@@ -12,8 +12,12 @@ import type { CreateProjectInput, ProjectDetail, ProjectReadiness, Settings, Vbk
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const isDev = !app.isPackaged;
-app.commandLine.appendSwitch("remote-debugging-port", "9222");
-const knownVbkAccountName = "vbk_671205";
+// 自动化通过 CDP 驱动内嵌的 VBK 页面，端口必须开着；但固定的 9222 可被
+// 本机任意进程预测并接管这个已登录会话，也会和其它 Chrome 实例抢占。
+// 改为每次启动随机取一个端口，并只监听回环地址。
+const debuggingPort = String(9300 + Math.floor(Math.random() * 600));
+app.commandLine.appendSwitch("remote-debugging-port", debuggingPort);
+app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7-highspeed";
 
 let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
@@ -26,7 +30,9 @@ const getSettings = (): Settings => ({
 function apiKey() { const stored = db.getSetting("minimaxApiKey")?.value; return stored ? safeStorage.decryptString(Buffer.from(stored, "base64")) : ""; }
 function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   if (!status.loggedIn) return status;
-  const accountName = status.accountName || db.getSetting("vbkAccountName")?.value || knownVbkAccountName;
+  // 页面抓取不到账号名时只沿用本机上次记录，不再回退到某个固定账号：
+  // 那会把当前登录者错标成别人，并写进本地设置长期生效。
+  const accountName = status.accountName || db.getSetting("vbkAccountName")?.value || "";
   if (accountName) db.setSetting("vbkAccountName", accountName);
   const accounts = Array.from(new Set([...(status.accounts || []), accountName].filter(Boolean)));
   return { ...status, accountName, accounts };
@@ -46,7 +52,7 @@ function readiness(projectId: string): ProjectReadiness {
 async function createWindow() {
   window = new BrowserWindow({ width: 1512, height: 982, minWidth: 1180, minHeight: 760, title: "VBK Desktop", backgroundColor: "#fafafa", webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(root, "dist-electron", "main", "preload.cjs") } });
   if (isDev) await window.loadURL("http://127.0.0.1:5173"); else await window.loadFile(path.join(root, "dist", "index.html"));
-  browser = new VbkBrowser(window); await browser.initialise();
+  browser = new VbkBrowser(window, debuggingPort); await browser.initialise();
   automation = new DraftAutomation(db, browser, emitProject);
 }
 
@@ -91,6 +97,7 @@ function registerIpc() {
   ipcMain.handle("browser:logout", () => browser.logout());
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));
   ipcMain.handle("browser:navigate", (_event, url: string) => browser.navigate(url));
+  ipcMain.handle("browser:openExternal", () => browser.openExternal());
   ipcMain.handle("browser:setBounds", (_event, bounds) => browser.setBounds(bounds));
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => browser.setVisible(visible));
   ipcMain.handle("automation:start", (_event, projectId: string) => automation.start(projectId));

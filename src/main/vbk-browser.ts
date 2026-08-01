@@ -1,4 +1,5 @@
 import { BrowserWindow, WebContentsView, shell } from "electron";
+import { openExternalUrl } from "./external-url.js";
 import { chromium, type Page } from "playwright";
 import { URLS } from "./automation/constants.js";
 
@@ -8,7 +9,7 @@ export class VbkBrowser {
   private view?: WebContentsView;
   private visible = false;
 
-  constructor(private readonly window: BrowserWindow) {}
+  constructor(private readonly window: BrowserWindow, private readonly debuggingPort: string) {}
 
   async initialise() {
     this.view = new WebContentsView({ webPreferences: { partition: "persist:vbk", contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -26,6 +27,10 @@ export class VbkBrowser {
 
   setBounds(bounds: Electron.Rectangle) { this.view?.setBounds(bounds); }
   setVisible(visible: boolean) { this.visible = visible; this.view?.setVisible(visible); }
+  async openExternal() {
+    const url = this.view?.webContents.getURL() || "";
+    await openExternalUrl(url, (value) => shell.openExternal(value));
+  }
   async navigate(url: string) {
     const host = new URL(url).hostname;
     if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) throw new Error("仅允许在内置 VBK 浏览器中打开携程页面");
@@ -71,7 +76,7 @@ export class VbkBrowser {
   }
 
   async page(): Promise<Page> {
-    const endpoint = "http://127.0.0.1:9222";
+    const endpoint = `http://127.0.0.1:${this.debuggingPort}`;
     const browser = await chromium.connectOverCDP(endpoint);
     const page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === this.view?.webContents.getURL())
       ?? browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url().includes("ctrip.com"));

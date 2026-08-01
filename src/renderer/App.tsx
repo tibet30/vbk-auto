@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, BriefcaseBusiness, CarFront, Check, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, TriangleAlert, UserRound } from "lucide-react";
+import { Bot, BriefcaseBusiness, CarFront, Check, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, TriangleAlert, UserRound } from "lucide-react";
 import type { CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
 
 type Mode = "ai" | "balanced" | "vbk";
@@ -126,11 +126,17 @@ export function App() {
     void api()!.settings.get().then(setSettings);
     void checkVbkLogin();
     const retryLoginCheck = window.setTimeout(() => void checkVbkLogin(), 1200);
-    const unsubscribe = api()!.events.onProjectUpdated((next) => { setProject((current) => current?.id === next.id ? next : current); void updateReadiness(next); });
+    const unsubscribe = api()!.events.onProjectUpdated((next) => {
+      setProject((current) => current?.id === next.id ? next : current);
+      void updateReadiness(next);
+    });
     return () => { window.clearTimeout(retryLoginCheck); unsubscribe(); };
   }, []);
   useEffect(() => { void updateReadiness(project); }, [project?.id, project?.updatedAt]);
   useEffect(() => { setVerificationNote(""); }, [activeTaskId]);
+  // 切换项目时清空核查选择，否则上一个项目残留的 activeTaskId 会落到
+  // 新项目的首个待办上，把已输入的核查结果写进另一个项目。
+  useEffect(() => { setActiveTaskId(null); setVerificationNote(""); }, [project?.id]);
   useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
@@ -199,9 +205,13 @@ export function App() {
   const itinerary = useMemo(() => project && Array.isArray(project.product.itinerary) ? project.product.itinerary as Array<Record<string, unknown>> : [], [project]);
   const basic = project ? (project.product.basicInfo || {}) as Record<string, unknown> : {};
   const presentation = project ? (project.product.presentation || {}) as Record<string, unknown> : {};
-  const activeTask = project?.researchTasks.find((task) => task.id === activeTaskId) || project?.researchTasks.find((task) => task.state !== "confirmed" && task.state !== "resolved");
+  // 只认当前项目里真实存在的选中项：回退到“首个待办”会让运营在 A 项目
+  // 输入的核查结果，落到 B 项目的另一条任务上。
+  const activeTask = activeTaskId
+    ? project?.researchTasks.find((task) => task.id === activeTaskId)
+    : undefined;
   const isVbkLoggedIn = Boolean(vbkLogin?.loggedIn);
-  const loggedAccounts = isVbkLoggedIn ? (vbkLogin?.accounts?.length ? vbkLogin.accounts : [vbkLogin?.accountName || "vbk_671205"]) : [];
+  const loggedAccounts = isVbkLoggedIn ? (vbkLogin?.accounts?.length ? vbkLogin.accounts : [vbkLogin?.accountName || "已登录账号"]) : [];
   const currentAccountName = loggedAccounts[0] || "未登录";
   const accountInitial = currentAccountName === "未登录" ? "未" : currentAccountName.slice(0, 1).toUpperCase();
   const browserPlaceholderTitle = isVbkLoggedIn ? "VBK 已登录" : "在 VBK 中完成核查";
@@ -377,18 +387,72 @@ export function App() {
       </nav>
       <div className="topbar-spacer" />
       {project && view === "workspace" && (
-        <div className="preset-group" aria-label="布局预设">
-          {(["ai", "balanced", "vbk"] as Mode[]).map((item) => (
-            <button key={item} className="preset-btn" data-active={!customizedLayout && mode === item} onClick={() => applyPreset(item)}>
-              {item === "ai" ? "AI优先" : item === "balanced" ? "均衡" : "VBK优先"}
+        <>
+          <div className="topbar-status-chip" aria-label="方案就绪状态">
+            <span className="dot" data-state={readiness.ready ? "ok" : readiness.issues.length ? "warn" : "ai"} />
+            <strong>{readiness.completion}%</strong>
+            <small>·</small>
+            <small>{readiness.ready ? "可以录入 VBK" : `${readiness.issues.length} 项待处理`}</small>
+          </div>
+          <div className="preset-group" aria-label="布局预设" data-custom={customizedLayout}>
+            {(["ai", "balanced", "vbk"] as Mode[]).map((item) => (
+              <button key={item} className="preset-btn" data-active={!customizedLayout && mode === item} onClick={() => applyPreset(item)}>
+                {item === "ai" ? "AI优先" : item === "balanced" ? "均衡" : "VBK优先"}
+              </button>
+            ))}
+          </div>
+          <div className="topbar-tool-rail">
+            <button
+              className="btn btn-sm"
+              data-variant="primary"
+              disabled={!readiness.ready || loading}
+              onClick={() => void startAutomation()}
+              aria-label="确认并保存草稿到 VBK"
+              title="确认并保存草稿"
+            >
+              {loading ? <LoaderCircle size={14} /> : <Play size={14} />}
+              保存草稿
             </button>
-          ))}
-        </div>
+            <button
+              className="topbar-account-chip"
+              type="button"
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              aria-label={`当前 VBK 账号：${currentAccountName}`}
+              title={currentAccountName}
+            >
+              <span className="topbar-account-avatar" data-empty={!isVbkLoggedIn}>{accountInitial}</span>
+              <span className="topbar-account-name">{currentAccountName}</span>
+              <span className="dot" data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
+            </button>
+          </div>
+        </>
       )}
       {!project && (
         <div className="topbar-status">
-          <span className="dot" data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
-          {currentAccountName}
+          <div className="topbar-status-chip">
+            <span className="dot" data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
+            <small>{currentAccountName}</small>
+          </div>
+          <button
+            className="topbar-account-chip"
+            type="button"
+            onClick={() => setAccountMenuOpen((open) => !open)}
+            aria-label={`当前 VBK 账号：${currentAccountName}`}
+            title={currentAccountName}
+          >
+            <span className="topbar-account-avatar" data-empty={!isVbkLoggedIn}>{accountInitial}</span>
+            <span className="topbar-account-name">{currentAccountName}</span>
+          </button>
+          {accountMenuOpen && (
+            <div className="account-popover">
+              <span className="popover-kicker">当前 VBK</span>
+              <strong>{currentAccountName}</strong>
+              <button className="btn btn-sm" onClick={openLogin}><UserRound size={14} />切换登录</button>
+              {vbkLogin?.loggedIn && (
+                <button className="btn btn-sm" data-variant="ghost" onClick={() => void logoutVbk()} disabled={checkingVbkLogin}>登出</button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </header>

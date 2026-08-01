@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, BriefcaseBusiness, CarFront, Check, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, TriangleAlert, UserRound } from "lucide-react";
+import { Bot, BriefcaseBusiness, CarFront, Check, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, Trash2, TriangleAlert, UserRound } from "lucide-react";
 import type { CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
 
 type Stage = "review" | "vbk";
@@ -200,6 +200,20 @@ export function App() {
     } catch (error) { setNotice(error instanceof Error ? error.message : "创建项目失败，请重试。"); }
     finally { setSavingProject(false); setCreating(false); }
   };
+  const deleteProject = async (item: ProjectSummary) => {
+    if (!api()) return false;
+    setNotice(null);
+    try {
+      await api()!.projects.delete(item.id);
+      setProjects((items) => items.filter((candidate) => candidate.id !== item.id));
+      if (project?.id === item.id) setProject(null);
+      setNotice(`已删除本机项目「${item.name}」。VBK 平台上的产品未受影响。`);
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除项目失败，请重试。");
+      return false;
+    }
+  };
   const confirmTask = async () => {
     if (!project || !activeTask) return;
     if (!verificationNote.trim()) { setNotice("请填写在 VBK 或公开来源查到的实际结果，再确认。"); return; }
@@ -368,7 +382,6 @@ export function App() {
               aria-label={`当前 VBK 账号：${currentAccountName}`}
               title={currentAccountName}
             >
-              <span className="topbar-account-avatar" data-empty={!isVbkLoggedIn}>{accountInitial}</span>
               <span className="topbar-account-name">{currentAccountName}</span>
               <span className="dot" data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
             </button>
@@ -377,10 +390,6 @@ export function App() {
       )}
       {!project && (
         <div className="topbar-status">
-          <div className="topbar-status-chip">
-            <span className="dot" data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
-            <small>{currentAccountName}</small>
-          </div>
           <button
             className="topbar-account-chip"
             type="button"
@@ -388,8 +397,8 @@ export function App() {
             aria-label={`当前 VBK 账号：${currentAccountName}`}
             title={currentAccountName}
           >
-            <span className="topbar-account-avatar" data-empty={!isVbkLoggedIn}>{accountInitial}</span>
             <span className="topbar-account-name">{currentAccountName}</span>
+            <span className="dot" data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
           </button>
           {accountMenuOpen && (
             <div className="account-popover">
@@ -567,7 +576,7 @@ export function App() {
           </div>
         </section>
       </div></div></section>}
-      {view === "projects" && !project && <section className="view projects-view"><div className="view-container content-width project-view-container"><div className="project-page-head"><div><h1 className="view-h1">项目</h1><p className="view-sub">管理产品草稿、规划进度和录入状态。</p></div><button className="btn" data-variant="primary" onClick={startCreateProduct}><Plus size={16} />新建产品</button></div>{creating && <ProductBriefForm input={createInput} setInput={setCreateInput} submitting={savingProject} onCancel={() => setCreating(false)} onSubmit={() => void createProject()} />}{projects.length ? <ProjectList projects={projects} onOpen={async (item) => { const next = await api()!.projects.get(item.id); setProject(next); setView("workspace"); }} /> : !creating && <EmptyProjectState onCreate={startCreateProduct} />}</div></section>}
+      {view === "projects" && !project && <section className="view projects-view"><div className="view-container content-width project-view-container"><div className="project-page-head"><div><h1 className="view-h1">项目</h1><p className="view-sub">管理产品草稿、规划进度和录入状态。</p></div><button className="btn" data-variant="primary" onClick={startCreateProduct}><Plus size={16} />新建产品</button></div>{creating && <ProductBriefForm input={createInput} setInput={setCreateInput} submitting={savingProject} onCancel={() => setCreating(false)} onSubmit={() => void createProject()} />}{projects.length ? <ProjectList projects={projects} onOpen={async (item) => { const next = await api()!.projects.get(item.id); setProject(next); setView("workspace"); }} onDelete={deleteProject} /> : !creating && <EmptyProjectState onCreate={startCreateProduct} />}</div></section>}
       {view === "workspace" && !project && <section className="view login-stage" data-login-open={loginPanelOpen}>
         <div className="view-container content-width workspace-home">
           <div className="home-head"><div><h1 className="view-h1">工作台</h1><p className="view-sub">只保留日常操作必须入口：AI 连接、VBK 登录和产品项目。</p></div><button className="btn" data-variant="primary" onClick={startCreateProduct}><Plus size={16} />新建产品</button></div>
@@ -998,8 +1007,30 @@ function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: {
 function WorkbenchModule({ icon, title, detail, state, action }: { icon: React.ReactNode; title: string; detail: string; state: "ready" | "todo"; action: React.ReactNode }) {
   return <section className="module-card" data-state={state}><span className="module-icon">{icon}</span><div><strong>{title}</strong><small>{detail}</small></div>{action}</section>;
 }
-function ProjectList({ projects, onOpen }: { projects: ProjectSummary[]; onOpen: (item: ProjectSummary) => Promise<void> }) {
-  return <section className="project-list-shell" aria-label="产品项目列表"><div className="project-list-head"><div><strong>产品项目</strong><small>最近更新优先</small></div><span>{projects.length} 个</span></div><div className="project-list">{projects.map((item) => <button className="project-row" key={item.id} onClick={() => void onOpen(item)} aria-label={`进入产品详情：${item.name}`}><span className="project-row-icon"><PackageOpen size={16} /></span><span className="project-main"><span className="project-title-line"><strong className="title">{item.name}</strong><span className="state" data-state={statusState(item.status)}>{statusLabel(item.status)}</span></span><span className="meta"><span>{item.productId ? `VBK ${item.productId}` : "本地产品草稿"}</span><span>更新 {formatUpdatedAt(item.updatedAt)}</span></span></span><span className="project-enter" aria-hidden="true"><ChevronRight size={16} /></span></button>)}</div></section>;
+function ProjectList({ projects, onOpen, onDelete }: { projects: ProjectSummary[]; onOpen: (item: ProjectSummary) => Promise<void>; onDelete: (item: ProjectSummary) => Promise<boolean> }) {
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const remove = async (item: ProjectSummary) => {
+    if (deletingId) return;
+    setDeletingId(item.id);
+    const removed = await onDelete(item);
+    setDeletingId(null);
+    if (removed) setConfirmingId(null);
+  };
+  return <section className="project-list-shell" aria-label="产品项目列表"><div className="project-list-head"><div><strong>产品项目</strong><small>最近更新优先</small></div><span>{projects.length} 个</span></div><div className="project-list">{projects.map((item) => <div className="project-list-item" key={item.id}>
+    <div className="project-row">
+      <button className="project-row-open" type="button" onClick={() => void onOpen(item)} aria-label={`进入产品详情：${item.name}`}>
+        <span className="project-row-icon"><PackageOpen size={16} /></span>
+        <span className="project-main"><span className="project-title-line"><strong className="title">{item.name}</strong><span className="state" data-state={statusState(item.status)}>{statusLabel(item.status)}</span></span><span className="meta"><span>{item.productId ? `VBK ${item.productId}` : "本地产品草稿"}</span><span>更新 {formatUpdatedAt(item.updatedAt)}</span></span></span>
+        <span className="project-enter" aria-hidden="true"><ChevronRight size={16} /></span>
+      </button>
+      <button className="project-delete-trigger" type="button" onClick={() => setConfirmingId((id) => id === item.id ? null : item.id)} disabled={item.status === "automating" || Boolean(deletingId)} aria-label={`删除项目：${item.name}`} title={item.status === "automating" ? "自动录入中，暂不能删除" : "删除项目"}><Trash2 size={15} /></button>
+    </div>
+    {confirmingId === item.id && <div className="project-delete-confirm" role="group" aria-label={`确认删除项目：${item.name}`}>
+      <div><strong>删除「{item.name}」？</strong><small>将永久删除本机的产品方案、对话、核查任务和录入记录；不会删除 VBK 平台上的产品。</small></div>
+      <div className="project-delete-actions"><button className="btn btn-sm" type="button" onClick={() => setConfirmingId(null)} disabled={deletingId === item.id}>取消</button><button className="btn btn-sm" data-variant="danger-solid" type="button" onClick={() => void remove(item)} disabled={deletingId === item.id}>{deletingId === item.id ? <LoaderCircle size={14} /> : <Trash2 size={14} />}确认删除</button></div>
+    </div>}
+  </div>)}</div></section>;
 }
 function EmptyProjectState({ onCreate }: { onCreate: () => void }) { return <div className="empty-state"><FileText size={28} /><h3>还没有产品项目</h3><p>从目的地、天数和产品形态开始，几分钟内得到可审查的通用方案。</p><button className="btn" data-variant="primary" onClick={onCreate}><Plus size={15} />创建第一个产品</button></div>; }
 function Field({ label, value }: { label: string; value: string }) { return <div className="product-field"><span className="product-field-label">{label}</span><strong className="product-field-value" data-state={value === "待生成" ? "empty" : ""}>{value}</strong></div>; }

@@ -21,7 +21,11 @@ app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7-highspeed";
 
 let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
-const emitProject = (project: ProjectDetail) => window?.webContents.send("project:updated", project);
+// 关闭窗口后 AI 或自动化可能仍在运行，向已销毁的 webContents 发送会抛异常。
+const emitProject = (project: ProjectDetail) => {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+  window.webContents.send("project:updated", project);
+};
 const getSettings = (): Settings => ({
   minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || "https://api.minimaxi.com/v1",
   minimaxModel: db.getSetting("minimaxModel")?.value || defaultMiniMaxModel,
@@ -54,6 +58,18 @@ async function createWindow() {
   if (isDev) await window.loadURL("http://127.0.0.1:5173"); else await window.loadFile(path.join(root, "dist", "index.html"));
   browser = new VbkBrowser(window, debuggingPort); await browser.initialise();
   automation = new DraftAutomation(db, browser, emitProject);
+}
+
+function assertSafeMiniMaxUrl(value: string) {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw new Error("MiniMax 服务地址格式不正确。"); }
+  // API Key 通过 Authorization 头随每次请求发出，明文 http 会让密钥在网络上
+  // 可被截获、响应可被篡改（进而改写产品草稿），因此只放行 https 与本机地址。
+  const isLoopback = parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost" || parsed.hostname === "[::1]";
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && isLoopback)) {
+    throw new Error("MiniMax 服务地址必须使用 https://（本机调试可用 http://127.0.0.1）。");
+  }
+  return parsed;
 }
 
 function registerIpc() {
@@ -107,9 +123,7 @@ function registerIpc() {
   ipcMain.handle("settings:save", (_event, input: Partial<Settings> & { apiKey?: string }) => {
     if (input.minimaxBaseUrl !== undefined) {
       const baseUrl = input.minimaxBaseUrl.trim();
-      let parsed: URL;
-      try { parsed = new URL(baseUrl); } catch { throw new Error("MiniMax 服务地址格式不正确。"); }
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("MiniMax 服务地址必须以 http:// 或 https:// 开头。");
+      assertSafeMiniMaxUrl(baseUrl);
       db.setSetting("minimaxBaseUrl", baseUrl);
     }
     if (input.minimaxModel) db.setSetting("minimaxModel", input.minimaxModel);
@@ -118,14 +132,16 @@ function registerIpc() {
   });
   ipcMain.handle("settings:test", async (_event, input: Pick<Settings, "minimaxBaseUrl"> & { apiKey?: string }) => {
     const baseUrl = typeof input?.minimaxBaseUrl === "string" ? input.minimaxBaseUrl.trim() : "";
-    let parsed: URL;
-    try { parsed = new URL(baseUrl); } catch { throw new Error("MiniMax 服务地址格式不正确。"); }
-    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("MiniMax 服务地址必须以 http:// 或 https:// 开头。");
+    assertSafeMiniMaxUrl(baseUrl);
     const key = typeof input.apiKey === "string" && input.apiKey.trim() ? input.apiKey.trim() : apiKey();
     await new MiniMaxService({ apiKey: key, baseUrl, model: getSettings().minimaxModel }).testConnection();
     return { connected: true, message: "连接测试通过。" };
   });
 }
 
-app.whenReady().then(async () => { db = new VbkDatabase(app.getPath("userData")); db.recoverUnansweredMessages(); registerIpc(); await createWindow(); app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) void createWindow(); }); });
+app.whenReady().then(async () => { db = new VbkDatabase(app.getPath("userData")); db.recoverUnansweredMessages(); registerIpc(); await createWindow(); app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) void createWindow(); }); }).catch((error) => {
+  // 启动链路失败时必须可见地退出，否则会留下一个已注册 IPC 但没有窗口的进程。
+  console.error("VBK Desktop 启动失败：", error);
+  app.quit();
+});
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

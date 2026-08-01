@@ -139,3 +139,28 @@ export const productSchema = z
 export function parseProduct(input) {
   return productSchema.parse(input);
 }
+
+// 自动录入在 package / pricingInventory / terms / vehicleResource 阶段强制要求
+// 这些字段，但 productSchema 把它们标为可选。readiness 必须用同一套要求，
+// 否则界面会显示「可以录入」，实际却在携程创建出草稿后才失败，留下半成品。
+export function automationBlockers(product: Record<string, unknown>) {
+  const blockers: Array<{ label: string; detail: string }> = [];
+  const commercial = product.commercial as Record<string, unknown> | undefined;
+  if (!commercial) {
+    blockers.push({ label: "套餐与价格", detail: "缺少套餐、价格库存与条款配置，自动录入无法完成。" });
+  } else {
+    if (!commercial.packageName) blockers.push({ label: "套餐名称", detail: "请补充套餐名称。" });
+    if (!commercial.pricing) blockers.push({ label: "价格", detail: "请补充成人价、儿童价与最低成团人数。" });
+    if (!commercial.inventory) blockers.push({ label: "库存", detail: "请补充库存起止日期与每日库存。" });
+    if (!commercial.terms) blockers.push({ label: "条款", detail: "请补充费用包含、不含、预订须知与退改规则。" });
+  }
+  const sales = product.sales as Record<string, unknown> | undefined;
+  if (sales?.productForm === "privateTour") {
+    const operations = product.operations as Record<string, unknown> | undefined;
+    const vehicle = operations?.vehicleResource as Record<string, unknown> | undefined;
+    if (!vehicle?.resourceGroupId) {
+      blockers.push({ label: "用车资源组", detail: "私家团需要在 VBK 核查并填写现有用车资源组 ID。" });
+    }
+  }
+  return blockers;
+}

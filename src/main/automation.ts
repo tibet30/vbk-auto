@@ -4,7 +4,7 @@ import {
   fillAndSavePackage, fillAndSavePresentation, fillAndSaveTerms, fillAndSubmitPricingInventory,
   fillItineraryDraft, openProductEditor, runProductPreflight, saveScreenshot,
 } from "./automation/ctrip.js";
-import { parseProduct } from "./automation/schema.js";
+import { automationBlockers, parseProduct } from "./automation/schema.js";
 import type { AutomationRun, ProjectDetail } from "../shared/contracts.js";
 import { VbkDatabase } from "./database.js";
 import { VbkBrowser } from "./vbk-browser.js";
@@ -31,6 +31,12 @@ export class DraftAutomation {
     const project = this.db.getProject(projectId);
     if (!project) throw new Error("项目不存在");
     const product = parseProduct(project.product);
+    // 后面几个阶段强制要求这些字段，但它们在 productSchema 里是可选的。
+    // 必须在创建远程草稿之前拦下，否则会在携程留下一个半成品产品。
+    const blockers = automationBlockers(project.product);
+    if (blockers.length) {
+      throw new Error(`录入前检查未通过：${blockers.map((item) => item.label).join("、")}`);
+    }
     const run: AutomationRun = { id: randomUUID(), status: "running", phases: draftPhases.map((phase) => ({ phase, status: "pending" })), logs: [] };
     const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); this.db.saveAutomation(projectId, run); this.emit(projectId); };
     this.db.updateProduct(projectId, project.product, "automating");

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { VbkDatabase } from "./database.js";
 import { MiniMaxService } from "./minimax.js";
 import { applyProductPatch } from "./product-patch.js";
-import { productSchema } from "./automation/schema.js";
+import { automationBlockers, productSchema } from "./automation/schema.js";
 import { VbkBrowser } from "./vbk-browser.js";
 import { DraftAutomation } from "./automation.js";
 import { resolveVehicleResource } from "./vehicle-resource.js";
@@ -50,6 +50,8 @@ function readiness(projectId: string): ProjectReadiness {
   }
   const unresolved = project.researchTasks.filter((task) => task.state !== "confirmed" && task.state !== "resolved");
   for (const task of unresolved) issues.push({ label: task.label, detail: task.detail || "需要在 VBK 或公开来源完成核查" });
+  // 与自动录入使用同一套要求，避免界面显示「可以录入」后才在携程失败。
+  if (parsed.success) for (const blocker of automationBlockers(project.product)) issues.push(blocker);
   return { ready: issues.length === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, issues.length)) / 12) * 100), issues };
 }
 

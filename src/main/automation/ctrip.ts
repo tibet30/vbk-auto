@@ -6,6 +6,8 @@ import {
   PRODUCT_FORM_LABELS,
   PRODUCT_TYPE_LABELS,
   URLS,
+  isOnlineStatus,
+  isValidStatus,
   productEditorUrl,
   productSectionUrl,
 } from "./constants.js";
@@ -283,7 +285,7 @@ async function ensureCheckboxChecked(checkbox) {
   }
 }
 
-async function fillMealCards(dayScope, day) {
+async function fillMealCards(dayScope, day, mealsIncluded = false) {
   const mealCards = await cardsByPrefix(dayScope, "餐饮");
   if (mealCards.length !== 3) {
     throw new Error(`第 ${day.day} 天餐饮节点数量异常：期望 3，实际 ${mealCards.length}`);
@@ -295,10 +297,13 @@ async function fillMealCards(dayScope, day) {
     const card = mealCards[index];
     await clickExact(card, "不限", `第 ${day.day} 天${types[index]}时间`);
     await clickExact(card, types[index], `第 ${day.day} 天餐饮类型`);
-    const selfPay = card.getByText("费用自理", { exact: true });
-    await assertCount(selfPay, 2, `第 ${day.day} 天${types[index]}费用自理选项`);
-    await selfPay.nth(0).click({ force: true });
-    await selfPay.nth(1).click({ force: true });
+    // 含餐产品不能勾「费用自理」，否则录入结果与产品数据相反。
+    if (!mealsIncluded) {
+      const selfPay = card.getByText("费用自理", { exact: true });
+      await assertCount(selfPay, 2, `第 ${day.day} 天${types[index]}费用自理选项`);
+      await selfPay.nth(0).click({ force: true });
+      await selfPay.nth(1).click({ force: true });
+    }
     const supplement = card.locator('textarea[placeholder="请输入补充说明"]');
     if (await supplement.count()) await supplement.first().fill(descriptions[index]);
   }
@@ -413,7 +418,7 @@ export async function fillItineraryDraft(page, product) {
         reusePickupForDropoff: true,
       },
     );
-    await fillMealCards(scope, day);
+    await fillMealCards(scope, day, product.operations?.mealsIncluded === true);
     if (product.operations) {
       await fillHotelCard(page, scope, day, product.operations);
     }
@@ -714,14 +719,14 @@ export async function publishProduct(page, product, productId) {
   }
 
   let status = (await row.innerText()).replace(/\s+/g, " ");
-  if (!status.includes("上线")) {
+  if (!isOnlineStatus(status)) {
     await ensureCheckboxChecked(row.getByRole("checkbox"));
     await page.getByRole("button", { name: "批量上线" }).click();
     await acknowledgeResult(page, "批量上线处理成功");
     row = await queryProductRow(page, productId);
     status = (await row.innerText()).replace(/\s+/g, " ");
   }
-  if (!status.includes("有效") || !status.includes("上线")) {
+  if (!isValidStatus(status) || !isOnlineStatus(status)) {
     throw new Error(`发布状态未达到“有效/上线”：${status}`);
   }
   return { published: true, status: "有效/上线" };
@@ -730,7 +735,7 @@ export async function publishProduct(page, product, productId) {
 export async function auditPublishedProduct(page, product, productId) {
   const row = await queryProductRow(page, productId);
   const status = (await row.innerText()).replace(/\s+/g, " ");
-  if (!status.includes("有效") || !status.includes("上线")) {
+  if (!isValidStatus(status) || !isOnlineStatus(status)) {
     throw new Error(`上线后检查失败：${status}`);
   }
   await page.goto(productSectionUrl(productId, "pricingInventory"), {
@@ -738,9 +743,11 @@ export async function auditPublishedProduct(page, product, productId) {
   });
   const pricingText = (await page.locator("body").innerText()).replace(/\s+/g, " ");
   const cost = product.commercial.pricing.cost;
+  // cost 是可选的；缺失时不能拼出 "…/undefined" 这种永远匹配不到的断言，
+  // 只核验能确定的库存与已给出的价格。
   const expected = [
-    `${product.commercial.pricing.adult}/${cost?.adult}`,
-    `${product.commercial.pricing.child}/${cost?.child}`,
+    ...(cost?.adult === undefined ? [] : [`${product.commercial.pricing.adult}/${cost.adult}`]),
+    ...(cost?.child === undefined ? [] : [`${product.commercial.pricing.child}/${cost.child}`]),
     `0/${product.commercial.inventory.dailyQuota}`,
   ];
   for (const value of expected) {

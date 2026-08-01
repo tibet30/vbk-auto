@@ -33,3 +33,17 @@ export const PRODUCT_FORM_LABELS = {
   privateTour: "私家团",
   freeTravel: "自由行",
 };
+
+// 携程列表页的状态列同时包含「上线」与「未上线」，直接用 includes("上线")
+// 会把未上线的产品判成已上线。这里要求出现「上线」且不是「未上线/待上线/下线」。
+export function isOnlineStatus(text: string) {
+  const normalised = String(text ?? "").replace(/\s+/g, "");
+  if (!normalised.includes("上线")) return false;
+  return !/(未上线|待上线|不上线|已下线|下线中)/.test(normalised);
+}
+
+export function isValidStatus(text: string) {
+  const normalised = String(text ?? "").replace(/\s+/g, "");
+  if (!normalised.includes("有效")) return false;
+  return !/(无效|失效|未生效)/.test(normalised);
+}

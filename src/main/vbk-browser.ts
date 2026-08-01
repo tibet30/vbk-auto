@@ -1,6 +1,6 @@
 import { BrowserWindow, WebContentsView, shell } from "electron";
 import { openExternalUrl } from "./external-url.js";
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { URLS } from "./automation/constants.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
@@ -8,6 +8,7 @@ const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"
 export class VbkBrowser {
   private view?: WebContentsView;
   private visible = false;
+  private cdp?: Browser;
 
   constructor(private readonly window: BrowserWindow, private readonly debuggingPort: string) {}
 
@@ -76,11 +77,20 @@ export class VbkBrowser {
   }
 
   async page(): Promise<Page> {
-    const endpoint = `http://127.0.0.1:${this.debuggingPort}`;
-    const browser = await chromium.connectOverCDP(endpoint);
-    const page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === this.view?.webContents.getURL())
-      ?? browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url().includes("ctrip.com"));
+    // 每次录入都新建一个 CDP 连接会持续累积 WebSocket，反复重试后拖垮自动化；
+    // 这里复用同一个连接，断开后再重连。
+    if (!this.cdp?.isConnected()) {
+      this.cdp = await chromium.connectOverCDP(`http://127.0.0.1:${this.debuggingPort}`);
+    }
+    const pages = this.cdp.contexts().flatMap((context) => context.pages());
+    const page = pages.find((candidate) => candidate.url() === this.view?.webContents.getURL())
+      ?? pages.find((candidate) => candidate.url().includes("ctrip.com"));
     if (!page) throw new Error("未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
     return page;
+  }
+
+  async dispose() {
+    if (this.cdp?.isConnected()) await this.cdp.close().catch(() => {});
+    this.cdp = undefined;
   }
 }

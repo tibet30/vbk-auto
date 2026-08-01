@@ -2,59 +2,21 @@ import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Bot, BriefcaseBusiness, CarFront, Check, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, TriangleAlert, UserRound } from "lucide-react";
 import type { CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
 
-type Mode = "ai" | "balanced" | "vbk";
+type Stage = "review" | "vbk";
 type View = "workspace" | "projects" | "settings";
-type PaneKey = "ai" | "product" | "browser";
-type PaneSizes = Record<PaneKey, number>;
-type PaneDivider = "ai-product" | "product-browser";
+
 const api = () => window.vbk;
 const emptyReadiness: ProjectReadiness = { ready: false, completion: 0, issues: [] };
 const initialInput: CreateProjectInput = { destination: "", days: 2, productForm: "privateTour" };
-const dividerWidth = 6;
-const paneMinimums: PaneSizes = { ai: 260, product: 280, browser: 360 };
-const panePresetRatios: Record<Mode, PaneSizes> = {
-  ai: { ai: 1.35, product: 1, browser: 0.9 },
-  balanced: { ai: 1, product: 1, browser: 1 },
-  vbk: { ai: 0.8, product: 0.8, browser: 1.6 }
-};
+
+// 切换项目时为新项目选择一个合理的初始阶段；用户可以随后自由切换。
+function initialStageFor(status: ProjectSummary["status"] | undefined): Stage {
+  if (status === "automating" || status === "draft_saved") return "vbk";
+  return "review";
+}
 
 function statusLabel(status?: string) { return ({ planning: "方案规划中", review: "等待确认", automating: "正在录入", draft_saved: "草稿已保存", blocked: "需要处理" } as Record<string, string>)[status || ""] || "准备开始"; }
 function statusState(status?: ProjectSummary["status"]) { return ({ planning: "researching", review: "needsConfirmation", automating: "researching", draft_saved: "confirmed", blocked: "blocked" } as Record<ProjectSummary["status"], string>)[status || "planning"]; }
-function paneWidth(target: HTMLElement | null) { return Math.max(0, Math.round((target?.getBoundingClientRect().width || 0) - dividerWidth * 2)); }
-function paneSizesEqual(left: PaneSizes, right: PaneSizes) { return Math.abs(left.ai - right.ai) < 1 && Math.abs(left.product - right.product) < 1 && Math.abs(left.browser - right.browser) < 1; }
-function normalizePaneSizes(sizes: PaneSizes, width: number): PaneSizes {
-  const keys: PaneKey[] = ["ai", "product", "browser"];
-  const minTotal = keys.reduce((sum, key) => sum + paneMinimums[key], 0);
-  if (width <= minTotal) return { ...paneMinimums };
-  const result = {} as PaneSizes;
-  let available = width;
-  let remaining = keys;
-  while (remaining.length) {
-    const weight = remaining.reduce((sum, key) => sum + Math.max(1, sizes[key]), 0);
-    const constrained = remaining.filter((key) => available * Math.max(1, sizes[key]) / weight < paneMinimums[key]);
-    if (!constrained.length) {
-      remaining.forEach((key) => { result[key] = Math.round(available * Math.max(1, sizes[key]) / weight); });
-      break;
-    }
-    constrained.forEach((key) => { result[key] = paneMinimums[key]; available -= paneMinimums[key]; });
-    remaining = remaining.filter((key) => !constrained.includes(key));
-  }
-  return result;
-}
-function presetPaneSizes(mode: Mode, width: number) { return normalizePaneSizes(panePresetRatios[mode], width); }
-function resizePanePair(start: PaneSizes, divider: PaneDivider, delta: number): PaneSizes {
-  const next = { ...start };
-  if (divider === "ai-product") {
-    const total = start.ai + start.product;
-    next.ai = Math.min(Math.max(start.ai + delta, paneMinimums.ai), total - paneMinimums.product);
-    next.product = total - next.ai;
-  } else {
-    const total = start.product + start.browser;
-    next.product = Math.min(Math.max(start.product + delta, paneMinimums.product), total - paneMinimums.browser);
-    next.browser = total - next.product;
-  }
-  return next;
-}
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "时间未知";
@@ -65,6 +27,14 @@ function isVehicleResourceTask(task?: ProjectDetail["researchTasks"][number]) {
   if (!task) return false;
   return /用车|车辆|车费|资源组|vehicle/i.test(`${task.label} ${task.detail || ""}`);
 }
+// 项目状态 → 用作第二步"草稿保存"现状文案，避免重复占用 statusLabel 的中文。
+function vbkStageStatusText(project: ProjectDetail | null): { tone: "waiting" | "running" | "saved" | "ready"; label: string; detail: string } {
+  if (!project) return { tone: "waiting", label: "等待选择项目", detail: "开始一个产品项目后即可进入" };
+  if (project.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
+  if (project.automation?.status === "failed") return { tone: "running", label: "自动录入未完成", detail: "可在右侧浏览器里手动调整后重试" };
+  if (project.status === "draft_saved" || project.automation?.status === "succeeded") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
+  return { tone: "waiting", label: "尚未录入 VBK", detail: "第一步审查通过后即可在右侧开始保存草稿" };
+}
 
 export function App() {
   const [view, setView] = useState<View>("workspace");
@@ -72,11 +42,8 @@ export function App() {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [readiness, setReadiness] = useState<ProjectReadiness>(emptyReadiness);
-  const [mode, setMode] = useState<Mode>("ai");
+  const [stage, setStage] = useState<Stage>("review");
   const [input, setInput] = useState("");
-  const [paneSizes, setPaneSizes] = useState<PaneSizes | null>(null);
-  const [customizedLayout, setCustomizedLayout] = useState(false);
-  const [draggingDivider, setDraggingDivider] = useState<PaneDivider | null>(null);
   const [createInput, setCreateInput] = useState<CreateProjectInput>(initialInput);
   const [creating, setCreating] = useState(false);
   const [savingProject, setSavingProject] = useState(false);
@@ -99,8 +66,9 @@ export function App() {
   const [miniMaxTest, setMiniMaxTest] = useState<MiniMaxConnectionTest | null>(null);
   const browserRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
-  const splitRef = useRef<HTMLDivElement>(null);
-  const resizeDragRef = useRef<{ divider: PaneDivider; startX: number; startSizes: PaneSizes } | null>(null);
+  // 用于判定异步响应回来时用户是否已经切换了项目。
+  const currentProjectIdRef = useRef<string | null>(null);
+  currentProjectIdRef.current = project?.id ?? null;
 
   const checkVbkLogin = async (refresh = false) => {
     if (!api()) return;
@@ -112,18 +80,29 @@ export function App() {
 
   const refresh = async () => {
     if (!api()) return;
-    const next = await api()!.projects.list();
-    setProjects(next);
-    setProject((current) => current && next.some((item) => item.id === current.id) ? current : null);
+    try {
+      const next = await api()!.projects.list();
+      setProjects(next);
+      setProject((current) => current && next.some((item) => item.id === current.id) ? current : null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "无法加载项目列表。");
+    }
   };
   const updateReadiness = async (candidate: ProjectDetail | null) => {
     if (!candidate || !api()) return setReadiness(emptyReadiness);
-    setReadiness(await api()!.projects.readiness(candidate.id));
+    try {
+      const next = await api()!.projects.readiness(candidate.id);
+      // 请求期间可能已切到别的项目：迟到的响应不能覆盖当前项目的就绪状态，
+      // 否则界面会长期显示另一个项目的检查结果。
+      if (currentProjectIdRef.current === candidate.id) setReadiness(next);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "无法获取录入前检查结果。");
+    }
   };
   useEffect(() => {
     if (!api()) return;
     void refresh();
-    void api()!.settings.get().then(setSettings);
+    void api()!.settings.get().then(setSettings).catch(() => setNotice("无法读取本机设置。"));
     void checkVbkLogin();
     const retryLoginCheck = window.setTimeout(() => void checkVbkLogin(), 1200);
     const unsubscribe = api()!.events.onProjectUpdated((next) => {
@@ -136,20 +115,30 @@ export function App() {
   useEffect(() => { setVerificationNote(""); }, [activeTaskId]);
   // 切换项目时清空核查选择，否则上一个项目残留的 activeTaskId 会落到
   // 新项目的首个待办上，把已输入的核查结果写进另一个项目。
-  useEffect(() => { setActiveTaskId(null); setVerificationNote(""); }, [project?.id]);
+  useEffect(() => {
+    if (!project) return;
+    setActiveTaskId(null);
+    setVerificationNote("");
+    setStage(initialStageFor(project.status));
+  }, [project?.id]);
   useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
   }, [project?.messages.length, loading]);
+  // 第二步与登录窗口共享同一个 VBK 浏览器；只有它们需要把 Electron BrowserView
+  // 切到可见并设置对应的物理坐标。第一步不渲染嵌入浏览器，避免遮挡会话与审查。
+  const browserShouldMount = view === "workspace" && (stage === "vbk" || loginPanelOpen) && Boolean(project || loginPanelOpen);
   useLayoutEffect(() => {
-    const target = browserRef.current; if (!target || !api()) return;
+    const target = browserRef.current; if (!target || !api() || !browserShouldMount) return;
     let frame = 0;
     const update = () => {
       const box = target.getBoundingClientRect();
       const width = Math.round(box.width);
       const height = Math.round(box.height);
       if (width <= 0 || height <= 0) return;
-      void api()!.browser.setBounds({ x: Math.round(box.x), y: Math.round(box.y), width, height });
+      // 主进程的 browser 在窗口加载完成后才创建，早期的布局调用会被拒绝；
+      // 这类调用失败不影响使用，静默忽略即可。
+      void api()!.browser.setBounds({ x: Math.round(box.x), y: Math.round(box.y), width, height }).catch(() => {});
     };
     const scheduleUpdate = () => {
       window.cancelAnimationFrame(frame);
@@ -160,52 +149,19 @@ export function App() {
     scheduleUpdate();
     window.addEventListener("resize", scheduleUpdate);
     return () => { window.cancelAnimationFrame(frame); window.removeEventListener("resize", scheduleUpdate); observer.disconnect(); };
-  }, [browserOpen, loginPanelOpen, mode, paneSizes, view, project?.id]);
-  useLayoutEffect(() => {
-    const target = splitRef.current;
-    if (!target || view !== "workspace" || !project) return;
-    const syncPaneSizes = () => {
-      const width = paneWidth(target);
-      if (!width) return;
-      setPaneSizes((current) => {
-        const next = current ? normalizePaneSizes(current, width) : presetPaneSizes(mode, width);
-        return current && paneSizesEqual(current, next) ? current : next;
-      });
-    };
-    const observer = new ResizeObserver(syncPaneSizes);
-    observer.observe(target);
-    syncPaneSizes();
-    return () => observer.disconnect();
-  }, [mode, project?.id, view]);
+  }, [browserShouldMount, loginPanelOpen, stage, view, project?.id]);
   useEffect(() => {
-    if (!draggingDivider) return;
-    const onMove = (event: PointerEvent) => {
-      const drag = resizeDragRef.current;
-      if (!drag) return;
-      setPaneSizes(resizePanePair(drag.startSizes, drag.divider, event.clientX - drag.startX));
-    };
-    const onEnd = () => {
-      resizeDragRef.current = null;
-      setDraggingDivider(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onEnd);
-    window.addEventListener("blur", onEnd);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onEnd);
-      window.removeEventListener("blur", onEnd);
-    };
-  }, [draggingDivider]);
-  useEffect(() => { if (api()) void api()!.browser.setVisible(Boolean(browserOpen && view === "workspace" && (project || loginPanelOpen))); }, [browserOpen, view, project, loginPanelOpen]);
+    if (!api()) return;
+    void api()!.browser.setVisible(Boolean(view === "workspace" && browserShouldMount)).catch(() => {});
+  }, [view, browserShouldMount]);
   useEffect(() => {
-    if (view === "workspace" && project && vbkLogin?.loggedIn && !browserOpen) setBrowserOpen(true);
-  }, [browserOpen, project, vbkLogin?.loggedIn, view]);
+    if (view === "workspace" && project && vbkLogin?.loggedIn && stage === "vbk" && !browserOpen) setBrowserOpen(true);
+  }, [browserOpen, project, vbkLogin?.loggedIn, view, stage]);
 
   const itinerary = useMemo(() => project && Array.isArray(project.product.itinerary) ? project.product.itinerary as Array<Record<string, unknown>> : [], [project]);
   const basic = project ? (project.product.basicInfo || {}) as Record<string, unknown> : {};
   const presentation = project ? (project.product.presentation || {}) as Record<string, unknown> : {};
-  // 只认当前项目里真实存在的选中项：回退到“首个待办”会让运营在 A 项目
+  // 只认当前项目里真实存在的选中项：回退到"首个待办"会让运营在 A 项目
   // 输入的核查结果，落到 B 项目的另一条任务上。
   const activeTask = activeTaskId
     ? project?.researchTasks.find((task) => task.id === activeTaskId)
@@ -216,14 +172,17 @@ export function App() {
   const accountInitial = currentAccountName === "未登录" ? "未" : currentAccountName.slice(0, 1).toUpperCase();
   const browserPlaceholderTitle = isVbkLoggedIn ? "VBK 已登录" : "在 VBK 中完成核查";
   const browserPlaceholderText = isVbkLoggedIn ? `${currentAccountName} 已登录，打开右侧页面继续核查当前待办。` : "登录后先核查当前待办；系统只会在你确认全部待办后保存产品草稿。";
-  const splitStyle: CSSProperties | undefined = paneSizes ? {
-    gridTemplateColumns: `${paneSizes.ai}px var(--divider) ${paneSizes.product}px var(--divider) ${paneSizes.browser}px`
-  } : undefined;
-  // Map the current focus preset to a pane key so CSS can highlight the
-  // corresponding panel and (when the workspace collapses) keep the matching
-  // tab selected in the responsive strip. Behavior is unchanged.
-  const focusedPane: PaneKey = mode === "ai" ? "ai" : mode === "vbk" ? "browser" : "product";
+  // 第一步：56% 对话 / 44% 审查；第二步：34% 审查摘要 / 66% VBK 浏览器。
+  const splitStyle: CSSProperties | undefined = project
+    ? { gridTemplateColumns: stage === "review" ? "minmax(0, 1.27fr) minmax(0, 1fr)" : "minmax(0, 0.515fr) minmax(0, 1fr)" }
+    : undefined;
   const projectCompletionLabel = readiness.ready ? "可以录入" : `${readiness.issues.length} 项待处理`;
+  const vbkStageStatus = vbkStageStatusText(project);
+  const automationActive = project?.automation?.status === "running";
+  // 顶部进度导航把项目就绪度抽象成两个有意义的步骤状态，每个步骤用文字/小点
+  // 同时表达含义，不依赖颜色单独传达。
+  const reviewStepStatus = !project ? "idle" : readiness.ready ? "passed" : readiness.issues.length ? "inProgress" : "reviewing";
+  const vbkStepStatus = !project ? "idle" : vbkStageStatus.tone === "running" ? "inProgress" : vbkStageStatus.tone === "saved" ? "saved" : project.status === "blocked" || readiness.issues.length ? "blocked" : "waiting";
 
   const send = async (retryContent?: string) => {
     const text = (retryContent || input).trim(); if (!text || !project || loading) return;
@@ -268,14 +227,20 @@ export function App() {
   };
   const startAutomation = async () => {
     if (!project || !readiness.ready) return;
-    setNotice(null); setBrowserOpen(true); setLoading(true);
+    setStage("vbk"); setNotice(null); setBrowserOpen(true); setLoading(true);
     try { await api()!.automation.start(project.id); }
     catch (error) { setNotice(error instanceof Error ? error.message : "自动录入失败，可在 VBK 中检查后重试。"); }
     finally { setLoading(false); }
   };
   const openMiniMaxConfig = async () => {
     setMiniMaxBaseUrl(settings?.minimaxBaseUrl || "https://api.minimaxi.com/v1");
-    setMiniMaxApiKey(settings?.hasMiniMaxKey && api() ? await api()!.settings.getApiKey() : "");
+    // 密钥解密失败不能让整个配置入口失效，退回空值让用户重新填写。
+    try {
+      setMiniMaxApiKey(settings?.hasMiniMaxKey && api() ? await api()!.settings.getApiKey() : "");
+    } catch {
+      setMiniMaxApiKey("");
+      setNotice("已保存的密钥无法读取，请重新填写。");
+    }
     setShowMiniMaxApiKey(false);
     setMiniMaxTest(null);
     setMiniMaxConfigOpen(true);
@@ -313,14 +278,20 @@ export function App() {
     if (!api() || !settings?.hasMiniMaxKey) return;
     setTestingMiniMax(true); setMiniMaxTest(null); setNotice(null);
     try { setMiniMaxTest(await api()!.settings.test({ minimaxBaseUrl: settings.minimaxBaseUrl })); }
-    catch (error) { setMiniMaxTest({ connected: false, message: error instanceof Error ? error.message : "MiniMax 连接测试失败。" }); }
-    finally { setTestingMiniMax(false); }
+    catch (error) {
+      setMiniMaxTest({ connected: false, message: error instanceof Error ? error.message : "MiniMax 连接测试失败。" });
+    } finally { setTestingMiniMax(false); }
   };
   const openLogin = () => {
-    setLoginPanelOpen(true); setView("workspace"); setProject(null); setBrowserOpen(true); setVbkLogin(null); setAccountMenuOpen(false);
-    if (api()) void api()!.browser.login().then(() => void checkVbkLogin());
+    setLoginPanelOpen(true); setView("workspace"); setProject(null); setBrowserOpen(true); setVbkLogin(null); setAccountMenuOpen(false); setStage("vbk");
+    if (api()) {
+      api()!.browser.login()
+        .then(() => checkVbkLogin())
+        .catch((error) => setVbkLogin({ loggedIn: false, message: error instanceof Error ? error.message : "无法打开 VBK 登录页面。" }));
+    }
   };
   const showVbkBrowser = () => {
+    setStage("vbk");
     setBrowserOpen(true); setLoginPanelOpen(false);
     void checkVbkLogin(true);
   };
@@ -341,30 +312,9 @@ export function App() {
   };
   const openProductList = () => { setProject(null); setView("projects"); setCreating(false); setAccountMenuOpen(false); };
   const startCreateProduct = () => { setProject(null); setView("projects"); setCreating(true); setCreateInput(initialInput); setAccountMenuOpen(false); };
-  const applyPreset = (nextMode: Mode) => {
-    setMode(nextMode);
-    setCustomizedLayout(false);
-    const width = paneWidth(splitRef.current);
-    if (width) setPaneSizes(presetPaneSizes(nextMode, width));
-  };
-  const beginPaneResize = (event: React.PointerEvent<HTMLDivElement>, divider: PaneDivider) => {
-    if (event.button !== 0) return;
-    const width = paneWidth(splitRef.current);
-    const startSizes = paneSizes ? normalizePaneSizes(paneSizes, width) : presetPaneSizes(mode, width);
-    resizeDragRef.current = { divider, startX: event.clientX, startSizes };
-    setPaneSizes(startSizes);
-    setCustomizedLayout(true);
-    setDraggingDivider(divider);
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  };
-  const resizeDividerFromKeyboard = (event: React.KeyboardEvent<HTMLDivElement>, divider: PaneDivider) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const width = paneWidth(splitRef.current);
-    const startSizes = paneSizes ? normalizePaneSizes(paneSizes, width) : presetPaneSizes(mode, width);
-    setPaneSizes(resizePanePair(startSizes, divider, event.key === "ArrowLeft" ? -32 : 32));
-    setCustomizedLayout(true);
+  const openStage = (next: Stage) => {
+    setStage(next);
+    setAccountMenuOpen(false);
   };
 
   return <div className="app">
@@ -399,23 +349,16 @@ export function App() {
             <small>·</small>
             <small>{readiness.ready ? "可以录入 VBK" : `${readiness.issues.length} 项待处理`}</small>
           </div>
-          <div className="preset-group" aria-label="布局预设" data-custom={customizedLayout}>
-            {(["ai", "balanced", "vbk"] as Mode[]).map((item) => (
-              <button key={item} className="preset-btn" data-active={!customizedLayout && mode === item} onClick={() => applyPreset(item)}>
-                {item === "ai" ? "AI优先" : item === "balanced" ? "均衡" : "VBK优先"}
-              </button>
-            ))}
-          </div>
           <div className="topbar-tool-rail">
             <button
               className="btn btn-sm"
               data-variant="primary"
               disabled={!readiness.ready || loading}
-              onClick={() => void startAutomation()}
+              onClick={() => { setStage("vbk"); void startAutomation(); }}
               aria-label="确认并保存草稿到 VBK"
               title="确认并保存草稿"
             >
-              {loading ? <LoaderCircle size={14} /> : <Play size={14} />}
+              {automationActive ? <LoaderCircle size={14} /> : <Play size={14} />}
               保存草稿
             </button>
             <button
@@ -461,6 +404,85 @@ export function App() {
         </div>
       )}
     </header>
+      {view === "workspace" && project && (
+        <nav className="stage-nav" role="tablist" aria-label="产品工作流步骤">
+          <button
+            type="button"
+            role="tab"
+            id="stage-review"
+            aria-controls="stage-panel-review"
+            aria-selected={stage === "review"}
+            tabIndex={stage === "review" ? 0 : -1}
+            className="stage-step"
+            data-active={stage === "review"}
+            data-status={reviewStepStatus}
+            onClick={() => openStage("review")}
+          >
+            <span className="stage-step-index" aria-hidden="true">1</span>
+            <span className="stage-step-body">
+              <span className="stage-step-title">AI 对话与产品审查</span>
+              <span className="stage-step-status" aria-live="polite">
+                {!project
+                  ? "选择项目后开始"
+                  : readiness.ready
+                    ? `就绪 ${readiness.completion}% · 可以进入录入`
+                    : reviewStepStatus === "reviewing"
+                      ? `${readiness.completion}% · 等待 AI 回复`
+                      : `还差 ${readiness.issues.length} 项 · 尚未就绪`}
+              </span>
+            </span>
+            <span className={`stage-step-dot dot`} data-state={
+              reviewStepStatus === "passed" ? "ok"
+              : reviewStepStatus === "inProgress" ? "warn"
+              : reviewStepStatus === "reviewing" ? "ai"
+              : "idle"
+            } aria-hidden="true" />
+          </button>
+          <span className="stage-connector" aria-hidden="true" data-state={
+            reviewStepStatus === "passed" ? "ok"
+            : reviewStepStatus === "inProgress" ? "warn"
+            : "idle"
+          } />
+          <button
+            type="button"
+            role="tab"
+            id="stage-vbk"
+            aria-controls="stage-panel-vbk"
+            aria-selected={stage === "vbk"}
+            tabIndex={stage === "vbk" ? 0 : -1}
+            className="stage-step"
+            data-active={stage === "vbk"}
+            data-status={vbkStepStatus}
+            onClick={() => openStage("vbk")}
+          >
+            <span className="stage-step-index" aria-hidden="true">2</span>
+            <span className="stage-step-body">
+              <span className="stage-step-title">审查结果与 VBK 录入</span>
+              <span className="stage-step-status" aria-live="polite">{vbkStageStatus.label} · {vbkStageStatus.detail}</span>
+            </span>
+            <span className={`stage-step-dot dot`} data-state={
+              vbkStageStatus.tone === "saved" ? "ok"
+              : vbkStageStatus.tone === "running" ? "ai"
+              : reviewStepStatus === "passed" ? "ready"
+              : "idle"
+            } aria-hidden="true" />
+          </button>
+          <span className="stage-nav-spacer" aria-hidden="true" />
+          <span className="stage-nav-summary" aria-label="当前步骤概要">
+            {stage === "review" ? (
+              <>
+                <Sparkles size={14} />
+                <span>{projectCompletionLabel}</span>
+              </>
+            ) : (
+              <>
+                {vbkStageStatus.tone === "saved" ? <Check size={14} /> : vbkStageStatus.tone === "running" ? <LoaderCircle size={14} /> : <CircleHelp size={14} />}
+                <span>{vbkStageStatus.label}</span>
+              </>
+            )}
+          </span>
+        </nav>
+      )}
       {notice && <div className="notice" role="status"><TriangleAlert size={15} /><span>{notice}</span><button onClick={() => setNotice(null)}>关闭</button></div>}
       {view === "settings" && !project && <section className="view"><div className="view-container narrow settings-page"><header className="settings-page-head"><div><h1 className="view-h1">设置</h1><p className="view-sub">连接配置和 VBK 登录状态都在这里管理。</p></div></header><div className="settings-stack">
         <section className="settings-block">
@@ -554,298 +576,410 @@ export function App() {
         </div>
         {loginPanelOpen && <section className="login-browser" aria-label="VBK 登录窗口"><div className="browser-chrome"><div className="browser-url"><span className="host">vbooking.ctrip.com</span><span className="path">/登录</span></div><button className="icon-btn" type="button" onClick={() => void checkVbkLogin(true)} disabled={checkingVbkLogin} aria-label="刷新 VBK 登录状态" title="刷新登录状态">{checkingVbkLogin ? <LoaderCircle size={16} /> : <RefreshCw size={16} />}</button><button className="icon-btn" type="button" onClick={() => { setLoginPanelOpen(false); setBrowserOpen(false); }} aria-label="关闭登录窗口" title="关闭">×</button></div><div className="browser-viewport" ref={browserRef} /></section>}
       </section>}
-      {view === "workspace" && project && <section className="split" data-mode={mode} data-custom={customizedLayout} data-resizing={Boolean(draggingDivider)} ref={splitRef} style={splitStyle}>
-        <div className="workspace-tabs" role="tablist" aria-label="工作区视图">
-          {([
-            { key: "ai", label: "方案协作", count: project.messages.length, icon: <Bot size={14} /> },
-            { key: "product", label: "产品审查", count: readiness.issues.length, icon: <ClipboardCheck size={14} /> },
-            { key: "browser", label: "VBK 浏览器", count: project.researchTasks.length, icon: <ExternalLink size={14} /> }
-          ] as Array<{ key: PaneKey; label: string; count: number; icon: React.ReactNode }>).map((item) => (
-            <button
-              key={item.key}
-              role="tab"
-              aria-selected={focusedPane === item.key}
-              className="workspace-tab"
-              data-active={focusedPane === item.key}
-              onClick={() => applyPreset(item.key === "ai" ? "ai" : item.key === "browser" ? "vbk" : "balanced")}
-              type="button"
-            >
-              {item.icon}
-              <span>{item.label}</span>
-              <span className="badge">{item.count}</span>
-            </button>
-          ))}
-        </div>
-        <section className="panel ai" data-focus={mode === "ai" ? "primary" : undefined} data-pane-active={focusedPane === "ai"}>
-          <div className="panel-header">
-            <div className="panel-title-row"><span className="panel-num">01</span><strong className="panel-title">方案协作</strong></div>
-            <span className="panel-sub-line">{project.messages.length} 条对话 · {loading ? "等待 AI" : "可继续追问"}</span>
-          </div>
-          <div className="conversation" ref={conversationRef} role="log" aria-live="polite">{project.messages.map((message, index) => {
-            const retryContent = message.role === "assistant" && message.taskStatus === "failed" ? project.messages.slice(0, index).reverse().find((item) => item.role === "user")?.content : undefined;
-            return <article className="msg" data-role={message.role} data-state={message.taskStatus} key={message.id}><span className="msg-avatar">{message.role === "assistant" ? <Bot size={14} /> : message.role === "system" ? <TriangleAlert size={14} /> : "我"}</span><div className="msg-body"><div className="msg-content"><p>{message.content}</p></div><small className="msg-meta">{new Date(message.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}{message.role === "user" && message.taskStatus === "running" && <><span>·</span><span className="msg-progress"><LoaderCircle size={12} />正在等待 AI 回复</span></>}{message.taskStatus === "failed" && <><span>·</span><span className="msg-error">本轮未完成</span></>}</small>{retryContent && <button className="msg-retry" type="button" onClick={() => void send(retryContent)} disabled={loading}><RefreshCw size={13} />重新发送这条消息</button>}</div></article>;
-          })}{loading && <div className="ai-thinking" role="status"><Bot size={14} /><span>AI 正在生成回复…</span></div>}</div>
-          <div className="composer">
-            <div className="composer-card">
-              <textarea
-                className="composer-textarea"
-                placeholder="例如：把这个产品改成亲子主题；或：在右侧浏览器里核查 XX 资源组后，把结果告诉我…"
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void send(); }}
-                disabled={loading}
-                aria-label="方案协作输入"
-              />
-              <div className="composer-bar">
-                <div className="composer-bar-left">
-                  <span className="panel-sub-line">项目上下文已带入，资源、价格必须经 VBK 核查后再回复。</span>
+      {view === "workspace" && project && (
+        <section
+          className="workflow-stage"
+          data-stage={stage}
+          role="tabpanel"
+          id={`stage-panel-${stage}`}
+          aria-labelledby={`stage-${stage}`}
+        >
+          {stage === "review" ? (
+            <div className="stage-split review-split" style={splitStyle}>
+              <section className="panel ai" aria-label="方案协作">
+                <div className="panel-header">
+                  <div className="panel-title-row"><span className="panel-num">01</span><strong className="panel-title">方案协作</strong></div>
+                  <span className="panel-sub-line">{project.messages.length} 条对话 · {loading ? "等待 AI" : "可继续追问"}</span>
                 </div>
-                <div className="composer-bar-right">
-                  <span className="chip-mini" data-on={Boolean(input.trim())}>
-                    <kbd className="kbd">⌘</kbd><kbd className="kbd">↵</kbd>
+                <div className="conversation" ref={conversationRef} role="log" aria-live="polite">{project.messages.map((message, index) => {
+                  const retryContent = message.role === "assistant" && message.taskStatus === "failed" ? project.messages.slice(0, index).reverse().find((item) => item.role === "user")?.content : undefined;
+                  return <article className="msg" data-role={message.role} data-state={message.taskStatus} key={message.id}><span className="msg-avatar">{message.role === "assistant" ? <Bot size={14} /> : message.role === "system" ? <TriangleAlert size={14} /> : "我"}</span><div className="msg-body"><div className="msg-content"><p>{message.content}</p></div><small className="msg-meta">{new Date(message.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}{message.role === "user" && message.taskStatus === "running" && <><span>·</span><span className="msg-progress"><LoaderCircle size={12} />正在等待 AI 回复</span></>}{message.taskStatus === "failed" && <><span>·</span><span className="msg-error">本轮未完成</span></>}</small>{retryContent && <button className="msg-retry" type="button" onClick={() => void send(retryContent)} disabled={loading}><RefreshCw size={13} />重新发送这条消息</button>}</div></article>;
+                })}{loading && <div className="ai-thinking" role="status"><Bot size={14} /><span>AI 正在生成回复…</span></div>}</div>
+                <div className="composer">
+                  <div className="composer-card">
+                    <textarea
+                      className="composer-textarea"
+                      placeholder="例如：把这个产品改成亲子主题；或：在右侧浏览器里核查 XX 资源组后，把结果告诉我…"
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void send(); }}
+                      disabled={loading}
+                      aria-label="方案协作输入"
+                    />
+                    <div className="composer-bar">
+                      <div className="composer-bar-left">
+                        <span className="panel-sub-line">项目上下文已带入，资源、价格必须经 VBK 核查后再回复。</span>
+                      </div>
+                      <div className="composer-bar-right">
+                        <span className="chip-mini" data-on={Boolean(input.trim())}>
+                          <kbd className="kbd">⌘</kbd><kbd className="kbd">↵</kbd>
+                        </span>
+                        <button
+                          className="composer-send"
+                          type="button"
+                          aria-label="发送消息，Command 加回车可快速发送"
+                          aria-disabled={loading || !input.trim()}
+                          data-disabled={loading || !input.trim()}
+                          onClick={() => void send()}
+                          disabled={loading}
+                        >
+                          {loading ? <LoaderCircle size={15} /> : <Send size={15} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section className="panel product" aria-label="产品审查">
+                <div className="panel-header">
+                  <div className="panel-title-row"><span className="panel-num">02</span><strong className="panel-title">产品审查</strong></div>
+                  <span className="state" data-state={readiness.ready ? "confirmed" : "needsConfirmation"}>{readiness.ready ? "可以录入" : `${readiness.issues.length} 项待处理`}</span>
+                </div>
+                <div className="product-scroll">
+                  <div className="readiness-hero" data-ready={readiness.ready}>
+                    <div className="readiness-hero-icon">{readiness.ready ? <Check size={18} /> : <CircleHelp size={18} />}</div>
+                    <div className="readiness-hero-body">
+                      <strong>{readiness.ready ? "方案满足录入条件" : "下一步：先完成待核查项目"}</strong>
+                      <small>{readiness.ready ? "确认后将自动填写 VBK 并保存为草稿，不会提审或发布。" : "第一版方案已经生成；解决下方高优先级问题后即可保存 VBK 草稿。"}</small>
+                    </div>
+                    <div className="readiness-hero-progress">
+                      <strong>{readiness.completion}%</strong>
+                      <small>就绪度</small>
+                    </div>
+                  </div>
+                  {!readiness.ready && (
+                    <div className="readiness-chips" data-empty={readiness.issues.length === 0}>
+                      {readiness.issues.slice(0, 4).map((issue, index) => (
+                        <span className="readiness-chip" key={`${issue.label}-${index}`} data-priority={index === 0 ? "high" : "medium"}>
+                          <span className="check"><TriangleAlert size={11} /></span>
+                          {formatIssueLabel(issue.label)}
+                        </span>
+                      ))}
+                      {readiness.issues.length > 4 && <span className="readiness-chip" data-priority="medium">还有 {readiness.issues.length - 4} 项</span>}
+                    </div>
+                  )}
+                  <section className="product-section">
+                    <div className="product-section-head">
+                      <span className="panel-num">A</span>
+                      <strong className="product-section-title">基础信息</strong>
+                    </div>
+                    <div className="product-grid product-grid-basic">
+                      <Field label="产品名称" value={valueOf(basic, "supplierProductName")} />
+                      <Field label="集合城市" value={valueOf(basic, "meetingCity")} />
+                      <Field label="目的城市" value={valueOf(basic, "destinationCity")} />
+                      <Field label="行程规格" value={`${valueOf(basic, "days")} 天 ${valueOf(basic, "nights")} 晚`} />
+                    </div>
+                  </section>
+                  <section className="product-section">
+                    <div className="product-section-head">
+                      <span className="panel-num">B</span>
+                      <strong className="product-section-title">每日行程</strong>
+                      <span className="product-section-meta">{itinerary.length} 天</span>
+                    </div>
+                    {itinerary.length ? <div className="product-itinerary">{itinerary.map((day, index) => <div className="product-itinerary-day" key={index}><span className="product-day-index">D{index + 1}</span><div><strong className="product-day-title">{valueOf(day, "title")}</strong><div className="product-day-spots">{Array.isArray(day.spots) ? day.spots.map((spot) => <span className="chip" key={String(spot)}>{String(spot)}</span>) : <span className="chip">待补充景点</span>}</div></div></div>)}</div> : <p className="section-empty">正在等待 AI 生成第一版行程。</p>}
+                  </section>
+                  <section className="product-section">
+                    <div className="product-section-head">
+                      <span className="panel-num">C</span>
+                      <strong className="product-section-title">产品卖点</strong>
+                    </div>
+                    <div className="review-copy">
+                      <div className="review-copy-block">
+                        <span className="review-copy-kicker">面向客人的推荐语</span>
+                        <strong className="review-copy-rec">{valueOf(presentation, "recommendation")}</strong>
+                      </div>
+                      <div className="review-copy-block">
+                        <span className="review-copy-kicker">产品特点</span>
+                        <p className="review-copy-feat">{valueOf(presentation, "features")}</p>
+                      </div>
+                    </div>
+                  </section>
+                  <section className="product-section">
+                    <div className="product-section-head">
+                      <span className="panel-num">D</span>
+                      <strong className="product-section-title">录入前检查</strong>
+                      <span className="product-section-meta">{readiness.issues.length === 0 ? "已通过" : `还需 ${readiness.issues.length} 项`}</span>
+                    </div>
+                    {readiness.issues.length === 0 ? (
+                      <div className="review-checklist-empty">
+                        <Check size={14} /><span>通过完整性检查，可以保存 VBK 草稿。</span>
+                      </div>
+                    ) : (
+                      <div className="review-checklist">
+                        <div className="review-checklist-head">
+                          <strong>{readiness.issues.length} 项待处理</strong>
+                          <small>按优先级排列；解决高优先级项后即可保存 VBK 草稿。</small>
+                        </div>
+                        <ul className="review-checklist-list">
+                          {readiness.issues.map((issue, index) => {
+                            const { guidance } = formatIssueGuidance(issue);
+                            return (
+                              <li
+                                className="review-checklist-item"
+                                key={`${issue.label}-${index}`}
+                                data-priority={index === 0 ? "high" : "medium"}
+                              >
+                                <span className="review-checklist-index">{index + 1}</span>
+                                <span className="review-checklist-body">
+                                  <strong className="review-checklist-label">{formatIssueLabel(issue.label)}</strong>
+                                  <span className="review-checklist-guidance">{guidance}</span>
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </section>
+                </div>
+                <footer className="product-footer">
+                  <span className="product-footer-meta">
+                    <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
+                    {readiness.ready ? " 可保存 VBK 草稿" : ` 还需 ${readiness.issues.length} 项核查`}
                   </span>
                   <button
-                    className="composer-send"
-                    type="button"
-                    aria-label="发送消息，Command 加回车可快速发送"
-                    aria-disabled={loading || !input.trim()}
-                    data-disabled={loading || !input.trim()}
-                    onClick={() => void send()}
-                    disabled={loading}
+                    className="btn btn-lg"
+                    data-variant="primary"
+                    disabled={!readiness.ready || loading}
+                    onClick={() => { setStage("vbk"); void startAutomation(); }}
                   >
-                    {loading ? <LoaderCircle size={15} /> : <Send size={15} />}
+                    <CircleCheck size={15} />前往 VBK 录入
                   </button>
-                </div>
-              </div>
+                </footer>
+              </section>
             </div>
-          </div>
-        </section>
-        <div className="divider" data-dragging={draggingDivider === "ai-product"} role="separator" aria-orientation="vertical" tabIndex={0} aria-label="调整方案协作和产品审查宽度" title="拖拽调整方案协作和产品审查宽度" onPointerDown={(event) => beginPaneResize(event, "ai-product")} onKeyDown={(event) => resizeDividerFromKeyboard(event, "ai-product")} />
-        <section className="panel product" data-focus={mode === "balanced" ? "primary" : undefined} data-pane-active={focusedPane === "product"}>
-          <div className="panel-header">
-            <div className="panel-title-row"><span className="panel-num">02</span><strong className="panel-title">产品审查</strong></div>
-            <span className="state" data-state={readiness.ready ? "confirmed" : "needsConfirmation"}>{readiness.ready ? "可以录入" : `${readiness.issues.length} 项待处理`}</span>
-          </div>
-          <div className="product-scroll">
-            <div className="readiness-hero" data-ready={readiness.ready}>
-              <div className="readiness-hero-icon">{readiness.ready ? <Check size={18} /> : <CircleHelp size={18} />}</div>
-              <div className="readiness-hero-body">
-                <strong>{readiness.ready ? "方案满足录入条件" : "下一步：先完成待核查项目"}</strong>
-                <small>{readiness.ready ? "确认后将自动填写 VBK 并保存为草稿，不会提审或发布。" : "第一版方案已经生成；解决下方高优先级问题后即可保存 VBK 草稿。"}</small>
-              </div>
-              <div className="readiness-hero-progress">
-                <strong>{readiness.completion}%</strong>
-                <small>就绪度</small>
-              </div>
-            </div>
-            {!readiness.ready && (
-              <div className="readiness-chips" data-empty={readiness.issues.length === 0}>
-                {readiness.issues.slice(0, 4).map((issue, index) => (
-                  <span className="readiness-chip" key={`${issue.label}-${index}`} data-priority={index === 0 ? "high" : "medium"}>
-                    <span className="check"><TriangleAlert size={11} /></span>
-                    {formatIssueLabel(issue.label)}
-                  </span>
-                ))}
-                {readiness.issues.length > 4 && <span className="readiness-chip" data-priority="medium">还有 {readiness.issues.length - 4} 项</span>}
-              </div>
-            )}
-            <section className="product-section">
-              <div className="product-section-head">
-                <span className="panel-num">A</span>
-                <strong className="product-section-title">基础信息</strong>
-              </div>
-              <div className="product-grid">
-                <Field label="产品名称" value={valueOf(basic, "supplierProductName")} />
-                <Field label="集合城市" value={valueOf(basic, "meetingCity")} />
-                <Field label="目的城市" value={valueOf(basic, "destinationCity")} />
-                <Field label="行程规格" value={`${valueOf(basic, "days")} 天 ${valueOf(basic, "nights")} 晚`} />
-              </div>
-            </section>
-            <section className="product-section">
-              <div className="product-section-head">
-                <span className="panel-num">B</span>
-                <strong className="product-section-title">每日行程</strong>
-                <span className="product-section-meta">{itinerary.length} 天</span>
-              </div>
-              {itinerary.length ? <div className="product-itinerary">{itinerary.map((day, index) => <div className="product-itinerary-day" key={index}><span className="product-day-index">D{index + 1}</span><div><strong className="product-day-title">{valueOf(day, "title")}</strong><div className="product-day-spots">{Array.isArray(day.spots) ? day.spots.map((spot) => <span className="chip" key={String(spot)}>{String(spot)}</span>) : <span className="chip">待补充景点</span>}</div></div></div>)}</div> : <p className="section-empty">正在等待 AI 生成第一版行程。</p>}
-            </section>
-            <section className="product-section">
-              <div className="product-section-head">
-                <span className="panel-num">C</span>
-                <strong className="product-section-title">产品卖点</strong>
-              </div>
-              <div className="review-copy">
-                <div className="review-copy-block">
-                  <span className="review-copy-kicker">面向客人的推荐语</span>
-                  <strong className="review-copy-rec">{valueOf(presentation, "recommendation")}</strong>
+          ) : (
+            <div className="stage-split vbk-split" style={splitStyle}>
+              <aside className="panel review-summary" aria-label="审查结果概要">
+                <div className="panel-header">
+                  <div className="panel-title-row"><span className="panel-num">02</span><strong className="panel-title">审查结果</strong></div>
+                  <span className="state" data-state={readiness.ready ? "confirmed" : "needsConfirmation"}>{readiness.ready ? "可以录入" : `${readiness.issues.length} 项待处理`}</span>
                 </div>
-                <div className="review-copy-block">
-                  <span className="review-copy-kicker">产品特点</span>
-                  <p className="review-copy-feat">{valueOf(presentation, "features")}</p>
-                </div>
-              </div>
-            </section>
-            <section className="product-section">
-              <div className="product-section-head">
-                <span className="panel-num">D</span>
-                <strong className="product-section-title">录入前检查</strong>
-                <span className="product-section-meta">{readiness.issues.length === 0 ? "已通过" : `还需 ${readiness.issues.length} 项`}</span>
-              </div>
-              {readiness.issues.length === 0 ? (
-                <div className="review-checklist-empty">
-                  <Check size={14} /><span>通过完整性检查，可以保存 VBK 草稿。</span>
-                </div>
-              ) : (
-                <div className="review-checklist">
-                  <div className="review-checklist-head">
-                    <strong>{readiness.issues.length} 项待处理</strong>
-                    <small>按优先级排列；解决高优先级项后即可保存 VBK 草稿。</small>
-                  </div>
-                  <ul className="review-checklist-list">
-                    {readiness.issues.map((issue, index) => {
-                      const { guidance } = formatIssueGuidance(issue);
-                      return (
-                        <li
-                          className="review-checklist-item"
-                          key={`${issue.label}-${index}`}
-                          data-priority={index === 0 ? "high" : "medium"}
-                        >
-                          <span className="review-checklist-index">{index + 1}</span>
-                          <span className="review-checklist-body">
-                            <strong className="review-checklist-label">{formatIssueLabel(issue.label)}</strong>
-                            <span className="review-checklist-guidance">{guidance}</span>
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-            </section>
-          </div>
-          <footer className="product-footer">
-            <span className="product-footer-meta">
-              <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
-              {readiness.ready ? " 可保存 VBK 草稿" : ` 还需 ${readiness.issues.length} 项核查`}
-            </span>
-            <button className="btn btn-lg" data-variant="primary" disabled={!readiness.ready || loading} onClick={() => void startAutomation()}>
-              <Play size={15} />保存草稿
-            </button>
-          </footer>
-        </section>
-        <div className="divider" data-dragging={draggingDivider === "product-browser"} role="separator" aria-orientation="vertical" tabIndex={0} aria-label="调整产品审查和 VBK 浏览器宽度" title="拖拽调整产品审查和 VBK 浏览器宽度" onPointerDown={(event) => beginPaneResize(event, "product-browser")} onKeyDown={(event) => resizeDividerFromKeyboard(event, "product-browser")} />
-        <section className="panel browser" data-focus={mode === "vbk" ? "primary" : undefined} data-pane-active={focusedPane === "browser"}>
-          <div className="panel-header">
-            <div className="panel-title-row"><span className="panel-num">03</span><strong className="panel-title">VBK 浏览器</strong></div>
-            <span className="panel-sub-line">
-              <span className={`dot`} data-state={isVbkLoggedIn ? "ok" : "warn"} />
-              {isVbkLoggedIn ? `已登录 ${currentAccountName}` : "未登录 VBK"}
-            </span>
-          </div>
-          <div className="browser-panel-head">
-            <div className="browser-nav">
-              <button className="icon-btn" data-size="sm" aria-label="返回"><ChevronLeft size={14} /></button>
-            </div>
-            <div className="browser-url"><span className="host">vbooking.ctrip.com</span><span className="path">/产品库</span></div>
-            <div className="browser-actions">
-              <button className="icon-btn" data-size="sm" aria-label="刷新" onClick={showVbkBrowser}><RefreshCw size={14} /></button>
-              <button className="icon-btn" data-size="sm" aria-label="打开外部浏览器"><ExternalLink size={14} /></button>
-            </div>
-          </div>
-          <div className="browser-viewport" ref={browserRef}>
-            {!browserOpen && (
-              <div className="browser-placeholder">
-                <div className="browser-placeholder-card">
-                  {isVbkLoggedIn ? <Check size={22} /> : <LogIn size={22} />}
-                  <h4>{browserPlaceholderTitle}</h4>
-                  <p>{browserPlaceholderText}</p>
-                  <div className="btn-row">
-                    {isVbkLoggedIn
-                      ? <button className="btn" data-variant="primary" onClick={showVbkBrowser}><RefreshCw size={15} />显示浏览器</button>
-                      : <button className="btn" data-variant="primary" onClick={openLogin}><LogIn size={15} />登录VBK</button>}
-                    <button className="btn" data-variant="ghost" onClick={showVbkBrowser}>刷新状态</button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-          {project.researchTasks.length > 0 && (
-            <div className="task-rail" data-empty={project.researchTasks.length === 0}>
-              <div className="task-rail-head">
-                <strong><ListChecks size={14} />待核查</strong>
-                <small>{project.researchTasks.length} 项 · {project.researchTasks.filter((t) => t.state === "confirmed" || t.state === "resolved").length} 已完成</small>
-              </div>
-              <div className="task-rail-body">
-                <div className="task-strip">
-                  {project.researchTasks.map((task) => (
-                    <button
-                      key={task.id}
-                      className="task-row-grid"
-                      data-active={activeTask?.id === task.id}
-                      data-done={task.state === "confirmed" || task.state === "resolved"}
-                      onClick={() => setActiveTaskId(task.id)}
-                      aria-label={`核查任务：${task.label}`}
-                    >
-                      <span className="marker">{task.state === "confirmed" || task.state === "resolved" ? <Check size={12} /> : <CircleHelp size={12} />}</span>
-                      <span className="body">
-                        <span className="label">{task.label}</span>
-                        <span className="detail">{task.detail || "需要核查"}</span>
-                      </span>
-                      <span className="chip-mini" data-on={activeTask?.id === task.id}>{activeTask?.id === task.id ? "正在处理" : "待核查"}</span>
-                    </button>
-                  ))}
-                </div>
-                {activeTask && activeTask.state !== "confirmed" && activeTask.state !== "resolved" && (
-                  <div className="task-detail-card">
-                    <div className="body">
-                      <div className="head"><span className="state" data-state="needsConfirmation">待核查</span></div>
-                      <h4>{activeTask.label}</h4>
-                      <p>{activeTask.detail || "请在 VBK 或公开来源完成核查，再填写结果。"}</p>
-                      <textarea
-                        className="task-result"
-                        value={verificationNote}
-                        onChange={(event) => setVerificationNote(event.target.value)}
-                        placeholder="粘贴实际结果，例如资源组 ID、名称、价格或来源链接…"
-                        aria-label="核查结果"
-                      />
-                      {isVehicleResourceTask(activeTask) && (
-                        <button className="btn btn-sm vehicle-resolve-btn" type="button" data-variant="secondary" disabled={Boolean(resolvingVehicleTaskId)} onClick={() => void resolveVehicleTask()}>
-                          {resolvingVehicleTaskId === activeTask.id ? <LoaderCircle size={14} /> : <CarFront size={14} />}
-                          {isVbkLoggedIn ? "估算并匹配资源组" : "登录后自动匹配"}
-                        </button>
-                      )}
+                <div className="product-scroll">
+                  <div className="readiness-hero" data-ready={readiness.ready}>
+                    <div className="readiness-hero-icon">{readiness.ready ? <Check size={18} /> : <TriangleAlert size={18} />}</div>
+                    <div className="readiness-hero-body">
+                      <strong>{readiness.ready ? "产品方案已就绪" : "先回第一步完成审查"}</strong>
+                      <small>
+                        {readiness.ready
+                          ? "在右侧浏览器执行录入，系统只保存 VBK 草稿，不会提审或发布。"
+                          : `还有 ${readiness.issues.length} 项未解决；保存草稿将保持禁用。`}
+                      </small>
                     </div>
-                    <div className="task-actions">
-                      <button className="btn" data-variant="primary" disabled={loading || !verificationNote.trim()} onClick={() => void confirmTask()}>
-                        {loading ? <LoaderCircle size={15} /> : <ClipboardCheck size={15} />}保存并写入
-                      </button>
+                    <div className="readiness-hero-progress">
+                      <strong>{readiness.completion}%</strong>
+                      <small>就绪度</small>
+                    </div>
+                  </div>
+                  {!readiness.ready && (
+                    <div className="review-checklist">
+                      <div className="review-checklist-head">
+                        <strong>{readiness.issues.length} 项待处理</strong>
+                        <small>先在第一步里完成核查，再回到这里继续。</small>
+                      </div>
+                      <ul className="review-checklist-list">
+                        {readiness.issues.slice(0, 4).map((issue, index) => {
+                          const { guidance } = formatIssueGuidance(issue);
+                          return (
+                            <li
+                              className="review-checklist-item"
+                              key={`${issue.label}-${index}`}
+                              data-priority={index === 0 ? "high" : "medium"}
+                            >
+                              <span className="review-checklist-index">{index + 1}</span>
+                              <span className="review-checklist-body">
+                                <strong className="review-checklist-label">{formatIssueLabel(issue.label)}</strong>
+                                <span className="review-checklist-guidance">{guidance}</span>
+                              </span>
+                            </li>
+                          );
+                        })}
+                        {readiness.issues.length > 4 && (
+                          <li className="review-checklist-item" data-priority="medium">
+                            <span className="review-checklist-index">…</span>
+                            <span className="review-checklist-body">
+                              <strong className="review-checklist-label">还有 {readiness.issues.length - 4} 项</strong>
+                              <span className="review-checklist-guidance">回到第一步的产品审查面板查看完整列表。</span>
+                            </span>
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                  <section className="product-section">
+                    <div className="product-section-head">
+                      <span className="panel-num">A</span>
+                      <strong className="product-section-title">产品要素</strong>
+                    </div>
+                    <div className="product-grid">
+                      <Field label="产品名称" value={valueOf(basic, "supplierProductName")} />
+                      <Field label="目的地" value={valueOf(basic, "destinationCity")} />
+                      <Field label="行程" value={`${valueOf(basic, "days")} 天 ${valueOf(basic, "nights")} 晚 · ${itinerary.length} 天行程`} />
+                      <Field label="产品状态" value={statusLabel(project.status)} />
+                    </div>
+                  </section>
+                  <section className="product-section">
+                    <div className="product-section-head">
+                      <span className="panel-num">B</span>
+                      <strong className="product-section-title">核查任务</strong>
+                      <span className="product-section-meta">
+                        {project.researchTasks.filter((t) => t.state === "confirmed" || t.state === "resolved").length}/{project.researchTasks.length || 0} 已确认
+                      </span>
+                    </div>
+                    {project.researchTasks.length ? (
+                      <ul className="review-checklist-list">
+                        {project.researchTasks.map((task) => (
+                          <li
+                            className="review-checklist-item"
+                            key={task.id}
+                            data-priority={task.state === "confirmed" || task.state === "resolved" ? "low" : "medium"}
+                          >
+                            <span className="review-checklist-index">
+                              {task.state === "confirmed" || task.state === "resolved" ? <Check size={12} /> : <CircleHelp size={12} />}
+                            </span>
+                            <span className="review-checklist-body">
+                              <strong className="review-checklist-label">{task.label}</strong>
+                              <span className="review-checklist-guidance">{task.detail || "需要核查"}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="section-empty">暂无待核查任务；项目结构简单，可直接保存草稿。</p>
+                    )}
+                  </section>
+                  {project.automation && (
+                    <section className="product-section">
+                      <div className="product-section-head">
+                        <span className="panel-num">C</span>
+                        <strong className="product-section-title">自动录入进度</strong>
+                        <span className="state" data-state={project.automation.status === "failed" ? "blocked" : project.automation.status === "succeeded" ? "confirmed" : "researching"}>
+                          {project.automation.status === "succeeded" ? "草稿已保存" : project.automation.status === "failed" ? "录入失败" : "执行中"}
+                        </span>
+                      </div>
+                      <div className="automation">
+                        <div className="automation-body">
+                          {project.automation.phases.map((phase) => (
+                            <div className="stage" data-state={phase.status === "completed" ? "done" : phase.status === "running" ? "running" : phase.status === "failed" ? "failed" : "pending"} key={phase.phase}>
+                              <span className="stage-dot" />{phase.phase}
+                            </div>
+                          ))}
+                          <p className="automation-note">系统只保存草稿，不会提交审核或发布。</p>
+                        </div>
+                      </div>
+                    </section>
+                  )}
+                  <div className="review-safety">
+                    <ShieldCheck size={14} aria-hidden="true" />
+                    <span>系统只保存 VBK 草稿，不会替运营提交审核或发布，操作人始终拥有最终决定权。</span>
+                  </div>
+                </div>
+                <footer className="product-footer">
+                  <span className="product-footer-meta">
+                    <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
+                    {readiness.ready ? " 可保存 VBK 草稿" : ` 还需 ${readiness.issues.length} 项核查`}
+                  </span>
+                  <button className="btn btn-lg" data-variant="primary" disabled={!readiness.ready || loading} onClick={() => void startAutomation()}>
+                    {automationActive ? <LoaderCircle size={15} /> : <Play size={15} />}保存草稿
+                  </button>
+                </footer>
+              </aside>
+              <section className="panel browser" aria-label="VBK 浏览器">
+                <div className="panel-header">
+                  <div className="panel-title-row"><span className="panel-num">03</span><strong className="panel-title">VBK 浏览器</strong></div>
+                  <span className="panel-sub-line">
+                    <span className={`dot`} data-state={isVbkLoggedIn ? "ok" : "warn"} />
+                    {isVbkLoggedIn ? `已登录 ${currentAccountName}` : "未登录 VBK"}
+                  </span>
+                </div>
+                <div className="browser-panel-head">
+                  <div className="browser-nav">
+                    <button className="icon-btn" data-size="sm" aria-label="返回"><ChevronLeft size={14} /></button>
+                  </div>
+                  <div className="browser-url"><span className="host">vbooking.ctrip.com</span><span className="path">/产品库</span></div>
+                  <div className="browser-actions">
+                    <button className="icon-btn" data-size="sm" aria-label="刷新" onClick={showVbkBrowser}><RefreshCw size={14} /></button>
+                    <button className="icon-btn" data-size="sm" aria-label="打开外部浏览器"><ExternalLink size={14} /></button>
+                  </div>
+                </div>
+                <div className="browser-viewport" ref={browserRef}>
+                  {!browserOpen && (
+                    <div className="browser-placeholder">
+                      <div className="browser-placeholder-card">
+                        {isVbkLoggedIn ? <Check size={22} /> : <LogIn size={22} />}
+                        <h4>{browserPlaceholderTitle}</h4>
+                        <p>{browserPlaceholderText}</p>
+                        <div className="btn-row">
+                          {isVbkLoggedIn
+                            ? <button className="btn" data-variant="primary" onClick={showVbkBrowser}><RefreshCw size={15} />显示浏览器</button>
+                            : <button className="btn" data-variant="primary" onClick={openLogin}><LogIn size={15} />登录VBK</button>}
+                          <button className="btn" data-variant="ghost" onClick={showVbkBrowser}>刷新状态</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {project.researchTasks.length > 0 && (
+                  <div className="task-rail" data-empty={project.researchTasks.length === 0}>
+                    <div className="task-rail-head">
+                      <strong><ListChecks size={14} />待核查</strong>
+                      <small>{project.researchTasks.length} 项 · {project.researchTasks.filter((t) => t.state === "confirmed" || t.state === "resolved").length} 已完成</small>
+                    </div>
+                    <div className="task-rail-body">
+                      <div className="task-strip">
+                        {project.researchTasks.map((task) => (
+                          <button
+                            key={task.id}
+                            className="task-row-grid"
+                            data-active={activeTask?.id === task.id}
+                            data-done={task.state === "confirmed" || task.state === "resolved"}
+                            onClick={() => setActiveTaskId(task.id)}
+                            aria-label={`核查任务：${task.label}`}
+                          >
+                            <span className="marker">{task.state === "confirmed" || task.state === "resolved" ? <Check size={12} /> : <CircleHelp size={12} />}</span>
+                            <span className="body">
+                              <span className="label">{task.label}</span>
+                              <span className="detail">{task.detail || "需要核查"}</span>
+                            </span>
+                            <span className="chip-mini" data-on={activeTask?.id === task.id}>{activeTask?.id === task.id ? "正在处理" : "待核查"}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {activeTask && activeTask.state !== "confirmed" && activeTask.state !== "resolved" && (
+                        <div className="task-detail-card">
+                          <div className="body">
+                            <div className="head"><span className="state" data-state="needsConfirmation">待核查</span></div>
+                            <h4>{activeTask.label}</h4>
+                            <p>{activeTask.detail || "请在 VBK 或公开来源完成核查，再填写结果。"}</p>
+                            <textarea
+                              className="task-result"
+                              value={verificationNote}
+                              onChange={(event) => setVerificationNote(event.target.value)}
+                              placeholder="粘贴实际结果，例如资源组 ID、名称、价格或来源链接…"
+                              aria-label="核查结果"
+                            />
+                            {isVehicleResourceTask(activeTask) && (
+                              <button className="btn btn-sm vehicle-resolve-btn" type="button" data-variant="secondary" disabled={Boolean(resolvingVehicleTaskId)} onClick={() => void resolveVehicleTask()}>
+                                {resolvingVehicleTaskId === activeTask.id ? <LoaderCircle size={14} /> : <CarFront size={14} />}
+                                {isVbkLoggedIn ? "估算并匹配资源组" : "登录后自动匹配"}
+                              </button>
+                            )}
+                          </div>
+                          <div className="task-actions">
+                            <button className="btn" data-variant="primary" disabled={loading || !verificationNote.trim()} onClick={() => void confirmTask()}>
+                              {loading ? <LoaderCircle size={15} /> : <ClipboardCheck size={15} />}保存并写入
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
-              </div>
+              </section>
             </div>
           )}
-          {project.automation && (
-            <aside className="automation">
-              <div className="automation-head">
-                <Sparkles size={16} />
-                <strong className="automation-title">自动录入</strong>
-                <span className="state" data-state={project.automation.status === "failed" ? "blocked" : project.automation.status === "succeeded" ? "confirmed" : "researching"}>
-                  {project.automation.status === "succeeded" ? "草稿已保存" : project.automation.status === "failed" ? "录入失败" : "执行中"}
-                </span>
-              </div>
-              <div className="automation-body">
-                {project.automation.phases.map((phase) => (
-                  <div className="stage" data-state={phase.status === "completed" ? "done" : phase.status === "running" ? "running" : phase.status === "failed" ? "failed" : "pending"} key={phase.phase}>
-                    <span className="stage-dot" />{phase.phase}
-                  </div>
-                ))}
-                <p className="automation-note">系统只保存草稿，不会提交审核或发布。</p>
-              </div>
-            </aside>
-          )}
         </section>
-      </section>}
+      )}
     </main>
   </div>;
 }
@@ -868,7 +1002,6 @@ function ProjectList({ projects, onOpen }: { projects: ProjectSummary[]; onOpen:
   return <section className="project-list-shell" aria-label="产品项目列表"><div className="project-list-head"><div><strong>产品项目</strong><small>最近更新优先</small></div><span>{projects.length} 个</span></div><div className="project-list">{projects.map((item) => <button className="project-row" key={item.id} onClick={() => void onOpen(item)} aria-label={`进入产品详情：${item.name}`}><span className="project-row-icon"><PackageOpen size={16} /></span><span className="project-main"><span className="project-title-line"><strong className="title">{item.name}</strong><span className="state" data-state={statusState(item.status)}>{statusLabel(item.status)}</span></span><span className="meta"><span>{item.productId ? `VBK ${item.productId}` : "本地产品草稿"}</span><span>更新 {formatUpdatedAt(item.updatedAt)}</span></span></span><span className="project-enter" aria-hidden="true"><ChevronRight size={16} /></span></button>)}</div></section>;
 }
 function EmptyProjectState({ onCreate }: { onCreate: () => void }) { return <div className="empty-state"><FileText size={28} /><h3>还没有产品项目</h3><p>从目的地、天数和产品形态开始，几分钟内得到可审查的通用方案。</p><button className="btn" data-variant="primary" onClick={onCreate}><Plus size={15} />创建第一个产品</button></div>; }
-function ReadinessRow({ complete, title, detail, action }: { complete: boolean; title: string; detail: string; action?: React.ReactNode }) { return <div className="readiness-row"><span className="readiness-icon" data-done={complete}>{complete ? <Check size={15} /> : <CircleHelp size={15} />}</span><span><strong>{title}</strong><small>{detail}</small></span>{action}</div>; }
 function Field({ label, value }: { label: string; value: string }) { return <div className="product-field"><span className="product-field-label">{label}</span><strong className="product-field-value" data-state={value === "待生成" ? "empty" : ""}>{value}</strong></div>; }
 function formatIssueLabel(label: string) { return ({ "basicInfo.supplierProductCode": "产品编码", "basicInfo.subtitle": "产品副标题", "basicInfo.province": "所属省份", "basicInfo.operationNotes": "运营说明", sales: "产品类型", itinerary: "每日行程", commercial: "商业信息" } as Record<string, string>)[label] || label; }
 
@@ -890,4 +1023,26 @@ function formatIssueGuidance(issue: { label: string; detail: string }) {
     return { guidance: "请在右侧核查后补齐该项内容", isTechnical: true };
   }
   return { guidance: detail, isTechnical: false };
+}
+
+function ShieldCheck(props: { size?: number; className?: string }) {
+  const { size = 16, className } = props;
+  return (
+    <svg
+      className={className}
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="presentation"
+      aria-hidden="true"
+    >
+      <path d="M12 3l8 3v5c0 4.5-3 8.4-8 9-5-.6-8-4.5-8-9V6l8-3z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
 }

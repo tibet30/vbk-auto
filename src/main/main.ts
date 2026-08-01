@@ -146,4 +146,5 @@ app.whenReady().then(async () => { db = new VbkDatabase(app.getPath("userData"))
   console.error("VBK Desktop 启动失败：", error);
   app.quit();
 });
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+app.on("window-all-closed", () => { void browser?.dispose(); if (process.platform !== "darwin") app.quit(); });
+app.on("before-quit", () => { void browser?.dispose(); });

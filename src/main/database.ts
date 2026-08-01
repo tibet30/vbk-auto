@@ -1,0 +1,129 @@
+import Database from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { AutomationRun, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, TaskStatus } from "../shared/contracts.js";
+
+const now = () => new Date().toISOString();
+
+export class VbkDatabase {
+  private db: Database.Database;
+
+  constructor(dataPath: string) {
+    fs.mkdirSync(dataPath, { recursive: true });
+    this.db = new Database(path.join(dataPath, "vbk-desktop.sqlite"));
+    this.db.pragma("journal_mode = WAL");
+    this.migrate();
+  }
+
+  private migrate() {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, product_id TEXT,
+        product_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL,
+        task_status TEXT, created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS research_tasks (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, label TEXT NOT NULL, type TEXT NOT NULL,
+        status TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, evidence_json TEXT NOT NULL DEFAULT '[]'
+      );
+      CREATE TABLE IF NOT EXISTS automation_runs (
+        id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    `);
+  }
+
+  getSetting(key: string) { return this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined; }
+  setSetting(key: string, value: string) { this.db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value); }
+
+  listProjects(): ProjectSummary[] {
+    return (this.db.prepare("SELECT id,name,status,product_id,updated_at FROM projects ORDER BY updated_at DESC").all() as Array<Record<string, string>>)
+      .map((row) => ({ id: row.id, name: row.name, status: row.status as ProjectSummary["status"], productId: row.product_id || undefined, updatedAt: row.updated_at }));
+  }
+
+  createProject(input: CreateProjectInput): ProjectDetail {
+    const id = randomUUID(); const createdAt = now();
+    const destination = typeof input?.destination === "string" ? input.destination.trim() : "";
+    if (!destination) throw new Error("请填写有效的目的地。");
+
+    const days = Number(input.days);
+    if (!Number.isInteger(days) || days < 1 || days > 60) throw new Error("天数需为 1 至 60 天的整数。");
+
+    const productForm = input.productForm;
+    if (productForm !== "privateTour" && productForm !== "groupTour") throw new Error("请选择有效的产品形态。");
+
+    const formLabel = productForm === "privateTour" ? "私家团" : "跟团游";
+    const nights = Math.max(0, days - 1);
+    const name = `${destination}${days}天${nights}晚${formLabel}`;
+    const product = {
+      sales: { productType: days <= 5 ? "domesticShort" : "domesticLong", productForm, splitGroup: false },
+      basicInfo: { supplierProductName: name, days, nights, meetingCity: destination, destinationCity: destination },
+      itinerary: [],
+    };
+    this.db.prepare("INSERT INTO projects VALUES(?,?,?,?,?,?,?)").run(id, name, "planning", null, JSON.stringify(product), createdAt, createdAt);
+    this.addMessage(id, "assistant", `已创建「${name}」。已带入项目上下文：目的地「${destination}」、产品形态「${formLabel}」、行程「${days}天${nights}晚」。请告诉我你希望生成或调整什么方案。`);
+    return this.getProject(id)!;
+  }
+
+  getProject(id: string): ProjectDetail | undefined {
+    const project = this.db.prepare("SELECT * FROM projects WHERE id=?").get(id) as Record<string, string> | undefined;
+    if (!project) return undefined;
+    const messages = this.db.prepare("SELECT * FROM messages WHERE project_id=? ORDER BY created_at").all(id) as Array<Record<string, string>>;
+    const tasks = this.db.prepare("SELECT * FROM research_tasks WHERE project_id=?").all(id) as Array<Record<string, string>>;
+    const automationRow = this.db.prepare("SELECT payload_json FROM automation_runs WHERE project_id=? ORDER BY updated_at DESC LIMIT 1").get(id) as { payload_json: string } | undefined;
+    return {
+      id: project.id, name: project.name, status: project.status as ProjectDetail["status"], productId: project.product_id || undefined,
+      updatedAt: project.updated_at, product: JSON.parse(project.product_json),
+      messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
+      researchTasks: tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) })),
+      automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
+    };
+  }
+
+  addMessage(projectId: string, role: ConversationMessage["role"], content: string, taskStatus?: ConversationMessage["taskStatus"]) {
+    const id = randomUUID();
+    this.db.prepare("INSERT INTO messages VALUES(?,?,?,?,?,?)").run(id, projectId, role, content, taskStatus || null, now()); this.touch(projectId);
+    return id;
+  }
+  updateMessageStatus(projectId: string, messageId: string, taskStatus: TaskStatus) {
+    this.db.prepare("UPDATE messages SET task_status=? WHERE id=? AND project_id=?").run(taskStatus, messageId, projectId); this.touch(projectId);
+  }
+  recoverUnansweredMessages() {
+    const unanswered = this.db.prepare(`
+      SELECT message.id, message.project_id FROM messages AS message
+      WHERE message.role='user' AND (message.task_status IS NULL OR message.task_status='running')
+        AND NOT EXISTS (
+          SELECT 1 FROM messages AS reply
+          WHERE reply.project_id=message.project_id AND reply.role='assistant' AND reply.created_at > message.created_at
+            AND reply.created_at < COALESCE((
+              SELECT MIN(next_message.created_at) FROM messages AS next_message
+              WHERE next_message.project_id=message.project_id AND next_message.role='user' AND next_message.created_at > message.created_at
+            ), '9999-12-31T23:59:59.999Z')
+        )
+    `).all() as Array<{ id: string; project_id: string }>;
+    for (const message of unanswered) {
+      this.updateMessageStatus(message.project_id, message.id, "failed");
+      this.addMessage(message.project_id, "assistant", "上一轮在应用关闭前没有完成，未获得 AI 回复。请重新发送这条消息。", "failed");
+    }
+  }
+  updateProduct(id: string, product: Record<string, unknown>, status?: ProjectSummary["status"]) {
+    this.db.prepare("UPDATE projects SET product_json=?, status=COALESCE(?,status), updated_at=? WHERE id=?").run(JSON.stringify(product), status || null, now(), id);
+  }
+  addResearchTask(projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
+    this.db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(randomUUID(), projectId, task.label, task.type, "queued", "researching", task.detail || null, "[]"); this.touch(projectId);
+  }
+  markResearchAccepted(projectId: string, taskId: string, note?: string) {
+    const evidence = [{ id: randomUUID(), title: note?.trim() || "运营人员已完成平台核查", source: "user", retrievedAt: now(), accepted: true }];
+    this.db.prepare("UPDATE research_tasks SET state='confirmed', status='succeeded', evidence_json=? WHERE id=? AND project_id=?").run(JSON.stringify(evidence), taskId, projectId); this.touch(projectId);
+  }
+  saveAutomation(projectId: string, run: AutomationRun) {
+    this.db.prepare("INSERT INTO automation_runs(id,project_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at").run(run.id, projectId, JSON.stringify(run), now(), now()); this.touch(projectId);
+  }
+  setProductId(projectId: string, productId: string) { this.db.prepare("UPDATE projects SET product_id=?,updated_at=? WHERE id=?").run(productId, now(), projectId); }
+  private touch(id: string) { this.db.prepare("UPDATE projects SET updated_at=? WHERE id=?").run(now(), id); }
+}

@@ -1,0 +1,52 @@
+{
+  "sales": {
+    "productType": "domesticShort",
+    "productForm": "groupTour",
+    "splitGroup": false
+  },
+  "basicInfo": {
+    "supplierProductName": "山西古建精华4天3晚跟团游",
+    "supplierProductCode": "AI-SX-4D3N-001",
+    "subtitle": "太原进出·晋祠平遥古城乔家大院·山西古建深度体验",
+    "days": 4,
+    "nights": 3,
+    "meetingCity": "太原",
+    "destinationCity": "太原",
+    "province": "山西",
+    "operationNotes": "AI 自动录入 MVP 样例；发布前请人工复核交通、酒店、餐食、价格库存与条款。"
+  },
+  "itinerary": [
+    {
+      "day": 1,
+      "title": "抵达太原",
+      "spots": ["山西博物院"],
+      "description": "抵达太原，接站后游览山西博物院。",
+      "hotel": "太原当地酒店",
+      "meals": "敬请自理"
+    },
+    {
+      "day": 2,
+      "title": "太原—晋祠—平遥",
+      "spots": ["晋祠", "平遥古城"],
+      "description": "参观晋祠，前往平遥古城。",
+      "hotel": "平遥当地酒店",
+      "meals": "含早餐"
+    },
+    {
+      "day": 3,
+      "title": "平遥—乔家大院—太原",
+      "spots": ["乔家大院"],
+      "description": "游览乔家大院，返回太原。",
+      "hotel": "太原当地酒店",
+      "meals": "含早餐"
+    },
+    {
+      "day": 4,
+      "title": "太原返程",
+      "spots": [],
+      "description": "根据返程时间送站，结束行程。",
+      "hotel": "",
+      "meals": "含早餐"
+    }
+  ]
+}

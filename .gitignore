@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.data/
+.env
+.env.*
+!.env.example
+artifacts/
+test-results/
+playwright-report/
+.DS_Store

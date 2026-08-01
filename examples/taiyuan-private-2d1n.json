@@ -1,0 +1,110 @@
+{
+  "sales": {
+    "productType": "domesticShort",
+    "productForm": "privateTour",
+    "splitGroup": false
+  },
+  "basicInfo": {
+    "supplierProductName": "太原晋阳古都文化2天1晚私家团",
+    "supplierProductCode": "TY-SJT-2D1N-001",
+    "subtitle": "晋祠·山西博物院·太原古县城·晋商博物院｜独立成团·专车服务",
+    "days": 2,
+    "nights": 1,
+    "meetingCity": "太原",
+    "destinationCity": "太原",
+    "province": "山西",
+    "operationNotes": "太原本地2天1晚私家团，独立成团、不拼团、不购物。建议2至6人出行，太原市区、太原南站或武宿机场接送。行程含晋祠、太原古县城、晋阳湖、山西博物院、钟楼街及晋商博物院；景点开放、预约、讲解、车辆、住宿、餐饮、门票、价格库存和退改条款须在发布前按实际资源复核。"
+  },
+  "presentation": {
+    "recommendationCategory": "优选行程",
+    "recommendation": "2天串联晋祠古建、晋阳古城与三晋文明，独立成团、专车服务，节奏舒适不赶路。",
+    "features": "【晋阳古都】专业讲解晋祠圣母殿、鱼沼飞梁与宋代彩塑。\n【三晋文明】走进山西博物院与晋商博物院，系统了解晋国和晋商历史。\n【城市烟火】漫步太原古县城、钟楼街与食品街，自由体验地道晋味。\n【私享出行】2至6人独立成团，专车接送，不拼团、不购物。",
+    "cover": {
+      "source": "ctripLibrary",
+      "poi": "晋祠博物馆",
+      "description": "太原晋祠古建筑实景",
+      "minQuality": 3
+    }
+  },
+  "operations": {
+    "transport": "charter",
+    "pickupCity": "太原",
+    "reusePickupForDropoff": true,
+    "hotelSource": "nonPlatform",
+    "hotelTier": "当地3钻酒店/-3",
+    "mealsIncluded": false,
+    "vehicleResource": {
+      "vehicleId": 5422005,
+      "resourceId": 76479748,
+      "resourceGroupId": 2206184,
+      "resourceGroupName": "5座经济150+5座舒适200+7座300+9座400+12座500+14座500+19座650",
+      "resourceGroupMaxItemPrice": 1000,
+      "vehicleModel": "广汽埃安 · 经济5座 · AION S",
+      "resourceName": "经济5座: 广汽埃安AION S",
+      "supplierCode": "TY-CAR-2D-001",
+      "serviceHoursPerDay": 10,
+      "serviceKilometersPerDay": 300
+    }
+  },
+  "commercial": {
+    "packageName": "太原2天1晚私家团标准套餐",
+    "pricing": {
+      "currency": "CNY",
+      "adult": 1233,
+      "child": 673,
+      "minimumTravelers": 2,
+      "cost": {
+        "adult": 1100,
+        "child": 600,
+        "singleSupplement": 300,
+        "childBed": 200
+      }
+    },
+    "inventory": {
+      "startDate": "2026-08-10",
+      "endDate": "2026-12-31",
+      "dailyQuota": 6
+    },
+    "terms": {
+      "inclusions": "行程内太原市区专车服务、1晚当地3钻酒店住宿、行程规划及旅行服务；实际包含项目以最终确认单为准。",
+      "exclusions": "景区门票、专业讲解、全程餐饮、个人消费、单房差及未在费用包含中列明的其他支出均不包含。",
+      "bookingNotes": "至少2人起订，建议提前1天15时前预订。下单后工作人员将确认车辆、酒店、景点开放和预约情况，资源确认后订单生效。",
+      "refundPolicy": "资源确认前可申请无损取消；资源确认后按实际已发生的车辆、酒店及预约损失扣除费用，具体金额以取消时核算结果为准。"
+    },
+    "release": {
+      "submitReview": true,
+      "publishAfterApproval": true,
+      "publicPriceCeiling": 3000,
+      "publicAuditRetries": 4
+    }
+  },
+  "itinerary": [
+    {
+      "day": 1,
+      "title": "太原接站—晋祠—太原古县城—晋阳湖",
+      "spots": ["晋祠博物馆", "太原古县城", "晋阳湖"],
+      "description": "专车于太原市区、太原南站或武宿机场迎接客人。上午前往晋祠博物馆，在专业讲解陪同下游览圣母殿、鱼沼飞梁、宋代彩塑和周柏唐槐，了解晋阳历史与古建艺术。午餐品尝过油肉、刀削面、莜面栲栳栳等晋味。下午漫步太原古县城城墙与明清街巷，傍晚前往晋阳湖欣赏日落，随后返回市区入住。",
+      "hotel": "太原市区舒适型酒店（具体酒店以所选套餐确认为准）",
+      "meals": "早餐敬请自理；午餐、晚餐敬请自理（可协助预约晋菜餐厅）",
+      "mealDescriptions": [
+        "早餐敬请自理，请根据抵达时间自行安排。",
+        "午餐敬请自理，可协助预约晋菜餐厅。",
+        "晚餐敬请自理，可自由选择太原本地风味。"
+      ],
+      "hotelDescription": "入住太原市区当地3钻酒店，具体酒店以套餐确认单为准。"
+    },
+    {
+      "day": 2,
+      "title": "山西博物院—钟楼街—晋商博物院—送站",
+      "spots": ["山西博物院", "钟楼街", "食品街", "晋商博物院"],
+      "description": "早餐后前往山西博物院，围绕晋侯鸟尊、青铜器、晋国历史与佛教艺术梳理三晋文明。中午游览钟楼街、食品街，自由品尝羊杂割、头脑、羊杂汤、剔尖等太原风味。下午参观晋商博物院，了解票号制度、晋商精神与历史建筑。约17时结束行程，按返程时间专车送往太原南站、武宿机场或太原市区。",
+      "hotel": "",
+      "meals": "含酒店早餐；午餐、晚餐敬请自理",
+      "mealDescriptions": [
+        "早餐为酒店安排，具体标准以所住酒店为准。",
+        "午餐敬请自理，可在钟楼街或食品街自由选择。",
+        "晚餐敬请自理，请结合返程时间自行安排。"
+      ]
+    }
+  ]
+}

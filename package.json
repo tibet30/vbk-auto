@@ -1,0 +1,41 @@
+{
+  "name": "vbk-auto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VBK Desktop 本地旅游产品规划与安全录入工作台",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"wait-on tcp:127.0.0.1:5173 file:dist-electron/main/main.js && electron .\"",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "dev:main": "tsc --watch",
+    "build": "vite build && tsc",
+    "start": "npm run build && electron .",
+    "package": "npm run build && electron-builder --mac dmg",
+    "test": "tsx --test test/**/*.test.ts",
+    "check": "tsc --noEmit && tsc -p tsconfig.renderer.json"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.2",
+    "lucide-react": "^1.28.0",
+    "openai": "^7.3.0",
+    "playwright": "^1.62.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "concurrently": "^10.0.4",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0",
+    "wait-on": "^9.1.0"
+  }
+}

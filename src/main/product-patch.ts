@@ -1,4 +1,5 @@
 import { parseProduct } from "./automation/schema.js";
+import { normaliseProductDraft } from "./product-normalize.js";
 import type { AiResponse } from "../shared/contracts.js";
 
 export function applyProductPatch(product: Record<string, unknown>, patch: NonNullable<AiResponse["patch"]>) {
@@ -11,8 +12,8 @@ export function applyProductPatch(product: Record<string, unknown>, patch: NonNu
       const key = Array.isArray(parent) ? Number(segment) : segment;
       const current = parent[key as never];
       if (!current || typeof current !== "object") {
-        if (operation.op === "add") parent[key as never] = {} as never;
-        else throw new Error(`产品字段不存在：${operation.path}`);
+        if (operation.op === "remove") throw new Error(`产品字段不存在：${operation.path}`);
+        parent[key as never] = {} as never;
       }
       parent = parent[key as never] as Record<string, unknown> | unknown[];
     }
@@ -21,8 +22,9 @@ export function applyProductPatch(product: Record<string, unknown>, patch: NonNu
       if (Array.isArray(parent)) parent.splice(last as number, 1); else delete parent[last as string];
     } else parent[last as never] = operation.value as never;
   }
+  const normalised = normaliseProductDraft(result);
   // A partial planning draft is intentionally allowed. Full Zod validation only
   // gates automation, avoiding a false impression that an incomplete plan is ready.
-  try { parseProduct(result); } catch { /* Stored as draft until all blocking fields resolve. */ }
-  return result;
+  try { parseProduct(normalised); } catch { /* Stored as draft until all blocking fields resolve. */ }
+  return normalised;
 }

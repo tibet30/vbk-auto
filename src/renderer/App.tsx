@@ -375,7 +375,89 @@ export function App() {
       )}
     </header>
       {notice && <div className="notice" role="status"><TriangleAlert size={15} /><span>{notice}</span><button onClick={() => setNotice(null)}>关闭</button></div>}
-      {view === "settings" && !project && <section className="view"><div className="view-container narrow"><div><h1 className="view-h1">设置</h1><p className="view-sub">连接配置和 VBK 登录状态都在这里管理。</p></div><div className="settings-stack"><section className="settings-block"><div className="settings-block-head"><KeyRound size={17} /><div><strong>连接设置</strong><small>MiniMax 用于生成产品方案和后续调整。</small></div></div><div className="settings-row"><div><strong className="settings-row-label">MiniMax</strong><p className="settings-row-desc">{settings?.hasMiniMaxKey ? `已连接 ${settings.minimaxBaseUrl}` : "尚未配置 API Key。"}</p></div><div className="settings-actions">{settings?.hasMiniMaxKey && <button className="icon-btn" type="button" onClick={() => void testSavedMiniMaxConnection()} disabled={testingMiniMax} aria-label="重新测试 MiniMax 连接" title="重新测试连接">{testingMiniMax ? <LoaderCircle size={16} /> : <Check size={16} />}</button>}<button className="btn" data-variant="ai" onClick={() => miniMaxConfigOpen ? setMiniMaxConfigOpen(false) : void openMiniMaxConfig()}>{miniMaxConfigOpen ? "收起配置" : settings?.hasMiniMaxKey ? "更新配置" : "配置连接"}</button></div></div>{miniMaxTest && !miniMaxConfigOpen && <p className="field-hint" data-state={miniMaxTest.connected ? "confirmed" : "blocked"}>{miniMaxTest.message}</p>}{miniMaxConfigOpen && <form className="minimax-config-form" onSubmit={(event) => { event.preventDefault(); void saveMiniMaxConfig(); }}><label><span className="field-label">服务地址</span><input className="input mono" type="url" inputMode="url" autoComplete="url" placeholder="https://api.minimaxi.com/v1" value={miniMaxBaseUrl} onChange={(event) => { setMiniMaxBaseUrl(event.target.value); setMiniMaxTest(null); }} /></label><label><span className="field-label">API Key</span><span className="secret-input"><input className="input" type={showMiniMaxApiKey ? "text" : "password"} autoComplete="off" placeholder={settings?.hasMiniMaxKey ? "已保存；留空则使用已保存的 Key" : "请输入 MiniMax API Key"} value={miniMaxApiKey} onChange={(event) => { setMiniMaxApiKey(event.target.value); setMiniMaxTest(null); }} /><button className="secret-toggle" type="button" onClick={() => setShowMiniMaxApiKey((visible) => !visible)} aria-label={showMiniMaxApiKey ? "隐藏 API Key" : "显示 API Key"} aria-pressed={showMiniMaxApiKey}>{showMiniMaxApiKey ? <Eye size={16} /> : <EyeOff size={16} />}</button></span><small className="field-hint">已保存的 Key 会回填到此处，默认保持隐藏；测试不会保存新输入的 Key。</small></label>{miniMaxTest && <p className="field-hint" data-state={miniMaxTest.connected ? "confirmed" : "blocked"}>{miniMaxTest.message}</p>}<div className="form-actions"><button className="btn" type="button" data-variant="ghost" onClick={() => { setMiniMaxConfigOpen(false); setMiniMaxApiKey(""); setShowMiniMaxApiKey(false); setMiniMaxTest(null); }}>取消</button><button className="btn" type="button" onClick={() => void testMiniMaxConnection()} disabled={testingMiniMax}>{testingMiniMax ? <LoaderCircle size={15} /> : null}测试连接</button><button className="btn" type="submit" data-variant="ai" disabled={savingMiniMax}>{savingMiniMax ? <LoaderCircle size={15} /> : null}保存配置</button></div></form>}</section><section className="settings-block"><div className="settings-block-head"><UserRound size={17} /><div><strong>VBK 登录设置</strong><small>已登录账号会显示在列表里，登录态只保存在本机。</small></div></div><div className="account-list">{loggedAccounts.length ? loggedAccounts.map((name) => <div className="account-row" key={name}><span className="account-avatar">{name.slice(0, 1).toUpperCase()}</span><span><strong>{name}</strong><small>已登录 VBK</small></span><div className="account-actions"><span className="state" data-state="current">当前</span><button className="btn btn-sm" data-variant="ghost" onClick={() => void logoutVbk()} disabled={checkingVbkLogin}>登出</button></div></div>) : <div className="account-row" data-empty="true"><span className="account-avatar">未</span><span><strong>暂无已登录账号</strong><small>{checkingVbkLogin ? "正在检查登录状态" : "新增登录后会出现在这里"}</small></span></div>}</div><div className="settings-foot"><button className="icon-btn" type="button" onClick={() => void checkVbkLogin(true)} disabled={checkingVbkLogin} aria-label="刷新 VBK 登录状态" title="刷新登录状态">{checkingVbkLogin ? <LoaderCircle size={16} /> : <RefreshCw size={16} />}</button><button className="btn" onClick={openLogin}><LogIn size={15} />新增登录VBK</button></div></section></div></div></section>}
+      {view === "settings" && !project && <section className="view"><div className="view-container narrow settings-page"><header className="settings-page-head"><div><h1 className="view-h1">设置</h1><p className="view-sub">连接配置和 VBK 登录状态都在这里管理。</p></div></header><div className="settings-stack">
+        <section className="settings-block">
+          <div className="settings-block-head">
+            <span className="settings-block-icon"><KeyRound size={17} /></span>
+            <div className="settings-block-head-body">
+              <strong>连接设置</strong>
+              <small>MiniMax 用于生成产品方案和后续调整。</small>
+            </div>
+          </div>
+          <div className="settings-block-body">
+            <div className="account-list">
+              <div className="account-row">
+                <span className="account-avatar" data-source="minimax">M</span>
+                <span className="account-row-info">
+                  <strong>MiniMax</strong>
+                  <small>{settings?.hasMiniMaxKey ? `已连接 ${settings.minimaxBaseUrl}` : "尚未配置 API Key。"}</small>
+                </span>
+                <div className="account-actions">
+                  <span className="state" data-state={settings?.hasMiniMaxKey ? "current" : "needsConfirmation"}>{settings?.hasMiniMaxKey ? "已连接" : "未配置"}</span>
+                  {settings?.hasMiniMaxKey && (
+                    <button className="icon-btn" data-size="sm" type="button" onClick={() => void testSavedMiniMaxConnection()} disabled={testingMiniMax} aria-label="重新测试 MiniMax 连接" title="重新测试连接">{testingMiniMax ? <LoaderCircle size={14} /> : <RefreshCw size={14} />}</button>
+                  )}
+                  <button className="btn btn-sm" data-variant={settings?.hasMiniMaxKey ? "secondary" : "ai"} onClick={() => miniMaxConfigOpen ? setMiniMaxConfigOpen(false) : void openMiniMaxConfig()}>
+                    {miniMaxConfigOpen ? "收起配置" : settings?.hasMiniMaxKey ? "更新配置" : "配置连接"}
+                  </button>
+                </div>
+              </div>
+            </div>
+            {miniMaxTest && !miniMaxConfigOpen && <p className="field-hint" data-state={miniMaxTest.connected ? "confirmed" : "blocked"}>{miniMaxTest.message}</p>}
+            {miniMaxConfigOpen && (
+              <form className="minimax-config-form" onSubmit={(event) => { event.preventDefault(); void saveMiniMaxConfig(); }}>
+                <label><span className="field-label">服务地址</span><input className="input mono" type="url" inputMode="url" autoComplete="url" placeholder="https://api.minimaxi.com/v1" value={miniMaxBaseUrl} onChange={(event) => { setMiniMaxBaseUrl(event.target.value); setMiniMaxTest(null); }} /></label>
+                <label><span className="field-label">API Key</span><span className="secret-input"><input className="input" type={showMiniMaxApiKey ? "text" : "password"} autoComplete="off" placeholder={settings?.hasMiniMaxKey ? "已保存；留空则使用已保存的 Key" : "请输入 MiniMax API Key"} value={miniMaxApiKey} onChange={(event) => { setMiniMaxApiKey(event.target.value); setMiniMaxTest(null); }} /><button className="secret-toggle" type="button" onClick={() => setShowMiniMaxApiKey((visible) => !visible)} aria-label={showMiniMaxApiKey ? "隐藏 API Key" : "显示 API Key"} aria-pressed={showMiniMaxApiKey}>{showMiniMaxApiKey ? <Eye size={16} /> : <EyeOff size={16} />}</button></span><small className="field-hint">已保存的 Key 会回填到此处，默认保持隐藏；测试不会保存新输入的 Key。</small></label>
+                {miniMaxTest && <p className="field-hint" data-state={miniMaxTest.connected ? "confirmed" : "blocked"}>{miniMaxTest.message}</p>}
+                <div className="form-actions">
+                  <button className="btn" type="button" data-variant="ghost" onClick={() => { setMiniMaxConfigOpen(false); setMiniMaxApiKey(""); setShowMiniMaxApiKey(false); setMiniMaxTest(null); }}>取消</button>
+                  <button className="btn" type="button" onClick={() => void testMiniMaxConnection()} disabled={testingMiniMax}>{testingMiniMax ? <LoaderCircle size={15} /> : null}测试连接</button>
+                  <button className="btn" type="submit" data-variant="ai" disabled={savingMiniMax}>{savingMiniMax ? <LoaderCircle size={15} /> : null}保存配置</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </section>
+        <section className="settings-block">
+          <div className="settings-block-head">
+            <span className="settings-block-icon"><UserRound size={17} /></span>
+            <div className="settings-block-head-body">
+              <strong>VBK 登录设置</strong>
+              <small>已登录账号会显示在列表里，登录态只保存在本机。</small>
+            </div>
+          </div>
+          <div className="settings-block-body">
+            <div className="account-list">
+              {loggedAccounts.length ? loggedAccounts.map((name) => (
+                <div className="account-row" key={name}>
+                  <span className="account-avatar">{name.slice(0, 1).toUpperCase()}</span>
+                  <span className="account-row-info">
+                    <strong>{name}</strong>
+                    <small>已登录 VBK</small>
+                  </span>
+                  <div className="account-actions">
+                    <span className="state" data-state="current">当前</span>
+                    <button className="icon-btn" data-size="sm" type="button" onClick={() => void checkVbkLogin(true)} disabled={checkingVbkLogin} aria-label="刷新 VBK 登录状态" title="刷新登录状态">{checkingVbkLogin ? <LoaderCircle size={14} /> : <RefreshCw size={14} />}</button>
+                    <button className="btn btn-sm" data-variant="danger" onClick={() => void logoutVbk()} disabled={checkingVbkLogin}>登出</button>
+                  </div>
+                </div>
+              )) : (
+                <div className="account-row" data-empty="true">
+                  <span className="account-avatar">未</span>
+                  <span className="account-row-info">
+                    <strong>暂无已登录账号</strong>
+                    <small>{checkingVbkLogin ? "正在检查登录状态" : "新增登录后会出现在这里"}</small>
+                  </span>
+                  <div className="account-actions">
+                    <button className="icon-btn" data-size="sm" type="button" onClick={() => void checkVbkLogin(true)} disabled={checkingVbkLogin} aria-label="刷新 VBK 登录状态" title="刷新登录状态">{checkingVbkLogin ? <LoaderCircle size={14} /> : <RefreshCw size={14} />}</button>
+                    <button className="btn btn-sm" data-variant="secondary" onClick={openLogin}><LogIn size={14} />新增登录VBK</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div></div></section>}
       {view === "projects" && !project && <section className="view projects-view"><div className="view-container content-width project-view-container"><div className="project-page-head"><div><h1 className="view-h1">项目</h1><p className="view-sub">管理产品草稿、规划进度和录入状态。</p></div><button className="btn" data-variant="primary" onClick={startCreateProduct}><Plus size={16} />新建产品</button></div>{creating && <ProductBriefForm input={createInput} setInput={setCreateInput} submitting={savingProject} onCancel={() => setCreating(false)} onSubmit={() => void createProject()} />}{projects.length ? <ProjectList projects={projects} onOpen={async (item) => { const next = await api()!.projects.get(item.id); setProject(next); setView("workspace"); }} /> : !creating && <EmptyProjectState onCreate={startCreateProduct} />}</div></section>}
       {view === "workspace" && !project && <section className="view login-stage" data-login-open={loginPanelOpen}>
         <div className="view-container content-width workspace-home">

@@ -1,6 +1,7 @@
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
 import { z } from "zod";
 import type { AiResponse } from "../shared/contracts.js";
+import { normaliseItinerary, normalisePresentation } from "./product-normalize.js";
 
 const writablePatchPrefixes = [
   "/sales/productType", "/sales/productForm", "/sales/splitGroup",
@@ -11,7 +12,7 @@ const writablePatchPrefixes = [
   "/itinerary",
 ];
 
-const writablePatchGuide = `可写 patch 路径只使用这些前缀：
+const writablePatchGuide = `可写 patch 路径只能使用这些值：
 - /sales/productType, /sales/productForm, /sales/splitGroup
 - /basicInfo/supplierProductName, /basicInfo/subtitle, /basicInfo/days, /basicInfo/nights, /basicInfo/meetingCity, /basicInfo/destinationCity, /basicInfo/province, /basicInfo/operationNotes
 - /presentation
@@ -42,7 +43,7 @@ const responseJsonSchema = {
         required: ["op", "path"],
         properties: {
           op: { type: "string", enum: ["add", "replace", "remove"] },
-          path: { type: "string", minLength: 1, pattern: "^/" },
+          path: { type: "string", enum: writablePatchPrefixes },
           value: {},
         },
       },
@@ -78,11 +79,50 @@ const patchOperationSchema = z.object({
   path: z.string().startsWith("/"),
   value: z.unknown().optional(),
 }).superRefine((operation, context) => {
-  const writable = writablePatchPrefixes.some((prefix) => operation.path === prefix || operation.path.startsWith(`${prefix}/`));
+  const writable = writablePatchPrefixes.includes(operation.path);
   if (!writable) context.addIssue({ code: "custom", message: `不可写入产品字段：${operation.path}` });
 });
 
 const researchTaskSchema = z.object({ label: z.string(), type: z.enum(["vbk", "web", "cost", "image"]), detail: z.string().optional() });
+
+const nonEmptyText = z.string().trim().min(1);
+const patchValueSchemas: Record<string, z.ZodType> = {
+  "/sales/productType": z.enum(["domesticShort", "domesticLong"]),
+  "/sales/productForm": z.enum(["groupTour", "semiSelfGuided", "privateTour", "freeTravel"]),
+  "/sales/splitGroup": z.boolean(),
+  "/basicInfo/supplierProductName": nonEmptyText,
+  "/basicInfo/subtitle": nonEmptyText,
+  "/basicInfo/days": z.number().int().min(1).max(60),
+  "/basicInfo/nights": z.number().int().min(0).max(59),
+  "/basicInfo/meetingCity": nonEmptyText,
+  "/basicInfo/destinationCity": nonEmptyText,
+  "/basicInfo/province": nonEmptyText,
+  "/basicInfo/operationNotes": nonEmptyText,
+  "/operations/transport": z.enum(["charter", "shared", "none"]),
+  "/operations/pickupCity": nonEmptyText,
+  "/operations/reusePickupForDropoff": z.boolean(),
+  "/operations/hotelSource": z.literal("nonPlatform"),
+  "/operations/hotelTier": z.enum(["当地2钻酒店/-2", "当地3钻酒店/-3", "当地4钻酒店/-4", "当地5钻酒店/-5"]),
+  "/operations/mealsIncluded": z.boolean(),
+  "/commercial/packageName": nonEmptyText,
+  "/commercial/terms": z.record(z.string(), nonEmptyText),
+};
+
+function normalisePatchOperation(operation: z.infer<typeof patchOperationSchema>) {
+  if (operation.op === "remove") return operation;
+  if (operation.path === "/presentation") {
+    const value = normalisePresentation(operation.value);
+    return value ? { ...operation, value } : undefined;
+  }
+  if (operation.path === "/itinerary") {
+    const value = normaliseItinerary(operation.value);
+    return value ? { ...operation, value } : undefined;
+  }
+  const schema = patchValueSchemas[operation.path];
+  if (!schema) return operation;
+  const parsed = schema.safeParse(operation.value);
+  return parsed.success ? { ...operation, value: parsed.data } : undefined;
+}
 
 export class MiniMaxServiceError extends Error {
   constructor(public readonly code: string, message: string) { super(message); }
@@ -90,6 +130,7 @@ export class MiniMaxServiceError extends Error {
 
 const systemPrompt = `你是 VBK Desktop 的旅游产品运营助手。你的用户是携程 VBK 运营人员；他们会用极少信息创建一个可复用的通用旅游产品，例如“太原2天1晚私家团”。
 当用户要求生成第一版时，基于已有目的地、天数、晚数和产品形态，生成完整且通用的产品文案、每日行程、基础信息与可审核的条款草稿。产品名称、行程、卖点可合理生成；不得虚构城市 ID、VBK 资源、车队价格、库存、门票、成本或已经完成的核查。上述运营数据缺失时，创建清晰、可由运营人员在 VBK 中执行的 researchTasks。
+当前产品草稿是产品状态的唯一事实来源；即使历史消息声称已经生成，只要草稿字段仍为空，就必须重新生成并返回可写 patch。
 patch 必须是 RFC6902 风格，且只能修改产品草稿的非敏感字段。最多追问一个真正阻塞生成的问题；如果不阻塞，先给出第一版。
 
 ${writablePatchGuide}
@@ -126,12 +167,20 @@ function parseValue(value: unknown): AiResponse {
   const reply = typeof record.reply === "string" ? record.reply.trim() : "";
   if (!reply) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
 
-  const patch = Array.isArray(record.patch)
-    ? record.patch.flatMap((operation) => {
+  const rawPatch = Array.isArray(record.patch) ? record.patch : [];
+  const patch = rawPatch
+    .flatMap((operation) => {
       const parsed = patchOperationSchema.safeParse(operation);
-      return parsed.success ? [parsed.data] : [];
-    })
-    : [];
+      if (!parsed.success) return [];
+      const normalised = normalisePatchOperation(parsed.data);
+      return normalised ? [normalised] : [];
+    });
+  const rejectedPatchPaths = rawPatch.flatMap((operation) => {
+    if (!operation || typeof operation !== "object" || Array.isArray(operation)) return ["[invalid operation]"];
+    const path = (operation as Record<string, unknown>).path;
+    return patchOperationSchema.safeParse(operation).success ? [] : [typeof path === "string" ? path : "[missing path]"];
+  });
+  if (rejectedPatchPaths.length) console.warn("[MiniMax] rejected patch paths", { paths: rejectedPatchPaths });
   const questions = Array.isArray(record.questions)
     ? record.questions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 1)
     : typeof record.questions === "string" && record.questions.trim() ? [record.questions.trim()] : [];
@@ -153,7 +202,15 @@ function parseJson(raw: string): AiResponse {
   const end = cleaned.lastIndexOf("}");
   const json = start >= 0 && end >= start ? cleaned.slice(start, end + 1) : cleaned;
   try { return parseValue(JSON.parse(json)); }
-  catch { throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。"); }
+  catch (error) {
+    console.warn("[MiniMax] structured response rejected", {
+      length: raw.length,
+      hasThinkingBlock: /^\s*<think>/i.test(raw),
+      hasJsonFence: /```(?:json)?/i.test(raw),
+      reason: error instanceof Error ? error.message : "unknown",
+    });
+    throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+  }
 }
 
 function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompletionMessage): AiResponse {
@@ -179,7 +236,7 @@ export class MiniMaxService {
         model: this.config.model,
         messages: [{ role: "user", content: "ping" }],
         max_completion_tokens: 1,
-        extra_body: { thinking: { type: "disabled" } },
+        thinking: { type: "disabled" },
       } as never);
     } catch (error) { this.throwProviderError(error); }
   }
@@ -187,26 +244,47 @@ export class MiniMaxService {
   async reply(input: { message: string; product: Record<string, unknown>; history: Array<{ role: string; content: string }> }): Promise<AiResponse> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 MiniMax API Key。");
     const client = this.client(replyTimeout());
+    const itinerary = input.product.itinerary;
+    const hasExistingDraft = Array.isArray(itinerary) && itinerary.length > 0;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
-      ...input.history.slice(-12).map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content } as OpenAI.Chat.Completions.ChatCompletionMessageParam)),
+      ...(hasExistingDraft ? input.history.slice(-12) : []).map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content } as OpenAI.Chat.Completions.ChatCompletionMessageParam)),
       { role: "user", content: `当前产品草稿：${JSON.stringify(input.product)}\n\n用户本轮输入：${input.message}\n\n请通过 submit_product_update 工具返回结构化结果。` },
     ];
+    const startedAt = Date.now();
+    console.info("[MiniMax] planning request started", { model: this.config.model, timeoutMs: replyTimeout() });
     try {
-      return parseAssistantMessage(await this.complete(client, messages));
-    } catch (error) { this.throwProviderError(error); }
+      const { message, traceId } = await this.complete(client, messages);
+      const parsed = parseAssistantMessage(message);
+      const isInitialDraft = (!Array.isArray(itinerary) || itinerary.length === 0) && /生成|第一版|方案/.test(input.message);
+      if (isInitialDraft && !parsed.patch?.length) {
+        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回可写入的产品方案，请重试。");
+      }
+      console.info("[MiniMax] planning request completed", { model: this.config.model, elapsedMs: Date.now() - startedAt, traceId });
+      return parsed;
+    } catch (error) {
+      console.error("[MiniMax] planning request failed", {
+        model: this.config.model,
+        elapsedMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+      this.throwProviderError(error);
+    }
   }
 
   private async complete(client: OpenAI, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
-    const response = await client.chat.completions.create({
-      model: this.config.model, messages, temperature: 0.3, max_completion_tokens: 4000,
+    const result = await client.chat.completions.create({
+      model: this.config.model, messages, temperature: 0.3, max_completion_tokens: 2048,
       tools: [responseTool],
       tool_choice: { type: "function", function: { name: "submit_product_update" } },
-      extra_body: { thinking: { type: "disabled" }, reasoning_split: true, service_tier: miniMaxServiceTier() },
-    } as never);
+      thinking: { type: "disabled" },
+      reasoning_split: true,
+      service_tier: miniMaxServiceTier(),
+    } as never).withResponse();
+    const response = result.data;
     const message = response.choices[0]?.message;
     if (!message) throw new MiniMaxServiceError("empty_model_output", "MiniMax 未返回内容。");
-    return message;
+    return { message, traceId: result.response.headers.get("trace-id") || result.response.headers.get("trace_id") || result.request_id || undefined };
   }
 
   private throwProviderError(error: unknown): never {

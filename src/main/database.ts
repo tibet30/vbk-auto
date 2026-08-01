@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AutomationRun, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, TaskStatus } from "../shared/contracts.js";
+import { normaliseProductDraft } from "./product-normalize.js";
 
 const now = () => new Date().toISOString();
 
@@ -14,6 +15,7 @@ export class VbkDatabase {
     this.db = new Database(path.join(dataPath, "vbk-desktop.sqlite"));
     this.db.pragma("journal_mode = WAL");
     this.migrate();
+    this.normaliseStoredProducts();
   }
 
   private migrate() {
@@ -36,6 +38,20 @@ export class VbkDatabase {
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+  }
+
+  private normaliseStoredProducts() {
+    const rows = this.db.prepare("SELECT id, product_json FROM projects").all() as Array<{ id: string; product_json: string }>;
+    const update = this.db.prepare("UPDATE projects SET product_json=? WHERE id=?");
+    const apply = this.db.transaction(() => {
+      for (const row of rows) {
+        try {
+          const normalised = JSON.stringify(normaliseProductDraft(JSON.parse(row.product_json)));
+          if (normalised !== row.product_json) update.run(normalised, row.id);
+        } catch { /* Leave unreadable legacy data untouched for manual recovery. */ }
+      }
+    });
+    apply();
   }
 
   getSetting(key: string) { return this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined; }
@@ -115,10 +131,22 @@ export class VbkDatabase {
     this.db.prepare("UPDATE projects SET product_json=?, status=COALESCE(?,status), updated_at=? WHERE id=?").run(JSON.stringify(product), status || null, now(), id);
   }
   addResearchTask(projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
-    this.db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(randomUUID(), projectId, task.label, task.type, "queued", "researching", task.detail || null, "[]"); this.touch(projectId);
+    const existing = this.db.prepare(`
+      SELECT id FROM research_tasks
+      WHERE project_id=? AND label=? AND type=? AND state NOT IN ('confirmed','resolved')
+      LIMIT 1
+    `).get(projectId, task.label, task.type) as { id: string } | undefined;
+    if (existing) {
+      if (task.detail) this.db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(task.detail, existing.id);
+      this.touch(projectId);
+      return existing.id;
+    }
+    const id = randomUUID();
+    this.db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(id, projectId, task.label, task.type, "queued", "researching", task.detail || null, "[]"); this.touch(projectId);
+    return id;
   }
-  markResearchAccepted(projectId: string, taskId: string, note?: string) {
-    const evidence = [{ id: randomUUID(), title: note?.trim() || "运营人员已完成平台核查", source: "user", retrievedAt: now(), accepted: true }];
+  markResearchAccepted(projectId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") {
+    const evidence = [{ id: randomUUID(), title: note?.trim() || "运营人员已完成平台核查", source, retrievedAt: now(), accepted: true }];
     this.db.prepare("UPDATE research_tasks SET state='confirmed', status='succeeded', evidence_json=? WHERE id=? AND project_id=?").run(JSON.stringify(evidence), taskId, projectId); this.touch(projectId);
   }
   saveAutomation(projectId: string, run: AutomationRun) {

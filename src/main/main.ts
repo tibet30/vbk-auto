@@ -7,18 +7,20 @@ import { applyProductPatch } from "./product-patch.js";
 import { productSchema } from "./automation/schema.js";
 import { VbkBrowser } from "./vbk-browser.js";
 import { DraftAutomation } from "./automation.js";
+import { resolveVehicleResource } from "./vehicle-resource.js";
 import type { CreateProjectInput, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const isDev = !app.isPackaged;
 app.commandLine.appendSwitch("remote-debugging-port", "9222");
 const knownVbkAccountName = "vbk_671205";
+const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7-highspeed";
 
 let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
 const emitProject = (project: ProjectDetail) => window?.webContents.send("project:updated", project);
 const getSettings = (): Settings => ({
   minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || "https://api.minimaxi.com/v1",
-  minimaxModel: db.getSetting("minimaxModel")?.value || "MiniMax-M3",
+  minimaxModel: db.getSetting("minimaxModel")?.value || defaultMiniMaxModel,
   hasMiniMaxKey: Boolean(db.getSetting("minimaxApiKey")), dataPath: app.getPath("userData"),
 });
 function apiKey() { const stored = db.getSetting("minimaxApiKey")?.value; return stored ? safeStorage.decryptString(Buffer.from(stored, "base64")) : ""; }
@@ -74,6 +76,17 @@ function registerIpc() {
     emitProject(db.getProject(projectId)!);
   });
   ipcMain.handle("research:accept", (_event, projectId: string, taskId: string, note?: string) => { db.markResearchAccepted(projectId, taskId, note); emitProject(db.getProject(projectId)!); });
+  ipcMain.handle("research:vehicleResource", async (_event, projectId: string, taskId?: string) => {
+    const project = db.getProject(projectId); if (!project) throw new Error("项目不存在");
+    const page = await browser.page();
+    const result = await resolveVehicleResource(page, project);
+    db.updateProduct(projectId, result.product, "review");
+    if (taskId) db.markResearchAccepted(projectId, taskId, result.note, "vbk");
+    db.addMessage(projectId, "assistant", `已完成用车估算和 VBK 资源组匹配：${result.note}`, "succeeded");
+    const next = db.getProject(projectId)!;
+    emitProject(next);
+    return result.resolved;
+  });
   ipcMain.handle("browser:login", () => browser.login());
   ipcMain.handle("browser:logout", () => browser.logout());
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));

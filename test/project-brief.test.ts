@@ -56,6 +56,20 @@ test("运营人员确认核查时会保存人工核查证据", async (t) => {
   assert.equal(confirmed.evidence?.[0].source, "user");
 });
 
+test("重复返回的同名待核查任务只保留一项", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-research-dedupe-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+
+  db.addResearchTask(project.id, { label: "核查车辆资源", type: "vbk", detail: "第一次说明" });
+  db.addResearchTask(project.id, { label: "核查车辆资源", type: "vbk", detail: "最新说明" });
+
+  const tasks = db.getProject(project.id)!.researchTasks;
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].detail, "最新说明");
+});
+
 test("应用重启后会把没有回复的消息标记为可重试失败", async (t) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-message-recovery-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));

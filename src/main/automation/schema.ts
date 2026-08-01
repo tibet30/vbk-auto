@@ -42,14 +42,14 @@ const operationsSchema = z.object({
   mealsIncluded: z.boolean().default(false),
   vehicleResource: z
     .object({
-      vehicleId: z.number().int().positive(),
+      vehicleId: z.number().int().positive().optional(),
       resourceId: z.number().int().positive().optional(),
       resourceGroupId: z.number().int().positive(),
       resourceGroupName: z.string().min(1),
       resourceGroupMaxItemPrice: z.number().positive().default(1000),
-      vehicleModel: z.string().min(1),
-      resourceName: z.string().min(1),
-      supplierCode: z.string().min(1),
+      vehicleModel: z.string().min(1).optional(),
+      resourceName: z.string().min(1).optional(),
+      supplierCode: z.string().min(1).optional(),
       serviceHoursPerDay: z.number().int().min(4).max(24).default(10),
       serviceKilometersPerDay: z.number().int().min(50).max(1000).default(300),
     })

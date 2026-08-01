@@ -187,7 +187,7 @@ a:hover {
 
 .rail-btn[data-active='true'] {
   background: var(--muted);
-  color: var(--foreground);
+  color: var(--success);
 }
 
 .rail-btn[data-active='true']::before {
@@ -198,7 +198,7 @@ a:hover {
   bottom: 9px;
   width: 2px;
   border-radius: 1px;
-  background: var(--primary);
+  background: var(--success);
 }
 
 .rail-btn .icon {
@@ -509,6 +509,16 @@ a:hover {
   background: var(--muted);
 }
 
+.btn[data-variant='secondary'] {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+.btn[data-variant='secondary']:hover {
+  background: var(--muted);
+  border-color: var(--muted-foreground);
+}
+
 .btn[data-variant='danger'] {
   border-color: var(--border);
   color: var(--destructive);
@@ -545,6 +555,10 @@ a:hover {
 .icon-btn[data-disabled='true'] {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.icon-btn[data-size='sm'] {
+  width: 28px;
+  height: 28px;
 }
 
 /* ---------- Inputs ---------- */
@@ -1844,33 +1858,17 @@ a:hover {
 
 /* ---------- Settings ---------- */
 
-.settings-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--fs-sm);
-}
-.settings-row:last-child {
-  border-bottom: 0;
-}
-
-.settings-row-label {
-  font-weight: 500;
-  color: var(--foreground);
-}
-
-.settings-row-desc {
-  font-size: var(--fs-xs);
-  color: var(--muted-foreground);
-  margin-top: 2px;
-}
-
-.settings-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--pad-xs);
+/* Legacy settings-row rules retained as no-ops so older snapshots stay inert. */
+.settings-row,
+.settings-row-info,
+.settings-row-label,
+.settings-row-desc,
+.settings-actions,
+.settings-row-state,
+.settings-row-state .dot,
+.settings-row-state[data-state='confirmed'],
+.settings-row-state[data-state='todo'] {
+  /* intentionally empty — connection status now reuses .account-row + .state for parity with VBK row */
 }
 
 .settings-stack {
@@ -1882,42 +1880,84 @@ a:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
-  padding: 0 var(--pad);
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-block-head {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: var(--pad) 0 12px;
+  gap: 12px;
+  padding: var(--pad) var(--pad) 14px;
   border-bottom: 1px solid var(--border);
 }
 
-.settings-block-head svg {
+.settings-block-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 10%, transparent);
   color: var(--ai-teal);
-  margin-top: 1px;
+  flex-shrink: 0;
 }
 
-.settings-block-head strong,
-.settings-block-head small {
+.settings-block-head-body {
+  min-width: 0;
+}
+
+.settings-block-head-body strong,
+.settings-block-head-body small {
   display: block;
 }
 
-.settings-block-head strong {
+.settings-block-head-body strong {
   font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.1px;
 }
 
-.settings-block-head small {
-  margin-top: 2px;
+.settings-block-head-body small {
+  margin-top: 4px;
   color: var(--muted-foreground);
   font-size: var(--fs-xs);
+  line-height: 1.5;
 }
 
-.settings-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--pad-xs);
-  padding: 12px 0 var(--pad);
+.settings-block-body {
+  padding: 6px var(--pad) var(--pad);
+  flex: 1 1 auto;
+}
+
+.settings-row-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--muted-foreground);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.settings-row-state .dot {
+  width: 6px;
+  height: 6px;
+}
+
+.settings-row-state[data-state='confirmed'] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--success) 24%, var(--border));
+}
+
+.settings-row-state[data-state='todo'] {
+  color: var(--muted-foreground);
 }
 
 .account-list {
@@ -1933,32 +1973,51 @@ a:hover {
 .account-row {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 10px 14px;
   background: var(--surface);
+}
+
+.account-row:first-child {
+  border-radius: var(--radius-control) var(--radius-control) 0 0;
+}
+
+.account-row:last-child {
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+}
+
+.account-row:only-child {
+  border-radius: var(--radius-control);
 }
 
 .account-actions {
   display: inline-flex;
   align-items: center;
-  gap: var(--pad-xs);
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .account-row[data-empty='true'] {
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr) auto;
 }
 
-.account-row strong,
-.account-row small {
+.account-row-info {
+  min-width: 0;
+}
+
+.account-row-info strong,
+.account-row-info small {
   display: block;
 }
 
-.account-row strong {
+.account-row-info strong {
   font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--foreground);
 }
 
-.account-row small {
+.account-row-info small {
   margin-top: 2px;
   color: var(--muted-foreground);
   font-size: var(--fs-xs);
@@ -1974,6 +2033,11 @@ a:hover {
   color: var(--foreground);
   font-size: var(--fs-xs);
   font-weight: 600;
+}
+
+.account-avatar[data-source='minimax'] {
+  background: color-mix(in srgb, var(--ai-teal) 14%, transparent);
+  color: var(--ai-teal);
 }
 
 .minimax-settings-card {
@@ -2197,6 +2261,18 @@ a:hover {
 .view-container.narrow {
   max-width: 720px;
   width: calc(100% - 32px);
+}
+
+.settings-page {
+  padding-top: 48px;
+}
+
+.settings-page-head {
+  margin-bottom: 28px;
+}
+
+.settings-page-head .view-sub {
+  margin-bottom: 0;
 }
 
 .welcome { max-width: 760px; padding-top: 72px; }

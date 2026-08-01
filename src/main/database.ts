@@ -7,6 +7,13 @@ import { normaliseProductDraft } from "./product-normalize.js";
 
 const now = () => new Date().toISOString();
 
+// 供应商产品编号是自动录入的必填项，且 AI 被禁止写入（属于运营数据）。
+// 建项目时先生成一个唯一占位编号，运营可在产品面板改成 VBK 中的真实编号。
+function newSupplierProductCode() {
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `VBK-${stamp}-${randomUUID().slice(0, 6).toUpperCase()}`;
+}
+
 export class VbkDatabase {
   private db: Database.Database;
 
@@ -78,7 +85,10 @@ export class VbkDatabase {
     const name = `${destination}${days}天${nights}晚${formLabel}`;
     const product = {
       sales: { productType: days <= 5 ? "domesticShort" : "domesticLong", productForm, splitGroup: false },
-      basicInfo: { supplierProductName: name, days, nights, meetingCity: destination, destinationCity: destination },
+      basicInfo: {
+        supplierProductName: name, supplierProductCode: newSupplierProductCode(),
+        days, nights, meetingCity: destination, destinationCity: destination,
+      },
       itinerary: [],
     };
     this.db.prepare("INSERT INTO projects VALUES(?,?,?,?,?,?,?)").run(id, name, "planning", null, JSON.stringify(product), createdAt, createdAt);
@@ -129,6 +139,21 @@ export class VbkDatabase {
   }
   updateProduct(id: string, product: Record<string, unknown>, status?: ProjectSummary["status"]) {
     this.db.prepare("UPDATE projects SET product_json=?, status=COALESCE(?,status), updated_at=? WHERE id=?").run(JSON.stringify(product), status || null, now(), id);
+  }
+  // 运营可直接维护 AI 不允许写入的基础信息字段（例如供应商产品编号）。
+  updateBasicInfoField(projectId: string, field: string, value: string): ProjectDetail {
+    const project = this.getProject(projectId);
+    if (!project) throw new Error("项目不存在");
+    const trimmed = value.trim();
+    if (!trimmed) throw new Error("内容不能为空。");
+    const product = { ...project.product } as Record<string, unknown>;
+    const basicInfo = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
+      ? { ...(product.basicInfo as Record<string, unknown>) }
+      : {};
+    basicInfo[field] = trimmed;
+    product.basicInfo = basicInfo;
+    this.updateProduct(projectId, product);
+    return this.getProject(projectId)!;
   }
   addResearchTask(projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
     const existing = this.db.prepare(`

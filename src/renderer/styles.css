@@ -2552,8 +2552,10 @@ a:hover {
 }
 .task-detail h3 { margin: 6px 0 2px; font-size: var(--fs-sm); }
 .task-detail p { max-width: 260px; margin: 0; color: var(--muted-foreground); font-size: var(--fs-xs); line-height: 1.5; }
+.vehicle-resolve-btn { margin-top: 10px; }
 .task-result { display: block; width: 100%; min-height: 58px; margin-top: 8px; resize: vertical; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 8px; color: var(--foreground); font: inherit; font-size: var(--fs-xs); line-height: 1.45; }
 .task-result:focus { border-color: var(--ai-teal); outline: none; }
+.task-actions { display: flex; gap: var(--pad-xs); }
 
 @media (max-width: 900px) {
   .brief-grid { grid-template-columns: 1fr 1fr; }

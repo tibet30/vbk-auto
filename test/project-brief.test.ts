@@ -13,11 +13,41 @@ test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
 
   assert.equal(project.name, "太原2天1晚私家团");
   assert.deepEqual(project.product.sales, { productType: "domesticShort", productForm: "privateTour", splitGroup: false });
-  assert.deepEqual(project.product.basicInfo, {
-    supplierProductName: "太原2天1晚私家团", days: 2, nights: 1, meetingCity: "太原", destinationCity: "太原",
-  });
+  const basicInfo = project.product.basicInfo as Record<string, unknown>;
+  assert.equal(basicInfo.supplierProductName, "太原2天1晚私家团");
+  assert.equal(basicInfo.days, 2);
+  assert.equal(basicInfo.nights, 1);
+  assert.equal(basicInfo.meetingCity, "太原");
+  assert.equal(basicInfo.destinationCity, "太原");
   assert.match(project.messages[0].content, /目的地「太原」/);
   assert.match(project.messages[0].content, /请告诉我/);
+});
+
+test("新建项目自带供应商产品编号，运营可再编辑", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-code-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+  const basicInfo = project.product.basicInfo as Record<string, unknown>;
+
+  // 编号是自动录入的 schema 必填项，AI 被禁止写入，因此必须在建项目时就位，
+  // 否则「确认并保存草稿」永远无法启用。
+  assert.ok(typeof basicInfo.supplierProductCode === "string" && basicInfo.supplierProductCode.length > 0);
+  assert.match(String(basicInfo.supplierProductCode), /^[A-Z0-9-]+$/);
+
+  const updated = db.updateBasicInfoField(project.id, "supplierProductCode", "TY-REAL-001");
+  assert.equal((updated.product.basicInfo as Record<string, unknown>).supplierProductCode, "TY-REAL-001");
+});
+
+test("两个项目的供应商产品编号不重复", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-code-unique-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const first = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+  const second = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+
+  const codeOf = (project: typeof first) => (project.product.basicInfo as Record<string, unknown>).supplierProductCode;
+  assert.notEqual(codeOf(first), codeOf(second));
 });
 
 test("项目标题按天数自动换算晚数", async (t) => {

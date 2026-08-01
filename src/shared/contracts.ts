@@ -83,6 +83,16 @@ export interface MiniMaxConnectionTest {
   message: string;
 }
 
+export interface VehicleResourceMatch {
+  query: string;
+  city: string;
+  days: number;
+  dailyCost: number;
+  totalCost: number;
+  resourceGroupId: number;
+  resourceGroupName: string;
+}
+
 export interface VbkLoginStatus {
   loggedIn: boolean;
   message: string;
@@ -105,7 +115,10 @@ export interface VbkApi {
     readiness(id: string): Promise<ProjectReadiness>;
   };
   ai: { send(projectId: string, content: string): Promise<void> };
-  research: { accept(projectId: string, taskId: string, note?: string): Promise<void> };
+  research: {
+    accept(projectId: string, taskId: string, note?: string): Promise<void>;
+    resolveVehicleResource(projectId: string, taskId?: string): Promise<VehicleResourceMatch>;
+  };
   browser: {
     login(): Promise<void>;
     logout(): Promise<void>;

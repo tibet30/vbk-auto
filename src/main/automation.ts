@@ -12,9 +12,22 @@ import { VbkBrowser } from "./vbk-browser.js";
 const draftPhases = ["basic", "presentation", "itinerary", "package", "pricingInventory", "terms", "vehicleResource", "preflight"];
 
 export class DraftAutomation {
+  private running = new Set<string>();
+
   constructor(private db: VbkDatabase, private browser: VbkBrowser, private onUpdate: (project: ProjectDetail) => void) {}
 
   async start(projectId: string) {
+    // 同一项目并发录入会共用一个 Playwright 页面互相抢占，甚至创建出两个草稿。
+    if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
+    this.running.add(projectId);
+    try {
+      await this.run(projectId);
+    } finally {
+      this.running.delete(projectId);
+    }
+  }
+
+  private async run(projectId: string) {
     const project = this.db.getProject(projectId);
     if (!project) throw new Error("项目不存在");
     const product = parseProduct(project.product);
@@ -25,11 +38,26 @@ export class DraftAutomation {
     try {
       const page = await this.browser.page();
       let productId = project.productId;
+      run.currentPhase = "basic"; run.phases[0].status = "running";
       if (!productId) {
-        run.currentPhase = "basic"; run.phases[0].status = "running"; log("正在创建 VBK 产品草稿…");
-        await configureProductShell(page, product); productId = (await createProductShell(page)) as string; this.db.setProductId(projectId, productId); await fillAndSaveBasicInfo(page, product);
-        run.phases[0].status = "completed"; log(`产品草稿已创建：${productId}`);
-      } else { await openProductEditor(page, productId); run.phases[0].status = "completed"; }
+        log("正在创建 VBK 产品草稿…");
+        await configureProductShell(page, product);
+        productId = (await createProductShell(page)) as string;
+        this.db.setProductId(projectId, productId);
+        await fillAndSaveBasicInfo(page, product);
+        // 基本信息保存成功后才算本阶段完成；此前 productId 一落库，
+        // 重试就会直接跳过 basic，永远补不上那次失败的填写。
+        this.db.setBasicInfoSaved(projectId);
+        log(`产品草稿已创建：${productId}`);
+      } else if (!project.basicInfoSaved) {
+        log("上次基本信息未保存成功，正在重新填写…", "warning");
+        await openProductEditor(page, productId);
+        await fillAndSaveBasicInfo(page, product);
+        this.db.setBasicInfoSaved(projectId);
+      } else {
+        await openProductEditor(page, productId);
+      }
+      run.phases[0].status = "completed";
       const handlers: Record<string, () => Promise<unknown>> = {
         presentation: () => fillAndSavePresentation(page, product), itinerary: () => fillItineraryDraft(page, product), package: () => fillAndSavePackage(page, product),
         pricingInventory: () => fillAndSubmitPricingInventory(page, product, productId!), terms: () => fillAndSaveTerms(page, product),

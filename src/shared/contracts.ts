@@ -33,6 +33,8 @@ export interface ProjectDetail extends ProjectSummary {
   messages: ConversationMessage[];
   researchTasks: ResearchTask[];
   automation?: AutomationRun;
+  /** 基本信息是否已在 VBK 成功保存，决定重试时是否需要补跑 basic 阶段。 */
+  basicInfoSaved?: boolean;
 }
 
 export interface ConversationMessage {
@@ -124,6 +126,7 @@ export interface VbkApi {
     logout(): Promise<void>;
     status(refresh?: boolean): Promise<VbkLoginStatus>;
     navigate(url: string): Promise<void>;
+    openExternal(): Promise<void>;
     setBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
     setVisible(visible: boolean): Promise<void>;
   };

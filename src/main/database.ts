@@ -45,6 +45,9 @@ export class VbkDatabase {
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `);
+    // 已有用户的库里没有这一列，ALTER 失败即表示列已存在。
+    try { this.db.exec("ALTER TABLE projects ADD COLUMN basic_info_saved INTEGER NOT NULL DEFAULT 0"); }
+    catch { /* 列已存在 */ }
   }
 
   private normaliseStoredProducts() {
@@ -89,9 +92,14 @@ export class VbkDatabase {
         supplierProductName: name, supplierProductCode: newSupplierProductCode(),
         days, nights, meetingCity: destination, destinationCity: destination,
       },
+      operations: {
+        hotelSource: "nonPlatform",
+        hotelTier: "当地5钻酒店/-5",
+        mealsIncluded: false,
+      },
       itinerary: [],
     };
-    this.db.prepare("INSERT INTO projects VALUES(?,?,?,?,?,?,?)").run(id, name, "planning", null, JSON.stringify(product), createdAt, createdAt);
+    this.db.prepare("INSERT INTO projects(id,name,status,product_id,product_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(id, name, "planning", null, JSON.stringify(product), createdAt, createdAt);
     this.addMessage(id, "assistant", `已创建「${name}」。已带入项目上下文：目的地「${destination}」、产品形态「${formLabel}」、行程「${days}天${nights}晚」。请告诉我你希望生成或调整什么方案。`);
     return this.getProject(id)!;
   }
@@ -108,6 +116,7 @@ export class VbkDatabase {
       messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
       researchTasks: tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) })),
       automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
+      basicInfoSaved: Number(project.basic_info_saved) === 1,
     };
   }
 
@@ -178,5 +187,9 @@ export class VbkDatabase {
     this.db.prepare("INSERT INTO automation_runs(id,project_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at").run(run.id, projectId, JSON.stringify(run), now(), now()); this.touch(projectId);
   }
   setProductId(projectId: string, productId: string) { this.db.prepare("UPDATE projects SET product_id=?,updated_at=? WHERE id=?").run(productId, now(), projectId); }
+  // 基本信息在 VBK 保存成功后才置位，供重试判断是否需要补跑 basic 阶段。
+  setBasicInfoSaved(projectId: string, saved = true) {
+    this.db.prepare("UPDATE projects SET basic_info_saved=?,updated_at=? WHERE id=?").run(saved ? 1 : 0, now(), projectId);
+  }
   private touch(id: string) { this.db.prepare("UPDATE projects SET updated_at=? WHERE id=?").run(now(), id); }
 }

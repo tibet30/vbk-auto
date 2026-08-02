@@ -817,18 +817,6 @@ export function App() {
                   )}
                   <section className="product-section">
                     <div className="product-section-head">
-                      <span className="panel-num">A</span>
-                      <strong className="product-section-title">产品要素</strong>
-                    </div>
-                    <div className="product-grid">
-                      <Field label="产品名称" value={valueOf(basic, "supplierProductName")} />
-                      <Field label="目的地" value={valueOf(basic, "destinationCity")} />
-                      <Field label="行程" value={`${valueOf(basic, "days")} 天 ${valueOf(basic, "nights")} 晚 · ${itinerary.length} 天行程`} />
-                      <Field label="产品状态" value={statusLabel(project.status)} />
-                    </div>
-                  </section>
-                  <section className="product-section">
-                    <div className="product-section-head">
                       <span className="panel-num">B</span>
                       <strong className="product-section-title">核查任务</strong>
                       <span className="product-section-meta">

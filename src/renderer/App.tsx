@@ -701,6 +701,21 @@ export function App() {
                         <span className="review-copy-kicker">产品特点</span>
                         <p className="review-copy-feat">{valueOf(presentation, "features")}</p>
                       </div>
+                      <div className="review-copy-block">
+                        <span className="review-copy-kicker">推荐理由（3 条）</span>
+                        {Array.isArray(presentation.recommendations) && presentation.recommendations.length === 3 ? (
+                          <ul className="review-copy-reasons">
+                            {(presentation.recommendations as Array<{ category: string; text: string }>).map((r, index) => (
+                              <li key={index}>
+                                <strong>{r.category}</strong>
+                                <span>{r.text}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="section-empty">正在等待 AI 生成推荐理由…</p>
+                        )}
+                      </div>
                     </div>
                   </section>
                   <section className="product-section">

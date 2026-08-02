@@ -461,6 +461,28 @@ a:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--ai-teal) 6%, var(--surface));
 }
 
+.topbar-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  padding: 0;
+  background: transparent;
+  border: none;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.topbar-status-chip strong {
+  font-weight: 600;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-status-chip .dot { width: 6px; height: 6px; }
+
 .topbar-spacer { flex: 1; min-width: 0; }
 
 .preset-group {

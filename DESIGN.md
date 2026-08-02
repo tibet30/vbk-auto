@@ -20,7 +20,7 @@ colors:
 layout:
   base-unit: 4px
   rail-width: 56px
-  topbar-height: 48px
+  topbar-height: 44px
   panel-padding: 16px
   control-height: 36px
   divider-width: 6px
@@ -36,14 +36,14 @@ VBK Desktop inherits Kaimu's compact shadcn-style light production workspace. It
 
 ## Interaction Thesis
 
-The application is one continuous workspace whose center of gravity moves with the job:
+The application is one continuous workspace expressed as two freely switchable stages:
 
-- Planning: the AI workspace owns roughly two thirds of the width while the signed-in VBK browser stays visible and narrow.
-- Resolution: conversation and structured product evidence share the AI side; VBK remains available for live platform lookups.
-- Execution: the divider moves left, the VBK browser becomes dominant, and a narrow automation rail reports progress and exceptions.
-- Users may drag the divider at any time. Preset focus controls restore “AI优先”, “均衡”, or “VBK优先”.
+- Step 1, “AI 对话与产品审查”: conversation and the complete structured product review stay side by side. AI receives slightly more width, while readiness and blocking items remain continuously visible.
+- Step 2, “审查结果与 VBK 录入”: a compact review-result rail keeps the approved facts, remaining blockers, and safety boundary visible while the signed-in VBK page becomes dominant.
+- A persistent two-step navigator shows completion, blockers, active automation, and saved-draft status in text as well as color. Operators can switch stages at any time without losing conversation, review, task, or browser state.
+- Entering Step 2 early is allowed for inspection and live platform lookup. Saving remains disabled until the product review passes.
 
-The browser is not a modal or separate application window. It is a first-class right-hand workspace that keeps login state, page location, and automation progress visible.
+The browser is not a modal or separate application window. It is a first-class Step 2 workspace that keeps login state, page location, research tasks, and automation progress visible without covering Step 1.
 
 ## Visual Language
 
@@ -71,12 +71,12 @@ The browser is not a modal or separate application window. It is a first-class r
 ## Application Shell
 
 - A 56px global rail holds the VBK Desktop mark, project history, resource library, execution records, settings, and account switcher.
-- A 48px top bar shows the current product, VBK login/account state, research status, and focus presets.
-- The main area is a draggable split view: AI workspace left, embedded VBK browser right.
-- The divider has a visible grab affordance and keyboard-accessible resizing.
+- A 44px top bar shows the current product, VBK login/account state, readiness, and the safe save-draft action.
+- Below it, a persistent two-step progress navigator controls which stage is visible and explains each stage's current state.
+- The active stage contains exactly two connected work areas: AI plus full review in Step 1; review result plus embedded VBK browser in Step 2.
 - Panel headers remain fixed while their content scrolls independently.
 - Non-detail pages such as the workbench home and product list use the shared centered content width: max `980px` with 16px side gutters at narrow sizes.
-- Product detail is the exception: it should use the full available main area for the AI, product review, and VBK browser split workspace.
+- Product detail is the exception: it uses the full available main area for the current two-panel stage. At narrow widths, those two panels stack; the inactive stage is not rendered.
 
 ## AI Workspace
 
@@ -104,7 +104,7 @@ The browser is not a modal or separate application window. It is a first-class r
 
 ## Motion
 
-- Use short 160–280ms transitions for divider presets, panel changes, and newly resolved fields.
+- Use short 160–280ms transitions for stage changes, progress state, and newly resolved fields.
 - Research results reveal once with a subtle vertical fade.
 - Avoid pulsing surfaces except a tiny active-task indicator.
 - Respect `prefers-reduced-motion`.

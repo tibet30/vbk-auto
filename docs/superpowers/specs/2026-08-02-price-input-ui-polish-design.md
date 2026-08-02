@@ -35,13 +35,12 @@ The goal: keep numeric semantics identical (same `inputMode`, `step`, `min`, val
 
 ### 1. `.manual-input-wrap` (shared primitive)
 
-Replace the current 2-column `auto minmax(0,1fr)` grid with a 3-track grid `auto 1px minmax(0,1fr)` and add a vertical divider after the `¥` cell.
+Keep the existing 2-track `auto minmax(0, 1fr)` grid. The divider is drawn by the left cell, not by an extra grid track, so no empty DOM cell is needed.
 
 - Left cell: `¥` glyph.
   - `padding-inline: 8px`, color `var(--muted-foreground)`, `font-variant-numeric: tabular-nums`.
   - `border-inline-end: 1px solid var(--border)` to draw the divider via the cell, not the wrapper.
   - Keeps the glyph anchored regardless of input width or caret position.
-- 1px column: empty spacer to enforce the divider line visually even if the border collapses; in practice the cell's `border-inline-end` does the work — keep `grid-template-columns` simple as `auto minmax(0, 1fr)` and put the divider via the cell border (alternative considered: explicit `1px` track — picked cell border to avoid a stray empty cell and to keep DOM small).
 - Right cell: input.
   - Hide native spinner via `appearance: none` and the WebKit pseudo-element overrides. Firefox respects `appearance: none` on `type=number` (per MDN); combined rules cover all three engines.
   - Keep existing transparent border, focus-visible styling unchanged.

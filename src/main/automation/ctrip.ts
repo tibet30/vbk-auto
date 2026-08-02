@@ -11,8 +11,41 @@ import {
   productEditorUrl,
   productSectionUrl,
 } from "./constants.js";
+import { RECOMMENDATION_CATEGORIES } from "./schema.js";
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export interface RecommendationPlanStep {
+  index: number;
+  category: string;
+  text: string;
+}
+
+export function buildRecommendationReasonsPlan(
+  recommendations: ReadonlyArray<{ category: string; text: string }>,
+): RecommendationPlanStep[] {
+  if (!Array.isArray(recommendations) || recommendations.length !== 3) {
+    throw new Error("推荐理由必须为 3 项，请先在产品草稿中维护。");
+  }
+  const seen = new Set<string>();
+  const plan: RecommendationPlanStep[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const item = recommendations[i]!;
+    const { category, text } = item;
+    if (!RECOMMENDATION_CATEGORIES.includes(category)) {
+      throw new Error(`推荐理由分类「${category}」不在白名单。`);
+    }
+    if (!text || !text.trim()) {
+      throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
+    }
+    if (seen.has(category)) {
+      throw new Error(`推荐理由分类「${category}」重复。`);
+    }
+    seen.add(category);
+    plan.push({ index: i, category, text });
+  }
+  return plan;
+}
 
 async function assertCount(locator, expected, description) {
   const count = await locator.count();
@@ -167,6 +200,53 @@ export async function fillAndSaveBasicInfo(page, product) {
   return clickSafeSave(page, ["保存", "保存并下一步"]);
 }
 
+async function fillRecommendationReasons(page: Page, recommendations: Array<{ category: string; text: string }>) {
+  const plan = buildRecommendationReasonsPlan(recommendations);
+
+  // 锚点 label「推荐理由」定位最近 form 区域；3 个 combobox + 3 个 textarea。
+  const groups = page.getByText("推荐理由", { exact: true });
+  const groupCount = await groups.count();
+  if (groupCount < 3) {
+    // 退化：单 combobox + 3 textarea 形态
+    const combobox = page.locator(".ant-select-selection").filter({ hasText: "" }).first();
+    // 只选第 1 项分类
+    await combobox.click();
+    await delay(400);
+    const options = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
+    const texts = (await options.allTextContents()).map((t) => t.trim());
+    const idx = texts.indexOf(plan[0]!.category);
+    if (idx < 0) throw new Error(`推荐理由下拉未找到「${plan[0]!.category}」；可选：${texts.join("、")}`);
+    await options.nth(idx).click();
+    // 填 3 个 textarea
+    const textareas = page.locator('textarea[placeholder*="推荐"]');
+    const taCount = await textareas.count();
+    if (taCount < 3) throw new Error(`推荐语 textarea 数量不足：期望 3，实际 ${taCount}`);
+    for (let i = 0; i < 3; i += 1) await textareas.nth(i).fill(plan[i]!.text);
+    return;
+  }
+
+  // 主流形态：3 个独立 form-item，每个含 1 个 combobox + 1 个 textarea
+  for (let i = 0; i < 3; i += 1) {
+    const label = groups.nth(i);
+    const formItem = label.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
+    const combobox = formItem.getByRole("combobox");
+    await assertCount(combobox, 1, `第 ${i + 1} 组推荐理由 combobox`);
+    await combobox.click();
+    await delay(400);
+    const options = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option");
+    await options.first().waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+    const texts = (await options.allTextContents()).map((t) => t.trim());
+    const idx = texts.indexOf(plan[i]!.category);
+    if (idx < 0) throw new Error(`第 ${i + 1} 组推荐理由未找到「${plan[i]!.category}」；可选：${texts.join("、")}`);
+    await options.nth(idx).click();
+    await delay(300);
+
+    const textarea = formItem.locator('textarea[placeholder*="推荐"]');
+    await assertCount(textarea, 1, `第 ${i + 1} 组推荐语 textarea`);
+    await textarea.fill(plan[i]!.text);
+  }
+}
+
 async function fillFirstVisible(locator, value, description) {
   const count = await locator.count();
   for (let index = 0; index < count; index += 1) {
@@ -182,6 +262,9 @@ async function fillFirstVisible(locator, value, description) {
 export async function fillAndSavePresentation(page, product) {
   if (!product.presentation) return { skipped: "产品数据未配置图文信息" };
   await clickSection(page, "图文信息");
+  if (product.presentation.recommendations?.length === 3) {
+    await fillRecommendationReasons(page, product.presentation.recommendations);
+  }
   await fillFirstVisible(
     page.locator('textarea[placeholder*="推荐"], textarea'),
     product.presentation.recommendation,

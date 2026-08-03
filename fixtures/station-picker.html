@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>station-picker-test</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", sans-serif; padding: 16px; }
+  .ant-modal { position: fixed; top: 60px; left: 200px; width: 780px; background: #fff; border: 1px solid #ccc; box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 1000; padding: 12px; }
+  .ant-modal-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+  .ant-form-item { display: flex; margin-bottom: 12px; align-items: center; }
+  .ant-form-item-label { width: 100px; }
+  .ant-select { flex: 1; }
+  .ant-select-selection { padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; min-height: 28px; cursor: text; }
+  .ant-select-selection--multiple .ant-select-selection__rendered { display: flex; align-items: center; }
+  .ant-select-search__field { border: 0; outline: 0; width: 200px; }
+  .ant-select-selection__choice { display: inline-flex; align-items: center; background: #e6f7ff; border: 1px solid #91d5ff; padding: 0 4px; margin-right: 4px; border-radius: 2px; }
+  .ant-select-selection__choice__content { padding: 0 4px; }
+  .ant-select-selection__choice__remove { color: #999; cursor: pointer; padding: 0 4px; }
+  .ant-select-selection__placeholder { color: #999; }
+  .ant-select-dropdown { position: absolute; background: #fff; border: 1px solid #ccc; box-shadow: 0 2px 8px rgba(0,0,0,0.15); min-width: 200px; max-height: 240px; overflow-y: auto; z-index: 1100; }
+  .ant-select-dropdown--multiple { padding: 4px 0; }
+  .ant-select-dropdown-hidden { display: none; }
+  .ant-select-dropdown-menu { list-style: none; margin: 0; padding: 0; }
+  .ant-select-dropdown-menu-item { padding: 4px 12px; cursor: pointer; }
+  .ant-select-dropdown-menu-item:hover { background: #f5f5f5; }
+  .ant-select-dropdown-menu-item-disabled { color: #ccc; cursor: not-allowed; }
+  .ant-select-dropdown-menu-item-active { background: #e6f7ff; }
+  .ant-select-dropdown-menu-item-selected { font-weight: 600; }
+  .ant-modal-footer { margin-top: 12px; text-align: right; }
+  .ant-btn { padding: 4px 16px; border-radius: 4px; cursor: pointer; }
+  .ant-btn-primary { background: #1890ff; color: #fff; border: 1px solid #1890ff; margin-left: 8px; }
+  td-day-card { display: block; margin: 12px 0; }
+  .out { margin-top: 24px; padding: 12px; background: #f0f0f0; font-family: monospace; }
+  pre { margin: 0; }
+</style>
+</head>
+<body>
+  <h2>测试说明</h2>
+  <p>本页模拟 VBK 接送站弹窗 DOM。`selectStationAddress` 应能在机场搜索框（nth=0）输入"大同"并选「大同云冈国际机场」、在火车站搜索框（nth=1）输入"大同"并选「大同」。</p>
+
+  <td-day-card class="td-day-card" data-testid="pickup-card">
+    <input class="ant-input" placeholder="请选择" data-testid="station-input" />
+  </td-day-card>
+
+  <div class="ant-modal" role="dialog" data-testid="station-dialog" style="display: none;">
+    <div class="ant-modal-content">
+      <div class="ant-modal-title" id="rcDialogTitle1">请选择机场/火车站</div>
+      <div class="ant-modal-body">
+        <form class="ant-form ant-form-horizontal">
+          <div class="ant-form-item">
+            <div class="ant-form-item-label"><label title="机场">机场</label></div>
+            <div class="ant-form-item-control-wrapper">
+              <div class="ant-form-item-control">
+                <span class="ant-form-item-children">
+                  <div class="ant-select ant-select-enabled">
+                    <div class="ant-select-selection ant-select-selection--multiple" role="combobox" aria-autocomplete="list" data-testid="airport-combo">
+                      <div class="ant-select-selection__rendered">
+                        <div class="ant-select-selection__placeholder">请输入</div>
+                        <ul><li class="ant-select-search ant-select-search--inline">
+                          <div class="ant-select-search__field__wrap">
+                            <input autocomplete="off" class="ant-select-search__field" data-testid="airport-input" />
+                          </div>
+                        </li></ul>
+                      </div>
+                    </div>
+                  </div>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="ant-form-item">
+            <div class="ant-form-item-label"><label title="火车站">火车站</label></div>
+            <div class="ant-form-item-control-wrapper">
+              <div class="ant-form-item-control">
+                <span class="ant-form-item-children">
+                  <div class="ant-select ant-select-enabled">
+                    <div class="ant-select-selection ant-select-selection--multiple" role="combobox" aria-autocomplete="list" data-testid="train-combo">
+                      <div class="ant-select-selection__rendered">
+                        <div class="ant-select-selection__placeholder">请输入</div>
+                        <ul><li class="ant-select-search ant-select-search--inline">
+                          <div class="ant-select-search__field__wrap">
+                            <input autocomplete="off" class="ant-select-search__field" data-testid="train-input" />
+                          </div>
+                        </li></ul>
+                      </div>
+                    </div>
+                  </div>
+                </span>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="ant-modal-footer">
+        <button type="button" class="ant-btn" data-testid="cancel-btn"><span>取消</span></button>
+        <button type="button" class="ant-btn ant-btn-primary" data-testid="confirm-btn"><span>确定</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="ant-select-dropdown ant-select-dropdown--multiple ant-select-dropdown-placement-bottomLeft" data-testid="dropdown" style="display: none; left: 600px; top: 300px;">
+    <ul class="ant-select-dropdown-menu ant-select-dropdown-menu-root ant-select-dropdown-menu-vertical" data-testid="dropdown-menu"></ul>
+  </div>
+
+  <div class="out">
+    <strong>station-input 当前值：</strong>
+    <pre id="out-value">(未填)</pre>
+  </div>
+
+  <script>
+    // 模拟 VBK 接送站数据源
+    const STATION_DB = {
+      airport: { '大同': ['大同云冈国际机场'], '太原': ['太原武宿国际机场'] },
+      train: {
+        '大同': ['大同', '大同南', '平型关', '阳高南', '云彩岭', '天镇', '大同町'],
+        '太原': ['太原', '太原南', '太原东'],
+      },
+    };
+    // 暴露出 STATION_DB 让 Playwright 测试可以注入多候选项
+    window.STATION_DB = STATION_DB;
+
+    // 维护当前 state
+    const state = { airport: [], train: [] };
+
+    function openDialog() {
+      document.querySelector('[data-testid="station-dialog"]').style.display = 'block';
+      render();
+    }
+    function closeDialog() {
+      document.querySelector('[data-testid="station-dialog"]').style.display = 'none';
+      document.querySelector('[data-testid="dropdown"]').style.display = 'none';
+    }
+    function render() {
+      const aCombo = document.querySelector('[data-testid="airport-combo"]');
+      const tCombo = document.querySelector('[data-testid="train-combo"]');
+      const renderCombo = (combo, items, input) => {
+        const placeholder = combo.querySelector('.ant-select-selection__placeholder');
+        const inp = combo.querySelector('.ant-select-search__field');
+        if (items.length) {
+          placeholder.style.display = 'none';
+          let tags = combo.querySelectorAll('.ant-select-selection__choice');
+          tags.forEach(t => t.remove());
+          items.forEach(item => {
+            const tag = document.createElement('li');
+            tag.className = 'ant-select-selection__choice';
+            tag.innerHTML = `<span class="ant-select-selection__choice__content">${item}</span><span class="ant-select-selection__choice__remove" data-action="remove">×</span>`;
+            combo.querySelector('.ant-select-selection__rendered ul').prepend(tag);
+          });
+        } else {
+          placeholder.style.display = 'block';
+          let tags = combo.querySelectorAll('.ant-select-selection__choice');
+          tags.forEach(t => t.remove());
+        }
+      };
+      renderCombo(aCombo, state.airport);
+      renderCombo(tCombo, state.train);
+      // 更新外部 input 显示——模拟 VBK 提交接送站状态后同步 input value
+      const out = [state.airport.join('、'), state.train.join('、')].filter(Boolean).join('、');
+      document.getElementById('out-value').textContent = out || '(未填)';
+      const stationInput = document.querySelector('[data-testid="station-input"]');
+      // 模拟 VBK Ant Design Form: value 属性同步
+      stationInput.value = out;
+      stationInput.setAttribute('value', out);
+    }
+
+    function showDropdown(items, source) {
+      const dd = document.querySelector('[data-testid="dropdown"]');
+      const menu = document.querySelector('[data-testid="dropdown-menu"]');
+      menu.innerHTML = '';
+      if (items.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'ant-select-dropdown-menu-item ant-select-dropdown-menu-item-disabled';
+        li.textContent = 'Not Found';
+        menu.appendChild(li);
+      } else {
+        items.forEach(text => {
+          const li = document.createElement('li');
+          li.className = 'ant-select-dropdown-menu-item';
+          li.textContent = text;
+          li.dataset.text = text;
+          menu.appendChild(li);
+        });
+      }
+      dd.style.display = 'block';
+      dd.dataset.source = source;
+    }
+    function hideDropdown() {
+      const dd = document.querySelector('[data-testid="dropdown"]');
+      dd.style.display = 'none';
+    }
+    function currentFocusedField() {
+      return document.activeElement === document.querySelector('[data-testid="airport-input"]') ? 'airport'
+        : document.activeElement === document.querySelector('[data-testid="train-input"]') ? 'train'
+        : null;
+    }
+
+    // 监听 input 事件：搜索 + 打开 dropdown
+    document.querySelector('[data-testid="airport-input"]').addEventListener('input', (e) => {
+      const q = e.target.value;
+      const items = (STATION_DB.airport[q] || []);
+      showDropdown(items, 'airport');
+    });
+    document.querySelector('[data-testid="train-input"]').addEventListener('input', (e) => {
+      const q = e.target.value;
+      const items = (STATION_DB.train[q] || []);
+      showDropdown(items, 'train');
+    });
+
+    // 监听 dropdown item click
+    document.querySelector('[data-testid="dropdown-menu"]').addEventListener('click', (e) => {
+      const item = e.target.closest('.ant-select-dropdown-menu-item');
+      if (!item || item.classList.contains('ant-select-dropdown-menu-item-disabled')) return;
+      const source = document.querySelector('[data-testid="dropdown"]').dataset.source;
+      const text = item.dataset.text;
+      if (source === 'airport') {
+        if (!state.airport.includes(text)) state.airport.push(text);
+        document.querySelector('[data-testid="airport-input"]').value = '';
+      } else if (source === 'train') {
+        if (!state.train.includes(text)) state.train.push(text);
+        document.querySelector('[data-testid="train-input"]').value = '';
+      }
+      hideDropdown();
+      render();
+    });
+
+    // 监听 combo click：open dialog（首次）
+    document.querySelector('[data-testid="station-input"]').addEventListener('click', () => {
+      openDialog();
+    });
+    // 点击 combo → focus search field
+    document.querySelector('[data-testid="airport-combo"]').addEventListener('click', (e) => {
+      if (e.target.closest('.ant-select-selection__choice__remove')) {
+        // 删除 tag
+        const text = e.target.closest('.ant-select-selection__choice').querySelector('.ant-select-selection__choice__content').textContent;
+        state.airport = state.airport.filter(t => t !== text);
+        render();
+        return;
+      }
+      document.querySelector('[data-testid="airport-input"]').focus();
+    });
+    document.querySelector('[data-testid="train-combo"]').addEventListener('click', (e) => {
+      if (e.target.closest('.ant-select-selection__choice__remove')) {
+        const text = e.target.closest('.ant-select-selection__choice').querySelector('.ant-select-selection__choice__content').textContent;
+        state.train = state.train.filter(t => t !== text);
+        render();
+        return;
+      }
+      document.querySelector('[data-testid="train-input"]').focus();
+    });
+
+    // 取消/确定
+    document.querySelector('[data-testid="cancel-btn"]').addEventListener('click', closeDialog);
+    document.querySelector('[data-testid="confirm-btn"]').addEventListener('click', () => {
+      // 确认时同步外部 input value（模拟 VBK 提交时由 Form 写回的合约）
+      const out = [state.airport.join('、'), state.train.join('、')].filter(Boolean).join('、');
+      const stationInput = document.querySelector('[data-testid="station-input"]');
+      stationInput.value = out;
+      stationInput.setAttribute('value', out);
+      document.getElementById('out-value').textContent = out || '(未填)';
+      closeDialog();
+    });
+  </script>
+</body>
+</html>

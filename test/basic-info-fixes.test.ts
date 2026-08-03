@@ -112,12 +112,23 @@ test("shouldRefillBasicInfo 任意 productId 已存在都重跑 basic", () => {
   assert.equal(result.refill, true);
 });
 
-test("阶段重试会先重新录入产品信息，并由通用 saveThenAdvance 推进", async () => {
+test("阶段重试会在当前页面继续，openProductEditor 带 stayOnCurrentTab 不拽回基本信息", async () => {
   const source = await fs.readFile("src/main/automation.ts", "utf8");
   const ctripSource = await fs.readFile("src/main/automation/ctrip.ts", "utf8");
 
-  assert.match(source, /重试 \$\{retryFrom\} 前，正在重新录入并验证产品信息/);
-  assert.match(source, /fillAndSaveBasicInfo\(page, product, butlerSelection, \{ servicePhone, keySpots, scenicSpotLogs \}\)/);
+  // 用户偏好「在当前页面去重试」：中间阶段重试不再调 openProductEditor
+  // 拽回「基本信息」 tab。openProductEditor 必须接受 stayOnCurrentTab 选项
+  // 并在 true 时不调用 ensureBasicInfoTabVisible。
+  assert.match(source, /openProductEditor\(page, productId!,\s*\{\s*stayOnCurrentTab:\s*true\s*\}\)/);
+  assert.match(ctripSource, /export async function openProductEditor\(page, productId, options = \{\}\)/);
+  assert.match(ctripSource, /const \{ stayOnCurrentTab = false \} = options;/);
+  assert.match(ctripSource, /if \(stayOnCurrentTab\)\s*\{\s*return;\s*\}/);
+  assert.doesNotMatch(
+    source,
+    /重试 \$\{retryFrom\} 前，正在重新录入并验证产品信息/,
+    "中间阶段重试不再走「重新录入产品信息」路径，偏好当前页面去重试",
+  );
+  assert.match(source, /fillAndSaveBasicInfo\(page, product, butlerSelection, \{ servicePhone, keySpots, scenicSpotLogs, disambiguator[^}]* \}\)/);
   // 完成门禁移到通用 saveThenAdvance helper；旧 basic-only clickBasicInfoNextStep
   // 与 waitForSectionEnabled / clickSection 的契约已删除，由 helper 统一负责
   // 「精确下一步 + 保存成功提示 + 两种成功门禁」。
@@ -130,10 +141,11 @@ test("阶段重试会先重新录入产品信息，并由通用 saveThenAdvance 
 });
 
 test("retryFrom>0 也由 basic runner 包裹，else 不再直接 fillAndSaveBasicInfo/setBasicInfoSaved", async () => {
-  // 锁死行为：retryFrom>0 分支只做 openProductEditor + 精确日志，不允许
-  // 在 else 块里直接调用 fillAndSaveBasicInfo 或 setBasicInfoSaved，
-  // 也不允许写 basicInfoSaved = true；真正的 basic 填写统一交给下方
-  // runPhaseWithRecovery(makeCtx("basic", basicExecute, 0)) 这一处。
+  // 锁死行为：retryFrom>0 分支只做 openProductEditor（带 stayOnCurrentTab）
+  // + 精确日志，不允许在 else 块里直接调用 fillAndSaveBasicInfo 或
+  // setBasicInfoSaved，也不允许写 basicInfoSaved = true；真正的 basic
+  // 填写统一交给下方 runPhaseWithRecovery(makeCtx("basic", basicExecute, 0))
+  // 这一处。
   const source = await fs.readFile("src/main/automation.ts", "utf8");
 
   // 切出 retryFrom>0 的 else 块：从 `} else {`（紧跟在 startIndex === 0 if 之后）
@@ -154,17 +166,17 @@ test("retryFrom>0 也由 basic runner 包裹，else 不再直接 fillAndSaveBasi
   assert.ok(elseEnd > 0, "无法定位 else 块的结束花括号");
   const elseBody = source.slice(elseStart, elseEnd);
 
-  // else 块必须保留精确日志
+  // else 块必须调 openProductEditor 且带上 stayOnCurrentTab=true
   assert.match(
     elseBody,
-    /重试 \$\{retryFrom\} 前，正在重新录入并验证产品信息/,
-    "else 必须保留「重试 ${retryFrom} 前…」精确日志",
+    /openProductEditor\(page, productId!,\s*\{\s*stayOnCurrentTab:\s*true\s*\}\)/,
+    "else 必须用 stayOnCurrentTab 调 openProductEditor，偏好当前页面去重试",
   );
-  // else 块必须先 openProductEditor
+  // 保留「已从 ${retryFrom} 阶段继续录入」日志
   assert.match(
     elseBody,
-    /openProductEditor\(page, productId!\)/,
-    "else 必须调用 openProductEditor 打开现有草稿",
+    /已从 \$\{retryFrom\} 阶段继续录入（当前页面）/,
+    "else 必须记录「从 ${retryFrom} 阶段继续录入（当前页面）」日志",
   );
 
   // else 块内禁止：直接 fillAndSaveBasicInfo、setBasicInfoSaved、basicInfoSaved = true
@@ -592,6 +604,38 @@ test("pickKeySpotsFromItinerary 行程不足时返回实际能匹配的数量", 
   assert.deepEqual(pickKeySpotsFromItinerary(product, 3), ["晋祠博物馆"]);
 });
 
+test("pickKeySpotsFromItinerary 净化「游览」后缀 + 接团/送团/自由活动过滤", () => {
+  // 来自「大同 2 天 1 晚」实际行程：第一个是接团，不应该是景点；
+  // 「云冈石窟游览」「华严寺游览」「九龙壁游览」都是加了动作后缀的口述写法，
+  // VBK 景点下拉里只有「云冈石窟」「华严寺」「九龙壁」。需要去掉「游览」才
+  // 能命中。
+  const product = productFixture({
+    itinerary: [
+      { day: 1, title: "第一天", spots: ["大同站/大同南站接团", "云冈石窟游览", "华严寺游览", "自由活动·大同古城"] },
+      { day: 2, title: "第二天", spots: ["九龙壁游览", "大同古城墙", "善化寺游览", "古城自由活动", "送团返程"] },
+    ],
+  });
+  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), [
+    "云冈石窟",
+    "华严寺",
+    "九龙壁",
+  ]);
+});
+
+test("pickKeySpotsFromItinerary 别名括号（双塔寺）等也参与推荐语匹配", () => {
+  const product = productFixture({
+    itinerary: [
+      { day: 1, title: "第一天", spots: ["永祚寺（双塔寺）"] },
+    ],
+    presentation: {
+      recommendation: "永祚寺双塔祈福",
+      features: "",
+    },
+  });
+  // 「永祚寺（双塔寺）」净化后为「永祚寺」，括号别名「双塔寺」用于匹配 corpus。
+  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), ["永祚寺"]);
+});
+
 test("pickKeySpotsFromItinerary 大小写不敏感去重", () => {
   const product = productFixture({
     itinerary: [
@@ -649,6 +693,9 @@ test("fillScenicAreaSpots 存在并以严格相等匹配、不默认第一项", 
   assert.match(body, /options\.nth\(index\)\.innerText/);
   assert.match(body, /景点“\$\{spot\}”已选择但未成功添加/);
   assert.match(body, /await combobox\.click\(\)/);
+  // 数据风险弹窗必须能跳过该景点，遵用户指示“遇到数据风险就跳过该景点”。
+  assert.match(body, /dismissDataRiskDialog/);
+  assert.match(body, /数据风险弹窗.*跳过该景点/);
   assert.doesNotMatch(body, /combobox\.locator\("\.ant-select-selection"\)/);
   assert.doesNotMatch(body, /type\("中国"/);
   assert.doesNotMatch(body, /chooseExact\(comboboxes\.nth\(1\)/, "国内景点无需重复选择省份");
@@ -744,12 +791,13 @@ test("fillBasicInfo 在省份非空时给两处城市都传中国，且 fallback
   const end = source.indexOf("\nasync function fillScenicAreaProvince", start);
   const body = source.slice(start, end);
   // 两处 fillCitySelect 必须都拿到 preferredCountry 形参（由 info.province 派生）。
+  // 后期会追加 5th 参数（AI 上下文）；这里只检查形参出现，不限位。
   const matches = body.match(/fillCitySelect\([^)]+\)/g) || [];
   assert.ok(matches.length >= 2, "fillBasicInfo 必须调用 fillCitySelect 至少两次");
   for (const call of matches) {
     assert.match(
       call,
-      /,\s*preferredCountry\s*\)/,
+      /,\s*preferredCountry\b/,
       `fillCitySelect 必须显式传 preferredCountry 形参：${call}`,
     );
   }
@@ -1346,4 +1394,119 @@ test("状态机 10：presentation / itinerary 不调用「提交审核并下一�
   assert.ok(!presBody.includes("submitCurrentSectionAndNext"), "fillAndSavePresentation 禁止调用 submitCurrentSectionAndNext");
   assert.ok(!itinBody.includes("提交审核并下一步"), "fillItineraryDraft 禁止匹配「提交审核并下一步」");
   assert.ok(!itinBody.includes("submitCurrentSectionAndNext"), "fillItineraryDraft 禁止调用 submitCurrentSectionAndNext");
+});
+
+test("matchDropdownOption「唯一可用项」直接选，不依赖精确也不依赖 AI", async () => {
+  const { matchDropdownOption } = await import("../src/main/automation/dropdown-match.js");
+
+  // 1. 唯一可用项（去除 Not Found 这种装饰文案）
+  const r1 = await matchDropdownOption(
+    [{ text: "Not Found" }, { text: "大同站" }, { text: "" }],
+    [false, false, false],
+    ["大同"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    null,
+  );
+  assert.deepEqual(r1, { index: 1, text: "大同站", source: "single" }, "唯一可用项必须被直接选中");
+
+  // 2. 零可用项 → null
+  const r2 = await matchDropdownOption(
+    [{ text: "Not Found" }, { text: "" }],
+    [false, false],
+    ["大同"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    null,
+  );
+  assert.equal(r2, null, "无可用项必须返回 null");
+
+  // 3. 多项 + aliases 命中 → exact
+  const r3 = await matchDropdownOption(
+    [{ text: "大同站" }, { text: "大同南站" }, { text: "大同北站" }],
+    [false, false, false],
+    ["大同站", "大同", "大同南站"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    null,
+  );
+  assert.deepEqual(r3, { index: 0, text: "大同站", source: "exact" }, "aliases 命中应走 exact");
+
+  // 4. 多项 + aliases 未命中 + 有 AI → AI 兜底
+  let aiCalled = false;
+  const fakeAi = async (input: { kind: string; desired: string; candidates: Array<{ text: string }> }) => {
+    aiCalled = true;
+    return { pickedText: input.candidates[1].text, reasoning: "mock" };
+  };
+  const r4 = await matchDropdownOption(
+    [{ text: "云冈机场" }, { text: "大同站" }, { text: "云冈石窟" }],
+    [false, false, false],
+    ["大同"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    fakeAi,
+  );
+  assert.ok(aiCalled, "多项未命中应调 AI");
+  assert.deepEqual(r4, { index: 1, text: "大同站", source: "ai", reasoning: "mock" }, "AI 选中应返回 ai 源");
+
+  // 5. 多项 + 仅有境外项 → AI 候选为空 → null（不让 AI 误中境外）
+  const r5 = await matchDropdownOption(
+    [{ text: "朝鲜-大同" }, { text: "韩国-大同" }],
+    [false, false],
+    ["大同"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    async () => ({ pickedText: "朝鲜-大同", reasoning: "should not be called" }),
+  );
+  assert.equal(r5, null, "仅有境外项时不允许返回任何选项");
+
+  // 6. AI 抛错 → null（不拖崩上游）
+  const r6 = await matchDropdownOption(
+    [{ text: "云冈机场" }, { text: "云冈石窟" }],
+    [false, false],
+    ["大同"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    async () => { throw new Error("network down"); },
+  );
+  assert.equal(r6, null, "AI 异常必须降级为 null");
+
+  // 7. disabled 唯一项不能被选中（避免误中「不可用」项）
+  const r7 = await matchDropdownOption(
+    [{ text: "大同站" }],
+    [true],
+    ["大同"],
+    { kind: "station", desired: "大同", product: {}, description: "接送站" },
+    null,
+  );
+  assert.equal(r7, null, "唯一项被 disabled 时不能返回");
+});
+test("closeBlockingDialogs / safeClick helper 已在 ctrip.ts 中定义", async () => {
+  const source = await fs.readFile(ctripSourcePath, "utf8");
+  // 通用 helper：扫页面上所有挡路弹窗并关掉，供 safeClick 在 click 失败后自愈。
+  assert.match(source, /async function closeBlockingDialogs\(/);
+  assert.match(source, /\.ant-modal-wrap:not\(\.ant-modal-wrap-hidden\) \.ant-modal/);
+  assert.match(source, /\.ant-drawer-open \.ant-drawer-content/);
+  assert.match(source, /Escape/);
+  // safeClick：先尝试点，失败再关弹窗重试（不要在点之前关，会把刚开的弹窗关掉）。
+  assert.match(source, /async function safeClick\(/);
+  assert.match(source, /closeBlockingDialogs\(page\)\.catch\(\(\) => false\)/);
+  // selectStationAddress 必须用上 safeClick 点接送站输入框与确定按钮。
+  assert.match(source, /await safeClick\(page, confirm, \{ force: true \}\)/);
+  assert.match(source, /await safeClick\(page, addressInput\.first\(\)\)/);
+  // 【重要】selectStationAddress 运行在接送站弹窗内部，不能调
+  // closeBlockingDialogs。closeBlockingDialogs 会把 role=dialog 的弹窗
+  // 自己都关掉（包括接送站），让后续 click 超时。锁定该项设计：函数体内
+  // 不允许再调 closeBlockingDialogs。锁定方式：去掉注释后检索「closeBlockingDialogs」
+  // 必须为 0。
+  const fnStart = source.indexOf("export async function selectStationAddress");
+  const fnEnd = source.indexOf("\nasync function fillPickupAndDropoff", fnStart);
+  assert.ok(fnStart >= 0 && fnEnd > fnStart, "selectStationAddress 区间定位失败");
+  // 去掉所有行注释再检索：单行 // 整行去掉
+  const fnBodyNoComments = source
+    .slice(fnStart, fnEnd)
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"))
+    .join("\n");
+  assert.equal(
+    (fnBodyNoComments.match(/closeBlockingDialogs/g) || []).length,
+    0,
+    "selectStationAddress 内部不允许再调 closeBlockingDialogs（会自关接送站弹窗）",
+  );
+  // 退路为 collapseOverlayTooltips（Escape）。
+  assert.match(fnBodyNoComments, /collapseOverlayTooltips/);
 });

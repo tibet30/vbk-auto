@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "./schema.js";
+import { breakpoint } from "./debug.js";
+import { matchDropdownOption } from "./dropdown-match.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -59,6 +61,34 @@ export function buildRecommendationReasonsPlan(
   return plan;
 }
 
+/**
+ * 轮询检查 locator 上的 predicate 直到超时或 true。适用于「点击后等 UI 异步
+ * 渲染」的场景，比如：
+ *   - 点击 tab 后等待 textarea 出现
+ *   - 点击表单控件后等待选项列表出现
+ *   - 输入框输入后等待 dropdown 出现
+ * 默认上限 3s，间隔 200ms — 兼具反应速度与对 VBK 慢接口的兑底。
+ *
+ * @param locator 要检查的 Playwright Locator
+ * @param predicate 谓词，收到 locator 返回 boolean
+ * @param timeoutMs 最长等待，默认 3000
+ * @returns {Promise<boolean>} 是否成功达到 predicate === true
+ */
+async function pollUntil(locator, predicate, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let result = false;
+    try {
+      result = await predicate(locator);
+    } catch {
+      result = false;
+    }
+    if (result) return true;
+    await delay(150);
+  }
+  return predicate(locator).catch(() => false);
+}
+
 async function assertCount(locator, expected, description) {
   const count = await locator.count();
   if (count !== expected) {
@@ -74,10 +104,46 @@ async function assertCount(locator, expected, description) {
   return locator;
 }
 
+/**
+ * 兜底匹配：先用 `aliases` 在已收集的下拉文本里精确查；查不到就让
+ * disambiguator 选一个最像的。
+ *
+ * - `candidates` 顺序对应 optionNodes / options Locator 的 index。
+ * - `disableds[i] === true` 跳过该项，精确与 AI 都不要。
+ * - 精确匹配走「全文相等」，所以调用方要事先把 prefix / suffix / 大小写
+ *   处理掉（fillScenicAreaSpots 的 aliases 已包含「去掉后缀」「加别名」）。
+ * - AI 调用只发非 disabled、非空文本的项；AI 返回 pickedText 之后
+ *   还要再校验「该文本在原 candidates 里 + 非 disabled」才会采纳，
+ *   避免 AI 幻觉点中根本不存在的项。
+ * - AI 调用本身 try/catch — 网络报错、key 失效都不拖崩上游。
+ * - 返回 null 表示「无匹配」，调用方应跳过该项 / 走原报错路径。
+ */
 async function selectVisibleOption(page, label) {
   const option = page.getByRole("option", { name: label, exact: true });
   await assertCount(option, 1, `选项“${label}”`);
   await option.click();
+}
+
+/**
+ * 安全点击：点失败后才走 closeBlockingDialogs 自愈，不再在点之前主动关弹窗。
+ * 原因：很多弹窗是 Playwright 自己刚刚点开的（比如“接送站”弹窗），点之前
+ * 调 closeBlockingDialogs 会把它们立刻关掉，让后续 click 找不到元素。
+ * 错误场景：上一步点击后弹窗未关（例如点击蒙层背后没点中）、或者意外
+ * 打开了别的弹窗挡住了目标元素 — Playwright click 超时 30s 后，调用方
+ * 再调一次 closeBlockingDialogs 重试。
+ *
+ * @param page Playwright Page 实例。
+ * @param locator 要点的 Locator。
+ * @param options Playwright click 选项。
+ */
+async function safeClick(page, locator, options = {}) {
+  try {
+    return await locator.click(options);
+  } catch (error) {
+    const closed = await closeBlockingDialogs(page).catch(() => false);
+    if (closed) return await locator.click(options);
+    throw error;
+  }
 }
 
 export async function inspectProductList(page) {
@@ -211,7 +277,9 @@ export function pickCityOption(
   return { kind: "missing", seen, reason: "notFound" };
 }
 
-async function fillCitySelect(page, id, city, preferredCountry) {
+async function fillCitySelect(page, id, city, preferredCountry, extra = {}) {
+  const disambiguator = extra?.disambiguator;
+  const product = extra?.product ?? {};
   // Ant Design renders the select container and its searchable input with the
   // same id. Scope to the select container first so duplicate ids do not make
   // the locator ambiguous.
@@ -295,6 +363,40 @@ async function fillCitySelect(page, id, city, preferredCountry) {
     await delay(250);
   }
   if (lastDecision.kind !== "matched") {
+    // 本地规则只决断 0/1/多个；ambiguous 与 wrongCountry 都表示“存在多个同名
+    // 候选但都不是唯一精确项”，交给 AI 选一个最像的。AI 也选不出则保持原报错。
+    const canAiDisambiguate = disambiguator
+      && (lastDecision.kind === "ambiguous"
+        || (lastDecision.kind === "missing" && lastSeen.length > 0));
+    if (canAiDisambiguate) {
+      const candidates = lastSeen.map((text, i) => ({ index: i, text, id: String(i) }));
+      const aliases = preferredCountry
+        ? [`${preferredCountry}-${city}`, city, `${city}市`, `${preferredCountry}-${city}市`]
+        : [city, `${city}市`];
+      const ai = await matchDropdownOption(
+        candidates,
+        candidates.map(() => false),  // 城市下拉项不设 disabled
+        aliases,
+        { kind: "city", desired: city, product, description: `${city}城市` },
+        disambiguator,
+      );
+      if (ai) {
+        // AI 选中的文本必然在 lastSeen 中（matchDropdownOption 已二次验证），
+        // 重新按 innerText 定位到 Locator index 点击。
+        const idx = lastSeen.findIndex((t) => t === ai.text);
+        if (idx >= 0) {
+          if (ai.source === "ai") {
+            console.info("[fillCitySelect] AI 兜底选中城市", {
+              desired: city,
+              picked: ai.text,
+              reasoning: ai.reasoning,
+            });
+          }
+          await options.nth(idx).click();
+          return;
+        }
+      }
+    }
     const alternatives = lastSeen.join("、") || "无";
     if (preferredCountry) {
       throw new Error(
@@ -376,9 +478,49 @@ async function fillProductLine(page, destinationCity, province) {
   throw new Error(`产品线下拉在 10 秒内未返回可用选项；最后看到：${seen.filter(Boolean).join("、") || "无"}`);
 }
 
-export async function openProductEditor(page, productId) {
-  await page.goto(productEditorUrl(productId), { waitUntil: "domcontentloaded" });
+export async function openProductEditor(page, productId, options = {}) {
+  const { stayOnCurrentTab = false } = options;
+  const targetUrl = productEditorUrl(productId);
+  const current = page.url();
+  const sameProduct = current.includes(encodeURIComponent(productId)) || current.includes(productId);
+  const onEditorPath = /\/ivbk\/vendor\//.test(current) || /\/product\/input\//.test(current);
+  // VBK 的 React Router 会拦截 page.goto（同路由上 会报 net::ERR_ABORTED）。
+  // 同一产品已在任一产品页面下，直接复用，不走 goto；否则用 location.href
+  // 触发完整的浏览器跳转，goto 拿到跳完之后的状态。
+  if (sameProduct && onEditorPath) {
+    // stayOnCurrentTab=true：中间阶段重试偏好。页面已停在某个子 tab
+    // （行程描述 / 产品图文），不要强制拽回「基本信息」。各阶段 handler
+    // 负责切到自己的 tab（fillItineraryDraft 会 clickSection("行程描述")
+    // 如果 title input 不在 DOM）。
+    if (stayOnCurrentTab) {
+      return;
+    }
+    // 复用现有页面 — 但页面可能停在子 tab（如 行程描述），需要先点回 基本信息
+    // 让后续阶段从首页开始。如果点不到，就等「基本信息」可见（通常是在
+    // 基本信息 tab 被点中后出现）。
+    await ensureBasicInfoTabVisible(page);
+    return;
+  }
+  // 跳出当前跳到目标 product editor。绕过 goto，用 location.href 走浏览器原生跳转。
+  await page.evaluate((url) => { window.location.href = url; }, targetUrl);
+  await page.waitForURL((url) => typeof url === "string" && url.includes("baseInfoMerge"), { timeout: 30_000 }).catch(() => {});
+  // 等待 产品信息 tab 可见
   await page.getByText("基本信息", { exact: true }).first().waitFor({ timeout: 30_000 });
+}
+
+async function ensureBasicInfoTabVisible(page) {
+  // 如果「基本信息」已经可见，直接返回
+  const visible = await page.getByText("基本信息", { exact: true }).first().isVisible().catch(() => false);
+  if (visible) return;
+  // 点击 产品信息 / 基本信息 tab
+  for (const label of ["基本信息", "产品信息"]) {
+    const tab = page.getByRole("tab", { name: label, exact: true });
+    if (await tab.count()) {
+      await tab.first().click().catch(() => {});
+      await page.getByText("基本信息", { exact: true }).first().waitFor({ timeout: 15_000 }).catch(() => {});
+      return;
+    }
+  }
 }
 
 async function clickSection(page, labels) {
@@ -397,7 +539,12 @@ async function clickSection(page, labels) {
         continue;
       }
       await current.click();
-      await delay(500);
+      // 点击 tab 后等 VBK 渲染完成（aria-selected=true / 对应面板出现），最多 3s。
+      await pollUntil(
+        current,
+        (loc) => loc.getAttribute("aria-selected").then((v) => v === "true"),
+        3_000,
+      );
       return;
     }
 
@@ -508,6 +655,121 @@ async function dismissKnownNoticeDialogs(page, { waitForSaveSuccess = false } = 
   return false;
 }
 
+/**
+ * 数据风险弹窗：VBK 在「国家景区」添加景点/省份时，如果产品是境内短途旅游
+ * 但下拉返回了境外同名项（典型：朝鲜-大同 / 北朝鲜-大同等），点「添加」
+ * 会弹出“数据风险，原因：途径地：XXX 且 产品类型：境内短途旅游，
+ * 请修改后重新操作！”的阻断弹窗。点确定/我知道了关闭，调用方应决定
+ * 是跳过（景点）还是报错（省份）。
+ *
+ /**
+ * 通用「关闭页面上能挡路的弹窗」。点 click 报错后调用。
+ *
+ * 默认不挑弹窗，全部都关。调用方传入 `keepOpenSelectors` 可以保留某些弹窗不被关。
+ * 例如 selectStationAddress 需要保留【接送站设置】这个对话框不被关闭，
+ * 只有其他意外打开的弹窗才被清除。
+ *
+ * @param page Playwright Page 实例。
+ * @param keepOpenSelectors 可选，匹配的弹窗 / overlay 选择器会被跳过不关。
+ * @returns {Promise<boolean>} 本次调用中是否成功关闭了至少一个弹窗。
+ */
+async function dismissDataRiskDialog(page, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  const pattern = /数据风险/;
+  const buttonName = /^(我知道了|知道了|确\s*定|确定|关闭|取\s*消|取消)$/;
+  do {
+    const dialogs = page.getByRole("dialog");
+    const count = await dialogs.count();
+    for (let index = 0; index < count; index += 1) {
+      const dialog = dialogs.nth(index);
+      if (!(await dialog.isVisible().catch(() => false))) continue;
+      const text = (await dialog.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+      if (!pattern.test(text)) continue;
+      const button = dialog.getByRole("button", { name: buttonName });
+      if (await button.count()) {
+        await button.first().click();
+        await dialog.waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
+        await delay(200);
+        return text;
+      }
+    }
+    await delay(150);
+  } while (Date.now() < deadline);
+  return null;
+}
+
+/**
+ * 通用「关闭页面上能挡路的弹窗」：在每次 click / 重要 DOM 操作之前调一下。
+ * 解决实际场景里「上次弹窗点击后没完全关闭」或「意外打开了弹窗」造成的
+ * 「元素不在视口里、点不到」误报。覆盖 .ant-modal / .ant-drawer / .ant-popconfirm
+ * / .ant-tooltip 等。优先点「关闭 × / 取 消 / Cancel / 关闭弹窗」关闭按钮；
+ * 找不到按钮时点蒙层 / 蒙层背后点击 / 按 Escape。
+ *
+ * 同一调用最多会返“是否关闭了弹窗”的 boolean，调用方可以在 click 前断言：
+ *   const closed = await closeBlockingDialogs(page);
+ *   // closed === true 表示刚才有弹窗被关了
+ *
+ * @returns {Promise<boolean>} 本次调用中是否成功关闭了至少一个弹窗。
+ */
+async function closeBlockingDialogs(page, keepOpenSelectors = []) {
+  const candidates = [
+    ".ant-modal-wrap:not(.ant-modal-wrap-hidden) .ant-modal",
+    ".ant-drawer-open .ant-drawer-content",
+    ".ant-popconfirm:not(.ant-popconfirm-hidden)",
+    ".ant-popover:not(.ant-popover-hidden) .ant-popover-inner",
+    ".ant-tooltip:not(.ant-tooltip-hidden) .ant-tooltip-inner",
+    '[role="dialog"]:not([aria-hidden="true"])',
+    '[role="alertdialog"]:not([aria-hidden="true"])',
+  ];
+  const seen = new Set();
+  let closedAny = false;
+  for (const selector of candidates) {
+    // 如果当前候选 selector 本身在 keepOpenSelectors 里，跳过。
+    if (keepOpenSelectors.some((keep) => keep === selector || selector.includes(keep))) continue;
+    let locators;
+    try {
+      locators = page.locator(selector);
+    } catch {
+      continue;
+    }
+    const count = await locators.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const dialog = locators.nth(index);
+      let visible = false;
+      try {
+        visible = await dialog.isVisible({ timeout: 200 });
+      } catch {
+        continue;
+      }
+      if (!visible) continue;
+      // 如果该 dialog 在某个 keepOpenSelector 里、并且它本身可见 — 跳过。
+      if (await dialog.evaluate((el, keeps) => keeps.some((k) => el.matches(k) || el.querySelector(k)), keepOpenSelectors).catch(() => false)) continue;
+      const sig = `${selector}::${index}`;
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      const closeBtn = dialog.locator(
+        ".ant-modal-close, .ant-drawer-close, [aria-label='Close'], [aria-label='关闭']",
+      );
+      const button = dialog.getByRole("button", { name: /^(取\s*消|取消|关\s*闭|关闭|我知道了|知道了|确\s*定|确定|Cancel|Close)$/ });
+      try {
+        if (await closeBtn.count()) {
+          await closeBtn.first().click({ force: true, timeout: 1_500 });
+        } else if (await button.count()) {
+          await button.first().click({ force: true, timeout: 1_500 });
+        } else {
+          await page.mouse.click(8, 8);
+          await page.keyboard.press("Escape");
+        }
+        await delay(150);
+        closedAny = true;
+      } catch {
+        closedAny = true;
+      }
+    }
+  }
+  return closedAny;
+}
+
 export async function submitCurrentSectionAndNext(page) {
   const label = "提交审核并下一步";
   const button = page.getByRole("button", { name: label, exact: true });
@@ -570,7 +832,8 @@ async function saveThenAdvance(page, options) {
   //         / itinerary 用这个作为自动跳转证据）。注意：仅「解锁/未禁用」
   //         不算 —— 必须 aria-selected=true 或 class 含 ant-tabs-tab-active
   //         才是真正激活。仅解锁而仍停在当前页 → 必须点下一步。
-  const activeBeforeClick = await findActiveTabLabel(page, targetTabLabels);
+  // VBK 保存动作切 tab 是异步的，跨子帧都需要至少 3s 才到位。
+  const activeBeforeClick = await findActiveTabLabel(page, targetTabLabels, 3_000);
   if (activeBeforeClick) {
     return { advanced: true, mode: "auto-navigated", savedWith: effectiveSavedWith };
   }
@@ -650,20 +913,32 @@ async function saveThenAdvance(page, options) {
  * 或 class 含 ant-tabs-tab-active（旧版 Ant / 自定义 Tab 仍用 className 标记）。
  * 命中即视为真正切到目标 tab。
  */
-async function findActiveTabLabel(page, labels) {
+async function findActiveTabLabel(page, labels, timeoutMs = 0) {
   const candidates = Array.isArray(labels) ? labels : [labels];
-  for (const label of candidates) {
-    const tab = page.getByRole("tab", { name: label, exact: true });
-    const tabCount = await tab.count();
-    for (let index = 0; index < tabCount; index += 1) {
-      const current = tab.nth(index);
-      if (!(await current.isVisible())) continue;
-      if ((await current.getAttribute("aria-selected")) === "true") return label;
-      const cls = (await current.getAttribute("class")) || "";
-      if (/\bant-tabs-tab-active\b/.test(cls)) return label;
+  const probe = async () => {
+    for (const label of candidates) {
+      const tab = page.getByRole("tab", { name: label, exact: true });
+      const tabCount = await tab.count();
+      for (let index = 0; index < tabCount; index += 1) {
+        const current = tab.nth(index);
+        if (!(await current.isVisible())) continue;
+        if ((await current.getAttribute("aria-selected")) === "true") return label;
+        const cls = (await current.getAttribute("class")) || "";
+        if (/\bant-tabs-tab-active\b/.test(cls)) return label;
+      }
     }
+    return null;
+  };
+  if (timeoutMs <= 0) return probe();
+  // VBK 保存动作切 tab 是异步的，跨子帧都需要至少 3s 才到位。
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await probe();
+    if (last) return last;
+    await delay(150);
   }
-  return null;
+  return last;
 }
 
 async function findUnlockedSectionLabel(page, labels) {
@@ -723,13 +998,76 @@ export async function fillAndSaveBasicInfo(page, product, butlerSelection, extra
   return advanced;
 }
 
+// VBK #pm_recommend 默认只渲染 1 行；plan 永远 3 项，所以开始填写前必须
+// 把行数补足。真实 VBK 在每行末尾放一个蓝图标 +（背景 color 由源码的
+// #1658DC 被浏览器序列化为 rgb(22, 88, 220)）；行 ≥2 时 + 前还有一个
+// − 删行按钮。两个按钮共享相同的 span.anticon + 内联 color rgb(22,88,220)，
+// 顺序固定为「− 在前、+ 在后」。直接 page.locator(...).click() 会被
+// span[title=空] 拦截，必须在 evaluate 里调 .click() 事件触发。测试 fixture
+// 使用 #1658DC 原始字串，所以这里同时匹配 rgb 序列化与 #hex 两种写法。
+const RECOMMEND_APPEND_BUTTON_SELECTOR =
+  'span.anticon[style*="rgb(22, 88, 220)"], span.anticon[style*="#1658DC"], span.anticon[style*="#1658dc"]';
+
+async function appendRecommendationRow(page: Page, currentCount: number) {
+  // 每次只负责点 + 一次并等「多 1 行」出现；多轮调用在 fillRecommendationReasons
+  // 的 while 循环里驱动。一次性等 targetCount 会让首轮点击后永远等不到
+  // （剩余行还没追加），触发误报。
+  const clicked = await page.evaluate((selector) => {
+    const all = document.querySelectorAll("#pm_recommend .ant-form-item");
+    if (all.length === 0) return { ok: false, reason: "empty" };
+    const last = all[all.length - 1];
+    const blues = last.querySelectorAll(selector);
+    if (blues.length === 0) {
+      return { ok: false, reason: "no-plus", rowCount: all.length };
+    }
+    // 同一个最后一行内可能同时有 − 和 +；点 + 即最后一个蓝图标。
+    blues[blues.length - 1].click();
+    return { ok: true, rowCount: all.length };
+  }, RECOMMEND_APPEND_BUTTON_SELECTOR);
+  if (!clicked.ok) {
+    if (clicked.reason === "empty") {
+      throw new Error("推荐理由区域为空，无法定位最后一行追加新行");
+    }
+    throw new Error(
+      `推荐理由最后一行缺少 + 按钮（VBK DOM 异常，行数=${clicked.rowCount}）`,
+    );
+  }
+  const expectedCount = currentCount + 1;
+  try {
+    await page.waitForFunction(
+      (target) =>
+        document.querySelectorAll("#pm_recommend .ant-form-item").length >= target,
+      expectedCount,
+      { timeout: 10_000 },
+    );
+  } catch {
+    // 真实 VBK 偶尔在新行 DOM 上慢一拍；再轮询一次兜底，避免误抛
+    // 「未生成第 N+1 组」。
+    await page.waitForFunction(
+      (target) =>
+        document.querySelectorAll("#pm_recommend .ant-form-item").length >= target,
+      expectedCount,
+      { timeout: 5_000 },
+    );
+  }
+}
+
 export async function fillRecommendationReasons(page: Page, recommendations: Array<{ category: string; text: string }>) {
   const plan = buildRecommendationReasonsPlan(recommendations);
   const section = page.locator("#pm_recommend");
   await assertCount(section, 1, "推荐理由区域");
   const rows = section.locator(".ant-form-item");
 
-  for (let i = 0; i < 3; i += 1) {
+  // VBK 默认渲染 1 行；plan 长度固定 3。开始填写前先把行数扩到 plan.length，
+  // 否则断言会先在 row count 上抛错。每一次扩行都点最后一行末尾的 + 按钮。
+  let currentRowCount = await rows.count();
+  while (currentRowCount < plan.length) {
+    await appendRecommendationRow(page, currentRowCount);
+    await delay(150);
+    currentRowCount = await rows.count();
+  }
+
+  for (let i = 0; i < plan.length; i += 1) {
     const targetCategory = plan[i]!.category;
     const targetText = plan[i]!.text;
     const row = rows.nth(i);
@@ -1156,8 +1494,9 @@ async function fillMealCards(dayScope, day, mealsIncluded = false) {
 }
 
 async function fillHotelCard(page, dayScope, day, operations) {
-  if (!day.hotel) return;
+  // 酒店节点：两天行程的第二天通常没有酒店节点，应跳过不报错。
   const hotelCards = await cardsByPrefix(dayScope, "酒店");
+  if (hotelCards.length === 0) return;
   if (hotelCards.length !== 1) {
     throw new Error(`第 ${day.day} 天酒店节点数量异常：期望 1，实际 ${hotelCards.length}`);
   }
@@ -1165,45 +1504,187 @@ async function fillHotelCard(page, dayScope, day, operations) {
   await clickExact(hotelCard, "不限", `第 ${day.day} 天酒店时间`);
   await clickExact(hotelCard, "不使用携程平台酒店", "非平台酒店来源");
   await delay(300);
+  // 默认按 hotelTier（“当地4钻酒店/-4” / “当地3钻酒店/-3”）选酒店名称。
+  // 即使 day.hotel 为空也应当选一个默认酒店，不然 VBK 会判酒店名未填。
   const combos = hotelCard.getByRole("combobox");
   if (!(await combos.count())) throw new Error(`第 ${day.day} 天酒店名称选择器缺失`);
   await combos.last().click();
   await delay(300);
-  await selectVisibleOption(page, operations.hotelTier);
+  // 默认选“当地4钻酒店/-4”，未提供则 fallback 到“当地3钻酒店/-3”。
+  const tierKeyword = operations.hotelTier && /4钻/.test(operations.hotelTier)
+    ? "当地4钻酒店/-4"
+    : "当地3钻酒店/-3";
+  await selectVisibleOption(page, tierKeyword);
   const supplement = hotelCard.locator('textarea[placeholder="请输入补充说明"]');
   if (await supplement.count()) {
-    await supplement.first().fill(day.hotelDescription || day.hotel);
+    await supplement.first().fill(day.hotelDescription || day.hotel || `依据产品配置：${operations.hotelTier}`);
   }
 }
 
-async function selectStationAddress(page, card, city) {
+// 暴露给 debug：直接调这个函数能复现「接送站」单步场景。
+export async function selectStationAddress(page, card, city, extra = {}) {
+  const disambiguator = extra?.disambiguator;
+  const product = extra?.product ?? {};
+  await breakpoint("selectStationAddress:enter", { city });
   const addressInput = card.locator('input.ant-input[placeholder="请选择"]');
   if (!(await addressInput.count())) throw new Error("接送站地址输入框缺失");
-  await addressInput.first().click();
+  await safeClick(page, addressInput.first());
   await delay(300);
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ state: "visible", timeout: 5_000 });
   const inputs = dialog.locator("input");
   if ((await inputs.count()) < 2) throw new Error("接送站弹窗结构异常");
-  await inputs.nth(1).click();
-  await inputs.nth(1).fill("").catch(() => {});
-  await inputs.nth(1).type(city, { delay: 80 });
-  await delay(500);
-  await dialog.getByText(city, { exact: true }).click();
+  // 弹窗里第 1 个可写输入是机场，第 2 个是火车站。两者都逐个填，
+  // 任意一个 dropdown 返回空则跳过不报错。所有搜索都以 city 为查询，
+  // dropdown 内逐候选项比对：唯一可用项 → 直选；与 city 完全一致 → 直选；
+  // 否则调 disambiguator（AI 兜底）。AI 网络错误不接外。
+  async function fillStationField(fieldIndex, kind) {
+    const input = inputs.nth(fieldIndex);
+    await safeClick(page, input);
+    await input.fill("").catch(() => {});
+    await input.type(city, { delay: 80 });
+    // VBK 接送站搜索接口反应慢，3s 才出 dropdown。
+    await delay(3_000);
+    const dropdown = page.locator(
+      '.ant-select-dropdown--multiple:not(.ant-select-dropdown-hidden)',
+    ).last();
+    // 【重要】本函数运行在接送站弹窗内部，不能调 closeBlockingDialogs
+    // 去收其它遮罩弹窗——closeBlockingDialogs 判定是按 role="dialog" / 「确定」
+    // 按钮文本枚举的，它会把接送站弹窗自己一起关掉，让后续 click 超时。
+    // 原代码在多处调 closeBlockingDialogs 是错的：弹窗里不会有别的遮罩，
+    // 跳出后所有的 dropdown 都会被弹窗一起藏起来。
+    // 退路：只按 Esc 收一下可能残留的 tooltip/popover，不动 role=dialog。
+    async function collapseOverlayTooltips() {
+      await page.keyboard.press("Escape").catch(() => false);
+      await delay(100);
+    }
+    try {
+      await dropdown.waitFor({ state: "visible", timeout: 3_000 });
+    } catch {
+      await collapseOverlayTooltips();
+      await dropdown.waitFor({ state: "visible", timeout: 3_000 });
+    }
+    const options = dropdown.locator('.ant-select-dropdown-menu-item');
+    const total = await options.count().catch(() => 0);
+    if (!total) {
+      return { matched: false, reason: "empty-list" };
+    }
+    const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.trim());
+    const disableds = await Promise.all(
+      Array.from({ length: total }, async (_, i) => {
+        const cls = (await options.nth(i).getAttribute("class").catch(() => "")) || "";
+        return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
+      }),
+    );
+    const usable = texts.filter((_, i) => !disableds[i]);
+    // 1) 唯一可用项 → 直选。
+    if (usable.length === 1) {
+      const idx = texts.findIndex(t => t === usable[0]);
+      await delay(150);
+      await options.nth(idx).click({ force: true });
+      await delay(200);
+      return { matched: true, source: "single", text: usable[0] };
+    }
+    // 2) 与 city 完全一致 → 直选。
+    const exactIdx = usable.findIndex(t => t.trim() === city);
+    if (exactIdx >= 0) {
+      const idx = texts.findIndex(t => t === usable[exactIdx]);
+      await delay(150);
+      await options.nth(idx).click({ force: true });
+      await delay(200);
+      return { matched: true, source: "exact", text: usable[exactIdx] };
+    }
+    // 3) AI 兑底。disambiguator 返回的 aiMatch 有两种契约：
+    //   a) { index, text, reasoning? }   — 直接给出索引（老调用方）
+    //   b) { pickedText, reasoning? }    — 返文本，由本函数定位索引（新调用方）
+    // 两种都允许。定位后还要二次校验「该索引未被 disabled、文本不空」才点。
+    if (disambiguator && usable.length > 0) {
+      const candidates = texts.map((text, i) => ({ index: i, text }));
+      try {
+        const aiMatch = await disambiguator(
+          candidates,
+          disableds,
+          [city, `${city}站`, `${city}南站`, `${city}北站`, `${city}东站`, `${city}西站`, `${city}机场`],
+          { kind, desired: city, product, description: `${kind}接送站` },
+        );
+        let chosenIndex = -1;
+        if (aiMatch && typeof aiMatch.index === "number" && candidates[aiMatch.index] && !disableds[aiMatch.index]) {
+          chosenIndex = aiMatch.index;
+        } else if (aiMatch && aiMatch.pickedText) {
+          const idx = candidates.findIndex((c) => c.text === aiMatch.pickedText);
+          if (idx >= 0 && !disableds[idx]) chosenIndex = idx;
+        }
+        if (chosenIndex >= 0) {
+          await delay(150);
+          await options.nth(chosenIndex).click({ force: true });
+          await delay(200);
+          return { matched: true, source: "ai", text: candidates[chosenIndex].text, reasoning: aiMatch.reasoning };
+        }
+      } catch (err) {
+        console.warn("[selectStationAddress] AI 兑底失败，跳过本字段", { kind, err: String(err.message || err) });
+      }
+    }
+    // 4) 列表不为空但无法选 → 只收 Esc，不动弹窗本身，保留机会重试。
+    await collapseOverlayTooltips();
+    return { matched: false, reason: "no-match", candidates: usable };
+  }
+  // dialog 实际只有 2 个 input（皆为 .ant-select-search__field 搜索框）：
+  //   - 索引 0 → 机场搜索框
+  //   - 索引 1 → 火车站搜索框
+  // 旧版曾认为「有隐藏 input，从下标 1 起」——在当前 VBK DOM 里已不成立，
+  // 旧索引导致机场被填到火车字段、火车取越界索引 30s 超时。
+  const airportResult = await fillStationField(0, "airport");
+  console.info("[selectStationAddress] airport", JSON.stringify(airportResult));
   await delay(300);
+  const trainResult = await fillStationField(1, "train");
+  console.info("[selectStationAddress] train", JSON.stringify(trainResult));
+  // 关闭弹窗。
   const confirm = dialog.getByRole("button", { name: "确定", exact: true });
-  await confirm.click({ force: true });
-  await delay(500);
-  if (await dialog.isVisible().catch(() => false)) {
-    await confirm.click({ force: true });
-    await delay(500);
+  if (await confirm.count()) {
+    await safeClick(page, confirm, { force: true }).catch(() => false);
+    await delay(300);
+    if (await dialog.isVisible().catch(() => false)) {
+      await safeClick(page, confirm, { force: true }).catch(() => false);
+      await delay(300);
+    }
   }
-  if (await dialog.isVisible().catch(() => false)) {
-    throw new Error("接送站设置弹窗未关闭");
-  }
+  // 接送站弹窗已点「确定」，到这一步应已闭合；但如果某些状态下
+  // 弹窗仍残留（edge case），点 Esc 收一下 tooltip/popover 即可，
+  // 不要再走 closeBlockingDialogs——它会把刚提交、还没保存的
+  // 弹窗一起关掉，导致「确定」动作被吞。
+  await page.keyboard.press("Escape").catch(() => false);
+  await breakpoint("selectStationAddress:done");
 }
 
-async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations) {
+async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations, extra = {}) {
+  const disambiguator = extra?.disambiguator;
+  const product = extra?.product;
+  // 集合 / 解散 card 里的“接机/站地址”可能有几个空““请选择”输入。这些
+  // 是 station 地址下拉，不是 city 下拉。原来的逻辑只填第一个 .first()，
+  // 如果第一个已经被填了（实际是集合点 city），后面的 station 地址会被漏下。
+  // 这里改成：过滤掉已有 value 的，请空值的“接机/站地址”才能进 selectStationAddress。
+  // 同时跳过在“全天具体时间”里的那个（时间控件不是 station 下拉）。
+  async function fillEmptyStationAddresses(card) {
+    const stationInputs = card.locator('input.ant-input[placeholder="请选择"]');
+    const total = await stationInputs.count();
+    for (let i = 0; i < total; i += 1) {
+      const input = stationInputs.nth(i);
+      const value = await input.getAttribute("value").catch(() => "");
+      if (value && value.trim()) continue;
+      const isTimeSlot = await input.evaluate((el) => {
+        let parent = el.parentElement;
+        while (parent && parent !== document.body) {
+          const txt = parent.textContent || "";
+          if (txt.includes("全天具体时间")) return true;
+          parent = parent.parentElement;
+        }
+        return false;
+      }).catch(() => false);
+      if (isTimeSlot) continue;
+      await selectStationAddress(page, card, operations.pickupCity, { disambiguator, product });
+      return;
+    }
+  }
   if (index === 0) {
     const cards = await cardsByPrefix(dayScope, "集合");
     if (cards.length !== 1) throw new Error("首日集合节点结构异常");
@@ -1211,10 +1692,7 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
     if ((await modes.count()) < 3) throw new Error("首日集合方式控件结构异常");
     await ensureCheckboxChecked(modes.nth(2));
     await delay(300);
-    const address = cards[0].locator('input.ant-input[placeholder="请选择"]');
-    if ((await address.count()) && !(await address.first().getAttribute("value"))) {
-      await selectStationAddress(page, cards[0], operations.pickupCity);
-    }
+    await fillEmptyStationAddresses(cards[0]);
   }
   if (index === totalDays - 1) {
     const cards = await cardsByPrefix(dayScope, "解散");
@@ -1231,20 +1709,29 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
         reused = true;
       }
     }
-    const address = cards[0].locator('input.ant-input[placeholder="请选择"]');
-    if ((await address.count()) && !(await address.first().getAttribute("value"))) {
-      await selectStationAddress(page, cards[0], operations.pickupCity);
-    }
+    await fillEmptyStationAddresses(cards[0]);
   }
 }
 
-export async function fillItineraryDraft(page, product) {
+export async function fillItineraryDraft(page, product, options = {}) {
+  // options.disambiguator — 接送站「精确→AI」兜底，由 automation.ts 注入
+  // product 总是从调用方传入；这里只是把它的句柄存下来往下传。
+  const disambiguator = options?.disambiguator;
   let titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
   if ((await titleInputs.count()) !== product.itinerary.length) {
     await clickSection(page, "行程描述");
     titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
   }
-  await assertCount(titleInputs, product.itinerary.length, "每日标题输入框");
+  // 点击行程描述 tab 后页面异步渲染最多需 3s，轮询 titleInputs 到位才对。
+  // count 没到期望值的话报“期望 X，实际 0”与预期不一致。
+  const titleReady = await pollUntil(
+    titleInputs,
+    (loc) => loc.count().then((n) => n === product.itinerary.length),
+    3_000,
+  );
+  if (!titleReady) {
+    await assertCount(titleInputs, product.itinerary.length, "每日标题输入框");
+  }
 
   for (let index = 0; index < product.itinerary.length; index += 1) {
     const day = product.itinerary[index];
@@ -1263,6 +1750,7 @@ export async function fillItineraryDraft(page, product) {
       product.operations ?? {
         reusePickupForDropoff: true,
       },
+      { disambiguator, product },
     );
     await fillMealCards(scope, day, product.operations?.mealsIncluded === true);
     if (product.operations) {
@@ -1798,19 +2286,22 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   // 国内省份非空时，集合城市和目的城市都必须严格匹配“中国-${city}”，
   // 防止把“大同”错绑到同名“朝鲜-大同”。未配置省份（如海外行程）走老路径。
   const preferredCountry = info.province && info.province.trim() ? "中国" : undefined;
-  await fillCitySelect(page, "baseInfo.masterDepartureCityId", info.meetingCity, preferredCountry);
-  await fillCitySelect(page, "baseInfo.destinationCityID", info.destinationCity, preferredCountry);
+  // AI 兜底仅在「ambiguous / 存在同名不同上级」场景下被调用；未传 disambiguator
+  // 时仍走原严格匹配路径，所以这里仅走透传，不改默认语义。
+  const cityContext = { disambiguator: extra?.disambiguator, product };
+  await fillCitySelect(page, "baseInfo.masterDepartureCityId", info.meetingCity, preferredCountry, cityContext);
+  await fillCitySelect(page, "baseInfo.destinationCityID", info.destinationCity, preferredCountry, cityContext);
   await fillProductLine(page, info.destinationCity, info.province);
 
   // 国家景区：从 basicInfo.province 取值，自动在 #scenic_area 容器内或标签
   // 「省」关联的下拉里点选。已存在的同省份条目不再重复添加。
-  if (info.province) await fillScenicAreaProvince(page, info.province);
+  if (info.province) await fillScenicAreaProvince(page, info.province, cityContext);
   // 国家景区内的具体景点：取 product 行程里确定性筛出的最多 3 个重点景点，
   // 在同一容器内逐个搜索并点选。spotLogs 由调用方传入，未命中的单项只记录
   // 日志、绝不允许默认第一项；不足 3 个时按实际匹配数量添加。
   const scenicSpotLogs = Array.isArray(extra?.scenicSpotLogs) ? extra.scenicSpotLogs : [];
   if (info.province && Array.isArray(extra?.keySpots) && extra.keySpots.length) {
-    await fillScenicAreaSpots(page, info.province, extra.keySpots, scenicSpotLogs);
+    await fillScenicAreaSpots(page, info.province, extra.keySpots, scenicSpotLogs, cityContext);
   }
   // 提前预订：通过 schema.resolveAdvanceBooking 拿到合法配置（缺失时回落 1 天 12:00），
   // 然后准确定位 label[for=bookingControls.advanceBooking] 关联的 .ant-form-item
@@ -1830,7 +2321,9 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
  * 用 schema.findProvinceOptionIndex 匹配省份文本；点击后视情点「添加」，
  * 已有相同省份时不再重复添加。
  */
-async function fillScenicAreaProvince(page, province) {
+async function fillScenicAreaProvince(page, province, extra = {}) {
+  const disambiguator = extra?.disambiguator;
+  const product = extra?.product ?? {};
   const label = (province || "").trim();
   if (!label) throw new Error("国家景区（省份）未配置，无法继续录入。");
   const container = page.locator("#scenic_area");
@@ -1885,17 +2378,51 @@ async function fillScenicAreaProvince(page, province) {
   const provinces = await availableOptions("省份");
   const texts = provinces.texts;
   const disableds = provinces.disableds;
-  const targetIndex = findProvinceOptionIndex(texts, label);
-  if (targetIndex < 0 || disableds[targetIndex]) {
+  // 先按本地省份规则匹配（处理“中国-山西”与“山西”这类差异），未命中再
+  // AI 兜底。AI 只为“能近似”的项投票，不接受「勉强选一个」。
+  const candidates = texts.map((text, i) => ({ index: i, text, id: undefined }));
+  const localIndex = findProvinceOptionIndex(texts, label);
+  let chosenIndex = localIndex >= 0 && !disableds[localIndex] ? localIndex : -1;
+  let chosenSource = "exact";
+  if (chosenIndex < 0) {
+    const ai = await matchDropdownOption(
+      candidates,
+      disableds,
+      [label, `${label}省`, `${label}市`, `${label}自治区`],
+      { kind: "province", desired: label, product, description: "省份" },
+      disambiguator,
+    );
+    if (ai) {
+      chosenIndex = ai.index;
+      chosenSource = ai.source;
+      if (ai.source === "ai") {
+        console.info("[fillScenicAreaProvince] AI 兜底选中省份", {
+          desired: label,
+          picked: ai.text,
+          reasoning: ai.reasoning,
+        });
+      }
+    }
+  }
+  if (chosenIndex < 0) {
     throw new Error(`省下拉未找到「${label}」；可选：${texts.filter(Boolean).join("、") || "无"}`);
   }
-  await optionNodes.nth(targetIndex).click();
+  void chosenSource; // 目前只用于日志
+  await optionNodes.nth(chosenIndex).click();
   await delay(300);
   // 「添加」按钮：仅在省份确认添加后才生效。同一省份已存在时不能再点。
   const addButton = container.getByRole("button", { name: "添加", exact: true }).first();
   if (await addButton.count()) {
     const alreadyAdded = await container.getByText(label, { exact: true }).count();
     if (alreadyAdded <= 1) await addButton.click();
+  }
+  // 数据风险弹窗只对“景点”跳过；省份被拒说明 AI/精确匹配选中了
+  // 境外同名项，代码路径不允许静默放过，必须报错让用户/上轮接手。
+  const dataRisk = await dismissDataRiskDialog(page);
+  if (dataRisk) {
+    throw new Error(
+      `省下拉疑似选中了境外项：${dataRisk}。这是 VBK 的阻断式反馈，请检查 VBK 中是否手动选过其他国家的省份。`,
+    );
   }
   await delay(300);
 }
@@ -1914,7 +2441,28 @@ async function fillServicePhone(page, phone) {
   const formItem = labelLocator.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
   await assertCount(formItem, 1, "线上 400 电话 .ant-form-item");
   await formItem.waitFor({ state: "visible", timeout: 10_000 });
-  const trigger = formItem.getByRole("combobox");
+  // Electron WebContentsView 下 window.innerHeight 可能为 0，Playwright 的
+  // auto-scroll 会跟不动并超时 30s。手动滚 form-item 到视口中央：
+  // 表单外层 .ant-form 可滚，先判断滚动原点（documentElement vs form 容器），
+  // 都试一下使能跨浏览器场景。
+  await page.evaluate(() => {
+    const el = document.querySelector('label[for="baseInfo.phone400"]')?.closest('.ant-form-item');
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.top < 0 || rect.bottom > (window.innerHeight || document.documentElement.clientHeight || 0)) {
+      el.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+      // 上面可能不够：手写「绝对滚动到 center」避免 form 容器 scrollTop 错位
+      const form = document.querySelector('.ant-form');
+      if (form && form.scrollHeight > form.clientHeight) {
+        form.scrollTop = Math.max(0, el.offsetTop - form.clientHeight / 2);
+      }
+      const main = document.querySelector('.vbk_layout_layout-main');
+      if (main && main.scrollHeight > main.clientHeight) {
+        main.scrollTop = Math.max(0, el.offsetTop - main.clientHeight / 2);
+      }
+    }
+  });
+  const trigger = formItem.locator(".ant-select-selection[role='combobox']");
   await assertCount(trigger, 1, "线上 400 电话 combobox");
   await trigger.click();
   await delay(400);
@@ -1945,7 +2493,9 @@ async function fillServicePhone(page, phone) {
  * 命中失败的单项只追加日志到 logs（由调用方落盘），绝不默认第一项。
  * 容器/下拉结构与 fillScenicAreaProvince 保持一致。
  */
-async function fillScenicAreaSpots(page, province, spots, logs = []) {
+async function fillScenicAreaSpots(page, province, spots, logs = [], extra = {}) {
+  const disambiguator = extra?.disambiguator;
+  const product = extra?.product ?? {};
   const container = page.locator("#scenic_area");
   await assertCount(container, 1, "国家景区容器 #scenic_area");
   const provinceLabel = (province || "").trim();
@@ -1973,6 +2523,7 @@ async function fillScenicAreaSpots(page, province, spots, logs = []) {
     await search.type(target, { delay: 80 });
     const deadline = Date.now() + 8_000;
     let last: string[] = [];
+    let lastDisableds: boolean[] = [];
     while (Date.now() < deadline) {
       const count = await options.count();
       // textContent 会把“柳巷”与“太原/山西/中国”直接粘连；使用
@@ -1982,17 +2533,40 @@ async function fillScenicAreaSpots(page, province, spots, logs = []) {
           await options.nth(index).innerText().catch(() => ""),
         )),
       ) : [];
-      const disableds = await Promise.all(Array.from({ length: count }, async (_, index) => {
+      lastDisableds = await Promise.all(Array.from({ length: count }, async (_, index) => {
         const cls = (await options.nth(index).getAttribute("class")) || "";
         return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
       }));
-      const matchIndex = last.findIndex((text, index) => aliases.includes(text) && !disableds[index]);
+      const matchIndex = last.findIndex((text, index) => aliases.includes(text) && !lastDisableds[index]);
       if (matchIndex >= 0) {
         await options.nth(matchIndex).click();
         await delay(300);
         return true;
       }
       await delay(250);
+    }
+    // 轮询结束仍未精确命中：进入 AI 兜底。
+    if (disambiguator) {
+      const candidates = last.map((text, index) => ({ index, text }));
+      const ai = await matchDropdownOption(
+        candidates,
+        lastDisableds,
+        aliases,
+        { kind: "spot", desired: target, product, description },
+        disambiguator,
+      );
+      if (ai) {
+        await options.nth(ai.index).click();
+        await delay(300);
+        if (ai.source === "ai") {
+          console.info("[fillScenicAreaSpots] AI 兜底选中景点", {
+            desired: target,
+            picked: ai.text,
+            reasoning: ai.reasoning,
+          });
+        }
+        return true;
+      }
     }
     await page.keyboard.press("Escape").catch(() => {});
     return false;
@@ -2032,6 +2606,18 @@ async function fillScenicAreaSpots(page, province, spots, logs = []) {
     if (await addButton.count()) {
       await addButton.click().catch(() => {});
     }
+    // 「数据风险」是 VBK 对「添加境外同名项」的拦截：原因=途径地
+    // 朝鲜 且 产品类型 境内短途旅游。设计上是“不能不填”以外的跳出门
+    // 槛：用户明确要求遇到该弹窗就跳过该景点，这里点「确定/我知道了」
+    // 关闭弹窗、记录警告日志、不报错。下一轮景点仍会接着尝试。
+    const dataRisk = await dismissDataRiskDialog(page);
+    if (dataRisk) {
+      logs.push(`[warn] 景点“${spot}”添加触发数据风险弹窗（${dataRisk}），疑似境外同名项，已跳过该景点`);
+      // 保证景区下拉被收起，否则下一个景点的 combobox.click() 会被旧弹层拦截。
+      await page.keyboard.press("Escape").catch(() => {});
+      await delay(200);
+      continue;
+    }
     const commitDeadline = Date.now() + 8_000;
     let committed = false;
     while (Date.now() < commitDeadline) {
@@ -2045,9 +2631,17 @@ async function fillScenicAreaSpots(page, province, spots, logs = []) {
         committed = true;
         break;
       }
+      // 等待期间也可能漂出数据风险弹窗（例如 form 提交后才出现）；
+      // 同样点“确定”关掉，不让下一轮选点被拦截。
+      if (await dismissDataRiskDialog(page, 200)) break;
       await delay(200);
     }
     if (!committed) {
+      const again = await dismissDataRiskDialog(page, 500);
+      if (again) {
+        logs.push(`[warn] 景点“${spot}”提交后弹出数据风险弹窗（${again}），已跳过该景点`);
+        continue;
+      }
       throw new Error(`景点“${spot}”已选择但未成功添加到国家景区标签。`);
     }
   }

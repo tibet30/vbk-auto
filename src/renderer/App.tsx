@@ -158,6 +158,8 @@ export function App() {
   const [checkingVbkLogin, setCheckingVbkLogin] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [verificationNote, setVerificationNote] = useState("");
+  // 刚被 confirmTask 确认的 task id：用于在 task-row 上打 1.2s 绿色闪动。
+  const [justConfirmedTaskId, setJustConfirmedTaskId] = useState<string | null>(null);
   const [resolvingVehicleTaskId, setResolvingVehicleTaskId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [miniMaxConfigOpen, setMiniMaxConfigOpen] = useState(false);
@@ -329,9 +331,15 @@ export function App() {
     if (!verificationNote.trim()) { setNotice("请填写在 VBK 或公开来源查到的实际结果，再确认。"); return; }
     setLoading(true);
     try {
-      await api()!.research.accept(project.id, activeTask.id, verificationNote.trim());
+      const confirmedId = activeTask.id;
+      await api()!.research.accept(project.id, confirmedId, verificationNote.trim());
       await api()!.ai.send(project.id, `运营人员已完成「${activeTask.label}」核查，结果如下：${verificationNote.trim()}。请仅使用这段已核实信息更新产品草稿中对应字段；如仍缺少录入所需数据，请明确保留待核查项。`);
       setVerificationNote(""); setActiveTaskId(null);
+      // 刚被确认的 task 在 1.2s 内打个绿色闪动，让运营一眼看到刚才点的那条成功。
+      setJustConfirmedTaskId(confirmedId);
+      window.setTimeout(() => {
+        setJustConfirmedTaskId((current) => (current === confirmedId ? null : current));
+      }, 1200);
     }
     catch (error) { setNotice(error instanceof Error ? error.message : "无法保存核查结果。"); }
     finally { setLoading(false); }
@@ -407,7 +415,10 @@ export function App() {
     } finally { setTestingMiniMax(false); }
   };
   const openLogin = () => {
-    setLoginPanelOpen(true); setView("workspace"); setProject(null); setBrowserOpen(true); setVbkLogin(null); setAccountMenuOpen(false); setStage("vbk");
+    // 不清当前项目：打开登录面板是“准备跳账号”，运营点完账号后还要回来
+    // 继续审查 / 补取问题，避免把现场拍掉。
+    // 唯一会清项目的地方是用户主动通过面包屑 / 项目列表返回。
+    setLoginPanelOpen(true); setView("workspace"); setBrowserOpen(true); setVbkLogin(null); setAccountMenuOpen(false); setStage("vbk");
     if (api()) {
       api()!.browser.login()
         .then(() => checkVbkLogin())
@@ -990,6 +1001,15 @@ export function App() {
                           ? "在右侧浏览器执行录入，系统只保存 VBK 草稿，不会提审或发布。"
                           : `还有 ${readiness.issues.length} 项未解决；保存草稿将保持禁用。`}
                       </small>
+                      {!readiness.ready && readiness.issues.length > 4 && (
+                        <button
+                          type="button"
+                          className="readiness-hero-meta-link"
+                          onClick={() => openStage("review")}
+                        >
+                          还有 {readiness.issues.length - 4} 项，回到上一步查看完整列表
+                        </button>
+                      )}
                     </div>
                     <div className="readiness-hero-progress">
                       <strong>{readiness.completion}%</strong>
@@ -997,13 +1017,13 @@ export function App() {
                     </div>
                   </div>
                   {!readiness.ready && (
-                    <div className="review-checklist">
+                    <div className="review-checklist review-checklist--full">
                       <div className="review-checklist-head">
                         <strong>{readiness.issues.length} 项待处理</strong>
                         <small>先在第一步里完成核查，再回到这里继续。</small>
                       </div>
-                      <ul className="review-checklist-list">
-                        {readiness.issues.slice(0, 4).map((issue, index) => {
+                      <ul className="review-checklist-list review-checklist-list--full">
+                        {readiness.issues.map((issue, index) => {
                           const { guidance } = formatIssueGuidance(issue);
                           return (
                             <li
@@ -1019,15 +1039,6 @@ export function App() {
                             </li>
                           );
                         })}
-                        {readiness.issues.length > 4 && (
-                          <li className="review-checklist-item" data-priority="medium">
-                            <span className="review-checklist-index">…</span>
-                            <span className="review-checklist-body">
-                              <strong className="review-checklist-label">还有 {readiness.issues.length - 4} 项</strong>
-                              <span className="review-checklist-guidance">回到第一步的产品审查面板查看完整列表。</span>
-                            </span>
-                          </li>
-                        )}
                       </ul>
                     </div>
                   )}
@@ -1200,6 +1211,7 @@ export function App() {
                             className="task-row-grid"
                             data-active={activeTask?.id === task.id}
                             data-done={task.state === "confirmed" || task.state === "resolved"}
+                            data-just-confirmed={justConfirmedTaskId === task.id}
                             onClick={() => setActiveTaskId(task.id)}
                             aria-label={`核查任务：${task.label}`}
                           >

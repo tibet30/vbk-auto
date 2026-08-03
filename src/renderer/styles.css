@@ -3355,6 +3355,19 @@ a:hover { text-decoration: underline; }
 .readiness-hero-body strong { font-size: var(--fs-sm); color: var(--foreground); }
 .readiness-hero-body small { margin-top: 2px; color: var(--muted-foreground); font-size: var(--fs-xs); line-height: 1.5; }
 
+.readiness-hero-meta-link {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--link);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  text-align: left;
+}
+.readiness-hero-meta-link:hover { text-decoration: underline; }
+
 .readiness-hero-progress { display: grid; justify-items: end; gap: 1px; }
 .readiness-hero-progress strong { color: var(--foreground); font-size: var(--fs-lg); font-variant-numeric: tabular-nums; }
 .readiness-hero-progress small { color: var(--muted-foreground); font-size: 10px; }
@@ -3400,6 +3413,16 @@ a:hover { text-decoration: underline; }
   border-radius: var(--radius-control);
   background: var(--surface);
   overflow: hidden;
+}
+
+/* Step 2 review-summary 使用完整列表：不要撑满整个面板；
+   仅 1‑2 轮 issue 时不高，超过 3 轮才出滚动条。 */
+.review-checklist--full { overflow: visible; }
+
+.review-checklist-list--full {
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .review-checklist-head {
@@ -3526,6 +3549,18 @@ a:hover { text-decoration: underline; }
 .task-row-grid:hover { background: var(--muted); }
 .task-row-grid[data-active='true'] { border-color: var(--ai-teal); background: #f0fdfa; }
 .task-row-grid[data-done='true'] { opacity: 0.72; }
+
+/* 刚被 confirmTask 确认的 task：1.2s 绿色闪动，让运营一眼看到刚才点的那条成功。
+   background 动从 success 浅色 → transparent，不要在 border / opacity 上动手脚。
+   animation-fill-mode 默认 forwards：动画完成后保留结束帧（transparent）。 */
+.task-row-grid[data-just-confirmed='true'] {
+  animation: row-confirmed-flash 1.2s ease-out;
+}
+
+@keyframes row-confirmed-flash {
+  0% { background: #dcfce7; }
+  100% { background: transparent; }
+}
 
 .task-row-grid .marker {
   width: 22px;

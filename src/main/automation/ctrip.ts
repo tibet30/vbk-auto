@@ -2207,6 +2207,14 @@ async function fillButlerContact(page, selection) {
  * 地接社 / 管家）红错。basic 阶段的「下一步」已由通用 saveThenAdvance
  * 负责，本函数只读页面状态；不再负责点「保存」、「下一步」、提交审核或
  * 发布。
+ *
+ * watcher → 填表函数一一对应表：
+ *   "国家景区"   ⇒  fillScenicAreaProvince / fillScenicAreaSpots
+ *   "提前预订"   ⇒  fillAdvanceBooking
+ *   "地接社"     ⇒  fillLocalTravelAgency
+ *   "管家"       ⇒  fillButlerContact
+ * 任何一项改了页面结构（class名、必填标记、提交逻辑），请同步调整上面
+ * 的填表函数与这里 watched 列表；不全表则红错遗漏→人工发现代价大。
  */
 async function assertBasicInfoNoRedErrors(page) {
   await delay(800);

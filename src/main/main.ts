@@ -11,7 +11,8 @@ import { resolveVehicleResource } from "./vehicle-resource.js";
 import { resolveHotelResource } from "./hotel-resource.js";
 import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./provider-id-source.js";
 import { listProviderContactCards } from "./butler-contacts.js";
-import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, CreateProjectInput, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
+import { applyManualReviewField } from "./manual-review-field.js";
+import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, CreateProjectInput, ManualReviewFieldInput, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 import { VbkDatabaseError, projectNotFound } from "./db-errors.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -127,6 +128,18 @@ function registerIpc() {
     let next: Record<string, unknown>;
     try { next = JSON.parse(json); }
     catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
+    parseProduct(next);
+    db.updateProduct(id, next, "review");
+    emitProject(db.getProject(id)!);
+    return db.getProject(id)!;
+  });
+  // 运营人员直接在 UI 上录入的「需要人工复核」字段（例如定价 pricing）。
+  // 仅允许 ManualReviewFieldInput 白名单，product 走 schema 校验后才落库；
+  // 路径不走 JSON patch，避免与 AI 写入口径混在一起难以追溯。
+  ipcMain.handle("projects:updateReviewField", (_event, id: string, input: ManualReviewFieldInput) => {
+    const project = db.getProject(id);
+    if (!project) throw projectNotFound(id);
+    const next = applyManualReviewField(project.product, input);
     parseProduct(next);
     db.updateProduct(id, next, "review");
     emitProject(db.getProject(id)!);

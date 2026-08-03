@@ -171,6 +171,8 @@ export class VbkDatabase {
    * 并在 project.automation.recovery.phases 里把所有仍处于 running / advising
    * 的记录强制改成 needs_user，避免 UI 一直显示「正在录入」。
    * 用 status+updated_at 双重 LIKE 拿到 payload_json 后就地回写。
+   * 同时把项目状态置为 blocked（项目列表 / 面包屑根据 status 字段染色），
+   * 防止「automating」与「run=failed」不一致让 UI 进退两难。
    */
   recoverOrphanAutomationRuns() {
     const orphans = this.db.prepare(`
@@ -194,6 +196,12 @@ export class VbkDatabase {
           run.logs.push({ at: new Date().toISOString(), message: "应用重启，自动录入已停止，请重新保存草稿", level: "warning" });
         }
         this.db.prepare("UPDATE automation_runs SET payload_json=?, updated_at=? WHERE project_id=? AND payload_json LIKE '%\"status\":\"running\"%'").run(JSON.stringify(run), now(), row.project_id);
+        // 项目状态置为 blocked，但只在本就是 automating / planning 等活跃状态时；
+        // 不动 draft_saved / blocked，避免误伤刚刚成功保存的项目。
+        const project = this.db.prepare("SELECT status FROM projects WHERE id=?").get(row.project_id) as { status: string } | undefined;
+        if (project && project.status !== "draft_saved" && project.status !== "blocked") {
+          this.db.prepare("UPDATE projects SET status=?, updated_at=? WHERE id=?").run("blocked", now(), row.project_id);
+        }
         touchedProjects.push(row.project_id);
       } catch { /* leave unreadable legacy payload untouched */ }
     }
@@ -240,8 +248,12 @@ export class VbkDatabase {
     const current = this.getSetting("vbkAccountName")?.value;
     if (current) names.add(current);
     for (const row of rows) {
-      const value = this.getSetting(row.key)?.value;
-      if (value) names.add(value);
+      // providerIdByAccount:* 的 value 是数字化的 providerId，不是账号名；
+      // 调旧逻辑会把 providerId 串当账号泄露到 settings popover 里。
+      if (row.key === "vbkAccountName") {
+        const value = this.getSetting(row.key)?.value;
+        if (value) names.add(value);
+      }
       if (row.key.startsWith("accountFixedInfo:")) names.add(row.key.slice("accountFixedInfo:".length));
       if (row.key.startsWith("providerIdByAccount:")) names.add(row.key.slice("providerIdByAccount:".length));
     }

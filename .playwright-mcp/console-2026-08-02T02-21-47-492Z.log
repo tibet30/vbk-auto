@@ -1,0 +1,2 @@
+[     150ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/@fs/Users/cisco/Documents/vbk-auto/node_modules/.vite/deps/react-dom_client.js?v=c3e03878:14333
+[     197ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/favicon.ico:0

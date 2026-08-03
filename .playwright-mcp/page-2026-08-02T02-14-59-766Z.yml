@@ -1,0 +1,41 @@
+- generic [ref=e3]:
+  - complementary "主导航" [ref=e4]:
+    - generic [ref=e5]: VBK
+    - button "工作台" [ref=e6] [cursor=pointer]
+    - button "项目" [ref=e11] [cursor=pointer]
+    - button "设置" [ref=e16] [cursor=pointer]
+    - button "当前 VBK 账号：未登录" [ref=e21] [cursor=pointer]: 未
+  - main [ref=e22]:
+    - generic [ref=e23]:
+      - navigation "项目导航" [ref=e24]:
+        - generic [ref=e25]: VBK Desktop
+      - button "当前 VBK 账号：未登录" [ref=e27] [cursor=pointer]: 未登录
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - heading "工作台" [level=1] [ref=e32]
+          - paragraph [ref=e33]: 只保留日常操作必须入口：AI 连接、VBK 登录和产品项目。
+        - button "新建产品" [ref=e34] [cursor=pointer]
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e42]:
+            - strong [ref=e43]: MiniMax
+            - generic [ref=e44]: 未配置 API Key
+          - button "配置" [ref=e45] [cursor=pointer]
+        - generic [ref=e46]:
+          - generic [ref=e51]:
+            - strong [ref=e52]: VBK
+            - generic [ref=e53]: 需要登录后核查和保存草稿
+          - button "登录" [ref=e54] [cursor=pointer]
+        - generic [ref=e58]:
+          - generic [ref=e64]:
+            - strong [ref=e65]: 产品
+            - generic [ref=e66]: 0 个产品项目
+          - button "进入列表" [ref=e67] [cursor=pointer]
+      - generic [ref=e68]:
+        - generic [ref=e69]:
+          - strong [ref=e70]: 产品快捷入口
+          - generic [ref=e71]: 新建产品后会直接进入产品详情；详情面包屑可返回项目列表。
+        - generic [ref=e72]:
+          - button "新建产品" [ref=e73] [cursor=pointer]
+          - button "产品列表" [ref=e75] [cursor=pointer]

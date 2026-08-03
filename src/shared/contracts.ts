@@ -64,6 +64,61 @@ export interface Evidence {
   accepted: boolean;
 }
 
+export type AdvisorAction =
+  | "retry_same_phase"
+  | "reload_and_retry_phase"
+  | "reopen_editor_and_retry_phase"
+  | "wait_for_user";
+
+export interface AdvisorRequest {
+  phase: string;
+  attempt: number;            // 1..3
+  error: string;              // 已脱敏
+  productIdExists: boolean;
+  basicInfoSaved: boolean;
+  completedPhases: string[];
+  diagnosisHistory: Array<{
+    summary: string;
+    rootCause: string;
+    action: AdvisorAction;
+    expectedEvidence: string;
+  }>;
+}
+
+export interface AdvisorOutcome {
+  summary: string;
+  rootCause: string;
+  action: AdvisorAction;
+  expectedEvidence: string;
+  userInstruction?: string;
+}
+
+export type RecoveryState =
+  | "running"
+  | "advising"
+  | "retrying"
+  | "needs_user"
+  | "completed";
+
+export interface PhaseAttempt {
+  attempt: number;
+  error: string;
+  diagnosis?: { summary: string; rootCause: string; expectedEvidence: string };
+  action?: AdvisorAction;
+  at: string;                 // ISO timestamp
+}
+
+export interface PhaseRecovery {
+  phase: string;
+  state: RecoveryState;
+  attempts: PhaseAttempt[];
+  /** 上一轮未完成（needs_user）后被重新进入 phase 时，老的 attempts 会被
+   *  归档到这里，rec.attempts 仅保留当前轮的 attempt；渲染时应合并显示。 */
+  attemptsHistory?: PhaseAttempt[];
+  userInstruction?: string;
+  finalError?: string;
+}
+
 export interface AutomationRun {
   id: string;
   status: TaskStatus;
@@ -71,6 +126,7 @@ export interface AutomationRun {
   phases: Array<{ phase: string; status: "pending" | "running" | "completed" | "failed" }>;
   logs: Array<{ at: string; message: string; level: "info" | "warning" | "error" }>;
   screenshot?: string;
+  recovery?: { phases: Record<string, PhaseRecovery> };
 }
 
 export interface Settings {
@@ -95,11 +151,80 @@ export interface VehicleResourceMatch {
   resourceGroupName: string;
 }
 
+export type AiRegenerateField = "subtitle" | "province" | "operationNotes" | "pricing" | "itinerary" | "sellingPoints";
+
+export type ManualReviewFieldInput =
+  { field: "pricing"; adult: number; child: number };
+
+export interface VehicleResourcePricePreview extends VehicleResourceMatch {
+  previewId: string;
+  requestedDailyCost: number;
+  matchedDailyCost: number;
+  matchMode: "exact" | "roundedUp";
+}
+
+export interface HotelResourceMatch {
+  source: "vbk" | "nonPlatform";
+  resourceId?: number;
+  resourceName: string;
+  supplierCode?: string;
+  roomType?: string;
+  query?: string;
+}
+
 export interface VbkLoginStatus {
   loggedIn: boolean;
   message: string;
+  /** VBK 页面展示名，例如“小璐”。 */
   accountName?: string;
+  /** VBK 登录账号，例如“vbk_671205”。 */
+  loginAccount?: string;
   accounts?: string[];
+}
+
+/**
+ * 账号在本机保存的固定信息。当前两项：400 电话（自由文本）、管家联系人
+ * （从 VBK 接口下拉选择，需要保存联系卡 ID 以便后续回填）。地接社名称属于
+ * 自动化在 VBK 当前页下拉里选的运行时数据，不属于账号固定信息。
+ */
+export type AccountFixedInfoFieldKey = "servicePhone" | "butlerName";
+
+export type AccountFixedInfoValue = string | ContactCardSelection;
+
+export interface ContactCardSelection {
+  /** VBK 上的联系人卡 ID，用于 selectedContactCardIdList 回填。 */
+  contactCardId: number;
+  /** 联系人显示名；同时作为设置里给人看的文案。 */
+  displayName: string;
+  /** 联系人卡所属供应商 ID，调用接口时回传 providerId。 */
+  providerId: number;
+}
+
+export interface AccountFixedInfoField {
+  key: AccountFixedInfoFieldKey;
+  label: string;
+  placeholder: string;
+  /** 输入为空时使用，渲染成「未设置」。 */
+  emptyText: string;
+  description?: string;
+  /** 字段的录入形态：text 是文本框，select 是下拉选择（值由 ContactCardSelection 提供）。 */
+  kind: "text" | "select";
+}
+
+export interface AccountFixedInfo {
+  accountName: string;
+  values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue>>;
+}
+
+/**
+ * VBK 接口返回的管家/联系人选项，用于弹窗里下拉展示。
+ */
+export interface ProviderContactCard {
+  contactCardId: number;
+  displayName: string;
+  providerId: number;
+  /** 接口可能附带额外字段（职位、手机号、是否默认等），原样透传给上层。 */
+  extra?: Record<string, unknown>;
 }
 
 export interface AiResponse {
@@ -114,12 +239,21 @@ export interface VbkApi {
     list(): Promise<ProjectSummary[]>;
     create(input: CreateProjectInput): Promise<ProjectDetail>;
     get(id: string): Promise<ProjectDetail>;
+    delete(id: string): Promise<void>;
     readiness(id: string): Promise<ProjectReadiness>;
+    updateReviewField(id: string, input: ManualReviewFieldInput): Promise<ProjectDetail>;
+    updateProductJson(id: string, json: string): Promise<ProjectDetail>;
   };
-  ai: { send(projectId: string, content: string): Promise<void> };
+  ai: {
+    send(projectId: string, content: string): Promise<void>;
+    regenerate(projectId: string, field: AiRegenerateField): Promise<void>;
+  };
   research: {
     accept(projectId: string, taskId: string, note?: string): Promise<void>;
     resolveVehicleResource(projectId: string, taskId?: string): Promise<VehicleResourceMatch>;
+    previewVehicleResourceByPrice(projectId: string, dailyCost: number): Promise<VehicleResourcePricePreview>;
+    confirmVehicleResourcePreview(projectId: string, previewId: string): Promise<VehicleResourceMatch>;
+    resolveHotelResource(projectId: string, taskId?: string): Promise<HotelResourceMatch>;
   };
   browser: {
     login(): Promise<void>;
@@ -130,7 +264,31 @@ export interface VbkApi {
     setBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
     setVisible(visible: boolean): Promise<void>;
   };
-  automation: { start(projectId: string): Promise<void>; retry(projectId: string): Promise<void> };
+  automation: {
+    start(projectId: string): Promise<void>;
+    retry(projectId: string): Promise<void>;
+    retryPhase(projectId: string, phase: string): Promise<void>;
+  };
+  accounts: {
+    /** 返回 VBK 账号在本机保存的固定信息（当前：400 电话、管家联系人）。 */
+    getFixedInfo(accountName: string): Promise<AccountFixedInfo>;
+    /** 保存某 VBK 账号的固定信息；未填写的字段保持现状。 */
+    saveFixedInfo(accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>): Promise<AccountFixedInfo>;
+    /** 弹窗里展示的字段定义（label / placeholder / 空文案 / kind），前端只读。 */
+    fixedInfoSchema(): Promise<AccountFixedInfoField[]>;
+    /** 从当前已登录的 VBK 浏览器页面自动识别 providerId，抓不到返回 null。 */
+    detectProviderId(): Promise<number | null>;
+    /** 返回 main 进程已缓存的当前账号 providerId（登录后由 scheduleProviderIdRefresh 写入）。 */
+    currentProviderId(): Promise<number | null>;
+    /** 列出本机所有登过的 VBK 账号及其历史 providerId（如有）。供设置页 / 顶栏展示。 */
+    listKnownAccounts(): Promise<Array<{ accountName: string; providerId?: number }>>;
+    /** 按账号名查 providerId；未记录返回 null。 */
+    providerIdFor(accountName: string): Promise<number | null>;
+  };
+  contacts: {
+    /** 在 VBK 已登录的浏览器上下文里拉取 providerId 对应的联系人卡片列表。 */
+    listProviderContactCards(providerId: number, searchKeyword?: string): Promise<ProviderContactCard[]>;
+  };
   settings: {
     get(): Promise<Settings>;
     getApiKey(): Promise<string>;

@@ -9,25 +9,30 @@ export interface VehicleResourceEstimateInput {
   serviceHoursPerDay?: number;
 }
 
+export interface VehicleResourceQuery {
+  city: string;
+  days: number;
+  seats: number;
+  tier: string;
+  serviceHoursPerDay: number;
+  query: string;
+}
+
 export interface ResolvedVehicleResource {
   query: string;
   city: string;
   days: number;
-  dailyCost: number;
-  totalCost: number;
+  dailyCost?: number;
+  totalCost?: number;
   resourceGroupId: number;
   resourceGroupName: string;
-  resourceGroupMaxItemPrice: number;
+  resourceGroupMaxItemPrice?: number;
   vehicleId?: number;
   resourceId?: number;
   vehicleModel?: string;
   resourceName?: string;
   supplierCode?: string;
 }
-
-const defaultCityCost: Record<string, number> = {
-  太原: 400,
-};
 
 function positiveInteger(value: unknown) {
   const numberValue = Number(value);
@@ -59,23 +64,28 @@ function firstNumber(record: Record<string, unknown>, keys: string[]) {
   return undefined;
 }
 
-export function estimateVehicleResource(input: VehicleResourceEstimateInput) {
-  const city = textValue(input.city) || "太原";
+/**
+ * 把城市/天数/座位/用车时长打包成 VBK 资源库查询参数。
+ *
+ * 之前版本会按硬编码字典 (“太原 = 400 元/天”) 拉出 estimate.dailyCost 并写
+ * 进产品 operations.vehicleResource，被审计指为 “AI/UI 虚构车队价格”。
+ * 这里只暴露 query、座位、时长这类 UI 能直接看懂的字段；任何给到产品 JSON
+ * 的金额都来自 VBK 资源组接口的 resourceGroupMaxItemPrice。
+ */
+export function buildVehicleResourceQuery(input: VehicleResourceEstimateInput): VehicleResourceQuery {
+  const city = textValue(input.city);
+  if (!city) throw new Error("用车资源查询需要明确城市。");
   const days = positiveInteger(input.days) || 1;
   const seats = positiveInteger(input.seats) || 5;
   const tier = textValue(input.tier) || "经济";
   const serviceHoursPerDay = positiveInteger(input.serviceHoursPerDay) || 8;
-  const baseDailyCost = defaultCityCost[city] || defaultCityCost.太原;
-  const dailyCost = Math.max(100, Math.round((baseDailyCost * serviceHoursPerDay) / 8 / 10) * 10);
   return {
     city,
     days,
     seats,
     tier,
     serviceHoursPerDay,
-    dailyCost,
-    totalCost: dailyCost * days,
-    query: `${seats}座${tier}${dailyCost}`,
+    query: `${seats}座${tier}`,
   };
 }
 
@@ -174,29 +184,35 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
   const existingVehicle = operations.vehicleResource && typeof operations.vehicleResource === "object" && !Array.isArray(operations.vehicleResource)
     ? operations.vehicleResource as Record<string, unknown>
     : {};
-  const estimate = estimateVehicleResource({
+  const estimate = buildVehicleResourceQuery({
     city: textValue(operations.pickupCity) || textValue(basic.meetingCity) || textValue(basic.destinationCity),
     days: positiveInteger(basic.days),
     serviceHoursPerDay: positiveInteger(existingVehicle.serviceHoursPerDay) || 8,
   });
   const payload = await searchVehicleResourceGroups(page, estimate.query);
   const selected = firstResourceGroup(payload);
-  if (!selected) throw new Error(`VBK 没有返回可用资源组：${estimate.query}`);
+  if (!selected) throw new Error(`VBK 资源库未返回与「${estimate.query}」匹配的资源组，请直接在 VBK 资源库手动核查并以 researchTasks / project 形式记录资源 ID。`);
 
+  // 资源组价格等运营字段只接受来自 VBK 资源库接口的真实值；接口未返回就
+  // 留空，UI 那边会要求运营人员从 VBK 复制金额补全。
   const resolved: ResolvedVehicleResource = {
-    ...selected,
     query: estimate.query,
     city: estimate.city,
     days: estimate.days,
-    dailyCost: estimate.dailyCost,
-    totalCost: estimate.totalCost,
-    resourceGroupMaxItemPrice: selected.resourceGroupMaxItemPrice || estimate.dailyCost,
+    resourceGroupId: selected.resourceGroupId,
+    resourceGroupName: selected.resourceGroupName,
+    resourceGroupMaxItemPrice: selected.resourceGroupMaxItemPrice,
+    vehicleId: selected.vehicleId,
+    resourceId: selected.resourceId,
+    vehicleModel: selected.vehicleModel,
+    resourceName: selected.resourceName,
+    supplierCode: selected.supplierCode,
   };
   const vehicleResource = {
     ...existingVehicle,
     resourceGroupId: resolved.resourceGroupId,
     resourceGroupName: resolved.resourceGroupName,
-    resourceGroupMaxItemPrice: resolved.resourceGroupMaxItemPrice,
+    ...(resolved.resourceGroupMaxItemPrice !== undefined ? { resourceGroupMaxItemPrice: resolved.resourceGroupMaxItemPrice } : {}),
     serviceHoursPerDay: estimate.serviceHoursPerDay,
     serviceKilometersPerDay: positiveInteger(existingVehicle.serviceKilometersPerDay) || 300,
     ...(resolved.vehicleId ? { vehicleId: resolved.vehicleId } : {}),
@@ -215,6 +231,13 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
       vehicleResource,
     },
   };
-  const note = `${estimate.city}${estimate.days}天用车按${estimate.seats}座${estimate.tier}、每天${estimate.serviceHoursPerDay}小时估算：约${estimate.dailyCost}元/天，合计约${estimate.totalCost}元。VBK 搜索“${estimate.query}”，选择第 1 条资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`;
-  return { product: nextProduct, resolved, note };
+  const noteParts: string[] = [
+    `${estimate.city}${estimate.days}天私家团按${estimate.query}、每天${estimate.serviceHoursPerDay}小时在 VBK 资源库搜索。`,
+    `命中 1 条资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`,
+  ];
+  if (resolved.resourceGroupMaxItemPrice !== undefined) noteParts.push(`资源组最高单价 ${resolved.resourceGroupMaxItemPrice} 元以 VBK 为准。`);
+  if (existingVehicle.resourceGroupId && Number(existingVehicle.resourceGroupId) !== resolved.resourceGroupId) {
+    noteParts.push("已替换先前的人工资源组 ID。");
+  }
+  return { product: nextProduct, resolved, note: noteParts.join(" ") };
 }

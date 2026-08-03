@@ -1,0 +1,175 @@
+- generic [ref=e117]:
+  - complementary "主导航" [ref=e118]:
+    - generic [ref=e119]: VBK
+    - button "工作台" [ref=e120] [cursor=pointer]
+    - button "项目" [ref=e125] [cursor=pointer]
+    - button "设置" [ref=e130] [cursor=pointer]
+    - button "当前 VBK 账号：未登录" [ref=e135] [cursor=pointer]: 未
+  - main [ref=e136]:
+    - generic [ref=e137]:
+      - navigation "项目导航" [ref=e138]:
+        - button "返回项目列表" [ref=e194] [cursor=pointer]:
+          - generic [ref=e195]: 项目
+        - generic [ref=e198]:
+          - strong [ref=e199]: 太原3天2晚私家团
+          - generic [ref=e200]: 等待确认
+      - generic "方案就绪状态" [ref=e202]:
+        - strong [ref=e203]: 50%
+        - text: ·0 项待处理
+      - generic [ref=e204]:
+        - button "确认并保存草稿到 VBK" [disabled] [ref=e205]: 保存草稿
+        - button "当前 VBK 账号：未登录" [ref=e208] [cursor=pointer]: 未登录
+    - tablist "产品工作流步骤" [ref=e209]:
+      - tab "AI 对话与产品审查 50% · 等待 AI 回复" [selected] [ref=e210] [cursor=pointer]:
+        - generic [ref=e211]: "1"
+        - generic [ref=e212]:
+          - generic [ref=e213]: AI 对话与产品审查
+          - generic [ref=e214]: 50% · 等待 AI 回复
+      - tab "审查结果与 VBK 录入 尚未录入 VBK · 第一步审查通过后即可在右侧开始保存草稿" [ref=e217] [cursor=pointer]:
+        - generic [ref=e218]: "2"
+        - generic [ref=e219]:
+          - generic [ref=e220]: 审查结果与 VBK 录入
+          - generic [ref=e221]: 尚未录入 VBK · 第一步审查通过后即可在右侧开始保存草稿
+      - generic "当前步骤概要" [ref=e224]: 0 项待处理
+    - tabpanel "AI 对话与产品审查 50% · 等待 AI 回复" [ref=e229]:
+      - generic [ref=e230]:
+        - region "方案协作" [ref=e231]:
+          - generic [ref=e232]:
+            - generic [ref=e233]:
+              - generic [ref=e234]: "01"
+              - strong [ref=e235]: 方案协作
+            - generic [ref=e236]: 3 条对话 · 可继续追问
+          - log [ref=e237]:
+            - article [ref=e238]:
+              - generic [ref=e239]: 我
+              - generic [ref=e240]:
+                - paragraph [ref=e242]: 开始生成
+                - generic [ref=e243]: 10:18
+            - article [ref=e244]:
+              - generic [ref=e249]:
+                - paragraph [ref=e251]: 已创建「太原3天2晚私家团」。已带入项目上下文：目的地「太原」、产品形态「私家团」、行程「3天2晚」。请告诉我希望生成或调整什么方案。
+                - generic [ref=e252]: 10:20
+            - article [ref=e253]:
+              - generic [ref=e254]: 我
+              - generic [ref=e255]:
+                - paragraph [ref=e257]: 开始生成
+                - generic [ref=e258]:
+                  - text: 10:21
+                  - generic [ref=e259]: ·
+                  - generic [ref=e260]: 正在等待 AI 回复
+          - generic [ref=e264]:
+            - textbox "方案协作输入" [ref=e265]:
+              - /placeholder: 例如：把这个产品改成亲子主题；或：在右侧浏览器里核查 XX 资源组后，把结果告诉我…
+            - generic [ref=e266]:
+              - generic [ref=e267]: 项目上下文已带入；资源自动匹配，价格按行程景点估算。
+              - generic [ref=e269]:
+                - generic [ref=e270]:
+                  - generic [ref=e271]: ⌘
+                  - generic [ref=e272]: ↵
+                - button "发送消息，Command 加回车可快速发送" [disabled] [ref=e273]
+        - region "产品审查" [ref=e277]:
+          - generic [ref=e278]:
+            - generic [ref=e279]:
+              - generic [ref=e280]: "02"
+              - strong [ref=e281]: 产品审查
+            - tablist "产品审查视图" [ref=e441]:
+              - tab "结构化" [selected] [ref=e442] [cursor=pointer]
+              - tab "JSON" [ref=e446] [cursor=pointer]
+            - generic [ref=e450]: 0 项待处理
+          - generic [ref=e283]:
+            - generic [ref=e284]:
+              - generic [ref=e289]:
+                - strong [ref=e290]: 下一步：先完成待核查项目
+                - generic [ref=e291]: 第一版方案已经生成；解决下方高优先级问题后即可保存 VBK 草稿。
+              - generic [ref=e292]:
+                - strong [ref=e293]: 50%
+                - generic [ref=e294]: 就绪度
+            - generic [ref=e295]:
+              - generic [ref=e296]:
+                - generic [ref=e297]: A
+                - strong [ref=e298]: 基础与运营信息
+              - generic [ref=e299]:
+                - generic [ref=e300]:
+                  - generic [ref=e301]: 产品名称
+                  - strong [ref=e303]: 待生成
+                - generic [ref=e304]:
+                  - generic [ref=e305]:
+                    - generic [ref=e306]: 产品副标题
+                    - button "重新生成产品副标题" [ref=e307] [cursor=pointer]:
+                      - generic [ref=e313]: 重新生成
+                  - strong [ref=e314]: 待生成
+                - generic [ref=e315]:
+                  - generic [ref=e316]: 集合城市
+                  - strong [ref=e318]: 待生成
+                - generic [ref=e319]:
+                  - generic [ref=e320]: 目的城市
+                  - strong [ref=e322]: 待生成
+                - generic [ref=e323]:
+                  - generic [ref=e324]:
+                    - generic [ref=e325]: 所属省份
+                    - button "重新生成所属省份" [ref=e326] [cursor=pointer]:
+                      - generic [ref=e332]: 重新生成
+                  - strong [ref=e333]: 待生成
+                - generic [ref=e334]:
+                  - generic [ref=e335]: 行程规格
+                  - strong [ref=e337]: 待生成 天 待生成 晚
+                - generic [ref=e338]:
+                  - generic [ref=e339]:
+                    - generic [ref=e340]: 成人 / 儿童估价
+                    - generic [ref=e341]:
+                      - button "手动调整" [ref=e342] [cursor=pointer]
+                      - button "重新生成成人 / 儿童估价" [ref=e347] [cursor=pointer]:
+                        - generic [ref=e353]: 重新生成
+                  - strong [ref=e354]: 待生成
+                - generic [ref=e355]:
+                  - generic [ref=e356]:
+                    - generic [ref=e357]: VBK 用车资源
+                    - generic [ref=e358]:
+                      - button "按价格调整" [ref=e359] [cursor=pointer]
+                      - button "按系统估价重新匹配 VBK 用车资源" [ref=e364] [cursor=pointer]:
+                        - generic [ref=e370]: 自动匹配
+                  - strong [ref=e371]: 待生成
+                - generic [ref=e372]:
+                  - generic [ref=e373]:
+                    - generic [ref=e374]: VBK 酒店资源
+                    - button "重新匹配 VBK 酒店资源" [ref=e375] [cursor=pointer]:
+                      - generic [ref=e381]: 重新匹配
+                  - strong [ref=e382]: 待生成
+                - generic [ref=e383]:
+                  - generic [ref=e384]:
+                    - generic [ref=e385]: 运营说明
+                    - button "重新生成运营说明" [ref=e386] [cursor=pointer]:
+                      - generic [ref=e392]: 重新生成
+                  - strong [ref=e393]: 待生成
+            - generic [ref=e394]:
+              - generic [ref=e395]:
+                - generic [ref=e396]: B
+                - strong [ref=e397]: 每日行程
+                - button "重新生成每日行程" [ref=e398] [cursor=pointer]:
+                  - generic [ref=e404]: 重新生成
+                - generic [ref=e405]: 0 天
+              - paragraph [ref=e406]: 正在等待 AI 生成第一版行程。
+            - generic [ref=e407]:
+              - generic [ref=e408]:
+                - generic [ref=e409]: C
+                - strong [ref=e410]: 产品卖点
+                - button "重新生成产品卖点" [ref=e411] [cursor=pointer]:
+                  - generic [ref=e417]: 重新生成
+              - generic [ref=e418]:
+                - generic [ref=e419]:
+                  - generic [ref=e420]: 面向客人的推荐语
+                  - strong [ref=e421]: 待生成
+                - generic [ref=e422]:
+                  - generic [ref=e423]: 产品特点
+                  - paragraph [ref=e424]: 待生成
+            - generic [ref=e425]:
+              - generic [ref=e426]:
+                - generic [ref=e427]: D
+                - strong [ref=e428]: 录入前检查
+                - generic [ref=e429]: 已通过
+              - generic [ref=e430]: 通过完整性检查，可以保存 VBK 草稿。
+          - generic [ref=e434]:
+            - generic [ref=e435]:
+              - strong [ref=e436]: ⏳ 进行中
+              - text: 还需 0 项核查
+            - button "前往 VBK 录入" [disabled] [ref=e437]

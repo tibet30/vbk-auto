@@ -1825,7 +1825,8 @@ a:hover { text-decoration: underline; }
   min-height: 64px;
 }
 
-.itinerary-timeline-item > time {
+.itinerary-timeline-item > time,
+.itinerary-timeline-label {
   padding-top: 1px;
   color: var(--muted-foreground);
   font-family: var(--font-mono);
@@ -1888,6 +1889,24 @@ a:hover { text-decoration: underline; }
   color: var(--muted-foreground);
   font-size: var(--fs-sm);
   line-height: 1.6;
+}
+
+.itinerary-day-description {
+  max-width: 72ch;
+  margin: 8px 0 16px 64px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.itinerary-day-empty {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--subtle);
+  font-size: var(--fs-sm);
 }
 
 .itinerary-day-facts {
@@ -3881,4 +3900,147 @@ a:hover { text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
   .fixed-info-modal-overlay, .fixed-info-modal { animation: none; }
+}
+
+/* ============================================================
+ * 自动录入 recovery 提示（needs_user / advising / retrying）
+ * 仅用现有 token；1px 边框；状态颜色 + 文字标识同时出现，不依赖单一色彩。
+ * ============================================================ */
+
+.recovery-banner {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.recovery-banner[data-state='advising'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 45%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 6%, var(--surface));
+}
+
+.recovery-banner[data-state='retrying'] {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning) 6%, var(--surface));
+}
+
+.recovery-banner[data-state='needs_user'] {
+  border-color: color-mix(in srgb, var(--destructive) 50%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 6%, var(--surface));
+}
+
+.recovery-banner:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.recovery-banner > svg {
+  color: var(--muted-foreground);
+  margin-top: 2px;
+}
+
+.recovery-banner[data-state='advising'] > svg { color: var(--ai-teal); }
+.recovery-banner[data-state='retrying'] > svg { color: var(--warning); }
+.recovery-banner[data-state='needs_user'] > svg { color: var(--destructive); }
+
+.recovery-banner-body { min-width: 0; display: grid; gap: 4px; }
+.recovery-banner-body strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+}
+
+.recovery-banner-instruction {
+  margin: 0;
+  color: var(--foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.recovery-attempts {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.recovery-attempt {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.recovery-attempt[data-state='latest'] {
+  border-color: color-mix(in srgb, var(--destructive) 40%, var(--border));
+}
+
+/* 历史轮的 attempt 用中性边框颜色，让运营一眼区分两轮。
+   “上一轮”的诊断作为参考，“本轮”的诊断是要看的原因。 */
+.recovery-attempt[data-round='1'] {
+  border-color: color-mix(in srgb, var(--muted-foreground) 25%, var(--border));
+  background: color-mix(in srgb, var(--muted-foreground) 4%, var(--bg));
+}
+
+.recovery-attempt[data-round='1'][data-state='latest'] {
+  border-color: color-mix(in srgb, var(--muted-foreground) 30%, var(--border));
+}
+
+.recovery-attempt-index {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.recovery-attempt-cause {
+  color: var(--foreground);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.recovery-attempt-cause.muted { color: var(--muted-foreground); font-style: italic; }
+
+.recovery-attempt-evidence {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.recovery-attempt-error {
+  display: block;
+  margin: 2px 0 0;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recovery-banner { transition: none; }
 }

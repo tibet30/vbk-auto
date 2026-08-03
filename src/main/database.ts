@@ -2,7 +2,8 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AutomationRun, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, TaskStatus } from "../shared/contracts.js";
+import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoFieldKey, AccountFixedInfoValue, AutomationRun, ContactCardSelection, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, TaskStatus } from "../shared/contracts.js";
+import { DEFAULT_HOTEL_TIER } from "../shared/hotel-tiers.js";
 import { normaliseProductDraft } from "./product-normalize.js";
 
 const now = () => new Date().toISOString();
@@ -94,7 +95,7 @@ export class VbkDatabase {
       },
       operations: {
         hotelSource: "nonPlatform",
-        hotelTier: "当地5钻酒店/-5",
+        hotelTier: DEFAULT_HOTEL_TIER,
         mealsIncluded: false,
       },
       itinerary: [],
@@ -118,6 +119,24 @@ export class VbkDatabase {
       automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
       basicInfoSaved: Number(project.basic_info_saved) === 1,
     };
+  }
+
+  deleteProject(id: string): boolean {
+    const remove = this.db.transaction((projectId: string) => {
+      const project = this.getProject(projectId);
+      if (!project) return false;
+      if (project.status === "automating" || project.automation?.status === "running") {
+        throw new Error("项目正在自动录入，完成或停止后才能删除。");
+      }
+      const activeMessage = this.db.prepare("SELECT 1 FROM messages WHERE project_id=? AND task_status='running' LIMIT 1").get(projectId);
+      if (activeMessage) throw new Error("AI 正在处理这个项目，请等待本轮完成后再删除。");
+      this.db.prepare("DELETE FROM automation_runs WHERE project_id=?").run(projectId);
+      this.db.prepare("DELETE FROM research_tasks WHERE project_id=?").run(projectId);
+      this.db.prepare("DELETE FROM messages WHERE project_id=?").run(projectId);
+      this.db.prepare("DELETE FROM projects WHERE id=?").run(projectId);
+      return true;
+    });
+    return remove(id);
   }
 
   addMessage(projectId: string, role: ConversationMessage["role"], content: string, taskStatus?: ConversationMessage["taskStatus"]) {
@@ -145,6 +164,91 @@ export class VbkDatabase {
       this.updateMessageStatus(message.project_id, message.id, "failed");
       this.addMessage(message.project_id, "assistant", "上一轮在应用关闭前没有完成，未获得 AI 回复。请重新发送这条消息。", "failed");
     }
+  }
+
+  /**
+   * 重启时清理 automation.status=running 的孤儿 run：标记为 failed，
+   * 并在 project.automation.recovery.phases 里把所有仍处于 running / advising
+   * 的记录强制改成 needs_user，避免 UI 一直显示「正在录入」。
+   * 用 status+updated_at 双重 LIKE 拿到 payload_json 后就地回写。
+   */
+  recoverOrphanAutomationRuns() {
+    const orphans = this.db.prepare(`
+      SELECT project_id, payload_json FROM automation_runs
+      WHERE payload_json LIKE '%"status":"running"%'
+    `).all() as Array<{ project_id: string; payload_json: string }>;
+    let touchedProjects: string[] = [];
+    for (const row of orphans) {
+      try {
+        const run = JSON.parse(row.payload_json) as AutomationRun;
+        if (run.status !== "running") continue;
+        run.status = "failed";
+        if (run.recovery?.phases) {
+          for (const rec of Object.values(run.recovery.phases)) {
+            if (rec.state === "running" || rec.state === "advising" || rec.state === "retrying") {
+              rec.state = "needs_user";
+              rec.finalError = rec.finalError || "应用重启导致自动录入被中断";
+              if (!rec.userInstruction) rec.userInstruction = "请在 VBK 核查基础信息后重新保存草稿。";
+            }
+          }
+          run.logs.push({ at: new Date().toISOString(), message: "应用重启，自动录入已停止，请重新保存草稿", level: "warning" });
+        }
+        this.db.prepare("UPDATE automation_runs SET payload_json=?, updated_at=? WHERE project_id=? AND payload_json LIKE '%\"status\":\"running\"%'").run(JSON.stringify(run), now(), row.project_id);
+        touchedProjects.push(row.project_id);
+      } catch { /* leave unreadable legacy payload untouched */ }
+    }
+    return touchedProjects;
+  }
+
+  /**
+   * 上次对当前账号在 VBK 抓到的 providerId，启动时由 scheduleProviderIdRefresh 写入。
+   * 历史账号没有抓到时返回 null，UI 允许运营手动补录或忽略。
+   */
+  providerIdFor(accountName: string): number | null {
+    const name = (accountName || "").trim();
+    if (!name) return null;
+    const key = `providerIdByAccount:${name}`;
+    const raw = this.getSetting(key)?.value;
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  setProviderIdFor(accountName: string, providerId: number | null) {
+    const name = (accountName || "").trim();
+    if (!name) return;
+    const key = `providerIdByAccount:${name}`;
+    if (providerId == null || !Number.isInteger(providerId) || providerId <= 0) {
+      this.db.prepare("DELETE FROM settings WHERE key=?").run(key);
+      return;
+    }
+    this.setSetting(key, String(providerId));
+  }
+
+  /**
+   * 列出本机已登录过的 VBK 账号 + 上次抓到的 providerId。
+   * 注意只返回曾经被记录过的账号，避免把 settings 里随便一个同名 key 当成账号泄露。
+   */
+  listKnownAccounts(): Array<{ accountName: string; providerId?: number }> {
+    const rows = this.db.prepare(`
+      SELECT DISTINCT key FROM settings
+      WHERE key IN ('vbkAccountName', 'accountFixedInfo:placeholder')
+        OR key LIKE 'accountFixedInfo:%'
+        OR key LIKE 'providerIdByAccount:%'
+    `).all() as Array<{ key: string }>;
+    const names = new Set<string>();
+    const current = this.getSetting("vbkAccountName")?.value;
+    if (current) names.add(current);
+    for (const row of rows) {
+      const value = this.getSetting(row.key)?.value;
+      if (value) names.add(value);
+      if (row.key.startsWith("accountFixedInfo:")) names.add(row.key.slice("accountFixedInfo:".length));
+      if (row.key.startsWith("providerIdByAccount:")) names.add(row.key.slice("providerIdByAccount:".length));
+    }
+    return Array.from(names).filter(Boolean).sort().map((accountName) => {
+      const providerId = this.providerIdFor(accountName);
+      return providerId ? { accountName, providerId } : { accountName };
+    });
   }
   updateProduct(id: string, product: Record<string, unknown>, status?: ProjectSummary["status"]) {
     this.db.prepare("UPDATE projects SET product_json=?, status=COALESCE(?,status), updated_at=? WHERE id=?").run(JSON.stringify(product), status || null, now(), id);
@@ -192,4 +296,93 @@ export class VbkDatabase {
     this.db.prepare("UPDATE projects SET basic_info_saved=?,updated_at=? WHERE id=?").run(saved ? 1 : 0, now(), projectId);
   }
   private touch(id: string) { this.db.prepare("UPDATE projects SET updated_at=? WHERE id=?").run(now(), id); }
+
+  /**
+   * 账号在本机保存的固定信息（例如 400 电话）。当前只有 servicePhone 一项；
+   * 结构以对象形式保存，便于后续直接加字段而不动 schema。
+   * 存在 settings 表里按 accountFixedInfo:<accountName> 取 key，避免新增表。
+   */
+  private static readonly FIXED_INFO_FIELDS: AccountFixedInfoField[] = [
+    { key: "servicePhone", label: "400 电话", placeholder: "请输入 400 电话号码", emptyText: "尚未设置", kind: "text" },
+    { key: "butlerName", label: "管家联系人", placeholder: "点击右侧刷新从 VBK 拉取联系人", emptyText: "尚未选择", kind: "select" },
+  ];
+
+  static fixedInfoSchema(): AccountFixedInfoField[] {
+    // 字段定义由 main 持有，渲染端只读，避免重复定义漂移。
+    return VbkDatabase.FIXED_INFO_FIELDS.map((field) => ({ ...field }));
+  }
+
+  getAccountFixedInfo(accountName: string): AccountFixedInfo {
+    const key = this.fixedInfoKey(accountName);
+    const row = this.getSetting(key);
+    return this.decodeAccountFixedInfo(accountName, row?.value);
+  }
+
+  /**
+   * 合并更新某账号的固定信息：传入的字段会覆盖，未传入的字段保持原值。
+   * text 字段的空字符串、select 字段的 null/undefined 都视作「未设置」并清除。
+   */
+  setAccountFixedInfo(
+    accountName: string,
+    values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>,
+  ): AccountFixedInfo {
+    const current = this.getAccountFixedInfo(accountName);
+    const merged: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue>> = { ...current.values };
+    for (const field of VbkDatabase.FIXED_INFO_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(values, field.key)) continue;
+      const incoming = (values as Record<string, AccountFixedInfoValue | null | undefined>)[field.key];
+      if (field.kind === "text") {
+        // text 字段：trim 后非空才保留，空字符串视作清除。
+        const text = typeof incoming === "string" ? incoming.trim() : "";
+        if (text) merged[field.key] = text;
+        else delete merged[field.key];
+      } else if (field.kind === "select") {
+        // select 字段：null/undefined 视为清除；其余必须是合法的 ContactCardSelection。
+        if (incoming == null) { delete merged[field.key]; continue; }
+        if (!isContactCardSelection(incoming)) throw new Error(`字段「${field.label}」必须是合法的联系人选择。`);
+        merged[field.key] = incoming;
+      }
+    }
+    const key = this.fixedInfoKey(accountName);
+    if (!merged || Object.keys(merged).length === 0) {
+      // 没有保留任何字段时直接删 key，避免 settings 表里堆陈旧空对象。
+      this.db.prepare("DELETE FROM settings WHERE key=?").run(key);
+      return { accountName, values: {} };
+    }
+    this.setSetting(key, JSON.stringify(merged));
+    return { accountName, values: merged };
+  }
+
+  private fixedInfoKey(accountName: string) {
+    return `accountFixedInfo:${accountName}`;
+  }
+
+  private decodeAccountFixedInfo(accountName: string, raw: string | undefined): AccountFixedInfo {
+    const values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue>> = {};
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          for (const field of VbkDatabase.FIXED_INFO_FIELDS) {
+            const candidate = (parsed as Record<string, unknown>)[field.key];
+            if (candidate == null) continue;
+            if (field.kind === "text") {
+              if (typeof candidate === "string" && candidate.trim()) values[field.key] = candidate.trim();
+            } else if (field.kind === "select" && isContactCardSelection(candidate)) {
+              values[field.key] = candidate;
+            }
+          }
+        }
+      } catch {
+        // 历史脏数据保留现状但不抛错，让运营能继续录入覆盖。
+      }
+    }
+    return { accountName, values };
+  }
+}
+
+function isContactCardSelection(value: unknown): value is ContactCardSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Number.isInteger(record.contactCardId) && Number.isInteger(record.providerId) && typeof record.displayName === "string" && record.displayName.trim().length > 0;
 }

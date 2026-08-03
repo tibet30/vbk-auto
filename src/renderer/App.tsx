@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, BriefcaseBusiness, CarFront, Check, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, Trash2, TriangleAlert, UserRound } from "lucide-react";
+import { Bot, BriefcaseBusiness, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, Trash2, TriangleAlert, UserRound } from "lucide-react";
 import type { CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
 
 type Stage = "review" | "vbk";
@@ -23,17 +23,120 @@ function formatUpdatedAt(value: string) {
   return date.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 function valueOf(source: Record<string, unknown>, key: string) { const value = source[key]; return typeof value === "string" || typeof value === "number" ? String(value) : "待生成"; }
+// 去除行程标题里重复出现的 DayN / 第N天 前缀，保留更具语义的副标题。
+function stripDayPrefix(title: string, index: number): string {
+  const trimmed = title.trim();
+  const patterns = [
+    new RegExp(`^第\\s*${index + 1}\\s*天[:：、\\s-]*`),
+    new RegExp(`^Day\\s*${index + 1}\\s*[:：、\\s-]*`, "i"),
+    new RegExp(`^D${index + 1}\\s*[:：、\\s-]*`, "i"),
+  ];
+  let result = trimmed;
+  for (const pattern of patterns) {
+    if (pattern.test(result)) {
+      result = result.replace(pattern, "");
+      break;
+    }
+  }
+  return result.trim() || trimmed;
+}
+function activityKindLabel(kind: string): string {
+  return ({ transport: "交通", visit: "游览", meal: "用餐", hotel: "入住", free: "自由活动", other: "安排" } as Record<string, string>)[kind] || "安排";
+}
 function isVehicleResourceTask(task?: ProjectDetail["researchTasks"][number]) {
   if (!task) return false;
   return /用车|车辆|车费|资源组|vehicle/i.test(`${task.label} ${task.detail || ""}`);
 }
 // 项目状态 → 用作第二步"草稿保存"现状文案，避免重复占用 statusLabel 的中文。
-function vbkStageStatusText(project: ProjectDetail | null): { tone: "waiting" | "running" | "saved" | "ready"; label: string; detail: string } {
+function vbkStageStatusText(project: ProjectDetail | null): { tone: "waiting" | "running" | "saved" | "ready" | "blocked"; label: string; detail: string } {
   if (!project) return { tone: "waiting", label: "等待选择项目", detail: "开始一个产品项目后即可进入" };
+  const blocked = recoveryNeedsUser(project.automation);
+  if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 MiniMax 给出的指令完成手动操作，再重新发起一次保存草稿" };
   if (project.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
-  if (project.automation?.status === "failed") return { tone: "running", label: "自动录入未完成", detail: "可在右侧浏览器里手动调整后重试" };
-  if (project.status === "draft_saved" || project.automation?.status === "succeeded") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
+  if (project.automation?.status === "succeeded" || project.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   return { tone: "waiting", label: "尚未录入 VBK", detail: "第一步审查通过后即可在右侧开始保存草稿" };
+}
+
+type RecoveryStageLabel = { phase: string; display: string };
+
+const RECOVERY_PHASE_LABELS: Record<string, string> = {
+  basic: "基础信息",
+  product: "产品正文",
+  itinerary: "每日行程",
+  presentation: "产品卖点",
+  commercial: "套餐与价格",
+  vehicle: "用车资源",
+  hotel: "酒店资源",
+  cost: "费用项",
+};
+
+const DEFAULT_RECOVERY_PHASE_LABEL = (phase: string) => phase || "当前阶段";
+
+function recoveryPhaseDisplay(phase: string): string {
+  return RECOVERY_PHASE_LABELS[phase] || DEFAULT_RECOVERY_PHASE_LABEL(phase);
+}
+
+interface RecoveryNeedsUser {
+  phase: string;
+  displayPhase: string;
+  instruction: string;
+  attempts: Array<{ seq: string; round: 1 | 2; attempt: number; rootCause?: string; expectedEvidence?: string; error: string; action?: string }>;
+}
+
+function recoveryNeedsUser(run: ProjectDetail["automation"]): RecoveryNeedsUser | null {
+  if (!run?.recovery) return null;
+  const block = Object.values(run.recovery.phases).find((rec) => rec.state === "needs_user");
+  if (!block) return null;
+  // 同一 runner 重入 phase 后，老的 attempts 会被归档到 attemptsHistory；UI
+  // 要让运营同时看到两轮的诊断。合并后只保留尾部 3 条，按时间顺序，
+  // history (round 1) 在前、current (round 2) 在后。
+  const history = (block.attemptsHistory ?? []).map((attempt) => ({
+    seq: `第 ${attempt.attempt} 次（历史）`,
+    round: 1 as const,
+    attempt: attempt.attempt,
+    rootCause: attempt.diagnosis?.rootCause,
+    expectedEvidence: attempt.diagnosis?.expectedEvidence,
+    error: attempt.error,
+    action: attempt.action,
+  }));
+  const current = block.attempts.map((attempt) => ({
+    seq: `第 ${attempt.attempt} 次`,
+    round: 2 as const,
+    attempt: attempt.attempt,
+    rootCause: attempt.diagnosis?.rootCause,
+    expectedEvidence: attempt.diagnosis?.expectedEvidence,
+    error: attempt.error,
+    action: attempt.action,
+  }));
+  const attempts = [...history, ...current].slice(-3);
+  return {
+    phase: block.phase,
+    displayPhase: recoveryPhaseDisplay(block.phase),
+    instruction: block.userInstruction || "请在 VBK 手动确认后再次保存草稿。",
+    attempts,
+  };
+}
+
+interface RecoveryAdvisorHint {
+  phase: string;
+  displayPhase: string;
+  currentAttempt: number;
+  action?: "advising" | "retrying";
+}
+
+function activeAdvisorHint(run: ProjectDetail["automation"]): RecoveryAdvisorHint | null {
+  if (!run?.recovery) return null;
+  for (const rec of Object.values(run.recovery.phases)) {
+    if (rec.state === "advising") {
+      const last = rec.attempts[rec.attempts.length - 1];
+      return { phase: rec.phase, displayPhase: recoveryPhaseDisplay(rec.phase), currentAttempt: last?.attempt ?? 1, action: "advising" };
+    }
+    if (rec.state === "retrying") {
+      const last = rec.attempts[rec.attempts.length - 1];
+      return { phase: rec.phase, displayPhase: recoveryPhaseDisplay(rec.phase), currentAttempt: (last?.attempt ?? rec.attempts.length) + 1, action: "retrying" };
+    }
+  }
+  return null;
 }
 
 export function App() {
@@ -64,6 +167,8 @@ export function App() {
   const [savingMiniMax, setSavingMiniMax] = useState(false);
   const [testingMiniMax, setTestingMiniMax] = useState(false);
   const [miniMaxTest, setMiniMaxTest] = useState<MiniMaxConnectionTest | null>(null);
+  // 每日行程可展开卡片：仅第 1 天默认展开；切换项目时重置。
+  const [expandedDayIndex, setExpandedDayIndex] = useState<number | null>(0);
   const browserRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   // 用于判定异步响应回来时用户是否已经切换了项目。
@@ -120,6 +225,7 @@ export function App() {
     setActiveTaskId(null);
     setVerificationNote("");
     setStage(initialStageFor(project.status));
+    setExpandedDayIndex(0);
   }, [project?.id]);
   useEffect(() => {
     const conversation = conversationRef.current;
@@ -179,10 +285,14 @@ export function App() {
   const projectCompletionLabel = readiness.ready ? "可以录入" : `${readiness.issues.length} 项待处理`;
   const vbkStageStatus = vbkStageStatusText(project);
   const automationActive = project?.automation?.status === "running";
+  // needs_user 是失败显示的唯一真值：recovery 优先于通用 status=failed。
+  const recoveryBlocked = project?.automation ? recoveryNeedsUser(project.automation) : null;
+  const advisorHint = project?.automation ? activeAdvisorHint(project.automation) : null;
+  const saveDraftLabel = recoveryBlocked ? "重新开始一轮保存" : "保存草稿";
   // 顶部进度导航把项目就绪度抽象成两个有意义的步骤状态，每个步骤用文字/小点
   // 同时表达含义，不依赖颜色单独传达。
   const reviewStepStatus = !project ? "idle" : readiness.ready ? "passed" : readiness.issues.length ? "inProgress" : "reviewing";
-  const vbkStepStatus = !project ? "idle" : vbkStageStatus.tone === "running" ? "inProgress" : vbkStageStatus.tone === "saved" ? "saved" : project.status === "blocked" || readiness.issues.length ? "blocked" : "waiting";
+  const vbkStepStatus = !project ? "idle" : vbkStageStatus.tone === "running" ? "inProgress" : vbkStageStatus.tone === "saved" ? "saved" : vbkStageStatus.tone === "blocked" || project.status === "blocked" || readiness.issues.length ? "blocked" : "waiting";
 
   const send = async (retryContent?: string) => {
     const text = (retryContent || input).trim(); if (!text || !project || loading) return;
@@ -367,13 +477,13 @@ export function App() {
             <button
               className="btn btn-sm"
               data-variant="primary"
-              disabled={!readiness.ready || loading}
+              disabled={!readiness.ready || loading || automationActive}
               onClick={() => { setStage("vbk"); void startAutomation(); }}
-              aria-label="确认并保存草稿到 VBK"
-              title="确认并保存草稿"
+              aria-label={saveDraftLabel}
+              title={saveDraftLabel}
             >
               {automationActive ? <LoaderCircle size={14} /> : <Play size={14} />}
-              保存草稿
+              {saveDraftLabel}
             </button>
             <button
               className="topbar-account-chip"
@@ -685,7 +795,98 @@ export function App() {
                       <strong className="product-section-title">每日行程</strong>
                       <span className="product-section-meta">{itinerary.length} 天</span>
                     </div>
-                    {itinerary.length ? <div className="product-itinerary">{itinerary.map((day, index) => <div className="product-itinerary-day" key={index}><span className="product-day-index">D{index + 1}</span><div><strong className="product-day-title">{valueOf(day, "title")}</strong><div className="product-day-spots">{Array.isArray(day.spots) ? day.spots.map((spot) => <span className="chip" key={String(spot)}>{String(spot)}</span>) : <span className="chip">待补充景点</span>}</div></div></div>)}</div> : <p className="section-empty">正在等待 AI 生成第一版行程。</p>}
+                    {itinerary.length ? (
+                      <div className="product-itinerary">
+                        {itinerary.map((day, index) => {
+                          const spots = Array.isArray(day.spots) ? (day.spots as unknown[]).map((spot) => String(spot)).filter(Boolean) : [];
+                          const activities = Array.isArray(day.activities) ? day.activities as Array<{ time?: string; title?: string; detail?: string; type?: string }> : [];
+                          const description = typeof day.description === "string" ? day.description.trim() : "";
+                          const meals = typeof day.meals === "string" ? day.meals.trim() : "";
+                          const hotel = typeof day.hotel === "string" ? day.hotel.trim() : "";
+                          const rawTitle = valueOf(day, "title");
+                          const displayTitle = stripDayPrefix(rawTitle, index);
+                          const spotSummary = spots.length ? spots.slice(0, 3).join(" · ") + (spots.length > 3 ? " …" : "") : "待补充景点";
+                          const expanded = expandedDayIndex === index;
+                          const contentId = `itinerary-day-${index}`;
+                          return (
+                            <div className="itinerary-card" key={index} data-expanded={expanded}>
+                              <button
+                                className="itinerary-card-trigger"
+                                type="button"
+                                aria-expanded={expanded}
+                                aria-controls={contentId}
+                                onClick={() => setExpandedDayIndex(expanded ? null : index)}
+                              >
+                                <span className="itinerary-day-badge">D{index + 1}</span>
+                                <span className="itinerary-card-summary">
+                                  <strong>{displayTitle}</strong>
+                                  <span>{spotSummary}</span>
+                                </span>
+                                <span className="itinerary-card-count">{spots.length ? `${spots.length} 个景点` : "行程待补充"}</span>
+                                <ChevronDown size={14} className="itinerary-card-chevron" aria-hidden="true" />
+                              </button>
+                              {expanded && (
+                                <div className="itinerary-card-content" id={contentId} role="region" aria-label={`第 ${index + 1} 天行程`}>
+                                  {activities.length ? (
+                                    <ol className="itinerary-timeline">
+                                      {activities.map((activity, activityIndex) => {
+                                        const kind = typeof activity.type === "string" ? activity.type : "other";
+                                        const time = typeof activity.time === "string" && activity.time ? activity.time : "—";
+                                        const title = typeof activity.title === "string" && activity.title ? activity.title : activityKindLabel(kind);
+                                        const detail = typeof activity.detail === "string" ? activity.detail : "";
+                                        return (
+                                          <li className="itinerary-timeline-item" data-kind={kind} key={activityIndex}>
+                                            <time>{time}</time>
+                                            <span className="itinerary-timeline-rail" aria-hidden="true"><span /></span>
+                                            <div className="itinerary-timeline-copy">
+                                              <div className="itinerary-timeline-heading">
+                                                <strong>{title}</strong>
+                                                <small>{activityKindLabel(kind)}</small>
+                                              </div>
+                                              {detail && <p>{detail}</p>}
+                                            </div>
+                                          </li>
+                                        );
+                                      })}
+                                    </ol>
+                                  ) : spots.length || description ? (
+                                    <div className="itinerary-timeline">
+                                      {spots.map((spot, spotIndex) => (
+                                        <div className="itinerary-timeline-item" data-kind="visit" key={`spot-${spotIndex}`}>
+                                          <span className="itinerary-timeline-label">第 {spotIndex + 1} 站</span>
+                                          <span className="itinerary-timeline-rail" aria-hidden="true"><span /></span>
+                                          <div className="itinerary-timeline-copy">
+                                            <div className="itinerary-timeline-heading">
+                                              <strong>{spot}</strong>
+                                              <small>游览</small>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {description && <p className="itinerary-day-description">{description}</p>}
+                                    </div>
+                                  ) : (
+                                    <p className="itinerary-day-empty">这一天还没有具体安排，等待 AI 补全。</p>
+                                  )}
+                                  <div className="itinerary-day-facts">
+                                    <span>
+                                      <small>餐食</small>
+                                      <span>{meals || "餐食信息待核查"}</span>
+                                    </span>
+                                    <span>
+                                      <small>住宿</small>
+                                      <span>{hotel || "住宿信息待核查"}</span>
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="section-empty">正在等待 AI 生成第一版行程。</p>
+                    )}
                   </section>
                   <section className="product-section">
                     <div className="product-section-head">
@@ -865,18 +1066,71 @@ export function App() {
                       <div className="product-section-head">
                         <span className="panel-num">C</span>
                         <strong className="product-section-title">自动录入进度</strong>
-                        <span className="state" data-state={project.automation.status === "failed" ? "blocked" : project.automation.status === "succeeded" ? "confirmed" : "researching"}>
-                          {project.automation.status === "succeeded" ? "草稿已保存" : project.automation.status === "failed" ? "录入失败" : "执行中"}
+                        <span className="state" data-state={recoveryBlocked ? "blocked" : project.automation.status === "succeeded" ? "confirmed" : project.automation.status === "failed" ? "blocked" : "researching"}>
+                          {recoveryBlocked ? "需要处理" : project.automation.status === "succeeded" ? "草稿已保存" : project.automation.status === "failed" ? "录入失败" : "执行中"}
                         </span>
                       </div>
                       <div className="automation">
                         <div className="automation-body">
-                          {project.automation.phases.map((phase) => (
-                            <div className="stage" data-state={phase.status === "completed" ? "done" : phase.status === "running" ? "running" : phase.status === "failed" ? "failed" : "pending"} key={phase.phase}>
-                              <span className="stage-dot" />{phase.phase}
+                          {project.automation.phases.map((phase) => {
+                            const rec = project.automation?.recovery?.phases[phase.phase];
+                            const stageState = recoveryBlocked && rec?.state === "needs_user"
+                              ? "failed"
+                              : rec?.state === "advising" || rec?.state === "retrying"
+                                ? "running"
+                                : phase.status === "completed" ? "done" : phase.status === "running" ? "running" : phase.status === "failed" ? "failed" : "pending";
+                            return (
+                              <div className="stage" data-state={stageState} key={phase.phase}>
+                                <span className="stage-dot" />
+                                <span className="stage-label">{recoveryPhaseDisplay(phase.phase)}</span>
+                              </div>
+                            );
+                          })}
+                          {advisorHint && (
+                            <div className="recovery-banner" data-state="advising" role="status" aria-live="polite">
+                              <LoaderCircle size={14} aria-hidden="true" />
+                              <span>
+                                {advisorHint.action === "retrying"
+                                  ? `MiniMax 将按建议进行第 ${advisorHint.currentAttempt} 次尝试（${advisorHint.displayPhase}）`
+                                  : `正在诊断「${advisorHint.displayPhase}」第 ${advisorHint.currentAttempt} 次失败`}
+                              </span>
                             </div>
-                          ))}
-                          <p className="automation-note">系统只保存草稿，不会提交审核或发布。</p>
+                          )}
+                          {recoveryBlocked && (
+                            <div className="recovery-banner" data-state="needs_user" role="alert" aria-live="assertive">
+                              <TriangleAlert size={14} aria-hidden="true" />
+                              <div className="recovery-banner-body">
+                                <strong>已停止，等待用户处理：{recoveryBlocked.displayPhase}</strong>
+                                <p className="recovery-banner-instruction">{recoveryBlocked.instruction}</p>
+                                {recoveryBlocked.attempts.length > 0 ? (
+                                  <ol className="recovery-attempts">
+                                    {recoveryBlocked.attempts.map((attempt) => {
+                                      // seq 区分历史轮 vs 当前轮；list 末尾的 attempt
+                                      // 才是“最近一次失败”，之前都属于历史。
+                                      const isLatest = attempt.seq === recoveryBlocked.attempts[recoveryBlocked.attempts.length - 1].seq;
+                                      return (
+                                      <li key={`${attempt.round}-${attempt.attempt}-${attempt.seq}`} className="recovery-attempt" data-state={isLatest ? "latest" : "history"} data-round={attempt.round}>
+                                        <span className="recovery-attempt-index">{attempt.seq}</span>
+                                        {attempt.rootCause ? (
+                                          <span className="recovery-attempt-cause">{attempt.rootCause}</span>
+                                        ) : (
+                                          <span className="recovery-attempt-cause muted">暂无 MiniMax 诊断</span>
+                                        )}
+                                        {attempt.expectedEvidence && (
+                                          <span className="recovery-attempt-evidence">预期证据：{attempt.expectedEvidence}</span>
+                                        )}
+                                        <code className="recovery-attempt-error">{attempt.error}</code>
+                                      </li>
+                                    );
+                                    })}
+                                  </ol>
+                                ) : (
+                                  <p className="recovery-banner-instruction">本次没有保留可显示的诊断记录，请在右侧浏览器内手动完成后再次保存草稿。</p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          <p className="automation-note">只保存草稿，不提交审核或发布。</p>
                         </div>
                       </div>
                     </section>
@@ -891,8 +1145,9 @@ export function App() {
                     <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
                     {readiness.ready ? " 可保存 VBK 草稿" : ` 还需 ${readiness.issues.length} 项核查`}
                   </span>
-                  <button className="btn btn-lg" data-variant="primary" disabled={!readiness.ready || loading} onClick={() => void startAutomation()}>
-                    {automationActive ? <LoaderCircle size={15} /> : <Play size={15} />}保存草稿
+                  <button className="btn btn-lg" data-variant="primary" disabled={!readiness.ready || loading || automationActive} onClick={() => void startAutomation()}>
+                    {automationActive ? <LoaderCircle size={15} /> : <Play size={15} />}
+                    {saveDraftLabel}
                   </button>
                 </footer>
               </aside>

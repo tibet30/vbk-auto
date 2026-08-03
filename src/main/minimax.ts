@@ -1,6 +1,6 @@
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
 import { z } from "zod";
-import type { AiResponse } from "../shared/contracts.js";
+import type { AdvisorOutcome, AdvisorRequest, AiResponse } from "../shared/contracts.js";
 import { normaliseItinerary, normalisePresentation } from "./product-normalize.js";
 
 const writablePatchPrefixes = [
@@ -9,6 +9,7 @@ const writablePatchPrefixes = [
   "/presentation",
   "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded",
   "/commercial/packageName", "/commercial/terms",
+  "/commercial/pricing", "/commercial/inventory", "/commercial/release",
   "/itinerary",
 ];
 
@@ -18,8 +19,9 @@ const writablePatchGuide = `可写 patch 路径只能使用这些值：
 - /presentation
 - /operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded
 - /commercial/packageName, /commercial/terms
+- /commercial/pricing, /commercial/inventory, /commercial/release
 - /itinerary
-不要写入 supplierProductCode、vehicleResource、pricing、inventory、release、城市 ID、资源 ID、供应商编码、车队价格、库存日期或成本。`;
+不要写入 supplierProductCode、vehicleResource 整段、providerId / contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。pricing/inventory/release 写入时只允许覆盖字段值，并保留 currency=CNY；不得给运营人数 0、或负价格、或类型不匹配的值。`;
 
 const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
 {"reply":"给运营看的简明中文回复","patch":[{"op":"add","path":"/presentation","value":{}}],"questions":[],"researchTasks":[{"label":"核查车辆资源","type":"vbk","detail":"在 VBK 资源库确认可用资源组、车型和供应商编码"}]}
@@ -65,6 +67,29 @@ const responseJsonSchema = {
   },
 };
 
+export const presentationCoverValueSchema = z.object({
+  source: z.literal("ctripLibrary"),
+  poi: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  minQuality: z.number().int().min(0).max(5),
+}).strict();
+
+export function hasCompleteCtripLibraryCover(product: Record<string, unknown>): boolean {
+  const presentation = product.presentation;
+  if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return false;
+  const cover = (presentation as Record<string, unknown>).cover;
+  if (!cover || typeof cover !== "object" || Array.isArray(cover)) return false;
+  return presentationCoverValueSchema.safeParse(cover).success;
+}
+
+export function isCoverResearchTaskSatisfiedByProduct(
+  task: { type: string; label?: string; detail?: string },
+  product: Record<string, unknown>,
+): boolean {
+  if (task.type !== "image") return false;
+  return hasCompleteCtripLibraryCover(product);
+}
+
 const responseTool = {
   type: "function",
   function: {
@@ -73,6 +98,58 @@ const responseTool = {
     parameters: responseJsonSchema,
   },
 };
+
+const advisorActions = [
+  "retry_same_phase",
+  "reload_and_retry_phase",
+  "reopen_editor_and_retry_phase",
+  "wait_for_user",
+] as const;
+
+const diagnosisTool = {
+  type: "function",
+  function: {
+    name: "submit_failure_diagnosis",
+    description: "返回自动录入阶段失败的结构化诊断。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["summary", "rootCause", "action", "expectedEvidence"],
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: 80 },
+        rootCause: { type: "string", minLength: 1, maxLength: 200 },
+        action: { type: "string", enum: advisorActions },
+        expectedEvidence: { type: "string", minLength: 1, maxLength: 120 },
+        userInstruction: { type: "string", minLength: 1, maxLength: 500 },
+      },
+    },
+  },
+};
+
+const chineseText = (maxLength: number) => z.string().trim().min(1).max(maxLength).refine(
+  (value) => /[\p{Script=Han}]/u.test(value),
+  { message: "必须包含中文" },
+);
+
+const advisorOutcomeSchema = z.object({
+  summary: chineseText(80),
+  rootCause: chineseText(200),
+  action: z.enum(advisorActions),
+  expectedEvidence: chineseText(120),
+  userInstruction: z.string().optional(),
+}).strict().superRefine((outcome, context) => {
+  if (outcome.action !== "wait_for_user") return;
+  const instruction = outcome.userInstruction?.trim() ?? "";
+  if (!instruction || instruction.length > 500 || !/[\p{Script=Han}]/u.test(instruction)) {
+    context.addIssue({ code: "custom", path: ["userInstruction"], message: "wait_for_user 必须提供不超过 500 字的中文 userInstruction" });
+  }
+});
+
+const diagnosisSystemPrompt = `你是 VBK Desktop 自动录入失败诊断器。只能根据输入证据判断当前阶段的受限恢复动作。
+输入包含 phase、attempt、error、productIdExists、basicInfoSaved、completedPhases、diagnosisHistory；diagnosisHistory 只表示已经发生的诊断，不得补充未观察事实。
+allowedActions 仅为 retry_same_phase、reload_and_retry_phase、reopen_editor_and_retry_phase、wait_for_user。
+输出字段：summary 是中文一句话且不超过 80 字；rootCause 是基于证据的中文说明且不超过 200 字；expectedEvidence 是中文短句且不超过 120 字，表示重试成功后应该看到的证据；action 只能选择一个 allowedActions。action 为 wait_for_user 时 userInstruction 必填，必须是中文且可执行的 VBK 操作；其它 action 忽略 userInstruction。
+硬约束：只返回唯一 action；禁止返回或建议代码、选择器、URL、浏览器脚本、patch 或 patch 路径；禁止包含 DOM、cookie、key、联系人、电话、完整产品JSON、图片、供应商 ID 或 providerId；禁止提审、发布、上线、删除、修改库存或价格；不要重复 production patch 协议。信息不足时返回 wait_for_user。`;
 
 const patchOperationSchema = z.object({
   op: z.enum(["add", "replace", "remove"]),
@@ -86,6 +163,42 @@ const patchOperationSchema = z.object({
 const researchTaskSchema = z.object({ label: z.string(), type: z.enum(["vbk", "web", "cost", "image"]), detail: z.string().optional() });
 
 const nonEmptyText = z.string().trim().min(1);
+const pricingCostSchema = z.object({
+  adult: z.number().nonnegative(),
+  child: z.number().nonnegative(),
+  singleSupplement: z.number().nonnegative().default(0),
+  childBed: z.number().nonnegative().default(0),
+}).optional();
+
+const pricingSchema = z.object({
+  currency: z.literal("CNY").default("CNY"),
+  adult: z.number().positive(),
+  child: z.number().nonnegative(),
+  minimumTravelers: z.number().int().positive(),
+  cost: pricingCostSchema,
+}).superRefine((value, ctx) => {
+  if (value.cost && value.cost.adult > value.adult) {
+    ctx.addIssue({ code: "custom", message: "成本价不得高于售卖价" });
+  }
+});
+
+const inventorySchema = z.object({
+  startDate: z.iso.date(),
+  endDate: z.iso.date(),
+  dailyQuota: z.number().int().positive(),
+}).superRefine((value, ctx) => {
+  if (new Date(value.startDate) > new Date(value.endDate)) {
+    ctx.addIssue({ code: "custom", message: "库存开始日期不能晚于结束日期" });
+  }
+});
+
+const releaseSchema = z.object({
+  submitReview: z.boolean().default(true),
+  publishAfterApproval: z.boolean().default(true),
+  publicPriceCeiling: z.number().positive(),
+  publicAuditRetries: z.number().int().min(1).max(10).default(3),
+});
+
 const patchValueSchemas: Record<string, z.ZodType> = {
   "/sales/productType": z.enum(["domesticShort", "domesticLong"]),
   "/sales/productForm": z.enum(["groupTour", "semiSelfGuided", "privateTour", "freeTravel"]),
@@ -106,6 +219,9 @@ const patchValueSchemas: Record<string, z.ZodType> = {
   "/operations/mealsIncluded": z.boolean(),
   "/commercial/packageName": nonEmptyText,
   "/commercial/terms": z.record(z.string(), nonEmptyText),
+  "/commercial/pricing": pricingSchema,
+  "/commercial/inventory": inventorySchema,
+  "/commercial/release": releaseSchema,
 };
 
 function normalisePatchOperation(operation: z.infer<typeof patchOperationSchema>) {
@@ -272,6 +388,63 @@ export class MiniMaxService {
     }
   }
 
+  async diagnoseAutomationFailure(input: AdvisorRequest): Promise<AdvisorOutcome> {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 MiniMax API Key。");
+    const startedAt = Date.now();
+    try {
+      const response = await this.client(replyTimeout()).chat.completions.create({
+        model: this.config.model,
+        messages: [
+          { role: "system", content: diagnosisSystemPrompt },
+          { role: "user", content: `请根据以下最小安全上下文诊断，只通过 submit_failure_diagnosis 返回结果：\n${JSON.stringify({
+            phase: input.phase,
+            attempt: input.attempt,
+            error: input.error,
+            productIdExists: input.productIdExists,
+            basicInfoSaved: input.basicInfoSaved,
+            completedPhases: input.completedPhases,
+            diagnosisHistory: input.diagnosisHistory,
+          })}` },
+        ],
+        max_completion_tokens: 1024,
+        tools: [diagnosisTool],
+        tool_choice: { type: "function", function: { name: "submit_failure_diagnosis" } },
+        thinking: { type: "disabled" },
+        service_tier: miniMaxServiceTier(),
+      } as never);
+      const toolCall = response.choices[0]?.message.tool_calls?.find(
+        (call) => "function" in call && call.function.name === "submit_failure_diagnosis",
+      );
+      if (!toolCall || !("function" in toolCall)) {
+        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的自动录入诊断格式无效。");
+      }
+      let value: unknown;
+      try { value = JSON.parse(toolCall.function.arguments); }
+      catch { throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的自动录入诊断格式无效。"); }
+      const parsed = advisorOutcomeSchema.safeParse(value);
+      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的自动录入诊断格式无效。");
+      const outcome = parsed.data.action === "wait_for_user"
+        ? { ...parsed.data, userInstruction: parsed.data.userInstruction!.trim() }
+        : { summary: parsed.data.summary, rootCause: parsed.data.rootCause, action: parsed.data.action, expectedEvidence: parsed.data.expectedEvidence };
+      console.info("[MiniMax] diagnosis completed", {
+        phase: input.phase,
+        attempt: input.attempt,
+        action: outcome.action,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return outcome;
+    } catch (error) {
+      const serviceError = this.providerError(error);
+      console.warn("[MiniMax] diagnosis failed", {
+        phase: input.phase,
+        attempt: input.attempt,
+        errorCode: serviceError.code,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw serviceError;
+    }
+  }
+
   private async complete(client: OpenAI, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
     const result = await client.chat.completions.create({
       model: this.config.model, messages, temperature: 0.3, max_completion_tokens: 2048,
@@ -287,12 +460,16 @@ export class MiniMaxService {
     return { message, traceId: result.response.headers.get("trace-id") || result.response.headers.get("trace_id") || result.request_id || undefined };
   }
 
+  private providerError(error: unknown): MiniMaxServiceError {
+    if (error instanceof MiniMaxServiceError) return error;
+    if (error instanceof AuthenticationError) return new MiniMaxServiceError("provider_authentication", "MiniMax API Key 无效。");
+    if (error instanceof RateLimitError) return new MiniMaxServiceError("provider_rate_limit", "MiniMax 请求过于频繁，请稍后重试。");
+    if (error instanceof APIConnectionTimeoutError) return new MiniMaxServiceError("provider_timeout", "MiniMax 响应超时，请重试。");
+    if (error instanceof APIConnectionError) return new MiniMaxServiceError("provider_connection", "无法连接 MiniMax 服务。");
+    return new MiniMaxServiceError("provider_error", "MiniMax 服务暂时无法完成本次请求。");
+  }
+
   private throwProviderError(error: unknown): never {
-    if (error instanceof MiniMaxServiceError) throw error;
-    if (error instanceof AuthenticationError) throw new MiniMaxServiceError("provider_authentication", "MiniMax API Key 无效。");
-    if (error instanceof RateLimitError) throw new MiniMaxServiceError("provider_rate_limit", "MiniMax 请求过于频繁，请稍后重试。");
-    if (error instanceof APIConnectionTimeoutError) throw new MiniMaxServiceError("provider_timeout", "MiniMax 响应超时，请重试。");
-    if (error instanceof APIConnectionError) throw new MiniMaxServiceError("provider_connection", "无法连接 MiniMax 服务。");
-    throw new MiniMaxServiceError("provider_error", "MiniMax 服务暂时无法完成本次请求。");
+    throw this.providerError(error);
   }
 }

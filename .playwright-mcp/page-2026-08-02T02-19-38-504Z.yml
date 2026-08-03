@@ -1,0 +1,156 @@
+- generic [ref=f5e3]:
+  - complementary "主导航" [ref=f5e4]:
+    - generic [ref=f5e5]: VBK
+    - button "工作台" [ref=f5e6] [cursor=pointer]
+    - button "项目" [ref=f5e11] [cursor=pointer]
+    - button "设置" [ref=f5e16] [cursor=pointer]
+    - button "当前 VBK 账号：未登录" [ref=f5e21] [cursor=pointer]: 未
+  - main [ref=f5e22]:
+    - generic [ref=f5e23]:
+      - navigation "项目导航" [ref=f5e24]:
+        - button "返回项目列表" [ref=f5e117] [cursor=pointer]:
+          - generic [ref=f5e118]: 项目
+        - generic [ref=f5e121]:
+          - strong [ref=f5e122]: 太原私家团2天1晚
+          - generic [ref=f5e123]: 等待确认
+      - generic "方案就绪状态" [ref=f5e125]:
+        - strong [ref=f5e126]: 80%
+        - text: ·0 项待处理
+      - generic [ref=f5e127]:
+        - button "确认并保存草稿到 VBK" [disabled] [ref=f5e128]: 保存草稿
+        - button "当前 VBK 账号：未登录" [ref=f5e131] [cursor=pointer]: 未登录
+    - tablist "产品工作流步骤" [ref=f5e132]:
+      - tab "AI 对话与产品审查 80% · 等待 AI 回复" [selected] [ref=f5e133] [cursor=pointer]:
+        - generic [ref=f5e134]: "1"
+        - generic [ref=f5e135]:
+          - generic [ref=f5e136]: AI 对话与产品审查
+          - generic [ref=f5e137]: 80% · 等待 AI 回复
+      - tab "审查结果与 VBK 录入 尚未录入 VBK · 第一步审查通过后即可在右侧开始保存草稿" [ref=f5e140] [cursor=pointer]:
+        - generic [ref=f5e141]: "2"
+        - generic [ref=f5e142]:
+          - generic [ref=f5e143]: 审查结果与 VBK 录入
+          - generic [ref=f5e144]: 尚未录入 VBK · 第一步审查通过后即可在右侧开始保存草稿
+      - generic "当前步骤概要" [ref=f5e147]: 0 项待处理
+    - tabpanel "AI 对话与产品审查 80% · 等待 AI 回复" [ref=f5e152]:
+      - generic [ref=f5e153]:
+        - region "方案协作" [ref=f5e154]:
+          - generic [ref=f5e155]:
+            - generic [ref=f5e156]:
+              - generic [ref=f5e157]: "01"
+              - strong [ref=f5e158]: 方案协作
+            - generic [ref=f5e159]: 0 条对话 · 可继续追问
+          - log [ref=f5e160]
+          - generic [ref=f5e162]:
+            - textbox "方案协作输入" [ref=f5e163]:
+              - /placeholder: 例如：把这个产品改成亲子主题；或：在右侧浏览器里核查 XX 资源组后，把结果告诉我…
+            - generic [ref=f5e164]:
+              - generic [ref=f5e165]: 项目上下文已带入；资源自动匹配，价格按行程景点估算。
+              - generic [ref=f5e167]:
+                - generic [ref=f5e168]:
+                  - generic [ref=f5e169]: ⌘
+                  - generic [ref=f5e170]: ↵
+                - button "发送消息，Command 加回车可快速发送" [disabled] [ref=f5e171]
+        - region "产品审查" [ref=f5e175]:
+          - generic [ref=f5e176]:
+            - generic [ref=f5e177]:
+              - generic [ref=f5e178]: "02"
+              - strong [ref=f5e179]: 产品审查
+            - generic [ref=f5e180]: 0 项待处理
+          - generic [ref=f5e181]:
+            - generic [ref=f5e182]:
+              - generic [ref=f5e187]:
+                - strong [ref=f5e188]: 下一步：先完成待核查项目
+                - generic [ref=f5e189]: 第一版方案已经生成；解决下方高优先级问题后即可保存 VBK 草稿。
+              - generic [ref=f5e190]:
+                - strong [ref=f5e191]: 80%
+                - generic [ref=f5e192]: 就绪度
+            - generic [ref=f5e193]:
+              - generic [ref=f5e194]:
+                - generic [ref=f5e195]: A
+                - strong [ref=f5e196]: 基础与运营信息
+              - generic [ref=f5e197]:
+                - generic [ref=f5e198]:
+                  - generic [ref=f5e199]: 产品名称
+                  - strong [ref=f5e201]: 太原私家团2天1晚深度体验
+                - generic [ref=f5e202]:
+                  - generic [ref=f5e203]:
+                    - generic [ref=f5e204]: 产品副标题
+                    - button "重新生成产品副标题" [ref=f5e205] [cursor=pointer]:
+                      - generic [ref=f5e211]: 重新生成
+                  - strong [ref=f5e212]: 太原精华线路，晋祠+平遥古城一网打尽
+                - generic [ref=f5e213]:
+                  - generic [ref=f5e214]: 集合城市
+                  - strong [ref=f5e216]: 太原
+                - generic [ref=f5e217]:
+                  - generic [ref=f5e218]: 目的城市
+                  - strong [ref=f5e220]: 太原
+                - generic [ref=f5e221]:
+                  - generic [ref=f5e222]:
+                    - generic [ref=f5e223]: 所属省份
+                    - button "重新生成所属省份" [ref=f5e224] [cursor=pointer]:
+                      - generic [ref=f5e230]: 重新生成
+                  - strong [ref=f5e231]: 山西省
+                - generic [ref=f5e232]:
+                  - generic [ref=f5e233]: 行程规格
+                  - strong [ref=f5e235]: 3 天 2 晚
+                - generic [ref=f5e236]:
+                  - generic [ref=f5e237]:
+                    - generic [ref=f5e238]: 成人 / 儿童估价
+                    - generic [ref=f5e239]:
+                      - button "手动调整" [ref=f5e240] [cursor=pointer]
+                      - button "重新生成成人 / 儿童估价" [ref=f5e245] [cursor=pointer]:
+                        - generic [ref=f5e251]: 重新生成
+                  - strong [ref=f5e252]: ¥1500 / ¥1200
+                - generic [ref=f5e253]:
+                  - generic [ref=f5e254]:
+                    - generic [ref=f5e255]: VBK 用车资源
+                    - generic [ref=f5e256]:
+                      - button "按价格调整" [ref=f5e257] [cursor=pointer]
+                      - button "按系统估价重新匹配 VBK 用车资源" [ref=f5e262] [cursor=pointer]:
+                        - generic [ref=f5e268]: 自动匹配
+                  - strong [ref=f5e269]: 太原5座舒适型资源组（ID 148273）
+                  - generic [ref=f5e270]: 当前采用 ¥450/天
+                - generic [ref=f5e271]:
+                  - generic [ref=f5e272]:
+                    - generic [ref=f5e273]: VBK 酒店资源
+                    - button "重新匹配 VBK 酒店资源" [ref=f5e274] [cursor=pointer]:
+                      - generic [ref=f5e280]: 重新匹配
+                  - strong [ref=f5e281]: 太原5钻酒店（非平台）
+                - generic [ref=f5e282]:
+                  - generic [ref=f5e283]:
+                    - generic [ref=f5e284]: 运营说明
+                    - button "重新生成运营说明" [ref=f5e285] [cursor=pointer]:
+                      - generic [ref=f5e291]: 重新生成
+                  - strong [ref=f5e292]: 需提前与供应商二次确认接送范围。
+            - generic [ref=f5e293]:
+              - generic [ref=f5e294]:
+                - generic [ref=f5e295]: B
+                - strong [ref=f5e296]: 每日行程
+                - button "重新生成每日行程" [ref=f5e297] [cursor=pointer]:
+                  - generic [ref=f5e303]: 重新生成
+                - generic [ref=f5e304]: 0 天
+              - paragraph [ref=f5e305]: 正在等待 AI 生成第一版行程。
+            - generic [ref=f5e306]:
+              - generic [ref=f5e307]:
+                - generic [ref=f5e308]: C
+                - strong [ref=f5e309]: 产品卖点
+                - button "重新生成产品卖点" [ref=f5e310] [cursor=pointer]:
+                  - generic [ref=f5e316]: 重新生成
+              - generic [ref=f5e317]:
+                - generic [ref=f5e318]:
+                  - generic [ref=f5e319]: 面向客人的推荐语
+                  - strong [ref=f5e320]: 适合首次到访太原的家庭与亲子。
+                - generic [ref=f5e321]:
+                  - generic [ref=f5e322]: 产品特点
+                  - paragraph [ref=f5e323]: 晋祠+平遥+乔家大院
+            - generic [ref=f5e324]:
+              - generic [ref=f5e325]:
+                - generic [ref=f5e326]: D
+                - strong [ref=f5e327]: 录入前检查
+                - generic [ref=f5e328]: 已通过
+              - generic [ref=f5e329]: 通过完整性检查，可以保存 VBK 草稿。
+          - generic [ref=f5e333]:
+            - generic [ref=f5e334]:
+              - strong [ref=f5e335]: ⏳ 进行中
+              - text: 还需 0 项核查
+            - button "前往 VBK 录入" [disabled] [ref=f5e336]

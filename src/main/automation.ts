@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { BrowserWindow } from "electron";
 import {
   configureProductShell, createProductShell, ensureHotelResource, ensureVehicleResource, fillAndSaveBasicInfo,
   fillAndSavePackage, fillAndSavePresentation, fillAndSaveTerms, fillAndSubmitPricingInventory,
-  fillItineraryDraft, openProductEditor, runProductPreflight, saveScreenshot,
+  fillItineraryDraft, openProductEditor, runProductPreflight, saveScreenshot, selectStationAddress,
 } from "./automation/ctrip.js";
 import { automationBlockers, parseProduct, pickKeySpotsFromItinerary, shouldRefillBasicInfo } from "./automation/schema.js";
 import type {
@@ -12,6 +13,7 @@ import { VbkDatabase } from "./database.js";
 import { VbkBrowser } from "./vbk-browser.js";
 import { preparePhaseRetry } from "./automation/phase-retry.js";
 import { runPhaseWithRecovery, type RecoveryContext } from "./automation/recovery.js";
+import { breakpoint, getHitBreakpoints, listBreakpoints, resetBreakpoints, resume as resumeDebug, snapshot as snapshotDebug } from "./automation/debug.js";
 
 function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
   // 顺序对齐 VBK 页签：资源配置在条款维护之前。
@@ -33,16 +35,112 @@ export class DraftAutomation {
     private browser: VbkBrowser,
     private onUpdate: (project: ProjectDetail) => void,
     private advisor: (req: AdvisorRequest) => Promise<AdvisorOutcome>,
+    private disambiguator?: (req: { kind: "province" | "city" | "spot" | "station"; desired: string; candidates: Array<{ id?: string; text: string }>; product: Record<string, unknown> }) => Promise<{ pickedText: string | null; reasoning: string }>,
   ) {}
 
   async start(projectId: string) {
     return this.runLocked(projectId);
   }
 
+  /**
+   * 调试入口：按名字调一个具名 ctrip 步骤，返回 JSON 可序列化结果。
+   * 支持 step 列表在下方 if/else 里随时扩。argsJson 是 JSON 字符串，
+   * CLI 侧不需要知道 TypeScript 类型。
+   */
+  async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
+    resetBreakpoints();
+    // debug 入口也走同样上 view 没上报 bounds 的兑底：保证 window.innerWidth
+    // / innerHeight 是主窗口实际大小，否则 click 会超出 viewport。
+    this.ensureBrowserHasBounds();
+    const page = await this.browser.page();
+    const args = argsJson ? (JSON.parse(argsJson) as Record<string, unknown>) : {};
+    const cardSelector = typeof args.cardSelector === "string" ? args.cardSelector : null;
+    if (stepName === "snapshot") {
+      return snapshotDebug(page, typeof args.label === "string" ? args.label : "manual");
+    }
+    if (stepName === "selectStationAddress") {
+      if (!cardSelector) throw new Error("selectStationAddress 需要 cardSelector 参数");
+      const card = page.locator(cardSelector).first();
+      const city = typeof args.city === "string" ? args.city : "大同";
+      await breakpoint("beforeSelectStationAddress", { cardSelector, city });
+      const result = await selectStationAddress(page, card, city);
+      await breakpoint("afterSelectStationAddress", { city });
+      return { ok: true, city };
+    }
+    if (stepName === "fillItineraryDraft") {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      if (!projectId) throw new Error("fillItineraryDraft 需要 projectId 参数");
+      const project = this.db.getProject(projectId);
+      if (!project) throw new Error(`项目不存在：${projectId}`);
+      const product = parseProduct(project.product);
+      await breakpoint("beforeFillItineraryDraft");
+      const result = await fillItineraryDraft(page, product);
+      await breakpoint("afterFillItineraryDraft", { savedWith: result.savedWith });
+      return result;
+    }
+    if (stepName === "fillRecommendationReasons") {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      if (!projectId) throw new Error("fillRecommendationReasons 需要 projectId 参数");
+      const project = this.db.getProject(projectId);
+      if (!project) throw new Error(`项目不存在：${projectId}`);
+      const product = parseProduct(project.product);
+      if (!product.presentation?.recommendations?.length) throw new Error("项目 presentation.recommendations 为空");
+      await breakpoint("beforeFillRecommendationReasons");
+      const { fillRecommendationReasons } = await import("./automation/ctrip.js");
+      await fillRecommendationReasons(page, product.presentation.recommendations);
+      await breakpoint("afterFillRecommendationReasons");
+      return { rows: product.presentation.recommendations.length };
+    }
+    throw new Error(`未知步骤：${stepName}；支持：snapshot / selectStationAddress / fillItineraryDraft / fillRecommendationReasons`);
+  }
+
+  async debugSnapshot(label?: string): Promise<unknown> {
+    // 调试快照也走兑底： renderer 不上 stage=vbk 时 view 还是 0×0，
+    // 取主窗口 size 重设一下，否则后续 click 也会超出 viewport。
+    this.ensureBrowserHasBounds();
+    const page = await this.browser.page();
+    return snapshotDebug(page, label);
+  }
+
+  async debugHitBreakpoints(): Promise<string[]> {
+    return [...getHitBreakpoints()];
+  }
+
+  async debugResume(command: "continue" | "step" | "stop"): Promise<{ stopped: boolean }> {
+    return resumeDebug(command);
+  }
+
+  async debugListBreakpoints(): Promise<string[]> {
+    return listBreakpoints();
+  }
+
   async retryPhase(projectId: string, phase: string) {
     const requested = typeof phase === "string" ? phase.trim() : "";
     if (!requested) throw new Error("请选择要重试的失败阶段。");
     return this.runLocked(projectId, requested);
+  }
+
+  private ensureBrowserHasBounds(): void {
+    // 主窗口未构造时不存在 view，运行时直接 return。view 在 createWindow
+    // 后期添加并由 renderer ResizeObserver 上报。
+    const view = (this.browser as unknown as { view?: { getBounds?: () => Electron.Rectangle | null } } | null | undefined)?.view;
+    if (!view || typeof view.getBounds !== "function") return;
+    // 这里原本“view 宽高 > 0 就跳过”的逻辑会漏过 viewport 还是 0×0 的
+    // 场景： renderer ResizeObserver 没被触发（用户还在 stage=ai，没
+    // 切到 vbk），view 之前被设置过非零 bounds 但当前 webContents
+    // 还是 0×0。直接走兑底 — 取主窗口 size 重新写一遍 bounds，能
+    // 解决“跨越进程触发自动化时 view 实际为 0×0”的老 bug。
+    const setBounds = (this.browser as unknown as { setBounds?: (b: { x: number; y: number; width: number; height: number }) => void } | null | undefined)?.setBounds;
+    if (typeof setBounds !== "function") return;
+    const wins = BrowserWindow.getAllWindows();
+    const main = wins[0];
+    if (!main) return;
+    const [width, height] = main.getSize();
+    if (width <= 0 || height <= 0) return;
+    // view 在 invisible 时 viewport 是 0×0，setBounds 也不会让 webContents
+    // 重新计算。先保证可见，再重设 bounds。
+    this.browser!.setVisible?.(true);
+    this.browser!.setBounds!({ x: 0, y: 0, width, height });
   }
 
   private async runLocked(projectId: string, retryFrom?: string) {
@@ -85,6 +183,14 @@ export class DraftAutomation {
     const project = this.db.getProject(projectId);
     if (!project) throw new Error("项目不存在");
     const product = parseProduct(project.product);
+    // 触发前先决：让 VBK 视图可见并兑底 bounds。
+    // 这些调用必须在后面任何预检查 / 阶段 runner 之前完成，否则：
+    //   1) view 隐藏时 setVisible 没调，Playwright 连接后看到 window.innerHeight=0
+    //   2) view 没填满窗口时 auto-scroll 跟不动，click 30s 超时
+    //   3) 但预检查（管家 / 400 电话 / blockers）会在 view 还没就绪时抛错，
+    //      把 ensureBrowserHasBounds 这一兑底短路掉。
+    this.browser.setVisible(true);
+    this.ensureBrowserHasBounds();
     // 后面几个阶段强制要求这些字段，但它们在 productSchema 里是可选的。
     // 必须在创建远程草稿之前拦下，否则会在携程留下一个半成品产品。
     const blockers = automationBlockers(project.product);
@@ -124,7 +230,8 @@ export class DraftAutomation {
     const persist = () => { this.db.saveAutomation(projectId, run); this.emit(projectId); };
     this.db.saveAutomation(projectId, run);
     this.db.updateProduct(projectId, project.product, "automating");
-    this.browser.setVisible(true);
+    // setVisible + ensureBrowserHasBounds 已在 run 入口提前调用，
+    // 保证后面预检查 / 阶段 runner 不会因 view 未就绪拖崩 click。
     let basicInfoSaved = project.basicInfoSaved ?? false;
     try {
       const page = await this.browser.page();
@@ -143,14 +250,13 @@ export class DraftAutomation {
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         log(`产品基本信息阶段开始：${productId}`);
       } else {
-        // 从中间阶段重试：任意阶段恢复前都重新幂等录入产品信息，这样
-        // 历史任务把 basic 误标成功、但 VBK 实际仍未保存的情况下，后续阶段
-        // 仍能拿到「产品图文已解锁」的门禁。先记录精确日志便于审计；
-        // 真正填写由下方的 basic runner（统一一次 runPhaseWithRecovery）承担，
-        // 不在此处直接 fill，避免对同一个草稿把基本信息填两遍导致 VBK 红错。
-        await openProductEditor(page, productId!);
-        log(`重试 ${retryFrom} 前，正在重新录入并验证产品信息`);
-        log(`已从 ${retryFrom} 阶段继续录入`);
+        // 从中间阶段重试：用户偏好「在当前页面去重试」 —— 不再调
+        // openProductEditor 去拽回「基本信息」 tab，也不进行“重新幂等录入
+        // 产品信息”避免重复填表。页面应已停在原产品某子 tab 上；阶段
+        // handler 各自负责跳到自己的 tab（fillItineraryDraft 会 clickSection
+        // 切到「行程描述」）。仅在页面不是产品编辑器时才补一次导航。
+        await openProductEditor(page, productId!, { stayOnCurrentTab: true });
+        log(`已从 ${retryFrom} 阶段继续录入（当前页面）`);
       }
 
       // 每个 phase 处理器共享一份 productId 闭包，并独立被 runPhaseWithRecovery 包裹。
@@ -169,7 +275,7 @@ export class DraftAutomation {
         scenicSpotLogs.length = 0;
         const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: project.product });
         if (!shouldRefill.refill && !productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
-        await fillAndSaveBasicInfo(page, product, butlerSelection, { servicePhone, keySpots, scenicSpotLogs });
+        await fillAndSaveBasicInfo(page, product, butlerSelection, { servicePhone, keySpots, scenicSpotLogs, disambiguator: this.disambiguator });
         // 把景点未命中的单项沉淀到 automation 日志。
         for (const entry of scenicSpotLogs) log(entry, "warning");
         // 仅当 VBK 真实保存成功后置位；setBasicInfoSaved 由 fillAndSaveBasicInfo
@@ -181,7 +287,7 @@ export class DraftAutomation {
 
       const handlers: Record<string, () => Promise<unknown>> = {
         presentation: async () => { phaseRecord("presentation"); const r = await fillAndSavePresentation(page, product); run.phases[draftPhases.indexOf("presentation")].status = "completed"; return r; },
-        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraft(page, product); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
+        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraft(page, product, { disambiguator: this.disambiguator }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
         package: async () => { phaseRecord("package"); const r = await fillAndSavePackage(page, product); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
         pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await fillAndSubmitPricingInventory(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
         terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },
@@ -225,18 +331,16 @@ export class DraftAutomation {
         execute,
         advisor: this.advisor,
         applyAction: async (action) => {
-          // 仅白名单动作能落到浏览器：reload / reopen；不允许 submit / publish / online。
-          if (action === "retry_same_phase") return;
-          if (action === "reload_and_retry_phase") {
-            await page.reload({ waitUntil: "domcontentloaded" });
-            if (productId) await openProductEditor(page, productId);
-            return;
+          // 仅白名单动作能落到浏览器：只接受 wait_for_user 真正停手；其余
+          // 三个重试动作全部一律 Noop —— 用户偏好「在当前页面去重试」，
+          // 不希望 reload_and_retry_phase / reopen_editor_and_retry_phase
+          // 重新打开产品编辑器（会带页面跳回“基本信息” tab 并造成上次状
+          // 态丢失）。advisor 提议的诊断信息仍会落盘到 attemptsHistory
+          // 以供下次会话接手；仅不再执行 reload / reopen 动作。
+          if (action === "wait_for_user") {
+            throw new Error("applyAction 不应收到 wait_for_user");
           }
-          if (action === "reopen_editor_and_retry_phase") {
-            if (productId) await openProductEditor(page, productId);
-            return;
-          }
-          // wait_for_user 在 runner 内部已提前 stop，不会到达这里。
+          log(`applyAction noop action=${action} phase=${phase}（当前页面重试偏好）`, "info");
         },
         log,
         persist,
@@ -244,17 +348,22 @@ export class DraftAutomation {
       };
 
       // basic 阶段也走 runner：attempt 1..3，最多 3 次；runner 不创建新草稿。
-      // 不论 startIndex 是 0 还是 >0，都统一调用一次 runPhaseWithRecovery，
-      // 由 basicExecute 内部根据 productId + basicInfoSaved 决定是否幂等填写，
-      // 避免对同一个草稿把基本信息填两遍导致 VBK 红错。
-      const basicOutcome = await runPhaseWithRecovery(makeCtx("basic", basicExecute, 0));
-      if (basicOutcome.status === "needs_user") {
-        run.status = "failed";
-        run.phases[0].status = "failed";
-        run.currentPhase = "basic";
-        this.db.updateProduct(projectId, project.product, "blocked");
-        persist();
-        return;
+      // 仅在 startIndex === 0（首次运行或重跑 basic）时跑 basic；中间阶段
+      // 重试（startIndex > 0）偏好「在当前页面去重试」，不再强制跑 basic
+      // 段，信任之前的 basic 阶段已完成，避免其 clickSection 把页面拽回
+      // 「基本信息」 tab 并造成上次状态丢失。
+      if (startIndex === 0) {
+        const basicOutcome = await runPhaseWithRecovery(makeCtx("basic", basicExecute, 0));
+        if (basicOutcome.status === "needs_user") {
+          run.status = "failed";
+          run.phases[0].status = "failed";
+          run.currentPhase = "basic";
+          this.db.updateProduct(projectId, project.product, "blocked");
+          persist();
+          return;
+        }
+      } else {
+        log(`跳过 basic 阶段（已保存），从 ${retryFrom} 继续（当前页面重试）`);
       }
 
       if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");

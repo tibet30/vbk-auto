@@ -201,11 +201,16 @@ export async function createProductShell(page) {
   const nextButton = page.getByRole("button", { name: "下一步", exact: true });
   await assertCount(nextButton, 1, "下一步按钮");
   await nextButton.click();
-  await page.waitForURL(/\/ivbk\/vendor\/baseInfoMerge\?productId=\d+/, {
-    timeout: 15_000,
-  });
+  // VBK 创建产品后跳转到的页面可以是 baseInfoMerge（旧路径）或其他同
+  // 源页面；接受 productId 参数或 /vendor/ 路径段、且 URL 含 productId/
+  // productid 参数即可。
+  await page.waitForURL(
+    (url) => typeof url === "string" && /\/ivbk\/vendor\//.test(url) && /[?&](productid|productId)=\d+/.test(url),
+    { timeout: 15_000 },
+  );
 
-  const productId = new URL(page.url()).searchParams.get("productId");
+  const productId = new URL(page.url()).searchParams.get("productId") ||
+    new URL(page.url()).searchParams.get("productid");
   if (!productId) throw new Error("携程已进入详情页，但未返回产品 ID");
   return productId;
 }
@@ -503,7 +508,12 @@ export async function openProductEditor(page, productId, options = {}) {
   }
   // 跳出当前跳到目标 product editor。绕过 goto，用 location.href 走浏览器原生跳转。
   await page.evaluate((url) => { window.location.href = url; }, targetUrl);
-  await page.waitForURL((url) => typeof url === "string" && url.includes("baseInfoMerge"), { timeout: 30_000 }).catch(() => {});
+  // VBK 把行程描述拆到独立的 tourdays 页面，其它阶段还在 baseInfoMerge 页。
+  // 两种 URL 都视为成功进入了产品编辑器。
+  await page.waitForURL(
+    (url) => typeof url === "string" && (url.includes("baseInfoMerge") || /\/ivbk\/vendor\/tourdays\?/.test(url)),
+    { timeout: 30_000 },
+  ).catch(() => {});
   // 等待 产品信息 tab 可见
   await page.getByText("基本信息", { exact: true }).first().waitFor({ timeout: 30_000 });
 }
@@ -1583,6 +1593,10 @@ export async function selectStationAddress(page, card, city, extra = {}) {
       await delay(150);
       await options.nth(idx).click({ force: true });
       await delay(200);
+      // 选项被 force-click 之后 dropdown 不会自动关闭，会拦截下一次
+      // 输入框 click。按 Esc 收掉 dropdown，但不要触碰接送站 dialog 本体。
+      await page.keyboard.press("Escape").catch(() => false);
+      await delay(150);
       return { matched: true, source: "single", text: usable[0] };
     }
     // 2) 与 city 完全一致 → 直选。
@@ -1592,6 +1606,9 @@ export async function selectStationAddress(page, card, city, extra = {}) {
       await delay(150);
       await options.nth(idx).click({ force: true });
       await delay(200);
+      // 同样的 force-click 问题：手动 Esc 关闭 dropdown。
+      await page.keyboard.press("Escape").catch(() => false);
+      await delay(150);
       return { matched: true, source: "exact", text: usable[exactIdx] };
     }
     // 3) AI 兑底。disambiguator 返回的 aiMatch 有两种契约：
@@ -1618,6 +1635,8 @@ export async function selectStationAddress(page, card, city, extra = {}) {
           await delay(150);
           await options.nth(chosenIndex).click({ force: true });
           await delay(200);
+          await page.keyboard.press("Escape").catch(() => false);
+          await delay(150);
           return { matched: true, source: "ai", text: candidates[chosenIndex].text, reasoning: aiMatch.reasoning };
         }
       } catch (err) {
@@ -1782,6 +1801,9 @@ export async function fillItineraryDraft(page, product, options = {}) {
     targetTabLabel: "套餐管理",
     saveButtonNames: ["存为草稿"],
     targetTabLabels: ["套餐管理"],
+    // VBK 行程描述页（tourdays）没有单独的「下一步」按钮，
+    // 提交流程按钮统一是「提交审核并下一步」。
+    nextButtonLabel: "提交审核并下一步",
     isTargetUrl: () => false,
     savedWith,
   });

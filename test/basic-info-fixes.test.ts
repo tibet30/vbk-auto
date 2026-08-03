@@ -1384,7 +1384,7 @@ test("状态机 9：saveThenAdvance 不触碰任何提审/发布/上架/价格�
   }
 });
 
-test("状态机 10：presentation / itinerary 不调用「提交审核并下一步」、不调用 submitCurrentSectionAndNext", async () => {
+test("状态机 10：presentation / itinerary 不调用 submitCurrentSectionAndNext；itinerary 阶段允许 nextButtonLabel=「提交审核并下一步」以适配 VBK tourdays 页", async () => {
   const ctrip = await fs.readFile(ctripSourcePath, "utf8");
   const presIdx = ctrip.indexOf("export async function fillAndSavePresentation");
   const presBody = stripComments(ctrip.slice(presIdx, ctrip.indexOf("function dayScopeFor", presIdx)));
@@ -1392,8 +1392,11 @@ test("状态机 10：presentation / itinerary 不调用「提交审核并下一�
   const itinBody = stripComments(ctrip.slice(itinIdx, ctrip.indexOf("async function chooseRadioValue", itinIdx)));
   assert.ok(!presBody.includes("提交审核并下一步"), "fillAndSavePresentation 禁止匹配「提交审核并下一步」");
   assert.ok(!presBody.includes("submitCurrentSectionAndNext"), "fillAndSavePresentation 禁止调用 submitCurrentSectionAndNext");
-  assert.ok(!itinBody.includes("提交审核并下一步"), "fillItineraryDraft 禁止匹配「提交审核并下一步」");
   assert.ok(!itinBody.includes("submitCurrentSectionAndNext"), "fillItineraryDraft 禁止调用 submitCurrentSectionAndNext");
+  // VBK 行程描述页（tourdays）的唯一推进按钮是「提交审核并下一步」，
+  // 这个按钮在 itinerary 阶段只是保存并切换到下一 tab，不会真正提交产品。
+  // 因此允许 fillItineraryDraft 显式传 nextButtonLabel: "提交审核并下一步"。
+  assert.ok(itinBody.includes("nextButtonLabel: \"提交审核并下一步\""), "fillItineraryDraft 应使用 nextButtonLabel: \"提交审核并下一步\"");
 });
 
 test("matchDropdownOption「唯一可用项」直接选，不依赖精确也不依赖 AI", async () => {

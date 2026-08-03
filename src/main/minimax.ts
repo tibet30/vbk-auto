@@ -29,7 +29,12 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
 - reply 必须是简明中文，可以概括已生成内容和待核查项。
 - patch 必须是 RFC6902 数组；新增或整体覆盖字段时用 add 或 replace。
 - questions 最多 1 条，只有真正阻塞第一版时才问。
-- researchTasks 只列不能确认的数据，type 只能是 vbk/web/cost/image。`;
+- researchTasks 只列不能确认的数据，type 只能是 vbk/web/cost/image。
+- 商业字段补丁：可以在补齐 /commercial/pricing、/commercial/inventory、/commercial/release 后让产品进入可录入状态。这三项的合法形状分别是：
+  - pricing: { currency:"CNY", adult:number>0, child:number>=0, minimumTravelers:正整数, cost:{ adult:number>=0, child:number>=0, singleSupplement:number>=0, childBed:number>=0 }? }，且 cost.adult 不能超过 adult
+  - inventory: { startDate:YYYY-MM-DD, endDate:YYYY-MM-DD, dailyQuota:正整数 }，且 startDate 不能晚于 endDate
+  - release: { submitReview:bool, publishAfterApproval:bool, publicPriceCeiling:number>0, publicAuditRetries:1..10 }
+  上面任何一条不满足都会被本地校验拒绝；cost.adult 超过 adult、startDate 晚于 endDate、子数为 0、价格为负数等都不行。`;
 
 const responseJsonSchema = {
   type: "object",

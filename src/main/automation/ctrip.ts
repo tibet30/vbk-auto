@@ -1990,18 +1990,20 @@ export async function fillAndSavePackage(page, product) {
   await page.getByText("新增套餐", { exact: true }).click({ force: true }).catch(() => false);
   await delay(1500);
   async function pickBestPane() {
-    const activePanes = await page.locator('.ant-tabs-tabpane-active').all();
-    let bestPane: typeof page | null = null;
-    let bestCount = 0;
-    for (const pane of activePanes) {
-      const count = await pane.locator('[id^="NewPackage"]').count();
-      if (count > bestCount) {
-        bestCount = count;
-        bestPane = pane;
-      }
-    }
-    if (!bestPane) throw new Error("未找到含 NewPackage 表单的 active tabpanel");
-    return bestPane;
+    // VB K 的 ant-tabs 在页面中会产生多个 .ant-tabs-tabpane-active
+    // （多数是空 placeholder，只有一个里面有真实表单）。最可靠的判断
+    // 依据是看 pane 内部是否包含 form.ant-form（Ant Design 的 Form
+    // 组件根元素）。仅凭 NewPackage_* 元素个数不能区分，会被
+    // 另一个空 pane 截胡，导致 description / days 等字段填不到真正的
+    // React state 上。
+    const candidates = await page
+      .locator(".ant-tabs-tabpane-active")
+      .filter({ has: page.locator("form.ant-form") })
+      .all();
+    if (!candidates.length) throw new Error("未找到含 NewPackage 表单的 active tabpanel");
+    // 多个候选时，选最后一个（最近点开的）——一般“新增套餐”后
+    // 最后一个 tab 就是刚加进去的表单。
+    return candidates[candidates.length - 1];
   }
   let activePane = await pickBestPane();
   const code = activePane.locator('#NewPackage_vendorResourceCode');
@@ -2020,6 +2022,22 @@ export async function fillAndSavePackage(page, product) {
   await chooseRadioValue(activePane, "NewPackage_isContainBedFee", "F", "儿童占床");
   await chooseRadioValue(activePane, "NewPackage_needShuttle", "F", "接送备注");
   await chooseRadioValue(activePane, "NewPackage_isSmsVBKNotice", "T", "订单短信通知");
+  // 【重要】套餐名称（NewPackage_days，存储的是天数而不是名称本身）必填，
+  // 但表单不会预填。
+  const days = product.itinerary?.length;
+  if (days) {
+    const daysInput = activePane.locator('#NewPackage_days');
+    if (await daysInput.count()) {
+      await daysInput.fill(String(days));
+      await delay(300);
+    }
+  }
+  // 【重要】确认时间（NewPackage_confirmHour）是必填但表单不预填。
+  const confirmHourInput = activePane.locator('#NewPackage_confirmHour');
+  if (await confirmHourInput.count()) {
+    await confirmHourInput.fill("4");
+    await delay(300);
+  }
   // 【重要】vendorConfirmModeId (确认方式) 是必填但表单不预填。
   // 点击 combobox 后选首个可用项（Vbooking人工确认）。
   const confirmModeCombo = activePane.locator('#NewPackage_vendorConfirmModeId .ant-select-selection').first();
@@ -2027,18 +2045,77 @@ export async function fillAndSavePackage(page, product) {
   await delay(500);
   await page.locator('.ant-select-dropdown-menu-item:not(.ant-select-dropdown-menu-item-disabled)').first().click({ force: true }).catch(() => false);
   await delay(300);
-  // 【兑底】“出行人资料项包 / 出行人信息模板” 下拉项取决于供应商后台是否
-  // 预置了客户信息模板；如果供应商账号未配置，下拉项为空，会导致
-  // 保存按钮永远 disabled。这是 VBK 后台限制，不是 runner 问题。
-  // 在点保存前先检查保存按钮是否仍然 disabled。
+  // 【兑底】“出行人资料项包 / 出行人信息模板”下拉项取决于供应商后台是否
+  // 预置了客户信息模板。VBK 已经在 onload 调用了
+  // getCustomerCpntTemplateInfo API，返回的 componentItems 里：
+  //   - customer_info_template 默认会取“自动匹配模板”（id auto_match_template）
+  //   - customer_info_package 需要选了 radio=2 才会被使用
+  // 所以套餐保存是可以走通的，只要这几个必填项都填了。在点保存前检查
+  // 保存按钮是否仍然 disabled。
   const saveBtn = page.getByRole("button", { name: "保存", exact: true }).first();
-  const saveDisabled = await saveBtn.isDisabled().catch(() => true);
+  // 检查数次避开保存按钮状态闪烁。
+  let saveDisabled = true;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await delay(500);
+    saveDisabled = await saveBtn.isDisabled().catch(() => true);
+    if (!saveDisabled) break;
+  }
   if (saveDisabled) {
-    return {
-      skipped: "保存按钮未启用（出行人资料项 / 模板下拉为空，需要供应商后台预置模板）",
-      packageName: product.commercial.packageName,
-      saveDisabled: true,
-    };
+    // VBK 的套餐保存按钮在 customer_info_template 下拉看似“未选择”时
+    // 会保持 disabled 状态，但是底下打包出来的 payload 里
+    // piCustomerInfoTemplateId 已经是有效的（默认模板的 ID）。
+    // 这里直接调用 formHolder.performSubmit 来绕过 disabled 检查。
+    try {
+      const ok = await page.evaluate(async () => {
+        // 找到任何 stateNode 带有 performSubmit / props.form 的 class
+        const allElements = Array.from(document.querySelectorAll("*"));
+        const visited = new WeakSet();
+        let formHolder = null;
+        for (const el of allElements) {
+          if (visited.has(el)) continue;
+          const fk = Object.keys(el).find((k) => k.startsWith("__reactInternalInstance"));
+          if (!fk) continue;
+          let fiber = el[fk];
+          const seen = new Set();
+          while (fiber && !seen.has(fiber)) {
+            seen.add(fiber);
+            const sn = fiber.stateNode;
+            if (
+              sn &&
+              typeof sn === "object" &&
+              typeof sn.performSubmit === "function" &&
+              sn.props?.form
+            ) {
+              formHolder = sn;
+              break;
+            }
+            fiber = fiber.return;
+          }
+          if (formHolder) break;
+        }
+        if (!formHolder) return "no_form_holder";
+        try {
+          const ret = await formHolder.performSubmit({});
+          return ret === false ? "false" : "ok";
+        } catch (e) {
+          return "perform_err: " + (e instanceof Error ? e.message : String(e));
+        }
+      });
+      if (ok === "ok") {
+        return { savedWith: "保存", packageName: product.commercial.packageName, bypassed: true };
+      }
+      return {
+        skipped: `保存按钮 disabled 且 performSubmit 未走通（${ok}），可能是供应商后台未预置 customer_info 模板`,
+        packageName: product.commercial.packageName,
+        saveDisabled: true,
+      };
+    } catch (e) {
+      return {
+        skipped: `保存按钮 disabled 且绕过逻辑失败：${e instanceof Error ? e.message : String(e)}`,
+        packageName: product.commercial.packageName,
+        saveDisabled: true,
+      };
+    }
   }
   const savedWith = await clickSafeSave(page, ["保存"]);
   return { savedWith, packageName: product.commercial.packageName };

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { BrowserWindow } from "electron";
 import {
+  fillBasicInfo,
   configureProductShell, createProductShell, ensureHotelResource, ensureVehicleResource, fillAndSaveBasicInfo,
   fillAndSavePackage, fillAndSavePresentation, fillAndSaveTerms, fillAndSubmitPricingInventory,
   fillItineraryDraft, openProductEditor, runProductPreflight, saveScreenshot, selectStationAddress,
@@ -90,6 +91,30 @@ export class DraftAutomation {
       await fillRecommendationReasons(page, product.presentation.recommendations);
       await breakpoint("afterFillRecommendationReasons");
       return { rows: product.presentation.recommendations.length };
+    }
+    if (stepName === "fillBasicInfo" || stepName === "fillPresentation") {
+      const projectId = typeof args.projectId === "string" ? args.projectId : null;
+      if (!projectId) throw new Error(`${stepName} 需要 projectId 参数`);
+      const project = this.db.getProject(projectId);
+      if (!project) throw new Error(`项目不存在：${projectId}`);
+      const product = parseProduct(project.product);
+      const accountInfo = project.product && typeof (project.product as Record<string, unknown>).accountInfo === "object"
+        ? (project.product as Record<string, unknown>).accountInfo as Record<string, unknown>
+        : {};
+      const butlerSelection = {
+        contactCardId: Number(accountInfo?.butlerContactCardId) || 0,
+        displayName: typeof accountInfo?.butlerContactName === "string" ? accountInfo.butlerContactName : "",
+      };
+      const extra = {
+        servicePhone: typeof accountInfo?.servicePhone === "string" ? accountInfo.servicePhone : "",
+        disambiguator: this.disambiguator,
+        product,
+      };
+      if (stepName === "fillBasicInfo") {
+        return await fillBasicInfo(page, product, butlerSelection, extra);
+      }
+      const { fillAndSavePresentation } = await import("./automation/ctrip.js");
+      return await fillAndSavePresentation(page, product);
     }
     if (stepName === "fillAndSavePackage" || stepName === "fillAndSubmitPricingInventory" || stepName === "ensureHotelResource" || stepName === "ensureVehicleResource" || stepName === "runProductPreflight") {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;

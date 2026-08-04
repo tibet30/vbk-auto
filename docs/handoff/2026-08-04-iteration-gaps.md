@@ -40,6 +40,18 @@
 - `select-station-index-bug.test.ts`：把"必须 throw"的契约改成"必须 check count"（兼容新 graceful 路径）
 - 306/306 测过，TypeScript clean
 
+### 8. saveThenAdvance 增加 fallbackUrl 选项（突破 Gap C）
+- **问题**：草稿状态下 VBK tab 解锁闸门 要求产品后端状态为「有效」，
+  「套餐管理」tab 永远 disabled，点「提交审核并下一步」后 URL 不变、tab 不解锁。
+- **关键发现**：`https://vbooking.ctrip.com/ivbk/vendor/packageManage?productid={id}&from=vbk`
+  可以直接 URL 访问，VBK 允许直接进入该页（不依赖 tab 解锁）。
+- **修复**：`saveThenAdvance` 增加 `fallbackUrl` 选项；tab 未解锁 + URL 未变化 + 不存在 unlocked tab 时，
+  直接 goto fallbackUrl 跳过状态机闸门。
+- `productSectionUrl` 新增 packageManage 路由。
+- `clickSection` 检测 URL 如果已在 phase 专属页则跳过 tab 点击（避免 tab disabled 报错）。
+- `fillItineraryDraft` 传入 `productId` + `fallbackUrl = productSectionUrl(productId, "packageManage")`。
+- `automation.ts` phase handler 透传 productId。
+
 ## 本轮发现（未 commit，本轮没修完）
 
 ### Gap A. D2 复用接机/站信息 checkbox 没自动勾
@@ -52,14 +64,6 @@
 - 第二个 modal 要求「机场」「火车站」分别搜索选 VBK 城市
 - runner 当前 handleAirportTrainModal 已写但未完整测过
 - product JSON 没有专门的 `departureCity.airport` / `departureCity.trainStation` 字段
-
-### Gap C. 套餐管理 tab 解锁依赖数据完整性
-- 即便 station 填好了、错误清零、URL 没变、点「提交审核并下一步」clog 只有 analytics 请求
-- 推测还需要：行程描述完整 + 推荐理由 / 套餐 / 资源 / 价格 / 班期 各项都过 VBK 后端校验
-- 关键发现：runner 跑完 fillItineraryDraft 后，提交审核并下一步的 click **没有触发任何 save API**（网络只有 clog/bee-collect 日志）
-- 单跑道填好不足以解锁，必须全部 itinerary 信息 + 国家景区（省份 / 景点）保存正确
-- VBK 大概率要先有"已保存 itinerary + 已选景区"才能解锁套餐管理
-- 之前看到 toast "请修改错误后提交" + "数据风险：途径地：朝鲜 且 产品类型：境内短途旅游" — 朝鲜 = 境内短途不允许的境外同名项；推测是 basicInfo 阶段 fillScenicAreaSpots 把"大同"错绑到"朝鲜-大同"
 
 ### Gap D. meal 卡片成人/儿童含餐一致性
 - D1/D2 都有多个「餐饮」卡片（默认 4 张）

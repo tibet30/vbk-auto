@@ -1953,8 +1953,11 @@ export async function fillItineraryDraft(page, product, options = {}) {
   return { savedWith, days: product.itinerary.length };
 }
 
-async function chooseRadioValue(page, groupId, value, description) {
-  const group = page.locator(`[id="${groupId}"]`);
+async function chooseRadioValue(pageOrLocator, groupId, value, description) {
+  // pageOrLocator 可以是 page 或已 scope 的 Locator（避免多个
+  // tabpanel 共享 id 导致 assertCount 报错）。
+  const base = pageOrLocator ?? page;
+  const group = base.locator(`[id="${groupId}"]`);
   await assertCount(group, 1, description);
   const radio = group.locator(`input[type="radio"][value="${value}"]`);
   await assertCount(radio, 1, description);
@@ -1972,23 +1975,67 @@ export async function fillAndSavePackage(page, product) {
   await clickSection(page, "套餐管理").catch(() => {});
   const existing = page.getByText(product.commercial.packageName, { exact: true });
   if (await existing.count()) return { skipped: "套餐已存在", packageName: product.commercial.packageName };
+  // 【重要】packageManage 页面上 ant-tabs-tabpane 多个面板都在 DOM 里，
+  // 所有 ID 重复（NewPackage_description / NewPackage_vendorResourceCode 等）。
+  // 必须锁定到含 NewPackage_* 控件最多的 active tabpanel，否则
+  // page.locator('[id="..."]') 会匹配多个元素 / 或选到占位 pane。
   await page
     .getByText("新增套餐", { exact: true })
     .waitFor({ state: "visible", timeout: 30_000 });
-  const code = page.locator('[id="NewPackage_vendorResourceCode"]');
+  // 点击「新增套餐」会切换到新 tabpane —— 必须在点击后重选 bestPane。
+  await page.getByText("新增套餐", { exact: true }).click({ force: true }).catch(() => false);
+  await delay(1500);
+  async function pickBestPane() {
+    const activePanes = await page.locator('.ant-tabs-tabpane-active').all();
+    let bestPane: typeof page | null = null;
+    let bestCount = 0;
+    for (const pane of activePanes) {
+      const count = await pane.locator('[id^="NewPackage"]').count();
+      if (count > bestCount) {
+        bestCount = count;
+        bestPane = pane;
+      }
+    }
+    if (!bestPane) throw new Error("未找到含 NewPackage 表单的 active tabpanel");
+    return bestPane;
+  }
+  let activePane = await pickBestPane();
+  const code = activePane.locator('#NewPackage_vendorResourceCode');
   await assertCount(code, 1, "供应商套餐编号");
   await code.fill(product.basicInfo.supplierProductCode);
-  const description = page.locator('[id="NewPackage_description"]');
+  await delay(300);
+  const description = activePane.locator('#NewPackage_description');
   await assertCount(description, 1, "套餐介绍");
   await description.fill(
     `${product.commercial.packageName}。${product.presentation?.recommendation ?? product.basicInfo.subtitle}`,
   );
-  await chooseRadioValue(page, "NewPackage_isHotelResource", "T", "是否含酒店");
-  await chooseRadioValue(page, "NewPackage_priceInputType", "1", "按人报价");
-  await chooseRadioValue(page, "NewPackage_isHotelShareRoom", "F", "酒店拼房");
-  await chooseRadioValue(page, "NewPackage_isContainBedFee", "F", "儿童占床");
-  await chooseRadioValue(page, "NewPackage_needShuttle", "F", "接送备注");
-  await chooseRadioValue(page, "NewPackage_isSmsVBKNotice", "T", "订单短信通知");
+  await delay(300);
+  await chooseRadioValue(activePane, "NewPackage_isHotelResource", "T", "是否含酒店");
+  await chooseRadioValue(activePane, "NewPackage_priceInputType", "1", "按人报价");
+  await chooseRadioValue(activePane, "NewPackage_isHotelShareRoom", "F", "酒店拼房");
+  await chooseRadioValue(activePane, "NewPackage_isContainBedFee", "F", "儿童占床");
+  await chooseRadioValue(activePane, "NewPackage_needShuttle", "F", "接送备注");
+  await chooseRadioValue(activePane, "NewPackage_isSmsVBKNotice", "T", "订单短信通知");
+  // 【重要】vendorConfirmModeId (确认方式) 是必填但表单不预填。
+  // 点击 combobox 后选首个可用项（Vbooking人工确认）。
+  const confirmModeCombo = activePane.locator('#NewPackage_vendorConfirmModeId .ant-select-selection').first();
+  await confirmModeCombo.click({ force: true }).catch(() => false);
+  await delay(500);
+  await page.locator('.ant-select-dropdown-menu-item:not(.ant-select-dropdown-menu-item-disabled)').first().click({ force: true }).catch(() => false);
+  await delay(300);
+  // 【兑底】“出行人资料项包 / 出行人信息模板” 下拉项取决于供应商后台是否
+  // 预置了客户信息模板；如果供应商账号未配置，下拉项为空，会导致
+  // 保存按钮永远 disabled。这是 VBK 后台限制，不是 runner 问题。
+  // 在点保存前先检查保存按钮是否仍然 disabled。
+  const saveBtn = page.getByRole("button", { name: "保存", exact: true }).first();
+  const saveDisabled = await saveBtn.isDisabled().catch(() => true);
+  if (saveDisabled) {
+    return {
+      skipped: "保存按钮未启用（出行人资料项 / 模板下拉为空，需要供应商后台预置模板）",
+      packageName: product.commercial.packageName,
+      saveDisabled: true,
+    };
+  }
   const savedWith = await clickSafeSave(page, ["保存"]);
   return { savedWith, packageName: product.commercial.packageName };
 }

@@ -34,11 +34,15 @@ export interface RecoveryContext {
   log: (message: string, level?: "info" | "warning" | "error") => void;
   /** 持久化 AutomationRun 后通知 UI。 */
   persist: () => void;
+  /** 用户是否点击了「停止」。由 DraftAutomation 注入，返回 true 时
+   *  recovery 循环立刻跳出并以 AutomationCancelledError 抛出，runner
+   *  会把 run.status 改为 cancelled 而不是 failed。 */
+  shouldCancel?: () => boolean;
   now?: () => Date;
 }
 
 export interface RunPhaseOutcome {
-  status: "completed" | "needs_user";
+  status: "completed" | "needs_user" | "cancelled";
   finalError?: string;
 }
 
@@ -206,8 +210,32 @@ export async function runPhaseWithRecovery(
     rec.state = "running";
     persist();
 
+    // 用户中止检查：放在 attempt 顶部而不是 handler 内部 —— 当前 handler
+    // 已经在跑就让它自然结束，避免掐断 Playwright 调用让页面留下半成品 UI。
+    // 下一次 attempt 不再启动。status 走 cancelled，由 runner 负责更新
+    // run.status / project.status。
+    if (ctx.shouldCancel?.()) {
+      rec.state = "needs_user";
+      rec.finalError = "用户中止了自动录入";
+      if (!rec.userInstruction) rec.userInstruction = "已停止当前自动录入，请在 VBK 核查当前页面后重新保存草稿。";
+      ctx.log(`phase=${ctx.phase} cancelled before attempt=${attempt}`, "warning");
+      persist();
+      return { status: "cancelled", finalError: rec.finalError };
+    }
+
     try {
       await ctx.execute();
+      // handler 跑完了但用户可能在期间点了停止；这种情况下「阶段已成功」
+      // 不重要，立刻退出，避免再启下一阶段。保留 attempts 为空 ——
+      // 不诊断一个成功的阶段。
+      if (ctx.shouldCancel?.()) {
+        rec.state = "needs_user";
+        rec.finalError = "用户中止了自动录入";
+        if (!rec.userInstruction) rec.userInstruction = "已停止当前自动录入，请在 VBK 核查当前页面后重新保存草稿。";
+        ctx.log(`phase=${ctx.phase} cancelled after attempt=${attempt}`, "warning");
+        persist();
+        return { status: "cancelled", finalError: rec.finalError };
+      }
       rec.state = "completed";
       ctx.log(`phase=${ctx.phase} attempt=${attempt} completed`, "info");
       persist();

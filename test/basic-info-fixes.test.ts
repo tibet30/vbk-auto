@@ -135,8 +135,10 @@ test("阶段重试会在当前页面继续，openProductEditor 带 stayOnCurrent
   assert.match(ctripSource, /async function saveThenAdvance\(/);
   assert.match(ctripSource, /name: "下一步", exact: true/);
   assert.match(ctripSource, /productImageText/);
-  assert.match(ctripSource, /await comboboxes\.nth\(0\)\.click\(\)/);
+  // 旧实现需要先点国家框，再点省份框；当前 VBK 国内省份接口可直接在
+  // 第二个级联框搜索，测试只锁定直接省份搜索与 Not Found 过滤。
   assert.match(ctripSource, /await comboboxes\.nth\(1\)\.click\(\)/);
+  assert.match(ctripSource, /provinceSearch\.type\(label/);
   assert.match(ctripSource, /text !== "Not Found"/);
 });
 
@@ -803,6 +805,25 @@ test("fillBasicInfo 在省份非空时给两处城市都传中国，且 fallback
   }
   // 没有省份时不允许静默传 "中国"，应该传 undefined 让 pickCityOption 走老路径。
   assert.match(body, /info\.province\s*&&\s*info\.province\.trim\(\)\s*\?\s*"中国"\s*:\s*undefined/);
+});
+
+test("clickSection 目标 tab 已激活时直接返回，避免 loading 遮罩下重复点击超时", async () => {
+  const ctrip = await fs.readFile(ctripSourcePath, "utf8");
+  const body = helperBody(
+    ctrip,
+    "async function clickSection(",
+    "\nasync function waitForSectionEnabled(",
+  );
+  assert.match(body, /getAttribute\("aria-selected"\).*=== "true"/);
+  assert.match(body, /ant-tabs-tab-active/);
+  const activeGuard = body.indexOf("if (selected ||");
+  const click = body.indexOf("await current.click()", activeGuard);
+  assert.ok(activeGuard >= 0 && click > activeGuard, "active tab guard 必须位于 click 之前");
+  assert.match(
+    body.slice(activeGuard, click),
+    /return/,
+    "目标 tab 已 active 时必须直接返回，不能重复点击",
+  );
 });
 
 // —— 通用 save-then-advance helper 的回归锁 ——————

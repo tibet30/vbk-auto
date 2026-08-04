@@ -1981,6 +1981,14 @@ a:hover { text-decoration: underline; }
 
 .product-footer-meta strong { color: var(--foreground); font-weight: 500; }
 
+/* 「停止」按钮与「保存草稿」按钮之间的间距；同排放在 footer 右侧。 */
+.product-footer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pad-xs);
+  flex-shrink: 0;
+}
+
 /* ============================================================
  * State badges
  * ============================================================ */
@@ -2214,7 +2222,7 @@ a:hover { text-decoration: underline; }
 
 .stage {
   display: grid;
-  grid-template-columns: 24px 1fr auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   gap: var(--pad-xs);
   align-items: center;
   padding: 6px 8px;
@@ -2246,27 +2254,56 @@ a:hover { text-decoration: underline; }
   overflow-wrap: anywhere;
 }
 
-.stage-retry {
+.stage-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: end;
+}
+
+.stage-action {
   min-height: 26px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
-  border: 0;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--destructive);
+  color: var(--muted-foreground);
   font: inherit;
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
 }
 
-.stage-retry:hover:not(:disabled) { background: color-mix(in srgb, var(--destructive) 8%, transparent); }
-.stage-retry:focus-visible { outline: 2px solid color-mix(in srgb, var(--destructive) 45%, transparent); outline-offset: 2px; }
-.stage-retry:disabled { cursor: not-allowed; opacity: 0.55; }
-.stage-retry svg { flex: 0 0 auto; }
-.stage-retry .lucide-loader-circle { animation: spin 0.8s linear infinite; }
+.stage-action:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
+.stage-action:focus-visible { outline: 2px solid color-mix(in srgb, var(--foreground) 35%, transparent); outline-offset: 1px; }
+.stage-action:disabled { cursor: not-allowed; opacity: 0.45; }
+.stage-action svg { flex: 0 0 auto; }
+.stage-action .lucide-loader-circle { animation: spin 0.8s linear infinite; }
+
+.stage-action-enter:hover:not(:disabled) { color: var(--foreground); }
+.stage-action-enter[data-busy='true'] { color: var(--foreground); background: var(--muted); }
+
+.stage-action-retry {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 30%, transparent);
+}
+.stage-action-retry:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+  color: var(--destructive);
+}
+.stage-action-retry[data-busy='true'] {
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+  color: var(--destructive);
+}
+
+@media (max-width: 720px) {
+  .stage-action span { display: none; }
+  .stage-action { padding: 3px 6px; }
+}
 
 .automation-note {
   font-size: var(--fs-xs);

@@ -19,6 +19,8 @@ const api: VbkApi = {
     start: (projectId) => ipcRenderer.invoke("automation:start", projectId),
     retry: (projectId) => ipcRenderer.invoke("automation:retry", projectId),
     retryPhase: (projectId, phase) => ipcRenderer.invoke("automation:retryPhase", projectId, phase),
+    retryOnePhase: (projectId, phase) => ipcRenderer.invoke("automation:retryOnePhase", projectId, phase),
+    stop: (projectId) => ipcRenderer.invoke("automation:stop", projectId),
   },
   debug: {
     runStep: (stepName: string, argsJson: string) => ipcRenderer.invoke("automation:debug:runStep", stepName, argsJson),

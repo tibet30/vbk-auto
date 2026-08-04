@@ -291,6 +291,19 @@ export interface VbkApi {
     start(projectId: string): Promise<void>;
     retry(projectId: string): Promise<void>;
     retryPhase(projectId: string, phase: string): Promise<void>;
+    /**
+     * 单阶段重新执行：在不重启其他阶段的前提下重跑一个阶段，用于运营
+     * review 某阶段在 VBK 当前页面的填充效果。不要求阶段是 failed
+     * 状态 —— completed / pending 都可以触发；后续阶段状态不变。
+     */
+    retryOnePhase(projectId: string, phase: string): Promise<void>;
+    /**
+     * 用户主动中止当前项目的自动录入。立即把 AutomationRun 标记为
+     * cancelled 并落盘（UI 可立刻看到「已停止」），已经在跑的当前阶段
+     * handler 会自然结束后停止后续阶段 —— 当前 Playwright 调用无法
+     * 跨进程 abort，安全起见不强制中断 in-flight click。
+     */
+    stop(projectId: string): Promise<void>;
   };
   /**
    * 调试入口：让 CLI / IDE 能逐函数调用 ctrip.ts，单步观察 VBK 页面状态。

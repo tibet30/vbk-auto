@@ -228,6 +228,11 @@ function registerIpc() {
   ipcMain.handle("browser:setBounds", (_event, bounds) => browser.setBounds(bounds));
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => browser.setVisible(visible));
   ipcMain.handle("automation:start", (_event, projectId: string) => automation.start(projectId));
+  // 「停止」按钮的入口：立刻把 run 标记为 cancelled，runner 在下一个
+  // checkpoint 跳出。不等待 Playwright 当前调用结束 ——
+  // 跨进程 await click 安全中断点未知，强制 abort 可能让浏览器页面留下
+  // 半成品 UI。让 in-flight handler 自然结束后下一 attempt 不再启动。
+  ipcMain.handle("automation:stop", (_event, projectId: string) => automation.stop(projectId));
   // automation:retry 真正接到 preparePhaseRetry：如果项目当前的 automation
   // 已是 failed，则从 currentPhase / 最后失败阶段继续；否则退化为 start。
   ipcMain.handle("automation:retry", async (_event, projectId: string) => {
@@ -240,6 +245,10 @@ function registerIpc() {
     return automation.start(projectId);
   });
   ipcMain.handle("automation:retryPhase", (_event, projectId: string, phase: string) => automation.retryPhase(projectId, phase));
+  // 「重新执行」按钮的入口：单阶段重跑，不影响其他阶段。与 retryPhase
+  // （失败后多阶段 forward）的区别：retryPhase 会重置后续阶段并从头跑
+  // 到尾；retryOnePhase 只跑一个阶段，用于运营 review 当前页面填充效果。
+  ipcMain.handle("automation:retryOnePhase", (_event, projectId: string, phase: string) => automation.retryOnePhase(projectId, phase));
   // 调试入口：CLI / IDE 可以逐函数调用 ctrip.ts 并观察页面快照。
   // 启用方式：设置环境变量 VBK_DEBUG=1 重启 Electron。
   ipcMain.handle("automation:debug:runStep", (_event, stepName: string, argsJson: string) => automation.debugRunStep(stepName, argsJson));

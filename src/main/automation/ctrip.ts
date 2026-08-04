@@ -161,40 +161,345 @@ export async function inspectProductList(page) {
   };
 }
 
+/**
+ * 销售控制（saleControlMerge）页面：开新草稿时的壳子配置。
+ *
+ * 完整流程（与原 createProductShell 合并，原子化）：
+ *   1. 产品类型（默认「境内短途旅游」）：单选下拉，按 product.sales.productType 选择；
+ *      若合同锁住（ant-select-disabled）则跳过，由合同决定。
+ *   2. 产品形态（默认「私家团」）：单选下拉，按 product.sales.productForm 选择；
+ *      跟团游额外出现「是否拆团」单选 radio；若被合同锁定则跳过。
+ *   3. 线路品牌：单选下拉，默认尊重预选项；为空时选第一项。
+ *   4. 分销渠道：一行 checkbox group（不是多选下拉），把所有 enabled 且未选
+ *      的渠道全部勾上；disabled 的（如「携程门店」「携程系分销」）不动。
+ *   5. 点「下一步」并等待携程跳转到 baseInfoMerge 等产品详情页，返回产品 ID。
+ *
+ * 页面真实 DOM（探测 2026-08 抓的）：
+ *   - 没有 .ant-form-item，字段用 .saleControl-body > .ant-row > .saleControl-title
+ *     （label）+ .ant-col-18 / .ant-col-19（控件）。
+ *   - 只有 3 个 combobox：产品类型（可能 disabled）、产品形态（常被合同锁）、
+ *     线路品牌；comboboxes.nth(3) 不存在，不要 wait。
+ *   - 分销渠道 / 地区 都是一行 checkbox group，不是 .ant-select--multiple 下拉。
+ *   - 「下一步」是 .ant-btn-primary 按钮，文本精确为「下一步」。
+ *
+ * 设计原则：
+ *   - product JSON 没设 sales 字段时按用户偏好「短途旅游 + 私家团」进入销售控制页；
+ *     已设值的销售字段一律优先，避免覆写用户刻意改的设置；
+ *   - 合同锁定的字段不强求点击（会抛错或无效），尊重合同；
+ *   - 销售控制是「新草稿创建壳」，与基本信息编辑是两个独立阶段；
+ *   - 返回产品 ID 给上层，供后续阶段（基本信息 / 套餐 / 价格库存等）继续录入。
+ *
+ * @param page Playwright Page 实例。
+ * @param product 产品 JSON，包含 sales.productType / sales.productForm / sales.splitGroup。
+ *                缺省值：productType=domesticShort, productForm=privateTour, splitGroup=false。
+ * @returns 携程返回的产品 ID（字符串）。
+ */
 export async function configureProductShell(page, product) {
+  // 默认值兜底：产品 JSON 没设 sales 字段时按用户偏好「短途旅游 + 私家团」
+  // 进入销售控制页。已设值的产品 JSON 一律优先，避免覆写用户刻意改的设置。
+  const productType = product?.sales?.productType === "domesticLong"
+    ? "domesticLong"
+    : "domesticShort";
+  const productForm = product?.sales?.productForm === "groupTour"
+    ? "groupTour"
+    : "privateTour";
+  const splitGroup = product?.sales?.splitGroup === true;
+
   await page.goto(URLS.createSetup, { waitUntil: "domcontentloaded" });
   await page
     .getByRole("button", { name: "下一步", exact: true })
     .waitFor({ state: "visible", timeout: 30_000 });
 
-  let comboboxes = page.getByRole("combobox");
-  const initialCount = await comboboxes.count();
-  if (initialCount < 3) {
-    throw new Error(`创建页下拉框结构异常：仅找到 ${initialCount} 个`);
+  // 等「销售模式 / 合同 / 产品类型 / 产品形态 / 地区 / 线路品牌 / 分销渠道 /
+  // 下一步」整页表单渲染完成——以「分销渠道」行可见为整页就绪信号。
+  await findRowByTitle(page, "分销渠道").waitFor({ state: "visible", timeout: 15_000 });
+
+  // 1) 产品类型：必须先选（即便 URL producttype=0 预选了，VBK 也要重新
+  //    点选才能解锁「产品形态」；只点不动 disabled 的 产品形态 会一直 disabled）。
+  const productTypeRow = findRowByTitle(page, "产品类型");
+  await setEnabledSelectByLabel(page, productTypeRow, PRODUCT_TYPE_LABELS[productType], "产品类型");
+
+  // 2) 产品形态：VBK 的产品形态下拉在「产品类型」未点选前是 ant-select-disabled。
+  //    先轮询等它从 disabled 切为 enabled；轮询超时仍未 enabled 才认为合同真锁。
+  const productFormRow = findRowByTitle(page, "产品形态");
+  const productFormUnlocked = await waitForRowEnabledSelect(page, productFormRow, 5_000);
+  if (productFormUnlocked) {
+    await setEnabledSelectByLabel(page, productFormRow, PRODUCT_FORM_LABELS[productForm], "产品形态");
+  } else {
+    // enabled 始终不出现：合同真锁了，尊重合同。
+    console.warn("[configureProductShell] 产品形态下拉始终 disabled（合同锁定）");
   }
 
-  await comboboxes.nth(0).click();
-  await selectVisibleOption(page, PRODUCT_TYPE_LABELS[product.sales.productType]);
-
-  comboboxes = page.getByRole("combobox");
-  await comboboxes.nth(1).click();
-  await selectVisibleOption(page, PRODUCT_FORM_LABELS[product.sales.productForm]);
-
-  await page
-    .getByRole("combobox")
-    .nth(3)
-    .waitFor({ state: "visible", timeout: 30_000 });
-
-  if (product.sales.productForm === "groupTour") {
-    const splitGroup = page.getByRole("radio", {
-      name: product.sales.splitGroup ? "是" : "否",
-      exact: true,
-    });
-    const count = await splitGroup.count();
-    if (count >= 1) await splitGroup.first().check();
+  // 跟团游额外出现「是否拆团」radio；其它形态跳过这一步。
+  // VBK 是否拆团不一定叫「是否拆团」，按行内 radio 兜底检测：找「是/否」配对。
+  if (productForm === "groupTour") {
+    await setSplitGroupIfPresent(page, splitGroup);
   }
 
-  return page;
+  // 3) 线路品牌：默认尊重预选项；为空才点第一项。
+  await selectLineBrandFirstOption(page);
+
+  // 4) 分销渠道：把所有 enabled 且未 checked 的 checkbox 勾上；disabled 不动。
+  await checkAllEnabledDistributionChannels(page);
+
+  // 5) 点「下一步」并等跳转，返回携程产品 ID
+  return await createProductShell(page);
+}
+
+/**
+ * 在销售控制页里按 .saleControl-title 文字找到对应 .ant-row。
+ * 真实页面里 .saleControl-title 文字可能是「产品类型」「产品类型*」「 产品类型 * 」
+ * 等变体，统一 strip 空白和「* 必填星号」后做包含匹配。
+ */
+function findRowByTitle(page, label) {
+  return page
+    .locator(".saleControl-body .ant-row")
+    .filter({
+      has: page.locator(".saleControl-title", { hasText: new RegExp(`^\\s*${escapeRegExp(label)}\\s*\\*?\\s*$`) }),
+    })
+    .first();
+}
+
+/**
+ * 在某行里轮询是否有 .ant-select.ant-select-enabled。
+ * 用于 VBK 销售控制页：产品形态下拉先随产品类型 disabled，用户点选完
+ * 产品类型后异步解锁；轮询等待这一解锁，超时则返回 false（合同真锁）。
+ */
+async function waitForRowEnabledSelect(page, row, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  const selector = ".ant-select.ant-select-enabled";
+  while (Date.now() < deadline) {
+    const count = await row.locator(selector).count();
+    if (count > 0) return true;
+    await delay(200);
+  }
+  return false;
+}
+
+/**
+ * 在某行里找 .ant-select.ant-select-enabled，open + 选指定 label。
+ * 找不到 enabled select（合同锁定 / disabled）直接 return，不报错。
+ */
+async function setEnabledSelectByLabel(page, row, label, description) {
+  const enabledSelect = row.locator(".ant-select.ant-select-enabled").first();
+  const count = await enabledSelect.count();
+  if (!count) {
+    // 合同锁住这条字段是正常的——尊重合同。
+    return { skipped: "disabled-by-contract", description };
+  }
+  await enabledSelect.scrollIntoViewIfNeeded().catch(() => {});
+  await enabledSelect.click();
+  await delay(400);
+  const option = page.getByRole("option", { name: label, exact: true });
+  // VBK 远程搜索延迟，先等可见再点；找不到也允许跳过（合同可能动态过滤选项）。
+  await option.first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
+  const optionCount = await option.count();
+  if (!optionCount) {
+    // 选项没出来，按 Esc 收尾弹层，让后续步骤继续。
+    await page.keyboard.press("Escape").catch(() => {});
+    return { skipped: "option-not-found", description };
+  }
+  await option.first().click();
+  await delay(300);
+  return { selected: label, description };
+}
+
+/**
+ * 跟团游额外的「是否拆团」radio：行内可能命名为「是否拆团」/「是否独立成团」/其它。
+ * 实际页面不一定有这个字段，找不到就跳过；找到就选指定值。
+ */
+async function setSplitGroupIfPresent(page, wantSplit) {
+  // 找包含「是」「否」两个 radio 的行（拆团问题）
+  const candidates = ["是否拆团", "是否独立成团", "支持拆团"];
+  for (const label of candidates) {
+    const row = findRowByTitle(page, label);
+    const count = await row.count();
+    if (!count) continue;
+    const radio = row.getByRole("radio", { name: wantSplit ? "是" : "否", exact: true });
+    const radioCount = await radio.count();
+    if (radioCount >= 1) {
+      await radio.first().check().catch(() => {});
+      return { row: label, selected: wantSplit ? "是" : "否" };
+    }
+  }
+  return { skipped: "split-group-row-not-found" };
+}
+
+/**
+ * 销售控制「线路品牌」单选下拉：尊重预选项；为空时选第一项。
+ *
+ * 真实页面：.ant-row 里只有一个 .ant-select.ant-select-enabled，selected-value
+ * 默认就有「向导梁飞」等具体品牌。若 selected-value 已非空，幂等跳过；若为空
+ * （极少发生），按 findFirstEnabledOptionIndex 选第一项。
+ */
+async function selectLineBrandFirstOption(page) {
+  const row = findRowByTitle(page, "线路品牌");
+  await row.waitFor({ state: "visible", timeout: 10_000 });
+  const enabledSelect = row.locator(".ant-select.ant-select-enabled").first();
+  const enabledCount = await enabledSelect.count();
+  if (!enabledCount) return { skipped: "line-brand-disabled" };
+  const selectedValue = enabledSelect.locator(".ant-select-selection-selected-value");
+  const selectedCount = await selectedValue.count();
+  if (selectedCount) {
+    const text = (
+      (await selectedValue.getAttribute("title")) ||
+      (await selectedValue.innerText().catch(() => "")) ||
+      ""
+    ).trim();
+    if (text) return { reused: text };
+  }
+  // 当前为空——主动选第一个。
+  await enabledSelect.click();
+  await delay(400);
+  const options = page.locator(
+    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
+    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
+  );
+  await options.first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
+  const total = await options.count();
+  if (!total) {
+    await page.keyboard.press("Escape").catch(() => {});
+    throw new Error("线路品牌下拉未返回任何选项，请确认 VBK 已维护线路品牌。");
+  }
+  const texts = (await options.allTextContents()).map((text) => text.trim());
+  const disableds = await Promise.all(
+    Array.from({ length: total }, async (_, index) => {
+      const cls = (await options.nth(index).getAttribute("class")) || "";
+      return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
+    }),
+  );
+  const targetIndex = findFirstEnabledOptionIndex(texts, disableds, ["暂无数据", "Not Found"]);
+  if (targetIndex < 0) {
+    await page.keyboard.press("Escape").catch(() => {});
+    throw new Error(`线路品牌下拉无可用项；可选：${texts.filter(Boolean).join("、") || "无"}`);
+  }
+  await options.nth(targetIndex).click();
+  await delay(300);
+  return { picked: texts[targetIndex] };
+}
+
+/**
+ * 销售控制「分销渠道」checkbox group：把所有「enabled 且未 checked」的勾上。
+ *
+ * 真实页面：11 个 .ant-checkbox-wrapper，包含：
+ *   - 携程门店     (disabled + checked) —— 不可取消
+ *   - 百事通门店   (enabled + checked)
+ *   - 去哪儿门店   (enabled + checked)
+ *   - 旅景         (enabled + checked)
+ *   - Ctrip.com    (enabled + checked)
+ *   - 泛定制-C     (enabled + unchecked) —— 默认跳过：勾选会弹“泛定制加返
+ *     补充协议”佣金确认 modal，要点「确定」才能生效；当前合同不需要，跳过。
+ *   - 携程系分销   (disabled + unchecked) —— 不可改
+ *   - 途风         (enabled + unchecked) —— 默认要勾上
+ *   - 站外直播渠道 (enabled + unchecked) —— 默认要勾上
+ *   - 商旅         (enabled + checked)
+ *   - 常规分销(108)(enabled + checked) —— 包含 108 个子渠道，已整体勾选
+ *
+ * 用户偏好「分销渠道全部选上」= 把所有 enabled 且未 checked 的都勾上；
+ * disabled 的跳过（携程门店 / 携程系分销）；泛定制-C 跳过（需要二次确认且
+ * 当前合同不需要）。常规分销(108) 已 checked，跳过；阶段重试时「已 checked」
+ * 的也跳过。
+ *
+ * 实现要点：Playwright 的 `click({ force: true })` 在这个页面上无法触发
+ * Ant Design 的合成 onChange（input 是 position=absolute、opacity=0 的
+ * 「幽灵 input」，原生 click 事件被冒泡到 React 时不经过 Ant 的状态 dispatch
+ * 路径）；只有 `wrapper.evaluate((el) => el.click())` 会走原生 HTMLLabelElement.click()
+ * 的“调起关联表单控件 click”路径，才能让 .ant-checkbox-input 收到原生 click，
+ * 并触发 Ant Design 的 onChange。
+ */
+async function checkAllEnabledDistributionChannels(page) {
+  const row = findRowByTitle(page, "分销渠道");
+  await row.waitFor({ state: "visible", timeout: 10_000 });
+  const checkboxes = row.locator(".ant-checkbox-wrapper");
+  const total = await checkboxes.count();
+  if (!total) throw new Error("分销渠道行未找到任何 .ant-checkbox-wrapper");
+
+  // 读取每个 wrapper 的文字，决定是否跳过。
+  const labels = await Promise.all(
+    Array.from({ length: total }, (_, i) =>
+      checkboxes.nth(i).evaluate((el) => (el.textContent || "").trim().replace(/\s+/g, " ")),
+    ),
+  );
+
+  let picked = 0;
+  let skippedDisabled = 0;
+  let skippedAlreadyChecked = 0;
+  const skippedCustomization = [];
+  for (let index = 0; index < total; index += 1) {
+    const wrapper = checkboxes.nth(index);
+    const label = labels[index] || "";
+    if (/^泛定制-C$/.test(label)) {
+      // 默认不勾泛定制-C：会弹佣金加返协议 modal。
+      skippedCustomization.push(label);
+      continue;
+    }
+    const isDisabled = await wrapper.evaluate(
+      (el) => el.classList.contains("ant-checkbox-wrapper-disabled")
+        || !!el.querySelector(".ant-checkbox-disabled, .ant-checkbox-input[disabled]"),
+    ).catch(() => false);
+    if (isDisabled) {
+      skippedDisabled += 1;
+      continue;
+    }
+    const isChecked = await wrapper.evaluate(
+      (el) => el.classList.contains("ant-checkbox-wrapper-checked")
+        || !!el.querySelector(".ant-checkbox-checked")
+        || (el.querySelector(".ant-checkbox-input")?.checked === true),
+    ).catch(() => false);
+    if (isChecked) {
+      skippedAlreadyChecked += 1;
+      continue;
+    }
+    // Playwright click({ force: true }) 在本页面无法触发 Ant 的 onChange；
+    // 走原生 HTMLLabelElement.click() 调起“隐藏”input 的 click 事件，
+    // 是唯一能在不弹自定义 modal 的渠道上同时被 Ant Design 接收的路径。
+    await wrapper.evaluate((el) => el.click());
+    await delay(120);
+    // 复核是否真的勾上；个别渠道可能拖出 modal 需要二次确认（泛定制-C
+    // 已被上面跳过；这里再做一个兜底，遇到任何 modal 直接关闭）。
+    const reopened = await wrapper.evaluate(
+      (el) => el.classList.contains("ant-checkbox-wrapper-checked")
+        || !!el.querySelector(".ant-checkbox-checked")
+        || (el.querySelector(".ant-checkbox-input")?.checked === true),
+    ).catch(() => false);
+    if (reopened) {
+      picked += 1;
+    } else {
+      // 关闭可能弹出的二次确认 modal，避免阻断后续阶段。
+      await dismissCustomizationModal(page);
+    }
+  }
+  return { picked, skippedDisabled, skippedAlreadyChecked, skippedCustomization, total };
+}
+
+/**
+ * 勾选分销渠道时可能弹出“泛定制加返补充协议 / 佣金规则”之类的二次确认 modal。
+ * modal 含“确定 / 取消”两个按钮，本函数一律关闭（点取消或 × ）以保留“默认
+ * 不勾泛定制-C”的语义；其它未预期的弹窗也走 Esc 关闭。
+ */
+async function dismissCustomizationModal(page) {
+  // 查找“取消 / 我知道了 / 确定”文本的 modal；默认选取消，避免误勾。
+  const candidates = ["取消", "我知道了", "确定"];
+  for (const name of candidates) {
+    const buttons = page.getByRole("button", { name, exact: true });
+    const count = await buttons.count();
+    for (let index = 0; index < count; index += 1) {
+      const btn = buttons.nth(index);
+      const visible = await btn.isVisible().catch(() => false);
+      if (!visible) continue;
+      const insideModal = await btn
+        .evaluate((el) => !!el.closest(".ant-modal-wrap:not(.ant-modal-wrap-hidden), [role='dialog']"))
+        .catch(() => false);
+      if (!insideModal) continue;
+      // 优先点取消，避免误选确定；若只能找到「确定」且其它 modal 已关，也点确定收尾。
+      await btn.click().catch(() => {});
+      await delay(200);
+      return name;
+    }
+  }
+  await page.keyboard.press("Escape").catch(() => {});
+  await delay(200);
+  return null;
 }
 
 export async function createProductShell(page) {
@@ -555,6 +860,12 @@ async function clickSection(page, labels) {
         disabledLabel = label;
         continue;
       }
+      // 保存并下一步可能已经切到了目标页。新版 VBK 的 active tab 在页面
+      // 初始化期间仍会被 loading 遮罩拦住，重复 click 会一直等 actionability
+      // 直至超时；已选中就是到达目标 section 的充分证据，无需再点一次。
+      const selected = (await current.getAttribute("aria-selected")) === "true";
+      const className = (await current.getAttribute("class")) || "";
+      if (selected || /\bant-tabs-tab-active\b/.test(className)) return;
       await current.click();
       // 点击 tab 后等 VBK 渲染完成（aria-selected=true / 对应面板出现），最多 3s。
       await pollUntil(
@@ -1274,9 +1585,8 @@ export async function selectCtripLibraryImage(page: any, params: LibraryImagePar
   const dialog = page.getByRole("dialog").filter({ hasText: "从图库资源导入" });
   await dialog.waitFor({ state: "visible", timeout: 10_000 });
   await selectSearchOption(page, dialog, "PoiId", poi, "携程图库景点");
-
-  const descInput = dialog.locator("#description");
-  if (description && (await descInput.count())) await descInput.fill(description);
+  // 不再写入 #description：填描述会让 VBK 服务端按文本过滤图片，
+  // 经常把可用的图片过滤为空。POI 已经足够定位图库来源。
 
   const queryBtn = dialog.getByRole("button", { name: /查\s*询/ });
   await queryBtn.waitFor({ state: "visible" });
@@ -1341,8 +1651,8 @@ async function selectCtripLibraryCover(page, cover) {
   const dialog = page.getByRole("dialog").filter({ hasText: "从图库资源导入" });
   await dialog.waitFor({ state: "visible", timeout: 10_000 });
   await selectSearchOption(page, dialog, "PoiId", cover.poi, "携程图库景点");
-  const description = dialog.locator("#description");
-  if (cover.description && (await description.count())) await description.fill(cover.description);
+  // 不再写入 #description：填描述会让 VBK 服务端按文本过滤图片，
+  // 经常把可用的图片过滤为空。POI 已经足够定位图库来源。
   await dialog.getByRole("button", { name: /查\s*询/ }).click();
 
   const cards = dialog.locator(".importpic-modal-picitem");
@@ -1833,7 +2143,7 @@ async function handleAirportTrainModal(page, city) {
   await delay(300);
   await searchInputs.nth(0).fill("");
   await searchInputs.nth(0).type(city, { delay: 80 });
-  await delay(3_000);
+  await delay(500);
   const airportOption = page.locator('.ant-select-dropdown-menu-item').filter({
     hasText: new RegExp(`^${escapeRegExp(city)}机场$`),
   }).first();
@@ -1849,7 +2159,7 @@ async function handleAirportTrainModal(page, city) {
   await delay(300);
   await searchInputs.nth(1).fill("");
   await searchInputs.nth(1).type(city, { delay: 80 });
-  await delay(3_000);
+  await delay(500);
   const trainOption = page.locator('.ant-select-dropdown-menu-item').filter({
     hasText: new RegExp(`^${escapeRegExp(city)}$`),
   }).first();
@@ -2128,25 +2438,59 @@ function dateTitle(date) {
 
 async function pickCalendarDate(page, input, date) {
   const title = dateTitle(date);
-  await input.click();
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    const target = page.locator(`td[title="${title}"]`);
-    for (let index = 0; index < (await target.count()); index += 1) {
-      if (await target.nth(index).isVisible()) {
-        await target.nth(index).click();
-        return;
-      }
+  // 先尝试点开 popup。如果 popup 已经是开着的（上一次起开始日期后未关闭），
+  // 复用上一个 popup，避免连点 input 导致 Ant Design 重置 state。
+  const alreadyOpen = await page.evaluate(() => {
+    const p = document.querySelector('.ant-calendar-picker-container .ant-calendar');
+    return !!p && p.getBoundingClientRect().width > 100;
+  });
+  if (!alreadyOpen) {
+    await input.click();
+    await delay(400);
+  }
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    // 若 popup 被关闭，重新点 input 打开。
+    const popupOpen = await page.evaluate(() => {
+      const p = document.querySelector('.ant-calendar-picker-container .ant-calendar');
+      return !!p && p.getBoundingClientRect().width > 100;
+    });
+    if (!popupOpen) {
+      await input.click();
+      await delay(400);
+      continue;
     }
-    const next = page.locator('[title*="下个月"]');
-    let advanced = false;
-    for (let index = (await next.count()) - 1; index >= 0; index -= 1) {
-      if (await next.nth(index).isVisible()) {
-        await next.nth(index).click();
-        advanced = true;
-        break;
-      }
+    // 在当前可见 popup 里查找目标 td。
+    const targetInfo = await page.evaluate((targetTitle) => {
+      const popup = document.querySelector('.ant-calendar-picker-container .ant-calendar');
+      if (!popup) return { hasPopup: false };
+      const cell = popup.querySelector(`td[title="${targetTitle}"]`);
+      if (!cell) return { hasPopup: true, hasCell: false };
+      const r = cell.getBoundingClientRect();
+      return { hasPopup: true, hasCell: true, visible: r.width > 0 && r.height > 0 };
+    }, title);
+    if (targetInfo.hasCell && targetInfo.visible) {
+      // 走 Playwright click 走 hover/mousedown/mouseup 完整路径，让 React 16 合成
+      // 事件能被 document 级委托监听器接收到。仅设 {force:true} 是不够的，
+      // 原生 HTMLElement.click() 走不到 React 的批处理提交，需 click() 默认 的
+      // hover/move/down/up 序列。
+      await page.locator(`.ant-calendar-picker-container td[title="${title}"]`).first().click();
+      return;
     }
+    // 点击 popup 下个月：默认点 range-left；点到上限后 fallback 到 range-right
+    // （多用于 end-date 选到 start+1month 之后还有多个月场景）。
+    const advanced = await page.evaluate(() => {
+      const popup = document.querySelector('.ant-calendar-picker-container .ant-calendar');
+      if (!popup) return false;
+      const leftNext = popup.querySelector('.ant-calendar-range-left .ant-calendar-next-month-btn');
+      if (leftNext) { leftNext.click(); return 'left'; }
+      const rightNext = popup.querySelector('.ant-calendar-range-right .ant-calendar-next-month-btn');
+      if (rightNext) { rightNext.click(); return 'right'; }
+      const next = popup.querySelector('.ant-calendar-next-month-btn');
+      if (next) { next.click(); return 'fallback'; }
+      return false;
+    });
     if (!advanced) break;
+    await delay(200);
   }
   throw new Error(`日期选择器无法定位 ${date}`);
 }
@@ -2200,9 +2544,40 @@ export async function fillAndSubmitPricingInventory(page, product, productId) {
   if (setupBtnDisabled) {
     return { skipped: "套餐未保存，价格库存按钮 disabled", dailyQuota: inventory.dailyQuota };
   }
-  await clickExact(page, "设置价格/库存");
+  // 【兑底】Playwright click 经内部坐标事件覆盖到 button 下的 span 后偶现不触发 button
+  // 自己的 onClick。直接调用 React 合成的 onClick 解决，避免依赖 clickExact 走原鼠标路径。
+  const directClicked = await page.evaluate(() => {
+    const btn = Array.from(document.querySelectorAll('button')).find(
+      (b) => b.textContent.trim() === '设置价格/库存' && b.offsetParent !== null,
+    );
+    if (!btn) return { ok: false, reason: 'no-button' };
+    const handlersKey = Object.keys(btn).find((k) => k.startsWith('__reactEventHandlers'));
+    if (!handlersKey) return { ok: false, reason: 'no-react-handlers' };
+    const handlers = (btn as any)[handlersKey];
+    if (typeof handlers.onClick !== 'function') return { ok: false, reason: 'no-onclick' };
+    handlers.onClick({});
+    return { ok: true };
+  });
+  if (!directClicked.ok) {
+    // 调不到 React handler（页面重构后），退回原 clickExact 路径
+    await clickExact(page, "设置价格/库存");
+  }
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ state: "visible", timeout: 15_000 });
+
+  // 【兑底】保证使用「按周」模式 + 顶部日期范围选择器。“按日期” tab 下的
+  // fullCalendar 只能逐月查看，不能跨多年选；“按周” tab 下的 ant-calendar-range-picker
+  // 支持 range-left/range-right 互相随动，能可靠跨越多个月份。Tester 偶尔会被
+  // 默认 radio=1 （“按周”）选中，但服务器侧可能因上次填充残留切换到“按日期”。
+  // 这里按需手动切回“按周”。
+  await page.evaluate(() => {
+    const radios = document.querySelectorAll('input[type="radio"][value="1"]');
+    for (const r of radios) {
+      const label = r.closest('label');
+      if (label && label.offsetParent !== null) { label.click(); return; }
+    }
+  });
+  await delay(500);
 
   const rangeInputs = dialog.locator('input[readonly]');
   if ((await rangeInputs.count()) < 2) throw new Error("价格库存日期范围控件缺失");
@@ -2290,6 +2665,16 @@ export async function ensureHotelResource(page, product, productId) {
     waitUntil: "domcontentloaded",
   });
   await page.getByText("资源配置", { exact: true }).waitFor({ timeout: 30_000 });
+
+  // VBK 「资源配置」页是查看态：除非点过右下角「编辑」，「酒店」、「附
+  // 加资源」这些入口不可点（仅能看到不能操作）。ensureVehicleResource 已
+  // 先点「编辑」后再点「附加资源」；这里酒店侧同样需要，否则重新执行本阶
+  // 段时会因查看态导致 hotelEntries.click 拖超时 / 静默失败。
+  const edit = page.getByRole("button", { name: "编 辑" });
+  if (await edit.count()) {
+    await edit.click();
+    await delay(500);
+  }
 
   // 住宿行程段才会出现“可添加：酒店”。从这个入口进入后，页面会自动带入
   // 行程段的城市 ID，再由酒店名称输入框调用 getSegmentHotelQueryList。

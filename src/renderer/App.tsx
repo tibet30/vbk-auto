@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, BriefcaseBusiness, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Pencil, Play, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
+import { Bot, BriefcaseBusiness, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Pencil, Play, Plus, RefreshCw, Search, Send, Settings, Sparkles, Square, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
 import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoValue, ContactCardSelection, CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, ProviderContactCard, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
 
 type Stage = "review" | "vbk";
@@ -75,6 +75,138 @@ const DEFAULT_RECOVERY_PHASE_LABEL = (phase: string) => phase || "当前阶段";
 function recoveryPhaseDisplay(phase: string): string {
   return RECOVERY_PHASE_LABELS[phase] || DEFAULT_RECOVERY_PHASE_LABEL(phase);
 }
+
+// 「重新执行」按钮需要中文文案。阶段名是带前缀的（hotelResource / vehicleResource），
+// 「资源」二词足以区分；其他阶段直接用「套餐」、「班期」等业内词。这里专门
+// 区分资源组两个阶段是因为它们在「资源配置」section 里并排出现。
+const RETRY_PHASE_LABELS: Record<string, string> = {
+  basic: "基础信息",
+  presentation: "产品图文",
+  itinerary: "行程描述",
+  package: "套餐",
+  pricingInventory: "班期与价格",
+  hotelResource: "酒店资源",
+  vehicleResource: "用车资源",
+  terms: "条款",
+  preflight: "上架预检",
+};
+
+function phaseDisplayLabel(phase: string): string {
+  return RETRY_PHASE_LABELS[phase] || phase || "当前阶段";
+}
+
+// 自动录入阶段的展示文案 + VBK 入口 URL。
+// VBK 产品录入页面的实际导航顺序。顺序与 VBK 后台页签一致：
+//   销售控制 → 产品信息 → 产品图文 → 行程描述 → 套餐管理 →
+//   价格库存班期 → 资源配置 → 条款维护
+// 「销售控制」是新建产品 shell 的入口页（saleControlMerge），位于基本
+// 信息之前；它不是自动化阶段，不映射到任何 phase。「资源配置」同时承载
+// hotelResource / vehicleResource 两个阶段（同 newResourceRule 页面，
+// 点不同入口切酒店/用车）；preflight 是最终一致性校验，对应不到独立
+// VBK 页面，所以从这张导航表中省略。状态由 section.phaseNames 所列
+// 阶段聚合给出；每个可重跑阶段在同一 section 内提供独立操作。
+interface VbkNavSection {
+  key: string;
+  label: string;
+  /** 构造页面 URL；销售控制在尚无 productId 时回退到新增产品入口。 */
+  buildUrl: (productId: string | undefined) => string | null;
+  /** 映射到本页面的自动化阶段名；空数组表示该页面不直接对应阶段。 */
+  phaseNames: string[];
+}
+
+const VBK_HOST = "https://vbooking.ctrip.com";
+
+export const VBK_NAV_SECTIONS: VbkNavSection[] = [
+  {
+    key: "saleControl",
+    label: "销售控制",
+    // 已生成 productId 时必须打开当前产品的销售控制；静态 producttype=0
+    // 地址是“新增产品”入口，只能在产品壳尚未创建时使用。
+    buildUrl: (id) => id
+      ? `${VBK_HOST}/ivbk/vendor/saleControlMerge?from=vbk&productId=${encodeURIComponent(id)}`
+      : `${VBK_HOST}/ivbk/vendor/saleControlMerge?producttype=0&from=vbk`,
+    phaseNames: [],
+  },
+  {
+    key: "basic",
+    label: "产品信息",
+    buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/baseInfoMerge?productId=${encodeURIComponent(id)}&from=vbk` : null,
+    phaseNames: ["basic"],
+  },
+  {
+    key: "presentation",
+    label: "产品图文",
+    // VBK 当前产品菜单返回的独立 productImageText 路由；baseInfoMerge
+    // 的默认落点始终是“产品信息”。
+    buildUrl: (id) => id ? `${VBK_HOST}/product/input/productImageText?productId=${encodeURIComponent(id)}&pattern=4&from=vbk` : null,
+    phaseNames: ["presentation"],
+  },
+  {
+    key: "itinerary",
+    label: "行程描述",
+    buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/tourdays?productid=${encodeURIComponent(id)}&istab=1&from=vbk` : null,
+    phaseNames: ["itinerary"],
+  },
+  {
+    key: "package",
+    label: "套餐管理",
+    buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/packageManage?productid=${encodeURIComponent(id)}&from=vbk` : null,
+    phaseNames: ["package"],
+  },
+  {
+    key: "pricingInventory",
+    label: "价格库存班期",
+    buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/priceInventory?productId=${encodeURIComponent(id)}&from=vbk` : null,
+    phaseNames: ["pricingInventory"],
+  },
+  {
+    key: "resource",
+    label: "资源配置",
+    buildUrl: (id) => id ? `${VBK_HOST}/product/input/newResourceRule?productid=${encodeURIComponent(id)}&from=vbk` : null,
+    phaseNames: ["hotelResource", "vehicleResource"],
+  },
+  {
+    key: "terms",
+    label: "条款维护",
+    buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/newResourceClause?productid=${encodeURIComponent(id)}&from=vbk` : null,
+    phaseNames: ["terms"],
+  },
+];
+
+type AutomationPhaseRow = { phase: string; status: "pending" | "running" | "completed" | "failed" };
+// 使用 PhaseRecovery 的结构性子集，避免依赖完整类型；state 允许是任意
+// RecoveryState（含 running/advising/retrying/needs_user/completed）。
+type AutomationRecoveryMap = Record<string, { phase: string; state: string }>;
+
+// 聚合一个 section 内所有映射阶段的整体状态：
+//   1. 任何阶段 needs_user / failed → failed
+//   2. 任何阶段 advising / retrying / running → running
+//   3. 所有存在阶段均 completed → done
+//   4. 否则 pending
+// phaseNames 为空的 section（销售控制）不返回有效状态，前端不打 stageState。
+function aggregateSectionState(
+  section: VbkNavSection,
+  phases: AutomationPhaseRow[],
+  recovery?: AutomationRecoveryMap,
+): "pending" | "running" | "done" | "failed" | "idle" {
+  if (section.phaseNames.length === 0) return "idle";
+  const mapped = section.phaseNames
+    .map((name) => phases.find((phase) => phase.phase === name))
+    .filter((phase): phase is AutomationPhaseRow => Boolean(phase));
+  if (mapped.length === 0) return "idle";
+  const blocked = recovery && Object.values(recovery).some((rec) => rec.state === "needs_user" && section.phaseNames.includes(rec.phase));
+  if (blocked) return "failed";
+  if (recovery) {
+    const advising = Object.values(recovery).some((rec) => (rec.state === "advising" || rec.state === "retrying") && section.phaseNames.includes(rec.phase));
+    if (advising) return "running";
+  }
+  if (mapped.some((phase) => phase.status === "running")) return "running";
+  if (mapped.some((phase) => phase.status === "failed")) return "failed";
+  if (mapped.every((phase) => phase.status === "completed")) return "done";
+  return "pending";
+}
+
+// 「重新执行」按钮逐阶段露出来，不再依赖「首个失败阶段」判断。
 
 interface RecoveryNeedsUser {
   phase: string;
@@ -169,6 +301,17 @@ export function App() {
   // 刚被 confirmTask 确认的 task id：用于在 task-row 上打 1.2s 绿色闪动。
   const [justConfirmedTaskId, setJustConfirmedTaskId] = useState<string | null>(null);
   const [resolvingVehicleTaskId, setResolvingVehicleTaskId] = useState<string | null>(null);
+  // 自动录入阶段列表里“进入”按钮的 loading 状态：按 section.key 跟踪。
+  // 同一时间只允许一个“进入”跳转，避免连续点击造成的多次导航。
+  const [navigatingSection, setNavigatingSection] = useState<string | null>(null);
+  // 自动录入阶段列表里“刷新”按钮的 loading 状态：按 section.key 跟踪。
+  // 「重新执行」按钮的 loading 状态：按 phase 名跟踪。同一时间只允许一个阶段
+  // 被重跑，避免并发调用 automation.retryOnePhase 抢占同一个 Playwright 页面。
+  const [retryingPhase, setRetryingPhase] = useState<string | null>(null);
+  // 「停止」按钮的点击锁：点击后到 project:updated 携 cancelled 状态返回前，
+  // 避免重复点击造成多次 IPC 出发。stop() 幂等，多点几下并不会损坏状态，但
+  // 锁住能避免 UI / main 两侧状态不一致时出现双连。
+  const [stoppingAutomation, setStoppingAutomation] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [miniMaxConfigOpen, setMiniMaxConfigOpen] = useState(false);
   const [miniMaxBaseUrl, setMiniMaxBaseUrl] = useState("https://api.minimaxi.com/v1");
@@ -298,6 +441,11 @@ export function App() {
   // needs_user 是失败显示的唯一真值：recovery 优先于通用 status=failed。
   const recoveryBlocked = project?.automation ? recoveryNeedsUser(project.automation) : null;
   const advisorHint = project?.automation ? activeAdvisorHint(project.automation) : null;
+  // 在 VBK 导航列表里重复读取 automation 的两个字段：供 aggregateSectionState
+  // 和「重新执行」按钮的判定使用。在外层 {project.automation && (...)} 里
+  // 拿到的是 narrowed 的 AutomationRun；这里引用能避免 .map 闭包里掉窄化。
+  const automationPhases = project?.automation?.phases ?? [];
+  const automationRecovery = project?.automation?.recovery?.phases;
   const saveDraftLabel = recoveryBlocked ? "重新开始一轮保存" : "保存草稿";
   // 顶部进度导航把项目就绪度抽象成两个有意义的步骤状态，每个步骤用文字/小点
   // 同时表达含义，不依赖颜色单独传达。
@@ -371,6 +519,53 @@ export function App() {
     try { await api()!.automation.start(project.id); }
     catch (error) { setNotice(error instanceof Error ? error.message : "自动录入失败，可在 VBK 中检查后重试。"); }
     finally { setLoading(false); }
+  };
+  // 「停止」按钮：立刻走 IPC 告诉 main 取消当前 runner。main 侧 stop()
+  // 会同步写 AutomationRun 为 cancelled 并 emit；这里仅负责点击锁和提示。
+  // runner 的取消检查点在阶段 / attempt 之间，因此 in-flight Playwright
+  // 调用会自然结束、下一个 attempt 不再启动 —— UI 会看到状态依次从
+  // running → cancelled →（下一轮点击「保存草稿」时）重新走一遍。
+  const stopAutomation = async () => {
+    if (!project || !api() || stoppingAutomation) return;
+    setStoppingAutomation(true); setNotice(null);
+    try {
+      await api()!.automation.stop(project.id);
+      setNotice("已发送停止信号，当前阶段完成后将中止自动录入。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "发送停止信号失败。");
+    } finally {
+      setStoppingAutomation(false);
+    }
+  };
+  // 「进入」按钮：把右侧 VBK 浏览器直接跳到该 section 的真实路由。
+  // 产品图文不能复用 baseInfoMerge：该地址的默认落点始终是“产品信息”。
+  // 自动化 runner 的 clickSection 只负责录入流程内切页，不能替代手动“进入”。
+  const enterSection = async (section: VbkNavSection) => {
+    if (!project || !api() || navigatingSection || retryingPhase) return;
+    const url = section.buildUrl(project.productId);
+    if (!url) { setNotice("该页面需要先创建产品草稿才能打开，请等待销售控制完成。"); return; }
+    setNotice(null); setNavigatingSection(section.key);
+    setStage("vbk"); setBrowserOpen(true);
+    try { await api()!.browser.navigate(url); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "无法跳转到 VBK 页面，请检查浏览器登录状态。"); }
+    finally { setNavigatingSection(null); }
+  };
+  // 「刷新」按钮：重跑当前 section 里首个失败阶段的自动化。retryPhase
+  // 「重新执行」按钮：调用 automation.retryOnePhase，仅重跑一个阶段、不动其他
+  // 阶段。用于运营 review 当前阶段在 VBK 页面上的填充效果，可反复点。
+  // 旧版 retrySectionAutomation 走 retryPhase（重置后续阶段重跑到末尾），
+  // 限于失败阶段使用；这里不再调用。
+  const retryOnePhaseAutomation = async (sectionKey: string, phaseName: string) => {
+    if (!project || !api() || navigatingSection || retryingPhase || automationActive) return;
+    setNotice(null); setRetryingPhase(phaseName);
+    try {
+      await api()!.automation.retryOnePhase(project.id, phaseName);
+      setNotice(`已重新执行：${phaseDisplayLabel(phaseName)}。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "重新执行失败，请在 VBK 中检查后重试。");
+    } finally {
+      setRetryingPhase(null);
+    }
   };
   const openMiniMaxConfig = async () => {
     setMiniMaxBaseUrl(settings?.minimaxBaseUrl || "https://api.minimaxi.com/v1");
@@ -560,6 +755,21 @@ export function App() {
               {automationActive ? <LoaderCircle size={14} /> : <Play size={14} />}
               {saveDraftLabel}
             </button>
+            {/* 「停止」按钮：只在自动录入进行中显示，点击后立刻通知 main
+                runner 取消；runner 在阶段 / attempt 之间拾起取消信号。 */}
+            {automationActive && (
+              <button
+                className="btn btn-sm"
+                data-variant="danger"
+                onClick={() => void stopAutomation()}
+                disabled={stoppingAutomation}
+                aria-label="停止自动录入"
+                title="停止当前自动录入"
+              >
+                {stoppingAutomation ? <LoaderCircle size={14} /> : <Square size={14} />}
+                停止
+              </button>
+            )}
             <button
               className="topbar-account-chip"
               type="button"
@@ -1155,23 +1365,66 @@ export function App() {
                       <div className="product-section-head">
                         <span className="panel-num">C</span>
                         <strong className="product-section-title">自动录入进度</strong>
-                        <span className="state" data-state={recoveryBlocked ? "blocked" : project.automation.status === "succeeded" ? "confirmed" : project.automation.status === "failed" ? "blocked" : "researching"}>
-                          {recoveryBlocked ? "需要处理" : project.automation.status === "succeeded" ? "草稿已保存" : project.automation.status === "failed" ? "录入失败" : "执行中"}
+                        <span className="state" data-state={recoveryBlocked ? "blocked" : project.automation.status === "succeeded" ? "confirmed" : project.automation.status === "cancelled" ? "blocked" : project.automation.status === "failed" ? "blocked" : "researching"}>
+                          {recoveryBlocked ? "需要处理" : project.automation.status === "succeeded" ? "草稿已保存" : project.automation.status === "cancelled" ? "已停止" : project.automation.status === "failed" ? "录入失败" : "执行中"}
                         </span>
                       </div>
                       <div className="automation">
                         <div className="automation-body">
-                          {project.automation.phases.map((phase) => {
-                            const rec = project.automation?.recovery?.phases[phase.phase];
-                            const stageState = recoveryBlocked && rec?.state === "needs_user"
-                              ? "failed"
-                              : rec?.state === "advising" || rec?.state === "retrying"
-                                ? "running"
-                                : phase.status === "completed" ? "done" : phase.status === "running" ? "running" : phase.status === "failed" ? "failed" : "pending";
+                          {VBK_NAV_SECTIONS.map((section) => {
+                            const sectionState = aggregateSectionState(section, automationPhases, automationRecovery);
+                            // 「重新执行」按钮：每阶段都露出来，让运营随时重跑一个
+                            // 阶段去 review 该阶段在 VBK 当前页面的填充效果。
+                            // section.phaseNames 为空的（销售控制）不露。
+                            // 多阶段 section（如「资源配置」同时映射 hotelResource
+                            // 和 vehicleResource）每个阶段独立一个按钮 —— 按钮里
+                            // 注明阶段中文名，避免两个按钮看不出来区别。
+                            const canEnter = Boolean(section.buildUrl(project.productId));
+                            const isEntering = navigatingSection === section.key;
+                            const hasRetryablePhases = section.phaseNames.length > 0;
                             return (
-                              <div className="stage" data-state={stageState} key={phase.phase}>
+                              <div className="stage" data-state={sectionState} key={section.key}>
                                 <span className="stage-dot" />
-                                <span className="stage-label">{recoveryPhaseDisplay(phase.phase)}</span>
+                                <span className="stage-label">{section.label}</span>
+                                <div className="stage-actions">
+                                  <button
+                                    type="button"
+                                    className="stage-action stage-action-enter"
+                                    onClick={() => void enterSection(section)}
+                                    disabled={!canEnter || Boolean(navigatingSection) || Boolean(retryingPhase)}
+                                    data-busy={isEntering}
+                                    aria-label={`进入「${section.label}」页面`}
+                                    title={canEnter ? `在 VBK 中打开「${section.label}」` : "产品 ID 尚未生成"}
+                                  >
+                                    <span>进入</span>
+                                    {isEntering ? <LoaderCircle size={12} /> : <ChevronRight size={12} />}
+                                  </button>
+                                  {hasRetryablePhases && section.phaseNames.map((phaseName) => {
+                                    const isRetrying = retryingPhase === phaseName;
+                                    const phaseLabel = phaseDisplayLabel(phaseName);
+                                    // 多阶段 section（如「资源配置」同时映射酒店 / 用车
+                                    // 两个阶段）必须把阶段名附在按钮上 —— 不然两个
+                                    // 「重新执行」看起来像重复，只有 aria-label 能区
+                                    // 分。单阶段 section 不需要，section.label 已经
+                                    // 说明了阶段。
+                                    const showPhaseLabel = section.phaseNames.length > 1;
+                                    return (
+                                      <button
+                                        key={phaseName}
+                                        type="button"
+                                        className="stage-action stage-action-retry"
+                                        onClick={() => void retryOnePhaseAutomation(section.key, phaseName)}
+                                        disabled={Boolean(navigatingSection) || Boolean(retryingPhase) || isEntering || automationActive}
+                                        data-busy={isRetrying}
+                                        aria-label={`重新执行「${section.label}」的「${phaseLabel}」阶段`}
+                                        title={`仅重跑 ${phaseLabel}，其他阶段不会动。可用于 review 该阶段在 VBK 当前页面的填充效果。`}
+                                      >
+                                        {isRetrying ? <LoaderCircle size={12} /> : <RefreshCw size={12} />}
+                                        <span>{showPhaseLabel ? `重新执行 ${phaseLabel}` : "重新执行"}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                               </div>
                             );
                           })}
@@ -1234,10 +1487,25 @@ export function App() {
                     <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
                     {readiness.ready ? " 可保存 VBK 草稿" : ` 还需 ${readiness.issues.length} 项核查`}
                   </span>
-                  <button className="btn btn-lg" data-variant="primary" disabled={!readiness.ready || loading || automationActive} onClick={() => void startAutomation()}>
+                  <div className="product-footer-actions">
+                    {automationActive && (
+                      <button
+                        className="btn btn-lg"
+                        data-variant="danger"
+                        onClick={() => void stopAutomation()}
+                        disabled={stoppingAutomation}
+                        aria-label="停止自动录入"
+                        title="停止当前自动录入"
+                      >
+                        {stoppingAutomation ? <LoaderCircle size={15} /> : <Square size={15} />}
+                        停止
+                      </button>
+                    )}
+                    <button className="btn btn-lg" data-variant="primary" disabled={!readiness.ready || loading || automationActive} onClick={() => void startAutomation()}>
                     {automationActive ? <LoaderCircle size={15} /> : <Play size={15} />}
                     {saveDraftLabel}
                   </button>
+                  </div>
                 </footer>
               </aside>
               <section className="panel browser" aria-label="VBK 浏览器">

@@ -151,6 +151,8 @@ test("preload 的 category.method → channel 命名约定（同名简化）", (
     ["automation.start", "automation:start"],
     ["automation.retry", "automation:retry"],
     ["automation.retryPhase", "automation:retryPhase"],
+    ["automation.retryOnePhase", "automation:retryOnePhase"],
+    ["automation.stop", "automation:stop"],
     ["accounts.listKnownAccounts", "accounts:listKnownAccounts"],
     ["accounts.providerIdFor", "accounts:providerIdFor"],
   ];

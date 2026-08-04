@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { BrowserWindow } from "electron";
 import {
   fillBasicInfo,
-  configureProductShell, createProductShell, ensureHotelResource, ensureVehicleResource, fillAndSaveBasicInfo,
+  configureProductShell, ensureHotelResource, ensureVehicleResource, fillAndSaveBasicInfo,
   fillAndSavePackage, fillAndSavePresentation, fillAndSaveTerms, fillAndSubmitPricingInventory,
   fillItineraryDraft, openProductEditor, runProductPreflight, saveScreenshot, selectStationAddress,
 } from "./automation/ctrip.js";
@@ -12,9 +12,27 @@ import type {
 } from "../shared/contracts.js";
 import { VbkDatabase } from "./database.js";
 import { VbkBrowser } from "./vbk-browser.js";
-import { preparePhaseRetry } from "./automation/phase-retry.js";
+import { preparePhaseRetry, prepareSinglePhaseRetry } from "./automation/phase-retry.js";
+import { projectNotFound } from "./db-errors.js";
 import { runPhaseWithRecovery, type RecoveryContext } from "./automation/recovery.js";
 import { breakpoint, getHitBreakpoints, listBreakpoints, resetBreakpoints, resume as resumeDebug, snapshot as snapshotDebug } from "./automation/debug.js";
+
+/**
+ * 用户点击「停止」后区别于普通失败的语义：
+ *   - run.status 走 cancelled（不是 failed）
+ *   - project.status 走 blocked（项目可被再次「保存草稿」覆盖）
+ *   - 不计入「自动录入失败」诊断，UI 顶部状态显示「已停止」
+ *
+ * 当前 runner 通过 recovery 的 `cancelled` 状态返回 + markCancelled() 走
+ * 取消路径；保留 export 以供 handler 未来需要主动取消（例如在页面
+ * 检测到 VBK 上下线后）抛出。
+ */
+export class AutomationCancelledError extends Error {
+  constructor(message = "用户中止了自动录入") {
+    super(message);
+    this.name = "AutomationCancelledError";
+  }
+}
 
 function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
   // 顺序对齐 VBK 页签：资源配置在条款维护之前。
@@ -30,6 +48,9 @@ function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
 
 export class DraftAutomation {
   private running = new Set<string>();
+  // 用户主动中止的 projectId：runner 在阶段之间和 attempt 之间检查这个集合。
+  // 用 Set 而不是 boolean：避免上一次取消信号污染下一轮 run。
+  private cancellationRequested = new Set<string>();
 
   constructor(
     private db: VbkDatabase,
@@ -41,6 +62,43 @@ export class DraftAutomation {
 
   async start(projectId: string) {
     return this.runLocked(projectId);
+  }
+
+  /**
+   * 用户点击「停止」时调用。语义：
+   *   1. 立即把当前 AutomationRun 标记为 cancelled 并落盘（emit 到 UI），
+   *      让顶栏状态切到「已停止」；
+   *   2. 在 cancellationRequested 里登记 projectId，runner 在下一次
+   *      checkpoint（阶段之间 / attempt 之间）抛 AutomationCancelledError，
+   *      跳出循环并把项目状态置为 blocked（不是 failed，避免误导运营以为
+   *      出了 VBK 端问题）。
+   * 不能立刻 abort 当前 Playwright 调用：playwright page.click 跨进程 await
+   * 无安全中断点，强制 cancel 反而可能让浏览器留下半完成的 UI 状态。让当
+   * 前阶段的 handler 自然结束更安全。
+   */
+  async stop(projectId: string) {
+    const project = this.db.getProject(projectId);
+    if (!project) return;
+    const run = project.automation;
+    if (!run || run.status !== "running") return;
+    this.cancellationRequested.add(projectId);
+    // 即时更新 UI：把 run 切成 cancelled。runner 也会再写一次最终状态，
+    // 这里先落盘让「停止」点击立刻可见，无需等下一个 checkpoint。
+    const next: AutomationRun = {
+      ...run,
+      status: "cancelled",
+      logs: [
+        ...run.logs,
+        { at: new Date().toISOString(), message: "用户中止了自动录入", level: "warning" },
+      ],
+    };
+    this.db.saveAutomation(projectId, next);
+    this.emit(projectId);
+  }
+
+  /** 仅供测试使用：查询项目是否被标记为取消。 */
+  isCancelRequested(projectId: string): boolean {
+    return this.cancellationRequested.has(projectId);
   }
 
   /**
@@ -168,37 +226,92 @@ export class DraftAutomation {
     return this.runLocked(projectId, requested);
   }
 
+  /**
+   * 「重新执行」按钮：单阶段重跑一个阶段、用于 review 执行效果。
+   * 与 retryPhase 的区别是：
+   *   - 不要求 run.status = failed（succeeded / cancelled / blocked 都允许）；
+   *   - 不要求目标阶段状态 = failed（completed / pending 都允许）；
+   *   - 不重置后续阶段，只重跑一个阶段，避免覆盖已保存的下游页面。
+   *
+   * runner 完成后会把 run.status 恢复为 previous.status（一般是 succeeded），
+   * 仅目标阶段的 status 可能从 completed 变为 failed / running 再次变 completed。
+   * 后续阶段原封不动 — 运营可以放心点「重新执行」 review 当前页面效果。
+   */
+  async retryOnePhase(projectId: string, phase: string) {
+    const requested = typeof phase === "string" ? phase.trim() : "";
+    if (!requested) throw new Error("请选择要重新执行的阶段。");
+    if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
+    const project = this.db.getProject(projectId);
+    if (!project) throw projectNotFound(projectId);
+    if (!project.automation) throw new Error("项目尚未开始自动录入。");
+    if (project.automation.status === "running") throw new Error("自动录入正在进行中，不能重新执行。");
+    // productId 存在是必要条件：某些阶段（如 package / preflight）需要在 VBK
+    // 携程草稿页上点操作；远程草稿尚未创建时不能单阶段重跑。
+    if (!project.productId) throw new Error("远程草稿尚未创建，不能重新执行阶段。");
+    return this.runOnePhaseLocked(projectId, requested);
+  }
+
   private ensureBrowserHasBounds(): void {
     // 主窗口未构造时不存在 view，运行时直接 return。view 在 createWindow
     // 后期添加并由 renderer ResizeObserver 上报。
     const view = (this.browser as unknown as { view?: { getBounds?: () => Electron.Rectangle | null } } | null | undefined)?.view;
     if (!view || typeof view.getBounds !== "function") return;
-    // 这里原本“view 宽高 > 0 就跳过”的逻辑会漏过 viewport 还是 0×0 的
-    // 场景： renderer ResizeObserver 没被触发（用户还在 stage=ai，没
-    // 切到 vbk），view 之前被设置过非零 bounds 但当前 webContents
-    // 还是 0×0。直接走兑底 — 取主窗口 size 重新写一遍 bounds，能
-    // 解决“跨越进程触发自动化时 view 实际为 0×0”的老 bug。
     const setBounds = (this.browser as unknown as { setBounds?: (b: { x: number; y: number; width: number; height: number }) => void } | null | undefined)?.setBounds;
     if (typeof setBounds !== "function") return;
     const wins = BrowserWindow.getAllWindows();
     const main = wins[0];
     if (!main) return;
-    const [width, height] = main.getSize();
-    if (width <= 0 || height <= 0) return;
-    // view 在 invisible 时 viewport 是 0×0，setBounds 也不会让 webContents
-    // 重新计算。先保证可见，再重设 bounds。
+    const [winWidth, winHeight] = main.getSize();
+    if (winWidth <= 0 || winHeight <= 0) return;
+    // 只在 renderer 还没上报过任何 bounds（当前是 0×0，首次跨进程触发）时
+    // 才使用兑底 size。已有有效 bounds 就让 renderer 自己负责位置
+    // —— 强制重写会覆盖它的最新布局，而且把 bounds 设成 {0,0,W,H}
+    // 会让 WebContentsView 盖住整个主窗口，把含 「停止」 按钮的
+    // React 顶栏一起遮住，用户看到 VBK「突然全屏」并点不到停止键。
+    const current = view.getBounds();
+    if (current && current.width > 0 && current.height > 0) {
+      // 仅保证可见，bounds 不动。
+      this.browser!.setVisible?.(true);
+      return;
+    }
+    // view 兑底尺寸：与 stage="vbk" 的 split 比例对齐（右 66%），
+    // 不占满整窗口、避免盖住 React 顶栏 / 左边的阶段摘要。最小宽
+    // 640 保证嵌入页面不被携程压成移动版布局。
     this.browser!.setVisible?.(true);
-    this.browser!.setBounds!({ x: 0, y: 0, width, height });
+    const fallbackWidth = Math.max(640, Math.round(winWidth * 0.66));
+    this.browser!.setBounds!({
+      x: winWidth - fallbackWidth,
+      y: 0,
+      width: fallbackWidth,
+      height: winHeight,
+    });
   }
 
   private async runLocked(projectId: string, retryFrom?: string) {
     // 同一项目并发录入会共用一个 Playwright 页面互相抢占，甚至创建出两个草稿。
     if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
     this.running.add(projectId);
+    // 清理上一轮可能的取消信号 —— stop() 会写进 cancellationRequested，但
+    // run 结束后 finally 会清理；保险起见重入前再清一次。
+    this.cancellationRequested.delete(projectId);
     try {
       await this.run(projectId, retryFrom);
     } finally {
       this.running.delete(projectId);
+    }
+  }
+
+  private async runOnePhaseLocked(projectId: string, phaseName: string) {
+    // 与 runLocked 共享并发锁：点「重新执行」时如果 start / retryPhase
+    // 还在跑，必须拒接 —— 同一个 Playwright 页面不能被两个 runner 并发调用。
+    if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
+    this.running.add(projectId);
+    this.cancellationRequested.delete(projectId);
+    try {
+      await this.runOnePhase(projectId, phaseName);
+    } finally {
+      this.running.delete(projectId);
+      this.cancellationRequested.delete(projectId);
     }
   }
 
@@ -288,8 +401,9 @@ export class DraftAutomation {
         run.currentPhase = "basic"; run.phases[0].status = "running";
         if (!productId) {
           log("正在创建 VBK 产品草稿…");
-          await configureProductShell(page, product);
-          productId = (await createProductShell(page)) as string;
+          // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌
+          // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
+          productId = (await configureProductShell(page, product)) as string;
           this.db.setProductId(projectId, productId);
         } else {
           log("正在重跑 basic 阶段…", "warning");
@@ -392,6 +506,10 @@ export class DraftAutomation {
         },
         log,
         persist,
+        // 「停止」按钮会写进 cancellationRequested。recovery 在 attempt
+        // 顶部检查；in-flight handler 不打断（Playwright click 跨进程无
+        // 安全中断点，强制中断会让浏览器页面留下半成品状态）。
+        shouldCancel: () => this.cancellationRequested.has(projectId),
         };
       };
 
@@ -408,6 +526,10 @@ export class DraftAutomation {
           run.currentPhase = "basic";
           this.db.updateProduct(projectId, project.product, "blocked");
           persist();
+          return;
+        }
+        if (basicOutcome.status === "cancelled") {
+          this.markCancelled(projectId, run, persist);
           return;
         }
       } else {
@@ -432,11 +554,23 @@ export class DraftAutomation {
           persist();
           return;
         }
+        if (outcome.status === "cancelled") {
+          this.markCancelled(projectId, run, persist);
+          return;
+        }
         log(`已保存：${phase}`);
       }
       run.status = "succeeded"; run.currentPhase = undefined; run.screenshot = await saveScreenshot(page, "desktop-draft", productId!);
       log("产品草稿已保存，未提交审核、未发布。", "warning"); this.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "draft_saved"); persist();
     } catch (error) {
+      // 「停止」流程不应该被 catch 当作 failed —— stop() 已经把 run.status
+      // 改为 cancelled 并 emit 过，这里只需清理 cancellationRequested 后
+      // 静默返回，不要覆盖状态。
+      if (error instanceof AutomationCancelledError) {
+        this.cancellationRequested.delete(projectId);
+        return;
+      }
+      // handler 内部可能因为 stop 之外的其他原因抛错 —— 现有逻辑保持不变。
       run.status = "failed";
       const current = run.phases.find((phase) => phase.phase === run.currentPhase);
       if (current && current.status !== "completed") current.status = "failed";
@@ -444,7 +578,181 @@ export class DraftAutomation {
       this.db.updateProduct(projectId, project.product, "blocked");
       persist();
       throw error;
+    } finally {
+      // 走完所有阶段后清理取消信号 —— 防止下一次 run 进来时拿到的 stale flag。
+      this.cancellationRequested.delete(projectId);
     }
   }
+
+  /**
+   * 在 recovery 阶段检测到 cancellation 时调用。把 run 状态从「上次
+   * stop() 写入的 cancelled」保持一致，并把当前 phase 标 failed（如果还
+   * 处于非 completed 状态）。项目状态走 blocked —— 与 failed 共用同一入口，
+   * UI 上都会出现「需要处理」提示。
+   */
+  private markCancelled(projectId: string, run: AutomationRun, persist: () => void) {
+    run.status = "cancelled";
+    const current = run.phases.find((phase) => phase.phase === run.currentPhase);
+    if (current && current.status !== "completed") current.status = "failed";
+    persist();
+  }
+
+  /**
+   * 单阶段重跑：只跑一个 phase，不动其他阶段。
+   * 设计要点：
+   *   1. 与 run() 共享 phase handler 逻辑 —— 用同样的 fill* 调用、同样的
+   *      recovery 包装，但 execute 里不再遍历后续 phase。
+   *   2. run.status 在执行期间临时变 running（让 UI 看到阶段正在重跑），
+   *      执行结束后恢复为 previous.status（一般是 succeeded / cancelled）。
+   *   3. 后续阶段原封不动 —— 运营可以反复点「重新执行」去 review 某阶段，
+   *      不会担心下游阶段被覆盖。
+   */
+  private async runOnePhase(projectId: string, phaseName: string) {
+    const project = this.db.getProject(projectId);
+    if (!project) throw projectNotFound(projectId);
+    const product = parseProduct(project.product);
+    const productId = project.productId;
+    // 「重新执行」以前置依赖与 run() 一致：需要管家联系人 / 400 电话才能
+    // 走到 VBK 页面上点表单。缺少则阻断。
+    const accountName = this.db.getSetting("vbkAccountName")?.value;
+    if (!accountName) throw new Error("未检测到当前登录的 VBK 账号，无法读取管家联系人。");
+    const butlerSelection = this.resolveButlerSelection(accountName);
+    if (!butlerSelection) throw new Error("录入前检查未通过：管家联系人（请在账号设置里维护）");
+    const servicePhone = this.resolveServicePhone(accountName);
+    if (!servicePhone) throw new Error("录入前检查未通过：线上 400 电话（请在账号设置里维护）");
+    const keySpots = pickKeySpotsFromItinerary(project.product, 3);
+    const scenicSpotLogs: string[] = [];
+    const basicInfoSaved = project.basicInfoSaved ?? false;
+
+    const draftPhases = draftPhasesFor(product);
+    const phaseIndex = draftPhases.indexOf(phaseName);
+    if (phaseIndex < 0) throw new Error(`当前产品没有阶段：${phaseName}`);
+    const previousRun = project.automation!;
+    const originalRunStatus = previousRun.status;
+    const run = prepareSinglePhaseRetry(previousRun, draftPhases, phaseName);
+    const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); this.db.saveAutomation(projectId, run); this.emit(projectId); };
+    const persist = () => { this.db.saveAutomation(projectId, run); this.emit(projectId); };
+    this.db.saveAutomation(projectId, run);
+
+    try {
+      this.browser.setVisible(true);
+      this.ensureBrowserHasBounds();
+      const page = await this.browser.page();
+      // 「重新执行」复用「在当前页面去重试」偏好：不调 openProductEditor 拽回
+      // 「基本信息」 tab；页面应已停在原产品某子 tab 上，由各阶段 handler 自
+      // 己 clickSection 切到目标 tab。仅在 productId 还没创建时跳过 —— 这种
+      // 情况调用方（retryOnePhase）已拦截。
+      if (productId) await openProductEditor(page, productId, { stayOnCurrentTab: true });
+
+      const phaseRecord = (phase: string) => {
+        const index = draftPhases.indexOf(phase);
+        if (index < 0) throw new Error(`未注册的阶段：${phase}`);
+        run.currentPhase = phase;
+        run.phases[index].status = "running";
+        persist();
+      };
+
+      // basic 阶段特殊：会动 setBasicInfoSaved / scenicSpotLogs。其他阶段直接
+      // 调 fill 函数 + 标记 completed 即可。这块逻辑与 run() 里的 handler
+      // 同型 — 仅去掉 multi-phase forward 部分。
+      const execute: () => Promise<unknown> = phaseName === "basic"
+        ? async () => {
+            phaseRecord("basic");
+            scenicSpotLogs.length = 0;
+            const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: project.product });
+            if (!shouldRefill.refill && !productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
+            await fillAndSaveBasicInfo(page, product, butlerSelection, { servicePhone, keySpots, scenicSpotLogs, disambiguator: this.disambiguator });
+            for (const entry of scenicSpotLogs) log(entry, "warning");
+            this.db.setBasicInfoSaved(projectId);
+            run.phases[phaseIndex].status = "completed";
+          }
+        : await (async () => {
+            const fillMap: Record<string, () => Promise<unknown>> = {
+              presentation: () => fillAndSavePresentation(page, product),
+              itinerary: () => fillItineraryDraft(page, product, { disambiguator: this.disambiguator, productId: productId ?? "" }),
+              package: () => fillAndSavePackage(page, product),
+              pricingInventory: () => fillAndSubmitPricingInventory(page, product, productId!),
+              terms: () => fillAndSaveTerms(page, product),
+              hotelResource: () => ensureHotelResource(page, product, productId!),
+              vehicleResource: () => ensureVehicleResource(page, product, productId!),
+              preflight: () => runProductPreflight(page, product, productId!),
+            };
+            const fillFn = fillMap[phaseName];
+            if (!fillFn) throw new Error(`未注册的阶段：${phaseName}`);
+            return async () => {
+              phaseRecord(phaseName);
+              const result = await fillFn();
+              // hotelResource 会更新 product.operations.hotelResource；其他阶段
+              // 不需要额外动作。这里与 run() 中 hotelResource handler 同型。
+              // 这里不写类型 cast，直接用 “in” 判位存在属性，跟 run()
+              // 那个 handler 保持一致 —— run() 里也是 result.source / diamond。
+              if (phaseName === "hotelResource") {
+                const hr = result as { source?: unknown; resourceId?: unknown; resourceName?: unknown; hotelTier?: unknown; diamond?: unknown };
+                if (hr.source === "vbk" && hr.resourceId && hr.resourceName) {
+                  product.operations!.hotelResource = {
+                    source: "vbk",
+                    resourceId: hr.resourceId as number,
+                    resourceName: String(hr.resourceName),
+                    hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
+                    diamond: hr.diamond as 3 | 4 | 5,
+                  };
+                  this.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "automating");
+                }
+              }
+              run.phases[phaseIndex].status = "completed";
+              return result;
+            };
+          })();
+
+      const completedBefore = draftPhases.slice(0, phaseIndex).filter((p) => previousRun.phases.find((r) => r.phase === p)?.status === "completed");
+      const ctx: RecoveryContext = {
+        run,
+        phase: phaseName,
+        completedPhases: completedBefore,
+        productIdExists: Boolean(productId),
+        basicInfoSaved,
+        execute,
+        advisor: this.advisor,
+        applyAction: async (action) => {
+          if (action === "wait_for_user") throw new Error("applyAction 不应收到 wait_for_user");
+          log(`applyAction noop action=${action} phase=${phaseName}（单阶段重试不执行 reload / reopen）`, "info");
+        },
+        log,
+        persist,
+        shouldCancel: () => this.cancellationRequested.has(projectId),
+      };
+
+      const outcome = await runPhaseWithRecovery(ctx);
+      if (outcome.status === "needs_user") {
+        run.status = "failed";
+        run.phases[phaseIndex].status = "failed";
+        run.currentPhase = phaseName;
+        this.db.updateProduct(projectId, project.product, "blocked");
+      } else if (outcome.status === "cancelled") {
+        this.markCancelled(projectId, run, persist);
+      } else {
+        // completed：恢复原 run.status。仅这个阶段被重跑过；后续阶段不动。
+        // 如果原状态是 succeeded / cancelled，把它们恢复回去，UI 上「草稿已
+        // 保存」/「已停止」标签能保持；若原状态就是 failed（上一轮所有阶段
+        // 都没成功），恢复后仍是 failed —— 运营可再次点「重新执行」 next
+        // 阶段。
+        run.status = originalRunStatus === "running" ? "running" : originalRunStatus;
+        run.currentPhase = undefined;
+      }
+      persist();
+    } catch (error) {
+      if (error instanceof AutomationCancelledError) return;
+      // 拋出的 handler 错误：走与 run() 同型的 failed 路径，但保留其他阶段
+      // 状态（不动 completed 阶段）。
+      run.status = "failed";
+      run.phases[phaseIndex].status = "failed";
+      run.currentPhase = phaseName;
+      log(error instanceof Error ? error.message : "重新执行发生未知错误", "error");
+      this.db.updateProduct(projectId, project.product, "blocked");
+      persist();
+      throw error;
+    }
+  }
+
   private emit(projectId: string) { const current = this.db.getProject(projectId); if (current) this.onUpdate(current); }
 }

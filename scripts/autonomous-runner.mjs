@@ -6,9 +6,10 @@ import Database from "better-sqlite3";
 import { chromium } from "playwright";
 import { execSync, spawn } from "node:child_process";
 
-const PROJECT_ID = "52147893-3b1b-4746-82f3-c3e4b30c47c7";
+const args = parseArgs(process.argv.slice(2));
+const PROJECT_ID = args.project || process.env.VBK_PROJECT_ID;
 const DB_PATH = `${process.env.HOME}/Library/Application Support/vbk-auto/vbk-desktop.sqlite`;
-const CDP_PORT = Number(process.env.VBK_CDP_PORT || 9837);
+const CDP_PORT = Number(args.port || process.env.VBK_CDP_PORT || 9837);
 
 function getState() {
   const db = new Database(DB_PATH, { readonly: true });
@@ -106,6 +107,11 @@ function describeAttemptErrors(state) {
 }
 
 async function main() {
+  if (!PROJECT_ID) {
+    console.error("缺少 PROJECT_ID。请用 --project <id> 或环境变量 VBK_PROJECT_ID 指定。");
+    console.error("示例: node scripts/autonomous-runner.mjs --project <uuid> --port 9330");
+    process.exit(1);
+  }
   console.log(`[runner] CDP=${CDP_PORT} PROJECT=${PROJECT_ID}`);
 
   const cdpOk = await ensureCdp();
@@ -159,3 +165,23 @@ async function main() {
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
+
+function parseArgs(argv) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith("--")) {
+      const key = a.slice(2);
+      const next = argv[i + 1];
+      if (!next || next.startsWith("--")) {
+        out[key] = true;
+      } else {
+        out[key] = next;
+        i++;
+      }
+    } else {
+      out._.push(a);
+    }
+  }
+  return out;
+}

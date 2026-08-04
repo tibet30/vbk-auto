@@ -1467,10 +1467,14 @@ async function clickExact(scope, label, description = label) {
   const matches = scope.getByText(label, { exact: true });
   const count = await matches.count();
   for (let index = 0; index < count; index += 1) {
-    if (await matches.nth(index).isVisible()) {
-      await matches.nth(index).click({ force: true });
-      return;
-    }
+    const match = matches.nth(index);
+    if (!(await match.isVisible().catch(() => false))) continue;
+    // 【兑底】如果元素是 tab 且已 aria-selected=true，说明已经选中，
+    // Playwright 会报「element is not visible」错误（ant-tabs-tab-active
+    // 会设 visibility:hidden）。直接跳过。
+    if ((await match.getAttribute("aria-selected").catch(() => null)) === "true") return;
+    await match.click({ force: true });
+    return;
   }
   throw new Error(`找不到可点击的${description}`);
 }
@@ -2090,6 +2094,35 @@ export async function fillAndSubmitPricingInventory(page, product, productId) {
     waitUntil: "domcontentloaded",
   });
   await clickExact(page, "套餐价格库存");
+  // 【兑底】页面加载后 VBK 可能弹出 「选中的产品和班期的库存余量会被新的库存数量覆盖…」
+  // / 「报价模式设置」 等提示 modal，这些 modal 会挡住下面的「设置价格/库存」按钮。
+  // 如果看到 “我知道了” / “取消” 按钮，先点掉。
+  const knowBtn = page.getByRole("button", { name: "我知道了", exact: true }).first();
+  if (await knowBtn.isVisible().catch(() => false)) {
+    await knowBtn.click({ force: true }).catch(() => false);
+    await delay(500);
+  }
+  // 【兑底】如果之前 fillAndSavePackage 被跳过（套餐未保存），footer 区
+  // 「设置价格/库存」 按钮会 disabled。这里检测一下如果 disabled 就跳过。
+  // 连续检查 2s，避免页面加载中按钮状态闪烁。
+  let setupBtnDisabled = true;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await delay(500);
+    const btnInfo = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button')).filter(
+        (b) => b.textContent.trim() === '设置价格/库存' && b.offsetParent !== null,
+      );
+      if (!btns.length) return { found: false, allDisabled: true, count: 0 };
+      return { found: true, allDisabled: btns.every(b => b.disabled), count: btns.length };
+    });
+    if (btnInfo.found && !btnInfo.allDisabled) {
+      setupBtnDisabled = false;
+      break;
+    }
+  }
+  if (setupBtnDisabled) {
+    return { skipped: "套餐未保存，价格库存按钮 disabled", dailyQuota: inventory.dailyQuota };
+  }
   await clickExact(page, "设置价格/库存");
   const dialog = page.getByRole("dialog");
   await dialog.waitFor({ state: "visible", timeout: 15_000 });

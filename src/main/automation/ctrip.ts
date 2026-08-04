@@ -536,6 +536,13 @@ async function ensureBasicInfoTabVisible(page) {
 async function clickSection(page, labels) {
   const candidates = Array.isArray(labels) ? labels : [labels];
   let disabledLabel = "";
+  // 兑底：部分 phase（套餐管理 / 价格库存班期）需要“产品后端有效”才解锁。
+  // 如果当前 URL 已经在该 phase 的专属页（直接 URL 访问），则不需点 tab。
+  // tab 点击失败后调用方仍可走 fallback URL。
+  const url = page.url();
+  if (/packageManage|priceInventory|newResourceRule/.test(url)) {
+    return;
+  }
   for (const label of candidates) {
     // 新版 VBK 使用顶层 tab（产品信息 / 产品图文），优先按角色定位，避免
     // 同名标题或帮助文案抢占点击。旧页面再回退到精确文本。

@@ -2184,6 +2184,16 @@ export async function fillAndSaveTerms(page, product) {
   // saveThenAdvance，绝不触碰任何「提审」/「提交审核」入口；
   // 真正的提审统一交给 submitProductReview。
   if (!product.commercial?.terms) throw new Error("缺少条款配置");
+  // 【兑底】套餐未保存时，「条款维护」 tab 会被 VBK 锁定。点不动会拖塔
+  // 下游，直接跳过。
+  const tabDisabled = await page.evaluate(() => {
+    const tabs = Array.from(document.querySelectorAll('.ant-tabs-tab'));
+    const target = tabs.find(t => t.textContent?.trim() === '条款维护');
+    return target ? (target.className.includes('ant-tabs-tab-disabled') || target.getAttribute('aria-disabled') === 'true') : false;
+  });
+  if (tabDisabled) {
+    return { skipped: "条款维护 tab disabled（套餐未保存）" };
+  }
   await clickSection(page, "条款维护");
   const terms = product.commercial.terms;
   const textareas = page.locator("textarea");
@@ -2291,11 +2301,26 @@ export async function ensureHotelResource(page, product, productId) {
 export async function ensureVehicleResource(page, product, productId) {
   const vehicle = product.operations?.vehicleResource;
   if (product.sales.productForm !== "privateTour") return { skipped: "非私家团" };
-  if (!vehicle) throw new Error("私家团缺少 operations.vehicleResource 配置");
+  // 【兑底】私家团但未预置 vehicleResource（resourceGroupId / 名称都没有）
+  // 时，本阶段无法在 VBK 上点选资源组，避免拖塔后阶段。返回 skipped 由调用
+  // 方继续走 terms / preflight。
+  if (!vehicle || !vehicle.resourceGroupId || !vehicle.resourceGroupName) {
+    return { skipped: "未配置 operations.vehicleResource（需人工预置后补跑本阶段）" };
+  }
   await page.goto(productSectionUrl(productId, "vehicleResource"), {
     waitUntil: "domcontentloaded",
   });
   await page.getByText("资源配置", { exact: true }).waitFor({ timeout: 30_000 });
+  // 【兑底】套餐未保存时，VBK 会把“附加资源 / 添加资源组” 入口设为 disabled。
+  // 这种状态下点击会报超时，直接跳过本阶段避免拖塔下游。
+  const segmentResourceInfo = await page.evaluate(() => {
+    const spans = Array.from(document.querySelectorAll('span.item'));
+    const found = spans.filter(s => s.textContent?.trim() === '附加资源' || s.textContent?.includes('附加资源'));
+    return { count: found.length, allDisabled: found.length > 0 && found.every(s => s.className.includes('disacitve')), classes: found.map(s => s.className) };
+  });
+  if (segmentResourceInfo.count > 0 && segmentResourceInfo.allDisabled) {
+    return { skipped: "套餐未保存，车辆资源入口 disabled" };
+  }
   const edit = page.getByRole("button", { name: "编 辑" });
   if (await edit.count()) {
     await edit.click();

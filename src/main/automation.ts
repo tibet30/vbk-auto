@@ -91,13 +91,13 @@ export class DraftAutomation {
       await breakpoint("afterFillRecommendationReasons");
       return { rows: product.presentation.recommendations.length };
     }
-    if (stepName === "fillAndSavePackage" || stepName === "fillAndSubmitPricingInventory" || stepName === "ensureHotelResource" || stepName === "ensureVehicleResource") {
+    if (stepName === "fillAndSavePackage" || stepName === "fillAndSubmitPricingInventory" || stepName === "ensureHotelResource" || stepName === "ensureVehicleResource" || stepName === "runProductPreflight") {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;
       if (!projectId) throw new Error(`${stepName} 需要 projectId 参数`);
       const project = this.db.getProject(projectId);
       if (!project) throw new Error(`项目不存在：${projectId}`);
       const product = parseProduct(project.product);
-      const { fillAndSavePackage, fillAndSubmitPricingInventory, ensureHotelResource, ensureVehicleResource } = await import("./automation/ctrip.js");
+      const { fillAndSavePackage, fillAndSubmitPricingInventory, ensureHotelResource, ensureVehicleResource, runProductPreflight } = await import("./automation/ctrip.js");
       if (stepName === "fillAndSavePackage") {
         return await fillAndSavePackage(page, product);
       }
@@ -110,8 +110,11 @@ export class DraftAutomation {
       if (stepName === "ensureVehicleResource") {
         return await ensureVehicleResource(page, product, project.productId || "");
       }
+      if (stepName === "runProductPreflight") {
+        return await runProductPreflight(page, product, project.productId || "");
+      }
     }
-    throw new Error(`未知步骤：${stepName}；支持：snapshot / selectStationAddress / fillItineraryDraft / fillRecommendationReasons / fillAndSavePackage / fillAndSubmitPricingInventory / ensureHotelResource / ensureVehicleResource`);
+    throw new Error(`未知步骤：${stepName}；支持：snapshot / selectStationAddress / fillItineraryDraft / fillRecommendationReasons / fillAndSavePackage / fillAndSubmitPricingInventory / ensureHotelResource / ensureVehicleResource / runProductPreflight`);
   }
 
   async debugSnapshot(label?: string): Promise<unknown> {

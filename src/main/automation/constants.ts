@@ -12,6 +12,7 @@ export function productEditorUrl(productId) {
 export function productSectionUrl(productId, section) {
   const id = encodeURIComponent(productId);
   const routes = {
+    packageManage: `/ivbk/vendor/packageManage?productid=${id}&from=vbk`,
     pricingInventory: `/ivbk/vendor/priceInventory?productid=${id}&from=vbk`,
     vehicleResource: `/product/input/newResourceRule?productid=${id}&from=vbk`,
   };

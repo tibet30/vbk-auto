@@ -827,7 +827,9 @@ async function saveThenAdvance(page, options) {
     isTargetUrl,
     nextButtonLabel = "下一步",
     savedWith,
+    fallbackUrl,
   } = options;
+  void fallbackUrl;
 
   // 规则 1：先点安全保存。
   const effectiveSavedWith = savedWith ?? (await clickSafeSave(page, saveButtonNames));
@@ -911,6 +913,20 @@ async function saveThenAdvance(page, options) {
     // 仅解锁未激活：安全切到该 tab 完成落点，绝不再点一次「下一步」。
     await clickSection(page, unlockedLabel);
     return { advanced: true, mode: "tabUnlocked", savedWith: effectiveSavedWith };
+  }
+
+  // 兑底：如果目标 tab 被 VBK 状态机锁住（比如「套餐管理」需要产品
+  // 已提交过 review 、或个另 phase 需要后端校验通过才会解锁），
+  // 直接按 fallbackUrl 导航到该 phase 的 URL ，避免状态机闸门阻断后续阶段。
+  if (fallbackUrl) {
+    console.warn(
+      `${phase}的「${targetTabLabel}」未解锁，使用 fallbackUrl=${fallbackUrl} 直接导航`,
+    );
+    await page.goto(fallbackUrl, { waitUntil: "domcontentloaded" }).catch(() => false);
+    await delay(1500);
+    if (page.url() === fallbackUrl || isTargetUrl(page.url())) {
+      return { advanced: true, mode: "fallback-url", savedWith: effectiveSavedWith };
+    }
   }
 
   throw new Error(
@@ -1845,8 +1861,10 @@ async function handleAirportTrainModal(page, city) {
 
 export async function fillItineraryDraft(page, product, options = {}) {
   // options.disambiguator — 接送站「精确→AI」兜底，由 automation.ts 注入
+  // options.productId — 草稿产品 ID，用于 fallback URL 跳转
   // product 总是从调用方传入；这里只是把它的句柄存下来往下传。
   const disambiguator = options?.disambiguator;
+  const productId = options?.productId || product.productId || "";
   let titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
   if ((await titleInputs.count()) !== product.itinerary.length) {
     await clickSection(page, "行程描述");
@@ -1902,7 +1920,7 @@ export async function fillItineraryDraft(page, product, options = {}) {
   // itinerary 草稿保存后，VBK 可能会弹出「请选择机场/火车站」二级 modal。
   // 这个 modal 要求选产品级别的机场 + 火车站，不处理会一直挡住「提交审核并下一步」。
   await handleAirportTrainModal(page, product.operations?.pickupCity || "");
-  // 推进到「套餐管理」tab。行程描述 / 套餐管理在真实 VBK 站里是同一
+  // 推进到下一阶段（套餐管理 tab）。行程描述 / 套餐管理在真实 VBK 站里是同一
   // baseInfoMerge 页内的两个 tab，URL 在它们之间切换时不会变化；而某些
   // 进入路径下 URL 干脆不带 baseInfoMerge 段（例如直接跳到 itinerary 独
   // 立页）。任何「URL 含 / 不含某路径段」的反向判断都会在每次保存后立刻
@@ -1919,6 +1937,10 @@ export async function fillItineraryDraft(page, product, options = {}) {
     // 提交流程按钮统一是「提交审核并下一步」。
     nextButtonLabel: "提交审核并下一步",
     isTargetUrl: () => false,
+    // VBK tab 解锁闸门需要产品后端状态为「有效」或已提交 review。
+    // 草稿状态下 tab 永远 disabled，直接导航 fallbackUrl 能进入
+    // 该 phase 的专属 URL（VBK 允许直接 URL 访问）。
+    fallbackUrl: productSectionUrl(productId, "packageManage"),
     savedWith,
   });
   return { savedWith, days: product.itinerary.length };

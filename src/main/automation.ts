@@ -74,7 +74,7 @@ export class DraftAutomation {
       if (!project) throw new Error(`项目不存在：${projectId}`);
       const product = parseProduct(project.product);
       await breakpoint("beforeFillItineraryDraft");
-      const result = await fillItineraryDraft(page, product);
+      const result = await fillItineraryDraft(page, product, { productId: project.productId });
       await breakpoint("afterFillItineraryDraft", { savedWith: result.savedWith });
       return result;
     }
@@ -287,7 +287,7 @@ export class DraftAutomation {
 
       const handlers: Record<string, () => Promise<unknown>> = {
         presentation: async () => { phaseRecord("presentation"); const r = await fillAndSavePresentation(page, product); run.phases[draftPhases.indexOf("presentation")].status = "completed"; return r; },
-        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraft(page, product, { disambiguator: this.disambiguator }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
+        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraft(page, product, { disambiguator: this.disambiguator, productId }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
         package: async () => { phaseRecord("package"); const r = await fillAndSavePackage(page, product); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
         pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await fillAndSubmitPricingInventory(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
         terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },

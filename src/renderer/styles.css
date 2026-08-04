@@ -4079,3 +4079,110 @@ a:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
   .recovery-banner { transition: none; }
 }
+
+/* === account editor modal === */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  max-height: min(85vh, 720px);
+  width: min(560px, 100%);
+}
+.modal.account-editor { width: min(560px, 100%); }
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head strong { font-size: var(--fs-md); font-weight: 600; color: var(--foreground); display: block; }
+.modal-head small { display: block; margin-top: 2px; color: var(--muted-foreground); font-size: var(--fs-xs); }
+.modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: auto;
+}
+.modal-foot {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  background: var(--surface-muted, var(--surface));
+}
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field-label { font-size: var(--fs-sm); font-weight: 500; color: var(--foreground); }
+.field-hint { font-size: var(--fs-xs); color: var(--muted-foreground); }
+.contact-card-loading { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font-size: var(--fs-xs); }
+.contact-card-picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.contact-card-picked strong { display: block; font-size: var(--fs-sm); font-weight: 600; color: var(--foreground); }
+.contact-card-picked small { display: block; margin-top: 2px; font-size: var(--fs-xs); color: var(--muted-foreground); }
+.contact-card-empty {
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+.contact-card-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--muted-foreground);
+}
+.contact-card-search input { flex: 1; border: none; outline: none; background: transparent; color: var(--foreground); }
+.contact-card-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.contact-card-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: none;
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  color: inherit;
+}
+.contact-card-item:last-child { border-bottom: none; }
+.contact-card-item:hover { background: var(--surface-muted, rgba(0, 0, 0, 0.04)); }
+.contact-card-item strong { font-size: var(--fs-sm); font-weight: 500; color: var(--foreground); display: block; }
+.contact-card-item small { font-size: var(--fs-xs); color: var(--muted-foreground); display: block; margin-top: 2px; }

@@ -63,9 +63,9 @@ export class DraftAutomation {
       const card = page.locator(cardSelector).first();
       const city = typeof args.city === "string" ? args.city : "大同";
       await breakpoint("beforeSelectStationAddress", { cardSelector, city });
-      const result = await selectStationAddress(page, card, city);
+      const result = await selectStationAddress(page, card, city) as unknown as { matched?: boolean; source?: string; reason?: string };
       await breakpoint("afterSelectStationAddress", { city });
-      return { ok: true, city };
+      return { ok: result?.matched === true, city, source: result?.source || "unknown", reason: result?.reason || null };
     }
     if (stepName === "fillItineraryDraft") {
       const projectId = typeof args.projectId === "string" ? args.projectId : null;

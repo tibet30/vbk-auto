@@ -1,6 +1,6 @@
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Bot, BriefcaseBusiness, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Play, Plus, RefreshCw, Send, Settings, Sparkles, Trash2, TriangleAlert, UserRound } from "lucide-react";
-import type { CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
+import { Bot, BriefcaseBusiness, CarFront, Check, ChevronDown, ChevronLeft, ChevronRight, CircleCheck, CircleHelp, ClipboardCheck, ExternalLink, Eye, EyeOff, FileText, KeyRound, ListChecks, LoaderCircle, LogIn, PackageOpen, Pencil, Play, Plus, RefreshCw, Search, Send, Settings, Sparkles, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
+import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoValue, ContactCardSelection, CreateProjectInput, MiniMaxConnectionTest, ProjectDetail, ProjectReadiness, ProjectSummary, ProviderContactCard, Settings as AppSettings, VbkLoginStatus } from "../shared/contracts.js";
 
 type Stage = "review" | "vbk";
 type View = "workspace" | "projects" | "settings";
@@ -154,6 +154,14 @@ export function App() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [loginPanelOpen, setLoginPanelOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  // 账号固定信息（管家联系人 / 400 电话）编辑弹窗
+  const [editingAccount, setEditingAccount] = useState<string | null>(null);
+  const [fixedInfoSchema, setFixedInfoSchema] = useState<AccountFixedInfoField[]>([]);
+  const [fixedInfoDraft, setFixedInfoDraft] = useState<Partial<Record<string, AccountFixedInfoValue>>>({});
+  const [fixedInfoSaving, setFixedInfoSaving] = useState(false);
+  const [contactCards, setContactCards] = useState<ProviderContactCard[]>([]);
+  const [contactCardsLoading, setContactCardsLoading] = useState(false);
+  const [contactCardSearch, setContactCardSearch] = useState("");
   const [vbkLogin, setVbkLogin] = useState<VbkLoginStatus | null>(null);
   const [checkingVbkLogin, setCheckingVbkLogin] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
@@ -414,6 +422,62 @@ export function App() {
       setMiniMaxTest({ connected: false, message: error instanceof Error ? error.message : "MiniMax 连接测试失败。" });
     } finally { setTestingMiniMax(false); }
   };
+  const openAccountEditor = async (accountName: string) => {
+    if (!api()) return;
+    setEditingAccount(accountName);
+    setFixedInfoDraft({});
+    setContactCards([]);
+    setContactCardSearch("");
+    try {
+      const [schema, info] = await Promise.all([
+        api()!.accounts.fixedInfoSchema(),
+        api()!.accounts.getFixedInfo(accountName),
+      ]);
+      setFixedInfoSchema(schema);
+      setFixedInfoDraft({ ...info.values });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取账号固定信息失败。");
+      setEditingAccount(null);
+      return;
+    }
+    // 拉联系人列表；providerId 未记录时由 detectProviderId 在 VBK 页面自动抓。
+    try {
+      setContactCardsLoading(true);
+      const providerId = (await api()!.accounts.providerIdFor(accountName))
+        ?? (await api()!.accounts.detectProviderId());
+      if (providerId) {
+        const cards = await api()!.contacts.listProviderContactCards(providerId);
+        setContactCards(cards);
+      } else {
+        setNotice("未能识别当前 VBK 账号的 providerId，请先在 VBK 页面登录并进入主控台。");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "拉取联系人列表失败。");
+    } finally {
+      setContactCardsLoading(false);
+    }
+  };
+  const closeAccountEditor = () => {
+    setEditingAccount(null);
+    setFixedInfoSchema([]);
+    setFixedInfoDraft({});
+    setContactCards([]);
+    setContactCardSearch("");
+  };
+  const saveAccountEditor = async () => {
+    if (!editingAccount || !api()) return;
+    setFixedInfoSaving(true);
+    try {
+      await api()!.accounts.saveFixedInfo(editingAccount, fixedInfoDraft);
+      setNotice("账号固定信息已保存。");
+      closeAccountEditor();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "保存失败。");
+    } finally {
+      setFixedInfoSaving(false);
+    }
+  };
+
   const openLogin = () => {
     // 不清当前项目：打开登录面板是“准备跳账号”，运营点完账号后还要回来
     // 继续审查 / 补取问题，避免把现场拍掉。
@@ -677,6 +741,7 @@ export function App() {
                   <div className="account-actions">
                     <span className="state" data-state="current">当前</span>
                     <button className="icon-btn" data-size="sm" type="button" onClick={() => void checkVbkLogin(true)} disabled={checkingVbkLogin} aria-label="刷新 VBK 登录状态" title="刷新登录状态">{checkingVbkLogin ? <LoaderCircle size={14} /> : <RefreshCw size={14} />}</button>
+                    <button className="btn btn-sm" data-variant="secondary" onClick={() => void openAccountEditor(name)} aria-label={`编辑 ${name} 的 400 电话 / 管家联系人`} title="编辑 400 电话 / 管家联系人"><Pencil size={14} />编辑</button>
                     <button className="btn btn-sm" data-variant="danger" onClick={() => void logoutVbk()} disabled={checkingVbkLogin}>登出</button>
                   </div>
                 </div>
@@ -697,6 +762,19 @@ export function App() {
           </div>
         </section>
       </div></div></section>}
+      {editingAccount && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`编辑 ${editingAccount} 的账号固定信息`}><div className="modal account-editor"><header className="modal-head"><div><strong>编辑账号固定信息</strong><small>当前账号：{editingAccount}</small></div><button className="icon-btn" type="button" onClick={closeAccountEditor} aria-label="关闭"><X size={16} /></button></header><div className="modal-body">{fixedInfoSchema.map((field) => {
+        if (field.key === "servicePhone") {
+          const value = typeof fixedInfoDraft.servicePhone === "string" ? fixedInfoDraft.servicePhone : "";
+          return <label key={field.key} className="field"><span className="field-label">{field.label}</span><input className="input" autoComplete="off" placeholder={field.placeholder} value={value} onChange={(event) => setFixedInfoDraft((draft) => ({ ...draft, servicePhone: event.target.value }))} /><small className="field-hint">{field.emptyText}</small></label>;
+        }
+        if (field.key === "butlerName") {
+          const current = fixedInfoDraft.butlerName as ContactCardSelection | undefined;
+          const keyword = contactCardSearch.trim().toLowerCase();
+          const filtered = keyword ? contactCards.filter((card) => card.displayName.toLowerCase().includes(keyword)) : contactCards;
+          return <div key={field.key} className="field"><span className="field-label">{field.label}</span>{contactCardsLoading ? <div className="contact-card-loading"><LoaderCircle size={14} />正在从 VBK 拉取联系人…</div> : current ? <div className="contact-card-picked"><span><strong>{current.displayName}</strong><small>contactCardId: {current.contactCardId} · providerId: {current.providerId}</small></span><button className="btn btn-sm" data-variant="ghost" type="button" onClick={() => setFixedInfoDraft((draft) => { const next = { ...draft }; delete next.butlerName; return next; })}>清除</button></div> : <div className="contact-card-empty">{field.emptyText}。</div>}<div className="contact-card-search"><Search size={14} /><input className="input" placeholder="按姓名筛选" value={contactCardSearch} onChange={(event) => setContactCardSearch(event.target.value)} /></div>{filtered.length ? <div className="contact-card-list">{filtered.map((card) => (<button key={card.contactCardId} type="button" className="contact-card-item" onClick={() => setFixedInfoDraft((draft) => ({ ...draft, butlerName: { contactCardId: card.contactCardId, providerId: card.providerId, displayName: card.displayName } }))}><span><strong>{card.displayName}</strong><small>ID: {card.contactCardId}</small></span>{current?.contactCardId === card.contactCardId ? <Check size={14} /> : null}</button>))}</div> : !contactCardsLoading && <div className="contact-card-empty">{contactCards.length ? "无匹配结果" : "未能加载联系人，请确认 VBK 已登录。"}</div>}<small className="field-hint">{field.placeholder}</small></div>;
+        }
+        return null;
+      })}</div><footer className="modal-foot"><button className="btn" data-variant="ghost" type="button" onClick={closeAccountEditor} disabled={fixedInfoSaving}>取消</button><button className="btn" data-variant="primary" type="button" onClick={() => void saveAccountEditor()} disabled={fixedInfoSaving}>{fixedInfoSaving ? <LoaderCircle size={14} /> : <Check size={14} />}保存</button></footer></div></div>}
       {view === "projects" && !project && <section className="view projects-view"><div className="view-container content-width project-view-container"><div className="project-page-head"><div><h1 className="view-h1">项目</h1><p className="view-sub">管理产品草稿、规划进度和录入状态。</p></div><button className="btn" data-variant="primary" onClick={startCreateProduct}><Plus size={16} />新建产品</button></div>{creating && <ProductBriefForm input={createInput} setInput={setCreateInput} submitting={savingProject} onCancel={() => setCreating(false)} onSubmit={() => void createProject()} />}{projects.length ? <ProjectList projects={projects} onOpen={async (item) => { const next = await api()!.projects.get(item.id); setProject(next); setView("workspace"); }} onDelete={deleteProject} /> : !creating && <EmptyProjectState onCreate={startCreateProduct} />}</div></section>}
       {view === "workspace" && !project && <section className="view login-stage" data-login-open={loginPanelOpen}>
         <div className="view-container content-width workspace-home">

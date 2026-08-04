@@ -396,6 +396,15 @@ export function pickKeySpotsFromItinerary(
   const itinerary = Array.isArray(product.itinerary) ? (product.itinerary as Array<Record<string, unknown>>) : [];
   const seen = new Set<string>();
   const candidates: string[] = [];
+  // 净化输入名：把「云冈石窟游览」「华严寺参观」之类动作后缀去掉，只喂景点名字。
+  // 这些后缀是行程里的口述写法，VBK 景点下拉里不存在“游览”这个子串。
+  // 同时清掉括号别名、掊点号与空格。
+  const normalizeSpot = (text: string) =>
+    text
+      .replace(/[\s\u3000]+/g, "")
+      .replace(/[（(][^）)]+[）)]/g, "")
+      .replace(/(?:游览|参观|参观游览|游览参观|参观游览参观)$/u, "")
+      .replace(/[·・•・]/g, "");
   for (const day of itinerary) {
     if (!day || typeof day !== "object") continue;
     const spots = Array.isArray(day.spots) ? (day.spots as Array<unknown>) : [];
@@ -403,10 +412,14 @@ export function pickKeySpotsFromItinerary(
       if (typeof raw !== "string") continue;
       const text = raw.trim();
       if (!text) continue;
-      const key = text.toLowerCase();
+      const cleaned = normalizeSpot(text);
+      if (!cleaned || cleaned.length < 2) continue;
+      // 接团/送团/返程/自由活动 这种非景点词跳过，避免下拉误点。
+      if (/(?:接团|送团|送机|接机|返程|出发|报到|入住|退房|自由活动)/u.test(cleaned)) continue;
+      const key = cleaned.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      candidates.push(text);
+      candidates.push(cleaned);
     }
   }
   const presentation = product.presentation as Record<string, unknown> | undefined;
@@ -426,9 +439,26 @@ export function pickKeySpotsFromItinerary(
   // 首日第一个景点通常是行程落地后的核心到访点；先保留它，再从产品
   // 推荐语中挑主打景点。当前太原行程因此得到“柳巷、晋祠、山西博物院”。
   const firstItinerarySpot = candidates[0];
-  return [
-    ...(firstItinerarySpot ? [firstItinerarySpot] : []),
-    ...candidates.filter((spot) => spot !== firstItinerarySpot && isHighlighted(spot)),
-    ...candidates.filter((spot) => spot !== firstItinerarySpot && !isHighlighted(spot)),
-  ].slice(0, limit);
+  const result: string[] = [];
+  const seenFinal = new Set<string>();
+  const pushUnique = (spot: string) => {
+    const key = spot.toLowerCase();
+    if (seenFinal.has(key)) return;
+    seenFinal.add(key);
+    result.push(spot);
+  };
+  if (firstItinerarySpot) pushUnique(firstItinerarySpot);
+  for (const spot of candidates) {
+    if (result.length >= limit) break;
+    if (spot === firstItinerarySpot) continue;
+    if (!isHighlighted(spot)) continue;
+    pushUnique(spot);
+  }
+  for (const spot of candidates) {
+    if (result.length >= limit) break;
+    if (spot === firstItinerarySpot) continue;
+    if (isHighlighted(spot)) continue;
+    pushUnique(spot);
+  }
+  return result;
 }

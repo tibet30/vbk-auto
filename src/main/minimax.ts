@@ -1,6 +1,6 @@
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
 import { z } from "zod";
-import type { AdvisorOutcome, AdvisorRequest, AiResponse } from "../shared/contracts.js";
+import type { AdvisorOutcome, AdvisorRequest, AiResponse, DisambiguateOutcome, DisambiguateRequest } from "../shared/contracts.js";
 import { normaliseItinerary, normalisePresentation } from "./product-normalize.js";
 
 const writablePatchPrefixes = [
@@ -130,6 +130,28 @@ const diagnosisTool = {
     },
   },
 };
+
+const disambiguateTool = {
+  type: "function",
+  function: {
+    name: "submit_disambiguation",
+    description: "从候选项中选一个与 desired 最接近的。无合适选则返回空串。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["pickedText", "reasoning"],
+      properties: {
+        pickedText: { type: "string" },
+        reasoning: { type: "string", minLength: 1, maxLength: 200 },
+      },
+    },
+  },
+};
+
+const disambiguateOutcomeSchema = z.object({
+  pickedText: z.string(),
+  reasoning: z.string().trim().min(1).max(200),
+}).strict();
 
 const chineseText = (maxLength: number) => z.string().trim().min(1).max(maxLength).refine(
   (value) => /[\p{Script=Han}]/u.test(value),
@@ -450,6 +472,68 @@ export class MiniMaxService {
     }
   }
 
+  /**
+   * 歧义消除：本地精确匹配不到时，发给 AI 判断。
+   * - kind=province/city/spot/station 决定 prompt 约束。
+   * - 返回 pickedText=null 表示“错误人选”，调用方应该跳过。
+   */
+  async disambiguateOption(input: DisambiguateRequest): Promise<DisambiguateOutcome> {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 MiniMax API Key。");
+    if (!Array.isArray(input.candidates) || input.candidates.length === 0) {
+      return { pickedText: null, reasoning: "候选项为空" };
+    }
+    const startedAt = Date.now();
+    try {
+      const response = await this.client(replyTimeout()).chat.completions.create({
+        model: this.config.model,
+        messages: [
+          { role: "system", content: disambiguateSystemPrompt(input.kind) },
+          { role: "user", content: JSON.stringify({
+            desired: input.desired,
+            candidates: input.candidates.map((c) => ({ id: c.id, text: c.text })),
+            productContext: extractContextForKind(input.product, input.kind, input.desired),
+          }) },
+        ],
+        max_completion_tokens: 512,
+        temperature: 0.1,
+        tools: [disambiguateTool],
+        tool_choice: { type: "function", function: { name: "submit_disambiguation" } },
+        thinking: { type: "disabled" },
+        service_tier: miniMaxServiceTier(),
+      } as never);
+      const toolCall = response.choices[0]?.message.tool_calls?.find(
+        (call) => "function" in call && call.function.name === "submit_disambiguation",
+      );
+      if (!toolCall || !("function" in toolCall)) {
+        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回结构化选则结果。");
+      }
+      let value: unknown;
+      try { value = JSON.parse(toolCall.function.arguments); }
+      catch { throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的选则结果不是合法 JSON。"); }
+      const parsed = disambiguateOutcomeSchema.safeParse(value);
+      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的选则结果不合法。");
+      const pickedText = parsed.data.pickedText && input.candidates.some((c) => c.text === parsed.data.pickedText)
+        ? parsed.data.pickedText
+        : null;
+      console.info("[MiniMax] disambiguation completed", {
+        kind: input.kind,
+        desired: input.desired,
+        picked: pickedText,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return { pickedText, reasoning: parsed.data.reasoning };
+    } catch (error) {
+      const serviceError = this.providerError(error);
+      console.warn("[MiniMax] disambiguation failed", {
+        kind: input.kind,
+        desired: input.desired,
+        errorCode: serviceError.code,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw serviceError;
+    }
+  }
+
   private async complete(client: OpenAI, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
     const result = await client.chat.completions.create({
       model: this.config.model, messages, temperature: 0.3, max_completion_tokens: 2048,
@@ -477,4 +561,48 @@ export class MiniMaxService {
   private throwProviderError(error: unknown): never {
     throw this.providerError(error);
   }
+}
+
+/**
+ * 从产品 JSON 中抽出与 kind 相关的上下文，帮 AI 决断。
+ * province → 取 basicInfo.province / 推荐语 / 重点景点 出现的省份
+ * city → 取 meetingCity / destinationCity / 重点景点 出现的城市
+ * spot → 取 itinerary 里出现的重点景点
+ * station → 取 product.operations.pickupCity
+ */
+function extractContextForKind(product: Record<string, unknown>, kind: DisambiguateRequest["kind"], desired: string): Record<string, unknown> {
+  const ctx: Record<string, unknown> = { desired };
+  const basic = (product.basicInfo as Record<string, unknown> | undefined) ?? {};
+  const presentation = (product.presentation as Record<string, unknown> | undefined) ?? {};
+  const operations = (product.operations as Record<string, unknown> | undefined) ?? {};
+  if (kind === "province") {
+    ctx.provinceInProduct = basic.province ?? null;
+    ctx.recommendation = typeof presentation.recommendation === "string" ? presentation.recommendation : null;
+    ctx.features = typeof presentation.features === "string" ? presentation.features : null;
+  } else if (kind === "city") {
+    ctx.meetingCity = basic.meetingCity ?? null;
+    ctx.destinationCity = basic.destinationCity ?? null;
+    ctx.pickupCity = operations.pickupCity ?? null;
+  } else if (kind === "spot") {
+    const itinerary = Array.isArray(product.itinerary) ? (product.itinerary as Array<Record<string, unknown>>) : [];
+    ctx.itinerarySpots = itinerary.map((d) => Array.isArray(d.spots) ? d.spots : []).flat().filter((s): s is string => typeof s === "string");
+    ctx.recommendation = typeof presentation.recommendation === "string" ? presentation.recommendation : null;
+  } else if (kind === "station") {
+    ctx.pickupCity = operations.pickupCity ?? null;
+    ctx.destinationCity = basic.destinationCity ?? null;
+  }
+  return ctx;
+}
+
+/** 根据 kind 给出不同的选则约束。 */
+function disambiguateSystemPrompt(kind: DisambiguateRequest["kind"]): string {
+  const base = `你是 VBK Desktop 选则辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
+你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。`;
+  const guidance: Record<DisambiguateRequest["kind"], string> = {
+    province: `期望值是中国某个省/直辖市/自治区，例如“山西”。candidates 可能是 “中国-山西”“山西省”“山西”。选 “中国-山西” 这类带国家前缀的优先。**绝对不要选 “朝鲜-xxx”“韩国-xxx” 这种境外前缀。**`,
+    city: `期望值是中国某个城市，例如“太原”。candidates 可能是 “中国-太原”“朝鲜-大同”“太原市”。选 “中国-xxx” 这种带国家前缀的优先，不要选同名海外城市。**只要 candidates 里有任何 “中国-xxx” 的项，优先选它；只在完全没有 “中国-” 前缀项时才考虑无前缀的项，绝不返回 “朝鲜-xxx”“北朝鲜-xxx”“韩国-xxx”。**`,
+    spot: `期望值是一个具体景点，例如“云冈石窟”。candidates 是 VBK 景点下拉返回的候选，可能是“云冈石窟”“云冈石窟景区”等。选产品 JSON 推荐语/特点中明确提到的那一个；如果是城市同名 + 同一省份，选那个。**只在国内景点里选：candidates 文本中出现 “朝鲜-”“韩国-”“北朝鲜-”“日本-” 等境外前缀的项一律跳过；产品类型是境内旅游，遇到境外项请返回空串并说明 “仅含境外候选”。**`,
+    station: `期望值是一个车站/机场名，例如“大同站”或城市名“大同”。candidates 是接送站下拉的所有火车站/机场。优先选火车站，其次机场；如果只有城市级选项，选该城市作为默认接送点。**不要选国外机场/车站（文本中带境外地名/机场代码的）。**`,
+  };
+  return `${base}\n\n当前类别：${kind}\n\n专项约束：${guidance[kind]}\n\n返回时只能调用 submit_disambiguation 工具。pickedText 必须是 candidates 里某一个 text 的精确字符串；reasoning 简要说明选则理由或未选原因。`;
 }

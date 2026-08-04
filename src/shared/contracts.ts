@@ -129,6 +129,29 @@ export interface AutomationRun {
   recovery?: { phases: Record<string, PhaseRecovery> };
 }
 
+/**
+ * AI 歧义消除：在 VBK 下拉里选不到精确项时，把候选项列表发给 MiniMax，让它
+ * 选一个最像的（或者明确表示「无匹配」）。用在景区、景点、城市、车站等所有
+ * 严格选择场景下。
+ */
+export interface DisambiguateRequest {
+  /** 上下文类别 — 用在不同 prompt 约束。 */
+  kind: "province" | "city" | "spot" | "station";
+  /** 产品 JSON 中期望选中的原始值（可能是“太原”“云冈石窟”这种）。 */
+  desired: string;
+  /** 产品完整 JSON，供 AI 理解上下文。 */
+  product: Record<string, unknown>;
+  /** VBK 下拉返回的全部候选（包含中文 / ID / 中文别名）。 */
+  candidates: Array<{ id?: string; text: string }>;
+}
+
+export interface DisambiguateOutcome {
+  /** 选中的候选项 text，未选中返回 null。 */
+  pickedText: string | null;
+  /** AI 的判断理由（给人看）。 */
+  reasoning: string;
+}
+
 export interface Settings {
   minimaxBaseUrl: string;
   minimaxModel: string;
@@ -268,6 +291,22 @@ export interface VbkApi {
     start(projectId: string): Promise<void>;
     retry(projectId: string): Promise<void>;
     retryPhase(projectId: string, phase: string): Promise<void>;
+  };
+  /**
+   * 调试入口：让 CLI / IDE 能逐函数调用 ctrip.ts，单步观察 VBK 页面状态。
+   * 通过 IPC 调用 DraftAutomation，settings/storage 不变。
+   */
+  debug: {
+    /** 执行一个具名步骤（例如「selectStationAddress」）。返回 JSON 可序列化结果。 */
+    runStep(stepName: string, argsJson: string): Promise<unknown>;
+    /** 取当前 VBK 页面快照。 */
+    snapshot(label?: string): Promise<unknown>;
+    /** 列出本次进程内已命中的断点。 */
+    hitBreakpoints(): Promise<string[]>;
+    /** 远程 resume（continue/step/stop）。 */
+    resume(command: "continue" | "step" | "stop"): Promise<{ stopped: boolean }>;
+    /** 查看当前配置的断点列表（来源：env VBK_DEBUG_BREAKPOINTS）。 */
+    listBreakpoints(): Promise<string[]>;
   };
   accounts: {
     /** 返回 VBK 账号在本机保存的固定信息（当前：400 电话、管家联系人）。 */

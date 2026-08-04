@@ -1453,11 +1453,20 @@ async function clickExact(scope, label, description = label) {
 }
 
 async function cardsByPrefix(dayScope, prefix) {
-  const cards = dayScope.locator('[class*="td-day-card--"]');
-  const texts = await cards.allTextContents();
-  return texts.flatMap((text, index) =>
-    text.trim().startsWith(prefix) ? [cards.nth(index)] : [],
-  );
+  // 只匹配 class 中含 td-day-card-- （不含 -list/-hd/-bd/-additembtn 这些
+  // 子容器变体），避免抓到外层列表 wrapper 导致 checkbox count 错位。
+  const all = await dayScope.locator('[class*="td-day-card--"]').all();
+  const indices: number[] = [];
+  for (let i = 0; i < all.length; i += 1) {
+    const handle = all[i];
+    const cls = (await handle.getAttribute("class")) || "";
+    if (/td-day-card-(list|hd|bd|additembtn)/.test(cls)) continue;
+    const text = (await handle.textContent())?.trim() || "";
+    if (text.startsWith(prefix)) indices.push(i);
+  }
+  // 重建 locator 以避免 stale handle：返回特定 index 的 nth locator
+  const base = dayScope.locator('[class*="td-day-card--"]');
+  return indices.map((idx) => base.nth(idx));
 }
 
 async function clickLabelExact(scope, label, description = label) {
@@ -1537,13 +1546,24 @@ export async function selectStationAddress(page, card, city, extra = {}) {
   const product = extra?.product ?? {};
   await breakpoint("selectStationAddress:enter", { city });
   const addressInput = card.locator('input.ant-input[placeholder="请选择"]');
-  if (!(await addressInput.count())) throw new Error("接送站地址输入框缺失");
+  const addressCount = await addressInput.count();
+  if (!addressCount) throw new Error("接送站地址输入框缺失");
   await safeClick(page, addressInput.first());
   await delay(300);
   const dialog = page.getByRole("dialog");
-  await dialog.waitFor({ state: "visible", timeout: 5_000 });
+  try {
+    await dialog.waitFor({ state: "visible", timeout: 5_000 });
+  } catch (e) {
+    console.warn("[selectStationAddress] dialog 没出现，card.first() 可能是其他控件");
+    return { matched: false, reason: "dialog-not-visible" };
+  }
   const inputs = dialog.locator("input");
-  if ((await inputs.count()) < 2) throw new Error("接送站弹窗结构异常");
+  const dialogInputCount = await inputs.count();
+  console.warn(`[selectStationAddress] dialog inputs=${dialogInputCount}`);
+  if (dialogInputCount < 2) {
+    console.warn("[selectStationAddress] 弹窗 inputs 不足 2 个");
+    return { matched: false, reason: "dialog-inputs-less-than-2" };
+  }
   // 弹窗里第 1 个可写输入是机场，第 2 个是火车站。两者都逐个填，
   // 任意一个 dropdown 返回空则跳过不报错。所有搜索都以 city 为查询，
   // dropdown 内逐候选项比对：唯一可用项 → 直选；与 city 完全一致 → 直选；
@@ -1555,8 +1575,10 @@ export async function selectStationAddress(page, card, city, extra = {}) {
     await input.type(city, { delay: 80 });
     // VBK 接送站搜索接口反应慢，3s 才出 dropdown。
     await delay(3_000);
+    // 接送站是单选下拉，实际渲染是 .ant-select-dropdown（不是 --multiple
+    // 变体）。以可见 + 未隐藏的 ant-select-dropdown 为准，取最后一个。
     const dropdown = page.locator(
-      '.ant-select-dropdown--multiple:not(.ant-select-dropdown-hidden)',
+      '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
     ).last();
     // 【重要】本函数运行在接送站弹窗内部，不能调 closeBlockingDialogs
     // 去收其它遮罩弹窗——closeBlockingDialogs 判定是按 role="dialog" / 「确定」
@@ -1576,10 +1598,40 @@ export async function selectStationAddress(page, card, city, extra = {}) {
     }
     const options = dropdown.locator('.ant-select-dropdown-menu-item');
     const total = await options.count().catch(() => 0);
+    console.warn(`[selectStationAddress/fillStationField] kind=${kind} dropdown count=${total}`);
     if (!total) {
+      // 兑底：dropdown 没出项时重试输入 + 等待 3s。VBK 接口在跨进程调用
+      // 拿手动填过的值时偶尔 3s 不够，需要再清空 + 重输。
+      try {
+        await input.fill("").catch(() => {});
+        await input.type(city, { delay: 120 });
+        await delay(4_000);
+        const total2 = await options.count().catch(() => 0);
+        if (total2 > 0) {
+          const texts2 = (await options.allInnerTexts().catch(() => [])).map((text) => text.trim());
+          const idx2 = texts2.indexOf(city);
+          if (idx2 >= 0) {
+            await options.nth(idx2).click({ force: true });
+            await delay(200);
+            await page.keyboard.press("Escape").catch(() => false);
+            await delay(150);
+            return { matched: true, source: "retry-exact", text: city };
+          }
+          if (texts2.length === 1) {
+            await options.nth(0).click({ force: true });
+            await delay(200);
+            await page.keyboard.press("Escape").catch(() => false);
+            await delay(150);
+            return { matched: true, source: "retry-single", text: texts2[0] };
+          }
+        }
+      } catch (retryErr) {
+        console.warn("[selectStationAddress/fillStationField] retry 失败", String(retryErr));
+      }
       return { matched: false, reason: "empty-list" };
     }
     const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.trim());
+    console.warn(`[selectStationAddress/fillStationField] kind=${kind} texts=`, texts.slice(0, 5));
     const disableds = await Promise.all(
       Array.from({ length: total }, async (_, i) => {
         const cls = (await options.nth(i).getAttribute("class").catch(() => "")) || "";
@@ -1587,6 +1639,7 @@ export async function selectStationAddress(page, card, city, extra = {}) {
       }),
     );
     const usable = texts.filter((_, i) => !disableds[i]);
+    console.warn(`[selectStationAddress/fillStationField] kind=${kind} usable=${usable.length}, city=${city}`);
     // 1) 唯一可用项 → 直选。
     if (usable.length === 1) {
       const idx = texts.findIndex(t => t === usable[0]);
@@ -1690,16 +1743,11 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
       const input = stationInputs.nth(i);
       const value = await input.getAttribute("value").catch(() => "");
       if (value && value.trim()) continue;
-      const isTimeSlot = await input.evaluate((el) => {
-        let parent = el.parentElement;
-        while (parent && parent !== document.body) {
-          const txt = parent.textContent || "";
-          if (txt.includes("全天具体时间")) return true;
-          parent = parent.parentElement;
-        }
-        return false;
-      }).catch(() => false);
-      if (isTimeSlot) continue;
+      // 只跳过 ant-time-picker-input（时间控件）；接送站输入是 ant-input。
+      // 之前 walk 父文本检查"全天具体时间"会导致接送站输入被误判，
+      // 接送站 pickup card 里多个控件不在同一子区，文本连在一起。
+      const inputClass = (await input.getAttribute("class")) || "";
+      if (/ant-time-picker-input/.test(inputClass)) continue;
       await selectStationAddress(page, card, operations.pickupCity, { disambiguator, product });
       return;
     }
@@ -1730,6 +1778,69 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
     }
     await fillEmptyStationAddresses(cards[0]);
   }
+}
+
+/**
+ * 处理 VBK 行程描述保存后弹出的「请选择机场/火车站」二级 modal。
+ * VBK 会在 itinerary 草稿保存后要求产品级别的出发机场 / 火车站，
+ * 以避免后续 套餐 / 资源 / 价格 / 班期阶段错位。流程：
+ *   1) 查到 modal 的两个搜索输入（机场 / 火车站）；
+ *   2) 输入 pickupCity 后选第一项；
+ *   3) 点「确定」关闭 modal。
+ * 4) 返回 true 表示处理了，false 表示 modal 未出现。
+ */
+async function handleAirportTrainModal(page, city) {
+  const modalTitle = page.locator('.ant-modal-title').filter({ hasText: "请选择机场/火车站" });
+  if ((await modalTitle.count()) === 0) return false;
+  const modal = modalTitle.first().locator("xpath=ancestor::*[contains(@class,\"ant-modal\")][1]");
+  if (!(await modal.isVisible().catch(() => false))) return false;
+  console.warn("[handleAirportTrainModal] 检测到「请选择机场/火车站」modal，开始处理");
+  const searchInputs = modal.locator('input.ant-select-search__field');
+  const inputCount = await searchInputs.count();
+  if (inputCount < 2) {
+    console.warn("[handleAirportTrainModal] modal 输入数量不足：", inputCount);
+    return false;
+  }
+  // 机场（第一个输入）
+  await searchInputs.nth(0).click({ force: true });
+  await delay(300);
+  await searchInputs.nth(0).fill("");
+  await searchInputs.nth(0).type(city, { delay: 80 });
+  await delay(3_000);
+  const airportOption = page.locator('.ant-select-dropdown-menu-item').filter({
+    hasText: new RegExp(`^${escapeRegExp(city)}机场$`),
+  }).first();
+  if ((await airportOption.count()) === 0) {
+    // 兑底：取首个可用项
+    await page.locator('.ant-select-dropdown-menu-item:not(.ant-select-dropdown-menu-item-disabled)').first().click({ force: true }).catch(() => {});
+  } else {
+    await airportOption.click({ force: true });
+  }
+  await delay(500);
+  // 火车站（第二个输入）
+  await searchInputs.nth(1).click({ force: true });
+  await delay(300);
+  await searchInputs.nth(1).fill("");
+  await searchInputs.nth(1).type(city, { delay: 80 });
+  await delay(3_000);
+  const trainOption = page.locator('.ant-select-dropdown-menu-item').filter({
+    hasText: new RegExp(`^${escapeRegExp(city)}$`),
+  }).first();
+  if ((await trainOption.count()) === 0) {
+    await page.locator('.ant-select-dropdown-menu-item:not(.ant-select-dropdown-menu-item-disabled)').first().click({ force: true }).catch(() => {});
+  } else {
+    await trainOption.click({ force: true });
+  }
+  await delay(500);
+  // 点「确定」
+  const confirm = modal.getByRole("button", { name: "确定", exact: true });
+  if ((await confirm.count()) === 0) {
+    console.warn("[handleAirportTrainModal] 未找到「确定」按钮");
+    return false;
+  }
+  await confirm.first().click({ force: true });
+  await delay(2_000);
+  return true;
 }
 
 export async function fillItineraryDraft(page, product, options = {}) {
@@ -1788,6 +1899,9 @@ export async function fillItineraryDraft(page, product, options = {}) {
   }
 
   const savedWith = await clickSafeSave(page, ["存为草稿"]);
+  // itinerary 草稿保存后，VBK 可能会弹出「请选择机场/火车站」二级 modal。
+  // 这个 modal 要求选产品级别的机场 + 火车站，不处理会一直挡住「提交审核并下一步」。
+  await handleAirportTrainModal(page, product.operations?.pickupCity || "");
   // 推进到「套餐管理」tab。行程描述 / 套餐管理在真实 VBK 站里是同一
   // baseInfoMerge 页内的两个 tab，URL 在它们之间切换时不会变化；而某些
   // 进入路径下 URL 干脆不带 baseInfoMerge 段（例如直接跳到 itinerary 独

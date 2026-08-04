@@ -93,6 +93,19 @@ async function createWindow() {
       // 让 runner 把 advisor 抛错当 needs_user 处理：再抛出一次即可。
       throw error;
     }
+  }, async (req) => {
+    const settings = getSettings();
+    const service = new MiniMaxService({ apiKey: apiKey(), baseUrl: settings.minimaxBaseUrl, model: settings.minimaxModel });
+    try {
+      return await service.disambiguateOption(req);
+    } catch (error) {
+      console.warn("[disambiguator] failed", {
+        kind: req.kind,
+        desired: req.desired,
+        errorCode: (error as { code?: string }).code,
+      });
+      throw error;
+    }
   });
 }
 
@@ -227,6 +240,13 @@ function registerIpc() {
     return automation.start(projectId);
   });
   ipcMain.handle("automation:retryPhase", (_event, projectId: string, phase: string) => automation.retryPhase(projectId, phase));
+  // 调试入口：CLI / IDE 可以逐函数调用 ctrip.ts 并观察页面快照。
+  // 启用方式：设置环境变量 VBK_DEBUG=1 重启 Electron。
+  ipcMain.handle("automation:debug:runStep", (_event, stepName: string, argsJson: string) => automation.debugRunStep(stepName, argsJson));
+  ipcMain.handle("automation:debug:snapshot", (_event, label?: string) => automation.debugSnapshot(label));
+  ipcMain.handle("automation:debug:hitBreakpoints", () => automation.debugHitBreakpoints());
+  ipcMain.handle("automation:debug:resume", (_event, command: "continue" | "step" | "stop") => automation.debugResume(command));
+  ipcMain.handle("automation:debug:listBreakpoints", () => automation.debugListBreakpoints());
   ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => db.getAccountFixedInfo(accountName));
   ipcMain.handle("accounts:saveFixedInfo", (_event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
     const saved = db.setAccountFixedInfo(accountName, values);

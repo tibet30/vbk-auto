@@ -20,6 +20,13 @@ const api: VbkApi = {
     retry: (projectId) => ipcRenderer.invoke("automation:retry", projectId),
     retryPhase: (projectId, phase) => ipcRenderer.invoke("automation:retryPhase", projectId, phase),
   },
+  debug: {
+    runStep: (stepName: string, argsJson: string) => ipcRenderer.invoke("automation:debug:runStep", stepName, argsJson),
+    snapshot: (label?: string) => ipcRenderer.invoke("automation:debug:snapshot", label),
+    hitBreakpoints: () => ipcRenderer.invoke("automation:debug:hitBreakpoints"),
+    resume: (command: "continue" | "step" | "stop") => ipcRenderer.invoke("automation:debug:resume", command),
+    listBreakpoints: () => ipcRenderer.invoke("automation:debug:listBreakpoints"),
+  },
   accounts: {
     getFixedInfo: (accountName) => ipcRenderer.invoke("accounts:getFixedInfo", accountName),
     saveFixedInfo: (accountName, values) => ipcRenderer.invoke("accounts:saveFixedInfo", accountName, values),

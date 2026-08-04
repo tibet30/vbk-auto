@@ -20,7 +20,12 @@ test("selectStationAddress 弹窗 input 契约：airport=0, train=1", async () =
   const fnBody = src.slice(start, end);
 
   // 契约 1：inputs 数量校验必须 >= 2（dialog 实际有 2 个：airport + train）
-  assert.match(fnBody, /if\s*\(\s*\(await\s+inputs\.count\(\)\)\s*<\s*2\s*\)/);
+  // 老实现是 throw Error，新实现是 graceful 返回 reason。
+  assert.ok(
+    /if\s*\(\s*\(await\s+inputs\.count\(\)\)\s*<\s*2\s*\)/.test(fnBody) ||
+    /dialogInputCount\s*<\s*2/.test(fnBody),
+    "selectStationAddress 必须检测 dialog input 数量",
+  );
 
   // 契约 2：必须用 airport=0, train=1 的索引（不是 1, 2）
   // 老代码里 "inputs 里有隐藏的 <input type='hidden'>，可写输入从下标 1 起"

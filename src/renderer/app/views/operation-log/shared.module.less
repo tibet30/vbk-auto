@@ -1,0 +1,23 @@
+/* VBK Desktop — operation-log shared primitives
+ * Cross-component classes shared by index.tsx and OperationLogRow.tsx. */
+
+.opIconBtn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  background: transparent;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.opIconBtn:hover { background: var(--muted); color: var(--foreground); }
+.opIconBtn:focus-visible { border-color: var(--border-strong); }
+.opIconBtn[aria-expanded='true'] { background: var(--muted); color: var(--foreground); }
+
+@keyframes skel-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}

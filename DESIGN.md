@@ -108,3 +108,12 @@ The browser is not a modal or separate application window. It is a first-class S
 - Research results reveal once with a subtle vertical fade.
 - Avoid pulsing surfaces except a tiny active-task indicator.
 - Respect `prefers-reduced-motion`.
+
+## Implementation Rules
+
+- Design should prioritize operational efficiency over visual novelty.  
+- Chinese text is default in interface copy and workflows unless a field must remain English (e.g., code IDs, external brand names).
+- Keep normal pages compact with a centered content width (max `980px`) and `16px` side gutters; exception pages may use full width by component-level decision.
+- Prefer stable borders, clear spacing, and readable density over heavy shadows or animation.
+- Every stage switch and status update should have an explicit source of truth (state icon + text), not only color.
+- Keep keyboard and screen-reader basics in scope for shared form controls and important action buttons.

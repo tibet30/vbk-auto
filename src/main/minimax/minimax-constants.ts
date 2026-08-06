@@ -1,0 +1,289 @@
+import { z } from "zod";
+import type { DisambiguateRequest } from "../../shared/contracts.js";
+
+const writablePatchGuide = `可写 patch 路径只能使用这些值：
+- /sales/productType, /sales/productForm, /sales/splitGroup
+- /basicInfo/supplierProductName, /basicInfo/subtitle, /basicInfo/days, /basicInfo/nights, /basicInfo/meetingCity, /basicInfo/destinationCity, /basicInfo/province, /basicInfo/operationNotes
+- /presentation
+- /operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded
+- /commercial/packageName, /commercial/terms
+- /commercial/pricing, /commercial/inventory, /commercial/release
+- /itinerary
+不要写入 supplierProductCode、vehicleResource 整段、providerId / contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。pricing/inventory/release 写入时只允许覆盖字段值，并保留 currency=CNY；不得给运营人数 0、或负价格、或类型不匹配的值。`;
+
+const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
+{"reply":"给运营看的简明中文回复","patch":[{"op":"add","path":"/presentation","value":{}}],"questions":[],"researchTasks":[{"label":"核查车辆资源","type":"vbk","detail":"在 VBK 资源库确认可用资源组、车型和供应商编码"}]}
+仅允许出现这 4 个一级字段：reply / patch / questions / researchTasks。多余字段直接视为无效。
+字段要求：
+- reply 必须是简明中文，可以概括已生成内容和待核查项。
+- patch 必须是 RFC6902 数组；新增或整体覆盖字段时用 add 或 replace。
+- questions 最多 1 条，只有真正阻塞第一版时才问。
+- researchTasks 只列不能确认的数据，type 只能是 vbk/web/cost/image。
+- 商业字段补丁：可以在补齐 /commercial/pricing、/commercial/inventory、/commercial/release 后让产品进入可录入状态。这三项的合法形状分别是：
+  - pricing: { currency:"CNY", adult:number>0, child:number>=0, minimumTravelers:正整数, cost:{ adult:number>=0, child:number>=0, singleSupplement:number>=0, childBed:number>=0 }? }，且 cost.adult 不能超过 adult
+  - inventory: { startDate:YYYY-MM-DD, endDate:YYYY-MM-DD, dailyQuota:正整数 }，且 startDate 不能晚于 endDate
+  - release: { submitReview:bool, publishAfterApproval:bool, publicPriceCeiling:number>0, publicAuditRetries:1..10 }
+  上面任何一条不满足都会被本地校验拒绝；cost.adult 超过 adult、startDate 晚于 endDate、子数为 0、价格为负数等都不行。`;
+
+const nonEmptyText = z.string().trim().min(1);
+
+export class MiniMaxServiceError extends Error {
+  constructor(public readonly code: string, message: string) { super(message); }
+}
+
+export const writablePatchPrefixes = [
+  "/sales/productType", "/sales/productForm", "/sales/splitGroup",
+  "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
+  "/presentation",
+  "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded",
+  "/commercial/packageName", "/commercial/terms",
+  "/commercial/pricing", "/commercial/inventory", "/commercial/release",
+  "/itinerary",
+];
+
+export const responseJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reply", "patch", "questions", "researchTasks"],
+  properties: {
+    reply: { type: "string", minLength: 1 },
+    patch: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["op", "path"],
+        properties: {
+          op: { type: "string", enum: ["add", "replace", "remove"] },
+          path: { type: "string", enum: writablePatchPrefixes },
+          value: {},
+        },
+      },
+    },
+    questions: { type: "array", maxItems: 1, items: { type: "string" } },
+    researchTasks: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "type"],
+        properties: {
+          label: { type: "string", minLength: 1 },
+          type: { type: "string", enum: ["vbk", "web", "cost", "image"] },
+          detail: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+export const presentationCoverValueSchema = z.object({
+  source: z.literal("ctripLibrary"),
+  poi: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  minQuality: z.number().int().min(0).max(5),
+}).strict();
+
+export function hasCompleteCtripLibraryCover(product: Record<string, unknown>): boolean {
+  const presentation = product.presentation;
+  if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return false;
+  const cover = (presentation as Record<string, unknown>).cover;
+  if (!cover || typeof cover !== "object" || Array.isArray(cover)) return false;
+  return presentationCoverValueSchema.safeParse(cover).success;
+}
+
+export function isCoverResearchTaskSatisfiedByProduct(
+  task: { type: string; label?: string; detail?: string },
+  product: Record<string, unknown>,
+): boolean {
+  if (task.type !== "image") return false;
+  return hasCompleteCtripLibraryCover(product);
+}
+
+export const responseTool = {
+  type: "function",
+  function: {
+    name: "submit_product_update",
+    description: "返回给 VBK Desktop 的产品协作回复、JSON Patch 和核查任务。",
+    strict: true,
+    parameters: responseJsonSchema,
+  },
+};
+
+const advisorActions = [
+  "retry_same_phase",
+  "reload_and_retry_phase",
+  "reopen_editor_and_retry_phase",
+  "wait_for_user",
+] as const;
+
+export const diagnosisTool = {
+  type: "function",
+  function: {
+    name: "submit_failure_diagnosis",
+    description: "返回自动录入阶段失败的结构化诊断。",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["summary", "rootCause", "action", "expectedEvidence"],
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: 80 },
+        rootCause: { type: "string", minLength: 1, maxLength: 200 },
+        action: { type: "string", enum: advisorActions },
+        expectedEvidence: { type: "string", minLength: 1, maxLength: 120 },
+        userInstruction: { type: "string", minLength: 1, maxLength: 500 },
+      },
+    },
+  },
+};
+
+export const disambiguateTool = {
+  type: "function",
+  function: {
+    name: "submit_disambiguation",
+    description: "从候选项中选一个与 desired 最接近的。无合适选则返回空串。",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["pickedText", "reasoning"],
+      properties: {
+        pickedText: { type: "string" },
+        reasoning: { type: "string", minLength: 1, maxLength: 200 },
+      },
+    },
+  },
+};
+
+export const disambiguateOutcomeSchema = z.object({
+  pickedText: z.string(),
+  reasoning: z.string().trim().min(1).max(200),
+}).strict();
+
+const chineseText = (maxLength: number) => z.string().trim().min(1).max(maxLength).refine(
+  (value) => /[\p{Script=Han}]/u.test(value),
+  { message: "必须包含中文" },
+);
+
+export const advisorOutcomeSchema = z.object({
+  summary: chineseText(80),
+  rootCause: chineseText(200),
+  action: z.enum(advisorActions),
+  expectedEvidence: chineseText(120),
+  userInstruction: z.string().optional(),
+}).strict().superRefine((outcome, context) => {
+  if (outcome.action !== "wait_for_user") return;
+  const instruction = outcome.userInstruction?.trim() ?? "";
+  if (!instruction || instruction.length > 500 || !/[\p{Script=Han}]/u.test(instruction)) {
+    context.addIssue({ code: "custom", path: ["userInstruction"], message: "wait_for_user 必须提供不超过 500 字的中文 userInstruction" });
+  }
+});
+
+export const diagnosisSystemPrompt = `你是 VBK Desktop 自动录入失败诊断器。只能根据输入证据判断当前阶段的受限恢复动作。
+输入包含 phase、attempt、error、productIdExists、basicInfoSaved、completedPhases、diagnosisHistory；diagnosisHistory 只表示已经发生的诊断，不得补充未观察事实。
+allowedActions 仅为 retry_same_phase、reload_and_retry_phase、reopen_editor_and_retry_phase、wait_for_user。
+输出字段：summary 是中文一句话且不超过 80 字；rootCause 是基于证据的中文说明且不超过 200 字；expectedEvidence 是中文短句且不超过 120 字，表示重试成功后应该看到的证据；action 只能选择一个 allowedActions。action 为 wait_for_user 时 userInstruction 必填，必须是中文且可执行的 VBK 操作；其它 action 忽略 userInstruction。
+硬约束：只返回唯一 action；禁止返回或建议代码、选择器、URL、浏览器脚本、patch 或 patch 路径；禁止包含 DOM、cookie、key、联系人、电话、完整产品JSON、图片、供应商 ID 或 providerId；禁止提审、发布、上线、删除、修改库存或价格；不要重复 production patch 协议。信息不足时返回 wait_for_user。`;
+
+export const patchOperationSchema = z.object({
+  op: z.enum(["add", "replace", "remove"]),
+  path: z.string().startsWith("/"),
+  value: z.unknown().optional(),
+}).strict().superRefine((operation, context) => {
+  const writable = writablePatchPrefixes.includes(operation.path);
+  if (!writable) context.addIssue({ code: "custom", message: `不可写入产品字段：${operation.path}` });
+});
+
+export const researchTaskSchema = z.object({ label: z.string(), type: z.enum(["vbk", "web", "cost", "image"]), detail: z.string().optional() }).strict();
+
+export const aiResponsePayloadKeys = ["reply", "patch", "questions", "researchTasks"] as const;
+
+export const aiResponseSchema = z.object({
+  reply: nonEmptyText,
+  patch: z.array(patchOperationSchema).default([]),
+  questions: z.array(z.string().trim().min(1)).max(1).default([]),
+  researchTasks: z.array(researchTaskSchema).default([]),
+}).strict();
+
+const pricingCostSchema = z.object({
+  adult: z.number().nonnegative(),
+  child: z.number().nonnegative(),
+  singleSupplement: z.number().nonnegative().default(0),
+  childBed: z.number().nonnegative().default(0),
+}).optional();
+
+const pricingSchema = z.object({
+  currency: z.literal("CNY").default("CNY"),
+  adult: z.number().positive(),
+  child: z.number().nonnegative(),
+  minimumTravelers: z.number().int().positive(),
+  cost: pricingCostSchema,
+}).superRefine((value, ctx) => {
+  if (value.cost && value.cost.adult > value.adult) {
+    ctx.addIssue({ code: "custom", message: "成本价不得高于售卖价" });
+  }
+});
+
+const inventorySchema = z.object({
+  startDate: z.iso.date(),
+  endDate: z.iso.date(),
+  dailyQuota: z.number().int().positive(),
+}).superRefine((value, ctx) => {
+  if (new Date(value.startDate) > new Date(value.endDate)) {
+    ctx.addIssue({ code: "custom", message: "库存开始日期不能晚于结束日期" });
+  }
+});
+
+const releaseSchema = z.object({
+  submitReview: z.boolean().default(true),
+  publishAfterApproval: z.boolean().default(true),
+  publicPriceCeiling: z.number().positive(),
+  publicAuditRetries: z.number().int().min(1).max(10).default(3),
+});
+
+export const patchValueSchemas: Record<string, z.ZodType> = {
+  "/sales/productType": z.enum(["domesticShort", "domesticLong"]),
+  "/sales/productForm": z.enum(["groupTour", "semiSelfGuided", "privateTour", "freeTravel"]),
+  "/sales/splitGroup": z.boolean(),
+  "/basicInfo/supplierProductName": nonEmptyText,
+  "/basicInfo/subtitle": nonEmptyText,
+  "/basicInfo/days": z.number().int().min(1).max(60),
+  "/basicInfo/nights": z.number().int().min(0).max(59),
+  "/basicInfo/meetingCity": nonEmptyText,
+  "/basicInfo/destinationCity": nonEmptyText,
+  "/basicInfo/province": nonEmptyText,
+  "/basicInfo/operationNotes": nonEmptyText,
+  "/operations/transport": z.enum(["charter", "shared", "none"]),
+  "/operations/pickupCity": nonEmptyText,
+  "/operations/reusePickupForDropoff": z.boolean(),
+  "/operations/hotelSource": z.literal("nonPlatform"),
+  "/operations/hotelTier": z.enum(["当地2钻酒店/-2", "当地3钻酒店/-3", "当地4钻酒店/-4", "当地5钻酒店/-5"]),
+  "/operations/mealsIncluded": z.boolean(),
+  "/commercial/packageName": nonEmptyText,
+  "/commercial/terms": z.record(z.string(), nonEmptyText),
+  "/commercial/pricing": pricingSchema,
+  "/commercial/inventory": inventorySchema,
+  "/commercial/release": releaseSchema,
+};
+
+export const systemPrompt = `你是 VBK Desktop 的旅游产品运营助手。你的用户是携程 VBK 运营人员；他们会用极少信息创建一个可复用的通用旅游产品，例如“太原2天1晚私家团”。
+当用户要求生成第一版时，基于已有目的地、天数、晚数和产品形态，生成完整且通用的产品文案、每日行程、基础信息与可审核的条款草稿。产品名称、行程、卖点可合理生成；不得虚构城市 ID、VBK 资源、车队价格、库存、门票、成本或已经完成的核查。上述运营数据缺失时，创建清晰、可由运营人员在 VBK 中执行的 researchTasks。
+当前产品草稿是产品状态的唯一事实来源；即使历史消息声称已经生成，只要草稿字段仍为空，就必须重新生成并返回可写 patch。
+patch 必须是 RFC6902 风格，且只能修改产品草稿的非敏感字段。最多追问一个真正阻塞生成的问题；如果不阻塞，先给出第一版。
+
+${writablePatchGuide}
+
+${outputGuide}`;
+
+export function disambiguateSystemPrompt(kind: DisambiguateRequest["kind"]): string {
+  const base = `你是 VBK Desktop 选则辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
+你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。`;
+  const guidance: Record<DisambiguateRequest["kind"], string> = {
+    province: `期望值是中国某个省/直辖市/自治区，例如“山西”。candidates 可能是 “中国-山西”“山西省”“山西”。选 “中国-山西” 这类带国家前缀的优先。**绝对不要选 “朝鲜-xxx”“韩国-xxx” 这种境外前缀。**`,
+    city: `期望值是中国某个城市，例如“太原”。candidates 可能是 “中国-太原”“太原市”。选 “中国-xxx” 这种带国家前缀的优先，不要选同名海外城市。**只要 candidates 里有任何 “中国-xxx” 的项，优先选它；只在完全没有 “中国-” 前缀项时才考虑无前缀的项，绝不返回 “朝鲜-xxx”“北朝鲜-xxx”“韩国-xxx”。**`,
+    spot: `期望值是一个具体景点，例如“云冈石窟”。candidates 是 VBK 景点下拉返回的候选，可能是“云冈石窟”“云冈石窟景区”等。选产品 JSON 推荐语/特点中明确提到的那一个；如果是城市同名 + 同一省份，选那个。**只在国内景点里选：candidates 文本中出现 “朝鲜-”“韩国-”“北朝鲜-”“日本-” 等境外前缀的项一律跳过；产品类型是境内旅游，遇到境外项请返回空串并说明 “仅含境外候选”。**`,
+    station: `期望值是一个车站/机场名，例如“大同站”或城市名“大同”。candidates 是接送站下拉的所有火车站/机场。优先选火车站，其次机场；如果只有城市级选项，选该城市作为默认接送点。**不要选国外机场/车站（文本中带境外地名/机场代码的）。**`,
+  };
+  return `${base}\n\n当前类别：${kind}\n\n专项约束：${guidance[kind]}\n\n返回时只能调用 submit_disambiguation 工具。pickedText 必须是 candidates 里某一个 text 的精确字符串；reasoning 简要说明选则理由或未选原因。`;
+}

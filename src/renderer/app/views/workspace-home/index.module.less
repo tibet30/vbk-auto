@@ -1,0 +1,77 @@
+.workspaceHome {
+  max-width: var(--content-max);
+  padding: 24px 16px 0;
+  margin: 0 auto;
+}
+
+.workspaceHomeHead {
+  margin-bottom: var(--pad);
+}
+
+.workspaceHomeHead h1 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.workspaceHomeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--pad-sm);
+}
+
+@media (max-width: 880px) {
+  .workspaceHomeGrid { grid-template-columns: 1fr; }
+}
+
+.moduleCard {
+  min-height: 132px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--pad);
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  grid-template-rows: 1fr auto;
+  gap: 8px 10px;
+  align-items: start;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.moduleCard:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-1);
+}
+
+.moduleCard :global(.btn) {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.moduleCard[data-state='ready'] .moduleIcon {
+  color: var(--success);
+  background: #f0fdf4;
+}
+
+.moduleIcon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  color: var(--warning);
+}
+
+.moduleCard strong,
+.moduleCard small { display: block; }
+
+.moduleCard strong { font-size: var(--fs-md); }
+
+.moduleCard small {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}

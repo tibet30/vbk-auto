@@ -14,7 +14,7 @@ const api: VbkApi = {
     confirmVehicleResourcePreview: (projectId, previewId) => ipcRenderer.invoke("research:confirmVehicleResourcePreview", projectId, previewId),
     resolveHotelResource: (projectId, taskId) => ipcRenderer.invoke("research:hotelResource", projectId, taskId),
   },
-  browser: { login: () => ipcRenderer.invoke("browser:login"), logout: () => ipcRenderer.invoke("browser:logout"), status: (refresh?: boolean) => ipcRenderer.invoke("browser:status", refresh), navigate: (url) => ipcRenderer.invoke("browser:navigate", url), openExternal: () => ipcRenderer.invoke("browser:openExternal"), setBounds: (bounds) => ipcRenderer.invoke("browser:setBounds", bounds), setVisible: (visible) => ipcRenderer.invoke("browser:setVisible", visible) },
+  browser: { login: () => ipcRenderer.invoke("browser:login"), logout: () => ipcRenderer.invoke("browser:logout"), status: (refresh?: boolean) => ipcRenderer.invoke("browser:status", refresh), navigate: (url) => ipcRenderer.invoke("browser:navigate", url), currentUrl: () => ipcRenderer.invoke("browser:currentUrl"), openExternal: () => ipcRenderer.invoke("browser:openExternal"), setBounds: (bounds) => ipcRenderer.invoke("browser:setBounds", bounds), setVisible: (visible) => ipcRenderer.invoke("browser:setVisible", visible) },
   automation: {
     start: (projectId) => ipcRenderer.invoke("automation:start", projectId),
     retry: (projectId) => ipcRenderer.invoke("automation:retry", projectId),
@@ -42,5 +42,6 @@ const api: VbkApi = {
   settings: { get: () => ipcRenderer.invoke("settings:get"), getApiKey: () => ipcRenderer.invoke("settings:getApiKey"), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input) },
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword) },
   events: { onProjectUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, project: unknown) => listener(project as never); ipcRenderer.on("project:updated", handler); return () => ipcRenderer.removeListener("project:updated", handler); } },
+  operationLog: { load: (query) => ipcRenderer.invoke("operationLog:load", query) },
 };
 contextBridge.exposeInMainWorld("vbk", api);

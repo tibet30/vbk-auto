@@ -1,0 +1,271 @@
+@import "./layout.module.less";
+@import "./review.chat.module.less";
+
+/* ============================================================
+ * Review stage — stage 1 of the workspace
+ * Reuses .panel / .stageSplit from layout.module.less.
+ * Chat panel (msg / composer / ai / conversation) lives in
+ * review.chat.module.less.
+ * ============================================================ */
+
+.reviewSummary {
+  display: flex;
+  flex-direction: column;
+}
+
+.productScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px var(--pad) var(--pad-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+}
+
+/* Review checklist */
+.reviewChecklist {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.reviewChecklistFull { overflow: visible; }
+
+.reviewChecklistItem {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 9px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.reviewChecklistItem:first-child { border-top: 0; }
+.reviewChecklistItem[data-priority='high'] { background: #fffbeb; }
+
+.reviewChecklistIndex {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.reviewChecklistBody { min-width: 0; }
+.reviewChecklistLabel {
+  display: block;
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+}
+.reviewChecklistGuidance {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* Product section */
+.productSection {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.productSectionHead {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: var(--pad-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.productSectionTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.productSectionMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--pad-xs);
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+/* Task rail */
+.taskRail {
+  flex: 0 0 auto;
+  max-height: min(310px, 42vh);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.taskRailHead {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px var(--pad-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+.taskRailHead strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+.taskRailHead small {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.taskRailBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.taskStrip {
+  display: grid;
+  gap: 4px;
+}
+
+.taskRowGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.taskRowGrid:hover { background: var(--muted); }
+
+.taskRowGrid[data-active='true'] {
+  border-color: var(--ai-teal);
+  background: #f0fdfa;
+}
+
+.taskRowGrid[data-done='true'] { opacity: 0.72; }
+
+.taskRowGrid[data-just-confirmed='true'] {
+  animation: row-confirmed-flash 1.2s ease-out;
+}
+
+.marker {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fffbeb;
+  color: var(--warning);
+}
+
+.taskRowGrid[data-done='true'] .marker {
+  background: #f0fdf4;
+  color: var(--success);
+}
+
+.body { min-width: 0; }
+
+.label,
+.detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label {
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+}
+
+.detail {
+  margin-top: 1px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+/* Task detail card */
+.taskDetailCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--ai-teal);
+  border-radius: var(--radius-control);
+  background: #f0fdfa;
+}
+
+.taskDetailCard h4 {
+  margin: 4px 0 2px;
+  font-size: var(--fs-sm);
+}
+
+.taskDetailCard .body { min-width: 0; }
+
+.taskDetailCard .head { margin-bottom: 4px; }
+
+.taskDetailCard p {
+  margin: 0 0 7px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.taskResult {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 8px;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+
+.taskResult:focus {
+  outline: 0;
+  border-color: var(--ai-teal);
+}
+
+.taskActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.vehicleResolveBtn { margin-top: 6px; }

@@ -1,0 +1,158 @@
+/* Review workspace — chat panel (AI conversation + composer) */
+
+.ai {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+}
+
+.conversation {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  padding-bottom: calc(var(--pad) + var(--composer-reserve));
+  min-height: 0;
+  overflow-y: auto;
+  scroll-padding-bottom: var(--composer-reserve);
+  scroll-behavior: smooth;
+}
+
+@media (max-width: 880px) {
+  .conversation { padding: 14px 12px; }
+}
+
+/* Message bubble */
+.msg {
+  display: flex;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.msg[data-role='user'] {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.msgAvatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+}
+
+.msg[data-role='assistant'] .msgAvatar {
+  background: color-mix(in srgb, var(--ai-teal) 14%, transparent);
+  color: var(--ai-teal);
+  border-color: color-mix(in srgb, var(--ai-teal) 30%, var(--border));
+}
+
+.msg[data-role='user'] .msgAvatar {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.msgBody {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  min-width: 0;
+  max-width: 78%;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.msg[data-role='assistant'] .msgBody {
+  border-top-left-radius: 4px;
+}
+
+.msg[data-role='user'] .msgBody {
+  border-top-right-radius: 4px;
+  background: var(--muted);
+}
+
+.msgContent p { margin: 0 0 8px 0; }
+.msgContent p:last-child { margin-bottom: 0; }
+
+.msgMeta {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.aiThinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--ai-teal);
+  font-size: var(--fs-sm);
+  background: var(--surface);
+}
+
+.aiThinking svg { animation: spin 900ms linear infinite; }
+
+@media (max-width: 880px) {
+  .msgBody { padding: 9px 12px; font-size: var(--fs-sm); }
+}
+
+/* Composer */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px var(--pad) var(--pad);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.composerCard {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.composerTextarea {
+  width: 100%;
+  min-height: 76px;
+  max-height: 180px;
+  display: block;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  padding: 11px 12px;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-base);
+  line-height: 1.55;
+}
+
+.composerTextarea::placeholder { color: var(--subtle); }
+
+.composerCard:focus-within {
+  border-color: var(--ai-teal);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-teal) 16%, transparent);
+}
+
+@media (max-width: 880px) {
+  .composer { padding: 10px 12px 12px; }
+  .composerCard :global(.textarea) { min-height: 68px; max-height: 160px; }
+}

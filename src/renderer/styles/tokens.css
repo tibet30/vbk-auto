@@ -1,0 +1,73 @@
+/* VBK Desktop — design tokens
+ * Single source of truth for color, geometry, typography, motion.
+ * Values mirror /DESIGN.md. No component selectors live here. */
+
+:root {
+  /* Surfaces */
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --muted: #f4f4f5;
+  --muted-strong: #ececef;
+  --foreground: #09090b;
+  --muted-foreground: #71717a;
+  --subtle: #a1a1aa;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --ring: #2563eb;
+
+  /* Brand & semantic */
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --link: #2563eb;
+  --success: #16a34a;
+  --ai-teal: #0d9488;
+  --warning: #d97706;
+  --destructive: #dc2626;
+
+  /* Field-state colors */
+  --state-proposed: #71717a;
+  --state-researching: #0d9488;
+  --state-resolved: #16a34a;
+  --state-needs: #d97706;
+  --state-confirmed: #18181b;
+  --state-blocked: #dc2626;
+
+  /* Geometry */
+  --base: 4px;
+  --rail: 56px;
+  --rail-compact: 48px;
+  --topbar: 44px;
+  --pad: 16px;
+  --pad-sm: 12px;
+  --pad-xs: 8px;
+
+  --control: 36px;
+  --control-sm: 32px;
+
+  --content-max: 980px;
+
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-sm: 6px;
+
+  --composer-reserve: 156px;
+
+  /* Type */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
+    'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-title: 20px;
+
+  --line: 1.5;
+
+  --shadow-1: 0 1px 0 rgba(9, 9, 11, 0.04);
+  --shadow-2: 0 4px 12px -4px rgba(9, 9, 11, 0.08);
+  --focus: 0 0 0 2px var(--ring);
+  --motion: cubic-bezier(0.2, 0.8, 0.2, 1);
+}

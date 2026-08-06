@@ -1,0 +1,380 @@
+/* VBK Desktop — shared helper components (used by projects + workspace-home) */
+
+.briefForm {
+  max-width: 720px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--pad);
+}
+
+.briefForm h3 {
+  margin: 0 0 6px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.briefForm :global(.view-sub) { margin-bottom: 18px; }
+
+.briefGrid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 0.7fr;
+  gap: var(--pad-sm);
+}
+
+.briefGrid label { min-width: 0; }
+.briefGrid select { height: 38px; }
+
+.formActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: var(--pad);
+}
+
+.moduleCard {
+  min-height: 132px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: var(--pad);
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  grid-template-rows: 1fr auto;
+  gap: 8px 10px;
+  align-items: start;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.moduleCard:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-1);
+}
+
+.moduleCard :global(.btn) {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.moduleCard[data-state='ready'] .moduleIcon {
+  color: var(--success);
+  background: #f0fdf4;
+}
+
+.moduleIcon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  color: var(--warning);
+}
+
+.moduleCard strong,
+.moduleCard small { display: block; }
+
+.moduleCard strong { font-size: var(--fs-md); }
+
+.moduleCard small {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+/* ============================================================
+ * Project list
+ * ============================================================ */
+
+.projectList {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.projectListItem {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  position: relative;
+}
+
+.projectListItem:first-child { border-top: 0; }
+
+.projectRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  transition: background 160ms ease;
+}
+
+.projectRow:hover { background: #fcfcfc; }
+
+.projectRow[data-state='blocked'] { box-shadow: inset 3px 0 0 var(--destructive); }
+.projectRow[data-state='automating'] { box-shadow: inset 3px 0 0 var(--ai-teal); }
+.projectRow[data-state='draft_saved'] { box-shadow: inset 3px 0 0 var(--success); }
+
+.projectRowOpen {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 14px 12px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.projectRowIcon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 8%, transparent);
+  color: var(--ai-teal);
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 18%, transparent);
+  flex-shrink: 0;
+}
+
+.projectRowIcon[data-form='groupTour'] {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.projectMain {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.projectTitleLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.projectTitleLine .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  min-width: 0;
+  letter-spacing: -0.005em;
+}
+
+.projectMetaLine {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.metaItem svg { flex-shrink: 0; opacity: 0.85; }
+
+.metaLink {
+  color: var(--link);
+  font-variant-numeric: tabular-nums;
+}
+
+.metaMuted { color: var(--subtle); }
+
+.metaSep {
+  color: var(--border-strong);
+  user-select: none;
+}
+
+/* Status badge */
+.projectBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.projectBadge[data-state='planning'] {
+  color: var(--ai-teal);
+  border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
+}
+
+.projectBadge[data-state='review'] {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+
+.projectBadge[data-state='automating'] {
+  color: var(--ai-teal);
+  border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
+}
+
+.projectBadge[data-state='automating'] svg {
+  animation: spin 900ms linear infinite;
+}
+
+.projectBadge[data-state='draft_saved'] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  background: color-mix(in srgb, var(--success) 7%, var(--surface));
+}
+
+.projectBadge[data-state='blocked'] {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 32%, var(--border));
+  background: color-mix(in srgb, var(--destructive) 7%, var(--surface));
+}
+
+/* Right side */
+.projectEnter {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  background: transparent;
+  transition: background 160ms ease, color 160ms ease;
+  flex-shrink: 0;
+}
+
+.projectRow:hover .projectEnter,
+.projectRowOpen:focus-visible .projectEnter {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.projectDeleteTrigger {
+  width: 30px;
+  height: 30px;
+  margin: 16px 14px 0 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 160ms ease, color 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.projectRow:hover .projectDeleteTrigger,
+.projectDeleteTrigger:focus-visible { opacity: 1; }
+
+.projectDeleteTrigger:hover:not(:disabled) {
+  color: var(--destructive);
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.projectDeleteTrigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+/* Confirmation row */
+.projectDeleteConfirm {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pad);
+  padding: 12px var(--pad);
+  border-top: 1px solid #fecaca;
+  background: #fff7f7;
+}
+
+.projectDeleteConfirm > div:first-child { min-width: 0; }
+
+.projectDeleteConfirm strong,
+.projectDeleteConfirm small { display: block; }
+
+.projectDeleteConfirm strong {
+  color: #991b1b;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.projectDeleteConfirm small {
+  margin-top: 3px;
+  color: #7f1d1d;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.projectDeleteActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .projectDeleteTrigger { opacity: 1; }
+  .projectDeleteConfirm { align-items: stretch; flex-direction: column; }
+  .projectDeleteActions { justify-content: flex-end; }
+  .projectRowOpen { grid-template-columns: 36px minmax(0, 1fr) 24px; gap: 10px; padding: 12px; }
+  .projectRowIcon { width: 36px; height: 36px; }
+}
+
+/* ============================================================
+ * Product field row (used by Field helper)
+ * ============================================================ */
+
+.productField {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 9px 12px;
+}
+
+.productFieldLabel {
+  font-size: var(--fs-sm);
+  color: var(--muted-foreground);
+}
+
+.productFieldValue {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--foreground);
+  word-break: break-word;
+}
+
+.productFieldValue[data-state='empty'] {
+  color: var(--subtle);
+  font-style: italic;
+}

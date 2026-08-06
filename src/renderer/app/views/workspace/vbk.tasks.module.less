@@ -1,0 +1,109 @@
+/* VBK workspace — task rail */
+
+.taskRail {
+  flex: 0 0 auto;
+  max-height: min(310px, 42vh);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.taskRailHead {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px var(--pad-sm);
+  border-bottom: 1px solid var(--border);
+}
+
+.taskRailHead strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+}
+
+.taskRailHead small {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.taskRailBody {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.taskStrip {
+  display: grid;
+  gap: 4px;
+}
+
+.taskRowGrid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.taskRowGrid:hover { background: var(--muted); }
+
+.taskRowGrid[data-active='true'] {
+  border-color: var(--ai-teal);
+  background: #f0fdfa;
+}
+
+.taskRowGrid[data-done='true'] { opacity: 0.72; }
+
+.taskRowGrid[data-just-confirmed='true'] {
+  animation: row-confirmed-flash 1.2s ease-out;
+}
+
+.marker {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fffbeb;
+  color: var(--warning);
+}
+
+.taskRowGrid[data-done='true'] .marker {
+  background: #f0fdf4;
+  color: var(--success);
+}
+
+.body { min-width: 0; }
+
+.label,
+.detail {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label {
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+}
+
+.detail {
+  margin-top: 1px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}

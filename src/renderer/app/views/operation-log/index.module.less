@@ -1,0 +1,134 @@
+@import "./OperationTypeIcon.module.less";
+@import "./shared.module.less";
+@import "./summary.module.less";
+@import "./toolbar.module.less";
+
+.opLog {
+  background: var(--bg);
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.opLogContainer {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 16px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+@media (max-width: 880px) {
+  .opLogContainer { padding: 20px 12px 48px; }
+}
+
+/* Header */
+.opLogHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pad);
+}
+
+.opLogHead h1 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.opLogHeadBody { min-width: 0; }
+
+.opLogHeadMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.opLogRefreshed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 720px) {
+  .opLogHead { flex-direction: column; align-items: stretch; }
+  .opLogHeadMeta { justify-content: space-between; }
+}
+
+/* Notice — inline banner */
+.opLogNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+}
+
+.opLogNotice[data-kind='info'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
+  color: color-mix(in srgb, var(--ai-teal) 60%, var(--foreground));
+}
+
+.opLogNotice[data-kind='warn'] {
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+  color: color-mix(in srgb, var(--warning) 70%, var(--foreground));
+}
+
+.opLogNoticeText { min-width: 0; flex: 1 1 auto; }
+
+/* Log list */
+.opList { display: flex; flex-direction: column; }
+
+.opListItems {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Empty state overlay on op log */
+.opEmpty {
+  margin-top: 0;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+}
+
+.opRowSkeleton { pointer-events: none; }
+
+.opSkelLine {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted-strong) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.4s linear infinite;
+}
+
+.opSkelLineLg { width: 60%; height: 12px; }
+.opSkelLineSm { width: 40%; height: 8px; margin-top: 6px; }
+.opSkelLineXs { width: 56px; height: 8px; }
+
+.opSkelPill {
+  width: 56px;
+  height: 18px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted-strong) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.4s linear infinite;
+}
+
+/* opIconBtn + skel-shimmer keyframe live in shared.module.less */

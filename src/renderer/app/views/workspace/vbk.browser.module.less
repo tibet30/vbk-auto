@@ -1,0 +1,96 @@
+/* VBK workspace — embedded browser panel */
+
+.browser {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  position: relative;
+}
+
+.browserPanelHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--pad-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+
+.browserNav,
+.browserActions { display: inline-flex; align-items: center; gap: 3px; }
+
+.browserUrl {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 10px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.path {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+}
+
+.browserViewport {
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--muted);
+  position: relative;
+  overflow: hidden;
+}
+
+.browserPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--surface);
+}
+
+.browserPlaceholderCard {
+  text-align: center;
+  max-width: 360px;
+  display: grid;
+  gap: 0;
+  justify-items: center;
+}
+
+.browserPlaceholderCard svg {
+  color: var(--ai-teal);
+  margin-bottom: 12px;
+}
+
+.browserPlaceholderCard h4 {
+  margin: 0 0 8px;
+  font-size: var(--fs-md);
+  color: var(--foreground);
+}
+
+.browserPlaceholderCard p {
+  margin: 0 0 var(--pad);
+  font-size: var(--fs-sm);
+  color: var(--muted-foreground);
+  line-height: 1.6;
+}
+
+.browserPlaceholderCard :global(.btn-row) {
+  display: flex;
+  gap: var(--pad-xs);
+  justify-content: center;
+}

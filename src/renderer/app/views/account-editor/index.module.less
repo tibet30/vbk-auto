@@ -1,0 +1,194 @@
+.field {
+  display: block;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 9, 11, 0.36);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+}
+
+.modal {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+
+.modalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px var(--pad);
+  border-bottom: 1px solid var(--border);
+}
+
+.modalHead strong { font-size: var(--fs-md); }
+
+.modalHead small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.modalBody {
+  padding: var(--pad);
+  overflow-y: auto;
+  display: grid;
+  gap: var(--pad);
+}
+
+.modalFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px var(--pad);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.modalFootBtnRow {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* ============================================================
+ * Contact card picker (butler name)
+ * ============================================================ */
+
+.contactCardLoading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  font-size: var(--fs-sm);
+}
+
+.contactCardLoading svg { animation: spin 900ms linear infinite; }
+
+.contactCardEmpty {
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  font-size: var(--fs-sm);
+}
+
+.contactCardPicked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--success) 28%, var(--border));
+  border-radius: var(--radius-control);
+  background: #f0fdf4;
+}
+
+.contactCardPicked > span { min-width: 0; }
+
+.contactCardPicked strong {
+  display: block;
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+}
+
+.contactCardPicked small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+
+.contactCardSearch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.contactCardSearch:focus-within {
+  border-color: var(--border-strong);
+}
+
+.contactCardSearch svg {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.contactCardSearch :global(.input) {
+  flex: 1 1 auto;
+  border: 0;
+  outline: 0;
+  height: 32px;
+  background: transparent;
+  font-size: var(--fs-sm);
+  padding: 0;
+}
+
+.contactCardList {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.contactCardItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.contactCardItem:hover {
+  background: var(--muted);
+  border-color: var(--border-strong);
+}
+
+.contactCardItem > span { min-width: 0; }
+
+.contactCardItem strong {
+  display: block;
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+}
+
+.contactCardItem small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+
+.contactCardItem svg { color: transparent; flex-shrink: 0; }
+
+.contactCardItem:hover svg { color: var(--ai-teal); }

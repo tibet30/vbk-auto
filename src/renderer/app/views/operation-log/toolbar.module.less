@@ -1,0 +1,195 @@
+/* Operation log — toolbar (搜索 / 状态芯片 / 类型&阶段) + active filter chips */
+
+.opToolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+@media (max-width: 1100px) {
+  .opToolbar { grid-template-columns: 1fr; }
+}
+
+.opSearch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--control);
+  padding: 0 10px 0 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--muted-foreground);
+  transition: border-color 160ms ease, background 160ms ease;
+  min-width: 0;
+}
+
+.opSearch:focus-within {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.opSearch > svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.opSearchInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.opSearchInput::placeholder { color: var(--subtle); }
+
+.opSearchClear {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.opSearchClear:hover { background: var(--muted); color: var(--foreground); }
+
+.opFilterGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+}
+
+.opStatusChip {
+  height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition: background 160ms ease, color 160ms ease;
+  white-space: nowrap;
+}
+
+.opStatusChip:hover { color: var(--foreground); background: var(--muted); }
+
+.opStatusChip[data-state='on'] {
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+.opStatusChip[data-state='on'][data-value='failed'] { color: var(--destructive); }
+.opStatusChip[data-state='on'][data-value='succeeded'] { color: var(--success); }
+.opStatusChip[data-state='on'][data-value='running'] { color: var(--ai-teal); }
+.opStatusChip[data-state='on'][data-value='skipped'] { color: var(--muted-foreground); }
+
+.opSelectors {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.opSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control);
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg);
+  color: var(--muted-foreground);
+  font-size: var(--fs-sm);
+  transition: border-color 160ms ease;
+}
+
+.opSelect:hover { border-color: var(--border-strong); }
+
+.opSelectPrefix {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.opSelectInput {
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+  padding: 0 4px 0 0;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right center;
+  padding-right: 16px;
+}
+
+.opClear {
+  height: var(--control);
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  border-radius: var(--radius-control);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.opClear:hover { background: var(--muted); color: var(--foreground); }
+
+/* Active filter chips */
+.opChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.opChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.opChip:hover { background: var(--muted); color: var(--foreground); border-color: var(--border-strong); }
+
+.opChipsCount {
+  margin-left: 4px;
+  color: var(--subtle);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}

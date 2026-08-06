@@ -1,0 +1,97 @@
+// @ts-nocheck
+
+import { delay } from "../utils.js";
+import { clickSection, clickSafeSave, saveThenAdvance } from "../tabs.js";
+import { productEditorUrl } from "../../constants.js";
+import { dayScopeFor, ensureOtherCard, ensureServiceTimeRange, clickExact } from "./common.js";
+import { fillHotelCard, fillMealCards } from "./cards.js";
+import { fillPickupAndDropoff, handleAirportTrainModal } from "./stations.js";
+
+export async function fillItineraryDraft(page, product, options = {}) {
+  const disambiguator = options?.disambiguator;
+  const productId = options?.productId || product.productId || "";
+  let titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
+  if ((await titleInputs.count()) !== product.itinerary.length) {
+    await page.goto(productEditorUrl(productId), { waitUntil: "domcontentloaded" });
+    titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
+  }
+  if ((await titleInputs.count()) !== product.itinerary.length) {
+    await clickSection(page, "行程描述");
+    titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
+  }
+  const titleReady = await pollUntilLocal(
+    titleInputs,
+    (loc) => loc.count().then((n) => n === product.itinerary.length),
+    3_000,
+  );
+  if (!titleReady) {
+    await assertCount(titleInputs, product.itinerary.length, "每日标题输入框");
+  }
+
+  for (let index = 0; index < product.itinerary.length; index += 1) {
+    const day = product.itinerary[index];
+    const titleInput = titleInputs.nth(index);
+    await titleInput.fill(day.title);
+    const titleAfterFill = (await titleInput.inputValue()).trim();
+    if (!titleAfterFill) {
+      throw new Error(`第 ${day.day} 天标题未成功写入（输入框为空）。`);
+    }
+    const scope = dayScopeFor(titleInput);
+    await assertCount(scope, 1, `第 ${day.day} 天行程区域`);
+    if (product.operations?.transport === "charter") {
+      await clickExact(scope, "包车", `第 ${day.day} 天包车选项`);
+    }
+    await fillPickupAndDropoff(
+      page,
+      scope,
+      index,
+      product.itinerary.length,
+      product.operations ?? {
+        reusePickupForDropoff: true,
+      },
+      { disambiguator, product },
+    );
+    await fillMealCards(scope, day, product.operations?.mealsIncluded === true);
+    if (product.operations) {
+      await fillHotelCard(page, scope, day, product.operations);
+    }
+    await ensureServiceTimeRange(scope, day);
+    const otherCard = await ensureOtherCard(page, scope, {
+      afterFirstCard: index === 0,
+    });
+    const unlimited = otherCard.getByText("不限", { exact: true });
+    if (await unlimited.count()) await unlimited.first().click();
+    const description = otherCard.locator('textarea[placeholder="请输入补充说明"]');
+    if (!(await description.count())) {
+      throw new Error(`第 ${day.day} 天"其他"节点缺少补充说明`);
+    }
+    await description.first().fill(day.description);
+    const descriptionAfterFill = (await description.first().inputValue()).trim();
+    if (!descriptionAfterFill) {
+      throw new Error(`第 ${day.day} 天"其他"补充说明未成功写入（输入框为空）。`);
+    }
+  }
+
+  const savedWith = await clickSafeSave(page, ["存为草稿"]);
+  const submitResult = await saveThenAdvance(page, {
+    phase: "ItineraryDraft",
+    targetTabLabel: "套餐管理",
+    saveButtonNames: ["存为草稿"],
+    targetTabLabels: ["套餐管理"],
+    isTargetUrl: () => false,
+    nextButtonLabel: "提交审核并下一步",
+    savedWith,
+  });
+  if (!submitResult?.advanced) {
+    throw new Error("ItineraryDraft 未提交通过：未进入下一阶段");
+  }
+  await delay(3_000);
+  return { savedWith, days: product.itinerary.length };
+}
+
+async function chooseRadioValue(_page, _groupId, _value, _description) { return null; }
+
+
+declare function assertCount(locator: any, expected: number, description: string): Promise<any>;
+declare function pollUntilLocal(locator: any, predicate: any, timeoutMs?: number): Promise<boolean>;
+

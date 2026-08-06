@@ -1,0 +1,96 @@
+/* Operation log — summary cards (4 联：总 / 成功 / 失败 / 跳过) */
+
+.opSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--pad-sm);
+}
+
+@media (max-width: 880px) {
+  .opSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.opSummaryCard {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 14px 14px 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  position: relative;
+  overflow: hidden;
+  min-height: 84px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.opSummaryCard::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--border-strong);
+}
+
+.opSummaryCard[data-tone='ok']::before { background: var(--success); }
+.opSummaryCard[data-tone='block']::before { background: var(--destructive); }
+.opSummaryCard[data-tone='skip']::before { background: var(--subtle); }
+.opSummaryCard[data-tone='ai']::before { background: var(--ai-teal); }
+
+.opSummaryIcon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.opSummaryCard[data-tone='ok'] .opSummaryIcon {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.opSummaryCard[data-tone='block'] .opSummaryIcon {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.opSummaryCard[data-tone='skip'] .opSummaryIcon {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.opSummaryCard[data-tone='ai'] .opSummaryIcon {
+  background: color-mix(in srgb, var(--ai-teal) 10%, transparent);
+  color: var(--ai-teal);
+}
+
+.opSummaryBody { min-width: 0; display: grid; gap: 1px; }
+
+.opSummaryLabel {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.01em;
+}
+
+.opSummaryValue {
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+  letter-spacing: -0.01em;
+}
+
+.opSummarySub {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  line-height: 1.4;
+}

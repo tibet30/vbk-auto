@@ -1,0 +1,6 @@
+/* VBK Desktop — global stylesheet entry
+ * Only design tokens + element-level reset remain here.
+ * Component styles live in *.module.less files colocated with their components. */
+
+@import './tokens.css';
+@import './reset.css';

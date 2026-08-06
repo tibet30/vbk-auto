@@ -1,0 +1,32 @@
+.opTypeIcon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.opTypeIcon[data-state='ok'] {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.opTypeIcon[data-state='fail'] {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.opTypeIcon[data-state='skip'] {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.opTypeIcon[data-state='run'] {
+  background: color-mix(in srgb, var(--ai-teal) 10%, transparent);
+  color: var(--ai-teal);
+}
+
+.opTypeIcon[data-state='run'] svg { animation: spin 1.4s linear infinite; }

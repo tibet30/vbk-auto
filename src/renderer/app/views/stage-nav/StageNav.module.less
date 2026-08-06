@@ -1,0 +1,135 @@
+.stageNav {
+  min-height: 64px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.stageNav::-webkit-scrollbar { display: none; }
+
+.stageStep {
+  min-width: 250px;
+  max-width: 360px;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  text-align: left;
+  transition: background 180ms var(--motion), border-color 180ms var(--motion), color 180ms var(--motion);
+  flex: 1 1 340px;
+}
+
+.stageStep:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.stageStep[data-active='true'] {
+  background: var(--surface);
+  border-color: var(--foreground);
+  color: var(--foreground);
+}
+
+.stageStepIndex {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.stageStep[data-active='true'] .stageStepIndex {
+  border-color: var(--foreground);
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.stageStep[data-status='passed'] .stageStepIndex,
+.stageStep[data-status='saved'] .stageStepIndex {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.stageStepBody {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.stageStepTitle {
+  color: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageStepStatus {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageStepDot[data-state='ready'] { background: var(--link); }
+.stageStepDot[data-state='idle']  { background: var(--subtle); }
+
+.stageConnector {
+  width: 34px;
+  height: 1px;
+  align-self: center;
+  background: var(--border-strong);
+  flex: 0 0 auto;
+}
+
+.stageConnector[data-state='ok']   { background: var(--success); }
+.stageConnector[data-state='warn'] { background: var(--warning); }
+
+.stageNavSpacer { flex: 1 1 auto; min-width: 8px; }
+
+.stageNavSummary {
+  align-self: center;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1100px) {
+  .stageNavSummary { display: none; }
+  .stageNavSpacer { display: none; }
+  .stageStep { flex-basis: 1fr; max-width: none; }
+}
+
+@media (max-width: 720px) {
+  .stageNav { min-height: 58px; padding: 6px 8px; gap: 4px; }
+  .stageStep { min-width: 220px; padding-inline: 8px; }
+  .stageConnector { width: 18px; }
+}

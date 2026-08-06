@@ -9,6 +9,7 @@
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"wait-on tcp:127.0.0.1:5173 file:dist-electron/main/main.js && electron .\"",
     "dev:renderer": "vite --host 127.0.0.1",
     "dev:main": "tsc --watch",
+    "pi:itinerary": "bash scripts/pi-itinerary.sh",
     "build": "vite build && tsc",
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder --mac dmg",
@@ -36,6 +37,7 @@
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.0",
-    "wait-on": "^9.1.0"
+    "wait-on": "^9.1.0",
+    "less": "^4.2.2"
   }
 }

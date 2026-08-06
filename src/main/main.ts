@@ -1,19 +1,24 @@
 import path from "node:path";
 import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
 import { fileURLToPath } from "node:url";
-import { VbkDatabase } from "./database.js";
-import { MiniMaxService, isCoverResearchTaskSatisfiedByProduct } from "./minimax.js";
-import { applyProductPatch } from "./product-patch.js";
-import { automationBlockers, parseProduct, productSchema } from "./automation/schema.js";
-import { VbkBrowser } from "./vbk-browser.js";
-import { DraftAutomation } from "./automation.js";
-import { resolveVehicleResource } from "./vehicle-resource.js";
-import { resolveHotelResource } from "./hotel-resource.js";
-import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./provider-id-source.js";
-import { listProviderContactCards } from "./butler-contacts.js";
-import { applyManualReviewField } from "./manual-review-field.js";
-import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, CreateProjectInput, ManualReviewFieldInput, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
-import { VbkDatabaseError, projectNotFound } from "./db-errors.js";
+import { VbkDatabase } from "./infrastructure/database/database.js";
+import {
+  MiniMaxService,
+  MiniMaxServiceError,
+  isCoverResearchTaskSatisfiedByProduct,
+} from "./minimax/minimax.js";
+import { applyProductPatch } from "./operations/product-patch.js";
+import { automationBlockers, parseProduct, productSchema } from "./automation/schema/schema.js";
+import { VbkBrowser } from "./infrastructure/vbk-browser.js";
+import { DraftAutomation } from "./automation/automation.js";
+import { resolveVehicleResource } from "./operations/vehicle-resource.js";
+import { resolveHotelResource } from "./operations/hotel-resource.js";
+import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
+import { listProviderContactCards } from "./infrastructure/butler-contacts.js";
+import { applyManualReviewField } from "./operations/manual-review-field.js";
+import { loadOperationLog } from "./operations/operation-log-store.js";
+import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
+import { VbkDatabaseError, projectNotFound } from "./infrastructure/db-errors.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const isDev = !app.isPackaged;
@@ -23,7 +28,7 @@ const isDev = !app.isPackaged;
 const debuggingPort = String(9300 + Math.floor(Math.random() * 600));
 app.commandLine.appendSwitch("remote-debugging-port", debuggingPort);
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
-const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M2.7-highspeed";
+const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
 
 let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
 // 关闭窗口后 AI 或自动化可能仍在运行，向已销毁的 webContents 发送会抛异常。
@@ -123,7 +128,15 @@ function assertSafeMiniMaxUrl(value: string) {
 
 function registerIpc() {
   ipcMain.handle("projects:list", () => db.listProjects());
-  ipcMain.handle("projects:create", (_event, input: CreateProjectInput) => { const project = db.createProject(input); emitProject(project); return project; });
+  ipcMain.handle("projects:create", (_event, input: CreateProjectInput) => {
+    const project = db.createProject(input);
+    emitProject(project);
+    // 第一版产品方案的自动触发不在 main 这里走 —— 交给 renderer 端的 useEffect
+    // 兑底。main 端 fire-and-forget 的请求与 renderer useEffect 重复触发会同时
+    // 生成两条 user-running 消息，状态不一致；renderer 单一入口更可控，
+    // 且能同时覆盖“新建后立即触发”与“重开空草稿项目”两种场景。
+    return project;
+  });
   ipcMain.handle("projects:get", (_event, id: string) => {
     const project = db.getProject(id);
     if (!project) throw projectNotFound(id);
@@ -158,7 +171,9 @@ function registerIpc() {
     emitProject(db.getProject(id)!);
     return db.getProject(id)!;
   });
-  ipcMain.handle("ai:send", async (_event, projectId: string, content: string) => {
+  // 抽到模块级函数，projects:create 会用它做自动触发；调用方决定是否 fire-and-forget。
+  // 这里不去做任何"是否第一次"判断 —— 自动触发由调用方按 minimax 已配置 API Key 决定。
+  async function runAiReply(projectId: string, content: string) {
     const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
     const message = typeof content === "string" ? content.trim() : "";
     if (!message) throw new Error("请输入要发送给 AI 的内容。");
@@ -167,17 +182,64 @@ function registerIpc() {
     emitProject(db.getProject(projectId)!);
     try {
       const history = project.messages.filter((item) => (item.role === "user" || item.role === "assistant") && item.taskStatus !== "failed" && item.taskStatus !== "running");
-      const settings = getSettings(); const response = await new MiniMaxService({ apiKey: apiKey(), baseUrl: settings.minimaxBaseUrl, model: settings.minimaxModel }).reply({ message, product: project.product, history: history.map((item) => ({ role: item.role, content: item.content })) });
+      const settings = getSettings();
+      const service = new MiniMaxService({ apiKey: apiKey(), baseUrl: settings.minimaxBaseUrl, model: settings.minimaxModel });
+      // 每轮先做一次配置有效性校验，避免把明显连接/鉴权问题交给主模型流程重复误报。
+      await service.testConnection();
+      const itinerary = Array.isArray(project.product.itinerary) ? project.product.itinerary : [];
+      const isInitialDraft = !itinerary.length && /生成|第一版|方案/.test(message);
+      const retryableCodes = new Set(["provider_connection", "provider_timeout", "provider_error", "provider_rate_limit", "invalid_model_output", "empty_model_output"]);
+      const isRetryable = (error: unknown) => {
+        const code = (error as { code?: string })?.code;
+        return code ? retryableCodes.has(code) : false;
+      };
+      const maxRetryAttempts = 4;
+      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      let response: Awaited<ReturnType<MiniMaxService["reply"]>> | undefined;
+      const repairPrompt = isInitialDraft
+        ? "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为首次生成返回至少一个可写入的 patch；不得带说明文字。"
+        : "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），不得带说明文字。";
+      const trimmedHistory = history.slice(-12);
+      for (let attempt = 1; attempt <= maxRetryAttempts; attempt++) {
+        const requestMessage = attempt === 1 ? message : `${message}\n\n${repairPrompt}`;
+        const attemptHistory = attempt === 1 ? trimmedHistory : trimmedHistory.slice(-4);
+        try {
+          response = await service.reply({
+            message: requestMessage,
+            product: project.product,
+            history: attemptHistory.map((item) => ({ role: item.role, content: item.content })),
+          });
+          break;
+        } catch (error) {
+          if (attempt >= maxRetryAttempts || !isRetryable(error)) throw error;
+          try {
+            console.warn("[MiniMax] planning request failed, run connectivity check before retry", {
+              attempt,
+              errorCode: (error as { code?: string })?.code,
+            });
+            await service.testConnection();
+          } catch (probeError) {
+            throw probeError;
+          }
+          await wait(350 * attempt);
+        }
+      }
+      if (!response) throw new Error("MiniMax 未返回有效响应。");
       const next = response.patch?.length ? applyProductPatch(project.product, response.patch) : project.product;
       db.updateProduct(projectId, next); db.updateMessageStatus(projectId, userMessageId, "succeeded"); db.addMessage(projectId, "assistant", response.reply, "succeeded");
       for (const task of response.researchTasks || []) db.addResearchTask(projectId, task);
-    } catch (error) {
+  } catch (error) {
+      const errorCode = error instanceof MiniMaxServiceError ? error.code : "provider_error";
       const reason = error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。";
+      const finalMessage = errorCode === "invalid_model_output" || errorCode === "empty_model_output"
+        ? `${reason}`
+        : `${reason} 请检查连接或配置后重试。`;
       db.updateMessageStatus(projectId, userMessageId, "failed");
-      db.addMessage(projectId, "assistant", `本轮没有获得 AI 回复：${reason} 请检查连接或配置后重试。`, "failed");
+      db.addMessage(projectId, "assistant", `本轮没有获得 AI 回复：${finalMessage}`, "failed");
     }
     emitProject(db.getProject(projectId)!);
-  });
+  }
+  ipcMain.handle("ai:send", (_event, projectId: string, content: string) => runAiReply(projectId, content));
   ipcMain.handle("ai:regenerate", (_event, projectId: string, field: string) => {
     // 当前 renderer 未调用；保留入口以便运营后期手动触发单字段重生成。
     // 实际重新生成流程仍走 ai:send（运营填写一句自然语言指令 + 上下文），
@@ -224,6 +286,7 @@ function registerIpc() {
   ipcMain.handle("browser:logout", () => browser.logout());
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));
   ipcMain.handle("browser:navigate", (_event, url: string) => browser.navigate(url));
+  ipcMain.handle("browser:currentUrl", () => browser.currentUrl());
   ipcMain.handle("browser:openExternal", () => browser.openExternal());
   ipcMain.handle("browser:setBounds", (_event, bounds) => browser.setBounds(bounds));
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => browser.setVisible(visible));
@@ -293,6 +356,9 @@ function registerIpc() {
     await new MiniMaxService({ apiKey: key, baseUrl, model: getSettings().minimaxModel }).testConnection();
     return { connected: true, message: "连接测试通过。" };
   });
+  // 读取自动化操作历史。早期版本返回内存样例，等真实写入路径就绪后再
+  // 改读持久化文件；查询语义保持一致以免上层调用方重写。
+  ipcMain.handle("operationLog:load", (_event, query?: OperationLogQuery) => loadOperationLog(query));
 }
 
 async function detectProviderIdInMain(): Promise<number | null> {

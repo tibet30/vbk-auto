@@ -49,6 +49,25 @@ if (!renderer) {
   console.error("未找到渲染进程页面（127.0.0.1:5173）");
   process.exit(1);
 }
+const dismissNativeDialog = async (page) => {
+  if (!page) return;
+  page.on("dialog", async (dialog) => {
+    try {
+      await dialog.accept().catch(() => dialog.dismiss().catch(() => {}));
+    } catch (error) {
+      console.warn(`[debug-step] 自动处理 JS dialog 失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+};
+dismissNativeDialog(renderer);
+dismissNativeDialog(vbk);
+renderer.on("dialog", async (dialog) => {
+  try {
+    await dialog.accept().catch(() => dialog.dismiss().catch(() => {}));
+  } catch (error) {
+    console.warn(`[debug-step] 自动处理 JS dialog 失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+});
 
 const mode = (process.env.VBK_DEBUG_BREAKPOINTS ? args.break || process.env.VBK_DEBUG_BREAKPOINTS : args.break) || "";
 const interactive = !!process.stdin.isTTY && !args.auto;

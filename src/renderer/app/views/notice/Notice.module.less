@@ -1,0 +1,56 @@
+.notice {
+  position: absolute;
+  z-index: 20;
+  top: var(--pad);
+  right: var(--pad);
+  max-width: min(560px, calc(100vw - 96px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-control);
+  background: #fffaf0;
+  color: #8a4b09;
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-2);
+}
+
+.notice[data-tone='success'] {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, #ffffff);
+  color: var(--success);
+}
+
+.notice[data-tone='error'] {
+  border-color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 8%, #ffffff);
+  color: var(--destructive);
+}
+
+.notice svg { flex: 0 0 auto; }
+
+.notice span {
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.notice button {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.notice button:hover { background: rgba(138, 75, 9, 0.08); }
+
+.notice[data-tone='success'] button:hover {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+
+.notice[data-tone='error'] button:hover {
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+}

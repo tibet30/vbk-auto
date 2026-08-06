@@ -1,0 +1,172 @@
+.topbar {
+  grid-area: topbar;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: var(--pad-sm);
+  height: var(--topbar);
+  min-height: var(--topbar);
+  min-width: 0;
+}
+
+.topbarSpacer { flex: 1; min-width: 0; }
+
+/* Crumb / breadcrumb */
+
+.topbarTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  display: flex;
+  align-items: center;
+  gap: var(--pad-xs);
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.topbarTitle .crumb {
+  color: var(--muted-foreground);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumbAction {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  transition: color 160ms ease;
+  flex-shrink: 0;
+}
+
+.crumbAction:hover { color: var(--foreground); }
+
+.crumbSep {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.crumbCurrent {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+
+.crumbCurrent .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  max-width: 280px;
+}
+
+.crumbState {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* Topbar right-side cluster */
+
+.topbarStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.topbarToolRail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbarStatusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  color: var(--foreground);
+}
+
+.topbarStatusChip strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.topbarStatusChip small {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+/* Account chip — 顶栏版本：账号名 + 状态点 */
+
+.topbarAccountChip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+  position: relative;
+}
+
+.topbarAccountChip:hover { background: var(--muted); }
+
+.topbarAccountMain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.topbarAccountName {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+/* ============================================================
+ * Compact viewport tweaks
+ * ============================================================ */
+
+@media (max-width: 880px) {
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbarStatus { display: none; }
+}

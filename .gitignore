@@ -1,12 +1,88 @@
+# ============ 依赖 ============
 node_modules/
+.pnp/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# ============ 构建产物 ============
 dist/
 dist-electron/
 release/
-.data/
-.env
-.env.*
-!.env.example
-artifacts/
+out/
+build/
+*.tsbuildinfo
+
+# ============ 测试 ============
+coverage/
 test-results/
 playwright-report/
+.nyc_output/
+
+# ============ 运行时 / 本地数据 ============
+.data/
+artifacts/
+tmp/
+.cache/
+.vite/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# ============ 环境变量 ============
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+# ============ 日志 ============
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+logs/
+tmp/pi-e2e/logs/
+
+# ============ 编辑器 / 工具临时目录 ============
+.history/
+.scratch/
+.playwright-mcp/
+.claude/
+.superpowers/
+.cursor/
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ============ 调试 / 抓取残留 ============
+.ant-select-selector
+.ant-select-selector-*
+span.ant-select-selection-search
+input
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# ============ 锁文件 ============
+# 项目统一使用 yarn，忽略 npm 锁文件避免冲突
+package-lock.json
+
+# ============ OS ============
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ============ Electron ============
+*.dmg
+*.pkg
+*.app

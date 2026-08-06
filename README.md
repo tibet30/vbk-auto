@@ -38,6 +38,24 @@ npm test
 npm run build
 ```
 
+### 命令行调试（行程描述）
+
+```bash
+npm run pi:itinerary -- <projectId> [cdpPort]
+```
+
+示例：
+
+```bash
+VBK_CDP_PORT=9496 npm run pi:itinerary -- ff43aae4-3cbf-44c9-8712-c31f219eac46
+npm run pi:itinerary -- ff43aae4-3cbf-44c9-8712-c31f219eac46 9496
+```
+
+说明：
+- `projectId` 为本地项目 ID（`projects` 表中的 `id`）。
+- `cdpPort` 默认使用 `VBK_CDP_PORT` 或 `9539`。
+- 命令会调用 `node scripts/debug-step.mjs fillItineraryDraft`，用于单独复现行程描述阶段。
+
 ## 源码结构
 
 ```text
@@ -50,3 +68,7 @@ test/                   自动化与产品协议测试
 ```
 
 MiniMax 密钥通过桌面端设置保存到 macOS 加密存储；不要将真实密钥或 VBK Cookie 写入仓库。
+
+## 代码规范
+
+见 [AGENTS.md](/Users/cisco/Documents/vbk-auto/AGENTS.md)。

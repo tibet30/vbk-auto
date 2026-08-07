@@ -1,4 +1,4 @@
-import { test, assert, makeRun, makeSpyAdvisor, now } from "./automation-recovery.shared.js";
+import { test, assert, makeRun, makeSpyAdvisor, now, runPhaseWithRecovery } from "./automation-recovery.shared.js";
 test("首次成功不调用 advisor", async () => {
   const advisor = makeSpyAdvisor();
   const calls: string[] = [];

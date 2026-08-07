@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyProductPatch } from "../../src/main/operations/product-patch.js";
+import { applyProductPatch, applyProductPatchSafe } from "../../src/main/operations/product-patch.js";
 import {
   normalisePresentation,
   normaliseItinerary,
@@ -248,4 +248,40 @@ test("应用产品 patch 后 recommendations 与 activities 字段仍存在", ()
   assert.deepEqual(day.activities, [
     { time: "09:00", title: "晋祠博物馆", detail: "参观古建", type: "visit" },
   ]);
+});
+
+test("安全应用补丁会跳过异常片段并保留可用更新", () => {
+  const product = {
+    itinerary: [day(1)],
+    basicInfo: { meetingCity: "太原" },
+  };
+  const result = applyProductPatchSafe(product, [
+    { op: "replace", path: "/itinerary/9", value: day(9) },
+    { op: "add", path: "/basicInfo/subtitle", value: "两天私家团" },
+  ]);
+
+  assert.equal(result.applied, true);
+  assert.equal(result.product.basicInfo?.subtitle, "两天私家团");
+  assert.equal((result.product.itinerary as Array<Record<string, unknown>>).length, 1);
+});
+
+test("安全应用补丁同值写入仍计为成功，避免误判为无落盘", () => {
+  const product = { basicInfo: { subtitle: "太原回合3" } };
+  const result = applyProductPatchSafe(product, [
+    { op: "replace", path: "/basicInfo/subtitle", value: "太原回合3" },
+  ]);
+
+  assert.equal(result.applied, true);
+  assert.equal(result.product.basicInfo?.subtitle, "太原回合3");
+});
+
+test("安全应用补丁若全为失败操作，返回原产品并标记未应用", () => {
+  const product = { basicInfo: { meetingCity: "太原" }, itinerary: [] };
+  const result = applyProductPatchSafe(product, [
+    { op: "replace", path: "/itinerary/9", value: { day: 1 } },
+    { op: "add", path: "__proto__/bad", value: 1 },
+  ]);
+
+  assert.equal(result.applied, false);
+  assert.deepEqual(result.product, product);
 });

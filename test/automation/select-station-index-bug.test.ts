@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ctripPath = path.join(__dirname, "../../src/main/automation/ctrip/ctrip.ts");
+const ctripPath = path.join(__dirname, "../../src/main/automation/ctrip/itinerary/stations.ts");
 
 test("selectStationAddress 弹窗 input 契约：airport=0, train=1", async () => {
   const src = await fs.readFile(ctripPath, "utf8");

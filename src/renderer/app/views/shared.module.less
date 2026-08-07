@@ -144,6 +144,19 @@
 .passInputWrap { position: relative; }
 .passInputWrap .input { padding-right: 44px; }
 
+/* 密码类型输入框的内置可见性切换按钮：绝对定位到 input 右内侧。
+ * 之前没有这一条，按钮流式排到 input 下方独立成块，视觉双层 + 错位。 */
+.passInputWrap .iconBtn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  color: var(--muted-foreground);
+}
+.passInputWrap .iconBtn:hover { background: var(--muted); color: var(--foreground); }
+
 .dot {
   width: 7px;
   height: 7px;

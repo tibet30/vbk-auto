@@ -1,0 +1,74 @@
+/* VBK Desktop — review summary: 任务详情 footer + hint */
+
+.taskHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px var(--pad);
+  border-top: 1px solid var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  flex: 0 0 auto;
+}
+
+.taskDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px var(--pad);
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--ai-teal) 4%, var(--surface));
+  flex: 0 0 auto;
+}
+
+.taskDetailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.taskDetailTitle {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskDetailText {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  line-height: 1.5;
+}
+
+.taskDetailInput {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 8px 10px;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.taskDetailInput:focus {
+  outline: 0;
+  border-color: var(--ai-teal);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-teal) 18%, transparent);
+}
+
+.taskDetailActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}

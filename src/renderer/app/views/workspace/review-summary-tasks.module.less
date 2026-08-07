@@ -1,0 +1,101 @@
+/* VBK Desktop — review summary: 核查任务 list */
+
+.taskList {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+}
+
+.taskRow {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.taskRow:hover { background: var(--muted); }
+
+.taskRow[data-active='true'] {
+  border-color: var(--ai-teal);
+  background: color-mix(in srgb, var(--ai-teal) 8%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ai-teal) 30%, transparent);
+}
+
+.taskRow[data-done='true'] { opacity: 0.7; }
+
+.taskMarker {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #fffbeb;
+  color: var(--warning);
+  flex: 0 0 auto;
+}
+
+.taskRow[data-done='true'] .taskMarker {
+  background: #f0fdf4;
+  color: var(--success);
+}
+
+.taskBody {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.taskLabel {
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskDetail {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskType {
+  height: 18px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.taskType[data-type='vbk'] {
+  background: color-mix(in srgb, var(--ai-teal) 12%, var(--surface));
+  color: var(--ai-teal);
+}
+
+.taskType[data-type='web'] {
+  background: color-mix(in srgb, var(--link) 10%, var(--surface));
+  color: var(--link);
+}
+
+.taskType[data-type='cost'] {
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  color: var(--warning);
+}

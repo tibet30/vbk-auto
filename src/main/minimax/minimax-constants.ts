@@ -28,7 +28,11 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
 const nonEmptyText = z.string().trim().min(1);
 
 export class MiniMaxServiceError extends Error {
-  constructor(public readonly code: string, message: string) { super(message); }
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly details?: string,
+  ) { super(message); }
 }
 
 export const writablePatchPrefixes = [

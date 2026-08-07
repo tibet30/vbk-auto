@@ -2,21 +2,95 @@
   position: absolute;
   left: calc(100% + 10px);
   bottom: 0;
-  width: 220px;
-  padding: 10px;
+  width: 224px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
   box-shadow: var(--shadow-2);
   z-index: 40;
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.accountPopover strong { display: block; }
-.accountPopover small { display: block; }
+/* 头部：圆形头像 + 标题/账号名，对齐更紧凑 */
+.popoverHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.popoverAvatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ai-teal) 12%, var(--surface));
+  color: var(--ai-teal);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 28%, var(--border));
+}
+
+.popoverHeadBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+}
 
 .popoverKicker {
   color: var(--muted-foreground);
-  font-size: var(--fs-xs);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  line-height: 1;
 }
+
+.popoverName {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--foreground);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 主操作：占满宽度，仍是标准 .btn 但取消右侧圆角偏移（popover 边距 8px） */
+.popoverAction {
+  width: 100%;
+  justify-content: center;
+}
+
+/* 底部登出：轻量文字链接样式，不抢主要操作 */
+.popoverLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  border-radius: 6px;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.popoverLink:hover:not(:disabled) {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 6%, transparent);
+}
+
+.popoverLink:disabled { opacity: 0.5; cursor: not-allowed; }

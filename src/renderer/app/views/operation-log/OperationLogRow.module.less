@@ -5,28 +5,39 @@
   flex-direction: column;
   border-top: 1px solid var(--border);
   background: var(--surface);
-  transition: background 160ms ease;
+  transition: background 160ms ease, box-shadow 160ms ease;
 }
 
 .opRow:first-child { border-top: 0; }
 
 .opRow:hover { background: #fcfcfc; }
 
-.opRow[data-state='failed'] { box-shadow: inset 3px 0 0 var(--destructive); }
-.opRow[data-state='succeeded'] { box-shadow: inset 3px 0 0 var(--success); }
-.opRow[data-state='skipped'] { box-shadow: inset 3px 0 0 var(--subtle); }
-.opRow[data-state='running'] { box-shadow: inset 3px 0 0 var(--ai-teal); }
+.opRow[data-state='failed'] {
+  background: color-mix(in srgb, var(--destructive) 4%, var(--surface));
+}
+.opRow[data-state='failed']:hover {
+  background: color-mix(in srgb, var(--destructive) 7%, var(--surface));
+}
+.opRow[data-state='running'] {
+  background: color-mix(in srgb, var(--ai-teal) 3%, var(--surface));
+}
+
+/* 状态条：失败/运行加粗到 4px，让重点状态一眼可辨 */
+.opRow[data-state='failed']    { box-shadow: inset 4px 0 0 var(--destructive); }
+.opRow[data-state='succeeded']  { box-shadow: inset 3px 0 0 var(--success); }
+.opRow[data-state='skipped']    { box-shadow: inset 3px 0 0 var(--subtle); }
+.opRow[data-state='running']    { box-shadow: inset 4px 0 0 var(--ai-teal); }
 
 .opRowMain {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  padding: 12px 14px;
+  padding: 13px 14px;
 }
 
 @media (max-width: 720px) {
-  .opRowMain { grid-template-columns: 1fr; gap: 8px; padding: 12px; }
+  .opRowMain { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
 }
 
 .opRowLead {
@@ -56,6 +67,9 @@
   white-space: nowrap;
 }
 
+/* 失败行的操作名加重一档，方便扫读 */
+.opRow[data-state='failed'] .opRowName { font-weight: 600; }
+
 .opRowTypeTag {
   display: inline-flex;
   align-items: center;
@@ -80,7 +94,7 @@
 }
 
 .opRowMetaLine {
-  margin-top: 4px;
+  margin-top: 5px;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -102,15 +116,48 @@
 
 .opMetaSep { color: var(--border-strong); user-select: none; }
 
+/* target 现在是按钮：可点击复制 + 颜色加深。保持 monospace 便于识别 CSS 选择器 */
 .opMetaTarget {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 280px;
+  padding: 1px 6px 1px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: 11px;
-  color: var(--subtle);
-  max-width: 240px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.opMetaTarget:hover {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+.opMetaTarget:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.opMetaTargetText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
+
+.opMetaTargetCopyIcon,
+.opMetaTargetCopied { color: var(--subtle); flex-shrink: 0; }
+.opMetaTarget:hover .opMetaTargetCopyIcon { color: var(--muted-foreground); }
+.opMetaTarget:hover .opMetaTargetCopied { color: var(--success); }
 
 /* Right column: status + time + duration + actions */
 .opRowMetaCol {
@@ -193,21 +240,82 @@
 .opRowActions {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   justify-self: end;
 }
 
+/* 文字版按钮：比纯图标更明确，宽度仍然紧凑（不打断右侧元信息列） */
+.opRowBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.opRowBtn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+.opRowBtn:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.opRowBtn svg { color: inherit; }
+
+/* 失败行的"重试"按钮做一次颜色提示，让"先看这里"的指引更直接 */
+.opRow[data-state='failed'] .opRowBtn:first-of-type {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 28%, var(--border));
+}
+.opRow[data-state='failed'] .opRowBtn:first-of-type:hover {
+  background: color-mix(in srgb, var(--destructive) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--destructive) 48%, var(--border));
+  color: var(--destructive);
+}
+
+/* 仅图标的"展开/收起"切换按钮，保持 26×26 方形不抢视线 */
+.opRowToggle {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  background: transparent;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.opRowToggle:hover { background: var(--muted); color: var(--foreground); }
+.opRowToggle:focus-visible { border-color: var(--border-strong); }
+.opRowToggle[aria-expanded='true'] { background: var(--muted); color: var(--foreground); }
+
 /* opIconBtn lives in shared.module.less */
 
-/* Error message — collapsed by default */
+/* 错误消息区：title + meta + copy 头部 + pre 主体 */
 .opRowError {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 8px;
-  padding: 0 14px 12px 48px;
-  color: var(--muted-foreground);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 14px 48px;
   font-size: var(--fs-xs);
   animation: row-confirmed-flash 200ms ease-out;
+}
+
+@media (max-width: 720px) {
+  .opRowError { padding: 0 12px 12px 12px; }
 }
 
 .opRowError[data-state='block'] { color: color-mix(in srgb, var(--destructive) 70%, var(--foreground)); }
@@ -215,9 +323,68 @@
 .opRowError[data-state='ai']    { color: color-mix(in srgb, var(--ai-teal) 70%, var(--foreground)); }
 .opRowError[data-state='skip']  { color: var(--muted-foreground); }
 
+.opRowErrorHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.opRowErrorTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 11px;
+  color: inherit;
+  letter-spacing: 0.01em;
+}
+
+.opRowErrorMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+
+.opRowErrorMetaSep { color: var(--border-strong); user-select: none; }
+
+.opRowErrorCopy {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.opRowErrorCopy:hover { background: var(--muted); color: var(--foreground); border-color: var(--border-strong); }
+.opRowErrorCopy:focus-visible { outline: none; border-color: var(--border-strong); }
+
+/* 失败行的复制按钮使用更显眼的红边，方便直接复制给同事 */
+.opRow[data-state='failed'] .opRowErrorCopy {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 28%, var(--border));
+}
+.opRow[data-state='failed'] .opRowErrorCopy:hover {
+  background: color-mix(in srgb, var(--destructive) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--destructive) 48%, var(--border));
+}
+
 .opRowErrorText {
   margin: 0;
-  padding: 8px 10px;
+  padding: 9px 10px;
   background: var(--muted);
   border-radius: 6px;
   font-family: var(--font-mono);
@@ -227,6 +394,8 @@
   white-space: pre-wrap;
   word-break: break-word;
   border: 1px solid var(--border);
+  max-height: 240px;
+  overflow: auto;
 }
 
 .opRowError[data-state='block'] .opRowErrorText {

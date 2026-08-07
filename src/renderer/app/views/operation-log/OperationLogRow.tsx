@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FileWarning, RefreshCw, ScrollText } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, ExternalLink, FileWarning, RefreshCw, ScrollText } from "lucide-react";
 import { useState } from "react";
 import type { OperationLogEntry } from "../../../../shared/contracts.js";
 import shared from "../shared.module.less";
@@ -40,6 +40,34 @@ function formatAbsolute(iso: string): string {
   });
 }
 
+/** 复制纯文本。Electron 渲染进程里 navigator.clipboard 通常可用；保留 textarea
+ * fallback，避免某些环境 clipboard 不可用时按钮毫无反应。 */
+async function copyText(value: string): Promise<boolean> {
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // 忽略并走 fallback
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 const STATUS_LABEL = {
   succeeded: "成功",
   failed: "失败",
@@ -62,6 +90,11 @@ function typeState(entry: OperationLogEntry): "ok" | "fail" | "skip" | "run" | "
   return "neutral";
 }
 
+function stageLabel(entry: OperationLogEntry): string | null {
+  if (!entry.stage) return null;
+  return entry.phase ? `${entry.stage} / ${entry.phase}` : entry.stage;
+}
+
 export function OperationLogRow({
   entry,
   canRetry,
@@ -74,8 +107,18 @@ export function OperationLogRow({
   onShowDetail: (entry: OperationLogEntry) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState<"target" | "message" | null>(null);
   const hasMessage = Boolean(entry.message);
   const tone = STATUS_TONE[entry.status];
+
+  async function handleCopy(value: string, slot: "target" | "message") {
+    const ok = await copyText(value);
+    if (!ok) return;
+    setCopied(slot);
+    window.setTimeout(() => {
+      setCopied((current) => (current === slot ? null : current));
+    }, 1400);
+  }
 
   return (
     <article className={styles.opRow} data-state={entry.status}>
@@ -107,9 +150,20 @@ export function OperationLogRow({
               {entry.target && (
                 <>
                   <span className={styles.opMetaSep}>·</span>
-                  <span className={`${styles.opMetaItem} ${styles.opMetaTarget}`} title={entry.target}>
-                    {entry.target}
-                  </span>
+                  <button
+                    type="button"
+                    className={styles.opMetaTarget}
+                    onClick={() => void handleCopy(entry.target!, "target")}
+                    title={`点击复制：${entry.target}`}
+                    aria-label={`复制目标选择器：${entry.target}`}
+                  >
+                    <span className={styles.opMetaTargetText}>{entry.target}</span>
+                    {copied === "target" ? (
+                      <Check size={11} aria-hidden="true" className={styles.opMetaTargetCopied} />
+                    ) : (
+                      <Copy size={11} aria-hidden="true" className={styles.opMetaTargetCopyIcon} />
+                    )}
+                  </button>
                 </>
               )}
             </div>
@@ -135,27 +189,29 @@ export function OperationLogRow({
             {canRetry && (
               <button
                 type="button"
-                className={shared.opIconBtn}
+                className={styles.opRowBtn}
                 onClick={() => onRetry(entry)}
                 aria-label={`重试「${entry.name}」`}
                 title="重试这一步"
               >
-                <RefreshCw size={13} />
+                <RefreshCw size={12} aria-hidden="true" />
+                <span>重试</span>
               </button>
             )}
             <button
               type="button"
-              className={shared.opIconBtn}
+              className={styles.opRowBtn}
               onClick={() => onShowDetail(entry)}
-              aria-label={`查看「${entry.name}」详情`}
-              title="查看详情"
+              aria-label={`打开「${entry.name}」关联项目并跳转到对应页面`}
+              title="打开该项目并跳转到对应的 VBK 页面"
             >
-              <ChevronRight size={13} />
+              <ExternalLink size={12} aria-hidden="true" />
+              <span>详情</span>
             </button>
             {hasMessage && (
               <button
                 type="button"
-                className={shared.opIconBtn}
+                className={styles.opRowToggle}
                 onClick={() => setExpanded((value) => !value)}
                 aria-label={expanded ? "收起错误消息" : "展开错误消息"}
                 aria-expanded={expanded}
@@ -170,7 +226,37 @@ export function OperationLogRow({
 
       {hasMessage && expanded && (
         <div className={styles.opRowError} role="note" data-state={tone}>
-          <FileWarning size={13} aria-hidden="true" />
+          <header className={styles.opRowErrorHead}>
+            <span className={styles.opRowErrorTitle}>
+              <FileWarning size={12} aria-hidden="true" />
+              错误消息
+            </span>
+            <span className={styles.opRowErrorMeta}>
+              <time dateTime={entry.startedAt}>{formatAbsolute(entry.startedAt)}</time>
+              {stageLabel(entry) && (
+                <>
+                  <span className={styles.opRowErrorMetaSep}>·</span>
+                  <span>{stageLabel(entry)}</span>
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              className={styles.opRowErrorCopy}
+              onClick={() => void handleCopy(entry.message!, "message")}
+              aria-label="复制错误消息"
+            >
+              {copied === "message" ? (
+                <>
+                  <Check size={11} aria-hidden="true" /> 已复制
+                </>
+              ) : (
+                <>
+                  <Copy size={11} aria-hidden="true" /> 复制
+                </>
+              )}
+            </button>
+          </header>
           <pre className={styles.opRowErrorText}>{entry.message}</pre>
         </div>
       )}

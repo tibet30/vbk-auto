@@ -180,7 +180,11 @@ export function useAppStateDerived(state: AppStateBase) {
   const isVbkLoggedIn = Boolean(vbkLogin?.loggedIn);
   const loggedAccounts = isVbkLoggedIn ? (vbkLogin?.accounts?.length ? vbkLogin.accounts : [vbkLogin?.accountName || "已登录账号"]) : [];
   const currentAccountName = loggedAccounts[0] || "未登录";
-  const accountInitial = currentAccountName === "未登录" ? "未" : currentAccountName.slice(0, 1).toUpperCase();
+  // 头像缩写：优先账号名最后一个数字（vbk_671205 → 5），没有数字时退到首字符。
+  // 之前是 slice(0,1).toUpperCase()，对 vbk_xxx 格式总是 "V"，识别度低。
+  const accountInitial = currentAccountName === "未登录"
+    ? "未"
+    : currentAccountName.match(/\d(?!.*\d)/)?.[0] ?? currentAccountName.slice(0, 1).toUpperCase();
 
   const browserPlaceholderTitle = isVbkLoggedIn ? "VBK 已登录" : "在 VBK 中完成核查";
   const browserPlaceholderText = isVbkLoggedIn

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
   AccountFixedInfo,
   AccountFixedInfoField,
@@ -15,11 +15,39 @@ import type {
 } from "../../../shared/contracts.js";
 import { api, emptyReadiness, initialInput } from "../helpers";
 
+type View = "workspace" | "projects" | "settings" | "operation-log";
+const VIEW_STORAGE_KEY = "vbk:view";
+const MINIMAX_TEST_KEY = "vbk:minimaxTest";
+
+function readInitialView(): View {
+  try {
+    const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+    if (raw === "workspace" || raw === "projects" || raw === "settings" || raw === "operation-log") return raw;
+  } catch { /* 某些 Electron 环境下 localStorage 不可用 */ }
+  return "workspace";
+}
+
+function readInitialMiniMaxTest(): MiniMaxConnectionTest | null {
+  try {
+    const raw = localStorage.getItem(MINIMAX_TEST_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof (parsed as any)?.connected === "boolean" && typeof (parsed as any)?.message === "string") {
+      return parsed as MiniMaxConnectionTest;
+    }
+  } catch {}
+  return null;
+}
+
 export function useAppStateBase() {
   // 在 Electron 预加载脚本生效之前，window.vbk 可能是 undefined；
   // 路由层靠 apiAvailable 决定是否调用主进程，避免初始化时报警告。
   const apiAvailable = Boolean(api());
-  const [view, setView] = useState<"workspace" | "projects" | "settings" | "operation-log">("workspace");
+  const [view, setViewRaw] = useState<View>(readInitialView);
+  const setView = useCallback((next: View) => {
+    try { localStorage.setItem(VIEW_STORAGE_KEY, next); } catch { /* 忽略 */ }
+    setViewRaw(next);
+  }, []);
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -43,6 +71,9 @@ export function useAppStateBase() {
   const [fixedInfoSchema, setFixedInfoSchema] = useState<AccountFixedInfoField[]>([]);
   const [fixedInfoDraft, setFixedInfoDraft] = useState<Partial<Record<string, AccountFixedInfoValue>>>({});
   const [fixedInfoSaving, setFixedInfoSaving] = useState(false);
+  // 管家联系人选择器（懒加载，进入编辑器不预拉）。
+  const [butlerPickerOpen, setButlerPickerOpen] = useState(false);
+  const [currentProviderId, setCurrentProviderId] = useState<number | null>(null);
   const [contactCards, setContactCards] = useState<ProviderContactCard[]>([]);
   const [contactCardsLoading, setContactCardsLoading] = useState(false);
   const [contactCardSearch, setContactCardSearch] = useState("");
@@ -75,7 +106,14 @@ export function useAppStateBase() {
   const [showMiniMaxApiKey, setShowMiniMaxApiKey] = useState(false);
   const [savingMiniMax, setSavingMiniMax] = useState(false);
   const [testingMiniMax, setTestingMiniMax] = useState(false);
-  const [miniMaxTest, setMiniMaxTest] = useState<MiniMaxConnectionTest | null>(null);
+  const [miniMaxTest, setMiniMaxTestRaw] = useState<MiniMaxConnectionTest | null>(readInitialMiniMaxTest);
+  const setMiniMaxTest = useCallback((next: MiniMaxConnectionTest | null) => {
+    try {
+      if (next) localStorage.setItem(MINIMAX_TEST_KEY, JSON.stringify(next));
+      else localStorage.removeItem(MINIMAX_TEST_KEY);
+    } catch {}
+    setMiniMaxTestRaw(next);
+  }, []);
 
   // 每日行程可展开卡片：仅第 1 天默认展开；切换项目时重置。
   const [expandedDayIndex, setExpandedDayIndex] = useState<number | null>(0);
@@ -168,6 +206,10 @@ export function useAppStateBase() {
     setContactCardsLoading,
     contactCardSearch,
     setContactCardSearch,
+    butlerPickerOpen,
+    setButlerPickerOpen,
+    currentProviderId,
+    setCurrentProviderId,
     vbkLogin,
     setVbkLogin,
     checkingVbkLogin,

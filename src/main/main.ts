@@ -7,7 +7,7 @@ import {
   MiniMaxServiceError,
   isCoverResearchTaskSatisfiedByProduct,
 } from "./minimax/minimax.js";
-import { applyProductPatch } from "./operations/product-patch.js";
+import { applyProductPatchSafe } from "./operations/product-patch.js";
 import { automationBlockers, parseProduct, productSchema } from "./automation/schema/schema.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
 import { DraftAutomation } from "./automation/automation.js";
@@ -19,6 +19,13 @@ import { applyManualReviewField } from "./operations/manual-review-field.js";
 import { loadOperationLog } from "./operations/operation-log-store.js";
 import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 import { VbkDatabaseError, projectNotFound } from "./infrastructure/db-errors.js";
+import {
+  classifyMiniMaxError,
+  extractMiniMaxFailureReason,
+  normalizeFailureMessage,
+  stripRetryHintTail,
+  toRetryHint,
+} from "./minimax/minimax-error-handling.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const isDev = !app.isPackaged;
@@ -184,24 +191,39 @@ function registerIpc() {
       const history = project.messages.filter((item) => (item.role === "user" || item.role === "assistant") && item.taskStatus !== "failed" && item.taskStatus !== "running");
       const settings = getSettings();
       const service = new MiniMaxService({ apiKey: apiKey(), baseUrl: settings.minimaxBaseUrl, model: settings.minimaxModel });
-      // 每轮先做一次配置有效性校验，避免把明显连接/鉴权问题交给主模型流程重复误报。
-      await service.testConnection();
       const itinerary = Array.isArray(project.product.itinerary) ? project.product.itinerary : [];
       const isInitialDraft = !itinerary.length && /生成|第一版|方案/.test(message);
       const retryableCodes = new Set(["provider_connection", "provider_timeout", "provider_error", "provider_rate_limit", "invalid_model_output", "empty_model_output"]);
       const isRetryable = (error: unknown) => {
-        const code = (error as { code?: string })?.code;
-        return code ? retryableCodes.has(code) : false;
+        const code = classifyMiniMaxError(error);
+        return retryableCodes.has(code);
       };
-      const maxRetryAttempts = 4;
+      const maxRetryAttempts = 5;
+      let connectionChecked = false;
       const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       let response: Awaited<ReturnType<MiniMaxService["reply"]>> | undefined;
-      const repairPrompt = isInitialDraft
-        ? "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为首次生成返回至少一个可写入的 patch；不得带说明文字。"
-        : "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），不得带说明文字。";
+      const repairPrompt = "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。";
+      let lastFailureReason = "";
       const trimmedHistory = history.slice(-12);
+      const requiresWritablePatch =
+        isInitialDraft
+        || /继续|补齐|补充|调整|更新|继续生成|继续补充|再次生成|重试|生成/.test(message)
+        || /修正|重写|优化|重新/.test(message)
+        || message.includes("上一次返回未通过结构化校验");
       for (let attempt = 1; attempt <= maxRetryAttempts; attempt++) {
-        const requestMessage = attempt === 1 ? message : `${message}\n\n${repairPrompt}`;
+        if (!connectionChecked) {
+          await service.testConnection();
+          connectionChecked = true;
+        }
+        const requestMessage = attempt === 1
+          ? message
+          : [
+            message,
+            repairPrompt,
+            lastFailureReason ? `上一次返回原因：${lastFailureReason}` : "",
+          ]
+            .filter((item) => item)
+            .join("\n\n");
         const attemptHistory = attempt === 1 ? trimmedHistory : trimmedHistory.slice(-4);
         try {
           response = await service.reply({
@@ -210,32 +232,46 @@ function registerIpc() {
             history: attemptHistory.map((item) => ({ role: item.role, content: item.content })),
           });
           break;
-        } catch (error) {
+          } catch (error) {
           if (attempt >= maxRetryAttempts || !isRetryable(error)) throw error;
+          lastFailureReason = toRetryHint(extractMiniMaxFailureReason(error) || ((error as { message?: string })?.message ?? ""));
           try {
-            console.warn("[MiniMax] planning request failed, run connectivity check before retry", {
-              attempt,
-              errorCode: (error as { code?: string })?.code,
-            });
-            await service.testConnection();
+            const retryCode = classifyMiniMaxError(error);
+            const shouldProbeConnectivity = new Set(["provider_connection", "provider_timeout", "provider_error"]).has(retryCode);
+            if (shouldProbeConnectivity) {
+              connectionChecked = false;
+              console.warn("[MiniMax] planning request failed, run connectivity check before retry", {
+                attempt,
+                errorCode: (error as { code?: string })?.code,
+              });
+            }
           } catch (probeError) {
             throw probeError;
           }
           await wait(350 * attempt);
         }
       }
-      if (!response) throw new Error("MiniMax 未返回有效响应。");
-      const next = response.patch?.length ? applyProductPatch(project.product, response.patch) : project.product;
+      // 如果服务返回空响应兜底，统一按结构化内容异常处理，避免错误地提示网络故障。
+      if (!response) {
+        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回可写入的产品方案，请重试。");
+      }
+      const responsePatch = response.patch ?? [];
+      const patchResult = responsePatch.length ? applyProductPatchSafe(project.product, responsePatch) : { product: project.product, applied: false };
+      const next = patchResult.product;
+      if (requiresWritablePatch && (responsePatch.length === 0 || !patchResult.applied)) {
+        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回可写入的产品方案，请重试。");
+      }
       db.updateProduct(projectId, next); db.updateMessageStatus(projectId, userMessageId, "succeeded"); db.addMessage(projectId, "assistant", response.reply, "succeeded");
       for (const task of response.researchTasks || []) db.addResearchTask(projectId, task);
-  } catch (error) {
-      const errorCode = error instanceof MiniMaxServiceError ? error.code : "provider_error";
-      const reason = error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。";
-      const finalMessage = errorCode === "invalid_model_output" || errorCode === "empty_model_output"
-        ? `${reason}`
-        : `${reason} 请检查连接或配置后重试。`;
+    } catch (error) {
+      const reason = extractMiniMaxFailureReason(error) || (error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。");
+      const errorCode = classifyMiniMaxError(error);
+      const finalMessage = normalizeFailureMessage(errorCode, reason);
+      const finalStructuredMessage = /返回的数据格式无法用于产品方案|MiniMax 返回的数据格式无法用于产品方案/i.test(finalMessage)
+        ? stripRetryHintTail(finalMessage)
+        : finalMessage;
       db.updateMessageStatus(projectId, userMessageId, "failed");
-      db.addMessage(projectId, "assistant", `本轮没有获得 AI 回复：${finalMessage}`, "failed");
+      db.addMessage(projectId, "assistant", `本轮没有获得 AI 回复：${finalStructuredMessage}`, "failed");
     }
     emitProject(db.getProject(projectId)!);
   }

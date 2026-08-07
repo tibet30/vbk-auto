@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Plus, Settings } from "lucide-react";
+import { BriefcaseBusiness, FolderOpen, Plus, Settings } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { WorkbenchModule } from "../../helpers";
@@ -7,6 +7,7 @@ import styles from "./index.module.less";
 export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
   const { projects, startCreateProduct, openProductList } = model;
   const totalProjects = projects.length;
+  const hasProjects = totalProjects > 0;
 
   return <section className={styles.workspaceHome}>
     <header className={styles.workspaceHomeHead}>
@@ -15,24 +16,28 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
     </header>
     <div className={styles.workspaceHomeGrid}>
       <WorkbenchModule
-        icon={<BriefcaseBusiness size={16} />}
+        icon={<Plus size={16} />}
         title="新建项目"
-        detail={totalProjects > 0 ? `当前已建立 ${totalProjects} 个项目，继续新增一个` : "先创建第一个产品项目"}
-        state="ready"
+        detail={hasProjects ? `当前已建立 ${totalProjects} 个项目，继续新增一个。` : "先创建第一个产品项目，从目的地与天数开始。"}
+        state="emphasis"
+        stateLabel="推荐"
+        hint="3 个字段起步"
         action={
           <button className={`${shared.btn} ${shared.btnSm}`} data-variant="primary" onClick={startCreateProduct}>
-            <Plus size={14} /> 创建项目
+            创建项目
           </button>
         }
       />
       <WorkbenchModule
-        icon={<BriefcaseBusiness size={16} />}
+        icon={<FolderOpen size={16} />}
         title="项目管理"
-        detail="浏览全部项目，打开历史记录并继续处理。"
-        state={totalProjects > 0 ? "ready" : "todo"}
+        detail={hasProjects ? "浏览全部项目，打开历史记录并继续处理。" : "还没有任何项目，新建一个后会出现在这里。"}
+        state={hasProjects ? "ready" : "todo"}
+        stateLabel={hasProjects ? "可用" : "暂无"}
+        hint={hasProjects ? `共 ${totalProjects} 个项目` : "—"}
         action={
-          <button className={`${shared.btn} ${shared.btnSm}`} onClick={openProductList}>
-            <BriefcaseBusiness size={14} /> 查看项目
+          <button className={`${shared.btn} ${shared.btnSm}`} onClick={openProductList} disabled={!hasProjects}>
+            查看项目
           </button>
         }
       />
@@ -41,9 +46,17 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
         title="VBK / MiniMax 设置"
         detail="维护登录与 API Key，确保 AI 与浏览器联动可用。"
         state="todo"
+        stateLabel="维护"
+        hint="登录 + API Key"
         action={
-          <button className={`${shared.btn} ${shared.btnSm}`} onClick={() => { model.setView("settings"); model.setProject(null); }}>
-            <Settings size={14} /> 前往设置
+          <button
+            className={`${shared.btn} ${shared.btnSm}`}
+            onClick={() => {
+              model.setView("settings");
+              model.setProject(null);
+            }}
+          >
+            前往设置
           </button>
         }
       />

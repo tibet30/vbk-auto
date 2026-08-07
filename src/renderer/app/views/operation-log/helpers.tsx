@@ -19,15 +19,21 @@ export function SummaryCard({
   value,
   tone,
   sublabel,
+  onClick,
+  active,
 }: {
   icon: ReactNode;
   label: string;
   value: number;
   tone: "ok" | "block" | "skip" | "neutral";
   sublabel: string;
+  /** 提供后整张卡片变成可点击的过滤快捷入口。 */
+  onClick?: () => void;
+  /** 当前已选中该过滤态时高亮。 */
+  active?: boolean;
 }) {
-  return (
-    <div className={summaryStyles.opSummaryCard} data-tone={tone}>
+  const body = (
+    <>
       <span className={summaryStyles.opSummaryIcon} aria-hidden="true">
         {icon}
       </span>
@@ -36,8 +42,27 @@ export function SummaryCard({
         <strong className={summaryStyles.opSummaryValue}>{value}</strong>
         <span className={summaryStyles.opSummarySub}>{sublabel}</span>
       </div>
-    </div>
+    </>
   );
+  const sharedProps = {
+    className: summaryStyles.opSummaryCard,
+    "data-tone": tone,
+    "data-interactive": onClick ? "true" : undefined,
+    "data-active": active ? "true" : undefined,
+  } as const;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        {...sharedProps}
+        onClick={onClick}
+        aria-pressed={Boolean(active)}
+      >
+        {body}
+      </button>
+    );
+  }
+  return <div {...sharedProps}>{body}</div>;
 }
 
 export function OperationLogSkeleton() {

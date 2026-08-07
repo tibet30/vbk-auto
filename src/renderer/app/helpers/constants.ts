@@ -211,6 +211,31 @@ export const VBK_NAV_SECTIONS: VbkNavSection[] = [
   },
 ];
 
+// 操作日志的 stage 名 → VBK_NAV_SECTIONS 的 key。
+// 自动化日志记录阶段时使用带 Info 后缀的命名（basicInfo），而导航 section
+// key 是 basic；统一在这里归一，让「详情」按钮能把 VBK 浏览器导航到对应页面。
+export const OPERATION_STAGE_TO_SECTION: Record<string, string> = {
+  basicInfo: "basic",
+  basic: "basic",
+  saleControl: "saleControl",
+  presentation: "presentation",
+  itinerary: "itinerary",
+  package: "package",
+  pricingInventory: "pricingInventory",
+  priceInventory: "pricingInventory",
+  hotelResource: "resource",
+  vehicleResource: "resource",
+  terms: "terms",
+};
+
+/** 把日志条目的 stage 映射到可导航的 VBK section；无法映射时返回 undefined。 */
+export function operationStageToSection(stage: string | undefined): VbkNavSection | undefined {
+  if (!stage) return undefined;
+  const key = OPERATION_STAGE_TO_SECTION[stage];
+  if (!key) return undefined;
+  return VBK_NAV_SECTIONS.find((section) => section.key === key);
+}
+
 export type AutomationPhaseRow = { phase: string; status: "pending" | "running" | "completed" | "failed" };
 // 使用 PhaseRecovery 的结构性子集，避免依赖完整类型；state 允许是任意
 // RecoveryState（含 running/advising/retrying/needs_user/completed）。

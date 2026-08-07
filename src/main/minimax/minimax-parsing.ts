@@ -33,7 +33,12 @@ export function unwrapResponse(value: unknown): unknown {
   if (typeof record.reply === "string") return value;
   for (const key of ["data", "result", "response", "output"]) {
     const nested = record[key];
-    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    if (typeof nested === "string") {
+      const parsed = parseRecoveredJson(nested);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof (parsed as Record<string, unknown>).reply === "string") {
+        return parsed;
+      }
+    } else if (nested && typeof nested === "object" && !Array.isArray(nested)) {
       const unwrapped = unwrapResponse(nested);
       if (unwrapped && typeof unwrapped === "object" && typeof (unwrapped as Record<string, unknown>).reply === "string") return unwrapped;
     }
@@ -116,10 +121,15 @@ function unstructured(value: string): ParsedMinimaxResponse {
 
 function pickBestStructuredResponse(responses: ParsedMinimaxResponse[]): ParsedMinimaxResponse | undefined {
   if (!responses.length) return undefined;
+  console.warn("[DBG-pickBest] candidates=", responses.map((r, i) => ({ i, reply: (r.response.reply ?? "").slice(0, 20), patchLen: r.response.patch?.length ?? 0 })));
   return responses.reduce((best, candidate) => {
     const bestPatchCount = best.response.patch?.length ?? 0;
     const candidatePatchCount = candidate.response.patch?.length ?? 0;
     if (candidatePatchCount !== bestPatchCount) return candidatePatchCount > bestPatchCount ? candidate : best;
+    // 当 patch 数相同时，优先选 reply 不是 "未获取到..." 兜底占位的（真正有内容的 reply）。
+    const bestIsFallback = typeof best.response.reply === "string" && /^未获取到/.test(best.response.reply);
+    const candidateIsFallback = typeof candidate.response.reply === "string" && /^未获取到/.test(candidate.response.reply);
+    if (bestIsFallback !== candidateIsFallback) return candidateIsFallback ? best : candidate;
     return candidate.response.reply.length > best.response.reply.length ? candidate : best;
   });
 }
@@ -288,6 +298,7 @@ function stripReplyValueWrappers(value: string): string {
 }
 
 function parseRecoveredJson(raw: string): unknown | undefined {
+  console.warn("[DBG-prj] called with raw[:80]=", raw.slice(0, 80));
   const withoutTrailingComma = trimTrailingComma(raw);
   const candidates = [
     raw,
@@ -392,16 +403,26 @@ function extractLooseStringValueFromRaw(raw: string, key: string): string | unde
 }
 
 function parseSparseResponse(raw: string): ParsedMinimaxResponse | undefined {
+  const patch = parseLoosePatch(raw);
+  const questions = parseLooseQuestions(raw);
+  const researchTasks = parseLooseResearchTasks(raw);
+  const hasStructuredFields = patch.length + questions.length + researchTasks.length > 0;
+  // 当模型只返回了 patch/questions/researchTasks 而无 reply 字段时，自动补一个 "未获取到正文..." 形式的 reply，
+  // 既保证 AiResponse schema 通过校验，也提示上层这是个不完整的回复。
+  const missingStructured = hasStructuredFields
+    ? `未获取到正文，但已识别到 ${patch.length} 条可写更新、${questions.length} 条待确认、${researchTasks.length} 条核查任务，已记录为纯文本回复。`
+    : "";
   const reply = extractLooseReplyFromRaw(raw)
     ?? extractBareReplyFromText(raw)
+    ?? (hasStructuredFields ? missingStructured : undefined)
     ?? extractPlainReply(raw)
     ?? extractTextFallback(raw);
   if (!reply) return undefined;
   const candidate = {
     reply,
-    patch: parseLoosePatch(raw),
-    questions: parseLooseQuestions(raw),
-    researchTasks: parseLooseResearchTasks(raw),
+    patch,
+    questions,
+    researchTasks,
   };
   const parsed = aiResponseSchema.safeParse(candidate);
   if (parsed.success) return structured(parsed.data);
@@ -598,17 +619,18 @@ function trimTrailingComma(raw: string): string {
 }
 
 export function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompletionMessage): ParsedMinimaxResponse {
-  const toolCalls = message.tool_calls?.filter((call): call is OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall =>
-    call.type === "function" &&
-    call.function.name === "submit_product_update" &&
-    typeof call.function.arguments === "string",
+  const allToolCalls = message.tool_calls?.filter((call): call is OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall =>
+    call.type === "function" && typeof call.function.arguments === "string",
   );
+  const toolCalls = allToolCalls?.filter((call) => call.function.name === "submit_product_update");
   if (toolCalls?.length) {
     let fallbackRaw = "";
     const structuredToolCalls: ParsedMinimaxResponse[] = [];
+    console.warn("[DBG-tc] toolCalls.length=", toolCalls.length, "allToolCalls.length=", allToolCalls?.length ?? 0);
     for (const toolCall of toolCalls) {
       fallbackRaw += `${toolCall.function.arguments}\n`;
       const parsed = parseJson(toolCall.function.arguments);
+      console.warn("[DBG-tc-iter] args[:80]=", toolCall.function.arguments.slice(0, 80), "isStr=", parsed.isStructured, "reply[:30]=", (parsed.response.reply ?? "").slice(0, 30));
       if (parsed.isStructured) structuredToolCalls.push(parsed);
     }
     const sparseFromTools = parseSparseResponse(fallbackRaw);
@@ -653,6 +675,23 @@ export function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompl
     console.warn("[MiniMax] tool-call arguments rejected, fallback to message content", {
       attempts: toolCalls.length,
     });
+  }
+  // 当 tool_call 名字不是 submit_product_update（错位或拼错）时，只有 content 是噪音或不存在时，
+  // 才回退用 tool_call arguments 解析；否则让上层 service 触发重试。
+  const nonOfficialCalls = (message.tool_calls ?? []).filter((call): call is OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall =>
+    call.type === "function"
+    && typeof call.function.arguments === "string"
+    && call.function.name !== "submit_product_update",
+  );
+  const rawContent = typeof message.content === "string" ? message.content : "";
+  const contentIsNoise = /(?:^|\n)\s*(?:event:|data:|\[DONE\]|keep-alive)/.test(rawContent);
+  const contentEmpty = !rawContent.trim();
+  if (nonOfficialCalls.length && (contentIsNoise || contentEmpty)) {
+    const combinedArgs = nonOfficialCalls.map((call) => call.function.arguments).join("\n");
+    const typoParsed = parseJson(combinedArgs);
+    if (typoParsed.isStructured) return typoParsed;
+    const sparseFromTypo = parseSparseResponse(combinedArgs);
+    if (sparseFromTypo) return sparseFromTypo;
   }
   const content = typeof message.content === "string" ? message.content : "";
   return parseJson(content);

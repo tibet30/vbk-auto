@@ -99,6 +99,7 @@ export function AppRail({ model }: { model: AppModel }) {
         {accountMenuOpen && (
           <AccountPopover
             currentAccountName={currentAccountName}
+            accountInitial={accountInitial}
             onSwitchLogin={() => {
               setAccountMenuOpen(false);
               model.openLogin();

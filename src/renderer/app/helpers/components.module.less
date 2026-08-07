@@ -32,18 +32,18 @@
   margin-top: var(--pad);
 }
 
+/* WorkbenchModule — 首页 / 工作台入口卡片。
+ * 三段结构：header(图标 + 标题 + 状态徽章) / 描述 / footer(提示 + 操作)。
+ * 按钮自然宽度，不强行拉伸，避免视觉重心下沉。 */
+
 .moduleCard {
-  min-height: 132px;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
-  padding: var(--pad);
-  display: grid;
-  grid-template-columns: 32px 1fr;
-  grid-template-rows: 1fr auto;
-  gap: 8px 10px;
-  align-items: start;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .moduleCard:hover {
@@ -51,14 +51,11 @@
   box-shadow: var(--shadow-1);
 }
 
-.moduleCard :global(.btn) {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-
-.moduleCard[data-state='ready'] .moduleIcon {
-  color: var(--success);
-  background: #f0fdf4;
+.moduleHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px var(--pad) 10px;
 }
 
 .moduleIcon {
@@ -68,19 +65,98 @@
   place-items: center;
   border-radius: var(--radius-control);
   background: var(--muted);
-  color: var(--warning);
+  color: var(--muted-foreground);
+  flex-shrink: 0;
 }
 
-.moduleCard strong,
-.moduleCard small { display: block; }
+/* 状态色：ready 绿 / todo 琥珀 / emphasis 主品牌色 */
+.moduleCard[data-state='ready'] .moduleIcon {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
+}
 
-.moduleCard strong { font-size: var(--fs-md); }
+.moduleCard[data-state='todo'] .moduleIcon {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
 
-.moduleCard small {
-  margin-top: 3px;
+.moduleCard[data-state='emphasis'] .moduleIcon {
+  color: var(--ai-teal);
+  background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface));
+}
+
+.moduleHeader {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.moduleTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.05px;
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.moduleBadge {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.moduleBadge[data-state='ready'] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface));
+}
+
+.moduleBadge[data-state='todo'] {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.moduleBody {
+  flex: 1 1 auto;
+  padding: 0 var(--pad) 12px;
   font-size: var(--fs-xs);
-  line-height: 1.45;
+  color: var(--muted-foreground);
+  line-height: 1.55;
+}
+
+.moduleFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px var(--pad);
+  border-top: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.moduleHint {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moduleFoot :global(.btn) {
+  flex-shrink: 0;
 }
 
 /* ============================================================

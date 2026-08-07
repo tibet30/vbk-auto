@@ -1,0 +1,224 @@
+/* VBK Desktop — review summary: view-mode tab switcher + JSON viewer
+ * 默认以卡片视图呈现产品审查结果，运营可以切换到 JSON 实时数据视图
+ * 核对原始结构。Tab 切换器和 JSON 阅读器的样式集中在这一个文件里，
+ * 以避免 review-summary.module.less 体积过大。 */
+
+/* ============================================================
+ * View-mode bar — tabs (cards | json) + status pill
+ * ============================================================ */
+
+.modeBar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+
+.modeTabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.modeTab {
+  height: 24px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  white-space: nowrap;
+}
+
+.modeTab:hover {
+  color: var(--foreground);
+}
+
+.modeTab:focus-visible {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 24%, transparent);
+}
+
+.modeTab[data-active='true'] {
+  background: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(9, 9, 11, 0.06);
+}
+
+.modeTab[data-active='true'] svg {
+  color: var(--ai-teal);
+}
+
+.modeBarMeta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* ============================================================
+ * Pane containers — 卡片视图 / JSON 视图 各占满剩余垂直空间并
+ * 独立滚动，避免切换时整列布局发生偏移。
+ * ============================================================ */
+
+.cardsPane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jsonPane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================
+ * JSON view — toolbar + scrollable <pre> body
+ * ============================================================ */
+
+.jsonView {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  background: var(--surface);
+}
+
+.jsonToolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+
+.jsonToolbarTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.jsonToolbarTitle svg {
+  color: var(--ai-teal);
+}
+
+.jsonToolbarMeta {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jsonToolbarSep {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--subtle);
+  flex: 0 0 auto;
+}
+
+.jsonBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px var(--pad) var(--pad);
+  background: color-mix(in srgb, var(--muted) 60%, var(--surface));
+  scrollbar-gutter: stable;
+}
+
+.jsonPre {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+  letter-spacing: 0.005em;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  tab-size: 2;
+  box-shadow: 0 1px 0 rgba(9, 9, 11, 0.03);
+}
+
+.jsonPre code {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+
+.jsonEmpty {
+  margin: 32px auto;
+  max-width: 320px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-card);
+  padding: 28px 24px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.jsonEmpty svg {
+  color: var(--ai-teal);
+  margin-bottom: 6px;
+}
+
+.jsonEmpty strong {
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.jsonEmpty p {
+  margin: 0;
+  line-height: 1.5;
+}

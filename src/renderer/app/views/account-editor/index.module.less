@@ -1,3 +1,7 @@
+/* VBK Desktop — 账号固定信息编辑 modal
+ * 进入时只显示两个字段卡片；管家联系人按需展开 picker。
+ * picker 内：300ms debounce 搜索 + 列表点选。 */
+
 .field {
   display: block;
 }
@@ -66,24 +70,24 @@
 }
 
 /* ============================================================
- * Contact card picker (butler name)
+ * 管家联系人字段
  * ============================================================ */
 
-.contactCardLoading {
-  display: inline-flex;
+.fieldHead {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-control);
-  color: var(--muted-foreground);
-  font-size: var(--fs-sm);
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
-.contactCardLoading svg { animation: spin 900ms linear infinite; }
+.fieldHeadActions {
+  display: inline-flex;
+  gap: 6px;
+}
 
 .contactCardEmpty {
-  padding: 6px 10px;
+  padding: 8px 10px;
   border: 1px dashed var(--border);
   border-radius: var(--radius-control);
   color: var(--muted-foreground);
@@ -98,7 +102,7 @@
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--success) 28%, var(--border));
   border-radius: var(--radius-control);
-  background: #f0fdf4;
+  background: color-mix(in srgb, var(--success) 6%, var(--surface));
 }
 
 .contactCardPicked > span { min-width: 0; }
@@ -117,60 +121,178 @@
   font-family: var(--font-mono);
 }
 
-.contactCardSearch {
+/* ============================================================
+ * Picker（懒加载）
+ * 搜索框与列表统一在一个 card 内，不再各自独立 border/背景，
+ * 让三者看上去是一组联动控件。
+ * ============================================================ */
+
+.contactCardPicker {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 8px;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--surface);
+  overflow: hidden;
 }
 
-.contactCardSearch:focus-within {
-  border-color: var(--border-strong);
-}
-
-.contactCardSearch svg {
-  color: var(--muted-foreground);
-  flex-shrink: 0;
-}
-
-.contactCardSearch :global(.input) {
-  flex: 1 1 auto;
-  border: 0;
-  outline: 0;
-  height: 32px;
-  background: transparent;
-  font-size: var(--fs-sm);
-  padding: 0;
-}
-
-.contactCardList {
-  display: grid;
-  gap: 4px;
-  max-height: 220px;
-  overflow-y: auto;
-}
-
-.contactCardItem {
+.contactCardPickerHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--surface);
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+
+/* 搜索条：嵌在 picker 内部，跟 picker head 共享同一层视觉（无独立 border/圆角），
+ * 通过 hover/focus 的背景 + 底部 inset teal 强调。避免再和 picker 外框套成双层。 */
+.contactCardSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  height: 40px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  position: relative;
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.contactCardSearch:hover { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+
+.contactCardSearch:focus-within {
+  background: color-mix(in srgb, var(--ai-teal) 6%, transparent);
+  box-shadow: inset 0 -2px 0 var(--ai-teal);
+}
+
+.contactCardSearchIcon {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  transition: color 160ms ease;
+}
+
+.contactCardSearch:focus-within .contactCardSearchIcon { color: var(--ai-teal); }
+
+.contactCardSearchInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 全局 :focus-visible 会给 input 加 box-shadow + 圆角，在嵌入式控件里会
+ * 单独凸显成一个圆角矩形。focus 视觉已迁到父级 :focus-within，这里把它抹平。 */
+.contactCardSearchInput:focus,
+.contactCardSearchInput:focus-visible {
+  border: 0;
+  outline: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.contactCardSearchInput::placeholder { color: var(--subtle); }
+
+.contactCardSearchClear {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+  background: transparent;
+  flex-shrink: 0;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.contactCardSearchClear:hover { background: var(--muted); color: var(--foreground); }
+
+.spinner {
+  color: var(--ai-teal);
+  animation: spin 900ms linear infinite;
+  flex-shrink: 0;
+}
+
+.contactCardHint {
+  margin: 0;
+  padding: 18px 4px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+.contactCardList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.contactCardItem {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px 8px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
   font: inherit;
   color: inherit;
   text-align: left;
-  transition: background 160ms ease, border-color 160ms ease;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.contactCardItem::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 160ms ease;
+}
+
+.contactCardItem:last-child {
+  border-bottom: none;
 }
 
 .contactCardItem:hover {
   background: var(--muted);
-  border-color: var(--border-strong);
+}
+
+.contactCardItem:hover::before {
+  background: var(--ai-teal);
+}
+
+.contactCardItem[data-picked='true'] {
+  background: color-mix(in srgb, var(--success) 5%, var(--surface));
+}
+
+.contactCardItem[data-picked='true']::before {
+  background: var(--success);
+  width: 3px;
+}
+
+.contactCardItem[data-picked='true'] > svg {
+  color: var(--success);
 }
 
 .contactCardItem > span { min-width: 0; }
@@ -179,6 +301,7 @@
   display: block;
   color: var(--foreground);
   font-size: var(--fs-sm);
+  font-weight: 500;
 }
 
 .contactCardItem small {
@@ -189,6 +312,17 @@
   font-family: var(--font-mono);
 }
 
-.contactCardItem svg { color: transparent; flex-shrink: 0; }
+.itemPickHint {
+  color: transparent;
+  flex-shrink: 0;
+  transition: color 160ms ease;
+}
 
-.contactCardItem:hover svg { color: var(--ai-teal); }
+.contactCardItem:hover .itemPickHint {
+  color: var(--ai-teal);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

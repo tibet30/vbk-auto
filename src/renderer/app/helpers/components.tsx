@@ -17,8 +17,39 @@ export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubm
   </div>;
 }
 
-export function WorkbenchModule({ icon, title, detail, state, action }: { icon: ReactNode; title: string; detail: string; state: "ready" | "todo"; action: ReactNode }) {
-  return <section className={styles.moduleCard} data-state={state}><span className={styles.moduleIcon}>{icon}</span><div><strong>{title}</strong><small>{detail}</small></div>{action}</section>;
+export function WorkbenchModule({
+  icon,
+  title,
+  detail,
+  state,
+  stateLabel,
+  hint,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  detail: string;
+  state: "ready" | "todo" | "emphasis";
+  stateLabel?: string;
+  hint?: string;
+  action: ReactNode;
+}) {
+  return <article className={styles.moduleCard} data-state={state}>
+    <header className={styles.moduleHead}>
+      <span className={styles.moduleIcon} aria-hidden="true">{icon}</span>
+      <div className={styles.moduleHeader}>
+        <strong className={styles.moduleTitle}>
+          {title}
+          {stateLabel && <span className={styles.moduleBadge} data-state={state}>{stateLabel}</span>}
+        </strong>
+      </div>
+    </header>
+    <p className={styles.moduleBody}>{detail}</p>
+    <footer className={styles.moduleFoot}>
+      {hint ? <span className={styles.moduleHint}>{hint}</span> : <span />}
+      {action}
+    </footer>
+  </article>;
 }
 
 /**

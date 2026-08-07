@@ -68,6 +68,6 @@
 
   --shadow-1: 0 1px 0 rgba(9, 9, 11, 0.04);
   --shadow-2: 0 4px 12px -4px rgba(9, 9, 11, 0.08);
-  --focus: 0 0 0 2px var(--ring);
+  --focus: 0 0 0 2px color-mix(in srgb, var(--ai-teal) 38%, transparent);
   --motion: cubic-bezier(0.2, 0.8, 0.2, 1);
 }

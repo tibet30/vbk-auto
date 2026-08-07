@@ -22,7 +22,41 @@
   position: relative;
   overflow: hidden;
   min-height: 84px;
-  transition: border-color 160ms ease, box-shadow 160ms ease;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.opSummaryCard[data-interactive='true'] { cursor: pointer; }
+.opSummaryCard[data-interactive='true']:hover { border-color: var(--border-strong); }
+.opSummaryCard[data-interactive='true']:active { transform: translateY(0.5px); }
+.opSummaryCard[data-interactive='true']:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.opSummaryCard[data-active='true'] {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 1px var(--border-strong) inset;
+}
+
+.opSummaryCard[data-active='true'][data-tone='ok'] {
+  background: color-mix(in srgb, var(--success) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 40%, var(--border)) inset;
+}
+.opSummaryCard[data-active='true'][data-tone='block'] {
+  background: color-mix(in srgb, var(--destructive) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--destructive) 40%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--destructive) 40%, var(--border)) inset;
+}
+.opSummaryCard[data-active='true'][data-tone='skip'] {
+  background: color-mix(in srgb, var(--muted-foreground) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--muted-foreground) 28%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--muted-foreground) 28%, var(--border)) inset;
 }
 
 .opSummaryCard::before {
@@ -34,12 +68,19 @@
   width: 3px;
   border-radius: 0 2px 2px 0;
   background: var(--border-strong);
+  transition: width 160ms ease, background 160ms ease;
 }
 
 .opSummaryCard[data-tone='ok']::before { background: var(--success); }
 .opSummaryCard[data-tone='block']::before { background: var(--destructive); }
 .opSummaryCard[data-tone='skip']::before { background: var(--subtle); }
 .opSummaryCard[data-tone='ai']::before { background: var(--ai-teal); }
+
+/* 失败卡未激活时左侧条更显眼，引导「先点这里」 */
+.opSummaryCard[data-tone='block'][data-active='false']::before { width: 4px; }
+
+/* 失败卡 hover 时左侧条加粗 + 抖动一下 */
+.opSummaryCard[data-tone='block'][data-interactive='true']:hover::before { width: 5px; }
 
 .opSummaryIcon {
   width: 32px;

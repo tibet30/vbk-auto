@@ -1,0 +1,282 @@
+/* VBK Desktop — review summary panel (hero + scroll layout)
+ * Reuses .panel / .panelHeader / .panelNum / .panelTitle from layout.module.less.
+ * Imports itinerary / issues / tasks / detail sub-sheets. */
+
+@import "./review-summary-itinerary.module.less";
+@import "./review-summary-issues.module.less";
+@import "./review-summary-tasks.module.less";
+@import "./review-summary-detail.module.less";
+@import "./review-summary-mode.module.less";
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ============================================================
+ * Hero — compact product snapshot + readiness bar
+ * ============================================================ */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+
+.hero[data-tone='blocked'] {
+  background: linear-gradient(180deg, #fffbeb 0%, var(--surface) 100%);
+}
+
+.hero[data-tone='ready'] {
+  background: linear-gradient(180deg, #f0fdf4 0%, var(--surface) 100%);
+}
+
+.heroMain {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.heroDestinationRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.heroIcon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+}
+
+.hero[data-tone='blocked'] .heroIcon {
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: var(--warning);
+}
+
+.hero[data-tone='ready'] .heroIcon {
+  background: color-mix(in srgb, var(--success) 14%, var(--surface));
+  color: var(--success);
+}
+
+.heroDestination {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.heroForm {
+  flex: 0 0 auto;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+
+.heroForm[data-form='groupTour'] {
+  background: color-mix(in srgb, var(--link) 10%, var(--surface));
+  color: var(--link);
+  border-color: color-mix(in srgb, var(--link) 28%, var(--border));
+}
+
+.heroForm[data-form='privateTour'] {
+  background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface));
+  color: var(--ai-teal);
+  border-color: color-mix(in srgb, var(--ai-teal) 28%, var(--border));
+}
+
+.heroSpec {
+  display: block;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.heroProgressBlock {
+  width: 84px;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.heroProgressValue {
+  display: grid;
+  justify-items: end;
+  line-height: 1;
+}
+
+.heroProgressValue strong {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.hero[data-tone='ready'] .heroProgressValue strong { color: var(--success); }
+.hero[data-tone='blocked'] .heroProgressValue strong { color: var(--warning); }
+
+.heroProgressValue small {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.04em;
+}
+
+.heroProgressTrack {
+  width: 84px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--muted);
+  overflow: hidden;
+}
+
+.heroProgressFill {
+  display: block;
+  height: 100%;
+  background: var(--ai-teal);
+  transition: width 220ms var(--motion);
+}
+
+.hero[data-tone='ready'] .heroProgressFill { background: var(--success); }
+.hero[data-tone='blocked'] .heroProgressFill { background: var(--warning); }
+
+/* ============================================================
+ * Scroll area — itinerary + collapsible sub-blocks
+ * ============================================================ */
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px var(--pad) var(--pad);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+  scrollbar-gutter: stable;
+}
+
+.collapsible {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.collapsibleHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 140ms ease;
+}
+
+.collapsibleHead:hover {
+  background: var(--muted);
+}
+
+.collapsibleHead:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ai-teal) 30%, transparent);
+}
+
+.collapsible[data-collapsed='true'] .collapsibleHead {
+  border-bottom: 0;
+}
+
+.collapsibleIcon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+}
+
+.collapsibleTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+}
+
+.collapsibleMeta {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+}
+
+.collapsibleChevron {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  transition: transform 180ms var(--motion);
+}
+
+.collapsible[data-collapsed='true'] .collapsibleChevron {
+  transform: rotate(-90deg);
+}
+
+/* Collapsible body — wraps the inner list so it can scroll independently
+ * once its content exceeds the configured max-height. When the module is
+ * collapsed, the body is hidden entirely (max-height 0). */
+.collapsibleBody {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 240px;
+  overflow: hidden;
+  transition: max-height 220ms var(--motion);
+}
+
+.collapsibleBody[data-scrollable='true'] {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.collapsible[data-collapsed='true'] .collapsibleBody {
+  max-height: 0;
+}

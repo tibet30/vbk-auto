@@ -1,0 +1,177 @@
+/* VBK 登录区块：head / body / foot 三段式，body 用 key-value 双列展示。 */
+
+.block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.blockHead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.blockIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 10%, transparent);
+  color: var(--ai-teal);
+  flex-shrink: 0;
+}
+
+.blockHeadBody {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.blockHeadBody strong {
+  display: block;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.1px;
+}
+
+.blockHeadBody small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.headStatus {
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.blockBody {
+  padding: var(--pad);
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+}
+
+.kv {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kvRow {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.kvRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.kvLabel {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+
+.kvValue {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--foreground);
+  line-height: 1.5;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.kvHintInline {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  margin: 0;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--foreground);
+  background: var(--muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+}
+
+.accountChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.accountChipActive {
+  color: var(--success) !important;
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border)) !important;
+  background: color-mix(in srgb, var(--success) 8%, var(--surface)) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.blockFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px var(--pad);
+  border-top: 1px solid var(--border);
+  background: var(--muted);
+  flex-wrap: wrap;
+}
+
+.footHint {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+@media (max-width: 640px) {
+  .blockHead {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .headStatus { align-self: flex-start; }
+  .blockFoot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .footHint { flex-basis: auto; }
+  .kvRow {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 8px 0;
+  }
+}

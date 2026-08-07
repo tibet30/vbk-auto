@@ -1,6 +1,8 @@
 import { api } from "../helpers";
 import type { AppState } from "../state/useAppState";
 
+const BUTLER_SEARCH_DEBOUNCE_MS = 300;
+
 export function useAccountHandlers(state: AppState) {
   const {
     setEditingAccount,
@@ -11,18 +13,26 @@ export function useAccountHandlers(state: AppState) {
     setContactCardsLoading,
     setNotice,
     setActiveTaskId,
+    setButlerPickerOpen,
+    setCurrentProviderId,
     fixedInfoDraft,
     fixedInfoSaving,
     setFixedInfoSaving,
     editingAccount,
+    currentProviderId,
+    contactCardSearch,
   } = state;
 
+  // 进入账号编辑器：只读取 schema + fixedInfo，不预拉联系人列表。
+  // 管家联系人采用懒加载：点开「选择管家联系人」后才发起请求。
   const openAccountEditor = async (accountName: string) => {
     if (!api()) return;
     setEditingAccount(accountName);
     setFixedInfoDraft({});
     setContactCards([]);
     setContactCardSearch("");
+    setButlerPickerOpen(false);
+    setCurrentProviderId(null);
     try {
       const [schema, info] = await Promise.all([
         api()!.accounts.fixedInfoSchema(),
@@ -35,20 +45,14 @@ export function useAccountHandlers(state: AppState) {
       setEditingAccount(null);
       return;
     }
-    // 拉联系人列表；providerId 未记录时由 detectProviderId 在 VBK 页面自动抓。
+    // 静默获取 providerId（仅用于后续管家搜索时不重复发起 detect）；
+    // 失败不阻断编辑器打开。
     try {
-      setContactCardsLoading(true);
-      const providerId = (await api()!.accounts.providerIdFor(accountName)) ?? (await api()!.accounts.detectProviderId());
-      if (providerId) {
-        const cards = await api()!.contacts.listProviderContactCards(providerId);
-        setContactCards(cards);
-      } else {
-        setNotice("未能识别当前 VBK 账号的 providerId，请先在 VBK 页面登录并进入主控台。");
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "拉取联系人列表失败。");
-    } finally {
-      setContactCardsLoading(false);
+      const providerId = (await api()!.accounts.providerIdFor(accountName))
+        ?? (await api()!.accounts.detectProviderId());
+      if (providerId) setCurrentProviderId(providerId);
+    } catch {
+      /* providerId 缺失不影响主流程；选择管家时会再尝试 detect。 */
     }
   };
 
@@ -58,6 +62,58 @@ export function useAccountHandlers(state: AppState) {
     setFixedInfoDraft({});
     setContactCards([]);
     setContactCardSearch("");
+    setButlerPickerOpen(false);
+    setCurrentProviderId(null);
+  };
+
+  const openButlerPicker = async () => {
+    if (!api()) return;
+    // 保证 providerId 可用；缺则再尝试一次 detect。
+    let providerId = currentProviderId;
+    if (!providerId) {
+      try {
+        providerId = (await api()!.accounts.detectProviderId()) ?? null;
+        if (providerId) setCurrentProviderId(providerId);
+      } catch {
+        providerId = null;
+      }
+    }
+    if (!providerId) {
+      setNotice("未能识别当前 VBK 账号的 providerId，请先在 VBK 页面登录并进入主控台。");
+      return;
+    }
+    // 仅打开 picker；首次查询由 modal 内 useEffect 监听 butlerPickerOpen 触发，
+    // 避免「手动查 + effect 查」重复请求。
+    setButlerPickerOpen(true);
+  };
+
+  const closeButlerPicker = () => {
+    setButlerPickerOpen(false);
+    setContactCards([]);
+    setContactCardSearch("");
+  };
+
+  /**
+   * 执行一次管家联系人搜索。300ms debounce 由 modal 内 useEffect 负责，
+   * 此函数本身不做节流。
+   */
+  const runButlerSearch = async (providerId: number, keyword: string) => {
+    if (!api()) return;
+    setContactCardsLoading(true);
+    try {
+      const cards = await api()!.contacts.listProviderContactCards(providerId, keyword.trim());
+      setContactCards(cards);
+    } catch (error) {
+      setContactCards([]);
+      setNotice(error instanceof Error ? error.message : "拉取联系人列表失败。");
+    } finally {
+      setContactCardsLoading(false);
+    }
+  };
+
+  const searchContactCards = (keyword: string) => {
+    if (!api() || !currentProviderId) return;
+    void runButlerSearch(currentProviderId, keyword);
   };
 
   const saveAccountEditor = async () => {
@@ -74,5 +130,13 @@ export function useAccountHandlers(state: AppState) {
     }
   };
 
-  return { openAccountEditor, closeAccountEditor, saveAccountEditor };
+  return {
+    openAccountEditor,
+    closeAccountEditor,
+    openButlerPicker,
+    closeButlerPicker,
+    searchContactCards,
+    butlerSearchDebounceMs: BUTLER_SEARCH_DEBOUNCE_MS,
+    saveAccountEditor,
+  };
 }

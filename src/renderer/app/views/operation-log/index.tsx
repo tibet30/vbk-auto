@@ -138,6 +138,8 @@ export function AppOperationLogPage({
             value={summary.total}
             tone="neutral"
             sublabel={summary.running > 0 ? `进行中 ${summary.running}` : "全部记录"}
+            onClick={() => setStatus("all")}
+            active={status === "all"}
           />
           <SummaryCard
             icon={<CheckCircle2 size={16} aria-hidden="true" />}
@@ -145,13 +147,17 @@ export function AppOperationLogPage({
             value={summary.succeeded}
             tone="ok"
             sublabel={summary.total ? `${Math.round((summary.succeeded / summary.total) * 100)}% 通过率` : "暂无"}
+            onClick={() => setStatus((current) => (current === "succeeded" ? "all" : "succeeded"))}
+            active={status === "succeeded"}
           />
           <SummaryCard
             icon={<AlertTriangle size={16} aria-hidden="true" />}
             label="失败"
             value={summary.failed}
             tone="block"
-            sublabel={summary.failed > 0 ? "需要关注" : "无失败记录"}
+            sublabel={summary.failed > 0 ? "需要关注 · 点击只看失败" : "无失败记录"}
+            onClick={() => setStatus((current) => (current === "failed" ? "all" : "failed"))}
+            active={status === "failed"}
           />
           <SummaryCard
             icon={<SkipForward size={16} aria-hidden="true" />}
@@ -159,6 +165,8 @@ export function AppOperationLogPage({
             value={summary.skipped}
             tone="skip"
             sublabel="运营手工跳过"
+            onClick={() => setStatus((current) => (current === "skipped" ? "all" : "skipped"))}
+            active={status === "skipped"}
           />
         </section>
 

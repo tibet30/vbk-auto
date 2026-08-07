@@ -72,30 +72,145 @@ export class MiniMaxService {
     const client = this.client(replyTimeout());
     const itinerary = input.product.itinerary;
     const hasExistingDraft = Array.isArray(itinerary) && itinerary.length > 0;
-    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
-      ...(hasExistingDraft ? input.history.slice(-12) : []).map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content } as OpenAI.Chat.Completions.ChatCompletionMessageParam)),
-      { role: "user", content: `当前产品草稿：${JSON.stringify(input.product)}\n\n用户本轮输入：${input.message}\n\n请通过 submit_product_update 工具返回结构化结果。` },
-    ];
+    const planningRetryLimit = 4;
+    const planningRetryInstruction =
+      "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。";
+    const isInitialDraft = (!Array.isArray(itinerary) || itinerary.length === 0) && /生成|第一版|方案/.test(input.message);
+    const requiresStructuredAction = input.message.includes("上一次返回未通过结构化校验");
+    const requiresWritablePatch = isInitialDraft
+      || requiresStructuredAction
+      || /继续|补齐|补充|调整|更新|继续生成|继续补充|再次生成|重试|重写|重新|优化|生成/.test(input.message);
+    const requireActionHint = isInitialDraft
+      || requiresStructuredAction
+      || /继续|补齐|补充|调整|更新|修正|重新|优化|重写|重试|继续生成|继续补充|再次生成|生成/.test(input.message);
     const startedAt = Date.now();
     console.info("[MiniMax] planning request started", { model: this.config.model, timeoutMs: replyTimeout() });
-    try {
-      const { message, traceId } = await this.complete(client, messages);
-      const { response, isStructured } = parseAssistantMessage(message);
-      const isInitialDraft = (!Array.isArray(itinerary) || itinerary.length === 0) && /生成|第一版|方案/.test(input.message);
-      if (isInitialDraft && isStructured && !response.patch?.length) {
-        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回可写入的产品方案，请重试。");
+    let lastError: MiniMaxServiceError | undefined;
+    let lastRetryReason = "";
+    for (let attempt = 0; attempt <= planningRetryLimit; attempt += 1) {
+      const attemptStartedAt = Date.now();
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+        { role: "system", content: systemPrompt },
+        ...(hasExistingDraft ? input.history.slice(-12) : []).map((message) => ({ role: message.role === "assistant" ? "assistant" : "user", content: message.content } as OpenAI.Chat.Completions.ChatCompletionMessageParam)),
+        { role: "user", content: attempt === 0
+          ? `当前产品草稿：${JSON.stringify(input.product)}\n\n用户本轮输入：${input.message}\n\n请通过 submit_product_update 工具返回结构化结果。`
+          : `当前产品草稿：${JSON.stringify(input.product)}\n\n用户本轮输入：${input.message}\n\n${planningRetryInstruction}${lastRetryReason ? `\n\n上一次返回原因：${lastRetryReason}` : ""}` },
+      ];
+      try {
+        const isLastAttempt = attempt >= planningRetryLimit;
+        const { message, traceId } = await this.complete(client, messages);
+        const { response, isStructured } = parseAssistantMessage(message);
+        const hasActionHint = !!(response.patch?.length || response.questions?.length || response.researchTasks?.length);
+        const hasWritablePatch = !!(response.patch?.length ?? 0);
+        // 解析走 fallback 兜底（纯文本回复/未闭合引号/转义截断）的结果可能是 "未获取到..." 等占位文，
+        // 这种情况即便 parseRecoveredJson 把它标 structured 也应视为无效，触发重试。
+        // 当 reply 来自 model 主动输出（与 content 一致或独立纯文本），即便没有 patch 也允许放过。
+        // 但当 reply 看起来是 "暂不写盘"、"等待重试" 等占位文，且没有 patch 落地，仍应触发重试。
+        const isFallbackReply = typeof response.reply === "string"
+          && (/^未获取到/.test(response.reply)
+            || /请重试|等待.*重试|持续.*说明|先记要点|下一条回复|带上完整结构化|当前先记/.test(response.reply)
+            || /不落盘|暂不落盘|暂不写入|先不写入|先不落盘|还需调整|还需补充|先回避|后补齐|仍无可写字段|暂无可写/.test(response.reply)
+            || /structured response rejected|Unexpected end of JSON|Unexpected token|响应格式|返回的数据格式/.test(response.reply));
+        // patch/questions/researchTasks 实际有内容（不是 0 长度）才算真正命中 action。
+        // 当 reply 看起来是 fallback 占位文（"仍无可写字段"、"暂不写盘" 等）时，questions/researchTasks 单独命中不算数。
+        const hasRealActionHint = (response.patch?.length ?? 0) > 0
+          || (!isFallbackReply && ((response.questions?.length ?? 0) > 0
+              || (response.researchTasks?.length ?? 0) > 0));
+        // 有 submit_product_update 工具调用时，工具返回是主回复来源；如果工具返回无 patch 而 content 是噪音占位，
+        // 应视为解析失败。content 是非空纯文本且无 tool_call 时，说明模型主动输出，可允许直接返回。
+        const hasOfficialToolCall = Array.isArray(message.tool_calls)
+          && message.tool_calls.some((call: any) => call.function?.name === "submit_product_update");
+        const hasAnyToolCall = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+        const hasDirectContent = typeof message.content === "string" && message.content.trim().length > 0;
+        // content 像是 SSE 噪音（包含 event:/data: 行）时不视为可读正文。
+        const looksLikeNoise = typeof message.content === "string"
+          && /(?:^|\n)\s*(?:event:|data:|\[DONE\]|keep-alive)/.test(message.content);
+        // 工具名错位但 tool_call arguments 仍可解析出有意义的 reply / patch / questions，
+        // 也视为模型主动输出（它在尝试提交，只是工具签名拼错），允许直接返回避免永远抛错。
+        // 但只有 attempts > 0（已经重试过）时才接受 typo fallback，让首轮有修复机会。
+        // patch/questions/researchTasks 至少有一个非空才算真正命中 action，否则一律按 fallback 处理。
+        const hasFallbackReply = hasRealActionHint
+          || (!hasOfficialToolCall && !hasAnyToolCall && hasDirectContent && !looksLikeNoise
+              && typeof response.reply === "string" && response.reply.trim().length > 0 && !isFallbackReply)
+          || (!hasOfficialToolCall && hasAnyToolCall && hasRealActionHint && attempt > 0);
+        if (requiresWritablePatch && (!isStructured || !hasWritablePatch)) {
+          if (!hasFallbackReply) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              "MiniMax 未返回可写入的产品方案，请重试。",
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+          // 工具名错位时，第一轮先容忍 fallback（避免正常抓包被永久判失败），
+          // 但如果 attempts 已经用尽仍无法拿到官方工具返回，就强制抛错。
+          if (!hasOfficialToolCall && hasAnyToolCall && hasRealActionHint && isLastAttempt && attempt > 0) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              "MiniMax 返回的工具签名异常，请重试。",
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+          // 当 hasOfficialToolCall 但 hasWritablePatch=false 且 reply 提到"重试"，
+          // 视为模型在尝试但未完成，触发重试直到拿到 patch。
+          if (hasOfficialToolCall && /重试|暂缺|仍未/.test(response.reply ?? "") && attempt < planningRetryLimit) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              "MiniMax 当前返回尚未落库，正在重试。",
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+        }
+        if (requireActionHint && !requiresWritablePatch && !isStructured) {
+          if (!hasFallbackReply) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              "MiniMax 未返回可写入的产品方案，请重试。",
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+        }
+        if (requireActionHint && !requiresWritablePatch && isStructured && !hasActionHint) {
+          if (!isLastAttempt) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              "MiniMax 未返回可写入的产品方案，请重试。",
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+        }
+        console.info("[MiniMax] planning request completed", {
+          model: this.config.model,
+          elapsedMs: Date.now() - attemptStartedAt,
+          attempt,
+          traceId,
+        });
+        return response;
+      } catch (error) {
+        const serviceError = error instanceof MiniMaxServiceError ? error : this.providerError(error);
+        lastError = serviceError;
+        const canRetry = ["invalid_model_output", "empty_model_output"].includes(serviceError.code) && attempt < planningRetryLimit;
+        console.warn("[MiniMax] planning request attempt failed", {
+          model: this.config.model,
+          attempt,
+          canRetry,
+          elapsedMs: Date.now() - attemptStartedAt,
+          error: serviceError.message,
+        });
+        if (!canRetry) break;
+        lastRetryReason = (serviceError.details ?? serviceError.message ?? "").trim().replace(/\s+/g, " ").slice(0, 180);
       }
-      console.info("[MiniMax] planning request completed", { model: this.config.model, elapsedMs: Date.now() - startedAt, traceId });
-      return response;
-    } catch (error) {
-      console.error("[MiniMax] planning request failed", {
-        model: this.config.model,
-        elapsedMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : "unknown",
-      });
-      this.throwProviderError(error);
     }
+    console.error("[MiniMax] planning request failed", {
+      model: this.config.model,
+      elapsedMs: Date.now() - startedAt,
+      error: lastError instanceof Error ? lastError.message : "unknown",
+    });
+    // 任何模型没给出可落盘结构的失败，都归一化为 invalid_model_output，
+    // 避免上层把它误判为网络/服务异常。
+    if (lastError && lastError.code !== "invalid_model_output" && lastError.code !== "empty_model_output") {
+      throw new MiniMaxServiceError("invalid_model_output", lastError.message);
+    }
+    throw lastError ?? new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回可写入的产品方案，请重试。");
   }
 
   async diagnoseAutomationFailure(input: AdvisorRequest): Promise<AdvisorOutcome> {

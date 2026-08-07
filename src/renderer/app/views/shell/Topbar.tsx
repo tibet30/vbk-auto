@@ -24,6 +24,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
     automationActive,
     stoppingAutomation,
     currentAccountName,
+    accountInitial,
     vbkLogin,
     saveDraftLabel,
     startAutomation,
@@ -34,6 +35,10 @@ export function AppTopbar({ model }: { model: AppModel }) {
   } = model;
 
   const showProjectTools = Boolean(project) && view === "workspace";
+
+  // 非工作台视图下，顶栏左侧显示当前页面名，比写死"VBK Desktop"更符合 macOS
+  // 顶栏语义（顶栏 = 当前文档/视图名）。工作台视图下保持原项目面包屑。
+  const viewTitle = view === "settings" ? "设置" : view === "operation-log" ? "操作日志" : view === "projects" ? "项目" : null;
 
   return (
     <header className={styles.topbar}>
@@ -63,6 +68,8 @@ export function AppTopbar({ model }: { model: AppModel }) {
               </span>
             </span>
           </>
+        ) : viewTitle ? (
+          <span className={styles.crumb}>{viewTitle}</span>
         ) : (
           <span className={styles.crumb}>VBK Desktop</span>
         )}
@@ -151,6 +158,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
           {accountMenuOpen && (
             <AccountPopover
               currentAccountName={currentAccountName}
+              accountInitial={accountInitial}
               onSwitchLogin={() => {
                 setAccountMenuOpen(false);
                 openLogin();

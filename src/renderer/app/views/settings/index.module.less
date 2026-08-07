@@ -1,20 +1,23 @@
+/* 设置页：页面级壳，只放页面级布局。区块样式在各自的 module.less。 */
+
 .settingsPage {
-  padding: 32px 0 64px;
+  padding: 20px 0 64px;
   background: var(--bg);
   overflow-y: auto;
 }
 
 .settingsPageHead {
   max-width: var(--content-max);
-  margin: 0 auto 24px;
+  margin: 0 auto 16px;
   padding: 0 16px;
 }
 
 .settingsPageHead h1 {
   margin: 0;
-  font-size: var(--fs-title);
+  font-size: 18px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 
 .settingsStack {
@@ -25,77 +28,6 @@
   gap: var(--pad);
 }
 
-.settingsBlock {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
+@media (max-width: 640px) {
+  .settingsPage { padding: 16px 0 48px; }
 }
-
-.settingsBlockHead {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: var(--pad) var(--pad) 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.settingsBlockIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-control);
-  background: color-mix(in srgb, var(--ai-teal) 10%, transparent);
-  color: var(--ai-teal);
-  flex-shrink: 0;
-}
-
-.settingsBlockHeadBody { min-width: 0; }
-
-.settingsBlockHeadBody strong,
-.settingsBlockHeadBody small { display: block; }
-
-.settingsBlockHeadBody strong {
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--foreground);
-  letter-spacing: 0.1px;
-}
-
-.settingsBlockHeadBody small {
-  margin-top: 4px;
-  color: var(--muted-foreground);
-  font-size: var(--fs-xs);
-  line-height: 1.5;
-}
-
-.settingsBlockBody {
-  padding: 6px var(--pad) var(--pad);
-  flex: 1 1 auto;
-  display: grid;
-  gap: var(--pad-xs);
-
-  p {
-    margin: 0;
-    font-size: var(--fs-sm);
-    color: var(--foreground);
-    line-height: 1.5;
-  }
-}
-
-.field {
-  display: block;
-}
-
-.fieldHint[data-state='confirmed'] {
-  color: var(--success);
-  font-weight: 500;
-}
-
-.fieldHint[data-state='blocked'] { color: var(--destructive); }
-
-.taskEmptyOk   { color: var(--success); }
-.taskEmptyWarn { color: var(--warning); }

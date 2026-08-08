@@ -16,6 +16,10 @@ import type {
 
 const NOW = Date.now();
 
+/**
+ * 返回距 NOW 之前 ms 毫秒的 ISO 时间字符串——样例数据相对当前时刻对齐，
+ * 让 UI 时间戳相对值（"刚刚 / 3 分钟前"）看起来合理。
+ */
 function ago(ms: number) {
   return new Date(NOW - ms).toISOString();
 }
@@ -265,6 +269,10 @@ const SAMPLE_ENTRIES: OperationLogEntry[] = [
   },
 ];
 
+/**
+ * 按 status 统计 succeeded/failed/skipped/running 各自数量，得到 OperationLogSummary；
+ * 用于头部卡片展示和过滤栏。
+ */
 function summarize(entries: OperationLogEntry[]): OperationLogSummary {
   const summary: OperationLogSummary = { total: entries.length, succeeded: 0, failed: 0, skipped: 0, running: 0 };
   for (const entry of entries) {
@@ -276,6 +284,10 @@ function summarize(entries: OperationLogEntry[]): OperationLogSummary {
   return summary;
 }
 
+/**
+ * 判断 entry 是否满足 query 的过滤条件（status / type / stage / projectId / 文本搜索）。
+ * status / type / stage 传 "all" 时忽略该项；文本字段做去前后空格 + lowercase 后的 substring 匹配。
+ */
 function matchQuery(entry: OperationLogEntry, query: OperationLogQuery): boolean {
   if (query.status && query.status !== "all" && entry.status !== query.status) return false;
   if (query.type && query.type !== "all" && entry.type !== query.type) return false;
@@ -293,6 +305,10 @@ function matchQuery(entry: OperationLogEntry, query: OperationLogQuery): boolean
   return true;
 }
 
+/**
+ * 加载操作日志：按 query 过滤样例数据，按 startedAt 倒序，再做 summary + 阶段列表汇总；
+ * 同时回填 refreshedAt 给 UI 展示"截至时间"。
+ */
 export function loadOperationLog(query: OperationLogQuery = {}): OperationLogPage {
   const entries = SAMPLE_ENTRIES.filter((entry) => matchQuery(entry, query))
     .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
@@ -305,6 +321,9 @@ export function loadOperationLog(query: OperationLogQuery = {}): OperationLogPag
   };
 }
 
+/**
+ * 返回状态过滤栏的可选值与中文标签（all / failed / succeeded / skipped / running）。
+ */
 export function listOperationStatusOptions(): Array<{ value: OperationStatus | "all"; label: string }> {
   return [
     { value: "all", label: "全部状态" },

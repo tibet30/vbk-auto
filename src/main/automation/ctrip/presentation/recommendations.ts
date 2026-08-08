@@ -1,4 +1,11 @@
 // @ts-nocheck
+/**
+ * 产品图文页「推荐理由」3 行写入工具集：
+ *   - buildRecommendationReasonsPlan：把 recommendations 校验成白名单内 3 项 + 类别不重复 + 文本非空；
+ *   - appendRecommendationRow：在 #pm_recommend 末行点 + 按钮（图标 #1658DC）追加 1 行；
+ *   - fillRecommendationReasons：主入口，先把行数补足到 3，再依次按行选中分类与填文本。
+ * 顶部带 `// @ts-nocheck`，DOM 是动态 page。
+ */
 
 import { delay, escapeRegExp, assertCount } from "../utils.js";
 import { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
@@ -9,6 +16,14 @@ export interface RecommendationPlanStep {
   text: string;
 }
 
+/**
+ * 把 recommendations 编译成推荐理由写入计划：
+ *   - 必须 length=3；
+ *   - category ∈ RECOMMENDATION_CATEGORIES；
+ *   - text 非空；
+ *   - category 不重复。
+ * 任一不满足抛错，避免在 VBK 写入半成品。
+ */
 export function buildRecommendationReasonsPlan(
   recommendations: ReadonlyArray<{ category: string; text: string }>,
 ): RecommendationPlanStep[] {
@@ -40,6 +55,11 @@ export function buildRecommendationReasonsPlan(
 const RECOMMEND_APPEND_BUTTON_SELECTOR =
   'span.anticon[style*="rgb(22, 88, 220)"], span.anticon[style*="#1658DC"], span.anticon[style*="#1658dc"]';
 
+/**
+ * 在 #pm_recommend 末行点 + 按钮（蓝图标）追加一行；用 waitForFunction 等行数真到 currentCount+1。
+ * - 找不到行 / + 按钮抛错（带 rowCount 信息便于排查 VBK DOM 变更）。
+ * - 若一次 wait 超时，第二次再短超时兜一次（应对网络抖动 / React 重渲染）。
+ */
 async function appendRecommendationRow(page: any, currentCount: number) {
   const clicked = await page.evaluate((selector: string) => {
     const all = document.querySelectorAll("#pm_recommend .ant-form-item");
@@ -78,6 +98,13 @@ async function appendRecommendationRow(page: any, currentCount: number) {
   }
 }
 
+/**
+ * 推荐理由 3 行写入主入口：
+ *   - 先循环补足行数到 plan.length；
+ *   - 每行按 select.ant-select / textarea.ant-input 定位；
+ *   - 分类不对时打开下拉，挑 enabled 选项里的精确匹配，再回读校验选中值；
+ *   - 文本后填 + 等待下一行可见（确保 VBK React 已渲染完成再动下一行）。
+ */
 export async function fillRecommendationReasons(page: any, recommendations: Array<{ category: string; text: string }>) {
   const plan = buildRecommendationReasonsPlan(recommendations);
   const section = page.locator("#pm_recommend");

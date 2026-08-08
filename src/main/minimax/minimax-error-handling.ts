@@ -1,8 +1,20 @@
 
+/**
+ * MiniMax / Evolink 错误处理工具集：
+ *   - 把任意 OpenAI 抛出的对象递归压缩成可读 reason 文本（extractMiniMaxFailureReason）；
+ *   - 把错文案里的「请检查 / 重试」尾巴裁掉（stripRetryHintTail）；
+ *   - 把 (code, reason) 翻译成项目内文案 + 归一化错误码（normalizeFailureMessage / classifyMiniMaxError）；
+ *   - 配套给 UI / DevTools 看的 toRetryHint、isStructuredFormatFailure。
+ */
+
 export const normalizeWhitespace = (value: string) => value.replace(/[\s\u00a0\t\r\n]+/g, " ").trim();
 
 const ignoreStructuralKeys = new Set(["code"]);
 
+/**
+ * 从错误文案中裁掉「请检查/重试」类尾部提示（中英文均覆盖），保留真正的故障原因。
+ * 用于让 UI 上看到的错误信息只描述问题本身，不夹带模型 / 网关附带的重连建议。
+ */
 export function stripRetryHintTail(message: string) {
   let normalized = message.trim();
   const tailPatterns = [
@@ -17,6 +29,11 @@ export function stripRetryHintTail(message: string) {
   return normalized;
 }
 
+/**
+ * 从 MiniMax（及其兼容代理）抛出的任意对象里递归提取可读的错误原因文本。
+ * 按预定义顺序遍历常见字段（details / message / reason / error / cause / body / data / response…），
+ * 找到第一个非空的字符串值后立即返回；用 WeakSet 防止循环引用。
+ */
 export function extractMiniMaxFailureReason(error: unknown, visited = new WeakSet<object>()): string {
   if (typeof error === "string") return normalizeWhitespace(error);
   if (!error || typeof error !== "object") return "";
@@ -47,18 +64,30 @@ export function extractMiniMaxFailureReason(error: unknown, visited = new WeakSe
   return "";
 }
 
+/**
+ * 把失败原因裁剪成「重试提示」：先做空白与尾部重试语句清洗，再按 maxLength 截断，
+ * 截断后若为空则回退到「本轮结构化结果无法解析。」占位文案。
+ */
 export function toRetryHint(reason: string, maxLength = 180): string {
   const normalized = stripRetryHintTail(normalizeWhitespace(reason)).slice(0, maxLength);
   if (!normalized) return "本轮结构化结果无法解析。";
   return normalized;
 }
 
+/**
+ * 判断字符串 reason 是否描述「结构化输出解析失败」（JSON 不合法、缺 fence、缺 token…）。
+ * 用于在错误归类阶段把模型输出类失败与网关 / 网络类失败区分开。
+ */
 export function isStructuredFormatFailure(reason: string) {
   if (!reason) return false;
   if (/(?:structured response rejected|Unexpected end of JSON input|hasJsonFence|JSON.parse|Unexpected token|不是有效 JSON|不是合法 JSON|解析.*失败|响应格式|返回的数据格式)/i.test(reason)) return true;
   return false;
 }
 
+/**
+ * 把任意 MiniMax 相关异常归一化为项目内部的 errorCode（invalid_model_output / empty_model_output /
+ * provider_not_configured / provider_error 等），供 orchestrator 决定重试或回退到 needs_user。
+ */
 export function classifyMiniMaxError(error: unknown): string {
   const reason = extractMiniMaxFailureReason(error);
   if (reason && isStructuredFormatFailure(reason)) return "invalid_model_output";
@@ -78,6 +107,12 @@ export function classifyMiniMaxError(error: unknown): string {
   return (error as { code?: string })?.code ?? "provider_error";
 }
 
+/**
+ * 把 (errorCode, 原 reason) 组合翻译成面向最终用户的失败说明：
+ *   - 先去掉「请检查连接 / 配置后重试」类尾巴，避免重复噪音；
+ *   - 不同 errorCode 走不同模板，例如 invalid_model_output 用「返回的数据格式无法用于产品方案」；
+ *   - providerLabel 默认是 "MiniMax"，可被其他兼容代理（Evolink 等）覆盖。
+ */
 export function normalizeFailureMessage(errorCode: string, reason: string, providerLabel: string = "MiniMax"): string {
   const normalizedReason = reason && reason.trim() ? reason : "AI 服务暂时无法完成本次请求。";
   const stripTrailingRetryInstruction = (message: string) => stripRetryHintTail(message);

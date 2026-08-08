@@ -1,5 +1,20 @@
+/**
+ * 根据 product 形态动态决定要执行的阶段顺序。
+ *   - 基础四阶段：basic / presentation / itinerary / package；
+ *   - 商业字段齐全时附加 pricingInventory；
+ *   - 行程含住宿时附加 hotelResource；
+ *   - 私家团附加 vehicleResource；
+ *   - 4 段条款齐全时附加 terms；
+ *   - 始终追加 preflight 自检。
+ *
+ * 返回数组由调用方按顺序执行；run() / runOnePhase 都用同一个 draftPhases 列表保持重试对齐。
+ */
+
 import { parseProduct } from "../schema/schema.js";
 
+/**
+ * 计算某个 product 当前应当跑的阶段序列。
+ */
 export function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
   const phases = ["basic", "presentation", "itinerary", "package"];
   if (product.commercial?.pricing && product.commercial.inventory) phases.push("pricingInventory");

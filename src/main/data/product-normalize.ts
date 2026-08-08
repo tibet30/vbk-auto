@@ -32,6 +32,10 @@ function normaliseRecommendationItem(value: unknown): { category: string; text: 
   return { category, text };
 }
 
+/**
+ * 推荐语数组校验：长度必须为 3、每条 category/text 非空且 category 在白名单、互不重复；
+ * 任一条不合规返回 undefined（调用方丢掉整个 recommendations 字段）。
+ */
 function normaliseRecommendations(value: unknown): Array<{ category: string; text: string }> | undefined {
   if (!Array.isArray(value)) return undefined;
   if (value.length !== 3) return undefined;
@@ -47,6 +51,12 @@ function normaliseRecommendations(value: unknown): Array<{ category: string; tex
   return items;
 }
 
+/**
+ * 单条行程活动（time/title/detail/type）归一化：
+ *   - type 不在白名单 → 退化为 "other"；
+ *   - title 接受 record.name 别名；
+ *   - 缺 time/title/detail 任一 → 返回 undefined。
+ */
 function normaliseActivity(value: unknown): { time: string; title: string; detail: string; type: string } | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -84,6 +94,10 @@ export function normalisePresentation(value: unknown) {
   };
 }
 
+/**
+ * 餐食归一化：接受 string 或 { breakfast/lunch/dinner } 对象，
+ * 统一输出 summary（中文拼接）+ 可选 descriptions（三餐逐条）。
+ */
 function normaliseMeals(value: unknown) {
   if (typeof value === "string") return { summary: value, descriptions: undefined };
   if (!value || typeof value !== "object" || Array.isArray(value)) return { summary: "餐食以实际确认单为准", descriptions: undefined };
@@ -138,15 +152,28 @@ export function normaliseItinerary(value: unknown) {
   return days.length ? days : undefined;
 }
 
+/**
+ * 把 unknown 转成非负有限数字；非法或负数返回 undefined。
+ * 用于 pricing.cost.* / pricing.adult / release.publicPriceCeiling 等金额字段。
+ */
 export function positiveNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
+/**
+ * 把 unknown 转成正整数（> 0）；非整数 / 非正返回 undefined。
+ * 用于 inventory.dailyQuota / release.publicAuditRetries 等。
+ */
 function positiveInteger(value: unknown) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
+/**
+ * 商业定价归一化：adult > 0、child ≥ 0、minimumTravelers 为正整数、currency 仅允许 CNY；
+ * 含 cost.{adult, child} 与可选 singleSupplement / childBed。
+ * 任一关键字段不合规 → 返回 undefined。
+ */
 function normaliseCommercialPricing(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -170,6 +197,10 @@ function normaliseCommercialPricing(value: unknown) {
   return out;
 }
 
+/**
+ * 库存归一化：startDate / endDate 必须是 YYYY-MM-DD，dailyQuota 为正整数，
+ * 且 startDate 不晚于 endDate，否则返回 undefined。
+ */
 function normaliseCommercialInventory(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -181,6 +212,13 @@ function normaliseCommercialInventory(value: unknown) {
   return { startDate: start, endDate: end, dailyQuota: quota };
 }
 
+/**
+ * Release 归一化：
+ *   - publicPriceCeiling 必填（>0）；
+ *   - 默认保留人工/VBK 已打开的 submitReview / publishAfterApproval；
+ *   - options.safeRelease=true 时强制 draft-only（AI / 自动写入路径）；
+ *   - publicAuditRetries 钳制到 1..10，超出回落到 3。
+ */
 function normaliseCommercialRelease(value: unknown, options?: NormaliseReleaseOptions) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;

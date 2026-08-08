@@ -1,8 +1,23 @@
 // @ts-nocheck
+/**
+ * 「基本信息」面板里几个相对独立的小字段段写入 helper：
+ *   - fillServicePhone：线上 400 电话（必填，缺则抛错）；
+ *   - fillAdvanceBooking：提前预订（天/点几分两个数值控件）；
+ *   - fillLocalTravelAgency：地接社已选项（如已选直接 return）；
+ *   - fillButlerContact：管家联系人，根据 selection.contactCardId 在下拉里精确定位。
+ * 顶部带 `// @ts-nocheck`，page 是动态传入。
+ */
 
 import { delay, assertCount } from "../utils.js";
 import { findFirstEnabledOptionIndex, findButlerOptionIndex } from "../../schema/schema-functions.js";
 
+/**
+ * 写「线上 400 电话」单选下拉：
+ *   - 必传 phone，否则抛错提示缺配置；
+ *   - 通过 label[for=baseInfo.phone400] 反查 .ant-form-item；
+ *   - 必要时滚动到容器可视区域；
+ *   - 在打开的下拉里精确匹配 phone 文本，未匹配到抛错（含可选列表便于运营排查）。
+ */
 export async function fillServicePhone(page, phone) {
   const target = (phone || "").trim();
   if (!target) throw new Error("线上 400 电话（servicePhone）未配置，无法继续录入。");
@@ -52,6 +67,12 @@ export async function fillServicePhone(page, phone) {
   await delay(300);
 }
 
+/**
+ * 写「提前预订」：
+ *   - 天数走数字输入框；
+ *   - 时间走 ant-time-picker 面板（小时列 + 分钟列各点一项），提交后回读 inputValue 等于 time；
+ *   - 面板结构异常 / 时间未成功提交时抛错。
+ */
 export async function fillAdvanceBooking(page, { days, time }) {
   const labelLocator = page.locator("label[for=\"bookingControls.advanceBooking\"]");
   await assertCount(labelLocator, 1, "提前预订 label[for=bookingControls.advanceBooking]");
@@ -82,6 +103,10 @@ export async function fillAdvanceBooking(page, { days, time }) {
   if (committed !== time) throw new Error(`提前预订时间未成功提交：期望 ${time}，实际 ${committed || "空"}`);
 }
 
+/**
+ * 「地接社」字段：已有已选项 → return；否则清空既有 + 在下拉挑第一个 enabled 选项写入。
+ * VBK 必须先在地接社维护里有可用项，否则抛错给上层 advisor。
+ */
 export async function fillLocalTravelAgency(page) {
   const scope = page.locator("div[id=\"bookingControls.localInfoIds\"]");
   await assertCount(scope, 1, "地接社容器 div#bookingControls.localInfoIds");
@@ -133,6 +158,13 @@ export async function fillLocalTravelAgency(page) {
   }
 }
 
+/**
+ * 「管家联系人」按 selection.contactCardId 精确挑选：
+ *   - selection 缺失 / 非对象抛错；
+ *   - contactCardId 非正整数也抛错；
+ *   - 在下拉中拿所有 option 的 data-value / data-id 与 selection.contactCardId 比对，
+ *     文本与 id 同时匹配 findButlerOptionIndex；找不到抛错附可选列表。
+ */
 export async function fillButlerContact(page, selection) {
   if (!selection || typeof selection !== "object") {
     throw new Error("管家联系人未配置账号固定信息，请在账号设置里维护后重试。");
@@ -174,4 +206,3 @@ export async function fillButlerContact(page, selection) {
   await options.nth(targetIndex).click();
   await delay(300);
 }
-

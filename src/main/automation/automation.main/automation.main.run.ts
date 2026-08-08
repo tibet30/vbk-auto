@@ -1,3 +1,17 @@
+/**
+ * 自动化阶段主循环入口：runAutomation。
+ *   - 拉项目 / 解析 product；
+ *   - 前置兜底：setVisible + ensureBrowserHasBounds；
+ *   - 自动化 blocker 检查 + 管家联系人 / 400 电话凭证准备；
+ *   - 根据 startIndex（首次或 retryFrom）创建或重置 AutomationRun；
+ *   - 用 handlers Map 把每个 phase 包成 local execute，runPhaseWithRecovery
+ *     负责尝试 → advisor → 决策；
+ *   - cancelled 由 AutomationCancelledError 短路，failed 落库 blocked 状态。
+ *
+ * 设计偏好：「在当前页面去重试」—— advisor 的 reload/reopen 动作走 noop，
+ * 不强制拽回 basic tab，避免把页面状态丢失。
+ */
+
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
 import { preparePhaseRetry } from "../phase-retry.js";
@@ -26,6 +40,16 @@ import { draftPhasesFor } from "./automation.main.phases.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 
+/**
+ * 单个项目自动化阶段主循环：
+ *   - retryFrom 为 undefined 时从第 0 阶段跑完整轮；否则按 preparePhaseRetry 重置并按该阶段重跑；
+ *   - 任一阶段 needs_user → run.status="failed" + 更新 product 为 blocked 并 return；
+ *   - 任一阶段 cancelled → ctx.markCancelled 接管；handler 抛错走 catch；
+ *   - 全部完成 → status=succeeded，附 desktop-draft 截图落档。
+ *
+ * 把持续状态（attempts / logs / phases）持久化到 ctx.db.saveAutomation(projectId, run)，
+ * UI 端通过 ctx.emit(projectId) 拿更新。
+ */
 export async function runAutomation(ctx: AutomationRunContext, projectId: string, retryFrom?: string) {
     const project = ctx.db.getProject(projectId);
     if (!project) throw new Error("项目不存在");

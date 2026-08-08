@@ -1,9 +1,21 @@
+/**
+ * AutomationRun 编排用到的几个跨阶段 helper：
+ *   - resolveButlerSelection / resolveServicePhone：从账号固定信息中拆出管家联系人和 400 电话；
+ *   - resolveActiveButlerContext：当前账号没配好时回退到 listKnownAccounts 中任意一个；
+ *   - markCancelled：把运行中的 run 切到 cancelled；
+ *   - ensureBrowserHasBounds：view 未上报 bounds 时，把 splitter 区域调到主窗口的右 66%。
+ */
+
 import { BrowserWindow } from "electron";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 import type { ActiveButlerContext } from "./automation.main.context.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 
+/**
+ * 从 db.getAccountFixedInfo(accountName).values.butlerName 解析出管家联系卡选择；
+ * 缺账号 / 缺失管家 → 返回 null。
+ */
 export function resolveButlerSelection(db: VbkDatabase, accountName: string | undefined): ContactCardSelection | null {
   if (!accountName) return null;
   const info = db.getAccountFixedInfo(accountName);
@@ -11,6 +23,10 @@ export function resolveButlerSelection(db: VbkDatabase, accountName: string | un
   return butler && typeof butler === "object" ? butler : null;
 }
 
+/**
+ * 从 db.getAccountFixedInfo(accountName).values.servicePhone 取 trim 后非空电话；
+ * 缺账号 / 缺失电话 → 返回 null。
+ */
 export function resolveServicePhone(db: VbkDatabase, accountName: string | undefined): string | null {
   if (!accountName) return null;
   const info = db.getAccountFixedInfo(accountName);
@@ -20,6 +36,12 @@ export function resolveServicePhone(db: VbkDatabase, accountName: string | undef
   return trimmed || null;
 }
 
+/**
+ * 解析当前可用的管家上下文：
+ *   - 优先尝试当前 accountName；不行时遍历 listKnownAccounts 找任何能拼齐
+ *     管家 + 400 电话的账号；回退成功时把 fallbackUsed=true 让上层写回 vbkAccountName；
+ *   - 完全找不到返回 null，让上层抛阻断错。
+ */
 export function resolveActiveButlerContext(
   db: VbkDatabase,
   accountName?: string,
@@ -51,6 +73,9 @@ export function resolveActiveButlerContext(
   return null;
 }
 
+/**
+ * 把 run 切成 cancelled，并把当前阶段（若未完成）标 failed；调 persist 同步到 DB。
+ */
 export function markCancelled(run: AutomationRun, persist: () => void) {
   run.status = "cancelled";
   const current = run.phases.find((phase) => phase.phase === run.currentPhase);
@@ -58,6 +83,13 @@ export function markCancelled(run: AutomationRun, persist: () => void) {
   persist();
 }
 
+/**
+ * 让 VBK 内嵌视图（Electron BrowserView / WebContentsView）拿到非零 bounds：
+ *   - 若 view 已经上报过非零 width/height，仅 setVisible(true) 即可；
+ *   - 否则用 BrowserWindow 主窗口 size 推算：右 66%，最低宽 640，
+ *     让 VBK 不会被压成移动版布局。
+ * 仅 Electron 内运行；其它环境（单测 / 非 Electron 调试）安静退出。
+ */
 export function ensureBrowserHasBounds(browser: VbkBrowser): void {
   const view = (browser as unknown as { view?: { getBounds?: () => Electron.Rectangle | null } } | null | undefined)?.view;
   if (!view || typeof view.getBounds !== "function") return;

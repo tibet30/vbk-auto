@@ -1,4 +1,12 @@
 // @ts-nocheck
+/**
+ * 「基本信息 → 国家景区」面板里省份 / 景点的自动填写：
+ *   - fillScenicAreaProvince：在 #scenic_area 的省份下拉按白名单 suffix 规范化标签名后挑选，
+ *     必要时回退到 AI disambiguator；
+ *   - fillScenicAreaSpots：依次按景点 / 景区级挑选，命中后点「添加」，并轮询确认标签写入；
+ *   - 数据风险弹窗（境外同名项）由 dismissDataRiskDialog 关闭，命中会丢弃该条以避免写入脏数据。
+ * 顶部带 `// @ts-nocheck`，page 是动态传入。
+ */
 
 import { delay, assertCount, pickSearchInput } from "../utils.js";
 import { matchDropdownOption } from "../../dropdown-match.js";
@@ -26,6 +34,10 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
     ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
   );
 
+  /**
+   * 拉出当前打开的 .ant-select-dropdown 候选 + enabled 状态，过滤掉空 / 占位项，
+   * 等到至少有一项可用就 return；最多等 8s。
+   */
   async function availableOptions(description) {
     const deadline = Date.now() + 8_000;
     while (Date.now() < deadline) {
@@ -98,6 +110,10 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
   await delay(300);
 }
 
+/**
+ * 按省级 + 景点数组，依次在「景点 → 城市/景区」两个级联下拉里挑选项；命中后点「添加」并
+ * 轮询确认标签被写入 #scenic_area。任何一步失败 / 触发数据风险弹窗都记录到 logs 而不抛错。
+ */
 export async function fillScenicAreaSpots(page, province, spots, logs = [], extra = {}) {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product ?? {};
@@ -237,5 +253,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
 }
 
 // source-slicing anchor（仅供测试切片识别；内部不调用）：
+/**
+ * 测试切片占位：保留这个 noop 函数让 source-slicing 工具识别 scenic 相关代码段。
+ */
 async function _scenicSliceAnchor() { void 0; }
-

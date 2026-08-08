@@ -1,3 +1,13 @@
+/**
+ * 「Debug」IPC 入口：debugRunStep / debugSnapshot / debugHitBreakpoints / debugResume /
+ * debugListBreakpoints。
+ *   - debugRunStep：根据 stepName 字符串分派到具体 ctrip / schema helper，按需挂断点；
+ *   - debugSnapshot：触发一次调试快照；
+ *   - debugHitBreakpoints / debugResume / debugListBreakpoints：调试状态读写。
+ *
+ * 全部强制调 ensureBrowserHasBounds 免于 renderer 上 view 没上报 bounds 导致 click 越界。
+ */
+
 import { parseProduct } from "../schema/schema.js";
 import {
   resetBreakpoints,
@@ -37,6 +47,14 @@ type DebugContext = {
   }) => Promise<{ pickedText: string | null; reasoning: string }>;
 };
 
+/**
+ * 按 stepName 字符串分派到具体 helper：
+ *   - snapshot / selectStationAddress / fillItineraryDraft / fillRecommendationReasons
+ *     / fillBasicInfo / fillPresentation 走带断点的版本；
+ *   - fillAndSavePackage / fillAndSubmitPricingInventory / ensureHotelResource /
+ *     ensureVehicleResource / runProductPreflight 走日常 helper；
+ * 未知名直接抛「未知步骤」并列出支持列表。
+ */
 export function debugRunStep(context: DebugContext, stepName: string, argsJson: string): Promise<unknown> {
   return (async () => {
     const { db, browser, resolveButlerSelection, resolveServicePhone, ensureBrowserHasBounds } = context;
@@ -153,6 +171,9 @@ export function debugRunStep(context: DebugContext, stepName: string, argsJson: 
   })();
 }
 
+/**
+ * 触发调试快照；先 ensureBrowserHasBounds 再取主窗口 size，否则 click 越界。
+ */
 export async function debugSnapshot(context: DebugContext, label?: string): Promise<unknown> {
   // 调试快照也走 fallback： renderer 不上 stage=vbk 时 view 还是 0×0，
   // 取主窗口 size 重设一下，否则后续 click 也会超出 viewport。
@@ -161,14 +182,23 @@ export async function debugSnapshot(context: DebugContext, label?: string): Prom
   return snapshotDebug(page, label);
 }
 
+/**
+ * 返回当前已命中的断点数组（Promise.resolve 是因为实现是同步）。
+ */
 export function debugHitBreakpoints(): Promise<string[]> {
   return Promise.resolve([...getHitBreakpoints()]);
 }
 
+/**
+ * 转发调试 resume 命令（continue / step / stop）；stopped 表示是否真的停下手。
+ */
 export function debugResume(command: "continue" | "step" | "stop"): Promise<{ stopped: boolean }> {
   return Promise.resolve(resumeDebug(command));
 }
 
+/**
+ * 返回当前已设置的断点名称列表（Promise.resolve 是因为实现是同步）。
+ */
 export function debugListBreakpoints(): Promise<string[]> {
   return Promise.resolve(listBreakpoints());
 }

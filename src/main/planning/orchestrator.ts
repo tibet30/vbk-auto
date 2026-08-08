@@ -15,6 +15,12 @@ import { PlannerError } from "../../shared/contracts-planning.js";
 
 export type { Planner, PlannerContext, PlannerRequest, PlanningStageOutput, PlanningStageError };
 
+/**
+ * 把任意错误归一化为 PlannerError：
+ *   - 已经是 PlannerError 直接透传；
+ *   - code 命中已知 provider / 模型输出类错误时，保留 code / message / details；
+ *   - 否则打码成 PlannerError("unknown", message)，让上层按未知错误统一处理。
+ */
 export function toPlannerError(error: unknown): PlannerError {
   if (error instanceof PlannerError) return error;
   const code = (error as { code?: string } | null)?.code;

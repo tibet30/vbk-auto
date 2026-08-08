@@ -171,6 +171,12 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   return finalizeRun(state, accepted, accumulatedResearchTasks);
 }
 
+/**
+ * 把最终 state 转为对外 OrchestratorRunResult：
+ *   - 用 validation 决定 accepted / rejected；
+ *   - composeAssistantReply 生成中文 assistant 回复；
+ *   - status 随 state.status 映射为 completed / failed / needs_user。
+ */
 async function finalizeRun(state: PlanningGenerationState, acceptedModules: readonly PlanningModule[], researchTasks: ResearchTaskProposal[] = []): Promise<OrchestratorRunResult> {
   const validation = validateCompleteness({ acceptedModules });
   const nowIso = new Date().toISOString();
@@ -198,6 +204,10 @@ async function finalizeRun(state: PlanningGenerationState, acceptedModules: read
   };
 }
 
+/**
+ * 生成一份全新 PlanningGenerationState：起点是 skeleton，未完成任何阶段，状态 pending。
+ * resumeAt 为当前 ISO 时间，providerLabel 透传供 UI 顶部展示。
+ */
 function createInitialState(projectId: string, providerLabel?: string): PlanningGenerationState {
   return {
     projectId,
@@ -210,4 +220,5 @@ function createInitialState(projectId: string, providerLabel?: string): Planning
   };
 }
 
+/** 统一时间戳（ISO8601），用于 state.resumeAt 等字段。 */
 function now() { return new Date().toISOString(); }

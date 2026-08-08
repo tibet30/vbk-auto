@@ -90,6 +90,11 @@ export async function runSingleStage(args: RunSingleStageArgs): Promise<SingleSt
   });
 }
 
+/**
+ * Skeleton 阶段（本地 deterministic）：
+ *   - 检查是否已 accepted（避免覆盖人工/VBK 修正）；
+ *   - 否则按 productForm 选择 hotelTier 默认值，把 destination / transport 写进产品。
+ */
 async function runSkeletonStage(args: {
   state: PlanningGenerationState;
   skeleton: PlanningSkeleton;
@@ -122,6 +127,10 @@ async function runSkeletonStage(args: {
   return makeStageResult({ state, stage: "skeleton", accepted, rejected, researchTasks, attempts, lastError, status: "completed" });
 }
 
+/**
+ * Validation 阶段（本地 deterministic）：用 validateCompleteness + deepValidateModules
+ * 拼 accepted/rejected，并触发 buildRewoundState 把已完成阶段截断到最早 invalid 模块。
+ */
 async function runValidationStage(args: {
   state: PlanningGenerationState;
   skeleton: PlanningSkeleton;
@@ -163,6 +172,10 @@ async function runValidationStage(args: {
   };
 }
 
+/**
+ * Research 阶段（本地 deterministic）：用 pendingResearchTasks 生成待研究项，
+ * runtime.addResearchTask 负责去重落库。
+ */
 async function runResearchStage(args: {
   state: PlanningGenerationState;
   skeleton: PlanningSkeleton;
@@ -206,6 +219,10 @@ async function runResearchStage(args: {
   };
 }
 
+/**
+ * makeStageResult 的输入：除 accepted/rejected/researchTasks 外还要 stage / attempts / lastError / status，
+ * 用于组装完整的 SingleStageResult。
+ */
 interface MakeStageResultArgs {
   state: PlanningGenerationState;
   stage: PlanningStage;
@@ -217,6 +234,12 @@ interface MakeStageResultArgs {
   status: "running" | "needs_user" | "completed" | "failed";
 }
 
+/**
+ * 组装阶段结果：
+ *   - 修正 currentStage：上一轮残留的 currentStage 与本轮失败 stage 不一致时校正；
+ *   - 写回 accepted / rejected / attempts / lastError / status；
+ *   - 用 composeStageAssistantReply 生成给用户的中文 assistant 文案。
+ */
 function makeStageResult(args: MakeStageResultArgs): SingleStageResult {
   // currentStage 保留失败 stage（让用户看到「卡在哪」）；resume 由
   // plan-orchestrator 的 skip 逻辑跳过已完成的 stage，从 currentStage 起跑。
@@ -242,6 +265,13 @@ function makeStageResult(args: MakeStageResultArgs): SingleStageResult {
   };
 }
 
+/**
+ * AI 阶段的通用重试循环：
+ *   - 维护 stageAcceptedModules（commercial 阶段专用）；
+ *   - 单模块阶段（itinerary/presentation）若已 accepted，直接跳出；
+ *   - planner.generateStage → executeStageOutput；失败重试 retryLimit 次；
+ *   - 全部 retry 用完仍无 accepted → needs_user 或 failed（取决于错误码）。
+ */
 async function runAiStage(args: {
   stage: PlanningStage;
   state: PlanningGenerationState;
@@ -361,4 +391,5 @@ async function runAiStage(args: {
   return makeStageResult({ state, stage, accepted, rejected, researchTasks, attempts, lastError, status });
 }
 
+/** 统一时间戳（ISO8601 字符串）；用于 persistence 与日志。 */
 function now() { return new Date().toISOString(); }

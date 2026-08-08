@@ -26,6 +26,10 @@ export function parseProduct(input: unknown) {
 
 export type CtripLibraryImageAspect = "landscape" | "any";
 
+/**
+ * 在候选图中挑「质量分最低值 ≥ minQuality、分辨率 ≥ 1280×800、landscape 时保证宽 ≥ 高」中
+ * 最低质量分最高的那张。返回其 index；都不达标返回 -1。
+ */
 export function findBestCtripLibraryImage(
   images: ReadonlyArray<{ quality: string; resolution: string }>,
   minQuality: number,

@@ -1,3 +1,12 @@
+/**
+ * 自动化「单阶段重新执行」入口：runOnePhase。
+ *   - 仅重跑指定 phase，其它阶段保留原状态（不全清）；
+ *   - 调用 prepareSinglePhaseRetry 准备新 AutomationRun，run.status 临时变 running；
+ *   - 「在当前页面去重试」偏好：advice 的 reload/reopen 动作走 noop；
+ *   - 完成后把 run.status 恢复为 originalRunStatus，让 UI 上的 succeeded / cancelled / failed
+ *     标签不丢失。
+ */
+
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
 import {
   parseProduct,
@@ -23,6 +32,13 @@ import { AutomationCancelledError } from "./automation.main.errors.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
 
+/**
+ * 单阶段重新执行入口：
+ *   - 项目 / product 校验、管家凭证按阶段名决定是否必带；
+ *   - 构造 fillMap：basic 阶段额外处理 setBasicInfoSaved + scenicSpotLogs，其它阶段直接调 fill*；
+ *   - 用 makeRecoveryCtx 拿到 RecoveryContext，让 runPhaseWithRecovery 走完整 advisor 链；
+ *   - cancelled / needs_user / failed 分支与 run() 保持一致；completed 时恢复原 status。
+ */
 export async function runOnePhase(ctx: AutomationRunContext, projectId: string, phaseName: string) {
     const project = ctx.db.getProject(projectId);
     if (!project) throw projectNotFound(projectId);

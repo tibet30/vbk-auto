@@ -1,10 +1,25 @@
 // @ts-nocheck
-// 资源配置阶段：酒店资源 / 用车资源组。
+/**
+ * 资源配置阶段：酒店资源与用车资源组的自动化填充。
+ *   - ensureHotelResource：按 operations.hotelTier + 行程中是否含住宿，进入「酒店」配置面板
+ *     添加符合当地钻级的酒店，跳过已存在的同钻级资源；
+ *   - ensureVehicleResource：仅私家团 + 已预置 resourceGroupId 时往「附加资源」段添加资源组，
+ *     最后过一道「校验」弹窗。
+ * 源码头部带 `// @ts-nocheck`，DOM 选择器对外部页面变化敏感。
+ */
+
 
 import { delay } from "./utils.js";
 import { productSectionUrl } from "../constants.js";
 import { hotelCandidateMatchesTier, hotelDiamondFromTier } from "../../../shared/hotel-tiers.js";
 
+/**
+ * 酒店资源阶段：
+ *   - 当行程含住宿时，根据 operations.hotelTier 转 diamond；
+ *   - 若酒店资源表中已配置同钻级现成资源则跳过；
+ *   - 否则打开「添加酒店」弹窗，按「酒店」触发 VBK 候选下拉，挑出与本地钻级一致的候选，
+ *     选中并提交保存，最后回读配置表确认新资源已经落库。
+ */
 export async function ensureHotelResource(page, product, productId) {
   const hotelTier = product.operations?.hotelTier;
   const diamond = hotelDiamondFromTier(hotelTier);
@@ -99,6 +114,13 @@ export async function ensureHotelResource(page, product, productId) {
   return { source: "vbk", resourceId: Number(hotelId), resourceName: selectedText, diamond, hotelTier };
 }
 
+/**
+ * 用车资源组阶段（仅私家团）：
+ *   - 当 operations.vehicleResource 已配置 resourceGroupId/Name 时，在车辆资源页的「附加资源」
+ *     段添加该资源组；若已存在则跳过添加，先清掉历史遗留项再加新项；
+ *   - 提报后等「校验」弹窗出现并通过；
+ *   - 非私家团 / 未预置资源都走 skipped 路径，不在自动化阶段里改 operations。
+ */
 export async function ensureVehicleResource(page, product, productId) {
   const vehicle = product.operations?.vehicleResource;
   if (product.sales.productForm !== "privateTour") return { skipped: "非私家团" };
@@ -174,4 +196,3 @@ export async function ensureVehicleResource(page, product, productId) {
   await validation.getByRole("button", { name: "确 定" }).click();
   return { resourceGroupId: vehicle.resourceGroupId, audited: true };
 }
-

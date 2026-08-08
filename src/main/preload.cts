@@ -1,3 +1,15 @@
+/**
+ * Electron preload（CommonJS）：通过 contextBridge 把 ipcRenderer.invoke 包装成 window.vbk，
+ * 避免 renderer 直接访问 ipcRenderer。
+ *
+ * 约定：
+ *   - 命名空间按业务域（projects / ai / research / browser / automation / debug /
+ *     accounts / settings / contacts / events / operationLog / planning）分组；
+ *   - 每个方法都是一段一行 ipcRenderer.invoke，args 顺序与主进程 handle 保持一致；
+ *   - events.onProjectUpdated 返回取消订阅函数，避免 renderer 误重复注册；
+ *   - 不同 IPC 边界异常穿透：主进程负责 try/catch 与本地化文案，preload 不做额外包装。
+ */
+
 import { contextBridge, ipcRenderer } from "electron";
 import type { VbkApi } from "../shared/contracts.js";
 

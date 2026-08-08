@@ -1,13 +1,31 @@
 // @ts-nocheck
-
+/**
+ * 行程描述面板的低层 DOM 帮助函数，被 itinerary/main.ts 与子 card 共同复用：
+ *   - dayScopeFor：从当天标题 textarea 反向定位「当天」的根 scope；
+ *   - ensureOtherCard / ensureServiceTimeRange：在 day scope 内准备「其他」节点 + 时间段；
+ *   - clickExact / clickByCandidates / clickLabelExact：表单 / 下拉里点文本或 label；
+ *   - cardsByPrefix：按 `td-day-card--` + 文本前缀过滤出某类 card 的多个匹配；
+ *   - ensureCheckboxChecked：勾复选框，但已勾时跳过，避免事件重复触发。
+ *
+ * 顶部带 `// @ts-nocheck`，DOM 是动态传入。
+ */
 import { delay, escapeRegExp } from "../utils.js";
 
+/**
+ * 从「当天标题 textarea」反查「当天」的根 scope（`td-day-item--...`），所有 day 级操作以此为根。
+ */
 export function dayScopeFor(titleInput) {
   return titleInput.locator(
     'xpath=ancestor::*[contains(@class,"td-day-item--")][1]',
   );
 }
 
+/**
+ * 在 dayScope 内保证「只有一个其他节点」：
+ *   - 多于 1 个时点击最后一个节点的删除按钮 + 弹窗确定（最多 20 * 100ms 等待移除）；
+ *   - 没有时通过 `td-add-box` / `td-add-plus-btn` / `td-add-item-btn-new` 打开下拉，选「其他」。
+ * afterFirstCard=true 时 addBox 取第 2 个（默认第 1 个），用于首日把「其他」挪到接送节点之后。
+ */
 export async function ensureOtherCard(page, dayScope, { afterFirstCard = false } = {}) {
   const otherCards = dayScope
     .locator('[class*="td-day-card--"]')
@@ -49,6 +67,12 @@ export async function ensureOtherCard(page, dayScope, { afterFirstCard = false }
   return otherCards.first();
 }
 
+/**
+ * 行程「可服务时间段」处理：只在「可服务时间段」label 存在时生效；
+ *   - 已有 radio 选中 / 已填时间则跳过；
+ *   - 否则用 clickByCandidates 试「全天」快捷按钮；
+ *   - 没有「全天」快捷按钮仅打 warning，不阻断流程。
+ */
 export async function ensureServiceTimeRange(dayScope, day) {
   const label = dayScope.getByText("可服务时间段", { exact: true });
   if (!(await label.count())) return;
@@ -71,6 +95,9 @@ export async function ensureServiceTimeRange(dayScope, day) {
   }
 }
 
+/**
+ * 在 scope 内点击第一个「可见 + 未选中」的精确文本匹配；全部不可用抛错。
+ */
 export async function clickExact(scope, label, description = label) {
   const matches = scope.getByText(label, { exact: true });
   const count = await matches.count();
@@ -84,6 +111,10 @@ export async function clickExact(scope, label, description = label) {
   throw new Error(`找不到可点击的${description}`);
 }
 
+/**
+ * 在 scope 内按 labels 顺序遍历：先 exact 文本，再空格容忍的正则宽松匹配，
+ * 第一个可见匹配就点击并 return true；都不命中返回 false。
+ */
 export async function clickByCandidates(scope, labels, description = "候选项") {
   const candidates = Array.isArray(labels) ? labels : [labels];
   for (const label of candidates) {
@@ -106,6 +137,10 @@ export async function clickByCandidates(scope, labels, description = "候选项"
   return false;
 }
 
+/**
+ * 在 dayScope 内按「文本以 prefix 开头」找出所有 card（剔除列表头 / 列表体 / 添加按钮等辅助节点）。
+ * 返回 BaseLocator 数组，便于后续链式操作。
+ */
 export async function cardsByPrefix(dayScope, prefix) {
   const base = dayScope.locator('[class*="td-day-card--"]');
   const all = await base.all();
@@ -120,6 +155,9 @@ export async function cardsByPrefix(dayScope, prefix) {
   return indices.map((idx) => base.nth(idx));
 }
 
+/**
+ * 点击「label 文本严格等于 label」的 ant-label；visible 且文本严格匹配才点，找不到抛错。
+ */
 export async function clickLabelExact(scope, label, description = label) {
   const labels = scope.locator("label").filter({ hasText: label });
   for (let index = 0; index < (await labels.count()); index += 1) {
@@ -132,6 +170,10 @@ export async function clickLabelExact(scope, label, description = label) {
   throw new Error(`找不到${description}标签`);
 }
 
+/**
+ * 给定复选框 / 父级 ant-checkbox-wrapper，已勾选时跳过；未勾选时 force click。
+ * 用 parentClass.includes("ant-checkbox-checked") 判定当前选中状态。
+ */
 export async function ensureCheckboxChecked(checkbox) {
   const parentClass = (await checkbox.locator("xpath=..").getAttribute("class")) ?? "";
   if (!parentClass.includes("ant-checkbox-checked")) {
@@ -139,3 +181,9 @@ export async function ensureCheckboxChecked(checkbox) {
   }
 }
 
+export async function ensureCheckboxChecked(checkbox) {
+  const parentClass = (await checkbox.locator("xpath=..").getAttribute("class")) ?? "";
+  if (!parentClass.includes("ant-checkbox-checked")) {
+    await checkbox.click({ force: true });
+  }
+}

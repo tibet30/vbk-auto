@@ -33,6 +33,11 @@ export interface SerialisedCookie {
 // 序列化侧：从 DB 拿出的 raw JSON → 经校验/过滤的 cookie 列表
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * 从 settings/login_sessions 表读出的 cookie JSON 字符串解析：
+ *   - JSON.parse 失败时返回空数组；
+ *   - 仅保留结构合法（object + name:string）的条目，下游不必再做 null 检查。
+ */
 export function parseCookies(raw: string): SerialisedCookie[] {
   try {
     const parsed = JSON.parse(raw);
@@ -50,6 +55,12 @@ export function parseCookies(raw: string): SerialisedCookie[] {
 // Electron `cookies.set/remove` 要求的 scheme + host。
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * 把 cookie 转换成 Electron `cookies.set` 要求的 scheme+host 字符串：
+ *   - 优先用 cookie.url；
+ *   - 否则根据 domain（去前缀点） + secure 拼出 https/http + host；
+ *   - 缺 domain 返回 null 让上层走 remove 接口。
+ */
 export function cookieUrl(cookie: SerialisedCookie): string | null {
   if (cookie.url) return cookie.url;
   if (!cookie.domain) return null;
@@ -59,6 +70,10 @@ export function cookieUrl(cookie: SerialisedCookie): string | null {
   return `${scheme}://${host}`;
 }
 
+/**
+ * 从完整 URL 反出 hostname，便于和 DB cookie 的 domain 字段对齐。
+ * URL 解析失败时返回空字符串。
+ */
 export function cookieDomain(url: string): string {
   try { return new URL(url).hostname || ""; } catch { return ""; }
 }
@@ -82,6 +97,12 @@ export function removeUrlFromCookie(cookie: Pick<Electron.Cookie, "domain" | "se
 // Electron `cookies.set` 期望的字面量。
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * DB 历史 cookie 的 sameSite 字段统一归一化到 Electron 字面量：
+ *   - lax / strict 直传；
+ *   - none 与 no_restriction 都映射为 no_restriction；
+ *   - 其它/缺失返回 unspecified。
+ */
 export function normaliseSameSite(value: SerialisedCookie["sameSite"]): "unspecified" | "no_restriction" | "lax" | "strict" {
   if (!value) return "unspecified";
   const lowered = String(value).toLowerCase();
@@ -91,6 +112,11 @@ export function normaliseSameSite(value: SerialisedCookie["sameSite"]): "unspeci
   return "unspecified";
 }
 
+/**
+ * DB cookie 的 expires 时间戳归一化：
+ *   - 非数 / 非正 / 无穷值返回 undefined 让 Electron 不写 expirationDate；
+ *   - 大于 1e12 自动按毫秒转秒（兼容旧 Playwright 数据）。
+ */
 export function normaliseExpiry(value: SerialisedCookie["expires"]): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
   // Electron 期望以秒为单位的 unix 时间戳；Playwright 已是同一口径，但保险起见

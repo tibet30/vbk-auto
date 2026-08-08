@@ -1,3 +1,14 @@
+/**
+ * 当前用户信息解析与归一化：
+ *   - fetchCurrentUserInfo：在 VBK 浏览器里调 /restapi/soa2/12405/getCurrentUserInfo，
+ *     回主进程后通过 decodeCurrentUserInfo 解码；
+ *   - decodeCurrentUserInfo：先搜 userInfo / currentUser，再广撒网递归找 partyId；
+ *     partyId 即 providerId（携程不同场景不同名字）。
+ *
+ * 顶部 `normalizeVbkDisplayName` 拒绝把数字 ID 之类当账号名展示；登录账号 `vbk_xxx`
+ * 仅匹配 vbk_* 形式，避免误把 partyId 当登录账号。
+ */
+
 import type { Page } from "playwright";
 
 /**
@@ -83,6 +94,12 @@ export function normalizeVbkLoginAccount(value: unknown): string {
   return /^vbk_[a-z0-9_-]+$/i.test(account) ? account : "";
 }
 
+/**
+ * 把 fetchCurrentUserInfo 返回的 payload 解析为 CurrentUserInfo：
+ *   - 1) 优先查 responseBody/data/result 的 userInfo / currentUser / user 等；
+ *   - 2) 拿不到时广撒网递归（深度 6）找 partyId；
+ *   - 任何阶段找不到返回 null（不掉链子，让上层决定用什么兜底）。
+ */
 function decodeCurrentUserInfo(payload: unknown): CurrentUserInfo | null {
   if (!payload || typeof payload !== "object") return null;
   const root = payload as Record<string, unknown>;
@@ -137,6 +154,10 @@ function decodeCurrentUserInfo(payload: unknown): CurrentUserInfo | null {
 const PARTY_ID_KEY_RE = /^(partyid|providerid|vendorid|party_id|provider_id|vendor_id)$/i;
 const NAME_KEY_RE = /^(username|displayname|name)$/i;
 const LOGIN_ACCOUNT_KEY_RE = /^(loginaccount|loginname|accountname|account|useraccount|usercode|loginid|userid|user_id|user_code)$/i;
+/**
+ * 在未知结构的 JSON 里（深度 ≤ 6）找 partyId / providerId / vendorId 任一字段；
+ * 命中时把同名对象里的 name / loginAccount 一并带回，避免后续再扫一遍。
+ */
 function searchPartyIdDeep(value: unknown, depth = 0): { value: number; name?: string; loginAccount?: string } | null {
   if (depth > 6 || value == null) return null;
   if (Array.isArray(value)) {
@@ -172,6 +193,9 @@ function searchPartyIdDeep(value: unknown, depth = 0): { value: number; name?: s
   return null;
 }
 
+/**
+ * 在未知结构 JSON 里（深度 ≤ 6）找以 vbk_ 开头的登录账号；找不到返回空字符串。
+ */
 function searchLoginAccountDeep(value: unknown, depth = 0): string {
   if (depth > 6 || value == null) return "";
   if (typeof value === "string") return normalizeVbkLoginAccount(value);
@@ -190,6 +214,9 @@ function searchLoginAccountDeep(value: unknown, depth = 0): string {
   return "";
 }
 
+/**
+ * 递归（深度 ≤ 6）尝试在 payload 里找 user 节点并抽出 name / account；找不到返回空对象。
+ */
 function extractVbkUser(value: unknown, depth = 0): { name?: string; account?: string } {
   if (depth > 6 || value == null || typeof value !== "object") return {};
   if (Array.isArray(value)) {
@@ -212,6 +239,9 @@ function extractVbkUser(value: unknown, depth = 0): { name?: string; account?: s
   return {};
 }
 
+/**
+ * 从 user 节点里抽 name / account 字段（trim + 非空才返回）。
+ */
 function extractUserFields(user: Record<string, unknown>): { name?: string; account?: string } {
   const name = typeof user.name === "string" ? user.name.trim() : "";
   const account = typeof user.account === "string" ? user.account.trim() : "";
@@ -221,6 +251,9 @@ function extractUserFields(user: Record<string, unknown>): { name?: string; acco
   };
 }
 
+/**
+ * 把任意 raw 转成正整数 partyId；字符串也能解析（携带「12345」之类场景），其它情况返回 null。
+ */
 function toPartyId(raw: unknown): number | null {
   if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return raw;
   if (typeof raw === "string") {

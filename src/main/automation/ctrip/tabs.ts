@@ -1,5 +1,27 @@
 
+/**
+ * Tab / Section 导航 + 安全保存 + save-then-advance 状态机：
+ *   - clickSection / clickSafeSave 是跨阶段共用的跳转与保存原语；
+ *   - waitForSectionEnabled / findUnlockedSectionLabel / findActiveTabLabel 用于探测下一个可点 tab；
+ *   - saveThenAdvance 实现「保存 → URL 落点 / tab 自动激活 / 下一步按钮 / 兜底 fallbackUrl」
+ *     的窄修复版状态机，被多个 phase handler 复用；
+ *   - submitCurrentSectionAndNext 单独点「提交审核并下一步」；
+ *   - openProductEditor / ensureBasicInfoTabVisible 负责跨产品的入口跳转与基本 tab 定位；
+ *   - isProductImageTextUrl 是 VBK productImageText 路径片段匹配。
+ *
+ * 顶部带 `// @ts-nocheck`，因为 page 与 locator 类型都是动态传入。
+ */
+
 // @ts-nocheck
+
+/**
+ * 「保存 → 进入目标 tab」状态机（窄修复版）：
+ *   1) 调 clickSafeSave 保存并吃「保存成功」弹窗；
+ *   2) 若 URL 已落点 / 目标 tab 已 active → auto-navigated；
+ *   3) 否则点「下一步」按钮，等待 URL / tab 落点 → navigated；
+ *   4) 仅目标 tab 解锁 → clickSection 落点 → tabUnlocked；
+ *   5) 都不命中 → 若有 fallbackUrl 则直接导航；再不行就抛错。
+ */
 async function saveThenAdvance(page, options) {
   const {
     phase,
@@ -96,6 +118,10 @@ async function saveThenAdvance(page, options) {
   );
 }
 
+/**
+ * 在候选 label 中找第一个 tab：可见且 aria-disabled != "true"。命中返回 label，否则 null。
+ * 用于 saveThenAdvance 探测目标 tab 是否已经被前序保存解锁。
+ */
 async function findUnlockedSectionLabel(page, labels) {
   const candidates = Array.isArray(labels) ? labels : [labels];
   for (const label of candidates) {
@@ -121,6 +147,12 @@ import { delay, pollUntil, safeClick } from "./utils.js";
 import { closeBlockingDialogs, dismissKnownNoticeDialogs } from "./dialogs.js";
 import { productEditorUrl } from "../constants.js";
 
+/**
+ * 点击 section / tab，优先按 role=tab 定位（新版 VBK 顶层 tab），再回退到精确文本；
+ *   - 命中已 selected / ant-tabs-tab-active 时直接 return；
+ *   - 命中 disabled / aria-disabled 时记下 disabledLabel，最后统一抛错；
+ *   - URL 含 packageManage / priceInventory / newResourceRule 时直接 return（不重复导航）。
+ */
 async function clickSection(page, labels) {
   const candidates = Array.isArray(labels) ? labels : [labels];
   let disabledLabel = "";
@@ -175,6 +207,10 @@ async function clickSection(page, labels) {
   throw new Error(`找不到"${candidates.join(" / ")}"入口`);
 }
 
+/**
+ * 轮询（间隔 250ms，最多 timeoutMs）直到候选 label 任一 tab 可见且 aria-disabled != "true"；
+ * 超时抛错，常用于保存之后等下一个 tab 解锁。
+ */
 async function waitForSectionEnabled(page, labels, timeout = 15_000) {
   const candidates = Array.isArray(labels) ? labels : [labels];
   const deadline = Date.now() + timeout;
@@ -197,6 +233,12 @@ async function waitForSectionEnabled(page, labels, timeout = 15_000) {
   throw new Error(`产品信息保存后仍未解锁"${candidates.join(" / ")}"，已停止后续录入。`);
 }
 
+/**
+ * 按顺序尝试 names 里的按钮名（如「保存」/「保存并下一步」）：
+ *   - 先用 getByRole({ name, exact: true }) 精确定位；
+ *   - 找不到再回退到「文本严格相等（去空白）」扫所有按钮；
+ * 命中后点击 + 顺手 dismissKnownNoticeDialogs。找不到抛出。
+ */
 async function clickSafeSave(page, names) {
   for (const name of names) {
     const button = page.getByRole("button", { name, exact: true });
@@ -224,6 +266,9 @@ async function clickSafeSave(page, names) {
   throw new Error(`找不到安全保存按钮：${names.join("、")}`);
 }
 
+/**
+ * 直接点「提交审核并下一步」按钮并 assert 唯一可见，用于部分 phase 末尾一次性提交。
+ */
 async function submitCurrentSectionAndNext(page) {
   const label = "提交审核并下一步";
   const button = page.getByRole("button", { name: label, exact: true });
@@ -234,6 +279,11 @@ async function submitCurrentSectionAndNext(page) {
   return { action: label };
 }
 
+/**
+ * 探测候选 label 当前是否有「active」tab（aria-selected=true 或 class 含 ant-tabs-tab-active）：
+ *   - timeoutMs = 0 立即返回；
+ *   - timeoutMs > 0 轮询 150ms 直到命中或超时。
+ */
 async function findActiveTabLabel(page, labels, timeoutMs = 0) {
   const candidates = Array.isArray(labels) ? labels : [labels];
   const probe = async () => {
@@ -289,6 +339,12 @@ declare function assertCount(locator: any, expected: number, description: string
  *      都不命中 → 抛错。
  */
 
+/**
+ * 跳到 productEditorUrl 并等 baseInfoMerge / tourdays 路径之一落点：
+ *   - 当前已经在这个产品路径上（且不在外层 URL）则不重复跳转，可选 stayOnCurrentTab；
+ *   - 通过 window.location.href 在浏览器内导航（保留 CSP / 不走 goto 防误刷新）；
+ *   - 落点后等「基本信息」文本出现，便于后续 phase 进一步操作。
+ */
 async function openProductEditor(page, productId, options = {}) {
   const { stayOnCurrentTab = false } = options;
   const targetUrl = productEditorUrl(productId);
@@ -310,6 +366,9 @@ async function openProductEditor(page, productId, options = {}) {
   await page.getByText("基本信息", { exact: true }).first().waitFor({ timeout: 30_000 });
 }
 
+/**
+ * 「基本信息」tab 可见性兜底：若当前不可见则按 role=tab 试「基本信息」/「产品信息」点开。
+ */
 async function ensureBasicInfoTabVisible(page) {
   const visible = await page.getByText("基本信息", { exact: true }).first().isVisible().catch(() => false);
   if (visible) return;

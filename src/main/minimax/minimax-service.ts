@@ -1,3 +1,13 @@
+/**
+ * MiniMax / Evolink 客户端封装（MiniMaxService）及其周边工具：
+ *   - 调用聊天接口完成规划对话（reply），内置结构化输出解析与重试；
+ *   - 调用诊断接口给出自动录入失败的下一步建议（diagnoseAutomationFailure）；
+ *   - 在 VBK 下拉候选项本地无法精确匹配时调用消歧接口（disambiguateOption）。
+ *
+ * 任何 OpenAI SDK 抛出的异常都会被 providerError() 归一化为 MiniMaxServiceError，
+ * 外层调用方按 errorCode 决定 retry / 回退 / 报错。
+ */
+
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
 import {
@@ -13,15 +23,28 @@ import {
 } from "./minimax-constants.js";
 import { parseAssistantMessage } from "./minimax-parsing.js";
 
+/**
+ * 单轮回复的 OpenAI 客户端超时（毫秒）：优先读取环境变量 MINIMAX_REPLY_TIMEOUT_MS，
+ * 但要求至少 30s，否则回退到默认值 90_000，避免误把合理的等待时间截短。
+ */
 function replyTimeout() {
   const parsed = Number(process.env.MINIMAX_REPLY_TIMEOUT_MS);
   return Number.isFinite(parsed) && parsed >= 30_000 ? parsed : 90_000;
 }
 
+/**
+ * 读取 MiniMax 服务等级（"priority" / "standard"）；默认 standard，
+ * 仅当环境变量显式设置为 "priority" 才使用付费优先级通道。
+ */
 function miniMaxServiceTier() {
   return process.env.MINIMAX_SERVICE_TIER === "priority" ? "priority" : "standard";
 }
 
+/**
+ * 从产品 JSON 中按 kind（province / city / spot / station）抽取 disambiguation 需要的最小上下文：
+ * 比如 spot 类型只暴露行程中所有 spots + presentation.recommendation/failures 等线索，
+ * 用于在选则时让模型知道「产品主要讲哪里」。
+ */
 function parseDisambiguateContext(product: Record<string, unknown>, kind: DisambiguateRequest["kind"], desired: string): Record<string, unknown> {
   const ctx: Record<string, unknown> = { desired };
   const basic = (product.basicInfo as Record<string, unknown> | undefined) ?? {};
@@ -46,16 +69,38 @@ function parseDisambiguateContext(product: Record<string, unknown>, kind: Disamb
   return ctx;
 }
 
+/**
+ * MiniMax（及其兼容代理，provider="deepseek" 即 Evolink）客户端封装。
+ * 负责三件事：连通性 ping、规划对话（reply）、自动化失败诊断（diagnoseAutomationFailure）、
+ * 以及本地精确匹配失败时的下拉选项消歧（disambiguateOption）。每个公共方法都把 OpenAI 异常
+ * 归一化为 MiniMaxServiceError 并由调用方按 code 决定下一步动作。
+ */
 export class MiniMaxService {
+  /**
+   * 构造 MiniMaxService。
+   * @param config.apiKey 必须，否则调用任何方法都会抛 provider_not_configured
+   * @param config.baseUrl OpenAI 兼容 baseURL
+   * @param config.model 当前默认模型
+   * @param config.provider "deepseek" 表示走 Evolink，否则走 MiniMax 默认参数
+   */
   constructor(private readonly config: { apiKey: string; baseUrl: string; model: string; provider?: string }) {}
+  /** 当前 provider 是否为 DeepSeek/Evolink，用于切换 OpenAI 参数（thinking / reasoning_split 等不支持）。 */
   private get isDeepSeek() { return this.config.provider === "deepseek"; }
   // 错误消息中显示的 provider 名：provider 为 "deepseek" 时显示 "Evolink"，否则默认 "MiniMax"。
   private get providerLabel() { return this.isDeepSeek ? "Evolink" : "MiniMax"; }
+  /**
+   * 构造一个禁用自动重试的 OpenAI 客户端：单轮规划请求必须显式失败，
+   * 而非被 SDK 默认重试拖到分钟级，便于上层按 code 决定续跑 / 终止。
+   */
   private client(timeout: number) {
     // A planning turn must fail visibly instead of silently retrying for minutes.
     return new OpenAI({ apiKey: this.config.apiKey, baseURL: this.config.baseUrl, timeout, maxRetries: 0 });
   }
 
+  /**
+   * 用一句「ping」测试当前 apiKey / 模型是否可用；任何 OpenAI 异常都会被归一化抛出。
+   * 仅用于设置页和诊断页的连接测试，不会进入主链路。
+   */
   async testConnection(): Promise<void> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `请先填写 ${this.providerLabel} API Key。`);
     const client = this.client(20_000);
@@ -70,6 +115,12 @@ export class MiniMaxService {
     } catch (error) { this.throwProviderError(error); }
   }
 
+  /**
+   * 主链路规划对话：以 systemPrompt + history + 用户本轮输入向 AI 请求一次结构化补全，
+   * 解析得到 AiResponse（reply / patch / questions / researchTasks），期间对 invalid_model_output
+   * / empty_model_output 等可重试错误最多重试 4 次；最终抛 MiniMaxServiceError。
+   * 区分首版生成（强制携带 patch）与对话微调（patch 可选但仍要走结构化）。
+   */
   async reply(input: { message: string; product: Record<string, unknown>; history: Array<{ role: string; content: string }> }): Promise<AiResponse> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const client = this.client(replyTimeout());
@@ -243,6 +294,13 @@ export class MiniMaxService {
     throw lastError ?? new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 未返回可写入的产品方案，请重试。`);
   }
 
+  /**
+   * 当 VBK 自动化阶段多次失败时调用 AI 做诊断：传入最小化失败上下文（阶段 / attempt / error /
+   * productId 是否存在 / basicInfo 是否已存 / 已完成阶段 / 历史诊断），模型必须通过
+   * submit_failure_diagnosis 工具回 action（retry / reload / wait_for_user），
+   * 由 orchestrator 决定继续自动重试还是回到 needs_user。返回的 outcome.userInstruction
+   * 字段仅在 action = wait_for_user 时有意义。
+   */
   async diagnoseAutomationFailure(input: AdvisorRequest): Promise<AdvisorOutcome> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const startedAt = Date.now();
@@ -298,8 +356,9 @@ export class MiniMaxService {
 
   /**
    * 歧义消除：本地精确匹配不到时，发给 AI 判断。
-   * - kind=province/city/spot/station 决定 prompt 约束。
-   * - 返回 pickedText=null 表示“错误人选”，调用方应该跳过。
+   *   - kind=province/city/spot/station 决定 prompt 约束。
+   *   - 返回 pickedText=null 表示"无法决定 / 应当跳过"，由调用方继续 fallback。
+   *   - 当模型返回的 pickedText 不在 candidates 文本中时也会被强制清成 null，防止 AI 自创 ID/文本。
    */
   async disambiguateOption(input: DisambiguateRequest): Promise<DisambiguateOutcome> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
@@ -360,6 +419,11 @@ export class MiniMaxService {
     }
   }
 
+  /**
+   * 用给定客户端发送 chat.completions 请求并取回首个 choice.message；返回时同时附带 traceId
+   * （尝试从响应头 trace-id / trace_id / request_id 中取），便于在 DevTools / 日志里串起一次请求。
+   * 若接口未返回任何 message，抛 empty_model_output 供上层触发重试。
+   */
   private async complete(client: OpenAI, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
     const baseParams = {
       model: this.config.model, messages, temperature: 0.1, max_completion_tokens: 8192,
@@ -380,6 +444,15 @@ export class MiniMaxService {
     return { message, traceId: result.response.headers.get("trace-id") || result.response.headers.get("trace_id") || result.request_id || undefined };
   }
 
+  /**
+   * 把 OpenAI SDK 抛出的任意错误归一化为 MiniMaxServiceError：
+   *   - AuthenticationError → provider_authentication
+   *   - RateLimitError      → provider_rate_limit
+   *   - APIConnectionTimeoutError → provider_timeout
+   *   - APIConnectionError  → provider_connection
+   *   - 其他                → provider_error
+   * 注意：不会包装 MiniMaxServiceError 自身，避免外层 code 被覆写丢失信息。
+   */
   private providerError(error: unknown): MiniMaxServiceError {
     if (error instanceof MiniMaxServiceError) return error;
     const label = this.providerLabel;
@@ -390,6 +463,9 @@ export class MiniMaxService {
     return new MiniMaxServiceError("provider_error", `${label} 服务暂时无法完成本次请求。`);
   }
 
+  /**
+   * 把任意错误归一化为 MiniMaxServiceError 并抛出（never 返回值），用于不希望吃异常的同步失败点。
+   */
   private throwProviderError(error: unknown): never {
     throw this.providerError(error);
   }

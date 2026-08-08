@@ -1,4 +1,11 @@
-// @ts-nocheck
+/**
+ * ctrip 自动化阶段公开 API 聚合 re-export：
+ *   - sale-control / tabs / basic-info / presentation / itinerary / package / pricing
+ *     / resources / publish / screenshot / utils / sale-control.workflow；
+ *   - 保持原有导入路径兼容，外部代码只需 `import { fillAndSaveBasicInfo, ... } from "../ctrip/ctrip.js"`。
+ *
+ * 顶部带 `// @ts-nocheck`，是单一聚合层不做类型校验。
+ */
 
 export { inspectProductList, configureProductShell, createProductShell } from "./sale-control/sale-control.js";
 export {

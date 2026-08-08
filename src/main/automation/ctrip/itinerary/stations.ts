@@ -1,4 +1,12 @@
 // @ts-nocheck
+/**
+ * 行程中的「接送站」子模块：
+ *   - selectStationAddress：在弹窗里为 airport / train 两个下拉填入 city，自动挑唯一匹配或
+ *     调用注入的 disambiguator（AI）做兜底消歧；
+ *   - fillPickupAndDropoff：首日 / 末日分别在「集合」「解散」card 里勾方式选项 + 调用上面填站；
+ *   - handleAirportTrainModal：当「请选择机场/火车站」modal 出现时的统一处理入口。
+ * 顶部带 `// @ts-nocheck`，依赖 debug 的 breakpoint 工具便于手动复现。
+ */
 
 import { delay, escapeRegExp } from "../utils.js";
 import { breakpoint } from "../../debug.js";
@@ -38,6 +46,9 @@ export async function selectStationAddress(page, card, city, extra = {}) {
     const dropdown = page.locator(
       '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
     ).last();
+    /**
+     * 收起遮罩型 ant-tooltip / ant-popover，让 select-dropdown 的可见性探测不被干扰。
+     */
     async function collapseOverlayTooltips() {
       await page.keyboard.press("Escape").catch(() => false);
       await delay(100);
@@ -164,6 +175,12 @@ export async function selectStationAddress(page, card, city, extra = {}) {
   await breakpoint("selectStationAddress:done");
 }
 
+/**
+ * 单天接送：首天 / 末日分别处理。
+ *   - 首天：在「集合」card 勾第 3 个 checkbox，再调用 selectStationAddress 填站；
+ *   - 末日：在「解散」card 勾第 2 个 checkbox，若 reusePickupForDropoff 则再勾第 3 个；
+ *   - 找到的 card / checkbox 数量不符 → 抛「结构异常」。
+ */
 async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations, extra = {}) {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product;
@@ -206,6 +223,10 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
   }
 }
 
+/**
+ * 处理「请选择机场/火车站」modal：先点开机场输入框填 city 找 `${city}机场`；再点火车输入框
+ * 找 `${city}`；最后确定。失败时按当前 enabled 的第一项兜底选择，返回是否成功关闭。
+ */
 async function handleAirportTrainModal(page, city) {
   const modalTitle = page.locator('.ant-modal-title').filter({ hasText: "请选择机场/火车站" });
   if ((await modalTitle.count()) === 0) return false;

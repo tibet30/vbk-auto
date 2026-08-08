@@ -1,5 +1,20 @@
+/**
+ * 阶段重试状态准备：
+ *   - preparePhaseRetry 用于「整体跑过但失败」的 AutomationRun，从失败阶段往后清回 pending，
+ *     之前的 completed 阶段保持 completed；
+ *   - prepareSinglePhaseRetry 用于「运营手动 / 跨状态」重跑某个阶段，不重置后续状态，
+ *     并把对应 phase 的 recovery 重置为 { attempts: [] }。
+ *
+ * 这两个函数只生成新的 AutomationRun，不触发实际执行；runner 负责按 plan 重新跑。
+ */
+
 import type { AutomationRun } from "../../shared/contracts.js";
 
+/**
+ * 准备「失败任务整段重跑」：要求 previous.status === "failed" 且目标阶段当前为 failed。
+ * 返回新的 AutomationRun：status=running，phases 里「目标之前已完成」保留 completed，
+ * 目标及之后阶段重置为 pending。
+ */
 export function preparePhaseRetry(
   previous: AutomationRun,
   phases: string[],

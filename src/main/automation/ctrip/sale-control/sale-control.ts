@@ -21,6 +21,10 @@ import {
   waitForPrimaryNextButton,
 } from "./sale-control.workflow.js";
 
+/**
+ * 探查产品列表页状态：是否存在「新增产品」按钮、可见行数、当前 URL 与页面 title。
+ * 用于初次登入页后的可用性检查（assertCount 检查新增按钮唯一）。
+ */
 async function inspectProductList(page) {
   const addButton = page.locator("a.clego-order-btn").filter({
     hasText: "新增产品",

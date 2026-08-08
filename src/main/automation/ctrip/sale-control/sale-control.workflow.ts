@@ -1,6 +1,21 @@
 // @ts-nocheck
+/**
+ * 销售控制（sale-control）相关流程级 helper：
+ *   - waitForProductIdFromUrl 轮询 URL 拿 productId（避开非 ivbk 路径）；
+ *   - pickVisiblePrimaryNextButton / pickFallbackNextButton 用「骨架屏内部按钮 / disabled
+ *     按钮」等多条件过滤，挑出真正可点的「下一步」；
+ *   - waitForPrimaryNextButton 在超时前同时尝试 primary 与 fallback；
+ *   - createProductShell 串联上面所有：点下一步 → 等 productId → 返回。
+ *
+ * 顶部带 `// @ts-nocheck`，参数 page / locator 是动态传入。
+ */
+
 import { delay } from "../utils.js";
 
+/**
+ * 等 page URL 落在 ivbk/vendor/... 路径后从 searchParams 中解析 productId；轮询 30s 后
+ * 仍找不到返回 null（让上层决定抛错）。
+ */
 async function waitForProductIdFromUrl(page) {
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
@@ -21,6 +36,10 @@ async function waitForProductIdFromUrl(page) {
   return null;
 }
 
+/**
+ * 挑第一个「可见、不 disabled、不在 #lingjie-skeleton 骨架屏里」的「下一步」按钮。
+ * 用于 saleControlMerge 等页面有多个同名按钮时选中真正可点的主操作按钮。
+ */
 async function pickVisiblePrimaryNextButton(page) {
   const nextButtons = page.getByRole("button", { name: "下一步", exact: true });
   const count = await nextButtons.count();
@@ -41,6 +60,10 @@ async function pickVisiblePrimaryNextButton(page) {
   return null;
 }
 
+/**
+ * 轮询直到任一「下一步」按钮（primary 或 fallback）可见且 enabled；超时抛错。
+ * 传 locator 是兜底用，实际先用 pickVisiblePrimaryNextButton 试主按钮。
+ */
 async function waitForPrimaryNextButton(page, locator, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -62,6 +85,10 @@ async function waitForPrimaryNextButton(page, locator, timeoutMs = 30_000) {
   throw new Error("下一步按钮未在预期时间内可见");
 }
 
+/**
+ * 从传入 locator 里挑第一个「可见 + enabled」的「下一步」按钮；用于当所有候选都被判定为
+ * 骨架屏内部 / disabled 时的兜底选择。
+ */
 async function pickFallbackNextButton(locator) {
   const count = await locator.count();
   for (let i = 0; i < count; i += 1) {
@@ -75,6 +102,10 @@ async function pickFallbackNextButton(locator) {
   return null;
 }
 
+/**
+ * 点「下一步」创建产品壳：先 pickVisiblePrimaryNextButton，再 fallback；点击后等 URL
+ * 出现 productId 即可；若 URL 已是 baseInfoMerge 但没 productId 则抛错让上层排查。
+ */
 async function createProductShell(page) {
   const nextButton = page.getByRole("button", { name: "下一步", exact: true });
   const filteredNextButton = await pickVisiblePrimaryNextButton(page);

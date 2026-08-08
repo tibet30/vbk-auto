@@ -1,8 +1,22 @@
 // @ts-nocheck
+/**
+ * sale-control 模块的低层控件 helper（按行 / 按控件类型拆分）：
+ *   - findRowByTitle 按 title 文本定位 saleControl-body 里的行；
+ *   - waitForRowEnabledSelect 等合同启用的 ant-select 出现；
+ *   - setEnabledSelectByLabel / setSplitGroupIfPresent / selectLineBrandFirstOption
+ *     安全地点开 / 选下拉（异常走 skipped，不抛错以免阻塞后续阶段）；
+ *   - checkAllEnabledDistributionChannels 批量勾选「分销渠道」，跳过泛定制-C 与 disabled 项。
+ *
+ * 头部带 `// @ts-nocheck`，形参 page 是动态传入。
+ */
 import { delay, escapeRegExp } from "../utils.js";
 import { dismissCustomizationModal } from "../dialogs.js";
 import { findFirstEnabledOptionIndex } from "../../schema/schema-functions.js";
 
+/**
+ * 在 saleControl-body 里按 title 文本精确匹配定位一行（容忍末尾「*」必填标记）。
+ * 用 escapeRegExp 包裹 label，保证 label 含元字符时也不会被 RegExp 误匹配。
+ */
 function findRowByTitle(page, label) {
   return page
     .locator(".saleControl-body .ant-row")
@@ -12,6 +26,10 @@ function findRowByTitle(page, label) {
     .first();
 }
 
+/**
+ * 等指定 row 内出现至少一个「可点击」的 ant-select-enabled（合同未禁用前不能点），
+ * 最多等 timeoutMs 默认 5s，返回是否等到。
+ */
 async function waitForRowEnabledSelect(page, row, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   const selector = ".ant-select.ant-select-enabled";
@@ -23,6 +41,10 @@ async function waitForRowEnabledSelect(page, row, timeoutMs = 5_000) {
   return false;
 }
 
+/**
+ * 在该 row 内第一个可用的 ant-select-enabled 里选 label 对应选项；
+ * 任何一步异常都返回 skipped 而不是抛错（合同未启用 / 选项不存在都安全跳过）。
+ */
 async function setEnabledSelectByLabel(page, row, label, description) {
   const enabledSelect = row.locator(".ant-select.ant-select-enabled").first();
   const count = await enabledSelect.count();
@@ -44,6 +66,10 @@ async function setEnabledSelectByLabel(page, row, label, description) {
   return { selected: label, description };
 }
 
+/**
+ * 找「是否拆团 / 是否独立成团 / 支持拆团」三组候选标题之一，wantSplit=true 时选「是」否则「否」。
+ * 任一命中即返回；都没命中返回 skipped = "split-group-row-not-found"。
+ */
 async function setSplitGroupIfPresent(page, wantSplit) {
   const candidates = ["是否拆团", "是否独立成团", "支持拆团"];
   for (const label of candidates) {
@@ -60,6 +86,10 @@ async function setSplitGroupIfPresent(page, wantSplit) {
   return { skipped: "split-group-row-not-found" };
 }
 
+/**
+ * 「线路品牌」行处理：若已经有值直接返回 reused；否则打开下拉挑第一个未禁用且非「暂无数据」项。
+ * 选项都被禁用 / 都是 placeholder 时抛错，让上层回退到 advisor。
+ */
 async function selectLineBrandFirstOption(page) {
   const row = findRowByTitle(page, "线路品牌");
   await row.waitFor({ state: "visible", timeout: 10_000 });
@@ -107,6 +137,13 @@ async function selectLineBrandFirstOption(page) {
   return { picked: texts[targetIndex] };
 }
 
+/**
+ * 「分销渠道」批量勾选：遍历所有 .ant-checkbox-wrapper，
+ *   - 跳过「泛定制-C」类定制渠道；
+ *   - 跳过 disabled 和已勾选项；
+ *   - 点完一次后回读状态，不成功时调用 dismissCustomizationModal 关闭可能弹出的泛定制弹层；
+ * 返回 picked / skippedDisabled / skippedAlreadyChecked / skippedCustomization / total 给上层。
+ */
 async function checkAllEnabledDistributionChannels(page) {
   const row = findRowByTitle(page, "分销渠道");
   await row.waitFor({ state: "visible", timeout: 10_000 });

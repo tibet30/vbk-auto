@@ -1,16 +1,33 @@
 // @ts-nocheck
-// 套餐价格库存 / 条款 / 基础资源校验辅助分层。
+/**
+ * 套餐价格库存与条款维护阶段的页面自动化：
+ *   - fillAndSubmitPricingInventory：进入「套餐价格库存」面板，打开「设置价格/库存」弹窗，
+ *     按 calendar 选起止日期、按 id 填入 adultActual / childActual / diffActual 等成本字段，
+ *     再点「发...审核」提交；
+ *   - fillAndSaveTerms：进入「条款维护」tab 写入 4 项条款文本，**绝不**触碰任何提审按钮；
+ *   - pickCalendarDate / dateTitle 单独导出供 tests 与别处复用。
+ *
+ * 源码头部带 `// @ts-nocheck`，DOM 选择器与日期控件耦合。
+ */
+
 
 import { delay, fillVisibleInputs } from "./utils.js";
 import { clickExact, ensureCheckboxChecked } from "./itinerary/itinerary.js";
 import { clickSection, clickSafeSave } from "./tabs.js";
 import { productSectionUrl } from "../constants.js";
 
+/**
+ * 把 ISO 日期字符串（YYYY-MM-DD）格式化成 ant-calendar td[title] 用的「YYYY年M月D日」形式。
+ */
 function dateTitle(date) {
   const [year, month, day] = date.split("-").map(Number);
   return `${year}年${month}月${day}日`;
 }
 
+/**
+ * 把日期选择器点开到目标 date：自动翻月最多 80 次直到定位到 `td[title="${title}"]`，
+ * 期间若 popup 没打开会再点一次输入框。失败抛错。
+ */
 async function pickCalendarDate(page, input, date) {
   const title = dateTitle(date);
   const alreadyOpen = await page.evaluate(() => {
@@ -73,6 +90,14 @@ async function pickCalendarDate(page, input, date) {
   throw new Error(`日期选择器无法定位 ${date}`);
 }
 
+/**
+ * 「设置价格/库存」弹窗全流程：
+ *   - 跳到 pricingInventory 分页，先点掉「我知道了」之类的引导；
+ *   - 等「设置价格/库存」按钮从 disabled 转可用；
+ *   - 选 radio=1、按 calendar 控件选起止日期、勾工作日全选、选是否限量；
+ *   - 按 adultActual / childActual / diffActual 等 id 填入 cost 各项；
+ *   - 点「发...审核」并等弹窗关闭；任何一步失败抛错。
+ */
 export async function fillAndSubmitPricingInventory(page, product, productId) {
   if (!product.commercial?.pricing || !product.commercial.inventory) throw new Error("缺少价格库存配置");
   const { pricing, inventory } = product.commercial;
@@ -192,6 +217,11 @@ export async function fillAndSubmitPricingInventory(page, product, productId) {
 }
 
 // 仅保存，不接入通用 helper。
+/**
+ * 「条款维护」tab 的保存：仅写入条款文本（包含 / 不含 / 预订须知 / 退改政策）到 4 个 textarea，
+ * 然后点保存/保存并下一步。**绝不**触碰任何「提审」按钮。
+ * 当「条款维护」tab 因套餐未保存而被禁用时返回 skipped。
+ */
 export async function fillAndSaveTerms(page, product) {
   // 绝不触碰任何「提审」 / 「提交审核」入口。
   if (!product.commercial?.terms) throw new Error("缺少条款配置");
@@ -218,4 +248,8 @@ export {
 };
 
 // source-slicing anchor（仅供测试切片识别，不在运行时使用）：
+/**
+ * 测试切片占位函数：实现见 ./resources.ts；保留此签名让 source-slicing 工具能识别资源相关代码段，
+ * 运行时不会调用。
+ */
 export async function ensureHotelResource(_page, _product, _productId) { return null; }

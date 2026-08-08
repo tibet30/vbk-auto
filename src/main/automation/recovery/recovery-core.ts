@@ -1,3 +1,12 @@
+/**
+ * 自动化阶段失败后的 recovery 状态机核心定义与共享 helper：
+ *   - MAX_PHASE_ATTEMPTS / DEFAULT_USER_INSTRUCTION 常量；
+ *   - RecoveryContext / RunPhaseOutcome 接口；
+ *   - isAdvisorAction / stripSensitive / isoNow / buildDiagnosisHistory / summarizeLog 工具函数。
+ *
+ * 主循环实现见 ./recovery-run.ts，本文件不依赖任何运行时，仅做状态机辅助逻辑。
+ */
+
 import type {
   AdvisorAction,
   AdvisorOutcome,
@@ -8,9 +17,16 @@ import type {
   RecoveryState,
 } from "../../../shared/contracts.js";
 
+/**
+ * 单阶段最多尝试次数（含首次）；达到上限后必须切到 needs_user。
+ */
 export const MAX_PHASE_ATTEMPTS = 3;
 
 const SAFE_ERROR_MAX = 280;
+
+/**
+ * 默认的「请人工核查」提示文案，在 advisor 抛错 / 返回非法形状时作为兜底。
+ */
 export const DEFAULT_USER_INSTRUCTION = "请在 VBK 手动确认后再次保存草稿。";
 
 export interface RecoveryContext {
@@ -55,6 +71,9 @@ const ADVISOR_ACTIONS: ReadonlyArray<AdvisorAction> = [
   "wait_for_user",
 ];
 
+/**
+ * 用白名单方式校验未知值是否在 4 种合法 advisor action 内（类型守卫）。
+ */
 export function isAdvisorAction(value: unknown): value is AdvisorAction {
   return (
     typeof value === "string" &&
@@ -76,6 +95,12 @@ interface PossiblyStructuredError {
  * - 优先取 message；
  * - 剥除 vbk 域名、11 位手机号、邮箱、Playwright `page.xxx(...)` 调用、css 选择器；
  * - 截断到 280 字符以避免把堆栈或大对象塞进 advisor 输入。
+ */
+/**
+ * 把错误对象压缩成 { message } 安全字符串：
+ *   - 优先 message；
+ *   - 脱敏：vbk URL / 手机号 / 邮箱 / Playwright 调用 / SQL-like select(...) 标签；
+ *   - 截断到 280 字符避免堆栈或大对象塞进 advisor 输入。
  */
 export function stripSensitive(error: unknown): SafeErrorShape {
   const raw = (() => {
@@ -102,6 +127,9 @@ export function stripSensitive(error: unknown): SafeErrorShape {
   return { message: safe };
 }
 
+/**
+ * 把当前时间格式化成 ISO 字符串；接收一个注入的 now() 让测试可以稳定时间戳。
+ */
 export function isoNow(now: () => Date): string {
   return now().toISOString();
 }
@@ -109,6 +137,10 @@ export function isoNow(now: () => Date): string {
 /**
  * 把已发生的 diagnosis 入栈，并严格裁剪成 4 字段（summary/rootCause/action/expectedEvidence），
  * 防止 userInstruction 或额外字段渗入下一轮 advisor 输入。
+ */
+/**
+ * 从已发生 attempts 中提取 advisor 用 history，每条仅保留 4 字段（不含 userInstruction），
+ * 防止多余字段渗入下一轮 advisor 请求。
  */
 export function buildDiagnosisHistory(
   attempts: ReadonlyArray<PhaseAttempt>,
@@ -140,6 +172,12 @@ interface ArgsLogShape {
  *
  * 当前 runPhaseWithRecovery 不在内部拼接 log，而是直接转发到 ctx.log；
  * 保留此 helper 以便未来需要写"安全摘要行"的场景（例如 phase summary 行）。
+ */
+/**
+ * 把任意 log 调用压成单行安全摘要（≤400 字符）：
+ *   - 字符串直传，截到 200；
+ *   - 对象走 JSON.stringify 截到 200；不可序列化时用 [unserializable]；
+ *   - 当前 runPhaseWithRecovery 不在内部拼接 log，保留此 helper 供未来需要写「phase summary」之类场景。
  */
 export function summarizeLog(parts: ArgsLogShape): string {
   const segs: string[] = [];

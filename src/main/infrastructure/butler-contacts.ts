@@ -1,3 +1,14 @@
+/**
+ * VBK 联系人卡片列表工具：
+ *   - listProviderContactCards：在已登录 VBK 上下文调 /restapi/soa2/17264/searchProviderContactCardList，
+ *     可带 searchKeyWord 服务端过滤；
+ *   - decodeContactCards：把不同返回结构（responseBody.contactCardList / cards / root 数组等）
+ *     解码为 ProviderContactCard[]。
+ *
+ * 复用 hotel-resource.ts 的 page.evaluate + fetch 模式：cookie 由 BrowserView
+ * 的 session 自动携带。
+ */
+
 import type { Page } from "playwright";
 import type { ProviderContactCard } from "../../shared/contracts.js";
 
@@ -61,6 +72,13 @@ interface RawContactCard {
   [key: string]: unknown;
 }
 
+/**
+ * 把 listProviderContactCards 拿到的 payload 解析为 ProviderContactCard[]：
+ *   - 支持 responseBody.contactCardList / responseBody.cards / root.contactCardList /
+ *     root.cards / root 是数组这 5 种返回结构；
+ *   - 仅保留 contactCardId 正整数 + displayName 非空的项；
+ *   - 其它字段挂到 extra 上，方便上层读取 phone / email 等。
+ */
 function decodeContactCards(payload: unknown, providerId: number): ProviderContactCard[] {
   if (!payload || typeof payload !== "object") return [];
   const root = payload as Record<string, unknown>;

@@ -57,22 +57,35 @@ import { isAsyncEncryptionAvailable, persistApiKeyAsync, loadApiKeyAsync } from 
 import { aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import { APP_NAME } from "../shared/brand.js";
 
+/** 项目根目录（指向 repository root），用来定位本地静态资源 / fixtures。 */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+/** 当前是否为开发模式（未打包），用于开关 DevTools / 临时文件路径。 */
 const isDev = !app.isPackaged;
 // 自动化通过 CDP 驱动内嵌的 VBK 页面，端口必须开着；但固定的 9222 可被
 // 本机任意进程预测并接管这个已登录会话，也会和其它 Chrome 实例抢占。
 // 改为每次启动随机取一个端口，并只监听回环地址。
+/** 随机生成回环调试端口（9300-9899）并仅监听 127.0.0.1：避免固定 9222 端口被本机其它进程劫持。 */
 const debuggingPort = String(9300 + Math.floor(Math.random() * 600));
 app.commandLine.appendSwitch("remote-debugging-port", debuggingPort);
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+/** MiniMax 默认 model：环境变量优先，否则用项目默认的「MiniMax-M3」。 */
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
 
 let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
 // 关闭窗口后 AI 或自动化可能仍在运行，向已销毁的 webContents 发送会抛异常。
+/**
+ * 向 renderer 广播「项目更新」事件：
+ *   - 关闭窗口后 webContents 可能销毁，因此先 isDestroyed 判定；
+ *   - 这条事件供 UI 实时刷新项目详情 / 操作日志。
+ */
 const emitProject = (project: ProjectDetail) => {
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
   window.webContents.send("project:updated", project);
 };
+/**
+ * 把 settings 表中的字段聚合成对外的 Settings 对象（含 hasKey 这类派生布尔）。
+ * 当 db 里没值时回落到默认值；用于 UI 渲染 / IPC 拿 setting 时不必关心落库字段。
+ */
 const getSettings = (): Settings => ({
   aiProvider: isAiProvider(db.getSetting("aiProvider")?.value) ? db.getSetting("aiProvider")!.value as AiProvider : "minimax",
   minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || "https://api.minimaxi.com/v1",
@@ -83,10 +96,21 @@ const getSettings = (): Settings => ({
   hasDeepSeekKey: Boolean(db.getSetting("deepseekApiKey")),
   dataPath: app.getPath("userData"),
 });
+/**
+ * 异步加载指定 provider 的真实 API Key：
+ *   - 走 secure storage（操作系统级加密），避免明文落 settings 表；
+ *   - provider 决定查 deepseekApiKey 还是 minimaxApiKey 字段。
+ */
 async function apiKey(provider: AiProvider = getSettings().aiProvider) {
   const settingName = provider === "deepseek" ? "deepseekApiKey" : "minimaxApiKey";
   return loadApiKeyAsync(db, settingName);
 }
+/**
+ * 按当前 settings 构造 MiniMaxService：
+ *   - provider=deepseek 时切到 Evolink baseUrl/model；
+ *   - apiKey 通过 secure-storage 异步读取；
+ *   - snapshot 可注入，用于在 IPC 上下文里使用「最新 settings」构造服务（避免双重读盘）。
+ */
 async function aiService(snapshot?: Settings) {
   const settings = snapshot ?? getSettings();
   const isDeepSeek = settings.aiProvider === "deepseek";
@@ -97,6 +121,11 @@ async function aiService(snapshot?: Settings) {
     provider: settings.aiProvider,
   });
 }
+/**
+ * 在 VBK 已登录的前提下，把当前账号信息写回 settings + 触发 providerId 异步刷新：
+ *   - 页面抓不到账号名时优先沿用本机上次记录，不再回退到某个固定值（避免错标）；
+ *   - 登录完后开始异步 scheduleProviderIdRefresh，写到 settings(providerIdByAccount:<name>)。
+ */
 function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   if (!status.loggedIn) return status;
   // 页面抓取不到账号名时只沿用本机上次记录，不再回退到某个固定账号：
@@ -121,6 +150,10 @@ function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   const accounts = Array.from(new Set([...(status.accounts || []), accountName].filter(Boolean)));
   return { ...status, accountName, accounts };
 }
+/**
+ * 计算项目 readiness：把项目当前状态、已保存自动化运行、是否阻塞等映射到对外的 ProjectReadiness。
+ * 用于 UI 顶栏显示与 IPC 路由。
+ */
 function readiness(projectId: string): ProjectReadiness {
   const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
   const issues: ProjectReadiness["issues"] = [];
@@ -147,6 +180,10 @@ function readiness(projectId: string): ProjectReadiness {
   return { ready: issues.length === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, issues.length)) / 12) * 100), issues };
 }
 
+/**
+ * 创建主窗口并加载 renderer 入口；遵循 isDev 决定是否打开 DevTools。
+ * 调用 registerIpc() 在窗口出现之前就注册好，避免 renderer 提前触发未注册 handler。
+ */
 async function createWindow() {
   window = new BrowserWindow({ width: 1512, height: 982, minWidth: 1180, minHeight: 760, title: APP_NAME, backgroundColor: "#fafafa", webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(root, "dist-electron", "main", "preload.cjs") } });
   if (isDev) await window.loadURL("http://127.0.0.1:5173"); else await window.loadFile(path.join(root, "dist", "index.html"));
@@ -189,6 +226,13 @@ async function createWindow() {
   });
 }
 
+/**
+ * 注册全部 ipcMain.handle：
+ *   - 项目相关：CRUD / readiness / applyProductPatchSafe / vehicle / hotel resolve 等；
+ *   - AI 相关：connectionTest / fetchAiModelList / saveApiKey / planner run / advisor；
+ *   - VBK 浏览器相关：getCurrentUserInfo / saveCurrentSession / switchAccount / forgetAccount。
+ * 单文件较长，未来拆分计划与 code review 一起做。
+ */
 function registerIpc() {
   ipcMain.handle("projects:list", () => db.listProjects());
   ipcMain.handle("projects:create", (_event, input: CreateProjectInput) => {
@@ -780,6 +824,11 @@ function registerIpc() {
   });
 }
 
+/**
+ * 在主进程内直接抓当前 VBK 页面的 providerId 并落库：
+ *   - 失败仅 console.warn，不抛错（IPC 端也能安静处理）；
+ *   - 同时把当前登录账号名从 settings 读出后写回 settings(providerIdByAccount:)。
+ */
 async function detectProviderIdInMain(): Promise<number | null> {
   try {
     const page = await browser.page();
@@ -792,6 +841,10 @@ async function detectProviderIdInMain(): Promise<number | null> {
     return null;
   }
 }
+/**
+ * 预留：固定信息变化时不需要广播项目更新。
+ * 仅保留签名以兼容未来扩展（比如联系人卡片变化后想主动推到 renderer）。
+ */
 function emitProjectIfKnown(_accountName: string, _info: unknown) { /* 预留：固定信息变化不需要广播项目更新 */ }
 
 app.whenReady().then(async () => {

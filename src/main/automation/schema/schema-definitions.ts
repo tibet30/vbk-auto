@@ -1,3 +1,14 @@
+/**
+ * 产品 JSON 完整 zod schema 定义 + 共享常量：
+ *   - itineraryDaySchema / presentationSchema / bookingControlsSchema / operationsSchema /
+ *     commercialSchema 等逐字段定义；
+ *   - productSchema：顶层全字段校验（含 release.submitReview / publishAfterApproval 默认 false）；
+ *   - HHMM_REGEX：被 ./schema-functions.ts 复用；
+ *   - RECOMMENDATION_CATEGORIES：「推荐理由」分类白名单，共 15 项。
+ *
+ * 顶级 schema 用 strict 模式拒绝额外字段，保持前后端契约稳定。
+ */
+
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
 

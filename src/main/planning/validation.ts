@@ -63,11 +63,17 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * 把 unknown 安全转成 plain record（排除 null / 数组 / 原始类型）。
+ */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
 }
 
+/**
+ * 把 unknown 安全转成数组（非数组返回 undefined），用于遍历校验。
+ */
 function asArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined;
 }
@@ -231,10 +237,9 @@ export function deepValidateModules(args: {
     } else {
       const reasons: string[] = [];
       if (!(typeof release.publicPriceCeiling === "number" && release.publicPriceCeiling > 0)) reasons.push("release.publicPriceCeiling 必须 > 0");
-      // 历史 / 人工 / VBK 标记的 release.submitReview / publishAfterApproval=true
-      // 不再被视为 invalid：product-normalize 默认保留这些标记，只有 AI / patch
-      // 路径会传 safeRelease=true 强制清零。让 deep validation 把这两个 boolean
-      // 视为合法存在，避免 false-success 防不住反而回退历史发布标记。
+      // release.submitReview / publishAfterApproval：当前 schema 允许任意 boolean。
+      // AI 自动写入路径仍由 stage-runner.sanitiseModuleValue 强制置 false，
+      // 这里不再针对发布态单独发 invalid。
       if (reasons.length > 0) invalid.push({ module: "release", status: "rejected", reason: reasons.join("；"), });
     }
   }

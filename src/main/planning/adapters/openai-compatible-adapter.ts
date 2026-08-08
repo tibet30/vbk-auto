@@ -176,6 +176,10 @@ research 阶段是本地 deterministic 生成；你不需要主动返回任何�
 9. 不要再返回顶级 question / researchTasks 字段：question 已合并到 module.reason；research tasks 由本地 deterministic 生成。AI 不能自行声明核查结果。`;
 }
 
+/**
+ * 组装阶段 user message：含项目骨架、已落地模块、已有 research tasks、上轮失败原因、当前产品草稿。
+ * 注意 supplierProductCode 在 prompt 中标注为「AI 不可修改」。
+ */
 function composeUserMessage(request: PlannerRequest): string {
   const { stage, context, previousError } = request;
   const lines: string[] = [];

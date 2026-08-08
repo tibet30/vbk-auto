@@ -1,3 +1,11 @@
+/**
+ * VBK 用车资源组查询与匹配：
+ *   - buildVehicleResourceQuery：把「城市 / 天数 / 座位 / 车级 / 时长」拼成搜索关键字；
+ *   - extractResourceGroups / firstResourceGroup / bestResourceGroup：广撒网挑第一条 / 按预算挑最贴；
+ *   - resolveVehicleResource：主入口，整体在 VBK 接口里选一份真实资源写入产品，
+ *     永不伪造金额（这是审计点修复之一）。
+ */
+
 import type { Page } from "playwright";
 import type { ProjectDetail } from "../../shared/contracts.js";
 
@@ -34,20 +42,32 @@ export interface ResolvedVehicleResource {
   supplierCode?: string;
 }
 
+/**
+ * 把 unknown 转成正整数；非整数 / 非正数返回 undefined。
+ */
 function positiveInteger(value: unknown) {
   const numberValue = Number(value);
   return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : undefined;
 }
 
+/**
+ * 把 unknown 转成正数（含小数）；非数 / 非正数返回 undefined。
+ */
 function positiveNumber(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
 }
 
+/**
+ * 把 unknown 转成 trim 后的字符串，非字符串返回 ""。
+ */
 function textValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * 从 record 的多个候选 key 中按顺序取第一个非空字符串。
+ */
 function firstText(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = textValue(record[key]);
@@ -56,6 +76,9 @@ function firstText(record: Record<string, unknown>, keys: string[]) {
   return undefined;
 }
 
+/**
+ * 从 record 的多个候选 key 中按顺序取第一个正整数。
+ */
 function firstNumber(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = positiveInteger(record[key]);
@@ -89,6 +112,10 @@ export function buildVehicleResourceQuery(input: VehicleResourceEstimateInput): 
   };
 }
 
+/**
+ * 递归遍历 payload，找到所有同时含 resourceGroupId + resourceGroupName 的对象；
+ * 用 seen WeakSet 防环。返回候选数组（不解析）。
+ */
 export function extractResourceGroups(payload: unknown) {
   const groups: Array<Record<string, unknown>> = [];
   const seen = new Set<unknown>();
@@ -112,6 +139,10 @@ export function extractResourceGroups(payload: unknown) {
   return groups;
 }
 
+/**
+ * 从 payload 里取第一个资源组并解析为 ResolvedVehicleResource；找不到返回 undefined。
+ * 用于「只要一个就行」的粗匹配场景。
+ */
 export function firstResourceGroup(payload: unknown) {
   const groups = extractResourceGroups(payload);
   if (!groups.length) return undefined;
@@ -123,6 +154,12 @@ export function firstResourceGroup(payload: unknown) {
  * 从资源组列表中选最接近目标日租价的一项。
  * 如果没有提供 targetDailyCost 或找不到价格匹配，退回到 firstResourceGroup。
  * 搭配 20% 的容差范围（target ± 20%），超出范围的条目直接跳过。
+ */
+/**
+ * 从 payload 资源组中按价格选最贴近 targetDailyCost 的项：
+ *   - 容差 ±20%，超容差跳过；
+ *   - 同等距离按价格绝对差排序；
+ *   - 没传 target 时 / 没命中时退回到 firstResourceGroup。
  */
 export function bestResourceGroup(payload: unknown, targetDailyCost?: number) {
   const groups = extractResourceGroups(payload);
@@ -154,6 +191,12 @@ export function bestResourceGroup(payload: unknown, targetDailyCost?: number) {
   return parseResourceGroup(record);
 }
 
+/**
+ * 把单个资源组记录解析为 ResolvedVehicleResource：
+ *   - id / name 同时存在才返回，否则 undefined；
+ *   - resourceGroupMaxItemPrice 支持多个别名（maxItemPrice / maxPrice / price）；
+ *   - 其余字段视存在性选择写不写。
+ */
 function parseResourceGroup(record: Record<string, unknown>) {
   const resourceGroupId = firstNumber(record, ["resourceGroupId", "resourceGroupID", "groupId", "id"]);
   const resourceGroupName = firstText(record, ["resourceGroupName", "groupName", "name", "resourceName"]);
@@ -174,6 +217,10 @@ function parseResourceGroup(record: Record<string, unknown>) {
   };
 }
 
+/**
+ * 在 VBK 页面上下文 fetch /restapi/soa2/15638/searchResourceGroup，参数为 resourceGroupName（座位+车型）。
+ * 按 cid 拼 x-traceID，回 raw payload（JSON.parse 失败保留文本），非 2xx 抛错。
+ */
 export async function searchVehicleResourceGroups(page: Page, query: string) {
   return page.evaluate(async ({ query: resourceGroupName }) => {
     const readCookie = (name: string) => {
@@ -217,6 +264,14 @@ export async function searchVehicleResourceGroups(page: Page, query: string) {
   }, { query });
 }
 
+/**
+ * 主入口：用 VBK 资源组搜索接口为 project 找一份车辆资源；
+ *   - 拿 estimate（城市/天数/座位/车级）→ 接口查询 → bestResourceGroup 选最佳；
+ *   - 未命中时退而求其次用「仅座位数」再次搜索；
+ *   - 仍未命中则保留原 product，加 note 说明，让运营人工干预；
+ *   - 命中时把资源组真实价格（resourceGroupMaxItemPrice）写入 operations.vehicleResource，
+ *     永不伪造金额（这是之前被审计为虚构车队价格的修复点）。
+ */
 export async function resolveVehicleResource(page: Page, project: ProjectDetail) {
   const product = project.product;
   const basic = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo) ? product.basicInfo as Record<string, unknown> : {};

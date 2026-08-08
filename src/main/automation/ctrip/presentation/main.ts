@@ -1,5 +1,12 @@
 // @ts-nocheck
-// 产品图文页（productImageText）：封面、推荐语、推荐理由 3 条、产品特点。
+/**
+ * 产品图文页（productImageText）页面层：
+ *   - selectCtripLibraryImage / selectCtripLibraryCover：在「从图库资源导入」弹窗里搜索 poi 并按
+ *     质量 / 分辨率要求挑图，确认协议并提交；
+ *   - fillAndSavePresentation：跳到产品图文 tab → 填推荐理由 → 上封面 → 填推荐语与产品特点 →
+ *     经 saveThenAdvance 推进到「行程描述」。
+ * 顶部带 `// @ts-nocheck`，形参 page 是动态传入。
+ */
 
 import { delay, assertCount } from "../utils.js";
 import { clickSection, saveThenAdvance } from "../tabs.js";
@@ -18,6 +25,14 @@ export interface LibraryImageParams {
   label: string;
 }
 
+/**
+ * 指定任意 trigger 元素触发的「携程图库导入」弹窗（适用于景点配图）：
+ *   - hover + 点「图库导入」；
+ *   - 弹窗里按 #PoiId 搜索 poi；
+ *   - 等若干次拿到候选列表 → 用 findBestCtripLibraryImage 选最佳；
+ *   - 同意协议 + 「同意并导入」+ 等弹窗消失。
+ * 找不到 / 不达标时给出包含 poi / minQuality / aspect 的详细错误信息。
+ */
 export async function selectCtripLibraryImage(page: any, params: LibraryImageParams) {
   const {
     trigger,
@@ -87,6 +102,10 @@ export async function selectCtripLibraryImage(page: any, params: LibraryImagePar
   return { reused: false };
 }
 
+/**
+ * 多个 candidate locator 中挑第一个可见的并 fill value；都不可见抛错。
+ * 用于 textarea 类控件在页面里有多个实例时只写可见那一个。
+ */
 async function fillFirstVisible(locator, value, description) {
   const count = await locator.count();
   for (let index = 0; index < count; index += 1) {
@@ -99,12 +118,20 @@ async function fillFirstVisible(locator, value, description) {
   throw new Error(`找不到${description}`);
 }
 
+/**
+ * 判断产品图文页当前是否已经有「封面图」（image-category-container 内 .drag-nav-container 有 img）。
+ * 用于封面图选择阶段的「已存在则跳过」快路径。
+ */
 export async function hasCoverImage(page) {
   const cover = page.locator(".image-category-container").filter({ hasText: /^\*?封面/ }).first();
   if (!(await cover.count())) return false;
   return (await cover.locator(".drag-nav-container img").count()) > 0;
 }
 
+/**
+ * 在携程图库弹窗内按 id 拿搜索 input + 键入 value，再从打开的 .ant-select-dropdown 抓 option，
+ * 命中与 value 完全相同或包含它的就点击；轮询最多 8s，超时报错。
+ */
 async function selectSearchOption(page, dialog, id, value, description) {
   const input = dialog.locator(`#${id}`);
   await assertCount(input, 1, `${description}搜索框`);
@@ -130,6 +157,14 @@ async function selectSearchOption(page, dialog, id, value, description) {
   throw new Error(`${description}未找到"${value}"；可选：${seen.join("、") || "无"}`);
 }
 
+/**
+ * 封面图入库主流程：
+ *   - hasCoverImage 已存在则 reused=true 跳过；
+ *   - 在封面卡上点添加 / 图库导入；
+ *   - 弹窗里搜 poi → 解析每个候选的质量 / 分辨率 → 用分辨率 × 横版 × minQuality 的硬规则
+ *     做兜底筛选，没找到再用 findBestCtripLibraryImage；
+ *   - 同意协议 + 「同意并导入」，最后回读封面是否已经出现。
+ */
 export async function selectCtripLibraryCover(page, cover) {
   if (await hasCoverImage(page)) return { reused: true };
 
@@ -195,6 +230,10 @@ export async function selectCtripLibraryCover(page, cover) {
   throw new Error(`已从携程图库导入"${cover.poi}"，但封面未显示在产品图文页。`);
 }
 
+/**
+ * 「产品图文」阶段主入口：填推荐理由 3 条 → 上封面 → 推荐语 + 产品特点 → 保存 → 进入「行程描述」。
+ * 调用方需要保证 product.presentation 含 cover 与 recommendation / features / recommendations。
+ */
 export async function fillAndSavePresentation(page, product) {
   const presentation = product.presentation;
   if (!presentation?.cover) {
@@ -233,4 +272,7 @@ export {
 };
 
 // source-slicing anchor（仅供测试切片识别，不在运行时使用）：
+/**
+ * 测试切片占位：实现见 ../itinerary/common.ts；保留签名让 source-slicing 识别。
+ */
 function dayScopeFor(_titleInput) { return null; }

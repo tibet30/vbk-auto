@@ -1,3 +1,12 @@
+/**
+ * 自动化阶段失败时的重试 + 诊断循环入口：runPhaseWithRecovery。
+ *   - 重跑当前 phase 最多 MAX_PHASE_ATTEMPTS 次；
+ *   - 每次失败后调 ctx.advisor() 拿下一步 action（retry / reload / reopen / wait_for_user）；
+ *   - advisor 抛错 / 返回非法形状时退化为 wait_for_user 状态；
+ *   - 用户中途取消则返回 status="cancelled" 且不打断正在跑的 handler；
+ *   - 归档历史 attempts 到 attemptsHistory 以便 UI 展示过往诊断。
+ */
+
 import {
   DEFAULT_USER_INSTRUCTION,
   MAX_PHASE_ATTEMPTS,
@@ -17,6 +26,16 @@ import type {
   PhaseAttempt,
 } from "../../../shared/contracts.js";
 
+/**
+ * 对单个 phase 做「尝试 → 失败 → 调 advisor → 应用 action → 重试」主循环。
+ * 返回 status ∈ { completed, cancelled, needs_user }：
+ *   - completed：handler 跑成功，或用户在 handler 结束后才取消；
+ *   - cancelled：用户在 attempt 顶部检测到取消信号并直接退出循环；
+ *   - needs_user：达到尝试上限 / advisor 失败 / wait_for_user。
+ *
+ * 把 attempts / attemptsHistory / userInstruction 等写到 ctx.run.recovery.phases[phase]，
+ * 每次状态变更都调一次 ctx.persist()（失败也不影响主流程）。
+ */
 export async function runPhaseWithRecovery(
   ctx: RecoveryContext,
 ): Promise<RunPhaseOutcome> {

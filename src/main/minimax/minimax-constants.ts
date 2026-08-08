@@ -1,3 +1,14 @@
+/**
+ * MiniMax 规划的 prompt / schema / 工具定义常量集合：
+ *   - 模型 systemPrompt（含 outputGuide、writablePatchGuide、字段细则）；
+ *   - responseTool / diagnosisTool / disambiguateTool 三个 OpenAI function-calling 工具定义；
+ *   - 各路径 patch 的 zod schema 与 aiResponsePayloadKeys / aiResponseSchema / patchOperationSchema；
+ *   - 跟 disambiguate 路径相关的 hasCompleteCtripLibraryCover / disambiguateSystemPrompt 等工具函数。
+ *
+ * 注意：本文件不引入运行时依赖，仅 zod 与 zod 衍生类型。模型端会按这些 prompt + tool schema
+ * 被约束输出，引擎侧则根据 schema 做严格校验与 patch 落库。
+ */
+
 import { z } from "zod";
 import { APP_NAME } from "../../shared/brand.js";
 import type { DisambiguateRequest } from "../../shared/contracts.js";
@@ -87,6 +98,10 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
 
 const nonEmptyText = z.string().trim().min(1);
 
+/**
+ * MiniMax 服务层错误类型：携带 code（机器可读）+ message（人类可读）+ details（可选技术细节）。
+ * 上层可通过 instanceof 检测并按 code 分类渲染给用户。
+ */
 export class MiniMaxServiceError extends Error {
   constructor(
     public readonly code: string,
@@ -150,6 +165,11 @@ export const presentationCoverValueSchema = z.object({
   minQuality: z.number().int().min(0).max(5),
 }).strict();
 
+/**
+ * 判断产品 JSON 中 /presentation/cover 是否已经是一个完整的携程图库封面
+ * （含 source/poi/description/minQuality 全部字段且类型正确）。
+ * 用于「封面图研究任务是否可被当前 product 直接满足」等收敛判断。
+ */
 export function hasCompleteCtripLibraryCover(product: Record<string, unknown>): boolean {
   const presentation = product.presentation;
   if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return false;
@@ -158,6 +178,11 @@ export function hasCompleteCtripLibraryCover(product: Record<string, unknown>): 
   return presentationCoverValueSchema.safeParse(cover).success;
 }
 
+/**
+ * 判断一条 image 类型的 research task 能否被当前产品 JSON 直接满足：
+ * 仅当 task.type === "image" 且产品封面已经是完整携程图库封面时返回 true，
+ * 其余情形（含 vbk/web/cost 类型任务）一律返回 false。
+ */
 export function isCoverResearchTaskSatisfiedByProduct(
   task: { type: string; label?: string; detail?: string },
   product: Record<string, unknown>,
@@ -371,6 +396,12 @@ ${writablePatchGuide}
 
 ${outputGuide}`;
 
+/**
+ * 为 VBK 下拉候选项消歧（disambiguate）工具调用生成系统 prompt：
+ *   - 基础规则要求模型只从 candidates 中选最像 desired 的一项，必要时返回空串；
+ *   - 按 kind（province / city / spot / station）追加专项约束，例如剔除「朝鲜-/韩国-」等境外前缀。
+ * 返回完整 system 文本，供 orchestrator 注入到 MiniMax 对话。
+ */
 export function disambiguateSystemPrompt(kind: DisambiguateRequest["kind"]): string {
   const base = `你是 ${APP_NAME} 选则辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
 你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。`;

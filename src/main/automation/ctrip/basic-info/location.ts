@@ -1,9 +1,21 @@
 // @ts-nocheck
+/**
+ * 基本信息面板里「城市 / 产品线」类下拉的写入：
+ *   - fillCitySelect：在 div[id=${id}] 的选择框里按城市 + preferredCountry 精确挑选项；
+ *     没有精确匹配时使用注入的 disambiguator（AI）做兜底消歧，但绝不回退到「其它国家同名城市」；
+ *   - fillProductLine：按「目的地一地 / 省份一地」白名单从产品线下拉里挑，禁止退到默认第一项。
+ * 顶部带 `// @ts-nocheck`，page 是动态传入。
+ */
 
 import { delay, assertCount } from "../utils.js";
 import { matchDropdownOption } from "../../dropdown-match.js";
 import { pickCityOption } from "./types.js";
 
+/**
+ * 通用城市下拉选择器：处理「已选即跳过」「清除 → 重选」「打开搜索框 → 输 → 轮询候选」流程；
+ * 命中失败时按 preferredCountry / ambiguous / missing 给出对应错误，preferredCountry 场景下
+ * 拒绝回退到其它同名国家。AI 消歧仅在 disambiguator 注入并匹配 kind 时启用。
+ */
 export async function fillCitySelect(page, id, city, preferredCountry, extra = {}) {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product ?? {};
@@ -114,6 +126,12 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
   await options.nth(lastDecision.index).click();
 }
 
+/**
+ * 产品线下拉写入：候选按目的地 / 省份拼 `${city/省}一地`，命中即返回；
+ *   - 已选值相符则跳过；
+ *   - 命中且 enabled 索引为 0 时抛错（避免错选默认项）；
+ *   - 10s 内未拿到非空候选抛错。
+ */
 export async function fillProductLine(page, destinationCity, province) {
   const provinceBase = String(province || "")
     .trim()
@@ -180,8 +198,10 @@ export async function fillProductLine(page, destinationCity, province) {
 }
 
 // source-slicing anchor（仅供测试切片识别；真实实现见 ./tabs.ts）：
+/**
+ * 测试切片占位：实现见 ../tabs.ts；保留签名让 source-slicing 识别 basic-info/location 这一段。
+ */
 export async function openProductEditor(page, productId, options = {}) {
   void page; void productId; void options;
   throw new Error("openProductEditor sentinel in basic-info/location.ts; runtime uses tabs.ts implementation");
 }
-

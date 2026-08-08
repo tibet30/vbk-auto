@@ -18,6 +18,7 @@
 
 import type { PlanningStage, PlanningModule } from "../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "./schemas.js";
+import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 
 /**
  * 共享子 schema：把 reason 等可有可无的字段编码为 nullable（required 仍包含），
@@ -40,6 +41,16 @@ const STATUS_FIELD: Record<string, unknown> = {
  */
 function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> {
   switch (module) {
+    case "basicInfo":
+      return {
+        type: "object", additionalProperties: false,
+        required: ["subtitle", "province", "operationNotes"],
+        properties: {
+          subtitle: { type: "string", minLength: 1 },
+          province: { type: ["string", "null"], minLength: 1 },
+          operationNotes: { type: "string", minLength: 1 },
+        },
+      };
     case "presentation":
       return {
         type: "object",
@@ -54,7 +65,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
               type: "object",
               additionalProperties: false,
               required: ["category", "text"],
-              properties: { category: { type: "string" }, text: { type: "string" } },
+              properties: { category: { type: "string", enum: [...RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
             },
           },
           features: { type: "string", minLength: 1 },

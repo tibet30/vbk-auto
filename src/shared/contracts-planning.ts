@@ -12,6 +12,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 export type PlanningStage =
   | "skeleton"
+  | "basicInfo"
   | "itinerary"
   | "presentation"
   | "commercial"
@@ -20,6 +21,7 @@ export type PlanningStage =
 
 export const PLANNING_STAGES: readonly PlanningStage[] = [
   "skeleton",
+  "basicInfo",
   "itinerary",
   "presentation",
   "commercial",
@@ -39,6 +41,7 @@ export const PLANNING_STAGE_RETRY_LIMIT = 2;
 // 「一组运营数据」。系统只接受规划子系统显式声明的模块，不接受任意路径。
 // ──────────────────────────────────────────────────────────────────────────
 export type PlanningModule =
+  | "basicInfo"
   | "presentation"
   | "itinerary"
   | "packageName"
@@ -50,6 +53,7 @@ export type PlanningModule =
   | "skeleton";
 
 export const REQUIRED_MODULES: readonly PlanningModule[] = [
+  "basicInfo",
   "presentation",
   "itinerary",
   "packageName",

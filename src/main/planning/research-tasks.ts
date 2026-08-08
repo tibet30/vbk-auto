@@ -41,32 +41,7 @@ export function planResearchTasks(args: {
 }): PendingEvaluation[] {
   const { skeleton, product, acceptedModules } = args;
   const pending: PendingEvaluation[] = [];
-  const productItinerary = Array.isArray(product.itinerary)
-    ? (product.itinerary as Array<Record<string, unknown>>)
-    : [];
   const commercial = product.commercial as Record<string, unknown> | undefined;
-
-  // 行程里出现的城市 / POI → VBK 核查
-  const seenSpotKeys = new Set<string>();
-  for (const day of productItinerary) {
-    const spots = Array.isArray(day?.spots) ? (day.spots as unknown[]) : [];
-    for (const raw of spots) {
-      if (typeof raw !== "string") continue;
-      const text = raw.trim();
-      if (!text) continue;
-      const key = `city-poi::${text}`;
-      if (seenSpotKeys.has(key)) continue;
-      seenSpotKeys.add(key);
-      pending.push({
-        key,
-        proposal: {
-          label: `核查 ${text} 在 VBK 资源库的 city / poi 映射`,
-          type: TASK_TYPE_VBK,
-          detail: `由骨架目的地「${skeleton.destination}」延伸`,
-        },
-      });
-    }
-  }
 
   // 用车：私家团必须；其它形态不强求
   if (skeleton.productForm === "privateTour") {
@@ -147,6 +122,24 @@ export function planResearchTasks(args: {
   }
 
   return pending;
+}
+
+export function itineraryPoiTasks(itinerary: unknown, destination: string): ResearchTaskProposal[] {
+  const seen = new Set<string>(); const out: ResearchTaskProposal[] = [];
+  for (const day of Array.isArray(itinerary) ? itinerary : []) {
+    const record = day && typeof day === "object" ? day as Record<string, unknown> : {};
+    const rawItems: unknown[] = [];
+    for (const key of ["spots", "poi", "attractions"]) {
+      const value = record[key]; if (Array.isArray(value)) rawItems.push(...value); else if (value) rawItems.push(value);
+    }
+    if (Array.isArray(record.activities)) rawItems.push(...record.activities);
+    for (const raw of rawItems) {
+      const name = typeof raw === "string" ? raw.trim() : raw && typeof raw === "object" ? String((raw as any).poiName ?? (raw as any).name ?? (raw as any).title ?? "").trim() : "";
+      if (!name || seen.has(name)) continue; seen.add(name);
+      out.push({ label: `核查 ${name} 在 VBK 资源库的 city / poi 映射`, type: TASK_TYPE_VBK, detail: `由目的地「${destination}」延伸` });
+    }
+  }
+  return out;
 }
 
 /**

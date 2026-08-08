@@ -11,7 +11,7 @@
 
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
-import { normaliseProductDraft } from "../data/product-normalize.js";
+import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 import type {
   GenerationStateStore,
   OrchestratorRuntime,
@@ -48,6 +48,12 @@ export class DbGenerationStateStore implements GenerationStateStore {
  */
 export function detectAcceptedModulesFromProduct(product: Record<string, unknown>): PlanningModule[] {
   const accepted: PlanningModule[] = [];
+  const basicInfo = product.basicInfo as Record<string, unknown> | undefined;
+  if (basicInfo && typeof basicInfo.subtitle === "string" && basicInfo.subtitle.trim()
+    && typeof basicInfo.province === "string" && basicInfo.province.trim()
+    && typeof basicInfo.operationNotes === "string" && basicInfo.operationNotes.trim()) {
+    accepted.push("basicInfo");
+  }
   const operations = product.operations as Record<string, unknown> | undefined;
   if (
     operations
@@ -69,7 +75,6 @@ export function detectAcceptedModulesFromProduct(product: Record<string, unknown
     }
   }
   const itinerary = product.itinerary;
-  const basicInfo = product.basicInfo as Record<string, unknown> | undefined;
   const expectedDays = Number.isInteger(Number(basicInfo?.days)) && Number(basicInfo?.days) > 0
     ? Number(basicInfo?.days)
     : null;
@@ -93,18 +98,30 @@ export function detectAcceptedModulesFromProduct(product: Record<string, unknown
   return accepted;
 }
 
+/**
+ * 验证 presentation.recommendations 三条都含合法 category / text：
+ *   - 数组长度 = 3；
+ *   - 每条 category 在 RECOMMENDATION_CATEGORIES 白名单里、text 非空；
+ *   - 任何一条不合规 → 返回 false，整张 presentation 不算 accepted。
+ */
 function presentationRecommendationsValid(entries: unknown[]): boolean {
   let nonEmptyCategoryCount = 0;
   for (const entry of entries) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
     const record = entry as Record<string, unknown>;
     if (typeof record.category !== "string" || !record.category.trim()) return false;
+    if (!(RECOMMENDATION_CATEGORIES as readonly string[]).includes(record.category)) return false;
     if (typeof record.text !== "string" || !record.text.trim()) return false;
     nonEmptyCategoryCount += 1;
   }
   return nonEmptyCategoryCount === entries.length;
 }
 
+/**
+ * 验证行程数组 days 字段是否 1..expectedDays 顺序递增且唯一：
+ *   - 同时检查 record.day === index + 1，避免出现「2 天骨架 + 1 天行程」的非法产品；
+ *   - 骨架缺失时不放宽（expectedDays==null 走调用方另一条分支）。
+ */
 function itineraryDaysAreOrdered(itinerary: unknown[], expectedDays: number): boolean {
   const seen = new Set<number>();
   for (let index = 0; index < expectedDays; index += 1) {
@@ -120,6 +137,13 @@ function itineraryDaysAreOrdered(itinerary: unknown[], expectedDays: number): bo
   return true;
 }
 
+/**
+ * OrchestratorRuntime 的 SQLite 实现：
+ *   - loadExistingResearchTasks：取项目下所有 research tasks，dedupe 按 label+type；
+ *   - writeModule：applyProductPatchSafe 写入 product；
+ *   - addResearchTask：委托 db.addResearchTask；
+ *   - loadHistory / loadCurrentProduct / loadAcceptedModules：从持久化反推。
+ */
 export class DbOrchestratorRuntime implements OrchestratorRuntime {
   constructor(private readonly db: VbkDatabase) {}
 
@@ -136,15 +160,22 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   async writeModule(projectId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
     const project = this.db.getProject(projectId);
     if (!project) return { ok: false, reason: "项目不存在" };
+    // basicInfo is a shared object; replacing its root must preserve days/cities
+    // and other existing fields needed by itinerary and automation.
+    if (module === "basicInfo" && value && typeof value === "object" && !Array.isArray(value)) {
+      const existing = project.product.basicInfo && typeof project.product.basicInfo === "object" && !Array.isArray(project.product.basicInfo)
+        ? project.product.basicInfo as Record<string, unknown>
+        : {};
+      const incoming = { ...(value as Record<string, unknown>) };
+      if (typeof incoming.province === "string") incoming.province = normaliseProvinceName(incoming.province);
+      if (typeof existing.province === "string" && existing.province.trim()) delete incoming.province;
+      value = { ...existing, ...incoming };
+    }
     const result = applyProductPatchSafe(project.product, [
       { op: "replace", path: writePath, value },
     ]);
     if (!result.applied) return { ok: false, reason: "本地写入被拒（路径 / 值不合法）" };
-    // 显式 safeRelease：AI 经 stage-runner 写 release 即便忘了走 sanitise，
-    // 也会被 normalise 强制成 draft-only（false）。applyProductPatchSafe
-    // 内部已统一传一次；这里再传一次是防御性兜底，避免未来重构时丢失。
-    const normalised = normaliseProductDraft(result.product, { safeRelease: true });
-    this.db.updateProduct(projectId, normalised);
+    this.db.updateProduct(projectId, result.product);
     return { ok: true };
   }
 
@@ -172,4 +203,9 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     if (!project) return [];
     return detectAcceptedModulesFromProduct(project.product);
   }
+}
+
+/** 统一省级名称展示：去除行政区后缀，保留已有简称（如“山西”“北京”）。 */
+export function normaliseProvinceName(value: string): string {
+  return value.trim().replace(/(特别行政区|维吾尔自治区|壮族自治区|回族自治区|自治区|省|市)$/, "").trim();
 }

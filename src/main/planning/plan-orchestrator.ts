@@ -25,7 +25,7 @@ import {
 } from "../../shared/contracts-planning.js";
 import { validateCompleteness } from "./validation.js";
 import { composeAssistantReply } from "./replies.js";
-import { runSingleStage } from "./single-stage-runner.js";
+import { runSingleStage, type SingleStageResult } from "./single-stage-runner.js";
 import { revalidateCompletedState } from "./validation-rewind.js";
 import { logRunEnd, logRunStart, logStageEnd, logStageStart } from "./log.js";
 import type {
@@ -83,6 +83,10 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   // validation 抓出来并 rewind 到 earliest invalid stage，状态置 needs_user。
   if (state.status === "completed") {
     state = await revalidateCompletedState({ state, skeleton: args.skeleton, runtime: args.runtime });
+    // revalidate 发现已完成产品被改坏时，rewindForInvalid 已将 currentStage
+    // 定位到最早失效阶段；本次 resume 应立即重跑该阶段，而不是把 needs_user
+    // 当成终止态返回。只有无 invalid 时才保持 completed 并走末尾确认路径。
+    if (state.status === "needs_user") state.status = "pending";
     await args.store.save(state);
   }
 
@@ -131,6 +135,44 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
 
   for (let i = startIndex; i < PLANNING_STAGES.length; i += 1) {
     const stage = PLANNING_STAGES[i];
+    if (stage === "presentation" && !state.completedStages.includes("commercial")) {
+      const parallelStages = (["presentation", "commercial"] as const).filter((s) => !state.completedStages.includes(s));
+      let writeTail = Promise.resolve();
+      const parallelRuntime = Object.create(args.runtime) as OrchestratorRuntime;
+      Object.assign(parallelRuntime, {
+        writeModule: async (...writeArgs: Parameters<OrchestratorRuntime["writeModule"]>) => {
+          let resolveResult!: (value: Awaited<ReturnType<OrchestratorRuntime["writeModule"]>>) => void;
+          const resultPromise = new Promise<Awaited<ReturnType<OrchestratorRuntime["writeModule"]>>>(resolve => { resolveResult = resolve; });
+          writeTail = writeTail.then(async () => resolveResult(await args.runtime.writeModule(...writeArgs)));
+          return resultPromise;
+        },
+      });
+      const parallelResults = await Promise.all(parallelStages.map((s) => runSingleStage({
+        stage: s, state, skeleton: args.skeleton, planner: args.planner, runtime: parallelRuntime,
+        retryLimit: stageRetryLimit, history, existingTasks, providerLabel: args.providerLabel,
+      })));
+      let failed: { stage: string; result: SingleStageResult } | undefined;
+      for (let n = 0; n < parallelResults.length; n += 1) {
+        const result = parallelResults[n];
+        const parallelStage = parallelStages[n];
+        state = { ...state, stages: [
+          ...state.stages.filter(entry => entry.stage !== parallelStage),
+          ...result.state.stages.filter(entry => entry.stage === parallelStage),
+        ] };
+        for (const t of result.researchTasks) accumulatedResearchTasks.push(t);
+        if (result.status === "needs_user" || result.status === "failed") failed = { stage: parallelStage, result };
+        else state.completedStages = Array.from(new Set([...state.completedStages, parallelStage]));
+        state.lastAssistantReply = result.assistantReply;
+        state.lastModuleSummary = [...result.accepted, ...result.rejected];
+        state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
+      }
+      state.currentStage = failed?.stage as typeof state.currentStage ?? "research";
+      state.status = failed ? failed.result.status : "running";
+      await args.store.save(state);
+      if (failed) return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+      i += 1;
+      continue;
+    }
     const result = await runSingleStage({
       stage,
       state,

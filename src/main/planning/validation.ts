@@ -21,6 +21,7 @@ export interface ValidationResult {
 }
 
 const REQUIRED_FOR_COMPLETION: readonly PlanningModule[] = [
+  "basicInfo",
   "presentation",
   "itinerary",
   "packageName",
@@ -104,6 +105,7 @@ export function deepValidateModules(args: {
   // rewind。这避免「非法产品长期处于 completed 状态」的回归。
   const productHasModule = (module: PlanningModule) => {
     switch (module) {
+      case "basicInfo": return asRecord(args.product.basicInfo) !== undefined;
       case "itinerary": return asArray(args.product.itinerary) !== undefined;
       case "presentation": return asRecord(args.product.presentation) !== undefined;
       case "packageName":
@@ -118,6 +120,15 @@ export function deepValidateModules(args: {
         return false;
     }
   };
+
+  if (acceptedSet.has("basicInfo") || productHasModule("basicInfo")) {
+    const basic = asRecord(args.product.basicInfo);
+    const reasons: string[] = [];
+    for (const field of ["subtitle", "province", "operationNotes"]) {
+      if (!textValue(basic?.[field])) reasons.push(`basicInfo.${field} 缺失`);
+    }
+    if (reasons.length) invalid.push({ module: "basicInfo", status: "rejected", reason: reasons.join("；") });
+  }
 
   if (acceptedSet.has("itinerary") || productHasModule("itinerary")) {
     const itinerary = asArray(args.product.itinerary) ?? [];
@@ -272,6 +283,7 @@ export function requiredModules(): readonly PlanningModule[] {
  * 被 rewound 的阶段。
  */
 export const MODULE_TO_STAGE: Readonly<Record<PlanningModule, import("../../shared/contracts-planning.js").PlanningStage>> = {
+  basicInfo: "basicInfo",
   skeleton: "skeleton",
   itinerary: "itinerary",
   presentation: "presentation",

@@ -8,6 +8,7 @@
 
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
+import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 import {
   PLANNING_STAGES,
   type PlanningStage,
@@ -18,6 +19,12 @@ import {
 } from "../../shared/contracts-planning.js";
 
 const requiredText = z.string().trim().min(1);
+const RECOMMENDATION_CATEGORY_VALUES = [...RECOMMENDATION_CATEGORIES] as [string, ...string[]];
+const basicInfoModuleValueSchema = z.object({
+  subtitle: requiredText,
+  province: requiredText,
+  operationNotes: requiredText,
+}).strict();
 
 const researchTaskProposalSchema = z.object({
   label: requiredText,
@@ -27,10 +34,10 @@ const researchTaskProposalSchema = z.object({
 
 /** presentation 模块：3 条互不重复的推荐理由 + 4 项必要字段。 */
 const presentationModuleValueSchema = z.object({
-  recommendationCategory: requiredText,
+  recommendationCategory: z.enum(RECOMMENDATION_CATEGORY_VALUES),
   recommendation: requiredText,
   recommendations: z.array(z.object({
-    category: requiredText,
+    category: z.enum(RECOMMENDATION_CATEGORY_VALUES),
     text: requiredText,
   })).length(3),
   features: requiredText,
@@ -141,6 +148,7 @@ const baseStageOutputSchema = z.object({
 // ──────────────────────────────────────────────────────────────────────────
 export const STAGE_ALLOWED_MODULES: Record<PlanningStage, readonly PlanningModule[]> = {
   skeleton: ["skeleton"],
+  basicInfo: ["basicInfo"],
   itinerary: ["itinerary"],
   presentation: ["presentation"],
   commercial: ["packageName", "pricing", "inventory", "terms", "release"],
@@ -153,6 +161,8 @@ export const STAGE_ALLOWED_MODULES: Record<PlanningStage, readonly PlanningModul
  */
 export function validateModuleValue(module: PlanningModule, value: unknown): { ok: true; value: unknown } | { ok: false; reason: string } {
   switch (module) {
+    case "basicInfo":
+      return validate(basicInfoModuleValueSchema, value);
     case "presentation":
       return validate(presentationModuleValueSchema, value);
     case "itinerary":
@@ -266,6 +276,7 @@ export function parseStageOutput(stage: PlanningStage, raw: unknown): { ok: true
  * 子树根」。任何 path 不在该集合内 → 立刻拒绝。
  */
 export const AI_WRITABLE_PATHS = {
+  basicInfo: "/basicInfo",
   presentation: "/presentation",
   itinerary: "/itinerary",
   packageName: "/commercial/packageName",
@@ -343,7 +354,8 @@ ${moduleList}
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. terms 必须包含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。
 9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、supplierCode、providerId、contactCardId。
-10. AI 不能自行声明 research task 已完成；research tasks 由本地 deterministic 生成并走运营 / VBK 核查流程。
+10. basicInfo 阶段必须生成 subtitle、province、operationNotes；province 必须是省/自治区/直辖市名称，不能把 meetingCity / destinationCity 城市名直接当作 province。已有非空 province 会被本地保留，不得覆盖。
+11. AI 不能自行声明 research task 已完成；research tasks 由本地 deterministic 生成并走运营 / VBK 核查流程。
 ${args.hasHistory ? "11. 历史会话已附在 user 消息尾部；本轮回复以补齐缺失模块为目标，已成功模块不要重复。" : ""}`;
 }
 

@@ -9,6 +9,7 @@ import { PlannerError, type PlanningStage, type PlanningStageOutput, type Planni
 import { AI_WRITABLE_PATHS, STAGE_ALLOWED_MODULES, validateModuleValue, validateResearchTaskProposal } from "./schemas.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
+import { normaliseProvinceName } from "./runtime.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -144,6 +145,21 @@ export async function executeStageOutput(args: {
     if (!sanitised.ok) {
       rejected.push({ module: outcome.module, status: "rejected", reason: sanitised.reason });
       continue;
+    }
+    if (outcome.module === "basicInfo") {
+      const current = await runtime.loadCurrentProduct(projectId);
+      const basic = current.basicInfo && typeof current.basicInfo === "object" && !Array.isArray(current.basicInfo)
+        ? current.basicInfo as Record<string, unknown> : {};
+      const next = { ...(sanitised.value as Record<string, unknown>) };
+      const existingProvince = String(basic.province ?? "").trim();
+      const province = normaliseProvinceName(String(next.province ?? "").trim() || existingProvince);
+      const city = normaliseProvinceName(String(basic.meetingCity ?? basic.destinationCity ?? "").trim());
+      if (!province || (city && province === city)) {
+        rejected.push({ module: "basicInfo", status: "rejected", reason: "basicInfo.province 缺失或不能直接使用目的地城市" });
+        continue;
+      }
+      if (!String(next.province ?? "").trim() && existingProvince) delete next.province;
+      sanitised.value = next;
     }
     const writeResult = await runtime.writeModule(projectId, outcome.module, writePath, sanitised.value);
     if (!writeResult.ok) {

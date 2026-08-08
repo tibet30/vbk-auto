@@ -173,7 +173,8 @@ research 阶段是本地 deterministic 生成；你不需要主动返回任何�
 6. pricing.adult > 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. terms 必须含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。
-9. 不要再返回顶级 question / researchTasks 字段：question 已合并到 module.reason；research tasks 由本地 deterministic 生成。AI 不能自行声明核查结果。`;
+9. basicInfo 阶段必须返回 subtitle、province、operationNotes；province 必须是省/自治区/直辖市，不能直接填写目的地城市名。已有 province 由本地保留。
+10. 不要再返回顶级 question / researchTasks 字段：question 已合并到 module.reason；research tasks 由本地 deterministic 生成。AI 不能自行声明核查结果。`;
 }
 
 /**

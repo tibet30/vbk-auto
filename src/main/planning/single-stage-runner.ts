@@ -17,7 +17,7 @@ import {
   deepValidateModules,
 } from "./validation.js";
 import { composeStageAssistantReply } from "./replies.js";
-import { pendingResearchTasks } from "./research-tasks.js";
+import { pendingResearchTasks, itineraryPoiTasks } from "./research-tasks.js";
 import { buildRewoundState } from "./validation-rewind.js";
 import { logAttemptError, logNoProgress, logStageEnd, logStageStart } from "./log.js";
 import type {
@@ -73,6 +73,8 @@ export async function runSingleStage(args: RunSingleStageArgs): Promise<SingleSt
     return await runSkeletonStage({ state, skeleton, runtime, attempts, lastError });
   }
 
+  // basicInfo 由 AI 生成，必须经过 schema 与 province 语义校验。
+
   // validation 阶段：从持久化产品反推完整性，不调用 AI。
   if (stage === "validation") {
     return await runValidationStage({ state, skeleton, runtime, attempts, lastError });
@@ -112,18 +114,20 @@ async function runSkeletonStage(args: {
     accepted.push({ module: "skeleton", status: "accepted", writePath: AI_WRITABLE_PATHS.skeleton, acceptedFields: ["hotelTier", "pickupCity", "transport"] });
     return makeStageResult({ state, stage: "skeleton", accepted, rejected, researchTasks, attempts, lastError, status: "completed" });
   }
-  const result = await runtime.writeModule(state.projectId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
-    hotelTier: skeleton.productForm === "privateTour" ? "当地5钻酒店/-38" : "当地3钻酒店/-3",
-    pickupCity: skeleton.destination,
-    transport: "charter",
-    reusePickupForDropoff: true,
-    mealsIncluded: false,
-  });
-  if (!result.ok) {
-    rejected.push({ module: "skeleton", status: "rejected", reason: result.reason || "骨架写入失败" });
-    return makeStageResult({ state, stage: "skeleton", accepted, rejected, researchTasks, attempts, lastError, status: "failed" });
+  if (!alreadyAccepted.includes("skeleton")) {
+    const result = await runtime.writeModule(state.projectId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
+      hotelTier: skeleton.productForm === "privateTour" ? "当地5钻酒店/-38" : "当地3钻酒店/-3",
+      pickupCity: skeleton.destination,
+      transport: "charter",
+      reusePickupForDropoff: true,
+      mealsIncluded: false,
+    });
+    if (!result.ok) {
+      rejected.push({ module: "skeleton", status: "rejected", reason: result.reason || "骨架写入失败" });
+      return makeStageResult({ state, stage: "skeleton", accepted, rejected, researchTasks, attempts, lastError, status: "failed" });
+    }
+    accepted.push({ module: "skeleton", status: "accepted", writePath: AI_WRITABLE_PATHS.skeleton, acceptedFields: ["hotelTier", "pickupCity", "transport"] });
   }
-  accepted.push({ module: "skeleton", status: "accepted", writePath: AI_WRITABLE_PATHS.skeleton, acceptedFields: ["hotelTier", "pickupCity", "transport"] });
   return makeStageResult({ state, stage: "skeleton", accepted, rejected, researchTasks, attempts, lastError, status: "completed" });
 }
 
@@ -295,6 +299,7 @@ async function runAiStage(args: {
   let researchTasks = args.researchTasks;
   let attempts = args.attempts;
   let lastError = args.lastError;
+  const persistedTaskKeys = new Set(existingTasks.map((task) => `${task.type}::${task.label}`));
 
   for (let attempt = 1; attempt <= retryLimit; attempt += 1) {
     attempts = attempt;
@@ -360,6 +365,17 @@ async function runAiStage(args: {
       for (const m of exec.rejected) rejected.push(m);
       for (const t of exec.researchTasks) researchTasks.push(t);
       if (exec.hasAccepted) {
+        if (stage === "itinerary") {
+          const product = await runtime.loadCurrentProduct(state.projectId);
+          for (const task of itineraryPoiTasks(product.itinerary, skeleton.destination)) {
+            const key = `${task.type}::${task.label}`;
+            await runtime.addResearchTask(state.projectId, task);
+            if (!persistedTaskKeys.has(key)) {
+              persistedTaskKeys.add(key);
+              researchTasks.push(task);
+            }
+          }
+        }
         if (stage === "commercial") {
           // commercial 阶段：必须五个模块（packageName + pricing + inventory + terms + release）全部 accepted 才算完成。
           const required: readonly PlanningModule[] = STAGE_ALLOWED_MODULES.commercial as readonly PlanningModule[];

@@ -258,7 +258,17 @@ export function AppWorkspaceReviewSummary({
                 onToggleCollapsed={() => setItineraryCollapsed((value) => !value)}
               />
 
-              {readiness.issues.length > 0 && (
+              {(readiness.issues.length > 0 || taskList.some(t => !/confirmed|resolved/.test(t.state))) && (
+                <section className={styles.collapsible} aria-label="统一待处理事项">
+                  <div className={styles.collapsibleHead}><strong className={styles.collapsibleTitle}>待处理事项</strong></div>
+                  <div className={styles.collapsibleBody}><ul className={styles.issueList}>
+                    {readiness.issues.map((issue, index) => <li key={`issue-${issue.label}`} className={styles.issueItem}><span className={styles.issueIndex}>{index + 1}</span><span className={styles.issueBody}><strong className={styles.issueLabel}>{issue.label}</strong><span className={styles.issueGuidance}>{issue.detail}</span></span><button type="button" onClick={() => setVerificationNote(`请补齐待处理项：${issue.label}。${issue.detail}`)}>处理</button></li>)}
+                    {taskList.filter(t => !/confirmed|resolved/.test(t.state)).map((task, index) => <li key={`task-${task.type}-${task.label}`} className={styles.issueItem}><span className={styles.issueIndex}>{readiness.issues.length + index + 1}</span><span className={styles.issueBody}><strong className={styles.issueLabel}>{task.label}</strong><span className={styles.issueGuidance}>{task.detail || "请补充核查信息"}</span></span><button type="button" onClick={() => setVerificationNote(`请核查并处理：${task.label}。完成后说明结果，不要自动提交。`)}>处理</button></li>)}
+                  </ul></div>
+                </section>
+              )}
+
+              {false && readiness.issues.length > 0 && (
                 <section className={styles.collapsible} aria-label="待处理问题" data-collapsed={issuesCollapsed}>
                   <button
                     type="button"
@@ -285,6 +295,7 @@ export function AppWorkspaceReviewSummary({
                             <strong className={styles.issueLabel}>{issue.label}</strong>
                             <span className={styles.issueGuidance}>{issueText(issue)}</span>
                           </span>
+                          <button type="button" onClick={() => setVerificationNote(`请补齐待处理项：${issue.label}。${issue.detail}`)}>处理</button>
                         </li>
                       ))}
                     </ul>
@@ -292,7 +303,7 @@ export function AppWorkspaceReviewSummary({
                 </section>
               )}
 
-              {taskList.length > 0 && (
+              {false && taskList.length > 0 && (
                 <section className={styles.collapsible} aria-label="核查任务" data-collapsed={tasksCollapsed}>
                   <button
                     type="button"
@@ -317,6 +328,7 @@ export function AppWorkspaceReviewSummary({
                         const done = task.state === "confirmed" || task.state === "resolved";
                         return (
                           <li key={task.id}>
+                            {!done && <button type="button" onClick={() => setVerificationNote(`请核查并处理：${task.label}。完成后说明结果，不要自动提交。`)}>处理</button>}
                             <button
                               type="button"
                               className={styles.taskRow}

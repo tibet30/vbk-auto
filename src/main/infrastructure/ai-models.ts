@@ -1,12 +1,3 @@
-import type {
-  AiModelInfo,
-  AiModelListInput,
-  AiModelListResult,
-  AiProvider,
-} from "../../shared/contracts.js";
-import { aiModelOption, isAiProvider } from "../../shared/contracts.js";
-import { assertSafeAiServiceUrl } from "./ai-settings.js";
-
 /**
  * AI 模型列表拉取与解析（仅 Evolink 提供方支持）。
  *
@@ -20,9 +11,21 @@ import { assertSafeAiServiceUrl } from "./ai-settings.js";
  *  - parseAiModelList：从原始 JSON 解析为 AiModelInfo 数组（去重、按 label 排序）
  */
 
+import type {
+  AiModelInfo,
+  AiModelListInput,
+  AiModelListResult,
+  AiProvider,
+} from "../../shared/contracts.js";
+import { aiModelOption, isAiProvider } from "../../shared/contracts.js";
+import { assertSafeAiServiceUrl } from "./ai-settings.js";
+
 /** fetch 注入点，签名与全局 fetch 兼容；测试时可替换为 mock。 */
 type FetchModelList = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+/**
+ * 拼 Evolink /models URL：先校验 baseUrl 安全，再追加 /models、清空 query/hash。
+ */
 function modelListUrl(baseUrl: string): URL {
   const url = assertSafeAiServiceUrl(baseUrl.trim());
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/models`;
@@ -31,10 +34,16 @@ function modelListUrl(baseUrl: string): URL {
   return url;
 }
 
+/**
+ * 把任意 unknown 转成 trim 后字符串，非字符串返回 ""。
+ */
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+/**
+ * 把模型列表响应归一化成一个数组：支持顶层是数组 / { data } / { models } 三种结构。
+ */
 function modelRecords(payload: unknown): unknown[] {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
@@ -73,6 +82,12 @@ export function parseAiModelList(payload: unknown, provider: AiProvider): AiMode
   return models.sort((a, b) => a.label.localeCompare(b.label, "zh-CN", { numeric: true }));
 }
 
+/**
+ * 拉取模型列表前的 API Key 解析：
+ *   - 校验 provider 合法；
+ *   - input.apiKey 优先，否则回调 readStoredKey 读 secure-storage；
+ *   - provider ≠ "deepseek" 时拒掉（当前只支持 Evolink）。
+ */
 async function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiProvider) => Promise<string>): Promise<string> {
   if (!isAiProvider(input?.provider)) throw new Error("请选择要刷新的 AI 提供商。");
   if (input.provider !== "deepseek") throw new Error("当前仅支持刷新 Evolink 模型列表。");
@@ -81,6 +96,10 @@ async function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiP
   return key;
 }
 
+/**
+ * 把 HTTP status 翻译成本地化错误：401/403（鉴权）、429（限流）、5xx（服务端）、其它（未知）。
+ * 调用方拿到 Error 后直接 throw / 抛回 IPC 层即可。
+ */
 function modelListHttpError(status: number): Error {
   if (status === 401 || status === 403) return new Error("Evolink API Key 无效，或无权读取模型列表。");
   if (status === 429) return new Error("Evolink 请求过于频繁，请稍后再刷新。");

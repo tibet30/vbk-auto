@@ -1,3 +1,11 @@
+/**
+ * 嵌入式 VBK 浏览器（VbkBrowser）+ 多账号登录支持：
+ *   - initialise 把 WebContentsView 绑到主窗口，配置导航白名单与外链钩子；
+ *   - login / logout / addLogin / switchAccount / forgetAccount 撑起多账号生命周期；
+ *   - saveCurrentSession / status / fetchProviderId / detectLoginAccount 等提供给上层用；
+ *   - 内部 collectCookies / clearBrowserSessionCookies / applyCookie 与 vbk-cookie-serializer 配合做持久化。
+ */
+
 import { BrowserWindow, WebContentsView, shell } from "electron";
 import { openExternalUrl } from "./external-url.js";
 import { chromium, type Browser, type Page } from "playwright";
@@ -36,7 +44,17 @@ const MENU_FALSE_POSITIVES = new Set([
  *    不只是显示名。同一身份证的 vbk_xxx / "小璐" 多次保存应视作同一账号。
  */
 export interface LoginSessionStore {
-  saveSession(accountKey: string, accountName: string, cookiesJson: string): void;
+  /**
+   * cookies **明文** JSON 字符串。Store 内部必须负责加密后落盘，
+   * 严禁把 plaintext 写入 login_sessions.cookies_json / 其它列。
+   * 入参为空数组 / 空字符串或当前账号未登录时，调用方不会调用本方法；
+   * store 内部对"空快照 = 删除"语义自行处理。
+   */
+  saveSession(accountKey: string, accountName: string, cookiesJson: string): void | Promise<void>;
+  /**
+   * 返回 **明文** cookies JSON 字符串。store 内部必须负责读出 ciphertext
+   * 并解密；找不到时返回 null。
+   */
   loadSession(accountKey: string): { cookiesJson: string; accountName: string } | null;
   listSessions(): SavedLoginAccount[];
   deleteSession(accountKey: string): void;
@@ -57,8 +75,12 @@ export class VbkBrowser {
     private readonly sessionStore?: LoginSessionStore,
   ) {}
 
-  async initialise() {
-    this.view = new WebContentsView({ webPreferences: { partition: "persist:vbk", contextIsolation: true, nodeIntegration: false, sandbox: true } });
+/**
+ * 初始化一个嵌入式 WebContentsView（持久分区 persist:vbk），配置导航白名单 + 外链打开走系统浏览器；
+ * 默认隐藏，待登录 / 显式 setVisible(true) 才显示。
+ */
+async initialise() {
+    this.view = new WebContentsView();
     this.window.contentView.addChildView(this.view);
     // 先抑制持久分区下 Chromium 默认启动的子系统副作用（WebRTC ICE → STUN
     // 探测 → 国内网络里 stun.services.mozilla.com 解析失败 ——
@@ -75,24 +97,47 @@ export class VbkBrowser {
     this.setVisible(false);
   }
 
-  setBounds(bounds: Electron.Rectangle) { this.view?.setBounds(bounds); }
-  setVisible(visible: boolean) { this.visible = visible; this.view?.setVisible(visible); }
+/**
+ * 调整 view 布局（Electron.Rectangle）。
+ */
+setBounds(bounds: Electron.Rectangle) { this.view?.setBounds(bounds); }
+/**
+ * 设置 view 可见性；同时维护 this.visible 状态供外部读取。
+ */
+setVisible(visible: boolean) { this.visible = visible; this.view?.setVisible(visible); }
   // 暴露当前嵌入式浏览器 URL：URL 栏需要实时反映页面跳转，否者用户点
   // 「进入」之后看到地址还是 /产品库，会误以为按钮没生效（实际上 VBK 内部
   // 可能又把页面重定向到 /产品库，地址栏同步过去才能区分「没跳转」和「跳转后被重定向」）。
   currentUrl(): string {
     return this.view?.webContents.getURL() || "";
   }
-  async openExternal() {
+
+  /** 在当前已登录 WebView 页面上下文执行只读函数；不暴露或持久化 cookie。 */
+  async evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T> {
+    if (!this.view) throw new Error("VBK 浏览器尚未初始化");
+    return this.view.webContents.executeJavaScript(`(${fn.toString()})(${JSON.stringify(arg)})`) as Promise<T>;
+  }
+/**
+ * 把当前 VBK WebView 的 URL 用系统浏览器打开（仅 HTTP/HTTPS）。
+ */
+async openExternal() {
     const url = this.view?.webContents.getURL() || "";
     await openExternalUrl(url, (value) => shell.openExternal(value));
-  }
-  async navigate(url: string) {
+}
+
+/**
+ * 内置 WebView 内导航；URL 必须命中 allowedHosts 白名单，否则抛「仅允许…」错误。
+ */
+async navigate(url: string) {
     const host = new URL(url).hostname;
     if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) throw new Error("仅允许在内置 VBK 浏览器中打开携程页面");
     await this.view?.webContents.loadURL(url);
-  }
-  async login() { this.setVisible(true); await this.navigate(URLS.list); }
+}
+
+/**
+ * 便捷登录入口：setVisible(true) + 跳到产品列表 URL。
+ */
+async login() { this.setVisible(true); await this.navigate(URLS.list); }
 
   /**
    * 退出当前账号但**不**影响其他已记录账号：
@@ -285,7 +330,13 @@ export class VbkBrowser {
     };
   }
 
-  async page(): Promise<Page> {
+/**
+ * 拿一个绑定到当前 VBK WebView 的 Playwright Page：
+ *   - 复用 this.cdp（CDP over debuggingPort），避免重复连接累积 WebSocket；
+ *   - 优先按 view URL 匹配；找不到则取任意 ctrip.com 页面；
+ *   - 完全拿不到时抛错让上层提示「请先登录 VBK」。
+ */
+async page(): Promise<Page> {
     // 每次录入都新建一个 CDP 连接会持续累积 WebSocket，反复重试后拖垮自动化；
     // 这里复用同一个连接，断开后再重连。
     if (!this.cdp?.isConnected()) {
@@ -298,7 +349,10 @@ export class VbkBrowser {
     return page;
   }
 
-  async dispose() {
+/**
+ * 关闭 CDP 连接（不关 view）；用于完全退出应用前或调试热重启时。
+ */
+async dispose() {
     if (this.cdp?.isConnected()) await this.cdp.close().catch(() => {});
     this.cdp = undefined;
   }

@@ -11,6 +11,7 @@ import { hasActiveAiKey } from "../../../shared/ai-provider-config.js";
 import type { AppStateBase } from "./base";
 import type { PlanningGenerationState } from "../../../shared/contracts-planning.js";
 import { shouldAutoStartPlanning } from "./auto-start-policy.js";
+import { simulateRecoveryEffectTick } from "./recovery-policy.js";
 import { upsertProjectToTop } from "./project-list-helper.js";
 
 export function useAppStateDerived(state: AppStateBase) {
@@ -88,33 +89,67 @@ export function useAppStateDerived(state: AppStateBase) {
 
   // 启动 / 刷新时恢复最近打开的项目：只持久化 id 不足以让 React 看到
   // ProjectDetail，必须再向主进程拉一次权威数据。
-  // 失败时（项目已被删除 / 主进程报错）清掉残留 id，避免下次启动死循环重试。
-  // 用 cleanup + cancelled flag 守卫中途切换项目 / 主动退出详情页的场景。
+  //
+  // 关键不变量（详见 ./recovery-policy.ts 的纯函数决策）：
+  //   - 只在 view === "workspace" 时恢复。切到 projects / settings / operation-log 后
+  //     用户明确离开详情，effect 必须短路，不再发起请求或回填 project；
+  //   - 同一会话内只尝试一次（hasAttempted gate）：点"工作台"按钮
+  //     （setProject(null) + setView("workspace")）后 view 仍是 workspace，如果
+  //     只看 view 会再次触发，把刚被用户清掉的项目又塞回来。点击"项目"/"设置"/
+  //     "操作日志"时则由 view gate 拦截；
+  //   - 用户在初始化期间手动 openProject(A) 时同样消费本会话恢复机会——
+  //     主动接管项目选择之后，session 内不应再自动恢复，否则清掉 project
+  //     回 workspace 又被拉回详情（核心防回填，详见 simulateRecoveryEffectTick）；
+  //   - 项目不存在 / 主进程报错 → 清掉残留 id + activeProjectId，让下次启动不再
+  //     尝试恢复；但 view 已切走时不清理（用户可能想用 localStorage 里的 id
+  //     重新打开）；
+  //   - 异步取消：cleanup 把 cancelled 置 true，.then() / .catch() 跳过；用
+  //     currentViewForRecoveryRef + currentActiveProjectIdForRecoveryRef 在
+  //     in-flight 期间 view / activeProjectId 切换时再次确认（refs 在每次 render
+  //     同步更新，闭包读到的总是最新值），避免旧请求覆盖目标项目。
+  const recoveryAttemptedRef = useRef(false);
+  const currentViewForRecoveryRef = useRef<typeof view>(view);
+  const currentActiveProjectIdForRecoveryRef = useRef<string | null>(activeProjectId);
+  currentViewForRecoveryRef.current = view;
+  currentActiveProjectIdForRecoveryRef.current = activeProjectId;
+
   useEffect(() => {
-    if (!api()) return;
-    if (!activeProjectId) return;
-    if (project) return; // 用户已经在初始化期间手动打开了某个项目，放弃恢复
-    const targetId = activeProjectId;
+    const decision = simulateRecoveryEffectTick({
+      hasApi: Boolean(api()),
+      view,
+      hasProject: Boolean(project),
+      hasActiveProjectId: Boolean(activeProjectId),
+      hasAttempted: recoveryAttemptedRef.current,
+    });
+    recoveryAttemptedRef.current = decision.nextHasAttempted;
+    if (!decision.shouldRequest) return;
+    const targetId = activeProjectId as string;
     let cancelled = false;
     void api()!.projects.get(targetId).then((detail) => {
       if (cancelled) return;
-      // 即便 cancelled 标志位为 false，也再校验一次当前 activeProjectId：
+      // 即便 cancelled 标志位为 false，也再校验一次当前 view + activeProjectId：
       // 用户可能在 in-flight 期间主动退出详情页（setProject(null) → sync effect
-      // 把 activeProjectId 清掉），此时不能把已拉到手的旧项目再塞回去。
-      if (activeProjectId !== targetId) return;
+      // 把 activeProjectId 清掉）或切到非 workspace 视图，此时不能把已拉到手的
+      // 旧项目再塞回去。
+      if (currentViewForRecoveryRef.current !== "workspace") return;
+      if (currentActiveProjectIdForRecoveryRef.current !== targetId) return;
       setProject(detail);
     }).catch(() => {
       if (cancelled) return;
+      // view 已切走时不清理 localStorage / activeProjectId：用户可能还在用
+      // projects 视图，需要保留 id 以便重新打开。
+      if (currentViewForRecoveryRef.current !== "workspace") return;
+      if (currentActiveProjectIdForRecoveryRef.current !== targetId) return;
       // 项目已被删除或主进程暂时不可达：清掉 localStorage，让 UI 回落到
       // 工作台首页（AppWorkspaceHomePage），下次启动不再尝试恢复。
       try { localStorage.removeItem("vbk:activeProjectId"); } catch { /* 忽略 */ }
       setActiveProjectId(null);
     });
     return () => { cancelled = true; };
-    // activeProjectId 与 project?.id 都进 deps：用户在拉取期间切走时 effect
-    // 会 cleanup + 重新跑，重新跑时会被「project 已存在」或「activeProjectId 已清」
-    // 两条短路拦住，不会再发起多余请求。
-  }, [activeProjectId, project?.id]);
+    // activeProjectId / project?.id / view 都进 deps：用户在拉取期间切走时 effect
+    // 会 cleanup + 重新跑，重新跑时会被 policy 的几条短路拦住（project 已存在 /
+    // activeProjectId 已清 / view 非 workspace / 已 attempt 过），不再发起多余请求。
+  }, [activeProjectId, project?.id, view]);
 
   useEffect(() => {
     void updateReadiness(project);

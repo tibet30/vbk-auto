@@ -24,6 +24,7 @@ class PartialCommercialPlanner implements Planner {
   calls: PlanningStage[] = [];
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     this.calls.push(request.stage);
+    if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
     if (request.stage === "itinerary") {
       return {
         reply: "itin",
@@ -77,7 +78,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   async loadExistingResearchTasks() { return []; }
   async writeModule(_id: string, _m: PlanningModule, path: string, value: unknown) {
     if (path === AI_WRITABLE_PATHS.skeleton) {

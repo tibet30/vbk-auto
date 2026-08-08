@@ -65,7 +65,9 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  // skeleton 阶段只负责补副标题/运营备注；省份必须来自已确认的基础信息，
+  // 不能把目的地城市伪造成省份。用真实项目已有的山西省份模拟该前置事实。
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   researchTasks: ResearchTaskProposal[] = [];
   history: Array<{ role: "user" | "assistant"; content: string }> = [];
   /** addResearchTask 去重语义：相同 label+type 只算一次。 */
@@ -83,6 +85,10 @@ class FakeRuntime implements OrchestratorRuntime {
     }
     if (writePath === AI_WRITABLE_PATHS.skeleton) {
       this.product = { ...this.product, operations: { ...(this.product.operations as object | undefined ?? {}), ...(value as object) } };
+      return { ok: true };
+    }
+    if (writePath === AI_WRITABLE_PATHS.basicInfo) {
+      this.product = { ...this.product, basicInfo: { ...(this.product.basicInfo as object | undefined ?? {}), ...(value as object) } };
       return { ok: true };
     }
     return { ok: false, reason: `unknown writePath ${writePath}` };
@@ -130,6 +136,7 @@ const skeleton = {
 
 function buildFakeScript(): FakeProviderScript[] {
   return [
+    { stage: "basicInfo", callCount: 0, output: { reply: "已生成基础信息", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] } },
     {
       stage: "itinerary",
       callCount: 0,
@@ -210,10 +217,10 @@ test("完整 staged planning 跑完后状态为 completed", async () => {
     projectId: "p1", skeleton, store, runtime, planner, providerLabel: "minimax",
   });
   assert.equal(result.status, "completed");
-  assert.deepEqual(result.state.completedStages, ["skeleton", "itinerary", "presentation", "commercial", "research", "validation"]);
+  assert.deepEqual(result.state.completedStages, ["skeleton", "basicInfo", "itinerary", "presentation", "commercial", "research", "validation"]);
   // accepted 包含所有 REQUIRED + skeleton。researchTasks 由 ResearchTaskProposal 列表单独暴露。
   const acceptedModules = result.accepted.map((m) => m.module).sort();
-  assert.deepEqual(acceptedModules, ["inventory", "itinerary", "packageName", "presentation", "pricing", "release", "skeleton", "terms"]);
+  assert.deepEqual(acceptedModules, ["basicInfo", "inventory", "itinerary", "packageName", "presentation", "pricing", "release", "skeleton", "terms"]);
   // research tasks 仍被记录到 result.researchTasks。
   assert.ok(result.researchTasks.length >= 1);
   assert.equal(result.rejected.length, 0);
@@ -239,8 +246,9 @@ test("每个阶段的 Planner 调用次数 = 1，不存在嵌套 25-call retry",
   assert.equal(planner.calls.filter((c) => c.stage === "itinerary").length, 1);
   assert.equal(planner.calls.filter((c) => c.stage === "presentation").length, 1);
   assert.equal(planner.calls.filter((c) => c.stage === "commercial").length, 1);
+  assert.equal(planner.calls.filter((c) => c.stage === "basicInfo").length, 1);
   assert.ok(!planner.calls.some((c) => c.stage === "research"), "research 阶段是本地 deterministic，不调用 planner");
-  assert.equal(planner.calls.length, 3, "总调用次数 = 3（不含 skeleton / research / validation）");
+  assert.equal(planner.calls.length, 4, "总调用次数 = 4（不含 skeleton / research / validation）");
 });
 
 test("research tasks 由本地 deterministic 生成，标签不含「已确认 / 已解决」", async () => {
@@ -266,7 +274,7 @@ test("续跑时已完成阶段被跳过，且不重跑 planner", async () => {
   const result2 = await runPlan({ projectId: "p5", skeleton, store, runtime, planner: planner2, providerLabel: "minimax" });
   assert.equal(result2.status, "completed");
   assert.equal(planner2.calls.length, 0, "resume 不应再调 planner");
-  assert.equal(firstCalls, 3);
+  assert.equal(firstCalls, 4);
 });
 
 test("assistant 回复反映实际接受 / 缺失模块，不抄模型 reply", async () => {

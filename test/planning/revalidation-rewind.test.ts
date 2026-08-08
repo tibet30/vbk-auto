@@ -27,6 +27,7 @@ class ScriptedPlanner implements Planner {
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     this.calls.push(request.stage);
     const out = this.script[request.stage];
+    if (request.stage === "basicInfo" && !out) return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
     if (!out) throw new Error(`未编排阶段 ${request.stage}`);
     return out;
   }
@@ -39,7 +40,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   /**
    * 模拟「运营 / 手工改坏」持久化产品：每次 loadAcceptedModules 都重新检测。
    * 这样检测函数与 runtime 持久化的真相保持一致。
@@ -68,8 +69,15 @@ class FakeRuntime implements OrchestratorRuntime {
     // 这是与真实 DB 路径的等价语义：DbOrchestratorRuntime.loadAcceptedModules
     // 永远能看到骨架里的 basicInfo.days。
     const productWithBasicInfo: Record<string, unknown> = {
-      basicInfo: { days: 2, nights: 1, supplierProductCode: "NEW" },
       ...this.product,
+      basicInfo: {
+        days: 2,
+        nights: 1,
+        supplierProductCode: "NEW",
+        ...(this.product.basicInfo && typeof this.product.basicInfo === "object" && !Array.isArray(this.product.basicInfo)
+          ? this.product.basicInfo as Record<string, unknown>
+          : {}),
+      },
     };
     return detectAcceptedModulesFromProduct(productWithBasicInfo);
   }
@@ -153,7 +161,7 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
   await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
   // 第一轮跑完：state.status === "completed"，completedStages 包含所有阶段。
   assert.equal(store.state?.status, "completed");
-  assert.deepEqual(store.state?.completedStages, ["skeleton", "itinerary", "presentation", "commercial", "research", "validation"]);
+  assert.deepEqual(store.state?.completedStages, ["skeleton", "basicInfo", "itinerary", "presentation", "commercial", "research", "validation"]);
   // 模拟「运营 / 手工改坏」持久化 itinerary：2 天骨架只剩 1 天。
   rt.product = {
     ...rt.product,
@@ -283,6 +291,7 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
   assert.equal(store.state?.status, "needs_user");
   assert.equal(store.state?.currentStage, "itinerary");
   assert.ok(store.state?.completedStages.includes("skeleton"), "skeleton 是 itinerary 之前合法完成的阶段，必须保留");
+  assert.ok(store.state?.completedStages.includes("basicInfo"), "basicInfo 是 itinerary 之前合法完成的阶段，必须保留");
   assert.ok(!store.state?.completedStages.includes("itinerary"));
   assert.ok(!store.state?.completedStages.includes("presentation"));
   assert.ok(!store.state?.completedStages.includes("commercial"));

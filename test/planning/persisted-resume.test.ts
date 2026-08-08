@@ -20,6 +20,7 @@ class PartialPlanner implements Planner {
   constructor(private readonly stageToSimulate: PlanningStage, private readonly output: PlanningStageOutput) {}
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     this.calls.push({ stage: request.stage, attempt: (request.previousError?.attempt ?? 0) + 1 });
+    if (request.stage === "basicInfo" && request.stage !== this.stageToSimulate) return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
     if (request.stage === this.stageToSimulate) return this.output;
     throw new Error(`unexpected stage ${request.stage}`);
   }
@@ -32,7 +33,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   async loadExistingResearchTasks() { return []; }
   async writeModule(_id: string, _m: PlanningModule, path: string, value: unknown) {
     if (path === AI_WRITABLE_PATHS.skeleton) {
@@ -73,8 +74,8 @@ test("resume 不会重跑已完成阶段，从 currentStage 续跑", async () =>
   const r1 = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
   assert.equal(r1.status, "needs_user");
   // 持久化状态：skeleton + itinerary 完成，presentation 是当前阶段。
-  assert.deepEqual(store.state?.completedStages, ["skeleton", "itinerary"]);
-  assert.equal(store.state?.currentStage, "presentation");
+  assert.deepEqual(store.state?.completedStages, ["skeleton", "basicInfo", "itinerary"]);
+  assert.equal(store.state?.currentStage, "commercial");
 
   // 模拟进程重启后 resume：换一个能产出 presentation 的 planner。
   const presentationOutput: PlanningStageOutput = {
@@ -96,11 +97,11 @@ test("resume 不会重跑已完成阶段，从 currentStage 续跑", async () =>
   // planner2 应被调用 presentation；skeleton / itinerary 不在 calls 里。
   // planner2.calls 是 {stage, attempt}[]，不能直接 .includes('presentation')。
   const stages2 = planner2.calls.map((c) => c.stage);
-  assert.ok(stages2.includes("presentation"), `resume 应当调用 presentation，实际 stages：${stages2.join(",")}`);
+  assert.ok(stages2.includes("commercial"), `resume 应当补跑 commercial，实际 stages：${stages2.join(",")}`);
   assert.ok(!stages2.includes("skeleton"), "resume 不应再调 skeleton");
   assert.ok(!stages2.includes("itinerary"), "resume 不应再调 itinerary");
   // 持久化产品里 presentation 已落地。
-  assert.ok(rt.product.presentation, "presentation 应已落地");
+  assert.ok(rt.product.operations, "已完成前置阶段结果应已保留");
 });
 
 /**
@@ -135,7 +136,7 @@ test("resume：persisted state 只有 skeleton 时必须从 itinerary 起跑，�
   // currentStage 被推进到 itinerary（不是 skeleton）。
   assert.deepEqual(store.state?.completedStages, ["skeleton"]);
   assert.equal(store.state?.status, "needs_user");
-  assert.equal(store.state?.currentStage, "itinerary", "needs_user 终止时 currentStage 必须推进到下一个未完成阶段，避免 UI 看起来卡在 skeleton");
+  assert.equal(store.state?.currentStage, "basicInfo", "needs_user 终止时 currentStage 必须推进到下一个未完成阶段");
 
   // 第二轮：换一个能产出 itinerary 的 planner；只接受 itinerary。
   const itineraryOutput: PlanningStageOutput = {

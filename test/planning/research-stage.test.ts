@@ -23,6 +23,7 @@ class ItineraryOnlyPlanner implements Planner {
   calls: PlanningStage[] = [];
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     this.calls.push(request.stage);
+    if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
     if (request.stage === "itinerary") {
       return {
         reply: "itin",
@@ -45,6 +46,13 @@ class ItineraryOnlyPlanner implements Planner {
         } }],
       };
     }
+    if (request.stage === "commercial") return { reply: "com", modules: [
+      { module: "packageName", status: "accepted", value: "pkg" },
+      { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
+      { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
+      { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
+      { module: "release", status: "accepted", value: { publicPriceCeiling: 2000, publicAuditRetries: 3 } },
+    ] };
     if (request.stage === "commercial") {
       return {
         reply: "com",
@@ -68,7 +76,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西", subtitle: "太原精华之旅", operationNotes: "待核查", days: 2, nights: 1, meetingCity: "太原" } };
   researchTasks: ResearchTaskProposal[] = [];
   private keys = new Set<string>();
   async loadExistingResearchTasks() {
@@ -99,6 +107,8 @@ class FakeRuntime implements OrchestratorRuntime {
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules(): Promise<PlanningModule[]> {
     const out: PlanningModule[] = [];
+    const b = this.product.basicInfo as Record<string, unknown> | undefined;
+    if (b && ["subtitle", "province", "operationNotes"].every(k => typeof b[k] === "string" && String(b[k]).trim())) out.push("basicInfo");
     if (this.product.operations) out.push("skeleton");
     if (this.product.presentation) out.push("presentation");
     if (Array.isArray(this.product.itinerary) && this.product.itinerary.length) out.push("itinerary");

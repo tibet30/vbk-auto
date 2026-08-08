@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { VBK_NAV_SECTIONS } from "../../src/renderer/app/app.main.helpers/app.main.helpers.constants.js";
+import { VBK_NAV_SECTIONS } from "../../src/renderer/app/helpers/constants.js";
 
 const host = "https://vbooking.ctrip.com";
 const productId = "76522394";

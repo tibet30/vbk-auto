@@ -18,6 +18,7 @@ class OneValidPlanner implements Planner {
   calls: PlanningStage[] = [];
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     this.calls.push(request.stage);
+    if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
     if (request.stage === "itinerary") {
       return {
         reply: "已生成行程，方案完成", // 模型声称完成 → 不可信
@@ -42,7 +43,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   async loadExistingResearchTasks() { return []; }
   async writeModule(_id: string, _m: PlanningModule, path: string, value: unknown) {
     if (path === AI_WRITABLE_PATHS.skeleton) {
@@ -84,7 +85,9 @@ test("包含禁写字段的模块会被拒，且原因包含字段名", async ()
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner: Planner = {
-    async generateStage(): Promise<PlanningStageOutput> {
+    async generateStage(request): Promise<PlanningStageOutput> {
+      if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
+      if (request.stage === "itinerary") return { reply: "itin", modules: [{ module: "itinerary", status: "accepted", value: [{ day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" }, { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" }] }] };
       return {
         reply: "尝试写入 supplierProductCode",
         modules: [{

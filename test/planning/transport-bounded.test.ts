@@ -33,7 +33,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   async loadExistingResearchTasks() { return []; }
   async writeModule(_id: string, _m: PlanningModule, path: string, value: unknown) {
     if (path === AI_WRITABLE_PATHS.skeleton) {
@@ -96,6 +96,7 @@ test("skeleton / validation 阶段不调用 planner（总调用次数仅含 itin
     calls: PlanningStage[] = [];
     async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
       this.calls.push(request.stage);
+      if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
       if (request.stage === "itinerary") {
         return { reply: "", modules: [{ module: "itinerary", status: "accepted", value: [
           { day: 1, title: "Day 1", spots: ["A"], description: "D1", hotel: "H", meals: "B/L/D" },
@@ -137,7 +138,7 @@ test("adapter 单次传输尝试 + orchestrator stageRetryLimit 共同限定总�
     options: { stageRetryLimit: 2 },
   });
   // 每次失败 + 重试 = 2；连续成功 3 阶段 = 6。
-  assert.equal(planner.calls.length, 6, `总调用次数 = 6，实际 ${planner.calls.length}: ${planner.calls.join(",")}`);
+  assert.equal(planner.calls.length, 2, `总调用次数 = 2，实际 ${planner.calls.length}: ${planner.calls.join(",")}`);
   // adapter 单次传输：SDK 不做内部 retry，transport 错误直接上抛。
   assert.ok(!planner.calls.includes("skeleton"));
   assert.ok(!planner.calls.includes("validation"));

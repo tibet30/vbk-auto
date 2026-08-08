@@ -67,7 +67,7 @@ interface ResearchTaskRow {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
-  product: Record<string, unknown> = {};
+  product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   /** DB-style task list, including all states. */
   tasks: ResearchTaskRow[] = [];
   private keys = new Set<string>();
@@ -148,8 +148,8 @@ test("research 阶段 deterministic：confirmed 任务与未完成任务的混�
   ];
   const pending = pendingResearchTasks({ skeleton, product, acceptedModules: accepted, existing });
   assert.ok(!pending.some((p) => p.proposal.label.includes("晋祠")), "confirmed 状态的晋祠核查已被 dedupe");
-  // 但山西博物院仍然 pending。
-  assert.ok(pending.some((p) => p.proposal.label.includes("山西博物院")), "未确认的任务仍 pending");
+  // 景点任务已迁移到 itinerary 接受后生成，research 纯函数不再产生 POI。
+  assert.ok(!pending.some((p) => p.proposal.label.includes("山西博物院")), "research 不应再生成景点任务");
 });
 
 test("runtime.addResearchTask 在 SQL 全状态 filter 下不创建重复条目", async () => {

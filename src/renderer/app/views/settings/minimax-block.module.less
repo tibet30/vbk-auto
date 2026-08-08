@@ -1,4 +1,4 @@
-/* MiniMax 配置区块：head / body / foot 三段式。body 在查看态是 kv，编辑态是表单。 */
+/* AI 模型配置区块：查看当前模型，编辑时在独立的提供商配置间切换。 */
 
 .block {
   border: 1px solid var(--border);
@@ -122,6 +122,19 @@
   letter-spacing: 0.02em;
 }
 
+.activeBadge {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 30%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
+  color: var(--ai-teal);
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .editForm {
   display: flex;
   flex-direction: column;
@@ -130,8 +143,202 @@
 
 .field { display: block; }
 
-.taskEmptyOk   { color: var(--success); }
-.taskEmptyWarn { color: var(--destructive); }
+.fieldLabelRow {
+  min-height: 24px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fieldLabelRow :global(.fieldLabel) { margin-bottom: 0; }
+
+.refreshModelsBtn {
+  min-height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ai-teal);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.refreshModelsBtn:hover:not(:disabled) { background: color-mix(in srgb, var(--ai-teal) 8%, transparent); }
+
+.refreshModelsBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ai-teal) 14%, transparent);
+}
+
+.refreshModelsBtn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.field input:focus-visible,
+.field select:focus-visible,
+.modelOption:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ai-teal) 14%, transparent);
+}
+
+.modelSelect {
+  width: 100%;
+  height: var(--control);
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  appearance: none;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.modelSelect:disabled { cursor: not-allowed; opacity: 0.62; }
+
+.inlineModelId {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.modelMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.modelRefreshStatus {
+  margin-top: 5px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  text-align: end;
+  overflow-wrap: anywhere;
+}
+
+.modelRefreshStatus[data-state='confirmed'] { color: var(--success); font-weight: 500; }
+.modelRefreshStatus[data-state='blocked'] { color: var(--destructive); }
+
+.modelFieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.modelFieldset > legend { padding: 0; }
+
+.modelSwitcher {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.modelOption {
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  text-align: start;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.modelOption:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--ai-teal) 3%, var(--surface));
+}
+
+.modelOption[data-selected='true'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 50%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 6%, var(--surface));
+}
+
+.modelOption:disabled { cursor: not-allowed; opacity: 0.62; }
+
+.modelOptionMark {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--surface);
+}
+
+.modelOption[data-selected='true'] .modelOptionMark {
+  border-color: var(--ai-teal);
+  background: var(--ai-teal);
+}
+
+.modelOptionBody { min-width: 0; }
+
+.modelOptionBody strong,
+.modelOptionBody small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelOptionBody strong { font-size: var(--fs-sm); font-weight: 600; }
+
+.modelOptionBody small {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.modelOptionState {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.modelOptionState[data-configured='true'] { color: var(--success); font-weight: 600; }
+
+.testStatus {
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.testStatus svg { flex: 0 0 auto; margin-top: 1px; }
+.testStatus span { min-width: 0; overflow-wrap: anywhere; }
+.testStatus[data-state='testing'] { color: var(--ai-teal); }
+.testStatus[data-state='ok'] { color: var(--success); }
+.testStatus[data-state='error'] { color: var(--destructive); }
+
+.spinner { animation: model-spin 800ms linear infinite; }
+
+@keyframes model-spin { to { transform: rotate(360deg); } }
 
 .blockFoot {
   display: flex;
@@ -170,16 +377,6 @@
   flex-shrink: 0;
 }
 
-.footHintDetail {
-  color: var(--muted-foreground);
-  font-weight: 400;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
 @media (max-width: 640px) {
   .blockHead {
     flex-wrap: wrap;
@@ -191,6 +388,7 @@
     align-items: stretch;
   }
   .footHint { flex-basis: auto; }
+  .modelSwitcher { grid-template-columns: 1fr; }
   .kvRow {
     grid-template-columns: 1fr;
     gap: 4px;

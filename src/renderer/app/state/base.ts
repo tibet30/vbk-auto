@@ -5,7 +5,9 @@ import type {
   AccountFixedInfoValue,
   ContactCardSelection,
   CreateProjectInput,
-  MiniMaxConnectionTest,
+  ConnectionTest,
+  AiModelInfo,
+  LoginAccountsSnapshot,
   ProjectDetail,
   ProjectReadiness,
   ProjectSummary,
@@ -17,7 +19,6 @@ import { api, emptyReadiness, initialInput } from "../helpers";
 
 type View = "workspace" | "projects" | "settings" | "operation-log";
 const VIEW_STORAGE_KEY = "vbk:view";
-const MINIMAX_TEST_KEY = "vbk:minimaxTest";
 
 function readInitialView(): View {
   try {
@@ -25,18 +26,6 @@ function readInitialView(): View {
     if (raw === "workspace" || raw === "projects" || raw === "settings" || raw === "operation-log") return raw;
   } catch { /* 某些 Electron 环境下 localStorage 不可用 */ }
   return "workspace";
-}
-
-function readInitialMiniMaxTest(): MiniMaxConnectionTest | null {
-  try {
-    const raw = localStorage.getItem(MINIMAX_TEST_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (typeof (parsed as any)?.connected === "boolean" && typeof (parsed as any)?.message === "string") {
-      return parsed as MiniMaxConnectionTest;
-    }
-  } catch {}
-  return null;
 }
 
 export function useAppStateBase() {
@@ -80,6 +69,12 @@ export function useAppStateBase() {
 
   const [vbkLogin, setVbkLogin] = useState<VbkLoginStatus | null>(null);
   const [checkingVbkLogin, setCheckingVbkLogin] = useState(false);
+  // 多账号登录态：当前 WebView 实际账号 + 本机已记录的所有其它 VBK 账号。
+  // 与 vbkLogin 不同：vbkLogin 是 status 探测出来的（菜单/DOM/API 兜底），
+  // vbkLoginAccounts 是从 main 进程拿到的 login_sessions 表数据，
+  // 提供「已记录账号」可点击切换 / 忘记的能力。
+  const [vbkLoginAccounts, setVbkLoginAccounts] = useState<LoginAccountsSnapshot>({ current: null, saved: [] });
+  const [loadingLoginAccounts, setLoadingLoginAccounts] = useState(false);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [verificationNote, setVerificationNote] = useState("");
   // 刚被 confirmTask 确认的 task id：用于在 task-row 上打 1.2s 绿色闪动。
@@ -100,20 +95,20 @@ export function useAppStateBase() {
 
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [miniMaxConfigOpen, setMiniMaxConfigOpen] = useState(false);
-  const [miniMaxBaseUrl, setMiniMaxBaseUrl] = useState("https://api.minimaxi.com/v1");
-  const [miniMaxApiKey, setMiniMaxApiKey] = useState("");
-  const [showMiniMaxApiKey, setShowMiniMaxApiKey] = useState(false);
-  const [savingMiniMax, setSavingMiniMax] = useState(false);
-  const [testingMiniMax, setTestingMiniMax] = useState(false);
-  const [miniMaxTest, setMiniMaxTestRaw] = useState<MiniMaxConnectionTest | null>(readInitialMiniMaxTest);
-  const setMiniMaxTest = useCallback((next: MiniMaxConnectionTest | null) => {
-    try {
-      if (next) localStorage.setItem(MINIMAX_TEST_KEY, JSON.stringify(next));
-      else localStorage.removeItem(MINIMAX_TEST_KEY);
-    } catch {}
-    setMiniMaxTestRaw(next);
-  }, []);
+  // AI 提供商配置。每个提供商独立 API Key / Base URL / Model。
+  const [aiProvider, setAiProvider] = useState<"minimax" | "deepseek">("minimax");
+  const [aiConfigOpen, setAiConfigOpen] = useState(false);
+  const [aiBaseUrl, setAiBaseUrl] = useState("https://api.minimaxi.com/v1");
+  const [aiApiKey, setAiApiKey] = useState("");
+  const [aiModel, setAiModel] = useState("");
+  const [showAiApiKey, setShowAiApiKey] = useState(false);
+  const [savingAi, setSavingAi] = useState(false);
+  const [testingAi, setTestingAi] = useState(false);
+  const [loadingAiKey, setLoadingAiKey] = useState(false);
+  const [aiTest, setAiTest] = useState<ConnectionTest | null>(null);
+  const [aiModelList, setAiModelList] = useState<AiModelInfo[] | null>(null);
+  const [refreshingAiModels, setRefreshingAiModels] = useState(false);
+  const [aiModelListError, setAiModelListError] = useState<string | null>(null);
 
   // 每日行程可展开卡片：仅第 1 天默认展开；切换项目时重置。
   const [expandedDayIndex, setExpandedDayIndex] = useState<number | null>(0);
@@ -134,6 +129,27 @@ export function useAppStateBase() {
       setVbkLogin({ loggedIn: false, message: error instanceof Error ? error.message : "无法检测 VBK 登录状态。" });
     } finally {
       setCheckingVbkLogin(false);
+    }
+  };
+
+  /**
+   * 拉取本机已记录的 VBK 账号快照。
+   * 注意刷新 vbkLoginAccounts 与 checkVbkLogin 是两件事：
+   *  - 前者读 login_sessions 表（main 进程），UI 用它显示 chip；
+   *  - 后者实际访问 WebView 探测登录态，可能很慢。
+   * 两者各拉各的，避免让"刷新账号列表"被网络卡住。
+   */
+  const refreshVbkLoginAccounts = async () => {
+    if (!api()) return;
+    setLoadingLoginAccounts(true);
+    try {
+      const snapshot = await api()!.browser.listLoginAccounts();
+      setVbkLoginAccounts(snapshot);
+    } catch (error) {
+      setVbkLoginAccounts({ current: null, saved: [] });
+      setNotice(error instanceof Error ? error.message : "读取账号列表失败。");
+    } finally {
+      setLoadingLoginAccounts(false);
     }
   };
 
@@ -214,6 +230,11 @@ export function useAppStateBase() {
     setVbkLogin,
     checkingVbkLogin,
     setCheckingVbkLogin,
+    vbkLoginAccounts,
+    setVbkLoginAccounts,
+    loadingLoginAccounts,
+    setLoadingLoginAccounts,
+    refreshVbkLoginAccounts,
     activeTaskId,
     setActiveTaskId,
     verificationNote,
@@ -230,20 +251,32 @@ export function useAppStateBase() {
     setStoppingAutomation,
     notice,
     setNotice,
-    miniMaxConfigOpen,
-    setMiniMaxConfigOpen,
-    miniMaxBaseUrl,
-    setMiniMaxBaseUrl,
-    miniMaxApiKey,
-    setMiniMaxApiKey,
-    showMiniMaxApiKey,
-    setShowMiniMaxApiKey,
-    savingMiniMax,
-    setSavingMiniMax,
-    testingMiniMax,
-    setTestingMiniMax,
-    miniMaxTest,
-    setMiniMaxTest,
+    aiProvider,
+    setAiProvider,
+    aiConfigOpen,
+    setAiConfigOpen,
+    aiBaseUrl,
+    setAiBaseUrl,
+    aiApiKey,
+    setAiApiKey,
+    aiModel,
+    setAiModel,
+    showAiApiKey,
+    setShowAiApiKey,
+    savingAi,
+    setSavingAi,
+    testingAi,
+    setTestingAi,
+    loadingAiKey,
+    setLoadingAiKey,
+    aiTest,
+    setAiTest,
+    aiModelList,
+    setAiModelList,
+    refreshingAiModels,
+    setRefreshingAiModels,
+    aiModelListError,
+    setAiModelListError,
     expandedDayIndex,
     setExpandedDayIndex,
     browserRef,

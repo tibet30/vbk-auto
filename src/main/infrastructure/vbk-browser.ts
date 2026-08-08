@@ -3,6 +3,7 @@ import { openExternalUrl } from "./external-url.js";
 import { chromium, type Browser, type Page } from "playwright";
 import { URLS } from "../automation/constants.js";
 import { fetchCurrentUserInfo } from "./current-user.js";
+import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/contracts-types.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
 
@@ -17,12 +18,36 @@ const MENU_FALSE_POSITIVES = new Set([
   "新手指引", "帮助中心", "设置",
 ]);
 
+/**
+ * 多账号登录需要的存储接口。
+ * 抽成接口而不是直接 import VbkDatabase，避免 vbk-browser.ts 与 database.ts
+ * 形成循环依赖（database 自己的 migrate 又会引用 main.ts 的 ipc 注册）。
+ *
+ * 关键差异：
+ *  - accountKey 才是 cookie 表的主键（vbk_xxx 这种 loginAccount），
+ *    不只是显示名。同一身份证的 vbk_xxx / "小璐" 多次保存应视作同一账号。
+ */
+export interface LoginSessionStore {
+  saveSession(accountKey: string, accountName: string, cookiesJson: string): void;
+  loadSession(accountKey: string): { cookiesJson: string; accountName: string } | null;
+  listSessions(): SavedLoginAccount[];
+  deleteSession(accountKey: string): void;
+  /** 让浏览器侧记录"当前 WebView 实际展示的是谁"，与 login_sessions 表解耦。 */
+  getActiveAccountKey(): string | undefined;
+  setActiveAccountKey(key: string): void;
+  clearActiveAccountKey(): void;
+}
+
 export class VbkBrowser {
   private view?: WebContentsView;
   private visible = false;
   private cdp?: Browser;
 
-  constructor(private readonly window: BrowserWindow, private readonly debuggingPort: string) {}
+  constructor(
+    private readonly window: BrowserWindow,
+    private readonly debuggingPort: string,
+    private readonly sessionStore?: LoginSessionStore,
+  ) {}
 
   async initialise() {
     this.view = new WebContentsView({ webPreferences: { partition: "persist:vbk", contextIsolation: true, nodeIntegration: false, sandbox: true } });
@@ -56,13 +81,130 @@ export class VbkBrowser {
     await this.view?.webContents.loadURL(url);
   }
   async login() { this.setVisible(true); await this.navigate(URLS.list); }
+
+  /**
+   * 退出当前账号但**不**影响其他已记录账号：
+   * 1. 抽出当前 session 的 cookies 但不写入登录快照（即将删除，无需持久化）；
+   * 2. 清空当前 session 的所有 storage 与缓存；
+   * 3. 导航到产品列表等待用户。
+   *
+   * 注意：保留 clearActiveAccountKey()，让"当前是谁"的指示器同步清掉。
+   */
   async logout() {
     if (!this.view) return;
+    await this.clearBrowserSessionCookies();
     await this.view.webContents.session.clearStorageData({
       storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
     });
     await this.view.webContents.session.clearCache();
+    this.sessionStore?.clearActiveAccountKey();
     await this.navigate(URLS.list);
+  }
+
+  /**
+   * 把当前 WebView 的 cookies 抽出来保存到本机（login_sessions 表）。
+   * 通常由 addLogin / switchAccount 在切换之前调用，账号未登录时直接 no-op。
+   */
+  async saveCurrentSession(): Promise<SavedLoginAccount | null> {
+    if (!this.view) return null;
+    if (!this.sessionStore) return null;
+    const cookies = await this.collectCookies();
+    if (cookies.length === 0) return null;
+    // 「当前是谁」需要在抽 cookie 之前就探测完，否则页面看到的还是上一会话的 UI。
+    const status = await this.status(false);
+    if (!status.loggedIn) return null;
+    const displayName = status.accountName || "已登录账号";
+    const key = status.loginAccount || displayName;
+    this.sessionStore.saveSession(key, displayName, JSON.stringify(cookies));
+    this.sessionStore.setActiveAccountKey(key);
+    return { accountKey: key, accountName: displayName, lastUsedAt: new Date().toISOString() };
+  }
+
+  /**
+   * "新增登录"流程：
+   *  1. 当前已登录 → 先 saveCurrentSession 把老账号 cookies 收进 login_sessions；
+   *  2. 清空当前 session 的 cookies / storage / cache；
+   *  3. 导航到 VBK 登录页，等用户在右侧 WebView 完成新账号登录；
+   *  4. status() 检测到新登录后会再调一次 saveCurrentSession()（在 withKnownVbkAccount 钩子里）。
+   *
+   * 与 logout 的区别：这里显式保留老账号快照，让运营随时能切回去。
+   */
+  async addLogin() {
+    if (!this.view) return;
+    // 先把当前账号抓走；如果未登录，跳过这一步避免空快照落地。
+    await this.saveCurrentSession();
+    await this.clearBrowserSessionCookies();
+    await this.view.webContents.session.clearStorageData({
+      storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
+    });
+    await this.view.webContents.session.clearCache();
+    this.sessionStore?.clearActiveAccountKey();
+    // 让登录页面尽可能快显示：使用轻量入口 URL 而不是产品库。
+    await this.view.webContents.loadURL("https://vbooking.ctrip.com/");
+  }
+
+  /**
+   * 切换到本机已记着的一个 VBK 账号：
+   *  1. 当前已登录 → saveCurrentSession 把老账号存好；
+   *  2. 把目标账号的 cookies 灌进当前 session；
+   *  3. 重新导航到产品列表让 VBK 自己刷新账号上下文。
+   *
+   * 注意：cookies 设置之后**异步生效**，需要 await session.cookies.flushStore()
+   * 才能保证接下来 loadURL 时 VBK 拿到的是新账号的会话。
+   */
+  async switchAccount(accountKey: string) {
+    if (!this.view) return;
+    if (!this.sessionStore) throw new Error("本机未启用多账号登录切换。");
+    const trimmedKey = accountKey?.trim();
+    if (!trimmedKey) throw new Error("切换账号失败：账号标识不能为空。");
+    const record = this.sessionStore.loadSession(trimmedKey);
+    if (!record) throw new Error(`本机未记录该 VBK 账号（${trimmedKey}），请先登录一次再切换。`);
+    await this.saveCurrentSession();
+    // 清掉旧账号残留的 cookies，确保就算目标账号 cookies 不全也不会留下混合会话。
+    await this.clearBrowserSessionCookies();
+    const cookies = parseCookies(record.cookiesJson);
+    if (cookies.length === 0) {
+      // 罕见：旧版记录可能为空，导航前补一条"目标账号"的占位 cookies 让写入不为空。
+      // 这种 fallback 也能让下次 saveCurrentSession 自然重新覆盖。
+    }
+    for (const cookie of cookies) await this.applyCookie(cookie);
+    // flushStore 让所有 set 都落盘，再加载产品库。
+    if (typeof this.view.webContents.session.cookies.flushStore === "function") {
+      await this.view.webContents.session.cookies.flushStore().catch(() => undefined);
+    }
+    this.sessionStore.setActiveAccountKey(trimmedKey);
+    await this.view.webContents.loadURL(URLS.list);
+  }
+
+  /**
+   * 忘记（删除）一个本机记着的账号快照。
+   * 删除后运营再点该 chip 不会切回去 —— 调用方需负责提示。
+   * WebView 当前正在展示的账号不允许忘记，否则会被一个已删除的记录
+   * 立刻「复活」导致删除语义不一致。
+   */
+  forgetAccount(accountKey: string) {
+    if (!this.sessionStore) throw new Error("本机未启用多账号登录切换。");
+    const trimmedKey = accountKey?.trim();
+    if (!trimmedKey) return;
+    const active = this.sessionStore.getActiveAccountKey();
+    if (active && active === trimmedKey) {
+      throw new Error("当前正在使用的账号不能直接忘记，请先切换或登出。");
+    }
+    this.sessionStore.deleteSession(trimmedKey);
+  }
+
+  /** 列出当前 + 所有已记录的账号。 */
+  listKnownLoginAccounts(): LoginAccountsSnapshot {
+    if (!this.sessionStore) return { current: null, saved: [] };
+    const saved = this.sessionStore.listSessions();
+    const activeKey = this.sessionStore.getActiveAccountKey();
+    if (!activeKey) return { current: null, saved };
+    const match = saved.find((entry) => entry.accountKey === activeKey);
+    if (!match) return { current: null, saved };
+    return {
+      current: { accountKey: match.accountKey, accountName: match.accountName, lastUsedAt: match.lastUsedAt },
+      saved: saved.filter((entry) => entry.accountKey !== activeKey),
+    };
   }
 
   async status(refresh = false) {
@@ -79,6 +221,7 @@ export class VbkBrowser {
     //    这是项目里已经实现的解析器（current-user.ts），能拿到 "张三" 这种
     //    真实可读名；旧的 DOM 抓取会把"账号管理"菜单误识别成"管理"。
     let accountName: string | undefined;
+    let loginAccount: string | undefined;
     try {
       const page = await this.page();
       const user = await fetchCurrentUserInfo(page);
@@ -86,8 +229,9 @@ export class VbkBrowser {
       const login = user?.loginAccount?.trim();
       // 优先 loginAccount（vbk_671205），一目了然知道是哪个 VBK 账号；
       // 兜底 displayName（"小璐"）仅在 account 字段缺失时展示。
-      if (login) accountName = login;
-      else if (display) accountName = display;
+      if (login) loginAccount = login;
+      if (display) accountName = display;
+      else if (login) accountName = login;
     } catch {
       // API 失败（CDP 未就绪、接口变更、网络异常）→ fallback 到 DOM 抓取
     }
@@ -117,11 +261,15 @@ export class VbkBrowser {
       }
     }
 
+    const accounts = accountName ? Array.from(new Set([accountName, loginAccount].filter(Boolean) as string[])) : [];
+    const snapshot: LoginAccountsSnapshot = this.listKnownLoginAccounts();
+
     return {
       loggedIn: true,
       message: "VBK 已登录。",
       accountName,
-      accounts: accountName ? [accountName] : [],
+      loginAccount,
+      accounts: accounts.length ? accounts : (accountName ? [accountName] : []),
     };
   }
 
@@ -142,4 +290,135 @@ export class VbkBrowser {
     if (this.cdp?.isConnected()) await this.cdp.close().catch(() => {});
     this.cdp = undefined;
   }
+
+  // ─────────────────────────────────────────────────────────────
+  // 内部辅助
+  // ─────────────────────────────────────────────────────────────
+
+  /** 抽出当前 session 的全部 cookies。空数组表示未登录或已被清空。 */
+  private async collectCookies(): Promise<Electron.Cookie[]> {
+    if (!this.view) return [];
+    try {
+      return await this.view.webContents.session.cookies.get({});
+    } catch {
+      return [];
+    }
+  }
+
+  /** 清空当前 session 的全部 cookies。会基于 cookie.domain 逐条 remove。 */
+  private async clearBrowserSessionCookies() {
+    if (!this.view) return;
+    try {
+      const existing = await this.view.webContents.session.cookies.get({});
+      const view = this.view;
+      await Promise.all(existing.map((cookie) => {
+        const target = removeUrlFromCookie(cookie);
+        if (!target) return Promise.resolve();
+        return view.webContents.session.cookies.remove(target, cookie.name).catch(() => undefined);
+      }));
+    } catch {
+      // get/remove 失败时走兜底路径：clearStorageData。
+    }
+  }
+
+  /**
+   * 把单条 cookie 写回 session。
+   * 输入是 DB 里的 SerialisedCookie（Playwright 兼容结构），需要先根据
+   * domain/scheme 构造 Electron `cookies.set` 要求的 url。
+   */
+  private async applyCookie(cookie: SerialisedCookie) {
+    if (!this.view) return;
+    const url = cookieUrl(cookie);
+    if (!url) return;
+    const details: Electron.CookiesSetDetails = {
+      url,
+      name: cookie.name,
+      value: cookie.value,
+      path: cookie.path || "/",
+      secure: Boolean(cookie.secure),
+      httpOnly: Boolean(cookie.httpOnly),
+      sameSite: normaliseSameSite(cookie.sameSite),
+      expirationDate: normaliseExpiry(cookie.expires),
+    };
+    // 如果 cookie 有显式 domain，写进 set 让它精确写入（url 模式会自动从 host 取 domain）。
+    if (cookie.domain) details.domain = cookie.domain;
+    try {
+      await this.view.webContents.session.cookies.set(details);
+    } catch {
+      // 极少数 cookie（无效 domain / 跨 origin）写不进去，跳过；不要让某条失败阻塞整体切换。
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Cookies 序列化兼容层：从 DB 拿出来的 cookies 是历史快照，可能字段不全或
+// sameSite 写法与 Electron 不一致，需要做必要的归一化。
+// ─────────────────────────────────────────────────────────────
+
+interface SerialisedCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: string | null;
+  url?: string;
+}
+
+function parseCookies(raw: string): SerialisedCookie[] {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is SerialisedCookie =>
+      !!entry && typeof entry === "object" && typeof (entry as { name?: unknown }).name === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function cookieUrl(cookie: SerialisedCookie): string | null {
+  if (cookie.url) return cookie.url;
+  if (!cookie.domain) return null;
+  // domain 形如 ".ctrip.com"，规范化成可写 cookies.set 的 url。
+  const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain;
+  const scheme = cookie.secure ? "https" : "http";
+  return `${scheme}://${host}`;
+}
+
+function cookieDomain(url: string): string {
+  try { return new URL(url).hostname || ""; } catch { return ""; }
+}
+
+/**
+ * `session.cookies.remove(url, name)` 的 url 必须是 scheme + host。
+ * Electron 的 Cookie 结构没有 url，只有 domain ——
+ * 注意 domain 可能包含前导点（".ctrip.com"）也可能没有，
+ * scheme 也要按 secure 选 https / http。
+ */
+function removeUrlFromCookie(cookie: Pick<Electron.Cookie, "domain" | "secure">): string | null {
+  if (!cookie.domain) return null;
+  const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain;
+  if (!host) return null;
+  const scheme = cookie.secure ? "https" : "http";
+  return `${scheme}://${host}`;
+}
+
+function normaliseSameSite(value: SerialisedCookie["sameSite"]): "unspecified" | "no_restriction" | "lax" | "strict" {
+  if (!value) return "unspecified";
+  const lowered = String(value).toLowerCase();
+  if (lowered === "lax") return "lax";
+  if (lowered === "strict") return "strict";
+  if (lowered === "none" || lowered === "no_restriction") return "no_restriction";
+  return "unspecified";
+}
+
+function normaliseExpiry(value: SerialisedCookie["expires"]): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  // Electron 期望以秒为单位的 unix 时间戳；Playwright 已是同一口径，但保险起见
+  // 检测超过 10^12 的毫秒值并转换。
+  if (value > 1e12) return Math.floor(value / 1000);
+  return Math.floor(value);
 }

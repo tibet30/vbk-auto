@@ -7,6 +7,7 @@ import {
   vbkStageStatusText,
 } from "../helpers";
 import { api } from "../helpers";
+import { hasActiveAiKey } from "../../../shared/ai-provider-config.js";
 import type { AppStateBase } from "./base";
 
 export function useAppStateDerived(state: AppStateBase) {
@@ -85,7 +86,7 @@ export function useAppStateDerived(state: AppStateBase) {
   // 项目进入兜底：进入仍为空草稿的项目时自动触发一次 AI 生成。
   useEffect(() => {
     if (!project || !api()) return;
-    if (!settings?.hasMiniMaxKey) return;
+    if (!hasActiveAiKey(settings)) return;
     if (project.messages.some((message: { role: string }) => message.role === "user")) return;
     const itinerary = project.product.itinerary;
     if (Array.isArray(itinerary) && itinerary.length > 0) return;
@@ -95,9 +96,9 @@ export function useAppStateDerived(state: AppStateBase) {
       "需要写入的内容：产品卖点（presentation.subtitle / recommendation / features / recommendations 三条）、完整每日行程（itinerary，含 title/spots/activities/description/meals/hotel）、套餐/班期/条款的合理占位；并对需要核查的运营数据（城市ID、景点匹配、门票价格、用车资源、酒店资源）创建对应 researchTasks。",
       "请一次性返回完整 patch，不要再追问基础信息。",
     ].join("");
-    console.info("[App] auto-ai fallback for empty project", { projectId: project.id });
+    console.info("[App] auto-ai fallback for empty project", { projectId: project.id, provider: settings?.aiProvider });
     void api()!.ai.send(project.id, content);
-  }, [project?.id, settings?.hasMiniMaxKey]);
+  }, [project?.id, settings?.aiProvider, settings?.hasMiniMaxKey, settings?.hasDeepSeekKey]);
 
   useEffect(() => {
     const conversation = conversationRef.current;
@@ -178,7 +179,20 @@ export function useAppStateDerived(state: AppStateBase) {
     : undefined;
 
   const isVbkLoggedIn = Boolean(vbkLogin?.loggedIn);
-  const loggedAccounts = isVbkLoggedIn ? (vbkLogin?.accounts?.length ? vbkLogin.accounts : [vbkLogin?.accountName || "已登录账号"]) : [];
+  // 渲染层需要把多账号快照 + 当前探测状态整合成一份「账号清单」：
+  //  1. 当前如果探测到账号 → 优先使用 vbkLogin.accountName/loginAccount；
+  //  2. 否则用 vbkLoginAccounts.current.accountName 兜底；
+  //  3. saved 列表始终来自 vbkLoginAccounts.saved（DB 真相）。
+  // 注意：上层的 loggedAccounts / currentAccountName 还服务于设置页的
+  // 「已记录账号」chip，所以这里继续保留其单一字符串形式。详细的切换 /
+  // 忘记都在 vbkLoginAccounts 内做。
+  const accountsSnapshot = state.vbkLoginAccounts;
+  const snapshotCurrentName = accountsSnapshot.current?.accountName ?? null;
+  const detectedName = vbkLogin?.loggedIn ? vbkLogin.accountName ?? null : null;
+  const resolvedCurrent = detectedName ?? snapshotCurrentName;
+  const loggedAccounts = resolvedCurrent
+    ? Array.from(new Set([resolvedCurrent, ...accountsSnapshot.saved.map((entry) => entry.accountName)].filter(Boolean)))
+    : accountsSnapshot.saved.map((entry) => entry.accountName);
   const currentAccountName = loggedAccounts[0] || "未登录";
   // 头像缩写：优先账号名最后一个数字（vbk_671205 → 5），没有数字时退到首字符。
   // 之前是 slice(0,1).toUpperCase()，对 vbk_xxx 格式总是 "V"，识别度低。
@@ -245,5 +259,6 @@ export function useAppStateDerived(state: AppStateBase) {
     reviewStepStatus,
     vbkStepStatus,
     statusState,
+    vbkLoginAccounts: accountsSnapshot,
   };
 }

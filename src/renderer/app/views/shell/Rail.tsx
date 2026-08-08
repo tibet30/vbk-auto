@@ -1,6 +1,7 @@
 import { BriefcaseBusiness, History, PackageOpen, Settings } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import { AccountPopover } from "./AccountPopover";
+import { LOGO_URL, LOGO_ALT } from "../../brand";
 import styles from "./Rail.module.less";
 
 /**
@@ -26,7 +27,7 @@ export function AppRail({ model }: { model: AppModel }) {
 
   return (
     <aside className={styles.rail} aria-label="主导航">
-      <div className={styles.railMark}>VBK</div>
+      <img src={LOGO_URL} alt={LOGO_ALT} className={styles.railMark} draggable={false} />
 
       <button
         className={styles.railBtn}
@@ -105,6 +106,17 @@ export function AppRail({ model }: { model: AppModel }) {
               model.openLogin();
             }}
             onLogout={() => void model.logoutVbk()}
+            onAddLogin={() => {
+              setAccountMenuOpen(false);
+              void model.addNewLogin();
+            }}
+            onSwitchAccount={(accountKey) => {
+              setAccountMenuOpen(false);
+              void model.switchAccount(accountKey);
+            }}
+            onForgetAccount={(accountKey) => void model.forgetAccount(accountKey)}
+            savedAccounts={model.vbkLoginAccounts?.saved ?? []}
+            busyAccountKey={null}
             vbkLoggedIn={Boolean(model.vbkLogin?.loggedIn)}
             logoutDisabled={model.checkingVbkLogin}
           />

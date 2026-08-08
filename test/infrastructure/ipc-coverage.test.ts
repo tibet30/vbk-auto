@@ -155,6 +155,10 @@ test("preload 的 category.method → channel 命名约定（同名简化）", (
     ["automation.stop", "automation:stop"],
     ["accounts.listKnownAccounts", "accounts:listKnownAccounts"],
     ["accounts.providerIdFor", "accounts:providerIdFor"],
+    ["browser.listLoginAccounts", "browser:listLoginAccounts"],
+    ["browser.addLogin", "browser:addLogin"],
+    ["browser.switchAccount", "browser:switchAccount"],
+    ["browser.forgetAccount", "browser:forgetAccount"],
   ];
   for (const [key, expectedChannel] of expectations) {
     assert.equal(bindings.get(key), expectedChannel, `${key} 应映射到 ${expectedChannel}`);

@@ -2,6 +2,7 @@ import { BriefcaseBusiness, FolderOpen, Plus, Settings } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { WorkbenchModule } from "../../helpers";
+import { APP_NAME, LOGO_URL, LOGO_ALT } from "../../brand";
 import styles from "./index.module.less";
 
 export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
@@ -11,7 +12,10 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
 
   return <section className={styles.workspaceHome}>
     <header className={styles.workspaceHomeHead}>
-      <h1>VBK Desktop 工作台</h1>
+      <h1 className={styles.workspaceHomeTitle}>
+        <img src={LOGO_URL} alt={LOGO_ALT} className={styles.workspaceHomeLogo} draggable={false} />
+        <span>{APP_NAME} 工作台</span>
+      </h1>
       <p className={shared.viewSub}>从这里启动项目、查看设置或直接进入录入。</p>
     </header>
     <div className={styles.workspaceHomeGrid}>
@@ -43,7 +47,7 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
       />
       <WorkbenchModule
         icon={<Settings size={16} />}
-        title="VBK / MiniMax 设置"
+        title="VBK / AI 模型设置"
         detail="维护登录与 API Key，确保 AI 与浏览器联动可用。"
         state="todo"
         stateLabel="维护"

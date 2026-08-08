@@ -113,8 +113,48 @@ export function extractResourceGroups(payload: unknown) {
 }
 
 export function firstResourceGroup(payload: unknown) {
-  const [record] = extractResourceGroups(payload);
-  if (!record) return undefined;
+  const groups = extractResourceGroups(payload);
+  if (!groups.length) return undefined;
+  const [record] = groups;
+  return parseResourceGroup(record);
+}
+
+/**
+ * 从资源组列表中选最接近目标日租价的一项。
+ * 如果没有提供 targetDailyCost 或找不到价格匹配，退回到 firstResourceGroup。
+ * 搭配 20% 的容差范围（target ± 20%），超出范围的条目直接跳过。
+ */
+export function bestResourceGroup(payload: unknown, targetDailyCost?: number) {
+  const groups = extractResourceGroups(payload);
+  if (!groups.length) return undefined;
+  if (!targetDailyCost || targetDailyCost <= 0) {
+    const [record] = groups;
+    return parseResourceGroup(record);
+  }
+  // 容差：目标价格的 ±20%
+  const tolerance = targetDailyCost * 0.2;
+  const minAcceptable = targetDailyCost - tolerance;
+  const maxAcceptable = targetDailyCost + tolerance;
+  // 收集所有有价格的资源组，按与目标价格的距离排序
+  const priced = groups
+    .flatMap((record) => {
+      const parsed = parseResourceGroup(record);
+      if (!parsed?.resourceGroupMaxItemPrice) return [];
+      const price = parsed.resourceGroupMaxItemPrice;
+      if (price < minAcceptable || price > maxAcceptable) return [];
+      return [{ ...parsed, _distance: Math.abs(price - targetDailyCost) }];
+    })
+    .sort((a, b) => (a._distance ?? Infinity) - (b._distance ?? Infinity));
+  if (priced.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { _distance, ...selected } = priced[0];
+    return selected;
+  }
+  const [record] = groups;
+  return parseResourceGroup(record);
+}
+
+function parseResourceGroup(record: Record<string, unknown>) {
   const resourceGroupId = firstNumber(record, ["resourceGroupId", "resourceGroupID", "groupId", "id"]);
   const resourceGroupName = firstText(record, ["resourceGroupName", "groupName", "name", "resourceName"]);
   if (!resourceGroupId || !resourceGroupName) return undefined;
@@ -190,8 +230,33 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
     serviceHoursPerDay: positiveInteger(existingVehicle.serviceHoursPerDay) || 8,
   });
   const payload = await searchVehicleResourceGroups(page, estimate.query);
-  const selected = firstResourceGroup(payload);
-  if (!selected) throw new Error(`VBK 资源库未返回与「${estimate.query}」匹配的资源组，请直接在 VBK 资源库手动核查并以 researchTasks / project 形式记录资源 ID。`);
+  // 从产品定价中推算每日用车预算（成人价 × 起订人数 × 约 25% 分配给用车 ÷ 天数）。
+  const commercial = product.commercial && typeof product.commercial === "object" && !Array.isArray(product.commercial) ? product.commercial as Record<string, unknown> : {};
+  const pricing = commercial.pricing && typeof commercial.pricing === "object" && !Array.isArray(commercial.pricing) ? commercial.pricing as Record<string, unknown> : {};
+  const adultPrice = positiveNumber(pricing.adult) || 0;
+  const minTravelers = positiveInteger(pricing.minimumTravelers) || 2;
+  const tripDays = positiveInteger(basic.days) || 1;
+  const targetDailyCost = adultPrice > 0 ? Math.round((adultPrice * minTravelers * 0.25) / tripDays) : undefined;
+  // 如果精准查询无结果，退而求其次用更宽泛的关键词重试（去掉车级）。
+  let selected = bestResourceGroup(payload, targetDailyCost);
+  if (!selected) {
+    const fallbackQuery = `${estimate.seats}座`; // 去掉车级（经济/舒适），只用座位数
+    if (fallbackQuery !== estimate.query) {
+      const fallbackPayload = await searchVehicleResourceGroups(page, fallbackQuery);
+      selected = bestResourceGroup(fallbackPayload, targetDailyCost);
+      if (selected) {
+        console.info("[VehicleResource] matched via fallback query", { original: estimate.query, fallback: fallbackQuery, resourceGroupId: selected.resourceGroupId });
+      }
+    }
+  }
+  if (!selected) {
+    // 车辆资源库无匹配项：产品退回原样，备注说明情况。不抛异常——运营可后续人工匹配。
+    return {
+      product: { ...product, operations: { ...operations, transport: operations.transport || "charter" } },
+      resolved: undefined,
+      note: `VBK 资源库未返回与「${estimate.query}」匹配的车辆资源组，请人工在 VBK 核查或调整搜索关键词后重试。`,
+    };
+  }
 
   // 资源组价格等运营字段只接受来自 VBK 资源库接口的真实值；接口未返回就
   // 留空，UI 那边会要求运营人员从 VBK 复制金额补全。
@@ -233,9 +298,13 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
   };
   const noteParts: string[] = [
     `${estimate.city}${estimate.days}天私家团按${estimate.query}、每天${estimate.serviceHoursPerDay}小时在 VBK 资源库搜索。`,
-    `命中 1 条资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`,
   ];
-  if (resolved.resourceGroupMaxItemPrice !== undefined) noteParts.push(`资源组最高单价 ${resolved.resourceGroupMaxItemPrice} 元以 VBK 为准。`);
+  if (targetDailyCost && resolved.resourceGroupMaxItemPrice) {
+    noteParts.push(`预算约 ${targetDailyCost} 元/天，命中资源组最高单价 ${resolved.resourceGroupMaxItemPrice} 元（ID ${resolved.resourceGroupId}）。`);
+  } else {
+    noteParts.push(`命中资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`);
+  }
+  if (resolved.resourceGroupMaxItemPrice !== undefined && !targetDailyCost) noteParts.push(`资源组最高单价 ${resolved.resourceGroupMaxItemPrice} 元以 VBK 为准。`);
   if (existingVehicle.resourceGroupId && Number(existingVehicle.resourceGroupId) !== resolved.resourceGroupId) {
     noteParts.push("已替换先前的人工资源组 ID。");
   }

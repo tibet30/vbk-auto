@@ -1,6 +1,7 @@
 import { ChevronRight, LoaderCircle, Play, Square } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
-import { statusLabel } from "../../helpers";
+import { CopyableId, statusLabel } from "../../helpers";
+import { APP_NAME, LOGO_URL } from "../../brand";
 import shared from "../shared.module.less";
 import { AccountPopover } from "./AccountPopover";
 import styles from "./Topbar.module.less";
@@ -62,6 +63,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
               data-form={project.name.endsWith("跟团游") ? "groupTour" : "privateTour"}
             >
               <strong className={styles.title}>{project.name}</strong>
+              <CopyableId value={project.id} className={styles.copyableIdTopbar} />
               <span className={styles.crumbState} data-state={statusTone(project.status)}>
                 <span className={shared.dot} data-state={project.status === "blocked" ? "warn" : project.status === "draft_saved" ? "ok" : "ai"} />
                 {statusLabel(project.status)}
@@ -71,7 +73,10 @@ export function AppTopbar({ model }: { model: AppModel }) {
         ) : viewTitle ? (
           <span className={styles.crumb}>{viewTitle}</span>
         ) : (
-          <span className={styles.crumb}>VBK Desktop</span>
+          <span className={styles.crumb}>
+            <img src={LOGO_URL} alt="" className={styles.crumbLogo} draggable={false} />
+            <span className={styles.crumbApp}>{APP_NAME}</span>
+          </span>
         )}
       </nav>
 
@@ -164,6 +169,17 @@ export function AppTopbar({ model }: { model: AppModel }) {
                 openLogin();
               }}
               onLogout={() => void logoutVbk()}
+              onAddLogin={() => {
+                setAccountMenuOpen(false);
+                void model.addNewLogin();
+              }}
+              onSwitchAccount={(accountKey) => {
+                setAccountMenuOpen(false);
+                void model.switchAccount(accountKey);
+              }}
+              onForgetAccount={(accountKey) => void model.forgetAccount(accountKey)}
+              savedAccounts={model.vbkLoginAccounts?.saved ?? []}
+              busyAccountKey={null}
               vbkLoggedIn={Boolean(vbkLogin?.loggedIn)}
               logoutDisabled={checkingVbkLogin}
             />

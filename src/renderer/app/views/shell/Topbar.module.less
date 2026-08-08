@@ -77,6 +77,32 @@
   max-width: 280px;
 }
 
+/* 项目详情页顶栏里的「CopyableId」项目 ID 徽章：复用 helpers/components 的同名样式，
+ * 这里只轻微收紧 max-width 以适应 44px 顶栏。 */
+.copyableIdTopbar {
+  max-width: 180px;
+}
+
+/* 无项目时顶栏左侧的品牌区：Logo + 应用名 */
+.crumbLogo {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: contain;
+  background: var(--muted);
+  flex-shrink: 0;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.crumbApp {
+  font-weight: 600;
+  color: var(--foreground);
+  font-size: var(--fs-md);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .crumbState {
   display: inline-flex;
   align-items: center;

@@ -112,3 +112,53 @@ test("extractMiniMaxFailureReason 可读取 MiniMaxServiceError.details 字段",
   });
   assert.equal(extracted, reason);
 });
+
+test("normalizeFailureMessage 显式传入 Evolink label 后使用 Evolink 文案", () => {
+  const reason = "[2] [Evolink] structured response rejected { length: 134, hasThinkingBlock: false, hasJsonFence: false, reason: 'Unexpected end of JSON input' }";
+
+  // 结构化失败 → 「Evolink 返回的数据格式…」
+  assert.equal(
+    normalizeFailureMessage("invalid_model_output", reason, "Evolink"),
+    "Evolink 返回的数据格式无法用于产品方案，请重试。",
+  );
+
+  // 空输出/无可写结构 → 「Evolink 未返回可写入的产品方案…」
+  assert.equal(
+    normalizeFailureMessage("empty_model_output", "", "Evolink"),
+    "Evolink 未返回可写入的产品方案，请重试。",
+  );
+
+  // 不传 label 时仍保持 MiniMax 原文（向后兼容）
+  assert.equal(
+    normalizeFailureMessage("invalid_model_output", reason),
+    "MiniMax 返回的数据格式无法用于产品方案，请重试。",
+  );
+});
+
+test("normalizeFailureMessage 在 Evolink 尾注“请检查 Evolink API 配置后重试”下仍归一化为 Evolink 结构化失败", () => {
+  const reason = "[2] [Evolink] structured response rejected { length: 134, hasThinkingBlock: false, hasJsonFence: false, reason: 'Unexpected end of JSON input' }；请检查 Evolink API 配置后重试。";
+
+  // 尾注应被连接提示清理识别并剥掉，最终文案不拼接连接提示
+  assert.equal(
+    normalizeFailureMessage("invalid_model_output", reason, "Evolink"),
+    "Evolink 返回的数据格式无法用于产品方案，请重试。",
+  );
+  // 即使尾注以“后再试 / 再次请求”形式出现，也应只保留结构化失败文案
+  assert.equal(
+    normalizeFailureMessage(
+      "invalid_model_output",
+      "[Evolink] structured response rejected { reason: 'Unexpected token' }，请检查 Evolink API 配置后再尝试请求。",
+      "Evolink",
+    ),
+    "Evolink 返回的数据格式无法用于产品方案，请重试。",
+  );
+});
+
+test("classifyMiniMaxError 对 Evolink “未返回可写入” 文案同样归为 invalid_model_output", () => {
+  const reason = "[Evolink] 返回的数据格式无法用于产品方案，请重试。";
+  assert.equal(classifyMiniMaxError({ code: "provider_error", payload: { message: reason } }), "invalid_model_output");
+  assert.equal(
+    classifyMiniMaxError({ code: "provider_error", payload: { message: "[AI] 未返回可写入的产品方案。" } }),
+    "invalid_model_output",
+  );
+});

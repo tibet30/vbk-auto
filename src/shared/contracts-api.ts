@@ -1,8 +1,13 @@
 import type {
   CreateProjectInput,
+  AiConnectionTestInput,
+  AiModelListInput,
+  AiModelListResult,
+  AiProvider,
   AiRegenerateField,
+  LoginAccountsSnapshot,
   ManualReviewFieldInput,
-  MiniMaxConnectionTest,
+  ConnectionTest,
   VbkLoginStatus,
   OperationLogPage,
   OperationLogQuery,
@@ -51,6 +56,33 @@ export interface VbkApi {
     openExternal(): Promise<void>;
     setBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
     setVisible(visible: boolean): Promise<void>;
+    /**
+     * 列出当前 WebView 实际账号 + 本机已保存的所有 VBK 登录账号（按最近使用排序）。
+     * "新增登录" / "切换到 xxx" / "忘记 xxx" 都依赖这个视图。
+     */
+    listLoginAccounts(): Promise<LoginAccountsSnapshot>;
+    /**
+     * 把当前 WebView 中已登录账号的 cookies 抽出来存到本机，
+     * 然后清空 session 并跳到 VBK 登录页，让用户登录另一个账号。
+     *
+     * 1. 若当前未登录：直接打开 VBK 登录页（不保存任何快照）；
+     * 2. 若当前已登录：先把当前 cookies 存到 `current.loginAccount` 对应的快照，
+     *    再清空 session，再导航到登录页；
+     * 3. 等用户在右侧 WebView 走完登录后，status 流程会自动保存新的快照。
+     */
+    addLogin(): Promise<void>;
+    /**
+     * 切换到本机已经记录过的一个 VBK 账号：
+     * 1. 当前账号已登录则先存快照；
+     * 2. 把目标账号的 cookies 回灌到 session；
+     * 3. 重新导航到产品列表，让 VBK 自动 refresh 账号。
+     */
+    switchAccount(accountKey: string): Promise<void>;
+    /**
+     * 忘记（删除）本机记着的某个账号快照。被 WebView 当前展示的账号不可忘记，
+     * 调用方需先切换 / 登出。
+     */
+    forgetAccount(accountKey: string): Promise<void>;
   };
   automation: {
     start(projectId: string): Promise<void>;
@@ -108,9 +140,10 @@ export interface VbkApi {
   };
   settings: {
     get(): Promise<Settings>;
-    getApiKey(): Promise<string>;
-    save(input: Partial<Settings> & { apiKey?: string }): Promise<Settings>;
-    test(input: Pick<Settings, "minimaxBaseUrl"> & { apiKey?: string }): Promise<MiniMaxConnectionTest>;
+    getApiKey(provider: AiProvider): Promise<string>;
+    listModels(input: AiModelListInput): Promise<AiModelListResult>;
+    save(input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }): Promise<Settings>;
+    test(input: AiConnectionTestInput): Promise<ConnectionTest>;
   };
   events: { onProjectUpdated(listener: (project: ProjectDetail) => void): () => void };
   operationLog: {

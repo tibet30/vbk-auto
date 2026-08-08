@@ -130,9 +130,9 @@ export interface AutomationRun {
 }
 
 /**
- * AI 歧义消除：在 VBK 下拉里选不到精确项时，把候选项列表发给 MiniMax，让它
- * 选一个最像的（或者明确表示「无匹配」）。用在景区、景点、城市、车站等所有
- * 严格选择场景下。
+ * AI 歧义消除：在 VBK 下拉里选不到精确项时，把候选项列表发给 AI（默认 MiniMax，
+ * 设置里可切换到 Evolink），让它选一个最像的（或者明确表示「无匹配」）。用在
+ * 景区、景点、城市、车站等所有严格选择场景下。
  */
 export interface DisambiguateRequest {
   /** 上下文类别 — 用在不同 prompt 约束。 */
@@ -152,16 +152,50 @@ export interface DisambiguateOutcome {
   reasoning: string;
 }
 
+export type AiProvider = "minimax" | "deepseek";
+
 export interface Settings {
+  aiProvider: AiProvider;
   minimaxBaseUrl: string;
   minimaxModel: string;
+  deepseekBaseUrl: string;
+  deepseekModel: string;
   hasMiniMaxKey: boolean;
+  hasDeepSeekKey: boolean;
   dataPath: string;
 }
 
-export interface MiniMaxConnectionTest {
+export interface ConnectionTest {
   connected: boolean;
   message: string;
+  provider: AiProvider;
+  baseUrl: string;
+  model: string;
+  testedAt: string;
+}
+
+export interface AiConnectionTestInput {
+  provider: AiProvider;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+}
+
+export interface AiModelListInput {
+  provider: AiProvider;
+  baseUrl: string;
+  apiKey?: string;
+}
+
+export interface AiModelInfo {
+  id: string;
+  label: string;
+  ownedBy?: string;
+}
+
+export interface AiModelListResult {
+  models: AiModelInfo[];
+  fetchedAt: string;
 }
 
 export interface VehicleResourceMatch {
@@ -198,11 +232,41 @@ export interface HotelResourceMatch {
 export interface VbkLoginStatus {
   loggedIn: boolean;
   message: string;
-  /** VBK 页面展示名，例如“小璐”。 */
+  /** VBK 页面展示名，例如"小璐"。 */
   accountName?: string;
-  /** VBK 登录账号，例如“vbk_671205”。 */
+  /** VBK 登录账号，例如"vbk_671205"。 */
   loginAccount?: string;
   accounts?: string[];
+}
+
+/**
+ * 本机已记录但**当前 WebView 未在线**的 VBK 登录账号。
+ *
+ * 多账号登录的工作流是这样的：
+ *  - WebView 同一时刻只能显示一个账号；
+ *  - "新增登录"会把当前账号的 cookies 抽出来存进 settings 表（key = 登录账号）；
+ *  - 切到已记录的账号时再把 cookies 回灌到 session。
+ *
+ * lastUsedAt 只用来给 UI 排序（最近用过靠前），不参与匹配。
+ */
+export interface SavedLoginAccount {
+  /** 唯一标识，VBK 的登录账号（vbk_xxx）/ 真实姓名兜底。这两者要在设置面板看起来一致。 */
+  accountKey: string;
+  /** 真实展示名（vbk_671205 / 小璐）。与 accountKey 在多数场景下相同，缺时回落 accountKey。 */
+  accountName: string;
+  /** 最近一次被保存到本机的时间（ISO 字符串），用于排序；已被忘记的账号不会出现在这里。 */
+  lastUsedAt: string;
+}
+
+/**
+ * 列举多账号登录态的合并视图：当前 + 已记录。
+ * - `current` 为当前 WebView 实际拿到的账号，可能为空（未登录）。
+ * - `saved` 是除 current 之外被本机保留的账号。
+ * 注意 current 同样也保存在本地；它的 cookies 在 WebView 的 session 里。
+ */
+export interface LoginAccountsSnapshot {
+  current: SavedLoginAccount | null;
+  saved: SavedLoginAccount[];
 }
 
 /**
@@ -323,4 +387,3 @@ export interface OperationLogPage {
   /** 刷新时间戳（ISO），方便头部显示「最近更新于…」并避免重复拉取。 */
   refreshedAt: string;
 }
-

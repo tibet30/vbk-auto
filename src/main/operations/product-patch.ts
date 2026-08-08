@@ -98,7 +98,7 @@ export function applyProductPatchSafe(
       result = next;
       applied = true;
     } catch (error) {
-      console.warn("[MiniMax] patch operation skipped", {
+      console.warn("[AI] patch operation skipped", {
         op: operation.op,
         path: operation.path,
         reason: error instanceof Error ? error.message : "unknown",

@@ -139,6 +139,92 @@
   gap: 4px;
 }
 
+/* 多账号登录：每条已记录账号是一个 inline 容器，左侧名字点击 = 切换，
+ * 右侧 × 图标点击 = 忘记。当前账号独立用 green 徽章展示，不参与切换。 */
+.accountList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.accountListItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 8px;
+  cursor: default;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.accountListItem[data-confirming='true'] {
+  border-color: color-mix(in srgb, var(--warning) 60%, var(--border));
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+}
+
+.accountListBusy { opacity: 0.6; pointer-events: none; }
+
+.accountListCurrent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, var(--surface));
+}
+
+.accountListName {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountListNameBtn {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  margin: 0;
+  font: inherit;
+  font-size: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 18px;
+}
+
+.accountListNameBtn:hover {
+  color: var(--foreground);
+}
+
+.accountListNameBtn:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.accountListTag {
+  color: var(--success);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.accountListForgetBtn {
+  width: 20px;
+  height: 20px;
+  color: var(--muted-foreground);
+  border: 0;
+  background: transparent;
+}
+
+.accountListForgetBtn:hover {
+  background: var(--muted);
+  color: var(--destructive);
+}
+
 .blockFoot {
   display: flex;
   align-items: center;

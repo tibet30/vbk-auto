@@ -5,11 +5,12 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { APP_NAME } from './app/brand';
 import './styles/global.css';
 
 const root = document.getElementById('root');
 if (!root) {
-  throw new Error('VBK Desktop: #root element not found');
+  throw new Error(`${APP_NAME}: #root element not found`);
 }
 
 createRoot(root).render(

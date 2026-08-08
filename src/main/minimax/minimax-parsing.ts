@@ -13,6 +13,12 @@ import {
 
 export function normalisePatchOperation(operation: z.infer<typeof patchOperationSchema>) {
   if (operation.op === "remove") return operation;
+  // 路径变体映射：模型常把 "basic_info/subtitle" 或 "transport_mode" 等非标准路径写出，
+  // 统一规整到产品协议里的可写路径。
+  const alias = pathAlias(operation.path);
+  if (alias !== operation.path) {
+    operation = { ...operation, path: alias };
+  }
   if (operation.path === "/presentation") {
     const value = normalisePresentation(operation.value);
     return value ? { ...operation, value } : undefined;
@@ -25,6 +31,26 @@ export function normalisePatchOperation(operation: z.infer<typeof patchOperation
   if (!schema) return operation;
   const parsed = schema.safeParse(operation.value);
   return parsed.success ? { ...operation, value: parsed.data } : undefined;
+}
+
+// 把抓包中常见的路径变体映射回产品协议的标准路径。
+function pathAlias(path: string): string {
+  const aliases: Record<string, string> = {
+    "basic_info/subtitle": "/basicInfo/subtitle",
+    "basicInfo/title": "/basicInfo/subtitle",
+    "basicInfo/destination": "/basicInfo/destinationCity",
+    "/basic_info/subtitle": "/basicInfo/subtitle",
+    "/operations/transport_mode": "/operations/transport",
+    "operations/transport_mode": "/operations/transport",
+    "transport-mode": "/operations/transport",
+    "/transport-mode": "/operations/transport",
+    "ops/transport": "/operations/transport",
+    "presentation/desc": "/presentation",
+    "/presentation/description": "/presentation",
+  };
+  if (aliases[path]) return aliases[path];
+  if (!path.startsWith("/")) return `/${path}`;
+  return path;
 }
 
 export function unwrapResponse(value: unknown): unknown {
@@ -48,7 +74,7 @@ export function unwrapResponse(value: unknown): unknown {
 
 export function parseValue(value: unknown): AiResponse {
   const unwrapped = unwrapResponse(value);
-  if (!unwrapped || typeof unwrapped !== "object" || Array.isArray(unwrapped)) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+  if (!unwrapped || typeof unwrapped !== "object" || Array.isArray(unwrapped)) throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
   const record = unwrapped as Record<string, unknown>;
   const recordKeys = Object.fromEntries(
     aiResponsePayloadKeys
@@ -56,20 +82,25 @@ export function parseValue(value: unknown): AiResponse {
       .map((key) => [key, record[key]]),
   );
   const reply = typeof recordKeys.reply === "string" ? recordKeys.reply.trim() : "";
-  if (!reply) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+  if (!reply) throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
   if (recordKeys.patch !== undefined && !Array.isArray(recordKeys.patch)) {
-    throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+    throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
   }
   if (recordKeys.questions !== undefined && !Array.isArray(recordKeys.questions)) {
-    throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+    throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
   }
   if (recordKeys.researchTasks !== undefined && !Array.isArray(recordKeys.researchTasks)) {
-    throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+    throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
   }
 
   const rawPatch = Array.isArray(recordKeys.patch) ? recordKeys.patch : [];
   const patch = rawPatch
     .flatMap((operation) => {
+      // 在 schema 校验前先把路径变体映射回产品协议的标准路径。
+      if (operation && typeof operation === "object" && !Array.isArray(operation)) {
+        const op = operation as Record<string, unknown>;
+        if (typeof op.path === "string") op.path = pathAlias(op.path);
+      }
       const parsed = patchOperationSchema.safeParse(operation);
       if (!parsed.success) return [];
       const normalised = normalisePatchOperation(parsed.data);
@@ -80,7 +111,7 @@ export function parseValue(value: unknown): AiResponse {
     const path = (operation as Record<string, unknown>).path;
     return patchOperationSchema.safeParse(operation).success ? [] : [typeof path === "string" ? path : "[missing path]"];
   });
-  if (rejectedPatchPaths.length) console.warn("[MiniMax] rejected patch paths", { paths: rejectedPatchPaths });
+  if (rejectedPatchPaths.length) console.warn("[AI] rejected patch paths", { paths: rejectedPatchPaths });
 
   const questions = Array.isArray(recordKeys.questions)
     ? recordKeys.questions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 1)
@@ -92,7 +123,7 @@ export function parseValue(value: unknown): AiResponse {
     })
     : [];
   const parsed = aiResponseSchema.safeParse({ reply, patch, questions, researchTasks });
-  if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的数据格式无法用于产品方案，请重试。");
+  if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
   return parsed.data;
 }
 
@@ -121,7 +152,6 @@ function unstructured(value: string): ParsedMinimaxResponse {
 
 function pickBestStructuredResponse(responses: ParsedMinimaxResponse[]): ParsedMinimaxResponse | undefined {
   if (!responses.length) return undefined;
-  console.warn("[DBG-pickBest] candidates=", responses.map((r, i) => ({ i, reply: (r.response.reply ?? "").slice(0, 20), patchLen: r.response.patch?.length ?? 0 })));
   return responses.reduce((best, candidate) => {
     const bestPatchCount = best.response.patch?.length ?? 0;
     const candidatePatchCount = candidate.response.patch?.length ?? 0;
@@ -263,7 +293,7 @@ export function parseJson(raw: string): ParsedMinimaxResponse {
   const maybeError = lastError instanceof Error ? lastError.message : "unknown";
   const sparseResponse = parseSparseResponse(cleaned);
   if (sparseResponse) {
-    console.warn("[MiniMax] structured parse fallback to partial payload", {
+    console.warn("[AI] structured parse fallback to partial payload", {
       length: raw.length,
       reason: maybeError,
       fallbackKind: sparseResponse.isStructured ? "structured-partial" : "text-only",
@@ -275,13 +305,13 @@ export function parseJson(raw: string): ParsedMinimaxResponse {
     ?? extractPlainReply(cleaned)
     ?? extractTextFallback(cleaned);
   if (fallbackReply) {
-    console.warn("[MiniMax] structured parse fallback to loose reply", {
+    console.warn("[AI] structured parse fallback to loose reply", {
       length: raw.length,
       reason: maybeError,
     });
     return unstructured(fallbackReply);
   }
-  console.warn("[MiniMax] structured response rejected", {
+  console.warn("[AI] structured response rejected", {
     length: raw.length,
     hasThinkingBlock: /<think>/i.test(raw),
     hasJsonFence: /```(?:json)?/i.test(raw),
@@ -298,8 +328,8 @@ function stripReplyValueWrappers(value: string): string {
 }
 
 function parseRecoveredJson(raw: string): unknown | undefined {
-  console.warn("[DBG-prj] called with raw[:80]=", raw.slice(0, 80));
   const withoutTrailingComma = trimTrailingComma(raw);
+  console.warn("[DBG-prj2] raw[:80]=", raw.slice(0, 80));
   const candidates = [
     raw,
     withoutTrailingComma,
@@ -309,6 +339,12 @@ function parseRecoveredJson(raw: string): unknown | undefined {
     repairSingleQuotedJson(completeJsonTail(withoutTrailingComma)),
     completeJsonTail(raw),
     completeJsonTail(withoutTrailingComma),
+    quoteUnquotedKeys(repairSingleQuotedJson(raw)),
+    quoteUnquotedKeys(repairSingleQuotedJson(withoutTrailingComma)),
+    quoteUnquotedKeys(repairSingleQuotedJson(completeJsonTail(raw))),
+    quoteUnquotedKeys(repairSingleQuotedJson(completeJsonTail(withoutTrailingComma))),
+    quoteUnquotedKeys(completeJsonTail(raw)),
+    quoteUnquotedKeys(completeJsonTail(withoutTrailingComma)),
   ];
   const seen = new Set<string>();
   for (const candidate of candidates) {
@@ -323,14 +359,56 @@ function parseRecoveredJson(raw: string): unknown | undefined {
   return undefined;
 }
 
+// 给未加引号的 key 加双引号（如 {key:value} -> {"key":"value"}）
+function quoteUnquotedKeys(raw: string): string {
+  return raw.replace(/([,{]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
+}
+
 function parseLooseFieldValue(raw: string, key: string): unknown {
-  const keyRegex = new RegExp(`(?:^|[\\s,{])(?:\"${key}\"|'${key}'|${key})\\s*:\\s*`, "i");
-  const match = raw.match(keyRegex);
-  if (!match || match.index === undefined) return undefined;
+  // 兼容半角 ":" / "=" 和全角 "：" / "，" 分隔符（模型抓包常见混用中文符号）
+  const normalized = raw.replace(/，/g, ",");
+  const keyRegex = new RegExp(`(?:^|[\\s,，{])(?:\"${key}\"|'${key}'|${key})\\s*[：:=]\\s*`, "gi");
+  const matches = Array.from(normalized.matchAll(keyRegex));
+  const match = matches.length > 0 ? matches[matches.length - 1] : null;
+  if (!match || match.index === undefined) {
+    // raw 是 value-only 形式（如 '是否继续补齐接驳？'），尝试把 raw 当作 string 解析。
+    if (/^["'].*["']$/.test(raw.trim())) {
+      try {
+        const v = JSON.parse(raw.trim());
+        return typeof v === "string" ? v : undefined;
+      } catch {}
+    }
+    return undefined;
+  }
+  // 关键：match.index 来自 normalized 字符串，但 startFrom + fragment 必须从 raw 取得。
+  // raw 与 normalized 长度通常一致（只把全角逗号转半角，长度不变），index 可直接复用。
   const startFrom = match.index + match[0].length;
   const rest = raw.slice(startFrom);
+  // rest 可能以单引号/双引号开头的标量字符串（如 'foo'），直接截取。
+  const trimmed = rest.trim();
+  if (/^["']/.test(trimmed) && !trimmed.startsWith("[") && !trimmed.startsWith("{")) {
+    const quote = trimmed[0];
+    const endIdx = trimmed.indexOf(quote, 1);
+    if (endIdx > 0) {
+      return trimmed.slice(1, endIdx);
+    }
+  }
+  // 兼容 reply= 形式：match[0] 可能已经把开头的引号算进去了（如 `,reply='`），rest 仍是裸字符串。
+  if (/^[一-鿿]/.test(trimmed) && trimmed.includes("'")) {
+    const endIdx = trimmed.indexOf("'");
+    if (endIdx > 0) return trimmed.slice(0, endIdx);
+  }
   const start = rest.search(/[{[]/);
-  if (start < 0) return undefined;
+  if (start < 0) {
+    // rest 是简单标量值（如 'foo' / "bar"），尝试整体解析。
+    if (/^["'].*["']$/.test(trimmed)) {
+      try {
+        const v = JSON.parse(trimmed);
+        return typeof v === "string" ? v : undefined;
+      } catch {}
+    }
+    return undefined;
+  }
   const fragment = extractJsonCandidate(rest, start);
   return parseRecoveredJson(fragment);
 }
@@ -339,6 +417,10 @@ function parseLoosePatch(raw: string) {
   const field = parseLooseFieldValue(raw, "patch");
   if (!Array.isArray(field)) return [];
   return field.flatMap((operation) => {
+    if (operation && typeof operation === "object" && !Array.isArray(operation)) {
+      const op = operation as Record<string, unknown>;
+      if (typeof op.path === "string") op.path = pathAlias(op.path);
+    }
     const parsed = patchOperationSchema.safeParse(operation);
     if (!parsed.success) return [];
     const normalised = normalisePatchOperation(parsed.data);
@@ -369,8 +451,17 @@ function parseLooseResearchTasks(raw: string) {
 }
 
 function extractLooseStringValueFromRaw(raw: string, key: string): string | undefined {
-  const match = raw.match(new RegExp(`(?:^|[\\s,{])(?:"${key}"|'${key}'|${key})\\s*[:：]\\s*("|')`, "i"));
-  if (!match || match.index === undefined) return undefined;
+  const match = raw.match(new RegExp(`(?:^|[\\s,，{])(?:"${key}"|'${key}'|${key})\\s*[:：=]\\s*("|')`, "i"));
+  if (!match || match.index === undefined) {
+    // raw 是 value-only 形式（如 '是否继续补齐接驳？'），尝试把 raw 当作 string 解析。
+    if (/^["'].*["']$/.test(raw.trim())) {
+      try {
+        const v = JSON.parse(raw.trim());
+        return typeof v === "string" ? v : undefined;
+      } catch {}
+    }
+    return undefined;
+  }
   const quote = match[1];
   if (quote !== '"' && quote !== "'") return undefined;
   let i = match.index + match[0].length;
@@ -414,6 +505,7 @@ function parseSparseResponse(raw: string): ParsedMinimaxResponse | undefined {
     : "";
   const reply = extractLooseReplyFromRaw(raw)
     ?? extractBareReplyFromText(raw)
+    ?? parseLooseFieldValue(raw, "reply")
     ?? (hasStructuredFields ? missingStructured : undefined)
     ?? extractPlainReply(raw)
     ?? extractTextFallback(raw);
@@ -426,18 +518,32 @@ function parseSparseResponse(raw: string): ParsedMinimaxResponse | undefined {
   };
   const parsed = aiResponseSchema.safeParse(candidate);
   if (parsed.success) return structured(parsed.data);
-  return unstructured(reply);
+  return unstructured(reply as string);
 }
 
 function extractBareReplyFromText(raw: string): string | undefined {
-  const rawMatch = raw.match(/(?:^|[\s,{])(?:\"reply\"|'reply'|reply)\s*[:：]\s*([^\r\n,}\]]{1,1500})/i);
+  const matches = Array.from(raw.matchAll(/(?:^|[\s,{])(?:\"reply\"|'reply'|reply)\s*[：:]\s*([^\r\n,}\]]{1,1500})/gi));
+  const rawMatch = matches.length > 0 ? matches[matches.length - 1] : null;
   if (!rawMatch || rawMatch.index === undefined) return undefined;
   return stripReplyValueWrappers(rawMatch[1]);
 }
 
 function extractLooseReplyFromRaw(raw: string): string | undefined {
-  const match = raw.match(/(?:^|[,{\s])(?:"reply"|\'reply\'|reply)\s*:\s*(["'])/);
-  if (!match || match.index === undefined) return undefined;
+  // 用 matchAll 找所有 match，取最后一个（多片段时优先后置有效字段）。
+  // 兼容半角 ":" 和全角 "：" 分隔符
+  const matches = raw.matchAll(/(?:^|[,{\s])(?:"reply"|\'reply\'|reply)\s*[：:]\s*(["'])/g);
+  const arr = Array.from(matches);
+  const match = arr.length > 0 ? arr[arr.length - 1] : null;
+  if (!match || match.index === undefined) {
+    // raw 是 value-only 形式（如 '是否继续补齐接驳？'），尝试把 raw 当作 string 解析。
+    if (/^["'].*["']$/.test(raw.trim())) {
+      try {
+        const v = JSON.parse(raw.trim());
+        return typeof v === "string" ? v : undefined;
+      } catch {}
+    }
+    return undefined;
+  }
   let start = match.index + match[0].length - 1;
   const quote = match[1];
   if (quote !== "\"" && quote !== "'") return undefined;
@@ -626,15 +732,50 @@ export function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompl
   if (toolCalls?.length) {
     let fallbackRaw = "";
     const structuredToolCalls: ParsedMinimaxResponse[] = [];
-    console.warn("[DBG-tc] toolCalls.length=", toolCalls.length, "allToolCalls.length=", allToolCalls?.length ?? 0);
     for (const toolCall of toolCalls) {
       fallbackRaw += `${toolCall.function.arguments}\n`;
       const parsed = parseJson(toolCall.function.arguments);
-      console.warn("[DBG-tc-iter] args[:80]=", toolCall.function.arguments.slice(0, 80), "isStr=", parsed.isStructured, "reply[:30]=", (parsed.response.reply ?? "").slice(0, 30));
       if (parsed.isStructured) structuredToolCalls.push(parsed);
     }
+    // 当所有官方 tool_calls arguments 都是纯文本（无结构化字段），且 patch/questions/researchTasks 都空，
+    // 拼接它们作为 fallback reply。
+    const allEmptyStructured = toolCalls.length > 1
+      && structuredToolCalls.every((c) =>
+        (c.response.patch?.length ?? 0) === 0
+        && (c.response.questions?.length ?? 0) === 0
+        && (c.response.researchTasks?.length ?? 0) === 0);
+    if (allEmptyStructured) {
+      const joined = structuredToolCalls.map((c) => c.response.reply).filter(Boolean).join("\n");
+      if (joined) return unstructured(joined);
+    }
     const sparseFromTools = parseSparseResponse(fallbackRaw);
-    const bestToolCall = pickBestStructuredResponse(structuredToolCalls);
+    let bestToolCall = pickBestStructuredResponse(structuredToolCalls);
+    // 合并多 tool_call 的字段：bestToolCall 拿到 patch/qs/rt 最多的，
+    // 但若它的 reply 是 missing 占位文本，则尝试从其它 tool_call 找非占位 reply 合并过来。
+    if (bestToolCall && /^未获取到/.test(bestToolCall.response.reply ?? "")) {
+      const nonFallback = structuredToolCalls.find((c) => c !== bestToolCall
+        && typeof c.response.reply === "string"
+        && c.response.reply.trim().length > 0
+        && !/^未获取到/.test(c.response.reply));
+      if (nonFallback) {
+        bestToolCall = {
+          response: { ...bestToolCall.response, reply: nonFallback.response.reply },
+          isStructured: true,
+        };
+      }
+    }
+    // 当 sparseFromTools 拼接后的结构（patch/qs/rt 总数）比 bestToolCall 更完整时优先使用 sparseFromTools。
+    if (sparseFromTools?.isStructured) {
+      const sparseActions = (sparseFromTools.response.patch?.length ?? 0)
+        + (sparseFromTools.response.questions?.length ?? 0)
+        + (sparseFromTools.response.researchTasks?.length ?? 0);
+      const bestActions = bestToolCall
+        ? (bestToolCall.response.patch?.length ?? 0)
+          + (bestToolCall.response.questions?.length ?? 0)
+          + (bestToolCall.response.researchTasks?.length ?? 0)
+        : 0;
+      if (sparseActions > bestActions) return sparseFromTools;
+    }
     if (sparseFromTools?.isStructured && !bestToolCall) {
       return sparseFromTools;
     }
@@ -672,7 +813,7 @@ export function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompl
       return sparseFromTools;
     }
     if (bestToolCall) return bestToolCall;
-    console.warn("[MiniMax] tool-call arguments rejected, fallback to message content", {
+    console.warn("[AI] tool-call arguments rejected, fallback to message content", {
       attempts: toolCalls.length,
     });
   }

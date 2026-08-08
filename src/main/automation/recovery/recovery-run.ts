@@ -140,7 +140,7 @@ export async function runPhaseWithRecovery(
         );
         // advisor 抛错 → 等价 wait_for_user
         rec.state = "needs_user";
-        rec.finalError = "MiniMax 诊断失败";
+        rec.finalError = "AI 诊断失败";
         if (!rec.userInstruction) {
           rec.userInstruction = DEFAULT_USER_INSTRUCTION;
         }
@@ -167,7 +167,7 @@ export async function runPhaseWithRecovery(
           "error",
         );
         rec.state = "needs_user";
-        rec.finalError = "MiniMax 诊断失败：模型返回不在白名单";
+        rec.finalError = "AI 诊断失败：模型返回不在白名单";
         if (!rec.userInstruction) {
           rec.userInstruction = DEFAULT_USER_INSTRUCTION;
         }
@@ -187,7 +187,7 @@ export async function runPhaseWithRecovery(
             "error",
           );
           rec.state = "needs_user";
-          rec.finalError = "MiniMax 诊断失败：缺少可执行的用户指令";
+          rec.finalError = "AI 诊断失败：缺少可执行的用户指令";
           if (!rec.userInstruction) {
             rec.userInstruction = DEFAULT_USER_INSTRUCTION;
           }
@@ -253,7 +253,7 @@ export async function runPhaseWithRecovery(
 
   // 退出主循环：attempts 已达 MAX_PHASE_ATTEMPTS 且仍失败
   rec.state = "needs_user";
-  rec.finalError = lastError?.message ?? "MiniMax 诊断失败";
+  rec.finalError = lastError?.message ?? "AI 诊断失败";
   if (!rec.userInstruction) {
     rec.userInstruction = DEFAULT_USER_INSTRUCTION;
   }

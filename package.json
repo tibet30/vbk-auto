@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "VBK Desktop 本地旅游产品规划与安全录入工作台",
+  "description": "三人同游 本地旅游产品规划与安全录入工作台",
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"wait-on tcp:127.0.0.1:5173 file:dist-electron/main/main.js && electron .\"",

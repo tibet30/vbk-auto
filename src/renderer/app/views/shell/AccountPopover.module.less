@@ -94,3 +94,103 @@
 }
 
 .popoverLink:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 多账号登录：弹窗内显示已记录账号清单，每条附切换 / 忘记按钮 */
+.popoverSaved {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.popoverSavedHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 6px 2px;
+}
+
+.popoverSavedHint {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.popoverSavedList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popoverSavedItem {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 4%, var(--surface));
+  border: 1px solid var(--border);
+}
+
+.popoverSavedSwitch {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  border-radius: var(--radius-control) 0 0 var(--radius-control);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.popoverSavedSwitch > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popoverSavedSwitch:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ai-teal) 14%, var(--surface));
+}
+
+.popoverSavedSwitch:disabled { opacity: 0.6; cursor: progress; }
+
+.popoverSavedForget {
+  flex: 0 0 auto;
+  width: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  cursor: pointer;
+}
+
+.popoverSavedForget:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.popoverSavedForget:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.popoverHint {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 2px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}

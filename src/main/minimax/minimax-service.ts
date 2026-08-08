@@ -47,28 +47,31 @@ function parseDisambiguateContext(product: Record<string, unknown>, kind: Disamb
 }
 
 export class MiniMaxService {
-  constructor(private readonly config: { apiKey: string; baseUrl: string; model: string }) {}
-
+  constructor(private readonly config: { apiKey: string; baseUrl: string; model: string; provider?: string }) {}
+  private get isDeepSeek() { return this.config.provider === "deepseek"; }
+  // 错误消息中显示的 provider 名：provider 为 "deepseek" 时显示 "Evolink"，否则默认 "MiniMax"。
+  private get providerLabel() { return this.isDeepSeek ? "Evolink" : "MiniMax"; }
   private client(timeout: number) {
     // A planning turn must fail visibly instead of silently retrying for minutes.
     return new OpenAI({ apiKey: this.config.apiKey, baseURL: this.config.baseUrl, timeout, maxRetries: 0 });
   }
 
   async testConnection(): Promise<void> {
-    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "请先填写 MiniMax API Key。");
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `请先填写 ${this.providerLabel} API Key。`);
     const client = this.client(20_000);
     try {
-      await client.chat.completions.create({
+      const baseParams = {
         model: this.config.model,
         messages: [{ role: "user", content: "ping" }],
         max_completion_tokens: 1,
-        thinking: { type: "disabled" },
-      } as never);
+      };
+      const providerParams = this.isDeepSeek ? {} : { thinking: { type: "disabled" as const } };
+      await client.chat.completions.create({ ...baseParams, ...providerParams } as never);
     } catch (error) { this.throwProviderError(error); }
   }
 
   async reply(input: { message: string; product: Record<string, unknown>; history: Array<{ role: string; content: string }> }): Promise<AiResponse> {
-    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 MiniMax API Key。");
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const client = this.client(replyTimeout());
     const itinerary = input.product.itinerary;
     const hasExistingDraft = Array.isArray(itinerary) && itinerary.length > 0;
@@ -84,7 +87,7 @@ export class MiniMaxService {
       || requiresStructuredAction
       || /继续|补齐|补充|调整|更新|修正|重新|优化|重写|重试|继续生成|继续补充|再次生成|生成/.test(input.message);
     const startedAt = Date.now();
-    console.info("[MiniMax] planning request started", { model: this.config.model, timeoutMs: replyTimeout() });
+    console.info("[AI] planning request started", { provider: this.config.provider ?? "minimax", model: this.config.model, timeoutMs: replyTimeout() });
     let lastError: MiniMaxServiceError | undefined;
     let lastRetryReason = "";
     for (let attempt = 0; attempt <= planningRetryLimit; attempt += 1) {
@@ -109,13 +112,18 @@ export class MiniMaxService {
         const isFallbackReply = typeof response.reply === "string"
           && (/^未获取到/.test(response.reply)
             || /请重试|等待.*重试|持续.*说明|先记要点|下一条回复|带上完整结构化|当前先记/.test(response.reply)
-            || /不落盘|暂不落盘|暂不写入|先不写入|先不落盘|还需调整|还需补充|先回避|后补齐|仍无可写字段|暂无可写/.test(response.reply)
+            || /不落盘|暂不落盘|暂不写入|先不写入|先不落盘|还需调整|还需补充|先回避|后补齐|仍无可写字段|暂无可写|先回传/.test(response.reply)
+            || /字段类型|类型错误|应重试|重试修正/.test(response.reply)
             || /structured response rejected|Unexpected end of JSON|Unexpected token|响应格式|返回的数据格式/.test(response.reply));
         // patch/questions/researchTasks 实际有内容（不是 0 长度）才算真正命中 action。
         // 当 reply 看起来是 fallback 占位文（"仍无可写字段"、"暂不写盘" 等）时，questions/researchTasks 单独命中不算数。
+        // patch/questions/researchTasks 实际有内容（不是 0 长度）才算真正命中 action。
+        // 当 requiresWritablePatch 强制要求写入 patch 时，questions/researchTasks 单独命中不算数（需要 patch 才能落库）。
         const hasRealActionHint = (response.patch?.length ?? 0) > 0
-          || (!isFallbackReply && ((response.questions?.length ?? 0) > 0
+          || (!requiresWritablePatch && !isFallbackReply && ((response.questions?.length ?? 0) > 0
               || (response.researchTasks?.length ?? 0) > 0));
+        // reply 看起来是单字占位（"heartbeat"、"ok"、"done" 之类）时不算实质内容，避免假阳性接受。
+        const looksLikeTrivialReply = typeof response.reply === "string" && /^(?:heartbeat|ok|done|ack|ping|received|好的|收到|ok!|yes)\.?$/i.test(response.reply.trim());
         // 有 submit_product_update 工具调用时，工具返回是主回复来源；如果工具返回无 patch 而 content 是噪音占位，
         // 应视为解析失败。content 是非空纯文本且无 tool_call 时，说明模型主动输出，可允许直接返回。
         const hasOfficialToolCall = Array.isArray(message.tool_calls)
@@ -129,15 +137,35 @@ export class MiniMaxService {
         // 也视为模型主动输出（它在尝试提交，只是工具签名拼错），允许直接返回避免永远抛错。
         // 但只有 attempts > 0（已经重试过）时才接受 typo fallback，让首轮有修复机会。
         // patch/questions/researchTasks 至少有一个非空才算真正命中 action，否则一律按 fallback 处理。
+        // retry attempt > 0 时，official tool_call 但没 patch 但 reply 有可读内容也算 fallback（已经给过一次机会）。
         const hasFallbackReply = hasRealActionHint
           || (!hasOfficialToolCall && !hasAnyToolCall && hasDirectContent && !looksLikeNoise
               && typeof response.reply === "string" && response.reply.trim().length > 0 && !isFallbackReply)
-          || (!hasOfficialToolCall && hasAnyToolCall && hasRealActionHint && attempt > 0);
-        if (requiresWritablePatch && (!isStructured || !hasWritablePatch)) {
-          if (!hasFallbackReply) {
+          || (!hasOfficialToolCall && hasAnyToolCall && hasRealActionHint && attempt > 0)
+          || (hasOfficialToolCall && attempt > 0 && !looksLikeTrivialReply
+              && typeof response.reply === "string" && response.reply.trim().length > 0 && !isFallbackReply);
+        if (requiresWritablePatch || (hasOfficialToolCall && isStructured && !hasWritablePatch)) {
+          if (!hasFallbackReply && (!isStructured || !hasWritablePatch)) {
             throw new MiniMaxServiceError(
               "invalid_model_output",
-              "MiniMax 未返回可写入的产品方案，请重试。",
+              `${this.providerLabel} 未返回可写入的产品方案，请重试。`,
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+          // 任何情况下（即使 requiresWritablePatch=false），reply 是 "已截断"、"抓包片段" 等占位但 hasOfficialToolCall 存在时，触发重试
+          if (hasOfficialToolCall && /截断|待补齐|抓包片段|先返回|先给|暂不可写|占位|未携带/.test(response.reply ?? "") && attempt < planningRetryLimit) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              `${this.providerLabel} 当前返回尚未落库，正在重试。`,
+              typeof response.reply === "string" ? response.reply : undefined,
+            );
+          }
+          // 工具名错位且 hasWritablePatch=true 时（patch 来自错误工具签名解析的 fallback），
+          // 第一次 attempt 也要重试，避免 typo 一次性通过。
+          if (!hasOfficialToolCall && hasAnyToolCall && hasWritablePatch && attempt === 0) {
+            throw new MiniMaxServiceError(
+              "invalid_model_output",
+              `${this.providerLabel} 返回的工具签名异常，请重试。`,
               typeof response.reply === "string" ? response.reply : undefined,
             );
           }
@@ -146,16 +174,17 @@ export class MiniMaxService {
           if (!hasOfficialToolCall && hasAnyToolCall && hasRealActionHint && isLastAttempt && attempt > 0) {
             throw new MiniMaxServiceError(
               "invalid_model_output",
-              "MiniMax 返回的工具签名异常，请重试。",
+              `${this.providerLabel} 返回的工具签名异常，请重试。`,
               typeof response.reply === "string" ? response.reply : undefined,
             );
           }
-          // 当 hasOfficialToolCall 但 hasWritablePatch=false 且 reply 提到"重试"，
+          // 当 hasOfficialToolCall 但 hasWritablePatch=false 且 reply 包含 "重试" / "暂缺" / "仍未"（明显占位词），
           // 视为模型在尝试但未完成，触发重试直到拿到 patch。
-          if (hasOfficialToolCall && /重试|暂缺|仍未/.test(response.reply ?? "") && attempt < planningRetryLimit) {
+          // 仅在 hasWritablePatch=false 时启用，避免 "工具片段重试成功" 这种包含"重试"的成功回复被误判。
+          if (hasOfficialToolCall && !hasWritablePatch && /重试|暂缺|仍未/.test(response.reply ?? "") && attempt < planningRetryLimit) {
             throw new MiniMaxServiceError(
               "invalid_model_output",
-              "MiniMax 当前返回尚未落库，正在重试。",
+              `${this.providerLabel} 当前返回尚未落库，正在重试。`,
               typeof response.reply === "string" ? response.reply : undefined,
             );
           }
@@ -164,7 +193,7 @@ export class MiniMaxService {
           if (!hasFallbackReply) {
             throw new MiniMaxServiceError(
               "invalid_model_output",
-              "MiniMax 未返回可写入的产品方案，请重试。",
+              `${this.providerLabel} 未返回可写入的产品方案，请重试。`,
               typeof response.reply === "string" ? response.reply : undefined,
             );
           }
@@ -173,12 +202,13 @@ export class MiniMaxService {
           if (!isLastAttempt) {
             throw new MiniMaxServiceError(
               "invalid_model_output",
-              "MiniMax 未返回可写入的产品方案，请重试。",
+              `${this.providerLabel} 未返回可写入的产品方案，请重试。`,
               typeof response.reply === "string" ? response.reply : undefined,
             );
           }
         }
-        console.info("[MiniMax] planning request completed", {
+        console.info("[AI] planning request completed", {
+          provider: this.config.provider ?? "minimax",
           model: this.config.model,
           elapsedMs: Date.now() - attemptStartedAt,
           attempt,
@@ -189,7 +219,8 @@ export class MiniMaxService {
         const serviceError = error instanceof MiniMaxServiceError ? error : this.providerError(error);
         lastError = serviceError;
         const canRetry = ["invalid_model_output", "empty_model_output"].includes(serviceError.code) && attempt < planningRetryLimit;
-        console.warn("[MiniMax] planning request attempt failed", {
+        console.warn("[AI] planning request attempt failed", {
+          provider: this.config.provider ?? "minimax",
           model: this.config.model,
           attempt,
           canRetry,
@@ -200,21 +231,20 @@ export class MiniMaxService {
         lastRetryReason = (serviceError.details ?? serviceError.message ?? "").trim().replace(/\s+/g, " ").slice(0, 180);
       }
     }
-    console.error("[MiniMax] planning request failed", {
+    console.error("[AI] planning request failed", {
+      provider: this.config.provider ?? "minimax",
       model: this.config.model,
       elapsedMs: Date.now() - startedAt,
       error: lastError instanceof Error ? lastError.message : "unknown",
     });
-    // 任何模型没给出可落盘结构的失败，都归一化为 invalid_model_output，
-    // 避免上层把它误判为网络/服务异常。
-    if (lastError && lastError.code !== "invalid_model_output" && lastError.code !== "empty_model_output") {
-      throw new MiniMaxServiceError("invalid_model_output", lastError.message);
-    }
-    throw lastError ?? new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回可写入的产品方案，请重试。");
+    // 解析/空输出失败（invalid_model_output、empty_model_output）原样抛出；
+    // provider_error / provider_authentication / provider_rate_limit / provider_timeout / provider_connection
+    // 必须保留原始 code/message/details，避免被外层误判为结构化失败并反复重试。
+    throw lastError ?? new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 未返回可写入的产品方案，请重试。`);
   }
 
   async diagnoseAutomationFailure(input: AdvisorRequest): Promise<AdvisorOutcome> {
-    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 MiniMax API Key。");
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const startedAt = Date.now();
     try {
       const response = await this.client(replyTimeout()).chat.completions.create({
@@ -241,26 +271,22 @@ export class MiniMaxService {
         (call) => "function" in call && call.function.name === "submit_failure_diagnosis",
       );
       if (!toolCall || !("function" in toolCall)) {
-        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的自动录入诊断格式无效。");
+        throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的自动录入诊断格式无效。`);
       }
       let value: unknown;
       try { value = JSON.parse(toolCall.function.arguments); }
-      catch { throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的自动录入诊断格式无效。"); }
+      catch { throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的自动录入诊断格式无效。`); }
       const parsed = advisorOutcomeSchema.safeParse(value);
-      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的自动录入诊断格式无效。");
+      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的自动录入诊断格式无效。`);
       const outcome = parsed.data.action === "wait_for_user"
         ? { ...parsed.data, userInstruction: parsed.data.userInstruction!.trim() }
         : { summary: parsed.data.summary, rootCause: parsed.data.rootCause, action: parsed.data.action, expectedEvidence: parsed.data.expectedEvidence };
-      console.info("[MiniMax] diagnosis completed", {
-        phase: input.phase,
-        attempt: input.attempt,
-        action: outcome.action,
-        elapsedMs: Date.now() - startedAt,
-      });
+      console.info("[AI] diagnosis completed", { provider: this.config.provider ?? "minimax", phase: input.phase, attempt: input.attempt, action: outcome.action, elapsedMs: Date.now() - startedAt });
       return outcome;
     } catch (error) {
       const serviceError = this.providerError(error);
-      console.warn("[MiniMax] diagnosis failed", {
+      console.warn("[AI] diagnosis failed", {
+        provider: this.config.provider ?? "minimax",
         phase: input.phase,
         attempt: input.attempt,
         errorCode: serviceError.code,
@@ -276,7 +302,7 @@ export class MiniMaxService {
    * - 返回 pickedText=null 表示“错误人选”，调用方应该跳过。
    */
   async disambiguateOption(input: DisambiguateRequest): Promise<DisambiguateOutcome> {
-    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 MiniMax API Key。");
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     if (!Array.isArray(input.candidates) || input.candidates.length === 0) {
       return { pickedText: null, reasoning: "候选项为空" };
     }
@@ -303,17 +329,18 @@ export class MiniMaxService {
         (call) => "function" in call && call.function.name === "submit_disambiguation",
       );
       if (!toolCall || !("function" in toolCall)) {
-        throw new MiniMaxServiceError("invalid_model_output", "MiniMax 未返回结构化选则结果。");
+        throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 未返回结构化选则结果。`);
       }
       let value: unknown;
       try { value = JSON.parse(toolCall.function.arguments); }
-      catch { throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的选则结果不是合法 JSON。"); }
+      catch { throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的选则结果不是合法 JSON。`); }
       const parsed = disambiguateOutcomeSchema.safeParse(value);
-      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", "MiniMax 返回的选则结果不合法。");
+      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的选则结果不合法。`);
       const pickedText = parsed.data.pickedText && input.candidates.some((c) => c.text === parsed.data.pickedText)
         ? parsed.data.pickedText
         : null;
-      console.info("[MiniMax] disambiguation completed", {
+      console.info("[AI] disambiguation completed", {
+        provider: this.config.provider ?? "minimax",
         kind: input.kind,
         desired: input.desired,
         picked: pickedText,
@@ -322,7 +349,8 @@ export class MiniMaxService {
       return { pickedText, reasoning: parsed.data.reasoning };
     } catch (error) {
       const serviceError = this.providerError(error);
-      console.warn("[MiniMax] disambiguation failed", {
+      console.warn("[AI] disambiguation failed", {
+        provider: this.config.provider ?? "minimax",
         kind: input.kind,
         desired: input.desired,
         errorCode: serviceError.code,
@@ -333,27 +361,33 @@ export class MiniMaxService {
   }
 
   private async complete(client: OpenAI, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
-    const result = await client.chat.completions.create({
+    const baseParams = {
       model: this.config.model, messages, temperature: 0.1, max_completion_tokens: 8192,
       tools: [responseTool],
-      tool_choice: { type: "function", function: { name: "submit_product_update" } },
-      thinking: { type: "disabled" },
-      reasoning_split: true,
-      service_tier: miniMaxServiceTier(),
+      tool_choice: { type: "function" as const, function: { name: "submit_product_update" } },
+    };
+    // MiniMax 专有参数：thinking、reasoning_split、service_tier。DeepSeek/Evolink 不支持。
+    const providerParams = this.isDeepSeek
+      ? {}
+      : { thinking: { type: "disabled" as const }, reasoning_split: true, service_tier: miniMaxServiceTier() };
+    const result = await client.chat.completions.create({
+      ...baseParams,
+      ...providerParams,
     } as never).withResponse();
     const response = result.data;
     const message = response.choices[0]?.message;
-    if (!message) throw new MiniMaxServiceError("empty_model_output", "MiniMax 未返回内容。");
+    if (!message) throw new MiniMaxServiceError("empty_model_output", "AI 未返回内容。");
     return { message, traceId: result.response.headers.get("trace-id") || result.response.headers.get("trace_id") || result.request_id || undefined };
   }
 
   private providerError(error: unknown): MiniMaxServiceError {
     if (error instanceof MiniMaxServiceError) return error;
-    if (error instanceof AuthenticationError) return new MiniMaxServiceError("provider_authentication", "MiniMax API Key 无效。");
-    if (error instanceof RateLimitError) return new MiniMaxServiceError("provider_rate_limit", "MiniMax 请求过于频繁，请稍后重试。");
-    if (error instanceof APIConnectionTimeoutError) return new MiniMaxServiceError("provider_timeout", "MiniMax 响应超时，请重试。");
-    if (error instanceof APIConnectionError) return new MiniMaxServiceError("provider_connection", "无法连接 MiniMax 服务。");
-    return new MiniMaxServiceError("provider_error", "MiniMax 服务暂时无法完成本次请求。");
+    const label = this.providerLabel;
+    if (error instanceof AuthenticationError) return new MiniMaxServiceError("provider_authentication", `${label} API Key 无效。`);
+    if (error instanceof RateLimitError) return new MiniMaxServiceError("provider_rate_limit", `${label} 请求过于频繁，请稍后重试。`);
+    if (error instanceof APIConnectionTimeoutError) return new MiniMaxServiceError("provider_timeout", `${label} 响应超时，请重试。`);
+    if (error instanceof APIConnectionError) return new MiniMaxServiceError("provider_connection", `无法连接 ${label} 服务。`);
+    return new MiniMaxServiceError("provider_error", `${label} 服务暂时无法完成本次请求。`);
   }
 
   private throwProviderError(error: unknown): never {

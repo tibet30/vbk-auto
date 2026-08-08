@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoFieldKey, AccountFixedInfoValue, AutomationRun, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, TaskStatus } from "../../../shared/contracts.js";
+import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoFieldKey, AccountFixedInfoValue, AutomationRun, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, SavedLoginAccount, TaskStatus } from "../../../shared/contracts.js";
 import { DEFAULT_HOTEL_TIER } from "../../../shared/hotel-tiers.js";
 import { normaliseProductDraft } from "../../data/product-normalize.js";
 import { fixedInfoSchema, getAccountFixedInfo, setAccountFixedInfo } from "./fixed-info.js";
@@ -46,6 +46,12 @@ export class VbkDatabase {
         id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS login_sessions (
+        account_key TEXT PRIMARY KEY,
+        account_name TEXT NOT NULL,
+        cookies_json TEXT NOT NULL,
+        saved_at TEXT NOT NULL
+      );
     `);
     // 已有用户的库里没有这一列，ALTER 失败即表示列已存在。
     try { this.db.exec("ALTER TABLE projects ADD COLUMN basic_info_saved INTEGER NOT NULL DEFAULT 0"); }
@@ -68,6 +74,8 @@ export class VbkDatabase {
 
   getSetting(key: string) { return this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined; }
   setSetting(key: string, value: string) { this.db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value); }
+  /** 多账号登录态当前活跃指示器需要显式删除空字符串；现有 getSetting 接口无法区分"未设置"与"空"。 */
+  deleteSetting(key: string) { this.db.prepare("DELETE FROM settings WHERE key=?").run(key); }
 
   listProjects(): ProjectSummary[] {
     return (this.db.prepare("SELECT id,name,status,product_id,updated_at FROM projects ORDER BY updated_at DESC").all() as Array<Record<string, string>>)
@@ -338,5 +346,73 @@ export class VbkDatabase {
       setSetting: (key, value) => this.setSetting(key, value),
       deleteSetting: (key) => this.db.prepare("DELETE FROM settings WHERE key=?").run(key),
     }, accountName, values);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 多账号登录态：把每个 VBK 账号的 cookies 抽出来持久化到本地，下次切
+  // 换账号时再回灌。WebView 同时只能展示一个账号，其它账号都收在
+  // login_sessions 表里。当前展示的账号 cookies 仍在 partition 文件中，
+  // 并不会同步进 login_sessions，除非调用方显式 saveSession。
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * 保存/替换某个账号的 cookies 快照。
+   *  - accountKey：唯一标识，未登录时由调用方传入临时占位（不会写盘）；
+   *  - accountName：人类可读名；
+   *  - cookiesJson：来自 session.cookies.get({}) 的 JSON 字符串。
+   * 同一 accountKey 多次保存会覆盖；saved_at 总是新的。
+   */
+  saveSession(accountKey: string, accountName: string, cookiesJson: string) {
+    const key = accountKey.trim();
+    if (!key) throw new Error("保存登录态失败：账号标识不能为空。");
+    const display = accountName.trim() || key;
+    if (!cookiesJson || cookiesJson === "[]") {
+      // 写入空快照等于删除；调用方通常在 addLogin 之前会先 clear，
+      // 这里再写空行反而会让"切换到空白账号"留下伪记录。
+      this.deleteSession(key);
+      return;
+    }
+    this.db.prepare(`
+      INSERT INTO login_sessions(account_key, account_name, cookies_json, saved_at)
+      VALUES(?, ?, ?, ?)
+      ON CONFLICT(account_key) DO UPDATE SET
+        account_name=excluded.account_name,
+        cookies_json=excluded.cookies_json,
+        saved_at=excluded.saved_at
+    `).run(key, display, cookiesJson, now());
+  }
+
+  /** 取一个账号的 cookies 快照；找不到返回 null。 */
+  loadSession(accountKey: string): { accountKey: string; accountName: string; cookiesJson: string; savedAt: string } | null {
+    const row = this.db.prepare("SELECT account_name, cookies_json, saved_at FROM login_sessions WHERE account_key=?").get(accountKey) as
+      | { account_name: string; cookies_json: string; saved_at: string }
+      | undefined;
+    if (!row) return null;
+    return {
+      accountKey,
+      accountName: row.account_name,
+      cookiesJson: row.cookies_json,
+      savedAt: row.saved_at,
+    };
+  }
+
+  /** 列举本机所有已记录的 VBK 账号；按最近使用倒序。 */
+  listSessions(): SavedLoginAccount[] {
+    const rows = this.db.prepare(`
+      SELECT account_key, account_name, saved_at
+      FROM login_sessions
+      ORDER BY saved_at DESC
+    `).all() as Array<{ account_key: string; account_name: string; saved_at: string }>;
+    return rows.map((row) => ({
+      accountKey: row.account_key,
+      accountName: row.account_name || row.account_key,
+      lastUsedAt: row.saved_at,
+    }));
+  }
+
+  /** 删除一个已记录的账号快照；不存在不抛错。 */
+  deleteSession(accountKey: string) {
+    if (!accountKey) return;
+    this.db.prepare("DELETE FROM login_sessions WHERE account_key=?").run(accountKey);
   }
 }

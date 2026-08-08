@@ -167,6 +167,111 @@
 .hero[data-tone='blocked'] .heroProgressFill { background: var(--warning); }
 
 /* ============================================================
+ * Generating state — AI 正在生成完整方案（products 为空时）
+ * 替换 itinerary / issues / tasks 的列表，改为全屏骨架屏 + spinner 提示。
+ * ============================================================ */
+
+.generatingPane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+  padding: var(--pad) var(--pad) var(--pad-sm);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.generatingHero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 22px 14px 18px;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 28%, var(--border));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--ai-teal) 6%, var(--surface));
+  text-align: center;
+}
+
+.generatingSpinner {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ai-teal) 14%, var(--surface));
+  color: var(--ai-teal);
+  margin-bottom: 4px;
+  animation: ai-teal-spin 1.4s linear infinite;
+}
+
+.generatingSpinner svg { animation: ai-teal-spin 1.4s linear infinite; }
+
+@keyframes ai-teal-spin {
+  to { transform: rotate(360deg); }
+}
+
+.generatingTitle {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+}
+
+.generatingHint {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+
+.generatingSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad-sm);
+}
+
+.skelCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.skelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.skelBar {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted-strong) 50%, var(--muted) 100%);
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.4s linear infinite;
+}
+
+.skelBarLg  { width: 38%; height: 12px; }
+.skelBarMd  { width: 58%; }
+.skelBarSm  { width: 32%; }
+.skelBarXs  { width: 56px; }
+.skelBarFull { width: 100%; }
+
+@keyframes skel-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ============================================================
  * Scroll area — itinerary + collapsible sub-blocks
  * ============================================================ */
 

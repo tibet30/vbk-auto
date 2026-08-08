@@ -3,9 +3,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 import { PROFILE_DIR, URLS } from "./constants.js";
+import { APP_NAME } from "../../shared/brand.js";
 
 export class AuthenticationRequiredError extends Error {
-  constructor(message = "VBK 登录态不可用，请在 VBK Desktop 中重新登录") {
+  constructor(message = `VBK 登录态不可用，请在 ${APP_NAME} 中重新登录`) {
     super(message);
     this.name = "AuthenticationRequiredError";
   }

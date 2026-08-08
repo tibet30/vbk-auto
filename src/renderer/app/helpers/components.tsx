@@ -1,8 +1,8 @@
-import { AlertTriangle, Briefcase, Check, ChevronRight, FileText, LoaderCircle, MapPin, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { AlertTriangle, Briefcase, Check, ChevronRight, Copy, FileText, LoaderCircle, MapPin, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
+import { type MouseEvent, type ReactNode, useState } from "react";
 import type { CreateProjectInput, ProjectSummary } from "../../../shared/contracts.js";
 import shared from "../views/shared.module.less";
-import { formatUpdatedAt } from "./constants";
+import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
 
 export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: { input: CreateProjectInput; setInput: (input: CreateProjectInput) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
@@ -130,6 +130,8 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
               {linked ? `VBK ${item.productId}` : "本地产品草稿"}
             </span>
             <span className={styles.metaSep} aria-hidden="true">·</span>
+            <CopyableId value={item.id} />
+            <span className={styles.metaSep} aria-hidden="true">·</span>
             <span className={`${styles.metaItem} ${styles.metaMuted}`}>更新 {formatUpdatedAt(item.updatedAt)}</span>
           </span>
         </span>
@@ -233,6 +235,57 @@ export function Field({ label, value }: { label: string; value: string }) {
       <span className={styles.productFieldLabel}>{label}</span>
       <strong className={styles.productFieldValue} data-state={value === "待生成" ? "empty" : ""}>{value}</strong>
     </div>
+  );
+}
+
+/**
+ * 可复制 ID 徽章：等宽字体显示 ID，点击复制到剪贴板。1.6 秒内显示「已复制」+ 勾选图标，再回到 idle 状态。
+ *
+ * 使用场景有两种：
+ * - 顶栏里作为面包屑 ID chip：父级是 span，不冲突。
+ * - 项目列表里嵌在 `projectRowOpen` 这个 button 里：项目列表行本身就是「进入项目」按钮，
+ *   严格的 HTML 规范不允许在 <button> 里嵌套交互元素；这里采用了实际项目里常见的折中 —
+ *   使用 <button> 元素获得原生键盘 / a11y 支持，同时在 click 里默认调用 stopPropagation，
+ *   避免被外层识别为「打开项目」。浏览器处理这类嵌套是稳定的。
+ */
+export function CopyableId({
+  value,
+  label = "ID",
+  className,
+  stopClickPropagation = true,
+}: {
+  value: string;
+  label?: string;
+  className?: string;
+  /** 调用 event.stopPropagation()，避免被父级 button 接收。默认开启。 */
+  stopClickPropagation?: boolean;
+}) {
+  const [state, setState] = useState<"idle" | "copied">("idle");
+
+  const handleCopy = async (event: MouseEvent<HTMLButtonElement>) => {
+    if (stopClickPropagation) event.stopPropagation();
+    if (state === "copied" || !value) return;
+    const ok = await copyText(value);
+    if (!ok) return;
+    setState("copied");
+    window.setTimeout(() => setState("idle"), 1600);
+  };
+
+  return (
+    <button
+      type="button"
+      className={`${styles.copyableId} ${className || ""}`}
+      data-state={state}
+      onClick={handleCopy}
+      title={state === "copied" ? `已复制 ${value}` : `点击复制项目 ID：${value}`}
+      aria-label={`复制项目 ID ${value}`}
+    >
+      <span className={styles.copyableIdLabel}>{label}</span>
+      <span className={styles.copyableIdValue}>{state === "copied" ? "已复制" : value}</span>
+      <span className={styles.copyableIdIcon} aria-hidden="true">
+        {state === "copied" ? <Check size={10} /> : <Copy size={10} />}
+      </span>
+    </button>
   );
 }
 

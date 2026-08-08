@@ -1,5 +1,5 @@
 import { test, assert, makeRun, makeSpyAdvisor, now, makeExecute, runPhaseWithRecovery, MAX_PHASE_ATTEMPTS } from "./automation-recovery.shared.js";
-test("advisor 抛错 → needs_user，finalError 含 MiniMax 诊断失败", async () => {
+test("advisor 抛错 → needs_user，finalError 含 AI 诊断失败", async () => {
   const advisor = {
     fn: async () => {
       throw new Error("network down");
@@ -28,10 +28,10 @@ test("advisor 抛错 → needs_user，finalError 含 MiniMax 诊断失败", asyn
     now: now(),
   });
   assert.equal(result.status, "needs_user");
-  assert.match(result.finalError || "", /MiniMax 诊断失败/);
+  assert.match(result.finalError || "", /AI 诊断失败/);
   const rec = run.recovery?.phases.basic;
   assert.equal(rec?.state, "needs_user");
-  assert.match(rec?.finalError || "", /MiniMax 诊断失败/);
+  assert.match(rec?.finalError || "", /AI 诊断失败/);
   assert.equal(executeCalls, 1);
   assert.deepEqual(applied, []);
 });
@@ -67,7 +67,7 @@ test("advisor 返回非法 shape（action 不在白名单）→ needs_user", asy
     now: now(),
   });
   assert.equal(result.status, "needs_user");
-  assert.match(result.finalError || "", /MiniMax 诊断失败/);
+  assert.match(result.finalError || "", /AI 诊断失败/);
   const rec = run.recovery?.phases.basic;
   assert.equal(rec?.state, "needs_user");
   assert.equal(executeCalls, 1);

@@ -64,10 +64,7 @@ export function classifyMiniMaxError(error: unknown): string {
   if (reason && isStructuredFormatFailure(reason)) return "invalid_model_output";
   if (reason) {
     if (isStructuredFormatFailure(reason)
-      || /(?:MiniMax 返回的数据格式无法用于产品方案|MiniMax 未返回可写入的产品方案|MiniMax 未返回可写入的结构化内容|未返回可写入的产品方案|返回的数据格式无法用于产品方案)/i.test(reason)) {
-      return "invalid_model_output";
-    }
-    if (/(?:MiniMax 未返回内容|未返回有效响应|empty_model_output)/i.test(reason)) {
+      || /(?:MiniMax|Evolink|AI)\s*(?:返回的数据格式无法用于产品方案|未返回可写入的产品方案|未返回可写入的结构化内容|未返回内容|未返回有效响应)|(?:未返回可写入的产品方案|返回的数据格式无法用于产品方案|empty_model_output)/i.test(reason)) {
       return "invalid_model_output";
     }
     if (/(?:json parse|not valid json|unexpected token|parse.*json|解析.*json|response.*json|invalid.*json)/i.test(reason)) {
@@ -81,20 +78,20 @@ export function classifyMiniMaxError(error: unknown): string {
   return (error as { code?: string })?.code ?? "provider_error";
 }
 
-export function normalizeFailureMessage(errorCode: string, reason: string): string {
+export function normalizeFailureMessage(errorCode: string, reason: string, providerLabel: string = "MiniMax"): string {
   const normalizedReason = reason && reason.trim() ? reason : "AI 服务暂时无法完成本次请求。";
   const stripTrailingRetryInstruction = (message: string) => stripRetryHintTail(message);
 
   const stripConnectionHint = (message: string) => {
     let normalized = message;
     const connectionPatterns = [
-      /\s*请(?:先)?(?:检查|确认|核实)\s*(?:网络|连接|网络连接|配置|网路|联网|MiniMax API|MiniMax)\s*(?:或(?:配置|网络|连接|鉴权|服务|API|token))?\s*(?:后|之后)?(?:可)?(?:重试|再试|重联|复试)[。!！]?\s*$/gu,
+      /\s*请(?:先)?(?:检查|确认|核实)\s*(?:网络|连接|网络连接|配置|网路|联网|MiniMax\s*API|Evolink\s*API|AI\s*API|MiniMax|Evolink|AI)\s*(?:或(?:配置|网络|连接|鉴权|服务|API|token))?\s*(?:后|之后)?(?:可)?(?:重试|再试|重联|复试)[。!！]?\s*$/gu,
       /\s*请(?:先)?(?:检查|确认|核实)[^。!！]*?(?:后|之后)?(?:可)?(?:重试|再试|重联|复试)[。!！]?\s*$/gui,
       /\s*请先确认.*?后?\s*(?:可)?(?:重试|再试)[。!！]?/gui,
-      /\s*[，。；;]请(?:先)?(?:检查|确认|核实|验证|校验)\s*(?:MiniMax|MiniMax API|网络|连接|网络连接|配置|网路|联网|服务|token)[^。!！;；,，]*(?:后|之后|之后再)?\s*(?:可)?\s*(?:重试|再试|再请求|复试|再次尝试|再次请求|尝试)[。!！;；,，]?\s*$/gui,
-      /\s*[，。；;,，\s]*请(?:先)?(?:检查|确认|核实|验证|校验|检查并确认)[\s\S]{0,120}?(?:连接|配置|网络|API|MiniMax)[\s\S]{0,120}?(?:后|之后|之后再|再|再次)?(?:可)?(?:尝试|重试|再试|重试一下|重新发送|再次请求)[。!！;；,，\s]*$/gui,
+      /\s*[，。；;]请(?:先)?(?:检查|确认|核实|验证|校验)\s*(?:MiniMax(?:\s*API)?|Evolink(?:\s*API)?|AI(?:\s*API)?|网络|连接|网络连接|配置|网路|联网|服务|token)[^。!！;；,，]*(?:后|之后|之后再)?\s*(?:可)?\s*(?:重试|再试|再请求|复试|再次尝试|再次请求|尝试)[。!！;；,，]?\s*$/gui,
+      /\s*[，。；;,，\s]*请(?:先)?(?:检查|确认|核实|验证|校验|检查并确认)[\s\S]{0,120}?(?:连接|配置|网络|API|MiniMax|Evolink|AI)[\s\S]{0,120}?(?:后|之后|之后再|再|再次)?(?:可)?(?:尝试|重试|再试|重试一下|重新发送|再次请求)[。!！;；,，\s]*$/gui,
       /\s*[，。；;,，\s]*Please\s+check[\s\S]{0,140}?(?:API|configuration|network|connection|token)[\s\S]{0,140}?(?:retry|re-?try|attempt|request)[。!！;；,，\s]*$/gui,
-      /\s*[，。；;,，\s]*请(?:先)?(?:检查|确认|核实|验证|校验)[\s\S]{0,140}?(?:API|MiniMax|网络|连接|配置)[\s\S]{0,140}?(?:后再(?:次)?尝试|后重试|再尝试|再次请求)[。!！;；,，\s]*$/gui,
+      /\s*[，。；;,，\s]*请(?:先)?(?:检查|确认|核实|验证|校验)[\s\S]{0,140}?(?:API|MiniMax|Evolink|AI|网络|连接|配置)[\s\S]{0,140}?(?:后再(?:次)?尝试|后重试|再尝试|再次请求)[。!！;；,，\s]*$/gui,
     ];
     for (const pattern of connectionPatterns) {
       normalized = normalized.replace(pattern, "");
@@ -107,21 +104,21 @@ export function normalizeFailureMessage(errorCode: string, reason: string): stri
   if (errorCode === "invalid_model_output") {
     if (
       isStructuredFailure
-      || /返回的数据格式无法用于产品方案|MiniMax 返回的数据格式无法用于产品方案|structured response rejected/i.test(normalizedForStructured)
+      || /返回的数据格式无法用于产品方案|MiniMax 返回的数据格式无法用于产品方案|Evolink 返回的数据格式无法用于产品方案|AI 返回的数据格式无法用于产品方案|structured response rejected/i.test(normalizedForStructured)
     ) {
-      return "MiniMax 返回的数据格式无法用于产品方案，请重试。";
+      return `${providerLabel} 返回的数据格式无法用于产品方案，请重试。`;
     }
-    return "MiniMax 未返回可写入的产品方案，请重试。";
+    return `${providerLabel} 未返回可写入的产品方案，请重试。`;
   }
   if (errorCode === "empty_model_output") {
-    return "MiniMax 未返回可写入的产品方案，请重试。";
+    return `${providerLabel} 未返回可写入的产品方案，请重试。`;
   }
 
   if (!(errorCode === "invalid_model_output" || errorCode === "empty_model_output") && !isStructuredFormatFailure(normalizedReason)) {
     return `${normalizedReason} 请检查连接或配置后重试。`;
   }
-  if (/(?:返回的数据格式无法用于产品方案|structured response rejected|MiniMax 返回的数据格式无法用于产品方案)/i.test(normalizedReason)) {
-    return "MiniMax 返回的数据格式无法用于产品方案，请重试。";
+  if (/(?:返回的数据格式无法用于产品方案|structured response rejected|MiniMax 返回的数据格式无法用于产品方案|Evolink 返回的数据格式无法用于产品方案|AI 返回的数据格式无法用于产品方案)/i.test(normalizedReason)) {
+    return `${providerLabel} 返回的数据格式无法用于产品方案，请重试。`;
   }
-  return "MiniMax 未返回可写入的产品方案，请重试。";
+  return `${providerLabel} 未返回可写入的产品方案，请重试。`;
 }

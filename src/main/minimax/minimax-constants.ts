@@ -1,29 +1,89 @@
 import { z } from "zod";
+import { APP_NAME } from "../../shared/brand.js";
 import type { DisambiguateRequest } from "../../shared/contracts.js";
 
-const writablePatchGuide = `可写 patch 路径只能使用这些值：
-- /sales/productType, /sales/productForm, /sales/splitGroup
-- /basicInfo/supplierProductName, /basicInfo/subtitle, /basicInfo/days, /basicInfo/nights, /basicInfo/meetingCity, /basicInfo/destinationCity, /basicInfo/province, /basicInfo/operationNotes
-- /presentation
-- /operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded
-- /commercial/packageName, /commercial/terms
-- /commercial/pricing, /commercial/inventory, /commercial/release
-- /itinerary
-不要写入 supplierProductCode、vehicleResource 整段、providerId / contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。pricing/inventory/release 写入时只允许覆盖字段值，并保留 currency=CNY；不得给运营人数 0、或负价格、或类型不匹配的值。`;
+const writablePatchGuide = `patch 可写路径白名单（共 16 个）：
+/sales/productType, /sales/productForm, /sales/splitGroup
+/basicInfo/supplierProductName, /basicInfo/subtitle, /basicInfo/days, /basicInfo/nights, /basicInfo/meetingCity, /basicInfo/destinationCity, /basicInfo/province, /basicInfo/operationNotes
+/presentation
+/operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded
+/commercial/packageName, /commercial/terms
+/commercial/pricing, /commercial/inventory, /commercial/release
+/itinerary
+
+黑名单（绝对禁止写入）：supplierProductCode、vehicleResource 整段（含 vehicleId/resourceId/resourceGroupId/supplierCode）、providerId、contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。`;
 
 const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
-{"reply":"给运营看的简明中文回复","patch":[{"op":"add","path":"/presentation","value":{}}],"questions":[],"researchTasks":[{"label":"核查车辆资源","type":"vbk","detail":"在 VBK 资源库确认可用资源组、车型和供应商编码"}]}
-仅允许出现这 4 个一级字段：reply / patch / questions / researchTasks。多余字段直接视为无效。
-字段要求：
-- reply 必须是简明中文，可以概括已生成内容和待核查项。
-- patch 必须是 RFC6902 数组；新增或整体覆盖字段时用 add 或 replace。
-- questions 最多 1 条，只有真正阻塞第一版时才问。
-- researchTasks 只列不能确认的数据，type 只能是 vbk/web/cost/image。
-- 商业字段补丁：可以在补齐 /commercial/pricing、/commercial/inventory、/commercial/release 后让产品进入可录入状态。这三项的合法形状分别是：
-  - pricing: { currency:"CNY", adult:number>0, child:number>=0, minimumTravelers:正整数, cost:{ adult:number>=0, child:number>=0, singleSupplement:number>=0, childBed:number>=0 }? }，且 cost.adult 不能超过 adult
-  - inventory: { startDate:YYYY-MM-DD, endDate:YYYY-MM-DD, dailyQuota:正整数 }，且 startDate 不能晚于 endDate
-  - release: { submitReview:bool, publishAfterApproval:bool, publicPriceCeiling:number>0, publicAuditRetries:1..10 }
-  上面任何一条不满足都会被本地校验拒绝；cost.adult 超过 adult、startDate 晚于 endDate、子数为 0、价格为负数等都不行。`;
+{"reply":"给运营看的简明中文回复","patch":[...],"questions":[],"researchTasks":[...]}
+
+仅允许这 4 个一级字段：reply / patch / questions / researchTasks。多余字段直接视为无效。
+
+各字段要求：
+- reply 必须是简明中文，概括已生成的内容模块和待核查项。
+- patch 必须是 RFC6902 数组；每条含 op (add/replace/remove)、path、value。value 必须完整写出全部子字段，不可简写或省略。
+- questions 最多 1 条，只有真正阻塞第一版生成时才问。
+- researchTasks 只列不能确认的数据，type 只能是 vbk/web/cost/image，每条含 {label, type, detail}。
+
+===== patch 各路径 value 必须包含的字段清单 =====
+
+⚠️ 以下每个路径的 value 必须包含列出的全部字段，缺任何一项都会被本地校验拒绝！
+
+【/presentation】value 必须是对象，包含以下全部字段：
+  recommendationCategory → string，从以下 15 个值中选一：
+    优选行程 / 服务保障 / 贴心赠送 / 精选酒店 / 缤纷景点 / 特色美食 / 度假首选 / 超值赠送 / 五星精选 / 限时秒杀 / 尊享入住 / 大牌驾到 / 优质交通 / 优良资质 / 缤纷体验
+  recommendation → string，一句推荐语
+  recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复
+  features → string，多行产品特点，每行一个亮点，\\n 分隔
+  cover → {source:"ctripLibrary", poi:"代表性景点名", description:"封面图描述", minQuality:3}
+
+【/itinerary】value 必须是数组，每天的行程为一个对象，包含以下全部字段：
+  day → number，正整数，从 1 开始
+  title → string，格式 "城市—景点1—景点2—景点3"
+  spots → string[]，当天游览的景点名称列表，不得为空
+  description → string，详细行程描述（非空，包含交通、游览、用餐安排）
+  hotel → string，当晚住宿描述
+  meals → string，餐饮总述，格式 "早餐...；午餐...；晚餐..."
+  mealDescriptions → string[]，恰好 3 个元素，依次描述早/午/晚餐
+行程总天数必须等于 basicInfo.days。
+
+【/commercial/pricing】value 必须是对象：
+  { currency:"CNY", adult:成人价(>0), child:儿童价(>=0), minimumTravelers:起订人数(正整数), cost?:{ adult:成人成本(>=0), child:儿童成本(>=0), singleSupplement:单房差(>=0), childBed:加床费(>=0) } }
+约束：cost.adult 不可超过 adult。
+
+【/commercial/inventory】value 必须是对象：
+  { startDate:"YYYY-MM-DD", endDate:"YYYY-MM-DD", dailyQuota:每日配额(正整数) }
+约束：startDate 不可晚于 endDate。
+
+【/commercial/release】value 必须是对象：
+  { submitReview:bool(默认true), publishAfterApproval:bool(默认true), publicPriceCeiling:价格上限(>0), publicAuditRetries:重审次数(1~10,默认3) }
+
+【/commercial/terms】value 必须是对象，必须包含以下 4 个字段，不可缺任何一项：
+  inclusions → string，费用包含
+  exclusions → string，费用不包含
+  bookingNotes → string，预订须知
+  refundPolicy → string，退改政策
+
+【其余路径】value 类型说明：
+  /sales/productType → "domesticShort" 或 "domesticLong"
+  /sales/productForm → "groupTour" / "semiSelfGuided" / "privateTour" / "freeTravel"
+  /sales/splitGroup → true 或 false
+  /basicInfo/supplierProductName → string，产品全名
+  /basicInfo/subtitle → string，副标题（含行程亮点）
+  /basicInfo/days → number，1~60
+  /basicInfo/nights → number，0~59
+  /basicInfo/meetingCity → string，出发城市
+  /basicInfo/destinationCity → string，目的地城市
+  /basicInfo/province → string，省份
+  /basicInfo/operationNotes → string，运营备注
+  /operations/transport → "charter" / "shared" / "none"
+  /operations/pickupCity → string
+  /operations/reusePickupForDropoff → true 或 false
+  /operations/hotelSource → "nonPlatform"
+  /operations/hotelTier → "当地2钻酒店/-2" / "当地3钻酒店/-3" / "当地4钻酒店/-4" / "当地5钻酒店/-5"
+  /operations/mealsIncluded → true 或 false
+  /commercial/packageName → string，套餐名称
+
+以上任何字段缺失、类型错误或格式不符，都会被本地校验拒绝，导致需要重试。`;
 
 const nonEmptyText = z.string().trim().min(1);
 
@@ -37,7 +97,7 @@ export class MiniMaxServiceError extends Error {
 
 export const writablePatchPrefixes = [
   "/sales/productType", "/sales/productForm", "/sales/splitGroup",
-  "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
+  "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/title", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
   "/presentation",
   "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded",
   "/commercial/packageName", "/commercial/terms",
@@ -60,7 +120,9 @@ export const responseJsonSchema = {
         properties: {
           op: { type: "string", enum: ["add", "replace", "remove"] },
           path: { type: "string", enum: writablePatchPrefixes },
-          value: {},
+          value: {
+            description: "对于 /presentation、/itinerary、/commercial/terms、/commercial/pricing、/commercial/inventory、/commercial/release 路径，value 必须是完整的嵌套对象或数组，结构详见 system prompt。对于 /sales/*、/basicInfo/*、/operations/*、/commercial/packageName 路径，value 是基本类型（string/number/boolean）。add/replace 操作必须提供 value。",
+          },
         },
       },
     },
@@ -108,7 +170,7 @@ export const responseTool = {
   type: "function",
   function: {
     name: "submit_product_update",
-    description: "返回给 VBK Desktop 的产品协作回复、JSON Patch 和核查任务。",
+    description: `返回给 ${APP_NAME} 的产品协作回复、JSON Patch 和核查任务。`,
     strict: true,
     parameters: responseJsonSchema,
   },
@@ -184,7 +246,7 @@ export const advisorOutcomeSchema = z.object({
   }
 });
 
-export const diagnosisSystemPrompt = `你是 VBK Desktop 自动录入失败诊断器。只能根据输入证据判断当前阶段的受限恢复动作。
+export const diagnosisSystemPrompt = `你是 ${APP_NAME} 自动录入失败诊断器。只能根据输入证据判断当前阶段的受限恢复动作。
 输入包含 phase、attempt、error、productIdExists、basicInfoSaved、completedPhases、diagnosisHistory；diagnosisHistory 只表示已经发生的诊断，不得补充未观察事实。
 allowedActions 仅为 retry_same_phase、reload_and_retry_phase、reopen_editor_and_retry_phase、wait_for_user。
 输出字段：summary 是中文一句话且不超过 80 字；rootCause 是基于证据的中文说明且不超过 200 字；expectedEvidence 是中文短句且不超过 120 字，表示重试成功后应该看到的证据；action 只能选择一个 allowedActions。action 为 wait_for_user 时 userInstruction 必填，必须是中文且可执行的 VBK 操作；其它 action 忽略 userInstruction。
@@ -271,17 +333,46 @@ export const patchValueSchemas: Record<string, z.ZodType> = {
   "/commercial/release": releaseSchema,
 };
 
-export const systemPrompt = `你是 VBK Desktop 的旅游产品运营助手。你的用户是携程 VBK 运营人员；他们会用极少信息创建一个可复用的通用旅游产品，例如“太原2天1晚私家团”。
-当用户要求生成第一版时，基于已有目的地、天数、晚数和产品形态，生成完整且通用的产品文案、每日行程、基础信息与可审核的条款草稿。产品名称、行程、卖点可合理生成；不得虚构城市 ID、VBK 资源、车队价格、库存、门票、成本或已经完成的核查。上述运营数据缺失时，创建清晰、可由运营人员在 VBK 中执行的 researchTasks。
-当前产品草稿是产品状态的唯一事实来源；即使历史消息声称已经生成，只要草稿字段仍为空，就必须重新生成并返回可写 patch。
-patch 必须是 RFC6902 风格，且只能修改产品草稿的非敏感字段。最多追问一个真正阻塞生成的问题；如果不阻塞，先给出第一版。
+export const systemPrompt = `你是 ${APP_NAME} 的旅游产品运营助手。你的用户是携程 VBK 运营人员；他们会用极少信息创建一个可复用的通用旅游产品，例如"太原2天1晚私家团"。
+当用户要求生成第一版时，基于已有目的地、天数、晚数和产品形态，生成完整且通用的产品文案、每日行程、基础信息与可审核的条款草稿。
+
+===== 核心规则 =====
+1. 一次性生成所有模块，patch 中必须涵盖以下模块，不得遗漏任何一个：
+   ⬜ presentation（产品文案）—— 推荐语、3条推荐理由、产品特点、封面图
+   ⬜ itinerary（每日行程）—— 每天完整行程（天数 = basicInfo.days）
+   ⬜ basicInfo（基础信息）—— 产品名、副标题、城市、省份、运营备注
+   ⬜ operations（运营配置）—— 交通、接送城市、酒店档次、含餐
+   ⬜ commercial/pricing（价格）—— 成人/儿童价、起订人数
+   ⬜ commercial/inventory（库存）—— 起止日期、每日配额
+   ⬜ commercial/release（发布）—— 审核配置、价格上限
+   ⬜ commercial/terms（条款）—— 费用包含/不包含、预订须知、退改（4个字段）
+   ⬜ commercial/packageName（套餐名）
+2. 产品名称、行程、卖点可合理生成。禁止虚构城市 ID、VBK 资源号、车队价格、库存、门票、成本或已完成的核查。
+3. 以下数据必须直接写入产品 JSON，不得用 researchTask 代替：
+   - 成人价/儿童价/单人房差/加床费（给出合理市场估算）
+   - 库存起止日期和每日配额
+   - 费用包含/不包含/预订须知/退改政策
+   - 封面图（直接生成 ctripLibrary cover，不创建 image 类 researchTask）
+   - 套餐名称
+4. 车辆资源和酒店资源由系统自动匹配 VBK 资源库，AI 不需要创建对应的 researchTask。
+5. 只有真正的运营数据缺失（如价格需要人工复核）时，才创建 researchTask。
+6. 当前产品草稿是产品状态的唯一事实来源；历史消息声称"已生成"但草稿字段为空时，必须重新生成并返回可写 patch。
+7. patch 必须是 RFC6902 风格，只能修改可写路径。
+8. 最多追问一个真正阻塞生成的问题；不阻塞就先给出完整第一版。
+
+===== 文案风格参考 =====
+presentation.recommendation 示例："2天串联晋祠古建与三晋文明，独立成团、专车服务，节奏舒适不赶路。"
+presentation.recommendations 示例：3条推荐理由，每条不同维度，如 [{"category":"优选行程","text":"2天串联核心景点，节奏舒适。"},{"category":"精选酒店","text":"精选当地3钻酒店，含早餐。"},{"category":"缤纷景点","text":"覆盖晋祠、博物院等核心景点。"}]
+presentation.features 示例："【古建巡礼】专业讲解晋祠圣母殿与宋代彩塑。\\n【私享出行】独立成团，专车接送，不拼团不购物。"
+itinerary 每天 description 示例："专车于市区/火车站/机场接客。上午前往XX景区，在讲解陪同下游览XX。午餐品尝当地特色美食。下午前往XX，傍晚返回市区入住。"
+terms 示例：inclusions="行程内专车服务、1晚酒店住宿、行程规划；实际以确认单为准。" exclusions="景区门票、讲解、餐饮、个人消费、单房差。" bookingNotes="至少2人起订，建议提前1天15时前预订。" refundPolicy="资源确认前无损取消；确认后按实际已发生费用扣除。"
 
 ${writablePatchGuide}
 
 ${outputGuide}`;
 
 export function disambiguateSystemPrompt(kind: DisambiguateRequest["kind"]): string {
-  const base = `你是 VBK Desktop 选则辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
+  const base = `你是 ${APP_NAME} 选则辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
 你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。`;
   const guidance: Record<DisambiguateRequest["kind"], string> = {
     province: `期望值是中国某个省/直辖市/自治区，例如“山西”。candidates 可能是 “中国-山西”“山西省”“山西”。选 “中国-山西” 这类带国家前缀的优先。**绝对不要选 “朝鲜-xxx”“韩国-xxx” 这种境外前缀。**`,

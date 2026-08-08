@@ -61,6 +61,34 @@ export function stripDayPrefix(title: string, index: number): string {
 export function activityKindLabel(kind: string): string {
   return ({ transport: "交通", visit: "游览", meal: "用餐", hotel: "入住", free: "自由活动", other: "安排" } as Record<string, string>)[kind] || "安排";
 }
+
+/** 复制纯文本到剪贴板。Electron 渲染进程里 navigator.clipboard 通常可用；
+ * 保留 textarea fallback，避免某些环境 clipboard 不可用时按钮毫无反应。 */
+export async function copyText(value: string): Promise<boolean> {
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // 忽略并走 fallback。
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 export function isVehicleResourceTask(task?: ProjectDetail["researchTasks"][number]) {
   if (!task) return false;
   return /用车|车辆|车费|资源组|vehicle/i.test(`${task.label} ${task.detail || ""}`);
@@ -69,7 +97,7 @@ export function isVehicleResourceTask(task?: ProjectDetail["researchTasks"][numb
 export function vbkStageStatusText(project: ProjectDetail | null): { tone: "waiting" | "running" | "saved" | "ready" | "blocked"; label: string; detail: string } {
   if (!project) return { tone: "waiting", label: "等待选择项目", detail: "开始一个产品项目后即可进入" };
   const blocked = recoveryNeedsUser(project.automation);
-  if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 MiniMax 给出的指令完成手动操作，再重新发起一次保存草稿" };
+  if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 AI 给出的指令完成手动操作，再重新发起一次保存草稿" };
   if (project.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
   if (project.automation?.status === "succeeded" || project.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   return { tone: "waiting", label: "尚未录入 VBK", detail: "第一步审查通过后即可在右侧开始保存草稿" };

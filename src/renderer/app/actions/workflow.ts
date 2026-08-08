@@ -1,4 +1,5 @@
 import { api, initialInput, phaseDisplayLabel, type VbkNavSection } from "../helpers";
+import { APP_NAME } from "../brand";
 import type { AppState } from "../state/useAppState";
 
 export function useWorkflowHandlers(state: AppState) {
@@ -35,6 +36,8 @@ export function useWorkflowHandlers(state: AppState) {
     setCreating,
     setCreateInput,
     setCheckingVbkLogin,
+    refreshVbkLoginAccounts,
+    setVbkLoginAccounts,
   } = state;
 
   const confirmTask = async () => {
@@ -154,6 +157,12 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /**
+   * 首次或未登录场景下打开 VBK 登录页。
+   * 与"新增登录"区别：当前没人在用浏览器 → 不需要保存快照，只需要展示
+   * VBK 登录入口。沿用旧 `browser.login()` 行为，导航到产品库让 VBK 自己
+   * 在未登录时重定向到登录页。
+   */
   const openLogin = () => {
     setLoginPanelOpen(true);
     setView("workspace");
@@ -165,6 +174,69 @@ export function useWorkflowHandlers(state: AppState) {
       api()!.browser.login()
         .then(() => checkVbkLogin())
         .catch((error) => setVbkLogin({ loggedIn: false, message: error instanceof Error ? error.message : "无法打开 VBK 登录页面。" }));
+    }
+    void refreshVbkLoginAccounts();
+  };
+
+  /**
+   * 「新增登录」专用入口。
+   * 流程：
+   *  1. 让右侧 VBK WebView 可见；
+   *  2. 调 main 进程 addLogin()：保存当前账号 cookies、清空 session、导航到 VBK 根；
+   *  3. 主动拉一次账号列表，让「已记录账号」立刻多出来一颗新 chip；
+   *  4. 等用户在右侧完成登录后，checkVbkLogin 会被 status 流触发，
+   *     自然把新账号 cookies 也写回 login_sessions。
+   */
+  const addNewLogin = async () => {
+    if (!api()) return;
+    setAccountMenuOpen(false);
+    setBrowserOpen(true);
+    setStage("vbk");
+    setLoginPanelOpen(true);
+    try {
+      await api()!.browser.addLogin();
+      await refreshVbkLoginAccounts();
+      void checkVbkLogin();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "新增登录失败。");
+    }
+  };
+
+  /**
+   * 切换到本机已记录的某个 VBK 账号。
+   * 1. 调 main 进程 switchAccount()：保存当前 → 回灌目标 cookies → 导航；
+   * 2. 等几百毫秒让 VBK 完成页面重渲染，再 checkVbkLogin 拿到新探测结果；
+   * 3. 刷新账号列表快照（current 应当切到目标，saved 列表里少一项）。
+   */
+  const switchAccount = async (accountKey: string) => {
+    if (!api()) return;
+    if (!accountKey) return;
+    setAccountMenuOpen(false);
+    setNotice(null);
+    try {
+      await api()!.browser.switchAccount(accountKey);
+      await refreshVbkLoginAccounts();
+      setVbkLogin(null);
+      await checkVbkLogin(true);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "切换登录账号失败。");
+    }
+  };
+
+  /**
+   * 忘记（从本机删除）某个 VBK 账号快照。
+   * 立刻刷新账号列表快照即可；目标账号若当前正在 WebView 里展示，
+   * main 端会拒绝并抛错，UI 会通过 notice 提示。
+   */
+  const forgetAccount = async (accountKey: string) => {
+    if (!api()) return;
+    if (!accountKey) return;
+    setNotice(null);
+    try {
+      await api()!.browser.forgetAccount(accountKey);
+      await refreshVbkLoginAccounts();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "忘记账号失败。");
     }
   };
 
@@ -189,7 +261,7 @@ export function useWorkflowHandlers(state: AppState) {
       const message = error instanceof Error ? error.message : "";
       setNotice(
         message.includes("No handler registered")
-          ? "登出功能已更新，请重启 VBK Desktop 后再试。"
+          ? `登出功能已更新，请重启 ${APP_NAME} 后再试。`
           : message || "VBK 登出失败，请重试。",
       );
     } finally {
@@ -225,6 +297,9 @@ export function useWorkflowHandlers(state: AppState) {
     openSection,
     retryOnePhaseAutomation,
     openLogin,
+    addNewLogin,
+    switchAccount,
+    forgetAccount,
     showVbkBrowser,
     logoutVbk,
     openProductList,

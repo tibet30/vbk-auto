@@ -133,8 +133,14 @@ export function AppWorkspaceReviewSummary({
     }
   };
 
-  const showTaskFooter = viewMode === "cards";
-  const showTaskHint = viewMode === "cards";
+  // AI 正在生成且 itinerary 为空时（项目刚创建、AI 第一版还未返回），
+  // 整个右侧卡片区展示"生成中"骨架，避免显示空产品的就绪度报错。
+  // 注意：project.product 在创建时就有 sales/basicInfo/operations 预填字段，
+  // 不能用 Object.keys().length === 0 判断，必须用 itinerary 长度。
+  const isProductEmpty = !project.product || !Array.isArray((project.product as Record<string, unknown>).itinerary) || ((project.product as Record<string, unknown>).itinerary as unknown[]).length === 0;
+  const isGenerating = loading && isProductEmpty;
+  const showTaskFooter = viewMode === "cards" && !isGenerating;
+  const showTaskHint = viewMode === "cards" && !isGenerating;
 
   return (
     <aside className={`${layout.panel} ${styles.summary}`} aria-label="审查结果概要">
@@ -178,15 +184,15 @@ export function AppWorkspaceReviewSummary({
           </button>
         </div>
         <span className={styles.modeBarMeta}>
-          <span className={shared.state} data-state={ready ? "confirmed" : "needsConfirmation"}>
-            {ready ? "可以录入" : `${readiness.issues.length} 项待处理`}
+          <span className={shared.state} data-state={ready ? "confirmed" : isGenerating ? "researching" : "needsConfirmation"}>
+            {ready ? "可以录入" : isGenerating ? "AI 正在生成…" : `${readiness.issues.length} 项待处理`}
           </span>
         </span>
       </div>
 
       {viewMode === "cards" ? (
         <div id="summary-view-panel" role="tabpanel" aria-labelledby="summary-view-cards" className={styles.cardsPane}>
-          <section className={styles.hero} data-tone={headlineTone}>
+          <section className={styles.hero} data-tone={isGenerating ? "neutral" : headlineTone}>
             <div className={styles.heroMain}>
               <div className={styles.heroDestinationRow}>
                 <span className={styles.heroIcon}><MapPin size={13} aria-hidden="true" /></span>
@@ -197,111 +203,149 @@ export function AppWorkspaceReviewSummary({
             </div>
             <div className={styles.heroProgressBlock}>
               <div className={styles.heroProgressValue}>
-                <strong>{readiness.completion}%</strong>
-                <small>就绪度</small>
+                <strong>{isGenerating ? "—" : `${readiness.completion}%`}</strong>
+                <small>{isGenerating ? "生成中" : "就绪度"}</small>
               </div>
               <div className={styles.heroProgressTrack}>
-                <span className={styles.heroProgressFill} style={{ width: `${Math.min(100, Math.max(0, readiness.completion))}%` }} />
+                <span className={styles.heroProgressFill} style={{ width: isGenerating ? "0%" : `${Math.min(100, Math.max(0, readiness.completion))}%` }} />
               </div>
             </div>
           </section>
 
-          <div className={styles.scroll}>
-            <AppWorkspaceReviewSummaryItinerary
-              days={itinerary}
-              expandedDayIndex={expandedDayIndex}
-              onToggle={(index) => setExpandedDayIndex(expandedDayIndex === index ? null : index)}
-              collapsed={itineraryCollapsed}
-              onToggleCollapsed={() => setItineraryCollapsed((value) => !value)}
-            />
-
-            {readiness.issues.length > 0 && (
-              <section className={styles.collapsible} aria-label="待处理问题" data-collapsed={issuesCollapsed}>
-                <button
-                  type="button"
-                  className={styles.collapsibleHead}
-                  onClick={() => setIssuesCollapsed((value) => !value)}
-                  aria-expanded={!issuesCollapsed}
-                  aria-controls="review-issues-body"
-                >
-                  <span className={styles.collapsibleIcon}><CircleAlert size={13} aria-hidden="true" /></span>
-                  <strong className={styles.collapsibleTitle}>待处理问题</strong>
-                  <small className={styles.collapsibleMeta}>{readiness.issues.length} 项</small>
-                  <span className={styles.collapsibleChevron} aria-hidden="true"><ChevronDown size={12} /></span>
-                </button>
-                <div
-                  id="review-issues-body"
-                  className={styles.collapsibleBody}
-                  data-scrollable={readiness.issues.length > 4}
-                >
-                  <ul className={styles.issueList}>
-                    {readiness.issues.map((issue, index) => (
-                      <li key={`${issue.label}-${index}`} className={styles.issueItem} data-priority={index === 0 ? "high" : "medium"}>
-                        <span className={styles.issueIndex}>{index + 1}</span>
-                        <span className={styles.issueBody}>
-                          <strong className={styles.issueLabel}>{issue.label}</strong>
-                          <span className={styles.issueGuidance}>{issueText(issue)}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+          {isGenerating ? (
+            <div className={styles.generatingPane} role="status" aria-live="polite">
+              <div className={styles.generatingHero}>
+                <span className={styles.generatingSpinner} aria-hidden="true">
+                  <LoaderCircle size={20} />
+                </span>
+                <strong className={styles.generatingTitle}>AI 正在生成完整方案…</strong>
+                <small className={styles.generatingHint}>通常 20–60 秒，期间可在左侧继续对话补齐要求。</small>
+              </div>
+              <div className={styles.generatingSkeleton} aria-hidden="true">
+                <div className={styles.skelCard}>
+                  <div className={styles.skelRow}>
+                    <span className={`${styles.skelBar} ${styles.skelBarLg}`} />
+                    <span className={`${styles.skelBar} ${styles.skelBarXs}`} />
+                  </div>
+                  <span className={`${styles.skelBar} ${styles.skelBarFull}`} />
+                  <span className={`${styles.skelBar} ${styles.skelBarFull}`} />
+                  <span className={`${styles.skelBar} ${styles.skelBarMd}`} />
                 </div>
-              </section>
-            )}
+                <div className={styles.skelCard}>
+                  <div className={styles.skelRow}>
+                    <span className={`${styles.skelBar} ${styles.skelBarLg}`} />
+                    <span className={`${styles.skelBar} ${styles.skelBarSm}`} />
+                  </div>
+                  <span className={`${styles.skelBar} ${styles.skelBarFull}`} />
+                  <span className={`${styles.skelBar} ${styles.skelBarMd}`} />
+                </div>
+                <div className={styles.skelCard}>
+                  <div className={styles.skelRow}>
+                    <span className={`${styles.skelBar} ${styles.skelBarLg}`} />
+                  </div>
+                  <span className={`${styles.skelBar} ${styles.skelBarFull}`} />
+                  <span className={`${styles.skelBar} ${styles.skelBarSm}`} />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.scroll}>
+              <AppWorkspaceReviewSummaryItinerary
+                days={itinerary}
+                expandedDayIndex={expandedDayIndex}
+                onToggle={(index) => setExpandedDayIndex(expandedDayIndex === index ? null : index)}
+                collapsed={itineraryCollapsed}
+                onToggleCollapsed={() => setItineraryCollapsed((value) => !value)}
+              />
 
-            {taskList.length > 0 && (
-              <section className={styles.collapsible} aria-label="核查任务" data-collapsed={tasksCollapsed}>
-                <button
-                  type="button"
-                  className={styles.collapsibleHead}
-                  onClick={() => setTasksCollapsed((value) => !value)}
-                  aria-expanded={!tasksCollapsed}
-                  aria-controls="review-tasks-body"
-                >
-                  <span className={styles.collapsibleIcon}><ListChecks size={13} aria-hidden="true" /></span>
-                  <strong className={styles.collapsibleTitle}>核查任务</strong>
-                  <small className={styles.collapsibleMeta}>{`${doneTaskCount} / ${taskList.length} 已确认`}</small>
-                  <span className={styles.collapsibleChevron} aria-hidden="true"><ChevronDown size={12} /></span>
-                </button>
-                <div
-                  id="review-tasks-body"
-                  className={styles.collapsibleBody}
-                  data-scrollable={taskList.length > 4}
-                >
-                  <ul className={styles.taskList}>
-                    {taskList.map((task) => {
-                      const isActive = activeTask?.id === task.id;
-                      const done = task.state === "confirmed" || task.state === "resolved";
-                      return (
-                        <li key={task.id}>
-                          <button
-                            type="button"
-                            className={styles.taskRow}
-                            data-active={isActive}
-                            data-done={done}
-                            onClick={() => setActiveTask(task.id)}
-                            aria-label={`核查任务：${task.label}`}
-                          >
-                            <span className={styles.taskMarker}>
-                              {done ? <CheckCircle2 size={12} aria-hidden="true" /> : <CircleHelp size={12} aria-hidden="true" />}
-                            </span>
-                            <span className={styles.taskBody}>
-                              <span className={styles.taskLabel}>{task.label}</span>
-                              <span className={styles.taskDetail}>{task.detail || "请补充核查信息后保存"}</span>
-                            </span>
-                            <span className={styles.taskType} data-type={task.type}>{taskTypeLabel(task.type)}</span>
-                            <span className={shared.chipMini} data-on={isActive}>
-                              {isActive ? "处理中" : done ? "已完成" : "待核查"}
-                            </span>
-                          </button>
+              {readiness.issues.length > 0 && (
+                <section className={styles.collapsible} aria-label="待处理问题" data-collapsed={issuesCollapsed}>
+                  <button
+                    type="button"
+                    className={styles.collapsibleHead}
+                    onClick={() => setIssuesCollapsed((value) => !value)}
+                    aria-expanded={!issuesCollapsed}
+                    aria-controls="review-issues-body"
+                  >
+                    <span className={styles.collapsibleIcon}><CircleAlert size={13} aria-hidden="true" /></span>
+                    <strong className={styles.collapsibleTitle}>待处理问题</strong>
+                    <small className={styles.collapsibleMeta}>{readiness.issues.length} 项</small>
+                    <span className={styles.collapsibleChevron} aria-hidden="true"><ChevronDown size={12} /></span>
+                  </button>
+                  <div
+                    id="review-issues-body"
+                    className={styles.collapsibleBody}
+                    data-scrollable={readiness.issues.length > 4}
+                  >
+                    <ul className={styles.issueList}>
+                      {readiness.issues.map((issue, index) => (
+                        <li key={`${issue.label}-${index}`} className={styles.issueItem} data-priority={index === 0 ? "high" : "medium"}>
+                          <span className={styles.issueIndex}>{index + 1}</span>
+                          <span className={styles.issueBody}>
+                            <strong className={styles.issueLabel}>{issue.label}</strong>
+                            <span className={styles.issueGuidance}>{issueText(issue)}</span>
+                          </span>
                         </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              </section>
-            )}
-          </div>
+                      ))}
+                    </ul>
+                  </div>
+                </section>
+              )}
+
+              {taskList.length > 0 && (
+                <section className={styles.collapsible} aria-label="核查任务" data-collapsed={tasksCollapsed}>
+                  <button
+                    type="button"
+                    className={styles.collapsibleHead}
+                    onClick={() => setTasksCollapsed((value) => !value)}
+                    aria-expanded={!tasksCollapsed}
+                    aria-controls="review-tasks-body"
+                  >
+                    <span className={styles.collapsibleIcon}><ListChecks size={13} aria-hidden="true" /></span>
+                    <strong className={styles.collapsibleTitle}>核查任务</strong>
+                    <small className={styles.collapsibleMeta}>{`${doneTaskCount} / ${taskList.length} 已确认`}</small>
+                    <span className={styles.collapsibleChevron} aria-hidden="true"><ChevronDown size={12} /></span>
+                  </button>
+                  <div
+                    id="review-tasks-body"
+                    className={styles.collapsibleBody}
+                    data-scrollable={taskList.length > 4}
+                  >
+                    <ul className={styles.taskList}>
+                      {taskList.map((task) => {
+                        const isActive = activeTask?.id === task.id;
+                        const done = task.state === "confirmed" || task.state === "resolved";
+                        return (
+                          <li key={task.id}>
+                            <button
+                              type="button"
+                              className={styles.taskRow}
+                              data-active={isActive}
+                              data-done={done}
+                              onClick={() => setActiveTask(task.id)}
+                              aria-label={`核查任务：${task.label}`}
+                            >
+                              <span className={styles.taskMarker}>
+                                {done ? <CheckCircle2 size={12} aria-hidden="true" /> : <CircleHelp size={12} aria-hidden="true" />}
+                              </span>
+                              <span className={styles.taskBody}>
+                                <span className={styles.taskLabel}>{task.label}</span>
+                                <span className={styles.taskDetail}>{task.detail || "请补充核查信息后保存"}</span>
+                              </span>
+                              <span className={styles.taskType} data-type={task.type}>{taskTypeLabel(task.type)}</span>
+                              <span className={shared.chipMini} data-on={isActive}>
+                                {isActive ? "处理中" : done ? "已完成" : "待核查"}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
 
           {showTaskFooter && activeTask && !activeTask.state.match(/confirmed|resolved/) ? (
             <footer className={styles.taskDetail} aria-label="当前任务详情">

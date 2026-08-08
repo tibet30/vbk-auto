@@ -6,13 +6,13 @@ import {
   successfulAiConnectionTest,
 } from "../../src/main/infrastructure/ai-settings.js";
 
-test("连接测试始终使用当前选择的提供商、地址和模型", () => {
+test("连接测试始终使用当前选择的提供商、地址和模型", async () => {
   const readProviders: string[] = [];
-  const resolved = resolveAiConnectionInput({
+  const resolved = await resolveAiConnectionInput({
     provider: "deepseek",
     baseUrl: " https://api.evolink.ai/v1 ",
     model: " deepseek-v4-flash ",
-  }, (provider) => {
+  }, async (provider) => {
     readProviders.push(provider);
     return "stored-deepseek-key";
   });
@@ -26,30 +26,30 @@ test("连接测试始终使用当前选择的提供商、地址和模型", () =>
   });
 });
 
-test("页面临时输入的密钥优先于已保存密钥", () => {
-  const resolved = resolveAiConnectionInput({
+test("页面临时输入的密钥优先于已保存密钥", async () => {
+  const resolved = await resolveAiConnectionInput({
     provider: "minimax",
     baseUrl: "https://api.minimaxi.com/v1",
     model: "MiniMax-M3",
     apiKey: "  temporary-key  ",
-  }, () => "stored-key");
+  }, async () => "stored-key");
   assert.equal(resolved.apiKey, "temporary-key");
 });
 
-test("Evolink 接受刷新接口返回的动态模型 ID", () => {
-  const fable = resolveAiConnectionInput({
+test("Evolink 接受刷新接口返回的动态模型 ID", async () => {
+  const fable = await resolveAiConnectionInput({
     provider: "deepseek",
     baseUrl: "https://api.evolink.ai/v1",
     model: "claude-fable-5",
     apiKey: "test-key",
-  }, () => "");
+  }, async () => "");
   assert.equal(fable.model, "claude-fable-5");
-  const dynamic = resolveAiConnectionInput({
+  const dynamic = await resolveAiConnectionInput({
     provider: "deepseek",
     baseUrl: "https://api.evolink.ai/v1",
     model: "newly-released-model",
     apiKey: "test-key",
-  }, () => "");
+  }, async () => "");
   assert.equal(dynamic.model, "newly-released-model");
 });
 

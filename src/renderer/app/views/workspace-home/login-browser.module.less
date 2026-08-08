@@ -1,0 +1,134 @@
+/* VBK Desktop — workspace-home login browser surface（专用 login stage 右侧）
+ * 紧凑中文工作台视觉：复用 surface / border / radius 体系，不引入新色板。 */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  height: 100%;
+  min-height: 320px;
+  position: relative;
+}
+
+.panelHeader {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  gap: var(--pad-sm);
+  flex-shrink: 0;
+}
+
+.panelTitleRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.panelNum {
+  min-width: 22px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.panelTitle {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+}
+
+.panelSubLine {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panelSubLineOk { color: var(--success); }
+.panelSubLineWarn { color: var(--warning); }
+
+.panelHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--pad-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex: 0 0 auto;
+}
+
+.url {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 10px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.host {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.path {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 探测中：刷新按钮 disabled + 图标旋转。 */
+.actionLoading {
+  cursor: progress;
+  color: var(--ai-teal);
+}
+
+.spin {
+  animation: loginBrowserSpin 900ms linear infinite;
+}
+
+@keyframes loginBrowserSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.viewport {
+  flex: 1 1 auto;
+  min-height: 320px;
+  background: var(--muted);
+  position: relative;
+  overflow: hidden;
+}

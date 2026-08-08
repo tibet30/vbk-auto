@@ -98,7 +98,7 @@ export function basicInfoCompletenessIssues(product: Record<string, unknown>): s
 
 // 第一版允许暂不维护库存与费用包含：有完整数据时自动录入，没有时跳过对应
 // VBK 阶段。价格仍用于运营审查，但只有同时存在库存时才写入价格库存页。
-export function automationBlockers(product: Record<string, unknown>) {
+export function automationBlockers(product: Record<string, unknown>, options: { researchTasks?: Array<{ state: string; label?: string; type?: string }> } = {}) {
   const blockers: Array<{ label: string; detail: string }> = [];
   const commercial = product.commercial as Record<string, unknown> | undefined;
   if (!commercial) {
@@ -114,6 +114,29 @@ export function automationBlockers(product: Record<string, unknown>) {
     if (!vehicle?.resourceGroupId) {
       blockers.push({ label: "用车资源组", detail: "私家团需要在 VBK 核查并填写现有用车资源组 ID。" });
     }
+  }
+  // 草稿默认安全：release 还在 draft-only 状态时，禁止进入自动录入。人工 / VBK
+  // 会在审核后逐项打开 submitReview / publishAfterApproval。
+  const release = commercial?.release as Record<string, unknown> | undefined;
+  if (release) {
+    if (release.submitReview === true) blockers.push({ label: "submitReview 仍为草稿状态", detail: "需在 VBK 或运营面板中明确开启后才能自动录入。" });
+    if (release.publishAfterApproval === true) blockers.push({ label: "publishAfterApproval 仍为草稿状态", detail: "需在 VBK 或运营面板中明确开启后才能自动录入。" });
+  }
+  // 未解决的 pricing / inventory / 车辆 / 酒店 research task 也会阯。
+  const tasks = options.researchTasks ?? [];
+  const openTasks = tasks.filter((task) => task.state !== "confirmed" && task.state !== "resolved");
+  const blockingLabels = {
+    price: /价格|成人价|儿童价|成本|单房差|加床费|售价/,
+    inventory: /库存|班期|每日配额|起订|起止日期/,
+    vehicle: /用车|车辆|资源组|接送|司机/,
+    hotel: /酒店|住宿|客栈|民宿/,
+  };
+  for (const task of openTasks) {
+    const label = task.label || "";
+    if (blockingLabels.price.test(label)) blockers.push({ label: `价格核查：${label}`, detail: task.type === "vbk" ? "需在 VBK 核查后才能自动录入。" : "需人工确认后才能自动录入。" });
+    else if (blockingLabels.inventory.test(label)) blockers.push({ label: `库存核查：${label}`, detail: "需人工 / VBK 核查后才能自动录入。" });
+    else if (blockingLabels.vehicle.test(label)) blockers.push({ label: `车辆核查：${label}`, detail: "需 VBK 匹配资源组后才能自动录入。" });
+    else if (blockingLabels.hotel.test(label)) blockers.push({ label: `酒店核查：${label}`, detail: "需 VBK 匹配酒店资源后才能自动录入。" });
   }
   return blockers;
 }

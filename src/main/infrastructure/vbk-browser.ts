@@ -4,6 +4,14 @@ import { chromium, type Browser, type Page } from "playwright";
 import { URLS } from "../automation/constants.js";
 import { fetchCurrentUserInfo } from "./current-user.js";
 import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/contracts-types.js";
+import type { SerialisedCookie } from "./vbk-cookie-serializer.js";
+import {
+  parseCookies,
+  cookieUrl,
+  removeUrlFromCookie,
+  normaliseSameSite,
+  normaliseExpiry,
+} from "./vbk-cookie-serializer.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
 
@@ -52,6 +60,10 @@ export class VbkBrowser {
   async initialise() {
     this.view = new WebContentsView({ webPreferences: { partition: "persist:vbk", contextIsolation: true, nodeIntegration: false, sandbox: true } });
     this.window.contentView.addChildView(this.view);
+    // 先抑制持久分区下 Chromium 默认启动的子系统副作用（WebRTC ICE → STUN
+    // 探测 → 国内网络里 stun.services.mozilla.com 解析失败 ——
+    // errorcode -105 / socket_manager.cc:137 噪音），再装导航/外链钩子。
+    this.configureVbkWebContents();
     this.view.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: "deny" }; });
     this.view.webContents.on("will-navigate", (event, url) => {
       const host = new URL(url).hostname;
@@ -291,6 +303,30 @@ export class VbkBrowser {
     this.cdp = undefined;
   }
 
+  /**
+   * 抑制 persist:vbk 持久分区在 Chromium 内部自动启用的副作用。
+   *
+   * 背景：本应用只用「DOM/CDP 自动化」驱动 VBK 后台，没有 WebRTC 代码。
+   * 但 `persist:vbk` 是持久分区（不是 incognito），Chromium 会对持久
+   * session 默认开启完整的 WebRTC ICE candidate gathering —— 即便
+   * 业务从不发起 PeerConnection，渲染进程一启动也会并发解析
+   * stun.services.mozilla.com 的 A/AAAA 记录，配合 IPv6/4 双栈 + 重试
+   * 喷出 5 条 `Failed to resolve address ... errorcode: -105` 噪音。
+   *
+   * 做法等价于 `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`：
+   * 不收集任何「非代理 UDP」ICE 候选，Chromium 直接放弃 STUN 解析。
+   * 作用面是这一个 webContents，不动 BrowserWindow 主进程和别的视图，
+   * 也不影响出方向的 HTTP/代理链路。
+   */
+  private configureVbkWebContents() {
+    if (!this.view) return;
+    try {
+      this.view.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+    } catch {
+      // 极端旧 Electron（<13）无此 API 时静默跳过；当前依赖 ^43 必然存在。
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────
   // 内部辅助
   // ─────────────────────────────────────────────────────────────
@@ -351,74 +387,6 @@ export class VbkBrowser {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Cookies 序列化兼容层：从 DB 拿出来的 cookies 是历史快照，可能字段不全或
-// sameSite 写法与 Electron 不一致，需要做必要的归一化。
+// Cookie 序列化的具体归一化逻辑已拆到 ./vbk-cookie-serializer.ts，
+// 这里只 import 用到的部分，避免单文件超过 400 行硬上限。
 // ─────────────────────────────────────────────────────────────
-
-interface SerialisedCookie {
-  name: string;
-  value: string;
-  domain?: string;
-  path?: string;
-  expires?: number;
-  httpOnly?: boolean;
-  secure?: boolean;
-  sameSite?: string | null;
-  url?: string;
-}
-
-function parseCookies(raw: string): SerialisedCookie[] {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry): entry is SerialisedCookie =>
-      !!entry && typeof entry === "object" && typeof (entry as { name?: unknown }).name === "string"
-    );
-  } catch {
-    return [];
-  }
-}
-
-function cookieUrl(cookie: SerialisedCookie): string | null {
-  if (cookie.url) return cookie.url;
-  if (!cookie.domain) return null;
-  // domain 形如 ".ctrip.com"，规范化成可写 cookies.set 的 url。
-  const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain;
-  const scheme = cookie.secure ? "https" : "http";
-  return `${scheme}://${host}`;
-}
-
-function cookieDomain(url: string): string {
-  try { return new URL(url).hostname || ""; } catch { return ""; }
-}
-
-/**
- * `session.cookies.remove(url, name)` 的 url 必须是 scheme + host。
- * Electron 的 Cookie 结构没有 url，只有 domain ——
- * 注意 domain 可能包含前导点（".ctrip.com"）也可能没有，
- * scheme 也要按 secure 选 https / http。
- */
-function removeUrlFromCookie(cookie: Pick<Electron.Cookie, "domain" | "secure">): string | null {
-  if (!cookie.domain) return null;
-  const host = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain;
-  if (!host) return null;
-  const scheme = cookie.secure ? "https" : "http";
-  return `${scheme}://${host}`;
-}
-
-function normaliseSameSite(value: SerialisedCookie["sameSite"]): "unspecified" | "no_restriction" | "lax" | "strict" {
-  if (!value) return "unspecified";
-  const lowered = String(value).toLowerCase();
-  if (lowered === "lax") return "lax";
-  if (lowered === "strict") return "strict";
-  if (lowered === "none" || lowered === "no_restriction") return "no_restriction";
-  return "unspecified";
-}
-
-function normaliseExpiry(value: SerialisedCookie["expires"]): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
-  // Electron 期望以秒为单位的 unix 时间戳；Playwright 已是同一口径，但保险起见
-  // 检测超过 10^12 的毫秒值并转换。
-  if (value > 1e12) return Math.floor(value / 1000);
-  return Math.floor(value);
-}

@@ -56,5 +56,10 @@ const api: VbkApi = {
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword) },
   events: { onProjectUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, project: unknown) => listener(project as never); ipcRenderer.on("project:updated", handler); return () => ipcRenderer.removeListener("project:updated", handler); } },
   operationLog: { load: (query) => ipcRenderer.invoke("operationLog:load", query) },
+  planning: {
+    start: (projectId) => ipcRenderer.invoke("planning:start", projectId),
+    resume: (projectId) => ipcRenderer.invoke("planning:resume", projectId),
+    state: (projectId) => ipcRenderer.invoke("planning:state", projectId),
+  },
 };
 contextBridge.exposeInMainWorld("vbk", api);

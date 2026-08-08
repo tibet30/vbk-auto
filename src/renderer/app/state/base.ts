@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AccountFixedInfo,
   AccountFixedInfoField,
@@ -19,6 +19,9 @@ import { api, emptyReadiness, initialInput } from "../helpers";
 
 type View = "workspace" | "projects" | "settings" | "operation-log";
 const VIEW_STORAGE_KEY = "vbk:view";
+// 最近打开的项目 id：仅持久化 id（不持久化整个 ProjectDetail）。
+// 刷新 / 重启后由 derived 层异步从主进程拉权威数据恢复，避免工作台首页闪现。
+const ACTIVE_PROJECT_STORAGE_KEY = "vbk:activeProjectId";
 
 function readInitialView(): View {
   try {
@@ -26,6 +29,14 @@ function readInitialView(): View {
     if (raw === "workspace" || raw === "projects" || raw === "settings" || raw === "operation-log") return raw;
   } catch { /* 某些 Electron 环境下 localStorage 不可用 */ }
   return "workspace";
+}
+
+function readInitialActiveProjectId(): string | null {
+  try {
+    const raw = localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY);
+    return raw && raw.length > 0 ? raw : null;
+  } catch { /* 某些 Electron 环境下 localStorage 不可用 */ }
+  return null;
 }
 
 export function useAppStateBase() {
@@ -38,6 +49,26 @@ export function useAppStateBase() {
     setViewRaw(next);
   }, []);
   const [project, setProject] = useState<ProjectDetail | null>(null);
+  // 持久化的「最近打开的项目 id」：启动 / 刷新后用来从主进程恢复 project。
+  // 与 project 本身解耦——project 是内存中的大对象，id 只是字符串。
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(readInitialActiveProjectId);
+  // 首次挂载跳过同步：activeProjectId 已经从 localStorage 读出来，再写一次会
+  // 把它在 mount 阶段清掉（project 初始为 null），导致永远恢复不了。
+  const hasSyncedActiveProjectRef = useRef(false);
+  useEffect(() => {
+    if (!hasSyncedActiveProjectRef.current) {
+      hasSyncedActiveProjectRef.current = true;
+      return;
+    }
+    const nextId = project?.id ?? null;
+    // localStorage 写入是幂等的，同值反复写也安全；不放在 setState updater
+    // 内是为了避开「updater 应保持纯函数」的 React 约定。
+    try {
+      if (nextId) localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, nextId);
+      else localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+    } catch { /* 忽略 localStorage 不可用 */ }
+    setActiveProjectId(nextId);
+  }, [project?.id]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [readiness, setReadiness] = useState<ProjectReadiness>(emptyReadiness);
@@ -138,8 +169,13 @@ export function useAppStateBase() {
    *  - 前者读 login_sessions 表（main 进程），UI 用它显示 chip；
    *  - 后者实际访问 WebView 探测登录态，可能很慢。
    * 两者各拉各的，避免让"刷新账号列表"被网络卡住。
+   *
+   * 必须用 useCallback 持有稳定引用——设置页 vbk-login-block 的 effect 依赖
+   * 本函数引用；若每次 render 都生成新函数，effect 会跟着重跑，调用本函数
+   * 又会 setLoadingLoginAccounts(true) → 再 render → 新函数引用 → 循环，
+   * 导致新增登录按钮因 loadingLoginAccounts 长期为 true 而 disabled。
    */
-  const refreshVbkLoginAccounts = async () => {
+  const refreshVbkLoginAccounts = useCallback(async () => {
     if (!api()) return;
     setLoadingLoginAccounts(true);
     try {
@@ -151,7 +187,7 @@ export function useAppStateBase() {
     } finally {
       setLoadingLoginAccounts(false);
     }
-  };
+  }, []);
 
   const refresh = async () => {
     if (!api()) return;
@@ -182,6 +218,8 @@ export function useAppStateBase() {
     setView,
     project,
     setProject,
+    activeProjectId,
+    setActiveProjectId,
     projects,
     setProjects,
     settings,

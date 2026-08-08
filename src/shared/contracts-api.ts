@@ -24,6 +24,7 @@ import type {
   AccountFixedInfoValue,
   ProviderContactCard,
 } from "./contracts-types.js";
+import type { PlanningGenerationState, PlanningModule } from "./contracts-planning.js";
 
 export interface VbkApi {
   projects: {
@@ -149,4 +150,22 @@ export interface VbkApi {
   operationLog: {
     load(query?: OperationLogQuery): Promise<OperationLogPage>;
   };
+  planning: {
+    /** 从骨架开始跑一遍（首次创建项目后调用）；写入持久化状态。 */
+    start(projectId: string): Promise<PlanningRunResult>;
+    /** 从持久化状态里的 currentStage 续跑。 */
+    resume(projectId: string): Promise<PlanningRunResult>;
+    /** 读取现有状态；不存在返回 undefined。 */
+    state(projectId: string): Promise<PlanningGenerationState | undefined>;
+  };
+}
+
+/** renderer 可见的规划结果摘要（状态 + 接受 / 拒绝模块 + 助手回复）。 */
+export interface PlanningRunResult {
+  state: PlanningGenerationState;
+  status: "completed" | "needs_user" | "failed";
+  accepted: PlanningModule[];
+  rejected: Array<{ module: PlanningModule; reason?: string }>;
+  researchTasks: Array<{ label: string; type: "vbk" | "web" | "cost" | "image"; detail?: string }>;
+  assistantReply: string;
 }

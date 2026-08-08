@@ -3,6 +3,7 @@ import {
   LoaderCircle,
   MessageCircleMore,
   RefreshCw,
+  RotateCcw,
   Send,
 } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
@@ -35,6 +36,9 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     itinerary,
     expandedDayIndex,
     setExpandedDayIndex,
+    planningRecovery,
+    planningResume,
+    planningBusy,
   } = model;
 
   if (!project) return null;
@@ -118,6 +122,52 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
           </span>
         </div>
         <div className={chat.conversation} ref={browserRef} role="log" aria-live="polite">
+          {planningRecovery && (planningRecovery.status === "needs_user" || planningRecovery.status === "failed" || planningRecovery.status === "running") && (
+            <article
+              className={chat.recoveryStrip}
+              data-status={planningRecovery.status}
+              aria-label="方案规划恢复面板"
+            >
+              <header className={chat.recoveryHead}>
+                <span className={chat.recoveryIcon}>
+                  {planningRecovery.status === "running" ? <LoaderCircle size={14} /> : <RotateCcw size={14} />}
+                </span>
+                <strong className={chat.recoveryHeadline}>{planningRecovery.headline}</strong>
+                {planningRecovery.status !== "running" && (
+                  <button
+                    className={`${shared.btn} ${shared.btnSm}`}
+                    type="button"
+                    data-variant="ai"
+                    onClick={() => void planningResume()}
+                    disabled={planningBusy || loading}
+                    data-testid="planning-resume-button"
+                  >
+                    {planningBusy ? <LoaderCircle size={13} /> : <RefreshCw size={13} />}
+                    {planningRecovery.status === "failed" ? "重试规划" : "继续规划"}
+                  </button>
+                )}
+              </header>
+              <p className={chat.recoveryHint}>{planningRecovery.hint}</p>
+              <div className={chat.recoveryChips}>
+                {planningRecovery.accepted.length > 0 && (
+                  <span className={chat.recoveryChipGroup} data-tone="ok">
+                    已接受：
+                    {planningRecovery.accepted.map((m: string) => (
+                      <span key={m} className={shared.chipMini} data-on="true">{m}</span>
+                    ))}
+                  </span>
+                )}
+                {planningRecovery.missing.length > 0 && (
+                  <span className={chat.recoveryChipGroup} data-tone="warn">
+                    缺失：
+                    {planningRecovery.missing.map((m: string) => (
+                      <span key={m} className={shared.chipMini}>{m}</span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            </article>
+          )}
           {project.messages.map((message, index) => {
             const failed = message.role === "assistant" && message.taskStatus === "failed";
               const lastQuestion = failed

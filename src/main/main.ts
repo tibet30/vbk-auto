@@ -1,5 +1,5 @@
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { fileURLToPath } from "node:url";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import {
@@ -19,6 +19,17 @@ import { applyManualReviewField } from "./operations/manual-review-field.js";
 import { loadOperationLog } from "./operations/operation-log-store.js";
 import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, AiConnectionTestInput, AiModelListInput, AiProvider, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
+import { aiProviderConfig } from "../shared/ai-provider-config.js";
+import type { PlanningGenerationState, PlanningModule, PlanningRunResult } from "../shared/contracts.js";
+import { runPlan } from "./planning/plan-orchestrator.js";
+import { OpenAICompatiblePlannerAdapter } from "./planning/adapters/openai-compatible-adapter.js";
+import { DbGenerationStateStore, DbOrchestratorRuntime } from "./planning/runtime.js";
+import { buildPreflightFailureState } from "./planning/preflight-failure.js";
+import {
+  restoreProjectToPlanningForRetry,
+  syncProjectStatusAfterFailure,
+  syncProjectStatusAfterRunPlan,
+} from "./planning/project-status-sync.js";
 import { VbkDatabaseError, projectNotFound } from "./infrastructure/db-errors.js";
 import {
   classifyMiniMaxError,
@@ -29,6 +40,7 @@ import {
 } from "./minimax/minimax-error-handling.js";
 import { assertSafeAiServiceUrl, resolveAiConnectionInput, successfulAiConnectionTest } from "./infrastructure/ai-settings.js";
 import { fetchAiModelList } from "./infrastructure/ai-models.js";
+import { isAsyncEncryptionAvailable, persistApiKeyAsync, loadApiKeyAsync } from "./infrastructure/secure-storage.js";
 import { aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import { APP_NAME } from "../shared/brand.js";
 
@@ -58,17 +70,15 @@ const getSettings = (): Settings => ({
   hasDeepSeekKey: Boolean(db.getSetting("deepseekApiKey")),
   dataPath: app.getPath("userData"),
 });
-function apiKey(provider: AiProvider = getSettings().aiProvider) {
-  const stored = provider === "deepseek"
-    ? db.getSetting("deepseekApiKey")?.value
-    : db.getSetting("minimaxApiKey")?.value;
-  return stored ? safeStorage.decryptString(Buffer.from(stored, "base64")) : "";
+async function apiKey(provider: AiProvider = getSettings().aiProvider) {
+  const settingName = provider === "deepseek" ? "deepseekApiKey" : "minimaxApiKey";
+  return loadApiKeyAsync(db, settingName);
 }
-function aiService(snapshot?: Settings) {
+async function aiService(snapshot?: Settings) {
   const settings = snapshot ?? getSettings();
   const isDeepSeek = settings.aiProvider === "deepseek";
   return new MiniMaxService({
-    apiKey: apiKey(settings.aiProvider),
+    apiKey: await apiKey(settings.aiProvider),
     baseUrl: isDeepSeek ? settings.deepseekBaseUrl : settings.minimaxBaseUrl,
     model: isDeepSeek ? settings.deepseekModel : settings.minimaxModel,
     provider: settings.aiProvider,
@@ -138,7 +148,7 @@ async function createWindow() {
   }); await browser.initialise();
   automation = new DraftAutomation(db, browser, emitProject, async (req) => {
     const settings = getSettings();
-      const service = aiService();
+      const service = await aiService();
       try {
         return await service.diagnoseAutomationFailure(req);
     } catch (error) {
@@ -152,7 +162,7 @@ async function createWindow() {
     }
   }, async (req) => {
     const settings = getSettings();
-      const service = aiService();
+      const service = await aiService();
       try {
         return await service.disambiguateOption(req);
     } catch (error) {
@@ -242,7 +252,7 @@ function registerIpc() {
     const providerLabel = resolveAiProviderLabel(turnSettings);
     try {
       const history = project.messages.filter((item) => (item.role === "user" || item.role === "assistant") && item.taskStatus !== "failed" && item.taskStatus !== "running");
-      const service = aiService(turnSettings);
+      const service = await aiService(turnSettings);
       const itinerary = Array.isArray(project.product.itinerary) ? project.product.itinerary : [];
       const isInitialDraft = !itinerary.length && /生成|第一版|方案/.test(message);
       const retryableCodes = new Set(["provider_connection", "provider_timeout", "provider_error", "provider_rate_limit", "invalid_model_output", "empty_model_output"]);
@@ -519,12 +529,12 @@ function registerIpc() {
     return listProviderContactCards(page, providerId, searchKeyword);
   });
   ipcMain.handle("settings:get", () => getSettings());
-  ipcMain.handle("settings:getApiKey", (_event, provider: unknown) => {
+  ipcMain.handle("settings:getApiKey", async (_event, provider: unknown) => {
     if (!isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
     return apiKey(provider);
   });
-  ipcMain.handle("settings:listModels", (_event, input: AiModelListInput) => fetchAiModelList(input, apiKey));
-  ipcMain.handle("settings:save", (_event, input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }) => {
+  ipcMain.handle("settings:listModels", (_event, input: AiModelListInput) => fetchAiModelList(input, (provider) => apiKey(provider)));
+  ipcMain.handle("settings:save", async (_event, input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }) => {
     const provider = input.aiProvider;
     if (provider !== undefined && !isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
 
@@ -539,28 +549,222 @@ function registerIpc() {
 
     const minimaxKey = input.apiKey?.trim();
     const deepseekKey = input.deepseekApiKey?.trim();
-    if ((minimaxKey || deepseekKey) && !safeStorage.isEncryptionAvailable()) throw new Error("当前 macOS 无法加密保存密钥");
+    if ((minimaxKey || deepseekKey) && !(await isAsyncEncryptionAvailable())) throw new Error("当前 macOS 无法加密保存密钥");
     if (provider === "minimax" && !minimaxKey && !db.getSetting("minimaxApiKey")) throw new Error("请填写 MiniMax API Key。");
     if (provider === "deepseek" && !deepseekKey && !db.getSetting("deepseekApiKey")) throw new Error("请填写 Evolink API Key。");
 
     if (minimaxBaseUrl !== undefined) db.setSetting("minimaxBaseUrl", minimaxBaseUrl);
     if (minimaxModel !== undefined) db.setSetting("minimaxModel", minimaxModel);
-    if (minimaxKey) db.setSetting("minimaxApiKey", safeStorage.encryptString(minimaxKey).toString("base64"));
+    if (minimaxKey) await persistApiKeyAsync(db, "minimaxApiKey", minimaxKey);
     if (deepseekBaseUrl !== undefined) db.setSetting("deepseekBaseUrl", deepseekBaseUrl);
     if (deepseekModel !== undefined) db.setSetting("deepseekModel", deepseekModel);
-    if (deepseekKey) db.setSetting("deepseekApiKey", safeStorage.encryptString(deepseekKey).toString("base64"));
+    if (deepseekKey) await persistApiKeyAsync(db, "deepseekApiKey", deepseekKey);
     // 当前模型最后切换，避免前面任一字段校验失败时留下半切换状态。
     if (provider !== undefined) db.setSetting("aiProvider", provider);
     return getSettings();
   });
   ipcMain.handle("settings:test", async (_event, input: AiConnectionTestInput) => {
-    const resolved = resolveAiConnectionInput(input, apiKey);
+    const resolved = await resolveAiConnectionInput(input, (provider) => apiKey(provider));
     await new MiniMaxService(resolved).testConnection();
     return successfulAiConnectionTest(resolved);
   });
   // 读取自动化操作历史。早期版本返回内存样例，等真实写入路径就绪后再
   // 改读持久化文件；查询语义保持一致以免上层调用方重写。
   ipcMain.handle("operationLog:load", (_event, query?: OperationLogQuery) => loadOperationLog(query));
+
+  // 规划子系统接线：preflight + runPlan + 项目状态同步。所有 plan 层逻辑
+  // 都被抽到 src/main/planning/*，main.ts 只做"装配 + 持久化 + 广播"。
+
+  /** preflight / runPlan 抛错时的统一出口：把任意 error 包成 status=failed 的
+   *  持久化 state，若项目存在则写 taskStatus='failed' 的 assistant 消息 + 同步
+   *  projects.status + emitProject，返回给上层一个 status='failed' 的正常
+   *  PlanningRunResult。
+   *
+   *  项目不存在时：仍持久化 failed state 并返回失败结果，但跳过 addMessage /
+   *  syncProjectStatusAfterFailure / emitProject —— 否则消息表会出现孤儿
+   *  project_id 行，破坏 conversations 反查项目的语义一致性。 */
+  function handlePreflightFailure(projectId: string, error: unknown): PlanningRunResult {
+    const project = db.getProject(projectId);
+    const existing = db.loadPlanningState(projectId);
+    const baseState: PlanningGenerationState = existing ?? {
+      projectId,
+      currentStage: "skeleton",
+      completedStages: [],
+      stages: [],
+      status: "pending",
+      resumeAt: new Date().toISOString(),
+    };
+    const failure = buildPreflightFailureState(baseState, error);
+    db.savePlanningState(failure.state);
+    // 用户可见可观测性：把 preflight 失败原因打到主进程 console，
+    // 避免「继续规划还是报错但日志全无」的报告。err 已通过
+    // buildPreflightFailureState 内部 redactSensitiveMessage 处理过；
+    // 这里再 raw 输出原 error 一次以方便 grep 调用栈。
+    console.warn(`[planning] preflight.failure projectId=${projectId} existingStatus=${existing?.status ?? "none"} message=${(error as { message?: string } | null)?.message ?? "unknown"}`);
+    console.warn("[planning] preflight.failure stack", error);
+    if (project) {
+      db.addMessage(projectId, "assistant", failure.assistantReply, "failed");
+      syncProjectStatusAfterFailure(db, projectId);
+      emitProject(db.getProject(projectId)!);
+    }
+    return {
+      state: failure.state,
+      status: "failed",
+      accepted: [],
+      rejected: [],
+      researchTasks: [],
+      assistantReply: failure.assistantReply,
+    };
+  }
+
+  /** 共享包装：start / resume 都走这条路径，保证 preflight 行为一致。
+   *  调用方在调本函数前应已做完各自的前置持久化（start 写 pending、
+   *  resume 做受限 restore），这里只负责 preflight + runPlan + 终态同步。 */
+  async function runPlanning(projectId: string): Promise<PlanningRunResult> {
+    try {
+      const project = db.getProject(projectId);
+      if (!project) throw projectNotFound(projectId);
+      const turnSettings = getSettings();
+      // 解密 API Key 必须在 try 内：safeStorage 在某些 macOS 环境下抛
+      // "decryption failed"，被外层 catch 接管后写一条 provider_not_configured
+      // 的失败消息；这条路径对应 preflight-failure.test.ts 第一组用例。
+      const decryptedKey = await apiKey(turnSettings.aiProvider);
+      const providerProfile = aiProviderConfig(turnSettings, turnSettings.aiProvider);
+      const providerLabel = resolveAiProviderLabel(turnSettings);
+      const store = new DbGenerationStateStore(db);
+      const runtime = new DbOrchestratorRuntime(db);
+
+      const adapter = new OpenAICompatiblePlannerAdapter({
+        apiKey: decryptedKey,
+        baseUrl: providerProfile.baseUrl,
+        model: providerProfile.model,
+      });
+      const product = (project.product ?? {}) as Record<string, unknown>;
+      const basicInfo = (product.basicInfo ?? {}) as Record<string, unknown>;
+      const sales = (product.sales ?? {}) as Record<string, unknown>;
+      const result = await runPlan({
+        projectId,
+        skeleton: {
+          destination: String(basicInfo.meetingCity ?? basicInfo.destinationCity ?? ""),
+          days: Number(basicInfo.days) || 0,
+          nights: Number(basicInfo.nights) || 0,
+          productForm: sales.productForm === "groupTour" ? "groupTour" : "privateTour",
+          productType: sales.productType === "domesticLong" ? "domesticLong" : "domesticShort",
+          supplierProductCode: String(basicInfo.supplierProductCode ?? ""),
+        },
+        store,
+        runtime,
+        planner: adapter,
+        providerLabel,
+      });
+
+      // 终态同步：completed → review、failed/needs_user → blocked，
+      // 其它活动状态（automating / draft_saved）一律不动。
+      syncProjectStatusAfterRunPlan(db, projectId, result.status);
+      // 消息 taskStatus 必须跟 result.status 走：completed → succeeded，
+      // failed / needs_user → failed（旧实现不论 result.status 都写
+      // succeeded，会让 recovery strip / 项目消息列表把失败轮误标成功）。
+      const replyMessageTaskStatus: "succeeded" | "failed" = result.status === "completed" ? "succeeded" : "failed";
+      const replyMessageId = db.addMessage(projectId, "assistant", result.assistantReply, replyMessageTaskStatus);
+      void replyMessageId;
+      emitProject(db.getProject(projectId)!);
+      return {
+        state: result.state,
+        status: result.status,
+        accepted: result.accepted.map((entry) => entry.module),
+        rejected: result.rejected.map((entry) => ({ module: entry.module, reason: entry.reason })),
+        researchTasks: result.researchTasks.map((task) => ({ label: task.label, type: task.type, detail: task.detail })),
+        assistantReply: result.assistantReply,
+      };
+    } catch (error) {
+      return handlePreflightFailure(projectId, error);
+    }
+  }
+
+  /** 把持久化 completed 的 PlanningGenerationState 拼回 PlanningRunResult 形状，
+   *  用于 planning:resume 在状态已为 completed 时跳过 runPlanning 直接返回稳定结果。 */
+  function buildStableCompletedResult(state: PlanningGenerationState): PlanningRunResult {
+    const accepted = state.stages.flatMap((s) => s.accepted.map((m) => m.module));
+    const rejected = state.stages.flatMap((s) =>
+      s.rejected.map((m) => ({ module: m.module, reason: m.reason })),
+    );
+    return {
+      state,
+      status: "completed",
+      accepted,
+      rejected,
+      researchTasks: [],
+      assistantReply: state.lastAssistantReply ?? "",
+    };
+  }
+
+  ipcMain.handle("planning:start", (_event, projectId: string) => {
+    // fresh start 语义：先调一次受限 restore —— 仅当 projects.status=blocked 且
+    // 旧持久化 planning_generation ∈ {failed, needs_user} 时把 projects.status
+    // 改回 planning，再覆盖写 pending state。
+    // 必须先 restore 后 save pending：否则 pending state 会先洗掉旧的
+    // failed/needs_user 标记，后续 runPlan=completed 走 syncProjectStatusAfterRunPlan
+    // 时因 projects.status=blocked 错过 planning→review 推送，UI 永远停在 blocked。
+    console.info(`[planning] ipc.start projectId=${projectId}`);
+    const existingState = db.loadPlanningState(projectId);
+    if (existingState) {
+      restoreProjectToPlanningForRetry(db, projectId, existingState.status);
+    }
+    db.savePlanningState({
+      projectId,
+      currentStage: "skeleton",
+      completedStages: [],
+      stages: [],
+      status: "pending",
+      resumeAt: new Date().toISOString(),
+    });
+    return runPlanning(projectId);
+  });
+  ipcMain.handle("planning:resume", (_event, projectId: string) => {
+    // resume 必须先 load state：没有持久化记录时没有可恢复上下文，盲目跑
+    // 等同 planning:start，应由调用方显式改走 start；这里直接抛错让 IPC
+    // 拒绝而不是静默写一条 pending。
+    console.info(`[planning] ipc.resume projectId=${projectId}`);
+    let existingState: PlanningGenerationState | undefined;
+    try {
+      existingState = db.loadPlanningState(projectId);
+    } catch (error) {
+      console.warn(`[planning] ipc.resume load_failed projectId=${projectId}`, error);
+      return handlePreflightFailure(projectId, error);
+    }
+    if (!existingState) {
+      console.warn(`[planning] ipc.resume no_state projectId=${projectId}`);
+      throw new Error(`planning:resume 拒绝：项目 ${projectId} 没有持久化规划状态，请改用 planning:start`);
+    }
+    if (existingState.status === "completed") {
+      // 已完成的项目不应被 resume 重跑（避免重新调 AI、重复写消息、再次触发
+      // syncProjectStatusAfterRunPlan）。直接返回持久化的稳定结果。
+      console.info(`[planning] ipc.resume stable_completed projectId=${projectId} currentStage=${existingState.currentStage} completedStages=${existingState.completedStages.join(",")}`);
+      return buildStableCompletedResult(existingState);
+    }
+    // 其他状态：受限 restore —— 仅当 projects.status=blocked 且持久化
+    // planning_generation ∈ {failed, needs_user} 时才把 projects.status
+    // 恢复为 planning；其他来源的 blocked（自动化孤儿、运营手工、
+    // planning_gen=running / pending 等）保持原状。
+    try {
+      restoreProjectToPlanningForRetry(db, projectId, existingState.status);
+    } catch (error) {
+      console.warn(`[planning] ipc.resume restore_failed projectId=${projectId}`, error);
+      return handlePreflightFailure(projectId, error);
+    }
+    console.info(`[planning] ipc.resume proceed projectId=${projectId} currentStage=${existingState.currentStage} status=${existingState.status} completedStages=${existingState.completedStages.join(",")}`);
+    return runPlanning(projectId);
+  });
+  ipcMain.handle("planning:state", (_event, projectId: string) => {
+    try {
+      const state = db.loadPlanningState(projectId);
+      console.info(`[planning] ipc.state projectId=${projectId} status=${state?.status ?? "none"} currentStage=${state?.currentStage ?? "none"}`);
+      return state;
+    } catch (error) {
+      console.warn(`[planning] ipc.state failed projectId=${projectId}`, error);
+      throw error;
+    }
+  });
 }
 
 async function detectProviderIdInMain(): Promise<number | null> {
@@ -582,6 +786,8 @@ app.whenReady().then(async () => {
   db.recoverUnansweredMessages();
   const orphanProjects = db.recoverOrphanAutomationRuns();
   if (orphanProjects.length) console.warn("[startup] recovered orphan automation runs", { count: orphanProjects.length });
+  const orphanPlanning = db.recoverOrphanPlanningStates();
+  if (orphanPlanning.length) console.warn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
   registerIpc(); await createWindow();
   app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) void createWindow(); });
 }).catch((error) => {

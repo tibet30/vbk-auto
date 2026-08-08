@@ -4,6 +4,23 @@ import type { AiResponse } from "../../shared/contracts.js";
 
 type PatchOperation = NonNullable<AiResponse["patch"]>[number];
 
+/**
+ * AI / patch 不得写入的路径前缀黑名单。supplierProductCode 与车辆 / 酒店资源
+ * ID 是运营数据，必须由 VBK 或人工填充；当前接受者（applyProductPatch /
+ * applyProductPatchSafe）会直接拒绝任何带这些前缀的 patch。
+ */
+const FORBIDDEN_PATH_PREFIXES = [
+  "/basicInfo/supplierProductCode",
+  "/operations/vehicleResource",
+  "/operations/butler",
+  "/operations/bookingControls",
+  "/operations/hotelResource",
+] as const;
+
+function isForbiddenPath(path: string): boolean {
+  return FORBIDDEN_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
 // RFC6902 的数组语义：add 是插入（"-" 表示追加），replace 是就地替换，
 // remove 是删除；下标越界一律拒绝，避免把模型的错误路径写成脏数据。
 function applyArrayOperation(target: unknown[], token: string, operation: PatchOperation) {
@@ -31,6 +48,11 @@ function applyPatchOperation(product: Record<string, unknown>, operation: PatchO
   // 导致 "__proto__/bad" 这种危险路径变成只检测最后一段，整段污染原型链。
   if (!operation.path.startsWith("/")) {
     throw new Error(`产品变更路径不合法：${operation.path}`);
+  }
+  // 黑名单路径：supplierProductCode / 资源 ID / 联系人卡 ID 都是运营数据，
+  // 必须由 VBK 或人工填充；AI 写入一律拒绝。
+  if (isForbiddenPath(operation.path)) {
+    throw new Error(`产品变更路径被禁写：${operation.path}`);
   }
   const segments = operation.path.split("/").slice(1).map(decodeURIComponent);
   if (!segments.length || segments.some((segment) => segment === "__proto__" || segment === "constructor")) {
@@ -68,10 +90,18 @@ function applyPatchMutably(product: Record<string, unknown>, patch: PatchOperati
   }
 }
 
+/**
+ * AI / patch 入口：调用 normaliseProductDraft 时必须显式传 safeRelease:true，
+ * 确保 AI 即便写 release.submitReview=true / publishAfterApproval=true 也会被
+ * 强制为 draft-only（false）。不传这个选项会把已经人工 / VBK 打开的发布态
+ * 默默清零——这是历史发布标记的破坏性 bug，禁止默认开启。
+ */
+const AI_PATCH_NORMALISE_OPTIONS = { safeRelease: true } as const;
+
 export function applyProductPatch(product: Record<string, unknown>, patch: NonNullable<AiResponse["patch"]>) {
   const result = structuredClone(product) as Record<string, unknown>;
   applyPatchMutably(result, patch);
-  const normalised = normaliseProductDraft(result);
+  const normalised = normaliseProductDraft(result, AI_PATCH_NORMALISE_OPTIONS);
   // A partial planning draft is intentionally allowed. Full Zod validation only
   // gates automation, avoiding a false impression that an incomplete plan is ready.
   try { parseProduct(normalised); } catch { /* Stored as draft until all blocking fields resolve. */ }
@@ -107,7 +137,7 @@ export function applyProductPatchSafe(
   }
 
   if (!applied) return { product, applied: false };
-  const normalised = normaliseProductDraft(result);
+  const normalised = normaliseProductDraft(result, AI_PATCH_NORMALISE_OPTIONS);
   try { parseProduct(normalised); } catch { /* Stored as draft until all blocking fields resolve. */ }
   return { product: normalised, applied: true };
 }

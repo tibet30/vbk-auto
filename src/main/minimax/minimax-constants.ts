@@ -79,7 +79,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   /operations/pickupCity → string
   /operations/reusePickupForDropoff → true 或 false
   /operations/hotelSource → "nonPlatform"
-  /operations/hotelTier → "当地2钻酒店/-2" / "当地3钻酒店/-3" / "当地4钻酒店/-4" / "当地5钻酒店/-5"
+  /operations/hotelTier → "当地3钻酒店/-3" / "当地4钻酒店/-4" / "当地5钻酒店/-38"
   /operations/mealsIncluded → true 或 false
   /commercial/packageName → string，套餐名称
 
@@ -324,7 +324,7 @@ export const patchValueSchemas: Record<string, z.ZodType> = {
   "/operations/pickupCity": nonEmptyText,
   "/operations/reusePickupForDropoff": z.boolean(),
   "/operations/hotelSource": z.literal("nonPlatform"),
-  "/operations/hotelTier": z.enum(["当地2钻酒店/-2", "当地3钻酒店/-3", "当地4钻酒店/-4", "当地5钻酒店/-5"]),
+  "/operations/hotelTier": z.enum(["当地3钻酒店/-3", "当地4钻酒店/-4", "当地5钻酒店/-38"]),
   "/operations/mealsIncluded": z.boolean(),
   "/commercial/packageName": nonEmptyText,
   "/commercial/terms": z.record(z.string(), nonEmptyText),

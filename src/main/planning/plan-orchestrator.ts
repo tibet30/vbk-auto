@@ -1,0 +1,213 @@
+/**
+ * 规划编排器（orchestrator）。
+ *
+ *  - 单调流式：skeleton → itinerary → presentation → commercial → research → validation；
+ *  - skeleton / research / validation 是**本地阶段**，不调用 AI；
+ *  - 其它 AI 阶段独立 retry，retry 次数受 stageRetryLimit 控制（默认 2）；
+ *  - 已成功阶段不会被重跑（除非显式 forceRerun）；
+ *  - 进度通过 GenerationStateStore 持久化；进程崩溃后从 currentStage 续跑；
+ *  - 拒绝把 supplierProductCode / 资源 ID 等运营数据写入产品；
+ *  - release 模块默认 draft-only（submitReview=false / publishAfterApproval=false）；
+ *  - assistant 回复基于「实际接受 / 缺失模块」重建，不接受模型声明；
+ *  - validation 阶段从持久化产品 + 持久化 stage 状态反推完整性。
+ */
+
+import {
+  PLANNING_STAGES,
+  PLANNING_STAGE_RETRY_LIMIT,
+  type PlanningGenerationState,
+  type ModuleOutcome,
+  type PlanningModule,
+  type PlanningStage,
+  type Planner,
+  type ResearchTaskProposal,
+  type PlanningSkeleton,
+} from "../../shared/contracts-planning.js";
+import { validateCompleteness } from "./validation.js";
+import { composeAssistantReply } from "./replies.js";
+import { runSingleStage } from "./single-stage-runner.js";
+import { revalidateCompletedState } from "./validation-rewind.js";
+import { logRunEnd, logRunStart, logStageEnd, logStageStart } from "./log.js";
+import type {
+  OrchestratorRunResult,
+  OrchestratorOptions,
+  GenerationStateStore,
+  OrchestratorRuntime,
+} from "./types.js";
+
+export type {
+  OrchestratorRunResult,
+  OrchestratorOptions,
+  GenerationStateStore,
+  OrchestratorRuntime,
+};
+
+export interface RunPlanArgs {
+  projectId: string;
+  skeleton: PlanningSkeleton;
+  store: GenerationStateStore;
+  runtime: OrchestratorRuntime;
+  planner: Planner;
+  providerLabel?: string;
+  options?: OrchestratorOptions;
+}
+
+/**
+ * 一次性跑完（或续跑）整个 plan。
+ *
+ * 续跑语义：
+ *  - 已 `completedStages` 中的阶段**不重跑**（无论持久化的 accepted/rejected 列表）。
+ *  - 启动点 = `state.currentStage`；当 currentStage 仍处于已完成阶段时，
+ *    直接跳到下一个未完成阶段。
+ *  - 已落地的 accepted 模块通过 `runtime.loadAcceptedModules(projectId)` 重新读出；
+ *    因此即使进程重启后内存 accumulator 丢失，也不会影响 completeness 判断。
+ */
+export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult> {
+  const opts = args.options ?? {};
+  const stageRetryLimit = opts.stageRetryLimit ?? PLANNING_STAGE_RETRY_LIMIT;
+  const enforceValidation = opts.enforceValidation !== false;
+
+  let state = (await args.store.load(args.projectId)) ?? createInitialState(args.projectId, opts.providerLabel);
+
+  logRunStart("runPlan 进入", {
+    projectId: args.projectId,
+    providerLabel: args.providerLabel,
+    currentStage: state.currentStage,
+    completedStages: state.completedStages.join(","),
+    status: state.status,
+  });
+
+  // 完成状态必须重新校验：state.completedStages / status 不可信；
+  // 任何已完成阶段实际产品如果被运营 / 手工改坏、或 shallow 检测把非法
+  // 行程 / presentation / commercial 当成 accepted 永久跳过，都会被 deep
+  // validation 抓出来并 rewind 到 earliest invalid stage，状态置 needs_user。
+  if (state.status === "completed") {
+    state = await revalidateCompletedState({ state, skeleton: args.skeleton, runtime: args.runtime });
+    await args.store.save(state);
+  }
+
+  // 跳过「当前阶段 ≤ 已完成阶段」的所有阶段：从 currentStage 起跑。
+  // 即使 currentStage 落后于 completedStages（例如 needs_user 中断后
+  // state.currentStage 没被推进），也会被此 while 推进到下一个未完成阶段。
+  let startIndex = PLANNING_STAGES.indexOf(state.currentStage);
+  if (startIndex < 0) startIndex = 0;
+  let skippedFromCurrent = 0;
+  while (startIndex < PLANNING_STAGES.length && state.completedStages.includes(PLANNING_STAGES[startIndex])) {
+    skippedFromCurrent += 1;
+    startIndex += 1;
+  }
+  if (skippedFromCurrent > 0) {
+    logRunStart(`续跑跳过 ${skippedFromCurrent} 个已完成阶段`, {
+      projectId: args.projectId,
+      providerLabel: args.providerLabel,
+      skippedStages: PLANNING_STAGES.slice(0, skippedFromCurrent).join(","),
+      resumeStage: PLANNING_STAGES[startIndex] ?? "<none>",
+    });
+  }
+  if (startIndex >= PLANNING_STAGES.length) {
+    // 全部阶段都被 completedStages 走过一次；仍然要 deep-validate，避免
+    // shallow detectAcceptedModules 把非法行程 / presentation / commercial
+    // 当成 accepted 永久跳过。再发现 invalid 就 rewind + return needs_user。
+    state = await revalidateCompletedState({ state, skeleton: args.skeleton, runtime: args.runtime });
+    await args.store.save(state);
+    if (state.status === "needs_user") {
+      logRunEnd("续跑走到末尾但 deep validation 发现 invalid，回退 needs_user", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId));
+    }
+    state.status = "completed";
+    await args.store.save(state);
+    logRunEnd("续跑走到末尾确认 completed", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
+    return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId));
+  }
+
+  state.status = "running";
+  state.currentStage = PLANNING_STAGES[startIndex];
+  logStageStart("续跑起点", { projectId: args.projectId, stage: state.currentStage, completedStages: state.completedStages.join(","), providerLabel: args.providerLabel });
+  await args.store.save(state);
+
+  const existingTasks = await args.runtime.loadExistingResearchTasks(args.projectId);
+  const history = await args.runtime.loadHistory(args.projectId);
+  const accumulatedResearchTasks: ResearchTaskProposal[] = [];
+
+  for (let i = startIndex; i < PLANNING_STAGES.length; i += 1) {
+    const stage = PLANNING_STAGES[i];
+    const result = await runSingleStage({
+      stage,
+      state,
+      skeleton: args.skeleton,
+      planner: args.planner,
+      runtime: args.runtime,
+      retryLimit: stageRetryLimit,
+      history,
+      existingTasks,
+      providerLabel: args.providerLabel,
+    });
+    state = result.state;
+    for (const t of result.researchTasks) accumulatedResearchTasks.push(t);
+    await args.store.save(state);
+    if (result.status === "needs_user" || result.status === "failed") {
+      logRunEnd("runPlan 提前结束于 mid-stage", { projectId: args.projectId, providerLabel: args.providerLabel, stage, status: result.status, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+    }
+    state.completedStages = Array.from(new Set([...state.completedStages, stage]));
+    state.currentStage = PLANNING_STAGES[Math.min(i + 1, PLANNING_STAGES.length - 1)];
+    state.lastAssistantReply = result.assistantReply;
+    state.lastModuleSummary = [...result.accepted, ...result.rejected];
+    state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
+    await args.store.save(state);
+    logStageEnd("阶段已接受，写入 completedStages", { projectId: args.projectId, stage, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
+  }
+
+  // validation 已在循环内完成；从持久化产品反推最终 completeness。
+  const accepted = await args.runtime.loadAcceptedModules(args.projectId);
+  const validation = validateCompleteness({ acceptedModules: accepted });
+  if (enforceValidation && !validation.complete) {
+    state.status = "needs_user";
+  } else {
+    state.status = "completed";
+  }
+  await args.store.save(state);
+  logRunEnd("runPlan 全流程完成", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status, complete: validation.complete });
+  return finalizeRun(state, accepted, accumulatedResearchTasks);
+}
+
+async function finalizeRun(state: PlanningGenerationState, acceptedModules: readonly PlanningModule[], researchTasks: ResearchTaskProposal[] = []): Promise<OrchestratorRunResult> {
+  const validation = validateCompleteness({ acceptedModules });
+  const nowIso = new Date().toISOString();
+  const accepted: OrchestratorRunResult["accepted"] = validation.accepted.map((m) => ({
+    module: m.module,
+    status: "accepted",
+    writePath: m.writePath,
+    acceptedFields: m.acceptedFields,
+    missingFields: m.missingFields,
+    updatedAt: nowIso,
+  }));
+  const rejected: OrchestratorRunResult["rejected"] = validation.missing.map((m) => ({
+    module: m.module,
+    status: m.status === "missing" ? "missing" : "rejected",
+    reason: m.reason,
+    writePath: m.writePath,
+  }));
+  return {
+    state,
+    accepted,
+    rejected,
+    researchTasks,
+    status: state.status === "completed" ? "completed" : state.status === "failed" ? "failed" : "needs_user",
+    assistantReply: composeAssistantReply(state, validation.accepted, validation.missing),
+  };
+}
+
+function createInitialState(projectId: string, providerLabel?: string): PlanningGenerationState {
+  return {
+    projectId,
+    currentStage: "skeleton",
+    completedStages: [],
+    stages: [],
+    status: "pending",
+    resumeAt: new Date().toISOString(),
+    providerLabel,
+  };
+}
+
+function now() { return new Date().toISOString(); }

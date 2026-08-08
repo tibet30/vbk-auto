@@ -8,6 +8,14 @@ export interface ResolvedAiConnectionInput {
   apiKey: string;
 }
 
+/**
+ * 校验并解析一个 AI 服务地址。必须 https；http 仅允许 127.0.0.1 / localhost / [::1]
+ * （用于本机调试）。
+ *
+ * @param value 待校验的 URL 字符串
+ * @returns 解析后的 URL 对象
+ * @throws 当协议不合法或字符串本身不是合法 URL 时
+ */
 export function assertSafeAiServiceUrl(value: string): URL {
   let parsed: URL;
   try {
@@ -22,10 +30,10 @@ export function assertSafeAiServiceUrl(value: string): URL {
   return parsed;
 }
 
-export function resolveAiConnectionInput(
+export async function resolveAiConnectionInput(
   input: AiConnectionTestInput,
-  readStoredKey: (provider: AiProvider) => string,
-): ResolvedAiConnectionInput {
+  readStoredKey: (provider: AiProvider) => Promise<string>,
+): Promise<ResolvedAiConnectionInput> {
   if (!isAiProvider(input?.provider)) throw new Error("请选择要测试的 AI 提供商。");
   const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl.trim() : "";
   assertSafeAiServiceUrl(baseUrl);
@@ -33,7 +41,7 @@ export function resolveAiConnectionInput(
   if (!model) throw new Error("请填写要测试的模型名。");
   const apiKey = typeof input.apiKey === "string" && input.apiKey.trim()
     ? input.apiKey.trim()
-    : readStoredKey(input.provider);
+    : await readStoredKey(input.provider);
   if (!apiKey) throw new Error(`请先填写 ${aiProviderProfile(input.provider).shortLabel} API Key。`);
   return { provider: input.provider, baseUrl, model, apiKey };
 }

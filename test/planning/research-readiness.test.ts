@@ -1,0 +1,74 @@
+/**
+ * research task / automation readiness 测试：
+ *  - researchTasks 必须针对每个未确认的商业 / 资源字段都有对应条目；
+ *  - 自动化 readiness 必须在未确认 research tasks 存在时阻断；
+ *  - 单一 type=image research task 在 presentation.cover 完整时不再阻塞。
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { automationBlockers } from "../../src/main/automation/schema/schema-functions.js";
+import { hasCompleteCtripLibraryCover, isCoverResearchTaskSatisfiedByProduct } from "../../src/main/minimax/minimax.js";
+
+test("未确认的 pricing / inventory research task 会阻断自动化", () => {
+  const product = {
+    sales: { productForm: "privateTour" },
+    commercial: {
+      pricing: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 },
+      inventory: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 },
+    },
+  };
+  const tasks = [
+    { state: "researching", label: "核查价格 / 库存 / 起订", type: "vbk" },
+    { state: "researching", label: "核查城市 / 景点 ID", type: "vbk" },
+  ];
+  const blockers = automationBlockers(product, { researchTasks: tasks });
+  assert.ok(blockers.some((b) => /价格/.test(b.label)));
+  assert.ok(blockers.some((b) => /库存|班期/.test(b.label)));
+});
+
+test("所有 research task 已 confirmed 时不再产生相关 blocker", () => {
+  const product = {
+    sales: { productForm: "privateTour" },
+    commercial: {
+      pricing: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 },
+      inventory: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 },
+    },
+    operations: {
+      vehicleResource: { resourceGroupId: 1, resourceGroupName: "X" },
+    },
+  };
+  const tasks = [
+    { state: "confirmed", label: "核查价格", type: "vbk" },
+    { state: "confirmed", label: "核查库存", type: "vbk" },
+  ];
+  const blockers = automationBlockers(product, { researchTasks: tasks });
+  // release.submitReview / publishAfterApproval 仍可能成为 blocker；这里不出现「价格核查」「库存核查」。
+  assert.ok(!blockers.some((b) => /价格核查|库存核查/.test(b.label)));
+});
+
+test("draft-only release 仍会阻断自动化", () => {
+  const product = {
+    sales: { productForm: "privateTour" },
+    commercial: {
+      pricing: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 },
+      release: { submitReview: true, publishAfterApproval: false, publicPriceCeiling: 3000, publicAuditRetries: 4 },
+    },
+    operations: {
+      vehicleResource: { resourceGroupId: 1, resourceGroupName: "X" },
+    },
+  };
+  const blockers = automationBlockers(product, { researchTasks: [] });
+  assert.ok(blockers.some((b) => /submitReview/.test(b.label)));
+});
+
+test("完整 ctripLibrary cover 配置使 image research task 不再阻塞", () => {
+  const product = {
+    presentation: {
+      cover: { source: "ctripLibrary", poi: "晋祠", description: "横版", minQuality: 3 },
+    },
+  };
+  const task = { type: "image", label: "获取产品封面图", state: "researching" };
+  assert.equal(isCoverResearchTaskSatisfiedByProduct(task, product), true);
+  assert.equal(hasCompleteCtripLibraryCover(product), true);
+});

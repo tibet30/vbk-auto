@@ -25,7 +25,7 @@ test("刷新使用当前地址和临时 API Key 请求 /models", async () => {
     provider: "deepseek",
     baseUrl: "https://api.evolink.ai/v1/",
     apiKey: " temporary-key ",
-  }, () => "stored-key", async (input, init) => {
+  }, async () => "stored-key", async (input, init) => {
     requestedUrl = String(input);
     authorization = new Headers(init?.headers).get("Authorization") || "";
     return new Response(JSON.stringify({ data: [{ id: "model-b" }, { id: "model-a" }] }), {
@@ -44,7 +44,7 @@ test("刷新可沿用 Keychain 密钥，并给出可恢复的鉴权错误", asyn
   await assert.rejects(() => fetchAiModelList({
     provider: "deepseek",
     baseUrl: "https://api.evolink.ai/v1",
-  }, (provider) => {
+  }, async (provider) => {
     readProvider = provider;
     return "stored-key";
   }, async () => new Response("unauthorized", { status: 401 })), /API Key 无效/);
@@ -56,5 +56,5 @@ test("空模型列表不会覆盖页面现有候选项", async () => {
     provider: "deepseek",
     baseUrl: "https://api.evolink.ai/v1",
     apiKey: "test-key",
-  }, () => "", async () => new Response(JSON.stringify({ data: [] }), { status: 200 })), /没有返回可用模型/);
+  }, async () => "", async () => new Response(JSON.stringify({ data: [] }), { status: 200 })), /没有返回可用模型/);
 });

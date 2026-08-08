@@ -48,10 +48,10 @@ export function parseAiModelList(payload: unknown, provider: AiProvider): AiMode
   return models.sort((a, b) => a.label.localeCompare(b.label, "zh-CN", { numeric: true }));
 }
 
-function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiProvider) => string): string {
+async function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiProvider) => Promise<string>): Promise<string> {
   if (!isAiProvider(input?.provider)) throw new Error("请选择要刷新的 AI 提供商。");
   if (input.provider !== "deepseek") throw new Error("当前仅支持刷新 Evolink 模型列表。");
-  const key = stringValue(input.apiKey) || readStoredKey(input.provider);
+  const key = stringValue(input.apiKey) || await readStoredKey(input.provider);
   if (!key) throw new Error("请先填写 Evolink API Key。");
   return key;
 }
@@ -65,10 +65,10 @@ function modelListHttpError(status: number): Error {
 
 export async function fetchAiModelList(
   input: AiModelListInput,
-  readStoredKey: (provider: AiProvider) => string,
+  readStoredKey: (provider: AiProvider) => Promise<string>,
   fetchModels: FetchModelList = fetch,
 ): Promise<AiModelListResult> {
-  const apiKey = resolveKey(input, readStoredKey);
+  const apiKey = await resolveKey(input, readStoredKey);
   let response: Response;
   try {
     response = await fetchModels(modelListUrl(input.baseUrl), {

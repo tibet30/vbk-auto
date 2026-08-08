@@ -162,18 +162,27 @@ export function useWorkflowHandlers(state: AppState) {
    * 与"新增登录"区别：当前没人在用浏览器 → 不需要保存快照，只需要展示
    * VBK 登录入口。沿用旧 `browser.login()` 行为，导航到产品库让 VBK 自己
    * 在未登录时重定向到登录页。
+   *
+   * 失败语义：catch 必须 setNotice 把错误显式抛给用户看，并保留 login surface
+   * （不动 loginPanelOpen / browserOpen / setVbkLogin(false)），让用户能在右侧
+   * 看到失败提示后继续重试或重新打开。
    */
   const openLogin = () => {
-    setLoginPanelOpen(true);
+    // setView 必须先于 setLoginPanelOpen：否则路由还在 settings 时 loginPanelOpen 已被置 true，
+    // ActiveRoute 还停在 AppSettingsPage，<LoginBrowserPanel> 没机会挂载。
     setView("workspace");
+    setStage("vbk");
     setBrowserOpen(true);
     setVbkLogin(null);
     setAccountMenuOpen(false);
-    setStage("vbk");
+    setLoginPanelOpen(true);
     if (api()) {
       api()!.browser.login()
         .then(() => checkVbkLogin())
-        .catch((error) => setVbkLogin({ loggedIn: false, message: error instanceof Error ? error.message : "无法打开 VBK 登录页面。" }));
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "无法打开 VBK 登录页面。";
+          setNotice(`VBK 登录页打开失败：${message}。请稍后重试，或在右侧重新发起。`);
+        });
     }
     void refreshVbkLoginAccounts();
   };
@@ -181,17 +190,22 @@ export function useWorkflowHandlers(state: AppState) {
   /**
    * 「新增登录」专用入口。
    * 流程：
-   *  1. 让右侧 VBK WebView 可见；
-   *  2. 调 main 进程 addLogin()：保存当前账号 cookies、清空 session、导航到 VBK 根；
-   *  3. 主动拉一次账号列表，让「已记录账号」立刻多出来一颗新 chip；
-   *  4. 等用户在右侧完成登录后，checkVbkLogin 会被 status 流触发，
+   *  1. 切到 workspace view 并把右侧 VBK WebView 设为可见、stage=vbk、loginPanelOpen=true；
+   *     setView 必须先于 setLoginPanelOpen，否则设置页的路由切换会先于 login surface 挂载。
+   *  2. 清空 stale vbkLogin.loggedIn：避免 derived.ts 中「已登录且 loginPanelOpen 则自动收起」
+   *     effect 立刻把刚打开的登录面板关掉。
+   *  3. 调 main 进程 addLogin()：保存当前账号 cookies、清空 session、导航到 VBK 根；
+   *  4. 主动拉一次账号列表，让「已记录账号」立刻多出来一颗新 chip；
+   *  5. 等用户在右侧完成登录后，checkVbkLogin 会被 status 流触发，
    *     自然把新账号 cookies 也写回 login_sessions。
    */
   const addNewLogin = async () => {
     if (!api()) return;
     setAccountMenuOpen(false);
-    setBrowserOpen(true);
+    setView("workspace");
     setStage("vbk");
+    setBrowserOpen(true);
+    setVbkLogin(null);
     setLoginPanelOpen(true);
     try {
       await api()!.browser.addLogin();

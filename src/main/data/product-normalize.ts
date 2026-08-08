@@ -1,4 +1,5 @@
 import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema.js";
+import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 
 function textValue(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 
@@ -149,13 +150,18 @@ function normaliseCommercialInventory(value: unknown) {
   return { startDate: start, endDate: end, dailyQuota: quota };
 }
 
-function normaliseCommercialRelease(value: unknown) {
+function normaliseCommercialRelease(value: unknown, options?: NormaliseReleaseOptions) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   const ceiling = positiveNumber(record.publicPriceCeiling);
   if (!ceiling) return undefined;
-  const submitReview = typeof record.submitReview === "boolean" ? record.submitReview : true;
-  const publishAfterApproval = typeof record.publishAfterApproval === "boolean" ? record.publishAfterApproval : true;
+  // 通用语义：默认**保留** release.submitReview / publishAfterApproval；
+  // 这是数据库启动归一、历史 fixture 解析、读取已人工显式打开的 release
+  // 时的安全路径——一次 reload 不应把运营/VBK 标记的发布态悄悄翻成 false。
+  // AI / 自动写入路径必须显式传 safeRelease=true 来强制 draft-only。
+  const safe = options?.safeRelease === true;
+  const submitReview = safe ? false : record.submitReview === true;
+  const publishAfterApproval = safe ? false : record.publishAfterApproval === true;
   const retriesRaw = positiveInteger(record.publicAuditRetries);
   const publicAuditRetries = retriesRaw && retriesRaw >= 1 && retriesRaw <= 10 ? retriesRaw : 3;
   return {
@@ -166,7 +172,19 @@ function normaliseCommercialRelease(value: unknown) {
   };
 }
 
-export function normaliseProductDraft(product: Record<string, unknown>) {
+export interface NormaliseReleaseOptions {
+  /**
+   * 强制 release 进入 draft-only：submitReview / publishAfterApproval 一律为 false。
+   * AI / 自动写入路径必须显式传 true，否则会把已经人工 / VBK 打开的发布态默默清零。
+   * 数据库 startup normalize 默认不传，保留历史 / 人工 release 标记。
+   */
+  safeRelease?: boolean;
+}
+
+/** @deprecated use {@link NormaliseReleaseOptions.safeRelease} instead. */
+export type NormaliseOptions = NormaliseReleaseOptions;
+
+export function normaliseProductDraft(product: Record<string, unknown>, options?: NormaliseOptions) {
   const result = structuredClone(product);
   const presentation = normalisePresentation(result.presentation);
   const itinerary = normaliseItinerary(result.itinerary);
@@ -178,7 +196,10 @@ export function normaliseProductDraft(product: Record<string, unknown>) {
     if (!textValue(operations.pickupCity)) delete operations.pickupCity;
     if (typeof operations.reusePickupForDropoff !== "boolean") delete operations.reusePickupForDropoff;
     if (operations.hotelSource !== "nonPlatform") delete operations.hotelSource;
-    if (!(["当地2钻酒店/-2", "当地3钻酒店/-3", "当地4钻酒店/-4", "当地5钻酒店/-5"] as unknown[]).includes(operations.hotelTier)) delete operations.hotelTier;
+    // 酒店档次：使用统一白名单；旧 /-5 自动被 normaliseHotelTier 纠正为 /-38。
+    const normalisedTier = normaliseHotelTier(operations.hotelTier);
+    if (normalisedTier) operations.hotelTier = normalisedTier;
+    else delete operations.hotelTier;
     if (typeof operations.mealsIncluded !== "boolean") delete operations.mealsIncluded;
     if (Object.keys(operations).length) result.operations = operations; else delete result.operations;
   }
@@ -190,7 +211,7 @@ export function normaliseProductDraft(product: Record<string, unknown>) {
     if (pricing) commercial.pricing = pricing; else delete commercial.pricing;
     const inventory = normaliseCommercialInventory(commercial.inventory);
     if (inventory) commercial.inventory = inventory; else delete commercial.inventory;
-    const release = normaliseCommercialRelease(commercial.release);
+    const release = normaliseCommercialRelease(commercial.release, { safeRelease: options?.safeRelease });
     if (release) commercial.release = release; else delete commercial.release;
     if (Object.keys(commercial).length) result.commercial = commercial; else delete result.commercial;
   }

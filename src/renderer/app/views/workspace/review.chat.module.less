@@ -121,6 +121,100 @@
   flex-shrink: 0;
 }
 
+/* Planning recovery strip — 紧凑中文状态条 */
+.recoveryStrip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 28%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 6%, var(--surface));
+  align-self: stretch;
+  max-width: 100%;
+  font-size: var(--fs-sm);
+}
+
+.recoveryStrip[data-status='failed'] {
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.recoveryStrip[data-status='running'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface));
+}
+
+.recoveryHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recoveryIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ai-teal) 14%, transparent);
+  color: var(--ai-teal);
+  flex-shrink: 0;
+}
+
+.recoveryStrip[data-status='failed'] .recoveryIcon {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--warning);
+}
+
+.recoveryHeadline {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--foreground);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.recoveryHead .btn { margin-left: auto; }
+
+.recoveryHint {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.recoveryChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.recoveryChipGroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.recoveryChipGroup[data-tone='ok'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 30%, var(--border));
+  color: var(--ai-teal);
+}
+
+.recoveryChipGroup[data-tone='warn'] {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
+  color: var(--warning);
+}
+
 .composerCard {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-card);

@@ -13,6 +13,7 @@ import { MaybeNotice } from "./notice/Notice";
 import type { OperationLogEntry, ProjectDetail } from "../../../shared/contracts.js";
 import { api, operationStageToSection } from "../helpers";
 import styles from "./AppView.module.less";
+import shared from "./shared.module.less";
 
 /**
  * 应用顶层视图：shell + 内容路由。
@@ -36,13 +37,29 @@ export function AppView(model: AppModel) {
 }
 
 function ActiveRoute({ model }: { model: AppModel }) {
-  const { view, project } = model;
+  const { view, project, activeProjectId } = model;
   if (view === "settings" && !project) return <AppSettingsPage model={model} />;
   if (view === "projects" && !project) return <AppProjectsPage model={model} />;
   if (view === "operation-log") return <OperationLogRoute model={model} />;
+  // 刷新后 project 还在异步拉取：先渲染一个轻量占位，避免闪现工作台首页
+  // 再跳回详情。activeProjectId 会在拉取成功 / 失败后被清掉，此分支自动失效。
+  if (view === "workspace" && !project && activeProjectId) return <RestoringProjectPlaceholder />;
   if (view === "workspace" && !project) return <AppWorkspaceHomePage model={model} />;
   if (view === "workspace" && project) return <AppWorkspaceWorkflow model={model} />;
   return null;
+}
+
+/**
+ * 刷新后的极简占位：避免在拉取最近打开的项目期间闪到工作台首页。
+ * 不抢样式主权，沿用 shared.module.less 的 viewSub + dot 视觉。
+ */
+function RestoringProjectPlaceholder() {
+  return (
+    <section className={styles.restoring} aria-live="polite" aria-busy="true">
+      <span className={shared.dot} data-state="ai" />
+      <span>正在恢复最近打开的项目…</span>
+    </section>
+  );
 }
 
 /**

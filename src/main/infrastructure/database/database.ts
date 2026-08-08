@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoFieldKey, AccountFixedInfoValue, AutomationRun, ConversationMessage, CreateProjectInput, ProjectDetail, ProjectSummary, ResearchTask, SavedLoginAccount, TaskStatus } from "../../../shared/contracts.js";
+import type { AccountFixedInfo, AccountFixedInfoField, AccountFixedInfoFieldKey, AccountFixedInfoValue, AutomationRun, ConversationMessage, CreateProjectInput, PlanningGenerationState, ProjectDetail, ProjectSummary, ResearchTask, SavedLoginAccount, TaskStatus } from "../../../shared/contracts.js";
 import { DEFAULT_HOTEL_TIER } from "../../../shared/hotel-tiers.js";
 import { normaliseProductDraft } from "../../data/product-normalize.js";
 import { fixedInfoSchema, getAccountFixedInfo, setAccountFixedInfo } from "./fixed-info.js";
@@ -51,6 +51,11 @@ export class VbkDatabase {
         account_name TEXT NOT NULL,
         cookies_json TEXT NOT NULL,
         saved_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS planning_generation (
+        project_id TEXT PRIMARY KEY,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
     `);
     // 已有用户的库里没有这一列，ALTER 失败即表示列已存在。
@@ -145,6 +150,7 @@ export class VbkDatabase {
       this.db.prepare("DELETE FROM automation_runs WHERE project_id=?").run(projectId);
       this.db.prepare("DELETE FROM research_tasks WHERE project_id=?").run(projectId);
       this.db.prepare("DELETE FROM messages WHERE project_id=?").run(projectId);
+      this.db.prepare("DELETE FROM planning_generation WHERE project_id=?").run(projectId);
       this.db.prepare("DELETE FROM projects WHERE id=?").run(projectId);
       return true;
     });
@@ -293,9 +299,12 @@ export class VbkDatabase {
     return this.getProject(projectId)!;
   }
   addResearchTask(projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
+    // 全状态 dedupe：即使之前已经被运营 / VBK 确认 / 解决过（state=confirmed/resolved），
+    // 同一 (label, type) 也不再创建重复条目。这样规划子系统在 resume / start 时不会
+    // 重复重提已被核查过的项目；手动 UI 调用方同样获益（同一标签不会产生两条视觉记录）。
     const existing = this.db.prepare(`
       SELECT id FROM research_tasks
-      WHERE project_id=? AND label=? AND type=? AND state NOT IN ('confirmed','resolved')
+      WHERE project_id=? AND label=? AND type=?
       LIMIT 1
     `).get(projectId, task.label, task.type) as { id: string } | undefined;
     if (existing) {
@@ -414,5 +423,68 @@ export class VbkDatabase {
   deleteSession(accountKey: string) {
     if (!accountKey) return;
     this.db.prepare("DELETE FROM login_sessions WHERE account_key=?").run(accountKey);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 规划状态 & 模块写入：为新的 staged planning 子系统提供持久化接口。
+  // ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * 加载项目的规划生成状态。返回值是完整的 PlanningGenerationState；
+   * 表里没有对应行时返回 undefined。
+   */
+  loadPlanningState(projectId: string): PlanningGenerationState | undefined {
+    const row = this.db.prepare(`SELECT state_json FROM planning_generation WHERE project_id=?`).get(projectId) as { state_json: string } | undefined;
+    if (!row) return undefined;
+    try {
+      return JSON.parse(row.state_json) as PlanningGenerationState;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 覆盖 / 写入规划状态。 */
+  savePlanningState(state: PlanningGenerationState): void {
+    const updatedAt = new Date().toISOString();
+    const payload = JSON.stringify({ ...state, resumeAt: updatedAt });
+    this.db.prepare(`
+      INSERT INTO planning_generation (project_id, state_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
+    `).run(state.projectId, payload, updatedAt);
+  }
+
+  /** 删除项目的规划状态；仅供项目删除时调用。 */
+  deletePlanningState(projectId: string): void {
+    this.db.prepare("DELETE FROM planning_generation WHERE project_id=?").run(projectId);
+  }
+
+  /**
+   * 重启后恢复规划状态：
+   *  - status=running → needs_user（UI 让运营选择「重跑 / 手动补齐」）；
+   *  - status=needs_user / completed / failed → 保持不变。
+   *  返回受影响的项目 ID 列表（供 main 进程记录日志 / 重置项目状态）。
+   */
+  recoverOrphanPlanningStates(): string[] {
+    const orphans = this.db.prepare(`
+      SELECT project_id, state_json FROM planning_generation
+    `).all() as Array<{ project_id: string; state_json: string }>;
+    const touched: string[] = [];
+    const upsert = this.db.prepare(`
+      INSERT INTO planning_generation (project_id, state_json, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
+    `);
+    for (const row of orphans) {
+      try {
+        const state = JSON.parse(row.state_json) as { status?: string };
+        if (state.status === "running") {
+          state.status = "needs_user";
+          upsert.run(row.project_id, JSON.stringify(state), now());
+          touched.push(row.project_id);
+        }
+      } catch { /* leave unreadable legacy state untouched */ }
+    }
+    return touched;
   }
 }

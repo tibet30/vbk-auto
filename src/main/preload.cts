@@ -39,6 +39,7 @@ const api: VbkApi = {
     addLogin: () => ipcRenderer.invoke("browser:addLogin"),
     switchAccount: (accountKey) => ipcRenderer.invoke("browser:switchAccount", accountKey),
     forgetAccount: (accountKey) => ipcRenderer.invoke("browser:forgetAccount", accountKey),
+    suggestPoi: (keyword: string) => ipcRenderer.invoke("poi:suggest", keyword),
   },
   automation: {
     start: (projectId) => ipcRenderer.invoke("automation:start", projectId),
@@ -64,8 +65,8 @@ const api: VbkApi = {
     listKnownAccounts: () => ipcRenderer.invoke("accounts:listKnownAccounts"),
     providerIdFor: (accountName) => ipcRenderer.invoke("accounts:providerIdFor", accountName),
   },
-  settings: { get: () => ipcRenderer.invoke("settings:get"), getApiKey: (provider) => ipcRenderer.invoke("settings:getApiKey", provider), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input) },
-  contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword) },
+  settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input) },
+  contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword), suggestPoi: (keyword) => ipcRenderer.invoke("contacts:suggestPoi", keyword) },
   events: { onProjectUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, project: unknown) => listener(project as never); ipcRenderer.on("project:updated", handler); return () => ipcRenderer.removeListener("project:updated", handler); } },
   operationLog: { load: (query) => ipcRenderer.invoke("operationLog:load", query) },
   planning: {

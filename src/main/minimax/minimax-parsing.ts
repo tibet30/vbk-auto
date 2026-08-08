@@ -1,5 +1,16 @@
+/**
+ * 把 MiniMax / Evolink 的原始模型输出解析成强类型 AiResponse 的全套工具：
+ *   - 顶层入口 parseAssistantMessage（处理 tool_calls + content 两种形态）
+ *   - parseJson / parseValue / unwrapResponse（结构化解析 + 自动修复）
+ *   - stripInlineNoise / normalizeModelPayload / extractTopLevelJsonCandidates 等清洗工具
+ *   - repairSingleQuotedJson / completeJsonTail / trimTrailingComma / quoteUnquotedKeys（修复变体）
+ *   - parseSparseResponse / parseLooseFieldValue 等「松散字段提取」回退
+ *
+ * 设计目标：在模型返回的 JSON 不合规时尽量「救回来」（fallback），但**绝不**伪造结构化字段，
+ * 救不回来的情况返回 isStructured=false 让上层决定 retry / fail。
+ */
+
 import OpenAI from "openai";
-import { normaliseItinerary, normalisePresentation } from "../data/product-normalize.js";
 import type { AiResponse } from "../../shared/contracts.js";
 import { z } from "zod";
 import {
@@ -11,6 +22,13 @@ import {
   researchTaskSchema,
 } from "./minimax-constants.js";
 
+/**
+ * 把单个 JSON Patch operation 规整为产品协议期望的形态：
+ *   - 先用 pathAlias 把模型常见的变体路径（basic_info/subtitle 等）映射回标准路径；
+ *   - 然后用 patchValueSchemas[path] 对 value 做严格解析；
+ *   - remove 不需要 value；其它路径若解析失败返回 undefined 让上游丢弃；
+ *   - 解析成功则合并 zod 的 parsed.data（缺字段会被剔除）。
+ */
 export function normalisePatchOperation(operation: z.infer<typeof patchOperationSchema>) {
   if (operation.op === "remove") return operation;
   // 路径变体映射：模型常把 "basic_info/subtitle" 或 "transport_mode" 等非标准路径写出，
@@ -19,14 +37,6 @@ export function normalisePatchOperation(operation: z.infer<typeof patchOperation
   if (alias !== operation.path) {
     operation = { ...operation, path: alias };
   }
-  if (operation.path === "/presentation") {
-    const value = normalisePresentation(operation.value);
-    return value ? { ...operation, value } : undefined;
-  }
-  if (operation.path === "/itinerary") {
-    const value = normaliseItinerary(operation.value);
-    return value ? { ...operation, value } : undefined;
-  }
   const schema = patchValueSchemas[operation.path];
   if (!schema) return operation;
   const parsed = schema.safeParse(operation.value);
@@ -34,6 +44,11 @@ export function normalisePatchOperation(operation: z.infer<typeof patchOperation
 }
 
 // 把抓包中常见的路径变体映射回产品协议的标准路径。
+/**
+ * 把模型写出 / 抓包中常见的路径变体（basic_info/subtitle / transport_mode / presentation/desc
+ * 等）映射回 /basicInfo/subtitle、/operations/transport 等项目标准 RFC6902 路径；
+ * 若以 `/` 开头原样返回，否则在前面补一个 `/`。
+ */
 function pathAlias(path: string): string {
   const aliases: Record<string, string> = {
     "basic_info/subtitle": "/basicInfo/subtitle",
@@ -52,6 +67,11 @@ function pathAlias(path: string): string {
   return path;
 }
 
+/**
+ * 把外层包裹（如 {data: "..."} / {result: {...}} / {response: "..."}）解开，
+ * 直到找到一个含 reply 字符串字段的对象为止；若顶层就是合法 AiResponse 形状则原样返回。
+ * 任何一步都最多解开一层，避免无限递归。
+ */
 export function unwrapResponse(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
@@ -71,6 +91,13 @@ export function unwrapResponse(value: unknown): unknown {
   return value;
 }
 
+/**
+ * 把已经解包过的对象解析为严格类型的 AiResponse：
+ *   - 强制 reply 非空字符串；
+ *   - patch / questions / researchTasks 必须是数组（如果存在）；
+ *   - 对每个 patch 操作做 pathAlias + zod 校验；
+ *   - 任何一步不通过都抛 MiniMaxServiceError("invalid_model_output")。
+ */
 export function parseValue(value: unknown): AiResponse {
   const unwrapped = unwrapResponse(value);
   if (!unwrapped || typeof unwrapped !== "object" || Array.isArray(unwrapped)) throw new MiniMaxServiceError("invalid_model_output", "AI 返回的数据格式无法用于产品方案，请重试。");
@@ -133,10 +160,17 @@ export type ParsedMinimaxResponse = {
 
 export const unstructuredFallbackReply = "未获取到结构化内容，已记录为纯文本回复。";
 
+/**
+ * 把合法 AiResponse 包成 isStructured=true 的 ParsedMinimaxResponse。
+ */
 function structured(value: AiResponse): ParsedMinimaxResponse {
   return { response: value, isStructured: true };
 }
 
+/**
+ * 把一段无结构化数据的纯文本 reply 包成 isStructured=false 的 ParsedMinimaxResponse；
+ * patch / questions / researchTasks 均为空数组，对应 fallback 兜底路径。
+ */
 function unstructured(value: string): ParsedMinimaxResponse {
   return {
     response: {
@@ -149,6 +183,11 @@ function unstructured(value: string): ParsedMinimaxResponse {
   };
 }
 
+/**
+ * 在多个候选项里挑出「最完整」的 ParseMinimaxResponse：先比 patch 数量，
+ * 再看 reply 是否是「未获取到...」兜底占位（优先选非占位），
+ * 最后比 reply 长度。用于从一坨修复过的 JSON 候选中选最佳结果。
+ */
 function pickBestStructuredResponse(responses: ParsedMinimaxResponse[]): ParsedMinimaxResponse | undefined {
   if (!responses.length) return undefined;
   return responses.reduce((best, candidate) => {
@@ -163,6 +202,10 @@ function pickBestStructuredResponse(responses: ParsedMinimaxResponse[]): ParsedM
   });
 }
 
+/**
+ * 去除 raw 中夹带的 JS 注释（/* ... *\/ 与 // 行内注释）以及连续空行，
+ * 用于在尝试 JSON.parse 之前先清理模型输出里混入的代码片段。
+ */
 function stripInlineNoise(raw: string): string {
   return raw
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -170,6 +213,10 @@ function stripInlineNoise(raw: string): string {
     .replace(/\n{3,}/g, "\n");
 }
 
+/**
+ * 把模型的纯文本输出清洗为接近合法 JSON 的形式：去掉行内注释、剥离 SSE 风格的
+ * event: / data: / keep-alive / [DONE] 等噪音前缀，再把多个空行合并。
+ */
 function normalizeModelPayload(raw: string): string {
   return stripInlineNoise(raw)
     .replace(/^(?:\s*event:\s*[^\n]*)$/gim, "")
@@ -180,6 +227,10 @@ function normalizeModelPayload(raw: string): string {
     .trim();
 }
 
+/**
+ * 从 raw 的 start 位置开始，按括号配对（考虑字符串和转义）切出所有顶层 JSON / 数组片段。
+ * 用于在一个回复中提取「多重结构化输出」或排除掉套娃在外的注释片段。
+ */
 function extractTopLevelJsonCandidates(raw: string, start: number): string[] {
   const fragments: string[] = [];
   let i = Math.max(0, start);
@@ -235,6 +286,13 @@ function extractTopLevelJsonCandidates(raw: string, start: number): string[] {
   return unique;
 }
 
+/**
+ * 入口函数：把模型原始输出解析为 ParsedMinimaxResponse。
+ * 完整流程：
+ *   1. 清理 SSE / 代码注释噪音 + 去掉思考块 fence；
+ *   2. 按顶层括号切出所有 JSON 候选项并生成 8 类修复变体（去尾逗号 / 修复单引号 / 补齐尾括号 等）；
+ *   3. 任一通过 parseValue 即返回；否则降级到 sparse / 纯文本 / 兜底 reply。
+ */
 export function parseJson(raw: string): ParsedMinimaxResponse {
   const cleaned = normalizeModelPayload(raw.trim())
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -320,12 +378,21 @@ export function parseJson(raw: string): ParsedMinimaxResponse {
   return unstructured(unstructuredFallbackReply);
 }
 
+/**
+ * 把 reply 字段前后的多余引号 / 反引号剥离掉（模型有时会重复包裹），
+ * 用于 parseLooseFieldValue 拿到裸值之后做最后一道清洗。
+ */
 function stripReplyValueWrappers(value: string): string {
   const trimmed = value.trim().replace(/^["'`]|["'`]$/g, "").trim();
   if (!trimmed) return "";
   return trimmed;
 }
 
+/**
+ * 试着把一个残破 JSON 片段修复回来：原样 → 去掉尾逗号 → 修复单引号 → 补齐尾括号 / 尾引号
+ * → 给未加引号的 key 加双引号等多个变体逐个尝试，第一个能 JSON.parse 通过的就返回。
+ * 所有变体都失败则返回 undefined。
+ */
 function parseRecoveredJson(raw: string): unknown | undefined {
   const withoutTrailingComma = trimTrailingComma(raw);
   console.warn("[DBG-prj2] raw[:80]=", raw.slice(0, 80));
@@ -359,10 +426,18 @@ function parseRecoveredJson(raw: string): unknown | undefined {
 }
 
 // 给未加引号的 key 加双引号（如 {key:value} -> {"key":"value"}）
+/**
+ * 用正则把 `{key:value}` / `,key:value` 这种未加引号的 key 改写成 `{"key":"value"}`，
+ * 不影响已经带引号的 key，是修复单引号 JSON 的兜底步骤之一。
+ */
 function quoteUnquotedKeys(raw: string): string {
   return raw.replace(/([,{]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
 }
 
+/**
+ * 从半结构化文本里抓取「key:value」形式的字段值；兼容半角 `:`/`=` 与全角 `：` 分隔符、
+ * 兼容键两侧单/双引号、兼容 value 标量与嵌套 JSON；找不到时回退 value-only 解析。
+ */
 function parseLooseFieldValue(raw: string, key: string): unknown {
   // 兼容半角 ":" / "=" 和全角 "：" / "，" 分隔符（模型抓包常见混用中文符号）
   const normalized = raw.replace(/，/g, ",");
@@ -412,6 +487,10 @@ function parseLooseFieldValue(raw: string, key: string): unknown {
   return parseRecoveredJson(fragment);
 }
 
+/**
+ * 从半结构化文本里提取 patch 字段（兼容数组或单条 operation 形式），逐条做 pathAlias
+ * + patchOperationSchema 校验，再走 normalisePatchOperation 规整；返回可用的 patch 数组。
+ */
 function parseLoosePatch(raw: string) {
   const field = parseLooseFieldValue(raw, "patch");
   if (!Array.isArray(field)) return [];
@@ -427,6 +506,10 @@ function parseLoosePatch(raw: string) {
   });
 }
 
+/**
+ * 从半结构化文本里提取 questions 字段：数组形式时按字符串数组解析（最多保留 1 条非空），
+ * 否则尝试用 extractLooseStringValueFromRaw 抓出一个裸字符串。
+ */
 function parseLooseQuestions(raw: string) {
   const field = parseLooseFieldValue(raw, "questions");
   if (Array.isArray(field)) {
@@ -436,6 +519,10 @@ function parseLooseQuestions(raw: string) {
   return question ? [question] : [];
 }
 
+/**
+ * 从半结构化文本里提取 researchTasks：兼容数组 / 单条对象两种形态，过 researchTaskSchema
+ * 后只保留通过校验的项。
+ */
 function parseLooseResearchTasks(raw: string) {
   const field = parseLooseFieldValue(raw, "researchTasks");
   if (Array.isArray(field)) {
@@ -449,6 +536,10 @@ function parseLooseResearchTasks(raw: string) {
   return parsed.success ? [parsed.data] : [];
 }
 
+/**
+ * 从半结构化文本里抓 key 后面引号内的字符串（手动处理 \\n / \\r / \\t / \\\），返回 trim 后的内容；
+ * 用于 loose-field 抽取失败时回退到「直接读字符串值」。
+ */
 function extractLooseStringValueFromRaw(raw: string, key: string): string | undefined {
   const match = raw.match(new RegExp(`(?:^|[\\s,，{])(?:"${key}"|'${key}'|${key})\\s*[:：=]\\s*("|')`, "i"));
   if (!match || match.index === undefined) {
@@ -492,6 +583,11 @@ function extractLooseStringValueFromRaw(raw: string, key: string): string | unde
   return value.trim() ? value.trim() : undefined;
 }
 
+/**
+ * 当整篇回复不构成合法 JSON 时，从松散文本里逐字段抽 patch / questions / researchTasks，
+ * 任意字段命中就标记为结构化；若 reply 也抽不出来但其余字段齐全，自动补一句
+ * 「未获取到正文...」的说明。全部抽空时返回 undefined。
+ */
 function parseSparseResponse(raw: string): ParsedMinimaxResponse | undefined {
   const patch = parseLoosePatch(raw);
   const questions = parseLooseQuestions(raw);
@@ -520,6 +616,9 @@ function parseSparseResponse(raw: string): ParsedMinimaxResponse | undefined {
   return unstructured(reply as string);
 }
 
+/**
+ * 单纯从 `reply:...` 形式抓出 reply 字段值（无引号简单标量），用最后一个匹配并 stripReplyValueWrappers。
+ */
 function extractBareReplyFromText(raw: string): string | undefined {
   const matches = Array.from(raw.matchAll(/(?:^|[\s,{])(?:\"reply\"|'reply'|reply)\s*[：:]\s*([^\r\n,}\]]{1,1500})/gi));
   const rawMatch = matches.length > 0 ? matches[matches.length - 1] : null;
@@ -527,6 +626,10 @@ function extractBareReplyFromText(raw: string): string | undefined {
   return stripReplyValueWrappers(rawMatch[1]);
 }
 
+/**
+ * 从半结构化文本里抓 `reply: "..."` / `reply: '...'` 的引号内字符串，处理简单转义；
+ * 用于 sparse recover 阶段拿 reply 字段。
+ */
 function extractLooseReplyFromRaw(raw: string): string | undefined {
   // 用 matchAll 找所有 match，取最后一个（多片段时优先后置有效字段）。
   // 兼容半角 ":" 和全角 "：" 分隔符
@@ -575,6 +678,9 @@ function extractLooseReplyFromRaw(raw: string): string | undefined {
   return value.trim() ? value.trim() : undefined;
 }
 
+/**
+ * 把 raw 当成纯文本 reply 直接 trim 掉前后多余引号 / 反引号返回（>2000 字按 2000 截断）。
+ */
 function extractPlainReply(raw: string): string | undefined {
   const text = raw.trim().replace(/^[`'"]|[`'"]$/g, "");
   if (!text) return undefined;
@@ -582,12 +688,20 @@ function extractPlainReply(raw: string): string | undefined {
   return text.trim();
 }
 
+/**
+ * 把 raw 中的连续空白折叠为单空格后直接当作回复内容（>1200 字按 1200 截断）。
+ * 用作所有结构化解析失败后的「最后兜底」。
+ */
 function extractTextFallback(raw: string): string | undefined {
   const text = raw.trim().replace(/\s{2,}/g, " ").trim();
   if (!text) return undefined;
   if (text.length > 1200) return text.slice(0, 1200);
   return text;
 }
+/**
+ * 从 raw 的 start 位置开始扫描，按括号配对（处理字符串与转义）截取一个完整的
+ * JSON 对象片段；用于 parseLooseFieldValue 找嵌套对象。
+ */
 function extractJsonCandidate(raw: string, start: number): string {
   const fragment = raw.slice(start);
   let inString = false;
@@ -630,6 +744,10 @@ function extractJsonCandidate(raw: string, start: number): string {
   return fragment;
 }
 
+/**
+ * 把单引号 JSON（如 {'reply': 'hi'}）的字符串部分统一改写成双引号，并把单引号字符串内的
+ * 双引号转义，避免被外层双引号包裹冲突；不做语法修复，仅做引号转换。
+ */
 function repairSingleQuotedJson(raw: string): string {
   let inString: "\"" | "'" | null = null;
   let escaped = false;
@@ -678,6 +796,10 @@ function repairSingleQuotedJson(raw: string): string {
   return output;
 }
 
+/**
+ * 给截断的 JSON 自动补齐缺失的尾括号 / 尾引号（按配对栈推算），让 JSON.parse 不至于因为
+ * 末尾缺失 `}` `]` 而抛错；不能识别的错位括号会原样返回 raw。
+ */
 function completeJsonTail(raw: string): string {
   let inString = false;
   let escaped = false;
@@ -719,10 +841,19 @@ function completeJsonTail(raw: string): string {
   return raw + stack.reverse().join("");
 }
 
+/**
+ * 删除 JSON 中 `[...,]` / `{...,}` 这类拖尾逗号；属于最常见的修复步骤之一。
+ */
 function trimTrailingComma(raw: string): string {
   return raw.replace(/,\s*(?=[}\]])/g, "");
 }
 
+/**
+ * 把 OpenAI Chat Completion 的一条 message 解析为 ParsedMinimaxResponse（结构化 / 非结构化）：
+ *   - 优先尝试官方 submit_product_update 工具调用；多个工具调用时取 patch 数最多者；
+ *   - 工具名错位 / content 为 SSE 噪音时，尝试把 arguments 当松散 JSON 解析；
+ *   - 最终兜底用 message.content 走 parseJson 链路。
+ */
 export function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompletionMessage): ParsedMinimaxResponse {
   const allToolCalls = message.tool_calls?.filter((call): call is OpenAI.Chat.Completions.ChatCompletionMessageFunctionToolCall =>
     call.type === "function" && typeof call.function.arguments === "string",

@@ -65,12 +65,10 @@ export function useAiHandlers(state: AppState) {
     setAiModelListError,
     setSettings,
   } = state;
-  const keyRequestId = useRef(0);
   const testRequestId = useRef(0);
   const modelListRequestId = useRef(0);
 
   const switchProvider = async (provider: AiProvider) => {
-    const requestId = ++keyRequestId.current;
     testRequestId.current += 1;
     const profile = aiProviderProfile(provider);
     const config = settings ? aiProviderConfig(settings, provider) : null;
@@ -85,19 +83,10 @@ export function useAiHandlers(state: AppState) {
     setAiTest(readSavedTest(provider, model));
     setAiModelListError(null);
     setNotice(null);
-    setLoadingAiKey(true);
-
-    try {
-      const key = api() ? await api()!.settings.getApiKey(provider) : "";
-      if (requestId === keyRequestId.current) setAiApiKey(key);
-    } catch {
-      if (requestId === keyRequestId.current) {
-        setAiApiKey("");
-        setNotice(`${profile.shortLabel} 已保存的密钥无法读取，请重新填写。`);
-      }
-    } finally {
-      if (requestId === keyRequestId.current) setLoadingAiKey(false);
-    }
+    // API Key 永远不从本机读回：渲染端只持有「临时未保存」的输入框值。
+    // 如需校验或调用模型，由调用方在 settings:listModels / settings:test 的入参里
+    // 显式带上当前 UI 输入框的 key；持久化需要走 settings:save。
+    setLoadingAiKey(false);
   };
 
   const openAiConfig = () => {

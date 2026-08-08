@@ -3,7 +3,6 @@ import type {
   AiConnectionTestInput,
   AiModelListInput,
   AiModelListResult,
-  AiProvider,
   AiRegenerateField,
   LoginAccountsSnapshot,
   ManualReviewFieldInput,
@@ -97,6 +96,7 @@ export interface VbkApi {
      * 调用方需先切换 / 登出。
      */
     forgetAccount(accountKey: string): Promise<void>;
+    suggestPoi(keyword: string): Promise<{ poiName: string; poiId: string } | null>;
   };
   automation: {
     start(projectId: string): Promise<void>;
@@ -151,10 +151,10 @@ export interface VbkApi {
   contacts: {
     /** 在 VBK 已登录的浏览器上下文里拉取 providerId 对应的联系人卡片列表。 */
     listProviderContactCards(providerId: number, searchKeyword?: string): Promise<ProviderContactCard[]>;
+    suggestPoi(keyword: string): Promise<{ poiName: string; poiId: string } | null>;
   };
   settings: {
     get(): Promise<Settings>;
-    getApiKey(provider: AiProvider): Promise<string>;
     listModels(input: AiModelListInput): Promise<AiModelListResult>;
     save(input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }): Promise<Settings>;
     test(input: AiConnectionTestInput): Promise<ConnectionTest>;

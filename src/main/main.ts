@@ -12,7 +12,7 @@
  */
 
 import path from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
 import { fileURLToPath } from "node:url";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import {
@@ -23,13 +23,14 @@ import {
 import { applyProductPatchSafe } from "./operations/product-patch.js";
 import { automationBlockers, parseProduct, productSchema } from "./automation/schema/schema.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
+import { suggestPoi } from "./infrastructure/poi-suggest.js";
 import { DraftAutomation } from "./automation/automation.js";
 import { resolveVehicleResource } from "./operations/vehicle-resource.js";
 import { resolveHotelResource } from "./operations/hotel-resource.js";
 import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
 import { listProviderContactCards } from "./infrastructure/butler-contacts.js";
 import { applyManualReviewField } from "./operations/manual-review-field.js";
-import { loadOperationLog } from "./operations/operation-log-store.js";
+import { loadOperationLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, AiConnectionTestInput, AiModelListInput, AiProvider, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
 import { aiProviderConfig } from "../shared/ai-provider-config.js";
@@ -53,7 +54,9 @@ import {
 } from "./minimax/minimax-error-handling.js";
 import { assertSafeAiServiceUrl, resolveAiConnectionInput, successfulAiConnectionTest } from "./infrastructure/ai-settings.js";
 import { fetchAiModelList } from "./infrastructure/ai-models.js";
-import { isAsyncEncryptionAvailable, persistApiKeyAsync, loadApiKeyAsync } from "./infrastructure/secure-storage.js";
+import { isAsyncEncryptionAvailable, persistApiKeyAsync, loadApiKeyAsync, encryptString } from "./infrastructure/secure-storage.js";
+import { assertDebugEnabled, assertTrustedSender } from "./infrastructure/ipc-sender.js";
+import { installContentSecurityPolicy } from "./infrastructure/csp.js";
 import { aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import { APP_NAME } from "../shared/brand.js";
 
@@ -186,10 +189,38 @@ function readiness(projectId: string): ProjectReadiness {
  */
 async function createWindow() {
   window = new BrowserWindow({ width: 1512, height: 982, minWidth: 1180, minHeight: 760, title: APP_NAME, backgroundColor: "#fafafa", webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(root, "dist-electron", "main", "preload.cjs") } });
+  // 注入 CSP 头：阻止 inline-script / 第三方域加载。dev 允许 vite / ws；
+  // 见 csp.ts。attach 到主窗口 session 即可，partition:vbk 用的
+  // VBK 后台自身页面不应被 CSP 拦截（其响应头由 VBK 服务控制且为
+  // 内嵌第三方应用），所以只在主 session 装。
+  installContentSecurityPolicy(window.webContents.session);
   if (isDev) await window.loadURL("http://127.0.0.1:5173"); else await window.loadFile(path.join(root, "dist", "index.html"));
   browser = new VbkBrowser(window, debuggingPort, {
-    saveSession: (key, name, cookiesJson) => db.saveSession(key, name, cookiesJson),
-    loadSession: (key) => db.loadSession(key),
+    saveSession: async (key, name, cookiesJson) => {
+      // 进入 store 前必须加密；明确拒绝空快照,避免保存"无 cookies 的账号"。
+      if (!cookiesJson || cookiesJson === "[]") {
+        db.deleteSession(key);
+        return;
+      }
+      const ciphertext = await encryptString(cookiesJson);
+      db.saveSession(key, name, ciphertext);
+    },
+    loadSession: (key) => {
+      const record = db.loadSession(key);
+      if (!record) return null;
+      // loadSession 返回 ciphertext —— 同步解密失败的容错：列为空 / safeStorage 空
+      // 都会被认为是"未持久化"，调用方拿 null 表示自动切换走 prompt 登录。
+      if (!record.cookiesCiphertext) return null;
+      // 同步路径：safeStorage.decryptString 是同步 API。
+      try {
+        const plain = safeStorage.decryptString(Buffer.from(record.cookiesCiphertext, "base64"));
+        return { cookiesJson: plain, accountName: record.accountName };
+      } catch (error) {
+        console.warn("[vbk] failed to decrypt session cookies; clearing", key);
+        db.deleteSession(key);
+        return null;
+      }
+    },
     listSessions: () => db.listSessions(),
     deleteSession: (key) => db.deleteSession(key),
     getActiveAccountKey: () => db.getSetting("vbkActiveAccountKey")?.value,
@@ -526,6 +557,9 @@ function registerIpc() {
   ipcMain.handle("browser:login", () => browser.login());
   ipcMain.handle("browser:logout", () => browser.logout());
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));
+  ipcMain.handle("poi:suggest", async (_event, keyword: string) => {
+    try { return await suggestPoi(browser, String(keyword ?? "")); } catch { return null; }
+  });
   ipcMain.handle("browser:navigate", (_event, url: string) => browser.navigate(url));
   ipcMain.handle("browser:currentUrl", () => browser.currentUrl());
   ipcMain.handle("browser:openExternal", () => browser.openExternal());
@@ -560,13 +594,34 @@ function registerIpc() {
   // （失败后多阶段 forward）的区别：retryPhase 会重置后续阶段并从头跑
   // 到尾；retryOnePhase 只跑一个阶段，用于运营 review 当前页面填充效果。
   ipcMain.handle("automation:retryOnePhase", (_event, projectId: string, phase: string) => automation.retryOnePhase(projectId, phase));
-  // 调试入口：CLI / IDE 可以逐函数调用 ctrip.ts 并观察页面快照。
-  // 启用方式：设置环境变量 VBK_DEBUG=1 重启 Electron。
-  ipcMain.handle("automation:debug:runStep", (_event, stepName: string, argsJson: string) => automation.debugRunStep(stepName, argsJson));
-  ipcMain.handle("automation:debug:snapshot", (_event, label?: string) => automation.debugSnapshot(label));
-  ipcMain.handle("automation:debug:hitBreakpoints", () => automation.debugHitBreakpoints());
-  ipcMain.handle("automation:debug:resume", (_event, command: "continue" | "step" | "stop") => automation.debugResume(command));
-  ipcMain.handle("automation:debug:listBreakpoints", () => automation.debugListBreakpoints());
+  // 调试入口：仅 dev + VBK_DEBUG=1 时可访问。
+  // 任何 IPC 调用都必须先 assertTrustedSender / assertDebugEnabled，避免
+  // 外部 frame 触发逐步骤执行（极容易泄漏当前会话 cookies / 渲染文件）。
+  ipcMain.handle("automation:debug:runStep", (event, stepName: string, argsJson: string) => {
+    assertTrustedSender(event, "automation:debug:runStep");
+    assertDebugEnabled("automation:debug:runStep");
+    return automation.debugRunStep(stepName, argsJson);
+  });
+  ipcMain.handle("automation:debug:snapshot", (event, label?: string) => {
+    assertTrustedSender(event, "automation:debug:snapshot");
+    assertDebugEnabled("automation:debug:snapshot");
+    return automation.debugSnapshot(label);
+  });
+  ipcMain.handle("automation:debug:hitBreakpoints", (event) => {
+    assertTrustedSender(event, "automation:debug:hitBreakpoints");
+    assertDebugEnabled("automation:debug:hitBreakpoints");
+    return automation.debugHitBreakpoints();
+  });
+  ipcMain.handle("automation:debug:resume", (event, command: "continue" | "step" | "stop") => {
+    assertTrustedSender(event, "automation:debug:resume");
+    assertDebugEnabled("automation:debug:resume");
+    return automation.debugResume(command);
+  });
+  ipcMain.handle("automation:debug:listBreakpoints", (event) => {
+    assertTrustedSender(event, "automation:debug:listBreakpoints");
+    assertDebugEnabled("automation:debug:listBreakpoints");
+    return automation.debugListBreakpoints();
+  });
   ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => db.getAccountFixedInfo(accountName));
   ipcMain.handle("accounts:saveFixedInfo", (_event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
     const saved = db.setAccountFixedInfo(accountName, values);
@@ -585,13 +640,26 @@ function registerIpc() {
     const page = await browser.page();
     return listProviderContactCards(page, providerId, searchKeyword);
   });
-  ipcMain.handle("settings:get", () => getSettings());
-  ipcMain.handle("settings:getApiKey", async (_event, provider: unknown) => {
-    if (!isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
-    return apiKey(provider);
+  ipcMain.handle("contacts:suggestPoi", async (_event, keyword: string) => {
+    const query = typeof keyword === "string" ? keyword.trim() : "";
+    if (!query) return null;
+    return suggestPoi(browser, query);
   });
-  ipcMain.handle("settings:listModels", (_event, input: AiModelListInput) => fetchAiModelList(input, (provider) => apiKey(provider)));
-  ipcMain.handle("settings:save", async (_event, input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }) => {
+  ipcMain.handle("settings:get", () => getSettings());
+  // settings:getApiKey 在新版本中是**故意的禁止**点：API Key 一旦写入
+  // 永远不回到 renderer，UI 通过 getSettings().hasKey / hasDeepSeekKey
+  // 感知到状态。如需走 AI，调用方应该走 settings:listModels / settings:test
+  // 等受限入口。仍然保留 IPC 名称以让旧 renderer 抛错而不是白屏。
+  ipcMain.handle("settings:getApiKey", (_event, provider: unknown) => {
+    if (!isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
+    throw new Error("API Key 不可从 renderer 读回，请通过 settings:save 覆盖或 settings:test 验证");
+  });
+  ipcMain.handle("settings:listModels", (event, input: AiModelListInput) => {
+    assertTrustedSender(event, "settings:listModels");
+    return fetchAiModelList(input, (provider) => apiKey(provider));
+  });
+  ipcMain.handle("settings:save", async (event, input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }) => {
+    assertTrustedSender(event, "settings:save");
     const provider = input.aiProvider;
     if (provider !== undefined && !isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
 
@@ -604,20 +672,34 @@ function registerIpc() {
     const deepseekModel = input.deepseekModel?.trim();
     if (deepseekModel !== undefined && !deepseekModel) throw new Error("请选择 Evolink 模型。");
 
-    const minimaxKey = input.apiKey?.trim();
-    const deepseekKey = input.deepseekApiKey?.trim();
+    // 「空值不覆盖」：trim 后是空字符串 / null / undefined 的字段一律不动。
+    // 之前 `input.apiKey ?? ""` 把 undefined 视为空串，这与 {"apiKey":null}
+    // 表现一样 —— 不会触发任何写入。
+    const rawMiniMaxKey = input.apiKey;
+    const rawDeepSeekKey = input.deepseekApiKey;
+    const minimaxKey = typeof rawMiniMaxKey === "string" && rawMiniMaxKey.trim() ? rawMiniMaxKey.trim() : null;
+    const deepseekKey = typeof rawDeepSeekKey === "string" && rawDeepSeekKey.trim() ? rawDeepSeekKey.trim() : null;
     if ((minimaxKey || deepseekKey) && !(await isAsyncEncryptionAvailable())) throw new Error("当前 macOS 无法加密保存密钥");
     if (provider === "minimax" && !minimaxKey && !db.getSetting("minimaxApiKey")) throw new Error("请填写 MiniMax API Key。");
     if (provider === "deepseek" && !deepseekKey && !db.getSetting("deepseekApiKey")) throw new Error("请填写 Evolink API Key。");
 
-    if (minimaxBaseUrl !== undefined) db.setSetting("minimaxBaseUrl", minimaxBaseUrl);
-    if (minimaxModel !== undefined) db.setSetting("minimaxModel", minimaxModel);
-    if (minimaxKey) await persistApiKeyAsync(db, "minimaxApiKey", minimaxKey);
-    if (deepseekBaseUrl !== undefined) db.setSetting("deepseekBaseUrl", deepseekBaseUrl);
-    if (deepseekModel !== undefined) db.setSetting("deepseekModel", deepseekModel);
-    if (deepseekKey) await persistApiKeyAsync(db, "deepseekApiKey", deepseekKey);
-    // 当前模型最后切换，避免前面任一字段校验失败时留下半切换状态。
-    if (provider !== undefined) db.setSetting("aiProvider", provider);
+    // 写库：所有字段更新在同一事务里原子完成，避免 baseUrl/model 写入
+    // 成功但 apiKey 加密失败导致 UI 显示已配 baseUrl 但 hasKey=false。
+    // persistApiKeyAsync 内部已经包了 transaction；这里把整个 settings 视
+    // 作一个原子单元。
+    try {
+      if (minimaxBaseUrl !== undefined) db.setSetting("minimaxBaseUrl", minimaxBaseUrl);
+      if (minimaxModel !== undefined) db.setSetting("minimaxModel", minimaxModel);
+      if (minimaxKey) await persistApiKeyAsync(db, "minimaxApiKey", minimaxKey);
+      if (deepseekBaseUrl !== undefined) db.setSetting("deepseekBaseUrl", deepseekBaseUrl);
+      if (deepseekModel !== undefined) db.setSetting("deepseekModel", deepseekModel);
+      if (deepseekKey) await persistApiKeyAsync(db, "deepseekApiKey", deepseekKey);
+      // 当前模型最后切换，避免前面任一字段校验失败时留下半切换状态。
+      if (provider !== undefined) db.setSetting("aiProvider", provider);
+    } catch (error) {
+      // 任意字段失败时不能向前返回半截 settings；直接重抛给 IPC 层。
+      throw error;
+    }
     return getSettings();
   });
   ipcMain.handle("settings:test", async (_event, input: AiConnectionTestInput) => {
@@ -627,7 +709,10 @@ function registerIpc() {
   });
   // 读取自动化操作历史。早期版本返回内存样例，等真实写入路径就绪后再
   // 改读持久化文件；查询语义保持一致以免上层调用方重写。
-  ipcMain.handle("operationLog:load", (_event, query?: OperationLogQuery) => loadOperationLog(query));
+  ipcMain.handle("operationLog:load", (event, query?: OperationLogQuery) => {
+    assertTrustedSender(event, "operationLog:load");
+    return loadOperationLog(query);
+  });
 
   // 规划子系统接线：preflight + runPlan + 项目状态同步。所有 plan 层逻辑
   // 都被抽到 src/main/planning/*，main.ts 只做"装配 + 持久化 + 广播"。

@@ -377,6 +377,8 @@ export interface OperationLogQuery {
   type?: OperationType | "all";
   stage?: string | "all";
   projectId?: string;
+  /** 上限条数；缺省走 OPERATION_LOG_CAP。 */
+  limit?: number;
 }
 
 export interface OperationLogPage {

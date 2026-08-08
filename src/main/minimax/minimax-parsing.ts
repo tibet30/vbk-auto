@@ -37,7 +37,6 @@ export function normalisePatchOperation(operation: z.infer<typeof patchOperation
 function pathAlias(path: string): string {
   const aliases: Record<string, string> = {
     "basic_info/subtitle": "/basicInfo/subtitle",
-    "basicInfo/title": "/basicInfo/subtitle",
     "basicInfo/destination": "/basicInfo/destinationCity",
     "/basic_info/subtitle": "/basicInfo/subtitle",
     "/operations/transport_mode": "/operations/transport",

@@ -97,7 +97,7 @@ export class MiniMaxServiceError extends Error {
 
 export const writablePatchPrefixes = [
   "/sales/productType", "/sales/productForm", "/sales/splitGroup",
-  "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/title", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
+  "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
   "/presentation",
   "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded",
   "/commercial/packageName", "/commercial/terms",

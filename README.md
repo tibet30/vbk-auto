@@ -58,6 +58,8 @@ npm run pi:itinerary -- ff43aae4-3cbf-44c9-8712-c31f219eac46 9496
 
 ## 源码结构
 
+分层与模块职责见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)(单一入口)。粗略三段:
+
 ```text
 src/
   main/                 Electron 主进程、本地数据库、MiniMax 与自动化服务

@@ -26,6 +26,19 @@ import type {
 } from "./contracts-types.js";
 import type { PlanningGenerationState, PlanningModule } from "./contracts-planning.js";
 
+/**
+ * IPC 契约：renderer ↔ main 的强类型接口。
+ *
+ * `VbkApi` 描述了 renderer 端可以调用的全部 IPC 方法。修改本接口后
+ * 需同步实现：
+ *  - main 端：在 `main.ts` 的 `registerIpc()` 中增补 handler；
+ *  - preload 端：在 `preload.cts` 暴露同名 API；
+ *  - renderer 端：`useAppActions` 等钩子里调用。
+ *
+ * 同一模块（例如 `browser`、`automation`、`accounts`、`settings`）内部按职责分组，
+ * 新方法请加到对应分组下，不要在末尾追加。
+ */
+
 export interface VbkApi {
   projects: {
     list(): Promise<ProjectSummary[]>;

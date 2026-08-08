@@ -1,6 +1,23 @@
 import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 
+/**
+ * 产品草稿归一化。
+ *
+ * AI 输出、外部导入、数据库启动迁移都会先把产品对象喂给 `normaliseProductDraft`，
+ * 再让上层继续使用；目的是把不合法字段静默剔除、把别名/缺字段归位到白名单。
+ *
+ * 几个常被踩到的坑：
+ *  - release 默认是草稿安全状态（`safeRelease` 不传 → 保留人工/VBK 打开的开关）；
+ *  - 酒店档次遇到旧的 "-5" 会被纠正到 "-38"；
+ *  - itinerary 推荐语的三条强制走白名单 + 去重。
+ *
+ * 主要导出：
+ *  - normaliseProductDraft：顶层入口；深拷贝 + 逐字段归一化
+ *  - normalisePresentation / normaliseItinerary：presentation / itinerary 子结构归一化
+ *  - NormaliseReleaseOptions：safeRelease 选项，控制 release 是否强制 draft-only
+ */
+
 function textValue(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 
 const ACTIVITY_TYPES = new Set(["transport", "visit", "meal", "hotel", "free", "other"]);
@@ -42,6 +59,13 @@ function normaliseActivity(value: unknown): { time: string; title: string; detai
   return { time, title, detail, type };
 }
 
+/**
+ * 归一化产品 presentation（推荐语 / 产品特点 / 三条推荐）。
+ *  - 推荐语接受 recommendation / description / subtitle / productName 多种别名；
+ *  - features 接受 features / highlights / highlightsMore；
+ *  - 三条推荐必须长度恰好为 3、类别在白名单、互不重复，否则整个 recommendations 字段被剔除；
+ *  - 返回 undefined 表示该结构不可用，调用方应当丢弃。
+ */
 export function normalisePresentation(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
@@ -72,6 +96,13 @@ function normaliseMeals(value: unknown) {
   return { summary: entries.join("；"), descriptions: entries };
 }
 
+/**
+ * 归一化产品行程（按天列表）。
+ *  - 接受 activities 数组 / spots 数组 / 老的散落字段；
+ *  - 一天的活动会被合并成 description；spots 过滤掉接团/送站等非景点词；
+ *  - 餐食会被重写成 `早餐…；午餐…；晚餐…` summary 形式；
+ *  - 返回 undefined 表示该结构不可用。
+ */
 export function normaliseItinerary(value: unknown) {
   if (!Array.isArray(value)) return undefined;
   const days = value.flatMap((item, index) => {
@@ -184,6 +215,15 @@ export interface NormaliseReleaseOptions {
 /** @deprecated use {@link NormaliseReleaseOptions.safeRelease} instead. */
 export type NormaliseOptions = NormaliseReleaseOptions;
 
+/**
+ * 产品草稿顶层归一化入口。
+ *
+ * 会深克隆入参再修改，避免污染上游数据。归一化后无法识别的字段会被静默剔除；
+ * 调用方拿到的是「尽可能合法但不一定完整」的对象——仍需在下游做必填校验。
+ *
+ * @param product 原始产品对象（任意来源：AI 输出、数据库读取、import）
+ * @param options.safeRelease 传 true 时把 release 强制为 draft-only（仅 AI/自动写入路径需要）
+ */
 export function normaliseProductDraft(product: Record<string, unknown>, options?: NormaliseOptions) {
   const result = structuredClone(product);
   const presentation = normalisePresentation(result.presentation);

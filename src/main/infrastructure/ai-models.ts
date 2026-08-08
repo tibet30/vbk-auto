@@ -7,6 +7,20 @@ import type {
 import { aiModelOption, isAiProvider } from "../../shared/contracts.js";
 import { assertSafeAiServiceUrl } from "./ai-settings.js";
 
+/**
+ * AI 模型列表拉取与解析（仅 Evolink 提供方支持）。
+ *
+ * 设计要点：
+ *  - 不直接读数据库：通过 `readStoredKey` 回调解耦，测试可注入 mock 密钥源
+ *  - HTTP 层：`fetchModels` 默认走全局 fetch，测试时可注入假实现
+ *  - 解析层：`parseAiModelList` 同时支持扁平数组 / `{ data: [...] }` / `{ models: [...] }`
+ *
+ * 主要导出：
+ *  - fetchAiModelList：发起一次远程拉取；返回 AiModelListResult 或抛出本地化错误
+ *  - parseAiModelList：从原始 JSON 解析为 AiModelInfo 数组（去重、按 label 排序）
+ */
+
+/** fetch 注入点，签名与全局 fetch 兼容；测试时可替换为 mock。 */
 type FetchModelList = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 function modelListUrl(baseUrl: string): URL {
@@ -30,6 +44,17 @@ function modelRecords(payload: unknown): unknown[] {
   return [];
 }
 
+/**
+ * 把模型列表 JSON 解析为 AiModelInfo 数组。
+ *  - 同时识别数组、`{ data }`、`{ models }` 三种载荷；
+ *  - 同一 id 多次出现只保留首个；
+ *  - label 优先取 display_name / displayName / name / label，否则回退到本地 i18n，最后回退到 id；
+ *  - 按 label 本地化排序。
+ *
+ * @param payload 任意模型列表响应
+ * @param provider 提供方，用于回退 label 查找
+ * @returns 去重并排序后的模型数组
+ */
 export function parseAiModelList(payload: unknown, provider: AiProvider): AiModelInfo[] {
   const seen = new Set<string>();
   const models: AiModelInfo[] = [];
@@ -63,6 +88,14 @@ function modelListHttpError(status: number): Error {
   return new Error(`Evolink 模型列表获取失败（HTTP ${status}）。`);
 }
 
+/**
+ * 拉取 Evolink 模型列表（仅 Evolink 提供方支持）。
+ * 抛错时已本地化为用户可读文案；调用方一般直接透传给 renderer。
+ *
+ * @param input 拉取输入（provider / baseUrl / 可选 apiKey）
+ * @param readStoredKey 当 input.apiKey 为空时，回调读取已存储 Key
+ * @param fetchModels 可选的 fetch 注入点（默认全局 fetch）
+ */
 export async function fetchAiModelList(
   input: AiModelListInput,
   readStoredKey: (provider: AiProvider) => Promise<string>,

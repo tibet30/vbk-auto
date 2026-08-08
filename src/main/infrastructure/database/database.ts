@@ -7,6 +7,26 @@ import { DEFAULT_HOTEL_TIER } from "../../../shared/hotel-tiers.js";
 import { normaliseProductDraft } from "../../data/product-normalize.js";
 import { fixedInfoSchema, getAccountFixedInfo, setAccountFixedInfo } from "./fixed-info.js";
 
+/**
+ * SQLite 数据访问层（VbkDatabase）。
+ *
+ * 这是 main 进程与本地数据库交互的唯一入口；上层 IPC handler 只调本类方法，
+ * 不直接写 SQL。表结构与迁移以 `migrate()` 为准——新表/列需在这里添加。
+ *
+ * 主要能力（按职责分区）：
+ *  - 项目 CRUD：listProjects / createProject / getProject / deleteProject / updateProduct…
+ *  - 会话消息：addMessage / updateMessageStatus / recoverUnansweredMessages
+ *  - 设置与账号固定信息：getSetting / setSetting / deleteSetting / getAccountFixedInfo / setAccountFixedInfo
+ *  - Research 任务：addResearchTask / markResearchAccepted
+ *  - Automation Run：saveAutomation / recoverOrphanAutomationRuns
+ *  - Planning 状态：loadPlanningState / savePlanningState / deletePlanningState / recoverOrphanPlanningStates
+ *  - 多账号登录会话：saveSession / loadSession / listSessions / deleteSession
+ *  - Provider ID 缓存：providerIdFor / setProviderIdFor / listKnownAccounts
+ *
+ * 启动时除了建表/迁移，还会跑一次 `normaliseStoredProducts()` 把历史 project_json
+ * 重新过一遍归一化，兼容旧版本脏数据。
+ */
+
 const now = () => new Date().toISOString();
 
 // 供应商产品编号是自动录入的必填项，且 AI 被禁止写入（属于运营数据）。

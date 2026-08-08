@@ -2,6 +2,18 @@ import { api, initialInput, phaseDisplayLabel, type VbkNavSection } from "../hel
 import { APP_NAME } from "../brand";
 import type { AppState } from "../state/useAppState";
 
+/**
+ * 汇总 workspace 工作流所需的所有 action（research 核查、自动化控制、VBK 浏览器交互、登录等）。
+ * 渲染层从 useWorkflowHandlers() 拿到这些 handler 即可，不需要关心 IPC / 状态拼装细节。
+ *
+ * 现有 action 大致分类：
+ *  - 核查与确认：confirmTask / resolveVehicleTask
+ *  - 自动化控制：startAutomation / stopAutomation / retryOnePhaseAutomation
+ *  - VBK 浏览器导航：openSection / showVbkBrowser
+ *  - 多账号登录：openLogin / addNewLogin / switchAccount / forgetAccount / logoutVbk
+ *  - 路由与项目视图切换：openProductList / startCreateProduct / openStage
+ */
+
 export function useWorkflowHandlers(state: AppState) {
   const {
     project,
@@ -40,6 +52,7 @@ export function useWorkflowHandlers(state: AppState) {
     setVbkLoginAccounts,
   } = state;
 
+  /** 把运营填写的核查结果提交到 main 端，并触发一次 AI 续答以更新产品草稿。 */
   const confirmTask = async () => {
     if (!project || !activeTask) return;
     if (!verificationNote.trim()) {
@@ -68,6 +81,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 让 VBK 后端去匹配一个用车资源组；成功后刷新 readiness。 */
   const resolveVehicleTask = async () => {
     if (!project || !activeTask || resolvingVehicleTaskId) return;
     if (!isVbkLoggedIn) {
@@ -91,6 +105,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 启动自动录入；切到 vbk 阶段并打开浏览器面板。 */
   const startAutomation = async () => {
     if (!project || !readiness.ready) return;
     setStage("vbk");
@@ -106,6 +121,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 发送停止信号；当前 in-flight 阶段会自然结束后停止后续阶段。 */
   const stopAutomation = async () => {
     if (!project || !api() || stoppingAutomation) return;
     setStoppingAutomation(true);
@@ -120,6 +136,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 在右侧 VBK WebView 打开某个导航区域（基本信息 / 行程 / 价格库存 等）。 */
   const openSection = async (section: VbkNavSection) => {
     if (!project || !api() || navigatingSection || retryingPhase) return;
     const url = section.buildUrl(project.productId);
@@ -143,6 +160,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 单阶段重跑（不重启其他阶段）；常用于运营在 VBK 中调整后重新填某个阶段。 */
   const retryOnePhaseAutomation = async (sectionKey: string, phaseName: string) => {
     if (!project || !api() || navigatingSection || retryingPhase || state.automationActive) return;
     setNotice(null);
@@ -254,6 +272,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 把右侧 VBK WebView 设为可见，并刷新一次登录状态探测。 */
   const showVbkBrowser = () => {
     setStage("vbk");
     setBrowserOpen(true);
@@ -283,6 +302,7 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
+  /** 退出当前项目，回到项目列表页。 */
   const openProductList = () => {
     setProject(null);
     setView("projects");
@@ -290,6 +310,7 @@ export function useWorkflowHandlers(state: AppState) {
     setAccountMenuOpen(false);
   };
 
+  /** 进入"新建项目"对话框（项目列表页 + 表单初始值）。 */
   const startCreateProduct = () => {
     setProject(null);
     setView("projects");

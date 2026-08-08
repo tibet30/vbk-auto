@@ -1,6 +1,16 @@
 import type { AiConnectionTestInput, AiProvider, ConnectionTest } from "../../shared/contracts.js";
 import { aiModelOption, aiProviderProfile, isAiProvider } from "../../shared/contracts.js";
 
+/**
+ * AI 连接校验与 URL 安全检查。
+ *
+ * 供 settings.test、ai-models.fetchAiModelList 等调用方共享的解析/校验层：
+ *  - assertSafeAiServiceUrl：拒绝非 https URL（仅允许 127.0.0.1 / localhost / [::1] 的 http）
+ *  - resolveAiConnectionInput：合并显式传入的 apiKey 与已存储 key，构造连接测试所需参数
+ *  - successfulAiConnectionTest：构造连接成功响应（不含真实 HTTP 往返）
+ */
+
+/** 已规范化、可直接用于 HTTP 调用的 AI 连接参数。 */
 export interface ResolvedAiConnectionInput {
   provider: AiProvider;
   baseUrl: string;
@@ -30,6 +40,13 @@ export function assertSafeAiServiceUrl(value: string): URL {
   return parsed;
 }
 
+/**
+ * 合并调用方传入参数与已存储的 API Key，返回一个可直接用于 HTTP 的连接参数集。
+ *
+ * @param input 连接测试输入（provider / baseUrl / model / apiKey）
+ * @param readStoredKey 当 input.apiKey 为空时，回调读取已存储的 Key
+ * @returns 规范化后的连接参数
+ */
 export async function resolveAiConnectionInput(
   input: AiConnectionTestInput,
   readStoredKey: (provider: AiProvider) => Promise<string>,
@@ -46,6 +63,13 @@ export async function resolveAiConnectionInput(
   return { provider: input.provider, baseUrl, model, apiKey };
 }
 
+/**
+ * 构造连接成功响应。仅做字段拼装，不实际发起请求；
+ * 调用方在拿到本返回前应当已经完成一次成功的网络往返。
+ *
+ * @param input 已规范化的连接参数
+ * @returns 构造好的 ConnectionTest（含人类可读的"连接通过"消息）
+ */
 export function successfulAiConnectionTest(input: ResolvedAiConnectionInput): ConnectionTest {
   const profile = aiProviderProfile(input.provider);
   const modelLabel = aiModelOption(input.provider, input.model)?.label || input.model;

@@ -3,6 +3,23 @@ import {
   productSchema,
 } from "./schema-definitions.js";
 
+/**
+ * 自动化层产品 schema 工具。
+ *
+ * 绝大多数函数都是「从产品对象里抽出某个字段、并在 VBK 下拉里挑出对应选项」。
+ * 入口处一定要在调用 VBK 前完成基础信息（productId、basicInfoSaved 等）检查，
+ * 这些 helper 不再重复校验上游状态。
+ *
+ * 主要导出：
+ *  - parseProduct：用 zod 校验一个产品对象是否符合契约
+ *  - findBestCtripLibraryImage：从携程图片库挑选最佳封面
+ *  - resolveAdvanceBooking / shouldRefillBasicInfo / basicInfoCompletenessIssues：basic 阶段决策
+ *  - automationBlockers：列出阻止自动录入启动的卡点
+ *  - findFirstEnabledOptionIndex / findProvinceOptionIndex / findButlerOptionIndex：下拉匹配
+ *  - pickKeySpotsFromItinerary：从行程里挑"重点景点"（无 LLM 调用）
+ */
+
+/** zod 校验入口；schema 定义见 ./schema-definitions.js。 */
 export function parseProduct(input: unknown) {
   return productSchema.parse(input);
 }

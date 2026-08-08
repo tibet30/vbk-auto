@@ -1,3 +1,16 @@
+/**
+ * Electron main 进程入口。
+ *
+ * 主要职责：
+ *  - 初始化数据层（VbkDatabase）、AI 服务、VBK 嵌入式浏览器、Automation；
+ *  - 创建主窗口并绑定 IPC 路由（`registerIpc()`）；
+ *  - 项目更新后向 renderer 推送 `project:updated` 事件；
+ *  - 启动时恢复孤儿 automation run / planning state。
+ *
+ * 本文件已偏大（700+ 行）：拆分计划需与 Code Review 一起安排；本次只
+ * 补文件头与少量 IPC 分组注释。
+ */
+
 import path from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { fileURLToPath } from "node:url";

@@ -1,3 +1,19 @@
+/**
+ * 酒店档次白名单与归一化工具。
+ *
+ * 整个产品草稿、VBK 下拉匹配、酒店资源候选项筛选都引用本模块提供的
+ * 合法档次字符串。旧版误把 `当地5钻酒店/-5` 当成 5 钻，实际该 key 对应
+ * 2 钻——本模块负责在数据进入/迁出时自动纠正到 `-38`，并拒绝任何其它
+ * 非白名单值。
+ *
+ * 主要导出：
+ *  - HOTEL_TIER_VALUES / DEFAULT_HOTEL_TIER / FIVE_DIAMOND_HOTEL_TIER：合法档次枚举
+ *  - LEGACY_FIVE_DIAMOND_HOTEL_TIER：旧的 "-5" 字符串，仅用于迁移期识别
+ *  - normaliseHotelTier：把任意输入规整成白名单值
+ *  - hotelDiamondFromTier：从档次字符串中提取"钻"数字
+ *  - hotelCandidateMatchesTier：判断一个酒店资源字符串是否匹配给定档次
+ */
+
 export const HOTEL_TIER_VALUES = [
   "当地5钻酒店/-38",
   "当地4钻酒店/-4",

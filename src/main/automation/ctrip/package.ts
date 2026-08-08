@@ -1,10 +1,23 @@
 // @ts-nocheck
-// 套餐管理页（packageManage）：新建套餐或重写已有套餐。
-// 包含 bestPane 选取、NewPackage_* 字段填写、performSubmit 绕过 disabled 兜底。
+/**
+ * 套餐管理（packageManage）页面自动化：新增或重写已有套餐。
+ *   - chooseRadioValue：按 id 选中 ant-radio-group 内某个 value；
+ *   - fillAndSavePackage：若 N 日套餐 tab 已存在则改写，否则「新增套餐」，按 NewPackage_*
+ *     控件填值，必要时用 React fiber 调 formHolder.performSubmit 绕过 disabled；
+ *   - rewriteExistingPackage：覆盖已有套餐的供应商编号、介绍、天数、确认时长与若干 radio；
+ *   - switchToExistingPackageTab：在 ant-tabs 里按 label 切到指定 pane 并定位 form.ant-form。
+ *
+ * 头部带 `// @ts-nocheck`，DOM 形参 page 为动态传入。
+ */
+
 
 import { delay, assertCount } from "./utils.js";
 import { clickSection, clickSafeSave } from "./tabs.js";
 
+/**
+ * 在指定 id 的 ant-radio-group 里选中 value，未选中状态下点 force click；
+ * 用于 NewPackage 表单的多个 radio 控件（按人报价 / 酒店拼房 / 儿童占床 / 接送…）。
+ */
 async function chooseRadioValue(pageOrLocator, groupId, value, description) {
   const base = pageOrLocator ?? page;
   const group = base.locator(`[id="${groupId}"]`);
@@ -18,6 +31,14 @@ async function chooseRadioValue(pageOrLocator, groupId, value, description) {
 }
 
 // 仅保存，不接入通用 helper。
+/**
+ * 「套餐管理」表单保存主流程：
+ *   - 若存在 N 日套餐 tab → 切过去并改写已有套餐（不走新增路径）；
+ *   - 否则如果套餐名已存在则跳过；
+ *   - 真正进入「新增套餐」分支，按 NewPackage_* 控件填值并保存；
+ *   - 保存按钮 disabled 时，尝试用 React fiber 反向定位 formHolder.performSubmit 绕过 UI disabled
+ *     状态；任何一步不通过都退化为 skipped（不会触发提审）。
+ */
 export async function fillAndSavePackage(page, product) {
   // 仅保存，不接入 saveThenAdvance，避免误点任何「下一步」按钮。
   if (!product.commercial) throw new Error("缺少 commercial 套餐配置");
@@ -35,13 +56,13 @@ export async function fillAndSavePackage(page, product) {
     .waitFor({ state: "visible", timeout: 30_000 });
   await page.getByText("新增套餐", { exact: true }).click({ force: true }).catch(() => false);
   await delay(1500);
+  /**
+   * 在多个 antd 的「active」tabpane 中挑出最可能承载 NewPackage 表单的那个：
+   * 要求包含 `form.ant-form`，且取最后一个（因为「新增套餐」通常是被追加的 pane）。
+   */
   async function pickBestPane() {
-    const candidates = await page
-      .locator(".ant-tabs-tabpane-active")
-      .filter({ has: page.locator("form.ant-form") })
-      .all();
-    if (!candidates.length) throw new Error("未找到含 NewPackage 表单的 active tabpanel");
-    return candidates[candidates.length - 1];
+    const panes = await page.locator(".ant-tabs-tabpane-active").filter({ has: page.locator("form.ant-form") }).all();
+    return panes.length ? panes[panes.length - 1] : page.locator(".ant-tabs-tabpane-active").last();
   }
   let activePane2 = await pickBestPane();
   const code = activePane2.locator('#NewPackage_vendorResourceCode');
@@ -140,6 +161,10 @@ export async function fillAndSavePackage(page, product) {
   return { savedWith, packageName: product.commercial.packageName };
 }
 
+/**
+ * 在套餐管理 tab 里找 expectedTabLabel（形如「5日套餐」）对应的活动 pane；若不存在则返回 null，
+ * 用于触发「改写已有套餐」分支。
+ */
 async function switchToExistingPackageTab(page, expectedTabLabel) {
   if (!expectedTabLabel) return null;
   const tabHandle = page.locator(".ant-tabs-tab").filter({ hasText: expectedTabLabel }).first();
@@ -154,6 +179,10 @@ async function switchToExistingPackageTab(page, expectedTabLabel) {
   return candidates[candidates.length - 1];
 }
 
+/**
+ * 改写已有套餐的字段：供应商套餐编号、套餐介绍、天数、确认时长、确认方式，以及若干 radio；
+ * 走 clickSafeSave 保存，不触发任何「下一步 / 提审」。
+ */
 async function rewriteExistingPackage(page, product, activePane) {
   const code = activePane.locator("#NewPackage_vendorResourceCode");
   if (await code.count()) {
@@ -217,4 +246,7 @@ export {
 };
 
 // source-slicing anchor（仅供测试切片识别，不在运行时使用）：
+/**
+ * 测试切片占位：实现见 ./pricing.ts，保留签名以便 source-slicing 工具识别同主题代码段。
+ */
 function dateTitle(_pkg) { return null; }

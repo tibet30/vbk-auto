@@ -180,10 +180,3 @@ export async function ensureCheckboxChecked(checkbox) {
     await checkbox.click({ force: true });
   }
 }
-
-export async function ensureCheckboxChecked(checkbox) {
-  const parentClass = (await checkbox.locator("xpath=..").getAttribute("class")) ?? "";
-  if (!parentClass.includes("ant-checkbox-checked")) {
-    await checkbox.click({ force: true });
-  }
-}

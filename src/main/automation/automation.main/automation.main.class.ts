@@ -1,3 +1,14 @@
+/**
+ * DraftAutomation：自动化阶段对外暴露的统一门面类。
+ *   - start / stop / retryPhase / retryOnePhase：业务侧 API；
+ *   - debugRunStep / debugSnapshot / debugHitBreakpoints / debugResume / debugListBreakpoints：
+ *     调试入口；
+ *   - running / cancellationRequested：互斥与取消状态字段；
+ *   - runLocked / runOnePhaseLocked：私有互斥包装，避免同一项目并发跑两轮。
+ *
+ * 调用方（IPC handler）只需要 new DraftAutomation(...) 即可获得 dashboard 需要的全部方法。
+ */
+
 import { AutomationRunContext } from "./automation.main.context.js";
 import { runAutomation as runAutomationFlow } from "./automation.main.run.js";
 import { runOnePhase as runOnePhaseFlow } from "./automation.main.run-one.js";
@@ -18,6 +29,11 @@ import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, reso
  * 取消路径；保留 export 以供 handler 未来需要主动取消（例如在页面
  * 检测到 VBK 上下线后）抛出。
  */
+/**
+ * DraftAutomation 主页面：
+ *   - 持有 db / browser / onUpdate / advisor / disambiguator 等依赖；
+ *   - 持有 running + cancellationRequested 两个 Sets 防并发 / 支持取消。
+ */
 export class DraftAutomation {
   private running = new Set<string>();
   // 用户主动中止的 projectId：runner 在阶段之间和 attempt 之间检查这个集合。
@@ -32,7 +48,11 @@ export class DraftAutomation {
     private disambiguator?: (req: { kind: "province" | "city" | "spot" | "station"; desired: string; candidates: Array<{ id?: string; text: string }>; product: Record<string, unknown> }) => Promise<{ pickedText: string | null; reasoning: string }>,
   ) {}
 
-  async start(projectId: string) {
+/**
+ * 启动一次完整跑（basic → preflight）；
+ * 直接转发到 runLocked。
+ */
+async start(projectId: string) {
     return this.runLocked(projectId);
   }
 
@@ -69,13 +89,17 @@ export class DraftAutomation {
     this.emit(projectId);
   }
 
-  /** 仅供测试使用：查询项目是否被标记为取消。 */
-  isCancelRequested(projectId: string): boolean {
+/**
+ * 仅供测试使用：查询项目是否被标记为取消。
+ */
+isCancelRequested(projectId: string): boolean {
     return this.cancellationRequested.has(projectId);
   }
 
-  /** 调试入口：按名字调一个具名 ctrip 步骤，返回 JSON 可序列化结果。 */
-  async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
+/**
+ * 调试入口：按名字调一个具名 ctrip 步骤，返回 JSON 可序列化结果。
+ */
+async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
     return debugRunStep({
       db: this.db,
       browser: this.browser,
@@ -115,10 +139,11 @@ export class DraftAutomation {
     return this.runLocked(projectId, requested);
   }
 
-  /**
-   * 「重新执行」按钮：单阶段重跑一个阶段、用于 review 执行效果。
-   */
-  async retryOnePhase(projectId: string, phase: string) {
+/**
+ * 「重新执行」按钮：单阶段重跑一个阶段、用于 review 执行效果。
+ * 要求 productId 已存在且项目不在 running，否则抛错。
+ */
+async retryOnePhase(projectId: string, phase: string) {
     const requested = typeof phase === "string" ? phase.trim() : "";
     if (!requested) throw new Error("请选择要重新执行的阶段。");
     if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
@@ -155,7 +180,10 @@ export class DraftAutomation {
     return runOnePhaseFlow(this.runContext(), projectId, phaseName);
   }
 
-  private async runLocked(projectId: string, retryFrom?: string) {
+/**
+ * 完整跑互斥包装：避免同一 projectId 并发 + 重入前清 stale 取消信号。
+ */
+private async runLocked(projectId: string, retryFrom?: string) {
     if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
     this.running.add(projectId);
 
@@ -170,7 +198,10 @@ export class DraftAutomation {
     }
   }
 
-  private async runOnePhaseLocked(projectId: string, phaseName: string) {
+/**
+ * 单阶段重跑互斥包装：与 runLocked 同型，仅不依赖 retryFrom，多清一次 cancellationRequested。
+ */
+private async runOnePhaseLocked(projectId: string, phaseName: string) {
     if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
     this.running.add(projectId);
     this.cancellationRequested.delete(projectId);

@@ -29,6 +29,8 @@ interface ReviewSummaryProps {
   activeTask: ResearchTask | undefined;
   verificationNote: string;
   setVerificationNote: (value: string) => void;
+  setComposerInput?: (value: string) => void;
+  planningRecovery?: { status: string; currentStageLabel?: string; completed?: string[]; allStagesCompleted?: boolean } | null;
   setActiveTask: (id: string | null) => void;
   expandedDayIndex: number | null;
   setExpandedDayIndex: (value: number | null) => void;
@@ -72,6 +74,8 @@ export function AppWorkspaceReviewSummary({
   activeTask,
   verificationNote,
   setVerificationNote,
+  setComposerInput,
+  planningRecovery,
   setActiveTask,
   expandedDayIndex,
   setExpandedDayIndex,
@@ -138,7 +142,10 @@ export function AppWorkspaceReviewSummary({
   // 注意：project.product 在创建时就有 sales/basicInfo/operations 预填字段，
   // 不能用 Object.keys().length === 0 判断，必须用 itinerary 长度。
   const isProductEmpty = !project.product || !Array.isArray((project.product as Record<string, unknown>).itinerary) || ((project.product as Record<string, unknown>).itinerary as unknown[]).length === 0;
-  const isGenerating = loading && isProductEmpty;
+  const planningGenerating = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
+  const planningPartial = planningRecovery?.status === "completed" && planningRecovery.allStagesCompleted === false;
+  const isGenerating = planningGenerating || (loading && isProductEmpty);
+  const showPartialGeneration = (planningGenerating || planningPartial) && !isProductEmpty;
   const showTaskFooter = viewMode === "cards" && !isGenerating;
   const showTaskHint = viewMode === "cards" && !isGenerating;
 
@@ -202,17 +209,17 @@ export function AppWorkspaceReviewSummary({
               <small className={styles.heroSpec}>{spec}</small>
             </div>
             <div className={styles.heroProgressBlock}>
-              <div className={styles.heroProgressValue}>
-                <strong>{isGenerating ? "—" : `${readiness.completion}%`}</strong>
-                <small>{isGenerating ? "生成中" : "就绪度"}</small>
+            <div className={styles.heroProgressValue}>
+                <strong>{planningGenerating || planningPartial ? `${planningRecovery?.completed?.length ?? 0}/7` : isGenerating ? "—" : `${readiness.completion}%`}</strong>
+                <small>{planningGenerating || planningPartial ? "生成进度" : isGenerating ? "生成中" : "就绪度"}</small>
               </div>
               <div className={styles.heroProgressTrack}>
-                <span className={styles.heroProgressFill} style={{ width: isGenerating ? "0%" : `${Math.min(100, Math.max(0, readiness.completion))}%` }} />
+                <span className={styles.heroProgressFill} style={{ width: planningGenerating || planningPartial ? `${Math.min(100, ((planningRecovery?.completed?.length ?? 0) / 7) * 100)}%` : isGenerating ? "0%" : `${Math.min(100, Math.max(0, readiness.completion))}%` }} />
               </div>
             </div>
           </section>
 
-          {isGenerating ? (
+          {isGenerating && !showPartialGeneration ? (
             <div className={styles.generatingPane} role="status" aria-live="polite">
               <div className={styles.generatingHero}>
                 <span className={styles.generatingSpinner} aria-hidden="true">
@@ -250,6 +257,7 @@ export function AppWorkspaceReviewSummary({
             </div>
           ) : (
             <div className={styles.scroll}>
+              {showPartialGeneration && <div className={styles.generatingPane} role="status" aria-live="polite"><strong className={styles.generatingTitle}>{planningPartial ? "方案已生成部分结果，等待继续规划" : `AI 正在生成：${planningRecovery?.currentStageLabel ?? "当前阶段"}`}</strong><small className={styles.generatingHint}>已完成 {planningRecovery?.completed?.length ?? 0}/7 个阶段，已生成内容会逐步显示。</small></div>}
               <AppWorkspaceReviewSummaryItinerary
                 days={itinerary}
                 expandedDayIndex={expandedDayIndex}
@@ -261,9 +269,9 @@ export function AppWorkspaceReviewSummary({
               {(readiness.issues.length > 0 || taskList.some(t => !/confirmed|resolved/.test(t.state))) && (
                 <section className={styles.collapsible} aria-label="统一待处理事项">
                   <div className={styles.collapsibleHead}><strong className={styles.collapsibleTitle}>待处理事项</strong></div>
-                  <div className={styles.collapsibleBody}><ul className={styles.issueList}>
-                    {readiness.issues.map((issue, index) => <li key={`issue-${issue.label}`} className={styles.issueItem}><span className={styles.issueIndex}>{index + 1}</span><span className={styles.issueBody}><strong className={styles.issueLabel}>{issue.label}</strong><span className={styles.issueGuidance}>{issue.detail}</span></span><button type="button" onClick={() => setVerificationNote(`请补齐待处理项：${issue.label}。${issue.detail}`)}>处理</button></li>)}
-                    {taskList.filter(t => !/confirmed|resolved/.test(t.state)).map((task, index) => <li key={`task-${task.type}-${task.label}`} className={styles.issueItem}><span className={styles.issueIndex}>{readiness.issues.length + index + 1}</span><span className={styles.issueBody}><strong className={styles.issueLabel}>{task.label}</strong><span className={styles.issueGuidance}>{task.detail || "请补充核查信息"}</span></span><button type="button" onClick={() => setVerificationNote(`请核查并处理：${task.label}。完成后说明结果，不要自动提交。`)}>处理</button></li>)}
+                  <div className={styles.collapsibleBody} style={{ maxHeight: 280, overflowY: "auto", minHeight: 0 }}><ul className={styles.issueList} style={{ display: "grid", gap: 6 }}>
+                    {readiness.issues.map((issue, index) => <li key={`issue-${issue.label}`} className={styles.issueItem} style={{ display: "grid", gridTemplateColumns: "20px minmax(0,1fr) auto", alignItems: "center", gap: 8 }}><span className={styles.issueIndex}>{index + 1}</span><span className={styles.issueBody}><strong className={styles.issueLabel}>{issue.label}</strong><span className={styles.issueGuidance}>{issue.detail}</span></span><button type="button" style={{ whiteSpace: "nowrap", flexShrink: 0 }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); (setComposerInput ?? setVerificationNote)(`请补齐待处理项：${issue.label}。${issue.detail}`); }}>处理</button></li>)}
+                    {taskList.filter(t => !/confirmed|resolved/.test(t.state)).map((task, index) => <li key={`task-${task.type}-${task.label}`} className={styles.issueItem} style={{ display: "grid", gridTemplateColumns: "20px minmax(0,1fr) 48px", alignItems: "center", gap: 8, minWidth: 0 }}><span className={styles.issueIndex}>{readiness.issues.length + index + 1}</span><span className={styles.issueBody} style={{ minWidth: 0, overflow: "hidden" }}><strong className={styles.issueLabel}>{task.label}</strong><span className={styles.issueGuidance} style={{ overflowWrap: "anywhere" }}>{task.detail || "请补充核查信息"}</span></span><button type="button" style={{ width: 48, whiteSpace: "nowrap" }} onClick={(event) => { event.preventDefault(); event.stopPropagation(); (setComposerInput ?? setVerificationNote)(`请核查并处理：${task.label}。完成后说明结果，不要自动提交。`); }}>处理</button></li>)}
                   </ul></div>
                 </section>
               )}
@@ -295,7 +303,7 @@ export function AppWorkspaceReviewSummary({
                             <strong className={styles.issueLabel}>{issue.label}</strong>
                             <span className={styles.issueGuidance}>{issueText(issue)}</span>
                           </span>
-                          <button type="button" onClick={() => setVerificationNote(`请补齐待处理项：${issue.label}。${issue.detail}`)}>处理</button>
+                          <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); (setComposerInput ?? setVerificationNote)(`请补齐待处理项：${issue.label}。${issue.detail}`); }}>处理</button>
                         </li>
                       ))}
                     </ul>
@@ -328,7 +336,6 @@ export function AppWorkspaceReviewSummary({
                         const done = task.state === "confirmed" || task.state === "resolved";
                         return (
                           <li key={task.id}>
-                            {!done && <button type="button" onClick={() => setVerificationNote(`请核查并处理：${task.label}。完成后说明结果，不要自动提交。`)}>处理</button>}
                             <button
                               type="button"
                               className={styles.taskRow}

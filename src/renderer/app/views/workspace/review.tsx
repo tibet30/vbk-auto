@@ -44,10 +44,18 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   if (!project) return null;
 
   const taskList = project.researchTasks ?? [];
-  const canSend = input.trim().length > 0 && !loading;
+  const planningActive = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
+  const planningPartial = planningRecovery?.status === "completed" && !planningRecovery.allStagesCompleted;
+  const planningResumable = planningRecovery?.status === "needs_user"
+    || planningRecovery?.status === "failed"
+    || planningPartial;
+  const canSend = input.trim().length > 0 && !loading && !planningActive;
 
   const handleSend = () => {
-    if (!project || loading || !input.trim()) return;
+    if (!project || loading || planningActive || !input.trim()) {
+      if (planningActive) setNotice("方案正在分阶段生成中，请完成后再继续对话。");
+      return;
+    }
     send();
     setBrowserUrl("");
     setBrowserOpen(true);
@@ -58,7 +66,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
       setNotice("当前未选中项目，请先打开项目后重试。");
       return;
     }
-    if (loading) {
+    if (loading || planningActive) {
       setNotice("AI 正在生成中，请稍后再点击“重新发送该条问题”。");
       return;
     }
@@ -122,7 +130,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
           </span>
         </div>
         <div className={chat.conversation} ref={browserRef} role="log" aria-live="polite">
-          {planningRecovery && (planningRecovery.status === "needs_user" || planningRecovery.status === "failed" || planningRecovery.status === "running") && (
+          {planningRecovery && (planningRecovery.status === "needs_user" || planningRecovery.status === "failed" || planningRecovery.status === "running" || planningRecovery.status === "pending" || planningPartial) && (
             <article
               className={chat.recoveryStrip}
               data-status={planningRecovery.status}
@@ -130,10 +138,10 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
             >
               <header className={chat.recoveryHead}>
                 <span className={chat.recoveryIcon}>
-                  {planningRecovery.status === "running" ? <LoaderCircle size={14} /> : <RotateCcw size={14} />}
+                  {planningRecovery.status === "running" || planningRecovery.status === "pending" ? <LoaderCircle size={14} /> : <RotateCcw size={14} />}
                 </span>
                 <strong className={chat.recoveryHeadline}>{planningRecovery.headline}</strong>
-                {planningRecovery.status !== "running" && (
+                {planningResumable && (
                   <button
                     className={`${shared.btn} ${shared.btnSm}`}
                     type="button"
@@ -147,6 +155,39 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
                   </button>
                 )}
               </header>
+              {(planningRecovery.status === "running" || planningRecovery.status === "pending" || planningPartial) && planningRecovery.currentStageLabel && (
+                <p className={chat.recoveryCurrentStage}>
+                  当前阶段：<strong>{planningRecovery.currentStageLabel}</strong>
+                </p>
+              )}
+              {(planningRecovery.status === "running" || planningRecovery.status === "pending" || planningPartial) && planningRecovery.stageProgress && planningRecovery.stageProgress.length > 0 && (
+                <ol className={chat.recoveryStageList} aria-label="规划阶段进度">
+                  {planningRecovery.stageProgress.map((entry: { stage: string; label: string; state: "completed" | "current" | "pending" }) => {
+                    // 用户可见的状态文案：内部数据用 completed / current / pending 三档，
+                    // 渲染时翻译成「已完成 / 进行中 / 待开始」三档之一。色弱/灰度模式下也能
+                    // 区分，必须显式说出口，不能仅靠颜色暗示。
+                    const phaseStateText = entry.state === "completed"
+                      ? "已完成"
+                      : entry.state === "current"
+                        ? "进行中"
+                        : "待开始";
+                    return (
+                      <li
+                        key={entry.stage}
+                        className={chat.recoveryStageItem}
+                        data-state={entry.state}
+                        aria-label={`${entry.label}：${phaseStateText}`}
+                      >
+                        <span className={chat.recoveryStageDot} aria-hidden="true" />
+                        {/* entry.label 是中文短标签（如「产品骨架」）；entry.stage 是内部 ID（如 skeleton），
+                            绝不作为可见主标签出现，避免泄漏 dev-only 枚举字符串。 */}
+                        <span className={chat.recoveryStageLabel}>{entry.label}</span>
+                        <span className={chat.recoveryStageState}>{phaseStateText}</span>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
               <p className={chat.recoveryHint}>{planningRecovery.hint}</p>
               <div className={chat.recoveryChips}>
                 {planningRecovery.accepted.length > 0 && (
@@ -242,6 +283,8 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         activeTask={activeTask}
         verificationNote={verificationNote}
         setVerificationNote={setVerificationNote}
+        setComposerInput={setInput}
+        planningRecovery={planningRecovery}
         setActiveTask={setActiveTaskId}
         expandedDayIndex={expandedDayIndex}
         setExpandedDayIndex={setExpandedDayIndex}

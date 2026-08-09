@@ -97,6 +97,7 @@ export interface VbkApi {
      */
     forgetAccount(accountKey: string): Promise<void>;
     suggestPoi(keyword: string): Promise<{ poiName: string; poiId: string } | null>;
+    suggestPoiDemo(keyword: string): Promise<unknown>;
   };
   automation: {
     start(projectId: string): Promise<void>;
@@ -159,7 +160,11 @@ export interface VbkApi {
     save(input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }): Promise<Settings>;
     test(input: AiConnectionTestInput): Promise<ConnectionTest>;
   };
-  events: { onProjectUpdated(listener: (project: ProjectDetail) => void): () => void };
+  events: {
+    onProjectUpdated(listener: (project: ProjectDetail) => void): () => void;
+    /** 主进程成功持久化规划状态后推送；订阅者必须按 projectId 过滤。 */
+    onPlanningStateUpdated(listener: (projectId: string, state: PlanningGenerationState) => void): () => void;
+  };
   operationLog: {
     load(query?: OperationLogQuery): Promise<OperationLogPage>;
   };

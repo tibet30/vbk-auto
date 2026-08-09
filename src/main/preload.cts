@@ -6,7 +6,7 @@
  *   - 命名空间按业务域（projects / ai / research / browser / automation / debug /
  *     accounts / settings / contacts / events / operationLog / planning）分组；
  *   - 每个方法都是一段一行 ipcRenderer.invoke，args 顺序与主进程 handle 保持一致；
- *   - events.onProjectUpdated 返回取消订阅函数，避免 renderer 误重复注册；
+ *   - events 的订阅均返回取消订阅函数，避免 renderer 误重复注册；
  *   - 不同 IPC 边界异常穿透：主进程负责 try/catch 与本地化文案，preload 不做额外包装。
  */
 
@@ -40,6 +40,7 @@ const api: VbkApi = {
     switchAccount: (accountKey) => ipcRenderer.invoke("browser:switchAccount", accountKey),
     forgetAccount: (accountKey) => ipcRenderer.invoke("browser:forgetAccount", accountKey),
     suggestPoi: (keyword: string) => ipcRenderer.invoke("poi:suggest", keyword),
+    suggestPoiDemo: (keyword: string) => ipcRenderer.invoke("poi:suggestDemo", keyword),
   },
   automation: {
     start: (projectId) => ipcRenderer.invoke("automation:start", projectId),
@@ -67,7 +68,10 @@ const api: VbkApi = {
   },
   settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input) },
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword), suggestPoi: (keyword) => ipcRenderer.invoke("contacts:suggestPoi", keyword) },
-  events: { onProjectUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, project: unknown) => listener(project as never); ipcRenderer.on("project:updated", handler); return () => ipcRenderer.removeListener("project:updated", handler); } },
+  events: {
+    onProjectUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, project: unknown) => listener(project as never); ipcRenderer.on("project:updated", handler); return () => ipcRenderer.removeListener("project:updated", handler); },
+    onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, projectId: unknown, state: unknown) => listener(projectId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
+  },
   operationLog: { load: (query) => ipcRenderer.invoke("operationLog:load", query) },
   planning: {
     start: (projectId) => ipcRenderer.invoke("planning:start", projectId),

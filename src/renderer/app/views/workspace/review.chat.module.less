@@ -192,6 +192,107 @@
   margin-top: 2px;
 }
 
+/* 运行中阶段进度：按 PLANNING_STAGES 顺序铺开，completed / current / pending 各一色 */
+.recoveryCurrentStage {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.55;
+}
+
+.recoveryCurrentStage strong {
+  color: var(--ai-teal);
+  font-weight: 600;
+  margin-left: 2px;
+}
+
+.recoveryStageList {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.recoveryStageItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+
+.recoveryStageItem[data-state='completed'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 30%, var(--border));
+  color: var(--ai-teal);
+}
+
+.recoveryStageItem[data-state='current'] {
+  border-color: color-mix(in srgb, var(--ai-teal) 38%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 12%, var(--surface));
+  color: var(--ai-teal);
+  font-weight: 600;
+}
+
+.recoveryStageItem[data-state='pending'] {
+  opacity: 0.55;
+}
+
+.recoveryStageDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.recoveryStageItem[data-state='current'] .recoveryStageDot {
+  animation: pulseDot 1.2s ease-in-out infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recoveryStageItem[data-state='current'] .recoveryStageDot {
+    animation: none;
+  }
+}
+
+/* 阶段状态中文标签：保留 「已完成 / 进行中 / 待开始」语义，即使色弱/灰度模式
+   下也能区分三档。同时承担「内部 stage id 不上床」的可读性责任：保证 stage id
+   永远只用于 React key，UI 上用户看到的只有中文 label + 中文状态。 */
+.recoveryStageState {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  opacity: 0.85;
+  /* 与 stage label 之间加一个小间隔，避免两段中文粘连 */
+  padding-left: 4px;
+  border-left: 1px solid color-mix(in srgb, currentColor 28%, transparent);
+  margin-left: 2px;
+}
+
+.recoveryStageItem[data-state='completed'] .recoveryStageState {
+  opacity: 0.75;
+}
+
+.recoveryStageItem[data-state='current'] .recoveryStageState {
+  font-weight: 700;
+}
+
+.recoveryStageItem[data-state='pending'] .recoveryStageState {
+  opacity: 0.6;
+}
+
 .recoveryChipGroup {
   display: inline-flex;
   flex-wrap: wrap;

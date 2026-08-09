@@ -21,7 +21,7 @@ export interface ItineraryActivity {
 export interface ItineraryDay {
   day?: number;
   title?: string;
-  spots?: string[];
+  spots?: Array<{ name: string; poiName?: string | null; poiId?: string | null }>;
   description?: string;
   hotel?: string;
   hotelDescription?: string;
@@ -71,11 +71,12 @@ function buildTimeline(day: ItineraryDay): TimelineItem[] {
   // spots 未在 activities 里出现的，追加到末尾作为未排时间的景点。
   const usedTitles = new Set(activityItems.map((a) => a.title.trim()));
   const spotItems: TimelineItem[] = spots
-    .filter((spot) => !usedTitles.has(spot.trim()))
+    .filter((spot) => !usedTitles.has(spot.name.trim()))
     .map< TimelineItem>((spot, idx) => ({
       key: `spot-${idx}`,
       time: "",
-      title: spot,
+      title: spot.name,
+      detail: spot.poiName && spot.poiId ? `已匹配：${spot.poiName}（${spot.poiId}）` : "待核查 POI",
       type: "visit",
     }));
 

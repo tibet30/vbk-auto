@@ -1,11 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   activeAdvisorHint,
+  buildPlanningStageProgress,
   initialStageFor,
+  planningStageLabel,
   recoveryNeedsUser,
   statusState,
   vbkStageStatusText,
 } from "../helpers";
+import { PLANNING_STAGES } from "../../../shared/contracts-planning.js";
 import { api } from "../helpers";
 import { hasActiveAiKey } from "../../../shared/ai-provider-config.js";
 import type { AppStateBase } from "./base";
@@ -59,6 +62,11 @@ export function useAppStateDerived(state: AppStateBase) {
   const [planningStateLoadedProjectId, setPlanningStateLoadedProjectId] = useState<string | null>(null);
   // 用于 planning.state() 异步回调内做项目 id 比对，避免切换项目后旧响应污染当前项目。
   const currentProjectIdRefForPlanning = useRef<string | null>(null);
+  // 首次 planning.state 补偿是异步的：若它返回前已收到 planning:updated，旧查询
+  // 结果不得反向覆盖实时状态。每个已接受的当前项目事件都递增该版本号。
+  const planningEventVersionRef = useRef(0);
+  // 此 ref 同时供首次补偿与实时事件使用；项目切换后迟到的状态事件不能污染新项目。
+  currentProjectIdRefForPlanning.current = project?.id ?? null;
 
   const browserShouldMount = view === "workspace" && (stage === "vbk" || loginPanelOpen) && Boolean(project || loginPanelOpen);
 
@@ -73,10 +81,17 @@ export function useAppStateDerived(state: AppStateBase) {
       void updateReadiness(next);
       setProjects((prev) => upsertProjectToTop(prev, next));
     });
+    const unsubscribePlanning = api()!.events.onPlanningStateUpdated((projectId, next) => {
+      if (currentProjectIdRefForPlanning.current !== projectId) return;
+      planningEventVersionRef.current += 1;
+      setPlanningState(next);
+      setPlanningStateLoadedProjectId(projectId);
+    });
 
     return () => {
       window.clearTimeout(retryLoginCheck);
       unsubscribe();
+      unsubscribePlanning();
     };
   }, []);
 
@@ -193,7 +208,20 @@ export function useAppStateDerived(state: AppStateBase) {
     })) return;
     setAutoStartUsed(project.id);
     console.info("[App] auto-planning fallback for empty project", { projectId: project.id, provider: settings?.aiProvider });
-    void api()!.planning.start(project.id).then((result) => {
+    const capturedProjectId = project.id;
+    let cancelled = false;
+    // planning.start IPC 会同步等待整轮 AI；先放入本地 pending，让 UI 立刻显示
+    // 0/7；后续持久化状态会由 planning:updated 事件直接推送。
+    setPlanningState({
+      projectId: capturedProjectId,
+      currentStage: "skeleton",
+      completedStages: [],
+      stages: [],
+      status: "pending",
+      resumeAt: new Date().toISOString(),
+    });
+    void api()!.planning.start(capturedProjectId).then((result) => {
+      if (cancelled || currentProjectIdRefForPlanning.current !== capturedProjectId) return;
       if (result.state) setPlanningState(result.state);
       if (result.status === "failed") {
         // preflight 失败（例如 safeStorage 不可用）→ IPC 也会返回 normal PlanningRunResult；
@@ -202,35 +230,57 @@ export function useAppStateDerived(state: AppStateBase) {
         setNotice(result.assistantReply || "方案规划未能启动，请检查 API Key 后重试。");
       }
     }).catch((error) => {
+      if (cancelled || currentProjectIdRefForPlanning.current !== capturedProjectId) return;
       console.warn("[App] planning.start failed", error);
       setNotice(`方案规划异常：${(error as { message?: string })?.message ?? String(error)}`);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [project?.id, settings?.aiProvider, settings?.hasMiniMaxKey, settings?.hasDeepSeekKey, planningState, planningStateLoadedProjectId, autoStartUsed]);
 
   // 拉取当前项目的持久化规划状态，供 UI 显示「实际接受 / 缺失」以及续跑按钮。
   // 行为契约：
-  //  - 调用时把 projectId 写入 ref，回调里比对；项目切换后旧响应不会污染当前项目。
-  //  - 无论结果是 state 还是 undefined，都把 sentinel 标记为当前 projectId，让
+  //  - (A) lookup effect 只在 project?.id 变化时跑一次，做 sentinel
+  //    推进；把 projectId 写入 ref，回调里比对；项目切换后旧响应不会污染当前项目。
+  //    无论结果是 state 还是 undefined，都把 sentinel 标记为当前 projectId，让
   //    auto-start effect 在 lookup 完成后才决定是否起跑（undefined → 允许一次起跑）。
+  //    lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错
+  //    时抢跑（lookup 失败通常意味着项目状态未知，不应擅自再生成）。
+  //  - (B) 后续状态由 planning:updated 实时事件驱动，不建立 interval；新 renderer
+  //    进程或项目切换时由这一次 lookup 补偿订阅建立前可能错过的事件。
   useEffect(() => {
     if (!project || !api()) return;
     const capturedId = project.id;
     currentProjectIdRefForPlanning.current = capturedId;
-    void api()!.planning.state(capturedId).then((s) => {
+    const eventVersionAtLookup = planningEventVersionRef.current;
+    let cancelled = false;
+
+    // lookup 只跑一次：写本地 cache + 推进 sentinel；后续变化由实时事件到达。
+    api()!.planning.state(capturedId).then((s) => {
       // 切换项目后旧响应必须丢弃：用 ref 比对当前 projectId。
       if (currentProjectIdRefForPlanning.current !== capturedId) return;
+      if (cancelled) return;
+      // lookup 在实时事件之后才返回时，事件携带的状态更新，不能被旧快照覆盖。
+      if (planningEventVersionRef.current !== eventVersionAtLookup) return;
       if (s) setPlanningState(s);
       // 注意：s === undefined 时也要标记为 loaded，这样 auto-start 才能在新项目里起跑。
       setPlanningStateLoadedProjectId(capturedId);
     }).catch((error) => {
       if (currentProjectIdRefForPlanning.current !== capturedId) return;
+      if (cancelled) return;
+      if (planningEventVersionRef.current !== eventVersionAtLookup) return;
       // lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错时抢跑
-      // （lookup 失败通常意味着项目状态未知，不应擅自再生成）。把 sentinel 推进，下一次
-      // project.updatedAt 触发 effect 时会重新尝试。
+      // （lookup 失败通常意味着项目状态未知，不应擅自再生成）。把 sentinel 推进；
+      // 下次重新打开该项目会再次执行一次补偿 lookup。
       console.warn("[App] planning.state lookup failed", { projectId: capturedId, error });
       setPlanningStateLoadedProjectId(capturedId);
     });
-  }, [project?.id, project?.updatedAt]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id]);
 
   useEffect(() => {
     const conversation = conversationRef.current;
@@ -338,9 +388,9 @@ export function useAppStateDerived(state: AppStateBase) {
     : "登录后先核查当前待办；系统只会在你确认全部待办后保存产品草稿。";
 
   // 规划状态摘要：把规划生成态压缩成「恢复提示 + 实际接受 / 缺失模块」两行。
+  // 运行中状态还会附上按 PLANNING_STAGES 顺序的阶段进度，供渲染层展示带顺序的进度条。
   const planningRecovery = useMemo(() => {
     if (!planningState) return null;
-    if (planningState.status === "completed") return null;
     const stages = planningState.stages ?? [];
     const accepted: string[] = [];
     const missing: string[] = [];
@@ -354,22 +404,42 @@ export function useAppStateDerived(state: AppStateBase) {
     }
     const completed = planningState.completedStages ?? [];
     const status = planningState.status;
+    const allStagesCompleted = PLANNING_STAGES.every((stage) => completed.includes(stage));
+    // 后端 terminal 状态可能先于阶段结果落盘；只有七个阶段全部覆盖时，
+    // 才允许前端把它当作整体完成并隐藏生成进度。
+    if (status === "completed" && allStagesCompleted) return null;
     let headline = "方案规划未完成。";
     if (status === "running") headline = "方案规划进行中…";
+    else if (status === "pending") headline = "方案规划即将开始…";
     else if (status === "failed") headline = "方案规划失败，需要重试。";
     else if (status === "needs_user") headline = "方案规划已暂停，等待补充缺失模块。";
+    else if (status === "completed") headline = "方案已生成部分结果，等待继续规划。";
+    // 运行中状态额外暴露阶段进度：顺序为 PLANNING_STAGES（共享合约），渲染层负责
+    // 把 completed / current / pending 分别贴不同样式与中文标签。
+    const stageProgress = status === "running" || status === "pending" || (status === "completed" && !allStagesCompleted)
+      ? buildPlanningStageProgress(planningState, PLANNING_STAGES)
+      : null;
+    const currentStageLabel = planningStageLabel(planningState.currentStage);
     return {
       status,
       headline,
       completed,
       accepted,
       missing,
+      currentStage: planningState.currentStage,
+      currentStageLabel,
+      stageProgress,
       // 简短的「可以续跑 / 已完成 / 需要补齐」三态。
+      allStagesCompleted,
       hint: status === "needs_user"
         ? "已自动跳过已接受模块；点击「继续规划」补齐缺失项。"
         : status === "failed"
           ? "请检查 API Key 后点击「重试规划」。"
-          : "系统正在分阶段生成方案，完成后会自动跳回产品面板。",
+          : status === "pending"
+            ? "系统正在准备下一阶段，完成后会自动跳回产品面板。"
+            : status === "completed"
+              ? "已保留当前已生成内容；后端状态已结束，需继续规划后才会补齐剩余阶段。"
+            : "系统正在分阶段生成方案，完成后会自动跳回产品面板。",
     };
   }, [planningState]);
 

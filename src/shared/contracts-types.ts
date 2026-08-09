@@ -389,3 +389,5 @@ export interface OperationLogPage {
   /** 刷新时间戳（ISO），方便头部显示「最近更新于…」并避免重复拉取。 */
   refreshedAt: string;
 }
+export interface ItinerarySpot { name: string; poiName: string | null; poiId: string | null }
+export interface ItineraryDay { day: number; title: string; spots?: ItinerarySpot[]; description: string; hotel: string; meals: string }

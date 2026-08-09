@@ -1,4 +1,5 @@
 import type { CreateProjectInput, FieldState, OperationStatus, ProjectDetail, ProjectReadiness, ProjectSummary } from "../../../shared/contracts.js";
+import type { PlanningStage } from "../../../shared/contracts-planning.js";
 
 export type Stage = "review" | "vbk";
 export type View = "workspace" | "projects" | "settings" | "operation-log";
@@ -104,6 +105,63 @@ export function vbkStageStatusText(project: ProjectDetail | null): { tone: "wait
 }
 
 export type RecoveryStageLabel = { phase: string; display: string };
+
+// 规划子系统阶段名（来自 shared/contracts-planning.ts）→ UI 中文标签。
+// 中文短标签用于运行中恢复条 / 日志 / 错误提示，避免在 renderer 里硬编码字符串。
+export const PLANNING_STAGE_LABELS: Record<PlanningStage, string> = {
+  skeleton: "产品骨架",
+  basicInfo: "基础信息",
+  itinerary: "每日行程",
+  presentation: "产品卖点",
+  commercial: "套餐与价格",
+  research: "资源核查",
+  validation: "一致性校验",
+};
+
+export const DEFAULT_PLANNING_STAGE_LABEL = (stage: string) => stage || "当前阶段";
+
+export function planningStageLabel(stage: PlanningStage | string | undefined): string {
+  if (!stage) return "当前阶段";
+  return PLANNING_STAGE_LABELS[stage as PlanningStage] || DEFAULT_PLANNING_STAGE_LABEL(stage);
+}
+
+/**
+ * 终态判断：completed / failed / needs_user 都不再轮询。
+ * 调用方传 undefined / 未知 status 时按"非终态"处理，避免把 lookup 未完成
+ * 当成终态停止轮询（lookup 本身可能仍是 pending）。
+ *
+ * 与轮询节奏常量解耦：实际轮询间隔由 derived.ts 内局部 const PLANNING_POLL_INTERVAL_MS
+ * 控制（也是 renderer 唯一真源），helpers 这层不再额外 export 同名常量，避免双重事实。
+ */
+export function isTerminalPlanningStatus(status: string | undefined): boolean {
+  return status === "completed" || status === "failed" || status === "needs_user";
+}
+
+/**
+ * 从持久化规划状态构造「按 PLANNING_STAGES 顺序的进度视图」：
+ *   - 已完成阶段 → 标记 completed
+ *   - 当前阶段（planningState.currentStage 且未在 completedStages 里） → current
+ *   - 其余 → pending
+ * 同时附带中文标签（planningStageLabel），供运行中恢复条直接渲染。
+ */
+export interface PlanningStageProgress {
+  stage: PlanningStage;
+  label: string;
+  state: "completed" | "current" | "pending";
+}
+
+export function buildPlanningStageProgress(
+  planningState: { currentStage: PlanningStage; completedStages?: PlanningStage[] } | null | undefined,
+  stageOrder: readonly PlanningStage[],
+): PlanningStageProgress[] {
+  const completed = new Set(planningState?.completedStages ?? []);
+  const current = planningState?.currentStage;
+  return stageOrder.map((stage) => {
+    if (completed.has(stage)) return { stage, label: planningStageLabel(stage), state: "completed" as const };
+    if (stage === current) return { stage, label: planningStageLabel(stage), state: "current" as const };
+    return { stage, label: planningStageLabel(stage), state: "pending" as const };
+  });
+}
 
 export const RECOVERY_PHASE_LABELS: Record<string, string> = {
   basic: "基础信息",

@@ -213,6 +213,20 @@ export interface Planner {
    * 走 retry 流程。
    */
   generateStage(request: PlannerRequest): Promise<PlanningStageOutput>;
+  /**
+   * 原始景点名称在 VBK suggestPoi 中未命中时，给出一个可再次查询的单一
+   * POI 名称。返回 null 表示本轮无法给出安全候选；调用方不会猜测 ID。
+   */
+  resolvePoiName?(request: PoiNameResolutionRequest): Promise<string | null>;
+}
+
+export interface PoiNameResolutionRequest {
+  originalName: string;
+  destination: string;
+  /** 1-based，最多三次。 */
+  attempt: number;
+  /** 已经实际交给 VBK suggestPoi 查询但未命中的候选；重试时不得重复。 */
+  previousCandidates: readonly string[];
 }
 
 /**

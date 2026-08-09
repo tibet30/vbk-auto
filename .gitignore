@@ -57,6 +57,7 @@ tmp/pi-e2e/logs/
 .claude/
 .superpowers/
 .cursor/
+.workbuddy/
 .idea/
 .vscode/*
 !.vscode/settings.json

@@ -127,7 +127,7 @@ export function normaliseItinerary(value: unknown) {
       : [];
     const activities = rawActivities.map(normaliseActivity).filter((activity): activity is { time: string; title: string; detail: string; type: string } => Boolean(activity));
     const spots = Array.isArray(record.spots)
-      ? record.spots.map(textValue).filter(Boolean)
+      ? record.spots.map((spot) => typeof spot === "string" ? { name: spot.trim(), poiName: null, poiId: null } : spot && typeof spot === "object" ? { name: textValue((spot as any).name) || textValue((spot as any).poiName), poiName: (spot as any).poiName ?? null, poiId: (spot as any).poiId ?? null } : null).filter((spot): spot is { name: string; poiName: string | null; poiId: string | null } => Boolean(spot?.name))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));
     const activityDescription = activities
       .map((activity) => [activity.time, activity.title, activity.detail].filter(Boolean).join(" "))

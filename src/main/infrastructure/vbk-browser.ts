@@ -1,16 +1,21 @@
 /**
  * 嵌入式 VBK 浏览器（VbkBrowser）+ 多账号登录支持：
- *   - initialise 把 WebContentsView 绑到主窗口，配置导航白名单与外链钩子；
- *   - login / logout / addLogin / switchAccount / forgetAccount 撑起多账号生命周期；
- *   - saveCurrentSession / status / fetchProviderId / detectLoginAccount 等提供给上层用；
- *   - 内部 collectCookies / clearBrowserSessionCookies / applyCookie 与 vbk-cookie-serializer 配合做持久化。
+ *   - 每个账号使用独立的 Electron partition（persist:account_<key>），
+ *     cookie / localStorage / 缓存由系统自动隔离，不再手动搬运；
+ *   - initialise 创建默认视图（persist:vbk）用于首次登录 / 新增登录，
+ *     同时恢复上次活跃账号的 partition 视图；
+ *   - switchAccount 直接切换视图，仅在首次创建时从 DB 做一次性 cookie 迁移；
+ *   - addLogin 清空默认视图、跳转登录页；登录后自动创建 partition 视图并迁移；
+ *   - forgetAccount 清除 partition 存储 + 销毁视图 + 删除 DB 记录；
+ *   - saveCurrentSession 保留作为 DB 备份（向后兼容 + 迁移安全网）。
  */
 
-import { BrowserWindow, WebContentsView, shell } from "electron";
+import { BrowserWindow, WebContentsView, session, shell } from "electron";
 import { openExternalUrl } from "./external-url.js";
 import { chromium, type Browser, type Page } from "playwright";
 import { URLS } from "../automation/constants.js";
 import { fetchCurrentUserInfo } from "./current-user.js";
+import { selectVbkPage } from "./vbk-page-selection.js";
 import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/contracts-types.js";
 import type { SerialisedCookie } from "./vbk-cookie-serializer.js";
 import {
@@ -64,10 +69,25 @@ export interface LoginSessionStore {
   clearActiveAccountKey(): void;
 }
 
+type LoginSessionRecord = ReturnType<LoginSessionStore["loadSession"]>;
+
 export class VbkBrowser {
-  private view?: WebContentsView;
+  // ── 多分区 view 管理 ──
+  /** 按 accountKey 索引的 partition 视图；每个账号一个独立 partition。 */
+  private accounts: Map<string, WebContentsView> = new Map();
+  /** 当前活跃的账号 key。undefined = 使用默认视图（persist:vbk）。 */
+  private activeKey?: string;
+  /** 默认视图：用于首次登录 / 新增登录，partition = persist:vbk。 */
+  private defaultView?: WebContentsView;
+  /** 视图可见性标记（用于 setVisible 状态同步）。 */
   private visible = false;
+  /** 缓存的 bounds，用于切换视图时恢复布局。 */
+  private _bounds: Electron.Rectangle = { x: 0, y: 0, width: 0, height: 0 };
+  /** CDP 连接（Playwright 驱动自动化用），跨 partition 共用。 */
   private cdp?: Browser;
+  /** fetchCurrentUserInfo 结果缓存：同一 URL 下避免重复 HTTP。login/logout 时清除。 */
+  private cachedUserInfoUrl?: string;
+  private cachedUserInfo?: { displayName?: string; loginAccount?: string };
 
   constructor(
     private readonly window: BrowserWindow,
@@ -75,36 +95,125 @@ export class VbkBrowser {
     private readonly sessionStore?: LoginSessionStore,
   ) {}
 
-/**
- * 初始化一个嵌入式 WebContentsView（持久分区 persist:vbk），配置导航白名单 + 外链打开走系统浏览器；
- * 默认隐藏，待登录 / 显式 setVisible(true) 才显示。
- */
-async initialise() {
-    this.view = new WebContentsView();
-    this.window.contentView.addChildView(this.view);
-    // 先抑制持久分区下 Chromium 默认启动的子系统副作用（WebRTC ICE → STUN
-    // 探测 → 国内网络里 stun.services.mozilla.com 解析失败 ——
-    // errorcode -105 / socket_manager.cc:137 噪音），再装导航/外链钩子。
-    this.configureVbkWebContents();
-    this.view.webContents.setWindowOpenHandler(({ url }) => { void shell.openExternal(url); return { action: "deny" }; });
-    this.view.webContents.on("will-navigate", (event, url) => {
-      const host = new URL(url).hostname;
-      if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) {
-        event.preventDefault(); void shell.openExternal(url);
-      }
+  // ─────────────────────────────────────────────────────────────
+  // 视图访问器（向后兼容：所有内部/外部代码仍可通过 this.view 访问当前视图）
+  // ─────────────────────────────────────────────────────────────
+
+  /** 当前活跃的 WebContentsView；未登录/默认状态返回 defaultView。 */
+  private get view(): WebContentsView | undefined {
+    if (this.activeKey) return this.accounts.get(this.activeKey);
+    return this.defaultView;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Partition 与视图工厂
+  // ─────────────────────────────────────────────────────────────
+
+  /** 根据账号 key 生成 partition 名（persist:account_<sanitized_key>）。 */
+  private getPartition(accountKey: string): string {
+    const safe = accountKey.replace(/[^a-zA-Z0-9_-]/g, "_");
+    return `persist:account_${safe}`;
+  }
+
+  /** 创建一个已配置 RTC 抑制 + 导航白名单 + 外链钩子的 WebContentsView。 */
+  private createView(partition: string): WebContentsView {
+    const view = new WebContentsView({
+      webPreferences: { partition },
     });
-    await this.view.webContents.loadURL(URLS.list);
+    this.configureRtc(view);
+    this.installNavigationHooks(view);
+    return view;
+  }
+
+  /** 获取或创建指定账号的 partition 视图。首次创建时写入调用方已读取的 cookie 快照。 */
+  private async ensureAccountView(accountKey: string, cookies: SerialisedCookie[]): Promise<WebContentsView> {
+    let view = this.accounts.get(accountKey);
+    if (view) return view;
+
+    view = this.createView(this.getPartition(accountKey));
+    this.accounts.set(accountKey, view);
+
+    // 首次创建：迁移调用方已经验证过的 cookie 快照（后续 Electron 自动持久化）。
+    if (cookies.length > 0) {
+      for (const cookie of cookies) {
+        await this.setCookieOn(view, cookie);
+      }
+      await view.webContents.session.cookies.flushStore().catch(() => undefined);
+    }
+    return view;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 视图切换
+  // ─────────────────────────────────────────────────────────────
+
+  /** 把窗口内容切换到指定视图。负责 detach 旧视图 + attach 新视图 + 同步状态。 */
+  private activateView(view: WebContentsView, accountKey?: string) {
+    const current = this.view;
+    if (current && current !== view) {
+      current.setVisible(false);
+      this.window.contentView.removeChildView(current);
+    }
+    this.window.contentView.addChildView(view);
+    view.setBounds(this._bounds);
+    view.setVisible(this.visible);
+
+    this.activeKey = accountKey || undefined;
+    if (accountKey) {
+      this.sessionStore?.setActiveAccountKey(accountKey);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 生命周期
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * 初始化嵌入式浏览器：
+   *   - 创建默认视图（persist:vbk），用于首次登录 / 新增登录；
+   *   - 若存在上次活跃账号，同步创建其 partition 视图并恢复 cookies；
+   *   - 默认隐藏，待 login() / setVisible(true) 才显示。
+   */
+  async initialise() {
+    // 默认视图：始终存在，供 addLogin / 初始登录使用
+    this.defaultView = this.createView("persist:vbk");
+    this.window.contentView.addChildView(this.defaultView);
+    await this.defaultView.webContents.loadURL(URLS.list);
+
+    // 恢复上次活跃账号的 partition 视图
+    const activeKey = this.sessionStore?.getActiveAccountKey();
+    const record: LoginSessionRecord = activeKey ? this.sessionStore?.loadSession(activeKey) ?? null : null;
+    const cookies = record ? parseCookies(record.cookiesJson) : [];
+    // 活跃账号指针只是上次展示状态，不代表 account partition 已有登录态。
+    // 没有可恢复的 DB 快照时必须继续使用 persist:vbk，避免空分区覆盖仍可用的默认登录态。
+    if (activeKey && cookies.length > 0) {
+      const view = await this.ensureAccountView(activeKey, cookies);
+      // 进程重启后 WebContents 初始 URL 可能是空白页。即使 partition 中
+      // 已有登录 cookie，也必须先把该账号 view 导航到 VBK 列表，避免 CDP
+      // 将 Electron renderer / 空白页误作为当前会话页面。
+      await view.webContents.loadURL(URLS.list);
+      // 复用统一切换路径：必须先 detach 默认 view，避免重启恢复后两个
+      // WebContentsView 同时挂在窗口上，造成可见性和布局归属不确定。
+      this.activateView(view, activeKey);
+    }
+
     this.setVisible(false);
   }
 
-/**
- * 调整 view 布局（Electron.Rectangle）。
- */
-setBounds(bounds: Electron.Rectangle) { this.view?.setBounds(bounds); }
-/**
- * 设置 view 可见性；同时维护 this.visible 状态供外部读取。
- */
-setVisible(visible: boolean) { this.visible = visible; this.view?.setVisible(visible); }
+  /**
+   * 调整 view 布局（Electron.Rectangle）；同时缓存 bounds 用于后续视图切换。
+   */
+  setBounds(bounds: Electron.Rectangle) {
+    this._bounds = bounds;
+    this.view?.setBounds(bounds);
+  }
+
+  /** 设置 view 可见性；同时维护 this.visible 状态供外部读取。 */
+  setVisible(visible: boolean) {
+    this.visible = visible;
+    this.view?.setVisible(visible);
+  }
+
   // 暴露当前嵌入式浏览器 URL：URL 栏需要实时反映页面跳转，否者用户点
   // 「进入」之后看到地址还是 /产品库，会误以为按钮没生效（实际上 VBK 内部
   // 可能又把页面重定向到 /产品库，地址栏同步过去才能区分「没跳转」和「跳转后被重定向」）。
@@ -117,50 +226,59 @@ setVisible(visible: boolean) { this.visible = visible; this.view?.setVisible(vis
     if (!this.view) throw new Error("VBK 浏览器尚未初始化");
     return this.view.webContents.executeJavaScript(`(${fn.toString()})(${JSON.stringify(arg)})`) as Promise<T>;
   }
-/**
- * 把当前 VBK WebView 的 URL 用系统浏览器打开（仅 HTTP/HTTPS）。
- */
-async openExternal() {
+
+  /**
+   * 把当前 VBK WebView 的 URL 用系统浏览器打开（仅 HTTP/HTTPS）。
+   */
+  async openExternal() {
     const url = this.view?.webContents.getURL() || "";
     await openExternalUrl(url, (value) => shell.openExternal(value));
-}
+  }
 
-/**
- * 内置 WebView 内导航；URL 必须命中 allowedHosts 白名单，否则抛「仅允许…」错误。
- */
-async navigate(url: string) {
+  /**
+   * 内置 WebView 内导航；URL 必须命中 allowedHosts 白名单，否则抛「仅允许…」错误。
+   */
+  async navigate(url: string) {
     const host = new URL(url).hostname;
-    if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) throw new Error("仅允许在内置 VBK 浏览器中打开携程页面");
+    if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) {
+      throw new Error("仅允许在内置 VBK 浏览器中打开携程页面");
+    }
     await this.view?.webContents.loadURL(url);
-}
+  }
 
-/**
- * 便捷登录入口：setVisible(true) + 跳到产品列表 URL。
- */
-async login() { this.setVisible(true); await this.navigate(URLS.list); }
+  /**
+   * 便捷登录入口：setVisible(true) + 跳到产品列表 URL。
+   */
+  async login() { this.setVisible(true); await this.navigate(URLS.list); }
+
+  // ─────────────────────────────────────────────────────────────
+  // 多账号操作
+  // ─────────────────────────────────────────────────────────────
 
   /**
    * 退出当前账号但**不**影响其他已记录账号：
-   * 1. 抽出当前 session 的 cookies 但不写入登录快照（即将删除，无需持久化）；
-   * 2. 清空当前 session 的所有 storage 与缓存；
-   * 3. 导航到产品列表等待用户。
-   *
-   * 注意：保留 clearActiveAccountKey()，让"当前是谁"的指示器同步清掉。
+   * 1. 清空当前活跃 view 的 partition 所有 storage 与缓存；
+   * 2. 切换到默认视图并导航到产品列表；
+   * 3. 清除活跃账号指针。
    */
   async logout() {
-    if (!this.view) return;
-    await this.clearBrowserSessionCookies();
-    await this.view.webContents.session.clearStorageData({
-      storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
-    });
-    await this.view.webContents.session.clearCache();
+    const current = this.view;
+    if (!current) return;
+    await this.clearViewStorage(current);
     this.sessionStore?.clearActiveAccountKey();
-    await this.navigate(URLS.list);
+    // 切回默认视图
+    if (this.defaultView) {
+      this.activateView(this.defaultView);
+      await this.defaultView.webContents.loadURL(URLS.list);
+    } else {
+      this.activeKey = undefined;
+    }
   }
 
   /**
    * 把当前 WebView 的 cookies 抽出来保存到本机（login_sessions 表）。
    * 通常由 addLogin / switchAccount 在切换之前调用，账号未登录时直接 no-op。
+   * 保留此方法作为 DB 备份（迁移安全网），即使 partition 已自动持久化。
    */
   async saveCurrentSession(): Promise<SavedLoginAccount | null> {
     if (!this.view) return null;
@@ -179,58 +297,59 @@ async login() { this.setVisible(true); await this.navigate(URLS.list); }
 
   /**
    * "新增登录"流程：
-   *  1. 当前已登录 → 先 saveCurrentSession 把老账号 cookies 收进 login_sessions；
-   *  2. 清空当前 session 的 cookies / storage / cache；
-   *  3. 导航到 VBK 登录页，等用户在右侧 WebView 完成新账号登录；
-   *  4. status() 检测到新登录后会再调一次 saveCurrentSession()（在 withKnownVbkAccount 钩子里）。
-   *
-   * 与 logout 的区别：这里显式保留老账号快照，让运营随时能切回去。
+   *  1. 当前已登录 → 先 saveCurrentSession 把老账号 cookies 收进 DB；
+   *  2. 清空默认视图的 storage / cache；
+   *  3. 切换到默认视图并导航到 VBK 登录页；
+   *  4. 等用户在右侧 WebView 完成新账号登录；
+   *  5. status() 检测到新登录后会调 saveCurrentSession()（在 withKnownVbkAccount 钩子里），
+   *     之后首次 switchAccount 时会自动创建 partition 视图并完成迁移。
    */
   async addLogin() {
-    if (!this.view) return;
     // 先把当前账号抓走；如果未登录，跳过这一步避免空快照落地。
     await this.saveCurrentSession();
-    await this.clearBrowserSessionCookies();
-    await this.view.webContents.session.clearStorageData({
-      storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
-    });
-    await this.view.webContents.session.clearCache();
+
+    if (!this.defaultView) return;
+
+    // 清空默认视图，准备承接新登录
+    await this.clearViewStorage(this.defaultView);
     this.sessionStore?.clearActiveAccountKey();
+
+    // 切换到默认视图
+    this.activateView(this.defaultView);
+
     // 让登录页面尽可能快显示：使用轻量入口 URL 而不是产品库。
-    await this.view.webContents.loadURL("https://vbooking.ctrip.com/");
+    await this.defaultView.webContents.loadURL("https://vbooking.ctrip.com/");
   }
 
   /**
    * 切换到本机已记着的一个 VBK 账号：
-   *  1. 当前已登录 → saveCurrentSession 把老账号存好；
-   *  2. 把目标账号的 cookies 灌进当前 session；
-   *  3. 重新导航到产品列表让 VBK 自己刷新账号上下文。
+   *  1. 当前已登录 → saveCurrentSession 把老账号存进 DB；
+   *  2. 获取/创建目标账号的 partition 视图（首次创建时从 DB 迁移 cookies）；
+   *  3. 切换视图并导航到产品列表。
    *
-   * 注意：cookies 设置之后**异步生效**，需要 await session.cookies.flushStore()
-   * 才能保证接下来 loadURL 时 VBK 拿到的是新账号的会话。
+   * 与旧版的关键区别：不再逐个 cookie 清除后回灌 —— partition 天然隔离，
+   * 每个账号的 cookies 由 Electron 自动持久化，仅首次创建视图时需要一次 DB→partition
+   * 的 cookie 迁移。
    */
   async switchAccount(accountKey: string) {
-    if (!this.view) return;
     if (!this.sessionStore) throw new Error("本机未启用多账号登录切换。");
     const trimmedKey = accountKey?.trim();
     if (!trimmedKey) throw new Error("切换账号失败：账号标识不能为空。");
     const record = this.sessionStore.loadSession(trimmedKey);
     if (!record) throw new Error(`本机未记录该 VBK 账号（${trimmedKey}），请先登录一次再切换。`);
-    await this.saveCurrentSession();
-    // 清掉旧账号残留的 cookies，确保就算目标账号 cookies 不全也不会留下混合会话。
-    await this.clearBrowserSessionCookies();
     const cookies = parseCookies(record.cookiesJson);
     if (cookies.length === 0) {
-      // 罕见：旧版记录可能为空，导航前补一条"目标账号"的占位 cookies 让写入不为空。
-      // 这种 fallback 也能让下次 saveCurrentSession 自然重新覆盖。
+      throw new Error(`本机没有该 VBK 账号（${trimmedKey}）可恢复的登录快照，请重新登录后再切换。`);
     }
-    for (const cookie of cookies) await this.applyCookie(cookie);
-    // flushStore 让所有 set 都落盘，再加载产品库。
-    if (typeof this.view.webContents.session.cookies.flushStore === "function") {
-      await this.view.webContents.session.cookies.flushStore().catch(() => undefined);
-    }
-    this.sessionStore.setActiveAccountKey(trimmedKey);
-    await this.view.webContents.loadURL(URLS.list);
+
+    await this.saveCurrentSession();
+
+    // 获取或创建 partition 视图（首次时自动从 DB 迁移 cookies）
+    const view = await this.ensureAccountView(trimmedKey, cookies);
+
+    // 切换到目标视图
+    this.activateView(view, trimmedKey);
+    await view.webContents.loadURL(URLS.list);
   }
 
   /**
@@ -238,6 +357,8 @@ async login() { this.setVisible(true); await this.navigate(URLS.list); }
    * 删除后运营再点该 chip 不会切回去 —— 调用方需负责提示。
    * WebView 当前正在展示的账号不允许忘记，否则会被一个已删除的记录
    * 立刻「复活」导致删除语义不一致。
+   *
+   * 同时清除该账号的 partition 持久化存储，彻底移除所有痕迹。
    */
   forgetAccount(accountKey: string) {
     if (!this.sessionStore) throw new Error("本机未启用多账号登录切换。");
@@ -247,6 +368,21 @@ async login() { this.setVisible(true); await this.navigate(URLS.list); }
     if (active && active === trimmedKey) {
       throw new Error("当前正在使用的账号不能直接忘记，请先切换或登出。");
     }
+
+    // 清除 partition 持久化存储
+    const partition = this.getPartition(trimmedKey);
+    const ses = session.fromPartition(partition);
+    ses.clearStorageData().catch(() => undefined);
+    ses.clearCache().catch(() => undefined);
+
+    // 销毁视图（如果已创建过）
+    const view = this.accounts.get(trimmedKey);
+    if (view) {
+      try { view.webContents.close(); } catch { /* 可能已关闭 */ }
+      this.accounts.delete(trimmedKey);
+    }
+
+    // 删除 DB 记录
     this.sessionStore.deleteSession(trimmedKey);
   }
 
@@ -264,6 +400,10 @@ async login() { this.setVisible(true); await this.navigate(URLS.list); }
     };
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // 登录状态检测
+  // ─────────────────────────────────────────────────────────────
+
   async status(refresh = false) {
     if (!this.view) return { loggedIn: false, message: "VBK 浏览器尚未准备好。" };
     if (refresh) await this.navigate(URLS.list);
@@ -275,27 +415,33 @@ async login() { this.setVisible(true); await this.navigate(URLS.list); }
     if (!productListVisible) return { loggedIn: false, message: "尚未登录 VBK。" };
 
     // 1) 优先：通过 VBK getCurrentUserInfo 接口拿真实账号名。
-    //    这是项目里已经实现的解析器（current-user.ts），能拿到 "张三" 这种
-    //    真实可读名；旧的 DOM 抓取会把"账号管理"菜单误识别成"管理"。
+    //    同一页面 URL 下缓存结果，避免重复 HTTP（checkVbkLogin / withKnownVbkAccount
+    //    等会在短时间内多次触发 status，每次都发一次 providerId 接口）。
     let accountName: string | undefined;
     let loginAccount: string | undefined;
-    try {
-      const page = await this.page();
-      const user = await fetchCurrentUserInfo(page);
-      const display = user?.displayName?.trim();
-      const login = user?.loginAccount?.trim();
-      // 优先 loginAccount（vbk_671205），一目了然知道是哪个 VBK 账号；
-      // 兜底 displayName（"小璐"）仅在 account 字段缺失时展示。
-      if (login) loginAccount = login;
-      if (display) accountName = display;
-      else if (login) accountName = login;
-    } catch {
-      // API 失败（CDP 未就绪、接口变更、网络异常）→ fallback 到 DOM 抓取
+    if (url === this.cachedUserInfoUrl && this.cachedUserInfo) {
+      accountName = this.cachedUserInfo.displayName;
+      loginAccount = this.cachedUserInfo.loginAccount;
+    } else {
+      try {
+        const page = await this.page();
+        const user = await fetchCurrentUserInfo(page);
+        const display = user?.displayName?.trim();
+        const login = user?.loginAccount?.trim();
+        if (login) loginAccount = login;
+        if (display) accountName = display;
+        else if (login) accountName = login;
+        // 成功抓取后缓存：下次同一 URL 不再走网络。
+        if (accountName || loginAccount) {
+          this.cachedUserInfoUrl = url;
+          this.cachedUserInfo = { displayName: accountName, loginAccount };
+        }
+      } catch {
+        // API 失败（CDP 未就绪、接口变更、网络异常）→ fallback 到 DOM 抓取
+      }
     }
 
-    // 2) Fallback：DOM 抓取 + 菜单白名单过滤。原先的 selector 太宽
-    //    ([class*="user"] / [class*="account"]) 会把"账号管理"等菜单
-    //    误识别成账号名，这里加黑名单丢掉。
+    // 2) Fallback：DOM 抓取 + 菜单白名单过滤。
     if (!accountName) {
       const scraped = await this.view.webContents.executeJavaScript(`
         (() => {
@@ -330,62 +476,88 @@ async login() { this.setVisible(true); await this.navigate(URLS.list); }
     };
   }
 
-/**
- * 拿一个绑定到当前 VBK WebView 的 Playwright Page：
- *   - 复用 this.cdp（CDP over debuggingPort），避免重复连接累积 WebSocket；
- *   - 优先按 view URL 匹配；找不到则取任意 ctrip.com 页面；
- *   - 完全拿不到时抛错让上层提示「请先登录 VBK」。
- */
-async page(): Promise<Page> {
-    // 每次录入都新建一个 CDP 连接会持续累积 WebSocket，反复重试后拖垮自动化；
-    // 这里复用同一个连接，断开后再重连。
+  // ─────────────────────────────────────────────────────────────
+  // Playwright / CDP
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * 拿一个绑定到当前 VBK WebView 的 Playwright Page：
+   *   - 复用 this.cdp（CDP over debuggingPort），避免重复连接累积 WebSocket；
+   *   - 优先按 view URL 匹配；找不到则取任意 ctrip.com 页面；
+   *   - 完全拿不到时抛错让上层提示「请先登录 VBK」。
+   */
+  async page(): Promise<Page> {
     if (!this.cdp?.isConnected()) {
       this.cdp = await chromium.connectOverCDP(`http://127.0.0.1:${this.debuggingPort}`);
     }
     const pages = this.cdp.contexts().flatMap((context) => context.pages());
-    const page = pages.find((candidate) => candidate.url() === this.view?.webContents.getURL())
-      ?? pages.find((candidate) => candidate.url().includes("ctrip.com"));
+    const page = selectVbkPage(pages, this.view?.webContents.getURL() ?? "");
     if (!page) throw new Error("未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
     return page;
   }
 
-/**
- * 关闭 CDP 连接（不关 view）；用于完全退出应用前或调试热重启时。
- */
-async dispose() {
+  /**
+   * 关闭 CDP 连接 + 销毁所有视图；用于完全退出应用前或调试热重启时。
+   */
+  async dispose() {
     if (this.cdp?.isConnected()) await this.cdp.close().catch(() => {});
     this.cdp = undefined;
+    // 销毁所有 partition 视图
+    for (const view of this.accounts.values()) {
+      try { view.webContents.close(); } catch { /* 可能已关闭 */ }
+    }
+    this.accounts.clear();
+    // 销毁默认视图
+    if (this.defaultView) {
+      try { this.defaultView.webContents.close(); } catch { /* 可能已关闭 */ }
+      this.defaultView = undefined;
+    }
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // 内部辅助：视图配置
+  // ─────────────────────────────────────────────────────────────
+
   /**
-   * 抑制 persist:vbk 持久分区在 Chromium 内部自动启用的副作用。
-   *
-   * 背景：本应用只用「DOM/CDP 自动化」驱动 VBK 后台，没有 WebRTC 代码。
-   * 但 `persist:vbk` 是持久分区（不是 incognito），Chromium 会对持久
-   * session 默认开启完整的 WebRTC ICE candidate gathering —— 即便
-   * 业务从不发起 PeerConnection，渲染进程一启动也会并发解析
-   * stun.services.mozilla.com 的 A/AAAA 记录，配合 IPv6/4 双栈 + 重试
-   * 喷出 5 条 `Failed to resolve address ... errorcode: -105` 噪音。
-   *
-   * 做法等价于 `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`：
-   * 不收集任何「非代理 UDP」ICE 候选，Chromium 直接放弃 STUN 解析。
-   * 作用面是这一个 webContents，不动 BrowserWindow 主进程和别的视图，
-   * 也不影响出方向的 HTTP/代理链路。
+   * 抑制持久分区下 Chromium 默认启动的 WebRTC ICE 副作用。
+   * 每个新建的 view 都要调用一次。
    */
-  private configureVbkWebContents() {
-    if (!this.view) return;
+  private configureRtc(view: WebContentsView) {
     try {
-      this.view.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+      view.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
     } catch {
       // 极端旧 Electron（<13）无此 API 时静默跳过；当前依赖 ^43 必然存在。
     }
   }
 
+  /** 给指定 view 安装导航白名单 + 外链打开走系统浏览器。 */
+  private installNavigationHooks(view: WebContentsView) {
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      void shell.openExternal(url);
+      return { action: "deny" };
+    });
+    view.webContents.on("will-navigate", (event, url) => {
+      const host = new URL(url).hostname;
+      if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) {
+        event.preventDefault();
+        void shell.openExternal(url);
+      }
+    });
+  }
+
   // ─────────────────────────────────────────────────────────────
-  // 内部辅助
+  // 内部辅助：cookie / storage 操作
   // ─────────────────────────────────────────────────────────────
 
-  /** 抽出当前 session 的全部 cookies。空数组表示未登录或已被清空。 */
+  /** 清空指定 view 的所有 storage 与缓存。 */
+  private async clearViewStorage(view: WebContentsView) {
+    await view.webContents.session.clearStorageData({
+      storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
+    });
+    await view.webContents.session.clearCache();
+  }
+
+  /** 抽出当前活跃 view 的全部 cookies。空数组表示未登录或已被清空。 */
   private async collectCookies(): Promise<Electron.Cookie[]> {
     if (!this.view) return [];
     try {
@@ -395,29 +567,10 @@ async dispose() {
     }
   }
 
-  /** 清空当前 session 的全部 cookies。会基于 cookie.domain 逐条 remove。 */
-  private async clearBrowserSessionCookies() {
-    if (!this.view) return;
-    try {
-      const existing = await this.view.webContents.session.cookies.get({});
-      const view = this.view;
-      await Promise.all(existing.map((cookie) => {
-        const target = removeUrlFromCookie(cookie);
-        if (!target) return Promise.resolve();
-        return view.webContents.session.cookies.remove(target, cookie.name).catch(() => undefined);
-      }));
-    } catch {
-      // get/remove 失败时走兜底路径：clearStorageData。
-    }
-  }
-
   /**
-   * 把单条 cookie 写回 session。
-   * 输入是 DB 里的 SerialisedCookie（Playwright 兼容结构），需要先根据
-   * domain/scheme 构造 Electron `cookies.set` 要求的 url。
+   * 把单条 cookie（SerialisedCookie 格式，来自 DB）写回指定 view 的 session。
    */
-  private async applyCookie(cookie: SerialisedCookie) {
-    if (!this.view) return;
+  private async setCookieOn(view: WebContentsView, cookie: SerialisedCookie) {
     const url = cookieUrl(cookie);
     if (!url) return;
     const details: Electron.CookiesSetDetails = {
@@ -430,12 +583,11 @@ async dispose() {
       sameSite: normaliseSameSite(cookie.sameSite),
       expirationDate: normaliseExpiry(cookie.expires),
     };
-    // 如果 cookie 有显式 domain，写进 set 让它精确写入（url 模式会自动从 host 取 domain）。
     if (cookie.domain) details.domain = cookie.domain;
     try {
-      await this.view.webContents.session.cookies.set(details);
+      await view.webContents.session.cookies.set(details);
     } catch {
-      // 极少数 cookie（无效 domain / 跨 origin）写不进去，跳过；不要让某条失败阻塞整体切换。
+      // 极少数 cookie（无效 domain / 跨 origin）写不进去，跳过。
     }
   }
 }

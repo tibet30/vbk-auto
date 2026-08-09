@@ -19,6 +19,7 @@ import {
   type ModuleOutcome,
   type PlanningModule,
   type PlanningStage,
+  type PoiNameResolutionRequest,
 } from "../../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "../schemas.js";
 import { buildStageToolSchema } from "../tool-schema.js";
@@ -90,6 +91,66 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     }
     return convertToolArgsToStageOutput(stage, parsed, allowed);
   }
+
+  async resolvePoiName(request: PoiNameResolutionRequest): Promise<string | null> {
+    const messages = composePoiNameResolutionMessages(request);
+    const response = await this.client.chat.completions.create({
+      model: this.config.model,
+      messages,
+      temperature: 0,
+      max_completion_tokens: 128,
+      tools: [poiNameToolSchema],
+      tool_choice: { type: "function", function: { name: poiNameToolSchema.function.name } },
+      ...(this.config.extraParams ?? {}),
+    } as never);
+    const call = response.choices[0]?.message?.tool_calls?.find(
+      (item) => "function" in item && item.function.name === poiNameToolSchema.function.name,
+    );
+    if (!call || !("function" in call)) return null;
+    try {
+      return parsePoiNameToolArgs(JSON.parse(call.function.arguments));
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** POI 名称纠正的约束独立导出，防止 prompt 和契约测试漂移。 */
+export function composePoiNameResolutionMessages(request: PoiNameResolutionRequest) {
+  const retryRule = request.previousCandidates.length > 0
+    ? `已尝试且未命中的候选：${request.previousCandidates.join("、")}。本次必须给出与以上所有候选不同的单一 POI 名称。`
+    : "这是第一次名称纠正。";
+  return [
+    {
+      role: "system" as const,
+      content: "你负责将未通过 VBK suggestPoi 查询的行程名称，纠正为最可能被该接口查到的 POI 名称。只可输出一个真实、单一的地点实体名称：不得给 POI ID、解释、详细街道地址、多个候选或组合点。原名若含并列或组合景点，必须从中选择一个最具代表性的主景点，绝不能照抄组合名称。无法安全判断时返回 null。",
+    },
+    {
+      role: "user" as const,
+      content: `目的地：${request.destination}\n原行程名称：${request.originalName}\n该名称刚刚未能通过 VBK suggestPoi 查询。请给出最可能通过该接口查到的单一 POI 名称（第 ${request.attempt} 次尝试）。${retryRule}`,
+    },
+  ];
+}
+
+export const poiNameToolSchema = {
+  type: "function" as const,
+  function: {
+    name: "submit_vbk_poi_name",
+    description: "提交一个可再次用于 VBK suggestPoi 查询的单一 POI 名称。",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["poiName"],
+      properties: { poiName: { type: ["string", "null"], description: "单一 POI 名称；不确定时 null" } },
+    },
+  },
+};
+
+export function parsePoiNameToolArgs(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const poiName = (value as { poiName?: unknown }).poiName;
+  return typeof poiName === "string" ? poiName.trim() || null : null;
 }
 
 /**
@@ -170,6 +231,7 @@ research 阶段是本地 deterministic 生成；你不需要主动返回任何�
 3. supplierProductCode / vehicleResource / hotelResource / vehicleId / resourceId / resourceGroupId / supplierCode / providerId / contactCardId / butler / bookingControls 全部禁写；含这些键的输出会被拒。
 4. presentation.recommendations 恰好 3 条，category 互不重复。
 5. itinerary 每天至少 1 个 spots；天数 = basicInfo.days。
+5.1 spots 必须是对象数组 name/poiName/poiId；未核查时 poiName/poiId 填 null，禁止字符串数组和猜测 ID。
 6. pricing.adult > 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. terms 必须含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。

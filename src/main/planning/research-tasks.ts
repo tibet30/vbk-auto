@@ -11,6 +11,7 @@
 
 import type { ResearchTaskProposal, PlanningSkeleton, PlanningModule } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
+import { poiResearchTaskLabel } from "../../shared/poi-research-tasks.js";
 
 const TASK_TYPE_VBK = "vbk" as const;
 const TASK_TYPE_WEB = "web" as const;
@@ -136,7 +137,7 @@ export function itineraryPoiTasks(itinerary: unknown, destination: string): Rese
     for (const raw of rawItems) {
       const name = typeof raw === "string" ? raw.trim() : raw && typeof raw === "object" ? String((raw as any).poiName ?? (raw as any).name ?? (raw as any).title ?? "").trim() : "";
       if (!name || seen.has(name)) continue; seen.add(name);
-      out.push({ label: `核查 ${name} 在 VBK 资源库的 city / poi 映射`, type: TASK_TYPE_VBK, detail: `由目的地「${destination}」延伸` });
+      out.push({ label: poiResearchTaskLabel(name), type: TASK_TYPE_VBK, detail: `由目的地「${destination}」延伸` });
     }
   }
   return out;

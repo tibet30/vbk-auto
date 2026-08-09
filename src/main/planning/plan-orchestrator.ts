@@ -26,6 +26,7 @@ import {
 import { validateCompleteness } from "./validation.js";
 import { composeAssistantReply } from "./replies.js";
 import { runSingleStage, type SingleStageResult } from "./single-stage-runner.js";
+import { enrichItineraryPois } from "./poi-enrichment.js";
 import { revalidateCompletedState } from "./validation-rewind.js";
 import { logRunEnd, logRunStart, logStageEnd, logStageStart } from "./log.js";
 import type {
@@ -118,10 +119,24 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
       logRunEnd("续跑走到末尾但 deep validation 发现 invalid，回退 needs_user", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
       return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId));
     }
+    // 已完成方案也可能是旧版本在 POI 查询超时前就走到了 validation。
+    // 此处只对空 POI 做补全：不调用 planner、不改变 completedStages 或阶段状态。
+    // enrichItineraryPois 仅在实际匹配到结果时写 itinerary；无缺失或无匹配都不会
+    // 产生无意义的模块重写。放在稳定 completed 返回前，确保用户点「继续规划」
+    // 能修复历史草稿，而不会被末尾短路跳过。
+    const existingTasks = await args.runtime.loadExistingResearchTasks(args.projectId);
+    const persistedTaskKeys = new Set(existingTasks.map((task) => `${task.type}::${task.label}`));
+    const poiResearchTasks = await enrichItineraryPois({
+      projectId: args.projectId,
+      destination: args.skeleton.destination,
+      runtime: args.runtime,
+      persistedTaskKeys,
+      resolvePoiName: args.planner.resolvePoiName?.bind(args.planner),
+    });
     state.status = "completed";
     await args.store.save(state);
     logRunEnd("续跑走到末尾确认 completed", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
-    return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId));
+    return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), poiResearchTasks);
   }
 
   state.status = "running";
@@ -132,6 +147,20 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   const existingTasks = await args.runtime.loadExistingResearchTasks(args.projectId);
   const history = await args.runtime.loadHistory(args.projectId);
   const accumulatedResearchTasks: ResearchTaskProposal[] = [];
+
+  // 历史版本把 itinerary 标为已完成后，POI 查询可能因超时而未写回。
+  // resume 不能重跑 AI 行程，也不能等到后续阶段全部结束才补：在进入
+  // presentation 前只查询缺失 POI，并沿用既有的 VBK 核查任务去重语义。
+  if (state.completedStages.includes("itinerary")) {
+    const persistedTaskKeys = new Set(existingTasks.map((task) => `${task.type}::${task.label}`));
+    accumulatedResearchTasks.push(...await enrichItineraryPois({
+      projectId: args.projectId,
+      destination: args.skeleton.destination,
+      runtime: args.runtime,
+      persistedTaskKeys,
+      resolvePoiName: args.planner.resolvePoiName?.bind(args.planner),
+    }));
+  }
 
   for (let i = startIndex; i < PLANNING_STAGES.length; i += 1) {
     const stage = PLANNING_STAGES[i];
@@ -186,13 +215,19 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     });
     state = result.state;
     for (const t of result.researchTasks) accumulatedResearchTasks.push(t);
-    await args.store.save(state);
     if (result.status === "needs_user" || result.status === "failed") {
+      // 失败 / 需要人工介入是终态，原样持久化，保留当前失败阶段供恢复入口使用。
+      await args.store.save(state);
       logRunEnd("runPlan 提前结束于 mid-stage", { projectId: args.projectId, providerLabel: args.providerLabel, stage, status: result.status, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
       return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
     }
+    // runSingleStage 成功时会返回该阶段自己的 completed 状态。不要先把这个
+    // 中间结果写入 store：renderer 轮询到 status=completed 会停止，从而错过
+    // 后续阶段。成功快照必须原子地同时推进 completedStages、currentStage，
+    // 并保持整个计划仍为 running；只有循环结束后才写真正的 completed。
     state.completedStages = Array.from(new Set([...state.completedStages, stage]));
     state.currentStage = PLANNING_STAGES[Math.min(i + 1, PLANNING_STAGES.length - 1)];
+    state.status = "running";
     state.lastAssistantReply = result.assistantReply;
     state.lastModuleSummary = [...result.accepted, ...result.rejected];
     state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);

@@ -26,6 +26,7 @@ export interface PlanningLogContext {
 }
 
 const PREFIX = "[planning]";
+const ts = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
 
 function safe(value: unknown): unknown {
   if (value instanceof Error) {
@@ -51,30 +52,30 @@ function fmt(context: PlanningLogContext | undefined): string {
 
 /** 进入 runPlan / 续跑。 */
 export function logRunStart(message: string, context?: PlanningLogContext): void {
-  console.info(`${PREFIX} run.start ${message}${fmt(context)}`);
+  console.info(`${ts()} ${PREFIX} run.start ${message}${fmt(context)}`);
 }
 
 /** runPlan 退出 + 最终态。 */
 export function logRunEnd(message: string, context?: PlanningLogContext): void {
-  console.info(`${PREFIX} run.end ${message}${fmt(context)}`);
+  console.info(`${ts()} ${PREFIX} run.end ${message}${fmt(context)}`);
 }
 
 /** 单阶段开始执行。 */
 export function logStageStart(message: string, context?: PlanningLogContext): void {
-  console.info(`${PREFIX} stage.start ${message}${fmt(context)}`);
+  console.info(`${ts()} ${PREFIX} stage.start ${message}${fmt(context)}`);
 }
 
 /** 单阶段完成。 */
 export function logStageEnd(message: string, context?: PlanningLogContext): void {
-  console.info(`${PREFIX} stage.end ${message}${fmt(context)}`);
+  console.info(`${ts()} ${PREFIX} stage.end ${message}${fmt(context)}`);
 }
 
 /** 单次 AI attempt 错误（planner 抛错或输出空）。 */
 export function logAttemptError(message: string, context?: PlanningLogContext): void {
-  console.warn(`${PREFIX} attempt.error ${message}${fmt(context)}`);
+  console.warn(`${ts()} ${PREFIX} attempt.error ${message}${fmt(context)}`);
 }
 
 /** 续跑未取得进展：当前阶段重复失败，但状态机不会自己跳到下一阶段。 */
 export function logNoProgress(message: string, context?: PlanningLogContext): void {
-  console.warn(`${PREFIX} no_progress ${message}${fmt(context)}`);
+  console.warn(`${ts()} ${PREFIX} no_progress ${message}${fmt(context)}`);
 }

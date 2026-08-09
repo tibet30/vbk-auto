@@ -43,14 +43,22 @@ export function saveSession(db: Database.Database, accountKey: string, accountNa
   }
   const tx = db.transaction(() => {
     if (hasColumn(db, "login_sessions", "cookies_ciphertext")) {
+      // cookies_json 列仍在过渡期且含 NOT NULL 约束，INSERT 需提供空字符串占位。
+      const hasJsonCol = hasColumn(db, "login_sessions", "cookies_json");
+      const columns = ["account_key", "account_name", "cookies_ciphertext", ...(hasJsonCol ? ["cookies_json"] : []), "saved_at"];
+      const placeholders = columns.map(() => "?").join(", ");
+      const values = [key, display, cookiesCiphertext, ...(hasJsonCol ? [""] : []), now()];
+      const setClauses = [
+        "account_name = excluded.account_name",
+        "cookies_ciphertext = excluded.cookies_ciphertext",
+        ...(hasJsonCol ? ["cookies_json = excluded.cookies_json"] : []),
+        "saved_at = excluded.saved_at",
+      ].join(", ");
       db.prepare(`
-        INSERT INTO login_sessions(account_key, account_name, cookies_ciphertext, saved_at)
-        VALUES(?, ?, ?, ?)
-        ON CONFLICT(account_key) DO UPDATE SET
-          account_name=excluded.account_name,
-          cookies_ciphertext=excluded.cookies_ciphertext,
-          saved_at=excluded.saved_at
-      `).run(key, display, cookiesCiphertext, now());
+        INSERT INTO login_sessions(${columns.join(", ")})
+        VALUES(${placeholders})
+        ON CONFLICT(account_key) DO UPDATE SET ${setClauses}
+      `).run(...values);
     } else {
       // 旧列路径：未升级时仍走 plaintext（理论上不应发生，因为 0003 migration 已 ALTER）。
       db.prepare(`

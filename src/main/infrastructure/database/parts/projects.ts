@@ -22,8 +22,55 @@ import type {
   TaskStatus,
 } from "../../../../shared/contracts.js";
 import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
+import {
+  canonicalPoiResearchTaskLabel,
+  isSamePoiResearchTask,
+  poiResearchTaskName,
+} from "../../../../shared/poi-research-tasks.js";
 import { parseAndNormalizeProductJson } from "../product-json-normalize.js";
 import { now, newId, newSupplierProductCode } from "./types.js";
+
+function preferLogicalPoiTask(current: ResearchTask, candidate: ResearchTask): ResearchTask {
+  const rank: Record<ResearchTask["state"], number> = {
+    proposed: 0,
+    researching: 1,
+    blocked: 2,
+    confirmed: 3,
+    resolved: 4,
+    needs_confirmation: 2,
+  };
+  return rank[candidate.state] > rank[current.state] ? candidate : current;
+}
+
+/**
+ * Legacy POI rows remain untouched for auditability. Detail reads expose their
+ * semantic union as one canonical task, so operators do not see duplicate work.
+ */
+function coalescePoiResearchTasks(tasks: ResearchTask[]): ResearchTask[] {
+  const result: ResearchTask[] = [];
+  const groups = new Map<string, ResearchTask[]>();
+  for (const task of tasks) {
+    const name = poiResearchTaskName(task.label, task.type);
+    if (!name) {
+      result.push(task);
+      continue;
+    }
+    const key = `${task.type}::${name}`;
+    groups.set(key, [...(groups.get(key) ?? []), task]);
+  }
+  for (const group of groups.values()) {
+    const primary = group.reduce(preferLogicalPoiTask);
+    const detail = [...new Set(group.map((task) => task.detail).filter((value): value is string => !!value))].join("；") || undefined;
+    const evidence = group.flatMap((task) => task.evidence ?? []);
+    result.push({
+      ...primary,
+      label: canonicalPoiResearchTaskLabel(primary.label, primary.type),
+      detail,
+      evidence,
+    });
+  }
+  return result;
+}
 
 /**
  * 项目列表（按 updated_at 倒序）。
@@ -60,11 +107,15 @@ export function createProject(db: Database.Database, input: CreateProjectInput):
       nights,
       meetingCity: destination,
       destinationCity: destination,
+      subtitle: "",
+      province: "",
+      operationNotes: "",
     },
     operations: {
       hotelSource: "nonPlatform",
       hotelTier: DEFAULT_HOTEL_TIER,
       mealsIncluded: false,
+      pickupCity: "",
     },
     itinerary: [],
   };
@@ -90,7 +141,7 @@ export function getProject(db: Database.Database, id: string): ProjectDetail | u
     updatedAt: project.updated_at,
     product: parseAndNormalizeProductJson(project.product_json),
     messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
-    researchTasks: tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) })),
+    researchTasks: coalescePoiResearchTasks(tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) }))),
     automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
     basicInfoSaved: Number(project.basic_info_saved) === 1,
   };
@@ -237,18 +288,27 @@ export function updateBasicInfoField(db: Database.Database, projectId: string, f
  * 重复条目（同一 (label, type) 视为同一核查）。
  */
 export function addResearchTask(db: Database.Database, projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
+  const canonicalTask = {
+    ...task,
+    label: canonicalPoiResearchTaskLabel(task.label, task.type),
+  };
   const existing = db.prepare(`
-    SELECT id FROM research_tasks
-    WHERE project_id=? AND label=? AND type=?
-    LIMIT 1
-  `).get(projectId, task.label, task.type) as { id: string } | undefined;
-  if (existing) {
-    if (task.detail) db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(task.detail, existing.id);
+    SELECT id, label, type FROM research_tasks
+    WHERE project_id=? AND type=?
+  `).all(projectId, canonicalTask.type) as Array<{ id: string; label: string; type: ResearchTask["type"] }>;
+  const duplicate = existing.find((row) => row.label === canonicalTask.label)
+    ?? existing.find((row) => isSamePoiResearchTask(row, canonicalTask));
+  if (duplicate) {
+    // 历史拼写命中仅作语义去重，保留其原 detail 作为可追溯记录；只有本来
+    // 就是 canonical 行时才沿用既有的“最新说明覆盖”行为。
+    if (canonicalTask.detail && duplicate.label === canonicalTask.label) {
+      db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(canonicalTask.detail, duplicate.id);
+    }
     touchProject(db, projectId);
-    return existing.id;
+    return duplicate.id;
   }
   const id = randomUUID();
-  db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(id, projectId, task.label, task.type, "queued", "researching", task.detail || null, "[]");
+  db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(id, projectId, canonicalTask.label, canonicalTask.type, "queued", "researching", canonicalTask.detail || null, "[]");
   touchProject(db, projectId);
   return id;
 }

@@ -10,6 +10,8 @@
  */
 
 import type { VbkDatabase } from "../infrastructure/database/database.js";
+import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
+import { suggestPoi } from "../infrastructure/poi-suggest.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 import type {
@@ -23,12 +25,16 @@ import type {
 } from "../../shared/contracts-planning.js";
 
 export class DbGenerationStateStore implements GenerationStateStore {
-  constructor(private readonly db: VbkDatabase) {}
+  constructor(
+    private readonly db: VbkDatabase,
+    private readonly onSaved?: (state: PlanningGenerationState) => void,
+  ) {}
   async load(projectId: string): Promise<PlanningGenerationState | undefined> {
     return this.db.loadPlanningState(projectId);
   }
   async save(state: PlanningGenerationState): Promise<void> {
     this.db.savePlanningState(state);
+    this.onSaved?.(state);
   }
 }
 
@@ -145,7 +151,11 @@ function itineraryDaysAreOrdered(itinerary: unknown[], expectedDays: number): bo
  *   - loadHistory / loadCurrentProduct / loadAcceptedModules：从持久化反推。
  */
 export class DbOrchestratorRuntime implements OrchestratorRuntime {
-  constructor(private readonly db: VbkDatabase) {}
+  constructor(private readonly db: VbkDatabase, private readonly browser?: VbkBrowser) {}
+  async suggestPoi(keyword: string) {
+    if (!this.browser) return null;
+    return suggestPoi(await this.browser.page(), keyword);
+  }
 
   async loadExistingResearchTasks(projectId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
     const project = this.db.getProject(projectId);

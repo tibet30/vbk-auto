@@ -82,7 +82,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           properties: {
             day: { type: "number", minimum: 1 },
             title: { type: "string", minLength: 1 },
-            spots: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
+            spots: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1 }, poiName: { type: ["string", "null"] }, poiId: { type: ["string", "null"] } } } },
             description: { type: "string", minLength: 1 },
             hotel: { type: "string" },
             meals: { type: "string", minLength: 1 },

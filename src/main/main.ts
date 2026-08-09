@@ -23,7 +23,7 @@ import {
 import { applyProductPatchSafe } from "./operations/product-patch.js";
 import { automationBlockers, parseProduct, productSchema } from "./automation/schema/schema.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
-import { suggestPoi } from "./infrastructure/poi-suggest.js";
+import { suggestPoi, suggestPoiDemo } from "./infrastructure/poi-suggest.js";
 import { DraftAutomation } from "./automation/automation.js";
 import { resolveVehicleResource } from "./operations/vehicle-resource.js";
 import { resolveHotelResource } from "./operations/hotel-resource.js";
@@ -34,8 +34,9 @@ import { loadOperationLog, setOperationLogDb } from "./operations/operation-log-
 import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, AiConnectionTestInput, AiModelListInput, AiProvider, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
 import { aiProviderConfig } from "../shared/ai-provider-config.js";
-import type { PlanningGenerationState, PlanningModule, PlanningRunResult } from "../shared/contracts.js";
+import { PLANNING_STAGES, type Planner, type PlanningGenerationState, type PlanningModule, type PlanningRunResult } from "../shared/contracts.js";
 import { runPlan } from "./planning/plan-orchestrator.js";
+import { hasIncompleteItineraryPois } from "./planning/poi-enrichment.js";
 import { OpenAICompatiblePlannerAdapter } from "./planning/adapters/openai-compatible-adapter.js";
 import { DbGenerationStateStore, DbOrchestratorRuntime } from "./planning/runtime.js";
 import { buildPreflightFailureState } from "./planning/preflight-failure.js";
@@ -71,6 +72,8 @@ const isDev = !app.isPackaged;
 const debuggingPort = String(9300 + Math.floor(Math.random() * 600));
 app.commandLine.appendSwitch("remote-debugging-port", debuggingPort);
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
+// 抑制 Chromium 内部 noise（service_worker/quota/stun 等），只显示 WARNING 及以上。
+app.commandLine.appendSwitch("log-level", "2");
 /** MiniMax 默认 model：环境变量优先，否则用项目默认的「MiniMax-M3」。 */
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
 
@@ -84,6 +87,20 @@ let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let aut
 const emitProject = (project: ProjectDetail) => {
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
   window.webContents.send("project:updated", project);
+};
+/**
+ * 规划状态在成功落库后才广播。该事件是 renderer 的实时来源；首次打开项目
+ * 仍通过 planning:state 补偿，避免订阅建立前的事件丢失。
+ */
+const emitPlanningState = (state: PlanningGenerationState) => {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+  // isDestroyed() 与 send() 之间窗口仍可能刚好被销毁。状态已经落库，通知失败
+  // 只能丢给下一次 planning:state 补偿，绝不能让主进程规划任务因 UI 生命周期失败。
+  try {
+    window.webContents.send("planning:updated", state.projectId, state);
+  } catch {
+    // renderer 重建 / 退出期间没有可投递目标；持久化状态仍是权威来源。
+  }
 };
 /**
  * 把 settings 表中的字段聚合成对外的 Settings 对象（含 hasKey 这类派生布尔）。
@@ -108,6 +125,32 @@ async function apiKey(provider: AiProvider = getSettings().aiProvider) {
   const settingName = provider === "deepseek" ? "deepseekApiKey" : "minimaxApiKey";
   return loadApiKeyAsync(db, settingName);
 }
+
+/** 已完成方案只允许 POI 查询/名称纠正；Key 不可用时安全降级到人工核查。 */
+async function completedPoiBackfillPlanner(projectId: string): Promise<{ planner: Planner; providerLabel?: string }> {
+  const planner: Planner = {
+    generateStage: async () => { throw new Error("已完成 POI 回填不应调用 AI planner"); },
+  };
+  const settings = getSettings();
+  const hasActiveKey = settings.aiProvider === "deepseek" ? settings.hasDeepSeekKey : settings.hasMiniMaxKey;
+  if (!hasActiveKey) return { planner };
+  try {
+    const decryptedKey = await apiKey(settings.aiProvider);
+    const providerProfile = aiProviderConfig(settings, settings.aiProvider);
+    const resolverAdapter = new OpenAICompatiblePlannerAdapter({
+      apiKey: decryptedKey,
+      baseUrl: providerProfile.baseUrl,
+      model: providerProfile.model,
+    });
+    return {
+      planner: { ...planner, resolvePoiName: resolverAdapter.resolvePoiName.bind(resolverAdapter) },
+      providerLabel: resolveAiProviderLabel(settings),
+    };
+  } catch (error) {
+    console.warn(`[planning] poi_backfill.resolver_unavailable projectId=${projectId}`, error);
+    return { planner };
+  }
+}
 /**
  * 按当前 settings 构造 MiniMaxService：
  *   - provider=deepseek 时切到 Evolink baseUrl/model；
@@ -127,8 +170,10 @@ async function aiService(snapshot?: Settings) {
 /**
  * 在 VBK 已登录的前提下，把当前账号信息写回 settings + 触发 providerId 异步刷新：
  *   - 页面抓不到账号名时优先沿用本机上次记录，不再回退到某个固定值（避免错标）；
- *   - 登录完后开始异步 scheduleProviderIdRefresh，写到 settings(providerIdByAccount:<name>)。
+ *   - 登录完后开始异步 scheduleProviderIdRefresh，写到 settings(providerIdByAccount:<name>)；
+ *   - providerId 刷新有飞行中防重：同一账号若已有刷新在途则跳过，避免重复 HTTP 请求。
  */
+const _providerIdRefreshing = new Set<string>();
 function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   if (!status.loggedIn) return status;
   // 页面抓取不到账号名时只沿用本机上次记录，不再回退到某个固定账号：
@@ -136,7 +181,13 @@ function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   const accountName = status.accountName || db.getSetting("vbkAccountName")?.value || "";
   if (accountName) {
     db.setSetting("vbkAccountName", accountName);
-    scheduleProviderIdRefresh(accountName, detectProviderIdFromBrowser, (id: number | null) => db.setProviderIdFor(accountName, id));
+    if (!_providerIdRefreshing.has(accountName)) {
+      _providerIdRefreshing.add(accountName);
+      scheduleProviderIdRefresh(accountName, detectProviderIdFromBrowser, (id: number | null) => {
+        db.setProviderIdFor(accountName, id);
+        _providerIdRefreshing.delete(accountName);
+      });
+    }
   }
   // 多账号登录：检测到已登录后立刻落快照与活动指针，避免"切走后再想切回来时
   // 没找到老 cookies"。登录过程的 cookies 是分批写入的，必须 await 异步
@@ -557,9 +608,8 @@ function registerIpc() {
   ipcMain.handle("browser:login", () => browser.login());
   ipcMain.handle("browser:logout", () => browser.logout());
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));
-  ipcMain.handle("poi:suggest", async (_event, keyword: string) => {
-    try { return await suggestPoi(browser, String(keyword ?? "")); } catch { return null; }
-  });
+  ipcMain.handle("poi:suggest", async (_event, keyword: string) => suggestPoi(browser, String(keyword ?? "")));
+  ipcMain.handle("poi:suggestDemo", async (_event, keyword: string) => suggestPoiDemo(browser, String(keyword ?? "")));
   ipcMain.handle("browser:navigate", (_event, url: string) => browser.navigate(url));
   ipcMain.handle("browser:currentUrl", () => browser.currentUrl());
   ipcMain.handle("browser:openExternal", () => browser.openExternal());
@@ -717,6 +767,9 @@ function registerIpc() {
   // 规划子系统接线：preflight + runPlan + 项目状态同步。所有 plan 层逻辑
   // 都被抽到 src/main/planning/*，main.ts 只做"装配 + 持久化 + 广播"。
 
+  /** 日志时间戳（HH:mm:ss），给 planning 日志加时间方便排查时序问题。 */
+  const ts = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+
   /** preflight / runPlan 抛错时的统一出口：把任意 error 包成 status=failed 的
    *  持久化 state，若项目存在则写 taskStatus='failed' 的 assistant 消息 + 同步
    *  projects.status + emitProject，返回给上层一个 status='failed' 的正常
@@ -738,12 +791,13 @@ function registerIpc() {
     };
     const failure = buildPreflightFailureState(baseState, error);
     db.savePlanningState(failure.state);
+    emitPlanningState(failure.state);
     // 用户可见可观测性：把 preflight 失败原因打到主进程 console，
     // 避免「继续规划还是报错但日志全无」的报告。err 已通过
     // buildPreflightFailureState 内部 redactSensitiveMessage 处理过；
     // 这里再 raw 输出原 error 一次以方便 grep 调用栈。
-    console.warn(`[planning] preflight.failure projectId=${projectId} existingStatus=${existing?.status ?? "none"} message=${(error as { message?: string } | null)?.message ?? "unknown"}`);
-    console.warn("[planning] preflight.failure stack", error);
+    console.warn(`${ts()} [planning] preflight.failure projectId=${projectId} existingStatus=${existing?.status ?? "none"} message=${(error as { message?: string } | null)?.message ?? "unknown"}`);
+    console.warn(`${ts()} [planning] preflight.failure stack`, error);
     if (project) {
       db.addMessage(projectId, "assistant", failure.assistantReply, "failed");
       syncProjectStatusAfterFailure(db, projectId);
@@ -762,28 +816,52 @@ function registerIpc() {
   /** 共享包装：start / resume 都走这条路径，保证 preflight 行为一致。
    *  调用方在调本函数前应已做完各自的前置持久化（start 写 pending、
    *  resume 做受限 restore），这里只负责 preflight + runPlan + 终态同步。 */
+  // Renderer 的 disabled 只能防正常点击；IPC 仍可能因双击落在同一渲染帧、
+  // 自动恢复或预加载层调用而并发到达。锁必须在主进程、且按项目持有，避免
+  // 两次 runPlan 同时读到同一 completed partial 状态并重复生成/写模块。
+  const activePlanningProjectIds = new Set<string>();
+
+  function assertPlanningIdle(projectId: string): void {
+    if (activePlanningProjectIds.has(projectId)) {
+      throw new Error(`规划正在进行中，不能重复启动：${projectId}`);
+    }
+  }
+
   async function runPlanning(projectId: string): Promise<PlanningRunResult> {
+    // 必须在 try 外拒绝：重复请求不应被 handlePreflightFailure 写成 failed，
+    // 更不能覆盖第一条仍在运行的规划状态。
+    assertPlanningIdle(projectId);
+    activePlanningProjectIds.add(projectId);
     try {
       const project = db.getProject(projectId);
       if (!project) throw projectNotFound(projectId);
-      const turnSettings = getSettings();
-      // 解密 API Key 必须在 try 内：safeStorage 在某些 macOS 环境下抛
-      // "decryption failed"，被外层 catch 接管后写一条 provider_not_configured
-      // 的失败消息；这条路径对应 preflight-failure.test.ts 第一组用例。
-      const decryptedKey = await apiKey(turnSettings.aiProvider);
-      const providerProfile = aiProviderConfig(turnSettings, turnSettings.aiProvider);
-      const providerLabel = resolveAiProviderLabel(turnSettings);
-      const store = new DbGenerationStateStore(db);
-      const runtime = new DbOrchestratorRuntime(db);
-
-      const adapter = new OpenAICompatiblePlannerAdapter({
-        apiKey: decryptedKey,
-        baseUrl: providerProfile.baseUrl,
-        model: providerProfile.model,
-      });
+      const store = new DbGenerationStateStore(db, emitPlanningState);
+      const runtime = new DbOrchestratorRuntime(db, browser);
       const product = (project.product ?? {}) as Record<string, unknown>;
       const basicInfo = (product.basicInfo ?? {}) as Record<string, unknown>;
       const sales = (product.sales ?? {}) as Record<string, unknown>;
+      const existingState = db.loadPlanningState(projectId);
+      const isCompletedPoiOnlyBackfill = existingState?.status === "completed"
+        && PLANNING_STAGES.every((stage) => existingState.completedStages.includes(stage))
+        && hasIncompleteItineraryPois(product);
+      let planner: Planner;
+      let providerLabel: string | undefined;
+      if (isCompletedPoiOnlyBackfill) {
+        ({ planner, providerLabel } = await completedPoiBackfillPlanner(projectId));
+      } else {
+        const turnSettings = getSettings();
+        // 解密 API Key 必须在 try 内：safeStorage 在某些 macOS 环境下抛
+        // "decryption failed"，被外层 catch 接管后写一条 provider_not_configured
+        // 的失败消息；这条路径对应 preflight-failure.test.ts 第一组用例。
+        const decryptedKey = await apiKey(turnSettings.aiProvider);
+        const providerProfile = aiProviderConfig(turnSettings, turnSettings.aiProvider);
+        providerLabel = resolveAiProviderLabel(turnSettings);
+        planner = new OpenAICompatiblePlannerAdapter({
+          apiKey: decryptedKey,
+          baseUrl: providerProfile.baseUrl,
+          model: providerProfile.model,
+        });
+      }
       const result = await runPlan({
         projectId,
         skeleton: {
@@ -796,7 +874,7 @@ function registerIpc() {
         },
         store,
         runtime,
-        planner: adapter,
+        planner,
         providerLabel,
       });
 
@@ -820,11 +898,13 @@ function registerIpc() {
       };
     } catch (error) {
       return handlePreflightFailure(projectId, error);
+    } finally {
+      activePlanningProjectIds.delete(projectId);
     }
   }
 
   /** 把持久化 completed 的 PlanningGenerationState 拼回 PlanningRunResult 形状，
-   *  用于 planning:resume 在状态已为 completed 时跳过 runPlanning 直接返回稳定结果。 */
+   *  用于 planning:resume 在状态已为 completed 且 POI 已齐全时跳过 runPlanning。 */
   function buildStableCompletedResult(state: PlanningGenerationState): PlanningRunResult {
     const accepted = state.stages.flatMap((s) => s.accepted.map((m) => m.module));
     const rejected = state.stages.flatMap((s) =>
@@ -847,41 +927,49 @@ function registerIpc() {
     // 必须先 restore 后 save pending：否则 pending state 会先洗掉旧的
     // failed/needs_user 标记，后续 runPlan=completed 走 syncProjectStatusAfterRunPlan
     // 时因 projects.status=blocked 错过 planning→review 推送，UI 永远停在 blocked。
-    console.info(`[planning] ipc.start projectId=${projectId}`);
+    console.info(`${ts()} [planning] ipc.start projectId=${projectId}`);
+    // 在任何状态写入前检查，避免第二个 start 把首个运行中的 state 覆盖为 pending。
+    assertPlanningIdle(projectId);
     const existingState = db.loadPlanningState(projectId);
     if (existingState) {
       restoreProjectToPlanningForRetry(db, projectId, existingState.status);
     }
-    db.savePlanningState({
+    const pendingState: PlanningGenerationState = {
       projectId,
       currentStage: "skeleton",
       completedStages: [],
       stages: [],
       status: "pending",
       resumeAt: new Date().toISOString(),
-    });
+    };
+    db.savePlanningState(pendingState);
+    emitPlanningState(pendingState);
     return runPlanning(projectId);
   });
   ipcMain.handle("planning:resume", (_event, projectId: string) => {
     // resume 必须先 load state：没有持久化记录时没有可恢复上下文，盲目跑
     // 等同 planning:start，应由调用方显式改走 start；这里直接抛错让 IPC
     // 拒绝而不是静默写一条 pending。
-    console.info(`[planning] ipc.resume projectId=${projectId}`);
+    console.info(`${ts()} [planning] ipc.resume projectId=${projectId}`);
     let existingState: PlanningGenerationState | undefined;
     try {
       existingState = db.loadPlanningState(projectId);
     } catch (error) {
-      console.warn(`[planning] ipc.resume load_failed projectId=${projectId}`, error);
+      console.warn(`${ts()} [planning] ipc.resume load_failed projectId=${projectId}`, error);
       return handlePreflightFailure(projectId, error);
     }
     if (!existingState) {
-      console.warn(`[planning] ipc.resume no_state projectId=${projectId}`);
+      console.warn(`${ts()} [planning] ipc.resume no_state projectId=${projectId}`);
       throw new Error(`planning:resume 拒绝：项目 ${projectId} 没有持久化规划状态，请改用 planning:start`);
     }
-    if (existingState.status === "completed") {
-      // 已完成的项目不应被 resume 重跑（避免重新调 AI、重复写消息、再次触发
-      // syncProjectStatusAfterRunPlan）。直接返回持久化的稳定结果。
-      console.info(`[planning] ipc.resume stable_completed projectId=${projectId} currentStage=${existingState.currentStage} completedStages=${existingState.completedStages.join(",")}`);
+    const allStagesCompleted = PLANNING_STAGES.every((stage) => existingState.completedStages.includes(stage));
+    const projectHasIncompletePois = hasIncompleteItineraryPois(db.getProject(projectId)?.product ?? {});
+    if (existingState.status === "completed" && allStagesCompleted && !projectHasIncompletePois) {
+      // 只有所有阶段完成且 itinerary POI 已齐全的项目才不应被 resume 重跑，避免
+      // 重复调 AI、重复写消息、再次触发 syncProjectStatusAfterRunPlan。历史 completed
+      // 草稿仍有空 POI 时必须进入 runPlanning 的 completed backfill 分支；该分支只查
+      // POI，不会重跑 planner / AI 阶段。
+      console.info(`${ts()} [planning] ipc.resume stable_completed projectId=${projectId} currentStage=${existingState.currentStage} completedStages=${existingState.completedStages.join(",")}`);
       return buildStableCompletedResult(existingState);
     }
     // 其他状态：受限 restore —— 仅当 projects.status=blocked 且持久化
@@ -891,19 +979,19 @@ function registerIpc() {
     try {
       restoreProjectToPlanningForRetry(db, projectId, existingState.status);
     } catch (error) {
-      console.warn(`[planning] ipc.resume restore_failed projectId=${projectId}`, error);
+      console.warn(`${ts()} [planning] ipc.resume restore_failed projectId=${projectId}`, error);
       return handlePreflightFailure(projectId, error);
     }
-    console.info(`[planning] ipc.resume proceed projectId=${projectId} currentStage=${existingState.currentStage} status=${existingState.status} completedStages=${existingState.completedStages.join(",")}`);
+    console.info(`${ts()} [planning] ipc.resume proceed projectId=${projectId} currentStage=${existingState.currentStage} status=${existingState.status} completedStages=${existingState.completedStages.join(",")}`);
     return runPlanning(projectId);
   });
   ipcMain.handle("planning:state", (_event, projectId: string) => {
     try {
       const state = db.loadPlanningState(projectId);
-      console.info(`[planning] ipc.state projectId=${projectId} status=${state?.status ?? "none"} currentStage=${state?.currentStage ?? "none"}`);
+      console.info(`${ts()} [planning] ipc.state projectId=${projectId} status=${state?.status ?? "none"} currentStage=${state?.currentStage ?? "none"}`);
       return state;
     } catch (error) {
-      console.warn(`[planning] ipc.state failed projectId=${projectId}`, error);
+      console.warn(`${ts()} [planning] ipc.state failed projectId=${projectId}`, error);
       throw error;
     }
   });

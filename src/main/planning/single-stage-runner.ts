@@ -1,36 +1,14 @@
-/**
- * 单阶段执行器：被 plan-orchestrator 主循环调用一次，负责把某个阶段从
- * planner / runtime 输入推进到下一阶段。
- *
- *  抽出到独立文件是为了保持 plan-orchestrator.ts 在 size budget 内
- * （≤350 行）；这块代码自包含、零外部依赖（除开 schemas / stage-runner / validation）。
- */
+/** 单阶段执行器：推进 planner / runtime 输入到下一阶段。 */
 
 import { AI_WRITABLE_PATHS, STAGE_ALLOWED_MODULES } from "./schemas.js";
-import {
-  executeStageOutput,
-  upsertStageInState,
-  toStageError,
-} from "./stage-runner.js";
-import {
-  validateCompleteness,
-  deepValidateModules,
-} from "./validation.js";
+import { executeStageOutput, upsertStageInState, toStageError } from "./stage-runner.js";
+import { validateCompleteness, deepValidateModules } from "./validation.js";
 import { composeStageAssistantReply } from "./replies.js";
-import { pendingResearchTasks, itineraryPoiTasks } from "./research-tasks.js";
+import { pendingResearchTasks } from "./research-tasks.js";
+import { enrichItineraryPois } from "./poi-enrichment.js";
 import { buildRewoundState } from "./validation-rewind.js";
 import { logAttemptError, logNoProgress, logStageEnd, logStageStart } from "./log.js";
-import type {
-  ModuleOutcome,
-  Planner,
-  PlannerContext,
-  PlanningGenerationState,
-  PlanningModule,
-  PlanningStage,
-  PlanningStageError,
-  ResearchTaskProposal,
-  PlanningSkeleton,
-} from "../../shared/contracts-planning.js";
+import type { ModuleOutcome, Planner, PlannerContext, PlanningGenerationState, PlanningModule, PlanningStage, PlanningStageError, ResearchTaskProposal, PlanningSkeleton } from "../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "./types.js";
 
 export interface SingleStageResult {
@@ -326,7 +304,13 @@ async function runAiStage(args: {
     if (stage === "itinerary" || stage === "presentation") {
       const alreadyAccepted = await runtime.loadAcceptedModules(state.projectId);
       const sole = stage === "itinerary" ? "itinerary" : "presentation";
-      if (alreadyAccepted.includes(sole)) {
+      let itineraryPoiComplete = true;
+      if (stage === "itinerary") {
+        const current = await runtime.loadCurrentProduct(state.projectId);
+        itineraryPoiComplete = Array.isArray(current.itinerary) && current.itinerary.every((day: any) => Array.isArray(day?.spots) && day.spots.every((spot: any) => spot && typeof spot === "object" && String(spot.poiName ?? "").trim() && String(spot.poiId ?? "").trim()));
+      }
+      if (alreadyAccepted.includes(sole) && itineraryPoiComplete) {
+        if (stage === "itinerary") console.info("[planning.poi]", { event: "skip", projectId: state.projectId });
         accepted.push({
           module: sole,
           status: "accepted",
@@ -366,15 +350,13 @@ async function runAiStage(args: {
       for (const t of exec.researchTasks) researchTasks.push(t);
       if (exec.hasAccepted) {
         if (stage === "itinerary") {
-          const product = await runtime.loadCurrentProduct(state.projectId);
-          for (const task of itineraryPoiTasks(product.itinerary, skeleton.destination)) {
-            const key = `${task.type}::${task.label}`;
-            await runtime.addResearchTask(state.projectId, task);
-            if (!persistedTaskKeys.has(key)) {
-              persistedTaskKeys.add(key);
-              researchTasks.push(task);
-            }
-          }
+          researchTasks.push(...await enrichItineraryPois({
+            projectId: state.projectId,
+            destination: skeleton.destination,
+            runtime,
+            persistedTaskKeys,
+            resolvePoiName: planner.resolvePoiName?.bind(planner),
+          }));
         }
         if (stage === "commercial") {
           // commercial 阶段：必须五个模块（packageName + pricing + inventory + terms + release）全部 accepted 才算完成。

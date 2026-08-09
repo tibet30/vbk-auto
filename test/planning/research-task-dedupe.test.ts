@@ -113,7 +113,7 @@ test("confirmed / resolved 的 research task 不被新一轮 planning 重新生�
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   // 预先在 DB 里放一条 confirmed 状态的 city-poi 核查：运营已经在 VBK 上确认过。
-  rt.tasks.push({ label: "核查 晋祠 在 VBK 资源库的 city / poi 映射", type: "vbk", state: "confirmed" });
+  rt.tasks.push({ label: "核查 晋祠 的 VBK POI 映射", type: "vbk", state: "confirmed" });
   // planning:start → research 阶段会基于 itinerary 提议 city-poi 核查；
   // 因为该任务已 confirmed，pendingResearchTasks 必须 filter 掉。
   const planner = new ItineraryOnlyPlanner();
@@ -131,8 +131,8 @@ test("research 阶段 deterministic：confirmed 任务与未完成任务的混�
     basicInfo: { days: 2, nights: 1, supplierProductCode: "NEW" },
     operations: { hotelTier: "当地5钻酒店/-38" },
     itinerary: [
-      { day: 1, spots: ["晋祠"] },
-      { day: 2, spots: ["山西博物院"] },
+      { day: 1, spots: [{ name: "晋祠", poiName: null, poiId: null }] },
+      { day: 2, spots: [{ name: "山西博物院", poiName: null, poiId: null }] },
     ],
     commercial: {
       pricing: { adult: 1000, child: 500, minimumTravelers: 2, currency: "CNY" },
@@ -144,7 +144,7 @@ test("research 阶段 deterministic：confirmed 任务与未完成任务的混�
   const accepted = ["skeleton", "itinerary", "packageName", "pricing", "inventory", "terms", "release"] as const;
   // existing 含一条 confirmed 状态的晋祠核查 → 应当 filter 掉。
   const existing: Array<Pick<ResearchTaskProposal, "label" | "type">> = [
-    { label: "核查 晋祠 在 VBK 资源库的 city / poi 映射", type: "vbk" },
+    { label: "核查 晋祠 的 VBK POI 映射", type: "vbk" },
   ];
   const pending = pendingResearchTasks({ skeleton, product, acceptedModules: accepted, existing });
   assert.ok(!pending.some((p) => p.proposal.label.includes("晋祠")), "confirmed 状态的晋祠核查已被 dedupe");

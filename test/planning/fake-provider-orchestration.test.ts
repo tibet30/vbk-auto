@@ -29,6 +29,7 @@ import type {
   PlanningStage,
   ResearchTaskProposal,
 } from "../../src/shared/contracts-planning.js";
+import { PLANNING_STAGES } from "../../src/shared/contracts-planning.js";
 
 interface FakeProviderScript {
   stage: PlanningStage;
@@ -60,8 +61,14 @@ class FakePlanner implements Planner {
 
 class InMemoryStore implements GenerationStateStore {
   state?: PlanningGenerationState;
+  snapshots: PlanningGenerationState[] = [];
   load(): Promise<PlanningGenerationState | undefined> { return Promise.resolve(this.state); }
-  save(state: PlanningGenerationState): Promise<void> { this.state = state; return Promise.resolve(); }
+  save(state: PlanningGenerationState): Promise<void> {
+    // 编排器会原地推进 state；记录深拷贝才能检验每次实际落盘的快照。
+    this.state = structuredClone(state);
+    this.snapshots.push(structuredClone(state));
+    return Promise.resolve();
+  }
 }
 
 class FakeRuntime implements OrchestratorRuntime {
@@ -72,10 +79,13 @@ class FakeRuntime implements OrchestratorRuntime {
   history: Array<{ role: "user" | "assistant"; content: string }> = [];
   /** addResearchTask 去重语义：相同 label+type 只算一次。 */
   private taskKeys = new Set<string>();
+  moduleWrites: Array<{ module: PlanningModule; writePath: string }> = [];
+  suggestPoi?: (keyword: string) => Promise<{ poiName: string; poiId: string } | null>;
   async loadExistingResearchTasks(): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
     return this.researchTasks.map((t) => ({ label: t.label, type: t.type }));
   }
   async writeModule(_projectId: string, _module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
+    this.moduleWrites.push({ module: _module, writePath });
     if (writePath === AI_WRITABLE_PATHS.presentation || writePath === AI_WRITABLE_PATHS.itinerary
         || writePath === AI_WRITABLE_PATHS.packageName || writePath === AI_WRITABLE_PATHS.pricing
         || writePath === AI_WRITABLE_PATHS.inventory || writePath === AI_WRITABLE_PATHS.terms
@@ -146,8 +156,8 @@ function buildFakeScript(): FakeProviderScript[] {
           module: "itinerary",
           status: "accepted",
           value: [
-            { day: 1, title: "太原接站—晋祠", spots: ["晋祠博物馆"], description: "专车接站游览晋祠。", hotel: "太原市区舒适酒店", meals: "早餐自理；午餐自理；晚餐自理" },
-            { day: 2, title: "山西博物院—送站", spots: ["山西博物院"], description: "上午山西博物院，下午送站。", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+            { day: 1, title: "太原接站—晋祠", spots: [{ name: "晋祠博物馆", poiName: null, poiId: null }], description: "专车接站游览晋祠。", hotel: "太原市区舒适酒店", meals: "早餐自理；午餐自理；晚餐自理" },
+            { day: 2, title: "山西博物院—送站", spots: [{ name: "山西博物院", poiName: null, poiId: null }], description: "上午山西博物院，下午送站。", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
           ],
         }],
       },
@@ -226,6 +236,39 @@ test("完整 staged planning 跑完后状态为 completed", async () => {
   assert.equal(result.rejected.length, 0);
 });
 
+test("阶段成功的持久化快照原子推进到下一阶段，期间不暴露 completed", async () => {
+  const store = new InMemoryStore();
+  const runtime = new FakeRuntime();
+  const planner = new FakePlanner(buildFakeScript());
+  await runPlan({ projectId: "progress-atomic", skeleton, store, runtime, planner, providerLabel: "minimax" });
+
+  // 首个 running 快照用于宣告起跑；随后每一个 save 都是实际会被 renderer
+  // 轮询到的持久化状态，必须原子完成「标记前一阶段完成 + 推进下一阶段」。
+  // 不使用状态对象的引用，InMemoryStore.save 已 structuredClone，避免后续原地
+  // 修改把历史快照伪装成正确结果。
+  const expectedProgressSnapshots: Array<{
+    completedStages: PlanningStage[];
+    currentStage: PlanningStage;
+    status: "running" | "completed";
+  }> = [
+    { completedStages: [], currentStage: "skeleton", status: "running" },
+    { completedStages: ["skeleton"], currentStage: "basicInfo", status: "running" },
+    { completedStages: ["skeleton", "basicInfo"], currentStage: "itinerary", status: "running" },
+    { completedStages: ["skeleton", "basicInfo", "itinerary"], currentStage: "presentation", status: "running" },
+    // presentation / commercial 并行阶段收敛后只落一次快照，不能先暴露任一
+    // 子阶段的 completed，也不能产生多余的中间 save。
+    { completedStages: ["skeleton", "basicInfo", "itinerary", "presentation", "commercial"], currentStage: "research", status: "running" },
+    { completedStages: ["skeleton", "basicInfo", "itinerary", "presentation", "commercial", "research"], currentStage: "validation", status: "running" },
+    { completedStages: PLANNING_STAGES.slice(), currentStage: "validation", status: "running" },
+    { completedStages: PLANNING_STAGES.slice(), currentStage: "validation", status: "completed" },
+  ];
+  assert.equal(store.snapshots.length, expectedProgressSnapshots.length, "成功路径不得额外持久化中间快照");
+  assert.deepEqual(
+    store.snapshots.map(({ completedStages, currentStage, status }) => ({ completedStages, currentStage, status })),
+    expectedProgressSnapshots,
+  );
+});
+
 test("release.submitReview / publishAfterApproval 即使模型写 true 也会被强制 false", async () => {
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
@@ -275,6 +318,66 @@ test("续跑时已完成阶段被跳过，且不重跑 planner", async () => {
   assert.equal(result2.status, "completed");
   assert.equal(planner2.calls.length, 0, "resume 不应再调 planner");
   assert.equal(firstCalls, 4);
+});
+
+test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 completed", async () => {
+  const store = new InMemoryStore();
+  const runtime = new FakeRuntime();
+  await runPlan({
+    projectId: "completed-poi-backfill", skeleton, store, runtime,
+    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
+  });
+  runtime.moduleWrites = [];
+  const queried: string[] = [];
+  runtime.suggestPoi = async (keyword) => {
+    queried.push(keyword);
+    return keyword === "晋祠博物馆" ? { poiName: "晋祠博物馆", poiId: "79413" } : null;
+  };
+  const planner = new FakePlanner(buildFakeScript());
+
+  const result = await runPlan({
+    projectId: "completed-poi-backfill", skeleton, store, runtime, planner, providerLabel: "minimax",
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.state.completedStages, PLANNING_STAGES);
+  assert.deepEqual(queried, ["晋祠博物馆", "山西博物院"]);
+  assert.equal(planner.calls.length, 0, "POI-only backfill 不得重新调用 AI planner");
+  assert.deepEqual(runtime.moduleWrites, [{ module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary }], "仅有实际匹配时才写回行程");
+  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: string | null }> }>;
+  assert.deepEqual(itinerary[0].spots[0], { name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: "79413" });
+  assert.deepEqual(itinerary[1].spots[0], { name: "山西博物院", poiName: null, poiId: null });
+});
+
+test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", async () => {
+  const store = new InMemoryStore();
+  const runtime = new FakeRuntime();
+  await runPlan({
+    projectId: "completed-poi-complete", skeleton, store, runtime,
+    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
+  });
+  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: string | null }> }>;
+  for (const day of itinerary) {
+    for (const spot of day.spots) {
+      spot.poiName = spot.poiName ?? "已核验景点";
+      spot.poiId = spot.poiId ?? "1";
+    }
+  }
+  runtime.moduleWrites = [];
+  let queryCount = 0;
+  runtime.suggestPoi = async () => {
+    queryCount += 1;
+    return null;
+  };
+
+  const result = await runPlan({
+    projectId: "completed-poi-complete", skeleton, store, runtime,
+    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(queryCount, 0);
+  assert.deepEqual(runtime.moduleWrites, []);
 });
 
 test("assistant 回复反映实际接受 / 缺失模块，不抄模型 reply", async () => {

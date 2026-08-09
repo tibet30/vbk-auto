@@ -78,9 +78,9 @@ const skeleton = {
 const fullOutputs: Record<PlanningStage, PlanningStageOutput> = {
   skeleton: { reply: "skel", modules: [{ module: "skeleton", status: "accepted", value: { hotelTier: "当地5钻酒店/-38", pickupCity: "南京", transport: "charter", reusePickupForDropoff: true, mealsIncluded: false } }] },
   itinerary: { reply: "itin", modules: [{ module: "itinerary", status: "accepted", value: [
-    { day: 1, title: "Day 1 南京", spots: ["中山陵"], description: "D1", hotel: "南京酒店", meals: "B/L/D" },
-    { day: 2, title: "Day 2 南京", spots: ["夫子庙"], description: "D2", hotel: "南京酒店", meals: "含早餐；午餐自理；晚餐自理" },
-    { day: 3, title: "Day 3 南京", spots: ["总统府"], description: "D3", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+    { day: 1, title: "Day 1 南京", spots: [{ name: "中山陵", poiName: null, poiId: null }], description: "D1", hotel: "南京酒店", meals: "B/L/D" },
+    { day: 2, title: "Day 2 南京", spots: [{ name: "夫子庙", poiName: null, poiId: null }], description: "D2", hotel: "南京酒店", meals: "含早餐；午餐自理；晚餐自理" },
+    { day: 3, title: "Day 3 南京", spots: [{ name: "总统府", poiName: null, poiId: null }], description: "D3", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
   ] }] },
   presentation: { reply: "pres", modules: [{ module: "presentation", status: "accepted", value: {
     recommendationCategory: "优选行程", recommendation: "南京三日历史文化漫游",

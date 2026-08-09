@@ -103,6 +103,39 @@ test("重复返回的同名待核查任务只保留一项", async (t) => {
   assert.equal(tasks[0].detail, "最新说明");
 });
 
+test("历史 POI 待办在详情中合并呈现，且续跑不会再新增同义项", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-poi-task-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+  const raw = (db as unknown as { db: { prepare(sql: string): { run(...values: unknown[]): void; get(...values: unknown[]): { count: number } } } }).db;
+  const insert = raw.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)");
+  for (const [index, name] of ["山西博物院", "晋祠", "蒙山大佛"].entries()) {
+    insert.run(`legacy-no-match-${index}`, project.id, `待核查景点 ${name} 的 VBK POI`, "vbk", "queued", "researching", "suggestPoi 未匹配，请人工核查", "[]");
+    insert.run(`legacy-city-poi-${index}`, project.id, `核查 ${name} 在 VBK 资源库的 city / poi 映射`, "vbk", "queued", "researching", "由目的地「太原」延伸", "[]");
+  }
+  // 标签相近的门票 / 成本任务不属于严格定义的 POI 映射，必须保留为独立项。
+  insert.run("ticket-cost", project.id, "核查 晋祠 门票成本", "cost", "queued", "researching", "待供应商确认", "[]");
+  insert.run("ticket-vbk", project.id, "核查 晋祠 在 VBK 资源库的 city / poi 映射（含门票）", "vbk", "queued", "researching", "待人工核查票价", "[]");
+
+  const visible = db.getProject(project.id)!.researchTasks;
+  assert.equal(visible.length, 5, "六条历史 POI 行应合为三项，门票/成本任务保持独立");
+  assert.deepEqual(visible.map((task) => task.label).sort(), [
+    "核查 山西博物院 的 VBK POI 映射",
+    "核查 晋祠 的 VBK POI 映射",
+    "核查 蒙山大佛 的 VBK POI 映射",
+    "核查 晋祠 门票成本",
+    "核查 晋祠 在 VBK 资源库的 city / poi 映射（含门票）",
+  ].sort());
+  assert.equal(raw.prepare("SELECT count(*) AS count FROM research_tasks WHERE project_id=?").get(project.id).count, 8, "历史行必须保留，不能无痕删除");
+
+  db.addResearchTask(project.id, { label: "核查 晋祠 的 VBK POI 映射", type: "vbk", detail: "本轮续跑仍需人工核查" });
+  assert.equal(raw.prepare("SELECT count(*) AS count FROM research_tasks WHERE project_id=?").get(project.id).count, 8, "canonical label 应识别 legacy 行并避免新增第七行");
+  const afterResume = db.getProject(project.id)!.researchTasks;
+  assert.equal(afterResume.length, 5);
+  assert.match(afterResume.find((task) => task.label === "核查 晋祠 的 VBK POI 映射")?.detail ?? "", /suggestPoi 未匹配/, "legacy detail 保留为可追溯历史");
+});
+
 test("应用重启后会把没有回复的消息标记为可重试失败", async (t) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-message-recovery-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));

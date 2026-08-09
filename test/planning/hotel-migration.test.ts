@@ -63,7 +63,7 @@ test("productSchema 接受 /-38，拒 绝不在白名单的旧 /-5", () => {
     sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
     basicInfo: { supplierProductName: "南京三日", supplierProductCode: "NEW", subtitle: "sub", days: 1, nights: 0, meetingCity: "南京", destinationCity: "南京", province: "江苏", operationNotes: "n" },
     operations: { hotelSource: "nonPlatform", hotelTier: "当地5钻酒店/-38", transport: "charter", pickupCity: "南京", reusePickupForDropoff: true, mealsIncluded: false },
-    itinerary: [{ day: 1, title: "Day 1", spots: ["A"], description: "D", hotel: "H", meals: "M" }],
+    itinerary: [{ day: 1, title: "Day 1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "M" }],
   };
   assert.equal(productSchema.safeParse(base).success, true);
   // operationsSchema 的 hotelTier 是 z.enum(HOTEL_TIER_VALUES) ，旧 /-5 不在白名单 → 解析失败。

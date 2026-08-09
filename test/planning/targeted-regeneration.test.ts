@@ -69,8 +69,8 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
     itinerary: () => ({
       reply: "itin",
       modules: [{ module: "itinerary", status: "accepted", value: [
-        { day: 1, title: "Day 1", spots: ["A"], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-        { day: 2, title: "Day 2", spots: ["B"], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+        { day: 1, title: "Day 1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+        { day: 2, title: "Day 2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
       ] }],
     }),
     presentation: () => ({

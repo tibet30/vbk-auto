@@ -99,8 +99,8 @@ test("skeleton / validation 阶段不调用 planner（总调用次数仅含 itin
       if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
       if (request.stage === "itinerary") {
         return { reply: "", modules: [{ module: "itinerary", status: "accepted", value: [
-          { day: 1, title: "Day 1", spots: ["A"], description: "D1", hotel: "H", meals: "B/L/D" },
-          { day: 2, title: "Day 2", spots: ["B"], description: "D2", hotel: "", meals: "B/L/D" },
+          { day: 1, title: "Day 1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D1", hotel: "H", meals: "B/L/D" },
+          { day: 2, title: "Day 2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "B/L/D" },
         ] }] };
       }
       // 其它阶段直接抛错模拟 needs_user（不是 fatal）。
@@ -149,8 +149,8 @@ function moduleSeed(stage: PlanningStage): unknown {
   switch (stage) {
     case "itinerary":
       return [
-        { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
-        { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" },
+        { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
+        { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
       ];
     case "presentation":
       return {

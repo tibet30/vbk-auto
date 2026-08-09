@@ -28,8 +28,8 @@ class ItineraryOnlyPlanner implements Planner {
       return {
         reply: "itin",
         modules: [{ module: "itinerary", status: "accepted", value: [
-          { day: 1, title: "D1", spots: ["晋祠博物馆", "太原古县城"], description: "D", hotel: "H", meals: "B/L/D" },
-          { day: 2, title: "D2", spots: ["山西博物院", "晋商博物院"], description: "D", hotel: "", meals: "B/L/D" },
+          { day: 1, title: "D1", spots: [{name:"晋祠博物馆",poiName:null,poiId:null},{name:"太原古县城",poiName:null,poiId:null}], description: "D", hotel: "H", meals: "B/L/D" },
+          { day: 2, title: "D2", spots: [{name:"山西博物院",poiName:null,poiId:null},{name:"晋商博物院",poiName:null,poiId:null}], description: "D", hotel: "", meals: "B/L/D" },
         ] }],
       };
     }
@@ -134,6 +134,47 @@ test("research 阶段由本地 deterministic 生成，不调用 AI", async () =>
   assert.ok(result.researchTasks.length >= 1, "research 阶段应当产出至少一条任务");
 });
 
+test("SuggestPoi 业务失败不会被降级成景点未匹配任务", async () => {
+  const store = new InMemoryStore();
+  const rt = new FakeRuntime();
+  rt.suggestPoi = async () => {
+    throw new Error("VBK POI 查询业务失败");
+  };
+
+  const result = await runPlan({
+    projectId: "poi-business-failure",
+    skeleton,
+    store,
+    runtime: rt,
+    planner: new ItineraryOnlyPlanner(),
+    providerLabel: "minimax",
+  });
+
+  assert.equal(result.status, "completed");
+  assert.ok(
+    !rt.researchTasks.some((task) => task.label.startsWith("待核查景点 ")),
+    "接口失败必须可观察，不能伪装成 suggestPoi 未匹配",
+  );
+  assert.equal(
+    rt.researchTasks.filter((task) => /VBK POI 映射$/.test(task.label)).length,
+    0,
+    "查询失败不是明确的未匹配，不能生成 canonical POI 核查项",
+  );
+});
+
+test("SuggestPoi 未匹配与 itinerary 核查共用一个 canonical POI 待办", async () => {
+  const store = new InMemoryStore();
+  const rt = new FakeRuntime();
+  rt.suggestPoi = async () => null;
+
+  await runPlan({ projectId: "poi-no-match", skeleton, store, runtime: rt, planner: new ItineraryOnlyPlanner(), providerLabel: "minimax" });
+
+  const poiTasks = rt.researchTasks.filter((task) => /VBK POI 映射$/.test(task.label));
+  assert.equal(poiTasks.length, 4, "四个景点只应有四项待办，不能因未匹配再翻倍");
+  assert.equal(new Set(poiTasks.map((task) => task.label)).size, 4);
+  assert.ok(poiTasks.every((task) => task.label.startsWith("核查 ")));
+});
+
 test("research task 标签不包含「已确认 / 已解决」", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
@@ -149,7 +190,7 @@ test("planResearchTasks deterministic：同一输入两次产出完全一致", (
     operations: { hotelTier: "当地5钻酒店/-38" },
     itinerary: [
       { day: 1, spots: ["晋祠", "太原古县城"] },
-      { day: 2, spots: ["山西博物院"] },
+      { day: 2, spots: [{ name: "山西博物院", poiName: null, poiId: null }] },
     ],
     commercial: {
       pricing: { adult: 1000, child: 500, minimumTravelers: 2, currency: "CNY" },
@@ -166,10 +207,10 @@ test("planResearchTasks deterministic：同一输入两次产出完全一致", (
 test("pendingResearchTasks 会过滤掉已存在的任务", () => {
   const product = {
     operations: { hotelTier: "当地5钻酒店/-38" },
-    itinerary: [{ day: 1, spots: ["晋祠"] }],
+    itinerary: [{ day: 1, spots: [{ name: "晋祠", poiName: null, poiId: null }] }],
   };
   const accepted = ["skeleton", "itinerary"] as const;
-  const existing = [{ label: "核查 晋祠 在 VBK 资源库的 city / poi 映射", type: "vbk" }];
+  const existing = [{ label: "核查 晋祠 的 VBK POI 映射", type: "vbk" }];
   const pending = pendingResearchTasks({ skeleton, product, acceptedModules: accepted, existing });
   // 已存在的城市核查不应再被推为 pending。
   assert.ok(!pending.some((p) => p.proposal.label.includes("晋祠")), "已存在的任务不应再 pending");

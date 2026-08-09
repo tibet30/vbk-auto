@@ -21,8 +21,8 @@ function buildScript(): ScriptEntry[] {
   return [
     { stage: "basicInfo", output: { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] } },
     { stage: "itinerary", output: { reply: "itin", modules: [{ module: "itinerary", status: "accepted", value: [
-      { day: 1, title: "Day 1", spots: ["Spot A"], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-      { day: 2, title: "Day 2", spots: ["Spot B"], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+      { day: 1, title: "Day 1", spots: [{ name: "Spot A", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+      { day: 2, title: "Day 2", spots: [{ name: "Spot B", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
     ] }] } },
     { stage: "presentation", output: { reply: "pres", modules: [{ module: "presentation", status: "accepted", value: {
       recommendationCategory: "优选行程", recommendation: "R", recommendations: [

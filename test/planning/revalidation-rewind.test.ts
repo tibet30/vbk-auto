@@ -93,7 +93,7 @@ test("detectAcceptedModulesFromProduct 在骨架 2 天但 itinerary 只 1 天时
   const product: Record<string, unknown> = {
     basicInfo: { days: 2, nights: 1, supplierProductCode: "NEW" },
     itinerary: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", meals: "M" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", meals: "M" },
     ],
   };
   const accepted = detectAcceptedModulesFromProduct(product);
@@ -121,8 +121,8 @@ test("detectAcceptedModulesFromProduct 对 itinerary days 顺序错乱也拒绝"
   const product = {
     basicInfo: { days: 2, nights: 1, supplierProductCode: "NEW" },
     itinerary: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", meals: "M" },
-      { day: 1, title: "D1-dup", spots: ["B"], description: "D", meals: "M" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", meals: "M" },
+      { day: 1, title: "D1-dup", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", meals: "M" },
     ],
   };
   const accepted = detectAcceptedModulesFromProduct(product);
@@ -137,8 +137,8 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
     itinerary: {
       reply: "itin",
       modules: [{ module: "itinerary", status: "accepted", value: [
-        { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
-        { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" },
+        { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
+        { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
       ] }],
     },
     presentation: { reply: "p", modules: [{ module: "presentation", status: "accepted", value: {
@@ -166,7 +166,7 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
   rt.product = {
     ...rt.product,
     itinerary: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
     ],
   };
   // 第二次 resume：planner 仍然只产 1 天行程（跟 corrupt 后一致，模拟 AI / 运营
@@ -178,7 +178,7 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
     itinerary: {
       reply: "itin-broken",
       modules: [{ module: "itinerary", status: "accepted", value: [
-        { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
+        { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
       ] }],
     },
   };
@@ -196,8 +196,8 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
   const rt = new FakeRuntime();
   const fullOutputs: Partial<Record<PlanningStage, PlanningStageOutput>> = {
     itinerary: { reply: "i", modules: [{ module: "itinerary", status: "accepted", value: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
-      { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
+      { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
     ] }] },
     presentation: { reply: "p", modules: [{ module: "presentation", status: "accepted", value: {
       recommendationCategory: "优选行程",
@@ -250,8 +250,8 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
   const rt = new FakeRuntime();
   const fullOutputs: Partial<Record<PlanningStage, PlanningStageOutput>> = {
     itinerary: { reply: "i", modules: [{ module: "itinerary", status: "accepted", value: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
-      { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
+      { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
     ] }] },
     presentation: { reply: "p", modules: [{ module: "presentation", status: "accepted", value: {
       recommendationCategory: "优选行程",
@@ -275,7 +275,7 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
   rt.product = {
     ...rt.product,
     itinerary: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
     ],
   };
   // planner2 仍只输出 1 天行程，保证 rewind + 重跑后状态仍停在 needs_user，
@@ -283,7 +283,7 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
   const brokenOutputs: Partial<Record<PlanningStage, PlanningStageOutput>> = {
     ...fullOutputs,
     itinerary: { reply: "i-broken", modules: [{ module: "itinerary", status: "accepted", value: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
     ] }] },
   };
   const planner2 = new ScriptedPlanner(brokenOutputs);

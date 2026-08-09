@@ -64,8 +64,8 @@ test("resume 不会重跑已完成阶段，从 currentStage 续跑", async () =>
     reply: "itin", modules: [{
       module: "itinerary", status: "accepted",
       value: [
-        { day: 1, title: "Day 1", spots: ["A"], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-        { day: 2, title: "Day 2", spots: ["B"], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+        { day: 1, title: "Day 1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+        { day: 2, title: "Day 2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
       ],
     }],
   };
@@ -144,8 +144,8 @@ test("resume：persisted state 只有 skeleton 时必须从 itinerary 起跑，�
     modules: [{
       module: "itinerary", status: "accepted",
       value: [
-        { day: 1, title: "Day 1", spots: ["A"], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-        { day: 2, title: "Day 2", spots: ["B"], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+        { day: 1, title: "Day 1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+        { day: 2, title: "Day 2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
       ],
     }],
   };

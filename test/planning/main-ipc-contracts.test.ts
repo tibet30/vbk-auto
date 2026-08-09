@@ -23,8 +23,10 @@
  *
  *   G4 · planning:resume 必须先 load state：
  *         - 持久化记录不存在 → 直接抛错（不接受盲跑等同 planning:start）；
- *         - 持久化 status='completed' → 返回 buildStableCompletedResult
- *           拼出的稳定 PlanningRunResult，且不重新调 runPlanning；
+ *         - 持久化 status='completed'、全部阶段已完成且 itinerary POI 齐全 → 返回
+ *           buildStableCompletedResult 拼出的稳定 PlanningRunResult；若仍有空 POI，
+ *           必须继续进入 runPlanning 的 completed backfill 分支，且不重跑 AI；
+ *           completed 但阶段不全也必须继续走恢复路径；
  *         - 其他状态 → 受限 restore 后才调 runPlanning。
  *
  *  本文件不动 main.ts / planning 模块，只读源码做白盒断言；不依赖 jsdom、
@@ -251,14 +253,24 @@ test("G4 · planning:resume 必须有 buildStableCompletedResult 拼装稳定 co
   assert.match(helperBody, /rejected/, "返回对象必须含 rejected 数组");
 });
 
-test("G4 · planning:resume 命中 completed 时必须短路，不重新调 runPlanning", () => {
+test("G4 · planning:resume 仅在 completed、所有阶段完成且 POI 齐全时短路", () => {
   const resumeBody = extractHandlerBody(mainSrc, 'ipcMain.handle("planning:resume"');
   // 必须有 `existingState.status === "completed"` 分支
   const completedBranchIdx = resumeBody.search(/existingState\.status\s*===\s*["']completed["']/);
   assert.notEqual(completedBranchIdx, -1, "planning:resume 必须显式判断 existingState.status === 'completed'");
+  // completed 不能单独成为短路条件；必须同时覆盖 PLANNING_STAGES 全集与 POI 完整性。
+  const completedBranch = resumeBody.slice(completedBranchIdx, resumeBody.indexOf("return buildStableCompletedResult(", completedBranchIdx));
+  assert.match(completedBranch, /allStagesCompleted/,
+    "completed 分支必须同时判断 allStagesCompleted，避免部分完成状态被错误短路");
+  assert.match(completedBranch, /!projectHasIncompletePois/,
+    "completed 分支必须要求 POI 齐全，避免历史 completed 草稿跳过 POI 回填");
+  assert.match(resumeBody, /PLANNING_STAGES\.every\([\s\S]*completedStages\.includes/,
+    "planning:resume 必须以 PLANNING_STAGES 全集判断是否真实完成");
+  assert.match(resumeBody, /hasIncompleteItineraryPois\(db\.getProject\(projectId\)\?\.product\s*\?\?\s*\{\}\)/,
+    "planning:resume 必须基于当前持久化产品判断 POI 是否仍缺失");
   // completed 分支内必须返回 buildStableCompletedResult(existingState)
   assert.match(resumeBody, /return\s+buildStableCompletedResult\(\s*existingState\s*\)/,
-    "completed 分支必须 return buildStableCompletedResult(existingState)，不接受其他形式");
+    "真实全完成分支必须 return buildStableCompletedResult(existingState)，不接受其他形式");
   // 关键：completed 分支不能出现在 runPlanning( 调用之前之后——必须独立分支。
   // 简化为断言：在 resume handler 内存在两段独立的 return；一段是 completed 短回路，
   // 另一段是其他状态下先 restoreProjectToPlanningForRetry 再 return runPlanning(...)。
@@ -267,7 +279,7 @@ test("G4 · planning:resume 命中 completed 时必须短路，不重新调 runP
   const runPlanningIdx = resumeBody.indexOf("runPlanning(", completedReturnIdx);
   assert.notEqual(completedReturnIdx, -1, "completed 分支必须有 return buildStableCompletedResult");
   assert.notEqual(runPlanningIdx, -1,
-    "planning:resume 在 completed 分支外必须有 runPlanning(...) 调用（其他状态走的路径），缺少说明 resume 完全短路了 valid case");
+    "planning:resume 在 completed 快速返回外必须有 runPlanning(...) 调用，供空 POI 与其他可恢复状态进入回填/恢复路径");
 });
 
 test("G4 · planning:resume 非 completed 状态必须先 restoreProjectToPlanningForRetry 再 return runPlanning", () => {
@@ -285,4 +297,51 @@ test("G4 · planning:resume 非 completed 状态必须先 restoreProjectToPlanni
   const runPlanningIdx = afterCompleted.indexOf("return runPlanning(");
   assert.ok(restoreIdx < runPlanningIdx,
     "非 completed 路径下 restoreProjectToPlanningForRetry 必须在 return runPlanning 之前");
+});
+
+test("G4 · completed POI 回填只暴露名称纠正器，不会调用规划阶段生成", () => {
+  const body = extractFunctionBody(mainSrc, "async function runPlanning(");
+  const backfillIdx = body.indexOf("isCompletedPoiOnlyBackfill");
+  assert.notEqual(backfillIdx, -1, "runPlanning 必须显式识别已完成的 POI-only 回填");
+  assert.match(body, /hasIncompleteItineraryPois\(product\)/,
+    "仅全阶段 completed 且当前产品仍缺 POI 时才能走 POI-only 回填");
+  assert.match(body, /completedPoiBackfillPlanner\(projectId\)/,
+    "completed 回填必须使用专用 planner 装配，不可落入正常规划 adapter");
+
+  const helperStart = mainSrc.indexOf("async function completedPoiBackfillPlanner(");
+  const helperEnd = mainSrc.indexOf("/**", helperStart + 1);
+  assert.notEqual(helperStart, -1, "completed POI 回填专用 planner 必须存在");
+  assert.notEqual(helperEnd, -1, "completed POI 回填专用 planner 后必须保留模块边界");
+  const helper = mainSrc.slice(helperStart, helperEnd);
+  assert.match(helper, /已完成 POI 回填不应调用 AI planner/,
+    "POI-only 回填必须使用不可调用的 generateStage，防止重跑 AI 规划阶段");
+  assert.match(helper, /hasActiveKey/,
+    "仅在当前 provider 已配置 Key 时，completed 回填才应请求 AI 名称纠正");
+  assert.match(helper, /resolverAdapter\.resolvePoiName\.bind\(resolverAdapter\)/,
+    "configured completed 回填必须只暴露 resolvePoiName 给 POI 三次纠正逻辑");
+  assert.match(helper, /poi_backfill\.resolver_unavailable/,
+    "Key 解密失败不能把 completed 项目写为 failed，必须降级为人工核查回填");
+  assert.doesNotMatch(helper, /planner\s*=\s*resolverAdapter/,
+    "completed 回填不可把完整 adapter 交给 runPlan，否则 generateStage 可能被调用");
+});
+
+test("G5 · 主进程以项目维度锁住 start / resume 的并发规划", () => {
+  const runPlanningBody = extractFunctionBody(mainSrc, "async function runPlanning(");
+  assert.match(mainSrc, /const activePlanningProjectIds\s*=\s*new Set<string>\(\)/,
+    "必须维护按项目区分的运行锁，不能只依赖 renderer disabled");
+  const guardIdx = runPlanningBody.indexOf("assertPlanningIdle(projectId)");
+  const addIdx = runPlanningBody.indexOf("activePlanningProjectIds.add(projectId)");
+  const tryIdx = runPlanningBody.indexOf("try {");
+  const finallyIdx = runPlanningBody.indexOf("finally {");
+  const deleteIdx = runPlanningBody.indexOf("activePlanningProjectIds.delete(projectId)");
+  assert.ok(guardIdx >= 0 && guardIdx < addIdx && addIdx < tryIdx,
+    "runPlanning 必须在进入 try/preflight 前取得运行锁，避免重入被写成 failed");
+  assert.ok(finallyIdx >= 0 && finallyIdx < deleteIdx,
+    "规划结束后必须在 finally 释放锁，避免失败后永久无法恢复");
+
+  const startBody = extractHandlerBody(mainSrc, 'ipcMain.handle("planning:start"');
+  const startGuardIdx = startBody.indexOf("assertPlanningIdle(projectId)");
+  const saveIdx = startBody.indexOf("savePlanningState(");
+  assert.ok(startGuardIdx >= 0 && startGuardIdx < saveIdx,
+    "planning:start 必须在覆盖 pending state 前拒绝并发请求");
 });

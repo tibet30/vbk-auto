@@ -85,15 +85,35 @@ test("恢复按钮在 running/loading/planningBusy 时 disabled，且 planningRe
 
 test("恢复面板在 status=needs_user / failed 时渲染，running 时仅展示不暴露按钮", () => {
   // 必须显式判断 status 渲染；running 时按钮不能暴露，避免用户重复点击仍在跑的任务。
-  const branch = reviewSrc.match(/planningRecovery\.status === "needs_user"[\s\S]*?planningRecovery\.status === "running"\s*\)/);
-  assert.ok(branch, "恢复面板必须基于 planningRecovery.status 渲染分支（needs_user / failed / running）");
-  // running 状态必须隐藏按钮：data-status=running 不在按钮渲染块内。
+  // 接受两种合法的状态分支写法：
+  //   1) 紧凑 || 链：planningRecovery.status === "needs_user" || ... || "running" || ...
+  //   2) 嵌套三元 / 多重条件：endswith "running")
+  // 只要 needs_user 与 running 在同一渲染分支即可——这是任务验收门。
+  const idxNeedsUser = reviewSrc.indexOf('planningRecovery.status === "needs_user"');
+  assert.notEqual(idxNeedsUser, -1, "恢复面板必须判断 needs_user");
+  const sliceFromNeedsUser = reviewSrc.slice(idxNeedsUser);
+  // 在 needs_user 之后同一段渲染分支内出现 "running"（说明这两个 status 都被覆盖）。
+  const idxRunning = sliceFromNeedsUser.search(/planningRecovery\.status\s*===\s*?"running"/);
+  assert.ok(idxRunning > 0, "needs_user 之后必须存在 running 状态分支（同一 recovery strip 内）");
+  // running / pending 都不能成为可恢复按钮条件，避免用户并发启动规划。
   const buttonsIdx = reviewSrc.indexOf('data-testid="planning-resume-button"');
-  const runningBranchIdx = reviewSrc.indexOf('planningRecovery.status === "running"');
-  assert.ok(runningBranchIdx > 0);
-  // running 条件必须出现早于按钮（条件式隐藏）。
-  const conditionOrder = reviewSrc.indexOf('planningRecovery.status !== "running"');
-  assert.ok(conditionOrder > 0 && conditionOrder < buttonsIdx, "按钮必须在 running 条件不满足时才渲染");
+  const resumableStart = reviewSrc.indexOf("const planningResumable");
+  const resumableEnd = reviewSrc.indexOf("const canSend", resumableStart);
+  const resumableDeclaration = reviewSrc.slice(resumableStart, resumableEnd);
+  assert.doesNotMatch(resumableDeclaration, /status === "running"|status === "pending"/,
+    "running / pending 不得被纳入 planningResumable，否则会发生并发续跑");
+  const buttonPrefix = reviewSrc.slice(Math.max(0, buttonsIdx - 500), buttonsIdx);
+  assert.match(buttonPrefix, /planningResumable/, "恢复按钮必须只由 planningResumable 显示");
+});
+
+test("completed 但阶段不全时展示继续规划，真实全完成时不展示", () => {
+  assert.match(reviewSrc, /const planningPartial = planningRecovery\?\.status === "completed" && !planningRecovery\.allStagesCompleted/,
+    "必须将 completed 且阶段不全识别为 planningPartial");
+  assert.match(reviewSrc, /const planningResumable =[\s\S]*\|\| planningPartial/,
+    "恢复按钮条件必须把 planningPartial 纳入可继续规划状态");
+  const buttonStart = reviewSrc.lastIndexOf("<button", reviewSrc.indexOf('data-testid="planning-resume-button"'));
+  const buttonPrefix = reviewSrc.slice(Math.max(0, buttonStart - 250), buttonStart);
+  assert.match(buttonPrefix, /planningResumable/, "恢复按钮必须由 planningResumable 控制，避免真实全完成状态露出按钮");
 });
 
 test("恢复面板 head / hint / chip 都是中文，与规划状态文案一致", () => {

@@ -29,7 +29,7 @@ test("normaliseProductDraft 保留 vehicleResource / hotelResource / butler / bo
       butler: { contactCardId: 222 },
       bookingControls: { advanceBooking: { days: 1, time: "12:00" } },
     },
-    itinerary: [{ day: 1, title: "D", spots: ["A"], description: "D", meals: "M" }],
+    itinerary: [{ day: 1, title: "D", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", meals: "M" }],
   };
   const normalised = normaliseProductDraft(product);
   const operations = normalised.operations as Record<string, unknown>;

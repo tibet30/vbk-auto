@@ -25,8 +25,8 @@ class OneValidPlanner implements Planner {
         modules: [{
           module: "itinerary", status: "accepted",
           value: [
-            { day: 1, title: "Day 1", spots: ["Spot"], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-            { day: 2, title: "Day 2", spots: ["Spot"], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+            { day: 1, title: "Day 1", spots: [{ name: "Spot", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+            { day: 2, title: "Day 2", spots: [{ name: "Spot", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
           ],
         }],
       };
@@ -87,14 +87,14 @@ test("包含禁写字段的模块会被拒，且原因包含字段名", async ()
   const planner: Planner = {
     async generateStage(request): Promise<PlanningStageOutput> {
       if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
-      if (request.stage === "itinerary") return { reply: "itin", modules: [{ module: "itinerary", status: "accepted", value: [{ day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" }, { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" }] }] };
+      if (request.stage === "itinerary") return { reply: "itin", modules: [{ module: "itinerary", status: "accepted", value: [{ day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" }, { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" }] }] };
       return {
         reply: "尝试写入 supplierProductCode",
         modules: [{
           module: "itinerary", status: "accepted",
           value: [
-            { day: 1, title: "Day 1", spots: ["Spot"], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-            { day: 2, title: "Day 2", spots: ["Spot"], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+            { day: 1, title: "Day 1", spots: [{ name: "Spot", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+            { day: 2, title: "Day 2", spots: [{ name: "Spot", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
           ],
         }, {
           module: "presentation", status: "accepted",

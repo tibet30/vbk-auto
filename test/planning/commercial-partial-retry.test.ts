@@ -29,8 +29,8 @@ class PartialCommercialPlanner implements Planner {
       return {
         reply: "itin",
         modules: [{ module: "itinerary", status: "accepted", value: [
-          { day: 1, title: "D1", spots: ["晋祠"], description: "D", hotel: "H", meals: "B/L/D" },
-          { day: 2, title: "D2", spots: ["山西博物院"], description: "D", hotel: "", meals: "B/L/D" },
+          { day: 1, title: "D1", spots: [{ name: "晋祠", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
+          { day: 2, title: "D2", spots: [{ name: "山西博物院", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
         ] }],
       };
     }

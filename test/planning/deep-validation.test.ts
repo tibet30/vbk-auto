@@ -25,8 +25,8 @@ class AllStagesOkPlanner implements Planner {
     if (request.stage === "itinerary") {
       return {
         reply: "itin", modules: [{ module: "itinerary", status: "accepted", value: [
-          { day: 1, title: "D1", spots: ["A"], description: "D", hotel: "H", meals: "B/L/D" },
-          { day: 2, title: "D2", spots: ["B"], description: "D", hotel: "", meals: "B/L/D" },
+          { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", hotel: "H", meals: "B/L/D" },
+          { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
         ] }],
       };
     }
@@ -89,7 +89,7 @@ const skeleton = { destination: "太原", days: 2, nights: 1, productForm: "priv
 test("itinerary 长度必须等于 skeleton.days", () => {
   const product = {
     itinerary: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", meals: "M" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", meals: "M" },
     ],
   };
   const out = deepValidateModules({
@@ -104,8 +104,8 @@ test("itinerary 长度必须等于 skeleton.days", () => {
 test("itinerary days 必须顺序递增且唯一", () => {
   const product = {
     itinerary: [
-      { day: 1, title: "D1", spots: ["A"], description: "D", meals: "M" },
-      { day: 3, title: "D3", spots: ["B"], description: "D", meals: "M" },
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D", meals: "M" },
+      { day: 3, title: "D3", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", meals: "M" },
     ],
   };
   const out = deepValidateModules({

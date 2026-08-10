@@ -1,16 +1,31 @@
 /**
  * AutomationRun 编排用到的几个跨阶段 helper：
- *   - resolveButlerSelection / resolveServicePhone：从账号固定信息中拆出管家联系人和 400 电话；
+ *   - resolveButlerSelection / resolveProductButlerSelection / resolveServicePhone：拆出管家联系人和 400 电话；
  *   - resolveActiveButlerContext：当前账号没配好时回退到 listKnownAccounts 中任意一个；
  *   - markCancelled：把运行中的 run 切到 cancelled；
  *   - ensureBrowserHasBounds：view 未上报 bounds 时，把 splitter 区域调到主窗口的右 66%。
  */
 
-import { BrowserWindow } from "electron";
+import { createRequire } from "node:module";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 import type { ActiveButlerContext } from "./automation.main.context.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
+
+const electronRequire = createRequire(import.meta.url);
+
+interface ElectronBrowserWindow {
+  getAllWindows: () => Array<{ getSize: () => [number, number] }>;
+}
+
+function resolveElectronBrowserWindow(): ElectronBrowserWindow | null {
+  try {
+    const electron = electronRequire("electron") as { BrowserWindow?: ElectronBrowserWindow };
+    return electron.BrowserWindow ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 从 db.getAccountFixedInfo(accountName).values.butlerName 解析出管家联系卡选择；
@@ -21,6 +36,39 @@ export function resolveButlerSelection(db: VbkDatabase, accountName: string | un
   const info = db.getAccountFixedInfo(accountName);
   const butler = info.values.butlerName;
   return butler && typeof butler === "object" ? butler : null;
+}
+
+function isContactCardSelection(value: unknown): value is ContactCardSelection {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const contactCardId = candidate.contactCardId;
+  const providerId = candidate.providerId;
+  const displayName = candidate.displayName;
+  return Number.isInteger(contactCardId)
+    && Number(contactCardId) > 0
+    && Number.isInteger(providerId)
+    && Number(providerId) > 0
+    && typeof displayName === "string"
+    && displayName.trim().length > 0;
+}
+
+/**
+ * 从 product.operations.bookingControls.butler 读取基础信息阶段实际要填的管家联系人。
+ * 创建路径会把账号固定信息固化到 product JSON；自动化阶段只读 product，避免账号
+ * 后续改动覆盖已创建产品的负责人。
+ */
+export function resolveProductButlerSelection(product: Record<string, unknown>): ContactCardSelection | null {
+  const operations = product.operations;
+  if (!operations || typeof operations !== "object" || Array.isArray(operations)) return null;
+  const bookingControls = (operations as Record<string, unknown>).bookingControls;
+  if (!bookingControls || typeof bookingControls !== "object" || Array.isArray(bookingControls)) return null;
+  const butler = (bookingControls as Record<string, unknown>).butler;
+  if (!isContactCardSelection(butler)) return null;
+  return {
+    contactCardId: butler.contactCardId,
+    providerId: butler.providerId,
+    displayName: butler.displayName.trim(),
+  };
 }
 
 /**
@@ -34,6 +82,46 @@ export function resolveServicePhone(db: VbkDatabase, accountName: string | undef
   if (typeof phone !== "string") return null;
   const trimmed = phone.trim();
   return trimmed || null;
+}
+
+export interface ActiveServicePhoneContext {
+  accountName: string;
+  servicePhone: string;
+  fallbackUsed: boolean;
+}
+
+/**
+ * 解析当前可用的 400 电话上下文。basic 阶段的管家联系人已经固化在 product JSON，
+ * 这里不再要求账号固定信息里仍保留 butlerName。
+ */
+export function resolveActiveServicePhoneContext(
+  db: VbkDatabase,
+  accountName?: string,
+): ActiveServicePhoneContext | null {
+  const isReady = (name: string) => {
+    const servicePhone = resolveServicePhone(db, name);
+    if (!servicePhone) return null;
+    return { accountName: name, servicePhone, fallbackUsed: false };
+  };
+
+  if (accountName) {
+    const direct = isReady(accountName);
+    if (direct) return direct;
+  }
+
+  const known = db.listKnownAccounts().map((item) => item.accountName);
+  for (const name of known) {
+    if (accountName && name === accountName) continue;
+    const fallback = isReady(name);
+    if (fallback) {
+      console.warn(
+        `[automation] 当前 vbkAccountName "${accountName || "<空>"}" 未匹配到有效 400 电话，回退到历史账号 "${name}"`,
+      );
+      return { ...fallback, fallbackUsed: true };
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -91,10 +179,13 @@ export function markCancelled(run: AutomationRun, persist: () => void) {
  * 仅 Electron 内运行；其它环境（单测 / 非 Electron 调试）安静退出。
  */
 export function ensureBrowserHasBounds(browser: VbkBrowser): void {
-  const view = (browser as unknown as { view?: { getBounds?: () => Electron.Rectangle | null } } | null | undefined)?.view;
+  const view = (browser as unknown as { view?: { getBounds?: () => { width: number; height: number } | null } } | null | undefined)?.view;
   if (!view || typeof view.getBounds !== "function") return;
   const setBounds = (browser as unknown as { setBounds?: (b: { x: number; y: number; width: number; height: number }) => void } | null | undefined)?.setBounds;
   if (typeof setBounds !== "function") return;
+
+  const BrowserWindow = resolveElectronBrowserWindow();
+  if (!BrowserWindow) return;
 
   const wins = BrowserWindow.getAllWindows();
   const main = wins[0];

@@ -29,6 +29,7 @@ import {
 import { projectNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
+import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
 
@@ -44,29 +45,32 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
     if (!project) throw projectNotFound(projectId);
     const product = parseProduct(project.product);
     const productId = project.productId;
-    // 「重新执行」以前置依赖与 run() 一致：需要管家联系人 / 400 电话才能
-    // 走到 VBK 页面上点表单。缺少则阻断。
+    // 「重新执行」以前置依赖与 run() 一致：管家联系人从 product JSON 读取，
+    // 400 电话从账号固定信息读取。缺少则阻断。
     const accountName = ctx.db.getSetting("vbkAccountName")?.value;
     const basicInfoSaved = project.basicInfoSaved ?? false;
     const shouldRequireAccountContext = phaseName === "basic" || !basicInfoSaved;
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone: string | null = null;
     if (shouldRequireAccountContext) {
-      const accountContext = ctx.resolveActiveButlerContext(accountName);
-      if (!accountContext) {
-        if (!accountName) throw new Error("未检测到当前登录的 VBK 账号，无法读取管家联系人。");
-        throw new Error("录入前检查未通过：管家联系人（请在账号设置里维护）");
+      butlerSelection = resolveProductButlerSelection(project.product);
+      if (!butlerSelection) {
+        throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
       }
-      butlerSelection = accountContext.butlerSelection;
-      servicePhone = accountContext.servicePhone;
-      if (accountContext.fallbackUsed) {
-        ctx.db.setSetting("vbkAccountName", accountContext.accountName);
+      const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
+      if (!phoneContext) {
+        if (!accountName) throw new Error("未检测到当前登录的 VBK 账号，无法读取 400 电话。");
+        throw new Error("录入前检查未通过：400 电话（请在账号设置里维护）");
+      }
+      servicePhone = phoneContext.servicePhone;
+      if (phoneContext.fallbackUsed) {
+        ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
     if (!shouldRequireAccountContext) {
-      const accountContext = ctx.resolveActiveButlerContext(accountName);
-      if (accountContext?.fallbackUsed) {
-        ctx.db.setSetting("vbkAccountName", accountContext.accountName);
+      const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
+      if (phoneContext?.fallbackUsed) {
+        ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
     const keySpots = pickKeySpotsFromItinerary(project.product, 3);

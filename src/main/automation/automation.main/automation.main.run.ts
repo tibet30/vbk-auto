@@ -37,6 +37,7 @@ import {
 } from "../ctrip/ctrip.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
+import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 
@@ -68,10 +69,9 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
     if (blockers.length) {
       throw new Error(`录入前检查未通过：${blockers.map((item) => item.label).join("、")}`);
     }
-    // 账号固定信息里的「管家联系人」是 basic 阶段实际依赖的来源；若账号
-    // 尚未在本地维护管家联系人，必须在创建远程草稿之前阻断，避免留半成品
-    // 草稿。地接社名称已不属于账号固定信息，由自动化在 VBK 当前页下拉里
-    // 自动选择第一个可用且非 disabled 的选项。
+    // product JSON 里的「管家联系人」是 basic 阶段实际依赖的来源；创建项目时
+    // 已从账号固定信息固化进去，自动化阶段不再回读账号 butlerName，避免账号
+    // 后续改动覆盖当前产品负责人。400 电话仍来自账号固定信息。
     const draftPhases = draftPhasesFor(product);
     const startIndex = retryFrom ? draftPhases.indexOf(retryFrom) : 0;
     if (retryFrom && startIndex < 0) throw new Error(`当前产品没有阶段：${retryFrom}`);
@@ -85,20 +85,23 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone = "";
     if (shouldRequireAccountContext) {
-      const accountContext = ctx.resolveActiveButlerContext(accountName);
-      if (!accountContext) {
-        if (!accountName) throw new Error("未检测到当前登录的 VBK 账号，无法读取管家联系人。");
-        throw new Error("录入前检查未通过：管家联系人（请在账号设置里维护）");
+      butlerSelection = resolveProductButlerSelection(project.product);
+      if (!butlerSelection) {
+        throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
       }
-      butlerSelection = accountContext.butlerSelection;
-      servicePhone = accountContext.servicePhone;
-      if (accountContext.fallbackUsed) {
-        ctx.db.setSetting("vbkAccountName", accountContext.accountName);
+      const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
+      if (!phoneContext) {
+        if (!accountName) throw new Error("未检测到当前登录的 VBK 账号，无法读取 400 电话。");
+        throw new Error("录入前检查未通过：400 电话（请在账号设置里维护）");
+      }
+      servicePhone = phoneContext.servicePhone;
+      if (phoneContext.fallbackUsed) {
+        ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     } else {
-      const accountContext = ctx.resolveActiveButlerContext(accountName);
-      if (accountContext?.fallbackUsed) {
-        ctx.db.setSetting("vbkAccountName", accountContext.accountName);
+      const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
+      if (phoneContext?.fallbackUsed) {
+        ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
     // 国家景区内具体景点：从行程中确定性筛选最多 3 个；不可匹配的单项

@@ -15,7 +15,7 @@ import { HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
 const itineraryDaySchema = z.object({
   day: z.number().int().positive(),
   title: z.string().min(1),
-  spots: z.array(z.object({ name: z.string().min(1), poiName: z.string().nullable().optional(), poiId: z.string().nullable().optional() }).strict()).default([]),
+  spots: z.array(z.object({ name: z.string().min(1), poiName: z.string().nullable().optional(), poiId: z.number().int().positive().nullable().optional() }).strict()).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),
   meals: z.string().default(""),
@@ -71,9 +71,9 @@ const presentationSchema = z.object({
 // 自动录入 VBK 基本信息时，除了产品元数据还会用到两类运营数据：
 //   - 提前预订：确定性运营规则（默认提前 1 天、12:00 截止），可配置覆盖。
 //   - 管家联系人：账号级固定信息，自动化按 stable contactCardId 选择。
-// AI 不能生成这两项；product JSON 不写死账号固定信息。地接社名称不属于
-// 账号固定信息，由自动化在 VBK 当前页下拉里自动选择第一个可用且非 disabled
-// 的选项；缺失时直接报错。
+// AI 不能生成这两项；管家联系人只能由账号固定信息在创建时注入，或由人工
+// review field 写入。地接社名称不属于账号固定信息，由自动化在 VBK 当前页
+// 下拉里自动选择第一个可用且非 disabled 的选项；缺失时直接报错。
 export const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const advanceBookingSchema = z.object({
@@ -88,8 +88,8 @@ const bookingControlsSchema = z.object({
   butler: z
     .object({
       contactCardId: z.number().int().positive(),
-      displayName: z.string().min(1).optional(),
-      providerId: z.number().int().positive().optional(),
+      displayName: z.string().min(1),
+      providerId: z.number().int().positive(),
     })
     .optional(),
 });
@@ -107,18 +107,11 @@ const operationsSchema = z.object({
   bookingControls: bookingControlsSchema.optional(),
   vehicleResource: z
     .object({
-      vehicleId: z.number().int().positive().optional(),
-      resourceId: z.number().int().positive().optional(),
-      resourceGroupId: z.number().int().positive(),
-      resourceGroupName: z.string().min(1),
-      resourceGroupMaxItemPrice: z.number().positive().default(1000),
+      resourceGroupId: z.number().int().positive().optional(),
+      resourceGroupName: z.string().min(1).optional(),
       requestedDailyCost: z.number().positive().optional(),
-      matchedDailyCost: z.number().positive().optional(),
-      vehicleModel: z.string().min(1).optional(),
-      resourceName: z.string().min(1).optional(),
-      supplierCode: z.string().min(1).optional(),
-      serviceHoursPerDay: z.number().int().min(4).max(24).default(10),
-      serviceKilometersPerDay: z.number().int().min(50).max(1000).default(300),
+      serviceHoursPerDay: z.number().int().min(4).max(24).optional(),
+      serviceKilometersPerDay: z.number().int().min(50).max(1000).optional(),
     })
     .optional(),
   hotelResource: z

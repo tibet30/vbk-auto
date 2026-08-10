@@ -2,6 +2,7 @@ import {
   HHMM_REGEX,
   productSchema,
 } from "./schema-definitions.js";
+import { mergeReadinessIssues } from "../../../shared/readiness-issues.js";
 
 /**
  * 自动化层产品 schema 工具。
@@ -159,7 +160,7 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
     else if (blockingLabels.vehicle.test(label)) blockers.push({ label: `车辆核查：${label}`, detail: "需 VBK 匹配资源组后才能自动录入。" });
     else if (blockingLabels.hotel.test(label)) blockers.push({ label: `酒店核查：${label}`, detail: "需 VBK 匹配酒店资源后才能自动录入。" });
   }
-  return blockers;
+  return mergeReadinessIssues(blockers);
 }
 
 /**

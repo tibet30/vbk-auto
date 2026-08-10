@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   assert,
   basicInfoCompletenessIssues,
@@ -348,4 +350,3 @@ test("findButlerOptionIndex 忽略 VBK 选项前置图标字符", () => {
 // 静默错命中其它字段。这里同时锁死容器选择器与「不使用 first」契约。
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ctripSourcePath = path.resolve(here, "..", "src", "main", "automation", "ctrip.ts");
-

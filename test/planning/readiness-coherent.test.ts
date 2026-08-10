@@ -73,6 +73,26 @@ test("未解决的车辆 research task 阻断自动化（即便 vehicleResource 
   assert.ok(labels.some((l) => /车辆核查/.test(l)), `车辆 research task 阻断：${labels.join(",")}`);
 });
 
+test("缺少 vehicleResource 且存在车辆 research task 时只生成一个车辆类 blocker", () => {
+  const product = {
+    sales: { productForm: "privateTour" },
+    commercial: {
+      pricing: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 },
+      inventory: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 },
+      release: { submitReview: false, publishAfterApproval: false, publicPriceCeiling: 3000, publicAuditRetries: 4 },
+    },
+    operations: { vehicleResource: {} },
+  };
+  const tasks = [
+    { state: "researching", label: "核查用车资源组", type: "vbk" },
+  ];
+  const blockers = automationBlockers(product, { researchTasks: tasks });
+  const vehicleBlockers = blockers.filter((b) => /用车|车辆|资源组/.test(`${b.label} ${b.detail}`));
+  assert.equal(vehicleBlockers.length, 1);
+  assert.equal(vehicleBlockers[0].label, "用车资源组");
+  assert.match(vehicleBlockers[0].detail, /私家团需要在 VBK 核查并填写现有用车资源组 ID/);
+});
+
 test("release.submitReview=true 阻断自动化；false 不阻断", () => {
   const onProduct = {
     sales: { productForm: "privateTour" },

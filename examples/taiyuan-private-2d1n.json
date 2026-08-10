@@ -48,14 +48,8 @@
     "hotelTier": "当地3钻酒店/-3",
     "mealsIncluded": false,
     "vehicleResource": {
-      "vehicleId": 5422005,
-      "resourceId": 76479748,
       "resourceGroupId": 2206184,
       "resourceGroupName": "5座经济150+5座舒适200+7座300+9座400+12座500+14座500+19座650",
-      "resourceGroupMaxItemPrice": 1000,
-      "vehicleModel": "广汽埃安 · 经济5座 · AION S",
-      "resourceName": "经济5座: 广汽埃安AION S",
-      "supplierCode": "TY-CAR-2D-001",
       "serviceHoursPerDay": 10,
       "serviceKilometersPerDay": 300
     }

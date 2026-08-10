@@ -4,18 +4,25 @@
  * 以避免 review-summary.module.less 体积过大。 */
 
 /* ============================================================
- * View-mode bar — tabs (cards | json) + status pill
+ * Header controls — tabs (cards | json) + status pill
  * ============================================================ */
 
-.modeBar {
-  height: 38px;
+.summaryHeader {
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.summaryTitleRow {
+  flex: 1 1 auto;
+  min-width: 86px;
+}
+
+.headerControls {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 var(--pad);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
   flex: 0 0 auto;
+  min-width: 0;
 }
 
 .modeTabs {
@@ -70,11 +77,28 @@
 }
 
 .modeBarMeta {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+}
+
+@container (max-width: 520px) {
+  .summaryTitleRow {
+    min-width: 78px;
+  }
+
+  .headerControls {
+    gap: 6px;
+  }
+
+  .modeTab {
+    padding: 0 8px;
+  }
+
+  .modeBarMeta {
+    display: none;
+  }
 }
 
 /* ============================================================

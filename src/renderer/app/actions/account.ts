@@ -24,8 +24,10 @@ export function useAccountHandlers(state: AppState) {
   } = state;
 
   // 进入账号编辑器：只读取 schema + fixedInfo，不预拉联系人列表。
+  // accountName 允许为 null：未登录场景下，编辑器可以处于「未指定账号」
+  // 状态供用户先登录再选。
   // 管家联系人采用懒加载：点开「选择管家联系人」后才发起请求。
-  const openAccountEditor = async (accountName: string) => {
+  const openAccountEditor = async (accountName: string | null) => {
     if (!api()) return;
     setEditingAccount(accountName);
     setFixedInfoDraft({});
@@ -33,6 +35,18 @@ export function useAccountHandlers(state: AppState) {
     setContactCardSearch("");
     setButlerPickerOpen(false);
     setCurrentProviderId(null);
+    if (!accountName) {
+      // 未指定账号：仅拿到 schema，让运营先选定要编辑的账号；fixedInfo
+      // 留空、providerId 不预拉。
+      try {
+        const schema = await api()!.accounts.fixedInfoSchema();
+        setFixedInfoSchema(schema);
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "读取账号固定信息失败。");
+        setEditingAccount(null);
+      }
+      return;
+    }
     try {
       const [schema, info] = await Promise.all([
         api()!.accounts.fixedInfoSchema(),

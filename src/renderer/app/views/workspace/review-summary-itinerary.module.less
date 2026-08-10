@@ -7,7 +7,7 @@
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .head {
@@ -24,6 +24,8 @@
   text-align: left;
   cursor: pointer;
   flex: 0 0 auto;
+  min-height: 48px;
+  border-radius: calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px) 0 0;
   transition: background 140ms ease;
 }
 
@@ -38,6 +40,7 @@
 
 .block[data-collapsed='true'] .head {
   border-bottom: 0;
+  border-radius: calc(var(--radius-card) - 1px);
 }
 
 .headIcon {
@@ -70,16 +73,13 @@
   transform: rotate(-90deg);
 }
 
-/* When the module is collapsed the day list is fully hidden; when expanded
- * it caps its own height and scrolls internally so the rest of the review
- * panel stays stable. */
+/* The list participates in the review panel's natural document flow. An
+ * expanded day must be able to increase the module height and reveal all of
+ * its details instead of creating a second scroll container. */
 .dayList {
   list-style: none;
   margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  max-height: 360px;
+  padding: 8px 0;
 }
 
 .block[data-collapsed='true'] .dayList,
@@ -93,18 +93,19 @@
  * Day card list
  * ============================================================ */
 
-.dayList { list-style: none; margin: 0; padding: 0; }
-.dayItem { border-top: 1px solid var(--border); }
+.dayItem { border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent); }
 .dayItem:first-child { border-top: 0; }
+.dayItem:last-child { border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px); }
 .dayItem[data-expanded='true'] { background: color-mix(in srgb, var(--ai-teal) 4%, var(--surface)); }
 
 .dayHead {
   width: 100%;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 18px;
-  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+  gap: 12px;
   align-items: center;
-  padding: 9px 14px;
+  min-height: 58px;
+  padding: 10px 14px;
   border: 0;
   background: transparent;
   text-align: left;
@@ -115,11 +116,13 @@
 }
 
 .dayHead:hover { background: var(--muted); }
-.dayHead[data-expanded='true'] { background: transparent; }
+.dayHead[data-expanded='true'] { background: color-mix(in srgb, var(--ai-teal) 3%, var(--surface)); }
+.dayItem:last-child .dayHead { border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px); }
+.dayItem:last-child[data-expanded='true'] .dayHead { border-radius: 0; }
 
 .dayNum {
-  width: 30px;
-  height: 22px;
+  width: 34px;
+  height: 26px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-sm);
@@ -134,9 +137,9 @@
 
 .dayHead[data-expanded='true'] .dayNum { background: var(--ai-teal); color: white; }
 
-.dayHeadBody { min-width: 0; display: grid; gap: 1px; }
-.dayTitle { font-size: var(--fs-sm); font-weight: 550; color: var(--foreground); letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.daySummary { font-size: 10px; color: var(--muted-foreground); letter-spacing: 0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dayHeadBody { min-width: 0; display: grid; gap: 2px; }
+.dayTitle { font-size: var(--fs-sm); font-weight: 550; line-height: 1.35; color: var(--foreground); letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.daySummary { font-size: 11px; line-height: 1.3; color: var(--muted-foreground); letter-spacing: 0.02em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .dayChevron {
   width: 18px;
@@ -150,18 +153,20 @@
 .dayHead[data-expanded='true'] .dayChevron { transform: rotate(180deg); color: var(--foreground); }
 
 .dayBody {
-  padding: 0 14px 12px 14px;
+  padding: 12px 14px 14px 38px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border-top: 1px dashed color-mix(in srgb, var(--ai-teal) 28%, var(--border));
   margin-top: 0;
 }
+
+.dayItem:last-child .dayBody { border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px); }
 
 /* ============================================================
  * Timeline — vertical recommended-time rail
  * ============================================================ */
 
-.timeline { list-style: none; margin: 2px 0 0 4px; padding: 0; display: grid; gap: 0; }
+.timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
 
 .timelineItem {
   display: grid;
@@ -171,7 +176,7 @@
   position: relative;
 }
 
-.timelineRail { position: relative; display: grid; justify-items: center; padding-top: 2px; }
+.timelineRail { position: relative; display: grid; justify-items: center; padding-top: 1px; }
 
 .timelineNode {
   width: 22px;
@@ -204,10 +209,10 @@
 }
 
 .timelineItem[data-last='true']::after { display: none; }
-.timelineItem[data-last='true'] .timelineRail { padding-bottom: 0; }
+.timelineItem[data-last='true'] .timelineRail { padding-bottom: 2px; }
 
-.timelineContent { min-width: 0; padding: 0 0 10px 0; display: grid; gap: 2px; }
-.timelineItem[data-last='true'] .timelineContent { padding-bottom: 0; }
+.timelineContent { min-width: 0; padding: 0 0 12px 0; display: grid; gap: 3px; }
+.timelineItem[data-last='true'] .timelineContent { padding-bottom: 2px; }
 
 .timelineHeader { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 8px; align-items: baseline; min-width: 0; }
 
@@ -230,7 +235,7 @@
 .timelineNodeHotel + .timelineContent .timelineTime     { color: var(--success); background: color-mix(in srgb, var(--success) 8%, var(--surface)); }
 .timelineNodeOther + .timelineContent .timelineTime     { color: var(--muted-foreground); background: var(--muted); }
 
-.timelineTitle { font-size: var(--fs-sm); font-weight: 550; color: var(--foreground); letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; }
+.timelineTitle { font-size: var(--fs-sm); font-weight: 550; color: var(--foreground); letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timelineDetail { margin: 0 0 0 58px; font-size: var(--fs-xs); color: var(--muted-foreground); line-height: 1.5; }
 .timelineEmpty { margin: 0; padding: 10px 0; color: var(--muted-foreground); font-size: var(--fs-xs); text-align: center; }
 

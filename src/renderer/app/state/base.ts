@@ -98,6 +98,26 @@ export function useAppStateBase() {
   const [contactCardsLoading, setContactCardsLoading] = useState(false);
   const [contactCardSearch, setContactCardSearch] = useState("");
 
+  /**
+   * 「基础信息」编辑模块（右侧 review 面板）：
+   *  - basicInfoDraft：本地输入中的值，尚未保存到 product；
+   *  - basicInfoSaving：当前正在保存的字段（防止同一字段重复点击）；
+   *  - basicInfoErrors：保存失败的字段 → 文案，渲染时贴红错；
+   *  - basicInfoButlerDefault：当前账号 AccountFixedInfo.butlerName 默认选中的
+   *    ContactCardSelection；进入「基础信息」编辑模块时一次性拉取，写入后即
+   *    与 product 同步。账号未设置 / 未登录时为 null。
+   *  - basicInfoButlerLoadedForProjectId：已为哪个项目拉过默认值；切换项目时复位。
+   * 这些状态在 basic-info 模块的 useEffect 里跟 project.id 联动，避免跨项目污染。
+   */
+  const [basicInfoDraft, setBasicInfoDraft] = useState<Record<string, string>>({});
+  const [basicInfoSaving, setBasicInfoSaving] = useState<string | null>(null);
+  const [basicInfoErrors, setBasicInfoErrors] = useState<Record<string, string>>({});
+  const [basicInfoButlerDefault, setBasicInfoButlerDefault] = useState<ContactCardSelection | null>(null);
+  // 当前账号的 400 电话（来自 AccountFixedInfo.servicePhone）；
+  // 仅展示用，不进入 product JSON；空字符串 / null = 未配置。
+  const [basicInfoServicePhone, setBasicInfoServicePhone] = useState<string | null>(null);
+  const [basicInfoButlerLoadedForProjectId, setBasicInfoButlerLoadedForProjectId] = useState<string | null>(null);
+
   const [vbkLogin, setVbkLogin] = useState<VbkLoginStatus | null>(null);
   const [checkingVbkLogin, setCheckingVbkLogin] = useState(false);
   // 多账号登录态：当前 WebView 实际账号 + 本机已记录的所有其它 VBK 账号。
@@ -264,6 +284,18 @@ export function useAppStateBase() {
     setButlerPickerOpen,
     currentProviderId,
     setCurrentProviderId,
+    basicInfoDraft,
+    setBasicInfoDraft,
+    basicInfoSaving,
+    setBasicInfoSaving,
+    basicInfoErrors,
+    setBasicInfoErrors,
+    basicInfoButlerDefault,
+    setBasicInfoButlerDefault,
+    basicInfoServicePhone,
+    setBasicInfoServicePhone,
+    basicInfoButlerLoadedForProjectId,
+    setBasicInfoButlerLoadedForProjectId,
     vbkLogin,
     setVbkLogin,
     checkingVbkLogin,

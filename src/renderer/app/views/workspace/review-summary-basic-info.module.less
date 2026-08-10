@@ -1,0 +1,381 @@
+/* VBK Desktop — review summary: 基础信息编辑模块
+ * 出现在右侧 review-summary 卡片视图的最顶端（在「每日行程」之前）。
+ * 设计目标：
+ *   - 默认展示态：仅显示非空关键信息，不展开任何 input / 控件；
+ *   - 每行「编辑」按钮触发后，原位切换为编辑控件；保存/取消立即收起；
+ *   - 整个模块不引入 max-height / overflow-y / 内部滚动 / 绝对定位覆盖下方内容，
+ *     自然高度随行数变化扩展，与「每日行程」「待处理」模块上下相连；
+ *   - 视觉密度收紧：单层 label + value + actions 三段，无嵌套卡片；
+ *   - 键盘可达：所有可点击控件都是原生 button，input 维持原生语义。 */
+
+.block {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  overflow: visible;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px) 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ai-teal) 6%, var(--surface)) 0%, var(--surface) 100%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background 140ms ease;
+}
+
+.head:hover {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ai-teal) 10%, var(--surface)) 0%, var(--surface) 100%);
+}
+
+.head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ai-teal) 30%, transparent);
+}
+
+.block[data-collapsed='true'] .head {
+  border-bottom: 0;
+  border-radius: calc(var(--radius-card) - 1px);
+}
+
+.headIcon {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--ai-teal) 14%, var(--surface));
+  color: var(--ai-teal);
+  flex: 0 0 auto;
+}
+
+.headTitle {
+  flex: 0 0 auto;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+}
+
+.headMeta {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headChevron {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  transition: transform 180ms var(--motion);
+  flex: 0 0 auto;
+}
+
+.block[data-collapsed='true'] .headChevron {
+  transform: rotate(-90deg);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============================================================
+  共享行 chrome：grid 三段 (label | value | actions)
+  默认无 max-height / 无 overflow：自然高度随内容扩展。
+  ============================================================ */
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(72px, 18%) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 6px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.body > .row:first-child {
+  border-top: 0;
+}
+
+.rowLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.rowLabelTitle {
+  font-size: var(--fs-sm);
+  color: var(--foreground);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rowLabelHint {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+}
+
+.rowValue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 4px;
+  flex: 0 0 auto;
+}
+
+.errorLine {
+  font-size: var(--fs-xs);
+  color: var(--destructive);
+  line-height: 1.5;
+}
+
+/* ============================================================
+  Display：单行紧凑展示，默认态用，无 input。
+  ============================================================ */
+
+.rowDisplay {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+  color: var(--foreground);
+  min-width: 0;
+}
+
+.rowDisplay strong {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowDisplay[data-state='empty'] {
+  color: var(--muted-foreground);
+}
+
+.rowDisplay[data-state='warn'] {
+  color: var(--warning);
+}
+
+.priceSeparator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 -2px;
+  color: var(--muted-foreground);
+  line-height: 1;
+}
+
+.rowMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+}
+
+.rowMetaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rowMetaMono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.tag[data-tone='ok'] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 32%, var(--border));
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+}
+
+.tag[data-tone='warn'] {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.tag[data-tone='ai'] {
+  color: var(--ai-teal);
+  border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 8%, transparent);
+}
+
+.hint {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}
+
+.hint[data-tone='warn'] {
+  color: var(--warning);
+}
+
+/* ============================================================
+  Edit：单 / 多 input 控件 + 输入区提示
+  ============================================================ */
+
+.input {
+  width: 100%;
+  height: var(--control);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.input:focus {
+  border-color: var(--ai-teal);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-teal) 18%, transparent);
+}
+
+.input:disabled {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  cursor: not-allowed;
+}
+
+.input[data-state='error'] {
+  border-color: var(--destructive);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--destructive) 14%, transparent);
+}
+
+.inputGroup {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-width: 220px;
+}
+
+.priceLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.priceLabelText {
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.spin {
+  animation: row-spin 900ms linear infinite;
+  color: var(--ai-teal);
+}
+
+@keyframes row-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ============================================================
+  Resources 行：匹配组 + ID 一行；AI 预估日价单独一行
+  ============================================================ */
+
+.resourceRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resourceRow + .resourceRow {
+  margin-top: 4px;
+}
+
+.resourceName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--foreground);
+}
+
+.resourceName strong {
+  font-weight: 500;
+}
+
+.resourceId {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.01em;
+}
+
+.resourcePrice {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.rowFoot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}

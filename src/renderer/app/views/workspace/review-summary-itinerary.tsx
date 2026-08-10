@@ -21,7 +21,7 @@ export interface ItineraryActivity {
 export interface ItineraryDay {
   day?: number;
   title?: string;
-  spots?: Array<{ name: string; poiName?: string | null; poiId?: string | null }>;
+  spots?: Array<{ name: string; poiName?: string | null; poiId?: number | null }>;
   description?: string;
   hotel?: string;
   hotelDescription?: string;

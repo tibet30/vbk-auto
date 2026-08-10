@@ -33,6 +33,20 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     resolveVehicleTask,
     resolvingVehicleTaskId,
     vbkLogin,
+    currentAccountName,
+    openAccountEditor,
+    basicInfoDraft,
+    setBasicInfoDraft,
+    basicInfoSaving,
+    basicInfoErrors,
+    basicInfoButlerDefault,
+    basicInfoServicePhone,
+    loadButlerDefault,
+    saveSubtitle,
+    saveButler,
+    savePricing,
+    saveVehicleCost,
+    clearError: clearBasicInfoError,
     itinerary,
     expandedDayIndex,
     setExpandedDayIndex,
@@ -261,16 +275,24 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
               }}
               disabled={loading}
             />
-            <button
-              className={`${shared.btn} ${shared.btnLg}`}
-              data-variant="primary"
-              type="button"
-              disabled={!canSend}
-              onClick={handleSend}
-            >
-              {loading ? <LoaderCircle size={15} /> : <Send size={15} />}
-              发送
-            </button>
+            <div className={chat.composerActions}>
+              <span className={chat.composerHint}>
+                <kbd className={chat.composerKbd}>⌘</kbd>
+                <span>+</span>
+                <kbd className={chat.composerKbd}>Enter</kbd>
+                <span>发送</span>
+              </span>
+              <button
+                className={`${shared.btn} ${chat.composerSendBtn}`}
+                data-variant="primary"
+                type="button"
+                disabled={!canSend}
+                onClick={handleSend}
+              >
+                {loading ? <LoaderCircle size={14} className={chat.composerSpin} /> : <Send size={14} />}
+                发送
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -289,6 +311,20 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         expandedDayIndex={expandedDayIndex}
         setExpandedDayIndex={setExpandedDayIndex}
         vbkLoggedIn={Boolean(vbkLogin?.loggedIn)}
+        currentAccountName={currentAccountName}
+        basicInfoDraft={basicInfoDraft}
+        setBasicInfoDraft={setBasicInfoDraft}
+        basicInfoSaving={basicInfoSaving}
+        basicInfoErrors={basicInfoErrors}
+        basicInfoButlerDefault={basicInfoButlerDefault}
+        basicInfoServicePhone={basicInfoServicePhone}
+        loadButlerDefault={loadButlerDefault}
+        onOpenAccountEditor={() => openAccountEditor(vbkLogin?.accountName ?? null)}
+        saveSubtitle={saveSubtitle}
+        saveButler={saveButler}
+        savePricing={savePricing}
+        saveVehicleCost={saveVehicleCost}
+        clearBasicInfoError={clearBasicInfoError}
         resolvingVehicleTaskId={resolvingVehicleTaskId}
         loading={loading}
         onConfirmTask={() => void confirmTask()}

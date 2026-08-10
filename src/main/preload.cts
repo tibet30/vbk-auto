@@ -22,8 +22,6 @@ const api: VbkApi = {
   research: {
     accept: (projectId, taskId, evidenceId) => ipcRenderer.invoke("research:accept", projectId, taskId, evidenceId),
     resolveVehicleResource: (projectId, taskId) => ipcRenderer.invoke("research:vehicleResource", projectId, taskId),
-    previewVehicleResourceByPrice: (projectId, dailyCost) => ipcRenderer.invoke("research:previewVehicleResourceByPrice", projectId, dailyCost),
-    confirmVehicleResourcePreview: (projectId, previewId) => ipcRenderer.invoke("research:confirmVehicleResourcePreview", projectId, previewId),
     resolveHotelResource: (projectId, taskId) => ipcRenderer.invoke("research:hotelResource", projectId, taskId),
   },
   browser: {

@@ -1,63 +1,223 @@
-/* VBK Desktop — review summary: 待处理问题 block (issue list) */
+/* VBK Desktop — review summary: 待处理事项 (open issues) block
+ *
+ * 默认展开的阻塞清单模块；与「每日行程」共享卡片视觉密度：
+ *  - 稳定卡片边界（teal 描边 + 圆角）；
+ *  - header 稳定高度，自然行分隔，圆角不泄漏；
+ *  - body 内部滚动，header 始终可见；
+ *  - 行内三段布局：序号 | 文本 | 处理按钮。 */
 
-.issueList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
+/* ============================================================
+ * Block — section 容器
+ * overflow: hidden 让 body 的滚动条不会突破圆角或底边。
+ * ============================================================ */
 
-.issueItem {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-}
-
-.issueItem:first-child { border-top: 0; }
-
-.issueItem[data-priority='high'] {
-  background: #fffbeb;
-}
-
-.issueItem[data-priority='medium'] {
+.block {
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 32%, var(--border));
+  border-radius: var(--radius-card);
   background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
 }
 
-.issueIndex {
+/* ============================================================
+ * Header — 标题 + 数量概览
+ * 用 button 元素实现，让屏幕阅读器与键盘可直接 toggle 折叠态，
+ * 与「每日行程」模块的 header 行为一致。
+ * min-height 稳定，teal 微渐变与每日行程头部对齐。
+ * ============================================================ */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ai-teal) 6%, var(--surface)) 0%, var(--surface) 100%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  flex: 0 0 auto;
+  min-height: 48px;
+  border-radius: calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px) 0 0;
+  transition: background 140ms ease;
+}
+
+.head:hover {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ai-teal) 10%, var(--surface)) 0%, var(--surface) 100%);
+}
+
+.head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ai-teal) 30%, transparent);
+}
+
+/* 收起时去掉 header 底部分隔线，并让圆角归一，让卡片在折叠态仍是一块完整 surface。 */
+.block[data-collapsed='true'] .head {
+  border-bottom: 0;
+  border-radius: calc(var(--radius-card) - 1px);
+}
+
+/* 模块级折叠箭头：收起时旋转 -90deg 与「每日行程」一致。 */
+.headChevron {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  transition: transform 180ms var(--motion);
+  flex: 0 0 auto;
+}
+
+.block[data-collapsed='true'] .headChevron {
+  transform: rotate(-90deg);
+}
+
+.headIcon {
   width: 22px;
   height: 22px;
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: var(--fs-xs);
-  font-weight: 500;
+  background: color-mix(in srgb, var(--ai-teal) 14%, var(--surface));
+  color: var(--ai-teal);
+  flex: 0 0 auto;
 }
 
-.issueItem[data-priority='high'] .issueIndex {
-  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
-  color: var(--warning);
-}
-
-.issueBody {
+.headTitle {
+  flex: 1;
   min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.issueLabel {
   font-size: var(--fs-sm);
+  font-weight: 600;
   color: var(--foreground);
-  font-weight: 500;
   letter-spacing: 0.01em;
 }
 
-.issueGuidance {
+.headMeta {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+}
+
+/* ============================================================
+ * Body — 列表内部滚动容器
+ * 少事项时按内容自然高度；多事项时只 body 滚动，header 保持可见。
+ * overflow-y: auto + scrollbar-gutter 让滚动条不破坏圆角，也不抖动。
+ * 收起态完全不让 body 占高度（display:none），避免在卡片堆里留空白。
+ * ============================================================ */
+
+.body {
+  --issue-row-min-height: 58px;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.body[data-min-visible='true'] {
+  min-height: calc(var(--issue-row-min-height) * 3);
+}
+
+.block[data-collapsed='true'] .body {
+  display: none;
+}
+
+/* ============================================================
+ * List — 事项行
+ * ============================================================ */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* 行布局：序号列 | 文本列（minmax(0, 1fr)） | 处理按钮列。
+ * 文本列负责承载 label + detail，按钮列固定 64px（含 padding），
+ * 长标题/长说明最多挤占文本列，按钮不会被推走、不换行。 */
+.item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 64px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  min-height: var(--issue-row-min-height);
+  min-width: 0;
+}
+
+.list > .item:first-child {
+  border-top: 0;
+}
+
+.list > .item:last-child {
+  border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
+}
+
+.itemIndex {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  color: var(--warning);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.itemBody {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.itemLabel {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemDetail {
   font-size: var(--fs-xs);
   color: var(--muted-foreground);
   line-height: 1.5;
   overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 按钮列：固定 64px 宽容器，保证「处理」按钮稳定且不换行。 */
+.itemAction {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 64px;
+}
+
+.itemActionBtn {
+  width: 64px;
+  height: var(--control-sm);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 8px;
 }

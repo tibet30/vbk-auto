@@ -47,6 +47,12 @@ export function useAppStateDerived(state: AppStateBase) {
     loginPanelOpen,
     stage,
     setBrowserUrl,
+    setBasicInfoErrors,
+    setBasicInfoDraft,
+    setBasicInfoSaving,
+    setBasicInfoButlerDefault,
+    setBasicInfoServicePhone,
+    setBasicInfoButlerLoadedForProjectId,
   } = state as AppStateBase & { setNotice: (value: string | null) => void; setActiveTaskId: (id: string | null) => void; };
 
   // 规划状态：本地缓存 + UI 触发器。auto-start 必须看到 failed/needs_user 不再自动重跑；
@@ -186,6 +192,14 @@ export function useAppStateDerived(state: AppStateBase) {
     setPlanningState(null);
     setAutoStartUsed(null);
     setPlanningStateLoadedProjectId(null);
+    // 基础信息模块的缓存（butler 默认联系人、临时草稿、错误信息）也随项目复位。
+    // basicInfoActions 不在这个文件里调用；调用方从 useAppActions() 拿到。
+    setBasicInfoErrors({});
+    setBasicInfoDraft({});
+    setBasicInfoSaving(null);
+    setBasicInfoButlerDefault(null);
+    setBasicInfoServicePhone(null);
+    setBasicInfoButlerLoadedForProjectId(null);
   }, [project?.id]);
 
   // 项目进入兜底：进入仍为空草稿的项目时自动触发一次 staged planning 生成。

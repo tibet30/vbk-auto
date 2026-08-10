@@ -317,6 +317,8 @@
 }
 
 .composerCard {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-card);
   overflow: hidden;
@@ -341,6 +343,59 @@
 }
 
 .composerTextarea::placeholder { color: var(--subtle); }
+
+/* 底部操作栏：左=快捷键提示，右=紧凑发送按钮 */
+.composerActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: color-mix(in srgb, var(--muted) 35%, var(--surface));
+}
+
+.composerHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--subtle);
+  user-select: none;
+}
+
+.composerKbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.composerSendBtn {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: var(--fs-sm);
+}
+
+.composerSpin {
+  animation: composerSpin 0.9s linear infinite;
+}
+
+@keyframes composerSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 
 .composerCard:focus-within {
   border-color: var(--ai-teal);

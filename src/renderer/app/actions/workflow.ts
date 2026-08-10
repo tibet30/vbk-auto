@@ -94,7 +94,11 @@ export function useWorkflowHandlers(state: AppState) {
     setBrowserOpen(true);
     try {
       const result = await api()!.research.resolveVehicleResource(project.id, activeTask.id);
-      setNotice(`已匹配资源组：${result.resourceGroupName}（ID ${result.resourceGroupId}），估算 ${result.dailyCost} 元/天。`);
+      if (!result) {
+        setNotice("VBK 未返回可匹配的用车资源组，请调整建议日价或关键词后重试。");
+        return;
+      }
+      setNotice(`已匹配资源组：${result.resourceGroupName}（ID ${result.resourceGroupId}）。`);
       setVerificationNote("");
       setActiveTaskId(null);
       void updateReadiness(project);

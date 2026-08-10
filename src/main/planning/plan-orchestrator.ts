@@ -147,6 +147,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   const existingTasks = await args.runtime.loadExistingResearchTasks(args.projectId);
   const history = await args.runtime.loadHistory(args.projectId);
   const accumulatedResearchTasks: ResearchTaskProposal[] = [];
+  let deferredPresentationFailure: SingleStageResult | undefined;
 
   // 历史版本把 itinerary 标为已完成后，POI 查询可能因超时而未写回。
   // resume 不能重跑 AI 行程，也不能等到后续阶段全部结束才补：在进入
@@ -164,6 +165,13 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
 
   for (let i = startIndex; i < PLANNING_STAGES.length; i += 1) {
     const stage = PLANNING_STAGES[i];
+    if (state.completedStages.includes(stage)) continue;
+    if (stage === "validation" && deferredPresentationFailure) {
+      state = applyDeferredPresentationFailure(state, deferredPresentationFailure, deferredPresentationFailure.status);
+      await args.store.save(state);
+      logRunEnd("runPlan 跳过 validation，回到 presentation 待处理", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+    }
     if (stage === "presentation" && !state.completedStages.includes("commercial")) {
       const parallelStages = (["presentation", "commercial"] as const).filter((s) => !state.completedStages.includes(s));
       let writeTail = Promise.resolve();
@@ -180,7 +188,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
         stage: s, state, skeleton: args.skeleton, planner: args.planner, runtime: parallelRuntime,
         retryLimit: stageRetryLimit, history, existingTasks, providerLabel: args.providerLabel,
       })));
-      let failed: { stage: string; result: SingleStageResult } | undefined;
+      let failed: { stage: PlanningStage; result: SingleStageResult } | undefined;
       for (let n = 0; n < parallelResults.length; n += 1) {
         const result = parallelResults[n];
         const parallelStage = parallelStages[n];
@@ -195,10 +203,15 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
         state.lastModuleSummary = [...result.accepted, ...result.rejected];
         state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
       }
-      state.currentStage = failed?.stage as typeof state.currentStage ?? "research";
-      state.status = failed ? failed.result.status : "running";
+      if (failed?.stage === "presentation" && state.completedStages.includes("commercial")) {
+        deferredPresentationFailure = failed.result;
+        state = applyDeferredPresentationFailure(state, deferredPresentationFailure, "running");
+      } else {
+        state.currentStage = failed ? failed.stage : "research";
+        state.status = failed ? failed.result.status : "running";
+      }
       await args.store.save(state);
-      if (failed) return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+      if (failed && !deferredPresentationFailure) return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
       i += 1;
       continue;
     }
@@ -216,6 +229,12 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state = result.state;
     for (const t of result.researchTasks) accumulatedResearchTasks.push(t);
     if (result.status === "needs_user" || result.status === "failed") {
+      if (stage === "presentation" && state.completedStages.includes("commercial")) {
+        deferredPresentationFailure = result;
+        state = applyDeferredPresentationFailure(state, deferredPresentationFailure, "running");
+        await args.store.save(state);
+        continue;
+      }
       // 失败 / 需要人工介入是终态，原样持久化，保留当前失败阶段供恢复入口使用。
       await args.store.save(state);
       logRunEnd("runPlan 提前结束于 mid-stage", { projectId: args.projectId, providerLabel: args.providerLabel, stage, status: result.status, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
@@ -233,6 +252,12 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
     await args.store.save(state);
     logStageEnd("阶段已接受，写入 completedStages", { projectId: args.projectId, stage, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
+    if (stage === "research" && deferredPresentationFailure) {
+      state = applyDeferredPresentationFailure(state, deferredPresentationFailure, deferredPresentationFailure.status);
+      await args.store.save(state);
+      logRunEnd("runPlan 完成 research 后回到 presentation 待处理", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status, researchTasks: accumulatedResearchTasks.length });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+    }
   }
 
   // validation 已在循环内完成；从持久化产品反推最终 completeness。
@@ -246,6 +271,21 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   await args.store.save(state);
   logRunEnd("runPlan 全流程完成", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status, complete: validation.complete });
   return finalizeRun(state, accepted, accumulatedResearchTasks);
+}
+
+function applyDeferredPresentationFailure(
+  state: PlanningGenerationState,
+  failure: SingleStageResult,
+  status: PlanningGenerationState["status"],
+): PlanningGenerationState {
+  return {
+    ...state,
+    currentStage: "presentation",
+    status,
+    lastAssistantReply: failure.assistantReply,
+    lastModuleSummary: [...failure.accepted, ...failure.rejected],
+    lastMissingSummary: failure.rejected.filter((m) => m.status === "missing").map((m) => m.module),
+  };
 }
 
 /**

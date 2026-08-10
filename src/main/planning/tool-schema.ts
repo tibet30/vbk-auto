@@ -82,7 +82,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           properties: {
             day: { type: "number", minimum: 1 },
             title: { type: "string", minLength: 1 },
-            spots: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1 }, poiName: { type: ["string", "null"] }, poiId: { type: ["string", "null"] } } } },
+            spots: { type: "array", minItems: 1, description: "每个 spot 只能是一个可独立检索的地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一地点名称；括号内可写同一地点别名，不能包含多个地点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 } } } },
             description: { type: "string", minLength: 1 },
             hotel: { type: "string" },
             meals: { type: "string", minLength: 1 },
@@ -151,13 +151,21 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
       return {
         type: "object",
         additionalProperties: false,
-        required: ["hotelTier", "pickupCity", "transport", "reusePickupForDropoff", "mealsIncluded"],
+        required: ["hotelTier", "pickupCity", "transport", "reusePickupForDropoff", "mealsIncluded", "vehicleResource"],
         properties: {
           hotelTier: { type: "string" },
           pickupCity: { type: "string", minLength: 1 },
           transport: { type: "string", enum: ["charter", "shared", "none"] },
           reusePickupForDropoff: { type: "boolean" },
           mealsIncluded: { type: "boolean" },
+          vehicleResource: {
+            type: "object",
+            additionalProperties: false,
+            required: ["requestedDailyCost"],
+            properties: {
+              requestedDailyCost: { type: ["number", "null"], exclusiveMinimum: 0, description: "AI 建议用车日价：按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，仅供后续 VBK 资源组查询；不要通过产品售价、成人价、毛利或起订人数倒推；不要填写任何资源组 ID 或供应商编码。" },
+            },
+          },
         },
       };
     case "researchTasks":

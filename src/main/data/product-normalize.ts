@@ -20,6 +20,20 @@ import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 
 function textValue(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
 
+function positiveNumberValue(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
+}
+
+function positiveIntegerValue(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : undefined;
+}
+
+function normalisePoiId(value: unknown): number | null {
+  return positiveIntegerValue(value) ?? null;
+}
+
 const ACTIVITY_TYPES = new Set(["transport", "visit", "meal", "hotel", "free", "other"]);
 
 function normaliseRecommendationItem(value: unknown): { category: string; text: string } | undefined {
@@ -127,7 +141,7 @@ export function normaliseItinerary(value: unknown) {
       : [];
     const activities = rawActivities.map(normaliseActivity).filter((activity): activity is { time: string; title: string; detail: string; type: string } => Boolean(activity));
     const spots = Array.isArray(record.spots)
-      ? record.spots.map((spot) => typeof spot === "string" ? { name: spot.trim(), poiName: null, poiId: null } : spot && typeof spot === "object" ? { name: textValue((spot as any).name) || textValue((spot as any).poiName), poiName: (spot as any).poiName ?? null, poiId: (spot as any).poiId ?? null } : null).filter((spot): spot is { name: string; poiName: string | null; poiId: string | null } => Boolean(spot?.name))
+      ? record.spots.map((spot) => typeof spot === "string" ? { name: spot.trim(), poiName: null, poiId: null } : spot && typeof spot === "object" ? { name: textValue((spot as any).name) || textValue((spot as any).poiName), poiName: textValue((spot as any).poiName) || null, poiId: normalisePoiId((spot as any).poiId) } : null).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null } => Boolean(spot?.name))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));
     const activityDescription = activities
       .map((activity) => [activity.time, activity.title, activity.detail].filter(Boolean).join(" "))
@@ -279,6 +293,18 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
     if (normalisedTier) operations.hotelTier = normalisedTier;
     else delete operations.hotelTier;
     if (typeof operations.mealsIncluded !== "boolean") delete operations.mealsIncluded;
+    if (!operations.vehicleResource || typeof operations.vehicleResource !== "object" || Array.isArray(operations.vehicleResource)) {
+      operations.vehicleResource = {};
+    } else {
+      const vehicle = operations.vehicleResource as Record<string, unknown>;
+      operations.vehicleResource = {
+        ...(positiveNumberValue(vehicle.requestedDailyCost) ? { requestedDailyCost: positiveNumberValue(vehicle.requestedDailyCost) } : {}),
+        ...(positiveIntegerValue(vehicle.resourceGroupId) ? { resourceGroupId: positiveIntegerValue(vehicle.resourceGroupId) } : {}),
+        ...(textValue(vehicle.resourceGroupName) ? { resourceGroupName: textValue(vehicle.resourceGroupName) } : {}),
+        ...(positiveIntegerValue(vehicle.serviceHoursPerDay) ? { serviceHoursPerDay: positiveIntegerValue(vehicle.serviceHoursPerDay) } : {}),
+        ...(positiveIntegerValue(vehicle.serviceKilometersPerDay) ? { serviceKilometersPerDay: positiveIntegerValue(vehicle.serviceKilometersPerDay) } : {}),
+      };
+    }
     if (Object.keys(operations).length) result.operations = operations; else delete result.operations;
   }
   if (result.commercial && typeof result.commercial === "object" && !Array.isArray(result.commercial)) {

@@ -4,6 +4,7 @@ import { applyProductPatch, applyProductPatchSafe } from "../../src/main/operati
 import {
   normalisePresentation,
   normaliseItinerary,
+  normaliseProductDraft,
 } from "../../src/main/data/product-normalize.js";
 
 test("草稿字段使用 replace 时会创建尚不存在的父对象", () => {
@@ -40,8 +41,16 @@ test("草稿归一化会移除无效运营占位值", () => {
 
   const result = applyProductPatch(product, [{ op: "add", path: "/basicInfo/province", value: "山西" }]);
 
-  assert.equal(result.operations, undefined);
+  assert.deepEqual(result.operations, { vehicleResource: {} });
   assert.equal(result.commercial, undefined);
+});
+
+test("草稿归一化保留空 vehicleResource 并为旧 operations 补空对象", () => {
+  const result = normaliseProductDraft({
+    operations: { hotelSource: "nonPlatform", hotelTier: "当地5钻酒店/-38", mealsIncluded: false },
+  });
+
+  assert.deepEqual((result.operations as Record<string, unknown>).vehicleResource, {});
 });
 
 const day = (n: number) => ({ day: n, title: `第 ${n} 天`, description: `第 ${n} 天描述`, meals: "自理" });

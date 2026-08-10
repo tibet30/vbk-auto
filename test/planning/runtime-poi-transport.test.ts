@@ -32,7 +32,7 @@ test("规划 POI 查询通过 VbkBrowser.page 的 CDP 页面执行", async () =>
   } as unknown as VbkBrowser;
   const runtime = new DbOrchestratorRuntime({} as VbkDatabase, browser);
 
-  assert.deepEqual(await runtime.suggestPoi("晋祠"), { poiName: "晋祠", poiId: "79413" });
+  assert.deepEqual(await runtime.suggestPoi("晋祠"), { poiName: "晋祠", poiId: 79413 });
   assert.equal(pageCalls, 1);
   assert.equal(pageEvaluateCalls, 1);
   assert.equal(browserEvaluateCalls, 0);

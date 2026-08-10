@@ -9,6 +9,7 @@
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { isCombinedSpotName } from "./spot-name.js";
 import {
   PLANNING_STAGES,
   type PlanningStage,
@@ -20,6 +21,20 @@ import {
 
 const requiredText = z.string().trim().min(1);
 const RECOMMENDATION_CATEGORY_VALUES = [...RECOMMENDATION_CATEGORIES] as [string, ...string[]];
+
+const itinerarySpotSchema = z.object({
+  name: requiredText,
+  poiName: z.string().trim().nullable().optional(),
+  poiId: z.number().int().positive().nullable().optional(),
+}).strict().superRefine((spot, ctx) => {
+  if (isCombinedSpotName(spot.name)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["name"],
+      message: "Spot 场所只能指定一个地点；请将组合地点拆分为两个或多个 spots",
+    });
+  }
+});
 const basicInfoModuleValueSchema = z.object({
   subtitle: requiredText,
   province: requiredText,
@@ -60,7 +75,7 @@ const presentationModuleValueSchema = z.object({
 const itineraryDaySchema = z.object({
   day: z.number().int().min(1),
   title: requiredText,
-  spots: z.array(z.object({ name: requiredText, poiName: z.string().trim().nullable().optional(), poiId: z.string().trim().nullable().optional() }).strict()).min(1),
+  spots: z.array(itinerarySpotSchema).min(1),
   description: requiredText,
   hotel: z.string().default(""),
   meals: requiredText,
@@ -123,6 +138,9 @@ const operationsHotelTierUpdateSchema = z.object({
   transport: z.enum(["charter", "shared", "none"]).optional(),
   reusePickupForDropoff: z.boolean().optional(),
   mealsIncluded: z.boolean().optional(),
+  vehicleResource: z.object({
+    requestedDailyCost: z.number().positive().nullable().optional(),
+  }).strict().optional(),
 }).strict();
 
 /**
@@ -354,7 +372,7 @@ ${moduleList}
 6. pricing.adult > 0；pricing.child >= 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. terms 必须包含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。
-9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、supplierCode、providerId、contactCardId。
+9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded / vehicleResource.requestedDailyCost；requestedDailyCost 必须按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、resourceGroupName、supplierCode、providerId、contactCardId。
 10. basicInfo 阶段必须生成 subtitle、province、operationNotes；province 必须是省/自治区/直辖市名称，不能把 meetingCity / destinationCity 城市名直接当作 province。已有非空 province 会被本地保留，不得覆盖。
 11. AI 不能自行声明 research task 已完成；research tasks 由本地 deterministic 生成并走运营 / VBK 核查流程。
 ${args.hasHistory ? "11. 历史会话已附在 user 消息尾部；本轮回复以补齐缺失模块为目标，已成功模块不要重复。" : ""}`;

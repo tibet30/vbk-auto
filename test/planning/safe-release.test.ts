@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { normaliseProductDraft } from "../../src/main/data/product-normalize.js";
 import { applyProductPatchSafe } from "../../src/main/operations/product-patch.js";
 import { automationBlockers } from "../../src/main/automation/schema/schema-functions.js";
-import { findBlacklistedKey } from "../../src/main/planning/stage-runner.js";
+import { findBlacklistedKey, sanitiseModuleValue } from "../../src/main/planning/stage-runner.js";
 
 test("新产品的 release 即使模型写 true 也会被强制为 false（safeRelease=true）", () => {
   const product = {
@@ -64,9 +64,11 @@ test("automationBlockers 把 submitReview=true / publishAfterApproval=true 视�
 test("findBlacklistedKey 命中禁写字段名", () => {
   assert.equal(findBlacklistedKey({ supplierProductCode: "X" }), "supplierProductCode");
   assert.equal(findBlacklistedKey({ vehicleResource: { resourceId: 1 } }), "vehicleResource");
+  assert.equal(findBlacklistedKey({ vehicleResource: { requestedDailyCost: 1000 } }), undefined);
   assert.equal(findBlacklistedKey({ vehicleId: 1 }), "vehicleId");
   assert.equal(findBlacklistedKey({ resourceId: 1 }), "resourceId");
   assert.equal(findBlacklistedKey({ resourceGroupId: 1 }), "resourceGroupId");
+  assert.equal(findBlacklistedKey({ resourceGroupName: "x" }), "resourceGroupName");
   assert.equal(findBlacklistedKey({ supplierCode: "x" }), "supplierCode");
   assert.equal(findBlacklistedKey({ providerId: 1 }), "providerId");
   assert.equal(findBlacklistedKey({ contactCardId: 1 }), "contactCardId");
@@ -77,4 +79,15 @@ test("findBlacklistedKey 命中禁写字段名", () => {
   // 合法的字段不被命中。
   assert.equal(findBlacklistedKey({ hotelTier: "当地5钻酒店/-38" }), undefined);
   assert.equal(findBlacklistedKey(null), undefined);
+});
+
+test("operations 阶段只允许 AI 写 vehicleResource.requestedDailyCost", () => {
+  assert.deepEqual(
+    sanitiseModuleValue("skeleton", { vehicleResource: { requestedDailyCost: 1000 } }),
+    { ok: true, value: { vehicleResource: { requestedDailyCost: 1000 } } },
+  );
+  assert.deepEqual(
+    sanitiseModuleValue("skeleton", { vehicleResource: { resourceGroupId: 101 } }),
+    { ok: false, reason: "AI 输出包含禁写字段 vehicleResource" },
+  );
 });

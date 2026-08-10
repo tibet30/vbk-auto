@@ -27,7 +27,7 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
   const runtime: OrchestratorRuntime = {
     suggestPoi: async (keyword) => {
       events.push(`poi:${keyword}`);
-      return { poiName: "晋祠博物馆", poiId: "83199" };
+      return { poiName: "晋祠博物馆", poiId: 83199 };
     },
     loadExistingResearchTasks: async () => [],
     writeModule: async (_projectId, _module: PlanningModule, path, value) => {
@@ -68,6 +68,6 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
     "planner:presentation",
   ]);
   assert.ok(!events.includes("planner:itinerary"));
-  const spot = ((product.itinerary as Array<{ spots: Array<{ poiName: string; poiId: string }> }>)[0].spots[0]);
-  assert.deepEqual(spot, { name: "晋祠", poiName: "晋祠博物馆", poiId: "83199" });
+  const spot = ((product.itinerary as Array<{ spots: Array<{ poiName: string; poiId: number }> }>)[0].spots[0]);
+  assert.deepEqual(spot, { name: "晋祠", poiName: "晋祠博物馆", poiId: 83199 });
 });

@@ -46,7 +46,7 @@ test("业务成功时匹配候选，浏览器调用只传端点、请求体和�
     status: 200,
     text: JSON.stringify({ ResponseStatus: { Ack: "Success" }, poiList: [{ poiName: "晋祠", poiId: 79413 }] }),
   });
-  assert.deepEqual(await suggestPoi(fake.browser, "晋祠"), { poiName: "晋祠", poiId: "79413" });
+  assert.deepEqual(await suggestPoi(fake.browser, "晋祠"), { poiName: "晋祠", poiId: 79413 });
   assert.deepEqual(fake.calls, [{
     endpoint: "https://online.ctrip.com/restapi/soa2/20049/suggestPoi",
     request: buildPoiSuggestRequest("晋祠"),
@@ -107,7 +107,7 @@ test("真实响应中的主景点别名只在唯一且完整覆盖时匹配，�
       { poiName: "秦始皇帝陵博物院(兵马俑)", poiId: 75682 },
     ],
   });
-  assert.deepEqual(best, { poiName: "秦始皇帝陵博物院(兵马俑)", poiId: "75682" });
+  assert.deepEqual(best, { poiName: "秦始皇帝陵博物院(兵马俑)", poiId: 75682 });
 });
 
 test("完整输入下属景点时，精确名称仍可匹配", () => {
@@ -116,7 +116,7 @@ test("完整输入下属景点时，精确名称仍可匹配", () => {
       { poiName: "秦始皇兵马俑博物馆-秦始皇雕像", poiId: 145194748 },
       { poiName: "秦始皇帝陵博物院(兵马俑)", poiId: 75682 },
     ],
-  }), { poiName: "秦始皇兵马俑博物馆-秦始皇雕像", poiId: "145194748" });
+  }), { poiName: "秦始皇兵马俑博物馆-秦始皇雕像", poiId: 145194748 });
 });
 
 test("POI 别名匹配在组合景点、低置信或多个同等候选时保持待核查", () => {
@@ -143,10 +143,10 @@ test("组合景点关键词在任何候选匹配前保持待核查", () => {
   }), null);
   assert.deepEqual(pickBestPoi("华清宫", {
     poiList: [{ poiName: "华清宫", poiId: 79658 }],
-  }), { poiName: "华清宫", poiId: "79658" });
+  }), { poiName: "华清宫", poiId: 79658 });
   assert.deepEqual(pickBestPoi("秦始皇兵马俑博物馆", {
     poiList: [{ poiName: "秦始皇帝陵博物院(兵马俑)", poiId: 75682 }],
-  }), { poiName: "秦始皇帝陵博物院(兵马俑)", poiId: "75682" });
+  }), { poiName: "秦始皇帝陵博物院(兵马俑)", poiId: 75682 });
 });
 
 test("精确和双向名称匹配仍优先于别名候选", () => {
@@ -155,10 +155,10 @@ test("精确和双向名称匹配仍优先于别名候选", () => {
       { poiName: "晋祠博物馆(晋祠)", poiId: 1 },
       { poiName: "晋祠", poiId: 79413 },
     ],
-  }), { poiName: "晋祠", poiId: "79413" });
+  }), { poiName: "晋祠", poiId: 79413 });
   assert.deepEqual(pickBestPoi("秦始皇兵马俑", {
     poiList: [{ poiName: "秦始皇兵马俑博物馆", poiId: 75682 }],
-  }), { poiName: "秦始皇兵马俑博物馆", poiId: "75682" });
+  }), { poiName: "秦始皇兵马俑博物馆", poiId: 75682 });
 });
 
 test("主景点的部分名称不会因候选列表顺序误选下属景点", () => {
@@ -167,7 +167,19 @@ test("主景点的部分名称不会因候选列表顺序误选下属景点", ()
       { poiName: "秦始皇兵马俑一号陪葬坑", poiId: 69722564 },
       { poiName: "秦始皇帝陵博物院（兵马俑）", poiId: 75682 },
     ],
-  }), { poiName: "秦始皇帝陵博物院（兵马俑）", poiId: "75682" });
+  }), { poiName: "秦始皇帝陵博物院（兵马俑）", poiId: 75682 });
+});
+
+test("无效 POI ID 不会被当作有效候选", () => {
+  assert.equal(pickBestPoi("晋祠", {
+    poiList: [{ poiName: "晋祠", poiId: "not-a-number" }],
+  }), null);
+  assert.equal(pickBestPoi("晋祠", {
+    poiList: [{ poiName: "晋祠", poiId: "79413" }],
+  }), null);
+  assert.equal(pickBestPoi("晋祠", {
+    poiList: [{ poiName: "晋祠", poiId: 0 }],
+  }), null);
 });
 
 test("别名和官方名重叠覆盖时保持待核查，不能把同一段字符计两次", () => {

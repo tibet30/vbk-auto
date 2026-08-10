@@ -33,10 +33,54 @@ const DEFAULT_PRODUCT = (overrides: Record<string, unknown> = {}): Record<string
     meetingCity: "",
     destinationCity: "",
   },
-  operations: { hotelSource: "nonPlatform", hotelTier: "threeStar", mealsIncluded: false },
+  operations: { hotelSource: "nonPlatform", hotelTier: "threeStar", mealsIncluded: false, vehicleResource: {} },
   itinerary: [],
   ...overrides,
 });
+
+function textValue(value: unknown) { return typeof value === "string" ? value.trim() : ""; }
+
+function positiveNumberValue(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
+}
+
+function positiveIntegerValue(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : undefined;
+}
+
+function normalisePoiId(value: unknown): number | null {
+  return positiveIntegerValue(value) ?? null;
+}
+
+function normaliseItineraryPois(value: unknown) {
+  if (!Array.isArray(value)) return value;
+  return value.map((day) => {
+    if (!day || typeof day !== "object" || Array.isArray(day)) return day;
+    const record = day as Record<string, unknown>;
+    if (!Array.isArray(record.spots)) return day;
+    record.spots = record.spots.map((spot) => {
+      if (typeof spot === "string") return { name: spot.trim(), poiName: null, poiId: null };
+      if (!spot || typeof spot !== "object" || Array.isArray(spot)) return spot;
+      const candidate = spot as Record<string, unknown>;
+      return { ...candidate, poiId: normalisePoiId(candidate.poiId) };
+    });
+    return record;
+  });
+}
+
+function normaliseVehicleResource(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const vehicle = value as Record<string, unknown>;
+  return {
+    ...(positiveNumberValue(vehicle.requestedDailyCost) ? { requestedDailyCost: positiveNumberValue(vehicle.requestedDailyCost) } : {}),
+    ...(positiveIntegerValue(vehicle.resourceGroupId) ? { resourceGroupId: positiveIntegerValue(vehicle.resourceGroupId) } : {}),
+    ...(textValue(vehicle.resourceGroupName) ? { resourceGroupName: textValue(vehicle.resourceGroupName) } : {}),
+    ...(positiveIntegerValue(vehicle.serviceHoursPerDay) ? { serviceHoursPerDay: positiveIntegerValue(vehicle.serviceHoursPerDay) } : {}),
+    ...(positiveIntegerValue(vehicle.serviceKilometersPerDay) ? { serviceKilometersPerDay: positiveIntegerValue(vehicle.serviceKilometersPerDay) } : {}),
+  };
+}
 
 /**
  * 把数据库里的 product_json 字符串解析为统一形态。
@@ -68,5 +112,10 @@ export function parseAndNormalizeProductJson(raw: string | null | undefined): Pr
       basicInfo.meetingCity = basicInfo.destinationCity;
     }
   }
+  const operations = product.operations as Record<string, unknown> | undefined;
+  if (operations && typeof operations === "object" && !Array.isArray(operations)) {
+    operations.vehicleResource = normaliseVehicleResource(operations.vehicleResource);
+  }
+  product.itinerary = normaliseItineraryPois(product.itinerary);
   return product as ProjectDetail["product"];
 }

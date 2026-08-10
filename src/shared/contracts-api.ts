@@ -15,7 +15,6 @@ import type {
   ProjectSummary,
   Settings,
   VehicleResourceMatch,
-  VehicleResourcePricePreview,
   HotelResourceMatch,
   AccountFixedInfo,
   AccountFixedInfoField,
@@ -54,9 +53,7 @@ export interface VbkApi {
   };
   research: {
     accept(projectId: string, taskId: string, note?: string): Promise<void>;
-    resolveVehicleResource(projectId: string, taskId?: string): Promise<VehicleResourceMatch>;
-    previewVehicleResourceByPrice(projectId: string, dailyCost: number): Promise<VehicleResourcePricePreview>;
-    confirmVehicleResourcePreview(projectId: string, previewId: string): Promise<VehicleResourceMatch>;
+    resolveVehicleResource(projectId: string, taskId?: string): Promise<VehicleResourceMatch | undefined>;
     resolveHotelResource(projectId: string, taskId?: string): Promise<HotelResourceMatch>;
   };
   browser: {
@@ -96,7 +93,7 @@ export interface VbkApi {
      * 调用方需先切换 / 登出。
      */
     forgetAccount(accountKey: string): Promise<void>;
-    suggestPoi(keyword: string): Promise<{ poiName: string; poiId: string } | null>;
+    suggestPoi(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
     suggestPoiDemo(keyword: string): Promise<unknown>;
   };
   automation: {
@@ -152,7 +149,7 @@ export interface VbkApi {
   contacts: {
     /** 在 VBK 已登录的浏览器上下文里拉取 providerId 对应的联系人卡片列表。 */
     listProviderContactCards(providerId: number, searchKeyword?: string): Promise<ProviderContactCard[]>;
-    suggestPoi(keyword: string): Promise<{ poiName: string; poiId: string } | null>;
+    suggestPoi(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
   };
   settings: {
     get(): Promise<Settings>;

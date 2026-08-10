@@ -198,26 +198,40 @@ export interface AiModelListResult {
   fetchedAt: string;
 }
 
+/**
+ * 运营人员在 review 面板上对单个字段的人工录入白名单。
+ *
+ * 用 discriminator (`field`) 拆分，每种 case 只覆盖一类字段，避免一个
+ * 巨型 payload 把无关字段都拖进来。落地前 main 进程会再用 productSchema
+ * 校验一次完整 product，保证无关字段保持原状。
+ */
+export type ManualReviewFieldInput =
+  | { field: "pricing"; adult: number; child: number }
+  /** 副标题：写入 basicInfo.subtitle。 */
+  | { field: "basicInfoSubtitle"; subtitle: string }
+  /** 用车资源组人工复核只允许写 AI 建议日价；真实资源组 ID / 名称由 VBK 匹配回填。 */
+  | { field: "vehicleResource"; requestedDailyCost?: number | null }
+  /**
+   * 管家联系人：来自账号固定信息 (AccountFixedInfo.butlerName)，
+   * 必须是合法的 ContactCardSelection（contactCardId / providerId / displayName）。
+   * selection === null 表示清空（让自动化阶段走 VBK 默认逻辑）。
+   */
+  | { field: "butlerContact"; selection: ContactCardSelection | null };
+
+/**
+ * AI 单字段重新生成允许的目标字段。当前 main 端只把这条 IPC 当作「未发布」
+ * 占位（抛错），但 contracts 类型保留以便后续接入。
+ */
+export type AiRegenerateField = "subtitle" | "province" | "operationNotes" | "pricing" | "itinerary" | "sellingPoints";
+
 export interface VehicleResourceMatch {
   query: string;
   city: string;
   days: number;
-  dailyCost: number;
-  totalCost: number;
+  dailyCost?: number;
+  totalCost?: number;
   resourceGroupId: number;
   resourceGroupName: string;
-}
-
-export type AiRegenerateField = "subtitle" | "province" | "operationNotes" | "pricing" | "itinerary" | "sellingPoints";
-
-export type ManualReviewFieldInput =
-  { field: "pricing"; adult: number; child: number };
-
-export interface VehicleResourcePricePreview extends VehicleResourceMatch {
-  previewId: string;
-  requestedDailyCost: number;
-  matchedDailyCost: number;
-  matchMode: "exact" | "roundedUp";
 }
 
 export interface HotelResourceMatch {
@@ -389,5 +403,5 @@ export interface OperationLogPage {
   /** 刷新时间戳（ISO），方便头部显示「最近更新于…」并避免重复拉取。 */
   refreshedAt: string;
 }
-export interface ItinerarySpot { name: string; poiName: string | null; poiId: string | null }
+export interface ItinerarySpot { name: string; poiName: string | null; poiId: number | null }
 export interface ItineraryDay { day: number; title: string; spots?: ItinerarySpot[]; description: string; hotel: string; meals: string }

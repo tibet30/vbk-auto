@@ -17,12 +17,12 @@ const writablePatchGuide = `patch 可写路径白名单（共 16 个）：
 /sales/productType, /sales/productForm, /sales/splitGroup
 /basicInfo/supplierProductName, /basicInfo/subtitle, /basicInfo/days, /basicInfo/nights, /basicInfo/meetingCity, /basicInfo/destinationCity, /basicInfo/province, /basicInfo/operationNotes
 /presentation
-/operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded
+/operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded, /operations/vehicleResource/requestedDailyCost
 /commercial/packageName, /commercial/terms
 /commercial/pricing, /commercial/inventory, /commercial/release
 /itinerary
 
-黑名单（绝对禁止写入）：supplierProductCode、vehicleResource 整段（含 vehicleId/resourceId/resourceGroupId/supplierCode）、providerId、contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。`;
+黑名单（绝对禁止写入）：supplierProductCode、vehicleResource 除 requestedDailyCost 外的任何字段（含 vehicleId/resourceId/resourceGroupId/resourceGroupName/supplierCode）、providerId、contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。`;
 
 const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
 {"reply":"给运营看的简明中文回复","patch":[...],"questions":[],"researchTasks":[...]}
@@ -50,7 +50,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
 【/itinerary】value 必须是数组，每天的行程为一个对象，包含以下全部字段：
   day → number，正整数，从 1 开始
   title → string，格式 "城市—景点1—景点2—景点3"
-  spots → string[]，当天游览的景点名称列表，不得为空
+  spots → string[]，当天游览的景点名称列表，不得为空；每个 spot 只能写一个可独立检索的地点。不得把“钟楼和鼓楼”“回民街·钟鼓楼广场”等多个地点合写为一个 spot，必须拆成多个 spots；括号内可写同一地点别名
   description → string，详细行程描述（非空，包含交通、游览、用餐安排）
   hotel → string，当晚住宿描述
   meals → string，餐饮总述，格式 "早餐...；午餐...；晚餐..."
@@ -92,6 +92,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   /operations/hotelSource → "nonPlatform"
   /operations/hotelTier → "当地3钻酒店/-3" / "当地4钻酒店/-4" / "当地5钻酒店/-38"
   /operations/mealsIncluded → true 或 false
+  /operations/vehicleResource/requestedDailyCost → number，AI 建议用车日价：按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，仅用于后续 VBK 资源组查询；禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写任何真实资源组 ID / 名称 / resourceId / supplierCode
   /commercial/packageName → string，套餐名称
 
 以上任何字段缺失、类型错误或格式不符，都会被本地校验拒绝，导致需要重试。`;
@@ -114,7 +115,7 @@ export const writablePatchPrefixes = [
   "/sales/productType", "/sales/productForm", "/sales/splitGroup",
   "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
   "/presentation",
-  "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded",
+  "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded", "/operations/vehicleResource/requestedDailyCost",
   "/commercial/packageName", "/commercial/terms",
   "/commercial/pricing", "/commercial/inventory", "/commercial/release",
   "/itinerary",

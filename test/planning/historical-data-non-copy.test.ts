@@ -134,7 +134,7 @@ test("新建产品不复用 example 的价格 / 库存日期", async () => {
   assert.match(commercial.inventory.startDate, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test("patch /operations/vehicleResource 一律被拒；supplierProductCode 也无法写入", () => {
+test("patch 只允许写 vehicleResource.requestedDailyCost；真实资源字段仍被拒", () => {
   const product: Record<string, unknown> = { basicInfo: { supplierProductCode: "NEW" } };
   const blockedPatch = applyProductPatchSafe(product, [
     { op: "replace", path: "/basicInfo/supplierProductCode", value: "TY-SJT-2D1N-001" },
@@ -144,6 +144,15 @@ test("patch /operations/vehicleResource 一律被拒；supplierProductCode 也�
     { op: "add", path: "/operations/vehicleResource", value: { vehicleId: 5422005, resourceId: 76479748 } },
   ]);
   assert.equal(vehiclePatch.applied, false);
+  const vehicleIdPatch = applyProductPatchSafe(product, [
+    { op: "add", path: "/operations/vehicleResource/resourceGroupId", value: 123 },
+  ]);
+  assert.equal(vehicleIdPatch.applied, false);
+  const requestedCostPatch = applyProductPatchSafe(product, [
+    { op: "add", path: "/operations/vehicleResource/requestedDailyCost", value: 1000 },
+  ]);
+  assert.equal(requestedCostPatch.applied, true);
+  assert.equal((((requestedCostPatch.product.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>).requestedDailyCost), 1000);
   // 允许写入合法字段。
   const allowedPatch = applyProductPatchSafe(product, [
     { op: "replace", path: "/operations/hotelTier", value: "当地5钻酒店/-38" },

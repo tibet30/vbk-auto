@@ -15,12 +15,13 @@ import type {
   GenerationStateStore, OrchestratorRuntime,
 } from "../../src/main/planning/types.js";
 import type {
-  Planner, PlannerRequest, PlanningStageOutput, PlanningGenerationState, PlanningModule, ResearchTaskProposal,
+  Planner, PlannerRequest, PlanningStage, PlanningStageOutput, PlanningGenerationState, PlanningModule, ResearchTaskProposal,
 } from "../../src/shared/contracts-planning.js";
 import { AI_WRITABLE_PATHS } from "../../src/main/planning/schemas.js";
 
 class ItineraryOnlyPlanner implements Planner {
   calls: PlanningStage[] = [];
+  constructor(private readonly opts: { failPresentation?: boolean } = {}) {}
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     this.calls.push(request.stage);
     if (request.stage === "basicInfo") return { reply: "basic", modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }] };
@@ -34,6 +35,7 @@ class ItineraryOnlyPlanner implements Planner {
       };
     }
     if (request.stage === "presentation") {
+      if (this.opts.failPresentation) return { reply: "pres missing", modules: [] };
       return {
         reply: "pres",
         modules: [{ module: "presentation", status: "accepted", value: {
@@ -132,6 +134,50 @@ test("research 阶段由本地 deterministic 生成，不调用 AI", async () =>
   assert.equal(result.status, "completed");
   assert.ok(!planner.calls.includes("research"), "research 阶段不应调用 planner");
   assert.ok(result.researchTasks.length >= 1, "research 阶段应当产出至少一条任务");
+});
+
+test("presentation 缺失不阻塞 privateTour research 用车资源组任务", async () => {
+  const store = new InMemoryStore();
+  const rt = new FakeRuntime();
+  const planner = new ItineraryOnlyPlanner({ failPresentation: true });
+
+  const result = await runPlan({
+    projectId: "presentation-missing-research", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
+  });
+
+  assert.equal(result.status, "needs_user");
+  assert.ok(!result.state.completedStages.includes("presentation"), "presentation 失败时不能标记完成");
+  assert.ok(result.state.completedStages.includes("commercial"), "commercial 成功结果应保留");
+  assert.ok(result.state.completedStages.includes("research"), "research 应在 presentation 缺失时继续执行");
+  assert.ok(!result.state.completedStages.includes("validation"), "presentation 缺失时不应进入最终 validation 完成态");
+  assert.equal(result.state.currentStage, "presentation", "currentStage 应指回 presentation，方便继续补齐");
+  assert.ok(result.researchTasks.some((task) => task.label === "核查用车资源组（按目的地 / 出行人数）"));
+  assert.ok(rt.researchTasks.some((task) => task.label === "核查用车资源组（按目的地 / 出行人数）"));
+  assert.ok(!planner.calls.includes("research"), "research 阶段不得调用 AI planner");
+  assert.equal(planner.calls.filter((stage) => stage === "commercial").length, 1);
+});
+
+test("presentation 缺失后继续规划只补 presentation 并进入 validation", async () => {
+  const store = new InMemoryStore();
+  const rt = new FakeRuntime();
+  const firstPlanner = new ItineraryOnlyPlanner({ failPresentation: true });
+
+  await runPlan({
+    projectId: "presentation-missing-resume", skeleton, store, runtime: rt, planner: firstPlanner, providerLabel: "minimax",
+  });
+
+  const secondPlanner = new ItineraryOnlyPlanner();
+  const result = await runPlan({
+    projectId: "presentation-missing-resume", skeleton, store, runtime: rt, planner: secondPlanner, providerLabel: "minimax",
+  });
+
+  assert.equal(result.status, "completed");
+  assert.ok(result.state.completedStages.includes("presentation"), "resume 应补齐 presentation");
+  assert.ok(result.state.completedStages.includes("validation"), "presentation 补齐后应进入 validation");
+  assert.equal(secondPlanner.calls.filter((stage) => stage === "presentation").length, 1);
+  assert.equal(secondPlanner.calls.filter((stage) => stage === "commercial").length, 0, "commercial 已完成，不应重跑");
+  assert.ok(!secondPlanner.calls.includes("research"), "research 已完成且本地阶段不应调用 AI");
+  assert.equal(rt.researchTasks.filter((task) => task.label === "核查用车资源组（按目的地 / 出行人数）").length, 1);
 });
 
 test("SuggestPoi 业务失败不会被降级成景点未匹配任务", async () => {

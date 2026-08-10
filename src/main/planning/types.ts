@@ -42,7 +42,7 @@ export interface GenerationStateStore {
 }
 
 export interface OrchestratorRuntime {
-  suggestPoi?(keyword: string): Promise<{ poiName: string; poiId: string } | null>;
+  suggestPoi?(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
   /** 读取当前已存在的 research tasks（label+type）。 */
   loadExistingResearchTasks(projectId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */

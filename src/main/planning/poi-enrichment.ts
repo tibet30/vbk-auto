@@ -114,7 +114,7 @@ async function queryPoi(args: {
   projectId: string;
   keyword: string;
   queryTimeoutMs: number;
-}): Promise<{ match: { poiName: string; poiId: string } | null; failed: boolean }> {
+}): Promise<{ match: { poiName: string; poiId: number } | null; failed: boolean }> {
   try {
     console.info("[planning.poi]", { event: "query-start", projectId: args.projectId, keyword: args.keyword });
     const match = await rejectPoiQueryAfter(args.runtime.suggestPoi!(args.keyword), args.queryTimeoutMs);
@@ -137,7 +137,7 @@ async function resolveFallbackPoi(args: {
   destination: string;
   projectId: string;
   queryTimeoutMs: number;
-}): Promise<{ match: { poiName: string; poiId: string } | null; queryFailed: boolean; attempts: number }> {
+}): Promise<{ match: { poiName: string; poiId: number } | null; queryFailed: boolean; attempts: number }> {
   const previousCandidates: string[] = [];
   for (let attempt = 1; attempt <= MAX_AI_POI_NAME_ATTEMPTS; attempt += 1) {
     let candidate: string | null = null;
@@ -175,11 +175,15 @@ function isUsableFallbackCandidate(candidate: string | null, originalName: strin
 function isPoiComplete(spot: unknown): boolean {
   if (!spot || typeof spot !== "object") return false;
   const candidate = spot as { poiName?: unknown; poiId?: unknown };
-  return hasText(candidate.poiName) && hasText(candidate.poiId);
+  return hasText(candidate.poiName) && isPositiveInteger(candidate.poiId);
 }
 
 function hasText(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
 function timeoutOrDefault(value: number | undefined, fallback: number): number {

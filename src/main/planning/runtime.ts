@@ -13,7 +13,10 @@ import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
 import { suggestPoi } from "../infrastructure/poi-suggest.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
+import { injectAccountButler } from "../operations/account-butler-inject.js";
+import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import type { ContactCardSelection } from "../../shared/contracts.js";
 import type {
   GenerationStateStore,
   OrchestratorRuntime,
@@ -143,6 +146,23 @@ function itineraryDaysAreOrdered(itinerary: unknown[], expectedDays: number): bo
   return true;
 }
 
+function readValidProductButler(product: Record<string, unknown>): ContactCardSelection | null {
+  const operations = product.operations;
+  if (!operations || typeof operations !== "object" || Array.isArray(operations)) return null;
+  const bookingControls = (operations as Record<string, unknown>).bookingControls;
+  if (!bookingControls || typeof bookingControls !== "object" || Array.isArray(bookingControls)) return null;
+  const butler = (bookingControls as Record<string, unknown>).butler;
+  if (!butler || typeof butler !== "object" || Array.isArray(butler)) return null;
+  const candidate = butler as Record<string, unknown>;
+  const id = candidate.contactCardId;
+  const providerId = candidate.providerId;
+  const displayName = typeof candidate.displayName === "string" ? candidate.displayName.trim() : "";
+  if (!Number.isInteger(id) || (id as number) <= 0) return null;
+  if (!Number.isInteger(providerId) || (providerId as number) <= 0) return null;
+  if (!displayName) return null;
+  return { contactCardId: id as number, displayName, providerId: providerId as number };
+}
+
 /**
  * OrchestratorRuntime 的 SQLite 实现：
  *   - loadExistingResearchTasks：取项目下所有 research tasks，dedupe 按 label+type；
@@ -170,6 +190,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   async writeModule(projectId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
     const project = this.db.getProject(projectId);
     if (!project) return { ok: false, reason: "项目不存在" };
+    const existingButler = readValidProductButler(project.product);
     // basicInfo is a shared object; replacing its root must preserve days/cities
     // and other existing fields needed by itinerary and automation.
     if (module === "basicInfo" && value && typeof value === "object" && !Array.isArray(value)) {
@@ -185,7 +206,12 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       { op: "replace", path: writePath, value },
     ]);
     if (!result.applied) return { ok: false, reason: "本地写入被拒（路径 / 值不合法）" };
-    this.db.updateProduct(projectId, result.product);
+    const product = existingButler
+      ? applyManualReviewField(result.product, { field: "butlerContact", selection: existingButler })
+      : result.product;
+    this.db.updateProduct(projectId, product);
+    const accountName = this.db.getSetting("vbkAccountName")?.value || null;
+    injectAccountButler(this.db, projectId, accountName);
     return { ok: true };
   }
 

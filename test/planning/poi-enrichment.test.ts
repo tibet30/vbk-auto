@@ -19,7 +19,7 @@ test("单个 POI 查询悬挂会超时，后续景点仍写回，且不伪造未
     suggestPoi: async (keyword) => {
       queried.push(keyword);
       if (keyword === "慢查询景点") return new Promise<never>(() => undefined);
-      return { poiName: "可匹配景点（VBK）", poiId: "1024" };
+      return { poiName: "可匹配景点（VBK）", poiId: 1024 };
     },
     loadExistingResearchTasks: async () => [],
     writeModule: async (_projectId, module, path, value) => {
@@ -46,9 +46,9 @@ test("单个 POI 查询悬挂会超时，后续景点仍写回，且不伪造未
   });
 
   assert.deepEqual(queried, ["慢查询景点", "可匹配景点"]);
-  const spots = (written as { spots: Array<{ poiName: string | null; poiId: string | null }> }[])[0].spots;
+  const spots = (written as { spots: Array<{ poiName: string | null; poiId: number | null }> }[])[0].spots;
   assert.deepEqual(spots[0], { name: "慢查询景点", poiName: null, poiId: null });
-  assert.deepEqual(spots[1], { name: "可匹配景点", poiName: "可匹配景点（VBK）", poiId: "1024" });
+  assert.deepEqual(spots[1], { name: "可匹配景点", poiName: "可匹配景点（VBK）", poiId: 1024 });
   assert.equal(tasks.length, 0, "超时与成功匹配都不能生成 POI 核查任务");
 });
 
@@ -118,7 +118,7 @@ test("完整 POI 不发起查询也不重写 itinerary；只查询缺失的景�
   const runtime: OrchestratorRuntime = {
     suggestPoi: async (keyword) => {
       queried.push(keyword);
-      return { poiName: `${keyword}（VBK）`, poiId: "2048" };
+      return { poiName: `${keyword}（VBK）`, poiId: 2048 };
     },
     loadExistingResearchTasks: async () => [],
     writeModule: async () => {
@@ -129,7 +129,7 @@ test("完整 POI 不发起查询也不重写 itinerary；只查询缺失的景�
     loadHistory: async () => [],
     loadCurrentProduct: async () => ({
       itinerary: [{ day: 1, spots: [
-        { name: "已有 POI", poiName: "已有 POI（VBK）", poiId: "1" },
+        { name: "已有 POI", poiName: "已有 POI（VBK）", poiId: 1 },
         { name: "缺失 POI", poiName: null, poiId: null },
       ] }],
     }),
@@ -163,7 +163,7 @@ test("完整 itinerary 在补全入口中零查询、零写回", async () => {
     addResearchTask: async () => "id",
     loadHistory: async () => [],
     loadCurrentProduct: async () => ({
-      itinerary: [{ day: 1, spots: [{ name: "晋祠", poiName: "晋祠博物馆", poiId: "83199" }] }],
+      itinerary: [{ day: 1, spots: [{ name: "晋祠", poiName: "晋祠博物馆", poiId: 83199 }] }],
     }),
     loadAcceptedModules: async () => ["itinerary"],
   };
@@ -187,7 +187,7 @@ test("原始名称未命中后，第二个 AI 单点候选命中会写回原 spo
     product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
     suggestPoi: async (keyword) => {
       queries.push(keyword);
-      return keyword === "西安钟楼" ? { poiName: "西安钟楼", poiId: "123" } : null;
+      return keyword === "西安钟楼" ? { poiName: "西安钟楼", poiId: 123 } : null;
     },
     write: (value) => { written = value; },
   });
@@ -200,7 +200,7 @@ test("原始名称未命中后，第二个 AI 单点候选命中会写回原 spo
   });
   assert.deepEqual(queries, ["回民街·钟鼓楼广场", "回民街", "西安钟楼"]);
   assert.deepEqual(resolverAttempts, [1, 2]);
-  assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安钟楼", poiId: "123" });
+  assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安钟楼", poiId: 123 });
   assert.equal(runtime.tasks.length, 0);
 });
 
@@ -208,7 +208,7 @@ test("原始名称直接命中不调用 AI；第三个候选也可正常写回",
   let resolverCalls = 0;
   const directRuntime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "西安钟楼", poiName: null, poiId: null }] }] },
-    suggestPoi: async () => ({ poiName: "西安钟楼", poiId: "1" }),
+    suggestPoi: async () => ({ poiName: "西安钟楼", poiId: 1 }),
   });
   await enrichItineraryPois({
     projectId: "fallback-direct", destination: "西安", runtime: directRuntime, persistedTaskKeys: new Set(),
@@ -219,14 +219,14 @@ test("原始名称直接命中不调用 AI；第三个候选也可正常写回",
   let written: any;
   const thirdRuntime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
-    suggestPoi: async (keyword) => keyword === "西安鼓楼" ? { poiName: "西安鼓楼", poiId: "2" } : null,
+    suggestPoi: async (keyword) => keyword === "西安鼓楼" ? { poiName: "西安鼓楼", poiId: 2 } : null,
     write: (value) => { written = value; },
   });
   await enrichItineraryPois({
     projectId: "fallback-third", destination: "西安", runtime: thirdRuntime, persistedTaskKeys: new Set(),
     resolvePoiName: async ({ attempt }) => ["回民街", "西安钟楼", "西安鼓楼"][attempt - 1],
   });
-  assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安鼓楼", poiId: "2" });
+  assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安鼓楼", poiId: 2 });
 });
 
 test("三次 AI 仍无候选时只创建一条带次数的人工核查项", async () => {
@@ -313,7 +313,7 @@ test("原始 POI 查询失败不调用 AI，也不创建未匹配任务", async 
 
 function testRuntime(args: {
   product: Record<string, unknown>;
-  suggestPoi: (keyword: string) => Promise<{ poiName: string; poiId: string } | null>;
+  suggestPoi: (keyword: string) => Promise<{ poiName: string; poiId: number } | null>;
   write?: (value: any) => void;
 }) {
   const tasks: ResearchTaskProposal[] = [];

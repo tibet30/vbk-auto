@@ -29,6 +29,7 @@ const BLACKLISTED_VALUE_KEYS = [
   "vehicleId",
   "resourceId",
   "resourceGroupId",
+  "resourceGroupName",
   "butler",
   "bookingControls",
 ] as const;
@@ -45,6 +46,12 @@ export function findBlacklistedKey(value: unknown): string | undefined {
   }
   if (typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (key === "vehicleResource") {
+        if (!child || typeof child !== "object" || Array.isArray(child)) return key;
+        const childKeys = Object.keys(child as Record<string, unknown>);
+        if (childKeys.some((childKey) => childKey !== "requestedDailyCost")) return key;
+        continue;
+      }
       if ((BLACKLISTED_VALUE_KEYS as readonly string[]).includes(key)) return key;
       const hit = findBlacklistedKey(child);
       if (hit) return hit;

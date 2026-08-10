@@ -80,7 +80,7 @@ class FakeRuntime implements OrchestratorRuntime {
   /** addResearchTask 去重语义：相同 label+type 只算一次。 */
   private taskKeys = new Set<string>();
   moduleWrites: Array<{ module: PlanningModule; writePath: string }> = [];
-  suggestPoi?: (keyword: string) => Promise<{ poiName: string; poiId: string } | null>;
+  suggestPoi?: (keyword: string) => Promise<{ poiName: string; poiId: number } | null>;
   async loadExistingResearchTasks(): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
     return this.researchTasks.map((t) => ({ label: t.label, type: t.type }));
   }
@@ -331,7 +331,7 @@ test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 com
   const queried: string[] = [];
   runtime.suggestPoi = async (keyword) => {
     queried.push(keyword);
-    return keyword === "晋祠博物馆" ? { poiName: "晋祠博物馆", poiId: "79413" } : null;
+    return keyword === "晋祠博物馆" ? { poiName: "晋祠博物馆", poiId: 79413 } : null;
   };
   const planner = new FakePlanner(buildFakeScript());
 
@@ -344,8 +344,8 @@ test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 com
   assert.deepEqual(queried, ["晋祠博物馆", "山西博物院"]);
   assert.equal(planner.calls.length, 0, "POI-only backfill 不得重新调用 AI planner");
   assert.deepEqual(runtime.moduleWrites, [{ module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary }], "仅有实际匹配时才写回行程");
-  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: string | null }> }>;
-  assert.deepEqual(itinerary[0].spots[0], { name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: "79413" });
+  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
+  assert.deepEqual(itinerary[0].spots[0], { name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: 79413 });
   assert.deepEqual(itinerary[1].spots[0], { name: "山西博物院", poiName: null, poiId: null });
 });
 
@@ -356,11 +356,11 @@ test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", asy
     projectId: "completed-poi-complete", skeleton, store, runtime,
     planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
   });
-  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: string | null }> }>;
+  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
   for (const day of itinerary) {
     for (const spot of day.spots) {
       spot.poiName = spot.poiName ?? "已核验景点";
-      spot.poiId = spot.poiId ?? "1";
+      spot.poiId = spot.poiId ?? 1;
     }
   }
   runtime.moduleWrites = [];

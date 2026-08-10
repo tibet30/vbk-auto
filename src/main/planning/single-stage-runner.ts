@@ -307,7 +307,7 @@ async function runAiStage(args: {
       let itineraryPoiComplete = true;
       if (stage === "itinerary") {
         const current = await runtime.loadCurrentProduct(state.projectId);
-        itineraryPoiComplete = Array.isArray(current.itinerary) && current.itinerary.every((day: any) => Array.isArray(day?.spots) && day.spots.every((spot: any) => spot && typeof spot === "object" && String(spot.poiName ?? "").trim() && String(spot.poiId ?? "").trim()));
+        itineraryPoiComplete = Array.isArray(current.itinerary) && current.itinerary.every((day: any) => Array.isArray(day?.spots) && day.spots.every((spot: any) => spot && typeof spot === "object" && typeof spot.poiName === "string" && spot.poiName.trim() && typeof spot.poiId === "number" && Number.isInteger(spot.poiId) && spot.poiId > 0));
       }
       if (alreadyAccepted.includes(sole) && itineraryPoiComplete) {
         if (stage === "itinerary") console.info("[planning.poi]", { event: "skip", projectId: state.projectId });

@@ -1,4 +1,4 @@
-export interface PoiSuggestion { poiName: string; poiId: string }
+export interface PoiSuggestion { poiName: string; poiId: number }
 
 export interface PoiSuggestRequest {
   requestHeader: { locale: "zh-CN" };
@@ -150,8 +150,10 @@ export function pickBestPoi(keyword: string, payload: unknown): PoiSuggestion | 
       return !isSubAttraction(rawName) && (name.includes(key) || key.includes(name));
     });
   const poi = asRecord(hit);
-  if (!poi || !String(poi.poiName ?? "").trim() || !String(poi.poiId ?? "").trim()) return null;
-  return { poiName: String(poi.poiName).trim(), poiId: String(poi.poiId).trim() };
+  const poiName = String(poi?.poiName ?? "").trim();
+  const poiId = positiveIntegerValue(poi?.poiId);
+  if (!poiName || poiId === undefined) return null;
+  return { poiName, poiId };
 }
 
 /**
@@ -243,6 +245,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function isBusinessSuccess(ack: unknown): boolean {
   return ack === "Success" || ack === "SUCCESS" || ack === true || ack === "true";
+}
+
+function positiveIntegerValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function failureReason(status: Record<string, unknown> | null): string {

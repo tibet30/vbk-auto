@@ -19,17 +19,33 @@ type PatchOperation = NonNullable<AiResponse["patch"]>[number];
  */
 const FORBIDDEN_PATH_PREFIXES = [
   "/basicInfo/supplierProductCode",
-  "/operations/vehicleResource",
   "/operations/butler",
   "/operations/bookingControls",
   "/operations/hotelResource",
+] as const;
+
+const ALLOWED_VEHICLE_RESOURCE_PATHS = [
+  "/operations/vehicleResource/requestedDailyCost",
 ] as const;
 
 /**
  * 判断 path 是否命中黑名单前缀（精确命中或子路径都算）；用于阻断 AI 写运营 / 资源 ID 等关键字段。
  */
 function isForbiddenPath(path: string): boolean {
+  if (path === "/operations/vehicleResource" || path.startsWith("/operations/vehicleResource/")) {
+    return !(ALLOWED_VEHICLE_RESOURCE_PATHS as readonly string[]).includes(path);
+  }
   return FORBIDDEN_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+function assertAllowedVehicleResourceValue(operation: PatchOperation) {
+  if (operation.path !== "/operations/vehicleResource/requestedDailyCost" || operation.op === "remove") return;
+  if (operation.value === null) return;
+  const value = Number(operation.value);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`AI 预估用车日价必须是正数：${operation.path}`);
+  }
+  operation.value = value;
 }
 
 // RFC6902 的数组语义：add 是插入（"-" 表示追加），replace 是就地替换，
@@ -78,6 +94,7 @@ function applyPatchOperation(product: Record<string, unknown>, operation: PatchO
   if (isForbiddenPath(operation.path)) {
     throw new Error(`产品变更路径被禁写：${operation.path}`);
   }
+  assertAllowedVehicleResourceValue(operation);
   const segments = operation.path.split("/").slice(1).map(decodeURIComponent);
   if (!segments.length || segments.some((segment) => segment === "__proto__" || segment === "constructor")) {
     throw new Error("产品变更路径不安全");

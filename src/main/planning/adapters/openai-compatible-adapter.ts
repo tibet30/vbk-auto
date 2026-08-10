@@ -228,10 +228,11 @@ research 阶段是本地 deterministic 生成；你不需要主动返回任何�
 硬性规则：
 1. 严禁返回 RFC6902 patch（op / path / replace / add / remove）。本系统只接受上述 JSON。
 2. release 模块：publicPriceCeiling 必填 (>0)；submitReview / publishAfterApproval 写 true 也会被系统强制改写为 false（草稿默认安全）。注意：tool schema 中 release 已不再声明 submitReview / publishAfterApproval 字段，违反会导致整体拒收。
-3. supplierProductCode / vehicleResource / hotelResource / vehicleId / resourceId / resourceGroupId / supplierCode / providerId / contactCardId / butler / bookingControls 全部禁写；含这些键的输出会被拒。
+3. supplierProductCode / hotelResource / vehicleId / resourceId / resourceGroupId / resourceGroupName / supplierCode / providerId / contactCardId / butler / bookingControls 全部禁写；vehicleResource 仅允许写 requestedDailyCost 建议日价，含其他子字段会被拒。requestedDailyCost 要按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，禁止通过产品售价、成人价、毛利或起订人数倒推。
 4. presentation.recommendations 恰好 3 条，category 互不重复。
 5. itinerary 每天至少 1 个 spots；天数 = basicInfo.days。
 5.1 spots 必须是对象数组 name/poiName/poiId；未核查时 poiName/poiId 填 null，禁止字符串数组和猜测 ID。
+5.2 每个 spot.name 只能指定一个可独立通过 POI 接口检索的地点。禁止把“钟楼和鼓楼”“回民街·钟鼓楼广场”等多个地点合写为一个 spot；需要游览多个地点时，必须拆成多个 spots。括号内可保留同一地点的别名或入口说明。
 6. pricing.adult > 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. terms 必须含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。

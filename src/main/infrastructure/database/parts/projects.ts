@@ -80,6 +80,26 @@ export function listProjects(db: Database.Database): ProjectSummary[] {
     .map((row) => ({ id: row.id, name: row.name, status: row.status as ProjectSummary["status"], productId: row.product_id || undefined, updatedAt: row.updated_at }));
 }
 
+/** 分页项目列表结果。 */
+export interface ProjectListPage {
+  items: ProjectSummary[];
+  total: number;
+}
+
+/**
+ * 分页项目列表（按 updated_at 倒序）。
+ * page 从 1 起；pageSize 默认 10。
+ */
+export function listProjectsPaginated(db: Database.Database, page: number, pageSize = 10): ProjectListPage {
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM projects").get() as { n: number }).n;
+  const offset = Math.max(0, (page - 1) * pageSize);
+  const items = (db.prepare(
+    "SELECT id,name,status,product_id,updated_at FROM projects ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+  ).all(pageSize, offset) as Array<Record<string, string>>)
+    .map((row) => ({ id: row.id, name: row.name, status: row.status as ProjectSummary["status"], productId: row.product_id || undefined, updatedAt: row.updated_at }));
+  return { items, total };
+}
+
 /**
  * 创建项目并自动追加一条开场白 assistant 消息。
  */
@@ -116,6 +136,7 @@ export function createProject(db: Database.Database, input: CreateProjectInput):
       hotelTier: DEFAULT_HOTEL_TIER,
       mealsIncluded: false,
       pickupCity: "",
+      vehicleResource: {},
     },
     itinerary: [],
   };

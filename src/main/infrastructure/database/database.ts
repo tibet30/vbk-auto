@@ -57,6 +57,8 @@ import {
   deleteProject,
   getProject,
   listProjects,
+  listProjectsPaginated,
+  type ProjectListPage,
   markResearchAccepted,
   recoverOrphanAutomationRuns,
   recoverUnansweredMessages,
@@ -117,6 +119,7 @@ export class VbkDatabase {
   // ─────────────────────────────────────────────────────────────────────
 
   listProjects(): ProjectSummary[] { return listProjects(this.db); }
+  listProjectsPaginated(page: number, pageSize?: number): ProjectListPage { return listProjectsPaginated(this.db, page, pageSize); }
   createProject(input: CreateProjectInput): ProjectDetail { return createProject(this.db, input); }
   getProject(id: string): ProjectDetail | undefined { return getProject(this.db, id); }
   deleteProject(id: string): boolean { return deleteProject(this.db, id); }

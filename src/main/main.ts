@@ -30,10 +30,13 @@ import { resolveHotelResource } from "./operations/hotel-resource.js";
 import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
 import { listProviderContactCards } from "./infrastructure/butler-contacts.js";
 import { applyManualReviewField } from "./operations/manual-review-field.js";
+import { createProjectWithAccountButler, injectAccountButler } from "./operations/account-butler-inject.js";
+import { assertCreatePreconditions } from "./operations/project-create-guard.js";
 import { loadOperationLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, AiConnectionTestInput, AiModelListInput, AiProvider, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
 import { aiProviderConfig } from "../shared/ai-provider-config.js";
+import { mergeReadinessIssues, openResearchTaskToIssue } from "../shared/readiness-issues.js";
 import { PLANNING_STAGES, type Planner, type PlanningGenerationState, type PlanningModule, type PlanningRunResult } from "../shared/contracts.js";
 import { runPlan } from "./planning/plan-orchestrator.js";
 import { hasIncompleteItineraryPois } from "./planning/poi-enrichment.js";
@@ -220,7 +223,7 @@ function readiness(projectId: string): ProjectReadiness {
     task.state !== "resolved" &&
     !isCoverResearchTaskSatisfiedByProduct(task, project.product),
   );
-  for (const task of unresolved) issues.push({ label: task.label, detail: task.detail || "需要在 VBK 或公开来源完成核查" });
+  for (const task of unresolved) issues.push(openResearchTaskToIssue(task));
   // 与自动录入使用同一套要求，避免界面显示「可以录入」后才在携程失败。
   if (parsed.success) for (const blocker of automationBlockers(project.product)) issues.push(blocker);
   // 自动录入当前正在运行 / 已停止等待用户处理时，再列一条直达指引。
@@ -231,7 +234,8 @@ function readiness(projectId: string): ProjectReadiness {
       detail: blocked.userInstruction || "请先按提示手动处理后再次保存草稿",
     });
   }
-  return { ready: issues.length === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, issues.length)) / 12) * 100), issues };
+  const mergedIssues = mergeReadinessIssues(issues);
+  return { ready: mergedIssues.length === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, mergedIssues.length)) / 12) * 100), issues: mergedIssues };
 }
 
 /**
@@ -318,13 +322,26 @@ async function createWindow() {
 function registerIpc() {
   ipcMain.handle("projects:list", () => db.listProjects());
   ipcMain.handle("projects:create", (_event, input: CreateProjectInput) => {
-    const project = db.createProject(input);
-    emitProject(project);
+    // 「产品创建」主进程防线：在写库前硬校验「登录 + 400 电话 + 管家联系人」。
+    // 任意一项缺失直接抛错（中文、列出补救路径），不创建项目、不写消息、不写任务，
+    // 也不发 project:updated。UI 端的提示只是辅助，这里才是真源。
+    assertCreatePreconditions(db);
+    // 「管家默认当前账号」：新建项目时若当前已登录 VBK 且账号已配管家，
+    // 自动把 butlerName 写入 product.operations.bookingControls.butler。
+    // 已有 butler / 未登录 / 未配置 都不会写；写失败也不抛错，避免影响创建。
+    const accountName = db.getSetting("vbkAccountName")?.value || null;
+    const { project: finalProject, injectResult } = createProjectWithAccountButler(db, input, accountName);
+    if (injectResult.written) {
+      console.info("[createProject] auto-injected butler from current account", { projectId: finalProject.id, accountName });
+    } else if (injectResult.reason) {
+      console.info("[createProject] butler not auto-injected", { projectId: finalProject.id, reason: injectResult.reason });
+    }
+    emitProject(finalProject);
     // 第一版产品方案的自动触发不在 main 这里走 —— 交给 renderer 端的 useEffect
     // 兑底。main 端 fire-and-forget 的请求与 renderer useEffect 重复触发会同时
     // 生成两条 user-running 消息，状态不一致；renderer 单一入口更可控，
     // 且能同时覆盖“新建后立即触发”与“重开空草稿项目”两种场景。
-    return project;
+    return finalProject;
   });
   ipcMain.handle("projects:get", (_event, id: string) => {
     const project = db.getProject(id);
@@ -351,7 +368,8 @@ function registerIpc() {
   // 运营人员直接在 UI 上录入的「需要人工复核」字段（例如定价 pricing）。
   // 仅允许 ManualReviewFieldInput 白名单，product 走 schema 校验后才落库；
   // 路径不走 JSON patch，避免与 AI 写入口径混在一起难以追溯。
-  ipcMain.handle("projects:updateReviewField", (_event, id: string, input: ManualReviewFieldInput) => {
+  ipcMain.handle("projects:updateReviewField", (event, id: string, input: ManualReviewFieldInput) => {
+    assertTrustedSender(event, "projects:updateReviewField");
     const project = db.getProject(id);
     if (!project) throw projectNotFound(id);
     const next = applyManualReviewField(project.product, input);
@@ -549,6 +567,16 @@ function registerIpc() {
             console.info("[AI] browser not ready for auto resource resolution, skipping", { provider: getSettings().aiProvider });
           }
         }
+        // 首轮生成完成后补一次管家注入：projects:create 已经在创建时尝试过一次，
+        // 但用户可能在创建项目时还没登录 VBK；首次 AI 完成后已是登录态，再补一次。
+        // 同样遵守「已有 butler 不覆盖」契约，写入失败只 console.info 不抛错。
+        const aiAccountName = db.getSetting("vbkAccountName")?.value || null;
+        const aiInject = injectAccountButler(db, projectId, aiAccountName);
+        if (aiInject.written) {
+          console.info("[ai:send] auto-injected butler after first draft", { projectId, accountName: aiAccountName });
+        } else if (aiInject.reason) {
+          console.info("[ai:send] butler not auto-injected after first draft", { projectId, reason: aiInject.reason });
+        }
       }
     } catch (error) {
       const reason = extractMiniMaxFailureReason(error) || (error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。");
@@ -580,8 +608,11 @@ function registerIpc() {
     const page = await browser.page();
     const result = await resolveVehicleResource(page, project);
     db.updateProduct(projectId, result.product, "review");
-    if (taskId) db.markResearchAccepted(projectId, taskId, result.note, "vbk");
-    db.addMessage(projectId, "assistant", `已完成用车估算和 VBK 资源组匹配：${result.note}`, "succeeded");
+    if (result.resolved && taskId) db.markResearchAccepted(projectId, taskId, result.note, "vbk");
+    const message = result.resolved
+      ? `已完成用车估算和 VBK 资源组匹配：${result.note}`
+      : `用车建议价已保留，但 VBK 资源组暂未匹配成功：${result.note}`;
+    db.addMessage(projectId, "assistant", message, result.resolved ? "succeeded" : "failed");
     const next = db.getProject(projectId)!;
     emitProject(next);
     return result.resolved;
@@ -595,15 +626,6 @@ function registerIpc() {
     db.addMessage(projectId, "assistant", `已查询酒店资源：${result.note}`, "succeeded");
     emitProject(db.getProject(projectId)!);
     return result.resolved;
-  });
-  ipcMain.handle("research:previewVehicleResourceByPrice", async (_event, projectId: string, dailyCost: number) => {
-    // 当前 UI 未实现价格预算 → 资源组匹配；保留 channel 以便合同稳定。
-    void projectId; void dailyCost;
-    throw new Error("按价格预算匹配资源组尚未发布，请先在 VBK 资源库手动核查。");
-  });
-  ipcMain.handle("research:confirmVehicleResourcePreview", async (_event, projectId: string, previewId: string) => {
-    void projectId; void previewId;
-    throw new Error("资源组预览确认尚未发布，请改用 research:vehicleResource。");
   });
   ipcMain.handle("browser:login", () => browser.login());
   ipcMain.handle("browser:logout", () => browser.logout());
@@ -673,7 +695,11 @@ function registerIpc() {
     return automation.debugListBreakpoints();
   });
   ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => db.getAccountFixedInfo(accountName));
-  ipcMain.handle("accounts:saveFixedInfo", (_event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
+  ipcMain.handle("accounts:saveFixedInfo", (event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
+    // 与 projects:updateReviewField 对称：会改写「账号级固定信息」，对外来的
+    // webContents 调用一律拒绝。同样的对称性也要求「accounts:getFixedInfo」
+    // 之类的只读入口不需要 sender 校验。
+    assertTrustedSender(event, "accounts:saveFixedInfo");
     const saved = db.setAccountFixedInfo(accountName, values);
     emitProjectIfKnown(accountName, saved);
     return saved;

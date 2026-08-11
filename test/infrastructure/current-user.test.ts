@@ -12,7 +12,7 @@ function fakePage(payload: unknown, { throwOnFetch = false }: { throwOnFetch?: b
     url: () => "https://vbooking.ctrip.com/fake",
     async evaluate(_fn: () => Promise<unknown>) {
       if (throwOnFetch) throw new Error("网络失败");
-      return { __status: 200, __raw: JSON.stringify(payload).slice(0, 4000), payload };
+      return { status: 200, durationMs: 1, ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false }, payload };
     },
   } as unknown as Parameters<typeof fetchCurrentUserInfo>[0];
 }

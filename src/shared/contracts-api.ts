@@ -4,12 +4,18 @@ import type {
   AiModelListInput,
   AiModelListResult,
   AiRegenerateField,
+  CtripLibraryPlaceCandidate,
+  CtripLibraryPlaceSearchResult,
+  CtripLibrarySearchResult,
   LoginAccountsSnapshot,
   ManualReviewFieldInput,
   ConnectionTest,
+  ManualUploadCoverMeta,
   VbkLoginStatus,
   OperationLogPage,
   OperationLogQuery,
+  PoiSuggestDetailResult,
+  PoiSuggestLogContext,
   ProjectDetail,
   ProjectReadiness,
   ProjectSummary,
@@ -53,6 +59,7 @@ export interface VbkApi {
   };
   research: {
     accept(projectId: string, taskId: string, note?: string): Promise<void>;
+    refreshIssues(projectId: string): Promise<{ updated: number; taskIds: string[]; project: ProjectDetail; readiness: ProjectReadiness }>;
     resolveVehicleResource(projectId: string, taskId?: string): Promise<VehicleResourceMatch | undefined>;
     resolveHotelResource(projectId: string, taskId?: string): Promise<HotelResourceMatch>;
   };
@@ -94,6 +101,7 @@ export interface VbkApi {
      */
     forgetAccount(accountKey: string): Promise<void>;
     suggestPoi(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
+    suggestPoiDetail(keyword: string, context?: PoiSuggestLogContext): Promise<PoiSuggestDetailResult>;
     suggestPoiDemo(keyword: string): Promise<unknown>;
   };
   automation: {
@@ -151,6 +159,56 @@ export interface VbkApi {
     listProviderContactCards(providerId: number, searchKeyword?: string): Promise<ProviderContactCard[]>;
     suggestPoi(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
   };
+  cover: {
+    /**
+     * 手动上传封面图片：
+     *  - renderer 把图片转 base64 → main 端解码 → 走 cover-storage 校验 →
+     *    返回 ManualUploadCoverMeta；
+     *  - 真正的字节永不进 product JSON。
+     */
+    uploadManual(args: { originalName: string; mimeType: string; base64: string }): Promise<ManualUploadCoverMeta>;
+    /**
+     * 读取手动上传图片预览（main 端把本地副本读成 data URL）：
+     *  - 返回的 `url` 可直接喂给 `<img src>`，格式为 `data:${mime};base64,...`；
+     *  - **历史变更**：旧版返回 `file://` 路径，在 Electron + 沙盒 + 路径编码下
+     *    偶发破图；新版统一走 data URL，避免对 filesystem 的直接访问；
+     *  - 文件丢失或 IO 失败返回 `url=null` + 持久化 meta（如果有），UI 走
+     *    「图片已失效，请重新上传」提示；
+     *  - data URL 仅本次 IPC 临时返回，**不**写入 product JSON / 任何持久层；
+     *    renderer 只用其渲染预览，别存到 state / draft / notice 等位置。
+     */
+    read(args: { fileId: string; originalName: string }): Promise<{ url: string | null; mimeType: string | null; sizeBytes: number | null; uploadedAt: string | null; originalName: string | null }>;
+    /** 列出现存所有手动上传 meta（仅元数据，无二进制）。 */
+    listManual(): Promise<{ supportedMimeTypes: readonly string[]; records: ManualUploadCoverMeta[] }>;
+    /** 判断 fileId 本地副本是否还在；UI 用作"图片已失效"判定。 */
+    exists(args: { fileId: string; originalName: string }): Promise<boolean>;
+    /**
+     * 按景点 / 景区名称（scenic/attraction name）查询携程图库地址候选列表（阶段 A）：
+     *  - main 端走 suggestpoi.json（soa2/15638），在 BrowserView 内联 fetch 完成，
+     *    **不再**调用 VBK 旧 suggestPoi / suggestPoiDetail / 任何 DOM 弹窗；
+     *  - keyword 必须是字符串（trim 后非空），由 renderer UI 的「景点名称」输入框
+     *    收集；空字符串由 UI 拦截，不进入 IPC；
+     *  - 返回 CtripLibraryPlaceSearchResult：places 是合法候选（poiId + poiName
+     *    都齐备）按 suggestPoi 原始顺序排列；address / province / city / district
+     *    按 suggestPoi 响应里的常见 key 抽取，缺时为 null；
+     *  - UI 在地址列表里选中一个 place 后再调用 searchCtripLibraryImages 走阶段 B；
+     *  - 错误由查询函数直接抛出（业务失败 / 网络失败 / 鉴权失败等）。
+     */
+    searchCtripLibraryPlaces(args: { keyword: string }): Promise<CtripLibraryPlaceSearchResult>;
+    /**
+     * 按已选 place 取该地址下的携程图库图片列表（阶段 B）：
+     *  - 必须先有合法的 place（poiId 正整数 + poiName 非空），由阶段 A 的
+     *    searchCtripLibraryPlaces 选出来；UI 选中后传入；
+     *  - main 端走 searchImage（soa2/12719）→ getImageInfo（soa2/12719），
+     *    在 BrowserView 内联 fetch 完成；不依赖 DOM 弹窗 / importpic-modal；
+     *  - 业务失败 / 未登录 / place 不合法时直接抛出；返回 CtripLibrarySearchResult
+     *    仅含 image candidates，每条 candidate 必含 imageId + imageUrl（缺一即
+     *    视为「未取到图库图片」不会进入 product）；keyword / poi 字段保留回显用；
+     *  - 选中某候选 → renderer 把它写回 product.presentation.cover 的 ctripLibrary
+     *    形态（imageId / imageUrl 必填，poi / description 来自 poiName 或兜底）。
+     */
+    searchCtripLibraryImages(args: { keyword: string; place: CtripLibraryPlaceCandidate }): Promise<CtripLibrarySearchResult>;
+  };
   settings: {
     get(): Promise<Settings>;
     listModels(input: AiModelListInput): Promise<AiModelListResult>;
@@ -161,6 +219,8 @@ export interface VbkApi {
     onProjectUpdated(listener: (project: ProjectDetail) => void): () => void;
     /** 主进程成功持久化规划状态后推送；订阅者必须按 projectId 过滤。 */
     onPlanningStateUpdated(listener: (projectId: string, state: PlanningGenerationState) => void): () => void;
+    /** VBK 页面加载完成、SPA 渲染就绪后推送；renderer 收到后触发 checkVbkLogin。 */
+    onPageReady(listener: () => void): () => void;
   };
   operationLog: {
     load(query?: OperationLogQuery): Promise<OperationLogPage>;

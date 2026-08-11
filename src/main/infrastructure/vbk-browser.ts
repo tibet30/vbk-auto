@@ -4,10 +4,17 @@
  *     cookie / localStorage / 缓存由系统自动隔离，不再手动搬运；
  *   - initialise 创建默认视图（persist:vbk）用于首次登录 / 新增登录，
  *     同时恢复上次活跃账号的 partition 视图；
- *   - switchAccount 直接切换视图，仅在首次创建时从 DB 做一次性 cookie 迁移；
+ *   - switchAccount 直接切换视图，仅在首次创建时从 sessionStore 一次性迁移；
  *   - addLogin 清空默认视图、跳转登录页；登录后自动创建 partition 视图并迁移；
- *   - forgetAccount 清除 partition 存储 + 销毁视图 + 删除 DB 记录；
- *   - saveCurrentSession 保留作为 DB 备份（向后兼容 + 迁移安全网）。
+ *   - forgetAccount 清除 partition 存储 + 销毁视图 + 删除 sessionStore 记录；
+ *   - saveCurrentSession 写入 sessionStore（0600 JSON 文件），并 await 其结果；
+ *     写入失败 → 返回 null（不抛错），由 IPC / UI 边界决定如何提示用户。
+ *
+ * Cookie 持久化历史说明：
+ *   - 早期版本通过 SQLite login_sessions 表 + Electron Keychain 加密；
+ *   - 用户决策后 AI API keys 与 VBK cookies 一律改走本地 0600 JSON 文件，
+ *     完全脱离 Keychain 加密层。本文件不再导入任何 `electron` 加密 API，
+ *     也未再读取 SQLite 里的 cookies_ciphertext / cookies_json。
  */
 
 import { BrowserWindow, WebContentsView, session, shell } from "electron";
@@ -25,6 +32,12 @@ import {
   normaliseSameSite,
   normaliseExpiry,
 } from "./vbk-cookie-serializer.js";
+import { waitForDomText } from "./vbk-page-wait.js";
+import {
+  VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE,
+  isVbkAuthCookieSummaryComplete,
+  summarizeVbkAuthCookies,
+} from "./vbk-auth-cookies.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
 
@@ -50,20 +63,19 @@ const MENU_FALSE_POSITIVES = new Set([
  */
 export interface LoginSessionStore {
   /**
-   * cookies **明文** JSON 字符串。Store 内部必须负责加密后落盘，
-   * 严禁把 plaintext 写入 login_sessions.cookies_json / 其它列。
-   * 入参为空数组 / 空字符串或当前账号未登录时，调用方不会调用本方法；
+   * cookies **明文** JSON 字符串。Store 内部必须负责落盘（0600 JSON 文件，
+   * 严禁写入 SQLite）。返回 Promise<void> 即可；调用方会 await 并捕获错误。
+   * 空数组 / 空字符串 / 当前账号未登录时调用方不会调用本方法；
    * store 内部对"空快照 = 删除"语义自行处理。
    */
   saveSession(accountKey: string, accountName: string, cookiesJson: string): void | Promise<void>;
   /**
-   * 返回 **明文** cookies JSON 字符串。store 内部必须负责读出 ciphertext
-   * 并解密；找不到时返回 null。
+   * 返回 **明文** cookies JSON 字符串。找不到时返回 null。
    */
   loadSession(accountKey: string): { cookiesJson: string; accountName: string } | null;
   listSessions(): SavedLoginAccount[];
   deleteSession(accountKey: string): void;
-  /** 让浏览器侧记录"当前 WebView 实际展示的是谁"，与 login_sessions 表解耦。 */
+  /** 让浏览器侧记录"当前 WebView 实际展示的是谁"，与 cookie-store 解耦。 */
   getActiveAccountKey(): string | undefined;
   setActiveAccountKey(key: string): void;
   clearActiveAccountKey(): void;
@@ -184,9 +196,10 @@ export class VbkBrowser {
     const activeKey = this.sessionStore?.getActiveAccountKey();
     const record: LoginSessionRecord = activeKey ? this.sessionStore?.loadSession(activeKey) ?? null : null;
     const cookies = record ? parseCookies(record.cookiesJson) : [];
+    const authSummary = summarizeVbkAuthCookies(cookies);
     // 活跃账号指针只是上次展示状态，不代表 account partition 已有登录态。
     // 没有可恢复的 DB 快照时必须继续使用 persist:vbk，避免空分区覆盖仍可用的默认登录态。
-    if (activeKey && cookies.length > 0) {
+    if (activeKey && cookies.length > 0 && isVbkAuthCookieSummaryComplete(authSummary)) {
       const view = await this.ensureAccountView(activeKey, cookies);
       // 进程重启后 WebContents 初始 URL 可能是空白页。即使 partition 中
       // 已有登录 cookie，也必须先把该账号 view 导航到 VBK 列表，避免 CDP
@@ -276,21 +289,43 @@ export class VbkBrowser {
   }
 
   /**
-   * 把当前 WebView 的 cookies 抽出来保存到本机（login_sessions 表）。
+   * 把当前 WebView 的 cookies 抽出来保存到本机（本地 0600 JSON cookie-store）。
    * 通常由 addLogin / switchAccount 在切换之前调用，账号未登录时直接 no-op。
-   * 保留此方法作为 DB 备份（迁移安全网），即使 partition 已自动持久化。
+   *
+   * 写入失败的处理：
+   *   - store 抛错（磁盘满、权限被改、JSON 损坏等）→ catch + console.warn，
+   *     返回 null。调用方（IPC handler / 内部 fire-and-forget）已经各自
+   *     catch 住，UI 不会看到未处理的 promise rejection。
+   *   - 这里的 await 是契约的一部分：调用方可以同步依赖 saveSession
+   *     在本函数返回前完成（fire-and-forget 的 .then/.catch 仍生效）。
    */
   async saveCurrentSession(): Promise<SavedLoginAccount | null> {
     if (!this.view) return null;
     if (!this.sessionStore) return null;
     const cookies = await this.collectCookies();
     if (cookies.length === 0) return null;
+    const authSummary = summarizeVbkAuthCookies(cookies);
+    if (!isVbkAuthCookieSummaryComplete(authSummary)) return null;
     // 「当前是谁」需要在抽 cookie 之前就探测完，否则页面看到的还是上一会话的 UI。
     const status = await this.status(false);
     if (!status.loggedIn) return null;
     const displayName = status.accountName || "已登录账号";
     const key = status.loginAccount || displayName;
-    this.sessionStore.saveSession(key, displayName, JSON.stringify(cookies));
+    const cookiesJson = JSON.stringify(cookies);
+    try {
+      // 必须 await：addLogin / switchAccount 路径依赖同步感知写入完成；
+      // withKnownVbkAccount 路径通过外层 .catch(...) 兜底。这里再次 try/catch
+      // 是为了让 saveCurrentSession 自身永不让 IPC handler 抛错，避免
+      // 「重新登录后用户啥也没看见但写盘失败」的沉默失败 —— 失败时已 console.warn，
+      // 后续 status() 会重新触发 saveCurrentSession 再试一次。
+      await Promise.resolve(this.sessionStore.saveSession(key, displayName, cookiesJson));
+    } catch (error) {
+      console.warn("[vbk] failed to persist session cookies; user will need to re-login", {
+        accountKey: key,
+        message: (error as { message?: string })?.message ?? "unknown",
+      });
+      return null;
+    }
     this.sessionStore.setActiveAccountKey(key);
     return { accountKey: key, accountName: displayName, lastUsedAt: new Date().toISOString() };
   }
@@ -340,6 +375,10 @@ export class VbkBrowser {
     const cookies = parseCookies(record.cookiesJson);
     if (cookies.length === 0) {
       throw new Error(`本机没有该 VBK 账号（${trimmedKey}）可恢复的登录快照，请重新登录后再切换。`);
+    }
+    const authSummary = summarizeVbkAuthCookies(cookies);
+    if (!isVbkAuthCookieSummaryComplete(authSummary)) {
+      throw new Error(VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE);
     }
 
     await this.saveCurrentSession();
@@ -413,6 +452,10 @@ export class VbkBrowser {
       document.body?.innerText?.includes("产品列表") === true
     `, true).catch(() => false);
     if (!productListVisible) return { loggedIn: false, message: "尚未登录 VBK。" };
+    const authSummary = summarizeVbkAuthCookies(await this.collectCookies());
+    if (!isVbkAuthCookieSummaryComplete(authSummary)) {
+      return { loggedIn: false, message: VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE };
+    }
 
     // 1) 优先：通过 VBK getCurrentUserInfo 接口拿真实账号名。
     //    同一页面 URL 下缓存结果，避免重复 HTTP（checkVbkLogin / withKnownVbkAccount
@@ -512,6 +555,20 @@ export class VbkBrowser {
       try { this.defaultView.webContents.close(); } catch { /* 可能已关闭 */ }
       this.defaultView = undefined;
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 页面就绪等待
+  // ─────────────────────────────────────────────────────────────
+
+  /**
+   * 启动时等待当前 VBK 页面渲染出"产品列表"。
+   * 进程重启后 loadURL 虽已完成，但 SPA 客户端路由、数据加载可能
+   * 仍在进行；调用方在收到 true 后即可安全调用 status() 检测登录态。
+   * 超时或页面跳转到登录页时返回 false。
+   */
+  async waitUntilReady(): Promise<boolean> {
+    return waitForDomText(this.view?.webContents, "产品列表", 10_000);
   }
 
   // ─────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@
  */
 
 import type { Page } from "playwright";
+import { vbkSessionRequest } from "./vbk-session-request.js";
 
 /**
  * 在已登录的 VBK 浏览器上下文里调 getCurrentUserInfo 接口，返回当前账号信息。
@@ -19,52 +20,26 @@ import type { Page } from "playwright";
  * cookies 由 BrowserView 的 session 自动带上，跨域也不需要 CORS 配置。
  */
 export async function fetchCurrentUserInfo(page: Page): Promise<CurrentUserInfo | null> {
-  const payload = await page.evaluate(async () => {
-    const readCookie = (name: string) => {
-      const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-      return match ? decodeURIComponent(match[1]) : "";
-    };
-    const cid = readCookie("GUID") || readCookie("vbk_login_cid") || `${Date.now()}`;
-    const trace = `${cid}-${Date.now()}-${Math.floor(Math.random() * 10_000_000)}`;
-    const endpoint = `https://online.ctrip.com/restapi/soa2/12405/getCurrentUserInfo?_fxpcqlniredt=${encodeURIComponent(cid)}&x-traceID=${encodeURIComponent(trace)}`;
-    console.warn("[providerId] page.evaluate fetch →", endpoint, "origin:", location.origin);
-    const response = await fetch(endpoint, {
-      method: "POST", credentials: "include",
-      headers: {
-        accept: "*/*",
-        "content-type": "application/json",
-        "x-ctx-currency": "CNY",
-        "x-ctx-locale": "zh-CN",
-        "x-tour-auth-from": "vbk_online",
+  const response = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/12405/getCurrentUserInfo",
+    browserRequestTimeoutMs: 12_000,
+    evaluateTimeoutMs: 15_000,
+    errorLabel: "VBK 当前用户查询",
+    headers: { "x-tour-auth-from": "vbk_online" },
+    body: {
+      needMenu: false,
+      needUserInfo: true,
+      needPermission: true,
+      needToolBar: false,
+      needHeadBar: false,
+      applicationCode: "vbk_online",
+      head: {
+        cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09",
+        auth: "", xsid: "", extension: [],
       },
-      body: JSON.stringify({
-        needMenu: false,
-        needUserInfo: true,
-        needPermission: true,
-        needToolBar: false,
-        needHeadBar: false,
-        applicationCode: "vbk_online",
-        head: {
-          cid, ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09",
-          auth: "", xsid: "", extension: [],
-        },
-      }),
-    });
-    const text = await response.text();
-    // 把状态码和原文带回主进程，方便主进程侧打日志诊断。
-    // Playwright 默认不把 page.evaluate 里的 console 输出转发到 Node，
-    // 因此这里走返回值。
-    if (!response.ok) throw new Error(`VBK getCurrentUserInfo 失败：HTTP ${response.status} ${text.slice(0, 200)}`);
-    let parsed: unknown;
-    try { parsed = JSON.parse(text); } catch { parsed = text; }
-    return { __status: response.status, __raw: text.slice(0, 4000), payload: parsed };
+    },
   });
-  const status = (payload as { __status?: unknown })?.__status;
-  const raw = (payload as { __raw?: unknown })?.__raw;
-  const body = (payload as { payload?: unknown })?.payload ?? payload;
-  console.warn(`[providerId] HTTP ${status}; raw first 600 chars:`);
-  console.warn(typeof raw === "string" ? raw.slice(0, 600) : JSON.stringify(raw).slice(0, 600));
-  const decoded = decodeCurrentUserInfo(body);
+  const decoded = decodeCurrentUserInfo(response.payload);
   return decoded;
 }
 

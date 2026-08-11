@@ -12,7 +12,7 @@
  */
 
 import path from "node:path";
-import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { fileURLToPath } from "node:url";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import {
@@ -23,20 +23,31 @@ import {
 import { applyProductPatchSafe } from "./operations/product-patch.js";
 import { automationBlockers, parseProduct, productSchema } from "./automation/schema/schema.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
-import { suggestPoi, suggestPoiDemo } from "./infrastructure/poi-suggest.js";
+import { suggestPoi, suggestPoiDemo, suggestPoiDetailWithRawPayload } from "./infrastructure/poi-suggest.js";
 import { DraftAutomation } from "./automation/automation.js";
 import { resolveVehicleResource } from "./operations/vehicle-resource.js";
 import { resolveHotelResource } from "./operations/hotel-resource.js";
 import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
 import { listProviderContactCards } from "./infrastructure/butler-contacts.js";
 import { applyManualReviewField } from "./operations/manual-review-field.js";
+import {
+  isManualCoverStillPresent,
+  listManualCoverMetas,
+  readManualCover,
+  searchCtripLibraryCoverImages,
+  searchCtripLibraryCoverPlaces,
+  uploadManualCover,
+} from "./operations/cover-ipc.js";
+import { refreshSatisfiedResearchTasks } from "./operations/research-refresh.js";
 import { createProjectWithAccountButler, injectAccountButler } from "./operations/account-butler-inject.js";
 import { assertCreatePreconditions } from "./operations/project-create-guard.js";
 import { loadOperationLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, AiConnectionTestInput, AiModelListInput, AiProvider, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
+import type { PoiSuggestLogContext } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
 import { aiProviderConfig } from "../shared/ai-provider-config.js";
 import { mergeReadinessIssues, openResearchTaskToIssue } from "../shared/readiness-issues.js";
+import { isResearchTaskSatisfiedByProduct } from "../shared/research-task-satisfaction.js";
 import { PLANNING_STAGES, type Planner, type PlanningGenerationState, type PlanningModule, type PlanningRunResult } from "../shared/contracts.js";
 import { runPlan } from "./planning/plan-orchestrator.js";
 import { hasIncompleteItineraryPois } from "./planning/poi-enrichment.js";
@@ -58,7 +69,12 @@ import {
 } from "./minimax/minimax-error-handling.js";
 import { assertSafeAiServiceUrl, resolveAiConnectionInput, successfulAiConnectionTest } from "./infrastructure/ai-settings.js";
 import { fetchAiModelList } from "./infrastructure/ai-models.js";
-import { isAsyncEncryptionAvailable, persistApiKeyAsync, loadApiKeyAsync, encryptString } from "./infrastructure/secure-storage.js";
+// AI API keys + VBK cookie snapshots follow the user's explicit decision
+// to drop Electron Keychain-backed encryption in favour of local 0600 JSON
+// stores under `app.getPath('userData')`. See ai-key-store.ts and
+// vbk-cookie-store.ts for the rationale. No encryption-layer import anywhere.
+import { createLocalAiKeyStore, LOCAL_AI_KEY_FILE_NAME, type LocalAiKeyStore } from "./infrastructure/ai-key-store.js";
+import { createLocalVbkCookieStore, LOCAL_VBK_COOKIE_FILE_NAME, type LocalVbkCookieStore } from "./infrastructure/vbk-cookie-store.js";
 import { assertDebugEnabled, assertTrustedSender } from "./infrastructure/ipc-sender.js";
 import { installContentSecurityPolicy } from "./infrastructure/csp.js";
 import { aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
@@ -68,6 +84,10 @@ import { APP_NAME } from "../shared/brand.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 /** 当前是否为开发模式（未打包），用于开关 DevTools / 临时文件路径。 */
 const isDev = !app.isPackaged;
+function logPoiManualIpc(event: string, context: Record<string, unknown>) {
+  if (!isDev) return;
+  console.log("[poi.manual]", event, { stage: event, ...context });
+}
 // 自动化通过 CDP 驱动内嵌的 VBK 页面，端口必须开着；但固定的 9222 可被
 // 本机任意进程预测并接管这个已登录会话，也会和其它 Chrome 实例抢占。
 // 改为每次启动随机取一个端口，并只监听回环地址。
@@ -81,6 +101,23 @@ app.commandLine.appendSwitch("log-level", "2");
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
 
 let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
+/**
+ * Local AI API key store. One instance per process; backed by a single
+ * 0600 JSON file under `app.getPath('userData')` (see ai-key-store.ts).
+ * Must be created *after* `app.whenReady()` so `userData` is available;
+ * main.ts initialises this in `bootstrap()` together with the database.
+ */
+let aiKeyStore: LocalAiKeyStore | null = null;
+/**
+ * Local VBK cookie-session store. Same 0600 JSON file pattern as the AI
+ * key store. Created in `bootstrap()` together with the database and
+ * aiKeyStore, then wired into VbkBrowser as the `LoginSessionStore`.
+ *
+ * 「null until bootstrap」语义与 aiKeyStore 一致：所有 cookieStore 消费
+ * 方都假设它在 createWindow 之前已就绪；createWindow 内部直接使用非空
+ * 引用，bootstrap 失败会通过 app.whenReady 的 .catch 退出进程。
+ */
+let cookieStore: LocalVbkCookieStore | null = null;
 // 关闭窗口后 AI 或自动化可能仍在运行，向已销毁的 webContents 发送会抛异常。
 /**
  * 向 renderer 广播「项目更新」事件：
@@ -106,8 +143,32 @@ const emitPlanningState = (state: PlanningGenerationState) => {
   }
 };
 /**
+ * 删除 settings 表里某个 provider 的旧密文。
+ * 安全的意义上：只删一行 key，失败会 warn 但不抛错；不应让表清理错误
+ * 阻塞主流程的设置保存。这是用户决策「脱离 Electron Keychain-backed
+ * 加密」后的迁移路径 —— 旧的 `minimaxApiKey` / `deepseekApiKey` 字段
+ * 保存的是历史密文（base64），本地 store 接手后不再读取这些字段，留
+ * 在表里只会造成隐患。
+ *
+ * 任何失败都只 warn，不会抛出。此函数不阻塞主流程：设置保存本身的
+ * 成功链路已走 aiKeyStore.setKey，即使这里出现异常也不应该带异常外。
+ */
+function safeRemoveLegacyCiphertext(db: VbkDatabase, key: string): void {
+  try {
+    if (!db.getSetting(key)) return;
+    db.deleteSetting(key);
+  } catch (error) {
+    console.warn("[settings] failed to remove legacy cipher row", { key, message: (error as { message?: string })?.message ?? "unknown" });
+  }
+}
+
+/**
  * 把 settings 表中的字段聚合成对外的 Settings 对象（含 hasKey 这类派生布尔）。
  * 当 db 里没值时回落到默认值；用于 UI 渲染 / IPC 拿 setting 时不必关心落库字段。
+ *
+ * hasKey 一律从本地 aiKeyStore 读取（0600 JSON 文件），不再读取 SQLite 里的
+ * legacy ciphertext —— 老字段一律视为未配置，避免把无效密文算成"已配置"。
+ * 必须等待 aiKeyStore 初始化完成，否则本地 store 还没就绪时 UI 会错报未配置。
  */
 const getSettings = (): Settings => ({
   aiProvider: isAiProvider(db.getSetting("aiProvider")?.value) ? db.getSetting("aiProvider")!.value as AiProvider : "minimax",
@@ -115,18 +176,19 @@ const getSettings = (): Settings => ({
   minimaxModel: db.getSetting("minimaxModel")?.value || defaultMiniMaxModel,
   deepseekBaseUrl: db.getSetting("deepseekBaseUrl")?.value || "https://api.evolink.ai/v1",
   deepseekModel: db.getSetting("deepseekModel")?.value || "deepseek-v4-flash",
-  hasMiniMaxKey: Boolean(db.getSetting("minimaxApiKey")),
-  hasDeepSeekKey: Boolean(db.getSetting("deepseekApiKey")),
+  hasMiniMaxKey: aiKeyStore ? aiKeyStore.hasKey("minimax") : false,
+  hasDeepSeekKey: aiKeyStore ? aiKeyStore.hasKey("deepseek") : false,
   dataPath: app.getPath("userData"),
 });
 /**
  * 异步加载指定 provider 的真实 API Key：
- *   - 走 secure storage（操作系统级加密），避免明文落 settings 表；
- *   - provider 决定查 deepseekApiKey 还是 minimaxApiKey 字段。
+ *   - 走本地 aiKeyStore（0600 JSON 文件），不再依赖 Keychain 加密层；
+ *   - probe 失败时（store 尚未初始化、文件被外部破坏）返回空串，让上层按
+ *     "未配置" 安全降级，而不是把错误冒泡到 UI。
  */
 async function apiKey(provider: AiProvider = getSettings().aiProvider) {
-  const settingName = provider === "deepseek" ? "deepseekApiKey" : "minimaxApiKey";
-  return loadApiKeyAsync(db, settingName);
+  if (!aiKeyStore) return "";
+  return aiKeyStore.getKey(provider);
 }
 
 /** 已完成方案只允许 POI 查询/名称纠正；Key 不可用时安全降级到人工核查。 */
@@ -157,7 +219,7 @@ async function completedPoiBackfillPlanner(projectId: string): Promise<{ planner
 /**
  * 按当前 settings 构造 MiniMaxService：
  *   - provider=deepseek 时切到 Evolink baseUrl/model；
- *   - apiKey 通过 secure-storage 异步读取；
+ *   - apiKey 通过本地 aiKeyStore（0600 JSON 文件）异步读取；
  *   - snapshot 可注入，用于在 IPC 上下文里使用「最新 settings」构造服务（避免双重读盘）。
  */
 async function aiService(snapshot?: Settings) {
@@ -197,12 +259,23 @@ function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   // 的 set，否则 saveCurrentSession 可能抓到不完整快照。activity 指针与
   // vbkAccountName 不同：后者用于 providerId 缓存 / UI 头像缩写；
   // 前者用于 switchAccount 直接定位 cookies 表里的行。
-  if (accountName) {
-    const snapshotKey = accountName.trim();
-    void browser?.saveCurrentSession().then((saved) => {
-      if (saved) db.setSetting("vbkActiveAccountKey", saved.accountKey);
-      else if (snapshotKey) db.setSetting("vbkActiveAccountKey", snapshotKey);
-    }).catch(() => undefined);
+  //
+  // 错误处理：必须 await + catch，否则 fs / IO 失败会变成 unhandled
+  // Promise rejection —— Electron 会在 stderr 打 unhandledRejection，
+  // 同时 saveCurrentSession 抛错意味着「这次登录态没有持久化」，下一次
+  // 切回账号时会让用户重新登录，业务上可接受。把错误降级为 warn 即可，
+  // 避免在 IPC 路径上 throw 出当前方法（withKnownVbkAccount 是 status
+  // IPC 的同步包装，throw 会让 status 返回 500）。
+  if (accountName && browser) {
+    browser.saveCurrentSession()
+      .then((saved) => {
+        if (saved) db.setSetting("vbkActiveAccountKey", saved.accountKey);
+      })
+      .catch((error) => {
+        console.warn("[vbk] saveCurrentSession failed; user must re-login", {
+          message: (error as { message?: string })?.message ?? String(error),
+        });
+      });
   }
   const accounts = Array.from(new Set([...(status.accounts || []), accountName].filter(Boolean)));
   return { ...status, accountName, accounts };
@@ -221,6 +294,7 @@ function readiness(projectId: string): ProjectReadiness {
   const unresolved = project.researchTasks.filter((task) =>
     task.state !== "confirmed" &&
     task.state !== "resolved" &&
+    !isResearchTaskSatisfiedByProduct(task, project.product) &&
     !isCoverResearchTaskSatisfiedByProduct(task, project.product),
   );
   for (const task of unresolved) issues.push(openResearchTaskToIssue(task));
@@ -250,38 +324,46 @@ async function createWindow() {
   // 内嵌第三方应用），所以只在主 session 装。
   installContentSecurityPolicy(window.webContents.session);
   if (isDev) await window.loadURL("http://127.0.0.1:5173"); else await window.loadFile(path.join(root, "dist", "index.html"));
+  // VBK cookie 快照走本地 0600 atomic cookie store（见
+  // ./infrastructure/vbk-cookie-store.ts），与 Electron Keychain 加密层
+  // 完全解耦。本地 store 自己管 per-account save/load/delete/list，
+  // SQLite 的 login_sessions 表里残留的 cookies_ciphertext / cookies_json
+  // 老密文**永远不被读、不被解密**（fail closed）。cookieStore 在
+  // bootstrap 阶段已就绪（app.whenReady 内创建）；createWindow 拿到的
+  // 是非空引用，初始化失败会让 app.whenReady 的 .catch 退出进程。
+  const sessions = cookieStore;
+  if (!sessions) throw new Error("VBK cookie store 尚未初始化，请稍后重试。");
   browser = new VbkBrowser(window, debuggingPort, {
-    saveSession: async (key, name, cookiesJson) => {
-      // 进入 store 前必须加密；明确拒绝空快照,避免保存"无 cookies 的账号"。
-      if (!cookiesJson || cookiesJson === "[]") {
-        db.deleteSession(key);
-        return;
-      }
-      const ciphertext = await encryptString(cookiesJson);
-      db.saveSession(key, name, ciphertext);
+    saveSession: (key, name, cookiesJson) => {
+      // sessions 自身已覆盖「空快照 = 删除」语义；这里直接转发即可。
+      // 抛出时由 VbkBrowser.saveCurrentSession 的 try/catch 兜底，最终
+      // IPC / UI 边界（browser.status、addLogin、switchAccount）都有
+      // 兜底 catch，不会出现 unhandled promise rejection。
+      sessions.saveSession(key, name, cookiesJson);
     },
     loadSession: (key) => {
-      const record = db.loadSession(key);
-      if (!record) return null;
-      // loadSession 返回 ciphertext —— 同步解密失败的容错：列为空 / safeStorage 空
-      // 都会被认为是"未持久化"，调用方拿 null 表示自动切换走 prompt 登录。
-      if (!record.cookiesCiphertext) return null;
-      // 同步路径：safeStorage.decryptString 是同步 API。
-      try {
-        const plain = safeStorage.decryptString(Buffer.from(record.cookiesCiphertext, "base64"));
-        return { cookiesJson: plain, accountName: record.accountName };
-      } catch (error) {
-        console.warn("[vbk] failed to decrypt session cookies; clearing", key);
-        db.deleteSession(key);
-        return null;
-      }
+      // Legacy fail-closed：本接口不再读取 SQLite。sessions 找不到时
+      // 返回 null，调用方切到「请重新登录」路径。SQLite 里残留的加密 / 明文
+      // cookies 行一律视为「不存在」，无需显式清理（用户在状态面板上看到
+      // 的列表来自 sessions.listSessions()，老行不会再出现）。
+      return sessions.loadSession(key);
     },
-    listSessions: () => db.listSessions(),
-    deleteSession: (key) => db.deleteSession(key),
+    listSessions: () => sessions.listSessions(),
+    deleteSession: (key) => {
+      sessions.deleteSession(key);
+    },
     getActiveAccountKey: () => db.getSetting("vbkActiveAccountKey")?.value,
     setActiveAccountKey: (key) => db.setSetting("vbkActiveAccountKey", key),
     clearActiveAccountKey: () => db.deleteSetting("vbkActiveAccountKey"),
   }); await browser.initialise();
+  // 启动后等待 VBK SPA 渲染出"产品列表"，然后通知 renderer 可以检测登录态。
+  // fire-and-forget：即使超时也不会阻塞窗口创建，renderer 的 1.2s 兜底重试
+  // 在事件未到达时仍会工作。
+  void browser.waitUntilReady().then((ready) => {
+    if (ready && window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send("vbk:page-ready");
+    }
+  });
   automation = new DraftAutomation(db, browser, emitProject, async (req) => {
     const settings = getSettings();
       const service = await aiService();
@@ -603,6 +685,13 @@ function registerIpc() {
     emitProject(db.getProject(projectId)!);
     return { accepted: true };
   });
+  ipcMain.handle("research:refreshIssues", (_event, projectId: string) => {
+    const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
+    const result = refreshSatisfiedResearchTasks(db, projectId);
+    const next = db.getProject(projectId)!;
+    emitProject(next);
+    return { ...result, project: next, readiness: readiness(projectId) };
+  });
   ipcMain.handle("research:vehicleResource", async (_event, projectId: string, taskId?: string) => {
     const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
     const page = await browser.page();
@@ -631,6 +720,43 @@ function registerIpc() {
   ipcMain.handle("browser:logout", () => browser.logout());
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));
   ipcMain.handle("poi:suggest", async (_event, keyword: string) => suggestPoi(browser, String(keyword ?? "")));
+  ipcMain.handle("poi:suggestDetail", async (_event, keyword: string, context?: PoiSuggestLogContext) => {
+    const query = String(keyword ?? "");
+    const logContext = {
+      projectId: context?.projectId,
+      dayIndex: context?.dayIndex,
+      spotIndex: context?.spotIndex,
+      title: context?.title,
+      keyword: query,
+    };
+    logPoiManualIpc("ipc_search_start", logContext);
+    try {
+      const result = await suggestPoiDetailWithRawPayload(browser, query);
+      logPoiManualIpc("ipc_search_detail", {
+        ...logContext,
+        httpStatus: result.httpStatus,
+        businessStatus: result.businessStatus,
+        poiListCount: result.poiListCount,
+        candidateCount: result.candidates.length,
+        rawPayload: result.rawPayload,
+      });
+      if (!result.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: result.candidates.length });
+      else logPoiManualIpc("ipc_search_success", {
+        ...logContext,
+        poiName: result.best.poiName,
+        poiId: result.best.poiId,
+        candidateCount: result.candidates.length,
+      });
+      const { rawPayload: _rawPayload, ...detail } = result;
+      return detail;
+    } catch (err) {
+      logPoiManualIpc("ipc_search_failure", {
+        ...logContext,
+        errorMessage: err instanceof Error ? err.message : "VBK POI 查询失败",
+      });
+      throw err;
+    }
+  });
   ipcMain.handle("poi:suggestDemo", async (_event, keyword: string) => suggestPoiDemo(browser, String(keyword ?? "")));
   ipcMain.handle("browser:navigate", (_event, url: string) => browser.navigate(url));
   ipcMain.handle("browser:currentUrl", () => browser.currentUrl());
@@ -721,6 +847,17 @@ function registerIpc() {
     if (!query) return null;
     return suggestPoi(browser, query);
   });
+  // 产品封面：手动上传 + 携程图库候选查询。所有入口先做 trusted sender 校验。
+  ipcMain.handle("cover:uploadManual", (event, args) => uploadManualCover(event, args));
+  ipcMain.handle("cover:read", (event, args) => readManualCover(event, args));
+  ipcMain.handle("cover:listManualCovers", (event) => listManualCoverMetas(event));
+  ipcMain.handle("cover:exists", (event, args) => isManualCoverStillPresent(event, args));
+  // 阶段 A：按景点名称查 suggestpoi.json → 地址 / 景点候选列表；
+  // UI 在地址列表里选中一个后再走 cover:searchCtripLibraryImages。
+  ipcMain.handle("cover:searchCtripLibraryPlaces", (event, args) => searchCtripLibraryCoverPlaces(event, args, browser));
+  // 阶段 B：按已选 place 取该地址下的携程图库图片列表；
+  // 链路：searchImage → getImageInfo（BrowserView 内联 fetch）。
+  ipcMain.handle("cover:searchCtripLibraryImages", (event, args) => searchCtripLibraryCoverImages(event, args, browser));
   ipcMain.handle("settings:get", () => getSettings());
   // settings:getApiKey 在新版本中是**故意的禁止**点：API Key 一旦写入
   // 永远不回到 renderer，UI 通过 getSettings().hasKey / hasDeepSeekKey
@@ -755,21 +892,40 @@ function registerIpc() {
     const rawDeepSeekKey = input.deepseekApiKey;
     const minimaxKey = typeof rawMiniMaxKey === "string" && rawMiniMaxKey.trim() ? rawMiniMaxKey.trim() : null;
     const deepseekKey = typeof rawDeepSeekKey === "string" && rawDeepSeekKey.trim() ? rawDeepSeekKey.trim() : null;
-    if ((minimaxKey || deepseekKey) && !(await isAsyncEncryptionAvailable())) throw new Error("当前 macOS 无法加密保存密钥");
-    if (provider === "minimax" && !minimaxKey && !db.getSetting("minimaxApiKey")) throw new Error("请填写 MiniMax API Key。");
-    if (provider === "deepseek" && !deepseekKey && !db.getSetting("deepseekApiKey")) throw new Error("请填写 Evolink API Key。");
+    // AI API keys live in the local 0600 JSON store, no longer routed
+    // through Electron Keychain encryption. We intentionally do NOT
+    // gate this IPC on any encryption-availability check anymore — the
+    // old "macOS cannot encrypt" prompt is gone.
+    if (!aiKeyStore) throw new Error("AI 密钥存储尚未就绪，请稍后重试。");
+    if (provider === "minimax" && !minimaxKey && !aiKeyStore.hasKey("minimax")) throw new Error("请填写 MiniMax API Key。");
+    if (provider === "deepseek" && !deepseekKey && !aiKeyStore.hasKey("deepseek")) throw new Error("请填写 Evolink API Key。");
 
-    // 写库：所有字段更新在同一事务里原子完成，避免 baseUrl/model 写入
-    // 成功但 apiKey 加密失败导致 UI 显示已配 baseUrl 但 hasKey=false。
-    // persistApiKeyAsync 内部已经包了 transaction；这里把整个 settings 视
-    // 作一个原子单元。
+    // 写库：SQLite 与本地 JSON 文件跨介质，不能在事务里原子提交。
+    // 写入顺序为 baseUrl/model/provider（旧 → 新）→ aiKeyStore.setKey
+    // （temp+rename）→ safeRemoveLegacyCiphertext。任一步骤抛错都会
+    // 直接重抛给 IPC 层，使 renderer 看到失败并可重试；由于 aiProvider
+    // 字段最后写，前面任一字段校验失败时不会留下半切换状态。
+    // 已知不一致窗口：db.setSetting("minimaxBaseUrl", ...) 已成功但
+    // aiKeyStore.setKey 抛错（磁盘满等）时，SQLite 与 JSON 处于不一致
+    // 态。但 AI 调用方先读 JSON、再读 SQLite ，不会出现"已配 hasKey 但
+    // 请求 baseUrl 还没更新"的危险中间态；恢复路径是用户再次保存。
     try {
       if (minimaxBaseUrl !== undefined) db.setSetting("minimaxBaseUrl", minimaxBaseUrl);
       if (minimaxModel !== undefined) db.setSetting("minimaxModel", minimaxModel);
-      if (minimaxKey) await persistApiKeyAsync(db, "minimaxApiKey", minimaxKey);
+      if (minimaxKey) {
+        aiKeyStore.setKey("minimax", minimaxKey);
+        // Legacy SQLite ciphertext is now meaningless and must NEVER be
+        // read again (it can't be decrypted after the old encryption row
+        // was lost). Remove that provider's row in the settings table so
+        // the DB stops pretending it has a configured key.
+        safeRemoveLegacyCiphertext(db, "minimaxApiKey");
+      }
       if (deepseekBaseUrl !== undefined) db.setSetting("deepseekBaseUrl", deepseekBaseUrl);
       if (deepseekModel !== undefined) db.setSetting("deepseekModel", deepseekModel);
-      if (deepseekKey) await persistApiKeyAsync(db, "deepseekApiKey", deepseekKey);
+      if (deepseekKey) {
+        aiKeyStore.setKey("deepseek", deepseekKey);
+        safeRemoveLegacyCiphertext(db, "deepseekApiKey");
+      }
       // 当前模型最后切换，避免前面任一字段校验失败时留下半切换状态。
       if (provider !== undefined) db.setSetting("aiProvider", provider);
     } catch (error) {
@@ -876,9 +1032,12 @@ function registerIpc() {
         ({ planner, providerLabel } = await completedPoiBackfillPlanner(projectId));
       } else {
         const turnSettings = getSettings();
-        // 解密 API Key 必须在 try 内：safeStorage 在某些 macOS 环境下抛
-        // "decryption failed"，被外层 catch 接管后写一条 provider_not_configured
-        // 的失败消息；这条路径对应 preflight-failure.test.ts 第一组用例。
+        // 读取 API Key 必须在 try 内：本地 aiKeyStore 是纯 fs 读取，理论上
+        // 不抛错（缺文件 / 损坏 JSON 已被 readFile 降级为空文件）。但
+        // store 尚未初始化（aiKeyStore === null）时 apiKey() 返回空串，
+        // 等同未配置；其它罕见 IO 错误抛到外层 catch 后由
+        // handlePreflightFailure 写一条 provider_not_configured 的失败
+        // 消息。这条路径对应 preflight-failure.test.ts 第一组用例。
         const decryptedKey = await apiKey(turnSettings.aiProvider);
         const providerProfile = aiProviderConfig(turnSettings, turnSettings.aiProvider);
         providerLabel = resolveAiProviderLabel(turnSettings);
@@ -1048,6 +1207,16 @@ function emitProjectIfKnown(_accountName: string, _info: unknown) { /* 预留：
 
 app.whenReady().then(async () => {
   db = new VbkDatabase(app.getPath("userData"));
+  // AI API key local store follows the user-decided model: a single 0600
+  // JSON file under `userData`. It must be ready before any IPC handler
+  // resolves `getSettings()` so renderer booleans don't flicker between
+  // "unconfigured" and "configured" while the store is initializing.
+  aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
+  // VBK cookie store follows the same lifecycle: one instance per process,
+  // rooted at `userData/vbk-cookie-sessions.json`. It must be ready before
+  // createWindow() runs because VbkBrowser.initialise() uses it during
+  // partition view creation.
+  cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   db.recoverUnansweredMessages();
   const orphanProjects = db.recoverOrphanAutomationRuns();
   if (orphanProjects.length) console.warn("[startup] recovered orphan automation runs", { count: orphanProjects.length });

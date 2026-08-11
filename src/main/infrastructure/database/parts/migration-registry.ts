@@ -3,15 +3,20 @@
  *   - 0001_baseline：建表（projects / messages / research_tasks / automation_runs /
  *     settings / login_sessions / planning_generation / migrations）；
  *   - 0002_projects_basic_info_saved：projects 加 basic_info_saved 列；
- *   - 0003_login_sessions_ciphertext：login_sessions 加 cookies_ciphertext 列（迁移期）；
+ *   - 0003_login_sessions_ciphertext：login_sessions 加 cookies_ciphertext 列
+ *     （历史 Keychain 加密迁移期保留列，新代码不读 / 不写）；
  *   - 0004_login_sessions_indexes：messages / research_tasks / automation_runs /
  *     planning_generation 上的索引；
  *   - 0005_operation_log：新建 operation_log 表 + 索引；
- *   - 0006_login_sessions_drop_plaintext：在 cookies_ciphertext 全部填齐后 DROP cookies_json。
+ *   - 0006_login_sessions_drop_plaintext：无 statements 的标记，原本由
+ *     `dropPlaintextCookiesColumn` 显式调用以 DROP cookies_json。已删除
+ *     Keychain 加密层移除后该函数被移除；标记 id 保留以便不破坏历史 db 文件
+ *     的 migrations 表。
  *
  * 注：
- *   - 0006 的「DROP COLUMN」不是无条件执行的（避免误删未迁移列），由
- *     dropPlaintextCookiesColumn 在外部保证安全后调用；
+ *   - cookies 不再写入 SQLite：本地 0600 atomic cookie store 才是 cookie
+ *     快照的真实存储（见 `../vbk-cookie-store.ts`）。SQLite login_sessions
+ *     表只保留 account_key / account_name / saved_at 等元数据；
  *   - FK / index：当前 SQLite 默认不强制外键，但索引已创建。
  */
 

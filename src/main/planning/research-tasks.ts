@@ -12,10 +12,9 @@
 import type { ResearchTaskProposal, PlanningSkeleton, PlanningModule } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { poiResearchTaskLabel } from "../../shared/poi-research-tasks.js";
+import { hasSatisfiedHotelTier, hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 
 const TASK_TYPE_VBK = "vbk" as const;
-const TASK_TYPE_WEB = "web" as const;
-const TASK_TYPE_COST = "cost" as const;
 const TASK_TYPE_IMAGE = "image" as const;
 
 interface PendingEvaluation {
@@ -29,8 +28,8 @@ interface PendingEvaluation {
  *
  *  规则：
  *  - 行程里出现的城市 / 景点 → VBK 核查（city / POI）。
- *  - 私家团 → 用车资源组待核查；酒店档次 → 酒店资源核查。
- *  - 商业模块：pricing / inventory 各自的 VBK / cost 核查；
+ *  - 私家团 → 用车资源组待核查；酒店档次 → 酒店档次核查。
+ *  - 商业模块在规划 / 草稿阶段不生成强制人工核查任务，上架时在 VBK 核算。
  *  - presentation.cover 缺失 → image 任务（仅当 cover 未填时）。
  *
  *  每条任务都以 label + type 区分；去重交给 runtime.addResearchTask 完成。
@@ -40,12 +39,10 @@ export function planResearchTasks(args: {
   product: Record<string, unknown>;
   acceptedModules: readonly PlanningModule[];
 }): PendingEvaluation[] {
-  const { skeleton, product, acceptedModules } = args;
+  const { skeleton, product } = args;
   const pending: PendingEvaluation[] = [];
-  const commercial = product.commercial as Record<string, unknown> | undefined;
-
   // 用车：私家团必须；其它形态不强求
-  if (skeleton.productForm === "privateTour") {
+  if (skeleton.productForm === "privateTour" && !hasSatisfiedVehicleResource(product)) {
     pending.push({
       key: "vehicle::resourceGroup",
       proposal: {
@@ -60,51 +57,13 @@ export function planResearchTasks(args: {
   const operations = product.operations as Record<string, unknown> | undefined;
   const hotelTier = typeof operations?.hotelTier === "string" ? operations.hotelTier : "";
   const matchedTier = HOTEL_TIER_VALUES.find((value) => value === hotelTier);
-  if (matchedTier) {
+  if (!hasSatisfiedHotelTier(product)) {
     pending.push({
-      key: `hotel::${matchedTier}`,
+      key: matchedTier ? `hotel::${matchedTier}` : "hotel::tier",
       proposal: {
-        label: `核查 ${matchedTier} 在 VBK 的酒店资源`,
+        label: matchedTier ? `核查 ${matchedTier} 在 VBK 的酒店资源` : "核查酒店档次配置",
         type: TASK_TYPE_VBK,
-        detail: "由骨架目的地 + 档次匹配候选酒店资源",
-      },
-    });
-  }
-
-  // 商业模块：pricing / inventory 各自的 VBK / cost 核查
-  if (acceptedModules.includes("pricing") || commercial?.pricing) {
-    pending.push({
-      key: "pricing::vbk",
-      proposal: {
-        label: "核查成人价 / 儿童价 / 起订人数在 VBK 是否可发布",
-        type: TASK_TYPE_VBK,
-      },
-    });
-  }
-  if (acceptedModules.includes("inventory") || commercial?.inventory) {
-    pending.push({
-      key: "inventory::vbk",
-      proposal: {
-        label: "核查库存起止日期与每日配额在 VBK 是否生效",
-        type: TASK_TYPE_VBK,
-      },
-    });
-  }
-  if (acceptedModules.includes("packageName") || (commercial?.packageName && typeof commercial.packageName === "string")) {
-    pending.push({
-      key: "packageName::web",
-      proposal: {
-        label: "核查套餐名称与公开渠道展示一致",
-        type: TASK_TYPE_WEB,
-      },
-    });
-  }
-  if (acceptedModules.includes("terms") || commercial?.terms) {
-    pending.push({
-      key: "terms::cost",
-      proposal: {
-        label: "核查费用包含 / 不包含 / 退改政策的运营成本口径",
-        type: TASK_TYPE_COST,
+        detail: matchedTier ? "由骨架目的地 + 档次匹配候选酒店资源" : "缺少合法酒店档次，需先确认 operations.hotelTier",
       },
     });
   }

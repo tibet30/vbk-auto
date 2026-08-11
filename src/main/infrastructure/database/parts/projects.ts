@@ -4,7 +4,6 @@
  *   - updateProduct / updateBasicInfoField / setProductId / setBasicInfoSaved
  *   - setProjectLifecycle / writeAutomationWithProjectStatus（事务化多表写入）
  *   - addMessage / updateMessageStatus / recoverUnansweredMessages
- *   - addResearchTask / markResearchAccepted
  *   - saveAutomation / recoverOrphanAutomationRuns
  *
  * 全部接受 Database.Database 句柄，便于在拆分模块上复用同一个连接。
@@ -24,7 +23,6 @@ import type {
 import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
 import {
   canonicalPoiResearchTaskLabel,
-  isSamePoiResearchTask,
   poiResearchTaskName,
 } from "../../../../shared/poi-research-tasks.js";
 import { parseAndNormalizeProductJson } from "../product-json-normalize.js";
@@ -302,50 +300,6 @@ export function updateBasicInfoField(db: Database.Database, projectId: string, f
   product.basicInfo = basicInfo;
   updateProduct(db, projectId, product);
   return getProject(db, projectId)!;
-}
-
-/**
- * 写入 research task：全状态 dedupe —— 即使已 confirmed/resolved 也不再创建
- * 重复条目（同一 (label, type) 视为同一核查）。
- */
-export function addResearchTask(db: Database.Database, projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
-  const canonicalTask = {
-    ...task,
-    label: canonicalPoiResearchTaskLabel(task.label, task.type),
-  };
-  const existing = db.prepare(`
-    SELECT id, label, type FROM research_tasks
-    WHERE project_id=? AND type=?
-  `).all(projectId, canonicalTask.type) as Array<{ id: string; label: string; type: ResearchTask["type"] }>;
-  const duplicate = existing.find((row) => row.label === canonicalTask.label)
-    ?? existing.find((row) => isSamePoiResearchTask(row, canonicalTask));
-  if (duplicate) {
-    // 历史拼写命中仅作语义去重，保留其原 detail 作为可追溯记录；只有本来
-    // 就是 canonical 行时才沿用既有的“最新说明覆盖”行为。
-    if (canonicalTask.detail && duplicate.label === canonicalTask.label) {
-      db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(canonicalTask.detail, duplicate.id);
-    }
-    touchProject(db, projectId);
-    return duplicate.id;
-  }
-  const id = randomUUID();
-  db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(id, projectId, canonicalTask.label, canonicalTask.type, "queued", "researching", canonicalTask.detail || null, "[]");
-  touchProject(db, projectId);
-  return id;
-}
-
-/** 把 research task 标记为 confirmed/succeeded，并写入 evidence。 */
-export function markResearchAccepted(
-  db: Database.Database,
-  projectId: string,
-  taskId: string,
-  note?: string,
-  source: "vbk" | "web" | "user" = "user",
-) {
-  const evidence = [{ id: randomUUID(), title: note?.trim() || "运营人员已完成平台核查", source, retrievedAt: now(), accepted: true }];
-  db.prepare("UPDATE research_tasks SET state='confirmed', status='succeeded', evidence_json=? WHERE id=? AND project_id=?")
-    .run(JSON.stringify(evidence), taskId, projectId);
-  touchProject(db, projectId);
 }
 
 /**

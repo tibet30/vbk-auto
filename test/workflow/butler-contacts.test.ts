@@ -11,7 +11,7 @@ function fakePage(payload: unknown, { throwOnFetch = false }: { throwOnFetch?: b
   return {
     async evaluate(_fn: (args: { providerId: number }) => Promise<unknown>, _args: { providerId: number }) {
       if (throwOnFetch) throw new Error("网络失败");
-      return payload;
+      return { status: 200, durationMs: 1, ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false }, payload };
     },
   } as unknown as Parameters<typeof listProviderContactCards>[0];
 }
@@ -81,8 +81,8 @@ test("searchKeyword 会被传到接口 searchKeyWord 字段", async () => {
     async evaluate(_fn: () => Promise<unknown>, _args: { providerId: number; keyword: string }) {
       // 让真正执行不到的 page.evaluate 接受我们提供的 payload；
       // 同时把 keyword 暴露给测试断言。
-      captured = _args.keyword;
-      return { responseBody: { contactCardList: [] } };
+      captured = ((_args as { body?: { searchKeyWord?: string } }).body?.searchKeyWord) ?? _args.keyword;
+      return { status: 200, durationMs: 1, ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false }, payload: { responseBody: { contactCardList: [] } } };
     },
   };
   await listProviderContactCards(fake as unknown as Parameters<typeof listProviderContactCards>[0], 1, "  张三  ");

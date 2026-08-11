@@ -85,7 +85,7 @@ export function parseAiModelList(payload: unknown, provider: AiProvider): AiMode
 /**
  * 拉取模型列表前的 API Key 解析：
  *   - 校验 provider 合法；
- *   - input.apiKey 优先，否则回调 readStoredKey 读 secure-storage；
+ *   - input.apiKey 优先，否则回调 readStoredKey 读本地 ai-key-store；
  *   - provider ≠ "deepseek" 时拒掉（当前只支持 Evolink）。
  */
 async function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiProvider) => Promise<string>): Promise<string> {

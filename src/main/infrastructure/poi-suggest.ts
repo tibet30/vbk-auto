@@ -1,4 +1,12 @@
-export interface PoiSuggestion { poiName: string; poiId: number }
+import type {
+  PoiSuggestDetailResult,
+  PoiSuggestion,
+} from "../../shared/contracts.js";
+import type { PoiSuggestDetailResultWithRawPayload } from "./poi-suggest-detail.js";
+import { buildPoiSuggestDetailResult } from "./poi-suggest-detail.js";
+import { vbkSessionRequest, VbkSessionRequestTimeoutError } from "./vbk-session-request.js";
+
+export { flattenPoiTextFields } from "./poi-suggest-detail.js";
 
 export interface PoiSuggestRequest {
   requestHeader: { locale: "zh-CN" };
@@ -18,6 +26,10 @@ export interface PoiSuggestDemoResult {
   best: PoiSuggestion | null;
 }
 
+export interface PoiSuggestBrowser {
+  evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
+}
+
 export interface PoiSuggestTimeoutOptions {
   /** 浏览器页内 fetch 的取消上限；默认 12 秒。 */
   browserRequestTimeoutMs?: number;
@@ -30,15 +42,6 @@ export class PoiSuggestTimeoutError extends Error {
     super(message);
     this.name = "PoiSuggestTimeoutError";
   }
-}
-
-interface PoiSuggestBrowser {
-  evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
-}
-
-interface BrowserResponse {
-  status: number;
-  text: string;
 }
 
 const SUGGEST_POI_ENDPOINT = "https://online.ctrip.com/restapi/soa2/20049/suggestPoi";
@@ -71,39 +74,57 @@ export async function suggestPoiDemo(
   keyword: string,
   options: PoiSuggestTimeoutOptions = {},
 ): Promise<PoiSuggestDemoResult> {
+  const parsed = await queryPoiSuggest(browser, keyword, options);
+  return {
+    httpStatus: parsed.httpStatus,
+    businessStatus: parsed.businessStatus,
+    poiListCount: parsed.poiListCount,
+    best: parsed.best,
+  };
+}
+
+async function queryPoiSuggest(
+  browser: PoiSuggestBrowser,
+  keyword: string,
+  options: PoiSuggestTimeoutOptions = {},
+): Promise<PoiSuggestDetailResultWithRawPayload> {
   const request = buildPoiSuggestRequest(keyword);
   const browserRequestTimeoutMs = timeoutOrDefault(options.browserRequestTimeoutMs, POI_BROWSER_REQUEST_TIMEOUT_MS);
   const evaluateTimeoutMs = timeoutOrDefault(options.evaluateTimeoutMs, POI_EVALUATE_TIMEOUT_MS);
-  const evaluation = browser.evaluate(async ({ endpoint, request: body, timeoutMs }: {
-    endpoint: string;
-    request: PoiSuggestRequest;
-    timeoutMs: number;
-  }) => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const result = await fetch(endpoint, {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json;charset=UTF-8" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      return { status: result.status, text: await result.text() };
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error(`VBK POI 浏览器请求超时（${timeoutMs}ms）`);
-      throw error;
-    } finally {
-      clearTimeout(timer);
+  let response;
+  try {
+    response = await vbkSessionRequest(browser, {
+      endpoint: SUGGEST_POI_ENDPOINT,
+      body: request,
+      browserRequestTimeoutMs,
+      evaluateTimeoutMs,
+      errorLabel: "VBK POI 查询",
+      includeCidQuery: false,
+    });
+  } catch (error) {
+    if (error instanceof VbkSessionRequestTimeoutError) {
+      throw new PoiSuggestTimeoutError(error.message);
     }
-  }, { endpoint: SUGGEST_POI_ENDPOINT, request, timeoutMs: browserRequestTimeoutMs });
-  const response = await rejectAfter(evaluation, evaluateTimeoutMs, `VBK POI BrowserView 执行超时（${evaluateTimeoutMs}ms）`) as BrowserResponse;
-  if (response.status < 200 || response.status >= 300) throw new Error(`VBK POI 查询 HTTP ${response.status}`);
+    throw error;
+  }
+  return parsePoiSuggestPayload(keyword, response.payload, response.status);
+}
 
-  let body: unknown;
-  try { body = JSON.parse(response.text); }
-  catch { throw new Error("VBK POI 查询返回无效 JSON"); }
-  return parsePoiSuggestPayload(keyword, body, response.status);
+export async function suggestPoiDetail(
+  browser: PoiSuggestBrowser,
+  keyword: string,
+  options?: PoiSuggestTimeoutOptions,
+): Promise<PoiSuggestDetailResult> {
+  const { rawPayload: _rawPayload, ...detail } = await queryPoiSuggest(browser, keyword, options);
+  return detail;
+}
+
+export async function suggestPoiDetailWithRawPayload(
+  browser: PoiSuggestBrowser,
+  keyword: string,
+  options?: PoiSuggestTimeoutOptions,
+): Promise<PoiSuggestDetailResultWithRawPayload> {
+  return queryPoiSuggest(browser, keyword, options);
 }
 
 export async function suggestPoi(
@@ -111,10 +132,10 @@ export async function suggestPoi(
   keyword: string,
   options?: PoiSuggestTimeoutOptions,
 ): Promise<PoiSuggestion | null> {
-  return (await suggestPoiDemo(browser, keyword, options)).best;
+  return (await queryPoiSuggest(browser, keyword, options)).best;
 }
 
-export function parsePoiSuggestPayload(keyword: string, payload: unknown, httpStatus = 200): PoiSuggestDemoResult {
+export function parsePoiSuggestPayload(keyword: string, payload: unknown, httpStatus = 200): PoiSuggestDetailResultWithRawPayload {
   const body = asRecord(payload);
   const responseStatus = asRecord(body?.ResponseStatus);
   const ack = responseStatus?.Ack ?? null;
@@ -123,7 +144,13 @@ export function parsePoiSuggestPayload(keyword: string, payload: unknown, httpSt
   }
   const data = asRecord(body?.data);
   const list = Array.isArray(body?.poiList) ? body.poiList : Array.isArray(data?.poiList) ? data.poiList : [];
-  return { httpStatus, businessStatus: ack as string | number | boolean | null, poiListCount: list.length, best: pickBestPoi(keyword, { poiList: list }) };
+  return buildPoiSuggestDetailResult({
+    httpStatus,
+    businessStatus: ack as string | number | boolean | null,
+    best: pickBestPoi(keyword, { poiList: list }),
+    payload,
+    poiList: list,
+  });
 }
 
 export function pickBestPoi(keyword: string, payload: unknown): PoiSuggestion | null {
@@ -264,14 +291,4 @@ function normaliseName(value: string): string {
 
 function timeoutOrDefault(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) && value! > 0 ? Math.floor(value!) : fallback;
-}
-
-function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new PoiSuggestTimeoutError(message)), timeoutMs);
-    promise.then(
-      (value) => { clearTimeout(timer); resolve(value); },
-      (error) => { clearTimeout(timer); reject(error); },
-    );
-  });
 }

@@ -1,7 +1,7 @@
 /**
  * 资源 / 人工数据保护 + 自动化阻断一致性测试：
  *  - normaliseProductDraft 不会删除 vehicleResource / hotelResource / butler / bookingControls；
- *  - 未解决的 pricing / inventory / 用车 / 酒店 research task 持续阻断自动化；
+ *  - 旧的商业 research task 不再阻断规划 / 草稿 readiness；
  *  - release.submitReview / publishAfterApproval=true 阻断自动化（草稿默认安全）；
  *  - 未填 vehicleResource 的私家团被 automationBlockers 阻断；
  *  - 数据库 normalizeStoredProducts 不会把 vehicleResource / hotelResource / butler
@@ -52,7 +52,26 @@ test("automationBlockers 在缺少 vehicleResource 时阻断（privateTour）", 
   assert.ok(blockers.some((b) => /用车资源组/.test(b.label)));
 });
 
-test("未解决的车辆 research task 阻断自动化（即便 vehicleResource 已填）", () => {
+test("未解决的车辆 research task 在 vehicleResource 已填完整时不再阻断自动化", () => {
+  const product = {
+    sales: { productForm: "privateTour" },
+    commercial: {
+      pricing: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 },
+      inventory: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 },
+      release: { submitReview: false, publishAfterApproval: false, publicPriceCeiling: 3000, publicAuditRetries: 4 },
+    },
+    operations: { vehicleResource: { resourceGroupId: 1, resourceGroupName: "5座经济550+..." } },
+  };
+  const tasks = [
+    { state: "researching", label: "核查用车资源组", type: "vbk" },
+  ];
+  const blockers = automationBlockers(product, { researchTasks: tasks });
+  const labels = blockers.map((b) => b.label);
+  assert.ok(!labels.some((l) => l === "用车资源组"));
+  assert.ok(!labels.some((l) => /车辆核查/.test(l)), `车辆 research task 已满足后不应阻断：${labels.join(",")}`);
+});
+
+test("vehicleResource 缺少 resourceGroupName 时仍阻断（privateTour）", () => {
   const product = {
     sales: { productForm: "privateTour" },
     commercial: {
@@ -62,15 +81,8 @@ test("未解决的车辆 research task 阻断自动化（即便 vehicleResource 
     },
     operations: { vehicleResource: { resourceGroupId: 1 } },
   };
-  const tasks = [
-    { state: "researching", label: "核查用车资源组", type: "vbk" },
-  ];
-  const blockers = automationBlockers(product, { researchTasks: tasks });
-  // vehicleResource 已有 resourceGroupId，所以「用车资源组」基础 blocker 消失；
-  // 但未解决的车辆 research task 应当仍然阻断。
-  const labels = blockers.map((b) => b.label);
-  assert.ok(!labels.some((l) => l === "用车资源组"));
-  assert.ok(labels.some((l) => /车辆核查/.test(l)), `车辆 research task 阻断：${labels.join(",")}`);
+  const blockers = automationBlockers(product, { researchTasks: [] });
+  assert.ok(blockers.some((b) => /用车资源组/.test(b.label)));
 });
 
 test("缺少 vehicleResource 且存在车辆 research task 时只生成一个车辆类 blocker", () => {
@@ -101,7 +113,7 @@ test("release.submitReview=true 阻断自动化；false 不阻断", () => {
       inventory: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 },
       release: { submitReview: true, publishAfterApproval: false, publicPriceCeiling: 3000, publicAuditRetries: 4 },
     },
-    operations: { vehicleResource: { resourceGroupId: 1 } },
+    operations: { vehicleResource: { resourceGroupId: 1, resourceGroupName: "X" } },
   };
   const blockers = automationBlockers(onProduct, { researchTasks: [] });
   assert.ok(blockers.some((b) => /submitReview/.test(b.label)));

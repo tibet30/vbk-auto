@@ -7,6 +7,8 @@
  *   - catch 分支调用 buildPreflightFailureState、把失败 state 持久化、写
  *     taskStatus="failed" 的 assistant 消息、emit project、返回 status="failed"
  *     的正常 PlanningRunResult；
+ *   - try 块必须包含项目存在性检查、API Key 解析、adapter 构造、runPlan
+ *     调用、addMessage、emitProject；不再要求「safeStorage 解密」（已脱钩）。
  *   - planning:start 与 planning:resume 都委托给 runPlanning（共享包装，行为一致）；
  *   - renderer auto-start 在 result.status === "failed" 时调用 setPlanningState
  *     与 setNotice。
@@ -91,12 +93,14 @@ test("main.ts 的 runPlanning 用 try/catch 包裹 preflight + runPlan + complet
   const body = extractFunctionBody(mainSrc, "async function runPlanning(");
   assert.match(body, /try\s*\{/, "runPlanning 必须有 try 块");
   assert.match(body, /catch\s*\(\s*\w+\s*\)/, "runPlanning 必须有 catch 块");
-  // try 块必须覆盖：项目存在性、safeStorage 解密、adapter 构造、runPlan、addMessage、emitProject。
+  // try 块必须覆盖：项目存在性、API Key 解析、adapter 构造、runPlan、addMessage、emitProject。
+  // 旧版要求 try 块里有 safeStorage 解密调用；新版本已脱钩 safeStorage，
+  // 改为要求出现 aiKeyStore / apiKey(...) 任一以验证密钥解析仍在 try 保护范围内。
   const tryMatch = body.match(/try\s*\{([\s\S]*?)\}\s*catch\s*\(/);
   assert.ok(tryMatch, "必须有 try 块");
   const tryBody = tryMatch![1];
   assert.match(tryBody, /db\.getProject\(/);
-  assert.match(tryBody, /safeStorage|apiKey\(/);
+  assert.match(tryBody, /apiKey\(/) ;
   assert.match(tryBody, /new OpenAICompatiblePlannerAdapter/);
   assert.match(tryBody, /runPlan\(/);
   assert.match(tryBody, /db\.addMessage/);

@@ -2,7 +2,7 @@
  * preflight 失败包装（buildPreflightFailureState）单元测试。
  *
  *  这层覆盖纯函数行为：
- *   - safeStorage 解密不可用 → 归类为 provider_not_configured；
+ *   - 解密不可用 / 密钥相关错误 → 归类为 provider_not_configured；
  *   - PlannerError code 透传（provider_authentication / provider_not_configured）；
  *   - 其它任何 thrown 异常归为 unknown；
  *   - pending → failed 状态机迁移；
@@ -32,11 +32,13 @@ const PENDING_SKELETON: PlanningGenerationState = {
   resumeAt: "2024-01-01T00:00:00.000Z",
 };
 
-test("safeStorage 解密不可用 → state.status=failed，code=provider_not_configured，currentStage 保留", () => {
+test("密钥解密不可用 → state.status=failed，code=provider_not_configured，currentStage 保留", () => {
   // 真实 bug 现场的原始错误文本（含 ciphertext 字样 + 长 base64 模拟）。
+  // 即便底层存储已迁移到无加密路径，分类器仍把任何「decrypt」相关错误归为
+  // provider_not_configured，作为防御性降级路径。
   const rawCipher = "AAAAaaaaXXXXxxxxQQQQqqqqZZZZzzzz1111aaaa2222bbbb3333cccc4444dddd";
   const err = new Error(
-    `Error while decrypting the ciphertext provided to safeStorage.decryptString. Decryption is not available. (${rawCipher})`,
+    `Error while decrypting the ciphertext. Decryption is not available. (${rawCipher})`,
   );
   const result = buildPreflightFailureState(PENDING_SKELETON, err);
   assert.equal(result.status, "failed");
@@ -51,7 +53,7 @@ test("safeStorage 解密不可用 → state.status=failed，code=provider_not_co
 });
 
 test("assistant text 含「未完成」与「请检查 API Key」，不含「已完成 / 全部完成 / 成功」", () => {
-  const err = new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString. Decryption is not available.");
+  const err = new Error("Error while decrypting the ciphertext. Decryption is not available.");
   const result = buildPreflightFailureState(PENDING_SKELETON, err);
   assert.ok(result.assistantReply.includes("未完成"), `reply 必须显式说「未完成」：${result.assistantReply}`);
   assert.ok(result.assistantReply.includes("请检查 API Key"), `reply 必须引导用户检查 API Key：${result.assistantReply}`);
@@ -95,7 +97,7 @@ test("classifyPreflightError：通过 message 关键字降级判断", () => {
 test("redactSensitiveMessage：长 base64 替换为 [redacted]，短字符串保留", () => {
   const long = "AAAAaaaaXXXXxxxxQQQQqqqqZZZZzzzz1111aaaa2222bbbb3333cccc4444dddd";
   assert.equal(redactSensitiveMessage(`prefix ${long} suffix`), "prefix [redacted] suffix");
-  assert.equal(redactSensitiveMessage("safeStorage.decryptString"), "safeStorage.decryptString");
+  assert.equal(redactSensitiveMessage("decryptString"), "decryptString");
 });
 
 test("composePreflightFailureReply 自身是 provider-neutral 且安全", () => {

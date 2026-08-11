@@ -52,9 +52,45 @@ test("applyProductPatchSafe 写入 release=true 仍会被 normalise 强制 false
 
 test("automationBlockers 把 submitReview=true / publishAfterApproval=true 视为阻断", () => {
   const product = {
-    sales: { productForm: "privateTour" },
+    sales: { productType: "domesticShort", productForm: "privateTour" as const, splitGroup: false },
+    basicInfo: {
+      supplierProductName: "x",
+      supplierProductCode: "NEW",
+      subtitle: "y",
+      days: 1,
+      nights: 0,
+      meetingCity: "Z",
+      destinationCity: "Z",
+      province: "Z",
+      operationNotes: "n",
+    },
+    operations: {
+      hotelSource: "nonPlatform" as const,
+      hotelTier: "当地5钻酒店/-38" as const,
+      transport: "charter" as const,
+      pickupCity: "Z",
+      reusePickupForDropoff: true,
+      mealsIncluded: false,
+      vehicleResource: { resourceGroupId: 1, resourceGroupName: "x" },
+    },
+    presentation: {
+      recommendation: "r",
+      features: "f",
+      recommendations: [
+        { category: "优选行程" as const, text: "A" },
+        { category: "精选酒店" as const, text: "B" },
+        { category: "缤纷景点" as const, text: "C" },
+      ],
+    },
+    itinerary: [{
+      day: 1,
+      title: "D",
+      spots: [{ name: "S", poiName: null, poiId: null }],
+      description: "D",
+      hotel: "H",
+      meals: "B/L/D",
+    }],
     commercial: { release: { submitReview: true, publishAfterApproval: true, publicPriceCeiling: 3000, publicAuditRetries: 4 } },
-    operations: { vehicleResource: { resourceGroupId: 1, resourceGroupName: "x" } },
   };
   const blockers = automationBlockers(product, { researchTasks: [] });
   assert.ok(blockers.some((b) => /submitReview/.test(b.label)));

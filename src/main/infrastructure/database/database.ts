@@ -8,10 +8,9 @@
  *  - 项目 CRUD：listProjects / createProject / getProject / deleteProject / updateProduct…
  *  - 会话消息：addMessage / updateMessageStatus / recoverUnansweredMessages
  *  - 设置：getSetting / setSetting / deleteSetting
- *  - Research 任务：addResearchTask / markResearchAccepted
+ *  - Research 任务：addResearchTask / markResearchAccepted / markResearchTasksSatisfied
  *  - Automation Run：saveAutomation / recoverOrphanAutomationRuns
  *  - Planning 状态：loadPlanningState / savePlanningState / deletePlanningState / recoverOrphanPlanningStates
- *  - 多账号登录会话：saveSession / loadSession / listSessions / deleteSession / migratePlaintextCookiesToEncrypted
  *  - Provider ID 缓存：providerIdFor / setProviderIdFor / listKnownAccounts
  *  - 操作日志：appendOperationLog / queryOperationLog / countOperationLog / recoverOrphanOperationLog
  *
@@ -34,7 +33,6 @@ import type {
   ProjectDetail,
   ProjectSummary,
   ResearchTask,
-  SavedLoginAccount,
   TaskStatus,
 } from "../../../shared/contracts.js";
 
@@ -52,14 +50,12 @@ import {
 } from "./parts/provider-accounts.js";
 import {
   addMessage,
-  addResearchTask,
   createProject,
   deleteProject,
   getProject,
   listProjects,
   listProjectsPaginated,
   type ProjectListPage,
-  markResearchAccepted,
   recoverOrphanAutomationRuns,
   recoverUnansweredMessages,
   saveAutomation,
@@ -71,16 +67,7 @@ import {
   updateProduct,
   writeAutomationWithProjectStatus,
 } from "./parts/projects.js";
-import {
-  deleteSession,
-  dropPlaintextCookiesColumn,
-  listSessions,
-  loadSession,
-  migratePlaintextCookiesToEncrypted,
-  saveSession,
-  saveSessionPlain,
-  type SessionRecord,
-} from "./parts/sessions.js";
+import { addResearchTask, markResearchAccepted, markResearchTasksSatisfied } from "./parts/research-tasks.js";
 import { deleteSetting, getSetting, setSetting } from "./parts/settings.js";
 
 /**
@@ -155,6 +142,9 @@ export class VbkDatabase {
   markResearchAccepted(projectId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") {
     markResearchAccepted(this.db, projectId, taskId, note, source);
   }
+  markResearchTasksSatisfied(projectId: string, taskIds: readonly string[], note?: string) {
+    return markResearchTasksSatisfied(this.db, projectId, taskIds, note);
+  }
   saveAutomation(projectId: string, run: AutomationRun) {
     saveAutomation(this.db, projectId, run);
   }
@@ -174,33 +164,6 @@ export class VbkDatabase {
   }
   listKnownAccounts(): Array<{ accountName: string; providerId?: number }> {
     return partListKnownAccounts(this.db);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // login_sessions（多账号登录态）+ plaintext → encrypted 迁移
-  // ─────────────────────────────────────────────────────────────────────
-
-  saveSession(accountKey: string, accountName: string, cookiesCiphertext: string) {
-    saveSession(this.db, accountKey, accountName, cookiesCiphertext);
-  }
-  saveSessionPlain(
-    accountKey: string,
-    accountName: string,
-    cookiesPlaintext: string,
-    encrypt: (plaintext: string) => Promise<string>,
-  ): Promise<void> {
-    return saveSessionPlain(this.db, accountKey, accountName, cookiesPlaintext, encrypt);
-  }
-  loadSession(accountKey: string): SessionRecord | null {
-    return loadSession(this.db, accountKey);
-  }
-  listSessions(): SavedLoginAccount[] { return listSessions(this.db); }
-  deleteSession(accountKey: string) { deleteSession(this.db, accountKey); }
-  async migratePlaintextCookiesToEncrypted(encrypt: (plaintext: string) => Promise<string>): Promise<{ migrated: number; failed: number }> {
-    return migratePlaintextCookiesToEncrypted(this.db, encrypt);
-  }
-  dropPlaintextCookiesColumn(): void {
-    dropPlaintextCookiesColumn(this.db);
   }
 
   // ─────────────────────────────────────────────────────────────────────

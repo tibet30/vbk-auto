@@ -11,6 +11,7 @@
 
 import type { Page } from "playwright";
 import type { ProviderContactCard } from "../../shared/contracts.js";
+import { vbkSessionRequest } from "./vbk-session-request.js";
 
 /**
  * 在已登录的 VBK 浏览器上下文里调用携程接口拉取 providerId 对应的联系人卡片列表。
@@ -21,45 +22,28 @@ import type { ProviderContactCard } from "../../shared/contracts.js";
 export async function listProviderContactCards(page: Page, providerId: number, searchKeyword?: string): Promise<ProviderContactCard[]> {
   if (!Number.isInteger(providerId) || providerId <= 0) throw new Error("providerId 必须为正整数。");
   const trimmedKeyword = (searchKeyword ?? "").trim();
-  const payload = await page.evaluate(async ({ providerId, keyword }: { providerId: number; keyword: string }) => {
-    const readCookie = (name: string) => {
-      const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-      return match ? decodeURIComponent(match[1]) : "";
-    };
-    const cid = readCookie("GUID") || readCookie("vbk_login_cid") || `${Date.now()}`;
-    const trace = `${cid}-${Date.now()}-${Math.floor(Math.random() * 10_000_000)}`;
-    const response = await fetch(`https://m.ctrip.com/restapi/soa2/17264/searchProviderContactCardList?_fxpcqlniredt=${encodeURIComponent(cid)}&x-traceID=${encodeURIComponent(trace)}`, {
-      method: "POST", credentials: "include",
-      headers: {
-        accept: "*/*",
-        "content-type": "application/json",
-        "x-ctx-currency": "CNY",
-        "x-ctx-locale": "zh-CN",
-        "x-tour-auth-from": "vbk",
-        referer: location.origin,
+  const response = await vbkSessionRequest(page, {
+    endpoint: "https://m.ctrip.com/restapi/soa2/17264/searchProviderContactCardList",
+    browserRequestTimeoutMs: 12_000,
+    evaluateTimeoutMs: 15_000,
+    errorLabel: "VBK 联系人列表查询",
+    headers: { "x-tour-auth-from": "vbk" },
+    body: {
+      providerId,
+      contactType: 0,
+      selectedContactCardIdList: [],
+      searchKeyWord: trimmedKeyword,
+      version: "v0.4",
+      pageIndex: 1,
+      pageSize: 50,
+      head: {
+        cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09",
+        auth: "", xsid: "", extension: [],
       },
-      body: JSON.stringify({
-        providerId,
-        contactType: 0,
-        selectedContactCardIdList: [],
-        searchKeyWord: keyword,
-        version: "v0.4",
-        pageIndex: 1,
-        pageSize: 50,
-        head: {
-          cid, ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09",
-          auth: "", xsid: "", extension: [],
-        },
-      }),
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`VBK 联系人列表查询失败：HTTP ${response.status} ${text.slice(0, 200)}`);
-    let parsed: unknown = text;
-    try { parsed = JSON.parse(text); } catch { /* keep raw text */ }
-    return parsed;
-  }, { providerId, keyword: trimmedKeyword });
+    },
+  });
 
-  return decodeContactCards(payload, providerId);
+  return decodeContactCards(response.payload, providerId);
 }
 
 interface RawContactCard {

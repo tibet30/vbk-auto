@@ -39,7 +39,7 @@ test("刷新使用当前地址和临时 API Key 请求 /models", async () => {
   assert.deepEqual(result.models.map((model) => model.id), ["model-a", "model-b"]);
 });
 
-test("刷新可沿用 Keychain 密钥，并给出可恢复的鉴权错误", async () => {
+test("刷新可沿用本地已保存密钥，并给出可恢复的鉴权错误", async () => {
   let readProvider = "";
   await assert.rejects(() => fetchAiModelList({
     provider: "deepseek",

@@ -8,6 +8,7 @@ export {
 } from "./minimax-service.js";
 export {
   hasCompleteCtripLibraryCover,
+  hasCompleteProductCover,
   isCoverResearchTaskSatisfiedByProduct,
   MiniMaxServiceError,
   presentationCoverValueSchema,

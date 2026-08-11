@@ -23,7 +23,9 @@ export function buildContentSecurityPolicy(): string {
     ["default-src", "'self'"],
     ["script-src", "'self' 'unsafe-inline'"], // vite 在 dev 模式需要 unsafe-inline eval；prod 关掉
     ["style-src", "'self' 'unsafe-inline'"], // antd 内联样式
-    ["img-src", "'self' data: https:"],
+    ["img-src", "'self' data: https: file:"], // data: 用于手动上传封面 cover.read 返回的 data URL 预览；
+                                                    // file: 仍保留（兼容旧调用 / 生产 file:// origin 同源），
+                                                    // 但 renderer 不再走 file://；不要扩展到 script/connect/object。
     ["font-src", "'self' data:"],
     ["connect-src", isDev ? "'self' http://127.0.0.1:5173 ws://127.0.0.1:5173" : "'self'"],
     ["object-src", "'none'"],

@@ -159,16 +159,36 @@ export const responseJsonSchema = {
   },
 } as const;
 
-export const presentationCoverValueSchema = z.object({
-  source: z.literal("ctripLibrary"),
-  poi: z.string().trim().min(1),
-  description: z.string().trim().min(1),
-  minQuality: z.number().int().min(0).max(5),
-}).strict();
+export const presentationCoverValueSchema = z.union([
+  // ctripLibrary：必填 source / poi / description / minQuality；
+  // imageId / imageUrl / thumbnailUrl / previewUrl / score / resolution /
+  // poiId / poiName / selectedAt 是 product JSON 中已持久化的合法可选元数据
+  // （来源：manual-review-field.applyProductCover 写入链路与 getImageInfo 派生字段），
+  // 通过 .passthrough() 放行，避免 .strict() 把整张合法携程图库封面误判为非法，
+  // 进而让 image 类 research task 一直被误标为「未满足」无法确认。
+  z.object({
+    source: z.literal("ctripLibrary"),
+    poi: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+    minQuality: z.number().int().min(0).max(5),
+  }).passthrough(),
+  z.object({
+    source: z.literal("manualUpload"),
+    fileId: z.string().trim().min(1),
+    originalName: z.string().trim().min(1),
+    mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+    sizeBytes: z.number().int().positive(),
+    poi: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+    minQuality: z.number().int().min(0).max(5),
+    uploadedAt: z.string().trim().min(1),
+  }).strict(),
+]);
 
 /**
- * 判断产品 JSON 中 /presentation/cover 是否已经是一个完整的携程图库封面
- * （含 source/poi/description/minQuality 全部字段且类型正确）。
+ * 判断产品 JSON 中 /presentation/cover 是否已经是一个完整的封面配置：
+ *  - ctripLibrary：含 source/poi/description/minQuality 全部字段；
+ *  - manualUpload：含 fileId/originalName/mimeType/sizeBytes/poi/description/minQuality/uploadedAt 全部字段。
  * 用于「封面图研究任务是否可被当前 product 直接满足」等收敛判断。
  */
 export function hasCompleteCtripLibraryCover(product: Record<string, unknown>): boolean {
@@ -180,8 +200,16 @@ export function hasCompleteCtripLibraryCover(product: Record<string, unknown>): 
 }
 
 /**
+ * 与 hasCompleteCtripLibraryCover 同义；保留语义清晰的别名以免上层误读。
+ * 任何 source（ctripLibrary / manualUpload）配置完整均视为满足。
+ */
+export function hasCompleteProductCover(product: Record<string, unknown>): boolean {
+  return hasCompleteCtripLibraryCover(product);
+}
+
+/**
  * 判断一条 image 类型的 research task 能否被当前产品 JSON 直接满足：
- * 仅当 task.type === "image" 且产品封面已经是完整携程图库封面时返回 true，
+ * 仅当 task.type === "image" 且产品封面已经是完整封面配置时返回 true，
  * 其余情形（含 vbk/web/cost 类型任务）一律返回 false。
  */
 export function isCoverResearchTaskSatisfiedByProduct(

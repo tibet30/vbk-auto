@@ -4,8 +4,11 @@ import {
   buildPoiSuggestRequest,
   POI_BROWSER_REQUEST_TIMEOUT_MS,
   PoiSuggestTimeoutError,
+  flattenPoiTextFields,
   pickBestPoi,
+  parsePoiSuggestPayload,
   suggestPoi,
+  suggestPoiDetail,
   suggestPoiDemo,
 } from "../../src/main/infrastructure/poi-suggest.js";
 
@@ -14,9 +17,32 @@ function fakeBrowser(response: { status: number; text: string }) {
   return {
     calls,
     browser: {
-      async evaluate<T, A>(_fn: (arg: A) => T | Promise<T>, arg: A): Promise<T> {
+      async evaluate<T, A>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T> {
         calls.push(arg);
-        return response as T;
+        const originalDocument = (globalThis as { document?: unknown }).document;
+        const originalFetch = globalThis.fetch;
+        Object.defineProperty(globalThis, "document", {
+          configurable: true,
+          value: { cookie: "GUID=test-cid" },
+        });
+        globalThis.fetch = (async () => ({
+          ok: response.status >= 200 && response.status < 300,
+          status: response.status,
+          text: async () => response.text,
+        })) as typeof fetch;
+        try {
+          return await fn(arg);
+        } finally {
+          globalThis.fetch = originalFetch;
+          if (originalDocument === undefined) {
+            delete (globalThis as { document?: unknown }).document;
+          } else {
+            Object.defineProperty(globalThis, "document", {
+              configurable: true,
+              value: originalDocument,
+            });
+          }
+        }
       },
     },
   };
@@ -47,11 +73,12 @@ test("业务成功时匹配候选，浏览器调用只传端点、请求体和�
     text: JSON.stringify({ ResponseStatus: { Ack: "Success" }, poiList: [{ poiName: "晋祠", poiId: 79413 }] }),
   });
   assert.deepEqual(await suggestPoi(fake.browser, "晋祠"), { poiName: "晋祠", poiId: 79413 });
-  assert.deepEqual(fake.calls, [{
-    endpoint: "https://online.ctrip.com/restapi/soa2/20049/suggestPoi",
-    request: buildPoiSuggestRequest("晋祠"),
-    timeoutMs: POI_BROWSER_REQUEST_TIMEOUT_MS,
-  }]);
+  assert.equal(fake.calls.length, 1);
+  const call = fake.calls[0] as Record<string, unknown>;
+  assert.equal(call.endpoint, "https://online.ctrip.com/restapi/soa2/20049/suggestPoi");
+  assert.deepEqual(call.body, buildPoiSuggestRequest("晋祠"));
+  assert.equal(call.timeoutMs, POI_BROWSER_REQUEST_TIMEOUT_MS);
+  assert.equal(call.includeCidQuery, false);
 });
 
 test("BrowserView evaluate 悬挂时主进程在上限后返回可识别超时", async () => {
@@ -69,7 +96,12 @@ test("BrowserView evaluate 悬挂时主进程在上限后返回可识别超时",
 
 test("页内 fetch 使用 AbortController 在请求超时后取消", async () => {
   const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
   let requestInit: RequestInit | undefined;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: "GUID=test-cid" },
+  });
   globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise((_resolve, reject) => {
     requestInit = init;
     init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
@@ -82,12 +114,20 @@ test("页内 fetch 使用 AbortController 在请求超时后取消", async () =>
   try {
     await assert.rejects(
       suggestPoi(browser, "晋祠", { browserRequestTimeoutMs: 1, evaluateTimeoutMs: 50 }),
-      /VBK POI 浏览器请求超时（1ms）/,
+      /VBK POI 查询浏览器请求超时（1ms）/,
     );
     assert.equal(requestInit?.credentials, "include");
     assert.equal(new Headers(requestInit?.headers).get("content-type"), "application/json;charset=UTF-8");
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalDocument === undefined) {
+      delete (globalThis as { document?: unknown }).document;
+    } else {
+      Object.defineProperty(globalThis, "document", {
+        configurable: true,
+        value: originalDocument,
+      });
+    }
   }
 });
 
@@ -96,6 +136,61 @@ test("业务成功但没有候选时返回 null", async () => {
   const result = await suggestPoiDemo(fake.browser, "晋祠");
   assert.equal(result.poiListCount, 0);
   assert.equal(result.best, null);
+  assert.equal("candidates" in result, false);
+  const detail = await suggestPoiDetail(fake.browser, "晋祠");
+  assert.deepEqual(detail.candidates, []);
+  assert.equal("rawPayload" in detail, false);
+});
+
+test("手动 POI 详情解析全部候选、扁平文字字段，并过滤敏感键", () => {
+  const result = parsePoiSuggestPayload("晋祠", {
+    ResponseStatus: { Ack: "Success" },
+    ticket: "must-not-leak",
+    poiList: [
+      {
+        poiName: "晋祠",
+        poiId: 79413,
+        cityName: "太原",
+        address: "晋源区晋祠镇",
+        category: { name: "景区", alias: ["祠庙", "博物馆"] },
+        Authorization: "must-not-leak",
+      },
+      { poiName: "晋祠公园", poiId: null, districtName: "晋源区", tags: ["公园"] },
+    ],
+  });
+  assert.equal(result.poiListCount, 2);
+  assert.deepEqual(result.best, { poiName: "晋祠", poiId: 79413 });
+  assert.equal(result.candidates.length, 2);
+  assert.equal(result.candidates[0].selectable, true);
+  assert.equal(result.candidates[1].selectable, false);
+  assert.deepEqual(
+    result.candidates[0].textFields.map((field) => `${field.path}:${field.value}`),
+    [
+      "poiName:晋祠",
+      "poiId:79413",
+      "cityName:太原",
+      "address:晋源区晋祠镇",
+      "category.name:景区",
+      "category.alias[0]:祠庙",
+      "category.alias[1]:博物馆",
+    ],
+  );
+  const serialised = JSON.stringify(result);
+  assert.doesNotMatch(serialised, /must-not-leak|ticket|Authorization|cookie|apiKey/i);
+});
+
+test("POI 文字字段递归收集字符串、数字、布尔并跳过敏感字段", () => {
+  assert.deepEqual(flattenPoiTextFields({
+    name: "A",
+    score: 4,
+    open: true,
+    nested: [{ area: "B", cookie: "hidden" }],
+  }), [
+    { path: "name", value: "A" },
+    { path: "score", value: "4" },
+    { path: "open", value: "true" },
+    { path: "nested[0].area", value: "B" },
+  ]);
 });
 
 test("真实响应中的主景点别名只在唯一且完整覆盖时匹配，避免选择下属景点", () => {
@@ -196,7 +291,7 @@ test("业务 Failure、HTTP 失败和无效 JSON 都向上抛出可见错误", a
   await assert.rejects(suggestPoi(businessFailure.browser, "晋祠"), /VBK POI 查询业务失败：请求体无效/);
 
   const httpFailure = fakeBrowser({ status: 403, text: "{}" });
-  await assert.rejects(suggestPoi(httpFailure.browser, "晋祠"), /VBK POI 查询 HTTP 403/);
+  await assert.rejects(suggestPoi(httpFailure.browser, "晋祠"), /VBK POI 查询失败：HTTP 403/);
 
   const invalidJson = fakeBrowser({ status: 200, text: "not-json" });
   await assert.rejects(suggestPoi(invalidJson.browser, "晋祠"), /VBK POI 查询返回无效 JSON/);

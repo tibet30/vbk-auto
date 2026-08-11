@@ -1,7 +1,7 @@
 /**
  * research 阶段 deterministic 行为测试：
  *  - 不调用 AI（planner 不会收到 research 请求）；
- *  - 按 itinerary + 商业模块生成 city / POI / 用车 / 酒店 / 价格库存核查；
+ *  - 按 itinerary + 资源 / 封面缺口生成 POI / 用车 / 酒店 / 图片核查；
  *  - 同一份输入多次运行产生完全相同的任务清单；
  *  - 标签禁止「已确认 / 已解决」措辞；
  *  - AI 即使产出声称解决，runtime 也不会被 fake task 标记为 confirmed。
@@ -248,6 +248,30 @@ test("planResearchTasks deterministic：同一输入两次产出完全一致", (
   const a = planResearchTasks({ skeleton, product, acceptedModules: ["skeleton", "itinerary", "presentation", "packageName", "pricing", "inventory", "terms", "release"] });
   const b = planResearchTasks({ skeleton, product, acceptedModules: ["skeleton", "itinerary", "presentation", "packageName", "pricing", "inventory", "terms", "release"] });
   assert.deepEqual(a, b);
+  const labels = a.map((entry) => entry.proposal.label);
+  assert.ok(!labels.some((label) => /成人价|儿童价|库存|套餐名称|费用包含|退改|成本口径/.test(label)));
+});
+
+test("planResearchTasks 不为已满足的用车 / 酒店字段新建任务", () => {
+  const product = {
+    operations: {
+      hotelTier: "当地5钻酒店/-38",
+      vehicleResource: { resourceGroupId: 2206240, resourceGroupName: "5座经济550+..." },
+    },
+    presentation: {
+      cover: { source: "ctripLibrary", poi: "晋祠", description: "横版", minQuality: 3 },
+    },
+  };
+  const pending = planResearchTasks({ skeleton, product, acceptedModules: ["skeleton", "presentation"] });
+  const labels = pending.map((entry) => entry.proposal.label).join("\n");
+  assert.ok(!/用车资源组|酒店/.test(labels), labels);
+});
+
+test("planResearchTasks 在用车 / 酒店字段缺失时仍生成资源核查任务", () => {
+  const pending = planResearchTasks({ skeleton, product: { operations: { vehicleResource: {} } }, acceptedModules: ["skeleton"] });
+  const labels = pending.map((entry) => entry.proposal.label);
+  assert.ok(labels.some((label) => /用车资源组/.test(label)));
+  assert.ok(labels.some((label) => /酒店/.test(label)));
 });
 
 test("pendingResearchTasks 会过滤掉已存在的任务", () => {

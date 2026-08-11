@@ -78,6 +78,24 @@ test("接线 2：fillAndSavePresentation 接入 saveThenAdvance，目标 行程�
   );
   assert.doesNotMatch(presBody, /clickBasicInfoNextStep/);
   assert.doesNotMatch(presBody, /waitForSectionEnabled/);
+  assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations\)/,
+    "进入产品图文前必须校验完整的三条推荐理由配置");
+  assert.match(presBody, /cover\.source !== "ctripLibrary"/, "产品图文必须在写入前校验完整的图库封面配置");
+  assert.match(presBody, /Number\.isInteger\(cover\.imageId\)/, "封面必须有已选图库图片的有效身份");
+  assert.match(presBody, /await fillRecommendationReasons\(page, recommendations\)/,
+    "产品图文必须实际填写已校验的推荐理由");
+  assert.match(presBody, /await selectCtripLibraryCover\(page, presentation\.cover\)/,
+    "产品图文必须录入图库封面");
+  assert.match(
+    presBody,
+    /if \(!filledFeatures\)/,
+    "产品特点输入框缺失时必须存在 if (!filledFeatures) 分支",
+  );
+  assert.match(
+    presBody,
+    /找不到产品特点富文本输入框/,
+    "产品特点输入框缺失时抛错必须保留「找不到产品特点富文本输入框」前缀",
+  );
 });
 
 test("接线 3：fillItineraryDraft 存为草稿后接入 saveThenAdvance，目标 套餐管理", async () => {
@@ -311,4 +329,3 @@ test("状态机 3：保存后目标 tab 已激活（aria-selected/active class�
     "规则 3：findActiveTabLabel 命中后必须返回 auto-navigated，不点下一步",
   );
 });
-

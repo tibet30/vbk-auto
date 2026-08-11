@@ -5,6 +5,7 @@
 
 import type { Page } from "playwright";
 import type { ProjectDetail } from "../../shared/contracts.js";
+import { vbkSessionRequest } from "../infrastructure/vbk-session-request.js";
 
 /**
  * 把任意 unknown 转成 trim 后的字符串，空值 / 非字符串返回 ""。
@@ -30,34 +31,25 @@ export function hotelResourceQuery(project: Pick<ProjectDetail, "product">) {
 }
 
 /**
- * 在 VBK 页面上下文里直接 fetch 资源列表接口（带 cid trace）：从 cookie 取 GUID，
- * 拼一个 traceID 后用 fetch 调用 restapi/15638；返回 raw payload（JSON.parse 失败则保留文本）。
+ * 在 VBK 页面上下文里直接 fetch 资源列表接口（带 cid trace）：从 cookie 取 GUID/vbk_login_cid，
+ * 拼 traceID 后用 fetch 调用 restapi/15638；只返回解析后的安全 payload。
  */
 export async function searchVbkResources(page: Page) {
-  return page.evaluate(async () => {
-    const readCookie = (name: string) => {
-      const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-      return match ? decodeURIComponent(match[1]) : "";
-    };
-    const cid = readCookie("GUID") || readCookie("vbk_login_cid") || `${Date.now()}`;
-    const trace = `${cid}-${Date.now()}-${Math.floor(Math.random() * 10_000_000)}`;
-    const response = await fetch(`https://online.ctrip.com/restapi/soa2/15638/searchResourceList.json?x-traceID=${encodeURIComponent(trace)}`, {
-      method: "POST", credentials: "include",
-      headers: { accept: "*/*", "content-type": "application/json", "x-ctx-currency": "CNY", "x-ctx-locale": "zh-CN" },
-      body: JSON.stringify({
-        contentType: "json", head: { cid, ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", xsid: "", extension: [] },
-        resourceIds: [], resourceName: "", departureCityId: null, destinationCityId: null, productRegion: null,
-        active: "T", vendorId: null, pmEid: "", paEid: "", createTimeStart: null, createTimeEnd: null,
-        forProductCategory: [], forProductPattern: [], forSaleMode: [], pageNo: 1, pageSize: 100,
-        vendorResourceCodes: [], businessOwner: "CUSTOM",
-      }),
-    });
-    const text = await response.text();
-    let payload: unknown = text;
-    try { payload = JSON.parse(text); } catch { /* keep raw text for diagnostics */ }
-    if (!response.ok) throw new Error(`VBK 资源列表查询失败：HTTP ${response.status} ${text.slice(0, 160)}`);
-    return payload;
+  const response = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/searchResourceList.json",
+    browserRequestTimeoutMs: 12_000,
+    evaluateTimeoutMs: 15_000,
+    errorLabel: "VBK 资源列表查询",
+    body: {
+      contentType: "json",
+      head: { cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", xsid: "", extension: [] },
+      resourceIds: [], resourceName: "", departureCityId: null, destinationCityId: null, productRegion: null,
+      active: "T", vendorId: null, pmEid: "", paEid: "", createTimeStart: null, createTimeEnd: null,
+      forProductCategory: [], forProductPattern: [], forSaleMode: [], pageNo: 1, pageSize: 100,
+      vendorResourceCodes: [], businessOwner: "CUSTOM",
+    },
   });
+  return response.payload;
 }
 
 /**

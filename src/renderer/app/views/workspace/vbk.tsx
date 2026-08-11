@@ -4,6 +4,7 @@ import {
   CircleHelp,
   LoaderCircle,
   MessageCircleMore,
+  Play,
   RefreshCw,
   Settings2,
   ShieldCheck,
@@ -49,6 +50,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     automationActive,
     stoppingAutomation,
     stopAutomation,
+    startAutomation,
     setActiveTaskId,
     activeTaskId,
     automationPhases,
@@ -64,7 +66,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
   const reviewSections = useMemo(
     () => VBK_NAV_SECTIONS.map((section) => ({
       section,
-      state: aggregateSectionState(section, automationPhases ?? [], automationRecovery ?? {}),
+      state: aggregateSectionState(section, automationPhases ?? [], automationRecovery ?? {}, project?.productId),
       url: project ? section.buildUrl(project.productId) : null,
     })),
     [project?.productId, automationRecovery, automationPhases],
@@ -166,23 +168,41 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
         )}
       </div>
       <footer className={styles.productFooter}>
-        <span className={styles.productFooterMeta}>
-          <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
-          {readiness.ready ? " 可保存 VBK 草稿" : ` 还需 ${readiness.issues.length} 项核查`}
-        </span>
         <div className={styles.productFooterActions}>
-          {automationActive && (
+          {automationActive ? (
             <button
               className={`${shared.btn} ${shared.btnLg}`}
               data-variant="danger"
+              data-busy={stoppingAutomation}
               onClick={() => void stopAutomation()}
               disabled={stoppingAutomation}
+              aria-label="停止自动录入"
+              title="停止当前自动录入"
             >
               {stoppingAutomation ? <LoaderCircle size={15} /> : <Square size={15} />}
               停止自动录入
             </button>
+          ) : (
+            <button
+              className={`${shared.btn} ${shared.btnLg}`}
+              data-variant="primary"
+              onClick={() => {
+                if (stage !== "vbk") setStage("vbk");
+                void startAutomation();
+              }}
+              disabled={!readiness.ready || loading}
+              aria-label="开始自动录入"
+              title="开始自动录入"
+            >
+              <Play size={15} />
+              开始自动录入
+            </button>
           )}
         </div>
+        <span className={styles.productFooterMeta}>
+          <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
+          {readiness.ready ? " 可开始自动录入" : ` 还需 ${readiness.issues.length} 项核查`}
+        </span>
       </footer>
     </aside>
     <section className={`${layout.panel} ${browser.browser}`} aria-label="VBK 浏览器">

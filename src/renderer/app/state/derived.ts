@@ -80,7 +80,12 @@ export function useAppStateDerived(state: AppStateBase) {
     if (!api()) return;
     void refresh();
     void api()!.settings.get().then(setSettings).catch(() => setNotice("无法读取本机设置。"));
-    void checkVbkLogin();
+    // 首次登录检测由主进程 vbk:page-ready 事件驱动：页面 SPA 渲染就绪后
+    // 主进程发事件，renderer 收到后才调用 checkVbkLogin，避免 DOM 未就绪误判。
+    const unsubscribePageReady = api()!.events.onPageReady(() => {
+      void checkVbkLogin();
+    });
+    // 兜底：1.2s 后重试一次，防止 vbk:page-ready 事件因超时未送达。
     const retryLoginCheck = window.setTimeout(() => void checkVbkLogin(), 1200);
     const unsubscribe = api()!.events.onProjectUpdated((next) => {
       setProject((current: typeof project) => current?.id === next.id ? next : current);
@@ -96,6 +101,7 @@ export function useAppStateDerived(state: AppStateBase) {
 
     return () => {
       window.clearTimeout(retryLoginCheck);
+      unsubscribePageReady();
       unsubscribe();
       unsubscribePlanning();
     };
@@ -238,7 +244,7 @@ export function useAppStateDerived(state: AppStateBase) {
       if (cancelled || currentProjectIdRefForPlanning.current !== capturedProjectId) return;
       if (result.state) setPlanningState(result.state);
       if (result.status === "failed") {
-        // preflight 失败（例如 safeStorage 不可用）→ IPC 也会返回 normal PlanningRunResult；
+        // preflight 失败（例如密钥不可用）→ IPC 也会返回 normal PlanningRunResult；
         // 这里显式 setNotice，让 recovery strip 的「重试规划」按钮有上下文；
         // assistantReply 已是 provider-neutral 中文，不会泄露密钥 / 密文。
         setNotice(result.assistantReply || "方案规划未能启动，请检查 API Key 后重试。");

@@ -23,7 +23,7 @@
 
 /* ============================================================
  * Header — 标题 + 数量概览
- * 用 button 元素实现，让屏幕阅读器与键盘可直接 toggle 折叠态，
+ * 左侧用 button 元素实现，让屏幕阅读器与键盘可直接 toggle 折叠态，
  * 与「每日行程」模块的 header 行为一致。
  * min-height 稳定，teal 微渐变与每日行程头部对齐。
  * ============================================================ */
@@ -34,13 +34,9 @@
   gap: 8px;
   width: 100%;
   padding: 10px 14px;
-  border: 0;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, color-mix(in srgb, var(--ai-teal) 6%, var(--surface)) 0%, var(--surface) 100%);
   color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
   flex: 0 0 auto;
   min-height: 48px;
   border-radius: calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px) 0 0;
@@ -51,7 +47,23 @@
   background: linear-gradient(180deg, color-mix(in srgb, var(--ai-teal) 10%, var(--surface)) 0%, var(--surface) 100%);
 }
 
-.head:focus-visible {
+.headToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.headToggle:focus-visible,
+.refreshBtn:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ai-teal) 30%, transparent);
 }
@@ -60,6 +72,40 @@
 .block[data-collapsed='true'] .head {
   border-bottom: 0;
   border-radius: calc(var(--radius-card) - 1px);
+}
+
+.refreshBtn {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 24%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ai-teal);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.refreshBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ai-teal) 8%, var(--surface));
+}
+
+.refreshBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.refreshSpin {
+  animation: issueRefreshSpin 900ms linear infinite;
+}
+
+@keyframes issueRefreshSpin {
+  to { transform: rotate(360deg); }
 }
 
 /* 模块级折叠箭头：收起时旋转 -90deg 与「每日行程」一致。 */

@@ -104,10 +104,18 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
 
   return (
     <article className={styles.projectRow} data-state={item.status}>
-      <button
+      <div
         className={styles.projectRowOpen}
-        type="button"
+        role="button"
+        tabIndex={0}
         onClick={onOpen}
+        onKeyDown={(event) => {
+          // 还原 <button> 的键盘语义：Enter / Space 触发进入项目。
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
         aria-label={`进入产品详情：${item.name}`}
       >
         <span className={styles.projectRowIcon} data-form={meta.form} aria-hidden="true">
@@ -138,7 +146,7 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
         <span className={styles.projectEnter} aria-hidden="true">
           <ChevronRight size={16} />
         </span>
-      </button>
+      </div>
 
       <button
         className={styles.projectDeleteTrigger}

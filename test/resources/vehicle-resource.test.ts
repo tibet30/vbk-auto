@@ -132,14 +132,17 @@ test("接口只有 ID/Name 时仍可按名称价格匹配且不暴露解析价",
 test("resolveVehicleResource 新接口只回填资源组 ID/Name 并清理旧车字段", async () => {
   const queries: string[] = [];
   const page = {
-    evaluate: async (_fn: unknown, args: { query: string }) => {
-      queries.push(args.query);
+    evaluate: async (_fn: unknown, args: { body: { resourceGroupName: string } }) => {
+      queries.push(args.body.resourceGroupName);
       return {
-        data: {
+        status: 200,
+        durationMs: 1,
+        ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false },
+        payload: { data: {
           list: [
             { resourceGroupId: 202, resourceGroupName: "5座经济500" },
           ],
-        },
+        } },
       };
     },
   };
@@ -187,11 +190,17 @@ test("resolveVehicleResource 新接口只回填资源组 ID/Name 并清理旧车
 test("resolveVehicleResource fallback 命中时记录实际查询词", async () => {
   const queries: string[] = [];
   const page = {
-    evaluate: async (_fn: unknown, args: { query: string }) => {
-      queries.push(args.query);
-      return args.query === "5座500"
-        ? { data: { list: [{ resourceGroupId: 303, resourceGroupName: "5座经济500" }] } }
-        : { data: { list: [] } };
+    evaluate: async (_fn: unknown, args: { body: { resourceGroupName: string } }) => {
+      const query = args.body.resourceGroupName;
+      queries.push(query);
+      return {
+        status: 200,
+        durationMs: 1,
+        ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false },
+        payload: query === "5座500"
+          ? { data: { list: [{ resourceGroupId: 303, resourceGroupName: "5座经济500" }] } }
+          : { data: { list: [] } },
+      };
     },
   };
   const result = await resolveVehicleResource(page as never, {
@@ -213,7 +222,12 @@ test("resolveVehicleResource fallback 命中时记录实际查询词", async () 
 
 test("resolveVehicleResource 未匹配时保留 requestedDailyCost/清除标记但清理旧匹配和旧车字段", async () => {
   const page = {
-    evaluate: async () => ({ data: { list: [] } }),
+    evaluate: async () => ({
+      status: 200,
+      durationMs: 1,
+      ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false },
+      payload: { data: { list: [] } },
+    }),
   };
   const originalProduct = {
     basicInfo: { days: 1, meetingCity: "太原", destinationCity: "太原" },

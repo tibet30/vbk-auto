@@ -104,10 +104,10 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
-    // 国家景区内具体景点：从行程中确定性筛选最多 3 个；不可匹配的单项
+    // 国家景区内具体景点：按行程顺序提取全部 spots[].name；不可匹配的单项
     // 由 fillAndSaveBasicInfo 内部追加到 scenicSpotLogs，再在每轮结束时
     // 落盘到 automation log，便于人工核对。
-    const keySpots = pickKeySpotsFromItinerary(project.product, 3);
+    const keySpots = pickKeySpotsFromItinerary(project.product);
     const scenicSpotLogs: string[] = [];
 
     if (retryFrom && !project.automation) throw new Error("没有可重试的自动录入记录。");

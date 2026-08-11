@@ -73,7 +73,7 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
         ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
-    const keySpots = pickKeySpotsFromItinerary(project.product, 3);
+    const keySpots = pickKeySpotsFromItinerary(project.product);
     const scenicSpotLogs: string[] = [];
 
     const draftPhases = draftPhasesFor(product);

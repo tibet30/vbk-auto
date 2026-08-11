@@ -131,6 +131,7 @@ export function useAppStateBase() {
   // 刚被 confirmTask 确认的 task id：用于在 task-row 上打 1.2s 绿色闪动。
   const [justConfirmedTaskId, setJustConfirmedTaskId] = useState<string | null>(null);
   const [resolvingVehicleTaskId, setResolvingVehicleTaskId] = useState<string | null>(null);
+  const [refreshingIssues, setRefreshingIssues] = useState(false);
 
   // 自动录入阶段列表里“进入”按钮的 loading 状态：按 section.key 跟踪。
   // 同一时间只允许一个“进入”跳转，避免连续点击造成多次导航。
@@ -313,6 +314,8 @@ export function useAppStateBase() {
     setJustConfirmedTaskId,
     resolvingVehicleTaskId,
     setResolvingVehicleTaskId,
+    refreshingIssues,
+    setRefreshingIssues,
     navigatingSection,
     setNavigatingSection,
     retryingPhase,

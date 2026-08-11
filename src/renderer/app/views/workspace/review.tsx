@@ -31,6 +31,8 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     setVerificationNote,
     confirmTask,
     resolveVehicleTask,
+    refreshResearchIssues,
+    refreshingIssues,
     resolvingVehicleTaskId,
     vbkLogin,
     currentAccountName,
@@ -46,6 +48,10 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     saveButler,
     savePricing,
     saveVehicleCost,
+    uploadAndSaveManualCover,
+    saveCtripLibraryCover,
+    searchCtripLibraryPlaces,
+    searchCtripLibraryImages,
     clearError: clearBasicInfoError,
     itinerary,
     expandedDayIndex,
@@ -324,8 +330,14 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         saveButler={saveButler}
         savePricing={savePricing}
         saveVehicleCost={saveVehicleCost}
+        uploadAndSaveManualCover={uploadAndSaveManualCover}
+        saveCtripLibraryCover={saveCtripLibraryCover}
+        searchCtripLibraryPlaces={searchCtripLibraryPlaces}
+        searchCtripLibraryImages={searchCtripLibraryImages}
         clearBasicInfoError={clearBasicInfoError}
         resolvingVehicleTaskId={resolvingVehicleTaskId}
+        refreshingIssues={refreshingIssues}
+        onRefreshIssues={refreshResearchIssues}
         loading={loading}
         onConfirmTask={() => void confirmTask()}
         onResolveVehicle={() => void resolveVehicleTask()}

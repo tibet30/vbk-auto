@@ -23,7 +23,7 @@ import {
 const baseProduct = {
   sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
   basicInfo: { subtitle: " 太原精品两日私家团 " },
-  commercial: { pricing: { currency: "CNY", adult: 1680, child: 980 } },
+  commercial: { pricing: { currency: "CNY", adult: 1680, child: 980, minimumTravelers: 2 } },
   operations: {
     bookingControls: {
       butler: { contactCardId: 1753732, displayName: "张三", providerId: 1279416 },
@@ -43,6 +43,7 @@ test("readBasicInfoFromProduct 完整产品可读取全部字段", () => {
   assert.deepEqual(snapshot.butler, { contactCardId: 1753732, displayName: "张三", providerId: 1279416 });
   assert.equal(snapshot.adult, 1680);
   assert.equal(snapshot.child, 980);
+  assert.equal(snapshot.minimumTravelers, 2);
   assert.equal(snapshot.currency, "CNY");
   assert.equal(snapshot.vehicleResource.exists, true);
   assert.equal(snapshot.vehicleResource.resourceGroupId, 88231);
@@ -56,12 +57,36 @@ test("readBasicInfoFromProduct 缺失子字段时显式返回 null，不抛错",
   assert.equal(snapshot.butler, null);
   assert.equal(snapshot.adult, null);
   assert.equal(snapshot.child, null);
+  assert.equal(snapshot.minimumTravelers, null);
   assert.equal(snapshot.currency, null);
   assert.equal(snapshot.productForm, null);
   assert.equal(snapshot.vehicleResource.exists, false);
   assert.equal(snapshot.vehicleResource.resourceGroupId, null);
   assert.equal(snapshot.vehicleResource.resourceGroupName, null);
   assert.equal(snapshot.vehicleResource.requestedDailyCost, null);
+});
+
+test("readBasicInfoFromProduct minimumTravelers 缺失或非法时返回 null，不默认填补", () => {
+  // 缺失字段：旧产品 / 半成品 pricing 都属于此类，UI 据此走「待补充」空状态。
+  assert.equal(readBasicInfoFromProduct({
+    commercial: { pricing: { currency: "CNY", adult: 1500, child: 1200 } },
+  }).minimumTravelers, null);
+  // 0 / 负数 / 小数 / NaN / 非数 全部视为「非法」，snapshot 也返回 null。
+  assert.equal(readBasicInfoFromProduct({
+    commercial: { pricing: { currency: "CNY", adult: 1500, child: 1200, minimumTravelers: 0 } },
+  }).minimumTravelers, null);
+  assert.equal(readBasicInfoFromProduct({
+    commercial: { pricing: { currency: "CNY", adult: 1500, child: 1200, minimumTravelers: -1 } },
+  }).minimumTravelers, null);
+  assert.equal(readBasicInfoFromProduct({
+    commercial: { pricing: { currency: "CNY", adult: 1500, child: 1200, minimumTravelers: 1.5 } },
+  }).minimumTravelers, null);
+  assert.equal(readBasicInfoFromProduct({
+    commercial: { pricing: { currency: "CNY", adult: 1500, child: 1200, minimumTravelers: Number.NaN } },
+  }).minimumTravelers, null);
+  assert.equal(readBasicInfoFromProduct({
+    commercial: { pricing: { currency: "CNY", adult: 1500, child: 1200, minimumTravelers: "2" } },
+  }).minimumTravelers, null);
 });
 
 test("readBasicInfoFromProduct 防御式拒绝 null / 数组 / 字符串", () => {
@@ -148,19 +173,27 @@ test("shouldShowVehicleResourceRow 未知产品形态已有车辆资源数据时
   assert.equal(shouldShowVehicleResourceRow(snapshot), true);
 });
 
-test("parsePricingDraft 接受合法正整数 / 0 儿童价", () => {
-  assert.deepEqual(parsePricingDraft("1680", "0"), { adult: 1680, child: 0 });
-  assert.deepEqual(parsePricingDraft("1680", "980"), { adult: 1680, child: 980 });
-  assert.deepEqual(parsePricingDraft("1680.5", "980.5"), { adult: 1680.5, child: 980.5 });
+test("parsePricingDraft 接受合法正整数 / 0 儿童价 / 正整数起订人数", () => {
+  assert.deepEqual(parsePricingDraft("1680", "0", "2"), { adult: 1680, child: 0, minimumTravelers: 2 });
+  assert.deepEqual(parsePricingDraft("1680", "980", "3"), { adult: 1680, child: 980, minimumTravelers: 3 });
+  assert.deepEqual(parsePricingDraft("1680.5", "980.5", "1"), { adult: 1680.5, child: 980.5, minimumTravelers: 1 });
 });
 
-test("parsePricingDraft 拒绝 0 / 负数 / NaN / 空串", () => {
-  assert.equal(parsePricingDraft("0", "100"), null);
-  assert.equal(parsePricingDraft("-1", "100"), null);
-  assert.equal(parsePricingDraft("abc", "100"), null);
-  assert.equal(parsePricingDraft("", "100"), null);
-  assert.equal(parsePricingDraft("1000", "-1"), null);
-  assert.equal(parsePricingDraft("1000", "abc"), null);
+test("parsePricingDraft 拒绝 0 / 负数 / NaN / 空串 / 非法起订人数", () => {
+  assert.equal(parsePricingDraft("0", "100", "2"), null);
+  assert.equal(parsePricingDraft("-1", "100", "2"), null);
+  assert.equal(parsePricingDraft("abc", "100", "2"), null);
+  assert.equal(parsePricingDraft("", "100", "2"), null);
+  assert.equal(parsePricingDraft("1000", "-1", "2"), null);
+  assert.equal(parsePricingDraft("1000", "abc", "2"), null);
+  // 起订人数必须是正整数
+  assert.equal(parsePricingDraft("1000", "0", ""), null, "空串起订人数必须拒绝");
+  assert.equal(parsePricingDraft("1000", "0", "0"), null, "0 起订人数必须拒绝");
+  assert.equal(parsePricingDraft("1000", "0", "-1"), null, "-1 起订人数必须拒绝");
+  assert.equal(parsePricingDraft("1000", "0", "1.5"), null, "小数起订人数必须拒绝");
+  assert.equal(parsePricingDraft("1000", "0", "abc"), null, "非数起订人数必须拒绝");
+  // 起订人数从不默认填值——传空一定拒绝，即便 adult / child 都合法
+  assert.equal(parsePricingDraft("1000", "0", ""), null);
 });
 
 test("parseRequestedDailyCostDraft 接受正数；空串 / 0 / 负数 / 非数 标记为 invalid", () => {

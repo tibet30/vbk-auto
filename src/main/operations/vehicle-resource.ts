@@ -7,6 +7,7 @@
 
 import type { Page } from "playwright";
 import type { ProjectDetail } from "../../shared/contracts.js";
+import { vbkSessionRequest } from "../infrastructure/vbk-session-request.js";
 
 export interface VehicleResourceEstimateInput {
   city?: string;
@@ -243,49 +244,33 @@ function parseResourceGroup(record: Record<string, unknown>) {
 
 /**
  * 在 VBK 页面上下文 fetch /restapi/soa2/15638/searchResourceGroup，参数为 resourceGroupName（座位+车型）。
- * 按 cid 拼 x-traceID，回 raw payload（JSON.parse 失败保留文本），非 2xx 抛错。
+ * 按 cid 拼 x-traceID，返回解析后的安全 payload，非 2xx / 非 JSON 都明确抛错。
  */
 export async function searchVehicleResourceGroups(page: Page, query: string) {
-  return page.evaluate(async ({ query: resourceGroupName }) => {
-    const readCookie = (name: string) => {
-      const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-      return match ? decodeURIComponent(match[1]) : "";
-    };
-    const cid = readCookie("GUID") || readCookie("vbk_login_cid") || `${Date.now()}`;
-    const trace = `${cid}-${Date.now()}-${Math.floor(Math.random() * 10_000_000)}`;
-    const response = await fetch(`https://online.ctrip.com/restapi/soa2/15638/searchResourceGroup?x-traceID=${encodeURIComponent(trace)}`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        accept: "*/*",
-        "content-type": "application/json",
-        "x-ctx-currency": "CNY",
-        "x-ctx-locale": "zh-CN",
+  const response = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/searchResourceGroup",
+    browserRequestTimeoutMs: 12_000,
+    evaluateTimeoutMs: 15_000,
+    errorLabel: "VBK 资源组搜索",
+    body: {
+      contentType: "json",
+      head: {
+        cid: "",
+        ctok: "",
+        cver: "1.0",
+        lang: "01",
+        sid: "8888",
+        syscode: "09",
+        auth: "",
+        xsid: "",
+        extension: [],
       },
-      body: JSON.stringify({
-        contentType: "json",
-        head: {
-          cid,
-          ctok: "",
-          cver: "1.0",
-          lang: "01",
-          sid: "8888",
-          syscode: "09",
-          auth: "",
-          xsid: "",
-          extension: [],
-        },
-        resourceGroupName,
-        pageNo: 1,
-        pageSize: 10,
-      }),
-    });
-    const text = await response.text();
-    let payload: unknown = text;
-    try { payload = JSON.parse(text); } catch { /* keep raw text for diagnostics */ }
-    if (!response.ok) throw new Error(`VBK 资源组搜索失败：HTTP ${response.status} ${text.slice(0, 160)}`);
-    return payload;
-  }, { query });
+      resourceGroupName: query,
+      pageNo: 1,
+      pageSize: 10,
+    },
+  });
+  return response.payload;
 }
 
 /**

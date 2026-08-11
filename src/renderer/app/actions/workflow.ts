@@ -35,6 +35,8 @@ export function useWorkflowHandlers(state: AppState) {
     isVbkLoggedIn,
     resolvingVehicleTaskId,
     setResolvingVehicleTaskId,
+    refreshingIssues,
+    setRefreshingIssues,
     setActiveTaskId,
     verificationNote,
     setVerificationNote,
@@ -106,6 +108,25 @@ export function useWorkflowHandlers(state: AppState) {
       setNotice(error instanceof Error ? error.message : "用车资源组匹配失败，请在 VBK 手动核查。");
     } finally {
       setResolvingVehicleTaskId(null);
+    }
+  };
+
+  /** 重算并清理已由当前 product_json 满足的历史待处理事项。 */
+  const refreshResearchIssues = async () => {
+    if (!project || !api() || refreshingIssues) return;
+    setRefreshingIssues(true);
+    setNotice(null);
+    try {
+      const result = await api()!.research.refreshIssues(project.id);
+      setProject(result.project);
+      state.setReadiness(result.readiness);
+      setActiveTaskId(null);
+      setVerificationNote("");
+      setNotice(result.updated > 0 ? `已刷新待处理事项，清理 ${result.updated} 项。` : "已刷新待处理事项，暂无可自动清理项。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "刷新待处理事项失败。");
+    } finally {
+      setRefreshingIssues(false);
     }
   };
 
@@ -330,6 +351,7 @@ export function useWorkflowHandlers(state: AppState) {
 
   return {
     confirmTask,
+    refreshResearchIssues,
     resolveVehicleTask,
     startAutomation,
     stopAutomation,

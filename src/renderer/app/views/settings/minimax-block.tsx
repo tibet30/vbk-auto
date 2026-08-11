@@ -236,7 +236,7 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
                   : showAiApiKey ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
               </button>
             </div>
-            <small className={shared.fieldHint}>每个模型单独保存在本机 macOS Keychain，切换时会自动读取对应密钥。</small>
+            <small className={shared.fieldHint}>Key 以 JSON 形式保存在本机应用数据目录（仅当前用户可读）。能直接访问本机文件系统的用户仍可读出，请勿在公用电脑使用。</small>
           </label>
 
           <div

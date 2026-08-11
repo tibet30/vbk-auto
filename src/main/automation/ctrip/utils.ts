@@ -21,12 +21,36 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
- * 在多个 locator 中挑出唯一匹配并断言数量等于 1，否则抛错；返回原 locator。
+ * 返回真正可写入的搜索控件：直接传入 input / textarea / contenteditable 时返回自身；
+ * 传入 Ant combobox 外层时，仅从其内部挑出唯一可见、可编辑的输入控件。
  */
-function pickSearchInput(locator, description) {
-  const count = locator.count();
+async function pickSearchInput(locator, description) {
+  const count = await locator.count();
   if (count !== 1) throw new Error(`${description}搜索输入框数量异常：期望 1，实际 ${count}`);
-  return locator;
+  const isDirectInput = await locator.evaluate((element) => {
+    const tag = element.tagName.toLowerCase();
+    return tag === "input" || tag === "textarea" || element.getAttribute("contenteditable") === "true";
+  });
+  const preferredInput = locator.locator(
+    'input.ant-select-search__field:visible:not([disabled]):not([readonly])',
+  );
+  // Ant 的真实搜索框优先于同一 combobox 内的其它可编辑控件（例如隐藏的旧值输入）。
+  // 只有没有任何优先匹配时，才退回通用控件；多个优先匹配仍应明确报歧义。
+  const input = isDirectInput
+    ? locator
+    : (await preferredInput.count()) > 0
+      ? preferredInput
+      : locator.locator(
+        'input:visible:not([disabled]):not([readonly]), ' +
+        'textarea:visible:not([disabled]):not([readonly]), [contenteditable="true"]:visible',
+      );
+  const inputCount = await input.count();
+  if (inputCount !== 1) {
+    throw new Error(`${description}搜索输入框数量异常：期望 1 个可编辑输入框，实际 ${inputCount}`);
+  }
+  await input.waitFor({ state: "visible", timeout: 5_000 });
+  if (!(await input.isEditable())) throw new Error(`${description}搜索输入框不可编辑`);
+  return input;
 }
 
 /**

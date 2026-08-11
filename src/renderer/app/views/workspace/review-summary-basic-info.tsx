@@ -1,20 +1,25 @@
 /**
  * 右侧 review 面板的「基础信息」模块：
+ *   - 封面 (presentation.cover)
  *   - 副标题 (basicInfo.subtitle)
  *   - 管家联系人 (operations.bookingControls.butler)
+ *   - 400 电话（来自账号 AccountFixedInfo.servicePhone，仅展示 + 引导设置）
  *   - 套餐定价 (commercial.pricing.adult / child)
  *   - 用车资源组 (operations.vehicleResource.{resourceGroupId, name, requestedDailyCost})
- *   - 400 电话（来自账号 AccountFixedInfo.servicePhone，仅展示 + 引导设置）
  *
  * 验收门（与用户规格一一对齐）：
  *  1. 模块自身不引入 max-height / overflow-y / 内部滚动 / 绝对定位覆盖下方内容；
  *     自然高度随行数变化扩展，与「每日行程」「待处理」模块上下相连。
- *  2. 默认展示态只渲染「非空」字段：空值 / 未匹配 / 次级说明 / 内部 ID 等默认隐藏。
- *  3. 每个可编辑行单独一个「编辑」按钮；点击后仅该行原位展开 input；
+ *  2. 基础信息「始终展示」：有 project/product 时模块不被隐藏；缺失字段在
+ *     各自行内显示紧凑空状态 + 编辑/设置入口，不再按非空值挂载行；
+ *     用车资源组保持既有产品类型逻辑（私家团或已有数据才显示）。
+ *  3. 每个可编辑行单独一个「编辑 / 去设置」按钮；点击后仅该行原位展开 input；
  *     持久化回流 / 取消立即收起回展示态。
  *  4. 管家 / 400 电话仍必须保留作为创建前置校验；
  *     UI 隐藏不会影响持久化（precondition 由 main 进程单独断言）。
- *  5. 视觉密度收紧：单层 label + value + actions 三段，无嵌套大卡。
+ *  5. headMeta/模块头部能表达「待补充」状态，不再只列已有值；缺失字段以
+ *     「… 待补充 / 待设置」文案标记，文案保持中文、紧凑、操作型。
+ *  6. 视觉密度收紧：单层 label + value + actions 三段，无嵌套大卡。
  *
  * 拆分：
  *  - .row.tsx            行壳 + 紧凑展示/编辑态切换（实际未使用 row.tsx，保留命名一致性）
@@ -27,18 +32,25 @@
  *  - review-summary-basic-info.helpers.ts  纯数据抽取 / 草稿解析
  */
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ClipboardList } from "lucide-react";
 import type {
   ContactCardSelection,
+  CtripLibraryImageCandidate,
+  CtripLibraryPlaceCandidate,
+  CtripLibraryPlaceSearchResult,
+  CtripLibrarySearchResult,
+  ManualUploadCoverMeta,
   ProjectDetail,
 } from "../../../../shared/contracts-types.js";
 import { BasicInfoButlerRow } from "./basic-info-butler-row";
+import { BasicInfoCoverRow } from "./basic-info-cover-row";
 import { BasicInfoPricingRow } from "./basic-info-pricing-row";
 import { BasicInfoServicePhoneRow } from "./basic-info-service-phone-row";
 import { BasicInfoSubtitleRow } from "./basic-info-subtitle-row";
 import { BasicInfoVehicleRow } from "./basic-info-vehicle-row";
 import { readBasicInfoFromProduct, shouldShowVehicleResourceRow } from "./review-summary-basic-info.helpers";
+import { api } from "../../helpers";
 import styles from "./review-summary-basic-info.module.less";
 
 export interface ReviewSummaryBasicInfoProps {
@@ -63,8 +75,29 @@ export interface ReviewSummaryBasicInfoProps {
   /** 单字段保存动作：把对应 ManualReviewFieldInput 推给主进程。 */
   saveSubtitle: (projectId: string) => Promise<void> | void;
   saveButler: (projectId: string, selection: ContactCardSelection | null) => Promise<void> | void;
-  savePricing: (projectId: string, adult: number, child: number) => Promise<void> | void;
+  savePricing: (projectId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void;
   saveVehicleCost: (projectId: string, value: number | null) => Promise<void> | void;
+  /**
+   * 手动上传封面：
+   *  - 先调 cover:uploadManual 落本地副本；
+   *  - poi / description / minQuality 由 action 层根据旧 cover / product 自动推导，
+   *    UI 不再传这些内部字段。
+   */
+  uploadAndSaveManualCover: (projectId: string, args: {
+    file: { name: string; type: string; base64: string };
+  }) => Promise<ManualUploadCoverMeta | null>;
+  /** 携程图库候选写入 product（ctripLibrary 形态）；由候选自动推导 cover 三字段。 */
+  saveCtripLibraryCover: (projectId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
+  /**
+   * 阶段 A：按景点名称解析 suggestpoi.json → places 候选列表。
+   *  返回 null 时由 notice 通道兜底。
+   */
+  searchCtripLibraryPlaces: (projectId: string, args: { keyword: string }) => Promise<CtripLibraryPlaceSearchResult | null>;
+  /**
+   * 阶段 B：按已选 place（poiId + poiName）拉该地址下的图库图片列表。
+   *  返回 null 时由 notice 通道兜底。
+   */
+  searchCtripLibraryImages: (projectId: string, args: { keyword: string; place: CtripLibraryPlaceCandidate }) => Promise<CtripLibrarySearchResult | null>;
   /** 手动清除某字段的错误（输入时联动）。 */
   clearError: (field: string) => void;
   /** 整个模块是否被收起（仅显示头部）。 */
@@ -88,11 +121,33 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   saveButler,
   savePricing,
   saveVehicleCost,
+  uploadAndSaveManualCover,
+  saveCtripLibraryCover,
+  searchCtripLibraryPlaces,
+  searchCtripLibraryImages,
   clearError,
   collapsed,
   onToggleCollapsed,
 }: ReviewSummaryBasicInfoProps) {
   const snapshot = useMemo(() => readBasicInfoFromProduct(project.product), [project.product]);
+
+  // 「手动上传封面」预览 data URL：仅 manualUpload 时需要解析；
+  // 旧实现返回 file:// URL 在沙盒下偶发破图，新实现改为 data: URL，
+  // 直接喂给 img 标签 src 即可，不再依赖文件系统路径。
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const cover = snapshot.cover;
+    if (!cover || cover.source !== "manualUpload" || !cover.fileId) {
+      setCoverPreviewUrl(null);
+      return () => { cancelled = true; };
+    }
+    if (!api()) return () => { cancelled = true; };
+    void api()!.cover.read({ fileId: cover.fileId, originalName: cover.originalName ?? "" })
+      .then((res) => { if (!cancelled) setCoverPreviewUrl(res.url); })
+      .catch(() => { if (!cancelled) setCoverPreviewUrl(null); });
+    return () => { cancelled = true; };
+  }, [snapshot.cover]);
 
   // 进入「基础信息」模块时拉一次当前账号的 fixedInfo；
   // loadAccountFixedInfo 内部已对 projectId 做去重，不会重复 IO。
@@ -100,37 +155,55 @@ export function AppWorkspaceReviewSummaryBasicInfo({
     loadAccountFixedInfo(project.id, currentAccountName);
   }, [project.id, currentAccountName, loadAccountFixedInfo]);
 
-  // 「行级可渲染」判定：每行仅在「有非空关键信息」时才挂载，避免空值默认显示。
-  // 隐藏占位行 = 满足验收门 #1「不展示占位行」+ #2「空值默认隐藏」。
-  const subtitleVisible = snapshot.subtitle !== null;
-  const butlerVisible = snapshot.butler !== null;
-  const pricingVisible = snapshot.adult !== null;
+  // 「行级可渲染」判定：
+  //  - 封面 / 副标题 / 管家 / 400 电话 / 套餐定价 始终挂载（用户验收门
+  //    #1/#2：基础信息「始终展示」+ 缺失字段在各自行内显示紧凑空状态）；
+  //  - 用车资源组保持既有产品类型逻辑（私家团 / 已有数据才显示）；
+  //  - 模块整体不返回 null：封面始终挂载意味着任意 product 下都能展开。
+  const subtitleHasValue = snapshot.subtitle !== null;
+  const butlerHasValue = snapshot.butler !== null;
+  // 定价展示态要求三字段同时具备；任一缺失（含 minimumTravelers）都走空状态。
+  const pricingHasValue = snapshot.adult !== null
+    && snapshot.child !== null
+    && snapshot.minimumTravelers !== null;
   const vehicleVisible = shouldShowVehicleResourceRow(snapshot);
-  const servicePhoneVisible = typeof accountServicePhone === "string" && accountServicePhone.trim().length > 0;
-
-  // 「自然高度扩展」保证：只要存在任一可见行，整个 section 就会被挂载并占据
-  // 自然高度；与「每日行程」「待处理」模块上下堆叠，共享 review-summary 滚动
-  // 容器，不再自己滚。
-  const anyVisible = subtitleVisible || butlerVisible || pricingVisible || vehicleVisible || servicePhoneVisible;
-  if (!anyVisible) return null;
+  const vehicleHasValue = vehicleVisible && (
+    snapshot.vehicleResource.resourceGroupId !== null
+    || (snapshot.vehicleResource.resourceGroupName !== null
+      && snapshot.vehicleResource.resourceGroupName.trim().length > 0)
+    || snapshot.vehicleResource.requestedDailyCost !== null
+  );
+  const servicePhoneRaw = typeof accountServicePhone === "string" ? accountServicePhone.trim() : "";
+  const servicePhoneHasValue = servicePhoneRaw.length > 0;
 
   const subtitleDraft = draft.subtitle ?? "";
   const pricingDraft = {
     adult: draft.adult ?? "",
     child: draft.child ?? "",
+    minimumTravelers: draft.minimumTravelers ?? "",
   };
   const costDraft = draft.requestedDailyCost ?? "";
-  const headMeta = [
-    subtitleVisible ? "副标题" : null,
-    butlerVisible ? "管家" : null,
-    servicePhoneVisible ? "400 电话" : null,
-    pricingVisible ? "定价" : null,
-    vehicleVisible ? "用车" : null,
-  ].filter(Boolean).join(" · ");
+
+  // headMeta：所有核心行都列出（封面永远在），缺失字段追加「待补充 / 待设置」
+  // 状态文案，让用户从模块头部一眼看到还需要补什么；用车按产品类型条件加入。
+  const headParts: string[] = ["封面"];
+  headParts.push(subtitleHasValue ? "副标题" : "副标题待补充");
+  headParts.push(butlerHasValue ? "管家" : "管家待补充");
+  headParts.push(servicePhoneHasValue ? "400 电话" : "400 电话待设置");
+  headParts.push(pricingHasValue ? "定价" : "定价待设置");
+  if (vehicleVisible) {
+    headParts.push(vehicleHasValue ? "用车" : "用车待匹配");
+  }
+  const headMeta = headParts.join(" · ");
 
   const updateDraft = (key: string, value: string) => setDraft({ ...draft, [key]: value });
-  const updatePricingDraft = (next: { adult: string; child: string }) =>
-    setDraft({ ...draft, adult: next.adult, child: next.child });
+  const updatePricingDraft = (next: { adult: string; child: string; minimumTravelers: string }) =>
+    setDraft({
+      ...draft,
+      adult: next.adult,
+      child: next.child,
+      minimumTravelers: next.minimumTravelers,
+    });
 
   return (
     <section
@@ -158,51 +231,61 @@ export function AppWorkspaceReviewSummaryBasicInfo({
 
       {!collapsed ? (
         <div id="basic-info-body" className={styles.body}>
-          {subtitleVisible ? (
-            <BasicInfoSubtitleRow
-              snapshot={snapshot}
-              draft={subtitleDraft}
-              saving={savingField === "subtitle"}
-              error={errors.subtitle}
-              onDraftChange={(value) => updateDraft("subtitle", value)}
-              onSave={() => { void saveSubtitle(project.id); }}
-              onClearError={() => clearError("subtitle")}
-            />
-          ) : null}
+          <BasicInfoCoverRow
+            cover={snapshot.cover}
+            previewUrl={coverPreviewUrl}
+            saving={savingField === "cover"}
+            error={errors.cover}
+            onClearError={() => clearError("cover")}
+            onUploadManual={(args) => uploadAndSaveManualCover(project.id, args)}
+            onPickCtripLibrary={(args) => saveCtripLibraryCover(project.id, args)}
+            onSearchCtripLibraryPlaces={(args) => searchCtripLibraryPlaces(project.id, args)}
+            onSearchCtripLibraryImages={(args) => searchCtripLibraryImages(project.id, args)}
+            onReadPreviewUrl={async (fileId, originalName) => {
+              if (!api()) return null;
+              const result = await api()!.cover.read({ fileId, originalName });
+              return result.url;
+            }}
+          />
 
-          {butlerVisible ? (
-            <BasicInfoButlerRow
-              snapshotButler={snapshot.butler}
-              accountButlerDefault={accountButlerDefault}
-              currentAccountName={currentAccountName}
-              saving={savingField === "butler"}
-              error={errors.butler}
-              onUseAccountButler={(selection) => { void saveButler(project.id, selection); }}
-              onClearButler={() => { void saveButler(project.id, null); }}
-              onOpenAccountEditor={onOpenAccountEditor}
-            />
-          ) : null}
+          <BasicInfoSubtitleRow
+            snapshot={snapshot}
+            draft={subtitleDraft}
+            saving={savingField === "subtitle"}
+            error={errors.subtitle}
+            onDraftChange={(value) => updateDraft("subtitle", value)}
+            onSave={() => { void saveSubtitle(project.id); }}
+            onClearError={() => clearError("subtitle")}
+          />
 
-          {servicePhoneVisible ? (
-            <BasicInfoServicePhoneRow
-              servicePhone={(accountServicePhone ?? "").trim()}
-              currentAccountName={currentAccountName}
-              onOpenAccountEditor={onOpenAccountEditor}
-            />
-          ) : null}
+          <BasicInfoButlerRow
+            snapshotButler={snapshot.butler}
+            accountButlerDefault={accountButlerDefault}
+            currentAccountName={currentAccountName}
+            saving={savingField === "butler"}
+            error={errors.butler}
+            onUseAccountButler={(selection) => { void saveButler(project.id, selection); }}
+            onClearButler={() => { void saveButler(project.id, null); }}
+            onOpenAccountEditor={onOpenAccountEditor}
+          />
 
-          {pricingVisible && snapshot.adult !== null ? (
-            <BasicInfoPricingRow
-              adult={snapshot.adult}
-              child={snapshot.child ?? 0}
-              draft={pricingDraft}
-              saving={savingField === "adult" || savingField === "child"}
-              error={errors.adult ?? errors.child}
-              onDraftChange={updatePricingDraft}
-              onSave={(parsed) => { void savePricing(project.id, parsed.adult, parsed.child); }}
-              onClearError={() => { clearError("adult"); clearError("child"); }}
-            />
-          ) : null}
+          <BasicInfoServicePhoneRow
+            servicePhone={servicePhoneRaw.length > 0 ? servicePhoneRaw : null}
+            currentAccountName={currentAccountName}
+            onOpenAccountEditor={onOpenAccountEditor}
+          />
+
+          <BasicInfoPricingRow
+            adult={snapshot.adult}
+            child={snapshot.child}
+            minimumTravelers={snapshot.minimumTravelers}
+            draft={pricingDraft}
+            saving={savingField === "adult" || savingField === "child" || savingField === "minimumTravelers"}
+            error={errors.adult ?? errors.child ?? errors.minimumTravelers}
+            onDraftChange={updatePricingDraft}
+            onSave={(parsed) => { void savePricing(project.id, parsed.adult, parsed.child, parsed.minimumTravelers); }}
+            onClearError={() => { clearError("adult"); clearError("child"); clearError("minimumTravelers"); }}
+          />
 
           {vehicleVisible ? (
             <BasicInfoVehicleRow

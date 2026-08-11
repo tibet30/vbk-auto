@@ -19,6 +19,8 @@ import {
   stripComments,
   test,
 } from "./basic-info-fixes.shared.js";
+import { chromium } from "playwright";
+import { fillScenicAreaProvince } from "../../src/main/automation/ctrip/basic-info/scenic.js";
 
 test("fillCitySelect 等待完整远程结果并按 title 精确选择城市", async () => {
   const source = readCtripSource();
@@ -151,6 +153,94 @@ test("fillScenicAreaProvince 识别中国山西标签并幂等跳过", async () 
   assert.match(body, /container\.locator\("\.ant-tag"\)\.allTextContents\(\)/);
   assert.match(body, /text\.includes\(provinceBase\)/);
   assert.match(body, /return;/);
+  assert.match(body, /comboboxes\.nth\(1\)\.click\(\)/,
+    "国家景区省份必须直接操作第二级下拉");
+  assert.match(body, /pickSearchInput\(comboboxes\.nth\(1\), "省份搜索输入框"\)/,
+    "省份搜索框必须来自第二级下拉");
+  assert.doesNotMatch(body, /comboboxes\.nth\(0\)/,
+    "国家保持空白，禁止操作第一级国家下拉");
+});
+
+test("pickSearchInput 从 combobox 外层返回内部唯一可编辑输入框，也支持直接 input", async () => {
+  const { pickSearchInput } = await import("../../src/main/automation/ctrip/utils.js");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <div id="province-box" role="combobox"><input class="ant-select-search__field" /><input id="decoy" /></div>
+      <input id="direct" />
+      <div id="ambiguous" role="combobox"><input /><input /></div>
+      <div id="ambiguous-preferred" role="combobox"><input class="ant-select-search__field" /><input class="ant-select-search__field" /></div>
+      <div id="hidden-only" role="combobox"><input style="display:none" /></div>
+    `);
+    const nested = await pickSearchInput(page.locator("#province-box"), "省份");
+    assert.equal(await nested.getAttribute("class"), "ant-select-search__field");
+    await nested.fill("山西");
+    assert.equal(await page.locator("#province-box .ant-select-search__field").inputValue(), "山西");
+    assert.equal(await page.locator("#decoy").inputValue(), "", "普通输入框不得抢占优先搜索框");
+    const direct = await pickSearchInput(page.locator("#direct"), "直接输入");
+    await direct.fill("可直接写入");
+    assert.equal(await page.locator("#direct").inputValue(), "可直接写入");
+    await assert.rejects(() => pickSearchInput(page.locator("#ambiguous"), "省份"), /期望 1 个可编辑输入框，实际 2/);
+    await assert.rejects(() => pickSearchInput(page.locator("#ambiguous-preferred"), "省份"), /期望 1 个可编辑输入框，实际 2/);
+    await assert.rejects(() => pickSearchInput(page.locator("#hidden-only"), "省份"), /期望 1 个可编辑输入框，实际 0/);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("国家景区省份实际只操作第二级，国家保持留空后成功添加省份", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <style>.ant-select-dropdown-hidden { display: none; }</style>
+      <div id="scenic_area">
+        <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
+        <div id="province" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
+        <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
+        <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
+        <button type="button">添加</button>
+      </div>
+      <div class="ant-select-dropdown ant-select-dropdown-hidden">
+        <div class="ant-select-item-option">山西省</div>
+      </div>
+      <script>
+        window.scenicEvents = [];
+        const dropdown = document.querySelector('.ant-select-dropdown');
+        document.querySelectorAll('#scenic_area [role="combobox"]').forEach((combobox) => {
+          combobox.addEventListener('click', () => window.scenicEvents.push('click:' + combobox.id));
+          const input = combobox.querySelector('input');
+          input.addEventListener('input', () => window.scenicEvents.push('input:' + combobox.id + ':' + input.value));
+        });
+        document.querySelector('#province').addEventListener('click', () => dropdown.classList.remove('ant-select-dropdown-hidden'));
+        document.querySelector('.ant-select-item-option').addEventListener('click', () => {
+          window.scenicEvents.push('choose:山西省');
+          dropdown.classList.add('ant-select-dropdown-hidden');
+        });
+        document.querySelector('#scenic_area button').addEventListener('click', () => {
+          window.scenicEvents.push('add');
+          const tag = document.createElement('span');
+          tag.className = 'ant-tag';
+          tag.textContent = '山西省';
+          document.querySelector('#scenic_area').append(tag);
+        });
+      </script>
+    `);
+
+    await fillScenicAreaProvince(page, "山西");
+
+    const events = await page.evaluate(() => window.scenicEvents);
+    assert.ok(events.includes("click:province"), "必须点击第二级省份下拉");
+    assert.ok(events.includes("input:province:山西"), "必须在第二级输入省份名称");
+    assert.ok(events.includes("choose:山西省"), "必须选择精确省份候选");
+    assert.ok(events.includes("add"), "选择省份后必须点击添加");
+    assert.ok(!events.some((event) => event.includes("country")), "禁止操作国家级下拉");
+    assert.equal(await page.locator("#country input").inputValue(), "", "国家级必须保持留空");
+    assert.equal(await page.locator("#scenic_area .ant-tag").innerText(), "山西省");
+  } finally {
+    await browser.close();
+  }
 });
 
 test("fillAdvanceBooking 通过时间面板提交受控时间值", async () => {
@@ -211,100 +301,69 @@ test("fillButlerContact 不在容器内使用 first() 逃避歧义", async () =>
   );
 });
 
-test("pickKeySpotsFromItinerary 按天顺序去重并限制 3 个", () => {
+test("pickKeySpotsFromItinerary 从 spots[].name 按行程顺序去重且不限制数量", () => {
   const product = productFixture({
     itinerary: [
-      { day: 1, title: "第一天", spots: ["晋祠博物馆", "  晋祠博物馆  ", "平遥古城"] },
-      { day: 2, title: "第二天", spots: ["平遥古城", "云冈石窟", "壶口瀑布"] },
-      { day: 3, title: "第三天", spots: ["五台山"] },
+      { day: 1, title: "第一天", spots: [{ name: "晋祠博物馆" }, { name: "  晋祠博物馆  " }, { name: "平遥古城" }] },
+      { day: 2, title: "第二天", spots: [{ name: "平遥古城" }, { name: "云冈石窟" }, { name: "壶口瀑布" }] },
+      { day: 3, title: "第三天", spots: [{ name: "五台山" }] },
     ],
   });
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), [
+  assert.deepEqual(pickKeySpotsFromItinerary(product), [
     "晋祠博物馆",
     "平遥古城",
     "云冈石窟",
+    "壶口瀑布",
+    "五台山",
   ]);
 });
 
-test("pickKeySpotsFromItinerary 优先挑产品推荐语中的主打景点", () => {
+test("pickKeySpotsFromItinerary 不受推荐语排序影响", () => {
   const product = productFixture({
     itinerary: [
-      { day: 1, title: "第一天", spots: ["柳巷", "食品街", "汾河公园"] },
-      { day: 2, title: "第二天", spots: ["晋祠", "山西博物院"] },
-      { day: 3, title: "第三天", spots: ["永祚寺（双塔寺）"] },
+      { day: 1, title: "第一天", spots: [{ name: "柳巷" }, { name: "食品街" }, { name: "汾河公园" }] },
+      { day: 2, title: "第二天", spots: [{ name: "晋祠" }, { name: "山西博物院" }] },
     ],
     presentation: {
-      recommendation: "晋祠三绝、山西博物院晋魂展、永祚寺双塔祈福",
+      recommendation: "晋祠三绝、山西博物院晋魂展",
       features: "三大核心文化 IP",
     },
   });
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), [
+  assert.deepEqual(pickKeySpotsFromItinerary(product), [
     "柳巷",
+    "食品街",
+    "汾河公园",
     "晋祠",
     "山西博物院",
   ]);
 });
 
-test("pickKeySpotsFromItinerary 行程不足时返回实际能匹配的数量", () => {
+test("pickKeySpotsFromItinerary 跳过空值、无效项与历史字符串", () => {
   const product = productFixture({
     itinerary: [
-      { day: 1, title: "第一天", spots: ["晋祠博物馆"] },
-      { day: 2, title: "第二天", spots: ["", "  "] },
+      { day: 1, title: "第一天", spots: [null, 0, "旧字符串", {}, { name: "" }, { name: 3 }, { name: "晋祠" }] },
+      { day: 2, title: "第二天", spots: "非数组" },
     ],
-  });
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), ["晋祠博物馆"]);
-});
-
-test("pickKeySpotsFromItinerary 净化「游览」后缀 + 接团/送团/自由活动过滤", () => {
-  // 来自「大同 2 天 1 晚」实际行程：第一个是接团，不应该是景点；
-  // 「云冈石窟游览」「华严寺游览」「九龙壁游览」都是加了动作后缀的口述写法，
-  // VBK 景点下拉里只有「云冈石窟」「华严寺」「九龙壁」。需要去掉「游览」才
-  // 能命中。
-  const product = productFixture({
-    itinerary: [
-      { day: 1, title: "第一天", spots: ["大同站/大同南站接团", "云冈石窟游览", "华严寺游览", "自由活动·大同古城"] },
-      { day: 2, title: "第二天", spots: ["九龙壁游览", "大同古城墙", "善化寺游览", "古城自由活动", "送团返程"] },
-    ],
-  });
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), [
-    "云冈石窟",
-    "华严寺",
-    "九龙壁",
-  ]);
-});
-
-test("pickKeySpotsFromItinerary 别名括号（双塔寺）等也参与推荐语匹配", () => {
-  const product = productFixture({
-    itinerary: [
-      { day: 1, title: "第一天", spots: ["永祚寺（双塔寺）"] },
-    ],
-    presentation: {
-      recommendation: "永祚寺双塔祈福",
-      features: "",
-    },
-  });
-  // 「永祚寺（双塔寺）」净化后为「永祚寺」，括号别名「双塔寺」用于匹配 corpus。
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), ["永祚寺"]);
+  } as unknown as Record<string, unknown>);
+  assert.deepEqual(pickKeySpotsFromItinerary(product), ["晋祠"]);
 });
 
 test("pickKeySpotsFromItinerary 大小写不敏感去重", () => {
   const product = productFixture({
     itinerary: [
-      { day: 1, title: "第一天", spots: ["MaoMing", "maoming"] },
+      { day: 1, title: "第一天", spots: [{ name: "MaoMing" }, { name: "maoming" }] },
     ],
   });
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), ["MaoMing"]);
+  assert.deepEqual(pickKeySpotsFromItinerary(product), ["MaoMing"]);
 });
 
-test("pickKeySpotsFromItinerary 跳过非字符串与非对象项", () => {
-  const product = {
-    ...productFixture(),
-    itinerary: [
-      { day: 1, title: "第一天", spots: [null, 0, "晋祠", ""] },
-      null,
-      { day: 2, title: "第二天", spots: "非数组" },
-    ],
-  } as unknown as Record<string, unknown>;
-  assert.deepEqual(pickKeySpotsFromItinerary(product, 3), ["晋祠"]);
+test("全量录入和单阶段 basic 重试使用同一全量景点列表", () => {
+  const source = readAutomationSource();
+  const fullRun = source.slice(source.indexOf("export async function runAutomation"));
+  const onePhase = source.slice(source.indexOf("export async function runOnePhase"));
+  for (const runner of [fullRun, onePhase]) {
+    assert.match(runner, /const keySpots = pickKeySpotsFromItinerary\(project\.product\);/);
+    assert.match(runner, /fillAndSaveBasicInfo\([\s\S]*?keySpots,/);
+  }
+  assert.doesNotMatch(source, /pickKeySpotsFromItinerary\(project\.product,\s*3\)/);
 });
-

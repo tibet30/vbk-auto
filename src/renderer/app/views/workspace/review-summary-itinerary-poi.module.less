@@ -1,0 +1,188 @@
+.status {
+  margin: 0 0 0 58px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: calc(100% - 58px);
+  min-height: 22px;
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+
+.status[data-state='matched'] { color: var(--success); }
+.status[data-state='missing'] { color: var(--warning); }
+
+.text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iconButton,
+.actionButton {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.iconButton:hover,
+.actionButton:hover {
+  border-color: color-mix(in srgb, var(--ai-teal) 40%, var(--border));
+  color: var(--ai-teal);
+  background: color-mix(in srgb, var(--ai-teal) 6%, var(--surface));
+}
+
+.iconButton:focus-visible,
+.actionButton:focus-visible,
+.result:focus-visible,
+.saveButton:focus-visible,
+.input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-teal) 24%, transparent);
+}
+
+.actionButton:disabled,
+.saveButton:disabled,
+.result:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.editor {
+  margin: 4px 0 0 58px;
+  display: grid;
+  gap: 6px;
+  max-width: min(100%, 360px);
+}
+
+.searchRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px 24px;
+  gap: 6px;
+  align-items: center;
+}
+
+.input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+
+.results {
+  display: grid;
+  gap: 5px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.result {
+  min-width: 0;
+  min-height: 30px;
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 34%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ai-teal) 5%, var(--surface));
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.result[data-selected='true'] {
+  border-color: var(--ai-teal);
+  background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface));
+}
+
+.result[data-selectable='false'] {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--muted-foreground) 5%, var(--surface));
+}
+
+.resultHead {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.resultName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result code,
+.field b,
+.resultState {
+  color: var(--muted-foreground);
+}
+
+.result code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.resultState {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.fields {
+  display: grid;
+  gap: 2px;
+  color: var(--muted-foreground);
+}
+
+.field {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.field b {
+  font-weight: 500;
+}
+
+.error {
+  margin: 0;
+  color: var(--destructive);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.saveButton {
+  width: fit-content;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-sm);
+  background: var(--foreground);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}

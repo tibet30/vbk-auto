@@ -332,13 +332,22 @@ export type AutomationRecoveryMap = Record<string, { phase: string; state: strin
 //   2. 任何阶段 advising / retrying / running → running
 //   3. 所有存在阶段均 completed → done
 //   4. 否则 pending
-// phaseNames 为空的 section（销售控制）不返回有效状态，前端不打 stageState。
+// phaseNames 为空的 section（销售控制）不映射到任何自动化阶段，整体状态由
+// 「是否已保存 VBK productId」直接给出：
+//   - 已保存非空 productId → done（销售控制已完成，绿）
+//   - productId 为 undefined / 空字符串 / 纯空白 → idle（未开始，灰）
+// 不基于运行/失败/recovery/automation status 等任何其他数据推导成功状态，
+// 因为销售控制是 VBK 后台入口页面，与具体录入阶段没有 1:1 映射关系。
 export function aggregateSectionState(
   section: VbkNavSection,
   phases: AutomationPhaseRow[],
   recovery?: AutomationRecoveryMap,
+  productId?: string,
 ): "pending" | "running" | "done" | "failed" | "idle" {
-  if (section.phaseNames.length === 0) return "idle";
+  if (section.phaseNames.length === 0) {
+    const hasProductId = typeof productId === "string" && productId.trim().length > 0;
+    return hasProductId ? "done" : "idle";
+  }
   const mapped = section.phaseNames
     .map((name) => phases.find((phase) => phase.phase === name))
     .filter((phase): phase is AutomationPhaseRow => Boolean(phase));

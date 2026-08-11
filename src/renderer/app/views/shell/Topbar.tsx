@@ -1,4 +1,4 @@
-import { ChevronRight, LoaderCircle, Play, Square } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import { CopyableId, statusLabel } from "../../helpers";
 import { APP_NAME, LOGO_URL } from "../../brand";
@@ -7,7 +7,9 @@ import { AccountPopover } from "./AccountPopover";
 import styles from "./Topbar.module.less";
 
 /**
- * 44px 顶栏：项目面包屑 / 当前步骤状态 / 保存草稿按钮 / 账号菜单。
+ * 44px 顶栏：项目面包屑 / 当前步骤状态 / 账号菜单。
+ * VBK 录入的主操作（开始/停止自动录入）已迁移到 VBK 录入页左面板的
+ * footer 底部左侧，这里不渲染重复入口。
  * 不渲染主导航 stage-nav，那由 AppShell 直接负责。
  */
 export function AppTopbar({ model }: { model: AppModel }) {
@@ -18,18 +20,10 @@ export function AppTopbar({ model }: { model: AppModel }) {
     setView,
     setAccountMenuOpen,
     accountMenuOpen,
-    setNotice,
     readiness,
-    stage,
-    loading,
-    automationActive,
-    stoppingAutomation,
     currentAccountName,
     accountInitial,
     vbkLogin,
-    saveDraftLabel,
-    startAutomation,
-    stopAutomation,
     openLogin,
     logoutVbk,
     checkingVbkLogin,
@@ -99,36 +93,6 @@ export function AppTopbar({ model }: { model: AppModel }) {
           </div>
 
           <div className={styles.topbarToolRail}>
-            <button
-              className={`${shared.btn} ${shared.btnSm}`}
-              data-variant="primary"
-              disabled={!readiness.ready || loading || automationActive}
-              onClick={() => {
-                setNotice(null);
-                if (stage !== "vbk") model.setStage("vbk");
-                void startAutomation();
-              }}
-              aria-label={saveDraftLabel}
-              title={saveDraftLabel}
-            >
-              {automationActive ? <LoaderCircle size={14} /> : <Play size={14} />}
-              {saveDraftLabel}
-            </button>
-
-            {automationActive && (
-              <button
-                className={`${shared.btn} ${shared.btnSm}`}
-                data-variant="danger"
-                onClick={() => void stopAutomation()}
-                disabled={stoppingAutomation}
-                aria-label="停止自动录入"
-                title="停止当前自动录入"
-              >
-                {stoppingAutomation ? <LoaderCircle size={14} /> : <Square size={14} />}
-                停止
-              </button>
-            )}
-
             <button
               className={styles.topbarAccountChip}
               type="button"

@@ -3,6 +3,9 @@ import {
   productSchema,
 } from "./schema-definitions.js";
 import { mergeReadinessIssues } from "../../../shared/readiness-issues.js";
+import { hasSatisfiedVehicleResource, isResearchTaskSatisfiedByProduct } from "../../../shared/research-task-satisfaction.js";
+import { readCover } from "../../operations/cover-info.js";
+import { evaluateAutomationContract } from "../automation-contract.js";
 
 /**
  * 自动化层产品 schema 工具。
@@ -17,7 +20,7 @@ import { mergeReadinessIssues } from "../../../shared/readiness-issues.js";
  *  - resolveAdvanceBooking / shouldRefillBasicInfo / basicInfoCompletenessIssues：basic 阶段决策
  *  - automationBlockers：列出阻止自动录入启动的卡点
  *  - findFirstEnabledOptionIndex / findProvinceOptionIndex / findButlerOptionIndex：下拉匹配
- *  - pickKeySpotsFromItinerary：从行程里挑"重点景点"（无 LLM 调用）
+ *  - pickKeySpotsFromItinerary：按行程顺序提取国家景区景点（无 LLM 调用）
  */
 
 /** zod 校验入口；schema 定义见 ./schema-definitions.js。 */
@@ -118,46 +121,61 @@ export function basicInfoCompletenessIssues(product: Record<string, unknown>): s
   return issues;
 }
 
-// 第一版允许暂不维护库存与费用包含：有完整数据时自动录入，没有时跳过对应
-// VBK 阶段。价格仍用于运营审查，但只有同时存在库存时才写入价格库存页。
+/**
+ * 规划 / 草稿阶段不把价格、库存、套餐名、条款成本口径作为阻塞项；这些由
+ * 上架时在 VBK 里核算。这里仅保留资源、安全发布态等会影响草稿自动化的卡点。
+ *
+ * 实现原则：把 VBK 实际写入/读取的字段契约集中到 automation-contract.ts，
+ * 本函数只做「ready = 没有任何 ai-planning / account-fixed 字段缺失」的
+ * 转发 + 兼容旧 release 阻断 / research task 阻断语义。
+ */
 export function automationBlockers(product: Record<string, unknown>, options: { researchTasks?: Array<{ state: string; label?: string; type?: string }> } = {}) {
   const blockers: Array<{ label: string; detail: string }> = [];
   const commercial = product.commercial as Record<string, unknown> | undefined;
-  if (!commercial) {
-    blockers.push({ label: "套餐与价格", detail: "缺少套餐、价格库存与条款配置，自动录入无法完成。" });
-  } else {
-    if (!commercial.packageName) blockers.push({ label: "套餐名称", detail: "请补充套餐名称。" });
-    if (!commercial.pricing) blockers.push({ label: "价格", detail: "请补充成人价、儿童价与最低成团人数。" });
+  // 1) 核心 VBK 字段契约（ai-planning / account-fixed 缺失 = 阻断）。
+  const contract = evaluateAutomationContract(product);
+  for (const failure of contract.failures) {
+    blockers.push({ label: failure.field.label, detail: failure.reason });
   }
+  // 2) 手动上传封面是单独阻断：自动化阶段不支持，UI 上要走别的提示。
+  const cover = readCover(product);
+  if (cover?.source === "manualUpload") {
+    blockers.push({
+      label: "封面来源",
+      detail: "手动上传封面暂不支持自动录入，请改用携程图库或手动处理。",
+    });
+  }
+  // 3) 私家团用车资源组是预检硬阻断：VBK 资源组匹配要等 vehicleResource
+  //    阶段才能走，在那之前让运营先核查 / 重算后填好 resourceGroupId + Name。
+  //    vbk-runtime 阶段的「资源组 ID 是 VBK 回填」是事实，但 readiness 必须
+  //    在这之前就拦下，否则自动录入起跑后会一直走直到 vehicleResource 阶段
+  //    才报错，前面的 basic / presentation / itinerary / package / pricing
+  //    / terms 阶段白跑。
   const sales = product.sales as Record<string, unknown> | undefined;
-  if (sales?.productForm === "privateTour") {
-    const operations = product.operations as Record<string, unknown> | undefined;
-    const vehicle = operations?.vehicleResource as Record<string, unknown> | undefined;
-    if (!vehicle?.resourceGroupId) {
-      blockers.push({ label: "用车资源组", detail: "私家团需要在 VBK 核查并填写现有用车资源组 ID。" });
-    }
+  if (sales?.productForm === "privateTour" && !hasSatisfiedVehicleResource(product)) {
+    blockers.push({ label: "用车资源组", detail: "私家团需要在 VBK 核查并填写现有用车资源组 ID。" });
   }
-  // 草稿默认安全：release 还在 draft-only 状态时，禁止进入自动录入。人工 / VBK
+  // 3) 草稿默认安全：release 还在 draft-only 状态时，禁止进入自动录入。人工 / VBK
   // 会在审核后逐项打开 submitReview / publishAfterApproval。
   const release = commercial?.release as Record<string, unknown> | undefined;
   if (release) {
     if (release.submitReview === true) blockers.push({ label: "submitReview 仍为草稿状态", detail: "需在 VBK 或运营面板中明确开启后才能自动录入。" });
     if (release.publishAfterApproval === true) blockers.push({ label: "publishAfterApproval 仍为草稿状态", detail: "需在 VBK 或运营面板中明确开启后才能自动录入。" });
   }
-  // 未解决的 pricing / inventory / 车辆 / 酒店 research task 也会阯。
+  // 未解决且不能由当前 product 本地字段满足的资源类 research task 才阻断。
   const tasks = options.researchTasks ?? [];
-  const openTasks = tasks.filter((task) => task.state !== "confirmed" && task.state !== "resolved");
+  const openTasks = tasks.filter((task) =>
+    task.state !== "confirmed" &&
+    task.state !== "resolved" &&
+    !isResearchTaskSatisfiedByProduct(task, product),
+  );
   const blockingLabels = {
-    price: /价格|成人价|儿童价|成本|单房差|加床费|售价/,
-    inventory: /库存|班期|每日配额|起订|起止日期/,
     vehicle: /用车|车辆|资源组|接送|司机/,
     hotel: /酒店|住宿|客栈|民宿/,
   };
   for (const task of openTasks) {
     const label = task.label || "";
-    if (blockingLabels.price.test(label)) blockers.push({ label: `价格核查：${label}`, detail: task.type === "vbk" ? "需在 VBK 核查后才能自动录入。" : "需人工确认后才能自动录入。" });
-    else if (blockingLabels.inventory.test(label)) blockers.push({ label: `库存核查：${label}`, detail: "需人工 / VBK 核查后才能自动录入。" });
-    else if (blockingLabels.vehicle.test(label)) blockers.push({ label: `车辆核查：${label}`, detail: "需 VBK 匹配资源组后才能自动录入。" });
+    if (blockingLabels.vehicle.test(label)) blockers.push({ label: `车辆核查：${label}`, detail: "需 VBK 匹配资源组后才能自动录入。" });
     else if (blockingLabels.hotel.test(label)) blockers.push({ label: `酒店核查：${label}`, detail: "需 VBK 匹配酒店资源后才能自动录入。" });
   }
   return mergeReadinessIssues(blockers);
@@ -233,82 +251,27 @@ export function findButlerOptionIndex(
 }
 
 /**
- * 从行程中按确定性规则挑选「重点景点」：先取行程里出现在产品推荐语或
- * 产品特点中的景点，再按行程顺序补足。这样会优先选择产品主打 IP，同时
- * 不调用任何 LLM。括号中的别名也参与匹配，例如「永祚寺（双塔寺）」可由
- * 推荐语中的「永祚寺」命中。
+ * 国家景区的景点完全以当前 itinerary[].spots[].name 为来源：按行程顺序
+ * 去除空名称和重复项后全部交给 VBK。历史字符串项不再作为主路径，安全跳过。
  */
-export function pickKeySpotsFromItinerary(
-  product: Record<string, unknown>,
-  max = 3,
-): string[] {
-  const limit = Number.isInteger(max) && max > 0 ? max : 3;
+export function pickKeySpotsFromItinerary(product: Record<string, unknown>): string[] {
   const itinerary = Array.isArray(product.itinerary) ? (product.itinerary as Array<Record<string, unknown>>) : [];
   const seen = new Set<string>();
-  const candidates: string[] = [];
-  // 净化输入名：把「云冈石窟游览」「华严寺参观」之类动作后缀去掉，只喂景点名字。
-  // 这些后缀是行程里的口述写法，VBK 景点下拉里不存在“游览”这个子串。
-  // 同时清掉括号别名、掊点号与空格。
-  const normalizeSpot = (text: string) =>
-    text
-      .replace(/[\s\u3000]+/g, "")
-      .replace(/[（(][^）)]+[）)]/g, "")
-      .replace(/(?:游览|参观|参观游览|游览参观|参观游览参观)$/u, "")
-      .replace(/[·・•・]/g, "");
+  const result: string[] = [];
   for (const day of itinerary) {
     if (!day || typeof day !== "object") continue;
     const spots = Array.isArray(day.spots) ? (day.spots as Array<unknown>) : [];
     for (const raw of spots) {
-      if (typeof raw !== "string") continue;
-      const text = raw.trim();
-      if (!text) continue;
-      const cleaned = normalizeSpot(text);
-      if (!cleaned || cleaned.length < 2) continue;
-      // 接团/送团/返程/自由活动 这种非景点词跳过，避免下拉误点。
-      if (/(?:接团|送团|送机|接机|返程|出发|报到|入住|退房|自由活动)/u.test(cleaned)) continue;
-      const key = cleaned.toLowerCase();
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const name = (raw as { name?: unknown }).name;
+      if (typeof name !== "string") continue;
+      const spot = name.trim();
+      if (!spot) continue;
+      const key = spot.toLocaleLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      candidates.push(cleaned);
+      result.push(spot);
     }
-  }
-  const presentation = product.presentation as Record<string, unknown> | undefined;
-  const corpus = [presentation?.recommendation, presentation?.features]
-    .filter((value): value is string => typeof value === "string")
-    .join(" ")
-    .replace(/\s+/g, "");
-  const isHighlighted = (spot: string) => {
-    const compact = spot.replace(/\s+/g, "");
-    const aliases = [
-      compact,
-      compact.replace(/[（(].*?[）)]/g, ""),
-      ...Array.from(compact.matchAll(/[（(]([^）)]+)[）)]/g), (match) => match[1]),
-    ].filter(Boolean);
-    return aliases.some((alias) => corpus.includes(alias));
-  };
-  // 首日第一个景点通常是行程落地后的核心到访点；先保留它，再从产品
-  // 推荐语中挑主打景点。当前太原行程因此得到“柳巷、晋祠、山西博物院”。
-  const firstItinerarySpot = candidates[0];
-  const result: string[] = [];
-  const seenFinal = new Set<string>();
-  const pushUnique = (spot: string) => {
-    const key = spot.toLowerCase();
-    if (seenFinal.has(key)) return;
-    seenFinal.add(key);
-    result.push(spot);
-  };
-  if (firstItinerarySpot) pushUnique(firstItinerarySpot);
-  for (const spot of candidates) {
-    if (result.length >= limit) break;
-    if (spot === firstItinerarySpot) continue;
-    if (!isHighlighted(spot)) continue;
-    pushUnique(spot);
-  }
-  for (const spot of candidates) {
-    if (result.length >= limit) break;
-    if (spot === firstItinerarySpot) continue;
-    if (isHighlighted(spot)) continue;
-    pushUnique(spot);
   }
   return result;
 }

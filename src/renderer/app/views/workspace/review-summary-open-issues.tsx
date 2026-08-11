@@ -10,7 +10,7 @@
  * 默认展开、可滚动；视觉密度对齐「每日行程」section。
  */
 
-import { ChevronDown, ListChecks } from "lucide-react";
+import { ChevronDown, ListChecks, LoaderCircle, RefreshCw } from "lucide-react";
 import type { ProjectReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
 import shared from "../shared.module.less";
 import styles from "./review-summary-issues.module.less";
@@ -26,6 +26,8 @@ export interface ReviewSummaryOpenIssuesProps {
   collapsed: boolean;
   /** 切换整个「待处理事项」模块的展开 / 收起。 */
   onToggleCollapsed: () => void;
+  refreshing: boolean;
+  onRefresh: () => void;
 }
 
 function sendToComposer(setComposerInput: ((value: string) => void) | undefined, fallback: (value: string) => void, content: string) {
@@ -41,6 +43,8 @@ export function AppWorkspaceReviewSummaryOpenIssues({
   setActiveTask,
   collapsed,
   onToggleCollapsed,
+  refreshing,
+  onRefresh,
 }: ReviewSummaryOpenIssuesProps) {
   const rows = buildOpenIssueRows(readiness, taskList);
   if (rows.length === 0) return null;
@@ -49,22 +53,38 @@ export function AppWorkspaceReviewSummaryOpenIssues({
 
   return (
     <section className={styles.block} aria-label="统一待处理事项" data-collapsed={collapsed}>
-      <button
-        type="button"
-        className={styles.head}
-        onClick={onToggleCollapsed}
-        aria-expanded={!collapsed}
-        aria-controls="open-issues-body"
-      >
-        <span className={styles.headIcon} aria-hidden="true">
-          <ListChecks size={13} />
-        </span>
-        <strong className={styles.headTitle}>待处理事项</strong>
-        <small className={styles.headMeta}>{total} 项</small>
-        <span className={styles.headChevron} aria-hidden="true">
-          <ChevronDown size={13} />
-        </span>
-      </button>
+      <div className={styles.head}>
+        <button
+          type="button"
+          className={styles.headToggle}
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-controls="open-issues-body"
+        >
+          <span className={styles.headIcon} aria-hidden="true">
+            <ListChecks size={13} />
+          </span>
+          <strong className={styles.headTitle}>待处理事项</strong>
+          <small className={styles.headMeta}>{total} 项</small>
+          <span className={styles.headChevron} aria-hidden="true">
+            <ChevronDown size={13} />
+          </span>
+        </button>
+        <button
+          type="button"
+          className={styles.refreshBtn}
+          disabled={refreshing}
+          aria-busy={refreshing}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onRefresh();
+          }}
+        >
+          {refreshing ? <LoaderCircle size={13} className={styles.refreshSpin} /> : <RefreshCw size={13} />}
+          <span>{refreshing ? "刷新中…" : "刷新"}</span>
+        </button>
+      </div>
       {!collapsed && (
         <div className={styles.body} id="open-issues-body" data-min-visible={total >= 3}>
           <ul className={styles.list}>

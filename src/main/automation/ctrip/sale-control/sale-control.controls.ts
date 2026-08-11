@@ -21,7 +21,7 @@ function findRowByTitle(page, label) {
   return page
     .locator(".saleControl-body .ant-row")
     .filter({
-      has: page.locator(".saleControl-title", { hasText: new RegExp(`^\s*${escapeRegExp(label)}\s*\*?\s*$`) }),
+      has: page.locator(".saleControl-title", { hasText: new RegExp(`^\\s*${escapeRegExp(label)}\\s*\\*?\\s*$`) }),
     })
     .first();
 }

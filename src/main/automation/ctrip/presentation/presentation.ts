@@ -17,3 +17,4 @@ export {
   selectSearchOption,
   type LibraryImageParams,
 } from "./main.js";
+export { fillProductFeatures, type FeaturesResult } from "./features.js";

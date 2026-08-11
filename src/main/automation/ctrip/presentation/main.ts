@@ -13,6 +13,8 @@ import { clickSection, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
 import { fillRecommendationReasons } from "./recommendations.js";
 import { buildRecommendationReasonsPlan } from "./recommendations.js";
+import { assertPresentationReadyForVbk } from "../../automation-contract.js";
+import { fillProductFeatures } from "./features.js";
 
 export { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 
@@ -233,28 +235,55 @@ export async function selectCtripLibraryCover(page, cover) {
 /**
  * 「产品图文」阶段主入口：填推荐理由 3 条 → 上封面 → 推荐语 + 产品特点 → 保存 → 进入「行程描述」。
  * 调用方需要保证 product.presentation 含 cover 与 recommendation / features / recommendations。
+ *
+ * 防御深度（defense in depth）：
+ *   - readiness / automationBlockers 已经在起跑前校验过 presentation 必填字段；
+ *   - 本函数第一行用 assertPresentationReadyForVbk 再校验一次，
+ *     即便 readiness 通过、产品被改坏、运行时 derivation 漏字段，
+ *     VBK 阶段自身也会在打开任何 tab / 弹窗之前抛错；
+ *   - 不调用 VBK、不打开网络、不会留下半成品页面状态。
  */
 export async function fillAndSavePresentation(page, product) {
+  // 第一道防御：统一从 automation-contract 取真实契约，错误文案面向运营。
+  assertPresentationReadyForVbk(product);
   const presentation = product.presentation;
-  if (!presentation?.cover) {
-    throw new Error("产品图文缺少携程图库封面配置，已停止后续录入。");
+  const cover = presentation?.cover;
+  if (
+    !cover ||
+    cover.source !== "ctripLibrary" ||
+    !Number.isInteger(cover.imageId) ||
+    cover.imageId <= 0 ||
+    typeof cover.imageUrl !== "string" ||
+    cover.imageUrl.trim().length === 0 ||
+    typeof cover.poi !== "string" ||
+    cover.poi.trim().length === 0 ||
+    typeof cover.description !== "string" ||
+    cover.description.trim().length === 0 ||
+    typeof cover.minQuality !== "number"
+  ) {
+    throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }
+  // 第二道防御（推荐理由 VBK 行写入前）：buildRecommendationReasonsPlan 内部
+  // 仍然校验 3 条 + 白名单 + 互不重复，错误信息保持原样，避免改动影响既有测试。
+  const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
   await clickSection(page, ["产品图文", "图文信息"]);
-  if (presentation.recommendations?.length === 3) {
-    await fillRecommendationReasons(page, presentation.recommendations);
-  }
+  await fillRecommendationReasons(page, recommendations);
   await selectCtripLibraryCover(page, presentation.cover);
   await fillFirstVisible(
     page.locator('textarea[placeholder*="推荐"], textarea'),
     presentation.recommendation,
     "推荐语输入框",
   );
-  const editor = page.locator('[contenteditable="true"]');
-  for (let index = 0; index < (await editor.count()); index += 1) {
-    if (await editor.nth(index).isVisible()) {
-      await editor.nth(index).fill(presentation.features);
-      break;
-    }
+  // 产品特点：先 label 锚定 .ant-form-item，再 fallback 到 #pm_features 容器；
+  // 失败抛「找不到产品特点富文本输入框」并附诊断（不静默保存）。
+  const featuresResult = await fillProductFeatures(page, presentation.features);
+  const filledFeatures = featuresResult.filled;
+  if (!filledFeatures) {
+    const editorTypeLabel = featuresResult.editorType ?? "未识别";
+    const scopeLabel = featuresResult.scopeSource ?? "无作用域";
+    throw new Error(
+      `找不到产品特点富文本输入框（编辑器类型=${editorTypeLabel}，作用域来源=${scopeLabel}）；诊断：${featuresResult.diagnostic || "无候选作用域/编辑器"}`,
+    );
   }
   return saveThenAdvance(page, {
     phase: "产品图文",

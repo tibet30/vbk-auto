@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { stripDayPrefix } from "../../helpers";
 import shared from "../shared.module.less";
+import { ItinerarySpotPoiEditor } from "./review-summary-itinerary-poi";
 import styles from "./review-summary-itinerary.module.less";
 
 export interface ItineraryActivity {
@@ -31,6 +32,7 @@ export interface ItineraryDay {
 }
 
 interface ReviewSummaryItineraryProps {
+  projectId: string;
   days: ItineraryDay[];
   expandedDayIndex: number | null;
   onToggle: (index: number) => void;
@@ -40,12 +42,24 @@ interface ReviewSummaryItineraryProps {
   onToggleCollapsed?: () => void;
 }
 
+export interface ItineraryTimelineSpotItem {
+  title: string;
+  dayIndex: number;
+  spotIndex: number;
+  poiName?: string | null;
+  poiId?: number | null;
+}
+
 interface TimelineItem {
   key: string;
   time: string;
   title: string;
   detail?: string;
   type: ItineraryActivity["type"];
+  dayIndex: number;
+  spotIndex?: number;
+  poiName?: string | null;
+  poiId?: number | null;
 }
 
 /**
@@ -54,30 +68,48 @@ interface TimelineItem {
  * - 没有 time 的 spots 视作「待安排」占位，排在末尾；
  * - meals 字段作为独立的「用餐」节点插入到活动之间（紧跟其前一个 visit 之后）。
  */
-function buildTimeline(day: ItineraryDay): TimelineItem[] {
+function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
   const activities = (day.activities ?? []).slice();
   const spots = (day.spots ?? []).filter(Boolean);
   const meals = day.meals?.trim() ?? "";
   const items: TimelineItem[] = [];
 
-  const activityItems: TimelineItem[] = activities.map((act, idx) => ({
-    key: `act-${idx}`,
-    time: act.time || "",
-    title: act.title,
-    detail: act.detail,
-    type: act.type ?? "other",
-  }));
+  const claimedSpotIndexes = new Set<number>();
+  const activityItems: TimelineItem[] = activities.map((act, idx) => {
+    const canAttachSpot = act.type === "visit" || act.type === undefined || act.type === "other";
+    const spotIndex = canAttachSpot
+      ? spots.findIndex((spot, index) => !claimedSpotIndexes.has(index) && spot.name.trim() === act.title.trim())
+      : -1;
+    const spot = spotIndex >= 0 ? spots[spotIndex] : undefined;
+    if (spotIndex >= 0) claimedSpotIndexes.add(spotIndex);
+    return {
+      key: `act-${idx}`,
+      time: act.time || "",
+      title: act.title,
+      detail: act.detail,
+      type: spot ? "visit" : act.type ?? "other",
+      dayIndex,
+      spotIndex: spotIndex >= 0 ? spotIndex : undefined,
+      poiName: spot?.poiName ?? null,
+      poiId: spot?.poiId ?? null,
+    };
+  });
 
   // spots 未在 activities 里出现的，追加到末尾作为未排时间的景点。
   const usedTitles = new Set(activityItems.map((a) => a.title.trim()));
   const spotItems: TimelineItem[] = spots
-    .filter((spot) => !usedTitles.has(spot.name.trim()))
-    .map< TimelineItem>((spot, idx) => ({
-      key: `spot-${idx}`,
+    .map((spot, index) => ({ spot, index }))
+    .filter(({ spot, index }) => !claimedSpotIndexes.has(index) && !usedTitles.has(spot.name.trim()))
+    .map<TimelineItem>(({ spot, index }) => ({
+      key: `spot-${index}`,
       time: "",
       title: spot.name,
-      detail: spot.poiName && spot.poiId ? `已匹配：${spot.poiName}（${spot.poiId}）` : "待核查 POI",
+      detail: undefined,
       type: "visit",
+      dayIndex,
+      spotIndex: index,
+      poiName: spot.poiName ?? null,
+      poiId: spot.poiId ?? null,
     }));
 
   items.push(...activityItems, ...spotItems);
@@ -95,6 +127,7 @@ function buildTimeline(day: ItineraryDay): TimelineItem[] {
       time: "",
       title: meals,
       type: "meal",
+      dayIndex,
     });
   }
 
@@ -139,7 +172,7 @@ function activityNodeClass(type: ItineraryActivity["type"]): string {
  * - 展开时显示按时间顺序排列的景点 + 活动 + 餐食时间线；
  * - 折叠时只保留 Day 编号 + 标题 + 节点计数，保持列表可快速浏览。
  */
-export function AppWorkspaceReviewSummaryItinerary({ days, expandedDayIndex, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
+export function AppWorkspaceReviewSummaryItinerary({ projectId, days, expandedDayIndex, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
   // 折叠时不渲染 dayList，节省节点；header 仍然可点击重新展开。
   const renderHeader = (meta: React.ReactNode, bodyId: string) => (
     <button
@@ -176,7 +209,7 @@ export function AppWorkspaceReviewSummaryItinerary({ days, expandedDayIndex, onT
         {days.map((day, index) => {
           const expanded = expandedDayIndex === index;
           const title = stripDayPrefix(day.title || "", index);
-          const timeline = buildTimeline(day);
+          const timeline = buildTimeline(day, index);
           const visitCount = timeline.filter((t) => t.type === "visit").length;
           const mealCount = timeline.filter((t) => t.type === "meal").length;
           const hotel = day.hotel?.trim() ?? "";
@@ -227,6 +260,18 @@ export function AppWorkspaceReviewSummaryItinerary({ days, expandedDayIndex, onT
                               </div>
                               {item.detail && (
                                 <p className={styles.timelineDetail}>{item.detail}</p>
+                              )}
+                              {item.spotIndex !== undefined && (
+                                <ItinerarySpotPoiEditor
+                                  projectId={projectId}
+                                  item={{
+                                    title: item.title,
+                                    dayIndex: item.dayIndex,
+                                    spotIndex: item.spotIndex,
+                                    poiName: item.poiName,
+                                    poiId: item.poiId,
+                                  }}
+                                />
                               )}
                             </div>
                           </li>

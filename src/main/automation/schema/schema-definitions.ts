@@ -53,19 +53,70 @@ export const recommendationItemSchema = z.object({
   text: z.string().min(1),
 });
 
+/**
+ * 产品封面信息契约（presentation.cover）：
+ *   - source 必须是 ctripLibrary 或 manualUpload；
+ *   - ctripLibrary：携程图库导入流程；poi / description / minQuality 必填；
+ *   - manualUpload：用户手动上传；本地只存引用 + 元数据，图片二进制不进 product JSON；
+ *     fileId 是 main 进程分配给本地副本的稳定 id（用于 UI / 持久化 / 之后排查）。
+ *     mimeType 限制在白名单（image/jpeg / image/png / image/webp）以与 cover-storage
+ *     同步；产品 JSON 仅保留引用，渲染端要预览时通过独立 IPC 拿回真实数据。
+ */
+export const PRODUCT_COVER_SOURCES = ["ctripLibrary", "manualUpload"] as const;
+export type ProductCoverSource = (typeof PRODUCT_COVER_SOURCES)[number];
+
+const MANUAL_UPLOAD_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+
+const manualUploadCoverSchema = z.object({
+  source: z.literal("manualUpload"),
+  fileId: z.string().min(1),
+  originalName: z.string().min(1),
+  mimeType: z.enum(MANUAL_UPLOAD_MIME_TYPES),
+  sizeBytes: z.number().int().positive(),
+  poi: z.string().min(1),
+  description: z.string().min(1),
+  minQuality: z.number().min(0).max(5).default(3),
+  uploadedAt: z.string().min(1),
+});
+
+const ctripLibraryCoverSchema = z.object({
+  source: z.literal("ctripLibrary").default("ctripLibrary"),
+  // 必填：选中一张具体图片必须带 imageId / imageUrl，
+  // 缺这两个字段视为无效（与 shared/contracts-types 的 CtripLibraryCover 一致）。
+  imageId: z.number().int().positive(),
+  imageUrl: z.string().min(1),
+  // 兼容自动化：selectCtripLibraryCover 仍按 cover.poi / cover.minQuality 兜底。
+  poi: z.string().min(1),
+  description: z.string().min(1),
+  minQuality: z.number().min(0).max(5).default(3),
+  // 派生 / 审计字段：可缺省，缺省时 UI 走占位。
+  thumbnailUrl: z.string().min(1).optional(),
+  previewUrl: z.string().min(1).optional(),
+  score: z.number().optional(),
+  resolution: z.string().min(1).optional(),
+  poiId: z.number().int().positive().optional(),
+  poiName: z.string().min(1).optional(),
+  selectedAt: z.string().min(1).optional(),
+});
+
+const presentationCoverSchema = z.discriminatedUnion("source", [
+  ctripLibraryCoverSchema,
+  manualUploadCoverSchema,
+]);
+
+// presentationSchema 允许 recommendation / features / recommendations 缺省：
+//   - 基础信息阶段只写 productCover 时不需要先填推荐语 / 特色；
+//   - 「presentation 已完成」的判定由 detectAcceptedModulesFromProduct
+//     （runtime.ts）和 deepValidateModules（validation.ts）在运行时承担，
+//     缺字段时它们会显式报告 missing / rejected，不会被 zod 在落库阶段
+//     阻断。
+//   - 保留 min(1) 校验以拒绝显式写入空字符串，但允许字段本身不存在。
 const presentationSchema = z.object({
   recommendationCategory: z.string().min(1).default("优选行程"),
-  recommendation: z.string().min(1),
+  recommendation: z.string().min(1).optional(),
   recommendations: z.array(recommendationItemSchema).length(3).optional(),
-  features: z.string().min(1),
-  cover: z
-    .object({
-      source: z.literal("ctripLibrary").default("ctripLibrary"),
-      poi: z.string().min(1),
-      description: z.string().min(1),
-      minQuality: z.number().min(0).max(5).default(3),
-    })
-    .optional(),
+  features: z.string().min(1).optional(),
+  cover: presentationCoverSchema.optional(),
 });
 
 // 自动录入 VBK 基本信息时，除了产品元数据还会用到两类运营数据：

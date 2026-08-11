@@ -3,6 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   ContactCardSelection,
+  CtripLibraryImageCandidate,
+  CtripLibraryPlaceCandidate,
+  CtripLibraryPlaceSearchResult,
+  CtripLibrarySearchResult,
   ProjectDetail,
   ProjectReadiness,
   ResearchTask,
@@ -43,13 +47,19 @@ interface ReviewSummaryProps {
   onOpenAccountEditor?: () => void;
   saveSubtitle?: (projectId: string) => Promise<void> | void | undefined;
   saveButler?: (projectId: string, selection: ContactCardSelection | null) => Promise<void> | void | undefined;
-  savePricing?: (projectId: string, adult: number, child: number) => Promise<void> | void | undefined;
+  savePricing?: (projectId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void | undefined;
   saveVehicleCost?: (projectId: string, value: number | null) => Promise<void> | void | undefined;
+  uploadAndSaveManualCover?: (projectId: string, args: { file: { name: string; type: string; base64: string } }) => Promise<import("../../../../shared/contracts-types.js").ManualUploadCoverMeta | null>;
+  saveCtripLibraryCover?: (projectId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
+  searchCtripLibraryPlaces?: (projectId: string, args: { keyword: string }) => Promise<CtripLibraryPlaceSearchResult | null>;
+  searchCtripLibraryImages?: (projectId: string, args: { keyword: string; place: CtripLibraryPlaceCandidate }) => Promise<CtripLibrarySearchResult | null>;
   clearBasicInfoError?: (field: string) => void;
   resolvingVehicleTaskId: string | null;
   loading: boolean;
   onConfirmTask: () => Promise<void> | void;
   onResolveVehicle: () => Promise<void> | void;
+  refreshingIssues: boolean;
+  onRefreshIssues: () => Promise<void> | void;
 }
 
 /** 从项目名反解目的地 / 规格 / 形态 — 仅供头部概览展示，不参与业务逻辑。 */
@@ -94,11 +104,17 @@ export function AppWorkspaceReviewSummary({
   saveButler,
   savePricing,
   saveVehicleCost,
+  uploadAndSaveManualCover,
+  saveCtripLibraryCover,
+  searchCtripLibraryPlaces,
+  searchCtripLibraryImages,
   clearBasicInfoError,
   resolvingVehicleTaskId,
   loading,
   onConfirmTask,
   onResolveVehicle,
+  refreshingIssues,
+  onRefreshIssues,
 }: ReviewSummaryProps) {
   const { destination, spec, form } = parseProjectSpec(project.name);
   const ready = readiness.ready;
@@ -196,6 +212,10 @@ export function AppWorkspaceReviewSummary({
     && saveButler
     && savePricing
     && saveVehicleCost
+    && uploadAndSaveManualCover
+    && saveCtripLibraryCover
+    && searchCtripLibraryPlaces
+    && searchCtripLibraryImages
     && clearBasicInfoError,
   );
 
@@ -233,7 +253,7 @@ export function AppWorkspaceReviewSummary({
               )}
 
               {/* 基础信息：紧凑表单，紧贴在「每日行程」上方。 */}
-              {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveVehicleCost && clearBasicInfoError && (
+              {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
                 <AppWorkspaceReviewSummaryBasicInfo
                   project={project}
                   currentAccountName={currentAccountName ?? null}
@@ -249,6 +269,10 @@ export function AppWorkspaceReviewSummary({
                   saveButler={saveButler}
                   savePricing={savePricing}
                   saveVehicleCost={saveVehicleCost}
+                  uploadAndSaveManualCover={uploadAndSaveManualCover}
+                  saveCtripLibraryCover={saveCtripLibraryCover}
+                  searchCtripLibraryPlaces={searchCtripLibraryPlaces}
+                  searchCtripLibraryImages={searchCtripLibraryImages}
                   clearError={clearBasicInfoError}
                   collapsed={basicInfoCollapsed}
                   onToggleCollapsed={() => setBasicInfoCollapsed((v) => !v)}
@@ -256,6 +280,7 @@ export function AppWorkspaceReviewSummary({
               )}
 
               <AppWorkspaceReviewSummaryItinerary
+                projectId={project.id}
                 days={itinerary}
                 expandedDayIndex={expandedDayIndex}
                 onToggle={(index) => setExpandedDayIndex(expandedDayIndex === index ? null : index)}
@@ -271,6 +296,8 @@ export function AppWorkspaceReviewSummary({
                 setActiveTask={setActiveTask}
                 collapsed={openIssuesCollapsed}
                 onToggleCollapsed={() => setOpenIssuesCollapsed((v) => !v)}
+                refreshing={refreshingIssues}
+                onRefresh={onRefreshIssues}
               />
             </div>
           )}

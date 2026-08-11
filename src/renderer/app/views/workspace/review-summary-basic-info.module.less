@@ -1,7 +1,8 @@
 /* VBK Desktop — review summary: 基础信息编辑模块
  * 出现在右侧 review-summary 卡片视图的最顶端（在「每日行程」之前）。
  * 设计目标：
- *   - 默认展示态：仅显示非空关键信息，不展开任何 input / 控件；
+ *   - 「基础信息」始终展示：封面 / 副标题 / 管家 / 400 电话 / 套餐定价 行
+ *     只要进入模块就挂载，缺失字段在各自行内显示紧凑空状态 + 编辑/去设置入口；
  *   - 每行「编辑」按钮触发后，原位切换为编辑控件；保存/取消立即收起；
  *   - 整个模块不引入 max-height / overflow-y / 内部滚动 / 绝对定位覆盖下方内容，
  *     自然高度随行数变化扩展，与「每日行程」「待处理」模块上下相连；
@@ -301,9 +302,12 @@
 
 .inputGroup {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 三列：成人 / 儿童 / 起订人数 并排；grid 子项用 min-width: 0 防溢出，
+     保证三个 input 始终单行不换行（不在 input 内部触发换行到第二行）。 */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
-  max-width: 220px;
+  width: 100%;
+  min-width: 0;
 }
 
 .priceLabel {
@@ -378,4 +382,159 @@
   flex-direction: column;
   gap: 4px;
   margin-top: 4px;
+}
+
+/* ============================================================
+  Cover 行：默认展示 + 编辑态（紧凑工具条 + 候选列表）。
+  编辑态使用单行 .coverToolbar + 候选列表；不再使用两个 coverSection
+  大块卡片，最大限度复用 review row chrome。
+  ============================================================ */
+
+.coverDisplay {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.coverThumb {
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.coverPlaceholder {
+  width: 96px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  border: 1px dashed var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+}
+
+.coverMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.coverToolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.coverToolbar > .input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 320px;
+}
+
+.coverToolbar > .btn,
+.coverToolbar > button {
+  flex: 0 0 auto;
+}
+
+.coverToolbarDivider {
+  width: 1px;
+  height: 18px;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  align-self: center;
+  flex: 0 0 auto;
+}
+
+.select {
+  width: 100%;
+  height: var(--control);
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.select:focus-visible {
+  outline: none;
+  border-color: var(--ai-teal);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ai-teal) 16%, transparent);
+}
+
+.coverCandidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  padding-right: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.coverCandidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.coverCandidateThumb {
+  width: 56px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.coverCandidatePlaceholder {
+  width: 56px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-control);
+  border: 1px dashed var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  flex: 0 0 auto;
+}
+
+.coverCandidateMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.coverCandidateMeta strong {
+  font-weight: 500;
+  font-size: var(--fs-sm);
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverCandidate button {
+  flex: 0 0 auto;
 }

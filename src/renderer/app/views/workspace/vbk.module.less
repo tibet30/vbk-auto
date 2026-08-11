@@ -263,12 +263,14 @@
   flex-shrink: 0;
 }
 
+/* 调整顺序：状态文字块移到左侧，行动按钮块移到右侧 */
 .productFooterMeta {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
   font-size: var(--fs-sm);
   color: var(--muted-foreground);
+  order: 1;
 }
 
 .productFooterMeta strong {
@@ -278,4 +280,8 @@
 
 .productFooterMeta strong[data-ready='true'] { color: var(--success); }
 
-.productFooterActions { display: inline-flex; gap: 6px; }
+.productFooterActions {
+  display: inline-flex;
+  gap: 6px;
+  order: 2;
+}

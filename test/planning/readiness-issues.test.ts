@@ -7,6 +7,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { ProjectReadiness, ResearchTask } from "../../src/shared/contracts.js";
 import { mergeReadinessIssues, openResearchTaskToIssue } from "../../src/shared/readiness-issues.js";
 import { buildOpenIssueRows } from "../../src/renderer/app/views/workspace/review-summary-open-issues.helpers.js";
@@ -124,4 +125,15 @@ test("open issues helper 只给匹配的 readiness issue 绑定 taskId 与核查
   assert.equal(rows[0].label, "核查酒店资源组");
   assert.equal(rows[0].taskId, "hotel");
   assert.match(rows[0].actionPrompt, /请核查并处理：核查酒店资源组/);
+});
+
+test("自动录入已停止只阻断 readiness，不新增待处理事项", () => {
+  const source = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
+  const readinessBody = source.slice(source.indexOf("function readiness("), source.indexOf("/**\n * 创建主窗口"));
+
+  assert.match(readinessBody, /hiddenBlockers\s*\+=\s*1/);
+  assert.match(readinessBody, /const blockerCount = mergedIssues\.length \+ hiddenBlockers/);
+  assert.match(readinessBody, /ready: blockerCount === 0/);
+  assert.match(readinessBody, /Math\.min\(12, blockerCount\)/);
+  assert.doesNotMatch(readinessBody, /issues\.push\(\{\s*label: "自动录入已停止"/);
 });

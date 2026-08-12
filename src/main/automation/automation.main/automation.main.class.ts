@@ -18,6 +18,7 @@ import { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 import type { AdvisorOutcome, AdvisorRequest, AutomationRun, ProjectDetail } from "../../../shared/contracts.js";
 import { debugHitBreakpoints, debugListBreakpoints, debugResume, debugRunStep, debugSnapshot } from "./automation.main.class.debug.js";
 import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
+import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 
 /**
  * 用户点击「停止」后区别于普通失败的语义：
@@ -137,6 +138,30 @@ async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
     const requested = typeof phase === "string" ? phase.trim() : "";
     if (!requested) throw new Error("请选择要重试的失败阶段。");
     return this.runLocked(projectId, requested);
+  }
+
+  /**
+   * 历史 bug 恢复：automation:retry 调用时先尝试窄恢复——若 run 处于
+   * "业务全部成功、最后一步是截图失败" 的脏状态，按业务完成恢复
+   * （succeeded + draft_saved），不重跑任何阶段；未命中返回 false，
+   * 调用方继续走 retryPhase / start 的原路径。
+   *
+   * 互斥语义：与 start / retryOnePhase 共享同一个 `running` Set。持有期
+   * 间任何并发 start / retryOnePhase / retryPhase 都会因 `running.has`
+   * 抛"项目正在进行中"被拒；未命中立刻释放，下一次 retry 不会自锁。
+   */
+  async recoverLegacyScreenshotFalseFailure(projectId: string): Promise<boolean> {
+    const lock = {
+      acquire: () => {
+        if (this.running.has(projectId)) return false;
+        this.running.add(projectId);
+        return true;
+      },
+      release: () => {
+        this.running.delete(projectId);
+      },
+    };
+    return recoverLegacyScreenshotFalseFailureFlow(this.runContext(), projectId, lock);
   }
 
 /**

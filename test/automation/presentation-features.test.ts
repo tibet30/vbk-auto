@@ -1,16 +1,6 @@
 // @ts-nocheck
-/**
- * 「产品特色」/「产品特点」富文本写入 helper（features.ts）的真实 Playwright 行为测试。
- *
- * 覆盖范围（page.setContent 注入真实 DOM fixture）：
- *   1-5) 旧版：label 锚定 textarea、iframe body 写入回读、缺失诊断、#pm_features fallback、
- *         main.ts 抛错契约；
- *   6) 新真实结构：label「产品特色」 + #briefeditor + UEditor iframe #ueditor_0（Electron CDP 验证）；
- *   7) #briefeditor fallback（label 缺失时优先走 #briefeditor，禁止全页盲扫）；
- *   8) 完全无候选（无 label、无 #briefeditor、无 #pm_features）时报诊断且不改无关输入框。
- *
- * 顶部带 `// @ts-nocheck`，page 是动态传入。
- */
+/** 「产品特色」/「产品特点」富文本写入 helper（features.ts）的真实 Playwright 行为测试。
+ * 覆盖（page.setContent 注入真实 DOM fixture）：1-5) 旧版 label 锚点 / iframe body / 缺失诊断 / #pm_features fallback / main.ts 抛错契约；6-11) 新版「产品特色」label + #briefeditor + UEditor iframe #ueditor_0 真实结构、fallback 及 hidden 校验。page 是动态传入。 */
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { chromium, type Browser, type Page } from "playwright";
@@ -157,10 +147,7 @@ test("产品特点：iframe body（ueditor/wangEditor 形态）写入并回读�
 });
 
 test("产品特点：缺失时报诊断（无 label、无 #pm_features）", async () => {
-  // 故意只放一个不相关表单与一个无「产品特点」label 的 textarea：
-  //   - 必须不写入任何无关输入框；
-  //   - 必须不静默成功；
-  //   - 必须返回 filled=false + 诊断（含「label 锚定的 .ant-form-item」或「作用域」等上下文）。
+  // 故意只放一个不相关表单与一个无「产品特点」label 的 textarea，必须不写入无关输入框、不静默成功，并返回 filled=false + 诊断。
   const html = `
     <div class="ant-form-item" id="unrelated">
       <div class="ant-form-item-label">
@@ -179,24 +166,14 @@ test("产品特点：缺失时报诊断（无 label、无 #pm_features）", asyn
     const result = await fillProductFeatures(page, "产品特点文本");
 
     assert.equal(result.filled, false, "缺失场景必须返回 filled=false");
-    assert.equal(
-      result.editorType, undefined,
-      "缺失场景不应附带具体编辑器类型",
-    );
-    assert.equal(
-      result.scopeSource, undefined,
-      "缺失场景不应附带具体作用域来源",
-    );
+    assert.equal(result.editorType, undefined, "缺失场景不应附带具体编辑器类型");
+    assert.equal(result.scopeSource, undefined, "缺失场景不应附带具体作用域来源");
     assert.ok(
       typeof result.diagnostic === "string" && result.diagnostic.length > 0,
       `缺失场景必须返回非空 diagnostic；实际=${JSON.stringify(result.diagnostic)}`,
     );
     // 必须包含「label 锚点」或「作用域」或「#pm_features」等诊断关键词，便于排查
-    assert.ok(
-      /label 锚定的 \.ant-form-item|#pm_features|作用域/.test(result.diagnostic),
-      `diagnostic 必须包含 label 锚点 / 作用域 / fallback 关键词；实际=${result.diagnostic}`,
-    );
-
+    assert.ok(/label 锚定的 \.ant-form-item|#pm_features|作用域/.test(result.diagnostic), `diagnostic 必须包含 label 锚点 / 作用域 / fallback 关键词；实际=${result.diagnostic}`);
     // 验证无关 textarea 没有被改写
     const unrelated = await page.locator("#unrelated-textarea").inputValue();
     assert.equal(unrelated, "已存在文本", "缺失场景必须不动无关输入框");
@@ -240,22 +217,13 @@ test("产品特点：错误必须以「找不到产品特点富文本输入框�
   const path = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const mainSrc = await fs.readFile(
-    path.resolve(here, "../../src/main/automation/ctrip/presentation/main.ts"),
-    "utf8",
-  );
+  const mainSrc = await fs.readFile(path.resolve(here, "../../src/main/automation/ctrip/presentation/main.ts"), "utf8");
   const startIdx = mainSrc.indexOf("export async function fillAndSavePresentation");
   assert.ok(startIdx >= 0, "找不到 fillAndSavePresentation 定义");
   const endIdx = mainSrc.indexOf("\nfunction dayScopeFor", startIdx);
   const body = mainSrc.slice(startIdx, endIdx > 0 ? endIdx : mainSrc.length);
-  // 错误必须以「找不到产品特点富文本输入框」开头
-  assert.match(
-    body,
-    /throw new Error\(\s*`找不到产品特点富文本输入框/,
-    "fillAndSavePresentation 必须以「找不到产品特点富文本输入框」开头抛错",
-  );
-  // 错误模板必须包含 diagnostic 字段（注意：模板里 diagnostic 后面跟着 || 兜底，
-  // 所以不能简单写 \$\{featuresResult\.diagnostic\}，得允许后面再接一段）
+  assert.match(body, /throw new Error\(\s*`找不到产品特点富文本输入框/, "fillAndSavePresentation 必须以「找不到产品特点富文本输入框」开头抛错");
+  // 错误模板必须包含 diagnostic 字段（注意：模板里 diagnostic 后面跟着 || 兜底，所以不能用 \$\{featuresResult\.diagnostic\} 这种精确形式，得允许后面再接一段）
   assert.match(
     body,
     /\$\{featuresResult\.diagnostic[^}]*\}/,
@@ -269,10 +237,7 @@ test("产品特点：错误必须以「找不到产品特点富文本输入框�
   );
 });
 
-/**
- * 真实 DOM fixture 的「产品特色」label 文本 + #briefeditor 容器 + UEditor iframe #ueditor_0。
- * 该结构与 Electron CDP 在 productImageText?productId=76906037 上观察到的 DOM 一致。
- */
+/** 真实 DOM fixture 的「产品特色」label 文本 + #briefeditor 容器 + UEditor iframe #ueditor_0（与 Electron CDP 在 productImageText?productId=76906037 上观察到的 DOM 一致）。 */
 function buildRealBriefEditorHtml(): string {
   const srcdoc = `<!doctype html><html><body contenteditable="true" id="ue-body"></body></html>`;
   return `
@@ -313,11 +278,7 @@ test("产品特色：新真实结构（label「产品特色」+ #briefeditor + U
 
     // 回读：iframe body.innerText 必须包含写入文本
     const bodyText = await readIframeBodyText(page, "#ueditor_0");
-    assert.ok(
-      bodyText.replace(/\s+/g, "").includes(value.replace(/\s+/g, "")),
-      `iframe body 回读必须包含写入文本；实际=${JSON.stringify(bodyText)}`,
-    );
-
+    assert.ok(bodyText.replace(/\s+/g, "").includes(value.replace(/\s+/g, "")), `iframe body 回读必须包含写入文本；实际=${JSON.stringify(bodyText)}`);
     // 容器 ID 必须是真实 DOM 上的 #briefeditor / #ueditor_0
     assert.equal(await page.locator("#briefeditor").count(), 1);
     assert.equal(await page.locator("#ueditor_0").count(), 1);
@@ -358,10 +319,48 @@ test("产品特色：label 锚点失败时回退 #briefeditor 容器（scopeSour
   }
 });
 
+/** 在父页面注册一个模拟 UEditor 实例：sync 把 body.innerHTML 同步到 hidden textarea。noSync=true 时 sync 不动 hidden（用于验证未同步场景）。 */
+async function installMockUEditor(page: Page, hiddenId: string | null, noSync: boolean): Promise<void> {
+  await page.waitForFunction(() => Boolean(document.querySelector("#ueditor_0")?.contentDocument?.body));
+  await page.evaluate(({ hiddenId, noSync }) => {
+    const body = (document.querySelector("#ueditor_0") as HTMLIFrameElement).contentDocument!.body;
+    const hidden = hiddenId ? document.querySelector(`#${hiddenId}`) as HTMLTextAreaElement : null;
+    const editor: any = {
+      body, options: { textarea: "briefeditor" },
+      setContent(html: string) { body.innerHTML = html; },
+      getContent() { return body.innerHTML; },
+      sync() { if (hidden) hidden.value = body.innerHTML; },
+    };
+    (window as any).UE = { instants: { ueditorInstant0: editor } };
+  }, { hiddenId, noSync });
+}
+
+test("UEditor：精确 parent.UE 实例 setContent + sync 后必须验证 hidden textarea", async () => {
+  const srcdoc = `<!doctype html><html><body contenteditable="true"></body></html>`;
+  const html = `<div id="briefeditor"><div class="ant-form-item"><label>产品特色</label><iframe id="ueditor_0" srcdoc="${srcdoc.replace(/"/g, "&quot;")}"></iframe><textarea id="ueditor_textarea_briefeditor" name="briefeditor"></textarea></div></div>`;
+  const page = await newPage(html);
+  try {
+    await installMockUEditor(page, "ueditor_textarea_briefeditor", false);
+    const value = "UEditor 精确实例同步成功";
+    const result = await fillProductFeatures(page, value);
+    assert.equal(result.filled, true);
+    assert.ok((await page.locator("#ueditor_textarea_briefeditor").inputValue()).includes(value));
+  } finally { await page.close(); }
+});
+
+test("UEditor：body 有字但 hidden textarea 未同步不得判成功", async () => {
+  const srcdoc = `<!doctype html><html><body contenteditable="true"></body></html>`;
+  const html = `<div id="briefeditor"><div class="ant-form-item"><label>产品特色</label><iframe id="ueditor_0" srcdoc="${srcdoc.replace(/"/g, "&quot;")}"></iframe><textarea name="briefeditor" style="display:none"></textarea></div></div>`;
+  const page = await newPage(html);
+  try {
+    await installMockUEditor(page, null, true);
+    const result = await fillProductFeatures(page, "不得仅凭 body 判定成功");
+    assert.equal(result.filled, false);
+  } finally { await page.close(); }
+});
+
 test("产品特色：完全无候选（无 label、无 #briefeditor、无 #pm_features）时报诊断且不改无关输入框", async () => {
-  // 既无产品特色/产品特点 label，也无任何 fallback 容器；只剩一个不相关输入框。
-  // 必须：filled=false；editorType / scopeSource 都 undefined；diagnostic 非空且包含新
-  // 关键词；无关 textarea 不能被写入。
+  // 既无产品特色/产品特点 label，也无任何 fallback 容器；只剩一个不相关输入框；无关 textarea 不能被写入。
   const html = `
     <div class="ant-form-item" id="unrelated">
       <div class="ant-form-item-label">
@@ -386,12 +385,7 @@ test("产品特色：完全无候选（无 label、无 #briefeditor、无 #pm_fe
       `缺失场景必须返回非空 diagnostic；实际=${JSON.stringify(result.diagnostic)}`,
     );
     // diagnostic 必须包含新 fallback 关键词（或 label 锚点 / 作用域）
-    assert.ok(
-      /label (#pm |#brief|#产品)|#briefeditor|#pm_features|产品特色|产品特点|作用域/.test(
-        result.diagnostic,
-      ),
-      `diagnostic 必须包含 label / fallback 容器 / 关键词上下文；实际=${result.diagnostic}`,
-    );
+    assert.ok(/label (#pm |#brief|#产品)|#briefeditor|#pm_features|产品特色|产品特点|作用域/.test(result.diagnostic), `diagnostic 必须包含 label / fallback 容器 / 关键词上下文；实际=${result.diagnostic}`);
 
     // 验证无关 textarea 没有被改写（禁止全页盲扫）
     const unrelated = await page.locator("#unrelated-textarea").inputValue();

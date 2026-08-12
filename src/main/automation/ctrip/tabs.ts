@@ -1,15 +1,11 @@
 
 /**
- * Tab / Section 导航 + 安全保存 + save-then-advance 状态机：
- *   - clickSection / clickSafeSave 是跨阶段共用的跳转与保存原语；
- *   - waitForSectionEnabled / findUnlockedSectionLabel / findActiveTabLabel 用于探测下一个可点 tab；
- *   - saveThenAdvance 实现「保存 → URL 落点 / tab 自动激活 / 下一步按钮 / 兜底 fallbackUrl」
- *     的窄修复版状态机，被多个 phase handler 复用；
- *   - submitCurrentSectionAndNext 单独点「提交审核并下一步」；
- *   - openProductEditor / ensureBasicInfoTabVisible 负责跨产品的入口跳转与基本 tab 定位；
- *   - isProductImageTextUrl 是 VBK productImageText 路径片段匹配。
- *
- * 顶部带 `// @ts-nocheck`，因为 page 与 locator 类型都是动态传入。
+ * Tab / Section 导航 + 安全保存 + save-then-advance 状态机：跨 phase 复用
+ * 的跳转/保存原语（clickSection / clickSafeSave / waitForSectionEnabled /
+ * findUnlockedSectionLabel / findActiveTabLabel）；saveThenAdvance 是「保存
+ * → URL 落点 / tab 自动激活 / 下一步按钮 / 按钮缺失但 tab 已解锁 / 兜底
+ * fallbackUrl」窄修复状态机；openProductEditor / ensureBasicInfoTabVisible
+ * 负责跨产品入口跳转与基本 tab 定位。
  */
 
 // @ts-nocheck
@@ -18,9 +14,12 @@
  * 「保存 → 进入目标 tab」状态机（窄修复版）：
  *   1) 调 clickSafeSave 保存并吃「保存成功」弹窗；
  *   2) 若 URL 已落点 / 目标 tab 已 active → auto-navigated；
- *   3) 否则点「下一步」按钮，等待 URL / tab 落点 → navigated；
+ *   3) 否则精确点「下一步」按钮，等待 URL / tab 落点 → navigated；
  *   4) 仅目标 tab 解锁 → clickSection 落点 → tabUnlocked；
- *   5) 都不命中 → 若有 fallbackUrl 则直接导航；再不行就抛错。
+ *   5) 下一步按钮已缺失 (count===0) 且目标 tab 已解锁 → clickSection 落点
+ *      → tabAlreadyUnlocked（真实幂等：行程已提交/产品已存盘时按钮被替换）；
+ *   6) 都不命中 → 若有 fallbackUrl 则直接导航；再不行就抛错。
+ *   注：count > 0 时仍按原路径走按钮点击，绝不能提前跳过。
  */
 async function saveThenAdvance(page, options) {
   const {
@@ -34,6 +33,9 @@ async function saveThenAdvance(page, options) {
     fallbackUrl,
   } = options;
   void fallbackUrl;
+
+  // 必须先 dismissKnownNoticeDialogs 吃掉线路变更提示等白名单弹窗，否则其遮罩会拦下后续 click。
+  await dismissKnownNoticeDialogs(page);
 
   const effectiveSavedWith = savedWith ?? (await clickSafeSave(page, saveButtonNames));
 
@@ -49,6 +51,18 @@ async function saveThenAdvance(page, options) {
   const buttons = page.getByRole("button", { name: nextButtonLabel, exact: true });
   const count = await buttons.count();
   if (count !== 1) {
+    // 真实幂等场景：行程已提交后「下一步」按钮已不存在（VBK tourdays 页
+    // 只剩「存为草稿 / 提交审核」），目标 tab 可能已解锁。先探测 unlocked：
+    // 解锁则 clickSection 落点并返回 tabAlreadyUnlocked；锁定 / count>1
+    // 仍抛原数量错误。count === 1 时由下方正常按钮点击路径接管，绝不
+    // 在按钮仍存在时提前跳过点击。
+    if (count === 0) {
+      const unlockedLabel = await findUnlockedSectionLabel(page, targetTabLabels);
+      if (unlockedLabel) {
+        await clickSection(page, unlockedLabel);
+        return { advanced: true, mode: "tabAlreadyUnlocked", savedWith: effectiveSavedWith };
+      }
+    }
     throw new Error(
       `${phase}的「${nextButtonLabel}」按钮数量异常：期望 1，实际 ${count}；观测 URL=${page.url()}；目标 tab=${targetTabLabel}。`,
     );
@@ -69,6 +83,7 @@ async function saveThenAdvance(page, options) {
       `${phase}的「${nextButtonLabel}」按钮 aria-disabled=true，无法提交；观测 URL=${page.url()}；目标 tab=${targetTabLabel}。`,
     );
   }
+  // 保存/下一步之后新冒出来的线路变更提示，再清一次。关闭提示不等于推进成功。
   await button.click();
 
   await dismissKnownNoticeDialogs(page, { waitForSaveSuccess: true });
@@ -326,18 +341,6 @@ export function isProductImageTextUrl(url) {
 
 // forward declaration，避免循环依赖
 declare function assertCount(locator: any, expected: number, description: string): Promise<any>;
-
-/**
- * 通用 save-then-advance helper（窄修复版）：
- * 状态机严格按以下顺序判定「保存后是否已真正进入目标页」：
- *   1) 先用约定的安全保存按钮保存，吃掉「保存成功」弹窗；
- *   2) URL 已落点（isTargetUrl）→ auto-navigated；
- *   3) 目标 tab 已 active → auto-navigated；
- *   4) 以上都不命中 → 点精确「下一步」按钮；
- *   5) 点击下一步后等待门禁：URL 落点 / 目标 tab active → navigated；
- *      仅目标 tab 解锁但未激活 → 安全 clickSection 落点 → tabUnlocked；
- *      都不命中 → 抛错。
- */
 
 /**
  * 跳到 productEditorUrl 并等 baseInfoMerge / tourdays 路径之一落点：

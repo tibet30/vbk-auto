@@ -11,10 +11,13 @@
 import { delay, assertCount } from "../utils.js";
 import { clickSection, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
-import { fillRecommendationReasons } from "./recommendations.js";
-import { buildRecommendationReasonsPlan } from "./recommendations.js";
+import {
+  buildRecommendationReasonsPlan,
+  fillRecommendationReasons,
+} from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
 import { fillProductFeatures } from "./features.js";
+import { installSaveMonitor, type SaveMonitorOutcome } from "./save-monitor.js";
 
 export { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 
@@ -242,6 +245,12 @@ export async function selectCtripLibraryCover(page, cover) {
  *     即便 readiness 通过、产品被改坏、运行时 derivation 漏字段，
  *     VBK 阶段自身也会在打开任何 tab / 弹窗之前抛错；
  *   - 不调用 VBK、不打开网络、不会留下半成品页面状态。
+ *
+ * 第三道防御（保存门禁）：在产品图文动作开始前挂 /15638/savedescriptioninfo 与
+ * /15638/checkSensitiveWord 监听；只有官方响应 success=true 且 ResponseStatus.Ack=Success
+ * 才允许继续推进；命中敏感词 / 业务失败 / 无响应都直接抛错，绝不因「目标 tab 已解锁」
+ * 误判完成。install 放在所有 UI 动作之前，覆盖 UEditor blur 触发的
+ * checkSensitiveWord 等前置检测；finally 中 uninstall 保证不会跨产品残留副作用。
  */
 export async function fillAndSavePresentation(page, product) {
   // 第一道防御：统一从 automation-contract 取真实契约，错误文案面向运营。
@@ -263,36 +272,59 @@ export async function fillAndSavePresentation(page, product) {
   ) {
     throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }
-  // 第二道防御（推荐理由 VBK 行写入前）：buildRecommendationReasonsPlan 内部
-  // 仍然校验 3 条 + 白名单 + 互不重复，错误信息保持原样，避免改动影响既有测试。
-  const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
-  await clickSection(page, ["产品图文", "图文信息"]);
-  await fillRecommendationReasons(page, recommendations);
-  await selectCtripLibraryCover(page, presentation.cover);
-  await fillFirstVisible(
-    page.locator('textarea[placeholder*="推荐"], textarea'),
-    presentation.recommendation,
-    "推荐语输入框",
-  );
-  // 产品特点：先 label 锚定 .ant-form-item，再 fallback 到 #pm_features 容器；
-  // 失败抛「找不到产品特点富文本输入框」并附诊断（不静默保存）。
-  const featuresResult = await fillProductFeatures(page, presentation.features);
-  const filledFeatures = featuresResult.filled;
-  if (!filledFeatures) {
-    const editorTypeLabel = featuresResult.editorType ?? "未识别";
-    const scopeLabel = featuresResult.scopeSource ?? "无作用域";
-    throw new Error(
-      `找不到产品特点富文本输入框（编辑器类型=${editorTypeLabel}，作用域来源=${scopeLabel}）；诊断：${featuresResult.diagnostic || "无候选作用域/编辑器"}`,
+
+  // 第三道防御（保存门禁）：在产品图文动作前挂 /15638/savedescriptioninfo 与
+  // /15638/checkSensitiveWord 监听，覆盖整段 UI 操作期间的所有官方响应。
+  const monitor = installSaveMonitor(page);
+  let saveOutcome: SaveMonitorOutcome | null = null;
+  let saveError: Error | null = null;
+  try {
+    // 第二道防御（推荐理由 VBK 行写入前）：buildRecommendationReasonsPlan 内部
+    // 仍然校验 3 条 + 白名单 + 互不重复，错误信息保持原样，避免改动影响既有测试。
+    const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
+    await clickSection(page, ["产品图文", "图文信息"]);
+    await fillRecommendationReasons(page, recommendations);
+    await selectCtripLibraryCover(page, presentation.cover);
+    await fillFirstVisible(
+      page.locator('textarea[placeholder*="推荐"], textarea'),
+      presentation.recommendation,
+      "推荐语输入框",
     );
+    // 产品特点：先 label 锚定 .ant-form-item，再 fallback 到 #pm_features 容器；
+    // 失败抛「找不到产品特点富文本输入框」并附诊断（不静默保存）。
+    const featuresResult = await fillProductFeatures(page, presentation.features);
+    const filledFeatures = featuresResult.filled;
+    if (!filledFeatures) {
+      const editorTypeLabel = featuresResult.editorType ?? "未识别";
+      const scopeLabel = featuresResult.scopeSource ?? "无作用域";
+      throw new Error(
+        `找不到产品特点富文本输入框（编辑器类型=${editorTypeLabel}，作用域来源=${scopeLabel}）；诊断：${featuresResult.diagnostic || "无候选作用域/编辑器"}`,
+      );
+    }
+
+    const advanced = await saveThenAdvance(page, {
+      phase: "产品图文",
+      targetTabLabel: "行程描述",
+      saveButtonNames: ["保存", "保存并下一步"],
+      targetTabLabels: ["行程描述"],
+      isTargetUrl: (url) =>
+        typeof url === "string" && !/(^|[/?&])productImageText([/?&]|$)/.test(url),
+    });
+    // saveThenAdvance 内部已经点了保存按钮；接下来等官方保存响应。
+    saveOutcome = await monitor.waitForSave();
+    return advanced;
+  } catch (error) {
+    saveError = error as Error;
+    throw error;
+  } finally {
+    monitor.uninstall();
+    // 业务校验：只有成功响应才允许 silent pass；失败响应统一抛错
+    if (saveError === null && saveOutcome && !saveOutcome.saved) {
+      throw new Error(
+        `产品图文保存未确认成功：HTTP=${saveOutcome.httpStatus} Ack=${saveOutcome.ack} success=${saveOutcome.success}`,
+      );
+    }
   }
-  return saveThenAdvance(page, {
-    phase: "产品图文",
-    targetTabLabel: "行程描述",
-    saveButtonNames: ["保存", "保存并下一步"],
-    targetTabLabels: ["行程描述"],
-    isTargetUrl: (url) =>
-      typeof url === "string" && !/(^|[/?&])productImageText([/?&]|$)/.test(url),
-  });
 }
 
 export {

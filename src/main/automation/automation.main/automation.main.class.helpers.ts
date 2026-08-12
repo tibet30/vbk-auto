@@ -181,8 +181,12 @@ export function markCancelled(run: AutomationRun, persist: () => void) {
 export function ensureBrowserHasBounds(browser: VbkBrowser): void {
   const view = (browser as unknown as { view?: { getBounds?: () => { width: number; height: number } | null } } | null | undefined)?.view;
   if (!view || typeof view.getBounds !== "function") return;
-  const setBounds = (browser as unknown as { setBounds?: (b: { x: number; y: number; width: number; height: number }) => void } | null | undefined)?.setBounds;
-  if (typeof setBounds !== "function") return;
+  // 不能把 browser.setBounds 提取到局部变量再以普通函数形式调用：
+  // VbkBrowser.setBounds 内部依赖 `this._bounds = bounds`，被解构后
+  // this 在严格模式下会变 undefined，进而抛 "Cannot set properties of
+  // undefined (setting '_bounds')"。这里直接用属性访问，确保 this 绑
+  // 定到 browser 实例。
+  if (typeof browser.setBounds !== "function") return;
 
   const BrowserWindow = resolveElectronBrowserWindow();
   if (!BrowserWindow) return;
@@ -207,7 +211,7 @@ export function ensureBrowserHasBounds(browser: VbkBrowser): void {
   // 640 保证嵌入页面不被携程压成移动版布局。
   browser.setVisible?.(true);
   const fallbackWidth = Math.max(640, Math.round(winWidth * 0.66));
-  setBounds!({
+  browser.setBounds({
     x: winWidth - fallbackWidth,
     y: 0,
     width: fallbackWidth,

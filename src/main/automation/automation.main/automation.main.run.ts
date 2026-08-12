@@ -35,9 +35,10 @@ import {
   runProductPreflight,
   saveScreenshot,
 } from "../ctrip/ctrip.js";
-import { AutomationCancelledError } from "./automation.main.errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
+import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
+import { AutomationCancelledError } from "./automation.main.errors.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 
@@ -287,8 +288,17 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         }
         log(`已保存：${phase}`);
       }
-      run.status = "succeeded"; run.currentPhase = undefined; run.screenshot = await saveScreenshot(page, "desktop-draft", productId!);
-      log("产品草稿已保存，未提交审核、未发布。", "warning"); ctx.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "draft_saved"); persist();
+      // 全部业务阶段成功后的收尾：best-effort screenshot（捕获 saveScreenshot
+      // 错误，避免页面 width=0 / page 已 detach 等竞态把整条 run 误标
+      // failed/blocked），然后切产品状态 draft_saved 并 persist。screenshot
+      // 失败仅写一条 warning log，业务成功状态保持 succeeded + undefined +
+      // draft_saved，绝不进入 failed/blocked 路径。
+      run.status = "succeeded";
+      run.currentPhase = undefined;
+      await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
+      log("产品草稿已保存，未提交审核、未发布。", "warning");
+      ctx.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "draft_saved");
+      persist();
     } catch (error) {
       // 「停止」流程不应该被 catch 当作 failed —— stop() 已经把 run.status
       // 改为 cancelled 并 emit 过，这里只需清理 cancellationRequested 后

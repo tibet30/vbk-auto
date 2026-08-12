@@ -33,6 +33,7 @@ import {
   normaliseExpiry,
 } from "./vbk-cookie-serializer.js";
 import { waitForDomText } from "./vbk-page-wait.js";
+import { navigateVbkPage } from "./vbk-navigation.js";
 import {
   VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE,
   isVbkAuthCookieSummaryComplete,
@@ -249,14 +250,18 @@ export class VbkBrowser {
   }
 
   /**
-   * 内置 WebView 内导航；URL 必须命中 allowedHosts 白名单，否则抛「仅允许…」错误。
+   * 内置 WebView 内导航；具体校验 / beforeunload 处理 / ERR_ABORTED 兜底逻辑
+   * 全部由 ./vbk-navigation.js 的 navigateVbkPage 承担。
+   *
+   * 该方法仅做接线，不再重复白名单 / 事件监听 / 错误归一化逻辑：
+   *   - 调用期间临时挂 will-prevent-unload 监听，event.preventDefault() 放行；
+   *   - ERR_ABORTED 但已抵达目标时视作成功（容忍尾斜杠 / hash 差异）；
+   *   - 仍未到目标时抛含 source / target / code 的明确错误；
+   *   - 监听器 finally 清理，永不全局永久忽略 beforeunload；
+   *   - 不无限重试。
    */
   async navigate(url: string) {
-    const host = new URL(url).hostname;
-    if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) {
-      throw new Error("仅允许在内置 VBK 浏览器中打开携程页面");
-    }
-    await this.view?.webContents.loadURL(url);
+    await navigateVbkPage(this.view?.webContents, url);
   }
 
   /**

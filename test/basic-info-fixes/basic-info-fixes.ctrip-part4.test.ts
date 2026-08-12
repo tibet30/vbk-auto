@@ -60,54 +60,77 @@ test("状态机 5：presentation / itinerary 走同一通用 helper，禁止中�
   );
 });
 
-// 行程描述 → 套餐管理 的真实自动跳转证据是目标「套餐管理」tab 的
-// aria-selected=true（顶层 tab role=tab 的属性）。当前 `fillItineraryDraft`
-// 阶段 URL 可能不含 baseInfoMerge 段（例如独立 itinerary 页），旧「URL 不再
-// 属于 baseInfoMerge」的反向判断会在每次保存后立刻误判 auto-navigated 并
-// 跳过点下一步，必须改回「永不自行判定 URL 命中」。本测试锁死源码契约，防
-// 回归。
-test("状态机 5.5：fillItineraryDraft 的 isTargetUrl 不依赖 URL 片段（永不自行判定）", async () => {
+// 行程描述 → 套餐管理 的真实自动跳转证据是 URL 直接落点
+//   https://vbooking.ctrip.com/ivbk/vendor/packageManage?productid=...&from=vbk
+// 跨页面后套餐 tab 暂不存在，原 `isTargetUrl: () => false` 会让 attempt2
+// 真实成功被判为「未到达目标」并继续重试 attempt3 产生噪声。本测试锁死
+// 源码契约：必须引用精确 packageManage URL 检测函数「isPackageManageUrl」，
+// 不得退回 () => false，也不得用 baseInfoMerge 反向判断 / 中文 tab 名 /
+// 路径前缀子串（packageManageList 等）做 URL 命中。
+test("状态机 5.5：fillItineraryDraft 的 isTargetUrl 必须精准命中 packageManage 路径（替代旧的 () => false）", async () => {
   const ctrip = readCtripSource();
   const itinIdx = ctrip.indexOf("export async function fillItineraryDraft");
   const itinBody = ctrip.slice(itinIdx, ctrip.indexOf("async function chooseRadioValue", itinIdx));
 
-  // 必须在 saveThenAdvance 调用块里出现 `isTargetUrl: () => false`，这是
-  // 既能通过 TS 类型「(url: string) => boolean」、又能完全脱离 URL 路径段的
-  // 唯一契约形式：参数声明 + 显式 false 短函数体。
+  // 必须在 saveThenAdvance 调用块里出现 `isTargetUrl: isPackageManageUrl`
+  // 形式（直接引用纯函数）。这是替代旧「() => false」的唯一契约形式。
   assert.match(
     itinBody,
+    /isTargetUrl:\s*isPackageManageUrl\b/,
+    "fillItineraryDraft 必须把 isTargetUrl 写成「isPackageManageUrl」函数引用，自动跳转证据由 VBK packageManage URL 落点判定",
+  );
+
+  // 旧的 `() => false` 契约必须清除：保存后真实跳转会被它误判为未到达，
+  // 继续点下一步生成 attempt3 噪声。
+  assert.doesNotMatch(
+    itinBody,
     /isTargetUrl:\s*\(\s*\)\s*=>\s*false\b/,
-    "fillItineraryDraft 必须把 isTargetUrl 写成「() => false」，自动跳转证据由目标「套餐管理」tab active 判定",
+    "fillItineraryDraft 已废弃「isTargetUrl: () => false」契约，禁止回潮",
   );
 
-  // 任何尝试恢复成「URL 包含某路径段」或「URL 排除某路径段」（中文 tab
-  // 名或英文路径段）都会因这段源码契约而回归。下面这条正向断言防住「留
-  // baseInfoMerge 兜底」的具体回归路径：之前的实现是
-  //   (url) => typeof url === "string" && !/baseInfoMerge/.test(url)
-  // 必须不存在——它会让 itinerary 独立页面的 URL 在保存后被立刻误判为
-  // auto-navigated，跳过点下一步。
+  // 禁止退化到内联 lambda / 直接 URL 片段判断（曾经的反例包括
+  //   (url) => !/baseInfoMerge/.test(url)、
+  //   (url) => /packageManage/.test(url) 等）。任何「isTargetUrl: (...) =>」
+  // 形式都必须不存在，让源码契约只能通过 ./url.ts 中的纯函数来诊断。
   assert.doesNotMatch(
     itinBody,
-    /isTargetUrl:\s*\([^)]*\)\s*=>[\s\S]*?baseInfoMerge/,
-    "fillItineraryDraft 的 isTargetUrl 禁止使用 baseInfoMerge 段兜底，否则 itinerary 独立页 URL 会误判 auto-navigated",
+    /isTargetUrl:\s*\([^)]*\)\s*=>|isTargetUrl:\s*url\s*=>/,
+    "fillItineraryDraft 的 isTargetUrl 必须是 isPackageManageUrl 函数引用，禁止再内联箭头函数",
   );
 
-  // 同样禁止恢复成「URL 不再属于 productImageText / 包车描述 / 推荐语 / 套餐管理」等任何路径段判断，回归源不可出现。
+  // 禁止「URL 包含 baseInfoMerge」等用旧段做反向兜底的判断，避免 itinerary
+  // 独立页保存后被立刻误判 auto-navigated 并跳过点下一步。
   assert.doesNotMatch(
     itinBody,
-    /isTargetUrl:\s*\([^)]*\)\s*=>[\s\S]*?(productImageText|行程描述|套餐管理)/,
-    "fillItineraryDraft 的 isTargetUrl 禁止依赖 productImageText / 中文 tab 名做 URL 命中判断",
+    /isTargetUrl:[^\n,]*baseInfoMerge/,
+    "fillItineraryDraft 的 isTargetUrl 禁止使用 baseInfoMerge 段（含反向 / 正向）做 URL 判定",
   );
 
-  // 防「fetch-first baseInfoMerge 兑底未覆盖到的中间形态」：除上面「() => false」外，
-  // isTargetUrl 整个字段不允许是「带参数的箭头函数」（任何「url =>」或 「(url) =>」
-  // 形式都不允许），强制 must be () => false。
+  // 禁止再把中文 tab 名（行程描述 / 套餐管理）或 productImageText 路径段写
+  // 进 isTargetUrl；URL 命中条件只能来自 ./url.ts 的纯函数（packageManage
+  // 路径段），源码契约层面保持这些关键字缺席。
   assert.doesNotMatch(
     itinBody,
-    /isTargetUrl:\s*\(\s*url\s*\)\s*=>|isTargetUrl:\s*url\s*=>/,
-    "fillItineraryDraft 的 isTargetUrl 必须是「() => false」，禁止接收 url 形参再自定义返回",
+    /isTargetUrl:[^\n,]*(行程描述|套餐管理|productImageText)/,
+    "fillItineraryDraft 的 isTargetUrl 禁止依赖中文 tab 名 / productImageText 做 URL 判定",
+  );
+
+  const { isPackageManageUrl } = await import("../../src/main/automation/ctrip/itinerary/main.js");
+  assert.strictEqual(
+    isPackageManageUrl("https://vbooking.ctrip.com/foo/packageManage/bar"),
+    false,
+  );
+  assert.strictEqual(
+    isPackageManageUrl("https://vbooking.ctrip.com/ivbk/vendor/packageManage/child"),
+    false,
   );
 });
+
+// —— isPackageManageUrl 真值表边界 ——
+// 单元级真值表边界（正/反命中、相似路径 / 子路径 / 端口错乱 / 子域名
+// 伪装 / query-only 串 / 非字符串 / 解析失败）已下沉到
+// test/automation/itinerary-package-url.test.ts 单独维护，本文件只保留
+// 状态机级的源码契约锁（isTargetUrl 字段形式 + 禁止回退形态）。
 
 test("状态机 6：package / terms 不接入通用 helper，不碰提审/发布/价格", async () => {
   const ctrip = readCtripSource();

@@ -8,7 +8,7 @@
  * 顶部带 `// @ts-nocheck`，依赖 debug 的 breakpoint 工具便于手动复现。
  */
 
-import { delay, escapeRegExp } from "../utils.js";
+import { delay, escapeRegExp, safeClick } from "../utils.js";
 import { breakpoint } from "../../debug.js";
 import { cardsByPrefix, ensureCheckboxChecked } from "./common.js";
 
@@ -277,7 +277,6 @@ async function handleAirportTrainModal(page, city) {
   return true;
 }
 
-declare function safeClick(page: any, locator: any, options?: any): Promise<any>;
 
 export {
   fillPickupAndDropoff,

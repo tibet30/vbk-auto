@@ -1,7 +1,7 @@
 /**
  * 通用弹窗 / modal 自愈工具集：
  *   - closeBlockingDialogs：通用关所有挡路弹窗（safeClick 失败后会自愈）；
- *   - dismissKnownNoticeDialogs：保存成功 / 必填提示等轻量提示弹窗（保存后等「保存成功」可开启）；
+ *   - dismissKnownNoticeDialogs：保存成功 / 线路变更提示 / 必填提示等轻量提示弹窗（保存后等「保存成功」可开启）；
  *   - dismissDataRiskDialog：境内短途旅游 + 下拉选到境外同名项时 VBK 阻断弹窗；
  *   - dismissCustomizationModal：分销渠道二次确认（泛定制加返协议等）。
  *
@@ -10,7 +10,7 @@
 // @ts-nocheck
 // 通用弹窗 / modal 自愈：关闭 Playwright 操作过程中挡路的 VBK 弹窗。
 // - closeBlockingDialogs：通用"关所有挡路弹窗"，safeClick 失败后会自愈。
-// - dismissKnownNoticeDialogs：保存成功、必填提示等轻量提示弹窗。
+// - dismissKnownNoticeDialogs：保存成功、线路变更提示、必填提示等轻量提示弹窗。
 // - dismissDataRiskDialog：境内短途旅游但下拉选了境外同名项时的 VBK 阻断。
 // - dismissCustomizationModal：分销渠道二次确认（泛定制加返协议等）。
 
@@ -79,16 +79,15 @@ async function closeBlockingDialogs(page, keepOpenSelectors = []) {
 }
 
 /**
- * 关闭已知轻量提示弹窗（保存成功 / 不能输入重复省份/景点等）：
+ * 关闭已知轻量提示弹窗（保存成功 / 线路变更提示 / 不能输入重复省份/景点等）：
  *   - waitForSaveSuccess=true：把超时拉到 5s 并把匹配模式放宽到「保存成功」为止；
  *   - 默认 800ms 内扫一轮任一已知的提示并点「我知道了 / 知道了 / 确定」关闭。
  * 用于保存后等提示自动清掉再继续，避免 stage 误读弹窗。
  */
 async function dismissKnownNoticeDialogs(page, { waitForSaveSuccess = false } = {}) {
   const deadline = Date.now() + (waitForSaveSuccess ? 5_000 : 800);
-  const knownNotice = waitForSaveSuccess
-    ? /保存成功/
-    : /保存成功|不能输入重复的国家或省或景区、景点、其他地区/;
+  // 线路变更提示是可安全确认的轻量白名单提示；未知/风险 modal 不匹配，绝不点击。
+  const knownNotice = /保存成功|不能输入重复的国家或省或景区、景点、其他地区|线路变更提示/;
 
   do {
     const dialogs = page.getByRole("dialog");
@@ -102,9 +101,25 @@ async function dismissKnownNoticeDialogs(page, { waitForSaveSuccess = false } = 
         name: /^(我知道了|知道了|确 定|确定)$/,
       });
       if (await acknowledge.count()) {
+        // 点击前先把当前 dialog 钉成 elementHandle；handle 绑定到具体节点，
+        // 即使点击后 dialogs.nth(0) 被重新解析指向后继 dialog，handle 仍跟原节点。
+        const handle = await dialog.elementHandle();
         await acknowledge.first().click();
-        await dialog.waitFor({ state: "hidden", timeout: 3_000 });
-        await delay(300);
+        // 严格等待原 dialog 在 DOM 上真正 hidden（节点被移除或原生隐藏）。
+        // 不能用 setAttribute / display:none 绕过：会留下 modal mask / 拦截事件。
+        if (handle) {
+          await handle.waitForElementState("hidden", { timeout: 3_000 }).catch(async () => {
+            // handle 已 detached → 原 dialog 一定不在 DOM，等价 hidden。
+            const stillAttached = await page.evaluate(
+              (el) => el && document.contains(el),
+              handle,
+            );
+            if (stillAttached) throw new Error("dismissKnownNoticeDialogs: 原 dialog 未 hidden");
+          });
+        } else {
+          await dialog.waitFor({ state: "hidden", timeout: 3_000 });
+        }
+        await delay(150);
         return true;
       }
     }

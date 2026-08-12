@@ -287,6 +287,7 @@ function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
 function readiness(projectId: string): ProjectReadiness {
   const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
   const issues: ProjectReadiness["issues"] = [];
+  let hiddenBlockers = 0;
   const parsed = productSchema.safeParse(project.product);
   if (!parsed.success) {
     for (const issue of parsed.error.issues.slice(0, 6)) issues.push({ label: issue.path.join(".") || "产品方案", detail: issue.message });
@@ -300,16 +301,15 @@ function readiness(projectId: string): ProjectReadiness {
   for (const task of unresolved) issues.push(openResearchTaskToIssue(task));
   // 与自动录入使用同一套要求，避免界面显示「可以录入」后才在携程失败。
   if (parsed.success) for (const blocker of automationBlockers(project.product)) issues.push(blocker);
-  // 自动录入当前正在运行 / 已停止等待用户处理时，再列一条直达指引。
+  // 自动录入已停止是当前运行状态，不是产品方案缺口；它阻断 readiness，
+  // 但不进入「待处理事项」列表，避免用户看到一条额外任务。
   if (project.automation?.recovery?.phases) {
     const blocked = Object.values(project.automation.recovery.phases).find((rec) => rec.state === "needs_user");
-    if (blocked) issues.push({
-      label: "自动录入已停止",
-      detail: blocked.userInstruction || "请先按提示手动处理后再次保存草稿",
-    });
+    if (blocked) hiddenBlockers += 1;
   }
   const mergedIssues = mergeReadinessIssues(issues);
-  return { ready: mergedIssues.length === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, mergedIssues.length)) / 12) * 100), issues: mergedIssues };
+  const blockerCount = mergedIssues.length + hiddenBlockers;
+  return { ready: blockerCount === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, blockerCount)) / 12) * 100), issues: mergedIssues };
 }
 
 /**
@@ -778,7 +778,11 @@ function registerIpc() {
   ipcMain.handle("automation:stop", (_event, projectId: string) => automation.stop(projectId));
   // automation:retry 真正接到 preparePhaseRetry：如果项目当前的 automation
   // 已是 failed，则从 currentPhase / 最后失败阶段继续；否则退化为 start。
+  // 先做一次窄恢复：旧版截图失败留下的「业务全成功 + run 标 failed + 项目 blocked」
+  // 脏数据会因 failed phase 找不到而退化为 start（全量重跑错误）或被
+  // retryPhase(preflight) 拒绝；本恢复按业务完成切回 succeeded + draft_saved。
   ipcMain.handle("automation:retry", async (_event, projectId: string) => {
+    if (await automation.recoverLegacyScreenshotFalseFailure(projectId)) return;
     const project = db.getProject(projectId);
     if (!project) throw projectNotFound(projectId);
     const failedPhase = project.automation?.recovery

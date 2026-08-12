@@ -36,7 +36,8 @@ test("手动 POI 调试日志必须只在 renderer 开发模式输出，并使�
   assert.match(source, /const POI_MANUAL_LOG_PREFIX = "\[poi\.manual\]"/);
   assert.match(source, /function logPoiManual\(/);
   assert.match(source, /if \(!import\.meta\.env\.DEV\) return;/);
-  assert.match(source, /console\.debug\(POI_MANUAL_LOG_PREFIX,\s*event,\s*\{\s*stage: event,\s*\.\.\.context\s*\}\)/);
+  // logDebug / console.debug 都会被认作可观测日志出口。
+  assert.match(source, /(console\.debug|logDebug)\(POI_MANUAL_LOG_PREFIX,\s*event,\s*\{\s*stage: event,\s*\.\.\.context\s*\}\)/);
 });
 
 test("手动 POI 调试日志覆盖编辑、搜索、选择和保存链路的安全上下文", () => {

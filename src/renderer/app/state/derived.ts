@@ -1,3 +1,4 @@
+import { logInfo, logWarn } from "../../../shared/log-timestamp.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   activeAdvisorHint,
@@ -227,7 +228,7 @@ export function useAppStateDerived(state: AppStateBase) {
       autoStartUsed,
     })) return;
     setAutoStartUsed(project.id);
-    console.info("[App] auto-planning fallback for empty project", { projectId: project.id, provider: settings?.aiProvider });
+    logInfo("[App] auto-planning fallback for empty project", { projectId: project.id, provider: settings?.aiProvider });
     const capturedProjectId = project.id;
     let cancelled = false;
     // planning.start IPC 会同步等待整轮 AI；先放入本地 pending，让 UI 立刻显示
@@ -251,7 +252,7 @@ export function useAppStateDerived(state: AppStateBase) {
       }
     }).catch((error) => {
       if (cancelled || currentProjectIdRefForPlanning.current !== capturedProjectId) return;
-      console.warn("[App] planning.start failed", error);
+      logWarn("[App] planning.start failed", error);
       setNotice(`方案规划异常：${(error as { message?: string })?.message ?? String(error)}`);
     });
     return () => {
@@ -293,7 +294,7 @@ export function useAppStateDerived(state: AppStateBase) {
       // lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错时抢跑
       // （lookup 失败通常意味着项目状态未知，不应擅自再生成）。把 sentinel 推进；
       // 下次重新打开该项目会再次执行一次补偿 lookup。
-      console.warn("[App] planning.state lookup failed", { projectId: capturedId, error });
+      logWarn("[App] planning.state lookup failed", { projectId: capturedId, error });
       setPlanningStateLoadedProjectId(capturedId);
     });
 
@@ -471,7 +472,7 @@ export function useAppStateDerived(state: AppStateBase) {
     if (!project || !api()) return;
     if (planningBusy) return; // 重复点击锁：与 UI 端 disabled 同源。
     setPlanningBusy(true);
-    console.info("[App] planning.resume click", { projectId: project.id, planningStateStatus: planningState?.status, currentStage: planningState?.currentStage });
+    logInfo("[App] planning.resume click", { projectId: project.id, planningStateStatus: planningState?.status, currentStage: planningState?.currentStage });
     setNotice("正在续跑规划…");
     try {
       const result = await api()!.planning.resume(project.id);
@@ -486,7 +487,7 @@ export function useAppStateDerived(state: AppStateBase) {
         for (const m of s.accepted ?? []) previouslyAccepted.add(m.module);
       }
       const newlyAccepted = acceptedNames.filter((m) => !previouslyAccepted.has(m));
-      console.info("[App] planning.resume result", { projectId: project.id, status: result.status, accepted: acceptedNames, newlyAccepted, rejected: rejectedNames });
+      logInfo("[App] planning.resume result", { projectId: project.id, status: result.status, accepted: acceptedNames, newlyAccepted, rejected: rejectedNames });
       const summary = result.assistantReply
         || (acceptedNames.length ? `已接受：${acceptedNames.join("、")}。` : "")
         + (rejectedNames.length ? `缺失：${rejectedNames.join("、")}。` : "");
@@ -496,7 +497,7 @@ export function useAppStateDerived(state: AppStateBase) {
         setNotice(summary || "续跑完成");
       }
     } catch (error) {
-      console.warn("[App] planning.resume failed", { projectId: project.id, error });
+      logWarn("[App] planning.resume failed", { projectId: project.id, error });
       setNotice(`续跑失败：${(error as { message?: string })?.message ?? String(error)}。请打开 DevTools 查看 [planning] 日志。`);
     } finally {
       setPlanningBusy(false);

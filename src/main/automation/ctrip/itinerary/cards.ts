@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * 行程描述里「餐饮 / 酒店」card 的写入函数：
- *   - fillMealCards：按早 / 午 / 晚 3 张 card，写入餐饮类型、「费用自理」（当 mealsIncluded=false）、
+ *   - fillMealCards：按早 / 午 / 晚 3 张 card，写入餐饮类型、1 小时时长与「不含餐」状态、
  *     补充说明；
  *   - getAvailableHotelSelectors：枚举 hotelCard 内所有 role=combobox，过滤掉
  *     ancestor 带 `.ant-select.ant-select-disabled` 的「具体时间」下拉，返回真正可
@@ -20,13 +20,19 @@
  */
 
 import { delay, assertCount, selectVisibleOption } from "../utils.js";
-import { cardsByPrefix, clickByCandidates, clickExact } from "./common.js";
+import {
+  cardsByPrefix,
+  clickByCandidates,
+  clickExact,
+  ensureCheckboxChecked,
+} from "./common.js";
+import { logWarn } from "../../../../shared/log-timestamp.js";
 
 /**
  * 餐饮 3 个 card 写入：
  *   - 断言恰好 3 张 card（早 / 午 / 晚），结构异常抛错；
- *   - 每张 card 点击「不限」与餐饮类型；
- *   - mealsIncluded=false 时勾两个「费用自理」；
+ *   - 每张 card 点击「1小时」与餐饮类型；
+ *   - 每张 card 勾两个「不含餐」（成人 / 儿童）；
  *   - mealDescriptions 给 3 个补充说明 textarea 复用。
  */
 export async function fillMealCards(dayScope, day, mealsIncluded = false) {
@@ -35,18 +41,22 @@ export async function fillMealCards(dayScope, day, mealsIncluded = false) {
     throw new Error(`第 ${day.day} 天餐饮节点数量异常：期望 3，实际 ${mealCards.length}`);
   }
   const types = ["早餐", "午餐", "晚餐"];
-  const descriptions = day.mealDescriptions ?? [day.meals, day.meals, day.meals];
+  const descriptions = [
+    "早餐以房间是否含餐为准",
+    "午餐自理",
+    "晚餐自理",
+  ];
 
   for (let index = 0; index < 3; index += 1) {
     const card = mealCards[index];
-    await clickExact(card, "不限", `第 ${day.day} 天${types[index]}时间`);
+    await clickExact(card, "1小时", `第 ${day.day} 天${types[index]}用餐时间`);
     await clickExact(card, types[index], `第 ${day.day} 天餐饮类型`);
-    if (!mealsIncluded) {
-      const selfPay = card.getByText("费用自理", { exact: true });
-      await assertCount(selfPay, 2, `第 ${day.day} 天${types[index]}费用自理选项`);
-      await selfPay.nth(0).click({ force: true });
-      await selfPay.nth(1).click({ force: true });
-    }
+    const noMeal = card.getByText("不含餐", { exact: true });
+    await assertCount(noMeal, 2, `第 ${day.day} 天${types[index]}不含餐选项`);
+    // 成人 / 儿童两个不含餐选项均需勾选；走 ensureCheckboxChecked 保证幂等
+    // （phase-retry 时第二次点击 ant-checkbox 会反勾回未选，必须先判状态再点）。
+    await ensureCheckboxChecked(noMeal.nth(0));
+    await ensureCheckboxChecked(noMeal.nth(1));
     const supplement = card.locator('textarea[placeholder="请输入补充说明"]');
     if (await supplement.count()) await supplement.first().fill(descriptions[index]);
   }
@@ -126,7 +136,7 @@ export async function fillHotelCard(page, dayScope, day, operations) {
   ];
   const sourceSet = await clickByCandidates(hotelCard, platformSourceCandidates, "酒店来源");
   if (!sourceSet) {
-    console.warn(`[fillHotelCard] 第 ${day.day} 天酒店来源未命中：${platformSourceCandidates.join(" / ")}，保留默认值继续后续录入`);
+    logWarn(`[fillHotelCard] 第 ${day.day} 天酒店来源未命中：${platformSourceCandidates.join(" / ")}，保留默认值继续后续录入`);
   }
   await delay(300);
   const combos = hotelCard.getByRole("combobox");
@@ -148,7 +158,7 @@ export async function fillHotelCard(page, dayScope, day, operations) {
     // 真实 VBK 渲染：选择「使用携程平台酒店」之后可能尚未生成酒店名称 combobox
     // （或刚生成的瞬间被异步重渲染吃掉）。此时跳过钻级下拉选择，把酒店钻级信息
     // 落到补充说明，交由后续 ensureHotelResource 在资源配置阶段补全酒店资源。
-    console.warn(
+    logWarn(
       `[fillHotelCard] 第 ${day.day} 天酒店名称选择器缺失；跳过钻级下拉选择，补充说明由后续 hotelResource 处理`,
     );
   }

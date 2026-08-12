@@ -13,7 +13,7 @@
     "build": "vite build && tsc",
     "start": "npm run build && electron .",
     "package": "npm run build && electron-builder --mac dmg",
-    "test": "tsx --test test/**/*.test.ts",
+    "test": "tsx --test --test-timeout=60000 test/**/*.test.ts",
     "check": "tsc --noEmit && tsc -p tsconfig.renderer.json"
   },
   "dependencies": {

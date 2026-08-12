@@ -10,6 +10,7 @@ import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { RECOMMENDATION_CATEGORIES, VBK_RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 import { isCombinedSpotName } from "./spot-name.js";
+import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
 import {
   PLANNING_STAGES,
   type PlanningStage,
@@ -377,6 +378,7 @@ ${moduleList}
 9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded / vehicleResource.requestedDailyCost；requestedDailyCost 必须按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、resourceGroupName、supplierCode、providerId、contactCardId。
 10. basicInfo 阶段必须生成 subtitle、province、operationNotes；province 必须是省/自治区/直辖市名称，不能把 meetingCity / destinationCity 城市名直接当作 province。已有非空 province 会被本地保留，不得覆盖。
 11. AI 不能自行声明 research task 已完成；research tasks 由本地 deterministic 生成并走运营 / VBK 核查流程。
+12. ${buildVbkCopyPolicyPrompt()}
 ${args.hasHistory ? "11. 历史会话已附在 user 消息尾部；本轮回复以补齐缺失模块为目标，已成功模块不要重复。" : ""}`;
 }
 

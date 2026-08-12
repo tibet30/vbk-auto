@@ -61,25 +61,19 @@ const RECOMMEND_APPEND_BUTTON_SELECTOR =
  * - 若一次 wait 超时，第二次再短超时兜一次（应对网络抖动 / React 重渲染）。
  */
 async function appendRecommendationRow(page: any, currentCount: number) {
-  const clicked = await page.evaluate((selector: string) => {
-    const all = document.querySelectorAll("#pm_recommend .ant-form-item");
-    if (all.length === 0) return { ok: false, reason: "empty" };
-    const last = all[all.length - 1];
-    const blues = last.querySelectorAll(selector);
-    if (blues.length === 0) {
-      return { ok: false, reason: "no-plus", rowCount: all.length };
-    }
-    blues[blues.length - 1].click();
-    return { ok: true, rowCount: all.length };
-  }, RECOMMEND_APPEND_BUTTON_SELECTOR);
-  if (!clicked.ok) {
-    if (clicked.reason === "empty") {
-      throw new Error("推荐理由区域为空，无法定位最后一行追加新行");
-    }
-    throw new Error(
-      `推荐理由最后一行缺少 + 按钮（VBK DOM 异常，行数=${clicked.rowCount}）`,
-    );
+  const rows = page.locator("#pm_recommend .ant-form-item");
+  const rowCount = await rows.count();
+  if (rowCount === 0) {
+    throw new Error("推荐理由区域为空，无法定位最后一行追加新行");
   }
+  const plusButtons = rows.last().locator(RECOMMEND_APPEND_BUTTON_SELECTOR);
+  const plusCount = await plusButtons.count();
+  if (plusCount === 0) {
+    throw new Error(`推荐理由最后一行缺少 + 按钮（VBK DOM 异常，行数=${rowCount}）`);
+  }
+  // VBK 当前 React 页面不会响应 evaluate 内的 HTMLElement.click()，必须由
+  // Playwright 发出真实指针点击，才能触发推荐理由数组的 onClick 更新。
+  await plusButtons.last().click();
   const expectedCount = currentCount + 1;
   try {
     await page.waitForFunction(

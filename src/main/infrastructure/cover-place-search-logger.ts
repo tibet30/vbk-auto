@@ -1,3 +1,4 @@
+import { logWarn } from "../../shared/log-timestamp.js";
 /**
  * cover place search 可观测日志：
  *   - 仅做类型 + 一个截断纯函数 + console 桥接，不持有任何 side effect 之外的资源；
@@ -190,7 +191,7 @@ export function createConsoleCoverPlaceLogger(args?: {
   sink?: (line: string) => void;
 }): CoverPlaceSearchLogger {
   const prefix = args?.prefix ?? COVER_SEARCH_LOG_PREFIX;
-  const sink = args?.sink ?? ((line: string) => console.warn(line));
+  const sink = args?.sink ?? ((line: string) => logWarn(line));
   return (record) => {
     switch (record.event) {
       case "search-start":
@@ -279,7 +280,7 @@ export function createConsoleCtripImageInfoLogger(args?: {
   sink?: (line: string) => void;
 }): (record: import("./ctrip-image-info.js").CtripImageInfoLogEvent) => void {
   const prefix = args?.prefix ?? COVER_IMAGE_INFO_LOG_PREFIX;
-  const sink = args?.sink ?? ((line: string) => console.warn(line));
+  const sink = args?.sink ?? ((line: string) => logWarn(line));
   return (record) => {
     switch (record.event) {
       case "fetch-start":

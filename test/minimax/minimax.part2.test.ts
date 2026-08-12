@@ -171,9 +171,18 @@ test("diagnoseAutomationFailure 日志不泄漏原始请求、响应或 tool arg
 
   await assert.rejects(service.diagnoseAutomationFailure(requestWithCanary), hasMiniMaxCode("invalid_model_output"));
 
-  const joined = seen.join("\n");
-  assert.equal(joined.includes("raw-request-canary"), false);
-  assert.equal(joined.includes("raw-response-canary"), false);
-  assert.equal(joined.includes("raw-tool-arguments-canary"), false);
-  assert.equal(joined.includes("function.arguments"), false);
+  // 只检查状态日志（[AI] / [MiniMax] / 错误码等）是否泄漏；
+  // [AI prompt] 日志按设计是会包含实际发送的 messages，所以排除前缀匹配的行。
+  const statusJoined = seen.filter((line) => !line.includes("[AI prompt]")).join("\n");
+  assert.equal(statusJoined.includes("raw-request-canary"), false);
+  assert.equal(statusJoined.includes("raw-response-canary"), false);
+  assert.equal(statusJoined.includes("raw-tool-arguments-canary"), false);
+  assert.equal(statusJoined.includes("function.arguments"), false);
+
+  // 反向验证：[AI prompt] 日志确实存在（说明新功能生效），但不允许出现伪造的敏感凭据字面量。
+  const promptJoined = seen.filter((line) => line.includes("[AI prompt]")).join("\n");
+  assert.match(promptJoined, /\[AI prompt\]/);
+  assert.equal(/api[_-]?key\s*[:=]\s*["']?[A-Za-z0-9_\-]{6,}/i.test(promptJoined), false, "[AI prompt] 不应含 apiKey 字面量");
+  assert.equal(/Bearer\s+[A-Za-z0-9_\-\.=]{8,}/i.test(promptJoined), false, "[AI prompt] 不应含 Bearer 令牌字面量");
+  assert.equal(/Cookie\s*:\s*[A-Za-z0-9_\-]+\s*=/i.test(promptJoined), false, "[AI prompt] 不应含 Cookie 头字面量");
 });

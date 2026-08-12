@@ -118,7 +118,7 @@ async function saveThenAdvance(page, options) {
   }
 
   if (fallbackUrl) {
-    console.warn(
+    logWarn(
       `${phase}的「${targetTabLabel}」未解锁，使用 fallbackUrl=${fallbackUrl} 直接导航`,
     );
     await page.goto(fallbackUrl, { waitUntil: "domcontentloaded" }).catch(() => false);
@@ -161,6 +161,7 @@ async function findUnlockedSectionLabel(page, labels) {
 import { delay, pollUntil, safeClick } from "./utils.js";
 import { closeBlockingDialogs, dismissKnownNoticeDialogs } from "./dialogs.js";
 import { productEditorUrl } from "../constants.js";
+import { logWarn } from "../../../shared/log-timestamp.js";
 
 /**
  * 点击 section / tab，优先按 role=tab 定位（新版 VBK 顶层 tab），再回退到精确文本；

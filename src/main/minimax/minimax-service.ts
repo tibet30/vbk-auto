@@ -10,6 +10,8 @@
 
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
+import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
+import { logAIPrompt } from "../ai/prompt-log.js";
 import {
   MiniMaxServiceError,
   advisorOutcomeSchema,
@@ -104,10 +106,17 @@ export class MiniMaxService {
   async testConnection(): Promise<void> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `请先填写 ${this.providerLabel} API Key。`);
     const client = this.client(20_000);
+    const messages = [{ role: "user", content: "ping" }];
     try {
+      logAIPrompt({
+        entry: "MiniMax.testConnection",
+        provider: this.config.provider ?? "minimax",
+        model: this.config.model,
+        messages,
+      });
       const baseParams = {
         model: this.config.model,
-        messages: [{ role: "user", content: "ping" }],
+        messages,
         max_completion_tokens: 1,
       };
       const providerParams = this.isDeepSeek ? {} : { thinking: { type: "disabled" as const } };
@@ -138,7 +147,7 @@ export class MiniMaxService {
       || requiresStructuredAction
       || /继续|补齐|补充|调整|更新|修正|重新|优化|重写|重试|继续生成|继续补充|再次生成|生成/.test(input.message);
     const startedAt = Date.now();
-    console.info("[AI] planning request started", { provider: this.config.provider ?? "minimax", model: this.config.model, timeoutMs: replyTimeout() });
+    logInfo("[AI] planning request started", { provider: this.config.provider ?? "minimax", model: this.config.model, timeoutMs: replyTimeout() });
     let lastError: MiniMaxServiceError | undefined;
     let lastRetryReason = "";
     for (let attempt = 0; attempt <= planningRetryLimit; attempt += 1) {
@@ -152,6 +161,13 @@ export class MiniMaxService {
       ];
       try {
         const isLastAttempt = attempt >= planningRetryLimit;
+        logAIPrompt({
+          entry: "MiniMax.reply",
+          provider: this.config.provider ?? "minimax",
+          model: this.config.model,
+          attempt,
+          messages,
+        });
         const { message, traceId } = await this.complete(client, messages);
         const { response, isStructured } = parseAssistantMessage(message);
         const hasActionHint = !!(response.patch?.length || response.questions?.length || response.researchTasks?.length);
@@ -258,7 +274,7 @@ export class MiniMaxService {
             );
           }
         }
-        console.info("[AI] planning request completed", {
+        logInfo("[AI] planning request completed", {
           provider: this.config.provider ?? "minimax",
           model: this.config.model,
           elapsedMs: Date.now() - attemptStartedAt,
@@ -270,7 +286,7 @@ export class MiniMaxService {
         const serviceError = error instanceof MiniMaxServiceError ? error : this.providerError(error);
         lastError = serviceError;
         const canRetry = ["invalid_model_output", "empty_model_output"].includes(serviceError.code) && attempt < planningRetryLimit;
-        console.warn("[AI] planning request attempt failed", {
+        logWarn("[AI] planning request attempt failed", {
           provider: this.config.provider ?? "minimax",
           model: this.config.model,
           attempt,
@@ -282,7 +298,7 @@ export class MiniMaxService {
         lastRetryReason = (serviceError.details ?? serviceError.message ?? "").trim().replace(/\s+/g, " ").slice(0, 180);
       }
     }
-    console.error("[AI] planning request failed", {
+    logError("[AI] planning request failed", {
       provider: this.config.provider ?? "minimax",
       model: this.config.model,
       elapsedMs: Date.now() - startedAt,
@@ -304,21 +320,28 @@ export class MiniMaxService {
   async diagnoseAutomationFailure(input: AdvisorRequest): Promise<AdvisorOutcome> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const startedAt = Date.now();
+    const messages = [
+      { role: "system", content: diagnosisSystemPrompt },
+      { role: "user", content: `请根据以下最小安全上下文诊断，只通过 submit_failure_diagnosis 返回结果：\n${JSON.stringify({
+        phase: input.phase,
+        attempt: input.attempt,
+        error: input.error,
+        productIdExists: input.productIdExists,
+        basicInfoSaved: input.basicInfoSaved,
+        completedPhases: input.completedPhases,
+        diagnosisHistory: input.diagnosisHistory,
+      })}` },
+    ];
     try {
+      logAIPrompt({
+        entry: "MiniMax.diagnoseAutomationFailure",
+        provider: this.config.provider ?? "minimax",
+        model: this.config.model,
+        messages,
+      });
       const response = await this.client(replyTimeout()).chat.completions.create({
         model: this.config.model,
-        messages: [
-          { role: "system", content: diagnosisSystemPrompt },
-          { role: "user", content: `请根据以下最小安全上下文诊断，只通过 submit_failure_diagnosis 返回结果：\n${JSON.stringify({
-            phase: input.phase,
-            attempt: input.attempt,
-            error: input.error,
-            productIdExists: input.productIdExists,
-            basicInfoSaved: input.basicInfoSaved,
-            completedPhases: input.completedPhases,
-            diagnosisHistory: input.diagnosisHistory,
-          })}` },
-        ],
+        messages,
         max_completion_tokens: 1024,
         tools: [diagnosisTool],
         tool_choice: { type: "function", function: { name: "submit_failure_diagnosis" } },
@@ -339,11 +362,11 @@ export class MiniMaxService {
       const outcome = parsed.data.action === "wait_for_user"
         ? { ...parsed.data, userInstruction: parsed.data.userInstruction!.trim() }
         : { summary: parsed.data.summary, rootCause: parsed.data.rootCause, action: parsed.data.action, expectedEvidence: parsed.data.expectedEvidence };
-      console.info("[AI] diagnosis completed", { provider: this.config.provider ?? "minimax", phase: input.phase, attempt: input.attempt, action: outcome.action, elapsedMs: Date.now() - startedAt });
+      logInfo("[AI] diagnosis completed", { provider: this.config.provider ?? "minimax", phase: input.phase, attempt: input.attempt, action: outcome.action, elapsedMs: Date.now() - startedAt });
       return outcome;
     } catch (error) {
       const serviceError = this.providerError(error);
-      console.warn("[AI] diagnosis failed", {
+      logWarn("[AI] diagnosis failed", {
         provider: this.config.provider ?? "minimax",
         phase: input.phase,
         attempt: input.attempt,
@@ -367,16 +390,23 @@ export class MiniMaxService {
     }
     const startedAt = Date.now();
     try {
+      const messages = [
+        { role: "system", content: disambiguateSystemPrompt(input.kind) },
+        { role: "user", content: JSON.stringify({
+          desired: input.desired,
+          candidates: input.candidates.map((c) => ({ id: c.id, text: c.text })),
+          productContext: parseDisambiguateContext(input.product, input.kind, input.desired),
+        }) },
+      ];
+      logAIPrompt({
+        entry: "MiniMax.disambiguateOption",
+        provider: this.config.provider ?? "minimax",
+        model: this.config.model,
+        messages,
+      });
       const response = await this.client(replyTimeout()).chat.completions.create({
         model: this.config.model,
-        messages: [
-          { role: "system", content: disambiguateSystemPrompt(input.kind) },
-          { role: "user", content: JSON.stringify({
-            desired: input.desired,
-            candidates: input.candidates.map((c) => ({ id: c.id, text: c.text })),
-            productContext: parseDisambiguateContext(input.product, input.kind, input.desired),
-          }) },
-        ],
+        messages,
         max_completion_tokens: 512,
         temperature: 0.1,
         tools: [disambiguateTool],
@@ -398,7 +428,7 @@ export class MiniMaxService {
       const pickedText = parsed.data.pickedText && input.candidates.some((c) => c.text === parsed.data.pickedText)
         ? parsed.data.pickedText
         : null;
-      console.info("[AI] disambiguation completed", {
+      logInfo("[AI] disambiguation completed", {
         provider: this.config.provider ?? "minimax",
         kind: input.kind,
         desired: input.desired,
@@ -408,7 +438,7 @@ export class MiniMaxService {
       return { pickedText, reasoning: parsed.data.reasoning };
     } catch (error) {
       const serviceError = this.providerError(error);
-      console.warn("[AI] disambiguation failed", {
+      logWarn("[AI] disambiguation failed", {
         provider: this.config.provider ?? "minimax",
         kind: input.kind,
         desired: input.desired,
@@ -457,6 +487,17 @@ export class MiniMaxService {
     if (error instanceof MiniMaxServiceError) return error;
     const label = this.providerLabel;
     if (error instanceof AuthenticationError) return new MiniMaxServiceError("provider_authentication", `${label} API Key 无效。`);
+    // 兜底：部分兼容代理 / 中间层抛出的未知错误对象不会带 OpenAI SDK 的 AuthenticationError 实例，
+    // 但仍可能携带 HTTP 401 status / statusCode；安全读取后映射为 provider_authentication，避免被误归为 provider_error。
+    if (typeof error === "object" && error !== null) {
+      const record = error as { status?: unknown; statusCode?: unknown };
+      const status = typeof record.status === "number"
+        ? record.status
+        : typeof record.statusCode === "number"
+          ? record.statusCode
+          : undefined;
+      if (status === 401) return new MiniMaxServiceError("provider_authentication", `${label} API Key 无效。`);
+    }
     if (error instanceof RateLimitError) return new MiniMaxServiceError("provider_rate_limit", `${label} 请求过于频繁，请稍后重试。`);
     if (error instanceof APIConnectionTimeoutError) return new MiniMaxServiceError("provider_timeout", `${label} 响应超时，请重试。`);
     if (error instanceof APIConnectionError) return new MiniMaxServiceError("provider_connection", `无法连接 ${label} 服务。`);

@@ -181,7 +181,7 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraft(page, product, { disambiguator: ctx.disambiguator, productId }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
         package: async () => { phaseRecord("package"); const r = await fillAndSavePackage(page, product); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
         pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await fillAndSubmitPricingInventory(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
-        terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },
+        terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product, productId); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },
         hotelResource: async () => {
           phaseRecord("hotelResource");
           const result = await ensureHotelResource(page, product, productId!);

@@ -25,6 +25,7 @@
  *     searchCtripLibraryCoverImages 走本模块；不再读 DOM / 弹窗。
  */
 import type { PoiSuggestBrowser } from "./poi-suggest.js";
+import { logWarn } from "../../shared/log-timestamp.js";
 import type {
   CtripLibraryImageCandidate,
   CtripLibraryPlaceCandidate,

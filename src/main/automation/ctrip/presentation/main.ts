@@ -178,15 +178,18 @@ export async function selectCtripLibraryCover(page, cover) {
   const addCard = section.locator(".add-image-card");
   await assertCount(addCard, 1, "封面添加图片入口");
   await addCard.click({ force: true });
-  const libraryImport = addCard.getByText("图库导入", { exact: true });
-  await libraryImport.waitFor({ state: "visible", timeout: 3_000 });
-  if (!(await libraryImport.isVisible())) {
-    await addCard.hover().catch(() => {});
-    await libraryImport.waitFor({ state: "visible", timeout: 3_000 });
-  }
-  await libraryImport.click();
-
   const dialog = page.getByRole("dialog").filter({ hasText: "从图库资源导入" });
+  // VBK 当前页面在 force 点击添加卡片后可能已经直接打开图库弹窗；此时
+  // 再点卡片内的「图库导入」会被 modal 遮挡并等待到 Playwright 超时。
+  if (!(await dialog.isVisible().catch(() => false))) {
+    const libraryImport = addCard.getByText("图库导入", { exact: true });
+    await libraryImport.waitFor({ state: "visible", timeout: 3_000 });
+    if (!(await libraryImport.isVisible())) {
+      await addCard.hover().catch(() => {});
+      await libraryImport.waitFor({ state: "visible", timeout: 3_000 });
+    }
+    await libraryImport.click();
+  }
   await dialog.waitFor({ state: "visible", timeout: 10_000 });
   await selectSearchOption(page, dialog, "PoiId", cover.poi, "携程图库景点");
   await dialog.getByRole("button", { name: /查\s*询/ }).click();

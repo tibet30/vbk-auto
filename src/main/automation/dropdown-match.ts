@@ -1,3 +1,4 @@
+import { logWarn } from "../../shared/log-timestamp.js";
 /**
  * 下拉候选匹配：从已收集的 dropdown 文本里找出最像 desired 的那一项。
  *
@@ -126,14 +127,14 @@ export async function matchDropdownOption(
         return { index: i, text: dis.pickedText, source: "ai", reasoning: dis.reasoning };
       }
     }
-    console.warn("[matchDropdownOption] AI 选中的文本不在 candidates 中", {
+    logWarn("[matchDropdownOption] AI 选中的文本不在 candidates 中", {
       kind: context.kind,
       desired: context.desired,
       pickedText: dis.pickedText,
     });
     return null;
   } catch (error) {
-    console.warn("[matchDropdownOption] AI 失败，降级到原报错路径", {
+    logWarn("[matchDropdownOption] AI 失败，降级到原报错路径", {
       kind: context.kind,
       desired: context.desired,
       error: error instanceof Error ? error.message : String(error),

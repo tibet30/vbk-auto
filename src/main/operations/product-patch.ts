@@ -9,6 +9,7 @@
 import { parseProduct } from "../automation/schema/schema.js";
 import { normaliseProductDraft } from "../data/product-normalize.js";
 import type { AiResponse } from "../../shared/contracts.js";
+import { logWarn } from "../../shared/log-timestamp.js";
 
 type PatchOperation = NonNullable<AiResponse["patch"]>[number];
 
@@ -173,7 +174,7 @@ export function applyProductPatchSafe(
       result = next;
       applied = true;
     } catch (error) {
-      console.warn("[AI] patch operation skipped", {
+      logWarn("[AI] patch operation skipped", {
         op: operation.op,
         path: operation.path,
         reason: error instanceof Error ? error.message : "unknown",

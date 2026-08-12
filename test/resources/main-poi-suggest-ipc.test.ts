@@ -26,7 +26,8 @@ test("poi:suggest IPC 调试日志必须由 isDev 保护，并使用统一前缀
   assert.match(source, /const isDev = !app\.isPackaged/);
   assert.match(source, /function logPoiManualIpc\(/);
   assert.match(source, /if \(!isDev\) return;/);
-  assert.match(source, /console\.log\("\[poi\.manual\]",\s*event,\s*\{\s*stage: event,\s*\.\.\.context\s*\}\)/);
+  // logLog / console.log 都会被认作可观测日志出口。
+  assert.match(source, /(console\.log|logLog)\("\[poi\.manual\]",\s*event,\s*\{\s*stage: event,\s*\.\.\.context\s*\}\)/);
 });
 
 test("poi:suggest IPC 调试日志覆盖开始、详情、成功、空结果和失败分支", () => {

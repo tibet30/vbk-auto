@@ -21,6 +21,7 @@ import {
   type PlanningStage,
   type PoiNameResolutionRequest,
 } from "../../../shared/contracts-planning.js";
+import { logAIPrompt } from "../../ai/prompt-log.js";
 import { STAGE_ALLOWED_MODULES } from "../schemas.js";
 import { buildStageToolSchema } from "../tool-schema.js";
 
@@ -33,6 +34,10 @@ export interface OpenAICompatibleAdapterConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  /**
+   * 可选 provider 名称，仅用于日志（[AI prompt] provider 字段）。不会影响请求构造。
+   */
+  provider?: string;
   /**
    * 额外参数会原样合入每个 chat.completions.create 请求；典型用例：
    *  - MiniMax 系列的 `thinking: { type: "disabled" }`
@@ -61,13 +66,20 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
     const toolSchema = buildStageToolSchema(stage);
     const userMessage = composeUserMessage(request);
+    const messages = [
+      { role: "system", content: composeSystemPrompt(stage) },
+      { role: "user", content: userMessage },
+    ];
     // Adapter 单次传输尝试：transport 失败直接抛错，由 orchestrator 决定是否 stage retry。
+    logAIPrompt({
+      entry: "Planner.generateStage",
+      provider: this.config.provider ?? "openai-compatible",
+      model: this.config.model,
+      messages,
+    });
     const response = await this.client.chat.completions.create({
       model: this.config.model,
-      messages: [
-        { role: "system", content: composeSystemPrompt(stage) },
-        { role: "user", content: userMessage },
-      ],
+      messages,
       temperature: 0.1,
       max_completion_tokens: 4096,
       tools: [toolSchema],
@@ -94,6 +106,12 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
 
   async resolvePoiName(request: PoiNameResolutionRequest): Promise<string | null> {
     const messages = composePoiNameResolutionMessages(request);
+    logAIPrompt({
+      entry: "Planner.resolvePoiName",
+      provider: this.config.provider ?? "openai-compatible",
+      model: this.config.model,
+      messages,
+    });
     const response = await this.client.chat.completions.create({
       model: this.config.model,
       messages,

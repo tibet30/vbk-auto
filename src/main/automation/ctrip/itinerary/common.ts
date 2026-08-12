@@ -10,6 +10,7 @@
  * 顶部带 `// @ts-nocheck`，DOM 是动态传入。
  */
 import { delay, escapeRegExp } from "../utils.js";
+import { logWarn } from "../../../../shared/log-timestamp.js";
 
 /**
  * 从「当天标题 textarea」反查「当天」的根 scope（`td-day-item--...`），所有 day 级操作以此为根。
@@ -91,7 +92,7 @@ export async function ensureServiceTimeRange(dayScope, day) {
   if (isChecked || !allTimeEmpty) return;
   const setAllDay = await clickByCandidates(formItem, ["全天"], `第 ${day.day} 天可服务时间段`);
   if (!setAllDay) {
-    console.warn(`[ensureServiceTimeRange] 第 ${day.day} 天可服务时间段未命中"全天"选项，暂不处理`);
+    logWarn(`[ensureServiceTimeRange] 第 ${day.day} 天可服务时间段未命中"全天"选项，暂不处理`);
   }
 }
 

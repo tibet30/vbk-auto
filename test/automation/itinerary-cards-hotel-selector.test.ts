@@ -14,7 +14,7 @@
  *       1 个可用 → 保持既有的 click + selectVisibleOption(tierKeyword)；
  *                  3钻 → 选「当地3钻酒店/-3」；4钻 → 选「当地4钻酒店/-4」；
  *       多于 1 个 → 抛「期望 1，实际 N」明确错误，绝不静默退化为选第一个。
- *   - 不能动的：fillMealCards 路径（含 assertCount 真实导入与 selfPay 调用形态）。
+ *   - 不能动的：fillMealCards 路径（含 assertCount 真实导入与「不含餐」契约）。
  */
 
 import test, { after, before } from "node:test";
@@ -137,16 +137,21 @@ test("cards.ts：必须导出 getAvailableHotelSelectors 并以 .ant-select-disa
     /ant-select-disabled/,
     "getAvailableHotelSelectors 必须以 .ant-select-disabled 祖先作为主判据（VBK 真实 DOM 暴露的禁用标记）",
   );
-  // 3) 必须保留餐饮路径的 assertCount 真实导入与原 selfPay 调用形态
+  // 3) 必须保留餐饮路径的 assertCount 真实导入与「不含餐」契约
   assert.match(
     src,
     /import\s*\{[^}]*\bassertCount\b[^}]*\}\s*from\s*"\.\.\/utils\.js"/,
-    "cards.ts 必须保持从 ../utils.js 真实导入 assertCount（餐饮费用自理的 assertCount 修复不能动）",
+    "cards.ts 必须保持从 ../utils.js 真实导入 assertCount（餐饮「不含餐」选项断言依赖）",
   );
   assert.match(
     src,
-    /await\s+assertCount\s*\(\s*selfPay\s*,\s*2\s*,\s*`第\s*\$\{day\.day\}\s*天\$\{types\[index\]\}费用自理选项`\s*\)/,
-    "fillMealCards 内的 assertCount(selfPay, 2, ...) 调用必须保持不变",
+    /await\s+assertCount\s*\(\s*noMeal\s*,\s*2\s*,\s*`第\s*\$\{day\.day\}\s*天\$\{types\[index\]\}不含餐选项`\s*\)/,
+    "fillMealCards 内必须 await assertCount(noMeal, 2, `第 ${day.day} 天${types[index]}不含餐选项`)",
+  );
+  assert.match(
+    src,
+    /await\s+ensureCheckboxChecked\s*\(\s*noMeal\.nth\s*\(\s*0\s*\)\s*\)/,
+    "fillMealCards 必须用 ensureCheckboxChecked(noMeal.nth(0)) 幂等勾选",
   );
   // 4) 不能再保留任何 declare-only 占位（运行期会 ReferenceError）
   assert.doesNotMatch(
@@ -175,11 +180,11 @@ test("cards.ts：fillHotelCard 三类分支契约（0 / 1 / 多于 1）必须互
     /\/4钻\/\.test\(operations\.hotelTier\)[\s\S]*?:\s*"当地3钻酒店\/-3"/,
     "tierKeyword 必须根据 hotelTier 是否含 4钻 拼「当地4钻酒店/-4」或「当地3钻酒店/-3」",
   );
-  // 3) 等于 0：必须走 else 分支并 console.warn 跳过（不调用 selectVisibleOption）
+  // 3) 等于 0：必须走 else 分支并通过 logWarn 输出可观测 warn（不调用 selectVisibleOption）
   assert.match(
     src,
-    /\}\s*else\s*\{[\s\S]*?console\.warn\([\s\S]*?跳过钻级下拉选择/,
-    "0 个可用时必须走 else 分支并 console.warn「跳过钻级下拉选择」",
+    /\}\s*else\s*\{[\s\S]*?logWarn\([\s\S]*?跳过钻级下拉选择/,
+    "0 个可用时必须走 else 分支并 logWarn「跳过钻级下拉选择」",
   );
   // 4) 补充说明 fill 必须出现在 0 分支的 console.warn 之后（即 0-case 仍写补充说明）
   const warnIdx = src.indexOf("跳过钻级下拉选择");

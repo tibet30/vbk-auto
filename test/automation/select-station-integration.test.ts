@@ -26,7 +26,7 @@ test("selectStationAddress 单一机场项 + 精确火车项", async () => {
   const b = await chromium.launch({ headless: true });
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
   const p = await ctx.newPage();
-  await p.goto("file://" + path.join(__dirname, "../fixtures/station-picker.html"), {
+  await p.goto("file://" + path.join(__dirname, "../../fixtures/station-picker.html"), {
     waitUntil: "domcontentloaded",
   });
   await p.waitForTimeout(300);
@@ -59,7 +59,7 @@ test("selectStationAddress 多项 + AI 兜底：airport AI 选第 2 项、train 
   const b = await chromium.launch({ headless: true });
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
   const p = await ctx.newPage();
-  await p.goto("file://" + path.join(__dirname, "../fixtures/station-picker.html"), {
+  await p.goto("file://" + path.join(__dirname, "../../fixtures/station-picker.html"), {
     waitUntil: "domcontentloaded",
   });
   await p.waitForTimeout(300);
@@ -110,7 +110,7 @@ test("selectStationAddress 弹窗内部不被 closeBlockingDialogs 自关", asyn
   const b = await chromium.launch({ headless: true });
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
   const p = await ctx.newPage();
-  await p.goto("file://" + path.join(__dirname, "../fixtures/station-picker.html"), {
+  await p.goto("file://" + path.join(__dirname, "../../fixtures/station-picker.html"), {
     waitUntil: "domcontentloaded",
   });
   await p.waitForTimeout(300);

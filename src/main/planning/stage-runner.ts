@@ -9,7 +9,8 @@ import { PlannerError, type PlanningStage, type PlanningStageOutput, type Planni
 import { AI_WRITABLE_PATHS, STAGE_ALLOWED_MODULES, validateModuleValue, validateResearchTaskProposal } from "./schemas.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
-import { normaliseProvinceName } from "./runtime.js";
+import { isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
+import { findVbkCopyBadCase } from "./vbk-copy-policy.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -69,6 +70,13 @@ export function sanitiseModuleValue(
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   const hit = findBlacklistedKey(value);
   if (hit) return { ok: false, reason: `AI 输出包含禁写字段 ${hit}` };
+  const copyBadCase = findVbkCopyBadCase(value);
+  if (copyBadCase) {
+    return {
+      ok: false,
+      reason: `AI 输出 ${copyBadCase.path} 命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」`,
+    };
+  }
 
   if (module === "release" && value && typeof value === "object" && !Array.isArray(value)) {
     value = { ...(value as Record<string, unknown>), submitReview: false, publishAfterApproval: false };
@@ -164,7 +172,9 @@ export async function executeStageOutput(args: {
       const existingProvince = String(basic.province ?? "").trim();
       const province = normaliseProvinceName(String(next.province ?? "").trim() || existingProvince);
       const city = normaliseProvinceName(String(basic.meetingCity ?? basic.destinationCity ?? "").trim());
-      if (!province || (city && province === city)) {
+      const sameAsDestination = Boolean(city && province === city);
+      const destinationIsProvince = isProvinceLevelName(city) && isProvinceLevelName(province);
+      if (!province || (sameAsDestination && !destinationIsProvince)) {
         rejected.push({ module: "basicInfo", status: "rejected", reason: "basicInfo.province 缺失或不能直接使用目的地城市" });
         continue;
       }

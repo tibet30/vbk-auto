@@ -9,6 +9,7 @@ import { poiResearchTaskLabel } from "../../shared/poi-research-tasks.js";
 import { AI_WRITABLE_PATHS } from "./schemas.js";
 import type { PoiNameResolutionRequest, ResearchTaskProposal } from "../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "./types.js";
+import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 
 interface PoiEnrichmentArgs {
   projectId: string;
@@ -65,14 +66,14 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           spot.poiName = match.poiName;
           spot.poiId = match.poiId;
           poiUpdated = true;
-          console.info("[planning.poi]", { event: "query-success", projectId, keyword, poiName: match.poiName, poiId: match.poiId });
+          logInfo("[planning.poi]", { event: "query-success", projectId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (match && typeof spot === "string") {
           const index = day.spots.indexOf(spot);
           day.spots[index] = { name: spot, poiName: match.poiName, poiId: match.poiId };
           poiUpdated = true;
-          console.info("[planning.poi]", { event: "query-success", projectId, keyword, poiName: match.poiName, poiId: match.poiId });
+          logInfo("[planning.poi]", { event: "query-success", projectId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (!queryFailed) {
-          console.info("[planning.poi]", { event: "query-no-match", projectId, keyword });
+          logInfo("[planning.poi]", { event: "query-no-match", projectId, keyword });
           const task: ResearchTaskProposal = {
             label: poiResearchTaskLabel(String(keyword)),
             type: "vbk",
@@ -100,7 +101,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
     }
     if (poiUpdated) {
       await runtime.writeModule(projectId, "itinerary", AI_WRITABLE_PATHS.itinerary, updated);
-      console.info("[planning.poi]", { event: "write-back", projectId });
+      logInfo("[planning.poi]", { event: "write-back", projectId });
     }
   }
 
@@ -116,11 +117,11 @@ async function queryPoi(args: {
   queryTimeoutMs: number;
 }): Promise<{ match: { poiName: string; poiId: number } | null; failed: boolean }> {
   try {
-    console.info("[planning.poi]", { event: "query-start", projectId: args.projectId, keyword: args.keyword });
+    logInfo("[planning.poi]", { event: "query-start", projectId: args.projectId, keyword: args.keyword });
     const match = await rejectPoiQueryAfter(args.runtime.suggestPoi!(args.keyword), args.queryTimeoutMs);
     return { match, failed: false };
   } catch (error) {
-    console.warn("[planning.poi]", {
+    logWarn("[planning.poi]", {
       event: "query-failed",
       projectId: args.projectId,
       keyword: args.keyword,
@@ -149,13 +150,13 @@ async function resolveFallbackPoi(args: {
         previousCandidates,
       });
     } catch (error) {
-      console.warn("[planning.poi]", { event: "fallback-resolver-failed", projectId: args.projectId, originalName: args.originalName, attempt, error: error instanceof Error ? error.message : String(error) });
+      logWarn("[planning.poi]", { event: "fallback-resolver-failed", projectId: args.projectId, originalName: args.originalName, attempt, error: error instanceof Error ? error.message : String(error) });
     }
     if (!isUsableFallbackCandidate(candidate, args.originalName, previousCandidates)) {
-      console.info("[planning.poi]", { event: "fallback-candidate-rejected", projectId: args.projectId, originalName: args.originalName, attempt });
+      logInfo("[planning.poi]", { event: "fallback-candidate-rejected", projectId: args.projectId, originalName: args.originalName, attempt });
       continue;
     }
-    console.info("[planning.poi]", { event: "fallback-query-start", projectId: args.projectId, originalName: args.originalName, candidate, attempt });
+    logInfo("[planning.poi]", { event: "fallback-query-start", projectId: args.projectId, originalName: args.originalName, candidate, attempt });
     previousCandidates.push(candidate);
     const result = await queryPoi({ runtime: args.runtime, projectId: args.projectId, keyword: candidate, queryTimeoutMs: args.queryTimeoutMs });
     if (result.failed) return { match: null, queryFailed: true, attempts: attempt };

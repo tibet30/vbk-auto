@@ -17,6 +17,7 @@
  *     也未再读取 SQLite 里的 cookies_ciphertext / cookies_json。
  */
 
+import { logWarn } from "../../shared/log-timestamp.js";
 import { BrowserWindow, WebContentsView, session, shell } from "electron";
 import { openExternalUrl } from "./external-url.js";
 import { chromium, type Browser, type Page } from "playwright";
@@ -325,7 +326,7 @@ export class VbkBrowser {
       // 后续 status() 会重新触发 saveCurrentSession 再试一次。
       await Promise.resolve(this.sessionStore.saveSession(key, displayName, cookiesJson));
     } catch (error) {
-      console.warn("[vbk] failed to persist session cookies; user will need to re-login", {
+      logWarn("[vbk] failed to persist session cookies; user will need to re-login", {
         accountKey: key,
         message: (error as { message?: string })?.message ?? "unknown",
       });

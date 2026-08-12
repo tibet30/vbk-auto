@@ -10,6 +10,7 @@
 import { delay, assertCount } from "../utils.js";
 import { matchDropdownOption } from "../../dropdown-match.js";
 import { pickCityOption } from "./types.js";
+import { logInfo } from "../../../../shared/log-timestamp.js";
 
 /**
  * 通用城市下拉选择器：处理「已选即跳过」「清除 → 重选」「打开搜索框 → 输 → 轮询候选」流程；
@@ -99,7 +100,7 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
         const idx = lastSeen.findIndex((t) => t === ai.text);
         if (idx >= 0) {
           if (ai.source === "ai") {
-            console.info("[fillCitySelect] AI 兜底选中城市", {
+            logInfo("[fillCitySelect] AI 兜底选中城市", {
               desired: city,
               picked: ai.text,
               reasoning: ai.reasoning,

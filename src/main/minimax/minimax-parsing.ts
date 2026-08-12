@@ -13,6 +13,7 @@
 import OpenAI from "openai";
 import type { AiResponse } from "../../shared/contracts.js";
 import { z } from "zod";
+import { logWarn } from "../../shared/log-timestamp.js";
 import {
   MiniMaxServiceError,
   aiResponsePayloadKeys,
@@ -137,7 +138,7 @@ export function parseValue(value: unknown): AiResponse {
     const path = (operation as Record<string, unknown>).path;
     return patchOperationSchema.safeParse(operation).success ? [] : [typeof path === "string" ? path : "[missing path]"];
   });
-  if (rejectedPatchPaths.length) console.warn("[AI] rejected patch paths", { paths: rejectedPatchPaths });
+  if (rejectedPatchPaths.length) logWarn("[AI] rejected patch paths", { paths: rejectedPatchPaths });
 
   const questions = Array.isArray(recordKeys.questions)
     ? recordKeys.questions.filter((question): question is string => typeof question === "string" && Boolean(question.trim())).slice(0, 1)
@@ -350,7 +351,7 @@ export function parseJson(raw: string): ParsedMinimaxResponse {
   const maybeError = lastError instanceof Error ? lastError.message : "unknown";
   const sparseResponse = parseSparseResponse(cleaned);
   if (sparseResponse) {
-    console.warn("[AI] structured parse fallback to partial payload", {
+    logWarn("[AI] structured parse fallback to partial payload", {
       length: raw.length,
       reason: maybeError,
       fallbackKind: sparseResponse.isStructured ? "structured-partial" : "text-only",
@@ -362,13 +363,13 @@ export function parseJson(raw: string): ParsedMinimaxResponse {
     ?? extractPlainReply(cleaned)
     ?? extractTextFallback(cleaned);
   if (fallbackReply) {
-    console.warn("[AI] structured parse fallback to loose reply", {
+    logWarn("[AI] structured parse fallback to loose reply", {
       length: raw.length,
       reason: maybeError,
     });
     return unstructured(fallbackReply);
   }
-  console.warn("[AI] structured response rejected", {
+  logWarn("[AI] structured response rejected", {
     length: raw.length,
     hasThinkingBlock: /<think>/i.test(raw),
     hasJsonFence: /```(?:json)?/i.test(raw),
@@ -395,7 +396,7 @@ function stripReplyValueWrappers(value: string): string {
  */
 function parseRecoveredJson(raw: string): unknown | undefined {
   const withoutTrailingComma = trimTrailingComma(raw);
-  console.warn("[DBG-prj2] raw[:80]=", raw.slice(0, 80));
+  logWarn("[DBG-prj2] raw[:80]=", raw.slice(0, 80));
   const candidates = [
     raw,
     withoutTrailingComma,
@@ -943,7 +944,7 @@ export function parseAssistantMessage(message: OpenAI.Chat.Completions.ChatCompl
       return sparseFromTools;
     }
     if (bestToolCall) return bestToolCall;
-    console.warn("[AI] tool-call arguments rejected, fallback to message content", {
+    logWarn("[AI] tool-call arguments rejected, fallback to message content", {
       attempts: toolCalls.length,
     });
   }

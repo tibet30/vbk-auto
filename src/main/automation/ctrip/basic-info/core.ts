@@ -93,7 +93,7 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
  */
 export async function assertBasicInfoNoRedErrors(page) {
   await delay(800);
-  const watched = ["国家景区", "提前预订", "地接社", "管家"];
+  const watched = ["国家景区", "提前预订", "地接社", "管家", "操作说明"];
   const withHelp = page.locator(".ant-form-item-with-help");
   const withControlError = page.locator(".ant-form-item:has(.ant-form-item-control.has-error)");
   const total = (await withHelp.count()) + (await withControlError.count());

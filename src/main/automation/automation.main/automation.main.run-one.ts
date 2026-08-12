@@ -30,6 +30,8 @@ import { projectNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { isProductImageTextUrl } from "../ctrip/tabs.js";
+import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
+import { saveScreenshot } from "../ctrip/ctrip.js";
 import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
@@ -113,7 +115,7 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
         itinerary: () => fillItineraryDraft(page, product, { disambiguator: ctx.disambiguator, productId: productId ?? "" }),
         package: () => fillAndSavePackage(page, product),
         pricingInventory: () => fillAndSubmitPricingInventory(page, product, productId!),
-        terms: () => fillAndSaveTerms(page, product),
+        terms: () => fillAndSaveTerms(page, product, productId),
         hotelResource: () => ensureHotelResource(page, product, productId!),
         vehicleResource: () => ensureVehicleResource(page, product, productId!),
         preflight: () => runProductPreflight(page, product, productId!),
@@ -219,6 +221,12 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
           // 阶段。
           run.status = originalRunStatus === "running" ? "running" : originalRunStatus;
           run.currentPhase = undefined;
+          if (run.phases.length > 0 && run.phases.every((phase) => phase.status === "completed")) {
+            run.status = "succeeded";
+            await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
+            log("产品草稿已保存，未提交审核、未发布。", "warning");
+            ctx.db.updateProduct(projectId, project.product, "draft_saved");
+          }
           break;
         }
       }

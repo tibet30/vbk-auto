@@ -1,3 +1,4 @@
+import { logWarn } from "../../../shared/log-timestamp.js";
 import type {
   ContactCardSelection,
   CtripLibraryImageCandidate,
@@ -87,7 +88,7 @@ export function useBasicInfoHandlers(state: AppState) {
       setBasicInfoButlerDefault(null);
       setBasicInfoServicePhone(null);
       setBasicInfoButlerLoadedForProjectId(capturedId);
-      console.warn("[basic-info] load account fixed info failed", { accountName, error });
+      logWarn("[basic-info] load account fixed info failed", { accountName, error });
     }
   };
 

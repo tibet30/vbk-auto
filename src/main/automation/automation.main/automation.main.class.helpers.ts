@@ -11,6 +11,7 @@ import type { AutomationRun, ContactCardSelection } from "../../../shared/contra
 import type { ActiveButlerContext } from "./automation.main.context.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
+import { logWarn } from "../../../shared/log-timestamp.js";
 
 const electronRequire = createRequire(import.meta.url);
 
@@ -114,7 +115,7 @@ export function resolveActiveServicePhoneContext(
     if (accountName && name === accountName) continue;
     const fallback = isReady(name);
     if (fallback) {
-      console.warn(
+      logWarn(
         `[automation] 当前 vbkAccountName "${accountName || "<空>"}" 未匹配到有效 400 电话，回退到历史账号 "${name}"`,
       );
       return { ...fallback, fallbackUsed: true };
@@ -151,7 +152,7 @@ export function resolveActiveButlerContext(
     if (accountName && name === accountName) continue;
     const fallback = isReady(name);
     if (fallback) {
-      console.warn(
+      logWarn(
         `[automation] 当前 vbkAccountName "${accountName || "<空>"}" 未匹配到有效固定信息，回退到历史账号 "${name}"`,
       );
       return { ...fallback, fallbackUsed: true };

@@ -63,8 +63,9 @@ test("saveCurrentSession：await 持久化 + catch 保存失败", () => {
   const saveCurrentSession = source.slice(source.indexOf("  async saveCurrentSession()"), source.indexOf("  /**\n   * \"新增登录\""));
   // 必须 await store 的 saveSession，确保同步感知写入完成。
   assert.match(saveCurrentSession, /await\s+Promise\.resolve\(this\.sessionStore\.saveSession/);
-  // store 抛错时 saveCurrentSession 自身不应再抛（catch + console.warn + 返回 null）。
-  assert.match(saveCurrentSession, /catch\s*\([\s\S]*?console\.warn\([\s\S]*?return null;/);
+  // store 抛错时 saveCurrentSession 自身不应再抛（catch + warn + 返回 null）。
+  // logWarn / console.warn 都会被认作可观测 warn 出口。
+  assert.match(saveCurrentSession, /catch\s*\([\s\S]*?(console\.warn|logWarn)\([\s\S]*?return null;/);
 });
 
 test("addLogin / switchAccount 都 await saveCurrentSession", () => {

@@ -245,3 +245,21 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
 export function normaliseProvinceName(value: string): string {
   return value.trim().replace(/(特别行政区|维吾尔自治区|壮族自治区|回族自治区|自治区|省|市)$/, "").trim();
 }
+
+/**
+ * 判断一个名称是否本身就是省级行政区，而不是普通目的地城市。
+ *
+ * 规划输入允许用户直接写「内蒙古」或「内蒙古自治区」作为目的地；
+ * 这类名称在 basicInfo 中会同时出现在 province / destinationCity，
+ * 但不能因此被当作「把城市伪装成省份」而拒绝。
+ */
+const PROVINCE_LEVEL_NAMES = new Set([
+  "北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江",
+  "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南",
+  "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州",
+  "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "香港", "澳门",
+]);
+
+export function isProvinceLevelName(value: string): boolean {
+  return PROVINCE_LEVEL_NAMES.has(normaliseProvinceName(value));
+}

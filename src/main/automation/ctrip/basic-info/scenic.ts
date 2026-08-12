@@ -12,6 +12,7 @@ import { delay, assertCount, pickSearchInput } from "../utils.js";
 import { matchDropdownOption } from "../../dropdown-match.js";
 import { findProvinceOptionIndex } from "../../schema/schema-functions.js";
 import { dismissDataRiskDialog } from "../dialogs.js";
+import { logInfo } from "../../../../shared/log-timestamp.js";
 
 export async function fillScenicAreaProvince(page, province, extra = {}) {
   const disambiguator = extra?.disambiguator;
@@ -82,7 +83,7 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
       chosenIndex = ai.index;
       chosenSource = ai.source;
       if (ai.source === "ai") {
-        console.info("[fillScenicAreaProvince] AI 兜底选中省份", {
+        logInfo("[fillScenicAreaProvince] AI 兜底选中省份", {
           desired: label,
           picked: ai.text,
           reasoning: ai.reasoning,
@@ -218,7 +219,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
         await options.nth(ai.index).click();
         await delay(300);
         if (ai.source === "ai") {
-          console.info("[fillScenicAreaSpots] AI 兜底选中景点", {
+          logInfo("[fillScenicAreaSpots] AI 兜底选中景点", {
             desired: target,
             picked: ai.text,
             reasoning: ai.reasoning,

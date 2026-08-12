@@ -2,6 +2,7 @@
 // 销售控制页（saleControlMerge）：新建草稿的产品壳配置。
 // 包括 1. 产品类型 / 2. 产品形态 / 3. 是否拆团 / 4. 线路品牌 / 5. 分销渠道
 // / 6. 点击下一步并返回携程产品 ID。
+import { logWarn } from "../../../../shared/log-timestamp.js";
 import { URLS } from "../../constants.js";
 import {
   PRODUCT_TYPE_LABELS,
@@ -78,7 +79,7 @@ async function configureProductShell(page, product) {
   if (productFormUnlocked) {
     await setEnabledSelectByLabel(page, productFormRow, PRODUCT_FORM_LABELS[productForm], "产品形态");
   } else {
-    console.warn("[configureProductShell] 产品形态下拉始终 disabled（合同锁定）");
+    logWarn("[configureProductShell] 产品形态下拉始终 disabled（合同锁定）");
   }
 
   // 跟团游额外出现「是否拆团」radio

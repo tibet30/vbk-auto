@@ -10,6 +10,7 @@
 
 import type { Page } from "playwright";
 import { fetchCurrentUserInfo } from "./current-user.js";
+import { logWarn } from "../../shared/log-timestamp.js";
 /**
  * 在已登录的 VBK 浏览器上下文里抓取当前登录账号对应的 providerId（供应商 ID）。
  *
@@ -181,7 +182,7 @@ export async function scheduleProviderIdRefresh(
       persist(id);
       return;
     } catch (error) {
-      console.warn("[providerId] refresh failed", { delayMs, error: error instanceof Error ? error.message : String(error) });
+      logWarn("[providerId] refresh failed", { delayMs, error: error instanceof Error ? error.message : String(error) });
     }
   }
   persist(null);

@@ -28,6 +28,7 @@
 import type { PoiSuggestBrowser } from "./poi-suggest.js";
 import { EMPTY_COVER_PLACE_SEARCH_CONTEXT, type CoverPlaceSearchSessionContext } from "./cover-place-search-logger.js";
 import { vbkSessionRequest } from "./vbk-session-request.js";
+import { logWarn } from "../../shared/log-timestamp.js";
 
 export interface CtripImageUrlVariant {
   width: number | null;

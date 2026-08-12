@@ -1,3 +1,4 @@
+import { logWarn } from "../../../../shared/log-timestamp.js";
 // @ts-nocheck
 /**
  * 「产品图文」阶段保存结果严格门禁 monitor：
@@ -296,7 +297,7 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
       if (settled || disposed) return;
       // 不在这里 settle：单次响应解析失败不应让整个 wait 失败；
       // 留给超时窗口判定「未在窗口内收到业务响应」。
-      console.warn("[save-monitor] response handler error", {
+      logWarn("[save-monitor] response handler error", {
         message: (error as Error)?.message ?? String(error),
       });
     });

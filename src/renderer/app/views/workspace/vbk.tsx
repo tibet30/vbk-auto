@@ -110,6 +110,8 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
               {reviewSections.map(({ section, state, url }) => {
                 const isNavigating = navigatingSection === section.key;
                 const canNav = Boolean(url) && !loading && !navigatingSection && !retryingPhase;
+                const saleControlRequiresNoProduct = section.key === "saleControl" && Boolean(project?.productId);
+                const retryPhases = section.key === "saleControl" ? ["saleControl"] : section.phaseNames;
                 return (
                   <div className={styles.stage} key={section.key} data-state={state}>
                     <span className={styles.stageDot} />
@@ -127,7 +129,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                         <span>进入</span>
                         {isNavigating ? <LoaderCircle size={12} /> : <Wrench size={12} />}
                       </button>
-                      {section.phaseNames.map((phaseKey) => {
+                      {retryPhases.map((phaseKey) => {
                         const isRetrying = retryingPhase === phaseKey;
                         const phaseName = phaseDisplayLabel(phaseKey);
                         return (
@@ -136,7 +138,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                             type="button"
                             className={`${styles.stageAction} ${styles.stageActionRetry}`}
                             onClick={() => void retryOnePhaseAutomation(section.key, phaseKey)}
-                            disabled={!!retryingPhase || !url || isNavigating}
+                            disabled={!!retryingPhase || !url || isNavigating || automationActive || saleControlRequiresNoProduct}
                             data-busy={isRetrying}
                             aria-label={`重新执行「${section.label}」的「${phaseName}」`}
                             title={`仅重跑 ${phaseName}，不影响其他阶段`}

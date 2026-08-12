@@ -24,6 +24,7 @@
  *   - src/main/operations/cover-ipc.ts 的 searchCtripLibraryCoverCandidates
  *     （沿用 IPC 名以避免大量 preload / renderer 改动；语义已切换为 places 候选）。
  */
+import { logWarn } from "../../shared/log-timestamp.js";
 import type { PoiSuggestCandidate, PoiSuggestDetailResult } from "../../shared/contracts.js";
 import type { CoverPlaceCandidate, CoverPlaceSearchResult } from "../../shared/contracts-types.js";
 import type { CtripLibraryImageInfo } from "./ctrip-image-info.js";

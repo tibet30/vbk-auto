@@ -125,7 +125,8 @@ test("VbkBrowser.saveCurrentSession: cookie store 抛错时被 try/catch 捕获�
   );
   assert.match(saveCurrentSession, /try\s*\{/);
   assert.match(saveCurrentSession, /catch\s*\(/);
-  assert.match(saveCurrentSession, /console\.warn/);
+  // logWarn / console.warn 都会被认作可观测 warn 出口。
+  assert.match(saveCurrentSession, /(console\.warn|logWarn)/);
   assert.match(saveCurrentSession, /return null/);
   // 必须 await Promise.resolve(sessionStore.saveSession(...)) —— 契约的一部分。
   assert.match(saveCurrentSession, /await\s+Promise\.resolve\(\s*this\.sessionStore\.saveSession\(/);
@@ -148,7 +149,8 @@ test("withKnownVbkAccount in main.ts: saveCurrentSession 抛错被 .catch 捕获
   assert.match(withKnown, /browser\.saveCurrentSession\(\)/);
   assert.match(withKnown, /\.then\(\(saved\)/);
   assert.match(withKnown, /\.catch\(\(error\)/);
-  assert.match(withKnown, /console\.warn/);
+  // logWarn / console.warn 都会被认作可观测 warn 出口。
+  assert.match(withKnown, /(console\.warn|logWarn)/);
   // 不允许 `void browser?.saveCurrentSession().then(...)` —— 这种写法在 browser
   // 为 undefined 时会同步抛 TypeError，且不会被 .catch 捕获。
   assert.equal(/void\s+browser\?\.saveCurrentSession/.test(withKnown), false,

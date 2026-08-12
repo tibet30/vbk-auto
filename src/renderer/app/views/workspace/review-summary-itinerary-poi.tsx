@@ -4,6 +4,7 @@ import { api } from "../../helpers";
 import type { PoiSuggestCandidate, PoiSuggestDetailResult, PoiSuggestLogContext } from "../../../../shared/contracts";
 import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary";
 import styles from "./review-summary-itinerary-poi.module.less";
+import { logDebug } from "../../../../shared/log-timestamp.js";
 
 type PoiManualLogContext = PoiSuggestLogContext & {
   keyword?: string;
@@ -16,7 +17,7 @@ const POI_MANUAL_LOG_PREFIX = "[poi.manual]";
 
 function logPoiManual(event: string, context: PoiManualLogContext) {
   if (!import.meta.env.DEV) return;
-  console.debug(POI_MANUAL_LOG_PREFIX, event, { stage: event, ...context });
+  logDebug(POI_MANUAL_LOG_PREFIX, event, { stage: event, ...context });
 }
 
 export function ItinerarySpotPoiEditor({ projectId, item }: { projectId: string; item: ItineraryTimelineSpotItem }) {

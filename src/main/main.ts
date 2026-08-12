@@ -11,6 +11,7 @@
  * 补文件头与少量 IPC 分组注释。
  */
 
+import { logError, logInfo, logLog, logWarn } from "../shared/log-timestamp.js";
 import path from "node:path";
 import { app, BrowserWindow, ipcMain } from "electron";
 import { fileURLToPath } from "node:url";
@@ -88,7 +89,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const isDev = !app.isPackaged;
 function logPoiManualIpc(event: string, context: Record<string, unknown>) {
   if (!isDev) return;
-  console.log("[poi.manual]", event, { stage: event, ...context });
+  logLog("[poi.manual]", event, { stage: event, ...context });
 }
 // 自动化通过 CDP 驱动内嵌的 VBK 页面，端口必须开着；但固定的 9222 可被
 // 本机任意进程预测并接管这个已登录会话，也会和其它 Chrome 实例抢占。
@@ -160,7 +161,7 @@ function safeRemoveLegacyCiphertext(db: VbkDatabase, key: string): void {
     if (!db.getSetting(key)) return;
     db.deleteSetting(key);
   } catch (error) {
-    console.warn("[settings] failed to remove legacy cipher row", { key, message: (error as { message?: string })?.message ?? "unknown" });
+    logWarn("[settings] failed to remove legacy cipher row", { key, message: (error as { message?: string })?.message ?? "unknown" });
   }
 }
 
@@ -214,7 +215,7 @@ async function completedPoiBackfillPlanner(projectId: string): Promise<{ planner
       providerLabel: resolveAiProviderLabel(settings),
     };
   } catch (error) {
-    console.warn(`[planning] poi_backfill.resolver_unavailable projectId=${projectId}`, error);
+    logWarn(`[planning] poi_backfill.resolver_unavailable projectId=${projectId}`, error);
     return { planner };
   }
 }
@@ -274,7 +275,7 @@ function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
         if (saved) db.setSetting("vbkActiveAccountKey", saved.accountKey);
       })
       .catch((error) => {
-        console.warn("[vbk] saveCurrentSession failed; user must re-login", {
+        logWarn("[vbk] saveCurrentSession failed; user must re-login", {
           message: (error as { message?: string })?.message ?? String(error),
         });
       });
@@ -372,7 +373,7 @@ async function createWindow() {
       try {
         return await service.diagnoseAutomationFailure(req);
     } catch (error) {
-      console.warn("[recovery] advisor failed", {
+      logWarn("[recovery] advisor failed", {
         phase: req.phase,
         attempt: req.attempt,
         errorCode: (error as { code?: string }).code,
@@ -386,7 +387,7 @@ async function createWindow() {
       try {
         return await service.disambiguateOption(req);
     } catch (error) {
-      console.warn("[disambiguator] failed", {
+      logWarn("[disambiguator] failed", {
         kind: req.kind,
         desired: req.desired,
         errorCode: (error as { code?: string }).code,
@@ -416,9 +417,9 @@ function registerIpc() {
     const accountName = db.getSetting("vbkAccountName")?.value || null;
     const { project: finalProject, injectResult } = createProjectWithAccountButler(db, input, accountName);
     if (injectResult.written) {
-      console.info("[createProject] auto-injected butler from current account", { projectId: finalProject.id, accountName });
+      logInfo("[createProject] auto-injected butler from current account", { projectId: finalProject.id, accountName });
     } else if (injectResult.reason) {
-      console.info("[createProject] butler not auto-injected", { projectId: finalProject.id, reason: injectResult.reason });
+      logInfo("[createProject] butler not auto-injected", { projectId: finalProject.id, reason: injectResult.reason });
     }
     emitProject(finalProject);
     // 第一版产品方案的自动触发不在 main 这里走 —— 交给 renderer 端的 useEffect
@@ -543,7 +544,7 @@ function registerIpc() {
             const shouldProbeConnectivity = new Set(["provider_connection", "provider_timeout", "provider_error"]).has(retryCode);
             if (shouldProbeConnectivity) {
               connectionChecked = false;
-              console.warn("[AI] planning request failed, run connectivity check before retry", {
+              logWarn("[AI] planning request failed, run connectivity check before retry", {
                 provider: turnSettings.aiProvider,
                 attempt,
                 errorCode: (error as { code?: string })?.code,
@@ -574,7 +575,7 @@ function registerIpc() {
         const missingModules = detectMissingModules(currentProduct);
         if (missingModules.length > 0) {
           const missingHint = missingModules.join("、");
-          console.info("[AI] first-draft missing modules detected, automatic follow-up", { provider: turnSettings.aiProvider, missingHint });
+          logInfo("[AI] first-draft missing modules detected, automatic follow-up", { provider: turnSettings.aiProvider, missingHint });
           const followUpMsg = `以下模块尚未生成：${missingHint}。请通过 submit_product_update 工具逐个补充这些模块的完整内容，每个模块用独立的 patch 操作。`;
           try {
             const secondResponse = await service.reply({
@@ -592,7 +593,7 @@ function registerIpc() {
             }
           } catch (e) {
             // 补齐失败不抛错：第一轮产物已经可用（只是不全），用户仍然可以在左侧继续对话补齐。
-            console.warn("[AI] completeness follow-up failed, keeping partial draft", { provider: turnSettings.aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
+            logWarn("[AI] completeness follow-up failed, keeping partial draft", { provider: turnSettings.aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
           }
         }
         // 首轮生成后自动补齐 VBK 车辆和酒店资源：如果 VBK 已登录，通过 API
@@ -601,7 +602,7 @@ function registerIpc() {
           try {
             const status = await browser.status();
             if (!status.loggedIn) {
-              console.info("[AI] VBK not logged in, skipping auto resource resolution", { provider: getSettings().aiProvider });
+              logInfo("[AI] VBK not logged in, skipping auto resource resolution", { provider: getSettings().aiProvider });
             } else {
               const projectAfterAi = db.getProject(projectId)!;
               let page: ReturnType<typeof browser.page> | undefined;
@@ -617,19 +618,19 @@ function registerIpc() {
                 });
                 if (coverOutcome.outcome.written) {
                   db.updateProduct(projectId, coverOutcome.nextProduct, "review");
-                  console.info("[AI] auto cover filled from Ctrip library", {
+                  logInfo("[AI] auto cover filled from Ctrip library", {
                     provider: getSettings().aiProvider,
                     keyword: coverOutcome.outcome.keyword,
                     imageId: coverOutcome.outcome.imageId,
                   });
                 } else {
-                  console.info("[AI] auto cover skipped", {
+                  logInfo("[AI] auto cover skipped", {
                     provider: getSettings().aiProvider,
                     reason: coverOutcome.outcome.reason,
                   });
                 }
               } catch (e) {
-                console.info("[AI] auto cover fill raised, keeping partial draft", {
+                logInfo("[AI] auto cover fill raised, keeping partial draft", {
                   provider: getSettings().aiProvider,
                   error: (e as { message?: string })?.message ?? "unknown",
                 });
@@ -651,22 +652,22 @@ function registerIpc() {
                         db.markResearchAccepted(projectId, task.id, vehicleOutcome.outcome.reason, "vbk");
                       }
                     }
-                    console.info("[AI] auto vehicle resource resolved", { provider: getSettings().aiProvider, resourceGroupId: vehicleOutcome.outcome.resourceGroupId });
+                    logInfo("[AI] auto vehicle resource resolved", { provider: getSettings().aiProvider, resourceGroupId: vehicleOutcome.outcome.resourceGroupId });
                   } else if (vehicleOutcome.outcome.estimatedDailyCost) {
-                    console.info("[AI] vehicle requested daily cost estimated", {
+                    logInfo("[AI] vehicle requested daily cost estimated", {
                       provider: getSettings().aiProvider,
                       estimatedDailyCost: vehicleOutcome.outcome.estimatedDailyCost,
                       reason: vehicleOutcome.outcome.reason,
                     });
                   } else {
-                    console.info("[AI] vehicle resource not found in VBK", {
+                    logInfo("[AI] vehicle resource not found in VBK", {
                       provider: getSettings().aiProvider,
                       reason: vehicleOutcome.outcome.reason,
                     });
                   }
                 }
               } catch (e) {
-                console.info("[AI] auto vehicle resource trigger raised, keeping partial draft", {
+                logInfo("[AI] auto vehicle resource trigger raised, keeping partial draft", {
                   provider: getSettings().aiProvider,
                   error: (e as { message?: string })?.message ?? "unknown",
                 });
@@ -685,18 +686,18 @@ function registerIpc() {
                         db.markResearchAccepted(projectId, task.id, hotelResult.note, "vbk");
                       }
                     }
-                    console.info("[AI] auto hotel resource resolved", { provider: getSettings().aiProvider, resourceId: hotelResult.resolved.resourceId });
+                    logInfo("[AI] auto hotel resource resolved", { provider: getSettings().aiProvider, resourceId: hotelResult.resolved.resourceId });
                   } else {
-                    console.warn("[AI] hotel resource not found in VBK", { provider: getSettings().aiProvider, note: hotelResult.note });
+                    logWarn("[AI] hotel resource not found in VBK", { provider: getSettings().aiProvider, note: hotelResult.note });
                   }
                 } catch (e) {
-                  console.warn("[AI] auto hotel resource resolution failed", { provider: getSettings().aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
+                  logWarn("[AI] auto hotel resource resolution failed", { provider: getSettings().aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
                 }
               }
             }
           } catch (e) {
             // 浏览器未就绪，静默跳过。
-            console.info("[AI] browser not ready for auto resource resolution, skipping", { provider: getSettings().aiProvider });
+            logInfo("[AI] browser not ready for auto resource resolution, skipping", { provider: getSettings().aiProvider });
           }
         }
         // 首轮生成完成后补一次管家注入：projects:create 已经在创建时尝试过一次，
@@ -705,9 +706,9 @@ function registerIpc() {
         const aiAccountName = db.getSetting("vbkAccountName")?.value || null;
         const aiInject = injectAccountButler(db, projectId, aiAccountName);
         if (aiInject.written) {
-          console.info("[ai:send] auto-injected butler after first draft", { projectId, accountName: aiAccountName });
+          logInfo("[ai:send] auto-injected butler after first draft", { projectId, accountName: aiAccountName });
         } else if (aiInject.reason) {
-          console.info("[ai:send] butler not auto-injected after first draft", { projectId, reason: aiInject.reason });
+          logInfo("[ai:send] butler not auto-injected after first draft", { projectId, reason: aiInject.reason });
         }
       }
     } catch (error) {
@@ -1003,8 +1004,7 @@ function registerIpc() {
   // 规划子系统接线：preflight + runPlan + 项目状态同步。所有 plan 层逻辑
   // 都被抽到 src/main/planning/*，main.ts 只做"装配 + 持久化 + 广播"。
 
-  /** 日志时间戳（HH:mm:ss），给 planning 日志加时间方便排查时序问题。 */
-  const ts = () => new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  /** 日志时间戳由 shared/log-timestamp.ts 的 log* 包装统一负责，这里不再定义。 */
 
   /** preflight / runPlan 抛错时的统一出口：把任意 error 包成 status=failed 的
    *  持久化 state，若项目存在则写 taskStatus='failed' 的 assistant 消息 + 同步
@@ -1032,8 +1032,8 @@ function registerIpc() {
     // 避免「继续规划还是报错但日志全无」的报告。err 已通过
     // buildPreflightFailureState 内部 redactSensitiveMessage 处理过；
     // 这里再 raw 输出原 error 一次以方便 grep 调用栈。
-    console.warn(`${ts()} [planning] preflight.failure projectId=${projectId} existingStatus=${existing?.status ?? "none"} message=${(error as { message?: string } | null)?.message ?? "unknown"}`);
-    console.warn(`${ts()} [planning] preflight.failure stack`, error);
+    logWarn(`[planning] preflight.failure projectId=${projectId} existingStatus=${existing?.status ?? "none"} message=${(error as { message?: string } | null)?.message ?? "unknown"}`);
+    logWarn(`[planning] preflight.failure stack`, error);
     if (project) {
       db.addMessage(projectId, "assistant", failure.assistantReply, "failed");
       syncProjectStatusAfterFailure(db, projectId);
@@ -1126,7 +1126,7 @@ function registerIpc() {
         // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致），
         // 使用 .catch() 而非 try/catch，避免干扰 coverage 测试的 try-block 正则匹配。
         const browserStatus = await browser.status().catch((e: unknown) => {
-          console.info("[planning] browser not ready for auto resource resolution, skipping", {
+          logInfo("[planning] browser not ready for auto resource resolution, skipping", {
             provider: providerLabel,
             error: (e as { message?: string })?.message ?? "unknown",
           });
@@ -1140,7 +1140,7 @@ function registerIpc() {
             page,
             product: projectAfter.product,
           }).catch((e: unknown) => {
-            console.info("[planning] auto cover fill raised", {
+            logInfo("[planning] auto cover fill raised", {
               provider: providerLabel,
               error: (e as { message?: string })?.message ?? "unknown",
             });
@@ -1148,7 +1148,7 @@ function registerIpc() {
           });
           if (coverResult?.outcome.written) {
             db.updateProduct(projectId, coverResult.nextProduct, "review");
-            console.info("[planning] auto cover filled from Ctrip library", {
+            logInfo("[planning] auto cover filled from Ctrip library", {
               provider: providerLabel,
               keyword: coverResult.outcome.keyword,
               imageId: coverResult.outcome.imageId,
@@ -1159,7 +1159,7 @@ function registerIpc() {
             page,
             project: db.getProject(projectId)!,
           }).catch((e: unknown) => {
-            console.info("[planning] auto vehicle resource trigger raised", {
+            logInfo("[planning] auto vehicle resource trigger raised", {
               provider: providerLabel,
               error: (e as { message?: string })?.message ?? "unknown",
             });
@@ -1173,18 +1173,18 @@ function registerIpc() {
                   db.markResearchAccepted(projectId, task.id, vehicleResult.outcome.reason, "vbk");
                 }
               }
-              console.info("[planning] auto vehicle resource resolved", {
+              logInfo("[planning] auto vehicle resource resolved", {
                 provider: providerLabel,
                 resourceGroupId: vehicleResult.outcome.resourceGroupId,
               });
             } else if (vehicleResult.outcome.estimatedDailyCost) {
-              console.info("[planning] vehicle requested daily cost estimated", {
+              logInfo("[planning] vehicle requested daily cost estimated", {
                 provider: providerLabel,
                 estimatedDailyCost: vehicleResult.outcome.estimatedDailyCost,
                 reason: vehicleResult.outcome.reason,
               });
             } else {
-              console.info("[planning] vehicle resource not found in VBK", {
+              logInfo("[planning] vehicle resource not found in VBK", {
                 provider: providerLabel,
                 reason: vehicleResult.outcome.reason,
               });
@@ -1240,7 +1240,7 @@ function registerIpc() {
     // 必须先 restore 后 save pending：否则 pending state 会先洗掉旧的
     // failed/needs_user 标记，后续 runPlan=completed 走 syncProjectStatusAfterRunPlan
     // 时因 projects.status=blocked 错过 planning→review 推送，UI 永远停在 blocked。
-    console.info(`${ts()} [planning] ipc.start projectId=${projectId}`);
+    logInfo(`[planning] ipc.start projectId=${projectId}`);
     // 在任何状态写入前检查，避免第二个 start 把首个运行中的 state 覆盖为 pending。
     assertPlanningIdle(projectId);
     const existingState = db.loadPlanningState(projectId);
@@ -1263,16 +1263,16 @@ function registerIpc() {
     // resume 必须先 load state：没有持久化记录时没有可恢复上下文，盲目跑
     // 等同 planning:start，应由调用方显式改走 start；这里直接抛错让 IPC
     // 拒绝而不是静默写一条 pending。
-    console.info(`${ts()} [planning] ipc.resume projectId=${projectId}`);
+    logInfo(`[planning] ipc.resume projectId=${projectId}`);
     let existingState: PlanningGenerationState | undefined;
     try {
       existingState = db.loadPlanningState(projectId);
     } catch (error) {
-      console.warn(`${ts()} [planning] ipc.resume load_failed projectId=${projectId}`, error);
+      logWarn(`[planning] ipc.resume load_failed projectId=${projectId}`, error);
       return handlePreflightFailure(projectId, error);
     }
     if (!existingState) {
-      console.warn(`${ts()} [planning] ipc.resume no_state projectId=${projectId}`);
+      logWarn(`[planning] ipc.resume no_state projectId=${projectId}`);
       throw new Error(`planning:resume 拒绝：项目 ${projectId} 没有持久化规划状态，请改用 planning:start`);
     }
     const allStagesCompleted = PLANNING_STAGES.every((stage) => existingState.completedStages.includes(stage));
@@ -1282,7 +1282,7 @@ function registerIpc() {
       // 重复调 AI、重复写消息、再次触发 syncProjectStatusAfterRunPlan。历史 completed
       // 草稿仍有空 POI 时必须进入 runPlanning 的 completed backfill 分支；该分支只查
       // POI，不会重跑 planner / AI 阶段。
-      console.info(`${ts()} [planning] ipc.resume stable_completed projectId=${projectId} currentStage=${existingState.currentStage} completedStages=${existingState.completedStages.join(",")}`);
+      logInfo(`[planning] ipc.resume stable_completed projectId=${projectId} currentStage=${existingState.currentStage} completedStages=${existingState.completedStages.join(",")}`);
       return buildStableCompletedResult(existingState);
     }
     // 其他状态：受限 restore —— 仅当 projects.status=blocked 且持久化
@@ -1292,19 +1292,19 @@ function registerIpc() {
     try {
       restoreProjectToPlanningForRetry(db, projectId, existingState.status);
     } catch (error) {
-      console.warn(`${ts()} [planning] ipc.resume restore_failed projectId=${projectId}`, error);
+      logWarn(`[planning] ipc.resume restore_failed projectId=${projectId}`, error);
       return handlePreflightFailure(projectId, error);
     }
-    console.info(`${ts()} [planning] ipc.resume proceed projectId=${projectId} currentStage=${existingState.currentStage} status=${existingState.status} completedStages=${existingState.completedStages.join(",")}`);
+    logInfo(`[planning] ipc.resume proceed projectId=${projectId} currentStage=${existingState.currentStage} status=${existingState.status} completedStages=${existingState.completedStages.join(",")}`);
     return runPlanning(projectId);
   });
   ipcMain.handle("planning:state", (_event, projectId: string) => {
     try {
       const state = db.loadPlanningState(projectId);
-      console.info(`${ts()} [planning] ipc.state projectId=${projectId} status=${state?.status ?? "none"} currentStage=${state?.currentStage ?? "none"}`);
+      logInfo(`[planning] ipc.state projectId=${projectId} status=${state?.status ?? "none"} currentStage=${state?.currentStage ?? "none"}`);
       return state;
     } catch (error) {
-      console.warn(`${ts()} [planning] ipc.state failed projectId=${projectId}`, error);
+      logWarn(`[planning] ipc.state failed projectId=${projectId}`, error);
       throw error;
     }
   });
@@ -1323,7 +1323,7 @@ async function detectProviderIdInMain(): Promise<number | null> {
     if (id && accountName) db.setProviderIdFor(accountName, id);
     return id;
   } catch (error) {
-    console.warn("[accounts] detectProviderId failed", error);
+    logWarn("[accounts] detectProviderId failed", error);
     return null;
   }
 }
@@ -1347,14 +1347,14 @@ app.whenReady().then(async () => {
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   db.recoverUnansweredMessages();
   const orphanProjects = db.recoverOrphanAutomationRuns();
-  if (orphanProjects.length) console.warn("[startup] recovered orphan automation runs", { count: orphanProjects.length });
+  if (orphanProjects.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProjects.length });
   const orphanPlanning = db.recoverOrphanPlanningStates();
-  if (orphanPlanning.length) console.warn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
+  if (orphanPlanning.length) logWarn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
   registerIpc(); await createWindow();
   app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) void createWindow(); });
 }).catch((error) => {
   // 启动链路失败时必须可见地退出，否则会留下一个已注册 IPC 但没有窗口的进程。
-  console.error(`${APP_NAME} 启动失败：`, error);
+  logError(`${APP_NAME} 启动失败：`, error);
   app.quit();
 });
 app.on("window-all-closed", () => { void browser?.dispose(); if (process.platform !== "darwin") app.quit(); });

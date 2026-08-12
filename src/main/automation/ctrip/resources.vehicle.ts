@@ -24,7 +24,7 @@ import {
   DEFAULT_VEHICLE_RESOURCE_ENTRY_TIMEOUT_MS,
   DEFAULT_VEHICLE_SUBMIT_TIMEOUT_MS,
 } from "./resources.constants.js";
-import { waitForSaveButtonReady, waitForSubmitButtonReady } from "./resources.helpers.js";
+import { waitForSubmitButtonReady } from "./resources.helpers.js";
 
 /**
  * 用车资源阶段入口；options 字段允许测试注入短 timeout。
@@ -60,86 +60,119 @@ export async function ensureVehicleResource(page, product, productId, options = 
   });
   await page.getByText("资源配置", { exact: true }).waitFor({ timeout: 30_000 });
 
-  await waitForAttachedResourceEntry(page, entryTimeoutMs);
-
-  const segmentResourceInfo = await page.locator("span.item").evaluateAll((spans) => {
-    const found = spans.filter((span) => (span.textContent || "").trim() === "附加资源");
-    const enabled = found.filter((span) => !String(span.className || "").includes("disacitve"));
-    return {
-      count: found.length,
-      allDisabled: found.every((span) => String(span.className || "").includes("disacitve")),
-      enabledCount: enabled.length,
-    };
-  });
-  if (segmentResourceInfo.count > 0 && segmentResourceInfo.allDisabled) {
-    // 文案只描述观察到的现象（附加资源入口全部 disabled），不揣测套餐是否已保存。
-    return { skipped: "当前行程段附加资源入口 disabled" };
-  }
-  if (segmentResourceInfo.enabledCount !== 1) {
-    throw new Error(`可用「附加资源」入口数量异常：期望 1，实际 ${segmentResourceInfo.enabledCount}`);
-  }
-
+  // VBK 车辆资源页有「只读态」与「编辑态」两种入口文案：
+  //   - 只读态：span.item 文本 == "附加资源"，带 disacitve class。
+  //   - 编辑态：span.item 文本 == "可添加：附加资源"，className 可能仍残留
+  //     旧 disacitve（页面异步把文案换掉，但没清 class），必须以编辑态文案为准。
+  // 自动化必须先点 "编 辑" 把页面切到编辑态；该页面编辑态底部只有「提交审核」
+  // 等按钮，没有稳定的「保存」按钮，因此以后续「可添加：附加资源」文案作为
+  // 异步编辑态的可观察证据。
   const edit = page.getByRole("button", { name: "编 辑" });
   if (await edit.count()) {
     await edit.click();
-    await waitForSaveButtonReady(page, editTimeoutMs);
   }
 
+  await waitForAttachedResourceEntry(page, entryTimeoutMs);
+  const segmentResourceInfo = await page.locator("span.item").evaluateAll((spans) => {
+    const found = spans.filter((span) => {
+      const text = (span.textContent || "").trim();
+      return /^(可添加：)?附加资源$/.test(text);
+    });
+    // 编辑态文案「可添加：附加资源」一定可点击；
+    // 只读态「附加资源」只有在不带 disacitve class 时才视为可点击入口。
+    const addable = found.filter((span) => {
+      const text = (span.textContent || "").trim();
+      return text === "可添加：附加资源"
+        || !String(span.className || "").includes("disacitve");
+    });
+    return {
+      count: found.length,
+      addableCount: addable.length,
+    };
+  });
+  if (segmentResourceInfo.count > 0 && segmentResourceInfo.addableCount === 0) {
+    return { skipped: "当前行程段附加资源入口 disabled" };
+  }
+  if (segmentResourceInfo.addableCount === 0) {
+    throw new Error("未找到可用「附加资源」入口");
+  }
   const groupId = String(vehicle.resourceGroupId);
-  const segmentResource = page.locator("span.item:not(.disacitve)").filter({ hasText: /^附加资源$/ });
-  if (await segmentResource.count() !== 1) {
-    throw new Error(`可用「附加资源」入口数量异常：期望 1，实际 ${await segmentResource.count()}`);
-  }
-  await segmentResource.click();
-  // 点开资源段面板后等「提交」按钮可见且 enabled，作为面板就绪的证据。
-  await waitForSubmitButtonReady(page, editTimeoutMs);
+  const addableEntries = page
+    .locator("span.item")
+    .filter({ hasText: /^可添加：附加资源$/ })
+    .or(page.locator("span.item:not(.disacitve)").filter({ hasText: /^附加资源$/ }));
+  const segmentCards = page.locator(".ResourceConfig-content-card");
+  const segmentCount = (await segmentCards.count()) > 0
+    ? await segmentCards.filter({ has: page.locator("span.item").filter({ hasText: /^(可添加：)?附加资源$/ }) }).count()
+    : await addableEntries.count();
 
-  const existing = page.getByRole("row").filter({ hasText: groupId });
-  if (!(await existing.count())) {
-    const currentGroupRows = page
-      .getByRole("row")
-      .filter({ hasText: "度假可选项/用车" });
-    for (let index = (await currentGroupRows.count()) - 1; index >= 0; index -= 1) {
-      const remove = currentGroupRows.nth(index).getByText("删除", { exact: true });
-      if (await remove.count()) await remove.click();
-    }
+  // 携程产品级校验要求每个可配置的私家团行程段都关联用车组，不能只处理首段。
+  for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+    const card = segmentCards.filter({ has: page.locator("span.item").filter({ hasText: /^(可添加：)?附加资源$/ }) }).nth(segmentIndex);
+    const segmentResource = (await segmentCards.count()) > 0
+      ? card.locator("span.item").filter({ hasText: /^(可添加：)?附加资源$/ }).first()
+      : addableEntries.nth(segmentIndex);
+    await segmentResource.click();
+    await waitForSubmitButtonReady(page, editTimeoutMs);
 
-    await page.getByRole("button", { name: /添加资源组/ }).click();
-    const dialog = page.getByRole("dialog", { name: "选择资源组" });
-    await dialog.waitFor({ state: "visible", timeout: 10_000 });
-    await dialog.getByRole("textbox").nth(0).fill(groupId);
-    await dialog.getByRole("button", { name: "查 询" }).click();
-    // 等查询结果行含 groupId；明确超时而非固定 delay。
-    const queryRow = dialog.getByRole("row").filter({ hasText: groupId });
-    try {
-      await queryRow.first().waitFor({ state: "visible", timeout: queryTimeoutMs });
-    } catch (err) {
-      const raw = err && typeof err === "object" ? err : { message: String(err) };
-      const name = typeof raw.name === "string" ? raw.name : "";
-      const msg = typeof raw.message === "string" ? raw.message : "";
-      if (name === "TimeoutError" || /timeout|timed out/i.test(msg)) {
-        throw new Error(
-          `资源组查询超时 ${queryTimeoutMs}ms：未在「选择资源组」弹窗内找到 groupId=${groupId} 的有效记录`,
-        );
+    const existing = page.getByRole("row").filter({ hasText: groupId });
+    if (!(await existing.count())) {
+      const currentGroupRows = page
+        .getByRole("row")
+        .filter({ hasText: "度假可选项/用车" });
+      for (let index = (await currentGroupRows.count()) - 1; index >= 0; index -= 1) {
+        const remove = currentGroupRows.nth(index).getByText("删除", { exact: true });
+        if (await remove.count()) await remove.click();
       }
-      throw new Error(`资源组查询失败：${msg}`);
+
+      await page.getByRole("button", { name: /添加资源组/ }).click();
+      const dialog = page.getByRole("dialog", { name: "选择资源组" });
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      await dialog.getByRole("textbox").nth(0).fill(groupId);
+      await dialog.getByRole("button", { name: "查 询" }).click();
+      const queryRow = dialog.getByRole("row").filter({ hasText: groupId });
+      try {
+        await queryRow.first().waitFor({ state: "visible", timeout: queryTimeoutMs });
+      } catch (err) {
+        const raw = err && typeof err === "object" ? err : { message: String(err) };
+        const name = typeof raw.name === "string" ? raw.name : "";
+        const msg = typeof raw.message === "string" ? raw.message : "";
+        if (name === "TimeoutError" || /timeout|timed out/i.test(msg)) {
+          throw new Error(
+            `资源组查询超时 ${queryTimeoutMs}ms：未在「选择资源组」弹窗内找到 groupId=${groupId} 的有效记录`,
+          );
+        }
+        throw new Error(`资源组查询失败：${msg}`);
+      }
+      const rowText = (await queryRow.first().innerText()).replace(/\s+/g, " ");
+      if (!rowText.includes("有效")) throw new Error(`用车资源组不是有效状态：${rowText}`);
+      if (!rowText.includes(vehicle.resourceGroupName)) {
+        throw new Error(`用车资源组名称与产品数据不一致：${rowText}`);
+      }
+      await queryRow.first().getByRole("radio").click();
+      await dialog.getByRole("button", { name: "确 定" }).click();
     }
-    const rowText = (await queryRow.first().innerText()).replace(/\s+/g, " ");
-    if (!rowText.includes("有效")) throw new Error(`用车资源组不是有效状态：${rowText}`);
-    if (!rowText.includes(vehicle.resourceGroupName)) {
-      throw new Error(`用车资源组名称与产品数据不一致：${rowText}`);
+
+    await page.getByRole("button", { name: "提 交" }).click();
+    await waitForVehicleResourceCommitted(page, groupId, submitTimeoutMs);
+    if ((await page.url()).includes("newResourceRuleEdit")) {
+      await page.waitForURL(/\/product\/input\/newResourceRule\?/i, { timeout: submitTimeoutMs });
     }
-    await queryRow.first().getByRole("radio").click();
-    await dialog.getByRole("button", { name: "确 定" }).click();
+    await waitForAttachedResourceEntry(page, entryTimeoutMs);
   }
 
-  // 「提交」点击后必须证明前向进度：等资源组行重新出现在「度假可选项/用车」
-  // 列表里，作为本次保存落库的唯一信号。
-  await page.getByRole("button", { name: "提 交" }).click();
-  await waitForVehicleResourceCommitted(page, groupId, submitTimeoutMs);
-  // 行可见后再点「提交审核」，避免按钮在异步保存完成前就已存在但被 disabled。
-  const submitReview = page.getByRole("button", { name: "提交审核" });
+  // 资源段逐一落库后回到资源配置主页面，必须等主页面的提审按钮真正可用再点击。
+  const submitReview = page.locator("button[data-testid='submit-draft']").or(page.getByRole("button", { name: "提交审核" })).first();
   await submitReview.waitFor({ state: "visible", timeout: submitTimeoutMs });
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll("button")).some((button) =>
+      (button.textContent || "").trim() === "提交审核" &&
+      !(button as HTMLButtonElement).disabled &&
+      button.getAttribute("aria-disabled") !== "true" &&
+      !!(button as HTMLElement).offsetParent),
+    undefined,
+    { timeout: submitTimeoutMs, polling: 100 },
+  );
   await submitReview.click();
   const validation = page.getByRole("dialog", { name: "校验" });
   await validation.waitFor({ state: "visible", timeout: validationDialogTimeoutMs });
@@ -159,9 +192,10 @@ async function waitForAttachedResourceEntry(page, timeoutMs) {
     await page.waitForFunction(
       () =>
         Array.from(document.querySelectorAll("span.item")).some(
-          (span) =>
-            (span.textContent || "").trim() === "附加资源" &&
-            !!(span as HTMLElement).offsetParent,
+          (span) => {
+            const text = (span.textContent || "").trim();
+            return /^(可添加：)?附加资源$/.test(text) && !!(span as HTMLElement).offsetParent;
+          },
         ),
       undefined,
       { timeout: timeoutMs, polling: 100 },

@@ -116,8 +116,9 @@ test("withKnownVbkAccount save-promise has .catch handler (no unhandled rejectio
     mainSource.indexOf("/**\n * 计算项目 readiness"),
   );
   // The saveCurrentSession chain must end with .catch(...) so that any
-  // rejection becomes a console.warn instead of an unhandled promise
+  // rejection becomes a warn log instead of an unhandled promise
   // rejection in the Electron main process.
   assert.match(withKnown, /browser\.saveCurrentSession\(\)/);
-  assert.match(withKnown, /\.catch\(\s*\(\s*error\s*\)\s*=>\s*\{[\s\S]*console\.warn/);
+  // logWarn / console.warn 都会被认作可观测 warn 出口。
+  assert.match(withKnown, /\.catch\(\s*\(\s*error\s*\)\s*=>\s*\{[\s\S]*(console\.warn|logWarn)/);
 });

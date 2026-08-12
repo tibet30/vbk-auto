@@ -90,3 +90,33 @@ export function prepareSinglePhaseRetry(
     screenshot: undefined,
   };
 }
+
+/**
+ * 准备销售控制入口重执行：销售控制是创建产品壳的入口，不属于
+ * draftPhases，因此只能更新 recovery / currentPhase，不能把 saleControl
+ * 塞进历史 phases 数组，避免普通阶段的索引与旧重试逻辑漂移。
+ */
+export function prepareSaleControlRetry(
+  previous: AutomationRun,
+  at = new Date().toISOString(),
+): AutomationRun {
+  if (previous.status === "running") throw new Error("自动录入正在进行中，不能重新执行。");
+
+  return {
+    ...previous,
+    status: "running",
+    currentPhase: "saleControl",
+    recovery: {
+      ...(previous.recovery ?? { phases: {} }),
+      phases: {
+        ...(previous.recovery?.phases ?? {}),
+        saleControl: { phase: "saleControl", state: "running", attempts: [] },
+      },
+    },
+    logs: [
+      ...previous.logs,
+      { at, message: "正在重新执行阶段：saleControl（销售控制）", level: "warning" },
+    ],
+    screenshot: undefined,
+  };
+}

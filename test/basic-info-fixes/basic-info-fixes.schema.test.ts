@@ -224,6 +224,15 @@ test("basicExecute 开头清空 scenicSpotLogs，防止 runner 重试重复记�
   );
 });
 
+test("全量 runner 在 basic 已保存且产品完整时跳过重复填充", () => {
+  const source = readAutomationSource();
+  const start = source.indexOf("const basicExecute = async () =>");
+  const body = source.slice(start, source.indexOf("const handlers:", start));
+  assert.match(body, /shouldRefill\.reason === "complete"/);
+  assert.match(body, /basic 阶段已保存且产品数据完整，跳过重复填充/);
+  assert.match(body, /run\.phases\[0\]\.status = "completed";\s*return;/);
+});
+
 test("basicInfoCompletenessIssues 报告省份缺失", () => {
   const product = productFixture();
   delete (product.basicInfo as Record<string, unknown>).province;

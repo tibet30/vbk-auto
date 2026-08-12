@@ -8,6 +8,7 @@
 import type { Page } from "playwright";
 import type { ProjectDetail } from "../../shared/contracts.js";
 import { vbkSessionRequest } from "../infrastructure/vbk-session-request.js";
+import { logInfo } from "../../shared/log-timestamp.js";
 
 export interface VehicleResourceEstimateInput {
   city?: string;
@@ -306,7 +307,7 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
       selected = bestResourceGroup(fallbackPayload, targetDailyCost, estimate.query);
       if (selected) {
         matchedQuery = fallbackSearchQuery;
-        console.info("[VehicleResource] matched via fallback query", { original: primaryQuery, fallback: fallbackSearchQuery, resourceGroupId: selected.resourceGroupId });
+        logInfo("[VehicleResource] matched via fallback query", { original: primaryQuery, fallback: fallbackSearchQuery, resourceGroupId: selected.resourceGroupId });
       }
     }
   }

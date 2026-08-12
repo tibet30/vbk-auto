@@ -10,6 +10,7 @@ import { buildRewoundState } from "./validation-rewind.js";
 import { logAttemptError, logNoProgress, logStageEnd, logStageStart } from "./log.js";
 import type { ModuleOutcome, Planner, PlannerContext, PlanningGenerationState, PlanningModule, PlanningStage, PlanningStageError, ResearchTaskProposal, PlanningSkeleton } from "../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "./types.js";
+import { logInfo } from "../../shared/log-timestamp.js";
 
 export interface SingleStageResult {
   state: PlanningGenerationState;
@@ -310,7 +311,7 @@ async function runAiStage(args: {
         itineraryPoiComplete = Array.isArray(current.itinerary) && current.itinerary.every((day: any) => Array.isArray(day?.spots) && day.spots.every((spot: any) => spot && typeof spot === "object" && typeof spot.poiName === "string" && spot.poiName.trim() && typeof spot.poiId === "number" && Number.isInteger(spot.poiId) && spot.poiId > 0));
       }
       if (alreadyAccepted.includes(sole) && itineraryPoiComplete) {
-        if (stage === "itinerary") console.info("[planning.poi]", { event: "skip", projectId: state.projectId });
+        if (stage === "itinerary") logInfo("[planning.poi]", { event: "skip", projectId: state.projectId });
         accepted.push({
           module: sole,
           status: "accepted",

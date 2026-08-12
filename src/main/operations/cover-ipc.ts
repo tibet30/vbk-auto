@@ -29,6 +29,7 @@
  */
 import fs from "node:fs/promises";
 import { app, type IpcMainInvokeEvent } from "electron";
+import { logWarn } from "../../shared/log-timestamp.js";
 import type {
   CtripLibraryPlaceSearchResult,
   CtripLibrarySearchResult,

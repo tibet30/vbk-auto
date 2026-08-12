@@ -15,6 +15,7 @@ import { delay, fillVisibleInputs } from "./utils.js";
 import { clickExact, ensureCheckboxChecked } from "./itinerary/itinerary.js";
 import { clickSection, clickSafeSave } from "./tabs.js";
 import { productSectionUrl } from "../constants.js";
+import { saveStructuredProductClauses } from "./clauses-api.js";
 
 /**
  * 把 ISO 日期字符串（YYYY-MM-DD）格式化成 ant-calendar td[title] 用的「YYYY年M月D日」形式。
@@ -225,9 +226,15 @@ export async function fillAndSubmitPricingInventory(page, product, productId) {
  * 然后点保存/保存并下一步。**绝不**触碰任何「提审」按钮。
  * 当「条款维护」tab 因套餐未保存而被禁用时返回 skipped。
  */
-export async function fillAndSaveTerms(page, product) {
+export async function fillAndSaveTerms(page, product, productId) {
   // 绝不触碰任何「提审」 / 「提交审核」入口。
   if (!product.commercial?.terms) throw new Error("缺少条款配置");
+  if (productId) {
+    await page.goto(`https://vbooking.ctrip.com/ivbk/vendor/newResourceClause?productid=${encodeURIComponent(productId)}&istab=1&from=vbk`, {
+      waitUntil: "domcontentloaded",
+    });
+    return saveStructuredProductClauses(page, productId);
+  }
   const tabDisabled = await page.evaluate(() => {
     const tabs = Array.from(document.querySelectorAll(".ant-tabs-tab"));
     const target = tabs.find((t) => t.textContent?.trim() === "条款维护");

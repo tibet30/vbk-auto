@@ -21,6 +21,7 @@ import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, reso
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
+import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
 
 /**
  * 用户点击「停止」后区别于普通失败的语义：
@@ -168,7 +169,8 @@ async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
 
 /**
  * 「重新执行」按钮：单阶段重跑一个阶段、用于 review 执行效果。
- * 要求 productId 已存在且项目不在 running，否则抛错。
+ * 普通阶段要求 productId 已存在；销售控制作为产品壳入口允许在无
+ * productId 但已有 automation 记录时重执行。
  */
 async retryOnePhase(projectId: string, phase: string) {
     const requested = typeof phase === "string" ? phase.trim() : "";
@@ -178,6 +180,13 @@ async retryOnePhase(projectId: string, phase: string) {
     if (!project) throw projectNotFound(projectId);
     if (!project.automation) throw new Error("项目尚未开始自动录入。")
     if (project.automation.status === "running") throw new Error("自动录入正在进行中，不能重新执行。");
+
+    if (requested === "saleControl") {
+      if (project.productId) {
+        throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
+      }
+      return this.runSaleControlLocked(projectId);
+    }
 
     // productId 存在是必要条件：某些阶段（如 package / preflight）需要在 VBK
     // 携程草稿页上点操作；远程草稿尚未创建时不能单阶段重跑。
@@ -208,6 +217,10 @@ async retryOnePhase(projectId: string, phase: string) {
     return runOnePhaseFlow(this.runContext(), projectId, phaseName);
   }
 
+  private async runSaleControl(projectId: string) {
+    return runSaleControlPhase(this.runContext(), projectId);
+  }
+
 /**
  * 完整跑互斥包装：避免同一 projectId 并发 + 重入前清 stale 取消信号。
  */
@@ -229,13 +242,26 @@ private async runLocked(projectId: string, retryFrom?: string) {
 /**
  * 单阶段重跑互斥包装：与 runLocked 同型，仅不依赖 retryFrom，多清一次 cancellationRequested。
  */
-private async runOnePhaseLocked(projectId: string, phaseName: string) {
+  private async runOnePhaseLocked(projectId: string, phaseName: string) {
     if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
     this.running.add(projectId);
     this.cancellationRequested.delete(projectId);
 
     try {
       await this.runOnePhase(projectId, phaseName);
+    } finally {
+      this.running.delete(projectId);
+      this.cancellationRequested.delete(projectId);
+    }
+  }
+
+  private async runSaleControlLocked(projectId: string) {
+    if (this.running.has(projectId)) throw new Error("该项目的自动录入正在进行中，请等待本轮结束。");
+    this.running.add(projectId);
+    this.cancellationRequested.delete(projectId);
+
+    try {
+      await this.runSaleControl(projectId);
     } finally {
       this.running.delete(projectId);
       this.cancellationRequested.delete(projectId);

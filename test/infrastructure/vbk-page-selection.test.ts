@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAllowedVbkPageUrl, selectVbkPage } from "../../src/main/infrastructure/vbk-page-selection.js";
+import {
+  isAllowedVbkPageUrl,
+  selectUsableVbkPage,
+  selectVbkPage,
+} from "../../src/main/infrastructure/vbk-page-selection.js";
 
 const page = (value: string) => ({ url: () => value });
 
@@ -38,4 +42,23 @@ test("非 HTTP(S) 或非 Ctrip 地址不能作为 VBK CDP 页面", () => {
   assert.equal(isAllowedVbkPageUrl("about:blank"), false);
   assert.equal(isAllowedVbkPageUrl("https://not-ctrip.com/"), false);
   assert.equal(selectVbkPage(candidates, "http://127.0.0.1:5173/"), undefined);
+});
+
+test("同 URL 存在隐藏副本时选择具有非零视口的当前账号页面", async () => {
+  const url = "https://vbooking.ctrip.com/product/input/productListMerge?from=vbk";
+  const hidden = { url: () => url, usable: false };
+  const active = { url: () => url, usable: true };
+
+  assert.equal(
+    await selectUsableVbkPage([hidden, active], url, (candidate) => candidate.usable),
+    active,
+  );
+});
+
+test("所有候选均无可交互视口时不回退到隐藏页面", async () => {
+  const hidden = {
+    url: () => "https://vbooking.ctrip.com/ivbk/vendor/saleControlMerge?producttype=0&from=vbk",
+  };
+
+  assert.equal(await selectUsableVbkPage([hidden], hidden.url(), () => false), undefined);
 });

@@ -10,6 +10,8 @@ export interface CdpPageLike {
   url(): string;
 }
 
+export type CdpPageUsabilityCheck<T extends CdpPageLike> = (page: T) => boolean | Promise<boolean>;
+
 export function isAllowedVbkPageUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -43,4 +45,36 @@ export function selectVbkPage<T extends CdpPageLike>(pages: T[], currentViewUrl:
   // 其它携程页面时，把不具备 VBK 会话上下文的页面用于 POI 请求。
   return pages.find((page) => isVbookingPageUrl(page.url()))
     ?? pages.find((page) => isAllowedVbkPageUrl(page.url()));
+}
+
+/**
+ * CDP 可能同时保留默认登录 view 和当前账号 view；二者甚至可能拥有相同 URL。
+ * 单靠 URL 的同步选择会命中已 detach 的 0×0 页面，导致后续 locator 虽能找到
+ * 元素，却永远因为 outside of viewport 无法点击。
+ *
+ * 这里先按既有 URL 优先级排列候选，再逐个验证页面是否拥有真实可交互视口。
+ * 不回退到不可用候选：宁可明确报“未找到可用页面”，也不能在隐藏副本上写入。
+ */
+export async function selectUsableVbkPage<T extends CdpPageLike>(
+  pages: T[],
+  currentViewUrl: string,
+  isUsable: CdpPageUsabilityCheck<T>,
+): Promise<T | undefined> {
+  const ordered: T[] = [];
+  const append = (page: T) => {
+    if (!ordered.includes(page)) ordered.push(page);
+  };
+
+  if (isAllowedVbkPageUrl(currentViewUrl)) {
+    pages
+      .filter((page) => page.url() === currentViewUrl && isAllowedVbkPageUrl(page.url()))
+      .forEach(append);
+  }
+  pages.filter((page) => isVbookingPageUrl(page.url())).forEach(append);
+  pages.filter((page) => isAllowedVbkPageUrl(page.url())).forEach(append);
+
+  for (const page of ordered) {
+    if (await isUsable(page)) return page;
+  }
+  return undefined;
 }

@@ -28,6 +28,7 @@
  *     调 resolveVehicleResource → 持久化」的异步入口，捕获所有抛错并以
  *     { written, reason } 返回，不阻塞 ai:send 主流程。
  */
+import { logInfo } from "../../shared/log-timestamp.js";
 import type { Page } from "playwright";
 import type { ProjectDetail } from "../../shared/contracts.js";
 import {

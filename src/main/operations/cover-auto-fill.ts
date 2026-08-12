@@ -29,6 +29,7 @@
 import type { Page } from "playwright";
 import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search.js";
 import type { CtripLibraryImageCandidate, CtripLibrarySearchResult } from "../../shared/contracts-types.js";
+import { logInfo } from "../../shared/log-timestamp.js";
 
 function safeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -338,7 +339,7 @@ export async function applyAutoCoverFill(args: {
         : await searchCtripLibraryImages(args.page, keyword);
     } catch (error) {
       // 单个 keyword 的搜索失败不能让整次自动补齐停掉：继续下一个 keyword。
-      console.info(
+      logInfo(
         "[cover-auto-fill] keyword 搜索失败，继续尝试下一个",
         { keyword, error: error instanceof Error ? error.message : String(error) },
       );

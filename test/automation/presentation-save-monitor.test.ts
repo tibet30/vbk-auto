@@ -49,23 +49,42 @@ async function mockRoute(page: Page, pathFragment: string, status: number, body:
 }
 
 /** 通过 page.evaluate(fetch) 触发一次被拦截的 POST 请求；fetch reject 由 page.route
- * 拦截导致，吞掉即可，page.on('response') 会按真实时序触发。 */
-async function fireInterceptedPost(page: Page, pathFragment: string, body: any): Promise<void> {
+ * 拦截导致，吞掉即可，page.on('response') 会按真实时序触发。
+ *
+ * 第二个 options 参数：
+ *   - `awaitResponse`（默认 `true`）：是否等待 fetch 解析。绝大多数用例依赖
+ *     「先发请求 → 等响应回来 → monitor.waitForSave 结算」的时序契约，必须 await。
+ *   - **特例**：当被路由的处理器「故意永不响应」（如「敏感词请求永不回响」用例）时，
+ *     必须传 `awaitResponse: false`，否则 fetch 永远 pending，evaluate 永远
+ *     不返回，整个测试卡死。fire-and-forget 模式下，响应仍会通过 page.on('response')
+ *     触发 monitor 内部结算（因为它是真实网络事件，不是 Promise 链上的等待）。 */
+async function fireInterceptedPost(
+  page: Page,
+  pathFragment: string,
+  body: any,
+  options: { awaitResponse?: boolean } = {},
+): Promise<void> {
+  const awaitResponse = options.awaitResponse !== false;
   await page.evaluate(
-    async ({ url, bodyStr }: { url: string; bodyStr: string }) => {
-      try {
-        await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: bodyStr,
-        });
-      } catch {
+    async ({ url, bodyStr, awaitRes }: { url: string; bodyStr: string; awaitRes: boolean }) => {
+      const p = fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: bodyStr,
+      }).catch(() => {
         // page.route 拦截后 fetch reject，吞掉即可
+      });
+      if (awaitRes) {
+        // 默认行为：等待响应回到浏览器侧，确保「请求 + 响应」时序后再继续测试
+        await p;
       }
+      // fire-and-forget：不 await，让 evaluate 立即返回；
+      // 真正的响应事件仍会通过 page.on('response') 触发 monitor 的 settle 逻辑
     },
     {
       url: `https://example.com${pathFragment}?test=${Math.random()}`,
       bodyStr: JSON.stringify(body),
+      awaitRes: awaitResponse,
     },
   ).catch(() => {});
 }
@@ -90,6 +109,10 @@ async function withMonitor(
       monitor.uninstall();
     }
   } finally {
+    // 防御性：先卸掉所有 page.route（部分用例故意挂起请求不响应模拟「敏感词永不回响」），
+    // 不先 unrouteAll 的话 page.close() 会等挂起请求收尾而卡死整个进程。
+    // ignoreErrors 确保 route 已走完 / 被替换时 unroute 不会因 abort 报错。
+    await page.unrouteAll({ behavior: "ignoreErrors" }).catch(() => {});
     await page.close();
   }
 }
@@ -389,12 +412,20 @@ test("save monitor：敏感词请求飞出但响应永不回响 + save 响应后
         ResponseStatus: { Ack: "Success" },
         sensitiveWords: [],
       });
-      // 先发敏感词请求（让 request handler 把它记为 pendingSensitive=1）
-      await fireInterceptedPost(page, CHECK_SENSITIVE_WORD_PATH, {
-        success: true,
-        ResponseStatus: { Ack: "Success" },
-        sensitiveWords: [],
-      }).catch(() => {});
+      // 先发敏感词请求（让 request handler 把它记为 pendingSensitive=1）。
+      // 该路由 handler 永不响应，所以必须 fire-and-forget；否则 evaluate 内部
+      // 的 await fetch() 永不返回，整个测试卡死。响应事件仍会通过 page.on('response')
+      // 触发 monitor 内部计时，只是我们不再等待它完成。
+      await fireInterceptedPost(
+        page,
+        CHECK_SENSITIVE_WORD_PATH,
+        {
+          success: true,
+          ResponseStatus: { Ack: "Success" },
+          sensitiveWords: [],
+        },
+        { awaitResponse: false },
+      ).catch(() => {});
       // 等 300ms 让 sensitiveWordTimeoutMs 窗口过去
       await new Promise((resolve) => setTimeout(resolve, 400));
       // 再发 save 请求：onSaveResponse 检测到 pendingSensitive>0 但 waitElapsed

@@ -58,18 +58,19 @@ function extractFunctionBody(source: string, signature: string): string {
 
 const mainSrc = read("src/main/main.ts");
 
-test("handlePreflightFailure 必须有 console.warn 输出 preflight 失败原因", () => {
+test("handlePreflightFailure 必须有 [planning] 前缀的可观测 warn 日志", () => {
   const body = extractFunctionBody(mainSrc, "function handlePreflightFailure(");
-  assert.match(body, /console\.warn\(\s*[`'"[']?\[planning\]/,
-    "handlePreflightFailure 必须用 console.warn 输出 [planning] 前缀的可观测日志，避免「继续规划还是报错但日志全无」");
+  // logWarn / console.warn 都会被认作可观测 warn 出口（logWarn 走 console.warn 底层）。
+  assert.match(body, /(console\.warn|logWarn)\(\s*[`'"[']?\[planning\]/,
+    "handlePreflightFailure 必须输出 [planning] 前缀的可观测 warn 日志，避免「继续规划还是报错但日志全无」");
 });
 
 test("planning:resume handler 必须把 loadPlanningState 包在 try/catch，失败走 handlePreflightFailure", () => {
   const body = extractHandlerBody(mainSrc, 'ipcMain.handle("planning:resume"');
   assert.match(body, /loadPlanningState\([\s\S]*?\}\s*catch\s*\(/,
     "planning:resume 必须把 loadPlanningState 包在 try/catch 内，失败时不再抛 raw Error 静默丢失");
-  assert.match(body, /load_failed/,
-    "planning:resume 在 load 失败时必须打 console.warn [planning] ipc.resume load_failed");
+  assert.match(body, /(console\.warn|logWarn)\([^)]*load_failed/,
+    "planning:resume 在 load 失败时必须打 [planning] ipc.resume load_failed");
   assert.match(body, /handlePreflightFailure\(/,
     "planning:resume 在 load/restore 失败时必须走 handlePreflightFailure 而非 throw raw error");
 });
@@ -79,8 +80,8 @@ test("planning:resume handler 必须把 restoreProjectToPlanningForRetry 包在 
   // 期望：try { restoreProjectToPlanningForRetry(...) } catch (error) { ... handlePreflightFailure ... }
   assert.match(body, /try\s*\{[\s\S]*?restoreProjectToPlanningForRetry\(/,
     "planning:resume 必须把 restoreProjectToPlanningForRetry 包在 try 内，restore 抛错不应让 IPC 直接抛 raw error");
-  assert.match(body, /restore_failed/,
-    "planning:resume 在 restore 失败时必须打 console.warn [planning] ipc.resume restore_failed");
+  assert.match(body, /(console\.warn|logWarn)\([^)]*restore_failed/,
+    "planning:resume 在 restore 失败时必须打 [planning] ipc.resume restore_failed");
 });
 
 test("plan-orchestrator 的 resume 起点必须有显式「跳过已完成阶段」日志", () => {

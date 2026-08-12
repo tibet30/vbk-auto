@@ -35,7 +35,8 @@ async function newPage(entryMarkup: string, delayMs = 0): Promise<Page> {
   const page = await browser.newPage();
   await page.setContent(`
     <div>资源配置</div>
-    <button>编 辑</button>
+    <button id="edit" onclick="this.dataset.clicked='true'">编 辑</button>
+    <button id="save">保存</button>
     <div id="entries"></div>
     <button>提 交</button><button>提交审核</button>
     <div role="dialog" aria-label="校验"><span>校验结束</span><span>校验通过</span><button>确 定</button></div>
@@ -47,7 +48,7 @@ async function newPage(entryMarkup: string, delayMs = 0): Promise<Page> {
 }
 
 function successfulFlowMarkup() {
-  return '<div role="row">101 旧资源组</div>';
+  return '<div role="row">度假可选项/用车 101 旧资源组</div>';
 }
 
 test("延迟出现的全 disabled 附加资源入口返回 skipped 且不点击", async () => {
@@ -82,19 +83,35 @@ test("一个 disabled 和一个 enabled 时只点击 enabled 入口", async () =
   try {
     const result = await ensureVehicleResource(wrapPage(page), product(), "p", { entryTimeoutMs: 500 });
     assert.equal(result.audited, true);
+    assert.equal(await page.locator("#edit").getAttribute("data-clicked"), "true", "必须先点击编辑");
     assert.equal(await page.locator("#enabled").getAttribute("data-clicked"), "true");
   } finally {
     await page.close();
   }
 });
 
-test("多个 enabled 附加资源入口明确失败且不点击", async () => {
-  const page = await newPage('<span class="item">附加资源</span><span class="item">附加资源</span>');
+test("编辑态的可添加附加资源即使保留 disacitve class 也会点击", async () => {
+  const page = await newPage(
+    `${successfulFlowMarkup()}<span class="item disacitve" id="editable-add" onclick="this.dataset.clicked='true'">可添加：附加资源</span>`,
+  );
   try {
-    await assert.rejects(
-      () => ensureVehicleResource(wrapPage(page), product(), "p", { entryTimeoutMs: 500 }),
-      (error: Error) => /可用「附加资源」入口数量异常：期望 1，实际 2/.test(error.message),
-    );
+    const result = await ensureVehicleResource(wrapPage(page), product(), "p", { entryTimeoutMs: 500 });
+    assert.equal(result.audited, true);
+    assert.equal(await page.locator("#edit").getAttribute("data-clicked"), "true");
+    assert.equal(await page.locator("#editable-add").getAttribute("data-clicked"), "true");
+  } finally {
+    await page.close();
+  }
+});
+
+test("多个行程段有附加资源入口时选择首个可配置入口", async () => {
+  const page = await newPage(
+    `${successfulFlowMarkup()}<span class="item" id="first-enabled" onclick="this.dataset.clicked='true'">附加资源</span><span class="item" id="second-enabled">附加资源</span>`,
+  );
+  try {
+    const result = await ensureVehicleResource(wrapPage(page), product(), "p", { entryTimeoutMs: 500 });
+    assert.equal(result.audited, true);
+    assert.equal(await page.locator("#first-enabled").getAttribute("data-clicked"), "true");
   } finally {
     await page.close();
   }

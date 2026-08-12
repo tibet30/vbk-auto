@@ -144,6 +144,9 @@ export async function fillItineraryDraft(page, product, options = {}) {
     targetTabLabels: ["套餐管理"],
     isTargetUrl: isPackageManageUrl,
     nextButtonLabel: "提交审核并下一步",
+    // VBK 会在行程提交后进入「AI审核中，约需1-2min」；真实页面曾在
+    // 约 20 秒后才跳到套餐管理，不能沿用通用页面的 15 秒短门限。
+    advanceTimeoutMs: 120_000,
     savedWith,
   });
   if (!submitResult?.advanced) {

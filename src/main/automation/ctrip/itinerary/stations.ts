@@ -11,6 +11,7 @@
 import { delay, escapeRegExp, safeClick } from "../utils.js";
 import { breakpoint } from "../../debug.js";
 import { cardsByPrefix, ensureCheckboxChecked } from "./common.js";
+import { logInfo, logWarn } from "../../../../shared/log-timestamp.js";
 
 // 暴露给 debug：直接调这个函数能复现「接送站」单步场景。
 export async function selectStationAddress(page, card, city, extra = {}) {
@@ -26,14 +27,14 @@ export async function selectStationAddress(page, card, city, extra = {}) {
   try {
     await dialog.waitFor({ state: "visible", timeout: 5_000 });
   } catch (e) {
-    console.warn("[selectStationAddress] dialog 没出现，card.first() 可能是其他控件");
+    logWarn("[selectStationAddress] dialog 没出现，card.first() 可能是其他控件");
     return { matched: false, reason: "dialog-not-visible" };
   }
   const inputs = dialog.locator("input");
   const dialogInputCount = await inputs.count();
-  console.warn(`[selectStationAddress] dialog inputs=${dialogInputCount}`);
+  logWarn(`[selectStationAddress] dialog inputs=${dialogInputCount}`);
   if (dialogInputCount < 2) {
-    console.warn("[selectStationAddress] 弹窗 inputs 不足 2 个");
+    logWarn("[selectStationAddress] 弹窗 inputs 不足 2 个");
     return { matched: false, reason: "dialog-inputs-less-than-2" };
   }
 
@@ -61,7 +62,7 @@ export async function selectStationAddress(page, card, city, extra = {}) {
     }
     const options = dropdown.locator('.ant-select-dropdown-menu-item');
     const total = await options.count().catch(() => 0);
-    console.warn(`[selectStationAddress/fillStationField] kind=${kind} dropdown count=${total}`);
+    logWarn(`[selectStationAddress/fillStationField] kind=${kind} dropdown count=${total}`);
     if (!total) {
       try {
         await input.fill("").catch(() => {});
@@ -87,12 +88,12 @@ export async function selectStationAddress(page, card, city, extra = {}) {
           }
         }
       } catch (retryErr) {
-        console.warn("[selectStationAddress/fillStationField] retry 失败", String(retryErr));
+        logWarn("[selectStationAddress/fillStationField] retry 失败", String(retryErr));
       }
       return { matched: false, reason: "empty-list" };
     }
     const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.trim());
-    console.warn(`[selectStationAddress/fillStationField] kind=${kind} texts=`, texts.slice(0, 5));
+    logWarn(`[selectStationAddress/fillStationField] kind=${kind} texts=`, texts.slice(0, 5));
     const disableds = await Promise.all(
       Array.from({ length: total }, async (_, i) => {
         const cls = (await options.nth(i).getAttribute("class").catch(() => "")) || "";
@@ -100,7 +101,7 @@ export async function selectStationAddress(page, card, city, extra = {}) {
       }),
     );
     const usable = texts.filter((_, i) => !disableds[i]);
-    console.warn(`[selectStationAddress/fillStationField] kind=${kind} usable=${usable.length}, city=${city}`);
+    logWarn(`[selectStationAddress/fillStationField] kind=${kind} usable=${usable.length}, city=${city}`);
     if (usable.length === 1) {
       const idx = texts.findIndex((t) => t === usable[0]);
       await delay(150);
@@ -150,7 +151,7 @@ export async function selectStationAddress(page, card, city, extra = {}) {
           };
         }
       } catch (err) {
-        console.warn("[selectStationAddress] AI 兜底失败，跳过本字段", { kind, err: String(err.message || err) });
+        logWarn("[selectStationAddress] AI 兜底失败，跳过本字段", { kind, err: String(err.message || err) });
       }
     }
     await collapseOverlayTooltips();
@@ -158,10 +159,10 @@ export async function selectStationAddress(page, card, city, extra = {}) {
   }
 
   const airportResult = await fillStationField(0, "airport");
-  console.info("[selectStationAddress] airport", JSON.stringify(airportResult));
+  logInfo("[selectStationAddress] airport", JSON.stringify(airportResult));
   await delay(300);
   const trainResult = await fillStationField(1, "train");
-  console.info("[selectStationAddress] train", JSON.stringify(trainResult));
+  logInfo("[selectStationAddress] train", JSON.stringify(trainResult));
   const confirm = dialog.getByRole("button", { name: "确定", exact: true });
   if (await confirm.count()) {
     await safeClick(page, confirm, { force: true }).catch(() => false);
@@ -232,11 +233,11 @@ async function handleAirportTrainModal(page, city) {
   if ((await modalTitle.count()) === 0) return false;
   const modal = modalTitle.first().locator("xpath=ancestor::*[contains(@class,\"ant-modal\")][1]");
   if (!(await modal.isVisible().catch(() => false))) return false;
-  console.warn('[handleAirportTrainModal] 检测到“请选择机场/火车站”modal，开始处理');
+  logWarn('[handleAirportTrainModal] 检测到“请选择机场/火车站”modal，开始处理');
   const searchInputs = modal.locator('input.ant-select-search__field');
   const inputCount = await searchInputs.count();
   if (inputCount < 2) {
-    console.warn("[handleAirportTrainModal] modal 输入数量不足：", inputCount);
+    logWarn("[handleAirportTrainModal] modal 输入数量不足：", inputCount);
     return false;
   }
   await searchInputs.nth(0).click({ force: true });
@@ -269,7 +270,7 @@ async function handleAirportTrainModal(page, city) {
   await delay(500);
   const confirm = modal.getByRole("button", { name: "确定", exact: true });
   if ((await confirm.count()) === 0) {
-    console.warn("[handleAirportTrainModal] 未找到\"确定\"按钮");
+    logWarn("[handleAirportTrainModal] 未找到\"确定\"按钮");
     return false;
   }
   await confirm.first().click({ force: true });

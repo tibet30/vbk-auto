@@ -99,7 +99,10 @@ async function pickCalendarDate(page, input, date) {
  *   - 点「发...审核」并等弹窗关闭；任何一步失败抛错。
  */
 export async function fillAndSubmitPricingInventory(page, product, productId) {
-  if (!product.commercial?.pricing || !product.commercial.inventory) throw new Error("缺少价格库存配置");
+  const missing = [];
+  if (!product.commercial?.pricing) missing.push("commercial.pricing");
+  if (!product.commercial?.inventory) missing.push("commercial.inventory（库存）");
+  if (missing.length > 0) throw new Error(`缺少价格库存配置：${missing.join("、")}`);
   const { pricing, inventory } = product.commercial;
   await page.goto(productSectionUrl(productId, "pricingInventory"), {
     waitUntil: "domcontentloaded",

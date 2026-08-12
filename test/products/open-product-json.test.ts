@@ -5,6 +5,7 @@ import os from "node:os";
 import fs from "node:fs";
 import { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
 import { parseProduct } from "../../src/main/automation/schema/schema.js";
+import { defaultCommercialInventory } from "../../src/main/data/commercial-defaults.js";
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -39,7 +40,7 @@ function makeValidProjectJson(): string {
       {
         day: 1,
         title: "D1 太原接站",
-        spots: ["晋祠"],
+        spots: [{ name: "晋祠", poiName: "晋祠", poiId: 79413 }],
         description: "专车接站后游览晋祠。",
         hotel: "太原市区酒店",
         meals: "敬请自理",
@@ -47,7 +48,7 @@ function makeValidProjectJson(): string {
       {
         day: 2,
         title: "D2 太原送站",
-        spots: ["蒙山大佛"],
+        spots: [{ name: "蒙山大佛", poiName: "蒙山大佛", poiId: 105586 }],
         description: "专车送站。",
         hotel: "",
         meals: "敬请自理",
@@ -136,7 +137,8 @@ test("updateProductJson 成功后原项目里旧 product 字段被覆盖", async
   const { db, cleanup } = await makeDb();
   try {
     const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    assert.equal((project.product.basicInfo as Record<string, unknown>).subtitle, undefined);
+    assert.equal((project.product.basicInfo as Record<string, unknown>).subtitle, "");
+    assert.deepEqual(project.product.commercial, { inventory: defaultCommercialInventory() });
 
     const next = JSON.parse(makeValidProjectJson()) as Record<string, unknown>;
     (next.basicInfo as Record<string, unknown>).subtitle = "更新后的副标题";
@@ -144,5 +146,6 @@ test("updateProductJson 成功后原项目里旧 product 字段被覆盖", async
 
     const reloaded = db.getProject(project.id)!;
     assert.equal((reloaded.product.basicInfo as Record<string, unknown>).subtitle, "更新后的副标题");
+    assert.equal(reloaded.product.commercial, undefined);
   } finally { cleanup(); }
 });

@@ -19,6 +19,8 @@ import type { AdvisorOutcome, AdvisorRequest, AutomationRun, ProjectDetail } fro
 import { debugHitBreakpoints, debugListBreakpoints, debugResume, debugRunStep, debugSnapshot } from "./automation.main.class.debug.js";
 import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
+import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
+import { parseProduct } from "../schema/schema.js";
 
 /**
  * 用户点击「停止」后区别于普通失败的语义：
@@ -180,6 +182,7 @@ async retryOnePhase(projectId: string, phase: string) {
     // productId 存在是必要条件：某些阶段（如 package / preflight）需要在 VBK
     // 携程草稿页上点操作；远程草稿尚未创建时不能单阶段重跑。
     if (!project.productId) throw new Error("远程草稿尚未创建，不能重新执行阶段。");
+    assertSinglePhaseRetryPrerequisites(parseProduct(project.product), requested);
     return this.runOnePhaseLocked(projectId, requested);
   }
 

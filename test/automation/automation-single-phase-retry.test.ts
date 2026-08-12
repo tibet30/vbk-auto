@@ -74,6 +74,25 @@ test("不在当前产品的阶段列表里抛错（防止误传其它产品的�
   assert.throws(() => prepareSinglePhaseRetry(previous, ["presentation", "itinerary"], "basic"), /未知阶段/);
 });
 
+test("当前阶段列表包含但历史 run 缺失的阶段：允许补入目标阶段重跑", () => {
+  const previous = makePrevious("succeeded");
+  const phases = ["basic", "presentation", "itinerary", "package", "pricingInventory", "preflight"];
+  const next = prepareSinglePhaseRetry(previous, phases, "pricingInventory", "2026-08-02T01:00:00.000Z");
+
+  assert.equal(next.status, "running");
+  assert.equal(next.currentPhase, "pricingInventory");
+  assert.deepEqual(next.phases, [
+    { phase: "basic", status: "completed" },
+    { phase: "presentation", status: "completed" },
+    { phase: "itinerary", status: "completed" },
+    { phase: "package", status: "completed" },
+    { phase: "pricingInventory", status: "pending" },
+    { phase: "preflight", status: "pending" },
+  ]);
+  assert.equal(next.recovery!.phases.pricingInventory.state, "running");
+  assert.deepEqual(next.recovery!.phases.pricingInventory.attempts, []);
+});
+
 test("失败的 run 也可以单阶段重新执行：与 retryPhase 共享入口，但不动后续已完成阶段", () => {
   // failed run 通常不会所有阶段都失败；这里构造一个 basic 完成、presentation 失败。
   const previous: AutomationRun = {

@@ -14,6 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  parseInventoryDraft,
   parsePricingDraft,
   parseRequestedDailyCostDraft,
   readBasicInfoFromProduct,
@@ -23,7 +24,10 @@ import {
 const baseProduct = {
   sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
   basicInfo: { subtitle: " 太原精品两日私家团 " },
-  commercial: { pricing: { currency: "CNY", adult: 1680, child: 980, minimumTravelers: 2 } },
+  commercial: {
+    pricing: { currency: "CNY", adult: 1680, child: 980, minimumTravelers: 2 },
+    inventory: { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 },
+  },
   operations: {
     bookingControls: {
       butler: { contactCardId: 1753732, displayName: "张三", providerId: 1279416 },
@@ -45,6 +49,7 @@ test("readBasicInfoFromProduct 完整产品可读取全部字段", () => {
   assert.equal(snapshot.child, 980);
   assert.equal(snapshot.minimumTravelers, 2);
   assert.equal(snapshot.currency, "CNY");
+  assert.deepEqual(snapshot.inventory, { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 });
   assert.equal(snapshot.vehicleResource.exists, true);
   assert.equal(snapshot.vehicleResource.resourceGroupId, 88231);
   assert.equal(snapshot.vehicleResource.resourceGroupName, "太原用车组");
@@ -59,6 +64,7 @@ test("readBasicInfoFromProduct 缺失子字段时显式返回 null，不抛错",
   assert.equal(snapshot.child, null);
   assert.equal(snapshot.minimumTravelers, null);
   assert.equal(snapshot.currency, null);
+  assert.deepEqual(snapshot.inventory, { startDate: null, endDate: null, dailyQuota: null });
   assert.equal(snapshot.productForm, null);
   assert.equal(snapshot.vehicleResource.exists, false);
   assert.equal(snapshot.vehicleResource.resourceGroupId, null);
@@ -120,6 +126,18 @@ test("readBasicInfoFromProduct requestedDailyCost 可独立为 null，资源组�
   assert.equal(snapshot.vehicleResource.exists, true);
   assert.equal(snapshot.vehicleResource.resourceGroupId, 5);
   assert.equal(snapshot.vehicleResource.resourceGroupName, "5 座经济");
+});
+
+test("readBasicInfoFromProduct 读取合法 inventory，非法子字段返回 null", () => {
+  const full = readBasicInfoFromProduct({
+    commercial: { inventory: { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 } },
+  });
+  assert.deepEqual(full.inventory, { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 });
+
+  const partial = readBasicInfoFromProduct({
+    commercial: { inventory: { startDate: "2026/09/01", endDate: "2026-02-30", dailyQuota: 1.5 } },
+  });
+  assert.deepEqual(partial.inventory, { startDate: null, endDate: null, dailyQuota: null });
 });
 
 test("shouldShowVehicleResourceRow 私家团空资源组也展示入口", () => {
@@ -194,6 +212,31 @@ test("parsePricingDraft 拒绝 0 / 负数 / NaN / 空串 / 非法起订人数", 
   assert.equal(parsePricingDraft("1000", "0", "abc"), null, "非数起订人数必须拒绝");
   // 起订人数从不默认填值——传空一定拒绝，即便 adult / child 都合法
   assert.equal(parsePricingDraft("1000", "0", ""), null);
+});
+
+test("parseInventoryDraft 接受合法日期范围与正整数每日配额", () => {
+  assert.deepEqual(parseInventoryDraft("2026-09-01", "2026-09-30", "10"), {
+    startDate: "2026-09-01",
+    endDate: "2026-09-30",
+    dailyQuota: 10,
+  });
+  assert.deepEqual(parseInventoryDraft(" 2026-09-01 ", " 2026-09-01 ", "1"), {
+    startDate: "2026-09-01",
+    endDate: "2026-09-01",
+    dailyQuota: 1,
+  });
+});
+
+test("parseInventoryDraft 拒绝非法日期、倒置日期与非正整数配额", () => {
+  assert.equal(parseInventoryDraft("", "2026-09-30", "10"), null);
+  assert.equal(parseInventoryDraft("2026/09/01", "2026-09-30", "10"), null);
+  assert.equal(parseInventoryDraft("2026-02-30", "2026-09-30", "10"), null);
+  assert.equal(parseInventoryDraft("2026-10-01", "2026-09-30", "10"), null);
+  assert.equal(parseInventoryDraft("2026-09-01", "2026-09-30", ""), null);
+  assert.equal(parseInventoryDraft("2026-09-01", "2026-09-30", "0"), null);
+  assert.equal(parseInventoryDraft("2026-09-01", "2026-09-30", "-1"), null);
+  assert.equal(parseInventoryDraft("2026-09-01", "2026-09-30", "1.5"), null);
+  assert.equal(parseInventoryDraft("2026-09-01", "2026-09-30", "abc"), null);
 });
 
 test("parseRequestedDailyCostDraft 接受正数；空串 / 0 / 负数 / 非数 标记为 invalid", () => {

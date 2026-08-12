@@ -5,6 +5,7 @@
  *   - 管家联系人 (operations.bookingControls.butler)
  *   - 400 电话（来自账号 AccountFixedInfo.servicePhone，仅展示 + 引导设置）
  *   - 套餐定价 (commercial.pricing.adult / child)
+ *   - 班期库存 (commercial.inventory.startDate / endDate / dailyQuota)
  *   - 用车资源组 (operations.vehicleResource.{resourceGroupId, name, requestedDailyCost})
  *
  * 验收门（与用户规格一一对齐）：
@@ -27,6 +28,7 @@
  *  - basic-info-subtitle-row.tsx       副标题行
  *  - basic-info-butler-row.tsx         管家联系人行
  *  - basic-info-pricing-row.tsx        套餐定价行
+ *  - basic-info-inventory-row.tsx      班期库存行
  *  - basic-info-vehicle-row.tsx        用车资源组行
  *  - basic-info-service-phone-row.tsx  400 电话行
  *  - review-summary-basic-info.helpers.ts  纯数据抽取 / 草稿解析
@@ -45,6 +47,7 @@ import type {
 } from "../../../../shared/contracts-types.js";
 import { BasicInfoButlerRow } from "./basic-info-butler-row";
 import { BasicInfoCoverRow } from "./basic-info-cover-row";
+import { BasicInfoInventoryRow } from "./basic-info-inventory-row";
 import { BasicInfoPricingRow } from "./basic-info-pricing-row";
 import { BasicInfoServicePhoneRow } from "./basic-info-service-phone-row";
 import { BasicInfoSubtitleRow } from "./basic-info-subtitle-row";
@@ -76,6 +79,7 @@ export interface ReviewSummaryBasicInfoProps {
   saveSubtitle: (projectId: string) => Promise<void> | void;
   saveButler: (projectId: string, selection: ContactCardSelection | null) => Promise<void> | void;
   savePricing: (projectId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void;
+  saveInventory: (projectId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void;
   saveVehicleCost: (projectId: string, value: number | null) => Promise<void> | void;
   /**
    * 手动上传封面：
@@ -120,6 +124,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   saveSubtitle,
   saveButler,
   savePricing,
+  saveInventory,
   saveVehicleCost,
   uploadAndSaveManualCover,
   saveCtripLibraryCover,
@@ -166,6 +171,9 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   const pricingHasValue = snapshot.adult !== null
     && snapshot.child !== null
     && snapshot.minimumTravelers !== null;
+  const inventoryHasValue = snapshot.inventory.startDate !== null
+    && snapshot.inventory.endDate !== null
+    && snapshot.inventory.dailyQuota !== null;
   const vehicleVisible = shouldShowVehicleResourceRow(snapshot);
   const vehicleHasValue = vehicleVisible && (
     snapshot.vehicleResource.resourceGroupId !== null
@@ -182,6 +190,11 @@ export function AppWorkspaceReviewSummaryBasicInfo({
     child: draft.child ?? "",
     minimumTravelers: draft.minimumTravelers ?? "",
   };
+  const inventoryDraft = {
+    startDate: draft.startDate ?? "",
+    endDate: draft.endDate ?? "",
+    dailyQuota: draft.dailyQuota ?? "",
+  };
   const costDraft = draft.requestedDailyCost ?? "";
 
   // headMeta：所有核心行都列出（封面永远在），缺失字段追加「待补充 / 待设置」
@@ -191,6 +204,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   headParts.push(butlerHasValue ? "管家" : "管家待补充");
   headParts.push(servicePhoneHasValue ? "400 电话" : "400 电话待设置");
   headParts.push(pricingHasValue ? "定价" : "定价待设置");
+  headParts.push(inventoryHasValue ? "库存" : "库存待设置");
   if (vehicleVisible) {
     headParts.push(vehicleHasValue ? "用车" : "用车待匹配");
   }
@@ -203,6 +217,13 @@ export function AppWorkspaceReviewSummaryBasicInfo({
       adult: next.adult,
       child: next.child,
       minimumTravelers: next.minimumTravelers,
+    });
+  const updateInventoryDraft = (next: { startDate: string; endDate: string; dailyQuota: string }) =>
+    setDraft({
+      ...draft,
+      startDate: next.startDate,
+      endDate: next.endDate,
+      dailyQuota: next.dailyQuota,
     });
 
   return (
@@ -285,6 +306,18 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             onDraftChange={updatePricingDraft}
             onSave={(parsed) => { void savePricing(project.id, parsed.adult, parsed.child, parsed.minimumTravelers); }}
             onClearError={() => { clearError("adult"); clearError("child"); clearError("minimumTravelers"); }}
+          />
+
+          <BasicInfoInventoryRow
+            startDate={snapshot.inventory.startDate}
+            endDate={snapshot.inventory.endDate}
+            dailyQuota={snapshot.inventory.dailyQuota}
+            draft={inventoryDraft}
+            saving={savingField === "inventory"}
+            error={errors.inventory}
+            onDraftChange={updateInventoryDraft}
+            onSave={(parsed) => { void saveInventory(project.id, parsed.startDate, parsed.endDate, parsed.dailyQuota); }}
+            onClearError={() => clearError("inventory")}
           />
 
           {vehicleVisible ? (

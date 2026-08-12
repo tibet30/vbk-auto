@@ -47,6 +47,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     saveSubtitle,
     saveButler,
     savePricing,
+    saveInventory,
     saveVehicleCost,
     uploadAndSaveManualCover,
     saveCtripLibraryCover,
@@ -329,6 +330,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         saveSubtitle={saveSubtitle}
         saveButler={saveButler}
         savePricing={savePricing}
+        saveInventory={saveInventory}
         saveVehicleCost={saveVehicleCost}
         uploadAndSaveManualCover={uploadAndSaveManualCover}
         saveCtripLibraryCover={saveCtripLibraryCover}

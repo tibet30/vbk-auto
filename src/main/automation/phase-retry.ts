@@ -66,8 +66,6 @@ export function prepareSinglePhaseRetry(
   if (previous.status === "running") throw new Error("自动录入正在进行中，不能重新执行。");
   const retryIndex = phases.indexOf(retryPhase);
   if (retryIndex < 0) throw new Error(`未知阶段：${retryPhase}`);
-  const previousRow = previous.phases.find((item) => item.phase === retryPhase);
-  if (!previousRow) throw new Error(`当前产品没有阶段：${retryPhase}`);
 
   return {
     ...previous,

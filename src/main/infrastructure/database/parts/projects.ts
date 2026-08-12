@@ -21,6 +21,7 @@ import type {
   TaskStatus,
 } from "../../../../shared/contracts.js";
 import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
+import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
 import {
   canonicalPoiResearchTaskLabel,
   poiResearchTaskName,
@@ -135,6 +136,9 @@ export function createProject(db: Database.Database, input: CreateProjectInput):
       mealsIncluded: false,
       pickupCity: "",
       vehicleResource: {},
+    },
+    commercial: {
+      inventory: defaultCommercialInventory(),
     },
     itinerary: [],
   };

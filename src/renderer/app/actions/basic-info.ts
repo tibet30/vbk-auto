@@ -26,7 +26,7 @@ import type { AppState } from "../state/useAppState";
  *     资源组 ID 必须由 VBK 真实匹配得到，UI 不允许自由输入。
  */
 
-type UpdateField = "subtitle" | "butler" | "adult" | "child" | "minimumTravelers" | "requestedDailyCost" | "cover";
+type UpdateField = "subtitle" | "butler" | "adult" | "child" | "minimumTravelers" | "inventory" | "requestedDailyCost" | "cover";
 
 export function useBasicInfoHandlers(state: AppState) {
   const savingFieldsRef = useRef<Set<UpdateField>>(new Set());
@@ -180,6 +180,11 @@ export function useBasicInfoHandlers(state: AppState) {
     // `basicInfoSaving === "adult"` 协同判断。
     if (savingFieldsRef.current.has("adult") || savingFieldsRef.current.has("minimumTravelers") || basicInfoSaving === "adult" || basicInfoSaving === "minimumTravelers") return;
     void updateField(projectId, "adult", { field: "pricing", adult, child, minimumTravelers });
+  };
+
+  const saveInventory = (projectId: string, startDate: string, endDate: string, dailyQuota: number) => {
+    if (savingFieldsRef.current.has("inventory") || basicInfoSaving === "inventory") return;
+    void updateField(projectId, "inventory", { field: "inventory", startDate, endDate, dailyQuota });
   };
 
   /** 写单个车辆资源组字段：当前仅允许用车日价；资源组 ID / 名称必须来自 VBK 匹配。 */
@@ -497,6 +502,7 @@ export function useBasicInfoHandlers(state: AppState) {
     saveSubtitle,
     saveButler,
     savePricing,
+    saveInventory,
     saveVehicleResourceField,
     saveVehicleCost,
     clearError,
@@ -522,6 +528,7 @@ function fieldLabel(field: UpdateField): string {
     adult: "成人价",
     child: "儿童价",
     minimumTravelers: "起订人数",
+    inventory: "班期库存",
     requestedDailyCost: "用车日价",
     cover: "产品封面",
   } as Record<UpdateField, string>)[field];

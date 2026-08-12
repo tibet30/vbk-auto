@@ -6,6 +6,7 @@ import {
   normaliseItinerary,
   normaliseProductDraft,
 } from "../../src/main/data/product-normalize.js";
+import { defaultCommercialInventory } from "../../src/main/data/commercial-defaults.js";
 
 test("草稿字段使用 replace 时会创建尚不存在的父对象", () => {
   const product = { basicInfo: { supplierProductName: "太原2天1晚私家团" }, itinerary: [] };
@@ -14,7 +15,10 @@ test("草稿字段使用 replace 时会创建尚不存在的父对象", () => {
     { op: "replace", path: "/commercial/packageName", value: "太原2天1晚标准套餐" },
   ]);
 
-  assert.deepEqual(result.commercial, { packageName: "太原2天1晚标准套餐" });
+  assert.deepEqual(result.commercial, {
+    packageName: "太原2天1晚标准套餐",
+    inventory: defaultCommercialInventory(),
+  });
   assert.equal("commercial" in product, false);
 });
 
@@ -42,7 +46,39 @@ test("草稿归一化会移除无效运营占位值", () => {
   const result = applyProductPatch(product, [{ op: "add", path: "/basicInfo/province", value: "山西" }]);
 
   assert.deepEqual(result.operations, { vehicleResource: {} });
-  assert.equal(result.commercial, undefined);
+  assert.deepEqual(result.commercial, { inventory: defaultCommercialInventory() });
+});
+
+test("normaliseProductDraft 在 commercial 存在但缺少库存时补默认班期库存", () => {
+  const result = normaliseProductDraft({
+    commercial: {
+      packageName: "标准套餐",
+      pricing: { currency: "CNY", adult: 599, child: 399, minimumTravelers: 2 },
+    },
+  });
+
+  assert.deepEqual((result.commercial as Record<string, unknown>).inventory, defaultCommercialInventory());
+});
+
+test("normaliseProductDraft 在 commercial.inventory 非法时补默认班期库存", () => {
+  const result = normaliseProductDraft({
+    commercial: {
+      inventory: { startDate: "2026-10-01", endDate: "2026-09-01", dailyQuota: 0 },
+    },
+  });
+
+  assert.deepEqual((result.commercial as Record<string, unknown>).inventory, defaultCommercialInventory());
+});
+
+test("normaliseProductDraft 保留已有合法 commercial.inventory", () => {
+  const inventory = { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 12 };
+  const result = normaliseProductDraft({
+    commercial: {
+      inventory,
+    },
+  });
+
+  assert.deepEqual((result.commercial as Record<string, unknown>).inventory, inventory);
 });
 
 test("草稿归一化保留空 vehicleResource 并为旧 operations 补空对象", () => {

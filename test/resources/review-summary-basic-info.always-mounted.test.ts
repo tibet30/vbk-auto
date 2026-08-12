@@ -1,7 +1,7 @@
 /**
  * 基础信息模块"始终展示"契约的源码级静态断言：
  *  - 父组件 review-summary-basic-info.tsx 的核心行（封面 / 副标题 / 管家 /
- *    400 电话 / 套餐定价）必须**无条件**挂载，不再按 servicePhone / adult /
+ *    400 电话 / 套餐定价 / 班期库存）必须**无条件**挂载，不再按 servicePhone / adult /
  *    subtitle 的非空条件挂载；
  *  - 旧的"条件挂载"标记（subtitleVisible / servicePhoneVisible /
  *    pricingVisible）必须从源码中消失；
@@ -23,6 +23,7 @@ const workspaceDir = resolve(__dirname, "../../src/renderer/app/views/workspace"
 
 const parentPath = resolve(workspaceDir, "review-summary-basic-info.tsx");
 const pricingPath = resolve(workspaceDir, "basic-info-pricing-row.tsx");
+const inventoryPath = resolve(workspaceDir, "basic-info-inventory-row.tsx");
 const servicePhonePath = resolve(workspaceDir, "basic-info-service-phone-row.tsx");
 const butlerPath = resolve(workspaceDir, "basic-info-butler-row.tsx");
 const subtitlePath = resolve(workspaceDir, "basic-info-subtitle-row.tsx");
@@ -30,6 +31,7 @@ const moduleCssPath = resolve(workspaceDir, "review-summary-basic-info.module.le
 
 const parentSource = readFileSync(parentPath, "utf8");
 const pricingSource = readFileSync(pricingPath, "utf8");
+const inventorySource = readFileSync(inventoryPath, "utf8");
 const servicePhoneSource = readFileSync(servicePhonePath, "utf8");
 const butlerSource = readFileSync(butlerPath, "utf8");
 const subtitleSource = readFileSync(subtitlePath, "utf8");
@@ -77,7 +79,7 @@ function stripCommentsAndStrings(source: string): string {
   return result;
 }
 
-test("父组件 review-summary-basic-info 始终挂载封面 / 副标题 / 管家 / 400 电话 / 套餐定价", () => {
+test("父组件 review-summary-basic-info 始终挂载封面 / 副标题 / 管家 / 400 电话 / 套餐定价 / 班期库存", () => {
   const code = stripCommentsAndStrings(parentSource);
   // JSX 节点必须直接出现在 body 内，不允许外面套任何 servicePhone 非空/phone 长度条件。
   assert.match(code, /<BasicInfoCoverRow\b/);
@@ -85,6 +87,7 @@ test("父组件 review-summary-basic-info 始终挂载封面 / 副标题 / 管�
   assert.match(code, /<BasicInfoButlerRow\b/);
   assert.match(code, /<BasicInfoServicePhoneRow\b/);
   assert.match(code, /<BasicInfoPricingRow\b/);
+  assert.match(code, /<BasicInfoInventoryRow\b/);
   // 用车资源组保持既有产品类型条件挂载（vehicleVisible 三元）。
   assert.match(code, /vehicleVisible\s*\?\s*[\s\S]*?<BasicInfoVehicleRow\b[\s\S]*?:\s*null/);
 });
@@ -101,6 +104,8 @@ test("父组件不再用 servicePhone / adult / subtitle 的非空条件挂载�
   // 套餐定价行同样不能被某判断包住。
   const pricingMounted = /<BasicInfoPricingRow\b[\s\S]*?\/>/.exec(parentSource);
   assert.ok(pricingMounted, "应当找到 BasicInfoPricingRow 挂载点");
+  const inventoryMounted = /<BasicInfoInventoryRow\b[\s\S]*?\/>/.exec(parentSource);
+  assert.ok(inventoryMounted, "应当找到 BasicInfoInventoryRow 挂载点");
 });
 
 test("父组件 headMeta 在缺失字段时使用「待补充 / 待设置」文案", () => {
@@ -108,7 +113,20 @@ test("父组件 headMeta 在缺失字段时使用「待补充 / 待设置」文�
   assert.match(parentSource, /管家待补充/);
   assert.match(parentSource, /400 电话待设置/);
   assert.match(parentSource, /定价待设置/);
+  assert.match(parentSource, /库存待设置/);
   assert.match(parentSource, /用车待匹配/);
+});
+
+test("BasicInfoInventoryRow 接受 null 并沿用 parseInventoryDraft 校验", () => {
+  const code = stripCommentsAndStrings(inventorySource);
+  assert.match(code, /startDate:\s*string\s*\|\s*null/);
+  assert.match(code, /endDate:\s*string\s*\|\s*null/);
+  assert.match(code, /dailyQuota:\s*number\s*\|\s*null/);
+  assert.match(code, /hasValue\s*=\s*startDate\s*!==\s*null\s*&&\s*endDate\s*!==\s*null\s*&&\s*dailyQuota\s*!==\s*null/);
+  assert.match(code, /parseInventoryDraft\(\s*draft\.startDate\s*,\s*draft\.endDate\s*,\s*draft\.dailyQuota\s*\)/);
+  assert.match(code, /canSave\s*=\s*parsed\s*!==\s*null/);
+  assert.match(inventorySource, /commercial\.inventory/);
+  assert.match(inventorySource, /type="date"/);
 });
 
 test("BasicInfoPricingRow 接受 adult/child/minimumTravelers 为 null，并跳过数值格式化", () => {

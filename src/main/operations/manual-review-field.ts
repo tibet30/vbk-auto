@@ -4,6 +4,7 @@
  *
  * 支持的字段（用 `field` discriminator 拆分）：
  *  - pricing                  : commercial.pricing.adult / child / minimumTravelers / currency（保留现有 cost）
+ *  - inventory                : commercial.inventory.startDate / endDate / dailyQuota
  *  - basicInfoSubtitle        : basicInfo.subtitle
  *  - vehicleResource          : operations.vehicleResource.requestedDailyCost
  *  - itinerarySpotPoi         : itinerary[dayIndex].spots[spotIndex].poiName / poiId
@@ -40,6 +41,7 @@ function objectValue(value: unknown): Record<string, unknown> {
 export function applyManualReviewField(product: Record<string, unknown>, input: ManualReviewFieldInput): Record<string, unknown> {
   switch (input.field) {
     case "pricing": return applyPricing(product, input.adult, input.child, input.minimumTravelers);
+    case "inventory": return applyInventory(product, input.startDate, input.endDate, input.dailyQuota);
     case "basicInfoSubtitle": return applyBasicInfoSubtitle(product, input.subtitle);
     case "vehicleResource": return applyVehicleResource(product, input);
     case "itinerarySpotPoi": return applyItinerarySpotPoi(product, input);
@@ -103,6 +105,28 @@ function applyPricing(product: Record<string, unknown>, adult: number, child: nu
   commercial.pricing = nextPricing;
   next.commercial = commercial;
   return next;
+}
+
+function applyInventory(product: Record<string, unknown>, startDate: string, endDate: string, dailyQuota: number): Record<string, unknown> {
+  const start = String(startDate ?? "").trim();
+  const end = String(endDate ?? "").trim();
+  if (!isIsoDate(start)) throw new Error("班期开始日期必须是 YYYY-MM-DD。");
+  if (!isIsoDate(end)) throw new Error("班期结束日期必须是 YYYY-MM-DD。");
+  if (start > end) throw new Error("班期开始日期不能晚于结束日期。");
+  if (!Number.isInteger(dailyQuota) || dailyQuota <= 0) throw new Error("每日配额必须是正整数。");
+
+  const next = structuredClone(product) as Record<string, unknown>;
+  const commercial = objectValue(next.commercial);
+  commercial.inventory = { startDate: start, endDate: end, dailyQuota };
+  next.commercial = commercial;
+  return next;
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toISOString().slice(0, 10) === value;
 }
 
 function applyBasicInfoSubtitle(product: Record<string, unknown>, subtitle: string): Record<string, unknown> {

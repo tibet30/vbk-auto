@@ -18,7 +18,7 @@
 
 import type { PlanningStage, PlanningModule } from "../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "./schemas.js";
-import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 
 /**
  * 共享子 schema：把 reason 等可有可无的字段编码为 nullable（required 仍包含），
@@ -65,7 +65,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
               type: "object",
               additionalProperties: false,
               required: ["category", "text"],
-              properties: { category: { type: "string", enum: [...RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
+              properties: { category: { type: "string", enum: [...VBK_RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
             },
           },
           features: { type: "string", minLength: 1 },
@@ -95,12 +95,11 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
       return {
         type: "object",
         additionalProperties: false,
-        required: ["currency", "adult", "child", "minimumTravelers"],
+        required: ["currency", "adult", "child"],
         properties: {
           currency: { type: "string", enum: ["CNY"] },
           adult: { type: "number", exclusiveMinimum: 0 },
           child: { type: "number", minimum: 0 },
-          minimumTravelers: { type: "integer", minimum: 1 },
           cost: {
             type: "object",
             additionalProperties: false,

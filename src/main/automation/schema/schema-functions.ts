@@ -263,9 +263,13 @@ export function pickKeySpotsFromItinerary(product: Record<string, unknown>): str
     const spots = Array.isArray(day.spots) ? (day.spots as Array<unknown>) : [];
     for (const raw of spots) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-      const name = (raw as { name?: unknown }).name;
-      if (typeof name !== "string") continue;
-      const spot = name.trim();
+      // 优先使用 poiName（VBK 内部标签名），回退到 name（行程描述名）；
+      // poiName 更贴近 VBK 景区的实际下拉选项，可显著提升精确匹配率。
+      const spotRecord = raw as { name?: unknown; poiName?: unknown };
+      const rawName = typeof spotRecord.poiName === "string" && spotRecord.poiName.trim()
+        ? spotRecord.poiName.trim()
+        : typeof spotRecord.name === "string" ? spotRecord.name.trim() : "";
+      const spot = rawName.trim();
       if (!spot) continue;
       const key = spot.toLocaleLowerCase();
       if (seen.has(key)) continue;

@@ -100,6 +100,77 @@ test("旧产品 pricing 缺少 minimumTravelers 时不自动补默认，仅在�
   assert.equal(((product.commercial.pricing) as Record<string, unknown>).minimumTravelers, undefined);
 });
 
+test("手动写入班期库存时写入 commercial.inventory 且不覆盖 pricing / packageName", () => {
+  const product = {
+    commercial: {
+      packageName: "标准套餐",
+      pricing: { currency: "CNY", adult: 1680, child: 980, minimumTravelers: 2 },
+    },
+  };
+  const next = applyManualReviewField(product, {
+    field: "inventory",
+    startDate: "2026-09-01",
+    endDate: "2026-09-30",
+    dailyQuota: 10,
+  });
+  const commercial = next.commercial as Record<string, unknown>;
+  assert.deepEqual(commercial.inventory, { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 });
+  assert.equal(commercial.packageName, "标准套餐");
+  assert.deepEqual(commercial.pricing, product.commercial.pricing);
+  assert.equal((product.commercial as Record<string, unknown>).inventory, undefined);
+});
+
+test("手动更新班期库存时只替换 inventory，保留 commercial.pricing", () => {
+  const product = {
+    commercial: {
+      pricing: { currency: "CNY", adult: 1680, child: 980, minimumTravelers: 2 },
+      inventory: { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 },
+    },
+  };
+  const next = applyManualReviewField(product, {
+    field: "inventory",
+    startDate: "2026-10-01",
+    endDate: "2026-10-31",
+    dailyQuota: 6,
+  });
+  const commercial = next.commercial as Record<string, unknown>;
+  assert.deepEqual(commercial.inventory, { startDate: "2026-10-01", endDate: "2026-10-31", dailyQuota: 6 });
+  assert.deepEqual(commercial.pricing, product.commercial.pricing);
+});
+
+test("手动班期库存拒绝非法日期与配额", () => {
+  assert.throws(() => applyManualReviewField({}, {
+    field: "inventory",
+    startDate: "2026/09/01",
+    endDate: "2026-09-30",
+    dailyQuota: 10,
+  }), /开始日期/);
+  assert.throws(() => applyManualReviewField({}, {
+    field: "inventory",
+    startDate: "2026-09-01",
+    endDate: "2026-02-30",
+    dailyQuota: 10,
+  }), /结束日期/);
+  assert.throws(() => applyManualReviewField({}, {
+    field: "inventory",
+    startDate: "2026-10-01",
+    endDate: "2026-09-30",
+    dailyQuota: 10,
+  }), /不能晚于/);
+  assert.throws(() => applyManualReviewField({}, {
+    field: "inventory",
+    startDate: "2026-09-01",
+    endDate: "2026-09-30",
+    dailyQuota: 0,
+  }), /每日配额/);
+  assert.throws(() => applyManualReviewField({}, {
+    field: "inventory",
+    startDate: "2026-09-01",
+    endDate: "2026-09-30",
+    dailyQuota: 1.5,
+  }), /每日配额/);
+});
+
 test("副标题写入保留其它基础信息字段", () => {
   const next = applyManualReviewField(baseProduct, { field: "basicInfoSubtitle", subtitle: "  太原精品两日游  " });
   const basic = (next.basicInfo as Record<string, unknown>);

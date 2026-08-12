@@ -404,6 +404,7 @@ export type ProductCover = CtripLibraryCover | ManualUploadCover;
 
 export type ManualReviewFieldInput =
   | { field: "pricing"; adult: number; child: number; minimumTravelers: number }
+  | { field: "inventory"; startDate: string; endDate: string; dailyQuota: number }
   /** 副标题：写入 basicInfo.subtitle。 */
   | { field: "basicInfoSubtitle"; subtitle: string }
   /** 用车资源组人工复核只允许写 AI 建议日价；真实资源组 ID / 名称由 VBK 匹配回填。 */

@@ -48,6 +48,22 @@ export const RECOMMENDATION_CATEGORIES = [
   "缤纷体验",
 ] as const;
 
+/**
+ * VBK 产品图文页「推荐理由」下拉实际存在的分类子集（9 项）。
+ * AI 在生成推荐理由时必须严格从该子集中选取 category，否则写入 VBK 时无法匹配。
+ */
+export const VBK_RECOMMENDATION_CATEGORIES = [
+  "优选行程",
+  "服务保障",
+  "贴心赠送",
+  "精选酒店",
+  "缤纷景点",
+  "特色美食",
+  "度假首选",
+  "超值赠送",
+  "五星精选",
+] as const;
+
 export const recommendationItemSchema = z.object({
   category: z.enum(RECOMMENDATION_CATEGORIES),
   text: z.string().min(1),

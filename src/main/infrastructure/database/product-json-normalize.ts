@@ -18,6 +18,7 @@
  */
 
 import type { ProjectDetail } from "../../../shared/contracts.js";
+import { defaultCommercialInventory } from "../../data/commercial-defaults.js";
 
 /**
  * 最小可渲染 product 兜底：必须满足 schema 验证（看 schema-functions.ts 的
@@ -82,6 +83,17 @@ function normaliseVehicleResource(value: unknown) {
   };
 }
 
+function normaliseCommercialInventory(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const start = typeof record.startDate === "string" ? record.startDate : "";
+  const end = typeof record.endDate === "string" ? record.endDate : "";
+  const quota = positiveIntegerValue(record.dailyQuota);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || !quota) return undefined;
+  if (new Date(start) > new Date(end)) return undefined;
+  return { startDate: start, endDate: end, dailyQuota: quota };
+}
+
 /**
  * 把数据库里的 product_json 字符串解析为统一形态。
  *  - 解析失败 → 兜底；
@@ -115,6 +127,10 @@ export function parseAndNormalizeProductJson(raw: string | null | undefined): Pr
   const operations = product.operations as Record<string, unknown> | undefined;
   if (operations && typeof operations === "object" && !Array.isArray(operations)) {
     operations.vehicleResource = normaliseVehicleResource(operations.vehicleResource);
+  }
+  const commercial = product.commercial as Record<string, unknown> | undefined;
+  if (commercial && typeof commercial === "object" && !Array.isArray(commercial)) {
+    commercial.inventory = normaliseCommercialInventory(commercial.inventory) ?? defaultCommercialInventory();
   }
   product.itinerary = normaliseItineraryPois(product.itinerary);
   return product as ProjectDetail["product"];

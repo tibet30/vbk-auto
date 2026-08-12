@@ -73,6 +73,9 @@ export function sanitiseModuleValue(
   if (module === "release" && value && typeof value === "object" && !Array.isArray(value)) {
     value = { ...(value as Record<string, unknown>), submitReview: false, publishAfterApproval: false };
   }
+  if (module === "pricing" && value && typeof value === "object" && !Array.isArray(value)) {
+    value = { ...(value as Record<string, unknown>), minimumTravelers: 1 };
+  }
   if (module === "skeleton" && value && typeof value === "object" && !Array.isArray(value)) {
     const v = { ...(value as Record<string, unknown>) };
     if (typeof v.hotelTier === "string") {

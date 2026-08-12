@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { RECOMMENDATION_CATEGORIES, VBK_RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
 import { isCombinedSpotName } from "./spot-name.js";
 import {
   PLANNING_STAGES,
@@ -21,6 +21,8 @@ import {
 
 const requiredText = z.string().trim().min(1);
 const RECOMMENDATION_CATEGORY_VALUES = [...RECOMMENDATION_CATEGORIES] as [string, ...string[]];
+/** AI 生成推荐理由时只能使用的 VBK 下拉兼容分类（9 项），不是全量 15 项。 */
+const VBK_RECOMMENDATION_VALUES = [...VBK_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
 
 const itinerarySpotSchema = z.object({
   name: requiredText,
@@ -47,12 +49,12 @@ const researchTaskProposalSchema = z.object({
   detail: z.string().trim().optional(),
 }).strict();
 
-/** presentation 模块：3 条互不重复的推荐理由 + 4 项必要字段。 */
+/** presentation 模块：3 条互不重复的推荐理由 + 4 项必要字段。category 必须从 VBK 下拉兼容子集选取。 */
 const presentationModuleValueSchema = z.object({
-  recommendationCategory: z.enum(RECOMMENDATION_CATEGORY_VALUES),
+  recommendationCategory: z.enum(VBK_RECOMMENDATION_VALUES),
   recommendation: requiredText,
   recommendations: z.array(z.object({
-    category: z.enum(RECOMMENDATION_CATEGORY_VALUES),
+    category: z.enum(VBK_RECOMMENDATION_VALUES),
     text: requiredText,
   })).length(3),
   features: requiredText,
@@ -84,12 +86,12 @@ const itineraryDaySchema = z.object({
 
 const itineraryModuleValueSchema = z.array(itineraryDaySchema).min(1);
 
-/** pricing 模块：成人/儿童价 + 起订人数 + 成本（可选）。 */
+/** pricing 模块：成人/儿童价 + 成本（可选）；起订人数由系统硬编码为 1。 */
 const pricingModuleValueSchema = z.object({
   currency: z.literal("CNY").default("CNY"),
   adult: z.number().positive(),
   child: z.number().nonnegative(),
-  minimumTravelers: z.number().int().positive(),
+  minimumTravelers: z.number().int().positive().optional(),
   cost: z.object({
     adult: z.number().nonnegative(),
     child: z.number().nonnegative(),
@@ -367,7 +369,7 @@ ${moduleList}
    - publicPriceCeiling 必填（>0）
    - publicAuditRetries 1..10
    - submitReview / publishAfterApproval 即使你写 true，系统也会忽略并强制 false。这是「草稿态默认安全」规则，不可被覆盖。
-4. presentation.recommendations 必须恰好 3 条，category 互不重复。
+4. presentation.recommendations 必须恰好 3 条，category 互不重复且必须从 VBK 推荐理由下拉可选分类中选取：${VBK_RECOMMENDATION_VALUES.join("、")}。
 5. itinerary 每天至少 1 个 spots；mealDescriptions 恰好 3 条。
 6. pricing.adult > 0；pricing.child >= 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。

@@ -48,6 +48,7 @@ interface ReviewSummaryProps {
   saveSubtitle?: (projectId: string) => Promise<void> | void | undefined;
   saveButler?: (projectId: string, selection: ContactCardSelection | null) => Promise<void> | void | undefined;
   savePricing?: (projectId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void | undefined;
+  saveInventory?: (projectId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void | undefined;
   saveVehicleCost?: (projectId: string, value: number | null) => Promise<void> | void | undefined;
   uploadAndSaveManualCover?: (projectId: string, args: { file: { name: string; type: string; base64: string } }) => Promise<import("../../../../shared/contracts-types.js").ManualUploadCoverMeta | null>;
   saveCtripLibraryCover?: (projectId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
@@ -103,6 +104,7 @@ export function AppWorkspaceReviewSummary({
   saveSubtitle,
   saveButler,
   savePricing,
+  saveInventory,
   saveVehicleCost,
   uploadAndSaveManualCover,
   saveCtripLibraryCover,
@@ -211,6 +213,7 @@ export function AppWorkspaceReviewSummary({
     && saveSubtitle
     && saveButler
     && savePricing
+    && saveInventory
     && saveVehicleCost
     && uploadAndSaveManualCover
     && saveCtripLibraryCover
@@ -253,7 +256,7 @@ export function AppWorkspaceReviewSummary({
               )}
 
               {/* 基础信息：紧凑表单，紧贴在「每日行程」上方。 */}
-              {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
+              {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveInventory && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
                 <AppWorkspaceReviewSummaryBasicInfo
                   project={project}
                   currentAccountName={currentAccountName ?? null}
@@ -268,6 +271,7 @@ export function AppWorkspaceReviewSummary({
                   saveSubtitle={saveSubtitle}
                   saveButler={saveButler}
                   savePricing={savePricing}
+                  saveInventory={saveInventory}
                   saveVehicleCost={saveVehicleCost}
                   uploadAndSaveManualCover={uploadAndSaveManualCover}
                   saveCtripLibraryCover={saveCtripLibraryCover}

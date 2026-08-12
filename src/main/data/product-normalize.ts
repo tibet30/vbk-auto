@@ -1,4 +1,5 @@
 import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema.js";
+import { defaultCommercialInventory } from "./commercial-defaults.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 
 /**
@@ -314,7 +315,7 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
     const pricing = normaliseCommercialPricing(commercial.pricing);
     if (pricing) commercial.pricing = pricing; else delete commercial.pricing;
     const inventory = normaliseCommercialInventory(commercial.inventory);
-    if (inventory) commercial.inventory = inventory; else delete commercial.inventory;
+    commercial.inventory = inventory ?? defaultCommercialInventory();
     const release = normaliseCommercialRelease(commercial.release, { safeRelease: options?.safeRelease });
     if (release) commercial.release = release; else delete commercial.release;
     if (Object.keys(commercial).length) result.commercial = commercial; else delete result.commercial;

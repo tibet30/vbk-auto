@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { defaultCommercialInventory } from "../../src/main/data/commercial-defaults.js";
 import { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
 
 test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
@@ -20,6 +21,7 @@ test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
   assert.equal(basicInfo.meetingCity, "太原");
   assert.equal(basicInfo.destinationCity, "太原");
   assert.deepEqual((project.product.operations as Record<string, unknown>).vehicleResource, {});
+  assert.deepEqual(project.product.commercial, { inventory: defaultCommercialInventory() });
   assert.match(project.messages[0].content, /目的地「太原」/);
   // 开场白只留项目上下文事实，不再表达"AI 正在生成"等 loading 状态 —— 后者由
   // user-running 消息下方的"正在等待 AI 回复"提示负责，避免两处文案重复。
@@ -42,6 +44,29 @@ test("读取旧项目时补齐空 vehicleResource", async (t) => {
 
   const loaded = db.getProject(project.id)!;
   assert.deepEqual((loaded.product.operations as Record<string, unknown>).vehicleResource, {});
+});
+
+test("读取已有 commercial 但缺库存的旧项目时补默认班期库存", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-inventory-default-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+  const raw = (db as unknown as { db: { prepare(sql: string): { run(...values: unknown[]): void } } }).db;
+  raw.prepare("UPDATE projects SET product_json=? WHERE id=?").run(JSON.stringify({
+    sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false },
+    basicInfo: { supplierProductName: "太原2天1晚跟团游", supplierProductCode: "TY", days: 2, nights: 1, meetingCity: "太原", destinationCity: "太原" },
+    commercial: {
+      packageName: "标准套餐",
+      pricing: { currency: "CNY", adult: 599, child: 399, minimumTravelers: 2 },
+    },
+    itinerary: [],
+  }), project.id);
+
+  const loaded = db.getProject(project.id)!;
+  const commercial = loaded.product.commercial as Record<string, unknown>;
+  assert.deepEqual(commercial.inventory, defaultCommercialInventory());
+  assert.equal(commercial.packageName, "标准套餐");
+  assert.deepEqual(commercial.pricing, { currency: "CNY", adult: 599, child: 399, minimumTravelers: 2 });
 });
 
 test("新建项目自带供应商产品编号，运营可再编辑", async (t) => {

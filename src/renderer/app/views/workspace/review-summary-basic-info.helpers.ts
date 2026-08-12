@@ -4,6 +4,7 @@
  * 与 React 组件分离（不放 .tsx 里），方便用 `tsx --test` 单测覆盖：
  *  - readBasicInfoFromProduct：把 product 树上的基础信息字段安全读出来；
  *  - parsePricingDraft：UI 草稿 → 主进程可用数值；
+ *  - parseInventoryDraft：UI 草稿 → 主进程可用库存对象；
  *  - parseRequestedDailyCostDraft：UI 草稿 → 主进程可用数值或清除信号。
  *
  * 写入主路径的合法性由 src/main/operations/manual-review-field.test.ts 覆盖。
@@ -27,9 +28,14 @@ export interface BasicInfoSnapshot {
    *  - 必须为正整数（schema 限定）；
    *  - 缺失 / 非法值返回 null，UI 据此走「待设置」空状态；**绝不**默认填 1，
    *    否则会污染 readiness 与发布校验。
-   */
+  */
   minimumTravelers: number | null;
   currency: string | null;
+  inventory: {
+    startDate: string | null;
+    endDate: string | null;
+    dailyQuota: number | null;
+  };
   vehicleResource: {
     exists: boolean;
     resourceGroupId: number | null;
@@ -114,6 +120,12 @@ export function asPositiveMinimumTravelers(value: unknown): number | null {
   return asPositiveInteger(value);
 }
 
+function asIsoDate(value: unknown): string | null {
+  const text = asTrimmedString(value);
+  if (!text || !isIsoDate(text)) return null;
+  return text;
+}
+
 function asProductCover(value: unknown): ProductCover | null {
   if (!isObject(value)) return null;
   const source = value.source;
@@ -193,6 +205,7 @@ export function readBasicInfoFromProduct(product: unknown): BasicInfoSnapshot {
   const basic = asObject(root.basicInfo);
   const commercial = asObject(root.commercial);
   const pricing = asObject(commercial.pricing);
+  const inventory = asObject(commercial.inventory);
   const operations = asObject(root.operations);
   const vehicleExists = isObject(operations.vehicleResource);
   const vehicle = asObject(operations.vehicleResource);
@@ -206,6 +219,11 @@ export function readBasicInfoFromProduct(product: unknown): BasicInfoSnapshot {
     child: asNumber(pricing.child),
     minimumTravelers: asPositiveInteger(pricing.minimumTravelers),
     currency: asTrimmedString(pricing.currency),
+    inventory: {
+      startDate: asIsoDate(inventory.startDate),
+      endDate: asIsoDate(inventory.endDate),
+      dailyQuota: asPositiveInteger(inventory.dailyQuota),
+    },
     vehicleResource: {
       exists: vehicleExists,
       resourceGroupId: asNumber(vehicle.resourceGroupId),
@@ -244,6 +262,28 @@ export function parsePricingDraft(
   if (!Number.isFinite(minimumTravelers)) return null;
   if (!Number.isInteger(minimumTravelers) || minimumTravelers <= 0) return null;
   return { adult, child, minimumTravelers };
+}
+
+export function parseInventoryDraft(
+  startDateRaw: string,
+  endDateRaw: string,
+  dailyQuotaRaw: string,
+): { startDate: string; endDate: string; dailyQuota: number } | null {
+  const startDate = startDateRaw.trim();
+  const endDate = endDateRaw.trim();
+  const dailyQuota = Number(dailyQuotaRaw);
+  if (!isIsoDate(startDate)) return null;
+  if (!isIsoDate(endDate)) return null;
+  if (startDate > endDate) return null;
+  if (!Number.isFinite(dailyQuota) || !Number.isInteger(dailyQuota) || dailyQuota <= 0) return null;
+  return { startDate, endDate, dailyQuota };
+}
+
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toISOString().slice(0, 10) === value;
 }
 
 /** 解析 AI 预估日价草稿：

@@ -2,7 +2,7 @@
  * 自动化阶段失败后的 recovery 状态机核心定义与共享 helper：
  *   - MAX_PHASE_ATTEMPTS / DEFAULT_USER_INSTRUCTION 常量；
  *   - RecoveryContext / RunPhaseOutcome 接口；
- *   - isAdvisorAction / stripSensitive / isoNow / buildDiagnosisHistory / summarizeLog 工具函数。
+ *   - isAdvisorAction / stripSensitive / isoNow / buildDiagnosisHistory 工具函数。
  *
  * 主循环实现见 ./recovery-run.ts，本文件不依赖任何运行时，仅做状态机辅助逻辑。
  */
@@ -159,42 +159,6 @@ export function buildDiagnosisHistory(
     });
   }
   return out;
-}
-
-interface ArgsLogShape {
-  args: unknown[];
-  level: "info" | "warning" | "error" | undefined;
-}
-
-/**
- * 把任意 log 调用压成单行安全摘要。包含 phase/attempt/action/errorCode，
- * 绝不写入 raw advisor payload 或原始异常对象。
- *
- * 当前 runPhaseWithRecovery 不在内部拼接 log，而是直接转发到 ctx.log；
- * 保留此 helper 以便未来需要写"安全摘要行"的场景（例如 phase summary 行）。
- */
-/**
- * 把任意 log 调用压成单行安全摘要（≤400 字符）：
- *   - 字符串直传，截到 200；
- *   - 对象走 JSON.stringify 截到 200；不可序列化时用 [unserializable]；
- *   - 当前 runPhaseWithRecovery 不在内部拼接 log，保留此 helper 供未来需要写「phase summary」之类场景。
- */
-export function summarizeLog(parts: ArgsLogShape): string {
-  const segs: string[] = [];
-  for (const a of parts.args) {
-    if (typeof a === "string") {
-      segs.push(a.slice(0, 200));
-    } else if (a == null) {
-      segs.push(String(a));
-    } else {
-      try {
-        segs.push(JSON.stringify(a).slice(0, 200));
-      } catch {
-        segs.push("[unserializable]");
-      }
-    }
-  }
-  return `[recovery] ${parts.level ?? "info"}: ${segs.join(" ")}`.slice(0, 400);
 }
 
 // ─────────── 主入口 ───────────

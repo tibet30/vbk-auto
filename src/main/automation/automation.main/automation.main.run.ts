@@ -143,8 +143,9 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         // openProductEditor 去拽回「基本信息」 tab，也不进行“重新幂等录入
         // 产品信息”避免重复填表。页面应已停在原产品某子 tab 上；阶段
         // handler 各自负责跳到自己的 tab（fillItineraryDraft 会 clickSection
-        // 切到「行程描述」）。仅在页面不是产品编辑器时才补一次导航。
-        await openProductEditor(page, productId!, { stayOnCurrentTab: true });
+        // 切到「行程描述」）。**不再做 legacy 的「页面不是编辑器就补一次导航」
+        // 兜底**：该兜底在 retry 路径下会让 clickSection 失去上次状态，引起
+        // recovery loop。
         log(`已从 ${retryFrom} 阶段继续录入（当前页面）`);
       }
 

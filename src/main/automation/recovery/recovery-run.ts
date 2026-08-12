@@ -256,15 +256,17 @@ export async function runPhaseWithRecovery(
       try {
         await ctx.applyAction(action, attempt);
       } catch (applyErr) {
-        // applyAction 抛错 → 视为本轮尝试终结：进入下一轮 attempt（不是新错，而是这一轮被吞掉）
+        // applyAction 抛错 → 当前上下文里我们的实现一律 noop，正常不会抛错。
+        // 即便抛错：attempts 数组里已经记录了上一次 handler 失败 + advisor 诊断，
+        // 这次 apply 失败本身只是 advisor 提议的副作用失败，没有新诊断可写。
+        // 把合成错误塞进 lastError，下一次 attempt 顶部 ctx.execute() 抛出的
+        // 错误会覆盖 lastError（这是预期行为）；如果下一次 handler 这次意外地
+        // 成功，lastError 也不会被消费，attempts 仍然完整。
         ctx.log(
           `phase=${ctx.phase} attempt=${attempt} applyFailed action=${action}`,
           "error",
         );
-        // 不增加 attempt：applyAction 是 advisor 提议的副作用；它失败算本 attempt 失败。
-        // 把这条错误作为下一轮的初始失败：写一条合成 attempt 让 advisor 知道
         const synthMessage = `apply_action_failed: ${stripSensitive(applyErr).message}`;
-        // 不写入 attempts（attempts 仅记录 handler 失败）；但喂给下一次 advisor
         lastError = { message: synthMessage };
       }
     }

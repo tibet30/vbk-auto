@@ -370,9 +370,48 @@ test("save monitor：保存响应先到、敏感词请求从未发出 → 正常
   });
 });
 
-/** 静态契约测试：从源码读取 main.ts，验证 installSaveMonitor 已被移到产品图文
- * 动作之前（满足「在产品图文动作前监听 page response」的窄修复要求）。 */
-test("main.ts：installSaveMonitor 必须在 clickSection 之前调用（静态契约）", async () => {
+/** 「敏感词请求飞出但响应永不回响」的异常 ordering：save 响应到达时如果
+ *  pendingSensitive>0 但已经超过 sensitiveWordTimeoutMs 窗口，runner 必须
+ *  不再继续缓存，强制按 save 业务结果结算。永远等敏感词响应会卡死 waitForSave。 */
+test("save monitor：敏感词请求飞出但响应永不回响 + save 响应后到 → 强制结算 save 不挂", async () => {
+  await withMonitor(
+    { saveTimeoutMs: 5_000, sensitiveWordTimeoutMs: 300 },
+    async ({ page, monitor }) => {
+      // 拦截敏感词：永远不真的发出去（page.route 接收但不调用 route.fulfill，
+      // 浏览器请求会一直挂着不返回）。
+      await page.route(`**${CHECK_SENSITIVE_WORD_PATH}*`, async (route) => {
+        // intentionally never call route.fulfill / route.continue
+        // 让请求保持挂起，模拟"响应永不回响"
+      });
+      // 拦截 save 正常返回 success=true
+      await mockRoute(page, SAVE_DESCRIPTION_INFO_PATH, 200, {
+        success: true,
+        ResponseStatus: { Ack: "Success" },
+        sensitiveWords: [],
+      });
+      // 先发敏感词请求（让 request handler 把它记为 pendingSensitive=1）
+      await fireInterceptedPost(page, CHECK_SENSITIVE_WORD_PATH, {
+        success: true,
+        ResponseStatus: { Ack: "Success" },
+        sensitiveWords: [],
+      }).catch(() => {});
+      // 等 300ms 让 sensitiveWordTimeoutMs 窗口过去
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      // 再发 save 请求：onSaveResponse 检测到 pendingSensitive>0 但 waitElapsed
+      // 已超过窗口，应强制结算
+      await fireInterceptedPost(page, SAVE_DESCRIPTION_INFO_PATH, {
+        success: true,
+        ResponseStatus: { Ack: "Success" },
+      });
+      const outcome = await monitor.waitForSave();
+      assert.equal(outcome.saved, true, "敏感词响应永不回响时，save 响应后到必须按业务结果强制结算");
+    },
+  );
+});
+
+/** uninstall 之后到达的 response 事件必须被 guard 吞掉，不再触发 settle —— 防止
+ *  跨测试/跨产品残留副作用。 */
+test("save monitor：uninstall 后到达的 response 事件不能影响新 monitor", async () => {
   // 测试文件位于 <repo>/test/automation/，相对路径要往上 3 层到 repo root
   const here = resolve("test/automation/presentation-save-monitor.test.ts");
   const mainPath = resolve(here, "../../../src/main/automation/ctrip/presentation/main.ts");

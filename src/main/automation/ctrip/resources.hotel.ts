@@ -1,13 +1,16 @@
 // @ts-nocheck
 /**
- * 资源配置阶段入口 + 酒店资源（ensureHotelResource）：
- *   - ensureHotelResource：按 operations.hotelTier + 行程中是否含住宿，进入「酒店」配置面板
- *     添加符合当地钻级的酒店，跳过已存在的同钻级资源；
- *   - ensureVehicleResource / 共享默认超时常量 / 共享等待 helper 由
- *     ./resources.vehicle.ts / ./resources.constants.ts / ./resources.helpers.ts 提供，
- *     本文件做 re-export 保持既有 import 路径稳定。
+ * 酒店资源阶段：
+ *   - 当行程含住宿时，根据 operations.hotelTier 转 diamond；
+ *   - 若酒店资源表中已配置同钻级现成资源则跳过；
+ *   - 否则打开「添加酒店」弹窗，按「酒店」触发 VBK 候选下拉，挑出与本地钻级一致的候选，
+ *     选中并提交保存，最后回读配置表确认新资源已经落库。
  *
- * 源码头部带 `// @ts-nocheck`，DOM 选择器对外部页面变化敏感。
+ *   - 当酒店入口数为 0（典型：行程含住宿但本页按套餐承载住宿、由 package 资源承载），
+ *     扫描 .ResourceConfig-content-card：每个住宿晚数>0 的段都必须有非 disacitve 的
+ *     span.item「套餐」入口；满足则返回 skipped + packageManaged，不写伪 hotelResource。
+ *
+ * 顶部带 `// @ts-nocheck`，DOM 选择器对外部页面变化敏感。
  */
 
 import { delay } from "./utils.js";
@@ -22,29 +25,11 @@ import {
   waitForSaveButtonReady,
 } from "./resources.helpers.js";
 
-export { ensureVehicleResource } from "./resources.vehicle.js";
-
-// 纯函数 `classifyPackageManagedSegments` 的唯一定义在 ./resources.helpers.ts；
-// 此处仅做 re-export，保持既有 `import { classifyPackageManagedSegments } from
-// ".../resources.js"`（单测入口）的导入路径稳定。
-export { classifyPackageManagedSegments } from "./resources.helpers.js";
-
 /**
- * 酒店资源阶段：
- *   - 当行程含住宿时，根据 operations.hotelTier 转 diamond；
- *   - 若酒店资源表中已配置同钻级现成资源则跳过；
- *   - 否则打开「添加酒店」弹窗，按「酒店」触发 VBK 候选下拉，挑出与本地钻级一致的候选，
- *     选中并提交保存，最后回读配置表确认新资源已经落库。
- *
- *   - 当酒店入口数为 0（典型：行程含住宿但本页按套餐承载住宿、由 package 资源承载），
- *     扫描 .ResourceConfig-content-card：每个住宿晚数>0 的段都必须有非 disacitve 的
- *     span.item「套餐」入口；满足则返回 skipped + packageManaged，不写伪 hotelResource。
- *
- *   - 第 4 个可选参数 options：
- *     - cardTimeoutMs（毫秒，默认 12_000）控制「资源卡异步重渲染」的等待窗口；
- *     - editTimeoutMs（毫秒，默认 4_000）控制点击「编辑」后等「保存」按钮可点击。
- *     测试可通过它们注入短 timeout，避免被默认值拖慢。
- *     全部调用方按 3 参调用保持不变。
+ * 第 4 个可选参数 options：
+ *   - cardTimeoutMs（毫秒，默认 12_000）控制「资源卡异步重渲染」的等待窗口；
+ *   - editTimeoutMs（毫秒，默认 4_000）控制点击「编辑」后等「保存」按钮可点击。
+ * 测试可通过它们注入短 timeout，避免被默认值拖慢。
  */
 export async function ensureHotelResource(
   page,

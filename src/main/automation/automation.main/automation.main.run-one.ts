@@ -29,6 +29,7 @@ import {
 import { projectNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
+import { isProductImageTextUrl } from "../ctrip/tabs.js";
 import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
@@ -126,6 +127,26 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
             const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: project.product });
             log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
             if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
+            // basicInfoSaved 已确认但 product 无缺失 → 跳过填充，直接标记完成。
+            if (shouldRefill.reason === "complete") {
+              log("basic 阶段无需重填，跳过 fillAndSaveBasicInfo");
+              run.phases[phaseIndex].status = "completed";
+              return;
+            }
+            // reason=retry 但页面可能已不在「基本信息」tab（用户已手动保存并导航
+            // 到产品图文）；此时 detectCurrentTab 能判断当前是否在 presentation
+            // 路径。若已在产品图文页面，视为 basic 已完成，跳过 refill。
+            if (shouldRefill.reason === "retry") {
+              try {
+                const currentUrl = page.url();
+                if (isProductImageTextUrl(currentUrl)) {
+                  log("检测到页面已在产品图文，跳过 basic 阶段");
+                  ctx.db.setBasicInfoSaved(projectId);
+                  run.phases[phaseIndex].status = "completed";
+                  return;
+                }
+              } catch (_) { /* URL 读取失败，走正常 refill 路径 */ }
+            }
             await fillAndSaveBasicInfo(page, product, butlerSelection, {
               servicePhone: servicePhone || "",
               keySpots,

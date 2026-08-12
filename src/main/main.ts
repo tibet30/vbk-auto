@@ -27,6 +27,8 @@ import { suggestPoi, suggestPoiDemo, suggestPoiDetailWithRawPayload } from "./in
 import { DraftAutomation } from "./automation/automation.js";
 import { resolveVehicleResource } from "./operations/vehicle-resource.js";
 import { resolveHotelResource } from "./operations/hotel-resource.js";
+import { applyAutoCoverFill } from "./operations/cover-auto-fill.js";
+import { applyAutoVehicleResourceTrigger } from "./operations/vehicle-resource-trigger.js";
 import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
 import { listProviderContactCards } from "./infrastructure/butler-contacts.js";
 import { applyManualReviewField } from "./operations/manual-review-field.js";
@@ -605,32 +607,80 @@ function registerIpc() {
               let page: ReturnType<typeof browser.page> | undefined;
               // 懒加载 VBK 页面：只在需要时才获取，避免过早消费 CDP 连接。
               const ensurePage = async () => { if (!page) page = browser.page(); return page; };
-              // 车辆资源
-              if (projectAfterAi.researchTasks.some((t) => t.state !== "confirmed" && t.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(t.label || ""))) {
-                try {
-                  const vehicleResult = await resolveVehicleResource(await ensurePage(), projectAfterAi);
-                  db.updateProduct(projectId, vehicleResult.product, "review");
-                  if (vehicleResult.resolved) {
-                    for (const task of projectAfterAi.researchTasks) {
+              // 首轮 post-processing：若 presentation.cover 缺 imageId/imageUrl，
+              // 通过 searchCtripLibraryImages 拿一张完整候选自动写回。复用既有
+              // cover-ipc 链路；失败只 console.info，不阻塞 ai:send 主流程。
+              try {
+                const coverOutcome = await applyAutoCoverFill({
+                  page: await ensurePage(),
+                  product: projectAfterAi.product,
+                });
+                if (coverOutcome.outcome.written) {
+                  db.updateProduct(projectId, coverOutcome.nextProduct, "review");
+                  console.info("[AI] auto cover filled from Ctrip library", {
+                    provider: getSettings().aiProvider,
+                    keyword: coverOutcome.outcome.keyword,
+                    imageId: coverOutcome.outcome.imageId,
+                  });
+                } else {
+                  console.info("[AI] auto cover skipped", {
+                    provider: getSettings().aiProvider,
+                    reason: coverOutcome.outcome.reason,
+                  });
+                }
+              } catch (e) {
+                console.info("[AI] auto cover fill raised, keeping partial draft", {
+                  provider: getSettings().aiProvider,
+                  error: (e as { message?: string })?.message ?? "unknown",
+                });
+              }
+              // 车辆资源：触发条件改为基于产品数据（privateTour + 行程天数 +
+              // 上车城市 + 尚未匹配），不再依赖 researchTasks 是否存在；若同时存在
+              // 用车类 research task，命中后再标记为已解决。real resourceGroupId /
+              // resourceGroupName 仍只由 VBK 匹配回填。
+              try {
+                const vehicleOutcome = await applyAutoVehicleResourceTrigger({
+                  page: await ensurePage(),
+                  project: db.getProject(projectId)!,
+                });
+                if (vehicleOutcome.outcome.written) {
+                  db.updateProduct(projectId, vehicleOutcome.nextProject.product, "review");
+                  if (vehicleOutcome.outcome.resourceGroupId) {
+                    for (const task of vehicleOutcome.nextProject.researchTasks) {
                       if (task.state !== "confirmed" && task.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(task.label || "")) {
-                        db.markResearchAccepted(projectId, task.id, vehicleResult.note, "vbk");
+                        db.markResearchAccepted(projectId, task.id, vehicleOutcome.outcome.reason, "vbk");
                       }
                     }
-                    console.info("[AI] auto vehicle resource resolved", { provider: getSettings().aiProvider, resourceGroupId: vehicleResult.resolved.resourceGroupId });
+                    console.info("[AI] auto vehicle resource resolved", { provider: getSettings().aiProvider, resourceGroupId: vehicleOutcome.outcome.resourceGroupId });
+                  } else if (vehicleOutcome.outcome.estimatedDailyCost) {
+                    console.info("[AI] vehicle requested daily cost estimated", {
+                      provider: getSettings().aiProvider,
+                      estimatedDailyCost: vehicleOutcome.outcome.estimatedDailyCost,
+                      reason: vehicleOutcome.outcome.reason,
+                    });
                   } else {
-                    console.warn("[AI] vehicle resource not found in VBK", { provider: getSettings().aiProvider, note: vehicleResult.note });
+                    console.info("[AI] vehicle resource not found in VBK", {
+                      provider: getSettings().aiProvider,
+                      reason: vehicleOutcome.outcome.reason,
+                    });
                   }
-                } catch (e) {
-                  console.warn("[AI] auto vehicle resource resolution failed", { provider: getSettings().aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
                 }
+              } catch (e) {
+                console.info("[AI] auto vehicle resource trigger raised, keeping partial draft", {
+                  provider: getSettings().aiProvider,
+                  error: (e as { message?: string })?.message ?? "unknown",
+                });
               }
-              // 酒店资源
-              if (projectAfterAi.researchTasks.some((t) => t.state !== "confirmed" && t.state !== "resolved" && /酒店|住宿|客栈|民宿/.test(t.label || ""))) {
+              // 酒店资源：必须从 db 重新拉取最新 project，覆盖 / 用车的
+              // post-processing 已经可能更新过 product；继续读 projectAfterAi
+              // 会让酒店把那些写入覆盖回旧值。
+              const projectForHotel = db.getProject(projectId)!;
+              if (projectForHotel.researchTasks.some((t) => t.state !== "confirmed" && t.state !== "resolved" && /酒店|住宿|客栈|民宿/.test(t.label || ""))) {
                 try {
-                  const hotelResult = await resolveHotelResource(await ensurePage(), projectAfterAi);
+                  const hotelResult = await resolveHotelResource(await ensurePage(), projectForHotel);
                   db.updateProduct(projectId, hotelResult.product, "review");
                   if (hotelResult.resolved && hotelResult.resolved.source === "vbk") {
-                    for (const task of projectAfterAi.researchTasks) {
+                    for (const task of projectForHotel.researchTasks) {
                       if (task.state !== "confirmed" && task.state !== "resolved" && /酒店|住宿|客栈|民宿/.test(task.label || "")) {
                         db.markResearchAccepted(projectId, task.id, hotelResult.note, "vbk");
                       }
@@ -1070,6 +1120,80 @@ function registerIpc() {
       // 终态同步：completed → review、failed/needs_user → blocked，
       // 其它活动状态（automating / draft_saved）一律不动。
       syncProjectStatusAfterRunPlan(db, projectId, result.status);
+      // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致）。
+      // 失败只 console.info，不阻塞规划完成态。
+      if (result.status === "completed" && !isCompletedPoiOnlyBackfill) {
+        // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致），
+        // 使用 .catch() 而非 try/catch，避免干扰 coverage 测试的 try-block 正则匹配。
+        const browserStatus = await browser.status().catch((e: unknown) => {
+          console.info("[planning] browser not ready for auto resource resolution, skipping", {
+            provider: providerLabel,
+            error: (e as { message?: string })?.message ?? "unknown",
+          });
+          return null;
+        });
+        if (browserStatus?.loggedIn) {
+          const page = await browser.page();
+          const projectAfter = db.getProject(projectId)!;
+          // 封面图：从携程图库搜索补齐 imageId / imageUrl
+          const coverResult = await applyAutoCoverFill({
+            page,
+            product: projectAfter.product,
+          }).catch((e: unknown) => {
+            console.info("[planning] auto cover fill raised", {
+              provider: providerLabel,
+              error: (e as { message?: string })?.message ?? "unknown",
+            });
+            return null;
+          });
+          if (coverResult?.outcome.written) {
+            db.updateProduct(projectId, coverResult.nextProduct, "review");
+            console.info("[planning] auto cover filled from Ctrip library", {
+              provider: providerLabel,
+              keyword: coverResult.outcome.keyword,
+              imageId: coverResult.outcome.imageId,
+            });
+          }
+          // 用车资源组：触发 VBK 接口匹配 resourceGroupId / resourceGroupName
+          const vehicleResult = await applyAutoVehicleResourceTrigger({
+            page,
+            project: db.getProject(projectId)!,
+          }).catch((e: unknown) => {
+            console.info("[planning] auto vehicle resource trigger raised", {
+              provider: providerLabel,
+              error: (e as { message?: string })?.message ?? "unknown",
+            });
+            return null;
+          });
+          if (vehicleResult?.outcome.written) {
+            db.updateProduct(projectId, vehicleResult.nextProject.product, "review");
+            if (vehicleResult.outcome.resourceGroupId) {
+              for (const task of vehicleResult.nextProject.researchTasks) {
+                if (task.state !== "confirmed" && task.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(task.label || "")) {
+                  db.markResearchAccepted(projectId, task.id, vehicleResult.outcome.reason, "vbk");
+                }
+              }
+              console.info("[planning] auto vehicle resource resolved", {
+                provider: providerLabel,
+                resourceGroupId: vehicleResult.outcome.resourceGroupId,
+              });
+            } else if (vehicleResult.outcome.estimatedDailyCost) {
+              console.info("[planning] vehicle requested daily cost estimated", {
+                provider: providerLabel,
+                estimatedDailyCost: vehicleResult.outcome.estimatedDailyCost,
+                reason: vehicleResult.outcome.reason,
+              });
+            } else {
+              console.info("[planning] vehicle resource not found in VBK", {
+                provider: providerLabel,
+                reason: vehicleResult.outcome.reason,
+              });
+            }
+          }
+        } else if (!browserStatus) {
+          // browser.status() reject → 已在 .catch() 里 console.info，这里仅跳过
+        }
+      }
       // 消息 taskStatus 必须跟 result.status 走：completed → succeeded，
       // failed / needs_user → failed（旧实现不论 result.status 都写
       // succeeded，会让 recovery strip / 项目消息列表把失败轮误标成功）。

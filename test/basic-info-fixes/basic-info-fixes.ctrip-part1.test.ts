@@ -357,6 +357,23 @@ test("pickKeySpotsFromItinerary 大小写不敏感去重", () => {
   assert.deepEqual(pickKeySpotsFromItinerary(product), ["MaoMing"]);
 });
 
+test("pickKeySpotsFromItinerary 优先 poiName（贴近 VBK 内部标签名）", () => {
+  const product = productFixture({
+    itinerary: [
+      { day: 1, title: "第一天", spots: [
+        { name: "西安明城墙", poiName: "西安城墙", poiId: 75686 },
+        { name: "兵马俑博物馆", poiName: "秦始皇帝陵博物院(兵马俑)", poiId: 75682 },
+        { name: "仅 name，无 poiName", poiName: null },
+      ] },
+    ],
+  });
+  assert.deepEqual(pickKeySpotsFromItinerary(product), [
+    "西安城墙",
+    "秦始皇帝陵博物院(兵马俑)",
+    "仅 name，无 poiName",
+  ]);
+});
+
 test("全量录入和单阶段 basic 重试使用同一全量景点列表", () => {
   const source = readAutomationSource();
   const fullRun = source.slice(source.indexOf("export async function runAutomation"));

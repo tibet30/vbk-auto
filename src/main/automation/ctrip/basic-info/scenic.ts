@@ -319,7 +319,17 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     const taggedSpotExists = committedLabels.some((tag) => normalizedAliases.some((name) =>
       tag === name || tag.startsWith(`${name}(`) || tag.startsWith(`${name}（`),
     ));
-    if (taggedSpotExists) {
+    const tagMainNames = committedLabels.map((tag) => {
+      // tag 形如 "西安城墙(西安/陕西/中国)"：取括号前的主名（"西安城墙"）作兜底匹配。
+      const match = tag.match(/^([^（(]+)/);
+      return match ? normalizeCommittedLabel(match[1]) : "";
+    }).filter(Boolean);
+    const fallbackDedup = !taggedSpotExists && tagMainNames.some((tagMain) => {
+      const normalizedSpot = normalizeCommittedLabel(spot);
+      return normalizedSpot.length >= 2 && tagMain.length >= 2
+        && (tagMain.includes(normalizedSpot) || normalizedSpot.includes(tagMain));
+    });
+    if (taggedSpotExists || fallbackDedup) {
       logs.push(`[info] 景点"${spot}"已存在于国家景区标签，未计入本次新增名额`);
       continue;
     }
@@ -378,7 +388,11 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
         logs.push(`[warn] 景点"${spot}"提交后弹出数据风险弹窗（${again}），已跳过该景点`);
         continue;
       }
-      throw new Error(`景点“${spot}”已选择但未成功添加到国家景区标签`);
+      // 添加确认超时（8s 内标签未出现）不抛错，记录 warning 并继续下一个景点；
+      // 这与函数文档契约「任何一步失败都记录到 logs 而不抛错」一致。
+      logs.push(`[warn] 景点"${spot}"已选择但未成功添加到国家景区标签（8s 超时），已跳过`);
+      await page.keyboard.press("Escape").catch(() => {});
+      continue;
     }
     newlyAddedCount += 1;
     // 添加确认后再读一次实时总数 —— 页面可能因为 VBK 的同步在 poll 之外又补了同名标签，

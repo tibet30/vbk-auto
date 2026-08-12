@@ -142,13 +142,28 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
    * 当 pendingSensitive>0 时（敏感词检测请求还在飞），把本次响应缓存到
    * pendingSaveResponse，等所有敏感词响应收尾再回放 —— 防止「保存先到、敏感词
    * 后到」被错判为成功。
+   *
+   * 异常 ordering 兜底：若 waitStartTs 已经超过 sensitiveWordTimeoutMs（说明
+   * 已经给敏感词一个完整等待窗口却仍 pendingSensitive>0），不再继续缓存，强制结算
+   * save —— 否则「敏感词请求飞出但 response 永不回响」会让 waitForSave 永远 pending。
    */
   function onSaveResponse(httpStatus: number, body: any) {
     if (disposed) return;
     savedResponse = { body, httpStatus };
     if (pendingSensitive > 0) {
-      pendingSaveResponse = { httpStatus, body };
-      return;
+      // waitStartTs 未启动：response 早于 waitForSave()；说明这次 save 响应
+      // 在 waitForSave 还没调用之前就已经到达，但之前还没有任何 waitForSave
+      // 注册过 resolveWait。这种情况下 applySaveOutcome 调用后还是会缓存
+      // outcome 等被消费，所以安全。
+      const waitElapsed = waitStartTs == null ? 0 : Date.now() - waitStartTs;
+      if (waitElapsed < sensitiveWordTimeoutMs) {
+        pendingSaveResponse = { httpStatus, body };
+        return;
+      }
+      // 已经超出敏感词窗口仍 pending：判定为「敏感词响应永不回响」异常 ordering，
+      // 不再等待；先把 pending 清零再结算，否则 applySaveOutcome 会反复缓存。
+      pendingSensitive = 0;
+      pendingSaveResponse = null;
     }
     applySaveOutcome(httpStatus, body);
   }
@@ -187,12 +202,25 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
     }
     // 敏感词响应到达且无敏感词：递减 pending；若 save 已缓存且现在 pending=0，回放结算。
     if (pendingSensitive > 0) pendingSensitive -= 1;
+    sensitiveResponsesSeen += 1;
     if (pendingSaveResponse && pendingSensitive === 0) {
       const cached = pendingSaveResponse;
       pendingSaveResponse = null;
       applySaveOutcome(cached.httpStatus, cached.body);
     }
   }
+
+  /** 已观察到的「checkSensitiveWord 请求」数量（包括未回响的）；
+   *  当 pendingSensitive 收到 decrement 时此值也跟着收尾 —— 这里用于统计
+   *  「飞出但未回响」的请求数。*/
+  let sensitiveRequestsSeen = 0;
+  /** 已观察到的「checkSensitiveWord 响应」数量（含无敏感词命中）；用于
+   *  判定"request 飞到后 response 仍未回响"导致 pendingSensitive 永远 > 0 的情况。*/
+  let sensitiveResponsesSeen = 0;
+  /** waitForSave() 启动的时间戳；用于在「save 响应到达 + pendingSensitive>0」时
+   *  判定「敏感词请求已经等了多久」：超过 sensitiveWordTimeoutMs 时直接结算 save，
+   *  防止「request 飞出但 response 永不回响」永久悬挂。 */
+  let waitStartTs: number | null = null;
 
   /**
    * 监听官方 endpoint 路径；只看 path 含目标片段（容忍 query string、协议、host 差异），
@@ -253,6 +281,7 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
     if (!url) return;
     if (pathMatches(url, CHECK_SENSITIVE_WORD_PATH)) {
       pendingSensitive += 1;
+      sensitiveRequestsSeen += 1;
     }
   };
 
@@ -368,6 +397,7 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
       // 未结算：注册 handler 等 settle 触发。
       resolveWait = resolve;
       rejectWait = reject;
+      waitStartTs = Date.now();
 
       // 优先给敏感词一个先于保存回响的窗口；命中就立即抛错。
       const sensDeadline = Date.now() + sensitiveWordTimeoutMs;
@@ -390,11 +420,23 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
             if (Date.now() >= saveDeadline) {
               clearInterval(saveTimer);
               timers.delete(saveTimer);
+              // 若 save 已收到但仍被 pendingSensitive 卡住，强制清算：当作
+              // 「敏感词响应永不回响」异常 ordering 兜底。savedResponse 存在时
+              // 走正常结算，否则按业务失败 reject。
+              if (pendingSaveResponse) {
+                const cached = pendingSaveResponse;
+                pendingSaveResponse = null;
+                pendingSensitive = 0;
+                applySaveOutcome(cached.httpStatus, cached.body);
+                return;
+              }
               settle(null, new Error(
                 `产品图文保存未在 ${saveTimeoutMs}ms 内收到官方 /15638/savedescriptioninfo 响应；` +
                 `savedResponse=${savedResponse ? `已捕获 HTTP=${savedResponse.httpStatus}` : "<未捕获>"}，` +
                 `sensitiveResponse=${sensitiveResponse ? `已捕获 HTTP=${sensitiveResponse.httpStatus}` : "<未捕获>"}` +
-                `，pendingSensitive=${pendingSensitive}`,
+                `，pendingSensitive=${pendingSensitive}，` +
+                `sensitiveRequestsSeen=${sensitiveRequestsSeen}，` +
+                `sensitiveResponsesSeen=${sensitiveResponsesSeen}`,
               ));
             }
           }, 80);

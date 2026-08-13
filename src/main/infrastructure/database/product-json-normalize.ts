@@ -4,25 +4,25 @@
  * 早期版本（V0.x）生成的 product_json 字段集与现行 schema 略有差异：
  *   - 没有 `sales` / `operations` / `itinerary` 段；
  *   - `basicInfo.meetingCity` 可能缺失（用 destinationCity 兜底）；
- *   - `logs` / `messages` / `researchTasks` 项目字段不存在（默认为 undefined）。
+ *   - `logs` / `messages` / `researchTasks` 产品字段不存在（默认为 undefined）。
  *
  * 这份模块只做"读到内存时"的归一化，**不**回写数据库，也不强行把整张
- * 库的 project_json 一次性升级；写到数据库时由 ai / 项目 UI 自行决定
+ * 库的 product_json 一次性升级；写到数据库时由 ai / 产品 UI 自行决定
  * 是否用 patch 触发一次 updateProduct 持久化。
  *
  * 归一化原则：
  *   - 任何字段缺失都用 DEFAULT_PRODUCT 兜底，保证前端拿到的是 minimum
  *     valid product 形态；
  *   - 字符串字段强转并 trim，map/list 字段缺失返回空 map/list；
- *   - 不抛错。解析失败时返回兜底，避免某个脏 row 让整个 getProject 失效。
+ *   - 不抛错。解析失败时返回兜底，避免某个脏 row 让整个 getProduct 失效。
  */
 
-import type { ProjectDetail } from "../../../shared/contracts.js";
+import type { ProductDetail } from "../../../shared/contracts.js";
 import { defaultCommercialInventory } from "../../data/commercial-defaults.js";
 
 /**
  * 最小可渲染 product 兜底：必须满足 schema 验证（看 schema-functions.ts 的
- * DEFAULT_PRODUCT），并保证新建项目也能通过 parseProduct 校验。
+ * DEFAULT_PRODUCT），并保证新建产品也能通过 parseProduct 校验。
  */
 const DEFAULT_PRODUCT = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
@@ -98,20 +98,32 @@ function normaliseCommercialInventory(value: unknown) {
  * 把数据库里的 product_json 字符串解析为统一形态。
  *  - 解析失败 → 兜底；
  *  - 任何字段缺失 → 局部兜底；
- *  - 返回类型是 ProjectDetail["product"]，但运行时倾向于 Record<string, unknown>。
+ *  - 返回类型是 ProductDetail["product"]，但运行时倾向于 Record<string, unknown>。
  */
-export function parseAndNormalizeProductJson(raw: string | null | undefined): ProjectDetail["product"] {
-  if (!raw) return DEFAULT_PRODUCT() as ProjectDetail["product"];
+export function parseAndNormalizeProductJson(raw: string | null | undefined): ProductDetail["product"] {
+  if (!raw) return DEFAULT_PRODUCT() as ProductDetail["product"];
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return DEFAULT_PRODUCT() as ProjectDetail["product"];
+    return DEFAULT_PRODUCT() as ProductDetail["product"];
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return DEFAULT_PRODUCT() as ProjectDetail["product"];
+    return DEFAULT_PRODUCT() as ProductDetail["product"];
   }
-  const product = parsed as Record<string, unknown>;
+  const parsedRecord = parsed as Record<string, unknown>;
+  // 2026-08 产品数据结构迁移期间，车辆资源回填曾把整个
+  // ProductDetail 误写进 product_json。读取时解开这一层，并保留当时
+  // 写在外层的 operations，避免已有草稿在界面里表现成空产品。
+  const nestedProduct = parsedRecord.product;
+  const product = nestedProduct && typeof nestedProduct === "object" && !Array.isArray(nestedProduct)
+    ? {
+        ...(nestedProduct as Record<string, unknown>),
+        ...(parsedRecord.operations && typeof parsedRecord.operations === "object" && !Array.isArray(parsedRecord.operations)
+          ? { operations: parsedRecord.operations }
+          : {}),
+      }
+    : parsedRecord;
   const base = DEFAULT_PRODUCT();
   // 复写：保留 DB 已有字段，只对缺失字段补兜底。
   for (const [key, value] of Object.entries(base)) {
@@ -133,5 +145,5 @@ export function parseAndNormalizeProductJson(raw: string | null | undefined): Pr
     commercial.inventory = normaliseCommercialInventory(commercial.inventory) ?? defaultCommercialInventory();
   }
   product.itinerary = normaliseItineraryPois(product.itinerary);
-  return product as ProjectDetail["product"];
+  return product as ProductDetail["product"];
 }

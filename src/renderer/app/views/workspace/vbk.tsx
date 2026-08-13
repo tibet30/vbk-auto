@@ -27,7 +27,7 @@ import styles from "./vbk.module.less";
 
 export function AppWorkspaceVbk({ model }: { model: AppModel }) {
   const {
-    project,
+    product,
     splitStyle,
     loading,
     setStage,
@@ -62,17 +62,17 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     showVbkBrowser,
   } = model;
 
-  const taskList = project?.researchTasks ?? [];
+  const taskList = product?.researchTasks ?? [];
   const reviewSections = useMemo(
     () => VBK_NAV_SECTIONS.map((section) => ({
       section,
-      state: aggregateSectionState(section, automationPhases ?? [], automationRecovery ?? {}, project?.productId),
-      url: project ? section.buildUrl(project.productId) : null,
+      state: aggregateSectionState(section, automationPhases ?? [], automationRecovery ?? {}, product?.productId),
+      url: product ? section.buildUrl(product.productId) : null,
     })),
-    [project?.productId, automationRecovery, automationPhases],
+    [product?.productId, automationRecovery, automationPhases],
   );
 
-  if (!project) return null;
+  if (!product) return null;
 
   return <div className={`${layout.stageSplit} ${styles.vbkSplit}`} style={splitStyle}>
     <aside className={`${layout.panel} ${styles.reviewSummary}`} aria-label="审查结果与 VBK 录入">
@@ -97,20 +97,20 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
             <small>就绪度</small>
           </div>
         </div>
-        {project.automation && (
+        {product.automation && (
           <section className={styles.productSection}>
             <div className={styles.productSectionHead}>
               <span className={layout.panelNum}>C</span>
               <strong className={styles.productSectionTitle}>自动录入进度</strong>
               <span className={styles.productSectionMeta}>
-                {project.automation.currentPhase ? `当前：${project.automation.currentPhase}` : "未开始"}
+                {product.automation.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
               </span>
             </div>
             <div className={styles.automation}>
               {reviewSections.map(({ section, state, url }) => {
                 const isNavigating = navigatingSection === section.key;
                 const canNav = Boolean(url) && !loading && !navigatingSection && !retryingPhase;
-                const saleControlRequiresNoProduct = section.key === "saleControl" && Boolean(project?.productId);
+                const saleControlRequiresNoProduct = section.key === "saleControl" && Boolean(product?.productId);
                 const retryPhases = section.key === "saleControl" ? ["saleControl"] : section.phaseNames;
                 return (
                   <div className={styles.stage} key={section.key} data-state={state}>

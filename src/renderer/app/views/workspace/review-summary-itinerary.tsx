@@ -10,6 +10,7 @@ import {
 import { stripDayPrefix } from "../../helpers";
 import shared from "../shared.module.less";
 import { ItinerarySpotPoiEditor } from "./review-summary-itinerary-poi";
+import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
 import styles from "./review-summary-itinerary.module.less";
 
 export interface ItineraryActivity {
@@ -32,7 +33,7 @@ export interface ItineraryDay {
 }
 
 interface ReviewSummaryItineraryProps {
-  projectId: string;
+  localProductId: string;
   days: ItineraryDay[];
   expandedDayIndex: number | null;
   onToggle: (index: number) => void;
@@ -40,14 +41,6 @@ interface ReviewSummaryItineraryProps {
   collapsed?: boolean;
   /** 切换整个「每日行程」模块的展开 / 收起。 */
   onToggleCollapsed?: () => void;
-}
-
-export interface ItineraryTimelineSpotItem {
-  title: string;
-  dayIndex: number;
-  spotIndex: number;
-  poiName?: string | null;
-  poiId?: number | null;
 }
 
 interface TimelineItem {
@@ -172,7 +165,7 @@ function activityNodeClass(type: ItineraryActivity["type"]): string {
  * - 展开时显示按时间顺序排列的景点 + 活动 + 餐食时间线；
  * - 折叠时只保留 Day 编号 + 标题 + 节点计数，保持列表可快速浏览。
  */
-export function AppWorkspaceReviewSummaryItinerary({ projectId, days, expandedDayIndex, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
+export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndex, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
   // 折叠时不渲染 dayList，节省节点；header 仍然可点击重新展开。
   const renderHeader = (meta: React.ReactNode, bodyId: string) => (
     <button
@@ -263,7 +256,7 @@ export function AppWorkspaceReviewSummaryItinerary({ projectId, days, expandedDa
                               )}
                               {item.spotIndex !== undefined && (
                                 <ItinerarySpotPoiEditor
-                                  projectId={projectId}
+                                  localProductId={localProductId}
                                   item={{
                                     title: item.title,
                                     dayIndex: item.dayIndex,

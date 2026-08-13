@@ -1,4 +1,4 @@
-/* VBK Desktop — shared helper components (used by projects + workspace-home) */
+/* VBK Desktop — shared helper components (used by products + workspace-home) */
 
 .briefForm {
   max-width: 720px;
@@ -160,10 +160,10 @@
 }
 
 /* ============================================================
- * Project list
+ * Product list
  * ============================================================ */
 
-.projectList {
+.productList {
   display: flex;
   flex-direction: column;
   list-style: none;
@@ -175,28 +175,28 @@
   overflow: hidden;
 }
 
-.projectListItem {
+.productListItem {
   border-top: 1px solid var(--border);
   background: var(--surface);
   position: relative;
 }
 
-.projectListItem:first-child { border-top: 0; }
+.productListItem:first-child { border-top: 0; }
 
-.projectRow {
+.productRow {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: stretch;
   transition: background 160ms ease;
 }
 
-.projectRow:hover { background: #fcfcfc; }
+.productRow:hover { background: #fcfcfc; }
 
-.projectRow[data-state='blocked'] { box-shadow: inset 3px 0 0 var(--destructive); }
-.projectRow[data-state='automating'] { box-shadow: inset 3px 0 0 var(--ai-teal); }
-.projectRow[data-state='draft_saved'] { box-shadow: inset 3px 0 0 var(--success); }
+.productRow[data-state='blocked'] { box-shadow: inset 3px 0 0 var(--destructive); }
+.productRow[data-state='automating'] { box-shadow: inset 3px 0 0 var(--ai-teal); }
+.productRow[data-state='draft_saved'] { box-shadow: inset 3px 0 0 var(--success); }
 
-.projectRowOpen {
+.productRowOpen {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 28px;
   align-items: center;
@@ -213,7 +213,7 @@
   user-select: none;
 }
 
-.projectRowIcon {
+.productRowIcon {
   width: 40px;
   height: 40px;
   display: grid;
@@ -225,19 +225,19 @@
   flex-shrink: 0;
 }
 
-.projectRowIcon[data-form='groupTour'] {
+.productRowIcon[data-form='groupTour'] {
   background: color-mix(in srgb, var(--warning) 8%, transparent);
   color: var(--warning);
   border-color: color-mix(in srgb, var(--warning) 18%, transparent);
 }
 
-.projectMain {
+.productMain {
   min-width: 0;
   display: grid;
   gap: 4px;
 }
 
-.projectTitleLine {
+.productTitleLine {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -245,7 +245,7 @@
   flex-wrap: wrap;
 }
 
-.projectTitleLine .title {
+.productTitleLine .title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -256,7 +256,7 @@
   letter-spacing: -0.005em;
 }
 
-.projectMetaLine {
+.productMetaLine {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -377,7 +377,7 @@
 }
 
 /* Status badge */
-.projectBadge {
+.productBadge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -392,42 +392,42 @@
   flex-shrink: 0;
 }
 
-.projectBadge[data-state='planning'] {
+.productBadge[data-state='planning'] {
   color: var(--ai-teal);
   border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
   background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
 }
 
-.projectBadge[data-state='review'] {
+.productBadge[data-state='review'] {
   color: var(--warning);
   border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
   background: color-mix(in srgb, var(--warning) 7%, var(--surface));
 }
 
-.projectBadge[data-state='automating'] {
+.productBadge[data-state='automating'] {
   color: var(--ai-teal);
   border-color: color-mix(in srgb, var(--ai-teal) 32%, var(--border));
   background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
 }
 
-.projectBadge[data-state='automating'] svg {
+.productBadge[data-state='automating'] svg {
   animation: spin 900ms linear infinite;
 }
 
-.projectBadge[data-state='draft_saved'] {
+.productBadge[data-state='draft_saved'] {
   color: var(--success);
   border-color: color-mix(in srgb, var(--success) 32%, var(--border));
   background: color-mix(in srgb, var(--success) 7%, var(--surface));
 }
 
-.projectBadge[data-state='blocked'] {
+.productBadge[data-state='blocked'] {
   color: var(--destructive);
   border-color: color-mix(in srgb, var(--destructive) 32%, var(--border));
   background: color-mix(in srgb, var(--destructive) 7%, var(--surface));
 }
 
 /* Right side */
-.projectEnter {
+.productEnter {
   width: 28px;
   height: 28px;
   display: grid;
@@ -439,13 +439,13 @@
   flex-shrink: 0;
 }
 
-.projectRow:hover .projectEnter,
-.projectRowOpen:focus-visible .projectEnter {
+.productRow:hover .productEnter,
+.productRowOpen:focus-visible .productEnter {
   background: var(--muted);
   color: var(--foreground);
 }
 
-.projectDeleteTrigger {
+.productDeleteTrigger {
   width: 30px;
   height: 30px;
   margin: 16px 14px 0 0;
@@ -458,22 +458,22 @@
   transition: opacity 160ms ease, color 160ms ease, background 160ms ease, border-color 160ms ease;
 }
 
-.projectRow:hover .projectDeleteTrigger,
-.projectDeleteTrigger:focus-visible { opacity: 1; }
+.productRow:hover .productDeleteTrigger,
+.productDeleteTrigger:focus-visible { opacity: 1; }
 
-.projectDeleteTrigger:hover:not(:disabled) {
+.productDeleteTrigger:hover:not(:disabled) {
   color: var(--destructive);
   background: #fef2f2;
   border-color: #fecaca;
 }
 
-.projectDeleteTrigger:disabled {
+.productDeleteTrigger:disabled {
   cursor: not-allowed;
   opacity: 0.35;
 }
 
 /* Confirmation row */
-.projectDeleteConfirm {
+.productDeleteConfirm {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
@@ -484,26 +484,26 @@
   background: #fff7f7;
 }
 
-.projectDeleteConfirm > div:first-child { min-width: 0; }
+.productDeleteConfirm > div:first-child { min-width: 0; }
 
-.projectDeleteConfirm strong,
-.projectDeleteConfirm small { display: block; }
+.productDeleteConfirm strong,
+.productDeleteConfirm small { display: block; }
 
-.projectDeleteConfirm strong {
+.productDeleteConfirm strong {
   color: #991b1b;
   font-size: var(--fs-sm);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.projectDeleteConfirm small {
+.productDeleteConfirm small {
   margin-top: 3px;
   color: #7f1d1d;
   font-size: var(--fs-xs);
   line-height: 1.5;
 }
 
-.projectDeleteActions {
+.productDeleteActions {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -511,11 +511,11 @@
 }
 
 @media (max-width: 640px) {
-  .projectDeleteTrigger { opacity: 1; }
-  .projectDeleteConfirm { align-items: stretch; flex-direction: column; }
-  .projectDeleteActions { justify-content: flex-end; }
-  .projectRowOpen { grid-template-columns: 36px minmax(0, 1fr) 24px; gap: 10px; padding: 12px; }
-  .projectRowIcon { width: 36px; height: 36px; }
+  .productDeleteTrigger { opacity: 1; }
+  .productDeleteConfirm { align-items: stretch; flex-direction: column; }
+  .productDeleteActions { justify-content: flex-end; }
+  .productRowOpen { grid-template-columns: 36px minmax(0, 1fr) 24px; gap: 10px; padding: 12px; }
+  .productRowIcon { width: 36px; height: 36px; }
 }
 
 /* ============================================================

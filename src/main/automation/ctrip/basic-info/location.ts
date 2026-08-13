@@ -57,8 +57,9 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
     await selection.click();
     await input.waitFor({ state: "visible", timeout: 5_000 });
   }
-  await input.fill("");
-  await input.type(city, { delay: 80 });
+  // 这个远程搜索框不会丢弃旧关键词的迟到响应。逐字输入会同时发出“北”与“北京”
+  // 等请求，较慢的单字响应可能最后覆盖完整城市结果；一次 fill 只触发完整关键词请求。
+  await input.fill(city);
 
   const options = page.locator(
     ".ant-select-dropdown:not(.ant-select-dropdown-hidden) li[role=option]",

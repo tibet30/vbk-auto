@@ -3,9 +3,8 @@
  *
  * 主要职责：
  *  - 校验进入主进程 IPC handler 的 webContents 来源。仅允许：
- *     - 主 BrowserWindow 的 webContents（主窗口）
- *     - 当 isDev=true 时，附加允许 devtools / 浏览器打开 dev server 进来的
- *       webContents（url 形式 http://127.0.0.1:5173 or file://）
+ *     - 主 BrowserWindow 的 main frame；
+ *     - dev：固定 Vite loopback origin；packaged：本地 file: renderer。
  *  - 拒绝任何 origin / frame 来自外部域名的调用。
  *  - 抛错而不是返回 false，让调用方代码 (ipcMain.handle) 不至于"忘记检查"。
  *
@@ -18,7 +17,9 @@
  * 调试（automation:debug:*）类 IPC 走 assertDebugEnabled()：仅 dev + VBK_DEBUG=1。
  */
 
-import { app, BrowserWindow, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, ipcMain as electronIpcMain, type IpcMainInvokeEvent } from "electron";
+import { validateIpcArguments } from "./ipc-input.js";
+import { isTrustedRendererSender } from "./ipc-sender-policy.js";
 
 let cachedDevFlag: boolean | undefined;
 /**
@@ -37,7 +38,7 @@ export function isDevEnv(): boolean {
 /**
  * 高风险 IPC 入口的便捷包装：先 assertTrustedSender 再调原 handler。
  *  - 不想全量改动 50+ ipcMain.handle 时，只在"会改 / 删 / 触发远端动作"
- *    入口覆盖 wrapper。即便是只读入口（projects:list 等），未来追加
+ *    入口覆盖 wrapper。即便是只读入口（products:list 等），未来追加
  *    sender 校验时也能直接换 `ipcMain.handle(...)` 为 `secureIpc(...)`。
  */
 export function secureIpc<TArgs extends unknown[], TReturn>(
@@ -52,51 +53,60 @@ export function secureIpc<TArgs extends unknown[], TReturn>(
 }
 
 /**
- * 解析 sender 来路。返回 [origin, isOwner]：
- *   - origin：URL.origin（非协议 → 空字符串）
- *   - isOwner：当前 webContents 是否属于主 BrowserWindow。
- *  - 抛错：sender 不可信或来自不可识别的 BrowserWindow。
+ * 所有业务 registrar 使用的安全 IPC 门面。
+ *
+ * 保持与 Electron `ipcMain.handle(channel, handler)` 相同的注册形态，但统一在
+ * handler 之前验证 sender，避免新增通道时忘记手写 assertTrustedSender。
  */
-export function describeSender(event: IpcMainInvokeEvent): { origin: string; isOwner: boolean; isDev: boolean } {
+type ElectronInvokeHandler = Parameters<typeof electronIpcMain.handle>[1];
+
+export const secureIpcMain = {
+  handle(channel: string, handler: ElectronInvokeHandler): void {
+    electronIpcMain.handle(channel, async (event, ...args) => {
+      assertTrustedSender(event, channel);
+      validateIpcArguments(channel, args);
+      return handler(event, ...args);
+    });
+  },
+};
+
+/**
+ * 解析 sender 来路：
+ *   - url：实际发起 invoke 的 frame URL；
+ *   - isOwner：当前 webContents 是否属于主 BrowserWindow。
+ *   - isMainFrame：拒绝主窗口里嵌入的外部 frame 借用 preload API。
+ */
+export function describeSender(event: IpcMainInvokeEvent): {
+  url: string;
+  isOwner: boolean;
+  isMainFrame: boolean;
+  isDev: boolean;
+} {
   const isDev = isDevEnv();
   const sender = event.sender;
   const owner = BrowserWindow.fromWebContents(sender);
   const isOwner = Boolean(owner);
-  const url = sender.getURL?.() || "";
-  let origin = "";
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    origin = "";
-  }
-  return { origin, isOwner, isDev };
+  const senderFrame = event.senderFrame;
+  const isMainFrame = Boolean(senderFrame && senderFrame === sender.mainFrame);
+  const url = senderFrame?.url || sender.getURL?.() || "";
+  return { url, isOwner, isMainFrame, isDev };
 }
 
 /**
  * 拦截非法 sender。具体规则：
- *  - 必须来自主 BrowserWindow（isOwner=true）；
- *  - dev 模式下允许 origin=http://127.0.0.1:5173；
- *  - 生产模式下允许 origin=file://（本地加载渲染产物）；
- *  - 任何其它 origin / 无 owner 视为不可信。
+ *  - 必须来自主 BrowserWindow 的 main frame；
+ *  - dev 仅允许 create-window.ts 实际加载的 http://127.0.0.1:5173；
+ *  - packaged 仅允许 file:（注意 file URL 的 URL.origin 实际是 "null"）；
+ *  - 任何其它协议、端口、外部 frame 或非法 URL 都拒绝。
  *
  * 失败抛 Error("sender not trusted") 以便主进程 IPC 路由拒绝。
  */
 export function assertTrustedSender(event: IpcMainInvokeEvent, channel: string): void {
-  const { origin, isOwner, isDev } = describeSender(event);
-  if (!isOwner) {
-    throw new Error(`[ipc] sender not trusted: channel=${channel} owner=false`);
-  }
-  if (isDev) {
-    // dev: 允许 127.0.0.1 (vite) / localhost / 空 origin (about:blank)
-    if (origin && origin !== "http://127.0.0.1:5173" && origin !== "http://localhost:5173") {
-      throw new Error(`[ipc] sender not trusted: channel=${channel} origin=${origin}`);
-    }
-    return;
-  }
-  // production: 允许 file:// origin
-  if (origin && origin !== "file://") {
-    throw new Error(`[ipc] sender not trusted: channel=${channel} origin=${origin}`);
-  }
+  const sender = describeSender(event);
+  if (isTrustedRendererSender(sender)) return;
+  throw new Error(
+    `[ipc] sender not trusted: channel=${channel} owner=${sender.isOwner} mainFrame=${sender.isMainFrame} url=${sender.url || "<empty>"}`,
+  );
 }
 
 /**

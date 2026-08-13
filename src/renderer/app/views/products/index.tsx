@@ -1,40 +1,40 @@
 import { Plus } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
-import { ProductBriefForm, ProjectList, EmptyProjectState } from "../../helpers";
+import { ProductBriefForm, ProductList, EmptyProductState } from "../../helpers";
 import styles from "./index.module.less";
 
 /**
- * 产品项目页：标题 + 计数 + 新建按钮，再加项目列表（或新建表单）。
+ * 产品列表页：标题 + 计数 + 新建按钮，再加产品列表（或新建表单）。
  * 列表本身只承担列表职责，标题由这里独占，避免和外层组件重复渲染。
  */
-export function AppProjectsPage({ model }: { model: AppModel }) {
+export function AppProductsPage({ model }: { model: AppModel }) {
   const {
-    projects,
+    products,
     creating,
     setCreating,
     createInput,
     setCreateInput,
-    savingProject,
-    createProject,
-    deleteProject,
-    openProject: openProjectAction,
+    savingProduct,
+    createProduct,
+    deleteProduct,
+    openProduct: openProductAction,
     setAccountMenuOpen,
     setNotice,
   } = model;
 
-  const openProject = async (item: (typeof projects)[number]) => {
+  const openProduct = async (item: (typeof products)[number]) => {
     setNotice(null);
-    await openProjectAction(item);
+    await openProductAction(item);
   };
 
   return (
-    <section className={styles.projectsView}>
-      <div className={styles.projectViewContainer}>
-        <header className={styles.projectPageHead}>
+    <section className={styles.productsView}>
+      <div className={styles.productViewContainer}>
+        <header className={styles.productPageHead}>
           <div>
-            <h1>产品项目</h1>
-            <p className={shared.viewSub}>{projects.length} 个项目 · 最近更新优先</p>
+            <h1>产品列表</h1>
+            <p className={shared.viewSub}>{products.length} 个产品 · 最近更新优先</p>
           </div>
           {!creating && (
             <button
@@ -46,7 +46,7 @@ export function AppProjectsPage({ model }: { model: AppModel }) {
               }}
             >
               <Plus size={14} />
-              创建项目
+              创建产品
             </button>
           )}
         </header>
@@ -55,17 +55,17 @@ export function AppProjectsPage({ model }: { model: AppModel }) {
           <ProductBriefForm
             input={createInput}
             setInput={setCreateInput}
-            submitting={savingProject}
+            submitting={savingProduct}
             onCancel={() => setCreating(false)}
             onSubmit={() => {
-              void createProject();
+              void createProduct();
               setCreating(false);
             }}
           />
-        ) : projects.length === 0 ? (
-          <EmptyProjectState onCreate={() => setCreating(true)} />
+        ) : products.length === 0 ? (
+          <EmptyProductState onCreate={() => setCreating(true)} />
         ) : (
-          <ProjectList projects={projects} onOpen={openProject} onDelete={deleteProject} />
+          <ProductList products={products} onOpen={openProduct} onDelete={deleteProduct} />
         )}
       </div>
     </section>

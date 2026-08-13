@@ -1,4 +1,4 @@
-import type { ProjectReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
+import type { ProductReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
 import { mergeReadinessIssues, openResearchTaskToIssue, readinessIssueSemanticKey } from "../../../../shared/readiness-issues.js";
 
 export interface OpenIssueRow {
@@ -16,7 +16,7 @@ function taskPrompt(task: Pick<ResearchTask, "label">): string {
   return `请核查并处理：${task.label}。完成后说明结果，不要自动提交。`;
 }
 
-function issuePrompt(issue: ProjectReadiness["issues"][number]): string {
+function issuePrompt(issue: ProductReadiness["issues"][number]): string {
   return `请补齐待处理项：${issue.label}。${issue.detail}`;
 }
 
@@ -33,7 +33,7 @@ function mergeRows(left: OpenIssueRow, right: OpenIssueRow): OpenIssueRow {
   };
 }
 
-export function buildOpenIssueRows(readiness: ProjectReadiness, taskList: ResearchTask[]): OpenIssueRow[] {
+export function buildOpenIssueRows(readiness: ProductReadiness, taskList: ResearchTask[]): OpenIssueRow[] {
   const rows = new Map<string, OpenIssueRow>();
   const pendingTasksByKey = new Map<string, ResearchTask>();
   for (const task of taskList.filter(isPendingTask)) {
@@ -41,7 +41,7 @@ export function buildOpenIssueRows(readiness: ProjectReadiness, taskList: Resear
     if (!pendingTasksByKey.has(key)) pendingTasksByKey.set(key, task);
   }
 
-  const push = (issue: ProjectReadiness["issues"][number], actionPrompt: string, task?: ResearchTask) => {
+  const push = (issue: ProductReadiness["issues"][number], actionPrompt: string, task?: ResearchTask) => {
     const key = readinessIssueSemanticKey(issue);
     const row = {
       label: issue.label,

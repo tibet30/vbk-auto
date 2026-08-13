@@ -37,29 +37,29 @@ export interface OrchestratorOptions {
 }
 
 export interface GenerationStateStore {
-  load(projectId: string): Promise<PlanningGenerationState | undefined>;
+  load(localProductId: string): Promise<PlanningGenerationState | undefined>;
   save(state: PlanningGenerationState): Promise<void>;
 }
 
 export interface OrchestratorRuntime {
   suggestPoi?(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
   /** 读取当前已存在的 research tasks（label+type）。 */
-  loadExistingResearchTasks(projectId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
+  loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */
-  writeModule(projectId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
+  writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
   /** 添加一条 research task；返回新增的 id（若 label+type 已存在则返回原 id）。 */
-  addResearchTask(projectId: string, task: ResearchTaskProposal): Promise<string>;
+  addResearchTask(localProductId: string, task: ResearchTaskProposal): Promise<string>;
   /** 拉取最近历史对话（仅供 orchestrator 上下文使用）。 */
-  loadHistory(projectId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>>;
+  loadHistory(localProductId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>>;
   /** 拉取当前产品草稿（用于 orchestrator 的 PlannerContext）。 */
-  loadCurrentProduct(projectId: string): Promise<Record<string, unknown>>;
+  loadCurrentProduct(localProductId: string): Promise<Record<string, unknown>>;
   /**
    * 加载已 accepted 模块 → 写入的产品 JSON 子树。
    *  Orchestrator 用这个函数从持久化产品中反推「哪个模块已落地」，
    *  从而在续跑 / validation 时判断 completeness —— 不依赖
    *  进程内 in-memory accumulators。
    */
-  loadAcceptedModules(projectId: string): Promise<PlanningModule[]>;
+  loadAcceptedModules(localProductId: string): Promise<PlanningModule[]>;
 }
 
 export type { Planner, PlannerContext };

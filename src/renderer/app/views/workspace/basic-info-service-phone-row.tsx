@@ -9,7 +9,7 @@
  *    chip + 「去账号设置」按钮，引导到账号页签；
  *  - 行壳上没有「编辑」按钮：400 电话属于账号设置范畴，UI 这里只放
  *    「去账号设置」快捷按钮，避免在基础信息模块里增加一个文本输入；
- *  - 该字段不写入 product（precondition-only），但创建项目时由
+ *  - 该字段不写入 product（precondition-only），但创建产品时由
  *    assertCreatePreconditions 强校验，必须保持可读。
  */
 import { Phone, Settings } from "lucide-react";

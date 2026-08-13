@@ -13,7 +13,6 @@ export {
   fillAndSavePresentation,
   selectCtripLibraryCover,
   fillFirstVisible,
-  hasCoverImage,
   selectSearchOption,
   type LibraryImageParams,
 } from "./main.js";

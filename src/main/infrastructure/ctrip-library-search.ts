@@ -155,7 +155,11 @@ export function buildSuggestPoiRequest(keyword: string): SuggestPoiRequest {
  *  （District / Country 留空）；sources [1, 9]；urlOptions 200 / 500 两档
  *  R 类型；imageClass TourProduct；pageIndex 1；pageSize 默认 20；
  *  auditStatuses [4]；excludeGif true。 */
-export function buildSearchImageRequest(args: { poiId: number; pageSize?: number }): SearchImageRequest {
+export function buildSearchImageRequest(args: {
+  poiId: number;
+  pageSize?: number;
+  sources?: ReadonlyArray<number>;
+}): SearchImageRequest {
   if (!Number.isInteger(args.poiId) || args.poiId <= 0) {
     throw new Error("searchImage 必须传入正整数 poiId。");
   }
@@ -168,7 +172,7 @@ export function buildSearchImageRequest(args: { poiId: number; pageSize?: number
       { tagType: "PoiId", tagValue: String(args.poiId) },
       { tagType: "Country", tagValue: "" },
     ],
-    sources: [1, 9],
+    sources: args.sources ?? [1, 9],
     urlOptions: [
       { width: 200, height: 200, quality: 0.9, type: "R" },
       { width: 500, height: 500, quality: 0.9, type: "R" },
@@ -365,7 +369,13 @@ export async function searchCtripLibraryImagesForPlace(
   }
 
   // 步骤 1：searchImage → imageIds
-  const searchImage = await callSearchImage(browser, placePoiId, options, logger);
+  let searchImage = await callSearchImage(browser, placePoiId, options, logger);
+  // VBK 的供应商图库（sources 1/9）可能没有当前 POI 素材，而攻略图库
+  // （source 3）仍有可用图片。仅在首选渠道为空时回退，避免把“渠道无图”
+  // 误判成“POI 无图”并永久阻断 readiness。
+  if (searchImage.imageIds.length === 0) {
+    searchImage = await callSearchImage(browser, placePoiId, options, logger, [3]);
+  }
 
   // 步骤 2：getImageInfo → imageId → CtripLibraryImageInfo
   if (searchImage.imageIds.length === 0) {
@@ -547,8 +557,9 @@ async function callSearchImage(
   poiId: number,
   options: SearchCtripLibraryOptions,
   logger: CoverPlaceSearchLogger,
+  sources?: ReadonlyArray<number>,
 ): Promise<SearchImageResponse> {
-  const request = buildSearchImageRequest({ poiId });
+  const request = buildSearchImageRequest({ poiId, sources });
   const browserRequestTimeoutMs = timeoutOrDefault(
     options.browserRequestTimeoutMs,
     CTRIP_LIBRARY_BROWSER_REQUEST_TIMEOUT_MS,

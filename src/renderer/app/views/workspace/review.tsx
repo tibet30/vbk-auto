@@ -14,7 +14,7 @@ import { AppWorkspaceReviewSummary } from "./review-summary";
 
 export function AppWorkspaceReview({ model }: { model: AppModel }) {
   const {
-    project,
+    product,
     input,
     setInput,
     loading,
@@ -62,9 +62,9 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     planningBusy,
   } = model;
 
-  if (!project) return null;
+  if (!product) return null;
 
-  const taskList = project.researchTasks ?? [];
+  const taskList = product.researchTasks ?? [];
   const planningActive = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
   const planningPartial = planningRecovery?.status === "completed" && !planningRecovery.allStagesCompleted;
   const planningResumable = planningRecovery?.status === "needs_user"
@@ -73,7 +73,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   const canSend = input.trim().length > 0 && !loading && !planningActive;
 
   const handleSend = () => {
-    if (!project || loading || planningActive || !input.trim()) {
+    if (!product || loading || planningActive || !input.trim()) {
       if (planningActive) setNotice("方案正在分阶段生成中，请完成后再继续对话。");
       return;
     }
@@ -83,24 +83,24 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   };
 
   const handleRetryMessage = async (targetMessageId: string) => {
-    if (!project) {
-      setNotice("当前未选中项目，请先打开项目后重试。");
+    if (!product) {
+      setNotice("当前未选中产品，请先打开产品后重试。");
       return;
     }
     if (loading || planningActive) {
       setNotice("AI 正在生成中，请稍后再点击“重新发送该条问题”。");
       return;
     }
-    const targetIndex = project.messages.findIndex((item) => item.id === targetMessageId);
+    const targetIndex = product.messages.findIndex((item) => item.id === targetMessageId);
     let retryContent = "";
     if (targetIndex >= 0) {
-      const target = project.messages[targetIndex];
+      const target = product.messages[targetIndex];
       if (target.role === "user" && target.content.trim()) {
         retryContent = target.content.trim();
       }
 
       for (let i = targetIndex - 1; i >= 0 && !retryContent; i -= 1) {
-        const candidate = project.messages[i];
+        const candidate = product.messages[i];
         if (candidate.role === "user" && candidate.content.trim()) {
           retryContent = candidate.content.trim();
           break;
@@ -108,7 +108,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
       }
 
       if (!retryContent && targetIndex > 0) {
-        const previous = project.messages[targetIndex - 1];
+        const previous = product.messages[targetIndex - 1];
         if (previous?.role === "user" && previous.content.trim()) {
           retryContent = previous.content.trim();
         }
@@ -116,7 +116,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     }
 
     if (!retryContent && !input.trim()) {
-      const latestUser = project.messages.slice().reverse().find((item) => item.role === "user" && item.content.trim());
+      const latestUser = product.messages.slice().reverse().find((item) => item.role === "user" && item.content.trim());
       if (latestUser) {
         retryContent = latestUser.content.trim();
         setNotice("未找到目标上下文，已使用最近一条提问内容重试。");
@@ -136,7 +136,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     setBrowserOpen(true);
   };
 
-  const userTurns = project.messages.filter((m) => m.role === "user").length;
+  const userTurns = product.messages.filter((m) => m.role === "user").length;
 
   return (
     <div className={layout.stageSplit} style={splitStyle}>
@@ -230,10 +230,10 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
               </div>
             </article>
           )}
-          {project.messages.map((message, index) => {
+          {product.messages.map((message, index) => {
             const failed = message.role === "assistant" && message.taskStatus === "failed";
               const lastQuestion = failed
-              ? project.messages.slice(0, index).reverse().find((candidate) => candidate.role === "user" && candidate.content.trim())?.content?.trim()
+              ? product.messages.slice(0, index).reverse().find((candidate) => candidate.role === "user" && candidate.content.trim())?.content?.trim()
               : "";
 
             return (
@@ -305,7 +305,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
       </section>
 
       <AppWorkspaceReviewSummary
-        project={project}
+        product={product}
         readiness={readiness}
         itinerary={itinerary as any}
         taskList={taskList}

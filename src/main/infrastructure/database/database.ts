@@ -5,7 +5,7 @@
  * 不直接写 SQL。表结构与迁移以 `runDatabaseMigrations()` 为准——新表/列需在这里添加。
  *
  * 主要能力（按职责分区到 parts/ 子模块）：
- *  - 项目 CRUD：listProjects / createProject / getProject / deleteProject / updateProduct…
+ *  - 产品 CRUD：listProducts / createProduct / getProduct / deleteProduct / updateProduct…
  *  - 会话消息：addMessage / updateMessageStatus / recoverUnansweredMessages
  *  - 设置：getSetting / setSetting / deleteSetting
  *  - Research 任务：addResearchTask / markResearchAccepted / markResearchTasksSatisfied
@@ -28,10 +28,10 @@ import type {
   AccountFixedInfoValue,
   AutomationRun,
   ConversationMessage,
-  CreateProjectInput,
+  CreateProductInput,
   PlanningGenerationState,
-  ProjectDetail,
-  ProjectSummary,
+  ProductDetail,
+  ProductSummary,
   ResearchTask,
   TaskStatus,
 } from "../../../shared/contracts.js";
@@ -50,23 +50,27 @@ import {
 } from "./parts/provider-accounts.js";
 import {
   addMessage,
-  createProject,
-  deleteProject,
-  getProject,
-  listProjects,
-  listProjectsPaginated,
-  type ProjectListPage,
+  createProduct,
+  deleteProduct,
+  getProduct,
+  listProducts,
+  listProductsPaginated,
+  type ProductListPage,
   recoverOrphanAutomationRuns,
   recoverUnansweredMessages,
   saveAutomation,
   setBasicInfoSaved,
   setProductId,
-  setProjectLifecycle,
+  setProductLifecycle,
   updateBasicInfoField,
   updateMessageStatus,
   updateProduct,
-  writeAutomationWithProjectStatus,
-} from "./parts/projects.js";
+  writeAutomationWithProductStatus,
+} from "./parts/products.js";
+import {
+  replaceProductAndSatisfyResearchTasks,
+  type ReplaceProductAndSatisfyResearchTasksOptions,
+} from "./parts/replace-product-with-research-tasks.js";
 import { addResearchTask, markResearchAccepted, markResearchTasksSatisfied } from "./parts/research-tasks.js";
 import { deleteSetting, getSetting, setSetting } from "./parts/settings.js";
 
@@ -102,51 +106,63 @@ export class VbkDatabase {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // projects / messages / research_tasks / automation_runs
+  // products / messages / research_tasks / automation_runs
   // ─────────────────────────────────────────────────────────────────────
 
-  listProjects(): ProjectSummary[] { return listProjects(this.db); }
-  listProjectsPaginated(page: number, pageSize?: number): ProjectListPage { return listProjectsPaginated(this.db, page, pageSize); }
-  createProject(input: CreateProjectInput): ProjectDetail { return createProject(this.db, input); }
-  getProject(id: string): ProjectDetail | undefined { return getProject(this.db, id); }
-  deleteProject(id: string): boolean { return deleteProject(this.db, id); }
-  updateProduct(id: string, product: Record<string, unknown>, status?: ProjectSummary["status"]) {
+  listProducts(): ProductSummary[] { return listProducts(this.db); }
+  listProductsPaginated(page: number, pageSize?: number): ProductListPage { return listProductsPaginated(this.db, page, pageSize); }
+  createProduct(input: CreateProductInput): ProductDetail { return createProduct(this.db, input); }
+  getProduct(id: string): ProductDetail | undefined { return getProduct(this.db, id); }
+  deleteProduct(id: string): boolean { return deleteProduct(this.db, id); }
+  updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) {
     updateProduct(this.db, id, product, status);
   }
-  updateBasicInfoField(projectId: string, field: string, value: string): ProjectDetail {
-    return updateBasicInfoField(this.db, projectId, field, value);
+  /**
+   * 原子地「写产品 JSON + 按字段匹配确认 research task」。仅用于手工复核路径
+   * （products:updateReviewField）；AI / 自动化 / 规划路径仍走 productMutations。
+   * 详见 parts/products.ts 注释。
+   */
+  replaceProductAndSatisfyResearchTasks(
+    localProductId: string,
+    product: Record<string, unknown>,
+    options?: ReplaceProductAndSatisfyResearchTasksOptions,
+  ): { product: ProductDetail; confirmedTaskIds: string[] } {
+    return replaceProductAndSatisfyResearchTasks(this.db, localProductId, product, options);
   }
-  setProductId(projectId: string, productId: string) {
-    setProductId(this.db, projectId, productId);
+  updateBasicInfoField(localProductId: string, field: string, value: string): ProductDetail {
+    return updateBasicInfoField(this.db, localProductId, field, value);
   }
-  setBasicInfoSaved(projectId: string, saved = true) {
-    setBasicInfoSaved(this.db, projectId, saved);
+  setProductId(localProductId: string, productId: string) {
+    setProductId(this.db, localProductId, productId);
   }
-  setProjectLifecycle(projectId: string, updates: { productId?: string; status?: ProjectSummary["status"]; basicInfoSaved?: boolean }): void {
-    setProjectLifecycle(this.db, projectId, updates);
+  setBasicInfoSaved(localProductId: string, saved = true) {
+    setBasicInfoSaved(this.db, localProductId, saved);
   }
-  writeAutomationWithProjectStatus(projectId: string, run: AutomationRun, status: ProjectSummary["status"]): void {
-    writeAutomationWithProjectStatus(this.db, projectId, run, status);
+  setProductLifecycle(localProductId: string, updates: { productId?: string; status?: ProductSummary["status"]; basicInfoSaved?: boolean }): void {
+    setProductLifecycle(this.db, localProductId, updates);
   }
-  addMessage(projectId: string, role: ConversationMessage["role"], content: string, taskStatus?: ConversationMessage["taskStatus"]) {
-    return addMessage(this.db, projectId, role, content, taskStatus);
+  writeAutomationWithProductStatus(localProductId: string, run: AutomationRun, status: ProductSummary["status"]): void {
+    writeAutomationWithProductStatus(this.db, localProductId, run, status);
   }
-  updateMessageStatus(projectId: string, messageId: string, taskStatus: TaskStatus) {
-    updateMessageStatus(this.db, projectId, messageId, taskStatus);
+  addMessage(localProductId: string, role: ConversationMessage["role"], content: string, taskStatus?: ConversationMessage["taskStatus"]) {
+    return addMessage(this.db, localProductId, role, content, taskStatus);
+  }
+  updateMessageStatus(localProductId: string, messageId: string, taskStatus: TaskStatus) {
+    updateMessageStatus(this.db, localProductId, messageId, taskStatus);
   }
   recoverUnansweredMessages() { recoverUnansweredMessages(this.db); }
   recoverOrphanAutomationRuns() { return recoverOrphanAutomationRuns(this.db); }
-  addResearchTask(projectId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
-    return addResearchTask(this.db, projectId, task);
+  addResearchTask(localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
+    return addResearchTask(this.db, localProductId, task);
   }
-  markResearchAccepted(projectId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") {
-    markResearchAccepted(this.db, projectId, taskId, note, source);
+  markResearchAccepted(localProductId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") {
+    markResearchAccepted(this.db, localProductId, taskId, note, source);
   }
-  markResearchTasksSatisfied(projectId: string, taskIds: readonly string[], note?: string) {
-    return markResearchTasksSatisfied(this.db, projectId, taskIds, note);
+  markResearchTasksSatisfied(localProductId: string, taskIds: readonly string[], note?: string) {
+    return markResearchTasksSatisfied(this.db, localProductId, taskIds, note);
   }
-  saveAutomation(projectId: string, run: AutomationRun) {
-    saveAutomation(this.db, projectId, run);
+  saveAutomation(localProductId: string, run: AutomationRun) {
+    saveAutomation(this.db, localProductId, run);
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -170,14 +186,14 @@ export class VbkDatabase {
   // planning_generation（持久化规划状态）
   // ─────────────────────────────────────────────────────────────────────
 
-  loadPlanningState(projectId: string): PlanningGenerationState | undefined {
-    return loadPlanningState(this.db, projectId);
+  loadPlanningState(localProductId: string): PlanningGenerationState | undefined {
+    return loadPlanningState(this.db, localProductId);
   }
   savePlanningState(state: PlanningGenerationState): void {
     savePlanningState(this.db, state);
   }
-  deletePlanningState(projectId: string): void {
-    deletePlanningState(this.db, projectId);
+  deletePlanningState(localProductId: string): void {
+    deletePlanningState(this.db, localProductId);
   }
   recoverOrphanPlanningStates(): string[] {
     return recoverOrphanPlanningStates(this.db);

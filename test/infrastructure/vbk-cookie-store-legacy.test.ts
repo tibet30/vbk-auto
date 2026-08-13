@@ -144,7 +144,7 @@ test("withKnownVbkAccount in main.ts: saveCurrentSession 抛错被 .catch 捕获
   // 重新出现。
   const withKnown = mainSource.slice(
     mainSource.indexOf("function withKnownVbkAccount"),
-    mainSource.indexOf("/**\n * 计算项目 readiness"),
+    mainSource.indexOf("/**\n * 计算产品 readiness"),
   );
   assert.match(withKnown, /browser\.saveCurrentSession\(\)/);
   assert.match(withKnown, /\.then\(\(saved\)/);

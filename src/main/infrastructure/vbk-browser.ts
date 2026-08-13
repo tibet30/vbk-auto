@@ -23,7 +23,7 @@ import { openExternalUrl } from "./external-url.js";
 import { chromium, type Browser, type Page } from "playwright";
 import { URLS } from "../automation/constants.js";
 import { fetchCurrentUserInfo } from "./current-user.js";
-import { selectVbkPage } from "./vbk-page-selection.js";
+import { selectUsableVbkPage, selectVbkPage } from "./vbk-page-selection.js";
 import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/contracts-types.js";
 import type { SerialisedCookie } from "./vbk-cookie-serializer.js";
 import {
@@ -535,13 +535,24 @@ export class VbkBrowser {
    *   - 优先按 view URL 匹配；找不到则取任意 ctrip.com 页面；
    *   - 完全拿不到时抛错让上层提示「请先登录 VBK」。
    */
-  async page(): Promise<Page> {
+  async page(options: { requireInteractive?: boolean } = {}): Promise<Page> {
     if (!this.cdp?.isConnected()) {
       this.cdp = await chromium.connectOverCDP(`http://127.0.0.1:${this.debuggingPort}`);
     }
     const pages = this.cdp.contexts().flatMap((context) => context.pages());
-    const page = selectVbkPage(pages, this.view?.webContents.getURL() ?? "");
-    if (!page) throw new Error("未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
+    const currentViewUrl = this.view?.webContents.getURL() ?? "";
+    const page = options.requireInteractive
+      ? await selectUsableVbkPage(
+          pages,
+          currentViewUrl,
+          async (candidate) => candidate.evaluate(() => window.innerWidth > 0 && window.innerHeight > 0).catch(() => false),
+        )
+      : selectVbkPage(pages, currentViewUrl);
+    if (!page) {
+      throw new Error(options.requireInteractive
+        ? "未找到可交互的嵌入式 VBK 页面，请打开 VBK 录入区域后重试。"
+        : "未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
+    }
     return page;
   }
 

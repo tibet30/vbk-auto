@@ -112,10 +112,10 @@ async function openRecommendationPage(config: RecommendationPageConfig) {
           const icons = [];
           // 真实 VBK：第一行没有 −；这里只在 index≥1 时渲染。
           if (index >= 1) {
-            icons.push(`<span role="img" tabindex="-1" class="anticon" data-action="minus" style="${ICON_STYLE}">${MINUS_SVG}</span>`);
+            icons.push('<span role="img" tabindex="-1" class="anticon" data-action="minus" style="' + ICON_STYLE + '">' + MINUS_SVG + '</span>');
           }
           if (config.appendRows) {
-            icons.push(`<span role="img" tabindex="-1" class="anticon" data-action="plus" style="${ICON_STYLE}">${PLUS_SVG}</span>`);
+            icons.push('<span role="img" tabindex="-1" class="anticon" data-action="plus" style="' + ICON_STYLE + '">' + PLUS_SVG + '</span>');
           }
           row.innerHTML = [
             '<label title="推荐理由">推荐理由</label>',
@@ -162,7 +162,6 @@ async function openRecommendationPage(config: RecommendationPageConfig) {
               }
             });
           }
-          row.appendChild(row);
           section.appendChild(row);
           events.push("append:" + index);
         }
@@ -212,5 +211,7 @@ export {
   browser,
   openRecommendationPage,
   recommendationState,
+  buildRecommendationReasonsPlan,
+  fillRecommendationReasons,
   RECOMMENDATION_CATEGORIES,
 };

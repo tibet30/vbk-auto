@@ -1,4 +1,4 @@
-import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema.js";
+import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { defaultCommercialInventory } from "./commercial-defaults.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 

@@ -11,6 +11,15 @@
 
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
+import {
+  RECOMMENDATION_CATEGORIES,
+  VBK_RECOMMENDATION_CATEGORIES,
+} from "../../domain/product/recommendation-categories.js";
+
+export {
+  RECOMMENDATION_CATEGORIES,
+  VBK_RECOMMENDATION_CATEGORIES,
+} from "../../domain/product/recommendation-categories.js";
 
 const itineraryDaySchema = z.object({
   day: z.number().int().positive(),
@@ -28,41 +37,6 @@ const itineraryDaySchema = z.object({
     type: z.enum(["transport", "visit", "meal", "hotel", "free", "other"]).default("other"),
   })).optional(),
 });
-
-// VBK 后台「推荐理由」分类白名单，共 15 项，顺序与 VBK 下拉一致。
-export const RECOMMENDATION_CATEGORIES = [
-  "优选行程",
-  "服务保障",
-  "贴心赠送",
-  "精选酒店",
-  "缤纷景点",
-  "特色美食",
-  "度假首选",
-  "超值赠送",
-  "五星精选",
-  "限时秒杀",
-  "尊享入住",
-  "大牌驾到",
-  "优质交通",
-  "优良资质",
-  "缤纷体验",
-] as const;
-
-/**
- * VBK 产品图文页「推荐理由」下拉实际存在的分类子集（9 项）。
- * AI 在生成推荐理由时必须严格从该子集中选取 category，否则写入 VBK 时无法匹配。
- */
-export const VBK_RECOMMENDATION_CATEGORIES = [
-  "优选行程",
-  "服务保障",
-  "贴心赠送",
-  "精选酒店",
-  "缤纷景点",
-  "特色美食",
-  "度假首选",
-  "超值赠送",
-  "五星精选",
-] as const;
 
 export const recommendationItemSchema = z.object({
   category: z.enum(RECOMMENDATION_CATEGORIES),

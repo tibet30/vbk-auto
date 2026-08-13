@@ -1,19 +1,19 @@
 import { AlertTriangle, Briefcase, Check, ChevronRight, Copy, FileText, LoaderCircle, MapPin, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { type MouseEvent, type ReactNode, useState } from "react";
-import type { CreateProjectInput, ProjectSummary } from "../../../shared/contracts.js";
+import type { CreateProductInput, ProductSummary } from "../../../shared/contracts.js";
 import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
 
-export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: { input: CreateProjectInput; setInput: (input: CreateProjectInput) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
+export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: { input: CreateProductInput; setInput: (input: CreateProductInput) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
   return <div className={`${shared.card} ${styles.briefForm}`}>
-    <div><h3>新建产品项目</h3><p className={shared.viewSub}>只需填写项目的三个基础信息；进入详情后再开始和 AI 沟通。</p></div>
+    <div><h3>新建产品</h3><p className={shared.viewSub}>只需填写产品的三个基础信息；进入详情后再开始和 AI 沟通。</p></div>
     <div className={styles.briefGrid}>
       <label><span className={shared.fieldLabel}>目的地</span><input className={shared.input} autoFocus placeholder="例如：太原" value={input.destination} onChange={(event) => setInput({ ...input, destination: event.target.value })} /></label>
-      <label><span className={shared.fieldLabel}>产品形态</span><select className={shared.input} value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProjectInput["productForm"] })}><option value="privateTour">私家团</option><option value="groupTour">跟团游</option></select></label>
-      <label><span className={shared.fieldLabel}>天数</span><input className={shared.input} type="number" min="1" max="60" value={input.days} onChange={(event) => setInput({ ...input, days: Number(event.target.value) || 1 })} /></label>
+      <label><span className={shared.fieldLabel}>产品形态</span><select className={shared.input} value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProductInput["productForm"] })}><option value="privateTour">私家团</option><option value="groupTour">跟团游</option></select></label>
+      <label><span className={shared.fieldLabel}>天数</span><input className={shared.input} type="number" min="2" max="60" value={input.days} onChange={(event) => setInput({ ...input, days: Math.max(2, Number(event.target.value) || 2) })} /></label>
     </div>
-    <div className={styles.formActions}><button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button><button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>{submitting ? <LoaderCircle size={15} /> : <Plus size={15} />}创建并进入项目</button></div>
+    <div className={styles.formActions}><button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button><button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>{submitting ? <LoaderCircle size={15} /> : <Plus size={15} />}创建并进入产品</button></div>
   </div>;
 }
 
@@ -53,14 +53,14 @@ export function WorkbenchModule({
 }
 
 /**
- * 项目列表：每行是一个清晰可扫描的卡片。
+ * 产品列表：每行是一个清晰可扫描的卡片。
  * 标题、状态徽章、产品形态、VBK ID / 本地草稿、更新时间按视觉层级排布，
  * 删除按钮在 hover 时浮现，避免误触又不至于太隐蔽。
  */
-export function ProjectList({ projects, onOpen, onDelete }: { projects: ProjectSummary[]; onOpen: (item: ProjectSummary) => Promise<void>; onDelete: (item: ProjectSummary) => Promise<boolean> }) {
+export function ProductList({ products, onOpen, onDelete }: { products: ProductSummary[]; onOpen: (item: ProductSummary) => Promise<void>; onDelete: (item: ProductSummary) => Promise<boolean> }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const remove = async (item: ProjectSummary) => {
+  const remove = async (item: ProductSummary) => {
     if (deletingId) return;
     setDeletingId(item.id);
     const removed = await onDelete(item);
@@ -69,10 +69,10 @@ export function ProjectList({ projects, onOpen, onDelete }: { projects: ProjectS
   };
 
   return (
-    <ul className={styles.projectList} aria-label="产品项目列表">
-      {projects.map((item) => (
-        <li className={styles.projectListItem} key={item.id}>
-          <ProjectRow
+    <ul className={styles.productList} aria-label="产品列表">
+      {products.map((item) => (
+        <li className={styles.productListItem} key={item.id}>
+          <ProductRow
             item={item}
             disabled={Boolean(deletingId)}
             confirming={confirmingId === item.id}
@@ -88,8 +88,8 @@ export function ProjectList({ projects, onOpen, onDelete }: { projects: ProjectS
   );
 }
 
-function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete, onCancelDelete, onConfirmDelete }: {
-  item: ProjectSummary;
+function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete, onCancelDelete, onConfirmDelete }: {
+  item: ProductSummary;
   disabled: boolean;
   confirming: boolean;
   deleting: boolean;
@@ -98,19 +98,19 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
 }) {
-  const meta = projectMeta(item);
+  const meta = productMeta(item);
   const linked = Boolean(item.productId);
   const locked = item.status === "automating";
 
   return (
-    <article className={styles.projectRow} data-state={item.status}>
+    <article className={styles.productRow} data-state={item.status}>
       <div
-        className={styles.projectRowOpen}
+        className={styles.productRowOpen}
         role="button"
         tabIndex={0}
         onClick={onOpen}
         onKeyDown={(event) => {
-          // 还原 <button> 的键盘语义：Enter / Space 触发进入项目。
+          // 还原 <button> 的键盘语义：Enter / Space 触发进入产品。
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             onOpen();
@@ -118,15 +118,15 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
         }}
         aria-label={`进入产品详情：${item.name}`}
       >
-        <span className={styles.projectRowIcon} data-form={meta.form} aria-hidden="true">
+        <span className={styles.productRowIcon} data-form={meta.form} aria-hidden="true">
           {meta.form === "groupTour" ? <Users size={16} /> : <Briefcase size={16} />}
         </span>
-        <span className={styles.projectMain}>
-          <span className={styles.projectTitleLine}>
+        <span className={styles.productMain}>
+          <span className={styles.productTitleLine}>
             <strong className={styles.title}>{item.name}</strong>
-            <ProjectStatusBadge status={item.status} />
+            <ProductStatusBadge status={item.status} />
           </span>
-          <span className={styles.projectMetaLine}>
+          <span className={styles.productMetaLine}>
             <span className={styles.metaItem}>
               <MapPin size={11} aria-hidden="true" />
               {meta.destination}
@@ -143,29 +143,29 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
             <span className={`${styles.metaItem} ${styles.metaMuted}`}>更新 {formatUpdatedAt(item.updatedAt)}</span>
           </span>
         </span>
-        <span className={styles.projectEnter} aria-hidden="true">
+        <span className={styles.productEnter} aria-hidden="true">
           <ChevronRight size={16} />
         </span>
       </div>
 
       <button
-        className={styles.projectDeleteTrigger}
+        className={styles.productDeleteTrigger}
         type="button"
         onClick={onAskDelete}
         disabled={locked || disabled}
-        aria-label={`删除项目：${item.name}`}
-        title={locked ? "自动录入中，暂不能删除" : "删除项目"}
+        aria-label={`删除产品：${item.name}`}
+        title={locked ? "自动录入中，暂不能删除" : "删除产品"}
       >
         <Trash2 size={15} />
       </button>
 
       {confirming && (
-        <div className={styles.projectDeleteConfirm} role="group" aria-label={`确认删除项目：${item.name}`}>
+        <div className={styles.productDeleteConfirm} role="group" aria-label={`确认删除产品：${item.name}`}>
           <div>
             <strong>删除「{item.name}」？</strong>
             <small>将永久删除本机的产品方案、对话、核查任务和录入记录；不会删除 VBK 平台上的产品。</small>
           </div>
-          <div className={styles.projectDeleteActions}>
+          <div className={styles.productDeleteActions}>
             <button className={`${shared.btn} ${shared.btnSm}`} type="button" onClick={onCancelDelete} disabled={deleting}>取消</button>
             <button className={`${shared.btn} ${shared.btnSm}`} data-variant="danger-solid" type="button" onClick={onConfirmDelete} disabled={deleting}>
               {deleting ? <LoaderCircle size={14} /> : <Trash2 size={14} />}
@@ -179,11 +179,11 @@ function ProjectRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
 }
 
 /**
- * 从项目名反解目的地 / 天数 / 产品形态。
+ * 从产品名反解目的地 / 天数 / 产品形态。
  * 输入：「太原3天2晚私家团」「北京2天1晚跟团游」
  * 解析失败时返回「-」占位，避免 UI 抖动。
  */
-function projectMeta(item: ProjectSummary): { destination: string; spec: string; form: "privateTour" | "groupTour" } {
+function productMeta(item: ProductSummary): { destination: string; spec: string; form: "privateTour" | "groupTour" } {
   const match = item.name.match(/^(.+?)(\d+)天\s*(\d+)晚\s*(.+)$/);
   if (!match) return { destination: item.name, spec: "本地草稿", form: "privateTour" };
   const destination = match[1];
@@ -195,23 +195,23 @@ function projectMeta(item: ProjectSummary): { destination: string; spec: string;
 }
 
 /**
- * 项目状态徽章：颜色 + 图标 + 文本三要素并存，让运营一眼读出项目所处阶段。
+ * 产品状态徽章：颜色 + 图标 + 文本三要素并存，让运营一眼读出产品所处阶段。
  * planning 与 automating 都用 AI 色，但 automating 加 spinner 让"正在动"显式可感。
  */
-function ProjectStatusBadge({ status }: { status: ProjectSummary["status"] }) {
+function ProductStatusBadge({ status }: { status: ProductSummary["status"] }) {
   switch (status) {
     case "planning":
-      return <span className={styles.projectBadge} data-state="planning"><Sparkles size={11} aria-hidden="true" />方案规划中</span>;
+      return <span className={styles.productBadge} data-state="planning"><Sparkles size={11} aria-hidden="true" />方案规划中</span>;
     case "review":
-      return <span className={styles.projectBadge} data-state="review"><CircleHelpSmall />等待确认</span>;
+      return <span className={styles.productBadge} data-state="review"><CircleHelpSmall />等待确认</span>;
     case "automating":
-      return <span className={styles.projectBadge} data-state="automating"><LoaderCircle size={11} aria-hidden="true" />正在录入</span>;
+      return <span className={styles.productBadge} data-state="automating"><LoaderCircle size={11} aria-hidden="true" />正在录入</span>;
     case "draft_saved":
-      return <span className={styles.projectBadge} data-state="draft_saved"><Check size={11} aria-hidden="true" />草稿已保存</span>;
+      return <span className={styles.productBadge} data-state="draft_saved"><Check size={11} aria-hidden="true" />草稿已保存</span>;
     case "blocked":
-      return <span className={styles.projectBadge} data-state="blocked"><AlertTriangle size={11} aria-hidden="true" />需要处理</span>;
+      return <span className={styles.productBadge} data-state="blocked"><AlertTriangle size={11} aria-hidden="true" />需要处理</span>;
     default:
-      return <span className={styles.projectBadge}>未开始</span>;
+      return <span className={styles.productBadge}>未开始</span>;
   }
 }
 
@@ -226,11 +226,11 @@ function CircleHelpSmall() {
   );
 }
 
-export function EmptyProjectState({ onCreate }: { onCreate: () => void }) {
+export function EmptyProductState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className={shared.emptyState}>
       <FileText size={28} />
-      <h3>还没有产品项目</h3>
+      <h3>还没有产品</h3>
       <p>从目的地、天数和产品形态开始，几分钟内得到可审查的通用方案。</p>
       <button className={shared.btn} data-variant="primary" onClick={onCreate}><Plus size={15} />创建第一个产品</button>
     </div>
@@ -251,10 +251,10 @@ export function Field({ label, value }: { label: string; value: string }) {
  *
  * 使用场景有两种：
  * - 顶栏里作为面包屑 ID chip：父级是 span，不冲突。
- * - 项目列表里嵌在 `projectRowOpen` 这个 button 里：项目列表行本身就是「进入项目」按钮，
- *   严格的 HTML 规范不允许在 <button> 里嵌套交互元素；这里采用了实际项目里常见的折中 —
+ * - 产品列表里嵌在 `productRowOpen` 这个 button 里：产品列表行本身就是「进入产品」按钮，
+ *   严格的 HTML 规范不允许在 <button> 里嵌套交互元素；这里采用了实际产品里常见的折中 —
  *   使用 <button> 元素获得原生键盘 / a11y 支持，同时在 click 里默认调用 stopPropagation，
- *   避免被外层识别为「打开项目」。浏览器处理这类嵌套是稳定的。
+ *   避免被外层识别为「打开产品」。浏览器处理这类嵌套是稳定的。
  */
 export function CopyableId({
   value,
@@ -285,8 +285,8 @@ export function CopyableId({
       className={`${styles.copyableId} ${className || ""}`}
       data-state={state}
       onClick={handleCopy}
-      title={state === "copied" ? `已复制 ${value}` : `点击复制项目 ID：${value}`}
-      aria-label={`复制项目 ID ${value}`}
+      title={state === "copied" ? `已复制 ${value}` : `点击复制产品 ID：${value}`}
+      aria-label={`复制产品 ID ${value}`}
     >
       <span className={styles.copyableIdLabel}>{label}</span>
       <span className={styles.copyableIdValue}>{state === "copied" ? "已复制" : value}</span>

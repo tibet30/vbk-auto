@@ -46,7 +46,7 @@ interface VbkApiMethod {
 /**
  * 从 VbkApi 类型定义里提取每个方法的 category.method。
  * 单纯用正则近似——contracts.ts 里 VbkApi 是一个对象类型；
- * 提取 categories 名（projects/ai/...）+ 它们的方法名。
+ * 提取 categories 名（products/ai/...）+ 它们的方法名。
  * 方法签名都以 `methodName(...)` 开头（参数列表后跟类型）。
  */
 function extractVbkApiMethods(contractsSource: string): VbkApiMethod[] {
@@ -101,22 +101,27 @@ function extractPreloadBindings(preloadSource: string): Map<string, string> {
 
 // ───────────────────────── 测试 ─────────────────────────
 
-test("preload.cts 里的 invoke channel 在 main.ts 全部注册", () => {
+const ipcRegistrarSource = [
+  "src/main/ipc/product-ai-ipc.ts",
+  "src/main/ipc/browser-automation-ipc.ts",
+  "src/main/ipc/settings-ipc.ts",
+  "src/main/ipc/planning-ipc.ts",
+].map(readSource).join("\n");
+
+test("preload.cts 里的 invoke channel 在 IPC registrars 全部注册", () => {
   const preload = readSource("src/main/preload.cts");
-  const main = readSource("src/main/main.ts");
   const invoked = extractInvokeChannels(preload);
-  const handled = new Set(extractIpcMainHandleChannels(main));
+  const handled = new Set(extractIpcMainHandleChannels(ipcRegistrarSource));
   const missing = invoked.filter((channel) => !handled.has(channel));
   assert.deepEqual(missing, [], `preload invoke 但 main 未注册的 channel：${missing.join(", ")}`);
 });
 
-test("main.ts 注册的 channel 都在 preload 用到了（避免泄漏）", () => {
+test("IPC registrars 注册的 channel 都在 preload 用到了（避免泄漏）", () => {
   const preload = readSource("src/main/preload.cts");
-  const main = readSource("src/main/main.ts");
   const invoked = new Set(extractInvokeChannels(preload));
-  const handled = extractIpcMainHandleChannels(main);
+  const handled = extractIpcMainHandleChannels(ipcRegistrarSource);
   // main 里注册的 channel 应当被 preload 引用；不强制要求 100%（main 可能注册
-  // 仅 main 内部使用的 channel，例如 project:updated 这类 event 通道）。
+  // 仅 main 内部使用的 channel，例如 product:updated 这类 event 通道）。
   // 这里我们允许存在 main-only channel，仅打印参考。
   void invoked;
   void handled;
@@ -129,7 +134,7 @@ test("contracts.ts VbkApi 里的每个方法在 preload.cts 都有绑定", () =>
   const bindings = extractPreloadBindings(preload);
   const missing: string[] = [];
   for (const m of methods) {
-    if (m.category === "events") continue; // events.onProjectUpdated 用 ipcRenderer.on,不是 invoke
+    if (m.category === "events") continue; // events.onProductUpdated 用 ipcRenderer.on,不是 invoke
     if (!bindings.has(`${m.category}.${m.method}`)) missing.push(`${m.category}.${m.method}`);
   }
   assert.deepEqual(missing, [], `VbkApi 方法在 preload 缺绑定：${missing.join(", ")}`);
@@ -141,11 +146,11 @@ test("preload 的 category.method → channel 命名约定（同名简化）", (
   // 大多数 channel 走 category.method 形式；列举几个代表性例子做断言，
   // 让 contracts 加新方法时显式提醒走这个规范。
   const expectations: Array<[string, string]> = [
-    ["projects.list", "projects:list"],
-    ["projects.create", "projects:create"],
-    ["projects.get", "projects:get"],
-    ["projects.delete", "projects:delete"],
-    ["projects.readiness", "projects:readiness"],
+    ["products.list", "products:list"],
+    ["products.create", "products:create"],
+    ["products.get", "products:get"],
+    ["products.delete", "products:delete"],
+    ["products.readiness", "products:readiness"],
     ["ai.send", "ai:send"],
     ["ai.regenerate", "ai:regenerate"],
     ["automation.start", "automation:start"],

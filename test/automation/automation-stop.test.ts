@@ -204,7 +204,7 @@ test("AutomationRun 状态枚举支持 cancelled（TaskStatus 含 cancelled）",
   cancel = true;
   const outcome = await runPhaseWithRecovery(ctx);
   assert.equal(outcome.status, "cancelled");
-  // cancelled 状态在 UI 侧对应 project.automation.status = "cancelled"，
+  // cancelled 状态在 UI 侧对应 product.automation.status = "cancelled"，
   // 与 succeeded/failed 并列。AutomationRun 走 TaskStatus；为防止意外
   // 被改回 union，这里验证 union 包含 cancelled。
   assert.ok(["queued", "running", "succeeded", "failed", "cancelled"].includes("cancelled"));

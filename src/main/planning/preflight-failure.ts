@@ -1,6 +1,6 @@
 /**
  * 规划子系统 preflight 失败包装：
- *   - 在进入 runPlan 之前（project 存在性检查、API key 解密、adapter 构造、
+ *   - 在进入 runPlan 之前（product 存在性检查、API key 解密、adapter 构造、
  *     甚至是 runPlan 自身逃逸的异常），把任意错误转成「状态 = failed」的
  *     持久化生成态 + 一段不会泄露密钥/密文的中文 assistant reply。
  *

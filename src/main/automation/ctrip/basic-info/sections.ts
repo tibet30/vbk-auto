@@ -201,7 +201,9 @@ export async function fillButlerContact(page, selection) {
   const targetIndex = findButlerOptionIndex(collected, { contactCardId, displayName });
   if (targetIndex < 0) {
     const texts = collected.map((option) => option.label);
-    throw new Error(`管家联系人下拉未找到 ID ${contactCardId}${displayName ? ` / ${displayName}` : ""}；可选：${texts.filter(Boolean).join("、") || "无"}`);
+    const who = displayName ? `「${displayName}」(ID ${contactCardId})` : `ID ${contactCardId}`;
+    const detail = `管家联系人${who}不在 VBK 联系人下拉中（缺少 ID / 姓名精确匹配项）；请在 VBK 维护该联系人或更新账号固定信息后再重试。可选：${texts.filter(Boolean).join("、") || "无"}`;
+    throw new Error(detail);
   }
   await options.nth(targetIndex).click();
   await delay(300);

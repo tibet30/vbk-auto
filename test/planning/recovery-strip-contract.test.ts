@@ -35,7 +35,7 @@ test("review.tsx 在 conversation 区域内渲染「继续规划 / 重试规划�
   //   - 重试规划：failed
   assert.match(reviewSrc, /继续规划/, "review.tsx 必须有「继续规划」按钮文案（needs_user 用）");
   assert.match(reviewSrc, /重试规划/, "review.tsx 必须有「重试规划」按钮文案（failed 用）");
-  // 按钮必须在 conversation 区域内（与项目消息同 panel），避免被独立 panel 隐藏。
+  // 按钮必须在 conversation 区域内（与产品消息同 panel），避免被独立 panel 隐藏。
   const conversationIdx = reviewSrc.indexOf('className={chat.conversation}');
   assert.notEqual(conversationIdx, -1, "review.tsx 必须有 conversation 容器");
   const buttonsIdx = reviewSrc.indexOf('planning-resume-button');
@@ -51,7 +51,7 @@ test("恢复按钮的 onClick 调 planningResume，且 planningResume 内部调 
   const onClickMatch = reviewSrc.match(/onClick=\{\(\)\s*=>\s*void\s+planningResume\(\)\}/);
   assert.ok(onClickMatch, "恢复按钮的 onClick 必须 void planningResume()（避免未捕获 promise）");
   // derived.ts 的 planningResume 必须调 api().planning.resume，并显式禁止 ai.send。
-  assert.match(derivedSrc, /api\(\)!\.planning\.resume\(project\.id\)/, "planningResume 必须调 planning.resume IPC");
+  assert.match(derivedSrc, /api\(\)!\.planning\.resume\(product\.id\)/, "planningResume 必须调 planning.resume IPC");
   assert.ok(
     !/api\(\)!\.ai\.send\(/.test(derivedSrc.replace(/\/\/[^\n]*\n/g, "")),
     "planningResume 不应再调 ai.send（AI 旧入口；恢复面板只接 staged planning）"

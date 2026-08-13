@@ -11,15 +11,16 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const here = new URL(".", import.meta.url).pathname;
-const projectRoot = path.resolve(here, "..", "..");
-const actionsPath = path.join(projectRoot, "src/renderer/app/actions/basic-info.ts");
+const productRoot = path.resolve(here, "..", "..");
+const actionsPath = path.join(productRoot, "src/renderer/app/actions/basic-info.ts");
 const actionsSource = readFileSync(actionsPath, "utf8");
+const coverModelSource = readFileSync(path.join(productRoot, "src/renderer/app/actions/basic-info-cover-model.ts"), "utf8");
 
 /**
  * 找到 `name = async (...) => {` 起点后，向右扫描直到配对 `}` 出现，截出
  * 完整函数体。同时显式支持 `(...args): ReturnType => {` 与 `async function`
  * 两种形态。当前文件里形如
- *   const saveCtripLibraryCover = async (projectId, args) => { ... };
+ *   const saveCtripLibraryCover = async (localProductId, args) => { ... };
  * 用本工具都能切全。
  */
 function extractFunctionBody(source: string, name: string): string {
@@ -109,20 +110,23 @@ test("actions/basic-info: saveCtripLibraryCover 接受 CtripLibraryImageCandidat
   assert.ok(body.length > 0, "未找到 saveCtripLibraryCover 定义");
   assert.match(body, /candidate: CtripLibraryImageCandidate/);
   assert.doesNotMatch(body, /CoverPlaceCandidate/);
-  assert.match(body, /source: "ctripLibrary"/);
-  assert.match(body, /minQuality:\s*3/);
+  assert.match(body, /buildCtripLibraryCover\(args\.candidate\)/);
+  const modelBody = extractFunctionBody(coverModelSource, "buildCtripLibraryCover");
+  assert.match(modelBody, /source: "ctripLibrary"/);
+  assert.match(modelBody, /minQuality:\s*3/);
 });
 
 test("actions/basic-info: saveCtripLibraryCover 写入 imageId / imageUrl 与可选字段", () => {
-  const body = extractFunctionBody(actionsSource, "saveCtripLibraryCover");
-  assert.ok(body.length > 0, "未找到 saveCtripLibraryCover 定义");
+  const actionBody = extractFunctionBody(actionsSource, "saveCtripLibraryCover");
+  const body = extractFunctionBody(coverModelSource, "buildCtripLibraryCover");
+  assert.ok(actionBody.length > 0 && body.length > 0, "未找到封面保存 action 或领域转换函数");
   // imageId / imageUrl 直接从 candidate 透传。
   assert.match(body, /candidate\.imageId/);
   assert.match(body, /candidate\.imageUrl/);
   // 拒绝缺 imageId / imageUrl 时返回 false 且不调 updateReviewField。
   assert.match(body, /imageId 或 imageUrl|imageId\/imageUrl/);
-  assert.match(body, /setBasicInfoErrors/);
-  assert.match(body, /setNotice/);
+  assert.match(actionBody, /setBasicInfoErrors/);
+  assert.match(actionBody, /setNotice/);
   // 写入时把 imageId / imageUrl 放进 ProductCover，并保留可选字段。
   assert.match(body, /imageId,/);
   assert.match(body, /imageUrl,/);
@@ -139,17 +143,16 @@ test("actions/basic-info: saveCtripLibraryCover 写入 imageId / imageUrl 与可
   assert.match(body, /candidate\.thumbnailUrl/);
   // 选中时刻写 selectedAt（ISO 时间戳）。
   assert.match(body, /selectedAt:\s*new Date\(\)\.toISOString\(\)/);
-  // 必须出现"if (imageId === null || imageUrl === null) ... return false;" 块，
-  // 且该块内不允许调用 updateReviewField。
-  const blockRe = /if\s*\(\s*imageId\s*===\s*null\s*\|\|\s*imageUrl\s*===\s*null\s*\)[\s\S]*?return\s+false\s*;/;
+  // 缺图时必须在纯转换层抛错，action catch 后不得调用 updateReviewField。
+  const blockRe = /if\s*\(imageId\s*===\s*null\s*\|\|\s*imageUrl\s*===\s*null\)[\s\S]*?throw new Error\([^;]+;/;
   const block = body.match(blockRe);
-  assert.ok(block, "缺 imageId/imageUrl 时必须 return false 跳过 updateReviewField");
+  assert.ok(block, "缺 imageId/imageUrl 时必须在转换层抛错并跳过 updateReviewField");
   assert.doesNotMatch(block![0], /updateReviewField/);
 });
 
 test("actions/basic-info: saveCtripLibraryCover poi / description 使用 poiName 或携程图库兜底", () => {
-  const body = extractFunctionBody(actionsSource, "saveCtripLibraryCover");
-  assert.ok(body.length > 0, "未找到 saveCtripLibraryCover 定义");
+  const body = extractFunctionBody(coverModelSource, "buildCtripLibraryCover");
+  assert.ok(body.length > 0, "未找到 buildCtripLibraryCover 定义");
   // poi / description 以 poiName 为主，兑底 = `携程图库图片 ${imageId}`。
   assert.match(body, /candidate\.poiName \|\| fallbackLabel/);
   assert.match(body, /`携程图库图片 \$\{imageId\}`/);

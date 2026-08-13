@@ -32,6 +32,8 @@ test("fillCitySelect 等待完整远程结果并按 title 精确选择城市", a
   assert.match(body, /ant-select-selection-selected-value/);
   assert.match(body, /\.ant-select-selection/);
   assert.match(body, /input\.waitFor\(\{ state: "visible"/);
+  assert.match(body, /await input\.fill\(city\)/, "城市搜索应一次输入完整关键词，避免旧的单字响应覆盖精确结果");
+  assert.doesNotMatch(body, /input\.type\(city/, "城市远程搜索禁止逐字触发并发请求");
   assert.doesNotMatch(body, /title\.endsWith\(`-\$\{city\}`\)/, "城市 endsWith 命中第一项不安全，必须走国家-城市精确匹配");
   assert.doesNotMatch(body, /selectedText\.endsWith\(`-\$\{city\}`\)/, "幂等判断也必须验证国家，不能因 endsWith 跳过");
   assert.doesNotMatch(body, /getByRole\("combobox"\)\.click\(\)/, "收起状态不能点击隐藏 combobox");
@@ -129,6 +131,8 @@ test("基本信息重试会关闭残留提示弹窗", async () => {
   assert.match(source, /我知道了\|知道了/);
   assert.match(source, /waitForSaveSuccess \? 5_000 : 800/);
   assert.match(source, /dialog\.waitFor\(\{ state: "hidden", timeout: 3_000 \}\)/);
+  assert.match(source, /Cannot find context\|Execution context was destroyed\|Target closed/,
+    "保存确认触发导航时应把旧执行上下文消失视为原弹窗已离开");
   const saveStart = source.indexOf("async function clickSafeSave");
   const saveBody = source.slice(saveStart, source.indexOf("\nasync function dismissKnownNoticeDialogs", saveStart));
   assert.match(saveBody, /current\.innerText\(\).*\.replace\(\/\\s\+\/g, ""\)/s);
@@ -159,6 +163,12 @@ test("fillScenicAreaProvince 识别中国山西标签并幂等跳过", async () 
     "省份搜索框必须来自第二级下拉");
   assert.doesNotMatch(body, /comboboxes\.nth\(0\)/,
     "国家保持空白，禁止操作第一级国家下拉");
+  assert.match(body, /DIRECT_ADMIN_MUNICIPALITIES\.has\(provinceBase\)/,
+    "直辖市不应强制等待 VBK 不提供的省份候选");
+  assert.match(body, /provinceSearch\.fill\(label\)/,
+    "省份远程搜索应一次写入完整关键词");
+  assert.doesNotMatch(body, /provinceSearch\.type\(/,
+    "省份远程搜索禁止逐字触发并发请求");
 });
 
 test("pickSearchInput 从 combobox 外层返回内部唯一可编辑输入框，也支持直接 input", async () => {
@@ -379,8 +389,8 @@ test("全量录入和单阶段 basic 重试使用同一全量景点列表", () =
   const fullRun = source.slice(source.indexOf("export async function runAutomation"));
   const onePhase = source.slice(source.indexOf("export async function runOnePhase"));
   for (const runner of [fullRun, onePhase]) {
-    assert.match(runner, /const keySpots = pickKeySpotsFromItinerary\(project\.product\);/);
+    assert.match(runner, /const keySpots = pickKeySpotsFromItinerary\((?:product|productDetail)\.product\);/);
     assert.match(runner, /fillAndSaveBasicInfo\([\s\S]*?keySpots,/);
   }
-  assert.doesNotMatch(source, /pickKeySpotsFromItinerary\(project\.product,\s*3\)/);
+  assert.doesNotMatch(source, /pickKeySpotsFromItinerary\((?:product|productDetail)\.product,\s*3\)/);
 });

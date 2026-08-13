@@ -81,6 +81,16 @@ test("buildSearchImageRequest：tags / sources / urlOptions / imageClass / exclu
   assert.equal(request.excludeGif, true);
 });
 
+test("buildSearchImageRequest：允许供应商图库无图时改查攻略图库", () => {
+  const request = buildSearchImageRequest({ poiId: 77498, sources: [3] });
+  assert.deepEqual(request.sources, [3]);
+  assert.deepEqual(request.tags, [
+    { tagType: "District", tagValue: "" },
+    { tagType: "PoiId", tagValue: "77498" },
+    { tagType: "Country", tagValue: "" },
+  ]);
+});
+
 test("buildSearchImageRequest：pageSize 自动夹到上限", () => {
   assert.equal(buildSearchImageRequest({ poiId: 1, pageSize: 999 }).pageSize, SEARCH_IMAGE_MAX_PAGE_SIZE);
   assert.equal(buildSearchImageRequest({ poiId: 1, pageSize: 0 }).pageSize, 20);
@@ -441,10 +451,10 @@ test("searchCtripLibraryImages：searchImage 返回空 imageIds → skip-image-i
   assert.equal(result.poi, "太原");
   assert.deepEqual(result.candidates, []);
   assert.ok(typeof result.fetchedAt === "string" && result.fetchedAt.length > 0);
-  // 事件序列：search-start → suggest-success → searchImage-success → skip-image-info
+  // 两个图库渠道均为空后才进入 skip-image-info。
   assert.deepEqual(
     events.map((e) => e.event),
-    ["search-start", "suggest-success", "searchImage-success", "skip-image-info"],
+    ["search-start", "suggest-success", "searchImage-success", "searchImage-success", "skip-image-info"],
   );
   // 日志 payload 不携带 imageIds / cookie value / token / header。
   const joined = JSON.stringify(events);
@@ -460,10 +470,12 @@ test("searchCtripLibraryImages：searchImage 返回空 imageIds → skip-image-i
   const si = events.find((e) => e.event === "searchImage-success");
   assert.ok(si && si.event === "searchImage-success");
   assert.equal(si.imageIdCount, 0);
-  // 调用了 suggest + searchImage 两个 endpoint；不会调 getImageInfo
+  // 调用了 suggest + 两次 searchImage（供应商图库、攻略图库）；不会调 getImageInfo。
   const endpoints = calls.map((c) => c.endpoint);
   assert.equal(endpoints[0], SUGGESTPOI_ENDPOINT);
   assert.equal(endpoints[1], SEARCH_IMAGE_ENDPOINT);
+  assert.equal(endpoints[2], SEARCH_IMAGE_ENDPOINT);
+  assert.deepEqual((calls[2].body as { sources: number[] }).sources, [3]);
 });
 
 test("searchCtripLibraryImages：suggestPoi 返回 HTTP 400 抛错 + suggest-failure 事件", async () => {

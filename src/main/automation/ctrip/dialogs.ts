@@ -113,7 +113,13 @@ async function dismissKnownNoticeDialogs(page, { waitForSaveSuccess = false } = 
             const stillAttached = await page.evaluate(
               (el) => el && document.contains(el),
               handle,
-            );
+            ).catch((error) => {
+              // 点击确认可能立即导航；旧 frame/context 消失等价于原 dialog 已离开。
+              if (/Cannot find context|Execution context was destroyed|Target closed/i.test(String(error))) {
+                return false;
+              }
+              throw error;
+            });
             if (stillAttached) throw new Error("dismissKnownNoticeDialogs: 原 dialog 未 hidden");
           });
         } else {

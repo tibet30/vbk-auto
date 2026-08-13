@@ -64,7 +64,7 @@ class FakeRuntime implements OrchestratorRuntime {
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules(): Promise<PlanningModule[]> {
     // FakeRuntime 不主动携带 basicInfo（它在 DbOrchestratorRuntime 里由
-    // db.createProject 填入）。为了让 detectAcceptedModulesFromProduct 对
+    // db.createProduct 填入）。为了让 detectAcceptedModulesFromProduct 对
     // itinerary / presentation 走「骨架对齐」分支，运行时补一个最小的 basicInfo。
     // 这是与真实 DB 路径的等价语义：DbOrchestratorRuntime.loadAcceptedModules
     // 永远能看到骨架里的 basicInfo.days。
@@ -158,7 +158,7 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
     ] },
   };
   const planner1 = new ScriptedPlanner(fullOutputs);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
   // 第一轮跑完：state.status === "completed"，completedStages 包含所有阶段。
   assert.equal(store.state?.status, "completed");
   assert.deepEqual(store.state?.completedStages, ["skeleton", "basicInfo", "itinerary", "presentation", "commercial", "research", "validation"]);
@@ -183,7 +183,7 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
     },
   };
   const planner2 = new ScriptedPlanner(brokenOutputs);
-  const r2 = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
+  const r2 = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
   assert.equal(r2.status, "needs_user", "非法 itinerary 触发 rewind → needs_user");
   assert.equal(store.state?.status, "needs_user");
   assert.equal(store.state?.currentStage, "itinerary", "rewind 到 earliest invalid stage = itinerary");
@@ -216,7 +216,7 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
     ] },
   };
   const planner1 = new ScriptedPlanner(fullOutputs);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
   assert.equal(store.state?.status, "completed");
   // 改坏 release 子模块：把 publicPriceCeiling 抹掉。
   rt.product = {
@@ -238,7 +238,7 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
     ] },
   };
   const planner2 = new ScriptedPlanner(brokenOutputs);
-  const r2 = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
+  const r2 = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
   assert.equal(r2.status, "needs_user", "非法 release 触发 rewind → needs_user");
   assert.equal(store.state?.currentStage, "commercial", "release 属于 commercial 阶段 → rewind 到 commercial");
   // planner2 必须重跑 commercial。
@@ -270,7 +270,7 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
     ] },
   };
   const planner1 = new ScriptedPlanner(fullOutputs);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax" });
   // 改坏 itinerary。skeleton 仍然是合法的（rewind 时不应被清掉）。
   rt.product = {
     ...rt.product,
@@ -287,7 +287,7 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
     ] }] },
   };
   const planner2 = new ScriptedPlanner(brokenOutputs);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
   assert.equal(store.state?.status, "needs_user");
   assert.equal(store.state?.currentStage, "itinerary");
   assert.ok(store.state?.completedStages.includes("skeleton"), "skeleton 是 itinerary 之前合法完成的阶段，必须保留");

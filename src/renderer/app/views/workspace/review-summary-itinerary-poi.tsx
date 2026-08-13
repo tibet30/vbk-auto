@@ -2,7 +2,7 @@ import { Check, MapPin, Pencil, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../helpers";
 import type { PoiSuggestCandidate, PoiSuggestDetailResult, PoiSuggestLogContext } from "../../../../shared/contracts";
-import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary";
+import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
 import styles from "./review-summary-itinerary-poi.module.less";
 import { logDebug } from "../../../../shared/log-timestamp.js";
 
@@ -20,7 +20,7 @@ function logPoiManual(event: string, context: PoiManualLogContext) {
   logDebug(POI_MANUAL_LOG_PREFIX, event, { stage: event, ...context });
 }
 
-export function ItinerarySpotPoiEditor({ projectId, item }: { projectId: string; item: ItineraryTimelineSpotItem }) {
+export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductId: string; item: ItineraryTimelineSpotItem }) {
   const hasPoi = Boolean(item.poiName?.trim() && item.poiId);
   const [editing, setEditing] = useState(false);
   const [keyword, setKeyword] = useState(item.title);
@@ -29,7 +29,7 @@ export function ItinerarySpotPoiEditor({ projectId, item }: { projectId: string;
   const [loading, setLoading] = useState<"search" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const logContext = (extra: Partial<PoiManualLogContext> = {}): PoiManualLogContext => ({
-    projectId,
+    localProductId,
     dayIndex: item.dayIndex,
     spotIndex: item.spotIndex,
     title: item.title,
@@ -88,7 +88,7 @@ export function ItinerarySpotPoiEditor({ projectId, item }: { projectId: string;
     setSelected(null);
     try {
       const next = await api()!.browser.suggestPoiDetail(query, {
-        projectId,
+        localProductId,
         dayIndex: item.dayIndex,
         spotIndex: item.spotIndex,
         title: item.title,
@@ -119,7 +119,7 @@ export function ItinerarySpotPoiEditor({ projectId, item }: { projectId: string;
     setLoading("save");
     setError(null);
     try {
-      await api()!.projects.updateReviewField(projectId, {
+      await api()!.products.updateReviewField(localProductId, {
         field: "itinerarySpotPoi",
         dayIndex: item.dayIndex,
         spotIndex: item.spotIndex,

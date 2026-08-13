@@ -1,8 +1,8 @@
-import type { CreateProjectInput, FieldState, OperationStatus, ProjectDetail, ProjectReadiness, ProjectSummary } from "../../../shared/contracts.js";
+import type { CreateProductInput, FieldState, OperationStatus, ProductDetail, ProductReadiness, ProductSummary } from "../../../shared/contracts.js";
 import type { PlanningStage } from "../../../shared/contracts-planning.js";
 
 export type Stage = "review" | "vbk";
-export type View = "workspace" | "projects" | "settings" | "operation-log";
+export type View = "workspace" | "products" | "settings" | "operation-log";
 
 export const api = () => window.vbk;
 
@@ -14,17 +14,17 @@ export const OPERATION_STATUS_OPTIONS: Array<{ value: OperationStatus | "all"; l
   { value: "skipped", label: "跳过" },
   { value: "running", label: "进行中" },
 ];
-export const emptyReadiness: ProjectReadiness = { ready: false, completion: 0, issues: [] };
-export const initialInput: CreateProjectInput = { destination: "", days: 2, productForm: "privateTour" };
+export const emptyReadiness: ProductReadiness = { ready: false, completion: 0, issues: [] };
+export const initialInput: CreateProductInput = { destination: "", days: 2, productForm: "privateTour" };
 
-// 切换项目时为新项目选择一个合理的初始阶段；用户可以随后自由切换。
-export function initialStageFor(status: ProjectSummary["status"] | undefined): Stage {
+// 切换产品时为新产品选择一个合理的初始阶段；用户可以随后自由切换。
+export function initialStageFor(status: ProductSummary["status"] | undefined): Stage {
   if (status === "automating" || status === "draft_saved") return "vbk";
   return "review";
 }
 
 export function statusLabel(status?: string) { return ({ planning: "方案规划中", review: "等待确认", automating: "正在录入", draft_saved: "草稿已保存", blocked: "需要处理" } as Record<string, string>)[status || ""] || "准备开始"; }
-export function statusState(status?: ProjectSummary["status"]) { return ({ planning: "researching", review: "needsConfirmation", automating: "researching", draft_saved: "confirmed", blocked: "blocked" } as Record<ProjectSummary["status"], string>)[status || "planning"]; }
+export function statusState(status?: ProductSummary["status"]) { return ({ planning: "researching", review: "needsConfirmation", automating: "researching", draft_saved: "confirmed", blocked: "blocked" } as Record<ProductSummary["status"], string>)[status || "planning"]; }
 // 字段状态 → 中文短标签。设计规范要求界面文案默认中文，只在内部数据层保留英文枚举。
 export function fieldStateLabel(state: FieldState | undefined): string {
   return ({
@@ -90,17 +90,17 @@ export async function copyText(value: string): Promise<boolean> {
     return false;
   }
 }
-export function isVehicleResourceTask(task?: ProjectDetail["researchTasks"][number]) {
+export function isVehicleResourceTask(task?: ProductDetail["researchTasks"][number]) {
   if (!task) return false;
   return /用车|车辆|车费|资源组|vehicle/i.test(`${task.label} ${task.detail || ""}`);
 }
-// 项目状态 → 用作第二步"草稿保存"现状文案，避免重复占用 statusLabel 的中文。
-export function vbkStageStatusText(project: ProjectDetail | null): { tone: "waiting" | "running" | "saved" | "ready" | "blocked"; label: string; detail: string } {
-  if (!project) return { tone: "waiting", label: "等待选择项目", detail: "开始一个产品项目后即可进入" };
-  const blocked = recoveryNeedsUser(project.automation);
+// 产品状态 → 用作第二步"草稿保存"现状文案，避免重复占用 statusLabel 的中文。
+export function vbkStageStatusText(product: ProductDetail | null): { tone: "waiting" | "running" | "saved" | "ready" | "blocked"; label: string; detail: string } {
+  if (!product) return { tone: "waiting", label: "等待选择产品", detail: "创建产品后即可进入" };
+  const blocked = recoveryNeedsUser(product.automation);
   if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 AI 给出的指令完成手动操作，再重新发起一次保存草稿" };
-  if (project.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
-  if (project.automation?.status === "succeeded" || project.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
+  if (product.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
+  if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   return { tone: "waiting", label: "尚未录入 VBK", detail: "第一步审查通过后即可在右侧开始保存草稿" };
 }
 
@@ -373,7 +373,7 @@ export interface RecoveryNeedsUser {
   attempts: Array<{ seq: string; round: 1 | 2; attempt: number; rootCause?: string; expectedEvidence?: string; error: string; action?: string }>;
 }
 
-export function recoveryNeedsUser(run: ProjectDetail["automation"]): RecoveryNeedsUser | null {
+export function recoveryNeedsUser(run: ProductDetail["automation"]): RecoveryNeedsUser | null {
   if (!run?.recovery) return null;
   const block = Object.values(run.recovery.phases).find((rec) => rec.state === "needs_user");
   if (!block) return null;
@@ -414,7 +414,7 @@ export interface RecoveryAdvisorHint {
   action?: "advising" | "retrying";
 }
 
-export function activeAdvisorHint(run: ProjectDetail["automation"]): RecoveryAdvisorHint | null {
+export function activeAdvisorHint(run: ProductDetail["automation"]): RecoveryAdvisorHint | null {
   if (!run?.recovery) return null;
   for (const rec of Object.values(run.recovery.phases)) {
     if (rec.state === "advising") {

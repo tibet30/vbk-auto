@@ -6,7 +6,7 @@
  */
 
 import type { Page } from "playwright";
-import type { ProjectDetail } from "../../shared/contracts.js";
+import type { ProductDetail } from "../../shared/contracts.js";
 import { vbkSessionRequest } from "../infrastructure/vbk-session-request.js";
 import { logInfo } from "../../shared/log-timestamp.js";
 
@@ -275,16 +275,16 @@ export async function searchVehicleResourceGroups(page: Page, query: string) {
 }
 
 /**
- * 主入口：用 VBK 资源组搜索接口为 project 找一份车辆资源；
+ * 主入口：用 VBK 资源组搜索接口为 product 找一份车辆资源；
  *   - 拿 estimate（城市/天数/座位/车级）→ 接口查询 → bestResourceGroup 选最佳；
  *   - 未命中时退而求其次用「仅座位数」再次搜索；
  *   - 仍未命中则保留建议价但清掉旧匹配结果，加 note 说明，让运营人工干预；
  *   - 命中时只把真实可用的资源组 ID / 名称写入 operations.vehicleResource。
  */
-export async function resolveVehicleResource(page: Page, project: ProjectDetail) {
-  const product = project.product;
-  const basic = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo) ? product.basicInfo as Record<string, unknown> : {};
-  const operations = product.operations && typeof product.operations === "object" && !Array.isArray(product.operations) ? product.operations as Record<string, unknown> : {};
+export async function resolveVehicleResource(page: Page, product: ProductDetail) {
+  const productData = product.product;
+  const basic = productData.basicInfo && typeof productData.basicInfo === "object" && !Array.isArray(productData.basicInfo) ? productData.basicInfo as Record<string, unknown> : {};
+  const operations = productData.operations && typeof productData.operations === "object" && !Array.isArray(productData.operations) ? productData.operations as Record<string, unknown> : {};
   const existingVehicle = operations.vehicleResource && typeof operations.vehicleResource === "object" && !Array.isArray(operations.vehicleResource)
     ? operations.vehicleResource as Record<string, unknown>
     : {};
@@ -293,7 +293,7 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
     days: positiveInteger(basic.days),
     serviceHoursPerDay: positiveInteger(existingVehicle.serviceHoursPerDay) || 8,
   });
-  const targetDailyCost = targetVehicleDailyCost(product);
+  const targetDailyCost = targetVehicleDailyCost(productData);
   const primaryQuery = targetDailyCost ? `${estimate.query}${targetDailyCost}` : estimate.query;
   const payload = await searchVehicleResourceGroups(page, primaryQuery);
   // 如果精准查询无结果，退而求其次用更宽泛的关键词重试（去掉车级）。
@@ -320,7 +320,7 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
     // 车辆资源库无匹配项：保留建议价 / 服务参数，但清掉旧 ID/Name，避免用户误以为新价格已匹配成功。
     return {
       product: {
-        ...product,
+        ...productData,
         operations: {
           ...operations,
           transport: operations.transport || "charter",
@@ -354,7 +354,7 @@ export async function resolveVehicleResource(page: Page, project: ProjectDetail)
     serviceKilometersPerDay: positiveInteger(existingVehicle.serviceKilometersPerDay) || 300,
   };
   const nextProduct = {
-    ...product,
+    ...productData,
     operations: {
       ...operations,
       transport: operations.transport || "charter",

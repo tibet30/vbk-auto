@@ -22,13 +22,23 @@ import {
   type PoiNameResolutionRequest,
 } from "../../../shared/contracts-planning.js";
 import { logAIPrompt } from "../../ai/prompt-log.js";
-import { STAGE_ALLOWED_MODULES } from "../schemas.js";
+import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { buildStageToolSchema } from "../tool-schema.js";
+import {
+  type ChatCompletionBody,
+  normaliseTransportError,
+  planningTransportOptions,
+} from "./openai-compatible-transport.js";
+import { composePlanningSystemPrompt, composePlanningUserMessage } from "./planning-prompt.js";
 
 /**
  * Adapter 不做 transport retry —— 一次失败直接交给 orchestrator 走 stage 层 retry。
  * 这里的常量仅作为 schema 校验失败的内部 type 表达，不再保留任何 retry 循环。
  */
+
+// 透传 transport 工具，保持外部导入路径不变；
+// planning-ipc / main / test 文件可以直接从本模块拉 transport helpers，不必关心具体子文件。
+export { planningTransportOptions, normaliseTransportError, type ChatCompletionBody };
 
 export interface OpenAICompatibleAdapterConfig {
   apiKey: string;
@@ -52,11 +62,13 @@ export interface OpenAICompatibleAdapterConfig {
 
 export class OpenAICompatiblePlannerAdapter implements Planner {
   private readonly client: OpenAI;
+  private readonly timeoutMs: number;
   constructor(private readonly config: OpenAICompatibleAdapterConfig) {
+    this.timeoutMs = config.timeoutMs ?? 90_000;
     this.client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
-      timeout: config.timeoutMs ?? 90_000,
+      timeout: this.timeoutMs,
       maxRetries: 0,
     });
   }
@@ -65,9 +77,9 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     const stage = request.stage;
     const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
     const toolSchema = buildStageToolSchema(stage);
-    const userMessage = composeUserMessage(request);
+    const userMessage = composePlanningUserMessage(request);
     const messages = [
-      { role: "system", content: composeSystemPrompt(stage) },
+      { role: "system", content: composePlanningSystemPrompt(stage) },
       { role: "user", content: userMessage },
     ];
     // Adapter 单次传输尝试：transport 失败直接抛错，由 orchestrator 决定是否 stage retry。
@@ -77,15 +89,15 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       model: this.config.model,
       messages,
     });
-    const response = await this.client.chat.completions.create({
+    const response = await this.createCompletion({
       model: this.config.model,
-      messages,
+      messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
       temperature: 0.1,
       max_completion_tokens: 4096,
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: toolSchema.function.name } },
       ...(this.config.extraParams ?? {}),
-    } as never);
+    });
 
     const message = response.choices[0]?.message;
     if (!message) throw new PlannerError("empty_model_output", "模型未返回任何内容。");
@@ -112,15 +124,15 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       model: this.config.model,
       messages,
     });
-    const response = await this.client.chat.completions.create({
+    const response = await this.createCompletion({
       model: this.config.model,
-      messages,
+      messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
       temperature: 0,
       max_completion_tokens: 128,
       tools: [poiNameToolSchema],
       tool_choice: { type: "function", function: { name: poiNameToolSchema.function.name } },
       ...(this.config.extraParams ?? {}),
-    } as never);
+    });
     const call = response.choices[0]?.message?.tool_calls?.find(
       (item) => "function" in item && item.function.name === poiNameToolSchema.function.name,
     );
@@ -129,6 +141,37 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       return parsePoiNameToolArgs(JSON.parse(call.function.arguments));
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * SDK timeout 之外再加一层硬截止：即便兼容服务端保持连接却不返回 body，阶段也会
+   * 在 timeoutMs 内释放，不会把一次新建产品挂十几分钟。
+   *
+   *  Promise.race 只消费第一个 settled 的 promise；超时触发后 SDK 抛
+   *   APIUserAbortError，那条 rejection 必须就地 swallow，否则会在主进程
+   *   触发 UnhandledPromiseRejection 警告；我们把它绑在硬截止发出的
+   *   controller.abort() 之后立即吞掉。
+   */
+  private async createCompletion(body: ChatCompletionBody) {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hardTimeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new PlannerError("provider_timeout", `AI 规划响应超时（${this.timeoutMs}ms），请重试。`));
+      }, this.timeoutMs);
+    });
+    // 在 race 之前先把 SDK promise 的 late-rejection 兜底掉；
+    // 超时赢家是 hardTimeout，SDK 抛出的 APIUserAbortError 不再传到 race 外。
+    const sdkPromise = this.client.chat.completions.create(body as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { signal: controller.signal });
+    sdkPromise.catch(() => undefined);
+    try {
+      return await Promise.race([sdkPromise, hardTimeout]);
+    } catch (error) {
+      throw normaliseTransportError(error);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 }
@@ -215,81 +258,4 @@ export function convertToolArgsToStageOutput(
     }
   }
   return { reply, question, modules };
-}
-
-/**
- * 阶段级 system prompt：明确不允许 RFC6902、明确哪些字段是禁写、明确 release
- * draft-only、明确 research tasks 不能写「已确认」。
- *
- *  严格对齐 buildStageToolSchema 生成的 JSON schema：research 阶段不暴露 modules，
- *  question 字段已去除（并入 module.reason）；AI tool schema 与 prompt 必须同步。
- *
- *  这段 prompt 文本**不包含 provider / model 字样**，adapter 只透传。
- */
-function composeSystemPrompt(stage: PlanningStage): string {
-  if (stage === "research") {
-    return `你是「三人同游」旅游产品运营助手。当前阶段：research。
-
-research 阶段是本地 deterministic 生成；你不需要主动返回任何模块或 researchTasks。
-本阶段可仅返回一句话备注（reply 可选 / nullable），主要用于说明临时建议。`;
-  }
-  return `你是「三人同游」旅游产品运营助手。当前阶段：${stage}。
-
-只允许返回单个 JSON（无 Markdown、无解释文字），并通过 submit_${stage}_module 工具提交：
-{
-  "reply": "给运营的中文一句话（必填）",
-  "modules": [
-    { "module": "<allowed>", "status": "accepted|proposed|missing|rejected", "value": <完整对象/数组>, "reason": "<可为 null>" }
-  ]
-}
-
-硬性规则：
-1. 严禁返回 RFC6902 patch（op / path / replace / add / remove）。本系统只接受上述 JSON。
-2. release 模块：publicPriceCeiling 必填 (>0)；submitReview / publishAfterApproval 写 true 也会被系统强制改写为 false（草稿默认安全）。注意：tool schema 中 release 已不再声明 submitReview / publishAfterApproval 字段，违反会导致整体拒收。
-3. supplierProductCode / hotelResource / vehicleId / resourceId / resourceGroupId / resourceGroupName / supplierCode / providerId / contactCardId / butler / bookingControls 全部禁写；vehicleResource 仅允许写 requestedDailyCost 建议日价，含其他子字段会被拒。requestedDailyCost 要按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，禁止通过产品售价、成人价、毛利或起订人数倒推。
-4. presentation.recommendations 恰好 3 条，category 互不重复。
-5. itinerary 每天至少 1 个 spots；天数 = basicInfo.days。
-5.1 spots 必须是对象数组 name/poiName/poiId；未核查时 poiName/poiId 填 null，禁止字符串数组和猜测 ID。
-5.2 每个 spot.name 只能指定一个可独立通过 POI 接口检索的地点。禁止把“钟楼和鼓楼”“回民街·钟鼓楼广场”等多个地点合写为一个 spot；需要游览多个地点时，必须拆成多个 spots。括号内可保留同一地点的别名或入口说明。
-6. pricing.adult > 0；cost.adult 不可超过 adult。
-7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
-8. terms 必须含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。
-9. basicInfo 阶段必须返回 subtitle、province、operationNotes；province 必须是省/自治区/直辖市，不能直接填写目的地城市名。已有 province 由本地保留。
-10. 不要再返回顶级 question / researchTasks 字段：question 已合并到 module.reason；research tasks 由本地 deterministic 生成。AI 不能自行声明核查结果。`;
-}
-
-/**
- * 组装阶段 user message：含项目骨架、已落地模块、已有 research tasks、上轮失败原因、当前产品草稿。
- * 注意 supplierProductCode 在 prompt 中标注为「AI 不可修改」。
- */
-function composeUserMessage(request: PlannerRequest): string {
-  const { stage, context, previousError } = request;
-  const lines: string[] = [];
-  lines.push(`项目骨架：`);
-  lines.push(`- destination = ${context.skeleton.destination}`);
-  lines.push(`- days/nights = ${context.skeleton.days}/${context.skeleton.nights}`);
-  lines.push(`- productForm = ${context.skeleton.productForm}`);
-  lines.push(`- productType = ${context.skeleton.productType}`);
-  lines.push(`- supplierProductCode = ${context.skeleton.supplierProductCode}（AI 不可修改）`);
-  lines.push("");
-  lines.push(`当前阶段：${stage}`);
-  if (context.acceptedModules.length) {
-    lines.push("");
-    lines.push("已落地模块（不要重复生成）：");
-    for (const m of context.acceptedModules) lines.push(`  - ${m.module}${m.writePath ? ` → ${m.writePath}` : ""}`);
-  }
-  if (context.existingResearchTasks.length) {
-    lines.push("");
-    lines.push("已有 research tasks（避免重复）：");
-    for (const task of context.existingResearchTasks) lines.push(`  - [${task.type}] ${task.label}`);
-  }
-  if (previousError) {
-    lines.push("");
-    lines.push(`上一轮失败原因：${previousError.message}（code=${previousError.code}）`);
-    lines.push("本轮重试：只返回本阶段模块结构化 JSON，不要返回 RFC6902 patch。");
-  }
-  lines.push("");
-  lines.push("当前产品草稿（参考上下文）：");
-  lines.push(JSON.stringify(context.currentProduct));
-  return lines.join("\n");
 }

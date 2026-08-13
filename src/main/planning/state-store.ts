@@ -1,5 +1,5 @@
 /**
- * 生成状态持久化：每个项目一行 JSON，存于 planning_generation 表。
+ * 生成状态持久化：每个产品一行 JSON，存于 planning_generation 表。
  *
  * 该模块暴露给 VbkDatabase；orchestrator 通过 GenerationStateStore 接口
  * 读写它，与底层 SQLite 解耦。
@@ -8,19 +8,19 @@
 import type { PlanningGenerationState } from "../../shared/contracts-planning.js";
 
 export interface PlanningGenerationRow {
-  project_id: string;
+  local_product_id: string;
   state_json: string;
   updated_at: string;
 }
 
 export interface PlanningStatePersistence {
   upsertRow(row: PlanningGenerationRow): void;
-  selectRow(projectId: string): PlanningGenerationRow | undefined;
+  selectRow(localProductId: string): PlanningGenerationRow | undefined;
 }
 
 /**
  * SQLite 实现的 PlanningGenerationState 仓库：
- *   - upsert 用 INSERT ... ON CONFLICT 保证每个项目只保留最新一份 state；
+ *   - upsert 用 INSERT ... ON CONFLICT 保证每个产品只保留最新一份 state；
  *   - load 反序列化 JSON；解析失败返回 undefined 触发上层重新初始化。
  * 仅依赖基础 better-sqlite3 风格 prepare/run/get 接口，不耦合具体 ORM。
  */
@@ -28,22 +28,22 @@ export class SqlitePlanningStateStore {
   constructor(private readonly db: { prepare: (sql: string) => { run(...args: unknown[]): unknown; get(...args: unknown[]): unknown; all(...args: unknown[]): unknown[] } }) {}
 
   /**
-   * 把当前 PlanningGenerationState 持久化到对应 projectId 行，存在则覆盖。
+   * 把当前 PlanningGenerationState 持久化到对应 localProductId 行，存在则覆盖。
    */
   upsert(state: PlanningGenerationState): void {
     const stmt = this.db.prepare(`
-      INSERT INTO planning_generation (project_id, state_json, updated_at)
+      INSERT INTO planning_generation (local_product_id, state_json, updated_at)
       VALUES (?, ?, ?)
-      ON CONFLICT(project_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
+      ON CONFLICT(local_product_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
     `);
-    stmt.run(state.projectId, JSON.stringify(state), state.resumeAt);
+    stmt.run(state.localProductId, JSON.stringify(state), state.resumeAt);
   }
 
   /**
-   * 从规划库加载指定 projectId 的最新 state；找不到行或 JSON 解析失败均返回 undefined。
+   * 从规划库加载指定 localProductId 的最新 state；找不到行或 JSON 解析失败均返回 undefined。
    */
-  load(projectId: string): PlanningGenerationState | undefined {
-    const row = this.db.prepare(`SELECT state_json FROM planning_generation WHERE project_id=?`).get(projectId) as { state_json: string } | undefined;
+  load(localProductId: string): PlanningGenerationState | undefined {
+    const row = this.db.prepare(`SELECT state_json FROM planning_generation WHERE local_product_id=?`).get(localProductId) as { state_json: string } | undefined;
     if (!row) return undefined;
     try {
       return JSON.parse(row.state_json) as PlanningGenerationState;

@@ -179,7 +179,7 @@ test("完整 staged plan：persisted product 通过 deep validation", async () =
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new AllStagesOkPlanner();
-  const result = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   assert.equal(result.status, "completed");
   assert.equal(result.rejected.length, 0, "完整 plan 不应当被 deep validation 拒绝");
 });

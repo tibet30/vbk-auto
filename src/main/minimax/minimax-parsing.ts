@@ -38,16 +38,97 @@ export function normalisePatchOperation(operation: z.infer<typeof patchOperation
   if (alias !== operation.path) {
     operation = { ...operation, path: alias };
   }
+  if (operation.path === "/presentation") {
+    operation = { ...operation, value: normalisePresentationValue(operation.value) };
+  } else if (operation.path === "/itinerary") {
+    operation = { ...operation, value: normaliseItineraryValue(operation.value) };
+  }
   const schema = patchValueSchemas[operation.path];
   if (!schema) return operation;
   const parsed = schema.safeParse(operation.value);
   return parsed.success ? { ...operation, value: parsed.data } : undefined;
 }
 
+function normalisePresentationValue(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const source = value as Record<string, unknown>;
+  const result: Record<string, unknown> = {
+    recommendationCategory: typeof source.recommendationCategory === "string"
+      ? source.recommendationCategory
+      : "优选行程",
+  };
+  const recommendation = typeof source.recommendation === "string"
+    ? source.recommendation
+    : source.description;
+  if (typeof recommendation === "string" && recommendation.trim()) {
+    result.recommendation = recommendation.trim();
+  }
+  const features = typeof source.features === "string"
+    ? source.features
+    : Array.isArray(source.highlights)
+      ? source.highlights.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).join("\n")
+      : undefined;
+  if (typeof features === "string" && features.trim()) result.features = features.trim();
+  if (Array.isArray(source.recommendations)) result.recommendations = source.recommendations;
+  if (source.cover && typeof source.cover === "object") result.cover = source.cover;
+  return result;
+}
+
+function normaliseItineraryValue(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
+    const source = entry as Record<string, unknown>;
+    const legacyActivities = Array.isArray(source.activities)
+      ? source.activities.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      : [];
+    const activities = legacyActivities.map((item) => ({
+      time: typeof item.time === "string" ? item.time : "",
+      title: typeof item.title === "string" ? item.title : typeof item.name === "string" ? item.name : "",
+      detail: typeof item.detail === "string" ? item.detail : "",
+      type: typeof item.type === "string" ? item.type : "other",
+    }));
+    const spots = Array.isArray(source.spots)
+      ? source.spots
+      : activities.map((item) => item.title).filter(Boolean);
+    const summary = typeof source.description === "string"
+      ? source.description
+      : typeof source.summary === "string" ? source.summary : "";
+    const activityDescription = activities
+      .map((item) => [item.time, item.title, item.detail].filter(Boolean).join(" "))
+      .filter(Boolean)
+      .join("；");
+    const description = source.description ?? [summary && `${summary}。`, activityDescription].filter(Boolean).join("");
+    const legacyMeals = source.meals && typeof source.meals === "object" && !Array.isArray(source.meals)
+      ? source.meals as Record<string, unknown>
+      : undefined;
+    const mealDescriptions = Array.isArray(source.mealDescriptions)
+      ? source.mealDescriptions
+      : legacyMeals
+        ? ["breakfast", "lunch", "dinner"].map((key) => `${key === "breakfast" ? "早餐" : key === "lunch" ? "午餐" : "晚餐"}${typeof legacyMeals[key] === "string" ? legacyMeals[key] : "自理"}`)
+        : undefined;
+    const meals = typeof source.meals === "string"
+      ? source.meals
+      : mealDescriptions?.join("；");
+    const hotel = typeof source.hotel === "string" ? source.hotel : source.stay;
+    return {
+      day: source.day,
+      title: source.title,
+      spots,
+      description,
+      hotel,
+      meals,
+      ...(mealDescriptions ? { mealDescriptions } : {}),
+      ...(hotel ? { hotelDescription: source.hotelDescription ?? hotel } : {}),
+      ...(activities.length ? { activities } : {}),
+    };
+  });
+}
+
 // 把抓包中常见的路径变体映射回产品协议的标准路径。
 /**
  * 把模型写出 / 抓包中常见的路径变体（basic_info/subtitle / transport_mode / presentation/desc
- * 等）映射回 /basicInfo/subtitle、/operations/transport 等项目标准 RFC6902 路径；
+ * 等）映射回 /basicInfo/subtitle、/operations/transport 等产品标准 RFC6902 路径；
  * 若以 `/` 开头原样返回，否则在前面补一个 `/`。
  */
 function pathAlias(path: string): string {
@@ -396,7 +477,6 @@ function stripReplyValueWrappers(value: string): string {
  */
 function parseRecoveredJson(raw: string): unknown | undefined {
   const withoutTrailingComma = trimTrailingComma(raw);
-  logWarn("[DBG-prj2] raw[:80]=", raw.slice(0, 80));
   const candidates = [
     raw,
     withoutTrailingComma,
@@ -834,7 +914,7 @@ function completeJsonTail(raw: string): string {
     }
   }
   if (inString) {
-    const fixedString = escaped ? raw.slice(0, -1) : raw;
+    const fixedString = raw.replace(/\\+$/, "");
     return `${fixedString}"${stack.reverse().join("")}`;
   }
   if (escaped) return `${raw}"${stack.reverse().join("")}`;

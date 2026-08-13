@@ -185,6 +185,18 @@ export async function selectStationAddress(page, card, city, extra = {}) {
 async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations, extra = {}) {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product;
+  async function setAllDay(card, description) {
+    const radio = card.locator('input[type="radio"][value="0"]');
+    const deadline = Date.now() + 5_000;
+    while (!(await radio.count()) && Date.now() < deadline) await delay(200);
+    if (!(await radio.count())) throw new Error(`找不到可设置的${description}`);
+    const label = radio.locator(
+      "xpath=ancestor::label[contains(@class,'ant-radio-wrapper')][1]",
+    );
+    if (!((await label.getAttribute("class")) || "").includes("ant-radio-wrapper-checked")) {
+      await label.click({ force: true });
+    }
+  }
   async function fillEmptyStationAddresses(card) {
     const stationInputs = card.locator('input.ant-input[placeholder="请选择"]');
     const total = await stationInputs.count();
@@ -204,6 +216,7 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
     const modes = cards[0].getByRole("checkbox");
     if ((await modes.count()) < 3) throw new Error("首日集合方式控件结构异常");
     await ensureCheckboxChecked(modes.nth(2));
+    await setAllDay(cards[0], "首日集合时间");
     await delay(300);
     await fillEmptyStationAddresses(cards[0]);
   }
@@ -213,6 +226,7 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
     let modes = cards[0].getByRole("checkbox");
     if ((await modes.count()) < 2) throw new Error("末日解散方式控件结构异常");
     await ensureCheckboxChecked(modes.nth(1));
+    await setAllDay(cards[0], "末日解散时间");
     await delay(300);
     modes = cards[0].getByRole("checkbox");
     if (operations.reusePickupForDropoff) {

@@ -1,20 +1,12 @@
-import { test, assert, recommendations, openRecommendationPage, recommendationState } from "./recommendation-reasons.shared.js";
-    initialRows: 1,
-    appendRows: true,
-    appendDelayMs: 200,
-  });
-  try {
-    await fillRecommendationReasons(page, recommendations);
-    assert.deepEqual(await recommendationState(page), recommendations);
-    // + 按钮点击顺序也应被忠实记录。
-    assert.deepEqual(
-      await page.evaluate(() => window.recommendationEvents.filter((event) => event.startsWith("plus-click:"))),
-      ["plus-click:0", "plus-click:1"],
-    );
-  } finally {
-    await page.close();
-  }
-});
+import {
+  test,
+  assert,
+  recommendations,
+  openRecommendationPage,
+  recommendationState,
+  fillRecommendationReasons,
+  RECOMMENDATION_CATEGORIES,
+} from "./recommendation-reasons.shared.js";
 
 test("仅有禁用同名项时拒绝选择并给出明确错误", async () => {
   const page = await openRecommendationPage({

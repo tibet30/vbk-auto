@@ -84,7 +84,7 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
       } }],
     }),
   });
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
   // 第二轮：模拟用户后续触发 resume；planner2 在 presentation 阶段如果再次生成不同内容，resume 会跳过它。
   const planner2 = new SelectivePlanner({
     commercial: () => ({
@@ -98,7 +98,7 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
     }),
     research: () => ({ reply: "rt", modules: [{ module: "researchTasks", status: "accepted", researchTasks: [] }] }),
   });
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
   // planner2 不应被要求生成 presentation / itinerary。
   assert.ok(!planner2.calls.includes("presentation"));
   assert.ok(!planner2.calls.includes("itinerary"));

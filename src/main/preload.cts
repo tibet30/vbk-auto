@@ -3,7 +3,7 @@
  * 避免 renderer 直接访问 ipcRenderer。
  *
  * 约定：
- *   - 命名空间按业务域（projects / ai / research / browser / automation / debug /
+ *   - 命名空间按业务域（products / ai / research / browser / automation / debug /
  *     accounts / settings / contacts / cover / events / operationLog / planning）分组；
  *   - 每个方法都是一段一行 ipcRenderer.invoke，args 顺序与主进程 handle 保持一致；
  *   - events 的订阅均返回取消订阅函数，避免 renderer 误重复注册；
@@ -25,16 +25,16 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { VbkApi } from "../shared/contracts.js";
 
 const api: VbkApi = {
-  projects: { list: () => ipcRenderer.invoke("projects:list"), create: (input) => ipcRenderer.invoke("projects:create", input), get: (id) => ipcRenderer.invoke("projects:get", id), delete: (id) => ipcRenderer.invoke("projects:delete", id), readiness: (id) => ipcRenderer.invoke("projects:readiness", id), updateReviewField: (id, input) => ipcRenderer.invoke("projects:updateReviewField", id, input), updateProductJson: (id, json) => ipcRenderer.invoke("projects:updateProductJson", id, json) },
+  products: { list: () => ipcRenderer.invoke("products:list"), create: (input) => ipcRenderer.invoke("products:create", input), get: (id) => ipcRenderer.invoke("products:get", id), delete: (id) => ipcRenderer.invoke("products:delete", id), readiness: (id) => ipcRenderer.invoke("products:readiness", id), updateReviewField: (id, input) => ipcRenderer.invoke("products:updateReviewField", id, input), updateProductJson: (id, json) => ipcRenderer.invoke("products:updateProductJson", id, json) },
   ai: {
-    send: (projectId, content) => ipcRenderer.invoke("ai:send", projectId, content),
-    regenerate: (projectId, field) => ipcRenderer.invoke("ai:regenerate", projectId, field),
+    send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),
+    regenerate: (localProductId, field) => ipcRenderer.invoke("ai:regenerate", localProductId, field),
   },
   research: {
-    accept: (projectId, taskId, evidenceId) => ipcRenderer.invoke("research:accept", projectId, taskId, evidenceId),
-    refreshIssues: (projectId) => ipcRenderer.invoke("research:refreshIssues", projectId),
-    resolveVehicleResource: (projectId, taskId) => ipcRenderer.invoke("research:vehicleResource", projectId, taskId),
-    resolveHotelResource: (projectId, taskId) => ipcRenderer.invoke("research:hotelResource", projectId, taskId),
+    accept: (localProductId, taskId, evidenceId) => ipcRenderer.invoke("research:accept", localProductId, taskId, evidenceId),
+    refreshIssues: (localProductId) => ipcRenderer.invoke("research:refreshIssues", localProductId),
+    resolveVehicleResource: (localProductId, taskId) => ipcRenderer.invoke("research:vehicleResource", localProductId, taskId),
+    resolveHotelResource: (localProductId, taskId) => ipcRenderer.invoke("research:hotelResource", localProductId, taskId),
   },
   browser: {
     login: () => ipcRenderer.invoke("browser:login"),
@@ -54,11 +54,11 @@ const api: VbkApi = {
     suggestPoiDemo: (keyword: string) => ipcRenderer.invoke("poi:suggestDemo", keyword),
   },
   automation: {
-    start: (projectId) => ipcRenderer.invoke("automation:start", projectId),
-    retry: (projectId) => ipcRenderer.invoke("automation:retry", projectId),
-    retryPhase: (projectId, phase) => ipcRenderer.invoke("automation:retryPhase", projectId, phase),
-    retryOnePhase: (projectId, phase) => ipcRenderer.invoke("automation:retryOnePhase", projectId, phase),
-    stop: (projectId) => ipcRenderer.invoke("automation:stop", projectId),
+    start: (localProductId) => ipcRenderer.invoke("automation:start", localProductId),
+    retry: (localProductId) => ipcRenderer.invoke("automation:retry", localProductId),
+    retryPhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryPhase", localProductId, phase),
+    retryOnePhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryOnePhase", localProductId, phase),
+    stop: (localProductId) => ipcRenderer.invoke("automation:stop", localProductId),
   },
   debug: {
     runStep: (stepName: string, argsJson: string) => ipcRenderer.invoke("automation:debug:runStep", stepName, argsJson),
@@ -96,15 +96,15 @@ const api: VbkApi = {
     searchCtripLibraryImages: (args) => ipcRenderer.invoke("cover:searchCtripLibraryImages", args),
   },
   events: {
-    onProjectUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, project: unknown) => listener(project as never); ipcRenderer.on("project:updated", handler); return () => ipcRenderer.removeListener("project:updated", handler); },
-    onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, projectId: unknown, state: unknown) => listener(projectId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
+    onProductUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, product: unknown) => listener(product as never); ipcRenderer.on("product:updated", handler); return () => ipcRenderer.removeListener("product:updated", handler); },
+    onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, localProductId: unknown, state: unknown) => listener(localProductId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
     onPageReady(listener) { const handler = () => listener(); ipcRenderer.on("vbk:page-ready", handler); return () => ipcRenderer.removeListener("vbk:page-ready", handler); },
   },
   operationLog: { load: (query) => ipcRenderer.invoke("operationLog:load", query) },
   planning: {
-    start: (projectId) => ipcRenderer.invoke("planning:start", projectId),
-    resume: (projectId) => ipcRenderer.invoke("planning:resume", projectId),
-    state: (projectId) => ipcRenderer.invoke("planning:state", projectId),
+    start: (localProductId) => ipcRenderer.invoke("planning:start", localProductId),
+    resume: (localProductId) => ipcRenderer.invoke("planning:resume", localProductId),
+    state: (localProductId) => ipcRenderer.invoke("planning:state", localProductId),
   },
 };
 contextBridge.exposeInMainWorld("vbk", api);

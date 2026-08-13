@@ -12,6 +12,8 @@
  *     `dropPlaintextCookiesColumn` 显式调用以 DROP cookies_json。已删除
  *     Keychain 加密层移除后该函数被移除；标记 id 保留以便不破坏历史 db 文件
  *     的 migrations 表。
+ *   - 0007_product_naming：把本地业务实体从 projects 迁为 products，并把
+ *     关联表的 project_id / project_name 改为 local_product_id / product_name。
  *
  * 注：
  *   - cookies 不再写入 SQLite：本地 0600 atomic cookie store 才是 cookie
@@ -110,6 +112,26 @@ const MIGRATIONS: Migration[] = [
   // 0006 是不带 statements 的"标记"：实际 DROP 由 dropPlaintextCookiesColumn 在
   // 全部 cookies_ciphertext 都填齐时显式调用，调用方再 INSERT OR IGNORE 这条 id。
   { id: "0006_login_sessions_drop_plaintext", statements: [] },
+  {
+    id: "0007_product_naming",
+    statements: [
+      `ALTER TABLE projects RENAME TO products`,
+      `ALTER TABLE messages RENAME COLUMN project_id TO local_product_id`,
+      `ALTER TABLE research_tasks RENAME COLUMN project_id TO local_product_id`,
+      `ALTER TABLE automation_runs RENAME COLUMN project_id TO local_product_id`,
+      `ALTER TABLE planning_generation RENAME COLUMN project_id TO local_product_id`,
+      `ALTER TABLE operation_log RENAME COLUMN project_id TO local_product_id`,
+      `ALTER TABLE operation_log RENAME COLUMN project_name TO product_name`,
+      `DROP INDEX IF EXISTS idx_messages_project_id`,
+      `DROP INDEX IF EXISTS idx_research_tasks_project_id`,
+      `DROP INDEX IF EXISTS idx_automation_runs_project_id`,
+      `DROP INDEX IF EXISTS idx_operation_log_project_id`,
+      `CREATE INDEX IF NOT EXISTS idx_messages_local_product_id ON messages(local_product_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_research_tasks_local_product_id ON research_tasks(local_product_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_automation_runs_local_product_id ON automation_runs(local_product_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_operation_log_local_product_id ON operation_log(local_product_id)`,
+    ],
+  },
 ];
 
 /** 在 VbkDatabase 启动时调用一次：按顺序应用 migrations。 */

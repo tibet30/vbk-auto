@@ -130,7 +130,7 @@ test("research 阶段由本地 deterministic 生成，不调用 AI", async () =>
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new ItineraryOnlyPlanner();
-  const result = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   assert.equal(result.status, "completed");
   assert.ok(!planner.calls.includes("research"), "research 阶段不应调用 planner");
   assert.ok(result.researchTasks.length >= 1, "research 阶段应当产出至少一条任务");
@@ -142,7 +142,7 @@ test("presentation 缺失不阻塞 privateTour research 用车资源组任务", 
   const planner = new ItineraryOnlyPlanner({ failPresentation: true });
 
   const result = await runPlan({
-    projectId: "presentation-missing-research", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
+    localProductId: "presentation-missing-research", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
   });
 
   assert.equal(result.status, "needs_user");
@@ -163,12 +163,12 @@ test("presentation 缺失后继续规划只补 presentation 并进入 validation
   const firstPlanner = new ItineraryOnlyPlanner({ failPresentation: true });
 
   await runPlan({
-    projectId: "presentation-missing-resume", skeleton, store, runtime: rt, planner: firstPlanner, providerLabel: "minimax",
+    localProductId: "presentation-missing-resume", skeleton, store, runtime: rt, planner: firstPlanner, providerLabel: "minimax",
   });
 
   const secondPlanner = new ItineraryOnlyPlanner();
   const result = await runPlan({
-    projectId: "presentation-missing-resume", skeleton, store, runtime: rt, planner: secondPlanner, providerLabel: "minimax",
+    localProductId: "presentation-missing-resume", skeleton, store, runtime: rt, planner: secondPlanner, providerLabel: "minimax",
   });
 
   assert.equal(result.status, "completed");
@@ -188,7 +188,7 @@ test("SuggestPoi 业务失败不会被降级成景点未匹配任务", async () 
   };
 
   const result = await runPlan({
-    projectId: "poi-business-failure",
+    localProductId: "poi-business-failure",
     skeleton,
     store,
     runtime: rt,
@@ -213,7 +213,7 @@ test("SuggestPoi 未匹配与 itinerary 核查共用一个 canonical POI 待办"
   const rt = new FakeRuntime();
   rt.suggestPoi = async () => null;
 
-  await runPlan({ projectId: "poi-no-match", skeleton, store, runtime: rt, planner: new ItineraryOnlyPlanner(), providerLabel: "minimax" });
+  await runPlan({ localProductId: "poi-no-match", skeleton, store, runtime: rt, planner: new ItineraryOnlyPlanner(), providerLabel: "minimax" });
 
   const poiTasks = rt.researchTasks.filter((task) => /VBK POI 映射$/.test(task.label));
   assert.equal(poiTasks.length, 4, "四个景点只应有四项待办，不能因未匹配再翻倍");
@@ -225,7 +225,7 @@ test("research task 标签不包含「已确认 / 已解决」", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new ItineraryOnlyPlanner();
-  const result = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   for (const task of result.researchTasks) {
     assert.ok(!/已确认|已解决|已完成|已通过/.test(task.label), `任务标签禁止「已确认」措辞：${task.label}`);
   }

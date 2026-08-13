@@ -12,7 +12,7 @@ import type { OrchestratorRuntime } from "./types.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 
 interface PoiEnrichmentArgs {
-  projectId: string;
+  localProductId: string;
   destination: string;
   runtime: OrchestratorRuntime;
   persistedTaskKeys: Set<string>;
@@ -32,9 +32,9 @@ export function hasIncompleteItineraryPois(product: Record<string, unknown>): bo
 }
 
 export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<ResearchTaskProposal[]> {
-  const { projectId, runtime, persistedTaskKeys } = args;
+  const { localProductId, runtime, persistedTaskKeys } = args;
   const queryTimeoutMs = timeoutOrDefault(args.queryTimeoutMs, POI_ENRICHMENT_QUERY_TIMEOUT_MS);
-  const product = await runtime.loadCurrentProduct(projectId);
+  const product = await runtime.loadCurrentProduct(localProductId);
   const addedTasks: ResearchTaskProposal[] = [];
 
   if (runtime.suggestPoi && Array.isArray(product.itinerary) && hasIncompleteItineraryPois(product)) {
@@ -45,17 +45,27 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         if (isPoiComplete(spot)) continue;
         const keyword = typeof spot === "string" ? spot : spot?.name ?? spot?.poiName;
         if (!keyword) continue;
-        const firstQuery = await queryPoi({ runtime, projectId, keyword: String(keyword), queryTimeoutMs });
+        const firstQuery = await queryPoi({ runtime, localProductId, keyword: String(keyword), queryTimeoutMs });
         let match = firstQuery.match;
         let queryFailed = firstQuery.failed;
         let fallbackAttempts = 0;
+        // “永祚寺（双塔寺）”这类官方名+同地点别名先做确定性别名查询，
+        // 避免整串关键词召回外地同名前缀，也避免模型原样重复后耗尽重试。
+        if (!match && !queryFailed) {
+          for (const alias of bracketAliases(String(keyword))) {
+            const aliasQuery = await queryPoi({ runtime, localProductId, keyword: alias, queryTimeoutMs });
+            match = aliasQuery.match;
+            queryFailed = aliasQuery.failed;
+            if (match || queryFailed) break;
+          }
+        }
         if (!match && !queryFailed && args.resolvePoiName) {
           const fallback = await resolveFallbackPoi({
             runtime,
             resolver: args.resolvePoiName,
             originalName: String(keyword),
             destination: args.destination,
-            projectId,
+            localProductId,
             queryTimeoutMs,
           });
           match = fallback.match;
@@ -66,14 +76,14 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           spot.poiName = match.poiName;
           spot.poiId = match.poiId;
           poiUpdated = true;
-          logInfo("[planning.poi]", { event: "query-success", projectId, keyword, poiName: match.poiName, poiId: match.poiId });
+          logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (match && typeof spot === "string") {
           const index = day.spots.indexOf(spot);
           day.spots[index] = { name: spot, poiName: match.poiName, poiId: match.poiId };
           poiUpdated = true;
-          logInfo("[planning.poi]", { event: "query-success", projectId, keyword, poiName: match.poiName, poiId: match.poiId });
+          logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (!queryFailed) {
-          logInfo("[planning.poi]", { event: "query-no-match", projectId, keyword });
+          logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
           const task: ResearchTaskProposal = {
             label: poiResearchTaskLabel(String(keyword)),
             type: "vbk",
@@ -86,13 +96,13 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           // 三次纠正耗尽后，即便任务已存在，也要升级为可操作的最终说明；
           // 但返回值仍只报告本轮新建的任务。
           if (fallbackAttempts > 0) {
-            await runtime.addResearchTask(projectId, task);
+            await runtime.addResearchTask(localProductId, task);
             if (!persistedTaskKeys.has(key)) {
               persistedTaskKeys.add(key);
               addedTasks.push(task);
             }
           } else if (!persistedTaskKeys.has(key)) {
-            await runtime.addResearchTask(projectId, task);
+            await runtime.addResearchTask(localProductId, task);
             persistedTaskKeys.add(key);
             addedTasks.push(task);
           }
@@ -100,8 +110,8 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
       }
     }
     if (poiUpdated) {
-      await runtime.writeModule(projectId, "itinerary", AI_WRITABLE_PATHS.itinerary, updated);
-      logInfo("[planning.poi]", { event: "write-back", projectId });
+      await runtime.writeModule(localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, updated);
+      logInfo("[planning.poi]", { event: "write-back", localProductId });
     }
   }
 
@@ -110,20 +120,25 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
 
 const MAX_AI_POI_NAME_ATTEMPTS = 3;
 
+function bracketAliases(value: string): string[] {
+  const aliases = Array.from(value.matchAll(/[（(]([^）)]+)[）)]/g), (match) => match[1].trim());
+  return [...new Set(aliases.filter((alias) => alias && alias !== value.trim()))];
+}
+
 async function queryPoi(args: {
   runtime: OrchestratorRuntime;
-  projectId: string;
+  localProductId: string;
   keyword: string;
   queryTimeoutMs: number;
 }): Promise<{ match: { poiName: string; poiId: number } | null; failed: boolean }> {
   try {
-    logInfo("[planning.poi]", { event: "query-start", projectId: args.projectId, keyword: args.keyword });
+    logInfo("[planning.poi]", { event: "query-start", localProductId: args.localProductId, keyword: args.keyword });
     const match = await rejectPoiQueryAfter(args.runtime.suggestPoi!(args.keyword), args.queryTimeoutMs);
     return { match, failed: false };
   } catch (error) {
     logWarn("[planning.poi]", {
       event: "query-failed",
-      projectId: args.projectId,
+      localProductId: args.localProductId,
       keyword: args.keyword,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -136,7 +151,7 @@ async function resolveFallbackPoi(args: {
   resolver: (request: PoiNameResolutionRequest) => Promise<string | null>;
   originalName: string;
   destination: string;
-  projectId: string;
+  localProductId: string;
   queryTimeoutMs: number;
 }): Promise<{ match: { poiName: string; poiId: number } | null; queryFailed: boolean; attempts: number }> {
   const previousCandidates: string[] = [];
@@ -150,15 +165,15 @@ async function resolveFallbackPoi(args: {
         previousCandidates,
       });
     } catch (error) {
-      logWarn("[planning.poi]", { event: "fallback-resolver-failed", projectId: args.projectId, originalName: args.originalName, attempt, error: error instanceof Error ? error.message : String(error) });
+      logWarn("[planning.poi]", { event: "fallback-resolver-failed", localProductId: args.localProductId, originalName: args.originalName, attempt, error: error instanceof Error ? error.message : String(error) });
     }
     if (!isUsableFallbackCandidate(candidate, args.originalName, previousCandidates)) {
-      logInfo("[planning.poi]", { event: "fallback-candidate-rejected", projectId: args.projectId, originalName: args.originalName, attempt });
+      logInfo("[planning.poi]", { event: "fallback-candidate-rejected", localProductId: args.localProductId, originalName: args.originalName, attempt });
       continue;
     }
-    logInfo("[planning.poi]", { event: "fallback-query-start", projectId: args.projectId, originalName: args.originalName, candidate, attempt });
+    logInfo("[planning.poi]", { event: "fallback-query-start", localProductId: args.localProductId, originalName: args.originalName, candidate, attempt });
     previousCandidates.push(candidate);
-    const result = await queryPoi({ runtime: args.runtime, projectId: args.projectId, keyword: candidate, queryTimeoutMs: args.queryTimeoutMs });
+    const result = await queryPoi({ runtime: args.runtime, localProductId: args.localProductId, keyword: candidate, queryTimeoutMs: args.queryTimeoutMs });
     if (result.failed) return { match: null, queryFailed: true, attempts: attempt };
     if (result.match) return { match: result.match, queryFailed: false, attempts: attempt };
   }

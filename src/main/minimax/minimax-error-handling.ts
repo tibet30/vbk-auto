@@ -3,7 +3,7 @@
  * MiniMax / Evolink 错误处理工具集：
  *   - 把任意 OpenAI 抛出的对象递归压缩成可读 reason 文本（extractMiniMaxFailureReason）；
  *   - 把错文案里的「请检查 / 重试」尾巴裁掉（stripRetryHintTail）；
- *   - 把 (code, reason) 翻译成项目内文案 + 归一化错误码（normalizeFailureMessage / classifyMiniMaxError）；
+ *   - 把 (code, reason) 翻译成产品内文案 + 归一化错误码（normalizeFailureMessage / classifyMiniMaxError）；
  *   - 配套给 UI / DevTools 看的 toRetryHint、isStructuredFormatFailure。
  */
 
@@ -85,7 +85,7 @@ export function isStructuredFormatFailure(reason: string) {
 }
 
 /**
- * 把任意 MiniMax 相关异常归一化为项目内部的 errorCode（invalid_model_output / empty_model_output /
+ * 把任意 MiniMax 相关异常归一化为产品内部的 errorCode（invalid_model_output / empty_model_output /
  * provider_not_configured / provider_error 等），供 orchestrator 决定重试或回退到 needs_user。
  */
 export function classifyMiniMaxError(error: unknown): string {

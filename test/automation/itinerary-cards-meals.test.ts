@@ -14,6 +14,9 @@ test("餐饮卡固定为一小时、三餐不含餐，并按早餐房间口径�
   const source = await fs.readFile(cardsPath, "utf8");
 
   assert.match(source, /clickExact\(card, "1小时", `第 \$\{day\.day\} 天\$\{types\[index\]\}用餐时间`\)/);
+  assert.match(source, /card\.getByText\("用餐时长", \{ exact: true \}\)/);
+  assert.match(source, /durationInputs\.nth\(0\)\.fill\("1"\)/);
+  assert.match(source, /durationInputs\.nth\(1\)\.fill\("0"\)/);
   assert.doesNotMatch(source, /clickExact\(card, "不限"/);
   assert.match(source, /card\.getByText\("不含餐", \{ exact: true \}\)/);
   assert.match(source, /assertCount\(noMeal, 2, `第 \$\{day\.day\} 天\$\{types\[index\]\}不含餐选项`\)/);

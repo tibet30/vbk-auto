@@ -1,7 +1,7 @@
 /**
  * 历史 bug 恢复：旧版 run.ts 把收尾 `saveScreenshot` 内联在主流程里，当
  * page width=0 / page 已 detach / CDP 抛 Page.captureScreenshot 错误时
- * 整条 run 被 catch 标为 failed，并把项目状态置为 blocked。这种"截图失败
+ * 整条 run 被 catch 标为 failed，并把产品状态置为 blocked。这种"截图失败
  * = 业务失败"在 finalizeRunWithScreenshot 之后已不再发生，但已经落库
  * 的"业务全部成功、最后一步截图失败"记录仍在；当前 automation:retry 看到
  * 没有 failed phase 会退化为 start 全量重跑（错误），retryPhase(preflight)
@@ -11,7 +11,7 @@
  *   - isLegacyScreenshotFalseFailure(run)：纯函数，判定是否命中"业务
  *     全部成功、最后一步是截图失败"这一类历史脏数据；
  *   - recoverLegacyScreenshotFalseFailure：把命中的 run 切到 succeeded、
- *     重试收尾截图、调 updateProduct 把项目切到 draft_saved，绝不重跑
+ *     重试收尾截图、调 updateProduct 把产品切到 draft_saved，绝不重跑
  *     任何业务阶段。
  *
  * 调用方（automation:retry IPC 入口）先调本文件做一次窄恢复，未命中时
@@ -20,7 +20,7 @@
 
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
-import type { AutomationRun, ProjectDetail } from "../../../shared/contracts.js";
+import type { AutomationRun, ProductDetail } from "../../../shared/contracts.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 
 /**
@@ -30,7 +30,7 @@ import type { AutomationRunContext } from "./automation.main.context.js";
  *   3) run.recovery 里没有任何 phase.state === "needs_user"（不能吞业务失败）；
  *   4) 最后一条 level="error" 日志 message 命中最终截图错误特征。
  *
- * 满足时调用方应把这条 run 切到 succeeded + 项目状态 draft_saved，不再重跑任何阶段。
+ * 满足时调用方应把这条 run 切到 succeeded + 产品状态 draft_saved，不再重跑任何阶段。
  */
 export function isLegacyScreenshotFalseFailure(run: AutomationRun | undefined | null): boolean {
   if (!run) return false;
@@ -83,7 +83,7 @@ export async function withRecoveryMutex<T>(
 
 /**
  * 互斥检查 + 命中时执行窄恢复。
- *   - 已在跑的项目绝不进入（避免与 in-flight runner 争抢 view / emit）；
+ *   - 已在跑的产品绝不进入（避免与 in-flight runner 争抢 view / emit）；
  *   - 未命中返回 false，让 automation:retry 走 retryPhase / start 原逻辑。
  *   - 命中返回 true（已落库 + emit），调用方不应再走 retryPhase / start。
  *
@@ -93,16 +93,16 @@ export async function withRecoveryMutex<T>(
  */
 export async function recoverLegacyScreenshotFalseFailure(
   ctx: AutomationRunContext,
-  projectId: string,
+  localProductId: string,
   lock: { acquire: () => boolean; release: () => void },
 ): Promise<boolean> {
   if (!lock.acquire()) return false;
   try {
-    const project: ProjectDetail | undefined = ctx.db.getProject(projectId);
-    if (!project) return false;
-    const run = project.automation;
+    const product: ProductDetail | undefined = ctx.db.getProduct(localProductId);
+    if (!product) return false;
+    const run = product.automation;
     if (!run || !isLegacyScreenshotFalseFailure(run)) return false;
-    const productId = project.productId;
+    const productId = product.productId;
     if (!productId) return false;
 
     const next: AutomationRun = {
@@ -119,8 +119,8 @@ export async function recoverLegacyScreenshotFalseFailure(
         ...next.logs,
         { at: new Date().toISOString(), message, level },
       ];
-      ctx.db.saveAutomation(projectId, next);
-      ctx.emit(projectId);
+      ctx.db.saveAutomation(localProductId, next);
+      ctx.emit(localProductId);
     };
 
     log("检测到历史截图失败遗留的失败记录，按业务完成状态恢复（不重跑任何阶段）", "warning");
@@ -128,24 +128,24 @@ export async function recoverLegacyScreenshotFalseFailure(
     ctx.ensureBrowserHasBounds();
     let page: unknown;
     try {
-      page = await ctx.browser.page();
+      page = await ctx.browser.page({ requireInteractive: true });
     } catch (error) {
       // 拿不到 page 也要保留 succeeded：业务已完成，最终截图失败属于
       // best-effort 步骤（与 finalizeRunWithScreenshot 同语义）。
       const message = error instanceof Error ? error.message : String(error);
       log(`恢复路径无法获取页面：${message}（业务已完成，run 状态不受影响）`, "warning");
       next.screenshot = undefined;
-      ctx.db.saveAutomation(projectId, next);
-      ctx.db.updateProduct(projectId, project.product, "draft_saved");
-      ctx.emit(projectId);
+      ctx.db.saveAutomation(localProductId, next);
+      ctx.db.updateProduct(localProductId, product.product, "draft_saved");
+      ctx.emit(localProductId);
       return true;
     }
 
     await finalizeRunWithScreenshot(next, saveScreenshot, productId, page, log);
     log("产品草稿已保存，未提交审核、未发布。", "warning");
-    ctx.db.saveAutomation(projectId, next);
-    ctx.db.updateProduct(projectId, project.product, "draft_saved");
-    ctx.emit(projectId);
+    ctx.db.saveAutomation(localProductId, next);
+    ctx.db.updateProduct(localProductId, product.product, "draft_saved");
+    ctx.emit(localProductId);
     return true;
   } finally {
     lock.release();

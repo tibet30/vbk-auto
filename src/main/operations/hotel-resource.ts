@@ -4,7 +4,7 @@
  */
 
 import type { Page } from "playwright";
-import type { ProjectDetail } from "../../shared/contracts.js";
+import type { ProductDetail } from "../../shared/contracts.js";
 import { vbkSessionRequest } from "../infrastructure/vbk-session-request.js";
 
 /**
@@ -21,10 +21,10 @@ function positiveInteger(value: unknown) { const parsed = Number(value); return 
  * 用「目的城市 + 钻级（例如「三星/五星」）」拼出查询关键字，供前端展示 / VBK 搜索复用。
  * 例：太原三星 → "太原三星"。
  */
-export function hotelResourceQuery(project: Pick<ProjectDetail, "product">) {
-  const product = project.product;
-  const basic = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo) ? product.basicInfo as Record<string, unknown> : {};
-  const operations = product.operations && typeof product.operations === "object" && !Array.isArray(product.operations) ? product.operations as Record<string, unknown> : {};
+export function hotelResourceQuery(product: Pick<ProductDetail, "product">) {
+  const productData = product.product;
+  const basic = productData.basicInfo && typeof productData.basicInfo === "object" && !Array.isArray(productData.basicInfo) ? productData.basicInfo as Record<string, unknown> : {};
+  const operations = productData.operations && typeof productData.operations === "object" && !Array.isArray(productData.operations) ? productData.operations as Record<string, unknown> : {};
   const city = textValue(basic.destinationCity) || textValue(basic.meetingCity);
   const tier = textValue(operations.hotelTier).replace(/^当地/, "").replace(/\/-\d+$/, "") || "酒店";
   return `${city}${tier}`;
@@ -76,24 +76,24 @@ export function firstHotelResource(payload: unknown, city = "") {
 }
 
 /**
- * 主入口：解析 project 上的 hotel 资源。
+ * 主入口：解析 product 上的 hotel 资源。
  *   - 缺少目的城市抛错；
  *   - 走 searchVbkResources + firstHotelResource 命中真实资源；
  *   - 命中失败时按「非平台酒店」占位写入 operations.hotelResource；
  *   - 返回 { product, resolved, note }：product 是浅拷贝加酒店资源的版本，note 给 UI 展示。
  */
-export async function resolveHotelResource(page: Page, project: ProjectDetail) {
-  const query = hotelResourceQuery(project);
+export async function resolveHotelResource(page: Page, product: ProductDetail) {
+  const query = hotelResourceQuery(product);
   if (!query) throw new Error("缺少目的城市，无法匹配 VBK 酒店资源。");
-  const basic = project.product.basicInfo as Record<string, unknown> | undefined;
+  const basic = product.product.basicInfo as Record<string, unknown> | undefined;
   const city = textValue(basic?.destinationCity) || textValue(basic?.meetingCity);
   const payload = await searchVbkResources(page);
   const selected = firstHotelResource(payload, city);
-  const operations = project.product.operations && typeof project.product.operations === "object" && !Array.isArray(project.product.operations) ? project.product.operations as Record<string, unknown> : {};
+  const operations = product.product.operations && typeof product.product.operations === "object" && !Array.isArray(product.product.operations) ? product.product.operations as Record<string, unknown> : {};
   const totalCount = payload && typeof payload === "object" && !Array.isArray(payload) ? Number((payload as Record<string, unknown>).totalCount) || 0 : 0;
   const resolved = selected || { source: "nonPlatform" as const, resourceName: `${query}（非平台）`, query };
   const note = selected
     ? `已查询 VBK 的 ${totalCount} 条有效资源，匹配酒店资源：${selected.resourceName}（ID ${selected.resourceId}）${selected.supplierCode ? `，供应商编码 ${selected.supplierCode}` : ""}。`
     : `已查询 VBK 的 ${totalCount} 条有效资源，当前账号没有匹配的酒店资源；按既定“${query}”非平台酒店方案录入，无需人工补资源 ID。`;
-  return { product: { ...project.product, operations: { ...operations, hotelResource: resolved } }, resolved, note };
+  return { product: { ...product.product, operations: { ...operations, hotelResource: resolved } }, resolved, note };
 }

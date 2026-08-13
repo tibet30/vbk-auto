@@ -49,7 +49,7 @@ test("组合 spot 在入库前被拒绝，且给出可操作的拆分原因", as
   };
   const result = await executeStageOutput({
     stage: "itinerary",
-    projectId: "single-spot-contract",
+    localProductId: "single-spot-contract",
     runtime: runtime as any,
     output: {
       reply: "行程",

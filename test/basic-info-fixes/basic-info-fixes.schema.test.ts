@@ -313,11 +313,15 @@ test("findButlerOptionIndex 优先按 contactCardId 匹配", () => {
   assert.equal(index, 1);
 });
 
-test("findButlerOptionIndex 失败回退按 displayName", () => {
+test("findButlerOptionIndex VBK 退化下拉（整列无 value）按 displayName 回退", () => {
+  // VBK 退化下拉：整列都未提供 value（退化场景），此时按 displayName
+  // 回退是合理且安全的（VBK 没给 ID，我们只能按姓名选）。新安全契约
+  // 只在 VBK 提供了非空 value 时禁用 byName 回退；本测试仅锁定
+  // 「全空 value」时的退化行为，不再触碰非空 ID 共存的旧断言。
   const index = findButlerOptionIndex(
     [
-      { value: "100", label: "客服A" },
-      { value: "999", label: "客服B" },
+      { value: "", label: "客服A" },
+      { value: "", label: "客服B" },
     ],
     { contactCardId: 200, displayName: "客服B" },
   );
@@ -358,4 +362,51 @@ test("findButlerOptionIndex 忽略 VBK 选项前置图标字符", () => {
 // 在三元里永远 truthy，会让后续 page.locator 退化成「整页第一个 combobox」，
 // 静默错命中其它字段。这里同时锁死容器选择器与「不使用 first」契约。
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// —— VBK 下拉中无目标联系人时的「证据充分」红线 ——
+// 联系人匹配必须严格按 ID 或精确姓名匹配，不允许任何形式的隐式回退；
+// 否则 basic 阶段会把第一个看似像的联系人盲选，把产品方案与实际携程草稿
+// 负责人错绑，触发更大面积的核对工作。
+test("findButlerOptionIndex 下拉完全无匹配时返回 -1，不做隐式回退", () => {
+  const index = findButlerOptionIndex(
+    [
+      { value: "1001", label: "李四 lisi@qq.com +86 13800000000" },
+      { value: "1002", label: "王五 wangwu@qq.com +86 13900000000" },
+    ],
+    { contactCardId: 1368298, displayName: "安思科" },
+  );
+  assert.equal(index, -1);
+});
+
+test("findButlerOptionIndex VBK 退化下拉（同姓名另一张卡）不让 byName 误选", () => {
+  // 「证据充分」红线：虽然 byName 回退逻辑里区分了「安思科-国际」与
+  // 「安思科」（分隔符必须是空白），但只要 VBK 提供了非空 value（说明
+  // 它知道 contactCardId），就不应该落到 byName 回退——否则会把
+  // 「ID 已删除但同姓名仍存在」的另一张卡误选。
+  // 本测试锁死安全门：hasAnyValue 命中即 -1，绝不 byName 回退。
+  const index = findButlerOptionIndex(
+    [
+      { value: "1001", label: "李四 lisi@qq.com +86 13800000000" },
+      { value: "1002", label: "安思科-国际 ansike@qq.com +86 18835112829" },
+    ],
+    { contactCardId: 1368298, displayName: "安思科" },
+  );
+  assert.equal(index, -1, "VBK 提供非空 value 时 byName 必须被禁用");
+});
+
+test("fillButlerContact 错误信息包含可操作的修复提示", async () => {
+  // 当管家联系人在 VBK 下拉里完全找不到时，错误信息必须：
+  //   1) 说明是哪个联系人缺失（含 ID + 姓名）；
+  //   2) 明确给出修复路径（在 VBK 维护 / 更新账号固定信息）；
+  //   3) 不混淆使用「可选」列表 —— 那些候选都不是同一个联系人。
+  const source = readCtripSource();
+  const start = source.indexOf("async function fillButlerContact");
+  assert.ok(start >= 0, "找不到 fillButlerContact 定义");
+  const rest = source.slice(start);
+  const end = rest.indexOf("\nasync function ", 1);
+  const body = end >= 0 ? rest.slice(0, end) : rest;
+  assert.match(body, /不在 VBK 联系人下拉中/, "fillButlerContact 必须说明联系人不在下拉中");
+  assert.match(body, /请在 VBK 维护该联系人或更新账号固定信息/, "fillButlerContact 必须给出可操作的修复提示");
+  assert.match(body, /可选：/, "fillButlerContact 仍附带候选列表供运营排查");
+});
 const ctripSourcePath = path.resolve(here, "..", "src", "main", "automation", "ctrip.ts");

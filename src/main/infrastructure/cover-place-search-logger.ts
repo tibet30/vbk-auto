@@ -146,7 +146,7 @@ export function truncateImageIdsForLog(imageIds: ReadonlyArray<number>, max = 20
   return imageIds.slice(0, max);
 }
 
-/** 日志前缀：与项目其它诊断日志保持 [scope.action] 风格。 */
+/** 日志前缀：与产品其它诊断日志保持 [scope.action] 风格。 */
 export const COVER_SEARCH_LOG_PREFIX = "[cover.searchCtripLibrary]";
 export const COVER_IMAGE_INFO_LOG_PREFIX = "[cover.ctripImageInfo]";
 
@@ -162,7 +162,7 @@ function formatImageIdsForLog(imageIds: ReadonlyArray<number>): string {
  *  hasCid=true/false cookieNames=N hasGuid=true/false hasVbkLoginCid=true/false
  * 仅布尔 + 计数；不进 cookie 名 / 值 / cid / URL query。
  */
-function formatSessionContext(ctx: CoverPlaceSearchSessionContext): string {
+function formatSessionContext(ctx: CoverPlaceSearchSessionContext = EMPTY_COVER_PLACE_SEARCH_CONTEXT): string {
   return (
     `hasCid=${ctx.hasCid ? "true" : "false"} ` +
     `cookieNames=${ctx.cookieNameCount} ` +
@@ -179,7 +179,7 @@ function formatSessionContext(ctx: CoverPlaceSearchSessionContext): string {
 
 /**
  * 把 cover-place-search 的结构化事件转成 console.warn 文本：
- *  - 全部走 console.warn（按用户要求与现有项目日志风格一致）；
+ *  - 全部走 console.warn（按用户要求与现有产品日志风格一致）；
  *  - 不打 cookie 值 / cookie 名 / header / token / w-payload-source /
  *    原始响应 body / URL query string；
  *  - durationMs 用 ms 单位，便于排查超时。

@@ -12,8 +12,8 @@ export function AppRail({ model }: { model: AppModel }) {
   const {
     view,
     setView,
-    project,
-    setProject,
+    product,
+    setProduct,
     setLoginPanelOpen,
     accountMenuOpen,
     setAccountMenuOpen,
@@ -21,8 +21,8 @@ export function AppRail({ model }: { model: AppModel }) {
     accountInitial,
   } = model;
 
-  const isWorkspace = view === "workspace" && !project;
-  const isProjects = view === "projects" || (view === "workspace" && Boolean(project));
+  const isWorkspace = view === "workspace" && !product;
+  const isProducts = view === "products" || (view === "workspace" && Boolean(product));
   const isOperationLog = view === "operation-log";
 
   return (
@@ -33,7 +33,7 @@ export function AppRail({ model }: { model: AppModel }) {
         className={styles.railBtn}
         data-active={isWorkspace}
         onClick={() => {
-          setProject(null);
+          setProduct(null);
           setView("workspace");
           setLoginPanelOpen(false);
         }}
@@ -45,14 +45,14 @@ export function AppRail({ model }: { model: AppModel }) {
 
       <button
         className={styles.railBtn}
-        data-active={isProjects}
+        data-active={isProducts}
         onClick={() => {
-          setProject(null);
-          setView("projects");
+          setProduct(null);
+          setView("products");
           setAccountMenuOpen(false);
         }}
-        aria-label="项目"
-        title="项目"
+        aria-label="产品"
+        title="产品"
       >
         <PackageOpen className={styles.icon} />
       </button>
@@ -61,7 +61,7 @@ export function AppRail({ model }: { model: AppModel }) {
         className={styles.railBtn}
         data-active={isOperationLog}
         onClick={() => {
-          setProject(null);
+          setProduct(null);
           setView("operation-log");
           setAccountMenuOpen(false);
         }}
@@ -77,7 +77,7 @@ export function AppRail({ model }: { model: AppModel }) {
         className={styles.railBtn}
         data-active={view === "settings"}
         onClick={() => {
-          setProject(null);
+          setProduct(null);
           setView("settings");
           setAccountMenuOpen(false);
         }}

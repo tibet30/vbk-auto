@@ -10,7 +10,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
-import { createProjectWithAccountButler, injectAccountButler } from "../../src/main/operations/account-butler-inject.js";
+import { createProductWithAccountButler, injectAccountButler } from "../../src/main/operations/account-butler-inject.js";
 import { DbOrchestratorRuntime } from "../../src/main/planning/runtime.js";
 import { AI_WRITABLE_PATHS } from "../../src/main/planning/schemas.js";
 
@@ -29,21 +29,21 @@ function loginCurrentAccount(db: VbkDatabase, accountName = "供应商A") {
 
 test("未登录时写入返回 false，不修改 product", async (t) => {
   const db = await newDatabase(t);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  const result = injectAccountButler(db, project.id, null);
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  const result = injectAccountButler(db, product.id, null);
   assert.equal(result.written, false);
   assert.match(result.reason ?? "", /未登录/);
-  const reread = db.getProject(project.id);
+  const reread = db.getProduct(product.id);
   assert.equal((reread!.product.operations as Record<string, unknown>).bookingControls, undefined);
 });
 
 test("账号未配置管家时写入返回 false，不修改 product", async (t) => {
   const db = await newDatabase(t);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  const result = injectAccountButler(db, project.id, "供应商A");
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  const result = injectAccountButler(db, product.id, "供应商A");
   assert.equal(result.written, false);
   assert.match(result.reason ?? "", /管家/);
-  const reread = db.getProject(project.id);
+  const reread = db.getProduct(product.id);
   assert.equal((reread!.product.operations as Record<string, unknown>).bookingControls, undefined);
 });
 
@@ -55,8 +55,8 @@ test("管家非法（缺字段）时写入返回 false", async (t) => {
     servicePhone: "400-820-1234",
     butlerName: { contactCardId: 1, displayName: "x", providerId: 0 },
   }));
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  const result = injectAccountButler(db, project.id, "供应商A");
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  const result = injectAccountButler(db, product.id, "供应商A");
   assert.equal(result.written, false);
   assert.match(result.reason ?? "", /管家/);
 });
@@ -64,10 +64,10 @@ test("管家非法（缺字段）时写入返回 false", async (t) => {
 test("全部就绪时 product 固化完整 ContactCardSelection（含 contactCardId / providerId / displayName）", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  const result = injectAccountButler(db, project.id, "供应商A");
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  const result = injectAccountButler(db, product.id, "供应商A");
   assert.equal(result.written, true);
-  const reread = db.getProject(project.id);
+  const reread = db.getProduct(product.id);
   const operations = reread!.product.operations as Record<string, unknown>;
   const bookingControls = operations.bookingControls as Record<string, unknown>;
   const butler = bookingControls.butler as Record<string, unknown>;
@@ -77,33 +77,33 @@ test("全部就绪时 product 固化完整 ContactCardSelection（含 contactCar
   assert.equal(butler.displayName, validButler.displayName);
 });
 
-test("创建路径返回值就是已固化 butler 的最终 project", async (t) => {
+test("创建路径返回值就是已固化 butler 的最终 product", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const result = createProjectWithAccountButler(
+  const result = createProductWithAccountButler(
     db,
     { destination: "太原", days: 2, productForm: "privateTour" },
     "供应商A",
   );
   assert.equal(result.injectResult.written, true);
-  const booking = (result.project.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>;
+  const booking = (result.product.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>;
   assert.deepEqual(booking.butler, validButler);
 });
 
-test("已有 butler 的项目不会被覆盖（运营手工值优先）", async (t) => {
+test("已有 butler 的产品不会被覆盖（运营手工值优先）", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
   // 第一次写入默认管家
-  const first = injectAccountButler(db, project.id, "供应商A");
+  const first = injectAccountButler(db, product.id, "供应商A");
   assert.equal(first.written, true);
   // 修改账号默认管家为另一个，并再次调用——不应覆盖已写入 product 的 butler
   const otherButler = { contactCardId: 9999, displayName: "李四", providerId: 8888 };
   db.setAccountFixedInfo("供应商A", { butlerName: otherButler });
-  const second = injectAccountButler(db, project.id, "供应商A");
+  const second = injectAccountButler(db, product.id, "供应商A");
   assert.equal(second.written, false);
   assert.match(second.reason ?? "", /不覆盖/);
-  const reread = db.getProject(project.id);
+  const reread = db.getProduct(product.id);
   const butler = ((reread!.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>).butler as Record<string, unknown>;
   assert.equal(butler.contactCardId, validButler.contactCardId, "原写入的管家必须保留");
 });
@@ -111,9 +111,9 @@ test("已有 butler 的项目不会被覆盖（运营手工值优先）", async 
 test("账号管家字段被运营清空后，后续注入返回 written=false", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
   db.setAccountFixedInfo("供应商A", { butlerName: null });
-  const result = injectAccountButler(db, project.id, "供应商A");
+  const result = injectAccountButler(db, product.id, "供应商A");
   assert.equal(result.written, false);
 });
 
@@ -161,15 +161,15 @@ const baseProduct: Record<string, unknown> = {
 test("AI 首次生成后调用注入 + 账号已配管家 → 写入完整 selection", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  // 模拟 AI 首次写库：覆盖 createProject 留下的骨架，写入完整但不含管家的产品。
-  db.updateProduct(project.id, baseProduct);
-  const before = db.getProject(project.id)!;
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  // 模拟 AI 首次写库：覆盖 createProduct 留下的骨架，写入完整但不含管家的产品。
+  db.updateProduct(product.id, baseProduct);
+  const before = db.getProduct(product.id)!;
   assert.equal(((before.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown> | undefined)?.butler, undefined);
 
-  const result = injectAccountButler(db, project.id, "供应商A");
+  const result = injectAccountButler(db, product.id, "供应商A");
   assert.equal(result.written, true);
-  const after = db.getProject(project.id)!;
+  const after = db.getProduct(product.id)!;
   const booking = (after.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>;
   assert.deepEqual(booking.butler, validButler);
 });
@@ -180,19 +180,19 @@ test("规划 runtime replace operations 后保留创建时固化的 product butl
   const changedButler = { contactCardId: 9999, displayName: "后改账号负责人", providerId: 8888 };
   db.setSetting("vbkAccountName", "供应商A");
   db.setAccountFixedInfo("供应商A", { servicePhone: "400-820-1234", butlerName: initialButler });
-  const created = createProjectWithAccountButler(
+  const created = createProductWithAccountButler(
     db,
     { destination: "太原", days: 2, productForm: "privateTour" },
     "供应商A",
   );
   assert.deepEqual(
-    ((created.project.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>).butler,
+    ((created.product.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>).butler,
     initialButler,
   );
 
   db.setAccountFixedInfo("供应商A", { servicePhone: "400-820-1234", butlerName: changedButler });
   const runtime = new DbOrchestratorRuntime(db);
-  const result = await runtime.writeModule(created.project.id, "skeleton", AI_WRITABLE_PATHS.skeleton, {
+  const result = await runtime.writeModule(created.product.id, "skeleton", AI_WRITABLE_PATHS.skeleton, {
     transport: "charter",
     pickupCity: "太原",
     reusePickupForDropoff: true,
@@ -202,7 +202,7 @@ test("规划 runtime replace operations 后保留创建时固化的 product butl
     vehicleResource: {},
   });
   assert.equal(result.ok, true);
-  const reread = db.getProject(created.project.id)!;
+  const reread = db.getProduct(created.product.id)!;
   const booking = (reread.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>;
   assert.deepEqual(booking.butler, initialButler);
 });
@@ -211,11 +211,11 @@ test("注入后完整 product 仍可通过 productSchema 校验", async (t) => {
   const { parseProduct } = await import("../../src/main/automation/schema/schema-functions.js");
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  db.updateProduct(project.id, baseProduct);
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  db.updateProduct(product.id, baseProduct);
 
-  injectAccountButler(db, project.id, "供应商A");
-  const reread = db.getProject(project.id)!;
+  injectAccountButler(db, product.id, "供应商A");
+  const reread = db.getProduct(product.id)!;
   // 包含 bookingControls.butler 的完整 product 必须能通过 schema 解析。
   assert.doesNotThrow(() => parseProduct(reread.product));
 });
@@ -223,11 +223,11 @@ test("注入后完整 product 仍可通过 productSchema 校验", async (t) => {
 test("写入不污染原 product（不可变性）", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  db.updateProduct(project.id, baseProduct);
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  db.updateProduct(product.id, baseProduct);
 
   const snapshot = JSON.stringify(baseProduct);
-  injectAccountButler(db, project.id, "供应商A");
+  injectAccountButler(db, product.id, "供应商A");
   // baseProduct 是入参 reference；写库后它本身必须保持原样。
   assert.equal(JSON.stringify(baseProduct), snapshot);
 });
@@ -237,13 +237,13 @@ test("settings 里的 vbkAccountName 含前后空格 → trim 后仍可命中", 
   // 故意把账号名两边带空格，模拟某条早期脏数据；trim 后应能查到固定信息。
   db.setSetting("vbkAccountName", "  供应商F  ");
   db.setAccountFixedInfo("供应商F", { butlerName: validButler });
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  db.updateProduct(project.id, baseProduct);
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  db.updateProduct(product.id, baseProduct);
 
   // injectAccountButler 的 accountName 参数必须由调用方显式提供；这里我们以 trim 后的值传入。
-  const result = injectAccountButler(db, project.id, "  供应商F  ".trim());
+  const result = injectAccountButler(db, product.id, "  供应商F  ".trim());
   assert.equal(result.written, true);
-  const reread = db.getProject(project.id)!;
+  const reread = db.getProduct(product.id)!;
   const booking = (reread.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>;
   assert.deepEqual(booking.butler, validButler);
 });
@@ -261,18 +261,18 @@ test("管家字段非法（缺 displayName / providerId / contactCardId）→ �
     db.setSetting("vbkAccountName", "供应商G");
     // 绕过 setAccountFixedInfo 的内部守卫直接写脏数据。
     db.setSetting("accountFixedInfo:供应商G", JSON.stringify({ butlerName: malformed }));
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    db.updateProduct(project.id, baseProduct);
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.updateProduct(product.id, baseProduct);
 
-    const result = injectAccountButler(db, project.id, "供应商G");
+    const result = injectAccountButler(db, product.id, "供应商G");
     assert.equal(result.written, false, `malformed should not write: ${JSON.stringify(malformed)}`);
-    const reread = db.getProject(project.id)!;
+    const reread = db.getProduct(product.id)!;
     const ops = reread.product.operations as Record<string, unknown>;
     assert.equal(ops.bookingControls, undefined);
   }
 });
 
-test("项目不存在 → 不写，给出 reason", async (t) => {
+test("产品不存在 → 不写，给出 reason", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
   const result = injectAccountButler(db, "non-existent-id", "供应商A");
@@ -283,11 +283,11 @@ test("项目不存在 → 不写，给出 reason", async (t) => {
 test("AI 首次生成后再覆盖一次默认管家：第二次注入仍不覆盖（保留首次 AI 写入的值）", async (t) => {
   const db = await newDatabase(t);
   loginCurrentAccount(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  db.updateProduct(project.id, baseProduct);
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  db.updateProduct(product.id, baseProduct);
 
   // 第一次注入：写入 validButler。
-  const first = injectAccountButler(db, project.id, "供应商A");
+  const first = injectAccountButler(db, product.id, "供应商A");
   assert.equal(first.written, true);
 
   // 切换账号默认管家 → 模拟「账号切换」或「运营在账号设置里改了管家」。
@@ -295,9 +295,9 @@ test("AI 首次生成后再覆盖一次默认管家：第二次注入仍不覆�
   db.setAccountFixedInfo("供应商A", { butlerName: otherButler });
 
   // 第二次注入：必须不覆盖，保留 validButler。
-  const second = injectAccountButler(db, project.id, "供应商A");
+  const second = injectAccountButler(db, product.id, "供应商A");
   assert.equal(second.written, false);
-  const reread = db.getProject(project.id)!;
+  const reread = db.getProduct(product.id)!;
   const butler = ((reread.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>).butler as Record<string, unknown>;
   assert.equal(butler.contactCardId, validButler.contactCardId);
 });

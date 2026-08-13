@@ -109,7 +109,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "管家联系人",
     phase: "basic",
     source: "account-fixed",
-    detail: "管家联系人由账号固定信息在创建项目时注入，自动化阶段不重写；缺则 VBK 联系人下拉无可选项。",
+    detail: "管家联系人由账号固定信息在创建产品时注入，自动化阶段不重写；缺则 VBK 联系人下拉无可选项。",
     check: (product) => {
       const operations = asObject(product.operations);
       const bookingControls = asObject(operations?.bookingControls);
@@ -307,10 +307,10 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
 
 /**
  * 产品 JSON 文档化存储位置：
- *   - 表：projects.product_json（TEXT，UTF-8 JSON 字符串）
+ *   - 表：products.product_json（TEXT，UTF-8 JSON 字符串）
  *   - 文件：dataPath（app.getPath("userData")）/vbk-desktop.sqlite
  *   - 写入时机：
- *     1. createProject：插入初始 product（仅骨架 + 空 presentation/itinerary）
+ *     1. createProduct：插入初始 product（仅骨架 + 空 presentation/itinerary）
  *     2. 规划 AI 输出 → stage-runner.executeStageOutput → runtime.writeModule
  *        → applyProductPatchSafe → db.updateProduct
  *     3. 运营手动复核（基础信息/管家/价格/封面）→ applyManualReviewField
@@ -318,13 +318,13 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
  *     4. 自动化阶段回填（hotelResource.resourceId/Name）→ fillAndSaveXxx
  *        → db.updateProduct
  *   - 读取时机：
- *     - IPC projects.get → db.getProject → parseAndNormalizeProductJson
+ *     - IPC products.get → db.getProduct → parseAndNormalizeProductJson
  *     - 规划 deep validation → runtime.loadCurrentProduct
  *     - automationBlockers → evaluateAutomationContract
  *     - 自动化 fillAndSave* 校验 → assertPresentationReadyForVbk 等
  */
 export const PRODUCT_JSON_LOCATION = {
-  table: "projects",
+  table: "products",
   column: "product_json",
   format: "JSON 字符串（TEXT，UTF-8）",
   schema: "src/main/automation/schema/schema-definitions.ts#productSchema",

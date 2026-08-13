@@ -3,7 +3,7 @@
  *
  * 背景：saleControl section 没有映射任何自动化阶段（phaseNames 为空），
  * 它是 VBK 后台「新建产品 shell」的入口页。原先 aggregateSectionState
- * 对这种 section 一律返回 "idle"，导致项目在 VBK 中已保存产品壳后，
+ * 对这种 section 一律返回 "idle"，导致产品在 VBK 中已保存产品壳后，
  * 左侧导航的「销售控制」行仍然是灰色未开始态，与右侧「VBK 浏览器」
  * 已经打开对应产品的视觉状态不一致。
  *
@@ -41,14 +41,14 @@ const completedRecovery: AutomationRecoveryMap = {
 };
 
 test("销售控制：productId 为非空字符串时聚合为 done（绿）", () => {
-  // 最常见路径：自动化已经在 VBK 创建了产品壳，project.productId 已保存。
+  // 最常见路径：自动化已经在 VBK 创建了产品壳，product.productId 已保存。
   assert.equal(
     aggregateSectionState(saleControl!, [], undefined, "76522394"),
     "done",
     "已保存 VBK productId 时，销售控制 section 必须显示为 done / 绿。",
   );
 
-  // 数字型 productId 不在本 API 范围（ProjectDetail.productId 是 string | undefined），
+  // 数字型 productId 不在本 API 范围（ProductDetail.productId 是 string | undefined），
   // 但为防回归，把"看起来非空"的字符串也包含进去（含前后空格的字符串 trim 后仍有内容）。
   assert.equal(
     aggregateSectionState(saleControl!, [], undefined, "  abc-123  "),

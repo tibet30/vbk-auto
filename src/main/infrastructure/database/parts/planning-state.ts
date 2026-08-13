@@ -11,11 +11,11 @@ import type { PlanningGenerationState } from "../../../../shared/contracts.js";
 import { now } from "./types.js";
 
 /**
- * 加载项目的规划生成状态。返回值是完整的 PlanningGenerationState；
+ * 加载产品的规划生成状态。返回值是完整的 PlanningGenerationState；
  * 表里没有对应行时返回 undefined。
  */
-export function loadPlanningState(db: Database.Database, projectId: string): PlanningGenerationState | undefined {
-  const row = db.prepare(`SELECT state_json FROM planning_generation WHERE project_id=?`).get(projectId) as { state_json: string } | undefined;
+export function loadPlanningState(db: Database.Database, localProductId: string): PlanningGenerationState | undefined {
+  const row = db.prepare(`SELECT state_json FROM planning_generation WHERE local_product_id=?`).get(localProductId) as { state_json: string } | undefined;
   if (!row) return undefined;
   try {
     return JSON.parse(row.state_json) as PlanningGenerationState;
@@ -29,43 +29,43 @@ export function savePlanningState(db: Database.Database, state: PlanningGenerati
   const updatedAt = new Date().toISOString();
   const payload = JSON.stringify({ ...state, resumeAt: updatedAt });
   const stmt = db.prepare(`
-    INSERT INTO planning_generation (project_id, state_json, updated_at)
+    INSERT INTO planning_generation (local_product_id, state_json, updated_at)
     VALUES (?, ?, ?)
-    ON CONFLICT(project_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
+    ON CONFLICT(local_product_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
   `);
   // 单语句写入：即使没有外层事务,这里也是原子单次写入。
-  const tx = db.transaction(() => stmt.run(state.projectId, payload, updatedAt));
+  const tx = db.transaction(() => stmt.run(state.localProductId, payload, updatedAt));
   tx();
 }
 
-/** 删除项目的规划状态；仅供项目删除时调用。 */
-export function deletePlanningState(db: Database.Database, projectId: string): void {
-  db.prepare("DELETE FROM planning_generation WHERE project_id=?").run(projectId);
+/** 删除产品的规划状态；仅供产品删除时调用。 */
+export function deletePlanningState(db: Database.Database, localProductId: string): void {
+  db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(localProductId);
 }
 
 /**
  * 重启后恢复规划状态：
  *   - status=running → needs_user（UI 让运营选择「重跑 / 手动补齐」）；
  *   - status=needs_user / completed / failed → 保持不变。
- * 返回受影响的项目 ID 列表。
+ * 返回受影响的产品 ID 列表。
  */
 export function recoverOrphanPlanningStates(db: Database.Database): string[] {
   const orphans = db.prepare(`
-    SELECT project_id, state_json FROM planning_generation
-  `).all() as Array<{ project_id: string; state_json: string }>;
+    SELECT local_product_id, state_json FROM planning_generation
+  `).all() as Array<{ local_product_id: string; state_json: string }>;
   const touched: string[] = [];
   const upsert = db.prepare(`
-    INSERT INTO planning_generation (project_id, state_json, updated_at)
+    INSERT INTO planning_generation (local_product_id, state_json, updated_at)
     VALUES (?, ?, ?)
-    ON CONFLICT(project_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
+    ON CONFLICT(local_product_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at
   `);
   for (const row of orphans) {
     try {
       const state = JSON.parse(row.state_json) as { status?: string };
       if (state.status === "running") {
         state.status = "needs_user";
-        upsert.run(row.project_id, JSON.stringify(state), now());
-        touched.push(row.project_id);
+        upsert.run(row.local_product_id, JSON.stringify(state), now());
+        touched.push(row.local_product_id);
       }
     } catch { /* leave unreadable legacy state untouched */ }
   }

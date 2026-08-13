@@ -1,4 +1,12 @@
-import { test, assert, recommendations, openRecommendationPage, recommendationState } from "./recommendation-reasons.shared.js";
+import {
+  test,
+  assert,
+  recommendations,
+  openRecommendationPage,
+  recommendationState,
+  buildRecommendationReasonsPlan,
+  fillRecommendationReasons,
+} from "./recommendation-reasons.shared.js";
 test("3 项分类去重后顺序保留", () => {
   const plan = buildRecommendationReasonsPlan([
     { category: "精选酒店", text: "B" },
@@ -131,3 +139,19 @@ test("页面无 + 按钮且行数不足时抛出明确错误", async () => {
 
 test("异步延迟生成下一行与子控件也能稳定完成", async () => {
   const page = await openRecommendationPage({
+    initialRows: 1,
+    appendRows: true,
+    appendDelayMs: 200,
+  });
+  try {
+    await fillRecommendationReasons(page, recommendations);
+    assert.deepEqual(await recommendationState(page), recommendations);
+    // + 按钮点击顺序也应被忠实记录。
+    assert.deepEqual(
+      await page.evaluate(() => window.recommendationEvents.filter((event) => event.startsWith("plus-click:"))),
+      ["plus-click:0", "plus-click:1"],
+    );
+  } finally {
+    await page.close();
+  }
+});

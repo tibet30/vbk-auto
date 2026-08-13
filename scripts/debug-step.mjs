@@ -6,13 +6,13 @@
 // 用法：
 //   node scripts/debug-step.mjs snapshot
 //   node scripts/debug-step.mjs selectStationAddress --cardSelector '...' --city 大同
-//   node scripts/debug-step.mjs fillRecommendationReasons --project <id>
-//   node scripts/debug-step.mjs fillItineraryDraft --project <id>
-//   node scripts/debug-step.mjs run-step fillItineraryDraft '{"projectId":"..."}' --break beforeFillItineraryDraft
+//   node scripts/debug-step.mjs fillRecommendationReasons --product <id>
+//   node scripts/debug-step.mjs fillItineraryDraft --product <id>
+//   node scripts/debug-step.mjs run-step fillItineraryDraft '{"localProductId":"..."}' --break beforeFillItineraryDraft
 //
 // 选项：
 //   --port <n>              CDP 端口（默认 9539，可用环境变量 VBK_CDP_PORT 覆盖）
-//   --project <id>          项目 ID
+//   --product <id>          产品 ID
 //   --break name1,name2     本次运行要等用户输入的断点名（多个逗号分隔）
 //   --break-on-all          命中所有断点时都停（不需要显式列名）
 //   --auto                  非交互：命中断点后立即 continue；只用来观察命中记录
@@ -100,11 +100,11 @@ if (STEP === "run-step") {
 }
 
 if (STEP === "selectStationAddress" || STEP === "fillItineraryDraft" || STEP === "fillRecommendationReasons") {
-  // 友好语法：把 --cardSelector / --city / --project 转成 argsJson
+  // 友好语法：把 --cardSelector / --city / --product 转成 argsJson
   const argsObj = {};
   if (args.cardSelector) argsObj.cardSelector = args.cardSelector;
   if (args.city) argsObj.city = args.city;
-  if (args.project) argsObj.projectId = args.project;
+  if (args.product) argsObj.localProductId = args.product;
   const argsJson = JSON.stringify(argsObj);
   const promise = renderer.evaluate(
     ({ stepName, argsJson }) => window.vbk.debug.runStep(stepName, argsJson),

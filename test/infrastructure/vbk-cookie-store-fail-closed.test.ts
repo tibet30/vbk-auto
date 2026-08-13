@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const mainSource = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
+const createWindowSource = readFileSync(new URL("../../src/main/create-window.ts", import.meta.url), "utf8");
 const browserSource = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
 const cookieStoreSource = readFileSync(new URL("../../src/main/infrastructure/vbk-cookie-store.ts", import.meta.url), "utf8");
 
@@ -38,7 +39,7 @@ test("production code never imports electron.safeStorage", () => {
 test("production code never references the obsolete secure-storage adapter", () => {
   // `secure-storage.ts` has been removed; any remaining reference would
   // break the build because the module no longer exists.
-  for (const source of [mainSource, browserSource, cookieStoreSource]) {
+  for (const source of [mainSource, createWindowSource, browserSource, cookieStoreSource]) {
     assert.doesNotMatch(source, /from\s+["'][^"']*secure-storage[^"']*["']/);
     assert.doesNotMatch(source, /encryptString|decryptString|isProbablyEncrypted|encryptApiKey|decryptApiKey|isAsyncEncryptionAvailable|persistApiKeyAsync|loadApiKeyAsync/);
   }
@@ -51,16 +52,16 @@ test("cookie store module is pure fs (no Electron / SQLite / safeStorage)", () =
   assert.doesNotMatch(cookieStoreSource, /safeStorage/);
 });
 
-test("main.ts wires VbkBrowser through cookieStore only (fail-closed legacy)", () => {
+test("create-window.ts wires VbkBrowser through cookieStore only (fail-closed legacy)", () => {
   // The VbkBrowser wiring inside createWindow() must only forward to
   // cookieStore.* — never to db.loadSession / db.saveSession /
   // safeStorage. We slice from the wiring block to the closing }) of
   // the VbkBrowser constructor.
-  const wiringStart = mainSource.indexOf("browser = new VbkBrowser(");
-  const wiringEnd = mainSource.indexOf("}); await browser.initialise();", wiringStart);
+  const wiringStart = createWindowSource.indexOf("const browser = new VbkBrowser(");
+  const wiringEnd = createWindowSource.indexOf("await browser.initialise();", wiringStart);
   assert.ok(wiringStart > 0, "VbkBrowser wiring must exist");
   assert.ok(wiringEnd > wiringStart, "wiring must have a closing brace");
-  const wiring = mainSource.slice(wiringStart, wiringEnd);
+  const wiring = createWindowSource.slice(wiringStart, wiringEnd);
 
   // saveSession wiring must go through cookieStore. 生产代码里通常用一个
   // 已收窄的本地别名（`sessions` / `cookieStore!` 等），所以这里用宽松的
@@ -113,7 +114,7 @@ test("VbkBrowser.saveCurrentSession / addLogin / switchAccount propagate errors 
 test("withKnownVbkAccount save-promise has .catch handler (no unhandled rejection)", () => {
   const withKnown = mainSource.slice(
     mainSource.indexOf("function withKnownVbkAccount"),
-    mainSource.indexOf("/**\n * 计算项目 readiness"),
+    mainSource.indexOf("/**\n * 计算产品 readiness"),
   );
   // The saveCurrentSession chain must end with .catch(...) so that any
   // rejection becomes a warn log instead of an unhandled promise

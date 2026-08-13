@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { DraftAutomation } from "../../src/main/automation/automation.main/automation.main.js";
 import { assertSinglePhaseRetryPrerequisites } from "../../src/main/automation/automation.main/automation.main.prerequisites.js";
 import { parseProduct } from "../../src/main/automation/schema/schema.js";
-import type { AutomationRun, ProjectDetail } from "../../src/shared/contracts.js";
+import type { AutomationRun, ProductDetail } from "../../src/shared/contracts.js";
 import type { VbkBrowser } from "../../src/main/infrastructure/vbk-browser.js";
 import type { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
 
 const pricing = { currency: "CNY", adult: 599, child: 399, minimumTravelers: 2 };
 const inventory = { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 };
 
-function makeProduct(commercial?: Record<string, unknown>) {
+function makeProductData(commercial?: Record<string, unknown>) {
   return parseProduct({
     sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false },
     basicInfo: {
@@ -54,9 +54,9 @@ function makeRun(): AutomationRun {
   };
 }
 
-function makeProject(product: Record<string, unknown>): ProjectDetail {
+function makeProduct(product: Record<string, unknown>): ProductDetail {
   return {
-    id: "project-1",
+    id: "product-1",
     name: "太原测试",
     status: "blocked",
     productId: "7654321",
@@ -69,10 +69,10 @@ function makeProject(product: Record<string, unknown>): ProjectDetail {
   };
 }
 
-function makeAutomation(project: ProjectDetail) {
+function makeAutomation(product: ProductDetail) {
   let saveAutomationCalls = 0;
   const db = {
-    getProject: () => project,
+    getProduct: () => product,
     saveAutomation: () => { saveAutomationCalls += 1; },
   } as unknown as VbkDatabase;
   const browser = {
@@ -89,13 +89,13 @@ function makeAutomation(project: ProjectDetail) {
 }
 
 test("pricingInventory 单阶段重试：缺 inventory 时入口直接抛错且不保存新 run", async () => {
-  const project = makeProject(makeProduct({ packageName: "标准套餐", pricing }));
-  const { automation, saveAutomationCalls } = makeAutomation(project);
+  const product = makeProduct(makeProductData({ packageName: "标准套餐", pricing }));
+  const { automation, saveAutomationCalls } = makeAutomation(product);
   let runOnePhaseCalls = 0;
   (automation as unknown as { runOnePhase: () => Promise<void> }).runOnePhase = async () => { runOnePhaseCalls += 1; };
 
   await assert.rejects(
-    () => automation.retryOnePhase(project.id, "pricingInventory"),
+    () => automation.retryOnePhase(product.id, "pricingInventory"),
     /commercial\.inventory|班期库存/,
   );
   assert.equal(runOnePhaseCalls, 0);
@@ -103,13 +103,13 @@ test("pricingInventory 单阶段重试：缺 inventory 时入口直接抛错且�
 });
 
 test("pricingInventory 单阶段重试：缺 pricing 时入口直接抛错且不保存新 run", async () => {
-  const project = makeProject(makeProduct({ packageName: "标准套餐", inventory }));
-  const { automation, saveAutomationCalls } = makeAutomation(project);
+  const product = makeProduct(makeProductData({ packageName: "标准套餐", inventory }));
+  const { automation, saveAutomationCalls } = makeAutomation(product);
   let runOnePhaseCalls = 0;
   (automation as unknown as { runOnePhase: () => Promise<void> }).runOnePhase = async () => { runOnePhaseCalls += 1; };
 
   await assert.rejects(
-    () => automation.retryOnePhase(project.id, "pricingInventory"),
+    () => automation.retryOnePhase(product.id, "pricingInventory"),
     /commercial\.pricing|套餐定价/,
   );
   assert.equal(runOnePhaseCalls, 0);
@@ -117,18 +117,18 @@ test("pricingInventory 单阶段重试：缺 pricing 时入口直接抛错且不
 });
 
 test("pricingInventory 单阶段重试：pricing 和 inventory 齐全时放行到原阶段执行", async () => {
-  const project = makeProject(makeProduct({ packageName: "标准套餐", pricing, inventory }));
-  const { automation, saveAutomationCalls } = makeAutomation(project);
+  const product = makeProduct(makeProductData({ packageName: "标准套餐", pricing, inventory }));
+  const { automation, saveAutomationCalls } = makeAutomation(product);
   let runOnePhaseCalls = 0;
   (automation as unknown as { runOnePhase: () => Promise<void> }).runOnePhase = async () => { runOnePhaseCalls += 1; };
 
-  await automation.retryOnePhase(project.id, "pricingInventory");
+  await automation.retryOnePhase(product.id, "pricingInventory");
   assert.equal(runOnePhaseCalls, 1);
   assert.equal(saveAutomationCalls(), 0);
 });
 
 test("其它阶段不受 pricingInventory 前置校验影响", () => {
-  const product = makeProduct({ packageName: "标准套餐", pricing });
+  const product = makeProductData({ packageName: "标准套餐", pricing });
 
   assert.doesNotThrow(() => assertSinglePhaseRetryPrerequisites(product, "package"));
 });

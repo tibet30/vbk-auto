@@ -15,7 +15,7 @@ function runtimeWith(product: Record<string, unknown>) {
     writes,
     runtime: {
       async loadCurrentProduct() { return product; },
-      async writeModule(_projectId: string, module: string, _path: string, value: unknown) {
+      async writeModule(_localProductId: string, module: string, _path: string, value: unknown) {
         if (module === "basicInfo" && value && typeof value === "object" && !Array.isArray(value)) {
           const existing = product.basicInfo as Record<string, unknown>;
           const incoming = { ...(value as Record<string, unknown>) };
@@ -40,7 +40,7 @@ async function executeBasicInfo(destination: string, province: string, existingP
   });
   const result = await executeStageOutput({
     stage: "basicInfo",
-    projectId: "province-normalization",
+    localProductId: "province-normalization",
     runtime: runtime as any,
     output: {
       reply: "基础信息",

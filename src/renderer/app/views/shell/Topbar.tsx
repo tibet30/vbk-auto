@@ -7,7 +7,7 @@ import { AccountPopover } from "./AccountPopover";
 import styles from "./Topbar.module.less";
 
 /**
- * 44px 顶栏：项目面包屑 / 当前步骤状态 / 账号菜单。
+ * 44px 顶栏：产品面包屑 / 当前步骤状态 / 账号菜单。
  * VBK 录入的主操作（开始/停止自动录入）已迁移到 VBK 录入页左面板的
  * footer 底部左侧，这里不渲染重复入口。
  * 不渲染主导航 stage-nav，那由 AppShell 直接负责。
@@ -15,8 +15,8 @@ import styles from "./Topbar.module.less";
 export function AppTopbar({ model }: { model: AppModel }) {
   const {
     view,
-    project,
-    setProject,
+    product,
+    setProduct,
     setView,
     setAccountMenuOpen,
     accountMenuOpen,
@@ -29,38 +29,38 @@ export function AppTopbar({ model }: { model: AppModel }) {
     checkingVbkLogin,
   } = model;
 
-  const showProjectTools = Boolean(project) && view === "workspace";
+  const showProductTools = Boolean(product) && view === "workspace";
 
   // 非工作台视图下，顶栏左侧显示当前页面名，比写死"VBK Desktop"更符合 macOS
-  // 顶栏语义（顶栏 = 当前文档/视图名）。工作台视图下保持原项目面包屑。
-  const viewTitle = view === "settings" ? "设置" : view === "operation-log" ? "操作日志" : view === "projects" ? "项目" : null;
+  // 顶栏语义（顶栏 = 当前文档/视图名）。工作台视图下保持原产品面包屑。
+  const viewTitle = view === "settings" ? "设置" : view === "operation-log" ? "操作日志" : view === "products" ? "产品" : null;
 
   return (
     <header className={styles.topbar}>
-      <nav className={styles.topbarTitle} aria-label="项目导航">
-        {project ? (
+      <nav className={styles.topbarTitle} aria-label="产品导航">
+        {product ? (
           <>
             <button
               className={`${styles.crumb} ${styles.crumbAction}`}
               onClick={() => {
-                setProject(null);
-                setView("projects");
+                setProduct(null);
+                setView("products");
                 setAccountMenuOpen(false);
               }}
-              aria-label="返回项目列表"
+              aria-label="返回产品列表"
             >
-              <span>项目</span>
+              <span>产品</span>
             </button>
             <ChevronRight size={13} className={styles.crumbSep} aria-hidden="true" />
             <span
               className={styles.crumbCurrent}
-              data-form={project.name.endsWith("跟团游") ? "groupTour" : "privateTour"}
+              data-form={product.name.endsWith("跟团游") ? "groupTour" : "privateTour"}
             >
-              <strong className={styles.title}>{project.name}</strong>
-              <CopyableId value={project.id} className={styles.copyableIdTopbar} />
-              <span className={styles.crumbState} data-state={statusTone(project.status)}>
-                <span className={shared.dot} data-state={project.status === "blocked" ? "warn" : project.status === "draft_saved" ? "ok" : "ai"} />
-                {statusLabel(project.status)}
+              <strong className={styles.title}>{product.name}</strong>
+              <CopyableId value={product.id} className={styles.copyableIdTopbar} />
+              <span className={styles.crumbState} data-state={statusTone(product.status)}>
+                <span className={shared.dot} data-state={product.status === "blocked" ? "warn" : product.status === "draft_saved" ? "ok" : "ai"} />
+                {statusLabel(product.status)}
               </span>
             </span>
           </>
@@ -76,7 +76,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
 
       <div className={styles.topbarSpacer} />
 
-      {showProjectTools && (
+      {showProductTools && (
         <>
           <div className={styles.topbarStatusChip} aria-label="方案就绪状态">
             <span
@@ -109,7 +109,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
         </>
       )}
 
-      {!project && (
+      {!product && (
         <div className={styles.topbarStatus}>
           <button
             className={styles.topbarAccountChip}

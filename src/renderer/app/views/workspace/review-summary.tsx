@@ -7,8 +7,8 @@ import type {
   CtripLibraryPlaceCandidate,
   CtripLibraryPlaceSearchResult,
   CtripLibrarySearchResult,
-  ProjectDetail,
-  ProjectReadiness,
+  ProductDetail,
+  ProductReadiness,
   ResearchTask,
 } from "../../../../shared/contracts-types.js";
 import { fieldStateLabel, isVehicleResourceTask } from "../../helpers";
@@ -22,8 +22,8 @@ import { AppWorkspaceReviewSummaryOpenIssues } from "./review-summary-open-issue
 import styles from "./review-summary.module.less";
 
 interface ReviewSummaryProps {
-  project: ProjectDetail;
-  readiness: ProjectReadiness;
+  product: ProductDetail;
+  readiness: ProductReadiness;
   itinerary: ItineraryDay[];
   taskList: ResearchTask[];
   activeTask: ResearchTask | undefined;
@@ -43,17 +43,17 @@ interface ReviewSummaryProps {
   basicInfoErrors?: Record<string, string>;
   basicInfoButlerDefault?: ContactCardSelection | null;
   basicInfoServicePhone?: string | null;
-  loadButlerDefault?: (projectId: string, accountName: string | null) => Promise<void> | void;
+  loadButlerDefault?: (localProductId: string, accountName: string | null) => Promise<void> | void;
   onOpenAccountEditor?: () => void;
-  saveSubtitle?: (projectId: string) => Promise<void> | void | undefined;
-  saveButler?: (projectId: string, selection: ContactCardSelection | null) => Promise<void> | void | undefined;
-  savePricing?: (projectId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void | undefined;
-  saveInventory?: (projectId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void | undefined;
-  saveVehicleCost?: (projectId: string, value: number | null) => Promise<void> | void | undefined;
-  uploadAndSaveManualCover?: (projectId: string, args: { file: { name: string; type: string; base64: string } }) => Promise<import("../../../../shared/contracts-types.js").ManualUploadCoverMeta | null>;
-  saveCtripLibraryCover?: (projectId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
-  searchCtripLibraryPlaces?: (projectId: string, args: { keyword: string }) => Promise<CtripLibraryPlaceSearchResult | null>;
-  searchCtripLibraryImages?: (projectId: string, args: { keyword: string; place: CtripLibraryPlaceCandidate }) => Promise<CtripLibrarySearchResult | null>;
+  saveSubtitle?: (localProductId: string) => Promise<void> | void | undefined;
+  saveButler?: (localProductId: string, selection: ContactCardSelection | null) => Promise<void> | void | undefined;
+  savePricing?: (localProductId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void | undefined;
+  saveInventory?: (localProductId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void | undefined;
+  saveVehicleCost?: (localProductId: string, value: number | null) => Promise<void> | void | undefined;
+  uploadAndSaveManualCover?: (localProductId: string, args: { file: { name: string; type: string; base64: string } }) => Promise<import("../../../../shared/contracts-types.js").ManualUploadCoverMeta | null>;
+  saveCtripLibraryCover?: (localProductId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
+  searchCtripLibraryPlaces?: (localProductId: string, args: { keyword: string }) => Promise<CtripLibraryPlaceSearchResult | null>;
+  searchCtripLibraryImages?: (localProductId: string, args: { keyword: string; place: CtripLibraryPlaceCandidate }) => Promise<CtripLibrarySearchResult | null>;
   clearBasicInfoError?: (field: string) => void;
   resolvingVehicleTaskId: string | null;
   loading: boolean;
@@ -63,8 +63,8 @@ interface ReviewSummaryProps {
   onRefreshIssues: () => Promise<void> | void;
 }
 
-/** 从项目名反解目的地 / 规格 / 形态 — 仅供头部概览展示，不参与业务逻辑。 */
-function parseProjectSpec(name: string): { destination: string; spec: string; form: "privateTour" | "groupTour" | "unknown" } {
+/** 从产品名反解目的地 / 规格 / 形态 — 仅供头部概览展示，不参与业务逻辑。 */
+function parseProductSpec(name: string): { destination: string; spec: string; form: "privateTour" | "groupTour" | "unknown" } {
   const match = name.match(/^(.+?)(\d+)\s*天\s*(\d+)\s*晚\s*(.+)$/);
   if (!match) return { destination: name, spec: "本地草稿", form: "unknown" };
   const kind = match[4];
@@ -79,7 +79,7 @@ function countTopLevelKeys(value: unknown): number {
 }
 
 export function AppWorkspaceReviewSummary({
-  project,
+  product,
   readiness,
   itinerary,
   taskList,
@@ -118,12 +118,12 @@ export function AppWorkspaceReviewSummary({
   refreshingIssues,
   onRefreshIssues,
 }: ReviewSummaryProps) {
-  const { destination, spec, form } = parseProjectSpec(project.name);
+  const { destination, spec, form } = parseProductSpec(product.name);
   const ready = readiness.ready;
   const headlineTone: "ready" | "blocked" | "neutral" = ready ? "ready" : readiness.issues.length > 0 ? "blocked" : "neutral";
 
   // 默认走卡片视图；切到 JSON 实时数据是「主动要求看」，不是默认体验。
-  // 每次切换项目都强制回到卡片视图，避免进入新项目后还是 JSON 视图造成迷惑。
+  // 每次切换产品都强制回到卡片视图，避免进入新产品后还是 JSON 视图造成迷惑。
   const [viewMode, setViewMode] = useState<SummaryViewMode>("cards");
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
   const [itineraryCollapsed, setItineraryCollapsed] = useState(false);
@@ -135,14 +135,14 @@ export function AppWorkspaceReviewSummary({
     setItineraryCollapsed(false);
     setBasicInfoCollapsed(false);
     setOpenIssuesCollapsed(false);
-  }, [project.id]);
+  }, [product.id]);
 
   const { jsonText, jsonBytes, topLevelKeyCount } = useMemo(() => {
-    const product = project.product ?? null;
-    const text = product ? JSON.stringify(product, null, 2) : "";
+    const productData = product.product ?? null;
+    const text = productData ? JSON.stringify(productData, null, 2) : "";
     const bytes = new Blob([text]).size;
-    return { jsonText: text, jsonBytes: bytes, topLevelKeyCount: countTopLevelKeys(product) };
-  }, [project.product]);
+    return { jsonText: text, jsonBytes: bytes, topLevelKeyCount: countTopLevelKeys(productData) };
+  }, [product.product]);
 
   const handleCopyJson = async () => {
     if (!jsonText || topLevelKeyCount === 0) return;
@@ -167,11 +167,11 @@ export function AppWorkspaceReviewSummary({
     }
   };
 
-  // AI 正在生成且 itinerary 为空时（项目刚创建、AI 第一版还未返回），
+  // AI 正在生成且 itinerary 为空时（产品刚创建、AI 第一版还未返回），
   // 整个右侧卡片区展示"生成中"骨架，避免显示空产品的就绪度报错。
-  const isProductEmpty = !project.product
-    || !Array.isArray((project.product as Record<string, unknown>).itinerary)
-    || ((project.product as Record<string, unknown>).itinerary as unknown[]).length === 0;
+  const isProductEmpty = !product.product
+    || !Array.isArray((product.product as Record<string, unknown>).itinerary)
+    || ((product.product as Record<string, unknown>).itinerary as unknown[]).length === 0;
   const planningGenerating = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
   const planningPartial = planningRecovery?.status === "completed" && planningRecovery.allStagesCompleted === false;
   const isGenerating = planningGenerating || (loading && isProductEmpty);
@@ -258,7 +258,7 @@ export function AppWorkspaceReviewSummary({
               {/* 基础信息：紧凑表单，紧贴在「每日行程」上方。 */}
               {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveInventory && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
                 <AppWorkspaceReviewSummaryBasicInfo
-                  project={project}
+                  product={product}
                   currentAccountName={currentAccountName ?? null}
                   savingField={basicInfoSaving}
                   errors={basicInfoErrors}
@@ -284,7 +284,7 @@ export function AppWorkspaceReviewSummary({
               )}
 
               <AppWorkspaceReviewSummaryItinerary
-                projectId={project.id}
+                localProductId={product.id}
                 days={itinerary}
                 expandedDayIndex={expandedDayIndex}
                 onToggle={(index) => setExpandedDayIndex(expandedDayIndex === index ? null : index)}

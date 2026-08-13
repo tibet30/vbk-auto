@@ -7,9 +7,9 @@ import { LoginBrowserPanel } from "./LoginBrowserPanel";
 import styles from "./index.module.less";
 
 export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
-  const { projects, startCreateProduct, openProductList, loginPanelOpen } = model;
-  const totalProjects = projects.length;
-  const hasProjects = totalProjects > 0;
+  const { products, startCreateProduct, openProductList, loginPanelOpen } = model;
+  const totalProducts = products.length;
+  const hasProducts = totalProducts > 0;
   // 登录面板展开时，专用两列 login stage：左侧普通工作台首页、右侧登录 WebView。
   // loginPanelOpen=true 时 LoginBrowserPanel 始终挂载真实 viewport，关闭由父级卸载。
   const stageClass = loginPanelOpen ? styles.homeStageOpen : styles.homeStage;
@@ -21,32 +21,32 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
           <img src={LOGO_URL} alt={LOGO_ALT} className={styles.workspaceHomeLogo} draggable={false} />
           <span>{APP_NAME} 工作台</span>
         </h1>
-        <p className={shared.viewSub}>从这里启动项目、查看设置或直接进入录入。</p>
+        <p className={shared.viewSub}>从这里启动产品、查看设置或直接进入录入。</p>
       </header>
       <div className={styles.workspaceHomeGrid}>
         <WorkbenchModule
           icon={<Plus size={16} />}
-          title="新建项目"
-          detail={hasProjects ? `当前已建立 ${totalProjects} 个项目，继续新增一个。` : "先创建第一个产品项目，从目的地与天数开始。"}
+          title="新建产品"
+          detail={hasProducts ? `当前已建立 ${totalProducts} 个产品，继续新增一个。` : "先创建第一个产品，从目的地与天数开始。"}
           state="emphasis"
           stateLabel="推荐"
           hint="3 个字段起步"
           action={
             <button className={`${shared.btn} ${shared.btnSm}`} data-variant="primary" onClick={startCreateProduct}>
-              创建项目
+              创建产品
             </button>
           }
         />
         <WorkbenchModule
           icon={<FolderOpen size={16} />}
-          title="项目管理"
-          detail={hasProjects ? "浏览全部项目，打开历史记录并继续处理。" : "还没有任何项目，新建一个后会出现在这里。"}
-          state={hasProjects ? "ready" : "todo"}
-          stateLabel={hasProjects ? "可用" : "暂无"}
-          hint={hasProjects ? `共 ${totalProjects} 个项目` : "—"}
+          title="产品管理"
+          detail={hasProducts ? "浏览全部产品，打开历史记录并继续处理。" : "还没有任何产品，新建一个后会出现在这里。"}
+          state={hasProducts ? "ready" : "todo"}
+          stateLabel={hasProducts ? "可用" : "暂无"}
+          hint={hasProducts ? `共 ${totalProducts} 个产品` : "—"}
           action={
-            <button className={`${shared.btn} ${shared.btnSm}`} onClick={openProductList} disabled={!hasProjects}>
-              查看项目
+            <button className={`${shared.btn} ${shared.btnSm}`} onClick={openProductList} disabled={!hasProducts}>
+              查看产品
             </button>
           }
         />
@@ -62,7 +62,7 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
               className={`${shared.btn} ${shared.btnSm}`}
               onClick={() => {
                 model.setView("settings");
-                model.setProject(null);
+                model.setProduct(null);
               }}
             >
               前往设置

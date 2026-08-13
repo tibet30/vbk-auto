@@ -21,9 +21,9 @@ import {
   resolveRequestedDailyCostEstimate,
   shouldRunVehicleResourceResolution,
 } from "../../src/main/operations/vehicle-resource-trigger.js";
-import type { ProjectDetail } from "../../src/shared/contracts.js";
+import type { ProductDetail } from "../../src/shared/contracts.js";
 
-function makeProduct(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function makeProductData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
     basicInfo: {
@@ -46,14 +46,14 @@ function makeProduct(overrides: Record<string, unknown> = {}): Record<string, un
   };
 }
 
-function makeProject(product: Record<string, unknown>, researchTasks: ProjectDetail["researchTasks"] = []): ProjectDetail {
+function makeProductDetail(product: Record<string, unknown>, researchTasks: ProductDetail["researchTasks"] = []): ProductDetail {
   return {
     id: "p-1",
     productId: null,
     status: "review",
     createdAt: "2026-08-12T00:00:00.000Z",
     updatedAt: "2026-08-12T00:00:00.000Z",
-    product: product as ProjectDetail["product"],
+    product: product as ProductDetail["product"],
     messages: [],
     researchTasks,
     automation: null,
@@ -62,22 +62,22 @@ function makeProject(product: Record<string, unknown>, researchTasks: ProjectDet
 }
 
 test("G1 · shouldRunVehicleResourceResolution: 无 researchTask 仍基于产品数据返回 true", () => {
-  const product = makeProduct();
+  const product = makeProductData();
   // 关键：不再依赖 researchTasks。
   assert.equal(shouldRunVehicleResourceResolution(product), true);
   // 已有 resourceGroupId 的产品不该重复触发。
-  const resolved = makeProduct({
+  const resolved = makeProductData({
     operations: { transport: "charter", pickupCity: "太原", vehicleResource: { resourceGroupId: 12345, resourceGroupName: "已匹配组" } },
   });
   assert.equal(shouldRunVehicleResourceResolution(resolved), false);
   // 非 privateTour 直接 false。
-  const group = makeProduct({ sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false } });
+  const group = makeProductData({ sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false } });
   assert.equal(shouldRunVehicleResourceResolution(group), false);
   // days=0 不触发。
-  const noDays = makeProduct({ basicInfo: { days: 0, meetingCity: "太原" } });
+  const noDays = makeProductData({ basicInfo: { days: 0, meetingCity: "太原" } });
   assert.equal(shouldRunVehicleResourceResolution(noDays), false);
   // 没上车城市不触发。
-  const noCity = makeProduct({
+  const noCity = makeProductData({
     operations: { transport: "charter", vehicleResource: {} },
     basicInfo: { days: 2, meetingCity: "", destinationCity: "" },
   });
@@ -113,16 +113,16 @@ test("G1 · applyAutoVehicleResourceTrigger: 无 researchTask 也仍然调用 VB
   };
   // 真实 VBK resolver 需要复杂的 page 接口构造；这里只断言流程：resolver 抛错时
   // 也会写回 estimatedDailyCost，不会丢弃草稿。具体看 G4 测试。
-  const project = makeProject(makeProduct(), []); // 关键：researchTasks=[]
+  const product = makeProductDetail(makeProductData(), []); // 关键：researchTasks=[]
   try {
-    const out = await applyAutoVehicleResourceTrigger({ page: page as never, project });
-    // 不论是否命中 VBK，nextProject.product.operations.vehicleResource.requestedDailyCost
+    const out = await applyAutoVehicleResourceTrigger({ page: page as never, product });
+    // 不论是否命中 VBK，nextProduct.product.operations.vehicleResource.requestedDailyCost
     // 一定已经被估算并写回。
-    const nextVehicle = (out.nextProject.product as Record<string, unknown>).operations as Record<string, unknown>;
+    const nextVehicle = (out.nextProduct.product as Record<string, unknown>).operations as Record<string, unknown>;
     const nextResource = nextVehicle.vehicleResource as Record<string, unknown>;
     assert.ok(Number(nextResource.requestedDailyCost) > 0, "estimatedDailyCost 必须写回 product");
-    // 不论成败，nextProject 不能等于旧 project。
-    assert.notEqual(out.nextProject, project);
+    // 不论成败，nextProduct 不能等于旧 product。
+    assert.notEqual(out.nextProduct, product);
     // 验证 G1 验收门：本次流程在 researchTasks 为空的情况下依然进入了 vehicle 分支。
     // outcome.reason 包含 "VBK 资源库未返回" 或 "auto vehicle resource" 等真 VBK 链路反馈。
     assert.ok(typeof out.outcome.reason === "string" && out.outcome.reason.length > 0);
@@ -137,13 +137,13 @@ test("G1 · applyAutoVehicleResourceTrigger: 无 researchTask 也仍然调用 VB
 });
 
 test("G2 · 缺 requestedDailyCost 时按产品数据估算并仅持久化 requestedDailyCost", () => {
-  const product = makeProduct();
+  const productData = makeProductData();
   // 估算给出 50 元档整数。
-  const estimate = estimateVehicleRequestedDailyCost(product);
+  const estimate = estimateVehicleRequestedDailyCost(productData);
   assert.ok(estimate && estimate > 0);
   assert.equal(estimate % 50, 0);
   // 写入时仅写 requestedDailyCost 一个字段。
-  const next = resolveRequestedDailyCostEstimate(product);
+  const next = resolveRequestedDailyCostEstimate(productData);
   const nextOps = (next.operations as Record<string, unknown>);
   const nextVehicle = nextOps.vehicleResource as Record<string, unknown>;
   assert.equal(nextVehicle.requestedDailyCost, estimate);
@@ -156,22 +156,22 @@ test("G2 · 缺 requestedDailyCost 时按产品数据估算并仅持久化 reque
   assert.equal(nextOps.transport, "charter");
   assert.equal(nextOps.pickupCity, "太原");
   // product 的 presentation / basicInfo / sales 引用必须不变。
-  assert.equal(next.presentation, product.presentation);
-  assert.equal(next.basicInfo, product.basicInfo);
-  assert.equal(next.sales, product.sales);
+  assert.equal(next.presentation, productData.presentation);
+  assert.equal(next.basicInfo, productData.basicInfo);
+  assert.equal(next.sales, productData.sales);
   // 已有 requestedDailyCost 时不覆盖。
-  const withDailyCost = makeProduct({ operations: { transport: "charter", pickupCity: "太原", vehicleResource: { requestedDailyCost: 9999 } } });
+  const withDailyCost = makeProductData({ operations: { transport: "charter", pickupCity: "太原", vehicleResource: { requestedDailyCost: 9999 } } });
   const unchanged = resolveRequestedDailyCostEstimate(withDailyCost);
   assert.equal(unchanged, withDailyCost, "已有 requestedDailyCost 时不应改写");
   // 用户主动 cleared 时不写。
-  const cleared = makeProduct({ operations: { transport: "charter", pickupCity: "太原", vehicleResource: { requestedDailyCostCleared: true } } });
+  const cleared = makeProductData({ operations: { transport: "charter", pickupCity: "太原", vehicleResource: { requestedDailyCostCleared: true } } });
   const clearedResult = resolveRequestedDailyCostEstimate(cleared);
   assert.equal(clearedResult, cleared, "requestedDailyCostCleared=true 时不应再估算");
 });
 
 test("G2 · 估算按城市 / 行程强度 / 私家团 / 包车综合得到合理日价", () => {
   // 基础：2 天 1 夜 同城私包车 2 个 spot。
-  const base = makeProduct({
+  const base = makeProductData({
     basicInfo: {
       days: 2, nights: 1, meetingCity: "太原", destinationCity: "太原",
       supplierProductCode: "TY", supplierProductName: "x",
@@ -179,7 +179,7 @@ test("G2 · 估算按城市 / 行程强度 / 私家团 / 包车综合得到合�
   });
   const baseCost = estimateVehicleRequestedDailyCost(base)!;
   // 行程强度更高（spot/day >= 3）→ 日价更高。
-  const intense = makeProduct({
+  const intense = makeProductData({
     basicInfo: {
       days: 2, nights: 1, meetingCity: "太原", destinationCity: "太原",
       supplierProductCode: "TY", supplierProductName: "x",
@@ -192,7 +192,7 @@ test("G2 · 估算按城市 / 行程强度 / 私家团 / 包车综合得到合�
   const intenseCost = estimateVehicleRequestedDailyCost(intense)!;
   assert.ok(intenseCost >= baseCost, "高强度行程日价应不低于基础价");
   // 跨城市（pickupCity 与 destinationCity 不同）→ 日价更高。
-  const longTrip = makeProduct({
+  const longTrip = makeProductData({
     basicInfo: {
       days: 2, nights: 1, meetingCity: "太原", destinationCity: "西安",
       supplierProductCode: "TY", supplierProductName: "x",
@@ -201,7 +201,7 @@ test("G2 · 估算按城市 / 行程强度 / 私家团 / 包车综合得到合�
   const longCost = estimateVehicleRequestedDailyCost(longTrip)!;
   assert.ok(longCost >= baseCost, "跨城市行程日价应不低于同城");
   // 长行程（>= 3 天）→ 日价更高。
-  const longDays = makeProduct({
+  const longDays = makeProductData({
     basicInfo: {
       days: 4, nights: 3, meetingCity: "太原", destinationCity: "太原",
       supplierProductCode: "TY", supplierProductName: "x",
@@ -217,9 +217,9 @@ test("G2 · 估算按城市 / 行程强度 / 私家团 / 包车综合得到合�
 });
 
 test("G3 · 估算 / trigger 路径中不写 resourceGroupId / resourceGroupName", async () => {
-  const product = makeProduct();
+  const productData = makeProductData();
   // 1) 估算层不写。
-  const afterEstimate = resolveRequestedDailyCostEstimate(product);
+  const afterEstimate = resolveRequestedDailyCostEstimate(productData);
   const estVehicle = ((afterEstimate.operations as Record<string, unknown>).vehicleResource) as Record<string, unknown>;
   assert.equal(estVehicle.resourceGroupId, undefined);
   assert.equal(estVehicle.resourceGroupName, undefined);
@@ -229,9 +229,9 @@ test("G3 · 估算 / trigger 路径中不写 resourceGroupId / resourceGroupName
       throw new Error("VBK 不可用");
     },
   };
-  const project = makeProject(product, []);
-  const outcome = await applyAutoVehicleResourceTrigger({ page: failingPage as never, project });
-  const finalVehicle = (((outcome.nextProject.product as Record<string, unknown>).operations) as Record<string, unknown>).vehicleResource as Record<string, unknown>;
+  const product = makeProductDetail(productData, []);
+  const outcome = await applyAutoVehicleResourceTrigger({ page: failingPage as never, product });
+  const finalVehicle = (((outcome.nextProduct.product as Record<string, unknown>).operations) as Record<string, unknown>).vehicleResource as Record<string, unknown>;
   assert.equal(finalVehicle.resourceGroupId, undefined, "trigger 失败时也不得写 resourceGroupId");
   assert.equal(finalVehicle.resourceGroupName, undefined, "trigger 失败时也不得写 resourceGroupName");
   // 3) 失败时只可能有 estimatedDailyCost 落库，不可能有 ID/Name。
@@ -246,9 +246,9 @@ test("G4 · resolveVehicleResource 抛错时保留 draft 引用并附带 reason"
       throw new Error("VBK 调用失败");
     },
   };
-  const product = makeProduct();
-  const project = makeProject(product, []);
-  const outcome = await applyAutoVehicleResourceTrigger({ page: failingPage as never, project });
+  const productData = makeProductData();
+  const product = makeProductDetail(productData, []);
+  const outcome = await applyAutoVehicleResourceTrigger({ page: failingPage as never, product });
   // outcome.reason 必须以可读形式表达失败原因，但不暴露 cookie / 凭证。
   assert.equal(outcome.outcome.written, true);
   assert.match(outcome.outcome.reason, /失败/);
@@ -259,7 +259,7 @@ test("G4 · resolveVehicleResource 抛错时保留 draft 引用并附带 reason"
   }
   // estimatedDailyCost 仍被估算并落库，draft 不丢。
   assert.ok(outcome.outcome.estimatedDailyCost);
-  const finalVehicle = (((outcome.nextProject.product as Record<string, unknown>).operations) as Record<string, unknown>).vehicleResource as Record<string, unknown>;
+  const finalVehicle = (((outcome.nextProduct.product as Record<string, unknown>).operations) as Record<string, unknown>).vehicleResource as Record<string, unknown>;
   assert.equal(finalVehicle.requestedDailyCost, outcome.outcome.estimatedDailyCost);
 });
 
@@ -274,12 +274,12 @@ test("G5 · buildVehicleResourceQuery 给出与车辆 helper 一致的搜索 que
 });
 
 test("G5 · 行程城市与 basicInfo.destinationCity 不同，估算时使用 destinationCity 计算长途", () => {
-  const product = makeProduct({
+  const product = makeProductData({
     basicInfo: {
       days: 3, meetingCity: "太原", destinationCity: "平遥", nights: 2, supplierProductCode: "TY", supplierProductName: "x",
     },
   });
-  const sameCity = makeProduct({
+  const sameCity = makeProductData({
     basicInfo: {
       days: 3, meetingCity: "太原", destinationCity: "太原", nights: 2, supplierProductCode: "TY", supplierProductName: "x",
     },

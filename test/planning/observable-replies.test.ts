@@ -13,7 +13,7 @@ import type { PlanningGenerationState, ModuleOutcome } from "../../src/shared/co
 
 function makeState(overrides: Partial<PlanningGenerationState> = {}): PlanningGenerationState {
   return {
-    projectId: "p",
+    localProductId: "p",
     currentStage: "itinerary",
     completedStages: ["skeleton"],
     stages: [],

@@ -39,7 +39,7 @@ test("保存和状态检测都必须先校验 VBK 鉴权 cookie 完整性", () =
 });
 
 test("withKnownVbkAccount 只在真实保存成功后写入活跃账号 key", () => {
-  const withKnown = mainSource.slice(mainSource.indexOf("function withKnownVbkAccount"), mainSource.indexOf("/**\n * 计算项目 readiness"));
+  const withKnown = mainSource.slice(mainSource.indexOf("function withKnownVbkAccount"), mainSource.indexOf("/**\n * 计算产品 readiness"));
   assert.match(withKnown, /if \(saved\) db\.setSetting\("vbkActiveAccountKey", saved\.accountKey\);/);
   assert.doesNotMatch(withKnown, /else if \(snapshotKey\) db\.setSetting\("vbkActiveAccountKey"/);
 });
@@ -76,7 +76,7 @@ test("addLogin / switchAccount 都 await saveCurrentSession", () => {
 });
 
 test("withKnownVbkAccount：saveCurrentSession 失败被 .catch 吞掉，不会变 unhandled rejection", () => {
-  const withKnown = mainSource.slice(mainSource.indexOf("function withKnownVbkAccount"), mainSource.indexOf("/**\n * 计算项目 readiness"));
+  const withKnown = mainSource.slice(mainSource.indexOf("function withKnownVbkAccount"), mainSource.indexOf("/**\n * 计算产品 readiness"));
   // 必须 Promise 链 + .catch，禁止裸 fire-and-forget。
   assert.match(withKnown, /browser\.saveCurrentSession\(\)/);
   assert.match(withKnown, /\.catch\(/, "saveCurrentSession 必须有 .catch 兜底");

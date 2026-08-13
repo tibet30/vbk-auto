@@ -11,7 +11,7 @@
 import type { PlanningModule, ModuleOutcome, PlanningSkeleton } from "../../shared/contracts-planning.js";
 import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 
 export interface ValidationResult {
   missing: ModuleOutcome[];

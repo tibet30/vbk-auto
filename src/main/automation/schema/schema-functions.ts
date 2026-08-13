@@ -223,17 +223,38 @@ export function findProvinceOptionIndex(
 }
 
 /**
- * 管家联系人下拉：优先按 stable contactCardId 匹配（option.value 携带），
- * 失败回退到 displayName 匹配。VBK 下拉会把邮箱和手机号拼到姓名后面，
- * 因此既接受纯姓名，也接受「姓名 + 空白 + 联系方式」；不接受
- * 「姓名-国际」这类同名前缀，避免选错联系人。都失败返回 -1。
+ * 管家联系人下拉：优先按 stable contactCardId 匹配（option.value 携带）。
+ *
+ * 失败回退策略（核心安全契约，绝不允许误选）：
+ *  - 优先按 ID 严格相等匹配；命中即返回。
+ *  - 只有当 VBK 整列都未提供 value（说明这是 VBK 未带 contactCardId 的
+ *    退化下拉，例如老版本或网络异常场景）时，才允许按 displayName 回退。
+ *    一旦任何一项携带非空 value（VBK 已给出 contactCardId），就绝对不能
+ *    落到 byName 回退，否则会把「ID 已删除 / 已停用但同姓名仍存在」的
+ *    旧联系人误选到当前产品上（真实 run 09306ec1 复现：固定联系人
+ *    「安思科」ID 1368298 在 VBK 列表里已不存在，但同姓名的另一张卡
+ *    仍存在，byName 回退会把它选成新的负责人）。
+ *  - byName 接受纯姓名，也接受「姓名 + 空白 + 联系方式」（VBK 会把邮箱
+ *    和手机号拼到姓名后面）；不接受「姓名-国际」这类同名前缀，避免
+ *    选错联系人。
+ *  - 都失败返回 -1，让 fillButlerContact 走「显式抛错」路径而不是
+ *    「默认第一项」之类的隐式兜底。
  */
 export function findButlerOptionIndex(
   options: ReadonlyArray<{ value: string; label: string }>,
   selection: { contactCardId: number; displayName?: string },
 ): number {
-  const byId = options.findIndex((option) => String(option.value) === String(selection.contactCardId));
+  const targetId = String(selection.contactCardId);
+  // 1) 严格按 contactCardId 匹配（value 与 targetId 完全相等；含 value 为
+  //    空字符串时与 targetId 不等，自然落到 -1，不会误选「value=空」的项）。
+  const byId = options.findIndex((option) => option.value === targetId);
   if (byId >= 0) return byId;
+  // 2) byName 回退的安全门：仅当整列都未提供 value 时才允许按姓名匹配；
+  //    只要任何一项带非空 value，就立即 -1，不做 byName。这是「固定联系
+  //    人已被 VBK 移除」与「VBK 同姓名新建了另一张卡」两个场景的
+  //    安全防线：宁可让 fillButlerContact 显式抛错，也不要被静默选错。
+  const hasAnyValue = options.some((option) => option.value && option.value.length > 0);
+  if (hasAnyValue) return -1;
   if (selection.displayName) {
     const targetName = selection.displayName.trim();
     const byName = options.findIndex((option) => {

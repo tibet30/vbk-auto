@@ -61,7 +61,7 @@ test("失败阶段被 bounded：planner 总调用次数受 stageRetryLimit 控�
   const rt = new FakeRuntime();
   const planner = new FailingPlanner();
   const result = await runPlan({
-    projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
+    localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
     options: { stageRetryLimit: 2 },
   });
   // status 必定 needs_user（provider_error 不算 fatal）；但 planner 调用次数有上限。
@@ -82,7 +82,7 @@ test("provider_authentication 视为 fatal（status=failed），planner 仍 boun
   }
   const planner = new AuthFailPlanner();
   const result = await runPlan({
-    projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
+    localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
     options: { stageRetryLimit: 2 },
   });
   assert.equal(result.status, "failed");
@@ -108,7 +108,7 @@ test("skeleton / validation 阶段不调用 planner（总调用次数仅含 itin
     }
   }
   const planner = new SingleCallPlanner();
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   // skeleton 不在调用列表。
   assert.ok(!planner.calls.includes("skeleton"));
   assert.ok(!planner.calls.includes("validation"));
@@ -134,7 +134,7 @@ test("adapter 单次传输尝试 + orchestrator stageRetryLimit 共同限定总�
   }
   const planner = new OneFailThenOkPlanner();
   await runPlan({
-    projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
+    localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax",
     options: { stageRetryLimit: 2 },
   });
   // 每次失败 + 重试 = 2；连续成功 3 阶段 = 6。

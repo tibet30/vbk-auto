@@ -166,13 +166,13 @@ test("cards.ts：fillHotelCard 三类分支契约（0 / 1 / 多于 1）必须互
   // 1) 多于 1：明确失败，错误必须含「期望 1」+「实际 N」（明确失败 ≠ 期望最多 1）
   assert.match(
     src,
-    /availableCombos\.length\s*>\s*1[\s\S]*?throw\s+new\s+Error\s*\([\s\S]*?期望\s*1[\s\S]*?实际\s*\$\{availableCombos\.length\}/,
+    /hotelNameCombos\.length\s*>\s*1[\s\S]*?throw\s+new\s+Error\s*\([\s\S]*?期望\s*1[\s\S]*?实际\s*\$\{hotelNameCombos\.length\}/,
     "多于 1 时必须 throw new Error，错误消息必须含「期望 1」与「实际 ${availableCombos.length}」",
   );
   // 2) 等于 1：必须 click + selectVisibleOption，tierKeyword 必须是 3钻/4钻 二选一
   assert.match(
     src,
-    /availableCombos\.length\s*===\s*1[\s\S]*?selectVisibleOption\s*\(\s*page\s*,\s*tierKeyword\s*\)/,
+    /hotelNameCombos\.length\s*===\s*1[\s\S]*?selectVisibleOption\s*\(\s*page\s*,\s*tierKeyword\s*\)/,
     "等于 1 时必须 click + selectVisibleOption(page, tierKeyword)",
   );
   assert.match(
@@ -302,6 +302,85 @@ test("酒店 card 一个可用酒店下拉：4钻 时 fillHotelCard 选「当地
       return window.__lastClicked;
     });
     assert.equal(lastClicked, "4", "4钻 时必须 selectVisibleOption 选「当地4钻酒店/-4」");
+  } finally {
+    await page.close();
+  }
+});
+
+test("新版酒店 card 同时有住宿类型和酒店名称下拉时优先选择酒店名称", async () => {
+  const html = `
+    <div id="day-scope">
+      <div class="td-day-card--hotel">
+        <span>酒店</span><span>不限</span><span>使用携程平台酒店</span>
+        <div class="ant-form-item"><label>住宿类型</label>
+          <div class="ant-select"><input role="combobox" data-testid="lodging-type" /></div>
+        </div>
+        <div class="ant-form-item"><label>酒店名称</label>
+          <div class="ant-select"><input role="combobox" data-testid="hotel-name" /></div>
+        </div>
+        <textarea placeholder="请输入补充说明"></textarea>
+      </div>
+    </div>
+    <ul role="listbox">
+      <li role="option" data-option-key="3">当地3钻酒店/-3</li>
+    </ul>`;
+  const page = await newPage(html);
+  try {
+    await page.evaluate(() => {
+      document.querySelector('[data-testid="hotel-name"]')?.addEventListener("click", () => {
+        // @ts-ignore
+        window.__hotelClicked = true;
+      });
+      document.querySelector('[data-testid="lodging-type"]')?.addEventListener("click", () => {
+        // @ts-ignore
+        window.__lodgingClicked = true;
+      });
+    });
+    await fillHotelCard(
+      page,
+      page.locator("#day-scope"),
+      { day: 1, hotelDescription: "新版" },
+      { hotelTier: "当地3钻酒店/-3" },
+    );
+    assert.equal(await page.evaluate(() => window.__hotelClicked), true);
+    assert.equal(await page.evaluate(() => window.__lodgingClicked), undefined);
+  } finally {
+    await page.close();
+  }
+});
+
+test("新版酒店 card 的多类名 ant-form-item 仍按标签筛出酒店名称下拉", async () => {
+  const html = `
+    <div id="day-scope">
+      <div class="td-day-card--hotel">
+        <span>酒店</span><span>不限</span><span>使用携程平台酒店</span>
+        <div class="ant-form-item ant-form-item-control"><label>住宿类型</label>
+          <div class="ant-select"><input role="combobox" data-testid="lodging-type" /></div>
+        </div>
+        <div class="ant-form-item ant-form-item-control"><label>酒店名称</label>
+          <div class="ant-select"><input role="combobox" data-testid="hotel-name" /></div>
+        </div>
+        <textarea placeholder="请输入补充说明"></textarea>
+      </div>
+    </div>
+    <ul role="listbox">
+      <li role="option" data-option-key="3">当地3钻酒店/-3</li>
+    </ul>`;
+  const page = await newPage(html);
+  try {
+    await page.evaluate(() => {
+      document.querySelector('[data-testid="hotel-name"]')?.addEventListener("click", () => {
+        // @ts-ignore
+        window.__hotelClicked = true;
+      });
+      document.querySelector('[data-testid="lodging-type"]')?.addEventListener("click", () => {
+        // @ts-ignore
+        window.__lodgingClicked = true;
+      });
+    });
+    await fillHotelCard(page, page.locator("#day-scope"), { day: 1, hotelDescription: "新版" }, { hotelTier: "当地3钻酒店/-3" });
+    assert.equal(await page.evaluate(() => window.__hotelClicked), true);
+    assert.equal(await page.evaluate(() => window.__lodgingClicked), undefined);
   } finally {
     await page.close();
   }

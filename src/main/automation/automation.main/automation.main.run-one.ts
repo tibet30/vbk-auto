@@ -26,7 +26,7 @@ import {
   openProductEditor,
   runProductPreflight,
 } from "../ctrip/ctrip.js";
-import { projectNotFound } from "../../infrastructure/db-errors.js";
+import { productNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { isProductImageTextUrl } from "../ctrip/tabs.js";
@@ -38,25 +38,25 @@ import type { ContactCardSelection } from "../../../shared/contracts.js";
 
 /**
  * 单阶段重新执行入口：
- *   - 项目 / product 校验、管家凭证按阶段名决定是否必带；
+ *   - 产品 / product 校验、管家凭证按阶段名决定是否必带；
  *   - 构造 fillMap：basic 阶段额外处理 setBasicInfoSaved + scenicSpotLogs，其它阶段直接调 fill*；
  *   - 用 makeRecoveryCtx 拿到 RecoveryContext，让 runPhaseWithRecovery 走完整 advisor 链；
  *   - cancelled / needs_user / failed 分支与 run() 保持一致；completed 时恢复原 status。
  */
-export async function runOnePhase(ctx: AutomationRunContext, projectId: string, phaseName: string) {
-    const project = ctx.db.getProject(projectId);
-    if (!project) throw projectNotFound(projectId);
-    const product = parseProduct(project.product);
-    const productId = project.productId;
+export async function runOnePhase(ctx: AutomationRunContext, localProductId: string, phaseName: string) {
+    const product = ctx.db.getProduct(localProductId);
+    if (!product) throw productNotFound(localProductId);
+    const productData = parseProduct(product.product);
+    const productId = product.productId;
     // 「重新执行」以前置依赖与 run() 一致：管家联系人从 product JSON 读取，
     // 400 电话从账号固定信息读取。缺少则阻断。
     const accountName = ctx.db.getSetting("vbkAccountName")?.value;
-    const basicInfoSaved = project.basicInfoSaved ?? false;
+    const basicInfoSaved = product.basicInfoSaved ?? false;
     const shouldRequireAccountContext = phaseName === "basic" || !basicInfoSaved;
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone: string | null = null;
     if (shouldRequireAccountContext) {
-      butlerSelection = resolveProductButlerSelection(project.product);
+      butlerSelection = resolveProductButlerSelection(product.product);
       if (!butlerSelection) {
         throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
       }
@@ -76,23 +76,23 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
         ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
-    const keySpots = pickKeySpotsFromItinerary(project.product);
+    const keySpots = pickKeySpotsFromItinerary(product.product);
     const scenicSpotLogs: string[] = [];
 
-    const draftPhases = draftPhasesFor(product);
+    const draftPhases = draftPhasesFor(productData);
     const phaseIndex = draftPhases.indexOf(phaseName);
     if (phaseIndex < 0) throw new Error(`当前产品没有阶段：${phaseName}`);
-    const previousRun = project.automation!;
+    const previousRun = product.automation!;
     const originalRunStatus = previousRun.status;
     const run = prepareSinglePhaseRetry(previousRun, draftPhases, phaseName);
-    const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(projectId, run); ctx.emit(projectId); };
-    const persist = () => { ctx.db.saveAutomation(projectId, run); ctx.emit(projectId); };
-    ctx.db.saveAutomation(projectId, run);
+    const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
+    const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
+    ctx.db.saveAutomation(localProductId, run);
 
     try {
       ctx.browser.setVisible(true);
       ctx.ensureBrowserHasBounds();
-      const page = await ctx.browser.page();
+      const page = await ctx.browser.page({ requireInteractive: true });
       // 「重新执行」复用「在当前页面去重试」偏好：不调 openProductEditor 拽回
       // 「基本信息」 tab；页面应已停在原产品某子 tab 上，由各阶段 handler 自
       // 己 clickSection 切到目标 tab。仅在 productId 还没创建时跳过 —— 这种
@@ -111,14 +111,14 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
       // 调 fill 函数 + 标记 completed 即可。这块逻辑与 run() 里的 handler
       // 同型 — 仅去掉 multi-phase forward 部分。
       const fillMap: Record<string, () => Promise<unknown>> = {
-        presentation: () => fillAndSavePresentation(page, product),
-        itinerary: () => fillItineraryDraft(page, product, { disambiguator: ctx.disambiguator, productId: productId ?? "" }),
-        package: () => fillAndSavePackage(page, product),
-        pricingInventory: () => fillAndSubmitPricingInventory(page, product, productId!),
-        terms: () => fillAndSaveTerms(page, product, productId),
-        hotelResource: () => ensureHotelResource(page, product, productId!),
-        vehicleResource: () => ensureVehicleResource(page, product, productId!),
-        preflight: () => runProductPreflight(page, product, productId!),
+        presentation: () => fillAndSavePresentation(page, productData),
+        itinerary: () => fillItineraryDraft(page, productData, { disambiguator: ctx.disambiguator, productId: productId ?? "" }),
+        package: () => fillAndSavePackage(page, productData),
+        pricingInventory: () => fillAndSubmitPricingInventory(page, productData, productId!),
+        terms: () => fillAndSaveTerms(page, productData, productId),
+        hotelResource: () => ensureHotelResource(page, productData, productId!),
+        vehicleResource: () => ensureVehicleResource(page, productData, productId!),
+        preflight: () => runProductPreflight(page, productData, productId!),
       };
       const fillFn = fillMap[phaseName];
 
@@ -126,7 +126,7 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
         ? async () => {
             phaseRecord("basic");
             scenicSpotLogs.length = 0;
-            const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: project.product });
+            const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: product.product });
             log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
             if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
             // basicInfoSaved 已确认但 product 无缺失 → 跳过填充，直接标记完成。
@@ -143,20 +143,20 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
                 const currentUrl = page.url();
                 if (isProductImageTextUrl(currentUrl)) {
                   log("检测到页面已在产品图文，跳过 basic 阶段");
-                  ctx.db.setBasicInfoSaved(projectId);
+                  ctx.db.setBasicInfoSaved(localProductId);
                   run.phases[phaseIndex].status = "completed";
                   return;
                 }
               } catch (_) { /* URL 读取失败，走正常 refill 路径 */ }
             }
-            await fillAndSaveBasicInfo(page, product, butlerSelection, {
+            await fillAndSaveBasicInfo(page, productData, butlerSelection, {
               servicePhone: servicePhone || "",
               keySpots,
               scenicSpotLogs,
               disambiguator: ctx.disambiguator,
             });
             for (const entry of scenicSpotLogs) log(entry, "warning");
-            ctx.db.setBasicInfoSaved(projectId);
+            ctx.db.setBasicInfoSaved(localProductId);
             run.phases[phaseIndex].status = "completed";
           }
         : async () => {
@@ -170,14 +170,14 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
             if (phaseName === "hotelResource") {
               const hr = result as { source?: unknown; resourceId?: unknown; resourceName?: unknown; hotelTier?: unknown; diamond?: unknown };
               if (hr.source === "vbk" && hr.resourceId && hr.resourceName) {
-                product.operations!.hotelResource = {
+                productData.operations!.hotelResource = {
                   source: "vbk",
                   resourceId: hr.resourceId as number,
                   resourceName: String(hr.resourceName),
                   hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
                   diamond: hr.diamond as 3 | 4 | 5,
                 };
-                ctx.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "automating");
+                ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "automating");
               }
             }
             run.phases[phaseIndex].status = "completed";
@@ -199,7 +199,7 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
         },
         log,
         persist,
-        shouldCancel: () => ctx.cancellationRequested.has(projectId),
+        shouldCancel: () => ctx.cancellationRequested.has(localProductId),
       };
 
       const outcome = await runPhaseWithRecovery(recoveryCtx);
@@ -208,10 +208,10 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
           run.status = "failed";
           run.phases[phaseIndex].status = "failed";
           run.currentPhase = phaseName;
-          ctx.db.updateProduct(projectId, project.product, "blocked");
+          ctx.db.updateProduct(localProductId, product.product, "blocked");
           break;
         case "cancelled":
-          ctx.markCancelled(projectId, run, persist);
+          ctx.markCancelled(localProductId, run, persist);
           break;
         default: {
           // completed：恢复原 run.status。仅这个阶段被重跑过；后续阶段不动。
@@ -225,7 +225,7 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
             run.status = "succeeded";
             await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
             log("产品草稿已保存，未提交审核、未发布。", "warning");
-            ctx.db.updateProduct(projectId, project.product, "draft_saved");
+            ctx.db.updateProduct(localProductId, product.product, "draft_saved");
           }
           break;
         }
@@ -239,7 +239,7 @@ export async function runOnePhase(ctx: AutomationRunContext, projectId: string, 
       run.phases[phaseIndex].status = "failed";
       run.currentPhase = phaseName;
       log(error instanceof Error ? error.message : "重新执行发生未知错误", "error");
-      ctx.db.updateProduct(projectId, project.product, "blocked");
+      ctx.db.updateProduct(localProductId, product.product, "blocked");
       persist();
       throw error;
     }

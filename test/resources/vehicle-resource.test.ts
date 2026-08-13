@@ -185,6 +185,8 @@ test("resolveVehicleResource 新接口只回填资源组 ID/Name 并清理旧车
   assert.equal(result.resolved?.dailyCost, 500);
   assert.equal(result.resolved?.query, "5座经济500");
   assert.match(result.note, /5座经济500/);
+  assert.equal((result.product as Record<string, unknown>).id, undefined);
+  assert.equal((result.product as Record<string, unknown>).product, undefined);
 });
 
 test("resolveVehicleResource fallback 命中时记录实际查询词", async () => {

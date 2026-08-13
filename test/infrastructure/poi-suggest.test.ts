@@ -256,6 +256,21 @@ test("精确和双向名称匹配仍优先于别名候选", () => {
   }), { poiName: "秦始皇兵马俑博物馆", poiId: 75682 });
 });
 
+test("线上 name 字段优先命中精确 POI，不按列表顺序误选下属景点", () => {
+  const result = parsePoiSuggestPayload("龙门石窟", {
+    ResponseStatus: { Ack: "Success" },
+    poiList: [
+      { name: "龙门石窟-清明寺", poiId: 152836481 },
+      { name: "龙门石窟", poiId: 77498 },
+    ],
+  });
+  assert.deepEqual(result.best, { poiName: "龙门石窟", poiId: 77498 });
+  assert.deepEqual(result.candidates.map(({ poiName, poiId, selectable }) => ({ poiName, poiId, selectable })), [
+    { poiName: "龙门石窟-清明寺", poiId: 152836481, selectable: true },
+    { poiName: "龙门石窟", poiId: 77498, selectable: true },
+  ]);
+});
+
 test("主景点的部分名称不会因候选列表顺序误选下属景点", () => {
   assert.deepEqual(pickBestPoi("秦始皇兵马俑", {
     poiList: [
@@ -263,6 +278,57 @@ test("主景点的部分名称不会因候选列表顺序误选下属景点", ()
       { poiName: "秦始皇帝陵博物院（兵马俑）", poiId: 75682 },
     ],
   }), { poiName: "秦始皇帝陵博物院（兵马俑）", poiId: 75682 });
+});
+
+test("主景点查询不会误选名称前多一个普通字的其它景区", () => {
+  assert.equal(pickBestPoi("金山风景区", {
+    poiList: [
+      { name: "夹金山风景区", poiId: 87584 },
+      { name: "布金山风景区", poiId: 145644977 },
+    ],
+  }), null);
+});
+
+test("带行政区前缀的官方主景点名仍可匹配", () => {
+  assert.deepEqual(pickBestPoi("鼋头渚", {
+    poiList: [{ name: "无锡市太湖鼋头渚风景区", poiId: 75725 }],
+  }), { poiName: "无锡市太湖鼋头渚风景区", poiId: 75725 });
+});
+
+test("主景点查询只有山门凉亭等下属点时保持待核查", () => {
+  assert.equal(pickBestPoi("焦山风景区", {
+    poiList: [
+      { name: "焦山风景区-山门", poiId: 145609538 },
+      { name: "焦山风景区-凉亭", poiId: 154157853 },
+    ],
+  }), null);
+});
+
+test("地标名称与广播电视塔类型后缀归一后可命中主 POI", () => {
+  assert.deepEqual(pickBestPoi("东方明珠广播电视塔", {
+    poiList: [
+      { name: "东方明珠", poiId: 75627 },
+      { name: "东方明珠广播电视塔-城市长廊", poiId: 143744560 },
+    ],
+  }), { poiName: "东方明珠", poiId: 75627 });
+});
+
+test("街区名称与步行街类型后缀归一后可命中主 POI", () => {
+  assert.deepEqual(pickBestPoi("王府井步行街", {
+    poiList: [
+      { name: "王府井", poiId: 10524169 },
+      { name: "艺术品珍藏馆(王府井步行街店)", poiId: 124906825 },
+    ],
+  }), { poiName: "王府井", poiId: 10524169 });
+});
+
+test("英文会话响应优先使用中文 localName 匹配并回写", () => {
+  const result = parsePoiSuggestPayload("山西博物院", {
+    ResponseStatus: { Ack: "Success" },
+    poiList: [{ poiName: "Shanxi Museum", localName: "山西博物院", poiId: 88189 }],
+  });
+  assert.deepEqual(result.best, { poiName: "山西博物院", poiId: 88189 });
+  assert.equal(result.candidates[0]?.poiName, "山西博物院");
 });
 
 test("无效 POI ID 不会被当作有效候选", () => {

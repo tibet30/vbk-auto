@@ -71,7 +71,7 @@ test("resume 不会重跑已完成阶段，从 currentStage 续跑", async () =>
   };
   // 跑第一轮：skeleton + itinerary 成功，presentation 触发 needs_user（missing）。
   const planner1 = new PartialPlanner("itinerary", itineraryOutput);
-  const r1 = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
+  const r1 = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
   assert.equal(r1.status, "needs_user");
   // 持久化状态：skeleton + itinerary 完成，presentation 是当前阶段。
   assert.deepEqual(store.state?.completedStages, ["skeleton", "basicInfo", "itinerary"]);
@@ -93,7 +93,7 @@ test("resume 不会重跑已完成阶段，从 currentStage 续跑", async () =>
   // 第二轮：skeleton 跳过；itinerary 跳过；presentation 跑成功；commercial / research / validation 跑；
   // 因为后面的 planner 还是会触发 needs_user（它只能产出 presentation），我们就只断言 presentation 没重跑、resume 不重跑 skeleton。
   const planner2 = new PartialPlanner("presentation", presentationOutput);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
   // planner2 应被调用 presentation；skeleton / itinerary 不在 calls 里。
   // planner2.calls 是 {stage, attempt}[]，不能直接 .includes('presentation')。
   const stages2 = planner2.calls.map((c) => c.stage);
@@ -124,7 +124,7 @@ test("resume：persisted state 只有 skeleton 时必须从 itinerary 起跑，�
     },
   };
   await runPlan({
-    projectId: "p",
+    localProductId: "p",
     skeleton,
     store,
     runtime: rt,
@@ -151,7 +151,7 @@ test("resume：persisted state 只有 skeleton 时必须从 itinerary 起跑，�
   };
   const planner2 = new PartialPlanner("itinerary", itineraryOutput);
   const r2 = await runPlan({
-    projectId: "p",
+    localProductId: "p",
     skeleton,
     store,
     runtime: rt,

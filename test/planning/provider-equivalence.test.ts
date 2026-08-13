@@ -92,12 +92,12 @@ test("minimax 与 deepseek label 跑同一脚本应产出等价产品 / 状态 /
   const storeA = new InMemoryStore();
   const rtA = new FakeRuntime();
   const plannerA = new ScriptedPlanner("minimax", buildScript());
-  const a = await runPlan({ projectId: "pA", skeleton, store: storeA, runtime: rtA, planner: plannerA, providerLabel: "minimax" });
+  const a = await runPlan({ localProductId: "pA", skeleton, store: storeA, runtime: rtA, planner: plannerA, providerLabel: "minimax" });
 
   const storeB = new InMemoryStore();
   const rtB = new FakeRuntime();
   const plannerB = new ScriptedPlanner("deepseek", buildScript());
-  const b = await runPlan({ projectId: "pB", skeleton, store: storeB, runtime: rtB, planner: plannerB, providerLabel: "deepseek" });
+  const b = await runPlan({ localProductId: "pB", skeleton, store: storeB, runtime: rtB, planner: plannerB, providerLabel: "deepseek" });
 
   assert.equal(a.status, b.status);
   assert.deepEqual(
@@ -116,6 +116,6 @@ test("orchestrator 回复文本不抄 provider 标签", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new ScriptedPlanner("minimax", buildScript());
-  const result = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   assert.ok(!result.assistantReply.includes("(minimax)"), `assistant reply 不应抄 provider 标签：${result.assistantReply}`);
 });

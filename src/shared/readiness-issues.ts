@@ -1,6 +1,6 @@
-import type { ProjectReadiness, ResearchTask } from "./contracts-types.js";
+import type { ProductReadiness, ResearchTask } from "./contracts-types.js";
 
-export type ReadinessIssue = ProjectReadiness["issues"][number];
+export type ReadinessIssue = ProductReadiness["issues"][number];
 
 const vehiclePattern = /用车|车辆|接送|司机|vehicle|vehicleResource|resourceGroupId/i;
 const hotelPattern = /酒店|住宿|客栈|民宿/;

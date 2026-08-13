@@ -2,7 +2,7 @@
  * 操作日志 (operation_log) 真实持久化 + 上限 1000 行。
  *
  *   - 写入入口 appendOperationLog：在同一事务里完成 INSERT + COUNT 检查 + 超限 DELETE；
- *   - 查询 queryOperationLog：status/type/stage/projectId/query(全文) + limit；
+ *   - 查询 queryOperationLog：status/type/stage/localProductId/query(全文) + limit；
  *   - recoverOrphanOperationLog：启动时把 status=running 的孤儿条目置为 failed。
  *
  * 历史版返回内存 SAMPLE，V0 起统一写 SQLite。
@@ -18,8 +18,8 @@ export const OPERATION_LOG_CAP = 1000;
 /** SQLite 行 → 上层使用的对象形态。 */
 export interface OperationLogRow {
   id: string;
-  projectId: string | null;
-  projectName: string | null;
+  localProductId: string | null;
+  productName: string | null;
   stage: string | null;
   phase: string | null;
   type: string;
@@ -46,7 +46,7 @@ export function appendOperationLog(
 ): void {
   const insert = db.prepare(`
     INSERT INTO operation_log (
-      id, project_id, project_name, stage, phase, type, name, status,
+      id, local_product_id, product_name, stage, phase, type, name, status,
       attempt, started_at, duration_ms, target, message, payload_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
@@ -54,8 +54,8 @@ export function appendOperationLog(
   const tx = db.transaction(() => {
     insert.run(
       entry.id,
-      (entry.projectId as string | null) ?? null,
-      (entry.projectName as string | null) ?? null,
+      (entry.localProductId as string | null) ?? null,
+      (entry.productName as string | null) ?? null,
       (entry.stage as string | null) ?? null,
       (entry.phase as string | null) ?? null,
       entry.type,
@@ -89,7 +89,7 @@ export function countOperationLog(db: Database.Database): number {
 
 /**
  * 查询操作日志。查询语义保持与 operation-log-store.ts 中旧 matchQuery 一致。
- * 入参 query 的字段：status / type / stage / projectId / query（全文 / 模糊）。
+ * 入参 query 的字段：status / type / stage / localProductId / query（全文 / 模糊）。
  * 返回行按 started_at DESC 排序。
  */
 export function queryOperationLog(
@@ -98,7 +98,7 @@ export function queryOperationLog(
     status?: OperationStatus | "all";
     type?: OperationType | "all";
     stage?: string;
-    projectId?: string;
+    localProductId?: string;
     query?: string;
     limit?: number;
   },
@@ -117,19 +117,19 @@ export function queryOperationLog(
     where.push("stage = ?");
     params.push(query.stage);
   }
-  if (query.projectId) {
-    where.push("project_id = ?");
-    params.push(query.projectId);
+  if (query.localProductId) {
+    where.push("local_product_id = ?");
+    params.push(query.localProductId);
   }
   if (query.query && query.query.trim()) {
     const needle = `%${query.query.trim()}%`;
     where.push(
-      "(name LIKE ? OR target LIKE ? OR message LIKE ? OR stage LIKE ? OR phase LIKE ? OR project_name LIKE ?)",
+      "(name LIKE ? OR target LIKE ? OR message LIKE ? OR stage LIKE ? OR phase LIKE ? OR product_name LIKE ?)",
     );
     params.push(needle, needle, needle, needle, needle, needle);
   }
   const sql = `
-    SELECT id, project_id AS projectId, project_name AS projectName,
+    SELECT id, local_product_id AS localProductId, product_name AS productName,
       stage, phase, type, name, status,
       attempt, started_at AS startedAt, duration_ms AS durationMs,
       target, message, payload_json AS payloadJson

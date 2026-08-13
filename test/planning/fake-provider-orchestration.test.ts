@@ -73,7 +73,7 @@ class InMemoryStore implements GenerationStateStore {
 
 class FakeRuntime implements OrchestratorRuntime {
   // skeleton 阶段只负责补副标题/运营备注；省份必须来自已确认的基础信息，
-  // 不能把目的地城市伪造成省份。用真实项目已有的山西省份模拟该前置事实。
+  // 不能把目的地城市伪造成省份。用真实产品已有的山西省份模拟该前置事实。
   product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   researchTasks: ResearchTaskProposal[] = [];
   history: Array<{ role: "user" | "assistant"; content: string }> = [];
@@ -84,7 +84,7 @@ class FakeRuntime implements OrchestratorRuntime {
   async loadExistingResearchTasks(): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
     return this.researchTasks.map((t) => ({ label: t.label, type: t.type }));
   }
-  async writeModule(_projectId: string, _module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
+  async writeModule(_localProductId: string, _module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
     this.moduleWrites.push({ module: _module, writePath });
     if (writePath === AI_WRITABLE_PATHS.presentation || writePath === AI_WRITABLE_PATHS.itinerary
         || writePath === AI_WRITABLE_PATHS.packageName || writePath === AI_WRITABLE_PATHS.pricing
@@ -103,7 +103,7 @@ class FakeRuntime implements OrchestratorRuntime {
     }
     return { ok: false, reason: `unknown writePath ${writePath}` };
   }
-  async addResearchTask(_projectId: string, task: ResearchTaskProposal): Promise<string> {
+  async addResearchTask(_localProductId: string, task: ResearchTaskProposal): Promise<string> {
     const key = `${task.type}::${task.label}`;
     if (!this.taskKeys.has(key)) {
       this.taskKeys.add(key);
@@ -224,7 +224,7 @@ test("完整 staged planning 跑完后状态为 completed", async () => {
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
   const result = await runPlan({
-    projectId: "p1", skeleton, store, runtime, planner, providerLabel: "minimax",
+    localProductId: "p1", skeleton, store, runtime, planner, providerLabel: "minimax",
   });
   assert.equal(result.status, "completed");
   assert.deepEqual(result.state.completedStages, ["skeleton", "basicInfo", "itinerary", "presentation", "commercial", "research", "validation"]);
@@ -240,7 +240,7 @@ test("阶段成功的持久化快照原子推进到下一阶段，期间不暴�
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
-  await runPlan({ projectId: "progress-atomic", skeleton, store, runtime, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "progress-atomic", skeleton, store, runtime, planner, providerLabel: "minimax" });
 
   // 首个 running 快照用于宣告起跑；随后每一个 save 都是实际会被 renderer
   // 轮询到的持久化状态，必须原子完成「标记前一阶段完成 + 推进下一阶段」。
@@ -273,7 +273,7 @@ test("release.submitReview / publishAfterApproval 即使模型写 true 也会被
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
-  await runPlan({ projectId: "p2", skeleton, store, runtime, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p2", skeleton, store, runtime, planner, providerLabel: "minimax" });
   const release = (runtime.product.commercial as { release: { submitReview: boolean; publishAfterApproval: boolean } }).release;
   assert.equal(release.submitReview, false);
   assert.equal(release.publishAfterApproval, false);
@@ -283,7 +283,7 @@ test("每个阶段的 Planner 调用次数 = 1，不存在嵌套 25-call retry",
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
-  await runPlan({ projectId: "p3", skeleton, store, runtime, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p3", skeleton, store, runtime, planner, providerLabel: "minimax" });
   // skeleton / research / validation 由本地完成，planner 不被调用；
   // itinerary / presentation / commercial 各调用 1 次。
   assert.equal(planner.calls.filter((c) => c.stage === "itinerary").length, 1);
@@ -298,7 +298,7 @@ test("research tasks 由本地 deterministic 生成，标签不含「已确认 /
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
-  const result = await runPlan({ projectId: "p4", skeleton, store, runtime, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p4", skeleton, store, runtime, planner, providerLabel: "minimax" });
   assert.ok(result.researchTasks.length >= 1, "research 阶段应当产出至少 1 条任务");
   for (const task of result.researchTasks) {
     assert.ok(!/已确认|已解决|已完成|已通过/.test(task.label), `research task 标签禁止「已确认」措辞：${task.label}`);
@@ -310,11 +310,11 @@ test("续跑时已完成阶段被跳过，且不重跑 planner", async () => {
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
   // 第一次跑完。
-  await runPlan({ projectId: "p5", skeleton, store, runtime, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p5", skeleton, store, runtime, planner, providerLabel: "minimax" });
   const firstCalls = planner.calls.length;
   // 第二次跑（模拟重启后 resume）：应当立即判定 completed，不调用 planner。
   const planner2 = new FakePlanner(buildFakeScript());
-  const result2 = await runPlan({ projectId: "p5", skeleton, store, runtime, planner: planner2, providerLabel: "minimax" });
+  const result2 = await runPlan({ localProductId: "p5", skeleton, store, runtime, planner: planner2, providerLabel: "minimax" });
   assert.equal(result2.status, "completed");
   assert.equal(planner2.calls.length, 0, "resume 不应再调 planner");
   assert.equal(firstCalls, 4);
@@ -324,7 +324,7 @@ test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 com
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   await runPlan({
-    projectId: "completed-poi-backfill", skeleton, store, runtime,
+    localProductId: "completed-poi-backfill", skeleton, store, runtime,
     planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
   });
   runtime.moduleWrites = [];
@@ -336,7 +336,7 @@ test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 com
   const planner = new FakePlanner(buildFakeScript());
 
   const result = await runPlan({
-    projectId: "completed-poi-backfill", skeleton, store, runtime, planner, providerLabel: "minimax",
+    localProductId: "completed-poi-backfill", skeleton, store, runtime, planner, providerLabel: "minimax",
   });
 
   assert.equal(result.status, "completed");
@@ -353,7 +353,7 @@ test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", asy
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   await runPlan({
-    projectId: "completed-poi-complete", skeleton, store, runtime,
+    localProductId: "completed-poi-complete", skeleton, store, runtime,
     planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
   });
   const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
@@ -371,7 +371,7 @@ test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", asy
   };
 
   const result = await runPlan({
-    projectId: "completed-poi-complete", skeleton, store, runtime,
+    localProductId: "completed-poi-complete", skeleton, store, runtime,
     planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
   });
 
@@ -384,7 +384,7 @@ test("assistant 回复反映实际接受 / 缺失模块，不抄模型 reply", a
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   const planner = new FakePlanner(buildFakeScript());
-  const result = await runPlan({ projectId: "p6", skeleton, store, runtime, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p6", skeleton, store, runtime, planner, providerLabel: "minimax" });
   // 模型在 presentation 阶段写过「已生成 presentation」；orchestrator 的回复应当不抄。
   assert.ok(!result.assistantReply.includes("已生成 presentation"), `assistant reply 不应抄模型字符串：${result.assistantReply}`);
   assert.ok(result.assistantReply.includes("完成"));

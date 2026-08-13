@@ -83,6 +83,50 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   if (advance) await fillAdvanceBooking(page, advance);
   await fillLocalTravelAgency(page);
   if (butlerSelection) await fillButlerContact(page, butlerSelection);
+  await repairBasicInfoIllegalKeywords(page, info);
+}
+
+export function stripIllegalKeywords(value, keywords) {
+  let next = String(value ?? "");
+  for (const keyword of keywords) {
+    const token = String(keyword ?? "").trim();
+    if (token) next = next.split(token).join("");
+  }
+  return next
+    .replace(/([·+｜|/])\1+/g, "$1")
+    .replace(/([，,；;。])\1+/g, "$1")
+    .replace(/^[·+｜|/，,；;。\s]+|[·+｜|/，,；;。\s]+$/g, "")
+    .trim();
+}
+
+async function repairBasicInfoIllegalKeywords(page, info) {
+  const fields = [
+    { id: "baseInfo.subName", key: "subtitle", label: "副标题" },
+    { id: "baseInfo.operationNote", key: "operationNotes", label: "操作说明" },
+  ];
+  for (let round = 0; round < 3; round += 1) {
+    await delay(800);
+    let repaired = false;
+    for (const field of fields) {
+      const input = page.locator(`[id="${field.id}"]`);
+      const item = input.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
+      const helpTexts = await item.locator(".ant-form-explain").allTextContents().catch(() => []);
+      const keywords = helpTexts.flatMap((text) => {
+        const matches = [...String(text).matchAll(/非法关键词[：:]\s*([^，,、\s]+)/g)];
+        return matches.map((match) => match[1]).filter(Boolean);
+      });
+      if (!keywords.length) continue;
+      const current = await input.inputValue();
+      const next = stripIllegalKeywords(current, keywords);
+      if (!next) throw new Error(`${field.label}只包含 VBK 禁止关键词，请修改产品 JSON 后重试。`);
+      if (next === current) continue;
+      await input.fill(next);
+      await input.blur().catch(() => {});
+      info[field.key] = next;
+      repaired = true;
+    }
+    if (!repaired) return;
+  }
 }
 
 /**
@@ -93,7 +137,7 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
  */
 export async function assertBasicInfoNoRedErrors(page) {
   await delay(800);
-  const watched = ["国家景区", "提前预订", "地接社", "管家", "操作说明"];
+  const watched = ["国家景区", "提前预订", "地接社", "管家", "副标题", "操作说明"];
   const withHelp = page.locator(".ant-form-item-with-help");
   const withControlError = page.locator(".ant-form-item:has(.ant-form-item-control.has-error)");
   const total = (await withHelp.count()) + (await withControlError.count());

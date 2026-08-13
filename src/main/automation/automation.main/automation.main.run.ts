@@ -1,6 +1,6 @@
 /**
  * 自动化阶段主循环入口：runAutomation。
- *   - 拉项目 / 解析 product；
+ *   - 拉产品 / 解析 product；
  *   - 前置兜底：setVisible + ensureBrowserHasBounds；
  *   - 自动化 blocker 检查 + 管家联系人 / 400 电话凭证准备；
  *   - 根据 startIndex（首次或 retryFrom）创建或重置 AutomationRun；
@@ -43,19 +43,19 @@ import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 
 /**
- * 单个项目自动化阶段主循环：
+ * 单个产品自动化阶段主循环：
  *   - retryFrom 为 undefined 时从第 0 阶段跑完整轮；否则按 preparePhaseRetry 重置并按该阶段重跑；
  *   - 任一阶段 needs_user → run.status="failed" + 更新 product 为 blocked 并 return；
  *   - 任一阶段 cancelled → ctx.markCancelled 接管；handler 抛错走 catch；
  *   - 全部完成 → status=succeeded，附 desktop-draft 截图落档。
  *
- * 把持续状态（attempts / logs / phases）持久化到 ctx.db.saveAutomation(projectId, run)，
- * UI 端通过 ctx.emit(projectId) 拿更新。
+ * 把持续状态（attempts / logs / phases）持久化到 ctx.db.saveAutomation(localProductId, run)，
+ * UI 端通过 ctx.emit(localProductId) 拿更新。
  */
-export async function runAutomation(ctx: AutomationRunContext, projectId: string, retryFrom?: string) {
-    const project = ctx.db.getProject(projectId);
-    if (!project) throw new Error("项目不存在");
-    const product = parseProduct(project.product);
+export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
+    const productDetail = ctx.db.getProduct(localProductId);
+    if (!productDetail) throw new Error("产品不存在");
+    const product = parseProduct(productDetail.product);
     // 触发前先决：让 VBK 视图可见并兑底 bounds。
     // 这些调用必须在后面任何预检查 / 阶段 runner 之前完成，否则：
     //   1) view 隐藏时 setVisible 没调，Playwright 连接后看到 window.innerHeight=0
@@ -66,18 +66,18 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
     ctx.ensureBrowserHasBounds();
     // 后面几个阶段强制要求这些字段，但它们在 productSchema 里是可选的。
     // 必须在创建远程草稿之前拦下，否则会在携程留下一个半成品产品。
-    const blockers = automationBlockers(project.product);
+    const blockers = automationBlockers(productDetail.product);
     if (blockers.length) {
       throw new Error(`录入前检查未通过：${blockers.map((item) => item.label).join("、")}`);
     }
-    // product JSON 里的「管家联系人」是 basic 阶段实际依赖的来源；创建项目时
+    // product JSON 里的「管家联系人」是 basic 阶段实际依赖的来源；创建产品时
     // 已从账号固定信息固化进去，自动化阶段不再回读账号 butlerName，避免账号
     // 后续改动覆盖当前产品负责人。400 电话仍来自账号固定信息。
     const draftPhases = draftPhasesFor(product);
     const startIndex = retryFrom ? draftPhases.indexOf(retryFrom) : 0;
     if (retryFrom && startIndex < 0) throw new Error(`当前产品没有阶段：${retryFrom}`);
-    if (retryFrom && !project.productId) throw new Error("远程草稿尚未创建，不能从中间阶段重试。");
-    let basicInfoSaved = project.basicInfoSaved ?? false;
+    if (retryFrom && !productDetail.productId) throw new Error("远程草稿尚未创建，不能从中间阶段重试。");
+    let basicInfoSaved = productDetail.basicInfoSaved ?? false;
 
     const accountName = ctx.db.getSetting("vbkAccountName")?.value;
     // 全量重跑从 basic 阶段起点，需要管家联系人；若从中间阶段重试且 basic 已成功，
@@ -86,7 +86,7 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone = "";
     if (shouldRequireAccountContext) {
-      butlerSelection = resolveProductButlerSelection(project.product);
+      butlerSelection = resolveProductButlerSelection(productDetail.product);
       if (!butlerSelection) {
         throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
       }
@@ -108,22 +108,22 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
     // 国家景区内具体景点：按行程顺序提取全部 spots[].name；不可匹配的单项
     // 由 fillAndSaveBasicInfo 内部追加到 scenicSpotLogs，再在每轮结束时
     // 落盘到 automation log，便于人工核对。
-    const keySpots = pickKeySpotsFromItinerary(project.product);
+    const keySpots = pickKeySpotsFromItinerary(productDetail.product);
     const scenicSpotLogs: string[] = [];
 
-    if (retryFrom && !project.automation) throw new Error("没有可重试的自动录入记录。");
+    if (retryFrom && !productDetail.automation) throw new Error("没有可重试的自动录入记录。");
     const run: AutomationRun = retryFrom
-      ? preparePhaseRetry(project.automation!, draftPhases, retryFrom)
+      ? preparePhaseRetry(productDetail.automation!, draftPhases, retryFrom)
       : { id: randomUUID(), status: "running", phases: draftPhases.map((phase) => ({ phase, status: "pending" })), logs: [] };
-    const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(projectId, run); ctx.emit(projectId); };
-    const persist = () => { ctx.db.saveAutomation(projectId, run); ctx.emit(projectId); };
-    ctx.db.saveAutomation(projectId, run);
-    ctx.db.updateProduct(projectId, project.product, "automating");
+    const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
+    const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
+    ctx.db.saveAutomation(localProductId, run);
+    ctx.db.updateProduct(localProductId, productDetail.product, "automating");
     // setVisible + ensureBrowserHasBounds 已在 run 入口提前调用，
     // 保证后面预检查 / 阶段 runner 不会因 view 未就绪拖崩 click。
     try {
-      const page = await ctx.browser.page();
-      let productId = project.productId;
+      const page = await ctx.browser.page({ requireInteractive: true });
+      let productId = productDetail.productId;
       if (startIndex === 0) {
         run.currentPhase = "basic"; run.phases[0].status = "running";
         if (!productId) {
@@ -131,7 +131,7 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
           // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌
           // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
           productId = (await configureProductShell(page, product)) as string;
-          ctx.db.setProductId(projectId, productId);
+          ctx.db.setProductId(localProductId, productId);
         } else {
           log("正在重跑 basic 阶段…", "warning");
           await openProductEditor(page, productId);
@@ -139,13 +139,18 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         log(`产品基本信息阶段开始：${productId}`);
       } else {
-        // 从中间阶段重试：用户偏好「在当前页面去重试」 —— 不再调
-        // openProductEditor 去拽回「基本信息」 tab，也不进行“重新幂等录入
-        // 产品信息”避免重复填表。页面应已停在原产品某子 tab 上；阶段
-        // handler 各自负责跳到自己的 tab（fillItineraryDraft 会 clickSection
-        // 切到「行程描述」）。**不再做 legacy 的「页面不是编辑器就补一次导航」
-        // 兜底**：该兜底在 retry 路径下会让 clickSection 失去上次状态，引起
-        // recovery loop。
+        // 中间阶段重试（retryFrom>0）：保留「在当前页面继续」偏好，但仍
+        // 必须保证浏览器当前是「这一个产品」的 editor 页。openProductEditor
+        // 带 stayOnCurrentTab=true：
+        //   - 若页面已经停在同一产品的 editor 路径上（含 baseInfoMerge /
+        //     /ivbk/vendor/tourdays）则直接 return，不再拽回「基本信息」tab，
+        //     避免 clickSection 失去上次状态、引发 recovery loop；
+        //   - 若页面已跳到其它 URL（例如用户中途切到设置 / 列表页）则按
+        //     常规导航回到 productEditorUrl，并等「基本信息」tab 落点。
+        // 兜底跳回 editor 后，阶段 handler 各自 clickSection 切到自己的
+        // tab（fillItineraryDraft 切「行程描述」、fillAndSavePresentation
+        // 切「产品图文」等）。
+        await openProductEditor(page, productId!, { stayOnCurrentTab: true });
         log(`已从 ${retryFrom} 阶段继续录入（当前页面）`);
       }
 
@@ -163,15 +168,20 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         // runner 重试本阶段时清空 scenicSpotLogs，防止把上一轮未命中的景点
         // 单项重复记入 automation 日志。
         scenicSpotLogs.length = 0;
-        const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: project.product });
+        const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: productDetail.product });
         log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
+        if (shouldRefill.reason === "complete") {
+          log("basic 阶段已保存且产品数据完整，跳过重复填充");
+          run.phases[0].status = "completed";
+          return;
+        }
         await fillAndSaveBasicInfo(page, product, butlerSelection, { servicePhone, keySpots, scenicSpotLogs, disambiguator: ctx.disambiguator });
         // 把景点未命中的单项沉淀到 automation 日志。
         for (const entry of scenicSpotLogs) log(entry, "warning");
         // 仅当 VBK 真实保存成功后置位；setBasicInfoSaved 由 fillAndSaveBasicInfo
         // 通过 tab 解锁门禁间接验证，runner 不能因此前置。
-        ctx.db.setBasicInfoSaved(projectId);
+        ctx.db.setBasicInfoSaved(localProductId);
         basicInfoSaved = true;
         run.phases[0].status = "completed";
       };
@@ -193,7 +203,7 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
               hotelTier: result.hotelTier,
               diamond: result.diamond as 3 | 4 | 5,
             };
-            ctx.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "automating");
+            ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "automating");
           }
           run.phases[draftPhases.indexOf("hotelResource")].status = "completed";
           return result;
@@ -212,7 +222,7 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
       // reopen_editor_and_retry_phase。basicInfoSaved 仍走同步读取，因为
       // 它由本次 runner 在 basic 成功后置位，不会被外部并发覆盖。
       const makeCtx = (phase: string, execute: () => Promise<unknown>, phaseIndex: number): RecoveryContext => {
-        const latestProductId = ctx.db.getProject(projectId)?.productId;
+        const latestProductId = ctx.db.getProduct(localProductId)?.productId;
         return {
         run,
         phase,
@@ -238,7 +248,7 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
         // 「停止」按钮会写进 cancellationRequested。recovery 在 attempt
         // 顶部检查；in-flight handler 不打断（Playwright click 跨进程无
         // 安全中断点，强制中断会让浏览器页面留下半成品状态）。
-        shouldCancel: () => ctx.cancellationRequested.has(projectId),
+        shouldCancel: () => ctx.cancellationRequested.has(localProductId),
         };
       };
 
@@ -253,12 +263,12 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
           run.status = "failed";
           run.phases[0].status = "failed";
           run.currentPhase = "basic";
-          ctx.db.updateProduct(projectId, project.product, "blocked");
+          ctx.db.updateProduct(localProductId, productDetail.product, "blocked");
           persist();
           return;
         }
         if (basicOutcome.status === "cancelled") {
-          ctx.markCancelled(projectId, run, persist);
+          ctx.markCancelled(localProductId, run, persist);
           return;
         }
       } else {
@@ -279,12 +289,12 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
           run.status = "failed";
           run.phases[index].status = "failed";
           run.currentPhase = phase;
-          ctx.db.updateProduct(projectId, project.product, "blocked");
+          ctx.db.updateProduct(localProductId, productDetail.product, "blocked");
           persist();
           return;
         }
         if (outcome.status === "cancelled") {
-          ctx.markCancelled(projectId, run, persist);
+          ctx.markCancelled(localProductId, run, persist);
           return;
         }
         log(`已保存：${phase}`);
@@ -298,14 +308,14 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
       run.currentPhase = undefined;
       await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
       log("产品草稿已保存，未提交审核、未发布。", "warning");
-      ctx.db.updateProduct(projectId, product as unknown as Record<string, unknown>, "draft_saved");
+      ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "draft_saved");
       persist();
     } catch (error) {
       // 「停止」流程不应该被 catch 当作 failed —— stop() 已经把 run.status
       // 改为 cancelled 并 emit 过，这里只需清理 cancellationRequested 后
       // 静默返回，不要覆盖状态。
       if (error instanceof AutomationCancelledError) {
-        ctx.cancellationRequested.delete(projectId);
+        ctx.cancellationRequested.delete(localProductId);
         return;
       }
       // handler 内部可能因为 stop 之外的其他原因抛错 —— 现有逻辑保持不变。
@@ -313,11 +323,11 @@ export async function runAutomation(ctx: AutomationRunContext, projectId: string
       const current = run.phases.find((phase: { phase: string; status: string }) => phase.phase === run.currentPhase);
       if (current && current.status !== "completed") current.status = "failed";
       log(error instanceof Error ? error.message : "自动录入发生未知错误", "error");
-      ctx.db.updateProduct(projectId, project.product, "blocked");
+      ctx.db.updateProduct(localProductId, productDetail.product, "blocked");
       persist();
       throw error;
     } finally {
       // 走完所有阶段后清理取消信号 —— 防止下一次 run 进来时拿到的 stale flag。
-      ctx.cancellationRequested.delete(projectId);
+      ctx.cancellationRequested.delete(localProductId);
     }
   }

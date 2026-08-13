@@ -15,8 +15,8 @@ export class VbkDatabaseError extends Error {
 }
 
 /**
- * 构造「项目不存在」业务错误：用于数据库层找不到 projectId 时抛出，UI 端按 name/code 区分。
+ * 构造「产品不存在」业务错误：用于数据库层找不到 localProductId 时抛出，UI 端按 name/code 区分。
  */
-export function projectNotFound(id: string): Error {
-  return new VbkDatabaseError("project_not_found", `项目不存在：${id}`);
+export function productNotFound(id: string): Error {
+  return new VbkDatabaseError("product_not_found", `产品不存在：${id}`);
 }

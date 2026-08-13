@@ -298,7 +298,7 @@ test("G4 VBK_PRODUCT_FIELDS 至少 4 个 vbk-runtime 字段（packageName/pricin
 });
 
 test("G4 PRODUCT_JSON_LOCATION 文档化产品 JSON 的存储位置与写入时机", () => {
-  assert.equal(PRODUCT_JSON_LOCATION.table, "projects");
+  assert.equal(PRODUCT_JSON_LOCATION.table, "products");
   assert.equal(PRODUCT_JSON_LOCATION.column, "product_json");
   assert.match(PRODUCT_JSON_LOCATION.schema, /productSchema/);
   assert.match(PRODUCT_JSON_LOCATION.dataPath, /userData/);

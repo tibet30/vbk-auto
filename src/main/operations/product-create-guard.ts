@@ -1,5 +1,5 @@
 /**
- * 「产品创建前置守卫」：在主进程 IPC 层 projects:create / 数据库层 createProject
+ * 「产品创建前置守卫」：在主进程 IPC 层 products:create / 数据库层 createProduct
  * 调用之前，对登录态 + 当前账号固定信息做硬性校验。
  *
  * 硬约束（必须满足至少一条，否则抛错）：
@@ -11,7 +11,7 @@
  *  - 这是主进程与数据库层唯一的「产品创建防线」，UI 端只做辅助提示，绝不能
  *    绕过此守卫；
  *  - 错误文案必须中文、明确、可被运营一眼看懂，列出缺失项以便补救；
- *  - 不做 best-effort：不满足条件时直接抛错，不写库、不发 project:updated。
+ *  - 不做 best-effort：不满足条件时直接抛错，不写库、不发 product:updated。
  *
  * 调用契约：
  *  - assertCreatePreconditions(db) 在不满足时抛 Error，message 包含具体缺失项；
@@ -67,7 +67,7 @@ export function detectCreateGuardFailures(db: VbkDatabase): CreateGuardFailures 
  * 把缺失项拼成一条中文错误信息，列出具体补救路径。
  */
 export function formatGuardFailureMessage(failures: CreateGuardFailures): string {
-  const lines: string[] = ["无法创建项目：缺少以下前置条件。"];
+  const lines: string[] = ["无法创建产品：缺少以下前置条件。"];
   if (failures.notLoggedIn) {
     lines.push("• 未登录 VBK：请先在「账号」面板登录当前账号。");
   }

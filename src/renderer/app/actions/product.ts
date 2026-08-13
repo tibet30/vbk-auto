@@ -1,21 +1,21 @@
-import type { ProjectSummary } from "../../../shared/contracts.js";
+import type { ProductSummary } from "../../../shared/contracts.js";
 import { api } from "../helpers";
 import type { AppState } from "../state/useAppState";
 
-export function useProjectHandlers(state: AppState) {
+export function useProductHandlers(state: AppState) {
   const {
-    project,
+    product,
     input,
     loading,
     createInput,
     setInput,
     setLoading,
     setNotice,
-    setProject,
-    setProjects,
+    setProduct,
+    setProducts,
     setCreating,
     setCreateInput,
-    setSavingProject,
+    setSavingProduct,
     setView,
     setAccountMenuOpen,
     refresh,
@@ -24,15 +24,15 @@ export function useProjectHandlers(state: AppState) {
 
   const send = async (retryContent?: string, keepNotice = false, options: { isRetry?: boolean } = {}) => {
     const retryFallback = options.isRetry
-      ? project?.messages?.slice().reverse().find((message) => message.role === "user" && message.content.trim())?.content.trim()
+      ? product?.messages?.slice().reverse().find((message) => message.role === "user" && message.content.trim())?.content.trim()
       : "";
     const rawText = (retryContent || input || retryFallback || "").trim();
     if (loading) {
       setNotice("AI 正在生成中，请稍后再试。");
       return;
     }
-    if (!project) {
-      if (!keepNotice) setNotice("当前未选中项目，请先打开项目后再发送。");
+    if (!product) {
+      if (!keepNotice) setNotice("当前未选中产品，请先打开产品后再发送。");
       return;
     }
     const aiApi = api();
@@ -62,7 +62,7 @@ export function useProjectHandlers(state: AppState) {
       setNotice(null);
     }
     try {
-      await aiApi.ai.send(project.id, text);
+      await aiApi.ai.send(product.id, text);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "方案生成失败，请重试。");
     } finally {
@@ -70,59 +70,59 @@ export function useProjectHandlers(state: AppState) {
     }
   };
 
-  const createProject = async () => {
+  const createProduct = async () => {
     if (!createInput.destination.trim()) {
       setNotice("请填写目的地。");
       return;
     }
-    setSavingProject(true);
+    setSavingProduct(true);
     setNotice(null);
     try {
-      const created = await api()!.projects.create({ ...createInput, destination: createInput.destination.trim() });
-      setProject(created);
-      setProjects((items) => [created, ...items]);
+      const created = await api()!.products.create({ ...createInput, destination: createInput.destination.trim() });
+      setProduct(created);
+      setProducts((items) => [created, ...items]);
       setView("workspace");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "创建项目失败，请重试。");
+      setNotice(error instanceof Error ? error.message : "创建产品失败，请重试。");
     } finally {
-      setSavingProject(false);
+      setSavingProduct(false);
       setCreating(false);
     }
   };
 
-  const openProject = async (item: ProjectSummary) => {
+  const openProduct = async (item: ProductSummary) => {
     if (!api()) return;
     setNotice(null);
     setCreating(false);
     setAccountMenuOpen(false);
     try {
-      setProject(await api()!.projects.get(item.id));
+      setProduct(await api()!.products.get(item.id));
       setActiveTaskId(null);
       setView("workspace");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "打开项目失败，请重试。");
+      setNotice(error instanceof Error ? error.message : "打开产品失败，请重试。");
     }
   };
 
-  const deleteProject = async (item: ProjectSummary) => {
+  const deleteProduct = async (item: ProductSummary) => {
     if (!api()) return false;
     setNotice(null);
     try {
-      await api()!.projects.delete(item.id);
-      setProjects((items) => items.filter((candidate) => candidate.id !== item.id));
-      if (project?.id === item.id) setProject(null);
-      setNotice(`已删除本机项目「${item.name}」。VBK 平台上的产品未受影响。`);
+      await api()!.products.delete(item.id);
+      setProducts((items) => items.filter((candidate) => candidate.id !== item.id));
+      if (product?.id === item.id) setProduct(null);
+      setNotice(`已删除本机产品「${item.name}」。VBK 平台上的产品未受影响。`);
       return true;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "删除项目失败，请重试。");
+      setNotice(error instanceof Error ? error.message : "删除产品失败，请重试。");
       return false;
     }
   };
 
   return {
     send,
-    createProject,
-    openProject,
-    deleteProject,
+    createProduct,
+    openProduct,
+    deleteProduct,
   };
 }

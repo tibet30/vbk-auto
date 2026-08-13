@@ -8,7 +8,7 @@ export type FieldState =
 
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
-export interface ProjectSummary {
+export interface ProductSummary {
   id: string;
   name: string;
   status: "planning" | "review" | "automating" | "draft_saved" | "blocked";
@@ -16,20 +16,20 @@ export interface ProjectSummary {
   updatedAt: string;
 }
 
-export interface CreateProjectInput {
+export interface CreateProductInput {
   destination: string;
   days: number;
   productForm: "privateTour" | "groupTour";
 }
 
-export interface ProjectReadiness {
+export interface ProductReadiness {
   ready: boolean;
   completion: number;
   issues: Array<{ label: string; detail: string }>;
 }
 
 export interface PoiSuggestLogContext {
-  projectId: string;
+  localProductId: string;
   dayIndex: number;
   spotIndex: number;
   title: string;
@@ -61,7 +61,7 @@ export interface PoiSuggestDetailResult {
   candidates: PoiSuggestCandidate[];
 }
 
-export interface ProjectDetail extends ProjectSummary {
+export interface ProductDetail extends ProductSummary {
   product: Record<string, unknown>;
   messages: ConversationMessage[];
   researchTasks: ResearchTask[];
@@ -568,10 +568,10 @@ export type OperationStatus = "succeeded" | "failed" | "skipped" | "running";
 
 export interface OperationLogEntry {
   id: string;
-  /** 关联到的产品项目 ID；undefined 表示全局操作（如登录态维护）。 */
-  projectId?: string;
-  /** 关联到的产品名称，方便在不切项目时识别。 */
-  projectName?: string;
+  /** 关联到的本地产品 ID；undefined 表示全局操作（如登录态维护）。 */
+  localProductId?: string;
+  /** 关联到的产品名称，方便在不切产品时识别。 */
+  productName?: string;
   type: OperationType;
   /** 操作可读的名称，如「点击确认删除」「输入产品名称」。 */
   name: string;
@@ -604,7 +604,7 @@ export interface OperationLogQuery {
   status?: OperationStatus | "all";
   type?: OperationType | "all";
   stage?: string | "all";
-  projectId?: string;
+  localProductId?: string;
   /** 上限条数；缺省走 OPERATION_LOG_CAP。 */
   limit?: number;
 }

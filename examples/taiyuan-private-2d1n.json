@@ -37,7 +37,9 @@
       "source": "ctripLibrary",
       "poi": "晋祠博物馆",
       "description": "太原晋祠古建筑实景",
-      "minQuality": 3
+      "minQuality": 3,
+      "imageId": 10001,
+      "imageUrl": "https://images.example.test/taiyuan-jinci.jpg"
     }
   },
   "operations": {

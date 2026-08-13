@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 import { execSync, spawn } from "node:child_process";
 
 const args = parseArgs(process.argv.slice(2));
-const PROJECT_ID = args.project || process.env.VBK_PROJECT_ID;
+const PRODUCT_ID = args.product || process.env.VBK_PRODUCT_ID;
 const DB_PATH = `${process.env.HOME}/Library/Application Support/vbk-auto/vbk-desktop.sqlite`;
 const CDP_PORT = Number(args.port || process.env.VBK_CDP_PORT || 9837);
 
@@ -15,14 +15,14 @@ function getState() {
   const db = new Database(DB_PATH, { readonly: true });
   try {
     const run = db.prepare(
-      "SELECT id, payload_json, created_at FROM automation_runs WHERE project_id=? ORDER BY created_at DESC LIMIT 1"
-    ).get(PROJECT_ID);
+      "SELECT id, payload_json, created_at FROM automation_runs WHERE local_product_id=? ORDER BY created_at DESC LIMIT 1"
+    ).get(PRODUCT_ID);
     const proj = db.prepare(
-      "SELECT status, product_id, updated_at FROM projects WHERE id=?"
-    ).get(PROJECT_ID);
+      "SELECT status, product_id, updated_at FROM products WHERE id=?"
+    ).get(PRODUCT_ID);
     if (!run) return null;
     const payload = JSON.parse(run.payload_json || "{}");
-    return { runId: run.id, runStatus: payload.status, currentPhase: payload.currentPhase, phases: payload.phases || [], recovery: payload.recovery, project: proj, payload, createdAt: run.created_at };
+    return { runId: run.id, runStatus: payload.status, currentPhase: payload.currentPhase, phases: payload.phases || [], recovery: payload.recovery, product: proj, payload, createdAt: run.created_at };
   } finally {
     db.close();
   }
@@ -43,7 +43,7 @@ async function triggerRetry(retryFromPhase) {
     }
     const res = await renderer.evaluate(
       ({ id, phase }) => phase ? window.vbk.automation.retryPhase(id, phase) : window.vbk.automation.retry(id),
-      { id: PROJECT_ID, phase: retryFromPhase }
+      { id: PRODUCT_ID, phase: retryFromPhase }
     );
     return res;
   } finally {
@@ -107,12 +107,12 @@ function describeAttemptErrors(state) {
 }
 
 async function main() {
-  if (!PROJECT_ID) {
-    console.error("缺少 PROJECT_ID。请用 --project <id> 或环境变量 VBK_PROJECT_ID 指定。");
-    console.error("示例: node scripts/autonomous-runner.mjs --project <uuid> --port 9330");
+  if (!PRODUCT_ID) {
+    console.error("缺少 PRODUCT_ID。请用 --product <id> 或环境变量 VBK_PRODUCT_ID 指定。");
+    console.error("示例: node scripts/autonomous-runner.mjs --product <uuid> --port 9330");
     process.exit(1);
   }
-  console.log(`[runner] CDP=${CDP_PORT} PROJECT=${PROJECT_ID}`);
+  console.log(`[runner] CDP=${CDP_PORT} PRODUCT=${PRODUCT_ID}`);
 
   const cdpOk = await ensureCdp();
   if (!cdpOk) {

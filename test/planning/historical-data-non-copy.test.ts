@@ -1,5 +1,5 @@
 /**
- * 历史数据隔离测试：确保新建项目从骨架生成的 supplierProductCode / 资源 ID
+ * 历史数据隔离测试：确保新建产品从骨架生成的 supplierProductCode / 资源 ID
  * / 价格 / 库存日期 / 推荐语与 examples/taiyuan-private-2d1n.json 不同。
  *
  *  同时验证 orchestrator 与 adapter 不会从 example 里复制 ID / 价格 / 日期
@@ -105,10 +105,10 @@ test("新建产品不复用 example 里的 supplierProductCode / vehicleResource
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new DisjointPlanner(fullOutputs);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
 
   // 1. supplierProductCode 必须保留骨架里的 NEWXYZ。
-  //    planning 只写骨架到 /operations；basicInfo 由 db.createProject 填充并保持不变。
+  //    planning 只写骨架到 /operations；basicInfo 由 db.createProduct 填充并保持不变。
   //    FakeRuntime 的 product 不含 basicInfo；这里断言：planner 全程没有写过 supplierProductCode。
   const basicInfo = (rt.product.basicInfo ?? {}) as { supplierProductCode?: string };
   assert.equal(basicInfo.supplierProductCode ?? skeleton.supplierProductCode, skeleton.supplierProductCode);
@@ -125,7 +125,7 @@ test("新建产品不复用 example 的价格 / 库存日期", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new DisjointPlanner(fullOutputs);
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   const commercial = rt.product.commercial as { pricing: { adult: number }; inventory: { startDate: string } };
   assert.notEqual(commercial.pricing.adult, 1233);
   assert.notEqual(commercial.inventory.startDate, "2026-08-10");

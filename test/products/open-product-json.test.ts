@@ -20,7 +20,7 @@ async function makeDb(): Promise<{ db: VbkDatabase; cleanup: () => void }> {
   };
 }
 
-function makeValidProjectJson(): string {
+function makeValidProductJson(): string {
   // 必须满足 productSchema：包含 basicInfo + sales + operations + itinerary
   return JSON.stringify({
     sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
@@ -58,27 +58,27 @@ function makeValidProjectJson(): string {
 }
 
 /**
- * 复刻 main.ts 里 projects:updateProductJson 的 handler 逻辑：解析 → parseProduct → updateProduct。
+ * 复刻 main.ts 里 products:updateProductJson 的 handler 逻辑：解析 → parseProduct → updateProduct。
  * 不直接调 ipcMain.handle，而是验证底层流程与 IPC 端完全等价。
  */
 async function updateProductJsonLikeIpc(db: VbkDatabase, id: string, json: string) {
-  const project = db.getProject(id);
-  if (!project) throw new Error("项目不存在");
+  const product = db.getProduct(id);
+  if (!product) throw new Error("产品不存在");
   let next: Record<string, unknown>;
   try { next = JSON.parse(json); }
   catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
   parseProduct(next);
   db.updateProduct(id, next, "review");
-  return db.getProject(id)!;
+  return db.getProduct(id)!;
 }
 
 // ───────────────────────── 测试 ─────────────────────────
 
-test("合法 JSON 写入：product 落库 + project.status='review'", async () => {
+test("合法 JSON 写入：product 落库 + product.status='review'", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    const updated = await updateProductJsonLikeIpc(db, project.id, makeValidProjectJson());
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    const updated = await updateProductJsonLikeIpc(db, product.id, makeValidProductJson());
 
     assert.equal(updated.status, "review");
     assert.equal((updated.product.basicInfo as Record<string, unknown>).subtitle, "轻松慢游");
@@ -89,9 +89,9 @@ test("合法 JSON 写入：product 落库 + project.status='review'", async () =
 test("非法 JSON 抛错：try/catch 抛「产品 JSON 无法解析」", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
     await assert.rejects(
-      async () => updateProductJsonLikeIpc(db, project.id, "{ broken json"),
+      async () => updateProductJsonLikeIpc(db, product.id, "{ broken json"),
       /产品 JSON 无法解析/,
     );
   } finally { cleanup(); }
@@ -100,24 +100,24 @@ test("非法 JSON 抛错：try/catch 抛「产品 JSON 无法解析」", async (
 test("产品协议被违反抛错：缺 basicInfo.meetingCity", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    const broken = JSON.parse(makeValidProjectJson()) as Record<string, unknown>;
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    const broken = JSON.parse(makeValidProductJson()) as Record<string, unknown>;
     const basic = broken.basicInfo as Record<string, unknown>;
     delete basic.meetingCity;
     await assert.rejects(
-      async () => updateProductJsonLikeIpc(db, project.id, JSON.stringify(broken)),
+      async () => updateProductJsonLikeIpc(db, product.id, JSON.stringify(broken)),
       // zod 的 issue 信息，不强制字面量，只要报错即可
       (err: Error) => err instanceof Error,
     );
   } finally { cleanup(); }
 });
 
-test("项目不存在抛错", async () => {
+test("产品不存在抛错", async () => {
   const { db, cleanup } = await makeDb();
   try {
     await assert.rejects(
-      async () => updateProductJsonLikeIpc(db, "non-existent-id", makeValidProjectJson()),
-      /项目不存在/,
+      async () => updateProductJsonLikeIpc(db, "non-existent-id", makeValidProductJson()),
+      /产品不存在/,
     );
   } finally { cleanup(); }
 });
@@ -125,26 +125,26 @@ test("项目不存在抛错", async () => {
 test("空对象 JSON 被协议拒绝：parseProduct 拒绝整个对象", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
     await assert.rejects(
-      async () => updateProductJsonLikeIpc(db, project.id, JSON.stringify({ random: "field" })),
+      async () => updateProductJsonLikeIpc(db, product.id, JSON.stringify({ random: "field" })),
       (err: Error) => err instanceof Error,
     );
   } finally { cleanup(); }
 });
 
-test("updateProductJson 成功后原项目里旧 product 字段被覆盖", async () => {
+test("updateProductJson 成功后原产品里旧 product 字段被覆盖", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    assert.equal((project.product.basicInfo as Record<string, unknown>).subtitle, "");
-    assert.deepEqual(project.product.commercial, { inventory: defaultCommercialInventory() });
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    assert.equal((product.product.basicInfo as Record<string, unknown>).subtitle, "");
+    assert.deepEqual(product.product.commercial, { inventory: defaultCommercialInventory() });
 
-    const next = JSON.parse(makeValidProjectJson()) as Record<string, unknown>;
+    const next = JSON.parse(makeValidProductJson()) as Record<string, unknown>;
     (next.basicInfo as Record<string, unknown>).subtitle = "更新后的副标题";
-    await updateProductJsonLikeIpc(db, project.id, JSON.stringify(next));
+    await updateProductJsonLikeIpc(db, product.id, JSON.stringify(next));
 
-    const reloaded = db.getProject(project.id)!;
+    const reloaded = db.getProduct(product.id)!;
     assert.equal((reloaded.product.basicInfo as Record<string, unknown>).subtitle, "更新后的副标题");
     assert.equal(reloaded.product.commercial, undefined);
   } finally { cleanup(); }

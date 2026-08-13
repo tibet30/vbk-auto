@@ -1,89 +1,50 @@
 /**
- * Electron main 进程入口。
- *
- * 主要职责：
- *  - 初始化数据层（VbkDatabase）、AI 服务、VBK 嵌入式浏览器、Automation；
- *  - 创建主窗口并绑定 IPC 路由（`registerIpc()`）；
- *  - 项目更新后向 renderer 推送 `project:updated` 事件；
- *  - 启动时恢复孤儿 automation run / planning state。
- *
- * 本文件已偏大（700+ 行）：拆分计划需与 Code Review 一起安排；本次只
- * 补文件头与少量 IPC 分组注释。
+ * Electron main process entry: process configuration, shared runtime helpers,
+ * IPC registrar composition, and application bootstrap.
  */
-
-import { logError, logInfo, logLog, logWarn } from "../shared/log-timestamp.js";
 import path from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
 import { fileURLToPath } from "node:url";
-import { VbkDatabase } from "./infrastructure/database/database.js";
-import {
-  MiniMaxService,
-  MiniMaxServiceError,
-  isCoverResearchTaskSatisfiedByProduct,
-} from "./minimax/minimax.js";
-import { applyProductPatchSafe } from "./operations/product-patch.js";
-import { automationBlockers, parseProduct, productSchema } from "./automation/schema/schema.js";
-import { VbkBrowser } from "./infrastructure/vbk-browser.js";
-import { suggestPoi, suggestPoiDemo, suggestPoiDetailWithRawPayload } from "./infrastructure/poi-suggest.js";
-import { DraftAutomation } from "./automation/automation.js";
-import { resolveVehicleResource } from "./operations/vehicle-resource.js";
-import { resolveHotelResource } from "./operations/hotel-resource.js";
-import { applyAutoCoverFill } from "./operations/cover-auto-fill.js";
-import { applyAutoVehicleResourceTrigger } from "./operations/vehicle-resource-trigger.js";
-import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
-import { listProviderContactCards } from "./infrastructure/butler-contacts.js";
-import { applyManualReviewField } from "./operations/manual-review-field.js";
-import {
-  isManualCoverStillPresent,
-  listManualCoverMetas,
-  readManualCover,
-  searchCtripLibraryCoverImages,
-  searchCtripLibraryCoverPlaces,
-  uploadManualCover,
-} from "./operations/cover-ipc.js";
-import { refreshSatisfiedResearchTasks } from "./operations/research-refresh.js";
-import { createProjectWithAccountButler, injectAccountButler } from "./operations/account-butler-inject.js";
-import { assertCreatePreconditions } from "./operations/project-create-guard.js";
-import { loadOperationLog, setOperationLogDb } from "./operations/operation-log-store.js";
-import type { AccountFixedInfoFieldKey, AccountFixedInfoValue, AiConnectionTestInput, AiModelListInput, AiProvider, CreateProjectInput, ManualReviewFieldInput, OperationLogQuery, ProjectDetail, ProjectReadiness, Settings, VbkLoginStatus } from "../shared/contracts.js";
-import type { PoiSuggestLogContext } from "../shared/contracts.js";
-import { isAiProvider } from "../shared/contracts.js";
-import { aiProviderConfig } from "../shared/ai-provider-config.js";
-import { mergeReadinessIssues, openResearchTaskToIssue } from "../shared/readiness-issues.js";
-import { isResearchTaskSatisfiedByProduct } from "../shared/research-task-satisfaction.js";
-import { PLANNING_STAGES, type Planner, type PlanningGenerationState, type PlanningModule, type PlanningRunResult } from "../shared/contracts.js";
-import { runPlan } from "./planning/plan-orchestrator.js";
-import { hasIncompleteItineraryPois } from "./planning/poi-enrichment.js";
-import { OpenAICompatiblePlannerAdapter } from "./planning/adapters/openai-compatible-adapter.js";
-import { DbGenerationStateStore, DbOrchestratorRuntime } from "./planning/runtime.js";
-import { buildPreflightFailureState } from "./planning/preflight-failure.js";
-import {
-  restoreProjectToPlanningForRetry,
-  syncProjectStatusAfterFailure,
-  syncProjectStatusAfterRunPlan,
-} from "./planning/project-status-sync.js";
-import { VbkDatabaseError, projectNotFound } from "./infrastructure/db-errors.js";
-import {
-  classifyMiniMaxError,
-  extractMiniMaxFailureReason,
-  normalizeFailureMessage,
-  stripRetryHintTail,
-  toRetryHint,
-} from "./minimax/minimax-error-handling.js";
-import { assertSafeAiServiceUrl, resolveAiConnectionInput, successfulAiConnectionTest } from "./infrastructure/ai-settings.js";
-import { fetchAiModelList } from "./infrastructure/ai-models.js";
-// AI API keys + VBK cookie snapshots follow the user's explicit decision
-// to drop Electron Keychain-backed encryption in favour of local 0600 JSON
-// stores under `app.getPath('userData')`. See ai-key-store.ts and
-// vbk-cookie-store.ts for the rationale. No encryption-layer import anywhere.
-import { createLocalAiKeyStore, LOCAL_AI_KEY_FILE_NAME, type LocalAiKeyStore } from "./infrastructure/ai-key-store.js";
-import { createLocalVbkCookieStore, LOCAL_VBK_COOKIE_FILE_NAME, type LocalVbkCookieStore } from "./infrastructure/vbk-cookie-store.js";
-import { assertDebugEnabled, assertTrustedSender } from "./infrastructure/ipc-sender.js";
-import { installContentSecurityPolicy } from "./infrastructure/csp.js";
-import { aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
+import { app, BrowserWindow } from "electron";
+import { logError, logLog, logWarn } from "../shared/log-timestamp.js";
 import { APP_NAME } from "../shared/brand.js";
+import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
+import type {
+  AiProvider,
+  Planner,
+  PlanningGenerationState,
+  ProductDetail,
+  ProductReadiness,
+  Settings,
+  VbkLoginStatus,
+} from "../shared/contracts.js";
+import { isAiProvider } from "../shared/contracts.js";
+import { DraftAutomation } from "./automation/automation.js";
+import { VbkDatabase } from "./infrastructure/database/database.js";
+import { productNotFound } from "./infrastructure/db-errors.js";
+import { computeReadiness } from "./readiness.js";
+import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
+import { VbkBrowser } from "./infrastructure/vbk-browser.js";
+import {
+  createLocalAiKeyStore,
+  LOCAL_AI_KEY_FILE_NAME,
+  type LocalAiKeyStore,
+} from "./infrastructure/ai-key-store.js";
+import {
+  createLocalVbkCookieStore,
+  LOCAL_VBK_COOKIE_FILE_NAME,
+  type LocalVbkCookieStore,
+} from "./infrastructure/vbk-cookie-store.js";
+import { MiniMaxService } from "./minimax/minimax.js";
+import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "./planning/adapters/openai-compatible-adapter.js";
+import { createMainWindow } from "./create-window.js";
+import { registerProductAiIpc } from "./ipc/product-ai-ipc.js";
+import { registerBrowserAutomationIpc } from "./ipc/browser-automation-ipc.js";
+import { registerSettingsIpc } from "./ipc/settings-ipc.js";
+import { registerPlanningIpc } from "./ipc/planning-ipc.js";
+import type { MainIpcContext } from "./ipc/context.js";
+import { ProductWorkflowCoordinator } from "./application/product-workflow-coordinator.js";
+import { ProductMutationService } from "./application/product-mutation-service.js";
 
-/** 项目根目录（指向 repository root），用来定位本地静态资源 / fixtures。 */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 /** 当前是否为开发模式（未打包），用于开关 DevTools / 临时文件路径。 */
 const isDev = !app.isPackaged;
@@ -100,10 +61,13 @@ app.commandLine.appendSwitch("remote-debugging-port", debuggingPort);
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 // 抑制 Chromium 内部 noise（service_worker/quota/stun 等），只显示 WARNING 及以上。
 app.commandLine.appendSwitch("log-level", "2");
-/** MiniMax 默认 model：环境变量优先，否则用项目默认的「MiniMax-M3」。 */
+/** MiniMax 默认 model：环境变量优先，否则用产品默认的「MiniMax-M3」。 */
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
 
-let window: BrowserWindow; let db: VbkDatabase; let browser: VbkBrowser; let automation: DraftAutomation;
+let window: BrowserWindow;
+let db: VbkDatabase;
+let browser: VbkBrowser;
+let automation: DraftAutomation;
 /**
  * Local AI API key store. One instance per process; backed by a single
  * 0600 JSON file under `app.getPath('userData')` (see ai-key-store.ts).
@@ -123,16 +87,16 @@ let aiKeyStore: LocalAiKeyStore | null = null;
 let cookieStore: LocalVbkCookieStore | null = null;
 // 关闭窗口后 AI 或自动化可能仍在运行，向已销毁的 webContents 发送会抛异常。
 /**
- * 向 renderer 广播「项目更新」事件：
+ * 向 renderer 广播「产品更新」事件：
  *   - 关闭窗口后 webContents 可能销毁，因此先 isDestroyed 判定；
- *   - 这条事件供 UI 实时刷新项目详情 / 操作日志。
+ *   - 这条事件供 UI 实时刷新产品详情 / 操作日志。
  */
-const emitProject = (project: ProjectDetail) => {
+const emitProduct = (product: ProductDetail) => {
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-  window.webContents.send("project:updated", project);
+  window.webContents.send("product:updated", product);
 };
 /**
- * 规划状态在成功落库后才广播。该事件是 renderer 的实时来源；首次打开项目
+ * 规划状态在成功落库后才广播。该事件是 renderer 的实时来源；首次打开产品
  * 仍通过 planning:state 补偿，避免订阅建立前的事件丢失。
  */
 const emitPlanningState = (state: PlanningGenerationState) => {
@@ -140,7 +104,7 @@ const emitPlanningState = (state: PlanningGenerationState) => {
   // isDestroyed() 与 send() 之间窗口仍可能刚好被销毁。状态已经落库，通知失败
   // 只能丢给下一次 planning:state 补偿，绝不能让主进程规划任务因 UI 生命周期失败。
   try {
-    window.webContents.send("planning:updated", state.projectId, state);
+    window.webContents.send("planning:updated", state.localProductId, state);
   } catch {
     // renderer 重建 / 退出期间没有可投递目标；持久化状态仍是权威来源。
   }
@@ -195,7 +159,7 @@ async function apiKey(provider: AiProvider = getSettings().aiProvider) {
 }
 
 /** 已完成方案只允许 POI 查询/名称纠正；Key 不可用时安全降级到人工核查。 */
-async function completedPoiBackfillPlanner(projectId: string): Promise<{ planner: Planner; providerLabel?: string }> {
+async function completedPoiBackfillPlanner(localProductId: string): Promise<{ planner: Planner; providerLabel?: string }> {
   const planner: Planner = {
     generateStage: async () => { throw new Error("已完成 POI 回填不应调用 AI planner"); },
   };
@@ -209,13 +173,14 @@ async function completedPoiBackfillPlanner(projectId: string): Promise<{ planner
       apiKey: decryptedKey,
       baseUrl: providerProfile.baseUrl,
       model: providerProfile.model,
+      ...planningTransportOptions(settings.aiProvider),
     });
     return {
       planner: { ...planner, resolvePoiName: resolverAdapter.resolvePoiName.bind(resolverAdapter) },
       providerLabel: resolveAiProviderLabel(settings),
     };
   } catch (error) {
-    logWarn(`[planning] poi_backfill.resolver_unavailable projectId=${projectId}`, error);
+    logWarn(`[planning] poi_backfill.resolver_unavailable localProductId=${localProductId}`, error);
     return { planner };
   }
 }
@@ -284,1037 +249,24 @@ function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
   return { ...status, accountName, accounts };
 }
 /**
- * 计算项目 readiness：把项目当前状态、已保存自动化运行、是否阻塞等映射到对外的 ProjectReadiness。
+ * 计算产品 readiness：把产品当前状态、已保存自动化运行、是否阻塞等映射到对外的 ProductReadiness。
  * 用于 UI 顶栏显示与 IPC 路由。
+ *
+ * 实际计算逻辑（needs_user 阻塞的「可见性」红线、completion 算法）已抽到
+ * ./readiness.ts 的纯函数 computeReadiness，便于单测覆盖 contact 不在 VBK
+ * 下拉 / 用户主动取消等场景；本函数只负责 db.getProduct + productNotFound
+ * 的包装与抛错。
  */
-function readiness(projectId: string): ProjectReadiness {
-  const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
-  const issues: ProjectReadiness["issues"] = [];
-  let hiddenBlockers = 0;
-  const parsed = productSchema.safeParse(project.product);
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues.slice(0, 6)) issues.push({ label: issue.path.join(".") || "产品方案", detail: issue.message });
-  }
-  const unresolved = project.researchTasks.filter((task) =>
-    task.state !== "confirmed" &&
-    task.state !== "resolved" &&
-    !isResearchTaskSatisfiedByProduct(task, project.product) &&
-    !isCoverResearchTaskSatisfiedByProduct(task, project.product),
-  );
-  for (const task of unresolved) issues.push(openResearchTaskToIssue(task));
-  // 与自动录入使用同一套要求，避免界面显示「可以录入」后才在携程失败。
-  if (parsed.success) for (const blocker of automationBlockers(project.product)) issues.push(blocker);
-  // 自动录入已停止是当前运行状态，不是产品方案缺口；它阻断 readiness，
-  // 但不进入「待处理事项」列表，避免用户看到一条额外任务。
-  if (project.automation?.recovery?.phases) {
-    const blocked = Object.values(project.automation.recovery.phases).find((rec) => rec.state === "needs_user");
-    if (blocked) hiddenBlockers += 1;
-  }
-  const mergedIssues = mergeReadinessIssues(issues);
-  const blockerCount = mergedIssues.length + hiddenBlockers;
-  return { ready: blockerCount === 0, completion: Math.round((Math.max(0, 12 - Math.min(12, blockerCount)) / 12) * 100), issues: mergedIssues };
-}
-
-/**
- * 创建主窗口并加载 renderer 入口；遵循 isDev 决定是否打开 DevTools。
- * 调用 registerIpc() 在窗口出现之前就注册好，避免 renderer 提前触发未注册 handler。
- */
-async function createWindow() {
-  window = new BrowserWindow({ width: 1512, height: 982, minWidth: 1180, minHeight: 760, title: APP_NAME, backgroundColor: "#fafafa", webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(root, "dist-electron", "main", "preload.cjs") } });
-  // 注入 CSP 头：阻止 inline-script / 第三方域加载。dev 允许 vite / ws；
-  // 见 csp.ts。attach 到主窗口 session 即可，partition:vbk 用的
-  // VBK 后台自身页面不应被 CSP 拦截（其响应头由 VBK 服务控制且为
-  // 内嵌第三方应用），所以只在主 session 装。
-  installContentSecurityPolicy(window.webContents.session);
-  if (isDev) await window.loadURL("http://127.0.0.1:5173"); else await window.loadFile(path.join(root, "dist", "index.html"));
-  // VBK cookie 快照走本地 0600 atomic cookie store（见
-  // ./infrastructure/vbk-cookie-store.ts），与 Electron Keychain 加密层
-  // 完全解耦。本地 store 自己管 per-account save/load/delete/list，
-  // SQLite 的 login_sessions 表里残留的 cookies_ciphertext / cookies_json
-  // 老密文**永远不被读、不被解密**（fail closed）。cookieStore 在
-  // bootstrap 阶段已就绪（app.whenReady 内创建）；createWindow 拿到的
-  // 是非空引用，初始化失败会让 app.whenReady 的 .catch 退出进程。
-  const sessions = cookieStore;
-  if (!sessions) throw new Error("VBK cookie store 尚未初始化，请稍后重试。");
-  browser = new VbkBrowser(window, debuggingPort, {
-    saveSession: (key, name, cookiesJson) => {
-      // sessions 自身已覆盖「空快照 = 删除」语义；这里直接转发即可。
-      // 抛出时由 VbkBrowser.saveCurrentSession 的 try/catch 兜底，最终
-      // IPC / UI 边界（browser.status、addLogin、switchAccount）都有
-      // 兜底 catch，不会出现 unhandled promise rejection。
-      sessions.saveSession(key, name, cookiesJson);
-    },
-    loadSession: (key) => {
-      // Legacy fail-closed：本接口不再读取 SQLite。sessions 找不到时
-      // 返回 null，调用方切到「请重新登录」路径。SQLite 里残留的加密 / 明文
-      // cookies 行一律视为「不存在」，无需显式清理（用户在状态面板上看到
-      // 的列表来自 sessions.listSessions()，老行不会再出现）。
-      return sessions.loadSession(key);
-    },
-    listSessions: () => sessions.listSessions(),
-    deleteSession: (key) => {
-      sessions.deleteSession(key);
-    },
-    getActiveAccountKey: () => db.getSetting("vbkActiveAccountKey")?.value,
-    setActiveAccountKey: (key) => db.setSetting("vbkActiveAccountKey", key),
-    clearActiveAccountKey: () => db.deleteSetting("vbkActiveAccountKey"),
-  }); await browser.initialise();
-  // 启动后等待 VBK SPA 渲染出"产品列表"，然后通知 renderer 可以检测登录态。
-  // fire-and-forget：即使超时也不会阻塞窗口创建，renderer 的 1.2s 兜底重试
-  // 在事件未到达时仍会工作。
-  void browser.waitUntilReady().then((ready) => {
-    if (ready && window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-      window.webContents.send("vbk:page-ready");
-    }
-  });
-  automation = new DraftAutomation(db, browser, emitProject, async (req) => {
-    const settings = getSettings();
-      const service = await aiService();
-      try {
-        return await service.diagnoseAutomationFailure(req);
-    } catch (error) {
-      logWarn("[recovery] advisor failed", {
-        phase: req.phase,
-        attempt: req.attempt,
-        errorCode: (error as { code?: string }).code,
-      });
-      // 让 runner 把 advisor 抛错当 needs_user 处理：再抛出一次即可。
-      throw error;
-    }
-  }, async (req) => {
-    const settings = getSettings();
-      const service = await aiService();
-      try {
-        return await service.disambiguateOption(req);
-    } catch (error) {
-      logWarn("[disambiguator] failed", {
-        kind: req.kind,
-        desired: req.desired,
-        errorCode: (error as { code?: string }).code,
-      });
-      throw error;
-    }
+function readiness(localProductId: string): ProductReadiness {
+  const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
+  return computeReadiness({
+    product: product.product,
+    researchTasks: product.researchTasks,
+    automation: product.automation,
   });
 }
 
-/**
- * 注册全部 ipcMain.handle：
- *   - 项目相关：CRUD / readiness / applyProductPatchSafe / vehicle / hotel resolve 等；
- *   - AI 相关：connectionTest / fetchAiModelList / saveApiKey / planner run / advisor；
- *   - VBK 浏览器相关：getCurrentUserInfo / saveCurrentSession / switchAccount / forgetAccount。
- * 单文件较长，未来拆分计划与 code review 一起做。
- */
-function registerIpc() {
-  ipcMain.handle("projects:list", () => db.listProjects());
-  ipcMain.handle("projects:create", (_event, input: CreateProjectInput) => {
-    // 「产品创建」主进程防线：在写库前硬校验「登录 + 400 电话 + 管家联系人」。
-    // 任意一项缺失直接抛错（中文、列出补救路径），不创建项目、不写消息、不写任务，
-    // 也不发 project:updated。UI 端的提示只是辅助，这里才是真源。
-    assertCreatePreconditions(db);
-    // 「管家默认当前账号」：新建项目时若当前已登录 VBK 且账号已配管家，
-    // 自动把 butlerName 写入 product.operations.bookingControls.butler。
-    // 已有 butler / 未登录 / 未配置 都不会写；写失败也不抛错，避免影响创建。
-    const accountName = db.getSetting("vbkAccountName")?.value || null;
-    const { project: finalProject, injectResult } = createProjectWithAccountButler(db, input, accountName);
-    if (injectResult.written) {
-      logInfo("[createProject] auto-injected butler from current account", { projectId: finalProject.id, accountName });
-    } else if (injectResult.reason) {
-      logInfo("[createProject] butler not auto-injected", { projectId: finalProject.id, reason: injectResult.reason });
-    }
-    emitProject(finalProject);
-    // 第一版产品方案的自动触发不在 main 这里走 —— 交给 renderer 端的 useEffect
-    // 兑底。main 端 fire-and-forget 的请求与 renderer useEffect 重复触发会同时
-    // 生成两条 user-running 消息，状态不一致；renderer 单一入口更可控，
-    // 且能同时覆盖“新建后立即触发”与“重开空草稿项目”两种场景。
-    return finalProject;
-  });
-  ipcMain.handle("projects:get", (_event, id: string) => {
-    const project = db.getProject(id);
-    if (!project) throw projectNotFound(id);
-    return project;
-  });
-  ipcMain.handle("projects:delete", (_event, id: string) => {
-    const removed = db.deleteProject(id);
-    if (!removed) throw projectNotFound(id);
-    return { deleted: true };
-  });
-  ipcMain.handle("projects:readiness", (_event, id: string) => readiness(id));
-  ipcMain.handle("projects:updateProductJson", (_event, id: string, json: string) => {
-    const project = db.getProject(id);
-    if (!project) throw projectNotFound(id);
-    let next: Record<string, unknown>;
-    try { next = JSON.parse(json); }
-    catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
-    parseProduct(next);
-    db.updateProduct(id, next, "review");
-    emitProject(db.getProject(id)!);
-    return db.getProject(id)!;
-  });
-  // 运营人员直接在 UI 上录入的「需要人工复核」字段（例如定价 pricing）。
-  // 仅允许 ManualReviewFieldInput 白名单，product 走 schema 校验后才落库；
-  // 路径不走 JSON patch，避免与 AI 写入口径混在一起难以追溯。
-  ipcMain.handle("projects:updateReviewField", (event, id: string, input: ManualReviewFieldInput) => {
-    assertTrustedSender(event, "projects:updateReviewField");
-    const project = db.getProject(id);
-    if (!project) throw projectNotFound(id);
-    const next = applyManualReviewField(project.product, input);
-    parseProduct(next);
-    db.updateProduct(id, next, "review");
-    emitProject(db.getProject(id)!);
-    return db.getProject(id)!;
-  });
-  // 抽到模块级函数，projects:create 会用它做自动触发；调用方决定是否 fire-and-forget。
-  // 这里不去做任何"是否第一次"判断 —— 自动触发由调用方按 minimax 已配置 API Key 决定。
 
-  /** 检查产品草稿中是否缺失关键生成模块，返回缺失模块的路径列表。 */
-  function detectMissingModules(product: Record<string, unknown>): string[] {
-    const missing: string[] = [];
-    const p = product.presentation;
-    if (!p || typeof p !== "object" || Array.isArray(p)) missing.push("presentation");
-    const i = product.itinerary;
-    if (!Array.isArray(i) || i.length === 0) missing.push("itinerary");
-    const c = product.commercial as Record<string, unknown> | undefined;
-    if (!c || typeof c.pricing !== "object" || Array.isArray(c.pricing)) missing.push("commercial/pricing");
-    if (!c || typeof c.inventory !== "object" || Array.isArray(c.inventory)) missing.push("commercial/inventory");
-    if (!c || typeof c.release !== "object" || Array.isArray(c.release)) missing.push("commercial/release");
-    if (!c || typeof c.terms !== "object" || Array.isArray(c.terms)) missing.push("commercial/terms");
-    return missing;
-  }
-
-  async function runAiReply(projectId: string, content: string) {
-    const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
-    const message = typeof content === "string" ? content.trim() : "";
-    if (!message) throw new Error("请输入要发送给 AI 的内容。");
-    if (message.length > 6000) throw new Error("单条消息不能超过 6000 个字符，请拆分后发送。");
-    const userMessageId = db.addMessage(projectId, "user", message, "running");
-    emitProject(db.getProject(projectId)!);
-    // 本轮请求开始时锁定当前 AI 提供商快照：service、过程日志、最终 normalizeFailureMessage
-    // 都使用同一份快照，避免请求过程中用户切换模型导致错误归错提供商。
-    const turnSettings = getSettings();
-    const providerLabel = resolveAiProviderLabel(turnSettings);
-    try {
-      const history = project.messages.filter((item) => (item.role === "user" || item.role === "assistant") && item.taskStatus !== "failed" && item.taskStatus !== "running");
-      const service = await aiService(turnSettings);
-      const itinerary = Array.isArray(project.product.itinerary) ? project.product.itinerary : [];
-      const isInitialDraft = !itinerary.length && /生成|第一版|方案/.test(message);
-      const retryableCodes = new Set(["provider_connection", "provider_timeout", "provider_error", "provider_rate_limit", "invalid_model_output", "empty_model_output"]);
-      const isRetryable = (error: unknown) => {
-        const code = classifyMiniMaxError(error);
-        return retryableCodes.has(code);
-      };
-      const maxRetryAttempts = 5;
-      let connectionChecked = false;
-      const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-      let response: Awaited<ReturnType<MiniMaxService["reply"]>> | undefined;
-      const repairPrompt = "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。";
-      let lastFailureReason = "";
-      const trimmedHistory = history.slice(-12);
-      const requiresWritablePatch =
-        isInitialDraft
-        || /继续|补齐|补充|调整|更新|继续生成|继续补充|再次生成|重试|生成/.test(message)
-        || /修正|重写|优化|重新/.test(message)
-        || message.includes("上一次返回未通过结构化校验");
-      for (let attempt = 1; attempt <= maxRetryAttempts; attempt++) {
-        if (!connectionChecked) {
-          await service.testConnection();
-          connectionChecked = true;
-        }
-        const requestMessage = attempt === 1
-          ? message
-          : [
-            message,
-            repairPrompt,
-            lastFailureReason ? `上一次返回原因：${lastFailureReason}` : "",
-          ]
-            .filter((item) => item)
-            .join("\n\n");
-        const attemptHistory = attempt === 1 ? trimmedHistory : trimmedHistory.slice(-4);
-        try {
-          response = await service.reply({
-            message: requestMessage,
-            product: project.product,
-            history: attemptHistory.map((item) => ({ role: item.role, content: item.content })),
-          });
-          break;
-          } catch (error) {
-          if (attempt >= maxRetryAttempts || !isRetryable(error)) throw error;
-          lastFailureReason = toRetryHint(extractMiniMaxFailureReason(error) || ((error as { message?: string })?.message ?? ""));
-          try {
-            const retryCode = classifyMiniMaxError(error);
-            const shouldProbeConnectivity = new Set(["provider_connection", "provider_timeout", "provider_error"]).has(retryCode);
-            if (shouldProbeConnectivity) {
-              connectionChecked = false;
-              logWarn("[AI] planning request failed, run connectivity check before retry", {
-                provider: turnSettings.aiProvider,
-                attempt,
-                errorCode: (error as { code?: string })?.code,
-              });
-            }
-          } catch (probeError) {
-            throw probeError;
-          }
-          await wait(350 * attempt);
-        }
-      }
-      // 如果服务返回空响应兜底，统一按结构化内容异常处理，避免错误地提示网络故障。
-      if (!response) {
-        throw new MiniMaxServiceError("invalid_model_output", "AI 未返回可写入的产品方案，请重试。");
-      }
-      const responsePatch = response.patch ?? [];
-      const patchResult = responsePatch.length ? applyProductPatchSafe(project.product, responsePatch) : { product: project.product, applied: false };
-      const next = patchResult.product;
-      if (requiresWritablePatch && (responsePatch.length === 0 || !patchResult.applied)) {
-        throw new MiniMaxServiceError("invalid_model_output", "AI 未返回可写入的产品方案，请重试。");
-      }
-      db.updateProduct(projectId, next); db.updateMessageStatus(projectId, userMessageId, "succeeded"); db.addMessage(projectId, "assistant", response.reply, "succeeded");
-      for (const task of response.researchTasks || []) db.addResearchTask(projectId, task);
-      // 首轮生成后自动检查缺失模块：如果 presentation / itinerary / commercial 子模块
-      // 仍未写入，追加一轮 AI 调用专门补齐，提升首次生成完整率。
-      if (isInitialDraft) {
-        const currentProduct = db.getProject(projectId)!.product;
-        const missingModules = detectMissingModules(currentProduct);
-        if (missingModules.length > 0) {
-          const missingHint = missingModules.join("、");
-          logInfo("[AI] first-draft missing modules detected, automatic follow-up", { provider: turnSettings.aiProvider, missingHint });
-          const followUpMsg = `以下模块尚未生成：${missingHint}。请通过 submit_product_update 工具逐个补充这些模块的完整内容，每个模块用独立的 patch 操作。`;
-          try {
-            const secondResponse = await service.reply({
-              message: followUpMsg,
-              product: currentProduct,
-              history: trimmedHistory.slice(-6).map((item) => ({ role: item.role as "user" | "assistant", content: item.content })),
-            });
-            const secondPatch = secondResponse.patch ?? [];
-            if (secondPatch.length > 0) {
-              const secondResult = applyProductPatchSafe(currentProduct, secondPatch);
-              db.updateProduct(projectId, secondResult.product);
-            }
-            for (const task of secondResponse.researchTasks || []) {
-              db.addResearchTask(projectId, task);
-            }
-          } catch (e) {
-            // 补齐失败不抛错：第一轮产物已经可用（只是不全），用户仍然可以在左侧继续对话补齐。
-            logWarn("[AI] completeness follow-up failed, keeping partial draft", { provider: turnSettings.aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
-          }
-        }
-        // 首轮生成后自动补齐 VBK 车辆和酒店资源：如果 VBK 已登录，通过 API
-        // 搜索资源库匹配资源组/酒店，自动标记对应的核查任务为已解决。
-        if (isInitialDraft) {
-          try {
-            const status = await browser.status();
-            if (!status.loggedIn) {
-              logInfo("[AI] VBK not logged in, skipping auto resource resolution", { provider: getSettings().aiProvider });
-            } else {
-              const projectAfterAi = db.getProject(projectId)!;
-              let page: ReturnType<typeof browser.page> | undefined;
-              // 懒加载 VBK 页面：只在需要时才获取，避免过早消费 CDP 连接。
-              const ensurePage = async () => { if (!page) page = browser.page(); return page; };
-              // 首轮 post-processing：若 presentation.cover 缺 imageId/imageUrl，
-              // 通过 searchCtripLibraryImages 拿一张完整候选自动写回。复用既有
-              // cover-ipc 链路；失败只 console.info，不阻塞 ai:send 主流程。
-              try {
-                const coverOutcome = await applyAutoCoverFill({
-                  page: await ensurePage(),
-                  product: projectAfterAi.product,
-                });
-                if (coverOutcome.outcome.written) {
-                  db.updateProduct(projectId, coverOutcome.nextProduct, "review");
-                  logInfo("[AI] auto cover filled from Ctrip library", {
-                    provider: getSettings().aiProvider,
-                    keyword: coverOutcome.outcome.keyword,
-                    imageId: coverOutcome.outcome.imageId,
-                  });
-                } else {
-                  logInfo("[AI] auto cover skipped", {
-                    provider: getSettings().aiProvider,
-                    reason: coverOutcome.outcome.reason,
-                  });
-                }
-              } catch (e) {
-                logInfo("[AI] auto cover fill raised, keeping partial draft", {
-                  provider: getSettings().aiProvider,
-                  error: (e as { message?: string })?.message ?? "unknown",
-                });
-              }
-              // 车辆资源：触发条件改为基于产品数据（privateTour + 行程天数 +
-              // 上车城市 + 尚未匹配），不再依赖 researchTasks 是否存在；若同时存在
-              // 用车类 research task，命中后再标记为已解决。real resourceGroupId /
-              // resourceGroupName 仍只由 VBK 匹配回填。
-              try {
-                const vehicleOutcome = await applyAutoVehicleResourceTrigger({
-                  page: await ensurePage(),
-                  project: db.getProject(projectId)!,
-                });
-                if (vehicleOutcome.outcome.written) {
-                  db.updateProduct(projectId, vehicleOutcome.nextProject.product, "review");
-                  if (vehicleOutcome.outcome.resourceGroupId) {
-                    for (const task of vehicleOutcome.nextProject.researchTasks) {
-                      if (task.state !== "confirmed" && task.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(task.label || "")) {
-                        db.markResearchAccepted(projectId, task.id, vehicleOutcome.outcome.reason, "vbk");
-                      }
-                    }
-                    logInfo("[AI] auto vehicle resource resolved", { provider: getSettings().aiProvider, resourceGroupId: vehicleOutcome.outcome.resourceGroupId });
-                  } else if (vehicleOutcome.outcome.estimatedDailyCost) {
-                    logInfo("[AI] vehicle requested daily cost estimated", {
-                      provider: getSettings().aiProvider,
-                      estimatedDailyCost: vehicleOutcome.outcome.estimatedDailyCost,
-                      reason: vehicleOutcome.outcome.reason,
-                    });
-                  } else {
-                    logInfo("[AI] vehicle resource not found in VBK", {
-                      provider: getSettings().aiProvider,
-                      reason: vehicleOutcome.outcome.reason,
-                    });
-                  }
-                }
-              } catch (e) {
-                logInfo("[AI] auto vehicle resource trigger raised, keeping partial draft", {
-                  provider: getSettings().aiProvider,
-                  error: (e as { message?: string })?.message ?? "unknown",
-                });
-              }
-              // 酒店资源：必须从 db 重新拉取最新 project，覆盖 / 用车的
-              // post-processing 已经可能更新过 product；继续读 projectAfterAi
-              // 会让酒店把那些写入覆盖回旧值。
-              const projectForHotel = db.getProject(projectId)!;
-              if (projectForHotel.researchTasks.some((t) => t.state !== "confirmed" && t.state !== "resolved" && /酒店|住宿|客栈|民宿/.test(t.label || ""))) {
-                try {
-                  const hotelResult = await resolveHotelResource(await ensurePage(), projectForHotel);
-                  db.updateProduct(projectId, hotelResult.product, "review");
-                  if (hotelResult.resolved && hotelResult.resolved.source === "vbk") {
-                    for (const task of projectForHotel.researchTasks) {
-                      if (task.state !== "confirmed" && task.state !== "resolved" && /酒店|住宿|客栈|民宿/.test(task.label || "")) {
-                        db.markResearchAccepted(projectId, task.id, hotelResult.note, "vbk");
-                      }
-                    }
-                    logInfo("[AI] auto hotel resource resolved", { provider: getSettings().aiProvider, resourceId: hotelResult.resolved.resourceId });
-                  } else {
-                    logWarn("[AI] hotel resource not found in VBK", { provider: getSettings().aiProvider, note: hotelResult.note });
-                  }
-                } catch (e) {
-                  logWarn("[AI] auto hotel resource resolution failed", { provider: getSettings().aiProvider, error: (e as { message?: string })?.message ?? "unknown" });
-                }
-              }
-            }
-          } catch (e) {
-            // 浏览器未就绪，静默跳过。
-            logInfo("[AI] browser not ready for auto resource resolution, skipping", { provider: getSettings().aiProvider });
-          }
-        }
-        // 首轮生成完成后补一次管家注入：projects:create 已经在创建时尝试过一次，
-        // 但用户可能在创建项目时还没登录 VBK；首次 AI 完成后已是登录态，再补一次。
-        // 同样遵守「已有 butler 不覆盖」契约，写入失败只 console.info 不抛错。
-        const aiAccountName = db.getSetting("vbkAccountName")?.value || null;
-        const aiInject = injectAccountButler(db, projectId, aiAccountName);
-        if (aiInject.written) {
-          logInfo("[ai:send] auto-injected butler after first draft", { projectId, accountName: aiAccountName });
-        } else if (aiInject.reason) {
-          logInfo("[ai:send] butler not auto-injected after first draft", { projectId, reason: aiInject.reason });
-        }
-      }
-    } catch (error) {
-      const reason = extractMiniMaxFailureReason(error) || (error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。");
-      const errorCode = classifyMiniMaxError(error);
-      const finalMessage = normalizeFailureMessage(errorCode, reason, providerLabel);
-      const finalStructuredMessage = /返回的数据格式无法用于产品方案|MiniMax 返回的数据格式无法用于产品方案/i.test(finalMessage)
-        ? stripRetryHintTail(finalMessage)
-        : finalMessage;
-      db.updateMessageStatus(projectId, userMessageId, "failed");
-      db.addMessage(projectId, "assistant", `本轮没有获得 AI 回复：${finalStructuredMessage}`, "failed");
-    }
-    emitProject(db.getProject(projectId)!);
-  }
-  ipcMain.handle("ai:send", (_event, projectId: string, content: string) => runAiReply(projectId, content));
-  ipcMain.handle("ai:regenerate", (_event, projectId: string, field: string) => {
-    // 当前 renderer 未调用；保留入口以便运营后期手动触发单字段重生成。
-    // 实际重新生成流程仍走 ai:send（运营填写一句自然语言指令 + 上下文），
-    // 单独的实现不增加模型 prompt 重复，等有明确需求再补。
-    void projectId; void field;
-    throw new Error("AI 字段级重新生成尚未发布，请回到对话面板继续沟通。");
-  });
-  ipcMain.handle("research:accept", (_event, projectId: string, taskId: string, note?: string) => {
-    db.markResearchAccepted(projectId, taskId, note);
-    emitProject(db.getProject(projectId)!);
-    return { accepted: true };
-  });
-  ipcMain.handle("research:refreshIssues", (_event, projectId: string) => {
-    const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
-    const result = refreshSatisfiedResearchTasks(db, projectId);
-    const next = db.getProject(projectId)!;
-    emitProject(next);
-    return { ...result, project: next, readiness: readiness(projectId) };
-  });
-  ipcMain.handle("research:vehicleResource", async (_event, projectId: string, taskId?: string) => {
-    const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
-    const page = await browser.page();
-    const result = await resolveVehicleResource(page, project);
-    db.updateProduct(projectId, result.product, "review");
-    if (result.resolved && taskId) db.markResearchAccepted(projectId, taskId, result.note, "vbk");
-    const message = result.resolved
-      ? `已完成用车估算和 VBK 资源组匹配：${result.note}`
-      : `用车建议价已保留，但 VBK 资源组暂未匹配成功：${result.note}`;
-    db.addMessage(projectId, "assistant", message, result.resolved ? "succeeded" : "failed");
-    const next = db.getProject(projectId)!;
-    emitProject(next);
-    return result.resolved;
-  });
-  ipcMain.handle("research:hotelResource", async (_event, projectId: string, taskId?: string) => {
-    const project = db.getProject(projectId); if (!project) throw projectNotFound(projectId);
-    const page = await browser.page();
-    const result = await resolveHotelResource(page, project);
-    db.updateProduct(projectId, result.product, "review");
-    if (taskId) db.markResearchAccepted(projectId, taskId, result.note, "vbk");
-    db.addMessage(projectId, "assistant", `已查询酒店资源：${result.note}`, "succeeded");
-    emitProject(db.getProject(projectId)!);
-    return result.resolved;
-  });
-  ipcMain.handle("browser:login", () => browser.login());
-  ipcMain.handle("browser:logout", () => browser.logout());
-  ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await browser.status(Boolean(refresh))));
-  ipcMain.handle("poi:suggest", async (_event, keyword: string) => suggestPoi(browser, String(keyword ?? "")));
-  ipcMain.handle("poi:suggestDetail", async (_event, keyword: string, context?: PoiSuggestLogContext) => {
-    const query = String(keyword ?? "");
-    const logContext = {
-      projectId: context?.projectId,
-      dayIndex: context?.dayIndex,
-      spotIndex: context?.spotIndex,
-      title: context?.title,
-      keyword: query,
-    };
-    logPoiManualIpc("ipc_search_start", logContext);
-    try {
-      const result = await suggestPoiDetailWithRawPayload(browser, query);
-      logPoiManualIpc("ipc_search_detail", {
-        ...logContext,
-        httpStatus: result.httpStatus,
-        businessStatus: result.businessStatus,
-        poiListCount: result.poiListCount,
-        candidateCount: result.candidates.length,
-        rawPayload: result.rawPayload,
-      });
-      if (!result.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: result.candidates.length });
-      else logPoiManualIpc("ipc_search_success", {
-        ...logContext,
-        poiName: result.best.poiName,
-        poiId: result.best.poiId,
-        candidateCount: result.candidates.length,
-      });
-      const { rawPayload: _rawPayload, ...detail } = result;
-      return detail;
-    } catch (err) {
-      logPoiManualIpc("ipc_search_failure", {
-        ...logContext,
-        errorMessage: err instanceof Error ? err.message : "VBK POI 查询失败",
-      });
-      throw err;
-    }
-  });
-  ipcMain.handle("poi:suggestDemo", async (_event, keyword: string) => suggestPoiDemo(browser, String(keyword ?? "")));
-  ipcMain.handle("browser:navigate", (_event, url: string) => browser.navigate(url));
-  ipcMain.handle("browser:currentUrl", () => browser.currentUrl());
-  ipcMain.handle("browser:openExternal", () => browser.openExternal());
-  ipcMain.handle("browser:setBounds", (_event, bounds) => browser.setBounds(bounds));
-  ipcMain.handle("browser:setVisible", (_event, visible: boolean) => browser.setVisible(visible));
-  ipcMain.handle("browser:listLoginAccounts", () => browser.listKnownLoginAccounts());
-  ipcMain.handle("browser:addLogin", () => browser.addLogin());
-  ipcMain.handle("browser:switchAccount", (_event, accountKey: string) => browser.switchAccount(accountKey));
-  ipcMain.handle("browser:forgetAccount", (_event, accountKey: string) => {
-    browser.forgetAccount(accountKey);
-    return { forgotten: true };
-  });
-  ipcMain.handle("automation:start", (_event, projectId: string) => automation.start(projectId));
-  // 「停止」按钮的入口：立刻把 run 标记为 cancelled，runner 在下一个
-  // checkpoint 跳出。不等待 Playwright 当前调用结束 ——
-  // 跨进程 await click 安全中断点未知，强制 abort 可能让浏览器页面留下
-  // 半成品 UI。让 in-flight handler 自然结束后下一 attempt 不再启动。
-  ipcMain.handle("automation:stop", (_event, projectId: string) => automation.stop(projectId));
-  // automation:retry 真正接到 preparePhaseRetry：如果项目当前的 automation
-  // 已是 failed，则从 currentPhase / 最后失败阶段继续；否则退化为 start。
-  // 先做一次窄恢复：旧版截图失败留下的「业务全成功 + run 标 failed + 项目 blocked」
-  // 脏数据会因 failed phase 找不到而退化为 start（全量重跑错误）或被
-  // retryPhase(preflight) 拒绝；本恢复按业务完成切回 succeeded + draft_saved。
-  ipcMain.handle("automation:retry", async (_event, projectId: string) => {
-    if (await automation.recoverLegacyScreenshotFalseFailure(projectId)) return;
-    const project = db.getProject(projectId);
-    if (!project) throw projectNotFound(projectId);
-    const failedPhase = project.automation?.recovery
-      ? Object.values(project.automation.recovery.phases).find((rec) => rec.state === "needs_user")?.phase
-      : project.automation?.phases.find((phase) => phase.status === "failed")?.phase;
-    if (failedPhase) return automation.retryPhase(projectId, failedPhase);
-    return automation.start(projectId);
-  });
-  ipcMain.handle("automation:retryPhase", (_event, projectId: string, phase: string) => automation.retryPhase(projectId, phase));
-  // 「重新执行」按钮的入口：单阶段重跑，不影响其他阶段。与 retryPhase
-  // （失败后多阶段 forward）的区别：retryPhase 会重置后续阶段并从头跑
-  // 到尾；retryOnePhase 只跑一个阶段，用于运营 review 当前页面填充效果。
-  ipcMain.handle("automation:retryOnePhase", (_event, projectId: string, phase: string) => automation.retryOnePhase(projectId, phase));
-  // 调试入口：仅 dev + VBK_DEBUG=1 时可访问。
-  // 任何 IPC 调用都必须先 assertTrustedSender / assertDebugEnabled，避免
-  // 外部 frame 触发逐步骤执行（极容易泄漏当前会话 cookies / 渲染文件）。
-  ipcMain.handle("automation:debug:runStep", (event, stepName: string, argsJson: string) => {
-    assertTrustedSender(event, "automation:debug:runStep");
-    assertDebugEnabled("automation:debug:runStep");
-    return automation.debugRunStep(stepName, argsJson);
-  });
-  ipcMain.handle("automation:debug:snapshot", (event, label?: string) => {
-    assertTrustedSender(event, "automation:debug:snapshot");
-    assertDebugEnabled("automation:debug:snapshot");
-    return automation.debugSnapshot(label);
-  });
-  ipcMain.handle("automation:debug:hitBreakpoints", (event) => {
-    assertTrustedSender(event, "automation:debug:hitBreakpoints");
-    assertDebugEnabled("automation:debug:hitBreakpoints");
-    return automation.debugHitBreakpoints();
-  });
-  ipcMain.handle("automation:debug:resume", (event, command: "continue" | "step" | "stop") => {
-    assertTrustedSender(event, "automation:debug:resume");
-    assertDebugEnabled("automation:debug:resume");
-    return automation.debugResume(command);
-  });
-  ipcMain.handle("automation:debug:listBreakpoints", (event) => {
-    assertTrustedSender(event, "automation:debug:listBreakpoints");
-    assertDebugEnabled("automation:debug:listBreakpoints");
-    return automation.debugListBreakpoints();
-  });
-  ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => db.getAccountFixedInfo(accountName));
-  ipcMain.handle("accounts:saveFixedInfo", (event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
-    // 与 projects:updateReviewField 对称：会改写「账号级固定信息」，对外来的
-    // webContents 调用一律拒绝。同样的对称性也要求「accounts:getFixedInfo」
-    // 之类的只读入口不需要 sender 校验。
-    assertTrustedSender(event, "accounts:saveFixedInfo");
-    const saved = db.setAccountFixedInfo(accountName, values);
-    emitProjectIfKnown(accountName, saved);
-    return saved;
-  });
-  ipcMain.handle("accounts:fixedInfoSchema", () => VbkDatabase.fixedInfoSchema());
-  ipcMain.handle("accounts:detectProviderId", () => detectProviderIdInMain());
-  ipcMain.handle("accounts:currentProviderId", () => {
-    const name = db.getSetting("vbkAccountName")?.value;
-    return name ? db.providerIdFor(name) : null;
-  });
-  ipcMain.handle("accounts:listKnownAccounts", () => db.listKnownAccounts());
-  ipcMain.handle("accounts:providerIdFor", (_event, accountName: string) => db.providerIdFor(accountName));
-  ipcMain.handle("contacts:listProviderContactCards", async (_event, providerId: number, searchKeyword?: string) => {
-    const page = await browser.page();
-    return listProviderContactCards(page, providerId, searchKeyword);
-  });
-  ipcMain.handle("contacts:suggestPoi", async (_event, keyword: string) => {
-    const query = typeof keyword === "string" ? keyword.trim() : "";
-    if (!query) return null;
-    return suggestPoi(browser, query);
-  });
-  // 产品封面：手动上传 + 携程图库候选查询。所有入口先做 trusted sender 校验。
-  ipcMain.handle("cover:uploadManual", (event, args) => uploadManualCover(event, args));
-  ipcMain.handle("cover:read", (event, args) => readManualCover(event, args));
-  ipcMain.handle("cover:listManualCovers", (event) => listManualCoverMetas(event));
-  ipcMain.handle("cover:exists", (event, args) => isManualCoverStillPresent(event, args));
-  // 阶段 A：按景点名称查 suggestpoi.json → 地址 / 景点候选列表；
-  // UI 在地址列表里选中一个后再走 cover:searchCtripLibraryImages。
-  ipcMain.handle("cover:searchCtripLibraryPlaces", (event, args) => searchCtripLibraryCoverPlaces(event, args, browser));
-  // 阶段 B：按已选 place 取该地址下的携程图库图片列表；
-  // 链路：searchImage → getImageInfo（BrowserView 内联 fetch）。
-  ipcMain.handle("cover:searchCtripLibraryImages", (event, args) => searchCtripLibraryCoverImages(event, args, browser));
-  ipcMain.handle("settings:get", () => getSettings());
-  // settings:getApiKey 在新版本中是**故意的禁止**点：API Key 一旦写入
-  // 永远不回到 renderer，UI 通过 getSettings().hasKey / hasDeepSeekKey
-  // 感知到状态。如需走 AI，调用方应该走 settings:listModels / settings:test
-  // 等受限入口。仍然保留 IPC 名称以让旧 renderer 抛错而不是白屏。
-  ipcMain.handle("settings:getApiKey", (_event, provider: unknown) => {
-    if (!isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
-    throw new Error("API Key 不可从 renderer 读回，请通过 settings:save 覆盖或 settings:test 验证");
-  });
-  ipcMain.handle("settings:listModels", (event, input: AiModelListInput) => {
-    assertTrustedSender(event, "settings:listModels");
-    return fetchAiModelList(input, (provider) => apiKey(provider));
-  });
-  ipcMain.handle("settings:save", async (event, input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }) => {
-    assertTrustedSender(event, "settings:save");
-    const provider = input.aiProvider;
-    if (provider !== undefined && !isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
-
-    const minimaxBaseUrl = input.minimaxBaseUrl?.trim();
-    if (minimaxBaseUrl !== undefined) assertSafeAiServiceUrl(minimaxBaseUrl);
-    const minimaxModel = input.minimaxModel?.trim();
-    if (minimaxModel !== undefined && !minimaxModel) throw new Error("请填写 MiniMax 模型名。");
-    const deepseekBaseUrl = input.deepseekBaseUrl?.trim();
-    if (deepseekBaseUrl !== undefined) assertSafeAiServiceUrl(deepseekBaseUrl);
-    const deepseekModel = input.deepseekModel?.trim();
-    if (deepseekModel !== undefined && !deepseekModel) throw new Error("请选择 Evolink 模型。");
-
-    // 「空值不覆盖」：trim 后是空字符串 / null / undefined 的字段一律不动。
-    // 之前 `input.apiKey ?? ""` 把 undefined 视为空串，这与 {"apiKey":null}
-    // 表现一样 —— 不会触发任何写入。
-    const rawMiniMaxKey = input.apiKey;
-    const rawDeepSeekKey = input.deepseekApiKey;
-    const minimaxKey = typeof rawMiniMaxKey === "string" && rawMiniMaxKey.trim() ? rawMiniMaxKey.trim() : null;
-    const deepseekKey = typeof rawDeepSeekKey === "string" && rawDeepSeekKey.trim() ? rawDeepSeekKey.trim() : null;
-    // AI API keys live in the local 0600 JSON store, no longer routed
-    // through Electron Keychain encryption. We intentionally do NOT
-    // gate this IPC on any encryption-availability check anymore — the
-    // old "macOS cannot encrypt" prompt is gone.
-    if (!aiKeyStore) throw new Error("AI 密钥存储尚未就绪，请稍后重试。");
-    if (provider === "minimax" && !minimaxKey && !aiKeyStore.hasKey("minimax")) throw new Error("请填写 MiniMax API Key。");
-    if (provider === "deepseek" && !deepseekKey && !aiKeyStore.hasKey("deepseek")) throw new Error("请填写 Evolink API Key。");
-
-    // 写库：SQLite 与本地 JSON 文件跨介质，不能在事务里原子提交。
-    // 写入顺序为 baseUrl/model/provider（旧 → 新）→ aiKeyStore.setKey
-    // （temp+rename）→ safeRemoveLegacyCiphertext。任一步骤抛错都会
-    // 直接重抛给 IPC 层，使 renderer 看到失败并可重试；由于 aiProvider
-    // 字段最后写，前面任一字段校验失败时不会留下半切换状态。
-    // 已知不一致窗口：db.setSetting("minimaxBaseUrl", ...) 已成功但
-    // aiKeyStore.setKey 抛错（磁盘满等）时，SQLite 与 JSON 处于不一致
-    // 态。但 AI 调用方先读 JSON、再读 SQLite ，不会出现"已配 hasKey 但
-    // 请求 baseUrl 还没更新"的危险中间态；恢复路径是用户再次保存。
-    try {
-      if (minimaxBaseUrl !== undefined) db.setSetting("minimaxBaseUrl", minimaxBaseUrl);
-      if (minimaxModel !== undefined) db.setSetting("minimaxModel", minimaxModel);
-      if (minimaxKey) {
-        aiKeyStore.setKey("minimax", minimaxKey);
-        // Legacy SQLite ciphertext is now meaningless and must NEVER be
-        // read again (it can't be decrypted after the old encryption row
-        // was lost). Remove that provider's row in the settings table so
-        // the DB stops pretending it has a configured key.
-        safeRemoveLegacyCiphertext(db, "minimaxApiKey");
-      }
-      if (deepseekBaseUrl !== undefined) db.setSetting("deepseekBaseUrl", deepseekBaseUrl);
-      if (deepseekModel !== undefined) db.setSetting("deepseekModel", deepseekModel);
-      if (deepseekKey) {
-        aiKeyStore.setKey("deepseek", deepseekKey);
-        safeRemoveLegacyCiphertext(db, "deepseekApiKey");
-      }
-      // 当前模型最后切换，避免前面任一字段校验失败时留下半切换状态。
-      if (provider !== undefined) db.setSetting("aiProvider", provider);
-    } catch (error) {
-      // 任意字段失败时不能向前返回半截 settings；直接重抛给 IPC 层。
-      throw error;
-    }
-    return getSettings();
-  });
-  ipcMain.handle("settings:test", async (_event, input: AiConnectionTestInput) => {
-    const resolved = await resolveAiConnectionInput(input, (provider) => apiKey(provider));
-    await new MiniMaxService(resolved).testConnection();
-    return successfulAiConnectionTest(resolved);
-  });
-  // 读取自动化操作历史。早期版本返回内存样例，等真实写入路径就绪后再
-  // 改读持久化文件；查询语义保持一致以免上层调用方重写。
-  ipcMain.handle("operationLog:load", (event, query?: OperationLogQuery) => {
-    assertTrustedSender(event, "operationLog:load");
-    return loadOperationLog(query);
-  });
-
-  // 规划子系统接线：preflight + runPlan + 项目状态同步。所有 plan 层逻辑
-  // 都被抽到 src/main/planning/*，main.ts 只做"装配 + 持久化 + 广播"。
-
-  /** 日志时间戳由 shared/log-timestamp.ts 的 log* 包装统一负责，这里不再定义。 */
-
-  /** preflight / runPlan 抛错时的统一出口：把任意 error 包成 status=failed 的
-   *  持久化 state，若项目存在则写 taskStatus='failed' 的 assistant 消息 + 同步
-   *  projects.status + emitProject，返回给上层一个 status='failed' 的正常
-   *  PlanningRunResult。
-   *
-   *  项目不存在时：仍持久化 failed state 并返回失败结果，但跳过 addMessage /
-   *  syncProjectStatusAfterFailure / emitProject —— 否则消息表会出现孤儿
-   *  project_id 行，破坏 conversations 反查项目的语义一致性。 */
-  function handlePreflightFailure(projectId: string, error: unknown): PlanningRunResult {
-    const project = db.getProject(projectId);
-    const existing = db.loadPlanningState(projectId);
-    const baseState: PlanningGenerationState = existing ?? {
-      projectId,
-      currentStage: "skeleton",
-      completedStages: [],
-      stages: [],
-      status: "pending",
-      resumeAt: new Date().toISOString(),
-    };
-    const failure = buildPreflightFailureState(baseState, error);
-    db.savePlanningState(failure.state);
-    emitPlanningState(failure.state);
-    // 用户可见可观测性：把 preflight 失败原因打到主进程 console，
-    // 避免「继续规划还是报错但日志全无」的报告。err 已通过
-    // buildPreflightFailureState 内部 redactSensitiveMessage 处理过；
-    // 这里再 raw 输出原 error 一次以方便 grep 调用栈。
-    logWarn(`[planning] preflight.failure projectId=${projectId} existingStatus=${existing?.status ?? "none"} message=${(error as { message?: string } | null)?.message ?? "unknown"}`);
-    logWarn(`[planning] preflight.failure stack`, error);
-    if (project) {
-      db.addMessage(projectId, "assistant", failure.assistantReply, "failed");
-      syncProjectStatusAfterFailure(db, projectId);
-      emitProject(db.getProject(projectId)!);
-    }
-    return {
-      state: failure.state,
-      status: "failed",
-      accepted: [],
-      rejected: [],
-      researchTasks: [],
-      assistantReply: failure.assistantReply,
-    };
-  }
-
-  /** 共享包装：start / resume 都走这条路径，保证 preflight 行为一致。
-   *  调用方在调本函数前应已做完各自的前置持久化（start 写 pending、
-   *  resume 做受限 restore），这里只负责 preflight + runPlan + 终态同步。 */
-  // Renderer 的 disabled 只能防正常点击；IPC 仍可能因双击落在同一渲染帧、
-  // 自动恢复或预加载层调用而并发到达。锁必须在主进程、且按项目持有，避免
-  // 两次 runPlan 同时读到同一 completed partial 状态并重复生成/写模块。
-  const activePlanningProjectIds = new Set<string>();
-
-  function assertPlanningIdle(projectId: string): void {
-    if (activePlanningProjectIds.has(projectId)) {
-      throw new Error(`规划正在进行中，不能重复启动：${projectId}`);
-    }
-  }
-
-  async function runPlanning(projectId: string): Promise<PlanningRunResult> {
-    // 必须在 try 外拒绝：重复请求不应被 handlePreflightFailure 写成 failed，
-    // 更不能覆盖第一条仍在运行的规划状态。
-    assertPlanningIdle(projectId);
-    activePlanningProjectIds.add(projectId);
-    try {
-      const project = db.getProject(projectId);
-      if (!project) throw projectNotFound(projectId);
-      const store = new DbGenerationStateStore(db, emitPlanningState);
-      const runtime = new DbOrchestratorRuntime(db, browser);
-      const product = (project.product ?? {}) as Record<string, unknown>;
-      const basicInfo = (product.basicInfo ?? {}) as Record<string, unknown>;
-      const sales = (product.sales ?? {}) as Record<string, unknown>;
-      const existingState = db.loadPlanningState(projectId);
-      const isCompletedPoiOnlyBackfill = existingState?.status === "completed"
-        && PLANNING_STAGES.every((stage) => existingState.completedStages.includes(stage))
-        && hasIncompleteItineraryPois(product);
-      let planner: Planner;
-      let providerLabel: string | undefined;
-      if (isCompletedPoiOnlyBackfill) {
-        ({ planner, providerLabel } = await completedPoiBackfillPlanner(projectId));
-      } else {
-        const turnSettings = getSettings();
-        // 读取 API Key 必须在 try 内：本地 aiKeyStore 是纯 fs 读取，理论上
-        // 不抛错（缺文件 / 损坏 JSON 已被 readFile 降级为空文件）。但
-        // store 尚未初始化（aiKeyStore === null）时 apiKey() 返回空串，
-        // 等同未配置；其它罕见 IO 错误抛到外层 catch 后由
-        // handlePreflightFailure 写一条 provider_not_configured 的失败
-        // 消息。这条路径对应 preflight-failure.test.ts 第一组用例。
-        const decryptedKey = await apiKey(turnSettings.aiProvider);
-        const providerProfile = aiProviderConfig(turnSettings, turnSettings.aiProvider);
-        providerLabel = resolveAiProviderLabel(turnSettings);
-        planner = new OpenAICompatiblePlannerAdapter({
-          apiKey: decryptedKey,
-          baseUrl: providerProfile.baseUrl,
-          model: providerProfile.model,
-        });
-      }
-      const result = await runPlan({
-        projectId,
-        skeleton: {
-          destination: String(basicInfo.meetingCity ?? basicInfo.destinationCity ?? ""),
-          days: Number(basicInfo.days) || 0,
-          nights: Number(basicInfo.nights) || 0,
-          productForm: sales.productForm === "groupTour" ? "groupTour" : "privateTour",
-          productType: sales.productType === "domesticLong" ? "domesticLong" : "domesticShort",
-          supplierProductCode: String(basicInfo.supplierProductCode ?? ""),
-        },
-        store,
-        runtime,
-        planner,
-        providerLabel,
-      });
-
-      // 终态同步：completed → review、failed/needs_user → blocked，
-      // 其它活动状态（automating / draft_saved）一律不动。
-      syncProjectStatusAfterRunPlan(db, projectId, result.status);
-      // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致）。
-      // 失败只 console.info，不阻塞规划完成态。
-      if (result.status === "completed" && !isCompletedPoiOnlyBackfill) {
-        // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致），
-        // 使用 .catch() 而非 try/catch，避免干扰 coverage 测试的 try-block 正则匹配。
-        const browserStatus = await browser.status().catch((e: unknown) => {
-          logInfo("[planning] browser not ready for auto resource resolution, skipping", {
-            provider: providerLabel,
-            error: (e as { message?: string })?.message ?? "unknown",
-          });
-          return null;
-        });
-        if (browserStatus?.loggedIn) {
-          const page = await browser.page();
-          const projectAfter = db.getProject(projectId)!;
-          // 封面图：从携程图库搜索补齐 imageId / imageUrl
-          const coverResult = await applyAutoCoverFill({
-            page,
-            product: projectAfter.product,
-          }).catch((e: unknown) => {
-            logInfo("[planning] auto cover fill raised", {
-              provider: providerLabel,
-              error: (e as { message?: string })?.message ?? "unknown",
-            });
-            return null;
-          });
-          if (coverResult?.outcome.written) {
-            db.updateProduct(projectId, coverResult.nextProduct, "review");
-            logInfo("[planning] auto cover filled from Ctrip library", {
-              provider: providerLabel,
-              keyword: coverResult.outcome.keyword,
-              imageId: coverResult.outcome.imageId,
-            });
-          }
-          // 用车资源组：触发 VBK 接口匹配 resourceGroupId / resourceGroupName
-          const vehicleResult = await applyAutoVehicleResourceTrigger({
-            page,
-            project: db.getProject(projectId)!,
-          }).catch((e: unknown) => {
-            logInfo("[planning] auto vehicle resource trigger raised", {
-              provider: providerLabel,
-              error: (e as { message?: string })?.message ?? "unknown",
-            });
-            return null;
-          });
-          if (vehicleResult?.outcome.written) {
-            db.updateProduct(projectId, vehicleResult.nextProject.product, "review");
-            if (vehicleResult.outcome.resourceGroupId) {
-              for (const task of vehicleResult.nextProject.researchTasks) {
-                if (task.state !== "confirmed" && task.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(task.label || "")) {
-                  db.markResearchAccepted(projectId, task.id, vehicleResult.outcome.reason, "vbk");
-                }
-              }
-              logInfo("[planning] auto vehicle resource resolved", {
-                provider: providerLabel,
-                resourceGroupId: vehicleResult.outcome.resourceGroupId,
-              });
-            } else if (vehicleResult.outcome.estimatedDailyCost) {
-              logInfo("[planning] vehicle requested daily cost estimated", {
-                provider: providerLabel,
-                estimatedDailyCost: vehicleResult.outcome.estimatedDailyCost,
-                reason: vehicleResult.outcome.reason,
-              });
-            } else {
-              logInfo("[planning] vehicle resource not found in VBK", {
-                provider: providerLabel,
-                reason: vehicleResult.outcome.reason,
-              });
-            }
-          }
-        } else if (!browserStatus) {
-          // browser.status() reject → 已在 .catch() 里 console.info，这里仅跳过
-        }
-      }
-      // 消息 taskStatus 必须跟 result.status 走：completed → succeeded，
-      // failed / needs_user → failed（旧实现不论 result.status 都写
-      // succeeded，会让 recovery strip / 项目消息列表把失败轮误标成功）。
-      const replyMessageTaskStatus: "succeeded" | "failed" = result.status === "completed" ? "succeeded" : "failed";
-      const replyMessageId = db.addMessage(projectId, "assistant", result.assistantReply, replyMessageTaskStatus);
-      void replyMessageId;
-      emitProject(db.getProject(projectId)!);
-      return {
-        state: result.state,
-        status: result.status,
-        accepted: result.accepted.map((entry) => entry.module),
-        rejected: result.rejected.map((entry) => ({ module: entry.module, reason: entry.reason })),
-        researchTasks: result.researchTasks.map((task) => ({ label: task.label, type: task.type, detail: task.detail })),
-        assistantReply: result.assistantReply,
-      };
-    } catch (error) {
-      return handlePreflightFailure(projectId, error);
-    } finally {
-      activePlanningProjectIds.delete(projectId);
-    }
-  }
-
-  /** 把持久化 completed 的 PlanningGenerationState 拼回 PlanningRunResult 形状，
-   *  用于 planning:resume 在状态已为 completed 且 POI 已齐全时跳过 runPlanning。 */
-  function buildStableCompletedResult(state: PlanningGenerationState): PlanningRunResult {
-    const accepted = state.stages.flatMap((s) => s.accepted.map((m) => m.module));
-    const rejected = state.stages.flatMap((s) =>
-      s.rejected.map((m) => ({ module: m.module, reason: m.reason })),
-    );
-    return {
-      state,
-      status: "completed",
-      accepted,
-      rejected,
-      researchTasks: [],
-      assistantReply: state.lastAssistantReply ?? "",
-    };
-  }
-
-  ipcMain.handle("planning:start", (_event, projectId: string) => {
-    // fresh start 语义：先调一次受限 restore —— 仅当 projects.status=blocked 且
-    // 旧持久化 planning_generation ∈ {failed, needs_user} 时把 projects.status
-    // 改回 planning，再覆盖写 pending state。
-    // 必须先 restore 后 save pending：否则 pending state 会先洗掉旧的
-    // failed/needs_user 标记，后续 runPlan=completed 走 syncProjectStatusAfterRunPlan
-    // 时因 projects.status=blocked 错过 planning→review 推送，UI 永远停在 blocked。
-    logInfo(`[planning] ipc.start projectId=${projectId}`);
-    // 在任何状态写入前检查，避免第二个 start 把首个运行中的 state 覆盖为 pending。
-    assertPlanningIdle(projectId);
-    const existingState = db.loadPlanningState(projectId);
-    if (existingState) {
-      restoreProjectToPlanningForRetry(db, projectId, existingState.status);
-    }
-    const pendingState: PlanningGenerationState = {
-      projectId,
-      currentStage: "skeleton",
-      completedStages: [],
-      stages: [],
-      status: "pending",
-      resumeAt: new Date().toISOString(),
-    };
-    db.savePlanningState(pendingState);
-    emitPlanningState(pendingState);
-    return runPlanning(projectId);
-  });
-  ipcMain.handle("planning:resume", (_event, projectId: string) => {
-    // resume 必须先 load state：没有持久化记录时没有可恢复上下文，盲目跑
-    // 等同 planning:start，应由调用方显式改走 start；这里直接抛错让 IPC
-    // 拒绝而不是静默写一条 pending。
-    logInfo(`[planning] ipc.resume projectId=${projectId}`);
-    let existingState: PlanningGenerationState | undefined;
-    try {
-      existingState = db.loadPlanningState(projectId);
-    } catch (error) {
-      logWarn(`[planning] ipc.resume load_failed projectId=${projectId}`, error);
-      return handlePreflightFailure(projectId, error);
-    }
-    if (!existingState) {
-      logWarn(`[planning] ipc.resume no_state projectId=${projectId}`);
-      throw new Error(`planning:resume 拒绝：项目 ${projectId} 没有持久化规划状态，请改用 planning:start`);
-    }
-    const allStagesCompleted = PLANNING_STAGES.every((stage) => existingState.completedStages.includes(stage));
-    const projectHasIncompletePois = hasIncompleteItineraryPois(db.getProject(projectId)?.product ?? {});
-    if (existingState.status === "completed" && allStagesCompleted && !projectHasIncompletePois) {
-      // 只有所有阶段完成且 itinerary POI 已齐全的项目才不应被 resume 重跑，避免
-      // 重复调 AI、重复写消息、再次触发 syncProjectStatusAfterRunPlan。历史 completed
-      // 草稿仍有空 POI 时必须进入 runPlanning 的 completed backfill 分支；该分支只查
-      // POI，不会重跑 planner / AI 阶段。
-      logInfo(`[planning] ipc.resume stable_completed projectId=${projectId} currentStage=${existingState.currentStage} completedStages=${existingState.completedStages.join(",")}`);
-      return buildStableCompletedResult(existingState);
-    }
-    // 其他状态：受限 restore —— 仅当 projects.status=blocked 且持久化
-    // planning_generation ∈ {failed, needs_user} 时才把 projects.status
-    // 恢复为 planning；其他来源的 blocked（自动化孤儿、运营手工、
-    // planning_gen=running / pending 等）保持原状。
-    try {
-      restoreProjectToPlanningForRetry(db, projectId, existingState.status);
-    } catch (error) {
-      logWarn(`[planning] ipc.resume restore_failed projectId=${projectId}`, error);
-      return handlePreflightFailure(projectId, error);
-    }
-    logInfo(`[planning] ipc.resume proceed projectId=${projectId} currentStage=${existingState.currentStage} status=${existingState.status} completedStages=${existingState.completedStages.join(",")}`);
-    return runPlanning(projectId);
-  });
-  ipcMain.handle("planning:state", (_event, projectId: string) => {
-    try {
-      const state = db.loadPlanningState(projectId);
-      logInfo(`[planning] ipc.state projectId=${projectId} status=${state?.status ?? "none"} currentStage=${state?.currentStage ?? "none"}`);
-      return state;
-    } catch (error) {
-      logWarn(`[planning] ipc.state failed projectId=${projectId}`, error);
-      throw error;
-    }
-  });
-}
-
-/**
- * 在主进程内直接抓当前 VBK 页面的 providerId 并落库：
- *   - 失败仅 console.warn，不抛错（IPC 端也能安静处理）；
- *   - 同时把当前登录账号名从 settings 读出后写回 settings(providerIdByAccount:)。
- */
 async function detectProviderIdInMain(): Promise<number | null> {
   try {
     const page = await browser.page();
@@ -1327,35 +279,83 @@ async function detectProviderIdInMain(): Promise<number | null> {
     return null;
   }
 }
-/**
- * 预留：固定信息变化时不需要广播项目更新。
- * 仅保留签名以兼容未来扩展（比如联系人卡片变化后想主动推到 renderer）。
- */
-function emitProjectIfKnown(_accountName: string, _info: unknown) { /* 预留：固定信息变化不需要广播项目更新 */ }
+
+function emitProductIfKnown(_accountName: string, _info: unknown): void {
+  // Reserved for future account-fixed-info renderer notifications.
+}
+
+function registerIpc(context: MainIpcContext): void {
+  registerProductAiIpc(context);
+  registerBrowserAutomationIpc(context);
+  registerSettingsIpc(context);
+  registerPlanningIpc(context);
+}
+
+async function openMainWindow(): Promise<void> {
+  if (!cookieStore) throw new Error("VBK cookie store 尚未初始化，请稍后重试。");
+  const services = await createMainWindow({
+    db,
+    cookieStore,
+    root,
+    isDev,
+    debuggingPort,
+    getSettings,
+    aiService,
+    emitProduct,
+    onWindowCreated: (createdWindow) => { window = createdWindow; },
+    onServicesCreated: (services) => {
+      window = services.window;
+      browser = services.browser;
+      automation = services.automation;
+    },
+  });
+  window = services.window;
+  browser = services.browser;
+  automation = services.automation;
+}
 
 app.whenReady().then(async () => {
   db = new VbkDatabase(app.getPath("userData"));
-  // AI API key local store follows the user-decided model: a single 0600
-  // JSON file under `userData`. It must be ready before any IPC handler
-  // resolves `getSettings()` so renderer booleans don't flicker between
-  // "unconfigured" and "configured" while the store is initializing.
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
-  // VBK cookie store follows the same lifecycle: one instance per process,
-  // rooted at `userData/vbk-cookie-sessions.json`. It must be ready before
-  // createWindow() runs because VbkBrowser.initialise() uses it during
-  // partition view creation.
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   db.recoverUnansweredMessages();
-  const orphanProjects = db.recoverOrphanAutomationRuns();
-  if (orphanProjects.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProjects.length });
+  const orphanProducts = db.recoverOrphanAutomationRuns();
+  if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });
   const orphanPlanning = db.recoverOrphanPlanningStates();
   if (orphanPlanning.length) logWarn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
-  registerIpc(); await createWindow();
-  app.on("activate", () => { if (!BrowserWindow.getAllWindows().length) void createWindow(); });
+
+  const context: MainIpcContext = {
+    db,
+    get browser() { return browser; },
+    get automation() { return automation; },
+    aiKeyStore,
+    getSettings,
+    apiKey,
+    aiService,
+    productWorkflows: new ProductWorkflowCoordinator(),
+    productMutations: new ProductMutationService(db, emitProduct),
+    readiness,
+    emitProduct,
+    emitPlanningState,
+    withKnownVbkAccount,
+    completedPoiBackfillPlanner,
+    safeRemoveLegacyCiphertext,
+    detectProviderIdInMain,
+    emitProductIfKnown,
+    logPoiManualIpc,
+  };
+  registerIpc(context);
+  await openMainWindow();
+  app.on("activate", () => {
+    if (!BrowserWindow.getAllWindows().length) void openMainWindow();
+  });
 }).catch((error) => {
-  // 启动链路失败时必须可见地退出，否则会留下一个已注册 IPC 但没有窗口的进程。
   logError(`${APP_NAME} 启动失败：`, error);
   app.quit();
 });
-app.on("window-all-closed", () => { void browser?.dispose(); if (process.platform !== "darwin") app.quit(); });
+
+app.on("window-all-closed", () => {
+  void browser?.dispose();
+  if (process.platform !== "darwin") app.quit();
+});
 app.on("before-quit", () => { void browser?.dispose(); });

@@ -50,6 +50,9 @@ export async function ensureOtherCard(page, dayScope, { afterFirstCard = false }
 
   const addBoxes = dayScope.locator('[class*="td-add-box"]');
   const addBox = addBoxes.nth(afterFirstCard ? 1 : 0);
+  // 首日的“其他”通常要插到首个卡片之后；该 add-box 可能在长页面视口外。
+  // 先滚入视口，避免 plus 点击后菜单节点仍处于不可见布局而被误判为缺失。
+  await addBox.scrollIntoViewIfNeeded();
   await addBox.locator('[class*="td-add-plus-btn"]').click();
   await delay(500);
   const menuItem = addBox
@@ -176,8 +179,13 @@ export async function clickLabelExact(scope, label, description = label) {
  * 用 parentClass.includes("ant-checkbox-checked") 判定当前选中状态。
  */
 export async function ensureCheckboxChecked(checkbox) {
-  const parentClass = (await checkbox.locator("xpath=..").getAttribute("class")) ?? "";
-  if (!parentClass.includes("ant-checkbox-checked")) {
-    await checkbox.click({ force: true });
-  }
+  const wrapper = checkbox.locator(
+    "xpath=ancestor::label[contains(@class,'ant-checkbox-wrapper')][1]",
+  );
+  const stateNode = (await wrapper.count()) ? wrapper : checkbox.locator("xpath=..");
+  const stateClass = (await stateNode.getAttribute("class")) ?? "";
+  if (stateClass.includes("ant-checkbox-checked")) return;
+  // VBK 的受控 checkbox 需要通过 label/wrapper 触发 React onChange；直接点隐藏
+  // input 有时不会更新 wrapper class，保存时会再次报“请选择集合方式”。
+  await stateNode.click({ force: true });
 }

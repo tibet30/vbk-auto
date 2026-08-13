@@ -11,18 +11,18 @@
  */
 
 import { ChevronDown, ListChecks, LoaderCircle, RefreshCw } from "lucide-react";
-import type { ProjectReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
+import type { ProductReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
 import shared from "../shared.module.less";
 import styles from "./review-summary-issues.module.less";
 import { buildOpenIssueRows } from "./review-summary-open-issues.helpers.js";
 
 export interface ReviewSummaryOpenIssuesProps {
-  readiness: ProjectReadiness;
+  readiness: ProductReadiness;
   taskList: ResearchTask[];
   setComposerInput?: (value: string) => void;
   setVerificationNote: (value: string) => void;
   setActiveTask: (id: string | null) => void;
-  /** 整个「待处理事项」模块是否被收起；由父级持有，项目切换时复位。 */
+  /** 整个「待处理事项」模块是否被收起；由父级持有，产品切换时复位。 */
   collapsed: boolean;
   /** 切换整个「待处理事项」模块的展开 / 收起。 */
   onToggleCollapsed: () => void;

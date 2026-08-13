@@ -11,12 +11,12 @@ import type { AppState } from "../state/useAppState";
  *  - 自动化控制：startAutomation / stopAutomation / retryOnePhaseAutomation
  *  - VBK 浏览器导航：openSection / showVbkBrowser
  *  - 多账号登录：openLogin / addNewLogin / switchAccount / forgetAccount / logoutVbk
- *  - 路由与项目视图切换：openProductList / startCreateProduct / openStage
+ *  - 路由与产品视图切换：openProductList / startCreateProduct / openStage
  */
 
 export function useWorkflowHandlers(state: AppState) {
   const {
-    project,
+    product,
     loading,
     activeTask,
     setLoading,
@@ -45,7 +45,7 @@ export function useWorkflowHandlers(state: AppState) {
     setLoginPanelOpen,
     setVbkLogin,
     setAccountMenuOpen,
-    setProject,
+    setProduct,
     setView,
     setCreating,
     setCreateInput,
@@ -56,7 +56,7 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 把运营填写的核查结果提交到 main 端，并触发一次 AI 续答以更新产品草稿。 */
   const confirmTask = async () => {
-    if (!project || !activeTask) return;
+    if (!product || !activeTask) return;
     if (!verificationNote.trim()) {
       setNotice("请填写在 VBK 或公开来源查到的实际结果，再确认。");
       return;
@@ -65,9 +65,9 @@ export function useWorkflowHandlers(state: AppState) {
     setLoading(true);
     try {
       const confirmedId = activeTask.id;
-      await api()!.research.accept(project.id, confirmedId, verificationNote.trim());
+      await api()!.research.accept(product.id, confirmedId, verificationNote.trim());
       await api()!.ai.send(
-        project.id,
+        product.id,
         `运营人员已完成「${activeTask.label}」核查，结果如下：${verificationNote.trim()}。请仅使用这段已核实信息更新产品草稿中对应字段；如仍缺少录入所需数据，请明确保留待核查项。`,
       );
       setVerificationNote("");
@@ -85,7 +85,7 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 让 VBK 后端去匹配一个用车资源组；成功后刷新 readiness。 */
   const resolveVehicleTask = async () => {
-    if (!project || !activeTask || resolvingVehicleTaskId) return;
+    if (!product || !activeTask || resolvingVehicleTaskId) return;
     if (!isVbkLoggedIn) {
       openLogin();
       return;
@@ -95,7 +95,7 @@ export function useWorkflowHandlers(state: AppState) {
     setNotice(null);
     setBrowserOpen(true);
     try {
-      const result = await api()!.research.resolveVehicleResource(project.id, activeTask.id);
+      const result = await api()!.research.resolveVehicleResource(product.id, activeTask.id);
       if (!result) {
         setNotice("VBK 未返回可匹配的用车资源组，请调整建议日价或关键词后重试。");
         return;
@@ -103,7 +103,7 @@ export function useWorkflowHandlers(state: AppState) {
       setNotice(`已匹配资源组：${result.resourceGroupName}（ID ${result.resourceGroupId}）。`);
       setVerificationNote("");
       setActiveTaskId(null);
-      void updateReadiness(project);
+      void updateReadiness(product);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "用车资源组匹配失败，请在 VBK 手动核查。");
     } finally {
@@ -113,12 +113,12 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 重算并清理已由当前 product_json 满足的历史待处理事项。 */
   const refreshResearchIssues = async () => {
-    if (!project || !api() || refreshingIssues) return;
+    if (!product || !api() || refreshingIssues) return;
     setRefreshingIssues(true);
     setNotice(null);
     try {
-      const result = await api()!.research.refreshIssues(project.id);
-      setProject(result.project);
+      const result = await api()!.research.refreshIssues(product.id);
+      setProduct(result.product);
       state.setReadiness(result.readiness);
       setActiveTaskId(null);
       setVerificationNote("");
@@ -132,13 +132,13 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 启动自动录入；切到 vbk 阶段并打开浏览器面板。 */
   const startAutomation = async () => {
-    if (!project || !readiness.ready) return;
+    if (!product || !readiness.ready) return;
     setStage("vbk");
     setNotice(null);
     setBrowserOpen(true);
     setLoading(true);
     try {
-      await api()!.automation.start(project.id);
+      await api()!.automation.start(product.id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "自动录入失败，可在 VBK 中检查后重试。");
     } finally {
@@ -148,11 +148,11 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 发送停止信号；当前 in-flight 阶段会自然结束后停止后续阶段。 */
   const stopAutomation = async () => {
-    if (!project || !api() || stoppingAutomation) return;
+    if (!product || !api() || stoppingAutomation) return;
     setStoppingAutomation(true);
     setNotice(null);
     try {
-      await api()!.automation.stop(project.id);
+      await api()!.automation.stop(product.id);
       setNotice("已发送停止信号，当前阶段完成后将中止自动录入。" );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "发送停止信号失败。");
@@ -163,8 +163,8 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 在右侧 VBK WebView 打开某个导航区域（基本信息 / 行程 / 价格库存 等）。 */
   const openSection = async (section: VbkNavSection) => {
-    if (!project || !api() || navigatingSection || retryingPhase) return;
-    const url = section.buildUrl(project.productId);
+    if (!product || !api() || navigatingSection || retryingPhase) return;
+    const url = section.buildUrl(product.productId);
     if (!url) {
       setNotice("该页面需要先创建产品草稿才能打开，请等待销售控制完成。");
       return;
@@ -187,11 +187,11 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 单阶段重跑（不重启其他阶段）；常用于运营在 VBK 中调整后重新填某个阶段。 */
   const retryOnePhaseAutomation = async (sectionKey: string, phaseName: string) => {
-    if (!project || !api() || navigatingSection || retryingPhase || state.automationActive) return;
+    if (!product || !api() || navigatingSection || retryingPhase || state.automationActive) return;
     setNotice(null);
     setRetryingPhase(phaseName);
     try {
-      await api()!.automation.retryOnePhase(project.id, phaseName);
+      await api()!.automation.retryOnePhase(product.id, phaseName);
       setNotice(`已重新执行：${phaseDisplayLabel(phaseName)}。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "重新执行失败，请在 VBK 中检查后重试。");
@@ -327,18 +327,18 @@ export function useWorkflowHandlers(state: AppState) {
     }
   };
 
-  /** 退出当前项目，回到项目列表页。 */
+  /** 退出当前产品，回到产品列表页。 */
   const openProductList = () => {
-    setProject(null);
-    setView("projects");
+    setProduct(null);
+    setView("products");
     setCreating(false);
     setAccountMenuOpen(false);
   };
 
-  /** 进入"新建项目"对话框（项目列表页 + 表单初始值）。 */
+  /** 进入"新建产品"对话框（产品列表页 + 表单初始值）。 */
   const startCreateProduct = () => {
-    setProject(null);
-    setView("projects");
+    setProduct(null);
+    setView("products");
     setCreating(true);
     setCreateInput(initialInput);
     setAccountMenuOpen(false);

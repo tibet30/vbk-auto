@@ -30,7 +30,7 @@
  */
 import { logInfo } from "../../shared/log-timestamp.js";
 import type { Page } from "playwright";
-import type { ProjectDetail } from "../../shared/contracts.js";
+import type { ProductDetail } from "../../shared/contracts.js";
 import {
   buildVehicleResourceQuery,
   resolveVehicleResource,
@@ -187,10 +187,10 @@ export interface AutoVehicleTriggerOutcome {
  *
  * 输入：
  *   - page：main 进程侧 VbkBrowser.page() 的引用；浏览器已经登录；
- *   - project：当前持久化的项目（resolvedVehicleResource 需要 ProjectDetail 形状）。
+ *   - product：当前持久化的产品（resolvedVehicleResource 需要 ProductDetail 形状）。
  *
  * 输出：
- *   - nextProject：可能被改写的产品（written=false 时与传入基本相等）；
+ *   - nextProduct：可能被改写的产品（written=false 时与传入基本相等）；
  *   - outcome：诊断信息，便于上层 console.info 跟踪；
  *
  * 行为约束：
@@ -201,16 +201,16 @@ export interface AutoVehicleTriggerOutcome {
  */
 export async function applyAutoVehicleResourceTrigger(args: {
   page: Page;
-  project: ProjectDetail;
-}): Promise<{ nextProject: ProjectDetail; outcome: AutoVehicleTriggerOutcome }> {
-  const project = args.project;
-  const product = project.product;
-  if (!shouldRunVehicleResourceResolution(product)) {
-    return { nextProject: project, outcome: { written: false, reason: "产品数据未指向私家团用车，跳过自动触发" } };
+  product: ProductDetail;
+}): Promise<{ nextProduct: ProductDetail; outcome: AutoVehicleTriggerOutcome }> {
+  const product = args.product;
+  const productData = product.product;
+  if (!shouldRunVehicleResourceResolution(productData)) {
+    return { nextProduct: product, outcome: { written: false, reason: "产品数据未指向私家团用车，跳过自动触发" } };
   }
 
   // 估算并持久化 requestedDailyCost（仅这一项）。
-  const withEstimate = resolveRequestedDailyCostEstimate(product);
+  const withEstimate = resolveRequestedDailyCostEstimate(productData);
   const estimateValue = (() => {
     const ops = safeObject(withEstimate.operations);
     const vehicle = safeObject(ops?.vehicleResource);
@@ -222,14 +222,14 @@ export async function applyAutoVehicleResourceTrigger(args: {
   let resolveResult: Awaited<ReturnType<typeof resolveVehicleResource>> | null = null;
   try {
     resolveResult = await resolveVehicleResource(args.page, {
-      ...project,
+      ...product,
       product: withEstimate,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // 估算写回了也算 partial success，把估算值带回去；调用方视情况落库。
     return {
-      nextProject: { ...project, product: withEstimate },
+      nextProduct: { ...product, product: withEstimate },
       outcome: {
         written: Boolean(estimateValue),
         reason: `resolveVehicleResource 失败：${message.slice(0, 200)}`,
@@ -238,14 +238,14 @@ export async function applyAutoVehicleResourceTrigger(args: {
     };
   }
 
-  const nextProject: ProjectDetail = {
-    ...project,
+  const nextProduct: ProductDetail = {
+    ...product,
     product: resolveResult.product,
   };
 
   if (!resolveResult.resolved) {
     return {
-      nextProject,
+      nextProduct,
       outcome: {
         written: true,
         reason: resolveResult.note,
@@ -255,7 +255,7 @@ export async function applyAutoVehicleResourceTrigger(args: {
   }
 
   return {
-    nextProject,
+    nextProduct,
     outcome: {
       written: true,
       reason: resolveResult.note,

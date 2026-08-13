@@ -6,7 +6,8 @@
  */
 
 import { PlannerError, type PlanningStage, type PlanningStageOutput, type PlanningGenerationState, type ModuleOutcome, type ResearchTaskProposal, type PlanningModule, type PlanningStageError } from "../../shared/contracts-planning.js";
-import { AI_WRITABLE_PATHS, STAGE_ALLOWED_MODULES, validateModuleValue, validateResearchTaskProposal } from "./schemas.js";
+import { AI_WRITABLE_PATHS, validateModuleValue, validateResearchTaskProposal } from "./schemas.js";
+import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
@@ -112,9 +113,9 @@ export async function executeStageOutput(args: {
   stage: PlanningStage;
   output: PlanningStageOutput;
   runtime: OrchestratorRuntime;
-  projectId: string;
+  localProductId: string;
 }): Promise<StageExecutionResult> {
-  const { stage, output, runtime, projectId } = args;
+  const { stage, output, runtime, localProductId } = args;
   const accepted: ModuleOutcome[] = [];
   const rejected: ModuleOutcome[] = [];
   const researchTasks: ResearchTaskProposal[] = [];
@@ -141,7 +142,7 @@ export async function executeStageOutput(args: {
       for (const task of outcome.researchTasks ?? []) {
         const result = validateResearchTaskProposal(task);
         if (result.ok) {
-          await runtime.addResearchTask(projectId, result.task);
+          await runtime.addResearchTask(localProductId, result.task);
           researchTasks.push(result.task);
         } else {
           rejected.push({ module: "researchTasks", status: "rejected", reason: `${task.label}: ${result.reason}` });
@@ -165,7 +166,7 @@ export async function executeStageOutput(args: {
       continue;
     }
     if (outcome.module === "basicInfo") {
-      const current = await runtime.loadCurrentProduct(projectId);
+      const current = await runtime.loadCurrentProduct(localProductId);
       const basic = current.basicInfo && typeof current.basicInfo === "object" && !Array.isArray(current.basicInfo)
         ? current.basicInfo as Record<string, unknown> : {};
       const next = { ...(sanitised.value as Record<string, unknown>) };
@@ -181,7 +182,7 @@ export async function executeStageOutput(args: {
       if (!String(next.province ?? "").trim() && existingProvince) delete next.province;
       sanitised.value = next;
     }
-    const writeResult = await runtime.writeModule(projectId, outcome.module, writePath, sanitised.value);
+    const writeResult = await runtime.writeModule(localProductId, outcome.module, writePath, sanitised.value);
     if (!writeResult.ok) {
       rejected.push({ module: outcome.module, status: "rejected", reason: writeResult.reason || "本地写入失败" });
       continue;

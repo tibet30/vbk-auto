@@ -11,11 +11,12 @@
 
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
+import { ProductMutationService } from "../application/product-mutation-service.js";
 import { suggestPoi } from "../infrastructure/poi-suggest.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
-import { RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import type { ContactCardSelection } from "../../shared/contracts.js";
 import type {
   GenerationStateStore,
@@ -32,8 +33,8 @@ export class DbGenerationStateStore implements GenerationStateStore {
     private readonly db: VbkDatabase,
     private readonly onSaved?: (state: PlanningGenerationState) => void,
   ) {}
-  async load(projectId: string): Promise<PlanningGenerationState | undefined> {
-    return this.db.loadPlanningState(projectId);
+  async load(localProductId: string): Promise<PlanningGenerationState | undefined> {
+    return this.db.loadPlanningState(localProductId);
   }
   async save(state: PlanningGenerationState): Promise<void> {
     this.db.savePlanningState(state);
@@ -165,79 +166,87 @@ function readValidProductButler(product: Record<string, unknown>): ContactCardSe
 
 /**
  * OrchestratorRuntime 的 SQLite 实现：
- *   - loadExistingResearchTasks：取项目下所有 research tasks，dedupe 按 label+type；
+ *   - loadExistingResearchTasks：取产品下所有 research tasks，dedupe 按 label+type；
  *   - writeModule：applyProductPatchSafe 写入 product；
  *   - addResearchTask：委托 db.addResearchTask；
  *   - loadHistory / loadCurrentProduct / loadAcceptedModules：从持久化反推。
  */
 export class DbOrchestratorRuntime implements OrchestratorRuntime {
-  constructor(private readonly db: VbkDatabase, private readonly browser?: VbkBrowser) {}
+  private readonly productMutations: ProductMutationService;
+
+  constructor(
+    private readonly db: VbkDatabase,
+    private readonly browser?: VbkBrowser,
+    productMutations?: ProductMutationService,
+  ) {
+    this.productMutations = productMutations ?? new ProductMutationService(db);
+  }
   async suggestPoi(keyword: string) {
     if (!this.browser) return null;
     return suggestPoi(await this.browser.page(), keyword);
   }
 
-  async loadExistingResearchTasks(projectId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
-    const project = this.db.getProject(projectId);
-    if (!project) return [];
+  async loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) return [];
     // 规划子系统使用「全状态」dedupe：confirmed / resolved 的运营 / VBK
     // 标记过的 research tasks 同样应当被视为已存在，避免下次 planning:start
     // 或 resume 时再次生成同 label+type 的重复任务。手动按钮调用走同一接口，
     // 与现有「重复添加视为同一任务」语义保持一致。
-    return project.researchTasks.map((task) => ({ label: task.label, type: task.type }));
+    return product.researchTasks.map((task) => ({ label: task.label, type: task.type }));
   }
 
-  async writeModule(projectId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
-    const project = this.db.getProject(projectId);
-    if (!project) return { ok: false, reason: "项目不存在" };
-    const existingButler = readValidProductButler(project.product);
+  async writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) return { ok: false, reason: "产品不存在" };
+    const existingButler = readValidProductButler(product.product);
     // basicInfo is a shared object; replacing its root must preserve days/cities
     // and other existing fields needed by itinerary and automation.
     if (module === "basicInfo" && value && typeof value === "object" && !Array.isArray(value)) {
-      const existing = project.product.basicInfo && typeof project.product.basicInfo === "object" && !Array.isArray(project.product.basicInfo)
-        ? project.product.basicInfo as Record<string, unknown>
+      const existing = product.product.basicInfo && typeof product.product.basicInfo === "object" && !Array.isArray(product.product.basicInfo)
+        ? product.product.basicInfo as Record<string, unknown>
         : {};
       const incoming = { ...(value as Record<string, unknown>) };
       if (typeof incoming.province === "string") incoming.province = normaliseProvinceName(incoming.province);
       if (typeof existing.province === "string" && existing.province.trim()) delete incoming.province;
       value = { ...existing, ...incoming };
     }
-    const result = applyProductPatchSafe(project.product, [
+    const result = applyProductPatchSafe(product.product, [
       { op: "replace", path: writePath, value },
     ]);
     if (!result.applied) return { ok: false, reason: "本地写入被拒（路径 / 值不合法）" };
-    const product = existingButler
+    const productData = existingButler
       ? applyManualReviewField(result.product, { field: "butlerContact", selection: existingButler })
       : result.product;
-    this.db.updateProduct(projectId, product);
+    this.productMutations.replace(localProductId, productData, { notify: false });
     const accountName = this.db.getSetting("vbkAccountName")?.value || null;
-    injectAccountButler(this.db, projectId, accountName);
+    injectAccountButler(this.db, localProductId, accountName);
     return { ok: true };
   }
 
-  async addResearchTask(projectId: string, task: ResearchTaskProposal): Promise<string> {
-    return this.db.addResearchTask(projectId, task);
+  async addResearchTask(localProductId: string, task: ResearchTaskProposal): Promise<string> {
+    return this.db.addResearchTask(localProductId, task);
   }
 
-  async loadHistory(projectId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
-    const project = this.db.getProject(projectId);
-    if (!project) return [];
-    return project.messages
+  async loadHistory(localProductId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) return [];
+    return product.messages
       .filter((message) => message.role === "user" || message.role === "assistant")
       .filter((message) => message.taskStatus !== "failed" && message.taskStatus !== "running")
       .slice(-12)
       .map((message) => ({ role: message.role as "user" | "assistant", content: message.content }));
   }
 
-  async loadCurrentProduct(projectId: string): Promise<Record<string, unknown>> {
-    const project = this.db.getProject(projectId);
-    return project?.product ?? {};
+  async loadCurrentProduct(localProductId: string): Promise<Record<string, unknown>> {
+    const product = this.db.getProduct(localProductId);
+    return product?.product ?? {};
   }
 
-  async loadAcceptedModules(projectId: string): Promise<PlanningModule[]> {
-    const project = this.db.getProject(projectId);
-    if (!project) return [];
-    return detectAcceptedModulesFromProduct(project.product);
+  async loadAcceptedModules(localProductId: string): Promise<PlanningModule[]> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) return [];
+    return detectAcceptedModulesFromProduct(product.product);
   }
 }
 

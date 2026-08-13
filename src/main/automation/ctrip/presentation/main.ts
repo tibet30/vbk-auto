@@ -18,6 +18,7 @@ import {
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
 import { fillProductFeatures } from "./features.js";
 import { installSaveMonitor, type SaveMonitorOutcome } from "./save-monitor.js";
+import { bindCtripLibraryCoverViaApi } from "./cover-bind.js";
 
 export { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 
@@ -63,21 +64,23 @@ export async function selectCtripLibraryImage(page: any, params: LibraryImagePar
 
   const cards = dialog.locator(".importpic-modal-picitem");
   const deadline = Date.now() + 8_000;
-  let count = 0;
+  let cardTexts: string[] = [];
   while (Date.now() < deadline) {
-    count = await cards.count();
-    if (count > 0) break;
+    // 图库结果会懒加载并整批重渲染。先 count 再逐个 nth().innerText() 会在
+    // 列表缩短时等待一个已经消失的固定序号；一次 evaluate 快照不会跨重渲染。
+    cardTexts = await cards.allInnerTexts();
+    if (cardTexts.length > 0) break;
     await delay(250);
   }
-  if (count === 0) {
+  if (cardTexts.length === 0) {
     throw new Error(
       `${label}: '${poi}' 在携程图库未找到符合质量要求的图片(质量分 ≥ ${minQuality},${aspect === "landscape" ? "最小 1280×800 横版" : "宽高不限但 ≥1280×800"})`,
     );
   }
 
   const candidates: Array<{ quality: string; resolution: string }> = [];
-  for (let index = 0; index < count; index += 1) {
-    const text = (await cards.nth(index).innerText()).replace(/\s+/g, " ");
+  for (const rawText of cardTexts) {
+    const text = rawText.replace(/\s+/g, " ");
     candidates.push({
       quality: text.match(/质量分：\s*([\d.]+(?:\s*-\s*[\d.]+)?)/)?.[1] || "",
       resolution: text.match(/分辨率：\s*(\d+\s*\*\s*\d+)/)?.[1] || "",
@@ -124,25 +127,15 @@ async function fillFirstVisible(locator, value, description) {
 }
 
 /**
- * 判断产品图文页当前是否已经有「封面图」（image-category-container 内 .drag-nav-container 有 img）。
- * 用于封面图选择阶段的「已存在则跳过」快路径。
- */
-export async function hasCoverImage(page) {
-  const cover = page.locator(".image-category-container").filter({ hasText: /^\*?封面/ }).first();
-  if (!(await cover.count())) return false;
-  return (await cover.locator(".drag-nav-container img").count()) > 0;
-}
-
-/**
  * 在携程图库弹窗内按 id 拿搜索 input + 键入 value，再从打开的 .ant-select-dropdown 抓 option，
  * 命中与 value 完全相同或包含它的就点击；轮询最多 8s，超时报错。
  */
 async function selectSearchOption(page, dialog, id, value, description) {
   const input = dialog.locator(`#${id}`);
   await assertCount(input, 1, `${description}搜索框`);
-  await input.click();
-  await input.fill("");
-  await input.pressSequentially(value, { delay: 80 });
+  await input.waitFor({ state: "visible", timeout: 5_000 });
+  // 远程搜索在逐字输入时会并发请求，旧短词响应可能覆盖完整 POI；fill 只提交完整名称。
+  await input.fill(value);
 
   const options = page.locator(
     ".ant-select-dropdown:not(.ant-select-dropdown-hidden) [role=option], " +
@@ -162,80 +155,9 @@ async function selectSearchOption(page, dialog, id, value, description) {
   throw new Error(`${description}未找到"${value}"；可选：${seen.join("、") || "无"}`);
 }
 
-/**
- * 封面图入库主流程：
- *   - hasCoverImage 已存在则 reused=true 跳过；
- *   - 在封面卡上点添加 / 图库导入；
- *   - 弹窗里搜 poi → 解析每个候选的质量 / 分辨率 → 用分辨率 × 横版 × minQuality 的硬规则
- *     做兜底筛选，没找到再用 findBestCtripLibraryImage；
- *   - 同意协议 + 「同意并导入」，最后回读封面是否已经出现。
- */
+/** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认。 */
 export async function selectCtripLibraryCover(page, cover) {
-  if (await hasCoverImage(page)) return { reused: true };
-
-  const section = page.locator(".image-category-container").filter({ hasText: /^\*?封面/ }).first();
-  await assertCount(section, 1, "封面图片区块");
-  const addCard = section.locator(".add-image-card");
-  await assertCount(addCard, 1, "封面添加图片入口");
-  await addCard.click({ force: true });
-  const dialog = page.getByRole("dialog").filter({ hasText: "从图库资源导入" });
-  // VBK 当前页面在 force 点击添加卡片后可能已经直接打开图库弹窗；此时
-  // 再点卡片内的「图库导入」会被 modal 遮挡并等待到 Playwright 超时。
-  if (!(await dialog.isVisible().catch(() => false))) {
-    const libraryImport = addCard.getByText("图库导入", { exact: true });
-    await libraryImport.waitFor({ state: "visible", timeout: 3_000 });
-    if (!(await libraryImport.isVisible())) {
-      await addCard.hover().catch(() => {});
-      await libraryImport.waitFor({ state: "visible", timeout: 3_000 });
-    }
-    await libraryImport.click();
-  }
-  await dialog.waitFor({ state: "visible", timeout: 10_000 });
-  await selectSearchOption(page, dialog, "PoiId", cover.poi, "携程图库景点");
-  await dialog.getByRole("button", { name: /查\s*询/ }).click();
-
-  const cards = dialog.locator(".importpic-modal-picitem");
-  await cards.first().waitFor({ state: "visible", timeout: 10_000 });
-  const candidates = [];
-  for (let index = 0; index < (await cards.count()); index += 1) {
-    const text = (await cards.nth(index).innerText()).replace(/\s+/g, " ");
-    candidates.push({
-      quality: text.match(/质量分：\s*([\d.]+(?:\s*-\s*[\d.]+)?)/)?.[1] || "",
-      resolution: text.match(/分辨率：\s*(\d+\s*\*\s*\d+)/)?.[1] || "",
-    });
-  }
-  const fallbackIndex = candidates.findIndex((image) => {
-    const qualities: number[] = image.quality.match(/\d+(?:\.\d+)?/g)?.map(Number) || [];
-    const lowestQuality: number = qualities.length ? Math.min(...qualities) : -Infinity;
-    const dimensions: number[] = image.resolution.match(/\d+/g)?.map(Number) || [];
-    const [width = 0, height = 0] = dimensions;
-    return lowestQuality >= (cover.minQuality ?? 3) && width >= 1280 && height >= 800 && width >= height;
-  });
-  const selectedIndex = findBestCtripLibraryImage(candidates, cover.minQuality ?? 3);
-  const finalIndex = fallbackIndex >= 0 ? fallbackIndex : selectedIndex;
-  if (finalIndex < 0) {
-    throw new Error(
-      `携程图库未找到符合封面标准的"${cover.poi}"图片：最低质量分 ${cover.minQuality ?? 3}，横版分辨率至少 1280×800。`,
-    );
-  }
-  const card = cards.nth(finalIndex);
-  await card.scrollIntoViewIfNeeded().catch(() => {});
-  await card.click({ force: true });
-
-  const agreement = dialog.getByText(/我已仔细阅读并同意/).locator("xpath=ancestor::label[1]");
-  if (await agreement.count()) {
-    const checkbox = agreement.locator('input[type="checkbox"]');
-    if ((await checkbox.count()) && !(await checkbox.isChecked())) await agreement.click();
-  }
-  const confirm = dialog.getByRole("button", { name: /同意并导入/ });
-  await confirm.click();
-  await dialog.waitFor({ state: "hidden", timeout: 15_000 });
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    if (await hasCoverImage(page)) return { reused: false };
-    await delay(250);
-  }
-  throw new Error(`已从携程图库导入"${cover.poi}"，但封面未显示在产品图文页。`);
+  return bindCtripLibraryCoverViaApi(page, cover.imageId);
 }
 
 /**

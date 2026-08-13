@@ -34,7 +34,7 @@ export function flattenPoiTextFields(value: unknown): PoiSuggestTextField[] {
 
 function toPoiSuggestCandidate(item: unknown, index: number): PoiSuggestCandidate {
   const poi = asRecord(item);
-  const poiName = stringValue(poi?.poiName);
+  const poiName = stringValue(poi?.localName ?? poi?.poiName ?? poi?.name);
   const poiId = positiveIntegerValue(poi?.poiId) ?? null;
   return {
     index,

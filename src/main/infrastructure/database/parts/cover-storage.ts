@@ -3,7 +3,7 @@
  *
  * 设计目标：
  *  - product JSON 只保留 fileId / 引用元数据，不直接保存图片二进制；
- *  - 同一 fileId 可被多个项目 / 多次编辑复用，文件层不重复落盘；
+ *  - 同一 fileId 可被多个产品 / 多次编辑复用，文件层不重复落盘；
  *  - 通过 refCount 跟踪引用计数；0 时清除本地副本，避免覆盖磁盘增长；
  *  - 文件目录在 dataPath/covers/ 下，按 fileId 前两位分桶以便排查；
  *  - 只接受白名单 mime（image/jpeg / image/png / image/webp）与大小上限；

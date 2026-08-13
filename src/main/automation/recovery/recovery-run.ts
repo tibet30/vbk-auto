@@ -88,7 +88,7 @@ export async function runPhaseWithRecovery(
     // 用户中止检查：放在 attempt 顶部而不是 handler 内部 —— 当前 handler
     // 已经在跑就让它自然结束，避免掐断 Playwright 调用让页面留下半成品 UI。
     // 下一次 attempt 不再启动。status 走 cancelled，由 runner 负责更新
-    // run.status / project.status。
+    // run.status / product.status。
     if (ctx.shouldCancel?.()) {
       rec.state = "needs_user";
       rec.finalError = "用户中止了自动录入";

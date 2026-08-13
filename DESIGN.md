@@ -70,7 +70,7 @@ The browser is not a modal or separate application window. It is a first-class S
 
 ## Application Shell
 
-- A 56px global rail holds the VBK Desktop mark, project history, resource library, execution records, settings, and account switcher.
+- A 56px global rail holds the VBK Desktop mark, product history, resource library, execution records, settings, and account switcher.
 - A 44px top bar shows the current product, VBK login/account state, readiness, and the safe save-draft action.
 - Below it, a persistent two-step progress navigator controls which stage is visible and explains each stage's current state.
 - The active stage contains exactly two connected work areas: AI plus full review in Step 1; review result plus embedded VBK browser in Step 2.

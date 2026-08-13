@@ -50,7 +50,7 @@ function makeMinimalPng(): Buffer {
   );
 }
 
-test("readManualCoverDataUrl：合法文件返回 data: URL（而非 file://）", () => {
+test("readManualCoverDataUrl：合法文件返回 data: URL（而非 file://）", async () => {
   const dataPath = makeDataPath();
   try {
     const bytes = makeMinimalJpeg();
@@ -60,27 +60,24 @@ test("readManualCoverDataUrl：合法文件返回 data: URL（而非 file://）"
       mimeType: "image/jpeg",
       bytes,
     });
-    return readManualCoverDataUrl({
+    const result = await readManualCoverDataUrl({
       dataPath,
       fileId: meta.fileId,
       originalName: meta.originalName,
-    }).then((result) => {
-      assert.ok(result.url, "data URL 不能为 null");
-      assert.match(result.url!, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
-      // 关键：绝不能是 file://（这是迁移目标）。
-      assert.doesNotMatch(result.url!, /^file:/);
-      // 元数据必须保留。
-      assert.equal(result.mimeType, "image/jpeg");
-      assert.equal(result.sizeBytes, bytes.length);
-      assert.equal(result.uploadedAt, meta.uploadedAt);
-      assert.equal(result.originalName, "demo.jpg");
     });
+    assert.ok(result.url, "data URL 不能为 null");
+    assert.match(result.url!, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
+    assert.doesNotMatch(result.url!, /^file:/);
+    assert.equal(result.mimeType, "image/jpeg");
+    assert.equal(result.sizeBytes, bytes.length);
+    assert.equal(result.uploadedAt, meta.uploadedAt);
+    assert.equal(result.originalName, "demo.jpg");
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
 
-test("readManualCoverDataUrl：PNG 文件以 image/png 返回 data URL", () => {
+test("readManualCoverDataUrl：PNG 文件以 image/png 返回 data URL", async () => {
   const dataPath = makeDataPath();
   try {
     const bytes = makeMinimalPng();
@@ -90,21 +87,20 @@ test("readManualCoverDataUrl：PNG 文件以 image/png 返回 data URL", () => {
       mimeType: "image/png",
       bytes,
     });
-    return readManualCoverDataUrl({
+    const result = await readManualCoverDataUrl({
       dataPath,
       fileId: meta.fileId,
       originalName: meta.originalName,
-    }).then((result) => {
-      assert.match(result.url!, /^data:image\/png;base64,/);
-      assert.doesNotMatch(result.url!, /^file:/);
-      assert.equal(result.mimeType, "image/png");
     });
+    assert.match(result.url!, /^data:image\/png;base64,/);
+    assert.doesNotMatch(result.url!, /^file:/);
+    assert.equal(result.mimeType, "image/png");
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
 
-test("readManualCoverDataUrl：文件丢失时 url=null 但保留 meta", () => {
+test("readManualCoverDataUrl：文件丢失时 url=null 但保留 meta", async () => {
   const dataPath = makeDataPath();
   try {
     const bytes = makeMinimalJpeg();
@@ -119,44 +115,42 @@ test("readManualCoverDataUrl：文件丢失时 url=null 但保留 meta", () => {
     for (const file of fs.readdirSync(dir)) {
       if (file.startsWith(meta.fileId)) fs.rmSync(path.join(dir, file));
     }
-    return readManualCoverDataUrl({
+    const result = await readManualCoverDataUrl({
       dataPath,
       fileId: meta.fileId,
       originalName: meta.originalName,
-    }).then((result) => {
-      assert.equal(result.url, null);
-      assert.equal(result.mimeType, "image/jpeg");
-      assert.equal(result.sizeBytes, bytes.length);
-      assert.equal(result.originalName, "demo.jpg");
-      assert.equal(result.uploadedAt, meta.uploadedAt);
     });
+    assert.equal(result.url, null);
+    assert.equal(result.mimeType, "image/jpeg");
+    assert.equal(result.sizeBytes, bytes.length);
+    assert.equal(result.originalName, "demo.jpg");
+    assert.equal(result.uploadedAt, meta.uploadedAt);
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
 
-test("readManualCoverDataUrl：fileId 完全不存在（无 meta）时全字段 null", () => {
+test("readManualCoverDataUrl：fileId 完全不存在（无 meta）时全字段 null", async () => {
   const dataPath = makeDataPath();
   try {
-    return readManualCoverDataUrl({
+    const result = await readManualCoverDataUrl({
       dataPath,
       fileId: "00000000-0000-0000-0000-000000000000",
       originalName: "nope.jpg",
-    }).then((result) => {
-      assert.deepEqual(result, {
-        url: null,
-        mimeType: null,
-        sizeBytes: null,
-        uploadedAt: null,
-        originalName: null,
-      });
+    });
+    assert.deepEqual(result, {
+      url: null,
+      mimeType: null,
+      sizeBytes: null,
+      uploadedAt: null,
+      originalName: null,
     });
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
 
-test("readManualCoverDataUrl：返回的 base64 解码后正好等于原始字节", () => {
+test("readManualCoverDataUrl：返回的 base64 解码后正好等于原始字节", async () => {
   const dataPath = makeDataPath();
   try {
     const bytes = makeMinimalJpeg();
@@ -166,17 +160,16 @@ test("readManualCoverDataUrl：返回的 base64 解码后正好等于原始字�
       mimeType: "image/jpeg",
       bytes,
     });
-    return readManualCoverDataUrl({
+    const result = await readManualCoverDataUrl({
       dataPath,
       fileId: meta.fileId,
       originalName: meta.originalName,
-    }).then((result) => {
-      assert.ok(result.url);
-      const prefix = "data:image/jpeg;base64,";
-      assert.ok(result.url!.startsWith(prefix));
-      const decoded = Buffer.from(result.url!.slice(prefix.length), "base64");
-      assert.ok(bytes.equals(decoded), "data URL 内嵌的 base64 必须能还原成原字节");
     });
+    assert.ok(result.url);
+    const prefix = "data:image/jpeg;base64,";
+    assert.ok(result.url!.startsWith(prefix));
+    const decoded = Buffer.from(result.url!.slice(prefix.length), "base64");
+    assert.ok(bytes.equals(decoded), "data URL 内嵌的 base64 必须能还原成原字节");
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }

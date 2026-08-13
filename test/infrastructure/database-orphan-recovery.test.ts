@@ -56,14 +56,14 @@ function makeCompletedRun(): AutomationRun {
 test("recoverOrphanAutomationRuns：status=running 的 run 启动时变为 failed", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    db.saveAutomation(project.id, makeRunningRun());
-    db.updateProduct(project.id, project.product, "automating");
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product.id, makeRunningRun());
+    db.updateProduct(product.id, product.product, "automating");
 
     const touched = db.recoverOrphanAutomationRuns();
-    assert.deepEqual(touched, [project.id]);
+    assert.deepEqual(touched, [product.id]);
 
-    const after = db.getProject(project.id)!;
+    const after = db.getProduct(product.id)!;
     assert.ok(after.automation);
     assert.equal(after.automation!.status, "failed");
     // 业务状态也应该回到 blocked，让 UI 不再当作「正在录入」渲染。
@@ -74,13 +74,13 @@ test("recoverOrphanAutomationRuns：status=running 的 run 启动时变为 faile
 test("recoverOrphanAutomationRuns：recovery.phases 里仍为 running 的项被强制改成 needs_user", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    db.saveAutomation(project.id, makeRunningRun({ phase: "basic", state: "running" }));
-    db.updateProduct(project.id, project.product, "automating");
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product.id, makeRunningRun({ phase: "basic", state: "running" }));
+    db.updateProduct(product.id, product.product, "automating");
 
     db.recoverOrphanAutomationRuns();
 
-    const after = db.getProject(project.id)!;
+    const after = db.getProduct(product.id)!;
     const basic = after.automation?.recovery?.phases.basic;
     assert.ok(basic, "basic recovery record should exist");
     assert.equal(basic!.state, "needs_user");
@@ -92,21 +92,21 @@ test("recoverOrphanAutomationRuns：recovery.phases 里仍为 running 的项被�
 test("recoverOrphanAutomationRuns：advising / retrying 也会被改成 needs_user", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    db.saveAutomation(project.id, makeRunningRun({ runId: "run-advising", phase: "presentation", state: "advising" }));
-    db.updateProduct(project.id, project.product, "automating");
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product.id, makeRunningRun({ runId: "run-advising", phase: "presentation", state: "advising" }));
+    db.updateProduct(product.id, product.product, "automating");
     db.recoverOrphanAutomationRuns();
 
-    const after = db.getProject(project.id)!;
+    const after = db.getProduct(product.id)!;
     const pres = after.automation?.recovery?.phases.presentation;
     assert.equal(pres?.state, "needs_user");
 
     // 同时再放一个 retrying 验证
-    const project2 = db.createProject({ destination: "大同", days: 2, productForm: "privateTour" });
-    db.saveAutomation(project2.id, makeRunningRun({ runId: "run-retrying", phase: "basic", state: "retrying" }));
-    db.updateProduct(project2.id, project2.product, "automating");
+    const product2 = db.createProduct({ destination: "大同", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product2.id, makeRunningRun({ runId: "run-retrying", phase: "basic", state: "retrying" }));
+    db.updateProduct(product2.id, product2.product, "automating");
     db.recoverOrphanAutomationRuns();
-    const after2 = db.getProject(project2.id)!;
+    const after2 = db.getProduct(product2.id)!;
     assert.equal(after2.automation?.recovery?.phases.basic?.state, "needs_user");
   } finally { cleanup(); }
 });
@@ -114,7 +114,7 @@ test("recoverOrphanAutomationRuns：advising / retrying 也会被改成 needs_us
 test("recoverOrphanAutomationRuns：history 归档保留（attempts + attemptsHistory 都不丢）", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
     const attempts = [
       { attempt: 1, error: "第一轮第 1 次失败", at: "2026-08-02T00:00:01.000Z" },
       { attempt: 2, error: "第一轮第 2 次失败", at: "2026-08-02T00:00:02.000Z" },
@@ -123,12 +123,12 @@ test("recoverOrphanAutomationRuns：history 归档保留（attempts + attemptsHi
     const attemptsHistory = [
       { attempt: 1, error: "更早的一次失败", at: "2026-08-01T00:00:01.000Z" },
     ];
-    db.saveAutomation(project.id, makeRunningRun({ phase: "basic", state: "running", attempts, attemptsHistory }));
-    db.updateProduct(project.id, project.product, "automating");
+    db.saveAutomation(product.id, makeRunningRun({ phase: "basic", state: "running", attempts, attemptsHistory }));
+    db.updateProduct(product.id, product.product, "automating");
 
     db.recoverOrphanAutomationRuns();
 
-    const after = db.getProject(project.id)!;
+    const after = db.getProduct(product.id)!;
     const rec = after.automation?.recovery?.phases.basic;
     assert.ok(rec);
     assert.equal(rec!.attempts.length, 3);
@@ -141,14 +141,14 @@ test("recoverOrphanAutomationRuns：history 归档保留（attempts + attemptsHi
 test("recoverOrphanAutomationRuns：status=succeeded 的 run 不被改动", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    db.saveAutomation(project.id, makeCompletedRun());
-    db.updateProduct(project.id, project.product, "draft_saved");
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product.id, makeCompletedRun());
+    db.updateProduct(product.id, product.product, "draft_saved");
 
     const touched = db.recoverOrphanAutomationRuns();
     assert.deepEqual(touched, []);
 
-    const after = db.getProject(project.id)!;
+    const after = db.getProduct(product.id)!;
     assert.equal(after.automation?.status, "succeeded");
     assert.equal(after.status, "draft_saved");
   } finally { cleanup(); }
@@ -157,13 +157,13 @@ test("recoverOrphanAutomationRuns：status=succeeded 的 run 不被改动", asyn
 test("recoverOrphanAutomationRuns：append 一条 warning 日志，让 UI 知道为什么停了", async () => {
   const { db, cleanup } = await makeDb();
   try {
-    const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-    db.saveAutomation(project.id, makeRunningRun({ phase: "basic", state: "running" }));
-    db.updateProduct(project.id, project.product, "automating");
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product.id, makeRunningRun({ phase: "basic", state: "running" }));
+    db.updateProduct(product.id, product.product, "automating");
 
     db.recoverOrphanAutomationRuns();
 
-    const after = db.getProject(project.id)!;
+    const after = db.getProduct(product.id)!;
     const lastLog = after.automation?.logs.at(-1);
     assert.ok(lastLog);
     assert.equal(lastLog!.level, "warning");

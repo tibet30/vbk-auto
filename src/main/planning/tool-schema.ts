@@ -17,8 +17,8 @@
  */
 
 import type { PlanningStage, PlanningModule } from "../../shared/contracts-planning.js";
-import { STAGE_ALLOWED_MODULES } from "./schemas.js";
-import { VBK_RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 
 /**
  * 共享子 schema：把 reason 等可有可无的字段编码为 nullable（required 仍包含），
@@ -57,7 +57,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
         additionalProperties: false,
         required: ["recommendationCategory", "recommendation", "recommendations", "features"],
         properties: {
-          recommendationCategory: { type: "string", minLength: 1 },
+          recommendationCategory: { type: "string", enum: [...VBK_RECOMMENDATION_CATEGORIES] },
           recommendation: { type: "string", minLength: 1 },
           recommendations: {
             type: "array", minItems: 3, maxItems: 3,

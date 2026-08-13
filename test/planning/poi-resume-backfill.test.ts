@@ -16,7 +16,7 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
     itinerary: [{ day: 1, title: "D1", spots: [{ name: "晋祠", poiName: null, poiId: null }], description: "游览", hotel: "", meals: "午餐自理" }],
   };
   const state: PlanningGenerationState = {
-    projectId: "resume-poi", currentStage: "presentation",
+    localProductId: "resume-poi", currentStage: "presentation",
     completedStages: ["skeleton", "basicInfo", "itinerary"], stages: [],
     status: "needs_user", resumeAt: new Date().toISOString(),
   };
@@ -30,7 +30,7 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
       return { poiName: "晋祠博物馆", poiId: 83199 };
     },
     loadExistingResearchTasks: async () => [],
-    writeModule: async (_projectId, _module: PlanningModule, path, value) => {
+    writeModule: async (_localProductId, _module: PlanningModule, path, value) => {
       events.push(`write:${path}`);
       if (path === AI_WRITABLE_PATHS.itinerary) product = { ...product, itinerary: value };
       return { ok: true };
@@ -60,7 +60,7 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
     },
   };
 
-  await runPlan({ projectId: "resume-poi", skeleton, store, runtime, planner, options: { stageRetryLimit: 1 } });
+  await runPlan({ localProductId: "resume-poi", skeleton, store, runtime, planner, options: { stageRetryLimit: 1 } });
 
   assert.deepEqual(events.slice(0, 3), [
     "poi:晋祠",

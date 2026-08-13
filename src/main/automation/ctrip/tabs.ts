@@ -88,7 +88,9 @@ async function saveThenAdvance(page, options) {
 
   await dismissKnownNoticeDialogs(page, { waitForSaveSuccess: true });
 
-  const deadline = Date.now() + 15_000;
+  // VBK 保存成功后可能先返回保存响应，再异步跳转到下一页；15 秒会把
+  // 已发生的晚到导航误判为失败。给目标 URL / active tab 留出 30 秒观测窗口。
+  const deadline = Date.now() + 30_000;
   let navigated = false;
   let activeLabel: string | null = null;
   let unlockedLabel: string | null = null;

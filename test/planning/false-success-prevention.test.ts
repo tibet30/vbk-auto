@@ -70,7 +70,7 @@ test("部分模块缺失时，状态进入 needs_user，不发完成声明", asy
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const planner = new OneValidPlanner();
-  const result = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   assert.equal(result.status, "needs_user");
   // 缺失的模块应当被报告出来。
   const rejectedNames = result.rejected.map((m) => m.module);
@@ -112,7 +112,7 @@ test("包含禁写字段的模块会被拒，且原因包含字段名", async ()
       };
     },
   };
-  const result = await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   // presentation 阶段因黑名单字段被拒，进入 needs_user。
   assert.equal(result.status, "needs_user");
   // 阶段级 rejected 里能查到原因（result.rejected 是 validation 级别的 missing）。

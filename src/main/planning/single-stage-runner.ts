@@ -1,6 +1,7 @@
 /** 单阶段执行器：推进 planner / runtime 输入到下一阶段。 */
 
-import { AI_WRITABLE_PATHS, STAGE_ALLOWED_MODULES } from "./schemas.js";
+import { AI_WRITABLE_PATHS } from "./schemas.js";
+import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { executeStageOutput, upsertStageInState, toStageError } from "./stage-runner.js";
 import { validateCompleteness, deepValidateModules } from "./validation.js";
 import { composeStageAssistantReply } from "./replies.js";
@@ -45,7 +46,7 @@ export async function runSingleStage(args: RunSingleStageArgs): Promise<SingleSt
   const researchTasks: ResearchTaskProposal[] = [];
   let attempts = state.stages.find((s) => s.stage === stage)?.attempts ?? 0;
   let lastError: PlanningStageError | undefined;
-  logStageStart("进入阶段", { stage, projectId: state.projectId, attempts });
+  logStageStart("进入阶段", { stage, localProductId: state.localProductId, attempts });
 
   // skeleton 阶段由本地完成；不调用 AI。
   if (stage === "skeleton") {
@@ -88,13 +89,13 @@ async function runSkeletonStage(args: {
   const rejected: ModuleOutcome[] = [];
   const researchTasks: ResearchTaskProposal[] = [];
   // 已有 valid skeleton（hotelTier / pickupCity / transport 都在）→ 跳过写入，避免覆盖人工 / VBK 修正。
-  const alreadyAccepted = await runtime.loadAcceptedModules(state.projectId);
+  const alreadyAccepted = await runtime.loadAcceptedModules(state.localProductId);
   if (alreadyAccepted.includes("skeleton")) {
     accepted.push({ module: "skeleton", status: "accepted", writePath: AI_WRITABLE_PATHS.skeleton, acceptedFields: ["hotelTier", "pickupCity", "transport"] });
     return makeStageResult({ state, stage: "skeleton", accepted, rejected, researchTasks, attempts, lastError, status: "completed" });
   }
   if (!alreadyAccepted.includes("skeleton")) {
-    const result = await runtime.writeModule(state.projectId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
+    const result = await runtime.writeModule(state.localProductId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
       hotelTier: skeleton.productForm === "privateTour" ? "当地5钻酒店/-38" : "当地3钻酒店/-3",
       pickupCity: skeleton.destination,
       transport: "charter",
@@ -125,12 +126,12 @@ async function runValidationStage(args: {
   const accepted: ModuleOutcome[] = [];
   const rejected: ModuleOutcome[] = [];
   const researchTasks: ResearchTaskProposal[] = [];
-  const acceptedFromProduct = await runtime.loadAcceptedModules(state.projectId);
+  const acceptedFromProduct = await runtime.loadAcceptedModules(state.localProductId);
   const validation = validateCompleteness({ acceptedModules: acceptedFromProduct });
   for (const m of validation.accepted) accepted.push(m);
   for (const m of validation.missing) rejected.push(m);
   // Deep validation：模块存在但内容不合法时，标记为 rejected 并报告原因。
-  const product = await runtime.loadCurrentProduct(state.projectId);
+  const product = await runtime.loadCurrentProduct(state.localProductId);
   const deep = deepValidateModules({
     skeleton,
     product,
@@ -173,8 +174,8 @@ async function runResearchStage(args: {
   const researchTasks: ResearchTaskProposal[] = [];
   // AI 不能写「已确认 / 已解决」措辞，也不能决定哪个核查项已落地；
   // 这里只生成「待运营 / VBK 核查」的提案，runtime.addResearchTask 负责去重落库。
-  const acceptedFromProduct = await runtime.loadAcceptedModules(state.projectId);
-  const product = await runtime.loadCurrentProduct(state.projectId);
+  const acceptedFromProduct = await runtime.loadAcceptedModules(state.localProductId);
+  const product = await runtime.loadCurrentProduct(state.localProductId);
   const pending = pendingResearchTasks({
     skeleton,
     product,
@@ -182,7 +183,7 @@ async function runResearchStage(args: {
     existing: existingTasks,
   });
   for (const entry of pending) {
-    await runtime.addResearchTask(state.projectId, entry.proposal);
+    await runtime.addResearchTask(state.localProductId, entry.proposal);
     researchTasks.push(entry.proposal);
   }
   const stageOutcome: ModuleOutcome = {
@@ -288,7 +289,7 @@ async function runAiStage(args: {
       ? new Set<PlanningModule>()
       : undefined;
     if (stage === "commercial") {
-      const already = await runtime.loadAcceptedModules(state.projectId);
+      const already = await runtime.loadAcceptedModules(state.localProductId);
       for (const m of already) {
         if ((STAGE_ALLOWED_MODULES.commercial as readonly PlanningModule[]).includes(m)) {
           stageAcceptedModules!.add(m);
@@ -303,15 +304,15 @@ async function runAiStage(args: {
     }
     // 单模块阶段（itinerary / presentation）：如果持久化产品已经有 valid 模块，跳过整次 AI 调用。
     if (stage === "itinerary" || stage === "presentation") {
-      const alreadyAccepted = await runtime.loadAcceptedModules(state.projectId);
+      const alreadyAccepted = await runtime.loadAcceptedModules(state.localProductId);
       const sole = stage === "itinerary" ? "itinerary" : "presentation";
       let itineraryPoiComplete = true;
       if (stage === "itinerary") {
-        const current = await runtime.loadCurrentProduct(state.projectId);
+        const current = await runtime.loadCurrentProduct(state.localProductId);
         itineraryPoiComplete = Array.isArray(current.itinerary) && current.itinerary.every((day: any) => Array.isArray(day?.spots) && day.spots.every((spot: any) => spot && typeof spot === "object" && typeof spot.poiName === "string" && spot.poiName.trim() && typeof spot.poiId === "number" && Number.isInteger(spot.poiId) && spot.poiId > 0));
       }
       if (alreadyAccepted.includes(sole) && itineraryPoiComplete) {
-        if (stage === "itinerary") logInfo("[planning.poi]", { event: "skip", projectId: state.projectId });
+        if (stage === "itinerary") logInfo("[planning.poi]", { event: "skip", localProductId: state.localProductId });
         accepted.push({
           module: sole,
           status: "accepted",
@@ -323,7 +324,7 @@ async function runAiStage(args: {
     }
     const ctx: PlannerContext = {
       skeleton,
-      currentProduct: await runtime.loadCurrentProduct(state.projectId),
+      currentProduct: await runtime.loadCurrentProduct(state.localProductId),
       acceptedModules: accepted.map((m) => ({
         module: m.module,
         status: "accepted",
@@ -342,7 +343,7 @@ async function runAiStage(args: {
         context: ctx,
         previousError: lastError,
       });
-      const exec = await executeStageOutput({ stage, output, runtime, projectId: state.projectId });
+      const exec = await executeStageOutput({ stage, output, runtime, localProductId: state.localProductId });
       for (const m of exec.accepted) {
         accepted.push(m);
         stageAcceptedModules?.add(m.module);
@@ -352,7 +353,7 @@ async function runAiStage(args: {
       if (exec.hasAccepted) {
         if (stage === "itinerary") {
           researchTasks.push(...await enrichItineraryPois({
-            projectId: state.projectId,
+            localProductId: state.localProductId,
             destination: skeleton.destination,
             runtime,
             persistedTaskKeys,
@@ -368,24 +369,24 @@ async function runAiStage(args: {
           }
           // 还有缺失模块：标记本次缺哪些，进入下一轮 retry；已被接受的模块不再重发。
           lastError = { stage, attempt, code: "missing_module", message: `commercial 阶段尚缺模块：${missing.join("、")}` };
-          logAttemptError("商业阶段部分模块缺失，准备重试补齐", { stage, attempt, projectId: state.projectId, missing: missing.join(",") });
+          logAttemptError("商业阶段部分模块缺失，准备重试补齐", { stage, attempt, localProductId: state.localProductId, missing: missing.join(",") });
           continue;
         }
         return makeStageResult({ state, stage, accepted, rejected, researchTasks, attempts, lastError, status: "completed" });
       }
       lastError = { stage, attempt, code: "missing_module", message: `本阶段没有接受任何模块（${allowed.join("、") || "无"}）` };
-      logAttemptError("阶段没有接受任何模块，准备重试", { stage, attempt, projectId: state.projectId, allowed: allowed.join(",") });
+      logAttemptError("阶段没有接受任何模块，准备重试", { stage, attempt, localProductId: state.localProductId, allowed: allowed.join(",") });
     } catch (error) {
       lastError = toStageError(stage, attempt, error);
-      logAttemptError("planner 抛错", { stage, attempt, projectId: state.projectId, code: lastError.code, message: lastError.message });
+      logAttemptError("planner 抛错", { stage, attempt, localProductId: state.localProductId, code: lastError.code, message: lastError.message });
     }
   }
 
   const status: "needs_user" | "failed" = lastError && (lastError.code === "provider_authentication" || lastError.code === "provider_not_configured") ? "failed" : "needs_user";
   if (status === "needs_user") {
-    logNoProgress("阶段达到 retry 上限未产出任何 accepted 模块", { stage, attempts, projectId: state.projectId, code: lastError?.code });
+    logNoProgress("阶段达到 retry 上限未产出任何 accepted 模块", { stage, attempts, localProductId: state.localProductId, code: lastError?.code });
   } else {
-    logStageEnd("阶段 fatal 终止", { stage, attempts, projectId: state.projectId, code: lastError?.code });
+    logStageEnd("阶段 fatal 终止", { stage, attempts, localProductId: state.localProductId, code: lastError?.code });
   }
   return makeStageResult({ state, stage, accepted, rejected, researchTasks, attempts, lastError, status });
 }

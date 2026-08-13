@@ -106,7 +106,7 @@ test("commercial 阶段首轮只 partial accepted → needs_user；resume 后 pa
   const rt = new FakeRuntime();
   const p1 = new PartialCommercialPlanner("first");
   const r1 = await runPlan({
-    projectId: "p", skeleton, store, runtime: rt, planner: p1, providerLabel: "minimax",
+    localProductId: "p", skeleton, store, runtime: rt, planner: p1, providerLabel: "minimax",
     options: { stageRetryLimit: 1 },
   });
   // 状态应当进 needs_user：缺 inventory / terms / release。
@@ -123,7 +123,7 @@ test("commercial 阶段首轮只 partial accepted → needs_user；resume 后 pa
   // 第二次 resume：用 second-mode planner 补齐剩余模块。
   const p2 = new PartialCommercialPlanner("second");
   const r2 = await runPlan({
-    projectId: "p", skeleton, store, runtime: rt, planner: p2, providerLabel: "minimax",
+    localProductId: "p", skeleton, store, runtime: rt, planner: p2, providerLabel: "minimax",
     options: { stageRetryLimit: 1 },
   });
   assert.equal(r2.status, "completed");
@@ -143,11 +143,11 @@ test("commercial 阶段 partial 提交：accepted 模块不会被后续 retry �
   const rt = new FakeRuntime();
   // 第一轮给全部 5 个模块
   const p1 = new PartialCommercialPlanner("first");
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: p1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: p1, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
   const before = (rt.product.commercial as Record<string, unknown>).packageName;
   // resume 触发：second planner 不会重发 packageName（它已经 accepted），应当只补缺失。
   const p2 = new PartialCommercialPlanner("second");
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner: p2, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: p2, providerLabel: "minimax", options: { stageRetryLimit: 1 } });
   const after = (rt.product.commercial as Record<string, unknown>).packageName;
   assert.equal(after, before, "packageName 不被 resume 覆盖");
 });

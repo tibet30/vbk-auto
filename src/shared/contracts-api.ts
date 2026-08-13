@@ -1,5 +1,5 @@
 import type {
-  CreateProjectInput,
+  CreateProductInput,
   AiConnectionTestInput,
   AiModelListInput,
   AiModelListResult,
@@ -16,9 +16,9 @@ import type {
   OperationLogQuery,
   PoiSuggestDetailResult,
   PoiSuggestLogContext,
-  ProjectDetail,
-  ProjectReadiness,
-  ProjectSummary,
+  ProductDetail,
+  ProductReadiness,
+  ProductSummary,
   Settings,
   VehicleResourceMatch,
   HotelResourceMatch,
@@ -44,24 +44,24 @@ import type { PlanningGenerationState, PlanningModule } from "./contracts-planni
  */
 
 export interface VbkApi {
-  projects: {
-    list(): Promise<ProjectSummary[]>;
-    create(input: CreateProjectInput): Promise<ProjectDetail>;
-    get(id: string): Promise<ProjectDetail>;
+  products: {
+    list(): Promise<ProductSummary[]>;
+    create(input: CreateProductInput): Promise<ProductDetail>;
+    get(id: string): Promise<ProductDetail>;
     delete(id: string): Promise<void>;
-    readiness(id: string): Promise<ProjectReadiness>;
-    updateReviewField(id: string, input: ManualReviewFieldInput): Promise<ProjectDetail>;
-    updateProductJson(id: string, json: string): Promise<ProjectDetail>;
+    readiness(id: string): Promise<ProductReadiness>;
+    updateReviewField(id: string, input: ManualReviewFieldInput): Promise<ProductDetail>;
+    updateProductJson(id: string, json: string): Promise<ProductDetail>;
   };
   ai: {
-    send(projectId: string, content: string): Promise<void>;
-    regenerate(projectId: string, field: AiRegenerateField): Promise<void>;
+    send(localProductId: string, content: string): Promise<void>;
+    regenerate(localProductId: string, field: AiRegenerateField): Promise<void>;
   };
   research: {
-    accept(projectId: string, taskId: string, note?: string): Promise<void>;
-    refreshIssues(projectId: string): Promise<{ updated: number; taskIds: string[]; project: ProjectDetail; readiness: ProjectReadiness }>;
-    resolveVehicleResource(projectId: string, taskId?: string): Promise<VehicleResourceMatch | undefined>;
-    resolveHotelResource(projectId: string, taskId?: string): Promise<HotelResourceMatch>;
+    accept(localProductId: string, taskId: string, note?: string): Promise<void>;
+    refreshIssues(localProductId: string): Promise<{ updated: number; taskIds: string[]; product: ProductDetail; readiness: ProductReadiness }>;
+    resolveVehicleResource(localProductId: string, taskId?: string): Promise<VehicleResourceMatch | undefined>;
+    resolveHotelResource(localProductId: string, taskId?: string): Promise<HotelResourceMatch>;
   };
   browser: {
     login(): Promise<void>;
@@ -105,22 +105,22 @@ export interface VbkApi {
     suggestPoiDemo(keyword: string): Promise<unknown>;
   };
   automation: {
-    start(projectId: string): Promise<void>;
-    retry(projectId: string): Promise<void>;
-    retryPhase(projectId: string, phase: string): Promise<void>;
+    start(localProductId: string): Promise<void>;
+    retry(localProductId: string): Promise<void>;
+    retryPhase(localProductId: string, phase: string): Promise<void>;
     /**
      * 单阶段重新执行：在不重启其他阶段的前提下重跑一个阶段，用于运营
      * review 某阶段在 VBK 当前页面的填充效果。不要求阶段是 failed
      * 状态 —— completed / pending 都可以触发；后续阶段状态不变。
      */
-    retryOnePhase(projectId: string, phase: string): Promise<void>;
+    retryOnePhase(localProductId: string, phase: string): Promise<void>;
     /**
-     * 用户主动中止当前项目的自动录入。立即把 AutomationRun 标记为
+     * 用户主动中止当前产品的自动录入。立即把 AutomationRun 标记为
      * cancelled 并落盘（UI 可立刻看到「已停止」），已经在跑的当前阶段
      * handler 会自然结束后停止后续阶段 —— 当前 Playwright 调用无法
      * 跨进程 abort，安全起见不强制中断 in-flight click。
      */
-    stop(projectId: string): Promise<void>;
+    stop(localProductId: string): Promise<void>;
   };
   /**
    * 调试入口：让 CLI / IDE 能逐函数调用 ctrip.ts，单步观察 VBK 页面状态。
@@ -216,9 +216,9 @@ export interface VbkApi {
     test(input: AiConnectionTestInput): Promise<ConnectionTest>;
   };
   events: {
-    onProjectUpdated(listener: (project: ProjectDetail) => void): () => void;
-    /** 主进程成功持久化规划状态后推送；订阅者必须按 projectId 过滤。 */
-    onPlanningStateUpdated(listener: (projectId: string, state: PlanningGenerationState) => void): () => void;
+    onProductUpdated(listener: (product: ProductDetail) => void): () => void;
+    /** 主进程成功持久化规划状态后推送；订阅者必须按 localProductId 过滤。 */
+    onPlanningStateUpdated(listener: (localProductId: string, state: PlanningGenerationState) => void): () => void;
     /** VBK 页面加载完成、SPA 渲染就绪后推送；renderer 收到后触发 checkVbkLogin。 */
     onPageReady(listener: () => void): () => void;
   };
@@ -226,12 +226,12 @@ export interface VbkApi {
     load(query?: OperationLogQuery): Promise<OperationLogPage>;
   };
   planning: {
-    /** 从骨架开始跑一遍（首次创建项目后调用）；写入持久化状态。 */
-    start(projectId: string): Promise<PlanningRunResult>;
+    /** 从骨架开始跑一遍（首次创建产品后调用）；写入持久化状态。 */
+    start(localProductId: string): Promise<PlanningRunResult>;
     /** 从持久化状态里的 currentStage 续跑。 */
-    resume(projectId: string): Promise<PlanningRunResult>;
+    resume(localProductId: string): Promise<PlanningRunResult>;
     /** 读取现有状态；不存在返回 undefined。 */
-    state(projectId: string): Promise<PlanningGenerationState | undefined>;
+    state(localProductId: string): Promise<PlanningGenerationState | undefined>;
   };
 }
 

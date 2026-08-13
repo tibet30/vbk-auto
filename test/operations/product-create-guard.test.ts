@@ -2,7 +2,7 @@
  * 「产品创建前置守卫」单元测试：
  *  - 覆盖三条独立失败路径（未登录 / 无 400 电话 / 无管家）+ 三条并存路径；
  *  - 覆盖完整就绪的成功路径，验证产品 JSON 实际写入了管家 selection 与 400 电话；
- *  - 验证守卫的副作用 = 0：失败时 DB 里没有项目、没有消息、没有任务。
+ *  - 验证守卫的副作用 = 0：失败时 DB 里没有产品、没有消息、没有任务。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ import {
   detectCreateGuardFailures,
   formatGuardFailureMessage,
   isValidContactCardSelection,
-} from "../../src/main/operations/project-create-guard.js";
+} from "../../src/main/operations/product-create-guard.js";
 
 async function newDatabase(t: test.TestContext) {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-create-guard-"));
@@ -61,7 +61,7 @@ test("已登录但缺 400 电话：抛出明确的中文错误且不写库", asy
   assert.throws(() => assertCreatePreconditions(db), /400 电话/);
 
   // 关键：失败时 DB 里没有副作用——这是用户验收「拒绝无副作用」的硬要求。
-  assert.equal(db.listProjects().length, 0);
+  assert.equal(db.listProducts().length, 0);
 });
 
 test("已登录但管家缺失或不合法：仅提示管家，不混淆 400 电话", async (t) => {
@@ -75,7 +75,7 @@ test("已登录但管家缺失或不合法：仅提示管家，不混淆 400 电
 
   assert.throws(() => assertCreatePreconditions(db), /管家联系人/);
 
-  assert.equal(db.listProjects().length, 0);
+  assert.equal(db.listProducts().length, 0);
 });
 
 test("管家 selection 字段缺失任何一项（contactCardId / providerId / displayName）都被识别为非法", async (t) => {
@@ -103,7 +103,7 @@ test("管家 selection 字段缺失任何一项（contactCardId / providerId / d
   }));
   assert.throws(() => assertCreatePreconditions(db), /管家联系人/);
 
-  assert.equal(db.listProjects().length, 0);
+  assert.equal(db.listProducts().length, 0);
 });
 
 test("isValidContactCardSelection 暴露出来便于复用，且与守卫语义一致", () => {
@@ -124,22 +124,22 @@ test("全部就绪时守卫静默放行", async (t) => {
 
 test("成功创建后产品 JSON 固化管家 selection + 创建成功断言，守卫失败时不留痕迹", async (t) => {
   const db = await newDatabase(t);
-  // 守卫失败路径：未登录时 db.createProject 不被守卫调用——但守卫的契约是
-  // 「在调 db.createProject 之前」调用。所以这里直接验证失败路径没有副作用。
+  // 守卫失败路径：未登录时 db.createProduct 不被守卫调用——但守卫的契约是
+  // 「在调 db.createProduct 之前」调用。所以这里直接验证失败路径没有副作用。
   assert.throws(() => assertCreatePreconditions(db));
-  assert.equal(db.listProjects().length, 0);
+  assert.equal(db.listProducts().length, 0);
 
-  // 现在登录、写好账号信息，模拟 IPC projects:create 的成功路径：
-  // 1) assertCreatePreconditions 通过 → 2) db.createProject(input) → 3) main 里
+  // 现在登录、写好账号信息，模拟 IPC products:create 的成功路径：
+  // 1) assertCreatePreconditions 通过 → 2) db.createProduct(input) → 3) main 里
   // injectAccountButler 把管家写入 product.operations.bookingControls.butler。
   loginCurrentAccount(db);
   assertCreatePreconditions(db);
-  const project = db.createProject({ destination: "太原", days: 2, productForm: "privateTour" });
-  const injected = injectAccountButler(db, project.id, "供应商A");
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+  const injected = injectAccountButler(db, product.id, "供应商A");
   assert.equal(injected.written, true);
-  assert.ok(project.id, "项目应当被创建");
-  const reread = db.getProject(project.id);
-  // 创建立即可验证 product JSON 已落库；main 的 projects:create 路径同样按此顺序调用。
+  assert.ok(product.id, "产品应当被创建");
+  const reread = db.getProduct(product.id);
+  // 创建立即可验证 product JSON 已落库；main 的 products:create 路径同样按此顺序调用。
   assert.ok(reread);
   assert.equal((reread!.product.basicInfo as Record<string, unknown>).meetingCity, "太原");
   const bookingControls = (reread!.product.operations as Record<string, unknown>).bookingControls as Record<string, unknown>;

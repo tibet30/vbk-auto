@@ -49,9 +49,34 @@ export async function fillMealCards(dayScope, day, mealsIncluded = false) {
 
   for (let index = 0; index < 3; index += 1) {
     const card = mealCards[index];
-    await clickExact(card, "1小时", `第 ${day.day} 天${types[index]}用餐时间`);
+    const unlimitedRadio = card.locator('input[type="radio"][value="N"]');
+    if (await unlimitedRadio.count()) {
+      const unlimitedLabel = unlimitedRadio.locator(
+        "xpath=ancestor::label[contains(@class,'ant-radio-wrapper')][1]",
+      );
+      if (!(await unlimitedLabel.getAttribute("class")).includes("ant-radio-wrapper-checked")) {
+        await unlimitedLabel.click({ force: true });
+      }
+    }
+    const legacyOneHour = card.getByText("1小时", { exact: true });
+    if (await legacyOneHour.count()) {
+      await clickExact(card, "1小时", `第 ${day.day} 天${types[index]}用餐时间`);
+    } else {
+      // 新版 VBK 不再提供“1小时”快捷项，改为用餐时长的时/分数字输入框。
+      const durationLabel = card.getByText("用餐时长", { exact: true });
+      await assertCount(durationLabel, 1, `第 ${day.day} 天${types[index]}用餐时长标签`);
+      const durationItem = durationLabel.locator(
+        'xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-form-item ")][1]',
+      );
+      const durationInputs = durationItem.locator("input.ant-input-number-input");
+      await assertCount(durationInputs, 2, `第 ${day.day} 天${types[index]}用餐时长输入框`);
+      await durationInputs.nth(0).fill("1");
+      await durationInputs.nth(1).fill("0");
+    }
     await clickExact(card, types[index], `第 ${day.day} 天餐饮类型`);
-    const noMeal = card.getByText("不含餐", { exact: true });
+    // 新版 VBK 将「不含餐」显示为「费用自理」；保留旧文案兼容已打开的旧页面。
+    let noMeal = card.getByText("不含餐", { exact: true });
+    if (!(await noMeal.count())) noMeal = card.getByText("费用自理", { exact: true });
     await assertCount(noMeal, 2, `第 ${day.day} 天${types[index]}不含餐选项`);
     // 成人 / 儿童两个不含餐选项均需勾选；走 ensureCheckboxChecked 保证幂等
     // （phase-retry 时第二次点击 ant-checkbox 会反勾回未选，必须先判状态再点）。
@@ -110,6 +135,35 @@ export async function getAvailableHotelSelectors(combos) {
 }
 
 /**
+ * 新版酒店卡还会有一个「住宿类型」combobox。若页面提供标准表单项标签，
+ * 只把最近的「酒店名称」表单项中的可用 combobox 作为酒店名称选择器。
+ * 没有标准标签的旧页面返回空数组，由调用方沿用旧的数量安全检查。
+ */
+async function getLabeledHotelNameSelectors(hotelCard, availableCombos) {
+  const labeled = [];
+  for (const combo of availableCombos) {
+    const isHotelName = await combo
+      .evaluate((el) => {
+        let node = el.parentElement;
+        while (node && node !== document.body) {
+          const cls = (typeof node.className === "string"
+            ? node.className
+            : node.className?.baseVal || ""
+          ).toString();
+          if (/(?:^|\s)ant-form-item(?:\s|$)/.test(cls)) {
+            return /酒店名称/.test(node.textContent || "");
+          }
+          node = node.parentElement;
+        }
+        return false;
+      })
+      .catch(() => false);
+    if (isHotelName) labeled.push(combo);
+  }
+  return labeled;
+}
+
+/**
  * 单天酒店 card 写入：
  *   - 0 张 card 时直接 return（行程无住宿）；
  *   - 点击「不限」、选「携程平台酒店」（候选包含别名）；
@@ -141,14 +195,16 @@ export async function fillHotelCard(page, dayScope, day, operations) {
   await delay(300);
   const combos = hotelCard.getByRole("combobox");
   const availableCombos = await getAvailableHotelSelectors(combos);
-  if (availableCombos.length > 1) {
+  const labeledHotelCombos = await getLabeledHotelNameSelectors(hotelCard, availableCombos);
+  const hotelNameCombos = labeledHotelCombos.length ? labeledHotelCombos : availableCombos;
+  if (hotelNameCombos.length > 1) {
     throw new Error(
-      `第 ${day.day} 天酒店名称选择器数量异常：期望 1，实际 ${availableCombos.length}；` +
+      `第 ${day.day} 天酒店名称选择器数量异常：期望 1，实际 ${hotelNameCombos.length}；` +
         "多个可用 combobox 可能误选，请人工核对后回填",
     );
   }
-  if (availableCombos.length === 1) {
-    await availableCombos[0].click();
+  if (hotelNameCombos.length === 1) {
+    await hotelNameCombos[0].click();
     await delay(300);
     const tierKeyword = operations.hotelTier && /4钻/.test(operations.hotelTier)
       ? "当地4钻酒店/-4"

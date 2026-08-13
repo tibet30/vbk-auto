@@ -117,7 +117,7 @@ test("confirmed / resolved 的 research task 不被新一轮 planning 重新生�
   // planning:start → research 阶段会基于 itinerary 提议 city-poi 核查；
   // 因为该任务已 confirmed，pendingResearchTasks 必须 filter 掉。
   const planner = new ItineraryOnlyPlanner();
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   // FakeRuntime 跟踪到的 tasks：原始 1 条 + 真正 pending 的（比如山西博物院 / 晋商博物院 / 用车 / 酒店等）；
   // 晋祠这条不应再被添加（重复）。
   const labels = rt.tasks.map((t) => t.label);
@@ -158,7 +158,7 @@ test("runtime.addResearchTask 在 SQL 全状态 filter 下不创建重复条目"
   const rt = new FakeRuntime();
   rt.tasks.push({ label: "核查 X", type: "vbk", state: "confirmed" });
   const planner = new ItineraryOnlyPlanner();
-  await runPlan({ projectId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
+  await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner, providerLabel: "minimax" });
   // 整个 plan 跑完，tasks 不应有任何重复 (label, type)。
   const keys = rt.tasks.map((t) => `${t.type}::${t.label}`);
   const seen = new Set<string>();

@@ -33,3 +33,24 @@ test("数据库读取归一化会把历史字符串 POI ID 转成数字，非法
     { name: "无效景点", poiName: "无效景点", poiId: null },
   ]);
 });
+
+test("数据库读取归一化会解开误写入 product_json 的 ProductDetail 包裹", () => {
+  const product = parseAndNormalizeProductJson(JSON.stringify({
+    id: "local-product-id",
+    name: "杭州2天1晚私家团",
+    product: {
+      basicInfo: { supplierProductName: "杭州2天1晚私家团", days: 2 },
+      operations: { vehicleResource: { requestedDailyCost: 800 } },
+      itinerary: [{ day: 1, spots: [] }],
+    },
+    operations: {
+      vehicleResource: { requestedDailyCost: 800, resourceGroupId: 2206275 },
+    },
+  })) as Record<string, any>;
+
+  assert.equal(product.id, undefined);
+  assert.equal(product.product, undefined);
+  assert.equal(product.basicInfo.supplierProductName, "杭州2天1晚私家团");
+  assert.equal(product.operations.vehicleResource.resourceGroupId, 2206275);
+  assert.equal(product.itinerary.length, 1);
+});

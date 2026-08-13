@@ -52,7 +52,7 @@ async function main() {
     console.error("❌ 未找到 VBK_TICKET。三种来源都可以：");
     console.error("   1) 命令行：node scripts/inject-vbk-ticket.mjs <ticket>");
     console.error("   2) 环境变量：VBK_TICKET=... node scripts/inject-vbk-ticket.mjs");
-    console.error("   3) .env 文件：在项目根 .env 中写入 VBK_TICKET=<ticket>");
+    console.error("   3) .env 文件：在产品根 .env 中写入 VBK_TICKET=<ticket>");
     process.exit(1);
   }
   console.log(`✓ ticket 来源：${source}（长度 ${ticket.length}）`);

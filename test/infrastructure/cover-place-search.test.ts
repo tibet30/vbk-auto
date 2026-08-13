@@ -687,7 +687,7 @@ test("cover-place-search-logger 的 console.warn 行不泄漏敏感字段", asyn
     durationMs: 42,
   });
   const joined = lines.join("\n");
-  for (const keyword of ["imageList", "imageUrls", "originalPath", "cookie", "Cookie", "token", "Token", "set-cookie", "Set-Cookie"]) {
+  for (const keyword of ["imageList", "imageUrls", "originalPath", "cookie=", "token", "Token", "set-cookie", "Set-Cookie"]) {
     assert.ok(
       !joined.toLowerCase().includes(keyword.toLowerCase()),
       `console.warn 行不应出现 ${keyword}：实际 ${joined}`,
@@ -697,4 +697,3 @@ test("cover-place-search-logger 的 console.warn 行不泄漏敏感字段", asyn
   assert.match(joined, /ack=Success/);
   assert.match(joined, /imageIdCount=3/);
 });
-

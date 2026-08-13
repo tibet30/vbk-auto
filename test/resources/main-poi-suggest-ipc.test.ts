@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync("src/main/main.ts", "utf8");
+const source = [
+  readFileSync("src/main/main.ts", "utf8"),
+  readFileSync("src/main/ipc/browser-automation-ipc.ts", "utf8"),
+].join("\n");
 
 function extractHandlerBody(sourceText: string, keyword: string): string {
   const start = sourceText.indexOf(keyword);
@@ -35,11 +38,11 @@ test("poi:suggest IPC 调试日志覆盖开始、详情、成功、空结果和�
   for (const event of ["ipc_search_start", "ipc_search_detail", "ipc_search_empty", "ipc_search_success", "ipc_search_failure"]) {
     assert.match(handler, new RegExp(`logPoiManualIpc\\("${event}"`));
   }
-  for (const key of ["projectId", "dayIndex", "spotIndex", "title", "keyword"]) {
+  for (const key of ["localProductId", "dayIndex", "spotIndex", "title", "keyword"]) {
     assert.match(handler, new RegExp(`${key}:`));
   }
   assert.match(source, /stage: event/);
-  assert.match(handler, /const result = await suggestPoiDetailWithRawPayload\(browser, query\)/);
+  assert.match(handler, /const result = await suggestPoiDetailWithRawPayload\(context\.browser, query\)/);
   assert.match(handler, /rawPayload: result\.rawPayload/);
   assert.match(handler, /const \{ rawPayload: _rawPayload, \.\.\.detail \} = result;/);
   assert.match(handler, /return detail;/);

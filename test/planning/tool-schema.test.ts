@@ -145,3 +145,16 @@ test("value 子节点不会出现 Zod 内部字段 / 函数 / moduleProperties �
   assert.ok(!stringified.includes("_def"), "tool schema 不应包含 Zod 内部字段");
   assert.ok(!stringified.includes("safeParse"), "tool schema 不应包含 Zod 内部方法");
 });
+
+test("presentation 主推荐分类与推荐理由分类使用同一组 VBK 下拉枚举", () => {
+  const schema = buildStageToolSchema("presentation");
+  const params = schema.function.parameters as Record<string, unknown>;
+  const modules = (params.properties as Record<string, unknown>).modules as Record<string, unknown>;
+  const value = ((modules.items as Record<string, unknown>).properties as Record<string, unknown>).value as Record<string, unknown>;
+  const props = value.properties as Record<string, unknown>;
+  const primary = (props.recommendationCategory as Record<string, unknown>).enum;
+  const recommendation = props.recommendations as Record<string, unknown>;
+  const itemProps = ((recommendation.items as Record<string, unknown>).properties as Record<string, unknown>);
+  assert.deepEqual(primary, (itemProps.category as Record<string, unknown>).enum);
+  assert.deepEqual(primary, ["优选行程", "服务保障", "贴心赠送", "精选酒店", "缤纷景点", "特色美食", "度假首选", "超值赠送", "五星精选"]);
+});

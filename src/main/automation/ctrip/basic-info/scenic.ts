@@ -14,6 +14,8 @@ import { findProvinceOptionIndex } from "../../schema/schema-functions.js";
 import { dismissDataRiskDialog } from "../dialogs.js";
 import { logInfo } from "../../../../shared/log-timestamp.js";
 
+const DIRECT_ADMIN_MUNICIPALITIES = new Set(["北京", "上海", "天津", "重庆"]);
+
 export async function fillScenicAreaProvince(page, province, extra = {}) {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product ?? {};
@@ -25,6 +27,8 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
   const addedTags = (await container.locator(".ant-tag").allTextContents())
     .map((text) => text.replace(/\s+/g, ""));
   if (addedTags.some((text) => text.includes(provinceBase))) return;
+  // VBK 的 PROVINCE 接口明确不返回四个直辖市；这些目的地直接录入下级景区/景点。
+  if (DIRECT_ADMIN_MUNICIPALITIES.has(provinceBase)) return;
   const comboboxes = container.getByRole("combobox");
   const comboboxCount = await comboboxes.count();
   if (comboboxCount < 2) {
@@ -62,8 +66,7 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
 
   await comboboxes.nth(1).click();
   const provinceSearch = await pickSearchInput(comboboxes.nth(1), "省份搜索输入框");
-  await provinceSearch.fill("");
-  await provinceSearch.type(label, { delay: 80 });
+  await provinceSearch.fill(label);
   const provinces = await availableOptions("省份");
   const texts = provinces.texts;
   const disableds = provinces.disableds;
@@ -182,8 +185,8 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     }
     await combobox.click();
     const search = await pickSearchInput(combobox, `${description}搜索输入框`);
-    await search.fill("");
-    await search.type(target, { delay: 80 });
+    // 与城市搜索相同，避免旧的短关键词响应迟到后覆盖完整名称结果。
+    await search.fill(target);
     const deadline = Date.now() + 8_000;
     let last: string[] = [];
     let lastDisableds: boolean[] = [];
@@ -391,7 +394,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
       }
       // 添加确认超时（8s 内标签未出现）不抛错，记录 warning 并继续下一个景点；
       // 这与函数文档契约「任何一步失败都记录到 logs 而不抛错」一致。
-      logs.push(`[warn] 景点"${spot}"已选择但未成功添加到国家景区标签（8s 超时），已跳过`);
+      logs.push(`[warn] 景点“${spot}”已选择但未成功添加到国家景区标签（8s 超时），已跳过`);
       await page.keyboard.press("Escape").catch(() => {});
       continue;
     }

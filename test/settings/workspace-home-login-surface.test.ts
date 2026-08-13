@@ -1,5 +1,5 @@
 // 回归契约测试：保证「新增登录 / 登录 VBK」按钮真的能在 view=workspace 且无
-// project 时打开一个可见的 VBK WebView surface。
+// product 时打开一个可见的 VBK WebView surface。
 //
 // 三个根因被本测试锁定：
 //   1) workspace-home 必须存在 LoginBrowserPanel 挂载点：

@@ -22,13 +22,13 @@ test("单个 POI 查询悬挂会超时，后续景点仍写回，且不伪造未
       return { poiName: "可匹配景点（VBK）", poiId: 1024 };
     },
     loadExistingResearchTasks: async () => [],
-    writeModule: async (_projectId, module, path, value) => {
+    writeModule: async (_localProductId, module, path, value) => {
       assert.equal(module, "itinerary");
       assert.equal(path, AI_WRITABLE_PATHS.itinerary);
       written = value;
       return { ok: true };
     },
-    addResearchTask: async (_projectId, task) => {
+    addResearchTask: async (_localProductId, task) => {
       if (!tasks.some((item) => item.type === task.type && item.label === task.label)) tasks.push(task);
       return task.label;
     },
@@ -38,7 +38,7 @@ test("单个 POI 查询悬挂会超时，后续景点仍写回，且不伪造未
   };
 
   await enrichItineraryPois({
-    projectId: "poi-timeout",
+    localProductId: "poi-timeout",
     destination: "太原",
     runtime,
     persistedTaskKeys: new Set(),
@@ -58,7 +58,7 @@ test("只有成功响应且没有候选时创建 canonical POI 核查任务", as
     suggestPoi: async () => null,
     loadExistingResearchTasks: async () => [],
     writeModule: async () => ({ ok: true }),
-    addResearchTask: async (_projectId, task) => {
+    addResearchTask: async (_localProductId, task) => {
       tasks.push(task);
       return task.label;
     },
@@ -70,7 +70,7 @@ test("只有成功响应且没有候选时创建 canonical POI 核查任务", as
   };
 
   const result = await enrichItineraryPois({
-    projectId: "poi-no-match",
+    localProductId: "poi-no-match",
     destination: "太原",
     runtime,
     persistedTaskKeys: new Set(),
@@ -102,7 +102,7 @@ test("已存在的未匹配 POI 核查项不再重复写入", async () => {
   };
 
   const result = await enrichItineraryPois({
-    projectId: "poi-existing-no-match",
+    localProductId: "poi-existing-no-match",
     destination: "太原",
     runtime,
     persistedTaskKeys: new Set(["vbk::核查 晋祠 的 VBK POI 映射"]),
@@ -137,7 +137,7 @@ test("完整 POI 不发起查询也不重写 itinerary；只查询缺失的景�
   };
 
   await enrichItineraryPois({
-    projectId: "poi-only-missing",
+    localProductId: "poi-only-missing",
     destination: "太原",
     runtime,
     persistedTaskKeys: new Set(),
@@ -169,7 +169,7 @@ test("完整 itinerary 在补全入口中零查询、零写回", async () => {
   };
 
   await enrichItineraryPois({
-    projectId: "poi-complete",
+    localProductId: "poi-complete",
     destination: "太原",
     runtime,
     persistedTaskKeys: new Set(),
@@ -192,7 +192,7 @@ test("原始名称未命中后，第二个 AI 单点候选命中会写回原 spo
     write: (value) => { written = value; },
   });
   await enrichItineraryPois({
-    projectId: "fallback-success", destination: "西安", runtime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-success", destination: "西安", runtime, persistedTaskKeys: new Set(),
     resolvePoiName: async ({ attempt }) => {
       resolverAttempts.push(attempt);
       return attempt === 1 ? "回民街" : "西安钟楼";
@@ -211,7 +211,7 @@ test("原始名称直接命中不调用 AI；第三个候选也可正常写回",
     suggestPoi: async () => ({ poiName: "西安钟楼", poiId: 1 }),
   });
   await enrichItineraryPois({
-    projectId: "fallback-direct", destination: "西安", runtime: directRuntime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-direct", destination: "西安", runtime: directRuntime, persistedTaskKeys: new Set(),
     resolvePoiName: async () => { resolverCalls += 1; return "不应调用"; },
   });
   assert.equal(resolverCalls, 0);
@@ -223,10 +223,36 @@ test("原始名称直接命中不调用 AI；第三个候选也可正常写回",
     write: (value) => { written = value; },
   });
   await enrichItineraryPois({
-    projectId: "fallback-third", destination: "西安", runtime: thirdRuntime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-third", destination: "西安", runtime: thirdRuntime, persistedTaskKeys: new Set(),
     resolvePoiName: async ({ attempt }) => ["回民街", "西安钟楼", "西安鼓楼"][attempt - 1],
   });
   assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安鼓楼", poiId: 2 });
+});
+
+test("官方名括号别名在 AI 前确定性查询并写回", async () => {
+  const queried: string[] = [];
+  let written: any;
+  const runtime = testRuntime({
+    product: { itinerary: [{ day: 1, spots: [{ name: "永祚寺（双塔寺）", poiName: null, poiId: null }] }] },
+    suggestPoi: async (keyword) => {
+      queried.push(keyword);
+      return keyword === "双塔寺" ? { poiName: "双塔寺", poiId: 77967 } : null;
+    },
+    write: (value) => { written = value; },
+  });
+  let resolverCalls = 0;
+  await enrichItineraryPois({
+    localProductId: "bracket-alias",
+    destination: "太原",
+    runtime,
+    persistedTaskKeys: new Set(),
+    resolvePoiName: async () => { resolverCalls += 1; return null; },
+  });
+  assert.deepEqual(queried, ["永祚寺（双塔寺）", "双塔寺"]);
+  assert.equal(resolverCalls, 0);
+  assert.deepEqual(written[0].spots[0], {
+    name: "永祚寺（双塔寺）", poiName: "双塔寺", poiId: 77967,
+  });
 });
 
 test("三次 AI 仍无候选时只创建一条带次数的人工核查项", async () => {
@@ -235,7 +261,7 @@ test("三次 AI 仍无候选时只创建一条带次数的人工核查项", asyn
     suggestPoi: async () => null,
   });
   const result = await enrichItineraryPois({
-    projectId: "fallback-exhausted", destination: "西安", runtime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-exhausted", destination: "西安", runtime, persistedTaskKeys: new Set(),
     resolvePoiName: async ({ attempt }) => `西安候选${attempt}`,
   });
   assert.equal(runtime.tasks.length, 1);
@@ -251,7 +277,7 @@ test("AI 重复已查询候选不会再次请求 VBK", async () => {
   });
   const seenRequests: any[] = [];
   await enrichItineraryPois({
-    projectId: "fallback-deduped", destination: "西安", runtime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-deduped", destination: "西安", runtime, persistedTaskKeys: new Set(),
     resolvePoiName: async (request) => {
       seenRequests.push(request);
       return request.attempt === 1 ? "回民街" : "回民街";
@@ -267,13 +293,13 @@ test("三次 AI 耗尽会升级已有 canonical 核查项详情，但不报告�
     product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
     suggestPoi: async () => null,
   });
-  runtime.addResearchTask = async (_projectId, task) => {
+  runtime.addResearchTask = async (_localProductId, task) => {
     taskWrites.push(task);
     return "existing-task";
   };
 
   const result = await enrichItineraryPois({
-    projectId: "fallback-existing-exhausted", destination: "西安", runtime,
+    localProductId: "fallback-existing-exhausted", destination: "西安", runtime,
     persistedTaskKeys: new Set(["vbk::核查 回民街·钟鼓楼广场 的 VBK POI 映射"]),
     resolvePoiName: async ({ attempt }) => `西安候选${attempt}`,
   });
@@ -290,7 +316,7 @@ test("相同或组合 AI 候选被拒绝但仍计入三次，绝不查询或猜�
     suggestPoi: async (keyword) => { queries.push(keyword); return null; },
   });
   await enrichItineraryPois({
-    projectId: "fallback-invalid", destination: "西安", runtime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-invalid", destination: "西安", runtime, persistedTaskKeys: new Set(),
     resolvePoiName: async ({ attempt }) => ["回民街·钟鼓楼广场", "钟楼和鼓楼", "钟楼与鼓楼"][attempt - 1],
   });
   assert.deepEqual(queries, ["回民街·钟鼓楼广场"]);
@@ -304,7 +330,7 @@ test("原始 POI 查询失败不调用 AI，也不创建未匹配任务", async 
     suggestPoi: async () => { throw new Error("network"); },
   });
   await enrichItineraryPois({
-    projectId: "fallback-query-failed", destination: "西安", runtime, persistedTaskKeys: new Set(),
+    localProductId: "fallback-query-failed", destination: "西安", runtime, persistedTaskKeys: new Set(),
     resolvePoiName: async () => { resolverCalls += 1; return "西安钟楼"; },
   });
   assert.equal(resolverCalls, 0);
@@ -321,8 +347,8 @@ function testRuntime(args: {
     tasks,
     suggestPoi: args.suggestPoi,
     loadExistingResearchTasks: async () => [],
-    writeModule: async (_projectId: string, _module: any, _path: string, value: any) => { args.write?.(value); return { ok: true }; },
-    addResearchTask: async (_projectId: string, task: ResearchTaskProposal) => { tasks.push(task); return task.label; },
+    writeModule: async (_localProductId: string, _module: any, _path: string, value: any) => { args.write?.(value); return { ok: true }; },
+    addResearchTask: async (_localProductId: string, task: ResearchTaskProposal) => { tasks.push(task); return task.label; },
     loadHistory: async () => [],
     loadCurrentProduct: async () => args.product,
     loadAcceptedModules: async () => ["itinerary" as const],

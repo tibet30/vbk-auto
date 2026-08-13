@@ -5,10 +5,10 @@
  *  读取 main.ts / derived.ts 的源码，断言：
  *   - runPlanning 的 preflight + runPlan 都在 try 块里；
  *   - catch 分支调用 buildPreflightFailureState、把失败 state 持久化、写
- *     taskStatus="failed" 的 assistant 消息、emit project、返回 status="failed"
+ *     taskStatus="failed" 的 assistant 消息、emit product、返回 status="failed"
  *     的正常 PlanningRunResult；
- *   - try 块必须包含项目存在性检查、API Key 解析、adapter 构造、runPlan
- *     调用、addMessage、emitProject；不再要求「safeStorage 解密」（已脱钩）。
+ *   - try 块必须包含产品存在性检查、API Key 解析、adapter 构造、runPlan
+ *     调用、addMessage、emitProduct；不再要求「safeStorage 解密」（已脱钩）。
  *   - planning:start 与 planning:resume 都委托给 runPlanning（共享包装，行为一致）；
  *   - renderer auto-start 在 result.status === "failed" 时调用 setPlanningState
  *     与 setNotice。
@@ -78,7 +78,7 @@ function extractFunctionBody(source: string, signature: string): string {
   return source.slice(start, i);
 }
 
-const mainSrc = read("src/main/main.ts");
+const mainSrc = read("src/main/ipc/planning-ipc.ts");
 const helperSrc = read("src/main/planning/preflight-failure.ts");
 const derivedSrc = read("src/renderer/app/state/derived.ts");
 
@@ -89,26 +89,26 @@ test("preflight-failure.ts 暴露 buildPreflightFailureState 纯函数", () => {
   assert.match(helperSrc, /export function composePreflightFailureReply/);
 });
 
-test("main.ts 的 runPlanning 用 try/catch 包裹 preflight + runPlan + completion handling", () => {
+test("planning IPC registrar 的 runPlanning 用 try/catch 包裹 preflight + runPlan + completion handling", () => {
   const body = extractFunctionBody(mainSrc, "async function runPlanning(");
   assert.match(body, /try\s*\{/, "runPlanning 必须有 try 块");
   assert.match(body, /catch\s*\(\s*\w+\s*\)/, "runPlanning 必须有 catch 块");
-  // try 块必须覆盖：项目存在性、API Key 解析、adapter 构造、runPlan、addMessage、emitProject。
+  // try 块必须覆盖：产品存在性、API Key 解析、adapter 构造、runPlan、addMessage、emitProduct。
   // 旧版要求 try 块里有 safeStorage 解密调用；新版本已脱钩 safeStorage，
   // 改为要求出现 aiKeyStore / apiKey(...) 任一以验证密钥解析仍在 try 保护范围内。
   const tryMatch = body.match(/try\s*\{([\s\S]*?)\}\s*catch\s*\(/);
   assert.ok(tryMatch, "必须有 try 块");
   const tryBody = tryMatch![1];
-  assert.match(tryBody, /db\.getProject\(/);
+  assert.match(tryBody, /db\.getProduct\(/);
   assert.match(tryBody, /apiKey\(/) ;
   assert.match(tryBody, /new OpenAICompatiblePlannerAdapter/);
   assert.match(tryBody, /runPlan\(/);
   assert.match(tryBody, /db\.addMessage/);
-  assert.match(tryBody, /emitProject/);
+  assert.match(tryBody, /emitProduct/);
 });
 
 test("main.ts 有 handlePreflightFailure 函数并被 runPlanning 的 catch 调用", () => {
-  assert.match(mainSrc, /function handlePreflightFailure\(/, "main.ts 必须定义 handlePreflightFailure");
+  assert.match(mainSrc, /function handlePreflightFailure\(/, "planning registrar 必须定义 handlePreflightFailure");
   // catch 块必须显式调用 handlePreflightFailure，而不是只 console.warn + return rejected。
   const runPlanningBody = extractFunctionBody(mainSrc, "async function runPlanning(");
   // catch 块 = 从 `catch (error) {` 起到 runPlanning 函数体末尾前的最后一个 `}`。
@@ -118,12 +118,12 @@ test("main.ts 有 handlePreflightFailure 函数并被 runPlanning 的 catch 调�
   assert.match(catchBody, /handlePreflightFailure\(/, "catch 必须调用 handlePreflightFailure");
 });
 
-test("handlePreflightFailure 持久化 failed state + 写 taskStatus='failed' 的 assistant 消息 + emit project + 返回正常 PlanningRunResult", () => {
+test("handlePreflightFailure 持久化 failed state + 写 taskStatus='failed' 的 assistant 消息 + emit product + 返回正常 PlanningRunResult", () => {
   const body = extractFunctionBody(mainSrc, "function handlePreflightFailure(");
   assert.match(body, /buildPreflightFailureState\(/, "必须调用 buildPreflightFailureState 包装");
   assert.match(body, /savePlanningState\(/, "必须调 savePlanningState 持久化失败状态");
   assert.match(body, /addMessage\([^)]*assistant[^)]*failed/, "必须写 taskStatus='failed' 的 assistant 消息");
-  assert.match(body, /emitProject\(/, "必须 emitProject");
+  assert.match(body, /emitProduct\(/, "必须 emitProduct");
   assert.match(body, /status:\s*["']failed["']/, "返回值必须 status='failed'");
   assert.match(body, /assistantReply:/, "返回值必须含 assistantReply");
   assert.match(body, /state:\s*failure\.state/, "返回值必须含持久化后的 state");

@@ -11,7 +11,7 @@
  * 验收门（与用户规格一一对齐）：
  *  1. 模块自身不引入 max-height / overflow-y / 内部滚动 / 绝对定位覆盖下方内容；
  *     自然高度随行数变化扩展，与「每日行程」「待处理」模块上下相连。
- *  2. 基础信息「始终展示」：有 project/product 时模块不被隐藏；缺失字段在
+ *  2. 基础信息「始终展示」：有 product/product 时模块不被隐藏；缺失字段在
  *     各自行内显示紧凑空状态 + 编辑/设置入口，不再按非空值挂载行；
  *     用车资源组保持既有产品类型逻辑（私家团或已有数据才显示）。
  *  3. 每个可编辑行单独一个「编辑 / 去设置」按钮；点击后仅该行原位展开 input；
@@ -43,7 +43,7 @@ import type {
   CtripLibraryPlaceSearchResult,
   CtripLibrarySearchResult,
   ManualUploadCoverMeta,
-  ProjectDetail,
+  ProductDetail,
 } from "../../../../shared/contracts-types.js";
 import { BasicInfoButlerRow } from "./basic-info-butler-row";
 import { BasicInfoCoverRow } from "./basic-info-cover-row";
@@ -57,7 +57,7 @@ import { api } from "../../helpers";
 import styles from "./review-summary-basic-info.module.less";
 
 export interface ReviewSummaryBasicInfoProps {
-  project: ProjectDetail;
+  product: ProductDetail;
   /** 当前登录的 VBK 账号名（vbkLogin.accountName）；未登录时为 null。 */
   currentAccountName: string | null;
   /** 当前正在保存的字段名（来自 basicInfoSaving）。null 表示空闲。 */
@@ -69,39 +69,39 @@ export interface ReviewSummaryBasicInfoProps {
   /** 当前账号已配置的 400 电话：来自 AccountFixedInfo.servicePhone。null / 空串 = 未设置。 */
   accountServicePhone: string | null;
   /** 进入基础信息模块时调用：拉取当前账号的 fixedInfo 并缓存。 */
-  loadAccountFixedInfo: (projectId: string, accountName: string | null) => void;
+  loadAccountFixedInfo: (localProductId: string, accountName: string | null) => void;
   /** 引导用户去账号设置页选择管家 / 编辑 400 电话。 */
   onOpenAccountEditor: () => void;
   /** 字段级草稿：key=字段名, value=本地输入中的字符串。 */
   draft: Record<string, string>;
   setDraft: (value: Record<string, string>) => void;
   /** 单字段保存动作：把对应 ManualReviewFieldInput 推给主进程。 */
-  saveSubtitle: (projectId: string) => Promise<void> | void;
-  saveButler: (projectId: string, selection: ContactCardSelection | null) => Promise<void> | void;
-  savePricing: (projectId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void;
-  saveInventory: (projectId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void;
-  saveVehicleCost: (projectId: string, value: number | null) => Promise<void> | void;
+  saveSubtitle: (localProductId: string) => Promise<void> | void;
+  saveButler: (localProductId: string, selection: ContactCardSelection | null) => Promise<void> | void;
+  savePricing: (localProductId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void;
+  saveInventory: (localProductId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void;
+  saveVehicleCost: (localProductId: string, value: number | null) => Promise<void> | void;
   /**
    * 手动上传封面：
    *  - 先调 cover:uploadManual 落本地副本；
    *  - poi / description / minQuality 由 action 层根据旧 cover / product 自动推导，
    *    UI 不再传这些内部字段。
    */
-  uploadAndSaveManualCover: (projectId: string, args: {
+  uploadAndSaveManualCover: (localProductId: string, args: {
     file: { name: string; type: string; base64: string };
   }) => Promise<ManualUploadCoverMeta | null>;
   /** 携程图库候选写入 product（ctripLibrary 形态）；由候选自动推导 cover 三字段。 */
-  saveCtripLibraryCover: (projectId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
+  saveCtripLibraryCover: (localProductId: string, args: { candidate: CtripLibraryImageCandidate }) => Promise<boolean>;
   /**
    * 阶段 A：按景点名称解析 suggestpoi.json → places 候选列表。
    *  返回 null 时由 notice 通道兜底。
    */
-  searchCtripLibraryPlaces: (projectId: string, args: { keyword: string }) => Promise<CtripLibraryPlaceSearchResult | null>;
+  searchCtripLibraryPlaces: (localProductId: string, args: { keyword: string }) => Promise<CtripLibraryPlaceSearchResult | null>;
   /**
    * 阶段 B：按已选 place（poiId + poiName）拉该地址下的图库图片列表。
    *  返回 null 时由 notice 通道兜底。
    */
-  searchCtripLibraryImages: (projectId: string, args: { keyword: string; place: CtripLibraryPlaceCandidate }) => Promise<CtripLibrarySearchResult | null>;
+  searchCtripLibraryImages: (localProductId: string, args: { keyword: string; place: CtripLibraryPlaceCandidate }) => Promise<CtripLibrarySearchResult | null>;
   /** 手动清除某字段的错误（输入时联动）。 */
   clearError: (field: string) => void;
   /** 整个模块是否被收起（仅显示头部）。 */
@@ -111,7 +111,7 @@ export interface ReviewSummaryBasicInfoProps {
 }
 
 export function AppWorkspaceReviewSummaryBasicInfo({
-  project,
+  product,
   currentAccountName,
   savingField,
   errors,
@@ -134,7 +134,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   collapsed,
   onToggleCollapsed,
 }: ReviewSummaryBasicInfoProps) {
-  const snapshot = useMemo(() => readBasicInfoFromProduct(project.product), [project.product]);
+  const snapshot = useMemo(() => readBasicInfoFromProduct(product.product), [product.product]);
 
   // 「手动上传封面」预览 data URL：仅 manualUpload 时需要解析；
   // 旧实现返回 file:// URL 在沙盒下偶发破图，新实现改为 data: URL，
@@ -155,10 +155,10 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   }, [snapshot.cover]);
 
   // 进入「基础信息」模块时拉一次当前账号的 fixedInfo；
-  // loadAccountFixedInfo 内部已对 projectId 做去重，不会重复 IO。
+  // loadAccountFixedInfo 内部已对 localProductId 做去重，不会重复 IO。
   useEffect(() => {
-    loadAccountFixedInfo(project.id, currentAccountName);
-  }, [project.id, currentAccountName, loadAccountFixedInfo]);
+    loadAccountFixedInfo(product.id, currentAccountName);
+  }, [product.id, currentAccountName, loadAccountFixedInfo]);
 
   // 「行级可渲染」判定：
   //  - 封面 / 副标题 / 管家 / 400 电话 / 套餐定价 始终挂载（用户验收门
@@ -258,10 +258,10 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             saving={savingField === "cover"}
             error={errors.cover}
             onClearError={() => clearError("cover")}
-            onUploadManual={(args) => uploadAndSaveManualCover(project.id, args)}
-            onPickCtripLibrary={(args) => saveCtripLibraryCover(project.id, args)}
-            onSearchCtripLibraryPlaces={(args) => searchCtripLibraryPlaces(project.id, args)}
-            onSearchCtripLibraryImages={(args) => searchCtripLibraryImages(project.id, args)}
+            onUploadManual={(args) => uploadAndSaveManualCover(product.id, args)}
+            onPickCtripLibrary={(args) => saveCtripLibraryCover(product.id, args)}
+            onSearchCtripLibraryPlaces={(args) => searchCtripLibraryPlaces(product.id, args)}
+            onSearchCtripLibraryImages={(args) => searchCtripLibraryImages(product.id, args)}
             onReadPreviewUrl={async (fileId, originalName) => {
               if (!api()) return null;
               const result = await api()!.cover.read({ fileId, originalName });
@@ -275,7 +275,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             saving={savingField === "subtitle"}
             error={errors.subtitle}
             onDraftChange={(value) => updateDraft("subtitle", value)}
-            onSave={() => { void saveSubtitle(project.id); }}
+            onSave={() => { void saveSubtitle(product.id); }}
             onClearError={() => clearError("subtitle")}
           />
 
@@ -285,8 +285,8 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             currentAccountName={currentAccountName}
             saving={savingField === "butler"}
             error={errors.butler}
-            onUseAccountButler={(selection) => { void saveButler(project.id, selection); }}
-            onClearButler={() => { void saveButler(project.id, null); }}
+            onUseAccountButler={(selection) => { void saveButler(product.id, selection); }}
+            onClearButler={() => { void saveButler(product.id, null); }}
             onOpenAccountEditor={onOpenAccountEditor}
           />
 
@@ -304,7 +304,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             saving={savingField === "adult" || savingField === "child" || savingField === "minimumTravelers"}
             error={errors.adult ?? errors.child ?? errors.minimumTravelers}
             onDraftChange={updatePricingDraft}
-            onSave={(parsed) => { void savePricing(project.id, parsed.adult, parsed.child, parsed.minimumTravelers); }}
+            onSave={(parsed) => { void savePricing(product.id, parsed.adult, parsed.child, parsed.minimumTravelers); }}
             onClearError={() => { clearError("adult"); clearError("child"); clearError("minimumTravelers"); }}
           />
 
@@ -316,7 +316,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             saving={savingField === "inventory"}
             error={errors.inventory}
             onDraftChange={updateInventoryDraft}
-            onSave={(parsed) => { void saveInventory(project.id, parsed.startDate, parsed.endDate, parsed.dailyQuota); }}
+            onSave={(parsed) => { void saveInventory(product.id, parsed.startDate, parsed.endDate, parsed.dailyQuota); }}
             onClearError={() => clearError("inventory")}
           />
 
@@ -329,8 +329,8 @@ export function AppWorkspaceReviewSummaryBasicInfo({
               saving={savingField === "requestedDailyCost"}
               error={errors.requestedDailyCost}
               onDraftChange={(value) => updateDraft("requestedDailyCost", value)}
-              onSave={(value) => { void saveVehicleCost(project.id, value); }}
-              onClear={() => { void saveVehicleCost(project.id, null); }}
+              onSave={(value) => { void saveVehicleCost(product.id, value); }}
+              onClear={() => { void saveVehicleCost(product.id, null); }}
               onClearError={() => clearError("requestedDailyCost")}
             />
           ) : null}

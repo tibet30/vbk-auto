@@ -7,7 +7,7 @@
  *  - parseRequestedDailyCostDraft：UI 草稿 → 主进程可用数值或清除信号。
  *
  * 写入主路径的合法性由 src/main/operations/manual-review-field.test.ts 覆盖；
- * UI 渲染 / IPC 交互无 DOM 测试基础设施（项目仅使用 tsx --test），
+ * UI 渲染 / IPC 交互无 DOM 测试基础设施（产品仅使用 tsx --test），
  * 因此 UI 行为以现有 E2E 与手动验收为准。
  */
 

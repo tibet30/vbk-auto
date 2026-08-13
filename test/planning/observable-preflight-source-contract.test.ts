@@ -56,7 +56,7 @@ function extractFunctionBody(source: string, signature: string): string {
   return source.slice(start, i);
 }
 
-const mainSrc = read("src/main/main.ts");
+const mainSrc = read("src/main/ipc/planning-ipc.ts");
 
 test("handlePreflightFailure 必须有 [planning] 前缀的可观测 warn 日志", () => {
   const body = extractFunctionBody(mainSrc, "function handlePreflightFailure(");
@@ -75,11 +75,11 @@ test("planning:resume handler 必须把 loadPlanningState 包在 try/catch，失
     "planning:resume 在 load/restore 失败时必须走 handlePreflightFailure 而非 throw raw error");
 });
 
-test("planning:resume handler 必须把 restoreProjectToPlanningForRetry 包在 try/catch", () => {
+test("planning:resume handler 必须把 restoreProductToPlanningForRetry 包在 try/catch", () => {
   const body = extractHandlerBody(mainSrc, 'ipcMain.handle("planning:resume"');
-  // 期望：try { restoreProjectToPlanningForRetry(...) } catch (error) { ... handlePreflightFailure ... }
-  assert.match(body, /try\s*\{[\s\S]*?restoreProjectToPlanningForRetry\(/,
-    "planning:resume 必须把 restoreProjectToPlanningForRetry 包在 try 内，restore 抛错不应让 IPC 直接抛 raw error");
+  // 期望：try { restoreProductToPlanningForRetry(...) } catch (error) { ... handlePreflightFailure ... }
+  assert.match(body, /try\s*\{[\s\S]*?restoreProductToPlanningForRetry\(/,
+    "planning:resume 必须把 restoreProductToPlanningForRetry 包在 try 内，restore 抛错不应让 IPC 直接抛 raw error");
   assert.match(body, /(console\.warn|logWarn)\([^)]*restore_failed/,
     "planning:resume 在 restore 失败时必须打 [planning] ipc.resume restore_failed");
 });

@@ -4,7 +4,7 @@
 
 ## 工作流
 
-1. 创建本地产品项目，和 AI 一起完善行程与产品资料。
+1. 创建本地产品，和 AI 一起完善行程与产品资料。
 2. 在 VBK 浏览区登录并核对城市、资源组、价格等平台数据。
 3. 确认结构化方案后，自动填写并保存 VBK 产品草稿。
 4. 用户在 VBK 中人工检查、提审和发布。
@@ -41,7 +41,7 @@ npm run build
 ### 命令行调试（行程描述）
 
 ```bash
-npm run pi:itinerary -- <projectId> [cdpPort]
+npm run pi:itinerary -- <localProductId> [cdpPort]
 ```
 
 示例：
@@ -52,7 +52,7 @@ npm run pi:itinerary -- ff43aae4-3cbf-44c9-8712-c31f219eac46 9496
 ```
 
 说明：
-- `projectId` 为本地项目 ID（`projects` 表中的 `id`）。
+- `localProductId` 为本地产品 ID（`products` 表中的 `id`）。
 - `cdpPort` 默认使用 `VBK_CDP_PORT` 或 `9539`。
 - 命令会调用 `node scripts/debug-step.mjs fillItineraryDraft`，用于单独复现行程描述阶段。
 
@@ -69,7 +69,7 @@ src/
 test/                   自动化与产品协议测试
 ```
 
-MiniMax 密钥通过桌面端设置保存到 macOS 加密存储；不要将真实密钥或 VBK Cookie 写入仓库。
+AI 密钥通过桌面端设置保存到 userData 下权限为 0600 的本地文件；renderer 只能读取 `hasKey`，不能取回明文。不要将真实密钥或 VBK Cookie 写入仓库、测试或日志。
 
 ## 代码规范
 

@@ -135,7 +135,7 @@ test("diagnoseAutomationFailure 将 provider 401 映射为 provider_authenticati
   });
 
   await assert.rejects(service.diagnoseAutomationFailure(diagnosisInput), hasMiniMaxCode("provider_authentication"));
-  const metadata = warnings.find((entry) => entry[0] === "[MiniMax] diagnosis failed")?.[1] as Record<string, unknown> | undefined;
+  const metadata = warnings.find((entry) => typeof entry[0] === "string" && entry[0].includes("[AI] diagnosis failed"))?.[1] as Record<string, unknown> | undefined;
   assert.equal(metadata?.errorCode, "provider_authentication");
 });
 

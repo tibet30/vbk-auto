@@ -4,13 +4,13 @@ import shared from "../shared.module.less";
 import styles from "./StageNav.module.less";
 
 /**
- * 两步工作流导航。仅在打开项目时渲染；切换 stage 由调用方决定。
+ * 两步工作流导航。仅在打开产品时渲染；切换 stage 由调用方决定。
  * 这里只负责呈现当前 stage 状态、概要文案和点击切换。
  */
 export function AppStageNav({ model }: { model: AppModel }) {
-  const { project, stage, openStage, reviewStepStatus, vbkStageStatus, projectCompletionLabel } = model;
+  const { product, stage, openStage, reviewStepStatus, vbkStageStatus, productCompletionLabel } = model;
 
-  if (!project) return null;
+  if (!product) return null;
 
   return (
     <nav className={styles.stageNav} role="tablist" aria-label="产品工作流步骤">
@@ -30,8 +30,8 @@ export function AppStageNav({ model }: { model: AppModel }) {
         <span className={styles.stageStepBody}>
           <span className={styles.stageStepTitle}>AI 对话与产品审查</span>
           <span className={styles.stageStepStatus} aria-live="polite">
-            {!project
-              ? "选择项目后开始"
+            {!product
+              ? "选择产品后开始"
               : reviewStepStatus === "passed"
                 ? `就绪 ${model.readiness.completion}% · 可以进入录入`
                 : reviewStepStatus === "reviewing"
@@ -105,7 +105,7 @@ export function AppStageNav({ model }: { model: AppModel }) {
         {stage === "review" ? (
           <>
             <Sparkles size={14} />
-            <span>{projectCompletionLabel}</span>
+            <span>{productCompletionLabel}</span>
           </>
         ) : (
           <>

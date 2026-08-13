@@ -49,13 +49,13 @@ test("logTimestamp 返回 ISO-like 字符串并按字典序可排序", () => {
 test("logInfo 在第一个字符串参数前加 timestamp，且整个字符串首部没有重复时间戳", () => {
   const cap = captureConsole();
   try {
-    logInfo("[planning] run.start projectId=p1");
+    logInfo("[planning] run.start localProductId=p1");
   } finally { cap.restore(); }
   assert.equal(cap.logs.length, 1);
   const [arg] = cap.logs[0].args;
   assert.equal(typeof arg, "string");
   const s = arg as string;
-  // 应当形如 "<ts> [planning] run.start projectId=p1"，ts 仅出现一次。
+  // 应当形如 "<ts> [planning] run.start localProductId=p1"，ts 仅出现一次。
   const tsMatches = s.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/g);
   assert.equal(tsMatches?.length, 1, `应只有 1 个时间戳，实际 ${tsMatches?.length}: ${s}`);
   assert.match(s, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \[planning\]/);

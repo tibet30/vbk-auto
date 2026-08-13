@@ -24,7 +24,7 @@ import {
 import type { PlanningGenerationState } from "../../src/shared/contracts-planning.js";
 
 const PENDING_SKELETON: PlanningGenerationState = {
-  projectId: "p",
+  localProductId: "p",
   currentStage: "skeleton",
   completedStages: [],
   stages: [],

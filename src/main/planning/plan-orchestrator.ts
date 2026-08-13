@@ -44,7 +44,7 @@ export type {
 };
 
 export interface RunPlanArgs {
-  projectId: string;
+  localProductId: string;
   skeleton: PlanningSkeleton;
   store: GenerationStateStore;
   runtime: OrchestratorRuntime;
@@ -60,7 +60,7 @@ export interface RunPlanArgs {
  *  - 已 `completedStages` 中的阶段**不重跑**（无论持久化的 accepted/rejected 列表）。
  *  - 启动点 = `state.currentStage`；当 currentStage 仍处于已完成阶段时，
  *    直接跳到下一个未完成阶段。
- *  - 已落地的 accepted 模块通过 `runtime.loadAcceptedModules(projectId)` 重新读出；
+ *  - 已落地的 accepted 模块通过 `runtime.loadAcceptedModules(localProductId)` 重新读出；
  *    因此即使进程重启后内存 accumulator 丢失，也不会影响 completeness 判断。
  */
 export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult> {
@@ -68,10 +68,10 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   const stageRetryLimit = opts.stageRetryLimit ?? PLANNING_STAGE_RETRY_LIMIT;
   const enforceValidation = opts.enforceValidation !== false;
 
-  let state = (await args.store.load(args.projectId)) ?? createInitialState(args.projectId, opts.providerLabel);
+  let state = (await args.store.load(args.localProductId)) ?? createInitialState(args.localProductId, opts.providerLabel);
 
   logRunStart("runPlan 进入", {
-    projectId: args.projectId,
+    localProductId: args.localProductId,
     providerLabel: args.providerLabel,
     currentStage: state.currentStage,
     completedStages: state.completedStages.join(","),
@@ -103,7 +103,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   }
   if (skippedFromCurrent > 0) {
     logRunStart(`续跑跳过 ${skippedFromCurrent} 个已完成阶段`, {
-      projectId: args.projectId,
+      localProductId: args.localProductId,
       providerLabel: args.providerLabel,
       skippedStages: PLANNING_STAGES.slice(0, skippedFromCurrent).join(","),
       resumeStage: PLANNING_STAGES[startIndex] ?? "<none>",
@@ -116,18 +116,18 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state = await revalidateCompletedState({ state, skeleton: args.skeleton, runtime: args.runtime });
     await args.store.save(state);
     if (state.status === "needs_user") {
-      logRunEnd("续跑走到末尾但 deep validation 发现 invalid，回退 needs_user", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
-      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId));
+      logRunEnd("续跑走到末尾但 deep validation 发现 invalid，回退 needs_user", { localProductId: args.localProductId, providerLabel: args.providerLabel, status: state.status });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.localProductId));
     }
     // 已完成方案也可能是旧版本在 POI 查询超时前就走到了 validation。
     // 此处只对空 POI 做补全：不调用 planner、不改变 completedStages 或阶段状态。
     // enrichItineraryPois 仅在实际匹配到结果时写 itinerary；无缺失或无匹配都不会
     // 产生无意义的模块重写。放在稳定 completed 返回前，确保用户点「继续规划」
     // 能修复历史草稿，而不会被末尾短路跳过。
-    const existingTasks = await args.runtime.loadExistingResearchTasks(args.projectId);
+    const existingTasks = await args.runtime.loadExistingResearchTasks(args.localProductId);
     const persistedTaskKeys = new Set(existingTasks.map((task) => `${task.type}::${task.label}`));
     const poiResearchTasks = await enrichItineraryPois({
-      projectId: args.projectId,
+      localProductId: args.localProductId,
       destination: args.skeleton.destination,
       runtime: args.runtime,
       persistedTaskKeys,
@@ -135,17 +135,17 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     });
     state.status = "completed";
     await args.store.save(state);
-    logRunEnd("续跑走到末尾确认 completed", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
-    return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), poiResearchTasks);
+    logRunEnd("续跑走到末尾确认 completed", { localProductId: args.localProductId, providerLabel: args.providerLabel, status: state.status });
+    return finalizeRun(state, await args.runtime.loadAcceptedModules(args.localProductId), poiResearchTasks);
   }
 
   state.status = "running";
   state.currentStage = PLANNING_STAGES[startIndex];
-  logStageStart("续跑起点", { projectId: args.projectId, stage: state.currentStage, completedStages: state.completedStages.join(","), providerLabel: args.providerLabel });
+  logStageStart("续跑起点", { localProductId: args.localProductId, stage: state.currentStage, completedStages: state.completedStages.join(","), providerLabel: args.providerLabel });
   await args.store.save(state);
 
-  const existingTasks = await args.runtime.loadExistingResearchTasks(args.projectId);
-  const history = await args.runtime.loadHistory(args.projectId);
+  const existingTasks = await args.runtime.loadExistingResearchTasks(args.localProductId);
+  const history = await args.runtime.loadHistory(args.localProductId);
   const accumulatedResearchTasks: ResearchTaskProposal[] = [];
   let deferredPresentationFailure: SingleStageResult | undefined;
 
@@ -155,7 +155,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
   if (state.completedStages.includes("itinerary")) {
     const persistedTaskKeys = new Set(existingTasks.map((task) => `${task.type}::${task.label}`));
     accumulatedResearchTasks.push(...await enrichItineraryPois({
-      projectId: args.projectId,
+      localProductId: args.localProductId,
       destination: args.skeleton.destination,
       runtime: args.runtime,
       persistedTaskKeys,
@@ -169,8 +169,8 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     if (stage === "validation" && deferredPresentationFailure) {
       state = applyDeferredPresentationFailure(state, deferredPresentationFailure, deferredPresentationFailure.status);
       await args.store.save(state);
-      logRunEnd("runPlan 跳过 validation，回到 presentation 待处理", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status });
-      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+      logRunEnd("runPlan 跳过 validation，回到 presentation 待处理", { localProductId: args.localProductId, providerLabel: args.providerLabel, status: state.status });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.localProductId), accumulatedResearchTasks);
     }
     if (stage === "presentation" && !state.completedStages.includes("commercial")) {
       const parallelStages = (["presentation", "commercial"] as const).filter((s) => !state.completedStages.includes(s));
@@ -211,7 +211,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
         state.status = failed ? failed.result.status : "running";
       }
       await args.store.save(state);
-      if (failed && !deferredPresentationFailure) return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+      if (failed && !deferredPresentationFailure) return finalizeRun(state, await args.runtime.loadAcceptedModules(args.localProductId), accumulatedResearchTasks);
       i += 1;
       continue;
     }
@@ -237,8 +237,8 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
       }
       // 失败 / 需要人工介入是终态，原样持久化，保留当前失败阶段供恢复入口使用。
       await args.store.save(state);
-      logRunEnd("runPlan 提前结束于 mid-stage", { projectId: args.projectId, providerLabel: args.providerLabel, stage, status: result.status, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
-      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+      logRunEnd("runPlan 提前结束于 mid-stage", { localProductId: args.localProductId, providerLabel: args.providerLabel, stage, status: result.status, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.localProductId), accumulatedResearchTasks);
     }
     // runSingleStage 成功时会返回该阶段自己的 completed 状态。不要先把这个
     // 中间结果写入 store：renderer 轮询到 status=completed 会停止，从而错过
@@ -251,17 +251,17 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state.lastModuleSummary = [...result.accepted, ...result.rejected];
     state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
     await args.store.save(state);
-    logStageEnd("阶段已接受，写入 completedStages", { projectId: args.projectId, stage, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
+    logStageEnd("阶段已接受，写入 completedStages", { localProductId: args.localProductId, stage, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
     if (stage === "research" && deferredPresentationFailure) {
       state = applyDeferredPresentationFailure(state, deferredPresentationFailure, deferredPresentationFailure.status);
       await args.store.save(state);
-      logRunEnd("runPlan 完成 research 后回到 presentation 待处理", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status, researchTasks: accumulatedResearchTasks.length });
-      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.projectId), accumulatedResearchTasks);
+      logRunEnd("runPlan 完成 research 后回到 presentation 待处理", { localProductId: args.localProductId, providerLabel: args.providerLabel, status: state.status, researchTasks: accumulatedResearchTasks.length });
+      return finalizeRun(state, await args.runtime.loadAcceptedModules(args.localProductId), accumulatedResearchTasks);
     }
   }
 
   // validation 已在循环内完成；从持久化产品反推最终 completeness。
-  const accepted = await args.runtime.loadAcceptedModules(args.projectId);
+  const accepted = await args.runtime.loadAcceptedModules(args.localProductId);
   const validation = validateCompleteness({ acceptedModules: accepted });
   if (enforceValidation && !validation.complete) {
     state.status = "needs_user";
@@ -269,7 +269,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state.status = "completed";
   }
   await args.store.save(state);
-  logRunEnd("runPlan 全流程完成", { projectId: args.projectId, providerLabel: args.providerLabel, status: state.status, complete: validation.complete });
+  logRunEnd("runPlan 全流程完成", { localProductId: args.localProductId, providerLabel: args.providerLabel, status: state.status, complete: validation.complete });
   return finalizeRun(state, accepted, accumulatedResearchTasks);
 }
 
@@ -325,9 +325,9 @@ async function finalizeRun(state: PlanningGenerationState, acceptedModules: read
  * 生成一份全新 PlanningGenerationState：起点是 skeleton，未完成任何阶段，状态 pending。
  * resumeAt 为当前 ISO 时间，providerLabel 透传供 UI 顶部展示。
  */
-function createInitialState(projectId: string, providerLabel?: string): PlanningGenerationState {
+function createInitialState(localProductId: string, providerLabel?: string): PlanningGenerationState {
   return {
-    projectId,
+    localProductId,
     currentStage: "skeleton",
     completedStages: [],
     stages: [],

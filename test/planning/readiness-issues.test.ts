@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import type { ProjectReadiness, ResearchTask } from "../../src/shared/contracts.js";
+import type { ProductReadiness, ResearchTask } from "../../src/shared/contracts.js";
 import { mergeReadinessIssues, openResearchTaskToIssue } from "../../src/shared/readiness-issues.js";
 import { buildOpenIssueRows } from "../../src/renderer/app/views/workspace/review-summary-open-issues.helpers.js";
 
@@ -53,7 +53,7 @@ test("酒店 / 价格 / 库存 / 封面 research tasks 在 open issues 中不双
     task("inventory", "核查库存起止日期与每日配额在 VBK 是否生效", "vbk", "确认库存生效"),
     task("cover", "获取产品封面图（ctripLibrary 或人工上传）", "image", "补齐封面图"),
   ];
-  const readiness: ProjectReadiness = {
+  const readiness: ProductReadiness = {
     ready: false,
     completion: 67,
     issues: tasks.map(openResearchTaskToIssue),
@@ -78,7 +78,7 @@ test("open issues helper 合并 readiness 与 taskList 的重复用车项并修�
   const tasks = [
     task("vehicle", "核查西安私家团用车资源组（vehicle resourceGroupId）", "vbk", "调用 VBK 用车资源组接口查询"),
   ];
-  const readiness: ProjectReadiness = {
+  const readiness: ProductReadiness = {
     ready: false,
     completion: 92,
     issues: [
@@ -97,7 +97,7 @@ test("open issues helper 不把空 readiness 外的 pending task 追加成待处
   const tasks = [
     task("hotel", "核查酒店资源组", "vbk", "确认酒店资源组 ID"),
   ];
-  const readiness: ProjectReadiness = {
+  const readiness: ProductReadiness = {
     ready: true,
     completion: 100,
     issues: [],
@@ -112,7 +112,7 @@ test("open issues helper 只给匹配的 readiness issue 绑定 taskId 与核查
     task("hotel", "核查酒店资源组", "vbk", "确认酒店资源组 ID"),
     task("price", "核查成人价 / 儿童价 / 起订人数在 VBK 是否可发布", "vbk", "确认价格口径"),
   ];
-  const readiness: ProjectReadiness = {
+  const readiness: ProductReadiness = {
     ready: false,
     completion: 88,
     issues: [
@@ -127,13 +127,50 @@ test("open issues helper 只给匹配的 readiness issue 绑定 taskId 与核查
   assert.match(rows[0].actionPrompt, /请核查并处理：核查酒店资源组/);
 });
 
-test("自动录入已停止只阻断 readiness，不新增待处理事项", () => {
-  const source = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
-  const readinessBody = source.slice(source.indexOf("function readiness("), source.indexOf("/**\n * 创建主窗口"));
+test("readiness needs_user 阻塞必须作为 actionable 待处理项推送，不走 hidden 计数", () => {
+  // 真实 bug：basic 阶段因 VBK 下拉中没有「安思科/1368298」而 needs_user。
+  // 旧实现只加 hiddenBlockers，completion 跳到 92% 但 issues=[]，运营看不到
+  // 「下一步要补什么」。新实现必须把 rec.userInstruction / rec.finalError
+  // 作为一条以阶段名标识的待处理项吐出来；completion 由 issues.length 算出，
+  // 不再有 hiddenBlockers 重复计数（否则 92% + 1 issue 会被算成 83%）。
+  // 重构后 readiness() 实现已从 main.ts 迁移到 src/main/readiness.ts。
+  const source = readFileSync(new URL("../../src/main/readiness.ts", import.meta.url), "utf8");
 
-  assert.match(readinessBody, /hiddenBlockers\s*\+=\s*1/);
-  assert.match(readinessBody, /const blockerCount = mergedIssues\.length \+ hiddenBlockers/);
-  assert.match(readinessBody, /ready: blockerCount === 0/);
-  assert.match(readinessBody, /Math\.min\(12, blockerCount\)/);
-  assert.doesNotMatch(readinessBody, /issues\.push\(\{\s*label: "自动录入已停止"/);
+  // 必须用带阶段名的可操作 label 推送 needs_user 详情。
+  assert.match(source, /issues\.push\(\{\s*label:\s*`自动录入失败：\$\{[^}]+\}`/,
+    "readiness 必须用带阶段名的可操作 label 推送 needs_user 详情");
+  // 详情必须从 rec.userInstruction 读（recovery-run.ts 暴露的字段）。
+  assert.match(source, /blocked\.userInstruction|userInstruction/,
+    "readiness 必须读 userInstruction 作为详情主体");
+  // rec.userInstruction 缺失时必须回退到 finalError。
+  assert.match(source, /finalError/,
+    "userInstruction 缺失时必须回退到 finalError");
+  // 不允许再有 hiddenBlockers 双计数：completion 由 issues.length 算出。
+  assert.doesNotMatch(source, /hiddenBlockers/,
+    "needs_user 不应再走 hidden 计数，避免 92%/0 pending 假就绪态 + 与 issues 重复计入 completion");
+  assert.match(source, /const blockerCount = mergedIssues\.length\b/,
+    "completion 必须单纯由 mergedIssues 算出，不再叠加 hiddenBlockers");
+  assert.match(source, /Math\.min\((?:12|READINESS_MAX_BLOCKERS), blockerCount\)/);
+  assert.match(source, /ready: blockerCount === 0/);
+});
+
+test("readiness 用户主动取消不产生新的待处理项", () => {
+  // rec.finalError 以「用户中止」开头时是用户已知动作，不重复产生任务，
+  // 避免与顶部「已停止」状态重复。
+  // 重构后 readiness() 实现已从 main.ts 迁移到 src/main/readiness.ts。
+  const source = readFileSync(new URL("../../src/main/readiness.ts", import.meta.url), "utf8");
+
+  assert.match(source, /用户中止/,
+    "readiness 必须以 finalError 前缀识别用户主动取消");
+  assert.match(source, /startsWith\(\s*["']用户中止["']\s*\)/,
+    "识别逻辑必须严格使用 startsWith 避免被其它错误文本误命中");
+  // 取消分支不能调用 issues.push(自动录入失败 …)，避免与顶部「已停止」重复。
+  // 用「cancelled 为 true 时跳过 push」语义锁死：if (!cancelled) 块内才有 push。
+  const cancelledCheckIdx = source.search(/const cancelled\b/);
+  const pushIdx = source.indexOf("issues.push({ label:", cancelledCheckIdx);
+  assert.ok(cancelledCheckIdx > 0, "readiness 必须先识别 cancelled");
+  assert.ok(pushIdx > cancelledCheckIdx, "issues.push 必须在 cancelled 检查之后");
+  const betweenCancAndPush = source.slice(cancelledCheckIdx, pushIdx);
+  assert.match(betweenCancAndPush, /if\s*\(\s*!cancelled\s*\)/,
+    "issues.push 必须在 if (!cancelled) 块内；取消分支不应 push 待处理项");
 });

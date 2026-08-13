@@ -140,9 +140,10 @@ export class MiniMaxService {
       "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。";
     const isInitialDraft = (!Array.isArray(itinerary) || itinerary.length === 0) && /生成|第一版|方案/.test(input.message);
     const requiresStructuredAction = input.message.includes("上一次返回未通过结构化校验");
+    const isExplanationOnly = /说明|解释/.test(input.message);
     const requiresWritablePatch = isInitialDraft
       || requiresStructuredAction
-      || /继续|补齐|补充|调整|更新|继续生成|继续补充|再次生成|重试|重写|重新|优化|生成/.test(input.message);
+      || (!isExplanationOnly && /继续|补齐|补充|调整|更新|继续生成|继续补充|再次生成|重试|重写|重新|优化|生成/.test(input.message));
     const requireActionHint = isInitialDraft
       || requiresStructuredAction
       || /继续|补齐|补充|调整|更新|修正|重新|优化|重写|重试|继续生成|继续补充|再次生成|生成/.test(input.message);
@@ -211,8 +212,20 @@ export class MiniMaxService {
           || (!hasOfficialToolCall && hasAnyToolCall && hasRealActionHint && attempt > 0)
           || (hasOfficialToolCall && attempt > 0 && !looksLikeTrivialReply
               && typeof response.reply === "string" && response.reply.trim().length > 0 && !isFallbackReply);
+        if (requiresWritablePatch && !hasWritablePatch && isFallbackReply) {
+          throw new MiniMaxServiceError(
+            "invalid_model_output",
+            `${this.providerLabel} 未返回可写入的产品方案，请重试。`,
+            typeof response.reply === "string" ? response.reply : undefined,
+          );
+        }
         if (requiresWritablePatch || (hasOfficialToolCall && isStructured && !hasWritablePatch)) {
-          if (!hasFallbackReply && (!isStructured || !hasWritablePatch)) {
+          const structuredEmptyDirectResponse = isInitialDraft
+            && isStructured
+            && !hasWritablePatch
+            && !hasOfficialToolCall
+            && !hasActionHint;
+          if (structuredEmptyDirectResponse || (!hasFallbackReply && !isStructured)) {
             throw new MiniMaxServiceError(
               "invalid_model_output",
               `${this.providerLabel} 未返回可写入的产品方案，请重试。`,

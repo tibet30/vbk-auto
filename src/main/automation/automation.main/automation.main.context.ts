@@ -40,8 +40,8 @@ export interface AutomationRunContext {
     product: Record<string, unknown>;
   }) => Promise<{ pickedText: string | null; reasoning: string }>;
   resolveActiveButlerContext: (accountName?: string) => ActiveButlerContext | null;
-  emit: (projectId: string) => void;
-  markCancelled: (projectId: string, run: AutomationRun, persist: () => void) => void;
+  emit: (localProductId: string) => void;
+  markCancelled: (localProductId: string, run: AutomationRun, persist: () => void) => void;
   cancellationRequested: Set<string>;
   ensureBrowserHasBounds: () => void;
 }

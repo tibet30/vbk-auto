@@ -1,7 +1,7 @@
 /**
  * 规划子系统统一日志：所有 console 输出都走这里，便于：
  *   - 主进程日志在终端 / dev tools 主进程面板可读；
- *   - 失败阶段带 stage / attempt / projectId / provider 等结构化字段，
+ *   - 失败阶段带 stage / attempt / localProductId / provider 等结构化字段，
  *     方便运营 / 工程师排查「继续规划还是报错」类用户报告；
  *   - 日志前缀一致，便于 grep / 过滤。
  *
@@ -18,7 +18,7 @@ import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 
 /** logger options */
 export interface PlanningLogContext {
-  projectId?: string;
+  localProductId?: string;
   stage?: string;
   attempt?: number;
   providerLabel?: string;
@@ -39,12 +39,12 @@ function safe(value: unknown): unknown {
 function fmt(context: PlanningLogContext | undefined): string {
   if (!context) return "";
   const parts: string[] = [];
-  if (context.projectId) parts.push(`project=${context.projectId}`);
+  if (context.localProductId) parts.push(`product=${context.localProductId}`);
   if (context.stage) parts.push(`stage=${context.stage}`);
   if (typeof context.attempt === "number") parts.push(`attempt=${context.attempt}`);
   if (context.providerLabel) parts.push(`provider=${context.providerLabel}`);
   for (const [key, value] of Object.entries(context)) {
-    if (key === "projectId" || key === "stage" || key === "attempt" || key === "providerLabel") continue;
+    if (key === "localProductId" || key === "stage" || key === "attempt" || key === "providerLabel") continue;
     parts.push(`${key}=${typeof value === "string" ? value : JSON.stringify(safe(value))}`);
   }
   return parts.length ? ` ${parts.join(" ")}` : "";

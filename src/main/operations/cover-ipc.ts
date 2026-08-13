@@ -78,7 +78,7 @@ function dataPath(): string {
  *  1. assertTrustedSender；
  *  2. 解析 args（originalName / mimeType / base64）；
  *  3. 走 cover-storage.storeManualCoverFile 校验 + 落盘；
- *  4. 返回 ManualUploadCoverMeta；不写 product（写 product 由 projects:updateReviewField 完成）。
+ *  4. 返回 ManualUploadCoverMeta；不写 product（写 product 由 products:updateReviewField 完成）。
  *
  * 注意：base64 解码后的字节由 storeManualCoverFile 校验 mime / size / 空文件。
  */

@@ -5,9 +5,9 @@ import shared from "../shared.module.less";
 import styles from "./login-browser.module.less";
 
 /**
- * 无项目工作台上的专用 VBK 登录 WebView surface（专用 login stage 右侧）。
+ * 无产品工作台上的专用 VBK 登录 WebView surface（专用 login stage 右侧）。
  *
- * 设计动机：模块化重构后，view=workspace 且 project=null 时 ActiveRoute 走
+ * 设计动机：模块化重构后，view=workspace 且 product=null 时 ActiveRoute 走
  * AppWorkspaceHomePage，原 vbk 工作台里的 <div ref={browserRef}> 不存在 →
  * derived.ts 的 useLayoutEffect 拿不到 ref → 浏览器永远不可见、bounds 永远
  * 没被下发。这是「新增登录 / 登录 VBK」点了之后右侧看不见 VBK 页面的根因之一。

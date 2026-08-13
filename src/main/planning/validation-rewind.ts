@@ -34,8 +34,8 @@ export interface RevalidateArgs {
  * 返回新的 state（即便不需要 rewind，也是新对象以便调用方无脑保存）。
  */
 export async function revalidateCompletedState(args: RevalidateArgs): Promise<PlanningGenerationState> {
-  const product = await args.runtime.loadCurrentProduct(args.state.projectId);
-  const accepted = await args.runtime.loadAcceptedModules(args.state.projectId);
+  const product = await args.runtime.loadCurrentProduct(args.state.localProductId);
+  const accepted = await args.runtime.loadAcceptedModules(args.state.localProductId);
   const deep = deepValidateModules({
     skeleton: args.skeleton,
     product,

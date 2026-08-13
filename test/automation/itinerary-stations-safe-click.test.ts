@@ -2,7 +2,7 @@
 //   - 必须从 ../utils.js 真实导入（utils.ts 里有 async function safeClick 并 export）；
 //   - 不得退化为 `declare function safeClick(...)` 占位（仅类型声明，运行时会抛
 //     `ReferenceError: safeClick is not defined`，破坏 itinerary 重试）。
-// 历史 bug：project ee4aefd7-033b-4639-a318-43d5cb51ff64 itinerary 真实重试
+// 历史 bug：product ee4aefd7-033b-4639-a318-43d5cb51ff64 itinerary 真实重试
 // finalError='safeClick is not defined'，根因就是 declare-only 占位。
 import test from "node:test";
 import assert from "node:assert/strict";

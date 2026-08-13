@@ -1,13 +1,9 @@
 import { logInfo, logWarn } from "../../../shared/log-timestamp.js";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  activeAdvisorHint,
   buildPlanningStageProgress,
   initialStageFor,
   planningStageLabel,
-  recoveryNeedsUser,
-  statusState,
-  vbkStageStatusText,
 } from "../helpers";
 import { PLANNING_STAGES } from "../../../shared/contracts-planning.js";
 import { api } from "../helpers";
@@ -16,15 +12,17 @@ import type { AppStateBase } from "./base";
 import type { PlanningGenerationState } from "../../../shared/contracts-planning.js";
 import { shouldAutoStartPlanning } from "./auto-start-policy.js";
 import { simulateRecoveryEffectTick } from "./recovery-policy.js";
-import { upsertProjectToTop } from "./project-list-helper.js";
+import { upsertProductToTop } from "./product-list-helper.js";
+import { useBrowserDerived } from "./domains/browser-derived";
+import { useProductViewDerived } from "./domains/product-view-derived";
 
 export function useAppStateDerived(state: AppStateBase) {
   const {
-    project,
-    setProjects,
-    setProject,
-    activeProjectId,
-    setActiveProjectId,
+    product,
+    setProducts,
+    setProduct,
+    activeLocalProductId,
+    setActiveLocalProductId,
     setNotice,
     setActiveTaskId,
     setVerificationNote,
@@ -53,7 +51,7 @@ export function useAppStateDerived(state: AppStateBase) {
     setBasicInfoSaving,
     setBasicInfoButlerDefault,
     setBasicInfoServicePhone,
-    setBasicInfoButlerLoadedForProjectId,
+    setBasicInfoButlerLoadedForLocalProductId,
   } = state as AppStateBase & { setNotice: (value: string | null) => void; setActiveTaskId: (id: string | null) => void; };
 
   // 规划状态：本地缓存 + UI 触发器。auto-start 必须看到 failed/needs_user 不再自动重跑；
@@ -62,20 +60,22 @@ export function useAppStateDerived(state: AppStateBase) {
   const [autoStartUsed, setAutoStartUsed] = useState<string | null>(null);
   // 续跑按钮点击锁：点击后到 planning.state 携新状态返回前，避免重复点击造成双触发。
   const [planningBusy, setPlanningBusy] = useState(false);
-  // Per-project sentinel：标记「planning.state(projectId) 已对当前 project 完成」。
-  // 未完成时 auto-start effect 必须空跑：这样能避免「persisted failed 项目被重新打开」
-  // 时 effect 在 lookup 回来前抢跑 planning.start，把已经失败的项目又拉起一次。
-  // 切换项目时复位为 null（由下面的 project-switch effect 负责）。
-  const [planningStateLoadedProjectId, setPlanningStateLoadedProjectId] = useState<string | null>(null);
-  // 用于 planning.state() 异步回调内做项目 id 比对，避免切换项目后旧响应污染当前项目。
-  const currentProjectIdRefForPlanning = useRef<string | null>(null);
+  // Per-product sentinel：标记「planning.state(localProductId) 已对当前 product 完成」。
+  // 未完成时 auto-start effect 必须空跑：这样能避免「persisted failed 产品被重新打开」
+  // 时 effect 在 lookup 回来前抢跑 planning.start，把已经失败的产品又拉起一次。
+  // 切换产品时复位为 null（由下面的 product-switch effect 负责）。
+  const [planningStateLoadedLocalProductId, setPlanningStateLoadedLocalProductId] = useState<string | null>(null);
+  // 用于 planning.state() 异步回调内做产品 id 比对，避免切换产品后旧响应污染当前产品。
+  const currentLocalProductIdRefForPlanning = useRef<string | null>(null);
   // 首次 planning.state 补偿是异步的：若它返回前已收到 planning:updated，旧查询
-  // 结果不得反向覆盖实时状态。每个已接受的当前项目事件都递增该版本号。
+  // 结果不得反向覆盖实时状态。每个已接受的当前产品事件都递增该版本号。
   const planningEventVersionRef = useRef(0);
-  // 此 ref 同时供首次补偿与实时事件使用；项目切换后迟到的状态事件不能污染新项目。
-  currentProjectIdRefForPlanning.current = project?.id ?? null;
+  // 此 ref 同时供首次补偿与实时事件使用；产品切换后迟到的状态事件不能污染新产品。
+  currentLocalProductIdRefForPlanning.current = product?.id ?? null;
 
-  const browserShouldMount = view === "workspace" && (stage === "vbk" || loginPanelOpen) && Boolean(project || loginPanelOpen);
+  const browserShouldMount = view === "workspace" && (stage === "vbk" || loginPanelOpen) && Boolean(product || loginPanelOpen);
+  const browserDerived = useBrowserDerived(state, browserShouldMount);
+  const productViewDerived = useProductViewDerived(state);
 
   useEffect(() => {
     if (!api()) return;
@@ -88,16 +88,16 @@ export function useAppStateDerived(state: AppStateBase) {
     });
     // 兜底：1.2s 后重试一次，防止 vbk:page-ready 事件因超时未送达。
     const retryLoginCheck = window.setTimeout(() => void checkVbkLogin(), 1200);
-    const unsubscribe = api()!.events.onProjectUpdated((next) => {
-      setProject((current: typeof project) => current?.id === next.id ? next : current);
+    const unsubscribe = api()!.events.onProductUpdated((next) => {
+      setProduct((current: typeof product) => current?.id === next.id ? next : current);
       void updateReadiness(next);
-      setProjects((prev) => upsertProjectToTop(prev, next));
+      setProducts((prev) => upsertProductToTop(prev, next));
     });
-    const unsubscribePlanning = api()!.events.onPlanningStateUpdated((projectId, next) => {
-      if (currentProjectIdRefForPlanning.current !== projectId) return;
+    const unsubscribePlanning = api()!.events.onPlanningStateUpdated((localProductId, next) => {
+      if (currentLocalProductIdRefForPlanning.current !== localProductId) return;
       planningEventVersionRef.current += 1;
       setPlanningState(next);
-      setPlanningStateLoadedProjectId(projectId);
+      setPlanningStateLoadedLocalProductId(localProductId);
     });
 
     return () => {
@@ -115,134 +115,134 @@ export function useAppStateDerived(state: AppStateBase) {
     }
   }, [vbkLogin?.loggedIn, loginPanelOpen]);
 
-  // 启动 / 刷新时恢复最近打开的项目：只持久化 id 不足以让 React 看到
-  // ProjectDetail，必须再向主进程拉一次权威数据。
+  // 启动 / 刷新时恢复最近打开的产品：只持久化 id 不足以让 React 看到
+  // ProductDetail，必须再向主进程拉一次权威数据。
   //
   // 关键不变量（详见 ./recovery-policy.ts 的纯函数决策）：
-  //   - 只在 view === "workspace" 时恢复。切到 projects / settings / operation-log 后
-  //     用户明确离开详情，effect 必须短路，不再发起请求或回填 project；
+  //   - 只在 view === "workspace" 时恢复。切到 products / settings / operation-log 后
+  //     用户明确离开详情，effect 必须短路，不再发起请求或回填 product；
   //   - 同一会话内只尝试一次（hasAttempted gate）：点"工作台"按钮
-  //     （setProject(null) + setView("workspace")）后 view 仍是 workspace，如果
-  //     只看 view 会再次触发，把刚被用户清掉的项目又塞回来。点击"项目"/"设置"/
+  //     （setProduct(null) + setView("workspace")）后 view 仍是 workspace，如果
+  //     只看 view 会再次触发，把刚被用户清掉的产品又塞回来。点击"产品"/"设置"/
   //     "操作日志"时则由 view gate 拦截；
-  //   - 用户在初始化期间手动 openProject(A) 时同样消费本会话恢复机会——
-  //     主动接管项目选择之后，session 内不应再自动恢复，否则清掉 project
+  //   - 用户在初始化期间手动 openProduct(A) 时同样消费本会话恢复机会——
+  //     主动接管产品选择之后，session 内不应再自动恢复，否则清掉 product
   //     回 workspace 又被拉回详情（核心防回填，详见 simulateRecoveryEffectTick）；
-  //   - 项目不存在 / 主进程报错 → 清掉残留 id + activeProjectId，让下次启动不再
+  //   - 产品不存在 / 主进程报错 → 清掉残留 id + activeLocalProductId，让下次启动不再
   //     尝试恢复；但 view 已切走时不清理（用户可能想用 localStorage 里的 id
   //     重新打开）；
   //   - 异步取消：cleanup 把 cancelled 置 true，.then() / .catch() 跳过；用
-  //     currentViewForRecoveryRef + currentActiveProjectIdForRecoveryRef 在
-  //     in-flight 期间 view / activeProjectId 切换时再次确认（refs 在每次 render
-  //     同步更新，闭包读到的总是最新值），避免旧请求覆盖目标项目。
+  //     currentViewForRecoveryRef + currentActiveLocalProductIdForRecoveryRef 在
+  //     in-flight 期间 view / activeLocalProductId 切换时再次确认（refs 在每次 render
+  //     同步更新，闭包读到的总是最新值），避免旧请求覆盖目标产品。
   const recoveryAttemptedRef = useRef(false);
   const currentViewForRecoveryRef = useRef<typeof view>(view);
-  const currentActiveProjectIdForRecoveryRef = useRef<string | null>(activeProjectId);
+  const currentActiveLocalProductIdForRecoveryRef = useRef<string | null>(activeLocalProductId);
   currentViewForRecoveryRef.current = view;
-  currentActiveProjectIdForRecoveryRef.current = activeProjectId;
+  currentActiveLocalProductIdForRecoveryRef.current = activeLocalProductId;
 
   useEffect(() => {
     const decision = simulateRecoveryEffectTick({
       hasApi: Boolean(api()),
       view,
-      hasProject: Boolean(project),
-      hasActiveProjectId: Boolean(activeProjectId),
+      hasProduct: Boolean(product),
+      hasActiveLocalProductId: Boolean(activeLocalProductId),
       hasAttempted: recoveryAttemptedRef.current,
     });
     recoveryAttemptedRef.current = decision.nextHasAttempted;
     if (!decision.shouldRequest) return;
-    const targetId = activeProjectId as string;
+    const targetId = activeLocalProductId as string;
     let cancelled = false;
-    void api()!.projects.get(targetId).then((detail) => {
+    void api()!.products.get(targetId).then((detail) => {
       if (cancelled) return;
-      // 即便 cancelled 标志位为 false，也再校验一次当前 view + activeProjectId：
-      // 用户可能在 in-flight 期间主动退出详情页（setProject(null) → sync effect
-      // 把 activeProjectId 清掉）或切到非 workspace 视图，此时不能把已拉到手的
-      // 旧项目再塞回去。
+      // 即便 cancelled 标志位为 false，也再校验一次当前 view + activeLocalProductId：
+      // 用户可能在 in-flight 期间主动退出详情页（setProduct(null) → sync effect
+      // 把 activeLocalProductId 清掉）或切到非 workspace 视图，此时不能把已拉到手的
+      // 旧产品再塞回去。
       if (currentViewForRecoveryRef.current !== "workspace") return;
-      if (currentActiveProjectIdForRecoveryRef.current !== targetId) return;
-      setProject(detail);
+      if (currentActiveLocalProductIdForRecoveryRef.current !== targetId) return;
+      setProduct(detail);
     }).catch(() => {
       if (cancelled) return;
-      // view 已切走时不清理 localStorage / activeProjectId：用户可能还在用
-      // projects 视图，需要保留 id 以便重新打开。
+      // view 已切走时不清理 localStorage / activeLocalProductId：用户可能还在用
+      // products 视图，需要保留 id 以便重新打开。
       if (currentViewForRecoveryRef.current !== "workspace") return;
-      if (currentActiveProjectIdForRecoveryRef.current !== targetId) return;
-      // 项目已被删除或主进程暂时不可达：清掉 localStorage，让 UI 回落到
+      if (currentActiveLocalProductIdForRecoveryRef.current !== targetId) return;
+      // 产品已被删除或主进程暂时不可达：清掉 localStorage，让 UI 回落到
       // 工作台首页（AppWorkspaceHomePage），下次启动不再尝试恢复。
-      try { localStorage.removeItem("vbk:activeProjectId"); } catch { /* 忽略 */ }
-      setActiveProjectId(null);
+      try { localStorage.removeItem("vbk:activeLocalProductId"); } catch { /* 忽略 */ }
+      setActiveLocalProductId(null);
     });
     return () => { cancelled = true; };
-    // activeProjectId / project?.id / view 都进 deps：用户在拉取期间切走时 effect
-    // 会 cleanup + 重新跑，重新跑时会被 policy 的几条短路拦住（project 已存在 /
-    // activeProjectId 已清 / view 非 workspace / 已 attempt 过），不再发起多余请求。
-  }, [activeProjectId, project?.id, view]);
+    // activeLocalProductId / product?.id / view 都进 deps：用户在拉取期间切走时 effect
+    // 会 cleanup + 重新跑，重新跑时会被 policy 的几条短路拦住（product 已存在 /
+    // activeLocalProductId 已清 / view 非 workspace / 已 attempt 过），不再发起多余请求。
+  }, [activeLocalProductId, product?.id, view]);
 
   useEffect(() => {
-    void updateReadiness(project);
-  }, [project?.id, project?.updatedAt]);
+    void updateReadiness(product);
+  }, [product?.id, product?.updatedAt]);
 
   useEffect(() => {
     setVerificationNote("");
   }, [state.activeTaskId]);
 
-  // 切换项目时清空核查选择，避免上一个项目残留的 activeTaskId 落到新项目。
-  // 同时复位 planning 相关本地缓存，保证 sentinel / autoStartUsed 不会跨项目残留；
+  // 切换产品时清空核查选择，避免上一个产品残留的 activeTaskId 落到新产品。
+  // 同时复位 planning 相关本地缓存，保证 sentinel / autoStartUsed 不会跨产品残留；
   // planning.state 由下一个 effect 异步拉取，sentinel 复位为 null 让 auto-start 等它回来。
   useEffect(() => {
-    if (!project) return;
+    if (!product) return;
     setActiveTaskId(null);
     setVerificationNote("");
-    setStage(initialStageFor(project.status));
+    setStage(initialStageFor(product.status));
     setExpandedDayIndex(0);
     setPlanningState(null);
     setAutoStartUsed(null);
-    setPlanningStateLoadedProjectId(null);
-    // 基础信息模块的缓存（butler 默认联系人、临时草稿、错误信息）也随项目复位。
+    setPlanningStateLoadedLocalProductId(null);
+    // 基础信息模块的缓存（butler 默认联系人、临时草稿、错误信息）也随产品复位。
     // basicInfoActions 不在这个文件里调用；调用方从 useAppActions() 拿到。
     setBasicInfoErrors({});
     setBasicInfoDraft({});
     setBasicInfoSaving(null);
     setBasicInfoButlerDefault(null);
     setBasicInfoServicePhone(null);
-    setBasicInfoButlerLoadedForProjectId(null);
-  }, [project?.id]);
+    setBasicInfoButlerLoadedForLocalProductId(null);
+  }, [product?.id]);
 
-  // 项目进入兜底：进入仍为空草稿的项目时自动触发一次 staged planning 生成。
+  // 产品进入兜底：进入仍为空草稿的产品时自动触发一次 staged planning 生成。
   // 规划走 planner.start，由后端分阶段 + bounded retry；ai:send 仍保留供后续多轮对话。
-  // 关键不变量：必须等到 planning.state(projectId) 已对当前 projectId 完成（sentinel
-  // 命中）；在此之前空跑。否则 persisted failed 的项目被重新打开时，会在 lookup 还没
-  // 回来前抢跑一次 planning.start，把失败的项目又拉起一次。决策逻辑抽出到
+  // 关键不变量：必须等到 planning.state(localProductId) 已对当前 localProductId 完成（sentinel
+  // 命中）；在此之前空跑。否则 persisted failed 的产品被重新打开时，会在 lookup 还没
+  // 回来前抢跑一次 planning.start，把失败的产品又拉起一次。决策逻辑抽出到
   // shouldAutoStartPlanning，便于纯函数单测。
   useEffect(() => {
-    if (!project || !api()) return;
+    if (!product || !api()) return;
     if (!shouldAutoStartPlanning({
-      hasProject: true,
-      projectId: project.id,
-      hasUserMessages: project.messages.some((message: { role: string }) => message.role === "user"),
-      hasItinerary: Array.isArray(project.product.itinerary) && (project.product.itinerary as unknown[]).length > 0,
+      hasProduct: true,
+      localProductId: product.id,
+      hasUserMessages: product.messages.some((message: { role: string }) => message.role === "user"),
+      hasItinerary: Array.isArray(product.product.itinerary) && (product.product.itinerary as unknown[]).length > 0,
       hasAiKey: hasActiveAiKey(settings),
-      planningStateLoadedProjectId,
+      planningStateLoadedLocalProductId,
       planningState,
       autoStartUsed,
     })) return;
-    setAutoStartUsed(project.id);
-    logInfo("[App] auto-planning fallback for empty project", { projectId: project.id, provider: settings?.aiProvider });
-    const capturedProjectId = project.id;
+    setAutoStartUsed(product.id);
+    logInfo("[App] auto-planning fallback for empty product", { localProductId: product.id, provider: settings?.aiProvider });
+    const capturedLocalProductId = product.id;
     let cancelled = false;
     // planning.start IPC 会同步等待整轮 AI；先放入本地 pending，让 UI 立刻显示
     // 0/7；后续持久化状态会由 planning:updated 事件直接推送。
     setPlanningState({
-      projectId: capturedProjectId,
+      localProductId: capturedLocalProductId,
       currentStage: "skeleton",
       completedStages: [],
       stages: [],
       status: "pending",
       resumeAt: new Date().toISOString(),
     });
-    void api()!.planning.start(capturedProjectId).then((result) => {
-      if (cancelled || currentProjectIdRefForPlanning.current !== capturedProjectId) return;
+    void api()!.planning.start(capturedLocalProductId).then((result) => {
+      if (cancelled || currentLocalProductIdRefForPlanning.current !== capturedLocalProductId) return;
       if (result.state) setPlanningState(result.state);
       if (result.status === "failed") {
         // preflight 失败（例如密钥不可用）→ IPC 也会返回 normal PlanningRunResult；
@@ -251,162 +251,62 @@ export function useAppStateDerived(state: AppStateBase) {
         setNotice(result.assistantReply || "方案规划未能启动，请检查 API Key 后重试。");
       }
     }).catch((error) => {
-      if (cancelled || currentProjectIdRefForPlanning.current !== capturedProjectId) return;
+      if (cancelled || currentLocalProductIdRefForPlanning.current !== capturedLocalProductId) return;
       logWarn("[App] planning.start failed", error);
       setNotice(`方案规划异常：${(error as { message?: string })?.message ?? String(error)}`);
     });
     return () => {
       cancelled = true;
     };
-  }, [project?.id, settings?.aiProvider, settings?.hasMiniMaxKey, settings?.hasDeepSeekKey, planningState, planningStateLoadedProjectId, autoStartUsed]);
+  }, [product?.id, settings?.aiProvider, settings?.hasMiniMaxKey, settings?.hasDeepSeekKey, planningState, planningStateLoadedLocalProductId, autoStartUsed]);
 
-  // 拉取当前项目的持久化规划状态，供 UI 显示「实际接受 / 缺失」以及续跑按钮。
+  // 拉取当前产品的持久化规划状态，供 UI 显示「实际接受 / 缺失」以及续跑按钮。
   // 行为契约：
-  //  - (A) lookup effect 只在 project?.id 变化时跑一次，做 sentinel
-  //    推进；把 projectId 写入 ref，回调里比对；项目切换后旧响应不会污染当前项目。
-  //    无论结果是 state 还是 undefined，都把 sentinel 标记为当前 projectId，让
+  //  - (A) lookup effect 只在 product?.id 变化时跑一次，做 sentinel
+  //    推进；把 localProductId 写入 ref，回调里比对；产品切换后旧响应不会污染当前产品。
+  //    无论结果是 state 还是 undefined，都把 sentinel 标记为当前 localProductId，让
   //    auto-start effect 在 lookup 完成后才决定是否起跑（undefined → 允许一次起跑）。
   //    lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错
-  //    时抢跑（lookup 失败通常意味着项目状态未知，不应擅自再生成）。
+  //    时抢跑（lookup 失败通常意味着产品状态未知，不应擅自再生成）。
   //  - (B) 后续状态由 planning:updated 实时事件驱动，不建立 interval；新 renderer
-  //    进程或项目切换时由这一次 lookup 补偿订阅建立前可能错过的事件。
+  //    进程或产品切换时由这一次 lookup 补偿订阅建立前可能错过的事件。
   useEffect(() => {
-    if (!project || !api()) return;
-    const capturedId = project.id;
-    currentProjectIdRefForPlanning.current = capturedId;
+    if (!product || !api()) return;
+    const capturedId = product.id;
+    currentLocalProductIdRefForPlanning.current = capturedId;
     const eventVersionAtLookup = planningEventVersionRef.current;
     let cancelled = false;
 
     // lookup 只跑一次：写本地 cache + 推进 sentinel；后续变化由实时事件到达。
     api()!.planning.state(capturedId).then((s) => {
-      // 切换项目后旧响应必须丢弃：用 ref 比对当前 projectId。
-      if (currentProjectIdRefForPlanning.current !== capturedId) return;
+      // 切换产品后旧响应必须丢弃：用 ref 比对当前 localProductId。
+      if (currentLocalProductIdRefForPlanning.current !== capturedId) return;
       if (cancelled) return;
       // lookup 在实时事件之后才返回时，事件携带的状态更新，不能被旧快照覆盖。
       if (planningEventVersionRef.current !== eventVersionAtLookup) return;
       if (s) setPlanningState(s);
-      // 注意：s === undefined 时也要标记为 loaded，这样 auto-start 才能在新项目里起跑。
-      setPlanningStateLoadedProjectId(capturedId);
+      // 注意：s === undefined 时也要标记为 loaded，这样 auto-start 才能在新产品里起跑。
+      setPlanningStateLoadedLocalProductId(capturedId);
     }).catch((error) => {
-      if (currentProjectIdRefForPlanning.current !== capturedId) return;
+      if (currentLocalProductIdRefForPlanning.current !== capturedId) return;
       if (cancelled) return;
       if (planningEventVersionRef.current !== eventVersionAtLookup) return;
       // lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错时抢跑
-      // （lookup 失败通常意味着项目状态未知，不应擅自再生成）。把 sentinel 推进；
-      // 下次重新打开该项目会再次执行一次补偿 lookup。
-      logWarn("[App] planning.state lookup failed", { projectId: capturedId, error });
-      setPlanningStateLoadedProjectId(capturedId);
+      // （lookup 失败通常意味着产品状态未知，不应擅自再生成）。把 sentinel 推进；
+      // 下次重新打开该产品会再次执行一次补偿 lookup。
+      logWarn("[App] planning.state lookup failed", { localProductId: capturedId, error });
+      setPlanningStateLoadedLocalProductId(capturedId);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [project?.id]);
+  }, [product?.id]);
 
   useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
-  }, [project?.messages.length, state.loading]);
-
-  // 第二步与登录窗口共享同一个 VBK 浏览器；只有它们需要把 BrowserView 切到可见并设置坐标。
-  useLayoutEffect(() => {
-    const target = browserRef.current;
-    if (!target || !api() || !browserShouldMount) return;
-
-    let frame = 0;
-    const update = () => {
-      const box = target.getBoundingClientRect();
-      const width = Math.round(box.width);
-      const height = Math.round(box.height);
-      if (width <= 0 || height <= 0) return;
-      // 主进程的 browser 在窗口加载完成后才创建，早期布局调用会被拒绝；这类失败静默忽略。
-      void api()!.browser.setBounds({ x: Math.round(box.x), y: Math.round(box.y), width, height }).catch(() => {});
-    };
-    const scheduleUpdate = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(update);
-    };
-    const observer = new ResizeObserver(scheduleUpdate);
-    observer.observe(target);
-    scheduleUpdate();
-    window.addEventListener("resize", scheduleUpdate);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("resize", scheduleUpdate);
-      observer.disconnect();
-    };
-  }, [browserShouldMount, loginPanelOpen, stage, view, project?.id]);
-
-  useEffect(() => {
-    if (!api()) return;
-    void api()!.browser.setVisible(Boolean(view === "workspace" && browserShouldMount)).catch(() => {});
-  }, [view, browserShouldMount]);
-
-  useEffect(() => {
-    if (view === "workspace" && project && vbkLogin?.loggedIn && stage === "vbk" && !browserOpen) {
-      setBrowserOpen(true);
-    }
-  }, [browserOpen, project, vbkLogin?.loggedIn, view, stage]);
-
-  // URL 栏需要随嵌入式浏览器的实际地址同步。
-  useEffect(() => {
-    if (!api() || !browserShouldMount || view !== "workspace") return;
-    let cancelled = false;
-    const refreshUrl = async () => {
-      if (cancelled) return;
-      const next = await api()!.browser.currentUrl().catch(() => "");
-      if (cancelled) return;
-      if (next) setBrowserUrl((prev: string) => (prev === next ? prev : next));
-    };
-    void refreshUrl();
-    const interval = window.setInterval(() => { void refreshUrl(); }, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [browserShouldMount, view]);
-
-  const itinerary = useMemo(
-    () => (project && Array.isArray(project.product.itinerary)
-      ? project.product.itinerary as Array<Record<string, unknown>>
-      : []),
-    [project],
-  );
-
-  const basic = project ? (project.product.basicInfo || {}) as Record<string, unknown> : {};
-  const presentation = project ? (project.product.presentation || {}) as Record<string, unknown> : {};
-
-  const activeTask = state.activeTaskId
-    ? project?.researchTasks.find((task: { id: string }) => task.id === state.activeTaskId)
-    : undefined;
-
-  const isVbkLoggedIn = Boolean(vbkLogin?.loggedIn);
-  // 渲染层需要把多账号快照 + 当前探测状态整合成一份「账号清单」：
-  //  1. 当前如果探测到账号 → 优先使用 vbkLogin.accountName/loginAccount；
-  //  2. 否则用 vbkLoginAccounts.current.accountName 兜底；
-  //  3. saved 列表始终来自 vbkLoginAccounts.saved（DB 真相）。
-  // 注意：上层的 loggedAccounts / currentAccountName 还服务于设置页的
-  // 「已记录账号」chip，所以这里继续保留其单一字符串形式。详细的切换 /
-  // 忘记都在 vbkLoginAccounts 内做。
-  const accountsSnapshot = state.vbkLoginAccounts;
-  const snapshotCurrentName = accountsSnapshot.current?.accountName ?? null;
-  const detectedName = vbkLogin?.loggedIn ? vbkLogin.accountName ?? null : null;
-  const resolvedCurrent = detectedName ?? snapshotCurrentName;
-  const loggedAccounts = resolvedCurrent
-    ? Array.from(new Set([resolvedCurrent, ...accountsSnapshot.saved.map((entry) => entry.accountName)].filter(Boolean)))
-    : accountsSnapshot.saved.map((entry) => entry.accountName);
-  const currentAccountName = loggedAccounts[0] || "未登录";
-  // 头像缩写：优先账号名最后一个数字（vbk_671205 → 5），没有数字时退到首字符。
-  // 之前是 slice(0,1).toUpperCase()，对 vbk_xxx 格式总是 "V"，识别度低。
-  const accountInitial = currentAccountName === "未登录"
-    ? "未"
-    : currentAccountName.match(/\d(?!.*\d)/)?.[0] ?? currentAccountName.slice(0, 1).toUpperCase();
-
-  const browserPlaceholderTitle = isVbkLoggedIn ? "VBK 已登录" : "在 VBK 中完成核查";
-  const browserPlaceholderText = isVbkLoggedIn
-    ? `${currentAccountName} 已登录，打开右侧页面继续核查当前待办。`
-    : "登录后先核查当前待办；系统只会在你确认全部待办后保存产品草稿。";
+  }, [product?.messages.length, state.loading]);
 
   // 规划状态摘要：把规划生成态压缩成「恢复提示 + 实际接受 / 缺失模块」两行。
   // 运行中状态还会附上按 PLANNING_STAGES 顺序的阶段进度，供渲染层展示带顺序的进度条。
@@ -469,13 +369,13 @@ export function useAppStateDerived(state: AppStateBase) {
    * 后端从持久化 currentStage 续跑，不会丢失已合法落地的模块。
    */
   const planningResume = async () => {
-    if (!project || !api()) return;
+    if (!product || !api()) return;
     if (planningBusy) return; // 重复点击锁：与 UI 端 disabled 同源。
     setPlanningBusy(true);
-    logInfo("[App] planning.resume click", { projectId: project.id, planningStateStatus: planningState?.status, currentStage: planningState?.currentStage });
+    logInfo("[App] planning.resume click", { localProductId: product.id, planningStateStatus: planningState?.status, currentStage: planningState?.currentStage });
     setNotice("正在续跑规划…");
     try {
-      const result = await api()!.planning.resume(project.id);
+      const result = await api()!.planning.resume(product.id);
       if (result.state) setPlanningState(result.state);
       const acceptedNames = (result.accepted ?? []).slice();
       const rejectedNames = (result.rejected ?? []).map((r) => r.module);
@@ -487,7 +387,7 @@ export function useAppStateDerived(state: AppStateBase) {
         for (const m of s.accepted ?? []) previouslyAccepted.add(m.module);
       }
       const newlyAccepted = acceptedNames.filter((m) => !previouslyAccepted.has(m));
-      logInfo("[App] planning.resume result", { projectId: project.id, status: result.status, accepted: acceptedNames, newlyAccepted, rejected: rejectedNames });
+      logInfo("[App] planning.resume result", { localProductId: product.id, status: result.status, accepted: acceptedNames, newlyAccepted, rejected: rejectedNames });
       const summary = result.assistantReply
         || (acceptedNames.length ? `已接受：${acceptedNames.join("、")}。` : "")
         + (rejectedNames.length ? `缺失：${rejectedNames.join("、")}。` : "");
@@ -497,68 +397,16 @@ export function useAppStateDerived(state: AppStateBase) {
         setNotice(summary || "续跑完成");
       }
     } catch (error) {
-      logWarn("[App] planning.resume failed", { projectId: project.id, error });
+      logWarn("[App] planning.resume failed", { localProductId: product.id, error });
       setNotice(`续跑失败：${(error as { message?: string })?.message ?? String(error)}。请打开 DevTools 查看 [planning] 日志。`);
     } finally {
       setPlanningBusy(false);
     }
   };
 
-  const splitStyle = project
-    ? { gridTemplateColumns: stage === "review" ? "minmax(0, 1.27fr) minmax(0, 1fr)" : "minmax(0, 0.515fr) minmax(0, 1fr)" }
-    : undefined;
-  const projectCompletionLabel = state.readiness.ready ? "可以录入" : `${state.readiness.issues.length} 项待处理`;
-  const vbkStageStatus = vbkStageStatusText(project);
-  const automationActive = project?.automation?.status === "running";
-  const recoveryBlocked = project?.automation ? recoveryNeedsUser(project.automation) : null;
-  const advisorHint = project?.automation ? activeAdvisorHint(project.automation) : null;
-  const automationPhases = project?.automation?.phases ?? [];
-  const automationRecovery = project?.automation?.recovery?.phases;
-
-  const saveDraftLabel = recoveryBlocked ? "重新开始一轮保存" : "保存草稿";
-  const reviewStepStatus =
-    !project
-      ? "idle"
-      : state.readiness.ready
-        ? "passed"
-        : state.readiness.issues.length
-          ? "inProgress"
-          : "reviewing";
-  const vbkStepStatus =
-    !project
-      ? "idle"
-      : vbkStageStatus.tone === "running"
-        ? "inProgress"
-        : vbkStageStatus.tone === "saved"
-          ? "saved"
-          : vbkStageStatus.tone === "blocked" || project.status === "blocked" || state.readiness.issues.length
-            ? "blocked"
-            : "waiting";
-
   return {
-    itinerary,
-    basic,
-    presentation,
-    activeTask,
-    isVbkLoggedIn,
-    loggedAccounts,
-    currentAccountName,
-    accountInitial,
-    browserPlaceholderTitle,
-    browserPlaceholderText,
-    splitStyle,
-    projectCompletionLabel,
-    vbkStageStatus,
-    automationActive,
-    recoveryBlocked,
-    advisorHint,
-    automationPhases,
-    automationRecovery,
-    saveDraftLabel,
-    reviewStepStatus,
-    vbkStepStatus,
-    statusState,
-    vbkLoginAccounts: accountsSnapshot,
+    ...productViewDerived,
+    ...browserDerived,
     planningRecovery,
     planningResume,
     planningBusy,

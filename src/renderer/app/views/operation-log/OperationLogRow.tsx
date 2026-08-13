@@ -136,10 +136,10 @@ export function OperationLogRow({
               )}
             </div>
             <div className={styles.opRowMetaLine}>
-              {entry.projectName && <span className={styles.opMetaItem}>{entry.projectName}</span>}
+              {entry.productName && <span className={styles.opMetaItem}>{entry.productName}</span>}
               {entry.stage && (
                 <>
-                  {entry.projectName && <span className={styles.opMetaSep}>·</span>}
+                  {entry.productName && <span className={styles.opMetaSep}>·</span>}
                   <span className={styles.opMetaItem}>
                     <ScrollText size={11} aria-hidden="true" />
                     {entry.stage}
@@ -202,8 +202,8 @@ export function OperationLogRow({
               type="button"
               className={styles.opRowBtn}
               onClick={() => onShowDetail(entry)}
-              aria-label={`打开「${entry.name}」关联项目并跳转到对应页面`}
-              title="打开该项目并跳转到对应的 VBK 页面"
+              aria-label={`打开「${entry.name}」关联产品并跳转到对应页面`}
+              title="打开该产品并跳转到对应的 VBK 页面"
             >
               <ExternalLink size={12} aria-hidden="true" />
               <span>详情</span>

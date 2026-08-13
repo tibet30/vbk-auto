@@ -6,7 +6,7 @@ const source = readFileSync("src/renderer/app/views/workspace/review-summary-iti
 
 test("行程 POI 编辑器必须通过 VBK suggestPoi 搜索并经 updateReviewField 写回白名单字段", () => {
   assert.match(source, /browser\.suggestPoiDetail\(query/);
-  assert.match(source, /projects\.updateReviewField\(projectId,\s*\{\s*field: "itinerarySpotPoi"/s);
+  assert.match(source, /products\.updateReviewField\(localProductId,\s*\{\s*field: "itinerarySpotPoi"/s);
   assert.match(source, /dayIndex: item\.dayIndex/);
   assert.match(source, /spotIndex: item\.spotIndex/);
 });
@@ -55,9 +55,9 @@ test("手动 POI 调试日志覆盖编辑、搜索、选择和保存链路的安
   ]) {
     assert.match(source, new RegExp(`logPoiManual\\("${event}"`));
   }
-  for (const key of ["projectId", "dayIndex", "spotIndex", "title", "keyword", "poiName", "poiId", "stage"]) {
+  for (const key of ["localProductId", "dayIndex", "spotIndex", "title", "keyword", "poiName", "poiId", "stage"]) {
     assert.match(source, new RegExp(`${key}:`));
   }
-  assert.match(source, /browser\.suggestPoiDetail\(query,\s*\{[\s\S]*projectId,[\s\S]*dayIndex: item\.dayIndex,[\s\S]*spotIndex: item\.spotIndex,[\s\S]*title: item\.title,[\s\S]*\}\)/);
+  assert.match(source, /browser\.suggestPoiDetail\(query,\s*\{[\s\S]*localProductId,[\s\S]*dayIndex: item\.dayIndex,[\s\S]*spotIndex: item\.spotIndex,[\s\S]*title: item\.title,[\s\S]*\}\)/);
   assert.doesNotMatch(source, /cookie|ticket|Authorization|apiKey|responseText/i);
 });

@@ -242,7 +242,7 @@ test("无 JSON 分隔符的 bare reply 会回退为文本", async (t) => {
     history: [],
   });
 
-  assert.equal(result.reply, "reply: 已完成首轮结构草稿整理，先给出核心结论。");
+  assert.equal(result.reply, "已完成首轮结构草稿整理，先给出核心结论。");
   assert.deepEqual(result.patch, []);
 });
 

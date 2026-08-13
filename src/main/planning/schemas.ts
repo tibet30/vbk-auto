@@ -8,8 +8,9 @@
 
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { RECOMMENDATION_CATEGORIES, VBK_RECOMMENDATION_CATEGORIES } from "../automation/schema/schema-definitions.js";
+import { RECOMMENDATION_CATEGORIES, VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { isCombinedSpotName } from "./spot-name.js";
+import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
 import {
   PLANNING_STAGES,
@@ -167,15 +168,7 @@ const baseStageOutputSchema = z.object({
 // ──────────────────────────────────────────────────────────────────────────
 // 阶段 → 允许产出的模块白名单
 // ──────────────────────────────────────────────────────────────────────────
-export const STAGE_ALLOWED_MODULES: Record<PlanningStage, readonly PlanningModule[]> = {
-  skeleton: ["skeleton"],
-  basicInfo: ["basicInfo"],
-  itinerary: ["itinerary"],
-  presentation: ["presentation"],
-  commercial: ["packageName", "pricing", "inventory", "terms", "release"],
-  research: ["researchTasks"],
-  validation: [],
-};
+export { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 
 /**
  * 单个模块 value 的 schema 校验（provider-neutral）。
@@ -189,6 +182,14 @@ export function validateModuleValue(module: PlanningModule, value: unknown): { o
     case "itinerary":
       return validate(itineraryModuleValueSchema, value);
     case "packageName":
+      // 部分兼容提供商即使收到 string tool schema，仍会额外包一层
+      // { packageName: "..." }。只兼容这个单键等价结构，其他对象继续拒绝。
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const record = value as Record<string, unknown>;
+        if (Object.keys(record).length === 1 && typeof record.packageName === "string") {
+          return validate(packageNameModuleValueSchema, record.packageName);
+        }
+      }
       return validate(packageNameModuleValueSchema, value);
     case "pricing":
       return validate(pricingModuleValueSchema, value);
@@ -344,7 +345,7 @@ export function buildSystemPrompt(args: {
     return `  - ${module}${pathNote}`;
   }).join("\n");
 
-  return `你是「三人同游」旅游产品运营助手。用户会给出一个新项目的目的地、天数、晚数与产品形态（私家团 / 跟团游）。你要按阶段为该项目生成**结构化 JSON 输出**，由本地系统写入产品草稿。
+  return `你是「三人同游」旅游产品运营助手。用户会给出一个新产品的目的地、天数、晚数与产品形态（私家团 / 跟团游）。你要按阶段为该产品生成**结构化 JSON 输出**，由本地系统写入产品草稿。
 
 ===== 当前阶段：${args.stage} =====
 本阶段你**只能**产出下列模块（其他模块请勿返回）：
@@ -392,6 +393,3 @@ export function getWritablePaths() {
 export function isPlanningStage(value: unknown): value is PlanningStage {
   return typeof value === "string" && (PLANNING_STAGES as readonly string[]).includes(value);
 }
-
-// Tool schema lives in a separate file to keep schemas.ts under the size budget.
-export { buildStageToolSchema } from "./tool-schema.js";

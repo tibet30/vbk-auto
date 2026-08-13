@@ -13,10 +13,12 @@ test("规划 POI 查询通过 VbkBrowser.page 的 CDP 页面执行", async () =>
       pageEvaluateCalls += 1;
       return {
         status: 200,
-        text: JSON.stringify({
+        payload: {
           ResponseStatus: { Ack: "Success" },
           poiList: [{ poiName: "晋祠", poiId: 79413 }],
-        }),
+        },
+        durationMs: 1,
+        ctx: {},
       } as T;
     },
   };

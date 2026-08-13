@@ -40,7 +40,7 @@ function productFixture(extra: Record<string, unknown> = {}) {
 }
 
 const here = new URL(".", import.meta.url).pathname;
-const projectRoot = path.resolve(here, "..", "..");
+const productRoot = path.resolve(here, "..", "..");
 const ctripSourceRoot = path.resolve(here, "..", "..", "src", "main", "automation", "ctrip");
 const automationSourceRoot = path.resolve(here, "..", "..", "src", "main", "automation");
 

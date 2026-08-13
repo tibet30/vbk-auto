@@ -115,7 +115,7 @@ export interface PlanningStageError {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// 持久化：生成状态按 project_id 单行存储；用于「中途重启后从失败阶段续跑」。
+// 持久化：生成状态按 local_product_id 单行存储；用于「中途重启后从失败阶段续跑」。
 // ──────────────────────────────────────────────────────────────────────────
 export interface ModulePersistedState {
   module: PlanningModule;
@@ -144,7 +144,7 @@ export interface StagePersistedState {
 }
 
 export interface PlanningGenerationState {
-  projectId: string;
+  localProductId: string;
   /** 当前正在运行或下一个要跑的阶段。 */
   currentStage: PlanningStage;
   /** 已完成阶段；这些阶段不会被重跑。 */
@@ -171,7 +171,7 @@ export interface PlanningGenerationState {
 // 只能调用接口方法，不能直接判断 provider / model。
 // ──────────────────────────────────────────────────────────────────────────
 export interface PlannerContext {
-  /** 已固化的项目骨架（destination / days / nights / productForm / sales）。 */
+  /** 已固化的产品骨架（destination / days / nights / productForm / sales）。 */
   skeleton: PlanningSkeleton;
   /** 当前产品草稿（来自数据库），用于 incremental 合并。 */
   currentProduct: Record<string, unknown>;

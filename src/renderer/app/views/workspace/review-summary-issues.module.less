@@ -3,7 +3,7 @@
  * 默认展开的阻塞清单模块；与「每日行程」共享卡片视觉密度：
  *  - 稳定卡片边界（teal 描边 + 圆角）；
  *  - header 稳定高度，自然行分隔，圆角不泄漏；
- *  - body 内部滚动，header 始终可见；
+ *  - body 随外层审查结果滚动，避免嵌套滚动导致底部卡住；
  *  - 行内三段布局：序号 | 文本 | 处理按钮。 */
 
 /* ============================================================
@@ -18,7 +18,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 0;
+  /* .scroll 是 flex 容器；该卡片必须按列表内容占位，不能被压缩成只有 header。 */
+  flex: 0 0 auto;
 }
 
 /* ============================================================
@@ -151,9 +152,9 @@
 }
 
 /* ============================================================
- * Body — 列表内部滚动容器
- * 少事项时按内容自然高度；多事项时只 body 滚动，header 保持可见。
- * overflow-y: auto + scrollbar-gutter 让滚动条不破坏圆角，也不抖动。
+ * Body — 列表内容
+ * 审查结果只有一个纵向滚动上下文，整个待处理模块会完整进入外层
+ * scroll 的可视范围，最后一行不会被面板底边或嵌套滚动截断。
  * 收起态完全不让 body 占高度（display:none），避免在卡片堆里留空白。
  * ============================================================ */
 
@@ -163,9 +164,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-height: 280px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: visible;
 }
 
 .body[data-min-visible='true'] {

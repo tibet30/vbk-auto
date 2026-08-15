@@ -4,7 +4,8 @@
  * 只展示 readiness.issues 这一套待处理规则：
  *  - researchTasks 只用于给同语义 issue 绑定"核查填写"出口，不额外增加列表项；
  *  - 普通 readiness blocker 仍可送入对话 / 文本补齐提示；
- *  - 整个区域自带 280px 高度滚动条，避免单点问题过多时撑破整个 review 面板。
+ *  - 列表本身不滚动，高度跟随内容；外层 .scroll 负责整个 review 面板的
+ *    纵向滚动，避免嵌套滚动导致底部被截断。
  *
  * 设计上不复用通用 .collapsible 折叠壳——折叠态由父级 review-summary 持有；
  * 默认展开、可滚动；视觉密度对齐「每日行程」section。

@@ -20,6 +20,7 @@ import {
   installSaveMonitor,
   SAVE_DESCRIPTION_INFO_PATH,
   CHECK_SENSITIVE_WORD_PATH,
+  PresentationSensitiveWordsError,
 } from "../../src/main/automation/ctrip/presentation/save-monitor.js";
 
 let browser: Browser;
@@ -188,11 +189,13 @@ test("save monitor：/15638/checkSensitiveWord 含敏感词必须抛敏感词错
       ResponseStatus: { Ack: "Success" },
       sensitiveWords: ["违禁词"],
     });
-    await assert.rejects(
-      () => monitor.waitForSave(),
-      /触发敏感词/,
-      "敏感词命中必须抛可操作错误",
-    );
+    await assert.rejects(() => monitor.waitForSave(), (error: unknown) => {
+      assert.ok(error instanceof PresentationSensitiveWordsError);
+      assert.deepEqual(error.sensitiveWords, ["违禁词"]);
+      assert.equal(error.httpStatus, 200);
+      assert.match(error.message, /触发敏感词/);
+      return true;
+    }, "敏感词命中必须抛可供 AI 恢复链路识别的结构化错误");
   });
 });
 

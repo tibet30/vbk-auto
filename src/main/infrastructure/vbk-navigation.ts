@@ -64,6 +64,23 @@ export function urlsMatch(a: string, b: string): boolean {
   return na === nb;
 }
 
+export interface NavigateVbkPageOptions {
+  allowRedirect?: (target: string, current: string) => boolean;
+}
+
+function isExpectedLoginRedirect(target: string, current: string): boolean {
+  let parsedCurrent: URL;
+  try {
+    parsedCurrent = new URL(current);
+  } catch {
+    return false;
+  }
+  if (parsedCurrent.hostname !== "vbooking.ctrip.com") return false;
+  if (!/^\/ivbk\/accountV2\/login$/i.test(parsedCurrent.pathname)) return false;
+  const backurl = parsedCurrent.searchParams.get("backurl") ?? "";
+  return urlsMatch(target, backurl);
+}
+
 /**
  * 显式导航入口。
  *
@@ -75,6 +92,7 @@ export function urlsMatch(a: string, b: string): boolean {
 export async function navigateVbkPage(
   webContents: WebContents | undefined,
   url: string,
+  options: NavigateVbkPageOptions = {},
 ): Promise<void> {
   if (!webContents) {
     throw new Error("VBK 浏览器尚未初始化");
@@ -122,6 +140,9 @@ export async function navigateVbkPage(
       if (code === "ERR_ABORTED" && urlsMatch(target, current)) {
         return;
       }
+      if (code === "ERR_ABORTED" && options.allowRedirect?.(target, current)) {
+        return;
+      }
       if (code === "ERR_ABORTED") {
         const err = new Error(
           `VBK 显式导航被中断: source=${sourceUrl} target=${target} actual=${current} code=${code}`,
@@ -137,7 +158,7 @@ export async function navigateVbkPage(
     // loadURL 已成功；核验 current URL 是否确实抵达目标（防御服务端把页面
     // 重定向到登录页等异常场景，避免 UI 误以为"进入"成功）。
     const current = webContents.getURL();
-    if (!urlsMatch(target, current)) {
+    if (!urlsMatch(target, current) && !options.allowRedirect?.(target, current)) {
       throw new Error(
         `VBK 显式导航未抵达目标: source=${sourceUrl} target=${target} actual=${current}`,
       );
@@ -146,3 +167,5 @@ export async function navigateVbkPage(
     webContents.off("will-prevent-unload", allowUnload);
   }
 }
+
+export { isExpectedLoginRedirect };

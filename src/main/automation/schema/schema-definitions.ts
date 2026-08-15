@@ -71,10 +71,11 @@ const manualUploadCoverSchema = z.object({
 
 const ctripLibraryCoverSchema = z.object({
   source: z.literal("ctripLibrary").default("ctripLibrary"),
-  // 必填：选中一张具体图片必须带 imageId / imageUrl，
-  // 缺这两个字段视为无效（与 shared/contracts-types 的 CtripLibraryCover 一致）。
-  imageId: z.number().int().positive(),
-  imageUrl: z.string().min(1),
+  // AI 首轮允许先写 cover 语义（poi/description/minQuality），
+  // imageId / imageUrl 由后续携程图库自动补全；真正“封面已完整”的判定
+  // 仍由 hasCompleteCtripLibraryCover / review helper / 自动化 readback 单独把关。
+  imageId: z.number().int().positive().optional(),
+  imageUrl: z.string().min(1).optional(),
   // 兼容自动化：selectCtripLibraryCover 仍按 cover.poi / cover.minQuality 兜底。
   poi: z.string().min(1),
   description: z.string().min(1),

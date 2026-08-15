@@ -56,3 +56,62 @@ test("统一写入口只在成功落库后广播最新 ProductDetail", () => {
   assert.equal(emitted[0], saved);
   assert.equal(saved.status, "review");
 });
+
+test("AI patch 写入待自动补图的 ctripLibrary cover 时不因缺 imageId/imageUrl 被拒", () => {
+  let saved = detail({
+    sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
+    basicInfo: {
+      supplierProductName: "太原2天1晚私家团",
+      supplierProductCode: "AUTO-DRAFT",
+      subtitle: "晋祠平遥核心景点轻松游",
+      days: 2,
+      nights: 1,
+      meetingCity: "太原",
+      destinationCity: "太原",
+      province: "山西",
+      operationNotes: "待自动补全封面图",
+    },
+    itinerary: [
+      { day: 1, title: "太原", spots: [{ name: "晋祠", poiName: "晋祠", poiId: 1 }], description: "游览晋祠", hotel: "当地3钻酒店", meals: "早餐自理；午餐自理；晚餐自理" },
+      { day: 2, title: "平遥", spots: [{ name: "平遥古城", poiName: "平遥古城", poiId: 2 }], description: "游览平遥古城", hotel: "", meals: "早餐酒店；午餐自理；晚餐自理" },
+    ],
+  });
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) => {
+      saved = { ...saved, product: product as ProductDetail["product"], status: status ?? saved.status };
+    },
+  };
+  const service = new ProductMutationService(store);
+
+  const result = service.applyAiPatch("p-1", [
+    {
+      op: "replace",
+      path: "/presentation",
+      value: {
+        recommendationCategory: "优选行程",
+        recommendation: "适合首次到访山西的轻松私家行程。",
+        recommendations: [
+          { category: "优选行程", text: "两天串联晋祠与平遥两大代表景点。" },
+          { category: "缤纷景点", text: "历史古建与古城街巷体验兼顾。" },
+          { category: "优质交通", text: "私家团用车更适合家庭与小团出行。" },
+        ],
+        features: "<p>精选山西代表景点，节奏轻松。</p>",
+        cover: {
+          source: "ctripLibrary",
+          poi: "晋祠",
+          description: "晋祠代表性古建横版封面",
+          minQuality: 3,
+        },
+      },
+    },
+  ]);
+
+  assert.equal(result.applied, true);
+  assert.deepEqual((saved.product.presentation as Record<string, unknown>).cover, {
+    source: "ctripLibrary",
+    poi: "晋祠",
+    description: "晋祠代表性古建横版封面",
+    minQuality: 3,
+  });
+});

@@ -100,3 +100,13 @@ test("stations.ts：safeClick 的三处既有调用形态保持不变", async ()
       "（首点 + 弹窗仍可见时的重试）",
   );
 });
+
+test("首末日全天时间必须普通点击 label，不能 force click 绕过受控 radio", async () => {
+  const src = await fs.readFile(stationsPath, "utf8");
+  const setAllDay = src.slice(
+    src.indexOf("async function setAllDay"),
+    src.indexOf("async function fillEmptyStationAddresses"),
+  );
+  assert.match(setAllDay, /label\.click\(\{ timeout: 2_000 \}\)/);
+  assert.doesNotMatch(setAllDay, /label\.click\(\{\s*force\s*:\s*true\s*\}\)/);
+});

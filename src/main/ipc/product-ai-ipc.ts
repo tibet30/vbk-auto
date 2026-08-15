@@ -14,6 +14,8 @@ import { assertCreatePreconditions } from "../operations/product-create-guard.js
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
+import { DbOrchestratorRuntime } from "../planning/runtime.js";
+import { enrichItineraryPois } from "../planning/poi-enrichment.js";
 import {
   classifyMiniMaxError,
   extractMiniMaxFailureReason,
@@ -91,6 +93,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", { localProductId: id, field: input.field, confirmedTaskIds });
     }
+    emitProduct(saved);
     return saved;
   });
   // 抽到模块级函数，products:create 会用它做自动触发；调用方决定是否 fire-and-forget。
@@ -109,6 +112,30 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (!c || typeof c.release !== "object" || Array.isArray(c.release)) missing.push("commercial/release");
     if (!c || typeof c.terms !== "object" || Array.isArray(c.terms)) missing.push("commercial/terms");
     return missing;
+  }
+
+  function patchTouchesItinerary(patch: Array<{ path: string }>): boolean {
+    return patch.some((operation) => operation.path === "/itinerary" || operation.path.startsWith("/itinerary/"));
+  }
+
+  async function enrichItineraryPoisAfterAi(localProductId: string, patch: Array<{ path: string }>): Promise<void> {
+    if (!patchTouchesItinerary(patch)) return;
+    const current = db.getProduct(localProductId);
+    if (!current) return;
+    const basicInfo = current.product.basicInfo as Record<string, unknown> | undefined;
+    const destination = typeof basicInfo?.destinationCity === "string" && basicInfo.destinationCity.trim()
+      ? basicInfo.destinationCity.trim()
+      : typeof basicInfo?.meetingCity === "string" && basicInfo.meetingCity.trim()
+        ? basicInfo.meetingCity.trim()
+        : "";
+    const runtime = new DbOrchestratorRuntime(db, context.browser, productMutations);
+    const existingTasks = await runtime.loadExistingResearchTasks(localProductId);
+    await enrichItineraryPois({
+      localProductId,
+      destination,
+      runtime,
+      persistedTaskKeys: new Set(existingTasks.map((task) => `${task.type}::${task.label}`)),
+    });
   }
 
   async function runAiReply(localProductId: string, content: string) {
@@ -197,6 +224,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       if (requiresWritablePatch && (responsePatch.length === 0 || !patchResult.applied)) {
         throw new MiniMaxServiceError("invalid_model_output", "AI 未返回可写入的产品方案，请重试。");
       }
+      if (patchResult.applied) {
+        await enrichItineraryPoisAfterAi(localProductId, responsePatch);
+      }
       db.updateMessageStatus(localProductId, userMessageId, "succeeded"); db.addMessage(localProductId, "assistant", response.reply, "succeeded");
       for (const task of response.researchTasks || []) db.addResearchTask(localProductId, task);
       // 首轮生成后自动检查缺失模块：如果 presentation / itinerary / commercial 子模块
@@ -216,7 +246,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
             });
             const secondPatch = secondResponse.patch ?? [];
             if (secondPatch.length > 0) {
-              productMutations.applyAiPatch(localProductId, secondPatch, { notify: false });
+              const secondPatchResult = productMutations.applyAiPatch(localProductId, secondPatch, { notify: false });
+              if (secondPatchResult.applied) {
+                await enrichItineraryPoisAfterAi(localProductId, secondPatch);
+              }
             }
             for (const task of secondResponse.researchTasks || []) {
               db.addResearchTask(localProductId, task);

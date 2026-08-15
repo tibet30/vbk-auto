@@ -68,7 +68,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
               properties: { category: { type: "string", enum: [...VBK_RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
             },
           },
-          features: { type: "string", minLength: 1 },
+          features: { type: "string", minLength: 1, description: "VBK 产品特色富文本 HTML 片段：3～5 个亮点；仅允许 p/strong/em/ul/ol/li/br 标签且不得含任何属性、Markdown、链接或图片。" },
         },
       };
     case "itinerary":
@@ -82,7 +82,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           properties: {
             day: { type: "number", minimum: 1 },
             title: { type: "string", minLength: 1 },
-            spots: { type: "array", minItems: 1, description: "每个 spot 只能是一个可独立检索的地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一地点名称；括号内可写同一地点别名，不能包含多个地点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 } } } },
+            spots: { type: "array", minItems: 1, description: "按实际游览顺序排列。每个 spot 只能是一个可独立检索的地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot。同日景点须集中在同城或相邻片区，禁止无交通衔接的远距离、跨城或 POI 离群组合。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一地点名称；括号内可写同一地点别名，不能包含多个地点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 } } } },
             description: { type: "string", minLength: 1 },
             hotel: { type: "string" },
             meals: { type: "string", minLength: 1 },

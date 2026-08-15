@@ -1,4 +1,6 @@
 import { test, assert, makeRun, makeSpyAdvisor, now, runPhaseWithRecovery } from "./automation-recovery.shared.js";
+import { NonAdvisableAutomationError } from "../../src/main/automation/automation.main/automation.main.errors.js";
+import { refreshPhasePageBeforeRetry } from "../../src/main/automation/automation.main/automation.main.retry-navigation.js";
 test("首次成功不调用 advisor", async () => {
   const advisor = makeSpyAdvisor();
   const calls: string[] = [];
@@ -23,6 +25,37 @@ test("首次成功不调用 advisor", async () => {
   assert.deepEqual(calls, ["exec"]);
   assert.equal(advisor.calls.length, 0);
   assert.equal(run.recovery?.phases.basic?.state, "completed");
+});
+
+test("确定性系统错误直接上抛，不调用 advisor 或执行重试动作", async () => {
+  const advisor = makeSpyAdvisor();
+  const run: AutomationRun = makeRun();
+  let executeCalls = 0;
+  let applyCalls = 0;
+  await assert.rejects(
+    runPhaseWithRecovery({
+      run,
+      phase: "basic",
+      completedPhases: [],
+      productIdExists: true,
+      basicInfoSaved: false,
+      execute: async () => {
+        executeCalls += 1;
+        throw new NonAdvisableAutomationError("线上 400 电话下拉未找到「0609240」；可选：无");
+      },
+      advisor: advisor.fn,
+      applyAction: async () => { applyCalls += 1; },
+      log: () => undefined,
+      persist: () => undefined,
+    }),
+    (error: unknown) => error instanceof NonAdvisableAutomationError
+      && error.message.includes("0609240"),
+  );
+  assert.equal(executeCalls, 1);
+  assert.equal(advisor.calls.length, 0);
+  assert.equal(applyCalls, 0);
+  assert.equal(run.recovery?.phases.basic?.state, "needs_user");
+  assert.match(run.recovery?.phases.basic?.finalError ?? "", /0609240/);
 });
 
 test("失败一次 → diagnosis → retry_same_phase 重新执行 handler 成功", async () => {
@@ -61,6 +94,63 @@ test("失败一次 → diagnosis → retry_same_phase 重新执行 handler 成�
   assert.equal(rec!.attempts.length, 1);
   assert.equal(rec!.attempts[0].diagnosis?.rootCause, "保存按钮回调失败。");
   assert.equal(rec!.attempts[0].action, "retry_same_phase");
+});
+
+test("retry 前先刷新当前 phase 页面，再重新执行 handler", async () => {
+  const advisor = makeSpyAdvisor([
+    {
+      summary: "产品图文页面状态陈旧。",
+      rootCause: "封面绑定后的页面状态未同步。",
+      action: "retry_same_phase",
+      expectedEvidence: "刷新产品图文页后重新绑定封面。",
+    },
+  ]);
+  const order: string[] = [];
+  let executeCalls = 0;
+  const run: AutomationRun = makeRun();
+  const result = await runPhaseWithRecovery({
+    run,
+    phase: "presentation",
+    completedPhases: ["basic"],
+    productIdExists: true,
+    basicInfoSaved: true,
+    execute: async () => {
+      executeCalls += 1;
+      order.push(`execute-${executeCalls}`);
+      if (executeCalls < 2) throw new Error("图片未设置好");
+    },
+    advisor: advisor.fn,
+    applyAction: async (action, attempt) => {
+      order.push(`refresh-${action}-${attempt}`);
+    },
+    log: () => undefined,
+    persist: () => undefined,
+    now: now(),
+  });
+  assert.equal(result.status, "completed");
+  assert.deepEqual(order, [
+    "execute-1",
+    "refresh-retry_same_phase-1",
+    "execute-2",
+  ]);
+});
+
+test("presentation 重试刷新会直接打开产品图文页", async () => {
+  const gotos: string[] = [];
+  const page = {
+    goto: async (url: string) => { gotos.push(url); },
+    waitForLoadState: async () => undefined,
+  };
+  await refreshPhasePageBeforeRetry({
+    page,
+    productId: "77025968",
+    phase: "presentation",
+    action: "retry_same_phase",
+    attempt: 1,
+    log: () => undefined,
+  });
+  assert.equal(gotos.length, 1);
+  assert.match(gotos[0], /\/product\/input\/productImageText\?productId=77025968&pattern=4&from=vbk/);
 });
 
 test("reload_and_retry_phase：attempt=1 reload + handler 再执行成功", async () => {
@@ -177,4 +267,3 @@ test("wait_for_user 立即 stop", async () => {
   assert.equal(rec?.state, "needs_user");
   assert.equal(rec?.userInstruction, "请在 VBK 手动补全行程标题后再点保存草稿。");
 });
-

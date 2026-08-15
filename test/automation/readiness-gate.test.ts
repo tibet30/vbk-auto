@@ -201,6 +201,34 @@ test("presentation.recommendations 非白名单 category 仍会被 readiness 明
   assert.ok(blockers.some((item) => /推荐理由/.test(item.label)));
 });
 
+test("行程景点缺 poiId / poiName 会在 readiness 阶段阻断", () => {
+  const product = {
+    ...baseProduct,
+    itinerary: [{
+      ...baseProduct.itinerary[0],
+      spots: [{ name: "晋祠博物馆", poiName: null, poiId: null }],
+    }],
+  };
+  const blockers = automationBlockers(product);
+  const detail = blockers.find((item) => item.label === "每日行程");
+  assert.ok(detail, "缺 POI 的行程必须在 readiness 阶段阻断");
+  assert.match(detail?.detail ?? "", /每日行程/);
+});
+
+test("已落库的 AI 文案命中 VBK 黑名单会在 readiness 阶段阻断", () => {
+  const product = {
+    ...baseProduct,
+    itinerary: [{
+      ...baseProduct.itinerary[0],
+      description: "保存最完整的明代城墙，适合周末游览。",
+    }],
+  };
+  const blockers = automationBlockers(product);
+  const detail = blockers.find((item) => item.label === "VBK 文案黑名单");
+  assert.ok(detail, "已落库黑名单文案必须阻断自动化");
+  assert.match(detail?.detail ?? "", /最（极限表达）/);
+});
+
 test("私家团配齐用车资源组后通过", () => {
   const product = {
     ...baseProduct,

@@ -1,5 +1,6 @@
 {
   "name": "vbk-auto",
+  "productName": "三人同游",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +10,7 @@
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"wait-on tcp:127.0.0.1:5173 file:dist-electron/main/main.js && electron .\"",
     "dev:renderer": "vite --host 127.0.0.1",
     "dev:main": "tsc --watch",
+    "package:mac:dir": "npm run build && electron-builder --dir --mac",
     "pi:itinerary": "bash scripts/pi-itinerary.sh",
     "build": "vite build && tsc",
     "start": "npm run build && electron .",

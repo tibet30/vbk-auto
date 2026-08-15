@@ -127,10 +127,14 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
         poiId: saveTarget.poiId,
       });
       logPoiManual("save_success", logContext(saveTarget));
+      setEditing(false);
+      setDetail(null);
+      setSelected(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "保存 POI 失败，请重试。";
       logPoiManual("save_failure", logContext({ ...saveTarget, errorMessage: message }));
       setError(message);
+    } finally {
       setLoading(null);
     }
   };
@@ -201,36 +205,46 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
       {detail && detail.candidates.length > 0 && (
         <div className={styles.results} aria-label="VBK POI 候选列表">
           {detail.candidates.map((candidate) => (
-            <button
+            <div
               key={`${candidate.index}-${candidate.poiId ?? "view"}`}
-              type="button"
               className={styles.result}
               data-selected={selected?.index === candidate.index}
               data-selectable={candidate.selectable}
-              disabled={!candidate.selectable || loading !== null}
-              onClick={() => {
-                if (!candidate.selectable) return;
-                setSelected(candidate);
-                logPoiManual("select_result", logContext({
-                  poiName: candidate.poiName ?? undefined,
-                  poiId: candidate.poiId ?? undefined,
-                }));
-              }}
             >
-              <span className={styles.resultHead}>
-                <MapPin size={12} aria-hidden="true" />
-                <span className={styles.resultName}>{candidate.poiName || "未返回 poiName"}</span>
-                <code>{candidate.poiId ?? "无 poiId"}</code>
-                <span className={styles.resultState}>{candidate.selectable ? "可选择" : "仅查看"}</span>
-              </span>
-              <span className={styles.fields}>
-                {candidate.textFields.map((field) => (
-                  <span className={styles.field} key={`${candidate.index}-${field.path}-${field.value}`}>
-                    <b>{field.path}：</b>{field.value}
+              <button
+                type="button"
+                className={styles.resultChoice}
+                disabled={!candidate.selectable || loading !== null}
+                aria-pressed={selected?.index === candidate.index}
+                onClick={() => {
+                  if (!candidate.selectable) return;
+                  setSelected(candidate);
+                  logPoiManual("select_result", logContext({
+                    poiName: candidate.poiName ?? undefined,
+                    poiId: candidate.poiId ?? undefined,
+                  }));
+                }}
+              >
+                <span className={styles.resultHead}>
+                  <MapPin size={12} aria-hidden="true" />
+                  <span className={styles.resultName}>{candidate.poiName || "未返回 poiName"}</span>
+                  <code>{candidate.poiId ?? "无 poiId"}</code>
+                  <span className={styles.resultState}>{candidate.selectable ? "可选择" : "仅查看"}</span>
+                </span>
+              </button>
+              {candidate.textFields.length > 0 && (
+                <details className={styles.fields}>
+                  <summary className={styles.fieldsSummary}>查看接口详情（{candidate.textFields.length} 项）</summary>
+                  <span className={styles.fieldsList}>
+                    {candidate.textFields.map((field) => (
+                      <span className={styles.field} key={`${candidate.index}-${field.path}-${field.value}`}>
+                        <b>{field.path}：</b>{field.value}
+                      </span>
+                    ))}
                   </span>
-                ))}
-              </span>
-            </button>
+                </details>
+              )}
+            </div>
           ))}
         </div>
       )}

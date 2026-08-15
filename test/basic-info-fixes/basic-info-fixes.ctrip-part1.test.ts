@@ -21,6 +21,96 @@ import {
 } from "./basic-info-fixes.shared.js";
 import { chromium } from "playwright";
 import { fillScenicAreaProvince } from "../../src/main/automation/ctrip/basic-info/scenic.js";
+import {
+  clickLocatorSnapshotOption,
+  getControlledDropdownOptions,
+  readLocatorSnapshot,
+} from "../../src/main/automation/ctrip/utils.js";
+
+test("动态下拉候选被 React 替换后以单次 DOM 快照读取，不等待消失的旧索引", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <ul id="options">
+        <li role="option" class="enabled"><span class="Name" title="中国-成都">中国-成都</span></li>
+        <li role="option" class="enabled"><span class="Name" title="中国-四川">中国-四川</span></li>
+      </ul>
+    `);
+    const options = page.locator("#options li[role=option]");
+    assert.equal(await options.count(), 2);
+    await page.evaluate(() => document.querySelector("#options li:last-child")?.remove());
+    const startedAt = Date.now();
+    const snapshot = await readLocatorSnapshot(options);
+    assert.ok(Date.now() - startedAt < 500, "快照读取不得触发 Playwright 默认 30 秒自动等待");
+    assert.deepEqual(snapshot.map(({ text, nameTitle }) => ({ text, nameTitle })), [
+      { text: "中国-成都", nameTitle: "中国-成都" },
+    ]);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("产品信息动态下拉禁止先 count 再逐个 nth 读取属性", async () => {
+  for (const relative of [
+    "src/main/automation/ctrip/basic-info/location.ts",
+    "src/main/automation/ctrip/basic-info/scenic.ts",
+    "src/main/automation/ctrip/basic-info/sections.ts",
+  ]) {
+    const source = await fs.readFile(new URL(`../../${relative}`, import.meta.url), "utf8");
+    assert.doesNotMatch(source, /options?\.nth\(index\)\.(?:getAttribute|innerText)/, relative);
+    assert.doesNotMatch(source, /options?\.nth\([^)]*\)\.click\(\)/, relative);
+    assert.match(source, /readLocatorSnapshot/, relative);
+    assert.match(source, /clickLocatorSnapshotOption/, relative);
+  }
+});
+
+test("动态候选换序后按身份原子点击，不依赖失效索引或 actionability 等待", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <ul id="options">
+        <li role="option"><span class="Name" title="中国-成都">中国-成都</span></li>
+        <li role="option"><span class="Name" title="中国-四川">中国-四川</span></li>
+      </ul>
+      <output id="clicked"></output>
+      <script>
+        document.querySelector('#options').addEventListener('mousedown', (event) => {
+          document.querySelector('#clicked').textContent = event.target.closest('li').innerText;
+        });
+      </script>
+    `);
+    const options = page.locator("#options li[role=option]");
+    const snapshot = await readLocatorSnapshot(options);
+    await page.evaluate(() => {
+      const list = document.querySelector("#options");
+      list.prepend(list.lastElementChild);
+    });
+    const startedAt = Date.now();
+    assert.equal(await clickLocatorSnapshotOption(options, snapshot[0]), true);
+    assert.ok(Date.now() - startedAt < 500, "原子点击不得触发 30 秒 actionability 等待");
+    assert.equal(await page.locator("#clicked").textContent(), "中国-成都");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("多个未隐藏下拉并存时只读取当前 combobox 的 aria-controls 候选", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <div role="combobox" id="province" aria-controls="province-options"></div>
+      <div id="stale-product-line"><div role="option">成都一地</div></div>
+      <div id="province-options"><div role="option">四川</div></div>
+    `);
+    const options = await getControlledDropdownOptions(page, page.locator("#province"));
+    assert.deepEqual((await readLocatorSnapshot(options)).map((option) => option.text), ["四川"]);
+  } finally {
+    await browser.close();
+  }
+});
 
 test("fillCitySelect 等待完整远程结果并按 title 精确选择城市", async () => {
   const source = readCtripSource();
@@ -28,7 +118,12 @@ test("fillCitySelect 等待完整远程结果并按 title 精确选择城市", a
   const end = source.indexOf("\nexport async function openProductEditor", start);
   const body = source.slice(start, end);
   assert.match(body, /pickCityOption/);
-  assert.match(body, /Date\.now\(\) \+ 8_000/);
+  assert.match(body, /CITY_SEARCH_TIMEOUT_MS/);
+  assert.match(body, /CITY_OPTION_SETTLE_MS/);
+  assert.match(body, /stableMatchSince/,
+    "城市候选首次出现后必须连续稳定，避免迟到响应覆盖已选值");
+  assert.match(body, /stableMatchKey\s*=\s*""/,
+    "Not Found 等中间态必须重置稳定计时并继续轮询");
   assert.match(body, /ant-select-selection-selected-value/);
   assert.match(body, /\.ant-select-selection/);
   assert.match(body, /input\.waitFor\(\{ state: "visible"/);
@@ -38,6 +133,11 @@ test("fillCitySelect 等待完整远程结果并按 title 精确选择城市", a
   assert.doesNotMatch(body, /selectedText\.endsWith\(`-\$\{city\}`\)/, "幂等判断也必须验证国家，不能因 endsWith 跳过");
   assert.doesNotMatch(body, /getByRole\("combobox"\)\.click\(\)/, "收起状态不能点击隐藏 combobox");
   assert.doesNotMatch(body, /chosenIndex\s*=.*:\s*0/, "城市未精确命中时禁止默认第一项");
+  assert.match(
+    body,
+    /return nameTitle \|\| title \|\| text/,
+    "城市候选必须优先读取结构化 .Name title，避免把城市和省份两列拼接后交给 AI",
+  );
 });
 
 test("fillCitySelect scoped 清空 Ant v3 单选：hover 后清除并等待隐藏", async () => {
@@ -109,7 +209,7 @@ test("fillProductLine 优先城市一地、回退省份一地并禁止默认第�
   assert.match(body, /baseInfo\.productLineID/);
   assert.match(body, /destinationCity[\s\S]*一地/);
   assert.match(body, /provinceBase[\s\S]*一地/);
-  assert.match(body, /Date\.now\(\) \+ 10_000/);
+  assert.match(body, /Date\.now\(\) \+ 3_000/);
   assert.match(body, /candidates\.includes\(text\)/);
   assert.match(body, /暂无数据/);
   assert.doesNotMatch(body, /options\.(?:first|nth\(0\))/, "产品线禁止默认第一项");
@@ -207,12 +307,12 @@ test("国家景区省份实际只操作第二级，国家保持留空后成功�
       <style>.ant-select-dropdown-hidden { display: none; }</style>
       <div id="scenic_area">
         <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
-        <div id="province" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
+        <div id="province" role="combobox" aria-controls="province-options"><input class="ant-select-search__field" placeholder="省份" /></div>
         <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
         <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
         <button type="button">添加</button>
       </div>
-      <div class="ant-select-dropdown ant-select-dropdown-hidden">
+      <div id="province-options" class="ant-select-dropdown ant-select-dropdown-hidden">
         <div class="ant-select-item-option">山西省</div>
       </div>
       <script>

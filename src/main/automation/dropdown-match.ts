@@ -32,6 +32,7 @@ export interface MatchDropdownCandidate {
 
 export interface MatchDropdownContext {
   kind: "province" | "city" | "spot" | "station";
+  stationSubtype?: "airport" | "train";
   desired: string;
   product?: Record<string, unknown>;
   description?: string;
@@ -50,6 +51,7 @@ export interface MatchDropdownResult {
 
 export type Disambiguator = (input: {
   kind: MatchDropdownContext["kind"];
+  stationSubtype?: MatchDropdownContext["stationSubtype"];
   desired: string;
   candidates: Array<{ id?: string | number; text: string }>;
   product?: Record<string, unknown>;
@@ -116,6 +118,7 @@ export async function matchDropdownOption(
   try {
     const dis = await disambiguator({
       kind: context.kind,
+      stationSubtype: context.stationSubtype,
       desired: context.desired,
       candidates: enabledCandidates.map((entry) => ({ id: entry.id, text: entry.text })),
       product: context.product,

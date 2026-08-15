@@ -14,11 +14,18 @@ async function loadFixture() {
   const ctripMod = await import(
     new URL("../../src/main/automation/ctrip/ctrip.ts", import.meta.url).href
   );
+  const stationsMod = await import(
+    new URL("../../src/main/automation/ctrip/itinerary/stations.ts", import.meta.url).href
+  );
   const { selectStationAddress } = ctripMod;
+  const { handleAirportTrainModal } = stationsMod;
   if (typeof selectStationAddress !== "function") {
     throw new Error("selectStationAddress not exported");
   }
-  return { selectStationAddress };
+  if (typeof handleAirportTrainModal !== "function") {
+    throw new Error("handleAirportTrainModal not exported");
+  }
+  return { selectStationAddress, handleAirportTrainModal };
 }
 
 test("selectStationAddress 单一机场项 + 精确火车项", async () => {
@@ -70,12 +77,12 @@ test("selectStationAddress 多项 + AI 兜底：airport AI 选第 2 项、train 
     window.STATION_DB.train["运城"] = ["运城南", "运城北", "运城东", "运城西", "运城"];
   });
 
-  // disambiguator 签名是 (candidates, disableds, aliases, context)
-  const disambiguator = async (candidates, _disableds, _aliases, context) => {
-    if (context.kind === "airport") {
-      return { pickedText: candidates[1].text, reasoning: "test-AI-airport" };
+  // disambiguator 签名是生产路径的对象式请求：{ kind, stationSubtype, candidates, ... }。
+  const disambiguator = async (request) => {
+    if (request.kind === "station" && request.stationSubtype === "airport") {
+      return { pickedText: request.candidates[1].text, reasoning: "test-AI-airport" };
     }
-    return { pickedText: candidates[3].text, reasoning: "test-AI-train" };
+    return { pickedText: request.candidates[3].text, reasoning: "test-AI-train" };
   };
 
   const card = p.locator("td-day-card");
@@ -97,6 +104,103 @@ test("selectStationAddress 多项 + AI 兜底：airport AI 选第 2 项、train 
   );
   assert.deepEqual(finalAir, ["运城关公机场"], "AI 应选中 airport 索引 1");
   assert.deepEqual(finalTrain, ["运城"], "exact 应选中 train「运城」");
+
+  await b.close();
+});
+
+test("selectStationAddress 机场多候选时把太原交给 AI 并选择主流机场", async () => {
+  const { selectStationAddress } = await loadFixture();
+  const b = await chromium.launch({ headless: true });
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
+  const p = await ctx.newPage();
+  await p.goto("file://" + path.join(__dirname, "../../fixtures/station-picker.html"), {
+    waitUntil: "domcontentloaded",
+  });
+  await p.waitForTimeout(300);
+
+  await p.evaluate(() => {
+    window.STATION_DB.airport["太原"] = ["武宿国际机场", "太原尧城通用机场"];
+    window.STATION_DB.train["太原"] = ["太原南站"];
+  });
+
+  let airportContext = null;
+  const disambiguator = async (request) => {
+    if (request.stationSubtype === "airport") {
+      airportContext = { ...request, candidates: request.candidates.map((candidate) => candidate.text) };
+      return { pickedText: "武宿国际机场", reasoning: "太原主流民航机场" };
+    }
+    return { pickedText: request.candidates[0].text, reasoning: "single train" };
+  };
+
+  const card = p.locator("td-day-card");
+  await selectStationAddress(p, card, "太原", { disambiguator });
+
+  const finalAir = await p.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(
+        '[data-testid="airport-combo"] .ant-select-selection__choice__content',
+      ),
+    ).map((t) => t.textContent),
+  );
+  assert.deepEqual(finalAir, ["武宿国际机场"], "太原机场多候选时应采用 AI 选出的主流机场");
+  assert.deepEqual(airportContext, {
+    kind: "station",
+    stationSubtype: "airport",
+    desired: "太原",
+    candidates: ["武宿国际机场", "太原尧城通用机场"],
+    product: {},
+  });
+
+  await b.close();
+});
+
+test("handleAirportTrainModal 已打开弹窗时也会调用 AI 选择机场候选", async () => {
+  const { handleAirportTrainModal } = await loadFixture();
+  const b = await chromium.launch({ headless: true });
+  const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
+  const p = await ctx.newPage();
+  await p.goto("file://" + path.join(__dirname, "../../fixtures/station-picker.html"), {
+    waitUntil: "domcontentloaded",
+  });
+  await p.waitForTimeout(300);
+
+  await p.evaluate(() => {
+    window.STATION_DB.airport["太原"] = ["武宿国际机场", "太原尧城通用机场"];
+    window.STATION_DB.train["太原"] = ["太原南站"];
+    document.querySelector('[data-testid="station-dialog"]').style.display = "block";
+  });
+
+  const seenRequests = [];
+  const disambiguator = async (request) => {
+    seenRequests.push({
+      kind: request.kind,
+      stationSubtype: request.stationSubtype,
+      desired: request.desired,
+      candidates: request.candidates.map((candidate) => candidate.text),
+    });
+    if (request.stationSubtype === "airport") {
+      return { pickedText: "武宿国际机场", reasoning: "太原主流民航机场" };
+    }
+    return { pickedText: request.candidates[0].text, reasoning: "single train" };
+  };
+
+  const handled = await handleAirportTrainModal(p, "太原", { disambiguator, product: {} });
+  assert.equal(handled, true);
+
+  const finalAir = await p.evaluate(() =>
+    Array.from(
+      document.querySelectorAll(
+        '[data-testid="airport-combo"] .ant-select-selection__choice__content',
+      ),
+    ).map((t) => t.textContent),
+  );
+  assert.deepEqual(finalAir, ["武宿国际机场"], "已打开弹窗的兜底 handler 也必须采用 AI 选出的主流机场");
+  assert.deepEqual(seenRequests[0], {
+    kind: "station",
+    stationSubtype: "airport",
+    desired: "太原",
+    candidates: ["武宿国际机场", "太原尧城通用机场"],
+  });
 
   await b.close();
 });

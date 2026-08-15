@@ -7,10 +7,13 @@
  * 顶部带 `// @ts-nocheck`，page 是动态传入。
  */
 
-import { delay, assertCount } from "../utils.js";
+import { delay, assertCount, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption } from "../utils.js";
 import { matchDropdownOption } from "../../dropdown-match.js";
 import { pickCityOption } from "./types.js";
 import { logInfo } from "../../../../shared/log-timestamp.js";
+
+const CITY_SEARCH_TIMEOUT_MS = 3_000;
+const CITY_OPTION_SETTLE_MS = 400;
 
 /**
  * 通用城市下拉选择器：处理「已选即跳过」「清除 → 重选」「打开搜索框 → 输 → 轮询候选」流程；
@@ -61,27 +64,54 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
   // 等请求，较慢的单字响应可能最后覆盖完整城市结果；一次 fill 只触发完整关键词请求。
   await input.fill(city);
 
-  const options = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) li[role=option]",
-  );
-  const deadline = Date.now() + 8_000;
-  let lastSeen: string[] = [];
-  let lastDecision: ReturnType<typeof pickCityOption> = { kind: "missing", seen: [], reason: "notFound" };
-  while (Date.now() < deadline) {
-    const count = await options.count();
-    const labels: string[] = [];
-    for (let index = 0; index < count; index += 1) {
-      const option = options.nth(index);
-      const title = ((await option.getAttribute("title")) || "").trim();
-      const nameTitle = ((await option.locator(".Name[title]").getAttribute("title").catch(() => null)) || "").trim();
-      labels.push(title || nameTitle || ((await option.innerText().catch(() => ""))).trim());
+  const options = await getControlledDropdownOptions(page, selection);
+  const commitCityOption = async (expected) => {
+    if (!(await clickLocatorSnapshotOption(options, expected))) return false;
+    const commitDeadline = Date.now() + 2_000;
+    while (Date.now() < commitDeadline) {
+      const committed = await readLocatorSnapshot(selectedValue);
+      const text = committed[0]?.title || committed[0]?.text || "";
+      if (pickCityOption([text], city, preferredCountry).kind === "matched") return true;
+      await delay(100);
     }
+    return false;
+  };
+  const deadline = Date.now() + CITY_SEARCH_TIMEOUT_MS;
+  let lastSeen: string[] = [];
+  let lastSnapshot = [];
+  let lastDecision: ReturnType<typeof pickCityOption> = { kind: "missing", seen: [], reason: "notFound" };
+  let stableMatchKey = "";
+  let stableMatchSince = 0;
+  let stableMatchReady = false;
+  while (Date.now() < deadline) {
+    const snapshot = await readLocatorSnapshot(options);
+    lastSnapshot = snapshot;
+    const labels = snapshot.map(({ nameTitle, title, text }) => {
+      // VBK 的城市行会同时展示「中国-西安」和所属省份「中国-陕西」；
+      // 外层 title / innerText 可能把两列拼成一个字符串，结构化的 .Name title
+      // 才是可点击城市本身。优先读取它，避免把确定候选误送给 90s AI 消歧。
+      return nameTitle || title || text;
+    });
     lastSeen = labels.filter(Boolean);
     lastDecision = pickCityOption(labels, city, preferredCountry);
-    if (lastDecision.kind === "matched") break;
-    await delay(250);
+    if (lastDecision.kind === "matched") {
+      const matchKey = labels[lastDecision.index] || "";
+      if (matchKey !== stableMatchKey) {
+        stableMatchKey = matchKey;
+        stableMatchSince = Date.now();
+      } else if (Date.now() - stableMatchSince >= CITY_OPTION_SETTLE_MS) {
+        stableMatchReady = true;
+        break;
+      }
+    } else {
+      // 输入后可能短暂显示上一次查询结果，随后出现 Not Found，再到达真正
+      // 的远程响应。任一中间态都要重置稳定计时，不能点击也不能提前失败。
+      stableMatchKey = "";
+      stableMatchSince = 0;
+    }
+    await delay(100);
   }
-  if (lastDecision.kind !== "matched") {
+  if (lastDecision.kind !== "matched" || !stableMatchReady) {
     const canAiDisambiguate = disambiguator
       && (lastDecision.kind === "ambiguous"
         || (lastDecision.kind === "missing" && lastSeen.length > 0));
@@ -107,8 +137,8 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
               reasoning: ai.reasoning,
             });
           }
-          await options.nth(idx).click();
-          return;
+          const clicked = await commitCityOption(lastSnapshot[idx]);
+          if (clicked) return;
         }
       }
     }
@@ -125,7 +155,8 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
     }
     throw new Error(`${city}城市下拉未找到精确选项；可选：${alternatives}`);
   }
-  await options.nth(lastDecision.index).click();
+  const clicked = await commitCityOption(lastSnapshot[lastDecision.index]);
+  if (!clicked) throw new Error(`${city}城市候选点击后未形成已选值，请重试。`);
 }
 
 /**
@@ -157,23 +188,16 @@ export async function fillProductLine(page, destinationCity, province) {
 
   const selection = scope.locator(".ant-select-selection");
   await assertCount(selection, 1, "产品线可见选择框");
-  const options = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
-  );
-  const deadline = Date.now() + 10_000;
+  const options = await getControlledDropdownOptions(page, selection);
+  const deadline = Date.now() + 3_000;
   let seen: string[] = [];
   while (Date.now() < deadline) {
     await selection.click();
     await delay(400);
-    const total = await options.count();
-    seen = total ? (await options.allTextContents()).map((text) => text.trim()) : [];
-    const disableds = await Promise.all(
-      Array.from({ length: total }, async (_, index) => {
-        const cls = (await options.nth(index).getAttribute("class")) || "";
-        return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
-      }),
-    );
+    const snapshot = await readLocatorSnapshot(options);
+    seen = snapshot.map((option) => option.text);
+    const disableds = snapshot.map((option) =>
+      /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(option.className));
     const matchIndex = seen.findIndex(
       (text, index) => candidates.includes(text) && !disableds[index],
     );
@@ -183,9 +207,19 @@ export async function fillProductLine(page, destinationCity, province) {
           `产品线命中候选"${seen[matchIndex]}"但其为默认第一项，必须按 candidates 精匹配后点击；可选：${seen.join("、")}`,
         );
       }
-      await options.nth(matchIndex).click();
-      await delay(300);
-      return;
+      const clicked = await clickLocatorSnapshotOption(options, snapshot[matchIndex]);
+      if (!clicked) {
+        await delay(150);
+        continue;
+      }
+      const commitDeadline = Date.now() + 2_000;
+      while (Date.now() < commitDeadline) {
+        const committed = await readLocatorSnapshot(selectedValue);
+        const committedText = committed[0]?.title || committed[0]?.text || "";
+        if (candidates.includes(committedText)) return;
+        await delay(100);
+      }
+      throw new Error(`产品线候选"${seen[matchIndex]}"点击后未形成已选值。`);
     }
     const realOptions = seen.filter(
       (text, index) => text && !["暂无数据", "Not Found"].includes(text) && !disableds[index],

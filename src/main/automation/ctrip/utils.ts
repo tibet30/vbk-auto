@@ -94,6 +94,91 @@ async function assertCount(locator, expected, description) {
 }
 
 /**
+ * 一次 page.evaluateAll 读取动态列表，避免「先 count、再逐个 nth」期间 React
+ * 替换节点后，Playwright 对已经不存在的索引自动等待 30 秒。
+ */
+async function readLocatorSnapshot(locator) {
+  return locator.evaluateAll((elements) => elements.map((element) => {
+    const html = element;
+    const nameNode = html.querySelector?.(".Name[title]");
+    return {
+      text: String(html.innerText || html.textContent || "").trim(),
+      title: String(html.getAttribute?.("title") || "").trim(),
+      nameTitle: String(nameNode?.getAttribute?.("title") || "").trim(),
+      className: String(html.getAttribute?.("class") || ""),
+      value: String(html.getAttribute?.("data-value") || ""),
+      id: String(html.getAttribute?.("data-id") || ""),
+      ariaSelected: html.getAttribute?.("aria-selected") === "true",
+      ariaDisabled: html.getAttribute?.("aria-disabled") === "true",
+    };
+  }));
+}
+
+/**
+ * 只返回当前 combobox 通过 aria-controls 绑定的下拉候选。页面可能同时残留
+ * 多个“未隐藏”弹层；全局查询会把上一步产品线候选误当成下一步省份候选。
+ */
+async function getControlledDropdownOptions(page, combobox) {
+  const controlId = String(await combobox.getAttribute("aria-controls") || "").trim();
+  if (!controlId) throw new Error("下拉框缺少 aria-controls，无法确认候选归属。");
+  const escaped = controlId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return page.locator(`[id="${escaped}"]`).locator(
+    '[role="option"], .ant-select-item-option, .ant-select-dropdown-menu-item',
+  );
+}
+
+/**
+ * 对 readLocatorSnapshot 产出的候选做“重新找同一身份 + 原生 click”。读取、
+ * 重定位和点击都在一次 evaluateAll 内完成，不触发 Playwright 30 秒 actionability
+ * 等待。Ant v3 的远程 Select 会在 mousedown 阶段提交候选，所以这里派发一组
+ * 完整鼠标事件，而不是只调用 HTMLElement.click()。
+ */
+async function clickLocatorSnapshotOption(locator, expected) {
+  if (!expected) return false;
+  return locator.evaluateAll((elements, wanted) => {
+    const wantedIdentity = wanted.value || wanted.id || wanted.nameTitle || wanted.title || wanted.text;
+    const match = elements.find((element) => {
+      const nameNode = element.querySelector?.(".Name[title]");
+      const value = String(element.getAttribute?.("data-value") || "");
+      const id = String(element.getAttribute?.("data-id") || "");
+      const nameTitle = String(nameNode?.getAttribute?.("title") || "").trim();
+      const title = String(element.getAttribute?.("title") || "").trim();
+      const text = String(element.innerText || element.textContent || "").trim();
+      const identity = value || id || nameTitle || title || text;
+      return identity === wantedIdentity;
+    });
+    if (!match) return false;
+    const className = String(match.getAttribute?.("class") || "");
+    if (/ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(className)) return false;
+    if (match.getAttribute?.("aria-disabled") === "true") return false;
+    const view = match.ownerDocument?.defaultView;
+    if (!view) return false;
+    if (typeof view.PointerEvent === "function") {
+      match.dispatchEvent(new view.PointerEvent("pointerdown", {
+        bubbles: true, cancelable: true, view, pointerId: 1, pointerType: "mouse",
+        isPrimary: true, button: 0, buttons: 1,
+      }));
+    }
+    match.dispatchEvent(new view.MouseEvent("mousedown", {
+      bubbles: true, cancelable: true, view, button: 0, buttons: 1,
+    }));
+    if (typeof view.PointerEvent === "function") {
+      match.dispatchEvent(new view.PointerEvent("pointerup", {
+        bubbles: true, cancelable: true, view, pointerId: 1, pointerType: "mouse",
+        isPrimary: true, button: 0, buttons: 0,
+      }));
+    }
+    match.dispatchEvent(new view.MouseEvent("mouseup", {
+      bubbles: true, cancelable: true, view, button: 0, buttons: 0,
+    }));
+    match.dispatchEvent(new view.MouseEvent("click", {
+      bubbles: true, cancelable: true, view, button: 0, buttons: 0,
+    }));
+    return true;
+  }, expected);
+}
+
+/**
  * 在当前打开的下拉里选名为 `label`（精确匹配）的选项，并先 assertCount=1 防止歧义。
  */
 async function selectVisibleOption(page, label) {
@@ -146,6 +231,9 @@ export {
   escapeRegExp,
   pollUntil,
   assertCount,
+  readLocatorSnapshot,
+  getControlledDropdownOptions,
+  clickLocatorSnapshotOption,
   pickSearchInput,
   selectVisibleOption,
   safeClick,

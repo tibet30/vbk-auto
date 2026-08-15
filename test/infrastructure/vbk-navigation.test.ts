@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import type { Event, WebContents } from "electron";
 import {
+  isExpectedLoginRedirect,
   navigateVbkPage,
   normalizeUrlForCompare,
   urlsMatch,
@@ -222,6 +223,24 @@ test("loadURL 成功但 current URL 未抵达目标：抛'未抵达目标'错误
   );
 
   assert.equal(fake.listenerCount("will-prevent-unload"), 0, "该路径也必须清理监听器");
+});
+
+test("登录入口允许被 VBK 重定向到登录页：backurl 指回目标时视作成功", async () => {
+  const loginUrl = "https://vbooking.ctrip.com/ivbk/accountV2/login?backurl="
+    + encodeURIComponent(TARGET);
+  const fake = makeFakeWebContents({
+    initialUrl: SOURCE,
+    loadURL: async () => {
+      fake.setURL(loginUrl);
+    },
+  });
+
+  await navigateVbkPage(asWebContents(fake), TARGET, {
+    allowRedirect: isExpectedLoginRedirect,
+  });
+
+  assert.equal(fake.getURL(), loginUrl);
+  assert.equal(fake.listenerCount("will-prevent-unload"), 0, "登录重定向路径也必须清理监听器");
 });
 
 // ─────────────────────────── 监听清理覆盖 ───────────────────────────

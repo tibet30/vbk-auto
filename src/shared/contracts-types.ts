@@ -170,6 +170,8 @@ export interface AutomationRun {
 export interface DisambiguateRequest {
   /** 上下文类别 — 用在不同 prompt 约束。 */
   kind: "province" | "city" | "spot" | "station";
+  /** 仅 kind=station 使用：区分本次候选来自机场框还是火车站框。 */
+  stationSubtype?: "airport" | "train";
   /** 产品 JSON 中期望选中的原始值（可能是“太原”“云冈石窟”这种）。 */
   desired: string;
   /** 产品完整 JSON，供 AI 理解上下文。 */

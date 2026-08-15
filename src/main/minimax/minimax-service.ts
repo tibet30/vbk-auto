@@ -34,6 +34,12 @@ function replyTimeout() {
   return Number.isFinite(parsed) && parsed >= 30_000 ? parsed : 90_000;
 }
 
+/** 下拉消歧只辅助一次页面点击，不能沿用规划对话的 90 秒等待。 */
+function disambiguationTimeout() {
+  const parsed = Number(process.env.MINIMAX_DISAMBIGUATION_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed >= 1_000 && parsed <= 15_000 ? parsed : 8_000;
+}
+
 /**
  * 读取 MiniMax 服务等级（"priority" / "standard"）；默认 standard，
  * 仅当环境变量显式设置为 "priority" 才使用付费优先级通道。
@@ -45,9 +51,10 @@ function miniMaxServiceTier() {
 /**
  * 从产品 JSON 中按 kind（province / city / spot / station）抽取 disambiguation 需要的最小上下文：
  * 比如 spot 类型只暴露行程中所有 spots + presentation.recommendation/failures 等线索，
- * 用于在选则时让模型知道「产品主要讲哪里」。
+ * 用于在选择时让模型知道「产品主要讲哪里」。
  */
-function parseDisambiguateContext(product: Record<string, unknown>, kind: DisambiguateRequest["kind"], desired: string): Record<string, unknown> {
+function parseDisambiguateContext(product: Record<string, unknown>, input: DisambiguateRequest): Record<string, unknown> {
+  const { kind, desired } = input;
   const ctx: Record<string, unknown> = { desired };
   const basic = (product.basicInfo as Record<string, unknown> | undefined) ?? {};
   const presentation = (product.presentation as Record<string, unknown> | undefined) ?? {};
@@ -67,6 +74,7 @@ function parseDisambiguateContext(product: Record<string, unknown>, kind: Disamb
   } else if (kind === "station") {
     ctx.pickupCity = operations.pickupCity ?? null;
     ctx.destinationCity = basic.destinationCity ?? null;
+    ctx.stationSubtype = input.stationSubtype ?? null;
   }
   return ctx;
 }
@@ -407,8 +415,9 @@ export class MiniMaxService {
         { role: "system", content: disambiguateSystemPrompt(input.kind) },
         { role: "user", content: JSON.stringify({
           desired: input.desired,
+          stationSubtype: input.stationSubtype ?? null,
           candidates: input.candidates.map((c) => ({ id: c.id, text: c.text })),
-          productContext: parseDisambiguateContext(input.product, input.kind, input.desired),
+          productContext: parseDisambiguateContext(input.product, input),
         }) },
       ];
       logAIPrompt({
@@ -417,7 +426,7 @@ export class MiniMaxService {
         model: this.config.model,
         messages,
       });
-      const response = await this.client(replyTimeout()).chat.completions.create({
+      const response = await this.client(disambiguationTimeout()).chat.completions.create({
         model: this.config.model,
         messages,
         max_completion_tokens: 512,
@@ -431,13 +440,13 @@ export class MiniMaxService {
         (call) => "function" in call && call.function.name === "submit_disambiguation",
       );
       if (!toolCall || !("function" in toolCall)) {
-        throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 未返回结构化选则结果。`);
+        throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 未返回结构化选择结果。`);
       }
       let value: unknown;
       try { value = JSON.parse(toolCall.function.arguments); }
-      catch { throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的选则结果不是合法 JSON。`); }
+      catch { throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的选择结果不是合法 JSON。`); }
       const parsed = disambiguateOutcomeSchema.safeParse(value);
-      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的选则结果不合法。`);
+      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的选择结果不合法。`);
       const pickedText = parsed.data.pickedText && input.candidates.some((c) => c.text === parsed.data.pickedText)
         ? parsed.data.pickedText
         : null;

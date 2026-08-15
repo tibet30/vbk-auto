@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync("src/renderer/app/views/workspace/review-summary-itinerary-poi.tsx", "utf8");
+const ipcSource = readFileSync("src/main/ipc/product-ai-ipc.ts", "utf8");
 
 test("行程 POI 编辑器必须通过 VBK suggestPoi 搜索并经 updateReviewField 写回白名单字段", () => {
   assert.match(source, /browser\.suggestPoiDetail\(query/);
@@ -18,6 +19,18 @@ test("行程 POI 搜索成功后展示全部候选并必须先手动选择合法
   assert.match(source, /<b>\{field\.path\}：<\/b>\{field\.value\}/);
   assert.match(source, /setSelected\(candidate\);/);
   assert.match(source, /disabled=\{loading !== null \|\| !selected\?\.selectable\}/);
+});
+
+test("POI 保存成功后广播产品更新并退出保存态", () => {
+  assert.match(ipcSource, /replaceProductAndSatisfyResearchTasks\([\s\S]*emitProduct\(saved\);[\s\S]*return saved;/);
+  assert.match(source, /logPoiManual\("save_success"[\s\S]*setEditing\(false\);[\s\S]*setDetail\(null\);[\s\S]*setSelected\(null\);/);
+  assert.match(source, /finally\s*\{\s*setLoading\(null\);\s*\}/);
+});
+
+test("候选原始字段使用独立可展开详情，避免与选择按钮内容叠压", () => {
+  assert.match(source, /<details className=\{styles\.fields\}>/);
+  assert.match(source, /查看接口详情（\{candidate\.textFields\.length\} 项）/);
+  assert.match(source, /className=\{styles\.fieldsList\}/);
 });
 
 test("无合法 poiName/poiId 的候选只能查看，不能作为保存目标", () => {

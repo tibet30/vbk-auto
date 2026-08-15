@@ -70,12 +70,17 @@ test("接线 2：fillAndSavePresentation 接入 saveThenAdvance，目标 行程�
   assert.match(presBody, /saveThenAdvance\(page, \{/);
   assert.match(presBody, /targetTabLabels: \["行程描述"\]/);
   assert.match(presBody, /targetTabLabel: "行程描述"/);
-  // presentation 不再自己点保存按钮（已交给 saveThenAdvance 内部）
-  assert.doesNotMatch(
+  // presentation 必须先自己保存并确认官方响应，再把 savedWith 交给
+  // saveThenAdvance；避免保存响应未落定时过早点击下一步。
+  assert.match(
     presBody,
     /await clickSafeSave\(page, \["保存", "保存并下一步"\]\)/,
-    "fillAndSavePresentation 的保存按钮调用已上交给 saveThenAdvance",
+    "fillAndSavePresentation 必须在推进前显式保存",
   );
+  assert.match(presBody, /saveOutcome = await monitor\.waitForSave\(\)/);
+  assert.match(presBody, /await page\.waitForURL\(\(url\) => isProductImageTextUrl\(url\.href\)/);
+  assert.match(presBody, /await page\.reload\(\{ waitUntil: "domcontentloaded" \}\)/);
+  assert.match(presBody, /savedWith,/);
   assert.doesNotMatch(presBody, /clickBasicInfoNextStep/);
   assert.doesNotMatch(presBody, /waitForSectionEnabled/);
   assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations\)/,
@@ -86,6 +91,16 @@ test("接线 2：fillAndSavePresentation 接入 saveThenAdvance，目标 行程�
     "产品图文必须实际填写已校验的推荐理由");
   assert.match(presBody, /await selectCtripLibraryCover\(page, presentation\.cover\)/,
     "产品图文必须录入图库封面");
+  const bindCoverIdx = presBody.indexOf("await selectCtripLibraryCover(page, presentation.cover)");
+  const reloadAfterCoverIdx = presBody.indexOf(
+    'await page.reload({ waitUntil: "domcontentloaded" })',
+    bindCoverIdx,
+  );
+  const fillReasonsIdx = presBody.indexOf("await fillRecommendationReasons(page, recommendations)");
+  assert.ok(bindCoverIdx >= 0 && reloadAfterCoverIdx > bindCoverIdx,
+    "首次接口绑定封面后必须刷新，让产品图文页从后端重新水合");
+  assert.ok(fillReasonsIdx > reloadAfterCoverIdx,
+    "推荐理由等表单字段必须在封面绑定后的刷新完成后再写入");
   assert.match(
     presBody,
     /if \(!filledFeatures\)/,
@@ -98,6 +113,13 @@ test("接线 2：fillAndSavePresentation 接入 saveThenAdvance，目标 行程�
   );
 });
 
+test("页签导航用页面内原生 click，避免 Electron 未结束导航阻塞 locator.click", async () => {
+  const ctrip = readCtripSource();
+  const start = ctrip.indexOf("async function clickSection");
+  const body = ctrip.slice(start, ctrip.indexOf("async function openProductEditor", start));
+  assert.match(body, /current\.evaluate\(\(element\) => \(element as HTMLElement\)\.click\(\)\)/);
+});
+
 test("接线 3：fillItineraryDraft 存为草稿后接入 saveThenAdvance，目标 套餐管理", async () => {
   const ctrip = readCtripSource();
   const itinIdx = ctrip.indexOf("export async function fillItineraryDraft");
@@ -106,8 +128,8 @@ test("接线 3：fillItineraryDraft 存为草稿后接入 saveThenAdvance，目�
   assert.match(itinBody, /clickSafeSave\(page, \["存为草稿"\]\)/);
   assert.match(itinBody, /saveThenAdvance\(page, \{/);
   assert.match(itinBody, /targetTabLabels: \["套餐管理"\]/);
-  // 返回契约必须仍是 { savedWith, days }
-  assert.match(itinBody, /return \{ savedWith, days: product\.itinerary\.length \}/);
+  // 返回契约保留 savedWith / days，并附带接口写入结果。
+  assert.match(itinBody, /return \{ savedWith, days: product\.itinerary\.length, spotResult \}/);
   assert.doesNotMatch(itinBody, /clickBasicInfoNextStep/);
 });
 

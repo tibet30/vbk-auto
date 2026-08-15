@@ -35,6 +35,7 @@ import {
 } from "./vbk-cookie-serializer.js";
 import { waitForDomText } from "./vbk-page-wait.js";
 import { navigateVbkPage } from "./vbk-navigation.js";
+import { isExpectedLoginRedirect } from "./vbk-navigation.js";
 import {
   VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE,
   isVbkAuthCookieSummaryComplete,
@@ -42,6 +43,31 @@ import {
 } from "./vbk-auth-cookies.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
+const nativeDialogHandledPages = new WeakSet<Page>();
+
+function isNoDialogShowingError(error: unknown): boolean {
+  const text = error instanceof Error
+    ? `${error.message}\n${error.stack ?? ""}`
+    : String(error);
+  return /Page\.handleJavaScriptDialog[\s\S]*No dialog is showing/.test(text);
+}
+
+function ensureNativeDialogHandler(page: Page): void {
+  if (nativeDialogHandledPages.has(page)) return;
+  nativeDialogHandledPages.add(page);
+  page.on("dialog", (dialog) => {
+    void dialog.accept().catch((error) => {
+      if (isNoDialogShowingError(error)) return;
+      return dialog.dismiss().catch((dismissError) => {
+        if (isNoDialogShowingError(dismissError)) return;
+        logWarn("[vbk-browser] native JS dialog auto-dismiss failed", {
+          acceptError: error instanceof Error ? error.message : String(error),
+          dismissError: dismissError instanceof Error ? dismissError.message : String(dismissError),
+        });
+      });
+    });
+  });
+}
 
 // DOM 抓取时丢弃的菜单/标签类文本：VBK 后台大量 class 名带 user / account
 // 的导航项（如「账号管理」「用户管理」），会先于真实账号名命中旧 selector，
@@ -268,7 +294,12 @@ export class VbkBrowser {
   /**
    * 便捷登录入口：setVisible(true) + 跳到产品列表 URL。
    */
-  async login() { this.setVisible(true); await this.navigate(URLS.list); }
+  async login() {
+    this.setVisible(true);
+    await navigateVbkPage(this.view?.webContents, URLS.list, {
+      allowRedirect: isExpectedLoginRedirect,
+    });
+  }
 
   // ─────────────────────────────────────────────────────────────
   // 多账号操作
@@ -553,6 +584,7 @@ export class VbkBrowser {
         ? "未找到可交互的嵌入式 VBK 页面，请打开 VBK 录入区域后重试。"
         : "未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
     }
+    ensureNativeDialogHandler(page);
     return page;
   }
 

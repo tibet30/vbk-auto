@@ -27,6 +27,7 @@ export function useAccountBrowserState() {
   const [checkingVbkLogin, setCheckingVbkLogin] = useState(false);
   const [vbkLoginAccounts, setVbkLoginAccounts] = useState<LoginAccountsSnapshot>({ current: null, saved: [] });
   const [loadingLoginAccounts, setLoadingLoginAccounts] = useState(false);
+  const [fixedInfoReloadToken, setFixedInfoReloadToken] = useState(0);
 
   return {
     browserOpen, setBrowserOpen,
@@ -46,5 +47,6 @@ export function useAccountBrowserState() {
     checkingVbkLogin, setCheckingVbkLogin,
     vbkLoginAccounts, setVbkLoginAccounts,
     loadingLoginAccounts, setLoadingLoginAccounts,
+    fixedInfoReloadToken, setFixedInfoReloadToken,
   };
 }

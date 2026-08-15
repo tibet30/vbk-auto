@@ -93,6 +93,22 @@ test("vbkSessionRequest 保留图库请求需要的 header/referrer，并支持�
   assert.equal(JSON.parse(String(captured!.init.body)).head.cid, "CID-VALUE");
 });
 
+test("vbkSessionRequest 把超出安全整数的行程 ID 保留为精确字符串", async () => {
+  const raw = '{"ResponseStatus":{"Ack":"Success"},"tourInfos":[{"tourInfoId":0,"previewTourInfoId":409226120750235682}],"ordinary":409226120750235682}';
+  const page = executablePage("GUID=GUID-VALUE", async () => new Response(raw, { status: 200 }));
+  const result = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/getProductTourInfoList",
+    browserRequestTimeoutMs: 1000,
+    evaluateTimeoutMs: 1000,
+    errorLabel: "VBK 行程关联查询",
+    body: { head: { cid: "" } },
+  });
+  const payload = result.payload as any;
+  assert.equal(payload.tourInfos[0].tourInfoId, 0);
+  assert.equal(payload.tourInfos[0].previewTourInfoId, "409226120750235682");
+  assert.equal(typeof payload.ordinary, "number", "非行程 ID 数值不应被改写成字符串");
+});
+
 test("vbkSessionRequest 缺 GUID/vbk_login_cid 时抛中文登录态错误", async () => {
   const page = executablePage("foo=bar", async () => jsonResponse({}));
   await assert.rejects(

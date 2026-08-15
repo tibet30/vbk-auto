@@ -15,7 +15,7 @@ import { runOnePhase as runOnePhaseFlow } from "./automation.main.run-one.js";
 import { productNotFound } from "../../infrastructure/db-errors.js";
 import { VbkDatabase } from "../../infrastructure/database/database.js";
 import { VbkBrowser } from "../../infrastructure/vbk-browser.js";
-import type { AdvisorOutcome, AdvisorRequest, AutomationRun, ProductDetail } from "../../../shared/contracts.js";
+import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ProductDetail } from "../../../shared/contracts.js";
 import { debugHitBreakpoints, debugListBreakpoints, debugResume, debugRunStep, debugSnapshot } from "./automation.main.class.debug.js";
 import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
@@ -49,7 +49,8 @@ export class DraftAutomation {
     private browser: VbkBrowser,
     private onUpdate: (product: ProductDetail) => void,
     private advisor: (req: AdvisorRequest) => Promise<AdvisorOutcome>,
-    private disambiguator?: (req: { kind: "province" | "city" | "spot" | "station"; desired: string; candidates: Array<{ id?: string; text: string }>; product: Record<string, unknown> }) => Promise<{ pickedText: string | null; reasoning: string }>,
+    private disambiguator?: (req: { kind: "province" | "city" | "spot" | "station"; stationSubtype?: "airport" | "train"; desired: string; candidates: Array<{ id?: string; text: string }>; product: Record<string, unknown> }) => Promise<{ pickedText: string | null; reasoning: string }>,
+    private presentationCopyRewriter?: (req: { message: string; product: Record<string, unknown> }) => Promise<AiResponse>,
   ) {}
 
 /**
@@ -200,6 +201,7 @@ async retryOnePhase(localProductId: string, phase: string) {
       db: this.db,
       browser: this.browser,
       advisor: this.advisor,
+      presentationCopyRewriter: this.presentationCopyRewriter,
       disambiguator: this.disambiguator,
       resolveActiveButlerContext: (accountName) => resolveActiveButlerContext(this.db, accountName),
       emit: (localProductId) => this.emit(localProductId),

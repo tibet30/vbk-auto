@@ -8,8 +8,13 @@
  * 顶部带 `// @ts-nocheck`，page 是动态传入。
  */
 
-import { delay, assertCount } from "../utils.js";
+import { delay, assertCount, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption } from "../utils.js";
 import { findFirstEnabledOptionIndex, findButlerOptionIndex } from "../../schema/schema-functions.js";
+import { NonAdvisableAutomationError } from "../../automation.main/automation.main.errors.js";
+
+const BASIC_INFO_VISIBLE_WAIT_MS = 5_000;
+const BASIC_INFO_SEARCH_TIMEOUT_MS = 3_000;
+const SERVICE_PHONE_POLL_INTERVAL_MS = 150;
 
 /**
  * 写「线上 400 电话」单选下拉：
@@ -25,7 +30,7 @@ export async function fillServicePhone(page, phone) {
   await assertCount(labelLocator, 1, "线上 400 电话 label[for=baseInfo.phone400]");
   const formItem = labelLocator.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
   await assertCount(formItem, 1, "线上 400 电话 .ant-form-item");
-  await formItem.waitFor({ state: "visible", timeout: 10_000 });
+  await formItem.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS });
   await page.evaluate(() => {
     const el = document.querySelector('label[for="baseInfo.phone400"]')?.closest('.ant-form-item');
     if (!el) return;
@@ -45,26 +50,31 @@ export async function fillServicePhone(page, phone) {
   const trigger = formItem.locator(".ant-select-selection[role='combobox']");
   await assertCount(trigger, 1, "线上 400 电话 combobox");
   await trigger.click();
-  await delay(400);
-  const options = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
-  );
-  await options.first().waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
-  const total = await options.count();
-  const texts = (await options.allTextContents()).map((text) => text.trim());
-  const disableds = await Promise.all(
-    Array.from({ length: total }, async (_, index) => {
-      const cls = (await options.nth(index).getAttribute("class")) || "";
-      return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
-    }),
-  );
-  const matchIndex = texts.findIndex((text, index) => text === target && !disableds[index]);
-  if (matchIndex < 0) {
-    throw new Error(`线上 400 电话下拉未找到「${target}」；可选：${texts.filter(Boolean).join("、") || "无"}`);
+  const options = await getControlledDropdownOptions(page, trigger);
+  let texts = [];
+  // 真实 VBK 会在打开后异步请求账号可用号码；连续新建产品时，候选可能
+  // 稍晚才替换“暂无数据”。这里收紧到 3 秒，避免把简单精确匹配拖成长等待。
+  const searchDeadline = Date.now() + BASIC_INFO_SEARCH_TIMEOUT_MS;
+  while (Date.now() < searchDeadline) {
+    await delay(SERVICE_PHONE_POLL_INTERVAL_MS);
+    const snapshot = await readLocatorSnapshot(options);
+    texts = snapshot.map((option) => option.text);
+    const disableds = snapshot.map((option) =>
+      /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(option.className));
+    const matchIndex = texts.findIndex((text, index) => text === target && !disableds[index]);
+    if (matchIndex >= 0) {
+      const clicked = await clickLocatorSnapshotOption(options, snapshot[matchIndex]);
+      if (!clicked) {
+        await delay(SERVICE_PHONE_POLL_INTERVAL_MS);
+        continue;
+      }
+      await delay(300);
+      return;
+    }
   }
-  await options.nth(matchIndex).click();
-  await delay(300);
+  throw new NonAdvisableAutomationError(
+    `线上 400 电话下拉未找到「${target}」；可选：${texts.filter(Boolean).join("、") || "无"}`,
+  );
 }
 
 /**
@@ -78,7 +88,7 @@ export async function fillAdvanceBooking(page, { days, time }) {
   await assertCount(labelLocator, 1, "提前预订 label[for=bookingControls.advanceBooking]");
   const formItem = labelLocator.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
   await assertCount(formItem, 1, "提前预订 .ant-form-item");
-  await formItem.waitFor({ state: "visible", timeout: 10_000 });
+  await formItem.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS });
   const dayInput = formItem.locator("input.ant-input-number-input");
   await assertCount(dayInput, 1, "提前预订天数输入框");
   await dayInput.fill(String(days));
@@ -110,7 +120,7 @@ export async function fillAdvanceBooking(page, { days, time }) {
 export async function fillLocalTravelAgency(page) {
   const scope = page.locator("div[id=\"bookingControls.localInfoIds\"]");
   await assertCount(scope, 1, "地接社容器 div#bookingControls.localInfoIds");
-  await scope.waitFor({ state: "visible", timeout: 10_000 });
+  await scope.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS });
   const selectedChoices = scope.locator(".ant-select-selection__choice");
   if (await selectedChoices.count() > 0) {
     return;
@@ -127,24 +137,20 @@ export async function fillLocalTravelAgency(page) {
   await searchInput.click();
   await delay(400);
 
-  const options = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
-  );
-  await options.first().waitFor({ state: "visible", timeout: 8_000 });
-  const total = await options.count();
-  const texts = (await options.allTextContents()).map((text) => text.trim());
-  const disableds = await Promise.all(
-    Array.from({ length: total }, async (_, index) => {
-      const cls = (await options.nth(index).getAttribute("class")) || "";
-      return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
-    }),
-  );
+  const localCombobox = scope.getByRole("combobox");
+  await assertCount(localCombobox, 1, "地接社 combobox");
+  const options = await getControlledDropdownOptions(page, localCombobox);
+  await options.first().waitFor({ state: "visible", timeout: BASIC_INFO_SEARCH_TIMEOUT_MS });
+  const snapshot = await readLocatorSnapshot(options);
+  const texts = snapshot.map((option) => option.text);
+  const disableds = snapshot.map((option) =>
+    /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(option.className));
   const targetIndex = findFirstEnabledOptionIndex(texts, disableds);
   if (targetIndex < 0) {
     throw new Error(`地接社下拉无可用项；请先在 VBK 维护地接社。可选：${texts.filter(Boolean).join("、") || "无"}`);
   }
-  await options.nth(targetIndex).click();
+  const clicked = await clickLocatorSnapshotOption(options, snapshot[targetIndex]);
+  if (!clicked) throw new Error(`地接社候选"${texts[targetIndex]}"在提交前已被页面刷新。`);
   const commitDeadline = Date.now() + 3_000;
   while (Date.now() < commitDeadline && (await selectedChoices.count()) !== 1) {
     await delay(150);
@@ -175,7 +181,7 @@ export async function fillButlerContact(page, selection) {
   }
   const scope = page.locator('div[id="bookingControls.vendorBookingAssistant"]');
   await assertCount(scope, 1, "管家联系人容器 div#bookingControls.vendorBookingAssistant");
-  await scope.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
+  await scope.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS }).catch(() => {});
   const trigger = scope.getByRole("combobox");
   await assertCount(trigger, 1, "管家联系人 combobox");
   await trigger.click();
@@ -184,27 +190,33 @@ export async function fillButlerContact(page, selection) {
   await assertCount(search, 1, "管家联系人搜索输入框");
   if (displayName) await search.fill(displayName);
   await delay(400);
-  const options = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
-  );
-  await options.first().waitFor({ state: "visible", timeout: 8_000 });
-  const total = await options.count();
-  const collected = await Promise.all(
-    Array.from({ length: total }, async (_, index) => {
-      const text = (await options.nth(index).innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-      const value = await options.nth(index).getAttribute("data-value").catch(() => null);
-      const id = await options.nth(index).getAttribute("data-id").catch(() => null);
-      return { value: String(value || id || ""), label: text };
-    }),
-  );
-  const targetIndex = findButlerOptionIndex(collected, { contactCardId, displayName });
+  const options = await getControlledDropdownOptions(page, trigger);
+  await options.first().waitFor({ state: "visible", timeout: BASIC_INFO_SEARCH_TIMEOUT_MS });
+  // 下拉打开时会先显示空关键词第一页（最多 50 条），`search.fill()` 后服务端
+  // 过滤结果异步替换这一批 DOM。不能看到首项就立即采集，否则会把仍在途的
+  // 精确联系人误判为“不存在”。持续读取当前可见候选，直到目标真正出现。
+  let collected = [];
+  let collectedSnapshot = [];
+  let targetIndex = -1;
+  const searchDeadline = Date.now() + BASIC_INFO_SEARCH_TIMEOUT_MS;
+  while (Date.now() < searchDeadline) {
+    const snapshot = await readLocatorSnapshot(options);
+    collectedSnapshot = snapshot;
+    collected = snapshot.map((option) => ({
+      value: option.value || option.id,
+      label: option.text.replace(/\s+/g, " ").trim(),
+    }));
+    targetIndex = findButlerOptionIndex(collected, { contactCardId, displayName });
+    if (targetIndex >= 0) break;
+    await delay(150);
+  }
   if (targetIndex < 0) {
     const texts = collected.map((option) => option.label);
     const who = displayName ? `「${displayName}」(ID ${contactCardId})` : `ID ${contactCardId}`;
     const detail = `管家联系人${who}不在 VBK 联系人下拉中（缺少 ID / 姓名精确匹配项）；请在 VBK 维护该联系人或更新账号固定信息后再重试。可选：${texts.filter(Boolean).join("、") || "无"}`;
     throw new Error(detail);
   }
-  await options.nth(targetIndex).click();
+  const clicked = await clickLocatorSnapshotOption(options, collectedSnapshot[targetIndex]);
+  if (!clicked) throw new Error("管家联系人候选在提交前已被页面刷新，请重试。");
   await delay(300);
 }

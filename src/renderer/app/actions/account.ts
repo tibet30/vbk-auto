@@ -21,6 +21,7 @@ export function useAccountHandlers(state: AppState) {
     editingAccount,
     currentProviderId,
     contactCardSearch,
+    setFixedInfoReloadToken,
   } = state;
 
   // 进入账号编辑器：只读取 schema + fixedInfo，不预拉联系人列表。
@@ -135,6 +136,7 @@ export function useAccountHandlers(state: AppState) {
     setFixedInfoSaving(true);
     try {
       await api()!.accounts.saveFixedInfo(editingAccount, fixedInfoDraft);
+      setFixedInfoReloadToken((value) => value + 1);
       setNotice("账号固定信息已保存。");
       closeAccountEditor();
     } catch (error) {

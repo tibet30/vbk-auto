@@ -25,6 +25,7 @@ import {
   DEFAULT_VEHICLE_SUBMIT_TIMEOUT_MS,
 } from "./resources.constants.js";
 import { waitForSubmitButtonReady } from "./resources.helpers.js";
+import { ensureVehicleResourceBinding } from "./vehicle-resource-api.js";
 
 /**
  * 用车资源阶段入口；options 字段允许测试注入短 timeout。
@@ -53,6 +54,19 @@ export async function ensureVehicleResource(page, product, productId, options = 
   if (product.sales.productForm !== "privateTour") return { skipped: "非私家团" };
   if (!vehicle || !vehicle.resourceGroupId || !vehicle.resourceGroupName) {
     return { skipped: "未配置 operations.vehicleResource（需人工预置后补跑本阶段）" };
+  }
+
+  // 真实 VBK 会话直接复用 Tour Helper 后端协议。file:/about:blank 等本地页面
+  // 继续走下方 DOM 契约，既保留离线测试能力，也避免在无 cookie origin 上
+  // 读取 document.cookie 触发 SecurityError。
+  const pageUrl = await page.url();
+  if (/^https:\/\/vbooking\.ctrip\.com\//i.test(pageUrl)) {
+    return ensureVehicleResourceBinding(
+      page,
+      productId,
+      vehicle.resourceGroupId,
+      vehicle.resourceGroupName,
+    );
   }
 
   await page.goto(productSectionUrl(productId, "vehicleResource"), {

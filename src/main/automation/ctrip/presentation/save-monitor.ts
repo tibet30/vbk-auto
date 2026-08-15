@@ -61,6 +61,20 @@ export interface InstallOptions {
 }
 
 /**
+ * 平台明确返回敏感词时使用的结构化错误。上层自动化据此触发 AI 局部重写，
+ * 不再依赖解析面向运营的错误字符串。
+ */
+export class PresentationSensitiveWordsError extends Error {
+  constructor(
+    public readonly sensitiveWords: string[],
+    public readonly httpStatus: number,
+  ) {
+    super(`产品图文触发敏感词，请先调整文案：${sensitiveWords.join("、")}（HTTP=${httpStatus}）`);
+    this.name = "PresentationSensitiveWordsError";
+  }
+}
+
+/**
  * 在 page 上挂监听 /15638/savedescriptioninfo 与 /15638/checkSensitiveWord，
  * 并返回 monitor 对象。调用方负责：
  *   - 在点击保存按钮之前 install；
@@ -197,8 +211,7 @@ function installSaveMonitor(page: any, options: InstallOptions = {}) {
     if (fields.sensitiveWords.length > 0) {
       // 敏感词命中永远优先失败 —— 即便 save 已收 success=true 也覆盖。
       // 用 include save httpStatus 的方式保留诊断上下文。
-      const msg = `产品图文触发敏感词，请先调整文案：${fields.sensitiveWords.join("、")}（HTTP=${httpStatus}）`;
-      settle(null, new Error(msg));
+      settle(null, new PresentationSensitiveWordsError(fields.sensitiveWords, httpStatus));
       return;
     }
     // 敏感词响应到达且无敏感词：递减 pending；若 save 已缓存且现在 pending=0，回放结算。

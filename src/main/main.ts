@@ -44,8 +44,10 @@ import { registerPlanningIpc } from "./ipc/planning-ipc.js";
 import type { MainIpcContext } from "./ipc/context.js";
 import { ProductWorkflowCoordinator } from "./application/product-workflow-coordinator.js";
 import { ProductMutationService } from "./application/product-mutation-service.js";
+import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+applyAppMetadata();
 /** 当前是否为开发模式（未打包），用于开关 DevTools / 临时文件路径。 */
 const isDev = !app.isPackaged;
 function logPoiManualIpc(event: string, context: Record<string, unknown>) {
@@ -63,6 +65,25 @@ app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 app.commandLine.appendSwitch("log-level", "2");
 /** MiniMax 默认 model：环境变量优先，否则用产品默认的「MiniMax-M3」。 */
 const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
+
+function formatProcessRejection(reason: unknown): { message: string; stack?: string } {
+  if (reason instanceof Error) return { message: reason.message, stack: reason.stack };
+  return { message: String(reason) };
+}
+
+function isPlaywrightNoDialogShowingRejection(reason: unknown): boolean {
+  const { message, stack } = formatProcessRejection(reason);
+  return /Page\.handleJavaScriptDialog[\s\S]*No dialog is showing/.test(`${message}\n${stack ?? ""}`);
+}
+
+process.on("unhandledRejection", (reason) => {
+  const formatted = formatProcessRejection(reason);
+  if (isPlaywrightNoDialogShowingRejection(reason)) {
+    logWarn("[playwright] ignored native JS dialog race", { message: formatted.message });
+    return;
+  }
+  logError("[process] unhandledRejection", formatted);
+});
 
 let window: BrowserWindow;
 let db: VbkDatabase;
@@ -315,6 +336,8 @@ async function openMainWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  applyDevDockIcon(root);
+  installApplicationMenu();
   db = new VbkDatabase(app.getPath("userData"));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));

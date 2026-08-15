@@ -25,6 +25,7 @@ import type {
   AdvisorRequest,
   PhaseAttempt,
 } from "../../../shared/contracts.js";
+import { NonAdvisableAutomationError } from "../automation.main/automation.main.errors.js";
 
 /**
  * 对单个 phase 做「尝试 → 失败 → 调 advisor → 应用 action → 重试」主循环。
@@ -127,6 +128,16 @@ export async function runPhaseWithRecovery(
       rec.attempts.push(attemptRecord);
       ctx.log(`phase=${ctx.phase} attempt=${attempt} failed`, "warning");
       persist();
+
+      // VBK 下拉明确缺少账号固定数据等确定性系统错误，不是“不会选”。
+      // 保留原错误并立即交给上层失败路径，禁止调用 AI advisor 或盲目重试。
+      if (err instanceof NonAdvisableAutomationError) {
+        rec.state = "needs_user";
+        rec.finalError = errorMessage;
+        ctx.log(`phase=${ctx.phase} nonAdvisableFailure`, "error");
+        persist();
+        throw err;
+      }
 
       // 达到上限后：不再 advisor、不再 applyAction，直接 needs_user
       if (attempt >= MAX_PHASE_ATTEMPTS) {

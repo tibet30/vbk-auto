@@ -13,6 +13,7 @@ import { productEditorUrl } from "../../constants.js";
 import { dayScopeFor, ensureOtherCard, ensureServiceTimeRange, clickExact } from "./common.js";
 import { fillHotelCard, fillMealCards } from "./cards.js";
 import { fillPickupAndDropoff, handleAirportTrainModal } from "./stations.js";
+import { ensureItinerarySpotsApi } from "../itinerary-api.js";
 
 /**
  * 行程描述阶段「套餐管理」URL 命中常量（导出供测试断言使用）：
@@ -152,8 +153,9 @@ export async function fillItineraryDraft(page, product, options = {}) {
   if (!submitResult?.advanced) {
     throw new Error("ItineraryDraft 未提交通过：未进入下一阶段");
   }
+  const spotResult = await ensureItinerarySpotsApi(page, product, productId);
   await delay(3_000);
-  return { savedWith, days: product.itinerary.length };
+  return { savedWith, days: product.itinerary.length, spotResult };
 }
 
 /**

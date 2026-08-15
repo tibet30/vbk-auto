@@ -88,6 +88,10 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
         throw error;
       }
     },
+    async (request) => {
+      args.getSettings();
+      return (await args.aiService()).reply({ ...request, history: [] });
+    },
   );
   const services = { window, browser, automation };
   // IPC handlers are registered before createMainWindow. Publish all service

@@ -51,6 +51,23 @@ test("draftPhasesFor: pricing 和 inventory 都不存在时不包含 pricingInve
   assert.equal(draftPhasesFor(withoutPricingInventory).includes("pricingInventory"), false);
 });
 
+test("draftPhasesFor: 含住宿时也先提交行程，解锁后再创建套餐", () => {
+  const product = parseProduct({
+    ...baseProduct,
+    basicInfo: { ...baseProduct.basicInfo, days: 2, nights: 1 },
+    commercial: { packageName: "住宿套餐" },
+    itinerary: [
+      { ...baseProduct.itinerary[0], hotel: "当地4钻酒店" },
+      { ...baseProduct.itinerary[0], day: 2, title: "太原送站", hotel: "" },
+    ],
+  });
+
+  assert.deepEqual(
+    draftPhasesFor(product).slice(0, 4),
+    ["basic", "presentation", "itinerary", "package"],
+  );
+});
+
 test("pricingInventory 阶段存在但 inventory 缺失时，由阶段处理器报告缺配置", async () => {
   const product = parseProduct({
     ...baseProduct,

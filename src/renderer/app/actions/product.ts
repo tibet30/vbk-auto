@@ -1,4 +1,5 @@
 import type { ProductSummary } from "../../../shared/contracts.js";
+import { aiProviderLabel, hasActiveAiKey } from "../../../shared/contracts.js";
 import { api } from "../helpers";
 import type { AppState } from "../state/useAppState";
 
@@ -8,6 +9,7 @@ export function useProductHandlers(state: AppState) {
     input,
     loading,
     createInput,
+    settings,
     setInput,
     setLoading,
     setNotice,
@@ -71,6 +73,10 @@ export function useProductHandlers(state: AppState) {
   };
 
   const createProduct = async () => {
+    if (!hasActiveAiKey(settings)) {
+      setNotice(`尚未配置 AI 模型，请先到「设置」中配置 ${aiProviderLabel(settings)} 的 API Key 后再创建产品。`);
+      return;
+    }
     if (!createInput.destination.trim()) {
       setNotice("请填写目的地。");
       return;

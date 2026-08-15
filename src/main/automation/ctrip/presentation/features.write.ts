@@ -15,6 +15,7 @@
 import type { EditorTarget } from "./features.types.js";
 import { delay } from "../utils.js";
 import { syncReactStateForTarget, type ReactSyncOutcome } from "./features.react-sync.js";
+import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../../domain/product/features-rich-text.js";
 
 /**
  * 把 value 写入目标编辑器：
@@ -26,38 +27,33 @@ import { syncReactStateForTarget, type ReactSyncOutcome } from "./features.react
  * 返回 ueditorUsed（iframe-body 命中了 window.parent.UE?.instants 同源实例时为 true）。
  */
 async function writeToEditor(target: EditorTarget, value: string): Promise<boolean> {
+  const safeHtml = formatProductFeaturesHtml(value);
   if (target.type === "iframe-body") {
     // UEditor owns the iframe body.  Use only the exact same-origin instance; never
     // scan arbitrary editors or rely on blur to synchronize its hidden textarea.
-    const result = await target.locator.evaluate((body: HTMLElement | null, text: string) => {
+    const result = await target.locator.evaluate((body: HTMLElement | null, html: string) => {
       if (!body) return { ok: false, ueditor: false };
       const parentWindow = window.parent;
       const instants = (parentWindow as any)?.UE?.instants;
       const editor = instants && Object.values(instants).find((candidate: any) => candidate?.body === body) as any;
-      const lines = String(text || "").split(/\n/);
-      const escaped = lines.map((line) => line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;")).join("<br>");
       if (editor) {
-        editor.setContent(escaped);
+        editor.setContent(html);
         editor.sync();
         return { ok: true, ueditor: true };
       }
       body.focus();
-      body.innerHTML = "";
-      for (let i = 0; i < lines.length; i += 1) {
-        if (i > 0) body.appendChild(document.createElement("br"));
-        body.appendChild(document.createTextNode(lines[i]!));
-      }
-      body.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+      body.innerHTML = html;
+      body.dispatchEvent(new InputEvent("input", { bubbles: true, data: html, inputType: "insertText" }));
       body.dispatchEvent(new Event("change", { bubbles: true }));
       body.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
       return { ok: true, ueditor: false };
-    }, value);
+    }, safeHtml);
     if (!result?.ok) throw new Error("iframe body 不可写");
     return Boolean(result.ueditor);
   }
   await target.locator.waitFor({ state: "visible", timeout: 3_000 });
   if (!(await target.locator.isEditable().catch(() => false))) throw new Error("目标编辑器不可编辑");
-  await target.locator.fill(value);
+  await target.locator.fill(productFeaturesPlainText(safeHtml));
   return false;
 }
 
@@ -89,15 +85,18 @@ function normalize(value: string): string {
 }
 
 function readbackIncludes(readback: any, value: string): boolean {
-  const expected = normalize(value);
+  const expectedHtml = normalize(formatProductFeaturesHtml(value));
+  const expectedText = normalize(productFeaturesPlainText(expectedHtml));
   if (readback && typeof readback === "object") {
     const body = normalize(readback.bodyText);
     if (readback.ueditor) {
-      return body.includes(expected) && normalize(readback.hiddenText).includes(expected) && normalize(readback.content).includes(expected);
+      return body.includes(expectedText)
+        && normalize(productFeaturesPlainText(readback.hiddenText)).includes(expectedText)
+        && normalize(productFeaturesPlainText(readback.content)).includes(expectedText);
     }
-    return body.includes(expected);
+    return body.includes(expectedText);
   }
-  return normalize(readback).includes(expected);
+  return normalize(readback).includes(expectedText);
 }
 
 /**
@@ -110,7 +109,7 @@ async function retryWrite(target: EditorTarget, value: string) {
   }
   await target.locator.fill("");
   await delay(50);
-  await target.locator.fill(value);
+  await target.locator.fill(productFeaturesPlainText(formatProductFeaturesHtml(value)));
 }
 
 /**

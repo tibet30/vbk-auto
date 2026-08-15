@@ -2,7 +2,7 @@
  * 自动化「单阶段重新执行」入口：runOnePhase。
  *   - 仅重跑指定 phase，其它阶段保留原状态（不全清）；
  *   - 调用 prepareSinglePhaseRetry 准备新 AutomationRun，run.status 临时变 running；
- *   - 「在当前页面去重试」偏好：advice 的 reload/reopen 动作走 noop；
+ *   - recovery 重试前会刷新目标阶段页，避免沿用上轮脏 DOM；
  *   - 完成后把 run.status 恢复为 originalRunStatus，让 UI 上的 succeeded / cancelled / failed
  *     标签不丢失。
  */
@@ -17,15 +17,14 @@ import { prepareSinglePhaseRetry } from "../phase-retry.js";
 import {
   fillAndSaveBasicInfo,
   fillAndSavePackage,
-  fillAndSavePresentation,
   fillAndSaveTerms,
   fillAndSubmitPricingInventory,
-  fillItineraryDraft,
   ensureHotelResource,
   ensureVehicleResource,
   openProductEditor,
   runProductPreflight,
 } from "../ctrip/ctrip.js";
+import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
 import { productNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
@@ -33,8 +32,12 @@ import { isProductImageTextUrl } from "../ctrip/tabs.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
+import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
+import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
+import { ensurePackageApi } from "../ctrip/package-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
+import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 
 /**
  * 单阶段重新执行入口：
@@ -93,10 +96,8 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       ctx.browser.setVisible(true);
       ctx.ensureBrowserHasBounds();
       const page = await ctx.browser.page({ requireInteractive: true });
-      // 「重新执行」复用「在当前页面去重试」偏好：不调 openProductEditor 拽回
-      // 「基本信息」 tab；页面应已停在原产品某子 tab 上，由各阶段 handler 自
-      // 己 clickSection 切到目标 tab。仅在 productId 还没创建时跳过 —— 这种
-      // 情况调用方（retryOnePhase）已拦截。
+      // 入口仍保留当前产品上下文；若 recovery 进入第 2/3 次 attempt，
+      // applyAction 会在每次重试前刷新目标 phase 的独立页面。
       if (productId) await openProductEditor(page, productId, { stayOnCurrentTab: true });
 
       const phaseRecord = (phase: string) => {
@@ -111,10 +112,10 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       // 调 fill 函数 + 标记 completed 即可。这块逻辑与 run() 里的 handler
       // 同型 — 仅去掉 multi-phase forward 部分。
       const fillMap: Record<string, () => Promise<unknown>> = {
-        presentation: () => fillAndSavePresentation(page, productData),
-        itinerary: () => fillItineraryDraft(page, productData, { disambiguator: ctx.disambiguator, productId: productId ?? "" }),
-        package: () => fillAndSavePackage(page, productData),
-        pricingInventory: () => fillAndSubmitPricingInventory(page, productData, productId!),
+        presentation: () => fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product: productData, log }),
+        itinerary: () => fillItineraryDraftApi(page, productData, { disambiguator: ctx.disambiguator, productId: productId ?? "" }),
+        package: () => ensurePackageApi(page, productData, productId!),
+        pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!),
         terms: () => fillAndSaveTerms(page, productData, productId),
         hotelResource: () => ensureHotelResource(page, productData, productId!),
         vehicleResource: () => ensureVehicleResource(page, productData, productId!),
@@ -163,6 +164,15 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             if (!fillFn) throw new Error(`未注册的阶段：${phaseName}`);
             phaseRecord(phaseName);
             const result = await fillFn();
+            if (phaseName === "vehicleResource") {
+              const vehicleResult = result as { skipped?: unknown; resourceGroupId?: unknown; audited?: unknown };
+              if (vehicleResult.skipped) {
+                throw new Error(`用车资源重新执行未完成：${String(vehicleResult.skipped)}`);
+              }
+              if (!vehicleResult.resourceGroupId || vehicleResult.audited !== true) {
+                throw new Error("用车资源重新执行未完成：未取得已绑定资源组的确认结果。");
+              }
+            }
             // hotelResource 会更新 product.operations.hotelResource；其他阶段
             // 不需要额外动作。这里与 run() 中 hotelResource handler 同型 ——
             // 都用 source / resourceId / resourceName / hotelTier / diamond
@@ -193,9 +203,9 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         basicInfoSaved,
         execute,
         advisor: ctx.advisor,
-        applyAction: async (action) => {
+        applyAction: async (action, attempt) => {
           if (action === "wait_for_user") throw new Error("applyAction 不应收到 wait_for_user");
-          log(`applyAction noop action=${action} phase=${phaseName}（单阶段重试不执行 reload / reopen）`, "info");
+          await refreshPhasePageBeforeRetry({ page, productId, phase: phaseName, action, attempt, log });
         },
         log,
         persist,
@@ -208,7 +218,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           run.status = "failed";
           run.phases[phaseIndex].status = "failed";
           run.currentPhase = phaseName;
-          ctx.db.updateProduct(localProductId, product.product, "blocked");
+          ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "blocked");
           break;
         case "cancelled":
           ctx.markCancelled(localProductId, run, persist);
@@ -225,7 +235,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             run.status = "succeeded";
             await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
             log("产品草稿已保存，未提交审核、未发布。", "warning");
-            ctx.db.updateProduct(localProductId, product.product, "draft_saved");
+            ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "draft_saved");
           }
           break;
         }
@@ -239,7 +249,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       run.phases[phaseIndex].status = "failed";
       run.currentPhase = phaseName;
       log(error instanceof Error ? error.message : "重新执行发生未知错误", "error");
-      ctx.db.updateProduct(localProductId, product.product, "blocked");
+      ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "blocked");
       persist();
       throw error;
     }

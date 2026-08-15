@@ -43,7 +43,9 @@ export async function selectStationAddress(page, card, city, extra = {}) {
     await safeClick(page, input);
     await input.fill("").catch(() => {});
     await input.type(city, { delay: 80 });
-    await delay(3_000);
+    // 不再固定等待 3 秒：下拉自身的 visible/option 门控已经覆盖远程加载，
+    // 固定 sleep 会让同一弹窗的机场、火车站以及整组集成测试线性变慢。
+    await delay(300);
     const dropdown = page.locator(
       '.ant-select-dropdown:not(.ant-select-dropdown-hidden)',
     ).last();
@@ -61,6 +63,7 @@ export async function selectStationAddress(page, card, city, extra = {}) {
       await dropdown.waitFor({ state: "visible", timeout: 3_000 });
     }
     const options = dropdown.locator('.ant-select-dropdown-menu-item');
+    await options.first().waitFor({ state: "visible", timeout: 3_000 }).catch(() => undefined);
     const total = await options.count().catch(() => 0);
     logWarn(`[selectStationAddress/fillStationField] kind=${kind} dropdown count=${total}`);
     if (!total) {
@@ -121,23 +124,51 @@ export async function selectStationAddress(page, card, city, extra = {}) {
       await delay(150);
       return { matched: true, source: "exact", text: usable[exactIdx] };
     }
+    // 城市机场候选可能使用机场专名（例如“武宿国际机场”），不含城市名。
+    // 在没有 AI 消歧器时，优先唯一的国际机场/城市机场，避免把机场地址静默留空。
+    if (!disambiguator && kind === "airport") {
+      const primary = usable
+        .map((text, index) => ({ text, index }))
+        .filter(({ text }) => text.includes("国际机场") || new RegExp(`${escapeRegExp(city)}机场`).test(text));
+      if (primary.length === 1) {
+        await options.nth(texts.findIndex((text) => text === primary[0].text)).click({ force: true });
+        await delay(200);
+        await page.keyboard.press("Escape").catch(() => false);
+        await delay(150);
+        return { matched: true, source: "primary-airport", text: primary[0].text };
+      }
+    }
     if (disambiguator && usable.length > 0) {
       const candidates = texts.map((text, i) => ({ index: i, text }));
+      const stationSubtype = kind === "airport" ? "airport" : "train";
       try {
-        const aiMatch = await disambiguator(
-          candidates,
-          disableds,
-          [city, `${city}站`, `${city}南站`, `${city}北站`, `${city}东站`, `${city}西站`, `${city}机场`],
-          { kind, desired: city, product, description: `${kind}接送站` },
-        );
+        const aiCandidates = candidates
+          .filter((candidate) => !disableds[candidate.index])
+          .map((candidate) => ({ id: String(candidate.index), text: candidate.text }));
+        logInfo("[selectStationAddress] AI 兜底请求", {
+          field: kind,
+          desired: city,
+          candidates: aiCandidates.map((candidate) => candidate.text),
+        });
+        const aiMatch = await disambiguator({
+          kind: "station",
+          stationSubtype,
+          desired: city,
+          candidates: aiCandidates,
+          product,
+        });
         let chosenIndex = -1;
-        if (aiMatch && typeof aiMatch.index === "number" && candidates[aiMatch.index] && !disableds[aiMatch.index]) {
-          chosenIndex = aiMatch.index;
-        } else if (aiMatch && aiMatch.pickedText) {
+        if (aiMatch && aiMatch.pickedText) {
           const idx = candidates.findIndex((c) => c.text === aiMatch.pickedText);
           if (idx >= 0 && !disableds[idx]) chosenIndex = idx;
         }
         if (chosenIndex >= 0) {
+          logInfo("[selectStationAddress] AI 兜底选中", {
+            field: kind,
+            desired: city,
+            picked: candidates[chosenIndex].text,
+            reasoning: aiMatch.reasoning,
+          });
           await delay(150);
           await options.nth(chosenIndex).click({ force: true });
           await delay(200);
@@ -185,17 +216,46 @@ export async function selectStationAddress(page, card, city, extra = {}) {
 async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations, extra = {}) {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product;
-  async function setAllDay(card, description) {
-    const radio = card.locator('input[type="radio"][value="0"]');
-    const deadline = Date.now() + 5_000;
-    while (!(await radio.count()) && Date.now() < deadline) await delay(200);
-    if (!(await radio.count())) throw new Error(`找不到可设置的${description}`);
-    const label = radio.locator(
-      "xpath=ancestor::label[contains(@class,'ant-radio-wrapper')][1]",
-    );
-    if (!((await label.getAttribute("class")) || "").includes("ant-radio-wrapper-checked")) {
-      await label.click({ force: true });
+  async function ensureNamedMode(card, labelText, description) {
+    const labels = card.getByText(labelText, { exact: true });
+    for (let i = 0; i < await labels.count(); i += 1) {
+      const text = labels.nth(i);
+      if (!(await text.isVisible().catch(() => false))) continue;
+      const wrapper = text.locator("xpath=ancestor::label[contains(@class,'ant-checkbox-wrapper')][1]");
+      if (!(await wrapper.count())) continue;
+      const target = wrapper.first();
+      const input = target.locator('input[type="checkbox"]');
+      if (await input.isChecked().catch(() => false)) return;
+      await target.click({ force: true });
+      if (await input.isChecked().catch(() => false)) return;
+      await input.check({ force: true }).catch(() => undefined);
+      if (await input.isChecked().catch(() => false)) return;
     }
+    throw new Error(`${description}未形成选中状态`);
+  }
+  async function setAllDay(card, description) {
+    const deadline = Date.now() + 5_000;
+    // 新版 VBK 的「全天」值为 D，旧版曾使用 0。逐个检查可见 wrapper，
+    // 避免跨 card / 隐藏节点的同名文本被误定位。
+    while (Date.now() < deadline) {
+      const radios = card.locator('input[type="radio"][value="D"], input[type="radio"][value="0"]');
+      for (let i = 0; i < await radios.count(); i += 1) {
+        const radio = radios.nth(i);
+        const label = radio.locator("xpath=ancestor::label[contains(@class,'ant-radio-wrapper')][1]");
+        if (!(await label.count()) || !(await label.isVisible().catch(() => false))) continue;
+        if (!/全天/.test((await label.innerText().catch(() => "")).trim())) continue;
+        // 真实 VBK 的可服务时间 radio 是受控组件：force click 会绕过它的
+        // 正常命中链，视觉上完成 click 但 React state 仍保持未选中。
+        // 这里必须走普通 label click；失败则由外层短轮询重新解析后再试。
+        if (!(await radio.isChecked().catch(() => false))) {
+          await label.scrollIntoViewIfNeeded().catch(() => undefined);
+          await label.click({ timeout: 2_000 }).catch(() => undefined);
+        }
+        if (await radio.isChecked().catch(() => false)) return;
+      }
+      await delay(200);
+    }
+    throw new Error(`找不到可设置的${description}`);
   }
   async function fillEmptyStationAddresses(card) {
     const stationInputs = card.locator('input.ant-input[placeholder="请选择"]');
@@ -215,7 +275,7 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
     if (cards.length !== 1) throw new Error("首日集合节点结构异常");
     const modes = cards[0].getByRole("checkbox");
     if ((await modes.count()) < 3) throw new Error("首日集合方式控件结构异常");
-    await ensureCheckboxChecked(modes.nth(2));
+    await ensureNamedMode(cards[0], "接机/站", "首日接送站方式");
     await setAllDay(cards[0], "首日集合时间");
     await delay(300);
     await fillEmptyStationAddresses(cards[0]);
@@ -225,7 +285,7 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
     if (cards.length !== 1) throw new Error("末日解散节点结构异常");
     let modes = cards[0].getByRole("checkbox");
     if ((await modes.count()) < 2) throw new Error("末日解散方式控件结构异常");
-    await ensureCheckboxChecked(modes.nth(1));
+    await ensureNamedMode(cards[0], "送机/站", "末日接送站方式");
     await setAllDay(cards[0], "末日解散时间");
     await delay(300);
     modes = cards[0].getByRole("checkbox");
@@ -242,7 +302,9 @@ async function fillPickupAndDropoff(page, dayScope, index, totalDays, operations
  * 处理「请选择机场/火车站」modal：先点开机场输入框填 city 找 `${city}机场`；再点火车输入框
  * 找 `${city}`；最后确定。失败时按当前 enabled 的第一项兜底选择，返回是否成功关闭。
  */
-async function handleAirportTrainModal(page, city) {
+async function handleAirportTrainModal(page, city, extra = {}) {
+  const disambiguator = extra?.disambiguator;
+  const product = extra?.product ?? {};
   const modalTitle = page.locator('.ant-modal-title').filter({ hasText: "请选择机场/火车站" });
   if ((await modalTitle.count()) === 0) return false;
   const modal = modalTitle.first().locator("xpath=ancestor::*[contains(@class,\"ant-modal\")][1]");
@@ -254,33 +316,88 @@ async function handleAirportTrainModal(page, city) {
     logWarn("[handleAirportTrainModal] modal 输入数量不足：", inputCount);
     return false;
   }
-  await searchInputs.nth(0).click({ force: true });
-  await delay(300);
-  await searchInputs.nth(0).fill("");
-  await searchInputs.nth(0).type(city, { delay: 80 });
-  await delay(500);
-  const airportOption = page.locator('.ant-select-dropdown-menu-item').filter({
-    hasText: new RegExp(`^${escapeRegExp(city)}机场$`),
-  }).first();
-  if ((await airportOption.count()) === 0) {
-    await page.locator('.ant-select-dropdown-menu-item:not(.ant-select-dropdown-menu-item-disabled)').first().click({ force: true }).catch(() => {});
-  } else {
-    await airportOption.click({ force: true });
+
+  async function selectField(fieldIndex, stationSubtype, aliases) {
+    const input = searchInputs.nth(fieldIndex);
+    await input.click({ force: true });
+    await delay(300);
+    await input.fill("");
+    await input.type(city, { delay: 80 });
+    await delay(800);
+    const options = page.locator('.ant-select-dropdown-menu-item');
+    const total = await options.count().catch(() => 0);
+    const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.trim());
+    const disableds = await Promise.all(
+      Array.from({ length: total }, async (_, i) => {
+        const cls = (await options.nth(i).getAttribute("class").catch(() => "")) || "";
+        return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
+      }),
+    );
+    logWarn(`[handleAirportTrainModal] ${stationSubtype} candidates=`, texts.slice(0, 8));
+    const usableIndexes = texts
+      .map((text, index) => ({ text, index }))
+      .filter((entry) => entry.text && !disableds[entry.index] && !/^(?:not\s*found|loading|加载中|暂无数据|暂无结果|搜索中|请选择)$/i.test(entry.text))
+      .map((entry) => entry.index);
+    if (!usableIndexes.length) return { matched: false, reason: "empty-list" };
+    for (const alias of aliases) {
+      const exactIndex = usableIndexes.find((index) => texts[index] === alias);
+      if (typeof exactIndex === "number") {
+        await options.nth(exactIndex).click({ force: true });
+        await delay(500);
+        return { matched: true, source: "exact", text: texts[exactIndex] };
+      }
+    }
+    if (disambiguator) {
+      const aiCandidates = usableIndexes.map((index) => ({ id: String(index), text: texts[index] }));
+      try {
+        logInfo("[handleAirportTrainModal] AI 兜底请求", {
+          stationSubtype,
+          desired: city,
+          candidates: aiCandidates.map((candidate) => candidate.text),
+        });
+        const aiMatch = await disambiguator({
+          kind: "station",
+          stationSubtype,
+          desired: city,
+          candidates: aiCandidates,
+          product,
+        });
+        const pickedIndex = aiMatch?.pickedText
+          ? texts.findIndex((text, index) => text === aiMatch.pickedText && !disableds[index])
+          : -1;
+        if (pickedIndex >= 0) {
+          logInfo("[handleAirportTrainModal] AI 兜底选中", {
+            stationSubtype,
+            desired: city,
+            picked: texts[pickedIndex],
+            reasoning: aiMatch.reasoning,
+          });
+          await options.nth(pickedIndex).click({ force: true });
+          await delay(500);
+          return { matched: true, source: "ai", text: texts[pickedIndex], reasoning: aiMatch.reasoning };
+        }
+        logWarn("[handleAirportTrainModal] AI 未返回可点击候选", {
+          stationSubtype,
+          desired: city,
+          pickedText: aiMatch?.pickedText ?? null,
+        });
+      } catch (err) {
+        logWarn("[handleAirportTrainModal] AI 兜底失败，回退到第一可用项", {
+          stationSubtype,
+          err: String(err.message || err),
+        });
+      }
+    }
+    const fallbackIndex = usableIndexes[0];
+    await options.nth(fallbackIndex).click({ force: true }).catch(() => {});
+    await delay(500);
+    return { matched: true, source: "fallback-first", text: texts[fallbackIndex] };
   }
-  await delay(500);
-  await searchInputs.nth(1).click({ force: true });
-  await delay(300);
-  await searchInputs.nth(1).fill("");
-  await searchInputs.nth(1).type(city, { delay: 80 });
-  await delay(500);
-  const trainOption = page.locator('.ant-select-dropdown-menu-item').filter({
-    hasText: new RegExp(`^${escapeRegExp(city)}$`),
-  }).first();
-  if ((await trainOption.count()) === 0) {
-    await page.locator('.ant-select-dropdown-menu-item:not(.ant-select-dropdown-menu-item-disabled)').first().click({ force: true }).catch(() => {});
-  } else {
-    await trainOption.click({ force: true });
-  }
+
+  const airportResult = await selectField(0, "airport", [`${city}机场`, `${city}国际机场`]);
+  logInfo("[handleAirportTrainModal] airport", JSON.stringify(airportResult));
+  const trainResult = await selectField(1, "train", [city, `${city}站`, `${city}南站`, `${city}北站`, `${city}东站`, `${city}西站`]);
+  logInfo("[handleAirportTrainModal] train", JSON.stringify(trainResult));
   await delay(500);
   const confirm = modal.getByRole("button", { name: "确定", exact: true });
   if ((await confirm.count()) === 0) {

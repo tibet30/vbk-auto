@@ -82,6 +82,12 @@ export function hasValidItinerary(product: Record<string, unknown>): boolean {
     if (textValue(record.meals).length === 0) return false;
     const spots = asArray(record.spots);
     if (!spots || spots.length === 0) return false;
+    for (const spot of spots) {
+      const item = asObject(spot);
+      if (!item || textValue(item.name).length === 0) return false;
+      if (textValue(item.poiName).length === 0) return false;
+      if (!Number.isInteger(item.poiId) || Number(item.poiId) <= 0) return false;
+    }
   }
   return true;
 }

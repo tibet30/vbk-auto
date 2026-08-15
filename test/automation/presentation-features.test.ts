@@ -146,6 +146,30 @@ test("产品特点：iframe body（ueditor/wangEditor 形态）写入并回读�
   }
 });
 
+test("产品特色：安全 HTML 以富文本节点写入 iframe，不显示标签源码", async () => {
+  const srcdoc = `<!doctype html><html><body contenteditable="true"></body></html>`;
+  const page = await newPage(`
+    <div class="ant-form-item">
+      <label title="产品特色">产品特色</label>
+      <iframe id="features-rich-editor" srcdoc="${srcdoc.replace(/"/g, "&quot;")}"></iframe>
+    </div>
+  `);
+  try {
+    await page.waitForFunction(() => Boolean(
+      (document.querySelector("#features-rich-editor") as HTMLIFrameElement | null)?.contentDocument?.body,
+    ));
+    const value = "<p><strong>古建巡礼：</strong>游览晋祠古建。</p><p><strong>私享出行：</strong>专车衔接核心景点。</p>";
+    const result = await fillProductFeatures(page, value);
+    assert.equal(result.filled, true, result.diagnostic);
+    const body = page.frameLocator("#features-rich-editor").locator("body");
+    assert.equal(await body.locator("p").count(), 2);
+    assert.equal(await body.locator("strong").count(), 2);
+    assert.doesNotMatch(await body.innerText(), /<p>|<strong>/);
+  } finally {
+    await page.close();
+  }
+});
+
 test("产品特点：缺失时报诊断（无 label、无 #pm_features）", async () => {
   // 故意只放一个不相关表单与一个无「产品特点」label 的 textarea，必须不写入无关输入框、不静默成功，并返回 filled=false + 诊断。
   const html = `

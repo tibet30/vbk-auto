@@ -269,7 +269,22 @@ test("matchDropdownOption「唯一可用项」直接选，不依赖精确也不�
   assert.ok(aiCalled, "多项未命中应调 AI");
   assert.deepEqual(r4, { index: 1, text: "大同站", source: "ai", reasoning: "mock" }, "AI 选中应返回 ai 源");
 
-  // 5. 多项 + 仅有境外项 → AI 候选为空 → null（不让 AI 误中境外）
+  // 5. stationSubtype 会透传给 AI，便于机场/火车站候选按各自场景选择主站。
+  let seenSubtype: string | undefined;
+  const r4b = await matchDropdownOption(
+    [{ text: "武宿国际机场" }, { text: "太原尧城通用机场" }],
+    [false, false],
+    ["太原"],
+    { kind: "station", stationSubtype: "airport", desired: "太原", product: {}, description: "机场接送站" },
+    async (input) => {
+      seenSubtype = input.stationSubtype;
+      return { pickedText: input.candidates[0].text, reasoning: "主机场" };
+    },
+  );
+  assert.equal(seenSubtype, "airport", "机场接送站必须把 stationSubtype=airport 交给 AI");
+  assert.deepEqual(r4b, { index: 0, text: "武宿国际机场", source: "ai", reasoning: "主机场" });
+
+  // 6. 多项 + 仅有境外项 → AI 候选为空 → null（不让 AI 误中境外）
   const r5 = await matchDropdownOption(
     [{ text: "朝鲜-大同" }, { text: "韩国-大同" }],
     [false, false],
@@ -279,7 +294,7 @@ test("matchDropdownOption「唯一可用项」直接选，不依赖精确也不�
   );
   assert.equal(r5, null, "仅有境外项时不允许返回任何选项");
 
-  // 6. AI 抛错 → null（不拖崩上游）
+  // 7. AI 抛错 → null（不拖崩上游）
   const r6 = await matchDropdownOption(
     [{ text: "云冈机场" }, { text: "云冈石窟" }],
     [false, false],
@@ -289,7 +304,7 @@ test("matchDropdownOption「唯一可用项」直接选，不依赖精确也不�
   );
   assert.equal(r6, null, "AI 异常必须降级为 null");
 
-  // 7. disabled 唯一项不能被选中（避免误中「不可用」项）
+  // 8. disabled 唯一项不能被选中（避免误中「不可用」项）
   const r7 = await matchDropdownOption(
     [{ text: "大同站" }],
     [true],

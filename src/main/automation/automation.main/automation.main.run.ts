@@ -8,8 +8,8 @@
  *     负责尝试 → advisor → 决策；
  *   - cancelled 由 AutomationCancelledError 短路，failed 落库 blocked 状态。
  *
- * 设计偏好：「在当前页面去重试」—— advisor 的 reload/reopen 动作走 noop，
- * 不强制拽回 basic tab，避免把页面状态丢失。
+ * 设计偏好：每次 recovery 重试前先刷新当前 phase 的编辑页，再重新执行 handler，
+ * 避免图片 / 富文本等 VBK 页面脏状态泄漏到下一轮。
  */
 
 import { randomUUID } from "node:crypto";
@@ -27,20 +27,23 @@ import {
   ensureVehicleResource,
   fillAndSaveBasicInfo,
   fillAndSavePackage,
-  fillAndSavePresentation,
   fillAndSaveTerms,
   fillAndSubmitPricingInventory,
-  fillItineraryDraft,
   openProductEditor,
   runProductPreflight,
   saveScreenshot,
 } from "../ctrip/ctrip.js";
+import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
+import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
+import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
+import { ensurePackageApi } from "../ctrip/package-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
+import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 
 /**
  * 单个产品自动化阶段主循环：
@@ -187,10 +190,15 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       };
 
       const handlers: Record<string, () => Promise<unknown>> = {
-        presentation: async () => { phaseRecord("presentation"); const r = await fillAndSavePresentation(page, product); run.phases[draftPhases.indexOf("presentation")].status = "completed"; return r; },
-        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraft(page, product, { disambiguator: ctx.disambiguator, productId }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
-        package: async () => { phaseRecord("package"); const r = await fillAndSavePackage(page, product); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
-        pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await fillAndSubmitPricingInventory(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
+        presentation: async () => {
+          phaseRecord("presentation");
+          const r = await fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product, log });
+          run.phases[draftPhases.indexOf("presentation")].status = "completed";
+          return r;
+        },
+        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraftApi(page, product, { disambiguator: ctx.disambiguator, productId }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
+        package: async () => { phaseRecord("package"); const r = await ensurePackageApi(page, product, productId!); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
+        pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await ensurePricingInventoryApi(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
         terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product, productId); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },
         hotelResource: async () => {
           phaseRecord("hotelResource");
@@ -231,17 +239,11 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         basicInfoSaved,
         execute,
         advisor: ctx.advisor,
-        applyAction: async (action) => {
-          // 仅白名单动作能落到浏览器：只接受 wait_for_user 真正停手；其余
-          // 三个重试动作全部一律 Noop —— 用户偏好「在当前页面去重试」，
-          // 不希望 reload_and_retry_phase / reopen_editor_and_retry_phase
-          // 重新打开产品编辑器（会带页面跳回“基本信息” tab 并造成上次状
-          // 态丢失）。advisor 提议的诊断信息仍会落盘到 attemptsHistory
-          // 以供下次会话接手；仅不再执行 reload / reopen 动作。
+        applyAction: async (action, attempt) => {
           if (action === "wait_for_user") {
             throw new Error("applyAction 不应收到 wait_for_user");
           }
-          log(`applyAction noop action=${action} phase=${phase}（当前页面重试偏好）`, "info");
+          await refreshPhasePageBeforeRetry({ page, productId, phase, action, attempt, log });
         },
         log,
         persist,
@@ -263,7 +265,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           run.status = "failed";
           run.phases[0].status = "failed";
           run.currentPhase = "basic";
-          ctx.db.updateProduct(localProductId, productDetail.product, "blocked");
+          ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "blocked");
           persist();
           return;
         }
@@ -289,7 +291,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           run.status = "failed";
           run.phases[index].status = "failed";
           run.currentPhase = phase;
-          ctx.db.updateProduct(localProductId, productDetail.product, "blocked");
+          ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "blocked");
           persist();
           return;
         }
@@ -323,7 +325,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const current = run.phases.find((phase: { phase: string; status: string }) => phase.phase === run.currentPhase);
       if (current && current.status !== "completed") current.status = "failed";
       log(error instanceof Error ? error.message : "自动录入发生未知错误", "error");
-      ctx.db.updateProduct(localProductId, productDetail.product, "blocked");
+      ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "blocked");
       persist();
       throw error;
     } finally {

@@ -1,11 +1,19 @@
-/**
- * 「用户取消」专用的业务异常：用户点停止时抛出，被 recovery 状态机吞掉并切换到 cancelled 分支，
- * 与普通 failed 路径区分；UI 上显示「已停止」标签。
- */
+/** 自动化控制流异常：区分用户取消与不应交给 AI 诊断的确定性系统错误。 */
 
 export class AutomationCancelledError extends Error {
   constructor(message = "用户中止了自动录入") {
     super(message);
     this.name = "AutomationCancelledError";
+  }
+}
+
+/**
+ * 页面已经明确证明目标数据不存在或系统配置不完整时使用。
+ * recovery 必须保留并直接上抛，禁止交给 AI 猜测重试动作。
+ */
+export class NonAdvisableAutomationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonAdvisableAutomationError";
   }
 }

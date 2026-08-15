@@ -87,8 +87,9 @@ function buildHotelCardHtml(opts: {
   const options = opts.includeOptions
     ? `
       <ul role="listbox">
-        <li role="option" data-option-key="3" tabindex="0">当地3钻酒店/-3</li>
-        <li role="option" data-option-key="4" tabindex="0">当地4钻酒店/-4</li>
+      <li role="option" data-option-key="3" tabindex="0">当地3钻酒店/-3</li>
+      <li role="option" data-option-key="4" tabindex="0">当地4钻酒店/-4</li>
+      <li role="option" data-option-key="5" tabindex="0">当地5钻酒店/-38</li>
       </ul>
     `
     : "";
@@ -99,7 +100,10 @@ function buildHotelCardHtml(opts: {
         <span>酒店</span>
         <span>具体酒店信息以后续资源配置内容为准</span>
         <div><span>不限</span></div>
-        <div><span>使用携程平台酒店</span></div>
+        <label class="ant-radio-wrapper">
+          <span class="ant-radio"><input type="radio" name="hotel-source" /></span>
+          <span>使用携程平台酒店</span>
+        </label>
         <div>
           <span>具体时间</span>
           ${disabledCombos}
@@ -109,6 +113,16 @@ function buildHotelCardHtml(opts: {
       </div>
     </div>
     ${options}
+    <script>
+      document.querySelectorAll('label.ant-radio-wrapper').forEach((label) => {
+        label.addEventListener('click', () => {
+          document.querySelectorAll('label.ant-radio-wrapper').forEach((item) => item.classList.remove('ant-radio-wrapper-checked'));
+          label.classList.add('ant-radio-wrapper-checked');
+          const input = label.querySelector('input[type="radio"]');
+          if (input) input.checked = true;
+        });
+      });
+    </script>
   `;
 }
 
@@ -121,6 +135,19 @@ test("cards.ts：fillHotelCard 不能再用 .last() 兜底酒店 combobox（历�
     /combos\.last\(\)\.click\(\)/,
     "fillHotelCard 不能再用 combos.last() 把禁用时间下拉当酒店选择器（历史 bug）",
   );
+});
+
+test("酒店来源必须通过可见 label 驱动 React，禁止直接 check 或伪造 DOM 选中态", async () => {
+  const src = await fs.readFile(cardsPath, "utf8");
+  const sourceSelection = src.slice(
+    src.indexOf("async function selectHotelSource"),
+    src.indexOf("function hotelTierKeyword"),
+  );
+  assert.doesNotMatch(sourceSelection, /\.check\s*\(/);
+  assert.doesNotMatch(sourceSelection, /\.checked\s*=/);
+  assert.doesNotMatch(sourceSelection, /classList\.add/);
+  assert.match(sourceSelection, /clickable\.click\(\{ force: true \}\)/);
+  assert.match(sourceSelection, /isHotelSourceSelectionStable/);
 });
 
 test("cards.ts：必须导出 getAvailableHotelSelectors 并以 .ant-select-disabled 为主判据", async () => {
@@ -169,16 +196,16 @@ test("cards.ts：fillHotelCard 三类分支契约（0 / 1 / 多于 1）必须互
     /hotelNameCombos\.length\s*>\s*1[\s\S]*?throw\s+new\s+Error\s*\([\s\S]*?期望\s*1[\s\S]*?实际\s*\$\{hotelNameCombos\.length\}/,
     "多于 1 时必须 throw new Error，错误消息必须含「期望 1」与「实际 ${availableCombos.length}」",
   );
-  // 2) 等于 1：必须 click + selectVisibleOption，tierKeyword 必须是 3钻/4钻 二选一
+  // 2) 等于 1：必须 click + selectVisibleOption，tierKeyword 必须支持 3/4/5 钻
   assert.match(
     src,
-    /hotelNameCombos\.length\s*===\s*1[\s\S]*?selectVisibleOption\s*\(\s*page\s*,\s*tierKeyword\s*\)/,
-    "等于 1 时必须 click + selectVisibleOption(page, tierKeyword)",
+    /hotelNameCombos\.length\s*===\s*1[\s\S]*?selectVisibleOption\s*\(\s*page\s*,\s*hotelTierKeyword\(operations\.hotelTier\)\s*\)/,
+    "等于 1 时必须 click + selectVisibleOption(page, hotelTierKeyword(operations.hotelTier))",
   );
   assert.match(
     src,
-    /\/4钻\/\.test\(operations\.hotelTier\)[\s\S]*?:\s*"当地3钻酒店\/-3"/,
-    "tierKeyword 必须根据 hotelTier 是否含 4钻 拼「当地4钻酒店/-4」或「当地3钻酒店/-3」",
+    /hotelDiamondFromTier\(hotelTier\)[\s\S]*?"当地5钻酒店\/-38"[\s\S]*?"当地4钻酒店\/-4"[\s\S]*?"当地3钻酒店\/-3"/,
+    "tierKeyword 必须通过 hotelDiamondFromTier 支持「当地5钻酒店/-38」「当地4钻酒店/-4」「当地3钻酒店/-3」",
   );
   // 3) 等于 0：必须走 else 分支并通过 logWarn 输出可观测 warn（不调用 selectVisibleOption）
   assert.match(
@@ -307,11 +334,111 @@ test("酒店 card 一个可用酒店下拉：4钻 时 fillHotelCard 选「当地
   }
 });
 
+test("酒店 card 一个可用酒店下拉：5钻 时 fillHotelCard 选「当地5钻酒店/-38」", async () => {
+  const html = buildHotelCardHtml({ enabledCombos: 1, includeOptions: true });
+  const page = await newPage(html);
+  try {
+    await page.evaluate(() => {
+      const w = window;
+      // @ts-ignore
+      w.__lastClicked = null;
+      document.querySelectorAll('[role="option"]').forEach((el) => {
+        el.addEventListener("click", () => {
+          // @ts-ignore
+          w.__lastClicked = el.getAttribute("data-option-key") || el.textContent || "";
+        }, { once: true });
+      });
+    });
+    await fillHotelCard(
+      page,
+      page.locator("#day-scope"),
+      { day: 1, hotelDescription: "Z" },
+      { hotelTier: "当地5钻酒店/-38" },
+    );
+    await page.waitForTimeout(50);
+    const lastClicked = await page.evaluate(() => {
+      // @ts-ignore
+      return window.__lastClicked;
+    });
+    assert.equal(lastClicked, "5", "5钻 时必须 selectVisibleOption 选「当地5钻酒店/-38」");
+  } finally {
+    await page.close();
+  }
+});
+
+test("酒店来源点击后未形成 radio checked 时必须失败，不能继续静默保存", async () => {
+  const html = buildHotelCardHtml({ enabledCombos: 0, includeOptions: false }).replace(
+    /<label class="ant-radio-wrapper">[\s\S]*?<\/label>/,
+    "<div><span>使用携程平台酒店</span></div>",
+  );
+  const page = await newPage(html);
+  try {
+    await assert.rejects(
+      () => fillHotelCard(
+        page,
+        page.locator("#day-scope"),
+        { day: 1, hotelDescription: "来源必须失败" },
+        { hotelTier: "当地3钻酒店/-3" },
+      ),
+      /酒店来源未选中/,
+    );
+  } finally {
+    await page.close();
+  }
+});
+
+test("酒店来源首次点击被 React 重渲染覆盖时会重新点击并稳定选中", async () => {
+  const page = await newPage(`
+    <div id="day-scope">
+      <div class="td-day-card--hotel">
+        <span>酒店</span><span>不限</span>
+        <label class="ant-radio-wrapper" id="platform-source">
+          <span class="ant-radio"><input type="radio" name="hotel-source" /></span>
+          <span>使用携程平台酒店</span>
+        </label>
+        <textarea placeholder="请输入补充说明"></textarea>
+      </div>
+    </div>
+    <script>
+      let clicks = 0;
+      const label = document.querySelector('#platform-source');
+      const input = label.querySelector('input');
+      label.addEventListener('click', (event) => {
+        clicks += 1;
+        if (clicks === 1) {
+          event.preventDefault();
+          input.checked = false;
+          label.classList.remove('ant-radio-wrapper-checked');
+          return;
+        }
+        input.checked = true;
+        label.classList.add('ant-radio-wrapper-checked');
+      });
+    </script>
+  `);
+  try {
+    await fillHotelCard(
+      page,
+      page.locator("#day-scope"),
+      { day: 1, hotelDescription: "稳定重试" },
+      { hotelTier: "当地3钻酒店/-3" },
+    );
+    assert.equal(await page.locator("#platform-source input").isChecked(), true);
+    assert.match(await page.locator("#platform-source").getAttribute("class") || "", /checked/);
+  } finally {
+    await page.close();
+  }
+});
+
 test("新版酒店 card 同时有住宿类型和酒店名称下拉时优先选择酒店名称", async () => {
   const html = `
     <div id="day-scope">
       <div class="td-day-card--hotel">
-        <span>酒店</span><span>不限</span><span>使用携程平台酒店</span>
+        <span>酒店</span><span>不限</span>
+        <label class="ant-radio-wrapper">
+          <span class="ant-radio"><input type="radio" name="hotel-source" /></span>
+          <span>使用携程平台酒店</span>
+        </label>
         <div class="ant-form-item"><label>住宿类型</label>
           <div class="ant-select"><input role="combobox" data-testid="lodging-type" /></div>
         </div>
@@ -353,7 +480,11 @@ test("新版酒店 card 的多类名 ant-form-item 仍按标签筛出酒店名�
   const html = `
     <div id="day-scope">
       <div class="td-day-card--hotel">
-        <span>酒店</span><span>不限</span><span>使用携程平台酒店</span>
+        <span>酒店</span><span>不限</span>
+        <label class="ant-radio-wrapper">
+          <span class="ant-radio"><input type="radio" name="hotel-source" /></span>
+          <span>使用携程平台酒店</span>
+        </label>
         <div class="ant-form-item ant-form-item-control"><label>住宿类型</label>
           <div class="ant-select"><input role="combobox" data-testid="lodging-type" /></div>
         </div>

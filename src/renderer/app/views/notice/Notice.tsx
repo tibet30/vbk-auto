@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { TriangleAlert } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import styles from "./Notice.module.less";
@@ -17,6 +18,17 @@ export function AppNotice({ notice, onDismiss }: { notice: string; onDismiss: ()
 }
 
 export function MaybeNotice({ model }: { model: AppModel }) {
-  if (!model.notice) return null;
-  return <AppNotice notice={model.notice} onDismiss={() => model.setNotice(null)} />;
+  const { notice, setNotice } = model;
+  useEffect(() => {
+    if (!notice) return;
+    const autoCloseTimer = window.setTimeout(() => {
+      setNotice(null);
+    }, 5000);
+    return () => {
+      window.clearTimeout(autoCloseTimer);
+    };
+  }, [notice, setNotice]);
+
+  if (!notice) return null;
+  return <AppNotice notice={notice} onDismiss={() => setNotice(null)} />;
 }

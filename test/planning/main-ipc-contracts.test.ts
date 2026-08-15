@@ -350,3 +350,18 @@ test("G5 · 主进程以产品维度统一互斥 planning 与 AI 写流程", () 
   assert.ok(startGuardIdx >= 0 && startGuardIdx < saveIdx,
     "planning:start 必须在覆盖 pending state 前拒绝并发请求");
 });
+
+test("G6 · ai:send 重写 itinerary 后必须立即补跑 POI enrichment", () => {
+  assert.match(productAiSrc, /async function enrichItineraryPoisAfterAi\(/,
+    "product-ai-ipc 必须提供 AI 行程写回后的 POI 补全 helper");
+  assert.match(productAiSrc, /patchTouchesItinerary\(patch\)/,
+    "POI 补全必须只在 patch 实际触达 itinerary 时触发，避免无关对话额外查 POI");
+  assert.match(productAiSrc, /new DbOrchestratorRuntime\(db,\s*context\.browser,\s*productMutations\)/,
+    "AI 行程重写后的 POI 补全必须复用规划 runtime，保持 suggestPoi / writeModule / task 去重语义一致");
+  assert.match(productAiSrc, /await enrichItineraryPois\(\{/,
+    "AI 行程重写后必须调用统一的 enrichItineraryPois，而不是各写各的 POI 查询逻辑");
+  assert.match(productAiSrc, /if \(patchResult\.applied\) \{\s*await enrichItineraryPoisAfterAi\(localProductId,\s*responsePatch\);/s,
+    "首轮 AI patch 成功写入 itinerary 后必须立即补跑 POI enrichment");
+  assert.match(productAiSrc, /if \(secondPatchResult\.applied\) \{\s*await enrichItineraryPoisAfterAi\(localProductId,\s*secondPatch\);/s,
+    "补齐轮次若写入了 itinerary，也必须补跑同一条 POI enrichment");
+});

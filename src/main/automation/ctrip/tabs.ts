@@ -31,6 +31,7 @@ async function saveThenAdvance(page, options) {
     nextButtonLabel = "下一步",
     savedWith,
     fallbackUrl,
+    advanceTimeoutMs = 30_000,
   } = options;
   void fallbackUrl;
 
@@ -83,40 +84,62 @@ async function saveThenAdvance(page, options) {
       `${phase}的「${nextButtonLabel}」按钮 aria-disabled=true，无法提交；观测 URL=${page.url()}；目标 tab=${targetTabLabel}。`,
     );
   }
-  // 保存/下一步之后新冒出来的线路变更提示，再清一次。关闭提示不等于推进成功。
-  await button.click();
-
-  await dismissKnownNoticeDialogs(page, { waitForSaveSuccess: true });
-
-  // VBK 保存成功后可能先返回保存响应，再异步跳转到下一页；15 秒会把
-  // 已发生的晚到导航误判为失败。给目标 URL / active tab 留出 30 秒观测窗口。
-  const deadline = Date.now() + 30_000;
-  let navigated = false;
-  let activeLabel: string | null = null;
-  let unlockedLabel: string | null = null;
   let observedUrl = page.url();
-  while (Date.now() < deadline) {
-    const url = page.url();
-    observedUrl = url;
-    if (isTargetUrl(url)) {
-      navigated = true;
-      break;
-    }
-    activeLabel = await findActiveTabLabel(page, targetTabLabels);
-    if (activeLabel) {
-      navigated = true;
-      break;
-    }
-    unlockedLabel = await findUnlockedSectionLabel(page, targetTabLabels);
-    if (unlockedLabel) break;
-    await delay(250);
-  }
+  let validationSummary = "";
+  for (let submitAttempt = 1; submitAttempt <= 2; submitAttempt += 1) {
+    // 保存/下一步之后新冒出来的线路变更提示，再清一次。关闭提示不等于推进成功。
+    await button.click();
 
-  if (navigated) return { advanced: true, mode: "navigated", savedWith: effectiveSavedWith };
+    await dismissKnownNoticeDialogs(page, { waitForSaveSuccess: true });
 
-  if (unlockedLabel) {
-    await clickSection(page, unlockedLabel);
-    return { advanced: true, mode: "tabUnlocked", savedWith: effectiveSavedWith };
+    // VBK 保存成功后可能先返回保存响应，再异步跳转到下一页；15 秒会把
+    // 已发生的晚到导航误判为失败。给目标 URL / active tab 留出 30 秒观测窗口。
+    const deadline = Date.now() + advanceTimeoutMs;
+    let navigated = false;
+    let activeLabel: string | null = null;
+    let unlockedLabel: string | null = null;
+    while (Date.now() < deadline) {
+      const url = page.url();
+      observedUrl = url;
+      if (isTargetUrl(url)) {
+        navigated = true;
+        break;
+      }
+      activeLabel = await findActiveTabLabel(page, targetTabLabels);
+      if (activeLabel) {
+        navigated = true;
+        break;
+      }
+      unlockedLabel = await findUnlockedSectionLabel(page, targetTabLabels);
+      if (unlockedLabel) break;
+      await delay(250);
+    }
+
+    if (navigated) {
+      if (submitAttempt === 1) {
+        return { advanced: true, mode: "navigated", savedWith: effectiveSavedWith };
+      }
+      return { advanced: true, mode: "repaired-navigated", savedWith: effectiveSavedWith };
+    }
+
+    if (unlockedLabel) {
+      await clickSection(page, unlockedLabel);
+      if (submitAttempt === 1) {
+        return { advanced: true, mode: "tabUnlocked", savedWith: effectiveSavedWith };
+      }
+      return { advanced: true, mode: "repaired-tabUnlocked", savedWith: effectiveSavedWith };
+    }
+
+    const validation = await inspectAndRepairValidationErrors(page);
+    validationSummary = formatValidationErrors(validation.after?.length ? validation.after : validation.errors);
+    if (submitAttempt === 1) {
+      logWarn(validation.repaired
+        ? `${phase}点击「${nextButtonLabel}」后未推进，已自动修复页面校验错误：${validation.repairs.join("；")}`
+        : `${phase}点击「${nextButtonLabel}」后暂未推进，执行一次同页重试`,
+      );
+      continue;
+    }
+    break;
   }
 
   if (fallbackUrl) {
@@ -131,7 +154,8 @@ async function saveThenAdvance(page, options) {
   }
 
   throw new Error(
-    `${phase}点击「${nextButtonLabel}」后未到达目标「${targetTabLabel}」：URL=${observedUrl}，目标 tab 仍未解锁。`,
+    `${phase}点击「${nextButtonLabel}」后未到达目标「${targetTabLabel}」：URL=${observedUrl}，目标 tab 仍未解锁。` +
+      (validationSummary ? ` 页面校验错误：${validationSummary}` : ""),
   );
 }
 
@@ -162,6 +186,7 @@ async function findUnlockedSectionLabel(page, labels) {
 
 import { delay, pollUntil, safeClick } from "./utils.js";
 import { closeBlockingDialogs, dismissKnownNoticeDialogs } from "./dialogs.js";
+import { formatValidationErrors, inspectAndRepairValidationErrors } from "./save-validation.js";
 import { productEditorUrl } from "../constants.js";
 import { logWarn } from "../../../shared/log-timestamp.js";
 
@@ -193,7 +218,15 @@ async function clickSection(page, labels) {
       const selected = (await current.getAttribute("aria-selected")) === "true";
       const className = (await current.getAttribute("class")) || "";
       if (selected || /\bant-tabs-tab-active\b/.test(className)) return;
-      await current.click();
+      // Electron WebContentsView 中可能已有一个 Playwright 判定为“未结束”的
+      // 历史导航；即使 noWaitAfter=true，locator.click 也会先等旧导航并超时。
+      // 在页面上下文触发原生 click，页签落点仍由下面 aria-selected 轮询确认。
+      if (typeof current.evaluate === "function") {
+        await current.evaluate((element) => (element as HTMLElement).click());
+      } else {
+        // 松散测试替身兼容；真实 Playwright Locator 始终有 evaluate。
+        await current.click({ noWaitAfter: true });
+      }
       await pollUntil(
         current,
         (loc) => loc.getAttribute("aria-selected").then((v) => v === "true"),
@@ -214,7 +247,11 @@ async function clickSection(page, labels) {
         disabledLabel = label;
         continue;
       }
-      await current.click();
+      if (typeof current.evaluate === "function") {
+        await current.evaluate((element) => (element as HTMLElement).click());
+      } else {
+        await current.click({ noWaitAfter: true });
+      }
       await delay(500);
       return;
     }

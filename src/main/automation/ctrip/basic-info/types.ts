@@ -20,6 +20,7 @@ export const PRODUCT_IMAGE_TEXT_PATH = "productImageText";
 /**
  * 在 labels 数组中按目标 city + 可选 preferredCountry 判定匹配结果：
  *   - preferredCountry 提供时，仅当某条「${country}-${city}」精确命中 1 个 → matched；
+ *     若没有国家前缀但裸城市名唯一，也允许 matched，避免国内城市被无谓拖慢；
  *     0 个或多个分别 → wrongCountry / ambiguous（让上层拒绝回退 / 让 AI 兜底）；
  *   - 不提供时，要求 city 无前缀条目唯一；若所有带前缀但只有 1 个也 matched；多个则 ambiguous。
  * 任何完全无候选返回 missing = "notFound"。
@@ -35,10 +36,21 @@ export function pickCityOption(
   }
   const seen = labels.map((value) => value.trim()).filter(Boolean);
   const splitLabel = (label: string) => {
-    const text = label.trim();
+    const text = label.trim().replace(/[—–]/g, "-");
     const dash = text.indexOf("-");
     if (dash > 0 && dash < text.length - 1) {
-      return { country: text.slice(0, dash).trim(), city: text.slice(dash + 1).trim() };
+      const country = text.slice(0, dash).trim();
+      let city = text.slice(dash + 1).trim();
+      // 旧版 VBK 的一个 option 内含两列：城市「中国-西安」+ 省份
+      // 「中国-陕西」。某些 DOM 结构会把它们拼成
+      // 「中国-西安中国-陕西」，但仍然只有一个可点击城市候选。
+      // 只裁掉“同一国家前缀开头”的上下文列，不能把「西安郊区」一类
+      // 相似城市误判为精确命中。
+      if (city.startsWith(target)) {
+        const suffix = city.slice(target.length).trim();
+        if (suffix.startsWith(`${country}-`)) city = target;
+      }
+      return { country, city };
     }
     return { country: "", city: text };
   };
@@ -54,6 +66,13 @@ export function pickCityOption(
     }
     if (inCountry.length > 1) {
       return { kind: "ambiguous", labels: inCountry.map((entry) => entry.label) };
+    }
+    const exactCity = matches.filter((entry) => entry.country === "");
+    if (exactCity.length === 1) {
+      return { kind: "matched", index: exactCity[0].index, label: exactCity[0].label };
+    }
+    if (exactCity.length > 1) {
+      return { kind: "ambiguous", labels: exactCity.map((entry) => entry.label) };
     }
     return { kind: "missing", seen, reason: "wrongCountry" };
   }
@@ -73,4 +92,3 @@ export function pickCityOption(
   }
   return { kind: "missing", seen, reason: "notFound" };
 }
-

@@ -1,4 +1,17 @@
 import { test, assert, MiniMaxService, MiniMaxServiceError, diagnosisInput, hasMiniMaxCode, sendDiagnosis, createDiagnosisService, validDiagnosis } from "./minimax.core.shared.js";
+
+test("下拉 AI 消歧使用独立短超时，不沿用规划对话 90 秒超时", async () => {
+  const source = await import("node:fs/promises").then((fs) => fs.readFile(
+    new URL("../../src/main/minimax/minimax-service.ts", import.meta.url),
+    "utf8",
+  ));
+  assert.match(source, /function disambiguationTimeout\(\)/);
+  assert.match(source, /return Number\.isFinite\(parsed\)[\s\S]*?8_000/);
+  const start = source.indexOf("async disambiguateOption");
+  const body = source.slice(start, source.indexOf("\n  /**", start + 10));
+  assert.match(body, /this\.client\(disambiguationTimeout\(\)\)/);
+  assert.doesNotMatch(body, /this\.client\(replyTimeout\(\)\)/);
+});
 test("diagnoseAutomationFailure 严格解析白名单诊断并只发送最小安全上下文", async (t) => {
   const { service, requestBody } = await createDiagnosisService(t, (response) => sendDiagnosis(response, validDiagnosis));
   const unsafeInput = {
@@ -50,6 +63,33 @@ test("diagnoseAutomationFailure 严格解析白名单诊断并只发送最小安
   assert.match(prompt, /expectedEvidence.*重试成功.*证据/s);
   assert.match(prompt, /wait_for_user.*userInstruction.*必填/s);
   assert.match(prompt, /其它 action.*忽略 userInstruction/s);
+  assert.match(prompt, /reload_and_retry_phase.*找不到可设置\/可填写\/可点击项/s);
+  assert.match(prompt, /itinerary.*首日集合时间.*优先选择 reload_and_retry_phase/s);
+});
+
+test("diagnoseAutomationFailure 提示首日集合时间首轮控件缺失优先刷新重试", async (t) => {
+  const { service, requestBody } = await createDiagnosisService(t, (response) => sendDiagnosis(response, {
+    summary: "首日集合时间控件可能未渲染。",
+    rootCause: "产品和前置阶段已有保存证据，首轮只看到控件缺失。",
+    action: "reload_and_retry_phase",
+    expectedEvidence: "刷新重试后首日集合时间被成功设置。",
+  }));
+
+  await service.diagnoseAutomationFailure({
+    phase: "itinerary",
+    attempt: 1,
+    error: "找不到可设置的首日集合时间",
+    productIdExists: true,
+    basicInfoSaved: true,
+    completedPhases: ["basic", "presentation"],
+    diagnosisHistory: [],
+  });
+
+  const body = JSON.parse(requestBody()) as { messages: Array<{ role: string; content: string }> };
+  const joined = body.messages.map((message) => message.content).join("\n");
+  assert.match(joined, /找不到可设置的首日集合时间/);
+  assert.match(joined, /前置阶段已完成.*优先选择 reload_and_retry_phase/s);
+  assert.doesNotMatch(joined, /信息不足时返回 wait_for_user/);
 });
 
 test("diagnoseAutomationFailure 拒绝含额外字段的诊断", async (t) => {

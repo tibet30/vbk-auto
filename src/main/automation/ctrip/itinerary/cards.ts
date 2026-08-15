@@ -22,10 +22,10 @@
 import { delay, assertCount, selectVisibleOption } from "../utils.js";
 import {
   cardsByPrefix,
-  clickByCandidates,
   clickExact,
   ensureCheckboxChecked,
 } from "./common.js";
+import { hotelDiamondFromTier } from "../../../../shared/hotel-tiers.js";
 import { logWarn } from "../../../../shared/log-timestamp.js";
 
 /**
@@ -163,6 +163,62 @@ async function getLabeledHotelNameSelectors(hotelCard, availableCombos) {
   return labeled;
 }
 
+async function isHotelSourceSelected(hotelCard, label) {
+  const matches = hotelCard.getByText(label, { exact: true });
+  for (let index = 0; index < (await matches.count()); index += 1) {
+    const match = matches.nth(index);
+    const wrapper = match.locator("xpath=ancestor-or-self::label[1]");
+    if (!(await wrapper.count())) continue;
+    const input = wrapper.first().locator('input[type="radio"]');
+    if ((await input.count()) && (await input.first().isChecked().catch(() => false))) return true;
+    const wrapperClass = (await wrapper.first().getAttribute("class").catch(() => "")) || "";
+    const radioClass = (await wrapper.first().locator(".ant-radio").first().getAttribute("class").catch(() => "")) || "";
+    if (/\bant-radio-wrapper-checked\b/.test(wrapperClass) || /\bant-radio-checked\b/.test(radioClass)) return true;
+    if ((await wrapper.first().getAttribute("aria-checked").catch(() => "")) === "true") return true;
+  }
+  return false;
+}
+
+async function isHotelSourceSelectionStable(hotelCard, label) {
+  for (let sample = 0; sample < 3; sample += 1) {
+    if (!(await isHotelSourceSelected(hotelCard, label))) return false;
+    if (sample < 2) await delay(100);
+  }
+  return true;
+}
+
+async function selectHotelSource(hotelCard, day) {
+  const labels = ["使用携程平台酒店", "携程平台酒店"];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (const label of labels) {
+      const matches = hotelCard.getByText(label, { exact: true });
+      for (let index = 0; index < (await matches.count()); index += 1) {
+        const match = matches.nth(index);
+        if (!(await match.isVisible().catch(() => false))) continue;
+        if (await isHotelSourceSelectionStable(hotelCard, label)) return label;
+
+        // VBK 这里是 React 受控 radio。直接对 input 调 check() 偶发会在
+        // React 重渲染时被旧 state 覆盖；直接改 checked/class 更只改了 DOM，
+        // 保存时表单 state 仍为空。始终点击可见 label，让 React onChange 接管。
+        const labelWrapper = match.locator("xpath=ancestor-or-self::label[1]");
+        const clickable = (await labelWrapper.count()) ? labelWrapper.first() : match;
+        await clickable.scrollIntoViewIfNeeded().catch(() => undefined);
+        await clickable.click({ force: true }).catch(() => undefined);
+        if (await isHotelSourceSelectionStable(hotelCard, label)) return label;
+      }
+    }
+    if (attempt < 3) await delay(250 * attempt);
+  }
+  throw new Error(`第 ${day.day} 天酒店来源未选中：期望选择 ${labels.join(" / ")}。`);
+}
+
+function hotelTierKeyword(hotelTier) {
+  const diamond = hotelDiamondFromTier(hotelTier);
+  if (diamond === 5) return "当地5钻酒店/-38";
+  if (diamond === 4) return "当地4钻酒店/-4";
+  return "当地3钻酒店/-3";
+}
+
 /**
  * 单天酒店 card 写入：
  *   - 0 张 card 时直接 return（行程无住宿）；
@@ -184,14 +240,7 @@ export async function fillHotelCard(page, dayScope, day, operations) {
   }
   const hotelCard = hotelCards[0];
   await clickExact(hotelCard, "不限", `第 ${day.day} 天酒店时间`);
-  const platformSourceCandidates = [
-    "使用携程平台酒店",
-    "携程平台酒店",
-  ];
-  const sourceSet = await clickByCandidates(hotelCard, platformSourceCandidates, "酒店来源");
-  if (!sourceSet) {
-    logWarn(`[fillHotelCard] 第 ${day.day} 天酒店来源未命中：${platformSourceCandidates.join(" / ")}，保留默认值继续后续录入`);
-  }
+  await selectHotelSource(hotelCard, day);
   await delay(300);
   const combos = hotelCard.getByRole("combobox");
   const availableCombos = await getAvailableHotelSelectors(combos);
@@ -206,10 +255,7 @@ export async function fillHotelCard(page, dayScope, day, operations) {
   if (hotelNameCombos.length === 1) {
     await hotelNameCombos[0].click();
     await delay(300);
-    const tierKeyword = operations.hotelTier && /4钻/.test(operations.hotelTier)
-      ? "当地4钻酒店/-4"
-      : "当地3钻酒店/-3";
-    await selectVisibleOption(page, tierKeyword);
+    await selectVisibleOption(page, hotelTierKeyword(operations.hotelTier));
   } else {
     // 真实 VBK 渲染：选择「使用携程平台酒店」之后可能尚未生成酒店名称 combobox
     // （或刚生成的瞬间被异步重渲染吃掉）。此时跳过钻级下拉选择，把酒店钻级信息
@@ -222,4 +268,7 @@ export async function fillHotelCard(page, dayScope, day, operations) {
   if (await supplement.count()) {
     await supplement.first().fill(day.hotelDescription || day.hotel || `依据产品配置：${operations.hotelTier}`);
   }
+  // 下拉与补充说明都会触发 card 重渲染；离开 card 前再次验证 React state，
+  // 防止只捕获到一次短暂的 checked DOM 状态。
+  await selectHotelSource(hotelCard, day);
 }

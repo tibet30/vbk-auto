@@ -30,6 +30,7 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
     switchAccount,
     forgetAccount,
     loadingLoginAccounts,
+    fixedInfoReloadToken,
   } = model;
 
   const loggedIn = !!vbkLogin?.loggedIn;
@@ -68,7 +69,8 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
     return () => {
       cancelled = true;
     };
-  }, [currentAccount]);
+    // 保存账号固定信息成功后由全局 reload token 刷新，避免切页后仍显示旧值。
+  }, [currentAccount, fixedInfoReloadToken]);
 
   // 进入页面 / 退出登录 / 新增登录等时机需要让「已记录账号」与 webview 同步；
   // 这里在 vbkLogin.loggedIn 切换 + 初次渲染时拉一次，避免把"刷新账号列表"

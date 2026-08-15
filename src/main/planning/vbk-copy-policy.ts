@@ -10,7 +10,32 @@ export const VBK_COPY_BAD_CASES = [
   {
     term: "首发",
     reason: "VBK 操作说明会判定为非法关键词",
-    alternatives: ["开班", "首次开班"],
+    alternatives: ["开班", "本期开班"],
+    pattern: /首发/,
+  },
+  {
+    term: "首次",
+    reason: "VBK 产品图文实跑会判定为非法关键词",
+    alternatives: ["初到", "初游", "刚开始接触"],
+    pattern: /首次/,
+  },
+  {
+    term: "第一（宣传排名用语）",
+    reason: "避免未经证明的排名或极限宣传；“第一天”等行程序号不受影响",
+    alternatives: ["重点", "优先", "前列"],
+    pattern: /第一(?!天|日|晚|站|餐|段)/,
+  },
+  {
+    term: "最（极限表达）",
+    reason: "VBK 会拦截“最”字开头的绝对化表达，避免最佳、最高、最优等宣传用语",
+    alternatives: ["更", "较为", "重点"],
+    pattern: /最(?!后|终)/,
+  },
+  {
+    term: "其他绝对化用语",
+    reason: "避免唯一、顶级、绝对、百分百、全网、史上、零风险等无法核实的承诺",
+    alternatives: ["特色", "优质", "尽量"],
+    pattern: /唯一|顶级|绝对|百分之百|100%|No\.?\s*1|全网|史上|遥遥领先|零风险|零差评|永久有效|保证满意/i,
   },
 ] as const;
 
@@ -26,7 +51,7 @@ export function findVbkCopyBadCase(value: unknown, path = "value"):
   | { path: string; term: string; reason: string; alternatives: readonly string[] }
   | undefined {
   if (typeof value === "string") {
-    const badCase = VBK_COPY_BAD_CASES.find(({ term }) => value.includes(term));
+    const badCase = VBK_COPY_BAD_CASES.find(({ pattern }) => pattern.test(value));
     return badCase ? { path, ...badCase } : undefined;
   }
   if (Array.isArray(value)) {

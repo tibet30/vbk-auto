@@ -1,20 +1,14 @@
 // @ts-nocheck
-/**
- * 「基本信息 → 国家景区」面板里省份 / 景点的自动填写：
- *   - fillScenicAreaProvince：在 #scenic_area 的省份下拉按白名单 suffix 规范化标签名后挑选，
- *     必要时回退到 AI disambiguator；
- *   - fillScenicAreaSpots：依次按景点 / 景区级挑选，命中后点「添加」，并轮询确认标签写入；
- *   - 数据风险弹窗（境外同名项）由 dismissDataRiskDialog 关闭，命中会丢弃该条以避免写入脏数据。
- * 顶部带 `// @ts-nocheck`，page 是动态传入。
- */
+/** 基本信息 → 国家景区的省份、景区与景点写入。 */
 
-import { delay, assertCount, pickSearchInput } from "../utils.js";
+import { delay, assertCount, pickSearchInput, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption } from "../utils.js";
 import { matchDropdownOption } from "../../dropdown-match.js";
 import { findProvinceOptionIndex } from "../../schema/schema-functions.js";
 import { dismissDataRiskDialog } from "../dialogs.js";
 import { logInfo } from "../../../../shared/log-timestamp.js";
 
 const DIRECT_ADMIN_MUNICIPALITIES = new Set(["北京", "上海", "天津", "重庆"]);
+const SCENIC_SEARCH_TIMEOUT_MS = 3_000;
 
 export async function fillScenicAreaProvince(page, province, extra = {}) {
   const disambiguator = extra?.disambiguator;
@@ -34,29 +28,17 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
   if (comboboxCount < 2) {
     throw new Error(`国家景区级联下拉结构异常：仅找到 ${comboboxCount} 个下拉框`);
   }
-  const optionNodes = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
-  );
-
-  /**
-   * 拉出当前打开的 .ant-select-dropdown 候选 + enabled 状态，过滤掉空 / 占位项，
-   * 等到至少有一项可用就 return；最多等 8s。
-   */
+  /** 等待当前省份下拉至少出现一个可用项，最多 3 秒。 */
   async function availableOptions(description) {
-    const deadline = Date.now() + 8_000;
+    const deadline = Date.now() + SCENIC_SEARCH_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const total = await optionNodes.count();
-      if (total) {
-        const texts = (await optionNodes.allTextContents()).map((text) => text.trim());
-        const disableds = await Promise.all(
-          Array.from({ length: total }, async (_, index) => {
-            const cls = (await optionNodes.nth(index).getAttribute("class")) || "";
-            return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
-          }),
-        );
+      const snapshot = await readLocatorSnapshot(optionNodes);
+      if (snapshot.length) {
+        const texts = snapshot.map((option) => option.text);
+        const disableds = snapshot.map((option) =>
+          /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(option.className));
         if (texts.some((text, index) => text && text !== "Not Found" && !disableds[index])) {
-          return { texts, disableds };
+          return { texts, disableds, snapshot };
         }
       }
       await delay(250);
@@ -67,9 +49,11 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
   await comboboxes.nth(1).click();
   const provinceSearch = await pickSearchInput(comboboxes.nth(1), "省份搜索输入框");
   await provinceSearch.fill(label);
+  const optionNodes = await getControlledDropdownOptions(page, comboboxes.nth(1));
   const provinces = await availableOptions("省份");
   const texts = provinces.texts;
   const disableds = provinces.disableds;
+  const provinceSnapshot = provinces.snapshot;
   const candidates = texts.map((text, i) => ({ index: i, text, id: undefined }));
   const localIndex = findProvinceOptionIndex(texts, label);
   let chosenIndex = localIndex >= 0 && !disableds[localIndex] ? localIndex : -1;
@@ -98,7 +82,8 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
     throw new Error(`省下拉未找到「${label}」；可选：${texts.filter(Boolean).join("、") || "无"}`);
   }
   void chosenSource;
-  await optionNodes.nth(chosenIndex).click();
+  const provinceClicked = await clickLocatorSnapshotOption(optionNodes, provinceSnapshot[chosenIndex]);
+  if (!provinceClicked) throw new Error(`省下拉候选「${texts[chosenIndex]}」在提交前已被页面刷新。`);
   await delay(300);
   const addButton = container.getByRole("button", { name: "添加", exact: true }).first();
   if (await addButton.count()) {
@@ -129,10 +114,6 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
   // 只计入本次确认新增的标签：历史已有、下拉未命中和风险弹窗都不占名额。
   let newlyAddedCount = 0;
 
-  const options = page.locator(
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option, " +
-    ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-dropdown-menu-item",
-  );
   const optionLabel = (text) => String(text || "").split(/\r?\n/)[0].trim();
   const normalizeCommittedLabel = (text) => String(text || "").replace(/\s+/g, "");
   const committedChoiceSelector = ".ant-select-selection__choice, .ant-select-selection-item";
@@ -187,23 +168,24 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     const search = await pickSearchInput(combobox, `${description}搜索输入框`);
     // 与城市搜索相同，避免旧的短关键词响应迟到后覆盖完整名称结果。
     await search.fill(target);
-    const deadline = Date.now() + 8_000;
+    const options = await getControlledDropdownOptions(page, combobox);
+    const deadline = Date.now() + SCENIC_SEARCH_TIMEOUT_MS;
     let last: string[] = [];
     let lastDisableds: boolean[] = [];
+    let lastSnapshot = [];
     while (Date.now() < deadline) {
-      const count = await options.count();
-      last = count ? await Promise.all(
-        Array.from({ length: count }, async (_, index) => optionLabel(
-          await options.nth(index).innerText().catch(() => ""),
-        )),
-      ) : [];
-      lastDisableds = await Promise.all(Array.from({ length: count }, async (_, index) => {
-        const cls = (await options.nth(index).getAttribute("class")) || "";
-        return /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(cls);
-      }));
+      const snapshot = await readLocatorSnapshot(options);
+      lastSnapshot = snapshot;
+      last = snapshot.map((option) => optionLabel(option.text));
+      lastDisableds = snapshot.map((option) =>
+        /ant-select-item-disabled|ant-select-dropdown-menu-item-disabled/.test(option.className));
       const matchIndex = last.findIndex((text, index) => aliases.includes(text) && !lastDisableds[index]);
       if (matchIndex >= 0) {
-        await options.nth(matchIndex).click();
+        const clicked = await clickLocatorSnapshotOption(options, snapshot[matchIndex]);
+        if (!clicked) {
+          await delay(150);
+          continue;
+        }
         await delay(300);
         return true;
       }
@@ -219,7 +201,8 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
         disambiguator,
       );
       if (ai) {
-        await options.nth(ai.index).click();
+        const clicked = await clickLocatorSnapshotOption(options, lastSnapshot[ai.index]);
+        if (!clicked) return false;
         await delay(300);
         if (ai.source === "ai") {
           logInfo("[fillScenicAreaSpots] AI 兜底选中景点", {
@@ -366,7 +349,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
       await delay(200);
       continue;
     }
-    const commitDeadline = Date.now() + 8_000;
+  const commitDeadline = Date.now() + SCENIC_SEARCH_TIMEOUT_MS;
     let committed = false;
     let delayedDataRisk = null;
     while (Date.now() < commitDeadline) {

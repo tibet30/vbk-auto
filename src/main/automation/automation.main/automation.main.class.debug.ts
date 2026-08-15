@@ -22,12 +22,12 @@ import {
   fillAndSavePresentation,
   fillBasicInfo,
   fillRecommendationReasons,
-  fillItineraryDraft,
   ensureHotelResource,
   ensureVehicleResource,
   runProductPreflight,
   selectStationAddress,
 } from "../ctrip/ctrip.js";
+import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
 import { breakpoint } from "../debug.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
@@ -41,6 +41,7 @@ type DebugContext = {
   ensureBrowserHasBounds: () => void;
   disambiguator?: (req: {
     kind: "province" | "city" | "spot" | "station";
+    stationSubtype?: "airport" | "train";
     desired: string;
     candidates: Array<{ id?: string; text: string }>;
     product: Record<string, unknown>;
@@ -51,6 +52,8 @@ type DebugContext = {
  * 按 stepName 字符串分派到具体 helper：
  *   - snapshot / selectStationAddress / fillItineraryDraft / fillRecommendationReasons
  *     / fillBasicInfo / fillPresentation 走带断点的版本；
+ *   - fillItineraryDraft 走全量接口保存路径（fillItineraryDraftApi），不再
+ *     使用 DOM 写入，避免重复出现「DOM 看起来成功但接口没保存」的误报；
  *   - fillAndSavePackage / fillAndSubmitPricingInventory / ensureHotelResource /
  *     ensureVehicleResource / runProductPreflight 走日常 helper；
  * 未知名直接抛「未知步骤」并列出支持列表。
@@ -87,7 +90,8 @@ export function debugRunStep(context: DebugContext, stepName: string, argsJson: 
       if (!product) throw new Error(`产品不存在：${localProductId}`);
       const productData = parseProduct(product.product);
       await breakpoint("beforeFillItineraryDraft");
-      const result = await fillItineraryDraft(page, productData, { productId: product.productId });
+      // 全量接口保存：DOM 写入路径已废弃，避免误报成功。
+      const result = await fillItineraryDraftApi(page, productData, { productId: product.productId });
       await breakpoint("afterFillItineraryDraft", { savedWith: result.savedWith });
       return result;
     }

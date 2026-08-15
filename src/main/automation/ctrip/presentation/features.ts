@@ -42,6 +42,7 @@ import {
   writeToEditor,
 } from "./features.write.js";
 import { delay } from "../utils.js";
+import { formatProductFeaturesHtml } from "../../../domain/product/features-rich-text.js";
 
 /**
  * 「产品特色」顶层入口：
@@ -54,7 +55,7 @@ import { delay } from "../utils.js";
  *   6) 失败抛「找不到产品特点富文本输入框」并附诊断（不静默保存）。
  */
 export async function fillProductFeatures(page, value: string): Promise<FeaturesResult> {
-  const valueSample = String(value ?? "");
+  const valueSample = formatProductFeaturesHtml(value);
   if (!valueSample.trim()) {
     return { filled: false, diagnostic: "presentation.features 为空，无需写入" };
   }

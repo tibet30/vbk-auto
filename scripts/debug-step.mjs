@@ -51,6 +51,7 @@ if (!renderer) {
 }
 const dismissNativeDialog = async (page) => {
   if (!page) return;
+  try { page.removeAllListeners("dialog"); } catch {}
   page.on("dialog", async (dialog) => {
     try {
       await dialog.accept().catch(() => dialog.dismiss().catch(() => {}));
@@ -61,13 +62,6 @@ const dismissNativeDialog = async (page) => {
 };
 dismissNativeDialog(renderer);
 dismissNativeDialog(vbk);
-renderer.on("dialog", async (dialog) => {
-  try {
-    await dialog.accept().catch(() => dialog.dismiss().catch(() => {}));
-  } catch (error) {
-    console.warn(`[debug-step] 自动处理 JS dialog 失败：${error instanceof Error ? error.message : String(error)}`);
-  }
-});
 
 const mode = (process.env.VBK_DEBUG_BREAKPOINTS ? args.break || process.env.VBK_DEBUG_BREAKPOINTS : args.break) || "";
 const interactive = !!process.stdin.isTTY && !args.auto;

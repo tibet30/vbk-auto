@@ -8,7 +8,7 @@
  * 顶部带 `// @ts-nocheck`，page 是动态传入。
  */
 
-import { delay, assertCount, fillById } from "../utils.js";
+import { delay, assertCount, fillById, readLocatorSnapshot } from "../utils.js";
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
 import {
   fillCitySelect,
@@ -149,10 +149,9 @@ export async function assertBasicInfoNoRedErrors(page) {
    * 使用 seen 去重避免同一关键词在 help 与 control 列表里被重复报。
    */
   async function consider(locator: any) {
-    const count = await locator.count();
-    for (let index = 0; index < count; index += 1) {
-      const item = locator.nth(index);
-      const text = (await item.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    const snapshot = await readLocatorSnapshot(locator);
+    for (const item of snapshot) {
+      const text = item.text.replace(/\s+/g, " ").trim();
       if (!text) continue;
       if (!watched.some((keyword) => text.includes(keyword))) continue;
       const labelKey = watched.find((keyword) => text.includes(keyword)) || text.slice(0, 32);

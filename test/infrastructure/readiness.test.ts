@@ -56,8 +56,8 @@ function minimalProduct(): Record<string, unknown> {
       cover: { source: "ctripLibrary", imageId: 1, imageUrl: "x", poi: "太原", description: "y", minQuality: 0 },
     },
     itinerary: [
-      { day: 1, title: "第一天", description: "首日", hotel: "酒店", meals: "自理", spots: [{ name: "太原食品街", poiName: null, poiId: null }] },
-      { day: 2, title: "第二天", description: "次日", hotel: "酒店", meals: "自理", spots: [{ name: "平遥古城", poiName: null, poiId: null }] },
+      { day: 1, title: "第一天", description: "首日", hotel: "酒店", meals: "自理", spots: [{ name: "太原食品街", poiName: "太原食品街", poiId: 10001 }] },
+      { day: 2, title: "第二天", description: "次日", hotel: "酒店", meals: "自理", spots: [{ name: "平遥古城", poiName: "平遥古城", poiId: 10002 }] },
     ],
     commercial: {
       packageName: "太原2天1晚私家团标准套餐",
@@ -193,6 +193,9 @@ test("needs_user 与 schema 阻断 / research task / automationBlockers 同时�
   (product.sales as { productForm: string }).productForm = "privateTour";
   const incomplete = { ...product };
   delete (incomplete.basicInfo as Record<string, unknown>).province;
+  (incomplete.itinerary as Array<Record<string, unknown>>)[0].spots = [
+    { name: "太原食品街", poiName: null, poiId: null },
+  ];
   const poiTask: ResearchTask = {
     id: "poi-1",
     label: "核查 太原食品街 的 VBK POI 映射",

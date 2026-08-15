@@ -44,7 +44,7 @@
 
 .iconButton:focus-visible,
 .actionButton:focus-visible,
-.result:focus-visible,
+.resultChoice:focus-visible,
 .saveButton:focus-visible,
 .input:focus-visible {
   outline: none;
@@ -53,7 +53,7 @@
 
 .actionButton:disabled,
 .saveButton:disabled,
-.result:disabled {
+.resultChoice:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -95,8 +95,6 @@
   min-width: 0;
   min-height: 30px;
   display: grid;
-  gap: 4px;
-  padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--ai-teal) 34%, var(--border));
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--ai-teal) 5%, var(--surface));
@@ -104,7 +102,7 @@
   font: inherit;
   font-size: var(--fs-xs);
   text-align: left;
-  cursor: pointer;
+  overflow: hidden;
 }
 
 .result[data-selected='true'] {
@@ -115,6 +113,18 @@
 .result[data-selectable='false'] {
   border-color: var(--border);
   background: color-mix(in srgb, var(--muted-foreground) 5%, var(--surface));
+}
+
+.resultChoice {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 8px;
+  color: inherit;
+  text-align: left;
+}
+
+.resultChoice:not(:disabled):hover {
+  background: color-mix(in srgb, var(--ai-teal) 7%, transparent);
 }
 
 .resultHead {
@@ -149,9 +159,28 @@
 }
 
 .fields {
+  min-width: 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  color: var(--muted-foreground);
+}
+
+.fieldsSummary {
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  user-select: none;
+}
+
+.fieldsSummary:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 5%, transparent);
+}
+
+.fieldsList {
   display: grid;
   gap: 2px;
-  color: var(--muted-foreground);
+  padding: 2px 8px 7px;
 }
 
 .field {

@@ -73,13 +73,17 @@
   transform: rotate(-90deg);
 }
 
-/* The list participates in the review panel's natural document flow. An
- * expanded day must be able to increase the module height and reveal all of
- * its details instead of creating a second scroll container. */
+/* Keep the itinerary within the review viewport so expanded day details can
+ * be reached with a wheel or trackpad without pushing the whole section away. */
 .dayList {
   list-style: none;
   margin: 0;
   padding: 8px 0;
+  min-height: 0;
+  max-height: min(680px, calc(100vh - 240px));
+  overflow-y: auto;
+  overscroll-behavior: auto;
+  scrollbar-gutter: stable;
 }
 
 .block[data-collapsed='true'] .dayList,

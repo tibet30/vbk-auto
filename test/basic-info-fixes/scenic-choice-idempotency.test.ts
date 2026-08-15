@@ -49,10 +49,10 @@ test("无已提交 choice 时精确选择景点并添加完整标签", async () 
         <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
         <div id="province" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
         <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
-        <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
+        <div id="spot" role="combobox" aria-controls="spot-options"><input class="ant-select-search__field" placeholder="景点" /></div>
         <button id="add" type="button">添加</button>
       </div>
-      <div class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">西安城墙</div></div>
+      <div id="spot-options" class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">西安城墙</div></div>
       <script>
         window.scenicEvents = [];
         const dropdown = document.querySelector('.ant-select-dropdown');
@@ -97,10 +97,10 @@ test("第四级当前同名值不算已添加", async () => {
         <div id="country" role="combobox"><span class="ant-select-selection-selected-value" title="中国">中国</span></div>
         <div id="province" role="combobox"><span class="ant-select-selection-selected-value" title="陕西">陕西</span></div>
         <div id="city" role="combobox"><span class="ant-select-selection-selected-value" title="西安">西安</span></div>
-        <div id="spot" role="combobox"><span class="ant-select-selection-item" title="西安城墙">西安城墙</span><input class="ant-select-search__field" placeholder="景点" /></div>
+        <div id="spot" role="combobox" aria-controls="spot-options"><span class="ant-select-selection-item" title="西安城墙">西安城墙</span><input class="ant-select-search__field" placeholder="景点" /></div>
         <button id="add" type="button">添加</button>
       </div>
-      <div class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">西安城墙</div></div>
+      <div id="spot-options" class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">西安城墙</div></div>
       <script>
         window.scenicEvents = [];
         const dropdown = document.querySelector('.ant-select-dropdown');
@@ -161,7 +161,7 @@ test("页面已提交 4 项景点时不再搜索 / 添加", async () => {
         <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
         <div id="province" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
         <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
-        <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
+        <div id="spot" role="combobox" aria-controls="spot-options"><input class="ant-select-search__field" placeholder="景点" /></div>
         <button id="add" type="button">添加</button>
       </div>
       <div class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">大明宫</div></div>
@@ -200,10 +200,10 @@ test("页面已提交 2 项景点时只补 1 项（达到 3 后停止）", async
         <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
         <div id="province" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
         <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
-        <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
+        <div id="spot" role="combobox" aria-controls="spot-options"><input class="ant-select-search__field" placeholder="景点" /></div>
         <button id="add" type="button">添加</button>
       </div>
-      <div class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">华清宫</div><div class="ant-select-item-option">钟楼</div></div>
+      <div id="spot-options" class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">华清宫</div><div class="ant-select-item-option">钟楼</div></div>
       <script>
         window.scenicEvents = [];
         const dropdown = document.querySelector('.ant-select-dropdown');
@@ -265,7 +265,7 @@ test("页面满 3 项且候选与已提交同名时不重复添加", async () =>
         <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
         <div id="provobox" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
         <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
-        <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
+        <div id="spot" role="combobox" aria-controls="spot-options"><input class="ant-select-search__field" placeholder="景点" /></div>
         <button id="add" type="button">添加</button>
       </div>
       <div class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">西安城墙</div></div>
@@ -308,10 +308,10 @@ test("省份标签「陕西(中国)」「陕西（中国）」「陕西省(中�
         <div id="country" role="combobox"><input class="ant-select-search__field" placeholder="国家" /></div>
         <div id="province" role="combobox"><input class="ant-select-search__field" placeholder="省份" /></div>
         <div id="city" role="combobox"><input class="ant-select-search__field" placeholder="城市/景区" /></div>
-        <div id="spot" role="combobox"><input class="ant-select-search__field" placeholder="景点" /></div>
+        <div id="spot" role="combobox" aria-controls="spot-options"><input class="ant-select-search__field" placeholder="景点" /></div>
         <button id="add" type="button">添加</button>
       </div>
-      <div class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">华清宫</div></div>
+      <div id="spot-options" class="ant-select-dropdown ant-select-dropdown-hidden"><div class="ant-select-item-option">华清宫</div></div>
       <script>
         window.scenicEvents = [];
         const dropdown = document.querySelector('.ant-select-dropdown');

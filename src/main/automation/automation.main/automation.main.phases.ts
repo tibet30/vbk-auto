@@ -1,6 +1,7 @@
 /**
  * 根据 product 形态动态决定要执行的阶段顺序。
- *   - 基础四阶段：basic / presentation / itinerary / package；
+ *   - 无论是否含住宿，都先保存并提交行程，再进入 package；真实 VBK 新产品在
+ *     行程提交前会锁住套餐管理，直接访问 packageManage 会被中断；
  *   - 价格或库存任一存在时附加 pricingInventory；
  *   - 行程含住宿时附加 hotelResource；
  *   - 私家团附加 vehicleResource；
@@ -16,9 +17,10 @@ import { parseProduct } from "../schema/schema.js";
  * 计算某个 product 当前应当跑的阶段序列。
  */
 export function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
+  const needsHotel = product.itinerary.some((day) => Boolean(day.hotel));
   const phases = ["basic", "presentation", "itinerary", "package"];
   if (product.commercial?.pricing || product.commercial?.inventory) phases.push("pricingInventory");
-  if (product.itinerary.some((day) => Boolean(day.hotel))) phases.push("hotelResource");
+  if (needsHotel) phases.push("hotelResource");
   if (product.sales.productForm === "privateTour") phases.push("vehicleResource");
   const terms = product.commercial?.terms;
   if (terms?.inclusions && terms.exclusions && terms.bookingNotes && terms.refundPolicy) phases.push("terms");

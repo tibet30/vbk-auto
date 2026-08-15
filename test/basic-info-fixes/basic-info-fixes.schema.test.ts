@@ -118,7 +118,7 @@ test("阶段重试会在当前页面继续，openProductEditor 带 stayOnCurrent
   // 旧实现需要先点国家框，再点省份框；当前 VBK 国内省份接口可直接在
   // 第二个级联框搜索，测试只锁定直接省份搜索与 Not Found 过滤。
   assert.match(ctripSource, /await comboboxes\.nth\(1\)\.click\(\)/);
-  assert.match(ctripSource, /provinceSearch\.type\(label/);
+  assert.match(ctripSource, /provinceSearch\.fill\(label/);
   assert.match(ctripSource, /text !== "Not Found"/);
 });
 

@@ -7,6 +7,7 @@
 
 import type { PlannerRequest, PlanningStage } from "../../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
+import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
 
 const RECOMMENDATION_CATEGORIES = "优选行程、服务保障、贴心赠送、精选酒店、缤纷景点、特色美食、度假首选、超值赠送、五星精选";
 
@@ -19,10 +20,13 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 3. subtitle 和 operationNotes 使用简洁中文；不得把未核查信息写成已确认事实。`,
   itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，每天至少一个 spot。
 2. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。
-3. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。`,
+3. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
+4. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
+5. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。`,
   presentation: `1. recommendationCategory 与 recommendations[].category 只能从以下值选择：${RECOMMENDATION_CATEGORIES}。
 2. recommendations 恰好 3 条，category 互不重复。
-3. recommendation、recommendations[].text 与 features 使用面向游客的中文产品文案，不得虚构已核查的资源事实。`,
+3. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
+4. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
   commercial: `1. packageName.value 直接提交 JSON 字符串，禁止包成 {"packageName":"..."} 对象。
 2. pricing.adult > 0，pricing.child >= 0；cost.adult 不可超过 adult。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。

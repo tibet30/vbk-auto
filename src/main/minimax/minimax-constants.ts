@@ -12,6 +12,8 @@
 import { z } from "zod";
 import { APP_NAME } from "../../shared/brand.js";
 import type { DisambiguateRequest } from "../../shared/contracts.js";
+import { buildVbkCopyPolicyPrompt } from "../planning/vbk-copy-policy.js";
+import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../domain/product/features-rich-text.js";
 
 const writablePatchGuide = `patch 可写路径白名单（共 16 个）：
 /sales/productType, /sales/productForm, /sales/splitGroup
@@ -44,7 +46,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
     优选行程 / 服务保障 / 贴心赠送 / 精选酒店 / 缤纷景点 / 特色美食 / 度假首选 / 超值赠送 / 五星精选 / 限时秒杀 / 尊享入住 / 大牌驾到 / 优质交通 / 优良资质 / 缤纷体验
   recommendation → string，一句推荐语
   recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复
-  features → string，多行产品特点，每行一个亮点，\\n 分隔
+  features → string，产品特色富文本 HTML 片段，规则见 system prompt
   cover → {source:"ctripLibrary", poi:"代表性景点名", description:"封面图描述", minQuality:3}
 
 【/itinerary】value 必须是数组，每天的行程为一个对象，包含以下全部字段：
@@ -56,6 +58,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   meals → string，餐饮总述，格式 "早餐...；午餐...；晚餐..."
   mealDescriptions → string[]，恰好 3 个元素，依次描述早/午/晚餐
 行程总天数必须等于 basicInfo.days。
+同一天的景点必须按实际游览顺序集中在同一城市或相邻片区，逐一检查相邻及前后 POI，禁止远距离、跨城折返或 POI 离群组合。远距离景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长。
 
 【/commercial/pricing】value 必须是对象：
   { currency:"CNY", adult:成人价(>0), child:儿童价(>=0), minimumTravelers:起订人数(正整数), cost?:{ adult:成人成本(>=0), child:儿童成本(>=0), singleSupplement:单房差(>=0), childBed:加床费(>=0) } }
@@ -262,7 +265,7 @@ export const disambiguateTool = {
   type: "function",
   function: {
     name: "submit_disambiguation",
-    description: "从候选项中选一个与 desired 最接近的。无合适选则返回空串。",
+    description: "从候选项中选一个与 desired 最接近的。无合适选择返回空串。",
     strict: true,
     parameters: {
       type: "object",
@@ -303,8 +306,10 @@ export const advisorOutcomeSchema = z.object({
 export const diagnosisSystemPrompt = `你是 ${APP_NAME} 自动录入失败诊断器。只能根据输入证据判断当前阶段的受限恢复动作。
 输入包含 phase、attempt、error、productIdExists、basicInfoSaved、completedPhases、diagnosisHistory；diagnosisHistory 只表示已经发生的诊断，不得补充未观察事实。
 allowedActions 仅为 retry_same_phase、reload_and_retry_phase、reopen_editor_and_retry_phase、wait_for_user。
+动作选择：retry_same_phase 用于首轮临时失败、保存回读不稳定、弹层遮挡或同阶段可直接再执行的错误；reload_and_retry_phase 用于已有草稿/产品且页面状态可能卡住、控件未渲染、找不到可设置/可填写/可点击项，刷新当前编辑页后重试；reopen_editor_and_retry_phase 仅在 productIdExists=true 且已保存基础信息或前置阶段已完成时使用，用于 tab/editor/路由疑似丢失、保存后页面锁死，或刷新重试历史显示同一目标编辑区仍不可达；wait_for_user 仅用于缺少人工可补的账号/业务数据、前置保存证据不足、已多次同因失败、或无法在白名单动作内安全恢复。
+itinerary 阶段若 attempt=1、productIdExists=true、basicInfoSaved=true、前置阶段已完成，且 error 是“找不到可设置/可填写/可点击的首日集合时间”等编辑控件未出现，应优先选择 reload_and_retry_phase；若 diagnosisHistory 显示刷新后仍同因失败，再考虑 reopen_editor_and_retry_phase。
 输出字段：summary 是中文一句话且不超过 80 字；rootCause 是基于证据的中文说明且不超过 200 字；expectedEvidence 是中文短句且不超过 120 字，表示重试成功后应该看到的证据；action 只能选择一个 allowedActions。action 为 wait_for_user 时 userInstruction 必填，必须是中文且可执行的 VBK 操作；其它 action 忽略 userInstruction。
-硬约束：只返回唯一 action；禁止返回或建议代码、选择器、URL、浏览器脚本、patch 或 patch 路径；禁止包含 DOM、cookie、key、联系人、电话、完整产品JSON、图片、供应商 ID 或 providerId；禁止提审、发布、上线、删除、修改库存或价格；不要重复 production patch 协议。信息不足时返回 wait_for_user。`;
+硬约束：只返回唯一 action；禁止返回或建议代码、选择器、URL、浏览器脚本、patch 或 patch 路径；禁止包含 DOM、cookie、key、联系人、电话、完整产品JSON、图片、供应商 ID 或 providerId；禁止提审、发布、上线、删除、修改库存或价格；不要重复 production patch 协议。信息不足且无法由上述自动恢复动作覆盖时返回 wait_for_user。`;
 
 export const patchOperationSchema = z.object({
   op: z.enum(["add", "replace", "remove"]),
@@ -414,10 +419,14 @@ export const systemPrompt = `你是 ${APP_NAME} 的旅游产品运营助手。�
 7. patch 必须是 RFC6902 风格，只能修改可写路径。
 8. 最多追问一个真正阻塞生成的问题；不阻塞就先给出完整第一版。
 
+${buildVbkCopyPolicyPrompt()}
+
+${PRODUCT_FEATURES_RICH_TEXT_GUIDE}
+
 ===== 文案风格参考 =====
 presentation.recommendation 示例："2天串联晋祠古建与三晋文明，独立成团、专车服务，节奏舒适不赶路。"
 presentation.recommendations 示例：3条推荐理由，每条不同维度，如 [{"category":"优选行程","text":"2天串联核心景点，节奏舒适。"},{"category":"精选酒店","text":"精选当地3钻酒店，含早餐。"},{"category":"缤纷景点","text":"覆盖晋祠、博物院等核心景点。"}]
-presentation.features 示例："【古建巡礼】专业讲解晋祠圣母殿与宋代彩塑。\\n【私享出行】独立成团，专车接送，不拼团不购物。"
+presentation.features 示例："<p><strong>古建巡礼：</strong>游览晋祠古建与宋代彩塑。</p><p><strong>私享出行：</strong>独立成团，专车衔接核心景点。</p><p><strong>舒适住宿：</strong>入住方案约定档次的酒店。</p>"
 itinerary 每天 description 示例："专车于市区/火车站/机场接客。上午前往XX景区，在讲解陪同下游览XX。午餐品尝当地特色美食。下午前往XX，傍晚返回市区入住。"
 terms 示例：inclusions="行程内专车服务、1晚酒店住宿、行程规划；实际以确认单为准。" exclusions="景区门票、讲解、餐饮、个人消费、单房差。" bookingNotes="至少2人起订，建议提前1天15时前预订。" refundPolicy="资源确认前无损取消；确认后按实际已发生费用扣除。"
 
@@ -432,13 +441,13 @@ ${outputGuide}`;
  * 返回完整 system 文本，供 orchestrator 注入到 MiniMax 对话。
  */
 export function disambiguateSystemPrompt(kind: DisambiguateRequest["kind"]): string {
-  const base = `你是 ${APP_NAME} 选则辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
+  const base = `你是 ${APP_NAME} 选择辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
 你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。`;
   const guidance: Record<DisambiguateRequest["kind"], string> = {
     province: `期望值是中国某个省/直辖市/自治区，例如“山西”。candidates 可能是 “中国-山西”“山西省”“山西”。选 “中国-山西” 这类带国家前缀的优先。**绝对不要选 “朝鲜-xxx”“韩国-xxx” 这种境外前缀。**`,
     city: `期望值是中国某个城市，例如“太原”。candidates 可能是 “中国-太原”“太原市”。选 “中国-xxx” 这种带国家前缀的优先，不要选同名海外城市。**只要 candidates 里有任何 “中国-xxx” 的项，优先选它；只在完全没有 “中国-” 前缀项时才考虑无前缀的项，绝不返回 “朝鲜-xxx”“北朝鲜-xxx”“韩国-xxx”。**`,
     spot: `期望值是一个具体景点，例如“云冈石窟”。candidates 是 VBK 景点下拉返回的候选，可能是“云冈石窟”“云冈石窟景区”等。选产品 JSON 推荐语/特点中明确提到的那一个；如果是城市同名 + 同一省份，选那个。**只在国内景点里选：candidates 文本中出现 “朝鲜-”“韩国-”“北朝鲜-”“日本-” 等境外前缀的项一律跳过；产品类型是境内旅游，遇到境外项请返回空串并说明 “仅含境外候选”。**`,
-    station: `期望值是一个车站/机场名，例如“大同站”或城市名“大同”。candidates 是接送站下拉的所有火车站/机场。优先选火车站，其次机场；如果只有城市级选项，选该城市作为默认接送点。**不要选国外机场/车站（文本中带境外地名/机场代码的）。**`,
+    station: `期望值是一个车站/机场名，例如“太原”“大同站”或“武宿机场”。candidates 是接送站下拉返回的机场或火车站。用户输入城市名时，必须只从 candidates 中选最贴近该城市、当地旅客最常用、最主流的交通站点；不要因为候选文本也含城市名就机械选择较小或较偏的通用机场/支线机场。若 user JSON 里的 stationSubtype=airport，本次只在机场候选中选择，例如“太原”候选含“武宿国际机场”和“太原尧城通用机场”时应选“武宿国际机场”；若 stationSubtype=train，本次只在火车站候选中选择，优先主站或高铁主站，避免货运站、机场站、偏远小站。只有城市级选项时，选该城市作为默认接送点。**不要选国外机场/车站（文本中带境外地名/机场代码的）。**`,
   };
-  return `${base}\n\n当前类别：${kind}\n\n专项约束：${guidance[kind]}\n\n返回时只能调用 submit_disambiguation 工具。pickedText 必须是 candidates 里某一个 text 的精确字符串；reasoning 简要说明选则理由或未选原因。`;
+  return `${base}\n\n当前类别：${kind}\n\n专项约束：${guidance[kind]}\n\n返回时只能调用 submit_disambiguation 工具。pickedText 必须是 candidates 里某一个 text 的精确字符串；reasoning 简要说明选择理由或未选原因。`;
 }

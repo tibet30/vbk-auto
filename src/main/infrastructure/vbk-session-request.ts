@@ -196,11 +196,17 @@ export async function vbkSessionRequest<TBody extends object>(
         signal: controller.signal,
       });
       const text = await response.text();
+      // VBK 行程 ID 为 18 位整数，直接 JSON.parse 会超过 Number.MAX_SAFE_INTEGER
+      // 并静默改写末位。只把协议中已知的行程 ID 字段转成字符串，其他数值保持原样。
+      const idSafeText = text.replace(
+        /("(?:tourInfoId|previewTourInfoId|auditTourInfoId|draftTourInfoId|tourInfoScoreId|tourDaily[A-Za-z]+Id)"\s*:\s*)(\d{16,})/g,
+        '$1"$2"',
+      );
       // 从响应中提取 Ack 和数据条数（仅诊断用，不入日志 payload）：
       //  Ack 用于判断「业务成功但数据为空」vs「业务失败」；
       //  dataItemCount 用于确认 suggestPoi 是否返回了候选。
       try {
-        const parsed: unknown = JSON.parse(text);
+        const parsed: unknown = JSON.parse(idSafeText);
         const parsedRecord = parsed && typeof parsed === "object" && !Array.isArray(parsed)
           ? parsed as Record<string, unknown>
           : null;
@@ -238,7 +244,7 @@ export async function vbkSessionRequest<TBody extends object>(
       if (!response.ok) throw new Error(`${errorLabel}失败：HTTP ${response.status}`);
       let payload: unknown;
       try {
-        payload = JSON.parse(text);
+        payload = JSON.parse(idSafeText);
       } catch {
         throw new Error(`${errorLabel}返回无效 JSON`);
       }

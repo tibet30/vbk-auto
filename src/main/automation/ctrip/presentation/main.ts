@@ -9,7 +9,7 @@
  */
 
 import { delay, assertCount } from "../utils.js";
-import { clickSection, saveThenAdvance } from "../tabs.js";
+import { clickSafeSave, clickSection, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
 import {
   buildRecommendationReasonsPlan,
@@ -208,8 +208,22 @@ export async function fillAndSavePresentation(page, product) {
     // 仍然校验 3 条 + 白名单 + 互不重复，错误信息保持原样，避免改动影响既有测试。
     const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
     await clickSection(page, ["产品图文", "图文信息"]);
-    await fillRecommendationReasons(page, recommendations);
+    await page.waitForURL((url) => isProductImageTextUrl(url.href), { timeout: 30_000 });
+    // basic 的「下一步」会先切 tab、再异步完成路由/数据水合。首轮直接写入
+    // 偶发只改到旧 React 状态，点击保存时不会发 savedescriptioninfo；刷新后
+    // 从已解锁的产品图文路由开始，行为与成功的 recovery attempt 一致。
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await delay(1_000);
+
+    // 新产品首次绑定封面会改变服务端的产品图文模型，但当前 React 页面并不会
+    // 自动水合这次接口写入。若继续在旧模型上填表，保存按钮虽然可见，点击后却
+    // 不会发 savedescriptioninfo；恢复重跑能成功只是因为封面已提前存在。
+    // 因此先完成并回读封面绑定，再刷新一次，让首次运行与恢复运行使用同一份
+    // 完整后端状态；所有表单字段必须在这次刷新之后写入，避免被刷新清空。
     await selectCtripLibraryCover(page, presentation.cover);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await delay(1_500);
+    await fillRecommendationReasons(page, recommendations);
     await fillFirstVisible(
       page.locator('textarea[placeholder*="推荐"], textarea'),
       presentation.recommendation,
@@ -227,6 +241,23 @@ export async function fillAndSavePresentation(page, product) {
       );
     }
 
+    // UEditor / 推荐理由均通过 React 受控状态回写；给最后一次 change/sync
+    // 一个明确稳定窗口，避免按钮已经可点但表单 store 尚未形成保存请求。
+    await delay(2_500);
+
+    // 先完成并确认官方保存，再刷新页面让 VBK 从后端重新水合最新图文状态。
+    // 真实新产品上若保存响应尚未落定就立即点「下一步」，行程 tab 会持续
+    // 锁定；整阶段刷新重跑才偶然恢复。这里把该恢复变成确定性主路径。
+    const savedWith = await clickSafeSave(page, ["保存", "保存并下一步"]);
+    saveOutcome = await monitor.waitForSave();
+    if (!saveOutcome.saved) {
+      throw new Error(
+        `产品图文保存未确认成功：HTTP=${saveOutcome.httpStatus} Ack=${saveOutcome.ack} success=${saveOutcome.success}`,
+      );
+    }
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await delay(1_500);
+
     const advanced = await saveThenAdvance(page, {
       phase: "产品图文",
       targetTabLabel: "行程描述",
@@ -234,9 +265,8 @@ export async function fillAndSavePresentation(page, product) {
       targetTabLabels: ["行程描述"],
       isTargetUrl: (url) =>
         typeof url === "string" && !/(^|[/?&])productImageText([/?&]|$)/.test(url),
+      savedWith,
     });
-    // saveThenAdvance 内部已经点了保存按钮；接下来等官方保存响应。
-    saveOutcome = await monitor.waitForSave();
     return advanced;
   } catch (error) {
     saveError = error as Error;

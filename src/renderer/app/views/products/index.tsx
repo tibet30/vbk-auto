@@ -1,4 +1,5 @@
 import { Plus } from "lucide-react";
+import { aiProviderLabel, hasActiveAiKey } from "../../../../shared/contracts.js";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { ProductBriefForm, ProductList, EmptyProductState } from "../../helpers";
@@ -21,7 +22,11 @@ export function AppProductsPage({ model }: { model: AppModel }) {
     openProduct: openProductAction,
     setAccountMenuOpen,
     setNotice,
+    settings,
   } = model;
+
+  const aiConfigured = hasActiveAiKey(settings);
+  const aiProviderName = aiProviderLabel(settings);
 
   const openProduct = async (item: (typeof products)[number]) => {
     setNotice(null);
@@ -42,6 +47,10 @@ export function AppProductsPage({ model }: { model: AppModel }) {
               data-variant="primary"
               onClick={() => {
                 setAccountMenuOpen(false);
+                if (!aiConfigured) {
+                  setNotice(`尚未配置 AI 模型，请先到「设置」中配置 ${aiProviderName} 的 API Key 后再创建产品。`);
+                  return;
+                }
                 setCreating(true);
               }}
             >
@@ -63,7 +72,7 @@ export function AppProductsPage({ model }: { model: AppModel }) {
             }}
           />
         ) : products.length === 0 ? (
-          <EmptyProductState onCreate={() => setCreating(true)} />
+          <EmptyProductState aiConfigured={aiConfigured} providerLabel={aiProviderName} />
         ) : (
           <ProductList products={products} onOpen={openProduct} onDelete={deleteProduct} />
         )}

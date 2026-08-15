@@ -85,7 +85,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "副标题",
     phase: "basic",
     source: "ai-planning",
-    detail: "副标题由 AI 规划阶段生成；缺则 VBK 基本信息页会留空。",
+    detail: "需由 AI 规划生成，写入 VBK 基本信息。",
     check: (product) => textValue(asObject(product.basicInfo)?.subtitle).length > 0,
   },
   {
@@ -93,7 +93,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "国家景区（省份）",
     phase: "basic",
     source: "ai-planning",
-    detail: "省份由 AI 规划阶段写入；缺则 VBK 省份下拉匹配失败。",
+    detail: "需由 AI 规划写入，用于匹配 VBK 省份下拉。",
     check: (product) => textValue(asObject(product.basicInfo)?.province).length > 0,
   },
   {
@@ -101,7 +101,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "运营备注",
     phase: "basic",
     source: "ai-planning",
-    detail: "运营备注由 AI 规划阶段写入；缺则 VBK 运营备注留空。",
+    detail: "需由 AI 规划写入，填入 VBK 运营备注。",
     check: (product) => textValue(asObject(product.basicInfo)?.operationNotes).length > 0,
   },
   {
@@ -109,7 +109,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "管家联系人",
     phase: "basic",
     source: "account-fixed",
-    detail: "管家联系人由账号固定信息在创建产品时注入，自动化阶段不重写；缺则 VBK 联系人下拉无可选项。",
+    detail: "需先配置账号固定信息，创建产品时注入 VBK 联系人。",
     check: (product) => {
       const operations = asObject(product.operations);
       const bookingControls = asObject(operations?.bookingControls);
@@ -126,7 +126,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "推荐语",
     phase: "presentation",
     source: "ai-planning",
-    detail: "推荐语由 AI 规划阶段写入；缺则 VBK 推荐语输入框空。",
+    detail: "需由 AI 规划写入，填入 VBK 推荐语。",
     check: (product) => textValue(asObject(product.presentation)?.recommendation).length > 0,
   },
   {
@@ -134,15 +134,15 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "产品特点",
     phase: "presentation",
     source: "ai-planning",
-    detail: "产品特点由 AI 规划阶段写入；缺则 VBK 富文本编辑器空。",
+    detail: "需由 AI 规划写入，填入 VBK 富文本。",
     check: (product) => textValue(asObject(product.presentation)?.features).length > 0,
   },
   {
     path: "presentation.recommendations",
-    label: "推荐理由（3 条）",
+    label: "推荐理由",
     phase: "presentation",
     source: "ai-planning",
-    detail: "推荐理由必须恰好 3 条、category 在白名单、互不重复；缺则 VBK 推荐理由写入失败。",
+    detail: "需 3 条；分类在白名单且不重复，文本非空。",
     check: hasValidPresentationRecommendations,
   },
   {
@@ -150,7 +150,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "封面图（携程图库）",
     phase: "presentation",
     source: "ai-planning",
-    detail: "封面图由 AI 规划阶段写入 poi/description/minQuality，imageId/imageUrl 由 VBK 选图回填。",
+    detail: "需 AI 提供 poi、description、minQuality；VBK 选图后回填图片。",
     check: hasValidCoverPoMeta,
   },
   // itinerary 阶段
@@ -159,7 +159,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "每日行程",
     phase: "itinerary",
     source: "ai-planning",
-    detail: "每日行程由 AI 规划阶段写入；缺则 VBK 行程描述无法填写。",
+    detail: "需由 AI 规划写入，包含可回读的 VBK POI。",
     check: hasValidItinerary,
   },
   // package / pricing / inventory / terms → 草稿态缺也允许（运营/上架时回填）
@@ -210,7 +210,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "AI 规划：hotelTier 字段",
     phase: "basic",
     source: "ai-planning",
-    detail: "AI 规划阶段必须写入合法 hotelTier（白名单见 HOTEL_TIER_VALUES）；缺则 VBK lodging tier 下拉无可选。",
+    detail: "需 AI 写入白名单 hotelTier，用于匹配 VBK 酒店档次。",
     check: (product) => {
       const tier = textValue(asObject(product.operations)?.hotelTier);
       return (HOTEL_TIER_VALUES as readonly string[]).includes(tier);
@@ -221,7 +221,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "用车资源组",
     phase: "vehicleResource",
     source: "vbk-runtime",
-    detail: "私家团用车资源组由 VBK 资源组接口匹配后回填；缺则 VBK 资源组下拉不可用。",
+    detail: "私家团需先匹配并回填 VBK 资源组。",
     check: (product) => isPrivateTour(product) ? hasSatisfiedVehicleResource(product) : true,
   },
 ];
@@ -261,7 +261,7 @@ export function evaluateAutomationContract(product: Record<string, unknown>): Au
     }
     if (ok) continue;
     if (field.source === "ai-planning" || field.source === "account-fixed") {
-      failures.push({ field, reason: `${field.label}未就绪：${field.detail}` });
+      failures.push({ field, reason: field.detail });
     } else {
       runtimeExceptions.push({ field, reason: `${field.label}由 ${field.source} 阶段回填：${field.detail}` });
     }
@@ -286,7 +286,7 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
     throw new Error("产品图文缺少产品特点，请先在 AI 规划阶段补全 presentation.features。");
   }
   if (!hasValidPresentationRecommendations(product)) {
-    throw new Error("推荐理由必须恰好 3 条：category 必须在 15 项白名单内、互不重复、文本非空。请回到 AI 规划阶段补全 presentation.recommendations。");
+    throw new Error("推荐理由必须恰好 3 条：分类在白名单且不重复，文本非空。请补全 presentation.recommendations。");
   }
   const cover = readCover(product);
   if (!cover) {

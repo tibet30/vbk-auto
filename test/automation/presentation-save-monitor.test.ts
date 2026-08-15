@@ -443,27 +443,21 @@ test("save monitor：敏感词请求飞出但响应永不回响 + save 响应后
   );
 });
 
-/** uninstall 之后到达的 response 事件必须被 guard 吞掉，不再触发 settle —— 防止
- *  跨测试/跨产品残留副作用。 */
-test("save monitor：uninstall 后到达的 response 事件不能影响新 monitor", async () => {
+/** 产品图文已改为直接接口保存；monitor 仅保留单测覆盖旧 UI 保存守门行为。 */
+test("产品图文主流程：直接接口保存必须先于推进下一页", async () => {
   // 测试文件位于 <repo>/test/automation/，相对路径要往上 3 层到 repo root
   const here = resolve("test/automation/presentation-save-monitor.test.ts");
   const mainPath = resolve(here, "../../../src/main/automation/ctrip/presentation/main.ts");
   const src = await readFile(mainPath, "utf8");
-  const idxInstall = src.indexOf("installSaveMonitor(page)");
-  const idxClickSection = src.indexOf("clickSection(page");
-  assert.ok(idxInstall >= 0, "main.ts 必须调用 installSaveMonitor(page)");
-  assert.ok(idxClickSection >= 0, "main.ts 必须调用 clickSection(page");
+  const idxSaveApi = src.indexOf("savePresentationViaApi(page, presentation)");
+  const idxAdvance = src.indexOf("saveThenAdvance(page");
+  assert.ok(idxSaveApi >= 0, "main.ts 必须调用 savePresentationViaApi(page, presentation)");
+  assert.ok(idxAdvance >= 0, "main.ts 必须调用 saveThenAdvance(page");
   assert.ok(
-    idxInstall < idxClickSection,
-    `installSaveMonitor 必须在 clickSection 之前（否则无法捕获 UEditor blur 触发的 checkSensitiveWord）；idxInstall=${idxInstall}, idxClickSection=${idxClickSection}`,
+    idxSaveApi < idxAdvance,
+    `savePresentationViaApi 必须在 saveThenAdvance 之前；idxSaveApi=${idxSaveApi}, idxAdvance=${idxAdvance}`,
   );
-  // 同时确保 monitor 已被 uninstall 包裹（防止跨产品残留副作用）
-  assert.match(
-    src,
-    /finally\s*\{[\s\S]*monitor\.uninstall\(\)/,
-    "main.ts 必须在 finally 中调用 monitor.uninstall()，防止跨产品残留",
-  );
+  assert.doesNotMatch(src, /installSaveMonitor\(page\)/, "接口保存后主流程不应再安装 UI 保存 monitor");
   // ensure tabs.ts 没有被改（守住「只收窄产品图文」红线）
   const tabsPath = resolve(here, "../../../src/main/automation/ctrip/tabs.ts");
   const tabsSrc = await readFile(tabsPath, "utf8");

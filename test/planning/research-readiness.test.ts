@@ -37,15 +37,15 @@ test("合法 hotelTier 使未确认酒店 research task 不再阻断", () => {
     { state: "researching", label: "核查酒店资源", type: "vbk" },
   ];
   const blockers = automationBlockers(product, { researchTasks: tasks });
-  assert.ok(!blockers.some((b) => /酒店核查/.test(b.label)));
+  assert.ok(!blockers.some((b) => /酒店资源/.test(b.label)));
 });
 
 test("缺失或非法 hotelTier 时未确认酒店 research task 仍可阻断", () => {
   const tasks = [
     { state: "researching", label: "核查酒店资源", type: "vbk" },
   ];
-  assert.ok(automationBlockers({ operations: {} }, { researchTasks: tasks }).some((b) => /酒店核查/.test(b.label)));
-  assert.ok(automationBlockers({ operations: { hotelTier: "当地9钻酒店/-9" } }, { researchTasks: tasks }).some((b) => /酒店核查/.test(b.label)));
+  assert.ok(automationBlockers({ operations: {} }, { researchTasks: tasks }).some((b) => /酒店资源/.test(b.label)));
+  assert.ok(automationBlockers({ operations: { hotelTier: "当地9钻酒店/-9" } }, { researchTasks: tasks }).some((b) => /酒店资源/.test(b.label)));
 });
 
 test("所有 research task 已 confirmed 时不再产生相关 blocker", () => {

@@ -161,7 +161,7 @@ test("needs_user 时优先用 rec.userInstruction 作详情，缺失时回退到
     researchTasks: [],
     automation: { ...needsUserRun("basic", ""), recovery: { phases: { basic: { phase: "basic", state: "needs_user", attempts: [] } } } },
   });
-  assert.match(withoutAnyDetail.issues[0]?.detail ?? "", /自动录入失败/);
+  assert.match(withoutAnyDetail.issues[0]?.detail ?? "", /核查当前阶段失败原因/);
 });
 
 test("用户主动取消（finalError 前缀为「用户中止」）不生成新待处理项", () => {
@@ -172,7 +172,7 @@ test("用户主动取消（finalError 前缀为「用户中止」）不生成新
     automation: needsUserRun(
       "basic",
       "用户中止了自动录入",
-      "已停止当前自动录入，请在 VBK 核查当前页面后重新保存草稿。",
+      "已停止，请核查当前页面后重新保存草稿。",
     ),
   });
   // 不应再追加「自动录入失败：basic」issues。

@@ -169,8 +169,8 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
   // 会在审核后逐项打开 submitReview / publishAfterApproval。
   const release = commercial?.release as Record<string, unknown> | undefined;
   if (release) {
-    if (release.submitReview === true) blockers.push({ label: "submitReview 仍为草稿状态", detail: "需在 VBK 或运营面板中明确开启后才能自动录入。" });
-    if (release.publishAfterApproval === true) blockers.push({ label: "publishAfterApproval 仍为草稿状态", detail: "需在 VBK 或运营面板中明确开启后才能自动录入。" });
+    if (release.submitReview === true) blockers.push({ label: "submitReview 仍为草稿状态", detail: "需先在 VBK 或运营面板确认开启。" });
+    if (release.publishAfterApproval === true) blockers.push({ label: "publishAfterApproval 仍为草稿状态", detail: "需先在 VBK 或运营面板确认开启。" });
   }
   // 未解决且不能由当前 product 本地字段满足的资源类 research task 才阻断。
   const tasks = options.researchTasks ?? [];
@@ -185,8 +185,8 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
   };
   for (const task of openTasks) {
     const label = task.label || "";
-    if (blockingLabels.vehicle.test(label)) blockers.push({ label: `车辆核查：${label}`, detail: "需 VBK 匹配资源组后才能自动录入。" });
-    else if (blockingLabels.hotel.test(label)) blockers.push({ label: `酒店核查：${label}`, detail: "需 VBK 匹配酒店资源后才能自动录入。" });
+    if (blockingLabels.vehicle.test(label)) blockers.push({ label: `车辆核查：${label}`, detail: "需先匹配 VBK 资源组。" });
+    else if (blockingLabels.hotel.test(label)) blockers.push({ label: `酒店核查：${label}`, detail: "需先匹配 VBK 酒店资源。" });
   }
   return mergeReadinessIssues(blockers);
 }

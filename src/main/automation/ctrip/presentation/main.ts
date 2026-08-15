@@ -9,16 +9,14 @@
  */
 
 import { delay, assertCount } from "../utils.js";
-import { clickSafeSave, clickSection, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
+import { clickSection, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
 import {
   buildRecommendationReasonsPlan,
-  fillRecommendationReasons,
 } from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
-import { fillProductFeatures } from "./features.js";
-import { installSaveMonitor, type SaveMonitorOutcome } from "./save-monitor.js";
 import { bindCtripLibraryCoverViaApi } from "./cover-bind.js";
+import { savePresentationViaApi } from "./presentation-api.js";
 
 export { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 
@@ -161,7 +159,7 @@ export async function selectCtripLibraryCover(page, cover) {
 }
 
 /**
- * 「产品图文」阶段主入口：填推荐理由 3 条 → 上封面 → 推荐语 + 产品特点 → 保存 → 进入「行程描述」。
+ * 「产品图文」阶段主入口：接口保存推荐理由 + 产品特色 → 上封面 → 进入「行程描述」。
  * 调用方需要保证 product.presentation 含 cover 与 recommendation / features / recommendations。
  *
  * 防御深度（defense in depth）：
@@ -171,11 +169,8 @@ export async function selectCtripLibraryCover(page, cover) {
  *     VBK 阶段自身也会在打开任何 tab / 弹窗之前抛错；
  *   - 不调用 VBK、不打开网络、不会留下半成品页面状态。
  *
- * 第三道防御（保存门禁）：在产品图文动作开始前挂 /15638/savedescriptioninfo 与
- * /15638/checkSensitiveWord 监听；只有官方响应 success=true 且 ResponseStatus.Ack=Success
- * 才允许继续推进；命中敏感词 / 业务失败 / 无响应都直接抛错，绝不因「目标 tab 已解锁」
- * 误判完成。install 放在所有 UI 动作之前，覆盖 UEditor blur 触发的
- * checkSensitiveWord 等前置检测；finally 中 uninstall 保证不会跨产品残留副作用。
+ * 保存不再触碰推荐理由 textarea / UEditor DOM：统一走 /15638/getdescriptionInfo →
+ * /20698/createProductDraft(desc) → /15638/savedescriptioninfo → 回读确认。
  */
 export async function fillAndSavePresentation(page, product) {
   // 第一道防御：统一从 automation-contract 取真实契约，错误文案面向运营。
@@ -198,88 +193,28 @@ export async function fillAndSavePresentation(page, product) {
     throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }
 
-  // 第三道防御（保存门禁）：在产品图文动作前挂 /15638/savedescriptioninfo 与
-  // /15638/checkSensitiveWord 监听，覆盖整段 UI 操作期间的所有官方响应。
-  const monitor = installSaveMonitor(page);
-  let saveOutcome: SaveMonitorOutcome | null = null;
-  let saveError: Error | null = null;
-  try {
-    // 第二道防御（推荐理由 VBK 行写入前）：buildRecommendationReasonsPlan 内部
-    // 仍然校验 3 条 + 白名单 + 互不重复，错误信息保持原样，避免改动影响既有测试。
-    const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
-    await clickSection(page, ["产品图文", "图文信息"]);
-    await page.waitForURL((url) => isProductImageTextUrl(url.href), { timeout: 30_000 });
-    // basic 的「下一步」会先切 tab、再异步完成路由/数据水合。首轮直接写入
-    // 偶发只改到旧 React 状态，点击保存时不会发 savedescriptioninfo；刷新后
-    // 从已解锁的产品图文路由开始，行为与成功的 recovery attempt 一致。
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await delay(1_000);
+  // 第二道防御（推荐理由接口保存前）：仍然保留 3 条 + 白名单 + 不重复校验，
+  // 错误信息保持原样，避免改动影响既有运营提示。
+  buildRecommendationReasonsPlan(presentation.recommendations);
+  await clickSection(page, ["产品图文", "图文信息"]);
+  await page.waitForURL((url) => isProductImageTextUrl(url.href), { timeout: 30_000 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await delay(1_000);
 
-    // 新产品首次绑定封面会改变服务端的产品图文模型，但当前 React 页面并不会
-    // 自动水合这次接口写入。若继续在旧模型上填表，保存按钮虽然可见，点击后却
-    // 不会发 savedescriptioninfo；恢复重跑能成功只是因为封面已提前存在。
-    // 因此先完成并回读封面绑定，再刷新一次，让首次运行与恢复运行使用同一份
-    // 完整后端状态；所有表单字段必须在这次刷新之后写入，避免被刷新清空。
-    await selectCtripLibraryCover(page, presentation.cover);
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await delay(1_500);
-    await fillRecommendationReasons(page, recommendations);
-    await fillFirstVisible(
-      page.locator('textarea[placeholder*="推荐"], textarea'),
-      presentation.recommendation,
-      "推荐语输入框",
-    );
-    // 产品特点：先 label 锚定 .ant-form-item，再 fallback 到 #pm_features 容器；
-    // 失败抛「找不到产品特点富文本输入框」并附诊断（不静默保存）。
-    const featuresResult = await fillProductFeatures(page, presentation.features);
-    const filledFeatures = featuresResult.filled;
-    if (!filledFeatures) {
-      const editorTypeLabel = featuresResult.editorType ?? "未识别";
-      const scopeLabel = featuresResult.scopeSource ?? "无作用域";
-      throw new Error(
-        `找不到产品特点富文本输入框（编辑器类型=${editorTypeLabel}，作用域来源=${scopeLabel}）；诊断：${featuresResult.diagnostic || "无候选作用域/编辑器"}`,
-      );
-    }
+  await selectCtripLibraryCover(page, presentation.cover);
+  const savedWith = await savePresentationViaApi(page, presentation);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await delay(1_500);
 
-    // UEditor / 推荐理由均通过 React 受控状态回写；给最后一次 change/sync
-    // 一个明确稳定窗口，避免按钮已经可点但表单 store 尚未形成保存请求。
-    await delay(2_500);
-
-    // 先完成并确认官方保存，再刷新页面让 VBK 从后端重新水合最新图文状态。
-    // 真实新产品上若保存响应尚未落定就立即点「下一步」，行程 tab 会持续
-    // 锁定；整阶段刷新重跑才偶然恢复。这里把该恢复变成确定性主路径。
-    const savedWith = await clickSafeSave(page, ["保存", "保存并下一步"]);
-    saveOutcome = await monitor.waitForSave();
-    if (!saveOutcome.saved) {
-      throw new Error(
-        `产品图文保存未确认成功：HTTP=${saveOutcome.httpStatus} Ack=${saveOutcome.ack} success=${saveOutcome.success}`,
-      );
-    }
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await delay(1_500);
-
-    const advanced = await saveThenAdvance(page, {
-      phase: "产品图文",
-      targetTabLabel: "行程描述",
-      saveButtonNames: ["保存", "保存并下一步"],
-      targetTabLabels: ["行程描述"],
-      isTargetUrl: (url) =>
-        typeof url === "string" && !/(^|[/?&])productImageText([/?&]|$)/.test(url),
-      savedWith,
-    });
-    return advanced;
-  } catch (error) {
-    saveError = error as Error;
-    throw error;
-  } finally {
-    monitor.uninstall();
-    // 业务校验：只有成功响应才允许 silent pass；失败响应统一抛错
-    if (saveError === null && saveOutcome && !saveOutcome.saved) {
-      throw new Error(
-        `产品图文保存未确认成功：HTTP=${saveOutcome.httpStatus} Ack=${saveOutcome.ack} success=${saveOutcome.success}`,
-      );
-    }
-  }
+  return saveThenAdvance(page, {
+    phase: "产品图文",
+    targetTabLabel: "行程描述",
+    saveButtonNames: ["保存", "保存并下一步"],
+    targetTabLabels: ["行程描述"],
+    isTargetUrl: (url) =>
+      typeof url === "string" && !/(^|[/?&])productImageText([/?&]|$)/.test(url),
+    savedWith,
+  });
 }
 
 export {

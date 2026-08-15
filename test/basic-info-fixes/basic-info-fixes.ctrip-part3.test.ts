@@ -70,14 +70,13 @@ test("接线 2：fillAndSavePresentation 接入 saveThenAdvance，目标 行程�
   assert.match(presBody, /saveThenAdvance\(page, \{/);
   assert.match(presBody, /targetTabLabels: \["行程描述"\]/);
   assert.match(presBody, /targetTabLabel: "行程描述"/);
-  // presentation 必须先自己保存并确认官方响应，再把 savedWith 交给
+  // presentation 必须先自己通过接口保存并回读确认，再把 savedWith 交给
   // saveThenAdvance；避免保存响应未落定时过早点击下一步。
   assert.match(
     presBody,
-    /await clickSafeSave\(page, \["保存", "保存并下一步"\]\)/,
-    "fillAndSavePresentation 必须在推进前显式保存",
+    /savePresentationViaApi\(page, presentation\)/,
+    "fillAndSavePresentation 必须在推进前通过接口保存并回读确认",
   );
-  assert.match(presBody, /saveOutcome = await monitor\.waitForSave\(\)/);
   assert.match(presBody, /await page\.waitForURL\(\(url\) => isProductImageTextUrl\(url\.href\)/);
   assert.match(presBody, /await page\.reload\(\{ waitUntil: "domcontentloaded" \}\)/);
   assert.match(presBody, /savedWith,/);
@@ -87,30 +86,21 @@ test("接线 2：fillAndSavePresentation 接入 saveThenAdvance，目标 行程�
     "进入产品图文前必须校验完整的三条推荐理由配置");
   assert.match(presBody, /cover\.source !== "ctripLibrary"/, "产品图文必须在写入前校验完整的图库封面配置");
   assert.match(presBody, /Number\.isInteger\(cover\.imageId\)/, "封面必须有已选图库图片的有效身份");
-  assert.match(presBody, /await fillRecommendationReasons\(page, recommendations\)/,
-    "产品图文必须实际填写已校验的推荐理由");
+  assert.doesNotMatch(presBody, /fillRecommendationReasons\(page/,
+    "产品图文主流程不应再通过 DOM 填写推荐理由");
   assert.match(presBody, /await selectCtripLibraryCover\(page, presentation\.cover\)/,
     "产品图文必须录入图库封面");
   const bindCoverIdx = presBody.indexOf("await selectCtripLibraryCover(page, presentation.cover)");
-  const reloadAfterCoverIdx = presBody.indexOf(
-    'await page.reload({ waitUntil: "domcontentloaded" })',
-    bindCoverIdx,
-  );
-  const fillReasonsIdx = presBody.indexOf("await fillRecommendationReasons(page, recommendations)");
-  assert.ok(bindCoverIdx >= 0 && reloadAfterCoverIdx > bindCoverIdx,
-    "首次接口绑定封面后必须刷新，让产品图文页从后端重新水合");
-  assert.ok(fillReasonsIdx > reloadAfterCoverIdx,
-    "推荐理由等表单字段必须在封面绑定后的刷新完成后再写入");
+  const saveApiIdx = presBody.indexOf("savePresentationViaApi(page, presentation)");
+  assert.ok(bindCoverIdx >= 0 && saveApiIdx > bindCoverIdx,
+    "产品图文接口保存必须在封面绑定之后执行");
   assert.match(
     presBody,
-    /if \(!filledFeatures\)/,
-    "产品特点输入框缺失时必须存在 if (!filledFeatures) 分支",
+    /savePresentationViaApi\(page, presentation\)/,
+    "产品特色必须通过产品图文接口保存模块写入",
   );
-  assert.match(
-    presBody,
-    /找不到产品特点富文本输入框/,
-    "产品特点输入框缺失时抛错必须保留「找不到产品特点富文本输入框」前缀",
-  );
+  assert.doesNotMatch(presBody, /fillProductFeatures\(page/,
+    "产品图文主流程不应再通过 UEditor DOM 写入产品特色");
 });
 
 test("页签导航用页面内原生 click，避免 Electron 未结束导航阻塞 locator.click", async () => {

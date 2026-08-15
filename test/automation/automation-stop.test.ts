@@ -75,7 +75,8 @@ test("shouldCancel 在第一次 attempt 顶部为 true：立刻返回 cancelled�
   const rec = run.recovery!.phases.basic;
   assert.equal(rec.state, "needs_user");
   assert.match(rec.finalError!, /用户中止/);
-  assert.match(rec.userInstruction!, /已停止当前自动录入/);
+  assert.match(rec.userInstruction!, /已停止/);
+  assert.match(rec.userInstruction!, /核查当前页面/);
 });
 
 test("shouldCancel 在 attempt 之间翻成 true：handler 跑一次就停", async () => {

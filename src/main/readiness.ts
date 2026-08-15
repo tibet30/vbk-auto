@@ -29,7 +29,7 @@ import { automationBlockers, productSchema } from "./automation/schema/schema.js
 const READINESS_MAX_BLOCKERS = 12;
 
 /** needs_user 详情缺失时的兜底文案，避免出现「detail 为空 → 不 push」的 92%/0 pending 假就绪态。 */
-const DEFAULT_NEEDS_USER_DETAIL = "自动录入失败，请在 VBK 核查当前阶段失败原因后再次保存草稿。";
+const DEFAULT_NEEDS_USER_DETAIL = "请核查当前阶段失败原因后重新保存草稿。";
 
 export interface ComputeReadinessInput {
   product: Record<string, unknown>;

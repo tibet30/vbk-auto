@@ -212,7 +212,7 @@ test("行程景点缺 poiId / poiName 会在 readiness 阶段阻断", () => {
   const blockers = automationBlockers(product);
   const detail = blockers.find((item) => item.label === "每日行程");
   assert.ok(detail, "缺 POI 的行程必须在 readiness 阶段阻断");
-  assert.match(detail?.detail ?? "", /每日行程/);
+  assert.match(detail?.detail ?? "", /VBK POI/);
 });
 
 test("已落库的 AI 文案命中 VBK 黑名单会在 readiness 阶段阻断", () => {

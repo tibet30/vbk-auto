@@ -93,7 +93,7 @@ export async function runPhaseWithRecovery(
     if (ctx.shouldCancel?.()) {
       rec.state = "needs_user";
       rec.finalError = "用户中止了自动录入";
-      if (!rec.userInstruction) rec.userInstruction = "已停止当前自动录入，请在 VBK 核查当前页面后重新保存草稿。";
+      if (!rec.userInstruction) rec.userInstruction = "已停止，请核查当前页面后重新保存草稿。";
       ctx.log(`phase=${ctx.phase} cancelled before attempt=${attempt}`, "warning");
       persist();
       return { status: "cancelled", finalError: rec.finalError };
@@ -107,7 +107,7 @@ export async function runPhaseWithRecovery(
       if (ctx.shouldCancel?.()) {
         rec.state = "needs_user";
         rec.finalError = "用户中止了自动录入";
-        if (!rec.userInstruction) rec.userInstruction = "已停止当前自动录入，请在 VBK 核查当前页面后重新保存草稿。";
+        if (!rec.userInstruction) rec.userInstruction = "已停止，请核查当前页面后重新保存草稿。";
         ctx.log(`phase=${ctx.phase} cancelled after attempt=${attempt}`, "warning");
         persist();
         return { status: "cancelled", finalError: rec.finalError };

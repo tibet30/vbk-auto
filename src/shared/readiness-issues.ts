@@ -45,12 +45,25 @@ function vehicleDetail(left: ReadinessIssue, right: ReadinessIssue): string {
   const candidates = [left.detail, right.detail].filter(Boolean);
   return candidates.find((detail) => /私家团.*VBK.*资源组|resourceGroupId/.test(detail))
     || candidates.sort((a, b) => b.length - a.length)[0]
-    || "私家团需要在 VBK 核查并填写现有用车资源组 ID。";
+    || "私家团需先填写 VBK 资源组。";
+}
+
+function hotelDetail(left: ReadinessIssue, right: ReadinessIssue): string {
+  const detail = mergeDetail(left.detail || "", right.detail || "");
+  const needsTier = /hotelTier|酒店档次/.test(detail);
+  const needsResource = /酒店资源/.test(detail);
+  if (needsTier && needsResource) return "需填写白名单酒店档次，并匹配 VBK 酒店资源。";
+  if (needsTier) return "需填写白名单酒店档次。";
+  if (needsResource) return "需先匹配 VBK 酒店资源。";
+  return detail || "需先核查 VBK 酒店配置。";
 }
 
 function mergeIssue(left: ReadinessIssue, right: ReadinessIssue, key: string): ReadinessIssue {
   if (key === "resource:vehicle") {
     return { label: "用车资源组", detail: vehicleDetail(left, right) };
+  }
+  if (key === "resource:hotel") {
+    return { label: "酒店资源", detail: hotelDetail(left, right) };
   }
   return { label: left.label || right.label, detail: mergeDetail(left.detail || "", right.detail || "") };
 }

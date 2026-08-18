@@ -23,7 +23,7 @@ export function AppRail({ model }: { model: AppModel }) {
 
   const isWorkspace = view === "workspace" && !product;
   const isProducts = view === "products" || (view === "workspace" && Boolean(product));
-  const isOperationLog = view === "operation-log";
+  // const isOperationLog = view === "operation-log";
 
   return (
     <aside className={styles.rail} aria-label="主导航">
@@ -57,19 +57,22 @@ export function AppRail({ model }: { model: AppModel }) {
         <PackageOpen className={styles.icon} />
       </button>
 
-      <button
-        className={styles.railBtn}
-        data-active={isOperationLog}
-        onClick={() => {
-          setProduct(null);
-          setView("operation-log");
-          setAccountMenuOpen(false);
-        }}
-        aria-label="操作日志"
-        title="操作日志"
-      >
-        <History className={styles.icon} />
-      </button>
+      {/*
+        操作日志入口（临时隐藏，保留视图分支以便历史状态恢复时不崩溃）
+        <button
+          className={styles.railBtn}
+          data-active={isOperationLog}
+          onClick={() => {
+            setProduct(null);
+            setView("operation-log");
+            setAccountMenuOpen(false);
+          }}
+          aria-label="操作日志"
+          title="操作日志"
+        >
+          <History className={styles.icon} />
+        </button>
+      */}
 
       <div className={styles.railSpacer} />
 

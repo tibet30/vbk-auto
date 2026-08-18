@@ -1,7 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import { CopyableId, statusLabel } from "../../helpers";
-import { APP_NAME, LOGO_URL } from "../../brand";
 import shared from "../shared.module.less";
 import { AccountPopover } from "./AccountPopover";
 import styles from "./Topbar.module.less";
@@ -66,12 +65,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
           </>
         ) : viewTitle ? (
           <span className={styles.crumb}>{viewTitle}</span>
-        ) : (
-          <span className={styles.crumb}>
-            <img src={LOGO_URL} alt="" className={styles.crumbLogo} draggable={false} />
-            <span className={styles.crumbApp}>{APP_NAME}</span>
-          </span>
-        )}
+        ) : null}
       </nav>
 
       <div className={styles.topbarSpacer} />

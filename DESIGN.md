@@ -75,7 +75,7 @@ The browser is not a modal or separate application window. It is a first-class S
 - Below it, a persistent two-step progress navigator controls which stage is visible and explains each stage's current state.
 - The active stage contains exactly two connected work areas: AI plus full review in Step 1; review result plus embedded VBK browser in Step 2.
 - Panel headers remain fixed while their content scrolls independently.
-- Non-detail pages such as the workbench home and product list use the shared centered content width: max `980px` with 16px side gutters at narrow sizes.
+- Non-detail pages such as the workbench home and product list use the shared centered content width: max `880px` (the `--content-max` token) with 16px side gutters at narrow sizes.
 - Product detail is the exception: it uses the full available main area for the current two-panel stage. At narrow widths, those two panels stack; the inactive stage is not rendered.
 
 ## AI Workspace
@@ -113,7 +113,7 @@ The browser is not a modal or separate application window. It is a first-class S
 
 - Design should prioritize operational efficiency over visual novelty.  
 - Chinese text is default in interface copy and workflows unless a field must remain English (e.g., code IDs, external brand names).
-- Keep normal pages compact with a centered content width (max `980px`) and `16px` side gutters; exception pages may use full width by component-level decision.
+- Keep normal pages compact with a centered content width (max `880px`, via the `--content-max` token) and `16px` side gutters; exception pages may use full width by component-level decision.
 - Prefer stable borders, clear spacing, and readable density over heavy shadows or animation.
 - Every stage switch and status update should have an explicit source of truth (state icon + text), not only color.
 - Keep keyboard and screen-reader basics in scope for shared form controls and important action buttons.

@@ -4,7 +4,7 @@
 
 /* 默认（登录未打开）：保留原 max-width + 单列布局。 */
 .homeStage {
-  max-width: var(--content-max);
+  width: var(--content-max);
   padding: 16px 16px 0;
   margin: 0 auto;
 }
@@ -54,32 +54,24 @@
   line-height: 1.3;
 }
 
-.workspaceHomeTitle {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.workspaceHomeLogo {
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: var(--muted);
-  object-fit: contain;
-  padding: 3px;
-  flex-shrink: 0;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
 .workspaceHomeGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--pad-sm);
 }
 
 @media (max-width: 880px) {
   .workspaceHomeGrid { grid-template-columns: 1fr; }
+}
+
+/* WorkbenchModule action 区内承载多个按钮的并排容器。
+ * WorkbenchModule 自身的 moduleFoot 是 space-between 布局：左 hint + 右 action。
+ * 这里只是 action 区的局部包装，使用 inline-flex 维持自然宽度，避免撑开父布局。 */
+.moduleActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 @media (max-width: 980px) {

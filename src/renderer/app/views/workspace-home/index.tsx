@@ -1,8 +1,7 @@
-import { BriefcaseBusiness, FolderOpen, Plus, Settings } from "lucide-react";
+import { PackageOpen, Settings } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { WorkbenchModule } from "../../helpers";
-import { APP_NAME, LOGO_URL, LOGO_ALT } from "../../brand";
 import { LoginBrowserPanel } from "./LoginBrowserPanel";
 import styles from "./index.module.less";
 
@@ -17,37 +16,38 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
   return <section className={stageClass} data-login-open={loginPanelOpen ? "true" : "false"}>
     <div className={styles.homeMain}>
       <header className={styles.workspaceHomeHead}>
-        <h1 className={styles.workspaceHomeTitle}>
-          <img src={LOGO_URL} alt={LOGO_ALT} className={styles.workspaceHomeLogo} draggable={false} />
-          <span>{APP_NAME} 工作台</span>
-        </h1>
+        <h1 className={styles.workspaceHomeTitle}>工作台</h1>
         <p className={shared.viewSub}>从这里启动产品、查看设置或直接进入录入。</p>
       </header>
       <div className={styles.workspaceHomeGrid}>
         <WorkbenchModule
-          icon={<Plus size={16} />}
-          title="新建产品"
-          detail={hasProducts ? `当前已建立 ${totalProducts} 个产品，继续新增一个。` : "先创建第一个产品，从目的地与天数开始。"}
-          state="emphasis"
-          stateLabel="推荐"
-          hint="3 个字段起步"
-          action={
-            <button className={`${shared.btn} ${shared.btnSm}`} data-variant="primary" onClick={startCreateProduct}>
-              创建产品
-            </button>
+          icon={<PackageOpen size={16} />}
+          title="产品"
+          detail={
+            hasProducts
+              ? `当前已建立 ${totalProducts} 个产品，可新增一个或继续处理已有的。`
+              : "从新建第一个产品开始，完成后会出现在这里统一管理。"
           }
-        />
-        <WorkbenchModule
-          icon={<FolderOpen size={16} />}
-          title="产品管理"
-          detail={hasProducts ? "浏览全部产品，打开历史记录并继续处理。" : "还没有任何产品，新建一个后会出现在这里。"}
-          state={hasProducts ? "ready" : "todo"}
-          stateLabel={hasProducts ? "可用" : "暂无"}
-          hint={hasProducts ? `共 ${totalProducts} 个产品` : "—"}
+          state={hasProducts ? "ready" : "emphasis"}
+          stateLabel={hasProducts ? "可用" : "推荐"}
+          hint={hasProducts ? `共 ${totalProducts} 个产品` : "尚未创建"}
           action={
-            <button className={`${shared.btn} ${shared.btnSm}`} onClick={openProductList} disabled={!hasProducts}>
-              查看产品
-            </button>
+            <div className={styles.moduleActions}>
+              <button
+                className={`${shared.btn} ${shared.btnSm}`}
+                data-variant="primary"
+                onClick={startCreateProduct}
+              >
+                新建产品
+              </button>
+              <button
+                className={`${shared.btn} ${shared.btnSm}`}
+                onClick={openProductList}
+                disabled={!hasProducts}
+              >
+                查看产品
+              </button>
+            </div>
           }
         />
         <WorkbenchModule

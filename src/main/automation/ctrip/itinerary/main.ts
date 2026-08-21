@@ -15,6 +15,15 @@ import { fillHotelCard, fillMealCards } from "./cards.js";
 import { fillPickupAndDropoff, handleAirportTrainModal } from "./stations.js";
 import { ensureItinerarySpotsApi } from "../itinerary-api.js";
 
+const FIRST_DAY_DESCRIPTION_REPLACEMENTS = [
+  { term: "巅峰", replacement: "高峰" },
+] as const;
+
+function normalizeFirstDayItineraryDescription(day) {
+  if (Number(day?.day) !== 1 || typeof day?.description !== "string") return day?.description ?? "";
+  return FIRST_DAY_DESCRIPTION_REPLACEMENTS.reduce((next, { term, replacement }) => next.split(term).join(replacement), day.description);
+}
+
 /**
  * 行程描述阶段「套餐管理」URL 命中常量（导出供测试断言使用）：
  *   - 真实 VBK 跳转目标 URL 形如：
@@ -69,12 +78,21 @@ export function isPackageManageUrl(url) {
 export async function fillItineraryDraft(page, product, options = {}) {
   const disambiguator = options?.disambiguator;
   const productId = options?.productId || product.productId || "";
+  const normalizedProduct = {
+    ...product,
+    itinerary: Array.isArray(product?.itinerary)
+      ? product.itinerary.map((day) =>
+          typeof day?.description === "string" ? { ...day, description: normalizeFirstDayItineraryDescription(day) } : day,
+        )
+      : [],
+  };
+  const normalizedDays = Array.isArray(normalizedProduct?.itinerary) ? normalizedProduct.itinerary : [];
   let titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
-  if ((await titleInputs.count()) !== product.itinerary.length) {
+  if ((await titleInputs.count()) !== normalizedDays.length) {
     await page.goto(productEditorUrl(productId), { waitUntil: "domcontentloaded" });
     titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
   }
-  if ((await titleInputs.count()) !== product.itinerary.length) {
+  if ((await titleInputs.count()) !== normalizedDays.length) {
     await clickSection(page, "行程描述");
     titleInputs = page.locator('textarea[placeholder^="请输入标题"]');
   }
@@ -87,8 +105,8 @@ export async function fillItineraryDraft(page, product, options = {}) {
     await assertCount(titleInputs, product.itinerary.length, "每日标题输入框");
   }
 
-  for (let index = 0; index < product.itinerary.length; index += 1) {
-    const day = product.itinerary[index];
+  for (let index = 0; index < normalizedDays.length; index += 1) {
+    const day = normalizedDays[index];
     const titleInput = titleInputs.nth(index);
     await titleInput.fill(day.title);
     const titleAfterFill = (await titleInput.inputValue()).trim();
@@ -100,14 +118,14 @@ export async function fillItineraryDraft(page, product, options = {}) {
     if (product.operations?.transport === "charter") {
       await clickExact(scope, "包车", `第 ${day.day} 天包车选项`);
     }
-    await fillPickupAndDropoff(
-      page,
-      scope,
-      index,
-      product.itinerary.length,
-      product.operations ?? {
-        reusePickupForDropoff: true,
-      },
+      await fillPickupAndDropoff(
+        page,
+        scope,
+        index,
+        normalizedDays.length,
+        product.operations ?? {
+          reusePickupForDropoff: true,
+        },
       { disambiguator, product },
     );
     await fillMealCards(scope, day, product.operations?.mealsIncluded === true);
@@ -153,9 +171,9 @@ export async function fillItineraryDraft(page, product, options = {}) {
   if (!submitResult?.advanced) {
     throw new Error("ItineraryDraft 未提交通过：未进入下一阶段");
   }
-  const spotResult = await ensureItinerarySpotsApi(page, product, productId);
+  const spotResult = await ensureItinerarySpotsApi(page, normalizedProduct, productId);
   await delay(3_000);
-  return { savedWith, days: product.itinerary.length, spotResult };
+  return { savedWith, days: normalizedDays.length, spotResult };
 }
 
 /**

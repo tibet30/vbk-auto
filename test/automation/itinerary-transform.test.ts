@@ -170,6 +170,23 @@ test("其他 / 自由活动节点承载 description，activeType.key=7", () => {
   assert.equal(other.description, "自由活动：漫步古城");
 });
 
+test("第1天 description 中包含“巅峰”会改写为“高峰”，其余天不改写", () => {
+  const out = transformItinerary({
+    itinerary: [
+      makeDay({ day: 1, description: "挑战巅峰线" }),
+      makeDay({ day: 2, description: "继续巅峰体验" }),
+    ],
+    operations: baseOps,
+    stations: baseStations,
+    refIdSeed: "1",
+  });
+  const firstOther = out[0].tourDailyInfos.find((info) => info.activeType?.key === 7);
+  const secondOther = out[1].tourDailyInfos.find((info) => info.activeType?.key === 7);
+  assert.ok(firstOther && secondOther);
+  assert.equal(firstOther.description, "挑战高峰线");
+  assert.equal(secondOther.description, "继续巅峰体验");
+});
+
 test("orderDay 严格 1..N 且 dailyDescription 来自 day.title", () => {
   const days = [
     makeDay({ day: 5, title: "A" }),

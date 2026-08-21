@@ -118,6 +118,15 @@ export interface ReadbackExpectations {
   requireHotels: boolean;
 }
 
+const FIRST_DAY_DESCRIPTION_REPLACEMENTS = [
+  { term: "巅峰", replacement: "高峰" },
+] as const;
+
+function sanitizeDayDescription(day: ProductItineraryDay): string {
+  if (Number(day.day) !== 1 || typeof day.description !== "string") return day.description;
+  return FIRST_DAY_DESCRIPTION_REPLACEMENTS.reduce((next, { term, replacement }) => next.split(term).join(replacement), day.description);
+}
+
 /**
  * 把项目侧 day 转成回读期望：title / pois / meals / hotel / description / serviceTime。
  */
@@ -144,7 +153,7 @@ export function buildReadbackExpectations(args: {
     hotels: day.hotel && day.hotel.trim()
       ? [{ hotelName: day.hotel, hotelTier: operations.hotelTier }]
       : [],
-    other: { description: day.description },
+    other: { description: sanitizeDayDescription(day) },
     serviceTime: { startTime: "08:00", endTime: "20:00" },
   }));
   return {
@@ -278,7 +287,7 @@ export function buildDayDescription(args: {
   // 6) 其他 / 自由活动节点（description 落到这里）
   infos.push(
     buildOtherInfo({
-      description: day.description,
+      description: sanitizeDayDescription(day),
       sort: sort++,
       serviceTime: { startTime: "08:00", endTime: "20:00" },
     }),

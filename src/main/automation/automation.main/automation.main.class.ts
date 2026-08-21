@@ -111,6 +111,7 @@ async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
       resolveButlerSelection: (accountName) => resolveButlerSelection(this.db, accountName),
       resolveServicePhone: (accountName) => resolveServicePhone(this.db, accountName),
       ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
+      presentationCopyRewriter: this.presentationCopyRewriter,
       disambiguator: this.disambiguator,
     }, stepName, argsJson);
   }

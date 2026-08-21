@@ -38,6 +38,7 @@ import { ensurePackageApi } from "../ctrip/package-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
+import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 
 /**
  * 单阶段重新执行入口：
@@ -113,7 +114,17 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       // 同型 — 仅去掉 multi-phase forward 部分。
       const fillMap: Record<string, () => Promise<unknown>> = {
         presentation: () => fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product: productData, log }),
-        itinerary: () => fillItineraryDraftApi(page, productData, { disambiguator: ctx.disambiguator, productId: productId ?? "" }),
+        itinerary: () => fillItineraryWithSensitiveRewrite({
+          ctx,
+          localProductId,
+          product: productData,
+          log,
+          executeItinerary: () => fillItineraryDraftApi(page, productData, {
+            disambiguator: ctx.disambiguator,
+            productId: productId ?? "",
+          }),
+          dbUpdate: (id, updatedProduct, status) => ctx.db.updateProduct(id, updatedProduct, status),
+        }),
         package: () => ensurePackageApi(page, productData, productId!),
         pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!),
         terms: () => fillAndSaveTerms(page, productData, productId),

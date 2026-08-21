@@ -28,10 +28,11 @@ import {
   selectStationAddress,
 } from "../ctrip/ctrip.js";
 import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
+import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { breakpoint } from "../debug.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
-import type { ContactCardSelection } from "../../../shared/contracts.js";
+import type { ContactCardSelection, AiResponse } from "../../../shared/contracts.js";
 
 type DebugContext = {
   db: VbkDatabase;
@@ -46,6 +47,10 @@ type DebugContext = {
     candidates: Array<{ id?: string; text: string }>;
     product: Record<string, unknown>;
   }) => Promise<{ pickedText: string | null; reasoning: string }>;
+  presentationCopyRewriter?: (req: {
+    message: string;
+    product: Record<string, unknown>;
+  }) => Promise<AiResponse>;
 };
 
 /**
@@ -91,7 +96,16 @@ export function debugRunStep(context: DebugContext, stepName: string, argsJson: 
       const productData = parseProduct(product.product);
       await breakpoint("beforeFillItineraryDraft");
       // 全量接口保存：DOM 写入路径已废弃，避免误报成功。
-      const result = await fillItineraryDraftApi(page, productData, { productId: product.productId });
+      const result = context.presentationCopyRewriter
+        ? await fillItineraryWithSensitiveRewrite({
+            ctx: { presentationCopyRewriter: context.presentationCopyRewriter },
+            localProductId,
+            product: productData,
+            log: () => {},
+            executeItinerary: () => fillItineraryDraftApi(page, productData, { productId: product.productId }),
+            dbUpdate: (id, updatedProduct, status) => db.updateProduct(id, updatedProduct, status),
+          })
+        : await fillItineraryDraftApi(page, productData, { productId: product.productId });
       await breakpoint("afterFillItineraryDraft", { savedWith: result.savedWith });
       return result;
     }

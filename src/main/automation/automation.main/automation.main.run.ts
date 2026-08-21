@@ -44,6 +44,7 @@ import { ensurePackageApi } from "../ctrip/package-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
+import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { initializeAutomationStartPhase } from "./automation.main.run-state.js";
 
 /**
@@ -197,7 +198,22 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           run.phases[draftPhases.indexOf("presentation")].status = "completed";
           return r;
         },
-        itinerary: async () => { phaseRecord("itinerary"); const r = await fillItineraryDraftApi(page, product, { disambiguator: ctx.disambiguator, productId }); run.phases[draftPhases.indexOf("itinerary")].status = "completed"; return r; },
+        itinerary: async () => {
+          phaseRecord("itinerary");
+          const r = await fillItineraryWithSensitiveRewrite({
+            ctx,
+            localProductId,
+            product,
+            log,
+            executeItinerary: () => fillItineraryDraftApi(page, product, {
+              disambiguator: ctx.disambiguator,
+              productId,
+            }),
+            dbUpdate: (id, updatedProduct, status) => ctx.db.updateProduct(id, updatedProduct, status),
+          });
+          run.phases[draftPhases.indexOf("itinerary")].status = "completed";
+          return r;
+        },
         package: async () => { phaseRecord("package"); const r = await ensurePackageApi(page, product, productId!); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
         pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await ensurePricingInventoryApi(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
         terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product, productId); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },

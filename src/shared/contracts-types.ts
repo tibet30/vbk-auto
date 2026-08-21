@@ -13,6 +13,8 @@ export interface ProductSummary {
   name: string;
   status: "planning" | "review" | "automating" | "draft_saved" | "blocked";
   productId?: string;
+  /** 创建该产品时使用的 VBK 登录账号（例如 vbk_671205）。 */
+  vbkAccount?: string;
   updatedAt: string;
   revision?: number;
 }
@@ -21,6 +23,8 @@ export interface CreateProductInput {
   destination: string;
   days: number;
   productForm: "privateTour" | "groupTour";
+  /** 创建产品时用户提供的原始想法，供后续 AI 规划参考。 */
+  userIdea?: string;
 }
 
 export interface ProductReadiness {

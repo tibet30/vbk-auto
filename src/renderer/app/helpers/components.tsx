@@ -1,4 +1,4 @@
-import { AlertTriangle, Briefcase, Check, ChevronRight, Copy, FileText, LoaderCircle, MapPin, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Briefcase, Check, ChevronRight, Copy, Eye, FileText, LoaderCircle, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { type MouseEvent, type ReactNode, useState } from "react";
 import type { CreateProductInput, ProductSummary } from "../../../shared/contracts.js";
 import shared from "../views/shared.module.less";
@@ -7,13 +7,26 @@ import styles from "./components.module.less";
 
 export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: { input: CreateProductInput; setInput: (input: CreateProductInput) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
   return <div className={`${shared.card} ${styles.briefForm}`}>
-    <div><h3>新建产品</h3><p className={shared.viewSub}>只需填写产品的三个基础信息；进入详情后再开始和 AI 沟通。</p></div>
+    <div><h3>新建产品</h3><p className={shared.viewSub}>填写基础信息和你的初步想法，进入产品后 AI 会据此开始规划。</p></div>
     <div className={styles.briefGrid}>
       <label><span className={shared.fieldLabel}>目的地</span><input className={shared.input} autoFocus placeholder="例如：太原" value={input.destination} onChange={(event) => setInput({ ...input, destination: event.target.value })} /></label>
       <label><span className={shared.fieldLabel}>产品形态</span><select className={shared.input} value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProductInput["productForm"] })}><option value="privateTour">私家团</option><option value="groupTour">跟团游</option></select></label>
       <label><span className={shared.fieldLabel}>天数</span><input className={shared.input} type="number" min="2" max="60" value={input.days} onChange={(event) => setInput({ ...input, days: Math.max(2, Number(event.target.value) || 2) })} /></label>
     </div>
-    <div className={styles.formActions}><button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button><button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>{submitting ? <LoaderCircle size={15} /> : <Plus size={15} />}创建并进入产品</button></div>
+    <label className={styles.ideaField}>
+      <span className={shared.fieldLabel}>你的想法 <small>选填</small></span>
+      <textarea
+        className={shared.input}
+        rows={5}
+        maxLength={1000}
+        placeholder="例如：希望节奏慢一点，多安排当地文化体验，适合带孩子出行……"
+        value={input.userIdea ?? ""}
+        onChange={(event) => setInput({ ...input, userIdea: event.target.value.slice(0, 1000) })}
+        aria-describedby="product-idea-hint"
+      />
+      <span id="product-idea-hint" className={styles.ideaHint}>{(input.userIdea ?? "").length} / 1000 字，AI 会把它作为需求偏好参考</span>
+    </label>
+    <div className={styles.formActions}><button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button><button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>{submitting ? <><LoaderCircle size={15} className={styles.spin} />创建中</> : <Plus size={15} />}创建并进入产品</button></div>
   </div>;
 }
 
@@ -54,8 +67,8 @@ export function WorkbenchModule({
 
 /**
  * 产品列表：每行是一个清晰可扫描的卡片。
- * 标题、状态徽章、产品形态、VBK ID / 本地草稿、更新时间按视觉层级排布，
- * 删除按钮在 hover 时浮现，避免误触又不至于太隐蔽。
+ * 标题、状态徽章、产品 ID、账号和更新时间按视觉层级排布，
+ * 查看详情 / 删除按钮保持统一的显式操作入口，同时保留点击整行内容进入详情。
  */
 export function ProductList({ products, onOpen, onDelete }: { products: ProductSummary[]; onOpen: (item: ProductSummary) => Promise<void>; onDelete: (item: ProductSummary) => Promise<boolean> }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
@@ -99,7 +112,6 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
   onConfirmDelete: () => void;
 }) {
   const meta = productMeta(item);
-  const linked = Boolean(item.productId);
   const locked = item.status === "automating";
 
   return (
@@ -127,18 +139,13 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
             <ProductStatusBadge status={item.status} />
           </span>
           <span className={styles.productMetaLine}>
-            <span className={styles.metaItem}>
-              <MapPin size={11} aria-hidden="true" />
-              {meta.destination}
+            {item.productId ? <CopyableId value={item.productId} label="VBK产品ID" /> : <span className={styles.metaItem}>VBK产品ID：待生成</span>}
+            <span className={styles.metaSep} aria-hidden="true">·</span>
+            <CopyableId value={item.id} label="列表ID" />
+            <span className={styles.metaSep} aria-hidden="true">·</span>
+            <span className={styles.metaItem} title={item.vbkAccount ? `创建于 VBK 账号 ${item.vbkAccount}` : "该历史产品尚未记录 VBK 归属账号"}>
+              {item.vbkAccount ? `账号 ${item.vbkAccount}` : "未绑定 VBK 账号"}
             </span>
-            <span className={styles.metaSep} aria-hidden="true">·</span>
-            <span className={styles.metaItem}>{meta.spec}</span>
-            <span className={styles.metaSep} aria-hidden="true">·</span>
-            <span className={`${styles.metaItem} ${linked ? styles.metaLink : ""}`}>
-              {linked ? `VBK ${item.productId}` : "本地产品草稿"}
-            </span>
-            <span className={styles.metaSep} aria-hidden="true">·</span>
-            <CopyableId value={item.id} />
             <span className={styles.metaSep} aria-hidden="true">·</span>
             <span className={`${styles.metaItem} ${styles.metaMuted}`}>更新 {formatUpdatedAt(item.updatedAt)}</span>
           </span>
@@ -148,16 +155,30 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
         </span>
       </div>
 
-      <button
-        className={styles.productDeleteTrigger}
-        type="button"
-        onClick={onAskDelete}
-        disabled={locked || disabled}
-        aria-label={`删除产品：${item.name}`}
-        title={locked ? "自动录入中，暂不能删除" : "删除产品"}
-      >
-        <Trash2 size={15} />
-      </button>
+      <div className={styles.productRowActions}>
+        <button
+          className={styles.productViewTrigger}
+          type="button"
+          onClick={onOpen}
+          disabled={disabled}
+          aria-label={`查看产品详情：${item.name}`}
+          title="查看产品详情"
+        >
+          <Eye size={14} />
+          <span>查看详情</span>
+        </button>
+        <button
+          className={styles.productDeleteTrigger}
+          type="button"
+          onClick={onAskDelete}
+          disabled={locked || disabled}
+          aria-label={`删除产品：${item.name}`}
+          title={locked ? "自动录入中，暂不能删除" : "删除产品"}
+        >
+          <Trash2 size={14} />
+          <span>删除</span>
+        </button>
+      </div>
 
       {confirming && (
         <div className={styles.productDeleteConfirm} role="group" aria-label={`确认删除产品：${item.name}`}>
@@ -180,18 +201,14 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
 
 /**
  * 从产品名反解目的地 / 天数 / 产品形态。
- * 输入：「太原3天2晚私家团」「北京2天1晚跟团游」
- * 解析失败时返回「-」占位，避免 UI 抖动。
+ * 输入：「太原3天2晚私家团」「北京2天1晚跟团游」，只解析产品形态图标所需的信息。
  */
-function productMeta(item: ProductSummary): { destination: string; spec: string; form: "privateTour" | "groupTour" } {
+function productMeta(item: ProductSummary): { form: "privateTour" | "groupTour" } {
   const match = item.name.match(/^(.+?)(\d+)天\s*(\d+)晚\s*(.+)$/);
-  if (!match) return { destination: item.name, spec: "本地草稿", form: "privateTour" };
-  const destination = match[1];
-  const days = match[2];
-  const nights = match[3];
+  if (!match) return { form: "privateTour" };
   const kind = match[4];
   const form: "privateTour" | "groupTour" = kind.includes("跟团") ? "groupTour" : "privateTour";
-  return { destination, spec: `${days} ${nights}`, form };
+  return { form };
 }
 
 /**
@@ -302,7 +319,7 @@ export function CopyableId({
       title={state === "copied" ? `已复制 ${value}` : `点击复制产品 ID：${value}`}
       aria-label={`复制产品 ID ${value}`}
     >
-      <span className={styles.copyableIdLabel}>{label}</span>
+      <span className={styles.copyableIdLabel}>{label}:</span>
       <span className={styles.copyableIdValue}>{state === "copied" ? "已复制" : value}</span>
       <span className={styles.copyableIdIcon} aria-hidden="true">
         {state === "copied" ? <Check size={10} /> : <Copy size={10} />}

@@ -25,11 +25,44 @@
 .briefGrid label { min-width: 0; }
 .briefGrid select { height: 38px; }
 
+.ideaField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--pad-sm);
+}
+
+.ideaField textarea {
+  min-height: 112px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.ideaHint {
+  align-self: flex-end;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+}
+
+.ideaField small {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
 .formActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: var(--pad);
+}
+
+.spin {
+  animation: create-form-spin 900ms linear infinite;
+}
+
+@keyframes create-form-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* WorkbenchModule — 首页 / 工作台入口卡片。
@@ -427,6 +460,45 @@
 }
 
 /* Right side */
+.productRowActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 0;
+  flex-shrink: 0;
+}
+
+.productViewTrigger,
+.productDeleteTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.productViewTrigger:hover:not(:disabled),
+.productViewTrigger:focus-visible {
+  color: var(--foreground);
+  background: var(--muted);
+  border-color: var(--border-strong);
+}
+
+.productViewTrigger:focus-visible,
+.productDeleteTrigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
 .productEnter {
   width: 28px;
   height: 28px;
@@ -446,22 +518,11 @@
 }
 
 .productDeleteTrigger {
-  width: 30px;
-  height: 30px;
-  margin: 16px 14px 0 0;
-  display: grid;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
-  opacity: 0;
-  transition: opacity 160ms ease, color 160ms ease, background 160ms ease, border-color 160ms ease;
+  color: var(--destructive);
 }
 
-.productRow:hover .productDeleteTrigger,
-.productDeleteTrigger:focus-visible { opacity: 1; }
-
-.productDeleteTrigger:hover:not(:disabled) {
+.productDeleteTrigger:hover:not(:disabled),
+.productDeleteTrigger:focus-visible {
   color: var(--destructive);
   background: #fef2f2;
   border-color: #fecaca;
@@ -511,11 +572,15 @@
 }
 
 @media (max-width: 640px) {
-  .productDeleteTrigger { opacity: 1; }
   .productDeleteConfirm { align-items: stretch; flex-direction: column; }
   .productDeleteActions { justify-content: flex-end; }
   .productRowOpen { grid-template-columns: 36px minmax(0, 1fr) 24px; gap: 10px; padding: 12px; }
   .productRowIcon { width: 36px; height: 36px; }
+  .productRowActions { padding-right: 8px; }
+  .productViewTrigger span,
+  .productDeleteTrigger span { display: none; }
+  .productViewTrigger,
+  .productDeleteTrigger { width: 30px; padding: 0; }
 }
 
 /* ============================================================

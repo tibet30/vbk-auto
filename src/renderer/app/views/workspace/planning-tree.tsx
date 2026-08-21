@@ -94,21 +94,25 @@ export function PlanningTree(props: {
             return !value;
           })}
         >
-          {treeCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-          <strong>生成规划</strong>
-          {treeCollapsed && plan ? (
-            <span className={styles.overallStatus} data-state={plan.status}>
-              {currentStage && plan.status === "running" ? (
-                <>
-                  {stageStatusIcon("running", styles.spin)}
-                  当前进行：{currentStage.label}
-                </>
-              ) : <>
-                {overallStatusIcon(plan.status, styles.spin)}
-                {overallLabel(plan)}
-              </>}
-            </span>
-          ) : !plan ? <span>旧产品需要按三阶段流程重新规划</span> : null}
+          <span className={styles.treeTitleMain}>
+            <strong>生成规划</strong>
+            {treeCollapsed && plan ? (
+              <span className={styles.overallStatus} data-state={plan.status}>
+                {currentStage && plan.status === "running" ? (
+                  <>
+                    {stageStatusIcon("running", styles.spin)}
+                    当前进行：{currentStage.label}
+                  </>
+                ) : <>
+                  {overallStatusIcon(plan.status, styles.spin)}
+                  {overallLabel(plan)}
+                </>}
+              </span>
+            ) : !plan ? <span>旧产品需要按三阶段流程重新规划</span> : null}
+          </span>
+          <span className={styles.treeTitleChevron} aria-hidden="true">
+            {treeCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          </span>
         </button>
         {resumable && (
           <button className={`${shared.btn} ${shared.btnSm}`} data-variant="ai" type="button" disabled={planningBusy} onClick={() => void onResume()}>

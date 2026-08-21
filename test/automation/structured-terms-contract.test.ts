@@ -23,5 +23,5 @@ test("结构化条款补齐儿童住宿口径与住宿自理说明", async () =>
   assert.match(source, /childNoBed:\s*10091/);
   assert.match(source, /otherfeewithout1/);
   assert.match(source, /lodgingSelfPayNote/);
-  assert.match(source, /async \(\{ productId, head, requiredIds, lodgingSelfPayNote \}\) =>/);
+  assert.match(source, /async \(\{ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote \}\) =>/);
 });

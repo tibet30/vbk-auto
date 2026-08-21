@@ -41,7 +41,7 @@ function depsFor(ai: any, product: Record<string, any>, events: string[] = []) {
   };
 }
 
-test("第一阶段由 AI 输出标准省市并通过准入", async () => {
+test("第一阶段只接受 AI 省份，城市保持创建时锁定值", async () => {
   const product = { basicInfo: { destination: "西藏自治区", destinationCity: "西藏自治区", province: "", days: 3 } };
   const calls: any[] = [];
   const ai = {
@@ -59,17 +59,18 @@ test("第一阶段由 AI 输出标准省市并通过准入", async () => {
   assert.equal(result.ok, true);
   assert.equal(calls.length, 1);
   assert.equal(product.basicInfo.province, "西藏");
-  assert.equal(product.basicInfo.destinationCity, "拉萨");
+  assert.equal(product.basicInfo.destinationCity, "西藏自治区");
   assert.deepEqual(events, ["local-write", "remote-completed"]);
+  assert.deepEqual((product.basicInfo as any).province, "西藏");
 });
 
-test("第一阶段缺少标准城市最多重试三次，并把准入原因反馈给 AI", async () => {
+test("第一阶段忽略 AI 返回的其它城市", async () => {
   const product = { basicInfo: { destination: "成都", destinationCity: "成都", province: "", days: 2 } };
   const calls: any[] = [];
   const ai = {
     async structureLocation(request: any) {
       calls.push(request);
-      return calls.length === 3 ? { province: "四川", destinationCity: "成都" } : { province: "四川", destinationCity: "" };
+      return { province: "四川", destinationCity: "西安" };
     },
   };
   let plan = createPlanningPlanV2();
@@ -77,18 +78,17 @@ test("第一阶段缺少标准城市最多重试三次，并把准入原因反�
     plan = { ...plan, nodes: plan.nodes.map((node) => node.id === "skeleton" ? { ...node, ...patch } : node) };
   }, () => plan);
   assert.equal(result.ok, true);
-  assert.equal(calls.length, 3);
-  assert.match(calls[1].previousError, /destinationCity/);
+  assert.equal(calls.length, 1);
   assert.equal(product.basicInfo.destinationCity, "成都");
 });
 
-test("第一阶段三次地点准入都失败后停在 needs_user，不写入省市", async () => {
+test("第一阶段省份不合法时仍然重试并停在 needs_user", async () => {
   const product = { basicInfo: { destination: "成都", destinationCity: "成都", province: "", days: 2 } };
   const calls: any[] = [];
   const ai = {
     async structureLocation(request: any) {
       calls.push(request);
-      return { province: "四川", destinationCity: "四川" };
+      return { province: "太原", destinationCity: "西安" };
     },
   };
   const events: string[] = [];
@@ -99,7 +99,7 @@ test("第一阶段三次地点准入都失败后停在 needs_user，不写入省
   }, () => plan);
   assert.equal(result.ok, false);
   assert.equal(calls.length, 3);
-  assert.match(calls[1].previousError, /destinationCity/);
+  assert.match(calls[1].previousError, /province/);
   assert.equal(product.basicInfo.province, "");
   assert.deepEqual(events, []);
 });

@@ -34,6 +34,33 @@ test("数据库读取归一化会把历史字符串 POI ID 转成数字，非法
   ]);
 });
 
+test("数据库读取会修复行政地点尾缀，并以历史 meetingCity 统一两城市", () => {
+  const product = parseAndNormalizeProductJson(JSON.stringify({
+    basicInfo: {
+      meetingCity: "成都",
+      destinationCity: "西安市",
+      province: "四川省",
+    },
+    operations: { pickupCity: "成都市" },
+  })) as Record<string, any>;
+
+  assert.equal(product.basicInfo.meetingCity, "成都");
+  assert.equal(product.basicInfo.destinationCity, "成都");
+  assert.equal(product.basicInfo.province, "四川");
+  assert.equal(product.operations.pickupCity, "成都");
+});
+
+test("数据库读取保留景区名称，不把景区后缀当行政区裁掉", () => {
+  const product = parseAndNormalizeProductJson(JSON.stringify({
+    basicInfo: { meetingCity: "宽窄巷子景区", destinationCity: "宽窄巷子景区", province: "四川省" },
+    itinerary: [{ spots: [{ name: "宽窄巷子景区" }] }],
+  })) as Record<string, any>;
+
+  assert.equal(product.basicInfo.meetingCity, "宽窄巷子景区");
+  assert.equal(product.basicInfo.destinationCity, "宽窄巷子景区");
+  assert.equal(product.itinerary[0].spots[0].name, "宽窄巷子景区");
+});
+
 test("数据库读取归一化会解开误写入 product_json 的 ProductDetail 包裹", () => {
   const product = parseAndNormalizeProductJson(JSON.stringify({
     id: "local-product-id",

@@ -104,6 +104,15 @@ export function registerPlanningIpc(context: MainIpcContext): void {
       const basicInfo = (productData.basicInfo ?? {}) as Record<string, unknown>;
       const sales = (productData.sales ?? {}) as Record<string, unknown>;
       const existingState = db.loadPlanningState(localProductId);
+      // 仅当旧持久化 state 是失败终态（failed / needs_user）且产品当前是 blocked，
+      // 才允许下一轮 runPlan=completed 把 blocked 推到 review。中间态（pending /
+      // running）或 completed 不触发该重试语义。这里用显式等值检查而非
+      // PLANNING_FAILURE_STATUSES.has()，因为 existingState.status 的类型是
+      // PlanningGenerationState 的 status 字段（含 pending / running），比
+      // Set 的元素类型更宽。
+      const allowBlockedToReviewOnCompletion = existingState !== undefined
+        && db.getProduct(localProductId)?.status === "blocked"
+        && (existingState.status === "failed" || existingState.status === "needs_user");
       const isCompletedPoiOnlyBackfill = existingState?.status === "completed"
         && PLANNING_STAGES.every((stage) => existingState.completedStages.includes(stage))
         && hasIncompleteItineraryPois(productData);
@@ -147,7 +156,9 @@ export function registerPlanningIpc(context: MainIpcContext): void {
 
       // 终态同步：completed → review、failed/needs_user → blocked，
       // 其它活动状态（automating / draft_saved）一律不动。
-      syncProductStatusAfterRunPlan(db, localProductId, result.status);
+      syncProductStatusAfterRunPlan(db, localProductId, result.status, {
+        allowBlockedToReviewOnCompletion,
+      });
       // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致）。
       // 失败只 console.info，不阻塞规划完成态。
       if (result.status === "completed" && !isCompletedPoiOnlyBackfill) {

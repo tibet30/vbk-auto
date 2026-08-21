@@ -52,6 +52,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
       // VBK 的旅游产品基本信息把 0 晚判为必填失败；新建入口只允许可保存的 2 天起产品。
       days: z.number().int().min(2).max(60),
       productForm: z.enum(["privateTour", "groupTour"]),
+      userIdea: z.string().max(1000).optional(),
     }).strict(), args[0]);
     void input;
   }

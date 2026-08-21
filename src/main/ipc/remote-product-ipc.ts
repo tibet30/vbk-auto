@@ -20,10 +20,11 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
       throw new Error(login.message || "无法创建产品：请先登录 VBK。");
     }
     const accountName = login.accountName?.trim() || login.loginAccount?.trim() || null;
+    const vbkAccount = login.loginAccount?.trim() || accountName;
     if (!accountName) throw new Error("无法创建产品：未能识别当前 VBK 账号，请重新登录后再试。");
     assertCreatePreconditions(db, accountName);
     db.setSetting("vbkAccountName", accountName);
-    const created = await createRemoteProduct(db, remoteProducts, input, accountName);
+    const created = await createRemoteProduct(db, remoteProducts, input, accountName, vbkAccount);
     if (created.injected) {
       logInfo("[createProduct] auto-injected butler from current account", {
         localProductId: created.product.id,

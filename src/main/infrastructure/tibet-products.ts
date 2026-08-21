@@ -56,6 +56,7 @@ function productSummary(value: unknown): ProductSummary | null {
     name: item.name,
     status: item.status as ProductSummary["status"],
     productId: typeof item.productId === "string" && item.productId ? item.productId : undefined,
+    ...(typeof item.vbkAccount === "string" && item.vbkAccount.trim() ? { vbkAccount: item.vbkAccount.trim() } : {}),
     updatedAt: item.updatedAt,
     ...(revision ? { revision } : {}),
   };

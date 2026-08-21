@@ -64,6 +64,31 @@ test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
   assert.match(product.messages[0].content, /行程「2天1晚」/);
 });
 
+test("创建草稿先把行政目的地归一为平台短名", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-city-short-name-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const product = db.createProduct({ destination: "成都市", days: 2, productForm: "privateTour" });
+  const basicInfo = product.product.basicInfo as Record<string, unknown>;
+
+  assert.equal(product.name, "成都2天1晚私家团");
+  assert.equal(basicInfo.destination, "成都");
+  assert.equal(basicInfo.meetingCity, "成都");
+  assert.equal(basicInfo.destinationCity, "成都");
+});
+
+test("创建产品会保存用户初始想法，并限制为 1000 个字", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-idea-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "想慢一点，多安排当地文化体验。" });
+  assert.equal((product.product.basicInfo as Record<string, unknown>).userIdea, "想慢一点，多安排当地文化体验。");
+  assert.throws(
+    () => db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1001) }),
+    /用户想法不能超过 1000 个字/,
+  );
+});
+
 test("读取旧产品时补齐空 vehicleResource", async (t) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-vehicle-default-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));

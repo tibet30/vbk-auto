@@ -163,6 +163,7 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
   restore();
   return {
     ...getProduct(db, snapshot.id)!,
+    vbkAccount: snapshot.vbkAccount,
     revision: snapshot.revision,
     planning: snapshot.planning,
   };

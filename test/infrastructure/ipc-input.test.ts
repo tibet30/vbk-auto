@@ -25,6 +25,8 @@ test("浏览器 bounds、导航 URL 与 providerId 拒绝错误类型", () => {
 
 test("产品创建 payload 必须严格符合公开契约", () => {
   assert.doesNotThrow(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour" }]));
+  assert.doesNotThrow(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1000) }]));
+  assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1001) }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 1, productForm: "privateTour" }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 0, productForm: "privateTour" }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", injected: true }]), /field=input/);

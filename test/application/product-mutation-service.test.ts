@@ -39,6 +39,28 @@ test("AI patch 在提交时基于数据库最新产品，而不是请求开始�
   assert.equal((saved.product.basicInfo as Record<string, unknown>).operationNotes, "运营刚刚手工补充");
 });
 
+test("统一写入口锁定既有 meetingCity，AI 返回其它城市也不能覆盖", () => {
+  let saved = detail({
+    basicInfo: { meetingCity: "成都", destinationCity: "成都", province: "四川" },
+  });
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) => {
+      saved = { ...saved, product: product as ProductDetail["product"], status: status ?? saved.status };
+    },
+  };
+  const service = new ProductMutationService(store);
+
+  const result = service.applyAiPatch("p-1", [
+    { op: "replace", path: "/basicInfo/destinationCity", value: "成都市" },
+    { op: "replace", path: "/basicInfo/meetingCity", value: "西安市" },
+  ]);
+
+  assert.equal(result.applied, true);
+  assert.equal((saved.product.basicInfo as any).meetingCity, "成都");
+  assert.equal((saved.product.basicInfo as any).destinationCity, "成都");
+});
+
 test("统一写入口只在成功落库后广播最新 ProductDetail", () => {
   let saved = detail({ basicInfo: { subtitle: "旧值" } });
   const emitted: ProductDetail[] = [];

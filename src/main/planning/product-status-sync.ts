@@ -59,7 +59,9 @@ export function shouldSyncProductToBlocked(args: {
  */
 export function shouldSyncProductToReview(args: {
   productStatus: string | undefined;
+  allowBlockedAfterRetry?: boolean;
 }): ProductsStatusSyncDecision {
+  if (args.allowBlockedAfterRetry && args.productStatus === "blocked") return { apply: true, newStatus: "review" };
   if (args.productStatus !== "planning") return { apply: false, newStatus: "review" };
   return { apply: true, newStatus: "review" };
 }
@@ -114,11 +116,15 @@ export function syncProductStatusAfterRunPlan(
   db: VbkDatabase,
   localProductId: string,
   runStatus: PlanningFinalStatus,
+  options: { allowBlockedToReviewOnCompletion?: boolean } = {},
 ): { applied: boolean } {
   const product = db.getProduct(localProductId);
   if (!product) return { applied: false };
   if (runStatus === "completed") {
-    const decision = shouldSyncProductToReview({ productStatus: product.status });
+    const decision = shouldSyncProductToReview({
+      productStatus: product.status,
+      allowBlockedAfterRetry: options.allowBlockedToReviewOnCompletion,
+    });
     if (!decision.apply) return { applied: false };
     db.updateProduct(product.id, product.product, "review");
     return { applied: true };

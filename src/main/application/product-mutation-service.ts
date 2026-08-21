@@ -9,6 +9,7 @@ import type { AiResponse, ProductDetail, ProductSummary } from "../../shared/con
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
+import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 
 type ProductMutationStore = Pick<VbkDatabase, "getProduct" | "updateProduct">;
 
@@ -28,8 +29,19 @@ export class ProductMutationService {
     product: Record<string, unknown>,
     options: ProductMutationOptions = {},
   ): ProductDetail {
-    if (!this.store.getProduct(localProductId)) throw productNotFound(localProductId);
-    this.store.updateProduct(localProductId, product, options.status);
+    const current = this.store.getProduct(localProductId);
+    if (!current) throw productNotFound(localProductId);
+    const currentBasic = current.product.basicInfo && typeof current.product.basicInfo === "object"
+      && !Array.isArray(current.product.basicInfo)
+      ? current.product.basicInfo as Record<string, unknown>
+      : {};
+    const lockedMeetingCity = toPlatformShortLocationName(
+      typeof currentBasic.meetingCity === "string" && currentBasic.meetingCity.trim()
+        ? currentBasic.meetingCity
+        : currentBasic.destinationCity,
+    );
+    const normalised = normaliseProductLocationFields(product, lockedMeetingCity || undefined);
+    this.store.updateProduct(localProductId, normalised, options.status);
     const saved = this.store.getProduct(localProductId);
     if (!saved) throw productNotFound(localProductId);
     if (options.notify !== false) this.onUpdated?.(saved);

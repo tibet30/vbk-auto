@@ -18,7 +18,7 @@ const CLAUSE_HEAD = {
   extension: [],
 };
 
-const REQUIRED_CLAUSE_IDS = {
+export const REQUIRED_CLAUSE_IDS = {
   // 当前产品 operations.mealsIncluded / 导游文案均明确为持证中文导游。
   mandarinGuide: 3014,
   // 服务标准页的住宿为必选：行程所列酒店费用 + 2 人/间。
@@ -30,21 +30,48 @@ const REQUIRED_CLAUSE_IDS = {
   lodgingIncluded: 1079,
   // 产品包含儿童价，因此采用允许未成年人、但必须由成人陪同的规则。
   minorWithAdult: 46,
+  outboundTransportExcluded: 1082,
+  flightForceMajeureNotice: 98,
+  complimentaryActivityNotice: 383,
 } as const;
 
 const LODGING_SELF_PAY_NOTE = "单房差及儿童占床费用（如产生），具体金额以出行前实际确认为准";
+// Saved platform clause IDs. The page-context payload is kept ID-only as well.
+export const DEFAULT_SELECTED_CLAUSE_IDS = {
+  1: [38536, 10095, 7, 10091, 13, 10087, 3014],
+  2: [REQUIRED_CLAUSE_IDS.outboundTransportExcluded, 1079],
+  3: [3031, 46],
+  4: [
+    3011,
+    REQUIRED_CLAUSE_IDS.flightForceMajeureNotice,
+    REQUIRED_CLAUSE_IDS.complimentaryActivityNotice,
+    478,
+    37682,
+    642,
+    32716,
+    563,
+  ],
+} as const;
 
 export function formatSelectedClauseItems(clauseTypeDtos) {
   const result = [];
   for (const type of clauseTypeDtos ?? []) {
     const selectedItems = [
-      ...(type.clauseItemDtos ?? []).filter((item) => item.selected === "T"),
+      ...(type.clauseItemDtos ?? []),
       ...(type.containers ?? []).flatMap((container) =>
-        container.selected === "T"
-          ? (container.clauseItemDtos ?? []).filter((item) => item.selected === "T")
-          : [],
+        (container.clauseItemDtos ?? []).map((item) => ({
+          ...item,
+          selected: container.selectedClauseItemId == null
+            ? item.selected
+            : String(item.clauseItemId) === String(container.selectedClauseItemId) ? "T" : "F",
+        })),
       ),
-    ];
+    ].filter((item) => {
+      if (item.itemType != null && item.itemType !== "F") return false;
+      if (item.isShow != null && item.isShow !== "T") return false;
+      if (item.hasSelectBox === "F") return true;
+      return item.selected === "T";
+    });
     for (const item of selectedItems) {
       result.push({
         clauseItemId: item.clauseItemId,
@@ -111,7 +138,7 @@ export function setClauseComponentValue(items, clauseItemId, componentCode, valu
 }
 
 export async function saveStructuredProductClauses(page, productId) {
-  return page.evaluate(async ({ productId, head, requiredIds, lodgingSelfPayNote }) => {
+  return page.evaluate(async ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote }) => {
     const request = async (url, body, contentType = "application/json") => {
       const response = await fetch(url, {
         method: "POST",
@@ -141,13 +168,21 @@ export async function saveStructuredProductClauses(page, productId) {
       const result = [];
       for (const type of clauseTypes ?? []) {
         const selected = [
-          ...(type.clauseItemDtos ?? []).filter((item) => item.selected === "T"),
+          ...(type.clauseItemDtos ?? []),
           ...(type.containers ?? []).flatMap((container) =>
-            container.selected === "T"
-              ? (container.clauseItemDtos ?? []).filter((item) => item.selected === "T")
-              : [],
+            (container.clauseItemDtos ?? []).map((item) => ({
+              ...item,
+              selected: container.selectedClauseItemId == null
+                ? item.selected
+                : String(item.clauseItemId) === String(container.selectedClauseItemId) ? "T" : "F",
+            })),
           ),
-        ];
+        ].filter((item) => {
+          if (item.itemType != null && item.itemType !== "F") return false;
+          if (item.isShow != null && item.isShow !== "T") return false;
+          if (item.hasSelectBox === "F") return true;
+          return item.selected === "T";
+        });
         for (const item of selected) {
           result.push({
             clauseItemId: item.clauseItemId,
@@ -233,7 +268,9 @@ export async function saveStructuredProductClauses(page, productId) {
         items = setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
       }
       if (tabEnum === 3) items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
-
+      for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
+        items = ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
+      }
       let savePackage;
       try {
         savePackage = await request(
@@ -242,6 +279,7 @@ export async function saveStructuredProductClauses(page, productId) {
             ...central,
             firstClassClauseTypeIds: central.additionalInfoDto.firstClassTypeIds,
             clausePackageItemDtos: items,
+            requestBaseData: { locale: "zh-CN" },
             pICategoryId: central.filterConditionDto.pICategoryId,
           },
           "text/plain;charset=UTF-8",
@@ -249,7 +287,8 @@ export async function saveStructuredProductClauses(page, productId) {
       } catch (error) {
         throw new Error(`条款页签 ${tabEnum} 保存失败：${error instanceof Error ? error.message : String(error)}`);
       }
-      const packageId = savePackage.clausePackageId ?? central.clausePackageId;
+      const packageId = savePackage.clausePackageId;
+      if (!packageId) throw new Error(`条款页签 ${tabEnum} 保存成功但未返回条款包 ID`);
       await request(
         "https://online.ctrip.com/restapi/soa2/15638/saveProductClauses.json",
         {
@@ -263,6 +302,28 @@ export async function saveStructuredProductClauses(page, productId) {
           unBookingRuleDtos: [],
         },
       );
+      const persistedClauseData = await request(
+        "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
+        { contentType: "json", head, productId: String(productId), tabEnum },
+      );
+      const persistedCentral = persistedClauseData.centralDataDto;
+      const persistedBody = {
+        ...persistedCentral,
+        clauseFilterConditionDto: persistedCentral.filterConditionDto,
+        firstClassClauseTypeIds: persistedCentral.additionalInfoDto.firstClassTypeIds,
+        additionalInfoDto: { ...persistedCentral.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
+      };
+      delete persistedBody.filterConditionDto;
+      const persistedPackage = await request(
+        "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
+        persistedBody,
+        "text/plain;charset=UTF-8",
+      );
+      const persistedIds = new Set(format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
+      const missingIds = (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
+      if (missingIds.length > 0) {
+        throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
+      }
       savedTabs.push({ tabEnum, packageId, itemCount: items.length });
     }
     return { savedTabs };
@@ -270,6 +331,7 @@ export async function saveStructuredProductClauses(page, productId) {
     productId: String(productId),
     head: CLAUSE_HEAD,
     requiredIds: REQUIRED_CLAUSE_IDS,
+    defaultSelectedClauseIds: DEFAULT_SELECTED_CLAUSE_IDS,
     lodgingSelfPayNote: LODGING_SELF_PAY_NOTE,
   });
 }

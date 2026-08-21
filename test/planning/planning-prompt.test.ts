@@ -21,7 +21,7 @@ const request: PlannerRequest = {
     transport: { providerLabel: "test", model: "test" },
     currentProduct: {
       sales: { productType: "domesticShort" },
-      basicInfo: { supplierProductName: "太原2天1晚私家团", supplierProductCode: "VBK-SECRET-CODE", subtitle: "", province: "" },
+      basicInfo: { supplierProductName: "太原2天1晚私家团", supplierProductCode: "VBK-SECRET-CODE", subtitle: "", province: "", userIdea: "想慢一点，多安排当地文化体验。" },
       operations: {
         hotelTier: "当地5钻", bookingControls: { butler: { contactCardId: 1368298, providerId: 1279416 } },
         vehicleResource: { requestedTotalCost: 500, resourceGroupId: 2206275 },
@@ -33,14 +33,16 @@ const request: PlannerRequest = {
 
 test("basicInfo prompt 只包含本阶段规则，不混入其他阶段约束", () => {
   const prompt = composePlanningSystemPrompt("basicInfo");
-  assert.match(prompt, /subtitle、province、operationNotes/);
-  assert.match(prompt, /省、自治区或直辖市/);
+  assert.match(prompt, /subtitle、province、destinationCity、meetingCity、operationNotes/);
+  assert.match(prompt, /标准省级行政区/);
   assert.doesNotMatch(prompt, /publicPriceCeiling|recommendations 恰好|每天至少一个 spot|requestedTotalCost/);
 });
 
 test("basicInfo user message 不暴露系统编码、联系人、资源 ID 或无关阶段上下文", () => {
   const message = composePlanningUserMessage(request);
   assert.match(message, /destination = 太原/);
+  assert.match(message, /用户初始想法/);
+  assert.match(message, /想慢一点，多安排当地文化体验/);
   assert.match(message, /supplierProductName/);
   assert.doesNotMatch(message, /VBK-SECRET-CODE|contactCardId|1368298|providerId|1279416|resourceGroupId|2206275/);
   assert.doesNotMatch(message, /bookingControls|commercial|operations|inventory/);

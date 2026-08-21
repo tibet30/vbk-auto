@@ -81,13 +81,27 @@ test("Tibet 详情作为权威快照恢复运行缓存的原 UUID 和消息", as
   assert.equal(target.getProduct(created.id)?.id, created.id);
 });
 
-test("创建只保存原始目的地，不调用目的地解析接口", async (t) => {
+test("创建先保存平台地点短名，不调用目的地解析接口", async (t) => {
   const db = await database(t);
   const remote = fakeRemote();
   const created = await createRemoteProduct(db, remote.service, { destination: "西藏自治区", days: 3, productForm: "privateTour" }, null);
   const basic = created.product.product.basicInfo as Record<string, unknown>;
-  assert.equal(basic.destination, "西藏自治区");
-  assert.equal(basic.destinationCity, "西藏自治区");
+  assert.equal(basic.destination, "西藏");
+  assert.equal(basic.destinationCity, "西藏");
   assert.equal(basic.province, "");
   assert.equal(remote.calls.upsert, 1);
+});
+
+test("创建产品会把稳定的 VBK 登录账号绑定到远端快照", async (t) => {
+  const db = await database(t);
+  const remote = fakeRemote();
+  const created = await createRemoteProduct(
+    db,
+    remote.service,
+    { destination: "拉萨", days: 3, productForm: "privateTour" },
+    "小璐",
+    "vbk_671205",
+  );
+  assert.equal(created.product.vbkAccount, "vbk_671205");
+  assert.equal(remote.records.get(created.product.id)?.vbkAccount, "vbk_671205");
 });

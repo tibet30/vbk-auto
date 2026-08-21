@@ -1,19 +1,25 @@
 import {
   CalendarDays,
+  Check,
   CheckCircle2,
   CircleHelp,
+  Copy,
+  ExternalLink,
   LoaderCircle,
+  Maximize2,
   MessageCircleMore,
+  Minimize2,
   Play,
   RefreshCw,
-  Settings2,
   ShieldCheck,
   Square,
   Wrench,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
+  api,
   aggregateSectionState,
+  copyText,
   formatBrowserPath,
   phaseDisplayLabel,
   VBK_NAV_SECTIONS,
@@ -31,12 +37,12 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     splitStyle,
     loading,
     setStage,
-    setBrowserOpen,
+    browserFullscreen,
+    setBrowserFullscreen,
     setBrowserUrl,
     browserOpen,
     browserRef,
     browserUrl,
-    setView,
     stage,
     navigatingSection,
     retryingPhase,
@@ -58,18 +64,27 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     browserPlaceholderTitle,
     browserPlaceholderText,
     setLoginPanelOpen,
+    setNotice,
     openLogin,
     showVbkBrowser,
   } = model;
+  const [copiedUrl, setCopiedUrl] = useState(false);
+  const [refreshingUrl, setRefreshingUrl] = useState(false);
 
   const taskList = product?.researchTasks ?? [];
   const reviewSections = useMemo(
     () => VBK_NAV_SECTIONS.map((section) => ({
       section,
-      state: aggregateSectionState(section, automationPhases ?? [], automationRecovery ?? {}, product?.productId),
+      state: aggregateSectionState(
+        section,
+        automationPhases ?? [],
+        automationRecovery ?? {},
+        product?.productId,
+        product?.automation?.currentPhase,
+      ),
       url: product ? section.buildUrl(product.productId) : null,
     })),
-    [product?.productId, automationRecovery, automationPhases],
+    [product?.productId, product?.automation?.currentPhase, automationRecovery, automationPhases],
   );
 
   if (!product) return null;
@@ -207,30 +222,77 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
         </span>
       </footer>
     </aside>
-    <section className={`${layout.panel} ${browser.browser}`} aria-label="VBK 浏览器">
+    <section className={`${layout.panel} ${browser.browser} ${browserFullscreen ? browser.browserFullscreen : ""}`} aria-label="VBK 浏览器">
       <div className={layout.panelHeader}>
         <div className={layout.panelTitleRow}>
           <span className={layout.panelNum}>03</span>
           <strong className={layout.panelTitle}>VBK 浏览器</strong>
         </div>
-        <span className={`${layout.panelSubLine} ${vbkLogin?.loggedIn ? layout.panelSubLineOk : layout.panelSubLineWarn}`}>
-          <span className={shared.dot} data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />
-          {vbkLogin?.loggedIn ? `已登录 ${vbkLogin.accountName ?? "当前账号"}` : "未登录 VBK"}
-        </span>
+        <button
+          className={`${shared.iconBtn} ${browser.fullscreenToggle}`}
+          type="button"
+          data-size="sm"
+          onClick={() => setBrowserFullscreen((current) => !current)}
+          aria-label={browserFullscreen ? "缩小 VBK 浏览器" : "全屏 VBK 浏览器"}
+          title={browserFullscreen ? "缩小" : "全屏"}
+        >
+          {browserFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+        </button>
       </div>
       <div className={browser.browserPanelHead}>
-        <div className={browser.browserNav}>
-          <button className={shared.iconBtn} type="button" data-size="sm" aria-label="返回" onClick={() => setView("workspace")}>
-            <Settings2 size={14} />
-          </button>
-        </div>
         <div className={browser.browserUrl} title={browserUrl || "/产品库"}>
           <span className={browser.host}>vbooking.ctrip.com</span>
           <span className={browser.path}>{browserUrl ? formatBrowserPath(browserUrl) : "/产品库"}</span>
         </div>
         <div className={browser.browserActions}>
-          <button className={shared.iconBtn} type="button" data-size="sm" onClick={() => setBrowserOpen(!browserOpen)} aria-label="显示/隐藏浏览器">
-            <RefreshCw size={14} />
+          <button
+            className={`${shared.iconBtn} ${copiedUrl ? browser.actionSuccess : ""}`}
+            type="button"
+            data-size="sm"
+            onClick={() => {
+              if (!browserUrl) return;
+              void copyText(browserUrl).then((copied) => {
+                if (!copied) {
+                  setNotice("复制页面地址失败，请重试。");
+                  return;
+                }
+                setCopiedUrl(true);
+                window.setTimeout(() => setCopiedUrl(false), 1000);
+              });
+            }}
+            disabled={!browserUrl}
+            aria-label="复制页面地址"
+            title={copiedUrl ? "已复制页面地址" : "复制页面地址"}
+          >
+            {copiedUrl ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+          <button
+            className={shared.iconBtn}
+            type="button"
+            data-size="sm"
+            onClick={() => {
+              if (!browserUrl || refreshingUrl) return;
+              setRefreshingUrl(true);
+              void api()!.browser.navigate(browserUrl)
+                .catch((error) => setNotice(error instanceof Error ? error.message : "刷新 VBK 页面失败，请重试。"))
+                .finally(() => setRefreshingUrl(false));
+            }}
+            disabled={!browserUrl || refreshingUrl}
+            aria-label="刷新当前页面"
+            title={refreshingUrl ? "正在刷新页面" : "刷新当前页面"}
+          >
+            <RefreshCw size={14} className={refreshingUrl ? browser.actionSpinning : ""} />
+          </button>
+          <button
+            className={shared.iconBtn}
+            type="button"
+            data-size="sm"
+            onClick={() => void api()!.browser.openExternal().catch((error) => setNotice(error instanceof Error ? error.message : "无法在默认浏览器中打开。"))}
+            disabled={!browserUrl}
+            aria-label="在默认浏览器中打开"
+            title="在默认浏览器中打开"
+          >
+            <ExternalLink size={14} />
           </button>
         </div>
       </div>

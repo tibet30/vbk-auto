@@ -9,6 +9,7 @@ import type {
 
 export function useAccountBrowserState() {
   const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserFullscreen, setBrowserFullscreen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("");
   const [loginPanelOpen, setLoginPanelOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -31,6 +32,7 @@ export function useAccountBrowserState() {
 
   return {
     browserOpen, setBrowserOpen,
+    browserFullscreen, setBrowserFullscreen,
     browserUrl, setBrowserUrl,
     loginPanelOpen, setLoginPanelOpen,
     accountMenuOpen, setAccountMenuOpen,

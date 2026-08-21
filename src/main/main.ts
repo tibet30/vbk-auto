@@ -5,7 +5,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow } from "electron";
-import { logError, logLog, logWarn } from "../shared/log-timestamp.js";
+import { logError, logWarn } from "../shared/log-timestamp.js";
 import { APP_NAME } from "../shared/brand.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import type {
@@ -51,50 +51,37 @@ import { ProductWorkflowCoordinator } from "./application/product-workflow-coord
 import { ProductMutationService } from "./application/product-mutation-service.js";
 import { createRemoteProductMirror } from "./application/remote-product-mirror.js";
 import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
+import { cleanStaleChromiumProfileDb } from "./infrastructure/chromium-profile-cleanup.js";
+import {
+  applyStartupCommandLineSwitches,
+  debuggingPort,
+  defaultMiniMaxModel,
+  installProcessErrorHandlers,
+  isDev,
+  logPoiManualIpc,
+} from "./startup-config.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 applyAppMetadata();
-/** 当前是否为开发模式（未打包），用于开关 DevTools / 临时文件路径。 */
-const isDev = !app.isPackaged;
-function logPoiManualIpc(event: string, context: Record<string, unknown>) {
-  if (!isDev) return;
-  logLog("[poi.manual]", event, { stage: event, ...context });
-}
-// 自动化通过 CDP 驱动内嵌的 VBK 页面，端口必须开着；但固定的 9222 可被
-// 本机任意进程预测并接管这个已登录会话，也会和其它 Chrome 实例抢占。
-// 改为每次启动随机取一个端口，并只监听回环地址。
-/** 随机生成回环调试端口（9300-9899）并仅监听 127.0.0.1：避免固定 9222 端口被本机其它进程劫持。 */
-const debuggingPort = String(9300 + Math.floor(Math.random() * 600));
-app.commandLine.appendSwitch("remote-debugging-port", debuggingPort);
-app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
-// 抑制 Chromium 内部 noise（service_worker/quota/stun 等），只显示 WARNING 及以上。
-app.commandLine.appendSwitch("log-level", "2");
-/** MiniMax 默认 model：环境变量优先，否则用产品默认的「MiniMax-M3」。 */
-const defaultMiniMaxModel = process.env.MINIMAX_MODEL?.trim() || "MiniMax-M3";
-
-function formatProcessRejection(reason: unknown): { message: string; stack?: string } {
-  if (reason instanceof Error) return { message: reason.message, stack: reason.stack };
-  return { message: String(reason) };
-}
-
-function isPlaywrightNoDialogShowingRejection(reason: unknown): boolean {
-  const { message, stack } = formatProcessRejection(reason);
-  return /Page\.handleJavaScriptDialog[\s\S]*No dialog is showing/.test(`${message}\n${stack ?? ""}`);
-}
-
-process.on("unhandledRejection", (reason) => {
-  const formatted = formatProcessRejection(reason);
-  if (isPlaywrightNoDialogShowingRejection(reason)) {
-    logWarn("[playwright] ignored native JS dialog race", { message: formatted.message });
-    return;
-  }
-  logError("[process] unhandledRejection", formatted);
-});
+applyStartupCommandLineSwitches();
+installProcessErrorHandlers();
 
 let window: BrowserWindow;
 let db: VbkDatabase;
 let browser: VbkBrowser;
 let automation: DraftAutomation;
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!window || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+  });
+}
 /**
  * Local AI API key store. One instance per process; backed by a single
  * 0600 JSON file under `app.getPath('userData')` (see ai-key-store.ts).
@@ -348,6 +335,10 @@ async function openMainWindow(): Promise<void> {
 app.whenReady().then(async () => {
   applyDevDockIcon(root);
   installApplicationMenu();
+  // 启动期清理 Chromium 上一版本遗留的 ServiceWorker / QuotaManager 脏库：
+  // 必须在构造 VbkDatabase / 创建 BrowserWindow 之前完成，否则 storage service
+  // 已经开始读这些库就会撞到 schema 不兼容报错。
+  cleanStaleChromiumProfileDb(app.getPath("userData"));
   db = new VbkDatabase(app.getPath("userData"));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
@@ -394,7 +385,12 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  void browser?.dispose();
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", () => { void browser?.dispose(); });
+let isDisposing = false;
+app.on("before-quit", (event) => {
+  if (isDisposing || !browser) return;
+  isDisposing = true;
+  event.preventDefault();
+  void browser.dispose().finally(() => app.exit(0));
+});

@@ -81,10 +81,14 @@ export function useProductHandlers(state: AppState) {
       setNotice("请填写目的地。");
       return;
     }
+    if ((createInput.userIdea ?? "").length > 1000) {
+      setNotice("用户想法不能超过 1000 个字。");
+      return;
+    }
     setSavingProduct(true);
     setNotice(null);
     try {
-      const created = await api()!.products.create({ ...createInput, destination: createInput.destination.trim() });
+      const created = await api()!.products.create({ ...createInput, destination: createInput.destination.trim(), userIdea: (createInput.userIdea ?? "").trim() });
       setProduct(created);
       setProducts((items) => [created, ...items]);
       setView("workspace");

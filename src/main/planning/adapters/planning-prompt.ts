@@ -88,6 +88,10 @@ export function composePlanningSystemPrompt(stage: PlanningStage): string {
 export function composePlanningUserMessage(request: PlannerRequest): string {
   const { stage, context, previousError } = request;
   const travelScope = resolveTravelScope(context.skeleton.destination);
+  const basicInfo = context.currentProduct.basicInfo && typeof context.currentProduct.basicInfo === "object" && !Array.isArray(context.currentProduct.basicInfo)
+    ? context.currentProduct.basicInfo as Record<string, unknown>
+    : {};
+  const userIdea = typeof basicInfo.userIdea === "string" ? basicInfo.userIdea.trim() : "";
   const lines = [
     "产品骨架（系统字段未提供，禁止在输出中补写）：",
     `- destination = ${context.skeleton.destination}`,
@@ -97,6 +101,7 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     `- days/nights = ${context.skeleton.days}/${context.skeleton.nights}`,
     `- productForm = ${context.skeleton.productForm}`,
     `- productType = ${context.skeleton.productType}`,
+    ...(userIdea ? ["", "用户初始想法（仅作为需求偏好参考，不代表已核查事实）：", userIdea] : []),
     "",
     `当前阶段：${stage}`,
   ];

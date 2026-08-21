@@ -7,9 +7,34 @@
   position: relative;
 }
 
+.browserFullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 0;
+}
+
+.fullscreenToggle {
+  margin-left: auto;
+}
+
+.actionSuccess {
+  color: var(--success);
+}
+
+.actionSpinning {
+  animation: browserActionSpin 800ms linear infinite;
+}
+
+@keyframes browserActionSpin {
+  to { transform: rotate(360deg); }
+}
+
 .browserPanelHead {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 6px var(--pad-sm);

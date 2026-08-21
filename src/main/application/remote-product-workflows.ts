@@ -14,12 +14,17 @@ export async function createRemoteProduct(
   remoteProducts: TibetProductService,
   input: CreateProductInput,
   accountName: string | null,
+  vbkAccount: string | null = null,
 ): Promise<{ product: ProductDetail; injectReason?: string; injected: boolean }> {
   // 创建阶段只保存运营输入的原始目的地；标准省市由第一阶段 AI 生成。
   // 这里不能提前调用任何目的地解析接口，否则新产品无法在未部署该接口的
   // Tibet 环境中创建，也会把“输入目的地”和“标准城市”混为一谈。
   const draft = db.buildProductSnapshot(input);
-  const { product, injectResult } = prepareProductWithAccountButler(db, draft, accountName);
+  const { product: preparedProduct, injectResult } = prepareProductWithAccountButler(db, draft, accountName);
+  const product: ProductDetail = {
+    ...preparedProduct,
+    ...(vbkAccount ? { vbkAccount } : {}),
+  };
   const saved = await remoteProducts.upsert(product);
   const cached = db.importProductSnapshot(saved);
   return { product: cached, injectReason: injectResult.reason, injected: injectResult.written };

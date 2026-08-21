@@ -10,6 +10,7 @@
  * 本次最小 API 调整：aggregateSectionState 增加第 4 个可选参数 productId，
  * 对 phaseNames 为空的 section：
  *   - productId 是非空字符串（trim 后仍有内容） → "done"（绿）
+ *   - 尚未保存 productId 且 currentPhase=saleControl → "running"（当前）
  *   - productId 为 undefined / 空串 / 纯空白 → "idle"（灰）
  *
  * 其余有 phaseNames 的 section（旧的产品信息 / 产品图文 / 行程描述 …）
@@ -67,6 +68,27 @@ test("销售控制：productId 为 undefined 时聚合为 idle（灰）", () => 
     aggregateSectionState(saleControl!, [], undefined, undefined),
     "idle",
     "显式 undefined productId 也必须聚合为 idle / 灰。",
+  );
+});
+
+test("销售控制：首次自动录入 currentPhase=saleControl 时聚合为 running（当前）", () => {
+  assert.equal(
+    aggregateSectionState(saleControl!, [], undefined, undefined, "saleControl"),
+    "running",
+    "创建产品壳期间销售控制必须显示为当前运行阶段",
+  );
+  assert.equal(
+    aggregateSectionState(saleControl!, [{ phase: "basic", status: "pending" }], undefined, undefined, "basic"),
+    "idle",
+    "产品信息尚未开始时不能被错误点亮",
+  );
+});
+
+test("销售控制：productId 已保存时 done 优先于 currentPhase", () => {
+  assert.equal(
+    aggregateSectionState(saleControl!, [], undefined, "76522394", "saleControl"),
+    "done",
+    "产品壳已保存后销售控制必须保持完成态",
   );
 });
 

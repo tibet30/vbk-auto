@@ -15,7 +15,7 @@ export const OPERATION_STATUS_OPTIONS: Array<{ value: OperationStatus | "all"; l
   { value: "running", label: "进行中" },
 ];
 export const emptyReadiness: ProductReadiness = { ready: false, completion: 0, issues: [] };
-export const initialInput: CreateProductInput = { destination: "", days: 2, productForm: "privateTour" };
+export const initialInput: CreateProductInput = { destination: "", days: 2, productForm: "privateTour", userIdea: "" };
 
 // 切换产品时为新产品选择一个合理的初始阶段；用户可以随后自由切换。
 export function initialStageFor(status: ProductSummary["status"] | undefined): Stage {
@@ -332,21 +332,24 @@ export type AutomationRecoveryMap = Record<string, { phase: string; state: strin
 //   2. 任何阶段 advising / retrying / running → running
 //   3. 所有存在阶段均 completed → done
 //   4. 否则 pending
-// phaseNames 为空的 section（销售控制）不映射到任何自动化阶段，整体状态由
-// 「是否已保存 VBK productId」直接给出：
+// phaseNames 为空的 section（销售控制）不映射到普通自动化阶段，整体状态由
+// 「是否已保存 VBK productId」和当前阶段给出：
 //   - 已保存非空 productId → done（销售控制已完成，绿）
+//   - 尚未保存 productId 且 currentPhase=saleControl → running（正在创建产品壳）
 //   - productId 为 undefined / 空字符串 / 纯空白 → idle（未开始，灰）
-// 不基于运行/失败/recovery/automation status 等任何其他数据推导成功状态，
-// 因为销售控制是 VBK 后台入口页面，与具体录入阶段没有 1:1 映射关系。
+// 不基于普通 phases 推导销售控制状态，因为它是 VBK 后台入口页面，
+// 与具体录入阶段没有 1:1 映射关系。
 export function aggregateSectionState(
   section: VbkNavSection,
   phases: AutomationPhaseRow[],
   recovery?: AutomationRecoveryMap,
   productId?: string,
+  currentPhase?: string,
 ): "pending" | "running" | "done" | "failed" | "idle" {
   if (section.phaseNames.length === 0) {
     const hasProductId = typeof productId === "string" && productId.trim().length > 0;
-    return hasProductId ? "done" : "idle";
+    if (hasProductId) return "done";
+    return currentPhase === section.key ? "running" : "idle";
   }
   const mapped = section.phaseNames
     .map((name) => phases.find((phase) => phase.phase === name))

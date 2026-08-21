@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const source = [
   readFileSync("src/main/main.ts", "utf8"),
+  readFileSync("src/main/startup-config.ts", "utf8"),
   readFileSync("src/main/ipc/browser-automation-ipc.ts", "utf8"),
 ].join("\n");
 

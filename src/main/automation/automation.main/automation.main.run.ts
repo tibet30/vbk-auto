@@ -44,6 +44,7 @@ import { ensurePackageApi } from "../ctrip/package-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
+import { initializeAutomationStartPhase } from "./automation.main.run-state.js";
 
 /**
  * 单个产品自动化阶段主循环：
@@ -128,7 +129,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const page = await ctx.browser.page({ requireInteractive: true });
       let productId = productDetail.productId;
       if (startIndex === 0) {
-        run.currentPhase = "basic"; run.phases[0].status = "running";
+        initializeAutomationStartPhase(run, productId);
         if (!productId) {
           log("正在创建 VBK 产品草稿…");
           // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌

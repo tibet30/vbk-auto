@@ -163,7 +163,16 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
           <div className={styles.kvRow}>
             <dt className={styles.kvLabel}>当前账号</dt>
             <dd className={styles.kvValue}>
-              {currentAccount || <span className={shared.taskEmpty}>尚未登录</span>}
+              {currentAccount ? (
+                <>
+                  <span>{currentAccount}</span>
+                  {vbkLogin?.loginAccount && vbkLogin.loginAccount !== currentAccount && (
+                    <span className={styles.loginAccount} title="VBK 登录账号">
+                      {vbkLogin.loginAccount}
+                    </span>
+                  )}
+                </>
+              ) : <span className={shared.taskEmpty}>尚未登录</span>}
             </dd>
           </div>
           <div className={styles.kvRow}>

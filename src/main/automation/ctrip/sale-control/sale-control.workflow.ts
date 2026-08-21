@@ -1,7 +1,7 @@
 // @ts-nocheck
 /**
  * 销售控制（sale-control）相关流程级 helper：
- *   - waitForProductIdFromUrl 轮询 URL 拿 productId（避开非 ivbk 路径）；
+ *   - waitForProductIdFromUrl 轮询 URL 拿 productId，并确认已经落到产品信息详情页；
  *   - pickVisiblePrimaryNextButton / pickFallbackNextButton 用「骨架屏内部按钮 / disabled
  *     按钮」等多条件过滤，挑出真正可点的「下一步」；
  *   - waitForPrimaryNextButton 在超时前同时尝试 primary 与 fallback；
@@ -13,18 +13,22 @@
 import { delay } from "../utils.js";
 
 /**
- * 等 page URL 落在 ivbk/vendor/... 路径后从 searchParams 中解析 productId；轮询 30s 后
- * 仍找不到返回 null（让上层决定抛错）。
+ * 等 page URL 真正落到产品信息详情页（baseInfoMerge）后从 searchParams 中解析
+ * productId。销售控制保存后可能短暂停留在 saleControlMerge?productId=...，这不是
+ * 产品信息已打开的证据，不能在此处提前让上层推进 basic。轮询 30s 后仍找不到返回
+ * null（让上层决定抛错）。
  */
-async function waitForProductIdFromUrl(page) {
-  const deadline = Date.now() + 30_000;
+async function waitForProductIdFromUrl(page, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const productId = (() => {
       try {
         const currentUrl = page.url();
         if (typeof currentUrl !== "string" || currentUrl.length === 0) return null;
-        if (!/\/_?ivbk\/vendor\//.test(currentUrl) && !/\/_?ivbk\//.test(currentUrl)) return null;
         const current = new URL(currentUrl);
+        // 只接受产品信息详情页。saleControlMerge 在保存后可能先带上
+        // productId，再异步跳转；此时必须继续等待，保持 saleControl running。
+        if (!/\/ivbk\/vendor\/baseInfoMerge$/.test(current.pathname)) return null;
         return current.searchParams.get("productId") || current.searchParams.get("productid");
       } catch {
         return null;
@@ -104,7 +108,8 @@ async function pickFallbackNextButton(locator) {
 
 /**
  * 点「下一步」创建产品壳：先 pickVisiblePrimaryNextButton，再 fallback；点击后等 URL
- * 出现 productId 即可；若 URL 已是 baseInfoMerge 但没 productId 则抛错让上层排查。
+ * 落到 baseInfoMerge 并出现 productId；若携程只在 saleControlMerge 原页回填 ID，
+ * 仍继续等待真实产品信息详情页，避免 basic 阶段状态领先页面。
  */
 async function createProductShell(page) {
   const nextButton = page.getByRole("button", { name: "下一步", exact: true });

@@ -16,6 +16,7 @@ import { runSingleStage } from "./single-stage-runner.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { expandVerifiedItinerary, resolvePlanningPoiCandidates } from "./planning-v2-pois.js";
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
+import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
 import { findVbkCopyBadCase } from "./vbk-copy-policy.js";
 export interface ThreeStageOrchestratorDependencies {
@@ -76,6 +77,11 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   };
   plan = { ...plan, status: "running" };
   await commit();
+  const currentProduct = await deps.runtime.loadCurrentProduct(deps.localProductId);
+  const currentBasic = asRecord(currentProduct.basicInfo);
+  deps.skeleton.city = toPlatformShortLocationName(
+    text(currentBasic.meetingCity) || text(currentBasic.destinationCity) || deps.skeleton.city,
+  );
   if (!isCompleted(plan, "skeleton") || !hasStandardLocation(deps.skeleton.province, deps.skeleton.city)) {
     const result = await runLegacyStage(deps, "skeleton", node(plan, "skeleton").attempts);
     if (result.status !== "completed") return failPlan(plan, patchNode, "skeleton", result.error);
@@ -141,7 +147,7 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   return plan;
 }
 
-/** 第一阶段的标准目的地准入：省份和城市必须由 AI 同轮输出并写回产品。 */
+/** 第一阶段只补齐省份；城市在创建时锁定，AI 不得覆盖。 */
 export async function runFoundationLocation(
   deps: ThreeStageOrchestratorDependencies,
   initial: PlanningPlanV2,
@@ -156,33 +162,33 @@ export async function runFoundationLocation(
     try {
       const currentProduct = await deps.runtime.loadCurrentProduct(deps.localProductId);
       const currentBasic = asRecord(currentProduct.basicInfo) ?? {};
+      const currentCity = toPlatformShortLocationName(
+        text(currentBasic.meetingCity) || text(currentBasic.destinationCity) || deps.skeleton.city,
+      );
       const location = await deps.ai.structureLocation({
         destination: deps.skeleton.destination,
         currentProvince: text(currentBasic.province),
-        currentDestinationCity: text(currentBasic.destinationCity),
+        currentDestinationCity: currentCity,
         previousError: previousError?.message,
       });
       const province = normaliseProvinceName(text(location.province));
-      const city = text(location.destinationCity);
       const errors: string[] = [];
       if (!province) errors.push("province 为空");
       else if (!isProvinceLevelName(province)) errors.push(`province「${province}」不是标准中国省级行政区名称`);
-      if (!city) errors.push("destinationCity 为空");
-      else if (!isValidDestinationCity(city, province)) errors.push(`destinationCity「${city}」不是合法目的地城市名称`);
       if (errors.length === 0) {
         const write = await deps.runtime.writeModule(
           deps.localProductId,
           "basicInfo",
           AI_WRITABLE_PATHS.basicInfo,
-          { province, destinationCity: city },
+          { province },
         );
         if (!write.ok) throw new Error(write.reason || "标准目的地写入失败");
         deps.skeleton.province = province;
-        deps.skeleton.city = city;
+        deps.skeleton.city = currentCity;
         await patchNode("skeleton", {
           status: "completed",
           attempts: attempt,
-          summary: `${province} · ${city} · ${deps.skeleton.days}天`,
+          summary: `${province} · ${currentCity} · ${deps.skeleton.days}天`,
           error: undefined,
           completedAt: new Date().toISOString(),
         });
@@ -248,7 +254,19 @@ async function buildVerifiedPool(
       const message = errorMessage(error);
       await patchNode("spotCandidates", { status: "failed", attempts: round, error: message });
       plan = getPlan();
-      if (resolved.length >= hardMinimum) break;
+      if (resolved.length >= hardMinimum) {
+        // 已有候选足够支撑后续真实 POI 与行程准入时，模型补充推荐失败
+        // 只是非阻断告警。后续节点成功后，不能把本轮暂时失败残留到最终规划树。
+        await patchNode("spotCandidates", {
+          status: "completed",
+          attempts: round,
+          summary: `已有 ${resolved.length} 个真实 POI，跳过本轮补充推荐`,
+          error: undefined,
+          completedAt: new Date().toISOString(),
+        });
+        plan = getPlan();
+        break;
+      }
       if (round === PLANNING_STAGE_RETRY_LIMIT) return { ok: false, plan: await terminal(plan, patchNode, "spotCandidates", message) };
       continue;
     }
@@ -290,6 +308,16 @@ async function buildVerifiedPool(
     }
   }
   const hit = plan.poiCandidates.filter((item) => item.status === "resolved").length;
+  if (hit >= hardMinimum && node(plan, "spotCandidates").status === "failed") {
+    // 续跑时可能在进入循环前就已经满足最低门槛，也要清理历史失败状态。
+    await patchNode("spotCandidates", {
+      status: "completed",
+      summary: `已有 ${hit} 个真实 POI，满足最低准入门槛`,
+      error: undefined,
+      completedAt: new Date().toISOString(),
+    });
+    plan = getPlan();
+  }
   if (hit < hardMinimum) {
     return { ok: false, plan: await terminal(plan, patchNode, "poiResolution", `真实 POI 仅 ${hit} 个，少于 ${hardMinimum} 天的最低门槛`) };
   }

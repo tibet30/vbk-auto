@@ -106,6 +106,22 @@ test("POI task 只有对应 spot 且保存非空 poiName / 正整数 poiId 时�
   })), false);
 });
 
+test("替换掉 suggestPoi 失败景点后，历史 POI 待办会按当前行程自动收敛", () => {
+  const product = {
+    itinerary: [{ day: 2, spots: [{ name: "夫子庙", poiName: "夫子庙", poiId: 150299051 }] }],
+  };
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "核查 老门东历史文化街区 的 VBK POI 映射",
+    type: "vbk",
+    detail: "suggestPoi 未匹配，请人工核查",
+  }, product), true);
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "核查 老门东历史文化街区 的 VBK POI 映射",
+    type: "vbk",
+    detail: "由目的地「南京」延伸",
+  }, product), false);
+});
+
 test("legacy POI label 仍可在有有效 POI 时满足", () => {
   const product = {
     itinerary: [{ day: 1, spots: [{ name: "晋祠", poiName: "晋祠博物馆", poiId: 79413 }] }],

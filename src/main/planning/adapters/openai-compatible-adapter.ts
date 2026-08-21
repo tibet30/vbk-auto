@@ -22,6 +22,7 @@ import {
   type PoiNameResolutionRequest,
 } from "../../../shared/contracts-planning.js";
 import { logAIPrompt } from "../../ai/prompt-log.js";
+import { logInfo } from "../../../shared/log-timestamp.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { buildStageToolSchema } from "../tool-schema.js";
 import {
@@ -113,6 +114,7 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     } catch {
       throw new PlannerError("invalid_model_output", "工具返回不是合法 JSON。");
     }
+    logInfo("[planning] adapter.result", JSON.stringify({ stage, parsed }));
     return convertToolArgsToStageOutput(stage, parsed, allowed);
   }
 
@@ -176,19 +178,19 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
   }
 }
 
-/** POI 名称纠正的约束独立导出，防止 prompt 和契约测试漂移。 */
+/** POI 名称替换的约束独立导出，防止 prompt 和契约测试漂移。 */
 export function composePoiNameResolutionMessages(request: PoiNameResolutionRequest) {
   const retryRule = request.previousCandidates.length > 0
     ? `已尝试且未命中的候选：${request.previousCandidates.join("、")}。本次必须给出与以上所有候选不同的单一 POI 名称。`
-    : "这是第一次名称纠正。";
+    : "这是第一次候选替换。";
   return [
     {
       role: "system" as const,
-      content: "你负责将未通过 VBK suggestPoi 查询的行程名称，纠正为最可能被该接口查到的 POI 名称。只可输出一个真实、单一的地点实体名称：不得给 POI ID、解释、详细街道地址、多个候选或组合点。原名若含并列或组合景点，必须从中选择一个最具代表性的主景点，绝不能照抄组合名称。无法安全判断时返回 null。",
+      content: "你负责为未通过 VBK suggestPoi 查询的行程景点，给出一个同目的地/同核心游览城市内更可能被接口查到的可替代 POI 名称。只可输出一个真实、单一、适合替换原景点的可游览地点实体名称：不得给 POI ID、解释、详细街道地址、多个候选或组合点；不得输出机场、车站、码头、酒店、民宿、集合点等接送/交通/住宿节点。原名若含并列或组合景点，优先从中选择一个最具代表性的主景点；若原名本身不可查，可以换成同主题或同片区的可游览景点。无法安全判断时返回 null。",
     },
     {
       role: "user" as const,
-      content: `目的地：${request.destination}\n原行程名称：${request.originalName}\n该名称刚刚未能通过 VBK suggestPoi 查询。请给出最可能通过该接口查到的单一 POI 名称（第 ${request.attempt} 次尝试）。${retryRule}`,
+      content: `目的地/游览范围：${request.destination}\n原行程名称：${request.originalName}\n该名称刚刚未能通过 VBK suggestPoi 查询。请给出可替换它、并最可能通过该接口查到的单一 POI 名称（第 ${request.attempt} 次尝试）。${retryRule}`,
     },
   ];
 }
@@ -197,7 +199,7 @@ export const poiNameToolSchema = {
   type: "function" as const,
   function: {
     name: "submit_vbk_poi_name",
-    description: "提交一个可再次用于 VBK suggestPoi 查询的单一 POI 名称。",
+    description: "提交一个可替换未命中景点、并可再次用于 VBK suggestPoi 查询的单一可游览 POI 名称；不能是交通或住宿节点。",
     strict: true,
     parameters: {
       type: "object",

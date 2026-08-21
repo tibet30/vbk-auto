@@ -25,6 +25,15 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { VbkApi } from "../shared/contracts.js";
 
 const api: VbkApi = {
+  appAuth: {
+    status: () => ipcRenderer.invoke("appAuth:status"),
+    listAccounts: () => ipcRenderer.invoke("appAuth:listAccounts"),
+    captcha: () => ipcRenderer.invoke("appAuth:captcha"),
+    login: (input) => ipcRenderer.invoke("appAuth:login", input),
+    switchAccount: (userId) => ipcRenderer.invoke("appAuth:switchAccount", userId),
+    startLogin: () => ipcRenderer.invoke("appAuth:startLogin"),
+    logout: () => ipcRenderer.invoke("appAuth:logout"),
+  },
   products: { list: () => ipcRenderer.invoke("products:list"), create: (input) => ipcRenderer.invoke("products:create", input), get: (id) => ipcRenderer.invoke("products:get", id), delete: (id) => ipcRenderer.invoke("products:delete", id), readiness: (id) => ipcRenderer.invoke("products:readiness", id), updateReviewField: (id, input) => ipcRenderer.invoke("products:updateReviewField", id, input), updateProductJson: (id, json) => ipcRenderer.invoke("products:updateProductJson", id, json) },
   ai: {
     send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),
@@ -105,6 +114,7 @@ const api: VbkApi = {
     start: (localProductId) => ipcRenderer.invoke("planning:start", localProductId),
     resume: (localProductId) => ipcRenderer.invoke("planning:resume", localProductId),
     state: (localProductId) => ipcRenderer.invoke("planning:state", localProductId),
+    rerunMajorStage: (localProductId, stage) => ipcRenderer.invoke("planning:rerunMajorStage", localProductId, stage),
   },
 };
 contextBridge.exposeInMainWorld("vbk", api);

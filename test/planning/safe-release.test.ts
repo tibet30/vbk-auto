@@ -100,7 +100,7 @@ test("automationBlockers 把 submitReview=true / publishAfterApproval=true 视�
 test("findBlacklistedKey 命中禁写字段名", () => {
   assert.equal(findBlacklistedKey({ supplierProductCode: "X" }), "supplierProductCode");
   assert.equal(findBlacklistedKey({ vehicleResource: { resourceId: 1 } }), "vehicleResource");
-  assert.equal(findBlacklistedKey({ vehicleResource: { requestedDailyCost: 1000 } }), undefined);
+  assert.equal(findBlacklistedKey({ vehicleResource: { requestedTotalCost: 1000 } }), undefined);
   assert.equal(findBlacklistedKey({ vehicleId: 1 }), "vehicleId");
   assert.equal(findBlacklistedKey({ resourceId: 1 }), "resourceId");
   assert.equal(findBlacklistedKey({ resourceGroupId: 1 }), "resourceGroupId");
@@ -117,10 +117,10 @@ test("findBlacklistedKey 命中禁写字段名", () => {
   assert.equal(findBlacklistedKey(null), undefined);
 });
 
-test("operations 阶段只允许 AI 写 vehicleResource.requestedDailyCost", () => {
+test("operations 阶段只允许 AI 写 vehicleResource.requestedTotalCost", () => {
   assert.deepEqual(
-    sanitiseModuleValue("skeleton", { vehicleResource: { requestedDailyCost: 1000 } }),
-    { ok: true, value: { vehicleResource: { requestedDailyCost: 1000 } } },
+    sanitiseModuleValue("skeleton", { vehicleResource: { requestedTotalCost: 1000 } }),
+    { ok: true, value: { vehicleResource: { requestedTotalCost: 1000 } } },
   );
   assert.deepEqual(
     sanitiseModuleValue("skeleton", { vehicleResource: { resourceGroupId: 101 } }),

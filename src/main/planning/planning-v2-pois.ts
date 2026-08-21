@@ -1,0 +1,255 @@
+import type {
+  PlanningItineraryDayDraft,
+  PlanningPoiCandidate,
+} from "../../shared/contracts-planning.js";
+import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
+
+const FACILITY_RE = /入口|出口|停车场|售票处|游客中心|服务中心|换乘中心|检票口|接驳站|码头|车站|机场/;
+
+const ADMINISTRATIVE_ALIASES: Record<string, string[]> = {
+  北京: ["beijing", "peking"],
+  天津: ["tianjin"],
+  河北: ["hebei"],
+  山西: ["shanxi"],
+  内蒙古: ["inner mongolia", "neimenggu"],
+  辽宁: ["liaoning"],
+  吉林: ["jilin"],
+  黑龙江: ["heilongjiang"],
+  上海: ["shanghai"],
+  江苏: ["jiangsu"],
+  浙江: ["zhejiang"],
+  安徽: ["anhui"],
+  福建: ["fujian"],
+  江西: ["jiangxi"],
+  山东: ["shandong"],
+  河南: ["henan"],
+  湖北: ["hubei"],
+  湖南: ["hunan"],
+  广东: ["guangdong", "canton"],
+  广西: ["guangxi"],
+  海南: ["hainan"],
+  重庆: ["chongqing"],
+  四川: ["sichuan"],
+  贵州: ["guizhou"],
+  云南: ["yunnan"],
+  西藏: ["tibet", "xizang"],
+  陕西: ["shaanxi", "shensi"],
+  甘肃: ["gansu"],
+  青海: ["qinghai"],
+  宁夏: ["ningxia"],
+  新疆: ["xinjiang"],
+  香港: ["hong kong"],
+  澳门: ["macau", "macao"],
+  拉萨: ["lhasa"],
+  日喀则: ["shigatse", "xigaze", "rikaze"],
+  林芝: ["nyingchi", "linzhi"],
+  西安: ["xi'an", "xian"],
+  成都: ["chengdu"],
+  北京市: ["beijing"],
+  上海市: ["shanghai"],
+  重庆市: ["chongqing"],
+  广州: ["guangzhou"],
+  深圳: ["shenzhen"],
+  昆明: ["kunming"],
+  大理: ["dali"],
+  丽江: ["lijiang"],
+  乌鲁木齐: ["urumqi", "urumchi", "wulumuqi"],
+  喀什: ["kashgar", "kashi"],
+  杭州: ["hangzhou"],
+  黄山: ["huangshan"],
+  桂林: ["guilin"],
+  三亚: ["sanya"],
+  厦门: ["xiamen"],
+  大同: ["datong"],
+  太原: ["taiyuan"],
+  兰州: ["lanzhou"],
+  西宁: ["xining"],
+  敦煌: ["dunhuang"],
+  嘉峪关: ["jiayuguan"],
+  张家界: ["zhangjiajie"],
+};
+
+export async function resolvePlanningPoiCandidates(args: {
+  names: string[];
+  province: string;
+  city: string;
+  concurrency?: number;
+  beforeEach: () => Promise<void>;
+  query: (name: string) => Promise<PoiSuggestDetailResult>;
+}): Promise<PlanningPoiCandidate[]> {
+  const result = new Array<PlanningPoiCandidate>(args.names.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < args.names.length) {
+      const index = cursor;
+      cursor += 1;
+      const requestedName = args.names[index];
+      try {
+        await args.beforeEach();
+        const detail = await args.query(requestedName);
+        result[index] = toPlanningCandidate(requestedName, detail, args.province, args.city);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/登录|Cookie|cookie|未登录/.test(message)) throw error;
+        result[index] = { requestedName, status: "rejected", reason: `POI 查询失败：${message.slice(0, 160)}` };
+      }
+    }
+  };
+  const workerCount = Math.min(Math.max(1, args.concurrency ?? 5), args.names.length || 1);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return result;
+}
+
+export function toPlanningCandidate(
+  requestedName: string,
+  detail: PoiSuggestDetailResult,
+  province: string,
+  city: string,
+): PlanningPoiCandidate {
+  const best = detail.best;
+  if (!best || !Number.isInteger(best.poiId) || best.poiId <= 0 || !best.poiName.trim()) {
+    return { requestedName, status: "rejected", reason: "未命中可确认的真实 POI" };
+  }
+  if (FACILITY_RE.test(best.poiName)) {
+    return { requestedName, status: "rejected", reason: "命中的是入口、停车场或服务设施" };
+  }
+  const raw = detail.candidates.find((candidate) => candidate.poiId === best.poiId);
+  const metadata = readLocationMetadata(raw?.textFields ?? []);
+  const hasKnownLocation = Boolean(metadata.province || metadata.city);
+  const provinceMatches = locationMatches(metadata.province, province);
+  const cityMatches = locationMatches(metadata.city, city);
+  if (!hasKnownLocation || (!provinceMatches && !cityMatches)) {
+    const actual = [metadata.province, metadata.city].filter(Boolean).join("/") || "地域未知";
+    return { requestedName, status: "rejected", reason: `POI 地域不匹配（${actual}）` };
+  }
+  return {
+    requestedName,
+    status: "resolved",
+    poiId: best.poiId,
+    poiName: best.poiName.trim(),
+    province: metadata.province || province,
+    city: metadata.city || city,
+    district: metadata.district,
+    address: metadata.address,
+  };
+}
+
+export function expandVerifiedItinerary(args: {
+  drafts: PlanningItineraryDayDraft[];
+  pool: PlanningPoiCandidate[];
+  days: number;
+}): { ok: true; itinerary: Array<Record<string, unknown>>; selectedIds: Set<number> } | { ok: false; reason: string } {
+  const pool = new Map<number, PlanningPoiCandidate>();
+  for (const candidate of args.pool) {
+    if (candidate.status === "resolved" && candidate.poiId && candidate.poiName) pool.set(candidate.poiId, candidate);
+  }
+  if (args.drafts.length !== args.days) return { ok: false, reason: `行程必须恰好生成 ${args.days} 天` };
+  const selectedIds = new Set<number>();
+  const citySequence: string[] = [];
+  const itinerary: Array<Record<string, unknown>> = [];
+  for (let index = 0; index < args.days; index += 1) {
+    const draft = args.drafts[index];
+    if (draft.day !== index + 1) return { ok: false, reason: `第 ${index + 1} 天 day 编号不连续` };
+    if (!draft.title || !draft.description || draft.poiIds.length === 0) {
+      return { ok: false, reason: `第 ${index + 1} 天缺少标题、描述或景点` };
+    }
+    const spots: Array<Record<string, unknown>> = [];
+    const cities = new Set<string>();
+    for (const poiId of draft.poiIds) {
+      const candidate = pool.get(poiId);
+      if (!candidate) return { ok: false, reason: `第 ${index + 1} 天引用了候选池外的 POI ${poiId}` };
+      if (selectedIds.has(poiId)) return { ok: false, reason: `POI ${candidate.poiName} 被重复使用` };
+      selectedIds.add(poiId);
+      if (candidate.city) cities.add(normaliseLocation(candidate.city));
+      spots.push({ name: candidate.poiName, poiName: candidate.poiName, poiId });
+    }
+    if (cities.size > 1) return { ok: false, reason: `第 ${index + 1} 天跨越多个城市` };
+    citySequence.push([...cities][0] ?? "");
+    itinerary.push({
+      day: index + 1,
+      title: draft.title,
+      description: draft.description,
+      spots,
+      // VBK 的行程 saveType=3 要求至少有一晚住宿节点；酒店名称本身
+      // 仍由后续 hotelResource 阶段按 hotelTier 匹配真实资源。这里仅写
+      // 一个明确的待匹配占位，避免把酒店资源误当成 AI 已确认的酒店。
+      hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
+      meals: draft.meals || "早餐自理；午餐自理；晚餐自理",
+      ...(draft.mealDescriptions ? { mealDescriptions: draft.mealDescriptions } : {}),
+    });
+  }
+  if (hasBacktrack(citySequence)) return { ok: false, reason: "跨日路线形成 A→B→A 折返" };
+  return { ok: true, itinerary, selectedIds };
+}
+
+function readLocationMetadata(fields: Array<{ path: string; value: string }>) {
+  const read = (patterns: RegExp[]) => fields.find((field) => patterns.some((pattern) => pattern.test(field.path)))?.value?.trim();
+  const districtRecords = new Map<string, { name?: string; type?: string; path: string }>();
+  for (const field of fields) {
+    const match = field.path.match(/^(.*(?:^|\.)(?:district|districtInfo)(?:\.parents\[\d+\])?)\.(districtName|districtType)$/i);
+    if (!match) continue;
+    const record = districtRecords.get(match[1]) ?? { path: match[1] };
+    if (match[2].toLowerCase() === "districtname") record.name = field.value.trim();
+    else record.type = field.value.trim();
+    districtRecords.set(match[1], record);
+  }
+  let province: string | undefined;
+  let city: string | undefined;
+  let district: string | undefined;
+  for (const record of districtRecords.values()) {
+    const kind = administrativeType(record.type);
+    if (kind === "province" || kind === "municipality") province ??= record.name;
+    if (kind === "city" || kind === "municipality") city ??= record.name;
+    if (kind === "district") district ??= record.name;
+    if (!district && record.name && !record.path.includes(".parents[")) district = record.name;
+  }
+  return {
+    province: province ?? read([/(?:provinceName|province)(?:\.|$)/i]),
+    city: city ?? read([/(?:cityName|city)(?:\.|$)/i]),
+    district: district ?? read([/(?:districtName|district|countyName)(?:\.|$)/i]),
+    address: read([/(?:address|addressDetail|displayAddress)(?:\.|$)/i]),
+  };
+}
+
+function locationMatches(actual: string | undefined, expected: string): boolean {
+  if (!actual || !expected) return false;
+  const expectedKeys = locationKeys(expected);
+  for (const key of locationKeys(actual)) {
+    if (expectedKeys.has(key)) return true;
+  }
+  return false;
+}
+
+function normaliseLocation(value: string): string {
+  return value.trim()
+    .replace(/特别行政区|维吾尔自治区|壮族自治区|回族自治区|自治区|省|市|地区|自治州/g, "")
+    .replace(/special administrative region|autonomous region|province|municipality|prefecture|city|district|county|league|state/gi, "")
+    .replace(/[\s'’`·.-]/g, "")
+    .toLowerCase();
+}
+
+function locationKeys(value: string): Set<string> {
+  const normalised = normaliseLocation(value);
+  const keys = new Set([normalised]);
+  for (const [canonical, aliases] of Object.entries(ADMINISTRATIVE_ALIASES)) {
+    const aliasKeys = [canonical, ...aliases].map(normaliseLocation);
+    if (aliasKeys.includes(normalised)) keys.add(normaliseLocation(canonical));
+  }
+  return keys;
+}
+
+function administrativeType(value: string | undefined): "province" | "city" | "municipality" | "district" | undefined {
+  const type = (value ?? "").trim().replace(/[\s'’`·.-]/g, "").toLowerCase();
+  if (/province|autonomousregion|specialadministrativeregion|省|自治区|特别行政区/.test(type)) return "province";
+  if (/municipality|直辖市/.test(type)) return "municipality";
+  if (/city|prefecture|市|州|地区/.test(type)) return "city";
+  if (/district|county|banner|旗|区|县/.test(type)) return "district";
+  return undefined;
+}
+
+function hasBacktrack(cities: string[]): boolean {
+  for (let i = 2; i < cities.length; i += 1) {
+    if (cities[i] && cities[i] === cities[i - 2] && cities[i] !== cities[i - 1]) return true;
+  }
+  return false;
+}

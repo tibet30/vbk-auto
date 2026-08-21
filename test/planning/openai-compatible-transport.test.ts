@@ -14,6 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions, normaliseTransportError } from "../../src/main/planning/adapters/openai-compatible-adapter.js";
+import { OpenAIThreeStagePlanningAi } from "../../src/main/planning/adapters/three-stage-ai.js";
 import { PlannerError } from "../../src/shared/contracts-planning.js";
 import type { PlannerRequest, PoiNameResolutionRequest } from "../../src/shared/contracts-planning.js";
 
@@ -106,6 +107,29 @@ function basicInfoRequest(): PlannerRequest {
 function poiNameRequest(): PoiNameResolutionRequest {
   return { destination: "西安", originalName: "钟楼", attempt: 1, previousCandidates: [] };
 }
+
+test("ThreeStage 第一阶段通过结构化工具返回省市，并把上一轮准入失败反馈给 AI", async (t) => {
+  const server = await startCapturingServer(t, (_req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(okToolCallResponse("submit_standard_location", { province: "西藏", destinationCity: "拉萨" }));
+  });
+  const ai = new OpenAIThreeStagePlanningAi({
+    apiKey: "location-test-key",
+    baseUrl: server.url,
+    model: "location-model",
+    provider: "test-provider",
+  });
+  const location = await ai.structureLocation({
+    destination: "西藏自治区",
+    previousError: "第一阶段目的地准入失败：destinationCity 为空",
+  });
+  assert.deepEqual(location, { province: "西藏", destinationCity: "拉萨" });
+  assert.equal(server.captured.length, 1);
+  const request = server.captured[0].parsedBody;
+  assert.equal(request.model, "location-model");
+  assert.equal((request.tools as Array<{ function: { name: string } }>)[0].function.name, "submit_standard_location");
+  assert.match(String((request.messages as Array<{ content: string }>)[1].content), /destinationCity 为空/);
+});
 
 // ───────────────────────── transport param mapping ─────────────────────────
 

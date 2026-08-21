@@ -6,7 +6,7 @@
  *   - 400 电话（来自账号 AccountFixedInfo.servicePhone，仅展示 + 引导设置）
  *   - 套餐定价 (commercial.pricing.adult / child)
  *   - 班期库存 (commercial.inventory.startDate / endDate / dailyQuota)
- *   - 用车资源组 (operations.vehicleResource.{resourceGroupId, name, requestedDailyCost})
+ *   - 用车资源组 (operations.vehicleResource.{resourceGroupId, name, requestedTotalCost})
  *
  * 验收门（与用户规格一一对齐）：
  *  1. 模块自身不引入 max-height / overflow-y / 内部滚动 / 绝对定位覆盖下方内容；
@@ -179,7 +179,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
     snapshot.vehicleResource.resourceGroupId !== null
     || (snapshot.vehicleResource.resourceGroupName !== null
       && snapshot.vehicleResource.resourceGroupName.trim().length > 0)
-    || snapshot.vehicleResource.requestedDailyCost !== null
+    || snapshot.vehicleResource.requestedTotalCost !== null
   );
   const servicePhoneRaw = typeof accountServicePhone === "string" ? accountServicePhone.trim() : "";
   const servicePhoneHasValue = servicePhoneRaw.length > 0;
@@ -195,7 +195,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
     endDate: draft.endDate ?? "",
     dailyQuota: draft.dailyQuota ?? "",
   };
-  const costDraft = draft.requestedDailyCost ?? "";
+  const costDraft = draft.requestedTotalCost ?? "";
 
   // headMeta：所有核心行都列出（封面永远在），缺失字段追加「待补充 / 待设置」
   // 状态文案，让用户从模块头部一眼看到还需要补什么；用车按产品类型条件加入。
@@ -324,14 +324,14 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             <BasicInfoVehicleRow
               resourceGroupId={snapshot.vehicleResource.resourceGroupId}
               resourceGroupName={snapshot.vehicleResource.resourceGroupName}
-              requestedDailyCost={snapshot.vehicleResource.requestedDailyCost}
+              requestedTotalCost={snapshot.vehicleResource.requestedTotalCost}
               draft={costDraft}
-              saving={savingField === "requestedDailyCost"}
-              error={errors.requestedDailyCost}
-              onDraftChange={(value) => updateDraft("requestedDailyCost", value)}
+              saving={savingField === "requestedTotalCost"}
+              error={errors.requestedTotalCost}
+              onDraftChange={(value) => updateDraft("requestedTotalCost", value)}
               onSave={(value) => { void saveVehicleCost(product.id, value); }}
               onClear={() => { void saveVehicleCost(product.id, null); }}
-              onClearError={() => clearError("requestedDailyCost")}
+              onClearError={() => clearError("requestedTotalCost")}
             />
           ) : null}
         </div>

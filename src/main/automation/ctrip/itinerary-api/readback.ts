@@ -179,10 +179,11 @@ function checkHotels(
   dayLabel: string,
   expected: Array<{ hotelName: string; hotelTier?: string }>,
   actualInfos: InfoRecord[],
-  requireHotels: boolean,
 ): number {
   const hotels = actualInfos.filter(isHotel);
-  if (requireHotels && !hotels.length) throw new Error(`${dayLabel} 回读缺少酒店节点（业务要求）`);
+  // 住宿按天校验：只有该天的期望里有住宿时才要求命中酒店节点。
+  // 不能使用全程级的 requireHotels，否则 2天1晚产品的末日会被错误判为缺酒店。
+  if (expected.length > 0 && !hotels.length) throw new Error(`${dayLabel} 回读缺少酒店节点（业务要求）`);
   if (expected.length !== hotels.length) {
     throw new Error(`${dayLabel} 回读酒店节点数不一致：期望 ${expected.length} 个，实际 ${hotels.length} 个`);
   }
@@ -328,7 +329,7 @@ export async function verifyItineraryReadback(
     checkTitle(dayLabel, exp.title, day.dailyDescription);
     totalSpots += checkPois(dayLabel, exp.pois, infos);
     totalMeals += checkMeals(dayLabel, exp.meals, infos);
-    totalHotels += checkHotels(dayLabel, exp.hotels, infos, expectations.requireHotels);
+    totalHotels += checkHotels(dayLabel, exp.hotels, infos);
     checkOther(dayLabel, { description: exp.other.description, serviceTime: exp.serviceTime }, infos);
 
     if (dayIndex === 0) checkPickup(dayLabel, expectations, infos);

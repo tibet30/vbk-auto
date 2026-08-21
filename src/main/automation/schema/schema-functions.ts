@@ -6,7 +6,7 @@ import { mergeReadinessIssues } from "../../../shared/readiness-issues.js";
 import { hasSatisfiedVehicleResource, isResearchTaskSatisfiedByProduct } from "../../../shared/research-task-satisfaction.js";
 import { readCover } from "../../operations/cover-info.js";
 import { evaluateAutomationContract } from "../automation-contract.js";
-import { findVbkCopyBadCase } from "../../planning/vbk-copy-policy.js";
+import { findAllVbkCopyBadCases } from "../../planning/vbk-copy-policy.js";
 
 /**
  * 自动化层产品 schema 工具。
@@ -140,8 +140,8 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
   }
   // 旧草稿可能绕过 stage-runner 的输出门禁；启动自动化前重新扫描产品文案，
   // 避免平台黑名单词进入 VBK 页面后才失败。
-  const copyBadCase = findVbkCopyBadCase(product);
-  if (copyBadCase) {
+  const copyBadCases = findAllVbkCopyBadCases(product);
+  for (const copyBadCase of copyBadCases) {
     blockers.push({
       label: "VBK 文案黑名单",
       detail: `${copyBadCase.path} 命中「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,

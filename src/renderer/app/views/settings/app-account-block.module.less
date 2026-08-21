@@ -1,0 +1,23 @@
+.block {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.heading { display: flex; align-items: flex-start; gap: 10px; }
+.icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: var(--radius-control); background: var(--muted); color: var(--foreground); }
+.heading h2 { margin: 0 0 3px; font-size: 14px; }
+.heading p { margin: 0; color: var(--muted-foreground); font-size: 11px; }
+.accountRow { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.avatar { width: 34px; height: 34px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 50%; background: var(--primary); color: var(--primary-foreground); font-size: 13px; font-weight: 650; }
+.identity { min-width: 0; display: grid; gap: 1px; margin-right: auto; }
+.identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.identity span { color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+.active { display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-size: 11px; font-weight: 550; }
+
+@media (max-width: 640px) {
+  .accountRow { align-items: flex-start; flex-wrap: wrap; }
+  .accountRow button { width: 100%; justify-content: center; }
+  .active { margin-top: 8px; }
+}

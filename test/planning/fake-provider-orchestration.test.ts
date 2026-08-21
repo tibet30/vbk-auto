@@ -80,7 +80,7 @@ class FakeRuntime implements OrchestratorRuntime {
   /** addResearchTask 去重语义：相同 label+type 只算一次。 */
   private taskKeys = new Set<string>();
   moduleWrites: Array<{ module: PlanningModule; writePath: string }> = [];
-  suggestPoi?: (keyword: string) => Promise<{ poiName: string; poiId: number } | null>;
+  suggestPoi = async (keyword: string) => ({ poiName: `${keyword}（VBK）`, poiId: 1000 });
   async loadExistingResearchTasks(): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
     return this.researchTasks.map((t) => ({ label: t.label, type: t.type }));
   }
@@ -187,9 +187,8 @@ function buildFakeScript(): FakeProviderScript[] {
       stage: "commercial",
       callCount: 0,
       output: {
-        reply: "已生成 commercial 五件套",
+        reply: "已生成 commercial 模块",
         modules: [
-          { module: "packageName", status: "accepted", value: "太原 2 天 1 晚私家团标准套餐" },
           {
             module: "pricing", status: "accepted",
             value: { currency: "CNY", adult: 1233, child: 673, minimumTravelers: 2 },
@@ -197,15 +196,6 @@ function buildFakeScript(): FakeProviderScript[] {
           {
             module: "inventory", status: "accepted",
             value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 },
-          },
-          {
-            module: "terms", status: "accepted",
-            value: {
-              inclusions: "行程内专车、住宿、行程规划。",
-              exclusions: "门票、讲解、餐饮、单房差。",
-              bookingNotes: "至少 2 人起订，建议提前 1 天 15 时前预订。",
-              refundPolicy: "资源确认前无损取消；确认后按实际损失扣除。",
-            },
           },
           {
             module: "release", status: "accepted",
@@ -228,9 +218,9 @@ test("完整 staged planning 跑完后状态为 completed", async () => {
   });
   assert.equal(result.status, "completed");
   assert.deepEqual(result.state.completedStages, ["skeleton", "basicInfo", "itinerary", "presentation", "commercial", "research", "validation"]);
-  // accepted 包含所有 REQUIRED + skeleton。researchTasks 由 ResearchTaskProposal 列表单独暴露。
+  // accepted 包含所有 planning REQUIRED + skeleton。terms 由 VBK 条款阶段处理。
   const acceptedModules = result.accepted.map((m) => m.module).sort();
-  assert.deepEqual(acceptedModules, ["basicInfo", "inventory", "itinerary", "packageName", "presentation", "pricing", "release", "skeleton", "terms"]);
+  assert.deepEqual(acceptedModules, ["basicInfo", "inventory", "itinerary", "packageName", "presentation", "pricing", "release", "skeleton"]);
   // research tasks 仍被记录到 result.researchTasks。
   assert.ok(result.researchTasks.length >= 1);
   assert.equal(result.rejected.length, 0);
@@ -320,18 +310,23 @@ test("续跑时已完成阶段被跳过，且不重跑 planner", async () => {
   assert.equal(firstCalls, 4);
 });
 
-test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 completed", async () => {
+test("已完成方案若 POI 被打坏，续跑会回退 itinerary 并补齐后再完成", async () => {
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
   await runPlan({
     localProductId: "completed-poi-backfill", skeleton, store, runtime,
     planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
   });
+  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ name: string; poiName: string | null; poiId: number | null }> }>;
+  itinerary[0].spots[0].poiName = null;
+  itinerary[0].spots[0].poiId = null;
+  itinerary[1].spots[0].poiName = null;
+  itinerary[1].spots[0].poiId = null;
   runtime.moduleWrites = [];
   const queried: string[] = [];
   runtime.suggestPoi = async (keyword) => {
     queried.push(keyword);
-    return keyword === "晋祠博物馆" ? { poiName: "晋祠博物馆", poiId: 79413 } : null;
+    return { poiName: `${keyword}（VBK）`, poiId: 79413 };
   };
   const planner = new FakePlanner(buildFakeScript());
 
@@ -342,11 +337,14 @@ test("已完成方案续跑时只补缺失 POI，不重跑 planner 或回退 com
   assert.equal(result.status, "completed");
   assert.deepEqual(result.state.completedStages, PLANNING_STAGES);
   assert.deepEqual(queried, ["晋祠博物馆", "山西博物院"]);
-  assert.equal(planner.calls.length, 0, "POI-only backfill 不得重新调用 AI planner");
-  assert.deepEqual(runtime.moduleWrites, [{ module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary }], "仅有实际匹配时才写回行程");
-  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
-  assert.deepEqual(itinerary[0].spots[0], { name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: 79413 });
-  assert.deepEqual(itinerary[1].spots[0], { name: "山西博物院", poiName: null, poiId: null });
+  assert.deepEqual(planner.calls.map((call) => call.stage), ["itinerary", "commercial"], "缺 POI 的 completed 产品必须回退重跑 itinerary，并重新经过下游阶段门");
+  assert.deepEqual(runtime.moduleWrites.filter((write) => write.module === "itinerary"), [
+    { module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary },
+    { module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary },
+  ]);
+  const fixed = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
+  assert.deepEqual(fixed[0].spots[0], { name: "晋祠博物馆", poiName: "晋祠博物馆（VBK）", poiId: 79413 });
+  assert.deepEqual(fixed[1].spots[0], { name: "山西博物院", poiName: "山西博物院（VBK）", poiId: 79413 });
 });
 
 test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", async () => {

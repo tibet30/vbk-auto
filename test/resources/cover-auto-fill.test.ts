@@ -87,15 +87,15 @@ test("pickFirstUsableCoverCandidate 按顺序挑第一条完整候选", () => {
     { stableId: "a", index: 0, quality: "", resolution: "", imageId: undefined as unknown as number, imageUrl: undefined as unknown as string },
     { stableId: "b", index: 1, quality: "", resolution: "", imageId: 0, imageUrl: "" },
     { stableId: "c", index: 2, quality: "", resolution: "", imageId: 100, imageUrl: "https://c" },
-    { stableId: "d", index: 3, quality: "", resolution: "", imageId: 200, imageUrl: "https://d", imageResolved: true },
+    { stableId: "d", index: 3, quality: "3.2", resolution: "2000*1200", imageId: 200, imageUrl: "https://d", imageResolved: true },
   ];
   // imageResolved === undefined 视为未确认：c 缺标记被跳过，挑 d。
   const picked = pickFirstUsableCoverCandidate(list);
   assert.equal(picked?.stableId, "d");
   // 整组都缺 imageResolved=true：全表跳过。
   const listAllUnresolved = [
-    { stableId: "a", index: 0, quality: "", resolution: "", imageId: 100, imageUrl: "https://a" },
-    { stableId: "b", index: 1, quality: "", resolution: "", imageId: 200, imageUrl: "https://b" },
+    { stableId: "a", index: 0, quality: "3.2", resolution: "2000*1200", imageId: 100, imageUrl: "https://a" },
+    { stableId: "b", index: 1, quality: "3.1", resolution: "2000*1200", imageId: 200, imageUrl: "https://b" },
   ];
   assert.equal(pickFirstUsableCoverCandidate(listAllUnresolved), null);
 });

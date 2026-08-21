@@ -5,7 +5,7 @@
  *  - readBasicInfoFromProduct：把 product 树上的基础信息字段安全读出来；
  *  - parsePricingDraft：UI 草稿 → 主进程可用数值；
  *  - parseInventoryDraft：UI 草稿 → 主进程可用库存对象；
- *  - parseRequestedDailyCostDraft：UI 草稿 → 主进程可用数值或清除信号。
+ *  - parseRequestedTotalCostDraft：UI 草稿 → 主进程可用数值或清除信号。
  *
  * 写入主路径的合法性由 src/main/operations/manual-review-field.test.ts 覆盖。
  */
@@ -40,7 +40,7 @@ export interface BasicInfoSnapshot {
     exists: boolean;
     resourceGroupId: number | null;
     resourceGroupName: string | null;
-    requestedDailyCost: number | null;
+    requestedTotalCost: number | null;
   };
   /**
    * product.presentation.cover 的安全读取结果：返回 shared `ProductCover`
@@ -209,6 +209,11 @@ export function readBasicInfoFromProduct(product: unknown): BasicInfoSnapshot {
   const operations = asObject(root.operations);
   const vehicleExists = isObject(operations.vehicleResource);
   const vehicle = asObject(operations.vehicleResource);
+  const days = asPositiveInteger(basic.days) ?? 1;
+  const requestedTotalCost = asNumber(vehicle.requestedTotalCost)
+    ?? (asNumber(vehicle.requestedDailyCost) !== null
+      ? asNumber(vehicle.requestedDailyCost)! * days
+      : null);
   const bookingControls = asObject(operations.bookingControls);
   const presentation = asObject(root.presentation);
   return {
@@ -228,7 +233,7 @@ export function readBasicInfoFromProduct(product: unknown): BasicInfoSnapshot {
       exists: vehicleExists,
       resourceGroupId: asNumber(vehicle.resourceGroupId),
       resourceGroupName: asTrimmedString(vehicle.resourceGroupName),
-      requestedDailyCost: asNumber(vehicle.requestedDailyCost),
+      requestedTotalCost,
     },
     cover: asProductCover(presentation.cover),
   };
@@ -238,7 +243,7 @@ export function shouldShowVehicleResourceRow(snapshot: BasicInfoSnapshot): boole
   const vehicle = snapshot.vehicleResource;
   const hasVehicleData = vehicle.resourceGroupId !== null
     || vehicle.resourceGroupName !== null
-    || vehicle.requestedDailyCost !== null;
+    || vehicle.requestedTotalCost !== null;
   return snapshot.productForm === "privateTour"
     || hasVehicleData;
 }
@@ -286,11 +291,11 @@ function isIsoDate(value: string): boolean {
   return date.toISOString().slice(0, 10) === value;
 }
 
-/** 解析 AI 预估日价草稿：
+/** 解析全程预计用车总成本草稿：
  *  - 合法正数 → 返回 number，UI 直接写入；
  *  - 空 / 0 / 负数 / 非数 → 返回 "invalid"，UI 禁用「保存」按钮；
  *  - 注：本 helper 永不返回 null；清除动作由 UI 显式发 null 给主进程。 */
-export function parseRequestedDailyCostDraft(raw: string): number | "invalid" {
+export function parseRequestedTotalCostDraft(raw: string): number | "invalid" {
   const trimmed = raw.trim();
   if (!trimmed) return "invalid";
   const value = Number(trimmed);

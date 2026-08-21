@@ -27,7 +27,6 @@ const REQUIRED_FOR_COMPLETION: readonly PlanningModule[] = [
   "packageName",
   "pricing",
   "inventory",
-  "terms",
   "release",
 ];
 
@@ -150,6 +149,20 @@ export function deepValidateModules(args: {
       if (textValue(record.title).length === 0) reasons.push(`第 ${index + 1} 天 title 缺失`);
       const spots = asArray(record.spots);
       if (!spots || spots.length === 0) reasons.push(`第 ${index + 1} 天 spots 缺失`);
+      else {
+        for (let spotIndex = 0; spotIndex < spots.length; spotIndex += 1) {
+          const spot = asRecord(spots[spotIndex]);
+          if (!spot) {
+            reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点不是对象`);
+            continue;
+          }
+          const label = textValue(spot.name) || textValue(spot.poiName) || `#${spotIndex + 1}`;
+          if (!textValue(spot.poiName)) reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点「${label}」缺 poiName 映射`);
+          if (!(typeof spot.poiId === "number" && Number.isInteger(spot.poiId) && spot.poiId > 0)) {
+            reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点「${label}」缺 poiId 映射`);
+          }
+        }
+      }
       if (textValue(record.description).length === 0) reasons.push(`第 ${index + 1} 天 description 缺失`);
       if (textValue(record.meals).length === 0) reasons.push(`第 ${index + 1} 天 meals 缺失`);
       index += 1;

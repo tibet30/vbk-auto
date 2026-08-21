@@ -43,7 +43,6 @@ class ItineraryOnlyPlanner implements Planner {
     }
     if (request.stage === "commercial") {
       return { reply: "c", modules: [
-        { module: "packageName", status: "accepted", value: "pkg" },
         { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1233, child: 673, minimumTravelers: 2 } },
         { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
         { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },

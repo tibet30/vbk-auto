@@ -8,30 +8,33 @@
 import type { PlannerRequest, PlanningStage } from "../../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
+import { resolveTravelScope } from "../runtime.js";
 
 const RECOMMENDATION_CATEGORIES = "优选行程、服务保障、贴心赠送、精选酒店、缤纷景点、特色美食、度假首选、超值赠送、五星精选";
 
 const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, string> = {
   skeleton: `1. skeleton.value 只包含 hotelTier、pickupCity、transport、reusePickupForDropoff、mealsIncluded、vehicleResource。
-2. vehicleResource 只包含 requestedDailyCost；按目的地/接送城市等级、约每日公里数和服务小时数估算包车日价，禁止按产品售价、毛利或起订人数倒推。不确定可填 null。
+2. vehicleResource 只包含 requestedTotalCost；按整段行程每天的实际用车、跨区移动、接送和行程密度估算全程总成本，禁止输出日均价，也禁止按产品售价、毛利或起订人数倒推。不确定可填 null。
 3. 禁止输出任何系统编码、资源 ID、供应商信息、管家或联系人信息。`,
-  basicInfo: `1. 只提交 basicInfo 一个模块；value 必须完整包含 subtitle、province、operationNotes，且不得增加其他字段。
-2. province 填省、自治区或直辖市名称，不能填目的地城市名；当前草稿已有非空 province 时原样保留。
-3. subtitle 和 operationNotes 使用简洁中文；不得把未核查信息写成已确认事实。`,
+  basicInfo: `1. 只提交 basicInfo 一个模块；value 必须包含 subtitle、province、destinationCity、meetingCity、operationNotes；省市字段只输出名称，不输出或猜测任何 ID。
+2. province 必须是中国标准省级行政区名称；destinationCity 必须是中国标准目的地城市名称，不能把景点名或 POI ID 填入其中。第一阶段即使草稿已有原始目的地，也必须给出标准 province 和 destinationCity。
+3. subtitle、meetingCity 和 operationNotes 使用简洁中文；不得把未核查信息写成已确认事实。`,
   itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，每天至少一个 spot。
-2. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。
-3. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
-4. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
-5. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。`,
+2. 使用 POI-first 顺序：先围绕 travelScope 准备足量候选景点池，再从中选择最可能被 VBK/携程 POI 接口查到的单一可游览景点组织行程；不要先写跨区域大行程再补 POI。
+3. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。本地系统会优先查接口，未命中时会要求替换为同范围可查景点。
+4. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
+5. 机场、车站、码头、酒店、民宿、集合点、接送点只能写进 description 的交通/接送说明，禁止写入 spots。
+6. 如果 destination 是省、自治区或直辖市，默认只围绕系统指定的核心游览城市选点；需要第二个核心城市时，只能选择系统给出的近邻城市，禁止全省撒点。
+7. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
+8. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。`,
   presentation: `1. recommendationCategory 与 recommendations[].category 只能从以下值选择：${RECOMMENDATION_CATEGORIES}。
 2. recommendations 恰好 3 条，category 互不重复。
 3. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
 4. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
-  commercial: `1. packageName.value 直接提交 JSON 字符串，禁止包成 {"packageName":"..."} 对象。
+  commercial: `1. 套餐名由本地系统按目的地、天数、晚数和产品形态固定生成；本阶段不要输出 packageName。
 2. pricing.adult > 0，pricing.child >= 0；cost.adult 不可超过 adult。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。
-4. terms 完整包含 inclusions、exclusions、bookingNotes、refundPolicy。
-5. release 完整包含 publicPriceCeiling (>0) 与 publicAuditRetries (1..10)；禁止输出 submitReview 或 publishAfterApproval，产品保持草稿态。`,
+4. release 完整包含 publicPriceCeiling (>0) 与 publicAuditRetries (1..10)；禁止输出 submitReview 或 publishAfterApproval，产品保持草稿态。`,
 };
 
 const CONTEXT_SECTIONS: Record<PlanningStage, readonly string[]> = {
@@ -56,7 +59,7 @@ function sanitiseContext(value: unknown, parentKey?: string): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (FORBIDDEN_CONTEXT_KEYS.has(key)) continue;
-    if (parentKey === "vehicleResource" && key !== "requestedDailyCost") continue;
+    if (parentKey === "vehicleResource" && key !== "requestedTotalCost") continue;
     result[key] = sanitiseContext(child, key);
   }
   return result;
@@ -83,9 +86,13 @@ export function composePlanningSystemPrompt(stage: PlanningStage): string {
 
 export function composePlanningUserMessage(request: PlannerRequest): string {
   const { stage, context, previousError } = request;
+  const travelScope = resolveTravelScope(context.skeleton.destination);
   const lines = [
     "产品骨架（系统字段未提供，禁止在输出中补写）：",
     `- destination = ${context.skeleton.destination}`,
+    `- travelScope = ${travelScope.isProvinceLevel
+      ? `省级输入，核心游览城市 ${travelScope.primaryCity}${travelScope.nearbyCoreCities.length ? `；可选近邻核心城市 ${travelScope.nearbyCoreCities.join("、")}` : "；不建议追加第二城市"}`
+      : `城市/景区输入，围绕 ${travelScope.primaryCity} 游玩`}`,
     `- days/nights = ${context.skeleton.days}/${context.skeleton.nights}`,
     `- productForm = ${context.skeleton.productForm}`,
     `- productType = ${context.skeleton.productType}`,

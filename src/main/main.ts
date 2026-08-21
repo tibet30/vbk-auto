@@ -34,16 +34,22 @@ import {
   LOCAL_VBK_COOKIE_FILE_NAME,
   type LocalVbkCookieStore,
 } from "./infrastructure/vbk-cookie-store.js";
+import { createAppAuthStore, LOCAL_APP_AUTH_FILE_NAME } from "./infrastructure/app-auth-store.js";
+import { createTibetAuthService, type TibetAuthService } from "./infrastructure/tibet-auth.js";
+import { createTibetProductService } from "./infrastructure/tibet-products.js";
 import { MiniMaxService } from "./minimax/minimax.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "./planning/adapters/openai-compatible-adapter.js";
 import { createMainWindow } from "./create-window.js";
 import { registerProductAiIpc } from "./ipc/product-ai-ipc.js";
+import { registerRemoteProductIpc } from "./ipc/remote-product-ipc.js";
 import { registerBrowserAutomationIpc } from "./ipc/browser-automation-ipc.js";
 import { registerSettingsIpc } from "./ipc/settings-ipc.js";
-import { registerPlanningIpc } from "./ipc/planning-ipc.js";
+import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
+import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
 import type { MainIpcContext } from "./ipc/context.js";
 import { ProductWorkflowCoordinator } from "./application/product-workflow-coordinator.js";
 import { ProductMutationService } from "./application/product-mutation-service.js";
+import { createRemoteProductMirror } from "./application/remote-product-mirror.js";
 import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -112,10 +118,12 @@ let cookieStore: LocalVbkCookieStore | null = null;
  *   - 关闭窗口后 webContents 可能销毁，因此先 isDestroyed 判定；
  *   - 这条事件供 UI 实时刷新产品详情 / 操作日志。
  */
-const emitProduct = (product: ProductDetail) => {
+const broadcastProduct = (product: ProductDetail) => {
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
   window.webContents.send("product:updated", product);
 };
+let productEmitter: (product: ProductDetail) => void = broadcastProduct;
+const emitProduct = (product: ProductDetail) => productEmitter(product);
 /**
  * 规划状态在成功落库后才广播。该事件是 renderer 的实时来源；首次打开产品
  * 仍通过 planning:state 补偿，避免订阅建立前的事件丢失。
@@ -305,11 +313,13 @@ function emitProductIfKnown(_accountName: string, _info: unknown): void {
   // Reserved for future account-fixed-info renderer notifications.
 }
 
-function registerIpc(context: MainIpcContext): void {
+function registerIpc(context: MainIpcContext, appAuth: TibetAuthService): void {
+  registerAppAuthIpc(appAuth);
+  registerRemoteProductIpc(context);
   registerProductAiIpc(context);
   registerBrowserAutomationIpc(context);
   registerSettingsIpc(context);
-  registerPlanningIpc(context);
+  registerPlanningV2Ipc(context);
 }
 
 async function openMainWindow(): Promise<void> {
@@ -341,6 +351,10 @@ app.whenReady().then(async () => {
   db = new VbkDatabase(app.getPath("userData"));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
+  const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
+  const appAuth = createTibetAuthService(appAuthStore);
+  const remoteProducts = createTibetProductService(appAuthStore);
+  productEmitter = createRemoteProductMirror({ remote: remoteProducts, broadcast: broadcastProduct }).emit;
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
   if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });
@@ -357,8 +371,10 @@ app.whenReady().then(async () => {
     aiService,
     productWorkflows: new ProductWorkflowCoordinator(),
     productMutations: new ProductMutationService(db, emitProduct),
+    remoteProducts,
     readiness,
     emitProduct,
+    broadcastProduct,
     emitPlanningState,
     withKnownVbkAccount,
     completedPoiBackfillPlanner,
@@ -367,7 +383,7 @@ app.whenReady().then(async () => {
     emitProductIfKnown,
     logPoiManualIpc,
   };
-  registerIpc(context);
+  registerIpc(context, appAuth);
   await openMainWindow();
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) void openMainWindow();

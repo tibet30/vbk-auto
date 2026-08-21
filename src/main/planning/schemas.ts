@@ -12,6 +12,7 @@ import { RECOMMENDATION_CATEGORIES, VBK_RECOMMENDATION_CATEGORIES } from "../dom
 import { isCombinedSpotName } from "./spot-name.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
+import { normalisePackageNameValue } from "./package-name.js";
 import {
   PLANNING_STAGES,
   type PlanningStage,
@@ -42,6 +43,8 @@ const itinerarySpotSchema = z.object({
 const basicInfoModuleValueSchema = z.object({
   subtitle: requiredText,
   province: requiredText,
+  destinationCity: requiredText.optional(),
+  meetingCity: requiredText.optional(),
   operationNotes: requiredText,
 }).strict();
 
@@ -143,7 +146,7 @@ const operationsHotelTierUpdateSchema = z.object({
   reusePickupForDropoff: z.boolean().optional(),
   mealsIncluded: z.boolean().optional(),
   vehicleResource: z.object({
-    requestedDailyCost: z.number().positive().nullable().optional(),
+    requestedTotalCost: z.number().positive().nullable().optional(),
   }).strict().optional(),
 }).strict();
 
@@ -182,15 +185,7 @@ export function validateModuleValue(module: PlanningModule, value: unknown): { o
     case "itinerary":
       return validate(itineraryModuleValueSchema, value);
     case "packageName":
-      // 部分兼容提供商即使收到 string tool schema，仍会额外包一层
-      // { packageName: "..." }。只兼容这个单键等价结构，其他对象继续拒绝。
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        const record = value as Record<string, unknown>;
-        if (Object.keys(record).length === 1 && typeof record.packageName === "string") {
-          return validate(packageNameModuleValueSchema, record.packageName);
-        }
-      }
-      return validate(packageNameModuleValueSchema, value);
+      return validate(packageNameModuleValueSchema, normalisePackageNameValue(value));
     case "pricing":
       return validate(pricingModuleValueSchema, value);
     case "inventory":
@@ -375,8 +370,8 @@ ${moduleList}
 5. itinerary 每天至少 1 个 spots；mealDescriptions 恰好 3 条。
 6. pricing.adult > 0；pricing.child >= 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
-8. terms 必须包含 inclusions / exclusions / bookingNotes / refundPolicy 四个字段。
-9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded / vehicleResource.requestedDailyCost；requestedDailyCost 必须按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、resourceGroupName、supplierCode、providerId、contactCardId。
+8. Terms 不属于 AI 规划模块，由 VBK 自动录入阶段处理；不得生成或返回 terms。
+9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded / vehicleResource.requestedTotalCost；requestedTotalCost 必须根据整段行程的实际用车安排、跨区移动、接送和行程密度估算全程总成本，禁止输出日均价，也禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、resourceGroupName、supplierCode、providerId、contactCardId。
 10. basicInfo 阶段必须生成 subtitle、province、operationNotes；province 必须是省/自治区/直辖市名称，不能把 meetingCity / destinationCity 城市名直接当作 province。已有非空 province 会被本地保留，不得覆盖。
 11. AI 不能自行声明 research task 已完成；research tasks 由本地 deterministic 生成并走运营 / VBK 核查流程。
 12. ${buildVbkCopyPolicyPrompt()}

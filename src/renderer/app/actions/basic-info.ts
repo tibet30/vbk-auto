@@ -26,7 +26,7 @@ import { createBasicInfoCoverSearchActions } from "./basic-info-cover-search";
  *     资源组 ID 必须由 VBK 真实匹配得到，UI 不允许自由输入。
  */
 
-type UpdateField = "subtitle" | "butler" | "adult" | "child" | "minimumTravelers" | "inventory" | "requestedDailyCost" | "cover";
+type UpdateField = "subtitle" | "butler" | "adult" | "child" | "minimumTravelers" | "inventory" | "requestedTotalCost" | "cover";
 
 export function useBasicInfoHandlers(state: AppState) {
   const savingFieldsRef = useRef<Set<UpdateField>>(new Set());
@@ -188,20 +188,20 @@ export function useBasicInfoHandlers(state: AppState) {
     void updateField(localProductId, "inventory", { field: "inventory", startDate, endDate, dailyQuota });
   };
 
-  /** 写单个车辆资源组字段：当前仅允许用车日价；资源组 ID / 名称必须来自 VBK 匹配。 */
+  /** 写单个车辆资源组字段：当前仅允许全程用车总成本；资源组 ID / 名称必须来自 VBK 匹配。 */
   const saveVehicleResourceField = (
     localProductId: string,
     payload: Extract<ManualReviewFieldInput, { field: "vehicleResource" }>,
   ) => {
     const fieldKey: UpdateField = ((): UpdateField => {
-      if ("requestedDailyCost" in payload) return "requestedDailyCost";
-      return "requestedDailyCost";
+      if ("requestedTotalCost" in payload) return "requestedTotalCost";
+      return "requestedTotalCost";
     })();
     void updateField(localProductId, fieldKey, payload);
   };
 
   /**
-   * 写「用车日价（待核查）」的便捷入口：value === null 表示显式清除。
+   * 写「全程用车总成本（待核查）」的便捷入口：value === null 表示显式清除。
    * 与 saveVehicleResourceField 共享同一条 IPC（products:updateReviewField），
    * 只是包了 number | null 友好签名，让 basic-info-vehicle-row 不用自己
    * 构造 discriminated union。
@@ -211,44 +211,44 @@ export function useBasicInfoHandlers(state: AppState) {
   };
 
   const saveVehicleCostAndResolve = async (localProductId: string, value: number | null) => {
-    const saved = await updateField(localProductId, "requestedDailyCost", { field: "vehicleResource", requestedDailyCost: value });
+    const saved = await updateField(localProductId, "requestedTotalCost", { field: "vehicleResource", requestedTotalCost: value });
     // value === null = 显式清除；保存已在 updateField 内做完，这里不再发起匹配。
     if (!saved || value === null) return;
     if (!api()) return;
     if (!isVbkLoggedIn) {
-      const message = "用车日价已保存；请先登录 VBK，再搜索用车资源组。";
-      setBasicInfoErrors((prev) => ({ ...prev, requestedDailyCost: message }));
+      const message = "全程用车总成本已保存；请先登录 VBK，再搜索用车资源组。";
+      setBasicInfoErrors((prev) => ({ ...prev, requestedTotalCost: message }));
       setNotice(message);
       setLoginPanelOpen(true);
       return;
     }
-    if (savingFieldsRef.current.has("requestedDailyCost")) return;
-    savingFieldsRef.current.add("requestedDailyCost");
-    setBasicInfoSaving("requestedDailyCost");
+    if (savingFieldsRef.current.has("requestedTotalCost")) return;
+    savingFieldsRef.current.add("requestedTotalCost");
+    setBasicInfoSaving("requestedTotalCost");
     setBasicInfoErrors((prev) => {
-      if (!prev.requestedDailyCost) return prev;
+      if (!prev.requestedTotalCost) return prev;
       const next = { ...prev };
-      delete next.requestedDailyCost;
+      delete next.requestedTotalCost;
       return next;
     });
     setBrowserOpen(true);
     try {
       const result = await api()!.research.resolveVehicleResource(localProductId);
       if (result) {
-        setNotice(`已按 ${value} 元/天搜索并匹配资源组：${result.resourceGroupName}（ID ${result.resourceGroupId}）。`);
+        setNotice(`已按全程总价 ${value} 元搜索并匹配资源组：${result.resourceGroupName}（ID ${result.resourceGroupId}）。`);
       } else {
-        const message = `用车日价已保存为 ${value} 元/天；VBK 未返回可匹配资源组，请调整价格后重试。`;
-        setBasicInfoErrors((prev) => ({ ...prev, requestedDailyCost: message }));
+        const message = `全程用车总成本已保存为 ${value} 元；VBK 未返回可匹配资源组，请调整总成本后重试。`;
+        setBasicInfoErrors((prev) => ({ ...prev, requestedTotalCost: message }));
         setNotice(message);
       }
       if (product?.id === localProductId) void updateReadiness(product);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "用车资源组搜索失败；用车日价已保留。";
-      setBasicInfoErrors((prev) => ({ ...prev, requestedDailyCost: message }));
-      setNotice(`用车日价已保存；资源组搜索失败：${message}`);
+      const message = error instanceof Error ? error.message : "用车资源组搜索失败；全程用车总成本已保留。";
+      setBasicInfoErrors((prev) => ({ ...prev, requestedTotalCost: message }));
+      setNotice(`全程用车总成本已保存；资源组搜索失败：${message}`);
     } finally {
-      savingFieldsRef.current.delete("requestedDailyCost");
-      setBasicInfoSaving((current) => (current === "requestedDailyCost" ? null : current));
+      savingFieldsRef.current.delete("requestedTotalCost");
+      setBasicInfoSaving((current) => (current === "requestedTotalCost" ? null : current));
     }
   };
 
@@ -414,7 +414,7 @@ function fieldLabel(field: UpdateField): string {
     child: "儿童价",
     minimumTravelers: "起订人数",
     inventory: "班期库存",
-    requestedDailyCost: "用车日价",
+    requestedTotalCost: "全程用车总成本",
     cover: "产品封面",
   } as Record<UpdateField, string>)[field];
 }

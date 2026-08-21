@@ -26,7 +26,7 @@ const FORBIDDEN_PATH_PREFIXES = [
 ] as const;
 
 const ALLOWED_VEHICLE_RESOURCE_PATHS = [
-  "/operations/vehicleResource/requestedDailyCost",
+  "/operations/vehicleResource/requestedTotalCost",
 ] as const;
 
 /**
@@ -40,11 +40,11 @@ function isForbiddenPath(path: string): boolean {
 }
 
 function assertAllowedVehicleResourceValue(operation: PatchOperation) {
-  if (operation.path !== "/operations/vehicleResource/requestedDailyCost" || operation.op === "remove") return;
+  if (operation.path !== "/operations/vehicleResource/requestedTotalCost" || operation.op === "remove") return;
   if (operation.value === null) return;
   const value = Number(operation.value);
   if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`AI 预估用车日价必须是正数：${operation.path}`);
+    throw new Error(`AI 预估全程用车总成本必须是正数：${operation.path}`);
   }
   operation.value = value;
 }
@@ -137,6 +137,47 @@ function applyPatchMutably(product: Record<string, unknown>, patch: PatchOperati
 }
 
 /**
+ * AI 可以改写规划内容，但不能通过 replace 一个父对象顺手清掉已经由人工、VBK
+ * 或封面流程确认的身份字段。对这些字段做“缺失回填”，允许 AI 继续更新同一对象
+ * 中的普通文案，同时避免一次 patch 让后续阶段失去可恢复的运行时状态。
+ */
+function restoreProtectedRuntimeFields(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): void {
+  const beforePresentation = asRecord(before.presentation);
+  const afterPresentation = asRecord(after.presentation);
+  const beforeCover = asRecord(beforePresentation?.cover);
+  const afterCover = asRecord(afterPresentation?.cover);
+  if (beforeCover && afterPresentation) {
+    if (!afterCover) {
+      afterPresentation.cover = structuredClone(beforeCover);
+    } else {
+      for (const key of ["source", "imageId", "imageUrl", "poiId", "poiName", "selectedAt"] as const) {
+        if (afterCover[key] === undefined && beforeCover[key] !== undefined) {
+          afterCover[key] = beforeCover[key];
+        }
+      }
+    }
+  }
+
+  const beforeOperations = asRecord(before.operations);
+  const afterOperations = asRecord(after.operations);
+  if (!beforeOperations || !afterOperations) return;
+  for (const key of ["butler", "hotelResource", "vehicleResource"] as const) {
+    if (beforeOperations[key] !== undefined && afterOperations[key] === undefined) {
+      afterOperations[key] = structuredClone(beforeOperations[key]);
+    }
+  }
+}
+
+function asRecord(value: unknown): Record<string, any> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, any>
+    : undefined;
+}
+
+/**
  * AI / patch 入口：调用 normaliseProductDraft 时必须显式传 safeRelease:true，
  * 确保 AI 即便写 release.submitReview=true / publishAfterApproval=true 也会被
  * 强制为 draft-only（false）。不传这个选项会把已经人工 / VBK 打开的发布态
@@ -147,6 +188,7 @@ const AI_PATCH_NORMALISE_OPTIONS = { safeRelease: true } as const;
 export function applyProductPatch(product: Record<string, unknown>, patch: NonNullable<AiResponse["patch"]>) {
   const result = structuredClone(product) as Record<string, unknown>;
   applyPatchMutably(result, patch);
+  restoreProtectedRuntimeFields(product, result);
   const normalised = normaliseProductDraft(result, AI_PATCH_NORMALISE_OPTIONS);
   // A partial planning draft is intentionally allowed. Full Zod validation only
   // gates automation, avoiding a false impression that an incomplete plan is ready.
@@ -183,6 +225,7 @@ export function applyProductPatchSafe(
   }
 
   if (!applied) return { product, applied: false };
+  restoreProtectedRuntimeFields(product, result);
   const normalised = normaliseProductDraft(result, AI_PATCH_NORMALISE_OPTIONS);
   try { parseProduct(normalised); } catch { /* Stored as draft until all blocking fields resolve. */ }
   return { product: normalised, applied: true };

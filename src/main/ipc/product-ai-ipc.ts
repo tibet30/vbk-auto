@@ -1,5 +1,5 @@
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
-import type { CreateProductInput, ManualReviewFieldInput } from "../../shared/contracts.js";
+import type { ManualReviewFieldInput } from "../../shared/contracts.js";
 import { aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import { MiniMaxService, MiniMaxServiceError } from "../minimax/minimax.js";
 import { parseProduct } from "../automation/schema/schema.js";
@@ -9,8 +9,7 @@ import { applyAutoCoverFill } from "../operations/cover-auto-fill.js";
 import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-trigger.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
-import { createProductWithAccountButler, injectAccountButler } from "../operations/account-butler-inject.js";
-import { assertCreatePreconditions } from "../operations/product-create-guard.js";
+import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
@@ -24,50 +23,15 @@ import {
   toRetryHint,
 } from "../minimax/minimax-error-handling.js";
 import type { MainIpcContext } from "./context.js";
-
 export function registerProductAiIpc(context: MainIpcContext): void {
   const { db, emitProduct, readiness, getSettings, aiService, productMutations } = context;
-  ipcMain.handle("products:list", () => db.listProducts());
-  ipcMain.handle("products:create", (_event, input: CreateProductInput) => {
-    // 「产品创建」主进程防线：在写库前硬校验「登录 + 400 电话 + 管家联系人」。
-    // 任意一项缺失直接抛错（中文、列出补救路径），不创建产品、不写消息、不写任务，
-    // 也不发 product:updated。UI 端的提示只是辅助，这里才是真源。
-    assertCreatePreconditions(db);
-    // 「管家默认当前账号」：新建产品时若当前已登录 VBK 且账号已配管家，
-    // 自动把 butlerName 写入 product.operations.bookingControls.butler。
-    // 已有 butler / 未登录 / 未配置 都不会写；写失败也不抛错，避免影响创建。
-    const accountName = db.getSetting("vbkAccountName")?.value || null;
-    const { product: finalProduct, injectResult } = createProductWithAccountButler(db, input, accountName);
-    if (injectResult.written) {
-      logInfo("[createProduct] auto-injected butler from current account", { localProductId: finalProduct.id, accountName });
-    } else if (injectResult.reason) {
-      logInfo("[createProduct] butler not auto-injected", { localProductId: finalProduct.id, reason: injectResult.reason });
-    }
-    emitProduct(finalProduct);
-    // 第一版产品方案的自动触发不在 main 这里走 —— 交给 renderer 端的 useEffect
-    // 兑底。main 端 fire-and-forget 的请求与 renderer useEffect 重复触发会同时
-    // 生成两条 user-running 消息，状态不一致；renderer 单一入口更可控，
-    // 且能同时覆盖“新建后立即触发”与“重开空草稿产品”两种场景。
-    return finalProduct;
-  });
-  ipcMain.handle("products:get", (_event, id: string) => {
-    const product = db.getProduct(id);
-    if (!product) throw productNotFound(id);
-    return product;
-  });
-  ipcMain.handle("products:delete", (_event, id: string) => {
-    const removed = db.deleteProduct(id);
-    if (!removed) throw productNotFound(id);
-    return { deleted: true };
-  });
   ipcMain.handle("products:readiness", (_event, id: string) => readiness(id));
   ipcMain.handle("products:updateProductJson", (_event, id: string, json: string) => {
     context.productWorkflows.assertIdle(id, "manual");
     const product = db.getProduct(id);
     if (!product) throw productNotFound(id);
     let next: Record<string, unknown>;
-    try { next = JSON.parse(json); }
-    catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
+    try { next = JSON.parse(json); } catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
     parseProduct(next);
     return productMutations.replace(id, next, { status: "review" });
   });
@@ -110,7 +74,6 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (!c || typeof c.pricing !== "object" || Array.isArray(c.pricing)) missing.push("commercial/pricing");
     if (!c || typeof c.inventory !== "object" || Array.isArray(c.inventory)) missing.push("commercial/inventory");
     if (!c || typeof c.release !== "object" || Array.isArray(c.release)) missing.push("commercial/release");
-    if (!c || typeof c.terms !== "object" || Array.isArray(c.terms)) missing.push("commercial/terms");
     return missing;
   }
 
@@ -316,10 +279,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
                       }
                     }
                     logInfo("[AI] auto vehicle resource resolved", { provider: getSettings().aiProvider, resourceGroupId: vehicleOutcome.outcome.resourceGroupId });
-                  } else if (vehicleOutcome.outcome.estimatedDailyCost) {
-                    logInfo("[AI] vehicle requested daily cost estimated", {
+                  } else if (vehicleOutcome.outcome.estimatedTotalCost) {
+                    logInfo("[AI] vehicle requested total cost estimated", {
                       provider: getSettings().aiProvider,
-                      estimatedDailyCost: vehicleOutcome.outcome.estimatedDailyCost,
+                      estimatedTotalCost: vehicleOutcome.outcome.estimatedTotalCost,
                       reason: vehicleOutcome.outcome.reason,
                     });
                   } else {

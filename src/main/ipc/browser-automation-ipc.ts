@@ -42,7 +42,10 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     };
     logPoiManualIpc("ipc_search_start", logContext);
     try {
-      const result = await suggestPoiDetailWithRawPayload(context.browser, query);
+      const result = await suggestPoiDetailWithRawPayload(context.browser, query, {
+        destinationCity: inputContext?.destinationCity,
+        province: inputContext?.province,
+      });
       logPoiManualIpc("ipc_search_detail", {
         ...logContext,
         httpStatus: result.httpStatus,

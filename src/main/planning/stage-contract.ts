@@ -12,7 +12,8 @@ export const STAGE_ALLOWED_MODULES: Record<PlanningStage, readonly PlanningModul
   basicInfo: ["basicInfo"],
   itinerary: ["itinerary"],
   presentation: ["presentation"],
-  commercial: ["packageName", "pricing", "inventory", "terms", "release"],
+  // 条款由 VBK 条款页在自动化阶段写入，不属于 AI 规划输出。
+  commercial: ["pricing", "inventory", "release"],
   research: ["researchTasks"],
   validation: [],
 };

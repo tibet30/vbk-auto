@@ -19,12 +19,12 @@ const writablePatchGuide = `patch 可写路径白名单（共 16 个）：
 /sales/productType, /sales/productForm, /sales/splitGroup
 /basicInfo/supplierProductName, /basicInfo/subtitle, /basicInfo/days, /basicInfo/nights, /basicInfo/meetingCity, /basicInfo/destinationCity, /basicInfo/province, /basicInfo/operationNotes
 /presentation
-/operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded, /operations/vehicleResource/requestedDailyCost
+/operations/transport, /operations/pickupCity, /operations/reusePickupForDropoff, /operations/hotelSource, /operations/hotelTier, /operations/mealsIncluded, /operations/vehicleResource/requestedTotalCost
 /commercial/packageName, /commercial/terms
 /commercial/pricing, /commercial/inventory, /commercial/release
 /itinerary
 
-黑名单（绝对禁止写入）：supplierProductCode、vehicleResource 除 requestedDailyCost 外的任何字段（含 vehicleId/resourceId/resourceGroupId/resourceGroupName/supplierCode）、providerId、contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。`;
+黑名单（绝对禁止写入）：supplierProductCode、vehicleResource 除 requestedTotalCost 外的任何字段（含 vehicleId/resourceId/resourceGroupId/resourceGroupName/supplierCode）、providerId、contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。`;
 
 const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
 {"reply":"给运营看的简明中文回复","patch":[...],"questions":[],"researchTasks":[...]}
@@ -95,7 +95,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   /operations/hotelSource → "nonPlatform"
   /operations/hotelTier → "当地3钻酒店/-3" / "当地4钻酒店/-4" / "当地5钻酒店/-38"
   /operations/mealsIncluded → true 或 false
-  /operations/vehicleResource/requestedDailyCost → number，AI 建议用车日价：按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，仅用于后续 VBK 资源组查询；禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写任何真实资源组 ID / 名称 / resourceId / supplierCode
+  /operations/vehicleResource/requestedTotalCost → number，AI 预计全程用车总成本：根据整段行程每天的实际用车、跨区移动、接送和行程密度估算，仅用于后续按总价查询 VBK 资源组；禁止输出日均价，禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写任何真实资源组 ID / 名称 / resourceId / supplierCode
   /commercial/packageName → string，套餐名称
 
 以上任何字段缺失、类型错误或格式不符，都会被本地校验拒绝，导致需要重试。`;
@@ -118,7 +118,7 @@ export const writablePatchPrefixes = [
   "/sales/productType", "/sales/productForm", "/sales/splitGroup",
   "/basicInfo/supplierProductName", "/basicInfo/subtitle", "/basicInfo/days", "/basicInfo/nights", "/basicInfo/meetingCity", "/basicInfo/destinationCity", "/basicInfo/province", "/basicInfo/operationNotes",
   "/presentation",
-  "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded", "/operations/vehicleResource/requestedDailyCost",
+  "/operations/transport", "/operations/pickupCity", "/operations/reusePickupForDropoff", "/operations/hotelSource", "/operations/hotelTier", "/operations/mealsIncluded", "/operations/vehicleResource/requestedTotalCost",
   "/commercial/packageName", "/commercial/terms",
   "/commercial/pricing", "/commercial/inventory", "/commercial/release",
   "/itinerary",

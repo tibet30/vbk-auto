@@ -19,7 +19,11 @@ export type AIPromptEntry =
   | "MiniMax.diagnoseAutomationFailure"
   | "MiniMax.disambiguateOption"
   | "Planner.generateStage"
-  | "Planner.resolvePoiName";
+  | "Planner.resolvePoiName"
+  | "ThreeStage.structureLocation"
+  | "ThreeStage.recommendSpotNames"
+  | "ThreeStage.composeVerifiedItinerary"
+  | "ThreeStage.estimateVehicleTotalCost";
 
 export interface AIPromptLogInput {
   entry: AIPromptEntry;

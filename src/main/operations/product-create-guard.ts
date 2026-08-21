@@ -48,8 +48,10 @@ export interface CreateGuardFailures {
  * 列出当前账号缺失的「必备前置条件」；全都不缺失时返回各字段都为 false。
  * 测试可直接断言结构而不依赖文案顺序。
  */
-export function detectCreateGuardFailures(db: VbkDatabase): CreateGuardFailures {
-  const accountName = db.getSetting(SETTING_CURRENT_ACCOUNT)?.value?.trim() ?? "";
+export function detectCreateGuardFailures(db: VbkDatabase, verifiedAccountName?: string | null): CreateGuardFailures {
+  const accountName = verifiedAccountName?.trim()
+    || db.getSetting(SETTING_CURRENT_ACCOUNT)?.value?.trim()
+    || "";
   if (!accountName) {
     return { notLoggedIn: true, missingServicePhone: true, missingButler: true };
   }
@@ -85,8 +87,8 @@ export function formatGuardFailureMessage(failures: CreateGuardFailures): string
  * 不满足时抛 Error，message 为中文且列出所有缺失项。
  * 满足时静默返回（无返回值）。
  */
-export function assertCreatePreconditions(db: VbkDatabase): void {
-  const failures = detectCreateGuardFailures(db);
+export function assertCreatePreconditions(db: VbkDatabase, verifiedAccountName?: string | null): void {
+  const failures = detectCreateGuardFailures(db, verifiedAccountName);
   if (failures.notLoggedIn || failures.missingServicePhone || failures.missingButler) {
     throw new Error(formatGuardFailureMessage(failures));
   }

@@ -103,9 +103,12 @@ function extractPreloadBindings(preloadSource: string): Map<string, string> {
 
 const ipcRegistrarSource = [
   "src/main/ipc/product-ai-ipc.ts",
+  "src/main/ipc/remote-product-ipc.ts",
   "src/main/ipc/browser-automation-ipc.ts",
   "src/main/ipc/settings-ipc.ts",
   "src/main/ipc/planning-ipc.ts",
+  "src/main/ipc/planning-v2-ipc.ts",
+  "src/main/ipc/app-auth-ipc.ts",
 ].map(readSource).join("\n");
 
 test("preload.cts 里的 invoke channel 在 IPC registrars 全部注册", () => {
@@ -146,6 +149,13 @@ test("preload 的 category.method → channel 命名约定（同名简化）", (
   // 大多数 channel 走 category.method 形式；列举几个代表性例子做断言，
   // 让 contracts 加新方法时显式提醒走这个规范。
   const expectations: Array<[string, string]> = [
+    ["appAuth.status", "appAuth:status"],
+    ["appAuth.listAccounts", "appAuth:listAccounts"],
+    ["appAuth.captcha", "appAuth:captcha"],
+    ["appAuth.login", "appAuth:login"],
+    ["appAuth.switchAccount", "appAuth:switchAccount"],
+    ["appAuth.startLogin", "appAuth:startLogin"],
+    ["appAuth.logout", "appAuth:logout"],
     ["products.list", "products:list"],
     ["products.create", "products:create"],
     ["products.get", "products:get"],

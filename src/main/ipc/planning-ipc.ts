@@ -205,10 +205,10 @@ export function registerPlanningIpc(context: MainIpcContext): void {
                 provider: providerLabel,
                 resourceGroupId: vehicleResult.outcome.resourceGroupId,
               });
-            } else if (vehicleResult.outcome.estimatedDailyCost) {
-              logInfo("[planning] vehicle requested daily cost estimated", {
+            } else if (vehicleResult.outcome.estimatedTotalCost) {
+              logInfo("[planning] vehicle requested total cost estimated", {
                 provider: providerLabel,
-                estimatedDailyCost: vehicleResult.outcome.estimatedDailyCost,
+                estimatedTotalCost: vehicleResult.outcome.estimatedTotalCost,
                 reason: vehicleResult.outcome.reason,
               });
             } else {

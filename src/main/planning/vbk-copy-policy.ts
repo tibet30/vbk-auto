@@ -20,6 +20,30 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /首次/,
   },
   {
+    term: "主席",
+    reason: "VBK 行程描述实跑会判定为非法关键词",
+    alternatives: ["重要人物", "相关负责人", "历史人物"],
+    pattern: /主席/,
+  },
+  {
+    term: "礼佛",
+    reason: "VBK 产品图文实跑会判定为非法关键词",
+    alternatives: ["参观南普陀寺", "游览寺院", "参观人文景观"],
+    pattern: /礼佛/,
+  },
+  {
+    term: "祈福",
+    reason: "VBK 行程描述实跑会判定为非法关键词",
+    alternatives: ["参观天坛", "游览祭坛建筑", "了解皇家祭祀文化"],
+    pattern: /祈福/,
+  },
+  {
+    term: "野长城",
+    reason: "VBK 行程描述实跑会判定为非法关键词",
+    alternatives: ["郊区长城", "长城郊游", "长城景观"],
+    pattern: /野长城/,
+  },
+  {
     term: "第一（宣传排名用语）",
     reason: "避免未经证明的排名或极限宣传；“第一天”等行程序号不受影响",
     alternatives: ["重点", "优先", "前列"],
@@ -68,4 +92,26 @@ export function findVbkCopyBadCase(value: unknown, path = "value"):
     }
   }
   return undefined;
+}
+
+/** 返回产品内全部命中，便于一次性修复所有阻断文案。 */
+export function findAllVbkCopyBadCases(value: unknown, path = "value"):
+  Array<{ path: string; term: string; reason: string; alternatives: readonly string[] }> {
+  const hits: Array<{ path: string; term: string; reason: string; alternatives: readonly string[] }> = [];
+  if (typeof value === "string") {
+    for (const badCase of VBK_COPY_BAD_CASES) {
+      if (badCase.pattern.test(value)) hits.push({ path, ...badCase });
+    }
+    return hits;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((child, index) => hits.push(...findAllVbkCopyBadCases(child, `${path}[${index}]`)));
+    return hits;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      hits.push(...findAllVbkCopyBadCases(child, `${path}.${key}`));
+    }
+  }
+  return hits;
 }

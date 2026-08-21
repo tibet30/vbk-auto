@@ -32,7 +32,8 @@ function hasSatisfiedPoiTask(product: ProductLike, taskName: string): boolean {
       const spotName = textValue(spot.name);
       const poiName = textValue(spot.poiName);
       const isMatchingSpot = spotName === targetName || poiName === targetName;
-      if (isMatchingSpot && poiName && positiveInteger(spot.poiId)) return true;
+      if (!isMatchingSpot) continue;
+      if (poiName && positiveInteger(spot.poiId)) return true;
     }
   }
 
@@ -58,7 +59,24 @@ export function isResearchTaskSatisfiedByProduct(
 ): boolean {
   if (task.type === "image") return false;
   const poiTaskName = poiResearchTaskName(task.label || "", task.type || "vbk");
-  if (poiTaskName) return hasSatisfiedPoiTask(product, poiTaskName);
+  if (poiTaskName) {
+    const satisfied = hasSatisfiedPoiTask(product, poiTaskName);
+    if (satisfied) return true;
+    // A failed suggestPoi task may become obsolete after the operator replaces
+    // that attraction in the current itinerary. Only this explicit failure
+    // state is auto-resolved; ordinary missing POI tasks remain actionable.
+    if (/suggestPoi\s*未匹配/i.test(task.detail || "")) {
+      return !Array.isArray(product.itinerary)
+        || !product.itinerary.some((day) => {
+          const spots = objectValue(day)?.spots;
+          return Array.isArray(spots) && spots.some((spotValue) => {
+            const spot = objectValue(spotValue);
+            return spot && (textValue(spot.name) === poiTaskName || textValue(spot.poiName) === poiTaskName);
+          });
+        });
+    }
+    return false;
+  }
   const text = `${task.label || ""} ${task.detail || ""}`;
   if (hotelPattern.test(text)) return hasSatisfiedHotelTier(product);
   if (vehiclePattern.test(text)) return hasSatisfiedVehicleResource(product);

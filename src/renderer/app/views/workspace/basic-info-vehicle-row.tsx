@@ -1,28 +1,28 @@
 /**
  * 「用车资源组」行：operations.vehicleResource.{resourceGroupId, resourceGroupName,
- * requestedDailyCost}。
+ * requestedTotalCost}。
  *
  * 行为契约（与用户验收门对齐）：
  *  - 父组件在私家团或已有 vehicleResource 时稳定挂载本行，让新产品也能
- *    直接进入「输入日价 → 搜索 VBK 资源组」流程。
+ *    直接进入「输入全程用车总成本 → 搜索 VBK 资源组」流程。
  *  - 默认展示：
  *    * 资源组名称 + ID；
- *    * 用车日价单独一行；未填写时提示先输入日价并搜索 VBK。
- *  - 编辑态：原位展开单个 number input（用车日价）；资源组 ID / 名称
+ *    * 全程预计用车总成本单独一行；未填写时提示先输入总成本并搜索 VBK。
+ *  - 编辑态：原位展开单个 number input（全程总成本）；资源组 ID / 名称
  *    严格只读（来自 VBK 资源库匹配，UI 禁止自由输入）。
- *  - 「清空」按钮清除本地保存的建议价，不允许手动清写资源组 ID / 名称。
+ *  - 「清空」按钮清除本地保存的全程总成本，不允许手动清写资源组 ID / 名称。
  */
 import { useEffect, useRef, useState } from "react";
 import { Eraser, LoaderCircle, Pencil, Sparkles, Truck, X } from "lucide-react";
 import shared from "../shared.module.less";
 import { BasicInfoRowShell } from "./basic-info-row-shell";
-import { parseRequestedDailyCostDraft } from "./review-summary-basic-info.helpers";
+import { parseRequestedTotalCostDraft } from "./review-summary-basic-info.helpers";
 import styles from "./review-summary-basic-info.module.less";
 
 export interface BasicInfoVehicleRowProps {
   resourceGroupId: number | null;
   resourceGroupName: string | null;
-  requestedDailyCost: number | null;
+  requestedTotalCost: number | null;
   draft: string;
   saving: boolean;
   error: string | undefined;
@@ -35,7 +35,7 @@ export interface BasicInfoVehicleRowProps {
 export function BasicInfoVehicleRow({
   resourceGroupId,
   resourceGroupName,
-  requestedDailyCost,
+  requestedTotalCost,
   draft,
   saving,
   error,
@@ -46,8 +46,8 @@ export function BasicInfoVehicleRow({
 }: BasicInfoVehicleRowProps) {
   const [isEditing, setIsEditing] = useState(false);
   const submittedRef = useRef(false);
-  const persisted = requestedDailyCost === null ? "" : String(requestedDailyCost);
-  const parsed = parseRequestedDailyCostDraft(draft);
+  const persisted = requestedTotalCost === null ? "" : String(requestedTotalCost);
+  const parsed = parseRequestedTotalCostDraft(draft);
   const canSave = parsed !== "invalid";
   const hasMatchedResource = resourceGroupId !== null && resourceGroupName !== null && resourceGroupName.trim().length > 0;
 
@@ -93,7 +93,7 @@ export function BasicInfoVehicleRow({
               className={`${shared.btn} ${shared.btnSm}`}
               onClick={cancel}
               disabled={saving}
-              aria-label="取消编辑用车日价"
+              aria-label="取消编辑全程用车总成本"
             >
               <X size={12} aria-hidden="true" />取消
             </button>
@@ -111,8 +111,8 @@ export function BasicInfoVehicleRow({
               className={`${shared.btn} ${shared.btnSm}`}
               onClick={onClear}
               disabled={saving}
-              aria-label="清除用车日价"
-              title="清除已保存的用车日价"
+              aria-label="清除全程用车总成本"
+              title="清除已保存的全程用车总成本"
             >
               <Eraser size={12} aria-hidden="true" />清空
             </button>
@@ -123,7 +123,7 @@ export function BasicInfoVehicleRow({
             className={`${shared.btn} ${shared.btnSm}`}
             data-variant="ghost"
             onClick={startEdit}
-            aria-label="编辑用车日价"
+            aria-label="编辑全程用车总成本"
             disabled={saving}
           >
             <Pencil size={12} aria-hidden="true" />编辑
@@ -142,7 +142,7 @@ export function BasicInfoVehicleRow({
           <div className={styles.resourceName}>
             <Truck size={12} aria-hidden="true" />
             <strong>资源组待匹配</strong>
-            <span className={styles.tag}>输入日价后搜索 VBK</span>
+            <span className={styles.tag}>输入总成本后搜索 VBK</span>
           </div>
         )}
 
@@ -158,8 +158,8 @@ export function BasicInfoVehicleRow({
               if (event.key === "Enter") { event.preventDefault(); save(); }
               else if (event.key === "Escape") { event.preventDefault(); cancel(); }
             }}
-            placeholder="输入用车日价"
-            aria-label="输入用车日价"
+            placeholder="输入全程用车总成本"
+            aria-label="输入全程用车总成本"
             data-state={error ? "error" : undefined}
             disabled={saving}
             autoFocus
@@ -167,10 +167,10 @@ export function BasicInfoVehicleRow({
         ) : (
           <div className={styles.rowDisplay}>
             <Sparkles size={12} aria-hidden="true" />
-            {requestedDailyCost !== null ? (
-              <strong>¥ {requestedDailyCost.toLocaleString("zh-CN")} / 天</strong>
+            {requestedTotalCost !== null ? (
+              <strong>全程 ¥ {requestedTotalCost.toLocaleString("zh-CN")}</strong>
             ) : (
-              <strong>待输入日价并搜索 VBK</strong>
+              <strong>待输入全程总成本并搜索 VBK</strong>
             )}
             <span className={styles.tag} data-tone="ai">手动可改 · 待核查</span>
           </div>

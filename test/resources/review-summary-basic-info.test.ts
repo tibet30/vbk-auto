@@ -4,7 +4,7 @@
  * 这里只覆盖 renderer 端的 helper：
  *  - readBasicInfoFromProduct：把 product 树上的字段安全读出来（缺失 → null，不抛）；
  *  - parsePricingDraft：UI 草稿 → 主进程可用数值；
- *  - parseRequestedDailyCostDraft：UI 草稿 → 主进程可用数值或清除信号。
+ *  - parseRequestedTotalCostDraft：UI 草稿 → 主进程可用数值或清除信号。
  *
  * 写入主路径的合法性由 src/main/operations/manual-review-field.test.ts 覆盖；
  * UI 渲染 / IPC 交互无 DOM 测试基础设施（产品仅使用 tsx --test），
@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import {
   parseInventoryDraft,
   parsePricingDraft,
-  parseRequestedDailyCostDraft,
+  parseRequestedTotalCostDraft,
   readBasicInfoFromProduct,
   shouldShowVehicleResourceRow,
 } from "../../src/renderer/app/views/workspace/review-summary-basic-info.helpers.js";
@@ -35,7 +35,7 @@ const baseProduct = {
     vehicleResource: {
       resourceGroupId: 88231,
       resourceGroupName: "太原用车组",
-      requestedDailyCost: 380,
+      requestedTotalCost: 380,
     },
   },
 };
@@ -53,7 +53,7 @@ test("readBasicInfoFromProduct 完整产品可读取全部字段", () => {
   assert.equal(snapshot.vehicleResource.exists, true);
   assert.equal(snapshot.vehicleResource.resourceGroupId, 88231);
   assert.equal(snapshot.vehicleResource.resourceGroupName, "太原用车组");
-  assert.equal(snapshot.vehicleResource.requestedDailyCost, 380);
+  assert.equal(snapshot.vehicleResource.requestedTotalCost, 380);
 });
 
 test("readBasicInfoFromProduct 缺失子字段时显式返回 null，不抛错", () => {
@@ -69,7 +69,7 @@ test("readBasicInfoFromProduct 缺失子字段时显式返回 null，不抛错",
   assert.equal(snapshot.vehicleResource.exists, false);
   assert.equal(snapshot.vehicleResource.resourceGroupId, null);
   assert.equal(snapshot.vehicleResource.resourceGroupName, null);
-  assert.equal(snapshot.vehicleResource.requestedDailyCost, null);
+  assert.equal(snapshot.vehicleResource.requestedTotalCost, null);
 });
 
 test("readBasicInfoFromProduct minimumTravelers 缺失或非法时返回 null，不默认填补", () => {
@@ -118,11 +118,11 @@ test("readBasicInfoFromProduct 拒绝不完整的 ContactCardSelection", () => {
   assert.equal(wrongTypes.butler, null);
 });
 
-test("readBasicInfoFromProduct requestedDailyCost 可独立为 null，资源组字段仍可读", () => {
+test("readBasicInfoFromProduct requestedTotalCost 可独立为 null，资源组字段仍可读", () => {
   const snapshot = readBasicInfoFromProduct({
     operations: { vehicleResource: { resourceGroupId: 5, resourceGroupName: "5 座经济" } },
   });
-  assert.equal(snapshot.vehicleResource.requestedDailyCost, null);
+  assert.equal(snapshot.vehicleResource.requestedTotalCost, null);
   assert.equal(snapshot.vehicleResource.exists, true);
   assert.equal(snapshot.vehicleResource.resourceGroupId, 5);
   assert.equal(snapshot.vehicleResource.resourceGroupName, "5 座经济");
@@ -167,7 +167,7 @@ test("shouldShowVehicleResourceRow 跟团游空 vehicleResource 不展示入口"
 test("shouldShowVehicleResourceRow 跟团游已有车辆资源数据时展示入口", () => {
   const withCost = readBasicInfoFromProduct({
     sales: { productForm: "groupTour" },
-    operations: { vehicleResource: { requestedDailyCost: 380 } },
+    operations: { vehicleResource: { requestedTotalCost: 380 } },
   });
   assert.equal(shouldShowVehicleResourceRow(withCost), true);
 
@@ -186,7 +186,7 @@ test("shouldShowVehicleResourceRow 跟团游已有车辆资源数据时展示入
 
 test("shouldShowVehicleResourceRow 未知产品形态已有车辆资源数据时展示入口", () => {
   const snapshot = readBasicInfoFromProduct({
-    operations: { vehicleResource: { requestedDailyCost: 380 } },
+    operations: { vehicleResource: { requestedTotalCost: 380 } },
   });
   assert.equal(shouldShowVehicleResourceRow(snapshot), true);
 });
@@ -239,18 +239,18 @@ test("parseInventoryDraft 拒绝非法日期、倒置日期与非正整数配额
   assert.equal(parseInventoryDraft("2026-09-01", "2026-09-30", "abc"), null);
 });
 
-test("parseRequestedDailyCostDraft 接受正数；空串 / 0 / 负数 / 非数 标记为 invalid", () => {
-  assert.equal(parseRequestedDailyCostDraft("380"), 380);
-  assert.equal(parseRequestedDailyCostDraft("380.5"), 380.5);
-  assert.equal(parseRequestedDailyCostDraft(""), "invalid");
-  assert.equal(parseRequestedDailyCostDraft("0"), "invalid");
-  assert.equal(parseRequestedDailyCostDraft("-1"), "invalid");
-  assert.equal(parseRequestedDailyCostDraft("abc"), "invalid");
+test("parseRequestedTotalCostDraft 接受正数；空串 / 0 / 负数 / 非数 标记为 invalid", () => {
+  assert.equal(parseRequestedTotalCostDraft("380"), 380);
+  assert.equal(parseRequestedTotalCostDraft("380.5"), 380.5);
+  assert.equal(parseRequestedTotalCostDraft(""), "invalid");
+  assert.equal(parseRequestedTotalCostDraft("0"), "invalid");
+  assert.equal(parseRequestedTotalCostDraft("-1"), "invalid");
+  assert.equal(parseRequestedTotalCostDraft("abc"), "invalid");
 });
 
-test("parseRequestedDailyCostDraft null 信号必须由调用方显式产生，不在 helper 内", () => {
+test("parseRequestedTotalCostDraft null 信号必须由调用方显式产生，不在 helper 内", () => {
   // helper 永远不返回 null；清除动作由 UI 用空串触发后单独发送 null 字段给主进程。
   // 这里用作「保证不会把空串误写成 0」的反向断言。
-  const parsed = parseRequestedDailyCostDraft("   ");
+  const parsed = parseRequestedTotalCostDraft("   ");
   assert.equal(parsed, "invalid");
 });

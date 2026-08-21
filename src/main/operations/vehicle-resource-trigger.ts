@@ -8,11 +8,11 @@
  *
  * 设计要点（参考 CLAUDE.md / AGENTS.md）：
  *   - 复用既有 resolveVehicleResource，不重写搜索逻辑；
- *   - 只在 requestedDailyCost 缺失时按产品数据估算（天数 / 上车城市 / 是否包车 /
- *     行程密度），写回前仅持久化 requestedDailyCost 一个字段，不碰
+ *   - 只在 requestedTotalCost 缺失时按产品数据估算（天数 / 上车城市 / 是否包车 /
+ *     行程密度），写回前仅持久化 requestedTotalCost 一个字段，不碰
  *     resourceGroupId / resourceGroupName（真实 ID/Name 必须由 VBK 匹配回填）；
  *   - 黑名单约束（BLACKLISTED_VALUE_KEYS）由上层 stage-runner 守住：本模块只
- *     写 requestedDailyCost，其它业务字段绝不染指；AI 写入路径仍被禁止写
+ *     写 requestedTotalCost，其它业务字段绝不染指；AI 写入路径仍被禁止写
  *     resourceGroupId/Name；
  *   - 失败一律 console.info，不抛错：search 接口不稳 / VBK 未登录属常态，
  *     第一轮草稿本身已经可用；
@@ -21,10 +21,10 @@
  *
  * 导出：
  *   - shouldRunVehicleResourceResolution：纯函数，决定是否该触发（基于产品数据）；
- *   - estimateVehicleRequestedDailyCost：纯函数，按产品数据估 AI 建议日价；
- *   - resolveRequestedDailyCostEstimate：把估算结果写回 product operations.vehicleResource
- *     的 requestedDailyCost（不触发搜索，调用方拿到结果后再决定是否调用 resolveVehicleResource）；
- *   - applyAutoVehicleResourceTrigger：串联「判断 → 估算 → 写 requestedDailyCost →
+ *   - estimateVehicleRequestedTotalCost：纯函数，按产品数据估全程用车总成本；
+ *   - resolveRequestedTotalCostEstimate：把估算结果写回 product operations.vehicleResource
+ *     的 requestedTotalCost（不触发搜索，调用方拿到结果后再决定是否调用 resolveVehicleResource）；
+ *   - applyAutoVehicleResourceTrigger：串联「判断 → 估算 → 写 requestedTotalCost →
  *     调 resolveVehicleResource → 持久化」的异步入口，捕获所有抛错并以
  *     { written, reason } 返回，不阻塞 ai:send 主流程。
  */
@@ -87,18 +87,18 @@ export function shouldRunVehicleResourceResolution(product: Record<string, unkno
 }
 
 /**
- * 按产品数据估算 AI 建议日价（人民币 / 天）。
+ * 按产品数据估算整段行程的预计用车总成本（人民币）。
  *
  * 启发式（与现有 operations 内 AI 草稿口径一致）：
  *   - 基础价 700 元 / 天；
  *   - 行程天数 ≥ 3 天 + 包车（transport === "charter" 或默认） + 多景点：+100 元；
  *   - 长途（pickupCity 与 destinationCity 不同）：+150 元；
  *   - 高强度行程：itinerary 中 spots 总数 / days >= 3 → +100 元；
- *   - 取整到 50 元档位（与 targetVehicleDailyCost 同步）。
+ *   - 先得到单日基础成本，再乘完整行程天数，最后取整到 50 元档位。
  *
  * 输入字段缺任何一项都视作中性输入；不会抛错。返回 undefined 表示数据不足以估算。
  */
-export function estimateVehicleRequestedDailyCost(product: Record<string, unknown>): number | null {
+export function estimateVehicleRequestedTotalCost(product: Record<string, unknown>): number | null {
   if (!shouldRunVehicleResourceResolution(product)) return null;
   const basic = safeObject(product.basicInfo) ?? {};
   const operations = safeObject(product.operations) ?? {};
@@ -137,27 +137,57 @@ export function estimateVehicleRequestedDailyCost(product: Record<string, unknow
   }
 
   // 向上取整到 50 元档（与 vehicle-resource.ts 同步）。
-  const rounded = Math.ceil(dailyCost / 50) * 50;
+  const rounded = Math.ceil((dailyCost * days) / 50) * 50;
   return rounded;
 }
 
 /**
- * 把估算结果写回 product.operations.vehicleResource.requestedDailyCost；
+ * 把估算结果写回 product.operations.vehicleResource.requestedTotalCost；
  * 只在以下条件同时成立时写：
  *   - businessOk(shouldRunVehicleResourceResolution) === true；
- *   - 估算有结果（estimateVehicleRequestedDailyCost 返回 number）；
- *   - 现有 vehicleResource 缺 requestedDailyCost 或为非法值；
- *   - 用户没主动 cleared（requestedDailyCostCleared !== true）；
+ *   - 估算有结果（estimateVehicleRequestedTotalCost 返回 number）；
+ *   - 现有 vehicleResource 缺 requestedTotalCost 或为非法值；
+ *   - 用户没主动 cleared（requestedTotalCostCleared !== true）；
  *
  * 副作用：不动 vehicleResource 其它字段，不动 product 其它子树。
  */
-export function resolveRequestedDailyCostEstimate(product: Record<string, unknown>): Record<string, unknown> {
+export function resolveRequestedTotalCostEstimate(product: Record<string, unknown>): Record<string, unknown> {
   if (!shouldRunVehicleResourceResolution(product)) return product;
   const operations = safeObject(product.operations) ?? {};
   const vehicle = safeObject(operations.vehicleResource) ?? {};
-  if (vehicle.requestedDailyCostCleared === true) return product;
-  if (positiveNumber(vehicle.requestedDailyCost)) return product;
-  const estimate = estimateVehicleRequestedDailyCost(product);
+  const days = positiveInteger(safeObject(product.basicInfo)?.days) || 1;
+  const legacyDailyCost = positiveNumber(vehicle.requestedDailyCost);
+  const legacyFieldsPresent = "requestedDailyCost" in vehicle || "requestedDailyCostCleared" in vehicle;
+  const canonicalTotalCost = positiveNumber(vehicle.requestedTotalCost);
+
+  // 历史产品可能同时带有 requestedDailyCost / requestedDailyCostCleared。
+  // 这里是唯一的兼容迁移点：读取时乘 basicInfo.days，随后立即删除旧字段，
+  // 不让新 payload 同时承载日价和全程总价两套语义。
+  if (legacyFieldsPresent) {
+    const nextVehicle = { ...vehicle };
+    delete nextVehicle.requestedDailyCost;
+    delete nextVehicle.requestedDailyCostCleared;
+
+    if (vehicle.requestedDailyCostCleared === true) {
+      delete nextVehicle.requestedTotalCost;
+      nextVehicle.requestedTotalCostCleared = true;
+    } else if (!canonicalTotalCost && legacyDailyCost) {
+      nextVehicle.requestedTotalCost = Math.ceil((legacyDailyCost * days) / 50) * 50;
+    } else if (canonicalTotalCost) {
+      nextVehicle.requestedTotalCost = canonicalTotalCost;
+    }
+
+    return {
+      ...product,
+      operations: {
+        ...operations,
+        vehicleResource: nextVehicle,
+      },
+    };
+  }
+
+  if (vehicle.requestedTotalCostCleared === true || canonicalTotalCost) return product;
+  const estimate = estimateVehicleRequestedTotalCost(product);
   if (!estimate) return product;
   return {
     ...product,
@@ -165,19 +195,19 @@ export function resolveRequestedDailyCostEstimate(product: Record<string, unknow
       ...operations,
       vehicleResource: {
         ...vehicle,
-        requestedDailyCost: estimate,
+        requestedTotalCost: estimate,
       },
     },
   };
 }
 
 export interface AutoVehicleTriggerOutcome {
-  /** 是否真的把 product 写回（estimatedDailyCost 写入或 VBK 资源组回填）。 */
+  /** 是否真的把 product 写回（estimatedTotalCost 写入或 VBK 资源组回填）。 */
   written: boolean;
   /** 没写时的简短原因（不会含任何敏感字段）。 */
   reason: string;
-  /** 是否仅写入了 requestedDailyCost（未调 VBK / 未命中）。 */
-  estimatedDailyCost?: number;
+  /** 是否仅写入了 requestedTotalCost（未调 VBK / 未命中）。 */
+  estimatedTotalCost?: number;
   /** 真实命中的 resourceGroupId（仅在 VBK 命中时存在）。 */
   resourceGroupId?: number;
 }
@@ -195,7 +225,7 @@ export interface AutoVehicleTriggerOutcome {
  *
  * 行为约束：
  *   - shouldRunVehicleResourceResolution === false → 直接返回，不搜；
- *   - requestedDailyCost 缺失时先用 resolveRequestedDailyCostEstimate 估算并持久化，
+ *   - requestedTotalCost 缺失时先用 resolveRequestedTotalCostEstimate 估算并持久化，
  *     然后再调 resolveVehicleResource；任何抛错都被捕获，不影响 ai:send 主流程；
  *   - 不打印 cookie / cookieorigin / 任何凭证字段。
  */
@@ -209,15 +239,15 @@ export async function applyAutoVehicleResourceTrigger(args: {
     return { nextProduct: product, outcome: { written: false, reason: "产品数据未指向私家团用车，跳过自动触发" } };
   }
 
-  // 估算并持久化 requestedDailyCost（仅这一项）。
-  const withEstimate = resolveRequestedDailyCostEstimate(productData);
+  // 估算并持久化 requestedTotalCost（仅这一项）。
+  const withEstimate = resolveRequestedTotalCostEstimate(productData);
   const estimateValue = (() => {
     const ops = safeObject(withEstimate.operations);
     const vehicle = safeObject(ops?.vehicleResource);
-    return positiveNumber(vehicle?.requestedDailyCost);
+    return positiveNumber(vehicle?.requestedTotalCost);
   })();
 
-  // 估算写入后立即调真实匹配：resolveVehicleResource 会用 requestedDailyCost
+  // 估算写入后立即调真实匹配：resolveVehicleResource 会用 requestedTotalCost
   // 作为搜索关键词的一部分，再由 bestResourceGroup 把最接近的资源组挑出来。
   let resolveResult: Awaited<ReturnType<typeof resolveVehicleResource>> | null = null;
   try {
@@ -233,7 +263,7 @@ export async function applyAutoVehicleResourceTrigger(args: {
       outcome: {
         written: Boolean(estimateValue),
         reason: `resolveVehicleResource 失败：${message.slice(0, 200)}`,
-        estimatedDailyCost: estimateValue ?? undefined,
+        estimatedTotalCost: estimateValue ?? undefined,
       },
     };
   }
@@ -249,7 +279,7 @@ export async function applyAutoVehicleResourceTrigger(args: {
       outcome: {
         written: true,
         reason: resolveResult.note,
-        estimatedDailyCost: estimateValue ?? undefined,
+        estimatedTotalCost: estimateValue ?? undefined,
       },
     };
   }
@@ -259,7 +289,7 @@ export async function applyAutoVehicleResourceTrigger(args: {
     outcome: {
       written: true,
       reason: resolveResult.note,
-      estimatedDailyCost: estimateValue ?? undefined,
+      estimatedTotalCost: estimateValue ?? undefined,
       resourceGroupId: resolveResult.resolved.resourceGroupId,
     },
   };

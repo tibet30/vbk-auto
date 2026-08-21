@@ -41,8 +41,13 @@ export interface GenerationStateStore {
   save(state: PlanningGenerationState): Promise<void>;
 }
 
+export interface PoiSuggestContext {
+  destinationCity?: string;
+  province?: string;
+}
+
 export interface OrchestratorRuntime {
-  suggestPoi?(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
+  suggestPoi?(keyword: string, context?: PoiSuggestContext): Promise<{ poiName: string; poiId: number } | null>;
   /** 读取当前已存在的 research tasks（label+type）。 */
   loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */

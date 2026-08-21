@@ -5,7 +5,7 @@
  *   - 价格或库存任一存在时附加 pricingInventory；
  *   - 行程含住宿时附加 hotelResource；
  *   - 私家团附加 vehicleResource；
- *   - 4 段条款齐全时附加 terms；
+ *   - 始终附加 terms，由 VBK 条款页直接写入，不依赖 AI 规划是否生成 commercial.terms；
  *   - 始终追加 preflight 自检。
  *
  * 返回数组由调用方按顺序执行；run() / runOnePhase 都用同一个 draftPhases 列表保持重试对齐。
@@ -22,8 +22,7 @@ export function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
   if (product.commercial?.pricing || product.commercial?.inventory) phases.push("pricingInventory");
   if (needsHotel) phases.push("hotelResource");
   if (product.sales.productForm === "privateTour") phases.push("vehicleResource");
-  const terms = product.commercial?.terms;
-  if (terms?.inclusions && terms.exclusions && terms.bookingNotes && terms.refundPolicy) phases.push("terms");
+  phases.push("terms");
   phases.push("preflight");
   return phases;
 }

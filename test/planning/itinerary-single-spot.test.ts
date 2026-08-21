@@ -105,5 +105,6 @@ test("itinerary tool schema 明确要求一个 spot 只写一个地点", () => {
   const items = parameters.properties.modules.items;
   const branch = items.oneOf?.[0] ?? items;
   const spots = branch.properties.value.items.properties.spots;
-  assert.match(spots.description, /只能是一个可独立检索的地点/);
+  assert.match(spots.description, /只能是一个可独立检索的可游览地点/);
+  assert.match(spots.description, /机场、车站、码头、酒店、民宿、集合点、接送点/);
 });

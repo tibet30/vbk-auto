@@ -151,7 +151,7 @@ const operationsSchema = z.object({
     .object({
       resourceGroupId: z.number().int().positive().optional(),
       resourceGroupName: z.string().min(1).optional(),
-      requestedDailyCost: z.number().positive().optional(),
+      requestedTotalCost: z.number().positive().optional(),
       serviceHoursPerDay: z.number().int().min(4).max(24).optional(),
       serviceKilometersPerDay: z.number().int().min(50).max(1000).optional(),
     })

@@ -20,7 +20,19 @@ import shared from "./shared.module.less";
  * 所有交互和状态来自 model，子组件只负责呈现与事件冒泡。
  */
 export function AppView(model: AppModel) {
-  const { view, product, editingAccount } = model;
+  const { view, product, editingAccount, accountMenuOpen, setAccountMenuOpen } = model;
+
+  // 账号浮层打开时，点击浮层与触发按钮之外的区域即关闭（点击外部关闭）。
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && target.closest("[data-account-menu]")) return;
+      setAccountMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [accountMenuOpen, setAccountMenuOpen]);
 
   return (
     <div className={styles.app}>

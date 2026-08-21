@@ -330,3 +330,28 @@ test("安全应用补丁若全为失败操作，返回原产品并标记未应�
   assert.equal(result.applied, false);
   assert.deepEqual(result.product, product);
 });
+
+test("AI 替换父对象时保留已确认的封面身份和运行时资源", () => {
+  const product = {
+    presentation: {
+      cover: {
+        source: "ctripLibrary",
+        imageId: 28501144,
+        imageUrl: "https://images.example/cover.jpg",
+        poi: "厦门鼓浪屿",
+        description: "代表性海岛景观",
+        minQuality: 3,
+      },
+    },
+    operations: {
+      vehicleResource: { resourceGroupId: 2206240, resourceGroupName: "5座经济型" },
+    },
+  };
+  const result = applyProductPatch(product, [
+    { op: "replace", path: "/presentation", value: { recommendation: "更新后的推荐语" } },
+    { op: "replace", path: "/operations", value: {} },
+  ]);
+  assert.equal((result.presentation as any).cover.imageId, 28501144);
+  assert.equal((result.presentation as any).cover.imageUrl, "https://images.example/cover.jpg");
+  assert.equal((result.operations as any).vehicleResource.resourceGroupId, 2206240);
+});

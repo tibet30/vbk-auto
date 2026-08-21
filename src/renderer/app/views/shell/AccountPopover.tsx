@@ -43,7 +43,7 @@ export function AccountPopover({
   // 当前账号与 saved 列表里出现的 key 不应再次出现为可切换项。
   const switchable = savedAccounts.filter((entry) => entry.accountName !== currentAccountName);
   return (
-    <div className={styles.accountPopover}>
+    <div className={styles.accountPopover} data-account-menu="">
       <div className={styles.popoverHead}>
         <span className={styles.popoverAvatar} aria-hidden="true">
           {accountInitial}

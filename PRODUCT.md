@@ -20,6 +20,7 @@ Unlike a generic itinerary chatbot, VBK Desktop grounds AI output in the live VB
 
 ## Operating Context
 
+- The operator signs in with a Tibet-managed application account before the local workspace is mounted; a still-valid session is restored automatically on later launches.
 - The user signs in to VBK before starting the AI workflow.
 - The AI conversation may span many rounds while a structured itinerary and product record update alongside it.
 - Multiple AI research tasks may run in parallel to resolve city IDs, images, ticket prices, vehicle estimates, and other incomplete data.
@@ -35,7 +36,7 @@ Unlike a generic itinerary chatbot, VBK Desktop grounds AI output in the live VB
 - AI may search the web for public ticket prices and suitable images, with source and freshness retained for review.
 - Cost and recommended price calculations must be inspectable and user-confirmed.
 - Most data, conversations, account profiles, resource snapshots, product versions, and automation checkpoints stay local.
-- Remote user authorization is deferred beyond the first product release.
+- Application access uses Tibet's managed extension-user API. The main process retains the short-lived token locally; passwords never persist and the renderer never receives the token.
 
 ## Brand Commitments
 

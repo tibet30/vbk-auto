@@ -204,8 +204,12 @@ function assertSaveSuccess(result: VbkSessionRequestResult, label: string): void
 
 function assertAckSuccess(result: VbkSessionRequestResult, label: string): void {
   if (result.status < 200 || result.status >= 300) throw new Error(`${label}失败：HTTP ${result.status}`);
-  const ack = text(asRecord(asRecord(result.payload)?.ResponseStatus)?.Ack);
-  if (ack && ack !== "Success") throw new Error(`${label}失败：Ack=${ack}`);
+  const payload = asRecord(result.payload);
+  const ack = text(asRecord(payload?.ResponseStatus)?.Ack);
+  if (ack && ack !== "Success") {
+    const detail = text(payload?.checkErrMsg) || text(payload?.errorMsg) || text(payload?.message);
+    throw new Error(`${label}失败：Ack=${ack}${detail ? `：${detail}` : ""}`);
+  }
 }
 
 function readSensitiveWords(payload: unknown): string[] {

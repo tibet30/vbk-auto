@@ -3,7 +3,7 @@
  * 基本信息面板里「城市 / 产品线」类下拉的写入：
  *   - fillCitySelect：在 div[id=${id}] 的选择框里按城市 + preferredCountry 精确挑选项；
  *     没有精确匹配时使用注入的 disambiguator（AI）做兜底消歧，但绝不回退到「其它国家同名城市」；
- *   - fillProductLine：按「目的地一地 / 省份一地」白名单从产品线下拉里挑，禁止退到默认第一项。
+ *   - fillProductLine：按「目的地一地 / 省份一地」白名单尝试选择；未命中则跳过。
  * 顶部带 `// @ts-nocheck`，page 是动态传入。
  */
 
@@ -162,8 +162,8 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
 /**
  * 产品线下拉写入：候选按目的地 / 省份拼 `${city/省}一地`，命中即返回；
  *   - 已选值相符则跳过；
- *   - 命中且 enabled 索引为 0 时抛错（避免错选默认项）；
- *   - 10s 内未拿到非空候选抛错。
+ *   - 不退回默认第一项，避免错选；
+ *   - 未找到候选时只记录并跳过：产品线不是自动录入硬阻断项。
  */
 export async function fillProductLine(page, destinationCity, province) {
   const provinceBase = String(province || "")
@@ -173,10 +173,17 @@ export async function fillProductLine(page, destinationCity, province) {
     `${String(destinationCity || "").trim()}一地`,
     `${provinceBase}一地`,
   ].filter((value) => value !== "一地"))];
-  if (!candidates.length) throw new Error("产品线缺少目的城市和省份，无法自动选择。");
+  if (!candidates.length) {
+    logInfo("[fillProductLine] skipped: empty candidates");
+    return;
+  }
 
   const scope = page.locator('div[id="baseInfo.productLineID"]');
-  await assertCount(scope, 1, "产品线容器 div#baseInfo.productLineID");
+  const scopeCount = await scope.count().catch(() => 0);
+  if (scopeCount !== 1) {
+    logInfo("[fillProductLine] skipped: product line control not found", { scopeCount });
+    return;
+  }
   const selectedValue = scope.locator(".ant-select-selection-selected-value");
   if (await selectedValue.count()) {
     const selectedText = (
@@ -187,7 +194,11 @@ export async function fillProductLine(page, destinationCity, province) {
   }
 
   const selection = scope.locator(".ant-select-selection");
-  await assertCount(selection, 1, "产品线可见选择框");
+  const selectionCount = await selection.count().catch(() => 0);
+  if (selectionCount !== 1) {
+    logInfo("[fillProductLine] skipped: selection not found", { selectionCount });
+    return;
+  }
   const options = await getControlledDropdownOptions(page, selection);
   const deadline = Date.now() + 3_000;
   let seen: string[] = [];
@@ -203,9 +214,8 @@ export async function fillProductLine(page, destinationCity, province) {
     );
     if (matchIndex >= 0) {
       if (matchIndex === 0) {
-        throw new Error(
-          `产品线命中候选"${seen[matchIndex]}"但其为默认第一项，必须按 candidates 精匹配后点击；可选：${seen.join("、")}`,
-        );
+        logInfo("[fillProductLine] skipped: matched first option", { matched: seen[matchIndex], seen: seen.join("、") });
+        return;
       }
       const clicked = await clickLocatorSnapshotOption(options, snapshot[matchIndex]);
       if (!clicked) {
@@ -219,18 +229,23 @@ export async function fillProductLine(page, destinationCity, province) {
         if (candidates.includes(committedText)) return;
         await delay(100);
       }
-      throw new Error(`产品线候选"${seen[matchIndex]}"点击后未形成已选值。`);
+      logInfo("[fillProductLine] skipped: matched option did not commit", { matched: seen[matchIndex] });
+      return;
     }
     const realOptions = seen.filter(
       (text, index) => text && !["暂无数据", "Not Found"].includes(text) && !disableds[index],
     );
     if (realOptions.length) {
-      throw new Error(`产品线未找到"${candidates.join("或")}"；可选：${realOptions.join("、")}`);
+      logInfo("[fillProductLine] skipped: no matching optional product line", {
+        candidates: candidates.join("、"),
+        options: realOptions.join("、"),
+      });
+      return;
     }
     await page.keyboard.press("Escape").catch(() => {});
     await delay(350);
   }
-  throw new Error(`产品线下拉在 10 秒内未返回可用选项；最后看到：${seen.filter(Boolean).join("、") || "无"}`);
+  logInfo("[fillProductLine] skipped: product line options timeout", { seen: seen.filter(Boolean).join("、") || "无" });
 }
 
 // source-slicing anchor（仅供测试切片识别；真实实现见 ./tabs.ts）：

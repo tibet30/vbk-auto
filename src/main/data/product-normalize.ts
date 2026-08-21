@@ -298,8 +298,18 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
       operations.vehicleResource = {};
     } else {
       const vehicle = operations.vehicleResource as Record<string, unknown>;
+      const days = result.basicInfo && typeof result.basicInfo === "object" && !Array.isArray(result.basicInfo)
+        ? positiveIntegerValue((result.basicInfo as Record<string, unknown>).days) || 1
+        : 1;
+      const requestedTotalCost = positiveNumberValue(vehicle.requestedTotalCost)
+        || (positiveNumberValue(vehicle.requestedDailyCost)
+          ? positiveNumberValue(vehicle.requestedDailyCost)! * days
+          : undefined);
       operations.vehicleResource = {
-        ...(positiveNumberValue(vehicle.requestedDailyCost) ? { requestedDailyCost: positiveNumberValue(vehicle.requestedDailyCost) } : {}),
+        ...(requestedTotalCost ? { requestedTotalCost } : {}),
+        ...((vehicle.requestedTotalCostCleared === true || vehicle.requestedDailyCostCleared === true)
+          ? { requestedTotalCostCleared: true }
+          : {}),
         ...(positiveIntegerValue(vehicle.resourceGroupId) ? { resourceGroupId: positiveIntegerValue(vehicle.resourceGroupId) } : {}),
         ...(textValue(vehicle.resourceGroupName) ? { resourceGroupName: textValue(vehicle.resourceGroupName) } : {}),
         ...(positiveIntegerValue(vehicle.serviceHoursPerDay) ? { serviceHoursPerDay: positiveIntegerValue(vehicle.serviceHoursPerDay) } : {}),

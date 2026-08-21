@@ -35,6 +35,11 @@ export interface CreateProductWithAccountButlerResult {
   injectResult: InjectAccountButlerResult;
 }
 
+export interface PreparedProductWithAccountButlerResult {
+  product: ProductDetail;
+  injectResult: InjectAccountButlerResult;
+}
+
 function isContactCardSelection(value: unknown): value is ContactCardSelection {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
@@ -86,6 +91,36 @@ export function injectAccountButler(
   }
   db.updateProduct(localProductId, next, "review");
   return { written: true };
+}
+
+/** Apply the account default to an in-memory draft before any persistence. */
+export function prepareProductWithAccountButler(
+  db: VbkDatabase,
+  product: ProductDetail,
+  accountName: string | null | undefined,
+): PreparedProductWithAccountButlerResult {
+  if (!accountName || !accountName.trim()) {
+    return { product, injectResult: { written: false, reason: "未登录 VBK 或账号名为空" } };
+  }
+  if (hasExistingButler(product.product)) {
+    return { product, injectResult: { written: false, reason: "product 已存在 butler，不覆盖" } };
+  }
+  const raw = db.getAccountFixedInfo(accountName.trim()).values.butlerName;
+  if (!isContactCardSelection(raw)) {
+    return { product, injectResult: { written: false, reason: "账号未配置合法管家联系人" } };
+  }
+  try {
+    const next = applyManualReviewField(product.product, { field: "butlerContact", selection: raw });
+    return {
+      product: { ...product, product: next, updatedAt: new Date().toISOString() },
+      injectResult: { written: true },
+    };
+  } catch (error) {
+    return {
+      product,
+      injectResult: { written: false, reason: `applyManualReviewField 拒绝：${(error as Error).message}` },
+    };
+  }
 }
 
 export function createProductWithAccountButler(

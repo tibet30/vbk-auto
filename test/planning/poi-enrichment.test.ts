@@ -179,7 +179,7 @@ test("完整 itinerary 在补全入口中零查询、零写回", async () => {
   assert.equal(writes, 0);
 });
 
-test("原始名称未命中后，第二个 AI 单点候选命中会写回原 spot", async () => {
+test("原始名称未命中后，第二个 AI 替代候选命中会替换原 spot", async () => {
   const queries: string[] = [];
   const resolverAttempts: number[] = [];
   let written: any;
@@ -200,7 +200,28 @@ test("原始名称未命中后，第二个 AI 单点候选命中会写回原 spo
   });
   assert.deepEqual(queries, ["回民街·钟鼓楼广场", "回民街", "西安钟楼"]);
   assert.deepEqual(resolverAttempts, [1, 2]);
-  assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安钟楼", poiId: 123 });
+  assert.deepEqual(written[0].spots[0], { name: "西安钟楼", poiName: "西安钟楼", poiId: 123 });
+  assert.equal(runtime.tasks.length, 0);
+});
+
+test("原始景点不可查时用已查到 POI 的替代景点替换 spot.name", async () => {
+  const queries: string[] = [];
+  let written: any;
+  const runtime = testRuntime({
+    product: { itinerary: [{ day: 1, spots: [{ name: "不存在的主题馆", poiName: null, poiId: null }] }] },
+    suggestPoi: async (keyword) => {
+      queries.push(keyword);
+      return keyword === "河南博物院" ? { poiName: "河南博物院", poiId: 77934 } : null;
+    },
+    write: (value) => { written = value; },
+  });
+  await enrichItineraryPois({
+    localProductId: "replacement-success", destination: "郑州", runtime, persistedTaskKeys: new Set(),
+    resolvePoiName: async () => "河南博物院",
+  });
+
+  assert.deepEqual(queries, ["不存在的主题馆", "河南博物院"]);
+  assert.deepEqual(written[0].spots[0], { name: "河南博物院", poiName: "河南博物院", poiId: 77934 });
   assert.equal(runtime.tasks.length, 0);
 });
 
@@ -226,7 +247,7 @@ test("原始名称直接命中不调用 AI；第三个候选也可正常写回",
     localProductId: "fallback-third", destination: "西安", runtime: thirdRuntime, persistedTaskKeys: new Set(),
     resolvePoiName: async ({ attempt }) => ["回民街", "西安钟楼", "西安鼓楼"][attempt - 1],
   });
-  assert.deepEqual(written[0].spots[0], { name: "回民街·钟鼓楼广场", poiName: "西安鼓楼", poiId: 2 });
+  assert.deepEqual(written[0].spots[0], { name: "西安鼓楼", poiName: "西安鼓楼", poiId: 2 });
 });
 
 test("官方名括号别名在 AI 前确定性查询并写回", async () => {
@@ -339,7 +360,7 @@ test("原始 POI 查询失败不调用 AI，也不创建未匹配任务", async 
 
 function testRuntime(args: {
   product: Record<string, unknown>;
-  suggestPoi: (keyword: string) => Promise<{ poiName: string; poiId: number } | null>;
+  suggestPoi: (keyword: string, context?: { destinationCity?: string; province?: string }) => Promise<{ poiName: string; poiId: number } | null>;
   write?: (value: any) => void;
 }) {
   const tasks: ResearchTaskProposal[] = [];

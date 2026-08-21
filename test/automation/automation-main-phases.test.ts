@@ -41,6 +41,10 @@ test("只有 pricing 时包含 pricingInventory 阶段", () => {
   assert.ok(draftPhasesFor(product).includes("pricingInventory"));
 });
 
+test("缺少 AI terms 时仍包含 VBK terms 阶段", () => {
+  assert.equal(draftPhasesFor(makeProduct()).includes("terms"), true);
+});
+
 test("只有 inventory 时包含 pricingInventory 阶段", () => {
   const product = makeProduct({
     packageName: "标准套餐",

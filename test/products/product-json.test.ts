@@ -40,11 +40,11 @@ test("数据库读取归一化会解开误写入 product_json 的 ProductDetail 
     name: "杭州2天1晚私家团",
     product: {
       basicInfo: { supplierProductName: "杭州2天1晚私家团", days: 2 },
-      operations: { vehicleResource: { requestedDailyCost: 800 } },
+      operations: { vehicleResource: { requestedTotalCost: 800 } },
       itinerary: [{ day: 1, spots: [] }],
     },
     operations: {
-      vehicleResource: { requestedDailyCost: 800, resourceGroupId: 2206275 },
+      vehicleResource: { requestedTotalCost: 800, resourceGroupId: 2206275 },
     },
   })) as Record<string, any>;
 

@@ -11,6 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runPlan } from "../../src/main/planning/plan-orchestrator.js";
 import { pendingResearchTasks, planResearchTasks } from "../../src/main/planning/research-tasks.js";
+import { detectAcceptedModulesFromProduct } from "../../src/main/planning/runtime.js";
 import type {
   GenerationStateStore, OrchestratorRuntime,
 } from "../../src/main/planning/types.js";
@@ -49,24 +50,11 @@ class ItineraryOnlyPlanner implements Planner {
       };
     }
     if (request.stage === "commercial") return { reply: "com", modules: [
-      { module: "packageName", status: "accepted", value: "pkg" },
       { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
       { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
       { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
       { module: "release", status: "accepted", value: { publicPriceCeiling: 2000, publicAuditRetries: 3 } },
     ] };
-    if (request.stage === "commercial") {
-      return {
-        reply: "com",
-        modules: [
-          { module: "packageName", status: "accepted", value: "pkg" },
-          { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1233, child: 673, minimumTravelers: 2 } },
-          { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
-          { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
-          { module: "release", status: "accepted", value: { submitReview: false, publishAfterApproval: false, publicPriceCeiling: 3000, publicAuditRetries: 4 } },
-        ],
-      };
-    }
     throw new Error("unexpected " + request.stage);
   }
 }
@@ -105,22 +93,11 @@ class FakeRuntime implements OrchestratorRuntime {
     }
     return k;
   }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules(): Promise<PlanningModule[]> {
-    const out: PlanningModule[] = [];
-    const b = this.product.basicInfo as Record<string, unknown> | undefined;
-    if (b && ["subtitle", "province", "operationNotes"].every(k => typeof b[k] === "string" && String(b[k]).trim())) out.push("basicInfo");
-    if (this.product.operations) out.push("skeleton");
-    if (this.product.presentation) out.push("presentation");
-    if (Array.isArray(this.product.itinerary) && this.product.itinerary.length) out.push("itinerary");
-    const c = this.product.commercial as Record<string, unknown> | undefined;
-    if (c?.packageName) out.push("packageName");
-    if (c?.pricing) out.push("pricing");
-    if (c?.inventory) out.push("inventory");
-    if (c?.terms) out.push("terms");
-    if (c?.release) out.push("release");
-    return out;
+    return detectAcceptedModulesFromProduct(this.product);
   }
 }
 
@@ -134,6 +111,19 @@ test("research 阶段由本地 deterministic 生成，不调用 AI", async () =>
   assert.equal(result.status, "completed");
   assert.ok(!planner.calls.includes("research"), "research 阶段不应调用 planner");
   assert.ok(result.researchTasks.length >= 1, "research 阶段应当产出至少一条任务");
+});
+
+test("research 前用首个已验证 POI 补齐携程图库封面配置", async () => {
+  const store = new InMemoryStore();
+  const rt = new FakeRuntime();
+  const result = await runPlan({ localProductId: "cover-default", skeleton, store, runtime: rt, planner: new ItineraryOnlyPlanner(), providerLabel: "minimax" });
+
+  assert.equal(result.status, "completed");
+  const cover = ((rt.product.presentation as Record<string, unknown>).cover ?? {}) as Record<string, unknown>;
+  assert.equal(cover.source, "ctripLibrary");
+  assert.equal(cover.poi, "晋祠博物馆（VBK）");
+  assert.equal(cover.minQuality, 3);
+  assert.ok(!rt.researchTasks.some((task) => task.type === "image"), "封面已补齐后不应再生成封面缺失任务");
 });
 
 test("presentation 缺失不阻塞 privateTour research 用车资源组任务", async () => {
@@ -180,7 +170,7 @@ test("presentation 缺失后继续规划只补 presentation 并进入 validation
   assert.equal(rt.researchTasks.filter((task) => task.label === "核查用车资源组（按目的地 / 出行人数）").length, 1);
 });
 
-test("SuggestPoi 业务失败不会被降级成景点未匹配任务", async () => {
+test("SuggestPoi 业务失败不会被降级成景点未匹配任务，且 itinerary 不完成", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   rt.suggestPoi = async () => {
@@ -196,7 +186,13 @@ test("SuggestPoi 业务失败不会被降级成景点未匹配任务", async () 
     providerLabel: "minimax",
   });
 
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "needs_user");
+  assert.ok(!result.state.completedStages.includes("itinerary"), "POI 查询失败时 itinerary 不能标记完成");
+  assert.equal(
+    result.state.stages.find((stage) => stage.stage === "itinerary")?.accepted.some((item) => item.module === "itinerary"),
+    false,
+    "POI 查询失败时 itinerary 阶段也不能残留 accepted 记录",
+  );
   assert.ok(
     !rt.researchTasks.some((task) => task.label.startsWith("待核查景点 ")),
     "接口失败必须可观察，不能伪装成 suggestPoi 未匹配",
@@ -213,10 +209,17 @@ test("SuggestPoi 未匹配与 itinerary 核查共用一个 canonical POI 待办"
   const rt = new FakeRuntime();
   rt.suggestPoi = async () => null;
 
-  await runPlan({ localProductId: "poi-no-match", skeleton, store, runtime: rt, planner: new ItineraryOnlyPlanner(), providerLabel: "minimax" });
+  const result = await runPlan({ localProductId: "poi-no-match", skeleton, store, runtime: rt, planner: new ItineraryOnlyPlanner(), providerLabel: "minimax" });
 
   const poiTasks = rt.researchTasks.filter((task) => /VBK POI 映射$/.test(task.label));
   assert.equal(poiTasks.length, 4, "四个景点只应有四项待办，不能因未匹配再翻倍");
+  assert.equal(result.status, "needs_user");
+  assert.ok(!result.state.completedStages.includes("itinerary"), "未匹配 POI 不能让 itinerary 完成");
+  assert.equal(
+    result.state.stages.find((stage) => stage.stage === "itinerary")?.accepted.some((item) => item.module === "itinerary"),
+    false,
+    "未匹配 POI 时 itinerary 阶段也不能残留 accepted 记录",
+  );
   assert.equal(new Set(poiTasks.map((task) => task.label)).size, 4);
   assert.ok(poiTasks.every((task) => task.label.startsWith("核查 ")));
 });

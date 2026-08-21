@@ -32,9 +32,116 @@ export const PLANNING_STAGES: readonly PlanningStage[] = [
 /**
  * 默认每阶段最多重试次数（含首跑）；超过后会进入 needs_user。
  * 与 adapter 的 maxAttempts=1 组合后，单个 AI 阶段在合理情况下的
- * planner 调用上限 = retryLimit（≤ 2）。
+ * planner 调用上限 = retryLimit（≤ 3）。
  */
-export const PLANNING_STAGE_RETRY_LIMIT = 2;
+export const PLANNING_STAGE_RETRY_LIMIT = 3;
+
+export type PlanningMajorStage = "foundation" | "itinerary" | "completion";
+export type PlanningNodeId =
+  | "skeleton"
+  | "spotCandidates"
+  | "poiResolution"
+  | "itineraryDraft"
+  | "copy"
+  | "presentation"
+  | "commercial"
+  | "cover"
+  | "vehicleResource"
+  | "finalValidation";
+export type PlanningNodeStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "skipped"
+  | "invalidated";
+
+export interface PlanningPoiCandidate {
+  requestedName: string;
+  status: "proposed" | "resolved" | "rejected" | "selected";
+  reason?: string;
+  poiId?: number;
+  poiName?: string;
+  province?: string;
+  city?: string;
+  district?: string;
+  address?: string;
+}
+
+export interface PlanningNodeState {
+  id: PlanningNodeId;
+  majorStage: PlanningMajorStage;
+  status: PlanningNodeStatus;
+  attempts: number;
+  summary?: string;
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface PlanningPlanV2 {
+  version: 2;
+  runId: string;
+  status: "pending" | "running" | "needs_user" | "completed" | "failed";
+  currentNode: PlanningNodeId;
+  nodes: PlanningNodeState[];
+  poiCandidates: PlanningPoiCandidate[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlanningSpotRecommendationRequest {
+  destination: string;
+  province: string;
+  city: string;
+  days: number;
+  targetCount: number;
+  excludedNames: string[];
+  rejectedNames: string[];
+}
+
+export interface PlanningItineraryRequest {
+  destination: string;
+  days: number;
+  candidates: Array<Required<Pick<PlanningPoiCandidate, "poiId" | "poiName">> &
+    Pick<PlanningPoiCandidate, "province" | "city" | "district" | "address">>;
+  previousError?: string;
+}
+
+export interface PlanningItineraryDayDraft {
+  day: number;
+  title: string;
+  description: string;
+  poiIds: number[];
+  meals: string;
+  mealDescriptions?: [string, string, string];
+}
+
+export interface PlanningLocationRequest {
+  destination: string;
+  currentProvince?: string;
+  currentDestinationCity?: string;
+  previousError?: string;
+}
+
+export interface PlanningLocation {
+  province: string;
+  destinationCity: string;
+}
+
+export interface ThreeStagePlanningAi {
+  structureLocation(request: PlanningLocationRequest): Promise<PlanningLocation>;
+  recommendSpotNames(request: PlanningSpotRecommendationRequest): Promise<string[]>;
+  composeVerifiedItinerary(request: PlanningItineraryRequest): Promise<PlanningItineraryDayDraft[]>;
+  estimateVehicleTotalCost(request: {
+    destination: string;
+    province: string;
+    city: string;
+    days: number;
+    itinerary: unknown[];
+  }): Promise<number>;
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // 模块：每个阶段会落盘若干模块；模块是「产品 JSON 里的一个子树」或
@@ -59,7 +166,6 @@ export const REQUIRED_MODULES: readonly PlanningModule[] = [
   "packageName",
   "pricing",
   "inventory",
-  "terms",
   "release",
   "researchTasks",
 ] as const;
@@ -215,7 +321,8 @@ export interface Planner {
   generateStage(request: PlannerRequest): Promise<PlanningStageOutput>;
   /**
    * 原始景点名称在 VBK suggestPoi 中未命中时，给出一个可再次查询的单一
-   * POI 名称。返回 null 表示本轮无法给出安全候选；调用方不会猜测 ID。
+   * POI 名称；该名称可作为同目的地/同核心城市内的替代景点。返回 null
+   * 表示本轮无法给出安全候选；调用方不会猜测 ID。
    */
   resolvePoiName?(request: PoiNameResolutionRequest): Promise<string | null>;
 }

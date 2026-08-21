@@ -20,14 +20,13 @@ import type {
   ResearchTask,
   TaskStatus,
 } from "../../../../shared/contracts.js";
-import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
-import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
 import {
   canonicalPoiResearchTaskLabel,
   poiResearchTaskName,
 } from "../../../../shared/poi-research-tasks.js";
 import { parseAndNormalizeProductJson } from "../product-json-normalize.js";
-import { now, newId, newSupplierProductCode } from "./types.js";
+import { buildProductSnapshot } from "./product-draft.js";
+import { now, newId } from "./types.js";
 
 function preferLogicalPoiTask(current: ResearchTask, candidate: ResearchTask): ResearchTask {
   const rank: Record<ResearchTask["state"], number> = {
@@ -99,52 +98,74 @@ export function listProductsPaginated(db: Database.Database, page: number, pageS
   return { items, total };
 }
 
-/**
- * 创建产品并自动追加一条开场白 assistant 消息。
- */
 export function createProduct(db: Database.Database, input: CreateProductInput): ProductDetail {
-  const id = randomUUID();
-  const createdAt = now();
-  const destination = typeof input?.destination === "string" ? input.destination.trim() : "";
-  if (!destination) throw new Error("请填写有效的目的地。");
+  return importProductSnapshot(db, buildProductSnapshot(input));
+}
 
-  const days = Number(input.days);
-  if (!Number.isInteger(days) || days < 1 || days > 60) throw new Error("天数需为 1 至 60 天的整数。");
-
-  const productForm = input.productForm;
-  if (productForm !== "privateTour" && productForm !== "groupTour") throw new Error("请选择有效的产品形态。");
-
-  const formLabel = productForm === "privateTour" ? "私家团" : "跟团游";
-  const nights = Math.max(0, days - 1);
-  const name = `${destination}${days}天${nights}晚${formLabel}`;
-  const product = {
-    sales: { productType: days <= 5 ? "domesticShort" : "domesticLong", productForm, splitGroup: false },
-    basicInfo: {
-      supplierProductName: name,
-      supplierProductCode: newSupplierProductCode(),
-      days,
-      nights,
-      meetingCity: destination,
-      destinationCity: destination,
-      subtitle: "",
-      province: "",
-      operationNotes: "",
-    },
-    operations: {
-      hotelSource: "nonPlatform",
-      hotelTier: DEFAULT_HOTEL_TIER,
-      mealsIncluded: false,
-      pickupCity: "",
-      vehicleResource: {},
-    },
-    commercial: {
-      inventory: defaultCommercialInventory(),
-    },
-    itinerary: [],
+/**
+ * Restore a Tibet-owned product into the local operational cache.
+ *
+ * Tibet is the authority for product and planning state. The SQLite row is a
+ * compatibility cache for existing mutation/automation code, so a remote read
+ * always replaces it even when the local timestamp happens to be newer.
+ */
+export function importProductSnapshot(db: Database.Database, snapshot: ProductDetail): ProductDetail {
+  const existing = getProduct(db, snapshot.id);
+  const product = parseAndNormalizeProductJson(JSON.stringify(snapshot.product));
+  const restoredAt = snapshot.updatedAt || now();
+  const restore = db.transaction(() => {
+    if (existing) {
+      db.prepare("DELETE FROM automation_runs WHERE local_product_id=?").run(snapshot.id);
+      db.prepare("DELETE FROM research_tasks WHERE local_product_id=?").run(snapshot.id);
+      db.prepare("DELETE FROM messages WHERE local_product_id=?").run(snapshot.id);
+      db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(snapshot.id);
+      db.prepare("DELETE FROM products WHERE id=?").run(snapshot.id);
+    }
+    db.prepare(
+      "INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at,basic_info_saved) VALUES(?,?,?,?,?,?,?,?)",
+    ).run(
+      snapshot.id,
+      snapshot.name,
+      snapshot.status,
+      snapshot.productId ?? null,
+      JSON.stringify(product),
+      restoredAt,
+      restoredAt,
+      snapshot.basicInfoSaved ? 1 : 0,
+    );
+    const insertMessage = db.prepare(
+      "INSERT OR IGNORE INTO messages(id,local_product_id,role,content,task_status,created_at) VALUES(?,?,?,?,?,?)",
+    );
+    for (const message of snapshot.messages) {
+      insertMessage.run(message.id, snapshot.id, message.role, message.content, message.taskStatus ?? null, message.createdAt);
+    }
+    const insertTask = db.prepare(
+      "INSERT OR IGNORE INTO research_tasks(id,local_product_id,label,type,status,state,detail,evidence_json) VALUES(?,?,?,?,?,?,?,?)",
+    );
+    for (const task of snapshot.researchTasks) {
+      insertTask.run(
+        task.id,
+        snapshot.id,
+        task.label,
+        task.type,
+        task.status,
+        task.state,
+        task.detail ?? null,
+        JSON.stringify(task.evidence ?? []),
+      );
+    }
+    if (snapshot.automation) {
+      db.prepare(
+        "INSERT OR IGNORE INTO automation_runs(id,local_product_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?)",
+      ).run(snapshot.automation.id, snapshot.id, JSON.stringify(snapshot.automation), restoredAt, restoredAt);
+    }
+  });
+  restore();
+  return {
+    ...getProduct(db, snapshot.id)!,
+    revision: snapshot.revision,
+    planning: snapshot.planning,
   };
-  db.prepare("INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)").run(id, name, "planning", null, JSON.stringify(product), createdAt, createdAt);
-  addMessage(db, id, "assistant", `已创建「${name}」。已带入产品上下文：目的地「${destination}」、产品形态「${formLabel}」、行程「${days}天${nights}晚」。`);
-  return getProduct(db, id)!;
 }
 
 /**

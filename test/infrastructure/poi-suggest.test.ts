@@ -81,6 +81,15 @@ test("业务成功时匹配候选，浏览器调用只传端点、请求体和�
   assert.equal(call.includeCidQuery, false);
 });
 
+test("带目的地前缀的景点从 VBK 嵌套地域字段中解析同城官方 POI", () => {
+  assert.deepEqual(pickBestPoi("北京故宫", {
+    poiList: [
+      { localName: "陈武帝故宫", poiId: 86018, district: { districtName: "长兴", parents: [{ districtName: "湖州" }, { districtName: "浙江省" }] } },
+      { localName: "故宫博物院", poiId: 75595, district: { districtName: "北京市", districtType: "City" } },
+    ],
+  }, { destinationCity: "北京", province: "北京市" }), { poiName: "故宫博物院", poiId: 75595 });
+});
+
 test("BrowserView evaluate 悬挂时主进程在上限后返回可识别超时", async () => {
   const browser = {
     evaluate<T>(): Promise<T> {
@@ -289,6 +298,19 @@ test("主景点查询不会误选名称前多一个普通字的其它景区", ()
   }), null);
 });
 
+test("带地域上下文时拒绝外省同名 POI，并优先同省候选", () => {
+  assert.deepEqual(pickBestPoi("南山风景区", {
+    poiList: [
+      { name: "南山风景区", poiId: 78174, provinceName: "广东省", cityName: "深圳市" },
+      { name: "乌鲁木齐市南山风景区", poiId: 99101, provinceName: "新疆维吾尔自治区", cityName: "乌鲁木齐市" },
+    ],
+  }, { destinationCity: "乌鲁木齐", province: "新疆" }), { poiName: "乌鲁木齐市南山风景区", poiId: 99101 });
+
+  assert.equal(pickBestPoi("南山风景区", {
+    poiList: [{ name: "南山风景区", poiId: 78174, provinceName: "广东省", cityName: "深圳市" }],
+  }, { destinationCity: "乌鲁木齐", province: "新疆" }), null);
+});
+
 test("带行政区前缀的官方主景点名仍可匹配", () => {
   assert.deepEqual(pickBestPoi("鼋头渚", {
     poiList: [{ name: "无锡市太湖鼋头渚风景区", poiId: 75725 }],
@@ -302,6 +324,12 @@ test("主景点查询只有山门凉亭等下属点时保持待核查", () => {
       { name: "焦山风景区-凉亭", poiId: 154157853 },
     ],
   }), null);
+});
+
+test("带城市前缀的洪崖洞可匹配官方民俗风貌区", () => {
+  assert.deepEqual(pickBestPoi("重庆洪崖洞", {
+    poiList: [{ name: "洪崖洞民俗风貌区", poiId: 10558957 }],
+  }, { destinationCity: "重庆", province: "重庆市" }), { poiName: "洪崖洞民俗风貌区", poiId: 10558957 });
 });
 
 test("地标名称与广播电视塔类型后缀归一后可命中主 POI", () => {

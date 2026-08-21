@@ -3,7 +3,6 @@ import {
   LoaderCircle,
   MessageCircleMore,
   RefreshCw,
-  RotateCcw,
   Send,
 } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
@@ -11,6 +10,7 @@ import shared from "../shared.module.less";
 import chat from "./review.chat.module.less";
 import layout from "./layout.module.less";
 import { AppWorkspaceReviewSummary } from "./review-summary";
+import { PlanningTree } from "./planning-tree";
 
 export function AppWorkspaceReview({ model }: { model: AppModel }) {
   const {
@@ -66,10 +66,6 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
 
   const taskList = product.researchTasks ?? [];
   const planningActive = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
-  const planningPartial = planningRecovery?.status === "completed" && !planningRecovery.allStagesCompleted;
-  const planningResumable = planningRecovery?.status === "needs_user"
-    || planningRecovery?.status === "failed"
-    || planningPartial;
   const canSend = input.trim().length > 0 && !loading && !planningActive;
 
   const handleSend = () => {
@@ -139,7 +135,14 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   const userTurns = product.messages.filter((m) => m.role === "user").length;
 
   return (
-    <div className={layout.stageSplit} style={splitStyle}>
+    <div className={layout.reviewWorkspace}>
+      <PlanningTree
+        productId={product.id}
+        plan={product.planning}
+        planningBusy={planningBusy}
+        onResume={planningResume}
+      />
+      <div className={layout.stageSplit} style={splitStyle}>
       <section className={`${layout.panel} ${chat.ai}`} aria-label="方案对话">
         <div className={layout.panelHeader}>
           <div className={layout.panelTitleRow}>
@@ -151,85 +154,6 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
           </span>
         </div>
         <div className={chat.conversation} ref={browserRef} role="log" aria-live="polite">
-          {planningRecovery && (planningRecovery.status === "needs_user" || planningRecovery.status === "failed" || planningRecovery.status === "running" || planningRecovery.status === "pending" || planningPartial) && (
-            <article
-              className={chat.recoveryStrip}
-              data-status={planningRecovery.status}
-              aria-label="方案规划恢复面板"
-            >
-              <header className={chat.recoveryHead}>
-                <span className={chat.recoveryIcon}>
-                  {planningRecovery.status === "running" || planningRecovery.status === "pending" ? <LoaderCircle size={14} /> : <RotateCcw size={14} />}
-                </span>
-                <strong className={chat.recoveryHeadline}>{planningRecovery.headline}</strong>
-                {planningResumable && (
-                  <button
-                    className={`${shared.btn} ${shared.btnSm}`}
-                    type="button"
-                    data-variant="ai"
-                    onClick={() => void planningResume()}
-                    disabled={planningBusy || loading}
-                    data-testid="planning-resume-button"
-                  >
-                    {planningBusy ? <LoaderCircle size={13} /> : <RefreshCw size={13} />}
-                    {planningRecovery.status === "failed" ? "重试规划" : "继续规划"}
-                  </button>
-                )}
-              </header>
-              {(planningRecovery.status === "running" || planningRecovery.status === "pending" || planningPartial) && planningRecovery.currentStageLabel && (
-                <p className={chat.recoveryCurrentStage}>
-                  当前阶段：<strong>{planningRecovery.currentStageLabel}</strong>
-                </p>
-              )}
-              {(planningRecovery.status === "running" || planningRecovery.status === "pending" || planningPartial) && planningRecovery.stageProgress && planningRecovery.stageProgress.length > 0 && (
-                <ol className={chat.recoveryStageList} aria-label="规划阶段进度">
-                  {planningRecovery.stageProgress.map((entry: { stage: string; label: string; state: "completed" | "current" | "pending" }) => {
-                    // 用户可见的状态文案：内部数据用 completed / current / pending 三档，
-                    // 渲染时翻译成「已完成 / 进行中 / 待开始」三档之一。色弱/灰度模式下也能
-                    // 区分，必须显式说出口，不能仅靠颜色暗示。
-                    const phaseStateText = entry.state === "completed"
-                      ? "已完成"
-                      : entry.state === "current"
-                        ? "进行中"
-                        : "待开始";
-                    return (
-                      <li
-                        key={entry.stage}
-                        className={chat.recoveryStageItem}
-                        data-state={entry.state}
-                        aria-label={`${entry.label}：${phaseStateText}`}
-                      >
-                        <span className={chat.recoveryStageDot} aria-hidden="true" />
-                        {/* entry.label 是中文短标签（如「产品骨架」）；entry.stage 是内部 ID（如 skeleton），
-                            绝不作为可见主标签出现，避免泄漏 dev-only 枚举字符串。 */}
-                        <span className={chat.recoveryStageLabel}>{entry.label}</span>
-                        <span className={chat.recoveryStageState}>{phaseStateText}</span>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-              <p className={chat.recoveryHint}>{planningRecovery.hint}</p>
-              <div className={chat.recoveryChips}>
-                {planningRecovery.accepted.length > 0 && (
-                  <span className={chat.recoveryChipGroup} data-tone="ok">
-                    已接受：
-                    {planningRecovery.accepted.map((m: string) => (
-                      <span key={m} className={shared.chipMini} data-on="true">{m}</span>
-                    ))}
-                  </span>
-                )}
-                {planningRecovery.missing.length > 0 && (
-                  <span className={chat.recoveryChipGroup} data-tone="warn">
-                    缺失：
-                    {planningRecovery.missing.map((m: string) => (
-                      <span key={m} className={shared.chipMini}>{m}</span>
-                    ))}
-                  </span>
-                )}
-              </div>
-            </article>
-          )}
           {product.messages.map((message, index) => {
             const failed = message.role === "assistant" && message.taskStatus === "failed";
               const lastQuestion = failed
@@ -344,6 +268,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         onConfirmTask={() => void confirmTask()}
         onResolveVehicle={() => void resolveVehicleTask()}
       />
+      </div>
     </div>
   );
 }

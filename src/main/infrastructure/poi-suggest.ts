@@ -35,6 +35,9 @@ export interface PoiSuggestTimeoutOptions {
   browserRequestTimeoutMs?: number;
   /** BrowserView evaluate 自身悬挂时，主进程的兜底上限；默认 15 秒。 */
   evaluateTimeoutMs?: number;
+  /** 自动补全 POI 时使用的产品地域上下文，用来剔除外地同名景点。 */
+  destinationCity?: string;
+  province?: string;
 }
 
 export class PoiSuggestTimeoutError extends Error {
@@ -107,7 +110,7 @@ async function queryPoiSuggest(
     }
     throw error;
   }
-  return parsePoiSuggestPayload(keyword, response.payload, response.status);
+  return parsePoiSuggestPayload(keyword, response.payload, response.status, options);
 }
 
 export async function suggestPoiDetail(
@@ -115,7 +118,7 @@ export async function suggestPoiDetail(
   keyword: string,
   options?: PoiSuggestTimeoutOptions,
 ): Promise<PoiSuggestDetailResult> {
-  const { rawPayload: _rawPayload, ...detail } = await queryPoiSuggest(browser, keyword, options);
+  const { rawPayload: _rawPayload, ...detail } = await queryPoiSuggestWithDestinationFallback(browser, keyword, options);
   return detail;
 }
 
@@ -132,10 +135,31 @@ export async function suggestPoi(
   keyword: string,
   options?: PoiSuggestTimeoutOptions,
 ): Promise<PoiSuggestion | null> {
-  return (await queryPoiSuggest(browser, keyword, options)).best;
+  return (await queryPoiSuggestWithDestinationFallback(browser, keyword, options)).best;
 }
 
-export function parsePoiSuggestPayload(keyword: string, payload: unknown, httpStatus = 200): PoiSuggestDetailResultWithRawPayload {
+async function queryPoiSuggestWithDestinationFallback(
+  browser: PoiSuggestBrowser,
+  keyword: string,
+  options: PoiSuggestTimeoutOptions = {},
+): Promise<PoiSuggestDetailResultWithRawPayload> {
+  const first = await queryPoiSuggest(browser, keyword, options);
+  if (first.best) return first;
+  const city = options.destinationCity?.trim() ?? "";
+  const trimmedKeyword = keyword.trim();
+  if (!city || !trimmedKeyword.startsWith(city) || trimmedKeyword.length <= city.length + 1) return first;
+  // VBK often searches “北京故宫” as a literal string and returns a noisy
+  // list. A second authenticated query for the city-local name lets the
+  // strict matcher choose the canonical “故宫博物院” without guessing an ID.
+  return queryPoiSuggest(browser, trimmedKeyword.slice(city.length).trim(), options);
+}
+
+export function parsePoiSuggestPayload(
+  keyword: string,
+  payload: unknown,
+  httpStatus = 200,
+  context?: { destinationCity?: string; province?: string },
+): PoiSuggestDetailResultWithRawPayload {
   const body = asRecord(payload);
   const responseStatus = asRecord(body?.ResponseStatus);
   const ack = responseStatus?.Ack ?? null;
@@ -144,16 +168,28 @@ export function parsePoiSuggestPayload(keyword: string, payload: unknown, httpSt
   }
   const data = asRecord(body?.data);
   const list = Array.isArray(body?.poiList) ? body.poiList : Array.isArray(data?.poiList) ? data.poiList : [];
+  const best = pickBestPoi(keyword, { poiList: list }, context)
+    ?? pickBestPoi(keyword, {
+      // A few live responses put valid names/IDs behind locale-specific
+      // metadata that makes the raw context filter undecidable. Re-run the
+      // strict name matcher on the already-sanitised identity projection;
+      // this is still exact/conservative matching, never first-result fallthrough.
+      poiList: list.map((item) => ({ localName: candidatePoiName(item), poiId: positiveIntegerValue(asRecord(item)?.poiId) })),
+    }, context);
   return buildPoiSuggestDetailResult({
     httpStatus,
     businessStatus: ack as string | number | boolean | null,
-    best: pickBestPoi(keyword, { poiList: list }),
+    best,
     payload,
     poiList: list,
   });
 }
 
-export function pickBestPoi(keyword: string, payload: unknown): PoiSuggestion | null {
+export function pickBestPoi(
+  keyword: string,
+  payload: unknown,
+  context?: { destinationCity?: string; province?: string },
+): PoiSuggestion | null {
   // A combined itinerary stop is not a single POI.  Never let exact or broad
   // containment select one half of it; enrichment will create a research task
   // instead.  Candidate names may legitimately use brackets for aliases, so
@@ -163,24 +199,87 @@ export function pickBestPoi(keyword: string, payload: unknown): PoiSuggestion | 
   const pois = Array.isArray(list) ? list : [];
   const key = normaliseName(keyword);
   if (!key) return null;
+  const scopedPois = filterPoisByContext(pois, context);
+  if (pois.length > 0 && scopedPois.length === 0) return null;
+  const matchKeys = [key, stripDestinationPrefix(key, context?.destinationCity)]
+    .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
   // An explicit name always wins, including a specific sub-attraction. For a
   // non-exact request, however, prefer a uniquely verified official(alias)
   // POI before using broad containment: facilities can otherwise happen to
   // contain the whole keyword and win merely because of list order.
-  const exact = pois.find((item) => normaliseName(candidatePoiName(item)) === key);
-  const hit = exact ?? pickConservativeAliasPoi(key, pois) ?? pois.find((item) => {
+  const findHit = (pool: unknown[]) => {
+    const exact = pool.find((item) => matchKeys.some((matchKey) => normaliseName(candidatePoiName(item)) === matchKey));
+    return exact ?? matchKeys.map((matchKey) => pickConservativeAliasPoi(matchKey, pool)).find(Boolean) ?? pool.find((item) => {
       const rawName = candidatePoiName(item);
       const name = normaliseName(rawName);
       // Exact requests for a sub-attraction remain valid above.  A partial
       // main-attraction request must never be satisfied by one of its pits,
       // halls, entrances, etc., merely because the name happens to contain it.
-      return !isSubAttraction(rawName) && isConservativeContainmentMatch(key, name);
+      return !isSubAttraction(rawName) && matchKeys.some((matchKey) => isConservativeContainmentMatch(matchKey, name));
     });
+  };
+  // Some VBK responses expose English/partial district metadata even though
+  // the product context is Chinese. If the city-prefixed name has a unique
+  // exact/conservative match outside the filtered pool, use that name proof;
+  // never fall back to the first arbitrary candidate.
+  const hit = findHit(scopedPois) ?? (matchKeys.length > 1 ? findHit(pois) : null);
   const poi = asRecord(hit);
   const poiName = candidatePoiName(poi);
   const poiId = positiveIntegerValue(poi?.poiId);
   if (!poiName || poiId === undefined) return null;
   return { poiName, poiId };
+}
+
+function filterPoisByContext(pois: unknown[], context?: { destinationCity?: string; province?: string }): unknown[] {
+  const destinationCity = normaliseLocationName(context?.destinationCity);
+  const province = normaliseLocationName(context?.province);
+  if (!destinationCity && !province) return pois;
+  return pois.filter((item) => {
+    const poi = asRecord(item);
+    const locations = candidateLocationNames(poi);
+    const candidateCity = locations.city;
+    const candidateProvince = locations.province;
+    if (candidateCity && destinationCity && locationNamesMatch(candidateCity, destinationCity)) return true;
+    if (candidateProvince && province && locationNamesMatch(candidateProvince, province)) return true;
+    // 候选没有地域字段时保留原有行为；有地域字段且明确不匹配时剔除，
+    // 避免“南山风景区”这类泛名命中外省 POI。
+    return !candidateCity && !candidateProvince;
+  });
+}
+
+function candidateLocationNames(poi: Record<string, unknown> | null): { city: string; province: string } {
+  const values = new Map<string, string>();
+  const visit = (value: unknown) => {
+    const record = asRecord(value);
+    if (!record) return;
+    const districtName = normaliseLocationName(record.districtName);
+    const districtType = normaliseLocationName(record.districtType);
+    // 当前 VBK locale=zh-CN 响应的 districtName 偶尔仍是英文（Beijing、Shanghai）。
+    // 英文值无法与中文产品上下文安全比较，按未知地域处理，交给名称匹配/人工核查，
+    // 不要把合法同城候选误判成外地候选。
+    const isChineseLocation = /[\u3400-\u9fff]/.test(String(record.districtName ?? ""));
+    if (districtName && isChineseLocation && districtType === "city") values.set("district.city", districtName);
+    if (districtName && isChineseLocation && districtType === "province") values.set("district.province", districtName);
+    for (const [key, child] of Object.entries(record)) {
+      const normalised = normaliseLocationName(child);
+      if (typeof child === "string" && normalised && /[\u3400-\u9fff]/.test(child)
+        && /(?:city|province|districtname|provincename)$/i.test(key)) {
+        values.set(key.toLowerCase(), normalised);
+      }
+      if (child && typeof child === "object") visit(child);
+    }
+  };
+  visit(poi);
+  const city = [...values.entries()].find(([key]) => /cityname|city$/.test(key))?.[1] ?? "";
+  const province = [...values.entries()].find(([key]) => /provincename|province$/.test(key))?.[1] ?? "";
+  return { city, province };
+}
+
+function stripDestinationPrefix(keyword: string, destinationCity?: string): string {
+  const city = normaliseName(destinationCity ?? "");
+  if (!city || !keyword.startsWith(city)) return keyword;
+  const remainder = keyword.slice(city.length);
+  return remainder.length >= 2 ? remainder : keyword;
 }
 
 /**
@@ -233,7 +332,7 @@ function isSubAttraction(name: string): boolean {
   // Keep this deliberately limited to facilities and clearly secondary
   // attractions. Exact-name selection is handled before this guard, so a
   // user who explicitly asks for (for example) a statue can still select it.
-  return /(?:[一二三四五六七八九十百\d]+号|陪葬坑|院史|陈列|展览|展厅|售票处|停车场|入口|出口|山门|凉亭|楼|洞|阁|塔|寺|殿|台|苑|园|碑林|救生会|观景台|服务中心|雕像|塑像|纪念碑)/.test(name);
+  return /(?:[一二三四五六七八九十百\d]+号|陪葬坑|院史|陈列|展览|展厅|售票处|停车场|入口|出口|山门|凉亭|楼|阁|塔|寺|殿|台|苑|园|碑林|救生会|观景台|服务中心|雕像|塑像|纪念碑)/.test(name);
 }
 
 function isConservativeContainmentMatch(keyword: string, candidate: string): boolean {
@@ -252,7 +351,7 @@ function isConservativeContainmentMatch(keyword: string, candidate: string): boo
 }
 
 function removePlaceType(name: string): string {
-  return name.replace(/(?:广播电视塔|电视塔|步行街|商业街|博物馆|博物院|风景名胜区|风景区|景区|公园|遗址)$/g, "");
+  return name.replace(/(?:广播电视塔|电视塔|步行街|商业街|博物馆|博物院|民俗风貌区|风景名胜区|风景区|景区|公园|遗址)$/g, "");
 }
 
 function matchedKeywordPositions(keyword: string, candidate: string): Set<number> {
@@ -314,6 +413,18 @@ function failureReason(status: Record<string, unknown> | null): string {
 
 function normaliseName(value: string): string {
   return value.replace(/[（）()\s]/g, "").toLowerCase();
+}
+
+function normaliseLocationName(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/维吾尔自治区|壮族自治区|回族自治区|自治区|特别行政区|省|市|地区|盟|州|自治州/g, "")
+    .replace(/[（）()\s]/g, "")
+    .toLowerCase();
+}
+
+function locationNamesMatch(candidate: string, expected: string): boolean {
+  return candidate === expected || candidate.includes(expected) || expected.includes(candidate);
 }
 
 function timeoutOrDefault(value: number | undefined, fallback: number): number {

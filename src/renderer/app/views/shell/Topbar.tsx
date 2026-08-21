@@ -88,12 +88,13 @@ export function AppTopbar({ model }: { model: AppModel }) {
 
           <div className={styles.topbarToolRail}>
             <button
-              className={styles.topbarAccountChip}
-              type="button"
-              onClick={() => setAccountMenuOpen((open) => !open)}
-              aria-label={`当前 VBK 账号：${currentAccountName}`}
-              title={currentAccountName}
-            >
+          className={styles.topbarAccountChip}
+          type="button"
+          onClick={() => setAccountMenuOpen((open) => !open)}
+          aria-label={`当前 VBK 账号：${currentAccountName}`}
+          title={currentAccountName}
+          data-account-menu=""
+        >
               <span className={styles.topbarAccountMain}>
                 <span className={styles.topbarAccountName}>{currentAccountName}</span>
                 <span className={shared.dot} data-state={vbkLogin?.loggedIn ? "ok" : "warn"} />

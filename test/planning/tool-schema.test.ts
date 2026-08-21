@@ -118,7 +118,7 @@ test("每个 stage 的 modules.value 与允许 module 列表一致", () => {
     } else if (stage === "presentation") {
       assert.deepEqual(moduleConsts, ["presentation"]);
     } else if (stage === "commercial") {
-      assert.deepEqual(moduleConsts, ["inventory", "packageName", "pricing", "release", "terms"]);
+      assert.deepEqual(moduleConsts, ["inventory", "pricing", "release"]);
     }
   }
 });

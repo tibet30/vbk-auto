@@ -61,6 +61,7 @@ class FakeRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
   async addResearchTask() { return "id"; }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules() { return detectAcceptedModulesFromProduct(this.product); }
@@ -89,7 +90,6 @@ const fullOutputs: Record<PlanningStage, PlanningStageOutput> = {
     ], features: "【古都巡礼】专业讲解",
   } }] },
   commercial: { reply: "com", modules: [
-    { module: "packageName", status: "accepted", value: "南京 3 天 2 晚私家团" },
     { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1500, child: 800, minimumTravelers: 2 } },
     { module: "inventory", status: "accepted", value: { startDate: "2026-09-01", endDate: "2026-12-31", dailyQuota: 6 } },
     { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
@@ -134,7 +134,7 @@ test("新建产品不复用 example 的价格 / 库存日期", async () => {
   assert.match(commercial.inventory.startDate, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test("patch 只允许写 vehicleResource.requestedDailyCost；真实资源字段仍被拒", () => {
+test("patch 只允许写 vehicleResource.requestedTotalCost；真实资源字段仍被拒", () => {
   const product: Record<string, unknown> = { basicInfo: { supplierProductCode: "NEW" } };
   const blockedPatch = applyProductPatchSafe(product, [
     { op: "replace", path: "/basicInfo/supplierProductCode", value: "TY-SJT-2D1N-001" },
@@ -149,10 +149,10 @@ test("patch 只允许写 vehicleResource.requestedDailyCost；真实资源字段
   ]);
   assert.equal(vehicleIdPatch.applied, false);
   const requestedCostPatch = applyProductPatchSafe(product, [
-    { op: "add", path: "/operations/vehicleResource/requestedDailyCost", value: 1000 },
+    { op: "add", path: "/operations/vehicleResource/requestedTotalCost", value: 1000 },
   ]);
   assert.equal(requestedCostPatch.applied, true);
-  assert.equal((((requestedCostPatch.product.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>).requestedDailyCost), 1000);
+  assert.equal((((requestedCostPatch.product.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>).requestedTotalCost), 1000);
   // 允许写入合法字段。
   const allowedPatch = applyProductPatchSafe(product, [
     { op: "replace", path: "/operations/hotelTier", value: "当地5钻酒店/-38" },

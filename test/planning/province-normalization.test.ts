@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { executeStageOutput } from "../../src/main/planning/stage-runner.js";
-import { isProvinceLevelName, normaliseProvinceName } from "../../src/main/planning/runtime.js";
+import { runSingleStage } from "../../src/main/planning/single-stage-runner.js";
+import { DbOrchestratorRuntime, isProvinceLevelName, normaliseProvinceName, resolveTravelScope } from "../../src/main/planning/runtime.js";
 
 const basicInfoValue = (province: string) => ({
   subtitle: "内蒙古精华之旅",
@@ -55,6 +56,97 @@ test("内蒙古与内蒙古自治区归一化为同一省级名称", () => {
   assert.equal(normaliseProvinceName("内蒙古自治区"), "内蒙古");
   assert.equal(isProvinceLevelName("内蒙古"), true);
   assert.equal(isProvinceLevelName("内蒙古自治区"), true);
+});
+
+test("省级目的地解析为默认核心游览城市和近邻城市", () => {
+  assert.deepEqual(resolveTravelScope("河南"), {
+    input: "河南",
+    isProvinceLevel: true,
+    primaryCity: "郑州",
+    nearbyCoreCities: ["开封", "洛阳"],
+  });
+  assert.deepEqual(resolveTravelScope("内蒙古自治区"), {
+    input: "内蒙古自治区",
+    isProvinceLevel: true,
+    primaryCity: "呼和浩特",
+    nearbyCoreCities: ["包头"],
+  });
+});
+
+test("普通城市目的地保持原城市游玩范围", () => {
+  assert.deepEqual(resolveTravelScope("太原"), {
+    input: "太原",
+    isProvinceLevel: false,
+    primaryCity: "太原",
+    nearbyCoreCities: [],
+  });
+});
+
+test("skeleton 阶段把省级目的地的 pickupCity 写为核心城市", async () => {
+  let skeletonValue: Record<string, unknown> | undefined;
+  const result = await runSingleStage({
+    stage: "skeleton",
+    state: {
+      localProductId: "province-skeleton",
+      currentStage: "skeleton",
+      completedStages: [],
+      stages: [],
+      status: "running",
+      updatedAt: new Date().toISOString(),
+    },
+    skeleton: {
+      destination: "河南",
+      days: 2,
+      nights: 1,
+      productForm: "privateTour",
+      productType: "domesticShort",
+      supplierProductCode: "NEW",
+    },
+    runtime: {
+      loadAcceptedModules: async () => [],
+      writeModule: async (_id: string, _module: string, _path: string, value: unknown) => {
+        skeletonValue = value as Record<string, unknown>;
+        return { ok: true as const };
+      },
+    } as any,
+    planner: {} as any,
+    retryLimit: 1,
+    history: [],
+    existingTasks: [],
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(skeletonValue?.pickupCity, "郑州");
+});
+
+test("真实 runtime 写入 skeleton 时同步把省级 meetingCity / destinationCity 改为核心城市", async () => {
+  let savedProduct: Record<string, unknown> | undefined;
+  const db = {
+    getProduct() {
+      return {
+        product: {
+          basicInfo: { meetingCity: "黑龙江", destinationCity: "黑龙江", days: 2, nights: 1 },
+          operations: { hotelTier: "5钻", pickupCity: "", transport: "privateCar" },
+        },
+      };
+    },
+    getSetting() { return null; },
+  };
+  const productMutations = {
+    replace(_localProductId: string, product: Record<string, unknown>) {
+      savedProduct = product;
+    },
+  };
+  const runtime = new DbOrchestratorRuntime(db as any, undefined, productMutations as any);
+  const result = await runtime.writeModule("province-runtime", "skeleton", "/operations", {
+    hotelTier: "5钻",
+    pickupCity: "哈尔滨",
+    transport: "privateCar",
+  });
+
+  assert.deepEqual(result, { ok: true });
+  const basicInfo = savedProduct?.basicInfo as Record<string, unknown>;
+  assert.equal(basicInfo.meetingCity, "哈尔滨");
+  assert.equal(basicInfo.destinationCity, "哈尔滨");
 });
 
 test("目的地输入内蒙古时 basicInfo 可以接受并写入", async () => {

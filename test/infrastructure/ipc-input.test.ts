@@ -29,3 +29,10 @@ test("产品创建 payload 必须严格符合公开契约", () => {
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 0, productForm: "privateTour" }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", injected: true }]), /field=input/);
 });
+
+test("应用账号切换只接受正整数用户 ID", () => {
+  assert.doesNotThrow(() => validateIpcArguments("appAuth:switchAccount", [12]));
+  for (const value of [0, -1, 1.5, "12", { id: 12 }]) {
+    assert.throws(() => validateIpcArguments("appAuth:switchAccount", [value]), /field=userId/);
+  }
+});

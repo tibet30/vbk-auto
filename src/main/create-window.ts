@@ -23,6 +23,8 @@ interface CreateMainWindowArgs {
   onServicesCreated?: (services: MainWindowServices) => void;
 }
 
+const devRendererUrl = process.env.VBK_RENDERER_URL?.trim() || "http://127.0.0.1:5173";
+
 export interface MainWindowServices {
   window: BrowserWindow;
   browser: VbkBrowser;
@@ -99,7 +101,7 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
   // immediately invokes browser:status / browser:setVisible.
   args.onServicesCreated?.(services);
   await browser.initialise();
-  if (args.isDev) await window.loadURL("http://127.0.0.1:5173");
+  if (args.isDev) await window.loadURL(devRendererUrl);
   else await window.loadFile(path.join(args.root, "dist", "index.html"));
   void browser.waitUntilReady().then((ready) => {
     if (ready && !window.isDestroyed() && !window.webContents.isDestroyed()) {

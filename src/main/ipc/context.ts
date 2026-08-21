@@ -5,6 +5,7 @@ import type { LocalAiKeyStore } from "../infrastructure/ai-key-store.js";
 import type { MiniMaxService } from "../minimax/minimax.js";
 import type { ProductWorkflowCoordinator } from "../application/product-workflow-coordinator.js";
 import type { ProductMutationService } from "../application/product-mutation-service.js";
+import type { TibetProductService } from "../infrastructure/tibet-products.js";
 import type {
   AiProvider,
   Planner,
@@ -26,8 +27,11 @@ export interface MainIpcContext {
   aiService: (snapshot?: Settings) => Promise<MiniMaxService>;
   productWorkflows: ProductWorkflowCoordinator;
   productMutations: ProductMutationService;
+  remoteProducts: TibetProductService;
   readiness: (localProductId: string) => ProductReadiness;
   emitProduct: (product: ProductDetail) => void;
+  /** Broadcast a snapshot already saved by Tibet; bypasses the local-write mirror. */
+  broadcastProduct: (product: ProductDetail) => void;
   emitPlanningState: (state: PlanningGenerationState) => void;
   withKnownVbkAccount: (status: VbkLoginStatus) => VbkLoginStatus;
   completedPoiBackfillPlanner: (

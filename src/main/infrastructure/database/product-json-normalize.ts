@@ -71,11 +71,18 @@ function normaliseItineraryPois(value: unknown) {
   });
 }
 
-function normaliseVehicleResource(value: unknown) {
+function normaliseVehicleResource(value: unknown, days: number) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const vehicle = value as Record<string, unknown>;
+  const requestedTotalCost = positiveNumberValue(vehicle.requestedTotalCost)
+    || (positiveNumberValue(vehicle.requestedDailyCost)
+      ? positiveNumberValue(vehicle.requestedDailyCost)! * days
+      : undefined);
   return {
-    ...(positiveNumberValue(vehicle.requestedDailyCost) ? { requestedDailyCost: positiveNumberValue(vehicle.requestedDailyCost) } : {}),
+    ...(requestedTotalCost ? { requestedTotalCost } : {}),
+    ...((vehicle.requestedTotalCostCleared === true || vehicle.requestedDailyCostCleared === true)
+      ? { requestedTotalCostCleared: true }
+      : {}),
     ...(positiveIntegerValue(vehicle.resourceGroupId) ? { resourceGroupId: positiveIntegerValue(vehicle.resourceGroupId) } : {}),
     ...(textValue(vehicle.resourceGroupName) ? { resourceGroupName: textValue(vehicle.resourceGroupName) } : {}),
     ...(positiveIntegerValue(vehicle.serviceHoursPerDay) ? { serviceHoursPerDay: positiveIntegerValue(vehicle.serviceHoursPerDay) } : {}),
@@ -138,7 +145,10 @@ export function parseAndNormalizeProductJson(raw: string | null | undefined): Pr
   }
   const operations = product.operations as Record<string, unknown> | undefined;
   if (operations && typeof operations === "object" && !Array.isArray(operations)) {
-    operations.vehicleResource = normaliseVehicleResource(operations.vehicleResource);
+    operations.vehicleResource = normaliseVehicleResource(
+      operations.vehicleResource,
+      positiveIntegerValue(basicInfo?.days) || 1,
+    );
   }
   const commercial = product.commercial as Record<string, unknown> | undefined;
   if (commercial && typeof commercial === "object" && !Array.isArray(commercial)) {

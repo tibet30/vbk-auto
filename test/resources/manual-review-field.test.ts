@@ -220,22 +220,22 @@ test("管家联系人 selection 缺少 ID/姓名会被拒绝", () => {
   }), /管家联系人/);
 });
 
-test("用车资源组只写 requestedDailyCost 时其它字段保持不变", () => {
+test("用车资源组只写 requestedTotalCost 时其它字段保持不变", () => {
   const next = applyManualReviewField(baseProduct, {
     field: "vehicleResource",
-    requestedDailyCost: 380,
+    requestedTotalCost: 380,
   });
   const vr = (next.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>;
-  assert.equal(vr.requestedDailyCost, 380);
+  assert.equal(vr.requestedTotalCost, 380);
   assert.equal(vr.resourceGroupId, 88231);
   assert.equal(vr.resourceGroupName, "太原用车组");
 });
 
-test("用车资源组 requestedDailyCost=null 表示清空 AI 预估日价", () => {
-  const productWithCost = { ...baseProduct, operations: { ...baseProduct.operations, vehicleResource: { ...baseProduct.operations.vehicleResource, requestedDailyCost: 500 } } };
-  const next = applyManualReviewField(productWithCost, { field: "vehicleResource", requestedDailyCost: null });
+test("用车资源组 requestedTotalCost=null 表示清空全程预计用车总成本", () => {
+  const productWithCost = { ...baseProduct, operations: { ...baseProduct.operations, vehicleResource: { ...baseProduct.operations.vehicleResource, requestedTotalCost: 500 } } };
+  const next = applyManualReviewField(productWithCost, { field: "vehicleResource", requestedTotalCost: null });
   const vr = (next.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>;
-  assert.equal("requestedDailyCost" in vr, false);
+  assert.equal("requestedTotalCost" in vr, false);
 });
 
 test("手动复核不能写入 resourceGroupMaxItemPrice", () => {
@@ -247,14 +247,14 @@ test("手动复核不能写入 resourceGroupMaxItemPrice", () => {
   assert.equal(vr.resourceGroupMaxItemPrice, undefined);
 });
 
-test("AI 预估日价必须大于 0 或传 null", () => {
+test("全程预计用车总成本必须大于 0 或传 null", () => {
   assert.throws(() => applyManualReviewField(baseProduct, {
     field: "vehicleResource",
-    requestedDailyCost: 0,
-  }), /AI 预估日价/);
+    requestedTotalCost: 0,
+  }), /全程预计用车总成本/);
 });
 
-test("车辆资源组空表也能独立写入 requestedDailyCost", () => {
+test("车辆资源组空表也能独立写入 requestedTotalCost", () => {
   const product = {
     ...baseProduct,
     operations: {
@@ -264,10 +264,10 @@ test("车辆资源组空表也能独立写入 requestedDailyCost", () => {
   };
   const next = applyManualReviewField(product, {
     field: "vehicleResource",
-    requestedDailyCost: 420,
+    requestedTotalCost: 420,
   });
   const vr = (next.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>;
-  assert.equal(vr.requestedDailyCost, 420);
+  assert.equal(vr.requestedTotalCost, 420);
   assert.equal(vr.resourceGroupId, undefined);
   assert.equal(vr.resourceGroupName, undefined);
 });
@@ -329,21 +329,21 @@ test("applyManualReviewField 不修改原 product", () => {
   assert.equal(JSON.stringify(baseProduct), original);
 });
 
-test("清空 requestedDailyCost 时写入 sentinel 字段，区分「从未设置」与「被主动清除」", () => {
-  const next = applyManualReviewField(baseProduct, { field: "vehicleResource", requestedDailyCost: null });
+test("清空 requestedTotalCost 时写入 sentinel 字段，区分「从未设置」与「被主动清除」", () => {
+  const next = applyManualReviewField(baseProduct, { field: "vehicleResource", requestedTotalCost: null });
   const vr = (next.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>;
-  assert.equal("requestedDailyCost" in vr, false);
-  // sentinel 是与 requestedDailyCost 同级的轻量标记，让下游 targetVehicleDailyCost
+  assert.equal("requestedTotalCost" in vr, false);
+  // sentinel 是与 requestedTotalCost 同级的轻量标记，让下游 targetVehicleTotalCost
   // 能区分两种意图。
-  assert.equal(vr.requestedDailyCostCleared, true);
+  assert.equal(vr.requestedTotalCostCleared, true);
 });
 
-test("重新填 requestedDailyCost 会撤销清除 sentinel", () => {
-  const cleared = applyManualReviewField(baseProduct, { field: "vehicleResource", requestedDailyCost: null });
-  const next = applyManualReviewField(cleared, { field: "vehicleResource", requestedDailyCost: 620 });
+test("重新填 requestedTotalCost 会撤销清除 sentinel", () => {
+  const cleared = applyManualReviewField(baseProduct, { field: "vehicleResource", requestedTotalCost: null });
+  const next = applyManualReviewField(cleared, { field: "vehicleResource", requestedTotalCost: 620 });
   const vr = (next.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>;
-  assert.equal(vr.requestedDailyCost, 620);
-  assert.equal("requestedDailyCostCleared" in vr, false);
+  assert.equal(vr.requestedTotalCost, 620);
+  assert.equal("requestedTotalCostCleared" in vr, false);
 });
 
 test("productCover (ctripLibrary) 写入 presentation.cover 并保留其它字段", () => {

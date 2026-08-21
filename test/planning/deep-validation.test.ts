@@ -44,7 +44,6 @@ class AllStagesOkPlanner implements Planner {
     if (request.stage === "commercial") {
       return {
         reply: "com", modules: [
-          { module: "packageName", status: "accepted", value: "pkg" },
           { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1233, child: 673, minimumTravelers: 2 } },
           { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
           { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
@@ -79,6 +78,7 @@ class FakeRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
   async addResearchTask() { return "id"; }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules() { return detectAcceptedModulesFromProduct(this.product); }
@@ -115,6 +115,41 @@ test("itinerary days 必须顺序递增且唯一", () => {
   });
   const reason = out.invalid.find((m) => m.module === "itinerary")?.reason ?? "";
   assert.ok(/不是顺序递增/.test(reason), `应当报告 day 不是顺序递增：${reason}`);
+});
+
+test("itinerary spot 缺 POI 映射时 deep validation 拒绝并指出第几天第几个景点", () => {
+  const product = {
+    itinerary: [
+      { day: 1, title: "D1", spots: [
+        { name: "A", poiName: "", poiId: 101 },
+        { name: "B", poiName: "B（VBK）", poiId: null },
+      ], description: "D", meals: "M" },
+      { day: 2, title: "D2", spots: [{ name: "C", poiName: "C（VBK）", poiId: 103 }], description: "D", meals: "M" },
+    ],
+  };
+  const out = deepValidateModules({
+    skeleton,
+    product,
+    acceptedModules: ["itinerary"],
+  });
+  const reason = out.invalid.find((m) => m.module === "itinerary")?.reason ?? "";
+  assert.match(reason, /第 1 天第 1 个景点「A」缺 poiName 映射/);
+  assert.match(reason, /第 1 天第 2 个景点「B」缺 poiId 映射/);
+});
+
+test("itinerary spot POI 映射完整时 deep validation 接受", () => {
+  const product = {
+    itinerary: [
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: "A（VBK）", poiId: 101 }], description: "D", meals: "M" },
+      { day: 2, title: "D2", spots: [{ name: "B", poiName: "B（VBK）", poiId: 102 }], description: "D", meals: "M" },
+    ],
+  };
+  const out = deepValidateModules({
+    skeleton,
+    product,
+    acceptedModules: ["itinerary"],
+  });
+  assert.equal(out.invalid.find((m) => m.module === "itinerary"), undefined);
 });
 
 test("presentation 必须是 3 条互不重复 + category 在白名单的 recommendations", () => {

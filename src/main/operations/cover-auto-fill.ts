@@ -45,6 +45,17 @@ function positiveInteger(value: unknown): boolean {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function hasPublishableCoverQuality(candidate: CtripLibraryImageCandidate): boolean {
+  const score = Number.parseFloat(textValue(candidate.quality));
+  const dimensions = candidate.resolution.match(/\d+/g)?.map(Number) ?? [];
+  const [width = 0, height = 0] = dimensions;
+  return Number.isFinite(score)
+    && score >= 3
+    && width >= 1280
+    && height >= 800
+    && width >= height;
+}
+
 /**
  * 任意 candidate 是否带可写回的 imageId + 非空 imageUrl。
  * 同时检查 imageResolved 以避免用「仅 DOM 占位」的脏数据：
@@ -76,7 +87,7 @@ export function isCtripLibraryCoverComplete(cover: Record<string, unknown> | nul
 }
 
 /**
- * 从 candidate 列表里挑第一条「同时含 imageId + imageUrl + imageResolved=true」的可用候选。
+ * 从 candidate 列表里挑第一条满足真实解析、质量、尺寸和横版比例的可用候选。
  * 找不到返回 null；不会抛错。
  */
 export function pickFirstUsableCoverCandidate(
@@ -84,7 +95,7 @@ export function pickFirstUsableCoverCandidate(
 ): CtripLibraryImageCandidate | null {
   if (!Array.isArray(candidates)) return null;
   for (const candidate of candidates) {
-    if (isCoverCandidateComplete(candidate)) return candidate;
+    if (isCoverCandidateComplete(candidate) && hasPublishableCoverQuality(candidate)) return candidate;
   }
   return null;
 }

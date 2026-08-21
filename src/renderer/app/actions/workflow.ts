@@ -97,7 +97,7 @@ export function useWorkflowHandlers(state: AppState) {
     try {
       const result = await api()!.research.resolveVehicleResource(product.id, activeTask.id);
       if (!result) {
-        setNotice("VBK 未返回可匹配的用车资源组，请调整建议日价或关键词后重试。");
+        setNotice("VBK 未返回可匹配的用车资源组，请调整全程用车总成本或关键词后重试。");
         return;
       }
       setNotice(`已匹配资源组：${result.resourceGroupName}（ID ${result.resourceGroupId}）。`);

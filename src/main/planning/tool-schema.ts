@@ -44,10 +44,12 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
     case "basicInfo":
       return {
         type: "object", additionalProperties: false,
-        required: ["subtitle", "province", "operationNotes"],
+        required: ["subtitle", "province", "destinationCity", "meetingCity", "operationNotes"],
         properties: {
           subtitle: { type: "string", minLength: 1 },
           province: { type: ["string", "null"], minLength: 1 },
+          destinationCity: { type: ["string", "null"], description: "标准目的地城市名称；第一阶段必须填写，不得填写 POI ID" },
+          meetingCity: { type: ["string", "null"], description: "接送/集合城市名称；如与目的地城市相同则填写相同城市" },
           operationNotes: { type: "string", minLength: 1 },
         },
       };
@@ -82,7 +84,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           properties: {
             day: { type: "number", minimum: 1 },
             title: { type: "string", minLength: 1 },
-            spots: { type: "array", minItems: 1, description: "按实际游览顺序排列。每个 spot 只能是一个可独立检索的地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot。同日景点须集中在同城或相邻片区，禁止无交通衔接的远距离、跨城或 POI 离群组合。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一地点名称；括号内可写同一地点别名，不能包含多个地点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 } } } },
+            spots: { type: "array", minItems: 1, description: "按实际游览顺序排列。每个 spot 只能是一个可独立检索的可游览地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot；机场、车站、码头、酒店、民宿、集合点、接送点等交通/住宿节点禁止写入 spots，只能写在 description。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一可游览地点名称；括号内可写同一地点别名，不能包含多个地点或交通/住宿节点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 } } } },
             description: { type: "string", minLength: 1 },
             hotel: { type: "string" },
             meals: { type: "string", minLength: 1 },
@@ -160,9 +162,9 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           vehicleResource: {
             type: "object",
             additionalProperties: false,
-            required: ["requestedDailyCost"],
+            required: ["requestedTotalCost"],
             properties: {
-              requestedDailyCost: { type: ["number", "null"], exclusiveMinimum: 0, description: "AI 建议用车日价：按目的地/接送城市的城市等级、约每日公里数、服务小时数评估包车一天费用，仅供后续 VBK 资源组查询；不要通过产品售价、成人价、毛利或起订人数倒推；不要填写任何资源组 ID 或供应商编码。" },
+              requestedTotalCost: { type: ["number", "null"], exclusiveMinimum: 0, description: "AI 估算整段行程的预计用车总成本：综合每天实际用车、跨区移动、接送和行程密度，仅供后续按总价查询 VBK 资源组；不要输出日均价，不要通过产品售价、成人价、毛利或起订人数倒推；不要填写任何资源组 ID 或供应商编码。" },
             },
           },
         },

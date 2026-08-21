@@ -1,0 +1,68 @@
+.tree {
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.treeHead {
+  min-height: 42px;
+  padding: 7px var(--pad);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.treeHead > div { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.treeHead strong { color: var(--foreground); font-size: var(--fs-sm); }
+.treeHead span { color: var(--muted-foreground); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.scroller { overflow-x: auto; outline: none; scrollbar-width: thin; }
+.scroller:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ai) 28%, transparent); }
+
+.stageList {
+  min-width: 980px;
+  margin: 0;
+  padding: 10px 12px 12px;
+  display: grid;
+  grid-template-columns: minmax(220px, .72fr) minmax(300px, 1fr) minmax(390px, 1.35fr);
+  gap: 22px;
+  list-style: none;
+}
+
+.stage { min-width: 0; position: relative; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.stage:not(:last-child)::after { content: ""; position: absolute; top: 25px; left: calc(100% + 1px); width: 22px; border-top: 1px solid var(--border); }
+.stage[data-state="running"] { border-color: color-mix(in srgb, var(--ai) 42%, var(--border)); }
+.stage[data-state="failed"] { border-color: color-mix(in srgb, var(--destructive) 42%, var(--border)); }
+.stage[data-state="blocked"] { border-color: color-mix(in srgb, var(--warning) 48%, var(--border)); }
+
+.stageHead { min-height: 48px; padding: 0 7px 0 5px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
+.stageToggle { min-width: 0; flex: 1; border: 0; background: transparent; padding: 5px 2px; display: flex; align-items: center; gap: 8px; text-align: left; color: inherit; cursor: pointer; }
+.stageToggle:focus-visible, .rerun:focus-visible { outline: 2px solid color-mix(in srgb, var(--ai) 35%, transparent); outline-offset: 1px; }
+.stageIndex { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 6px; background: var(--muted); color: var(--muted-foreground); font-family: var(--font-mono); font-size: 10px; }
+.stageTitle { min-width: 0; flex: 1; display: grid; gap: 1px; }
+.stageTitle strong { font-size: 12px; color: var(--foreground); }
+.stageTitle small { font-size: 10px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rerun { height: 26px; flex: 0 0 auto; border: 0; background: transparent; color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 4px; padding: 0 5px; border-radius: 6px; font-size: 10px; cursor: pointer; }
+.rerun:hover:not(:disabled) { color: var(--foreground); background: var(--muted); }
+.rerun:disabled { opacity: .45; cursor: not-allowed; }
+
+.nodeList { margin: 0; padding: 4px 7px 7px; list-style: none; display: grid; gap: 1px; }
+.node { min-width: 0; display: flex; align-items: flex-start; gap: 7px; padding: 5px 4px; border-radius: 6px; }
+.node:hover { background: var(--muted); }
+.nodeIcon { width: 17px; height: 17px; margin-top: 1px; flex: 0 0 auto; display: grid; place-items: center; color: var(--muted-foreground); }
+.node[data-state="completed"] .nodeIcon { color: var(--success); }
+.node[data-state="running"] .nodeIcon { color: var(--ai); }
+.node[data-state="failed"] .nodeIcon { color: var(--destructive); }
+.node[data-state="blocked"] .nodeIcon { color: var(--warning); }
+.nodeBody { min-width: 0; flex: 1; display: grid; gap: 1px; }
+.nodeTopline { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: 7px; }
+.nodeTopline strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-size: 11px; font-weight: 600; }
+.nodeTopline small { flex: 0 0 auto; color: var(--muted-foreground); font-family: var(--font-mono); font-size: 9px; }
+.nodeDetail { color: var(--muted-foreground); font-size: 10px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node[data-state="failed"] .nodeDetail { color: var(--destructive); }
+.node[data-state="blocked"] .nodeDetail { color: var(--warning); }
+.spin { animation: spin 800ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

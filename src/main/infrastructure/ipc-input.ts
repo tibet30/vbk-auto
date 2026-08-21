@@ -93,6 +93,17 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
   if (["settings:listModels", "settings:save", "settings:test", "products:updateReviewField"].includes(channel)) {
     assertPlainObject(channel, "input", channel === "products:updateReviewField" ? args[1] : args[0]);
   }
+  if (channel === "appAuth:login") {
+    parse(channel, "input", z.object({
+      phone: z.string().regex(/^1\d{10}$/),
+      password: z.string().min(1).max(256),
+      captchaId: z.string().trim().min(1).max(128),
+      captchaCode: z.string().trim().min(1).max(8),
+    }).strict(), args[0]);
+  }
+  if (channel === "appAuth:switchAccount") {
+    parse(channel, "userId", z.number().int().positive(), args[0]);
+  }
   if (channel.startsWith("cover:")) {
     if (!new Set(["cover:listManualCovers"]).has(channel)) assertPlainObject(channel, "input", args[0]);
   }

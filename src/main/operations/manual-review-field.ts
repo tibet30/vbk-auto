@@ -6,15 +6,15 @@
  *  - pricing                  : commercial.pricing.adult / child / minimumTravelers / currency（保留现有 cost）
  *  - inventory                : commercial.inventory.startDate / endDate / dailyQuota
  *  - basicInfoSubtitle        : basicInfo.subtitle
- *  - vehicleResource          : operations.vehicleResource.requestedDailyCost
+ *  - vehicleResource          : operations.vehicleResource.requestedTotalCost
  *  - itinerarySpotPoi         : itinerary[dayIndex].spots[spotIndex].poiName / poiId
  *  - butlerContact            : operations.bookingControls.butler（写入完整 ContactCardSelection；null 表示清空）
  *  - productCover             : presentation.cover（ctripLibrary / manualUpload 二选一）
  *
  * 写入策略：
- *   - 数值字段：> 0（pricing.adult / requestedDailyCost）；
+ *   - 数值字段：> 0（pricing.adult / requestedTotalCost）；
  *     pricing.child >= 0；pricing.minimumTravelers 必须是正整数；
- *     requestedDailyCost > 0（可独立为 null）；
+ *     requestedTotalCost > 0（可独立为 null）；
  *   - 文本字段：trim 后非空，> 1 字符（与 schema subtitle 同步）；
  *   - 真实资源组 ID / 名称只能由 VBK 匹配回填，手动复核入口不写。
  *   - 与 AI 写入路径完全解耦：product 走 schema 校验后才落库。
@@ -149,21 +149,24 @@ function applyVehicleResource(
   const operations = objectValue(next.operations);
   const vehicle = { ...objectValue(operations.vehicleResource) };
 
-  // 不存在的子项视为「不动」，null 表示清空 requestedDailyCost。
-  if (input.requestedDailyCost !== undefined) {
-    if (input.requestedDailyCost === null) {
-      // 显式清空「AI 预估日价·待核查」：同时写一个 sentinel 字段，让下游
-      // targetVehicleDailyCost 能区分「从未设置」与「被用户主动清除」，
-      // 避免后续自动匹配继续使用已清空的 AI 建议价。
+  // 不存在的子项视为「不动」，null 表示清空 requestedTotalCost。
+  if (input.requestedTotalCost !== undefined) {
+    if (input.requestedTotalCost === null) {
+      // 显式清空「全程预计用车总成本·待核查」：同时写一个 sentinel 字段，让下游
+      // targetVehicleTotalCost 能区分「从未设置」与「被用户主动清除」，
+      // 避免后续自动匹配继续使用已清空的全程用车总成本。
+      delete vehicle.requestedTotalCost;
       delete vehicle.requestedDailyCost;
-      vehicle.requestedDailyCostCleared = true;
+      vehicle.requestedTotalCostCleared = true;
     } else {
-      if (!Number.isFinite(input.requestedDailyCost) || input.requestedDailyCost <= 0) {
-        throw new Error("AI 预估日价必须大于 0，或传 null 清除。");
+      if (!Number.isFinite(input.requestedTotalCost) || input.requestedTotalCost <= 0) {
+        throw new Error("全程预计用车总成本必须大于 0，或传 null 清除。");
       }
-      vehicle.requestedDailyCost = input.requestedDailyCost;
+      vehicle.requestedTotalCost = input.requestedTotalCost;
+      delete vehicle.requestedDailyCost;
       // 重新设值时把上一次的清除标记也撤销，否则旧的「已清除」语义会污染
       // 新一轮的估算路径。
+      delete vehicle.requestedTotalCostCleared;
       delete vehicle.requestedDailyCostCleared;
     }
   }

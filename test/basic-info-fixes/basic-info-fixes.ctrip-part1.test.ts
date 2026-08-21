@@ -200,7 +200,7 @@ test("fillCitySelect 打开下拉：scoped click selection 后等 input 可见�
   assert.doesNotMatch(retryBlock, /\binput\.fill\(/, "重试不允许 fill 隐藏 input");
 });
 
-test("fillProductLine 优先城市一地、回退省份一地并禁止默认第一项", async () => {
+test("fillProductLine 优先城市一地、回退省份一地，未命中时跳过", async () => {
   const source = readCtripSource();
   const start = source.indexOf("async function fillProductLine");
   const end = source.indexOf("\nexport async function openProductEditor", start);
@@ -212,7 +212,10 @@ test("fillProductLine 优先城市一地、回退省份一地并禁止默认第�
   assert.match(body, /Date\.now\(\) \+ 3_000/);
   assert.match(body, /candidates\.includes\(text\)/);
   assert.match(body, /暂无数据/);
+  assert.match(body, /skipped: no matching optional product line/);
+  assert.match(body, /skipped: product line options timeout/);
   assert.doesNotMatch(body, /options\.(?:first|nth\(0\))/, "产品线禁止默认第一项");
+  assert.doesNotMatch(body, /throw new Error\(`产品线/, "产品线是可选项，未命中不应阻断 basic 阶段");
 });
 
 test("fillBasicInfo 在城市后录入产品线", async () => {

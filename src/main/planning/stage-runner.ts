@@ -51,7 +51,7 @@ export function findBlacklistedKey(value: unknown): string | undefined {
       if (key === "vehicleResource") {
         if (!child || typeof child !== "object" || Array.isArray(child)) return key;
         const childKeys = Object.keys(child as Record<string, unknown>);
-        if (childKeys.some((childKey) => childKey !== "requestedDailyCost")) return key;
+        if (childKeys.some((childKey) => childKey !== "requestedTotalCost")) return key;
         continue;
       }
       if ((BLACKLISTED_VALUE_KEYS as readonly string[]).includes(key)) return key;

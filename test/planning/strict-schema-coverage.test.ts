@@ -96,24 +96,17 @@ test("每个 stage（research 除外）的 modules.items 把 module 与 value �
   }
 });
 
-test("mismatched module / value 组合在结构上不会被 schema 通过（packageName 配 pricing-shape value）", () => {
-  // 用一个明确的 mismatch 输入：module=packageName（string value）+ value={currency:"CNY",adult:1000,...}
-  // 走一遍 strict 校验模拟：modules.items 是 oneOf，每个 branch 都用 const。
-  // packageName branch 的 const=packageName + value schema=string；
-  // pricing branch 的 const=pricing + value schema=object。
-  // 把 mismatch 喂给 schema：branch 必须挑出 module.const 不匹配的 branch → mismatch。
+test("commercial tool schema 不再暴露 packageName，套餐名走本地固定规则", () => {
   const schema = buildStageToolSchema("commercial");
   const params = schema.function.parameters as Record<string, unknown>;
   const modules = (params.properties as Record<string, unknown>).modules as Record<string, unknown>;
   const items = modules.items as Record<string, unknown>;
   const branches = (Array.isArray(items.oneOf) ? items.oneOf : [items]) as Array<Record<string, unknown>>;
-  // 模拟：const=packageName branch 的 value 是 string；尝试传 pricing-shape value。
-  const packageNameBranch = branches.find((b) => (b.properties as Record<string, unknown>).module && ((b.properties as Record<string, unknown>).module as Record<string, unknown>).const === "packageName")!;
-  const valueSchema = (packageNameBranch.properties as Record<string, unknown>).value as Record<string, unknown>;
-  assert.equal(valueSchema.type, "string", "packageName branch.value 必须是 string");
-  // pricing-shape value（object）如果喂给 packageName branch 的 value，会被 schema.type=string 拒绝。
-  // 这里只验证 schema 结构约束正确：mismatch 在 strict 校验下不可能通过。
-  assert.notEqual(valueSchema.type, "object", "packageName branch.value 不应是 object（否则能通过 pricing-shape 输入）");
+  const moduleConsts = branches.map((branch) => {
+    const moduleField = (branch.properties as Record<string, unknown>).module as Record<string, unknown>;
+    return moduleField.const;
+  });
+  assert.ok(!moduleConsts.includes("packageName"));
 });
 
 test("stage tool_call schema 没有遗留 researchTasks / question 顶级字段", () => {

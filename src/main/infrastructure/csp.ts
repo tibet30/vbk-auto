@@ -19,6 +19,9 @@ export function buildContentSecurityPolicy(): string {
   const isDev = !process.env.NODE_ENV && /dist-electron.*unpackage|electron-builder/.test(process.env.npm_lifecycle_event || "");
   // 简化：dev 判定优先用 app.isPackaged；为了避免在 csp 模块跨 import electron，先
   // 用 process.env.NODE_ENV 兜底，main 进程设置 webRequest 时再走 isDevEnv 二次校验。
+  const rendererUrl = new URL(process.env.VBK_RENDERER_URL?.trim() || "http://127.0.0.1:5173");
+  const rendererOrigin = `${rendererUrl.protocol}//${rendererUrl.host}`;
+  const rendererWsOrigin = `${rendererUrl.protocol === "https:" ? "wss:" : "ws:"}//${rendererUrl.host}`;
   const directives: Array<[string, string]> = [
     ["default-src", "'self'"],
     ["script-src", "'self' 'unsafe-inline'"], // vite 在 dev 模式需要 unsafe-inline eval；prod 关掉
@@ -27,7 +30,7 @@ export function buildContentSecurityPolicy(): string {
                                                     // file: 仍保留（兼容旧调用 / 生产 file:// origin 同源），
                                                     // 但 renderer 不再走 file://；不要扩展到 script/connect/object。
     ["font-src", "'self' data:"],
-    ["connect-src", isDev ? "'self' http://127.0.0.1:5173 ws://127.0.0.1:5173" : "'self'"],
+    ["connect-src", isDev ? `'self' ${rendererOrigin} ${rendererWsOrigin}` : "'self'"],
     ["object-src", "'none'"],
     ["base-uri", "'self'"],
     ["frame-ancestors", "'none'"],

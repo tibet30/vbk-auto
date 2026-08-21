@@ -14,6 +14,7 @@ export interface ProductSummary {
   status: "planning" | "review" | "automating" | "draft_saved" | "blocked";
   productId?: string;
   updatedAt: string;
+  revision?: number;
 }
 
 export interface CreateProductInput {
@@ -33,6 +34,8 @@ export interface PoiSuggestLogContext {
   dayIndex: number;
   spotIndex: number;
   title: string;
+  destinationCity?: string;
+  province?: string;
 }
 
 export interface PoiSuggestion {
@@ -68,6 +71,7 @@ export interface ProductDetail extends ProductSummary {
   automation?: AutomationRun;
   /** 基本信息是否已在 VBK 成功保存，决定重试时是否需要补跑 basic 阶段。 */
   basicInfoSaved?: boolean;
+  planning?: import("./contracts-planning.js").PlanningPlanV2;
 }
 
 export interface ConversationMessage {
@@ -409,8 +413,8 @@ export type ManualReviewFieldInput =
   | { field: "inventory"; startDate: string; endDate: string; dailyQuota: number }
   /** 副标题：写入 basicInfo.subtitle。 */
   | { field: "basicInfoSubtitle"; subtitle: string }
-  /** 用车资源组人工复核只允许写 AI 建议日价；真实资源组 ID / 名称由 VBK 匹配回填。 */
-  | { field: "vehicleResource"; requestedDailyCost?: number | null }
+  /** 用车资源组人工复核只允许写全程预计总成本；真实资源组 ID / 名称由 VBK 匹配回填。 */
+  | { field: "vehicleResource"; requestedTotalCost?: number | null }
   /** 每日行程 spot 的 VBK POI 手动补全：只允许写入指定 spot 的 poiName / poiId。 */
   | { field: "itinerarySpotPoi"; dayIndex: number; spotIndex: number; poiName: string; poiId: number }
   /**
@@ -444,7 +448,6 @@ export interface VehicleResourceMatch {
   query: string;
   city: string;
   days: number;
-  dailyCost?: number;
   totalCost?: number;
   resourceGroupId: number;
   resourceGroupName: string;

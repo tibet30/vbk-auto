@@ -23,9 +23,10 @@ export function isTrustedRendererSender(input: RendererSenderTrustInput): boolea
   }
 
   if (input.isDev) {
-    return url.protocol === "http:"
-      && url.port === "5173"
-      && url.hostname === "127.0.0.1";
+    const rendererUrl = new URL(process.env.VBK_RENDERER_URL?.trim() || "http://127.0.0.1:5173");
+    return url.protocol === rendererUrl.protocol
+      && url.port === rendererUrl.port
+      && url.hostname === rendererUrl.hostname;
   }
 
   return url.protocol === "file:";

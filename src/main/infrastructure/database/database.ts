@@ -53,6 +53,7 @@ import {
   createProduct,
   deleteProduct,
   getProduct,
+  importProductSnapshot,
   listProducts,
   listProductsPaginated,
   type ProductListPage,
@@ -67,6 +68,7 @@ import {
   updateProduct,
   writeAutomationWithProductStatus,
 } from "./parts/products.js";
+import { buildProductSnapshot } from "./parts/product-draft.js";
 import {
   replaceProductAndSatisfyResearchTasks,
   type ReplaceProductAndSatisfyResearchTasksOptions,
@@ -112,7 +114,9 @@ export class VbkDatabase {
   listProducts(): ProductSummary[] { return listProducts(this.db); }
   listProductsPaginated(page: number, pageSize?: number): ProductListPage { return listProductsPaginated(this.db, page, pageSize); }
   createProduct(input: CreateProductInput): ProductDetail { return createProduct(this.db, input); }
+  buildProductSnapshot(input: CreateProductInput): ProductDetail { return buildProductSnapshot(input); }
   getProduct(id: string): ProductDetail | undefined { return getProduct(this.db, id); }
+  importProductSnapshot(snapshot: ProductDetail): ProductDetail { return importProductSnapshot(this.db, snapshot); }
   deleteProduct(id: string): boolean { return deleteProduct(this.db, id); }
   updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) {
     updateProduct(this.db, id, product, status);

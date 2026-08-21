@@ -49,6 +49,7 @@ class FakeRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
   async addResearchTask() { return "id"; }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules() { return detectAcceptedModulesFromProduct(this.product); }

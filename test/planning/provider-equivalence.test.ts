@@ -30,7 +30,6 @@ function buildScript(): ScriptEntry[] {
       ], features: "feat",
     } }] } },
     { stage: "commercial", output: { reply: "com", modules: [
-      { module: "packageName", status: "accepted", value: "pkg" },
       { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
       { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
       { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
@@ -81,6 +80,7 @@ class FakeRuntime implements OrchestratorRuntime {
     this.tasks.push(task);
     return task.label;
   }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules() { return detectAcceptedModulesFromProduct(this.product); }

@@ -54,6 +54,7 @@ class FakeRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
   async addResearchTask() { return "id"; }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules() { return detectAcceptedModulesFromProduct(this.product); }
@@ -89,7 +90,6 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
   const planner2 = new SelectivePlanner({
     commercial: () => ({
       reply: "com", modules: [
-        { module: "packageName", status: "accepted", value: "pkg" },
         { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1, child: 1, minimumTravelers: 1 } },
         { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 1 } },
         { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },

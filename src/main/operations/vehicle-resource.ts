@@ -31,7 +31,6 @@ export interface ResolvedVehicleResource {
   query: string;
   city: string;
   days: number;
-  dailyCost?: number;
   totalCost?: number;
   resourceGroupId: number;
   resourceGroupName: string;
@@ -48,7 +47,7 @@ function positiveNumber(value: unknown) {
   return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : undefined;
 }
 
-function roundUpVehicleDailyCost(value: number) {
+function roundUpVehicleTotalCost(value: number) {
   return Math.ceil(value / 50) * 50;
 }
 
@@ -97,27 +96,35 @@ export function buildVehicleResourceQuery(input: VehicleResourceEstimateInput): 
   };
 }
 
-export function targetVehicleDailyCost(product: Record<string, unknown>): number | undefined {
+export function targetVehicleTotalCost(product: Record<string, unknown>): number | undefined {
   const operations = product.operations && typeof product.operations === "object" && !Array.isArray(product.operations) ? product.operations as Record<string, unknown> : {};
   const vehicle = operations.vehicleResource && typeof operations.vehicleResource === "object" && !Array.isArray(operations.vehicleResource)
     ? operations.vehicleResource as Record<string, unknown>
     : {};
-  // 用户曾在 UI 上清空过「AI 预估日价」——尊重这个意图，不再自动填充。
-  if (vehicle.requestedDailyCostCleared === true) return undefined;
-  const requestedDailyCost = positiveNumber(vehicle.requestedDailyCost);
-  if (requestedDailyCost) return roundUpVehicleDailyCost(requestedDailyCost);
+  // 用户曾在 UI 上清空过「全程预计用车总成本」——尊重这个意图，不再自动填充。
+  if (vehicle.requestedTotalCostCleared === true || vehicle.requestedDailyCostCleared === true) return undefined;
+  const requestedTotalCost = positiveNumber(vehicle.requestedTotalCost);
+  if (requestedTotalCost) return roundUpVehicleTotalCost(requestedTotalCost);
+  // 历史产品把成本保存为日价。读取时按产品天数一次性换算为总价；
+  // 新的规划和人工保存不再写 requestedDailyCost。
+  const legacyDailyCost = positiveNumber(vehicle.requestedDailyCost);
+  const basic = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
+    ? product.basicInfo as Record<string, unknown>
+    : {};
+  const days = positiveInteger(basic.days) || 1;
+  if (legacyDailyCost) return roundUpVehicleTotalCost(legacyDailyCost * days);
   return undefined;
 }
 
-function sanitiseVehicleResource(value: Record<string, unknown>) {
+function sanitiseVehicleResource(value: Record<string, unknown>, totalCost?: number) {
   const safeVehicle: Record<string, unknown> = {};
-  const requestedDailyCost = positiveNumber(value.requestedDailyCost);
+  const requestedTotalCost = positiveNumber(value.requestedTotalCost) || totalCost;
   const resourceGroupId = positiveInteger(value.resourceGroupId);
   const resourceGroupName = textValue(value.resourceGroupName);
   const serviceHoursPerDay = positiveInteger(value.serviceHoursPerDay);
   const serviceKilometersPerDay = positiveInteger(value.serviceKilometersPerDay);
-  if (value.requestedDailyCostCleared === true) safeVehicle.requestedDailyCostCleared = true;
-  if (requestedDailyCost) safeVehicle.requestedDailyCost = requestedDailyCost;
+  if (value.requestedTotalCostCleared === true || value.requestedDailyCostCleared === true) safeVehicle.requestedTotalCostCleared = true;
+  if (requestedTotalCost) safeVehicle.requestedTotalCost = requestedTotalCost;
   if (resourceGroupId) safeVehicle.resourceGroupId = resourceGroupId;
   if (resourceGroupName) safeVehicle.resourceGroupName = resourceGroupName;
   if (serviceHoursPerDay) safeVehicle.serviceHoursPerDay = serviceHoursPerDay;
@@ -172,7 +179,7 @@ function normalisedText(value: string) {
 }
 
 /**
- * 从资源组名称中临时解析车型价格，仅用于选择最接近日价，不写回 product JSON。
+ * 从资源组名称中临时解析车型价格，仅用于选择最接近全程总价，不写回 product JSON。
  * 例如：
  *   - "5座经济1000+5座舒适1100" + "5座经济" => 1000
  *   - "5座舒适1000" + "5座舒适" => 1000
@@ -191,17 +198,17 @@ export function parseVehicleResourceGroupNamePrice(resourceGroupName: string, pr
   return prices[0];
 }
 
-export function bestResourceGroup(payload: unknown, targetDailyCost?: number, preferredLabel?: string) {
+export function bestResourceGroup(payload: unknown, targetTotalCost?: number, preferredLabel?: string) {
   const groups = extractResourceGroups(payload);
   if (!groups.length) return undefined;
-  if (!targetDailyCost || targetDailyCost <= 0) {
+  if (!targetTotalCost || targetTotalCost <= 0) {
     const [record] = groups;
     return parseResourceGroup(record);
   }
   // 容差：目标价格的 ±20%
-  const tolerance = targetDailyCost * 0.2;
-  const minAcceptable = targetDailyCost - tolerance;
-  const maxAcceptable = targetDailyCost + tolerance;
+  const tolerance = targetTotalCost * 0.2;
+  const minAcceptable = targetTotalCost - tolerance;
+  const maxAcceptable = targetTotalCost + tolerance;
   // 收集所有有价格的资源组，按与目标价格的距离排序
   let hasParsedPrice = false;
   const priced = groups
@@ -216,7 +223,7 @@ export function bestResourceGroup(payload: unknown, targetDailyCost?: number, pr
       if (!price) return [];
       hasParsedPrice = true;
       if (price < minAcceptable || price > maxAcceptable) return [];
-      return [{ ...parsed, _distance: Math.abs(price - targetDailyCost) }];
+      return [{ ...parsed, _distance: Math.abs(price - targetTotalCost) }];
     })
     .sort((a, b) => (a._distance ?? Infinity) - (b._distance ?? Infinity));
   if (priced.length > 0) {
@@ -278,7 +285,7 @@ export async function searchVehicleResourceGroups(page: Page, query: string) {
  * 主入口：用 VBK 资源组搜索接口为 product 找一份车辆资源；
  *   - 拿 estimate（城市/天数/座位/车级）→ 接口查询 → bestResourceGroup 选最佳；
  *   - 未命中时退而求其次用「仅座位数」再次搜索；
- *   - 仍未命中则保留建议价但清掉旧匹配结果，加 note 说明，让运营人工干预；
+ *   - 仍未命中则保留全程用车总成本但清掉旧匹配结果，加 note 说明，让运营人工干预；
  *   - 命中时只把真实可用的资源组 ID / 名称写入 operations.vehicleResource。
  */
 export async function resolveVehicleResource(page: Page, product: ProductDetail) {
@@ -293,18 +300,18 @@ export async function resolveVehicleResource(page: Page, product: ProductDetail)
     days: positiveInteger(basic.days),
     serviceHoursPerDay: positiveInteger(existingVehicle.serviceHoursPerDay) || 8,
   });
-  const targetDailyCost = targetVehicleDailyCost(productData);
-  const primaryQuery = targetDailyCost ? `${estimate.query}${targetDailyCost}` : estimate.query;
+  const targetTotalCost = targetVehicleTotalCost(productData);
+  const primaryQuery = targetTotalCost ? `${estimate.query}${targetTotalCost}` : estimate.query;
   const payload = await searchVehicleResourceGroups(page, primaryQuery);
   // 如果精准查询无结果，退而求其次用更宽泛的关键词重试（去掉车级）。
-  let selected = bestResourceGroup(payload, targetDailyCost, estimate.query);
+  let selected = bestResourceGroup(payload, targetTotalCost, estimate.query);
   let matchedQuery = primaryQuery;
   if (!selected) {
     const fallbackQuery = `${estimate.seats}座`; // 去掉车级（经济/舒适），只用座位数
     if (fallbackQuery !== estimate.query) {
-      const fallbackSearchQuery = targetDailyCost ? `${fallbackQuery}${targetDailyCost}` : fallbackQuery;
+      const fallbackSearchQuery = targetTotalCost ? `${fallbackQuery}${targetTotalCost}` : fallbackQuery;
       const fallbackPayload = await searchVehicleResourceGroups(page, fallbackSearchQuery);
-      selected = bestResourceGroup(fallbackPayload, targetDailyCost, estimate.query);
+      selected = bestResourceGroup(fallbackPayload, targetTotalCost, estimate.query);
       if (selected) {
         matchedQuery = fallbackSearchQuery;
         logInfo("[VehicleResource] matched via fallback query", { original: primaryQuery, fallback: fallbackSearchQuery, resourceGroupId: selected.resourceGroupId });
@@ -316,8 +323,8 @@ export async function resolveVehicleResource(page: Page, product: ProductDetail)
       resourceGroupId: _oldResourceGroupId,
       resourceGroupName: _oldResourceGroupName,
       ...safeExistingVehicle
-    } = sanitiseVehicleResource(existingVehicle);
-    // 车辆资源库无匹配项：保留建议价 / 服务参数，但清掉旧 ID/Name，避免用户误以为新价格已匹配成功。
+    } = sanitiseVehicleResource(existingVehicle, targetTotalCost);
+    // 车辆资源库无匹配项：保留全程用车总成本 / 服务参数，但清掉旧 ID/Name，避免用户误以为新价格已匹配成功。
     return {
       product: {
         ...productData,
@@ -336,8 +343,7 @@ export async function resolveVehicleResource(page: Page, product: ProductDetail)
     query: matchedQuery,
     city: estimate.city,
     days: estimate.days,
-    dailyCost: targetDailyCost,
-    totalCost: targetDailyCost ? targetDailyCost * estimate.days : undefined,
+    totalCost: targetTotalCost,
     resourceGroupId: selected.resourceGroupId,
     resourceGroupName: selected.resourceGroupName,
   };
@@ -345,7 +351,7 @@ export async function resolveVehicleResource(page: Page, product: ProductDetail)
     resourceGroupId: _oldResourceGroupId,
     resourceGroupName: _oldResourceGroupName,
     ...safeExistingVehicle
-  } = sanitiseVehicleResource(existingVehicle);
+  } = sanitiseVehicleResource(existingVehicle, targetTotalCost);
   const vehicleResource = {
     ...safeExistingVehicle,
     resourceGroupId: resolved.resourceGroupId,
@@ -366,7 +372,7 @@ export async function resolveVehicleResource(page: Page, product: ProductDetail)
   const noteParts: string[] = [
     `${estimate.city}${estimate.days}天私家团按${matchedQuery}、每天${estimate.serviceHoursPerDay}小时在 VBK 资源库搜索。`,
   ];
-  if (targetDailyCost) noteParts.push(`预算约 ${targetDailyCost} 元/天，命中资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`);
+  if (targetTotalCost) noteParts.push(`全程用车预算约 ${targetTotalCost} 元，按总价命中资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`);
   else noteParts.push(`命中资源组：${resolved.resourceGroupName}（ID ${resolved.resourceGroupId}）。`);
   if (existingVehicle.resourceGroupId && Number(existingVehicle.resourceGroupId) !== resolved.resourceGroupId) {
     noteParts.push("已替换先前的人工资源组 ID。");

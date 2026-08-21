@@ -50,7 +50,8 @@ export class DbGenerationStateStore implements GenerationStateStore {
  *  - skeleton：operations.hotelTier / pickupCity / transport / mealsIncluded 都在；
  *  - presentation：对象存在 + recommendation + recommendations.length === 3 + 至少
  *    一条 category 命中白名单；
- *  - itinerary：数组非空 + 长度 = basicInfo.days + 每条 day 字段是 1..n 顺序递增；
+ *  - itinerary：数组非空 + 长度 = basicInfo.days + 每条 day 字段是 1..n 顺序递增
+ *    + 每个 spot 都有平台 POI 映射（poiName + poiId）；
  *    旧浅实现只判断 length > 0，导致「2 天骨架 + 1 天行程」的非法产品被当作
  *    accepted 永久跳过，触发 false-success。骨架缺失时不放宽，仍然要求长度匹配；
  *  - packageName：commercial.packageName 非空；
@@ -90,10 +91,10 @@ export function detectAcceptedModulesFromProduct(product: Record<string, unknown
     : null;
   if (Array.isArray(itinerary)) {
     if (expectedDays !== null) {
-      if (itinerary.length === expectedDays && itineraryDaysAreOrdered(itinerary, expectedDays)) {
+      if (itinerary.length === expectedDays && itineraryDaysAreOrdered(itinerary, expectedDays) && itineraryPoisAreComplete(itinerary)) {
         accepted.push("itinerary");
       }
-    } else if (itinerary.length > 0 && itineraryDaysAreOrdered(itinerary, itinerary.length)) {
+    } else if (itinerary.length > 0 && itineraryDaysAreOrdered(itinerary, itinerary.length) && itineraryPoisAreComplete(itinerary)) {
       accepted.push("itinerary");
     }
   }
@@ -102,7 +103,6 @@ export function detectAcceptedModulesFromProduct(product: Record<string, unknown
     if (typeof commercial.packageName === "string" && commercial.packageName.trim()) accepted.push("packageName");
     if (commercial.pricing && typeof commercial.pricing === "object" && !Array.isArray(commercial.pricing)) accepted.push("pricing");
     if (commercial.inventory && typeof commercial.inventory === "object" && !Array.isArray(commercial.inventory)) accepted.push("inventory");
-    if (commercial.terms && typeof commercial.terms === "object" && !Array.isArray(commercial.terms)) accepted.push("terms");
     if (commercial.release && typeof commercial.release === "object" && !Array.isArray(commercial.release)) accepted.push("release");
   }
   return accepted;
@@ -147,6 +147,24 @@ function itineraryDaysAreOrdered(itinerary: unknown[], expectedDays: number): bo
   return true;
 }
 
+export function itineraryPoisAreComplete(itinerary: unknown[]): boolean {
+  if (itinerary.length === 0) return false;
+  for (const day of itinerary) {
+    if (!day || typeof day !== "object" || Array.isArray(day)) return false;
+    const spots = (day as Record<string, unknown>).spots;
+    if (!Array.isArray(spots) || spots.length === 0) return false;
+    for (const spot of spots) {
+      if (!spot || typeof spot !== "object" || Array.isArray(spot)) return false;
+      const record = spot as Record<string, unknown>;
+      const poiName = typeof record.poiName === "string" ? record.poiName.trim() : "";
+      const poiId = record.poiId;
+      if (!poiName) return false;
+      if (!(typeof poiId === "number" && Number.isInteger(poiId) && poiId > 0)) return false;
+    }
+  }
+  return true;
+}
+
 function readValidProductButler(product: Record<string, unknown>): ContactCardSelection | null {
   const operations = product.operations;
   if (!operations || typeof operations !== "object" || Array.isArray(operations)) return null;
@@ -181,9 +199,9 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   ) {
     this.productMutations = productMutations ?? new ProductMutationService(db);
   }
-  async suggestPoi(keyword: string) {
+  async suggestPoi(keyword: string, context?: { destinationCity?: string; province?: string }) {
     if (!this.browser) return null;
-    return suggestPoi(await this.browser.page(), keyword);
+    return suggestPoi(await this.browser.page(), keyword, context);
   }
 
   async loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {
@@ -208,8 +226,13 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
         : {};
       const incoming = { ...(value as Record<string, unknown>) };
       if (typeof incoming.province === "string") incoming.province = normaliseProvinceName(incoming.province);
-      if (typeof existing.province === "string" && existing.province.trim()) delete incoming.province;
       value = { ...existing, ...incoming };
+    }
+    if (module === "presentation" && value && typeof value === "object" && !Array.isArray(value)) {
+      const existing = product.product.presentation && typeof product.product.presentation === "object" && !Array.isArray(product.product.presentation)
+        ? product.product.presentation as Record<string, unknown>
+        : {};
+      value = { ...existing, ...(value as Record<string, unknown>) };
     }
     const result = applyProductPatchSafe(product.product, [
       { op: "replace", path: writePath, value },
@@ -218,6 +241,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     const productData = existingButler
       ? applyManualReviewField(result.product, { field: "butlerContact", selection: existingButler })
       : result.product;
+    alignProvinceLevelBasicCities(productData, module, product.product);
     this.productMutations.replace(localProductId, productData, { notify: false });
     const accountName = this.db.getSetting("vbkAccountName")?.value || null;
     injectAccountButler(this.db, localProductId, accountName);
@@ -250,6 +274,30 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   }
 }
 
+function alignProvinceLevelBasicCities(
+  productData: Record<string, unknown>,
+  module: PlanningModule,
+  previousProduct: Record<string, unknown>,
+): void {
+  if (module !== "skeleton") return;
+  const basicInfo = productData.basicInfo;
+  const operations = productData.operations;
+  if (!basicInfo || typeof basicInfo !== "object" || Array.isArray(basicInfo)) return;
+  if (!operations || typeof operations !== "object" || Array.isArray(operations)) return;
+  const basic = basicInfo as Record<string, unknown>;
+  const ops = operations as Record<string, unknown>;
+  const pickupCity = typeof ops.pickupCity === "string" ? ops.pickupCity.trim() : "";
+  if (!pickupCity) return;
+  const previousBasic = previousProduct.basicInfo;
+  const previous = previousBasic && typeof previousBasic === "object" && !Array.isArray(previousBasic)
+    ? previousBasic as Record<string, unknown>
+    : {};
+  const meetingCity = typeof previous.meetingCity === "string" ? previous.meetingCity.trim() : "";
+  const destinationCity = typeof previous.destinationCity === "string" ? previous.destinationCity.trim() : "";
+  if (isProvinceLevelName(meetingCity)) basic.meetingCity = pickupCity;
+  if (isProvinceLevelName(destinationCity)) basic.destinationCity = pickupCity;
+}
+
 /** 统一省级名称展示：去除行政区后缀，保留已有简称（如“山西”“北京”）。 */
 export function normaliseProvinceName(value: string): string {
   return value.trim().replace(/(特别行政区|维吾尔自治区|壮族自治区|回族自治区|自治区|省|市)$/, "").trim();
@@ -271,4 +319,48 @@ const PROVINCE_LEVEL_NAMES = new Set([
 
 export function isProvinceLevelName(value: string): boolean {
   return PROVINCE_LEVEL_NAMES.has(normaliseProvinceName(value));
+}
+
+const PROVINCE_TRAVEL_SCOPES: Record<string, { primaryCity: string; nearbyCoreCities: string[] }> = {
+  北京: { primaryCity: "北京", nearbyCoreCities: [] },
+  天津: { primaryCity: "天津", nearbyCoreCities: [] },
+  上海: { primaryCity: "上海", nearbyCoreCities: [] },
+  重庆: { primaryCity: "重庆", nearbyCoreCities: [] },
+  河北: { primaryCity: "石家庄", nearbyCoreCities: ["正定"] },
+  山西: { primaryCity: "太原", nearbyCoreCities: ["晋中"] },
+  内蒙古: { primaryCity: "呼和浩特", nearbyCoreCities: ["包头"] },
+  辽宁: { primaryCity: "沈阳", nearbyCoreCities: ["抚顺"] },
+  吉林: { primaryCity: "长春", nearbyCoreCities: ["吉林市"] },
+  黑龙江: { primaryCity: "哈尔滨", nearbyCoreCities: [] },
+  江苏: { primaryCity: "南京", nearbyCoreCities: ["镇江", "扬州"] },
+  浙江: { primaryCity: "杭州", nearbyCoreCities: ["绍兴"] },
+  安徽: { primaryCity: "合肥", nearbyCoreCities: [] },
+  福建: { primaryCity: "福州", nearbyCoreCities: ["泉州"] },
+  江西: { primaryCity: "南昌", nearbyCoreCities: [] },
+  山东: { primaryCity: "济南", nearbyCoreCities: ["泰安"] },
+  河南: { primaryCity: "郑州", nearbyCoreCities: ["开封", "洛阳"] },
+  湖北: { primaryCity: "武汉", nearbyCoreCities: [] },
+  湖南: { primaryCity: "长沙", nearbyCoreCities: ["湘潭"] },
+  广东: { primaryCity: "广州", nearbyCoreCities: ["佛山"] },
+  广西: { primaryCity: "南宁", nearbyCoreCities: ["柳州"] },
+  海南: { primaryCity: "海口", nearbyCoreCities: ["文昌"] },
+  四川: { primaryCity: "成都", nearbyCoreCities: ["都江堰"] },
+  贵州: { primaryCity: "贵阳", nearbyCoreCities: [] },
+  云南: { primaryCity: "昆明", nearbyCoreCities: [] },
+  西藏: { primaryCity: "拉萨", nearbyCoreCities: [] },
+  陕西: { primaryCity: "西安", nearbyCoreCities: ["咸阳"] },
+  甘肃: { primaryCity: "兰州", nearbyCoreCities: [] },
+  青海: { primaryCity: "西宁", nearbyCoreCities: [] },
+  宁夏: { primaryCity: "银川", nearbyCoreCities: [] },
+  新疆: { primaryCity: "乌鲁木齐", nearbyCoreCities: [] },
+  香港: { primaryCity: "香港", nearbyCoreCities: [] },
+  澳门: { primaryCity: "澳门", nearbyCoreCities: [] },
+};
+
+export function resolveTravelScope(destination: string): { input: string; isProvinceLevel: boolean; primaryCity: string; nearbyCoreCities: string[] } {
+  const input = destination.trim();
+  const province = normaliseProvinceName(input);
+  const scope = PROVINCE_TRAVEL_SCOPES[province];
+  if (!scope) return { input, isProvinceLevel: false, primaryCity: input, nearbyCoreCities: [] };
+  return { input, isProvinceLevel: true, primaryCity: scope.primaryCity, nearbyCoreCities: scope.nearbyCoreCities };
 }

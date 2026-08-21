@@ -28,7 +28,13 @@ import type {
   AccountFixedInfoValue,
   ProviderContactCard,
 } from "./contracts-types.js";
-import type { PlanningGenerationState, PlanningModule } from "./contracts-planning.js";
+import type { PlanningGenerationState, PlanningMajorStage, PlanningModule } from "./contracts-planning.js";
+import type {
+  AppAuthAccountsSnapshot,
+  AppAuthCaptcha,
+  AppAuthLoginInput,
+  AppAuthStatus,
+} from "./contracts-auth.js";
 
 /**
  * IPC 契约：renderer ↔ main 的强类型接口。
@@ -44,6 +50,15 @@ import type { PlanningGenerationState, PlanningModule } from "./contracts-planni
  */
 
 export interface VbkApi {
+  appAuth: {
+    status(): Promise<AppAuthStatus>;
+    listAccounts(): Promise<AppAuthAccountsSnapshot>;
+    captcha(): Promise<AppAuthCaptcha>;
+    login(input: AppAuthLoginInput): Promise<AppAuthStatus>;
+    switchAccount(userId: number): Promise<AppAuthStatus>;
+    startLogin(): Promise<void>;
+    logout(): Promise<void>;
+  };
   products: {
     list(): Promise<ProductSummary[]>;
     create(input: CreateProductInput): Promise<ProductDetail>;
@@ -232,6 +247,8 @@ export interface VbkApi {
     resume(localProductId: string): Promise<PlanningRunResult>;
     /** 读取现有状态；不存在返回 undefined。 */
     state(localProductId: string): Promise<PlanningGenerationState | undefined>;
+    /** 重做一个大阶段；该阶段及下游节点会失效并立即按新流程执行。 */
+    rerunMajorStage(localProductId: string, stage: PlanningMajorStage): Promise<PlanningRunResult>;
   };
 }
 

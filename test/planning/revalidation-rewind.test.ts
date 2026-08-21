@@ -60,6 +60,7 @@ class FakeRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
   async addResearchTask() { return "id"; }
+  async suggestPoi(keyword: string) { return { poiName: `${keyword}（VBK）`, poiId: 1000 }; }
   async loadHistory() { return []; }
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules(): Promise<PlanningModule[]> {
@@ -129,6 +130,39 @@ test("detectAcceptedModulesFromProduct 对 itinerary days 顺序错乱也拒绝"
   assert.ok(!accepted.includes("itinerary"));
 });
 
+test("detectAcceptedModulesFromProduct 对 itinerary 缺 poiName 时拒绝", () => {
+  const product = {
+    basicInfo: { days: 1, nights: 0, supplierProductCode: "NEW" },
+    itinerary: [
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: null, poiId: 101 }], description: "D", meals: "M" },
+    ],
+  };
+  const accepted = detectAcceptedModulesFromProduct(product);
+  assert.ok(!accepted.includes("itinerary"), "spot.poiName 缺失时 itinerary 不应被算 accepted");
+});
+
+test("detectAcceptedModulesFromProduct 对 itinerary 缺 poiId 时拒绝", () => {
+  const product = {
+    basicInfo: { days: 1, nights: 0, supplierProductCode: "NEW" },
+    itinerary: [
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: "A（VBK）", poiId: null }], description: "D", meals: "M" },
+    ],
+  };
+  const accepted = detectAcceptedModulesFromProduct(product);
+  assert.ok(!accepted.includes("itinerary"), "spot.poiId 缺失时 itinerary 不应被算 accepted");
+});
+
+test("detectAcceptedModulesFromProduct 对 POI 完整 itinerary 正常 accepted", () => {
+  const product = {
+    basicInfo: { days: 1, nights: 0, supplierProductCode: "NEW" },
+    itinerary: [
+      { day: 1, title: "D1", spots: [{ name: "A", poiName: "A（VBK）", poiId: 101 }], description: "D", meals: "M" },
+    ],
+  };
+  const accepted = detectAcceptedModulesFromProduct(product);
+  assert.ok(accepted.includes("itinerary"), "spot.poiName + spot.poiId 完整时 itinerary 应被算 accepted");
+});
+
 test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentStage=itinerary", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
@@ -150,7 +184,6 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
       features: "f",
     } }] },
     commercial: { reply: "c", modules: [
-      { module: "packageName", status: "accepted", value: "pkg" },
       { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
       { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
       { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
@@ -208,7 +241,6 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
       features: "f",
     } }] },
     commercial: { reply: "c", modules: [
-      { module: "packageName", status: "accepted", value: "pkg" },
       { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
       { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
       { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
@@ -230,7 +262,6 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
   const brokenOutputs: Partial<Record<PlanningStage, PlanningStageOutput>> = {
     ...fullOutputs,
     commercial: { reply: "c-broken", modules: [
-      { module: "packageName", status: "accepted", value: "pkg" },
       { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
       { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
       { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },
@@ -262,7 +293,6 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
       features: "f",
     } }] },
     commercial: { reply: "c", modules: [
-      { module: "packageName", status: "accepted", value: "pkg" },
       { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
       { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
       { module: "terms", status: "accepted", value: { inclusions: "i", exclusions: "e", bookingNotes: "b", refundPolicy: "r" } },

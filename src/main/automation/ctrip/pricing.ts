@@ -228,7 +228,8 @@ export async function fillAndSubmitPricingInventory(page, product, productId) {
  */
 export async function fillAndSaveTerms(page, product, productId) {
   // 绝不触碰任何「提审」 / 「提交审核」入口。
-  if (!product.commercial?.terms) throw new Error("缺少条款配置");
+  // Terms 已移出 AI 规划；有产品 ID 时由 VBK 条款 API 使用系统默认条款，
+  // 不再要求 product.commercial.terms 由规划模块生成。
   if (productId) {
     await page.goto(`https://vbooking.ctrip.com/ivbk/vendor/newResourceClause?productid=${encodeURIComponent(productId)}&istab=1&from=vbk`, {
       waitUntil: "domcontentloaded",
@@ -244,7 +245,13 @@ export async function fillAndSaveTerms(page, product, productId) {
     return { skipped: "条款维护 tab disabled（套餐未保存）" };
   }
   await clickSection(page, "条款维护");
-  const terms = product.commercial.terms;
+  const nights = Number(product.basicInfo?.nights) > 0 ? Number(product.basicInfo.nights) : 0;
+  const terms = product.commercial?.terms ?? {
+    inclusions: `行程内专车服务、${nights}晚酒店住宿、行程规划；实际以确认单为准。`,
+    exclusions: "景区门票、讲解、餐饮、个人消费、单房差及其他未列明费用。",
+    bookingNotes: "至少2人起订，建议提前1天15时前预订；具体以资源确认结果为准。",
+    refundPolicy: "资源确认前可申请取消；确认后按实际已发生费用扣除。",
+  };
   const textareas = page.locator("textarea");
   const values = [terms.inclusions, terms.exclusions, terms.bookingNotes, terms.refundPolicy];
   await fillVisibleInputs(textareas, values, "条款");

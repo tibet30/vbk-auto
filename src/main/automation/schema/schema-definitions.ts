@@ -10,7 +10,7 @@
  */
 
 import { z } from "zod";
-import { HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
+import { DEFAULT_HOTEL_TIER, HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
 import {
   RECOMMENDATION_CATEGORIES,
   VBK_RECOMMENDATION_CATEGORIES,
@@ -143,7 +143,7 @@ const operationsSchema = z.object({
   hotelSource: z.literal("nonPlatform").default("nonPlatform"),
   hotelTier: z
     .enum(HOTEL_TIER_VALUES)
-    .default("当地3钻酒店/-3"),
+    .default(DEFAULT_HOTEL_TIER),
   mealsIncluded: z.boolean().default(false),
   // 自动化基本信息的运营控件；可缺省，按默认值填入。
   bookingControls: bookingControlsSchema.optional(),
@@ -230,6 +230,7 @@ export const productSchema = z
       destinationCity: z.string().min(1),
       province: z.string().min(1),
       operationNotes: z.string().min(1),
+      userIdea: z.string().max(1000).default(""),
     }),
     presentation: presentationSchema.optional(),
     operations: operationsSchema.optional(),

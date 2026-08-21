@@ -18,6 +18,8 @@
  */
 
 import type { ProductDetail } from "../../../shared/contracts.js";
+import { normaliseProductLocationFields } from "../../../shared/location-short-name.js";
+import { DEFAULT_HOTEL_TIER } from "../../../shared/hotel-tiers.js";
 import { defaultCommercialInventory } from "../../data/commercial-defaults.js";
 
 /**
@@ -34,7 +36,7 @@ const DEFAULT_PRODUCT = (overrides: Record<string, unknown> = {}): Record<string
     meetingCity: "",
     destinationCity: "",
   },
-  operations: { hotelSource: "nonPlatform", hotelTier: "threeStar", mealsIncluded: false, vehicleResource: {} },
+  operations: { hotelSource: "nonPlatform", hotelTier: DEFAULT_HOTEL_TIER, mealsIncluded: false, vehicleResource: {} },
   itinerary: [],
   ...overrides,
 });
@@ -136,13 +138,10 @@ export function parseAndNormalizeProductJson(raw: string | null | undefined): Pr
   for (const [key, value] of Object.entries(base)) {
     if (product[key] === undefined) product[key] = value;
   }
-  // 旧字段兼容：basicInfo.meetingCity 缺失时用 destinationCity 兜底。
+  // 旧字段兼容：地点字段统一为平台短名，并以 meetingCity 优先锁定两城市。
+  const normalisedLocations = normaliseProductLocationFields(product);
+  Object.assign(product, normalisedLocations);
   const basicInfo = product.basicInfo as Record<string, unknown> | undefined;
-  if (basicInfo && typeof basicInfo === "object") {
-    if (!basicInfo.meetingCity && basicInfo.destinationCity) {
-      basicInfo.meetingCity = basicInfo.destinationCity;
-    }
-  }
   const operations = product.operations as Record<string, unknown> | undefined;
   if (operations && typeof operations === "object" && !Array.isArray(operations)) {
     operations.vehicleResource = normaliseVehicleResource(

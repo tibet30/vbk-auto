@@ -8,9 +8,10 @@
 import type { PlannerRequest, PlanningStage } from "../../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
 import { resolveTravelScope } from "../runtime.js";
 
-const RECOMMENDATION_CATEGORIES = "优选行程、服务保障、贴心赠送、精选酒店、缤纷景点、特色美食、度假首选、超值赠送、五星精选";
+const RECOMMENDATION_CATEGORIES = VBK_RECOMMENDATION_CATEGORIES.join("、");
 
 const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, string> = {
   skeleton: `1. skeleton.value 只包含 hotelTier、pickupCity、transport、reusePickupForDropoff、mealsIncluded、vehicleResource。

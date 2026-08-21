@@ -37,7 +37,7 @@ test("planning schema 与工具 schema 通过 stage-contract 单向共享阶段�
 test("跨工作流产品分类契约只有一个领域定义源", () => {
   const definition = source("src/main/domain/product/recommendation-categories.ts");
   assert.match(definition, /export const RECOMMENDATION_CATEGORIES = \[/);
-  assert.match(definition, /export const VBK_RECOMMENDATION_CATEGORIES = \[/);
+  assert.match(definition, /export const VBK_RECOMMENDATION_CATEGORIES = RECOMMENDATION_CATEGORIES/);
 
   const schema = source("src/main/automation/schema/schema-definitions.ts");
   assert.doesNotMatch(schema, /export const RECOMMENDATION_CATEGORIES = \[/);

@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { RECOMMENDATION_CATEGORIES, VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { isCombinedSpotName } from "./spot-name.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
@@ -23,8 +23,7 @@ import {
 } from "../../shared/contracts-planning.js";
 
 const requiredText = z.string().trim().min(1);
-const RECOMMENDATION_CATEGORY_VALUES = [...RECOMMENDATION_CATEGORIES] as [string, ...string[]];
-/** AI 生成推荐理由时只能使用的 VBK 下拉兼容分类（9 项），不是全量 15 项。 */
+/** AI 生成推荐理由时只能使用的 VBK 下拉分类。 */
 const VBK_RECOMMENDATION_VALUES = [...VBK_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
 
 const itinerarySpotSchema = z.object({

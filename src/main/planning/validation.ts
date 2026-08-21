@@ -11,7 +11,7 @@
 import type { PlanningModule, ModuleOutcome, PlanningSkeleton } from "../../shared/contracts-planning.js";
 import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 
 export interface ValidationResult {
   missing: ModuleOutcome[];
@@ -188,7 +188,7 @@ export function deepValidateModules(args: {
           const record = asRecord(entry);
           const category = textValue(record?.category);
           if (!category) { reasons.push("recommendation.category 缺失"); valid = false; continue; }
-          if (!(RECOMMENDATION_CATEGORIES as readonly string[]).includes(category)) {
+          if (!(VBK_RECOMMENDATION_CATEGORIES as readonly string[]).includes(category)) {
             reasons.push(`recommendation.category=${category} 不在白名单`); valid = false;
           }
           if (seen.has(category)) { reasons.push(`recommendation.category=${category} 重复`); valid = false; }

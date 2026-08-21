@@ -16,7 +16,7 @@ import { suggestPoi } from "../infrastructure/poi-suggest.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
-import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import type { ContactCardSelection } from "../../shared/contracts.js";
 import type {
   GenerationStateStore,
@@ -120,7 +120,7 @@ function presentationRecommendationsValid(entries: unknown[]): boolean {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
     const record = entry as Record<string, unknown>;
     if (typeof record.category !== "string" || !record.category.trim()) return false;
-    if (!(RECOMMENDATION_CATEGORIES as readonly string[]).includes(record.category)) return false;
+    if (!(VBK_RECOMMENDATION_CATEGORIES as readonly string[]).includes(record.category)) return false;
     if (typeof record.text !== "string" || !record.text.trim()) return false;
     nonEmptyCategoryCount += 1;
   }

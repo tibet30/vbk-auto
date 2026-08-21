@@ -38,7 +38,7 @@ const presentation = {
   recommendations: [
     { category: "优选行程", text: "2天串起西安古城中轴与临潼盛唐地标。" },
     { category: "精选酒店", text: "入住钟楼/南门商圈当地5钻酒店。" },
-    { category: "缤纷体验", text: "覆盖城墙、钟鼓楼、兵马俑等核心景点。" },
+    { category: "缤纷景点", text: "覆盖城墙、钟鼓楼、兵马俑等核心景点。" },
   ],
   features: "<p><strong>私家团：</strong>专车专导。</p>",
 };
@@ -52,7 +52,7 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
         pmRcmdCategories: [
           { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
           { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
-          { pmRcmdCategoryId: 15, pmRcmdCategoryName: "缤纷体验" },
+          { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
         ],
       },
     },
@@ -82,7 +82,7 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
           pmRcmdItems: [
             { id: 1, pmRcmdCategoryId: 9, rcmdDesc: presentation.recommendations[0].text },
             { id: 2, pmRcmdCategoryId: 3, rcmdDesc: presentation.recommendations[1].text },
-            { id: 3, pmRcmdCategoryId: 15, rcmdDesc: presentation.recommendations[2].text },
+            { id: 3, pmRcmdCategoryId: 5, rcmdDesc: presentation.recommendations[2].text },
           ],
           productDesc: {
             id: 77098084,
@@ -126,7 +126,7 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
     [
       { id: 1, pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程", rcmdDesc: presentation.recommendations[0].text, sortOrder: 1 },
       { id: 2, pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店", rcmdDesc: presentation.recommendations[1].text, sortOrder: 2 },
-      { id: undefined, pmRcmdCategoryId: 15, pmRcmdCategoryName: "缤纷体验", rcmdDesc: presentation.recommendations[2].text, sortOrder: 3 },
+      { id: undefined, pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点", rcmdDesc: presentation.recommendations[2].text, sortOrder: 3 },
     ],
   );
 });
@@ -140,7 +140,7 @@ test("产品图文接口保存：敏感词命中时不创建草稿也不保存",
         pmRcmdCategories: [
           { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
           { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
-          { pmRcmdCategoryId: 15, pmRcmdCategoryName: "缤纷体验" },
+          { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
         ],
       },
     },

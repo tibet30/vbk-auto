@@ -5,7 +5,13 @@
  * 与具体工作流无关的领域层，避免 planning/data 反向依赖 automation。
  */
 
-/** 产品 JSON 接受的完整推荐理由分类。 */
+/**
+ * 产品全链路唯一可用的推荐理由分类。
+ *
+ * 这些值必须与 VBK 产品图文页下拉完全一致。此前这里维护了一个 15 项
+ * 的产品 JSON 白名单，而录入页实际只有 9 项，导致本地 readiness 通过后
+ * 在 VBK 选择分类时失败。现在将产品契约直接收敛到 VBK 的真实选项。
+ */
 export const RECOMMENDATION_CATEGORIES = [
   "优选行程",
   "服务保障",
@@ -16,23 +22,7 @@ export const RECOMMENDATION_CATEGORIES = [
   "度假首选",
   "超值赠送",
   "五星精选",
-  "限时秒杀",
-  "尊享入住",
-  "大牌驾到",
-  "优质交通",
-  "优良资质",
-  "缤纷体验",
 ] as const;
 
-/** VBK 产品图文页下拉当前实际支持的分类子集。 */
-export const VBK_RECOMMENDATION_CATEGORIES = [
-  "优选行程",
-  "服务保障",
-  "贴心赠送",
-  "精选酒店",
-  "缤纷景点",
-  "特色美食",
-  "度假首选",
-  "超值赠送",
-  "五星精选",
-] as const;
+/** 保留语义化导出名；它与产品契约共用同一份值，禁止再次出现分叉。 */
+export const VBK_RECOMMENDATION_CATEGORIES = RECOMMENDATION_CATEGORIES;

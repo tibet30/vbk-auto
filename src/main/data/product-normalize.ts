@@ -1,4 +1,4 @@
-import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { defaultCommercialInventory } from "./commercial-defaults.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 
@@ -43,7 +43,7 @@ function normaliseRecommendationItem(value: unknown): { category: string; text: 
   const category = textValue(record.category);
   const text = textValue(record.text);
   if (!category || !text) return undefined;
-  if (!(RECOMMENDATION_CATEGORIES as readonly string[]).includes(category)) return undefined;
+  if (!(VBK_RECOMMENDATION_CATEGORIES as readonly string[]).includes(category)) return undefined;
   return { category, text };
 }
 

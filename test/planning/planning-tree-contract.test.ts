@@ -14,8 +14,8 @@ test("stage rerun confirms invalidated data and uses the dedicated IPC", () => {
   assert.match(tree, /重做此阶段/);
 });
 
-test("current and failed stages expand by default and expose accessible controls", () => {
-  assert.match(tree, /expandedByState = currentMajor === stage\.id \|\| hasFailure\(stage\.id\)/);
+test("planning tree expands all major stages by default and exposes accessible controls", () => {
+  assert.match(tree, /const isCollapsed = collapsed\[stage\.id\] \?\? false/);
   assert.match(tree, /aria-expanded=\{!isCollapsed\}/);
   assert.match(tree, /tabIndex=\{0\}/);
   assert.match(styles, /:focus-visible/);

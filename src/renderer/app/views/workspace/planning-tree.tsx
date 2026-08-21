@@ -57,10 +57,10 @@ export function PlanningTree(props: {
   const { productId, plan, planningBusy, onResume } = props;
   const [rerunning, setRerunning] = useState<PlanningMajorStage | null>(null);
   const [collapsed, setCollapsed] = useState<Partial<Record<PlanningMajorStage, boolean>>>({});
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
   const nodes = plan?.nodes ?? [];
   const currentMajor = nodes.find((node) => node.id === plan?.currentNode)?.majorStage;
-  const hasFailure = (stage: PlanningMajorStage) => nodes.some((node) =>
-    node.majorStage === stage && (node.status === "failed" || node.status === "blocked"));
+  const currentStage = STAGES.find((stage) => stage.id === currentMajor);
   const poiSummary = useMemo(() => {
     if (!plan) return "";
     const recommended = plan.poiCandidates.length;
@@ -84,10 +84,32 @@ export function PlanningTree(props: {
   return (
     <section className={styles.tree} aria-label="三阶段产品规划树">
       <div className={styles.treeHead}>
-        <div>
+        <button
+          className={styles.treeTitleToggle}
+          type="button"
+          aria-expanded={!treeCollapsed}
+          aria-controls="planning-stage-list"
+          onClick={() => setTreeCollapsed((value) => {
+            if (value) setCollapsed({});
+            return !value;
+          })}
+        >
+          {treeCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
           <strong>生成规划</strong>
-          <span>{plan ? overallLabel(plan) : "旧产品需要按三阶段流程重新规划"}</span>
-        </div>
+          {treeCollapsed && plan ? (
+            <span className={styles.overallStatus} data-state={plan.status}>
+              {currentStage && plan.status === "running" ? (
+                <>
+                  {stageStatusIcon("running", styles.spin)}
+                  当前进行：{currentStage.label}
+                </>
+              ) : <>
+                {overallStatusIcon(plan.status, styles.spin)}
+                {overallLabel(plan)}
+              </>}
+            </span>
+          ) : !plan ? <span>旧产品需要按三阶段流程重新规划</span> : null}
+        </button>
         {resumable && (
           <button className={`${shared.btn} ${shared.btnSm}`} data-variant="ai" type="button" disabled={planningBusy} onClick={() => void onResume()}>
             {planningBusy ? <LoaderCircle size={13} className={styles.spin} /> : <RotateCcw size={13} />}
@@ -95,12 +117,11 @@ export function PlanningTree(props: {
           </button>
         )}
       </div>
-      <div className={styles.scroller} tabIndex={0} aria-label="规划阶段，可水平滚动">
+      {!treeCollapsed && <div id="planning-stage-list" className={styles.scroller} tabIndex={0} aria-label="规划阶段，可水平滚动">
         <ol className={styles.stageList}>
           {STAGES.map((stage, index) => {
             const stageNodes = nodes.filter((node) => node.majorStage === stage.id);
-            const expandedByState = currentMajor === stage.id || hasFailure(stage.id);
-            const isCollapsed = collapsed[stage.id] ?? (!expandedByState && stageNodes.every((node) => node.status === "completed" || node.status === "skipped"));
+            const isCollapsed = collapsed[stage.id] ?? false;
             const state = majorStageState(stageNodes, plan);
             return (
               <li className={styles.stage} data-state={state} key={stage.id}>
@@ -113,10 +134,15 @@ export function PlanningTree(props: {
                   >
                     <span className={styles.stageIndex}>{index + 1}</span>
                     <span className={styles.stageTitle}>
-                      <strong>{stage.label}</strong>
+                      <strong>
+                        {stage.label}
+                      </strong>
                       <small>{stage.description}</small>
                     </span>
-                    {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                    <span className={styles.stageStateSummary} data-state={state}>
+                      {stageStatusIcon(state, styles.spin)}
+                      {stageStatusLabel(state)}
+                    </span>
                   </button>
                   <button
                     className={styles.rerun}
@@ -126,6 +152,15 @@ export function PlanningTree(props: {
                   >
                     {rerunning === stage.id ? <LoaderCircle size={12} className={styles.spin} /> : <RotateCcw size={12} />}
                     {!plan && stage.id === "foundation" ? "按新流程规划" : "重做此阶段"}
+                  </button>
+                  <button
+                    className={styles.stageExpand}
+                    type="button"
+                    aria-label={`${isCollapsed ? "展开" : "收起"}${stage.label}`}
+                    aria-expanded={!isCollapsed}
+                    onClick={() => setCollapsed((value) => ({ ...value, [stage.id]: !isCollapsed }))}
+                  >
+                    {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                   </button>
                 </header>
                 {!isCollapsed && (
@@ -150,7 +185,7 @@ export function PlanningTree(props: {
             );
           })}
         </ol>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -176,6 +211,30 @@ function statusIcon(status: PlanningNodeState["status"]) {
   if (status === "failed") return <AlertTriangle size={12} />;
   if (status === "blocked") return <LockKeyhole size={12} />;
   return <Circle size={10} />;
+}
+
+function stageStatusIcon(state: ReturnType<typeof majorStageState>, spinClass: string) {
+  if (state === "running") return <LoaderCircle size={12} className={spinClass} aria-hidden="true" />;
+  if (state === "completed") return <Check size={12} aria-hidden="true" />;
+  if (state === "failed") return <AlertTriangle size={12} aria-hidden="true" />;
+  if (state === "blocked") return <LockKeyhole size={12} aria-hidden="true" />;
+  return <Circle size={10} aria-hidden="true" />;
+}
+
+function stageStatusLabel(state: ReturnType<typeof majorStageState>) {
+  if (state === "completed") return "已完成";
+  if (state === "running") return "进行中";
+  if (state === "failed") return "未通过";
+  if (state === "blocked") return "被阻塞";
+  if (state === "legacy") return "待规划";
+  return "待开始";
+}
+
+function overallStatusIcon(status: PlanningPlanV2["status"], spinClass: string) {
+  if (status === "running") return <LoaderCircle size={13} className={spinClass} aria-hidden="true" />;
+  if (status === "completed") return <Check size={13} aria-hidden="true" />;
+  if (status === "needs_user" || status === "failed") return <AlertTriangle size={13} aria-hidden="true" />;
+  return <Circle size={11} aria-hidden="true" />;
 }
 
 function fallbackText(node: PlanningNodeState): string {

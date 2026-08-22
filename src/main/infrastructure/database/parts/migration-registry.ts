@@ -132,6 +132,16 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_operation_log_local_product_id ON operation_log(local_product_id)`,
     ],
   },
+  {
+    id: "0008_runtime_log_metadata",
+    statements: [
+      `ALTER TABLE operation_log ADD COLUMN level TEXT NOT NULL DEFAULT 'info'`,
+      `ALTER TABLE operation_log ADD COLUMN source TEXT NOT NULL DEFAULT 'automation'`,
+      `ALTER TABLE operation_log ADD COLUMN module TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_operation_log_level ON operation_log(level)`,
+      `CREATE INDEX IF NOT EXISTS idx_operation_log_source ON operation_log(source)`,
+    ],
+  },
 ];
 
 /** 在 VbkDatabase 启动时调用一次：按顺序应用 migrations。 */

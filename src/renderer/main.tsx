@@ -7,6 +7,9 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { APP_NAME } from './app/brand';
 import './styles/global.css';
+import { installRendererLogCapture } from './log-capture';
+
+installRendererLogCapture();
 
 const root = document.getElementById('root');
 if (!root) {

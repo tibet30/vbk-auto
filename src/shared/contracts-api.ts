@@ -14,6 +14,8 @@ import type {
   VbkLoginStatus,
   OperationLogPage,
   OperationLogQuery,
+  OperationLogExportResult,
+  RuntimeLogCaptureInput,
   PoiSuggestDetailResult,
   PoiSuggestLogContext,
   ProductDetail,
@@ -239,6 +241,10 @@ export interface VbkApi {
   };
   operationLog: {
     load(query?: OperationLogQuery): Promise<OperationLogPage>;
+    capture(input: RuntimeLogCaptureInput): Promise<void>;
+    export(query?: OperationLogQuery): Promise<OperationLogExportResult>;
+    /** 用系统默认应用打开刚导出的日志文件（绝对路径）。 */
+    open(path: string): Promise<void>;
   };
   planning: {
     /** 从骨架开始跑一遍（首次创建产品后调用）；写入持久化状态。 */
@@ -249,6 +255,8 @@ export interface VbkApi {
     state(localProductId: string): Promise<PlanningGenerationState | undefined>;
     /** 重做一个大阶段；该阶段及下游节点会失效并立即按新流程执行。 */
     rerunMajorStage(localProductId: string, stage: PlanningMajorStage): Promise<PlanningRunResult>;
+    /** 采用当前对话行程：先核验真实 POI，再失效并重跑全部产品补全节点。 */
+    acceptItineraryAndRerunCompletion(localProductId: string): Promise<PlanningRunResult>;
   };
 }
 

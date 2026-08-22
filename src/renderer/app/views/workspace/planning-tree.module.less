@@ -14,16 +14,68 @@
   border-bottom: 1px solid var(--border);
 }
 
-.treeTitleToggle { min-width: 0; flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; padding: 3px 0; color: inherit; text-align: left; cursor: pointer; }
+.treeTitleToggle { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; padding: 3px 0; color: inherit; text-align: left; cursor: pointer; }
 .treeTitleToggle:focus-visible { outline: 2px solid color-mix(in srgb, var(--ai) 35%, transparent); outline-offset: 2px; border-radius: 4px; }
 .treeHead strong { color: var(--foreground); font-size: var(--fs-sm); }
 .treeTitleMain { min-width: 0; display: inline-flex; align-items: center; gap: 7px; overflow: hidden; }
+.treeTitleMain > strong { flex: 0 0 auto; white-space: nowrap; }
 .treeHead span { color: var(--muted-foreground); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.overallStatus { display: inline-flex; align-items: center; gap: 5px; }
+.generationStatus { min-width: 0; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--ai) !important; }
+.generationStatus > svg { flex: 0 0 auto; }
+.generationStatus > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overallStatus { min-width: 0; flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: flex-end; gap: 5px; color: var(--muted-foreground); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overallStatus > svg { flex: 0 0 auto; }
 .overallStatus[data-state="running"] { color: var(--ai); }
 .overallStatus[data-state="completed"] { color: var(--success); }
 .overallStatus[data-state="failed"], .overallStatus[data-state="needs_user"] { color: var(--destructive); }
-.treeTitleChevron { flex: 0 0 auto; color: var(--muted-foreground); display: inline-flex; align-items: center; }
+.treeTrailing { min-width: 0; flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+
+/* 生成规划标题右侧：就绪度徽章 + 进度数值/百分比（从方案协作面板迁入）。 */
+.readinessGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.progressValue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: visible;
+  color: var(--muted-foreground);
+}
+
+.progressValue strong {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.progressValue small {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.04em;
+}
+
+.treeTitleChevron { flex: 0 0 auto; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; padding: 0; color: var(--muted-foreground); cursor: pointer; }
+.treeTitleChevron:focus-visible { outline: 2px solid color-mix(in srgb, var(--ai) 35%, transparent); outline-offset: 2px; border-radius: 6px; }
+.treeTitleChevron:hover { background: var(--muted); color: var(--foreground); }
+
+.adoptionCard { display: grid; gap: 6px; margin: 10px 12px 12px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--ai) 28%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--ai) 6%, var(--background)); }
+.adoptionCard strong { color: var(--foreground); font-size: 13px; }
+.adoptionCard > span { color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.adoptionActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+.adoptionHint { color: var(--muted-foreground); font-size: 11px; }
+.adoptionError { display: grid; gap: 4px; margin: 10px 12px 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--destructive) 32%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font-size: 12px; line-height: 1.45; }
 
 .scroller { overflow-x: auto; outline: none; scrollbar-width: thin; }
 .scroller:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ai) 28%, transparent); }

@@ -114,7 +114,7 @@ export class VbkDatabase {
   listProducts(): ProductSummary[] { return listProducts(this.db); }
   listProductsPaginated(page: number, pageSize?: number): ProductListPage { return listProductsPaginated(this.db, page, pageSize); }
   createProduct(input: CreateProductInput): ProductDetail { return createProduct(this.db, input); }
-  buildProductSnapshot(input: CreateProductInput): ProductDetail { return buildProductSnapshot(input); }
+  buildProductSnapshot(input: CreateProductInput, supplierContactName?: string | null): ProductDetail { return buildProductSnapshot(input, supplierContactName); }
   getProduct(id: string): ProductDetail | undefined { return getProduct(this.db, id); }
   importProductSnapshot(snapshot: ProductDetail): ProductDetail { return importProductSnapshot(this.db, snapshot); }
   deleteProduct(id: string): boolean { return deleteProduct(this.db, id); }
@@ -204,7 +204,7 @@ export class VbkDatabase {
   }
 
   // ─────────────────────────────────────────────────────────────────────
-  // operation_log（真实持久化 + 上限 1000 行）
+  // operation_log（真实持久化 + 上限 10000 行）
   // ─────────────────────────────────────────────────────────────────────
 
   /** 操作日志默认上限：超过则按时间最早删。 */

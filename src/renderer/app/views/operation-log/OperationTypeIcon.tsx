@@ -75,6 +75,7 @@ export function OperationTypeIcon({ type, state }: { type: OperationType; state:
 }
 
 export const OPERATION_TYPE_LABEL: Record<OperationType, string> = {
+  runtime: "运行输出",
   click: "点击",
   input: "输入",
   navigate: "导航",

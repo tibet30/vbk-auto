@@ -110,17 +110,23 @@ test("页签导航用页面内原生 click，避免 Electron 未结束导航阻�
   assert.match(body, /current\.evaluate\(\(element\) => \(element as HTMLElement\)\.click\(\)\)/);
 });
 
-test("接线 3：fillItineraryDraft 存为草稿后接入 saveThenAdvance，目标 套餐管理", async () => {
+test("接线 3：fillItineraryDraftApi 先走全量接口，再用 saveThenAdvance 进入套餐管理", async () => {
   const ctrip = readCtripSource();
-  const itinIdx = ctrip.indexOf("export async function fillItineraryDraft");
-  const itinBody = ctrip.slice(itinIdx, ctrip.indexOf("async function chooseRadioValue", itinIdx));
-  // 必须先调用 clickSafeSave(["存为草稿"]) 拿 savedWith，再传入 saveThenAdvance。
-  assert.match(itinBody, /clickSafeSave\(page, \["存为草稿"\]\)/);
+  const itinIdx = ctrip.indexOf("export async function fillItineraryDraftApi(");
+  const itinEnd = ctrip.indexOf("\n// FILE:", itinIdx);
+  const itinBody = ctrip.slice(itinIdx, itinEnd > 0 ? itinEnd : ctrip.length);
+  // 当前行程入口先由 ensureItineraryApi 全量保存并回读，再做页面水合和推进。
+  assert.match(itinBody, /ensureItineraryApi\(page,/);
+  assert.match(itinBody, /navigateToHydratedItinerary\(page, productId\)/);
   assert.match(itinBody, /saveThenAdvance\(page, \{/);
+  assert.match(itinBody, /savedWith = "itinerary-api"/);
+  assert.match(itinBody, /saveButtonNames: \[\]/);
+  assert.match(itinBody, /nextButtonLabel: "提交审核并下一步"/);
   assert.match(itinBody, /targetTabLabels: \["套餐管理"\]/);
-  // 返回契约保留 savedWith / days，并附带接口写入结果。
-  assert.match(itinBody, /return \{ savedWith, days: product\.itinerary\.length, spotResult \}/);
-  assert.doesNotMatch(itinBody, /clickBasicInfoNextStep/);
+  // 返回契约保留 savedWith / days，并附带接口与提交结果；不再回到旧 DOM spotResult 契约。
+  assert.match(itinBody, /return \{[\s\S]*savedWith,[\s\S]*days: product\.itinerary\.length,[\s\S]*apiResult,[\s\S]*submitResult,[\s\S]*\}/);
+  assert.doesNotMatch(itinBody, /clickSafeSave\(page/);
+  assert.doesNotMatch(itinBody, /spotResult/);
 });
 
 // —— package / terms 接线：仅保存，不接入 saveThenAdvance ——

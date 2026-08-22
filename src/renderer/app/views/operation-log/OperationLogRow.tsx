@@ -82,7 +82,16 @@ const STATUS_TONE = {
   running: "ai",
 } as const;
 
+const LEVEL_LABEL = { debug: "调试", info: "信息", warn: "警告", error: "错误" } as const;
+const LEVEL_TONE = { debug: "neutral", info: "ai", warn: "warn", error: "block" } as const;
+const SOURCE_LABEL = { main: "主进程", renderer: "页面", automation: "自动化", system: "系统" } as const;
+
 function typeState(entry: OperationLogEntry): "ok" | "fail" | "skip" | "run" | "neutral" {
+  if (entry.type === "runtime") {
+    if (entry.level === "error") return "fail";
+    if (entry.level === "warn") return "skip";
+    return "neutral";
+  }
   if (entry.status === "failed") return "fail";
   if (entry.status === "skipped") return "skip";
   if (entry.status === "running") return "run";
@@ -108,8 +117,13 @@ export function OperationLogRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState<"target" | "message" | null>(null);
-  const hasMessage = Boolean(entry.message);
-  const tone = STATUS_TONE[entry.status];
+  const hasMessage = Boolean(entry.message) || Boolean(entry.context && Object.keys(entry.context).length);
+  const level = entry.level ?? "info";
+  const tone = entry.type === "runtime" ? LEVEL_TONE[level] : STATUS_TONE[entry.status];
+  const detailText = [
+    entry.message,
+    entry.context && Object.keys(entry.context).length ? JSON.stringify(entry.context, null, 2) : "",
+  ].filter(Boolean).join("\n\n");
 
   async function handleCopy(value: string, slot: "target" | "message") {
     const ok = await copyText(value);
@@ -121,7 +135,7 @@ export function OperationLogRow({
   }
 
   return (
-    <article className={styles.opRow} data-state={entry.status}>
+    <article className={styles.opRow} data-state={entry.status} data-level={level}>
       <div className={styles.opRowMain}>
         <div className={styles.opRowLead}>
           <OperationTypeIcon type={entry.type} state={typeState(entry)} />
@@ -129,6 +143,7 @@ export function OperationLogRow({
             <div className={styles.opRowNameLine}>
               <span className={styles.opRowName}>{entry.name}</span>
               <span className={styles.opRowTypeTag}>{OPERATION_TYPE_LABEL[entry.type]}</span>
+              {entry.module && <span className={styles.opRowModule}>{entry.module}</span>}
               {entry.attempt > 1 && (
                 <span className={styles.opRowAttempt} title={`第 ${entry.attempt} 次尝试`}>
                   第 {entry.attempt} 次
@@ -136,6 +151,7 @@ export function OperationLogRow({
               )}
             </div>
             <div className={styles.opRowMetaLine}>
+              {entry.source && <span className={styles.opMetaItem}>{SOURCE_LABEL[entry.source]}</span>}
               {entry.productName && <span className={styles.opMetaItem}>{entry.productName}</span>}
               {entry.stage && (
                 <>
@@ -173,7 +189,7 @@ export function OperationLogRow({
         <div className={styles.opRowMetaCol}>
           <span className={styles.opStatus} data-state={tone}>
             {entry.status === "running" && <span className={styles.opStatusDot} aria-hidden="true" />}
-            {STATUS_LABEL[entry.status]}
+            {entry.type === "runtime" ? LEVEL_LABEL[level] : STATUS_LABEL[entry.status]}
           </span>
           <time
             className={styles.opTime}
@@ -198,7 +214,7 @@ export function OperationLogRow({
                 <span>重试</span>
               </button>
             )}
-            <button
+            {entry.localProductId && <button
               type="button"
               className={styles.opRowBtn}
               onClick={() => onShowDetail(entry)}
@@ -207,13 +223,13 @@ export function OperationLogRow({
             >
               <ExternalLink size={12} aria-hidden="true" />
               <span>详情</span>
-            </button>
+            </button>}
             {hasMessage && (
               <button
                 type="button"
                 className={styles.opRowToggle}
                 onClick={() => setExpanded((value) => !value)}
-                aria-label={expanded ? "收起错误消息" : "展开错误消息"}
+                aria-label={expanded ? "收起日志详情" : "展开日志详情"}
                 aria-expanded={expanded}
                 title={expanded ? "收起" : "展开"}
               >
@@ -229,7 +245,7 @@ export function OperationLogRow({
           <header className={styles.opRowErrorHead}>
             <span className={styles.opRowErrorTitle}>
               <FileWarning size={12} aria-hidden="true" />
-              错误消息
+              日志详情
             </span>
             <span className={styles.opRowErrorMeta}>
               <time dateTime={entry.startedAt}>{formatAbsolute(entry.startedAt)}</time>
@@ -243,8 +259,8 @@ export function OperationLogRow({
             <button
               type="button"
               className={styles.opRowErrorCopy}
-              onClick={() => void handleCopy(entry.message!, "message")}
-              aria-label="复制错误消息"
+              onClick={() => void handleCopy(detailText, "message")}
+              aria-label="复制日志详情"
             >
               {copied === "message" ? (
                 <>
@@ -257,7 +273,7 @@ export function OperationLogRow({
               )}
             </button>
           </header>
-          <pre className={styles.opRowErrorText}>{entry.message}</pre>
+          <pre className={styles.opRowErrorText}>{detailText}</pre>
         </div>
       )}
     </article>

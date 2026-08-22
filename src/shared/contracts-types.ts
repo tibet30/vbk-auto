@@ -564,6 +564,7 @@ export interface AiResponse {
  * ============================================================ */
 
 export type OperationType =
+  | "runtime"
   | "click"
   | "input"
   | "navigate"
@@ -574,6 +575,8 @@ export type OperationType =
   | "upload";
 
 export type OperationStatus = "succeeded" | "failed" | "skipped" | "running";
+export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogSource = "main" | "renderer" | "automation" | "system";
 
 export interface OperationLogEntry {
   id: string;
@@ -597,6 +600,14 @@ export interface OperationLogEntry {
   message?: string;
   /** 操作目标的 VBK 选择器/字段路径，便于运营定位。 */
   target?: string;
+  /** 日志严重级别；历史操作记录缺省按 info 展示。 */
+  level?: LogLevel;
+  /** 日志产生位置，帮助区分主进程、页面和自动化。 */
+  source?: LogSource;
+  /** 从 `[planning]` 这类前缀提取出的模块名。 */
+  module?: string;
+  /** 已脱敏的结构化上下文；仅用于平台详情与安全导出。 */
+  context?: Record<string, unknown>;
 }
 
 export interface OperationLogSummary {
@@ -606,6 +617,10 @@ export interface OperationLogSummary {
   skipped: number;
   /** 当前正在进行的条目数（status === 'running'），便于在标题里表达"还在跑"。 */
   running: number;
+  debug: number;
+  info: number;
+  warn: number;
+  error: number;
 }
 
 export interface OperationLogQuery {
@@ -614,6 +629,8 @@ export interface OperationLogQuery {
   type?: OperationType | "all";
   stage?: string | "all";
   localProductId?: string;
+  level?: LogLevel | "all";
+  source?: LogSource | "all";
   /** 上限条数；缺省走 OPERATION_LOG_CAP。 */
   limit?: number;
 }
@@ -623,8 +640,24 @@ export interface OperationLogPage {
   entries: OperationLogEntry[];
   /** 用于过滤下拉的可用阶段列表。 */
   stages: string[];
+  sources: LogSource[];
   /** 刷新时间戳（ISO），方便头部显示「最近更新于…」并避免重复拉取。 */
   refreshedAt: string;
+}
+
+export interface RuntimeLogCaptureInput {
+  level: LogLevel;
+  source: LogSource;
+  occurredAt: string;
+  message: string;
+  module?: string;
+  context?: Record<string, unknown>;
+}
+
+export interface OperationLogExportResult {
+  canceled: boolean;
+  count: number;
+  path?: string;
 }
 export interface ItinerarySpot { name: string; poiName: string | null; poiId: number | null }
 export interface ItineraryDay { day: number; title: string; spots?: ItinerarySpot[]; description: string; hotel: string; meals: string }

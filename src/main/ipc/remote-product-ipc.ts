@@ -3,7 +3,7 @@ import type { CreateProductInput } from "../../shared/contracts.js";
 import {
   createRemoteProduct,
   deleteRemoteProduct,
-  getRemoteProduct,
+  getProductForRead,
   listRemoteProducts,
 } from "../application/remote-product-workflows.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
@@ -39,7 +39,12 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
     broadcastProduct(created.product);
     return created.product;
   });
-  ipcMain.handle("products:get", (_event, id: string) => getRemoteProduct(db, remoteProducts, id));
+  ipcMain.handle("products:get", (_event, id: string) => getProductForRead(
+    db,
+    remoteProducts,
+    id,
+    context.productWorkflows.activeWorkflow(id),
+  ));
   ipcMain.handle("products:delete", async (_event, id: string) => {
     const removed = await deleteRemoteProduct(db, remoteProducts, id);
     if (!removed) throw productNotFound(id);

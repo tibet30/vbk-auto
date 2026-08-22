@@ -1,11 +1,6 @@
-import { AlertTriangle, CheckCircle2, CircleHelp, Filter, History, LoaderCircle, RefreshCw, Search, SkipForward, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import type {
-  OperationLogEntry,
-  OperationLogPage,
-  OperationStatus,
-  OperationType,
-} from "../../../../shared/contracts.js";
+import { AlertTriangle, Bug, CircleHelp, Download, History, Info, ListFilter, LoaderCircle, RefreshCw, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { LogLevel, LogSource, OperationLogEntry, OperationLogPage, OperationLogQuery, OperationStatus, OperationType } from "../../../../shared/contracts.js";
 import shared from "../shared.module.less";
 import { OPERATION_STATUS_OPTIONS } from "../../helpers";
 import { OperationLogRow } from "./OperationLogRow";
@@ -18,282 +13,127 @@ import styles from "./index.module.less";
 
 export { formatRefreshedAt, useOperationLogState };
 
-const TYPE_FILTER_OPTIONS: Array<{ value: OperationType | "all"; label: string }> = [
-  { value: "all", label: "全部类型" },
-  { value: "click", label: OPERATION_TYPE_LABEL.click },
-  { value: "input", label: OPERATION_TYPE_LABEL.input },
-  { value: "navigate", label: OPERATION_TYPE_LABEL.navigate },
-  { value: "verify", label: OPERATION_TYPE_LABEL.verify },
-  { value: "screenshot", label: OPERATION_TYPE_LABEL.screenshot },
-  { value: "wait", label: OPERATION_TYPE_LABEL.wait },
-  { value: "select", label: OPERATION_TYPE_LABEL.select },
-  { value: "upload", label: OPERATION_TYPE_LABEL.upload },
+const LEVEL_OPTIONS: Array<{ value: LogLevel | "all"; label: string }> = [
+  { value: "all", label: "全部级别" }, { value: "error", label: "错误" },
+  { value: "warn", label: "警告" }, { value: "info", label: "信息" }, { value: "debug", label: "调试" },
+];
+const SOURCE_OPTIONS: Array<{ value: LogSource | "all"; label: string }> = [
+  { value: "all", label: "全部来源" }, { value: "main", label: "主进程" },
+  { value: "renderer", label: "页面" }, { value: "automation", label: "自动化" }, { value: "system", label: "系统" },
+];
+const TYPE_OPTIONS: Array<{ value: OperationType | "all"; label: string }> = [
+  { value: "all", label: "全部类型" }, { value: "runtime", label: "运行输出" },
+  ...(["click", "input", "navigate", "verify", "screenshot", "wait", "select", "upload"] as OperationType[])
+    .map((value) => ({ value, label: OPERATION_TYPE_LABEL[value] })),
 ];
 
-const STATUS_FILTERS = OPERATION_STATUS_OPTIONS;
-
 export function AppOperationLogPage({
-  loading,
-  page,
-  refreshedAtLabel,
-  onRefresh,
-  onRetry,
-  onShowDetail,
-  notice,
-  onDismissNotice,
+  loading, page, refreshedAtLabel, onRefresh, onExport, onRetry, onShowDetail, notice, onDismissNotice,
 }: {
   loading: boolean;
   page: OperationLogPage | null;
   refreshedAtLabel: string;
-  onRefresh: () => Promise<void> | void;
+  onRefresh: (query: OperationLogQuery) => Promise<void> | void;
+  onExport: (query: OperationLogQuery) => Promise<void> | void;
   onRetry: (entry: OperationLogEntry) => Promise<void> | void;
   onShowDetail: (entry: OperationLogEntry) => void;
   notice: Notice;
   onDismissNotice: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<OperationStatus | "all">("all");
+  const [level, setLevel] = useState<LogLevel | "all">("all");
+  const [source, setSource] = useState<LogSource | "all">("all");
   const [type, setType] = useState<OperationType | "all">("all");
-  const [stage, setStage] = useState<string>("all");
+  const [status, setStatus] = useState<OperationStatus | "all">("all");
+  const [stage, setStage] = useState("all");
+  const [exporting, setExporting] = useState(false);
+  const refreshRef = useRef(onRefresh);
+  refreshRef.current = onRefresh;
 
-  const stages = page?.stages ?? [];
-  const summary = page?.summary ?? { total: 0, succeeded: 0, failed: 0, skipped: 0, running: 0 };
+  const filter: OperationLogQuery = useMemo(() => ({ query: query.trim() || undefined, level, source, type, status, stage }), [query, level, source, type, status, stage]);
+  const filterKey = JSON.stringify(filter);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refreshRef.current(filter), query ? 240 : 0);
+    return () => window.clearTimeout(timer);
+  }, [filterKey]);
+  useEffect(() => {
+    const timer = window.setInterval(() => void refreshRef.current(filter), 2_500);
+    return () => window.clearInterval(timer);
+  }, [filterKey]);
+
+  const summary = page?.summary ?? { total: 0, succeeded: 0, failed: 0, skipped: 0, running: 0, debug: 0, info: 0, warn: 0, error: 0 };
   const entries = page?.entries ?? [];
-
-  // 把本地筛选条件同步成 query 字符串，便于在地址栏复现 / 复制。
-  const filterChips = useMemo(() => {
-    const chips: Array<{ key: string; label: string; onClear: () => void }> = [];
-    if (query.trim()) {
-      chips.push({ key: "q", label: `关键词：${query.trim()}`, onClear: () => setQuery("") });
-    }
-    if (status !== "all") {
-      chips.push({
-        key: "status",
-        label: `状态：${STATUS_FILTERS.find((item) => item.value === status)?.label ?? status}`,
-        onClear: () => setStatus("all"),
-      });
-    }
-    if (type !== "all") {
-      chips.push({
-        key: "type",
-        label: `类型：${TYPE_FILTER_OPTIONS.find((item) => item.value === type)?.label ?? type}`,
-        onClear: () => setType("all"),
-      });
-    }
-    if (stage !== "all") {
-      chips.push({ key: "stage", label: `阶段：${stage}`, onClear: () => setStage("all") });
-    }
-    return chips;
-  }, [query, status, type, stage]);
-
-  // 过滤后的条目数（在 header 右侧显示），让用户对"被过滤掉了多少"有感知。
-  const filteredCount = entries.length;
-
-  const clearAll = () => {
-    setQuery("");
-    setStatus("all");
-    setType("all");
-    setStage("all");
-  };
+  const hasFilter = Boolean(query.trim() || level !== "all" || source !== "all" || type !== "all" || status !== "all" || stage !== "all");
+  const activeFilterCount = [level, source, type, status, stage].filter((value) => value !== "all").length;
+  const clearAll = () => { setQuery(""); setLevel("all"); setSource("all"); setType("all"); setStatus("all"); setStage("all"); };
+  const exportCurrent = async () => { setExporting(true); try { await onExport(filter); } finally { setExporting(false); } };
 
   return (
     <section className={styles.opLog}>
       <div className={styles.opLogContainer}>
         <header className={styles.opLogHead}>
           <div className={styles.opLogHeadBody}>
-            <h1>操作日志</h1>
-            <p className={shared.viewSub}>查看自动化操作的历史记录，支持按状态、类型和阶段定位失败原因。</p>
+            <h1>运行日志</h1>
+            <p className={shared.viewSub}>集中查看主进程、页面与自动化输出；敏感字段会在保存和导出前自动脱敏。</p>
           </div>
           <div className={styles.opLogHeadMeta}>
-            <span className={styles.opLogRefreshed}>
-              <History size={12} aria-hidden="true" />
-              最近更新：{refreshedAtLabel}
-            </span>
-            <button
-              className={shared.btn}
-              data-variant="ghost"
-              onClick={() => void onRefresh()}
-              disabled={loading}
-              type="button"
-            >
-              {loading ? <LoaderCircle size={14} /> : <RefreshCw size={14} />}
-              刷新
+            <span className={styles.opLogRefreshed}><History size={12} />最近更新：{refreshedAtLabel}</span>
+            <button className={shared.btn} data-variant="ghost" onClick={() => void onRefresh(filter)} disabled={loading} type="button">
+              {loading ? <LoaderCircle size={14} className={styles.spinning} /> : <RefreshCw size={14} />}刷新
+            </button>
+            <button className={shared.btn} onClick={() => void exportCurrent()} disabled={exporting || loading} type="button">
+              {exporting ? <LoaderCircle size={14} className={styles.spinning} /> : <Download size={14} />}导出当前结果
             </button>
           </div>
         </header>
 
-        {notice && (
-          <div className={styles.opLogNotice} data-kind={notice.kind} role={notice.kind === "warn" ? "alert" : "status"}>
-            <span className={styles.opLogNoticeText}>{notice.text}</span>
-            <button className={sharedOp.opIconBtn} onClick={onDismissNotice} aria-label="关闭提示">
-              <X size={13} />
-            </button>
-          </div>
-        )}
+        {notice && <div className={styles.opLogNotice} data-kind={notice.kind} role={notice.kind === "warn" ? "alert" : "status"}>
+          <span className={styles.opLogNoticeText}>{notice.text}</span>
+          {notice.action && <button className={styles.opLogNoticeAction} onClick={notice.action.onClick} type="button" title="用默认方式打开该文件">{notice.action.label}</button>}
+          <button className={sharedOp.opIconBtn} onClick={onDismissNotice} aria-label="关闭提示"><X size={13} /></button>
+        </div>}
 
         <section className={summaryStyles.opSummary} aria-label="日志统计">
-          <SummaryCard
-            icon={<History size={16} aria-hidden="true" />}
-            label="总操作"
-            value={summary.total}
-            tone="neutral"
-            sublabel={summary.running > 0 ? `进行中 ${summary.running}` : "全部记录"}
-            onClick={() => setStatus("all")}
-            active={status === "all"}
-          />
-          <SummaryCard
-            icon={<CheckCircle2 size={16} aria-hidden="true" />}
-            label="成功"
-            value={summary.succeeded}
-            tone="ok"
-            sublabel={summary.total ? `${Math.round((summary.succeeded / summary.total) * 100)}% 通过率` : "暂无"}
-            onClick={() => setStatus((current) => (current === "succeeded" ? "all" : "succeeded"))}
-            active={status === "succeeded"}
-          />
-          <SummaryCard
-            icon={<AlertTriangle size={16} aria-hidden="true" />}
-            label="失败"
-            value={summary.failed}
-            tone="block"
-            sublabel={summary.failed > 0 ? "需要关注 · 点击只看失败" : "无失败记录"}
-            onClick={() => setStatus((current) => (current === "failed" ? "all" : "failed"))}
-            active={status === "failed"}
-          />
-          <SummaryCard
-            icon={<SkipForward size={16} aria-hidden="true" />}
-            label="跳过"
-            value={summary.skipped}
-            tone="skip"
-            sublabel="运营手工跳过"
-            onClick={() => setStatus((current) => (current === "skipped" ? "all" : "skipped"))}
-            active={status === "skipped"}
-          />
+          <SummaryCard icon={<History size={16} />} label="当前结果" value={summary.total} tone="neutral" sublabel="最多保留最近 10,000 条" onClick={() => setLevel("all")} active={level === "all"} />
+          <SummaryCard icon={<AlertTriangle size={16} />} label="错误" value={summary.error} tone="block" sublabel={summary.error ? "需要优先处理" : "没有错误"} onClick={() => setLevel(level === "error" ? "all" : "error")} active={level === "error"} />
+          <SummaryCard icon={<CircleHelp size={16} />} label="警告" value={summary.warn} tone="skip" sublabel="可能影响执行结果" onClick={() => setLevel(level === "warn" ? "all" : "warn")} active={level === "warn"} />
+          <SummaryCard icon={level === "debug" ? <Bug size={16} /> : <Info size={16} />} label="信息与调试" value={summary.info + summary.debug} tone="ai" sublabel={`信息 ${summary.info} · 调试 ${summary.debug}`} onClick={() => setLevel(level === "info" ? "all" : "info")} active={level === "info"} />
         </section>
 
         <div className={toolbarStyles.opToolbar}>
-          <label className={toolbarStyles.opSearch}>
-            <Search size={14} aria-hidden="true" />
-            <input
-              className={toolbarStyles.opSearchInput}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索操作名称、目标或错误消息"
-              type="search"
-              aria-label="搜索操作日志"
-            />
-            {query && (
-              <button
-                type="button"
-                className={toolbarStyles.opSearchClear}
-                onClick={() => setQuery("")}
-                aria-label="清空搜索"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </label>
-
-          <div className={toolbarStyles.opFilterGroup} role="group" aria-label="按状态筛选">
-            {STATUS_FILTERS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={toolbarStyles.opStatusChip}
-                data-state={status === option.value ? "on" : "off"}
-                data-value={option.value}
-                onClick={() => setStatus(option.value)}
-                aria-pressed={status === option.value}
-              >
-                {option.label}
-              </button>
-            ))}
+          <div className={toolbarStyles.opToolbarTop}>
+            <label className={toolbarStyles.opSearch}>
+              <Search size={15} /><input className={toolbarStyles.opSearchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索消息、模块、产品、阶段或目标" type="search" aria-label="搜索运行日志" />
+              {query && <button type="button" className={toolbarStyles.opSearchClear} onClick={() => setQuery("")} aria-label="清空搜索"><X size={12} /></button>}
+            </label>
+            {hasFilter && <button className={toolbarStyles.opClear} type="button" onClick={clearAll}><X size={12} />重置全部</button>}
           </div>
-
-          <div className={toolbarStyles.opSelectors}>
-            <label className={toolbarStyles.opSelect}>
-              <Filter size={12} aria-hidden="true" />
-              <span className={toolbarStyles.opSelectPrefix}>类型</span>
-              <select
-                className={toolbarStyles.opSelectInput}
-                value={type}
-                onChange={(event) => setType(event.target.value as OperationType | "all")}
-                aria-label="按类型筛选"
-              >
-                {TYPE_FILTER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className={toolbarStyles.opSelect}>
-              <CircleHelp size={12} aria-hidden="true" />
-              <span className={toolbarStyles.opSelectPrefix}>阶段</span>
-              <select
-                className={toolbarStyles.opSelectInput}
-                value={stage}
-                onChange={(event) => setStage(event.target.value)}
-                aria-label="按阶段筛选"
-              >
-                <option value="all">全部阶段</option>
-                {stages.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {filterChips.length > 0 && (
-              <button className={toolbarStyles.opClear} type="button" onClick={clearAll} aria-label="清空全部筛选">
-                <X size={12} aria-hidden="true" />
-                清空
-              </button>
-            )}
+          <div className={toolbarStyles.opFilterBar}>
+            <div className={toolbarStyles.opFilterLabel}>
+              <ListFilter size={13} aria-hidden="true" />
+              <span>筛选</span>
+              {activeFilterCount > 0 && <span className={toolbarStyles.opFilterCount}>{activeFilterCount}</span>}
+            </div>
+            <div className={toolbarStyles.opSelectors}>
+              <LogSelect label="级别" value={level} onChange={(value) => setLevel(value as LogLevel | "all")} options={LEVEL_OPTIONS} />
+              <LogSelect label="来源" value={source} onChange={(value) => setSource(value as LogSource | "all")} options={SOURCE_OPTIONS} />
+              <LogSelect label="类型" value={type} onChange={(value) => setType(value as OperationType | "all")} options={TYPE_OPTIONS} />
+              <LogSelect label="状态" value={status} onChange={(value) => setStatus(value as OperationStatus | "all")} options={OPERATION_STATUS_OPTIONS} />
+              <LogSelect label="阶段" value={stage} onChange={setStage} options={[{ value: "all", label: "全部阶段" }, ...(page?.stages ?? []).map((value) => ({ value, label: value }))]} />
+            </div>
           </div>
         </div>
 
-        {filterChips.length > 0 && (
-          <div className={toolbarStyles.opChips} aria-live="polite">
-            {filterChips.map((chip) => (
-              <button
-                key={chip.key}
-                type="button"
-                className={toolbarStyles.opChip}
-                onClick={chip.onClear}
-                aria-label={`移除筛选：${chip.label}`}
-              >
-                <span>{chip.label}</span>
-                <X size={11} aria-hidden="true" />
-              </button>
-            ))}
-            <span className={toolbarStyles.opChipsCount}>
-              匹配 {filteredCount} / {summary.total} 条
-            </span>
-          </div>
-        )}
-
-        <section className={styles.opList} aria-label="操作日志列表">
-          {loading && entries.length === 0 ? (
-            <OperationLogSkeleton />
-          ) : entries.length === 0 ? (
-            <EmptyLogState hasFilter={filterChips.length > 0} onClear={clearAll} />
-          ) : (
-            <div className={styles.opListItems}>
-              {entries.map((entry) => (
-                <OperationLogRow
-                  key={entry.id}
-                  entry={entry}
-                  canRetry={entry.status === "failed" || entry.status === "skipped"}
-                  onRetry={(item) => void onRetry(item)}
-                  onShowDetail={onShowDetail}
-                />
-              ))}
-            </div>
-          )}
+        <div className={styles.opResultMeta} aria-live="polite"><span>显示 {entries.length} 条</span><span>·</span><span>每 2.5 秒自动刷新</span><span>·</span><span>导出遵循当前筛选</span></div>
+        <section className={styles.opList} aria-label="运行日志列表">
+          {loading && entries.length === 0 ? <OperationLogSkeleton /> : entries.length === 0 ? <EmptyLogState hasFilter={hasFilter} onClear={clearAll} /> :
+            <div className={styles.opListItems}>{entries.map((entry) => <OperationLogRow key={entry.id} entry={entry} canRetry={entry.type !== "runtime" && (entry.status === "failed" || entry.status === "skipped")} onRetry={(item) => void onRetry(item)} onShowDetail={onShowDetail} />)}</div>}
         </section>
       </div>
     </section>
   );
+}
+
+function LogSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
+  return <label className={toolbarStyles.opSelect}><span className={toolbarStyles.opSelectPrefix}>{label}</span><select className={toolbarStyles.opSelectInput} value={value} onChange={(event) => onChange(event.target.value)} aria-label={`按${label}筛选`}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
 }

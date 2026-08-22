@@ -1,5 +1,5 @@
 /**
- * 操作日志 (operation_log) 真实持久化 + 上限 1000 行。
+ * 操作日志 (operation_log) 真实持久化 + 上限 10000 行。
  *
  *   - 写入入口 appendOperationLog：在同一事务里完成 INSERT + COUNT 检查 + 超限 DELETE；
  *   - 查询 queryOperationLog：status/type/stage/localProductId/query(全文) + limit；
@@ -13,7 +13,7 @@ import type { OperationLogQuery, OperationStatus, OperationType } from "../../..
 import { now } from "./types.js";
 
 /** 操作日志默认上限：超过则按时间最早删。 */
-export const OPERATION_LOG_CAP = 1000;
+export const OPERATION_LOG_CAP = 10_000;
 
 /** SQLite 行 → 上层使用的对象形态。 */
 export interface OperationLogRow {
@@ -31,6 +31,9 @@ export interface OperationLogRow {
   target: string | null;
   message: string | null;
   payloadJson: string;
+  level: string;
+  source: string;
+  module: string | null;
 }
 
 /**
@@ -47,8 +50,8 @@ export function appendOperationLog(
   const insert = db.prepare(`
     INSERT INTO operation_log (
       id, local_product_id, product_name, stage, phase, type, name, status,
-      attempt, started_at, duration_ms, target, message, payload_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      attempt, started_at, duration_ms, target, message, payload_json, level, source, module
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const count = db.prepare(`SELECT COUNT(*) AS n FROM operation_log`).get() as { n: number };
   const tx = db.transaction(() => {
@@ -67,6 +70,9 @@ export function appendOperationLog(
       (entry.target as string | null) ?? null,
       (entry.message as string | null) ?? null,
       JSON.stringify((entry.payload as Record<string, unknown> | null) ?? {}),
+      (entry.level as string | null) ?? "info",
+      (entry.source as string | null) ?? "automation",
+      (entry.module as string | null) ?? null,
     );
     const totalAfter = count.n + 1;
     if (totalAfter > OPERATION_LOG_CAP) {
@@ -101,6 +107,8 @@ export function queryOperationLog(
     localProductId?: string;
     query?: string;
     limit?: number;
+    level?: string;
+    source?: string;
   },
 ): Array<OperationLogRow> {
   const where: string[] = [];
@@ -121,18 +129,26 @@ export function queryOperationLog(
     where.push("local_product_id = ?");
     params.push(query.localProductId);
   }
+  if (query.level && query.level !== "all") {
+    where.push("level = ?");
+    params.push(query.level);
+  }
+  if (query.source && query.source !== "all") {
+    where.push("source = ?");
+    params.push(query.source);
+  }
   if (query.query && query.query.trim()) {
     const needle = `%${query.query.trim()}%`;
     where.push(
-      "(name LIKE ? OR target LIKE ? OR message LIKE ? OR stage LIKE ? OR phase LIKE ? OR product_name LIKE ?)",
+      "(name LIKE ? OR target LIKE ? OR message LIKE ? OR stage LIKE ? OR phase LIKE ? OR product_name LIKE ? OR module LIKE ? OR payload_json LIKE ?)",
     );
-    params.push(needle, needle, needle, needle, needle, needle);
+    params.push(needle, needle, needle, needle, needle, needle, needle, needle);
   }
   const sql = `
     SELECT id, local_product_id AS localProductId, product_name AS productName,
       stage, phase, type, name, status,
       attempt, started_at AS startedAt, duration_ms AS durationMs,
-      target, message, payload_json AS payloadJson
+      target, message, payload_json AS payloadJson, level, source, module
     FROM operation_log
     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY started_at DESC

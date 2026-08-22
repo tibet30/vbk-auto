@@ -3,6 +3,7 @@ import type {
   AiConnectionTestInput,
   AiModelListInput,
   OperationLogQuery,
+  RuntimeLogCaptureInput,
   Settings,
 } from "../../shared/contracts.js";
 import { isAiProvider } from "../../shared/contracts.js";
@@ -14,7 +15,8 @@ import {
 import { fetchAiModelList } from "../infrastructure/ai-models.js";
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
-import { loadOperationLog } from "../operations/operation-log-store.js";
+import { captureRuntimeLog, loadOperationLog } from "../operations/operation-log-store.js";
+import { exportOperationLog, openOperationLogFile } from "../operations/operation-log-export.js";
 import type { MainIpcContext } from "./context.js";
 
 export function registerSettingsIpc(context: MainIpcContext): void {
@@ -105,6 +107,18 @@ export function registerSettingsIpc(context: MainIpcContext): void {
   ipcMain.handle("operationLog:load", (event, query?: OperationLogQuery) => {
     assertTrustedSender(event, "operationLog:load");
     return loadOperationLog(query);
+  });
+  ipcMain.handle("operationLog:capture", (event, input: RuntimeLogCaptureInput) => {
+    assertTrustedSender(event, "operationLog:capture");
+    captureRuntimeLog(input);
+  });
+  ipcMain.handle("operationLog:export", (event, query?: OperationLogQuery) => {
+    assertTrustedSender(event, "operationLog:export");
+    return exportOperationLog(query);
+  });
+  ipcMain.handle("operationLog:open", (event, path?: unknown) => {
+    assertTrustedSender(event, "operationLog:open");
+    return openOperationLogFile(path);
   });
 
   // 规划子系统接线：preflight + runPlan + 产品状态同步。所有 plan 层逻辑

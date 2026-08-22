@@ -22,11 +22,8 @@
   background: color-mix(in srgb, var(--ai-teal) 3%, var(--surface));
 }
 
-/* 状态条：失败/运行加粗到 4px，让重点状态一眼可辨 */
-.opRow[data-state='failed']    { box-shadow: inset 4px 0 0 var(--destructive); }
-.opRow[data-state='succeeded']  { box-shadow: inset 3px 0 0 var(--success); }
-.opRow[data-state='skipped']    { box-shadow: inset 3px 0 0 var(--subtle); }
-.opRow[data-state='running']    { box-shadow: inset 4px 0 0 var(--ai-teal); }
+.opRow[data-level='warn'] { background: color-mix(in srgb, var(--warning) 3%, var(--surface)); }
+.opRow[data-level='info'][data-state='running'] { background: color-mix(in srgb, var(--ai-teal) 3%, var(--surface)); }
 
 .opRowMain {
   display: grid;
@@ -80,6 +77,12 @@
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.02em;
+}
+
+.opRowModule {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ai-teal);
 }
 
 .opRowAttempt {
@@ -212,6 +215,12 @@
   background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
 }
 
+.opStatus[data-state='warn'] {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+
 .opStatusDot {
   width: 6px;
   height: 6px;
@@ -322,6 +331,7 @@
 .opRowError[data-state='ok']    { color: color-mix(in srgb, var(--success) 70%, var(--foreground)); }
 .opRowError[data-state='ai']    { color: color-mix(in srgb, var(--ai-teal) 70%, var(--foreground)); }
 .opRowError[data-state='skip']  { color: var(--muted-foreground); }
+.opRowError[data-state='warn']  { color: color-mix(in srgb, var(--warning) 76%, var(--foreground)); }
 
 .opRowErrorHead {
   display: inline-flex;

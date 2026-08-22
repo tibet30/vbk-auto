@@ -98,17 +98,22 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
     if (!itineraryResult.ok) return itineraryResult.plan;
     plan = itineraryResult.plan;
   }
-  // 基础文案同时提供目的地上下文和后续提示词所需的摘要。先完成并确认
-  // 实际字段已经落库，再并行执行展示、商业和资源节点，避免并发节点基于
-  // 空 basicInfo 生成并把「节点完成」误当成「产品字段已完成」。
+  // 基础文案同时提供目的地上下文和后续提示词所需的摘要。展示与商业节点
+  // 都会写产品字段并触发远端整包持久化；必须先完成 presentation 的写入与
+  // 持久化，再刷新 plan，最后启动 commercial，避免旧 presentation 快照在
+  // commercial 的 packageName/pricing 等写回后覆盖新字段。
   if (!isCompleted(plan, "copy")) {
     await runCompletionAiNode(deps, plan, "copy", "basicInfo", patchNode);
     plan = { ...plan, nodes: [...plan.nodes] };
   }
-  const completionAiNodes: Array<Promise<void>> = [];
-  if (!isCompleted(plan, "presentation")) completionAiNodes.push(runCompletionAiNode(deps, plan, "presentation", "presentation", patchNode));
-  if (!isCompleted(plan, "commercial")) completionAiNodes.push(runCompletionAiNode(deps, plan, "commercial", "commercial", patchNode));
-  await Promise.all(completionAiNodes);
+  if (!isCompleted(plan, "presentation")) {
+    await runCompletionAiNode(deps, plan, "presentation", "presentation", patchNode);
+    plan = { ...plan, nodes: [...plan.nodes] };
+  }
+  if (!isCompleted(plan, "commercial")) {
+    await runCompletionAiNode(deps, plan, "commercial", "commercial", patchNode);
+    plan = { ...plan, nodes: [...plan.nodes] };
+  }
 
   // 封面与用车查询都会驱动同一个 VBK BrowserView 导航，不能并行使用页面。
   // 两个节点仍各自保留 3 次重试，但资源查询本身必须串行，避免一个节点的

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import type { AppModel } from "../app.main.model";
 import { AppWorkspaceWorkflow } from "./workspace";
 import { AppWorkspaceHomePage } from "./workspace-home";
@@ -10,7 +10,7 @@ import { AppRail } from "./shell/Rail";
 import { AppTopbar } from "./shell/Topbar";
 import { AppStageNav } from "./stage-nav/StageNav";
 import { MaybeNotice } from "./notice/Notice";
-import type { OperationLogEntry, ProductDetail } from "../../../shared/contracts.js";
+import type { OperationLogEntry, OperationLogQuery, ProductDetail } from "../../../shared/contracts.js";
 import { api, operationStageToSection } from "../helpers";
 import styles from "./AppView.module.less";
 import shared from "./shared.module.less";
@@ -80,9 +80,6 @@ function RestoringProductPlaceholder() {
  */
 function OperationLogRoute({ model }: { model: AppModel }) {
   const { page, loading, refreshedAtLabel, notice, setNotice, refresh } = useOperationLogState(model.apiAvailable);
-  // 首次挂载时拉一次：query 为空表示不过滤，等同于「全部」。
-  useEffectOnce(() => { void refresh(); });
-
   const handleRetry = async (entry: OperationLogEntry) => {
     // 真实数据接上后，这里调 automation.retryOnePhase(localProductId, entry.phase)。
     // 现在用 notice 表达「已发起」并让用户感知操作已生效。
@@ -143,29 +140,51 @@ function OperationLogRoute({ model }: { model: AppModel }) {
     }
   };
 
+  const openExportedFile = async (filePath: string) => {
+    const bridge = api();
+    if (!bridge?.operationLog) {
+      setNotice({ kind: "warn", text: "日志打开接口尚未就绪。" });
+      return;
+    }
+    try {
+      await bridge.operationLog.open(filePath);
+    } catch (error) {
+      setNotice({ kind: "warn", text: error instanceof Error ? error.message : "打开日志文件失败。" });
+    }
+  };
+
+  const handleExport = async (query: OperationLogQuery) => {
+    const bridge = api();
+    if (!bridge?.operationLog) {
+      setNotice({ kind: "warn", text: "日志导出接口尚未就绪。" });
+      return;
+    }
+    try {
+      const result = await bridge.operationLog.export(query);
+      if (result.canceled) return;
+      const filePath = result.path;
+      const fileName = filePath?.split(/[\\/]/).pop() ?? "CSV 文件";
+      setNotice({
+        kind: "info",
+        text: `已安全导出 ${result.count} 条日志`,
+        action: filePath ? { label: fileName, onClick: () => void openExportedFile(filePath) } : undefined,
+      });
+    } catch (error) {
+      setNotice({ kind: "warn", text: error instanceof Error ? error.message : "日志导出失败。" });
+    }
+  };
+
   return (
     <AppOperationLogPage
       loading={loading}
       page={page}
       refreshedAtLabel={refreshedAtLabel}
-      onRefresh={() => refresh()}
+      onRefresh={(query) => refresh(query)}
+      onExport={handleExport}
       onRetry={handleRetry}
       onShowDetail={handleShowDetail}
       notice={notice}
       onDismissNotice={() => setNotice(null)}
     />
   );
-}
-
-/**
- * useEffect 的极简一次性版：ref 跟踪已挂载的次数，第二次以后不再触发。
- * 避免把 useEffect 直接放进组件函数体里造成 lint 警告。
- */
-function useEffectOnce(callback: () => void) {
-  const ran = useRef(false);
-  useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-    callback();
-  }, [callback]);
 }

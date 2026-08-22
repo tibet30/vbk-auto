@@ -1,4 +1,4 @@
-import { AlertTriangle, Briefcase, Check, ChevronRight, Copy, Eye, FileText, LoaderCircle, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Briefcase, Check, Copy, Eye, FileText, LoaderCircle, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { type MouseEvent, type ReactNode, useState } from "react";
 import type { CreateProductInput, ProductSummary } from "../../../shared/contracts.js";
 import shared from "../views/shared.module.less";
@@ -26,7 +26,21 @@ export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubm
       />
       <span id="product-idea-hint" className={styles.ideaHint}>{(input.userIdea ?? "").length} / 1000 字，AI 会把它作为需求偏好参考</span>
     </label>
-    <div className={styles.formActions}><button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button><button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>{submitting ? <><LoaderCircle size={15} className={styles.spin} />创建中</> : <Plus size={15} />}创建并进入产品</button></div>
+    <div className={styles.formActions}>
+      <button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button>
+      <button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>
+        {submitting ? (
+          <>
+            <LoaderCircle size={15} className={styles.spin} />创建中
+          </>
+        ) : (
+          <>
+            <Plus size={15} />
+            创建
+          </>
+        )}
+      </button>
+    </div>
   </div>;
 }
 
@@ -149,9 +163,6 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
             <span className={styles.metaSep} aria-hidden="true">·</span>
             <span className={`${styles.metaItem} ${styles.metaMuted}`}>更新 {formatUpdatedAt(item.updatedAt)}</span>
           </span>
-        </span>
-        <span className={styles.productEnter} aria-hidden="true">
-          <ChevronRight size={16} />
         </span>
       </div>
 

@@ -10,7 +10,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { logTimestamp, logInfo, logWarn, logError, logLog, logDebug } from "../../src/shared/log-timestamp.js";
+import { installLogSink, logTimestamp, logInfo, logWarn, logError, logLog, logDebug } from "../../src/shared/log-timestamp.js";
 
 type Captured = { level: "info" | "warn" | "error" | "log" | "debug"; args: unknown[] }[];
 
@@ -129,4 +129,22 @@ test("包装函数透传额外参数（不只接受字符串首参）", () => {
   assert.deepEqual(args[1], { a: 1 });
   assert.deepEqual(args[2], [1, 2, 3]);
   assert.equal(args[3], 42);
+});
+
+test("主进程可注入持久化 sink，且 sink 失败不影响原 console 输出", () => {
+  const seen: Array<{ level: string; args: ReadonlyArray<unknown> }> = [];
+  const cap = captureConsole();
+  try {
+    installLogSink((level, args) => seen.push({ level, args }));
+    logWarn("[runtime] visible", { attempt: 2 });
+    installLogSink(() => { throw new Error("disk failed"); });
+    assert.doesNotThrow(() => logInfo("still visible"));
+  } finally {
+    installLogSink(undefined);
+    cap.restore();
+  }
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].level, "warn");
+  assert.deepEqual(seen[0].args, ["[runtime] visible", { attempt: 2 }]);
+  assert.equal(cap.logs.length, 2);
 });

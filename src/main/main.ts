@@ -5,7 +5,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow } from "electron";
-import { logError, logWarn } from "../shared/log-timestamp.js";
+import { installLogSink, logError, logWarn } from "../shared/log-timestamp.js";
+import { createRuntimeLogCapture } from "../shared/log-redaction.js";
 import { APP_NAME } from "../shared/brand.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import type {
@@ -52,6 +53,7 @@ import { ProductMutationService } from "./application/product-mutation-service.j
 import { createRemoteProductMirror } from "./application/remote-product-mirror.js";
 import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
 import { cleanStaleChromiumProfileDb } from "./infrastructure/chromium-profile-cleanup.js";
+import { captureRuntimeLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import {
   applyStartupCommandLineSwitches,
   debuggingPort,
@@ -340,6 +342,8 @@ app.whenReady().then(async () => {
   // 已经开始读这些库就会撞到 schema 不兼容报错。
   cleanStaleChromiumProfileDb(app.getPath("userData"));
   db = new VbkDatabase(app.getPath("userData"));
+  setOperationLogDb(db);
+  installLogSink((level, args) => captureRuntimeLog(createRuntimeLogCapture(level, "main", args)));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
@@ -351,6 +355,8 @@ app.whenReady().then(async () => {
   if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });
   const orphanPlanning = db.recoverOrphanPlanningStates();
   if (orphanPlanning.length) logWarn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
+  const orphanLogs = db.recoverOrphanOperationLog();
+  if (orphanLogs) logWarn("[startup] recovered interrupted log entries", { count: orphanLogs });
 
   const context: MainIpcContext = {
     db,

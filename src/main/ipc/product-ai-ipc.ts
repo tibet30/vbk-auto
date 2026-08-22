@@ -15,6 +15,7 @@ import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { enrichItineraryPois } from "../planning/poi-enrichment.js";
+import { ItineraryAdoptionSyncError, syncItineraryAdoptionSignal } from "../planning/itinerary-adoption-signal.js";
 import {
   classifyMiniMaxError,
   extractMiniMaxFailureReason,
@@ -99,6 +100,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       runtime,
       persistedTaskKeys: new Set(existingTasks.map((task) => `${task.type}::${task.label}`)),
     });
+    await syncItineraryAdoptionSignal(context, localProductId);
   }
 
   async function runAiReply(localProductId: string, content: string) {
@@ -108,6 +110,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (message.length > 6000) throw new Error("单条消息不能超过 6000 个字符，请拆分后发送。");
     const userMessageId = db.addMessage(localProductId, "user", message, "running");
     emitProduct(db.getProduct(localProductId)!);
+    let suppressFinalEmit = false;
     // 本轮请求开始时锁定当前 AI 提供商快照：service、过程日志、最终 normalizeFailureMessage
     // 都使用同一份快照，避免请求过程中用户切换模型导致错误归错提供商。
     const turnSettings = getSettings();
@@ -338,6 +341,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         }
       }
     } catch (error) {
+      if (error instanceof ItineraryAdoptionSyncError) suppressFinalEmit = error.suppressFinalEmit;
       const reason = extractMiniMaxFailureReason(error) || (error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。");
       const errorCode = classifyMiniMaxError(error);
       const finalMessage = normalizeFailureMessage(errorCode, reason, providerLabel);
@@ -347,7 +351,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       db.updateMessageStatus(localProductId, userMessageId, "failed");
       db.addMessage(localProductId, "assistant", `本轮没有获得 AI 回复：${finalStructuredMessage}`, "failed");
     }
-    emitProduct(db.getProduct(localProductId)!);
+    if (!suppressFinalEmit) emitProduct(db.getProduct(localProductId)!);
   }
   ipcMain.handle("ai:send", (_event, localProductId: string, content: string) =>
     context.productWorkflows.runExclusive(localProductId, "ai", () => runAiReply(localProductId, content)));

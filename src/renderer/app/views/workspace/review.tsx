@@ -55,11 +55,15 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     searchCtripLibraryImages,
     clearError: clearBasicInfoError,
     itinerary,
-    expandedDayIndex,
-    setExpandedDayIndex,
+    expandedDayIndexes,
+    setExpandedDayIndexes,
     planningRecovery,
     planningResume,
     planningBusy,
+    planningAcceptItinerary,
+    planningAcceptBusy,
+    planningRerunMajorStage,
+    planningRerunBusy,
   } = model;
 
   if (!product) return null;
@@ -67,6 +71,31 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   const taskList = product.researchTasks ?? [];
   const planningActive = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
   const canSend = input.trim().length > 0 && !loading && !planningActive;
+
+  // 生成进度 / 就绪度：展示在顶部「生成规划」标题右侧（见 PlanningTree）。
+  const isProductEmpty = !product.product
+    || !Array.isArray((product.product as Record<string, unknown>).itinerary)
+    || ((product.product as Record<string, unknown>).itinerary as unknown[]).length === 0;
+  const planningPartial = planningRecovery?.status === "completed" && planningRecovery.allStagesCompleted === false;
+  const isGenerating = planningActive || (loading && isProductEmpty);
+  const ready = readiness.ready;
+  const completedStages = planningRecovery?.completed?.length ?? 0;
+  const progressValue = planningActive || planningPartial
+    ? `${completedStages}/7`
+    : isGenerating ? "—" : `${readiness.completion}%`;
+  const progressCaption = planningActive || planningPartial
+    ? "生成进度"
+    : isGenerating ? "生成中" : "就绪度";
+  const readinessLabel = ready
+    ? "可以录入"
+    : isGenerating
+      ? "AI 正在生成…"
+      : `${readiness.issues.length} 项待处理`;
+  const readinessState: "confirmed" | "researching" | "needsConfirmation" = ready
+    ? "confirmed"
+    : isGenerating
+      ? "researching"
+      : "needsConfirmation";
 
   const handleSend = () => {
     if (!product || loading || planningActive || !input.trim()) {
@@ -137,10 +166,17 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   return (
     <div className={layout.reviewWorkspace}>
       <PlanningTree
-        productId={product.id}
         plan={product.planning}
         planningBusy={planningBusy}
         onResume={planningResume}
+        itineraryAdoptionBusy={planningAcceptBusy}
+        onAcceptItinerary={planningAcceptItinerary}
+        onRerunMajorStage={planningRerunMajorStage}
+        rerunBusy={planningRerunBusy}
+        readinessLabel={readinessLabel}
+        readinessState={readinessState}
+        progressValue={progressValue}
+        progressCaption={progressCaption}
       />
       <div className={layout.stageSplit} style={splitStyle}>
       <section className={`${layout.panel} ${chat.ai}`} aria-label="方案对话">
@@ -239,8 +275,8 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         setComposerInput={setInput}
         planningRecovery={planningRecovery}
         setActiveTask={setActiveTaskId}
-        expandedDayIndex={expandedDayIndex}
-        setExpandedDayIndex={setExpandedDayIndex}
+        expandedDayIndexes={expandedDayIndexes}
+        setExpandedDayIndexes={setExpandedDayIndexes}
         vbkLoggedIn={Boolean(vbkLogin?.loggedIn)}
         currentAccountName={currentAccountName}
         basicInfoDraft={basicInfoDraft}

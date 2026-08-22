@@ -73,17 +73,12 @@
   transform: rotate(-90deg);
 }
 
-/* Keep the itinerary within the review viewport so expanded day details can
- * be reached with a wheel or trackpad without pushing the whole section away. */
+/* Day list stretches to fit its content — no internal scrollbar.
+ * The panel-level .scroll container owns the only vertical scroll. */
 .dayList {
   list-style: none;
   margin: 0;
   padding: 8px 0;
-  min-height: 0;
-  max-height: min(680px, calc(100vh - 240px));
-  overflow-y: auto;
-  overscroll-behavior: auto;
-  scrollbar-gutter: stable;
 }
 
 .block[data-collapsed='true'] .dayList,

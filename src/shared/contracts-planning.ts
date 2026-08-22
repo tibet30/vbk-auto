@@ -80,6 +80,19 @@ export interface PlanningNodeState {
   completedAt?: string;
 }
 
+export type ItineraryAdoptionStatus = "pending" | "verifying" | "accepted" | "blocked";
+
+/**
+ * 行程由对话 patch 产生后，必须先由运营显式采用；completion 不能继续沿用
+ * 旧行程生成的派生数据。这个信号与 PlanningPlanV2 一起落到 Tibet。
+ */
+export interface ItineraryAdoptionState {
+  status: ItineraryAdoptionStatus;
+  itineraryRevision: string;
+  triggeredAt: string;
+  error?: string;
+}
+
 export interface PlanningPlanV2 {
   version: 2;
   runId: string;
@@ -89,6 +102,7 @@ export interface PlanningPlanV2 {
   poiCandidates: PlanningPoiCandidate[];
   createdAt: string;
   updatedAt: string;
+  itineraryAdoption?: ItineraryAdoptionState;
 }
 
 export interface PlanningSpotRecommendationRequest {

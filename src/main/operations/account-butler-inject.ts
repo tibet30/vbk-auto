@@ -60,6 +60,20 @@ function hasExistingButler(product: Record<string, unknown>): boolean {
 }
 
 /**
+ * 解析当前账号的管家联系人选择：只有 accountName 非空且 butlerName 是合法
+ * ContactCardSelection 时才返回，否则返回 undefined。供「供应商产品编号 =
+ * VBK-联系人名字」与管家注入两处共用，避免重复校验。
+ */
+export function resolveAccountButler(
+  db: VbkDatabase,
+  accountName: string | null | undefined,
+): ContactCardSelection | undefined {
+  if (!accountName || !accountName.trim()) return undefined;
+  const raw = db.getAccountFixedInfo(accountName.trim()).values.butlerName;
+  return isContactCardSelection(raw) ? raw : undefined;
+}
+
+/**
  * 把当前账号的管家联系人（若已配置）注入到 product.operations.bookingControls.butler。
  * 严格遵守「已有 butler 不覆盖」「未登录 / 未配置不写」两条硬约束。
  */
@@ -76,9 +90,8 @@ export function injectAccountButler(
   if (hasExistingButler(product.product)) {
     return { written: false, reason: "product 已存在 butler，不覆盖" };
   }
-  const fixed = db.getAccountFixedInfo(accountName.trim());
-  const raw = fixed.values.butlerName;
-  if (!isContactCardSelection(raw)) {
+  const raw = resolveAccountButler(db, accountName);
+  if (!raw) {
     return { written: false, reason: "账号未配置合法管家联系人" };
   }
   // applyManualReviewField 内部还会再走一次 isContactCardSelection 校验；
@@ -105,8 +118,8 @@ export function prepareProductWithAccountButler(
   if (hasExistingButler(product.product)) {
     return { product, injectResult: { written: false, reason: "product 已存在 butler，不覆盖" } };
   }
-  const raw = db.getAccountFixedInfo(accountName.trim()).values.butlerName;
-  if (!isContactCardSelection(raw)) {
+  const raw = resolveAccountButler(db, accountName);
+  if (!raw) {
     return { product, injectResult: { written: false, reason: "账号未配置合法管家联系人" } };
   }
   try {
@@ -128,7 +141,8 @@ export function createProductWithAccountButler(
   input: CreateProductInput,
   accountName: string | null | undefined,
 ): CreateProductWithAccountButlerResult {
-  const created = db.createProduct(input);
+  const butler = resolveAccountButler(db, accountName);
+  const created = db.importProductSnapshot(db.buildProductSnapshot(input, butler?.displayName ?? null));
   const injectResult = injectAccountButler(db, created.id, accountName);
   return {
     product: db.getProduct(created.id) ?? created,

@@ -7,10 +7,11 @@
  *  - 只校验被命中的 /itinerary/{index}/description 字段是否去掉了命中词；
  *  - 其余行程结构不要求重写，但 AI 生成不得写入文案黑名单。
  */
-import type { AiResponse } from "../../../shared/contracts.js";
+import type { AiResponse, ProductSummary } from "../../../shared/contracts.js";
 import { applyProductPatch } from "../../operations/product-patch.js";
 import { buildVbkCopyPolicyPrompt, findVbkCopyBadCase } from "../../planning/vbk-copy-policy.js";
 import type { ProductItineraryDay } from "../ctrip/itinerary-api/itinerary-transform.js";
+import type { FillItineraryDraftApiResult } from "../ctrip/itinerary/api-entry.js";
 
 export type ItineraryCopyPath = `/itinerary/${number}/description`;
 
@@ -34,7 +35,9 @@ function sanitizeWord(word: string): string {
 
 export function extractSensitiveWords(message: string): string[] {
   if (typeof message !== "string") return [];
-  const hits = [...message.matchAll(/非法(?:词|关键词)[：:：]\s*([^，,、;；。\n]+?)\s*(?:[，,、;；。\n]|$)/g)];
+  // 先取到“请修改/请更换”等平台提示之前，再按顿号/逗号拆词；
+  // 否则全角顿号会被当作一次完整匹配的结束，后续词不会进入 matchAll。
+  const hits = [...message.matchAll(/非法(?:词|关键词)[：:]\s*([^。\n]+?)(?=\s*(?:[，,、;；]\s*请|[。\n]|$))/g)];
   const raw = hits.flatMap((match) => {
     const words = match[1]?.split(/[、,，;；]/) ?? [];
     return words.map(sanitizeWord).filter(Boolean);
@@ -140,9 +143,9 @@ export async function fillItineraryWithSensitiveRewrite(args: {
   localProductId: string;
   product: ProductWithItinerary;
   log: (message: string, level?: "info" | "warning" | "error") => void;
-  executeItinerary: () => Promise<unknown>;
-  dbUpdate: (localProductId: string, product: Record<string, unknown>, status: string) => void;
-}): Promise<unknown> {
+  executeItinerary: () => Promise<FillItineraryDraftApiResult>;
+  dbUpdate: (localProductId: string, product: Record<string, unknown>, status: ProductSummary["status"]) => void;
+}): Promise<FillItineraryDraftApiResult> {
   const maxAiRewrites = 2;
   for (let rewriteAttempt = 0; ; rewriteAttempt += 1) {
     try {

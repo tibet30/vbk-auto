@@ -15,6 +15,7 @@ import { simulateRecoveryEffectTick } from "./recovery-policy.js";
 import { upsertProductToTop } from "./product-list-helper.js";
 import { useBrowserDerived } from "./domains/browser-derived";
 import { useProductViewDerived } from "./domains/product-view-derived";
+import { usePlanningActions } from "./domains/planning-actions";
 
 export function useAppStateDerived(state: AppStateBase) {
   const {
@@ -26,7 +27,7 @@ export function useAppStateDerived(state: AppStateBase) {
     setNotice,
     setActiveTaskId,
     setVerificationNote,
-    setExpandedDayIndex,
+    setExpandedDayIndexes,
     settings,
     setSettings,
     setStage,
@@ -58,8 +59,7 @@ export function useAppStateDerived(state: AppStateBase) {
   // 用户通过 planning.resume 手动续跑，避免并发触发。
   const [planningState, setPlanningState] = useState<PlanningGenerationState | null>(null);
   const [autoStartUsed, setAutoStartUsed] = useState<string | null>(null);
-  // 续跑按钮点击锁：点击后到 planning.state 携新状态返回前，避免重复点击造成双触发。
-  const [planningBusy, setPlanningBusy] = useState(false);
+  const planningActions = usePlanningActions({ product, planningState, setPlanningState, setNotice });
   // Per-product sentinel：标记「planning.state(localProductId) 已对当前 product 完成」。
   // 未完成时 auto-start effect 必须空跑：这样能避免「persisted failed 产品被重新打开」
   // 时 effect 在 lookup 回来前抢跑 planning.start，把已经失败的产品又拉起一次。
@@ -195,7 +195,7 @@ export function useAppStateDerived(state: AppStateBase) {
     setActiveTaskId(null);
     setVerificationNote("");
     setStage(initialStageFor(product.status));
-    setExpandedDayIndex(0);
+    setExpandedDayIndexes(new Set([0]));
     setPlanningState(null);
     setAutoStartUsed(null);
     setPlanningStateLoadedLocalProductId(null);
@@ -364,51 +364,10 @@ export function useAppStateDerived(state: AppStateBase) {
     };
   }, [planningState]);
 
-  /**
-   * 用户手动续跑入口：与 auto-start 互斥；每次点击都会调一次 planning.resume，
-   * 后端从持久化 currentStage 续跑，不会丢失已合法落地的模块。
-   */
-  const planningResume = async () => {
-    if (!product || !api()) return;
-    if (planningBusy) return; // 重复点击锁：与 UI 端 disabled 同源。
-    setPlanningBusy(true);
-    logInfo("[App] planning.resume click", { localProductId: product.id, planningStateStatus: planningState?.status, currentStage: planningState?.currentStage });
-    setNotice("正在续跑规划…");
-    try {
-      const result = await api()!.planning.resume(product.id);
-      if (result.state) setPlanningState(result.state);
-      const acceptedNames = (result.accepted ?? []).slice();
-      const rejectedNames = (result.rejected ?? []).map((r) => r.module);
-      // 关键可观测性：当 result.status === needs_user 且 persisted accepted
-      // 与上一次快照相同（即后端没有推进任何模块），明确告诉用户「本轮未取得进展」，
-      // 而不是只显示 assistantReply 本身看不到原因。
-      const previouslyAccepted = new Set<string>();
-      for (const s of planningState?.stages ?? []) {
-        for (const m of s.accepted ?? []) previouslyAccepted.add(m.module);
-      }
-      const newlyAccepted = acceptedNames.filter((m) => !previouslyAccepted.has(m));
-      logInfo("[App] planning.resume result", { localProductId: product.id, status: result.status, accepted: acceptedNames, newlyAccepted, rejected: rejectedNames });
-      const summary = result.assistantReply
-        || (acceptedNames.length ? `已接受：${acceptedNames.join("、")}。` : "")
-        + (rejectedNames.length ? `缺失：${rejectedNames.join("、")}。` : "");
-      if (result.status === "needs_user" && newlyAccepted.length === 0 && acceptedNames.length > 0) {
-        setNotice(`续跑未取得进展：${summary}请查看 DevTools 中 [planning] 日志或调整对话后重试。`);
-      } else {
-        setNotice(summary || "续跑完成");
-      }
-    } catch (error) {
-      logWarn("[App] planning.resume failed", { localProductId: product.id, error });
-      setNotice(`续跑失败：${(error as { message?: string })?.message ?? String(error)}。请打开 DevTools 查看 [planning] 日志。`);
-    } finally {
-      setPlanningBusy(false);
-    }
-  };
-
   return {
     ...productViewDerived,
     ...browserDerived,
     planningRecovery,
-    planningResume,
-    planningBusy,
+    ...planningActions,
   };
 }

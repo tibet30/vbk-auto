@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -15,11 +15,11 @@ import type {
   PlanningNodeState,
   PlanningPlanV2,
 } from "../../../../shared/contracts-planning.js";
-import { api } from "../../helpers";
 import shared from "../shared.module.less";
+import { PlanningRerunConfirmDialog, type PlanningRerunStage } from "./planning-rerun-confirm-dialog";
 import styles from "./planning-tree.module.less";
 
-const STAGES: Array<{ id: PlanningMajorStage; label: string; description: string; invalidates: string }> = [
+const STAGES: PlanningRerunStage[] = [
   { id: "foundation", label: "产品骨架", description: "省市、天数、形态与交通骨架", invalidates: "产品骨架、行程规划和全部产品补全数据" },
   { id: "itinerary", label: "行程规划", description: "候选景点、真实 POI 与逐日编排", invalidates: "景点池、POI、逐日行程和全部产品补全数据" },
   { id: "completion", label: "产品补全", description: "文案、商业信息、封面与用车资源", invalidates: "副标题、展示、商业信息、封面和用车资源组" },
@@ -38,6 +38,12 @@ const NODE_LABELS: Record<PlanningNodeId, string> = {
   finalValidation: "最终准入检查",
 };
 
+const RERUN_FALLBACK_NODES: Record<PlanningMajorStage, PlanningNodeId> = {
+  foundation: "skeleton",
+  itinerary: "spotCandidates",
+  completion: "copy",
+};
+
 const STATUS_LABELS: Record<PlanningNodeState["status"], string> = {
   pending: "待开始",
   running: "进行中",
@@ -48,19 +54,43 @@ const STATUS_LABELS: Record<PlanningNodeState["status"], string> = {
   invalidated: "已失效",
 };
 
+export function resolveActivePlanningNode(
+  plan: PlanningPlanV2 | undefined,
+  rerunBusy: PlanningMajorStage | null,
+): PlanningNodeId | null {
+  if (plan?.status === "running") return plan.currentNode;
+  return rerunBusy ? RERUN_FALLBACK_NODES[rerunBusy] : null;
+}
+
 export function PlanningTree(props: {
-  productId: string;
   plan?: PlanningPlanV2;
   planningBusy: boolean;
   onResume(): Promise<void>;
+  onRerunMajorStage(stage: PlanningMajorStage): Promise<void>;
+  rerunBusy: PlanningMajorStage | null;
+  itineraryAdoptionBusy: boolean;
+  onAcceptItinerary(): Promise<void>;
+  /** 就绪度徽章文案（如「可以录入 / N 项待处理 / AI 正在生成…」）。 */
+  readinessLabel: string;
+  /** 就绪度徽章状态，映射到 shared.state 的 data-state 配色。 */
+  readinessState: "confirmed" | "researching" | "needsConfirmation";
+  /** 进度数值（如「85% / 3/7 / —」）。 */
+  progressValue: string;
+  /** 进度数值旁的小标签（生成进度 / 生成中 / 就绪度）。 */
+  progressCaption: string;
 }) {
-  const { productId, plan, planningBusy, onResume } = props;
-  const [rerunning, setRerunning] = useState<PlanningMajorStage | null>(null);
+  const { plan, planningBusy, onResume, onRerunMajorStage, rerunBusy, itineraryAdoptionBusy, onAcceptItinerary, readinessLabel, readinessState, progressValue, progressCaption } = props;
   const [collapsed, setCollapsed] = useState<Partial<Record<PlanningMajorStage, boolean>>>({});
   const [treeCollapsed, setTreeCollapsed] = useState(false);
+  const [rerunStage, setRerunStage] = useState<PlanningMajorStage | null>(null);
+  const rerunTriggerRefs = useRef<Partial<Record<PlanningMajorStage, HTMLButtonElement | null>>>({});
+  const rerunFocusRef = useRef<HTMLButtonElement | null>(null);
   const nodes = plan?.nodes ?? [];
-  const currentMajor = nodes.find((node) => node.id === plan?.currentNode)?.majorStage;
-  const currentStage = STAGES.find((stage) => stage.id === currentMajor);
+  const activeNode = resolveActivePlanningNode(plan, rerunBusy);
+  const activeNodeLabel = activeNode ? `AI 正在生成 ${NODE_LABELS[activeNode]}` : null;
+  const terminalStatus = plan && !activeNodeLabel
+    ? { label: overallLabel(plan), status: plan.status }
+    : null;
   const poiSummary = useMemo(() => {
     if (!plan) return "";
     const recommended = plan.poiCandidates.length;
@@ -69,15 +99,21 @@ export function PlanningTree(props: {
     return recommended ? `推荐 ${recommended} / 命中 ${matched} / 采用 ${selected}` : "";
   }, [plan]);
 
-  const rerun = async (stage: PlanningMajorStage) => {
-    const definition = STAGES.find((item) => item.id === stage)!;
-    if (!window.confirm(`重做“${definition.label}”将清除：${definition.invalidates}。\n\n产品 UUID、目的地、天数、形态、供应商编号和账号固定信息会保留。是否继续？`)) return;
-    setRerunning(stage);
-    try {
-      await api()!.planning.rerunMajorStage(productId, stage);
-    } finally {
-      setRerunning(null);
-    }
+  useEffect(() => {
+    if (plan?.status === "completed" && !rerunBusy) setTreeCollapsed(true);
+  }, [plan?.status, rerunBusy]);
+
+  const rerun = (stage: PlanningMajorStage) => {
+    rerunFocusRef.current = rerunTriggerRefs.current[stage] ?? null;
+    setRerunStage(stage);
+  };
+  const confirmRerun = () => {
+    if (!rerunStage) return;
+    const stage = rerunStage;
+    setRerunStage(null);
+    // 确认后按钮会立即进入 disabled/busy 状态，先在状态切换前交还焦点。
+    rerunTriggerRefs.current[stage]?.focus();
+    void onRerunMajorStage(stage);
   };
 
   const resumable = plan && (plan.status === "needs_user" || plan.status === "failed");
@@ -96,37 +132,64 @@ export function PlanningTree(props: {
         >
           <span className={styles.treeTitleMain}>
             <strong>生成规划</strong>
-            {treeCollapsed && plan ? (
-              <span className={styles.overallStatus} data-state={plan.status}>
-                {currentStage && plan.status === "running" ? (
-                  <>
-                    {stageStatusIcon("running", styles.spin)}
-                    当前进行：{currentStage.label}
-                  </>
-                ) : <>
-                  {overallStatusIcon(plan.status, styles.spin)}
-                  {overallLabel(plan)}
-                </>}
+            {activeNodeLabel ? (
+              <span
+                className={styles.generationStatus}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                title={activeNodeLabel}
+              >
+                <LoaderCircle size={13} className={styles.spin} aria-hidden="true" />
+                <span>{activeNodeLabel}</span>
               </span>
             ) : !plan ? <span>旧产品需要按三阶段流程重新规划</span> : null}
           </span>
-          <span className={styles.treeTitleChevron} aria-hidden="true">
-            {treeCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-          </span>
         </button>
         {resumable && (
-          <button className={`${shared.btn} ${shared.btnSm}`} data-variant="ai" type="button" disabled={planningBusy} onClick={() => void onResume()}>
+          <button className={`${shared.btn} ${shared.btnSm}`} data-variant="ai" type="button" disabled={planningBusy || Boolean(rerunBusy) || itineraryAdoptionBusy} onClick={() => void onResume()}>
             {planningBusy ? <LoaderCircle size={13} className={styles.spin} /> : <RotateCcw size={13} />}
             从失败节点继续
           </button>
         )}
+        <span className={styles.treeTrailing}>
+          {terminalStatus && (
+            <span className={styles.overallStatus} data-state={terminalStatus.status} title={terminalStatus.label}>
+              {overallStatusIcon(terminalStatus.status, styles.spin)}
+              {terminalStatus.label}
+            </span>
+          )}
+          <span className={styles.readinessGroup}>
+            <span className={shared.state} data-state={readinessState}>{readinessLabel}</span>
+            <span className={styles.progressValue}>
+              <strong>{progressValue}</strong>
+              <small>{progressCaption}</small>
+            </span>
+          </span>
+          <button
+            className={styles.treeTitleChevron}
+            type="button"
+            aria-label={treeCollapsed ? "展开方案生成" : "收起方案生成"}
+            aria-expanded={!treeCollapsed}
+            aria-controls="planning-stage-list"
+            onClick={() => setTreeCollapsed((value) => {
+              if (value) setCollapsed({});
+              return !value;
+            })}
+          >
+            <span aria-hidden="true">
+              {treeCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            </span>
+          </button>
+        </span>
       </div>
       {!treeCollapsed && <div id="planning-stage-list" className={styles.scroller} tabIndex={0} aria-label="规划阶段，可水平滚动">
         <ol className={styles.stageList}>
           {STAGES.map((stage, index) => {
             const stageNodes = nodes.filter((node) => node.majorStage === stage.id);
             const isCollapsed = collapsed[stage.id] ?? false;
-            const state = majorStageState(stageNodes, plan);
+            const stageBusy = rerunBusy === stage.id;
+            const state = stageBusy ? "running" : majorStageState(stageNodes, plan);
             return (
               <li className={styles.stage} data-state={state} key={stage.id}>
                 <header className={styles.stageHead}>
@@ -151,11 +214,13 @@ export function PlanningTree(props: {
                   <button
                     className={styles.rerun}
                     type="button"
-                    disabled={Boolean(rerunning) || plan?.status === "running" || (!plan && stage.id !== "foundation")}
-                    onClick={() => void rerun(stage.id)}
+                    ref={(element) => { rerunTriggerRefs.current[stage.id] = element; }}
+                    aria-busy={stageBusy}
+                    disabled={Boolean(rerunBusy) || planningBusy || itineraryAdoptionBusy || (!plan && stage.id !== "foundation")}
+                    onClick={() => rerun(stage.id)}
                   >
-                    {rerunning === stage.id ? <LoaderCircle size={12} className={styles.spin} /> : <RotateCcw size={12} />}
-                    {!plan && stage.id === "foundation" ? "按新流程规划" : "重做此阶段"}
+                    {rerunBusy === stage.id ? <LoaderCircle size={12} className={styles.spin} /> : <RotateCcw size={12} />}
+                    {rerunBusy === stage.id ? "重做中…" : !plan && stage.id === "foundation" ? "按新流程规划" : "重做此阶段"}
                   </button>
                   <button
                     className={styles.stageExpand}
@@ -190,6 +255,50 @@ export function PlanningTree(props: {
           })}
         </ol>
       </div>}
+      {plan?.itineraryAdoption?.status === "pending" && (
+        <div className={styles.adoptionCard} role="status" aria-live="polite">
+          <strong>新行程已更新，产品补全已失效</strong>
+          <span>确认后会重新核验当前行程的真实 POI，并重做文案、封面、商业信息和用车资源。</span>
+          <div className={styles.adoptionActions}>
+            <button
+              className={`${shared.btn} ${shared.btnSm}`}
+              data-variant="ai"
+              type="button"
+              disabled={itineraryAdoptionBusy || planningBusy || Boolean(rerunBusy)}
+              onClick={() => void onAcceptItinerary()}
+            >
+              {itineraryAdoptionBusy ? <LoaderCircle size={13} className={styles.spin} /> : <Check size={13} />}
+              {itineraryAdoptionBusy ? "正在核验并补全…" : "采用此行程并重新补全产品"}
+            </button>
+            <span className={styles.adoptionHint}>可继续调整：继续在对话中修改行程，采用前会以最新版本为准。</span>
+          </div>
+        </div>
+      )}
+      {plan?.itineraryAdoption?.status === "blocked" && (
+        <div className={styles.adoptionError} role="alert">
+          <strong>行程尚未采用</strong>
+          <span>{plan.itineraryAdoption.error || "有景点未匹配真实 POI，请继续调整后重试。"}</span>
+          <div className={styles.adoptionActions}>
+            <button
+              className={`${shared.btn} ${shared.btnSm}`}
+              data-variant="ai"
+              type="button"
+              disabled={itineraryAdoptionBusy || planningBusy || Boolean(rerunBusy)}
+              onClick={() => void onAcceptItinerary()}
+            >
+              {itineraryAdoptionBusy ? <LoaderCircle size={13} className={styles.spin} /> : <RotateCcw size={13} />}
+              {itineraryAdoptionBusy ? "正在重新核验…" : "重新核验并补全"}
+            </button>
+            <span>也可以继续在对话中调整行程，采用时始终以最新版本为准。</span>
+          </div>
+        </div>
+      )}
+      <PlanningRerunConfirmDialog
+        stage={rerunStage ? STAGES.find((stage) => stage.id === rerunStage) ?? null : null}
+        onCancel={() => setRerunStage(null)}
+        onConfirm={confirmRerun}
+        returnFocusRef={rerunFocusRef}
+      />
     </section>
   );
 }
@@ -248,7 +357,7 @@ function fallbackText(node: PlanningNodeState): string {
 }
 
 function overallLabel(plan: PlanningPlanV2): string {
-  if (plan.status === "completed") return "规划完成，已进入产品审查";
+  if (plan.status === "completed") return "规划已完成，可进入产品审查";
   if (plan.status === "running") return "正在运行，节点通过后即写入 Tibet";
   if (plan.status === "needs_user") return "流程已暂停，请处理失败或登录阻塞节点";
   return "等待开始";

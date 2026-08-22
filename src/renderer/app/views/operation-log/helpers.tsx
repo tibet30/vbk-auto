@@ -1,7 +1,7 @@
 /* VBK Desktop — operation-log sub-components and hooks
  * Helper bits used by the operation log page itself. */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { History, LoaderCircle, X } from "lucide-react";
 import type { OperationLogPage } from "../../../../shared/contracts.js";
 import { api } from "../../helpers";
@@ -11,7 +11,7 @@ import summaryStyles from "./summary.module.less";
 import typeIconStyles from "./OperationTypeIcon.module.less";
 import styles from "./index.module.less";
 
-type Notice = { kind: "info" | "warn"; text: string } | null;
+type Notice = { kind: "info" | "warn"; text: string; action?: { label: string; onClick: () => void } } | null;
 
 export function SummaryCard({
   icon,
@@ -25,7 +25,7 @@ export function SummaryCard({
   icon: ReactNode;
   label: string;
   value: number;
-  tone: "ok" | "block" | "skip" | "neutral";
+  tone: "ok" | "block" | "skip" | "neutral" | "ai";
   sublabel: string;
   /** 提供后整张卡片变成可点击的过滤快捷入口。 */
   onClick?: () => void;
@@ -94,11 +94,11 @@ export function EmptyLogState({ hasFilter, onClear }: { hasFilter: boolean; onCl
   return (
     <div className={`${shared.emptyState} ${styles.opEmpty}`}>
       <History size={26} />
-      <h3>{hasFilter ? "没有匹配的日志" : "还没有自动化操作记录"}</h3>
+      <h3>{hasFilter ? "没有匹配的日志" : "还没有运行日志"}</h3>
       <p>
         {hasFilter
           ? "试着放宽筛选条件，或清空关键词查看全部操作。"
-          : "触发一次自动录入或手动重跑某阶段后，浏览器自动化每一步都会留在这里。"}
+          : "开始规划、打开页面或执行自动录入后，主进程、页面与自动化输出会实时显示在这里。"}
       </p>
       {hasFilter && (
         <button className={shared.btn} onClick={onClear}>
@@ -138,21 +138,25 @@ export function useOperationLogState(apiAvailable: boolean) {
   const [loading, setLoading] = useState(false);
   const [refreshedAtLabel, setRefreshedAtLabel] = useState("尚未刷新");
   const [notice, setNotice] = useState<Notice>(null);
+  const requestSequence = useRef(0);
 
   const refresh = async (filter?: import("../../../../shared/contracts.js").OperationLogQuery) => {
     if (!apiAvailable || !api()?.operationLog) {
-      setNotice({ kind: "warn", text: "操作日志接口尚未接入主进程，先用内置样例预览。" });
+      setNotice({ kind: "warn", text: "运行日志接口尚未就绪。" });
       return;
     }
+    const sequence = ++requestSequence.current;
     setLoading(true);
     try {
       const next = await api()!.operationLog.load(filter);
+      if (sequence !== requestSequence.current) return;
       setPage(next);
       setRefreshedAtLabel(formatRefreshedAt(next.refreshedAt));
     } catch (error) {
-      setNotice({ kind: "warn", text: error instanceof Error ? error.message : "无法加载操作日志。" });
+      if (sequence !== requestSequence.current) return;
+      setNotice({ kind: "warn", text: error instanceof Error ? error.message : "无法加载运行日志。" });
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   };
 

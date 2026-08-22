@@ -28,6 +28,18 @@ export function logTimestamp(): string {
 
 type LogFn = (...args: unknown[]) => void;
 
+export type LogSink = (level: "debug" | "info" | "warn" | "error", args: ReadonlyArray<unknown>) => void;
+let logSink: LogSink | undefined;
+
+/** 主进程可注入持久化 sink；失败不能反向影响真实业务流程。 */
+export function installLogSink(sink?: LogSink): void {
+  logSink = sink;
+}
+
+function emit(level: "debug" | "info" | "warn" | "error", args: ReadonlyArray<unknown>): void {
+  try { logSink?.(level, args); } catch { /* 日志写入永不阻断业务 */ }
+}
+
 const withTimestamp = (args: ReadonlyArray<unknown>): unknown[] => {
   if (args.length === 0) return [logTimestamp()];
   const [first, ...rest] = args;
@@ -40,8 +52,8 @@ const withTimestamp = (args: ReadonlyArray<unknown>): unknown[] => {
   return [logTimestamp(), ...args];
 };
 
-export const logInfo: LogFn = (...args) => { console.info(...withTimestamp(args)); };
-export const logWarn: LogFn = (...args) => { console.warn(...withTimestamp(args)); };
-export const logError: LogFn = (...args) => { console.error(...withTimestamp(args)); };
-export const logLog: LogFn = (...args) => { console.log(...withTimestamp(args)); };
-export const logDebug: LogFn = (...args) => { console.debug(...withTimestamp(args)); };
+export const logInfo: LogFn = (...args) => { emit("info", args); console.info(...withTimestamp(args)); };
+export const logWarn: LogFn = (...args) => { emit("warn", args); console.warn(...withTimestamp(args)); };
+export const logError: LogFn = (...args) => { emit("error", args); console.error(...withTimestamp(args)); };
+export const logLog: LogFn = (...args) => { emit("info", args); console.log(...withTimestamp(args)); };
+export const logDebug: LogFn = (...args) => { emit("debug", args); console.debug(...withTimestamp(args)); };

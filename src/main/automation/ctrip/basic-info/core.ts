@@ -27,18 +27,25 @@ import {
 
 /**
  * 写入「基本信息」面板完整字段：
- *   - 客服电话（来自 extra.servicePhone）；
- *   - 天数 / 晚数 / 副标题 / 供应商名 / 编号 / 操作说明；
- *   - 出发地 + 目的地 + 产品线；
  *   - 国家景区（省份必填，景点仅当 extra.keySpots 非空时填）；
+ *   - 天数 / 晚数 / 副标题 / 供应商名 / 编号；
+ *   - 出发地 + 目的地 + 产品线；
+ *   - 客服电话（来自 extra.servicePhone）；
+ *   - 操作说明；
  *   - 提前预订（按 resolveAdvanceBooking 解析）；
  *   - 地接社 + 管家联系人（但仅在外部传入时填）。
  */
 export async function fillBasicInfo(page, product, butlerSelection, extra = {}) {
   const info = product.basicInfo;
   await page.getByText("基本信息", { exact: true }).waitFor();
-  const servicePhone = typeof extra?.servicePhone === "string" ? extra.servicePhone.trim() : "";
-  await fillServicePhone(page, servicePhone);
+
+  const preferredCountry = info.province && info.province.trim() ? "中国" : undefined;
+  const cityContext = { disambiguator: extra?.disambiguator, product };
+  if (info.province) await fillScenicAreaProvince(page, info.province, cityContext);
+  const scenicSpotLogs = Array.isArray(extra?.scenicSpotLogs) ? extra.scenicSpotLogs : [];
+  if (info.province && Array.isArray(extra?.keySpots) && extra.keySpots.length) {
+    await fillScenicAreaSpots(page, info.province, extra.keySpots, scenicSpotLogs, cityContext);
+  }
 
   const numberInputs = page.locator("input.ant-input-number-input");
   const numberInputCount = await numberInputs.count();
@@ -61,24 +68,19 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
     info.supplierProductCode,
     "供应商产品编号输入框",
   );
+
+  await fillCitySelect(page, "baseInfo.masterDepartureCityId", info.meetingCity, preferredCountry, cityContext);
+  await fillCitySelect(page, "baseInfo.destinationCityID", info.destinationCity, preferredCountry, cityContext);
+  await fillProductLine(page, info.destinationCity, info.province);
+
+  const servicePhone = typeof extra?.servicePhone === "string" ? extra.servicePhone.trim() : "";
+  await fillServicePhone(page, servicePhone);
   await fillById(
     page,
     "baseInfo.operationNote",
     info.operationNotes,
     "操作说明输入框",
   );
-
-  const preferredCountry = info.province && info.province.trim() ? "中国" : undefined;
-  const cityContext = { disambiguator: extra?.disambiguator, product };
-  await fillCitySelect(page, "baseInfo.masterDepartureCityId", info.meetingCity, preferredCountry, cityContext);
-  await fillCitySelect(page, "baseInfo.destinationCityID", info.destinationCity, preferredCountry, cityContext);
-  await fillProductLine(page, info.destinationCity, info.province);
-
-  if (info.province) await fillScenicAreaProvince(page, info.province, cityContext);
-  const scenicSpotLogs = Array.isArray(extra?.scenicSpotLogs) ? extra.scenicSpotLogs : [];
-  if (info.province && Array.isArray(extra?.keySpots) && extra.keySpots.length) {
-    await fillScenicAreaSpots(page, info.province, extra.keySpots, scenicSpotLogs, cityContext);
-  }
   const advance = resolveAdvanceBooking(product);
   if (advance) await fillAdvanceBooking(page, advance);
   await fillLocalTravelAgency(page);

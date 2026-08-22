@@ -1,38 +1,40 @@
-/* Operation log — toolbar (搜索 / 状态芯片 / 类型&阶段) + active filter chips */
+/* 运行日志工具栏：搜索优先，筛选条件作为稳定的第二层。 */
 
 .opToolbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
-  padding: 10px 12px;
 }
 
-@media (max-width: 1100px) {
-  .opToolbar { grid-template-columns: 1fr; }
+.opToolbarTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .opSearch {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: var(--control);
-  padding: 0 10px 0 32px;
+  min-width: 0;
+  height: var(--control-sm);
+  padding: 0 9px 0 32px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: var(--bg);
   color: var(--muted-foreground);
-  transition: border-color 160ms ease, background 160ms ease;
-  min-width: 0;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
 .opSearch:focus-within {
   border-color: var(--border-strong);
   background: var(--surface);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 6%, transparent);
   color: var(--foreground);
 }
 
@@ -45,151 +47,138 @@
 }
 
 .opSearchInput {
-  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   height: 100%;
   border: 0;
+  outline: none;
   background: transparent;
   color: var(--foreground);
   font-size: var(--fs-sm);
-  outline: none;
 }
 
 .opSearchInput::placeholder { color: var(--subtle); }
 
 .opSearchClear {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
   border-radius: 5px;
   color: var(--muted-foreground);
   transition: background 160ms ease, color 160ms ease;
 }
 
 .opSearchClear:hover { background: var(--muted); color: var(--foreground); }
-
-.opFilterGroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg);
-}
-
-.opStatusChip {
-  height: 28px;
-  padding: 0 10px;
-  display: inline-flex;
-  align-items: center;
-  border-radius: 6px;
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  color: var(--muted-foreground);
-  transition: background 160ms ease, color 160ms ease;
-  white-space: nowrap;
-}
-
-.opStatusChip:hover { color: var(--foreground); background: var(--muted); }
-
-.opStatusChip[data-state='on'] {
-  background: var(--surface);
-  color: var(--foreground);
-  box-shadow: 0 0 0 1px var(--border-strong);
-}
-
-.opStatusChip[data-state='on'][data-value='failed'] { color: var(--destructive); }
-.opStatusChip[data-state='on'][data-value='succeeded'] { color: var(--success); }
-.opStatusChip[data-state='on'][data-value='running'] { color: var(--ai-teal); }
-.opStatusChip[data-state='on'][data-value='skipped'] { color: var(--muted-foreground); }
-
-.opSelectors {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.opSelect {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control);
-  padding: 0 8px 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--bg);
-  color: var(--muted-foreground);
-  font-size: var(--fs-sm);
-  transition: border-color 160ms ease;
-}
-
-.opSelect:hover { border-color: var(--border-strong); }
-
-.opSelectPrefix {
-  color: var(--muted-foreground);
-  font-size: var(--fs-xs);
-}
-
-.opSelectInput {
-  border: 0;
-  background: transparent;
-  color: var(--foreground);
-  font-size: var(--fs-sm);
-  padding: 0 4px 0 0;
-  outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right center;
-  padding-right: 16px;
-}
+.opSearchClear:focus-visible { outline: 2px solid var(--border-strong); outline-offset: 1px; }
 
 .opClear {
-  height: var(--control);
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 0;
-  background: transparent;
+  border-radius: var(--radius-sm);
   color: var(--muted-foreground);
   font-size: var(--fs-xs);
-  border-radius: var(--radius-control);
+  white-space: nowrap;
   transition: background 160ms ease, color 160ms ease;
 }
 
 .opClear:hover { background: var(--muted); color: var(--foreground); }
+.opClear:focus-visible { outline: 2px solid var(--border-strong); outline-offset: 1px; }
 
-/* Active filter chips */
-.opChips {
-  display: flex;
-  flex-wrap: wrap;
+.opFilterBar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
 }
 
-.opChip {
+.opFilterLabel {
+  min-width: 54px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
+  gap: 5px;
   color: var(--muted-foreground);
   font-size: var(--fs-xs);
-  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.opChip:hover { background: var(--muted); color: var(--foreground); border-color: var(--border-strong); }
-
-.opChipsCount {
-  margin-left: 4px;
-  color: var(--subtle);
-  font-size: var(--fs-xs);
+.opFilterCount {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--foreground);
+  color: var(--surface);
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
+}
+
+.opSelectors {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.opSelect {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 7px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.opSelect:hover { border-color: var(--border-strong); background: var(--surface); }
+.opSelect:focus-within { border-color: var(--border-strong); background: var(--surface); }
+
+.opSelectPrefix {
+  color: var(--subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.opSelectInput {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0 14px 0 0;
+  overflow: hidden;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right center;
+  color: var(--foreground);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 760px) {
+  .opFilterBar { grid-template-columns: 1fr; gap: 7px; }
+  .opSelectors { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 440px) {
+  .opToolbarTop { grid-template-columns: 1fr; }
+  .opClear { justify-self: end; }
+  .opSelectors { grid-template-columns: 1fr; }
 }

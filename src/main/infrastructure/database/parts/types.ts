@@ -8,10 +8,13 @@ import { randomUUID } from "node:crypto";
 export const now = () => new Date().toISOString();
 
 /**
- * 为新产品生成 VBK 内部 supplierProductCode：日期戳 + uuid 前 6 位；
- * 格式「VBK-YYYYMMDD-XXXXXX」，同一秒内多次创建也不会冲突（uuid 后缀）。
+ * 为新产品生成 VBK 内部 supplierProductCode。
+ * 固定格式「VBK-{联系人名字}」；未提供联系人时回落到「VBK-YYYYMMDD-XXXXXX」
+ * （日期戳 + uuid 前 6 位，同一秒内多次创建也不会冲突）。
  */
-export function newSupplierProductCode() {
+export function newSupplierProductCode(contactName?: string | null) {
+  const name = typeof contactName === "string" ? contactName.trim() : "";
+  if (name) return `VBK-${name}`;
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   return `VBK-${stamp}-${randomUUID().slice(0, 6).toUpperCase()}`;
 }

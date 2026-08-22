@@ -107,4 +107,8 @@ test("支持解析含空格与结尾提示的非法关键词文案", () => {
     extractSensitiveWords("VBK 行程校验(saveType=3)失败：非法关键词：巅峰、极端 ；请修改"),
     ["巅峰", "极端"],
   );
+  assert.deepEqual(
+    extractSensitiveWords("非法关键词：巅峰,极端，请修改后重新提交"),
+    ["巅峰", "极端"],
+  );
 });

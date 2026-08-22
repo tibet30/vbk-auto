@@ -18,14 +18,15 @@ export function useNavigationState() {
     setViewRaw(next);
   }, []);
   const [notice, setNotice] = useState<string | null>(null);
-  const [expandedDayIndex, setExpandedDayIndex] = useState<number | null>(0);
+  // 每日行程展开的天集合：支持多天同时展开（不互斥），默认只展开第一天。
+  const [expandedDayIndexes, setExpandedDayIndexes] = useState<Set<number>>(() => new Set([0]));
   const browserRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
 
   return {
     view, setView,
     notice, setNotice,
-    expandedDayIndex, setExpandedDayIndex,
+    expandedDayIndexes, setExpandedDayIndexes,
     browserRef, conversationRef,
   };
 }

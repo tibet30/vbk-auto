@@ -105,3 +105,34 @@ test("创建产品会把稳定的 VBK 登录账号绑定到远端快照", async 
   assert.equal(created.product.vbkAccount, "vbk_671205");
   assert.equal(remote.records.get(created.product.id)?.vbkAccount, "vbk_671205");
 });
+
+test("供应商产品编号固定为 VBK-联系人名字（账号已配管家）", async (t) => {
+  const db = await database(t);
+  db.setAccountFixedInfo("供应商A", {
+    servicePhone: "400-820-1234",
+    butlerName: { contactCardId: 1753732, displayName: "张三", providerId: 1279416 },
+  });
+  const remote = fakeRemote();
+  const created = await createRemoteProduct(
+    db,
+    remote.service,
+    { destination: "太原", days: 2, productForm: "privateTour" },
+    "供应商A",
+    "vbk_123",
+  );
+  const basic = created.product.product.basicInfo as Record<string, unknown>;
+  assert.equal(basic.supplierProductCode, "VBK-张三");
+});
+
+test("账号未配管家时供应商产品编号回落日期+uuid 格式", async (t) => {
+  const db = await database(t);
+  const remote = fakeRemote();
+  const created = await createRemoteProduct(
+    db,
+    remote.service,
+    { destination: "太原", days: 2, productForm: "privateTour" },
+    "供应商B",
+  );
+  const basic = created.product.product.basicInfo as Record<string, unknown>;
+  assert.match(String(basic.supplierProductCode), /^VBK-\d{8}-[A-F0-9]{6}$/);
+});

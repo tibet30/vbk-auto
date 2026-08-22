@@ -17,13 +17,14 @@ const automationPhaseSchema = z.enum([
   "preflight",
   "saleControl",
 ]);
+const planningMajorStageSchema = z.enum(["foundation", "itinerary", "completion"]);
 
 const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "products:get", "products:delete", "products:readiness", "products:updateReviewField", "products:updateProductJson",
   "ai:send", "ai:regenerate",
   "research:accept", "research:refreshIssues", "research:vehicleResource", "research:hotelResource",
   "automation:start", "automation:stop", "automation:retry", "automation:retryPhase", "automation:retryOnePhase",
-  "planning:start", "planning:resume", "planning:state",
+  "planning:start", "planning:resume", "planning:state", "planning:rerunMajorStage", "planning:acceptItineraryAndRerunCompletion",
 ]);
 
 function parse<T>(channel: string, label: string, schema: z.ZodType<T>, value: unknown): T {
@@ -65,6 +66,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
   if (channel === "automation:retryPhase" || channel === "automation:retryOnePhase") {
     parse(channel, "phase", automationPhaseSchema, args[1]);
   }
+  if (channel === "planning:rerunMajorStage") parse(channel, "stage", planningMajorStageSchema, args[1]);
   if (channel === "browser:status" && args[0] !== undefined) parse(channel, "refresh", z.boolean(), args[0]);
   if (channel === "browser:setVisible") parse(channel, "visible", z.boolean(), args[0]);
   if (channel === "browser:setBounds") {

@@ -35,7 +35,7 @@ export interface ItineraryDay {
 interface ReviewSummaryItineraryProps {
   localProductId: string;
   days: ItineraryDay[];
-  expandedDayIndex: number | null;
+  expandedDayIndexes: Set<number>;
   onToggle: (index: number) => void;
   /** 整个「每日行程」模块是否被收起。 */
   collapsed?: boolean;
@@ -161,11 +161,12 @@ function activityNodeClass(type: ItineraryActivity["type"]): string {
 
 /**
  * 每日行程：右侧 review 阶段的视觉重点。
- * - 默认仅展开第一天（与 expandedDayIndex 默认 0 对齐），其他天折叠成一行摘要；
+ * - 默认仅展开第一天（与 expandedDayIndexes 默认含 0 对齐），其他天折叠成一行摘要；
  * - 展开时显示按时间顺序排列的景点 + 活动 + 餐食时间线；
  * - 折叠时只保留 Day 编号 + 标题 + 节点计数，保持列表可快速浏览。
+ * - 多天可同时展开（不互斥），再次点击已展开的天即收起该天。
  */
-export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndex, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
+export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndexes, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
   // 折叠时不渲染 dayList，节省节点；header 仍然可点击重新展开。
   const renderHeader = (meta: React.ReactNode, bodyId: string) => (
     <button
@@ -200,7 +201,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
       {renderHeader(`共 ${days.length} 天`, "itinerary-day-body")}
       <ol className={styles.dayList} id="itinerary-day-body">
         {days.map((day, index) => {
-          const expanded = expandedDayIndex === index;
+          const expanded = expandedDayIndexes.has(index);
           const title = stripDayPrefix(day.title || "", index);
           const timeline = buildTimeline(day, index);
           const visitCount = timeline.filter((t) => t.type === "visit").length;

@@ -32,8 +32,8 @@ interface ReviewSummaryProps {
   setComposerInput?: (value: string) => void;
   planningRecovery?: { status: string; currentStageLabel?: string; completed?: string[]; allStagesCompleted?: boolean } | null;
   setActiveTask: (id: string | null) => void;
-  expandedDayIndex: number | null;
-  setExpandedDayIndex: (value: number | null) => void;
+  expandedDayIndexes: Set<number>;
+  setExpandedDayIndexes: Dispatch<SetStateAction<Set<number>>>;
   vbkLoggedIn: boolean;
   /** 当前登录的 VBK 账号名（来自 vbkLogin.accountName），用于管家联系人默认值与状态引导。 */
   currentAccountName?: string | null;
@@ -63,15 +63,6 @@ interface ReviewSummaryProps {
   onRefreshIssues: () => Promise<void> | void;
 }
 
-/** 从产品名反解目的地 / 规格 / 形态 — 仅供头部概览展示，不参与业务逻辑。 */
-function parseProductSpec(name: string): { destination: string; spec: string; form: "privateTour" | "groupTour" | "unknown" } {
-  const match = name.match(/^(.+?)(\d+)\s*天\s*(\d+)\s*晚\s*(.+)$/);
-  if (!match) return { destination: name, spec: "本地草稿", form: "unknown" };
-  const kind = match[4];
-  const form: "privateTour" | "groupTour" = kind.includes("跟团") ? "groupTour" : "privateTour";
-  return { destination: match[1], spec: `${match[2]} 天 ${match[3]} 晚`, form };
-}
-
 /** 统计产品 JSON 对象顶层键的数量，给运营一个结构直觉；不会递归整个树。 */
 function countTopLevelKeys(value: unknown): number {
   if (!value || typeof value !== "object" || Array.isArray(value)) return 0;
@@ -89,8 +80,8 @@ export function AppWorkspaceReviewSummary({
   setComposerInput,
   planningRecovery,
   setActiveTask,
-  expandedDayIndex,
-  setExpandedDayIndex,
+  expandedDayIndexes,
+  setExpandedDayIndexes,
   vbkLoggedIn,
   currentAccountName,
   basicInfoDraft,
@@ -118,10 +109,6 @@ export function AppWorkspaceReviewSummary({
   refreshingIssues,
   onRefreshIssues,
 }: ReviewSummaryProps) {
-  const { destination, spec, form } = parseProductSpec(product.name);
-  const ready = readiness.ready;
-  const headlineTone: "ready" | "blocked" | "neutral" = ready ? "ready" : readiness.issues.length > 0 ? "blocked" : "neutral";
-
   // 默认走卡片视图；切到 JSON 实时数据是「主动要求看」，不是默认体验。
   // 每次切换产品都强制回到卡片视图，避免进入新产品后还是 JSON 视图造成迷惑。
   const [viewMode, setViewMode] = useState<SummaryViewMode>("cards");
@@ -178,27 +165,6 @@ export function AppWorkspaceReviewSummary({
   const showPartialGeneration = (planningGenerating || planningPartial) && !isProductEmpty;
   const showTaskFooter = viewMode === "cards" && !isGenerating;
 
-  const completedStages = planningRecovery?.completed?.length ?? 0;
-  const progressValue = planningGenerating || planningPartial
-    ? `${completedStages}/7`
-    : isGenerating ? "—" : `${readiness.completion}%`;
-  const progressCaption = planningGenerating || planningPartial
-    ? "生成进度"
-    : isGenerating ? "生成中" : "就绪度";
-  const progressPercent = planningGenerating || planningPartial
-    ? Math.min(100, (completedStages / 7) * 100)
-    : isGenerating ? 0 : Math.min(100, Math.max(0, readiness.completion));
-  const readinessLabel = ready
-    ? "可以录入"
-    : isGenerating
-      ? "AI 正在生成…"
-      : `${readiness.issues.length} 项待处理`;
-  const readinessState: "confirmed" | "researching" | "needsConfirmation" | "blocked" = ready
-    ? "confirmed"
-    : isGenerating
-      ? "researching"
-      : "needsConfirmation";
-
   // 「基础信息」模块所需的全部 prop 都已从父级传进来才渲染；任何一个缺失时
   // 退化到旧的"未挂载"路径，避免新模块意外接管部分功能。
   const basicInfoReady = Boolean(
@@ -225,17 +191,8 @@ export function AppWorkspaceReviewSummary({
   return (
     <aside className={`${layout.panel} ${styles.summary}`} aria-label="审查结果概要">
       <AppWorkspaceReviewSummaryHead
-        destination={destination}
-        spec={spec}
-        form={form}
         viewMode={viewMode}
         onChangeViewMode={setViewMode}
-        readinessLabel={readinessLabel}
-        readinessState={readinessState}
-        progressValue={progressValue}
-        progressCaption={progressCaption}
-        progressPercent={progressPercent}
-        heroTone={isGenerating ? "neutral" : headlineTone}
       />
 
       {viewMode === "cards" ? (
@@ -244,17 +201,6 @@ export function AppWorkspaceReviewSummary({
             <GeneratingSkeleton />
           ) : (
             <div className={styles.scroll}>
-              {showPartialGeneration && (
-                <div className={styles.generatingPane} role="status" aria-live="polite">
-                  <strong className={styles.generatingTitle}>
-                    {planningPartial ? "方案已生成部分结果，等待继续规划" : `AI 正在生成：${planningRecovery?.currentStageLabel ?? "当前阶段"}`}
-                  </strong>
-                  <small className={styles.generatingHint}>
-                    已完成 {completedStages}/7 个阶段，已生成内容会逐步显示。
-                  </small>
-                </div>
-              )}
-
               {/* 基础信息：紧凑表单，紧贴在「每日行程」上方。 */}
               {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveInventory && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
                 <AppWorkspaceReviewSummaryBasicInfo
@@ -286,8 +232,15 @@ export function AppWorkspaceReviewSummary({
               <AppWorkspaceReviewSummaryItinerary
                 localProductId={product.id}
                 days={itinerary}
-                expandedDayIndex={expandedDayIndex}
-                onToggle={(index) => setExpandedDayIndex(expandedDayIndex === index ? null : index)}
+                expandedDayIndexes={expandedDayIndexes}
+                onToggle={(index) =>
+                  setExpandedDayIndexes((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(index)) next.delete(index);
+                    else next.add(index);
+                    return next;
+                  })
+                }
                 collapsed={itineraryCollapsed}
                 onToggleCollapsed={() => setItineraryCollapsed((value) => !value)}
               />

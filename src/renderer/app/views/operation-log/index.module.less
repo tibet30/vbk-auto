@@ -11,7 +11,7 @@
 }
 
 .opLogContainer {
-  max-width: 1080px;
+  max-width: var(--content-max);
   margin: 0 auto;
   padding: 28px 16px 64px;
   display: flex;
@@ -45,6 +45,18 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.spinning { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.opResultMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  min-height: 16px;
 }
 
 .opLogRefreshed {
@@ -87,6 +99,30 @@
 }
 
 .opLogNoticeText { min-width: 0; flex: 1 1 auto; }
+
+/* 可点击的文件名链接：点击后用系统默认应用打开导出的日志文件。 */
+.opLogNoticeAction {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  color: inherit;
+}
+
+.opLogNoticeAction:hover {
+  text-decoration-thickness: 2px;
+  opacity: 0.8;
+}
 
 /* Log list */
 .opList { display: flex; flex-direction: column; }

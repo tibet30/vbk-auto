@@ -109,12 +109,18 @@ const api: VbkApi = {
     onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, localProductId: unknown, state: unknown) => listener(localProductId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
     onPageReady(listener) { const handler = () => listener(); ipcRenderer.on("vbk:page-ready", handler); return () => ipcRenderer.removeListener("vbk:page-ready", handler); },
   },
-  operationLog: { load: (query) => ipcRenderer.invoke("operationLog:load", query) },
+  operationLog: {
+    load: (query) => ipcRenderer.invoke("operationLog:load", query),
+    capture: (input) => ipcRenderer.invoke("operationLog:capture", input),
+    export: (query) => ipcRenderer.invoke("operationLog:export", query),
+    open: (path) => ipcRenderer.invoke("operationLog:open", path),
+  },
   planning: {
     start: (localProductId) => ipcRenderer.invoke("planning:start", localProductId),
     resume: (localProductId) => ipcRenderer.invoke("planning:resume", localProductId),
     state: (localProductId) => ipcRenderer.invoke("planning:state", localProductId),
     rerunMajorStage: (localProductId, stage) => ipcRenderer.invoke("planning:rerunMajorStage", localProductId, stage),
+    acceptItineraryAndRerunCompletion: (localProductId) => ipcRenderer.invoke("planning:acceptItineraryAndRerunCompletion", localProductId),
   },
 };
 contextBridge.exposeInMainWorld("vbk", api);

@@ -227,6 +227,33 @@ test("fillBasicInfo 在城市后录入产品线", async () => {
   assert.ok(cityAnchor >= 0 && lineAnchor > cityAnchor, "产品线必须在目的城市之后录入");
 });
 
+test("fillBasicInfo 按 VBK 产品信息页面从上到下录入已覆盖字段", async () => {
+  const source = readCtripSource();
+  const start = source.indexOf("export async function fillBasicInfo");
+  const body = source.slice(start, source.indexOf("\nexport function stripIllegalKeywords", start));
+  const anchors = [
+    ["国家景区", "fillScenicAreaProvince(page, info.province, cityContext)"],
+    ["行程天数", "numberInputs.nth(0).fill"],
+    ["副标题", 'fillById(page, "baseInfo.subName"'],
+    ["供应商产品名称", '"baseInfo.providerProductName"'],
+    ["供应商产品编号", '"baseInfo.vendorProductCode"'],
+    ["集合城市", '"baseInfo.masterDepartureCityId"'],
+    ["目的城市", '"baseInfo.destinationCityID"'],
+    ["产品线", "fillProductLine(page, info.destinationCity, info.province)"],
+    ["400 电话", "fillServicePhone(page, servicePhone)"],
+    ["操作说明", '"baseInfo.operationNote"'],
+    ["提前预订", "fillAdvanceBooking(page, advance)"],
+    ["联系人", "fillButlerContact(page, butlerSelection)"],
+  ];
+  let previous = -1;
+  for (const [label, anchor] of anchors) {
+    const index = body.indexOf(anchor);
+    assert.ok(index >= 0, `找不到 ${label} 录入锚点`);
+    assert.ok(index > previous, `${label} 录入顺序不应早于前一项`);
+    previous = index;
+  }
+});
+
 test("基本信息重试会关闭残留提示弹窗", async () => {
   const source = readCtripSource();
   assert.match(source, /async function dismissKnownNoticeDialogs/);

@@ -6,7 +6,7 @@ import { now, newSupplierProductCode } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 
 /** Build the initial product snapshot without writing local or remote state. */
-export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
+export function buildProductSnapshot(input: CreateProductInput, supplierContactName?: string | null): ProductDetail {
   const id = randomUUID();
   const createdAt = now();
   const destination = toPlatformShortLocationName(input?.destination);
@@ -28,7 +28,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
     sales: { productType: days <= 5 ? "domesticShort" : "domesticLong", productForm, splitGroup: false },
     basicInfo: {
       supplierProductName: name,
-      supplierProductCode: newSupplierProductCode(),
+      supplierProductCode: newSupplierProductCode(supplierContactName),
       destination,
       days,
       nights,

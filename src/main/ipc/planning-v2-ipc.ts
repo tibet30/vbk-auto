@@ -14,6 +14,7 @@ import { OpenAIThreeStagePlanningAi } from "../planning/adapters/three-stage-ai.
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { invalidatePlanningStage, resetProductForPlanningStage } from "../planning/planning-v2-reset.js";
 import { createPlanningPlanV2, runThreeStagePlan } from "../planning/three-stage-orchestrator.js";
+import { acceptItineraryAndRerunCompletion } from "../planning/itinerary-adoption-flow.js";
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
@@ -21,9 +22,8 @@ import { productNotFound } from "../infrastructure/db-errors.js";
 import type { MainIpcContext } from "./context.js";
 
 export function registerPlanningV2Ipc(context: MainIpcContext): void {
-  const run = async (localProductId: string, initialPlan?: PlanningPlanV2): Promise<PlanningRunResult> => {
-    context.productWorkflows.assertIdle(localProductId, "planning");
-    return context.productWorkflows.runExclusive(localProductId, "planning", async () => {
+  const acceptingItineraries = new Set<string>();
+  const runBody = async (localProductId: string, initialPlan?: PlanningPlanV2): Promise<PlanningRunResult> => {
       let remote = await context.remoteProducts.get(localProductId);
       context.db.importProductSnapshot(remote);
       const product = remote.product;
@@ -183,31 +183,48 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
           };
         },
       });
-      return toRunResult(localProductId, plan);
-    });
+    return toRunResult(localProductId, plan);
   };
 
+  // 读取、重置/更新和实际运行必须处于同一把产品锁内。仅在 handler 顶部
+  // assertIdle 会留下「检查后、mutation 前」的 await 竞态，第二个请求仍可能
+  // 先覆盖第一个请求的 pending/invalidated 数据；runBody 不再重复加锁。
+  const withPlanningLock = <T>(localProductId: string, task: () => Promise<T>): Promise<T> => {
+    context.productWorkflows.assertIdle(localProductId, "planning");
+    return context.productWorkflows.runExclusive(localProductId, "planning", task);
+  };
+
+  const run = (localProductId: string, initialPlan?: PlanningPlanV2): Promise<PlanningRunResult> =>
+    withPlanningLock(localProductId, () => runBody(localProductId, initialPlan));
+
   ipcMain.handle("planning:start", async (_event, localProductId: string) => {
-    const remote = await context.remoteProducts.get(localProductId);
-    if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全开始规划。");
-    const plan = createPlanningPlanV2();
-    const prepared = await context.remoteProducts.update({
-      ...remote,
-      product: resetProductForPlanningStage(remote.product, "foundation"),
-      status: "planning",
-      planning: plan,
-      updatedAt: new Date().toISOString(),
-    }, remote.revision);
-    context.db.importProductSnapshot(prepared);
-    context.broadcastProduct(prepared);
-    return run(localProductId, plan);
+    return withPlanningLock(localProductId, async () => {
+      const remote = await context.remoteProducts.get(localProductId);
+      if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全开始规划。");
+      const plan = createPlanningPlanV2();
+      const prepared = await context.remoteProducts.update({
+        ...remote,
+        product: resetProductForPlanningStage(remote.product, "foundation"),
+        status: "planning",
+        planning: plan,
+        updatedAt: new Date().toISOString(),
+      }, remote.revision);
+      context.db.importProductSnapshot(prepared);
+      context.broadcastProduct(prepared);
+      return runBody(localProductId, plan);
+    });
   });
 
   ipcMain.handle("planning:resume", async (_event, localProductId: string) => {
-    const remote = await context.remoteProducts.get(localProductId);
-    if (!remote.planning || remote.planning.version !== 2) throw new Error("该产品没有可恢复的新流程规划，请重新开始规划。");
-    if (remote.planning.status === "completed") return toRunResult(localProductId, remote.planning);
-    return run(localProductId, remote.planning);
+    return withPlanningLock(localProductId, async () => {
+      const remote = await context.remoteProducts.get(localProductId);
+      if (!remote.planning || remote.planning.version !== 2) throw new Error("该产品没有可恢复的新流程规划，请重新开始规划。");
+      if (remote.planning.itineraryAdoption?.status === "pending" || remote.planning.itineraryAdoption?.status === "blocked") {
+        throw new Error("当前有一版对话行程待采用，请先点击“采用此行程并重新补全产品”。");
+      }
+      if (remote.planning.status === "completed") return toRunResult(localProductId, remote.planning);
+      return runBody(localProductId, remote.planning);
+    });
   });
 
   ipcMain.handle("planning:state", async (_event, localProductId: string) => {
@@ -217,19 +234,26 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
 
   ipcMain.handle("planning:rerunMajorStage", async (_event, localProductId: string, stage: PlanningMajorStage) => {
     if (!(["foundation", "itinerary", "completion"] as string[]).includes(stage)) throw new Error("未知的规划阶段。");
-    const remote = await context.remoteProducts.get(localProductId);
-    if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全重做规划阶段。");
-    const plan = invalidatePlanningStage(remote.planning, stage);
-    const prepared = await context.remoteProducts.update({
-      ...remote,
-      product: resetProductForPlanningStage(remote.product, stage),
-      status: "planning",
-      planning: plan,
-      updatedAt: new Date().toISOString(),
-    }, remote.revision);
-    context.db.importProductSnapshot(prepared);
-    context.broadcastProduct(prepared);
-    return run(localProductId, plan);
+    return withPlanningLock(localProductId, async () => {
+      const remote = await context.remoteProducts.get(localProductId);
+      if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全重做规划阶段。");
+      const plan = invalidatePlanningStage(remote.planning, stage);
+      const prepared = await context.remoteProducts.update({
+        ...remote,
+        product: resetProductForPlanningStage(remote.product, stage),
+        status: "planning",
+        planning: plan,
+        updatedAt: new Date().toISOString(),
+      }, remote.revision);
+      context.db.importProductSnapshot(prepared);
+      context.broadcastProduct(prepared);
+      return runBody(localProductId, plan);
+    });
+  });
+
+  ipcMain.handle("planning:acceptItineraryAndRerunCompletion", async (_event, localProductId: string) => {
+    return withPlanningLock(localProductId, () =>
+      acceptItineraryAndRerunCompletion({ context, localProductId, accepting: acceptingItineraries, run: runBody }));
   });
 }
 

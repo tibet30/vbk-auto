@@ -371,7 +371,7 @@ ${moduleList}
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. Terms 不属于 AI 规划模块，由 VBK 自动录入阶段处理；不得生成或返回 terms。
 9. operations 阶段仅允许 hotelTier / pickupCity / transport / reusePickupForDropoff / mealsIncluded / vehicleResource.requestedTotalCost；requestedTotalCost 必须根据整段行程的实际用车安排、跨区移动、接送和行程密度估算全程总成本，禁止输出日均价，也禁止通过产品售价、成人价、毛利或起订人数倒推；禁止写入 supplierProductCode、vehicleId、resourceId、resourceGroupId、resourceGroupName、supplierCode、providerId、contactCardId。
-10. basicInfo 阶段必须生成 subtitle、province、operationNotes；province 必须是省/自治区/直辖市名称，不能把 meetingCity / destinationCity 城市名直接当作 province。已有非空 province 会被本地保留，不得覆盖。
+10. basicInfo 阶段必须生成 subtitle、province、operationNotes；中国目的地的 province 必须是省/自治区/直辖市名称，境外目的地的 province 填国家、地区或一级行政区常用中文名称，不能把 meetingCity / destinationCity 普通城市名直接当作 province。已有非空 province 会被本地保留，不得覆盖。
 11. AI 不能自行声明 research task 已完成；research tasks 由本地 deterministic 生成并走运营 / VBK 核查流程。
 12. ${buildVbkCopyPolicyPrompt()}
 ${args.hasHistory ? "11. 历史会话已附在 user 消息尾部；本轮回复以补齐缺失模块为目标，已成功模块不要重复。" : ""}`;

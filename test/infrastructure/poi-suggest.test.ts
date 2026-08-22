@@ -61,10 +61,14 @@ test("POI 请求体使用当前 VBK SuggestPoi 契约，且不传递会话凭据
     keyword: "晋祠",
     tagIds: [],
     useENameSort: "T",
-    districtSortDto: { districtIds: [], poiIds: [93331, 79413, 118386477] },
+    districtSortDto: { districtIds: [], poiIds: [] },
     contentType: "json",
   });
   assert.doesNotMatch(JSON.stringify(buildPoiSuggestRequest("晋祠")), /cookie|ticket|authorization/i);
+});
+
+test("新产品 POI 请求使用空的地区和锚点筛选", () => {
+  assert.deepEqual(buildPoiSuggestRequest("贝加尔湖").districtSortDto, { districtIds: [], poiIds: [] });
 });
 
 test("业务成功时匹配候选，浏览器调用只传端点、请求体和超时配置", async () => {

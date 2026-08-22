@@ -127,6 +127,7 @@ export class VbkBrowser {
   private cdp?: Browser;
   /** fetchCurrentUserInfo 结果缓存：同一 URL 下避免重复 HTTP。login/logout 时清除。 */
   private cachedUserInfoUrl?: string;
+  private cachedUserInfoWebContentsId?: number;
   private cachedUserInfo?: { displayName?: string; loginAccount?: string };
 
   constructor(
@@ -168,10 +169,14 @@ export class VbkBrowser {
   /** 获取或创建指定账号的 partition 视图。首次创建时写入调用方已读取的 cookie 快照。 */
   private async ensureAccountView(accountKey: string, cookies: SerialisedCookie[]): Promise<WebContentsView> {
     let view = this.accounts.get(accountKey);
-    if (view) return view;
-
-    view = this.createView(this.getPartition(accountKey));
-    this.accounts.set(accountKey, view);
+    if (view) {
+      // 旧版本可能曾把默认分区内容误留在目标分区；切换时以本机快照为准，
+      // 清掉残留鉴权状态后重新灌入，避免页面看似切换但仍显示旧账号。
+      await this.clearViewStorage(view);
+    } else {
+      view = this.createView(this.getPartition(accountKey));
+      this.accounts.set(accountKey, view);
+    }
 
     // 首次创建：迁移调用方已经验证过的 cookie 快照（后续 Electron 自动持久化）。
     if (cookies.length > 0) {
@@ -190,6 +195,8 @@ export class VbkBrowser {
   /** 把窗口内容切换到指定视图。负责 detach 旧视图 + attach 新视图 + 同步状态。 */
   private activateView(view: WebContentsView, accountKey?: string) {
     const current = this.view;
+    const nextKey = accountKey || undefined;
+    if (current !== view || this.activeKey !== nextKey) this.clearCachedUserInfo();
     if (current && current !== view) {
       current.setVisible(false);
       this.window.contentView.removeChildView(current);
@@ -198,7 +205,7 @@ export class VbkBrowser {
     view.setBounds(this._bounds);
     view.setVisible(this.visible);
 
-    this.activeKey = accountKey || undefined;
+    this.activeKey = nextKey;
     if (accountKey) {
       this.sessionStore?.setActiveAccountKey(accountKey);
     }
@@ -265,7 +272,17 @@ export class VbkBrowser {
   /** 在当前已登录 WebView 页面上下文执行只读函数；不暴露或持久化 cookie。 */
   async evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T> {
     if (!this.view) throw new Error("VBK 浏览器尚未初始化");
-    return this.view.webContents.executeJavaScript(`(${fn.toString()})(${JSON.stringify(arg)})`) as Promise<T>;
+    return this.evaluateInView(this.view, fn, arg);
+  }
+
+  private evaluateInView<T, A = unknown>(view: WebContentsView, fn: (arg: A) => T | Promise<T>, arg: A): Promise<T> {
+    return view.webContents.executeJavaScript(`(${fn.toString()})(${JSON.stringify(arg)})`) as Promise<T>;
+  }
+
+  private fetchCurrentUserInfoInView(view: WebContentsView) {
+    return fetchCurrentUserInfo({
+      evaluate: <T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A) => this.evaluateInView(view, fn, arg),
+    });
   }
 
   /**
@@ -337,17 +354,26 @@ export class VbkBrowser {
    *     在本函数返回前完成（fire-and-forget 的 .then/.catch 仍生效）。
    */
   async saveCurrentSession(): Promise<SavedLoginAccount | null> {
-    if (!this.view) return null;
+    const sourceView = this.view;
+    const sourceKey = this.activeKey;
+    if (!sourceView) return null;
     if (!this.sessionStore) return null;
-    const cookies = await this.collectCookies();
+    const cookies = await this.collectCookies(sourceView);
     if (cookies.length === 0) return null;
+    if (this.view !== sourceView || this.activeKey !== sourceKey) return null;
     const authSummary = summarizeVbkAuthCookies(cookies);
     if (!isVbkAuthCookieSummaryComplete(authSummary)) return null;
-    // 「当前是谁」需要在抽 cookie 之前就探测完，否则页面看到的还是上一会话的 UI。
-    const status = await this.status(false);
-    if (!status.loggedIn) return null;
-    const displayName = status.accountName || "已登录账号";
-    const key = status.loginAccount || displayName;
+    const user = await this.fetchCurrentUserInfoInView(sourceView).catch(() => null);
+    const key = user?.loginAccount?.trim();
+    if (!key) return null;
+    if (sourceKey && key !== sourceKey) {
+      logWarn("[vbk] refused to overwrite session with mismatched browser identity", {
+        expectedAccountKey: sourceKey,
+        actualAccountKey: key,
+      });
+      return null;
+    }
+    const displayName = user?.displayName?.trim() || key;
     const cookiesJson = JSON.stringify(cookies);
     try {
       // 必须 await：addLogin / switchAccount 路径依赖同步感知写入完成；
@@ -363,7 +389,11 @@ export class VbkBrowser {
       });
       return null;
     }
-    this.sessionStore.setActiveAccountKey(key);
+    // 状态探测会异步保存快照；切换账号期间，旧视图的迟到保存只能更新
+    // 记录，不能把活动账号指针抢回旧账号。
+    if (this.view === sourceView && this.activeKey === sourceKey) {
+      this.sessionStore.setActiveAccountKey(key);
+    }
     return { accountKey: key, accountName: displayName, lastUsedAt: new Date().toISOString() };
   }
 
@@ -405,10 +435,11 @@ export class VbkBrowser {
    */
   async switchAccount(accountKey: string) {
     if (!this.sessionStore) throw new Error("本机未启用多账号登录切换。");
-    const trimmedKey = accountKey?.trim();
-    if (!trimmedKey) throw new Error("切换账号失败：账号标识不能为空。");
+    const requestedKey = accountKey?.trim();
+    if (!requestedKey) throw new Error("切换账号失败：账号标识不能为空。");
+    const trimmedKey = this.resolveSessionKey(requestedKey);
     const record = this.sessionStore.loadSession(trimmedKey);
-    if (!record) throw new Error(`本机未记录该 VBK 账号（${trimmedKey}），请先登录一次再切换。`);
+    if (!record) throw new Error(`本机未记录该 VBK 账号（${requestedKey}），请先登录一次再切换。`);
     const cookies = parseCookies(record.cookiesJson);
     if (cookies.length === 0) {
       throw new Error(`本机没有该 VBK 账号（${trimmedKey}）可恢复的登录快照，请重新登录后再切换。`);
@@ -420,12 +451,28 @@ export class VbkBrowser {
 
     await this.saveCurrentSession();
 
-    // 获取或创建 partition 视图（首次时自动从 DB 迁移 cookies）
+    // 获取或创建 partition 视图，并以持久化快照重建目标登录态。
     const view = await this.ensureAccountView(trimmedKey, cookies);
-
-    // 切换到目标视图
-    this.activateView(view, trimmedKey);
     await view.webContents.loadURL(URLS.list);
+    const restoredUser = await this.fetchCurrentUserInfoInView(view).catch(() => null);
+    if (restoredUser?.loginAccount !== trimmedKey) {
+      throw new Error(
+        `切换账号失败：本机快照属于 ${restoredUser?.loginAccount || "未知账号"}，与目标 ${trimmedKey} 不一致，请重新登录该账号。`,
+      );
+    }
+
+    // 只有目标视图完成真实账号读回后，才提交活动账号与可见视图。
+    this.activateView(view, trimmedKey);
+  }
+
+  /**
+   * 新数据始终传 vbk_xxx key；历史快照偶尔只把展示名传回 UI。
+   * 仅在展示名唯一时兼容回查，避免同名账号被错误切换。
+   */
+  private resolveSessionKey(identifier: string): string {
+    if (this.sessionStore?.loadSession(identifier)) return identifier;
+    const matches = this.sessionStore?.listSessions().filter((entry) => entry.accountName === identifier) ?? [];
+    return matches.length === 1 ? matches[0].accountKey : identifier;
   }
 
   /**
@@ -499,13 +546,17 @@ export class VbkBrowser {
     //    等会在短时间内多次触发 status，每次都发一次 providerId 接口）。
     let accountName: string | undefined;
     let loginAccount: string | undefined;
-    if (url === this.cachedUserInfoUrl && this.cachedUserInfo) {
+    const currentWebContentsId = this.view.webContents.id;
+    if (
+      url === this.cachedUserInfoUrl
+      && currentWebContentsId === this.cachedUserInfoWebContentsId
+      && this.cachedUserInfo
+    ) {
       accountName = this.cachedUserInfo.displayName;
       loginAccount = this.cachedUserInfo.loginAccount;
     } else {
       try {
-        const page = await this.page();
-        const user = await fetchCurrentUserInfo(page);
+        const user = await this.fetchCurrentUserInfoInView(this.view);
         const display = user?.displayName?.trim();
         const login = user?.loginAccount?.trim();
         if (login) loginAccount = login;
@@ -514,6 +565,7 @@ export class VbkBrowser {
         // 成功抓取后缓存：下次同一 URL 不再走网络。
         if (accountName || loginAccount) {
           this.cachedUserInfoUrl = url;
+          this.cachedUserInfoWebContentsId = currentWebContentsId;
           this.cachedUserInfo = { displayName: accountName, loginAccount };
         }
       } catch {
@@ -636,11 +688,24 @@ export class VbkBrowser {
     }
   }
 
+  /** 账号信息与 WebView 会话强相关；跨导航 / 切账号后必须重新探测。 */
+  private clearCachedUserInfo(): void {
+    this.cachedUserInfoUrl = undefined;
+    this.cachedUserInfoWebContentsId = undefined;
+    this.cachedUserInfo = undefined;
+  }
+
   /** 给指定 view 安装导航白名单 + 外链打开走系统浏览器。 */
   private installNavigationHooks(view: WebContentsView) {
     view.webContents.setWindowOpenHandler(({ url }) => {
       void shell.openExternal(url);
       return { action: "deny" };
+    });
+    view.webContents.on("did-start-navigation", () => {
+      this.clearCachedUserInfo();
+    });
+    view.webContents.on("did-navigate-in-page", () => {
+      this.clearCachedUserInfo();
     });
     view.webContents.on("will-navigate", (event, url) => {
       const host = new URL(url).hostname;
@@ -657,17 +722,19 @@ export class VbkBrowser {
 
   /** 清空指定 view 的所有 storage 与缓存。 */
   private async clearViewStorage(view: WebContentsView) {
+    this.clearCachedUserInfo();
     await view.webContents.session.clearStorageData({
       storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
     });
     await view.webContents.session.clearCache();
+    this.clearCachedUserInfo();
   }
 
   /** 抽出当前活跃 view 的全部 cookies。空数组表示未登录或已被清空。 */
-  private async collectCookies(): Promise<Electron.Cookie[]> {
-    if (!this.view) return [];
+  private async collectCookies(view = this.view): Promise<Electron.Cookie[]> {
+    if (!view) return [];
     try {
-      return await this.view.webContents.session.cookies.get({});
+      return await view.webContents.session.cookies.get({});
     } catch {
       return [];
     }

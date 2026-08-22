@@ -357,6 +357,24 @@ const PROVINCE_TRAVEL_SCOPES: Record<string, { primaryCity: string; nearbyCoreCi
   澳门: { primaryCity: "澳门", nearbyCoreCities: [] },
 };
 
+const TRAVEL_SCOPE_CITIES = new Set<string>(
+  Object.values(PROVINCE_TRAVEL_SCOPES).flatMap(({ primaryCity, nearbyCoreCities }) => [primaryCity, ...nearbyCoreCities]),
+);
+
+function isCoreTravelCity(name: string): boolean {
+  return TRAVEL_SCOPE_CITIES.has(normaliseProvinceName(name));
+}
+
+export function isAcceptablePlanningRegionName(value: string, destinationCity = ""): boolean {
+  const region = normaliseProvinceName(value);
+  const city = normaliseProvinceName(destinationCity);
+  if (!region || region.length > 40 || /\d/.test(region)) return false;
+  if (/[机场车站码头酒店民宿景区]/.test(region)) return false;
+  if (!isProvinceLevelName(region) && isCoreTravelCity(region)) return false;
+  if (city && region === city && !isProvinceLevelName(region)) return false;
+  return true;
+}
+
 export function resolveTravelScope(destination: string): { input: string; isProvinceLevel: boolean; primaryCity: string; nearbyCoreCities: string[] } {
   const input = destination.trim();
   const province = normaliseProvinceName(input);

@@ -36,10 +36,8 @@ export function useAppStateDerived(state: AppStateBase) {
     updateReadiness,
     browserRef,
     conversationRef,
-    vbkLogin,
     setBrowserOpen,
     setVbkLogin,
-    setLoginPanelOpen,
     setCheckingVbkLogin,
     setAccountMenuOpen,
     browserOpen,
@@ -74,6 +72,8 @@ export function useAppStateDerived(state: AppStateBase) {
   currentLocalProductIdRefForPlanning.current = product?.id ?? null;
 
   const browserShouldMount = view === "workspace" && (stage === "vbk" || loginPanelOpen) && Boolean(product || loginPanelOpen);
+  const loginPanelOpenRef = useRef(loginPanelOpen);
+  loginPanelOpenRef.current = loginPanelOpen;
   const browserDerived = useBrowserDerived(state, browserShouldMount);
   const productViewDerived = useProductViewDerived(state);
 
@@ -84,10 +84,14 @@ export function useAppStateDerived(state: AppStateBase) {
     // 首次登录检测由主进程 vbk:page-ready 事件驱动：页面 SPA 渲染就绪后
     // 主进程发事件，renderer 收到后才调用 checkVbkLogin，避免 DOM 未就绪误判。
     const unsubscribePageReady = api()!.events.onPageReady(() => {
+      if (loginPanelOpenRef.current) return;
       void checkVbkLogin();
     });
     // 兜底：1.2s 后重试一次，防止 vbk:page-ready 事件因超时未送达。
-    const retryLoginCheck = window.setTimeout(() => void checkVbkLogin(), 1200);
+    const retryLoginCheck = window.setTimeout(() => {
+      if (loginPanelOpenRef.current) return;
+      void checkVbkLogin();
+    }, 1200);
     const unsubscribe = api()!.events.onProductUpdated((next) => {
       setProduct((current: typeof product) => current?.id === next.id ? next : current);
       void updateReadiness(next);
@@ -107,13 +111,6 @@ export function useAppStateDerived(state: AppStateBase) {
       unsubscribePlanning();
     };
   }, []);
-
-  // VBK 登录成功后自动收起登录面板，避免右侧 VBK 浏览器残留在工作台首页。
-  useEffect(() => {
-    if (vbkLogin?.loggedIn && loginPanelOpen) {
-      setLoginPanelOpen(false);
-    }
-  }, [vbkLogin?.loggedIn, loginPanelOpen]);
 
   // 启动 / 刷新时恢复最近打开的产品：只持久化 id 不足以让 React 看到
   // ProductDetail，必须再向主进程拉一次权威数据。

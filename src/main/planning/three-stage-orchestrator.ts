@@ -17,7 +17,7 @@ import type { OrchestratorRuntime } from "./types.js";
 import { expandVerifiedItinerary, resolvePlanningPoiCandidates } from "./planning-v2-pois.js";
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
-import { isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
+import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
 import { findVbkCopyBadCase } from "./vbk-copy-policy.js";
 export interface ThreeStageOrchestratorDependencies {
   localProductId: string;
@@ -179,7 +179,9 @@ export async function runFoundationLocation(
       const province = normaliseProvinceName(text(location.province));
       const errors: string[] = [];
       if (!province) errors.push("province 为空");
-      else if (!isProvinceLevelName(province)) errors.push(`province「${province}」不是标准中国省级行政区名称`);
+      else if (!isAcceptablePlanningRegionName(province, currentCity)) {
+        errors.push(`province「${province}」不是可用的国家、地区或一级行政区名称`);
+      }
       if (errors.length === 0) {
         const write = await deps.runtime.writeModule(
           deps.localProductId,
@@ -547,7 +549,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function hasStandardLocation(province: string, city: string): boolean {
-  return Boolean(province && isProvinceLevelName(province) && isValidDestinationCity(city, normaliseProvinceName(province)));
+  return Boolean(province && isAcceptablePlanningRegionName(province, city) && isValidDestinationCity(city, normaliseProvinceName(province)));
 }
 
 function isValidDestinationCity(city: string, province: string): boolean {

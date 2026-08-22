@@ -17,8 +17,8 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
   skeleton: `1. skeleton.value 只包含 hotelTier、pickupCity、transport、reusePickupForDropoff、mealsIncluded、vehicleResource。
 2. vehicleResource 只包含 requestedTotalCost；按整段行程每天的实际用车、跨区移动、接送和行程密度估算全程总成本，禁止输出日均价，也禁止按产品售价、毛利或起订人数倒推。不确定可填 null。
 3. 禁止输出任何系统编码、资源 ID、供应商信息、管家或联系人信息。`,
-  basicInfo: `1. 只提交 basicInfo 一个模块；value 必须包含 subtitle、province、destinationCity、meetingCity、operationNotes；省市字段只输出名称，不输出或猜测任何 ID。
-2. province 必须是中国标准省级行政区名称；destinationCity 必须是中国标准目的地城市名称，不能把景点名或 POI ID 填入其中。第一阶段即使草稿已有原始目的地，也必须给出标准 province 和 destinationCity。
+  basicInfo: `1. 只提交 basicInfo 一个模块；value 必须包含 subtitle、province、destinationCity、meetingCity、operationNotes；地点字段只输出名称，不输出或猜测任何 ID。
+2. 中国目的地的 province 必须是标准省级行政区名称；境外目的地的 province 填国家、地区或一级行政区常用中文名称。destinationCity 必须是标准目的地城市名称，不能把景点名或 POI ID 填入其中，也不能把普通城市原样填进 province。第一阶段即使草稿已有原始目的地，也必须给出标准 province 和 destinationCity。
 3. subtitle、meetingCity 和 operationNotes 使用简洁中文；不得把未核查信息写成已确认事实。`,
   itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，每天至少一个 spot。
 2. 使用 POI-first 顺序：先围绕 travelScope 准备足量候选景点池，再从中选择最可能被 VBK/携程 POI 接口查到的单一可游览景点组织行程；不要先写跨区域大行程再补 POI。

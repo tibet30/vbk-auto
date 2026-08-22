@@ -20,6 +20,7 @@ test("有效快照只读取一次并传入账号分区恢复流程", () => {
 
 test("手动切换也拒绝空快照，不能激活空账号分区", () => {
   const switchAccount = source.slice(source.indexOf("  async switchAccount("), source.indexOf("  /**\n   * 忘记"));
+  assert.match(source, /private resolveSessionKey\(identifier: string\): string[\s\S]*listSessions\(\)\.filter\([\s\S]*accountName === identifier/);
   assert.match(switchAccount, /const cookies = parseCookies\(record\.cookiesJson\);[\s\S]*if \(cookies\.length === 0\) \{[\s\S]*throw new Error/);
   assert.match(switchAccount, /const authSummary = summarizeVbkAuthCookies\(cookies\);[\s\S]*isVbkAuthCookieSummaryComplete\(authSummary\)/);
   assert.match(switchAccount, /ensureAccountView\(trimmedKey, cookies\)/);
@@ -68,11 +69,41 @@ test("saveCurrentSession：await 持久化 + catch 保存失败", () => {
   assert.match(saveCurrentSession, /catch\s*\([\s\S]*?(console\.warn|logWarn)\([\s\S]*?return null;/);
 });
 
+test("迟到的旧视图保存不能覆盖切换后的活跃账号", () => {
+  const saveCurrentSession = source.slice(source.indexOf("  async saveCurrentSession()"), source.indexOf("  /**\n   * \"新增登录\""));
+  assert.match(saveCurrentSession, /const sourceView = this\.view;[\s\S]*const sourceKey = this\.activeKey;/);
+  assert.match(saveCurrentSession, /collectCookies\(sourceView\)[\s\S]*this\.view !== sourceView \|\| this\.activeKey !== sourceKey/);
+  assert.match(saveCurrentSession, /fetchCurrentUserInfoInView\(sourceView\)[\s\S]*if \(sourceKey && key !== sourceKey\)[\s\S]*return null;/);
+  assert.match(saveCurrentSession, /if \(this\.view === sourceView && this\.activeKey === sourceKey\) \{[\s\S]*setActiveAccountKey\(key\)/);
+});
+
+test("切换账号先验证目标视图真实身份，再提交活动账号", () => {
+  const switchAccount = source.slice(source.indexOf("  async switchAccount("), source.indexOf("  /**\n   * 新数据始终传"));
+  const verifyAt = switchAccount.indexOf("fetchCurrentUserInfoInView(view)");
+  const activateAt = switchAccount.indexOf("this.activateView(view, trimmedKey)");
+  assert.ok(verifyAt >= 0, "切换必须读取目标 WebContentsView 的真实账号");
+  assert.ok(activateAt > verifyAt, "只有身份校验成功后才能激活目标视图");
+  assert.match(switchAccount, /restoredUser\?\.loginAccount !== trimmedKey[\s\S]*throw new Error/);
+});
+
 test("addLogin / switchAccount 都 await saveCurrentSession", () => {
   const addLogin = source.slice(source.indexOf("  async addLogin()"), source.indexOf("  /**\n   * 切换"));
   const switchAccount = source.slice(source.indexOf("  async switchAccount("), source.indexOf("  /**\n   * 忘记"));
   assert.match(addLogin, /await this\.saveCurrentSession\(\);/, "addLogin must await saveCurrentSession");
   assert.match(switchAccount, /await this\.saveCurrentSession\(\);/, "switchAccount must await saveCurrentSession");
+});
+
+test("新增登录 / 切换账号不会复用上一个账号的 current-user 缓存", () => {
+  const activateView = source.slice(source.indexOf("  private activateView("), source.indexOf("  // ─────────────────────────────────────────────────────────────\n  // 生命周期"));
+  const installNavigationHooks = source.slice(source.indexOf("  private installNavigationHooks("), source.indexOf("  // ─────────────────────────────────────────────────────────────\n  // 内部辅助：cookie"));
+  const clearViewStorage = source.slice(source.indexOf("  private async clearViewStorage("), source.indexOf("  /** 抽出当前活跃 view"));
+  assert.match(source, /private clearCachedUserInfo\(\): void \{[\s\S]*cachedUserInfoUrl = undefined;[\s\S]*cachedUserInfo = undefined;/);
+  assert.match(source, /cachedUserInfoWebContentsId/);
+  assert.match(source, /fetchCurrentUserInfoInView\(this\.view\)/);
+  assert.match(activateView, /if \(current !== view \|\| this\.activeKey !== nextKey\) this\.clearCachedUserInfo\(\);/);
+  assert.match(installNavigationHooks, /did-start-navigation[\s\S]*this\.clearCachedUserInfo\(\);/);
+  assert.match(installNavigationHooks, /did-navigate-in-page[\s\S]*this\.clearCachedUserInfo\(\);/);
+  assert.match(clearViewStorage, /this\.clearCachedUserInfo\(\);[\s\S]*clearStorageData[\s\S]*clearCache\(\);[\s\S]*this\.clearCachedUserInfo\(\);/);
 });
 
 test("withKnownVbkAccount：saveCurrentSession 失败被 .catch 吞掉，不会变 unhandled rejection", () => {

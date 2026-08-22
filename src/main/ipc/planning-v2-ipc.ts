@@ -62,7 +62,6 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
         productType: sales.productType === "domesticLong" ? "domesticLong" as const : "domesticShort" as const,
         supplierProductCode: text(basic.supplierProductCode),
       };
-
       const persist = async (plan: PlanningPlanV2) => {
         const local = context.db.getProduct(localProductId);
         if (!local) throw productNotFound(localProductId);

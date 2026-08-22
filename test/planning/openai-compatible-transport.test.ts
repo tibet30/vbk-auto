@@ -128,6 +128,8 @@ test("ThreeStage 第一阶段通过结构化工具返回省市，并把上一轮
   const request = server.captured[0].parsedBody;
   assert.equal(request.model, "location-model");
   assert.equal((request.tools as Array<{ function: { name: string } }>)[0].function.name, "submit_standard_location");
+  assert.match(String((request.messages as Array<{ content: string }>)[0].content), /全球旅游产品/);
+  assert.match(String((request.messages as Array<{ content: string }>)[0].content), /境外目的地/);
   assert.match(String((request.messages as Array<{ content: string }>)[1].content), /destinationCity 为空/);
 });
 

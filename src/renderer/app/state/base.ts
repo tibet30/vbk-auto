@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import type { ProductDetail, ProductSummary } from "../../../shared/contracts.js";
+import type { ProductDetail, ProductSummary, VbkLoginStatus } from "../../../shared/contracts.js";
 import { api, emptyReadiness } from "../helpers";
 import { useAccountBrowserState } from "./domains/account-browser-state";
 import { useAiSettingsState } from "./domains/ai-settings-state";
@@ -22,16 +22,20 @@ export function useAppStateBase() {
   const currentLocalProductIdRef = useRef<string | null>(null);
   currentLocalProductIdRef.current = productState.product?.id ?? null;
 
-  const checkVbkLogin = async (refresh = false) => {
-    if (!api()) return;
+  const checkVbkLogin = async (refresh = false): Promise<VbkLoginStatus | null> => {
+    if (!api()) return null;
     accountState.setCheckingVbkLogin(true);
     try {
-      accountState.setVbkLogin(await api()!.browser.status(refresh));
+      const next = await api()!.browser.status(refresh);
+      accountState.setVbkLogin(next);
+      return next;
     } catch (error) {
-      accountState.setVbkLogin({
+      const next = {
         loggedIn: false,
         message: error instanceof Error ? error.message : "无法检测 VBK 登录状态。",
-      });
+      };
+      accountState.setVbkLogin(next);
+      return next;
     } finally {
       accountState.setCheckingVbkLogin(false);
     }

@@ -10,7 +10,7 @@ import { AI_WRITABLE_PATHS, validateModuleValue, validateResearchTaskProposal } 
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
-import { isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
+import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
 import { findVbkCopyBadCase } from "./vbk-copy-policy.js";
 
 export interface StageExecutionResult {
@@ -175,8 +175,8 @@ export async function executeStageOutput(args: {
       const city = normaliseProvinceName(String(basic.meetingCity ?? basic.destinationCity ?? "").trim());
       const sameAsDestination = Boolean(city && province === city);
       const destinationIsProvince = isProvinceLevelName(city) && isProvinceLevelName(province);
-      if (!province || (sameAsDestination && !destinationIsProvince)) {
-        rejected.push({ module: "basicInfo", status: "rejected", reason: "basicInfo.province 缺失或不能直接使用目的地城市" });
+      if (!province || (sameAsDestination && !destinationIsProvince) || !isAcceptablePlanningRegionName(province, city)) {
+        rejected.push({ module: "basicInfo", status: "rejected", reason: "basicInfo.province 缺失或不能直接使用目的地城市；境外产品需填写国家、地区或一级行政区" });
         continue;
       }
       if (!String(next.province ?? "").trim() && existingProvince) delete next.province;

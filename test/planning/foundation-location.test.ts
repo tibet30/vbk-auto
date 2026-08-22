@@ -103,3 +103,19 @@ test("第一阶段省份不合法时仍然重试并停在 needs_user", async () 
   assert.equal(product.basicInfo.province, "");
   assert.deepEqual(events, []);
 });
+
+test("第一阶段境外目的地接受国家或一级行政区作为 province", async () => {
+  const product = { basicInfo: { destination: "伊尔库茨克", destinationCity: "伊尔库茨克", province: "", days: 3 } };
+  const ai = {
+    async structureLocation() {
+      return { province: "俄罗斯", destinationCity: "伊尔库茨克" };
+    },
+  };
+  let plan = createPlanningPlanV2();
+  const result = await runFoundationLocation(depsFor(ai, product), plan, async (_id, patch) => {
+    plan = { ...plan, nodes: plan.nodes.map((node) => node.id === "skeleton" ? { ...node, ...patch } : node) };
+  }, () => plan);
+  assert.equal(result.ok, true);
+  assert.equal(product.basicInfo.province, "俄罗斯");
+  assert.equal(product.basicInfo.destinationCity, "伊尔库茨克");
+});

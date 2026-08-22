@@ -1,15 +1,14 @@
-/* VBK Desktop — workspace-home login browser surface（专用 login stage 右侧）
+/* VBK Desktop — workspace-home login browser surface（专用 login stage）
  * 紧凑中文工作台视觉：复用 surface / border / radius 体系，不引入新色板。 */
 
 .panel {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
+  border-top: 1px solid var(--border);
   overflow: hidden;
   height: 100%;
-  min-height: 320px;
+  min-height: 0;
   position: relative;
 }
 
@@ -27,23 +26,7 @@
 .panelTitleRow {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
-}
-
-.panelNum {
-  min-width: 22px;
-  height: 18px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1;
-  flex-shrink: 0;
 }
 
 .panelTitle {
@@ -107,7 +90,11 @@
 .actions {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 6px;
+}
+
+.doneButton {
+  gap: 6px;
 }
 
 /* 探测中：刷新按钮 disabled + 图标旋转。 */
@@ -127,8 +114,32 @@
 
 .viewport {
   flex: 1 1 auto;
-  min-height: 320px;
+  min-height: 0;
   background: var(--muted);
   position: relative;
   overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .panelHeader {
+    height: auto;
+    min-height: 44px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px var(--pad);
+  }
+
+  .panelSubLine {
+    margin-left: 0;
+    max-width: 100%;
+  }
+
+  .panelHead {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
 }

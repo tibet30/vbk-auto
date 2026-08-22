@@ -37,6 +37,13 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
   const currentAccount = vbkLogin?.accountName ?? null;
   const snapCurrent = vbkLoginAccounts?.current;
   const snapSaved = vbkLoginAccounts?.saved ?? [];
+  const currentListAccount = currentAccount
+    ? {
+        accountKey: snapCurrent?.accountKey ?? vbkLogin?.loginAccount ?? currentAccount,
+        accountName: currentAccount,
+        lastUsedAt: snapCurrent?.lastUsedAt ?? "",
+      }
+    : snapCurrent;
 
   // 当前账号的固定信息（400 电话 + 管家联系人）。
   const [accountInfo, setAccountInfo] = useState<AccountFixedInfo | null>(null);
@@ -131,6 +138,11 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
     }
   };
 
+  const handleRefreshStatus = async () => {
+    await checkVbkLogin(true);
+    await refreshVbkLoginAccounts();
+  };
+
   return <section className={styles.block}>
     <div className={styles.blockHead}>
       <span className={styles.blockIcon}><UserRound size={18} /></span>
@@ -216,7 +228,7 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
             <dt className={styles.kvLabel}>已记录账号</dt>
             <dd className={styles.kvValue}>
               <AccountList
-                current={snapCurrent ?? (currentAccount ? { accountKey: currentAccount, accountName: currentAccount, lastUsedAt: "" } : null)}
+                current={currentListAccount}
                 saved={snapSaved}
                 busyAccount={busyAccount}
                 confirmForgetKey={confirmForgetKey}
@@ -250,7 +262,7 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
         )}
         <button
           className={`${shared.btn} ${shared.btnSm}`}
-          onClick={() => void checkVbkLogin(true)}
+          onClick={() => void handleRefreshStatus()}
           disabled={checkingVbkLogin}
         >
           <RotateCw size={14} /> 刷新状态

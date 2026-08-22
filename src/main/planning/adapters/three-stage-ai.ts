@@ -50,7 +50,7 @@ const locationTool = {
   type: "function" as const,
   function: {
     name: "submit_standard_location",
-    description: "把原始目的地结构化为中国标准省级行政区名称和目的地城市名称。",
+    description: "把原始目的地结构化为标准上级地区和目的地城市名称。",
     strict: true,
     parameters: {
       type: "object",
@@ -136,9 +136,11 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       {
         role: "system" as const,
         content: [
-          "你是中国旅游产品的目的地标准化助手。",
-          "只把原始目的地转换为标准中国省级行政区名称和标准目的地城市名称。",
-          "province 必须是省、自治区或直辖市的常用标准名称；destinationCity 必须是城市名称，不能填省名、景点名、机场、车站或 POI ID。",
+          "你是全球旅游产品的目的地标准化助手。",
+          "把原始目的地转换为标准上级地区和标准目的地城市名称。",
+          "中国目的地：province 填省、自治区或直辖市的常用标准名称；destinationCity 填城市名称。",
+          "境外目的地：province 填国家、地区或一级行政区的常用中文名称；destinationCity 填城市名称。不要把城市原样填进 province。",
+          "destinationCity 不能填省名、景点名、机场、车站或 POI ID。",
           "两个字段都必须非空；无法判断时仍需根据失败原因修正，不得返回解释文字。",
         ].join("\n"),
       },
@@ -158,7 +160,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       {
         role: "system" as const,
         content: [
-          "你是中国目的地产品的景点候选规划员。只推荐真实、单一、可检索的景点名称。",
+          "你是全球目的地产品的景点候选规划员。只推荐真实、单一、可检索的景点名称。",
           "禁止酒店、车站、机场、码头、集合点、停车场、入口、售票处以及 A和B 组合名称。",
           "不要生成或猜测 POI ID。候选应覆盖代表性景点，并尽量分布在可合理串联的片区。",
         ].join("\n"),
@@ -187,7 +189,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       {
         role: "system" as const,
         content: [
-          "你是中国目的地行程规划员。只能引用候选池中的 poiId，不得虚构景点。",
+          "你是全球目的地行程规划员。只能引用候选池中的 poiId，不得虚构景点。",
           "必须恰好覆盖产品天数，每天至少一个 POI，同一 POI 不得重复。",
           "同日只安排同城景点；优先把相同或相邻区县安排在同一天。",
           "跨日沿一个方向移动，禁止 A→B→A 折返。全日型景点可单独占一天。",
@@ -211,7 +213,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
     const messages = [
       {
         role: "system" as const,
-        content: "你负责估算中国境内私家团整段行程的用车总成本。结合每天的用车安排、目的地、天数、跨区移动、接送和行程密度，只给出一个合理的人民币总成本正数，用于按总价匹配现有 VBK 车辆资源组；不要给区间、日均价或解释。",
+        content: "你负责估算私家团整段行程的用车总成本。结合每天的用车安排、目的地、天数、跨区移动、接送和行程密度，只给出一个合理的人民币总成本正数，用于按总价匹配现有 VBK 车辆资源组；不要给区间、日均价或解释。",
       },
       { role: "user" as const, content: JSON.stringify(request) },
     ];

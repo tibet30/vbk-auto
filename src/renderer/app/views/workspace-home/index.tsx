@@ -9,12 +9,11 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
   const { products, startCreateProduct, openProductList, loginPanelOpen } = model;
   const totalProducts = products.length;
   const hasProducts = totalProducts > 0;
-  // 登录面板展开时，专用两列 login stage：左侧普通工作台首页、右侧登录 WebView。
-  // loginPanelOpen=true 时 LoginBrowserPanel 始终挂载真实 viewport，关闭由父级卸载。
+  // 登录打开时，VBK 是唯一任务面：全量展示嵌入式页面，完成后由用户手动确认登录态。
   const stageClass = loginPanelOpen ? styles.homeStageOpen : styles.homeStage;
 
   return <section className={stageClass} data-login-open={loginPanelOpen ? "true" : "false"}>
-    <div className={styles.homeMain}>
+    {!loginPanelOpen && <div className={styles.homeMain}>
       <header className={styles.workspaceHomeHead}>
         <h1 className={styles.workspaceHomeTitle}>工作台</h1>
         <p className={shared.viewSub}>从这里启动产品、查看设置或直接进入录入。</p>
@@ -70,7 +69,7 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
           }
         />
       </div>
-    </div>
+    </div>}
     {loginPanelOpen && <LoginBrowserPanel model={model} />}
   </section>;
 }

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { executeStageOutput } from "../../src/main/planning/stage-runner.js";
 import { runSingleStage } from "../../src/main/planning/single-stage-runner.js";
-import { DbOrchestratorRuntime, isProvinceLevelName, normaliseProvinceName, resolveTravelScope } from "../../src/main/planning/runtime.js";
+import { DbOrchestratorRuntime, isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName, resolveTravelScope } from "../../src/main/planning/runtime.js";
 
 const basicInfoValue = (province: string) => ({
   subtitle: "内蒙古精华之旅",
@@ -80,6 +80,12 @@ test("普通城市目的地保持原城市游玩范围", () => {
     primaryCity: "太原",
     nearbyCoreCities: [],
   });
+});
+
+test("境外上级地区可以作为 planning province，但不能直接照抄普通城市", () => {
+  assert.equal(isAcceptablePlanningRegionName("俄罗斯", "伊尔库茨克"), true);
+  assert.equal(isAcceptablePlanningRegionName("伊尔库茨克州", "伊尔库茨克"), true);
+  assert.equal(isAcceptablePlanningRegionName("伊尔库茨克", "伊尔库茨克"), false);
 });
 
 test("skeleton 阶段把省级目的地的 pickupCity 写为核心城市", async () => {
@@ -169,6 +175,13 @@ test("普通城市不能直接作为 province", async () => {
   assert.equal(result.rejected.length, 1);
   assert.match(result.rejected[0]?.reason ?? "", /province/);
   assert.equal(writes.length, 0);
+});
+
+test("境外产品 basicInfo 可以接受国家或一级行政区作为 province", async () => {
+  const { result, writes } = await executeBasicInfo("伊尔库茨克", "俄罗斯");
+  assert.equal(result.accepted.length, 1);
+  assert.equal(result.rejected.length, 0);
+  assert.equal(writes.length, 1);
 });
 
 test("已有合法 province 不被 AI 输出覆盖", async () => {

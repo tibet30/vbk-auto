@@ -9,8 +9,7 @@
  * 仅匹配 vbk_* 形式，避免误把 partyId 当登录账号。
  */
 
-import type { Page } from "playwright";
-import { vbkSessionRequest } from "./vbk-session-request.js";
+import { vbkSessionRequest, type VbkSessionRequestBrowser } from "./vbk-session-request.js";
 
 /**
  * 在已登录的 VBK 浏览器上下文里调 getCurrentUserInfo 接口，返回当前账号信息。
@@ -19,8 +18,8 @@ import { vbkSessionRequest } from "./vbk-session-request.js";
  * 与 hotel-resource.ts / butler-contacts.ts 一样，走 page.evaluate + fetch：
  * cookies 由 BrowserView 的 session 自动带上，跨域也不需要 CORS 配置。
  */
-export async function fetchCurrentUserInfo(page: Page): Promise<CurrentUserInfo | null> {
-  const response = await vbkSessionRequest(page, {
+export async function fetchCurrentUserInfo(browser: VbkSessionRequestBrowser): Promise<CurrentUserInfo | null> {
+  const response = await vbkSessionRequest(browser, {
     endpoint: "https://online.ctrip.com/restapi/soa2/12405/getCurrentUserInfo",
     browserRequestTimeoutMs: 12_000,
     evaluateTimeoutMs: 15_000,

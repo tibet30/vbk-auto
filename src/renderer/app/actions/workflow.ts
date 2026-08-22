@@ -208,7 +208,8 @@ export function useWorkflowHandlers(state: AppState) {
    *
    * 失败语义：catch 必须 setNotice 把错误显式抛给用户看，并保留 login surface
    * （不动 loginPanelOpen / browserOpen / setVbkLogin(false)），让用户能在右侧
-   * 看到失败提示后继续重试或重新打开。
+   * 看到失败提示后继续重试或重新打开。登录完成后由用户点击面板里的确认按钮，
+   * 再触发 status 探测与本机账号快照保存。
    */
   const openLogin = () => {
     // setView 必须先于 setLoginPanelOpen：否则路由还在 settings 时 loginPanelOpen 已被置 true，
@@ -221,7 +222,6 @@ export function useWorkflowHandlers(state: AppState) {
     setLoginPanelOpen(true);
     if (api()) {
       api()!.browser.login()
-        .then(() => checkVbkLogin())
         .catch((error) => {
           const message = error instanceof Error ? error.message : "无法打开 VBK 登录页面。";
           setNotice(`VBK 登录页打开失败：${message}。请稍后重试，或在右侧重新发起。`);
@@ -239,8 +239,8 @@ export function useWorkflowHandlers(state: AppState) {
    *     effect 立刻把刚打开的登录面板关掉。
    *  3. 调 main 进程 addLogin()：保存当前账号 cookies、清空 session、导航到 VBK 根；
    *  4. 主动拉一次账号列表，让「已记录账号」立刻多出来一颗新 chip；
-   *  5. 等用户在右侧完成登录后，checkVbkLogin 会被 status 流触发，
-   *     自然把新账号 cookies 也写回 login_sessions。
+   *  5. 等用户在右侧完成登录后，由「我已完成 VBK 登录」按钮手动触发 status，
+   *     再把新账号 cookies 写回 login_sessions。
    */
   const addNewLogin = async () => {
     if (!api()) return;
@@ -253,7 +253,6 @@ export function useWorkflowHandlers(state: AppState) {
     try {
       await api()!.browser.addLogin();
       await refreshVbkLoginAccounts();
-      void checkVbkLogin();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "新增登录失败。");
     }

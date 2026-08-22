@@ -15,8 +15,13 @@ export interface PoiSuggestRequest {
   keyword: string;
   tagIds: [];
   useENameSort: "T";
-  districtSortDto: { districtIds: []; poiIds: [number, number, number] };
+  districtSortDto: PoiDistrictSortDto;
   contentType: "json";
+}
+
+export interface PoiDistrictSortDto {
+  districtIds: number[];
+  poiIds: number[];
 }
 
 export interface PoiSuggestDemoResult {
@@ -67,7 +72,7 @@ export function buildPoiSuggestRequest(keyword: string): PoiSuggestRequest {
     keyword: trimmed,
     tagIds: [],
     useENameSort: "T",
-    districtSortDto: { districtIds: [], poiIds: [93331, 79413, 118386477] },
+    districtSortDto: { districtIds: [], poiIds: [] },
     contentType: "json",
   };
 }

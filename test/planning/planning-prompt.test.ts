@@ -34,7 +34,7 @@ const request: PlannerRequest = {
 test("basicInfo prompt 只包含本阶段规则，不混入其他阶段约束", () => {
   const prompt = composePlanningSystemPrompt("basicInfo");
   assert.match(prompt, /subtitle、province、destinationCity、meetingCity、operationNotes/);
-  assert.match(prompt, /标准省级行政区/);
+  assert.match(prompt, /境外目的地/);
   assert.doesNotMatch(prompt, /publicPriceCeiling|recommendations 恰好|每天至少一个 spot|requestedTotalCost/);
 });
 

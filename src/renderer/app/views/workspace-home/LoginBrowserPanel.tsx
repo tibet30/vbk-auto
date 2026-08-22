@@ -1,11 +1,11 @@
-import { RefreshCw, X } from "lucide-react";
+import { CheckCircle2, RefreshCw, X } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import { formatBrowserPath } from "../../helpers";
 import shared from "../shared.module.less";
 import styles from "./login-browser.module.less";
 
 /**
- * 无产品工作台上的专用 VBK 登录 WebView surface（专用 login stage 右侧）。
+ * 无产品工作台上的专用 VBK 登录 WebView surface（专用 login stage）。
  *
  * 设计动机：模块化重构后，view=workspace 且 product=null 时 ActiveRoute 走
  * AppWorkspaceHomePage，原 vbk 工作台里的 <div ref={browserRef}> 不存在 →
@@ -23,6 +23,9 @@ export function LoginBrowserPanel({ model }: { model: AppModel }) {
     setBrowserOpen,
     setLoginPanelOpen,
     checkVbkLogin,
+    refreshVbkLoginAccounts,
+    setNotice,
+    setView,
     vbkLogin,
     checkingVbkLogin,
   } = model;
@@ -32,11 +35,23 @@ export function LoginBrowserPanel({ model }: { model: AppModel }) {
     setLoginPanelOpen(false);
   };
 
+  const handleLoginDone = async () => {
+    const next = await checkVbkLogin(true);
+    await refreshVbkLoginAccounts();
+    if (next?.loggedIn) {
+      setBrowserOpen(false);
+      setLoginPanelOpen(false);
+      setView("settings");
+      setNotice(null);
+      return;
+    }
+    setNotice(next?.message || "还没有检测到 VBK 登录态，请在 VBK 页面完成登录后再点一次。");
+  };
+
   return (
     <section className={styles.panel} aria-label="VBK 登录">
       <div className={styles.panelHeader}>
         <div className={styles.panelTitleRow}>
-          <span className={styles.panelNum}>02</span>
           <strong className={styles.panelTitle}>VBK 登录</strong>
         </div>
         <span className={`${styles.panelSubLine} ${vbkLogin?.loggedIn ? styles.panelSubLineOk : styles.panelSubLineWarn}`}>
@@ -50,6 +65,18 @@ export function LoginBrowserPanel({ model }: { model: AppModel }) {
           <span className={styles.path}>{browserUrl ? formatBrowserPath(browserUrl) : "/产品库"}</span>
         </div>
         <div className={styles.actions}>
+          <button
+            className={`${shared.btn} ${shared.btnSm} ${styles.doneButton}`}
+            type="button"
+            data-variant="primary"
+            onClick={() => void handleLoginDone()}
+            disabled={checkingVbkLogin}
+            aria-busy={checkingVbkLogin}
+            title="完成 VBK 登录后点击，平台会刷新并保存当前账号登录态"
+          >
+            <CheckCircle2 size={14} />
+            {checkingVbkLogin ? "正在确认" : "我已完成 VBK 登录"}
+          </button>
           <button
             className={`${shared.iconBtn} ${checkingVbkLogin ? styles.actionLoading : ""}`}
             type="button"

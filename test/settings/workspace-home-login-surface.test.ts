@@ -10,11 +10,11 @@
 //      「已登录且 loginPanelOpen 则自动收起」effect 会立刻把它关掉。
 //
 // 本次回归新增的契约：
-//   - 登录面板展开时必须是「两列 login stage」：左侧保留 home 卡片、右侧挂
-//     LoginBrowserPanel；窄屏（<=980px）切换为仅显示登录面板；
+//   - 登录面板展开时必须是「单一 VBK stage」：工作台首页卸载，VBK 页面占满主区域；
 //   - LoginBrowserPanel 挂载期间必须持续持有 ref={browserRef} 的真 DOM；
 //     不允许有 placeholder 死分支；
 //   - 关闭按钮必须同时把 browserOpen / loginPanelOpen 置 false；
+//   - 登录完成必须由用户点击“我已完成 VBK 登录”手动触发状态探测；
 //   - openLogin 的 catch 必须调 setNotice 显式抛错，且不修改
 //     loginPanelOpen / browserOpen（即保留登录 surface）；
 //   - 刷新按钮必须使用 checkingVbkLogin 做 disabled 与 spin 图标，
@@ -42,13 +42,36 @@ const homePanelSrc = read("src/renderer/app/views/workspace-home/LoginBrowserPan
 const homePanelLessSrc = read("src/renderer/app/views/workspace-home/login-browser.module.less");
 const homeIndexLessSrc = read("src/renderer/app/views/workspace-home/index.module.less");
 const workflowSrc = read("src/renderer/app/actions/workflow.ts");
+const vbkLoginBlockSrc = read("src/renderer/app/views/settings/vbk-login-block.tsx");
 
 function sliceBetween(haystack: string, start: number, stop: number): string {
   // 闭区间 [start, stop]
   return haystack.slice(start, stop);
 }
 
-test("workspace-home 必须在 loginPanelOpen=true 时挂载 LoginBrowserPanel（右侧分栏）", () => {
+test("VBK 已记录账号的当前徽章跟随实时账号名称，避免显示旧快照名称", () => {
+  assert.match(
+    vbkLoginBlockSrc,
+    /const\s+currentListAccount\s*=\s*currentAccount\s*\?[\s\S]*?accountName:\s*currentAccount[\s\S]*?:\s*snapCurrent;/,
+    "已记录账号的当前徽章必须使用实时检测到的账号名称，不能优先显示旧快照名称。",
+  );
+  assert.match(
+    vbkLoginBlockSrc,
+    /<AccountList[\s\S]*?current=\{currentListAccount\}/,
+    "AccountList 必须接收经过实时账号名称校正的当前账号。",
+  );
+});
+
+test("VBK 刷新状态后同步刷新已记录账号列表", () => {
+  assert.match(
+    vbkLoginBlockSrc,
+    /const\s+handleRefreshStatus\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]*?await\s+checkVbkLogin\(true\)[\s\S]*?await\s+refreshVbkLoginAccounts\(\)[\s\S]*?\};/,
+    "刷新状态必须同时重新读取已记录账号，避免磁盘已有账号但界面列表仍是旧快照。",
+  );
+  assert.match(vbkLoginBlockSrc, /onClick=\{\(\)\s*=>\s*void\s+handleRefreshStatus\(\)\}/);
+});
+
+test("workspace-home 必须在 loginPanelOpen=true 时挂载 LoginBrowserPanel", () => {
   // 必须形如：{loginPanelOpen && <LoginBrowserPanel model={model} />}
   // 关键不变量：挂载条件来自 loginPanelOpen；否则浏览器永远不会被打开。
   assert.match(
@@ -67,18 +90,26 @@ test("workspace-home 必须在 loginPanelOpen=true 时挂载 LoginBrowserPanel�
   );
 });
 
-test("workspace-home 在登录打开时使用两列 login stage，窄屏隐藏左栏", () => {
-  // 必须存在一个 grid-template-columns: 包含两列 1fr 1fr 的样式块；
-  // 同时窄屏（max-width: 980px）必须把 homeMain 隐藏，仅显示登录面板。
+test("workspace-home 在登录打开时使用单一 VBK stage，不再 50/50 分栏", () => {
   assert.match(
+    homeIndexSrc,
+    /\{!loginPanelOpen\s*&&\s*<div\s+className=\{styles\.homeMain\}>/,
+    "登录打开时工作台首页必须卸载，避免与 VBK 页面各占 50%。",
+  );
+  assert.doesNotMatch(
     homeIndexLessSrc,
     /grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*1fr\)/,
-    "登录打开时 workspace-home 必须切换为两列 layout（grid-template-columns: 1fr 1fr）。",
+    "登录打开时不允许再使用两列 1fr/1fr layout。",
   );
   assert.match(
     homeIndexLessSrc,
-    /@media\s*\(max-width:\s*980px\)[\s\S]*?\.homeStageOpen\s*>\s*\.homeMain\s*\{[\s\S]*?display:\s*none/,
-    "窄屏（max-width: 980px）登录打开时必须隐藏左侧 home，仅显示登录面板。",
+    /\.homeStageOpen\s*\{[\s\S]*?height:\s*100%;[\s\S]*?display:\s*block/,
+    "登录打开时 workspace-home 必须是单一全高 VBK stage。",
+  );
+  assert.match(
+    homePanelLessSrc,
+    /\.panel\s*\{[\s\S]*?height:\s*100%;[\s\S]*?min-height:\s*0/,
+    "LoginBrowserPanel 必须占满 stage 高度，让 VBK viewport 成为主任务面。",
   );
 });
 
@@ -132,6 +163,24 @@ test("LoginBrowserPanel 刷新按钮使用 checkingVbkLogin 做 disabled 与 loa
     homePanelLessSrc,
     /@keyframes\s+loginBrowserSpin\s*\{[\s\S]*?rotate\(360deg\)/,
     "login-browser.module.less 必须定义 loginBrowserSpin 关键帧动画，否则 loading 不会旋转。",
+  );
+});
+
+test("LoginBrowserPanel 必须提供手动完成登录按钮，成功后刷新账号并回设置页", () => {
+  assert.match(
+    homePanelSrc,
+    /我已完成 VBK 登录/,
+    "登录完成必须由用户手动确认，不能只靠页面就绪自动探测。",
+  );
+  assert.match(
+    homePanelSrc,
+    /const\s+handleLoginDone\s*=\s*async\s*\(\s*\)\s*=>\s*\{[\s\S]*?await checkVbkLogin\(true\)[\s\S]*?await refreshVbkLoginAccounts\(\)/,
+    "完成登录按钮必须先刷新 VBK 登录态，再刷新已记录账号列表。",
+  );
+  assert.match(
+    homePanelSrc,
+    /if \(next\?\.loggedIn\) \{[\s\S]*?setBrowserOpen\(false\)[\s\S]*?setLoginPanelOpen\(false\)[\s\S]*?setView\("settings"\)/,
+    "检测到已登录后必须关闭 VBK login stage 并回到设置页展示账号结果。",
   );
 });
 
@@ -235,5 +284,47 @@ test("openLogin 的 catch 必须 setNotice 显式抛错并保留登录 surface",
     catchBody,
     /setVbkLogin\(\{\s*loggedIn:\s*false/,
     "openLogin 的 catch 不应使用 setVbkLogin({ loggedIn: false, ... })：这会让失败看起来像「已登出」，丢掉错误上下文。",
+  );
+});
+
+test("登录面板打开期间不自动探测，必须等待用户手动确认", () => {
+  const derivedSrc = read("src/renderer/app/state/derived.ts");
+  const workflowOpenLogin = workflowSrc.slice(
+    workflowSrc.indexOf("  const openLogin = () => {"),
+    workflowSrc.indexOf("  /**\n   * 「新增登录」"),
+  );
+  const workflowAddLogin = workflowSrc.slice(
+    workflowSrc.indexOf("  const addNewLogin = async () => {"),
+    workflowSrc.indexOf("  /**\n   * 切换到本机已记录"),
+  );
+  assert.match(
+    derivedSrc,
+    /const loginPanelOpenRef = useRef\(loginPanelOpen\);[\s\S]*loginPanelOpenRef\.current = loginPanelOpen;/,
+    "derived.ts 必须用 ref 读取登录面板最新开关状态，避免空 deps effect 读到旧值。",
+  );
+  assert.match(
+    derivedSrc,
+    /onPageReady\(\(\) => \{[\s\S]*?if \(loginPanelOpenRef\.current\) return;[\s\S]*?checkVbkLogin\(\)/,
+    "登录面板打开时 page-ready 自动探测必须跳过。",
+  );
+  assert.match(
+    derivedSrc,
+    /setTimeout\(\(\) => \{[\s\S]*?if \(loginPanelOpenRef\.current\) return;[\s\S]*?checkVbkLogin\(\)/,
+    "登录面板打开时启动兜底自动探测也必须跳过。",
+  );
+  assert.doesNotMatch(
+    derivedSrc,
+    /vbkLogin\?\.loggedIn[\s\S]*?setLoginPanelOpen\(false\)/,
+    "登录成功后不允许全局 effect 自动收起登录面板，必须由完成登录按钮收尾。",
+  );
+  assert.doesNotMatch(
+    workflowOpenLogin,
+    /\.then\(\(\)\s*=>\s*checkVbkLogin\(\)\)/,
+    "openLogin 只负责打开 VBK 页面，不应自动触发登录态确认。",
+  );
+  assert.doesNotMatch(
+    workflowAddLogin,
+    /checkVbkLogin\(\)/,
+    "addNewLogin 只负责保存旧账号并打开新登录入口，不应自动确认新账号。",
   );
 });

@@ -1,0 +1,47 @@
+# electron-builder 打包配置
+# 说明：vite 输出到 dist/，tsc 输出到 dist-electron/，本配置将打包产物输出到 release/，
+# 避免与 vite 的 emptyOutDir 互相清空（历史遗留 dist/mac-universal-*-temp 冲突即由此而来）。
+
+appId: com.vbk.sanrentongyou
+productName: 三人同游
+
+directories:
+  # 打包产物（DMG / .app / 临时目录）统一落到 release/，与源码产物 dist / dist-electron 隔离
+  output: release
+  buildResources: build
+
+files:
+  # 只打包构建产物；node_modules 生产依赖由 electron-builder 按 dependencies 自动收集
+  - "dist/**"
+  - "dist-electron/**"
+  - "package.json"
+  - "!**/*.map"
+  # 显式排除源码/测试/临时/文档等无关目录，避免被塞进包（尤其是 tmp/ 下的日志会干扰 universal 合并）
+  - "!src/**"
+  - "!test/**"
+  - "!tmp/**"
+  - "!docs/**"
+  - "!scripts/**"
+  - "!artifacts/**"
+  - "!fixtures/**"
+  - "!examples/**"
+
+# 原生模块（.node）需从 asar 中解包，否则运行时无法加载
+asarUnpack:
+  - "**/*.node"
+
+mac:
+  icon: build/icon.icns
+  target:
+    - dmg
+  # 产物名带上架构后缀，避免 x64 与 arm64 同名覆盖（如 三人同游-0.1.0-x64.dmg）
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  category: public.app-category.travel
+
+  # --- universal 合并（仅 --universal 时生效）---
+  # better-sqlite3 是 N-API 原生模块，prebuilds/ 里 darwin-arm64.node / darwin-x64.node
+  # 是两个架构各自的 Mach-O 二进制；打包时两边的文件 SHA 相同，@electron/universal 会
+  # 误判为“重复的架构专属文件”而报错。用 x64ArchFiles 显式声明这些 .node 为架构专属、
+  # 跳过 lipo 合并，各自保留（arm64 机器加载 darwin-arm64.node，x64 机器加载 darwin-x64.node）。
+  mergeASARs: true
+  x64ArchFiles: "**/node_modules/better-sqlite3/prebuilds/*.node"

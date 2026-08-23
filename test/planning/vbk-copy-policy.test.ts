@@ -16,6 +16,7 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   assert.match(prompt, /主席/);
   assert.match(prompt, /第一（宣传排名用语）/);
   assert.match(prompt, /最（极限表达）/);
+  assert.match(prompt, /导游否定描述/);
   assert.match(legacySystemPrompt, /VBK 文案黑名单/);
   assert.match(legacySystemPrompt, /首次/);
 
@@ -41,8 +42,10 @@ test("实跑敏感词与极限宣传进入黑名单，但行程序号不被误�
   assert.equal(findVbkCopyBadCase("保存最完整的明代城墙")?.term, "最（极限表达）");
   assert.equal(findVbkCopyBadCase("唯一选择")?.term, "其他绝对化用语");
   assert.equal(findVbkCopyBadCase("全网零差评")?.term, "其他绝对化用语");
+  assert.equal(findVbkCopyBadCase("不配随队导游", "value.presentation.features")?.term, "导游否定描述");
   assert.equal(findVbkCopyBadCase("第一天游览晋祠"), undefined);
   assert.equal(findVbkCopyBadCase("最后一天送站"), undefined);
+  assert.equal(findVbkCopyBadCase("费用不含导游", "value.commercial.terms.exclusions"), undefined);
 });
 
 test("不含 bad case 的合规文案正常通过", () => {

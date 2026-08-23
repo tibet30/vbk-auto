@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 import type { AiUsageEvent, AiUsageSource } from "../../shared/contracts-ai-usage.js";
 
 export interface ParsedCompletionUsage {
@@ -99,6 +100,12 @@ export function toAiUsageEvent(input: {
   const endedAt = new Date().toISOString();
   const startedAt = new Date(Date.now() - Math.max(0, input.durationMs)).toISOString();
   const usage = input.response ? parseCompletionUsage(input.response) : parseCompletionUsage(null);
+  const estimatedCostCny = estimateAiUsageCostCny({
+    model: input.model,
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cachedTokens: usage.cachedTokens,
+  });
   return {
     id: randomUUID(),
     runId: input.runId,
@@ -117,5 +124,6 @@ export function toAiUsageEvent(input: {
     totalTokens: usage.totalTokens,
     cachedTokens: usage.cachedTokens,
     reasoningTokens: usage.reasoningTokens,
+    estimatedCostCny,
   };
 }

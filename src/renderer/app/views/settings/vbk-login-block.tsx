@@ -1,10 +1,21 @@
 import { useEffect, useState } from "react";
-import { Pencil, Phone, PlugZap, RotateCw, Shield, Trash2, UserRound, UserSquare2, X } from "lucide-react";
+import { Pencil, Phone, PlugZap, RotateCw, Shield, UserRound, UserSquare2 } from "lucide-react";
 import type { AccountFixedInfo, ContactCardSelection, SavedLoginAccount } from "../../../../shared/contracts.js";
+import { useAppAuth } from "../../auth/AppAuthContext";
 import { api } from "../../helpers";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
+import { AccountList } from "./vbk-login-account-list";
 import styles from "./vbk-login-block.module.less";
+
+function hasBindingValues(info: AccountFixedInfo): boolean {
+  const phone = typeof info.values.servicePhone === "string" ? info.values.servicePhone.trim() : "";
+  const raw = info.values.butlerName;
+  const butler = raw && typeof raw === "object" && "displayName" in raw
+    ? String((raw as ContactCardSelection).displayName || "").trim()
+    : "";
+  return Boolean(phone || butler);
+}
 
 /**
  * 多账号登录：把每个 VBK 账号的 cookies 抽出来本机持久化，
@@ -16,8 +27,8 @@ import styles from "./vbk-login-block.module.less";
  *  - 主按钮文案随登录态切换；已登录时调 addNewLogin，未登录时调 openLogin。
  */
 export function VbkLoginBlock({ model }: { model: AppModel }) {
+  const { user } = useAppAuth();
   const {
-    loggedAccounts,
     vbkLogin,
     checkingVbkLogin,
     openLogin,
@@ -31,12 +42,14 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
     forgetAccount,
     loadingLoginAccounts,
     fixedInfoReloadToken,
+    setFixedInfoReloadToken,
   } = model;
 
   const loggedIn = !!vbkLogin?.loggedIn;
   const currentAccount = vbkLogin?.accountName ?? null;
   const snapCurrent = vbkLoginAccounts?.current;
   const snapSaved = vbkLoginAccounts?.saved ?? [];
+  const currentAccountKey = snapCurrent?.accountKey ?? vbkLogin?.loginAccount ?? currentAccount;
   const currentListAccount = currentAccount
     ? {
         accountKey: snapCurrent?.accountKey ?? vbkLogin?.loginAccount ?? currentAccount,
@@ -45,43 +58,72 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
       }
     : snapCurrent;
 
-  // 当前账号的固定信息（400 电话 + 管家联系人）。
   const [accountInfo, setAccountInfo] = useState<AccountFixedInfo | null>(null);
   const [loadingAccountInfo, setLoadingAccountInfo] = useState(false);
-  // 忘记按钮的二次确认态：避免误触把刚加的账号瞬间蒸发。
+  /** Tibet 绑定有 400/管家，但本机 VBK webview 未登录。 */
+  const [boundOffline, setBoundOffline] = useState(false);
   const [confirmForgetKey, setConfirmForgetKey] = useState<string | null>(null);
-  // 切换 / 忘记 进行中：避免连续点击造成 race condition。
   const [busyAccount, setBusyAccount] = useState<string | null>(null);
 
+  // App 账号切换后 workspace 会按 user.id remount；main 侧 sync 是 fire-and-forget，
+  // 这里立刻刷新并延迟再 bump token，让设置页读到新用户的 scoped 绑定。
   useEffect(() => {
-    if (!currentAccount) {
-      setAccountInfo(null);
-      return;
-    }
+    void refreshVbkLoginAccounts();
+    void checkVbkLogin(true);
+    setFixedInfoReloadToken((value) => value + 1);
+    const timer = window.setTimeout(() => {
+      setFixedInfoReloadToken((value) => value + 1);
+      void refreshVbkLoginAccounts();
+    }, 800);
+    return () => window.clearTimeout(timer);
+    // checkVbkLogin 引用不稳定，刻意只跟 user.id。
+  }, [user.id]);
+
+  useEffect(() => {
     const client = api();
     if (!client) return;
     let cancelled = false;
     setLoadingAccountInfo(true);
-    client.accounts
-      .getFixedInfo(currentAccount)
-      .then((info) => {
-        if (!cancelled) setAccountInfo(info);
-      })
-      .catch(() => {
-        if (!cancelled) setAccountInfo(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingAccountInfo(false);
-      });
+
+    const finish = (info: AccountFixedInfo | null, offlineBound: boolean) => {
+      if (cancelled) return;
+      setAccountInfo(info);
+      setBoundOffline(offlineBound);
+      setLoadingAccountInfo(false);
+    };
+
+    void (async () => {
+      try {
+        if (currentAccount) {
+          finish(await client.accounts.getFixedInfo(currentAccountKey ?? currentAccount), false);
+          return;
+        }
+        // 未登录 VBK：用本机已记录账号 key 探测 scoped 绑定（有 400/管家则提示待登录）。
+        const keys = [
+          snapCurrent?.accountKey,
+          snapCurrent?.accountName,
+          ...snapSaved.flatMap((entry) => [entry.accountKey, entry.accountName]),
+        ]
+          .map((key) => (typeof key === "string" ? key.trim() : ""))
+          .filter(Boolean);
+        for (const key of [...new Set(keys)]) {
+          const info = await client.accounts.getFixedInfo(key);
+          if (hasBindingValues(info)) {
+            finish(info, true);
+            return;
+          }
+        }
+        finish(null, false);
+      } catch {
+        finish(null, false);
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
-    // 保存账号固定信息成功后由全局 reload token 刷新，避免切页后仍显示旧值。
-  }, [currentAccount, fixedInfoReloadToken]);
+  }, [currentAccount, currentAccountKey, vbkLoginAccounts, fixedInfoReloadToken]);
 
-  // 进入页面 / 退出登录 / 新增登录等时机需要让「已记录账号」与 webview 同步；
-  // 这里在 vbkLogin.loggedIn 切换 + 初次渲染时拉一次，避免把"刷新账号列表"
-  // 跟 checkVbkLogin 绑定导致被网络探测拖慢。
   useEffect(() => {
     void refreshVbkLoginAccounts();
   }, [refreshVbkLoginAccounts, vbkLogin?.loggedIn]);
@@ -128,7 +170,6 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
         setConfirmForgetKey(null);
       } else {
         setConfirmForgetKey(target.accountKey);
-        // 给运营 4 秒考虑时间，逾期自动收回确认态。
         window.setTimeout(() => {
           setConfirmForgetKey((current) => (current === target.accountKey ? null : current));
         }, 4000);
@@ -143,6 +184,10 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
     await refreshVbkLoginAccounts();
   };
 
+  const offlineAccountLabel = !loggedIn && boundOffline
+    ? (accountInfo?.accountName || snapCurrent?.accountName || null)
+    : null;
+
   return <section className={styles.block}>
     <div className={styles.blockHead}>
       <span className={styles.blockIcon}><UserRound size={18} /></span>
@@ -156,7 +201,7 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
           data-state={accountInfoState === "confirmed" ? "ok" : accountInfoState === "needs" ? "warn" : "block"}
         />
         {!loggedIn
-          ? "未登录"
+          ? boundOffline ? "待登录" : "未登录"
           : loadingAccountInfo
             ? "读取中…"
             : filledCount === 2
@@ -183,6 +228,11 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
                       {vbkLogin.loginAccount}
                     </span>
                   )}
+                </>
+              ) : offlineAccountLabel ? (
+                <>
+                  <span>{offlineAccountLabel}</span>
+                  <span className={styles.loginAccount}>本机未登录</span>
                 </>
               ) : <span className={shared.taskEmpty}>尚未登录</span>}
             </dd>
@@ -249,13 +299,15 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
           ? filledCount === 2
             ? "账号信息已就绪，可执行 VBK 录入。"
             : "补全 400 电话与管家联系人后，录入可自动填表。"
-          : "登录后可在工作台直接读取平台数据。"}
+          : boundOffline
+            ? "已绑定 VBK，本机尚未登录，请登录后继续"
+            : "登录后可在工作台直接读取平台数据。"}
       </div>
       <div className={shared.btnRow}>
         {loggedIn && currentAccount && (
           <button
             className={`${shared.btn} ${shared.btnSm}`}
-            onClick={() => void openAccountEditor(currentAccount)}
+            onClick={() => void openAccountEditor(currentAccountKey ?? currentAccount)}
           >
             <Pencil size={14} /> 编辑账号信息
           </button>
@@ -301,73 +353,4 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
       </div>
     </footer>
   </section>;
-}
-
-/**
- * 已记录账号列表：当前账号用绿色徽章标记，其余每个都是可点击切换 / 忘记的 chip。
- * 与 vbk-login-block.module.less 中的 .accountList* 系列配套。
- */
-interface AccountListProps {
-  current: SavedLoginAccount | null;
-  saved: SavedLoginAccount[];
-  busyAccount: string | null;
-  confirmForgetKey: string | null;
-  loading: boolean;
-  onSwitch: (account: SavedLoginAccount) => void;
-  onForget: (account: SavedLoginAccount) => void;
-  onCancelForget: () => void;
-}
-
-function AccountList({ current, saved, busyAccount, confirmForgetKey, loading, onSwitch, onForget, onCancelForget }: AccountListProps) {
-  const all = [
-    ...(current ? [current] : []),
-    ...saved,
-  ];
-  if (loading && all.length === 0) {
-    return <span className={shared.taskEmpty}>正在读取账号列表…</span>;
-  }
-  if (all.length === 0) {
-    return <span className={shared.taskEmpty}>暂无账号</span>;
-  }
-  return <div className={styles.accountList}>
-    {current && (
-      <span className={`${shared.chipMini} ${styles.accountListCurrent}`}>
-        <span className={shared.dot} data-state="ok" aria-hidden="true" />
-        <span className={styles.accountListName}>{current.accountName}</span>
-        <small className={styles.accountListTag}>当前</small>
-      </span>
-    )}
-    {saved.map((entry) => {
-      const busy = busyAccount === entry.accountKey;
-      const confirming = confirmForgetKey === entry.accountKey;
-      return (
-        <span
-          key={entry.accountKey}
-          className={`${shared.chipMini} ${styles.accountListItem} ${busy ? styles.accountListBusy : ""}`}
-          data-confirming={confirming || undefined}
-        >
-          <button
-            type="button"
-            className={styles.accountListNameBtn}
-            onClick={() => onSwitch(entry)}
-            disabled={!!busyAccount || busy}
-            title={`切换到「${entry.accountName}」`}
-          >
-            <span className={styles.accountListName}>{entry.accountName}</span>
-          </button>
-          <button
-            type="button"
-            className={`${shared.iconBtn} ${styles.accountListForgetBtn}`}
-            data-size="sm"
-            onClick={() => (confirming ? onCancelForget() : onForget(entry))}
-            disabled={!!busyAccount}
-            aria-label={confirming ? `取消忘记「${entry.accountName}」` : `忘记「${entry.accountName}」`}
-            title={confirming ? "再点一次取消" : "忘记本机的账号快照"}
-          >
-            {confirming ? <X size={12} aria-hidden="true" /> : <Trash2 size={12} aria-hidden="true" />}
-          </button>
-        </span>
-      );
-    })}
-  </div>;
 }

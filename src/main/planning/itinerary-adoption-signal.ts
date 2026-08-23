@@ -1,7 +1,7 @@
 import type { MainIpcContext } from "../ipc/context.js";
 import type { ProductDetail } from "../../shared/contracts.js";
 import { logWarn } from "../../shared/log-timestamp.js";
-import { markItineraryPendingAdoption } from "./itinerary-adoption.js";
+import { findUserRecommendedSpotNames, markItineraryPendingAdoption } from "./itinerary-adoption.js";
 
 export const ITINERARY_ADOPTION_SYNC_ERROR = "行程已生成，但待采用状态未同步，请重试本轮。";
 
@@ -59,7 +59,14 @@ async function syncOnce(context: MainIpcContext, localProductId: string, local: 
     revision: remote.revision,
     planningVersion: remote.planning?.version,
   });
-  const plan = markItineraryPendingAdoption(remote.planning!, local!.product.itinerary);
+  const latestUserMessage = [...local!.messages].reverse().find((message) => message.role === "user" && message.taskStatus !== "failed");
+  const directlyMentioned = findUserRecommendedSpotNames(local!.product.itinerary, latestUserMessage?.content ?? "");
+  const stillPresentFromEarlierTurns = findUserRecommendedSpotNames(
+    local!.product.itinerary,
+    (remote.planning!.itineraryAdoption?.userRecommendedSpotNames ?? []).join("、"),
+  );
+  const userRecommendedSpotNames = [...new Set([...stillPresentFromEarlierTurns, ...directlyMentioned])];
+  const plan = markItineraryPendingAdoption(remote.planning!, local!.product.itinerary, new Date().toISOString(), userRecommendedSpotNames);
   const saved = await context.remoteProducts.update({
     ...remote,
     product: local!.product,

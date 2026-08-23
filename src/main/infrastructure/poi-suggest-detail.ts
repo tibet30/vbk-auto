@@ -36,12 +36,38 @@ function toPoiSuggestCandidate(item: unknown, index: number): PoiSuggestCandidat
   const poi = asRecord(item);
   const poiName = stringValue(poi?.localName ?? poi?.poiName ?? poi?.name);
   const poiId = positiveIntegerValue(poi?.poiId) ?? null;
+  const textFields = flattenPoiTextFields(item);
+  const location = readDistrictLocation(poi);
   return {
     index,
     poiName,
     poiId,
+    province: location.province,
+    city: location.city,
+    district: location.district,
+    address: stringValue(poi?.address),
     selectable: Boolean(poiName && poiId),
-    textFields: flattenPoiTextFields(item),
+    textFields,
+  };
+}
+
+/**
+ * suggestPoi 行政区契约（以真实响应为准，不做别名猜测）：
+ * - `district.districtName` → 当前节点（可能是 City / County / District）
+ * - `parents[]` 中 `districtType=City` → 城市（地级）
+ * - `parents[]` 中 `districtType=Province` → 省/自治区
+ * 例：Gyantse(City) → parents Shigatse(City) / Tibet(Province)
+ */
+function readDistrictLocation(poi: Record<string, unknown> | null) {
+  const district = asRecord(poi?.district);
+  const parents = Array.isArray(district?.parents)
+    ? district.parents.map(asRecord).filter((parent): parent is Record<string, unknown> => Boolean(parent))
+    : [];
+  const parentOfType = (type: string) => parents.find((parent) => String(parent.districtType ?? "").toLowerCase() === type.toLowerCase());
+  return {
+    province: stringValue(parentOfType("Province")?.districtName),
+    city: stringValue(parentOfType("City")?.districtName),
+    district: stringValue(district?.districtName),
   };
 }
 

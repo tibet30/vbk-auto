@@ -1,15 +1,17 @@
 /**
- * 「基础信息 / AI 副标题」行：默认展示，点击「编辑」后变成 input + 保存 / 取消。
+ * 「基础信息 / AI 副标题」行：展示 + 手工编辑 + AI 重新生成四种状态。
  *
- * 行为契约（与用户验收门对齐）：
- *  - 默认**只展示**信息（persisted 文本或「尚未填写」提示），不画任何 input / 控件；
- *  - 「编辑」按钮把展示 div 原位切到 input，max 80 字符与 schema subtitle 上限对齐；
- *  - 失焦或按 Enter 触发保存；保存中显示 spinner；保存失败保留 draft + 红字错误；
- *  - 持久化回流（draft 与 snapshot.subtitle 一致 + 不在保存中）→ 自动退出编辑态；
- *  - 取消 = 退出编辑模式、丢弃草稿，回到展示态；不写库。
+ * 行为契约：
+ *  - 默认只展示信息（persisted 文本或「尚未填写」提示）；
+ *  - 「编辑」把展示 div 原位切到 input（max 80 字符），失焦 / Enter 触发保存；
+ *  - 「AI 重新生成」进入 generating 态：只显示 spinner，**禁止编辑**；
+ *  - 生成后进入 preview 态：展示候选，可「重新生成」继续换、「确定」写入、
+ *    「取消」丢弃；
+ *  - 「确定」把候选作为显式值交给 onSave → 写入 basicInfo.subtitle 并进入规划；
+ *  - 生成失败时返回 display 态，错误经 errors.subtitle 贴回行内。
  */
 import { useEffect, useRef, useState } from "react";
-import { FileText, LoaderCircle, Pencil, X } from "lucide-react";
+import { Check, FileText, LoaderCircle, Pencil, RefreshCw, Sparkles, X } from "lucide-react";
 import type { BasicInfoSnapshot } from "./review-summary-basic-info.helpers";
 import shared from "../shared.module.less";
 import { BasicInfoRowShell } from "./basic-info-row-shell";
@@ -21,11 +23,16 @@ export interface BasicInfoSubtitleRowProps {
   saving: boolean;
   error: string | undefined;
   onDraftChange: (value: string) => void;
-  onSave: () => void;
+  /** 保存：不传值时读手工草稿；传值时为 AI 候选确认写入。 */
+  onSave: (value?: string) => void;
   onClearError: () => void;
+  /** AI 重新生成：返回候选副标题（失败返回 null，错误由调用方贴回）。 */
+  onRegenerate: () => Promise<string | null>;
 }
 
 const MAX_LEN = 80;
+
+type SubtitleMode = "display" | "editing" | "generating" | "preview";
 
 export function BasicInfoSubtitleRow({
   snapshot,
@@ -35,56 +42,217 @@ export function BasicInfoSubtitleRow({
   onDraftChange,
   onSave,
   onClearError,
+  onRegenerate,
 }: BasicInfoSubtitleRowProps) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [mode, setMode] = useState<SubtitleMode>("display");
+  const [candidate, setCandidate] = useState<string | null>(null);
   const submittedRef = useRef(false);
   // 取消信号：用户点击「取消」后，input 的 onBlur（事件顺序先于 onClick）
   // 会再调一次 save()，需要提前阻止这个二次保存。
   const cancelledRef = useRef(false);
+  // AI 重新生成的并发锁：React state 要等下一帧才禁用按钮，用 ref 补双击窗口。
+  const regenerateInFlightRef = useRef(false);
   const persisted = snapshot.subtitle ?? "";
   const displayValue = persisted.trim() || "尚未填写 — AI 生成或人工补全后会显示在此";
   const dirty = draft.trim() !== persisted.trim();
 
   // 仅当提交过保存后，saving 结束且无错误 → 自动退出编辑态。
   useEffect(() => {
-    if (!isEditing) return;
+    if (mode !== "editing") return;
     if (!submittedRef.current) return;
     if (saving) return;
     if (error) return;
-    setIsEditing(false);
+    setMode("display");
     submittedRef.current = false;
-  }, [isEditing, saving, error]);
+  }, [mode, saving, error]);
 
   const startEdit = () => {
     cancelledRef.current = false;
     submittedRef.current = false;
     onDraftChange(persisted);
     onClearError();
-    setIsEditing(true);
+    setMode("editing");
   };
-  const cancel = () => {
+  const cancelEdit = () => {
     cancelledRef.current = true;
     submittedRef.current = false;
     onDraftChange(persisted);
     onClearError();
-    setIsEditing(false);
+    setMode("display");
   };
-  const save = () => {
+  const saveEdit = () => {
     if (cancelledRef.current) return;
     if (!dirty) {
-      setIsEditing(false);
+      setMode("display");
       return;
     }
     submittedRef.current = true;
     onSave();
   };
 
-  if (!isEditing) {
+  const runRegenerate = async () => {
+    if (regenerateInFlightRef.current) return;
+    regenerateInFlightRef.current = true;
+    setMode("generating");
+    onClearError();
+    try {
+      const result = await onRegenerate();
+      if (result && result.trim().length >= 2) {
+        setCandidate(result.trim());
+        setMode("preview");
+      } else {
+        // 生成失败（错误已由 action 贴回 errors.subtitle）回到 display。
+        setMode("display");
+      }
+    } finally {
+      regenerateInFlightRef.current = false;
+    }
+  };
+
+  const confirmCandidate = () => {
+    const value = candidate?.trim();
+    if (!value) return;
+    setCandidate(null);
+    setMode("display");
+    onSave(value);
+  };
+
+  const cancelPreview = () => {
+    setCandidate(null);
+    onClearError();
+    setMode("display");
+  };
+
+  if (mode === "editing") {
     return (
       <BasicInfoRowShell
         rowId="subtitle"
         labelTitle="AI 副标题"
+        labelHint="方案首屏"
+        error={error}
+        className={styles.rowCenter}
         actions={
+          <>
+            {saving ? <LoaderCircle size={14} className={styles.spin} aria-label="保存中" /> : null}
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              onClick={cancelEdit}
+              disabled={saving}
+              title="放弃修改"
+            >
+              <X size={12} aria-hidden="true" /> 取消
+            </button>
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              data-variant={dirty ? "primary" : "ghost"}
+              onClick={saveEdit}
+              disabled={saving || !dirty || draft.trim().length < 2 || draft.trim().length > MAX_LEN}
+            >
+              保存
+            </button>
+          </>
+        }
+      >
+        <input
+          className={styles.input}
+          type="text"
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); saveEdit(); } }}
+          onBlur={() => { if (dirty && !cancelledRef.current) saveEdit(); }}
+          placeholder="例如：太原精品两日私家团"
+          aria-label="AI 副标题"
+          title={`${draft.trim().length}/${MAX_LEN} 字`}
+          maxLength={MAX_LEN}
+          data-state={error ? "error" : undefined}
+          disabled={saving}
+          autoFocus
+        />
+      </BasicInfoRowShell>
+    );
+  }
+
+  if (mode === "generating") {
+    return (
+      <BasicInfoRowShell
+        rowId="subtitle"
+        labelTitle="AI 副标题"
+        labelHint="AI 生成中"
+        error={error}
+        className={styles.rowCenter}
+        actions={
+          <span className={styles.hint} aria-label="生成中">
+            <LoaderCircle size={13} className={styles.spin} aria-hidden="true" />
+          </span>
+        }
+      >
+        <div className={styles.subtitleDisplay} data-state="empty">
+          <LoaderCircle size={12} className={styles.spin} aria-hidden="true" />
+          <strong>AI 正在生成副标题…</strong>
+        </div>
+        <span className={styles.hint}>生成期间无法编辑，请稍候。</span>
+      </BasicInfoRowShell>
+    );
+  }
+
+  if (mode === "preview") {
+    return (
+      <BasicInfoRowShell
+        rowId="subtitle"
+        labelTitle="AI 副标题"
+        labelHint="AI 生成候选"
+        error={error}
+        className={styles.rowCenter}
+        actions={
+          <>
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              onClick={cancelPreview}
+              title="放弃候选"
+            >
+              <X size={12} aria-hidden="true" /> 取消
+            </button>
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              data-variant="secondary"
+              onClick={() => { void runRegenerate(); }}
+              title="换一个候选"
+            >
+              <RefreshCw size={12} aria-hidden="true" /> 重新生成
+            </button>
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              data-variant="primary"
+              onClick={confirmCandidate}
+              title="采用该副标题"
+            >
+              <Check size={12} aria-hidden="true" /> 确定
+            </button>
+          </>
+        }
+      >
+        <div className={styles.subtitleCandidate} data-testid="subtitle-ai-candidate">
+          <Sparkles size={12} aria-hidden="true" />
+          <strong title={candidate ?? undefined}>{candidate}</strong>
+        </div>
+        <span className={styles.hint}>确定后写入 basicInfo.subtitle 并进入规划。</span>
+      </BasicInfoRowShell>
+    );
+  }
+
+  return (
+    <BasicInfoRowShell
+      rowId="subtitle"
+      labelTitle="AI 副标题"
+      error={error}
+      className={styles.rowCenter}
+      actions={
+        <>
           <button
             type="button"
             className={`${shared.btn} ${shared.btnSm}`}
@@ -95,63 +263,23 @@ export function BasicInfoSubtitleRow({
           >
             <Pencil size={13} aria-hidden="true" /> 编辑
           </button>
-        }
-      >
-        <div className={styles.rowDisplay} data-state={persisted ? "ok" : "empty"}>
-          <FileText size={12} aria-hidden="true" />
-          <strong>{displayValue}</strong>
-        </div>
-      </BasicInfoRowShell>
-    );
-  }
-
-  return (
-    <BasicInfoRowShell
-      rowId="subtitle"
-      labelTitle="AI 副标题"
-      labelHint="方案首屏"
-      error={error}
-      actions={
-        <>
-          {saving ? <LoaderCircle size={14} className={styles.spin} aria-label="保存中" /> : null}
           <button
             type="button"
             className={`${shared.btn} ${shared.btnSm}`}
-            onClick={cancel}
-            disabled={saving}
-            title="放弃修改"
+            data-variant="ghost"
+            onClick={() => { void runRegenerate(); }}
+            title="让 AI 重新生成副标题"
+            aria-label="AI 重新生成副标题"
           >
-            <X size={12} aria-hidden="true" /> 取消
-          </button>
-          <button
-            type="button"
-            className={`${shared.btn} ${shared.btnSm}`}
-            data-variant={dirty ? "primary" : "ghost"}
-            onClick={save}
-            disabled={saving || !dirty || draft.trim().length < 2 || draft.trim().length > MAX_LEN}
-          >
-            保存
+            <Sparkles size={13} aria-hidden="true" /> AI 重新生成
           </button>
         </>
       }
     >
-      <input
-        className={styles.input}
-        type="text"
-        value={draft}
-        onChange={(event) => onDraftChange(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); save(); } }}
-        onBlur={() => { if (dirty && !cancelledRef.current) save(); }}
-        placeholder="例如：太原精品两日私家团"
-        aria-label="AI 副标题"
-        maxLength={MAX_LEN}
-        data-state={error ? "error" : undefined}
-        disabled={saving}
-        autoFocus
-      />
-      <span className={styles.hint}>
-        {draft.trim().length}/{MAX_LEN} · 写入 basicInfo.subtitle。
-      </span>
+      <div className={styles.subtitleDisplay} data-state={persisted ? "ok" : "empty"}>
+        <FileText size={12} aria-hidden="true" />
+        <strong>{displayValue}</strong>
+      </div>
     </BasicInfoRowShell>
   );
 }

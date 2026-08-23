@@ -4,7 +4,7 @@
  *   - fillServicePhone：线上 400 电话（必填，缺则抛错）；
  *   - fillAdvanceBooking：提前预订（天/点几分两个数值控件）；
  *   - fillLocalTravelAgency：地接社已选项（如已选直接 return）；
- *   - fillButlerContact：管家联系人，根据 selection.contactCardId 在下拉里精确定位。
+ *   - fillButlerContact：预订联系人，复用管家联系人 selection.contactCardId 精确定位。
  * 顶部带 `// @ts-nocheck`，page 是动态传入。
  */
 
@@ -165,7 +165,28 @@ export async function fillLocalTravelAgency(page) {
 }
 
 /**
- * 「管家联系人」按 selection.contactCardId 精确挑选：
+ * 找到 VBK 的「预订联系人」控件。当前页面稳定 ID 仍是旧的
+ * bookingControls.vendorBookingAssistant；若后续页面只保留中文 label，则回退按
+ * 「预订联系人 / 预定联系人」定位到同一个表单项。
+ */
+async function findBookingContactScope(page) {
+  const stableScope = page.locator('div[id="bookingControls.vendorBookingAssistant"]');
+  if ((await stableScope.count()) === 1) {
+    return { scope: stableScope, description: "预订联系人容器 div#bookingControls.vendorBookingAssistant" };
+  }
+
+  const label = page.locator("label").filter({ hasText: /^\s*(预订联系人|预定联系人)\s*\*?\s*$/ });
+  const labelCount = await label.count();
+  if (labelCount === 1) {
+    const formItem = label.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
+    return { scope: formItem, description: "预订联系人 .ant-form-item" };
+  }
+
+  return { scope: stableScope, description: "预订联系人容器 div#bookingControls.vendorBookingAssistant" };
+}
+
+/**
+ * 「预订联系人」按管家联系人 selection.contactCardId 精确挑选：
  *   - selection 缺失 / 非对象抛错；
  *   - contactCardId 非正整数也抛错；
  *   - 在下拉中拿所有 option 的 data-value / data-id 与 selection.contactCardId 比对，
@@ -173,21 +194,21 @@ export async function fillLocalTravelAgency(page) {
  */
 export async function fillButlerContact(page, selection) {
   if (!selection || typeof selection !== "object") {
-    throw new Error("管家联系人未配置账号固定信息，请在账号设置里维护后重试。");
+    throw new Error("预订联系人使用管家联系人信息，但管家联系人未配置，请在账号设置里维护后重试。");
   }
   const { contactCardId, displayName } = selection;
   if (!Number.isInteger(contactCardId) || contactCardId <= 0) {
-    throw new Error("管家联系人 contactCardId 缺失或非法。");
+    throw new Error("预订联系人使用的管家联系人 contactCardId 缺失或非法。");
   }
-  const scope = page.locator('div[id="bookingControls.vendorBookingAssistant"]');
-  await assertCount(scope, 1, "管家联系人容器 div#bookingControls.vendorBookingAssistant");
+  const { scope, description } = await findBookingContactScope(page);
+  await assertCount(scope, 1, description);
   await scope.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS }).catch(() => {});
   const trigger = scope.getByRole("combobox");
-  await assertCount(trigger, 1, "管家联系人 combobox");
+  await assertCount(trigger, 1, "预订联系人 combobox");
   await trigger.click();
   await delay(400);
   const search = scope.locator("input.ant-select-search__field");
-  await assertCount(search, 1, "管家联系人搜索输入框");
+  await assertCount(search, 1, "预订联系人搜索输入框");
   if (displayName) await search.fill(displayName);
   await delay(400);
   const options = await getControlledDropdownOptions(page, trigger);
@@ -213,10 +234,10 @@ export async function fillButlerContact(page, selection) {
   if (targetIndex < 0) {
     const texts = collected.map((option) => option.label);
     const who = displayName ? `「${displayName}」(ID ${contactCardId})` : `ID ${contactCardId}`;
-    const detail = `管家联系人${who}不在 VBK 联系人下拉中（缺少 ID / 姓名精确匹配项）；请在 VBK 维护该联系人或更新账号固定信息后再重试。可选：${texts.filter(Boolean).join("、") || "无"}`;
+    const detail = `预订联系人使用管家联系人${who}，但该联系人不在 VBK 联系人下拉中（缺少 ID / 姓名精确匹配项）；请在 VBK 维护该联系人或更新账号固定信息后再重试。可选：${texts.filter(Boolean).join("、") || "无"}`;
     throw new Error(detail);
   }
   const clicked = await clickLocatorSnapshotOption(options, collectedSnapshot[targetIndex]);
-  if (!clicked) throw new Error("管家联系人候选在提交前已被页面刷新，请重试。");
+  if (!clicked) throw new Error("预订联系人候选在提交前已被页面刷新，请重试。");
   await delay(300);
 }

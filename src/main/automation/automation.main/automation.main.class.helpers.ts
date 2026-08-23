@@ -12,6 +12,7 @@ import type { ActiveButlerContext } from "./automation.main.context.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 import { logWarn } from "../../../shared/log-timestamp.js";
+import { newSupplierProductCode } from "../../infrastructure/database/parts/types.js";
 
 const electronRequire = createRequire(import.meta.url);
 
@@ -70,6 +71,27 @@ export function resolveProductButlerSelection(product: Record<string, unknown>):
     providerId: butler.providerId,
     displayName: butler.displayName.trim(),
   };
+}
+
+/**
+ * 兼容旧产品：早期供应商产品编号为「VBK-联系人名字」，同一管家会重复。
+ * 录入 basic 前若发现这个精确旧格式，就升级为当前规则「VBK-联系人名字-时间」。
+ * 手工维护过的编号、已带时间戳的编号都不改。
+ */
+export function ensureLegacySupplierProductCodeUpgraded(
+  product: Record<string, unknown>,
+  butlerSelection: ContactCardSelection | null,
+): string | null {
+  if (!butlerSelection) return null;
+  const basicInfo = product.basicInfo;
+  if (!basicInfo || typeof basicInfo !== "object" || Array.isArray(basicInfo)) return null;
+  const basic = basicInfo as Record<string, unknown>;
+  const current = typeof basic.supplierProductCode === "string" ? basic.supplierProductCode.trim() : "";
+  const contactName = butlerSelection.displayName.trim();
+  if (!contactName || current !== `VBK-${contactName}`) return null;
+  const next = newSupplierProductCode(contactName);
+  basic.supplierProductCode = next;
+  return next;
 }
 
 /**

@@ -15,6 +15,8 @@ import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "../pla
 import { OpenAIThreeStagePlanningAi } from "../planning/adapters/three-stage-ai.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { invalidatePlanningStage, resetProductForPlanningStage } from "../planning/planning-v2-reset.js";
+import { itineraryPoisAreComplete } from "../planning/runtime.js";
+import { markItineraryAccepted } from "../planning/itinerary-adoption.js";
 import { createPlanningPlanV2, runThreeStagePlan } from "../planning/three-stage-orchestrator.js";
 import { acceptItineraryAndRerunCompletion } from "../planning/itinerary-adoption-flow.js";
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
@@ -255,7 +257,18 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
     return withPlanningLock(localProductId, async () => {
       const remote = await context.remoteProducts.get(localProductId);
       if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全重做规划阶段。");
-      const plan = invalidatePlanningStage(remote.planning, stage);
+      let planSource = remote.planning;
+      // 对话行程在 POI 未齐时保持 pending adoption，避免误触发产品补全。
+      // 一旦运营已把每日行程的所有 POI 配齐，点击“重做产品补全”就视为
+      // 采用当前行程，直接从 completion 开始，不再回到 itinerary/AI 规划。
+      if (stage === "completion"
+        && (remote.planning?.itineraryAdoption?.status === "pending" || remote.planning?.itineraryAdoption?.status === "blocked")) {
+        if (!itineraryPoisAreComplete(Array.isArray(remote.product.itinerary) ? remote.product.itinerary : [])) {
+          throw new Error("每日行程仍有缺失 POI，请先完成所有景点的 POI 配置后再重做产品补全。");
+        }
+        planSource = markItineraryAccepted(remote.planning, remote.product.itinerary);
+      }
+      const plan = invalidatePlanningStage(planSource, stage);
       const prepared = await context.remoteProducts.update({
         ...remote,
         product: resetProductForPlanningStage(remote.product, stage),

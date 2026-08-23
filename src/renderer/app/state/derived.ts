@@ -302,7 +302,9 @@ export function useAppStateDerived(state: AppStateBase) {
 
   useEffect(() => {
     const conversation = conversationRef.current;
-    if (conversation) conversation.scrollTop = conversation.scrollHeight;
+    if (conversation && conversation.scrollTop + conversation.clientHeight < conversation.scrollHeight) {
+      conversation.scrollTop = conversation.scrollHeight;
+    }
   }, [product?.messages.length, state.loading]);
 
   // 规划状态摘要：把规划生成态压缩成「恢复提示 + 实际接受 / 缺失模块」两行。

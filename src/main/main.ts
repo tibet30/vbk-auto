@@ -16,14 +16,13 @@ import type {
   ProductDetail,
   ProductReadiness,
   Settings,
-  VbkLoginStatus,
 } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
 import { DraftAutomation } from "./automation/automation.js";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import { productNotFound } from "./infrastructure/db-errors.js";
 import { computeReadiness } from "./readiness.js";
-import { detectProviderIdFromBrowser, scheduleProviderIdRefresh } from "./infrastructure/provider-id-source.js";
+import { detectProviderIdFromBrowser } from "./infrastructure/provider-id-source.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
 import {
   createLocalAiKeyStore,
@@ -53,6 +52,8 @@ import { ProductMutationService } from "./application/product-mutation-service.j
 import { createRemoteProductMirror } from "./application/remote-product-mirror.js";
 import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
 import { cleanStaleChromiumProfileDb } from "./infrastructure/chromium-profile-cleanup.js";
+import { createWithKnownVbkAccount } from "./infrastructure/vbk-account-status.js";
+import { createVbkBindingBootstrap } from "./infrastructure/vbk-binding-bootstrap.js";
 import { captureRuntimeLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import {
   applyStartupCommandLineSwitches,
@@ -219,54 +220,6 @@ async function aiService(snapshot?: Settings) {
   });
 }
 /**
- * 在 VBK 已登录的前提下，把当前账号信息写回 settings + 触发 providerId 异步刷新：
- *   - 页面抓不到账号名时优先沿用本机上次记录，不再回退到某个固定值（避免错标）；
- *   - 登录完后开始异步 scheduleProviderIdRefresh，写到 settings(providerIdByAccount:<name>)；
- *   - providerId 刷新有飞行中防重：同一账号若已有刷新在途则跳过，避免重复 HTTP 请求。
- */
-const _providerIdRefreshing = new Set<string>();
-function withKnownVbkAccount(status: VbkLoginStatus): VbkLoginStatus {
-  if (!status.loggedIn) return status;
-  // 页面抓取不到账号名时只沿用本机上次记录，不再回退到某个固定账号：
-  // 那会把当前登录者错标成别人，并写进本地设置长期生效。
-  const accountName = status.accountName || db.getSetting("vbkAccountName")?.value || "";
-  if (accountName) {
-    db.setSetting("vbkAccountName", accountName);
-    if (!_providerIdRefreshing.has(accountName)) {
-      _providerIdRefreshing.add(accountName);
-      scheduleProviderIdRefresh(accountName, detectProviderIdFromBrowser, (id: number | null) => {
-        db.setProviderIdFor(accountName, id);
-        _providerIdRefreshing.delete(accountName);
-      });
-    }
-  }
-  // 多账号登录：检测到已登录后立刻落快照与活动指针，避免"切走后再想切回来时
-  // 没找到老 cookies"。登录过程的 cookies 是分批写入的，必须 await 异步
-  // 的 set，否则 saveCurrentSession 可能抓到不完整快照。activity 指针与
-  // vbkAccountName 不同：后者用于 providerId 缓存 / UI 头像缩写；
-  // 前者用于 switchAccount 直接定位 cookies 表里的行。
-  //
-  // 错误处理：必须 await + catch，否则 fs / IO 失败会变成 unhandled
-  // Promise rejection —— Electron 会在 stderr 打 unhandledRejection，
-  // 同时 saveCurrentSession 抛错意味着「这次登录态没有持久化」，下一次
-  // 切回账号时会让用户重新登录，业务上可接受。把错误降级为 warn 即可，
-  // 避免在 IPC 路径上 throw 出当前方法（withKnownVbkAccount 是 status
-  // IPC 的同步包装，throw 会让 status 返回 500）。
-  if (accountName && browser) {
-    browser.saveCurrentSession()
-      .then((saved) => {
-        if (saved) db.setSetting("vbkActiveAccountKey", saved.accountKey);
-      })
-      .catch((error) => {
-        logWarn("[vbk] saveCurrentSession failed; user must re-login", {
-          message: (error as { message?: string })?.message ?? String(error),
-        });
-      });
-  }
-  const accounts = Array.from(new Set([...(status.accounts || []), accountName].filter(Boolean)));
-  return { ...status, accountName, accounts };
-}
-/**
  * 计算产品 readiness：把产品当前状态、已保存自动化运行、是否阻塞等映射到对外的 ProductReadiness。
  * 用于 UI 顶栏显示与 IPC 路由。
  *
@@ -302,8 +255,12 @@ function emitProductIfKnown(_accountName: string, _info: unknown): void {
   // Reserved for future account-fixed-info renderer notifications.
 }
 
-function registerIpc(context: MainIpcContext, appAuth: TibetAuthService): void {
-  registerAppAuthIpc(appAuth);
+function registerIpc(
+  context: MainIpcContext,
+  appAuth: TibetAuthService,
+  onAuthenticated?: Parameters<typeof registerAppAuthIpc>[1],
+): void {
+  registerAppAuthIpc(appAuth, onAuthenticated);
   registerRemoteProductIpc(context);
   registerProductAiIpc(context);
   registerBrowserAutomationIpc(context);
@@ -349,7 +306,24 @@ app.whenReady().then(async () => {
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
   const appAuth = createTibetAuthService(appAuthStore);
   const remoteProducts = createTibetProductService(appAuthStore);
-  productEmitter = createRemoteProductMirror({ remote: remoteProducts, broadcast: broadcastProduct }).emit;
+  const vbkBindings = createVbkBindingBootstrap({
+    appAuthStore,
+    db,
+    getCookieStore: () => cookieStore,
+    getBrowser: () => browser,
+  });
+  db.setExtensionUserIdResolver(vbkBindings.getExtensionUserId);
+  const withKnownVbkAccount = createWithKnownVbkAccount({
+    db,
+    getBrowser: () => browser,
+    noteVbkAccountActive: vbkBindings.noteVbkAccountActive,
+  });
+  const productWorkflows = new ProductWorkflowCoordinator();
+  productEmitter = createRemoteProductMirror({
+    remote: remoteProducts,
+    broadcast: broadcastProduct,
+    isWorkflowActive: (productId) => Boolean(productWorkflows.activeWorkflow(productId)),
+  }).emit;
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
   if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });
@@ -366,9 +340,12 @@ app.whenReady().then(async () => {
     getSettings,
     apiKey,
     aiService,
-    productWorkflows: new ProductWorkflowCoordinator(),
+    productWorkflows,
     productMutations: new ProductMutationService(db, emitProduct),
     remoteProducts,
+    bindingSync: vbkBindings.bindingSync,
+    getExtensionUserId: vbkBindings.getExtensionUserId,
+    noteVbkAccountActive: vbkBindings.noteVbkAccountActive,
     readiness,
     emitProduct,
     broadcastProduct,
@@ -380,8 +357,9 @@ app.whenReady().then(async () => {
     emitProductIfKnown,
     logPoiManualIpc,
   };
-  registerIpc(context, appAuth);
+  registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
+  await vbkBindings.afterBrowserReady();
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) void openMainWindow();
   });

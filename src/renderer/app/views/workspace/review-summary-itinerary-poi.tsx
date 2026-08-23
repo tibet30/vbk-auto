@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../helpers";
 import type { PoiSuggestCandidate, PoiSuggestDetailResult, PoiSuggestLogContext } from "../../../../shared/contracts";
 import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
+import { formatPoiRegion } from "./review-summary-itinerary-types";
 import styles from "./review-summary-itinerary-poi.module.less";
 import { logDebug } from "../../../../shared/log-timestamp.js";
 
@@ -46,16 +47,17 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
     setSelected(null);
     setLoading(null);
     setError(null);
-  }, [item.dayIndex, item.spotIndex, item.poiName, item.poiId, item.title]);
+  }, [item.dayIndex, item.spotIndex, item.poiName, item.poiId, item.province, item.city, item.district, item.title]);
 
   const startEdit = () => {
     const nextKeyword = item.poiName?.trim() || item.title;
     setEditing(true);
     setKeyword(nextKeyword);
-    setDetail(null);
     setSelected(null);
     setError(null);
     logPoiManual("open_edit", logContext({ keyword: nextKeyword }));
+    // 打开编辑器即查询当前 POI，避免用户还要再点一次搜索。
+    void searchPoi(nextKeyword);
   };
 
   const cancel = () => {
@@ -68,8 +70,8 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
     setLoading(null);
   };
 
-  const searchPoi = async () => {
-    const query = keyword.trim();
+  const searchPoi = async (keywordOverride?: string) => {
+    const query = (keywordOverride ?? keyword).trim();
     logPoiManual("search_start", logContext({ keyword: query }));
     if (!query) {
       setError("请输入 POI 搜索关键词。");
@@ -114,7 +116,13 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
 
   const save = async () => {
     if (!selected?.selectable || !selected.poiName || !selected.poiId || !api()) return;
-    const saveTarget = { poiName: selected.poiName, poiId: selected.poiId };
+    const saveTarget = {
+      poiName: selected.poiName,
+      poiId: selected.poiId,
+      province: selected.province ?? null,
+      city: selected.city ?? null,
+      district: selected.district ?? null,
+    };
     logPoiManual("save_start", logContext(saveTarget));
     setLoading("save");
     setError(null);
@@ -125,6 +133,9 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
         spotIndex: item.spotIndex,
         poiName: saveTarget.poiName,
         poiId: saveTarget.poiId,
+        province: saveTarget.province,
+        city: saveTarget.city,
+        district: saveTarget.district,
       });
       logPoiManual("save_success", logContext(saveTarget));
       setEditing(false);
@@ -143,19 +154,17 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
     return (
       <div className={styles.status} data-state={hasPoi ? "matched" : "missing"}>
         <span className={styles.text}>
-          {hasPoi ? `已匹配：${item.poiName}（${item.poiId}）` : "待核查 POI"}
+          {hasPoi ? formatMatchedPoiLabel(item) : "待手动配置 POI"}
         </span>
-        {!hasPoi && (
-          <button
-            type="button"
-            className={styles.iconButton}
-            onClick={startEdit}
-            title={`编辑 ${item.title} 的 VBK POI`}
-            aria-label={`编辑 ${item.title} 的 VBK POI`}
-          >
-            <Pencil size={12} aria-hidden="true" />
-          </button>
-        )}
+        <button
+          type="button"
+          className={styles.iconButton}
+          onClick={startEdit}
+          title={`编辑 ${item.title} 的 VBK POI`}
+          aria-label={`编辑 ${item.title} 的 VBK POI`}
+        >
+          <Pencil size={12} aria-hidden="true" />
+        </button>
       </div>
     );
   }
@@ -176,9 +185,9 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
             if (event.key === "Enter") { event.preventDefault(); void searchPoi(); }
             else if (event.key === "Escape") { event.preventDefault(); cancel(); }
           }}
-          placeholder="输入 VBK POI 关键词"
+          placeholder={loading === "search" ? "正在搜索 VBK POI…" : "输入 VBK POI 关键词"}
           aria-label="VBK POI 关键词"
-          disabled={loading !== null}
+          disabled={loading === "save"}
           autoFocus
         />
         <button
@@ -228,22 +237,11 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
                 <span className={styles.resultHead}>
                   <MapPin size={12} aria-hidden="true" />
                   <span className={styles.resultName}>{candidate.poiName || "未返回 poiName"}</span>
-                  <code>{candidate.poiId ?? "无 poiId"}</code>
-                  <span className={styles.resultState}>{candidate.selectable ? "可选择" : "仅查看"}</span>
+                  <span className={styles.resultLocation} aria-label="候选区域信息">
+                    {formatCandidateLocation(candidate)}
+                  </span>
                 </span>
               </button>
-              {candidate.textFields.length > 0 && (
-                <details className={styles.fields}>
-                  <summary className={styles.fieldsSummary}>查看接口详情（{candidate.textFields.length} 项）</summary>
-                  <span className={styles.fieldsList}>
-                    {candidate.textFields.map((field) => (
-                      <span className={styles.field} key={`${candidate.index}-${field.path}-${field.value}`}>
-                        <b>{field.path}：</b>{field.value}
-                      </span>
-                    ))}
-                  </span>
-                </details>
-              )}
             </div>
           ))}
         </div>
@@ -260,4 +258,13 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
       </button>
     </div>
   );
+}
+
+function formatCandidateLocation(candidate: PoiSuggestCandidate): string {
+  return formatPoiRegion(candidate) || "地域未知";
+}
+
+function formatMatchedPoiLabel(item: ItineraryTimelineSpotItem): string {
+  const region = formatPoiRegion(item);
+  return region ? `已匹配：${item.poiName} · ${region}` : `已匹配：${item.poiName}`;
 }

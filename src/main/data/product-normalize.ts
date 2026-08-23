@@ -48,6 +48,19 @@ function normaliseRecommendationItem(value: unknown): { category: string; text: 
 }
 
 /**
+ * 旧版本或表单回写可能把封面最低质量分保存成字符串（例如 "3"）。
+ * 封面会随任意手工复核字段一起经过 product schema 校验，因此这里必须在
+ * 读取/写回产品时统一恢复为 number，避免删除景点等无关操作被封面脏值阻断。
+ */
+function normaliseCover(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const cover = { ...(value as Record<string, unknown>) };
+  const quality = positiveNumber(cover.minQuality);
+  cover.minQuality = quality !== undefined && quality <= 5 ? quality : 3;
+  return cover;
+}
+
+/**
  * 推荐语数组校验：长度必须为 3、每条 category/text 非空且 category 在白名单、互不重复；
  * 任一条不合规返回 undefined（调用方丢掉整个 recommendations 字段）。
  */
@@ -98,7 +111,7 @@ export function normalisePresentation(value: unknown) {
   const recommendation = textValue(record.recommendation) || textValue(record.description) || textValue(record.subtitle) || textValue(record.productName);
   const features = textValue(record.features) || highlights.join("\n") || textValue(record.highlightsMore);
   if (!recommendation || !features) return undefined;
-  const cover = record.cover && typeof record.cover === "object" && !Array.isArray(record.cover) ? record.cover : undefined;
+  const cover = normaliseCover(record.cover);
   const recommendations = normaliseRecommendations(record.recommendations);
   return {
     recommendationCategory: textValue(record.recommendationCategory) || "优选行程",

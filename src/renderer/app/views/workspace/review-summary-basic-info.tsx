@@ -76,7 +76,9 @@ export interface ReviewSummaryBasicInfoProps {
   draft: Record<string, string>;
   setDraft: (value: Record<string, string>) => void;
   /** 单字段保存动作：把对应 ManualReviewFieldInput 推给主进程。 */
-  saveSubtitle: (localProductId: string) => Promise<void> | void;
+  saveSubtitle: (localProductId: string, value?: string) => Promise<void> | void;
+  /** AI 重新生成副标题：返回候选（失败返回 null），不写库。 */
+  regenerateSubtitle: (localProductId: string) => Promise<string | null>;
   saveButler: (localProductId: string, selection: ContactCardSelection | null) => Promise<void> | void;
   savePricing: (localProductId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void;
   saveInventory: (localProductId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void;
@@ -122,6 +124,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   draft,
   setDraft,
   saveSubtitle,
+  regenerateSubtitle,
   saveButler,
   savePricing,
   saveInventory,
@@ -275,8 +278,9 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             saving={savingField === "subtitle"}
             error={errors.subtitle}
             onDraftChange={(value) => updateDraft("subtitle", value)}
-            onSave={() => { void saveSubtitle(product.id); }}
+            onSave={(value) => { void saveSubtitle(product.id, value); }}
             onClearError={() => clearError("subtitle")}
+            onRegenerate={() => regenerateSubtitle(product.id)}
           />
 
           <BasicInfoButlerRow

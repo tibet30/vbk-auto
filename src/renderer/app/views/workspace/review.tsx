@@ -5,6 +5,7 @@ import {
   RefreshCw,
   Send,
 } from "lucide-react";
+import { useLayoutEffect } from "react";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import chat from "./review.chat.module.less";
@@ -20,13 +21,14 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     loading,
     setNotice,
     send,
+    cancel,
     setBrowserUrl,
     setBrowserOpen,
     splitStyle,
     readiness,
     activeTask,
     setActiveTaskId,
-    browserRef,
+    conversationRef,
     verificationNote,
     setVerificationNote,
     confirmTask,
@@ -45,6 +47,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     basicInfoServicePhone,
     loadButlerDefault,
     saveSubtitle,
+    regenerateSubtitle,
     saveButler,
     savePricing,
     saveInventory,
@@ -69,8 +72,10 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
   if (!product) return null;
 
   const taskList = product.researchTasks ?? [];
+  const persistedAiBusy = product.messages.some((message) => message.role === "user" && message.taskStatus === "running");
+  const aiBusy = loading || persistedAiBusy;
   const planningActive = planningRecovery?.status === "pending" || planningRecovery?.status === "running";
-  const canSend = input.trim().length > 0 && !loading && !planningActive;
+  const canSend = input.trim().length > 0 && !aiBusy && !planningActive;
 
   // 生成进度 / 就绪度：展示在顶部「生成规划」标题右侧（见 PlanningTree）。
   const isProductEmpty = !product.product
@@ -98,7 +103,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
       : "needsConfirmation";
 
   const handleSend = () => {
-    if (!product || loading || planningActive || !input.trim()) {
+    if (!product || aiBusy || planningActive || !input.trim()) {
       if (planningActive) setNotice("方案正在分阶段生成中，请完成后再继续对话。");
       return;
     }
@@ -163,6 +168,13 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
 
   const userTurns = product.messages.filter((m) => m.role === "user").length;
 
+  useLayoutEffect(() => {
+    const conversation = conversationRef.current;
+    if (conversation && conversation.scrollTop + conversation.clientHeight < conversation.scrollHeight) {
+      conversation.scrollTop = conversation.scrollHeight;
+    }
+  }, [conversationRef]);
+
   return (
     <div className={layout.reviewWorkspace}>
       <PlanningTree
@@ -190,7 +202,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
             {userTurns === 0 ? "等待你的第一条消息" : `${userTurns} 轮对话 · 可继续追问`}
           </span>
         </div>
-        <div className={chat.conversation} ref={browserRef} role="log" aria-live="polite">
+        <div className={chat.conversation} ref={conversationRef} role="log" aria-live="polite">
           {product.messages.map((message, index) => {
             const failed = message.role === "assistant" && message.taskStatus === "failed";
               const lastQuestion = failed
@@ -212,7 +224,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
                         className={`${shared.btn} ${shared.btnSm}`}
                         type="button"
                         onClick={() => handleRetryMessage(message.id)}
-                        disabled={loading}
+                        disabled={aiBusy}
                       >
                         <RefreshCw size={13} />重新发送该条问题
                       </button>
@@ -221,10 +233,13 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
               </article>
             );
           })}
-          {loading && (
+          {aiBusy && (
             <div className={chat.aiThinking} role="status">
               <MessageCircleMore size={14} />
-              <span>AI 正在生成回复…</span>
+              <span>{persistedAiBusy && !loading ? "上一轮消息已保存，AI 仍在处理中…" : "消息已保存，AI 正在生成回复…"}</span>
+              <button className={`${shared.btn} ${shared.btnSm}`} type="button" onClick={() => void cancel()}>
+                取消本次对话
+              </button>
             </div>
           )}
         </div>
@@ -241,7 +256,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
                   handleSend();
                 }
               }}
-              disabled={loading}
+              disabled={aiBusy}
             />
             <div className={chat.composerActions}>
               <span className={chat.composerHint}>
@@ -257,7 +272,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
                 disabled={!canSend}
                 onClick={handleSend}
               >
-                {loading ? <LoaderCircle size={14} className={chat.composerSpin} /> : <Send size={14} />}
+                {aiBusy ? <LoaderCircle size={14} className={chat.composerSpin} /> : <Send size={14} />}
                 发送
               </button>
             </div>
@@ -287,8 +302,9 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         basicInfoButlerDefault={basicInfoButlerDefault}
         basicInfoServicePhone={basicInfoServicePhone}
         loadButlerDefault={loadButlerDefault}
-        onOpenAccountEditor={() => openAccountEditor(vbkLogin?.accountName ?? null)}
+        onOpenAccountEditor={() => openAccountEditor(vbkLogin?.loginAccount ?? vbkLogin?.accountName ?? null)}
         saveSubtitle={saveSubtitle}
+        regenerateSubtitle={regenerateSubtitle}
         saveButler={saveButler}
         savePricing={savePricing}
         saveInventory={saveInventory}

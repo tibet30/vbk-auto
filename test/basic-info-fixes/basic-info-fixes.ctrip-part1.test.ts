@@ -408,17 +408,18 @@ test("fillButlerContact 不再使用 scope.count() ? scope : page 的歧义写�
   );
 });
 
-test("fillButlerContact 用稳定的 div[id=bookingControls.vendorBookingAssistant] 定位", async () => {
+test("fillButlerContact 用稳定的 div[id=bookingControls.vendorBookingAssistant] 并兼容预订联系人 label 定位", async () => {
   const source = readCtripSource();
-  const start = source.indexOf("async function fillButlerContact");
-  assert.ok(start >= 0, "找不到 fillButlerContact 定义");
+  const start = source.indexOf("async function findBookingContactScope");
+  assert.ok(start >= 0, "找不到 findBookingContactScope 定义");
   const rest = source.slice(start);
   const end = rest.indexOf("\nasync function ", 1);
   const body = end >= 0 ? rest.slice(0, end) : rest;
   assert.ok(
     /div\[id="bookingControls\.vendorBookingAssistant"\]/.test(body),
-    "fillButlerContact 必须用 div[id=bookingControls.vendorBookingAssistant] 收敛范围",
+    "findBookingContactScope 必须优先用 div[id=bookingControls.vendorBookingAssistant] 收敛范围",
   );
+  assert.match(body, /预订联系人\|预定联系人/, "页面仅保留中文 label 时必须能定位预订联系人");
 });
 
 test("fillButlerContact 不在容器内使用 first() 逃避歧义", async () => {
@@ -430,7 +431,7 @@ test("fillButlerContact 不在容器内使用 first() 逃避歧义", async () =>
   const body = end >= 0 ? rest.slice(0, end) : rest;
   // scope 拿到之后，到搜索输入框 assertCount 结束之前：容器内的 combobox 与
   // input 必须由 assertCount 兜底唯一，不允许用 .first() 偷懒。
-  const scopeMatch = body.match(/scope\s*=\s*[^\n;]+;/);
+  const scopeMatch = body.match(/(?:const|let)\s+(?:\{\s*)?scope\b[^\n;]*;/);
   assert.ok(scopeMatch, "找不到 scope = ... 赋值");
   const searchAnchor = body.indexOf("await assertCount(search, 1");
   assert.ok(searchAnchor > 0, "找不到搜索输入框 assertCount 调用");

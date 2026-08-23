@@ -33,7 +33,7 @@ export interface AiUsageEvent {
   totalTokens: number | null;
   cachedTokens?: number | null;
   reasoningTokens?: number | null;
-  /** Tibet 按 model/tokens 估算；桌面端只读，不自己填。 */
+  /** 按 model/tokens 估算的人民币（元）；桌面本地刊例价或 Tibet 回写。 */
   estimatedCostCny?: number | null;
 }
 

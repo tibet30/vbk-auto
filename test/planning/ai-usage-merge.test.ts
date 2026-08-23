@@ -35,7 +35,7 @@ test("appendAiUsage 按 id 去重并累加 Token", () => {
   assert.equal(next.latestRun.totalTokens, 30);
 });
 
-test("appendAiUsage 保留 Tibet 已有 estimatedCostCny，不覆盖", () => {
+test("appendAiUsage 事件有费用时按事件合计，不再被旧 lifetime 锁死", () => {
   const existing: ProductAiUsage = {
     events: [event({ id: "a", estimatedCostCny: 1.25 })],
     lifetime: {
@@ -58,9 +58,40 @@ test("appendAiUsage 保留 Tibet 已有 estimatedCostCny，不覆盖", () => {
     },
     byStage: [],
   };
-  const next = appendAiUsage(existing, [event({ id: "b", inputTokens: 4, outputTokens: 1, totalTokens: 5, estimatedCostCny: null })]);
+  const next = appendAiUsage(existing, [
+    event({ id: "b", inputTokens: 4, outputTokens: 1, totalTokens: 5, estimatedCostCny: 0.5 }),
+  ]);
   assert.equal(next.events.find((item) => item.id === "a")?.estimatedCostCny, 1.25);
-  assert.equal(next.lifetime.estimatedCostCny, 1.25);
+  assert.equal(next.lifetime.estimatedCostCny, 1.75);
+});
+
+test("appendAiUsage 事件无费用时保留 Tibet lifetime estimatedCostCny", () => {
+  const existing: ProductAiUsage = {
+    events: [event({ id: "a", estimatedCostCny: null })],
+    lifetime: {
+      calls: 1,
+      durationMs: 1000,
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      tokensIncomplete: false,
+      estimatedCostCny: 9.99,
+    },
+    latestRun: {
+      calls: 1,
+      durationMs: 1000,
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      tokensIncomplete: false,
+      estimatedCostCny: 9.99,
+    },
+    byStage: [],
+  };
+  const next = appendAiUsage(existing, [
+    event({ id: "b", inputTokens: 4, outputTokens: 1, totalTokens: 5, estimatedCostCny: null }),
+  ]);
+  assert.equal(next.lifetime.estimatedCostCny, 9.99);
 });
 
 test("appendAiUsage 任一 Token 缺失则 tokensIncomplete", () => {

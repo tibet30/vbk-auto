@@ -284,6 +284,39 @@ export const disambiguateOutcomeSchema = z.object({
   reasoning: z.string().trim().min(1).max(200),
 }).strict();
 
+/**
+ * AI 副标题单字段重新生成：专用 function-calling 工具。
+ * 只返回一个 2~80 字的中文副标题，便于 renderer 展示候选、由用户确认后再落库。
+ */
+export const subtitleTool = {
+  type: "function",
+  function: {
+    name: "submit_subtitle",
+    description: "为旅游产品提交一个简洁、面向游客的中文副标题（2~80 字）。",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["subtitle"],
+      properties: {
+        subtitle: { type: "string", minLength: 2, maxLength: 80 },
+      },
+    },
+  },
+};
+
+export const subtitleOutcomeSchema = z.object({
+  subtitle: z.string().trim().min(2).max(80),
+}).strict();
+
+export const subtitleSystemPrompt = `你是 ${APP_NAME} 的旅游产品运营助手。当前任务：为产品生成一句简洁、面向游客的中文副标题（basicInfo.subtitle）。
+
+要求：
+1. 副标题 2~80 个字符，使用简洁中文。
+2. 副标题应体现：目的地 + 天数/晚数 + 产品形态（私家团 / 跟团游等）+ 一个核心亮点。
+3. 不得编造未核查的价格、酒店名称、导游信息、供应商 / 资源 ID 或联系人。
+4. 只调用 submit_subtitle 工具返回 {subtitle}，不要输出任何解释文字或其它字段。`;
+
 const chineseText = (maxLength: number) => z.string().trim().min(1).max(maxLength).refine(
   (value) => /[\p{Script=Han}]/u.test(value),
   { message: "必须包含中文" },

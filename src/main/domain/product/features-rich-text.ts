@@ -6,6 +6,7 @@ const RICH_TAG = /<\/?(?:p|strong|em|ul|ol|li|br)\b/i;
 export const PRODUCT_FEATURES_RICH_TEXT_GUIDE = `features 是 VBK 富文本字段，必须输出 HTML 片段：
 - 写 3～5 个与本产品事实一致的亮点，每个亮点使用 <p><strong>短标题：</strong>具体说明</p>；需要列举时可用 <ul><li>...</li></ul>。
 - 只允许 p、strong、em、ul、ol、li、br 标签；禁止 Markdown、外层 html/body、style/class/id 等属性，以及 a、img、table、script、iframe。
+- 产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息，避免与导游条款显示“含导游”产生不一致。
 - 标题简短、内容具体，不虚构服务、资源或承诺；同时遵守 VBK 文案黑名单。`;
 
 function escapeText(value: string): string {

@@ -70,6 +70,39 @@ test("真实 district parents 英文行政区字段可解析同城 POI，异地�
   assert.match(unknown.reason ?? "", /地域未知/);
 });
 
+test("Gyantse(City)+Shigatse(City)+Tibet 结构化字段可匹配日喀则产品", () => {
+  // 真实白居寺 district：当前节点 City=Gyantse，上级 City=Shigatse，Province=Tibet。
+  const detailResult: PoiSuggestDetailResult = {
+    httpStatus: 200,
+    businessStatus: "Success",
+    poiListCount: 1,
+    best: { poiName: "白居寺", poiId: 76349 },
+    candidates: [{
+      index: 0,
+      poiName: "白居寺",
+      poiId: 76349,
+      selectable: true,
+      province: "Tibet",
+      city: "Shigatse",
+      district: "Gyantse",
+      address: "Gyantse",
+      textFields: [
+        { path: "district.districtName", value: "Gyantse" },
+        { path: "district.districtType", value: "City" },
+        { path: "district.parents[0].districtName", value: "Shigatse" },
+        { path: "district.parents[0].districtType", value: "City" },
+        { path: "district.parents[1].districtName", value: "Tibet" },
+        { path: "district.parents[1].districtType", value: "Province" },
+      ],
+    }],
+  };
+  const resolved = toPlanningCandidate("白居寺", detailResult, "西藏", "日喀则");
+  assert.equal(resolved.status, "resolved");
+  assert.equal(resolved.city, "Shigatse");
+  assert.equal(resolved.province, "Tibet");
+  assert.equal(resolved.district, "Gyantse");
+});
+
 test("POI candidate keeps official identity and rejects foreign/facility matches", () => {
   const valid = toPlanningCandidate("布达拉宫", detail({ requested: "布达拉宫" }), "西藏", "拉萨");
   assert.equal(valid.status, "resolved");

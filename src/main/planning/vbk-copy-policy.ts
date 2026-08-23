@@ -61,6 +61,13 @@ export const VBK_COPY_BAD_CASES = [
     alternatives: ["特色", "优质", "尽量"],
     pattern: /唯一|顶级|绝对|百分之百|100%|No\.?\s*1|全网|史上|遥遥领先|零风险|零差评|永久有效|保证满意/i,
   },
+  {
+    term: "导游否定描述",
+    reason: "产品图文的推荐语、推荐理由或产品特色写“不配随队导游”“不含导游”等，可能与导游条款“含导游”不一致",
+    alternatives: ["当地服务衔接清晰", "行程安排清晰", "用车接送安排明确"],
+    pattern: /不配随队导游|不含(?:随队)?导游|不提供(?:随队)?导游|无(?:随队)?导游|不安排(?:随队)?导游/,
+    pathPattern: /(^|\.)(?:presentation\.)?(?:recommendation|features|recommendations(?:\[\d+\]|\.\d+)\.text)$/,
+  },
 ] as const;
 
 export function buildVbkCopyPolicyPrompt(): string {
@@ -75,7 +82,8 @@ export function findVbkCopyBadCase(value: unknown, path = "value"):
   | { path: string; term: string; reason: string; alternatives: readonly string[] }
   | undefined {
   if (typeof value === "string") {
-    const badCase = VBK_COPY_BAD_CASES.find(({ pattern }) => pattern.test(value));
+    const badCase = VBK_COPY_BAD_CASES.find((item) =>
+      (!("pathPattern" in item) || item.pathPattern.test(path)) && item.pattern.test(value));
     return badCase ? { path, ...badCase } : undefined;
   }
   if (Array.isArray(value)) {
@@ -100,7 +108,9 @@ export function findAllVbkCopyBadCases(value: unknown, path = "value"):
   const hits: Array<{ path: string; term: string; reason: string; alternatives: readonly string[] }> = [];
   if (typeof value === "string") {
     for (const badCase of VBK_COPY_BAD_CASES) {
-      if (badCase.pattern.test(value)) hits.push({ path, ...badCase });
+      if ((!("pathPattern" in badCase) || badCase.pathPattern.test(path)) && badCase.pattern.test(value)) {
+        hits.push({ path, ...badCase });
+      }
     }
     return hits;
   }

@@ -31,7 +31,7 @@ import { AutomationCancelledError } from "./automation.main.errors.js";
 import { isProductImageTextUrl } from "../ctrip/tabs.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
-import { resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
+import { ensureLegacySupplierProductCodeUpgraded, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
 import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
 import { ensurePackageApi } from "../ctrip/package-api.js";
@@ -59,10 +59,17 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
     const shouldRequireAccountContext = phaseName === "basic" || !basicInfoSaved;
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone: string | null = null;
+    let upgradedSupplierCode = "";
     if (shouldRequireAccountContext) {
       butlerSelection = resolveProductButlerSelection(product.product);
       if (!butlerSelection) {
         throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
+      }
+      const upgradedCode = ensureLegacySupplierProductCodeUpgraded(productData, butlerSelection);
+      if (upgradedCode) {
+        upgradedSupplierCode = upgradedCode;
+        product.product = productData as unknown as Record<string, unknown>;
+        ctx.db.updateProduct(localProductId, product.product, "automating");
       }
       const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
       if (!phoneContext) {
@@ -140,6 +147,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             scenicSpotLogs.length = 0;
             const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: product.product });
             log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
+            if (upgradedSupplierCode) log(`供应商产品编号已按新规则更新为：${upgradedSupplierCode}`);
             if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
             // basicInfoSaved 已确认但 product 无缺失 → 跳过填充，直接标记完成。
             if (shouldRefill.reason === "complete") {

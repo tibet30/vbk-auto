@@ -1,4 +1,5 @@
 import type { ProductReadiness, ResearchTask } from "./contracts-types.js";
+import { isBorderPermitIssueText } from "./border-permit.js";
 
 export type ReadinessIssue = ProductReadiness["issues"][number];
 
@@ -27,6 +28,7 @@ export function readinessIssueSemanticKey(issue: Pick<ReadinessIssue, "label" | 
   if (vehiclePattern.test(text)) return "resource:vehicle";
   if (hotelPattern.test(text)) return "resource:hotel";
   if (coverPattern.test(text)) return "presentation:cover";
+  if (isBorderPermitIssueText(text)) return "travel:borderPermit";
   if (pricePattern.test(text) && label !== "套餐与价格" && label !== "套餐名称") return "commercial:price";
   if (inventoryPattern.test(text)) return "commercial:inventory";
   return `exact:${normalizedText(label)}:${normalizedText(detail)}`;
@@ -58,12 +60,21 @@ function hotelDetail(left: ReadinessIssue, right: ReadinessIssue): string {
   return detail || "需先核查 VBK 酒店配置。";
 }
 
+function borderPermitDetail(left: ReadinessIssue, right: ReadinessIssue): string {
+  const detail = mergeDetail(left.detail || "", right.detail || "");
+  if (/预订须知|bookingNotes/.test(detail)) return "需确认边境通行/边防证办理口径，并写入预订须知。";
+  return "需确认边境通行/边防证办理口径，并同步到预订须知。";
+}
+
 function mergeIssue(left: ReadinessIssue, right: ReadinessIssue, key: string): ReadinessIssue {
   if (key === "resource:vehicle") {
     return { label: "用车资源组", detail: vehicleDetail(left, right) };
   }
   if (key === "resource:hotel") {
     return { label: "酒店资源", detail: hotelDetail(left, right) };
+  }
+  if (key === "travel:borderPermit") {
+    return { label: "边防证办理口径", detail: borderPermitDetail(left, right) };
   }
   return { label: left.label || right.label, detail: mergeDetail(left.detail || "", right.detail || "") };
 }

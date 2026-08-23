@@ -84,12 +84,18 @@ import { deleteSetting, getSetting, setSetting } from "./parts/settings.js";
  */
 export class VbkDatabase {
   private db: Database.Database;
+  /** Optional Tibet extension user id for scoped accountFixedInfo reads. */
+  private extensionUserIdResolver: (() => number | null) | null = null;
 
   constructor(dataPath: string) {
     fs.mkdirSync(dataPath, { recursive: true });
     this.db = new Database(path.join(dataPath, "vbk-desktop.sqlite"));
     this.db.pragma("journal_mode = WAL");
     runDatabaseMigrations(this.db);
+  }
+
+  setExtensionUserIdResolver(resolver: (() => number | null) | null): void {
+    this.extensionUserIdResolver = resolver;
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -174,7 +180,16 @@ export class VbkDatabase {
   // ─────────────────────────────────────────────────────────────────────
 
   static fixedInfoSchema(): AccountFixedInfoField[] { return partFixedInfoSchema(); }
-  getAccountFixedInfo(accountName: string): AccountFixedInfo { return partGetAccountFixedInfo(this.db, accountName); }
+  getAccountFixedInfo(accountName: string): AccountFixedInfo {
+    const name = accountName.trim();
+    const userId = this.extensionUserIdResolver?.() ?? null;
+    // Logged-in Tibet user: scoped cache only — no legacy fallback (cross-user bleed).
+    if (userId != null && name) {
+      const scoped = partGetAccountFixedInfo(this.db, `${userId}:${name}`);
+      return { accountName: name, values: scoped.values };
+    }
+    return partGetAccountFixedInfo(this.db, accountName);
+  }
   setAccountFixedInfo(accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>): AccountFixedInfo {
     return partSetAccountFixedInfo(this.db, accountName, values);
   }

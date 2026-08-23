@@ -46,3 +46,37 @@ test("管家联系人等待远端搜索结果替换空关键词第一页后再�
     await browser.close();
   }
 });
+
+test("预订联系人使用管家联系人信息录入", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <div class="ant-form-item">
+        <label>预订联系人</label>
+        <input role="combobox" aria-controls="booking-contact-options" />
+        <input class="ant-select-search__field" />
+      </div>
+      <div id="booking-contact-options" class="ant-select-dropdown">
+        <div class="ant-select-dropdown-menu-item" data-value="1753732">张三 zhangsan@qq.com</div>
+        <div class="ant-select-dropdown-menu-item" data-value="1753733">李四 lisi@qq.com</div>
+      </div>
+      <script>
+        window.chosen = "";
+        for (const option of document.querySelectorAll(".ant-select-dropdown-menu-item")) {
+          option.addEventListener("click", () => { window.chosen = option.textContent; });
+        }
+      </script>
+    `);
+
+    await fillButlerContact(page, {
+      contactCardId: 1753732,
+      displayName: "张三",
+      providerId: 1279416,
+    });
+
+    assert.match(await page.evaluate(() => (window as any).chosen), /^张三 /);
+  } finally {
+    await browser.close();
+  }
+});

@@ -53,6 +53,8 @@ test("vbkSessionRequest 在浏览器上下文读取 CID、补 trace/header/body�
   assert.equal(captured!.init.credentials, "include");
   assert.equal((captured!.init.headers as Record<string, string>)["x-tour-auth-from"], "vbk");
   assert.equal((captured!.init.headers as Record<string, string>)["x-ctx-locale"], "zh-CN");
+  assert.equal((captured!.init.headers as Record<string, string>)["x-input-locale"], "zh-CN");
+  assert.equal((captured!.init.headers as Record<string, string>)["accept-language"], "zh-CN,zh;q=0.9");
   assert.equal(JSON.parse(String(captured!.init.body)).head.cid, "GUID-VALUE");
 });
 

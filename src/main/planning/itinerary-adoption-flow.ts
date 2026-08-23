@@ -3,21 +3,27 @@ import type { MainIpcContext } from "../ipc/context.js";
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { resetProductForPlanningStage } from "./planning-v2-reset.js";
 import {
-  applyPoiMatches,
+  applyUnmatchedPoiSourcePolicy,
   collectRequiredItinerarySpots,
   guardLatestItineraryAdoption,
   isTravelNodeName,
   markItineraryAccepted,
-  markItineraryBlocked,
   markItineraryPendingAdoption,
   markItineraryVerifying,
 } from "./itinerary-adoption.js";
+
+type ItineraryPoiLookup = (
+  name: string,
+  context: { destinationCity: string; province: string },
+) => Promise<{ poiName: string; poiId: number } | null>;
 
 export async function acceptItineraryAndRerunCompletion(args: {
   context: MainIpcContext;
   localProductId: string;
   accepting: Set<string>;
   run(localProductId: string, plan: PlanningPlanV2): Promise<PlanningRunResult>;
+  /** 测试或调用方可注入；生产环境默认使用当前 VBK 页面查询。 */
+  lookupPoi?: ItineraryPoiLookup;
 }): Promise<PlanningRunResult> {
   const { context, localProductId, accepting, run } = args;
   if (accepting.has(localProductId)) throw new Error("当前行程正在采用，请勿重复点击。");
@@ -55,31 +61,26 @@ export async function acceptItineraryAndRerunCompletion(args: {
     const basic = asRecord(remote.product.basicInfo) ?? {};
     const destinationCity = text(basic.destinationCity) || text(basic.meetingCity);
     const province = text(basic.province);
-    let page: Awaited<ReturnType<MainIpcContext["browser"]["page"]>>;
-    try {
-      page = await context.browser.page();
-    } catch (error) {
-      const reason = `无法开始真实 POI 核验：${error instanceof Error ? error.message : String(error)}`;
-      return await persistBlocked(context, localProductId, verifying, itinerary, reason);
-    }
-    const matches = new Map<string, { poiName: string; poiId: number }>();
-    const failed: string[] = [];
-    for (const spot of required) {
+    let lookupPoi = args.lookupPoi;
+    if (!lookupPoi) {
       try {
-        const detail = await suggestPoiDetail(page, spot.name, { destinationCity, province });
-        const best = detail.best;
-        if (best && Number.isInteger(best.poiId) && best.poiId > 0 && best.poiName.trim() && !isTravelNodeName(best.poiName)) {
-          matches.set(spot.name, { poiName: best.poiName.trim(), poiId: best.poiId });
-        } else failed.push(`第${spot.dayIndex + 1}天「${spot.name}」未匹配真实 POI`);
-      } catch (error) {
-        failed.push(`第${spot.dayIndex + 1}天「${spot.name}」核验失败：${error instanceof Error ? error.message : String(error)}`);
+        const page = await context.browser.page();
+        lookupPoi = async (name, poiContext) => {
+          const best = (await suggestPoiDetail(page, name, poiContext)).best;
+          return best && Number.isInteger(best.poiId) && best.poiId > 0 && best.poiName.trim() && !isTravelNodeName(best.poiName)
+            ? { poiName: best.poiName.trim(), poiId: best.poiId }
+            : null;
+        };
+      } catch {
+        // POI 是尽力匹配项。页面暂不可用时保留用户景点名，交给运营稍后手动配置。
       }
     }
-    const hydrated = applyPoiMatches(itinerary, matches);
-    if (failed.length > 0 || hydrated.missing.length > 0) {
-      const reason = [...failed, ...hydrated.missing.map((spot) => `第${spot.dayIndex + 1}天「${spot.name}」缺少真实 POI`)].join("；");
-      return await persistBlocked(context, localProductId, verifying, itinerary, reason);
-    }
+    const matches = await resolveBestEffortPoiMatches(required, { destinationCity, province }, lookupPoi);
+    const hydrated = applyUnmatchedPoiSourcePolicy(
+      itinerary,
+      matches,
+      new Set(verifying.itineraryAdoption?.userRecommendedSpotNames ?? []),
+    );
 
     const latest = await context.remoteProducts.get(localProductId);
     const guard = guardLatestItineraryAdoption(itinerary, latest.planning, latest.product.itinerary);
@@ -102,21 +103,24 @@ export async function acceptItineraryAndRerunCompletion(args: {
   }
 }
 
-async function persistBlocked(
-  context: MainIpcContext,
-  localProductId: string,
-  plan: PlanningPlanV2,
-  itinerary: unknown,
-  reason: string,
-): Promise<never> {
-  const latest = await context.remoteProducts.get(localProductId);
-  const guard = guardLatestItineraryAdoption(itinerary, latest.planning, latest.product.itinerary);
-  if (!guard.ok) return persistLatestPending(context, latest);
-  const blocked = markItineraryBlocked(latest.planning ?? plan, latest.product.itinerary, reason.slice(0, 500));
-  const saved = await context.remoteProducts.update({ ...latest, status: "blocked", planning: blocked, updatedAt: new Date().toISOString() }, latest.revision!);
-  context.db.importProductSnapshot(saved);
-  context.broadcastProduct(saved);
-  throw new Error(`行程暂未采用：${reason}`);
+/** 查询是尽力而为：单点异常或整体不可用都只留下未绑定项，不阻断行程采用。 */
+export async function resolveBestEffortPoiMatches(
+  spots: ReturnType<typeof collectRequiredItinerarySpots>,
+  poiContext: { destinationCity: string; province: string },
+  lookupPoi?: ItineraryPoiLookup,
+): Promise<Map<string, { poiName: string; poiId: number }>> {
+  const matches = new Map<string, { poiName: string; poiId: number }>();
+  for (const spot of lookupPoi ? spots : []) {
+    try {
+      const match = await lookupPoi!(spot.name, poiContext);
+      if (match && Number.isInteger(match.poiId) && match.poiId > 0 && match.poiName.trim() && !isTravelNodeName(match.poiName)) {
+        matches.set(spot.name, { poiName: match.poiName.trim(), poiId: match.poiId });
+      }
+    } catch {
+      // 单个查询失败不再阻断采用；applyPoiMatches 会保留原名称和空 POI。
+    }
+  }
+  return matches;
 }
 
 async function persistLatestPending(

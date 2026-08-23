@@ -90,6 +90,8 @@ export interface ItineraryAdoptionState {
   status: ItineraryAdoptionStatus;
   itineraryRevision: string;
   triggeredAt: string;
+  /** 本轮用户消息中明确点名的景点；未命中 POI 时允许保留给运营手动处理。 */
+  userRecommendedSpotNames?: string[];
   error?: string;
 }
 

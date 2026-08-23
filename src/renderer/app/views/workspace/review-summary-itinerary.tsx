@@ -4,10 +4,17 @@ import {
   Coffee,
   Hotel,
   MapPin,
+  ShieldAlert,
   Sparkles,
+  Trash2,
   Utensils,
 } from "lucide-react";
+import { useState } from "react";
+import type { ProductReadiness } from "../../../../shared/contracts-types.js";
+import { itineraryDayHasBorderPermitTrigger } from "../../../../shared/border-permit.js";
+import { readinessIssueSemanticKey } from "../../../../shared/readiness-issues.js";
 import { stripDayPrefix } from "../../helpers";
+import { api } from "../../helpers";
 import shared from "../shared.module.less";
 import { ItinerarySpotPoiEditor } from "./review-summary-itinerary-poi";
 import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
@@ -23,7 +30,14 @@ export interface ItineraryActivity {
 export interface ItineraryDay {
   day?: number;
   title?: string;
-  spots?: Array<{ name: string; poiName?: string | null; poiId?: number | null }>;
+  spots?: Array<{
+    name: string;
+    poiName?: string | null;
+    poiId?: number | null;
+    province?: string | null;
+    city?: string | null;
+    district?: string | null;
+  }>;
   description?: string;
   hotel?: string;
   hotelDescription?: string;
@@ -41,6 +55,7 @@ interface ReviewSummaryItineraryProps {
   collapsed?: boolean;
   /** 切换整个「每日行程」模块的展开 / 收起。 */
   onToggleCollapsed?: () => void;
+  readinessIssues?: ProductReadiness["issues"];
 }
 
 interface TimelineItem {
@@ -53,6 +68,9 @@ interface TimelineItem {
   spotIndex?: number;
   poiName?: string | null;
   poiId?: number | null;
+  province?: string | null;
+  city?: string | null;
+  district?: string | null;
 }
 
 /**
@@ -85,6 +103,9 @@ function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
       spotIndex: spotIndex >= 0 ? spotIndex : undefined,
       poiName: spot?.poiName ?? null,
       poiId: spot?.poiId ?? null,
+      province: spot?.province ?? null,
+      city: spot?.city ?? null,
+      district: spot?.district ?? null,
     };
   });
 
@@ -103,6 +124,9 @@ function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
       spotIndex: index,
       poiName: spot.poiName ?? null,
       poiId: spot.poiId ?? null,
+      province: spot.province ?? null,
+      city: spot.city ?? null,
+      district: spot.district ?? null,
     }));
 
   items.push(...activityItems, ...spotItems);
@@ -166,7 +190,29 @@ function activityNodeClass(type: ItineraryActivity["type"]): string {
  * - 折叠时只保留 Day 编号 + 标题 + 节点计数，保持列表可快速浏览。
  * - 多天可同时展开（不互斥），再次点击已展开的天即收起该天。
  */
-export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndexes, onToggle, collapsed = false, onToggleCollapsed }: ReviewSummaryItineraryProps) {
+export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndexes, onToggle, collapsed = false, onToggleCollapsed, readinessIssues = [] }: ReviewSummaryItineraryProps) {
+  const [removingSpotKey, setRemovingSpotKey] = useState<string | null>(null);
+  const borderPermitIssue = readinessIssues.find((issue) => readinessIssueSemanticKey(issue) === "travel:borderPermit");
+  const removeSpot = async (item: TimelineItem) => {
+    if (item.spotIndex === undefined || !api()) return;
+    const confirmed = window.confirm(`确认删除「${item.title}」这一站？`);
+    if (!confirmed) return;
+    const key = `${item.dayIndex}-${item.spotIndex}`;
+    setRemovingSpotKey(key);
+    try {
+      await api()!.products.updateReviewField(localProductId, {
+        field: "itinerarySpotRemove",
+        dayIndex: item.dayIndex,
+        spotIndex: item.spotIndex,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "删除站点失败，请重试。";
+      window.alert(message);
+    } finally {
+      setRemovingSpotKey((current) => (current === key ? null : current));
+    }
+  };
+
   // 折叠时不渲染 dayList，节省节点；header 仍然可点击重新展开。
   const renderHeader = (meta: React.ReactNode, bodyId: string) => (
     <button
@@ -207,6 +253,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
           const visitCount = timeline.filter((t) => t.type === "visit").length;
           const mealCount = timeline.filter((t) => t.type === "meal").length;
           const hotel = day.hotel?.trim() ?? "";
+          const showBorderPermitHint = Boolean(borderPermitIssue) && itineraryDayHasBorderPermitTrigger(day);
           return (
             <li key={index} className={styles.dayItem} data-expanded={expanded}>
               <button
@@ -251,6 +298,18 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                               <div className={styles.timelineHeader}>
                                 <span className={styles.timelineTime}>{label}</span>
                                 <span className={styles.timelineTitle}>{item.title}</span>
+                                {item.spotIndex !== undefined && (
+                                  <button
+                                    type="button"
+                                    className={styles.spotRemove}
+                                    onClick={() => { void removeSpot(item); }}
+                                    disabled={removingSpotKey === `${item.dayIndex}-${item.spotIndex}`}
+                                    title={`删除 ${item.title}`}
+                                    aria-label={`删除 ${item.title}`}
+                                  >
+                                    <Trash2 size={12} aria-hidden="true" />
+                                  </button>
+                                )}
                               </div>
                               {item.detail && (
                                 <p className={styles.timelineDetail}>{item.detail}</p>
@@ -264,6 +323,9 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                                     spotIndex: item.spotIndex,
                                     poiName: item.poiName,
                                     poiId: item.poiId,
+                                    province: item.province,
+                                    city: item.city,
+                                    district: item.district,
                                   }}
                                 />
                               )}
@@ -281,6 +343,15 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                       <div className={styles.hotelBody}>
                         <strong className={styles.hotelTitle}>入住</strong>
                         <span className={styles.hotelText}>{hotel}</span>
+                      </div>
+                    </div>
+                  )}
+                  {showBorderPermitHint && borderPermitIssue && (
+                    <div className={styles.permitCard}>
+                      <span className={styles.permitIcon}><ShieldAlert size={12} aria-hidden="true" /></span>
+                      <div className={styles.permitBody}>
+                        <strong className={styles.permitTitle}>证件提示</strong>
+                        <span className={styles.permitText}>{borderPermitIssue.detail}</span>
                       </div>
                     </div>
                   )}

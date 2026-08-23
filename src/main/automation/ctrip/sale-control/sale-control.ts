@@ -71,13 +71,19 @@ async function configureProductShell(page, product) {
 
   // 1) 产品类型
   const productTypeRow = findRowByTitle(page, "产品类型");
-  await setEnabledSelectByLabel(page, productTypeRow, PRODUCT_TYPE_LABELS[productType], "产品类型");
+  const productTypeResult = await setEnabledSelectByLabel(page, productTypeRow, PRODUCT_TYPE_LABELS[productType], "产品类型");
+  if (!productTypeResult?.selected) {
+    throw new Error(`产品类型未确认选中「${PRODUCT_TYPE_LABELS[productType]}」，已停止选择产品形态。`);
+  }
 
   // 2) 产品形态
   const productFormRow = findRowByTitle(page, "产品形态");
   const productFormUnlocked = await waitForRowEnabledSelect(page, productFormRow, 5_000);
   if (productFormUnlocked) {
-    await setEnabledSelectByLabel(page, productFormRow, PRODUCT_FORM_LABELS[productForm], "产品形态");
+    const productFormResult = await setEnabledSelectByLabel(page, productFormRow, PRODUCT_FORM_LABELS[productForm], "产品形态");
+    if (!productFormResult?.selected) {
+      throw new Error(`产品形态未确认选中「${PRODUCT_FORM_LABELS[productForm]}」。`);
+    }
   } else {
     logWarn("[configureProductShell] 产品形态下拉始终 disabled（合同锁定）");
   }

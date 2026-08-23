@@ -122,6 +122,65 @@ test("替换掉 suggestPoi 失败景点后，历史 POI 待办会按当前行程
   }, product), false);
 });
 
+test("替换掉非游览节点后，历史 POI 待办会按当前行程自动收敛", () => {
+  const product = {
+    itinerary: [{ day: 1, spots: [{ name: "日喀则市非物质文化中心", poiName: "日喀则非遗博物馆", poiId: 12345 }] }],
+  };
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "核查 日喀则火车站 的 VBK POI 映射",
+    type: "vbk",
+    detail: "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点",
+  }, product), true);
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "核查 日喀则火车站 的 VBK POI 映射",
+    type: "vbk",
+    detail: "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点",
+  }, {
+    itinerary: [{ day: 1, spots: [{ name: "日喀则火车站" }] }],
+  }), false);
+});
+
+test("边防证旧任务在当前行程没有边境点位时自动收敛", () => {
+  const product = {
+    basicInfo: { userIdea: "旧路线包含亚东乃堆拉国门" },
+    presentation: { recommendation: "旧文案提到边境通行" },
+    itinerary: [{ day: 1, title: "日喀则市区游", spots: [{ name: "扎什伦布寺" }] }],
+  };
+
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "边防证办理口径核查",
+    type: "vbk",
+    detail: "请人工核实亚东、乃堆拉国门的边防证办理流程。",
+  }, product), true);
+});
+
+test("当前行程含边境点位时，边防证任务必须等基础信息或每日行程明确落地", () => {
+  const base = {
+    itinerary: [{ day: 2, title: "乃堆拉国门游览", spots: [{ name: "乃堆拉国门" }] }],
+  };
+  const task = {
+    label: "边防证办理口径核查",
+    type: "vbk",
+    detail: "请人工核实边防证办理流程。",
+  };
+
+  assert.equal(isResearchTaskSatisfiedByProduct(task, {
+    ...base,
+    basicInfo: { operationNotes: "边防证办理口径以出行前最终确认为准。" },
+  }), false);
+  assert.equal(isResearchTaskSatisfiedByProduct(task, {
+    ...base,
+    commercial: { terms: { bookingNotes: "出行人须提前办理边境地区通行证，并携带有效身份证件。" } },
+  }), false);
+  assert.equal(isResearchTaskSatisfiedByProduct(task, {
+    ...base,
+    basicInfo: { operationNotes: "出行人须提前办理边境地区通行证，并携带有效身份证件。" },
+  }), true);
+  assert.equal(isResearchTaskSatisfiedByProduct(task, {
+    itinerary: [{ day: 2, title: "乃堆拉国门游览", description: "出行人须提前办理边防证，并携带有效身份证件。", spots: [{ name: "乃堆拉国门" }] }],
+  }), true);
+});
+
 test("legacy POI label 仍可在有有效 POI 时满足", () => {
   const product = {
     itinerary: [{ day: 1, spots: [{ name: "晋祠", poiName: "晋祠博物馆", poiId: 79413 }] }],

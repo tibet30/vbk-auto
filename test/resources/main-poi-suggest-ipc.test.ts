@@ -44,7 +44,7 @@ test("poi:suggest IPC 调试日志覆盖开始、详情、成功、空结果和�
   }
   assert.match(source, /stage: event/);
   assert.match(handler, /const result = await suggestPoiDetailWithRawPayload\(context\.browser, query(?:, \{[\s\S]*?\})?\)/);
-  assert.match(handler, /rawPayload: result\.rawPayload/);
+  assert.match(handler, /rawPayload: stringifyPoiPayloadForLog\(result\.rawPayload\)/);
   assert.match(handler, /const \{ rawPayload: _rawPayload, \.\.\.detail \} = result;/);
   assert.match(handler, /return detail;/);
   assert.match(handler, /candidateCount: result\.candidates\.length/);

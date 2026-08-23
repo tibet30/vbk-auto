@@ -279,13 +279,46 @@ test("行程 spot 手动 POI 补全只写入目标 spot 并保留其它字段", 
     spotIndex: 0,
     poiName: "晋祠博物馆",
     poiId: 79413,
+    province: "山西",
+    city: "太原",
+    district: "晋源区",
   });
   const days = next.itinerary as Array<{ spots: Array<Record<string, unknown>>; hotel: string }>;
-  assert.deepEqual(days[0].spots[0], { name: "晋祠", poiName: "晋祠博物馆", poiId: 79413 });
+  assert.deepEqual(days[0].spots[0], {
+    name: "晋祠",
+    poiName: "晋祠博物馆",
+    poiId: 79413,
+    province: "山西",
+    city: "太原",
+    district: "晋源区",
+  });
   assert.deepEqual(days[0].spots[1], { name: "已有景点", poiName: "已有 POI", poiId: 100 });
   assert.deepEqual(days[1].spots[0], { name: "山西博物院", poiName: null, poiId: null });
   assert.equal(days[0].hotel, "太原酒店");
   assert.equal(baseProduct.itinerary[0].spots[0].poiName, null);
+});
+
+test("行程 spot 手动 POI 补全缺少行政区时写 null，避免残留旧区域", () => {
+  const product = {
+    ...baseProduct,
+    itinerary: [{
+      ...baseProduct.itinerary[0],
+      spots: [{ name: "晋祠", poiName: "旧名", poiId: 1, province: "旧省", city: "旧市", district: "旧区" }],
+    }],
+  };
+  const next = applyManualReviewField(product, {
+    field: "itinerarySpotPoi",
+    dayIndex: 0,
+    spotIndex: 0,
+    poiName: "晋祠博物馆",
+    poiId: 79413,
+  });
+  const spot = (next.itinerary as Array<{ spots: Array<Record<string, unknown>> }>)[0].spots[0];
+  assert.equal(spot.poiName, "晋祠博物馆");
+  assert.equal(spot.poiId, 79413);
+  assert.equal(spot.province, null);
+  assert.equal(spot.city, null);
+  assert.equal(spot.district, null);
 });
 
 test("行程 spot 手动 POI 补全拒绝非法 index", () => {
@@ -322,11 +355,71 @@ test("行程 spot 手动 POI 补全拒绝非法 poiId 或空名称", () => {
   }), /POI 名称/);
 });
 
+test("行程站点手动删除只移除目标 spot 和同名游览活动", () => {
+  const product = {
+    ...baseProduct,
+    presentation: {
+      ...baseProduct.presentation,
+      features: "一日游；私家团",
+    },
+    itinerary: [
+      {
+        ...baseProduct.itinerary[0],
+        activities: [
+          { time: "09:00", title: "晋祠", type: "visit", detail: "游览晋祠" },
+          { time: "12:00", title: "午餐自理", type: "meal", detail: "午餐自理" },
+          { time: "14:00", title: "已有景点", type: "visit", detail: "继续游览" },
+        ],
+      },
+      baseProduct.itinerary[1],
+    ],
+  };
+  const next = applyManualReviewField(product, {
+    field: "itinerarySpotRemove",
+    dayIndex: 0,
+    spotIndex: 0,
+  });
+  productSchema.parse(next);
+  const day = (next.itinerary as Array<Record<string, unknown>>)[0];
+  assert.deepEqual(day.spots, [{ name: "已有景点", poiName: "已有 POI", poiId: 100 }]);
+  assert.deepEqual(day.activities, [
+    { time: "12:00", title: "午餐自理", type: "meal", detail: "午餐自理" },
+    { time: "14:00", title: "已有景点", type: "visit", detail: "继续游览" },
+  ]);
+  assert.deepEqual((next.itinerary as Array<Record<string, unknown>>)[1], baseProduct.itinerary[1]);
+  assert.equal(baseProduct.itinerary[0].spots.length, 2);
+});
+
+test("行程站点手动删除拒绝非法 index", () => {
+  assert.throws(() => applyManualReviewField(baseProduct, {
+    field: "itinerarySpotRemove",
+    dayIndex: 99,
+    spotIndex: 0,
+  }), /目标行程天数/);
+  assert.throws(() => applyManualReviewField(baseProduct, {
+    field: "itinerarySpotRemove",
+    dayIndex: 0,
+    spotIndex: 99,
+  }), /目标景点/);
+});
+
 test("applyManualReviewField 不修改原 product", () => {
   const original = JSON.stringify(baseProduct);
   applyManualReviewField(baseProduct, { field: "pricing", adult: 9999, child: 8888, minimumTravelers: 4 });
   applyManualReviewField(baseProduct, { field: "basicInfoSubtitle", subtitle: "新副标题新副标题" });
   assert.equal(JSON.stringify(baseProduct), original);
+});
+
+test("删除景点时会修复历史字符串 cover.minQuality，避免无关字段校验失败", () => {
+  const product = structuredClone(baseProduct) as Record<string, unknown>;
+  product.presentation = {
+    recommendation: "推荐",
+    features: "特色",
+    recommendations: [],
+    cover: { source: "ctripLibrary", poi: "景点", description: "横版", minQuality: "3" },
+  };
+  const next = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0 });
+  assert.equal(((next.presentation as any).cover as any).minQuality, 3);
 });
 
 test("清空 requestedTotalCost 时写入 sentinel 字段，区分「从未设置」与「被主动清除」", () => {

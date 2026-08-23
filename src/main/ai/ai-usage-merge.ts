@@ -1,6 +1,7 @@
 /**
  * 产品级 AI usage 事件合并与聚合。
- * Token 可本地合计；estimatedCostCny 只保留已有 Tibet 值，桌面不覆盖。
+ * Token 与 estimatedCostCny 均可由事件本地合计；
+ * 仅当事件侧算不出费用时，才保留既有 lifetime / latestRun 上的 Tibet 回写值。
  */
 
 import {
@@ -61,6 +62,7 @@ function sumTokens(events: readonly AiUsageEvent[]): AiUsageTotals {
 }
 
 function preserveCost(previous: number | null | undefined, next: AiUsageTotals): AiUsageTotals {
+  if (next.estimatedCostCny !== null) return next;
   if (typeof previous === "number" && Number.isFinite(previous)) {
     return { ...next, estimatedCostCny: previous };
   }

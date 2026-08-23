@@ -118,6 +118,14 @@ test("itinerary adoption runs under the same planning product lock", () => {
   assert.doesNotMatch(planningV2Ipc, /acceptItineraryAndRerunCompletion\(\{[^}]*run: run\W/);
 });
 
+test("conversation itinerary adoption explains best-effort POI matching and manual fallback", () => {
+  assert.match(tree, /尽力匹配当前行程的真实 POI/);
+  assert.match(tree, /AI 推荐但未命中的景点会删除/);
+  assert.match(tree, /用户点名但未命中的景点会保留/);
+  assert.match(tree, /手动配置或删除/);
+  assert.match(tree, /待手动/);
+});
+
 test("planning tree expands all major stages by default and exposes accessible controls", () => {
   assert.match(tree, /const isCollapsed = collapsed\[stage\.id\] \?\? false/);
   assert.match(tree, /aria-expanded=\{!isCollapsed\}/);

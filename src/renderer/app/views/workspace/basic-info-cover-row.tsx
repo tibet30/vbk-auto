@@ -30,6 +30,7 @@ import {
   LoaderCircle,
   MapPin,
   Pencil,
+  ZoomIn,
   Upload,
   X,
 } from "lucide-react";
@@ -43,6 +44,7 @@ import type {
 } from "../../../../shared/contracts-types.js";
 import shared from "../shared.module.less";
 import { BasicInfoRowShell } from "./basic-info-row-shell";
+import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox";
 import styles from "./review-summary-basic-info.module.less";
 
 export interface BasicInfoCoverRowProps {
@@ -106,6 +108,7 @@ export function BasicInfoCoverRow({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const submittedRef = useRef(false);
+  const [zoomImage, setZoomImage] = useState<ImageLightboxItem | null>(null);
   // React state 要等下一次渲染才会禁用控件；用 ref 补住双击/回车连发窗口。
   const placeSearchInFlightRef = useRef(false);
   const imageSearchInFlightRef = useRef(false);
@@ -243,149 +246,174 @@ export function BasicInfoCoverRow({
     if (!ok) submittedRef.current = false;
   };
 
+  const openImageZoom = (item: ImageLightboxItem) => {
+    setZoomImage(item);
+  };
+
+  const closeImageZoom = () => {
+    setZoomImage(null);
+  };
+
   if (!isEditing) {
     return (
-      <BasicInfoRowShell
-        rowId="cover"
-        labelTitle="产品封面"
-        actions={
-          <button
-            type="button"
-            className={`${shared.btn} ${shared.btnSm}`}
-            data-variant="ghost"
-            onClick={startEdit}
-            aria-label={cover ? "编辑产品封面" : "添加产品封面"}
-            disabled={saving}
-          >
-            <Pencil size={12} aria-hidden="true" /> {cover ? "编辑" : "添加"}
-          </button>
-        }
-      >
-        {cover ? (
-          <CoverDisplay cover={cover} previewUrl={previewUrl} onReadPreviewUrl={onReadPreviewUrl} />
-        ) : (
-          <div className={styles.rowDisplay} data-state="empty">
-            <ImagePlus size={12} aria-hidden="true" />
-            <strong>尚未设置封面</strong>
-            <span className={styles.hint}>手动上传图片或输入景点名称查询候选</span>
-          </div>
-        )}
-      </BasicInfoRowShell>
+      <>
+        <BasicInfoRowShell
+          rowId="cover"
+          labelTitle="产品封面"
+          actions={
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              data-variant="ghost"
+              onClick={startEdit}
+              aria-label={cover ? "编辑产品封面" : "添加产品封面"}
+              disabled={saving}
+            >
+              <Pencil size={12} aria-hidden="true" /> {cover ? "编辑" : "添加"}
+            </button>
+          }
+        >
+          {cover ? (
+            <CoverDisplay
+              cover={cover}
+              previewUrl={previewUrl}
+              onReadPreviewUrl={onReadPreviewUrl}
+              onOpenImage={openImageZoom}
+            />
+          ) : (
+            <div className={styles.rowDisplay} data-state="empty">
+              <ImagePlus size={12} aria-hidden="true" />
+              <strong>尚未设置封面</strong>
+              <span className={styles.hint}>手动上传图片或输入景点名称查询候选</span>
+            </div>
+          )}
+        </BasicInfoRowShell>
+        <ImageLightbox image={zoomImage} onClose={closeImageZoom} />
+      </>
     );
   }
 
   return (
-    <BasicInfoRowShell
-      rowId="cover"
-      labelTitle="产品封面"
-      error={error}
-      actions={
-        <>
-          {saving || uploading || placeSearching || imageSearching ? <LoaderCircle size={12} className={styles.spin} aria-label="保存中" /> : null}
+    <>
+      <BasicInfoRowShell
+        rowId="cover"
+        labelTitle="产品封面"
+        error={error}
+        className={styles.coverEditRow}
+        actions={
+          <>
+            {saving || uploading || placeSearching || imageSearching ? <LoaderCircle size={12} className={styles.spin} aria-label="保存中" /> : null}
+            <button
+              type="button"
+              className={`${shared.btn} ${shared.btnSm}`}
+              onClick={cancel}
+              disabled={saving || uploading || placeSearching || imageSearching}
+              aria-label="取消编辑封面"
+            >
+              <X size={12} aria-hidden="true" /> 取消
+            </button>
+          </>
+        }
+      >
+        <div className={styles.coverToolbar} role="group" aria-label="封面操作工具条">
           <button
             type="button"
             className={`${shared.btn} ${shared.btnSm}`}
-            onClick={cancel}
+            data-variant="primary"
             disabled={saving || uploading || placeSearching || imageSearching}
-            aria-label="取消编辑封面"
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="cover-manual-pick"
           >
-            <X size={12} aria-hidden="true" /> 取消
+            <Upload size={12} aria-hidden="true" /> {uploading ? "上传中…" : "选择图片并保存"}
           </button>
-        </>
-      }
-    >
-      <div className={styles.coverToolbar} role="group" aria-label="封面操作工具条">
-        <button
-          type="button"
-          className={`${shared.btn} ${shared.btnSm}`}
-          data-variant="primary"
-          disabled={saving || uploading || placeSearching || imageSearching}
-          onClick={() => fileInputRef.current?.click()}
-          data-testid="cover-manual-pick"
-        >
-          <Upload size={12} aria-hidden="true" /> {uploading ? "上传中…" : "选择图片并保存"}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ALLOWED_MIME.join(",")}
-          data-testid="cover-manual-file"
-          onChange={(event) => { void handleUpload(event); }}
-          disabled={uploading}
-          style={{ display: "none" }}
-        />
-        <span className={styles.coverToolbarDivider} aria-hidden="true" />
-        <input
-          className={styles.input}
-          type="text"
-          value={searchKeyword}
-          onChange={(event) => {
-            setPlaceError(null);
-            setImageError(null);
-            setSearchKeyword(event.target.value);
-            // 关键词变化后，旧地址和图片不再对应当前查询，立即清空。
-            setPlaceResult(null);
-            setSelectedPlace(null);
-            setImageResult(null);
-          }}
-          placeholder="景点名称（如：云冈石窟、莫高窟）"
-          aria-label="携程图库景点名称"
-          disabled={placeSearching || imageSearching}
-          data-testid="cover-search-keyword"
-        />
-        <button
-          type="button"
-          className={`${shared.btn} ${shared.btnSm}`}
-          data-variant="secondary"
-          disabled={saving || uploading || placeSearching || imageSearching}
-          onClick={() => { void handleSearchPlaces(); }}
-          data-testid="cover-search-submit"
-        >
-          {placeSearching ? (
-            <>
-              <LoaderCircle size={12} className={styles.spin} aria-hidden="true" /> 查询中…
-            </>
-          ) : (
-            <>
-              <MapPin size={12} aria-hidden="true" /> 查询地址
-            </>
-          )}
-        </button>
-      </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ALLOWED_MIME.join(",")}
+            data-testid="cover-manual-file"
+            onChange={(event) => { void handleUpload(event); }}
+            disabled={uploading}
+            style={{ display: "none" }}
+          />
+          <span className={styles.coverToolbarDivider} aria-hidden="true" />
+          <input
+            className={styles.input}
+            type="text"
+            value={searchKeyword}
+            onChange={(event) => {
+              setPlaceError(null);
+              setImageError(null);
+              setSearchKeyword(event.target.value);
+              // 关键词变化后，旧地址和图片不再对应当前查询，立即清空。
+              setPlaceResult(null);
+              setSelectedPlace(null);
+              setImageResult(null);
+            }}
+            placeholder="景点名称（如：云冈石窟、莫高窟）"
+            aria-label="携程图库景点名称"
+            disabled={placeSearching || imageSearching}
+            data-testid="cover-search-keyword"
+          />
+          <button
+            type="button"
+            className={`${shared.btn} ${shared.btnSm}`}
+            data-variant="secondary"
+            disabled={saving || uploading || placeSearching || imageSearching}
+            onClick={() => { void handleSearchPlaces(); }}
+            data-testid="cover-search-submit"
+          >
+            {placeSearching ? (
+              <>
+                <LoaderCircle size={12} className={styles.spin} aria-hidden="true" /> 查询中…
+              </>
+            ) : (
+              <>
+                <MapPin size={12} aria-hidden="true" /> 查询地址
+              </>
+            )}
+          </button>
+        </div>
 
-      <span className={styles.hint}>
-        支持 jpg/png/webp，单张最大 {MAX_FILE_SIZE_MIB} MiB；图库查询分两阶段：先选地址，再选图片。
-      </span>
+        <span className={styles.hint}>
+          支持 jpg/png/webp，单张最大 {MAX_FILE_SIZE_MIB} MiB；图库查询分两阶段：先选地址，再选图片。
+        </span>
 
-      {/* 阶段 A：places 候选 */}
-      {placeSearching ? (
-        <span className={styles.hint} data-testid="cover-place-loading">查询地址中，请稍候…</span>
-      ) : null}
-      {placeError ? (
-        <span className={styles.hint} data-state="warn" data-testid="cover-place-error">{placeError}</span>
-      ) : null}
-      {placeResult && placeResult.places.length > 0 ? (
-        <CoverPlaces
-          places={placeResult.places}
-          selectedPlace={selectedPlace}
-          disabled={imageSearching || saving}
-          onPick={(place) => { void handlePickPlace(place); }}
-        />
-      ) : null}
+        {/* 阶段 A：places 候选 */}
+        {placeSearching ? (
+          <span className={styles.hint} data-testid="cover-place-loading">查询地址中，请稍候…</span>
+        ) : null}
+        {placeError ? (
+          <span className={styles.hint} data-state="warn" data-testid="cover-place-error">{placeError}</span>
+        ) : null}
+        {placeResult && placeResult.places.length > 0 ? (
+          <CoverPlaces
+            places={placeResult.places}
+            selectedPlace={selectedPlace}
+            disabled={imageSearching || saving}
+            onPick={(place) => { void handlePickPlace(place); }}
+          />
+        ) : null}
 
-      {/* 阶段 B：image candidates */}
-      {imageSearching ? (
-        <span className={styles.hint} data-testid="cover-image-loading">查询图片中，请稍候…</span>
-      ) : null}
-      {imageError ? (
-        <span className={styles.hint} data-state="warn" data-testid="cover-image-error">{imageError}</span>
-      ) : null}
-      {imageResult && imageResult.candidates.length > 0 ? (
-        <CoverCandidates candidates={imageResult.candidates} onPick={handlePickCandidate} saving={saving} />
-      ) : null}
+        {/* 阶段 B：image candidates */}
+        {imageSearching ? (
+          <span className={styles.hint} data-testid="cover-image-loading">查询图片中，请稍候…</span>
+        ) : null}
+        {imageError ? (
+          <span className={styles.hint} data-state="warn" data-testid="cover-image-error">{imageError}</span>
+        ) : null}
+        {imageResult && imageResult.candidates.length > 0 ? (
+          <CoverCandidates
+            candidates={imageResult.candidates}
+            onPick={handlePickCandidate}
+            saving={saving}
+            onOpenImage={openImageZoom}
+          />
+        ) : null}
 
-      {/* 兜底提示：阶段 A 无候选时已经在 placeError 给出，不在此处重复。 */}
-    </BasicInfoRowShell>
+        {/* 兜底提示：阶段 A 无候选时已经在 placeError 给出，不在此处重复。 */}
+      </BasicInfoRowShell>
+      <ImageLightbox image={zoomImage} onClose={closeImageZoom} />
+    </>
   );
 }
 
@@ -393,10 +421,12 @@ function CoverDisplay({
   cover,
   previewUrl,
   onReadPreviewUrl,
+  onOpenImage,
 }: {
   cover: ProductCover;
   previewUrl: string | null;
   onReadPreviewUrl: (fileId: string, originalName: string) => Promise<string | null>;
+  onOpenImage: (item: ImageLightboxItem) => void;
 }) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(previewUrl);
 
@@ -422,11 +452,26 @@ function CoverDisplay({
     ? resolvedUrl
     : cover.imageUrl;
   const hasImage = Boolean(displayUrl);
+  const sourceLabel = cover.source === "manualUpload" ? "手动上传" : "携程图库";
+  const title = cover.poi || "封面预览";
 
   return (
     <div className={styles.coverDisplay}>
       {hasImage ? (
-        <img className={styles.coverThumb} src={displayUrl!} alt={cover.poi || "封面预览"} />
+        <button
+          type="button"
+          className={styles.coverThumbButton}
+          onClick={() => onOpenImage({ src: displayUrl!, alt: title, title, subtitle: sourceLabel })}
+          aria-label={`放大查看封面：${title}`}
+          title="放大查看"
+          data-testid="cover-open-lightbox"
+        >
+          <img className={styles.coverThumb} src={displayUrl!} alt={title} />
+          <span className={styles.coverZoomHint} aria-hidden="true">
+            <ZoomIn size={14} />
+            <span>放大查看</span>
+          </span>
+        </button>
       ) : (
         <div className={styles.coverPlaceholder} aria-hidden="true">
           <ImagePlus size={16} />
@@ -436,7 +481,7 @@ function CoverDisplay({
         <div className={styles.rowDisplay}>
           <strong>{cover.poi}</strong>
           <span className={styles.tag} data-tone={cover.source === "manualUpload" ? "warn" : "ok"}>
-            {cover.source === "manualUpload" ? "手动上传" : "携程图库"}
+            {sourceLabel}
           </span>
           <span className={styles.tag}>质量 ≥ {cover.minQuality}</span>
         </div>
@@ -524,10 +569,12 @@ function CoverCandidates({
   candidates,
   onPick,
   saving,
+  onOpenImage,
 }: {
   candidates: CtripLibraryImageCandidate[];
   onPick: (candidate: CtripLibraryImageCandidate) => void;
   saving: boolean;
+  onOpenImage: (item: ImageLightboxItem) => void;
 }) {
   return (
     <ul className={styles.coverCandidates} aria-label="携程图库候选" data-testid="cover-search-candidates">
@@ -535,7 +582,7 @@ function CoverCandidates({
         const selectable = isCandidateSelectable(candidate);
         return (
           <li key={candidate.stableId} className={styles.coverCandidate}>
-            <CoverCandidateThumb candidate={candidate} />
+            <CoverCandidateThumb candidate={candidate} onOpenImage={onOpenImage} />
             <div className={styles.coverCandidateMeta}>
               <strong>imageId {candidate.imageId}</strong>
               <span className={styles.hint}>
@@ -564,18 +611,36 @@ function CoverCandidates({
   );
 }
 
-function CoverCandidateThumb({ candidate }: { candidate: CtripLibraryImageCandidate }) {
+function CoverCandidateThumb({ candidate, onOpenImage }: {
+  candidate: CtripLibraryImageCandidate;
+  onOpenImage: (item: ImageLightboxItem) => void;
+}) {
   // 渲染缩略图：imageUrl 优先；缺失回退 previewUrl / thumbnailUrl；
   // 三者全缺才走占位元素。
   const src = candidate.imageUrl || candidate.previewUrl || candidate.thumbnailUrl;
   if (src) {
+    const alt = candidate.imageId ? `imageId ${candidate.imageId}` : "携程图库图片";
     return (
-      <img
-        className={styles.coverCandidateThumb}
-        src={src}
-        alt={candidate.imageId ? `imageId ${candidate.imageId}` : "携程图库图片"}
-        loading="lazy"
-      />
+      <div className={styles.coverCandidateThumbWrap}>
+        <img
+          className={styles.coverCandidateThumb}
+          src={src}
+          alt={alt}
+          loading="lazy"
+        />
+        <div className={styles.imageZoomHoverLayer}>
+          <button
+            type="button"
+            className={`${shared.iconBtn} ${styles.imageZoomButton}`}
+            onClick={() => onOpenImage({ src, alt, title: alt, subtitle: "携程图库候选" })}
+            aria-label={`放大查看 ${alt}`}
+            title="放大查看"
+          >
+            <ZoomIn size={16} aria-hidden="true" />
+            <span className={styles.imageZoomText}>放大</span>
+          </button>
+        </div>
+      </div>
     );
   }
   return (

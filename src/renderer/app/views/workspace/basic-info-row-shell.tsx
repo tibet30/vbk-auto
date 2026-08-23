@@ -24,6 +24,8 @@ export interface BasicInfoRowShellProps {
   actions?: ReactNode;
   /** 行 id，方便 ARIA / 自动化测试关联。 */
   rowId?: string;
+  /** 附加到行根元素上的 class，用于行级对齐 / 布局微调（如编辑态垂直居中）。 */
+  className?: string;
 }
 
 export function BasicInfoRowShell({
@@ -33,9 +35,10 @@ export function BasicInfoRowShell({
   error,
   actions,
   rowId,
+  className,
 }: BasicInfoRowShellProps) {
   return (
-    <div className={styles.row} data-row-id={rowId}>
+    <div className={className ? `${styles.row} ${className}` : styles.row} data-row-id={rowId}>
       <div className={styles.rowLabel}>
         <span className={styles.rowLabelTitle}>{labelTitle}</span>
         {labelHint ? <small className={styles.rowLabelHint}>{labelHint}</small> : null}

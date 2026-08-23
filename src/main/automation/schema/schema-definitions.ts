@@ -24,7 +24,14 @@ export {
 const itineraryDaySchema = z.object({
   day: z.number().int().positive(),
   title: z.string().min(1),
-  spots: z.array(z.object({ name: z.string().min(1), poiName: z.string().nullable().optional(), poiId: z.number().int().positive().nullable().optional() }).strict()).default([]),
+  spots: z.array(z.object({
+    name: z.string().min(1),
+    poiName: z.string().nullable().optional(),
+    poiId: z.number().int().positive().nullable().optional(),
+    province: z.string().nullable().optional(),
+    city: z.string().nullable().optional(),
+    district: z.string().nullable().optional(),
+  }).strict()).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),
   meals: z.string().default(""),

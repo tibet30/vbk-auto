@@ -351,17 +351,37 @@ test("G5 · 主进程以产品维度统一互斥 planning 与 AI 写流程", () 
     "planning:start 必须在覆盖 pending state 前拒绝并发请求");
 });
 
-test("G6 · ai:send 重写 itinerary 后必须立即补跑 POI enrichment", () => {
-  assert.match(productAiSrc, /async function enrichItineraryPoisAfterAi\(/,
-    "product-ai-ipc 必须提供 AI 行程写回后的 POI 补全 helper");
-  assert.match(productAiSrc, /patchTouchesItinerary\(patch\)/,
-    "POI 补全必须只在 patch 实际触达 itinerary 时触发，避免无关对话额外查 POI");
-  assert.match(productAiSrc, /new DbOrchestratorRuntime\(db,\s*context\.browser,\s*productMutations\)/,
-    "AI 行程重写后的 POI 补全必须复用规划 runtime，保持 suggestPoi / writeModule / task 去重语义一致");
-  assert.match(productAiSrc, /await enrichItineraryPois\(\{/,
-    "AI 行程重写后必须调用统一的 enrichItineraryPois，而不是各写各的 POI 查询逻辑");
-  assert.match(productAiSrc, /if \(patchResult\.applied\) \{\s*await enrichItineraryPoisAfterAi\(localProductId,\s*responsePatch\);/s,
-    "首轮 AI patch 成功写入 itinerary 后必须立即补跑 POI enrichment");
-  assert.match(productAiSrc, /if \(secondPatchResult\.applied\) \{\s*await enrichItineraryPoisAfterAi\(localProductId,\s*secondPatch\);/s,
-    "补齐轮次若写入了 itinerary，也必须补跑同一条 POI enrichment");
+test("G6 · ai:send 写入 itinerary 后先完成第二阶段并等待手动补全", () => {
+  assert.match(productAiSrc, /patchTouchesItinerary\(responsePatch\)/,
+    "行程阶段完成信号必须只在 patch 实际触达 itinerary 时触发");
+  assert.match(productAiSrc, /syncItineraryAdoptionSignal\(context, localProductId\)/,
+    "行程写回后必须标记为待采用，等待用户手动配置 POI 后再补全");
+  assert.match(productAiSrc, /await enrichItineraryPois\(/,
+    "行程回复落库后应尝试自动匹配真实 POI");
+  assert.match(productAiSrc, /responsePersisted = true/,
+    "助手回复必须在后处理前落库并对用户可见");
+});
+
+test("G7 · 重做产品补全前若 POI 已齐，直接采用当前行程并从 completion 继续", () => {
+  const planningV2Ipc = read("src/main/ipc/planning-v2-ipc.ts");
+  assert.match(planningV2Ipc, /stage === "completion"[\s\S]*itineraryAdoption\?\.status === "pending"/,
+    "completion 重做必须识别待采用的对话行程");
+  assert.match(planningV2Ipc, /itineraryPoisAreComplete\(Array\.isArray\(remote\.product\.itinerary\)/,
+    "completion 重做必须以全部每日 POI 已配置作为行程完成条件");
+  assert.match(planningV2Ipc, /planSource = markItineraryAccepted\(remote\.planning, remote\.product\.itinerary\)/,
+    "POI 齐全后必须先采用当前行程再进入 completion");
+  assert.match(planningV2Ipc, /resetProductForPlanningStage\(remote\.product, stage\)/,
+    "采用后只重置并重跑当前 completion 阶段");
+});
+
+test("手工复核字段先广播本地事务结果，再交给远端镜像同步", () => {
+  const productAiSrc = read("src/main/ipc/product-ai-ipc.ts");
+  assert.match(productAiSrc, /const \{ product: saved, confirmedTaskIds \} = db\.replaceProductAndSatisfyResearchTasks[\s\S]*?broadcastProduct\(saved\);\s*emitProduct\(saved\);/,
+    "手工删除/POI 保存不能等待远端镜像完成后才刷新界面");
+});
+
+test("POI IPC 详情日志将 rawPayload 序列化为字符串", () => {
+  const source = read("src/main/ipc/browser-automation-ipc.ts");
+  assert.match(source, /rawPayload: stringifyPoiPayloadForLog\(result\.rawPayload\)/);
+  assert.match(source, /function stringifyPoiPayloadForLog\(value: unknown\): string/);
 });

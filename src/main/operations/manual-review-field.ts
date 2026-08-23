@@ -7,7 +7,8 @@
  *  - inventory                : commercial.inventory.startDate / endDate / dailyQuota
  *  - basicInfoSubtitle        : basicInfo.subtitle
  *  - vehicleResource          : operations.vehicleResource.requestedTotalCost
- *  - itinerarySpotPoi         : itinerary[dayIndex].spots[spotIndex].poiName / poiId
+ *  - itinerarySpotPoi         : itinerary[dayIndex].spots[spotIndex].poiName / poiId / province / city / district
+ *  - itinerarySpotRemove      : 删除 itinerary[dayIndex].spots[spotIndex] 及同名 visit 活动
  *  - butlerContact            : operations.bookingControls.butler（写入完整 ContactCardSelection；null 表示清空）
  *  - productCover             : presentation.cover（ctripLibrary / manualUpload 二选一）
  *
@@ -39,20 +40,39 @@ function objectValue(value: unknown): Record<string, unknown> {
  *  - 不修改原 product 的副本（structuredClone）。
  */
 export function applyManualReviewField(product: Record<string, unknown>, input: ManualReviewFieldInput): Record<string, unknown> {
+  let next: Record<string, unknown>;
   switch (input.field) {
-    case "pricing": return applyPricing(product, input.adult, input.child, input.minimumTravelers);
-    case "inventory": return applyInventory(product, input.startDate, input.endDate, input.dailyQuota);
-    case "basicInfoSubtitle": return applyBasicInfoSubtitle(product, input.subtitle);
-    case "vehicleResource": return applyVehicleResource(product, input);
-    case "itinerarySpotPoi": return applyItinerarySpotPoi(product, input);
-    case "butlerContact": return applyButlerContact(product, input.selection);
-    case "productCover": return applyProductCover(product, input.cover);
+    case "pricing": next = applyPricing(product, input.adult, input.child, input.minimumTravelers); break;
+    case "inventory": next = applyInventory(product, input.startDate, input.endDate, input.dailyQuota); break;
+    case "basicInfoSubtitle": next = applyBasicInfoSubtitle(product, input.subtitle); break;
+    case "vehicleResource": next = applyVehicleResource(product, input); break;
+    case "itinerarySpotPoi": next = applyItinerarySpotPoi(product, input); break;
+    case "itinerarySpotRemove": next = applyItinerarySpotRemove(product, input); break;
+    case "butlerContact": next = applyButlerContact(product, input.selection); break;
+    case "productCover": next = applyProductCover(product, input.cover); break;
     default: {
       // 编译期已穷尽，运行期兜底
       const exhaustive: never = input;
       throw new Error(`不支持的 ManualReviewFieldInput：${(exhaustive as { field?: string }).field ?? "unknown"}`);
     }
   }
+  return repairLegacyCoverQuality(next);
+}
+
+/** 手工修改任意字段都会经过整份 product schema 校验，顺便修复历史封面脏值。 */
+function repairLegacyCoverQuality(product: Record<string, unknown>): Record<string, unknown> {
+  const presentation = product.presentation;
+  if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return product;
+  const cover = (presentation as Record<string, unknown>).cover;
+  if (!cover || typeof cover !== "object" || Array.isArray(cover)) return product;
+  const rawQuality = (cover as Record<string, unknown>).minQuality;
+  const quality = Number(rawQuality);
+  if (typeof rawQuality === "number" && Number.isFinite(rawQuality) && rawQuality >= 0 && rawQuality <= 5) return product;
+  (presentation as Record<string, unknown>).cover = {
+    ...(cover as Record<string, unknown>),
+    minQuality: Number.isFinite(quality) && quality >= 0 && quality <= 5 ? quality : 3,
+  };
+  return product;
 }
 
 function applyItinerarySpotPoi(
@@ -79,7 +99,54 @@ function applyItinerarySpotPoi(
     ...(spot as Record<string, unknown>),
     poiName,
     poiId: input.poiId,
+    province: optionalLocationText(input.province),
+    city: optionalLocationText(input.city),
+    district: optionalLocationText(input.district),
   };
+  return next;
+}
+
+function optionalLocationText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text || null;
+}
+
+function applyItinerarySpotRemove(
+  product: Record<string, unknown>,
+  input: Extract<ManualReviewFieldInput, { field: "itinerarySpotRemove" }>,
+): Record<string, unknown> {
+  if (!Number.isInteger(input.dayIndex) || input.dayIndex < 0) throw new Error("行程天数索引不合法。");
+  if (!Number.isInteger(input.spotIndex) || input.spotIndex < 0) throw new Error("景点索引不合法。");
+
+  const next = structuredClone(product) as Record<string, unknown>;
+  if (!Array.isArray(next.itinerary)) throw new Error("当前产品没有可删除的每日行程。");
+  const day = next.itinerary[input.dayIndex];
+  if (!day || typeof day !== "object" || Array.isArray(day)) throw new Error("目标行程天数不存在。");
+
+  const dayRecord = day as Record<string, unknown>;
+  if (!Array.isArray(dayRecord.spots)) throw new Error("目标行程没有可删除的景点列表。");
+  const spot = dayRecord.spots[input.spotIndex];
+  if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
+
+  const spotName = typeof (spot as Record<string, unknown>).name === "string"
+    ? ((spot as Record<string, unknown>).name as string).trim()
+    : "";
+  dayRecord.spots = dayRecord.spots.filter((_, index) => index !== input.spotIndex);
+  if (spotName && Array.isArray(dayRecord.activities)) {
+    let removedActivity = false;
+    dayRecord.activities = dayRecord.activities.filter((activity) => {
+      if (removedActivity || !activity || typeof activity !== "object" || Array.isArray(activity)) return true;
+      const record = activity as Record<string, unknown>;
+      const title = typeof record.title === "string" ? record.title.trim() : "";
+      const type = typeof record.type === "string" ? record.type : undefined;
+      if (title === spotName && (type === undefined || type === "visit" || type === "other")) {
+        removedActivity = true;
+        return false;
+      }
+      return true;
+    });
+  }
   return next;
 }
 

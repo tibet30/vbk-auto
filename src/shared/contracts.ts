@@ -4,3 +4,4 @@ export * from "./ai-provider-config.js";
 export * from "./contracts-planning.js";
 export * from "./contracts-auth.js";
 export * from "./contracts-ai-usage.js";
+export * from "./contracts-vbk-binding.js";

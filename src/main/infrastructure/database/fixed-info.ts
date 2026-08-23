@@ -1,6 +1,7 @@
 /**
  * 「账号固定信息」读写工具：
- *   - 数据按账号 id 缓存到 settings 表里，键 `accountFixedInfo:${accountName}`；
+ *   - 遗留键 `accountFixedInfo:${accountName}`（无 user）；
+ *   - 作用域键 `accountFixedInfo:${extensionUserId}:${accountKey}`（由 sync 层写入）；
  *   - FIXED_INFO_FIELDS 定义可用字段，目前包含 servicePhone 与 butlerName；
  *   - 读 getAccountFixedInfo / 写 setAccountFixedInfo 合并 + 类型校验；
  *   - 全部为空时直接删除设置项，避免 settings 表堆积空对象。
@@ -85,10 +86,26 @@ export function setAccountFixedInfo(
 }
 
 /**
- * 生成账号固定信息在 settings 表里的键名（`accountFixedInfo:${accountName}`）。
+ * 遗留键：`accountFixedInfo:${accountName}`（无 Tibet user 作用域）。
  */
-function fixedInfoKey(accountName: string) {
+export function fixedInfoKey(accountName: string) {
   return `accountFixedInfo:${accountName}`;
+}
+
+/**
+ * 用户作用域缓存键：`accountFixedInfo:${extensionUserId}:${accountKey}`。
+ */
+export function scopedFixedInfoKey(extensionUserId: number, accountKey: string) {
+  return `accountFixedInfo:${extensionUserId}:${accountKey}`;
+}
+
+/**
+ * 判断 settings key 是否为带 userId 的作用域固定信息键。
+ */
+export function isScopedFixedInfoKey(settingKey: string): boolean {
+  if (!settingKey.startsWith("accountFixedInfo:")) return false;
+  const rest = settingKey.slice("accountFixedInfo:".length);
+  return /^\d+:/.test(rest);
 }
 
 /**

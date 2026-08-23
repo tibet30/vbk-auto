@@ -13,6 +13,7 @@ import type { ResearchTaskProposal, PlanningSkeleton, PlanningModule } from "../
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { poiResearchTaskLabel } from "../../shared/poi-research-tasks.js";
 import { hasSatisfiedHotelTier, hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
+import { isTravelNodeName } from "./itinerary-adoption.js";
 
 const TASK_TYPE_VBK = "vbk" as const;
 const TASK_TYPE_IMAGE = "image" as const;
@@ -95,7 +96,7 @@ export function itineraryPoiTasks(itinerary: unknown, destination: string): Rese
     if (Array.isArray(record.activities)) rawItems.push(...record.activities);
     for (const raw of rawItems) {
       const name = typeof raw === "string" ? raw.trim() : raw && typeof raw === "object" ? String((raw as any).poiName ?? (raw as any).name ?? (raw as any).title ?? "").trim() : "";
-      if (!name || seen.has(name)) continue; seen.add(name);
+      if (!name || seen.has(name) || isTravelNodeName(name)) continue; seen.add(name);
       out.push({ label: poiResearchTaskLabel(name), type: TASK_TYPE_VBK, detail: `由目的地「${destination}」延伸` });
     }
   }

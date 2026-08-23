@@ -74,6 +74,18 @@ test("价格核查不会吞掉费用条款和运营成本口径核查", () => {
   assert.ok(issues.some((issue) => issue.label === "核查费用包含 / 不包含 / 退改政策的运营成本口径"));
 });
 
+test("多条边防证核查合并成单一待处理项", () => {
+  const issues = mergeReadinessIssues([
+    openResearchTaskToIssue(task("permit-1", "确认乃堆拉国门边防证办理口径", "cost", "是否需要代办边防证、代办费用与办理时长请人工确认并写入运营备注与预订须知。")),
+    openResearchTaskToIssue(task("permit-2", "核实边防证办理口径", "vbk", "亚东乃堆拉属边境管控区，需确认边防证办理地点与可通行范围。")),
+    openResearchTaskToIssue(task("permit-3", "复核边防证办理口径", "web", "复核定日/珠峰边境通行边防证办理口径，影响 bookingNotes。")),
+  ]);
+
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].label, "边防证办理口径");
+  assert.match(issues[0].detail, /预订须知/);
+});
+
 test("open issues helper 合并 readiness 与 taskList 的重复用车项并修正 headMeta 计数来源", () => {
   const tasks = [
     task("vehicle", "核查西安私家团用车资源组（vehicle resourceGroupId）", "vbk", "调用 VBK 用车资源组接口查询"),

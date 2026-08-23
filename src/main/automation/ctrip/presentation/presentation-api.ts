@@ -7,6 +7,7 @@ import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../../do
 import { buildRecommendationReasonsPlan, type RecommendationPlanStep } from "./recommendations.js";
 import { readProductIdFromVbkUrl } from "./cover-bind.js";
 import { PresentationSensitiveWordsError } from "./save-monitor.js";
+import { findVbkCopyBadCase } from "../../../planning/vbk-copy-policy.js";
 
 const SOA_15638 = "https://online.ctrip.com/restapi/soa2/15638";
 const CREATE_PRODUCT_DRAFT_ENDPOINT =
@@ -33,8 +34,10 @@ export async function savePresentationViaApi(
 ): Promise<PresentationApiResult> {
   const productId = readProductIdFromVbkUrl(page.url());
   const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
+  assertPresentationCopyAllowed(presentation.recommendation, "recommendation", "推荐语");
   const featuresHtml = formatProductFeaturesHtml(presentation.features);
   if (!featuresHtml) throw new Error("产品图文缺少产品特色 HTML，已停止接口保存。");
+  assertPresentationCopyAllowed(productFeaturesPlainText(featuresHtml), "features", "产品特色");
 
   const [categoryMap, current] = await Promise.all([
     loadRecommendationCategories(page),
@@ -73,6 +76,14 @@ export async function savePresentationViaApi(
     featuresSaved: true,
     savedWith: "presentation-api",
   };
+}
+
+function assertPresentationCopyAllowed(value: unknown, path: string, label: string): void {
+  const copyBadCase = findVbkCopyBadCase(value, path);
+  if (!copyBadCase) return;
+  throw new Error(
+    `产品图文${label}命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,
+  );
 }
 
 async function loadRecommendationCategories(page: VbkSessionRequestBrowser): Promise<Map<string, number>> {

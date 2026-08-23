@@ -6,6 +6,7 @@ import type { MiniMaxService } from "../minimax/minimax.js";
 import type { ProductWorkflowCoordinator } from "../application/product-workflow-coordinator.js";
 import type { ProductMutationService } from "../application/product-mutation-service.js";
 import type { TibetProductService } from "../infrastructure/tibet-products.js";
+import type { VbkBindingSync } from "../infrastructure/vbk-binding-sync.js";
 import type {
   AiProvider,
   Planner,
@@ -28,6 +29,12 @@ export interface MainIpcContext {
   productWorkflows: ProductWorkflowCoordinator;
   productMutations: ProductMutationService;
   remoteProducts: TibetProductService;
+  bindingSync: VbkBindingSync;
+  getExtensionUserId: () => number | null;
+  noteVbkAccountActive: (
+    accountKey: string,
+    meta?: { accountName?: string; providerId?: number | null },
+  ) => void;
   readiness: (localProductId: string) => ProductReadiness;
   emitProduct: (product: ProductDetail) => void;
   /** Broadcast a snapshot already saved by Tibet; bypasses the local-write mirror. */

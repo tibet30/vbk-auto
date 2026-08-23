@@ -164,6 +164,15 @@ test("normalisePresentation 仅在 recommendations 合法时保留", () => {
   ]);
 });
 
+test("normalisePresentation 将历史字符串 minQuality 归一为数字", () => {
+  const result = normalisePresentation({
+    recommendation: "推荐",
+    features: "特色",
+    cover: { source: "ctripLibrary", poi: "景点", description: "横版", minQuality: "3" },
+  });
+  assert.equal((result?.cover as { minQuality?: unknown })?.minQuality, 3);
+});
+
 test("normalisePresentation 会拒绝非法 recommendations：长度不对、空白 text、未知分类、重复分类", () => {
   const make = (recommendations: unknown) =>
     normalisePresentation({

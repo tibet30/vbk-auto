@@ -13,7 +13,12 @@ import type {
   AccountFixedInfoFieldKey,
   AccountFixedInfoValue,
 } from "../../../../shared/contracts.js";
-import { fixedInfoSchema as fixedInfoSchemaFn, getAccountFixedInfo as getFixedInfo, setAccountFixedInfo as setFixedInfo } from "../fixed-info.js";
+import {
+  fixedInfoSchema as fixedInfoSchemaFn,
+  getAccountFixedInfo as getFixedInfo,
+  isScopedFixedInfoKey,
+  setAccountFixedInfo as setFixedInfo,
+} from "../fixed-info.js";
 
 type GetSettingFn = (key: string) => string | undefined;
 type SetSettingFn = (key: string, value: string) => void;
@@ -67,7 +72,12 @@ export function listKnownAccounts(db: Database.Database): Array<{ accountName: s
       const v = (db.prepare("SELECT value FROM settings WHERE key=?").get(row.key) as { value: string } | undefined)?.value;
       if (v) names.add(v);
     }
-    if (row.key.startsWith("accountFixedInfo:")) names.add(row.key.slice("accountFixedInfo:".length));
+    if (row.key.startsWith("accountFixedInfo:")) {
+      // Skip dirty stamps / indexes and scoped `userId:accountKey` cache rows.
+      if (row.key.startsWith("accountFixedInfoDirty")) continue;
+      if (isScopedFixedInfoKey(row.key)) continue;
+      names.add(row.key.slice("accountFixedInfo:".length));
+    }
     if (row.key.startsWith("providerIdByAccount:")) names.add(row.key.slice("providerIdByAccount:".length));
   }
   return Array.from(names).filter(Boolean).sort().map((accountName) => {

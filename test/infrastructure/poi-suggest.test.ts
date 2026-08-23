@@ -85,6 +85,70 @@ test("业务成功时匹配候选，浏览器调用只传端点、请求体和�
   assert.equal(call.includeCidQuery, false);
 });
 
+test("英文 districtName 会追加 suggestDistrict 并按 districtId 映成中文展示", async () => {
+  const calls: unknown[] = [];
+  const browser = {
+    async evaluate<T, A>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T> {
+      calls.push(arg);
+      const endpoint = String((arg as { endpoint?: string }).endpoint ?? "");
+      const originalDocument = (globalThis as { document?: unknown }).document;
+      const originalFetch = globalThis.fetch;
+      Object.defineProperty(globalThis, "document", {
+        configurable: true,
+        value: { cookie: "GUID=test-cid" },
+      });
+      const payload = endpoint.includes("suggestDistrict")
+        ? {
+          ResponseStatus: { Ack: "Success" },
+          districts: [{
+            districtId: 2437,
+            districtName: "江孜",
+            districtType: "City",
+            parents: [
+              { districtId: 100, districtName: "日喀则", districtType: "City" },
+              { districtId: 100003, districtName: "西藏", districtType: "Province" },
+            ],
+          }],
+        }
+        : {
+          ResponseStatus: { Ack: "Success" },
+          poiList: [{
+            localName: "白居寺",
+            poiId: 76349,
+            district: {
+              districtId: 2437,
+              districtName: "Gyantse",
+              districtType: "City",
+              parents: [
+                { districtId: 100, districtName: "Shigatse", districtType: "City" },
+                { districtId: 100003, districtName: "Tibet", districtType: "Province" },
+              ],
+            },
+            address: "Gyantse",
+          }],
+        };
+      globalThis.fetch = (async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(payload),
+      })) as typeof fetch;
+      try {
+        return await fn(arg);
+      } finally {
+        globalThis.fetch = originalFetch;
+        if (originalDocument === undefined) delete (globalThis as { document?: unknown }).document;
+        else Object.defineProperty(globalThis, "document", { configurable: true, value: originalDocument });
+      }
+    },
+  };
+  const detail = await suggestPoiDetail(browser, "白居寺");
+  assert.equal(detail.candidates[0]?.province, "西藏");
+  assert.equal(detail.candidates[0]?.city, "日喀则");
+  assert.equal(detail.candidates[0]?.district, "江孜");
+  assert.equal(calls.length, 2);
+  assert.equal((calls[1] as { endpoint: string }).endpoint, "https://online.ctrip.com/restapi/soa2/20049/suggestDistrict");
+});
+
 test("带目的地前缀的景点从 VBK 嵌套地域字段中解析同城官方 POI", () => {
   assert.deepEqual(pickBestPoi("北京故宫", {
     poiList: [

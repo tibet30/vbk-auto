@@ -100,6 +100,10 @@ export function PlanningTree(props: {
     const recommended = plan.poiCandidates.length;
     const matched = plan.poiCandidates.filter((item) => item.status === "resolved" || item.status === "selected").length;
     const selected = plan.poiCandidates.filter((item) => item.status === "selected").length;
+    const manual = plan.itineraryAdoption?.status === "accepted"
+      ? plan.poiCandidates.filter((item) => item.status === "rejected").length
+      : 0;
+    if (manual > 0) return `推荐 ${recommended} / 命中 ${matched} / 采用 ${selected} / 待手动 ${manual}`;
     return recommended ? `推荐 ${recommended} / 命中 ${matched} / 采用 ${selected}` : "";
   }, [plan]);
 
@@ -284,8 +288,8 @@ export function PlanningTree(props: {
       </div>
       {plan?.itineraryAdoption?.status === "pending" && (
         <div className={styles.adoptionCard} role="status" aria-live="polite">
-          <strong>新行程已更新，产品补全已失效</strong>
-          <span>确认后会重新核验当前行程的真实 POI，并重做文案、封面、商业信息和用车资源。</span>
+          <strong>行程规划第二阶段已完成，等待补充 POI</strong>
+          <span>系统会先自动尝试匹配当前行程的真实 POI，并尽力匹配当前行程的真实 POI；查到的景点会自动绑定。AI 推荐但未命中的景点会删除，用户点名但未命中的景点会保留，但不保证 POI 真实可靠。你也可以在产品审查中手动配置或删除缺失 POI，再重新补全文案、封面、商业信息和用车资源。</span>
           <div className={styles.adoptionActions}>
             <button
               className={`${shared.btn} ${shared.btnSm}`}
@@ -295,7 +299,7 @@ export function PlanningTree(props: {
               onClick={() => void onAcceptItinerary()}
             >
               {itineraryAdoptionBusy ? <LoaderCircle size={13} className={styles.spin} /> : <Check size={13} />}
-              {itineraryAdoptionBusy ? "正在核验并补全…" : "采用此行程并重新补全产品"}
+              {itineraryAdoptionBusy ? "正在匹配并补全…" : "采用此行程并重新补全产品"}
             </button>
             <span className={styles.adoptionHint}>可继续调整：继续在对话中修改行程，采用前会以最新版本为准。</span>
           </div>

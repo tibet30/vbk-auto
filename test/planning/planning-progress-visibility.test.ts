@@ -57,3 +57,11 @@ test("阶段标签总是中文，避免 event state 直接泄漏裸 stage id", (
   }
   assert.equal(planningStageLabel(undefined), "当前阶段");
 });
+
+test("方案对话使用独立 ref，首次进入时可滚动到最新消息", () => {
+  assert.match(reviewSrc, /conversationRef,?/);
+  assert.match(reviewSrc, /className=\{chat\.conversation\} ref=\{conversationRef\}/);
+  assert.doesNotMatch(reviewSrc, /className=\{chat\.conversation\} ref=\{browserRef\}/);
+  assert.match(reviewSrc, /conversation\.scrollTop \+ conversation\.clientHeight < conversation\.scrollHeight/);
+  assert.match(derivedSrc, /conversation\.scrollTop \+ conversation\.clientHeight < conversation\.scrollHeight/);
+});

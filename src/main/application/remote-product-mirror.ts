@@ -10,10 +10,17 @@ import { TibetProductConflictError, type TibetProductService } from "../infrastr
 export function createRemoteProductMirror(args: {
   remote: TibetProductService;
   broadcast(product: ProductDetail): void;
+  /** 长流程持有产品锁时，镜像只排队，不能抢先写远端。 */
+  isWorkflowActive?: (productId: string) => boolean;
 }) {
   const queues = new Map<string, Promise<void>>();
 
   const sync = async (candidate: ProductDetail) => {
+    // productMutations 的本地广播可能发生在 AI / planning 尚未完成远端提交时。
+    // 等主流程释放产品锁后再读远端并同步，避免旧 revision 与主流程并发写入。
+    while (args.isWorkflowActive?.(candidate.id)) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     let latest: ProductDetail;
     try {
       latest = await args.remote.get(candidate.id);
@@ -42,6 +49,28 @@ export function createRemoteProductMirror(args: {
       args.broadcast(saved);
     } catch (error) {
       if (error instanceof TibetProductConflictError) {
+        // AI 行程同步、usage flush 和 legacy local mutation 可能同时写同一产品。
+        // 409 后不能只丢弃本地变更：以服务端最新 revision 为基准重放本次本地
+        // mutation，同时保留服务端刚写入的 planning / aiUsage，避免旧缓存覆盖
+        // 新行程状态。最多重试一次，仍冲突则交给下一次本地 mutation 继续收敛。
+        try {
+          const merged: ProductDetail = {
+            ...error.latest,
+            ...candidate,
+            revision: error.latest.revision,
+            planning: error.latest.planning,
+            aiUsage: error.latest.aiUsage,
+            updatedAt: new Date().toISOString(),
+          };
+          const saved = await args.remote.update(merged, error.latest.revision!);
+          args.broadcast(saved);
+          return;
+        } catch (retryError) {
+          logWarn("[tibet-product-mirror] conflict retry failed", {
+            productId: candidate.id,
+            error: message(retryError),
+          });
+        }
         args.broadcast(error.latest);
       }
       logWarn("[tibet-product-mirror] remote update failed", { productId: candidate.id, error: message(error) });

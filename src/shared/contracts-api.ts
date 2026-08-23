@@ -72,7 +72,13 @@ export interface VbkApi {
   };
   ai: {
     send(localProductId: string, content: string): Promise<void>;
-    regenerate(localProductId: string, field: AiRegenerateField): Promise<void>;
+    cancel(localProductId: string): Promise<{ cancelled: boolean }>;
+    /**
+     * 单字段 AI 重新生成：目前仅实现 subtitle，返回生成的候选副标题（**不落库**）；
+     * 由调用方展示候选、用户确认后再经 products.updateReviewField 写入。
+     * 其它字段暂未发布，调用会抛错。
+     */
+    regenerate(localProductId: string, field: AiRegenerateField): Promise<string>;
   };
   research: {
     accept(localProductId: string, taskId: string, note?: string): Promise<void>;

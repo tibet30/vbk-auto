@@ -10,7 +10,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runPlan } from "../../src/main/planning/plan-orchestrator.js";
-import { pendingResearchTasks, planResearchTasks } from "../../src/main/planning/research-tasks.js";
+import { itineraryPoiTasks, pendingResearchTasks, planResearchTasks } from "../../src/main/planning/research-tasks.js";
 import { detectAcceptedModulesFromProduct } from "../../src/main/planning/runtime.js";
 import type {
   GenerationStateStore, OrchestratorRuntime,
@@ -232,6 +232,24 @@ test("research task 标签不包含「已确认 / 已解决」", async () => {
   for (const task of result.researchTasks) {
     assert.ok(!/已确认|已解决|已完成|已通过/.test(task.label), `任务标签禁止「已确认」措辞：${task.label}`);
   }
+});
+
+test("itineraryPoiTasks 不为车站 / 集合点 / 酒店等接送住宿节点生成 POI 核查", () => {
+  const tasks = itineraryPoiTasks([
+    {
+      day: 1,
+      spots: [
+        { name: "日喀则火车站" },
+        { name: "日喀则市非物质文化中心" },
+        { name: "日喀则非物质文化中心集合" },
+        { name: "酒店集合点" },
+      ],
+      activities: [{ title: "亚东县城入住", type: "hotel" }],
+    },
+  ], "日喀则");
+
+  assert.ok(!tasks.some((task) => /火车站|非物质文化中心集合|酒店集合点|亚东县城/.test(task.label)));
+  assert.ok(tasks.some((task) => task.label === "核查 日喀则市非物质文化中心 的 VBK POI 映射"));
 });
 
 test("planResearchTasks deterministic：同一输入两次产出完全一致", () => {

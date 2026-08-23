@@ -29,7 +29,8 @@ export function useProductHandlers(state: AppState) {
       ? product?.messages?.slice().reverse().find((message) => message.role === "user" && message.content.trim())?.content.trim()
       : "";
     const rawText = (retryContent || input || retryFallback || "").trim();
-    if (loading) {
+    const hasRunningAiMessage = product?.messages.some((message) => message.role === "user" && message.taskStatus === "running") ?? false;
+    if (loading || hasRunningAiMessage) {
       setNotice("AI 正在生成中，请稍后再试。");
       return;
     }
@@ -69,6 +70,19 @@ export function useProductHandlers(state: AppState) {
       setNotice(error instanceof Error ? error.message : "方案生成失败，请重试。");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const cancel = async () => {
+    const hasRunningAiMessage = product?.messages.some((message) => message.role === "user" && message.taskStatus === "running") ?? false;
+    if (!product || (!loading && !hasRunningAiMessage)) return;
+    const aiApi = api();
+    if (!aiApi) return;
+    setNotice("正在取消本次 AI 对话…");
+    try {
+      await aiApi.ai.cancel(product.id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "取消 AI 对话失败，请稍后重试。");
     }
   };
 
@@ -131,6 +145,7 @@ export function useProductHandlers(state: AppState) {
 
   return {
     send,
+    cancel,
     createProduct,
     openProduct,
     deleteProduct,

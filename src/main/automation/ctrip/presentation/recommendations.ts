@@ -9,6 +9,7 @@
 
 import { delay, escapeRegExp, assertCount } from "../utils.js";
 import { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
+import { findVbkCopyBadCase } from "../../../planning/vbk-copy-policy.js";
 
 export interface RecommendationPlanStep {
   index: number;
@@ -40,6 +41,12 @@ export function buildRecommendationReasonsPlan(
     }
     if (!text || !text.trim()) {
       throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
+    }
+    const copyBadCase = findVbkCopyBadCase(text, `recommendations.${i}.text`);
+    if (copyBadCase) {
+      throw new Error(
+        `推荐理由第 ${i + 1} 项命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,
+      );
     }
     if (seen.has(category)) {
       throw new Error(`推荐理由分类「${category}」重复。`);

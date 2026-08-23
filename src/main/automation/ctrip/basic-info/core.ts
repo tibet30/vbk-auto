@@ -4,7 +4,7 @@
  *   - fillBasicInfo：按 product.basicInfo 完整填「基本信息」面板（副标题、供应商名/编号、操作
  *     说明、出发/目的地、产品线、国家景区、提前预订、地接社、管家联系人等）；
  *   - assertBasicInfoNoRedErrors：保存后扫 .ant-form-item-with-help / .has-error，限定
- *     只关注「国家景区 / 提前预订 / 地接社 / 管家」几类，给出本地化错误。
+ *     只关注「国家景区 / 提前预订 / 地接社 / 管家 / 预订联系人」几类，给出本地化错误。
  * 顶部带 `// @ts-nocheck`，page 是动态传入。
  */
 
@@ -33,7 +33,7 @@ import {
  *   - 客服电话（来自 extra.servicePhone）；
  *   - 操作说明；
  *   - 提前预订（按 resolveAdvanceBooking 解析）；
- *   - 地接社 + 管家联系人（但仅在外部传入时填）。
+ *   - 地接社 + 预订联系人（使用管家联系人信息；但仅在外部传入时填）。
  */
 export async function fillBasicInfo(page, product, butlerSelection, extra = {}) {
   const info = product.basicInfo;
@@ -134,12 +134,12 @@ async function repairBasicInfoIllegalKeywords(page, info) {
 /**
  * 校验「基本信息」面板保存后没有红色错误提示：
  *   - 等 800ms 让 antd 完成校验动画；
- *   - 只关注「国家景区 / 提前预订 / 地接社 / 管家」4 个高风险区域，避免被无关注入噪音导致 false positive；
+ *   - 只关注「国家景区 / 提前预订 / 地接社 / 管家 / 预订联系人」等高风险区域，避免被无关注入噪音导致 false positive；
  *   - 任一区域内有红色校验项则抛错，错误信息列出区域名供 UI 直显。
  */
 export async function assertBasicInfoNoRedErrors(page) {
   await delay(800);
-  const watched = ["国家景区", "提前预订", "地接社", "管家", "副标题", "操作说明"];
+  const watched = ["国家景区", "提前预订", "地接社", "管家", "预订联系人", "预定联系人", "副标题", "操作说明"];
   const withHelp = page.locator(".ant-form-item-with-help");
   const withControlError = page.locator(".ant-form-item:has(.ant-form-item-control.has-error)");
   const total = (await withHelp.count()) + (await withControlError.count());

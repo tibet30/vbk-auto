@@ -2,12 +2,45 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { summarizeAiUsageMetric } from "../../src/renderer/app/views/workspace/planning-usage-format.js";
+import type { ProductAiUsage } from "../../src/shared/contracts-ai-usage.js";
 
 const read = (file: string) => readFileSync(path.resolve(process.cwd(), file), "utf8");
 const usage = read("src/renderer/app/views/workspace/planning-usage.tsx");
+const usageFormat = read("src/renderer/app/views/workspace/planning-usage-format.ts");
 const tree = read("src/renderer/app/views/workspace/planning-tree.tsx");
 const review = read("src/renderer/app/views/workspace/review.tsx");
 const styles = read("src/renderer/app/views/workspace/planning-usage.module.less");
+
+test("summarizeAiUsageMetric 在有费用时附带约 ¥", () => {
+  const aiUsage: ProductAiUsage = {
+    events: [],
+    lifetime: {
+      calls: 2,
+      durationMs: 3000,
+      inputTokens: 1200,
+      outputTokens: 300,
+      totalTokens: 1500,
+      tokensIncomplete: false,
+      estimatedCostCny: 0.12,
+    },
+    latestRun: {
+      calls: 1,
+      durationMs: 1000,
+      inputTokens: 800,
+      outputTokens: 200,
+      totalTokens: 1000,
+      tokensIncomplete: false,
+      estimatedCostCny: 0.08,
+      runId: "run-1",
+    },
+    byStage: [],
+  };
+  const label = summarizeAiUsageMetric(aiUsage);
+  assert.match(label, /本产品 1\.5k/);
+  assert.match(label, /上次 1k/);
+  assert.match(label, /约 ¥0\.12/);
+});
 
 test("规划树接入 AI usage 指标与明细面板", () => {
   assert.match(tree, /aiUsage\?: ProductAiUsage/);
@@ -18,10 +51,11 @@ test("规划树接入 AI usage 指标与明细面板", () => {
 });
 
 test("usage 文案覆盖本产品、上次、Token 未返回、约 ¥", () => {
-  assert.match(usage, /本产品/);
-  assert.match(usage, /上次/);
-  assert.match(usage, /Token 未返回/);
-  assert.match(usage, /约 ¥/);
+  assert.match(usageFormat, /本产品/);
+  assert.match(usageFormat, /上次/);
+  assert.match(usageFormat, /Token 未返回/);
+  assert.match(usageFormat, /约 ¥/);
+  assert.match(usageFormat, /summarizeAiUsageMetric/);
   assert.match(usage, /summarizeAiUsageMetric/);
 });
 
@@ -62,7 +96,7 @@ test("生成规划收起时 Token、行程树、采用提示同在 treeBody 内�
   assert.ok(usageIdx < stageIdx && stageIdx < adoptionIdx);
 });
 
-test("usage 明细按列对齐：次数、耗时、入、出", () => {
+test("usage 明细按列对齐：次数、耗时、入、出、费用", () => {
   assert.match(styles, /grid-template-columns:/);
   assert.match(styles, /\.num \{[^}]*text-align:\s*right/s);
   assert.match(styles, /font-variant-numeric:\s*tabular-nums/);
@@ -70,5 +104,7 @@ test("usage 明细按列对齐：次数、耗时、入、出", () => {
   assert.match(usage, />耗时</);
   assert.match(usage, />入</);
   assert.match(usage, />出</);
+  assert.match(usage, />费用</);
+  assert.match(usage, /formatCost\(/);
   assert.match(usage, /UsageTableHeader/);
 });

@@ -93,8 +93,8 @@
 
 .result {
   min-width: 0;
-  min-height: 30px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   border: 1px solid color-mix(in srgb, var(--ai-teal) 34%, var(--border));
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--ai-teal) 5%, var(--surface));
@@ -102,7 +102,6 @@
   font: inherit;
   font-size: var(--fs-xs);
   text-align: left;
-  overflow: hidden;
 }
 
 .result[data-selected='true'] {
@@ -130,7 +129,7 @@
 .resultHead {
   min-width: 0;
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  grid-template-columns: 14px auto minmax(0, 1fr);
   gap: 6px;
   align-items: center;
 }
@@ -142,55 +141,14 @@
   white-space: nowrap;
 }
 
-.result code,
-.field b,
-.resultState {
-  color: var(--muted-foreground);
-}
-
-.result code {
-  font-family: var(--font-mono);
-  font-size: 11px;
-}
-
-.resultState {
-  font-size: 11px;
+.resultLocation {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.fields {
-  min-width: 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   color: var(--muted-foreground);
-}
-
-.fieldsSummary {
-  padding: 5px 8px;
-  cursor: pointer;
   font-size: 11px;
-  line-height: 1.4;
-  user-select: none;
-}
-
-.fieldsSummary:hover {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--muted-foreground) 5%, transparent);
-}
-
-.fieldsList {
-  display: grid;
-  gap: 2px;
-  padding: 2px 8px 7px;
-}
-
-.field {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  line-height: 1.45;
-}
-
-.field b {
-  font-weight: 500;
+  line-height: 1.35;
 }
 
 .error {

@@ -45,7 +45,8 @@ interface ReviewSummaryProps {
   basicInfoServicePhone?: string | null;
   loadButlerDefault?: (localProductId: string, accountName: string | null) => Promise<void> | void;
   onOpenAccountEditor?: () => void;
-  saveSubtitle?: (localProductId: string) => Promise<void> | void | undefined;
+  saveSubtitle?: (localProductId: string, value?: string) => Promise<void> | void | undefined;
+  regenerateSubtitle?: (localProductId: string) => Promise<string | null>;
   saveButler?: (localProductId: string, selection: ContactCardSelection | null) => Promise<void> | void | undefined;
   savePricing?: (localProductId: string, adult: number, child: number, minimumTravelers: number) => Promise<void> | void | undefined;
   saveInventory?: (localProductId: string, startDate: string, endDate: string, dailyQuota: number) => Promise<void> | void | undefined;
@@ -93,6 +94,7 @@ export function AppWorkspaceReviewSummary({
   loadButlerDefault,
   onOpenAccountEditor,
   saveSubtitle,
+  regenerateSubtitle,
   saveButler,
   savePricing,
   saveInventory,
@@ -177,6 +179,7 @@ export function AppWorkspaceReviewSummary({
     && basicInfoServicePhone !== undefined
     && onOpenAccountEditor
     && saveSubtitle
+    && regenerateSubtitle
     && saveButler
     && savePricing
     && saveInventory
@@ -202,7 +205,7 @@ export function AppWorkspaceReviewSummary({
           ) : (
             <div className={styles.scroll}>
               {/* 基础信息：紧凑表单，紧贴在「每日行程」上方。 */}
-              {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && saveButler && savePricing && saveInventory && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
+              {basicInfoReady && basicInfoDraft && setBasicInfoDraft && basicInfoSaving !== undefined && basicInfoErrors && loadButlerDefault && basicInfoServicePhone !== undefined && onOpenAccountEditor && saveSubtitle && regenerateSubtitle && saveButler && savePricing && saveInventory && saveVehicleCost && uploadAndSaveManualCover && saveCtripLibraryCover && searchCtripLibraryPlaces && searchCtripLibraryImages && clearBasicInfoError && (
                 <AppWorkspaceReviewSummaryBasicInfo
                   product={product}
                   currentAccountName={currentAccountName ?? null}
@@ -215,6 +218,7 @@ export function AppWorkspaceReviewSummary({
                   loadAccountFixedInfo={loadButlerDefault}
                   onOpenAccountEditor={onOpenAccountEditor}
                   saveSubtitle={saveSubtitle}
+                  regenerateSubtitle={regenerateSubtitle}
                   saveButler={saveButler}
                   savePricing={savePricing}
                   saveInventory={saveInventory}
@@ -232,6 +236,7 @@ export function AppWorkspaceReviewSummary({
               <AppWorkspaceReviewSummaryItinerary
                 localProductId={product.id}
                 days={itinerary}
+                readinessIssues={readiness.issues}
                 expandedDayIndexes={expandedDayIndexes}
                 onToggle={(index) =>
                   setExpandedDayIndexes((prev) => {

@@ -52,7 +52,7 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
         businessStatus: result.businessStatus,
         poiListCount: result.poiListCount,
         candidateCount: result.candidates.length,
-        rawPayload: result.rawPayload,
+        rawPayload: stringifyPoiPayloadForLog(result.rawPayload),
       });
       if (!result.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: result.candidates.length });
       else logPoiManualIpc("ipc_search_success", {
@@ -79,7 +79,18 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => context.browser.setVisible(visible));
   ipcMain.handle("browser:listLoginAccounts", () => context.browser.listKnownLoginAccounts());
   ipcMain.handle("browser:addLogin", () => context.browser.addLogin());
-  ipcMain.handle("browser:switchAccount", (_event, accountKey: string) => context.browser.switchAccount(accountKey));
+  ipcMain.handle("browser:switchAccount", async (_event, accountKey: string) => {
+    const key = String(accountKey ?? "").trim();
+    await context.browser.switchAccount(key);
+    const snapshot = context.browser.listKnownLoginAccounts();
+    const current = snapshot.current;
+    const resolvedKey = current?.accountKey ?? key;
+    const accountName = current?.accountName ?? key;
+    context.noteVbkAccountActive(resolvedKey, {
+      accountName,
+      providerId: db.providerIdFor(resolvedKey) ?? db.providerIdFor(accountName),
+    });
+  });
   ipcMain.handle("browser:forgetAccount", (_event, accountKey: string) => {
     context.browser.forgetAccount(accountKey);
     return { forgotten: true };
@@ -142,19 +153,49 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     assertDebugEnabled("automation:debug:listBreakpoints");
     return context.automation.debugListBreakpoints();
   });
-  ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => db.getAccountFixedInfo(accountName));
-  ipcMain.handle("accounts:saveFixedInfo", (event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
+  ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => {
+    const userId = context.getExtensionUserId();
+    const raw = String(accountName ?? "").trim();
+    const info = context.bindingSync.getFixedInfo(userId, raw);
+    if (Object.keys(info.values).length > 0) return info;
+    // UI 常传展示名；回落当前活跃 vbk_* 键上的 scoped 缓存。
+    const activeKey = db.getSetting("vbkActiveAccountKey")?.value?.trim() || "";
+    if (activeKey && activeKey !== raw) {
+      return context.bindingSync.getFixedInfo(userId, activeKey);
+    }
+    return info;
+  });
+  ipcMain.handle("accounts:saveFixedInfo", async (event, accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>) => {
     // 与 products:updateReviewField 对称：会改写「账号级固定信息」，对外来的
     // webContents 调用一律拒绝。同样的对称性也要求「accounts:getFixedInfo」
     // 之类的只读入口不需要 sender 校验。
     assertTrustedSender(event, "accounts:saveFixedInfo");
-    const saved = db.setAccountFixedInfo(accountName, values);
-    emitProductIfKnown(accountName, saved);
+    const displayOrKey = String(accountName ?? "").trim();
+    const activeKey = db.getSetting("vbkActiveAccountKey")?.value?.trim() || "";
+    // 远端主键必须是 vbk_*；展示名保存时改写到当前活跃 loginAccount。
+    const key = /^vbk_[a-z0-9_-]+$/i.test(displayOrKey)
+      ? displayOrKey
+      : (/^vbk_[a-z0-9_-]+$/i.test(activeKey) ? activeKey : displayOrKey);
+    const saved = await context.bindingSync.saveFixedInfo(
+      context.getExtensionUserId(),
+      key,
+      values,
+      {
+        accountName: displayOrKey || key,
+        providerId: key ? (db.providerIdFor(displayOrKey) ?? db.providerIdFor(key)) : null,
+      },
+    );
+    emitProductIfKnown(key, saved);
     return saved;
   });
   ipcMain.handle("accounts:fixedInfoSchema", () => VbkDatabase.fixedInfoSchema());
   ipcMain.handle("accounts:detectProviderId", () => detectProviderIdInMain());
   ipcMain.handle("accounts:currentProviderId", () => {
+    const activeKey = db.getSetting("vbkActiveAccountKey")?.value?.trim();
+    if (activeKey) {
+      const providerId = db.providerIdFor(activeKey);
+      if (providerId) return providerId;
+    }
     const name = db.getSetting("vbkAccountName")?.value;
     return name ? db.providerIdFor(name) : null;
   });
@@ -180,4 +221,15 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   // 阶段 B：按已选 place 取该地址下的携程图库图片列表；
   // 链路：searchImage → getImageInfo（BrowserView 内联 fetch）。
   ipcMain.handle("cover:searchCtripLibraryImages", (event, args) => searchCtripLibraryCoverImages(event, args, context.browser));
+}
+
+/** 日志字段必须是字符串，避免 Node inspect 将嵌套对象折叠成 [Object]/[Array]。 */
+function stringifyPoiPayloadForLog(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json !== "string") return String(value);
+    return json.length > 30_000 ? `${json.slice(0, 30_000)}...[truncated]` : json;
+  } catch {
+    return String(value);
+  }
 }

@@ -1,0 +1,170 @@
+/* VBK Desktop — 通用图片放大查看 Lightbox。
+ * 深色全屏遮罩，顶部标题栏 + 中间可缩放图片 + 底部控制栏。
+ * 明暗无关：遮罩始终深色，文字白色，保证大图在任何主题下清晰。 */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: rgb(10 10 12 / 80%);
+  backdrop-filter: blur(6px);
+  animation: lightbox-fade 160ms ease;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: rgb(255 255 255 / 62%);
+  letter-spacing: 0.02em;
+}
+
+.closeButton {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-control);
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+  cursor: pointer;
+  transition: background 140ms ease;
+  flex: 0 0 auto;
+}
+
+.closeButton:hover {
+  background: rgb(255 255 255 / 16%);
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ai-teal) 55%, white);
+  outline-offset: 2px;
+}
+
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.stage:active {
+  cursor: grabbing;
+}
+
+.loading {
+  position: absolute;
+  z-index: 1;
+  color: rgb(255 255 255 / 72%);
+  pointer-events: none;
+}
+
+.spin {
+  animation: lightbox-spin 900ms linear infinite;
+}
+
+.image {
+  display: block;
+  max-width: calc(100% - 48px);
+  max-height: calc(100% - 24px);
+  object-fit: contain;
+  user-select: none;
+  will-change: transform;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 18px 16px;
+  flex: 0 0 auto;
+}
+
+.zoomLabel {
+  min-width: 48px;
+  text-align: center;
+  font-size: 12px;
+  color: rgb(255 255 255 / 72%);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.toolButton {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-control);
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+  cursor: pointer;
+  transition: background 140ms ease, opacity 140ms ease;
+}
+
+.toolButton:hover:not(:disabled) {
+  background: rgb(255 255 255 / 16%);
+}
+
+.toolButton:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.toolButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ai-teal) 55%, white);
+  outline-offset: 2px;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: rgb(255 255 255 / 14%);
+  margin: 0 4px;
+}
+
+@keyframes lightbox-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes lightbox-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay { animation: none; }
+  .spin { animation-duration: 1800ms; }
+}

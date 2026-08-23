@@ -21,8 +21,8 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 2. 中国目的地的 province 必须是标准省级行政区名称；境外目的地的 province 填国家、地区或一级行政区常用中文名称。destinationCity 必须是标准目的地城市名称，不能把景点名或 POI ID 填入其中，也不能把普通城市原样填进 province。第一阶段即使草稿已有原始目的地，也必须给出标准 province 和 destinationCity。
 3. subtitle、meetingCity 和 operationNotes 使用简洁中文；不得把未核查信息写成已确认事实。`,
   itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，每天至少一个 spot。
-2. 使用 POI-first 顺序：先围绕 travelScope 准备足量候选景点池，再从中选择最可能被 VBK/携程 POI 接口查到的单一可游览景点组织行程；不要先写跨区域大行程再补 POI。
-3. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。本地系统会优先查接口，未命中时会要求替换为同范围可查景点。
+2. 使用 POI-first 顺序：先围绕 travelScope 准备足量候选景点池，再从中选择最可能被 VBK/携程 POI 接口查到的单一可游览景点组织行程；不要先写跨区域大行程再补 POI。若用户已在对话中明确或确认具体景点，则这些景点优先进入景点池，不得仅因 POI 未命中而替换。
+3. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。本地系统会尽力匹配接口；用户明确推荐的景点未命中时仍保留 name，后续由运营手动配置或删除；仅由 AI 推荐且未命中的景点会从行程中删除。
 4. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
 5. 机场、车站、码头、酒店、民宿、集合点、接送点只能写进 description 的交通/接送说明，禁止写入 spots。
 6. 如果 destination 是省、自治区或直辖市，默认只围绕系统指定的核心游览城市选点；需要第二个核心城市时，只能选择系统给出的近邻城市，禁止全省撒点。
@@ -31,7 +31,8 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
   presentation: `1. recommendationCategory 与 recommendations[].category 只能从以下值选择：${RECOMMENDATION_CATEGORIES}。
 2. recommendations 恰好 3 条，category 互不重复。
 3. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
-4. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
+4. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
+5. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
   commercial: `1. 套餐名由本地系统按目的地、天数、晚数和产品形态固定生成；本阶段不要输出 packageName。
 2. pricing.adult > 0，pricing.child >= 0；cost.adult 不可超过 adult。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。

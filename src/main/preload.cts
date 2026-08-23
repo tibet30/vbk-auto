@@ -37,6 +37,7 @@ const api: VbkApi = {
   products: { list: () => ipcRenderer.invoke("products:list"), create: (input) => ipcRenderer.invoke("products:create", input), get: (id) => ipcRenderer.invoke("products:get", id), delete: (id) => ipcRenderer.invoke("products:delete", id), readiness: (id) => ipcRenderer.invoke("products:readiness", id), updateReviewField: (id, input) => ipcRenderer.invoke("products:updateReviewField", id, input), updateProductJson: (id, json) => ipcRenderer.invoke("products:updateProductJson", id, json) },
   ai: {
     send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),
+    cancel: (localProductId) => ipcRenderer.invoke("ai:cancel", localProductId),
     regenerate: (localProductId, field) => ipcRenderer.invoke("ai:regenerate", localProductId, field),
   },
   research: {

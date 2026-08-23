@@ -150,11 +150,29 @@ export function useBasicInfoHandlers(state: AppState) {
 
   /**
    * 写入副标题：UI 上是字符串，落到 product.basicInfo.subtitle。
+   *  - explicit 传入时（AI 生成候选确认）直接写该值；
+   *  - 未传时读 basicInfoDraft.subtitle（手工编辑保存路径）。
    */
-  const saveSubtitle = (localProductId: string) => {
-    const draft = (basicInfoDraft.subtitle ?? "").trim();
+  const saveSubtitle = (localProductId: string, explicit?: string) => {
+    const draft = (explicit ?? basicInfoDraft.subtitle ?? "").trim();
     if (!draft) return;
     void updateField(localProductId, "subtitle", { field: "basicInfoSubtitle", subtitle: draft });
+  };
+
+  /**
+   * AI 单字段重新生成副标题：调用 ai:regenerate 拿候选，不写库；
+   * 返回候选字符串（失败返回 null 并把错误贴回 UI）。
+   */
+  const regenerateSubtitle = async (localProductId: string): Promise<string | null> => {
+    if (!api()) return null;
+    try {
+      return await api()!.ai.regenerate(localProductId, "subtitle");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI 副标题生成失败，请重试。";
+      setBasicInfoErrors((prev) => ({ ...prev, subtitle: message }));
+      setNotice(`AI 副标题生成失败：${message}`);
+      return null;
+    }
   };
 
   /**
@@ -386,6 +404,7 @@ export function useBasicInfoHandlers(state: AppState) {
     loadButlerDefault,
     resetLoaded,
     saveSubtitle,
+    regenerateSubtitle,
     saveButler,
     savePricing,
     saveInventory,

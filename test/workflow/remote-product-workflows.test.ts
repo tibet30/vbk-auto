@@ -106,7 +106,7 @@ test("创建产品会把稳定的 VBK 登录账号绑定到远端快照", async 
   assert.equal(remote.records.get(created.product.id)?.vbkAccount, "vbk_671205");
 });
 
-test("供应商产品编号固定为 VBK-联系人名字（账号已配管家）", async (t) => {
+test("供应商产品编号固定为 VBK-联系人名字-时间（账号已配管家）", async (t) => {
   const db = await database(t);
   db.setAccountFixedInfo("供应商A", {
     servicePhone: "400-820-1234",
@@ -121,7 +121,35 @@ test("供应商产品编号固定为 VBK-联系人名字（账号已配管家）
     "vbk_123",
   );
   const basic = created.product.product.basicInfo as Record<string, unknown>;
-  assert.equal(basic.supplierProductCode, "VBK-张三");
+  assert.match(String(basic.supplierProductCode), /^VBK-张三-\d{17,}$/);
+});
+
+test("同一管家连续创建产品时供应商产品编号不重复", async (t) => {
+  const db = await database(t);
+  db.setAccountFixedInfo("供应商A", {
+    servicePhone: "400-820-1234",
+    butlerName: { contactCardId: 1753732, displayName: "张三", providerId: 1279416 },
+  });
+  const remote = fakeRemote();
+  const first = await createRemoteProduct(
+    db,
+    remote.service,
+    { destination: "太原", days: 2, productForm: "privateTour" },
+    "供应商A",
+    "vbk_123",
+  );
+  const second = await createRemoteProduct(
+    db,
+    remote.service,
+    { destination: "太原", days: 2, productForm: "privateTour" },
+    "供应商A",
+    "vbk_123",
+  );
+
+  const codeOf = (created: typeof first) => String((created.product.product.basicInfo as Record<string, unknown>).supplierProductCode);
+  assert.match(codeOf(first), /^VBK-张三-\d{17,}$/);
+  assert.match(codeOf(second), /^VBK-张三-\d{17,}$/);
+  assert.notEqual(codeOf(first), codeOf(second));
 });
 
 test("账号未配管家时供应商产品编号回落日期+uuid 格式", async (t) => {

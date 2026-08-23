@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { savePresentationViaApi } from "../../src/main/automation/ctrip/presentation/presentation-api.js";
+import { buildRecommendationReasonsPlan } from "../../src/main/automation/ctrip/presentation/recommendations.js";
 
 function browserWithResponses(responses: Array<{ status: number; payload: unknown }>) {
   const calls: Array<{ endpoint: string; body: unknown }> = [];
@@ -152,4 +153,27 @@ test("产品图文接口保存：敏感词命中时不创建草稿也不保存",
     /产品图文触发敏感词/,
   );
   assert.equal(browser.calls.length, 3);
+});
+
+test("产品图文接口保存：推荐理由不得描述不含导游", () => {
+  assert.throws(
+    () => buildRecommendationReasonsPlan([
+      { category: "优选行程", text: "行程自由安排，不配随队导游。" },
+      { category: "精选酒店", text: "入住当地酒店。" },
+      { category: "缤纷景点", text: "覆盖核心景点。" },
+    ]),
+    /导游否定描述/,
+  );
+});
+
+test("产品图文接口保存：产品特色不得描述不含导游", async () => {
+  const browser = browserWithResponses([]);
+  await assert.rejects(
+    savePresentationViaApi(browser as never, {
+      ...presentation,
+      features: "<p><strong>自由安排：</strong>不含导游，轻松游览。</p>",
+    }),
+    /产品特色命中 VBK 文案黑名单「导游否定描述」/,
+  );
+  assert.equal(browser.calls.length, 0);
 });

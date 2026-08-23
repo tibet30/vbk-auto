@@ -213,7 +213,7 @@
 .timelineContent { min-width: 0; padding: 0 0 12px 0; display: grid; gap: 3px; }
 .timelineItem[data-last='true'] .timelineContent { padding-bottom: 2px; }
 
-.timelineHeader { display: grid; grid-template-columns: 50px minmax(0, 1fr); gap: 8px; align-items: baseline; min-width: 0; }
+.timelineHeader { display: grid; grid-template-columns: 50px minmax(0, 1fr) 24px; gap: 8px; align-items: center; min-width: 0; }
 
 .timelineTime {
   font-family: var(--font-mono);
@@ -235,6 +235,19 @@
 .timelineNodeOther + .timelineContent .timelineTime     { color: var(--muted-foreground); background: var(--muted); }
 
 .timelineTitle { font-size: var(--fs-sm); font-weight: 550; color: var(--foreground); letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spotRemove {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.spotRemove:hover:not(:disabled) { background: #fef2f2; color: #dc2626; }
+.spotRemove:disabled { opacity: .45; cursor: not-allowed; }
 .timelineDetail { margin: 0 0 0 58px; font-size: var(--fs-xs); color: var(--muted-foreground); line-height: 1.5; }
 .timelineEmpty { margin: 0; padding: 10px 0; color: var(--muted-foreground); font-size: var(--fs-xs); text-align: center; }
 
@@ -265,4 +278,25 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+
+.permitCard {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 34%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+
+.permitIcon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: color-mix(in srgb, var(--warning) 16%, var(--surface)); color: var(--warning); flex: 0 0 auto; }
+.permitBody { min-width: 0; display: grid; gap: 1px; }
+.permitTitle { font-size: 10px; letter-spacing: 0.04em; color: var(--warning); font-weight: 600; text-transform: uppercase; }
+.permitText {
+  font-size: var(--fs-xs);
+  color: var(--foreground);
+  font-weight: 500;
+  line-height: 1.45;
 }

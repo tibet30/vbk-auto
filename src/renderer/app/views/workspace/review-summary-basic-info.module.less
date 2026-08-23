@@ -112,7 +112,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: minmax(72px, 18%) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(64px, 84px) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: start;
   padding: 6px 12px;
@@ -128,7 +128,6 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  padding-top: 6px;
 }
 
 .rowLabelTitle {
@@ -269,6 +268,93 @@
   color: var(--warning);
 }
 
+/* AI 副标题候选：预览态高亮块，完整展示候选，icon 与首行对齐。 */
+.subtitleCandidate {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 36%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 8%, var(--surface));
+  color: var(--ai-teal);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.subtitleCandidate > svg {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.subtitleCandidate strong {
+  flex: 1 1 auto;
+  font-weight: 500;
+  color: var(--foreground);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* AI 副标题展示 / 生成中：完整展示，icon 与首行对齐。 */
+.subtitleDisplay {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--foreground);
+}
+
+.subtitleDisplay > svg {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.subtitleDisplay strong {
+  flex: 1 1 auto;
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.subtitleDisplay[data-state='empty'] {
+  color: var(--muted-foreground);
+}
+
+/* 基础信息行（副标题 / 套餐定价 / 班期库存）：value 与 actions 垂直居中。 */
+.rowCenter {
+  align-items: center;
+}
+
+.rowCenter .rowValue,
+.rowCenter .rowActions {
+  padding-top: 0;
+}
+
+/* 封面行编辑态：取消按钮与「查询地址」工具栏顶部对齐（取消按钮不能居中于含候选列表的整列）。 */
+.coverEditRow .rowValue,
+.coverEditRow .rowActions {
+  padding-top: 0;
+}
+
+.coverEditRow {
+  grid-template-areas: "label value actions";
+}
+
+.coverEditRow .rowLabel { grid-area: label; }
+.coverEditRow .rowValue { grid-area: value; }
+.coverEditRow .rowActions { grid-area: actions; }
+
+.coverEditRow .coverToolbar {
+  padding-top: 0;
+}
+
 /* ============================================================
   Edit：单 / 多 input 控件 + 输入区提示
   ============================================================ */
@@ -396,24 +482,106 @@
 
 .coverDisplay {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  gap: 14px;
   min-width: 0;
 }
 
-.coverThumb {
-  width: 96px;
-  height: 64px;
-  object-fit: cover;
-  border-radius: var(--radius-control);
+.coverThumbButton {
+  position: relative;
+  display: inline-flex;
+  padding: 0;
   border: 1px solid var(--border);
+  border-radius: var(--radius-control);
   background: var(--muted);
+  cursor: zoom-in;
   flex: 0 0 auto;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.coverThumbButton:hover {
+  border-color: color-mix(in srgb, var(--ai-teal) 45%, var(--border));
+  box-shadow: var(--shadow-2);
+}
+
+.coverThumbButton:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.coverThumb {
+  width: 180px;
+  height: 112px;
+  object-fit: cover;
+  display: block;
+  border-radius: calc(var(--radius-control) - 1px);
+  background: var(--muted);
+  transition: transform 180ms var(--motion);
+}
+
+.coverThumbButton:hover .coverThumb {
+  transform: scale(1.04);
+}
+
+.coverZoomHint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 62%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 6px 16px rgb(0 0 0 / 28%);
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.coverThumbButton:hover .coverZoomHint {
+  background: rgb(0 0 0 / 78%);
+  transform: translateY(-1px);
+}
+
+.coverCandidateThumbWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 40px;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+}
+
+.coverCandidateThumbWrap:hover .imageZoomHoverLayer,
+.coverCandidateThumbWrap:focus-within .imageZoomHoverLayer {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.imageZoomHoverLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 48%);
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
 }
 
 .coverPlaceholder {
-  width: 96px;
-  height: 64px;
+  width: 180px;
+  height: 112px;
   display: grid;
   place-items: center;
   border-radius: var(--radius-control);
@@ -541,4 +709,46 @@
 
 .coverCandidate button {
   flex: 0 0 auto;
+}
+
+.imageZoomButton {
+  width: auto;
+  height: 32px;
+  padding: 0 12px;
+  gap: 6px;
+  border-color: transparent;
+  color: #fff;
+  background: rgb(0 0 0 / 70%);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 40%);
+  border-radius: 999px;
+  pointer-events: auto;
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+.imageZoomButton:hover {
+  background: rgb(0 0 0 / 82%);
+  transform: scale(1.05);
+}
+
+.imageZoomButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ai-teal) 45%, white);
+  outline-offset: 2px;
+}
+
+.imageZoomText {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.coverCandidateThumbWrap .imageZoomButton {
+  height: 30px;
+}
+
+.coverCandidateThumbWrap .imageZoomText {
+  white-space: nowrap;
+}
+
+.coverCandidateThumb {
+  cursor: zoom-in;
 }

@@ -56,6 +56,10 @@ export interface PoiSuggestCandidate {
   index: number;
   poiName: string | null;
   poiId: number | null;
+  province?: string | null;
+  city?: string | null;
+  district?: string | null;
+  address?: string | null;
   selectable: boolean;
   textFields: PoiSuggestTextField[];
 }
@@ -421,8 +425,19 @@ export type ManualReviewFieldInput =
   | { field: "basicInfoSubtitle"; subtitle: string }
   /** 用车资源组人工复核只允许写全程预计总成本；真实资源组 ID / 名称由 VBK 匹配回填。 */
   | { field: "vehicleResource"; requestedTotalCost?: number | null }
-  /** 每日行程 spot 的 VBK POI 手动补全：只允许写入指定 spot 的 poiName / poiId。 */
-  | { field: "itinerarySpotPoi"; dayIndex: number; spotIndex: number; poiName: string; poiId: number }
+  /** 每日行程 spot 的 VBK POI 手动补全：写入指定 spot 的 poiName / poiId，以及可选行政区。 */
+  | {
+    field: "itinerarySpotPoi";
+    dayIndex: number;
+    spotIndex: number;
+    poiName: string;
+    poiId: number;
+    province?: string | null;
+    city?: string | null;
+    district?: string | null;
+  }
+  /** 每日行程 spot 手动删除：只移除指定 spot，并同步移除同名 visit 活动。 */
+  | { field: "itinerarySpotRemove"; dayIndex: number; spotIndex: number }
   /**
    * 管家联系人：来自账号固定信息 (AccountFixedInfo.butlerName)，
    * 必须是合法的 ContactCardSelection（contactCardId / providerId / displayName）。
@@ -661,7 +676,14 @@ export interface OperationLogExportResult {
   count: number;
   path?: string;
 }
-export interface ItinerarySpot { name: string; poiName: string | null; poiId: number | null }
+export interface ItinerarySpot {
+  name: string;
+  poiName: string | null;
+  poiId: number | null;
+  province?: string | null;
+  city?: string | null;
+  district?: string | null;
+}
 export interface ItineraryDay { day: number; title: string; spots?: ItinerarySpot[]; description: string; hotel: string; meals: string }
 
 /* ============================================================

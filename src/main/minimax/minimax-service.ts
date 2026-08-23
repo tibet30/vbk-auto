@@ -22,6 +22,9 @@ import {
   disambiguateSystemPrompt,
   disambiguateTool,
   responseTool,
+  subtitleOutcomeSchema,
+  subtitleSystemPrompt,
+  subtitleTool,
   systemPrompt,
 } from "./minimax-constants.js";
 import { parseAssistantMessage } from "./minimax-parsing.js";
@@ -112,7 +115,7 @@ export class MiniMaxService {
    * 用一句「ping」测试当前 apiKey / 模型是否可用；任何 OpenAI 异常都会被归一化抛出。
    * 仅用于设置页和诊断页的连接测试，不会进入主链路。
    */
-  async testConnection(): Promise<void> {
+  async testConnection(signal?: AbortSignal): Promise<void> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `请先填写 ${this.providerLabel} API Key。`);
     const client = this.client(20_000);
     const messages = [{ role: "user", content: "ping" }];
@@ -129,7 +132,7 @@ export class MiniMaxService {
         max_completion_tokens: 1,
       };
       const providerParams = this.isDeepSeek ? {} : { thinking: { type: "disabled" as const } };
-      await client.chat.completions.create({ ...baseParams, ...providerParams } as never);
+      await client.chat.completions.create({ ...baseParams, ...providerParams } as never, { signal });
     } catch (error) { this.throwProviderError(error); }
   }
 
@@ -144,12 +147,14 @@ export class MiniMaxService {
     product: Record<string, unknown>;
     history: Array<{ role: string; content: string }>;
     usage?: { localProductId: string; source: Extract<AiUsageSource, "chat.reply" | "chat.regenerate">; runId?: string; onEvent?: (event: AiUsageEvent) => void };
+    signal?: AbortSignal;
   }): Promise<AiResponse> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const client = this.client(replyTimeout());
     const itinerary = input.product.itinerary;
     const hasExistingDraft = Array.isArray(itinerary) && itinerary.length > 0;
-    const planningRetryLimit = 4;
+    // 结构化输出只保留 1 次修复机会；外层 ai:send 不再重复包网络重试。
+    const planningRetryLimit = 1;
     const planningRetryInstruction =
       "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。";
     const isInitialDraft = (!Array.isArray(itinerary) || itinerary.length === 0) && /生成|第一版|方案/.test(input.message);
@@ -188,7 +193,7 @@ export class MiniMaxService {
           runId: input.usage.runId,
           attempt,
           onEvent: input.usage.onEvent,
-        } : undefined);
+        } : undefined, input.signal);
         const { response, isStructured } = parseAssistantMessage(message);
         const hasActionHint = !!(response.patch?.length || response.questions?.length || response.researchTasks?.length);
         const hasWritablePatch = !!(response.patch?.length ?? 0);
@@ -491,6 +496,84 @@ export class MiniMaxService {
   }
 
   /**
+   * 单字段重新生成：AI 副标题（basicInfo.subtitle）。
+   * 只返回候选副标题字符串，**不写入产品**；由调用方展示候选、用户确认后再落库。
+   * 使用专用 submit_subtitle 工具 + 更高温度，让「重新生成」能产出多样候选。
+   */
+  async regenerateSubtitle(input: {
+    product: Record<string, unknown>;
+    usage?: { localProductId: string; onEvent?: (event: AiUsageEvent) => void };
+    signal?: AbortSignal;
+  }): Promise<string> {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
+    const startedAt = Date.now();
+    const basic = (input.product.basicInfo as Record<string, unknown> | undefined) ?? {};
+    const sales = (input.product.sales as Record<string, unknown> | undefined) ?? {};
+    const presentation = (input.product.presentation as Record<string, unknown> | undefined) ?? {};
+    const context = {
+      meetingCity: basic.meetingCity ?? null,
+      destinationCity: basic.destinationCity ?? null,
+      days: basic.days ?? null,
+      nights: basic.nights ?? null,
+      productForm: sales.productForm ?? null,
+      productType: sales.productType ?? null,
+      existingSubtitle: typeof basic.subtitle === "string" ? basic.subtitle : null,
+      recommendation: typeof presentation.recommendation === "string" ? presentation.recommendation : null,
+    };
+    const messages = [
+      { role: "system", content: subtitleSystemPrompt },
+      { role: "user", content: `产品上下文：${JSON.stringify(context)}\n\n请生成一个新的副标题候选。` },
+    ];
+    try {
+      logAIPrompt({
+        entry: "MiniMax.regenerateSubtitle",
+        provider: this.config.provider ?? "minimax",
+        model: this.config.model,
+        messages,
+      });
+      const providerParams = this.isDeepSeek
+        ? {}
+        : { thinking: { type: "disabled" as const }, service_tier: miniMaxServiceTier() };
+      const response = await this.client(replyTimeout()).chat.completions.create({
+        model: this.config.model,
+        messages,
+        max_completion_tokens: 256,
+        temperature: 0.9,
+        tools: [subtitleTool],
+        tool_choice: { type: "function", function: { name: "submit_subtitle" } },
+        ...providerParams,
+      } as never, { signal: input.signal });
+      this.emitUsage(input.usage, "chat.regenerate", "subtitle", Date.now() - startedAt, response);
+      const toolCall = response.choices[0]?.message.tool_calls?.find(
+        (call) => "function" in call && call.function.name === "submit_subtitle",
+      );
+      if (!toolCall || !("function" in toolCall)) {
+        throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 未返回副标题候选。`);
+      }
+      let value: unknown;
+      try { value = JSON.parse(toolCall.function.arguments); }
+      catch { throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的副标题格式无效。`); }
+      const parsed = subtitleOutcomeSchema.safeParse(value);
+      if (!parsed.success) throw new MiniMaxServiceError("invalid_model_output", `${this.providerLabel} 返回的副标题不合法。`);
+      const subtitle = parsed.data.subtitle.trim();
+      logInfo("[AI] subtitle regeneration completed", {
+        provider: this.config.provider ?? "minimax",
+        elapsedMs: Date.now() - startedAt,
+      });
+      return subtitle;
+    } catch (error) {
+      const serviceError = this.providerError(error);
+      this.emitUsage(input.usage, "chat.regenerate", "subtitle", Date.now() - startedAt, undefined, serviceError);
+      logWarn("[AI] subtitle regeneration failed", {
+        provider: this.config.provider ?? "minimax",
+        errorCode: serviceError.code,
+        elapsedMs: Date.now() - startedAt,
+      });
+      throw serviceError;
+    }
+  }
+
+  /**
    * 用给定客户端发送 chat.completions 请求并取回首个 choice.message；返回时同时附带 traceId
    * （尝试从响应头 trace-id / trace_id / request_id 中取），便于在 DevTools / 日志里串起一次请求。
    * 若接口未返回任何 message，抛 empty_model_output 供上层触发重试。
@@ -528,6 +611,7 @@ export class MiniMaxService {
       attempt?: number;
       onEvent?: (event: AiUsageEvent) => void;
     },
+    signal?: AbortSignal,
   ) {
     const baseParams = {
       model: this.config.model, messages, temperature: 0.1, max_completion_tokens: 8192,
@@ -543,7 +627,7 @@ export class MiniMaxService {
       const result = await client.chat.completions.create({
         ...baseParams,
         ...providerParams,
-      } as never).withResponse();
+      } as never, { signal }).withResponse();
       const response = result.data;
       if (usage?.onEvent) {
         try {

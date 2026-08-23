@@ -33,15 +33,42 @@ export function markItineraryPendingAdoption(
   plan: PlanningPlanV2,
   itinerary: unknown,
   now = new Date().toISOString(),
+  userRecommendedSpotNames?: readonly string[],
 ): PlanningPlanV2 {
+  const revision = itineraryFingerprint(itinerary);
+  const preservedNames = plan.itineraryAdoption?.itineraryRevision === revision
+    ? plan.itineraryAdoption.userRecommendedSpotNames
+    : undefined;
   const adoption: ItineraryAdoptionState = {
     status: "pending",
-    itineraryRevision: itineraryFingerprint(itinerary),
+    itineraryRevision: revision,
     triggeredAt: now,
+    userRecommendedSpotNames: [...new Set(userRecommendedSpotNames ?? preservedNames ?? [])],
   };
-  const nodes = plan.nodes.map((node) => COMPLETION_NODES.has(node.id) || ITINERARY_NODES.has(node.id)
-    ? invalidateItineraryNode(node)
-    : node);
+  const nodes = plan.nodes.map((node) => {
+    if (COMPLETION_NODES.has(node.id)) return invalidateItineraryNode(node);
+    if (node.id === "poiResolution") {
+      return {
+        ...node,
+        status: "completed" as const,
+        attempts: Math.max(1, node.attempts),
+        summary: "已采用用户建议 POI，真实 POI 待手动配置/补全",
+        error: undefined,
+        completedAt: now,
+      };
+    }
+    if (node.id === "itineraryDraft") {
+      return {
+        ...node,
+        status: "completed" as const,
+        attempts: Math.max(1, node.attempts),
+        summary: "已完成景点池与每日行程编排",
+        error: undefined,
+        completedAt: now,
+      };
+    }
+    return node;
+  });
   return {
     ...plan,
     status: "needs_user",
@@ -68,6 +95,7 @@ export function markItineraryVerifying(plan: PlanningPlanV2, itinerary: unknown,
       status: "verifying",
       itineraryRevision: itineraryFingerprint(itinerary),
       triggeredAt: plan.itineraryAdoption?.triggeredAt ?? now,
+      userRecommendedSpotNames: plan.itineraryAdoption?.userRecommendedSpotNames,
     },
     updatedAt: now,
   };
@@ -89,6 +117,7 @@ export function markItineraryBlocked(plan: PlanningPlanV2, itinerary: unknown, e
       status: "blocked",
       itineraryRevision: itineraryFingerprint(itinerary),
       triggeredAt: plan.itineraryAdoption?.triggeredAt ?? now,
+      userRecommendedSpotNames: plan.itineraryAdoption?.userRecommendedSpotNames,
       error,
     },
     updatedAt: now,
@@ -97,21 +126,29 @@ export function markItineraryBlocked(plan: PlanningPlanV2, itinerary: unknown, e
 
 export function markItineraryAccepted(plan: PlanningPlanV2, itinerary: unknown, now = new Date().toISOString()): PlanningPlanV2 {
   const selectedAt = now;
-  const selected = new Map<number, { poiName: string; poiId: number }>();
-  for (const spot of collectRequiredItinerarySpots(itinerary)) {
-    if (spot.travelNode) continue;
+  const required = collectRequiredItinerarySpots(itinerary).filter((spot) => !spot.travelNode);
+  const candidates = new Map<string, PlanningPlanV2["poiCandidates"][number]>();
+  let matchedCount = 0;
+  for (const spot of required) {
     const day = asRecord(Array.isArray(itinerary) ? itinerary[spot.dayIndex] : undefined);
     const value = asRecord(Array.isArray(day?.spots) ? day.spots[spot.spotIndex] : undefined);
     if (text(value?.poiName) && positiveInteger(value?.poiId)) {
-      selected.set(value.poiId, { poiName: text(value.poiName), poiId: value.poiId });
+      matchedCount += 1;
+      candidates.set(spot.name, {
+        requestedName: spot.name,
+        status: "selected",
+        poiName: text(value.poiName),
+        poiId: value.poiId,
+      });
+    } else if (candidates.get(spot.name)?.status !== "selected") {
+      candidates.set(spot.name, {
+        requestedName: spot.name,
+        status: "rejected",
+        reason: "未匹配真实 POI，保留用户推荐景点，待运营手动配置",
+      });
     }
   }
-  const selectedCandidates = [...selected.values()].map((poi) => ({
-    requestedName: poi.poiName,
-    status: "selected" as const,
-    poiName: poi.poiName,
-    poiId: poi.poiId,
-  }));
+  const manualCount = required.length - matchedCount;
   return {
     ...plan,
     status: "pending",
@@ -125,15 +162,18 @@ export function markItineraryAccepted(plan: PlanningPlanV2, itinerary: unknown, 
         attempts: Math.max(1, node.attempts),
         startedAt: undefined,
         error: undefined,
-        summary: node.id === "poiResolution" ? `已核验 ${selectedCandidates.length} 个真实 POI` : "已采用当前对话行程",
+        summary: node.id === "poiResolution"
+          ? `已匹配 ${matchedCount}/${required.length} 个真实 POI${manualCount > 0 ? `，${manualCount} 个待手动配置` : ""}`
+          : "已采用当前对话行程",
         completedAt: selectedAt,
       };
     }),
-    poiCandidates: selectedCandidates,
+    poiCandidates: [...candidates.values()],
     itineraryAdoption: {
       status: "accepted",
       itineraryRevision: itineraryFingerprint(itinerary),
       triggeredAt: plan.itineraryAdoption?.triggeredAt ?? now,
+      userRecommendedSpotNames: plan.itineraryAdoption?.userRecommendedSpotNames,
     },
     updatedAt: now,
   };
@@ -174,7 +214,7 @@ export function isTravelNodeName(value: string): boolean {
   if (!name) return false;
   if (SETTLEMENT_NODE_NAMES.has(name)) return true;
   if (/(城区|市区|县城|镇区)$/.test(name)) return true;
-  return /(机场|航站楼|火车站|高铁站|动车站|汽车站|客运站|码头|酒店|宾馆|民宿|客栈|住宿|入住|集合点|接送点|接机点|送机点|接站点|送站点)/.test(name);
+  return /(机场|航站楼|火车站|高铁站|动车站|汽车站|客运站|码头|酒店|宾馆|民宿|客栈|住宿|入住|集合|接送|接机|送机|接站|送站)/.test(name);
 }
 
 export type ItineraryAdoptionGuard = { ok: true } | { ok: false; reason: "itinerary_changed" | "adoption_state_changed" };
@@ -211,15 +251,66 @@ export function applyPoiMatches(
       continue;
     }
     if (current) {
-      current.name = match.poiName;
       current.poiName = match.poiName;
       current.poiId = match.poiId;
     } else {
-      spots[spot.spotIndex] = { name: match.poiName, poiName: match.poiName, poiId: match.poiId };
+      spots[spot.spotIndex] = { name: spot.name, poiName: match.poiName, poiId: match.poiId };
     }
     if (day) day.spots = spots;
   }
   return { itinerary: next, missing };
+}
+
+export function findUserRecommendedSpotNames(itinerary: unknown, userMessage: string): string[] {
+  const message = normaliseMentionText(userMessage);
+  if (!message) return [];
+  const names = collectRequiredItinerarySpots(itinerary)
+    .filter((spot) => !spot.travelNode)
+    .map((spot) => spot.name)
+    .filter((name) => {
+      const full = normaliseMentionText(name);
+      const base = normaliseMentionText(name.split(/[（(]/, 1)[0] ?? "");
+      return Boolean((full.length >= 2 && message.includes(full)) || (base.length >= 2 && message.includes(base)));
+    });
+  return [...new Set(names)];
+}
+
+/** 用户点名的未命中景点保留；AI 自荐但未命中的景点从行程中移除。 */
+export function applyUnmatchedPoiSourcePolicy(
+  itinerary: unknown,
+  matches: ReadonlyMap<string, { poiName: string; poiId: number }>,
+  userRecommendedSpotNames: ReadonlySet<string>,
+): { itinerary: Array<Record<string, unknown>>; missing: RequiredItinerarySpot[]; removed: RequiredItinerarySpot[] } {
+  const hydrated = applyPoiMatches(itinerary, matches);
+  const next = hydrated.itinerary;
+  const removed: RequiredItinerarySpot[] = [];
+  const retainedMissing: RequiredItinerarySpot[] = [];
+  const missingByDay = new Map<number, RequiredItinerarySpot[]>();
+  for (const spot of hydrated.missing) {
+    const items = missingByDay.get(spot.dayIndex) ?? [];
+    items.push(spot);
+    missingByDay.set(spot.dayIndex, items);
+  }
+  for (const [dayIndex, spots] of missingByDay) {
+    const day = asRecord(next[dayIndex]);
+    const daySpots = Array.isArray(day?.spots) ? day.spots as unknown[] : [];
+    for (const spot of [...spots].sort((a, b) => b.spotIndex - a.spotIndex)) {
+      if (userRecommendedSpotNames.has(spot.name)) {
+        const current = asRecord(daySpots[spot.spotIndex]);
+        if (current) {
+          current.poiName = null;
+          current.poiId = null;
+        } else daySpots[spot.spotIndex] = { name: spot.name, poiName: null, poiId: null };
+        retainedMissing.unshift(spot);
+      }
+      else {
+        daySpots.splice(spot.spotIndex, 1);
+        removed.unshift(spot);
+      }
+    }
+    if (day) day.spots = daySpots;
+  }
+  return { itinerary: next, missing: retainedMissing, removed };
 }
 
 export function itineraryHasRequiredPois(itinerary: unknown): boolean {
@@ -243,4 +334,8 @@ function text(value: unknown): string {
 
 function positiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function normaliseMentionText(value: string): string {
+  return value.toLocaleLowerCase("zh-CN").replace(/[\s，。！？、；：,.!?;:'"“”‘’（）()【】\[\]·—_-]+/g, "");
 }

@@ -42,6 +42,7 @@ const ADMINISTRATIVE_ALIASES: Record<string, string[]> = {
   澳门: ["macau", "macao"],
   拉萨: ["lhasa"],
   日喀则: ["shigatse", "xigaze", "rikaze"],
+  江孜: ["gyantse"],
   林芝: ["nyingchi", "linzhi"],
   西安: ["xi'an", "xian"],
   成都: ["chengdu"],
@@ -114,7 +115,14 @@ export function toPlanningCandidate(
     return { requestedName, status: "rejected", reason: "命中的是入口、停车场或服务设施" };
   }
   const raw = detail.candidates.find((candidate) => candidate.poiId === best.poiId);
-  const metadata = readLocationMetadata(raw?.textFields ?? []);
+  const fromTextFields = readLocationMetadata(raw?.textFields ?? []);
+  // 优先用 suggestPoi 契约解析出的结构化字段（district + parents），textFields 仅兜底。
+  const metadata = {
+    province: raw?.province || fromTextFields.province,
+    city: raw?.city || fromTextFields.city,
+    district: raw?.district || fromTextFields.district,
+    address: raw?.address || fromTextFields.address,
+  };
   const hasKnownLocation = Boolean(metadata.province || metadata.city);
   const provinceMatches = locationMatches(metadata.province, province);
   const cityMatches = locationMatches(metadata.city, city);

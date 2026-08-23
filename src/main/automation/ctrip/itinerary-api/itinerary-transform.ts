@@ -30,7 +30,7 @@ import {
 /**
  * 输入：项目侧行程 + operations。
  *   - day 字段：{ day, title, spots, description, hotel, meals, mealDescriptions? }
- *   - spots 字段：{ name, poiName?, poiId? }（poiId 是 VBK 系统 POI 唯一 ID）
+ *   - spots 字段：{ name, poiName?, poiId?, province?, city?, district? }（poiId 是 VBK 系统 POI 唯一 ID）
  */
 export interface ProductItineraryDay {
   day: number;
@@ -39,6 +39,9 @@ export interface ProductItineraryDay {
     name: string;
     poiName?: string | null;
     poiId?: number | null;
+    province?: string | null;
+    city?: string | null;
+    district?: string | null;
     poiType?: { key: number; name: string } | null;
     ticketType?: { key: number; name: string } | null;
     poiData?: Record<string, unknown>;

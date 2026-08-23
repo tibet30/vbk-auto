@@ -57,8 +57,11 @@ export const EMPTY_VBK_SESSION_CONTEXT: VbkSessionContext = {
 export const DEFAULT_VBK_SOA_HEADERS: Record<string, string> = {
   accept: "*/*",
   "content-type": "application/json;charset=UTF-8",
+  "accept-language": "zh-CN,zh;q=0.9",
   "x-ctx-currency": "CNY",
   "x-ctx-locale": "zh-CN",
+  // suggestPoi 的行政区名语言由 x-input-locale 决定；缺省时西藏等地会回英文 Gyantse。
+  "x-input-locale": "zh-CN",
 };
 
 export class VbkSessionRequestTimeoutError extends Error {

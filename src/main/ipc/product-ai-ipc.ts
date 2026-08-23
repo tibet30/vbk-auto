@@ -24,9 +24,11 @@ import {
   stripRetryHintTail,
   toRetryHint,
 } from "../minimax/minimax-error-handling.js";
+import { tryHandleVehicleResourceOnlyRequest } from "./product-ai-vehicle-resource-only.js";
 import type { MainIpcContext } from "./context.js";
 export function registerProductAiIpc(context: MainIpcContext): void {
   const { db, emitProduct, readiness, getSettings, aiService, productMutations, remoteProducts, broadcastProduct } = context;
+  const activeAiRequests = new Map<string, { controller: AbortController; userMessageId: string }>();
   ipcMain.handle("products:readiness", (_event, id: string) => readiness(id));
   ipcMain.handle("products:updateProductJson", (_event, id: string, json: string) => {
     context.productWorkflows.assertIdle(id, "manual");
@@ -59,6 +61,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", { localProductId: id, field: input.field, confirmedTaskIds });
     }
+    // 手工复核要先让界面看到本地事务已成功（尤其是删除景点），远端镜像
+    // 只负责后台同步，不能让网络/revision 冲突把 UI 卡在确认弹窗之后。
+    broadcastProduct(saved);
     emitProduct(saved);
     return saved;
   });
@@ -83,7 +88,11 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     return patch.some((operation) => operation.path === "/itinerary" || operation.path.startsWith("/itinerary/"));
   }
 
-  async function enrichItineraryPoisAfterAi(localProductId: string, patch: Array<{ path: string }>): Promise<void> {
+  /**
+   * 行程回复落库后做一次非阻塞式 POI 尝试：查到的景点自动绑定，查不到的
+   * 用户建议景点保留原名并留下待手动配置任务。该步骤不能反过来影响聊天回复。
+   */
+  async function tryEnrichItineraryPoisAfterAi(localProductId: string, patch: Array<{ path: string }>): Promise<void> {
     if (!patchTouchesItinerary(patch)) return;
     const current = db.getProduct(localProductId);
     if (!current) return;
@@ -110,14 +119,43 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (!message) throw new Error("请输入要发送给 AI 的内容。");
     if (message.length > 6000) throw new Error("单条消息不能超过 6000 个字符，请拆分后发送。");
     const userMessageId = db.addMessage(localProductId, "user", message, "running");
+    const controller = new AbortController();
+    activeAiRequests.set(localProductId, { controller, userMessageId });
     emitProduct(db.getProduct(localProductId)!);
     let suppressFinalEmit = false;
+    let timeoutTriggered = false;
+    let responsePersisted = false;
+    let rejectDeadline!: (error: Error) => void;
+    const deadlineTimer = setTimeout(() => {
+      timeoutTriggered = true;
+      controller.abort();
+      rejectDeadline(new Error("AI_REQUEST_TIMEOUT"));
+    }, 120_000);
+    const deadlinePromise = new Promise<never>((_, reject) => { rejectDeadline = reject; });
+    void deadlinePromise.catch(() => undefined);
+    const raceDeadline = <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, deadlinePromise]);
+    const clearDeadline = () => clearTimeout(deadlineTimer);
     const usageEvents: AiUsageEvent[] = [];
     // 本轮请求开始时锁定当前 AI 提供商快照：service、过程日志、最终 normalizeFailureMessage
     // 都使用同一份快照，避免请求过程中用户切换模型导致错误归错提供商。
     const turnSettings = getSettings();
     const providerLabel = resolveAiProviderLabel(turnSettings);
+    const assertNotCancelled = () => {
+      if (controller.signal.aborted) throw new Error("AI_REQUEST_CANCELLED");
+    };
     try {
+      assertNotCancelled();
+      const handledVehicleResourceOnly = await tryHandleVehicleResourceOnlyRequest({
+        context,
+        localProductId,
+        message,
+        userMessageId,
+      });
+      if (handledVehicleResourceOnly) {
+        clearDeadline();
+        activeAiRequests.delete(localProductId);
+        return;
+      }
       const history = product.messages.filter((item) => (item.role === "user" || item.role === "assistant") && item.taskStatus !== "failed" && item.taskStatus !== "running");
       const service = await aiService(turnSettings);
       const itinerary = Array.isArray(product.product.itinerary) ? product.product.itinerary : [];
@@ -127,7 +165,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         const code = classifyMiniMaxError(error);
         return retryableCodes.has(code);
       };
-      const maxRetryAttempts = 5;
+      // reply() 自身负责一次结构化输出修复；外层不再重复包一层网络重试，
+      // 避免“外层 5 次 × 内层 5 次”把单条消息放大成 25 次模型调用。
+      const maxRetryAttempts = 1;
       let connectionChecked = false;
       const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       let response: Awaited<ReturnType<MiniMaxService["reply"]>> | undefined;
@@ -140,8 +180,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         || /修正|重写|优化|重新/.test(message)
         || message.includes("上一次返回未通过结构化校验");
       for (let attempt = 1; attempt <= maxRetryAttempts; attempt++) {
+        assertNotCancelled();
         if (!connectionChecked) {
-          await service.testConnection();
+          await raceDeadline(service.testConnection(controller.signal));
           connectionChecked = true;
         }
         const requestMessage = attempt === 1
@@ -155,7 +196,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
             .join("\n\n");
         const attemptHistory = attempt === 1 ? trimmedHistory : trimmedHistory.slice(-4);
         try {
-          response = await service.reply({
+          response = await raceDeadline(service.reply({
             message: requestMessage,
             product: product.product,
             history: attemptHistory.map((item) => ({ role: item.role, content: item.content })),
@@ -164,7 +205,8 @@ export function registerProductAiIpc(context: MainIpcContext): void {
               source: "chat.reply",
               onEvent: (event) => usageEvents.push(event),
             },
-          });
+            signal: controller.signal,
+          }));
           break;
           } catch (error) {
           if (attempt >= maxRetryAttempts || !isRetryable(error)) throw error;
@@ -186,6 +228,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
           await wait(350 * attempt);
         }
       }
+      assertNotCancelled();
       // 如果服务返回空响应兜底，统一按结构化内容异常处理，避免错误地提示网络故障。
       if (!response) {
         throw new MiniMaxServiceError("invalid_model_output", "AI 未返回可写入的产品方案，请重试。");
@@ -197,10 +240,23 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       if (requiresWritablePatch && (responsePatch.length === 0 || !patchResult.applied)) {
         throw new MiniMaxServiceError("invalid_model_output", "AI 未返回可写入的产品方案，请重试。");
       }
-      if (patchResult.applied) {
-        await enrichItineraryPoisAfterAi(localProductId, responsePatch);
-      }
+      assertNotCancelled();
       db.updateMessageStatus(localProductId, userMessageId, "succeeded"); db.addMessage(localProductId, "assistant", response.reply, "succeeded");
+      responsePersisted = true;
+      // 模型回复已经落库后，本轮不再属于“可取消的请求”；后续补全/资源核查
+      // 仍受产品工作流锁保护，但不能再把已经成功的消息改成 cancelled。
+      activeAiRequests.delete(localProductId);
+      // 对话阶段只完成景点池和每日编排，不强制查询真实 POI。先标记为待采用，
+      // 用户可手动补充/删除缺失 POI，再显式触发产品补全与真实 POI 核验。
+      if (patchResult.applied && patchTouchesItinerary(responsePatch)) {
+        await tryEnrichItineraryPoisAfterAi(localProductId, responsePatch).catch((error) => {
+          logWarn("[AI] itinerary adoption signal deferred", {
+            localProductId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+      emitProduct(db.getProduct(localProductId)!);
       for (const task of response.researchTasks || []) db.addResearchTask(localProductId, task);
       // 首轮生成后自动检查缺失模块：如果 presentation / itinerary / commercial 子模块
       // 仍未写入，追加一轮 AI 调用专门补齐，提升首次生成完整率。
@@ -212,7 +268,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
           logInfo("[AI] first-draft missing modules detected, automatic follow-up", { provider: turnSettings.aiProvider, missingHint });
           const followUpMsg = `以下模块尚未生成：${missingHint}。请通过 submit_product_update 工具逐个补充这些模块的完整内容，每个模块用独立的 patch 操作。`;
           try {
-            const secondResponse = await service.reply({
+            const secondResponse = await raceDeadline(service.reply({
               message: followUpMsg,
               product: currentProduct,
               history: trimmedHistory.slice(-6).map((item) => ({ role: item.role as "user" | "assistant", content: item.content })),
@@ -221,12 +277,18 @@ export function registerProductAiIpc(context: MainIpcContext): void {
                 source: "chat.reply",
                 onEvent: (event) => usageEvents.push(event),
               },
-            });
+              signal: controller.signal,
+            }));
             const secondPatch = secondResponse.patch ?? [];
             if (secondPatch.length > 0) {
               const secondPatchResult = productMutations.applyAiPatch(localProductId, secondPatch, { notify: false });
-              if (secondPatchResult.applied) {
-                await enrichItineraryPoisAfterAi(localProductId, secondPatch);
+              if (secondPatchResult.applied && patchTouchesItinerary(secondPatch)) {
+                await tryEnrichItineraryPoisAfterAi(localProductId, secondPatch).catch((error) => {
+                  logWarn("[AI] itinerary adoption signal deferred", {
+                    localProductId,
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                });
               }
             }
             for (const task of secondResponse.researchTasks || []) {
@@ -353,6 +415,36 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         }
       }
     } catch (error) {
+      if (timeoutTriggered) {
+        clearDeadline();
+        activeAiRequests.delete(localProductId);
+        if (responsePersisted) {
+          emitProduct(db.getProduct(localProductId)!);
+          return;
+        }
+        db.updateMessageStatus(localProductId, userMessageId, "failed");
+        db.addMessage(localProductId, "assistant", "AI 请求超过 2 分钟仍未完成，已停止本轮请求。你可以重试或修改后重新发送。", "failed");
+        emitProduct(db.getProduct(localProductId)!);
+        return;
+      }
+      if (controller.signal.aborted || (error instanceof Error && error.message === "AI_REQUEST_CANCELLED")) {
+        clearDeadline();
+        db.updateMessageStatus(localProductId, userMessageId, "cancelled");
+        const current = db.getProduct(localProductId);
+        const hasCancellationNotice = current?.messages.some((message) => message.role === "assistant" && message.taskStatus === "cancelled" && /AI 对话已停止|AI 对话已取消/.test(message.content));
+        if (!hasCancellationNotice) db.addMessage(localProductId, "assistant", "本次 AI 对话已取消。你可以继续发送新的消息。", "cancelled");
+        emitProduct(db.getProduct(localProductId)!);
+        activeAiRequests.delete(localProductId);
+        return;
+      }
+      if (responsePersisted) {
+        logWarn("[AI] post-processing failed after reply persisted", {
+          localProductId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        emitProduct(db.getProduct(localProductId)!);
+        return;
+      }
       if (error instanceof ItineraryAdoptionSyncError) suppressFinalEmit = error.suppressFinalEmit;
       const reason = extractMiniMaxFailureReason(error) || (error instanceof Error ? error.message : "AI 服务暂时无法完成本次请求。");
       const errorCode = classifyMiniMaxError(error);
@@ -363,6 +455,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       db.updateMessageStatus(localProductId, userMessageId, "failed");
       db.addMessage(localProductId, "assistant", `本轮没有获得 AI 回复：${finalStructuredMessage}`, "failed");
     }
+    clearDeadline();
     if (usageEvents.length > 0) {
       await flushProductAiUsage({
         remote: remoteProducts,
@@ -373,15 +466,60 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       });
     }
     if (!suppressFinalEmit) emitProduct(db.getProduct(localProductId)!);
+    activeAiRequests.delete(localProductId);
   }
   ipcMain.handle("ai:send", (_event, localProductId: string, content: string) =>
     context.productWorkflows.runExclusive(localProductId, "ai", () => runAiReply(localProductId, content)));
-  ipcMain.handle("ai:regenerate", (_event, localProductId: string, field: string) => {
-    // 当前 renderer 未调用；保留入口以便运营后期手动触发单字段重生成。
-    // 实际重新生成流程仍走 ai:send（运营填写一句自然语言指令 + 上下文），
-    // 单独的实现不增加模型 prompt 重复，等有明确需求再补。
-    void localProductId; void field;
-    throw new Error("AI 字段级重新生成尚未发布，请回到对话面板继续沟通。");
+  ipcMain.handle("ai:cancel", (_event, localProductId: string) => {
+    const active = activeAiRequests.get(localProductId);
+    if (!active) {
+      const product = db.getProduct(localProductId);
+      const runningMessages = product?.messages.filter((message) => message.role === "user" && message.taskStatus === "running") ?? [];
+      if (runningMessages.length === 0) return { cancelled: false };
+      for (const message of runningMessages) db.updateMessageStatus(localProductId, message.id, "cancelled");
+      db.addMessage(localProductId, "assistant", "上一轮 AI 对话已停止。你可以继续发送新的消息。", "cancelled");
+      emitProduct(db.getProduct(localProductId)!);
+      return { cancelled: true };
+    }
+    active.controller.abort();
+    const product = db.getProduct(localProductId);
+    const runningMessages = product?.messages.filter((message) => message.role === "user" && message.taskStatus === "running") ?? [];
+    for (const message of runningMessages) db.updateMessageStatus(localProductId, message.id, "cancelled");
+    db.addMessage(localProductId, "assistant", "本次 AI 对话已停止。你可以继续发送新的消息。", "cancelled");
+    emitProduct(db.getProduct(localProductId)!);
+    return { cancelled: true };
+  });
+  ipcMain.handle("ai:regenerate", async (_event, localProductId: string, field: string) => {
+    // 单字段 AI 重新生成：目前仅实现 subtitle，返回候选副标题（不落库）。
+    // 用户确认后再经 products:updateReviewField 写入 basicInfo.subtitle。
+    if (field !== "subtitle") {
+      throw new Error("AI 字段级重新生成目前仅支持副标题，请回到对话面板继续沟通。");
+    }
+    const product = db.getProduct(localProductId);
+    if (!product) throw productNotFound(localProductId);
+    return context.productWorkflows.runExclusive(localProductId, "ai", async () => {
+      const turnSettings = getSettings();
+      const service = await aiService(turnSettings);
+      const usageEvents: AiUsageEvent[] = [];
+      const subtitle = await service.regenerateSubtitle({
+        product: product.product,
+        usage: {
+          localProductId,
+          onEvent: (event) => usageEvents.push(event),
+        },
+      });
+      if (usageEvents.length > 0) {
+        await flushProductAiUsage({
+          remote: remoteProducts,
+          localProductId,
+          events: usageEvents,
+          importSnapshot: (snapshot) => db.importProductSnapshot(snapshot),
+          broadcast: broadcastProduct,
+        });
+      }
+      logInfo("[ai:regenerate] subtitle candidate generated", { localProductId, provider: turnSettings.aiProvider });
+      return subtitle;
+    });
   });
   ipcMain.handle("research:accept", (_event, localProductId: string, taskId: string, note?: string) => {
     db.markResearchAccepted(localProductId, taskId, note);

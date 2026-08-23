@@ -41,6 +41,30 @@ async function waitForRowEnabledSelect(page, row, timeoutMs = 5_000) {
   return false;
 }
 
+async function rowHasSelectedLabel(row, label) {
+  const selectedValues = row.locator(".ant-select-selection-selected-value, .ant-select-selection-item");
+  const count = await selectedValues.count();
+  for (let index = 0; index < count; index += 1) {
+    const selected = selectedValues.nth(index);
+    const text = (
+      (await selected.getAttribute("title").catch(() => "")) ||
+      (await selected.innerText().catch(() => "")) ||
+      ""
+    ).trim();
+    if (text === label) return true;
+  }
+  return false;
+}
+
+async function waitForRowSelectedLabel(row, label, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await rowHasSelectedLabel(row, label)) return true;
+    await delay(200);
+  }
+  return await rowHasSelectedLabel(row, label);
+}
+
 /**
  * 在该 row 内第一个可用的 ant-select-enabled 里选 label 对应选项；
  * 任何一步异常都返回 skipped 而不是抛错（合同未启用 / 选项不存在都安全跳过）。
@@ -62,7 +86,10 @@ async function setEnabledSelectByLabel(page, row, label, description) {
     return { skipped: "option-not-found", description };
   }
   await option.first().click();
-  await delay(300);
+  const confirmed = await waitForRowSelectedLabel(row, label, 5_000);
+  if (!confirmed) {
+    return { skipped: "selection-not-confirmed", description, label };
+  }
   return { selected: label, description };
 }
 
@@ -210,5 +237,6 @@ export {
   selectLineBrandFirstOption,
   setEnabledSelectByLabel,
   setSplitGroupIfPresent,
+  waitForRowSelectedLabel,
   waitForRowEnabledSelect,
 };

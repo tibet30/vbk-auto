@@ -4,6 +4,7 @@ import type {
 } from "../../shared/contracts.js";
 import type { PoiSuggestDetailResultWithRawPayload } from "./poi-suggest-detail.js";
 import { buildPoiSuggestDetailResult } from "./poi-suggest-detail.js";
+import { localizePoiListDistricts } from "./suggest-district.js";
 import { vbkSessionRequest, VbkSessionRequestTimeoutError } from "./vbk-session-request.js";
 
 export { flattenPoiTextFields } from "./poi-suggest-detail.js";
@@ -115,7 +116,16 @@ async function queryPoiSuggest(
     }
     throw error;
   }
-  return parsePoiSuggestPayload(keyword, response.payload, response.status, options);
+  const payload = response.payload;
+  const body = asRecord(payload);
+  const data = asRecord(body?.data);
+  const list = Array.isArray(body?.poiList) ? body.poiList : Array.isArray(data?.poiList) ? data.poiList : [];
+  // suggestPoi 的 districtName 偶发英文；用 suggestDistrict 按 districtId 映回中文后再解析展示。
+  await localizePoiListDistricts(browser, list, {
+    browserRequestTimeoutMs,
+    evaluateTimeoutMs,
+  });
+  return parsePoiSuggestPayload(keyword, payload, response.status, options);
 }
 
 export async function suggestPoiDetail(

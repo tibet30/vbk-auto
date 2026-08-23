@@ -143,7 +143,7 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   await patchNode("finalValidation", {
     status: "completed",
     attempts: node(plan, "finalValidation").attempts + 1,
-    summary: "真实 POI、封面和用车资源已通过最终准入",
+    summary: "行程、封面和用车资源已完成规划检查；缺失 POI 需在自动录入前手动配置",
     error: undefined,
     completedAt: new Date().toISOString(),
   });

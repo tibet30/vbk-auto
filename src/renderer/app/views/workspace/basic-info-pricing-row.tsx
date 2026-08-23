@@ -142,6 +142,7 @@ export function BasicInfoPricingRow({
       rowId="pricing"
       labelTitle="套餐定价"
       error={error}
+      className={styles.rowCenter}
       actions={
         <>
           {saving ? <LoaderCircle size={12} className={styles.spin} aria-label="保存中" /> : null}
@@ -226,9 +227,6 @@ export function BasicInfoPricingRow({
           />
         </label>
       </div>
-      <span className={styles.hint}>
-        校验：成人价 &gt; 0、儿童价 ≥ 0、起订人数为正整数。任一字段留空视为待补充，保存按钮自动禁用。
-      </span>
     </BasicInfoRowShell>
   );
 }

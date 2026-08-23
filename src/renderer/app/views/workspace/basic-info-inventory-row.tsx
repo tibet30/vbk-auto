@@ -125,6 +125,7 @@ export function BasicInfoInventoryRow({
       rowId="inventory"
       labelTitle="班期库存"
       error={error}
+      className={styles.rowCenter}
       actions={
         <>
           {saving ? <LoaderCircle size={12} className={styles.spin} aria-label="保存中" /> : null}
@@ -151,7 +152,6 @@ export function BasicInfoInventoryRow({
     >
       <div className={styles.inputGroup}>
         <label className={styles.priceLabel}>
-          <span className={styles.priceLabelText}>开始日期</span>
           <input
             className={styles.input}
             type="date"
@@ -168,7 +168,6 @@ export function BasicInfoInventoryRow({
           />
         </label>
         <label className={styles.priceLabel}>
-          <span className={styles.priceLabelText}>结束日期</span>
           <input
             className={styles.input}
             type="date"
@@ -203,9 +202,6 @@ export function BasicInfoInventoryRow({
           />
         </label>
       </div>
-      <span className={styles.hint}>
-        校验：日期必须为 YYYY-MM-DD，开始日期不能晚于结束日期，每日配额必须为正整数。
-      </span>
     </BasicInfoRowShell>
   );
 }

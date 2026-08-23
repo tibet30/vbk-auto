@@ -1,5 +1,10 @@
 import { HOTEL_TIER_VALUES } from "./hotel-tiers.js";
 import { poiResearchTaskName } from "./poi-research-tasks.js";
+import {
+  hasBorderPermitItineraryTrigger,
+  hasResolvedBorderPermitVisibleFields,
+  isBorderPermitIssueText,
+} from "./border-permit.js";
 type ProductLike = Record<string, unknown>;
 type ResearchTaskText = { label?: string; detail?: string | null; type?: string };
 
@@ -65,7 +70,7 @@ export function isResearchTaskSatisfiedByProduct(
     // A failed suggestPoi task may become obsolete after the operator replaces
     // that attraction in the current itinerary. Only this explicit failure
     // state is auto-resolved; ordinary missing POI tasks remain actionable.
-    if (/suggestPoi\s*未匹配/i.test(task.detail || "")) {
+    if (/suggestPoi\s*未匹配|不能作为行程景点|请替换为可游览景点/i.test(task.detail || "")) {
       return !Array.isArray(product.itinerary)
         || !product.itinerary.some((day) => {
           const spots = objectValue(day)?.spots;
@@ -78,6 +83,9 @@ export function isResearchTaskSatisfiedByProduct(
     return false;
   }
   const text = `${task.label || ""} ${task.detail || ""}`;
+  if (isBorderPermitIssueText(text)) {
+    return !hasBorderPermitItineraryTrigger(product) || hasResolvedBorderPermitVisibleFields(product);
+  }
   if (hotelPattern.test(text)) return hasSatisfiedHotelTier(product);
   if (vehiclePattern.test(text)) return hasSatisfiedVehicleResource(product);
   if (commercialPattern.test(text)) return true;

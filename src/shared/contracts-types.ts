@@ -76,6 +76,8 @@ export interface ProductDetail extends ProductSummary {
   /** 基本信息是否已在 VBK 成功保存，决定重试时是否需要补跑 basic 阶段。 */
   basicInfoSaved?: boolean;
   planning?: import("./contracts-planning.js").PlanningPlanV2;
+  /** 产品级 AI Token 用量；与 planning 同级，权威在 Tibet，不进 product JSON。 */
+  aiUsage?: import("./contracts-ai-usage.js").ProductAiUsage;
 }
 
 export interface ConversationMessage {

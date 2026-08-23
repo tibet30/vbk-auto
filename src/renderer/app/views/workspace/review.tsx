@@ -167,6 +167,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     <div className={layout.reviewWorkspace}>
       <PlanningTree
         plan={product.planning}
+        aiUsage={product.aiUsage}
         planningBusy={planningBusy}
         onResume={planningResume}
         itineraryAdoptionBusy={planningAcceptBusy}

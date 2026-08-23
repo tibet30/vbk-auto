@@ -9,6 +9,8 @@ import type {
 } from "../../shared/contracts.js";
 import { applyAutoCoverFill, isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-trigger.js";
+import { appendAiUsage } from "../ai/ai-usage-merge.js";
+import type { AiUsageEvent } from "../../shared/contracts-ai-usage.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "../planning/adapters/openai-compatible-adapter.js";
 import { OpenAIThreeStagePlanningAi } from "../planning/adapters/three-stage-ai.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
@@ -42,15 +44,30 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
       const key = await context.apiKey(turnSettings.aiProvider);
       if (!key) throw new Error(`请先配置${aiProviderLabel(turnSettings)} API Key。`);
       const transport = planningTransportOptions(turnSettings.aiProvider);
+      const usageScope = { localProductId, runId: initialPlan?.runId };
+      const recordUsage = (event: AiUsageEvent) => {
+        try {
+          remote = {
+            ...remote,
+            aiUsage: appendAiUsage(remote.aiUsage, [{
+              ...event,
+              runId: event.runId ?? usageScope.runId,
+            }]),
+          };
+        } catch {
+          // usage recording must never break planning
+        }
+      };
       const plannerConfig = {
         apiKey: key,
         baseUrl: provider.baseUrl,
         model: provider.model,
         ...transport,
         provider: aiProviderLabel(turnSettings),
+        recordUsage,
       };
-      const planner = new OpenAICompatiblePlannerAdapter(plannerConfig);
-      const threeStageAi = new OpenAIThreeStagePlanningAi(plannerConfig);
+      const planner = new OpenAICompatiblePlannerAdapter(plannerConfig).withUsageScope(usageScope);
+      const threeStageAi = new OpenAIThreeStagePlanningAi(plannerConfig).withUsageScope(usageScope);
       const runtime = new DbOrchestratorRuntime(context.db, context.browser, context.productMutations);
       const skeleton = {
         destination,
@@ -63,6 +80,7 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
         supplierProductCode: text(basic.supplierProductCode),
       };
       const persist = async (plan: PlanningPlanV2) => {
+        usageScope.runId = plan.runId;
         const local = context.db.getProduct(localProductId);
         if (!local) throw productNotFound(localProductId);
         const status: ProductDetail["status"] = plan.status === "completed"
@@ -76,6 +94,7 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
           status,
           revision: remote.revision,
           planning: plan,
+          aiUsage: remote.aiUsage,
           updatedAt: new Date().toISOString(),
         };
         if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全保存规划节点。");

@@ -61,6 +61,25 @@ test("顶部活动节点提示优先使用 currentNode，并为重做阶段提�
   assert.doesNotMatch(tree, /当前进行：/);
 });
 
+test("生成规划内容区可在内部滚动，标题栏固定", () => {
+  assert.match(styles, /\.tree \{[^}]*max-height:\s*min\(46vh,\s*480px\)/s);
+  assert.match(styles, /\.tree \{[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.treeBody \{[^}]*overflow:\s*auto/s);
+  assert.match(tree, /className=\{styles\.treeBody\}/);
+});
+
+test("treeBody 内各模块间距统一由 gap 控制", () => {
+  assert.match(styles, /\.treeBody \{[^}]*gap:\s*8px/s);
+  assert.match(styles, /\.treeBody \{[^}]*padding:\s*8px 0/s);
+  assert.match(styles, /\.adoptionCard \{[^}]*margin:\s*0 12px/s);
+  assert.match(styles, /\.adoptionError \{[^}]*margin:\s*0 12px/s);
+  assert.match(styles, /\.stageList \{[^}]*padding:\s*0 12px/s);
+});
+
+test("treeBody 子模块不被压缩，整体滚动保留行程三栏", () => {
+  assert.match(styles, /\.treeBody > \* \{[^}]*flex:\s*0 0 auto/s);
+});
+
 test("completed planning collapses the tree and keeps the terminal status next to the chevron", () => {
   assert.match(tree, /useEffect/);
   assert.match(tree, /if \(plan\?\.status === "completed" && !rerunBusy\) setTreeCollapsed\(true\)/);

@@ -34,6 +34,7 @@ export function createRemoteProductMirror(args: {
       ...candidate,
       revision: latest.revision,
       planning: candidate.planning ?? latest.planning,
+      aiUsage: candidate.aiUsage ?? latest.aiUsage,
       updatedAt: new Date().toISOString(),
     };
     try {

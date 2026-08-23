@@ -1,5 +1,5 @@
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
-import type { ManualReviewFieldInput } from "../../shared/contracts.js";
+import type { AiUsageEvent, ManualReviewFieldInput } from "../../shared/contracts.js";
 import { aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import { MiniMaxService, MiniMaxServiceError } from "../minimax/minimax.js";
 import { parseProduct } from "../automation/schema/schema.js";
@@ -13,6 +13,7 @@ import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
+import { flushProductAiUsage } from "../ai/flush-product-ai-usage.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { enrichItineraryPois } from "../planning/poi-enrichment.js";
 import { ItineraryAdoptionSyncError, syncItineraryAdoptionSignal } from "../planning/itinerary-adoption-signal.js";
@@ -25,7 +26,7 @@ import {
 } from "../minimax/minimax-error-handling.js";
 import type { MainIpcContext } from "./context.js";
 export function registerProductAiIpc(context: MainIpcContext): void {
-  const { db, emitProduct, readiness, getSettings, aiService, productMutations } = context;
+  const { db, emitProduct, readiness, getSettings, aiService, productMutations, remoteProducts, broadcastProduct } = context;
   ipcMain.handle("products:readiness", (_event, id: string) => readiness(id));
   ipcMain.handle("products:updateProductJson", (_event, id: string, json: string) => {
     context.productWorkflows.assertIdle(id, "manual");
@@ -111,6 +112,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const userMessageId = db.addMessage(localProductId, "user", message, "running");
     emitProduct(db.getProduct(localProductId)!);
     let suppressFinalEmit = false;
+    const usageEvents: AiUsageEvent[] = [];
     // 本轮请求开始时锁定当前 AI 提供商快照：service、过程日志、最终 normalizeFailureMessage
     // 都使用同一份快照，避免请求过程中用户切换模型导致错误归错提供商。
     const turnSettings = getSettings();
@@ -157,6 +159,11 @@ export function registerProductAiIpc(context: MainIpcContext): void {
             message: requestMessage,
             product: product.product,
             history: attemptHistory.map((item) => ({ role: item.role, content: item.content })),
+            usage: {
+              localProductId,
+              source: "chat.reply",
+              onEvent: (event) => usageEvents.push(event),
+            },
           });
           break;
           } catch (error) {
@@ -209,6 +216,11 @@ export function registerProductAiIpc(context: MainIpcContext): void {
               message: followUpMsg,
               product: currentProduct,
               history: trimmedHistory.slice(-6).map((item) => ({ role: item.role as "user" | "assistant", content: item.content })),
+              usage: {
+                localProductId,
+                source: "chat.reply",
+                onEvent: (event) => usageEvents.push(event),
+              },
             });
             const secondPatch = secondResponse.patch ?? [];
             if (secondPatch.length > 0) {
@@ -350,6 +362,15 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         : finalMessage;
       db.updateMessageStatus(localProductId, userMessageId, "failed");
       db.addMessage(localProductId, "assistant", `本轮没有获得 AI 回复：${finalStructuredMessage}`, "failed");
+    }
+    if (usageEvents.length > 0) {
+      await flushProductAiUsage({
+        remote: remoteProducts,
+        localProductId,
+        events: usageEvents,
+        importSnapshot: (snapshot) => db.importProductSnapshot(snapshot),
+        broadcast: broadcastProduct,
+      });
     }
     if (!suppressFinalEmit) emitProduct(db.getProduct(localProductId)!);
   }

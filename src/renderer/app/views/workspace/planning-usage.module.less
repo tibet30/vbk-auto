@@ -1,0 +1,154 @@
+.metric {
+  min-width: 0;
+  max-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.metric:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.metric:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ai) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.metricText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel {
+  display: grid;
+  gap: 8px;
+  margin: 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.panelTitle {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panelTitle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ai) 35%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.panelTitleChevron {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  display: inline-flex;
+}
+
+.panelBody {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sectionLabel {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.table {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1.4fr) 48px 64px 56px 56px minmax(56px, 0.7fr);
+  align-items: center;
+  column-gap: 8px;
+  min-height: 24px;
+  padding: 3px 0;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+}
+
+.rowHeader {
+  border-top: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.rowHeader span {
+  font-weight: 500;
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.rowHeader .name {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.num {
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 10px;
+}
+
+.row[data-status="error"] .name,
+.row[data-status="error"] .num {
+  color: var(--destructive);
+}
+
+.empty {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  margin: 0;
+}

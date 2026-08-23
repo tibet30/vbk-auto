@@ -166,6 +166,7 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
     vbkAccount: snapshot.vbkAccount,
     revision: snapshot.revision,
     planning: snapshot.planning,
+    ...(snapshot.aiUsage ? { aiUsage: snapshot.aiUsage } : {}),
   };
 }
 

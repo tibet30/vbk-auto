@@ -15,8 +15,10 @@ import type {
   PlanningNodeState,
   PlanningPlanV2,
 } from "../../../../shared/contracts-planning.js";
+import type { ProductAiUsage } from "../../../../shared/contracts-ai-usage.js";
 import shared from "../shared.module.less";
 import { PlanningRerunConfirmDialog, type PlanningRerunStage } from "./planning-rerun-confirm-dialog";
+import { PlanningUsagePanel, PlanningUsageToggle, usePlanningUsage } from "./planning-usage";
 import styles from "./planning-tree.module.less";
 
 const STAGES: PlanningRerunStage[] = [
@@ -64,6 +66,7 @@ export function resolveActivePlanningNode(
 
 export function PlanningTree(props: {
   plan?: PlanningPlanV2;
+  aiUsage?: ProductAiUsage;
   planningBusy: boolean;
   onResume(): Promise<void>;
   onRerunMajorStage(stage: PlanningMajorStage): Promise<void>;
@@ -79,7 +82,8 @@ export function PlanningTree(props: {
   /** 进度数值旁的小标签（生成进度 / 生成中 / 就绪度）。 */
   progressCaption: string;
 }) {
-  const { plan, planningBusy, onResume, onRerunMajorStage, rerunBusy, itineraryAdoptionBusy, onAcceptItinerary, readinessLabel, readinessState, progressValue, progressCaption } = props;
+  const { plan, aiUsage, planningBusy, onResume, onRerunMajorStage, rerunBusy, itineraryAdoptionBusy, onAcceptItinerary, readinessLabel, readinessState, progressValue, progressCaption } = props;
+  const usage = usePlanningUsage(aiUsage);
   const [collapsed, setCollapsed] = useState<Partial<Record<PlanningMajorStage, boolean>>>({});
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const [rerunStage, setRerunStage] = useState<PlanningMajorStage | null>(null);
@@ -159,6 +163,20 @@ export function PlanningTree(props: {
               {terminalStatus.label}
             </span>
           )}
+          {usage.visible ? (
+            <PlanningUsageToggle
+              label={usage.label}
+              open={usage.open && !treeCollapsed}
+              onToggle={() => {
+                if (usage.open && !treeCollapsed) {
+                  usage.setOpen(false);
+                  return;
+                }
+                setTreeCollapsed(false);
+                usage.setOpen(true);
+              }}
+            />
+          ) : null}
           <span className={styles.readinessGroup}>
             <span className={shared.state} data-state={readinessState}>{readinessLabel}</span>
             <span className={styles.progressValue}>
@@ -183,7 +201,16 @@ export function PlanningTree(props: {
           </button>
         </span>
       </div>
-      {!treeCollapsed && <div id="planning-stage-list" className={styles.scroller} tabIndex={0} aria-label="规划阶段，可水平滚动">
+      {!treeCollapsed ? (
+      <div className={styles.treeBody}>
+      {usage.visible && usage.open && usage.aiUsage ? (
+        <PlanningUsagePanel
+          aiUsage={usage.aiUsage}
+          recent={usage.recent}
+          onClose={() => usage.setOpen(false)}
+        />
+      ) : null}
+      <div id="planning-stage-list" className={styles.scroller} tabIndex={0} aria-label="规划阶段，可水平滚动">
         <ol className={styles.stageList}>
           {STAGES.map((stage, index) => {
             const stageNodes = nodes.filter((node) => node.majorStage === stage.id);
@@ -254,7 +281,7 @@ export function PlanningTree(props: {
             );
           })}
         </ol>
-      </div>}
+      </div>
       {plan?.itineraryAdoption?.status === "pending" && (
         <div className={styles.adoptionCard} role="status" aria-live="polite">
           <strong>新行程已更新，产品补全已失效</strong>
@@ -293,6 +320,8 @@ export function PlanningTree(props: {
           </div>
         </div>
       )}
+      </div>
+      ) : null}
       <PlanningRerunConfirmDialog
         stage={rerunStage ? STAGES.find((stage) => stage.id === rerunStage) ?? null : null}
         onCancel={() => setRerunStage(null)}

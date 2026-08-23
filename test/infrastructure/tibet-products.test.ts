@@ -67,6 +67,57 @@ test("Tibet 产品创建发送完整快照并读取服务端记录", async (t) =
   assert.deepEqual(await service.upsert(product), product);
 });
 
+test("Tibet 产品详情保留 aiUsage 且不混入 product 正文", async (t) => {
+  const store = fixture(t);
+  const withUsage: ProductDetail = {
+    ...product,
+    revision: 2,
+    aiUsage: {
+      events: [{
+        id: "evt-1",
+        source: "planning.structureLocation",
+        model: "test-model",
+        provider: "minimax",
+        status: "ok",
+        startedAt: "2026-08-23T10:00:00.000Z",
+        endedAt: "2026-08-23T10:00:01.000Z",
+        durationMs: 1000,
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        estimatedCostCny: 0.02,
+      }],
+      lifetime: {
+        calls: 1,
+        durationMs: 1000,
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        tokensIncomplete: false,
+        estimatedCostCny: 0.02,
+      },
+      latestRun: {
+        calls: 1,
+        durationMs: 1000,
+        inputTokens: 12,
+        outputTokens: 3,
+        totalTokens: 15,
+        tokensIncomplete: false,
+        estimatedCostCny: 0.02,
+      },
+      byStage: [],
+    },
+  };
+  const service = createTibetProductService(store, {
+    baseUrl: "https://example.test",
+    fetchImpl: async () => response({ code: 200, data: { product: withUsage } }),
+  });
+  const got = await service.get(product.id);
+  assert.equal(got.aiUsage?.lifetime.totalTokens, 15);
+  assert.equal(got.aiUsage?.lifetime.estimatedCostCny, 0.02);
+  assert.equal("aiUsage" in (got.product as object), false);
+});
+
 test("Tibet 产品接口 401 会清除本地会话", async (t) => {
   const store = fixture(t);
   const service = createTibetProductService(store, {

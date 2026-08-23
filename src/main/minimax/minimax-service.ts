@@ -9,8 +9,9 @@
  */
 
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
-import type { AdvisorOutcome, AdvisorRequest, AiResponse, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
+import type { AdvisorOutcome, AdvisorRequest, AiResponse, AiUsageEvent, AiUsageSource, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
+import { toAiUsageEvent } from "../ai/completion-usage.js";
 import { logAIPrompt } from "../ai/prompt-log.js";
 import {
   MiniMaxServiceError,
@@ -138,7 +139,12 @@ export class MiniMaxService {
    * / empty_model_output 等可重试错误最多重试 4 次；最终抛 MiniMaxServiceError。
    * 区分首版生成（强制携带 patch）与对话微调（patch 可选但仍要走结构化）。
    */
-  async reply(input: { message: string; product: Record<string, unknown>; history: Array<{ role: string; content: string }> }): Promise<AiResponse> {
+  async reply(input: {
+    message: string;
+    product: Record<string, unknown>;
+    history: Array<{ role: string; content: string }>;
+    usage?: { localProductId: string; source: Extract<AiUsageSource, "chat.reply" | "chat.regenerate">; runId?: string; onEvent?: (event: AiUsageEvent) => void };
+  }): Promise<AiResponse> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const client = this.client(replyTimeout());
     const itinerary = input.product.itinerary;
@@ -177,7 +183,12 @@ export class MiniMaxService {
           attempt,
           messages,
         });
-        const { message, traceId } = await this.complete(client, messages);
+        const { message, traceId } = await this.complete(client, messages, input.usage ? {
+          source: input.usage.source,
+          runId: input.usage.runId,
+          attempt,
+          onEvent: input.usage.onEvent,
+        } : undefined);
         const { response, isStructured } = parseAssistantMessage(message);
         const hasActionHint = !!(response.patch?.length || response.questions?.length || response.researchTasks?.length);
         const hasWritablePatch = !!(response.patch?.length ?? 0);
@@ -338,7 +349,9 @@ export class MiniMaxService {
    * 由 orchestrator 决定继续自动重试还是回到 needs_user。返回的 outcome.userInstruction
    * 字段仅在 action = wait_for_user 时有意义。
    */
-  async diagnoseAutomationFailure(input: AdvisorRequest): Promise<AdvisorOutcome> {
+  async diagnoseAutomationFailure(input: AdvisorRequest & {
+    usage?: { localProductId: string; stage?: string; onEvent?: (event: AiUsageEvent) => void };
+  }): Promise<AdvisorOutcome> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     const startedAt = Date.now();
     const messages = [
@@ -369,6 +382,7 @@ export class MiniMaxService {
         thinking: { type: "disabled" },
         service_tier: miniMaxServiceTier(),
       } as never);
+      this.emitUsage(input.usage, "automation.diagnose", input.phase, Date.now() - startedAt, response);
       const toolCall = response.choices[0]?.message.tool_calls?.find(
         (call) => "function" in call && call.function.name === "submit_failure_diagnosis",
       );
@@ -387,6 +401,7 @@ export class MiniMaxService {
       return outcome;
     } catch (error) {
       const serviceError = this.providerError(error);
+      this.emitUsage(input.usage, "automation.diagnose", input.phase, Date.now() - startedAt, undefined, serviceError);
       logWarn("[AI] diagnosis failed", {
         provider: this.config.provider ?? "minimax",
         phase: input.phase,
@@ -404,7 +419,9 @@ export class MiniMaxService {
    *   - 返回 pickedText=null 表示"无法决定 / 应当跳过"，由调用方继续 fallback。
    *   - 当模型返回的 pickedText 不在 candidates 文本中时也会被强制清成 null，防止 AI 自创 ID/文本。
    */
-  async disambiguateOption(input: DisambiguateRequest): Promise<DisambiguateOutcome> {
+  async disambiguateOption(input: DisambiguateRequest & {
+    usage?: { localProductId: string; stage?: string; onEvent?: (event: AiUsageEvent) => void };
+  }): Promise<DisambiguateOutcome> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     if (!Array.isArray(input.candidates) || input.candidates.length === 0) {
       return { pickedText: null, reasoning: "候选项为空" };
@@ -436,6 +453,7 @@ export class MiniMaxService {
         thinking: { type: "disabled" },
         service_tier: miniMaxServiceTier(),
       } as never);
+      this.emitUsage(input.usage, "automation.disambiguate", input.usage?.stage ?? input.kind, Date.now() - startedAt, response);
       const toolCall = response.choices[0]?.message.tool_calls?.find(
         (call) => "function" in call && call.function.name === "submit_disambiguation",
       );
@@ -460,6 +478,7 @@ export class MiniMaxService {
       return { pickedText, reasoning: parsed.data.reasoning };
     } catch (error) {
       const serviceError = this.providerError(error);
+      this.emitUsage(input.usage, "automation.disambiguate", input.usage?.stage ?? input.kind, Date.now() - startedAt, undefined, serviceError);
       logWarn("[AI] disambiguation failed", {
         provider: this.config.provider ?? "minimax",
         kind: input.kind,
@@ -476,7 +495,40 @@ export class MiniMaxService {
    * （尝试从响应头 trace-id / trace_id / request_id 中取），便于在 DevTools / 日志里串起一次请求。
    * 若接口未返回任何 message，抛 empty_model_output 供上层触发重试。
    */
-  private async complete(client: OpenAI, messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[]) {
+  private emitUsage(
+    usage: { onEvent?: (event: AiUsageEvent) => void } | undefined,
+    source: AiUsageSource,
+    stage: string | undefined,
+    durationMs: number,
+    response?: unknown,
+    error?: unknown,
+  ): void {
+    if (!usage?.onEvent) return;
+    try {
+      usage.onEvent(toAiUsageEvent({
+        source,
+        stage,
+        model: this.config.model,
+        provider: this.config.provider ?? "minimax",
+        durationMs,
+        response,
+        error,
+      }));
+    } catch {
+      // usage recording must never break the primary call
+    }
+  }
+
+  private async complete(
+    client: OpenAI,
+    messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+    usage?: {
+      source: Extract<AiUsageSource, "chat.reply" | "chat.regenerate">;
+      runId?: string;
+      attempt?: number;
+      onEvent?: (event: AiUsageEvent) => void;
+    },
+  ) {
     const baseParams = {
       model: this.config.model, messages, temperature: 0.1, max_completion_tokens: 8192,
       tools: [responseTool],
@@ -486,14 +538,49 @@ export class MiniMaxService {
     const providerParams = this.isDeepSeek
       ? {}
       : { thinking: { type: "disabled" as const }, reasoning_split: true, service_tier: miniMaxServiceTier() };
-    const result = await client.chat.completions.create({
-      ...baseParams,
-      ...providerParams,
-    } as never).withResponse();
-    const response = result.data;
-    const message = response.choices[0]?.message;
-    if (!message) throw new MiniMaxServiceError("empty_model_output", "AI 未返回内容。");
-    return { message, traceId: result.response.headers.get("trace-id") || result.response.headers.get("trace_id") || result.request_id || undefined };
+    const startedAt = Date.now();
+    try {
+      const result = await client.chat.completions.create({
+        ...baseParams,
+        ...providerParams,
+      } as never).withResponse();
+      const response = result.data;
+      if (usage?.onEvent) {
+        try {
+          usage.onEvent(toAiUsageEvent({
+            source: usage.source,
+            runId: usage.runId,
+            attempt: usage.attempt,
+            model: this.config.model,
+            provider: this.config.provider ?? "minimax",
+            durationMs: Date.now() - startedAt,
+            response,
+          }));
+        } catch {
+          // ignore recorder failures
+        }
+      }
+      const message = response.choices[0]?.message;
+      if (!message) throw new MiniMaxServiceError("empty_model_output", "AI 未返回内容。");
+      return { message, traceId: result.response.headers.get("trace-id") || result.response.headers.get("trace_id") || result.request_id || undefined };
+    } catch (error) {
+      if (usage?.onEvent) {
+        try {
+          usage.onEvent(toAiUsageEvent({
+            source: usage.source,
+            runId: usage.runId,
+            attempt: usage.attempt,
+            model: this.config.model,
+            provider: this.config.provider ?? "minimax",
+            durationMs: Date.now() - startedAt,
+            error,
+          }));
+        } catch {
+          // ignore recorder failures
+        }
+      }
+      throw error;
+    }
   }
 
   /**

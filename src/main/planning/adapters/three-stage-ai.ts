@@ -8,8 +8,10 @@ import {
   type PlanningSpotRecommendationRequest,
   type ThreeStagePlanningAi,
 } from "../../../shared/contracts-planning.js";
+import { timedCompletion, toAiUsageEvent } from "../../ai/completion-usage.js";
 import { logAIPrompt } from "../../ai/prompt-log.js";
 import type { AIPromptEntry } from "../../ai/prompt-log.js";
+import type { AiUsageEvent, AiUsageSource } from "../../../shared/contracts-ai-usage.js";
 import {
   normaliseTransportError,
   type ChatCompletionBody,
@@ -22,7 +24,18 @@ export interface ThreeStageAiConfig {
   provider?: string;
   extraParams?: Record<string, unknown>;
   timeoutMs?: number;
+  recordUsage?: (event: AiUsageEvent) => void;
 }
+
+const ENTRY_SOURCE: Record<
+  "ThreeStage.structureLocation" | "ThreeStage.recommendSpotNames" | "ThreeStage.composeVerifiedItinerary" | "ThreeStage.estimateVehicleTotalCost",
+  AiUsageSource
+> = {
+  "ThreeStage.structureLocation": "planning.structureLocation",
+  "ThreeStage.recommendSpotNames": "planning.recommendSpotNames",
+  "ThreeStage.composeVerifiedItinerary": "planning.composeItinerary",
+  "ThreeStage.estimateVehicleTotalCost": "planning.estimateVehicleCost",
+};
 
 const spotTool = {
   type: "function" as const,
@@ -120,6 +133,7 @@ const vehicleCostTool = {
 export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
   private readonly client: OpenAI;
   private readonly timeoutMs: number;
+  private usageScope?: { localProductId: string; runId?: string };
 
   constructor(private readonly config: ThreeStageAiConfig) {
     this.timeoutMs = config.timeoutMs ?? 90_000;
@@ -129,6 +143,11 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       timeout: this.timeoutMs,
       maxRetries: 0,
     });
+  }
+
+  withUsageScope(scope: { localProductId: string; runId?: string }): this {
+    this.usageScope = scope;
+    return this;
   }
 
   async structureLocation(request: PlanningLocationRequest): Promise<PlanningLocation> {
@@ -234,6 +253,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       model: this.config.model,
       messages,
     });
+    const source = ENTRY_SOURCE[entry as keyof typeof ENTRY_SOURCE] ?? "planning.structureLocation";
     const response = await this.createCompletion({
       model: this.config.model,
       messages,
@@ -242,7 +262,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       tools: [tool],
       tool_choice: { type: "function", function: { name: tool.function.name } },
       ...(this.config.extraParams ?? {}),
-    });
+    }, source);
     const call = response.choices[0]?.message?.tool_calls?.find(
       (item) => "function" in item && item.function.name === tool.function.name,
     );
@@ -258,7 +278,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
     }
   }
 
-  private async createCompletion(body: ChatCompletionBody) {
+  private async createCompletion(body: ChatCompletionBody, source: AiUsageSource) {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_resolve, reject) => {
@@ -273,9 +293,27 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
     );
     request.catch(() => undefined);
     try {
-      return await Promise.race([request, timeout]);
-    } catch (error) {
-      throw normaliseTransportError(error);
+      return await timedCompletion(
+        async () => {
+          try {
+            return await Promise.race([request, timeout]);
+          } catch (error) {
+            throw normaliseTransportError(error);
+          }
+        },
+        (result) => {
+          if (!this.config.recordUsage) return;
+          this.config.recordUsage(toAiUsageEvent({
+            source,
+            model: this.config.model,
+            provider: this.config.provider ?? "openai-compatible",
+            runId: this.usageScope?.runId,
+            durationMs: result.durationMs,
+            response: result.value,
+            error: result.error,
+          }));
+        },
+      );
     } finally {
       if (timer) clearTimeout(timer);
     }

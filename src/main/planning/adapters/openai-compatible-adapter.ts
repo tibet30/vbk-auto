@@ -21,8 +21,10 @@ import {
   type PlanningStage,
   type PoiNameResolutionRequest,
 } from "../../../shared/contracts-planning.js";
+import { timedCompletion, toAiUsageEvent } from "../../ai/completion-usage.js";
 import { logAIPrompt } from "../../ai/prompt-log.js";
 import { logInfo } from "../../../shared/log-timestamp.js";
+import type { AiUsageEvent, AiUsageSource } from "../../../shared/contracts-ai-usage.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { buildStageToolSchema } from "../tool-schema.js";
 import {
@@ -59,11 +61,14 @@ export interface OpenAICompatibleAdapterConfig {
   extraParams?: Record<string, unknown>;
   /** 单次请求超时（ms）。默认 90s。 */
   timeoutMs?: number;
+  /** 每次 Chat Completions 完成后回调；记账失败不得影响主流程。 */
+  recordUsage?: (event: AiUsageEvent) => void;
 }
 
 export class OpenAICompatiblePlannerAdapter implements Planner {
   private readonly client: OpenAI;
   private readonly timeoutMs: number;
+  private usageScope?: { localProductId: string; runId?: string };
   constructor(private readonly config: OpenAICompatibleAdapterConfig) {
     this.timeoutMs = config.timeoutMs ?? 90_000;
     this.client = new OpenAI({
@@ -72,6 +77,11 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       timeout: this.timeoutMs,
       maxRetries: 0,
     });
+  }
+
+  withUsageScope(scope: { localProductId: string; runId?: string }): this {
+    this.usageScope = scope;
+    return this;
   }
 
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
@@ -98,7 +108,7 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: toolSchema.function.name } },
       ...(this.config.extraParams ?? {}),
-    });
+    }, { source: "planning.generateStage", stage });
 
     const message = response.choices[0]?.message;
     if (!message) throw new PlannerError("empty_model_output", "模型未返回任何内容。");
@@ -134,7 +144,7 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       tools: [poiNameToolSchema],
       tool_choice: { type: "function", function: { name: poiNameToolSchema.function.name } },
       ...(this.config.extraParams ?? {}),
-    });
+    }, { source: "planning.resolvePoiName", attempt: request.attempt });
     const call = response.choices[0]?.message?.tool_calls?.find(
       (item) => "function" in item && item.function.name === poiNameToolSchema.function.name,
     );
@@ -155,7 +165,10 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
    *   触发 UnhandledPromiseRejection 警告；我们把它绑在硬截止发出的
    *   controller.abort() 之后立即吞掉。
    */
-  private async createCompletion(body: ChatCompletionBody) {
+  private async createCompletion(
+    body: ChatCompletionBody,
+    meta: { source: AiUsageSource; stage?: string; attempt?: number },
+  ) {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const hardTimeout = new Promise<never>((_resolve, reject) => {
@@ -169,9 +182,29 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     const sdkPromise = this.client.chat.completions.create(body as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming, { signal: controller.signal });
     sdkPromise.catch(() => undefined);
     try {
-      return await Promise.race([sdkPromise, hardTimeout]);
-    } catch (error) {
-      throw normaliseTransportError(error);
+      return await timedCompletion(
+        async () => {
+          try {
+            return await Promise.race([sdkPromise, hardTimeout]);
+          } catch (error) {
+            throw normaliseTransportError(error);
+          }
+        },
+        (result) => {
+          if (!this.config.recordUsage) return;
+          this.config.recordUsage(toAiUsageEvent({
+            source: meta.source,
+            stage: meta.stage,
+            attempt: meta.attempt,
+            model: this.config.model,
+            provider: this.config.provider ?? "openai-compatible",
+            runId: this.usageScope?.runId,
+            durationMs: result.durationMs,
+            response: result.value,
+            error: result.error,
+          }));
+        },
+      );
     } finally {
       if (timer) clearTimeout(timer);
     }

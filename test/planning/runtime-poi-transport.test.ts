@@ -45,3 +45,41 @@ test("未挂载 VBK 浏览器时规划 POI 查询安全跳过", async () => {
 
   assert.equal(await runtime.suggestPoi("晋祠"), null);
 });
+
+test("规划 POI 查询通过共享页面门执行", async () => {
+  const calls: string[] = [];
+  const page = {
+    async evaluate<T>(): Promise<T> {
+      calls.push("evaluate");
+      return {
+        status: 200,
+        payload: {
+          ResponseStatus: { Ack: "Success" },
+          poiList: [{ poiName: "晋祠", poiId: 79413 }],
+        },
+        durationMs: 1,
+        ctx: {},
+      } as T;
+    },
+  };
+  const browser = {
+    async page() {
+      calls.push("page");
+      return page;
+    },
+  } as unknown as VbkBrowser;
+  const runtime = new DbOrchestratorRuntime(
+    {} as VbkDatabase,
+    browser,
+    undefined,
+    async (task) => {
+      calls.push("gate:start");
+      const result = await task();
+      calls.push("gate:end");
+      return result;
+    },
+  );
+
+  assert.deepEqual(await runtime.suggestPoi("晋祠"), { poiName: "晋祠", poiId: 79413 });
+  assert.deepEqual(calls, ["gate:start", "page", "evaluate", "gate:end"]);
+});

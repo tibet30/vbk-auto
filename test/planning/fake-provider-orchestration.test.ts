@@ -174,9 +174,9 @@ function buildFakeScript(): FakeProviderScript[] {
             recommendationCategory: "优选行程",
             recommendation: "2 天串联核心景点",
             recommendations: [
-              { category: "优选行程", text: "节奏舒适不赶路" },
+              { category: "服务保障", text: "节奏舒适不赶路" },
               { category: "精选酒店", text: "当地 3 钻酒店含早餐" },
-              { category: "缤纷景点", text: "覆盖晋祠与博物院" },
+              { category: "贴心赠送", text: "覆盖晋祠与博物院" },
             ],
             features: "【古建巡礼】专业讲解\n【私享出行】独立成团",
           },

@@ -11,7 +11,7 @@ test("有产品 ID 时结构化条款走正式接口，旧页面才回退自由�
   const end = source.indexOf("\n}\n\nexport {", start);
   const body = source.slice(start, end);
   assert.match(body, /newResourceClause/);
-  assert.match(body, /return saveStructuredProductClauses\(page, productId\)/);
+  assert.match(body, /return saveStructuredProductClauses\(page, productId, \{/);
   assert.ok(body.indexOf("saveStructuredProductClauses") < body.indexOf("await fillVisibleInputs"));
 });
 
@@ -23,5 +23,5 @@ test("结构化条款补齐儿童住宿口径与住宿自理说明", async () =>
   assert.match(source, /childNoBed:\s*10091/);
   assert.match(source, /otherfeewithout1/);
   assert.match(source, /lodgingSelfPayNote/);
-  assert.match(source, /async \(\{ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote \}\) =>/);
+  assert.match(source, /async \(\{ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, isFreeTravel \}\) =>/);
 });

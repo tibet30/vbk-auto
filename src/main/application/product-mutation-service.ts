@@ -16,6 +16,8 @@ type ProductMutationStore = Pick<VbkDatabase, "getProduct" | "updateProduct">;
 export interface ProductMutationOptions {
   status?: ProductSummary["status"];
   notify?: boolean;
+  /** 人工整包编辑可显式纠正历史错误城市；AI/规划写入仍锁定既有城市锚点。 */
+  allowMeetingCityCorrection?: boolean;
 }
 
 export class ProductMutationService {
@@ -35,7 +37,7 @@ export class ProductMutationService {
       && !Array.isArray(current.product.basicInfo)
       ? current.product.basicInfo as Record<string, unknown>
       : {};
-    const lockedMeetingCity = toPlatformShortLocationName(
+    const lockedMeetingCity = options.allowMeetingCityCorrection ? "" : toPlatformShortLocationName(
       typeof currentBasic.meetingCity === "string" && currentBasic.meetingCity.trim()
         ? currentBasic.meetingCity
         : currentBasic.destinationCity,

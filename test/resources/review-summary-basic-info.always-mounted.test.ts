@@ -170,24 +170,20 @@ test("BasicInfoServicePhoneRow 接受 null / 空串输入并落到「未设置�
   assert.match(code, /servicePhone:\s*string\s*\|\s*null/);
   // normalizePhone 把 null / 空串归一为 null。
   assert.match(code, /function\s+normalizePhone[\s\S]*?trimmed\.length\s*>\s*0\s*\?\s*trimmed\s*:\s*null/);
-  // hasValue 守卫落到「未设置」chip + 「待补充」tag。
+  // 有值展示账号已配，无值展示未设置。
   // 字符串字面量被 strip 成空格，需对中文部分做空白容忍匹配。
-  assert.match(code, /hasValue\s*\?\s*[\s\S]*?账号已配[\s\S]*?:\s*[\s\S]*?未设置/);
+  assert.match(code, /normalized\s*\?\s*[\s\S]*?账号已配[\s\S]*?:\s*[\s\S]*?未设置/);
   assert.match(servicePhoneSource, /data-tone="warn"/);
-  // 即使未登录也展示「去账号设置」按钮入口。
-  assert.match(code, /disabled=\{!currentAccountName\}/);
+  assert.doesNotMatch(code, /onOpenAccountEditor|去账号设置|Settings/);
 });
 
-test("BasicInfoButlerRow 接受 null 快照并提供「使用账号默认 / 去账号设置」入口", () => {
+test("BasicInfoButlerRow 接受 null 快照并只读展示账号默认联系人", () => {
   const code = stripCommentsAndStrings(butlerSource);
   // snapshotButler 必须是 ContactCardSelection | null。
   assert.match(code, /snapshotButler:\s*ContactCardSelection\s*\|\s*null/);
-  // 账号默认入口：仅当 accountButlerDefault 非空时显示「使用账号默认」按钮。
-  assert.match(code, /accountButlerDefault[\s\S]*?使用账号默认/);
-  // 未登录时按钮 disabled。
-  assert.match(code, /disabled=\{!currentAccountName\}/);
-  // 提供「清除」入口让用户撤销当前绑定。
-  assert.match(code, /清除/);
+  assert.match(code, /displayButler\s*=\s*accountButlerDefault\s*\?\?\s*snapshotButler/);
+  assert.match(butlerSource, /账号默认/);
+  assert.doesNotMatch(code, /onUseAccountButler|onClearButler|onOpenAccountEditor|清除|使用账号默认/);
 });
 
 test("BasicInfoSubtitleRow 默认展示「尚未填写」空状态，不再仅按非空挂载", () => {

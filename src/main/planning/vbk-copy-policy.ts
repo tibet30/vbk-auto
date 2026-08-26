@@ -6,6 +6,9 @@
  *  - 本地输出门禁，阻止违规文案落入 product JSON；
  *  - 重试错误反馈，让 AI 根据真实 bad case 自行改写。
  */
+const OFFICIAL_POI_IDENTITY_PATH = /\.(?:poiName|requestedName)$/;
+const FREE_COPY_PATH = /^(?!.*\.(?:poiName|requestedName)$)/;
+
 export const VBK_COPY_BAD_CASES = [
   {
     term: "首发",
@@ -26,6 +29,15 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /主席/,
   },
   {
+    term: "毛泽东",
+    reason: "VBK 产品图文接口实跑会判定为非法关键词",
+    alternatives: ["历史人物", "青年主题雕塑", "近现代文化地标"],
+    pattern: /毛泽东/,
+    // VBK suggestPoi 返回的官方实体名必须原样保留，不能为绕过文案校验
+    // 而破坏 POI 身份；自由描述、标题和卖点仍全部受本规则约束。
+    pathPattern: FREE_COPY_PATH,
+  },
+  {
     term: "礼佛",
     reason: "VBK 产品图文实跑会判定为非法关键词",
     alternatives: ["参观南普陀寺", "游览寺院", "参观人文景观"],
@@ -42,6 +54,12 @@ export const VBK_COPY_BAD_CASES = [
     reason: "VBK 行程描述实跑会判定为非法关键词",
     alternatives: ["郊区长城", "长城郊游", "长城景观"],
     pattern: /野长城/,
+  },
+  {
+    term: "之巅",
+    reason: "VBK 产品图文接口实跑会判定为非法关键词",
+    alternatives: ["高处", "峰顶", "代表性景观"],
+    pattern: /之巅/,
   },
   {
     term: "第一（宣传排名用语）",
@@ -70,12 +88,24 @@ export const VBK_COPY_BAD_CASES = [
   },
 ] as const;
 
+/**
+ * POI 的这两个字段是远端实体身份，不是面向用户的自由文案。
+ * 只有这两个字段允许保留官方返回的敏感词；其余路径一律按可见文案处理。
+ */
+export function isVbkOfficialPoiIdentityPath(path: string): boolean {
+  return OFFICIAL_POI_IDENTITY_PATH.test(path);
+}
+
 export function buildVbkCopyPolicyPrompt(): string {
   const rules = VBK_COPY_BAD_CASES.map(
     ({ term, reason, alternatives }) =>
       `- 禁止词「${term}」：${reason}；请按语境改写为「${alternatives.join("」或「")}」`,
   ).join("\n");
-  return `VBK 文案黑名单（适用于所有 AI 生成的可见文案，禁止原样输出）：\n${rules}`;
+  return [
+    "VBK 文案黑名单（适用于所有 AI 生成的可见文案，禁止原样输出）：",
+    rules,
+    "例外仅限官方 POI 身份字段 poiName 和 requestedName：它们必须原样保留远端官方名称，不得改写；不要把敏感词放进 title、description、features、recommendation、recommendations 或其他自由文案字段来规避限制。",
+  ].join("\n");
 }
 
 export function findVbkCopyBadCase(value: unknown, path = "value"):

@@ -72,6 +72,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     (await getPackage(page, productId, false))
     ?? (await createInitialPackage(page, product, productId));
   const days = product.itinerary?.length || current.resourceNameRule?.days || 0;
+  const priceInputType = product.sales?.splitGroup === true ? 5 : 1;
   const description = `${commercial.packageName}。${product.presentation?.recommendation ?? basic.subtitle ?? ""}`;
   const packageInfo = {
     ...current,
@@ -80,7 +81,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     vendorResourceCode: basic.supplierProductCode ?? current.vendorResourceCode,
     resourceNameRule: { ...(current.resourceNameRule ?? {}), days },
     confirmHour: 4,
-    priceInputType: 1,
+    priceInputType,
     isHotelShareRoom: "F",
     isContainBedFee: "F",
     isNeedCustomer: "T",
@@ -89,7 +90,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
   };
   await post(page, "savePackageItem", {
     contentType: "json",
-    priceInputType: "1",
+    priceInputType: String(priceInputType),
     productId: Number(productId) || productId,
     packageInfo,
   }, "VBK 套餐保存");

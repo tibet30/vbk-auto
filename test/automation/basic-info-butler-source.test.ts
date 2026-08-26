@@ -84,3 +84,17 @@ test("400 电话可独立读取，不再要求账号固定信息仍有 butlerNam
     fallbackUsed: false,
   });
 });
+
+test("400 电话优先按当前活动的规范 VBK 账号键读取，不把展示名当账号键", async (t) => {
+  const db = await newDatabase(t);
+  db.setSetting("vbkAccountName", "小璐");
+  db.setSetting("vbkActiveAccountKey", "vbk_671205");
+  db.setExtensionUserIdResolver(() => 3);
+  db.setAccountFixedInfo("3:vbk_671205", { servicePhone: "0609240" });
+
+  assert.deepEqual(resolveActiveServicePhoneContext(db, "小璐"), {
+    accountName: "vbk_671205",
+    servicePhone: "0609240",
+    fallbackUsed: false,
+  });
+});

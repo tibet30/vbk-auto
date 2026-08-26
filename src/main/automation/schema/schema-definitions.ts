@@ -226,6 +226,9 @@ export const productSchema = z
         "freeTravel",
       ]),
       splitGroup: z.boolean().default(false),
+      squareGroup: z.boolean().default(false),
+      maxGroupSize: z.number().int().min(2).max(50).optional(),
+      guideIncluded: z.boolean().default(true),
     }),
     basicInfo: z.object({
       supplierProductName: z.string().min(2).max(400),

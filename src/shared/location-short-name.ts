@@ -57,7 +57,6 @@ const ADMINISTRATIVE_SUFFIXES = [
   "市",
   "县",
   "旗",
-  "州",
   "区",
 ] as const;
 

@@ -136,15 +136,14 @@ test("withKnownVbkAccount in main.ts: saveCurrentSession 抛错被 .catch 捕获
   // 静态契约：调用方在 fire-and-forget 路径上必须显式 .catch(...)，
   // 防止 fs 错误变成 unhandled promise rejection。
   const mainSource = fs.readFileSync(
-    new URL("../../src/main/main.ts", import.meta.url),
+    new URL("../../src/main/infrastructure/vbk-account-status.ts", import.meta.url),
     "utf8",
   );
   // 必须在 browser 存在时直接 .saveCurrentSession().then(...).catch(...) 调用，
   // 且先做 browser 判空避免 TypeError。任意写法退化都会让 unhandled rejection
   // 重新出现。
   const withKnown = mainSource.slice(
-    mainSource.indexOf("function withKnownVbkAccount"),
-    mainSource.indexOf("/**\n * 计算产品 readiness"),
+    mainSource.indexOf("export function createWithKnownVbkAccount"),
   );
   assert.match(withKnown, /browser\.saveCurrentSession\(\)/);
   assert.match(withKnown, /\.then\(\(saved\)/);

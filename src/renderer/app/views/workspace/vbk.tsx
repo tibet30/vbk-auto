@@ -112,13 +112,12 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
             <small>就绪度</small>
           </div>
         </div>
-        {product.automation && (
-          <section className={styles.productSection}>
+        <section className={styles.productSection}>
             <div className={styles.productSectionHead}>
               <span className={layout.panelNum}>C</span>
               <strong className={styles.productSectionTitle}>自动录入进度</strong>
               <span className={styles.productSectionMeta}>
-                {product.automation.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
+                {product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
               </span>
             </div>
             <div className={styles.automation}>
@@ -181,8 +180,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
               )}
               <p className={styles.automationNote}>只保存草稿，不提交审核或发布。</p>
             </div>
-          </section>
-        )}
+        </section>
       </div>
       <footer className={styles.productFooter}>
         <div className={styles.productFooterActions}>

@@ -24,6 +24,7 @@ import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import type { MainIpcContext } from "./context.js";
+import { isProductForm } from "../../shared/product-form.js";
 
 export function registerPlanningV2Ipc(context: MainIpcContext): void {
   const acceptingItineraries = new Set<string>();
@@ -70,14 +71,19 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
       };
       const planner = new OpenAICompatiblePlannerAdapter(plannerConfig).withUsageScope(usageScope);
       const threeStageAi = new OpenAIThreeStagePlanningAi(plannerConfig).withUsageScope(usageScope);
-      const runtime = new DbOrchestratorRuntime(context.db, context.browser, context.productMutations);
+      const runtime = new DbOrchestratorRuntime(
+        context.db,
+        context.browser,
+        context.productMutations,
+        (task) => context.productWorkflows.runVbkPageExclusive(task),
+      );
       const skeleton = {
         destination,
         province,
         city: destinationCity,
         days,
         nights: Number(basic.nights) || Math.max(0, days - 1),
-        productForm: sales.productForm === "groupTour" ? "groupTour" as const : "privateTour" as const,
+        productForm: isProductForm(sales.productForm) ? sales.productForm : "privateTour",
         productType: sales.productType === "domesticLong" ? "domesticLong" as const : "domesticShort" as const,
         supplierProductCode: text(basic.supplierProductCode),
       };
@@ -106,13 +112,14 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
         context.emitPlanningState(toLegacyState(remote.id, plan));
       };
 
-      const assertVbkLogin = async () => {
+      const assertVbkLoginUnlocked = async () => {
         const login = await context.browser.status(true);
         if (!login.loggedIn) throw new Error(login.message || "VBK 登录已失效，请重新登录后继续规划。");
         if (!login.accountName?.trim() && !login.loginAccount?.trim()) {
           throw new Error("VBK 登录账号无法识别，请重新登录后继续规划。");
         }
       };
+      const assertVbkLogin = () => context.productWorkflows.runVbkPageExclusive(assertVbkLoginUnlocked);
 
       const plan = await runThreeStagePlan({
         localProductId,
@@ -125,11 +132,12 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
         assertVbkLogin,
         privateTour: skeleton.productForm === "privateTour",
         providerLabel: plannerConfig.provider,
-        queryPoi: async (name) => suggestPoiDetail(await context.browser.page(), name, {
-          destinationCity: skeleton.city,
-          province: skeleton.province,
-        }),
-        resolveCover: async () => {
+        queryPoi: async (name) => context.productWorkflows.runVbkPageExclusive(async () =>
+          suggestPoiDetail(await context.browser.page(), name, {
+            destinationCity: skeleton.city,
+            province: skeleton.province,
+          })),
+        resolveCover: async () => context.productWorkflows.runVbkPageExclusive(async () => {
           let current = context.db.getProduct(localProductId);
           if (!current) throw productNotFound(localProductId);
           const preparedProduct = ensureCoverUsesFinalItineraryPoi(current.product);
@@ -142,7 +150,8 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
             page: await context.browser.page(),
             product: current.product,
             injectSearch: async (page, keyword) => {
-              await assertVbkLogin();
+              // resolveCover 已持有共享 VBK 页面门，不能在这里二次入队。
+              await assertVbkLoginUnlocked();
               return searchCtripLibraryImages(page, keyword);
             },
           });
@@ -162,8 +171,8 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
             complete: isCtripLibraryCoverComplete(nextCover),
             summary: result.outcome.written ? `已匹配真实封面 imageId ${result.outcome.imageId}` : result.outcome.reason,
           };
-        },
-        resolveVehicle: async () => {
+        }),
+        resolveVehicle: async () => context.productWorkflows.runVbkPageExclusive(async () => {
           let current = context.db.getProduct(localProductId);
           if (!current) throw productNotFound(localProductId);
           const requested = asRecord(asRecord(current.product.operations)?.vehicleResource);
@@ -201,7 +210,7 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
               ? `已匹配 ${text(resource?.resourceGroupName)}（${resource?.resourceGroupId}）`
               : result.outcome.reason,
           };
-        },
+        }),
       });
     return toRunResult(localProductId, plan);
   };

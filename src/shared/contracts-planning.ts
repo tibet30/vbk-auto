@@ -315,7 +315,7 @@ export interface PlanningSkeleton {
   destination: string;
   days: number;
   nights: number;
-  productForm: "privateTour" | "groupTour";
+  productForm: import("./product-form.js").ProductForm;
   productType: "domesticShort" | "domesticLong";
   /** 系统生成的供应商产品编号（AI 不可修改）。 */
   supplierProductCode: string;

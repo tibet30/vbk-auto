@@ -64,13 +64,14 @@ export async function acceptItineraryAndRerunCompletion(args: {
     let lookupPoi = args.lookupPoi;
     if (!lookupPoi) {
       try {
-        const page = await context.browser.page();
-        lookupPoi = async (name, poiContext) => {
+        await context.productWorkflows.runVbkPageExclusive(() => context.browser.status());
+        lookupPoi = async (name, poiContext) => context.productWorkflows.runVbkPageExclusive(async () => {
+          const page = await context.browser.page();
           const best = (await suggestPoiDetail(page, name, poiContext)).best;
           return best && Number.isInteger(best.poiId) && best.poiId > 0 && best.poiName.trim() && !isTravelNodeName(best.poiName)
             ? { poiName: best.poiName.trim(), poiId: best.poiId }
             : null;
-        };
+        });
       } catch {
         // POI 是尽力匹配项。页面暂不可用时保留用户景点名，交给运营稍后手动配置。
       }

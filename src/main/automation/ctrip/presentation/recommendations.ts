@@ -17,6 +17,32 @@ export interface RecommendationPlanStep {
   text: string;
 }
 
+export const VBK_RECOMMENDATION_MAX_LENGTH = 84;
+
+/**
+ * 现场确认 VBK 推荐理由输入框只接受这组标点的等价形式；只做无语义
+ * 的标点规范化，敏感词、措辞和结构化字段必须由规划阶段重新生成。
+ */
+export function normalizeVbkRecommendationPunctuation(value: string): string {
+  return value
+    .trim()
+    .replace(/[,:：;；!！?？。]/g, "，")
+    .replace(/[—–]/g, "-")
+    .replace(/，{2,}/g, "，")
+    .replace(/，+$/g, "");
+}
+
+export function normalizeVbkRecommendation(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error("推荐理由文本必须是 string，禁止自动转换类型。");
+  }
+  return normalizeVbkRecommendationPunctuation(value);
+}
+
+function recommendationByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
 /**
  * 把 recommendations 编译成推荐理由写入计划：
  *   - 必须 length=3；
@@ -34,15 +60,28 @@ export function buildRecommendationReasonsPlan(
   const seen = new Set<string>();
   const plan: RecommendationPlanStep[] = [];
   for (let i = 0; i < 3; i += 1) {
-    const item = recommendations[i] as { category: string; text: string };
-    const { category, text } = item;
+    const item = recommendations[i];
+    if (!item || typeof item !== "object") {
+      throw new Error(`推荐理由第 ${i + 1} 项必须是对象。`);
+    }
+    const { category, text } = item as { category: unknown; text: unknown };
+    if (typeof category !== "string") {
+      throw new Error(`推荐理由第 ${i + 1} 项分类必须是 string。`);
+    }
+    if (typeof text !== "string") {
+      throw new Error(`推荐理由第 ${i + 1} 项文本必须是 string，禁止自动转换类型。`);
+    }
     if (!RECOMMENDATION_CATEGORIES.includes(category)) {
       throw new Error(`推荐理由分类「${category}」不在白名单。`);
     }
-    if (!text || !text.trim()) {
+    const normalizedText = normalizeVbkRecommendation(text);
+    if (!normalizedText) {
       throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
     }
-    const copyBadCase = findVbkCopyBadCase(text, `recommendations.${i}.text`);
+    if (recommendationByteLength(normalizedText) > VBK_RECOMMENDATION_MAX_LENGTH) {
+      throw new Error(`推荐理由第 ${i + 1} 项超过 VBK 长度限制（${VBK_RECOMMENDATION_MAX_LENGTH} 字节），请重新生成更短文案。`);
+    }
+    const copyBadCase = findVbkCopyBadCase(normalizedText, `recommendations.${i}.text`);
     if (copyBadCase) {
       throw new Error(
         `推荐理由第 ${i + 1} 项命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,
@@ -52,7 +91,7 @@ export function buildRecommendationReasonsPlan(
       throw new Error(`推荐理由分类「${category}」重复。`);
     }
     seen.add(category);
-    plan.push({ index: i, category, text });
+    plan.push({ index: i, category, text: normalizedText });
   }
   return plan;
 }

@@ -127,14 +127,16 @@ export function resolveActiveServicePhoneContext(
     return { accountName: name, servicePhone, fallbackUsed: false };
   };
 
-  if (accountName) {
-    const direct = isReady(accountName);
+  const activeAccountKey = db.getSetting("vbkActiveAccountKey")?.value?.trim() || "";
+  const directCandidates = [...new Set([activeAccountKey, accountName?.trim() || ""].filter(Boolean))];
+  for (const candidate of directCandidates) {
+    const direct = isReady(candidate);
     if (direct) return direct;
   }
 
   const known = db.listKnownAccounts().map((item) => item.accountName);
   for (const name of known) {
-    if (accountName && name === accountName) continue;
+    if (directCandidates.includes(name)) continue;
     const fallback = isReady(name);
     if (fallback) {
       logWarn(

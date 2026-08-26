@@ -1,6 +1,7 @@
 import { ChevronRight } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
 import { CopyableId, statusLabel } from "../../helpers";
+import { PRODUCT_FORM_LABELS, type ProductForm } from "../../../../shared/product-form.js";
 import shared from "../shared.module.less";
 import { AccountPopover } from "./AccountPopover";
 import styles from "./Topbar.module.less";
@@ -29,6 +30,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
   } = model;
 
   const showProductTools = Boolean(product) && view === "workspace";
+  const productForm = product ? ((Object.entries(PRODUCT_FORM_LABELS).find(([, label]) => product.name.endsWith(label))?.[0] ?? "privateTour") as ProductForm) : null;
 
   // 非工作台视图下，顶栏左侧显示当前页面名，比写死"VBK Desktop"更符合 macOS
   // 顶栏语义（顶栏 = 当前文档/视图名）。工作台视图下保持原产品面包屑。
@@ -53,7 +55,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
             <ChevronRight size={13} className={styles.crumbSep} aria-hidden="true" />
             <span
               className={styles.crumbCurrent}
-              data-form={product.name.endsWith("跟团游") ? "groupTour" : "privateTour"}
+              data-form={productForm ?? "privateTour"}
             >
               <strong className={styles.title}>{product.name}</strong>
               <CopyableId value={product.id} className={styles.copyableIdTopbar} />

@@ -133,6 +133,46 @@ test("ThreeStage 第一阶段通过结构化工具返回省市，并把上一轮
   assert.match(String((request.messages as Array<{ content: string }>)[1].content), /destinationCity 为空/);
 });
 
+test("ThreeStage 行程提示词携带完整 VBK 文案黑名单", async (t) => {
+  const server = await startCapturingServer(t, (_req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(okToolCallResponse("submit_verified_itinerary", {
+      days: [{
+        day: 1,
+        title: "城市人文漫游",
+        description: "按片区依次游览",
+        poiIds: [77593],
+        meals: "早餐自理；午餐自理；晚餐自理",
+        mealDescriptions: ["早餐自理", "午餐自理", "晚餐自理"],
+      }],
+    }));
+  });
+  const ai = new OpenAIThreeStagePlanningAi({
+    apiKey: "itinerary-test-key",
+    baseUrl: server.url,
+    model: "itinerary-model",
+    provider: "test-provider",
+  });
+  await ai.composeVerifiedItinerary({
+    destination: "武汉",
+    days: 1,
+    candidates: [{
+      requestedName: "黄鹤楼",
+      status: "resolved",
+      poiId: 77593,
+      poiName: "黄鹤楼",
+      province: "湖北",
+      city: "武汉",
+    }],
+    previousError: "上一轮命中祈福",
+  });
+  const messages = server.captured[0].parsedBody.messages as Array<{ content: string }>;
+  assert.match(messages[0].content, /VBK 文案黑名单/);
+  assert.match(messages[0].content, /祈福/);
+  assert.match(messages[0].content, /第一（宣传排名用语）/);
+  assert.match(messages[1].content, /上一轮命中祈福/);
+});
+
 // ───────────────────────── transport param mapping ─────────────────────────
 
 test("MiniMax 请求 body 含 thinking/reasoning_split/service_tier，Authorization 正确", async (t) => {

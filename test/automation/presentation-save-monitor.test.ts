@@ -466,3 +466,16 @@ test("产品图文主流程：直接接口保存必须先于推进下一页", as
     "tabs.ts 不应被本任务改动（只收窄产品图文）",
   );
 });
+
+test("产品图文手动保存后刷新落到行程描述时，必须按已推进处理", async () => {
+  const here = resolve("test/automation/presentation-save-monitor.test.ts");
+  const mainPath = resolve(here, "../../../src/main/automation/ctrip/presentation/main.ts");
+  const src = await readFile(mainPath, "utf8");
+  const reloadIndex = src.indexOf("await page.reload({ waitUntil: \"domcontentloaded\" });");
+  const idempotentIndex = src.indexOf("isItineraryUrl(page.url())", reloadIndex);
+  const advanceIndex = src.indexOf("return saveThenAdvance(page, {", reloadIndex);
+  assert.ok(reloadIndex >= 0, "产品图文保存后必须刷新并回读页面");
+  assert.ok(idempotentIndex > reloadIndex, "刷新后必须检查是否已经落到行程描述页");
+  assert.ok(idempotentIndex < advanceIndex, "已落到行程描述页时必须在 saveThenAdvance 前返回");
+  assert.match(src, /mode: \"already-advanced\"/, "幂等成功必须留下明确结果模式");
+});

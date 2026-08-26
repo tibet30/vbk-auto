@@ -25,7 +25,12 @@ export function preparePhaseRetry(
   const retryIndex = phases.indexOf(retryPhase);
   if (retryIndex < 0) throw new Error(`无法重试未知阶段：${retryPhase}`);
   const failed = previous.phases.find((item) => item.phase === retryPhase);
-  if (failed?.status !== "failed") throw new Error(`阶段 ${retryPhase} 当前不是失败状态。`);
+  const interruptedRecovery = failed?.status === "running"
+    && previous.recovery?.phases[retryPhase]?.state === "needs_user"
+    && previous.recovery.phases[retryPhase].finalError === "应用重启导致自动录入被中断";
+  if (failed?.status !== "failed" && !interruptedRecovery) {
+    throw new Error(`阶段 ${retryPhase} 当前不是失败状态。`);
+  }
 
   return {
     ...previous,

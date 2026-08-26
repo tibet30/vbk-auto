@@ -137,8 +137,9 @@ export function setClauseComponentValue(items, clauseItemId, componentCode, valu
   return next;
 }
 
-export async function saveStructuredProductClauses(page, productId) {
-  return page.evaluate(async ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote }) => {
+export async function saveStructuredProductClauses(page, productId, options = {}) {
+  const isFreeTravel = options?.productForm === "freeTravel";
+  return page.evaluate(async ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, isFreeTravel }) => {
     const request = async (url, body, contentType = "application/json") => {
       const response = await fetch(url, {
         method: "POST",
@@ -257,19 +258,21 @@ export async function saveStructuredProductClauses(page, productId) {
         "text/plain;charset=UTF-8",
       );
       let items = format(clausePackage.clauseTypeDtos);
-      if (tabEnum === 1) {
+      if (tabEnum === 1 && !isFreeTravel) {
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.mandarinGuide);
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
       }
-      if (tabEnum === 2) {
+      if (tabEnum === 2 && !isFreeTravel) {
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
         items = setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
       }
-      if (tabEnum === 3) items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
-      for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
-        items = ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
+      if (tabEnum === 3 && !isFreeTravel) items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
+      if (!isFreeTravel) {
+        for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
+          items = ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
+        }
       }
       let savePackage;
       try {
@@ -320,7 +323,9 @@ export async function saveStructuredProductClauses(page, productId) {
         "text/plain;charset=UTF-8",
       );
       const persistedIds = new Set(format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
-      const missingIds = (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
+      const missingIds = isFreeTravel
+        ? []
+        : (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
       if (missingIds.length > 0) {
         throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
       }
@@ -333,5 +338,6 @@ export async function saveStructuredProductClauses(page, productId) {
     requiredIds: REQUIRED_CLAUSE_IDS,
     defaultSelectedClauseIds: DEFAULT_SELECTED_CLAUSE_IDS,
     lodgingSelfPayNote: LODGING_SELF_PAY_NOTE,
+    isFreeTravel,
   });
 }

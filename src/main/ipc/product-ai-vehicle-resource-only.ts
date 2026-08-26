@@ -52,7 +52,7 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
     product = productMutations.replace(localProductId, nextJson, { status: "review", notify: false });
   }
 
-  const login = await context.browser.status();
+  const login = await context.productWorkflows.runVbkPageExclusive(() => context.browser.status());
   if (!login.loggedIn) {
     db.updateMessageStatus(localProductId, userMessageId, "succeeded");
     db.addMessage(
@@ -67,10 +67,11 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
     return true;
   }
 
-  const result = await applyAutoVehicleResourceTrigger({
-    page: await context.browser.page(),
-    product,
-  });
+  const result = await context.productWorkflows.runVbkPageExclusive(async () =>
+    applyAutoVehicleResourceTrigger({
+      page: await context.browser.page(),
+      product,
+    }));
   if (result.outcome.written) {
     productMutations.replace(localProductId, result.nextProduct.product, { status: "review", notify: false });
     if (result.outcome.resourceGroupId) {

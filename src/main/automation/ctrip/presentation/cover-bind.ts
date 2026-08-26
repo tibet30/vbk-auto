@@ -15,6 +15,7 @@ const BIND_PRODUCT_IMAGE_ENDPOINT =
 const SEARCH_PRODUCT_IMAGE_ENDPOINT =
   "https://online.ctrip.com/restapi/soa2/20698/searchProductImage.json";
 const COVER_IMAGE_TYPE_ID = 2;
+const ATTRACTION_IMAGE_TYPE_ID = 4;
 
 interface ProductImageRecord {
   imageId?: unknown;
@@ -43,6 +44,20 @@ export function buildCoverBindRequest(productId: number, imageId: number) {
   };
 }
 
+export function buildImageTypeBindRequest(productId: number, imageId: number, imageTypeId: number) {
+  assertPositiveInteger(productId, "VBK 产品 ID");
+  assertPositiveInteger(imageId, "图片 imageId");
+  assertPositiveInteger(imageTypeId, "图片类型 imageTypeId");
+  return {
+    productId,
+    productImages: [{
+      imageId,
+      accompanyTourInfo: { imageTypeId, slideShowType: 2 },
+    }],
+    isCover: false,
+  };
+}
+
 export function readProductIdFromVbkUrl(url: string): number {
   let productId = 0;
   try {
@@ -56,13 +71,17 @@ export function readProductIdFromVbkUrl(url: string): number {
 }
 
 export function responseHasBoundCover(payload: unknown, imageId: number): boolean {
+  return responseHasImageType(payload, imageId, COVER_IMAGE_TYPE_ID);
+}
+
+function responseHasImageType(payload: unknown, imageId: number, imageTypeId: number): boolean {
   const record = asRecord(payload);
   const images = Array.isArray(record?.productImages) ? record.productImages : [];
   return images.some((entry) => {
     const outer = asRecord(entry) as ProductImageRecord | null;
     const image = asRecord(outer?.imageInfo) as ProductImageRecord | null ?? outer;
     return Number(image?.imageId) === imageId
-      && Number(image?.accompanyTourInfo?.imageTypeId) === COVER_IMAGE_TYPE_ID;
+      && Number(image?.accompanyTourInfo?.imageTypeId) === imageTypeId;
   });
 }
 
@@ -71,11 +90,46 @@ export async function bindCtripLibraryCoverViaApi(
   imageId: number,
   options: CoverBindOptions = {},
 ): Promise<{ reused: boolean; productId: number; imageId: number }> {
+  assertPositiveInteger(imageId, "封面 imageId");
   const productId = readProductIdFromVbkUrl(page.url());
   const existingResult = await searchProductImages(page, productId);
   assertBusinessSuccess(existingResult, "确认现有产品封面", false);
+  const existingImages = productImageInfos(existingResult.payload);
   if (responseHasBoundCover(existingResult.payload, imageId)) {
     return { reused: true, productId, imageId };
+  }
+
+  // 只有 imageTypeId=2 明确表示“当前产品封面”。imageTypeId=0 仅表示
+  // 未分类，无法推断其业务类型，必须保持不动；否则会误改酒店、餐饮等素材。
+  const oldCovers = existingImages.filter((image) =>
+    Number(image.imageId) !== imageId
+    && Number(image.accompanyTourInfo?.imageTypeId) === COVER_IMAGE_TYPE_ID,
+  );
+  if (oldCovers.length > 1) {
+    throw new Error("更换封面失败：远端存在多个当前封面，无法安全确定需要归类的旧封面。请先在 VBK 处理重复封面。");
+  }
+  const oldCover = oldCovers[0];
+  let reclassifiedOldCoverId: number | undefined;
+  if (oldCover) {
+    const oldCoverId = Number(oldCover.imageId);
+    if (!Number.isInteger(oldCoverId) || oldCoverId <= 0) {
+      throw new Error("更换封面失败：远端当前封面缺少合法 imageId，已停止写入。");
+    }
+    const reclassifyResult = await request(page, {
+      endpoint: BIND_PRODUCT_IMAGE_ENDPOINT,
+      body: buildImageTypeBindRequest(productId, oldCoverId, ATTRACTION_IMAGE_TYPE_ID),
+      errorLabel: "归类旧产品封面",
+    });
+    assertBusinessSuccess(reclassifyResult, "归类旧产品封面", true);
+    await confirmImageType(
+      page,
+      productId,
+      oldCoverId,
+      ATTRACTION_IMAGE_TYPE_ID,
+      "归类旧产品封面",
+      options,
+    );
+    reclassifiedOldCoverId = oldCoverId;
   }
 
   const bindResult = await request(page, {
@@ -90,12 +144,48 @@ export async function bindCtripLibraryCoverViaApi(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const searchResult = await searchProductImages(page, productId);
     assertBusinessSuccess(searchResult, "确认产品封面", false);
-    if (responseHasBoundCover(searchResult.payload, imageId)) {
+    if (responseHasBoundCover(searchResult.payload, imageId)
+      && (reclassifiedOldCoverId === undefined
+        || responseHasImageType(searchResult.payload, reclassifiedOldCoverId, ATTRACTION_IMAGE_TYPE_ID))) {
       return { reused: false, productId, imageId };
     }
     if (attempt < attempts - 1 && intervalMs > 0) await delay(intervalMs);
   }
+  if (reclassifiedOldCoverId !== undefined) {
+    throw new Error(
+      `封面接口已返回成功，但回读未同时确认新封面 imageId=${imageId} 与旧图 imageId=${reclassifiedOldCoverId} 的最终类型。`,
+    );
+  }
   throw new Error(`封面接口已返回成功，但回读未确认 imageId=${imageId} 已设置为产品封面。`);
+}
+
+async function confirmImageType(
+  page: VbkSessionRequestBrowser,
+  productId: number,
+  imageId: number,
+  imageTypeId: number,
+  label: string,
+  options: CoverBindOptions,
+): Promise<void> {
+  const attempts = positiveAttemptCount(options.confirmationAttempts, 10);
+  const intervalMs = nonNegativeDelay(options.confirmationIntervalMs, 500);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const searchResult = await searchProductImages(page, productId);
+    assertBusinessSuccess(searchResult, label, false);
+    if (responseHasImageType(searchResult.payload, imageId, imageTypeId)) return;
+    if (attempt < attempts - 1 && intervalMs > 0) await delay(intervalMs);
+  }
+  throw new Error(`${label}接口已返回成功，但回读未确认 imageId=${imageId} 的图片类型为 ${imageTypeId}。`);
+}
+
+function productImageInfos(payload: unknown): ProductImageRecord[] {
+  const record = asRecord(payload);
+  const images = Array.isArray(record?.productImages) ? record.productImages : [];
+  return images.flatMap((entry) => {
+    const outer = asRecord(entry) as ProductImageRecord | null;
+    const image = asRecord(outer?.imageInfo) as ProductImageRecord | null ?? outer;
+    return image ? [image] : [];
+  });
 }
 
 async function searchProductImages(
@@ -166,6 +256,7 @@ function nonNegativeDelay(value: number | undefined, fallback: number): number {
 }
 
 export {
+  ATTRACTION_IMAGE_TYPE_ID,
   BIND_PRODUCT_IMAGE_ENDPOINT,
   COVER_IMAGE_TYPE_ID,
   SEARCH_PRODUCT_IMAGE_ENDPOINT,

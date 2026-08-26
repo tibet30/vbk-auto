@@ -7,6 +7,8 @@
  * 顶部带 `// @ts-nocheck`，类型文件以注释为主。
  */
 
+import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
+
 export type CityOptionMatch =
   | { kind: "matched"; index: number; label: string }
   | { kind: "ambiguous"; labels: string[] }
@@ -56,7 +58,10 @@ export function pickCityOption(
   };
   const matches = seen
     .map((label, index) => ({ label, index, ...splitLabel(label) }))
-    .filter((entry) => entry.city === target);
+    // VBK 有时只提供带行政尾缀的正式名称（例如「中国-平遥县」），
+    // 而产品行政地点按平台常用短名保存为「平遥」。国家前缀仍需精确，
+    // 这里只放宽同一行政地点的标准尾缀，不接受其它国家或相似地名。
+    .filter((entry) => entry.city === target || toPlatformShortLocationName(entry.city) === toPlatformShortLocationName(target));
 
   if (preferredCountry) {
     const wantedCountry = preferredCountry.trim();

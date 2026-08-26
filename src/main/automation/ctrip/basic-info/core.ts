@@ -55,6 +55,7 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   await numberInputs.nth(0).fill(String(info.days));
   await numberInputs.nth(1).fill(String(info.nights));
 
+  info.subtitle = normalizeVbkSubtitle(info.subtitle, info.meetingCity || info.destinationCity);
   await fillById(page, "baseInfo.subName", info.subtitle, "副标题输入框");
   await fillById(
     page,
@@ -86,6 +87,40 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   await fillLocalTravelAgency(page);
   if (butlerSelection) await fillButlerContact(page, butlerSelection);
   await repairBasicInfoIllegalKeywords(page, info);
+}
+
+/**
+ * VBK 基本信息页要求副标题至少 30 个字符；规划结果可能只有产品名，
+ * 这在本地 schema 合法但会在真实页面保存时触发红框。保留原文并补充
+ * 目的地/体验边界，按 VBK 的中文 2、ASCII 1 计数规则控制在 80 上限内。
+ */
+export function normalizeVbkSubtitle(value, city = "") {
+  const current = String(value ?? "").trim();
+  if (vbkTextLength(current) >= 30) return truncateVbkText(current, 80);
+  const location = String(city ?? "").trim();
+  const suffix = `｜${location || "目的地"}核心景点与当地文化体验，灵活安排自由时间与接送服务`;
+  const normalized = `${current}${suffix}`.trim();
+  if (vbkTextLength(normalized) >= 30) return truncateVbkText(normalized, 80);
+  return truncateVbkText(`${normalized}，适合轻松出行`, 80);
+}
+
+export function vbkTextLength(value) {
+  return Array.from(String(value ?? "")).reduce(
+    (total, character) => total + (/^[\x00-\xff]$/.test(character) ? 1 : 2),
+    0,
+  );
+}
+
+function truncateVbkText(value, limit) {
+  let total = 0;
+  let result = "";
+  for (const character of Array.from(String(value ?? ""))) {
+    const width = /^[\x00-\xff]$/.test(character) ? 1 : 2;
+    if (total + width > limit) break;
+    result += character;
+    total += width;
+  }
+  return result;
 }
 
 export function stripIllegalKeywords(value, keywords) {

@@ -5,7 +5,7 @@
  *   - waitForRowEnabledSelect 等合同启用的 ant-select 出现；
  *   - setEnabledSelectByLabel / setSplitGroupIfPresent / selectLineBrandFirstOption
  *     安全地点开 / 选下拉（异常走 skipped，不抛错以免阻塞后续阶段）；
- *   - checkAllEnabledDistributionChannels 批量勾选「分销渠道」，跳过泛定制-C 与 disabled 项。
+ *   - checkAllEnabledDistributionChannels 批量勾选「分销渠道」，跳过途风、泛定制-C 与 disabled 项。
  *
  * 头部带 `// @ts-nocheck`，形参 page 是动态传入。
  */
@@ -18,12 +18,22 @@ import { findFirstEnabledOptionIndex } from "../../schema/schema-functions.js";
  * 用 escapeRegExp 包裹 label，保证 label 含元字符时也不会被 RegExp 误匹配。
  */
 function findRowByTitle(page, label) {
-  return page
+  const legacyRow = page
     .locator(".saleControl-body .ant-row")
     .filter({
       has: page.locator(".saleControl-title", { hasText: new RegExp(`^\\s*${escapeRegExp(label)}\\s*\\*?\\s*$`) }),
     })
     .first();
+
+  // 新版页面把「是否拼小团」等动态字段放在 ant-form-item，标题是
+  // label[title]，不在 .saleControl-body 的旧 ant-row 中。
+  const modernRow = page
+    .locator(".ant-form-item")
+    .filter({ has: page.locator(`label[title="${label.replaceAll('"', '\\"')}"]`) })
+    .first();
+  // first() 保证过渡渲染短暂并存两套结构时只操作页面顺序靠前的一行，
+  // 不会把两组 checkbox 合并为一个列表。
+  return legacyRow.or(modernRow).first();
 }
 
 /**
@@ -94,11 +104,10 @@ async function setEnabledSelectByLabel(page, row, label, description) {
 }
 
 /**
- * 找「是否拆团 / 是否独立成团 / 支持拆团」三组候选标题之一，wantSplit=true 时选「是」否则「否」。
- * 任一命中即返回；都没命中返回 skipped = "split-group-row-not-found"。
+ * 配置跟团游 / 半自助的拼小团链路：是否拼小团、是否参加广场拼团、最大拼团人数。
  */
-async function setSplitGroupIfPresent(page, wantSplit) {
-  const candidates = ["是否拆团", "是否独立成团", "支持拆团"];
+async function setSmallGroupIfPresent(page, { wantSplit = true, joinSquareGroup = true, maxGroupSize = 8 } = {}) {
+  const candidates = ["是否拼小团", "是否拆团", "是否独立成团", "支持拆团"];
   for (const label of candidates) {
     const row = findRowByTitle(page, label);
     const count = await row.count();
@@ -107,10 +116,107 @@ async function setSplitGroupIfPresent(page, wantSplit) {
     const radioCount = await radio.count();
     if (radioCount >= 1) {
       await radio.first().check().catch(() => {});
-      return { row: label, selected: wantSplit ? "是" : "否" };
+      if (!(await radio.first().isChecked().catch(() => false))) return { row: label, skipped: "small-group-selection-not-confirmed" };
+      if (!wantSplit) return { row: label, selected: "否" };
+
+      const squareRows = ["是否参加广场拼团", "是否参加拼单广场"];
+      let squareRow = null;
+      for (const squareLabel of squareRows) {
+        const candidate = findRowByTitle(page, squareLabel);
+        if (await candidate.count()) {
+          squareRow = candidate;
+          break;
+        }
+      }
+      if (!squareRow) return { row: label, skipped: "square-group-row-not-found" };
+      const squareRadio = squareRow.getByRole("radio", { name: joinSquareGroup ? "是" : "否", exact: true });
+      if (!(await squareRadio.count())) return { row: label, skipped: "square-group-row-not-found" };
+      await squareRadio.first().check().catch(() => {});
+      if (!(await squareRadio.first().isChecked().catch(() => false))) return { row: label, skipped: "square-group-selection-not-confirmed" };
+
+      const maxRows = ["最大拼团人数", "最大成团人数"];
+      let maxInput = null;
+      for (const maxLabel of maxRows) {
+        const candidate = findRowByTitle(page, maxLabel).locator("input").first();
+        if (await candidate.count()) {
+          maxInput = candidate;
+          break;
+        }
+      }
+      if (!maxInput) {
+        return {
+          row: label,
+          selected: "是",
+          squareGroup: joinSquareGroup ? "是" : "否",
+          maxGroupSize: null,
+          maxGroupSizeUnavailable: "platform-not-exposed",
+        };
+      }
+      // Ant Design InputNumber 在初始展示值已经是目标值时，直接 fill 同值
+      // 不会触发 React onChange，保存 DTO 仍可能保留服务端默认 0。先写入一个
+      // 不同的合法值，再写回目标值，确保表单状态真实更新。
+      const currentValue = (await maxInput.inputValue().catch(() => "")).trim();
+      if (currentValue === String(maxGroupSize)) {
+        await maxInput.fill(String(alternateSmallGroupInputValue(maxGroupSize)));
+      }
+      await maxInput.fill(String(maxGroupSize));
+      await maxInput.press("Tab").catch(() => {});
+      if ((await maxInput.inputValue().catch(() => "")).trim() !== String(maxGroupSize)) return { row: label, skipped: "max-group-size-not-confirmed" };
+      return { row: label, selected: "是", squareGroup: joinSquareGroup ? "是" : "否", maxGroupSize };
     }
   }
   return { skipped: "split-group-row-not-found" };
+}
+
+function alternateSmallGroupInputValue(maxGroupSize) {
+  return Number(maxGroupSize) === 1 ? 2 : Number(maxGroupSize) - 1;
+}
+
+async function readSmallGroupState(page) {
+  const splitLabels = ["是否拼小团", "是否拆团", "是否独立成团", "支持拆团"];
+  let splitRow = null;
+  for (const label of splitLabels) {
+    const candidate = findRowByTitle(page, label);
+    if (await candidate.count()) {
+      splitRow = candidate;
+      break;
+    }
+  }
+  if (!splitRow) return { available: false };
+
+  const splitYes = splitRow.getByRole("radio", { name: "是", exact: true }).first();
+  const squareLabels = ["是否参加广场拼团", "是否参加拼单广场"];
+  let squareRow = null;
+  for (const label of squareLabels) {
+    const candidate = findRowByTitle(page, label);
+    if (await candidate.count()) {
+      squareRow = candidate;
+      break;
+    }
+  }
+  const squareYes = squareRow?.getByRole("radio", { name: "是", exact: true }).first();
+  const maxLabels = ["最大拼团人数", "最大成团人数"];
+  let maxInput = null;
+  for (const label of maxLabels) {
+    const candidate = findRowByTitle(page, label).locator("input").first();
+    if (await candidate.count()) {
+      maxInput = candidate;
+      break;
+    }
+  }
+  return {
+    available: true,
+    splitGroup: await splitYes.isChecked().catch(() => false),
+    squareGroup: squareYes ? await squareYes.isChecked().catch(() => false) : false,
+    maxGroupSize: maxInput ? Number(await maxInput.inputValue().catch(() => "")) : NaN,
+  };
+}
+
+function smallGroupStateMatches(state, maxGroupSize) {
+  return state?.available === true
+    && state.splitGroup === true
+    && state.squareGroup === true
+    && Number(state.maxGroupSize) === Number(maxGroupSize);
 }
 
 /**
@@ -166,11 +272,17 @@ async function selectLineBrandFirstOption(page) {
 
 /**
  * 「分销渠道」批量勾选：遍历所有 .ant-checkbox-wrapper，
- *   - 跳过「泛定制-C」类定制渠道；
+ *   - 跳过「途风」和「泛定制-C」类定制渠道；
  *   - 跳过 disabled 和已勾选项；
  *   - 点完一次后回读状态，不成功时调用 dismissCustomizationModal 关闭可能弹出的泛定制弹层；
- * 返回 picked / skippedDisabled / skippedAlreadyChecked / skippedCustomization / total 给上层。
+ * 返回 picked / skippedDisabled / skippedAlreadyChecked / skippedCustomization / skippedExcluded / total 给上层。
  */
+const DISTRIBUTION_CHANNELS_TO_SKIP = new Set(["途风"]);
+
+function shouldSkipDistributionChannel(label) {
+  return DISTRIBUTION_CHANNELS_TO_SKIP.has(label) || /^泛定制-C$/.test(label);
+}
+
 async function checkAllEnabledDistributionChannels(page) {
   const row = findRowByTitle(page, "分销渠道");
   await row.waitFor({ state: "visible", timeout: 10_000 });
@@ -188,11 +300,17 @@ async function checkAllEnabledDistributionChannels(page) {
   let skippedDisabled = 0;
   let skippedAlreadyChecked = 0;
   const skippedCustomization = [];
+  const skippedExcluded = [];
   for (let index = 0; index < total; index += 1) {
-    const wrapper = checkboxes.nth(index);
     const label = labels[index] || "";
-    if (/^泛定制-C$/.test(label)) {
-      skippedCustomization.push(label);
+    // 点击渠道后 VBK 会重渲染 checkbox group，原来的 nth(index) 可能失效；
+    // 用渠道文本重新定位，避免最后一项被重排/隐藏后等待不存在的索引。
+    if (!label) continue;
+    const wrapper = checkboxes.filter({ hasText: label }).first();
+    if (!(await wrapper.count())) continue;
+    if (shouldSkipDistributionChannel(label)) {
+      if (DISTRIBUTION_CHANNELS_TO_SKIP.has(label)) skippedExcluded.push(label);
+      else skippedCustomization.push(label);
       continue;
     }
     const isDisabled = await wrapper.evaluate(
@@ -228,15 +346,20 @@ async function checkAllEnabledDistributionChannels(page) {
     }
   }
 
-  return { picked, skippedDisabled, skippedAlreadyChecked, skippedCustomization, total };
+  return { picked, skippedDisabled, skippedAlreadyChecked, skippedCustomization, skippedExcluded, total };
 }
 
 export {
   checkAllEnabledDistributionChannels,
+  alternateSmallGroupInputValue,
+  shouldSkipDistributionChannel,
   findRowByTitle,
   selectLineBrandFirstOption,
+  readSmallGroupState,
   setEnabledSelectByLabel,
-  setSplitGroupIfPresent,
+  setSmallGroupIfPresent,
+  setSmallGroupIfPresent as setSplitGroupIfPresent,
+  smallGroupStateMatches,
   waitForRowSelectedLabel,
   waitForRowEnabledSelect,
 };

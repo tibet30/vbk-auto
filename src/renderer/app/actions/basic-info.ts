@@ -44,6 +44,7 @@ export function useBasicInfoHandlers(state: AppState) {
     basicInfoButlerDefault,
     basicInfoButlerLoadedForLocalProductId,
     basicInfoServicePhone,
+    fixedInfoReloadToken,
     product,
     isVbkLoggedIn,
     setBrowserOpen,
@@ -51,6 +52,7 @@ export function useBasicInfoHandlers(state: AppState) {
     updateReadiness,
   } = state;
   const coverSearchActions = createBasicInfoCoverSearchActions(setNotice);
+  const loadedFixedInfoTokenRef = useRef<number | null>(null);
 
   /**
    * 进入「基础信息」编辑模块时调用：拉取当前账号的管家联系人默认值 + 400 电话。
@@ -59,11 +61,14 @@ export function useBasicInfoHandlers(state: AppState) {
    *  - 账号未登录 / 未配置时静默置 null，不抛错；
    *  - 产品切换期间如果上一次加载才返回，丢弃迟到的结果，防止跨产品污染。
    *  - servicePhone 与 butlerName 共用同一次 IPC（accounts.getFixedInfo），避免重复 IO；
-   *    两者均不写入 product，只在 review 模块作为「产品基础信息 + 创建前置」展示。
+   *  - fixedInfoReloadToken 变化时强制刷新，保证账号设置保存后 review 立即看到新值。
    */
   const loadAccountFixedInfo = async (localProductId: string, accountName: string | null) => {
     if (!api() || !accountName) return;
-    if (basicInfoButlerLoadedForLocalProductId === localProductId) return;
+    if (
+      basicInfoButlerLoadedForLocalProductId === localProductId
+      && loadedFixedInfoTokenRef.current === fixedInfoReloadToken
+    ) return;
     // 用一个调用方局部 sentinel：产品切换时 sentinel 被 reset()，即便在途请求
     // 晚到也不会把 stale default 写入新产品。
     const capturedId = localProductId;
@@ -83,11 +88,13 @@ export function useBasicInfoHandlers(state: AppState) {
         setBasicInfoServicePhone(null);
       }
       setBasicInfoButlerLoadedForLocalProductId(capturedId);
+      loadedFixedInfoTokenRef.current = fixedInfoReloadToken;
     } catch (error) {
       if (basicInfoButlerLoadedForLocalProductId && basicInfoButlerLoadedForLocalProductId !== capturedId) return;
       setBasicInfoButlerDefault(null);
       setBasicInfoServicePhone(null);
       setBasicInfoButlerLoadedForLocalProductId(capturedId);
+      loadedFixedInfoTokenRef.current = fixedInfoReloadToken;
       logWarn("[basic-info] load account fixed info failed", { accountName, error });
     }
   };
@@ -103,6 +110,7 @@ export function useBasicInfoHandlers(state: AppState) {
     setBasicInfoButlerDefault(null);
     setBasicInfoServicePhone(null);
     setBasicInfoButlerLoadedForLocalProductId(null);
+    loadedFixedInfoTokenRef.current = null;
   };
 
   /**

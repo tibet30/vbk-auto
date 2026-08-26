@@ -1,8 +1,9 @@
 import type { PlanningSkeleton } from "../../shared/contracts-planning.js";
+import { PRODUCT_FORM_LABELS } from "../../shared/product-form.js";
 
 export function buildPackageName(skeleton: PlanningSkeleton): string {
   const destination = skeleton.destination.trim() || "目的地";
-  const formLabel = skeleton.productForm === "groupTour" ? "跟团游" : "私家团";
+  const formLabel = PRODUCT_FORM_LABELS[skeleton.productForm];
   return `${destination}${skeleton.days}天${skeleton.nights}晚${formLabel}`;
 }
 

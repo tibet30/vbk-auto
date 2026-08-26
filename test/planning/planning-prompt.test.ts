@@ -100,12 +100,16 @@ test("省级目的地 user message 明确核心游览城市和近邻城市", () 
 
 test("presentation prompt 要求产品特色输出安全结构化富文本", () => {
   const prompt = composePlanningSystemPrompt("presentation");
-  assert.match(prompt, /features 是 VBK 富文本字段/);
+  assert.match(prompt, /严禁在 value 内再次放 reason 或 value/);
+  assert.match(prompt, /reason 只能在 value 右侧与 value 同级/);
+  assert.match(prompt, /status=accepted 时 reason 固定为 null/);
+  assert.match(prompt, /数组长度必须严格等于 3/);
+  assert.match(prompt, /features 必须是 JSON 字符串值/);
   assert.match(prompt, /<p><strong>短标题：<\/strong>具体说明<\/p>/);
   assert.match(prompt, /只允许 p、strong、em、ul、ol、li、br 标签/);
   assert.match(prompt, /禁止 Markdown/);
   assert.match(prompt, /推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息/);
-  assert.match(legacySystemPrompt, /features 是 VBK 富文本字段/);
+  assert.match(legacySystemPrompt, /features → string（必须是 JSON 字符串，禁止对象\/数组\/AST\/null）/);
   assert.match(legacySystemPrompt, /<p><strong>古建巡礼：<\/strong>/);
   assert.match(legacySystemPrompt, /导游否定描述/);
 });

@@ -24,6 +24,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const mainSource = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
+const accountStatusSource = readFileSync(new URL("../../src/main/infrastructure/vbk-account-status.ts", import.meta.url), "utf8");
 const createWindowSource = readFileSync(new URL("../../src/main/create-window.ts", import.meta.url), "utf8");
 const browserSource = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
 const cookieStoreSource = readFileSync(new URL("../../src/main/infrastructure/vbk-cookie-store.ts", import.meta.url), "utf8");
@@ -112,10 +113,7 @@ test("VbkBrowser.saveCurrentSession / addLogin / switchAccount propagate errors 
 });
 
 test("withKnownVbkAccount save-promise has .catch handler (no unhandled rejection)", () => {
-  const withKnown = mainSource.slice(
-    mainSource.indexOf("function withKnownVbkAccount"),
-    mainSource.indexOf("/**\n * 计算产品 readiness"),
-  );
+  const withKnown = accountStatusSource.slice(accountStatusSource.indexOf("export function createWithKnownVbkAccount"));
   // The saveCurrentSession chain must end with .catch(...) so that any
   // rejection becomes a warn log instead of an unhandled promise
   // rejection in the Electron main process.

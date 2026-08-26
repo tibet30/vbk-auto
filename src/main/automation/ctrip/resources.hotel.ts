@@ -51,6 +51,9 @@ export async function ensureHotelResource(
   const diamond = hotelDiamondFromTier(hotelTier);
   const needsHotel = product.itinerary?.some((day) => Boolean(day.hotel));
   if (!needsHotel) return { skipped: "行程不含住宿" };
+  if (product.operations?.hotelSource === "nonPlatform") {
+    return { skipped: "使用非携程酒店资源", source: "nonPlatform" };
+  }
   if (!diamond) throw new Error(`酒店等级配置无效：${String(hotelTier || "未配置")}`);
 
   await page.goto(productSectionUrl(productId, "vehicleResource"), {

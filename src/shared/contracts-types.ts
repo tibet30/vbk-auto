@@ -22,7 +22,7 @@ export interface ProductSummary {
 export interface CreateProductInput {
   destination: string;
   days: number;
-  productForm: "privateTour" | "groupTour";
+  productForm: import("./product-form.js").ProductForm;
   /** 创建产品时用户提供的原始想法，供后续 AI 规划参考。 */
   userIdea?: string;
 }

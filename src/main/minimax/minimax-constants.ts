@@ -46,7 +46,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
     优选行程 / 服务保障 / 贴心赠送 / 精选酒店 / 缤纷景点 / 特色美食 / 度假首选 / 超值赠送 / 五星精选 / 限时秒杀 / 尊享入住 / 大牌驾到 / 优质交通 / 优良资质 / 缤纷体验
   recommendation → string，一句推荐语
   recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复
-  features → string，产品特色富文本 HTML 片段，规则见 system prompt
+ features → string（必须是 JSON 字符串，禁止对象/数组/AST/null），产品特色富文本 HTML 片段，规则见 system prompt
   cover → {source:"ctripLibrary", poi:"代表性景点名", description:"封面图描述", minQuality:3}
 
 【/itinerary】value 必须是数组，每天的行程为一个对象，包含以下全部字段：
@@ -62,7 +62,9 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
 
 【/commercial/pricing】value 必须是对象：
   { currency:"CNY", adult:成人价(>0), child:儿童价(>=0), minimumTravelers:起订人数(正整数), cost?:{ adult:成人成本(>=0), child:儿童成本(>=0), singleSupplement:单房差(>=0), childBed:加床费(>=0) } }
-约束：cost.adult 不可超过 adult。
+约束：cost.adult 不可超过 adult；价格按人均填写；minimumTravelers 固定为 1。
+
+产品形态硬规则：私家团每天专车接送且必须有用车资源组；半自助部分日期自由活动、其余日期专车接送；自由行每天自由活动；跟团游必须包含随团导游。跟团游 / 半自助的销售控制必须选择拼小团=是、参加广场拼团=是、最大拼团人数=8。
 
 【/commercial/inventory】value 必须是对象：
   { startDate:"YYYY-MM-DD", endDate:"YYYY-MM-DD", dailyQuota:每日配额(正整数) }

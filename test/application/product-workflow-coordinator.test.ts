@@ -40,3 +40,38 @@ test("不同产品可并行，同一产品在成功或异常后都会释放", as
   assert.equal(coordinator.activeWorkflow("p-1"), undefined);
   assert.equal(await coordinator.runExclusive("p-1", "ai", async () => 3), 3);
 });
+
+test("不同产品的共享 VBK 页面操作按 FIFO 串行，但不影响产品级并行", async () => {
+  const coordinator = new ProductWorkflowCoordinator();
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let markFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+
+  const first = coordinator.runVbkPageExclusive(async () => {
+    events.push("first:start");
+    markFirstStarted();
+    await firstGate;
+    events.push("first:end");
+  });
+  const second = coordinator.runVbkPageExclusive(async () => {
+    events.push("second:start");
+    events.push("second:end");
+  });
+
+  await firstStarted;
+  assert.deepEqual(events, ["first:start"]);
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ["first:start", "first:end", "second:start", "second:end"]);
+});
+
+test("共享 VBK 页面任务失败后仍释放队列", async () => {
+  const coordinator = new ProductWorkflowCoordinator();
+  await assert.rejects(
+    coordinator.runVbkPageExclusive(async () => { throw new Error("page failed"); }),
+    /page failed/,
+  );
+  assert.equal(await coordinator.runVbkPageExclusive(async () => "next"), "next");
+});

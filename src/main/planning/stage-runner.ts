@@ -11,7 +11,7 @@ import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
-import { findVbkCopyBadCase } from "./vbk-copy-policy.js";
+import { findAllVbkCopyBadCases } from "./vbk-copy-policy.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -68,14 +68,15 @@ export function findBlacklistedKey(value: unknown): string | undefined {
 export function sanitiseModuleValue(
   module: PlanningModule,
   value: unknown,
+  minimumTravelersDefault = 1,
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   const hit = findBlacklistedKey(value);
   if (hit) return { ok: false, reason: `AI 输出包含禁写字段 ${hit}` };
-  const copyBadCase = findVbkCopyBadCase(value);
-  if (copyBadCase) {
+  const copyBadCases = findAllVbkCopyBadCases(value);
+  if (copyBadCases.length > 0) {
     return {
       ok: false,
-      reason: `AI 输出 ${copyBadCase.path} 命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」`,
+      reason: formatVbkCopyBadCases(copyBadCases),
     };
   }
 
@@ -83,7 +84,7 @@ export function sanitiseModuleValue(
     value = { ...(value as Record<string, unknown>), submitReview: false, publishAfterApproval: false };
   }
   if (module === "pricing" && value && typeof value === "object" && !Array.isArray(value)) {
-    value = { ...(value as Record<string, unknown>), minimumTravelers: 1 };
+    value = { ...(value as Record<string, unknown>), minimumTravelers: minimumTravelersDefault };
   }
   if (module === "skeleton" && value && typeof value === "object" && !Array.isArray(value)) {
     const v = { ...(value as Record<string, unknown>) };
@@ -97,6 +98,14 @@ export function sanitiseModuleValue(
   const validated = validateModuleValue(module, value);
   if (!validated.ok) return validated;
   return { ok: true, value: validated.value };
+}
+
+function formatVbkCopyBadCases(
+  badCases: ReturnType<typeof findAllVbkCopyBadCases>,
+): string {
+  return badCases.map((badCase) =>
+    `AI 输出 ${badCase.path} 命中 VBK 文案黑名单「${badCase.term}」：${badCase.reason}；请改写为「${badCase.alternatives.join("」或「")}」`,
+  ).join("；");
 }
 
 /**
@@ -119,6 +128,7 @@ export async function executeStageOutput(args: {
   const accepted: ModuleOutcome[] = [];
   const rejected: ModuleOutcome[] = [];
   const researchTasks: ResearchTaskProposal[] = [];
+  const minimumTravelersDefault = 1;
   const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
 
   // research tasks 是 module 列表里的一种 module（researchTasks）；adapter
@@ -160,7 +170,7 @@ export async function executeStageOutput(args: {
 
     // value 是从原始 raw 中读取的；adapter 在拆 tool_call 时会把模块的 value 暴露到 outcome 里。
     const rawValue = outcome.value;
-    const sanitised = sanitiseModuleValue(outcome.module, rawValue);
+    const sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault);
     if (!sanitised.ok) {
       rejected.push({ module: outcome.module, status: "rejected", reason: sanitised.reason });
       continue;

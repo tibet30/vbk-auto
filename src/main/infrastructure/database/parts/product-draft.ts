@@ -4,6 +4,7 @@ import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
 import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
 import { now, newSupplierProductCode } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
+import { isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
 
 /** Build the initial product snapshot without writing local or remote state. */
 export function buildProductSnapshot(input: CreateProductInput, supplierContactName?: string | null): ProductDetail {
@@ -15,17 +16,25 @@ export function buildProductSnapshot(input: CreateProductInput, supplierContactN
   const days = Number(input.days);
   if (!Number.isInteger(days) || days < 1 || days > 60) throw new Error("天数需为 1 至 60 天的整数。");
   const productForm = input.productForm;
-  if (productForm !== "privateTour" && productForm !== "groupTour") throw new Error("请选择有效的产品形态。");
+  if (!isProductForm(productForm)) throw new Error("请选择有效的产品形态。");
   const userIdea = typeof input.userIdea === "string" ? input.userIdea.trim() : "";
   if (userIdea.length > 1000) throw new Error("用户想法不能超过 1000 个字。");
 
-  const formLabel = productForm === "privateTour" ? "私家团" : "跟团游";
+  const formLabel = PRODUCT_FORM_LABELS[productForm];
   const nights = Math.max(0, days - 1);
   const destinationCity = destination;
   const province = "";
   const name = `${destination}${days}天${nights}晚${formLabel}`;
   const product = {
-    sales: { productType: days <= 5 ? "domesticShort" : "domesticLong", productForm, splitGroup: false },
+    sales: {
+      productType: days <= 5 ? "domesticShort" : "domesticLong",
+      productForm,
+      splitGroup: productForm === "groupTour" || productForm === "semiSelfGuided",
+      ...(productForm === "groupTour" || productForm === "semiSelfGuided"
+        ? { squareGroup: true, maxGroupSize: 8 }
+        : {}),
+      ...(productForm === "groupTour" ? { guideIncluded: true } : {}),
+    },
     basicInfo: {
       supplierProductName: name,
       supplierProductCode: newSupplierProductCode(supplierContactName),

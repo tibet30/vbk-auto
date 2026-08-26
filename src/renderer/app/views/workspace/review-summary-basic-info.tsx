@@ -34,7 +34,7 @@
  *  - review-summary-basic-info.helpers.ts  纯数据抽取 / 草稿解析
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ClipboardList } from "lucide-react";
 import type {
   ContactCardSelection,
@@ -68,10 +68,10 @@ export interface ReviewSummaryBasicInfoProps {
   accountButlerDefault: ContactCardSelection | null;
   /** 当前账号已配置的 400 电话：来自 AccountFixedInfo.servicePhone。null / 空串 = 未设置。 */
   accountServicePhone: string | null;
+  /** 账号固定信息保存后的刷新令牌。 */
+  fixedInfoReloadToken: number;
   /** 进入基础信息模块时调用：拉取当前账号的 fixedInfo 并缓存。 */
   loadAccountFixedInfo: (localProductId: string, accountName: string | null) => void;
-  /** 引导用户去账号设置页选择管家 / 编辑 400 电话。 */
-  onOpenAccountEditor: () => void;
   /** 字段级草稿：key=字段名, value=本地输入中的字符串。 */
   draft: Record<string, string>;
   setDraft: (value: Record<string, string>) => void;
@@ -119,8 +119,8 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   errors,
   accountButlerDefault,
   accountServicePhone,
+  fixedInfoReloadToken,
   loadAccountFixedInfo,
-  onOpenAccountEditor,
   draft,
   setDraft,
   saveSubtitle,
@@ -143,6 +143,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   // 旧实现返回 file:// URL 在沙盒下偶发破图，新实现改为 data: URL，
   // 直接喂给 img 标签 src 即可，不再依赖文件系统路径。
   const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
+  const autoSyncedButlerKeyRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const cover = snapshot.cover;
@@ -161,7 +162,21 @@ export function AppWorkspaceReviewSummaryBasicInfo({
   // loadAccountFixedInfo 内部已对 localProductId 做去重，不会重复 IO。
   useEffect(() => {
     loadAccountFixedInfo(product.id, currentAccountName);
-  }, [product.id, currentAccountName, loadAccountFixedInfo]);
+  }, [product.id, currentAccountName, fixedInfoReloadToken, loadAccountFixedInfo]);
+
+  // 账号固定信息是默认来源：账号联系人变化后，自动同步当前产品，
+  // 保证自动录入仍读取完整的产品级 ContactCardSelection。
+  const accountButlerKey = accountButlerDefault
+    ? `${accountButlerDefault.contactCardId}:${accountButlerDefault.providerId}:${accountButlerDefault.displayName}`
+    : "none";
+  useEffect(() => {
+    if (!accountButlerDefault || savingField === "butler") return;
+    if (sameContactCard(snapshot.butler, accountButlerDefault)) return;
+    const syncKey = `${product.id}:${accountButlerKey}`;
+    if (autoSyncedButlerKeyRef.current === syncKey) return;
+    autoSyncedButlerKeyRef.current = syncKey;
+    void saveButler(product.id, accountButlerDefault);
+  }, [accountButlerDefault, accountButlerKey, product.id, saveButler, savingField, snapshot.butler]);
 
   // 「行级可渲染」判定：
   //  - 封面 / 副标题 / 管家 / 400 电话 / 套餐定价 始终挂载（用户验收门
@@ -286,18 +301,12 @@ export function AppWorkspaceReviewSummaryBasicInfo({
           <BasicInfoButlerRow
             snapshotButler={snapshot.butler}
             accountButlerDefault={accountButlerDefault}
-            currentAccountName={currentAccountName}
             saving={savingField === "butler"}
             error={errors.butler}
-            onUseAccountButler={(selection) => { void saveButler(product.id, selection); }}
-            onClearButler={() => { void saveButler(product.id, null); }}
-            onOpenAccountEditor={onOpenAccountEditor}
           />
 
           <BasicInfoServicePhoneRow
             servicePhone={servicePhoneRaw.length > 0 ? servicePhoneRaw : null}
-            currentAccountName={currentAccountName}
-            onOpenAccountEditor={onOpenAccountEditor}
           />
 
           <BasicInfoPricingRow
@@ -341,5 +350,18 @@ export function AppWorkspaceReviewSummaryBasicInfo({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function sameContactCard(
+  left: ContactCardSelection | null,
+  right: ContactCardSelection | null,
+): boolean {
+  return Boolean(
+    left
+    && right
+    && left.contactCardId === right.contactCardId
+    && left.providerId === right.providerId
+    && left.displayName.trim() === right.displayName.trim(),
   );
 }

@@ -61,6 +61,27 @@ test("统一写入口锁定既有 meetingCity，AI 返回其它城市也不能�
   assert.equal((saved.product.basicInfo as any).destinationCity, "成都");
 });
 
+test("人工整包编辑可显式纠正历史错误 meetingCity", () => {
+  let saved = detail({
+    basicInfo: { meetingCity: "杭", destinationCity: "杭", province: "浙江" },
+  });
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) => {
+      saved = { ...saved, product: product as ProductDetail["product"], status: status ?? saved.status };
+    },
+  };
+  const service = new ProductMutationService(store);
+
+  service.replace("p-1", {
+    basicInfo: { meetingCity: "杭州市", destinationCity: "杭州市", province: "浙江省" },
+  }, { allowMeetingCityCorrection: true });
+
+  assert.equal((saved.product.basicInfo as any).meetingCity, "杭州");
+  assert.equal((saved.product.basicInfo as any).destinationCity, "杭州");
+  assert.equal((saved.product.basicInfo as any).province, "浙江");
+});
+
 test("统一写入口只在成功落库后广播最新 ProductDetail", () => {
   let saved = detail({ basicInfo: { subtitle: "旧值" } });
   const emitted: ProductDetail[] = [];

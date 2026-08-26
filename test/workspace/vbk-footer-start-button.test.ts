@@ -51,6 +51,12 @@ function extractProductFooter(source: string): string {
   return source.slice(footerStart, footerEnd);
 }
 
+test("VBK 左侧自动录入阶段列表在 automation 尚未回流时也必须展示", () => {
+  assert.match(vbkSrc, /<section\s+className=\{styles\.productSection\}>[\s\S]*?自动录入进度/);
+  assert.match(vbkSrc, /product\.automation\?\.currentPhase/);
+  assert.doesNotMatch(vbkSrc, /product\.automation\s*&&\s*\(\s*<section[\s\S]*?自动录入进度/);
+});
+
 test("VBK footer: 底部左侧有「开始自动录入」主按钮，文案/aria-label/title 完全一致", () => {
   const footer = extractProductFooter(vbkSrc);
 

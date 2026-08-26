@@ -8,10 +8,11 @@
 import type { PlannerRequest, PlanningStage } from "../../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
-import { VBK_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
 import { resolveTravelScope } from "../runtime.js";
 
 const RECOMMENDATION_CATEGORIES = VBK_RECOMMENDATION_CATEGORIES.join("、");
+const SELECTABLE_RECOMMENDATION_CATEGORIES = VBK_SELECTABLE_RECOMMENDATION_CATEGORIES.join("、");
 
 const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, string> = {
   skeleton: `1. skeleton.value 只包含 hotelTier、pickupCity、transport、reusePickupForDropoff、mealsIncluded、vehicleResource。
@@ -19,22 +20,24 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 3. 禁止输出任何系统编码、资源 ID、供应商信息、管家或联系人信息。`,
   basicInfo: `1. 只提交 basicInfo 一个模块；value 必须包含 subtitle、province、destinationCity、meetingCity、operationNotes；地点字段只输出名称，不输出或猜测任何 ID。
 2. 中国目的地的 province 必须是标准省级行政区名称；境外目的地的 province 填国家、地区或一级行政区常用中文名称。destinationCity 必须是标准目的地城市名称，不能把景点名或 POI ID 填入其中，也不能把普通城市原样填进 province。第一阶段即使草稿已有原始目的地，也必须给出标准 province 和 destinationCity。
-3. subtitle、meetingCity 和 operationNotes 使用简洁中文；不得把未核查信息写成已确认事实。`,
+3. subtitle、meetingCity 和 operationNotes 使用简洁中文；subtitle 必须为 2～40 个字符；不得把未核查信息写成已确认事实。`,
   itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，每天至少一个 spot。
 2. 使用 POI-first 顺序：先围绕 travelScope 准备足量候选景点池，再从中选择最可能被 VBK/携程 POI 接口查到的单一可游览景点组织行程；不要先写跨区域大行程再补 POI。若用户已在对话中明确或确认具体景点，则这些景点优先进入景点池，不得仅因 POI 未命中而替换。
-3. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。本地系统会尽力匹配接口；用户明确推荐的景点未命中时仍保留 name，后续由运营手动配置或删除；仅由 AI 推荐且未命中的景点会从行程中删除。
+3. spots 必须是对象数组，每项完整包含 name、poiName、poiId；未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID。本地系统会尽力匹配接口；用户明确推荐的景点未命中时仍保留 name，后续由运营手动配置或删除；仅由 AI 推荐且未命中的景点会从行程中删除，必要时只能替换为同范围可查景点。
 4. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
 5. 机场、车站、码头、酒店、民宿、集合点、接送点只能写进 description 的交通/接送说明，禁止写入 spots。
 6. 如果 destination 是省、自治区或直辖市，默认只围绕系统指定的核心游览城市选点；需要第二个核心城市时，只能选择系统给出的近邻城市，禁止全省撒点。
 7. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
 8. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。`,
-  presentation: `1. recommendationCategory 与 recommendations[].category 只能从以下值选择：${RECOMMENDATION_CATEGORIES}。
-2. recommendations 恰好 3 条，category 互不重复。
-3. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
-4. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
-5. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
+  presentation: `1. recommendationCategory 只能从以下值选择：${RECOMMENDATION_CATEGORIES}；recommendations[].category 只能从当前合同稳定可选项选择：${SELECTABLE_RECOMMENDATION_CATEGORIES}。
+2. recommendations 数组长度必须严格等于 3：只输出第 1、2、3 条，禁止第 4 条或更多；category 互不重复。数组长度不是 3 会导致本阶段整体失败并重试。
+3. presentation 模块的外层形状必须是 {"module":"presentation","status":"accepted","value":{...四个 presentation 字段...},"reason":null}；reason 只能在 value 右侧与 value 同级，绝不能放进 value 对象。
+4. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
+5. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
+6. 禁止使用“最、最佳、最高、最优”等绝对化表达；改用“更、较为、重点”等客观表述。
+7. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
   commercial: `1. 套餐名由本地系统按目的地、天数、晚数和产品形态固定生成；本阶段不要输出 packageName。
-2. pricing.adult > 0，pricing.child >= 0；cost.adult 不可超过 adult。
+2. 价格统一按人均填写；pricing.adult > 0，pricing.child >= 0；minimumTravelers 固定为 1；cost.adult 不可超过 adult。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。
 4. release 完整包含 publicPriceCeiling (>0) 与 publicAuditRetries (1..10)；禁止输出 submitReview 或 publishAfterApproval，产品保持草稿态。`,
 };
@@ -83,7 +86,7 @@ export function composePlanningSystemPrompt(stage: PlanningStage): string {
   const stageRules = stage === "validation"
     ? "本阶段不生成新模块；只按工具 schema 返回结果，不得改写产品草稿。"
     : STAGE_RULES[stage];
-  return `你是「三人同游」旅游产品运营助手。当前阶段：${stage}。\n\n唯一任务：通过 submit_${stage}_module 工具提交结构化参数。工具 schema 是输出字段的唯一标准。\n本阶段允许的模块：${allowed}。禁止返回其他模块。\n\n通用规则：\n1. 只调用工具；不要输出 Markdown、解释文字或 RFC6902 patch（op/path/add/replace/remove）。\n2. value 必须满足工具 schema 且字段完整；不要增加 schema 未声明的字段。\n3. 不要返回顶级 question 或 researchTasks；缺失信息写入对应 module.reason。不得自行声明外部核查已经完成。\n\n本阶段规则：\n${stageRules}`;
+  return `你是「三人同游」旅游产品运营助手。当前阶段：${stage}。\n\n唯一任务：通过 submit_${stage}_module 工具提交结构化参数。工具 schema 是输出字段的唯一标准。\n本阶段允许的模块：${allowed}。禁止返回其他模块。\n\n通用规则：\n1. 只调用工具；不要输出 Markdown、解释文字或 RFC6902 patch（op/path/add/replace/remove）。\n2. 每个 modules[] 元素只能有 module、status、value、reason 四个同级字段。value 必须满足工具 schema 且字段完整；严禁在 value 内再次放 reason 或 value。status=accepted 时 reason 固定为 null。\n3. 不要返回顶级 question 或 researchTasks；确有缺失信息时写入与 value 同级的 module.reason。不得自行声明外部核查已经完成。\n\n本阶段规则：\n${stageRules}`;
 }
 
 export function composePlanningUserMessage(request: PlannerRequest): string {
@@ -102,6 +105,13 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     `- days/nights = ${context.skeleton.days}/${context.skeleton.nights}`,
     `- productForm = ${context.skeleton.productForm}`,
     `- productType = ${context.skeleton.productType}`,
+    "",
+    "产品形态业务规则（必须遵守）：",
+    "- 私家团：每天安排专车接送，必须匹配用车资源组。",
+    "- 半自助：部分日期可自由活动，其余日期安排专车接送；不得把整段行程都写成自由活动或都写成专车陪同。",
+    "- 自由行：每天均为用户自由活动，不生成私家团用车资源组阻塞。",
+    "- 跟团游：必须包含随团导游；价格按人均填写。",
+    "- 跟团游 / 半自助：销售控制需要选择拼小团=是、参加广场拼团=是、最大拼团人数=8。",
     ...(userIdea ? ["", "用户初始想法（仅作为需求偏好参考，不代表已核查事实）：", userIdea] : []),
     "",
     `当前阶段：${stage}`,

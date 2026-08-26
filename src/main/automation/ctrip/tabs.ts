@@ -165,17 +165,20 @@ async function saveThenAdvance(page, options) {
  */
 async function findUnlockedSectionLabel(page, labels) {
   const candidates = Array.isArray(labels) ? labels : [labels];
-  for (const label of candidates) {
-    const tab = page.getByRole("tab", { name: label, exact: true });
-    const tabCount = await tab.count();
-    for (let index = 0; index < tabCount; index += 1) {
-      const current = tab.nth(index);
-      if (!(await current.isVisible())) continue;
-      if ((await current.getAttribute("aria-disabled")) === "true") continue;
-      return label;
+  return page.evaluate((expected) => {
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+    for (const label of expected) {
+      const matched = tabs.find((tab) => {
+        const rect = tab.getBoundingClientRect();
+        return (tab.textContent || "").trim() === label
+          && rect.width > 0
+          && rect.height > 0
+          && tab.getAttribute("aria-disabled") !== "true";
+      });
+      if (matched) return label;
     }
-  }
-  return null;
+    return null;
+  }, candidates).catch(() => null);
 }
 
 
@@ -204,6 +207,26 @@ async function clickSection(page, labels) {
     return;
   }
   for (const label of candidates) {
+    const roleTabResult = await page.evaluate((expected) => {
+      const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+      const tab = tabs.find((candidate) => {
+        const rect = candidate.getBoundingClientRect();
+        return (candidate.textContent || "").trim() === expected && rect.width > 0 && rect.height > 0;
+      });
+      if (!tab) return "missing";
+      if (tab.getAttribute("aria-disabled") === "true") return "disabled";
+      if (tab.getAttribute("aria-selected") === "true" || tab.classList.contains("ant-tabs-tab-active")) return "selected";
+      (tab as HTMLElement).click();
+      return "clicked";
+    }, label).catch(() => "missing");
+    if (roleTabResult === "selected" || roleTabResult === "clicked") {
+      if (roleTabResult === "clicked") await delay(500);
+      return;
+    }
+    if (roleTabResult === "disabled") {
+      disabledLabel = label;
+      continue;
+    }
     // 新版 VBK 使用顶层 tab（产品信息 / 产品图文），优先按角色定位，避免
     // 同名标题或帮助文案抢占点击。旧页面再回退到精确文本。
     const tab = page.getByRole("tab", { name: label, exact: true });
@@ -341,20 +364,22 @@ async function submitCurrentSectionAndNext(page) {
  */
 async function findActiveTabLabel(page, labels, timeoutMs = 0) {
   const candidates = Array.isArray(labels) ? labels : [labels];
-  const probe = async () => {
-    for (const label of candidates) {
-      const tab = page.getByRole("tab", { name: label, exact: true });
-      const tabCount = await tab.count();
-      for (let index = 0; index < tabCount; index += 1) {
-        const current = tab.nth(index);
-        if (!(await current.isVisible())) continue;
-        if ((await current.getAttribute("aria-selected")) === "true") return label;
-        const cls = (await current.getAttribute("class")) || "";
-        if (/\bant-tabs-tab-active\b/.test(cls)) return label;
-      }
+  // locator.count/evaluate 会在 VBK 的晚到导航期间等待 navigation finished，
+  // 即使目标页 DOM 已经可用也可能整整卡满默认 30 秒。页面内只读探针不
+  // 绑定导航生命周期，适合这里的瞬时状态判断。
+  const probe = async () => page.evaluate((expected) => {
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+    for (const label of expected) {
+      const matched = tabs.find((tab) => (tab.textContent || "").trim() === label && visible(tab));
+      if (!matched) continue;
+      if (matched.getAttribute("aria-selected") === "true" || matched.classList.contains("ant-tabs-tab-active")) return label;
     }
     return null;
-  };
+  }, candidates).catch(() => null);
   if (timeoutMs <= 0) return probe();
   const deadline = Date.now() + timeoutMs;
   let last = null;
@@ -377,6 +402,17 @@ const PRODUCT_IMAGE_TEXT_REGEX = /(^|[/?&])productImageText([/?&]|$)/;
 export function isProductImageTextUrl(url) {
   if (typeof url !== "string" || !url) return false;
   return PRODUCT_IMAGE_TEXT_REGEX.test(url);
+}
+
+/** 真实 VBK 行程描述页路径；产品图文保存后刷新可能直接落到这里。 */
+export function isItineraryUrl(url) {
+  if (typeof url !== "string" || !url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname.replace(/\/+$/, "") === "/ivbk/vendor/tourdays";
+  } catch {
+    return false;
+  }
 }
 
 // forward declaration，避免循环依赖

@@ -22,6 +22,7 @@ import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-
 import { aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import type { MainIpcContext } from "./context.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
+import { isProductForm } from "../../shared/product-form.js";
 
 export function registerPlanningIpc(context: MainIpcContext): void {
   const {
@@ -99,7 +100,12 @@ export function registerPlanningIpc(context: MainIpcContext): void {
       const product = db.getProduct(localProductId);
       if (!product) throw productNotFound(localProductId);
       const store = new DbGenerationStateStore(db, emitPlanningState);
-      const runtime = new DbOrchestratorRuntime(db, context.browser, productMutations);
+      const runtime = new DbOrchestratorRuntime(
+        db,
+        context.browser,
+        productMutations,
+        (task) => context.productWorkflows.runVbkPageExclusive(task),
+      );
       const productData = (product.product ?? {}) as Record<string, unknown>;
       const basicInfo = (productData.basicInfo ?? {}) as Record<string, unknown>;
       const sales = (productData.sales ?? {}) as Record<string, unknown>;
@@ -144,7 +150,7 @@ export function registerPlanningIpc(context: MainIpcContext): void {
           destination: String(basicInfo.meetingCity ?? basicInfo.destinationCity ?? ""),
           days: Number(basicInfo.days) || 0,
           nights: Number(basicInfo.nights) || 0,
-          productForm: sales.productForm === "groupTour" ? "groupTour" : "privateTour",
+          productForm: isProductForm(sales.productForm) ? sales.productForm : "privateTour",
           productType: sales.productType === "domesticLong" ? "domesticLong" : "domesticShort",
           supplierProductCode: String(basicInfo.supplierProductCode ?? ""),
         },
@@ -164,7 +170,9 @@ export function registerPlanningIpc(context: MainIpcContext): void {
       if (result.status === "completed" && !isCompletedPoiOnlyBackfill) {
         // 规划完成后自动补齐封面图和用车资源组（与 ai:send 首轮后处理口径一致），
         // 使用 .catch() 而非 try/catch，避免干扰 coverage 测试的 try-block 正则匹配。
-        const browserStatus = await context.browser.status().catch((e: unknown) => {
+        const browserStatus = await context.productWorkflows
+          .runVbkPageExclusive(() => context.browser.status())
+          .catch((e: unknown) => {
           logInfo("[planning] browser not ready for auto resource resolution, skipping", {
             provider: providerLabel,
             error: (e as { message?: string })?.message ?? "unknown",
@@ -172,13 +180,13 @@ export function registerPlanningIpc(context: MainIpcContext): void {
           return null;
         });
         if (browserStatus?.loggedIn) {
-          const page = await context.browser.page();
           const productAfter = db.getProduct(localProductId)!;
           // 封面图：从携程图库搜索补齐 imageId / imageUrl
-          const coverResult = await applyAutoCoverFill({
-            page,
-            product: productAfter.product,
-          }).catch((e: unknown) => {
+          const coverResult = await context.productWorkflows.runVbkPageExclusive(async () =>
+            applyAutoCoverFill({
+              page: await context.browser.page(),
+              product: productAfter.product,
+            })).catch((e: unknown) => {
             logInfo("[planning] auto cover fill raised", {
               provider: providerLabel,
               error: (e as { message?: string })?.message ?? "unknown",
@@ -194,10 +202,11 @@ export function registerPlanningIpc(context: MainIpcContext): void {
             });
           }
           // 用车资源组：触发 VBK 接口匹配 resourceGroupId / resourceGroupName
-          const vehicleResult = await applyAutoVehicleResourceTrigger({
-            page,
-            product: db.getProduct(localProductId)!,
-          }).catch((e: unknown) => {
+          const vehicleResult = await context.productWorkflows.runVbkPageExclusive(async () =>
+            applyAutoVehicleResourceTrigger({
+              page: await context.browser.page(),
+              product: db.getProduct(localProductId)!,
+            })).catch((e: unknown) => {
             logInfo("[planning] auto vehicle resource trigger raised", {
               provider: providerLabel,
               error: (e as { message?: string })?.message ?? "unknown",

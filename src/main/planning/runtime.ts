@@ -196,12 +196,14 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     private readonly db: VbkDatabase,
     private readonly browser?: VbkBrowser,
     productMutations?: ProductMutationService,
+    private readonly runVbkPageExclusive?: <T>(task: () => Promise<T>) => Promise<T>,
   ) {
     this.productMutations = productMutations ?? new ProductMutationService(db);
   }
   async suggestPoi(keyword: string, context?: { destinationCity?: string; province?: string }) {
     if (!this.browser) return null;
-    return suggestPoi(await this.browser.page(), keyword, context);
+    const query = async () => suggestPoi(await this.browser!.page(), keyword, context);
+    return this.runVbkPageExclusive ? this.runVbkPageExclusive(query) : query();
   }
 
   async loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {

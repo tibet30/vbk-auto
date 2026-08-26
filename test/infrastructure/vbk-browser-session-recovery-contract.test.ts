@@ -4,6 +4,7 @@ import { test } from "node:test";
 
 const source = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
+const accountStatusSource = readFileSync(new URL("../../src/main/infrastructure/vbk-account-status.ts", import.meta.url), "utf8");
 const initialise = source.slice(source.indexOf("  async initialise()"), source.indexOf("  /**\n   * 调整 view 布局"));
 
 test("无登录快照的活跃账号指针不会切换到空账号分区", () => {
@@ -40,8 +41,8 @@ test("保存和状态检测都必须先校验 VBK 鉴权 cookie 完整性", () =
 });
 
 test("withKnownVbkAccount 只在真实保存成功后写入活跃账号 key", () => {
-  const withKnown = mainSource.slice(mainSource.indexOf("function withKnownVbkAccount"), mainSource.indexOf("/**\n * 计算产品 readiness"));
-  assert.match(withKnown, /if \(saved\) db\.setSetting\("vbkActiveAccountKey", saved\.accountKey\);/);
+  const withKnown = accountStatusSource.slice(accountStatusSource.indexOf("export function createWithKnownVbkAccount"));
+  assert.match(withKnown, /if \(!saved\) return;[\s\S]*db\.setSetting\("vbkActiveAccountKey", saved\.accountKey\);/);
   assert.doesNotMatch(withKnown, /else if \(snapshotKey\) db\.setSetting\("vbkActiveAccountKey"/);
 });
 
@@ -107,7 +108,7 @@ test("新增登录 / 切换账号不会复用上一个账号的 current-user 缓
 });
 
 test("withKnownVbkAccount：saveCurrentSession 失败被 .catch 吞掉，不会变 unhandled rejection", () => {
-  const withKnown = mainSource.slice(mainSource.indexOf("function withKnownVbkAccount"), mainSource.indexOf("/**\n * 计算产品 readiness"));
+  const withKnown = accountStatusSource.slice(accountStatusSource.indexOf("export function createWithKnownVbkAccount"));
   // 必须 Promise 链 + .catch，禁止裸 fire-and-forget。
   assert.match(withKnown, /browser\.saveCurrentSession\(\)/);
   assert.match(withKnown, /\.catch\(/, "saveCurrentSession 必须有 .catch 兜底");

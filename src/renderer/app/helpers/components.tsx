@@ -1,6 +1,7 @@
 import { AlertTriangle, Briefcase, Check, Copy, Eye, FileText, LoaderCircle, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { type MouseEvent, type ReactNode, useState } from "react";
 import type { CreateProductInput, ProductSummary } from "../../../shared/contracts.js";
+import { PRODUCT_FORM_LABELS, type ProductForm } from "../../../shared/product-form.js";
 import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
@@ -10,7 +11,7 @@ export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubm
     <div><h3>新建产品</h3><p className={shared.viewSub}>填写基础信息和你的初步想法，进入产品后 AI 会据此开始规划。</p></div>
     <div className={styles.briefGrid}>
       <label><span className={shared.fieldLabel}>目的地</span><input className={shared.input} autoFocus placeholder="例如：太原" value={input.destination} onChange={(event) => setInput({ ...input, destination: event.target.value })} /></label>
-      <label><span className={shared.fieldLabel}>产品形态</span><select className={shared.input} value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProductInput["productForm"] })}><option value="privateTour">私家团</option><option value="groupTour">跟团游</option></select></label>
+      <label><span className={shared.fieldLabel}>产品形态</span><select className={shared.input} value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProductInput["productForm"] })}>{(Object.entries(PRODUCT_FORM_LABELS) as Array<[ProductForm, string]>).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label><span className={shared.fieldLabel}>天数</span><input className={shared.input} type="number" min="2" max="60" value={input.days} onChange={(event) => setInput({ ...input, days: Math.max(2, Number(event.target.value) || 2) })} /></label>
     </div>
     <label className={styles.ideaField}>
@@ -214,11 +215,11 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
  * 从产品名反解目的地 / 天数 / 产品形态。
  * 输入：「太原3天2晚私家团」「北京2天1晚跟团游」，只解析产品形态图标所需的信息。
  */
-function productMeta(item: ProductSummary): { form: "privateTour" | "groupTour" } {
+function productMeta(item: ProductSummary): { form: ProductForm } {
   const match = item.name.match(/^(.+?)(\d+)天\s*(\d+)晚\s*(.+)$/);
   if (!match) return { form: "privateTour" };
   const kind = match[4];
-  const form: "privateTour" | "groupTour" = kind.includes("跟团") ? "groupTour" : "privateTour";
+  const form = (Object.entries(PRODUCT_FORM_LABELS).find(([, label]) => kind.includes(label))?.[0] ?? "privateTour") as ProductForm;
   return { form };
 }
 

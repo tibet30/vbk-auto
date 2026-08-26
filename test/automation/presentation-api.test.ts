@@ -45,6 +45,7 @@ const presentation = {
 };
 
 test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读确认", async () => {
+  const recommendationPlan = buildRecommendationReasonsPlan(presentation.recommendations);
   const browser = browserWithResponses([
     {
       status: 200,
@@ -81,9 +82,9 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
         ResponseStatus: { Ack: "Success" },
         info: {
           pmRcmdItems: [
-            { id: 1, pmRcmdCategoryId: 9, rcmdDesc: presentation.recommendations[0].text },
-            { id: 2, pmRcmdCategoryId: 3, rcmdDesc: presentation.recommendations[1].text },
-            { id: 3, pmRcmdCategoryId: 5, rcmdDesc: presentation.recommendations[2].text },
+            { id: 1, pmRcmdCategoryId: 9, rcmdDesc: recommendationPlan[0].text },
+            { id: 2, pmRcmdCategoryId: 3, rcmdDesc: recommendationPlan[1].text },
+            { id: 3, pmRcmdCategoryId: 5, rcmdDesc: recommendationPlan[2].text },
           ],
           productDesc: {
             id: 77098084,
@@ -125,9 +126,9 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
       sortOrder: item.sortOrder,
     })),
     [
-      { id: 1, pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程", rcmdDesc: presentation.recommendations[0].text, sortOrder: 1 },
-      { id: 2, pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店", rcmdDesc: presentation.recommendations[1].text, sortOrder: 2 },
-      { id: undefined, pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点", rcmdDesc: presentation.recommendations[2].text, sortOrder: 3 },
+      { id: 1, pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程", rcmdDesc: recommendationPlan[0].text, sortOrder: 1 },
+      { id: 2, pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店", rcmdDesc: recommendationPlan[1].text, sortOrder: 2 },
+      { id: undefined, pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点", rcmdDesc: recommendationPlan[2].text, sortOrder: 3 },
     ],
   );
 });

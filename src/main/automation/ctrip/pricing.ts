@@ -234,7 +234,9 @@ export async function fillAndSaveTerms(page, product, productId) {
     await page.goto(`https://vbooking.ctrip.com/ivbk/vendor/newResourceClause?productid=${encodeURIComponent(productId)}&istab=1&from=vbk`, {
       waitUntil: "domcontentloaded",
     });
-    return saveStructuredProductClauses(page, productId);
+    return saveStructuredProductClauses(page, productId, {
+      productForm: product.sales?.productForm,
+    });
   }
   const tabDisabled = await page.evaluate(() => {
     const tabs = Array.from(document.querySelectorAll(".ant-tabs-tab"));

@@ -12,16 +12,18 @@
  */
 
 import { parseProduct } from "../schema/schema.js";
+import { requiresVehicleResource } from "../../../shared/product-form.js";
 
 /**
  * 计算某个 product 当前应当跑的阶段序列。
  */
 export function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
-  const needsHotel = product.itinerary.some((day) => Boolean(day.hotel));
+  const needsHotel = product.operations?.hotelSource !== "nonPlatform"
+    && product.itinerary.some((day) => Boolean(day.hotel));
   const phases = ["basic", "presentation", "itinerary", "package"];
   if (product.commercial?.pricing || product.commercial?.inventory) phases.push("pricingInventory");
   if (needsHotel) phases.push("hotelResource");
-  if (product.sales.productForm === "privateTour") phases.push("vehicleResource");
+  if (requiresVehicleResource(product.sales.productForm)) phases.push("vehicleResource");
   phases.push("terms");
   phases.push("preflight");
   return phases;

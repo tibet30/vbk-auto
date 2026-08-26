@@ -3,7 +3,7 @@
 const ALLOWED_TAG = /^<\s*(\/?)\s*(p|strong|em|ul|ol|li|br)\b[^>]*>$/i;
 const RICH_TAG = /<\/?(?:p|strong|em|ul|ol|li|br)\b/i;
 
-export const PRODUCT_FEATURES_RICH_TEXT_GUIDE = `features 是 VBK 富文本字段，必须输出 HTML 片段：
+export const PRODUCT_FEATURES_RICH_TEXT_GUIDE = `features 必须是 JSON 字符串值，绝对禁止输出对象、数组、AST 或 null；字符串内容才是 VBK 富文本 HTML 片段：
 - 写 3～5 个与本产品事实一致的亮点，每个亮点使用 <p><strong>短标题：</strong>具体说明</p>；需要列举时可用 <ul><li>...</li></ul>。
 - 只允许 p、strong、em、ul、ol、li、br 标签；禁止 Markdown、外层 html/body、style/class/id 等属性，以及 a、img、table、script、iframe。
 - 产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息，避免与导游条款显示“含导游”产生不一致。
@@ -23,7 +23,8 @@ function escapeText(value: string): string {
  * - HTML 只保留无属性的白名单标签；危险块连同内容移除。
  */
 export function formatProductFeaturesHtml(value: unknown): string {
-  const source = String(value ?? "").trim();
+  if (typeof value !== "string") return "";
+  const source = value.trim();
   if (!source) return "";
   if (!RICH_TAG.test(source)) {
     return source.split(/\r?\n/).map((line) => `<p>${escapeText(line)}</p>`).join("");
@@ -41,6 +42,7 @@ export function formatProductFeaturesHtml(value: unknown): string {
     return closing ? `</${tag}>` : `<${tag}>`;
   }).join("");
 }
+
 
 /** UEditor HTML 转为普通输入框/回读比较使用的文本。 */
 export function productFeaturesPlainText(value: unknown): string {

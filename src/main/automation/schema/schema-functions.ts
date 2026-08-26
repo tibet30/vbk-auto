@@ -7,6 +7,7 @@ import { hasSatisfiedVehicleResource, isResearchTaskSatisfiedByProduct } from ".
 import { readCover } from "../../operations/cover-info.js";
 import { evaluateAutomationContract } from "../automation-contract.js";
 import { findAllVbkCopyBadCases } from "../../planning/vbk-copy-policy.js";
+import { requiresGuide } from "../../../shared/product-form.js";
 
 /**
  * 自动化层产品 schema 工具。
@@ -164,6 +165,9 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
   const sales = product.sales as Record<string, unknown> | undefined;
   if (sales?.productForm === "privateTour" && !hasSatisfiedVehicleResource(product)) {
     blockers.push({ label: "用车资源组", detail: "私家团需要在 VBK 核查并填写现有用车资源组 ID。" });
+  }
+  if (requiresGuide(sales?.productForm) && sales?.guideIncluded === false) {
+    blockers.push({ label: "随团导游", detail: "跟团游必须带随团导游，请确认产品包含导游。" });
   }
   // 3) 草稿默认安全：release 还在 draft-only 状态时，禁止进入自动录入。人工 / VBK
   // 会在审核后逐项打开 submitReview / publishAfterApproval。

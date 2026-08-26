@@ -16,6 +16,7 @@ import {
   normaliseTransportError,
   type ChatCompletionBody,
 } from "./openai-compatible-transport.js";
+import { buildVbkCopyPolicyPrompt } from "../vbk-copy-policy.js";
 
 export interface ThreeStageAiConfig {
   apiKey: string;
@@ -213,6 +214,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
           "同日只安排同城景点；优先把相同或相邻区县安排在同一天。",
           "跨日沿一个方向移动，禁止 A→B→A 折返。全日型景点可单独占一天。",
           "无需用完候选池；代表性、游览节奏和地址聚类优先。",
+          buildVbkCopyPolicyPrompt(),
         ].join("\n"),
       },
       { role: "user" as const, content: JSON.stringify(request) },

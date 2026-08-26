@@ -279,6 +279,9 @@ export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
         const run = JSON.parse(row.payload_json) as AutomationRun;
         if (run.status !== "running") continue;
         run.status = "failed";
+        for (const phase of run.phases) {
+          if (phase.status === "running") phase.status = "failed";
+        }
         if (run.recovery?.phases) {
           for (const rec of Object.values(run.recovery.phases)) {
             if (rec.state === "running" || rec.state === "advising" || rec.state === "retrying") {

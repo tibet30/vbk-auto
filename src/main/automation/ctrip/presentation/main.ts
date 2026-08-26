@@ -9,10 +9,11 @@
  */
 
 import { delay, assertCount } from "../utils.js";
-import { clickSection, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
+import { clickSection, isItineraryUrl, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
 import {
   buildRecommendationReasonsPlan,
+  fillRecommendationReasons,
 } from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
 import { bindCtripLibraryCoverViaApi } from "./cover-bind.js";
@@ -201,10 +202,19 @@ export async function fillAndSavePresentation(page, product) {
   await page.reload({ waitUntil: "domcontentloaded" });
   await delay(1_000);
 
+  // 接口保存不会触发 VBK React 表单的分类变更事件；先用真实控件回填并回读，
+  // 清掉“请重新选择推荐理由类别”这类仅存在于页面状态的校验错误，再做接口保存。
+  await fillRecommendationReasons(page, presentation.recommendations);
   await selectCtripLibraryCover(page, presentation.cover);
   const savedWith = await savePresentationViaApi(page, presentation);
   await page.reload({ waitUntil: "domcontentloaded" });
   await delay(1_500);
+
+  // 产品图文已经保存过时，VBK 刷新可能直接落到「行程描述」页。
+  // 这是手动保存后重试的幂等成功落点，不应再回头寻找产品图文页的「下一步」。
+  if (isItineraryUrl(page.url())) {
+    return { advanced: true, mode: "already-advanced", savedWith };
+  }
 
   return saveThenAdvance(page, {
     phase: "产品图文",

@@ -18,6 +18,12 @@ const WORKFLOW_LABELS: Record<ProductWorkflow, string> = {
 
 export class ProductWorkflowCoordinator {
   private readonly active = new Map<string, ProductWorkflow>();
+  /**
+   * 所有产品最终共用同一个已登录 VBK WebContentsView。产品级互斥只能保护
+   * 本地 JSON，不能阻止不同产品同时 page.goto / evaluate。用一条 FIFO promise
+   * 链只串行真正占用 VBK 页面的操作；纯 AI 规划仍可跨产品并行。
+   */
+  private vbkPageTail: Promise<void> = Promise.resolve();
 
   activeWorkflow(localProductId: string): ProductWorkflow | undefined {
     return this.active.get(localProductId);
@@ -42,6 +48,18 @@ export class ProductWorkflowCoordinator {
       return await task();
     } finally {
       if (this.active.get(localProductId) === workflow) this.active.delete(localProductId);
+    }
+  }
+
+  async runVbkPageExclusive<T>(task: () => Promise<T>): Promise<T> {
+    const previous = this.vbkPageTail;
+    let release!: () => void;
+    this.vbkPageTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous.catch(() => undefined);
+    try {
+      return await task();
+    } finally {
+      release();
     }
   }
 }

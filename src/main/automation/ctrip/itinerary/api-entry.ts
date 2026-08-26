@@ -70,6 +70,13 @@ async function clickHydrationTab(page: Page, label: string): Promise<void> {
     target.click();
     return true;
   }, label);
+  // 自由行的真实页面把行程编辑器渲染在“产品图文”页签下，内容标题为
+  // “行程A”，不额外提供名为“行程描述”的 role=tab；标题输入框本身就是
+  // 更可靠的水合证据，避免把合法页面误判为导航失败。
+  if (!clicked && label === "行程描述") {
+    const hasItineraryEditor = await page.locator('textarea[placeholder^="请输入标题"]').count().then((n) => n > 0).catch(() => false);
+    if (hasItineraryEditor) return;
+  }
   if (!clicked) throw new Error(`接口保存后找不到可点击的“${label}”页签，无法重新水合行程。`);
 }
 
@@ -86,9 +93,10 @@ async function waitForHydratedItineraryDom(page: Page): Promise<void> {
         && (tab.textContent ?? "").trim() === "行程描述"
         && (tab.getAttribute("aria-selected") === "true"
           || tab.classList.contains("ant-tabs-tab-active")));
+      const inlineItineraryEditor = document.querySelectorAll('textarea[placeholder^="请输入标题"]').length > 0;
       const submitVisible = Array.from(document.querySelectorAll("button")).some((button) =>
         visible(button) && /提交审核/.test((button.textContent ?? "").trim()));
-      return activeItinerary && submitVisible;
+      return (activeItinerary || inlineItineraryEditor) && submitVisible;
     }).catch(() => false);
     if (ready) return;
     await delay(250);

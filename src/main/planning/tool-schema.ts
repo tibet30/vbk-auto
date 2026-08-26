@@ -18,7 +18,7 @@
 
 import type { PlanningStage, PlanningModule } from "../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
-import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 
 /**
  * 共享子 schema：把 reason 等可有可无的字段编码为 nullable（required 仍包含），
@@ -46,7 +46,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
         type: "object", additionalProperties: false,
         required: ["subtitle", "province", "destinationCity", "meetingCity", "operationNotes"],
         properties: {
-          subtitle: { type: "string", minLength: 1 },
+          subtitle: { type: "string", minLength: 2, maxLength: 40, description: "VBK 副标题，简洁中文，最多 40 个字符。" },
           province: { type: ["string", "null"], minLength: 1 },
           destinationCity: { type: ["string", "null"], description: "标准目的地城市名称；第一阶段必须填写，不得填写 POI ID" },
           meetingCity: { type: ["string", "null"], description: "接送/集合城市名称；如与目的地城市相同则填写相同城市" },
@@ -62,15 +62,15 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           recommendationCategory: { type: "string", enum: [...VBK_RECOMMENDATION_CATEGORIES] },
           recommendation: { type: "string", minLength: 1 },
           recommendations: {
-            type: "array", minItems: 3, maxItems: 3,
+            type: "array", minItems: 3, maxItems: 3, description: "数组长度必须严格等于 3；只输出三条，禁止第四条或更多。",
             items: {
               type: "object",
               additionalProperties: false,
               required: ["category", "text"],
-              properties: { category: { type: "string", enum: [...VBK_RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
+              properties: { category: { type: "string", enum: [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
             },
           },
-          features: { type: "string", minLength: 1, description: "VBK 产品特色富文本 HTML 片段：3～5 个亮点；仅允许 p/strong/em/ul/ol/li/br 标签且不得含任何属性、Markdown、链接或图片。" },
+          features: { type: "string", minLength: 1, description: "必须是 JSON 字符串，禁止对象、数组、AST 或 null。字符串内容为 VBK 产品特色富文本 HTML 片段：3～5 个亮点；仅允许 p/strong/em/ul/ol/li/br 标签且不得含任何属性、Markdown、链接或图片。" },
         },
       };
     case "itinerary":

@@ -38,13 +38,13 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     resolvingVehicleTaskId,
     vbkLogin,
     currentAccountName,
-    openAccountEditor,
     basicInfoDraft,
     setBasicInfoDraft,
     basicInfoSaving,
     basicInfoErrors,
     basicInfoButlerDefault,
     basicInfoServicePhone,
+    fixedInfoReloadToken,
     loadButlerDefault,
     saveSubtitle,
     regenerateSubtitle,
@@ -301,8 +301,8 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         basicInfoErrors={basicInfoErrors}
         basicInfoButlerDefault={basicInfoButlerDefault}
         basicInfoServicePhone={basicInfoServicePhone}
+        fixedInfoReloadToken={fixedInfoReloadToken}
         loadButlerDefault={loadButlerDefault}
-        onOpenAccountEditor={() => openAccountEditor(vbkLogin?.loginAccount ?? vbkLogin?.accountName ?? null)}
         saveSubtitle={saveSubtitle}
         regenerateSubtitle={regenerateSubtitle}
         saveButler={saveButler}

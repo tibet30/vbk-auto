@@ -84,6 +84,7 @@ test("recoverOrphanAutomationRuns：recovery.phases 里仍为 running 的项被�
     const basic = after.automation?.recovery?.phases.basic;
     assert.ok(basic, "basic recovery record should exist");
     assert.equal(basic!.state, "needs_user");
+    assert.equal(after.automation?.phases.find((phase) => phase.phase === "basic")?.status, "failed");
     // 默认填一个 userInstruction（rec 没有原指令时），让 UI banner 能渲染
     assert.match(basic!.userInstruction || "", /核查|手动|重新/);
   } finally { cleanup(); }

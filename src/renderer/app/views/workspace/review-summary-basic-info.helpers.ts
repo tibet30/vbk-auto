@@ -15,10 +15,11 @@ import type {
   ManualUploadCoverMeta,
   ProductCover,
 } from "../../../../shared/contracts-types.js";
+import { isProductForm, type ProductForm } from "../../../../shared/product-form.js";
 
 /** 把 product 树上的基础信息字段安全读出来；缺失项显式返回 null。 */
 export interface BasicInfoSnapshot {
-  productForm: "privateTour" | "groupTour" | null;
+  productForm: ProductForm | null;
   subtitle: string | null;
   butler: ContactCardSelection | null;
   adult: number | null;
@@ -82,8 +83,8 @@ function asContactCard(value: unknown): ContactCardSelection | null {
   return { contactCardId: id, providerId, displayName: name };
 }
 
-function asProductForm(value: unknown): "privateTour" | "groupTour" | null {
-  return value === "privateTour" || value === "groupTour" ? value : null;
+function asProductForm(value: unknown): ProductForm | null {
+  return isProductForm(value) ? value : null;
 }
 
 /**

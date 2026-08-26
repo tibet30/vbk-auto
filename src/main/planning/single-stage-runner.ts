@@ -374,8 +374,22 @@ async function runAiStage(args: {
         }
         return makeStageResult({ state, stage, accepted, rejected, researchTasks, attempts, lastError, status: "completed" });
       }
-      lastError = { stage, attempt, code: "missing_module", message: `本阶段没有接受任何模块（${allowed.join("、") || "无"}）` };
-      logAttemptError("阶段没有接受任何模块，准备重试", { stage, attempt, localProductId: state.localProductId, allowed: allowed.join(",") });
+      const rejectionSummary = exec.rejected
+        .map((item) => `${item.module}：${item.reason ?? "未说明原因"}`)
+        .join("；");
+      lastError = {
+        stage,
+        attempt,
+        code: "missing_module",
+        message: `本阶段没有接受任何模块（${allowed.join("、") || "无"}）${rejectionSummary ? `：${rejectionSummary}` : ""}`,
+      };
+      logAttemptError("阶段没有接受任何模块，准备重试", {
+        stage,
+        attempt,
+        localProductId: state.localProductId,
+        allowed: allowed.join(","),
+        rejected: exec.rejected.map((item) => `${item.module}:${item.reason ?? "unknown"}`).join(" | "),
+      });
     } catch (error) {
       lastError = toStageError(stage, attempt, error);
       logAttemptError("planner 抛错", { stage, attempt, localProductId: state.localProductId, code: lastError.code, message: lastError.message });

@@ -27,10 +27,15 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     emitProductIfKnown,
     detectProviderIdInMain,
   } = context;
-  ipcMain.handle("browser:login", () => context.browser.login());
-  ipcMain.handle("browser:logout", () => context.browser.logout());
-  ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(await context.browser.status(Boolean(refresh))));
-  ipcMain.handle("poi:suggest", async (_event, keyword: string) => suggestPoi(context.browser, String(keyword ?? "")));
+  ipcMain.handle("browser:login", () =>
+    context.productWorkflows.runVbkPageExclusive(() => context.browser.login()));
+  ipcMain.handle("browser:logout", () =>
+    context.productWorkflows.runVbkPageExclusive(() => context.browser.logout()));
+  ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(
+    await context.productWorkflows.runVbkPageExclusive(() => context.browser.status(Boolean(refresh))),
+  ));
+  ipcMain.handle("poi:suggest", async (_event, keyword: string) =>
+    context.productWorkflows.runVbkPageExclusive(() => suggestPoi(context.browser, String(keyword ?? ""))));
   ipcMain.handle("poi:suggestDetail", async (_event, keyword: string, inputContext?: PoiSuggestLogContext) => {
     const query = String(keyword ?? "");
     const logContext = {
@@ -41,47 +46,52 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
       keyword: query,
     };
     logPoiManualIpc("ipc_search_start", logContext);
-    try {
-      const result = await suggestPoiDetailWithRawPayload(context.browser, query, {
-        destinationCity: inputContext?.destinationCity,
-        province: inputContext?.province,
-      });
-      logPoiManualIpc("ipc_search_detail", {
-        ...logContext,
-        httpStatus: result.httpStatus,
-        businessStatus: result.businessStatus,
-        poiListCount: result.poiListCount,
-        candidateCount: result.candidates.length,
-        rawPayload: stringifyPoiPayloadForLog(result.rawPayload),
-      });
-      if (!result.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: result.candidates.length });
-      else logPoiManualIpc("ipc_search_success", {
-        ...logContext,
-        poiName: result.best.poiName,
-        poiId: result.best.poiId,
-        candidateCount: result.candidates.length,
-      });
-      const { rawPayload: _rawPayload, ...detail } = result;
-      return detail;
-    } catch (err) {
-      logPoiManualIpc("ipc_search_failure", {
-        ...logContext,
-        errorMessage: err instanceof Error ? err.message : "VBK POI 查询失败",
-      });
-      throw err;
-    }
+    return context.productWorkflows.runVbkPageExclusive(async () => {
+      try {
+        const result = await suggestPoiDetailWithRawPayload(context.browser, query, {
+          destinationCity: inputContext?.destinationCity,
+          province: inputContext?.province,
+        });
+        logPoiManualIpc("ipc_search_detail", {
+          ...logContext,
+          httpStatus: result.httpStatus,
+          businessStatus: result.businessStatus,
+          poiListCount: result.poiListCount,
+          candidateCount: result.candidates.length,
+          rawPayload: stringifyPoiPayloadForLog(result.rawPayload),
+        });
+        if (!result.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: result.candidates.length });
+        else logPoiManualIpc("ipc_search_success", {
+          ...logContext,
+          poiName: result.best.poiName,
+          poiId: result.best.poiId,
+          candidateCount: result.candidates.length,
+        });
+        const { rawPayload: _rawPayload, ...detail } = result;
+        return detail;
+      } catch (err) {
+        logPoiManualIpc("ipc_search_failure", {
+          ...logContext,
+          errorMessage: err instanceof Error ? err.message : "VBK POI 查询失败",
+        });
+        throw err;
+      }
+    });
   });
-  ipcMain.handle("poi:suggestDemo", async (_event, keyword: string) => suggestPoiDemo(context.browser, String(keyword ?? "")));
-  ipcMain.handle("browser:navigate", (_event, url: string) => context.browser.navigate(url));
+  ipcMain.handle("poi:suggestDemo", async (_event, keyword: string) =>
+    context.productWorkflows.runVbkPageExclusive(() => suggestPoiDemo(context.browser, String(keyword ?? ""))));
+  ipcMain.handle("browser:navigate", (_event, url: string) =>
+    context.productWorkflows.runVbkPageExclusive(() => context.browser.navigate(url)));
   ipcMain.handle("browser:currentUrl", () => context.browser.currentUrl());
   ipcMain.handle("browser:openExternal", () => context.browser.openExternal());
   ipcMain.handle("browser:setBounds", (_event, bounds) => context.browser.setBounds(bounds));
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => context.browser.setVisible(visible));
   ipcMain.handle("browser:listLoginAccounts", () => context.browser.listKnownLoginAccounts());
-  ipcMain.handle("browser:addLogin", () => context.browser.addLogin());
+  ipcMain.handle("browser:addLogin", () =>
+    context.productWorkflows.runVbkPageExclusive(() => context.browser.addLogin()));
   ipcMain.handle("browser:switchAccount", async (_event, accountKey: string) => {
     const key = String(accountKey ?? "").trim();
-    await context.browser.switchAccount(key);
+    await context.productWorkflows.runVbkPageExclusive(() => context.browser.switchAccount(key));
     const snapshot = context.browser.listKnownLoginAccounts();
     const current = snapshot.current;
     const resolvedKey = current?.accountKey ?? key;
@@ -96,7 +106,8 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     return { forgotten: true };
   });
   ipcMain.handle("automation:start", (_event, localProductId: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () => context.automation.start(localProductId)));
+    context.productWorkflows.runExclusive(localProductId, "automation", () =>
+      context.productWorkflows.runVbkPageExclusive(() => context.automation.start(localProductId))));
   // 「停止」按钮的入口：立刻把 run 标记为 cancelled，runner 在下一个
   // checkpoint 跳出。不等待 Playwright 当前调用结束 ——
   // 跨进程 await click 安全中断点未知，强制 abort 可能让浏览器页面留下
@@ -108,7 +119,8 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   // 脏数据会因 failed phase 找不到而退化为 start（全量重跑错误）或被
   // retryPhase(preflight) 拒绝；本恢复按业务完成切回 succeeded + draft_saved。
   ipcMain.handle("automation:retry", (_event, localProductId: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", async () => {
+    context.productWorkflows.runExclusive(localProductId, "automation", () =>
+      context.productWorkflows.runVbkPageExclusive(async () => {
     if (await context.automation.recoverLegacyScreenshotFalseFailure(localProductId)) return;
     const product = db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
@@ -117,14 +129,16 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
       : product.automation?.phases.find((phase) => phase.status === "failed")?.phase;
     if (failedPhase) return context.automation.retryPhase(localProductId, failedPhase);
     return context.automation.start(localProductId);
-  }));
+  })));
   ipcMain.handle("automation:retryPhase", (_event, localProductId: string, phase: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () => context.automation.retryPhase(localProductId, phase)));
+    context.productWorkflows.runExclusive(localProductId, "automation", () =>
+      context.productWorkflows.runVbkPageExclusive(() => context.automation.retryPhase(localProductId, phase))));
   // 「重新执行」按钮的入口：单阶段重跑，不影响其他阶段。与 retryPhase
   // （失败后多阶段 forward）的区别：retryPhase 会重置后续阶段并从头跑
   // 到尾；retryOnePhase 只跑一个阶段，用于运营 review 当前页面填充效果。
   ipcMain.handle("automation:retryOnePhase", (_event, localProductId: string, phase: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () => context.automation.retryOnePhase(localProductId, phase)));
+    context.productWorkflows.runExclusive(localProductId, "automation", () =>
+      context.productWorkflows.runVbkPageExclusive(() => context.automation.retryOnePhase(localProductId, phase))));
   // 调试入口：仅 dev + VBK_DEBUG=1 时可访问。
   // 任何 IPC 调用都必须先 assertTrustedSender / assertDebugEnabled，避免
   // 外部 frame 触发逐步骤执行（极容易泄漏当前会话 cookies / 渲染文件）。
@@ -201,14 +215,15 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   });
   ipcMain.handle("accounts:listKnownAccounts", () => db.listKnownAccounts());
   ipcMain.handle("accounts:providerIdFor", (_event, accountName: string) => db.providerIdFor(accountName));
-  ipcMain.handle("contacts:listProviderContactCards", async (_event, providerId: number, searchKeyword?: string) => {
-    const page = await context.browser.page();
-    return listProviderContactCards(page, providerId, searchKeyword);
-  });
+  ipcMain.handle("contacts:listProviderContactCards", (_event, providerId: number, searchKeyword?: string) =>
+    context.productWorkflows.runVbkPageExclusive(async () => {
+      const page = await context.browser.page();
+      return listProviderContactCards(page, providerId, searchKeyword);
+    }));
   ipcMain.handle("contacts:suggestPoi", async (_event, keyword: string) => {
     const query = typeof keyword === "string" ? keyword.trim() : "";
     if (!query) return null;
-    return suggestPoi(context.browser, query);
+    return context.productWorkflows.runVbkPageExclusive(() => suggestPoi(context.browser, query));
   });
   // 产品封面：手动上传 + 携程图库候选查询。所有入口先做 trusted sender 校验。
   ipcMain.handle("cover:uploadManual", (event, args) => uploadManualCover(event, args));
@@ -217,10 +232,12 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   ipcMain.handle("cover:exists", (event, args) => isManualCoverStillPresent(event, args));
   // 阶段 A：按景点名称查 suggestpoi.json → 地址 / 景点候选列表；
   // UI 在地址列表里选中一个后再走 cover:searchCtripLibraryImages。
-  ipcMain.handle("cover:searchCtripLibraryPlaces", (event, args) => searchCtripLibraryCoverPlaces(event, args, context.browser));
+  ipcMain.handle("cover:searchCtripLibraryPlaces", (event, args) =>
+    context.productWorkflows.runVbkPageExclusive(() => searchCtripLibraryCoverPlaces(event, args, context.browser)));
   // 阶段 B：按已选 place 取该地址下的携程图库图片列表；
   // 链路：searchImage → getImageInfo（BrowserView 内联 fetch）。
-  ipcMain.handle("cover:searchCtripLibraryImages", (event, args) => searchCtripLibraryCoverImages(event, args, context.browser));
+  ipcMain.handle("cover:searchCtripLibraryImages", (event, args) =>
+    context.productWorkflows.runVbkPageExclusive(() => searchCtripLibraryCoverImages(event, args, context.browser)));
 }
 
 /** 日志字段必须是字符串，避免 Node inspect 将嵌套对象折叠成 [Object]/[Array]。 */

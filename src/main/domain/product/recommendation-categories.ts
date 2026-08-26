@@ -26,3 +26,11 @@ export const RECOMMENDATION_CATEGORIES = [
 
 /** 保留语义化导出名；它与产品契约共用同一份值，禁止再次出现分叉。 */
 export const VBK_RECOMMENDATION_CATEGORIES = RECOMMENDATION_CATEGORIES;
+
+/** 当前 VBK 合同下推荐理由三行稳定可选的分类；其余分类可能展示但为 disabled。 */
+export const VBK_SELECTABLE_RECOMMENDATION_CATEGORIES = [
+  "服务保障",
+  "贴心赠送",
+  "精选酒店",
+  "特色美食",
+] as const;

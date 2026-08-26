@@ -8,12 +8,15 @@ import {
 
 test("findRowByTitle 精确匹配标题，容忍空白和末尾必填星号", () => {
   let titleOptions: { hasText?: RegExp } | undefined;
-  const result = { first: () => "first-row" };
-  const rows = { filter: () => result };
+  const legacyRow = { or: () => ({ first: () => "first-row" }) };
+  const rows = { filter: () => ({ first: () => legacyRow }) };
+  const modernRows = { filter: () => ({ first: () => ({}) }) };
   const page = {
     locator(selector: string, options?: { hasText?: RegExp }) {
       if (selector === ".saleControl-title") titleOptions = options;
-      return selector === ".saleControl-body .ant-row" ? rows : {};
+      if (selector === ".saleControl-body .ant-row") return rows;
+      if (selector === ".ant-form-item") return modernRows;
+      return {};
     },
   };
 

@@ -18,7 +18,7 @@ import { expandVerifiedItinerary, resolvePlanningPoiCandidates } from "./plannin
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
-import { findVbkCopyBadCase } from "./vbk-copy-policy.js";
+import { findAllVbkCopyBadCases } from "./vbk-copy-policy.js";
 export interface ThreeStageOrchestratorDependencies {
   localProductId: string;
   skeleton: PlanningSkeleton & { province: string; city: string };
@@ -353,9 +353,11 @@ async function composeItinerary(
       });
       const expanded = expandVerifiedItinerary({ drafts, pool, days: deps.skeleton.days });
       if (!expanded.ok) throw new Error(expanded.reason);
-      const copyBadCase = findVbkCopyBadCase(expanded.itinerary, "itinerary");
-      if (copyBadCase) {
-        throw new Error(`行程文案命中 VBK 黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」`);
+      const copyBadCases = findAllVbkCopyBadCases(expanded.itinerary, "itinerary");
+      if (copyBadCases.length > 0) {
+        throw new Error(copyBadCases.map((badCase) =>
+          `行程文案 ${badCase.path} 命中 VBK 黑名单「${badCase.term}」：${badCase.reason}；请改写为「${badCase.alternatives.join("」或「")}」`,
+        ).join("；"));
       }
       const write = await deps.runtime.writeModule(deps.localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, expanded.itinerary);
       if (!write.ok) throw new Error(write.reason || "行程写入失败");

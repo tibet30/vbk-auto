@@ -27,6 +27,7 @@
 
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
+import { requiresGuide, supportsSmallGroupSettings } from "../../shared/product-form.js";
 import { readCover } from "../operations/cover-info.js";
 import {
   hasValidCoverPoMeta,
@@ -56,6 +57,7 @@ export type AutomationPhase =
   | "terms"
   | "hotelResource"
   | "vehicleResource"
+  | "saleControl"
   | "preflight";
 
 /** 单一字段契约。 */
@@ -223,6 +225,29 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     source: "vbk-runtime",
     detail: "私家团需先匹配并回填 VBK 资源组。",
     check: (product) => isPrivateTour(product) ? hasSatisfiedVehicleResource(product) : true,
+  },
+  {
+    path: "sales.guideIncluded",
+    label: "随团导游",
+    phase: "basic",
+    source: "manual-only",
+    detail: "跟团游必须确认包含随团导游。",
+    check: (product) => {
+      const sales = asObject(product.sales);
+      return !requiresGuide(sales?.productForm) || sales?.guideIncluded !== false;
+    },
+  },
+  {
+    path: "sales.smallGroupSettings",
+    label: "拼小团配置",
+    phase: "saleControl",
+    source: "vbk-runtime",
+    detail: "跟团游 / 半自助需选择拼小团、广场拼团并设置最大人数 8。",
+    check: (product) => {
+      const sales = asObject(product.sales);
+      if (!supportsSmallGroupSettings(sales?.productForm)) return true;
+      return sales?.splitGroup === true && sales?.squareGroup === true && sales?.maxGroupSize === 8;
+    },
   },
 ];
 

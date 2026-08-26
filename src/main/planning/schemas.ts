@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { isCombinedSpotName } from "./spot-name.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
@@ -23,8 +23,10 @@ import {
 } from "../../shared/contracts-planning.js";
 
 const requiredText = z.string().trim().min(1);
+const vbkSubtitle = z.string().trim().min(2).max(40, "subtitle 最多 40 个字符");
 /** AI 生成推荐理由时只能使用的 VBK 下拉分类。 */
 const VBK_RECOMMENDATION_VALUES = [...VBK_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
+const VBK_SELECTABLE_RECOMMENDATION_VALUES = [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
 
 const itinerarySpotSchema = z.object({
   name: requiredText,
@@ -40,7 +42,7 @@ const itinerarySpotSchema = z.object({
   }
 });
 const basicInfoModuleValueSchema = z.object({
-  subtitle: requiredText,
+  subtitle: vbkSubtitle,
   province: requiredText,
   destinationCity: requiredText.optional(),
   meetingCity: requiredText.optional(),
@@ -58,7 +60,7 @@ const presentationModuleValueSchema = z.object({
   recommendationCategory: z.enum(VBK_RECOMMENDATION_VALUES),
   recommendation: requiredText,
   recommendations: z.array(z.object({
-    category: z.enum(VBK_RECOMMENDATION_VALUES),
+    category: z.enum(VBK_SELECTABLE_RECOMMENDATION_VALUES),
     text: requiredText,
   })).length(3),
   features: requiredText,

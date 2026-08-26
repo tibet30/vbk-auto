@@ -122,6 +122,23 @@ test("全部就绪时守卫静默放行", async (t) => {
   assert.doesNotThrow(() => assertCreatePreconditions(db));
 });
 
+test("Tibet 用户作用域下按真实 vbk_* 登录账号读取固定信息，不被展示名误导", async (t) => {
+  const db = await newDatabase(t);
+  db.setExtensionUserIdResolver(() => 42);
+  db.setSetting("vbkAccountName", "供应商展示名");
+  db.setSetting("accountFixedInfo:42:vbk_2405770", JSON.stringify({
+    servicePhone: "400-820-1234",
+    butlerName: validButler,
+  }));
+
+  assert.deepEqual(detectCreateGuardFailures(db, "vbk_2405770"), {
+    notLoggedIn: false,
+    missingServicePhone: false,
+    missingButler: false,
+  });
+  assert.doesNotThrow(() => assertCreatePreconditions(db, "vbk_2405770"));
+});
+
 test("成功创建后产品 JSON 固化管家 selection + 创建成功断言，守卫失败时不留痕迹", async (t) => {
   const db = await newDatabase(t);
   // 守卫失败路径：未登录时 db.createProduct 不被守卫调用——但守卫的契约是

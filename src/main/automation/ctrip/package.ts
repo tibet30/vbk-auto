@@ -51,10 +51,11 @@ export async function fillAndSavePackage(page, product) {
   }
   const existing = page.getByText(product.commercial.packageName, { exact: true });
   if (await existing.count()) return { skipped: "套餐已存在", packageName: product.commercial.packageName };
-  await page
-    .getByText("新增套餐", { exact: true })
-    .waitFor({ state: "visible", timeout: 30_000 });
-  await page.getByText("新增套餐", { exact: true }).click({ force: true }).catch(() => false);
+  // 套餐页会同时保留正常区域和 #lingjie-skeleton 的同名占位按钮；
+  // 只在可见 button 中取首个，避免 strict mode 把占位节点也算入匹配。
+  const addPackageButton = page.locator('button:visible').filter({ hasText: /^\s*新增套餐\s*$/ }).first();
+  await addPackageButton.waitFor({ state: "visible", timeout: 30_000 });
+  await addPackageButton.click({ force: true }).catch(() => false);
   await delay(1500);
   /**
    * 在多个 antd 的「active」tabpane 中挑出最可能承载 NewPackage 表单的那个：
@@ -78,7 +79,10 @@ export async function fillAndSavePackage(page, product) {
   await chooseRadioValue(activePane2, "NewPackage_priceInputType", "1", "按人报价");
   await chooseRadioValue(activePane2, "NewPackage_isHotelShareRoom", "F", "酒店拼房");
   await chooseRadioValue(activePane2, "NewPackage_isContainBedFee", "F", "儿童占床");
-  await chooseRadioValue(activePane2, "NewPackage_needShuttle", "F", "接送备注");
+  // 自由行新增套餐页不渲染接送备注控件；仅在当前产品形态实际提供时设置。
+  if (await activePane2.locator("#NewPackage_needShuttle").count()) {
+    await chooseRadioValue(activePane2, "NewPackage_needShuttle", "F", "接送备注");
+  }
   await chooseRadioValue(activePane2, "NewPackage_isSmsVBKNotice", "T", "订单短信通知");
   await chooseRadioValue(activePane2, "NewPackage_isHotelResource", "F", "是否含酒店");
   if (days) {

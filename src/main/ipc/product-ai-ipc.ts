@@ -37,7 +37,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     let next: Record<string, unknown>;
     try { next = JSON.parse(json); } catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
     parseProduct(next);
-    return productMutations.replace(id, next, { status: "review" });
+    return productMutations.replace(id, next, {
+      status: "review",
+      allowMeetingCityCorrection: true,
+    });
   });
   // 运营人员直接在 UI 上录入的「需要人工复核」字段（例如定价 pricing）。
   // 仅允许 ManualReviewFieldInput 白名单，product 走 schema 校验后才落库；
@@ -102,7 +105,12 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       : typeof basicInfo?.meetingCity === "string" && basicInfo.meetingCity.trim()
         ? basicInfo.meetingCity.trim()
         : "";
-    const runtime = new DbOrchestratorRuntime(db, context.browser, productMutations);
+    const runtime = new DbOrchestratorRuntime(
+      db,
+      context.browser,
+      productMutations,
+      (task) => context.productWorkflows.runVbkPageExclusive(task),
+    );
     const existingTasks = await runtime.loadExistingResearchTasks(localProductId);
     await enrichItineraryPois({
       localProductId,
@@ -303,22 +311,21 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         // 搜索资源库匹配资源组/酒店，自动标记对应的核查任务为已解决。
         if (isInitialDraft) {
           try {
-            const status = await context.browser.status();
+            const status = await context.productWorkflows.runVbkPageExclusive(() => context.browser.status());
             if (!status.loggedIn) {
               logInfo("[AI] VBK not logged in, skipping auto resource resolution", { provider: getSettings().aiProvider });
             } else {
               const productAfterAi = db.getProduct(localProductId)!;
-              let page: ReturnType<MainIpcContext["browser"]["page"]> | undefined;
-              // 懒加载 VBK 页面：只在需要时才获取，避免过早消费 CDP 连接。
-              const ensurePage = async () => { if (!page) page = context.browser.page(); return page; };
+              const withVbkPage = <T>(task: (page: Awaited<ReturnType<MainIpcContext["browser"]["page"]>>) => Promise<T>) =>
+                context.productWorkflows.runVbkPageExclusive(async () => task(await context.browser.page()));
               // 首轮 post-processing：若 presentation.cover 缺 imageId/imageUrl，
               // 通过 searchCtripLibraryImages 拿一张完整候选自动写回。复用既有
               // cover-ipc 链路；失败只 console.info，不阻塞 ai:send 主流程。
               try {
-                const coverOutcome = await applyAutoCoverFill({
-                  page: await ensurePage(),
+                const coverOutcome = await withVbkPage((page) => applyAutoCoverFill({
+                  page,
                   product: productAfterAi.product,
-                });
+                }));
                 if (coverOutcome.outcome.written) {
                   productMutations.replace(localProductId, coverOutcome.nextProduct, { status: "review", notify: false });
                   logInfo("[AI] auto cover filled from Ctrip library", {
@@ -343,10 +350,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
               // 用车类 research task，命中后再标记为已解决。real resourceGroupId /
               // resourceGroupName 仍只由 VBK 匹配回填。
               try {
-                const vehicleOutcome = await applyAutoVehicleResourceTrigger({
-                  page: await ensurePage(),
+                const vehicleOutcome = await withVbkPage((page) => applyAutoVehicleResourceTrigger({
+                  page,
                   product: db.getProduct(localProductId)!,
-                });
+                }));
                 if (vehicleOutcome.outcome.written) {
                   productMutations.replace(localProductId, vehicleOutcome.nextProduct.product, { status: "review", notify: false });
                   if (vehicleOutcome.outcome.resourceGroupId) {
@@ -381,7 +388,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
               const productForHotel = db.getProduct(localProductId)!;
               if (productForHotel.researchTasks.some((t) => t.state !== "confirmed" && t.state !== "resolved" && /酒店|住宿|客栈|民宿/.test(t.label || ""))) {
                 try {
-                  const hotelResult = await resolveHotelResource(await ensurePage(), productForHotel);
+                  const hotelResult = await withVbkPage((page) => resolveHotelResource(page, productForHotel));
                   productMutations.replace(localProductId, hotelResult.product, { status: "review", notify: false });
                   if (hotelResult.resolved && hotelResult.resolved.source === "vbk") {
                     for (const task of productForHotel.researchTasks) {
@@ -534,7 +541,8 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     return { ...result, product: next, readiness: readiness(localProductId) };
   });
   ipcMain.handle("research:vehicleResource", (_event, localProductId: string, taskId?: string) =>
-    context.productWorkflows.runExclusive(localProductId, "resource", async () => {
+    context.productWorkflows.runExclusive(localProductId, "resource", () =>
+      context.productWorkflows.runVbkPageExclusive(async () => {
     const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
     const page = await context.browser.page();
     const result = await resolveVehicleResource(page, product);
@@ -547,9 +555,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const next = db.getProduct(localProductId)!;
     emitProduct(next);
     return result.resolved;
-  }));
+  })));
   ipcMain.handle("research:hotelResource", (_event, localProductId: string, taskId?: string) =>
-    context.productWorkflows.runExclusive(localProductId, "resource", async () => {
+    context.productWorkflows.runExclusive(localProductId, "resource", () =>
+      context.productWorkflows.runVbkPageExclusive(async () => {
     const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
     const page = await context.browser.page();
     const result = await resolveHotelResource(page, product);
@@ -558,5 +567,5 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     db.addMessage(localProductId, "assistant", `已查询酒店资源：${result.note}`, "succeeded");
     emitProduct(db.getProduct(localProductId)!);
     return result.resolved;
-  }));
+  })));
 }

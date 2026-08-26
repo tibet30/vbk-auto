@@ -83,3 +83,30 @@ test("preparePhaseRetry 保留 recovery 字段（needs_user 修复路径）", ()
   assert.match(rec!.finalError || "", /管家联系人下拉未找到/);
   assert.equal(rec!.attempts.length, 1, "上轮 attempts 必须保留供 UI 查看");
 });
+
+test("preparePhaseRetry 兼容旧版孤儿恢复遗留的 running 阶段", () => {
+  const interrupted: AutomationRun = {
+    id: "run-interrupted",
+    status: "failed",
+    currentPhase: "presentation",
+    phases: [
+      { phase: "basic", status: "completed" },
+      { phase: "presentation", status: "running" },
+    ],
+    logs: [],
+    recovery: {
+      phases: {
+        presentation: {
+          phase: "presentation",
+          state: "needs_user",
+          attempts: [],
+          finalError: "应用重启导致自动录入被中断",
+        },
+      },
+    },
+  };
+
+  const next = preparePhaseRetry(interrupted, ["basic", "presentation"], "presentation");
+  assert.equal(next.status, "running");
+  assert.equal(next.currentPhase, "presentation");
+});

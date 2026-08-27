@@ -3,18 +3,15 @@
  * 产品图文页（productImageText）页面层：
  *   - selectCtripLibraryImage / selectCtripLibraryCover：在「从图库资源导入」弹窗里搜索 poi 并按
  *     质量 / 分辨率要求挑图，确认协议并提交；
- *   - fillAndSavePresentation：跳到产品图文 tab → 填推荐理由 → 上封面 → 填推荐语与产品特点 →
- *     经 saveThenAdvance 推进到「行程描述」。
+ *   - fillAndSavePresentation：跳到产品图文 tab → 接口保存推荐理由 + 产品特点 + 封面 →
+ *     经 saveThenAdvance 推进到「行程描述」。不再回退到 DOM / UEditor / UI SaveMonitor。
  * 顶部带 `// @ts-nocheck`，形参 page 是动态传入。
  */
 
 import { delay, assertCount } from "../utils.js";
 import { clickSection, isItineraryUrl, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
-import {
-  buildRecommendationReasonsPlan,
-  fillRecommendationReasons,
-} from "./recommendations.js";
+import { buildRecommendationReasonsPlan } from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
 import { bindCtripLibraryCoverViaApi } from "./cover-bind.js";
 import { savePresentationViaApi } from "./presentation-api.js";
@@ -194,17 +191,17 @@ export async function fillAndSavePresentation(page, product) {
     throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }
 
-  // 第二道防御（推荐理由接口保存前）：仍然保留 3 条 + 白名单 + 不重复校验，
-  // 错误信息保持原样，避免改动影响既有运营提示。
+  // 防御深度：仍然保留 3 条 + 白名单 + 不重复校验（buildRecommendationReasonsPlan
+  // 抛错信息保持原样），避免改动影响既有运营提示。
   buildRecommendationReasonsPlan(presentation.recommendations);
   await clickSection(page, ["产品图文", "图文信息"]);
   await page.waitForURL((url) => isProductImageTextUrl(url.href), { timeout: 30_000 });
   await page.reload({ waitUntil: "domcontentloaded" });
   await delay(1_000);
 
-  // 接口保存不会触发 VBK React 表单的分类变更事件；先用真实控件回填并回读，
-  // 清掉“请重新选择推荐理由类别”这类仅存在于页面状态的校验错误，再做接口保存。
-  await fillRecommendationReasons(page, presentation.recommendations);
+  // 推荐理由 + 产品特色 + 封面图统一走接口保存：直接由 savePresentationViaApi
+  // 写入 /15638/getdescriptionInfo → /20698/createProductDraft → /15638/savedescriptioninfo，
+  // 不再回退到 DOM / UEditor / UI SaveMonitor。
   await selectCtripLibraryCover(page, presentation.cover);
   const savedWith = await savePresentationViaApi(page, presentation);
   await page.reload({ waitUntil: "domcontentloaded" });

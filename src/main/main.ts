@@ -359,7 +359,10 @@ app.whenReady().then(async () => {
   };
   registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
-  await vbkBindings.afterBrowserReady();
+  // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
+  void browser.initialise()
+    .then(() => vbkBindings.afterBrowserReady())
+    .catch((error) => logWarn("[startup] deferred VBK binding restore failed", error));
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) void openMainWindow();
   });

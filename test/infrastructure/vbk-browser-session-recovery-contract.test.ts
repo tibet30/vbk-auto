@@ -5,7 +5,7 @@ import { test } from "node:test";
 const source = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
 const mainSource = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
 const accountStatusSource = readFileSync(new URL("../../src/main/infrastructure/vbk-account-status.ts", import.meta.url), "utf8");
-const initialise = source.slice(source.indexOf("  async initialise()"), source.indexOf("  /**\n   * 调整 view 布局"));
+const initialise = source.slice(source.indexOf("  private async initialiseOnce()"), source.indexOf("  /**\n   * 调整 view 布局"));
 
 test("无登录快照的活跃账号指针不会切换到空账号分区", () => {
   assert.match(initialise, /const record:[\s\S]*loadSession\(activeKey\)[\s\S]*const cookies = record \? parseCookies\(record\.cookiesJson\) : \[\];/);
@@ -19,17 +19,51 @@ test("有效快照只读取一次并传入账号分区恢复流程", () => {
   assert.doesNotMatch(source, /ensureAccountView\(accountKey: string\)[\s\S]*loadSession\(accountKey\)/);
 });
 
+test("有效 activeKey 快照初始化时不预加载 defaultView", () => {
+  const defaultCreation = initialise.indexOf('createView("persist:vbk")');
+  const defaultLoad = initialise.indexOf("defaultView.webContents.loadURL");
+  assert.equal(defaultCreation, -1, "有效快照路径不能在 initialise 中创建默认视图");
+  assert.equal(defaultLoad, -1, "有效快照路径不能在 initialise 中加载默认视图");
+  assert.match(
+    initialise,
+    /if \([\s\S]*isVbkAuthCookieSummaryComplete\(authSummary\)[\s\S]*\) \{[\s\S]*ensureAccountView\([\s\S]*\}[\s\S]*(?:else|ensureDefaultView)/,
+    "初始化必须先判定快照，再仅在无效快照时准备默认视图",
+  );
+});
+
+test("无有效快照初始化才准备 defaultView，新增登录和退出按需懒创建", () => {
+  assert.match(initialise, /ensureDefaultView\(\)/, "无有效快照必须有默认视图兜底");
+
+  const addLogin = source.slice(source.indexOf("  async addLogin()"), source.indexOf("  /**\n   * 切换"));
+  assert.match(addLogin, /(?:await\s+)?this\.ensureDefaultView\(\)/, "新增登录需要时应懒创建默认视图");
+  assert.doesNotMatch(addLogin, /if \(!this\.defaultView\) return;/, "新增登录不能因默认视图尚未预创建而直接返回");
+
+  const logout = source.slice(source.indexOf("  async logout()"), source.indexOf("  /**\n   * 把当前 WebView"));
+  assert.match(logout, /(?:await\s+)?this\.ensureDefaultView\(\)/, "退出需要切回默认视图时应懒创建");
+});
+
 test("手动切换也拒绝空快照，不能激活空账号分区", () => {
   const switchAccount = source.slice(source.indexOf("  async switchAccount("), source.indexOf("  /**\n   * 忘记"));
+  assert.match(switchAccount, /await this\.ensureReadyForAction\(\);/, "后台初始化未完成时切换账号必须等待同一任务");
   assert.match(source, /private resolveSessionKey\(identifier: string\): string[\s\S]*listSessions\(\)\.filter\([\s\S]*accountName === identifier/);
   assert.match(switchAccount, /const cookies = parseCookies\(record\.cookiesJson\);[\s\S]*if \(cookies\.length === 0\) \{[\s\S]*throw new Error/);
   assert.match(switchAccount, /const authSummary = summarizeVbkAuthCookies\(cookies\);[\s\S]*isVbkAuthCookieSummaryComplete\(authSummary\)/);
   assert.match(switchAccount, /ensureAccountView\(trimmedKey, cookies\)/);
 });
 
+test("远端恢复命中当前账号时验证身份后直接复用，不重复加载产品列表", () => {
+  const switchAccount = source.slice(source.indexOf("  async switchAccount("), source.indexOf("  /**\n   * 忘记"));
+  assert.match(switchAccount, /const sourceKey = this\.activeKey;[\s\S]*await this\.saveCurrentSession\(\);/);
+  assert.match(switchAccount, /sourceKey === trimmedKey && savedCurrent\?\.accountKey === trimmedKey[\s\S]*return;/);
+  assert.ok(
+    switchAccount.indexOf("savedCurrent?.accountKey === trimmedKey") < switchAccount.indexOf("ensureAccountView(trimmedKey, cookies)"),
+    "同账号复用判断必须发生在清空 partition 和再次 loadURL 之前",
+  );
+});
+
 test("退出账号先卸载活跃分区视图，再清空内存活跃标识", () => {
   const logout = source.slice(source.indexOf("  async logout()"), source.indexOf("  /**\n   * 把当前 WebView"));
-  assert.match(logout, /if \(this\.defaultView\) \{[\s\S]*this\.activateView\(this\.defaultView\);[\s\S]*\} else \{\s*this\.activeKey = undefined;/);
+  assert.match(logout, /clearActiveAccountKey\(\);[\s\S]*ensureDefaultView\(\);[\s\S]*activateView\(defaultView\);/);
   assert.doesNotMatch(logout, /clearActiveAccountKey\(\);\s*this\.activeKey = undefined;\s*\/\/ 切回默认视图/);
 });
 

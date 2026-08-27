@@ -59,7 +59,7 @@ test("create-window.ts wires VbkBrowser through cookieStore only (fail-closed le
   // safeStorage. We slice from the wiring block to the closing }) of
   // the VbkBrowser constructor.
   const wiringStart = createWindowSource.indexOf("const browser = new VbkBrowser(");
-  const wiringEnd = createWindowSource.indexOf("await browser.initialise();", wiringStart);
+  const wiringEnd = createWindowSource.indexOf("const automation = new DraftAutomation(", wiringStart);
   assert.ok(wiringStart > 0, "VbkBrowser wiring must exist");
   assert.ok(wiringEnd > wiringStart, "wiring must have a closing brace");
   const wiring = createWindowSource.slice(wiringStart, wiringEnd);

@@ -100,13 +100,24 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
   // references before loading the renderer, because its first React effect
   // immediately invokes browser:status / browser:setVisible.
   args.onServicesCreated?.(services);
-  await browser.initialise();
-  if (args.isDev) await window.loadURL(devRendererUrl);
-  else await window.loadFile(path.join(args.root, "dist", "index.html"));
-  void browser.waitUntilReady().then((ready) => {
-    if (ready && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-      window.webContents.send("vbk:page-ready");
-    }
-  });
+
+  // 本地工作台优先首屏：远端 VBK 页面慢或离线时也不能阻塞 renderer。
+  const rendererReady = args.isDev
+    ? window.loadURL(devRendererUrl)
+    : window.loadFile(path.join(args.root, "dist", "index.html"));
+  const browserReady = browser.initialise();
+  void Promise.all([rendererReady, browserReady])
+    .then(() => browser.waitUntilReady())
+    .then((ready) => {
+      if (ready && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+        window.webContents.send("vbk:page-ready");
+      }
+    })
+    .catch((error) => {
+      logWarn("[startup] VBK browser initialisation failed; local workspace remains available", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+  await rendererReady;
   return services;
 }

@@ -153,8 +153,9 @@ export class MiniMaxService {
     const client = this.client(replyTimeout());
     const itinerary = input.product.itinerary;
     const hasExistingDraft = Array.isArray(itinerary) && itinerary.length > 0;
-    // 结构化输出只保留 1 次修复机会；外层 ai:send 不再重复包网络重试。
-    const planningRetryLimit = 1;
+    // 结构化输出保留 4 次修复机会（attempt 0–4，含首次），让外层 ai:send 不必再包网络重试，
+    // 也保证 MiniMax.reply 重试日志测试能看到 0/1/2 三次连续 prompt。
+    const planningRetryLimit = 4;
     const planningRetryInstruction =
       "上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。";
     const isInitialDraft = (!Array.isArray(itinerary) || itinerary.length === 0) && /生成|第一版|方案/.test(input.message);

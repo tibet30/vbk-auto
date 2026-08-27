@@ -1,5 +1,6 @@
 import type { PlanningPlanV2, PlanningRunResult } from "../../shared/contracts.js";
 import type { MainIpcContext } from "../ipc/context.js";
+import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { resetProductForPlanningStage } from "./planning-v2-reset.js";
 import {
@@ -16,6 +17,8 @@ type ItineraryPoiLookup = (
   name: string,
   context: { destinationCity: string; province: string },
 ) => Promise<{ poiName: string; poiId: number } | null>;
+
+const POI_LOOKUP_CONCURRENCY = 5;
 
 export async function acceptItineraryAndRerunCompletion(args: {
   context: MainIpcContext;
@@ -61,22 +64,27 @@ export async function acceptItineraryAndRerunCompletion(args: {
     const basic = asRecord(remote.product.basicInfo) ?? {};
     const destinationCity = text(basic.destinationCity) || text(basic.meetingCity);
     const province = text(basic.province);
-    let lookupPoi = args.lookupPoi;
-    if (!lookupPoi) {
+    let matches: Map<string, { poiName: string; poiId: number }>;
+    if (args.lookupPoi) {
+      matches = await resolveBestEffortPoiMatches(required, { destinationCity, province }, args.lookupPoi);
+    } else {
       try {
-        await context.productWorkflows.runVbkPageExclusive(() => context.browser.status());
-        lookupPoi = async (name, poiContext) => context.productWorkflows.runVbkPageExclusive(async () => {
+        matches = await context.productWorkflows.runVbkPageExclusive(async () => {
+          await context.browser.status();
           const page = await context.browser.page();
-          const best = (await suggestPoiDetail(page, name, poiContext)).best;
-          return best && Number.isInteger(best.poiId) && best.poiId > 0 && best.poiName.trim() && !isTravelNodeName(best.poiName)
-            ? { poiName: best.poiName.trim(), poiId: best.poiId }
-            : null;
+          return resolveBestEffortPoiMatches(required, { destinationCity, province }, async (name, poiContext) => {
+            const best = (await suggestPoiDetail(page, name, poiContext)).best;
+            if (!best || !Number.isInteger(best.poiId) || best.poiId <= 0 || !best.poiName.trim() || isTravelNodeName(best.poiName)) return null;
+            // 每个 worker 拿到 POI ID 后，立即查询营业状态；暂停营业不绑定进采用行程。
+            const availability = await getCtripSightAvailability(page, best.poiId);
+            return availability.status === "suspended" ? null : { poiName: best.poiName.trim(), poiId: best.poiId };
+          });
         });
       } catch {
         // POI 是尽力匹配项。页面暂不可用时保留用户景点名，交给运营稍后手动配置。
+        matches = new Map();
       }
     }
-    const matches = await resolveBestEffortPoiMatches(required, { destinationCity, province }, lookupPoi);
     const hydrated = applyUnmatchedPoiSourcePolicy(
       itinerary,
       matches,
@@ -111,16 +119,23 @@ export async function resolveBestEffortPoiMatches(
   lookupPoi?: ItineraryPoiLookup,
 ): Promise<Map<string, { poiName: string; poiId: number }>> {
   const matches = new Map<string, { poiName: string; poiId: number }>();
-  for (const spot of lookupPoi ? spots : []) {
-    try {
-      const match = await lookupPoi!(spot.name, poiContext);
-      if (match && Number.isInteger(match.poiId) && match.poiId > 0 && match.poiName.trim() && !isTravelNodeName(match.poiName)) {
-        matches.set(spot.name, { poiName: match.poiName.trim(), poiId: match.poiId });
+  if (!lookupPoi) return matches;
+  const uniqueSpots = [...new Map(spots.map((spot) => [spot.name, spot])).values()];
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < uniqueSpots.length) {
+      const spot = uniqueSpots[nextIndex++];
+      try {
+        const match = await lookupPoi(spot.name, poiContext);
+        if (match && Number.isInteger(match.poiId) && match.poiId > 0 && match.poiName.trim() && !isTravelNodeName(match.poiName)) {
+          matches.set(spot.name, { poiName: match.poiName.trim(), poiId: match.poiId });
+        }
+      } catch {
+        // 单个查询失败不再阻断采用；applyPoiMatches 会保留原名称和空 POI。
       }
-    } catch {
-      // 单个查询失败不再阻断采用；applyPoiMatches 会保留原名称和空 POI。
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(POI_LOOKUP_CONCURRENCY, uniqueSpots.length) }, worker));
   return matches;
 }
 

@@ -13,6 +13,7 @@ import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
 import { ProductMutationService } from "../application/product-mutation-service.js";
 import { suggestPoi } from "../infrastructure/poi-suggest.js";
+import { getCtripSightAvailability, getCtripSightAvailabilities } from "../infrastructure/ctrip-sight-availability.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
@@ -204,6 +205,14 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     if (!this.browser) return null;
     const query = async () => suggestPoi(await this.browser!.page(), keyword, context);
     return this.runVbkPageExclusive ? this.runVbkPageExclusive(query) : query();
+  }
+
+  async getPoiAvailability(poiId: number) {
+    return getCtripSightAvailability(undefined, poiId);
+  }
+
+  async getPoiAvailabilities(poiIds: readonly number[]) {
+    return getCtripSightAvailabilities(undefined, poiIds);
   }
 
   async loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {

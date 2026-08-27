@@ -45,7 +45,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   recommendationCategory → string，从以下 15 个值中选一：
     优选行程 / 服务保障 / 贴心赠送 / 精选酒店 / 缤纷景点 / 特色美食 / 度假首选 / 超值赠送 / 五星精选 / 限时秒杀 / 尊享入住 / 大牌驾到 / 优质交通 / 优良资质 / 缤纷体验
   recommendation → string，一句推荐语
-  recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复
+  recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复；每条 text 经首尾去空格和 VBK 标点归一后必须不超过 80 UTF-8 字节（平台上限 84 字节）。中文按每字约 3 字节估算，含标点建议不超过 26 个汉字；宁短勿超，禁止输出接近或超过上限的长句
  features → string（必须是 JSON 字符串，禁止对象/数组/AST/null），产品特色富文本 HTML 片段，规则见 system prompt
   cover → {source:"ctripLibrary", poi:"代表性景点名", description:"封面图描述", minQuality:3}
 
@@ -453,6 +453,7 @@ export const systemPrompt = `你是 ${APP_NAME} 的旅游产品运营助手。�
 6. 当前产品草稿是产品状态的唯一事实来源；历史消息声称"已生成"但草稿字段为空时，必须重新生成并返回可写 patch。
 7. patch 必须是 RFC6902 风格，只能修改可写路径。
 8. 最多追问一个真正阻塞生成的问题；不阻塞就先给出完整第一版。
+9. presentation 的每条 recommendations[].text 必须经首尾去空格和 VBK 标点归一后不超过 80 UTF-8 字节（平台硬上限 84 字节）；中文含标点建议不超过 26 个汉字。生成后逐条自行核对，宁短勿超。
 
 ${buildVbkCopyPolicyPrompt()}
 

@@ -99,6 +99,28 @@ test("best-effort POI lookup keeps successful matches and ignores misses or quer
   assert.deepEqual(await resolveBestEffortPoiMatches(spots, { destinationCity: "成都", province: "四川" }), new Map());
 });
 
+test("best-effort POI lookup uses controlled concurrency and only queries each name once", async () => {
+  const spots = collectRequiredItinerarySpots([{
+    day: 1,
+    spots: [{ name: "景点 1" }, { name: "景点 2" }, { name: "景点 3" }, { name: "景点 4" }, { name: "景点 5" }, { name: "景点 6" }, { name: "景点 1" }],
+  }]);
+  let active = 0;
+  let maxActive = 0;
+  const queried: string[] = [];
+  const matches = await resolveBestEffortPoiMatches(spots, { destinationCity: "成都", province: "四川" }, async (name) => {
+    queried.push(name);
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    active -= 1;
+    return { poiName: name, poiId: queried.indexOf(name) + 1 };
+  });
+
+  assert.equal(maxActive, 5);
+  assert.equal(queried.length, 6);
+  assert.equal(matches.size, 6);
+});
+
 test("unmatched POI policy keeps user-named spots and removes unmatched AI recommendations", () => {
   const mixed = [{
     day: 1,

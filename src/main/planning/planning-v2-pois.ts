@@ -77,6 +77,7 @@ export async function resolvePlanningPoiCandidates(args: {
   concurrency?: number;
   beforeEach: () => Promise<void>;
   query: (name: string) => Promise<PoiSuggestDetailResult>;
+  checkAvailability?: (poiId: number) => Promise<{ status: "available" | "suspended" }>;
 }): Promise<PlanningPoiCandidate[]> {
   const result = new Array<PlanningPoiCandidate>(args.names.length);
   let cursor = 0;
@@ -88,7 +89,15 @@ export async function resolvePlanningPoiCandidates(args: {
       try {
         await args.beforeEach();
         const detail = await args.query(requestedName);
-        result[index] = toPlanningCandidate(requestedName, detail, args.province, args.city);
+        const candidate = toPlanningCandidate(requestedName, detail, args.province, args.city);
+        if (candidate.status === "resolved" && candidate.poiId && args.checkAvailability) {
+          const availability = await args.checkAvailability(candidate.poiId);
+          result[index] = availability.status === "suspended"
+            ? { requestedName, status: "rejected", poiId: candidate.poiId, poiName: candidate.poiName, reason: "携程景点详情标记为暂停营业" }
+            : candidate;
+        } else {
+          result[index] = candidate;
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (/登录|Cookie|cookie|未登录/.test(message)) throw error;

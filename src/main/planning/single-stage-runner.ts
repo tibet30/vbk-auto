@@ -349,6 +349,9 @@ async function runAiStage(args: {
             runtime,
             persistedTaskKeys,
             resolvePoiName: planner.resolvePoiName?.bind(planner),
+            // 重跑行程规划也必须复核已绑定 POI；否则历史行程只会补空 ID，
+            // 已暂停营业的景点会被错误保留。
+            reviewCompletePois: true,
           }));
           const acceptedAfterPoi = await runtime.loadAcceptedModules(state.localProductId);
           if (!acceptedAfterPoi.includes("itinerary")) {

@@ -141,6 +141,34 @@ test("POI queries are bounded at five concurrent requests", async () => {
   assert.equal(peak, 5);
 });
 
+test("three-stage POI pool rejects suspended sights immediately after resolving their ID", async () => {
+  const events: string[] = [];
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["金沙遗址博物馆"],
+    province: "四川",
+    city: "成都",
+    concurrency: 5,
+    beforeEach: async () => undefined,
+    query: async (name) => {
+      events.push(`id:${name}`);
+      return detail({ requested: name, poiId: 82723, province: "四川", city: "成都" });
+    },
+    checkAvailability: async (poiId) => {
+      events.push(`availability:${poiId}`);
+      return { status: "suspended" };
+    },
+  });
+
+  assert.deepEqual(events, ["id:金沙遗址博物馆", "availability:82723"]);
+  assert.deepEqual(candidate, {
+    requestedName: "金沙遗址博物馆",
+    status: "rejected",
+    poiId: 82723,
+    poiName: "金沙遗址博物馆",
+    reason: "携程景点详情标记为暂停营业",
+  });
+});
+
 test("itinerary only accepts pool POIs, exact day coverage, no duplicates or A-B-A", () => {
   const pool = [
     { requestedName: "A1", status: "resolved" as const, poiId: 1, poiName: "A1", city: "拉萨" },

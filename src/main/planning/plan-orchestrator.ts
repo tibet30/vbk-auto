@@ -132,6 +132,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
       runtime: args.runtime,
       persistedTaskKeys,
       resolvePoiName: args.planner.resolvePoiName?.bind(args.planner),
+      reviewCompletePois: true,
     });
     state.status = "completed";
     await args.store.save(state);

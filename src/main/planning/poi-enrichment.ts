@@ -44,6 +44,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
   if (runtime.suggestPoi && Array.isArray(product.itinerary)
     && (hasIncompleteItineraryPois(product) || (shouldReviewCompletePois && hasCompleteItineraryPois(product)))) {
     const updated = structuredClone(product.itinerary) as any[];
+    const availabilityByPoiId = await queryItineraryPoiAvailabilities(runtime, localProductId, updated, shouldReviewCompletePois);
     let poiUpdated = false;
     for (const day of updated) {
       for (const spot of Array.isArray(day?.spots) ? day.spots : []) {
@@ -51,6 +52,19 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         if (!keyword) continue;
         if (isPoiComplete(spot)) {
           if (!shouldReviewCompletePois) continue;
+          const availability = availabilityByPoiId.get(spot.poiId) ?? await queryPoiAvailability(runtime, localProductId, spot.poiId);
+          if (availability === "suspended") {
+            const removedName = String(spot.poiName || keyword);
+            day.spots.splice(day.spots.indexOf(spot), 1);
+            poiUpdated = true;
+            await addPoiResearchTask({
+              runtime, localProductId, persistedTaskKeys, addedTasks,
+              keyword: removedName,
+              detail: "携程景点详情标记为暂停营业，已从行程移除；请替换为正常营业景点",
+            });
+            logInfo("[planning.poi]", { event: "suspended-poi-removed", localProductId, keyword: removedName });
+            continue;
+          }
           const checked = await queryPoi({ runtime, localProductId, keyword: String(spot.poiName || keyword), queryTimeoutMs, context: poiContext });
           if (checked.failed) continue;
           if (checked.match && checked.match.poiId === spot.poiId && checked.match.poiName === spot.poiName) continue;
@@ -75,23 +89,25 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         }
         const originalKeyword = String(keyword);
         const firstQuery = isTravelNodeName(originalKeyword)
-          ? { match: null, failed: false }
+          ? { match: null, failed: false, suspended: false }
           : await queryPoi({ runtime, localProductId, keyword: originalKeyword, queryTimeoutMs, context: poiContext });
         let match = firstQuery.match;
         let queryFailed = firstQuery.failed;
+        let suspended = firstQuery.suspended;
         let fallbackAttempts = 0;
         // “永祚寺（双塔寺）”这类官方名+同地点别名先做确定性别名查询，
         // 避免整串关键词召回外地同名前缀，也避免模型原样重复后耗尽重试。
-        if (!match && !queryFailed) {
+        if (!match && !queryFailed && !suspended) {
           for (const alias of bracketAliases(originalKeyword)) {
             if (isTravelNodeName(alias)) continue;
             const aliasQuery = await queryPoi({ runtime, localProductId, keyword: alias, queryTimeoutMs, context: poiContext });
             match = aliasQuery.match;
             queryFailed = aliasQuery.failed;
-            if (match || queryFailed) break;
+            suspended = aliasQuery.suspended;
+            if (match || queryFailed || suspended) break;
           }
         }
-        if (!match && !queryFailed && args.resolvePoiName) {
+        if (!match && !queryFailed && !suspended && args.resolvePoiName) {
           const fallback = await resolveFallbackPoi({
             runtime,
             resolver: args.resolvePoiName,
@@ -103,6 +119,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           });
           match = fallback.match;
           queryFailed = fallback.queryFailed;
+          suspended = fallback.suspended;
           fallbackAttempts = fallback.attempts;
         }
         if (match && typeof spot === "object") {
@@ -120,7 +137,9 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
           const task = buildPoiResearchTask(
             String(keyword),
-            isTravelNodeName(originalKeyword)
+            suspended
+              ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
+              : isTravelNodeName(originalKeyword)
               ? "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点"
               : fallbackAttempts > 0
               ? `suggestPoi 未匹配，已进行 ${fallbackAttempts} 次 AI 名称纠正仍未匹配，请人工核查`
@@ -166,11 +185,16 @@ async function queryPoi(args: {
   keyword: string;
   queryTimeoutMs: number;
   context?: { destinationCity?: string; province?: string };
-}): Promise<{ match: PoiMatch | null; failed: boolean }> {
+}): Promise<{ match: PoiMatch | null; failed: boolean; suspended: boolean }> {
   try {
     logInfo("[planning.poi]", { event: "query-start", localProductId: args.localProductId, keyword: args.keyword });
-    const match = await rejectPoiQueryAfter(args.runtime.suggestPoi!(args.keyword, args.context), args.queryTimeoutMs);
-    return { match: normalisePoiMatch(match, "direct"), failed: false };
+    const candidate = await rejectPoiQueryAfter(args.runtime.suggestPoi!(args.keyword, args.context), args.queryTimeoutMs);
+    const availability = candidate ? await queryPoiAvailability(args.runtime, args.localProductId, candidate.poiId) : null;
+    return {
+      match: availability === "suspended" ? null : normalisePoiMatch(candidate, "direct"),
+      failed: availability === "unverified",
+      suspended: availability === "suspended",
+    };
   } catch (error) {
     logWarn("[planning.poi]", {
       event: "query-failed",
@@ -178,7 +202,7 @@ async function queryPoi(args: {
       keyword: args.keyword,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { match: null, failed: true };
+    return { match: null, failed: true, suspended: false };
   }
 }
 
@@ -190,7 +214,7 @@ async function resolveFallbackPoi(args: {
   localProductId: string;
   queryTimeoutMs: number;
   context?: { destinationCity?: string; province?: string };
-}): Promise<{ match: PoiMatch | null; queryFailed: boolean; attempts: number }> {
+}): Promise<{ match: PoiMatch | null; queryFailed: boolean; suspended: boolean; attempts: number }> {
   const previousCandidates: string[] = [];
   for (let attempt = 1; attempt <= MAX_AI_POI_NAME_ATTEMPTS; attempt += 1) {
     let candidate: string | null = null;
@@ -217,10 +241,11 @@ async function resolveFallbackPoi(args: {
       queryTimeoutMs: args.queryTimeoutMs,
       context: args.context,
     });
-    if (result.failed) return { match: null, queryFailed: true, attempts: attempt };
-    if (result.match) return { match: { ...result.match, source: "fallback" }, queryFailed: false, attempts: attempt };
+    if (result.failed) return { match: null, queryFailed: true, suspended: false, attempts: attempt };
+    if (result.suspended) return { match: null, queryFailed: false, suspended: true, attempts: attempt };
+    if (result.match) return { match: { ...result.match, source: "fallback" }, queryFailed: false, suspended: false, attempts: attempt };
   }
-  return { match: null, queryFailed: false, attempts: MAX_AI_POI_NAME_ATTEMPTS };
+  return { match: null, queryFailed: false, suspended: false, attempts: MAX_AI_POI_NAME_ATTEMPTS };
 }
 
 function isUsableFallbackCandidate(candidate: string | null, originalName: string, previousCandidates: readonly string[]): candidate is string {
@@ -260,6 +285,46 @@ function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown } | null 
   return { poiName: poiName.trim(), poiId, source };
 }
 
+async function queryPoiAvailability(runtime: OrchestratorRuntime, localProductId: string, poiId: unknown): Promise<"available" | "suspended" | "unverified" | null> {
+  if (!runtime.getPoiAvailability || !isPositiveInteger(poiId)) return null;
+  try {
+    return (await runtime.getPoiAvailability(poiId)).status;
+  } catch (error) {
+    logWarn("[planning.poi]", {
+      event: "availability-query-failed",
+      localProductId,
+      poiId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return "unverified";
+  }
+}
+
+async function queryItineraryPoiAvailabilities(
+  runtime: OrchestratorRuntime,
+  localProductId: string,
+  itinerary: any[],
+  shouldReviewCompletePois: boolean,
+): Promise<Map<number, "available" | "suspended">> {
+  if (!shouldReviewCompletePois || !runtime.getPoiAvailabilities) return new Map();
+  const poiIds = itinerary.flatMap((day) => Array.isArray(day?.spots) ? day.spots : [])
+    .filter(isPoiComplete)
+    .map((spot) => spot.poiId as number);
+  if (poiIds.length === 0) return new Map();
+  try {
+    const result = await runtime.getPoiAvailabilities(poiIds);
+    return new Map([...result.entries()].map(([poiId, value]) => [poiId, value.status]));
+  } catch (error) {
+    logWarn("[planning.poi]", {
+      event: "availability-batch-query-failed",
+      localProductId,
+      poiCount: new Set(poiIds).size,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return new Map();
+  }
+}
+
 function isTravelNodeName(value: string): boolean {
   return /(机场|航站楼|火车站|高铁站|动车站|汽车站|客运站|码头|酒店|宾馆|民宿|客栈|集合点|接送点|接机点|送机点|接站点|送站点)/.test(value.trim());
 }
@@ -282,6 +347,23 @@ function buildPoiResearchTask(keyword: string, detail: string): ResearchTaskProp
     type: "vbk",
     detail,
   };
+}
+
+async function addPoiResearchTask(args: {
+  runtime: OrchestratorRuntime;
+  localProductId: string;
+  persistedTaskKeys: Set<string>;
+  addedTasks: ResearchTaskProposal[];
+  keyword: string;
+  detail: string;
+}): Promise<void> {
+  const task = buildPoiResearchTask(args.keyword, args.detail);
+  const key = `${task.type}::${task.label}`;
+  await args.runtime.addResearchTask(args.localProductId, task);
+  if (!args.persistedTaskKeys.has(key)) {
+    args.persistedTaskKeys.add(key);
+    args.addedTasks.push(task);
+  }
 }
 
 function hasText(value: unknown): value is string {

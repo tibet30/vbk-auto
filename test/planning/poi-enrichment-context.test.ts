@@ -51,6 +51,52 @@ test("已完整 POI 未通过目的地省份复核时清空映射并生成核查
   assert.match(result[0].detail ?? "", /目的地\/省份复核/);
 });
 
+test("已绑定但暂停营业的 POI 在复核时从行程删除并创建替换任务", async () => {
+  let written: any;
+  const runtime = testRuntime({
+    product: {
+      basicInfo: { destinationCity: "成都", province: "四川" },
+      itinerary: [{ day: 2, spots: [
+        { name: "金沙遗址博物馆", poiName: "金沙遗址博物馆", poiId: 12345 },
+        { name: "武侯祠", poiName: "武侯祠", poiId: 67890 },
+      ] }],
+    },
+    suggestPoi: async (keyword) => ({ poiName: keyword, poiId: keyword === "金沙遗址博物馆" ? 12345 : 67890 }),
+    write: (value) => { written = value; },
+  });
+  let batchIds: readonly number[] = [];
+  runtime.getPoiAvailabilities = async (poiIds) => {
+    batchIds = poiIds;
+    return new Map(poiIds.map((poiId) => [poiId, { status: poiId === 12345 ? "suspended" as const : "available" as const }]));
+  };
+
+  const result = await enrichItineraryPois({
+    localProductId: "poi-suspended", destination: "成都", runtime, persistedTaskKeys: new Set(), reviewCompletePois: true,
+  });
+
+  assert.deepEqual(written[0].spots, [{ name: "武侯祠", poiName: "武侯祠", poiId: 67890 }]);
+  assert.equal(result[0]?.label, "核查 金沙遗址博物馆 的 VBK POI 映射");
+  assert.match(result[0]?.detail ?? "", /暂停营业，已从行程移除/);
+  assert.deepEqual([...new Set(batchIds)].sort(), [12345, 67890]);
+});
+
+test("自动匹配到暂停营业 POI 时不写入行程", async () => {
+  let written = false;
+  const runtime = testRuntime({
+    product: { itinerary: [{ day: 1, spots: [{ name: "金沙遗址博物馆", poiName: null, poiId: null }] }] },
+    suggestPoi: async () => ({ poiName: "金沙遗址博物馆", poiId: 82723 }),
+    write: () => { written = true; },
+  });
+  runtime.getPoiAvailability = async () => ({ status: "suspended" });
+
+  const result = await enrichItineraryPois({
+    localProductId: "poi-suspended-auto", destination: "成都", runtime, persistedTaskKeys: new Set(),
+  });
+
+  assert.equal(written, false);
+  assert.match(result[0]?.detail ?? "", /携程景点详情标记为暂停营业/);
+});
+
 function testRuntime(args: {
   product: Record<string, unknown>;
   suggestPoi: (keyword: string, context?: { destinationCity?: string; province?: string }) => Promise<{ poiName: string; poiId: number } | null>;

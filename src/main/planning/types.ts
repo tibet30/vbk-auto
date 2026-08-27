@@ -48,6 +48,10 @@ export interface PoiSuggestContext {
 
 export interface OrchestratorRuntime {
   suggestPoi?(keyword: string, context?: PoiSuggestContext): Promise<{ poiName: string; poiId: number } | null>;
+  /** 按 POI ID 从携程攻略景点详情核验实时营业状态。 */
+  getPoiAvailability?(poiId: number): Promise<{ status: "available" | "suspended" }>;
+  /** 以受控并发批量核验一组 POI 的营业状态。 */
+  getPoiAvailabilities?(poiIds: readonly number[]): Promise<Map<number, { status: "available" | "suspended" }>>;
   /** 读取当前已存在的 research tasks（label+type）。 */
   loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */

@@ -104,12 +104,15 @@ test("presentation prompt 要求产品特色输出安全结构化富文本", () 
   assert.match(prompt, /reason 只能在 value 右侧与 value 同级/);
   assert.match(prompt, /status=accepted 时 reason 固定为 null/);
   assert.match(prompt, /数组长度必须严格等于 3/);
+  assert.match(prompt, /不超过 80 UTF-8 字节/);
+  assert.match(prompt, /平台硬上限 84 字节/);
   assert.match(prompt, /features 必须是 JSON 字符串值/);
   assert.match(prompt, /<p><strong>短标题：<\/strong>具体说明<\/p>/);
   assert.match(prompt, /只允许 p、strong、em、ul、ol、li、br 标签/);
   assert.match(prompt, /禁止 Markdown/);
   assert.match(prompt, /推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息/);
   assert.match(legacySystemPrompt, /features → string（必须是 JSON 字符串，禁止对象\/数组\/AST\/null）/);
+  assert.match(legacySystemPrompt, /不超过 80 UTF-8 字节/);
   assert.match(legacySystemPrompt, /<p><strong>古建巡礼：<\/strong>/);
   assert.match(legacySystemPrompt, /导游否定描述/);
 });

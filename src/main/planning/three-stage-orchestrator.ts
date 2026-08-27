@@ -228,6 +228,7 @@ async function buildVerifiedPool(
       const checked = await resolvePlanningPoiCandidates({
         names: pendingAtResume.map((item) => item.requestedName), province: deps.skeleton.province,
         city: deps.skeleton.city, concurrency: 5, beforeEach: deps.assertVbkLogin, query: deps.queryPoi,
+        checkAvailability: deps.runtime.getPoiAvailability?.bind(deps.runtime),
       });
       const byName = new Map(checked.map((item) => [item.requestedName, item]));
       plan = { ...plan, poiCandidates: plan.poiCandidates.map((item) => byName.get(item.requestedName) ?? item) };
@@ -292,6 +293,7 @@ async function buildVerifiedPool(
         concurrency: 5,
         beforeEach: deps.assertVbkLogin,
         query: deps.queryPoi,
+        checkAvailability: deps.runtime.getPoiAvailability?.bind(deps.runtime),
       });
       const byName = new Map(checked.map((item) => [item.requestedName, item]));
       plan = {

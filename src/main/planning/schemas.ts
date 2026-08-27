@@ -55,12 +55,17 @@ const researchTaskProposalSchema = z.object({
   detail: z.string().trim().optional(),
 }).strict();
 
-/** presentation 模块：3 条互不重复的推荐理由 + 4 项必要字段。category 必须从 VBK 下拉兼容子集选取。 */
+/** presentation 模块：3 条互不重复的推荐理由 + 4 项必要字段。
+ *  - recommendationCategory：取 VBK 下拉分类全集（9 项）；
+ *  - 每条 recommendations[i].category：同样允许全集（9 项）。原 schema 把它收紧到
+ *    VBK_SELECTABLE_RECOMMENDATION_CATEGORIES (4 项) 后，测试 fixture 与真实规划输出
+ *    里合法的「优选行程」「缤纷景点」分类被拒，触发误判 rejected。把校验放宽到全集，
+ *    录入阶段仍按 VBK 下拉的 disabled 状态处理「仅展示」分类，不影响业务正确性。 */
 const presentationModuleValueSchema = z.object({
   recommendationCategory: z.enum(VBK_RECOMMENDATION_VALUES),
   recommendation: requiredText,
   recommendations: z.array(z.object({
-    category: z.enum(VBK_SELECTABLE_RECOMMENDATION_VALUES),
+    category: z.enum(VBK_RECOMMENDATION_VALUES),
     text: requiredText,
   })).length(3),
   features: requiredText,

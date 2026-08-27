@@ -51,20 +51,22 @@ export function markItineraryPendingAdoption(
       return {
         ...node,
         status: "completed" as const,
-        attempts: Math.max(1, node.attempts),
-        summary: "已采用用户建议 POI，真实 POI 待手动配置/补全",
+        attempts: 0,
+        startedAt: undefined,
+        completedAt: undefined,
         error: undefined,
-        completedAt: now,
+        summary: undefined,
       };
     }
     if (node.id === "itineraryDraft") {
       return {
         ...node,
         status: "completed" as const,
-        attempts: Math.max(1, node.attempts),
-        summary: "已完成景点池与每日行程编排",
+        attempts: 0,
+        startedAt: undefined,
+        completedAt: undefined,
         error: undefined,
-        completedAt: now,
+        summary: undefined,
       };
     }
     return node;

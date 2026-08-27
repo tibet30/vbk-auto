@@ -106,7 +106,7 @@ test("创建产品会把稳定的 VBK 登录账号绑定到远端快照", async 
   assert.equal(remote.records.get(created.product.id)?.vbkAccount, "vbk_671205");
 });
 
-test("供应商产品编号固定为 VBK-联系人名字-时间（账号已配管家）", async (t) => {
+test("产品壳不预置供应商产品编号（账号已配管家）", async (t) => {
   const db = await database(t);
   db.setAccountFixedInfo("供应商A", {
     servicePhone: "400-820-1234",
@@ -121,10 +121,10 @@ test("供应商产品编号固定为 VBK-联系人名字-时间（账号已配�
     "vbk_123",
   );
   const basic = created.product.product.basicInfo as Record<string, unknown>;
-  assert.match(String(basic.supplierProductCode), /^VBK-张三-\d{17,}$/);
+  assert.equal(basic.supplierProductCode, "");
 });
 
-test("同一管家连续创建产品时供应商产品编号不重复", async (t) => {
+test("同一管家连续创建产品时由 basic 平台写入阶段生成编号", async (t) => {
   const db = await database(t);
   db.setAccountFixedInfo("供应商A", {
     servicePhone: "400-820-1234",
@@ -147,12 +147,11 @@ test("同一管家连续创建产品时供应商产品编号不重复", async (t
   );
 
   const codeOf = (created: typeof first) => String((created.product.product.basicInfo as Record<string, unknown>).supplierProductCode);
-  assert.match(codeOf(first), /^VBK-张三-\d{17,}$/);
-  assert.match(codeOf(second), /^VBK-张三-\d{17,}$/);
-  assert.notEqual(codeOf(first), codeOf(second));
+  assert.equal(codeOf(first), "");
+  assert.equal(codeOf(second), "");
 });
 
-test("账号未配管家时供应商产品编号回落日期+uuid 格式", async (t) => {
+test("账号未配管家时产品壳同样不预置供应商产品编号", async (t) => {
   const db = await database(t);
   const remote = fakeRemote();
   const created = await createRemoteProduct(
@@ -162,5 +161,5 @@ test("账号未配管家时供应商产品编号回落日期+uuid 格式", async
     "供应商B",
   );
   const basic = created.product.product.basicInfo as Record<string, unknown>;
-  assert.match(String(basic.supplierProductCode), /^VBK-\d{8}-[A-F0-9]{6}$/);
+  assert.equal(basic.supplierProductCode, "");
 });

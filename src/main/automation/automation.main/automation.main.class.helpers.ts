@@ -73,23 +73,33 @@ export function resolveProductButlerSelection(product: Record<string, unknown>):
   };
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * 兼容旧产品：早期供应商产品编号为「VBK-联系人名字」，同一管家会重复。
- * 录入 basic 前若发现这个精确旧格式，就升级为当前规则「VBK-联系人名字-时间」。
- * 手工维护过的编号、已带时间戳的编号都不改。
+ * 每次 basic 信息实际写入平台前，即时重算系统自动生成的编号。
+ *
+ * 时间戳只能在单进程内降低碰撞概率，不能证明跨设备唯一；productId 是平台产品壳
+ * 创建后已确定的唯一键。产品壳不携带时间戳，避免创建时刻被错误复用；手工编号保持不动。
  */
-export function ensureLegacySupplierProductCodeUpgraded(
+export function refreshSupplierProductCodeForPlatformWrite(
   product: Record<string, unknown>,
   butlerSelection: ContactCardSelection | null,
+  productId: string | null | undefined,
 ): string | null {
-  if (!butlerSelection) return null;
+  if (!butlerSelection || !productId) return null;
   const basicInfo = product.basicInfo;
   if (!basicInfo || typeof basicInfo !== "object" || Array.isArray(basicInfo)) return null;
   const basic = basicInfo as Record<string, unknown>;
   const current = typeof basic.supplierProductCode === "string" ? basic.supplierProductCode.trim() : "";
   const contactName = butlerSelection.displayName.trim();
-  if (!contactName || current !== `VBK-${contactName}`) return null;
-  const next = newSupplierProductCode(contactName);
+  if (!contactName) return null;
+  const autoCode = new RegExp(`^VBK-${escapeRegExp(contactName)}(?:-\\d{17,}(?:-P\\d+)?)?$`);
+  // 空值是新产品壳的正常状态；只接管本系统生成过的编号，绝不覆盖手工编号。
+  if (current && !autoCode.test(current)) return null;
+  const timestamp = newSupplierProductCode(contactName).slice(`VBK-${contactName}-`.length);
+  const next = `VBK-${contactName}-${timestamp}-P${productId}`;
   basic.supplierProductCode = next;
   return next;
 }

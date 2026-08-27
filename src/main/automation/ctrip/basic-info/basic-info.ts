@@ -20,5 +20,6 @@ export {
 } from "./sections.js";
 export { fillBasicInfo, assertBasicInfoNoRedErrors } from "./core.js";
 export { fillAndSaveBasicInfo } from "./main.js";
+export { syncSupplierProductCode } from "./supplier-product-code.js";
 export { isProductImageTextUrl } from "../tabs.js";
 export { fillById } from "../utils.js";

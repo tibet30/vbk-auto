@@ -24,15 +24,11 @@ function supplierProductCodeTimeStamp() {
 }
 
 /**
- * 为新产品生成 VBK 内部 supplierProductCode。
- * 有联系人时固定格式「VBK-{联系人名字}-{时间戳}」；未提供联系人时回落到
- * 「VBK-YYYYMMDD-XXXXXX」（日期戳 + uuid 前 6 位）。
+ * basic 实际写入平台前生成供应商产品编号的时间部分。
+ * 调用方已取得联系人后才允许调用，产品壳阶段不得调用。
  */
-export function newSupplierProductCode(contactName?: string | null) {
-  const name = typeof contactName === "string" ? contactName.trim() : "";
-  if (name) return `VBK-${name}-${supplierProductCodeTimeStamp()}`;
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  return `VBK-${stamp}-${randomUUID().slice(0, 6).toUpperCase()}`;
+export function newSupplierProductCode(contactName: string) {
+  return `VBK-${contactName.trim()}-${supplierProductCodeTimeStamp()}`;
 }
 
 /** 在 db 句柄上随机生成一个 uuid（SQLite 主键使用）。 */

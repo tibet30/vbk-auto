@@ -16,6 +16,7 @@ import {
 import { prepareSinglePhaseRetry } from "../phase-retry.js";
 import {
   fillAndSaveBasicInfo,
+  syncSupplierProductCode,
   fillAndSavePackage,
   fillAndSaveTerms,
   fillAndSubmitPricingInventory,
@@ -31,7 +32,7 @@ import { AutomationCancelledError } from "./automation.main.errors.js";
 import { isProductImageTextUrl } from "../ctrip/tabs.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
-import { ensureLegacySupplierProductCodeUpgraded, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
+import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
 import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
 import { ensurePackageApi } from "../ctrip/package-api.js";
@@ -55,21 +56,14 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
     // 「重新执行」以前置依赖与 run() 一致：管家联系人从 product JSON 读取，
     // 400 电话从账号固定信息读取。缺少则阻断。
     const accountName = ctx.db.getSetting("vbkAccountName")?.value;
-    const basicInfoSaved = product.basicInfoSaved ?? false;
+    let basicInfoSaved = product.basicInfoSaved ?? false;
     const shouldRequireAccountContext = phaseName === "basic" || !basicInfoSaved;
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone: string | null = null;
-    let upgradedSupplierCode = "";
     if (shouldRequireAccountContext) {
       butlerSelection = resolveProductButlerSelection(product.product);
       if (!butlerSelection) {
         throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
-      }
-      const upgradedCode = ensureLegacySupplierProductCodeUpgraded(productData, butlerSelection);
-      if (upgradedCode) {
-        upgradedSupplierCode = upgradedCode;
-        product.product = productData as unknown as Record<string, unknown>;
-        ctx.db.updateProduct(localProductId, product.product, "automating");
       }
       const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
       if (!phoneContext) {
@@ -145,9 +139,21 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         ? async () => {
             phaseRecord("basic");
             scenicSpotLogs.length = 0;
+            const refreshedSupplierCode = refreshSupplierProductCodeForPlatformWrite(productData, butlerSelection, productId);
+            if (refreshedSupplierCode) {
+              product.product = productData as unknown as Record<string, unknown>;
+              ctx.db.updateProduct(localProductId, product.product, product.status);
+              const supplierCode = String((productData.basicInfo as Record<string, unknown>).supplierProductCode);
+              log(`供应商产品编号已按本次写入时间重算：${refreshedSupplierCode}`);
+              if (basicInfoSaved) {
+                await syncSupplierProductCode(page, supplierCode);
+                log(`供应商产品编号已写入平台并完成回读：${supplierCode}`);
+                run.phases[phaseIndex].status = "completed";
+                return;
+              }
+            }
             const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: product.product });
             log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
-            if (upgradedSupplierCode) log(`供应商产品编号已按新规则更新为：${upgradedSupplierCode}`);
             if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
             // basicInfoSaved 已确认但 product 无缺失 → 跳过填充，直接标记完成。
             if (shouldRefill.reason === "complete") {

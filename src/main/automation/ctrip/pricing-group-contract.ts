@@ -222,7 +222,10 @@ function rowDate(row: any): string {
   const unitDates = Array.isArray(row?.singleResourceUnitPriceDtos)
     ? row.singleResourceUnitPriceDtos.map((unit: any) => String(unit?.date ?? ""))
     : [];
-  const date = String(row?.productDate ?? unitDates[0] ?? "");
+  // GetBatchOperateSchedule 的实际返回把日期放在 base.productDate；
+  // 测试/旧接口则可能仍在顶层。两种形态都必须识别，否则已写入的
+  // 拼团班期会被聚合为 0 个匹配日期并被整年重复提交。
+  const date = String(row?.productDate ?? row?.base?.productDate ?? unitDates[0] ?? "");
   return date && unitDates.every((unitDate: string) => unitDate === date) ? date : "";
 }
 
@@ -230,6 +233,13 @@ function groupRowMatches(row: any, date: string, expected: GroupPricingExpectati
   if (rowDate(row) !== date || Number(row?.inventory?.total) !== expected.dailyQuota) return false;
   const actualUnits = Array.isArray(row?.singleResourceUnitPriceDtos) ? row.singleResourceUnitPriceDtos : [];
   if (actualUnits.length !== expected.units.length) return false;
+  // 拼小团在「分拆报价」模式下会把各人档的卖价标记为 Auto，并根据当前
+  // 报价配置重新计算。此时请求中的 salePrice 是输入依据而非最终回读值；
+  // 继续要求数值完全相等会把已成功写入的班期误判为失败，进而重复提交全年。
+  // 仅当成人和儿童价格都明确由平台自动计算时放宽卖价数值，成本、库存、
+  // 日期和年龄段/层级仍必须精确匹配。
+  const salePriceAutoCalculated = [row?.adultPrice, row?.childPrice]
+    .every((price) => price?.salePriceStatus === "Auto");
   const expectedByKey = new Map(expected.units.map((unit) => [groupUnitKey(unit.ageBandId, unit.tierId), unit]));
   const seen = new Set<string>();
   for (const actual of actualUnits) {
@@ -239,7 +249,8 @@ function groupRowMatches(row: any, date: string, expected: GroupPricingExpectati
     const salePrice = Number(actual?.salePrice);
     if (!unit || seen.has(key)
       || !Number.isFinite(costPrice) || costPrice <= 0 || costPrice !== unit.costPrice
-      || !Number.isFinite(salePrice) || salePrice <= 0 || salePrice !== unit.salePrice) return false;
+      || !Number.isFinite(salePrice) || salePrice <= 0
+      || (!salePriceAutoCalculated && salePrice !== unit.salePrice)) return false;
     seen.add(key);
   }
   return seen.size === expectedByKey.size;

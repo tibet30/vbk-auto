@@ -26,6 +26,7 @@ import {
   ensureHotelResource,
   ensureVehicleResource,
   fillAndSaveBasicInfo,
+  syncSupplierProductCode,
   fillAndSavePackage,
   fillAndSaveTerms,
   fillAndSubmitPricingInventory,
@@ -35,7 +36,7 @@ import {
 } from "../ctrip/ctrip.js";
 import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
-import { ensureLegacySupplierProductCodeUpgraded, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
+import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
@@ -90,17 +91,10 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     const shouldRequireAccountContext = startIndex === 0 || !basicInfoSaved;
     let butlerSelection: ContactCardSelection | null = null;
     let servicePhone = "";
-    let upgradedSupplierCode = "";
     if (shouldRequireAccountContext) {
       butlerSelection = resolveProductButlerSelection(productDetail.product);
       if (!butlerSelection) {
         throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
-      }
-      const upgradedCode = ensureLegacySupplierProductCodeUpgraded(product, butlerSelection);
-      if (upgradedCode) {
-        upgradedSupplierCode = upgradedCode;
-        productDetail.product = product as unknown as Record<string, unknown>;
-        ctx.db.updateProduct(localProductId, productDetail.product, "automating");
       }
       const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
       if (!phoneContext) {
@@ -180,9 +174,21 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         // runner 重试本阶段时清空 scenicSpotLogs，防止把上一轮未命中的景点
         // 单项重复记入 automation 日志。
         scenicSpotLogs.length = 0;
+        const refreshedSupplierCode = refreshSupplierProductCodeForPlatformWrite(product, butlerSelection, productId);
+        if (refreshedSupplierCode) {
+          productDetail.product = product as unknown as Record<string, unknown>;
+          ctx.db.updateProduct(localProductId, productDetail.product, "automating");
+          const supplierCode = String((product.basicInfo as Record<string, unknown>).supplierProductCode);
+          log(`供应商产品编号已按本次写入时间重算：${refreshedSupplierCode}`);
+          if (basicInfoSaved) {
+            await syncSupplierProductCode(page, supplierCode);
+            log(`供应商产品编号已写入平台并完成回读：${supplierCode}`);
+            run.phases[0].status = "completed";
+            return;
+          }
+        }
         const shouldRefill = shouldRefillBasicInfo({ productId, basicInfoSaved, product: productDetail.product });
         log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
-        if (upgradedSupplierCode) log(`供应商产品编号已按新规则更新为：${upgradedSupplierCode}`);
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         if (shouldRefill.reason === "complete") {
           log("basic 阶段已保存且产品数据完整，跳过重复填充");

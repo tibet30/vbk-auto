@@ -3,7 +3,7 @@ import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { TibetProductService } from "../infrastructure/tibet-products.js";
 import type { ProductWorkflow } from "./product-workflow-coordinator.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
-import { prepareProductWithAccountButler, resolveAccountButler } from "../operations/account-butler-inject.js";
+import { prepareProductWithAccountButler } from "../operations/account-butler-inject.js";
 
 export async function listRemoteProducts(
   remoteProducts: TibetProductService,
@@ -21,7 +21,7 @@ export async function createRemoteProduct(
   // 创建阶段只保存运营输入的原始目的地；标准省市由第一阶段 AI 生成。
   // 这里不能提前调用任何目的地解析接口，否则新产品无法在未部署该接口的
   // Tibet 环境中创建，也会把“输入目的地”和“标准城市”混为一谈。
-  const draft = db.buildProductSnapshot(input, resolveAccountButler(db, accountName)?.displayName ?? null);
+  const draft = db.buildProductSnapshot(input);
   const { product: preparedProduct, injectResult } = prepareProductWithAccountButler(db, draft, accountName);
   const product: ProductDetail = {
     ...preparedProduct,

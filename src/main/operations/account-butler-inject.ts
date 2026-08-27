@@ -141,8 +141,7 @@ export function createProductWithAccountButler(
   input: CreateProductInput,
   accountName: string | null | undefined,
 ): CreateProductWithAccountButlerResult {
-  const butler = resolveAccountButler(db, accountName);
-  const created = db.importProductSnapshot(db.buildProductSnapshot(input, butler?.displayName ?? null));
+  const created = db.importProductSnapshot(db.buildProductSnapshot(input));
   const injectResult = injectAccountButler(db, created.id, accountName);
   return {
     product: db.getProduct(created.id) ?? created,

@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { CreateProductInput, ProductDetail } from "../../../../shared/contracts.js";
 import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
 import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
-import { now, newSupplierProductCode } from "./types.js";
+import { now } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
 
 /** Build the initial product snapshot without writing local or remote state. */
-export function buildProductSnapshot(input: CreateProductInput, supplierContactName?: string | null): ProductDetail {
+export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
   const id = randomUUID();
   const createdAt = now();
   const destination = toPlatformShortLocationName(input?.destination);
@@ -37,7 +37,8 @@ export function buildProductSnapshot(input: CreateProductInput, supplierContactN
     },
     basicInfo: {
       supplierProductName: name,
-      supplierProductCode: newSupplierProductCode(supplierContactName),
+      // 供应商产品编号由 basic 实际写入平台时，基于当时联系人和产品 ID 生成。
+      supplierProductCode: "",
       destination,
       days,
       nights,

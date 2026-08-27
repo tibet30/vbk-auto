@@ -232,7 +232,8 @@ export const productSchema = z
     }),
     basicInfo: z.object({
       supplierProductName: z.string().min(2).max(400),
-      supplierProductCode: z.string().min(1).max(100),
+      // 产品壳阶段尚未写入平台；供应商产品编号在 basic 提交前即时生成。
+      supplierProductCode: z.string().max(100),
       subtitle: z.string().min(2).max(80),
       days: z.number().int().min(1).max(60),
       nights: z.number().int().min(0).max(59),

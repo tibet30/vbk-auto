@@ -243,6 +243,26 @@ test("远端回读逐日期精确核对 ID、层级价格和库存", () => {
   }
 });
 
+test("平台明确标记自动卖价时，保留成本与库存精确核对但接受平台计算卖价", () => {
+  const expectation = buildGroupPricingExpectation(ageBands, product.commercial.pricing, 8);
+  const row = {
+    base: { productDate: "2026-09-01" },
+    inventory: { total: 8 },
+    adultPrice: { salePriceStatus: "Auto" },
+    childPrice: { salePriceStatus: "Auto" },
+    singleResourceUnitPriceDtos: expectation.units.map((unit, index) => ({
+      date: "2026-09-01",
+      costPrice: unit.costPrice,
+      salePrice: unit.salePrice - (index + 1),
+      unitInfo: { ageBandId: unit.ageBandId, tierId: unit.tierId },
+    })),
+  };
+  assert.doesNotThrow(() => assertGroupPricingReadback([row], ["2026-09-01"], expectation));
+
+  row.singleResourceUnitPriceDtos[0].costPrice = 0;
+  assert.throws(() => assertGroupPricingReadback([row], ["2026-09-01"], expectation), /回读不一致/);
+});
+
 test("只有结构化 20018030 会重试；错误消息中的同码文本不会触发兼容", async () => {
   let busyCalls = 0;
   const pauses: number[] = [];

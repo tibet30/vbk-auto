@@ -16,6 +16,7 @@ import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { flushProductAiUsage } from "../ai/flush-product-ai-usage.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { enrichItineraryPois } from "../planning/poi-enrichment.js";
+import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
 import { ItineraryAdoptionSyncError, syncItineraryAdoptionSignal } from "../planning/itinerary-adoption-signal.js";
 import {
   classifyMiniMaxError,
@@ -51,11 +52,17 @@ export function registerProductAiIpc(context: MainIpcContext): void {
   // 自动化 preflight / 重载后 getProduct）会与乐观 UI 出现不一致（100% vs 92%）。
   // 这里走 db.replaceProductAndSatisfyResearchTasks 把 JSON 写入与 task 确认
   // 放在同一个事务里。
-  ipcMain.handle("products:updateReviewField", (event, id: string, input: ManualReviewFieldInput) => {
+  ipcMain.handle("products:updateReviewField", async (event, id: string, input: ManualReviewFieldInput) => {
     assertTrustedSender(event, "products:updateReviewField");
     context.productWorkflows.assertIdle(id, "manual");
     const product = db.getProduct(id);
     if (!product) throw productNotFound(id);
+    if (input.field === "itinerarySpotPoi") {
+      const availability = await context.productWorkflows.runVbkPageExclusive(() => getCtripSightAvailability(context.browser, input.poiId));
+      if (availability.status === "suspended") {
+        throw new Error(`“${input.poiName}”在携程景点详情中标记为${availability.openStatus}，不能加入行程。`);
+      }
+    }
     const next = applyManualReviewField(product.product, input);
     parseProduct(next);
     // 原子写入：product JSON 与匹配该字段的 research task 确认同步落库。

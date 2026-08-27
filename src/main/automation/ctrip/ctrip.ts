@@ -25,6 +25,7 @@ export {
 } from "./tabs.js";
 export {
   fillAndSaveBasicInfo,
+  syncSupplierProductCode,
   fillBasicInfo,
   fillCitySelect,
   pickCityOption,

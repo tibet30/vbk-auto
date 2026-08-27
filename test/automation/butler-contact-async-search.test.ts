@@ -1,14 +1,31 @@
-import test from "node:test";
+// @ts-nocheck
+/** 「管家联系人」异步搜索契约：等待远端搜索结果替换空关键词首屏后再选择；
+ *  「预订联系人」使用管家联系人信息直接录入。两组都用同一份共享的 headless chromium，
+ *  page 通过 helper 拿取，避免每个用例独立 `chromium.launch` 在完整 e2e 套件里超过 60s 上限。 */
+import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 
 import { fillButlerContact } from "../../src/main/automation/ctrip/basic-info/sections.js";
 
+let browser: Browser;
+
+before(async () => {
+  browser = await chromium.launch({ headless: true });
+});
+
+after(async () => {
+  await browser?.close();
+});
+
+async function newPage(html: string): Promise<Page> {
+  const page = await browser.newPage();
+  await page.setContent(html);
+  return page;
+}
+
 test("管家联系人等待远端搜索结果替换空关键词第一页后再选择", async () => {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(`
+  const page = await newPage(`
       <div id="bookingControls.vendorBookingAssistant">
         <input role="combobox" aria-controls="butler-options" />
         <input class="ant-select-search__field" />
@@ -34,7 +51,7 @@ test("管家联系人等待远端搜索结果替换空关键词第一页后再�
         });
       </script>
     `);
-
+  try {
     await fillButlerContact(page, {
       contactCardId: 1368298,
       displayName: "安思科",
@@ -43,15 +60,12 @@ test("管家联系人等待远端搜索结果替换空关键词第一页后再�
 
     assert.match(await page.evaluate(() => (window as any).chosen), /^安思科 /);
   } finally {
-    await browser.close();
+    await page.close();
   }
 });
 
 test("预订联系人使用管家联系人信息录入", async () => {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(`
+  const page = await newPage(`
       <div class="ant-form-item">
         <label>预订联系人</label>
         <input role="combobox" aria-controls="booking-contact-options" />
@@ -68,7 +82,7 @@ test("预订联系人使用管家联系人信息录入", async () => {
         }
       </script>
     `);
-
+  try {
     await fillButlerContact(page, {
       contactCardId: 1753732,
       displayName: "张三",
@@ -77,6 +91,6 @@ test("预订联系人使用管家联系人信息录入", async () => {
 
     assert.match(await page.evaluate(() => (window as any).chosen), /^张三 /);
   } finally {
-    await browser.close();
+    await page.close();
   }
 });

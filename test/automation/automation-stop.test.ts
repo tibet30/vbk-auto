@@ -189,24 +189,3 @@ test("cancel 后 attempts 数组只保留 cancel 之前失败的那条", async (
   assert.equal(attempts[0].attempt, 1);
   assert.equal(attempts[0].error, "attempt-fail-1");
 });
-
-// ───────────────────────── IPC / 静态 覆盖 ─────────────────────────
-
-test("AutomationRun 状态枚举支持 cancelled（TaskStatus 含 cancelled）", async () => {
-  // 静态验证：recovery.ts 返回 cancelled 时调用方不应当作 failed 处理。
-  // 已经被其他测试覆盖，但这里明确跑一次：
-  const run: AutomationRun = makeRun();
-  let cancel = false;
-  const ctx = makeCtx({
-    run,
-    execute: async () => undefined,
-    shouldCancel: () => cancel,
-  });
-  cancel = true;
-  const outcome = await runPhaseWithRecovery(ctx);
-  assert.equal(outcome.status, "cancelled");
-  // cancelled 状态在 UI 侧对应 product.automation.status = "cancelled"，
-  // 与 succeeded/failed 并列。AutomationRun 走 TaskStatus；为防止意外
-  // 被改回 union，这里验证 union 包含 cancelled。
-  assert.ok(["queued", "running", "succeeded", "failed", "cancelled"].includes("cancelled"));
-});

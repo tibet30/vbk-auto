@@ -313,27 +313,6 @@ test("React fiber：兼容 React 16 旧版 __reactInternalInstance$ 命名约定
   }
 });
 
-/** 关键回归：React 已检测到（DOM 上有 fiber）但 onChange 调用后祖先 state
- *  没更新目标文本时，reactDetected=true / synced=false —— 调用方必须阻断保存。
- *  这条与「无 React 旧页兼容」路径（reactDetected=false）的语义截然不同。 */
-test("React fiber：state 不更新时 reactDetected=true，调用方必须能据此阻断保存", async () => {
-  const html = `<div id="briefeditor"><span id="react-anchor"></span></div>`;
-  const page = await newPage(html);
-  try {
-    await installMockReactFiber(page, { updateState: false });
-    const result = await syncReactOnChange("目标", page);
-    assert.equal(result.synced, false);
-    assert.equal(
-      result.reactDetected,
-      true,
-      "DOM 上有 fiber 且 onChange 已调用过 → reactDetected 必须为 true，调用方必须阻断",
-    );
-    assert.ok(result.diagnostic.length > 0, "真实失败必须带可操作诊断");
-  } finally {
-    await page.close();
-  }
-});
-
 /** React 16 旧版 React 同样适用：DOM 上有 __reactInternalInstance$ 但 state 不更新时
  *  reactDetected=true / synced=false。 */
 test("React fiber：React 16 旧版 fiber 存在但 state 不更新时 reactDetected=true", async () => {

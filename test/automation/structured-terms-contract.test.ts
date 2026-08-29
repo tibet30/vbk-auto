@@ -10,8 +10,8 @@ test("有产品 ID 时结构化条款走正式接口，旧页面才回退自由�
   const start = source.indexOf("export async function fillAndSaveTerms");
   const end = source.indexOf("\n}\n\nexport {", start);
   const body = source.slice(start, end);
-  assert.match(body, /newResourceClause/);
   assert.match(body, /return saveStructuredProductClauses\(page, productId, \{/);
+  assert.doesNotMatch(body, /page\.goto|newResourceClause/);
   assert.ok(body.indexOf("saveStructuredProductClauses") < body.indexOf("await fillVisibleInputs"));
 });
 

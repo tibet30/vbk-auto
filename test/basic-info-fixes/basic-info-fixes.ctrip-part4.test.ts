@@ -37,12 +37,13 @@ test("状态机 4：只允许 exact 「下一步」按钮，绝不匹配「提�
   assert.ok(!helper.includes("submitCurrentSectionAndNext"), "saveThenAdvance 禁止调用 submitCurrentSectionAndNext");
 });
 
-test("状态机 5：presentation / itinerary 走同一通用 helper，禁止中文 tab 名伪 URL 判断", async () => {
+test("状态机 5：presentation / itinerary 保存入口均为 API-only", async () => {
   const ctrip = readCtripSource();
   // presentation
   const presIdx = ctrip.indexOf("export async function fillAndSavePresentation");
   const presBody = ctrip.slice(presIdx, ctrip.indexOf("function dayScopeFor", presIdx));
-  assert.match(presBody, /saveThenAdvance\(page, \{/);
+  assert.match(presBody, /savePresentationViaApi\(/);
+  assert.doesNotMatch(presBody, /saveThenAdvance|page\.goto|clickSection/);
   // presentation 的 isTargetUrl 不允许再用 /行程描述/.test(url) 这种中文伪判断。
   // 允许用「URL 段已离开 productImageText」或「URL 不再属于 baseInfoMerge」
   // 这类真实路径段判断；至少不能让中文 tab 名直接出现在 isTargetUrl 实现里。
@@ -53,7 +54,8 @@ test("状态机 5：presentation / itinerary 走同一通用 helper，禁止中�
   // itinerary
   const itinIdx = ctrip.indexOf("export async function fillItineraryDraft");
   const itinBody = ctrip.slice(itinIdx, ctrip.indexOf("async function chooseRadioValue", itinIdx));
-  assert.match(itinBody, /saveThenAdvance\(page, \{/);
+  assert.match(ctrip, /export async function fillItineraryDraftApi/);
+  assert.match(ctrip, /ensureItineraryApi\(/);
   assert.ok(
     !/isTargetUrl:\s*\(\s*url\s*\)\s*=>\s*[^,]*\/套餐管理\//.test(itinBody),
     "fillItineraryDraft 禁止把中文「套餐管理」当作 URL 命中条件",

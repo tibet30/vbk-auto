@@ -150,7 +150,8 @@ export function debugRunStep(context: DebugContext, stepName: string, argsJson: 
         return await fillBasicInfo(page, productData, butlerSelection, extra);
       }
 
-      return await fillAndSavePresentation(page, productData);
+      if (!product.productId) throw new Error("产品尚无 VBK 产品 ID，无法保存产品图文。");
+      return await fillAndSavePresentation(page, productData, product.productId);
     }
 
     if (

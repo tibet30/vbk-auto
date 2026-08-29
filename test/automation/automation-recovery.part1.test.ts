@@ -27,6 +27,31 @@ test("首次成功不调用 advisor", async () => {
   assert.equal(run.recovery?.phases.basic?.state, "completed");
 });
 
+test("结果校验成功后统一更新阶段完成态并持久化", async () => {
+  const run: AutomationRun = {
+    ...makeRun(),
+    phases: [{ phase: "basic", status: "running" }],
+  };
+  const snapshots: string[] = [];
+
+  const result = await runPhaseWithRecovery({
+    run,
+    phase: "basic",
+    completedPhases: [],
+    productIdExists: true,
+    basicInfoSaved: false,
+    execute: async () => undefined,
+    advisor: async () => { throw new Error("不应调用 advisor"); },
+    applyAction: async () => undefined,
+    log: () => undefined,
+    persist: () => snapshots.push(run.phases[0].status),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(run.phases[0].status, "completed");
+  assert.ok(snapshots.includes("completed"));
+});
+
 test("确定性系统错误直接上抛，不调用 advisor 或执行重试动作", async () => {
   const advisor = makeSpyAdvisor();
   const run: AutomationRun = makeRun();
@@ -135,7 +160,7 @@ test("retry 前先刷新当前 phase 页面，再重新执行 handler", async ()
   ]);
 });
 
-test("presentation 重试刷新会直接打开产品图文页", async () => {
+test("API-only presentation 重试不再导航产品图文页", async () => {
   const gotos: string[] = [];
   const page = {
     goto: async (url: string) => { gotos.push(url); },
@@ -149,8 +174,7 @@ test("presentation 重试刷新会直接打开产品图文页", async () => {
     attempt: 1,
     log: () => undefined,
   });
-  assert.equal(gotos.length, 1);
-  assert.match(gotos[0], /\/product\/input\/productImageText\?productId=77025968&pattern=4&from=vbk/);
+  assert.equal(gotos.length, 0);
 });
 
 test("reload_and_retry_phase：attempt=1 reload + handler 再执行成功", async () => {

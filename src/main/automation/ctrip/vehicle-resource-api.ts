@@ -14,7 +14,7 @@ const head = {
   extension: [],
 };
 
-function segmentsFrom(payload: any): Segment[] {
+export function segmentsFromPayload(payload: any): Segment[] {
   return payload?.draftProductSegments?.segments
     ?? payload?.productSegments?.segments
     ?? [];
@@ -25,13 +25,13 @@ function groupIdOf(value: any): string {
 }
 
 function matchingSegments(payload: any, groupId: string): Segment[] {
-  return segmentsFrom(payload).filter((segment) =>
+  return segmentsFromPayload(payload).filter((segment) =>
     Array.isArray(segment.segmentResourceGroups)
     && segment.segmentResourceGroups.some((group: any) => groupIdOf(group) === groupId),
   );
 }
 
-async function getSegments(page: any, productId: string) {
+export async function getProductSegmentsApi(page: any, productId: string) {
   const response = await vbkSessionRequest(page, {
     endpoint: "https://online.ctrip.com/restapi/soa2/15638/getSegments",
     browserRequestTimeoutMs: 12_000,
@@ -113,17 +113,15 @@ function vehicleGroup(groupId: string, groupName: string, segmentId: unknown) {
 
 /** 读取 Tour Helper 使用的后端数据，确认每个行程段是否已绑定目标用车组。 */
 export async function verifyVehicleResourceBinding(page: any, productId: string, groupId: number) {
-  const payload = await getSegments(page, productId);
-  const all = segmentsFrom(payload);
-  const first = all[0];
-  const bound = Boolean(first && Array.isArray(first.segmentResourceGroups)
-    && first.segmentResourceGroups.some((group: any) => groupIdOf(group) === String(groupId)));
-  return { bound, segmentCount: all.length, matchedCount: bound ? 1 : 0 };
+  const payload = await getProductSegmentsApi(page, productId);
+  const all = segmentsFromPayload(payload);
+  const matched = matchingSegments(payload, String(groupId));
+  return { bound: all.length > 0 && matched.length === all.length, segmentCount: all.length, matchedCount: matched.length };
 }
 
 /** 页面操作未落库时，按 Tour Helper 的 saveSegment/submitSegments 协议补写并回读。 */
 export async function ensureVehicleResourceBinding(page: any, productId: string, groupId: number, groupName: string) {
-  const before: any = await getSegments(page, productId);
+  const before: any = await getProductSegmentsApi(page, productId);
   if (!before?.draftProductSegments?.segments) {
     const maintain = await vbkSessionRequest(page, {
       endpoint: "https://online.ctrip.com/restapi/soa2/15638/saveProductMaintainType",
@@ -142,12 +140,11 @@ export async function ensureVehicleResourceBinding(page: any, productId: string,
     });
     assertResponse(draft.payload, "VBK 资源配置草稿初始化");
   }
-  const current: any = before?.draftProductSegments?.segments ? before : await getSegments(page, productId);
-  const segments = segmentsFrom(current);
-  const firstSegment = segments[0];
-  const missing = firstSegment && !matchingSegments({ productSegments: { segments: [firstSegment] } }, String(groupId)).length
-    ? [firstSegment]
-    : [];
+  const current: any = before?.draftProductSegments?.segments ? before : await getProductSegmentsApi(page, productId);
+  const segments = segmentsFromPayload(current);
+  if (!segments.length) throw new Error("VBK 资源配置未返回任何行程段");
+  const missing = segments.filter((segment) => !Array.isArray(segment.segmentResourceGroups)
+    || !segment.segmentResourceGroups.some((group: any) => groupIdOf(group) === String(groupId)));
   for (const segment of missing) {
     await saveSegment(page, {
       ...segment,
@@ -158,13 +155,21 @@ export async function ensureVehicleResourceBinding(page: any, productId: string,
     });
   }
   if (missing.length) await submitSegments(page, productId);
-  const after = await getSegments(page, productId);
-  const afterSegments = segmentsFrom(after);
-  const firstAfter = afterSegments[0];
-  const bound = Boolean(firstAfter && Array.isArray(firstAfter.segmentResourceGroups)
-    && firstAfter.segmentResourceGroups.some((group: any) => groupIdOf(group) === String(groupId)));
-  if (!bound) {
-    throw new Error(`接口回读确认失败：用车资源组 ${groupId} 未绑定到第一段行程`);
+  const after = await getProductSegmentsApi(page, productId);
+  const afterSegments = segmentsFromPayload(after);
+  const matchedAfter = matchingSegments(after, String(groupId));
+  if (!afterSegments.length || matchedAfter.length !== afterSegments.length) {
+    throw new Error(`接口回读确认失败：用车资源组 ${groupId} 仅绑定 ${matchedAfter.length}/${afterSegments.length} 个行程段`);
   }
-  return { resourceGroupId: groupId, audited: true, via: "tour-helper-api", segmentCount: 1 };
+  return { resourceGroupId: groupId, audited: true, via: "tour-helper-api", segmentCount: afterSegments.length };
+}
+
+/** 正式自动录入入口：严格只走接口，不根据当前页面 URL 回退 DOM。 */
+export async function ensureVehicleResourceApi(page: any, product: any, productId: string) {
+  if (product.sales?.productForm !== "privateTour") return { skipped: "非私家团" };
+  const vehicle = product.operations?.vehicleResource;
+  if (!vehicle?.resourceGroupId || !vehicle?.resourceGroupName) {
+    throw new Error("私家团缺少 operations.vehicleResource 资源组 ID/名称");
+  }
+  return ensureVehicleResourceBinding(page, productId, Number(vehicle.resourceGroupId), String(vehicle.resourceGroupName));
 }

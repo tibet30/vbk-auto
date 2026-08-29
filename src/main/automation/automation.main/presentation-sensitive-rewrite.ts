@@ -98,12 +98,13 @@ export async function fillPresentationWithSensitiveRewrite(args: {
   localProductId: string;
   page: any;
   product: ProductWithPresentation;
+  productId: string;
   log: (message: string, level?: "info" | "warning" | "error") => void;
 }): Promise<unknown> {
   const maxAiRewrites = 2;
   for (let rewriteAttempt = 0; ; rewriteAttempt += 1) {
     try {
-      return await fillAndSavePresentation(args.page, args.product);
+      return await fillAndSavePresentation(args.page, args.product, args.productId);
     } catch (error) {
       if (!(error instanceof PresentationSensitiveWordsError)) throw error;
       if (!args.ctx.presentationCopyRewriter || rewriteAttempt >= maxAiRewrites) throw error;

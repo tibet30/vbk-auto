@@ -231,9 +231,6 @@ export async function fillAndSaveTerms(page, product, productId) {
   // Terms 已移出 AI 规划；有产品 ID 时由 VBK 条款 API 使用系统默认条款，
   // 不再要求 product.commercial.terms 由规划模块生成。
   if (productId) {
-    await page.goto(`https://vbooking.ctrip.com/ivbk/vendor/newResourceClause?productid=${encodeURIComponent(productId)}&istab=1&from=vbk`, {
-      waitUntil: "domcontentloaded",
-    });
     return saveStructuredProductClauses(page, productId, {
       productForm: product.sales?.productForm,
     });

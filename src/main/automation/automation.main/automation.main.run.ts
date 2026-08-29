@@ -22,16 +22,7 @@ import {
   shouldRefillBasicInfo,
 } from "../schema/schema.js";
 import {
-  configureProductShell,
-  ensureHotelResource,
-  ensureVehicleResource,
-  fillAndSaveBasicInfo,
-  syncSupplierProductCode,
-  fillAndSavePackage,
   fillAndSaveTerms,
-  fillAndSubmitPricingInventory,
-  openProductEditor,
-  runProductPreflight,
   saveScreenshot,
 } from "../ctrip/ctrip.js";
 import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
@@ -42,11 +33,16 @@ import { AutomationCancelledError } from "./automation.main.errors.js";
 import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
 import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
 import { ensurePackageApi } from "../ctrip/package-api.js";
+import { ensureBasicInfoApi } from "../ctrip/basic-info/api.js";
+import { configureProductShellApi } from "../ctrip/sale-control/api.js";
+import { ensureHotelResourceApi } from "../ctrip/hotel-resource-api.js";
+import { runProductPreflightApi } from "../ctrip/preflight-api.js";
+import { ensureVehicleResourceApi } from "../ctrip/vehicle-resource-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
-import { initializeAutomationStartPhase } from "./automation.main.run-state.js";
+import { completeVerifiedSaleControlPhase, initializeAutomationStartPhase } from "./automation.main.run-state.js";
 
 /**
  * 单个产品自动化阶段主循环：
@@ -112,7 +108,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       }
     }
     // 国家景区内具体景点：按行程顺序提取全部 spots[].name；不可匹配的单项
-    // 由 fillAndSaveBasicInfo 内部追加到 scenicSpotLogs，再在每轮结束时
+    // 由基本信息 API 解析过程追加到 scenicSpotLogs，再在每轮结束时
     // 落盘到 automation log，便于人工核对。
     const keySpots = pickKeySpotsFromItinerary(productDetail.product);
     const scenicSpotLogs: string[] = [];
@@ -136,27 +132,22 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           log("正在创建 VBK 产品草稿…");
           // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌
           // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
-          productId = (await configureProductShell(page, product)) as string;
+          productId = await configureProductShellApi(page, product);
           ctx.db.setProductId(localProductId, productId);
+          // configureProductShellApi 已完成销售控制远端回读；先持久化销售控制
+          // 的完成态并推送 UI，之后才开始 basic，避免 API 直连模式下阶段状态
+          // 落后于实际保存结果。
+          completeVerifiedSaleControlPhase(run);
+          persist();
+          log(`销售控制已通过远端回读：${productId}`);
         } else {
           log("正在重跑 basic 阶段…", "warning");
-          await openProductEditor(page, productId);
         }
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         log(`产品基本信息阶段开始：${productId}`);
       } else {
-        // 中间阶段重试（retryFrom>0）：保留「在当前页面继续」偏好，但仍
-        // 必须保证浏览器当前是「这一个产品」的 editor 页。openProductEditor
-        // 带 stayOnCurrentTab=true：
-        //   - 若页面已经停在同一产品的 editor 路径上（含 baseInfoMerge /
-        //     /ivbk/vendor/tourdays）则直接 return，不再拽回「基本信息」tab，
-        //     避免 clickSection 失去上次状态、引发 recovery loop；
-        //   - 若页面已跳到其它 URL（例如用户中途切到设置 / 列表页）则按
-        //     常规导航回到 productEditorUrl，并等「基本信息」tab 落点。
-        // 兜底跳回 editor 后，阶段 handler 各自 clickSection 切到自己的
-        // tab（fillItineraryDraft 切「行程描述」、fillAndSavePresentation
-        // 切「产品图文」等）。
-        await openProductEditor(page, productId!, { stayOnCurrentTab: true });
+        // 中间阶段重试复用当前登录会话，并用显式 productId 调用对应 API；
+        // 不再依赖编辑器 URL、当前 tab 或页面导航状态。
         log(`已从 ${retryFrom} 阶段继续录入（当前页面）`);
       }
 
@@ -181,9 +172,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           const supplierCode = String((product.basicInfo as Record<string, unknown>).supplierProductCode);
           log(`供应商产品编号已按本次写入时间重算：${refreshedSupplierCode}`);
           if (basicInfoSaved) {
-            await syncSupplierProductCode(page, supplierCode);
-            log(`供应商产品编号已写入平台并完成回读：${supplierCode}`);
-            run.phases[0].status = "completed";
+            await ensureBasicInfoApi(page, product, productId!, butlerSelection!, servicePhone);
+            log(`供应商产品编号已通过基本信息 API 写入并完成回读：${supplierCode}`);
             return;
           }
         }
@@ -192,24 +182,20 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         if (shouldRefill.reason === "complete") {
           log("basic 阶段已保存且产品数据完整，跳过重复填充");
-          run.phases[0].status = "completed";
           return;
         }
-        await fillAndSaveBasicInfo(page, product, butlerSelection, { servicePhone, keySpots, scenicSpotLogs, disambiguator: ctx.disambiguator });
+        await ensureBasicInfoApi(page, product, productId, butlerSelection!, servicePhone);
         // 把景点未命中的单项沉淀到 automation 日志。
         for (const entry of scenicSpotLogs) log(entry, "warning");
-        // 仅当 VBK 真实保存成功后置位；setBasicInfoSaved 由 fillAndSaveBasicInfo
-        // 通过 tab 解锁门禁间接验证，runner 不能因此前置。
+        // 仅当 VBK API 保存并完成远端回读后置位，失败路径不会误标。
         ctx.db.setBasicInfoSaved(localProductId);
         basicInfoSaved = true;
-        run.phases[0].status = "completed";
       };
 
       const handlers: Record<string, () => Promise<unknown>> = {
         presentation: async () => {
           phaseRecord("presentation");
-          const r = await fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product, log });
-          run.phases[draftPhases.indexOf("presentation")].status = "completed";
+          const r = await fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product, productId: productId!, log });
           return r;
         },
         itinerary: async () => {
@@ -225,30 +211,18 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
             }),
             dbUpdate: (id, updatedProduct, status) => ctx.db.updateProduct(id, updatedProduct, status),
           });
-          run.phases[draftPhases.indexOf("itinerary")].status = "completed";
           return r;
         },
-        package: async () => { phaseRecord("package"); const r = await ensurePackageApi(page, product, productId!); run.phases[draftPhases.indexOf("package")].status = "completed"; return r; },
-        pricingInventory: async () => { phaseRecord("pricingInventory"); const r = await ensurePricingInventoryApi(page, product, productId!); run.phases[draftPhases.indexOf("pricingInventory")].status = "completed"; return r; },
-        terms: async () => { phaseRecord("terms"); const r = await fillAndSaveTerms(page, product, productId); run.phases[draftPhases.indexOf("terms")].status = "completed"; return r; },
+        package: async () => { phaseRecord("package"); return ensurePackageApi(page, product, productId!); },
+        pricingInventory: async () => { phaseRecord("pricingInventory"); return ensurePricingInventoryApi(page, product, productId!); },
+        terms: async () => { phaseRecord("terms"); return fillAndSaveTerms(page, product, productId); },
         hotelResource: async () => {
           phaseRecord("hotelResource");
-          const result = await ensureHotelResource(page, product, productId!);
-          if (result.source === "vbk" && result.resourceId && result.resourceName) {
-            product.operations!.hotelResource = {
-              source: "vbk",
-              resourceId: result.resourceId,
-              resourceName: result.resourceName,
-              hotelTier: result.hotelTier,
-              diamond: result.diamond as 3 | 4 | 5,
-            };
-            ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "automating");
-          }
-          run.phases[draftPhases.indexOf("hotelResource")].status = "completed";
+          const result = await ensureHotelResourceApi(page, product, productId!);
           return result;
         },
-        vehicleResource: async () => { phaseRecord("vehicleResource"); const r = await ensureVehicleResource(page, product, productId!); run.phases[draftPhases.indexOf("vehicleResource")].status = "completed"; return r; },
-        preflight: async () => { phaseRecord("preflight"); const r = await runProductPreflight(page, product, productId!); run.phases[draftPhases.indexOf("preflight")].status = "completed"; return r; },
+        vehicleResource: async () => { phaseRecord("vehicleResource"); return ensureVehicleResourceApi(page, product, productId!); },
+        preflight: async () => { phaseRecord("preflight"); return runProductPreflightApi(page, product, productId!); },
       };
 
       // 重建 ctx 的 factory：每个阶段都使用同一份 run；同一 runner 第二次进入时

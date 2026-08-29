@@ -253,17 +253,18 @@ test("产品图文：fillAndSavePresentation 必须通过 presentation-api 接�
   // 接线：必须通过接口保存模块把产品特色 + 推荐理由落库
   assert.match(
     body,
-    /savePresentationViaApi\(page,\s*presentation\)/,
+    /savePresentationViaApi\(page,\s*presentation,\s*productId\)/,
     "fillAndSavePresentation 必须通过接口保存模块写入产品特色与推荐理由",
   );
-  // 顺序：接口保存必须先于 saveThenAdvance，避免产物未确认落库前推进下一页
+  // 顺序：先绑定封面，再保存图文；二者都必须使用显式 productId。
   const idxSaveApi = body.indexOf("savePresentationViaApi(");
-  const idxAdvance = body.indexOf("saveThenAdvance(");
-  assert.ok(idxSaveApi >= 0 && idxAdvance >= 0, "必须同时存在 savePresentationViaApi / saveThenAdvance 调用");
+  const idxCover = body.indexOf("selectCtripLibraryCover(");
+  assert.ok(idxSaveApi >= 0 && idxCover >= 0, "必须同时存在封面绑定和图文保存调用");
   assert.ok(
-    idxSaveApi < idxAdvance,
-    `savePresentationViaApi 必须在 saveThenAdvance 之前；idxSaveApi=${idxSaveApi}, idxAdvance=${idxAdvance}`,
+    idxCover < idxSaveApi,
+    `封面绑定必须先于图文保存；idxCover=${idxCover}, idxSaveApi=${idxSaveApi}`,
   );
+  assert.doesNotMatch(body, /saveThenAdvance\(|clickSection\(|page\.reload|waitForURL/);
   // 反向红线：主流程不应再回退到 DOM 写入 / UI SaveMonitor
   assert.doesNotMatch(body, /fillProductFeatures\(page/, "产品图文主流程不应再通过 UEditor DOM 写入产品特色");
   assert.doesNotMatch(body, /fillRecommendationReasons\(page/, "产品图文主流程不应再通过 DOM 填写推荐理由");

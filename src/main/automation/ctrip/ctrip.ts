@@ -39,6 +39,7 @@ export {
   assertBasicInfoNoRedErrors,
   fillById,
 } from "./basic-info/basic-info.js";
+export { ensureBasicInfoApi, getProductBaseInfoApi } from "./basic-info/api.js";
 export {
   selectCtripLibraryImage,
   fillRecommendationReasons,

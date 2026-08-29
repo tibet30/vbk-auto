@@ -156,6 +156,29 @@ test("产品图文接口保存：敏感词命中时不创建草稿也不保存",
   assert.equal(browser.calls.length, 3);
 });
 
+test("产品图文接口保存：显式产品 ID 不读取页面 URL", async () => {
+  const browser = browserWithResponses([
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, pmRcmdCategories: [
+      { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
+      { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
+      { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
+    ] } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, info: {} } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, sensitiveWords: [] } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, success: true } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, info: {
+      pmRcmdItems: buildRecommendationReasonsPlan(presentation.recommendations).map((item) => ({ rcmdDesc: item.text })),
+      productDesc: { productDesc: presentation.features },
+    } } },
+  ]);
+  browser.url = () => { throw new Error("production path must not read page.url"); };
+  const result = await savePresentationViaApi(browser as never, presentation, 77098085);
+  assert.equal(result.productId, 77098085);
+  assert.equal((browser.calls[1].body as any).productId, 77098085);
+  assert.equal((browser.calls[4].body as any).dto.productId, 77098085);
+});
+
 test("产品图文接口保存：推荐理由不得描述不含导游", () => {
   assert.throws(
     () => buildRecommendationReasonsPlan([

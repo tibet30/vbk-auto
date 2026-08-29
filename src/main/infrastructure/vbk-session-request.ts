@@ -1,6 +1,20 @@
 export interface VbkSessionRequestBrowser {
   evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
+  vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult>;
 }
+
+export interface VbkSessionNativeRequest {
+  endpoint: string;
+  body: object;
+  errorLabel: string;
+  headers: Record<string, string>;
+  referrer?: string;
+  referrerPolicy?: "strict-origin-when-cross-origin";
+  includeCidQuery: boolean;
+  requireReadableCid: boolean;
+}
+
+export type VbkSessionNativeResult = VbkSessionRequestResult;
 
 export interface VbkSessionContext {
   hasCid: boolean;
@@ -37,6 +51,8 @@ export interface VbkSessionRequestOptions<TBody extends object = Record<string, 
   referrer?: string;
   referrerPolicy?: "strict-origin-when-cross-origin";
   includeCidQuery?: boolean;
+  /** 仅少数旧接口硬性要求页面可读 CID；默认允许依赖 HttpOnly/partition Cookie。 */
+  requireReadableCid?: boolean;
 }
 
 export const EMPTY_VBK_SESSION_CONTEXT: VbkSessionContext = {
@@ -83,6 +99,7 @@ export async function vbkSessionRequest<TBody extends object>(
     errorLabel,
     headers,
     includeCidQuery,
+    requireReadableCid,
     referrer,
     referrerPolicy,
     timeoutMs,
@@ -92,6 +109,7 @@ export async function vbkSessionRequest<TBody extends object>(
     errorLabel: string;
     headers: Record<string, string>;
     includeCidQuery: boolean;
+    requireReadableCid: boolean;
     referrer?: string;
     referrerPolicy?: "strict-origin-when-cross-origin";
     timeoutMs: number;
@@ -165,19 +183,21 @@ export async function vbkSessionRequest<TBody extends object>(
         responseAck: "",
         responseDataItemCount: 0,
       };
-      if (!cid) {
+      if (!cid && requireReadableCid) {
         throw new Error(`${errorLabel}缺少 cid：请确认 VBK 登录态 Cookie 中存在 GUID 或 vbk_login_cid。`);
       }
       const requestUrl = new URL(endpoint);
-      if (includeCidQuery) requestUrl.searchParams.append("_fxpcqlniredt", cid);
-      requestUrl.searchParams.set("x-traceID", `${cid}-${Date.now()}-${Math.floor(Math.random() * 10_000_000)}`);
+      if (includeCidQuery && cid) requestUrl.searchParams.append("_fxpcqlniredt", cid);
+      if (cid) requestUrl.searchParams.set("x-traceID", `${cid}-${Date.now()}-${Math.floor(Math.random() * 10_000_000)}`);
       const bodyRecord = body && typeof body === "object" && !Array.isArray(body)
         ? body as Record<string, unknown>
         : {};
       const currentHead = bodyRecord.head && typeof bodyRecord.head === "object" && !Array.isArray(bodyRecord.head)
         ? bodyRecord.head as Record<string, unknown>
         : null;
-      const finalBody: unknown = currentHead ? { ...bodyRecord, head: { ...currentHead, cid } } : body;
+      const finalBody: unknown = currentHead
+        ? { ...bodyRecord, head: { ...currentHead, ...(cid ? { cid } : {}) } }
+        : body;
       // 注入从 cookie 提取的反作弊/追踪头（与控制台请求对齐）：
       //   - x-ctx-ubt-vid 对应 UBT_VID cookie 值（携程反作弊 visitor ID）
       //   - 其它 x-ctx-ubt-* 头需要页面 JS 动态生成，无法在 fetch 里自动复制，
@@ -267,12 +287,28 @@ export async function vbkSessionRequest<TBody extends object>(
     referrer: options.referrer,
     referrerPolicy: options.referrerPolicy,
     includeCidQuery: options.includeCidQuery !== false,
+    requireReadableCid: options.requireReadableCid === true,
   });
-  const result = await rejectAfter(
-    evaluation,
-    evaluateTimeoutMs,
-    `${options.errorLabel}BrowserView 执行超时（${evaluateTimeoutMs}ms）`,
-  ) as VbkSessionRequestResult;
+  let result: VbkSessionRequestResult;
+  try {
+    result = await rejectAfter(
+      evaluation,
+      evaluateTimeoutMs,
+      `${options.errorLabel}BrowserView 执行超时（${evaluateTimeoutMs}ms）`,
+    ) as VbkSessionRequestResult;
+  } catch (error) {
+    if (!browser.vbkSessionFetch || !/Failed to fetch|NetworkError|CORS/i.test(String(error))) throw error;
+    result = await browser.vbkSessionFetch({
+      endpoint: options.endpoint,
+      body: options.body,
+      errorLabel: options.errorLabel,
+      headers: { ...DEFAULT_VBK_SOA_HEADERS, ...(options.headers ?? {}) },
+      referrer: options.referrer,
+      referrerPolicy: options.referrerPolicy,
+      includeCidQuery: options.includeCidQuery !== false,
+      requireReadableCid: options.requireReadableCid === true,
+    });
+  }
   if (result.status < 200 || result.status >= 300) {
     throw new Error(`${options.errorLabel}失败：HTTP ${result.status}`);
   }

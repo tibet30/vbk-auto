@@ -111,7 +111,24 @@ test("vbkSessionRequest 把超出安全整数的行程 ID 保留为精确字符�
   assert.equal(typeof payload.ordinary, "number", "非行程 ID 数值不应被改写成字符串");
 });
 
-test("vbkSessionRequest 缺 GUID/vbk_login_cid 时抛中文登录态错误", async () => {
+test("vbkSessionRequest 默认允许 HttpOnly/partition Cookie 登录态不暴露 CID", async () => {
+  let capturedUrl = "";
+  const page = executablePage("foo=bar", async (url) => {
+    capturedUrl = String(url);
+    return jsonResponse({ ResponseStatus: { Ack: "Success" } });
+  });
+  const result = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/1/demo",
+    browserRequestTimeoutMs: 1000,
+    evaluateTimeoutMs: 1000,
+    errorLabel: "VBK 测试请求",
+    body: { head: { cid: "" } },
+  });
+  assert.equal(result.ctx.hasCid, false);
+  assert.doesNotMatch(capturedUrl, /_fxpcqlniredt|x-traceID/);
+});
+
+test("vbkSessionRequest 显式 requireReadableCid 时仍严格阻断", async () => {
   const page = executablePage("foo=bar", async () => jsonResponse({}));
   await assert.rejects(
     vbkSessionRequest(page, {
@@ -119,6 +136,7 @@ test("vbkSessionRequest 缺 GUID/vbk_login_cid 时抛中文登录态错误", asy
       browserRequestTimeoutMs: 1000,
       evaluateTimeoutMs: 1000,
       errorLabel: "VBK 测试请求",
+      requireReadableCid: true,
       body: { head: { cid: "" } },
     }),
     /缺少 cid.*GUID.*vbk_login_cid/,

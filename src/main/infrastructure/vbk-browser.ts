@@ -34,6 +34,7 @@ import {
   normaliseExpiry,
 } from "./vbk-cookie-serializer.js";
 import { waitForDomText } from "./vbk-page-wait.js";
+import { attachVbkSessionFetch } from "./vbk-session-fetch-adapter.js";
 import { navigateVbkPage } from "./vbk-navigation.js";
 import { isExpectedLoginRedirect } from "./vbk-navigation.js";
 import {
@@ -685,6 +686,8 @@ export class VbkBrowser {
         : "未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
     }
     ensureNativeDialogHandler(page);
+    const activeSession = this.view?.webContents.session;
+    if (activeSession) attachVbkSessionFetch(page, activeSession);
     return page;
   }
 

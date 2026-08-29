@@ -31,8 +31,10 @@ export interface PresentationApiResult {
 export async function savePresentationViaApi(
   page: VbkSessionRequestBrowser & { url(): string },
   presentation: any,
+  explicitProductId?: number,
 ): Promise<PresentationApiResult> {
-  const productId = readProductIdFromVbkUrl(page.url());
+  const productId = explicitProductId ?? readProductIdFromVbkUrl(page.url());
+  if (!Number.isInteger(productId) || productId <= 0) throw new Error("VBK 产品 ID必须是正整数。");
   const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
   assertPresentationCopyAllowed(presentation.recommendation, "recommendation", "推荐语");
   const featuresHtml = formatProductFeaturesHtml(presentation.features);

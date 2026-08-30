@@ -323,6 +323,9 @@ app.whenReady().then(async () => {
     remote: remoteProducts,
     broadcast: broadcastProduct,
     isWorkflowActive: (productId) => Boolean(productWorkflows.activeWorkflow(productId)),
+    // automation 的 phases / recovery / logs 是 SQLite 运行态，需要逐节点即时
+    // 呈现在审查结果；产品业务数据仍在工作流解锁后合并并写回 Tibet。
+    shouldBroadcastWhileActive: (productId) => productWorkflows.activeWorkflow(productId) === "automation",
   }).emit;
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
@@ -359,6 +362,7 @@ app.whenReady().then(async () => {
   };
   registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
+  automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));
   // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
   void browser.initialise()
     .then(() => vbkBindings.afterBrowserReady())

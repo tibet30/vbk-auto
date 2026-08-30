@@ -30,10 +30,14 @@ import { draftPhasesFor } from "./automation.main.phases.js";
 import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
-import { refreshPhasePageBeforeRetry } from "./automation.main.retry-navigation.js";
+import { enterPhasePageForApi, recordPhaseRetry, refreshPhasePageAfterApi } from "./automation.main.retry-navigation.js";
 import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
 import { ensurePackageApi } from "../ctrip/package-api.js";
-import { ensureBasicInfoApi } from "../ctrip/basic-info/api.js";
+import {
+  ensureBasicInfoApi,
+  hasProductLineResolutionFailure,
+  isProductLineResolutionError,
+} from "../ctrip/basic-info/api.js";
 import { configureProductShellApi } from "../ctrip/sale-control/api.js";
 import { ensureHotelResourceApi } from "../ctrip/hotel-resource-api.js";
 import { runProductPreflightApi } from "../ctrip/preflight-api.js";
@@ -58,14 +62,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     const productDetail = ctx.db.getProduct(localProductId);
     if (!productDetail) throw new Error("产品不存在");
     const product = parseProduct(productDetail.product);
-    // 触发前先决：让 VBK 视图可见并兑底 bounds。
-    // 这些调用必须在后面任何预检查 / 阶段 runner 之前完成，否则：
-    //   1) view 隐藏时 setVisible 没调，Playwright 连接后看到 window.innerHeight=0
-    //   2) view 没填满窗口时 auto-scroll 跟不动，click 30s 超时
-    //   3) 但预检查（管家 / 400 电话 / blockers）会在 view 还没就绪时抛错，
-    //      把 ensureBrowserHasBounds 这一兑底短路掉。
-    ctx.browser.setVisible(true);
-    ctx.ensureBrowserHasBounds();
+    // 用户离开 VBK 页面后，自动化继续复用隐藏会话；不重新打开 BrowserView。
     // 后面几个阶段强制要求这些字段，但它们在 productSchema 里是可选的。
     // 必须在创建远程草稿之前拦下，否则会在携程留下一个半成品产品。
     const blockers = automationBlockers(productDetail.product);
@@ -80,6 +77,9 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     if (retryFrom && startIndex < 0) throw new Error(`当前产品没有阶段：${retryFrom}`);
     if (retryFrom && !productDetail.productId) throw new Error("远程草稿尚未创建，不能从中间阶段重试。");
     let basicInfoSaved = productDetail.basicInfoSaved ?? false;
+    let productLineBlocked = hasProductLineResolutionFailure(
+      productDetail.automation?.recovery?.phases.basic,
+    );
 
     const accountName = ctx.db.getSetting("vbkAccountName")?.value;
     // 全量重跑从 basic 阶段起点，需要管家联系人；若从中间阶段重试且 basic 已成功，
@@ -121,10 +121,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
     ctx.db.saveAutomation(localProductId, run);
     ctx.db.updateProduct(localProductId, productDetail.product, "automating");
-    // setVisible + ensureBrowserHasBounds 已在 run 入口提前调用，
-    // 保证后面预检查 / 阶段 runner 不会因 view 未就绪拖崩 click。
     try {
-      const page = await ctx.browser.page({ requireInteractive: true });
+      const page = await ctx.browser.page();
       let productId = productDetail.productId;
       if (startIndex === 0) {
         initializeAutomationStartPhase(run, productId);
@@ -146,9 +144,9 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         log(`产品基本信息阶段开始：${productId}`);
       } else {
-        // 中间阶段重试复用当前登录会话，并用显式 productId 调用对应 API；
-        // 不再依赖编辑器 URL、当前 tab 或页面导航状态。
-        log(`已从 ${retryFrom} 阶段继续录入（当前页面）`);
+        // 中间阶段重试复用当前登录会话，并用显式 productId 先进入对应模块页，
+        // 再调用 API；不依赖上一轮遗留的编辑器 URL 或当前 tab。
+        log(`已从 ${retryFrom} 阶段继续录入（将进入对应模块页面）`);
       }
 
       // 每个 phase 处理器共享一份 productId 闭包，并独立被 runPhaseWithRecovery 包裹。
@@ -160,8 +158,54 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         persist();
       };
 
+      const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
+        phaseRecord(phase);
+        return ctx.runVbkPageExclusive(async () => {
+          const syncPage = ctx.browser.isVisible();
+          if (syncPage) {
+            ctx.ensureBrowserHasBounds();
+            await enterPhasePageForApi({
+              page,
+              productId,
+              phase,
+              log,
+              navigate: (url) => ctx.browser.navigate(url),
+            });
+          } else {
+            log(`phase=${phase} 后台执行：VBK 页面未打开，跳过页面进入`, "info");
+          }
+          const result = await executeApi();
+          if (ctx.browser.isVisible()) {
+            await refreshPhasePageAfterApi({ page, productId, phase, log });
+          } else {
+            log(`phase=${phase} API 远端回读完成：VBK 页面已关闭，跳过页面刷新`, "info");
+          }
+          return result;
+        });
+      };
+
+      const saveBasicInfo = async () => {
+        const skipProductLine = productLineBlocked;
+        if (skipProductLine) {
+          log("产品线曾阻断基本信息，本次不提交产品线字段，其余信息继续保存。", "warning");
+        }
+        try {
+          return await ensureBasicInfoApi(
+            page,
+            product,
+            productId!,
+            butlerSelection!,
+            servicePhone,
+            { skipProductLine },
+          );
+        } catch (error) {
+          if (isProductLineResolutionError(error)) productLineBlocked = true;
+          throw error;
+        }
+      };
+
       const basicExecute = async () => {
-        phaseRecord("basic");
+        return executePhase("basic", async () => {
         // runner 重试本阶段时清空 scenicSpotLogs，防止把上一轮未命中的景点
         // 单项重复记入 automation 日志。
         scenicSpotLogs.length = 0;
@@ -172,7 +216,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           const supplierCode = String((product.basicInfo as Record<string, unknown>).supplierProductCode);
           log(`供应商产品编号已按本次写入时间重算：${refreshedSupplierCode}`);
           if (basicInfoSaved) {
-            await ensureBasicInfoApi(page, product, productId!, butlerSelection!, servicePhone);
+            const result = await saveBasicInfo();
+            log(`地接社已${result.localTravelAgency.selection === "defaulted" ? "自动选择" : "确认"}：${result.localTravelAgency.name || "未命名"}（${result.localTravelAgency.id}）`);
             log(`供应商产品编号已通过基本信息 API 写入并完成回读：${supplierCode}`);
             return;
           }
@@ -184,23 +229,21 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           log("basic 阶段已保存且产品数据完整，跳过重复填充");
           return;
         }
-        await ensureBasicInfoApi(page, product, productId, butlerSelection!, servicePhone);
+        const result = await saveBasicInfo();
+        log(`地接社已${result.localTravelAgency.selection === "defaulted" ? "自动选择" : "确认"}：${result.localTravelAgency.name || "未命名"}（${result.localTravelAgency.id}）`);
         // 把景点未命中的单项沉淀到 automation 日志。
         for (const entry of scenicSpotLogs) log(entry, "warning");
         // 仅当 VBK API 保存并完成远端回读后置位，失败路径不会误标。
         ctx.db.setBasicInfoSaved(localProductId);
         basicInfoSaved = true;
+        });
       };
 
       const handlers: Record<string, () => Promise<unknown>> = {
-        presentation: async () => {
-          phaseRecord("presentation");
-          const r = await fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product, productId: productId!, log });
-          return r;
-        },
-        itinerary: async () => {
-          phaseRecord("itinerary");
-          const r = await fillItineraryWithSensitiveRewrite({
+        presentation: () => executePhase("presentation", () =>
+          fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product, productId: productId!, log })),
+        itinerary: () => executePhase("itinerary", () =>
+          fillItineraryWithSensitiveRewrite({
             ctx,
             localProductId,
             product,
@@ -210,19 +253,13 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
               productId,
             }),
             dbUpdate: (id, updatedProduct, status) => ctx.db.updateProduct(id, updatedProduct, status),
-          });
-          return r;
-        },
-        package: async () => { phaseRecord("package"); return ensurePackageApi(page, product, productId!); },
-        pricingInventory: async () => { phaseRecord("pricingInventory"); return ensurePricingInventoryApi(page, product, productId!); },
-        terms: async () => { phaseRecord("terms"); return fillAndSaveTerms(page, product, productId); },
-        hotelResource: async () => {
-          phaseRecord("hotelResource");
-          const result = await ensureHotelResourceApi(page, product, productId!);
-          return result;
-        },
-        vehicleResource: async () => { phaseRecord("vehicleResource"); return ensureVehicleResourceApi(page, product, productId!); },
-        preflight: async () => { phaseRecord("preflight"); return runProductPreflightApi(page, product, productId!); },
+          })),
+        package: () => executePhase("package", () => ensurePackageApi(page, product, productId!)),
+        pricingInventory: () => executePhase("pricingInventory", () => ensurePricingInventoryApi(page, product, productId!)),
+        terms: () => executePhase("terms", () => fillAndSaveTerms(page, product, productId)),
+        hotelResource: () => executePhase("hotelResource", () => ensureHotelResourceApi(page, product, productId!)),
+        vehicleResource: () => executePhase("vehicleResource", () => ensureVehicleResourceApi(page, product, productId!)),
+        preflight: () => executePhase("preflight", () => runProductPreflightApi(page, product, productId!)),
       };
 
       // 重建 ctx 的 factory：每个阶段都使用同一份 run；同一 runner 第二次进入时
@@ -248,7 +285,9 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           if (action === "wait_for_user") {
             throw new Error("applyAction 不应收到 wait_for_user");
           }
-          await refreshPhasePageBeforeRetry({ page, productId, phase, action, attempt, log });
+          // executePhase 在每个 attempt 的开头独占页面并进入目标模块。这里若再
+          // 导航，会与紧接着的 executePhase.goto 竞争并中断前一个导航。
+          recordPhaseRetry({ productId, phase, action, attempt, log });
         },
         log,
         persist,
@@ -279,7 +318,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           return;
         }
       } else {
-        log(`跳过 basic 阶段（已保存），从 ${retryFrom} 继续（当前页面重试）`);
+        log(`跳过 basic 阶段（已保存），从 ${retryFrom} 继续并进入对应模块页面`);
       }
 
       if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");

@@ -55,6 +55,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
       days: z.number().int().min(2).max(60),
       productForm: z.enum(PRODUCT_FORMS),
       userIdea: z.string().max(1000).optional(),
+      autoConfirm: z.boolean().optional(),
     }).strict(), args[0]);
     void input;
   }

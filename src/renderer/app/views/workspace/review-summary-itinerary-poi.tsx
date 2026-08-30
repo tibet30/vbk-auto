@@ -119,9 +119,11 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
     const saveTarget = {
       poiName: selected.poiName,
       poiId: selected.poiId,
-      province: selected.province ?? null,
-      city: selected.city ?? null,
-      district: selected.district ?? null,
+      // renderer 日志上下文使用可选字符串；缺失行政区在 main 写入边界
+      // 统一归一为 null，避免在两层契约之间传播 string | null。
+      province: selected.province ?? undefined,
+      city: selected.city ?? undefined,
+      district: selected.district ?? undefined,
     };
     logPoiManual("save_start", logContext(saveTarget));
     setLoading("save");

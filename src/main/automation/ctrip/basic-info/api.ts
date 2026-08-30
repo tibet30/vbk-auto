@@ -3,6 +3,16 @@ import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infra
 import { listProviderContactCards } from "../../../infrastructure/butler-contacts.js";
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
 import { normalizeVbkSubtitle } from "./core.js";
+import {
+  productLineSaveField,
+  resolveBasicInfoCityAnchor,
+  selectProductLine,
+} from "./product-line.js";
+
+export {
+  hasProductLineResolutionFailure,
+  isProductLineResolutionError,
+} from "./product-line.js";
 
 const ENDPOINT = "https://online.ctrip.com/restapi/soa2/15638";
 const HEAD = { cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", extension: [] };
@@ -16,6 +26,16 @@ export interface BasicInfoApiResult {
   phone400: string;
   contactCardId: number;
   scenicSpotCount: number;
+  productLineSkipped: boolean;
+  localTravelAgency: {
+    id: number;
+    name: string;
+    selection: "existing" | "defaulted";
+  };
+}
+
+export interface BasicInfoApiOptions {
+  skipProductLine?: boolean;
 }
 
 function record(value: unknown): Json {
@@ -24,6 +44,32 @@ function record(value: unknown): Json {
 
 function list(value: unknown): Json[] {
   return Array.isArray(value) ? value.filter((item): item is Json => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function localTravelAgencyId(agency: Json): number {
+  return Number(agency.localInfoID ?? agency.localInfoId ?? agency.id);
+}
+
+function isActiveLocalTravelAgency(agency: Json): boolean {
+  return localTravelAgencyId(agency) > 0 && String(agency.active ?? agency.isActive ?? "T") !== "F";
+}
+
+function localTravelAgencyName(agency: Json): string {
+  return String(agency.localInfoName ?? agency.localInfoNameCn ?? agency.name ?? "").trim();
+}
+
+export function resolveLocalTravelAgency(sourceBooking: Json, agencies: Json[]) {
+  const selectedId = Number(sourceBooking.localInfoID
+    ?? (Array.isArray(sourceBooking.localInfoIds) ? sourceBooking.localInfoIds[0] : 0));
+  const activeAgencies = agencies.filter(isActiveLocalTravelAgency);
+  if (!selectedId) {
+    const fallback = activeAgencies[0];
+    if (!fallback) throw new Error("VBK 地接社未选择且当前账号无可用候选");
+    return { id: localTravelAgencyId(fallback), name: localTravelAgencyName(fallback), selection: "defaulted" as const };
+  }
+  const matches = activeAgencies.filter((agency) => localTravelAgencyId(agency) === selectedId);
+  if (matches.length !== 1) throw new Error(`VBK 地接社无法按已选 ID 精确匹配：${matches.length} 个候选`);
+  return { id: selectedId, name: localTravelAgencyName(matches[0]), selection: "existing" as const };
 }
 
 function ack(payload: unknown, label: string): Json {
@@ -99,26 +145,11 @@ async function resolveCity(page: VbkSessionRequestBrowser, cityName: string): Pr
   return city;
 }
 
-function trimAdministrativeSuffix(value: unknown): string {
-  return String(value ?? "").trim()
-    .replace(/(维吾尔自治区|壮族自治区|回族自治区|特别行政区|自治区|省|市)$/u, "");
-}
-
-async function resolveProductLine(page: VbkSessionRequestBrowser, info: Json, cityId: number): Promise<Json> {
-  const candidates = [...new Set([
-    `${String(info.destinationCity ?? "").trim()}一地`,
-    `${trimAdministrativeSuffix(info.province)}一地`,
-  ].filter((value) => value !== "一地"))];
+async function resolveProductLine(page: VbkSessionRequestBrowser, info: Json, cityId: number, cityName: string): Promise<Json> {
   const payload = await post(page, "getProductLinesByDestinationCityId", {
     destinationCityId: cityId,
   }, "VBK 产品线查询");
-  for (const name of candidates) {
-    const matches = list(payload.productLineDtos).filter((item) =>
-      String(item.lineName ?? "").trim() === name);
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1) throw new Error(`产品线「${name}」无法唯一匹配：${matches.length} 个候选`);
-  }
-  throw new Error(`产品线无法按城市/省份精确匹配：${candidates.join("、") || "无候选"}`);
+  return selectProductLine(payload.productLineDtos, info, cityName);
 }
 
 function phoneText(item: Json): string {
@@ -178,6 +209,7 @@ export async function ensureBasicInfoApi(
   productId: string,
   butler: ContactCardSelection,
   servicePhone: string,
+  options: BasicInfoApiOptions = {},
 ): Promise<BasicInfoApiResult> {
   const [saveModel, remote] = await Promise.all([
     getProductBaseInfoSaveModel(page, productId),
@@ -185,21 +217,18 @@ export async function ensureBasicInfoApi(
   ]);
   const sourceBase = record(remote.baseInfo);
   const sourceBooking = record(remote.bookingControl ?? remote.bookingControls);
-  const agencyId = Number(sourceBooking.localInfoID ?? (Array.isArray(sourceBooking.localInfoIds) ? sourceBooking.localInfoIds[0] : 0));
   const agencies = list(saveModel.localInfoDtos);
-  const agencyMatches = agencies.filter((agency) => Number(agency.localInfoID ?? agency.localInfoId ?? agency.id) === agencyId
-    && String(agency.active ?? agency.isActive ?? "T") !== "F");
-  if (!agencyId || agencyMatches.length !== 1) throw new Error(`VBK 地接社无法按已选 ID 精确匹配：${agencyMatches.length} 个候选`);
+  const localTravelAgency = resolveLocalTravelAgency(sourceBooking, agencies);
   const info = record(product.basicInfo);
-  const meetingCity = String(info.meetingCity ?? "").trim();
-  const destinationCity = String(info.destinationCity ?? "").trim();
-  if (!meetingCity || destinationCity !== meetingCity) throw new Error("基本信息 API 要求集合城市与目的城市使用同一已锁定城市");
+  const meetingCity = resolveBasicInfoCityAnchor(product);
   const [city, phone, contact] = await Promise.all([
     resolveCity(page, meetingCity),
     resolvePhone(page, sourceBase, servicePhone),
     resolveContact(page, butler),
   ]);
-  const productLine = await resolveProductLine(page, info, Number(city.cityId));
+  const productLine = options.skipProductLine
+    ? null
+    : await resolveProductLine(page, info, Number(city.cityId), String(city.cityName ?? meetingCity).trim());
   const advance = resolveAdvanceBooking(product);
   if (!advance) throw new Error("提前预订配置非法");
   const scenicRules = desiredScenicRules(product, city, remote);
@@ -208,7 +237,7 @@ export async function ensureBasicInfoApi(
   const duration = `${Number(info.days)}日${Number(info.nights) > 0 ? `${Number(info.nights)}晚` : ""}`;
   const mainName = `${scenicRules.map((rule) => rule.pOIScenicSpotName).join("+")}${duration}${pattern}`;
   const baseInfo = {
-    ...withoutKeys(sourceBase, ["destinationInfo", "extNumberId"]),
+    ...withoutKeys(sourceBase, ["destinationInfo", "extNumberId", "productLineID"]),
     productId: Number(productId),
     travelDays: Number(info.days),
     maxTravelDays: Number(info.days),
@@ -218,7 +247,7 @@ export async function ensureBasicInfoApi(
     subName: normalizeVbkSubtitle(info.subtitle, meetingCity),
     providerProductName: String(info.supplierProductName ?? "").trim(),
     vendorProductCode: String(info.supplierProductCode ?? "").trim(),
-    productLineID: Number(productLine.lineId),
+    ...productLineSaveField(productLine),
     operationNote: String(info.operationNotes ?? "").trim(),
     masterDepartureCityId: Number(city.cityId),
     masterDepartureCityName: city.cityName,
@@ -238,7 +267,7 @@ export async function ensureBasicInfoApi(
       minPersonQuantity: Number(sourceBooking.minPersonQuantity ?? 1),
       maxPersonQuantity: Number(sourceBooking.maxPersonQuantity ?? 999),
     },
-    localInfoIds: [agencyId],
+    localInfoIds: [localTravelAgency.id],
     childrenMinAge: Number(sourceBooking.childrenMinAge ?? 2),
     childrenMaxAge: Number(sourceBooking.childrenMaxAge ?? 12),
   };
@@ -268,17 +297,21 @@ export async function ensureBasicInfoApi(
   const savedBooking = record(readback.bookingControls ?? readback.bookingControl);
   const expected = {
     cityId: Number(city.cityId),
-    productLineId: Number(productLine.lineId),
+    productLineId: productLine ? Number(productLine.lineId) : null,
     code: baseInfo.vendorProductCode,
     phone: String(phone.extNumberId ?? phone.extNumberID ?? phone.id),
     contactCardId: Number(butler.contactCardId),
+    localTravelAgencyId: localTravelAgency.id,
   };
+  const savedLocalTravelAgencyId = Number(savedBooking.localInfoID
+    ?? (Array.isArray(savedBooking.localInfoIds) ? savedBooking.localInfoIds[0] : 0));
   if (Number(savedBase.masterDepartureCityId) !== expected.cityId
     || Number(savedBase.destinationCityID) !== expected.cityId
-    || Number(savedBase.productLineID) !== expected.productLineId
+    || (expected.productLineId !== null && Number(savedBase.productLineID) !== expected.productLineId)
     || String(savedBase.vendorProductCode ?? "") !== expected.code
     || String(savedBase.phone400 ?? "") !== expected.phone
-    || Number(savedBooking.vendorBookingSeneschalContactId) !== expected.contactCardId) {
+    || Number(savedBooking.vendorBookingSeneschalContactId) !== expected.contactCardId
+    || savedLocalTravelAgencyId !== expected.localTravelAgencyId) {
     throw new Error("VBK 基本信息保存后远端回读不一致");
   }
   const savedScenicIds = new Set(list(readback.nameAreas).map((rule) => Number(rule.pOIScenicSpotID)));
@@ -292,5 +325,7 @@ export async function ensureBasicInfoApi(
     phone400: servicePhone.trim(),
     contactCardId: expected.contactCardId,
     scenicSpotCount: scenicRules.length,
+    productLineSkipped: productLine === null,
+    localTravelAgency,
   };
 }

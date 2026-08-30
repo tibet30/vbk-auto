@@ -79,6 +79,7 @@ test("产品工作流进行中时镜像不写远端，释放后才同步", async
   let active = true;
   let getCalls = 0;
   let updates = 0;
+  let broadcasts = 0;
   const service: TibetProductService = {
     async list() { return []; },
     async upsert(product) { return product; },
@@ -88,16 +89,111 @@ test("产品工作流进行中时镜像不写远端，释放后才同步", async
   };
   const mirror = createRemoteProductMirror({
     remote: service,
-    broadcast: () => undefined,
+    broadcast: () => { broadcasts += 1; },
     isWorkflowActive: () => active,
+    // 模拟 AI / planning：即使持有工作流锁，也不能绕过远端权威快照。
+    shouldBroadcastWhileActive: () => false,
   });
   mirror.emit({ ...base, revision: undefined });
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(getCalls, 0);
   assert.equal(updates, 0);
+  assert.equal(broadcasts, 0);
   active = false;
   await waitFor(() => updates === 1);
   assert.equal(getCalls, 1);
+  assert.equal(broadcasts, 1);
+});
+
+test("自动录入工作流逐节点即时广播，并在释放后只同步最新快照", async () => {
+  let active = true;
+  let remote = structuredClone(base);
+  const updates: ProductDetail[] = [];
+  const service: TibetProductService = {
+    async list() { return []; },
+    async upsert(product) { return product; },
+    async update(product, expectedRevision) {
+      updates.push(structuredClone(product));
+      remote = { ...structuredClone(product), revision: expectedRevision + 1 };
+      return structuredClone(remote);
+    },
+    async get() { return structuredClone(remote); },
+    async delete() {},
+  };
+  const broadcasts: ProductDetail[] = [];
+  const mirror = createRemoteProductMirror({
+    remote: service,
+    broadcast: (product) => broadcasts.push(structuredClone(product)),
+    isWorkflowActive: () => active,
+    shouldBroadcastWhileActive: () => true,
+  });
+  const progress = (completed: number): ProductDetail => ({
+    ...base,
+    revision: undefined,
+    automation: {
+      id: "run-1",
+      status: "running",
+      phases: ["basic", "itinerary", "package"].map((phase, index) => ({
+        phase,
+        status: index < completed ? "completed" : index === completed ? "running" : "pending",
+      })),
+      logs: [],
+    },
+  });
+
+  mirror.emit(progress(0));
+  mirror.emit(progress(1));
+  mirror.emit(progress(2));
+  await waitFor(() => broadcasts.length === 3);
+  assert.equal(updates.length, 0);
+  assert.deepEqual(
+    broadcasts.map((product) => product.automation?.phases.map((phase) => phase.status)),
+    [
+      ["running", "pending", "pending"],
+      ["completed", "running", "pending"],
+      ["completed", "completed", "running"],
+    ],
+  );
+
+  active = false;
+  await waitFor(() => updates.length === 1 && broadcasts.length === 4);
+  assert.deepEqual(
+    updates[0].automation?.phases.map((phase) => phase.status),
+    ["completed", "completed", "running"],
+  );
+  assert.equal(broadcasts[3].revision, 2);
+});
+
+test("自动录入失败与取消终态也在工作流释放前即时广播", async () => {
+  let active = true;
+  let updates = 0;
+  const service: TibetProductService = {
+    async list() { return []; },
+    async upsert(product) { return product; },
+    async update(product, expectedRevision) { updates += 1; return { ...product, revision: expectedRevision + 1 }; },
+    async get() { return structuredClone(base); },
+    async delete() {},
+  };
+  const statuses: string[] = [];
+  const mirror = createRemoteProductMirror({
+    remote: service,
+    broadcast: (product) => statuses.push(product.automation?.status ?? "missing"),
+    isWorkflowActive: () => active,
+    shouldBroadcastWhileActive: () => true,
+  });
+
+  mirror.emit({ ...base, revision: undefined, status: "blocked", automation: {
+    id: "run-failed", status: "failed", phases: [{ phase: "basic", status: "failed" }], logs: [],
+  } });
+  mirror.emit({ ...base, revision: undefined, automation: {
+    id: "run-cancelled", status: "cancelled", phases: [{ phase: "basic", status: "running" }], logs: [],
+  } });
+  assert.deepEqual(statuses, ["failed", "cancelled"]);
+  assert.equal(updates, 0);
+
+  active = false;
+  await waitFor(() => updates === 1 && statuses.length === 3);
+  assert.equal(statuses[2], "cancelled");
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

@@ -9,6 +9,7 @@ export function useProductHandlers(state: AppState) {
     input,
     loading,
     createInput,
+    autoConfirmCreation,
     settings,
     setInput,
     setLoading,
@@ -17,6 +18,7 @@ export function useProductHandlers(state: AppState) {
     setProducts,
     setCreating,
     setCreateInput,
+    setAutoConfirmCreation,
     setSavingProduct,
     setView,
     setAccountMenuOpen,
@@ -102,15 +104,28 @@ export function useProductHandlers(state: AppState) {
     setSavingProduct(true);
     setNotice(null);
     try {
-      const created = await api()!.products.create({ ...createInput, destination: createInput.destination.trim(), userIdea: (createInput.userIdea ?? "").trim() });
+      const client = api();
+      if (!client) throw new Error("应用通道未就绪，请稍后重试。");
+      const created = await client.products.create({
+        ...createInput,
+        destination: createInput.destination.trim(),
+        userIdea: (createInput.userIdea ?? "").trim(),
+        autoConfirm: autoConfirmCreation,
+      });
       setProduct(created);
       setProducts((items) => [created, ...items]);
       setView("workspace");
+      if (autoConfirmCreation) {
+        setNotice(created.automation?.status === "succeeded"
+          ? "产品已完成自动生成并录入携程。"
+          : "自动生成已停止，未满足的确认项已保留在产品内，尚未录入携程。");
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "创建产品失败，请重试。");
     } finally {
       setSavingProduct(false);
       setCreating(false);
+      setAutoConfirmCreation(false);
     }
   };
 

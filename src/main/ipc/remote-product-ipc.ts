@@ -9,6 +9,7 @@ import {
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { assertCreatePreconditions } from "../operations/product-create-guard.js";
+import { runAutoConfirmedCreation } from "../application/auto-confirm-product.js";
 import type { MainIpcContext } from "./context.js";
 
 export function registerRemoteProductIpc(context: MainIpcContext): void {
@@ -38,8 +39,13 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
         reason: created.injectReason,
       });
     }
-    broadcastProduct(created.product);
-    return created.product;
+    if (input.autoConfirm) await runAutoConfirmedCreation(context, created.product.id);
+    const finalProduct = db.getProduct(created.product.id) ?? created.product;
+    // 一键链路会在 AI/readiness 之后追加本地状态或自动化结果；必须走镜像
+    // 提交给 Tibet，避免下次 products:get 用远端旧快照覆盖这次的真实结果。
+    if (input.autoConfirm) context.emitProduct(finalProduct);
+    else broadcastProduct(finalProduct);
+    return finalProduct;
   });
   ipcMain.handle("products:get", (_event, id: string) => getProductForRead(
     db,

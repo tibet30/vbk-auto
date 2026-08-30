@@ -1,8 +1,6 @@
 /**
  * DraftAutomation：自动化阶段对外暴露的统一门面类。
  *   - start / stop / retryPhase / retryOnePhase：业务侧 API；
- *   - debugRunStep / debugSnapshot / debugHitBreakpoints / debugResume / debugListBreakpoints：
- *     调试入口；
  *   - running / cancellationRequested：互斥与取消状态字段；
  *   - runLocked / runOnePhaseLocked：私有互斥包装，避免同一产品并发跑两轮。
  *
@@ -16,7 +14,6 @@ import { productNotFound } from "../../infrastructure/db-errors.js";
 import { VbkDatabase } from "../../infrastructure/database/database.js";
 import { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ProductDetail } from "../../../shared/contracts.js";
-import { debugHitBreakpoints, debugListBreakpoints, debugResume, debugRunStep, debugSnapshot } from "./automation.main.class.debug.js";
 import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
@@ -40,6 +37,7 @@ import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
  */
 export class DraftAutomation {
   private running = new Set<string>();
+  private runVbkPageExclusive = async <T>(task: () => Promise<T>): Promise<T> => task();
   // 用户主动中止的 localProductId：runner 在阶段之间和 attempt 之间检查这个集合。
   // 用 Set 而不是 boolean：避免上一次取消信号污染下一轮 run。
   private cancellationRequested = new Set<string>();
@@ -52,6 +50,10 @@ export class DraftAutomation {
     private disambiguator?: (req: { kind: "province" | "city" | "spot" | "station"; stationSubtype?: "airport" | "train"; desired: string; candidates: Array<{ id?: string; text: string }>; product: Record<string, unknown> }) => Promise<{ pickedText: string | null; reasoning: string }>,
     private presentationCopyRewriter?: (req: { message: string; product: Record<string, unknown> }) => Promise<AiResponse>,
   ) {}
+
+  setRunVbkPageExclusive(run: <T>(task: () => Promise<T>) => Promise<T>) {
+    this.runVbkPageExclusive = run;
+  }
 
 /**
  * 启动一次完整跑（basic → preflight）；
@@ -99,44 +101,6 @@ async start(localProductId: string) {
  */
 isCancelRequested(localProductId: string): boolean {
     return this.cancellationRequested.has(localProductId);
-  }
-
-/**
- * 调试入口：按名字调一个具名 ctrip 步骤，返回 JSON 可序列化结果。
- */
-async debugRunStep(stepName: string, argsJson: string): Promise<unknown> {
-    return debugRunStep({
-      db: this.db,
-      browser: this.browser,
-      resolveButlerSelection: (accountName) => resolveButlerSelection(this.db, accountName),
-      resolveServicePhone: (accountName) => resolveServicePhone(this.db, accountName),
-      ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
-      presentationCopyRewriter: this.presentationCopyRewriter,
-      disambiguator: this.disambiguator,
-    }, stepName, argsJson);
-  }
-
-  async debugSnapshot(label?: string): Promise<unknown> {
-    return debugSnapshot({
-      db: this.db,
-      browser: this.browser,
-      resolveButlerSelection: (accountName) => resolveButlerSelection(this.db, accountName),
-      resolveServicePhone: (accountName) => resolveServicePhone(this.db, accountName),
-      ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
-      disambiguator: this.disambiguator,
-    }, label);
-  }
-
-  async debugHitBreakpoints(): Promise<string[]> {
-    return debugHitBreakpoints();
-  }
-
-  async debugResume(command: "continue" | "step" | "stop"): Promise<{ stopped: boolean }> {
-    return debugResume(command);
-  }
-
-  async debugListBreakpoints(): Promise<string[]> {
-    return debugListBreakpoints();
   }
 
   async retryPhase(localProductId: string, phase: string) {
@@ -209,6 +173,7 @@ async retryOnePhase(localProductId: string, phase: string) {
       markCancelled: (_localProductId, run, persist) => markCancelled(run, persist),
       cancellationRequested: this.cancellationRequested,
       ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
+      runVbkPageExclusive: this.runVbkPageExclusive,
     };
   }
 

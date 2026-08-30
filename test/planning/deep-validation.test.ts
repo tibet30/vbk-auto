@@ -17,7 +17,7 @@ import type {
 import type {
   Planner, PlannerRequest, PlanningStageOutput, PlanningGenerationState, PlanningModule, ResearchTaskProposal,
 } from "../../src/shared/contracts-planning.js";
-import { AI_WRITABLE_PATHS } from "../../src/main/planning/schemas.js";
+import { AI_WRITABLE_PATHS, validateModuleValue } from "../../src/main/planning/schemas.js";
 
 class AllStagesOkPlanner implements Planner {
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
@@ -169,6 +169,21 @@ test("presentation 必须是 3 条互不重复 + category 在白名单的 recomm
     acceptedModules: ["presentation"],
   });
   assert.ok(out.invalid.some((m) => m.module === "presentation"));
+});
+
+test("生成阶段拒绝超过 VBK 安全字节上限的推荐理由", () => {
+  const result = validateModuleValue("presentation", {
+    recommendationCategory: "优选行程",
+    recommendation: "太原文化之旅",
+    recommendations: [
+      { category: "优选行程", text: "太原古建与博物馆深度串联，兼顾晋祠古韵、城市人文与舒适节奏。" },
+      { category: "精选酒店", text: "城区住宿安排" },
+      { category: "缤纷景点", text: "核心景点串联" },
+    ],
+    features: "<p>特色</p>",
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /不得超过 80 UTF-8 字节/);
 });
 
 test("commercial.release.submitReview=true 不再被 deep validation 拒绝（历史 / 人工标记保留）", () => {

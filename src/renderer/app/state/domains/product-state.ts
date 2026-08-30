@@ -39,6 +39,7 @@ export function useProductState() {
   const [stage, setStage] = useState<"review" | "vbk">("review");
   const [input, setInput] = useState("");
   const [createInput, setCreateInput] = useState<CreateProductInput>(initialInput);
+  const [autoConfirmCreation, setAutoConfirmCreation] = useState(false);
   const [creating, setCreating] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -67,6 +68,7 @@ export function useProductState() {
     stage, setStage,
     input, setInput,
     createInput, setCreateInput,
+    autoConfirmCreation, setAutoConfirmCreation,
     creating, setCreating,
     savingProduct, setSavingProduct,
     loading, setLoading,

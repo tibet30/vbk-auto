@@ -12,6 +12,7 @@ import type { PlanningModule, ModuleOutcome, PlanningSkeleton } from "../../shar
 import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_GENERATION_MAX_BYTES } from "./schemas.js";
 
 export interface ValidationResult {
   missing: ModuleOutcome[];
@@ -184,7 +185,7 @@ export function deepValidateModules(args: {
       else {
         const seen = new Set<string>();
         let valid = true;
-        for (const entry of recommendations) {
+        for (const [recommendationIndex, entry] of recommendations.entries()) {
           const record = asRecord(entry);
           const category = textValue(record?.category);
           if (!category) { reasons.push("recommendation.category 缺失"); valid = false; continue; }
@@ -193,7 +194,12 @@ export function deepValidateModules(args: {
           }
           if (seen.has(category)) { reasons.push(`recommendation.category=${category} 重复`); valid = false; }
           seen.add(category);
-          if (textValue(record?.text).length === 0) { reasons.push("recommendation.text 缺失"); valid = false; }
+          const text = textValue(record?.text);
+          if (text.length === 0) { reasons.push("recommendation.text 缺失"); valid = false; }
+          else if (new TextEncoder().encode(text).length > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+            reasons.push(`recommendation[${recommendationIndex + 1}].text 超过 ${VBK_RECOMMENDATION_GENERATION_MAX_BYTES} UTF-8 字节`);
+            valid = false;
+          }
         }
         if (!valid) { /* reasons already populated */ }
       }

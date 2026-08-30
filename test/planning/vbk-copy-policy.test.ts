@@ -1,12 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sanitiseModuleValue } from "../../src/main/planning/stage-runner.js";
+import { executeStageOutput, sanitiseModuleValue } from "../../src/main/planning/stage-runner.js";
 import {
+  VBK_COPY_BAD_CASES,
   buildVbkCopyPolicyPrompt,
   findAllVbkCopyBadCases,
   findVbkCopyBadCase,
+  repairVbkCopyPolicyValue,
 } from "../../src/main/planning/vbk-copy-policy.js";
 import { systemPrompt as legacySystemPrompt } from "../../src/main/minimax/minimax-constants.js";
+import { composePlanningSystemPrompt } from "../../src/main/planning/adapters/planning-prompt.js";
 
 test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   const prompt = buildVbkCopyPolicyPrompt();
@@ -20,6 +23,14 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   assert.match(prompt, /官方 POI 身份字段 poiName 和 requestedName/);
   assert.match(legacySystemPrompt, /VBK 文案黑名单/);
   assert.match(legacySystemPrompt, /首次/);
+
+  const planningPrompt = composePlanningSystemPrompt("presentation");
+  assert.match(planningPrompt, /VBK 文案黑名单/);
+  assert.match(planningPrompt, /首次/);
+  assert.match(planningPrompt, /初到/);
+  for (const badCase of VBK_COPY_BAD_CASES) {
+    assert.ok(planningPrompt.includes(badCase.term), `真实规划提示漏掉黑名单词：${badCase.term}`);
+  }
 
   const hit = findVbkCopyBadCase({ operationNotes: "本产品首发日期待定" });
   assert.equal(hit?.path, "value.operationNotes");
@@ -94,4 +105,76 @@ test("模块门禁一次返回同一模块内全部文案命中", () => {
     assert.match(result.reason, /value\.recommendation.*最（极限表达）/);
     assert.match(result.reason, /改写为/);
   }
+});
+
+test("规划阶段用已验证替代词修复首次文案后才写入", async () => {
+  const writes: unknown[] = [];
+  const presentation = {
+    recommendationCategory: "优选行程",
+    recommendation: "首次到访西藏，行程安排清晰",
+    recommendations: [
+      { category: "优选行程", text: "高原风光与城市文化结合" },
+      { category: "精选酒店", text: "住宿安排与每日行程衔接" },
+      { category: "缤纷景点", text: "预留舒缓节奏适应高原环境" },
+    ],
+    features: "<p><strong>行程节奏：</strong>预留适应时间。</p>",
+  };
+  const result = await executeStageOutput({
+    stage: "presentation",
+    localProductId: "copy-policy-fallback",
+    runtime: {
+      async writeModule(_id: string, _module: string, _path: string, value: unknown) {
+        writes.push(value);
+        return { ok: true };
+      },
+    } as any,
+    output: { reply: "产品图文", modules: [{ module: "presentation", status: "accepted", value: presentation }] },
+  });
+
+  assert.equal(result.rejected.length, 0);
+  assert.equal(result.accepted.length, 1);
+  assert.deepEqual(writes, [{ ...presentation, recommendation: "初到西藏，行程安排清晰" }]);
+  assert.equal(sanitiseModuleValue("presentation", writes[0]).ok, true, "写入前后的门禁仍应通过");
+});
+
+test("确定性修复保留官方 POI 身份字段，并让未消除的命中继续拒绝", () => {
+  const value = {
+    itinerary: [{ description: "首次到访", spots: [{ poiName: "首次公园", requestedName: "首次公园" }] }],
+  };
+  const repaired = repairVbkCopyPolicyValue(value);
+  assert.deepEqual(repaired, {
+    itinerary: [{ description: "初到", spots: [{ poiName: "首次公园", requestedName: "首次公园" }] }],
+  });
+  assert.equal(findVbkCopyBadCase(repaired)?.path, "value.itinerary[0].spots[0].poiName");
+});
+
+test("文案修复后仍有 schema 问题时不得写入", async () => {
+  let writes = 0;
+  const result = await executeStageOutput({
+    stage: "presentation",
+    localProductId: "copy-policy-structural-reject",
+    runtime: {
+      async writeModule() {
+        writes += 1;
+        return { ok: true };
+      },
+    } as any,
+    output: {
+      reply: "产品图文",
+      modules: [{
+        module: "presentation",
+        status: "accepted",
+        value: {
+          recommendationCategory: "优选行程",
+          recommendation: "首次到访西藏",
+          recommendations: [],
+          features: "<p>合规</p>",
+        },
+      }],
+    },
+  });
+
+  assert.equal(writes, 0);
+  assert.equal(result.accepted.length, 0);
+  assert.match(result.rejected[0]?.reason ?? "", /recommendations.*>=3 items/);
 });

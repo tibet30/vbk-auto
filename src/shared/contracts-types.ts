@@ -25,6 +25,8 @@ export interface CreateProductInput {
   productForm: import("./product-form.js").ProductForm;
   /** 创建产品时用户提供的原始想法，供后续 AI 规划参考。 */
   userIdea?: string;
+  /** 勾选后由主进程完成生成、核验和 VBK 自动录入，不依赖 renderer 持续在线。 */
+  autoConfirm?: boolean;
 }
 
 export interface ProductReadiness {

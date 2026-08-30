@@ -7,6 +7,7 @@ import {
   formatSelectedClauseItems,
   setClauseComponentValue,
 } from "../../src/main/automation/ctrip/clauses-api.js";
+import { buildAdultTicketInclusionText } from "../../src/main/automation/ctrip/terms.js";
 
 const clauseTypes = [{
   clauseTypeId: 4,
@@ -128,17 +129,69 @@ test("目标组件不存在时失败，避免把空必填项误判成已保存",
   );
 });
 
+test("成人首道门票文本仅汇总明确收费的行程景点，并按景点名去重", () => {
+  assert.equal(buildAdultTicketInclusionText([{
+    spots: [
+      { name: "晋祠", ticketType: { key: 1 } },
+      { name: "山西博物院", ticketType: { key: 2 } },
+      { name: "晋祠", ticketType: { key: 1 } },
+      { name: "未知票型景点", ticketType: null },
+    ],
+  }, {
+    spots: [{ poiName: "太原古县城", ticketType: { key: 1 } }],
+  }]), "晋祠+太原古县城");
+});
+
+test("成人和儿童门票条款分别写入对应备注字段，不改动其它组件", () => {
+  const items = [{
+    clauseItemId: 13,
+    secondClassTypeId: 8,
+    elementDtos: [
+      { componentCode: "landticketremarks", value: "" },
+      { componentCode: "adultTicketCategory", value: "首道大门票" },
+    ],
+  }];
+  const withAdultRemarks = setClauseComponentValue(items, 13, "landticketremarks", "晋祠");
+  const withChildRemarks = setClauseComponentValue([
+    ...withAdultRemarks,
+    {
+      clauseItemId: 10087,
+      secondClassTypeId: 8,
+      elementDtos: [{ componentCode: "landticket2", value: "" }],
+    },
+  ], 10087, "landticket2", "晋祠");
+  assert.deepEqual(withChildRemarks, [{
+    clauseItemId: 13,
+    secondClassTypeId: 8,
+    elementDtos: [
+      { componentCode: "landticketremarks", value: "晋祠" },
+      { componentCode: "adultTicketCategory", value: "首道大门票" },
+    ],
+  }, {
+    clauseItemId: 10087,
+    secondClassTypeId: 8,
+    elementDtos: [{ componentCode: "landticket2", value: "晋祠" }],
+  }]);
+  assert.throws(
+    () => setClauseComponentValue(items, 13, "landticketremarks-missing", "晋祠"),
+    /缺少组件 landticketremarks-missing/,
+  );
+});
+
 test("默认条款集合使用已保存的平台 ID，覆盖门票成人/儿童及四个页签", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(
     new URL("../../src/main/automation/ctrip/clauses-api.ts", import.meta.url),
     "utf8",
   );
-  assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[1]], [38536, 10095, 7, 10091, 13, 10087, 3014]);
-  assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[2]], [1082, 1079]);
-  assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[3]], [3031, 46]);
+  assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[1]], [38536, 134, 10095, 7, 10091, 13, 10087, 3014]);
+  assert.equal(REQUIRED_CLAUSE_IDS.localExclusiveVehicle, 134);
+  assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[2]], [1082, 1079, 1120]);
+  assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[3]], [3031, 46, 1095]);
   assert.deepEqual([...DEFAULT_SELECTED_CLAUSE_IDS[4]], [3011, 98, 383, 478, 37682, 642, 32716, 563]);
   assert.equal(REQUIRED_CLAUSE_IDS.outboundTransportExcluded, 1082);
+  assert.equal(REQUIRED_CLAUSE_IDS.excessBaggageAndPersonalExpenses, 1120);
+  assert.equal(REQUIRED_CLAUSE_IDS.pregnancyBookingRestriction, 1095);
   assert.equal(REQUIRED_CLAUSE_IDS.flightForceMajeureNotice, 98);
   assert.equal(REQUIRED_CLAUSE_IDS.complimentaryActivityNotice, 383);
   assert.match(source, /requestBaseData:\s*\{\s*locale:\s*["']zh-CN["']/);

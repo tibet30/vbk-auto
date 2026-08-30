@@ -67,7 +67,10 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
               type: "object",
               additionalProperties: false,
               required: ["category", "text"],
-              properties: { category: { type: "string", enum: [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] }, text: { type: "string", minLength: 1 } },
+              properties: {
+                category: { type: "string", enum: [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] },
+                text: { type: "string", minLength: 1, description: "首尾去空格和 VBK 标点归一后不得超过 80 UTF-8 字节（平台硬上限 84 字节）；建议不超过 26 个汉字。" },
+              },
             },
           },
           features: { type: "string", minLength: 1, description: "必须是 JSON 字符串，禁止对象、数组、AST 或 null。字符串内容为 VBK 产品特色富文本 HTML 片段：3～5 个亮点；仅允许 p/strong/em/ul/ol/li/br 标签且不得含任何属性、Markdown、链接或图片。" },

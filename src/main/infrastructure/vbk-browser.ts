@@ -285,6 +285,10 @@ export class VbkBrowser {
     this.view?.setVisible(visible);
   }
 
+  isVisible(): boolean {
+    return this.visible;
+  }
+
   // 暴露当前嵌入式浏览器 URL：URL 栏需要实时反映页面跳转，否者用户点
   // 「进入」之后看到地址还是 /产品库，会误以为按钮没生效（实际上 VBK 内部
   // 可能又把页面重定向到 /产品库，地址栏同步过去才能区分「没跳转」和「跳转后被重定向」）。

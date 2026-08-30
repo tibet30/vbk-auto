@@ -49,6 +49,7 @@ export function useWorkflowHandlers(state: AppState) {
     setView,
     setCreating,
     setCreateInput,
+    setAutoConfirmCreation,
     setCheckingVbkLogin,
     refreshVbkLoginAccounts,
     setVbkLoginAccounts,
@@ -340,6 +341,7 @@ export function useWorkflowHandlers(state: AppState) {
     setView("products");
     setCreating(true);
     setCreateInput(initialInput);
+    setAutoConfirmCreation(false);
     setAccountMenuOpen(false);
   };
 

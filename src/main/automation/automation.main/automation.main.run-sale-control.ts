@@ -39,9 +39,7 @@ export async function runSaleControlPhase(
   ctx.emit(localProductId);
 
   try {
-    ctx.browser.setVisible(true);
-    ctx.ensureBrowserHasBounds();
-    const page = await ctx.browser.page({ requireInteractive: true });
+    const page = await ctx.browser.page();
     let shellAttempted = false;
     const outcome = await runPhaseWithRecovery({
       run,
@@ -50,6 +48,8 @@ export async function runSaleControlPhase(
       productIdExists: false,
       basicInfoSaved: product.basicInfoSaved ?? false,
       execute: async () => {
+        return ctx.runVbkPageExclusive(async () => {
+        if (ctx.browser.isVisible()) ctx.ensureBrowserHasBounds();
         if (shellAttempted) {
           throw new Error("销售控制本轮已尝试创建产品壳但未取得 productId，请先在 VBK 确认结果后再继续。");
         }
@@ -65,6 +65,7 @@ export async function runSaleControlPhase(
           throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
         }
         ctx.db.setProductLifecycle(localProductId, { productId: String(productId) });
+        });
       },
       advisor: ctx.advisor,
       applyAction: async (action) => {

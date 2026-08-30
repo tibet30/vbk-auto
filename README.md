@@ -38,23 +38,21 @@ npm test
 npm run build
 ```
 
-### 命令行调试（行程描述）
+## 真实 VBK E2E
+
+默认测试不会写入 VBK。需要验证“一款产品的创建和完整录入”时，显式提供已审核的产品 JSON、联系人卡和 400 电话，再运行：
 
 ```bash
-npm run pi:itinerary -- <localProductId> [cdpPort]
+VBK_LIVE_E2E=1 \
+VBK_LIVE_E2E_PRODUCT_FILE=/absolute/path/product.json \
+VBK_LIVE_E2E_CONTACT_CARD_ID=123 \
+VBK_LIVE_E2E_CONTACT_NAME='联系人姓名' \
+VBK_LIVE_E2E_PROVIDER_ID=456 \
+VBK_LIVE_E2E_SERVICE_PHONE=4000000000 \
+npm run test:e2e
 ```
 
-示例：
-
-```bash
-VBK_CDP_PORT=9496 npm run pi:itinerary -- ff43aae4-3cbf-44c9-8712-c31f219eac46
-npm run pi:itinerary -- ff43aae4-3cbf-44c9-8712-c31f219eac46 9496
-```
-
-说明：
-- `localProductId` 为本地产品 ID（`products` 表中的 `id`）。
-- `cdpPort` 默认使用 `VBK_CDP_PORT` 或 `9539`。
-- 命令会调用 `node scripts/debug-step.mjs fillItineraryDraft`，用于单独复现行程描述阶段。
+该测试只创建草稿、通过 API 录入并执行远端 preflight 回读；不会提审或发布。平台没有已验证的自动回收契约，因此测试草稿会保留，命令输出的产品 ID 应由运营在 VBK 后台人工回收。
 
 ## 源码结构
 

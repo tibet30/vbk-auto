@@ -101,9 +101,8 @@ test("阶段重试只重新调用 API，不再打开产品编辑页", async () =
   assert.doesNotMatch(runSource, /fillAndSaveBasicInfo\(/);
 });
 
-test("retryFrom>0 保留恢复日志且不做 DOM 导航", async () => {
-  // 锁死行为：retryFrom>0 分支只做 openProductEditor（带 stayOnCurrentTab）
-  // + 精确日志，不允许在 else 块里直接调用 fillAndSaveBasicInfo 或
+test("retryFrom>0 保留恢复日志并由统一执行链导航", async () => {
+  // retryFrom>0 分支只保留精确日志，不允许在 else 块里直接调用 fillAndSaveBasicInfo 或
   // setBasicInfoSaved，也不允许写 basicInfoSaved = true；真正的 basic
   // 填写统一交给下方 runPhaseWithRecovery(makeCtx("basic", basicExecute, 0))
   // 这一处。
@@ -111,7 +110,7 @@ test("retryFrom>0 保留恢复日志且不做 DOM 导航", async () => {
   const start = source.indexOf("export async function runAutomation");
   const runSource = source.slice(start, source.indexOf("\n// FILE:", start));
 
-  assert.match(runSource, /已从 \$\{retryFrom\} 阶段继续录入（当前页面）/);
+  assert.match(runSource, /已从 \$\{retryFrom\} 阶段继续录入（将进入对应模块页面）/);
   assert.doesNotMatch(runSource, /openProductEditor\(/);
   assert.doesNotMatch(runSource, /fillAndSaveBasicInfo\(/);
 
@@ -142,16 +141,17 @@ test("basicExecute 开头清空 scenicSpotLogs，防止 runner 重试重复记�
   const startMatch = source.match(/const basicExecute = async \(\) => \{/);
   assert.ok(startMatch, "找不到 basicExecute 定义");
   const bodyStart = startMatch.index! + startMatch[0].length;
-  // 函数体内紧跟 phaseRecord 之后必须先 scenicSpotLogs.length = 0，再做 shouldRefillBasicInfo 判断。
-  const phaseRecordIdx = source.indexOf("phaseRecord(\"basic\")", bodyStart);
-  assert.ok(phaseRecordIdx > 0, "basicExecute 缺少 phaseRecord(\"basic\")");
-  const refillIdx = source.indexOf("shouldRefillBasicInfo", phaseRecordIdx);
+  // 阶段进度和页面导航统一由 executePhase 管理；其 API body 必须在此之后
+  // 清空 scenicSpotLogs，再做 shouldRefillBasicInfo 判断。
+  const executePhaseIdx = source.indexOf('executePhase("basic"', bodyStart);
+  assert.ok(executePhaseIdx > 0, "basicExecute 缺少 executePhase(\"basic\")");
+  const refillIdx = source.indexOf("shouldRefillBasicInfo", executePhaseIdx);
   assert.ok(refillIdx > 0, "basicExecute 缺少 shouldRefillBasicInfo 调用");
-  const region = source.slice(phaseRecordIdx, refillIdx);
+  const region = source.slice(executePhaseIdx, refillIdx);
   assert.match(
     region,
     /scenicSpotLogs\.length\s*=\s*0/,
-    "basicExecute 必须在 phaseRecord 之后、shouldRefillBasicInfo 之前清空 scenicSpotLogs",
+    "basicExecute 必须在 executePhase 之后、shouldRefillBasicInfo 之前清空 scenicSpotLogs",
   );
 });
 
@@ -161,7 +161,8 @@ test("全量 runner 在 basic 已保存且产品完整时跳过重复填充", ()
   const body = source.slice(start, source.indexOf("const handlers:", start));
   assert.match(body, /shouldRefill\.reason === "complete"/);
   assert.match(body, /basic 阶段已保存且产品数据完整，跳过重复填充/);
-  assert.match(body, /run\.phases\[0\]\.status = "completed";\s*return;/);
+  assert.match(body, /executePhase\("basic"/);
+  assert.match(source, /await refreshPhasePageAfterApi\(/);
 });
 
 test("basicInfoCompletenessIssues 报告省份缺失", () => {

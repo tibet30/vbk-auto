@@ -15,7 +15,7 @@ import {
   searchCtripLibraryCoverPlaces,
   uploadManualCover,
 } from "../operations/cover-ipc.js";
-import { assertDebugEnabled, assertTrustedSender } from "../infrastructure/ipc-sender.js";
+import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import type { MainIpcContext } from "./context.js";
 
@@ -107,7 +107,7 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   });
   ipcMain.handle("automation:start", (_event, localProductId: string) =>
     context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.productWorkflows.runVbkPageExclusive(() => context.automation.start(localProductId))));
+      context.automation.start(localProductId)));
   // 「停止」按钮的入口：立刻把 run 标记为 cancelled，runner 在下一个
   // checkpoint 跳出。不等待 Playwright 当前调用结束 ——
   // 跨进程 await click 安全中断点未知，强制 abort 可能让浏览器页面留下
@@ -120,8 +120,8 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   // retryPhase(preflight) 拒绝；本恢复按业务完成切回 succeeded + draft_saved。
   ipcMain.handle("automation:retry", (_event, localProductId: string) =>
     context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.productWorkflows.runVbkPageExclusive(async () => {
-    if (await context.automation.recoverLegacyScreenshotFalseFailure(localProductId)) return;
+      (async () => {
+    if (await context.productWorkflows.runVbkPageExclusive(() => context.automation.recoverLegacyScreenshotFalseFailure(localProductId))) return;
     const product = db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
     const failedPhase = product.automation?.recovery
@@ -129,44 +129,16 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
       : product.automation?.phases.find((phase) => phase.status === "failed")?.phase;
     if (failedPhase) return context.automation.retryPhase(localProductId, failedPhase);
     return context.automation.start(localProductId);
-  })));
+  })()));
   ipcMain.handle("automation:retryPhase", (_event, localProductId: string, phase: string) =>
     context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.productWorkflows.runVbkPageExclusive(() => context.automation.retryPhase(localProductId, phase))));
+      context.automation.retryPhase(localProductId, phase)));
   // 「重新执行」按钮的入口：单阶段重跑，不影响其他阶段。与 retryPhase
   // （失败后多阶段 forward）的区别：retryPhase 会重置后续阶段并从头跑
   // 到尾；retryOnePhase 只跑一个阶段，用于运营 review 当前页面填充效果。
   ipcMain.handle("automation:retryOnePhase", (_event, localProductId: string, phase: string) =>
     context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.productWorkflows.runVbkPageExclusive(() => context.automation.retryOnePhase(localProductId, phase))));
-  // 调试入口：仅 dev + VBK_DEBUG=1 时可访问。
-  // 任何 IPC 调用都必须先 assertTrustedSender / assertDebugEnabled，避免
-  // 外部 frame 触发逐步骤执行（极容易泄漏当前会话 cookies / 渲染文件）。
-  ipcMain.handle("automation:debug:runStep", (event, stepName: string, argsJson: string) => {
-    assertTrustedSender(event, "automation:debug:runStep");
-    assertDebugEnabled("automation:debug:runStep");
-    return context.automation.debugRunStep(stepName, argsJson);
-  });
-  ipcMain.handle("automation:debug:snapshot", (event, label?: string) => {
-    assertTrustedSender(event, "automation:debug:snapshot");
-    assertDebugEnabled("automation:debug:snapshot");
-    return context.automation.debugSnapshot(label);
-  });
-  ipcMain.handle("automation:debug:hitBreakpoints", (event) => {
-    assertTrustedSender(event, "automation:debug:hitBreakpoints");
-    assertDebugEnabled("automation:debug:hitBreakpoints");
-    return context.automation.debugHitBreakpoints();
-  });
-  ipcMain.handle("automation:debug:resume", (event, command: "continue" | "step" | "stop") => {
-    assertTrustedSender(event, "automation:debug:resume");
-    assertDebugEnabled("automation:debug:resume");
-    return context.automation.debugResume(command);
-  });
-  ipcMain.handle("automation:debug:listBreakpoints", (event) => {
-    assertTrustedSender(event, "automation:debug:listBreakpoints");
-    assertDebugEnabled("automation:debug:listBreakpoints");
-    return context.automation.debugListBreakpoints();
-  });
+      context.automation.retryOnePhase(localProductId, phase)));
   ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => {
     const userId = context.getExtensionUserId();
     const raw = String(accountName ?? "").trim();

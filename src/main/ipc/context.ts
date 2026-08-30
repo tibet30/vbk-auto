@@ -11,6 +11,7 @@ import type {
   AiProvider,
   Planner,
   PlanningGenerationState,
+  PlanningRunResult,
   ProductDetail,
   ProductReadiness,
   Settings,
@@ -48,4 +49,6 @@ export interface MainIpcContext {
   detectProviderIdInMain: () => Promise<number | null>;
   emitProductIfKnown: (accountName: string, info: unknown) => void;
   logPoiManualIpc: (event: string, context: Record<string, unknown>) => void;
+  /** 新产品三阶段规划；由 planning IPC 注册后注入，供一键创建编排复用。 */
+  startPlanning?: (localProductId: string) => Promise<PlanningRunResult>;
 }

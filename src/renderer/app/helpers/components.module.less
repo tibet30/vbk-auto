@@ -51,6 +51,35 @@
   font-weight: 400;
 }
 
+.autoConfirmOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: var(--pad-sm);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.autoConfirmOption input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+}
+
+.autoConfirmOption span {
+  display: grid;
+  gap: 2px;
+}
+
+.autoConfirmOption strong { font-size: var(--fs-sm); }
+
+.autoConfirmOption small {
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
 .formActions {
   display: flex;
   justify-content: flex-end;

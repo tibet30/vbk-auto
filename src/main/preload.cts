@@ -70,13 +70,6 @@ const api: VbkApi = {
     retryOnePhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryOnePhase", localProductId, phase),
     stop: (localProductId) => ipcRenderer.invoke("automation:stop", localProductId),
   },
-  debug: {
-    runStep: (stepName: string, argsJson: string) => ipcRenderer.invoke("automation:debug:runStep", stepName, argsJson),
-    snapshot: (label?: string) => ipcRenderer.invoke("automation:debug:snapshot", label),
-    hitBreakpoints: () => ipcRenderer.invoke("automation:debug:hitBreakpoints"),
-    resume: (command: "continue" | "step" | "stop") => ipcRenderer.invoke("automation:debug:resume", command),
-    listBreakpoints: () => ipcRenderer.invoke("automation:debug:listBreakpoints"),
-  },
   accounts: {
     getFixedInfo: (accountName) => ipcRenderer.invoke("accounts:getFixedInfo", accountName),
     saveFixedInfo: (accountName, values) => ipcRenderer.invoke("accounts:saveFixedInfo", accountName, values),

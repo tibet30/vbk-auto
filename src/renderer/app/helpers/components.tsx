@@ -6,7 +6,7 @@ import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
 
-export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: { input: CreateProductInput; setInput: (input: CreateProductInput) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
+export function ProductBriefForm({ input, setInput, autoConfirm, setAutoConfirm, submitting, onCancel, onSubmit }: { input: CreateProductInput; setInput: (input: CreateProductInput) => void; autoConfirm: boolean; setAutoConfirm: (value: boolean) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
   return <div className={`${shared.card} ${styles.briefForm}`}>
     <div><h3>新建产品</h3><p className={shared.viewSub}>填写基础信息和你的初步想法，进入产品后 AI 会据此开始规划。</p></div>
     <div className={styles.briefGrid}>
@@ -27,12 +27,24 @@ export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubm
       />
       <span id="product-idea-hint" className={styles.ideaHint}>{(input.userIdea ?? "").length} / 1000 字，AI 会把它作为需求偏好参考</span>
     </label>
+    <label className={styles.autoConfirmOption}>
+      <input
+        type="checkbox"
+        checked={autoConfirm}
+        disabled={submitting}
+        onChange={(event) => setAutoConfirm(event.target.checked)}
+      />
+      <span>
+        <strong>一键生成并录入携程</strong>
+        <small>跳过人工确认；仅在方案通过自动核验后才会写入 VBK。</small>
+      </span>
+    </label>
     <div className={styles.formActions}>
       <button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button>
       <button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>
         {submitting ? (
           <>
-            <LoaderCircle size={15} className={styles.spin} />创建中
+            <LoaderCircle size={15} className={styles.spin} />{autoConfirm ? "正在一键生成并录入…" : "创建中"}
           </>
         ) : (
           <>

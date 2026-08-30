@@ -1,6 +1,6 @@
 import { test, assert, makeRun, makeSpyAdvisor, now, runPhaseWithRecovery } from "./automation-recovery.shared.js";
 import { NonAdvisableAutomationError } from "../../src/main/automation/automation.main/automation.main.errors.js";
-import { refreshPhasePageBeforeRetry } from "../../src/main/automation/automation.main/automation.main.retry-navigation.js";
+import { recordPhaseRetry } from "../../src/main/automation/automation.main/automation.main.retry-navigation.js";
 test("首次成功不调用 advisor", async () => {
   const advisor = makeSpyAdvisor();
   const calls: string[] = [];
@@ -160,21 +160,16 @@ test("retry 前先刷新当前 phase 页面，再重新执行 handler", async ()
   ]);
 });
 
-test("API-only presentation 重试不再导航产品图文页", async () => {
-  const gotos: string[] = [];
-  const page = {
-    goto: async (url: string) => { gotos.push(url); },
-    waitForLoadState: async () => undefined,
-  };
-  await refreshPhasePageBeforeRetry({
-    page,
+test("API-only presentation 重试仅记录动作，页面进入由下一次执行负责", () => {
+  const logs: string[] = [];
+  recordPhaseRetry({
     productId: "77025968",
     phase: "presentation",
     action: "retry_same_phase",
     attempt: 1,
-    log: () => undefined,
+    log: (message) => logs.push(message),
   });
-  assert.equal(gotos.length, 0);
+  assert.match(logs[0], /下一次执行将在录入前进入模块页面/);
 });
 
 test("reload_and_retry_phase：attempt=1 reload + handler 再执行成功", async () => {

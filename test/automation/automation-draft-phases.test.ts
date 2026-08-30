@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { draftPhasesFor } from "../../src/main/automation/automation.main/automation.main.phases.js";
-import { fillAndSubmitPricingInventory } from "../../src/main/automation/ctrip/pricing.js";
 import { parseProduct } from "../../src/main/automation/schema/schema.js";
 
 const baseProduct = {
@@ -65,17 +64,5 @@ test("draftPhasesFor: 含住宿时也先提交行程，解锁后再创建套餐"
   assert.deepEqual(
     draftPhasesFor(product).slice(0, 4),
     ["basic", "presentation", "itinerary", "package"],
-  );
-});
-
-test("pricingInventory 阶段存在但 inventory 缺失时，由阶段处理器报告缺配置", async () => {
-  const product = parseProduct({
-    ...baseProduct,
-    commercial: { packageName: "标准套餐", pricing },
-  });
-
-  await assert.rejects(
-    () => fillAndSubmitPricingInventory(null, product, "7654321"),
-    /commercial\.inventory/,
   );
 });

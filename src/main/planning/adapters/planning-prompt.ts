@@ -10,6 +10,7 @@ import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
 import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
 import { resolveTravelScope } from "../runtime.js";
+import { buildVbkCopyPolicyPrompt } from "../vbk-copy-policy.js";
 
 const RECOMMENDATION_CATEGORIES = VBK_RECOMMENDATION_CATEGORIES.join("、");
 const SELECTABLE_RECOMMENDATION_CATEGORIES = VBK_SELECTABLE_RECOMMENDATION_CATEGORIES.join("、");
@@ -87,7 +88,7 @@ export function composePlanningSystemPrompt(stage: PlanningStage): string {
   const stageRules = stage === "validation"
     ? "本阶段不生成新模块；只按工具 schema 返回结果，不得改写产品草稿。"
     : STAGE_RULES[stage];
-  return `你是「三人同游」旅游产品运营助手。当前阶段：${stage}。\n\n唯一任务：通过 submit_${stage}_module 工具提交结构化参数。工具 schema 是输出字段的唯一标准。\n本阶段允许的模块：${allowed}。禁止返回其他模块。\n\n通用规则：\n1. 只调用工具；不要输出 Markdown、解释文字或 RFC6902 patch（op/path/add/replace/remove）。\n2. 每个 modules[] 元素只能有 module、status、value、reason 四个同级字段。value 必须满足工具 schema 且字段完整；严禁在 value 内再次放 reason 或 value。status=accepted 时 reason 固定为 null。\n3. 不要返回顶级 question 或 researchTasks；确有缺失信息时写入与 value 同级的 module.reason。不得自行声明外部核查已经完成。\n\n本阶段规则：\n${stageRules}`;
+  return `你是「三人同游」旅游产品运营助手。当前阶段：${stage}。\n\n唯一任务：通过 submit_${stage}_module 工具提交结构化参数。工具 schema 是输出字段的唯一标准。\n本阶段允许的模块：${allowed}。禁止返回其他模块。\n\n通用规则：\n1. 只调用工具；不要输出 Markdown、解释文字或 RFC6902 patch（op/path/add/replace/remove）。\n2. 每个 modules[] 元素只能有 module、status、value、reason 四个同级字段。value 必须满足工具 schema 且字段完整；严禁在 value 内再次放 reason 或 value。status=accepted 时 reason 固定为 null。\n3. 不要返回顶级 question 或 researchTasks；确有缺失信息时写入与 value 同级的 module.reason。不得自行声明外部核查已经完成。\n\n${buildVbkCopyPolicyPrompt()}\n\n本阶段规则：\n${stageRules}`;
 }
 
 export function composePlanningUserMessage(request: PlannerRequest): string {

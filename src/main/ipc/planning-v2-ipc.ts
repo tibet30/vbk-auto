@@ -226,8 +226,7 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
   const run = (localProductId: string, initialPlan?: PlanningPlanV2): Promise<PlanningRunResult> =>
     withPlanningLock(localProductId, () => runBody(localProductId, initialPlan));
 
-  ipcMain.handle("planning:start", async (_event, localProductId: string) => {
-    return withPlanningLock(localProductId, async () => {
+  const startPlanningUnderLock = async (localProductId: string): Promise<PlanningRunResult> => {
       const remote = await context.remoteProducts.get(localProductId);
       if (!remote.revision) throw new Error("Tibet 产品缺少 revision，无法安全开始规划。");
       const plan = createPlanningPlanV2();
@@ -241,7 +240,13 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
       context.db.importProductSnapshot(prepared);
       context.broadcastProduct(prepared);
       return runBody(localProductId, plan);
-    });
+  };
+  const startPlanning = (localProductId: string): Promise<PlanningRunResult> =>
+    withPlanningLock(localProductId, () => startPlanningUnderLock(localProductId));
+  context.startPlanning = startPlanning;
+
+  ipcMain.handle("planning:start", (_event, localProductId: string) => {
+    return withPlanningLock(localProductId, () => startPlanningUnderLock(localProductId));
   });
 
   ipcMain.handle("planning:resume", async (_event, localProductId: string) => {

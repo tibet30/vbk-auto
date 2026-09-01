@@ -49,4 +49,5 @@ export interface AutomationRunContext {
   markCancelled: (localProductId: string, run: AutomationRun, persist: () => void) => void;
   cancellationRequested: Set<string>;
   ensureBrowserHasBounds: () => void;
+  runVbkPageExclusive: <T>(task: () => Promise<T>) => Promise<T>;
 }

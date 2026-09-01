@@ -21,6 +21,10 @@ test("已匹配 POI 仍保留编辑按钮，并展示候选省市地址", () => 
   assert.match(source, /province: saveTarget\.province/);
   assert.match(source, /city: saveTarget\.city/);
   assert.match(source, /district: saveTarget\.district/);
+  assert.match(source, /province: selected\.province \?\? undefined/);
+  assert.match(source, /city: selected\.city \?\? undefined/);
+  assert.match(source, /district: selected\.district \?\? undefined/);
+  assert.doesNotMatch(source, /(province|city|district): selected\.\1 \?\? null/);
   assert.match(source, /地域未知/);
   assert.doesNotMatch(source, /可选择/);
   assert.doesNotMatch(source, /candidate\.poiId \?\? "无 poiId"/);

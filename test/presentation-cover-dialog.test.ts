@@ -7,7 +7,7 @@ test("封面使用已有 imageId 直接绑定，不再重新打开图库弹窗",
     new URL("../src/main/automation/ctrip/presentation/main.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /bindCtripLibraryCoverViaApi\(page, cover\.imageId\)/);
+  assert.match(source, /bindCtripLibraryCoverViaApi\(page, cover\.imageId, productId\)/);
   const coverStart = source.indexOf("export async function selectCtripLibraryCover");
   const coverEnd = source.indexOf("export async function fillAndSavePresentation", coverStart);
   const coverSource = source.slice(coverStart, coverEnd);

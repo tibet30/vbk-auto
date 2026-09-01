@@ -88,10 +88,17 @@ function responseHasImageType(payload: unknown, imageId: number, imageTypeId: nu
 export async function bindCtripLibraryCoverViaApi(
   page: VbkSessionRequestBrowser & { url(): string },
   imageId: number,
-  options: CoverBindOptions = {},
+  productIdOrOptions?: number | CoverBindOptions,
+  fallbackOptions: CoverBindOptions = {},
 ): Promise<{ reused: boolean; productId: number; imageId: number }> {
   assertPositiveInteger(imageId, "封面 imageId");
-  const productId = readProductIdFromVbkUrl(page.url());
+  const productId = typeof productIdOrOptions === "number"
+    ? productIdOrOptions
+    : readProductIdFromVbkUrl(page.url());
+  assertPositiveInteger(productId, "VBK 产品 ID");
+  const options = typeof productIdOrOptions === "number"
+    ? fallbackOptions
+    : productIdOrOptions ?? {};
   const existingResult = await searchProductImages(page, productId);
   assertBusinessSuccess(existingResult, "确认现有产品封面", false);
   const existingImages = productImageInfos(existingResult.payload);

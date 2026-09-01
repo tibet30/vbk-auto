@@ -25,7 +25,7 @@
  */
 
 /** 与 base.ts 的 View 字符串联合保持一致。 */
-export type RecoveryView = "workspace" | "products" | "settings" | "operation-log";
+export type RecoveryView = "workspace" | "products" | "tasks" | "settings" | "operation-log";
 
 export interface RecoveryInputs {
   /** preload API 是否已注入（window.vbk 已存在）。 */

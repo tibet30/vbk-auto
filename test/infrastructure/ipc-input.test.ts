@@ -10,6 +10,8 @@ test("产品写入与长流程通道拒绝空/超长/非法产品 ID", () => {
 });
 
 test("AI 消息、自动化阶段和产品 JSON 有明确运行时上限", () => {
+  assert.doesNotThrow(() => validateIpcArguments("workflowTasks:abandon", ["task-1"]));
+  assert.throws(() => validateIpcArguments("workflowTasks:abandon", ["../bad task"]), /field=localProductId/);
   assert.doesNotThrow(() => validateIpcArguments("ai:send", ["p-1", "继续补齐"]));
   assert.throws(() => validateIpcArguments("ai:send", ["p-1", "x".repeat(6001)]), /field=content/);
   assert.throws(() => validateIpcArguments("automation:retryPhase", ["p-1", "unknown"]), /field=phase/);

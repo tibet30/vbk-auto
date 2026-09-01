@@ -3,6 +3,7 @@ import type { AppModel } from "../app.main.model";
 import { AppWorkspaceWorkflow } from "./workspace";
 import { AppWorkspaceHomePage } from "./workspace-home";
 import { AppProductsPage } from "./products";
+import { AppTasksPage } from "./tasks";
 import { AppSettingsPage } from "./settings";
 import { AppAccountEditor } from "./account-editor";
 import { AppOperationLogPage, useOperationLogState } from "./operation-log";
@@ -52,6 +53,7 @@ function ActiveRoute({ model }: { model: AppModel }) {
   const { view, product, activeLocalProductId } = model;
   if (view === "settings" && !product) return <AppSettingsPage model={model} />;
   if (view === "products" && !product) return <AppProductsPage model={model} />;
+  if (view === "tasks" && !product) return <AppTasksPage model={model} />;
   if (view === "operation-log") return <OperationLogRoute model={model} />;
   // 刷新后 product 还在异步拉取：先渲染一个轻量占位，避免闪现工作台首页
   // 再跳回详情。activeLocalProductId 会在拉取成功 / 失败后被清掉，此分支自动失效。

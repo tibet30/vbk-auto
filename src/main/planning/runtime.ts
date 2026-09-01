@@ -19,6 +19,7 @@ import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import type { ContactCardSelection } from "../../shared/contracts.js";
+import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 import type {
   GenerationStateStore,
   OrchestratorRuntime,
@@ -153,7 +154,11 @@ export function itineraryPoisAreComplete(itinerary: unknown[]): boolean {
   for (const day of itinerary) {
     if (!day || typeof day !== "object" || Array.isArray(day)) return false;
     const spots = (day as Record<string, unknown>).spots;
-    if (!Array.isArray(spots) || spots.length === 0) return false;
+    if (!Array.isArray(spots)) return false;
+    if (spots.length === 0) {
+      if (dayHasUserOtherActivity(day)) continue;
+      return false;
+    }
     for (const spot of spots) {
       if (!spot || typeof spot !== "object" || Array.isArray(spot)) return false;
       const record = spot as Record<string, unknown>;

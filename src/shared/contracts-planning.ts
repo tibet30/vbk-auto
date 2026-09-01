@@ -1,3 +1,9 @@
+import type {
+  PlanningPoiDisambiguationRequest,
+  PlanningPoiDisambiguationResult,
+} from "./contracts-planning-poi-disambiguation.js";
+export type * from "./contracts-planning-poi-disambiguation.js";
+
 /**
  * Planning subsystem contracts — provider-neutral, model-neutral.
  *
@@ -60,6 +66,9 @@ export type PlanningNodeStatus =
 export interface PlanningPoiCandidate {
   requestedName: string;
   status: "proposed" | "resolved" | "rejected" | "selected";
+  source?: "user" | "ai";
+  userActivityId?: string;
+  preferredDay?: number;
   reason?: string;
   poiId?: number;
   poiName?: string;
@@ -102,6 +111,7 @@ export interface PlanningPlanV2 {
   currentNode: PlanningNodeId;
   nodes: PlanningNodeState[];
   poiCandidates: PlanningPoiCandidate[];
+  userIntent?: import("./contracts-planning-intent.js").PlanningUserIntent;
   createdAt: string;
   updatedAt: string;
   itineraryAdoption?: ItineraryAdoptionState;
@@ -115,6 +125,8 @@ export interface PlanningSpotRecommendationRequest {
   targetCount: number;
   excludedNames: string[];
   rejectedNames: string[];
+  userIdea?: string;
+  userIntent?: import("./contracts-planning-intent.js").PlanningUserIntent;
 }
 
 export interface PlanningItineraryRequest {
@@ -123,6 +135,8 @@ export interface PlanningItineraryRequest {
   candidates: Array<Required<Pick<PlanningPoiCandidate, "poiId" | "poiName">> &
     Pick<PlanningPoiCandidate, "province" | "city" | "district" | "address">>;
   previousError?: string;
+  userIdea?: string;
+  userIntent?: import("./contracts-planning-intent.js").PlanningUserIntent;
 }
 
 export interface PlanningItineraryDayDraft {
@@ -148,6 +162,12 @@ export interface PlanningLocation {
 
 export interface ThreeStagePlanningAi {
   structureLocation(request: PlanningLocationRequest): Promise<PlanningLocation>;
+  structureUserIntent(
+    request: import("./contracts-planning-intent.js").PlanningUserIntentRequest,
+  ): Promise<import("./contracts-planning-intent.js").PlanningUserIntent>;
+  disambiguatePoiCandidate?(
+    request: PlanningPoiDisambiguationRequest,
+  ): Promise<PlanningPoiDisambiguationResult>;
   recommendSpotNames(request: PlanningSpotRecommendationRequest): Promise<string[]>;
   composeVerifiedItinerary(request: PlanningItineraryRequest): Promise<PlanningItineraryDayDraft[]>;
   estimateVehicleTotalCost(request: {

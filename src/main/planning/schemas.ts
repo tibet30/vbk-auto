@@ -24,6 +24,8 @@ import {
 
 const requiredText = z.string().trim().min(1);
 const vbkSubtitle = z.string().trim().min(2).max(40, "subtitle 最多 40 个字符");
+/** 给模型留出标点归一化余量；VBK 实际硬上限为 84 UTF-8 字节。 */
+export const VBK_RECOMMENDATION_GENERATION_MAX_BYTES = 80;
 /** AI 生成推荐理由时只能使用的 VBK 下拉分类。 */
 const VBK_RECOMMENDATION_VALUES = [...VBK_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
 const VBK_SELECTABLE_RECOMMENDATION_VALUES = [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
@@ -82,6 +84,14 @@ const presentationModuleValueSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["recommendations", index, "category"], message: "推荐理由 category 必须互不重复" });
     }
     seen.add(entry.category);
+    const byteLength = new TextEncoder().encode(entry.text.trim()).length;
+    if (byteLength > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["recommendations", index, "text"],
+        message: `推荐理由不得超过 ${VBK_RECOMMENDATION_GENERATION_MAX_BYTES} UTF-8 字节（VBK 硬上限 84 字节）`,
+      });
+    }
   });
 });
 

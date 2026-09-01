@@ -11,7 +11,7 @@ import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
-import { findAllVbkCopyBadCases } from "./vbk-copy-policy.js";
+import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-policy.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -170,7 +170,17 @@ export async function executeStageOutput(args: {
 
     // value 是从原始 raw 中读取的；adapter 在拆 tool_call 时会把模块的 value 暴露到 outcome 里。
     const rawValue = outcome.value;
-    const sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault);
+    let sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault);
+    // Copy-policy rejection is kept as a hard gate.  Only its known, vetted
+    // alternatives may be used for one deterministic repair; the repaired
+    // value then goes through every gate (including schema) again.
+    if (!sanitised.ok && findAllVbkCopyBadCases(rawValue).length > 0) {
+      sanitised = sanitiseModuleValue(
+        outcome.module,
+        repairVbkCopyPolicyValue(rawValue),
+        minimumTravelersDefault,
+      );
+    }
     if (!sanitised.ok) {
       rejected.push({ module: outcome.module, status: "rejected", reason: sanitised.reason });
       continue;

@@ -17,6 +17,8 @@ export function AppProductsPage({ model }: { model: AppModel }) {
     setCreating,
     createInput,
     setCreateInput,
+    autoConfirmCreation,
+    setAutoConfirmCreation,
     savingProduct,
     createProduct,
     deleteProduct,
@@ -105,6 +107,7 @@ export function AppProductsPage({ model }: { model: AppModel }) {
                   setNotice(`尚未配置 AI 模型，请先到「设置」中配置 ${aiProviderName} 的 API Key 后再创建产品。`);
                   return;
                 }
+                setAutoConfirmCreation(false);
                 setCreating(true);
               }}
             >
@@ -118,8 +121,13 @@ export function AppProductsPage({ model }: { model: AppModel }) {
           <ProductBriefForm
             input={createInput}
             setInput={setCreateInput}
+            autoConfirm={autoConfirmCreation}
+            setAutoConfirm={setAutoConfirmCreation}
             submitting={savingProduct}
-            onCancel={() => setCreating(false)}
+            onCancel={() => {
+              setCreating(false);
+              setAutoConfirmCreation(false);
+            }}
             onSubmit={() => {
               void createProduct();
             }}

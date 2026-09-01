@@ -29,6 +29,14 @@ const head = {
 
 export const VBK_MAX_PRICING_INVENTORY_DAYS = 365;
 
+export function localBusinessDate(now = new Date()): string {
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 export function datesBetween(start: string, end: string) {
   const dates: string[] = [];
   const cursor = new Date(`${start}T00:00:00`);
@@ -235,7 +243,11 @@ export async function ensurePricingInventoryApi(
   if (!pricing || !inventory) throw new Error("缺少价格库存配置：commercial.pricing / commercial.inventory");
   // VBK 的价格可以接受第 366 个业务日，但库存不会落库；以库存接口的
   // 实际上限为准，避免把平台明确拒绝的最后一天误判为自动化失败。
+  // 平台不会为过去的业务日落价格库存；规划与真正执行之间可能跨日。
+  // 在实际写入时剔除过去日期，避免把无法写入的历史日误判为回读缺失。
+  const today = localBusinessDate();
   const dates = datesBetween(inventory.startDate, inventory.endDate)
+    .filter((date) => date >= today)
     .slice(0, VBK_MAX_PRICING_INVENTORY_DAYS);
   if (!dates.length) throw new Error("价格库存日期范围为空。");
   const item = await packageInfo(page, productId);

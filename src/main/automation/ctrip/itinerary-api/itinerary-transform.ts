@@ -50,6 +50,14 @@ export interface ProductItineraryDay {
   hotel: string;
   meals: string;
   mealDescriptions?: string[];
+  activities?: Array<{
+    time: string;
+    title: string;
+    detail: string;
+    type?: "transport" | "visit" | "meal" | "hotel" | "free" | "other";
+    durationMinutes?: number;
+    source?: "user" | "ai";
+  }>;
 }
 
 export interface ProductOperations {
@@ -106,8 +114,8 @@ export interface ReadbackDayExpectation {
   }>;
   /** 酒店节点（无酒店时为空数组）。 */
   hotels: Array<{ hotelName: string; hotelTier?: string }>;
-  /** 其他 / 自由活动节点。 */
-  other: { description: string };
+  /** 仅未匹配的用户活动才写入其他 / 自由活动节点。 */
+  other?: { description: string };
   /** 服务时间（其他节点写入 startOnBoardTime / stopOnBoardTime）。 */
   serviceTime: { startTime: string; endTime: string };
 }
@@ -121,17 +129,25 @@ export interface ReadbackExpectations {
   requireHotels: boolean;
 }
 
-const FIRST_DAY_DESCRIPTION_REPLACEMENTS = [
-  { term: "巅峰", replacement: "高峰" },
-] as const;
+function dayOtherActivities(day: ProductItineraryDay) {
+  return (day.activities ?? []).filter((activity) =>
+    activity.source === "user"
+      && (activity.type === "other" || activity.type === "free")
+      && typeof activity.time === "string" && Boolean(activity.time.trim())
+      && typeof activity.title === "string" && Boolean(activity.title.trim())
+      && typeof activity.detail === "string" && Boolean(activity.detail.trim()));
+}
 
-function sanitizeDayDescription(day: ProductItineraryDay): string {
-  if (Number(day.day) !== 1 || typeof day.description !== "string") return day.description;
-  return FIRST_DAY_DESCRIPTION_REPLACEMENTS.reduce((next, { term, replacement }) => next.split(term).join(replacement), day.description);
+function otherDescription(day: ProductItineraryDay): string {
+  const activities = dayOtherActivities(day);
+  return activities.map((activity) => {
+    const prefix = activity.time && activity.time !== "不限" ? `${activity.time} ` : "";
+    return `${prefix}${activity.title}：${activity.detail}`;
+  }).join("；");
 }
 
 /**
- * 把项目侧 day 转成回读期望：title / pois / meals / hotel / description / serviceTime。
+ * 把项目侧 day 转成回读期望：title / pois / meals / hotel / 必要时的其他 / serviceTime。
  */
 export function buildReadbackExpectations(args: {
   itinerary: ProductItineraryDay[];
@@ -139,26 +155,29 @@ export function buildReadbackExpectations(args: {
   stations: ResolvedStations;
 }): ReadbackExpectations {
   const { itinerary, operations, stations } = args;
-  const days: ReadbackDayExpectation[] = itinerary.map((day) => ({
-    orderDay: day.day,
-    title: day.title,
-    pois: Array.isArray(day.spots)
-      ? day.spots.map((s) => ({
-          poiId: typeof s?.poiId === "number" ? s.poiId : 0,
-          poiName: s?.poiName || s?.name || "",
-        }))
-      : [],
-    meals: (["B", "L", "S"] as const).map((key, index) => ({
-      key,
-      description: day.mealDescriptions?.[index] ?? "",
-      mealsIncluded: operations.mealsIncluded === true,
-    })),
-    hotels: day.hotel && day.hotel.trim()
-      ? [{ hotelName: day.hotel, hotelTier: operations.hotelTier }]
-      : [],
-    other: { description: sanitizeDayDescription(day) },
-    serviceTime: { startTime: "08:00", endTime: "20:00" },
-  }));
+  const days: ReadbackDayExpectation[] = itinerary.map((day) => {
+    const activities = dayOtherActivities(day);
+    return {
+      orderDay: day.day,
+      title: day.title,
+      pois: Array.isArray(day.spots)
+        ? day.spots.map((s) => ({
+            poiId: typeof s?.poiId === "number" ? s.poiId : 0,
+            poiName: s?.poiName || s?.name || "",
+          }))
+        : [],
+      meals: (["B", "L", "S"] as const).map((key, index) => ({
+        key,
+        description: day.mealDescriptions?.[index] ?? "",
+        mealsIncluded: operations.mealsIncluded === true,
+      })),
+      hotels: day.hotel && day.hotel.trim()
+        ? [{ hotelName: day.hotel, hotelTier: operations.hotelTier }]
+        : [],
+      ...(activities.length ? { other: { description: otherDescription(day) } } : {}),
+      serviceTime: { startTime: "08:00", endTime: "20:00" },
+    };
+  });
   return {
     days,
     pickup: {
@@ -179,7 +198,7 @@ export function buildReadbackExpectations(args: {
  *   - 餐饮三段（早 / 午 / 晚）从 day.meals + mealDescriptions 派生；
  *   - 酒店节点可选（无酒店时不输出）；
  *   - 景点节点使用 buildAttractionPois 强校验；
- *   - 末尾追加「其他」节点，承载 day.description。
+ *   - 末尾仅在存在未匹配的用户活动时追加「其他」节点。
  *
  * 输出的每个 info 都保留 VBK 模板的全部字段，未知字段保持 null 让后端默认填。
  */
@@ -194,9 +213,6 @@ export function buildDayDescription(args: {
   if (!day.title || !day.title.trim()) {
     throw new Error(`第 ${day.day} 天 title 缺失（行程标题必填）。`);
   }
-  if (!day.description || !day.description.trim()) {
-    throw new Error(`第 ${day.day} 天 description 缺失（其他节点说明必填）。`);
-  }
   const isFirst = index === 0;
   const isLast = index === totalDays - 1;
   const infos: Array<Record<string, unknown>> = [];
@@ -207,52 +223,59 @@ export function buildDayDescription(args: {
     infos.push(buildPickupInfo({ stations, sort: sort++ }));
   }
 
-  // 2) 景点节点（必须存在）
-  const attractionPois = buildAttractionPois(day.spots);
-  infos.push({
-    tourDailyInfoId: null,
-    takeoffTime: { key: "D", name: "全天" },
-    takeoffEndTime: { name: "" },
-    activeType: { key: 3, name: "景点" },
-    sessionTimeType: 0,
-    distance: 0,
-    driveTime: 0,
-    takeTime: 240,
-    takeTimeType: 0,
-    description: "",
-    productsOnSale: "",
-    specialGift: "",
-    warmTips: "",
-    sort,
-    costInclude: false,
-    tourDailyHotels: [],
-    tourDailyTrains: [],
-    tourDailyFlights: [],
-    tourDailyPois: attractionPois,
-    tourDailyThemes: [],
-    tourDailyPackageGatherList: [],
-    tourDailyPackageDismissList: [],
-    tourDailyDistricts: [],
-    tourDailyPackageFlights: [],
-    tourDailyPackageTrains: [],
-    tourDailyPackageIntermodals: [],
-    tourDailyPackageShips: [],
-    tourDailyPackageHotels: [],
-    startOnBoardTime: "",
-    stopOnBoardTime: "",
-    communication: "",
-    customStatus: 0,
-    arriveTime: "",
-    departTime: "",
-    directionWay: { key: "", name: "" },
-    recommendActivities: [],
-    pkgProductId: 0,
-    pkgTourInfoId: 0,
-    pkgDayDesc: "",
-    pkgShoppingId: "",
-    versionNum: 0,
-  });
-  sort += 1;
+  // 2) 景点节点（可由用户明确的“其他”活动替代）
+  const hasSpots = Array.isArray(day.spots) && day.spots.length > 0;
+  const otherActivities = dayOtherActivities(day);
+  if (!hasSpots && !otherActivities.length) {
+    throw new Error(`第 ${day.day} 天缺少已验证景点或用户明确的其他活动。`);
+  }
+  if (hasSpots) {
+    const attractionPois = buildAttractionPois(day.spots);
+    infos.push({
+      tourDailyInfoId: null,
+      takeoffTime: { key: "D", name: "全天" },
+      takeoffEndTime: { name: "" },
+      activeType: { key: 3, name: "景点" },
+      sessionTimeType: 0,
+      distance: 0,
+      driveTime: 0,
+      takeTime: 240,
+      takeTimeType: 0,
+      description: "",
+      productsOnSale: "",
+      specialGift: "",
+      warmTips: "",
+      sort,
+      costInclude: false,
+      tourDailyHotels: [],
+      tourDailyTrains: [],
+      tourDailyFlights: [],
+      tourDailyPois: attractionPois,
+      tourDailyThemes: [],
+      tourDailyPackageGatherList: [],
+      tourDailyPackageDismissList: [],
+      tourDailyDistricts: [],
+      tourDailyPackageFlights: [],
+      tourDailyPackageTrains: [],
+      tourDailyPackageIntermodals: [],
+      tourDailyPackageShips: [],
+      tourDailyPackageHotels: [],
+      startOnBoardTime: "",
+      stopOnBoardTime: "",
+      communication: "",
+      customStatus: 0,
+      arriveTime: "",
+      departTime: "",
+      directionWay: { key: "", name: "" },
+      recommendActivities: [],
+      pkgProductId: 0,
+      pkgTourInfoId: 0,
+      pkgDayDesc: "",
+      pkgShoppingId: "",
+      versionNum: 0,
+    });
+    sort += 1;
+  }
 
   // 3) 餐饮三段（早 / 午 / 晚）
   const mealTypes: Array<{ key: "B" | "L" | "S"; index: 0 | 1 | 2 }> = [
@@ -287,14 +310,19 @@ export function buildDayDescription(args: {
   // 真实 detail 结构里「服务时间」是 tourDailyInfo 上的 startOnBoardTime /
   // stopOnBoardTime；这里保留兼容。
 
-  // 6) 其他 / 自由活动节点（description 落到这里）
-  infos.push(
-    buildOtherInfo({
-      description: sanitizeDayDescription(day),
-      sort: sort++,
-      serviceTime: { startTime: "08:00", endTime: "20:00" },
-    }),
-  );
+  // 6) 其他 / 自由活动仅承载无法匹配真实 POI 的用户活动。
+  // 已有 POI 的日程不再把 day.description 复制为自由活动，避免同一景点重复出现。
+  if (otherActivities.length) {
+    infos.push(
+      buildOtherInfo({
+        description: otherDescription(day),
+        sort: sort++,
+        serviceTime: { startTime: "08:00", endTime: "20:00" },
+        activityTime: otherActivities[0]?.time,
+        durationMinutes: otherActivities[0]?.durationMinutes,
+      }),
+    );
+  }
 
   // 7) 送机 / 解散节点（仅末日）
   if (isLast) {

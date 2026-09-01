@@ -3,13 +3,12 @@
  * 产品图文页（productImageText）页面层：
  *   - selectCtripLibraryImage / selectCtripLibraryCover：在「从图库资源导入」弹窗里搜索 poi 并按
  *     质量 / 分辨率要求挑图，确认协议并提交；
- *   - fillAndSavePresentation：跳到产品图文 tab → 接口保存推荐理由 + 产品特点 + 封面 →
- *     经 saveThenAdvance 推进到「行程描述」。不再回退到 DOM / UEditor / UI SaveMonitor。
+ *   - fillAndSavePresentation：以显式 productId 接口保存推荐理由、产品特点与封面，
+ *     每步回读成功后直接返回；不做 DOM 导航或推进。
  * 顶部带 `// @ts-nocheck`，形参 page 是动态传入。
  */
 
 import { delay, assertCount } from "../utils.js";
-import { clickSection, isItineraryUrl, isProductImageTextUrl, saveThenAdvance } from "../tabs.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
 import { buildRecommendationReasonsPlan } from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
@@ -152,28 +151,32 @@ async function selectSearchOption(page, dialog, id, value, description) {
 }
 
 /** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认。 */
-export async function selectCtripLibraryCover(page, cover) {
-  return bindCtripLibraryCoverViaApi(page, cover.imageId);
+export async function selectCtripLibraryCover(page, cover, productId) {
+  return bindCtripLibraryCoverViaApi(page, cover.imageId, productId);
 }
 
 /**
- * 「产品图文」阶段主入口：接口保存推荐理由 + 产品特色 → 上封面 → 进入「行程描述」。
+ * 「产品图文」阶段主入口：以显式产品 ID 接口保存推荐理由、产品特色与封面。
  * 调用方需要保证 product.presentation 含 cover 与 recommendation / features / recommendations。
  *
  * 防御深度（defense in depth）：
  *   - readiness / automationBlockers 已经在起跑前校验过 presentation 必填字段；
  *   - 本函数第一行用 assertPresentationReadyForVbk 再校验一次，
  *     即便 readiness 通过、产品被改坏、运行时 derivation 漏字段，
- *     VBK 阶段自身也会在打开任何 tab / 弹窗之前抛错；
+ *     VBK 阶段自身也会在任何 API 写入之前抛错；
  *   - 不调用 VBK、不打开网络、不会留下半成品页面状态。
  *
  * 保存不再触碰推荐理由 textarea / UEditor DOM：统一走 /15638/getdescriptionInfo →
  * /20698/createProductDraft(desc) → /15638/savedescriptioninfo → 回读确认。
  */
-export async function fillAndSavePresentation(page, product) {
+export async function fillAndSavePresentation(page, product, explicitProductId) {
   // 第一道防御：统一从 automation-contract 取真实契约，错误文案面向运营。
   assertPresentationReadyForVbk(product);
   const presentation = product.presentation;
+  const productId = Number(explicitProductId ?? product.productId);
+  if (!Number.isInteger(productId) || productId <= 0) {
+    throw new Error("产品图文接口保存：产品 ID 缺失，无法继续。");
+  }
   const cover = presentation?.cover;
   if (
     !cover ||
@@ -194,34 +197,12 @@ export async function fillAndSavePresentation(page, product) {
   // 防御深度：仍然保留 3 条 + 白名单 + 不重复校验（buildRecommendationReasonsPlan
   // 抛错信息保持原样），避免改动影响既有运营提示。
   buildRecommendationReasonsPlan(presentation.recommendations);
-  await clickSection(page, ["产品图文", "图文信息"]);
-  await page.waitForURL((url) => isProductImageTextUrl(url.href), { timeout: 30_000 });
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await delay(1_000);
-
   // 推荐理由 + 产品特色 + 封面图统一走接口保存：直接由 savePresentationViaApi
   // 写入 /15638/getdescriptionInfo → /20698/createProductDraft → /15638/savedescriptioninfo，
   // 不再回退到 DOM / UEditor / UI SaveMonitor。
-  await selectCtripLibraryCover(page, presentation.cover);
-  const savedWith = await savePresentationViaApi(page, presentation);
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await delay(1_500);
-
-  // 产品图文已经保存过时，VBK 刷新可能直接落到「行程描述」页。
-  // 这是手动保存后重试的幂等成功落点，不应再回头寻找产品图文页的「下一步」。
-  if (isItineraryUrl(page.url())) {
-    return { advanced: true, mode: "already-advanced", savedWith };
-  }
-
-  return saveThenAdvance(page, {
-    phase: "产品图文",
-    targetTabLabel: "行程描述",
-    saveButtonNames: ["保存", "保存并下一步"],
-    targetTabLabels: ["行程描述"],
-    isTargetUrl: (url) =>
-      typeof url === "string" && !/(^|[/?&])productImageText([/?&]|$)/.test(url),
-    savedWith,
-  });
+  const coverResult = await selectCtripLibraryCover(page, presentation.cover, productId);
+  const savedWith = await savePresentationViaApi(page, presentation, productId);
+  return { advanced: true, mode: "presentation-api", productId, coverResult, savedWith };
 }
 
 export {

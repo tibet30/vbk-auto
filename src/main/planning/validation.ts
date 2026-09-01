@@ -12,6 +12,8 @@ import type { PlanningModule, ModuleOutcome, PlanningSkeleton } from "../../shar
 import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { VBK_RECOMMENDATION_GENERATION_MAX_BYTES } from "./schemas.js";
+import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 
 export interface ValidationResult {
   missing: ModuleOutcome[];
@@ -148,7 +150,9 @@ export function deepValidateModules(args: {
       }
       if (textValue(record.title).length === 0) reasons.push(`第 ${index + 1} 天 title 缺失`);
       const spots = asArray(record.spots);
-      if (!spots || spots.length === 0) reasons.push(`第 ${index + 1} 天 spots 缺失`);
+      if (!spots || (spots.length === 0 && !dayHasUserOtherActivity(record))) {
+        reasons.push(`第 ${index + 1} 天缺少已验证 spots 或用户其他活动`);
+      }
       else {
         for (let spotIndex = 0; spotIndex < spots.length; spotIndex += 1) {
           const spot = asRecord(spots[spotIndex]);
@@ -184,7 +188,7 @@ export function deepValidateModules(args: {
       else {
         const seen = new Set<string>();
         let valid = true;
-        for (const entry of recommendations) {
+        for (const [recommendationIndex, entry] of recommendations.entries()) {
           const record = asRecord(entry);
           const category = textValue(record?.category);
           if (!category) { reasons.push("recommendation.category 缺失"); valid = false; continue; }
@@ -193,7 +197,12 @@ export function deepValidateModules(args: {
           }
           if (seen.has(category)) { reasons.push(`recommendation.category=${category} 重复`); valid = false; }
           seen.add(category);
-          if (textValue(record?.text).length === 0) { reasons.push("recommendation.text 缺失"); valid = false; }
+          const text = textValue(record?.text);
+          if (text.length === 0) { reasons.push("recommendation.text 缺失"); valid = false; }
+          else if (new TextEncoder().encode(text).length > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+            reasons.push(`recommendation[${recommendationIndex + 1}].text 超过 ${VBK_RECOMMENDATION_GENERATION_MAX_BYTES} UTF-8 字节`);
+            valid = false;
+          }
         }
         if (!valid) { /* reasons already populated */ }
       }

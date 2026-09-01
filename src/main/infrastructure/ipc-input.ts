@@ -26,6 +26,7 @@ const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "research:accept", "research:refreshIssues", "research:vehicleResource", "research:hotelResource",
   "automation:start", "automation:stop", "automation:retry", "automation:retryPhase", "automation:retryOnePhase",
   "planning:start", "planning:resume", "planning:state", "planning:rerunMajorStage", "planning:acceptItineraryAndRerunCompletion",
+  "workflowTasks:get", "workflowTasks:abandon",
 ]);
 
 function parse<T>(channel: string, label: string, schema: z.ZodType<T>, value: unknown): T {
@@ -55,6 +56,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
       days: z.number().int().min(2).max(60),
       productForm: z.enum(PRODUCT_FORMS),
       userIdea: z.string().max(1000).optional(),
+      autoConfirm: z.boolean().optional(),
     }).strict(), args[0]);
     void input;
   }

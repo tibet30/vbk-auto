@@ -32,6 +32,7 @@ import type {
   PlanningGenerationState,
   ProductDetail,
   ProductSummary,
+  ProductWorkflowTask,
   ResearchTask,
   TaskStatus,
 } from "../../../shared/contracts.js";
@@ -75,6 +76,17 @@ import {
 } from "./parts/replace-product-with-research-tasks.js";
 import { addResearchTask, markResearchAccepted, markResearchTasksSatisfied } from "./parts/research-tasks.js";
 import { deleteSetting, getSetting, setSetting } from "./parts/settings.js";
+import {
+  abandonWorkflowTask,
+  completeSavedProductWorkflowTasks,
+  completeWorkflowTaskForProduct,
+  createWorkflowTask,
+  getWorkflowTask,
+  latestWorkflowTaskForProduct,
+  listWorkflowTasks,
+  recoverOrphanWorkflowTasks,
+  updateWorkflowTask,
+} from "./parts/workflow-tasks.js";
 
 /**
  * SQLite 数据访问对象，main 进程与本地数据库的唯一入口。
@@ -174,6 +186,35 @@ export class VbkDatabase {
   saveAutomation(localProductId: string, run: AutomationRun) {
     saveAutomation(this.db, localProductId, run);
   }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // workflow_tasks（一键创建后台任务）
+  // ─────────────────────────────────────────────────────────────────────
+
+  createWorkflowTask(localProductId: string, productName: string): ProductWorkflowTask {
+    return createWorkflowTask(this.db, localProductId, productName);
+  }
+  completeWorkflowTaskForProduct(
+    product: Pick<ProductSummary, "id" | "status" | "productId">,
+  ): ProductWorkflowTask | undefined {
+    return completeWorkflowTaskForProduct(this.db, product);
+  }
+  completeSavedProductWorkflowTasks(): ProductWorkflowTask[] {
+    return completeSavedProductWorkflowTasks(this.db);
+  }
+  getWorkflowTask(id: string): ProductWorkflowTask | undefined { return getWorkflowTask(this.db, id); }
+  latestWorkflowTaskForProduct(localProductId: string): ProductWorkflowTask | undefined {
+    return latestWorkflowTaskForProduct(this.db, localProductId);
+  }
+  listWorkflowTasks(): ProductWorkflowTask[] { return listWorkflowTasks(this.db); }
+  abandonWorkflowTask(id: string): ProductWorkflowTask { return abandonWorkflowTask(this.db, id); }
+  updateWorkflowTask(
+    id: string,
+    patch: Parameters<typeof updateWorkflowTask>[2],
+  ): ProductWorkflowTask {
+    return updateWorkflowTask(this.db, id, patch);
+  }
+  recoverOrphanWorkflowTasks(): ProductWorkflowTask[] { return recoverOrphanWorkflowTasks(this.db); }
 
   // ─────────────────────────────────────────────────────────────────────
   // account fixed info / providerId / known accounts

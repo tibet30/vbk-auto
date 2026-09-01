@@ -103,6 +103,16 @@ test("planning v2 mutation handlers acquire the product lock before reset/update
     const end = planningV2Ipc.indexOf("\n  });", start);
     assert.ok(start >= 0 && end > start, `${handler} handler must be present`);
     const body = planningV2Ipc.slice(start, end);
+    if (handler === "planning:start") {
+      assert.match(body, /withPlanningLock\(localProductId[\s\S]*startPlanningUnderLock\(localProductId\)/,
+        "planning:start must lock before delegating to the shared start operation");
+      const sharedStart = planningV2Ipc.indexOf("const startPlanningUnderLock");
+      assert.ok(sharedStart >= 0, "shared planning:start operation must be present");
+      const sharedBody = planningV2Ipc.slice(sharedStart, start);
+      assert.ok(sharedBody.indexOf("remoteProducts.get") < sharedBody.indexOf("remoteProducts.update"),
+        "shared planning:start operation must read before update");
+      continue;
+    }
     assert.ok(body.indexOf("withPlanningLock(localProductId") < body.indexOf("remoteProducts.update"), `${handler} must lock before update`);
     assert.ok(body.indexOf("remoteProducts.get") > body.indexOf("withPlanningLock(localProductId"), `${handler} must read under lock`);
   }

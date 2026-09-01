@@ -35,6 +35,11 @@ const api: VbkApi = {
     logout: () => ipcRenderer.invoke("appAuth:logout"),
   },
   products: { list: () => ipcRenderer.invoke("products:list"), create: (input) => ipcRenderer.invoke("products:create", input), get: (id) => ipcRenderer.invoke("products:get", id), delete: (id) => ipcRenderer.invoke("products:delete", id), readiness: (id) => ipcRenderer.invoke("products:readiness", id), updateReviewField: (id, input) => ipcRenderer.invoke("products:updateReviewField", id, input), updateProductJson: (id, json) => ipcRenderer.invoke("products:updateProductJson", id, json) },
+  workflowTasks: {
+    list: () => ipcRenderer.invoke("workflowTasks:list"),
+    get: (id) => ipcRenderer.invoke("workflowTasks:get", id),
+    abandon: (id) => ipcRenderer.invoke("workflowTasks:abandon", id),
+  },
   ai: {
     send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),
     cancel: (localProductId) => ipcRenderer.invoke("ai:cancel", localProductId),
@@ -70,13 +75,6 @@ const api: VbkApi = {
     retryOnePhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryOnePhase", localProductId, phase),
     stop: (localProductId) => ipcRenderer.invoke("automation:stop", localProductId),
   },
-  debug: {
-    runStep: (stepName: string, argsJson: string) => ipcRenderer.invoke("automation:debug:runStep", stepName, argsJson),
-    snapshot: (label?: string) => ipcRenderer.invoke("automation:debug:snapshot", label),
-    hitBreakpoints: () => ipcRenderer.invoke("automation:debug:hitBreakpoints"),
-    resume: (command: "continue" | "step" | "stop") => ipcRenderer.invoke("automation:debug:resume", command),
-    listBreakpoints: () => ipcRenderer.invoke("automation:debug:listBreakpoints"),
-  },
   accounts: {
     getFixedInfo: (accountName) => ipcRenderer.invoke("accounts:getFixedInfo", accountName),
     saveFixedInfo: (accountName, values) => ipcRenderer.invoke("accounts:saveFixedInfo", accountName, values),
@@ -107,6 +105,7 @@ const api: VbkApi = {
   },
   events: {
     onProductUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, product: unknown) => listener(product as never); ipcRenderer.on("product:updated", handler); return () => ipcRenderer.removeListener("product:updated", handler); },
+    onWorkflowTaskUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, task: unknown) => listener(task as never); ipcRenderer.on("workflow-task:updated", handler); return () => ipcRenderer.removeListener("workflow-task:updated", handler); },
     onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, localProductId: unknown, state: unknown) => listener(localProductId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
     onPageReady(listener) { const handler = () => listener(); ipcRenderer.on("vbk:page-ready", handler); return () => ipcRenderer.removeListener("vbk:page-ready", handler); },
   },

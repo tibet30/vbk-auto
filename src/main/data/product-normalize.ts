@@ -85,7 +85,7 @@ function normaliseRecommendations(value: unknown): Array<{ category: string; tex
  *   - title 接受 record.name 别名；
  *   - 缺 time/title/detail 任一 → 返回 undefined。
  */
-function normaliseActivity(value: unknown): { time: string; title: string; detail: string; type: string } | undefined {
+function normaliseActivity(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   const time = textValue(record.time);
@@ -94,7 +94,13 @@ function normaliseActivity(value: unknown): { time: string; title: string; detai
   if (!time || !title || !detail) return undefined;
   const rawType = textValue(record.type);
   const type = ACTIVITY_TYPES.has(rawType) ? rawType : "other";
-  return { time, title, detail, type };
+  const durationMinutes = positiveIntegerValue(record.durationMinutes);
+  const source = record.source === "user" || record.source === "ai" ? record.source : undefined;
+  return {
+    time, title, detail, type,
+    ...(durationMinutes ? { durationMinutes } : {}),
+    ...(source ? { source } : {}),
+  };
 }
 
 /**
@@ -153,7 +159,8 @@ export function normaliseItinerary(value: unknown) {
     const rawActivities = Array.isArray(record.activities)
       ? record.activities.filter((activity): activity is Record<string, unknown> => Boolean(activity) && typeof activity === "object" && !Array.isArray(activity))
       : [];
-    const activities = rawActivities.map(normaliseActivity).filter((activity): activity is { time: string; title: string; detail: string; type: string } => Boolean(activity));
+    const activities = rawActivities.map(normaliseActivity)
+      .filter((activity): activity is NonNullable<ReturnType<typeof normaliseActivity>> => Boolean(activity));
     const spots = Array.isArray(record.spots)
       ? record.spots.map((spot) => typeof spot === "string" ? { name: spot.trim(), poiName: null, poiId: null } : spot && typeof spot === "object" ? { name: textValue((spot as any).name) || textValue((spot as any).poiName), poiName: textValue((spot as any).poiName) || null, poiId: normalisePoiId((spot as any).poiId) } : null).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null } => Boolean(spot?.name))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));

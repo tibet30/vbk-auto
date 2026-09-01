@@ -424,19 +424,14 @@ test("save monitor：敏感词请求飞出但响应永不回响 + save 响应后
 });
 
 /** 产品图文已改为直接接口保存；monitor 仅保留单测覆盖旧 UI 保存守门行为。 */
-test("产品图文主流程：直接接口保存必须先于推进下一页", async () => {
+test("产品图文主流程：仅使用显式产品 ID 的接口保存，不推进下一页", async () => {
   // 测试文件位于 <repo>/test/automation/，相对路径要往上 3 层到 repo root
   const here = resolve("test/automation/presentation-save-monitor.test.ts");
   const mainPath = resolve(here, "../../../src/main/automation/ctrip/presentation/main.ts");
   const src = await readFile(mainPath, "utf8");
-  const idxSaveApi = src.indexOf("savePresentationViaApi(page, presentation)");
-  const idxAdvance = src.indexOf("saveThenAdvance(page");
-  assert.ok(idxSaveApi >= 0, "main.ts 必须调用 savePresentationViaApi(page, presentation)");
-  assert.ok(idxAdvance >= 0, "main.ts 必须调用 saveThenAdvance(page");
-  assert.ok(
-    idxSaveApi < idxAdvance,
-    `savePresentationViaApi 必须在 saveThenAdvance 之前；idxSaveApi=${idxSaveApi}, idxAdvance=${idxAdvance}`,
-  );
+  assert.ok(src.includes("savePresentationViaApi(page, presentation, productId)"));
+  assert.ok(src.includes("selectCtripLibraryCover(page, presentation.cover, productId)"));
+  assert.doesNotMatch(src, /saveThenAdvance\(page|clickSection\(page|page\.reload|waitForURL/);
   assert.doesNotMatch(src, /installSaveMonitor\(page\)/, "接口保存后主流程不应再安装 UI 保存 monitor");
   // ensure tabs.ts 没有被改（守住「只收窄产品图文」红线）
   const tabsPath = resolve(here, "../../../src/main/automation/ctrip/tabs.ts");
@@ -447,15 +442,10 @@ test("产品图文主流程：直接接口保存必须先于推进下一页", as
   );
 });
 
-test("产品图文手动保存后刷新落到行程描述时，必须按已推进处理", async () => {
+test("产品图文接口保存返回明确的 API 模式", async () => {
   const here = resolve("test/automation/presentation-save-monitor.test.ts");
   const mainPath = resolve(here, "../../../src/main/automation/ctrip/presentation/main.ts");
   const src = await readFile(mainPath, "utf8");
-  const reloadIndex = src.indexOf("await page.reload({ waitUntil: \"domcontentloaded\" });");
-  const idempotentIndex = src.indexOf("isItineraryUrl(page.url())", reloadIndex);
-  const advanceIndex = src.indexOf("return saveThenAdvance(page, {", reloadIndex);
-  assert.ok(reloadIndex >= 0, "产品图文保存后必须刷新并回读页面");
-  assert.ok(idempotentIndex > reloadIndex, "刷新后必须检查是否已经落到行程描述页");
-  assert.ok(idempotentIndex < advanceIndex, "已落到行程描述页时必须在 saveThenAdvance 前返回");
-  assert.match(src, /mode: \"already-advanced\"/, "幂等成功必须留下明确结果模式");
+  assert.match(src, /mode: "presentation-api"/);
+  assert.match(src, /return \{ advanced: true, mode: "presentation-api", productId, coverResult, savedWith \}/);
 });

@@ -75,6 +75,14 @@ test("缺少 commercial 不再作为规划 / 草稿阶段阻塞项", () => {
   assert.deepEqual(blockers.map((item) => item.label), []);
 });
 
+test("用户原始想法中的绝对化用语不作为自动录入文案阻断项", () => {
+  const product = {
+    ...baseProduct,
+    basicInfo: { ...baseProduct.basicInfo, userIdea: "第一天安排全网最佳、唯一的体验" },
+  };
+  assert.deepEqual(automationBlockers(product), []);
+});
+
 test("缺少 packageName 不再作为规划 / 草稿阶段阻塞项", () => {
   const blockers = automationBlockers({ ...baseProduct, commercial: { pricing: commercial.pricing } });
   assert.deepEqual(blockers.map((item) => item.label), []);

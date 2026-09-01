@@ -22,6 +22,8 @@ export type AIPromptEntry =
   | "Planner.generateStage"
   | "Planner.resolvePoiName"
   | "ThreeStage.structureLocation"
+  | "ThreeStage.structureUserIntent"
+  | "ThreeStage.disambiguatePoiCandidate"
   | "ThreeStage.recommendSpotNames"
   | "ThreeStage.composeVerifiedItinerary"
   | "ThreeStage.estimateVehicleTotalCost";

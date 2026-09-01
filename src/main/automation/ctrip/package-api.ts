@@ -1,7 +1,4 @@
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
-import { productSectionUrl } from "../constants.js";
-import { fillAndSavePackage } from "./package.js";
-import { delay } from "./utils.js";
 
 const head = {
   cid: "",
@@ -45,22 +42,53 @@ async function getPackage(page: any, productId: string, required = true) {
   return item;
 }
 
-async function createInitialPackage(page: any, product: any, productId: string) {
-  await page.goto(productSectionUrl(productId, "packageManage"), {
-    waitUntil: "domcontentloaded",
+async function createCustomerTemplate(page: any, vendorId: number) {
+  const response = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/20242/saveCustomerCpntTemplateInfo",
+    browserRequestTimeoutMs: 15_000,
+    evaluateTimeoutMs: 20_000,
+    errorLabel: "VBK 套餐客资模板创建",
+    headers: { accept: "application/json", cookieorigin: "https://vbooking.ctrip.com" },
+    body: {
+      businessData: encodeURIComponent(JSON.stringify({ from: "vbk", resourceId: 0, resourceVendorId: vendorId })),
+      piCategoryId: 1173,
+      piCustomerInfoTemplateId: 0,
+      header: { locale: "zh-CN", code: "vaction" },
+      componentItems: [
+        { code: "title", name: "预订用户填写信息", itemValue: [] },
+        { code: "fill_in_number_limit", name: "每单填写出行人数", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "A", itemValue: "全部出行人", isChecked: true }] },
+        { code: "is_need_certificate", name: "是否需要证件", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "T", itemValue: "是", isChecked: true }, { itemId: "F", itemValue: "否", isChecked: false }] },
+        { code: "customer_info", name: "出行人信息", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "1", itemValue: "出行人信息模板", isChecked: true }, { itemId: "2", itemValue: "自定义资料项包", isChecked: false }] },
+        { code: "customer_info_package", name: "出行人资料项包", isNeed: true, isDisplay: false, componentType: "select", itemValue: [{ itemId: "5122001", itemValue: "个人信息", isChecked: false }] },
+        { code: "customer_info_template", name: "出行人信息模板", isNeed: true, isDisplay: true, componentType: "select", itemValue: [{ itemId: "auto_match_template", itemValue: "自动匹配模板", isChecked: true }] },
+      ],
+    },
   });
-  const created = await fillAndSavePackage(page, product);
-  if (created && "saveDisabled" in created && created.saveDisabled) {
-    throw new Error(
-      `VBK 首个套餐未保存：${"skipped" in created ? created.skipped : "保存按钮不可用"}`,
-    );
-  }
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const saved = await getPackage(page, productId, false);
-    if (saved) return saved;
-    await delay(1_000);
-  }
-  throw new Error("VBK 套餐页已执行首次保存，但接口回读仍为空。");
+  assertOk(response.payload, "VBK 套餐客资模板创建");
+  const templateId = Number((response.payload as any)?.cpntTemplateInfoId);
+  if (!Number.isInteger(templateId) || templateId <= 0) throw new Error("VBK 套餐客资模板未返回合法 ID");
+  return templateId;
+}
+
+async function createInitialPackage(page: any, product: any, productId: string) {
+  const basic = await post(page, "getProductBaseInfo", {
+    contentType: "json", head, productId: Number(productId) || productId, needBaseInfo: true,
+  }, "VBK 套餐初始化账号查询");
+  const vendorId = Number(basic?.baseInfo?.vendorId);
+  if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error("VBK 套餐初始化缺少 vendorId");
+  const templateId = await createCustomerTemplate(page, vendorId);
+  const days = product.itinerary?.length || Number(product.basicInfo?.days) || 0;
+  const packageInfo = {
+    name: `${days}日套餐`, needShuttle: "F", vendorConfirmModeId: 2, confirmHour: 4,
+    isHotelShareRoom: "F", isContainBedFee: "T", visaInfo: [], vendorResourceCode: "",
+    isSmsVBKNotice: "T", isMainPackage: "T", isHotelResource: "T",
+    piCustomerInfoTemplateId: templateId,
+    resourceNameRule: { days, upgradeType: {}, upgradeValue: {} },
+  };
+  await post(page, "savePackageItem", {
+    contentType: "json", priceInputType: "1", productId: Number(productId) || productId, packageInfo,
+  }, "VBK 首套餐接口创建");
+  return getPackage(page, productId);
 }
 
 /** 直接调用 Tour Helper 同源协议更新套餐，并回读关键字段。 */

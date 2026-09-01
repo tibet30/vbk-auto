@@ -5,7 +5,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow } from "electron";
-import { installLogSink, logError, logWarn } from "../shared/log-timestamp.js";
+import { installLogSink, logError, logInfo, logWarn } from "../shared/log-timestamp.js";
 import { createRuntimeLogCapture } from "../shared/log-redaction.js";
 import { APP_NAME } from "../shared/brand.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
@@ -46,6 +46,8 @@ import { registerBrowserAutomationIpc } from "./ipc/browser-automation-ipc.js";
 import { registerSettingsIpc } from "./ipc/settings-ipc.js";
 import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
 import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
+import { ProductTaskScheduler } from "./application/product-task-scheduler.js";
+import type { ProductWorkflowTask } from "../shared/contracts.js";
 import type { MainIpcContext } from "./ipc/context.js";
 import { ProductWorkflowCoordinator } from "./application/product-workflow-coordinator.js";
 import { ProductMutationService } from "./application/product-mutation-service.js";
@@ -109,6 +111,8 @@ let cookieStore: LocalVbkCookieStore | null = null;
  *   - 这条事件供 UI 实时刷新产品详情 / 操作日志。
  */
 const broadcastProduct = (product: ProductDetail) => {
+  const completedTask = db?.completeWorkflowTaskForProduct(product);
+  if (completedTask) emitWorkflowTask(completedTask);
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
   window.webContents.send("product:updated", product);
 };
@@ -126,6 +130,14 @@ const emitPlanningState = (state: PlanningGenerationState) => {
     window.webContents.send("planning:updated", state.localProductId, state);
   } catch {
     // renderer 重建 / 退出期间没有可投递目标；持久化状态仍是权威来源。
+  }
+};
+const emitWorkflowTask = (task: ProductWorkflowTask) => {
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+  try {
+    window.webContents.send("workflow-task:updated", task);
+  } catch {
+    // 任务已持久化；窗口恢复后 workflowTasks:list 会补偿事件丢失。
   }
 };
 /**
@@ -323,6 +335,9 @@ app.whenReady().then(async () => {
     remote: remoteProducts,
     broadcast: broadcastProduct,
     isWorkflowActive: (productId) => Boolean(productWorkflows.activeWorkflow(productId)),
+    // automation 的 phases / recovery / logs 是 SQLite 运行态，需要逐节点即时
+    // 呈现在审查结果；产品业务数据仍在工作流解锁后合并并写回 Tibet。
+    shouldBroadcastWhileActive: (productId) => productWorkflows.activeWorkflow(productId) === "automation",
   }).emit;
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
@@ -331,6 +346,10 @@ app.whenReady().then(async () => {
   if (orphanPlanning.length) logWarn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
   const orphanLogs = db.recoverOrphanOperationLog();
   if (orphanLogs) logWarn("[startup] recovered interrupted log entries", { count: orphanLogs });
+  const completedWorkflowTasks = db.completeSavedProductWorkflowTasks();
+  if (completedWorkflowTasks.length) logInfo("[startup] reconciled completed product tasks", { count: completedWorkflowTasks.length });
+  const orphanWorkflowTasks = db.recoverOrphanWorkflowTasks();
+  if (orphanWorkflowTasks.length) logWarn("[startup] recovered interrupted product tasks", { count: orphanWorkflowTasks.length });
 
   const context: MainIpcContext = {
     db,
@@ -357,11 +376,24 @@ app.whenReady().then(async () => {
     emitProductIfKnown,
     logPoiManualIpc,
   };
+  const productTaskScheduler = new ProductTaskScheduler({
+    db,
+    get startPlanning() { return context.startPlanning; },
+    readiness,
+    productWorkflows,
+    get automation() { return automation; },
+    emitTask: emitWorkflowTask,
+    emitProduct,
+  });
+  context.enqueueProductTask = (product) => productTaskScheduler.enqueue(product);
+  context.abandonProductTask = (taskId) => productTaskScheduler.abandon(taskId);
   registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
+  automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));
   // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
   void browser.initialise()
     .then(() => vbkBindings.afterBrowserReady())
+    .then(() => productTaskScheduler.resumeQueued())
     .catch((error) => logWarn("[startup] deferred VBK binding restore failed", error));
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) void openMainWindow();

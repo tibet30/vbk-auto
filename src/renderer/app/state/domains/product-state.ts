@@ -5,6 +5,7 @@ import type {
   ProductDetail,
   ProductReadiness,
   ProductSummary,
+  ProductWorkflowTask,
 } from "../../../../shared/contracts.js";
 import { emptyReadiness, initialInput } from "../../helpers";
 
@@ -35,10 +36,12 @@ export function useProductState() {
   }, [product?.id]);
 
   const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [workflowTasks, setWorkflowTasks] = useState<ProductWorkflowTask[]>([]);
   const [readiness, setReadiness] = useState<ProductReadiness>(emptyReadiness);
   const [stage, setStage] = useState<"review" | "vbk">("review");
   const [input, setInput] = useState("");
   const [createInput, setCreateInput] = useState<CreateProductInput>(initialInput);
+  const [autoConfirmCreation, setAutoConfirmCreation] = useState(false);
   const [creating, setCreating] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -63,10 +66,12 @@ export function useProductState() {
     product, setProduct,
     activeLocalProductId, setActiveLocalProductId,
     products, setProducts,
+    workflowTasks, setWorkflowTasks,
     readiness, setReadiness,
     stage, setStage,
     input, setInput,
     createInput, setCreateInput,
+    autoConfirmCreation, setAutoConfirmCreation,
     creating, setCreating,
     savingProduct, setSavingProduct,
     loading, setLoading,

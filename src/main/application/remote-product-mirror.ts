@@ -4,23 +4,28 @@ import { TibetProductConflictError, type TibetProductService } from "../infrastr
 
 /**
  * Serialises legacy local mutations into Tibet. SQLite remains an operational
- * cache for automation code, while every user-visible snapshot is broadcast
- * only after the remote revisioned PATCH succeeds.
+ * cache for automation code. Business snapshots are broadcast after the remote
+ * revisioned PATCH succeeds; explicitly allow-listed local runtime progress may
+ * be broadcast while its workflow lock is held, then converges to the remotely
+ * saved snapshot after release.
  */
 export function createRemoteProductMirror(args: {
   remote: TibetProductService;
   broadcast(product: ProductDetail): void;
   /** 长流程持有产品锁时，镜像只排队，不能抢先写远端。 */
   isWorkflowActive?: (productId: string) => boolean;
+  /**
+   * 自动录入的阶段状态属于本机运行态：远端同步仍需等待产品锁释放，但 UI
+   * 不能因此等到整轮结束才看到进展。仅由调用方对白名单工作流开启即时广播。
+   */
+  shouldBroadcastWhileActive?: (productId: string) => boolean;
 }) {
-  const queues = new Map<string, Promise<void>>();
+  // emit() always receives a complete ProductDetail snapshot, so replacing an
+  // older pending value is safe and preserves the newest runtime state.
+  const pending = new Map<string, ProductDetail>();
+  const workers = new Map<string, Promise<void>>();
 
   const sync = async (candidate: ProductDetail) => {
-    // productMutations 的本地广播可能发生在 AI / planning 尚未完成远端提交时。
-    // 等主流程释放产品锁后再读远端并同步，避免旧 revision 与主流程并发写入。
-    while (args.isWorkflowActive?.(candidate.id)) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
     let latest: ProductDetail;
     try {
       latest = await args.remote.get(candidate.id);
@@ -77,14 +82,41 @@ export function createRemoteProductMirror(args: {
     }
   };
 
+  const drain = async (productId: string) => {
+    // productMutations 的本地广播可能发生在 AI / planning 尚未完成远端提交时。
+    // 等主流程释放产品锁后再读远端并同步，避免旧 revision 与主流程并发写入。
+    while (pending.has(productId)) {
+      while (args.isWorkflowActive?.(productId)) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      // 长流程中同一产品会产生许多阶段快照。解锁时只写最后一份，避免在
+      // UI 已经实时前进后又从远端连续回放过期的中间状态。
+      const candidate = pending.get(productId);
+      if (!candidate) continue;
+      pending.delete(productId);
+      await sync(candidate);
+    }
+  };
+
+  const ensureWorker = (productId: string) => {
+    if (workers.has(productId)) return;
+    const worker = drain(productId);
+    workers.set(productId, worker);
+    void worker.finally(() => {
+      if (workers.get(productId) !== worker) return;
+      workers.delete(productId);
+      // sync 结束和 finally 之间若刚好收到新快照，继续启动 drain。
+      if (pending.has(productId)) ensureWorker(productId);
+    });
+  };
+
   return {
     emit(product: ProductDetail): void {
-      const previous = queues.get(product.id) ?? Promise.resolve();
-      const next = previous.catch(() => undefined).then(() => sync(product));
-      queues.set(product.id, next);
-      void next.finally(() => {
-        if (queues.get(product.id) === next) queues.delete(product.id);
-      });
+      pending.set(product.id, product);
+      if (args.isWorkflowActive?.(product.id) && args.shouldBroadcastWhileActive?.(product.id)) {
+        args.broadcast(product);
+      }
+      ensureWorker(product.id);
     },
   };
 }

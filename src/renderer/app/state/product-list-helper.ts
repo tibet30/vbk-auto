@@ -10,5 +10,6 @@ export function upsertProductToTop(
 ): ProductSummary[] {
   const idx = products.findIndex((p) => p.id === updated.id);
   if (idx === -1) return products;
-  return [updated, ...products.slice(0, idx), ...products.slice(idx + 1)];
+  const current = products[idx];
+  return [{ ...updated, workflowTask: updated.workflowTask ?? current.workflowTask }, ...products.slice(0, idx), ...products.slice(idx + 1)];
 }

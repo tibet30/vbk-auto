@@ -19,6 +19,7 @@
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { RECOMMENDATION_CATEGORIES } from "./schema/schema-definitions.js";
 import { readCover } from "../operations/cover-info.js";
+import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 
 export function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -81,7 +82,11 @@ export function hasValidItinerary(product: Record<string, unknown>): boolean {
     if (textValue(record.description).length === 0) return false;
     if (textValue(record.meals).length === 0) return false;
     const spots = asArray(record.spots);
-    if (!spots || spots.length === 0) return false;
+    if (!spots) return false;
+    if (spots.length === 0) {
+      if (dayHasUserOtherActivity(record)) continue;
+      return false;
+    }
     for (const spot of spots) {
       const item = asObject(spot);
       if (!item || textValue(item.name).length === 0) return false;

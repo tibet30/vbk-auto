@@ -212,9 +212,10 @@ function checkHotels(
 /** 校验「其他 / 自由活动」节点 description + 服务时间。 */
 function checkOther(
   dayLabel: string,
-  expected: { description: string; serviceTime: { startTime: string; endTime: string } },
+  expected: { description: string; serviceTime: { startTime: string; endTime: string } } | undefined,
   actualInfos: InfoRecord[],
 ): void {
+  if (!expected) return;
   const others = actualInfos.filter(isOther);
   if (!others.length) throw new Error(`${dayLabel} 回读缺少「其他 / 自由活动」节点`);
   const otherDesc = String(others[0]?.description ?? "").trim();
@@ -330,7 +331,7 @@ export async function verifyItineraryReadback(
     totalSpots += checkPois(dayLabel, exp.pois, infos);
     totalMeals += checkMeals(dayLabel, exp.meals, infos);
     totalHotels += checkHotels(dayLabel, exp.hotels, infos);
-    checkOther(dayLabel, { description: exp.other.description, serviceTime: exp.serviceTime }, infos);
+    checkOther(dayLabel, exp.other ? { description: exp.other.description, serviceTime: exp.serviceTime } : undefined, infos);
 
     if (dayIndex === 0) checkPickup(dayLabel, expectations, infos);
     if (dayIndex === descriptions.length - 1) checkDropoff(exp.orderDay, expectations, infos);

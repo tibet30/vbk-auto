@@ -5,6 +5,7 @@ const RICH_TAG = /<\/?(?:p|strong|em|ul|ol|li|br)\b/i;
 
 export const PRODUCT_FEATURES_RICH_TEXT_GUIDE = `features 必须是 JSON 字符串值，绝对禁止输出对象、数组、AST 或 null；字符串内容才是 VBK 富文本 HTML 片段：
 - 写 3～5 个与本产品事实一致的亮点，每个亮点使用 <p><strong>短标题：</strong>具体说明</p>；需要列举时可用 <ul><li>...</li></ul>。
+- 字符串内容必须直接以富文本标签开始和结束，不得在 HTML 片段首尾额外添加英文或中文双引号；JSON 自身的语法引号不属于内容。
 - 只允许 p、strong、em、ul、ol、li、br 标签；禁止 Markdown、外层 html/body、style/class/id 等属性，以及 a、img、table、script、iframe。
 - 产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息，避免与导游条款显示“含导游”产生不一致。
 - 标题简短、内容具体，不虚构服务、资源或承诺；同时遵守 VBK 文案黑名单。`;
@@ -17,6 +18,20 @@ function escapeText(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function stripWrappingDoubleQuotes(value: string): string {
+  const pairs: ReadonlyArray<readonly [string, string]> = [
+    ['"', '"'],
+    ["“", "”"],
+    ["&quot;", "&quot;"],
+  ];
+  for (const [opening, closing] of pairs) {
+    if (value.startsWith(opening) && value.endsWith(closing)) {
+      return value.slice(opening.length, -closing.length).trim();
+    }
+  }
+  return value;
+}
+
 /**
  * 把 AI/历史 features 转成可交给 UEditor 的安全 HTML：
  * - 纯文本按行包装成 p，保持旧产品兼容；
@@ -24,7 +39,7 @@ function escapeText(value: string): string {
  */
 export function formatProductFeaturesHtml(value: unknown): string {
   if (typeof value !== "string") return "";
-  const source = value.trim();
+  const source = stripWrappingDoubleQuotes(value.trim());
   if (!source) return "";
   if (!RICH_TAG.test(source)) {
     return source.split(/\r?\n/).map((line) => `<p>${escapeText(line)}</p>`).join("");

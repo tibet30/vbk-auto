@@ -28,6 +28,18 @@ import type {
 import { NonAdvisableAutomationError } from "../automation.main/automation.main.errors.js";
 
 /**
+ * 统一把“处理器正常返回”落成可观察的阶段完成态。
+ *
+ * 每个 API 处理器必须自行完成远端回读，不满足即抛错；只有其成功返回且用户
+ * 没有在执行期间停止时，才能在这里更新阶段状态。销售控制没有普通 phase row，
+ * 因此允许找不到行，仍由其专用状态交接记录 recovery 完成态。
+ */
+function completeVerifiedPhase(run: RecoveryContext["run"], phase: string): void {
+  const phaseRow = run.phases.find((item) => item.phase === phase);
+  if (phaseRow) phaseRow.status = "completed";
+}
+
+/**
  * 对单个 phase 做「尝试 → 失败 → 调 advisor → 应用 action → 重试」主循环。
  * 返回 status ∈ { completed, cancelled, needs_user }：
  *   - completed：handler 跑成功，或用户在 handler 结束后才取消；
@@ -112,8 +124,9 @@ export async function runPhaseWithRecovery(
         persist();
         return { status: "cancelled", finalError: rec.finalError };
       }
+      completeVerifiedPhase(ctx.run, ctx.phase);
       rec.state = "completed";
-      ctx.log(`phase=${ctx.phase} attempt=${attempt} completed`, "info");
+      ctx.log(`phase=${ctx.phase} attempt=${attempt} resultVerified`, "info");
       persist();
       return { status: "completed" };
     } catch (err) {

@@ -135,6 +135,23 @@ test("目标 imageId 已是封面时只回读，不重复绑定", async () => {
   assert.deepEqual(browser.calls.map((call) => call.endpoint), [SEARCH_PRODUCT_IMAGE_ENDPOINT]);
 });
 
+test("封面直绑：显式产品 ID 不读取页面 URL", async () => {
+  const browser = browserWithResponses([
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 42851842, accompanyTourInfo: { imageTypeId: 2 } } },
+    ] } },
+  ]);
+  browser.url = () => { throw new Error("production path must not read page.url"); };
+  const result = await bindCtripLibraryCoverViaApi(browser as never, 42851842, 77098085, {
+    confirmationAttempts: 1,
+    confirmationIntervalMs: 0,
+  });
+  assert.deepEqual(result, { reused: false, productId: 77098085, imageId: 42851842 });
+  assert.deepEqual(browser.calls[1].body, buildCoverBindRequest(77098085, 42851842));
+});
+
 test("接口业务失败与回读不一致都不得误报成功", async () => {
   const failed = browserWithResponses([
     { status: 200, payload: { productImages: [] } },

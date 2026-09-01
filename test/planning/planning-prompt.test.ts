@@ -48,6 +48,24 @@ test("basicInfo user message 不暴露系统编码、联系人、资源 ID 或�
   assert.doesNotMatch(message, /bookingControls|commercial|operations|inventory/);
 });
 
+test("用户想法送入补全文案 AI 前移除绝对化用语，但保留逐日安排", () => {
+  const message = composePlanningUserMessage({
+    ...request,
+    context: {
+      ...request.context,
+      currentProduct: {
+        ...request.context.currentProduct,
+        basicInfo: {
+          ...(request.context.currentProduct.basicInfo as Record<string, unknown>),
+          userIdea: "第一天去晋祠，安排全网最佳、唯一的体验",
+        },
+      },
+    },
+  });
+  assert.match(message, /第一天去晋祠/);
+  assert.doesNotMatch(message, /全网|最佳|唯一/);
+});
+
 test("上下文投影递归清理禁写字段，并限制 vehicleResource 子字段", () => {
   const projected = projectProductContext("commercial", request.context.currentProduct);
   const text = JSON.stringify(projected);

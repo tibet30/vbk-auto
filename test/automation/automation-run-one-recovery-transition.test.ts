@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import type { AutomationRun, PhaseAttempt } from "../../src/shared/contracts.js";
 import { prepareSinglePhaseRetry } from "../../src/main/automation/phase-retry.js";
 import { runPhaseWithRecovery } from "../../src/main/automation/recovery/recovery.js";
+import { resolveRunStatusAfterSinglePhaseSuccess } from "../../src/main/automation/automation.main/automation.main.run-one-state.js";
 import {
   aggregateSectionState,
   recoveryNeedsUser,
@@ -113,7 +114,7 @@ async function successfulExecute(): Promise<unknown> {
 
 /** 模拟 runOnePhase 的成功分支：恢复 run.status + run.currentPhase */
 function applyCompletedOutcome(run: AutomationRun, originalRunStatus: AutomationRun["status"]): void {
-  run.status = originalRunStatus === "running" ? "running" : originalRunStatus;
+  run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
   run.currentPhase = undefined;
 }
 
@@ -160,6 +161,7 @@ test("失败 presentation 重试成功后：recovery[presentation] 不再停留�
   assert.equal(presentationRec.attempts.length, 0, "成功的 retry 不留失败 attempts");
   assert.equal(presentationRec.userInstruction, undefined, "成功的 retry 必须清掉旧 userInstruction");
   assert.equal(presentationRec.finalError, undefined, "成功的 retry 必须清掉旧 finalError");
+  assert.equal(run.status, "queued", "已修复最后一个失败阶段但仍有 pending 时，应等待断点续跑而非保留 failed");
 });
 
 test("失败 presentation 重试成功后：recoveryNeedsUser(run) 返回 null，UI banner 消失", async () => {

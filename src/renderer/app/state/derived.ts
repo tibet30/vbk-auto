@@ -21,6 +21,8 @@ export function useAppStateDerived(state: AppStateBase) {
   const {
     product,
     setProducts,
+    workflowTasks,
+    setWorkflowTasks,
     setProduct,
     activeLocalProductId,
     setActiveLocalProductId,
@@ -93,9 +95,20 @@ export function useAppStateDerived(state: AppStateBase) {
       void checkVbkLogin();
     }, 1200);
     const unsubscribe = api()!.events.onProductUpdated((next) => {
-      setProduct((current: typeof product) => current?.id === next.id ? next : current);
+      setProduct((current: typeof product) => current?.id === next.id
+        ? { ...next, workflowTask: next.workflowTask ?? current.workflowTask }
+        : current);
       void updateReadiness(next);
       setProducts((prev) => upsertProductToTop(prev, next));
+    });
+    const unsubscribeWorkflowTask = api()!.events.onWorkflowTaskUpdated((task) => {
+      setWorkflowTasks((current) => [task, ...current.filter((item) => item.id !== task.id)]);
+      setProducts((current) => current.map((item) => item.id === task.localProductId
+        ? { ...item, workflowTask: task, updatedAt: task.updatedAt }
+        : item));
+      setProduct((current: typeof product) => current?.id === task.localProductId
+        ? { ...current, workflowTask: task }
+        : current);
     });
     const unsubscribePlanning = api()!.events.onPlanningStateUpdated((localProductId, next) => {
       if (currentLocalProductIdRefForPlanning.current !== localProductId) return;
@@ -108,6 +121,7 @@ export function useAppStateDerived(state: AppStateBase) {
       window.clearTimeout(retryLoginCheck);
       unsubscribePageReady();
       unsubscribe();
+      unsubscribeWorkflowTask();
       unsubscribePlanning();
     };
   }, []);
@@ -363,10 +377,18 @@ export function useAppStateDerived(state: AppStateBase) {
     };
   }, [planningState]);
 
+  const currentWorkflowTask = useMemo(() => {
+    if (!product) return null;
+    return workflowTasks.find((task) => task.localProductId === product.id)
+      ?? product.workflowTask
+      ?? null;
+  }, [product?.id, product?.workflowTask, workflowTasks]);
+
   return {
     ...productViewDerived,
     ...browserDerived,
     planningRecovery,
+    currentWorkflowTask,
     ...planningActions,
   };
 }

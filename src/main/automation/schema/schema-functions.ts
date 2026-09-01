@@ -141,7 +141,13 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
   }
   // 旧草稿可能绕过 stage-runner 的输出门禁；启动自动化前重新扫描产品文案，
   // 避免平台黑名单词进入 VBK 页面后才失败。
-  const copyBadCases = findAllVbkCopyBadCases(product);
+  const copyScanProduct = {
+    ...product,
+    ...(product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
+      ? { basicInfo: { ...(product.basicInfo as Record<string, unknown>), userIdea: undefined } }
+      : {}),
+  };
+  const copyBadCases = findAllVbkCopyBadCases(copyScanProduct);
   for (const copyBadCase of copyBadCases) {
     blockers.push({
       label: "VBK 文案黑名单",

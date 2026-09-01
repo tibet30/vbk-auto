@@ -14,7 +14,6 @@
  *     ...
  *   });
  *
- * 调试（automation:debug:*）类 IPC 走 assertDebugEnabled()：仅 dev + VBK_DEBUG=1。
  */
 
 import { app, BrowserWindow, ipcMain as electronIpcMain, type IpcMainInvokeEvent } from "electron";
@@ -107,17 +106,4 @@ export function assertTrustedSender(event: IpcMainInvokeEvent, channel: string):
   throw new Error(
     `[ipc] sender not trusted: channel=${channel} owner=${sender.isOwner} mainFrame=${sender.isMainFrame} url=${sender.url || "<empty>"}`,
   );
-}
-
-/**
- * 调试 IPC 通道的总闸。两条必须同时为真：
- *  - dev：app.isPackaged===false；
- *  - VBK_DEBUG=1：用户/测试显式开启。
- * 任意一条不满足 → 抛错。
- */
-export function assertDebugEnabled(channel: string): void {
-  const debugEnabled = process.env.VBK_DEBUG === "1";
-  if (!isDevEnv() || !debugEnabled) {
-    throw new Error(`[ipc] debug channel disabled: ${channel}`);
-  }
 }

@@ -1,8 +1,13 @@
 import type {
   PlanningItineraryDayDraft,
   PlanningPoiCandidate,
+  PlanningPoiDisambiguationRequest,
+  PlanningPoiDisambiguationResult,
 } from "../../shared/contracts-planning.js";
+import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
+import { otherActivitiesForDay } from "./user-intent.js";
+import { resolveAmbiguousPlanningPoi } from "./planning-poi-disambiguation.js";
 
 const FACILITY_RE = /入口|出口|停车场|售票处|游客中心|服务中心|换乘中心|检票口|接驳站|码头|车站|机场/;
 
@@ -78,6 +83,11 @@ export async function resolvePlanningPoiCandidates(args: {
   beforeEach: () => Promise<void>;
   query: (name: string) => Promise<PoiSuggestDetailResult>;
   checkAvailability?: (poiId: number) => Promise<{ status: "available" | "suspended" }>;
+  destination?: string;
+  userIdea?: string;
+  shouldDisambiguate?: (requestedName: string, index: number) => boolean;
+  preferredDay?: (requestedName: string, index: number) => number | undefined;
+  disambiguate?: (request: PlanningPoiDisambiguationRequest) => Promise<PlanningPoiDisambiguationResult>;
 }): Promise<PlanningPoiCandidate[]> {
   const result = new Array<PlanningPoiCandidate>(args.names.length);
   let cursor = 0;
@@ -89,7 +99,44 @@ export async function resolvePlanningPoiCandidates(args: {
       try {
         await args.beforeEach();
         const detail = await args.query(requestedName);
-        const candidate = toPlanningCandidate(requestedName, detail, args.province, args.city);
+        const details = [detail];
+        let candidate = toPlanningCandidate(requestedName, detail, args.province, args.city);
+        const originallyAmbiguous = candidate.status === "rejected"
+          && (candidate.reason === "未命中可确认的真实 POI" || candidate.reason?.startsWith("POI 地域不匹配"));
+        // 通用名（如“长城”）首次查询可能优先返回异地 POI。不能因为首个
+        // 搜索结果地域不匹配就中断一键链路；带产品城市重查一次，仍只接受
+        // 通过同一地域校验的真实 POI，绝不猜测或复用异地 ID。
+        const cityQualifiedName = `${args.city.trim()}${requestedName}`;
+        if (originallyAmbiguous
+          && args.city.trim()
+          && !requestedName.startsWith(args.city.trim())) {
+          await args.beforeEach();
+          const cityDetail = await args.query(cityQualifiedName);
+          details.push(cityDetail);
+          candidate = toPlanningCandidate(requestedName, cityDetail, args.province, args.city);
+        }
+        if (args.disambiguate
+          && originallyAmbiguous
+          && args.shouldDisambiguate?.(requestedName, index)) {
+          const resolved = await resolveAmbiguousPlanningPoi({
+            requestedName,
+            destination: args.destination || args.city,
+            province: args.province,
+            city: args.city,
+            userIdea: args.userIdea,
+            preferredDay: args.preferredDay?.(requestedName, index),
+            details,
+            disambiguate: args.disambiguate,
+            validate: (source, best) => toPlanningCandidate(
+              requestedName,
+              { ...source, best },
+              args.province,
+              args.city,
+            ),
+          });
+          if (resolved.candidate) candidate = resolved.candidate;
+          else if (resolved.reason) candidate = { ...candidate, reason: resolved.reason };
+        }
         if (candidate.status === "resolved" && candidate.poiId && args.checkAvailability) {
           const availability = await args.checkAvailability(candidate.poiId);
           result[index] = availability.status === "suspended"
@@ -155,6 +202,7 @@ export function expandVerifiedItinerary(args: {
   drafts: PlanningItineraryDayDraft[];
   pool: PlanningPoiCandidate[];
   days: number;
+  userIntent?: PlanningUserIntent;
 }): { ok: true; itinerary: Array<Record<string, unknown>>; selectedIds: Set<number> } | { ok: false; reason: string } {
   const pool = new Map<number, PlanningPoiCandidate>();
   for (const candidate of args.pool) {
@@ -167,14 +215,44 @@ export function expandVerifiedItinerary(args: {
   for (let index = 0; index < args.days; index += 1) {
     const draft = args.drafts[index];
     if (draft.day !== index + 1) return { ok: false, reason: `第 ${index + 1} 天 day 编号不连续` };
-    if (!draft.title || !draft.description || draft.poiIds.length === 0) {
-      return { ok: false, reason: `第 ${index + 1} 天缺少标题、描述或景点` };
+    const matchedPoiNames = draft.poiIds
+      .map((poiId) => pool.get(poiId)?.poiName)
+      .filter((poiName): poiName is string => Boolean(poiName));
+    const otherActivities = args.userIntent
+      ? otherActivitiesForDay({
+        intent: args.userIntent,
+        candidates: args.pool,
+        day: draft.day,
+        matchedPoiNames,
+      })
+      : [];
+    const requiredUserPoiIds = args.pool
+      .filter((candidate) => candidate.source === "user"
+        && candidate.status === "resolved"
+        && candidate.preferredDay === draft.day
+        && candidate.poiId)
+      .map((candidate) => candidate.poiId!);
+    if (requiredUserPoiIds.length > 0) {
+      const unexpected = draft.poiIds.find((poiId) => !requiredUserPoiIds.includes(poiId));
+      if (unexpected) {
+        return { ok: false, reason: `第 ${draft.day} 天存在用户未指定的 POI ${unexpected}；请严格按用户逐日计划编排` };
+      }
+      const missing = requiredUserPoiIds.find((poiId) => !draft.poiIds.includes(poiId));
+      if (missing) {
+        return { ok: false, reason: `第 ${draft.day} 天遗漏用户指定的 POI ${missing}` };
+      }
+    }
+    if (!draft.title || !draft.description || (draft.poiIds.length === 0 && otherActivities.length === 0)) {
+      return { ok: false, reason: `第 ${index + 1} 天缺少标题、描述或有效活动节点` };
     }
     const spots: Array<Record<string, unknown>> = [];
     const cities = new Set<string>();
     for (const poiId of draft.poiIds) {
       const candidate = pool.get(poiId);
       if (!candidate) return { ok: false, reason: `第 ${index + 1} 天引用了候选池外的 POI ${poiId}` };
+      if (candidate.source === "user" && candidate.preferredDay && candidate.preferredDay !== draft.day) {
+        return { ok: false, reason: `用户指定的「${candidate.poiName}」必须保留在第 ${candidate.preferredDay} 天` };
+      }
       if (selectedIds.has(poiId)) return { ok: false, reason: `POI ${candidate.poiName} 被重复使用` };
       selectedIds.add(poiId);
       if (candidate.city) cities.add(normaliseLocation(candidate.city));
@@ -193,8 +271,14 @@ export function expandVerifiedItinerary(args: {
       hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
       meals: draft.meals || "早餐自理；午餐自理；晚餐自理",
       ...(draft.mealDescriptions ? { mealDescriptions: draft.mealDescriptions } : {}),
+      ...(otherActivities.length ? { activities: otherActivities } : {}),
     });
   }
+  const omittedUserPoi = args.pool.find((candidate) => candidate.source === "user"
+    && candidate.status === "resolved"
+    && candidate.poiId
+    && !selectedIds.has(candidate.poiId));
+  if (omittedUserPoi) return { ok: false, reason: `用户明确指定的 POI「${omittedUserPoi.poiName || omittedUserPoi.requestedName}」未进入最终行程` };
   if (hasBacktrack(citySequence)) return { ok: false, reason: "跨日路线形成 A→B→A 折返" };
   return { ok: true, itinerary, selectedIds };
 }

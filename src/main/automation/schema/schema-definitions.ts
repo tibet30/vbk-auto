@@ -42,6 +42,8 @@ const itineraryDaySchema = z.object({
     title: z.string().min(1),
     detail: z.string().min(1),
     type: z.enum(["transport", "visit", "meal", "hotel", "free", "other"]).default("other"),
+    durationMinutes: z.number().int().positive().optional(),
+    source: z.enum(["user", "ai"]).optional(),
   })).optional(),
 });
 

@@ -21,6 +21,8 @@ const CLAUSE_HEAD = {
 export const REQUIRED_CLAUSE_IDS = {
   // 当前产品 operations.mealsIncluded / 导游文案均明确为持证中文导游。
   mandarinGuide: 3014,
+  // 私家团/拼小团均提供目的地当地专属用车，特殊路段可按当地规定换用小型车。
+  localExclusiveVehicle: 134,
   // 服务标准页的住宿为必选：行程所列酒店费用 + 2 人/间。
   itineraryHotelIncluded: 10095,
   hotelTwoPerRoom: 7,
@@ -31,16 +33,22 @@ export const REQUIRED_CLAUSE_IDS = {
   // 产品包含儿童价，因此采用允许未成年人、但必须由成人陪同的规则。
   minorWithAdult: 46,
   outboundTransportExcluded: 1082,
+  excessBaggageAndPersonalExpenses: 1120,
+  pregnancyBookingRestriction: 1095,
   flightForceMajeureNotice: 98,
   complimentaryActivityNotice: 383,
+  // 费用包含页：成人行程所列景点/场馆首道大门票。
+  adultTicketIncluded: 13,
+  // 费用包含页：儿童行程所列景点/场馆首道大门票。
+  childTicketIncluded: 10087,
 } as const;
 
 const LODGING_SELF_PAY_NOTE = "单房差及儿童占床费用（如产生），具体金额以出行前实际确认为准";
 // Saved platform clause IDs. The page-context payload is kept ID-only as well.
 export const DEFAULT_SELECTED_CLAUSE_IDS = {
-  1: [38536, 10095, 7, 10091, 13, 10087, 3014],
-  2: [REQUIRED_CLAUSE_IDS.outboundTransportExcluded, 1079],
-  3: [3031, 46],
+  1: [38536, 134, 10095, 7, 10091, 13, 10087, 3014],
+  2: [REQUIRED_CLAUSE_IDS.outboundTransportExcluded, 1079, REQUIRED_CLAUSE_IDS.excessBaggageAndPersonalExpenses],
+  3: [3031, 46, REQUIRED_CLAUSE_IDS.pregnancyBookingRestriction],
   4: [
     3011,
     REQUIRED_CLAUSE_IDS.flightForceMajeureNotice,
@@ -137,9 +145,13 @@ export function setClauseComponentValue(items, clauseItemId, componentCode, valu
   return next;
 }
 
+const ADULT_TICKET_REMARKS_COMPONENT = "landticketremarks";
+const CHILD_TICKET_REMARKS_COMPONENT = "landticket2";
+
 export async function saveStructuredProductClauses(page, productId, options = {}) {
   const isFreeTravel = options?.productForm === "freeTravel";
-  return page.evaluate(async ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, isFreeTravel }) => {
+  const adultTicketInclusionText = String(options?.adultTicketInclusionText ?? "").trim();
+  return page.evaluate(async ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, adultTicketInclusionText, adultTicketRemarksComponent, childTicketRemarksComponent, isFreeTravel }) => {
     const request = async (url, body, contentType = "application/json") => {
       const response = await fetch(url, {
         method: "POST",
@@ -260,9 +272,16 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       let items = format(clausePackage.clauseTypeDtos);
       if (tabEnum === 1 && !isFreeTravel) {
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.mandarinGuide);
+        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.localExclusiveVehicle);
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
+      }
+      if (tabEnum === 1 && adultTicketInclusionText) {
+        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.adultTicketIncluded);
+        items = setValue(items, requiredIds.adultTicketIncluded, adultTicketRemarksComponent, adultTicketInclusionText);
+        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
+        items = setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
       }
       if (tabEnum === 2 && !isFreeTravel) {
         items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
@@ -329,6 +348,30 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       if (missingIds.length > 0) {
         throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
       }
+      if (tabEnum === 1 && adultTicketInclusionText) {
+        const persistedItems = format(persistedPackage.clauseTypeDtos);
+        const persistedAdultTicket = persistedItems.find(
+          (item) => item.clauseItemId === requiredIds.adultTicketIncluded,
+        );
+        if (!persistedAdultTicket) {
+          throw new Error(`条款页签 1 保存后回读缺少成人门票条款：${requiredIds.adultTicketIncluded}`);
+        }
+        const persistedRemarks = (persistedAdultTicket.elementDtos ?? []).find(
+          (element) => element.componentCode === adultTicketRemarksComponent,
+        );
+        if (persistedRemarks?.value !== adultTicketInclusionText) {
+          throw new Error("条款页签 1 保存后回读的成人门票景点文本不一致");
+        }
+        const persistedChildTicket = persistedItems.find(
+          (item) => item.clauseItemId === requiredIds.childTicketIncluded,
+        );
+        const persistedChildRemarks = (persistedChildTicket?.elementDtos ?? []).find(
+          (element) => element.componentCode === childTicketRemarksComponent,
+        );
+        if (persistedChildRemarks?.value !== adultTicketInclusionText) {
+          throw new Error("条款页签 1 保存后回读的儿童门票景点文本不一致");
+        }
+      }
       savedTabs.push({ tabEnum, packageId, itemCount: items.length });
     }
     return { savedTabs };
@@ -338,6 +381,9 @@ export async function saveStructuredProductClauses(page, productId, options = {}
     requiredIds: REQUIRED_CLAUSE_IDS,
     defaultSelectedClauseIds: DEFAULT_SELECTED_CLAUSE_IDS,
     lodgingSelfPayNote: LODGING_SELF_PAY_NOTE,
+    adultTicketRemarksComponent: ADULT_TICKET_REMARKS_COMPONENT,
+    childTicketRemarksComponent: CHILD_TICKET_REMARKS_COMPONENT,
+    adultTicketInclusionText,
     isFreeTravel,
   });
 }

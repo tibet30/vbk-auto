@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { draftPhasesFor } from "../../src/main/automation/automation.main/automation.main.phases.js";
-import { fillAndSubmitPricingInventory } from "../../src/main/automation/ctrip/pricing.js";
 import { parseProduct } from "../../src/main/automation/schema/schema.js";
 
 function makeProduct(commercial?: Record<string, unknown>) {
@@ -57,16 +56,4 @@ test("只有 inventory 时包含 pricingInventory 阶段", () => {
 test("没有 pricing 和 inventory 时不包含 pricingInventory 阶段", () => {
   assert.equal(draftPhasesFor(makeProduct()).includes("pricingInventory"), false);
   assert.equal(draftPhasesFor(makeProduct({ packageName: "标准套餐" })).includes("pricingInventory"), false);
-});
-
-test("半完整商业数据进入 pricingInventory 后由阶段处理器报告缺配置", async () => {
-  const product = makeProduct({
-    packageName: "标准套餐",
-    pricing: { currency: "CNY", adult: 599, child: 399, minimumTravelers: 2 },
-  });
-
-  await assert.rejects(
-    () => fillAndSubmitPricingInventory(null, product, "7654321"),
-    /commercial\.inventory/,
-  );
 });

@@ -34,6 +34,7 @@ import {
   normaliseExpiry,
 } from "./vbk-cookie-serializer.js";
 import { waitForDomText } from "./vbk-page-wait.js";
+import { attachVbkSessionFetch } from "./vbk-session-fetch-adapter.js";
 import { navigateVbkPage } from "./vbk-navigation.js";
 import { isExpectedLoginRedirect } from "./vbk-navigation.js";
 import {
@@ -282,6 +283,10 @@ export class VbkBrowser {
   setVisible(visible: boolean) {
     this.visible = visible;
     this.view?.setVisible(visible);
+  }
+
+  isVisible(): boolean {
+    return this.visible;
   }
 
   // 暴露当前嵌入式浏览器 URL：URL 栏需要实时反映页面跳转，否者用户点
@@ -685,6 +690,8 @@ export class VbkBrowser {
         : "未找到嵌入式 VBK 页面，请先登录 VBK 后重试。");
     }
     ensureNativeDialogHandler(page);
+    const activeSession = this.view?.webContents.session;
+    if (activeSession) attachVbkSessionFetch(page, activeSession);
     return page;
   }
 

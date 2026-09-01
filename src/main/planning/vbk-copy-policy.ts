@@ -23,6 +23,12 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /首次/,
   },
   {
+    term: "首选",
+    reason: "VBK 产品图文实跑会判定为非法关键词",
+    alternatives: ["之选", "推荐选择"],
+    pattern: /首选/,
+  },
+  {
     term: "主席",
     reason: "VBK 行程描述实跑会判定为非法关键词",
     alternatives: ["重要人物", "相关负责人", "历史人物"],
@@ -108,6 +114,30 @@ export function buildVbkCopyPolicyPrompt(): string {
   ].join("\n");
 }
 
+/**
+ * 用户原始想法不是平台宣传文案，数据库中应保持原样；但送入 AI 前移除
+ * 未经核实的极限/排名承诺，避免模型把这些词继续扩散到产品可见文案。
+ */
+export function sanitiseUserIdeaForAi(value: string): string {
+  const absoluteCases = VBK_COPY_BAD_CASES.filter(({ term }) =>
+    term === "第一（宣传排名用语）"
+      || term === "最（极限表达）"
+      || term === "其他绝对化用语");
+  const withoutAbsolutePhrases = value.trim().replace(/最(?:佳|高|优|好|强|大|低|快|全|完整|专业|值得)/g, "");
+  const sanitised = absoluteCases.reduce((text, badCase) => {
+    const pattern = new RegExp(
+      badCase.pattern.source,
+      badCase.pattern.flags.includes("g") ? badCase.pattern.flags : `${badCase.pattern.flags}g`,
+    );
+    return text.replace(pattern, "");
+  }, withoutAbsolutePhrases);
+  return sanitised
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/([，、；。])\1+/g, "$1")
+    .replace(/[，、；]\s*(?=的)/g, "")
+    .replace(/^[，、；。\s]+|[，、；。\s]+$/g, "");
+}
+
 export function findVbkCopyBadCase(value: unknown, path = "value"):
   | { path: string; term: string; reason: string; alternatives: readonly string[] }
   | undefined {
@@ -154,4 +184,40 @@ export function findAllVbkCopyBadCases(value: unknown, path = "value"):
     }
   }
   return hits;
+}
+
+/**
+ * 仅修复 AI 输出中的自由可见文案，作为规划阶段的确定性兜底。
+ *
+ * 本函数不把修复视为放宽门禁：官方 POI 身份字段保持原样，且调用方必须在
+ * 修复后再次通过完整的 copy-policy 与 schema 校验才可写入产品。
+ */
+export function repairVbkCopyPolicyValue(value: unknown, path = "value"): unknown {
+  if (typeof value === "string") {
+    if (isVbkOfficialPoiIdentityPath(path)) return value;
+
+    // "首次到访" is the common phrase that triggered the live failure.  Its
+    // preferred alternative replaces the whole phrase, rather than producing
+    // the awkward "初到到访" from a character-only substitution below.
+    const phraseRepaired = value.replace(/首次到访/g, "初到");
+    return VBK_COPY_BAD_CASES.reduce((repaired, badCase) => {
+      if ("pathPattern" in badCase && !badCase.pathPattern.test(path)) return repaired;
+      const preferredAlternative = badCase.alternatives[0];
+      const pattern = new RegExp(
+        badCase.pattern.source,
+        badCase.pattern.flags.includes("g") ? badCase.pattern.flags : `${badCase.pattern.flags}g`,
+      );
+      return repaired.replace(pattern, preferredAlternative);
+    }, phraseRepaired);
+  }
+  if (Array.isArray(value)) {
+    return value.map((child, index) => repairVbkCopyPolicyValue(child, `${path}[${index}]`));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      key,
+      repairVbkCopyPolicyValue(child, `${path}.${key}`),
+    ]));
+  }
+  return value;
 }

@@ -515,13 +515,14 @@ test("pickKeySpotsFromItinerary 优先 poiName（贴近 VBK 内部标签名）",
   ]);
 });
 
-test("全量录入和单阶段 basic 重试使用同一全量景点列表", () => {
+test("全量录入和单阶段 basic 重试统一走 basic API", () => {
   const source = readAutomationSource();
-  const fullRun = source.slice(source.indexOf("export async function runAutomation"));
-  const onePhase = source.slice(source.indexOf("export async function runOnePhase"));
+  const fullStart = source.indexOf("export async function runAutomation");
+  const onePhaseStart = source.indexOf("export async function runOnePhase");
+  const fullRun = source.slice(fullStart, source.indexOf("\n// FILE:", fullStart));
+  const onePhase = source.slice(onePhaseStart, source.indexOf("\n// FILE:", onePhaseStart));
   for (const runner of [fullRun, onePhase]) {
-    assert.match(runner, /const keySpots = pickKeySpotsFromItinerary\((?:product|productDetail)\.product\);/);
-    assert.match(runner, /fillAndSaveBasicInfo\([\s\S]*?keySpots,/);
+    assert.match(runner, /ensureBasicInfoApi\(/);
+    assert.doesNotMatch(runner, /fillAndSaveBasicInfo\(/);
   }
-  assert.doesNotMatch(source, /pickKeySpotsFromItinerary\((?:product|productDetail)\.product,\s*3\)/);
 });

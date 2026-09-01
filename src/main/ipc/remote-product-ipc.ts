@@ -13,7 +13,37 @@ import type { MainIpcContext } from "./context.js";
 
 export function registerRemoteProductIpc(context: MainIpcContext): void {
   const { db, broadcastProduct, remoteProducts } = context;
-  ipcMain.handle("products:list", () => listRemoteProducts(remoteProducts));
+  ipcMain.handle("products:list", async () => (await listRemoteProducts(remoteProducts)).map((product) => {
+    db.completeWorkflowTaskForProduct(product);
+    const workflowTask = db.latestWorkflowTaskForProduct(product.id);
+    return {
+      ...product,
+      ...(workflowTask ? {
+        workflowTask,
+        updatedAt: Date.parse(workflowTask.updatedAt) > Date.parse(product.updatedAt)
+          ? workflowTask.updatedAt
+          : product.updatedAt,
+      } : {}),
+    };
+  }));
+  ipcMain.handle("workflowTasks:list", () => {
+    db.completeSavedProductWorkflowTasks();
+    return db.listWorkflowTasks();
+  });
+  ipcMain.handle("workflowTasks:get", (_event, id: string) => {
+    let task = db.getWorkflowTask(id);
+    if (!task) throw new Error(`后台任务不存在：${id}`);
+    const product = db.getProduct(task.localProductId);
+    if (product) {
+      db.completeWorkflowTaskForProduct(product);
+      task = db.getWorkflowTask(id)!;
+    }
+    return task;
+  });
+  ipcMain.handle("workflowTasks:abandon", (_event, id: string) => {
+    if (!context.abandonProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
+    return context.abandonProductTask(id);
+  });
   ipcMain.handle("products:create", async (_event, input: CreateProductInput) => {
     const login = await context.productWorkflows.runVbkPageExclusive(() => context.browser.status(true));
     if (!login.loggedIn) {
@@ -38,15 +68,30 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
         reason: created.injectReason,
       });
     }
-    broadcastProduct(created.product);
-    return created.product;
+    const initialProduct = db.getProduct(created.product.id) ?? created.product;
+    if (input.autoConfirm) {
+      if (!context.enqueueProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
+      const workflowTask = context.enqueueProductTask(initialProduct);
+      // 创建接口只返回已落库的产品和任务，不再等待规划与携程录入。
+      broadcastProduct(initialProduct);
+      return { ...initialProduct, workflowTask };
+    }
+    broadcastProduct(initialProduct);
+    return initialProduct;
   });
-  ipcMain.handle("products:get", (_event, id: string) => getProductForRead(
-    db,
-    remoteProducts,
-    id,
-    context.productWorkflows.activeWorkflow(id),
-  ));
+  ipcMain.handle("products:get", async (_event, id: string) => {
+    const product = await getProductForRead(
+      db,
+      remoteProducts,
+      id,
+      context.productWorkflows.activeWorkflow(id),
+    );
+    db.completeWorkflowTaskForProduct(product);
+    return {
+      ...product,
+      workflowTask: db.latestWorkflowTaskForProduct(id),
+    };
+  });
   ipcMain.handle("products:delete", async (_event, id: string) => {
     const removed = await deleteRemoteProduct(db, remoteProducts, id);
     if (!removed) throw productNotFound(id);

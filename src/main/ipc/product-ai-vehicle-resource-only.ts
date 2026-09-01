@@ -7,6 +7,17 @@ import type { MainIpcContext } from "./context.js";
 export function isVehicleResourceOnlyMessage(message: string): boolean {
   const text = message.replace(/\s+/g, "");
   if (!text) return false;
+  // 「保留现有用车」常出现在一次完整方案修订的保护条件里，不能因为
+  // “匹配 … 用车”恰好落在短窗口内，就吞掉用户要求修改行程的主诉。
+  // 仅排除明确的否定句（如“不要修改行程”），保留用车专项场景。
+  const textWithoutExplicitItineraryExclusions = text.replace(
+    /(?:不要|不用|不必|无需|别|勿).{0,3}(?:修改|更新|变更|调整|重做|重新生成|规划)?(?:行程|景点|POI|itinerary)/gi,
+    "",
+  );
+  const changesItinerary =
+    /(?:修改|更新|修复|变更|调整|重做|重新生成|重新规划|编排|安排|替换|添加|删除).{0,14}(?:行程|景点|POI|itinerary)/i.test(textWithoutExplicitItineraryExclusions)
+    || /(?:行程|景点|POI|itinerary).{0,14}(?:修改|更新|修复|变更|调整|重做|重新生成|重新规划|编排|安排|替换|添加|删除)/i.test(textWithoutExplicitItineraryExclusions);
+  if (changesItinerary) return false;
   const hasVehicleResourceIntent =
     /(用车|车辆|接送|司机|车).{0,12}(资源组|总成本|成本|预算|匹配|搜索|申请|生成|估算)/.test(text)
     || /(资源组|总成本|成本|预算|匹配|搜索|申请|生成|估算).{0,12}(用车|车辆|接送|司机|车)/.test(text);

@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, History, PackageOpen, Settings } from "lucide-react";
+import { BriefcaseBusiness, History, ListChecks, PackageOpen, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppModel } from "../../app.main.model";
 import { useAppAuth } from "../../auth/AppAuthContext";
@@ -51,6 +51,7 @@ export function AppRail({ model }: { model: AppModel }) {
   const isWorkspace = view === "workspace" && !product;
   const isProducts = view === "products" || (view === "workspace" && Boolean(product));
   const isOperationLog = view === "operation-log";
+  const isTasks = view === "tasks";
 
   return (
     <aside className={styles.rail} aria-label="主导航">
@@ -83,6 +84,20 @@ export function AppRail({ model }: { model: AppModel }) {
         title="产品"
       >
         <PackageOpen className={styles.icon} />
+      </button>
+
+      <button
+        className={styles.railBtn}
+        data-active={isTasks}
+        onClick={() => {
+          setProduct(null);
+          setView("tasks");
+          closeAccountMenus();
+        }}
+        aria-label="任务中心"
+        title="任务中心"
+      >
+        <ListChecks className={styles.icon} />
       </button>
 
       <button

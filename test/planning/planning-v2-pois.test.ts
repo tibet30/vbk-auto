@@ -141,6 +141,158 @@ test("POI queries are bounded at five concurrent requests", async () => {
   assert.equal(peak, 5);
 });
 
+test("异地同名 POI 会以产品城市重查，命中同城结果后继续一键规划", async () => {
+  const queries: string[] = [];
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["长城"],
+    province: "北京",
+    city: "北京",
+    beforeEach: async () => undefined,
+    query: async (name) => {
+      queries.push(name);
+      return name === "北京长城"
+        ? detail({ requested: name, poiName: "八达岭长城", poiId: 88001, province: "北京", city: "北京" })
+        : detail({ requested: name, poiName: "长城", poiId: 88000, province: "河北", city: "张家口" });
+    },
+  });
+
+  assert.deepEqual(queries, ["长城", "北京长城"]);
+  assert.deepEqual(candidate, {
+    requestedName: "长城",
+    status: "resolved",
+    poiId: 88001,
+    poiName: "八达岭长城",
+    province: "北京",
+    city: "北京",
+    district: "城关区",
+    address: "北京中路",
+  });
+});
+
+test("用户简称未精确命中时，AI 只从同城真实候选中选择大众常游主景点", async () => {
+  const queries: string[] = [];
+  const ambiguous: PoiSuggestDetailResult = {
+    httpStatus: 200,
+    businessStatus: "Success",
+    poiListCount: 3,
+    best: null,
+    candidates: [
+      { index: 0, poiName: "天安门广场", poiId: 75594, selectable: true, province: "北京", city: "北京", district: "东城区", address: "东长安街", textFields: [] },
+      { index: 1, poiName: "天安门城楼", poiId: 84616, selectable: true, province: "北京", city: "北京", district: "东城区", address: "西长安街", textFields: [] },
+      { index: 2, poiName: "同安影视城-天安门", poiId: 143751554, selectable: true, province: "福建", city: "厦门", textFields: [] },
+    ],
+  };
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["天安门"], province: "北京", city: "北京", destination: "北京",
+    userIdea: "第一天天安门、故宫", beforeEach: async () => undefined,
+    query: async (name) => { queries.push(name); return ambiguous; },
+    shouldDisambiguate: () => true,
+    preferredDay: () => 1,
+    disambiguate: async (request) => {
+      assert.deepEqual(request.candidates.map((item) => item.poiName), ["天安门广场", "天安门城楼"]);
+      assert.equal("poiId" in request.candidates[0], false, "AI 请求不能包含真实 POI ID");
+      assert.equal(request.preferredDay, 1);
+      return { decision: "selected", candidateId: "candidate-1", confidence: 0.93, reason: "大众常游主景点" };
+    },
+  });
+  assert.deepEqual(queries, ["天安门", "北京天安门"]);
+  assert.equal(candidate.status, "resolved");
+  assert.equal(candidate.poiName, "天安门广场");
+  assert.equal(candidate.poiId, 75594);
+  assert.match(candidate.reason ?? "", /AI 消歧/);
+});
+
+test("城市重查命中内部子景点时仍由 AI 选择大众常游主景点", async () => {
+  const direct: PoiSuggestDetailResult = {
+    httpStatus: 200,
+    businessStatus: "Success",
+    poiListCount: 3,
+    best: { poiName: "长城", poiId: 99000 },
+    candidates: [
+      { index: 0, poiName: "长城", poiId: 99000, selectable: true, province: "河北", city: "张家口", textFields: [] },
+      { index: 1, poiName: "八达岭长城", poiId: 75596, selectable: true, province: "北京", city: "北京", textFields: [] },
+      { index: 2, poiName: "慕田峪长城", poiId: 75609, selectable: true, province: "北京", city: "北京", textFields: [] },
+    ],
+  };
+  const cityQualified: PoiSuggestDetailResult = {
+    httpStatus: 200,
+    businessStatus: "Success",
+    poiListCount: 3,
+    best: { poiName: "北京青龙峡风景区-古长城", poiId: 149947398 },
+    candidates: [
+      { index: 0, poiName: "北京青龙峡风景区-古长城", poiId: 149947398, selectable: true, province: "北京", city: "北京", textFields: [] },
+      { index: 1, poiName: "八达岭长城", poiId: 75596, selectable: true, province: "北京", city: "北京", textFields: [] },
+      { index: 2, poiName: "慕田峪长城", poiId: 75609, selectable: true, province: "北京", city: "北京", textFields: [] },
+    ],
+  };
+  let aiCalls = 0;
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["长城"], province: "北京", city: "北京", destination: "北京", beforeEach: async () => undefined,
+    query: async (name) => name === "北京长城" ? cityQualified : direct,
+    shouldDisambiguate: () => true,
+    disambiguate: async (request) => {
+      aiCalls += 1;
+      assert.deepEqual(
+        request.candidates.map((item) => item.poiName),
+        ["八达岭长城", "慕田峪长城", "北京青龙峡风景区-古长城"],
+      );
+      return { decision: "selected", candidateId: "candidate-1", confidence: 0.95, reason: "普通游客最常前往的代表性主景点" };
+    },
+  });
+
+  assert.equal(aiCalls, 1);
+  assert.equal(candidate.status, "resolved");
+  assert.equal(candidate.poiName, "八达岭长城");
+  assert.equal(candidate.poiId, 75596);
+  assert.notEqual(candidate.poiId, 149947398);
+});
+
+test("AI 无法确定简称时保留候选摘要并进入人工确认", async () => {
+  const ambiguous: PoiSuggestDetailResult = {
+    httpStatus: 200, businessStatus: "Success", poiListCount: 2, best: null,
+    candidates: [
+      { index: 0, poiName: "八达岭长城", poiId: 75596, selectable: true, province: "北京", city: "北京", textFields: [] },
+      { index: 1, poiName: "慕田峪长城", poiId: 75609, selectable: true, province: "北京", city: "北京", textFields: [] },
+    ],
+  };
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["长城"], province: "北京", city: "北京", beforeEach: async () => undefined,
+    query: async () => ambiguous, shouldDisambiguate: () => true,
+    disambiguate: async () => ({ decision: "uncertain", confidence: 0.55, reason: "缺少具体偏好" }),
+  });
+  assert.equal(candidate.status, "rejected");
+  assert.match(candidate.reason ?? "", /八达岭长城、慕田峪长城/);
+  assert.match(candidate.reason ?? "", /缺少具体偏好/);
+});
+
+test("用户明确指定官方主景点时不调用 AI 消歧", async () => {
+  let calls = 0;
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["慕田峪长城"], province: "北京", city: "北京", beforeEach: async () => undefined,
+    query: async (name) => detail({ requested: name, poiId: 75609, province: "北京", city: "北京" }),
+    shouldDisambiguate: () => true,
+    disambiguate: async () => { calls += 1; return { decision: "uncertain", confidence: 0, reason: "不应调用" }; },
+  });
+  assert.equal(candidate.status, "resolved");
+  assert.equal(candidate.poiId, 75609);
+  assert.equal(calls, 0);
+});
+
+test("AI 选中的真实候选仍必须通过暂停营业检查", async () => {
+  const ambiguous: PoiSuggestDetailResult = {
+    httpStatus: 200, businessStatus: "Success", poiListCount: 1, best: null,
+    candidates: [{ index: 0, poiName: "天安门广场", poiId: 75594, selectable: true, province: "北京", city: "北京", textFields: [] }],
+  };
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["天安门"], province: "北京", city: "北京", beforeEach: async () => undefined,
+    query: async () => ambiguous, shouldDisambiguate: () => true,
+    disambiguate: async () => ({ decision: "selected", candidateId: "candidate-1", confidence: 0.96, reason: "代表性主景点" }),
+    checkAvailability: async () => ({ status: "suspended" }),
+  });
+  assert.equal(candidate.status, "rejected");
+  assert.match(candidate.reason ?? "", /暂停营业/);
+});
+
 test("three-stage POI pool rejects suspended sights immediately after resolving their ID", async () => {
   const events: string[] = [];
   const [candidate] = await resolvePlanningPoiCandidates({
@@ -192,4 +344,19 @@ test("itinerary only accepts pool POIs, exact day coverage, no duplicates or A-B
   const backtrack = expandVerifiedItinerary({ drafts: base([[1], [2], [3]]), pool, days: 3 });
   assert.equal(backtrack.ok, false);
   if (!backtrack.ok) assert.match(backtrack.reason, /折返/);
+});
+
+test("逐日用户 POI 已匹配时，编排不能擅自增加或遗漏当天景点", () => {
+  const pool = [
+    { requestedName: "故宫", status: "resolved" as const, source: "user" as const, preferredDay: 1, poiId: 75595, poiName: "故宫博物院", city: "北京" },
+    { requestedName: "景山", status: "resolved" as const, source: "ai" as const, poiId: 76610, poiName: "景山公园", city: "北京" },
+  ];
+  const expanded = expandVerifiedItinerary({
+    days: 1,
+    pool,
+    userIntent: { rawIdea: "第一天故宫", preferences: [], activities: [] },
+    drafts: [{ day: 1, title: "北京中轴", description: "游览故宫与景山", poiIds: [75595, 76610] }],
+  });
+  assert.equal(expanded.ok, false);
+  if (!expanded.ok) assert.match(expanded.reason, /用户未指定/);
 });

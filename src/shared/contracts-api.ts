@@ -21,6 +21,7 @@ import type {
   ProductDetail,
   ProductReadiness,
   ProductSummary,
+  ProductWorkflowTask,
   Settings,
   VehicleResourceMatch,
   HotelResourceMatch,
@@ -69,6 +70,12 @@ export interface VbkApi {
     readiness(id: string): Promise<ProductReadiness>;
     updateReviewField(id: string, input: ManualReviewFieldInput): Promise<ProductDetail>;
     updateProductJson(id: string, json: string): Promise<ProductDetail>;
+  };
+  workflowTasks: {
+    list(): Promise<ProductWorkflowTask[]>;
+    get(id: string): Promise<ProductWorkflowTask>;
+    /** 永久封存任务；保留关联产品与已经写入的 VBK 草稿。 */
+    abandon(id: string): Promise<ProductWorkflowTask>;
   };
   ai: {
     send(localProductId: string, content: string): Promise<void>;
@@ -144,22 +151,6 @@ export interface VbkApi {
      * 跨进程 abort，安全起见不强制中断 in-flight click。
      */
     stop(localProductId: string): Promise<void>;
-  };
-  /**
-   * 调试入口：让 CLI / IDE 能逐函数调用 ctrip.ts，单步观察 VBK 页面状态。
-   * 通过 IPC 调用 DraftAutomation，settings/storage 不变。
-   */
-  debug: {
-    /** 执行一个具名步骤（例如「selectStationAddress」）。返回 JSON 可序列化结果。 */
-    runStep(stepName: string, argsJson: string): Promise<unknown>;
-    /** 取当前 VBK 页面快照。 */
-    snapshot(label?: string): Promise<unknown>;
-    /** 列出本次进程内已命中的断点。 */
-    hitBreakpoints(): Promise<string[]>;
-    /** 远程 resume（continue/step/stop）。 */
-    resume(command: "continue" | "step" | "stop"): Promise<{ stopped: boolean }>;
-    /** 查看当前配置的断点列表（来源：env VBK_DEBUG_BREAKPOINTS）。 */
-    listBreakpoints(): Promise<string[]>;
   };
   accounts: {
     /** 返回 VBK 账号在本机保存的固定信息（当前：400 电话、管家联系人）。 */
@@ -240,6 +231,8 @@ export interface VbkApi {
   };
   events: {
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
+    /** 后台任务每次持久化状态变化后推送；任务中心和产品入口共用。 */
+    onWorkflowTaskUpdated(listener: (task: ProductWorkflowTask) => void): () => void;
     /** 主进程成功持久化规划状态后推送；订阅者必须按 localProductId 过滤。 */
     onPlanningStateUpdated(listener: (localProductId: string, state: PlanningGenerationState) => void): () => void;
     /** VBK 页面加载完成、SPA 渲染就绪后推送；renderer 收到后触发 checkVbkLogin。 */

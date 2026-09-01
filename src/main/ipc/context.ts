@@ -11,8 +11,10 @@ import type {
   AiProvider,
   Planner,
   PlanningGenerationState,
+  PlanningRunResult,
   ProductDetail,
   ProductReadiness,
+  ProductWorkflowTask,
   Settings,
   VbkLoginStatus,
 } from "../../shared/contracts.js";
@@ -48,4 +50,10 @@ export interface MainIpcContext {
   detectProviderIdInMain: () => Promise<number | null>;
   emitProductIfKnown: (accountName: string, info: unknown) => void;
   logPoiManualIpc: (event: string, context: Record<string, unknown>) => void;
+  /** 新产品三阶段规划；由 planning IPC 注册后注入，供一键创建编排复用。 */
+  startPlanning?: (localProductId: string) => Promise<PlanningRunResult>;
+  /** 一键创建只负责落任务；调度器在 renderer 请求结束后继续执行。 */
+  enqueueProductTask?: (product: ProductDetail) => ProductWorkflowTask;
+  /** 永久废弃后台任务；运行中任务会在安全检查点停止。 */
+  abandonProductTask?: (taskId: string) => Promise<ProductWorkflowTask>;
 }

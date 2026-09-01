@@ -50,6 +50,13 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /礼佛/,
   },
   {
+    term: "旅游意外险",
+    reason: "产品权益未经核实，且 VBK 产品图文实跑会判定相关表述为非法关键词",
+    alternatives: ["直接删除该表述，不提及保险权益"],
+    pattern: /(?:(?:赠送|送|含|包含|附赠|建议(?:另行)?购买)\s*)?旅游意外险(?:一份)?/,
+    replacement: "",
+  },
+  {
     term: "祈福",
     reason: "VBK 行程描述实跑会判定为非法关键词",
     alternatives: ["参观天坛", "游览祭坛建筑", "了解皇家祭祀文化"],
@@ -104,8 +111,9 @@ export function isVbkOfficialPoiIdentityPath(path: string): boolean {
 
 export function buildVbkCopyPolicyPrompt(): string {
   const rules = VBK_COPY_BAD_CASES.map(
-    ({ term, reason, alternatives }) =>
-      `- 禁止词「${term}」：${reason}；请按语境改写为「${alternatives.join("」或「")}」`,
+    (badCase) => "replacement" in badCase && badCase.replacement === ""
+      ? `- 禁止词「${badCase.term}」：${badCase.reason}；直接删除相关表述，不要改写成其他保险承诺`
+      : `- 禁止词「${badCase.term}」：${badCase.reason}；请按语境改写为「${badCase.alternatives.join("」或「")}」`,
   ).join("\n");
   return [
     "VBK 文案黑名单（适用于所有 AI 生成的可见文案，禁止原样输出）：",
@@ -200,15 +208,24 @@ export function repairVbkCopyPolicyValue(value: unknown, path = "value"): unknow
     // preferred alternative replaces the whole phrase, rather than producing
     // the awkward "初到到访" from a character-only substitution below.
     const phraseRepaired = value.replace(/首次到访/g, "初到");
-    return VBK_COPY_BAD_CASES.reduce((repaired, badCase) => {
+    const removedCopyFragment = VBK_COPY_BAD_CASES.some(
+      (badCase) => "replacement" in badCase && badCase.replacement === "" && badCase.pattern.test(value),
+    );
+    const repairedValue = VBK_COPY_BAD_CASES.reduce((repaired, badCase) => {
       if ("pathPattern" in badCase && !badCase.pathPattern.test(path)) return repaired;
-      const preferredAlternative = badCase.alternatives[0];
+      const preferredAlternative = "replacement" in badCase
+        ? badCase.replacement
+        : badCase.alternatives[0];
       const pattern = new RegExp(
         badCase.pattern.source,
         badCase.pattern.flags.includes("g") ? badCase.pattern.flags : `${badCase.pattern.flags}g`,
       );
       return repaired.replace(pattern, preferredAlternative);
     }, phraseRepaired);
+    if (!removedCopyFragment) return repairedValue;
+    return repairedValue
+      .replace(/([，、；。])(?:\s*[，、；。])+/g, "$1")
+      .replace(/^[，、；。\s]+|[，、；\s]+$/g, "");
   }
   if (Array.isArray(value)) {
     return value.map((child, index) => repairVbkCopyPolicyValue(child, `${path}[${index}]`));

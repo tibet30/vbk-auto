@@ -1,10 +1,15 @@
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiProviderLabel, hasActiveAiKey } from "../../../../shared/contracts.js";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { ProductBriefForm, ProductList, EmptyProductState } from "../../helpers";
 import styles from "./index.module.less";
+
+// 后台任务会高频刷新 products / workflowTasks。新建表单只应响应自己的草稿
+// 与提交状态，不能跟着无关任务反复重渲染，否则中文输入法的组合输入和焦点
+// 都可能被打断。
+const StableProductBriefForm = memo(ProductBriefForm);
 
 /**
  * 产品列表页：标题 + 计数 + 新建按钮，再加产品列表（或新建表单）。
@@ -32,12 +37,23 @@ export function AppProductsPage({ model }: { model: AppModel }) {
   } = model;
   const [selectedVbkAccount, setSelectedVbkAccount] = useState("all");
   const [page, setPage] = useState(1);
+  const createProductRef = useRef(createProduct);
+  createProductRef.current = createProduct;
+
+  const cancelCreation = useCallback(() => {
+    setCreating(false);
+    setAutoConfirmCreation(false);
+  }, [setAutoConfirmCreation, setCreating]);
+  const submitCreation = useCallback(() => {
+    void createProductRef.current();
+  }, []);
 
   const aiConfigured = hasActiveAiKey(settings);
   const aiProviderName = aiProviderLabel(settings);
   useEffect(() => {
+    if (creating) return;
     void refreshVbkLoginAccounts();
-  }, [refreshVbkLoginAccounts]);
+  }, [creating, refreshVbkLoginAccounts]);
   const vbkAccounts = useMemo(() => {
     const entries = [
       ...(vbkLogin?.loginAccount ? [{ key: vbkLogin.loginAccount, label: vbkLogin.accountName ?? vbkLogin.loginAccount }] : []),
@@ -118,19 +134,14 @@ export function AppProductsPage({ model }: { model: AppModel }) {
         </header>
 
         {creating ? (
-          <ProductBriefForm
+          <StableProductBriefForm
             input={createInput}
             setInput={setCreateInput}
             autoConfirm={autoConfirmCreation}
             setAutoConfirm={setAutoConfirmCreation}
             submitting={savingProduct}
-            onCancel={() => {
-              setCreating(false);
-              setAutoConfirmCreation(false);
-            }}
-            onSubmit={() => {
-              void createProduct();
-            }}
+            onCancel={cancelCreation}
+            onSubmit={submitCreation}
           />
         ) : products.length === 0 ? (
           <EmptyProductState aiConfigured={aiConfigured} providerLabel={aiProviderName} />

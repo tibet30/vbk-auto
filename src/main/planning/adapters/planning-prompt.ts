@@ -34,10 +34,11 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 2. recommendations 数组长度必须严格等于 3：只输出第 1、2、3 条，禁止第 4 条或更多；category 互不重复。数组长度不是 3 会导致本阶段整体失败并重试。
 3. presentation 模块的外层形状必须是 {"module":"presentation","status":"accepted","value":{...四个 presentation 字段...},"reason":null}；reason 只能在 value 右侧与 value 同级，绝不能放进 value 对象。
 4. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
-5. 每条 recommendations[].text 经首尾去空格和 VBK 标点归一后必须不超过 80 UTF-8 字节（平台硬上限 84 字节）；中文含标点建议不超过 26 个汉字。生成后逐条自行核对，宁短勿超，禁止输出接近或超过上限的长句。
-6. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
-7. 禁止使用“最、最佳、最高、最优”等绝对化表达；改用“更、较为、重点”等客观表述。
-8. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
+5. 只有当前结构化产品上下文明示了已核实的免费权益时，才可使用“贴心赠送”；禁止自行编造保险、礼品、门票、接送或其他赠送权益。没有已核实赠品时，从服务保障、精选酒店、特色美食中选择有事实依据的分类与文案。
+6. 每条 recommendations[].text 经首尾去空格和 VBK 标点归一后必须不超过 80 UTF-8 字节（平台硬上限 84 字节）；中文含标点建议不超过 26 个汉字。生成后逐条自行核对，宁短勿超，禁止输出接近或超过上限的长句。
+7. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
+8. 禁止使用“最、最佳、最高、最优”等绝对化表达；改用“更、较为、重点”等客观表述。
+9. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
   commercial: `1. 套餐名由本地系统按目的地、天数、晚数和产品形态固定生成；本阶段不要输出 packageName。
 2. 价格统一按人均填写；pricing.adult > 0，pricing.child >= 0；minimumTravelers 固定为 1；cost.adult 不可超过 adult。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。

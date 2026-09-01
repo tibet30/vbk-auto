@@ -164,6 +164,15 @@ test("产品标题按天数自动换算晚数", async (t) => {
   assert.equal((product.product.basicInfo as { nights: number }).nights, 3);
 });
 
+test("一地多日游不因超过五天被误判为需要大交通的境内长途", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-seven-day-type-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const product = db.createProduct({ destination: "西安", days: 7, productForm: "privateTour" });
+
+  assert.equal((product.product.sales as { productType: string }).productType, "domesticShort");
+});
+
 test("异常创建参数会返回清晰校验提示", async (t) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-invalid-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));

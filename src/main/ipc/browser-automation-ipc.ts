@@ -139,6 +139,9 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   ipcMain.handle("automation:retryOnePhase", (_event, localProductId: string, phase: string) =>
     context.productWorkflows.runExclusive(localProductId, "automation", () =>
       context.automation.retryOnePhase(localProductId, phase)));
+  ipcMain.handle("automation:replaceLockedDraft", (_event, localProductId: string) =>
+    context.productWorkflows.runExclusive(localProductId, "automation", () =>
+      Promise.resolve(context.automation.replaceLockedDraft(localProductId))));
   ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => {
     const userId = context.getExtensionUserId();
     const raw = String(accountName ?? "").trim();

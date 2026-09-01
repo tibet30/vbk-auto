@@ -11,6 +11,11 @@ type PoiCandidate = {
   ticketType?: { key?: unknown; name?: unknown } | null;
 };
 
+function positiveInteger(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function candidatesFrom(payload: unknown): PoiCandidate[] {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
   const body = payload as Record<string, unknown>;
@@ -50,13 +55,16 @@ export async function enrichItineraryPoiMetadata(
           includeCidQuery: false,
         });
         const match = candidatesFrom(result.payload).find((candidate) => String(candidate.poiId) === String(poiId));
-        if (!match?.poiType || typeof match.poiType.key !== "number") {
+        const poiTypeKey = positiveInteger(match?.poiType?.key);
+        if (!match?.poiType || poiTypeKey === null) {
           throw new Error(`VBK suggestPoi 未返回 poiId=${poiId}（${keyword}）的有效 poiType`);
         }
         metadata = {
-          poiType: { key: match.poiType.key, name: String(match.poiType.name ?? "") },
-          ticketType: match.ticketType && typeof match.ticketType.key === "number"
-            ? { key: match.ticketType.key, name: String(match.ticketType.name ?? "") }
+          // Electron 原生会话通道与页面 fetch 的 JSON 解码存在差异：平台偶发把
+          // 枚举 key 返回成字符串。两种响应语义相同，统一为 number 后再写入。
+          poiType: { key: poiTypeKey, name: String(match.poiType.name ?? "") },
+          ticketType: positiveInteger(match.ticketType?.key) !== null
+            ? { key: positiveInteger(match.ticketType?.key)!, name: String(match.ticketType?.name ?? "") }
             : null,
           poiData: { ...(match as Record<string, unknown>) },
         };

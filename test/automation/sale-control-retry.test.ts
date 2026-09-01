@@ -58,6 +58,7 @@ function makeProduct(overrides: Partial<ProductDetail> = {}): ProductDetail {
 function makeContext(product: ProductDetail) {
   const savedRuns: AutomationRun[] = [];
   const lifecycleUpdates: Array<Record<string, unknown>> = [];
+  const productUpdates: Array<Record<string, unknown>> = [];
   const db = {
     getProduct: () => product,
     saveAutomation: (_localProductId: string, run: AutomationRun) => savedRuns.push(run),
@@ -66,9 +67,15 @@ function makeContext(product: ProductDetail) {
       if (updates.productId !== undefined) product.productId = String(updates.productId);
       if (updates.status !== undefined) product.status = updates.status as ProductDetail["status"];
     },
+    updateProduct: (_localProductId: string, updated: Record<string, unknown>, status?: ProductDetail["status"]) => {
+      productUpdates.push(updated);
+      product.product = updated;
+      if (status) product.status = status;
+    },
   } as unknown as VbkDatabase;
   const browser = {
     setVisible: () => undefined,
+    isVisible: () => false,
     page: async () => ({ url: () => "https://vbooking.ctrip.com/ivbk/vendor/saleControlMerge" }),
   } as unknown as VbkBrowser;
 
@@ -85,9 +92,11 @@ function makeContext(product: ProductDetail) {
       },
       cancellationRequested: new Set<string>(),
       ensureBrowserHasBounds: () => undefined,
+      runVbkPageExclusive: async <T>(task: () => Promise<T>) => task(),
     },
     savedRuns,
     lifecycleUpdates,
+    productUpdates,
   };
 }
 
@@ -129,6 +138,21 @@ test("已有 productId：入口在创建前明确阻断，避免重复创建第�
   assert.equal(configureCalls, 0);
 });
 
+test("销售控制重试会在创建远端壳前迁移旧版 domesticLong 快照", async () => {
+  const product = makeProduct();
+  (product.product.sales as Record<string, unknown>).productType = "domesticLong";
+  const { ctx, productUpdates, savedRuns } = makeContext(product);
+
+  await runSaleControlPhase(ctx, product.id, async (_page, productData) => {
+    assert.equal(productData.sales.productType, "domesticShort");
+    return "76543211";
+  });
+
+  assert.equal(productUpdates.length, 1);
+  assert.equal((product.product.sales as Record<string, unknown>).productType, "domesticShort");
+  assert.ok(savedRuns.some((run) => run.logs.some((entry) => /销售控制重试前归一/.test(entry.message))));
+});
+
 test("prepareSaleControlRetry 不向 draft phases 添加 saleControl", () => {
   const next = prepareSaleControlRetry(makeRun(), "2026-08-12T01:00:00.000Z");
   assert.equal(next.currentPhase, "saleControl");
@@ -165,6 +189,29 @@ test("销售控制重执行进行中：同一产品的第二次 retryOnePhase �
   await assert.rejects(() => automation.retryOnePhase(product.id, "saleControl"), /正在进行中/);
   release();
   await first;
+});
+
+test("应用在销售控制创建产品壳期间退出时不会自动重复创建", async () => {
+  const product = makeProduct();
+  product.automation = {
+    ...makeRun("failed"),
+    currentPhase: "saleControl",
+    phases: [{ phase: "basic", status: "pending" }],
+    recovery: {
+      phases: {
+        saleControl: {
+          phase: "saleControl",
+          state: "needs_user",
+          attempts: [],
+          finalError: "应用重启导致自动录入被中断",
+        },
+      },
+    },
+  };
+  const db = { getProduct: () => product } as unknown as VbkDatabase;
+  const automation = new DraftAutomation(db, {} as VbkBrowser, () => undefined, async () => ({ action: "wait_for_user", reasoning: "test" }));
+
+  await assert.rejects(() => automation.start(product.id), /核查 VBK 是否已生成草稿.*避免重复创建/);
 });
 
 test("销售控制行提供重执行入口，但仍保持空 phaseNames 的 done 聚合设计", () => {

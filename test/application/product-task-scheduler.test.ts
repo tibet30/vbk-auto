@@ -103,6 +103,92 @@ test("readiness 未通过时任务保留为 needs_attention，不调用携程自
   assert.equal(automationCalls, 0);
 });
 
+test("应用重启后续跑已回队的中断任务", async () => {
+  const store = fakeTaskStore();
+  const interrupted = store.createWorkflowTask(product().id, product().name);
+  store.updateWorkflowTask(interrupted.id, {
+    status: "queued",
+    stage: "automation",
+    progress: 65,
+    message: "任务因应用退出而中断，将在启动后继续",
+    startedAt: "2026-09-01T00:00:00.000Z",
+  });
+  let planningCalls = 0;
+  let resumePlanningCalls = 0;
+  let automationCalls = 0;
+  const emittedStages: string[] = [];
+  let resolveDone!: (task: ProductWorkflowTask) => void;
+  const done = new Promise<ProductWorkflowTask>((resolve) => { resolveDone = resolve; });
+  const scheduler = new ProductTaskScheduler({
+    db: store as never,
+    startPlanning: async () => {
+      planningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应重做" } as never;
+    },
+    resumePlanning: async () => {
+      resumePlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应回到规划" } as never;
+    },
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, work) => work() },
+    automation: { start: async () => { automationCalls += 1; } },
+    emitTask: (task) => {
+      emittedStages.push(task.stage);
+      if (task.status === "succeeded") resolveDone(task);
+    },
+    emitProduct: () => undefined,
+  });
+
+  scheduler.resumeQueued();
+  const completed = await done;
+
+  assert.equal(planningCalls, 0);
+  assert.equal(resumePlanningCalls, 0);
+  assert.equal(automationCalls, 1);
+  assert.equal(emittedStages.includes("planning"), false);
+  assert.equal(emittedStages.includes("readiness"), false);
+  assert.equal(completed.status, "succeeded");
+  assert.equal(completed.stage, "completed");
+  assert.equal(completed.progress, 100);
+});
+
+test("应用重启发生在规划阶段时恢复既有规划，而不是清空 foundation 重建", async () => {
+  const store = fakeTaskStore();
+  const interrupted = store.createWorkflowTask(product().id, product().name);
+  store.updateWorkflowTask(interrupted.id, {
+    status: "queued",
+    stage: "planning",
+    progress: 35,
+    message: "任务因应用退出而中断，将在启动后继续",
+  });
+  let startPlanningCalls = 0;
+  let resumePlanningCalls = 0;
+  let resolveDone!: (task: ProductWorkflowTask) => void;
+  const done = new Promise<ProductWorkflowTask>((resolve) => { resolveDone = resolve; });
+  const scheduler = new ProductTaskScheduler({
+    db: store as never,
+    startPlanning: async () => {
+      startPlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应重建" } as never;
+    },
+    resumePlanning: async () => {
+      resumePlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "已续跑" } as never;
+    },
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, work) => work() },
+    automation: { start: async () => undefined },
+    emitTask: (task) => { if (task.status === "succeeded") resolveDone(task); },
+    emitProduct: () => undefined,
+  });
+
+  scheduler.resumeQueued();
+  await done;
+
+  assert.equal(startPlanningCalls, 0);
+  assert.equal(resumePlanningCalls, 1);
+});
+
 test("排队任务永久废弃后不会启动规划，重复废弃保持终态", async () => {
   const store = fakeTaskStore();
   let planningCalls = 0;

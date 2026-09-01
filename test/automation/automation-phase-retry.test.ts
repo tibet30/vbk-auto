@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { preparePhaseRetry, prepareQueuedPhaseResume } from "../../src/main/automation/phase-retry.js";
+import { DraftAutomation, interruptedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.class.js";
 import type { AutomationRun } from "../../src/shared/contracts.js";
 
 const previous = {
@@ -129,4 +130,81 @@ test("prepareQueuedPhaseResume：从首个待继续阶段恢复，不重跑已�
   assert.equal(next.status, "running");
   assert.deepEqual(next.phases.map((phase) => phase.status), ["completed", "completed", "completed", "pending", "pending"]);
   assert.match(next.logs.at(-1)?.message ?? "", /已修复断点继续：package/);
+});
+
+test("应用重启中断只恢复当前失败阶段，销售控制保留人工核查边界", () => {
+  const interrupted: AutomationRun = {
+    id: "run-interrupted",
+    status: "failed",
+    currentPhase: "presentation",
+    phases: [
+      { phase: "basic", status: "completed" },
+      { phase: "presentation", status: "failed" },
+      { phase: "itinerary", status: "pending" },
+    ],
+    logs: [],
+    recovery: {
+      phases: {
+        presentation: {
+          phase: "presentation",
+          state: "needs_user",
+          attempts: [],
+          finalError: "应用重启导致自动录入被中断",
+        },
+      },
+    },
+  };
+  assert.equal(interruptedAutomationResumePhase(interrupted), "presentation");
+  assert.equal(interruptedAutomationResumePhase({
+    ...interrupted,
+    currentPhase: "saleControl",
+    phases: [{ phase: "basic", status: "pending" }],
+    recovery: {
+      phases: {
+        saleControl: {
+          phase: "saleControl",
+          state: "needs_user",
+          attempts: [],
+          finalError: "应用重启导致自动录入被中断",
+        },
+      },
+    },
+  }), "saleControl");
+});
+
+test("DraftAutomation.start 把应用中断映射为阶段重试，而不是全量重跑", async () => {
+  const interrupted: AutomationRun = {
+    id: "run-interrupted-start",
+    status: "failed",
+    currentPhase: "presentation",
+    phases: [
+      { phase: "basic", status: "completed" },
+      { phase: "presentation", status: "failed" },
+    ],
+    logs: [],
+    recovery: {
+      phases: {
+        presentation: {
+          phase: "presentation",
+          state: "needs_user",
+          attempts: [],
+          finalError: "应用重启导致自动录入被中断",
+        },
+      },
+    },
+  };
+  const automation = new DraftAutomation(
+    { getProduct: () => ({ id: "local-1", automation: interrupted }) } as never,
+    {} as never,
+    () => undefined,
+    async () => ({ action: "wait_for_user", reasoning: "test" }),
+  );
+  let retryFrom: string | undefined;
+  (automation as unknown as { run: (_id: string, phase?: string) => Promise<void> }).run = async (_id, phase) => {
+    retryFrom = phase;
+  };
+
+  await automation.start("local-1");
+
+  assert.equal(retryFrom, "presentation");
 });

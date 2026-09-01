@@ -18,6 +18,8 @@ export function useAppStateBase() {
   const productState = useProductState();
   const accountState = useAccountBrowserState();
   const aiState = useAiSettingsState();
+  const collectionScopeRef = useRef("");
+  collectionScopeRef.current = `${navigation.view}:${productState.creating ? "creating" : "list"}`;
 
   const currentLocalProductIdRef = useRef<string | null>(null);
   currentLocalProductIdRef.current = productState.product?.id ?? null;
@@ -44,23 +46,30 @@ export function useAppStateBase() {
   // 必须保持稳定引用：设置页 effect 依赖该函数，普通 async 箭头会形成刷新循环。
   const refreshVbkLoginAccounts = useCallback(async () => {
     if (!api()) return;
+    const requestScope = collectionScopeRef.current;
     accountState.setLoadingLoginAccounts(true);
     try {
-      accountState.setVbkLoginAccounts(await api()!.browser.listLoginAccounts());
+      const next = await api()!.browser.listLoginAccounts();
+      if (collectionScopeRef.current !== requestScope) return;
+      accountState.setVbkLoginAccounts(next);
     } catch (error) {
+      if (collectionScopeRef.current !== requestScope) return;
       accountState.setVbkLoginAccounts({ current: null, saved: [] });
       navigation.setNotice(error instanceof Error ? error.message : "读取账号列表失败。");
     } finally {
+      if (collectionScopeRef.current !== requestScope) return;
       accountState.setLoadingLoginAccounts(false);
     }
   }, []);
 
   const refresh = async () => {
     if (!api()) return;
+    const requestScope = collectionScopeRef.current;
     const [productResult, taskResult] = await Promise.allSettled([
       api()!.products.list(),
       api()!.workflowTasks.list(),
     ]);
+    if (collectionScopeRef.current !== requestScope) return;
     if (taskResult.status === "fulfilled") {
       productState.setWorkflowTasks(taskResult.value);
     }

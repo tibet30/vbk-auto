@@ -24,7 +24,7 @@ import { AutomationCancelledError } from "./automation.main.errors.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
-import { enterPhasePageForApi, recordPhaseRetry, refreshPhasePageAfterApi } from "./automation.main.retry-navigation.js";
+import { executeApiWithPhasePageSync, recordPhaseRetry } from "./automation.main.retry-navigation.js";
 import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
 import { ensurePackageApi } from "../ctrip/package-api.js";
 import {
@@ -113,22 +113,16 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
         phaseRecord(phase);
         return ctx.runVbkPageExclusive(async () => {
-          if (ctx.browser.isVisible()) {
-            ctx.ensureBrowserHasBounds();
-            await enterPhasePageForApi({
-              page,
-              productId,
-              phase,
-              log,
-              navigate: (url) => ctx.browser.navigate(url),
-            });
-          } else {
-            log(`phase=${phase} 后台执行：VBK 页面未打开，跳过页面进入`, "info");
-          }
-          const result = await executeApi();
-          if (ctx.browser.isVisible()) await refreshPhasePageAfterApi({ page, productId, phase, log });
-          else log(`phase=${phase} API 远端回读完成：VBK 页面已关闭，跳过页面刷新`, "info");
-          return result;
+          return executeApiWithPhasePageSync({
+            page,
+            productId,
+            phase,
+            log,
+            isPageVisible: () => ctx.browser.isVisible(),
+            ensureBrowserHasBounds: ctx.ensureBrowserHasBounds,
+            navigate: (url) => ctx.browser.navigate(url),
+            executeApi,
+          });
         });
       };
 

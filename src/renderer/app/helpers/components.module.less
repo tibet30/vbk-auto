@@ -22,8 +22,11 @@
   gap: var(--pad-sm);
 }
 
-.briefGrid label { min-width: 0; }
+.briefGrid label { min-width: 0; display: grid; align-content: start; }
 .briefGrid select { height: 38px; }
+
+.briefForm .input[aria-invalid='true'] { border-color: var(--destructive); }
+.fieldError { margin-top: 5px; color: var(--destructive); font-size: var(--fs-xs); line-height: 1.5; }
 
 .ideaField {
   display: flex;

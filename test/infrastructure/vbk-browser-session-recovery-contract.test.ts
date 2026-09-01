@@ -3,6 +3,18 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const source = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
+
+test("hidden VBK navigation cannot steal the renderer IME focus", () => {
+  const createViewStart = source.indexOf("private createView(partition: string)");
+  const createViewEnd = source.indexOf("private ensureDefaultView", createViewStart);
+  assert.ok(createViewStart >= 0 && createViewEnd > createViewStart, "createView implementation must exist");
+  const createView = source.slice(createViewStart, createViewEnd);
+  assert.match(
+    createView,
+    /webPreferences:\s*\{[\s\S]*partition,[\s\S]*focusOnNavigation:\s*false/,
+    "background WebContentsView navigation must not become the macOS first responder",
+  );
+});
 const mainSource = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
 const accountStatusSource = readFileSync(new URL("../../src/main/infrastructure/vbk-account-status.ts", import.meta.url), "utf8");
 const initialise = source.slice(source.indexOf("  private async initialiseOnce()"), source.indexOf("  /**\n   * 调整 view 布局"));

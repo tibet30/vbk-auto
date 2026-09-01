@@ -4,6 +4,8 @@ import type {
   VbkSessionContext,
   VbkSessionNativeRequest,
   VbkSessionNativeResult,
+  VbkSessionNativeTextRequest,
+  VbkSessionNativeTextResult,
 } from "./vbk-session-request.js";
 
 function emptyContext(): VbkSessionContext {
@@ -25,9 +27,11 @@ function safePayload(text: string): unknown {
 
 /** 给 Playwright Page 附加同一 Electron partition 的原生 fetch，供 CORS 拒绝时使用。 */
 export function attachVbkSessionFetch(page: Page, electronSession: Session): void {
-  const target = page as Page & { vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult> };
-  if (target.vbkSessionFetch) return;
-  target.vbkSessionFetch = async (request) => {
+  const target = page as Page & {
+    vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult>;
+    vbkSessionGetText?: (request: VbkSessionNativeTextRequest) => Promise<VbkSessionNativeTextResult>;
+  };
+  if (!target.vbkSessionFetch) target.vbkSessionFetch = async (request) => {
     const startedAt = Date.now();
     const cookies = await electronSession.cookies.get({});
     const ctx = emptyContext();
@@ -67,5 +71,14 @@ export function attachVbkSessionFetch(page: Page, electronSession: Session): voi
     const root = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, any> : {};
     ctx.responseAck = String(root.ResponseStatus?.Ack ?? "").slice(0, 200);
     return { status: response.status, payload, durationMs: Date.now() - startedAt, ctx };
+  };
+  if (!target.vbkSessionGetText) target.vbkSessionGetText = async (request) => {
+    const response = await electronSession.fetch(request.endpoint, {
+      method: "GET",
+      headers: request.headers,
+      referrer: request.referrer,
+      referrerPolicy: request.referrerPolicy,
+    });
+    return { status: response.status, text: await response.text() };
   };
 }

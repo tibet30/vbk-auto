@@ -200,6 +200,40 @@ test("vbkSessionRequest 浏览器侧超时与 evaluate 超时都有明确错误"
   );
 });
 
+test("页面导航销毁 evaluate 上下文时改用同分区原生请求", async () => {
+  let nativeCalls = 0;
+  const page = {
+    async evaluate() {
+      throw new Error("page.evaluate: Execution context was destroyed, most likely because of a navigation");
+    },
+    async vbkSessionFetch() {
+      nativeCalls += 1;
+      return {
+        status: 200,
+        payload: { ResponseStatus: { Ack: "Success" } },
+        durationMs: 1,
+        ctx: {
+          hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false,
+          hasUbtVidCookie: false, hasVbkTicketCookie: true, hasBticketCookie: false,
+          hasJsSessionIdCookie: false, hasBusinessIdCookie: false, hasBfaCookie: false,
+          responseAck: "Success", responseDataItemCount: 0,
+        },
+      };
+    },
+  };
+
+  const result = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/1/demo",
+    browserRequestTimeoutMs: 1000,
+    evaluateTimeoutMs: 1000,
+    errorLabel: "VBK 导航竞态测试",
+    body: { head: { cid: "" } },
+  });
+
+  assert.equal(nativeCalls, 1);
+  assert.equal(result.status, 200);
+});
+
 // ─────────────────────────────────────────────────────────────────────────
 // 7. 真实 evaluate 闭包：responseDataItemCount 在 6 种响应形态下的归一化计数，
 //    以及 responseAck 的提取。不记录 / 不断言 cookie 值与原始 payload。

@@ -102,12 +102,15 @@ export class ProductTaskScheduler {
     if (this.active.has(taskId)) return;
     const task = this.dependencies.db.getWorkflowTask(taskId);
     if (!task || task.status !== "queued") return;
+    const resumeFrom = task.stage === "queued" ? "planning" : task.stage;
+    if (resumeFrom === "completed") return;
+    const resuming = task.stage !== "queued";
     this.active.add(taskId);
     const started = this.persist(taskId, {
       status: "running",
-      stage: "planning",
-      progress: 5,
-      message: "任务已开始，准备生成产品方案",
+      stage: resumeFrom,
+      progress: resuming ? task.progress : 5,
+      message: resuming ? "任务因应用退出而中断，正在从原阶段继续" : "任务已开始，准备生成产品方案",
       startedAt: new Date().toISOString(),
       error: undefined,
     });
@@ -127,6 +130,7 @@ export class ProductTaskScheduler {
           message: STAGE_MESSAGE[stage],
         }),
         () => this.dependencies.db.getWorkflowTask(taskId)?.status === "abandoned",
+        { resumeFrom, resumePlanning: resuming && resumeFrom === "planning" },
       );
       if (result.status === "abandoned") {
         return;

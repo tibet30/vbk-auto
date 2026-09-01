@@ -73,6 +73,7 @@ const api: VbkApi = {
     retry: (localProductId) => ipcRenderer.invoke("automation:retry", localProductId),
     retryPhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryPhase", localProductId, phase),
     retryOnePhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryOnePhase", localProductId, phase),
+    replaceLockedDraft: (localProductId) => ipcRenderer.invoke("automation:replaceLockedDraft", localProductId),
     stop: (localProductId) => ipcRenderer.invoke("automation:stop", localProductId),
   },
   accounts: {

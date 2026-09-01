@@ -144,6 +144,8 @@ export interface VbkApi {
      * 状态 —— completed / pending 都可以触发；后续阶段状态不变。
      */
     retryOnePhase(localProductId: string, phase: string): Promise<void>;
+    /** 保留已失败且不可改型的旧 VBK 草稿，准备创建新的替代草稿。 */
+    replaceLockedDraft(localProductId: string): Promise<{ previousProductId: string }>;
     /**
      * 用户主动中止当前产品的自动录入。立即把 AutomationRun 标记为
      * cancelled 并落盘（UI 可立刻看到「已停止」），已经在跑的当前阶段
@@ -231,7 +233,7 @@ export interface VbkApi {
   };
   events: {
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
-    /** 后台任务每次持久化状态变化后推送；任务中心和产品入口共用。 */
+    /** 后台任务状态变化后推送；renderer 按当前可见页面决定是否应用。 */
     onWorkflowTaskUpdated(listener: (task: ProductWorkflowTask) => void): () => void;
     /** 主进程成功持久化规划状态后推送；订阅者必须按 localProductId 过滤。 */
     onPlanningStateUpdated(listener: (localProductId: string, state: PlanningGenerationState) => void): () => void;

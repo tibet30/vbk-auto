@@ -30,6 +30,8 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   assert.match(planningPrompt, /VBK 文案黑名单/);
   assert.match(planningPrompt, /首次/);
   assert.match(planningPrompt, /初到/);
+  assert.match(planningPrompt, /只有当前结构化产品上下文明示了已核实的免费权益/);
+  assert.match(planningPrompt, /禁止自行编造保险、礼品、门票、接送或其他赠送权益/);
   for (const badCase of VBK_COPY_BAD_CASES) {
     assert.ok(planningPrompt.includes(badCase.term), `真实规划提示漏掉黑名单词：${badCase.term}`);
   }
@@ -52,6 +54,10 @@ test("实跑敏感词与极限宣传进入黑名单，但行程序号不被误�
   assert.equal(findVbkCopyBadCase("度假首选路线")?.term, "首选");
   assert.equal(findVbkCopyBadCase("参观主席旧居")?.term, "主席");
   assert.equal(findVbkCopyBadCase("前往南普陀寺礼佛")?.term, "礼佛");
+  assert.equal(findVbkCopyBadCase("赠送旅游意外险，行程安排更安心")?.term, "旅游意外险");
+  assert.equal(findVbkCopyBadCase("送旅游意外险，出行更安心")?.term, "旅游意外险");
+  assert.equal(findVbkCopyBadCase("含旅游意外险，行程安排更安心")?.term, "旅游意外险");
+  assert.equal(findVbkCopyBadCase("建议购买旅游意外险")?.term, "旅游意外险");
   assert.equal(findVbkCopyBadCase("登临长城之巅")?.term, "之巅");
   assert.equal(findVbkCopyBadCase("本地排名第一的路线")?.term, "第一（宣传排名用语）");
   assert.equal(findVbkCopyBadCase("提供最佳体验")?.term, "最（极限表达）");
@@ -158,9 +164,25 @@ test("确定性修复保留官方 POI 身份字段，并让未消除的命中继
   assert.equal(findVbkCopyBadCase(repaired)?.path, "value.itinerary[0].spots[0].poiName");
 });
 
-test("真实图文非法词首选会在写入前确定性改写", () => {
-  const repaired = repairVbkCopyPolicyValue({ presentation: { features: "云南度假首选" } });
-  assert.deepEqual(repaired, { presentation: { features: "云南度假之选" } });
+test("真实图文保险权益会在写入前整段删除", () => {
+  const repaired = repairVbkCopyPolicyValue({
+    presentation: {
+      features: "云南度假首选，赠送旅游意外险",
+      recommendations: [
+        { text: "送旅游意外险，出行更安心" },
+        { text: "行程清晰，含旅游意外险一份，衔接顺畅" },
+      ],
+    },
+  });
+  assert.deepEqual(repaired, {
+    presentation: {
+      features: "云南度假之选",
+      recommendations: [
+        { text: "出行更安心" },
+        { text: "行程清晰，衔接顺畅" },
+      ],
+    },
+  });
   assert.equal(findVbkCopyBadCase(repaired), undefined);
 });
 

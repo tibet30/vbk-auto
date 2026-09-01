@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensurePricingInventoryApi } from "../../src/main/automation/ctrip/pricing-api.js";
+import { ensurePricingInventoryApi, localBusinessDate } from "../../src/main/automation/ctrip/pricing-api.js";
 import {
   VBK_ASYNC_REQUEST_ACCEPTED_ERROR_CODE,
   VBK_GROUP_DAILY_REQUEST_INTERVAL_MS,
@@ -30,10 +30,14 @@ const ageBands = [
     ],
   },
 ];
+const firstDate = localBusinessDate();
+const nextBusinessDay = new Date();
+nextBusinessDay.setDate(nextBusinessDay.getDate() + 1);
+const secondDate = localBusinessDate(nextBusinessDay);
 const product = {
   commercial: {
     pricing: { adult: 1_000, child: 600 },
-    inventory: { startDate: "2026-09-01", endDate: "2026-09-02", dailyQuota: 8 },
+    inventory: { startDate: firstDate, endDate: secondDate, dailyQuota: 8 },
   },
   sales: { splitGroup: true, maxGroupSize: 8 },
 };
@@ -94,7 +98,7 @@ test("缺失 cost 时按 queryAgeBandConfig 的实际 ID 生成有限价格，�
     }
     if (path === "savePriceInventorySingleProduct") {
       const date = body.dateChoose.dates[0];
-      if (date === "2026-09-01" && firstDateAttempts++ === 0) {
+      if (date === firstDate && firstDateAttempts++ === 0) {
         return {
           ResponseStatus: {
             Ack: "Failure",
@@ -115,9 +119,9 @@ test("缺失 cost 时按 queryAgeBandConfig 的实际 ID 生成有限价格，�
 
   const saves = browser.calls.filter((call) => call.path === "savePriceInventorySingleProduct");
   assert.deepEqual(saves.map((call) => call.body.dateChoose.dates), [
-    ["2026-09-01"],
-    ["2026-09-01"],
-    ["2026-09-02"],
+    [firstDate],
+    [firstDate],
+    [secondDate],
   ]);
   assert.deepEqual(pauses, [VBK_GROUP_DAILY_REQUEST_INTERVAL_MS, VBK_GROUP_DAILY_REQUEST_INTERVAL_MS]);
   assert.equal(result.dateCount, 2);
@@ -154,10 +158,10 @@ test("缺失 cost 时按 queryAgeBandConfig 的实际 ID 生成有限价格，�
 test("已有四层但任一价格错误时不会跳过该日期，而会精确重提", async () => {
   const expectation = buildGroupPricingExpectation(ageBands, product.commercial.pricing, 8);
   const wrongExistingRow = {
-    productDate: "2026-09-01",
+    productDate: firstDate,
     inventory: { total: 8 },
     singleResourceUnitPriceDtos: expectation.units.map((unit, index) => ({
-      date: "2026-09-01",
+      date: firstDate,
       costPrice: index === 2 ? 0 : unit.costPrice,
       salePrice: unit.salePrice,
       unitInfo: { ageBandId: unit.ageBandId, tierId: unit.tierId },
@@ -183,7 +187,7 @@ test("已有四层但任一价格错误时不会跳过该日期，而会精确�
   assert.deepEqual(
     browser.calls.filter((call) => call.path === "savePriceInventorySingleProduct")
       .map((call) => call.body.dateChoose.dates[0]),
-    ["2026-09-01", "2026-09-02"],
+    [firstDate, secondDate],
   );
 });
 
@@ -214,16 +218,16 @@ test("queryAgeBandConfig 必须逐年龄段精确回读两档区间，缺失或�
 test("远端回读逐日期精确核对 ID、层级价格和库存", () => {
   const expectation = buildGroupPricingExpectation(ageBands, product.commercial.pricing, 8);
   const makeRow = () => ({
-    productDate: "2026-09-01",
+    productDate: firstDate,
     inventory: { total: 8 },
     singleResourceUnitPriceDtos: expectation.units.map((unit) => ({
-      date: "2026-09-01",
+      date: firstDate,
       costPrice: unit.costPrice,
       salePrice: unit.salePrice,
       unitInfo: { ageBandId: unit.ageBandId, tierId: unit.tierId },
     })),
   });
-  assert.doesNotThrow(() => assertGroupPricingReadback([makeRow()], ["2026-09-01"], expectation));
+  assert.doesNotThrow(() => assertGroupPricingReadback([makeRow()], [firstDate], expectation));
 
   const mutations: Array<[string, (row: any) => void]> = [
     ["缺层级", (row) => { row.singleResourceUnitPriceDtos.pop(); }],
@@ -236,7 +240,7 @@ test("远端回读逐日期精确核对 ID、层级价格和库存", () => {
     const row = makeRow();
     mutate(row);
     assert.throws(
-      () => assertGroupPricingReadback([row], ["2026-09-01"], expectation),
+      () => assertGroupPricingReadback([row], [firstDate], expectation),
       /回读不一致/,
       label,
     );
@@ -246,21 +250,21 @@ test("远端回读逐日期精确核对 ID、层级价格和库存", () => {
 test("平台明确标记自动卖价时，保留成本与库存精确核对但接受平台计算卖价", () => {
   const expectation = buildGroupPricingExpectation(ageBands, product.commercial.pricing, 8);
   const row = {
-    base: { productDate: "2026-09-01" },
+    base: { productDate: firstDate },
     inventory: { total: 8 },
     adultPrice: { salePriceStatus: "Auto" },
     childPrice: { salePriceStatus: "Auto" },
     singleResourceUnitPriceDtos: expectation.units.map((unit, index) => ({
-      date: "2026-09-01",
+      date: firstDate,
       costPrice: unit.costPrice,
       salePrice: unit.salePrice - (index + 1),
       unitInfo: { ageBandId: unit.ageBandId, tierId: unit.tierId },
     })),
   };
-  assert.doesNotThrow(() => assertGroupPricingReadback([row], ["2026-09-01"], expectation));
+  assert.doesNotThrow(() => assertGroupPricingReadback([row], [firstDate], expectation));
 
   row.singleResourceUnitPriceDtos[0].costPrice = 0;
-  assert.throws(() => assertGroupPricingReadback([row], ["2026-09-01"], expectation), /回读不一致/);
+  assert.throws(() => assertGroupPricingReadback([row], [firstDate], expectation), /回读不一致/);
 });
 
 test("只有结构化 20018030 会重试；错误消息中的同码文本不会触发兼容", async () => {
@@ -319,6 +323,6 @@ test("最终月回读价格为零时整次保存失败", async () => {
 
   await assert.rejects(
     ensurePricingInventoryApi(browser as never, product, "123", { pause: async () => {} }),
-    /1\/2 个日期精确匹配.*2026-09-02/,
+    new RegExp(`1/2 个日期精确匹配.*${secondDate}`),
   );
 });

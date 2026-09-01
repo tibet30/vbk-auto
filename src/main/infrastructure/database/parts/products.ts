@@ -285,19 +285,34 @@ export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
         const run = JSON.parse(row.payload_json) as AutomationRun;
         if (run.status !== "running") continue;
         run.status = "failed";
+        run.recovery ??= { phases: {} };
+        const markInterrupted = (phase: string) => {
+          const current = run.recovery!.phases[phase];
+          run.recovery!.phases[phase] = {
+            ...current,
+            phase,
+            state: "needs_user",
+            attempts: current?.attempts ?? [],
+            finalError: "应用重启导致自动录入被中断",
+            userInstruction: current?.userInstruction || "应用已保留完成阶段，将从当前阶段重新执行。",
+          };
+        };
+        let markedCurrentPhase = false;
         for (const phase of run.phases) {
-          if (phase.status === "running") phase.status = "failed";
-        }
-        if (run.recovery?.phases) {
-          for (const rec of Object.values(run.recovery.phases)) {
-            if (rec.state === "running" || rec.state === "advising" || rec.state === "retrying") {
-              rec.state = "needs_user";
-              rec.finalError = rec.finalError || "应用重启导致自动录入被中断";
-              if (!rec.userInstruction) rec.userInstruction = "请在 VBK 核查基础信息后重新保存草稿。";
-            }
+          if (phase.status === "running") {
+            phase.status = "failed";
+            markInterrupted(phase.phase);
+            markedCurrentPhase ||= phase.phase === run.currentPhase;
           }
-          run.logs.push({ at: new Date().toISOString(), message: "应用重启，自动录入已停止，请重新保存草稿", level: "warning" });
         }
+        for (const rec of Object.values(run.recovery.phases)) {
+          if (rec.state === "running" || rec.state === "advising" || rec.state === "retrying") {
+            markInterrupted(rec.phase);
+            markedCurrentPhase ||= rec.phase === run.currentPhase;
+          }
+        }
+        if (!markedCurrentPhase && run.currentPhase) markInterrupted(run.currentPhase);
+        run.logs.push({ at: new Date().toISOString(), message: "应用重启，已保留完成阶段并准备从断点继续", level: "warning" });
         updateRun.run(JSON.stringify(run), now(), row.local_product_id);
         const product = db.prepare("SELECT status FROM products WHERE id=?").get(row.local_product_id) as { status: string } | undefined;
         if (product && product.status !== "draft_saved" && product.status !== "blocked") {
@@ -369,7 +384,7 @@ export function setBasicInfoSaved(db: Database.Database, localProductId: string,
 export function setProductLifecycle(
   db: Database.Database,
   localProductId: string,
-  updates: { productId?: string; status?: ProductSummary["status"]; basicInfoSaved?: boolean },
+  updates: { productId?: string | null; status?: ProductSummary["status"]; basicInfoSaved?: boolean },
 ): void {
   const tx = db.transaction(() => {
     if (updates.productId !== undefined) db.prepare("UPDATE products SET product_id=?, updated_at=? WHERE id=?").run(updates.productId, now(), localProductId);

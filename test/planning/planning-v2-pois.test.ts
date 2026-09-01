@@ -321,7 +321,7 @@ test("three-stage POI pool rejects suspended sights immediately after resolving 
   });
 });
 
-test("itinerary only accepts pool POIs, exact day coverage, no duplicates or A-B-A", () => {
+test("itinerary only accepts pool POIs, repairs safe duplicates, and rejects A-B-A", () => {
   const pool = [
     { requestedName: "A1", status: "resolved" as const, poiId: 1, poiName: "A1", city: "拉萨" },
     { requestedName: "B1", status: "resolved" as const, poiId: 2, poiName: "B1", city: "日喀则" },
@@ -336,14 +336,48 @@ test("itinerary only accepts pool POIs, exact day coverage, no duplicates or A-B
   }));
   assert.equal(expandVerifiedItinerary({ drafts: base([[1], [2]]), pool, days: 2 }).ok, true);
   const duplicate = expandVerifiedItinerary({ drafts: base([[1], [1]]), pool, days: 2 });
-  assert.equal(duplicate.ok, false);
-  if (!duplicate.ok) assert.match(duplicate.reason, /重复/);
+  assert.equal(duplicate.ok, true);
+  if (duplicate.ok) {
+    const ids = duplicate.itinerary.flatMap((day) => (day.spots as Array<{ poiId: number }>).map((spot) => spot.poiId));
+    assert.equal(new Set(ids).size, 2);
+    assert.equal(ids[0], 1);
+    assert.notEqual(ids[1], 1);
+  }
   const outside = expandVerifiedItinerary({ drafts: base([[99], [2]]), pool, days: 2 });
   assert.equal(outside.ok, false);
   if (!outside.ok) assert.match(outside.reason, /候选池外/);
   const backtrack = expandVerifiedItinerary({ drafts: base([[1], [2], [3]]), pool, days: 3 });
   assert.equal(backtrack.ok, false);
   if (!backtrack.ok) assert.match(backtrack.reason, /折返/);
+});
+
+test("多日规划的空白日只用未占用的已核验 POI 确定性补位", () => {
+  const pool = Array.from({ length: 7 }, (_, index) => ({
+    requestedName: `西安景点${index + 1}`,
+    status: "resolved" as const,
+    source: "ai" as const,
+    poiId: index + 1,
+    poiName: `西安景点${index + 1}`,
+    city: "西安",
+  }));
+  const drafts = Array.from({ length: 7 }, (_, index) => ({
+    day: index + 1,
+    title: index === 5 ? "" : `第${index + 1}天`,
+    description: index === 5 ? "" : "合理游览",
+    poiIds: index === 5 ? [] : [index + 1],
+    meals: "三餐自理",
+  }));
+
+  const expanded = expandVerifiedItinerary({ drafts, pool, days: 7 });
+
+  assert.equal(expanded.ok, true);
+  if (!expanded.ok) return;
+  const sixth = expanded.itinerary[5] as { title: string; description: string; spots: Array<{ poiId: number }> };
+  assert.equal(sixth.spots[0].poiId, 6);
+  assert.match(sixth.title, /西安景点6/);
+  assert.match(sixth.description, /西安景点6/);
+  assert.equal(new Set(expanded.itinerary.flatMap((day) =>
+    (day.spots as Array<{ poiId: number }>).map((spot) => spot.poiId))).size, 7);
 });
 
 test("逐日用户 POI 已匹配时，编排不能擅自增加或遗漏当天景点", () => {

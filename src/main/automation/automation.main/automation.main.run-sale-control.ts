@@ -9,6 +9,7 @@ import { parseProduct } from "../schema/schema.js";
 import { prepareSaleControlRetry } from "../phase-retry.js";
 import { runPhaseWithRecovery } from "../recovery/recovery.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
+import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
 
 type ConfigureProductShell = (page: any, product: ReturnType<typeof parseProduct>) => Promise<string>;
 
@@ -22,6 +23,8 @@ export async function runSaleControlPhase(
   if (product.productId) throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
   if (!product.automation) throw new Error("产品尚未开始自动录入。");
 
+  const normalizedProductType = normalizeUnsupportedProductTypeBeforeShell(product.product);
+  product.product = normalizedProductType.product;
   const productData = parseProduct(product.product);
   const run = prepareSaleControlRetry(product.automation);
   const log = (message: string, level: "info" | "warning" | "error" = "info") => {
@@ -35,7 +38,12 @@ export async function runSaleControlPhase(
   };
 
   ctx.db.saveAutomation(localProductId, run);
-  ctx.db.setProductLifecycle(localProductId, { status: "automating" });
+  if (normalizedProductType.changed) {
+    ctx.db.updateProduct(localProductId, product.product, "automating");
+    log("旧产品类型已在销售控制重试前归一为境内短途，避免缺少大交通卡片导致校验失败。", "warning");
+  } else {
+    ctx.db.setProductLifecycle(localProductId, { status: "automating" });
+  }
   ctx.emit(localProductId);
 
   try {

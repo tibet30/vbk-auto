@@ -1,6 +1,7 @@
 import type { ProductSummary, ProductWorkflowTask } from "../../../shared/contracts.js";
 import { aiProviderLabel, hasActiveAiKey } from "../../../shared/contracts.js";
 import { api } from "../helpers";
+import { validateProductBrief } from "../helpers/product-brief-validation.js";
 import type { AppState } from "../state/useAppState";
 
 export function useProductHandlers(state: AppState) {
@@ -24,7 +25,6 @@ export function useProductHandlers(state: AppState) {
     setView,
     setStage,
     setAccountMenuOpen,
-    refresh,
     setActiveTaskId,
   } = state;
 
@@ -95,12 +95,10 @@ export function useProductHandlers(state: AppState) {
       setNotice(`尚未配置 AI 模型，请先到「设置」中配置 ${aiProviderLabel(settings)} 的 API Key 后再创建产品。`);
       return;
     }
-    if (!createInput.destination.trim()) {
-      setNotice("请填写目的地。");
-      return;
-    }
-    if ((createInput.userIdea ?? "").length > 1000) {
-      setNotice("用户想法不能超过 1000 个字。");
+    const fieldErrors = validateProductBrief(createInput);
+    const firstFieldError = Object.values(fieldErrors)[0];
+    if (firstFieldError) {
+      setNotice(firstFieldError);
       return;
     }
     setSavingProduct(true);
@@ -114,10 +112,10 @@ export function useProductHandlers(state: AppState) {
         userIdea: (createInput.userIdea ?? "").trim(),
         autoConfirm: autoConfirmCreation,
       });
-      const latestTask = created.workflowTask
-        ? await client.workflowTasks.get(created.workflowTask.id).catch(() => created.workflowTask)
-        : undefined;
-      const visibleCreated = latestTask ? { ...created, workflowTask: latestTask, updatedAt: latestTask.updatedAt } : created;
+      const latestTask = created.workflowTask;
+      const visibleCreated = latestTask
+        ? { ...created, workflowTask: latestTask, updatedAt: latestTask.updatedAt }
+        : created;
       setProducts((items) => [visibleCreated, ...items]);
       if (autoConfirmCreation) {
         if (latestTask) {
@@ -125,7 +123,7 @@ export function useProductHandlers(state: AppState) {
         }
         setProduct(null);
         setView("products");
-        setNotice("产品和后台任务已创建，你可以继续操作；任务会持续运行并同步进度。");
+        setNotice("产品和后台任务已创建；进入产品列表或任务中心时会读取最新进度。");
       } else {
         setProduct(visibleCreated);
         setView("workspace");

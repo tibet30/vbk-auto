@@ -35,6 +35,8 @@ export interface ComputeReadinessInput {
   product: Record<string, unknown>;
   researchTasks: ReadonlyArray<ResearchTask>;
   automation?: AutomationRun;
+  /** 后台任务重启续跑时只忽略“应用重启中断”本身，其他阻断仍照常生效。 */
+  ignoreInterruptedAutomationFailure?: boolean;
 }
 
 /**
@@ -69,7 +71,9 @@ export function computeReadiness(input: ComputeReadinessInput): ProductReadiness
     const blocked = Object.values(automation.recovery.phases).find((rec) => rec.state === "needs_user");
     if (blocked) {
       const cancelled = typeof blocked.finalError === "string" && blocked.finalError.startsWith("用户中止");
-      if (!cancelled) {
+      const resumableInterruption = input.ignoreInterruptedAutomationFailure
+        && blocked.finalError === "应用重启导致自动录入被中断";
+      if (!cancelled && !resumableInterruption) {
         const userInstruction = typeof blocked.userInstruction === "string" ? blocked.userInstruction.trim() : "";
         const finalError = typeof blocked.finalError === "string" ? blocked.finalError.trim() : "";
         const detail = userInstruction || finalError || DEFAULT_NEEDS_USER_DETAIL;

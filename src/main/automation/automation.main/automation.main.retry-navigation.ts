@@ -89,6 +89,48 @@ export async function refreshPhasePageAfterApi(args: {
   }
 }
 
+/**
+ * 一次阶段执行只在开始时决定是否同步右侧页面。若执行期间用户刚好打开或关闭
+ * BrowserView，不能在 API 返回后改用新的可见性状态刷新当前页，否则可能把
+ * 用户刚打开的产品列表误刷新；下一阶段会按新的可见性重新做一次完整判断。
+ */
+export async function executeApiWithPhasePageSync<T>(args: {
+  page: PhasePage;
+  productId?: string | null;
+  phase: string;
+  log: RetryLog;
+  isPageVisible: () => boolean;
+  ensureBrowserHasBounds: () => void;
+  navigate: (url: string) => Promise<void>;
+  executeApi: () => Promise<T>;
+}): Promise<T> {
+  const {
+    page,
+    productId,
+    phase,
+    log,
+    isPageVisible,
+    ensureBrowserHasBounds,
+    navigate,
+    executeApi,
+  } = args;
+  const syncPage = isPageVisible();
+  if (syncPage) {
+    ensureBrowserHasBounds();
+    await enterPhasePageForApi({ page, productId, phase, log, navigate });
+  } else {
+    log(`phase=${phase} 后台执行：VBK 页面未打开，跳过页面进入`, "info");
+  }
+
+  const result = await executeApi();
+  if (syncPage) {
+    await refreshPhasePageAfterApi({ page, productId, phase, log });
+  } else {
+    log(`phase=${phase} API 远端回读完成：VBK 页面已关闭，跳过页面刷新`, "info");
+  }
+  return result;
+}
+
 export function recordPhaseRetry(args: {
   productId?: string | null;
   phase: string;

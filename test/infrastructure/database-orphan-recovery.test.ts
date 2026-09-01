@@ -71,6 +71,27 @@ test("recoverOrphanAutomationRuns：status=running 的 run 启动时变为 faile
   } finally { cleanup(); }
 });
 
+test("孤儿 run 即使缺少 recovery 也会标记可恢复断点", async () => {
+  const { db, cleanup } = await makeDb();
+  try {
+    const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
+    db.saveAutomation(product.id, {
+      id: "run-without-recovery",
+      status: "running",
+      currentPhase: "basic",
+      phases: [{ phase: "basic", status: "running" }],
+      logs: [],
+    });
+    db.updateProduct(product.id, product.product, "automating");
+
+    db.recoverOrphanAutomationRuns();
+
+    const recovered = db.getProduct(product.id)?.automation;
+    assert.equal(recovered?.phases[0].status, "failed");
+    assert.equal(recovered?.recovery?.phases.basic.finalError, "应用重启导致自动录入被中断");
+  } finally { cleanup(); }
+});
+
 test("recoverOrphanAutomationRuns：recovery.phases 里仍为 running 的项被强制改成 needs_user", async () => {
   const { db, cleanup } = await makeDb();
   try {

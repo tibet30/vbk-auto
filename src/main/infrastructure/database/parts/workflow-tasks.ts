@@ -171,13 +171,20 @@ export function abandonWorkflowTask(
   });
 }
 
-/** 应用退出时正在执行的任务不能伪装成继续运行；保留记录并明确要求人工检查后重试。 */
+/**
+ * 应用退出会丢失内存中的执行器与锁，因此上次留下的 running 不能
+ * 继续伪装成正在运行。将它们重新放回持久化队列，待浏览器与登录态恢复后
+ * 由 ProductTaskScheduler 通过幂等的规划/自动化入口续跑。
+ */
 export function recoverOrphanWorkflowTasks(db: Database.Database): ProductWorkflowTask[] {
-  const running = listWorkflowTasks(db).filter((task) => task.status === "running");
-  return running.map((task) => updateWorkflowTask(db, task.id, {
-    status: "needs_attention",
-    message: "应用上次退出时任务仍在运行，请打开产品核对当前阶段",
-    error: "任务因应用退出而中断",
-    completedAt: now(),
+  const recoverable = listWorkflowTasks(db).filter((task) =>
+    task.status === "running"
+    // 兼容旧版本：它曾把同一种退出中断写成人工处理终态。
+    || (task.status === "needs_attention" && task.error === "任务因应用退出而中断"));
+  return recoverable.map((task) => updateWorkflowTask(db, task.id, {
+    status: "queued",
+    message: "任务因应用退出而中断，将在启动后继续",
+    error: undefined,
+    completedAt: undefined,
   }));
 }

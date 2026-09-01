@@ -240,12 +240,16 @@ async function aiService(snapshot?: Settings) {
  * 下拉 / 用户主动取消等场景；本函数只负责 db.getProduct + productNotFound
  * 的包装与抛错。
  */
-function readiness(localProductId: string): ProductReadiness {
+function readiness(
+  localProductId: string,
+  options: { ignoreInterruptedAutomationFailure?: boolean } = {},
+): ProductReadiness {
   const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
   return computeReadiness({
     product: product.product,
     researchTasks: product.researchTasks,
     automation: product.automation,
+    ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
   });
 }
 
@@ -379,6 +383,7 @@ app.whenReady().then(async () => {
   const productTaskScheduler = new ProductTaskScheduler({
     db,
     get startPlanning() { return context.startPlanning; },
+    get resumePlanning() { return context.resumePlanning; },
     readiness,
     productWorkflows,
     get automation() { return automation; },

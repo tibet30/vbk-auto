@@ -27,7 +27,10 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
   const name = `${destination}${days}天${nights}晚${formLabel}`;
   const product = {
     sales: {
-      productType: days <= 5 ? "domesticShort" : "domesticLong",
+      // 创建表单只描述目的地、天数与产品形态，并没有机票 / 火车 / 轮船等
+      // 大交通输入。天数长不等于“境内长途”：一地 7 日游仍属于境内 N 日游。
+      // 在真正支持大交通卡片前，新建产品统一使用可承载一地地接行程的短途类型。
+      productType: "domesticShort",
       productForm,
       splitGroup: productForm === "groupTour" || productForm === "semiSelfGuided",
       ...(productForm === "groupTour" || productForm === "semiSelfGuided"

@@ -160,7 +160,7 @@ export class VbkDatabase {
   setBasicInfoSaved(localProductId: string, saved = true) {
     setBasicInfoSaved(this.db, localProductId, saved);
   }
-  setProductLifecycle(localProductId: string, updates: { productId?: string; status?: ProductSummary["status"]; basicInfoSaved?: boolean }): void {
+  setProductLifecycle(localProductId: string, updates: { productId?: string | null; status?: ProductSummary["status"]; basicInfoSaved?: boolean }): void {
     setProductLifecycle(this.db, localProductId, updates);
   }
   writeAutomationWithProductStatus(localProductId: string, run: AutomationRun, status: ProductSummary["status"]): void {

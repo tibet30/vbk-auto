@@ -165,7 +165,13 @@ export class VbkBrowser {
   /** 创建一个已配置 RTC 抑制 + 导航白名单 + 外链钩子的 WebContentsView。 */
   private createView(partition: string): WebContentsView {
     const view = new WebContentsView({
-      webPreferences: { partition },
+      webPreferences: {
+        partition,
+        // 后台规划会为登录校验反复导航这一个隐藏视图。Electron 默认会在
+        // 每次导航时把目标 WebContents 设成同窗 first responder；macOS 下
+        // 这会终止 renderer 正在进行的中文 IME 组合输入。
+        focusOnNavigation: false,
+      },
     });
     this.configureRtc(view);
     this.installNavigationHooks(view);

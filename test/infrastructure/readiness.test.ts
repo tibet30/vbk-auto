@@ -183,6 +183,25 @@ test("用户主动取消（finalError 前缀为「用户中止」）不生成新
   );
 });
 
+test("后台任务恢复只忽略应用重启中断，普通 needs_user 仍保持阻断", () => {
+  const interrupted = computeReadiness({
+    product: minimalProduct(),
+    researchTasks: [],
+    automation: needsUserRun("presentation", "应用重启导致自动录入被中断"),
+    ignoreInterruptedAutomationFailure: true,
+  });
+  assert.equal(interrupted.ready, true);
+
+  const businessFailure = computeReadiness({
+    product: minimalProduct(),
+    researchTasks: [],
+    automation: needsUserRun("presentation", "产品图文命中非法关键词"),
+    ignoreInterruptedAutomationFailure: true,
+  });
+  assert.equal(businessFailure.ready, false);
+  assert.ok(businessFailure.issues.some((issue) => issue.label === "自动录入失败：presentation"));
+});
+
 test("needs_user 与 schema 阻断 / research task / automationBlockers 同时存在时，全部作为独立 issues 计入", () => {
   // 验证 needs_user 与其它来源的阻断不会被合并 / 吞掉：
   //   - schema 错误：product 缺 province 会产出 schema issue；

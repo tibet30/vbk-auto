@@ -37,7 +37,10 @@ export interface MainIpcContext {
     accountKey: string,
     meta?: { accountName?: string; providerId?: number | null },
   ) => void;
-  readiness: (localProductId: string) => ProductReadiness;
+  readiness: (
+    localProductId: string,
+    options?: { ignoreInterruptedAutomationFailure?: boolean },
+  ) => ProductReadiness;
   emitProduct: (product: ProductDetail) => void;
   /** Broadcast a snapshot already saved by Tibet; bypasses the local-write mirror. */
   broadcastProduct: (product: ProductDetail) => void;
@@ -52,6 +55,8 @@ export interface MainIpcContext {
   logPoiManualIpc: (event: string, context: Record<string, unknown>) => void;
   /** 新产品三阶段规划；由 planning IPC 注册后注入，供一键创建编排复用。 */
   startPlanning?: (localProductId: string) => Promise<PlanningRunResult>;
+  /** 应用重启后的规划续跑；保留已完成节点，不重置 foundation。 */
+  resumePlanning?: (localProductId: string) => Promise<PlanningRunResult>;
   /** 一键创建只负责落任务；调度器在 renderer 请求结束后继续执行。 */
   enqueueProductTask?: (product: ProductDetail) => ProductWorkflowTask;
   /** 永久废弃后台任务；运行中任务会在安全检查点停止。 */

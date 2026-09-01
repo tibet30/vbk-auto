@@ -30,7 +30,7 @@ import { draftPhasesFor } from "./automation.main.phases.js";
 import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
-import { enterPhasePageForApi, recordPhaseRetry, refreshPhasePageAfterApi } from "./automation.main.retry-navigation.js";
+import { executeApiWithPhasePageSync, recordPhaseRetry } from "./automation.main.retry-navigation.js";
 import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
 import { ensurePackageApi } from "../ctrip/package-api.js";
 import {
@@ -47,6 +47,7 @@ import type { AutomationRun, ContactCardSelection } from "../../../shared/contra
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { completeVerifiedSaleControlPhase, initializeAutomationStartPhase } from "./automation.main.run-state.js";
+import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
 
 /**
  * 单个产品自动化阶段主循环：
@@ -61,6 +62,11 @@ import { completeVerifiedSaleControlPhase, initializeAutomationStartPhase } from
 export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
     const productDetail = ctx.db.getProduct(localProductId);
     if (!productDetail) throw new Error("产品不存在");
+    const normalizedProductType = normalizeUnsupportedProductTypeBeforeShell(
+      productDetail.product,
+      productDetail.productId,
+    );
+    productDetail.product = normalizedProductType.product;
     const product = parseProduct(productDetail.product);
     // 用户离开 VBK 页面后，自动化继续复用隐藏会话；不重新打开 BrowserView。
     // 后面几个阶段强制要求这些字段，但它们在 productSchema 里是可选的。
@@ -122,6 +128,9 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
     const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
     ctx.db.saveAutomation(localProductId, run);
+    if (normalizedProductType.changed) {
+      log("旧产品类型已在创建远端草稿前归一为境内短途，避免缺少大交通卡片导致校验失败。", "warning");
+    }
     ctx.db.updateProduct(localProductId, productDetail.product, "automating");
     try {
       const page = await ctx.browser.page();
@@ -132,7 +141,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           log("正在创建 VBK 产品草稿…");
           // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌
           // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
-          productId = await configureProductShellApi(page, product);
+          productId = await ctx.runVbkPageExclusive(() => configureProductShellApi(page, product));
           ctx.db.setProductId(localProductId, productId);
           // configureProductShellApi 已完成销售控制远端回读；先持久化销售控制
           // 的完成态并推送 UI，之后才开始 basic，避免 API 直连模式下阶段状态
@@ -163,26 +172,16 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
         phaseRecord(phase);
         return ctx.runVbkPageExclusive(async () => {
-          const syncPage = ctx.browser.isVisible();
-          if (syncPage) {
-            ctx.ensureBrowserHasBounds();
-            await enterPhasePageForApi({
-              page,
-              productId,
-              phase,
-              log,
-              navigate: (url) => ctx.browser.navigate(url),
-            });
-          } else {
-            log(`phase=${phase} 后台执行：VBK 页面未打开，跳过页面进入`, "info");
-          }
-          const result = await executeApi();
-          if (ctx.browser.isVisible()) {
-            await refreshPhasePageAfterApi({ page, productId, phase, log });
-          } else {
-            log(`phase=${phase} API 远端回读完成：VBK 页面已关闭，跳过页面刷新`, "info");
-          }
-          return result;
+          return executeApiWithPhasePageSync({
+            page,
+            productId,
+            phase,
+            log,
+            isPageVisible: () => ctx.browser.isVisible(),
+            ensureBrowserHasBounds: ctx.ensureBrowserHasBounds,
+            navigate: (url) => ctx.browser.navigate(url),
+            executeApi,
+          });
         });
       };
 

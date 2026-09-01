@@ -40,19 +40,36 @@ async function post(page: VbkSessionRequestBrowser, path: string, body: Json, la
   return assertAck(response.payload, label);
 }
 
-async function loadCreateState(page: VbkSessionRequestBrowser): Promise<Json> {
-  return page.evaluate(async (url) => {
-    const response = await fetch(url, {
-      method: "GET",
-      credentials: "include",
-      headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
+export async function loadSaleControlCreateState(page: VbkSessionRequestBrowser): Promise<Json> {
+  const headers = { accept: "text/html,application/xhtml+xml,*/*;q=0.8" };
+  let status: number;
+  let html: string;
+  if (page.vbkSessionGetText) {
+    const response = await page.vbkSessionGetText({
+      endpoint: CREATE_PAGE,
+      errorLabel: "VBK 销售控制前置数据读取",
+      headers,
     });
-    if (!response.ok) throw new Error(`VBK 销售控制前置数据读取失败：HTTP ${response.status}`);
-    const html = await response.text();
-    const match = html.match(/window\.__INITIAL_STATE__\s*=\s*(.*)/);
-    if (!match) throw new Error("VBK 销售控制页面缺少 __INITIAL_STATE__");
-    try { return JSON.parse(match[1]); } catch { throw new Error("VBK 销售控制前置数据 JSON 无效"); }
-  }, CREATE_PAGE);
+    status = response.status;
+    html = response.text;
+  } else {
+    const response = await page.evaluate(async ({ url, requestHeaders }) => {
+      const result = await fetch(url, {
+        method: "GET",
+        credentials: "include",
+        headers: requestHeaders,
+      });
+      return { status: result.status, text: await result.text() };
+    }, { url: CREATE_PAGE, requestHeaders: headers });
+    status = response.status;
+    html = response.text;
+  }
+  if (status < 200 || status >= 300) {
+    throw new Error(`VBK 销售控制前置数据读取失败：HTTP ${status}`);
+  }
+  const match = html.match(/window\.__INITIAL_STATE__\s*=\s*(.*)/);
+  if (!match) throw new Error("VBK 销售控制页面缺少 __INITIAL_STATE__");
+  try { return JSON.parse(match[1]); } catch { throw new Error("VBK 销售控制前置数据 JSON 无效"); }
 }
 
 function exactOne(items: Json[], key: string, value: string, label: string): Json {
@@ -107,7 +124,7 @@ export async function configureProductShellApi(
   page: VbkSessionRequestBrowser,
   product: Json,
 ): Promise<string> {
-  const state = await loadCreateState(page);
+  const state = await loadSaleControlCreateState(page);
   const vendorId = Number(state.vendorId ?? record(state.userInfo).vendorId);
   if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error("VBK 销售控制缺少合法 vendorId");
   const form = formOf(product);

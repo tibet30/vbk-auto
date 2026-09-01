@@ -19,6 +19,16 @@ import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFail
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
 import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
+import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
+import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
+
+export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
+  if (run?.status !== "failed") return undefined;
+  const phases = [run.currentPhase, ...run.phases.map((phase) => phase.phase)]
+    .filter((phase): phase is string => Boolean(phase));
+  return phases.find((phase) =>
+    run.recovery?.phases[phase]?.finalError === "应用重启导致自动录入被中断");
+}
 
 /**
  * 用户点击「停止」后区别于普通失败的语义：
@@ -61,6 +71,15 @@ export class DraftAutomation {
  */
 async start(localProductId: string) {
     const product = this.db.getProduct(localProductId);
+    const interruptedPhase = interruptedAutomationResumePhase(product?.automation);
+    if (interruptedPhase) {
+      const resumable = product?.automation?.phases.some((phase) =>
+        phase.phase === interruptedPhase && phase.status === "failed");
+      if (!resumable) {
+        throw new Error("应用在销售控制创建产品壳期间退出，请先核查 VBK 是否已生成草稿，避免重复创建。");
+      }
+      return this.runLocked(localProductId, interruptedPhase);
+    }
     const queuedPhase = product?.automation?.status === "queued"
       ? product.automation.phases.find((phase) => phase.status === "pending")?.phase
       : undefined;
@@ -164,6 +183,26 @@ async retryOnePhase(localProductId: string, phase: string) {
     if (!product.productId) throw new Error("远程草稿尚未创建，不能重新执行阶段。");
     assertSinglePhaseRetryPrerequisites(parseProduct(product.product), requested);
     return this.runOnePhaseLocked(localProductId, requested);
+  }
+
+  /** 保留失败的不可改型远端草稿，重置本地绑定以创建新的可用替代草稿。 */
+  async replaceLockedDraft(localProductId: string): Promise<{ previousProductId: string }> {
+    if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
+    const product = this.db.getProduct(localProductId);
+    if (!product) throw productNotFound(localProductId);
+    const { previousProductId, replacementProduct } = prepareLockedDraftReplacement(product);
+    const remote = await this.runVbkPageExclusive(async () =>
+      getProductBaseInfoApi(await this.browser.page(), previousProductId));
+    assertRemoteDraftCanBeReplaced(remote);
+    this.db.updateProduct(localProductId, replacementProduct, "review");
+    this.db.setProductLifecycle(localProductId, { productId: null, status: "review", basicInfoSaved: false });
+    this.db.addMessage(
+      localProductId,
+      "assistant",
+      `旧 VBK 草稿 ${previousProductId} 的产品类型已被平台锁定，已保留且未删除；将创建境内短途替代草稿。`,
+    );
+    this.emit(localProductId);
+    return { previousProductId };
   }
 
   private runContext(): AutomationRunContext {

@@ -177,12 +177,12 @@ test("readiness 用户主动取消不产生新的待处理项", () => {
   assert.match(source, /startsWith\(\s*["']用户中止["']\s*\)/,
     "识别逻辑必须严格使用 startsWith 避免被其它错误文本误命中");
   // 取消分支不能调用 issues.push(自动录入失败 …)，避免与顶部「已停止」重复。
-  // 用「cancelled 为 true 时跳过 push」语义锁死：if (!cancelled) 块内才有 push。
+  // 用「cancelled 为 true 时跳过 push」语义锁死：push 的守卫必须包含 !cancelled。
   const cancelledCheckIdx = source.search(/const cancelled\b/);
   const pushIdx = source.indexOf("issues.push({ label:", cancelledCheckIdx);
   assert.ok(cancelledCheckIdx > 0, "readiness 必须先识别 cancelled");
   assert.ok(pushIdx > cancelledCheckIdx, "issues.push 必须在 cancelled 检查之后");
   const betweenCancAndPush = source.slice(cancelledCheckIdx, pushIdx);
-  assert.match(betweenCancAndPush, /if\s*\(\s*!cancelled\s*\)/,
-    "issues.push 必须在 if (!cancelled) 块内；取消分支不应 push 待处理项");
+  assert.match(betweenCancAndPush, /if\s*\(\s*!cancelled\b/,
+    "issues.push 的守卫必须包含 !cancelled；取消分支不应 push 待处理项");
 });

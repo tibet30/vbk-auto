@@ -128,3 +128,31 @@ test("自动录入返回 failed 时一键任务必须需要处理，不能误报
     message: "产品图文接口保存失败：非法关键词：首选",
   });
 });
+
+test("从自动录入阶段恢复时不重做规划，只复核 readiness 后继续断点", async () => {
+  const calls: string[] = [];
+  const result = await runAutoConfirmedCreation({
+    startPlanning: async () => { calls.push("start-planning"); throw new Error("不应调用"); },
+    resumePlanning: async () => { calls.push("resume-planning"); throw new Error("不应调用"); },
+    readiness: (_id, options) => {
+      calls.push(`readiness:${options?.ignoreInterruptedAutomationFailure === true}`);
+      return { ready: true, completion: 100, issues: [] };
+    },
+    productWorkflows: { runExclusive: async (_id, _kind, task) => task() },
+    automation: { start: async () => { calls.push("automation"); } },
+    db: {
+      getProduct: () => ({
+        ...makeProduct(),
+        status: "draft_saved",
+        automation: { id: "run-resumed", status: "succeeded", phases: [], logs: [] },
+      } as never),
+      addMessage: () => "message-1",
+      updateProduct: () => makeProduct(),
+    },
+  }, "local-resumed", (stage) => calls.push(`stage:${stage}`), undefined, {
+    resumeFrom: "automation",
+  });
+
+  assert.deepEqual(calls, ["readiness:true", "stage:automation", "automation"]);
+  assert.equal(result.status, "succeeded");
+});

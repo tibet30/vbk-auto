@@ -27,8 +27,14 @@ test("workflow task 持久化生命周期并按创建时间列出", () => {
 
     const recovered = db.recoverOrphanWorkflowTasks();
     assert.equal(recovered.length, 1);
-    assert.equal(recovered[0].status, "needs_attention");
-    assert.match(recovered[0].error ?? "", /应用退出/);
+    assert.equal(recovered[0].status, "queued");
+    assert.equal(recovered[0].stage, "planning", "恢复时保留中断前阶段");
+    assert.equal(recovered[0].progress, 8, "恢复时保留中断前进度");
+    assert.equal(recovered[0].startedAt, "2026-08-31T00:00:00.000Z");
+    assert.equal(recovered[0].completedAt, undefined);
+    assert.equal(recovered[0].error, undefined);
+    assert.match(recovered[0].message, /启动后继续/);
+    assert.equal(db.recoverOrphanWorkflowTasks().length, 0, "同一次启动不能重复恢复已回队的任务");
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
@@ -51,6 +57,42 @@ test("运行中的 workflow task 阻止删除产品，结束后随产品一并�
     });
     assert.equal(db.deleteProduct(product.id), true);
     assert.equal(db.getWorkflowTask(task.id), undefined);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test("旧版本标为人工处理的退出中断任务也能回队", () => {
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-workflow-legacy-interrupted-"));
+  try {
+    const db = new VbkDatabase(dataPath);
+    const product = db.createProduct({ destination: "西安", days: 4, productForm: "privateTour" });
+    const interrupted = db.createWorkflowTask(product.id, product.name);
+    db.updateWorkflowTask(interrupted.id, {
+      status: "needs_attention",
+      stage: "automation",
+      progress: 85,
+      message: "应用上次退出时任务仍在运行，请打开产品核对当前阶段",
+      error: "任务因应用退出而中断",
+      completedAt: "2026-08-31T00:10:00.000Z",
+    });
+    const manual = db.createWorkflowTask(product.id, product.name);
+    db.updateWorkflowTask(manual.id, {
+      status: "needs_attention",
+      stage: "readiness",
+      progress: 60,
+      message: "请确认封面",
+      error: "缺少封面",
+    });
+
+    const recovered = db.recoverOrphanWorkflowTasks();
+
+    assert.deepEqual(recovered.map((task) => task.id), [interrupted.id]);
+    assert.equal(recovered[0].status, "queued");
+    assert.equal(recovered[0].stage, "automation");
+    assert.equal(recovered[0].progress, 85);
+    assert.equal(recovered[0].completedAt, undefined);
+    assert.equal(db.getWorkflowTask(manual.id)?.status, "needs_attention", "真实待确认任务不能被自动复活");
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }

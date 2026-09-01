@@ -8,6 +8,7 @@ import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { otherActivitiesForDay } from "./user-intent.js";
 import { resolveAmbiguousPlanningPoi } from "./planning-poi-disambiguation.js";
+import { repairMissingItineraryDays } from "./planning-itinerary-repair.js";
 
 const FACILITY_RE = /入口|出口|停车场|售票处|游客中心|服务中心|换乘中心|检票口|接驳站|码头|车站|机场/;
 
@@ -204,16 +205,21 @@ export function expandVerifiedItinerary(args: {
   days: number;
   userIntent?: PlanningUserIntent;
 }): { ok: true; itinerary: Array<Record<string, unknown>>; selectedIds: Set<number> } | { ok: false; reason: string } {
+  const drafts = repairMissingItineraryDays({
+    drafts: args.drafts,
+    pool: args.pool,
+    userIntent: args.userIntent,
+  });
   const pool = new Map<number, PlanningPoiCandidate>();
   for (const candidate of args.pool) {
     if (candidate.status === "resolved" && candidate.poiId && candidate.poiName) pool.set(candidate.poiId, candidate);
   }
-  if (args.drafts.length !== args.days) return { ok: false, reason: `行程必须恰好生成 ${args.days} 天` };
+  if (drafts.length !== args.days) return { ok: false, reason: `行程必须恰好生成 ${args.days} 天` };
   const selectedIds = new Set<number>();
   const citySequence: string[] = [];
   const itinerary: Array<Record<string, unknown>> = [];
   for (let index = 0; index < args.days; index += 1) {
-    const draft = args.drafts[index];
+    const draft = drafts[index];
     if (draft.day !== index + 1) return { ok: false, reason: `第 ${index + 1} 天 day 编号不连续` };
     const matchedPoiNames = draft.poiIds
       .map((poiId) => pool.get(poiId)?.poiName)

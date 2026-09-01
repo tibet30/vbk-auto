@@ -1,6 +1,7 @@
 export interface VbkSessionRequestBrowser {
   evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
   vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult>;
+  vbkSessionGetText?: (request: VbkSessionNativeTextRequest) => Promise<VbkSessionNativeTextResult>;
 }
 
 export interface VbkSessionNativeRequest {
@@ -15,6 +16,19 @@ export interface VbkSessionNativeRequest {
 }
 
 export type VbkSessionNativeResult = VbkSessionRequestResult;
+
+export interface VbkSessionNativeTextRequest {
+  endpoint: string;
+  errorLabel: string;
+  headers?: Record<string, string>;
+  referrer?: string;
+  referrerPolicy?: "strict-origin-when-cross-origin";
+}
+
+export interface VbkSessionNativeTextResult {
+  status: number;
+  text: string;
+}
 
 export interface VbkSessionContext {
   hasCid: boolean;
@@ -297,7 +311,10 @@ export async function vbkSessionRequest<TBody extends object>(
       `${options.errorLabel}BrowserView 执行超时（${evaluateTimeoutMs}ms）`,
     ) as VbkSessionRequestResult;
   } catch (error) {
-    if (!browser.vbkSessionFetch || !/Failed to fetch|NetworkError|CORS/i.test(String(error))) throw error;
+    if (!browser.vbkSessionFetch
+      || !/Failed to fetch|NetworkError|CORS|Execution context was destroyed|Cannot find context with specified id/i.test(String(error))) {
+      throw error;
+    }
     result = await browser.vbkSessionFetch({
       endpoint: options.endpoint,
       body: options.body,

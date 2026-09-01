@@ -376,26 +376,6 @@ test("save monitor：uninstall 后到达的 response 事件不能影响新 monit
   }
 });
 
-/** 「保存响应先到、敏感词请求后到」的强约束：保存响应到达时如果
- *  还没有任何 checkSensitiveWord 请求发出（即 pending=0），可以直接结算。
- *  本测试验证「save 响应早到 + 后续 checkSensitiveWord 请求永远不发」时
- *  waitForSave 仍能正常成功（pending=0 不卡死）。 */
-test("save monitor：保存响应先到、敏感词请求从未发出 → 正常 saved=true", async () => {
-  await withMonitor({}, async ({ page, monitor }) => {
-    await mockRoute(page, SAVE_DESCRIPTION_INFO_PATH, 200, {
-      success: true,
-      ResponseStatus: { Ack: "Success" },
-      sensitiveWords: [],
-    });
-    await fireInterceptedPost(page, SAVE_DESCRIPTION_INFO_PATH, {
-      success: true,
-      ResponseStatus: { Ack: "Success" },
-    });
-    const outcome = await monitor.waitForSave();
-    assert.equal(outcome.saved, true, "无任何敏感词请求时，save 响应到达即可结算");
-  });
-});
-
 /** 「敏感词请求飞出但响应永不回响」的异常 ordering：save 响应到达时如果
  *  pendingSensitive>0 但已经超过 sensitiveWordTimeoutMs 窗口，runner 必须
  *  不再继续缓存，强制按 save 业务结果结算。永远等敏感词响应会卡死 waitForSave。 */

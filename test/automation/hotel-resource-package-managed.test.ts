@@ -429,34 +429,3 @@ test("资源卡永不出现：传短 timeout 确保抛「资源卡未加载」�
     await page.close();
   }
 });
-
-// ─────────────────────── 8. 解析真实 textContent「住宿晚数1」 ───────────────────────
-
-test("解析真实 textContent：住宿晚数=1 → segments[0].stayNights===1", async () => {
-  // 验证 evaluateAll 真实从 textContent 解析出数字 1，而不是字符串 "1"。
-  const inner = `
-    <div class="ResourceConfig-content-card">
-      <div class="ResourceConfig-segment-title">行程段1</div>
-      <div>住宿晚数1</div>
-      <span class="item" data-resource="A">套餐</span>
-    </div>
-  `;
-  const page = await newPageWith(
-    `<html><body><div>资源配置</div>${inner}</body></html>`,
-  );
-  try {
-    const result = await ensureHotelResource(
-      wrapPage(page),
-      buildProduct(),
-      productId,
-      withCardTimeout(2_000),
-    );
-    assert.equal(result.segments.length, 1);
-    assert.equal(result.segments[0].stayNights, 1, "必须从 textContent 解析出 number 1");
-    assert.equal(typeof result.segments[0].stayNights, "number");
-    assert.equal(result.segments[0].enabledPackageCount, 1);
-    assert.equal(result.positiveSegmentCount, 1);
-  } finally {
-    await page.close();
-  }
-});

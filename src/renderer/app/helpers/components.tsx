@@ -1,10 +1,11 @@
-import { AlertTriangle, Briefcase, Check, Copy, Eye, FileText, LoaderCircle, PackageOpen, Plus, Sparkles, Trash2, Users } from "lucide-react";
+import { Briefcase, Check, Copy, Eye, FileText, LoaderCircle, Plus, Trash2, Users } from "lucide-react";
 import { type MouseEvent, type ReactNode, useState } from "react";
 import type { CreateProductInput, ProductSummary } from "../../../shared/contracts.js";
 import { PRODUCT_FORM_LABELS, type ProductForm } from "../../../shared/product-form.js";
 import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
+import { ProductStatusBadge, productTaskStageLabel } from "./product-task-status";
 
 export function ProductBriefForm({ input, setInput, autoConfirm, setAutoConfirm, submitting, onCancel, onSubmit }: { input: CreateProductInput; setInput: (input: CreateProductInput) => void; autoConfirm: boolean; setAutoConfirm: (value: boolean) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void }) {
   return <div className={`${shared.card} ${styles.briefForm}`}>
@@ -44,7 +45,7 @@ export function ProductBriefForm({ input, setInput, autoConfirm, setAutoConfirm,
       <button className={shared.btn} data-variant="primary" disabled={submitting} onClick={onSubmit}>
         {submitting ? (
           <>
-            <LoaderCircle size={15} className={styles.spin} />{autoConfirm ? "正在一键生成并录入…" : "创建中"}
+            <LoaderCircle size={15} className={styles.spin} />{autoConfirm ? "正在创建后台任务…" : "创建中"}
           </>
         ) : (
           <>
@@ -139,7 +140,7 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
   onConfirmDelete: () => void;
 }) {
   const meta = productMeta(item);
-  const locked = item.status === "automating";
+  const locked = item.status === "automating" || item.workflowTask?.status === "queued" || item.workflowTask?.status === "running";
 
   return (
     <article className={styles.productRow} data-state={item.status}>
@@ -163,7 +164,7 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
         <span className={styles.productMain}>
           <span className={styles.productTitleLine}>
             <strong className={styles.title}>{item.name}</strong>
-            <ProductStatusBadge status={item.status} />
+            <ProductStatusBadge item={item} />
           </span>
           <span className={styles.productMetaLine}>
             {item.productId ? <CopyableId value={item.productId} label="VBK产品ID" /> : <span className={styles.metaItem}>VBK产品ID：待生成</span>}
@@ -176,6 +177,15 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
             <span className={styles.metaSep} aria-hidden="true">·</span>
             <span className={`${styles.metaItem} ${styles.metaMuted}`}>更新 {formatUpdatedAt(item.updatedAt)}</span>
           </span>
+          {item.workflowTask && (
+            <span className={styles.productTaskLine} data-status={item.workflowTask.status}>
+              <span className={styles.productTaskTrack} role="progressbar" aria-label="后台任务进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.workflowTask.progress}>
+                <span style={{ transform: `scaleX(${item.workflowTask.progress / 100})` }} />
+              </span>
+              <span>{productTaskStageLabel(item.workflowTask.stage, item.workflowTask.status)} · {item.workflowTask.progress}%</span>
+              <span className={styles.productTaskMessage}>{item.workflowTask.error || item.workflowTask.message}</span>
+            </span>
+          )}
         </span>
       </div>
 
@@ -197,7 +207,7 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
           onClick={onAskDelete}
           disabled={locked || disabled}
           aria-label={`删除产品：${item.name}`}
-          title={locked ? "自动录入中，暂不能删除" : "删除产品"}
+          title={locked ? "后台任务执行中，暂不能删除" : "删除产品"}
         >
           <Trash2 size={14} />
           <span>删除</span>
@@ -233,38 +243,6 @@ function productMeta(item: ProductSummary): { form: ProductForm } {
   const kind = match[4];
   const form = (Object.entries(PRODUCT_FORM_LABELS).find(([, label]) => kind.includes(label))?.[0] ?? "privateTour") as ProductForm;
   return { form };
-}
-
-/**
- * 产品状态徽章：颜色 + 图标 + 文本三要素并存，让运营一眼读出产品所处阶段。
- * planning 与 automating 都用 AI 色，但 automating 加 spinner 让"正在动"显式可感。
- */
-function ProductStatusBadge({ status }: { status: ProductSummary["status"] }) {
-  switch (status) {
-    case "planning":
-      return <span className={styles.productBadge} data-state="planning"><Sparkles size={11} aria-hidden="true" />方案规划中</span>;
-    case "review":
-      return <span className={styles.productBadge} data-state="review"><CircleHelpSmall />等待确认</span>;
-    case "automating":
-      return <span className={styles.productBadge} data-state="automating"><LoaderCircle size={11} aria-hidden="true" />正在录入</span>;
-    case "draft_saved":
-      return <span className={styles.productBadge} data-state="draft_saved"><Check size={11} aria-hidden="true" />草稿已保存</span>;
-    case "blocked":
-      return <span className={styles.productBadge} data-state="blocked"><AlertTriangle size={11} aria-hidden="true" />需要处理</span>;
-    default:
-      return <span className={styles.productBadge}>未开始</span>;
-  }
-}
-
-function CircleHelpSmall() {
-  // Lightweight inline question mark to avoid pulling another icon
-  return (
-    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M9.5 9a2.5 2.5 0 0 1 4.9.6c0 1.7-2.4 2-2.4 3.4" />
-      <path d="M12 17h.01" />
-    </svg>
-  );
 }
 
 export function EmptyProductState({

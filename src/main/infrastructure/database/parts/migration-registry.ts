@@ -14,6 +14,7 @@
  *     的 migrations 表。
  *   - 0007_product_naming：把本地业务实体从 projects 迁为 products，并把
  *     关联表的 project_id / project_name 改为 local_product_id / product_name。
+ *   - 0009_workflow_tasks：持久化一键创建的后台任务与当前阶段。
  *
  * 注：
  *   - cookies 不再写入 SQLite：本地 0600 atomic cookie store 才是 cookie
@@ -140,6 +141,28 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE operation_log ADD COLUMN module TEXT`,
       `CREATE INDEX IF NOT EXISTS idx_operation_log_level ON operation_log(level)`,
       `CREATE INDEX IF NOT EXISTS idx_operation_log_source ON operation_log(source)`,
+    ],
+  },
+  {
+    id: "0009_workflow_tasks",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS workflow_tasks (
+        id TEXT PRIMARY KEY,
+        local_product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        progress INTEGER NOT NULL DEFAULT 0,
+        message TEXT NOT NULL,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_tasks_product_id ON workflow_tasks(local_product_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_tasks_created_at ON workflow_tasks(created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_tasks_status ON workflow_tasks(status)`,
     ],
   },
 ];

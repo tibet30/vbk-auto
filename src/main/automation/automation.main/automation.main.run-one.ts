@@ -3,8 +3,8 @@
  *   - 仅重跑指定 phase，其它阶段保留原状态（不全清）；
  *   - 调用 prepareSinglePhaseRetry 准备新 AutomationRun，run.status 临时变 running；
  *   - recovery 重试前会刷新目标阶段页，避免沿用上轮脏 DOM；
- *   - 完成后把 run.status 恢复为 originalRunStatus，让 UI 上的 succeeded / cancelled / failed
- *     标签不丢失。
+ *   - 完成后保留原有 completed / cancelled 语义；若修复了最后一个失败阶段但
+ *     仍有后续 pending 阶段，则切为 queued，允许从断点继续。
  */
 
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
@@ -39,6 +39,7 @@ import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
+import { resolveRunStatusAfterSinglePhaseSuccess } from "./automation.main.run-one-state.js";
 
 /**
  * 单阶段重新执行入口：
@@ -271,15 +272,16 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           ctx.markCancelled(localProductId, run, persist);
           break;
         default: {
-          // completed：恢复原 run.status。仅这个阶段被重跑过；后续阶段不动。
-          // 如果原状态是 succeeded / cancelled，把它们恢复回去，UI 上「草稿已
-          // 保存」/「已停止」标签能保持；若原状态就是 failed（上一轮所有阶段
-          // 都没成功），恢复后仍是 failed —— 运营可再次点「重新执行」 next
-          // 阶段。
-          run.status = originalRunStatus === "running" ? "running" : originalRunStatus;
+          // completed：仅这个阶段被重跑过；后续阶段不动。若刚修复的是最后一
+          // 个失败阶段，不能再把整条 run 恢复为 failed，否则 UI 会继续显示卡住。
+          run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
           run.currentPhase = undefined;
-          if (run.phases.length > 0 && run.phases.every((phase) => phase.status === "completed")) {
-            run.status = "succeeded";
+          if (run.status === "queued") {
+            const nextPhase = run.phases.find((phase) => phase.status === "pending")?.phase;
+            log(`阶段 ${phaseName} 已通过远端回读；${nextPhase ? `可从 ${nextPhase} 继续剩余录入。` : "等待继续录入。"}`);
+            ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "review");
+          }
+          if (run.status === "succeeded") {
             await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
             log("产品草稿已保存，未提交审核、未发布。", "warning");
             ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "draft_saved");

@@ -13,6 +13,7 @@ import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { VBK_RECOMMENDATION_GENERATION_MAX_BYTES } from "./schemas.js";
+import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 
 export interface ValidationResult {
   missing: ModuleOutcome[];
@@ -149,7 +150,9 @@ export function deepValidateModules(args: {
       }
       if (textValue(record.title).length === 0) reasons.push(`第 ${index + 1} 天 title 缺失`);
       const spots = asArray(record.spots);
-      if (!spots || spots.length === 0) reasons.push(`第 ${index + 1} 天 spots 缺失`);
+      if (!spots || (spots.length === 0 && !dayHasUserOtherActivity(record))) {
+        reasons.push(`第 ${index + 1} 天缺少已验证 spots 或用户其他活动`);
+      }
       else {
         for (let spotIndex = 0; spotIndex < spots.length; spotIndex += 1) {
           const spot = asRecord(spots[spotIndex]);

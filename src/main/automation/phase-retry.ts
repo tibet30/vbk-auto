@@ -51,6 +51,45 @@ export function preparePhaseRetry(
 }
 
 /**
+ * 从单阶段修复后的 queued 断点继续完整录入。
+ *
+ * 已完成阶段不重跑；从首个 pending 阶段开始，后续阶段统一回到 pending，
+ * 使「开始自动录入」真正从断点恢复而不是重写整个产品。
+ */
+export function prepareQueuedPhaseResume(
+  previous: AutomationRun,
+  phases: string[],
+  resumePhase: string,
+  at = new Date().toISOString(),
+): AutomationRun {
+  if (previous.status !== "queued") throw new Error("当前自动录入不处于待继续状态。");
+  const resumeIndex = phases.indexOf(resumePhase);
+  if (resumeIndex < 0) throw new Error(`无法继续未知阶段：${resumePhase}`);
+  const target = previous.phases.find((item) => item.phase === resumePhase);
+  if (target?.status !== "pending") throw new Error(`阶段 ${resumePhase} 当前不是待继续状态。`);
+  if (previous.phases.some((item) => item.status === "failed")) {
+    throw new Error("仍有失败阶段，请先重新执行该阶段。");
+  }
+
+  return {
+    ...previous,
+    status: "running",
+    currentPhase: resumePhase,
+    phases: phases.map((phase, index) => ({
+      phase,
+      status: index < resumeIndex
+        ? previous.phases.find((item) => item.phase === phase)?.status === "completed" ? "completed" : "pending"
+        : "pending",
+    })),
+    logs: [
+      ...previous.logs,
+      { at, message: `正在从已修复断点继续：${resumePhase}`, level: "info" },
+    ],
+    screenshot: undefined,
+  };
+}
+
+/**
  * 「单阶段重新执行」状态准备：与 preparePhaseRetry 的区别是——
  *   - 不要求 previous.status 是 failed，succeeded / cancelled 也允许（用于运营
  *     在草稿已保存或手动停止后，重新跑某一个阶段去 review 当前页面效果）；

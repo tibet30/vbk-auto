@@ -1,12 +1,12 @@
 import { useCallback, useRef, useState } from "react";
 
-export type AppView = "workspace" | "products" | "settings" | "operation-log";
+export type AppView = "workspace" | "products" | "tasks" | "settings" | "operation-log";
 const VIEW_STORAGE_KEY = "vbk:view";
 
 function readInitialView(): AppView {
   try {
     const raw = localStorage.getItem(VIEW_STORAGE_KEY);
-    if (raw === "workspace" || raw === "products" || raw === "settings" || raw === "operation-log") return raw;
+    if (raw === "workspace" || raw === "products" || raw === "tasks" || raw === "settings" || raw === "operation-log") return raw;
   } catch { /* localStorage 在部分 Electron 启动阶段不可用 */ }
   return "workspace";
 }

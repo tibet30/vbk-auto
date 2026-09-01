@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preparePhaseRetry } from "../../src/main/automation/phase-retry.js";
+import { preparePhaseRetry, prepareQueuedPhaseResume } from "../../src/main/automation/phase-retry.js";
+import type { AutomationRun } from "../../src/shared/contracts.js";
 
 const previous = {
   id: "run-1",
@@ -109,4 +110,23 @@ test("preparePhaseRetry 兼容旧版孤儿恢复遗留的 running 阶段", () =>
   const next = preparePhaseRetry(interrupted, ["basic", "presentation"], "presentation");
   assert.equal(next.status, "running");
   assert.equal(next.currentPhase, "presentation");
+});
+
+test("prepareQueuedPhaseResume：从首个待继续阶段恢复，不重跑已完成阶段", () => {
+  const queued: AutomationRun = {
+    id: "queued-after-itinerary",
+    status: "queued",
+    phases: [
+      { phase: "basic", status: "completed" },
+      { phase: "presentation", status: "completed" },
+      { phase: "itinerary", status: "completed" },
+      { phase: "package", status: "pending" },
+      { phase: "pricingInventory", status: "pending" },
+    ],
+    logs: [],
+  };
+  const next = prepareQueuedPhaseResume(queued, queued.phases.map((phase) => phase.phase), "package", "2026-08-31T12:00:00.000Z");
+  assert.equal(next.status, "running");
+  assert.deepEqual(next.phases.map((phase) => phase.status), ["completed", "completed", "completed", "pending", "pending"]);
+  assert.match(next.logs.at(-1)?.message ?? "", /已修复断点继续：package/);
 });

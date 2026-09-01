@@ -26,6 +26,7 @@ const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "research:accept", "research:refreshIssues", "research:vehicleResource", "research:hotelResource",
   "automation:start", "automation:stop", "automation:retry", "automation:retryPhase", "automation:retryOnePhase",
   "planning:start", "planning:resume", "planning:state", "planning:rerunMajorStage", "planning:acceptItineraryAndRerunCompletion",
+  "workflowTasks:get", "workflowTasks:abandon",
 ]);
 
 function parse<T>(channel: string, label: string, schema: z.ZodType<T>, value: unknown): T {

@@ -56,10 +56,15 @@ export class DraftAutomation {
   }
 
 /**
- * 启动一次完整跑（basic → preflight）；
- * 直接转发到 runLocked。
+ * 启动自动录入：首次从 basic 开始；单阶段修复后若有 queued 断点，则从首个
+ * pending 阶段继续，避免重写已经真实保存的内容。
  */
 async start(localProductId: string) {
+    const product = this.db.getProduct(localProductId);
+    const queuedPhase = product?.automation?.status === "queued"
+      ? product.automation.phases.find((phase) => phase.status === "pending")?.phase
+      : undefined;
+    if (queuedPhase) return this.runLocked(localProductId, queuedPhase);
     return this.runLocked(localProductId);
   }
 

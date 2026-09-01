@@ -16,6 +16,13 @@ test("全量产品规划请求不会被误判为用车资源组专项", () => {
   assert.equal(isVehicleResourceOnlyMessage("重新生成全部行程和价格"), false);
 });
 
+test("行程修复中提及保留用车时不能被用车专项吞掉", () => {
+  assert.equal(
+    isVehicleResourceOnlyMessage("修复当前产品行程并绑定 POI，保留现有用车资源组，不要改定价"),
+    false,
+  );
+});
+
 test("用车资源组专项请求可从话术中提取全程总成本", () => {
   assert.equal(extractVehicleTotalCost("按全程 3,200 元搜索车辆资源组"), 3200);
   assert.equal(extractVehicleTotalCost("用车预算 0.45 万，生成资源组"), 4500);

@@ -100,6 +100,7 @@ export function vbkStageStatusText(product: ProductDetail | null): { tone: "wait
   const blocked = recoveryNeedsUser(product.automation);
   if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 AI 给出的指令完成手动操作，再重新发起一次保存草稿" };
   if (product.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
+  if (product.automation?.status === "queued") return { tone: "waiting", label: "部分阶段已保存，等待继续", detail: "已修复的阶段不会重写；点击开始自动录入将从第一个未完成阶段继续" };
   if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   return { tone: "waiting", label: "尚未录入 VBK", detail: "第一步审查通过后即可在右侧开始保存草稿" };
 }

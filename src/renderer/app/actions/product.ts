@@ -1,4 +1,4 @@
-import type { ProductSummary } from "../../../shared/contracts.js";
+import type { ProductSummary, ProductWorkflowTask } from "../../../shared/contracts.js";
 import { aiProviderLabel, hasActiveAiKey } from "../../../shared/contracts.js";
 import { api } from "../helpers";
 import type { AppState } from "../state/useAppState";
@@ -16,11 +16,13 @@ export function useProductHandlers(state: AppState) {
     setNotice,
     setProduct,
     setProducts,
+    setWorkflowTasks,
     setCreating,
     setCreateInput,
     setAutoConfirmCreation,
     setSavingProduct,
     setView,
+    setStage,
     setAccountMenuOpen,
     refresh,
     setActiveTaskId,
@@ -112,13 +114,21 @@ export function useProductHandlers(state: AppState) {
         userIdea: (createInput.userIdea ?? "").trim(),
         autoConfirm: autoConfirmCreation,
       });
-      setProduct(created);
-      setProducts((items) => [created, ...items]);
-      setView("workspace");
+      const latestTask = created.workflowTask
+        ? await client.workflowTasks.get(created.workflowTask.id).catch(() => created.workflowTask)
+        : undefined;
+      const visibleCreated = latestTask ? { ...created, workflowTask: latestTask, updatedAt: latestTask.updatedAt } : created;
+      setProducts((items) => [visibleCreated, ...items]);
       if (autoConfirmCreation) {
-        setNotice(created.automation?.status === "succeeded"
-          ? "产品已完成自动生成并录入携程。"
-          : "自动生成已停止，未满足的确认项已保留在产品内，尚未录入携程。");
+        if (latestTask) {
+          setWorkflowTasks((items) => [latestTask, ...items.filter((item) => item.id !== latestTask.id)]);
+        }
+        setProduct(null);
+        setView("products");
+        setNotice("产品和后台任务已创建，你可以继续操作；任务会持续运行并同步进度。");
+      } else {
+        setProduct(visibleCreated);
+        setView("workspace");
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "创建产品失败，请重试。");
@@ -143,6 +153,45 @@ export function useProductHandlers(state: AppState) {
     }
   };
 
+  const openWorkflowTask = async (task: ProductWorkflowTask) => {
+    if (!api()) return;
+    setNotice(null);
+    setCreating(false);
+    setAccountMenuOpen(false);
+    try {
+      setProduct(await api()!.products.get(task.localProductId));
+      setActiveTaskId(null);
+      setStage(task.stage === "automation" || task.stage === "completed" ? "vbk" : "review");
+      setView("workspace");
+      requestAnimationFrame(() => {
+        document.getElementById("workflow-task-status")?.focus();
+      });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "打开任务关联产品失败，请重试。");
+    }
+  };
+
+  const abandonWorkflowTask = async (task: ProductWorkflowTask) => {
+    const client = api();
+    if (!client) return false;
+    setNotice(null);
+    try {
+      const abandoned = await client.workflowTasks.abandon(task.id);
+      setWorkflowTasks((items) => [abandoned, ...items.filter((item) => item.id !== abandoned.id)]);
+      setProducts((items) => items.map((item) => item.id === abandoned.localProductId
+        ? { ...item, workflowTask: abandoned, updatedAt: abandoned.updatedAt }
+        : item));
+      setProduct((current) => current?.id === abandoned.localProductId
+        ? { ...current, workflowTask: abandoned }
+        : current);
+      setNotice(`任务「${abandoned.productName}」已永久废弃；关联产品和携程草稿未删除。`);
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "废弃任务失败，请重试。");
+      return false;
+    }
+  };
+
   const deleteProduct = async (item: ProductSummary) => {
     if (!api()) return false;
     setNotice(null);
@@ -163,6 +212,8 @@ export function useProductHandlers(state: AppState) {
     cancel,
     createProduct,
     openProduct,
+    openWorkflowTask,
+    abandonWorkflowTask,
     deleteProduct,
   };
 }

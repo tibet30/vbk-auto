@@ -1,0 +1,38 @@
+.taskStrip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(180px, 260px);
+  align-items: center;
+  gap: 10px;
+  padding: 9px var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.taskStrip:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
+.statusIcon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-control); color: var(--muted-foreground); background: var(--muted); }
+.taskStrip[data-status='running'] .statusIcon { color: var(--ai-teal); background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface)); }
+.taskStrip[data-status='running'] .statusIcon svg { animation: task-strip-spin 900ms linear infinite; }
+.taskStrip[data-status='succeeded'] .statusIcon { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--surface)); }
+.taskStrip[data-status='needs_attention'] .statusIcon, .taskStrip[data-status='failed'] .statusIcon { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 9%, var(--surface)); }
+.taskStrip[data-status='abandoned'] .statusIcon { color: var(--muted-foreground); background: var(--muted); }
+
+.taskCopy { display: grid; gap: 2px; min-width: 0; }
+.titleLine { display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); }
+.titleLine strong { font-size: var(--fs-sm); }
+.titleLine span { color: var(--muted-foreground); }
+.message { overflow: hidden; color: var(--muted-foreground); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+
+.progressBlock { display: grid; gap: 4px; }
+.progressMeta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.progressMeta strong { font-size: var(--fs-xs); }
+.progressMeta small { color: var(--muted-foreground); font-size: 10px; }
+.progressTrack { display: block; height: 4px; overflow: hidden; border-radius: 2px; background: var(--border); }
+.progressTrack span { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--ai-teal); transform-origin: left center; transition: transform 220ms ease-out; }
+.taskStrip[data-status='succeeded'] .progressTrack span { background: var(--success); }
+.taskStrip[data-status='failed'] .progressTrack span, .taskStrip[data-status='needs_attention'] .progressTrack span { background: var(--destructive); }
+.taskStrip[data-status='abandoned'] .progressTrack span { background: var(--muted-foreground); }
+
+@keyframes task-strip-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .taskStrip[data-status='running'] .statusIcon svg { animation: none; } .progressTrack span { transition: none; } }
+@media (max-width: 720px) { .taskStrip { grid-template-columns: auto minmax(0, 1fr); } .progressBlock { grid-column: 1 / -1; } }

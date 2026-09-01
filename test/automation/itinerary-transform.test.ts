@@ -1,7 +1,7 @@
 // 锁死 itinerary-transform 的契约：
 //   - 输入 product.itinerary + operations + stations → 输出 VBK tourDailyDescriptions；
 //   - 每种节点（接机/餐饮/景点/酒店/其他/送机）的 activeType.key 与 known fields 正确；
-//   - 必填字段缺失抛错（含 day.title / description / spots[i].poiId）；
+//   - 必填字段缺失抛错（含 day.title / spots[i].poiId）；
 //   - 保留未知字段（tourDailyInfo 上的 pkgTourInfoId / versionNum / customStatus）；
 //   - POI 字段保留（poiId / poiName / ticketType / relateSystemTicket）。
 import test from "node:test";
@@ -47,12 +47,12 @@ function makeDay(overrides: Partial<ProductItineraryDay> = {}): ProductItinerary
 
 // ───────── 每天全节点转换 ─────────
 
-test("每天产出 6 节点：接机(仅首日)/景点/餐饮早/餐饮午/餐饮晚/其他 + 末日送机 + 接机(仅首日)", () => {
+test("有真实 POI 且无未匹配用户活动时，不追加其他节点", () => {
   const days = [makeDay({ day: 1, title: "第1天" }), makeDay({ day: 2, title: "第2天" }), makeDay({ day: 3, title: "第3天" })];
   const out = transformItinerary({ itinerary: days, operations: baseOps, stations: baseStations, refIdSeed: "1" });
   assert.equal(out.length, 3);
-  // 首日：接机 + 景点 + 3 餐 + 酒店 + 其他 = 7
-  assert.equal(out[0].tourDailyInfos.length, 7, "首日必须有接机节点");
+  // 首日：接机 + 景点 + 3 餐 + 酒店 = 6
+  assert.equal(out[0].tourDailyInfos.length, 6, "首日必须有接机节点");
   assert.equal(out[0].tourDailyInfos[0].activeType?.key, 25, "首日首节点必须是集合（接机/站）");
   assert.equal(out[0].tourDailyInfos[0].activeType?.name, "集合");
   // 末日
@@ -158,7 +158,7 @@ test("接机只有 train 时写入 trainStation + 上下车点", () => {
   assert.equal(out[1].tourDailyInfos.at(-1).tourDailyPackageDismissList[0].trainStations[0].locationCode, "CN001NJH");
 });
 
-test("其他 / 自由活动节点承载 description，activeType.key=7", () => {
+test("已有真实 POI 且没有未匹配用户活动时，不写入其他 / 自由活动节点", () => {
   const out = transformItinerary({
     itinerary: [makeDay({ description: "自由活动：漫步古城" })],
     operations: baseOps,
@@ -166,25 +166,21 @@ test("其他 / 自由活动节点承载 description，activeType.key=7", () => {
     refIdSeed: "1",
   });
   const other = out[0].tourDailyInfos.find((info) => info.activeType?.key === 7);
-  assert.ok(other);
-  assert.equal(other.description, "自由活动：漫步古城");
+  assert.equal(other, undefined);
 });
 
-test("第1天 description 中包含“巅峰”会改写为“高峰”，其余天不改写", () => {
+test("AI 行程 description 不会被自动写为其他 / 自由活动", () => {
   const out = transformItinerary({
     itinerary: [
-      makeDay({ day: 1, description: "挑战巅峰线" }),
-      makeDay({ day: 2, description: "继续巅峰体验" }),
+      makeDay({ day: 1, description: "上午游览丽江古城" }),
+      makeDay({ day: 2, description: "继续游览玉龙雪山" }),
     ],
     operations: baseOps,
     stations: baseStations,
     refIdSeed: "1",
   });
-  const firstOther = out[0].tourDailyInfos.find((info) => info.activeType?.key === 7);
-  const secondOther = out[1].tourDailyInfos.find((info) => info.activeType?.key === 7);
-  assert.ok(firstOther && secondOther);
-  assert.equal(firstOther.description, "挑战高峰线");
-  assert.equal(secondOther.description, "继续巅峰体验");
+  assert.equal(out[0].tourDailyInfos.some((info) => info.activeType?.key === 7), false);
+  assert.equal(out[1].tourDailyInfos.some((info) => info.activeType?.key === 7), false);
 });
 
 test("orderDay 严格 1..N 且 dailyDescription 来自 day.title", () => {
@@ -300,12 +296,9 @@ test("day.title 缺失 → 抛错", () => {
   );
 });
 
-test("day.description 缺失 → 抛错", () => {
+test("day.description 缺失不会阻断已有真实 POI 的日程", () => {
   const day = makeDay({ description: "" });
-  assert.throws(
-    () => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }),
-    /description 缺失/,
-  );
+  assert.doesNotThrow(() => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }));
 });
 
 test("空 itinerary 数组 → 抛错", () => {
@@ -353,11 +346,11 @@ test("refIdSeed 是日志关联 nonce，允许任意字符串（包括空），�
   }
 });
 
-test("spots 为空数组 → 抛错（业务要求每日至少 1 个景点）", () => {
+test("spots 和用户其他活动都为空 → 抛错", () => {
   const day = makeDay({ spots: [] });
   assert.throws(
     () => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }),
-    /每日必须至少 1 个/,
+    /缺少已验证景点或用户明确的其他活动/,
   );
 });
 

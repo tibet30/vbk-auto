@@ -57,13 +57,25 @@ export function useAppStateBase() {
 
   const refresh = async () => {
     if (!api()) return;
-    try {
-      const next = await api()!.products.list();
+    const [productResult, taskResult] = await Promise.allSettled([
+      api()!.products.list(),
+      api()!.workflowTasks.list(),
+    ]);
+    if (taskResult.status === "fulfilled") {
+      productState.setWorkflowTasks(taskResult.value);
+    }
+    if (productResult.status === "fulfilled") {
+      const next = productResult.value;
       productState.setProducts(next);
       productState.setProduct((current: ProductDetail | null) =>
         current && next.some((item: ProductSummary) => item.id === current.id) ? current : null);
-    } catch (error) {
+    }
+    if (productResult.status === "rejected") {
+      const error = productResult.reason;
       navigation.setNotice(error instanceof Error ? error.message : "无法加载产品列表。");
+    } else if (taskResult.status === "rejected") {
+      const error = taskResult.reason;
+      navigation.setNotice(error instanceof Error ? error.message : "无法加载任务列表。");
     }
   };
 

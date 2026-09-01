@@ -379,6 +379,28 @@ test("带地域上下文时拒绝外省同名 POI，并优先同省候选", () =
   }, { destinationCity: "乌鲁木齐", province: "新疆" }), null);
 });
 
+test("带地域上下文的简称查询不会通过无地域投影命中外地完全同名 POI", () => {
+  const result = parsePoiSuggestPayload("长城", {
+    ResponseStatus: { Ack: "Success" },
+    poiList: [
+      { name: "慕田峪长城", poiId: 75609, provinceName: "北京", cityName: "北京" },
+      { name: "八达岭长城", poiId: 75596, provinceName: "北京", cityName: "北京" },
+      { name: "长城", poiId: 143727104, provinceName: "河北", cityName: "张家口" },
+    ],
+  }, 200, { destinationCity: "北京", province: "北京" });
+  assert.equal(result.best, null, "歧义简称应交给受约束 AI，而不是选择外地完全同名项");
+  assert.deepEqual(result.candidates.slice(0, 2).map((item) => item.poiName), ["慕田峪长城", "八达岭长城"]);
+});
+
+test("城市前缀查询也不能绕过地域过滤回看外地候选", () => {
+  assert.equal(pickBestPoi("北京长城", {
+    poiList: [
+      { name: "八达岭长城", poiId: 75596, provinceName: "北京", cityName: "北京" },
+      { name: "北京长城", poiId: 152911723, provinceName: "江西", cityName: "抚州" },
+    ],
+  }, { destinationCity: "北京", province: "北京" }), null);
+});
+
 test("带行政区前缀的官方主景点名仍可匹配", () => {
   assert.deepEqual(pickBestPoi("鼋头渚", {
     poiList: [{ name: "无锡市太湖鼋头渚风景区", poiId: 75725 }],

@@ -6,6 +6,8 @@
 export type AiUsageSource =
   | "planning.generateStage"
   | "planning.structureLocation"
+  | "planning.structureUserIntent"
+  | "planning.disambiguatePoi"
   | "planning.recommendSpotNames"
   | "planning.composeItinerary"
   | "planning.estimateVehicleCost"

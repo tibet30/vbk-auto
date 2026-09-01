@@ -184,13 +184,14 @@ export function parsePoiSuggestPayload(
   const data = asRecord(body?.data);
   const list = Array.isArray(body?.poiList) ? body.poiList : Array.isArray(data?.poiList) ? data.poiList : [];
   const best = pickBestPoi(keyword, { poiList: list }, context)
-    ?? pickBestPoi(keyword, {
+    ?? (!hasLocationContext(context) ? pickBestPoi(keyword, {
       // A few live responses put valid names/IDs behind locale-specific
       // metadata that makes the raw context filter undecidable. Re-run the
       // strict name matcher on the already-sanitised identity projection;
-      // this is still exact/conservative matching, never first-result fallthrough.
+      // 带产品地域时禁止使用这条无地域投影，否则外地完全同名 POI 会绕过
+      // destinationCity / province 过滤。
       poiList: list.map((item) => ({ localName: candidatePoiName(item), poiId: positiveIntegerValue(asRecord(item)?.poiId) })),
-    }, context);
+    }) : null);
   return buildPoiSuggestDetailResult({
     httpStatus,
     businessStatus: ack as string | number | boolean | null,
@@ -237,7 +238,8 @@ export function pickBestPoi(
   // the product context is Chinese. If the city-prefixed name has a unique
   // exact/conservative match outside the filtered pool, use that name proof;
   // never fall back to the first arbitrary candidate.
-  const hit = findHit(scopedPois) ?? (matchKeys.length > 1 ? findHit(pois) : null);
+  const hit = findHit(scopedPois)
+    ?? (!hasLocationContext(context) && matchKeys.length > 1 ? findHit(pois) : null);
   const poi = asRecord(hit);
   const poiName = candidatePoiName(poi);
   const poiId = positiveIntegerValue(poi?.poiId);
@@ -260,6 +262,10 @@ function filterPoisByContext(pois: unknown[], context?: { destinationCity?: stri
     // 避免“南山风景区”这类泛名命中外省 POI。
     return !candidateCity && !candidateProvince;
   });
+}
+
+function hasLocationContext(context?: { destinationCity?: string; province?: string }): boolean {
+  return Boolean(context?.destinationCity?.trim() || context?.province?.trim());
 }
 
 function candidateLocationNames(poi: Record<string, unknown> | null): { city: string; province: string } {

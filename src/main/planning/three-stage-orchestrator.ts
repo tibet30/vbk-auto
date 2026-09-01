@@ -7,18 +7,19 @@ import {
   type PlanningNodeId,
   type PlanningNodeState,
   type PlanningPlanV2,
-  type PlanningPoiCandidate,
   type PlanningSkeleton,
   type ThreeStagePlanningAi,
 } from "../../shared/contracts-planning.js";
-import { AI_WRITABLE_PATHS } from "./schemas.js";
 import { runSingleStage } from "./single-stage-runner.js";
 import type { OrchestratorRuntime } from "./types.js";
-import { expandVerifiedItinerary, resolvePlanningPoiCandidates } from "./planning-v2-pois.js";
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
-import { findAllVbkCopyBadCases } from "./vbk-copy-policy.js";
+import { emptyPlanningUserIntent } from "../../shared/contracts-planning-intent.js";
+import { buildVerifiedPool, composeItinerary, runFoundationLocation } from "./three-stage-itinerary-flow.js";
+import { validateUserIntentDays } from "./user-intent.js";
+
+export { runFoundationLocation };
 export interface ThreeStageOrchestratorDependencies {
   localProductId: string;
   skeleton: PlanningSkeleton & { province: string; city: string };
@@ -79,6 +80,7 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   await commit();
   const currentProduct = await deps.runtime.loadCurrentProduct(deps.localProductId);
   const currentBasic = asRecord(currentProduct.basicInfo);
+  const userIdea = text(currentBasic.userIdea);
   deps.skeleton.city = toPlatformShortLocationName(
     text(currentBasic.meetingCity) || text(currentBasic.destinationCity) || deps.skeleton.city,
   );
@@ -88,6 +90,19 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
     const location = await runFoundationLocation(deps, plan, patchNode, () => plan);
     if (!location.ok) return location.plan;
     plan = location.plan;
+  }
+  if (!plan.userIntent || plan.userIntent.rawIdea !== userIdea) {
+    try {
+      const userIntent = userIdea
+        ? await deps.ai.structureUserIntent({ userIdea, destination: deps.skeleton.destination, days: deps.skeleton.days })
+        : emptyPlanningUserIntent();
+      const dayError = validateUserIntentDays(userIntent, deps.skeleton.days);
+      if (dayError) return failPlan(plan, patchNode, "spotCandidates", dayError);
+      plan = { ...plan, userIntent };
+      await commit();
+    } catch (error) {
+      return failPlan(plan, patchNode, "spotCandidates", `用户想法解析失败：${errorMessage(error)}`);
+    }
   }
   const itineraryReady = isCompleted(plan, "itineraryDraft");
   if (!itineraryReady) {
@@ -150,240 +165,6 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   plan = { ...plan, status: "completed", currentNode: "finalValidation" };
   await commit();
   return plan;
-}
-
-/** 第一阶段只补齐省份；城市在创建时锁定，AI 不得覆盖。 */
-export async function runFoundationLocation(
-  deps: ThreeStageOrchestratorDependencies,
-  initial: PlanningPlanV2,
-  patchNode: (id: PlanningNodeId, patch: Partial<PlanningNodeState>) => Promise<void>,
-  getPlan: () => PlanningPlanV2,
-): Promise<{ ok: boolean; plan: PlanningPlanV2 }> {
-  let plan = initial;
-  let previousError: { stage: "basicInfo"; attempt: number; code: string; message: string } | undefined;
-  for (let attempt = 1; attempt <= PLANNING_STAGE_RETRY_LIMIT; attempt += 1) {
-    await patchNode("skeleton", { status: "running", attempts: attempt, startedAt: new Date().toISOString(), error: undefined });
-    plan = getPlan();
-    try {
-      const currentProduct = await deps.runtime.loadCurrentProduct(deps.localProductId);
-      const currentBasic = asRecord(currentProduct.basicInfo) ?? {};
-      const currentCity = toPlatformShortLocationName(
-        text(currentBasic.meetingCity) || text(currentBasic.destinationCity) || deps.skeleton.city,
-      );
-      const location = await deps.ai.structureLocation({
-        destination: deps.skeleton.destination,
-        currentProvince: text(currentBasic.province),
-        currentDestinationCity: currentCity,
-        previousError: previousError?.message,
-      });
-      const province = normaliseProvinceName(text(location.province));
-      const errors: string[] = [];
-      if (!province) errors.push("province 为空");
-      else if (!isAcceptablePlanningRegionName(province, currentCity)) {
-        errors.push(`province「${province}」不是可用的国家、地区或一级行政区名称`);
-      }
-      if (errors.length === 0) {
-        const write = await deps.runtime.writeModule(
-          deps.localProductId,
-          "basicInfo",
-          AI_WRITABLE_PATHS.basicInfo,
-          { province },
-        );
-        if (!write.ok) throw new Error(write.reason || "标准目的地写入失败");
-        deps.skeleton.province = province;
-        deps.skeleton.city = currentCity;
-        await patchNode("skeleton", {
-          status: "completed",
-          attempts: attempt,
-          summary: `${province} · ${currentCity} · ${deps.skeleton.days}天`,
-          error: undefined,
-          completedAt: new Date().toISOString(),
-        });
-        return { ok: true, plan: getPlan() };
-      }
-      previousError = { stage: "basicInfo", attempt, code: "location_gate_failed", message: `第一阶段目的地准入失败：${errors.join("；")}` };
-      await patchNode("skeleton", { status: "failed", attempts: attempt, error: previousError.message });
-    } catch (error) {
-      previousError = { stage: "basicInfo", attempt, code: "location_generation_failed", message: errorMessage(error) };
-      await patchNode("skeleton", { status: "failed", attempts: attempt, error: previousError.message });
-    }
-    plan = getPlan();
-  }
-  return { ok: false, plan: await terminal(getPlan(), patchNode, "skeleton", previousError?.message ?? "第一阶段目的地准入失败") };
-}
-async function buildVerifiedPool(
-  deps: ThreeStageOrchestratorDependencies,
-  initial: PlanningPlanV2,
-  patchNode: (id: PlanningNodeId, patch: Partial<PlanningNodeState>) => Promise<void>,
-  getPlan: () => PlanningPlanV2,
-  setPlan: (plan: PlanningPlanV2) => void,
-): Promise<{ ok: boolean; plan: PlanningPlanV2 }> {
-  let plan = initial;
-  const hardMinimum = deps.skeleton.days;
-  const target = Math.min(30, Math.max(10, deps.skeleton.days * 2));
-  const recommendationTarget = Math.min(30, Math.max(10, deps.skeleton.days * 3));
-  const pendingAtResume = plan.poiCandidates.filter((item) => item.status === "proposed");
-  if (pendingAtResume.length > 0) {
-    try {
-      const checked = await resolvePlanningPoiCandidates({
-        names: pendingAtResume.map((item) => item.requestedName), province: deps.skeleton.province,
-        city: deps.skeleton.city, concurrency: 5, beforeEach: deps.assertVbkLogin, query: deps.queryPoi,
-        checkAvailability: deps.runtime.getPoiAvailability?.bind(deps.runtime),
-      });
-      const byName = new Map(checked.map((item) => [item.requestedName, item]));
-      plan = { ...plan, poiCandidates: plan.poiCandidates.map((item) => byName.get(item.requestedName) ?? item) };
-      setPlan(plan);
-      const hit = plan.poiCandidates.filter((item) => item.status === "resolved").length;
-      await patchNode("poiResolution", { status: "completed", attempts: Math.max(1, node(plan, "poiResolution").attempts), summary: `推荐 ${plan.poiCandidates.length} / 命中 ${hit}`, error: undefined, completedAt: new Date().toISOString() });
-      plan = getPlan();
-    } catch (error) {
-      await patchNode("poiResolution", { status: "blocked", attempts: node(plan, "poiResolution").attempts, error: errorMessage(error) });
-      return { ok: false, plan: getPlan() };
-    }
-  }
-  for (let round = node(plan, "spotCandidates").attempts + 1; round <= PLANNING_STAGE_RETRY_LIMIT; round += 1) {
-    const resolved = plan.poiCandidates.filter((item) => item.status === "resolved");
-    if (resolved.length >= target) break;
-    const seen = plan.poiCandidates.map((item) => item.requestedName);
-    await patchNode("spotCandidates", { status: "running", attempts: round, startedAt: new Date().toISOString(), error: undefined });
-    plan = getPlan();
-    let names: string[];
-    try {
-      names = await deps.ai.recommendSpotNames({
-        destination: deps.skeleton.destination,
-        province: deps.skeleton.province,
-        city: deps.skeleton.city,
-        days: deps.skeleton.days,
-        targetCount: round === 1 ? recommendationTarget : Math.min(30 - seen.length, Math.max(1, target - resolved.length)),
-        excludedNames: seen,
-        rejectedNames: plan.poiCandidates.filter((item) => item.status === "rejected").map((item) => item.requestedName),
-      });
-    } catch (error) {
-      const message = errorMessage(error);
-      await patchNode("spotCandidates", { status: "failed", attempts: round, error: message });
-      plan = getPlan();
-      if (resolved.length >= hardMinimum) {
-        // 已有候选足够支撑后续真实 POI 与行程准入时，模型补充推荐失败
-        // 只是非阻断告警。后续节点成功后，不能把本轮暂时失败残留到最终规划树。
-        await patchNode("spotCandidates", {
-          status: "completed",
-          attempts: round,
-          summary: `已有 ${resolved.length} 个真实 POI，跳过本轮补充推荐`,
-          error: undefined,
-          completedAt: new Date().toISOString(),
-        });
-        plan = getPlan();
-        break;
-      }
-      if (round === PLANNING_STAGE_RETRY_LIMIT) return { ok: false, plan: await terminal(plan, patchNode, "spotCandidates", message) };
-      continue;
-    }
-    const newEntries = names.map((requestedName) => ({ requestedName, status: "proposed" as const }));
-    plan = { ...getPlan(), poiCandidates: [...getPlan().poiCandidates, ...newEntries] };
-    setPlan(plan);
-    await patchNode("spotCandidates", { status: "completed", attempts: round, summary: `累计推荐 ${plan.poiCandidates.length} 个候选`, completedAt: new Date().toISOString() });
-    plan = getPlan();
-
-    const unresolved = plan.poiCandidates.filter((item) => item.status === "proposed");
-    try {
-      const checked = await resolvePlanningPoiCandidates({
-        names: unresolved.map((item) => item.requestedName),
-        province: deps.skeleton.province,
-        city: deps.skeleton.city,
-        concurrency: 5,
-        beforeEach: deps.assertVbkLogin,
-        query: deps.queryPoi,
-        checkAvailability: deps.runtime.getPoiAvailability?.bind(deps.runtime),
-      });
-      const byName = new Map(checked.map((item) => [item.requestedName, item]));
-      plan = {
-        ...getPlan(),
-        poiCandidates: getPlan().poiCandidates.map((item) => byName.get(item.requestedName) ?? item),
-      };
-      setPlan(plan);
-      const hit = plan.poiCandidates.filter((item) => item.status === "resolved").length;
-      await patchNode("poiResolution", {
-        status: "completed",
-        attempts: round,
-        summary: `推荐 ${plan.poiCandidates.length} / 命中 ${hit}`,
-        error: undefined,
-        completedAt: new Date().toISOString(),
-      });
-      plan = getPlan();
-    } catch (error) {
-      const message = errorMessage(error);
-      await patchNode("poiResolution", { status: "blocked", attempts: round - 1, error: message });
-      return { ok: false, plan: getPlan() };
-    }
-  }
-  const hit = plan.poiCandidates.filter((item) => item.status === "resolved").length;
-  if (hit >= hardMinimum && node(plan, "spotCandidates").status === "failed") {
-    // 续跑时可能在进入循环前就已经满足最低门槛，也要清理历史失败状态。
-    await patchNode("spotCandidates", {
-      status: "completed",
-      summary: `已有 ${hit} 个真实 POI，满足最低准入门槛`,
-      error: undefined,
-      completedAt: new Date().toISOString(),
-    });
-    plan = getPlan();
-  }
-  if (hit < hardMinimum) {
-    return { ok: false, plan: await terminal(plan, patchNode, "poiResolution", `真实 POI 仅 ${hit} 个，少于 ${hardMinimum} 天的最低门槛`) };
-  }
-  return { ok: true, plan };
-}
-
-async function composeItinerary(
-  deps: ThreeStageOrchestratorDependencies,
-  initial: PlanningPlanV2,
-  patchNode: (id: PlanningNodeId, patch: Partial<PlanningNodeState>) => Promise<void>,
-  getPlan: () => PlanningPlanV2,
-  setPlan: (plan: PlanningPlanV2) => void,
-): Promise<{ ok: boolean; plan: PlanningPlanV2 }> {
-  let plan = initial;
-  let previousError = node(plan, "itineraryDraft").error;
-  const pool = plan.poiCandidates.filter((item): item is PlanningPoiCandidate & { poiId: number; poiName: string } =>
-    item.status === "resolved" && Boolean(item.poiId && item.poiName));
-  for (let attempt = node(plan, "itineraryDraft").attempts + 1; attempt <= PLANNING_STAGE_RETRY_LIMIT; attempt += 1) {
-    await patchNode("itineraryDraft", { status: "running", attempts: attempt, error: undefined, startedAt: new Date().toISOString() });
-    try {
-      const drafts = await deps.ai.composeVerifiedItinerary({
-        destination: deps.skeleton.destination,
-        days: deps.skeleton.days,
-        candidates: pool,
-        previousError,
-      });
-      const expanded = expandVerifiedItinerary({ drafts, pool, days: deps.skeleton.days });
-      if (!expanded.ok) throw new Error(expanded.reason);
-      const copyBadCases = findAllVbkCopyBadCases(expanded.itinerary, "itinerary");
-      if (copyBadCases.length > 0) {
-        throw new Error(copyBadCases.map((badCase) =>
-          `行程文案 ${badCase.path} 命中 VBK 黑名单「${badCase.term}」：${badCase.reason}；请改写为「${badCase.alternatives.join("」或「")}」`,
-        ).join("；"));
-      }
-      const write = await deps.runtime.writeModule(deps.localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, expanded.itinerary);
-      if (!write.ok) throw new Error(write.reason || "行程写入失败");
-      plan = {
-        ...getPlan(),
-        poiCandidates: getPlan().poiCandidates.map((item) => item.poiId && expanded.selectedIds.has(item.poiId)
-          ? { ...item, status: "selected" as const }
-          : item),
-      };
-      setPlan(plan);
-      await patchNode("itineraryDraft", {
-        status: "completed",
-        attempts: attempt,
-        summary: `采用 ${expanded.selectedIds.size} 个真实 POI，生成 ${deps.skeleton.days} 天行程`,
-        completedAt: new Date().toISOString(),
-      });
-      return { ok: true, plan: getPlan() };
-    } catch (error) {
-      previousError = errorMessage(error);
-      await patchNode("itineraryDraft", { status: "failed", attempts: attempt, error: previousError });
-      if (attempt === PLANNING_STAGE_RETRY_LIMIT) return { ok: false, plan: await terminal(getPlan(), patchNode, "itineraryDraft", previousError) };
-    }
-  }
-  return { ok: false, plan };
 }
 
 async function runCompletionAiNode(

@@ -21,6 +21,7 @@ import type {
   ProductDetail,
   ProductReadiness,
   ProductSummary,
+  ProductWorkflowTask,
   Settings,
   VehicleResourceMatch,
   HotelResourceMatch,
@@ -69,6 +70,12 @@ export interface VbkApi {
     readiness(id: string): Promise<ProductReadiness>;
     updateReviewField(id: string, input: ManualReviewFieldInput): Promise<ProductDetail>;
     updateProductJson(id: string, json: string): Promise<ProductDetail>;
+  };
+  workflowTasks: {
+    list(): Promise<ProductWorkflowTask[]>;
+    get(id: string): Promise<ProductWorkflowTask>;
+    /** 永久封存任务；保留关联产品与已经写入的 VBK 草稿。 */
+    abandon(id: string): Promise<ProductWorkflowTask>;
   };
   ai: {
     send(localProductId: string, content: string): Promise<void>;
@@ -224,6 +231,8 @@ export interface VbkApi {
   };
   events: {
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
+    /** 后台任务每次持久化状态变化后推送；任务中心和产品入口共用。 */
+    onWorkflowTaskUpdated(listener: (task: ProductWorkflowTask) => void): () => void;
     /** 主进程成功持久化规划状态后推送；订阅者必须按 localProductId 过滤。 */
     onPlanningStateUpdated(listener: (localProductId: string, state: PlanningGenerationState) => void): () => void;
     /** VBK 页面加载完成、SPA 渲染就绪后推送；renderer 收到后触发 checkVbkLogin。 */

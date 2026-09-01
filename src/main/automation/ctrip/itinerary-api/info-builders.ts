@@ -285,6 +285,8 @@ export function buildOtherInfo(args: {
   description: string;
   sort: number;
   serviceTime?: { startTime: string; endTime: string };
+  activityTime?: string;
+  durationMinutes?: number;
 }) {
   const { description, sort, serviceTime } = args;
   return {
@@ -292,8 +294,8 @@ export function buildOtherInfo(args: {
       activeType: { key: 7, name: "自由活动" },
       sort,
       description,
-      takeoffTime: { key: "D", name: "全天" },
-      takeTime: 0,
+      takeoffTime: otherActivityTime(args.activityTime),
+      takeTime: args.durationMinutes ?? 0,
       costInclude: false,
       startOnBoardTime: serviceTime?.startTime ?? "",
       stopOnBoardTime: serviceTime?.endTime ?? "",
@@ -302,4 +304,11 @@ export function buildOtherInfo(args: {
     }),
     tourDailyPois: [emptyTourDailyPoi()],
   };
+}
+
+function otherActivityTime(value?: string): { key: string | null; name: string } {
+  const time = value?.trim() || "全天";
+  if (time === "不限") return { key: "N", name: "不限" };
+  if (time === "全天") return { key: "D", name: "全天" };
+  return { key: null, name: time };
 }

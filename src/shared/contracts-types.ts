@@ -8,6 +8,38 @@ export type FieldState =
 
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
+export type ProductWorkflowTaskStatus =
+  | "queued"
+  | "running"
+  | "needs_attention"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "abandoned";
+
+export type ProductWorkflowTaskStage =
+  | "queued"
+  | "planning"
+  | "readiness"
+  | "automation"
+  | "completed";
+
+/** 一键创建的持久化后台任务。它独立于 renderer 生命周期，以产品为跳转主体。 */
+export interface ProductWorkflowTask {
+  id: string;
+  localProductId: string;
+  productName: string;
+  status: ProductWorkflowTaskStatus;
+  stage: ProductWorkflowTaskStage;
+  progress: number;
+  message: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
 export interface ProductSummary {
   id: string;
   name: string;
@@ -17,6 +49,8 @@ export interface ProductSummary {
   vbkAccount?: string;
   updatedAt: string;
   revision?: number;
+  /** 本机最近一条一键创建任务；不写入 Tibet 产品业务快照。 */
+  workflowTask?: ProductWorkflowTask;
 }
 
 export interface CreateProductInput {

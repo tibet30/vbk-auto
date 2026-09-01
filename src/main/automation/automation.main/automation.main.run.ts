@@ -14,7 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
-import { preparePhaseRetry } from "../phase-retry.js";
+import { preparePhaseRetry, prepareQueuedPhaseResume } from "../phase-retry.js";
 import {
   automationBlockers,
   parseProduct,
@@ -115,7 +115,9 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
 
     if (retryFrom && !productDetail.automation) throw new Error("没有可重试的自动录入记录。");
     const run: AutomationRun = retryFrom
-      ? preparePhaseRetry(productDetail.automation!, draftPhases, retryFrom)
+      ? productDetail.automation?.status === "queued"
+        ? prepareQueuedPhaseResume(productDetail.automation, draftPhases, retryFrom)
+        : preparePhaseRetry(productDetail.automation!, draftPhases, retryFrom)
       : { id: randomUUID(), status: "running", phases: draftPhases.map((phase) => ({ phase, status: "pending" })), logs: [] };
     const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
     const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };

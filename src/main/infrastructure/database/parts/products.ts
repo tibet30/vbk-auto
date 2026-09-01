@@ -206,6 +206,12 @@ export function deleteProduct(db: Database.Database, id: string): boolean {
     }
     const activeMessage = db.prepare("SELECT 1 FROM messages WHERE local_product_id=? AND task_status='running' LIMIT 1").get(localProductId);
     if (activeMessage) throw new Error("AI 正在处理这个产品，请等待本轮完成后再删除。");
+    const activeWorkflowTask = db.prepare(`
+      SELECT 1 FROM workflow_tasks
+      WHERE local_product_id=? AND status IN ('queued','running') LIMIT 1
+    `).get(localProductId);
+    if (activeWorkflowTask) throw new Error("后台任务正在处理这个产品，请等待任务完成后再删除。");
+    db.prepare("DELETE FROM workflow_tasks WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM automation_runs WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM research_tasks WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM messages WHERE local_product_id=?").run(localProductId);

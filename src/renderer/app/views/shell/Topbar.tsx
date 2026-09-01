@@ -34,7 +34,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
 
   // 非工作台视图下，顶栏左侧显示当前页面名，比写死"VBK Desktop"更符合 macOS
   // 顶栏语义（顶栏 = 当前文档/视图名）。工作台视图下保持原产品面包屑。
-  const viewTitle = view === "settings" ? "设置" : view === "operation-log" ? "运行日志" : view === "products" ? "产品" : null;
+  const viewTitle = view === "settings" ? "设置" : view === "operation-log" ? "运行日志" : view === "tasks" ? "任务中心" : view === "products" ? "产品" : null;
 
   return (
     <header className={styles.topbar}>

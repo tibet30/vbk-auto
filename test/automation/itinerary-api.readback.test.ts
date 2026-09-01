@@ -46,6 +46,18 @@ test.after(() => {
   uninstallFetchStub();
 });
 
+function baseProductWithUserOther() {
+  return {
+    ...baseProduct,
+    itinerary: baseProduct.itinerary.map((day, index) => index === 0 ? {
+      ...day,
+      activities: [{
+        time: "下午", title: "手作体验", detail: "体验手作", type: "other", source: "user", durationMinutes: 120,
+      }],
+    } : day),
+  };
+}
+
 test("字段级回读：dailyDescription.title 不一致 → 失败", async () => {
   installHandlersForFieldMismatch({ title: () => "被改掉" });
   try {
@@ -175,7 +187,7 @@ test("字段级回读：餐饮 includeAdult 费用状态不一致 → 失败", a
 test("字段级回读：其他 description 不一致 → 失败", async () => {
   installHandlersForFieldMismatch({ otherDescription: () => "描述被覆盖" });
   try {
-    await ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928");
+    await ensureItineraryApi(makeFakePage() as any, baseProductWithUserOther() as any, "77035928");
     assert.fail("必须抛错");
   } catch (e) {
     assert.match(String(e), /第 1 天 回读「其他」description 不一致/);
@@ -184,9 +196,12 @@ test("字段级回读：其他 description 不一致 → 失败", async () => {
 });
 
 test("字段级回读：服务时间 startOnBoardTime 不一致 → 失败", async () => {
-  installHandlersForFieldMismatch({ serviceStart: "09:30" });
+  installHandlersForFieldMismatch({
+    otherDescription: () => "下午 手作体验：体验手作",
+    serviceStart: "09:30",
+  });
   try {
-    await ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928");
+    await ensureItineraryApi(makeFakePage() as any, baseProductWithUserOther() as any, "77035928");
     assert.fail("必须抛错");
   } catch (e) {
     assert.match(String(e), /第 1 天 回读服务时间 startOnBoardTime 不一致/);
@@ -196,9 +211,12 @@ test("字段级回读：服务时间 startOnBoardTime 不一致 → 失败", asy
 });
 
 test("字段级回读：服务时间 stopOnBoardTime 不一致 → 失败", async () => {
-  installHandlersForFieldMismatch({ serviceEnd: "21:00" });
+  installHandlersForFieldMismatch({
+    otherDescription: () => "下午 手作体验：体验手作",
+    serviceEnd: "21:00",
+  });
   try {
-    await ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928");
+    await ensureItineraryApi(makeFakePage() as any, baseProductWithUserOther() as any, "77035928");
     assert.fail("必须抛错");
   } catch (e) {
     assert.match(String(e), /第 1 天 回读服务时间 stopOnBoardTime 不一致/);
@@ -293,7 +311,7 @@ test("buildReadbackExpectations：title/POI/餐饮/酒店/其他/服务时间/�
   assert.deepEqual(exp.days[0].meals.map((m) => m.key), ["B", "L", "S"]);
   assert.equal(exp.days[0].meals.every((m) => m.mealsIncluded === false), true);
   assert.deepEqual(exp.days[0].hotels, [{ hotelName: "和玺酒店", hotelTier: "当地4钻酒店/-4" }]);
-  assert.equal(exp.days[0].other.description, "自由活动");
+  assert.equal(exp.days[0].other, undefined);
   assert.deepEqual(exp.days[0].serviceTime, { startTime: "08:00", endTime: "20:00" });
   assert.deepEqual(exp.pickup.airport, { code: "LJG", name: "三义机场" });
   assert.deepEqual(exp.pickup.train, { code: "CN001LHM", name: "丽江" });

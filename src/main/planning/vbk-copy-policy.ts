@@ -23,6 +23,12 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /首次/,
   },
   {
+    term: "首选",
+    reason: "VBK 产品图文实跑会判定为非法关键词",
+    alternatives: ["之选", "推荐选择"],
+    pattern: /首选/,
+  },
+  {
     term: "主席",
     reason: "VBK 行程描述实跑会判定为非法关键词",
     alternatives: ["重要人物", "相关负责人", "历史人物"],
@@ -106,6 +112,30 @@ export function buildVbkCopyPolicyPrompt(): string {
     rules,
     "例外仅限官方 POI 身份字段 poiName 和 requestedName：它们必须原样保留远端官方名称，不得改写；不要把敏感词放进 title、description、features、recommendation、recommendations 或其他自由文案字段来规避限制。",
   ].join("\n");
+}
+
+/**
+ * 用户原始想法不是平台宣传文案，数据库中应保持原样；但送入 AI 前移除
+ * 未经核实的极限/排名承诺，避免模型把这些词继续扩散到产品可见文案。
+ */
+export function sanitiseUserIdeaForAi(value: string): string {
+  const absoluteCases = VBK_COPY_BAD_CASES.filter(({ term }) =>
+    term === "第一（宣传排名用语）"
+      || term === "最（极限表达）"
+      || term === "其他绝对化用语");
+  const withoutAbsolutePhrases = value.trim().replace(/最(?:佳|高|优|好|强|大|低|快|全|完整|专业|值得)/g, "");
+  const sanitised = absoluteCases.reduce((text, badCase) => {
+    const pattern = new RegExp(
+      badCase.pattern.source,
+      badCase.pattern.flags.includes("g") ? badCase.pattern.flags : `${badCase.pattern.flags}g`,
+    );
+    return text.replace(pattern, "");
+  }, withoutAbsolutePhrases);
+  return sanitised
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/([，、；。])\1+/g, "$1")
+    .replace(/[，、；]\s*(?=的)/g, "")
+    .replace(/^[，、；。\s]+|[，、；。\s]+$/g, "");
 }
 
 export function findVbkCopyBadCase(value: unknown, path = "value"):

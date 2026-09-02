@@ -19,6 +19,7 @@ const automationPhaseSchema = z.enum([
   "saleControl",
 ]);
 const planningMajorStageSchema = z.enum(["foundation", "itinerary", "completion"]);
+const workflowTaskRetryModeSchema = z.enum(["from_error", "from_start"]);
 
 const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "products:get", "products:delete", "products:readiness", "products:updateReviewField", "products:updateProductJson",
@@ -26,7 +27,7 @@ const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "research:accept", "research:refreshIssues", "research:vehicleResource", "research:hotelResource",
   "automation:start", "automation:stop", "automation:retry", "automation:retryPhase", "automation:retryOnePhase",
   "planning:start", "planning:resume", "planning:state", "planning:rerunMajorStage", "planning:acceptItineraryAndRerunCompletion",
-  "workflowTasks:get", "workflowTasks:abandon",
+  "workflowTasks:get", "workflowTasks:abandon", "workflowTasks:resume",
 ]);
 
 function parse<T>(channel: string, label: string, schema: z.ZodType<T>, value: unknown): T {
@@ -65,6 +66,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
   }
   if (channel === "ai:send") parse(channel, "content", z.string().trim().min(1).max(6000), args[1]);
   if (channel === "ai:regenerate") parse(channel, "field", shortTextSchema, args[1]);
+  if (channel === "workflowTasks:resume") parse(channel, "mode", workflowTaskRetryModeSchema, args[1]);
 
   if (channel === "automation:retryPhase" || channel === "automation:retryOnePhase") {
     parse(channel, "phase", automationPhaseSchema, args[1]);

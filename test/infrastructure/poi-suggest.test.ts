@@ -379,6 +379,20 @@ test("带地域上下文时拒绝外省同名 POI，并优先同省候选", () =
   }, { destinationCity: "乌鲁木齐", province: "新疆" }), null);
 });
 
+test("带地域上下文时从 district.parents 识别同省真实 POI", () => {
+  assert.deepEqual(pickBestPoi("成都大熊猫繁育研究基地", {
+    poiList: [{
+      localName: "成都大熊猫繁育研究基地",
+      poiId: 76342,
+      district: {
+        districtName: "成都",
+        districtType: "City",
+        parents: [{ districtName: "四川", districtType: "Province" }],
+      },
+    }],
+  }, { destinationCity: "成都", province: "四川" }), { poiName: "成都大熊猫繁育研究基地", poiId: 76342 });
+});
+
 test("带地域上下文的简称查询不会通过无地域投影命中外地完全同名 POI", () => {
   const result = parsePoiSuggestPayload("长城", {
     ResponseStatus: { Ack: "Success" },

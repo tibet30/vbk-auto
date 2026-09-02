@@ -1,7 +1,7 @@
 {
   "name": "vbk-auto",
   "productName": "三人同游",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "三人同游 本地旅游产品规划与安全录入工作台",

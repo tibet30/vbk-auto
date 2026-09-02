@@ -44,6 +44,10 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
     if (!context.abandonProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
     return context.abandonProductTask(id);
   });
+  ipcMain.handle("workflowTasks:resume", (_event, id: string, mode: "from_error" | "from_start") => {
+    if (!context.resumeProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
+    return context.resumeProductTask(id, mode);
+  });
   ipcMain.handle("products:create", async (_event, input: CreateProductInput) => {
     const login = await context.productWorkflows.runVbkPageExclusive(() => context.browser.status(true));
     if (!login.loggedIn) {

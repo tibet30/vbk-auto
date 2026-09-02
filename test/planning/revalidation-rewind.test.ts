@@ -118,6 +118,23 @@ test("detectAcceptedModulesFromProduct 对 presentation 三条 recommendations �
   assert.ok(!accepted.includes("presentation"), "recommendations 缺 category/text 时不应被算 accepted");
 });
 
+test("detectAcceptedModulesFromProduct 不把遗留超长推荐理由算作 accepted", () => {
+  const product = {
+    presentation: {
+      recommendationCategory: "优选行程",
+      recommendation: "R",
+      recommendations: [
+        { category: "优选行程", text: "行程安排清晰" },
+        { category: "精选酒店", text: "住宿位置便利" },
+        { category: "服务保障", text: "这是一条会超过平台限制并且不应被规划恢复逻辑静默跳过的推荐理由".repeat(2) },
+      ],
+      features: "f",
+    },
+  };
+  const accepted = detectAcceptedModulesFromProduct(product);
+  assert.equal(accepted.includes("presentation"), false);
+});
+
 test("detectAcceptedModulesFromProduct 对 itinerary days 顺序错乱也拒绝", () => {
   const product = {
     basicInfo: { days: 2, nights: 1, supplierProductCode: "NEW" },

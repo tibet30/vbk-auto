@@ -41,7 +41,7 @@ function depsFor(ai: any, product: Record<string, any>, events: string[] = []) {
   };
 }
 
-test("第一阶段只接受 AI 省份，城市保持创建时锁定值", async () => {
+test("第一阶段将遗留省级城市锚点提升为该省主城市", async () => {
   const product = { basicInfo: { destination: "西藏自治区", destinationCity: "西藏自治区", province: "", days: 3 } };
   const calls: any[] = [];
   const ai = {
@@ -59,7 +59,8 @@ test("第一阶段只接受 AI 省份，城市保持创建时锁定值", async (
   assert.equal(result.ok, true);
   assert.equal(calls.length, 1);
   assert.equal(product.basicInfo.province, "西藏");
-  assert.equal(product.basicInfo.destinationCity, "西藏自治区");
+  assert.equal(product.basicInfo.meetingCity, "拉萨");
+  assert.equal(product.basicInfo.destinationCity, "拉萨");
   assert.deepEqual(events, ["local-write", "remote-completed"]);
   assert.deepEqual((product.basicInfo as any).province, "西藏");
 });

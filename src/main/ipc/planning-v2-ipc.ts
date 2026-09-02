@@ -262,21 +262,27 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
     withPlanningLock(localProductId, () => resumePlanningUnderLock(localProductId));
   context.resumePlanning = resumePlanning;
 
+  const retryPlanningUnderLock = async (localProductId: string): Promise<PlanningRunResult> => {
+    const remote = await context.remoteProducts.get(localProductId);
+    if (!remote.planning || remote.planning.version !== 2) {
+      throw new Error("该产品没有可恢复的新流程规划，请重新开始规划。");
+    }
+    if (remote.planning.itineraryAdoption?.status === "pending"
+      || remote.planning.itineraryAdoption?.status === "blocked") {
+      throw new Error("当前有一版对话行程待采用，请先点击“采用此行程并重新补全产品”。");
+    }
+    if (remote.planning.status === "completed") return toRunResult(localProductId, remote.planning);
+    return runBody(localProductId, prepareExplicitPlanningResume(remote.planning));
+  };
+  const retryPlanning = (localProductId: string): Promise<PlanningRunResult> =>
+    withPlanningLock(localProductId, () => retryPlanningUnderLock(localProductId));
+  context.retryPlanning = retryPlanning;
+
   ipcMain.handle("planning:start", (_event, localProductId: string) => {
     return withPlanningLock(localProductId, () => startPlanningUnderLock(localProductId));
   });
 
-  ipcMain.handle("planning:resume", async (_event, localProductId: string) => {
-    return withPlanningLock(localProductId, async () => {
-      const remote = await context.remoteProducts.get(localProductId);
-      if (!remote.planning || remote.planning.version !== 2) throw new Error("该产品没有可恢复的新流程规划，请重新开始规划。");
-      if (remote.planning.itineraryAdoption?.status === "pending" || remote.planning.itineraryAdoption?.status === "blocked") {
-        throw new Error("当前有一版对话行程待采用，请先点击“采用此行程并重新补全产品”。");
-      }
-      if (remote.planning.status === "completed") return toRunResult(localProductId, remote.planning);
-      return runBody(localProductId, prepareExplicitPlanningResume(remote.planning));
-    });
-  });
+  ipcMain.handle("planning:resume", (_event, localProductId: string) => retryPlanning(localProductId));
 
   ipcMain.handle("planning:state", async (_event, localProductId: string) => {
     const remote = await context.remoteProducts.get(localProductId);

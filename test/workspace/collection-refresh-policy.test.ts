@@ -50,6 +50,7 @@ test("后台任务状态通过受控事件实时更新，列表接口负责进�
 
   assert.match(main, /workflow-task:updated/);
   assert.match(main, /const completedTask = db\?\.completeWorkflowTaskForProduct\(product\);[\s\S]*if \(completedTask\) emitWorkflowTask\(completedTask\);/);
+  assert.match(main, /product\.status === "draft_saved"[\s\S]*latestWorkflowTaskForProduct\(product\.id\)[\s\S]*send\("product:updated", nextProduct\)/);
   assert.match(preload, /onWorkflowTaskUpdated/);
   assert.match(api, /onWorkflowTaskUpdated/);
   assert.match(derived, /subscribeCollectionLiveUpdates/);

@@ -71,6 +71,19 @@ test("VBK 刷新状态后同步刷新已记录账号列表", () => {
   assert.match(vbkLoginBlockSrc, /onClick=\{\(\)\s*=>\s*void\s+handleRefreshStatus\(\)\}/);
 });
 
+test("工作台空产品时仍可进入产品列表", () => {
+  const productListButton = homeIndexSrc.match(
+    /<button[\s\S]*?onClick=\{openProductList\}[\s\S]*?>\s*查看产品\s*<\/button>/,
+  )?.[0];
+
+  assert.ok(productListButton, "工作台必须保留“查看产品”入口。");
+  assert.doesNotMatch(
+    productListButton,
+    /disabled=/,
+    "空产品列表是可安全查看的；“查看产品”不能因 products.length 为 0 而变成死按钮。",
+  );
+});
+
 test("workspace-home 必须在 loginPanelOpen=true 时挂载 LoginBrowserPanel", () => {
   // 必须形如：{loginPanelOpen && <LoginBrowserPanel model={model} />}
   // 关键不变量：挂载条件来自 loginPanelOpen；否则浏览器永远不会被打开。

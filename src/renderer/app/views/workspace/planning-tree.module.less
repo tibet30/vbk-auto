@@ -155,6 +155,12 @@
 .spin { animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+@media (max-width: 900px) {
+  .treeHead { flex-wrap: wrap; gap: 4px 8px; }
+  .treeTitleToggle { flex-basis: calc(100% - 36px); }
+  .treeTrailing { flex: 1 1 100%; justify-content: flex-start; padding-left: 3px; }
+  .readinessGroup { margin-left: auto; }
+}
 @media (max-width: 680px) {
   .stageStateSummary { font-size: 9px; }
   .stageList { gap: 12px; }

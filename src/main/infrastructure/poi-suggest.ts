@@ -271,6 +271,10 @@ function hasLocationContext(context?: { destinationCity?: string; province?: str
 function candidateLocationNames(poi: Record<string, unknown> | null): { city: string; province: string } {
   const values = new Map<string, string>();
   const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
     const record = asRecord(value);
     if (!record) return;
     const districtName = normaliseLocationName(record.districtName);

@@ -44,3 +44,13 @@ test("后台中断恢复沿用远端规划，不走 foundation 重置", () => {
   assert.match(resumeFlow, /runBody\(localProductId, remote\.planning\)/);
   assert.doesNotMatch(resumeFlow, /createPlanningPlanV2|resetProductForPlanningStage/);
 });
+
+test("用户从后台任务报错处继续时沿用显式规划恢复规则", () => {
+  const source = readFileSync("src/main/ipc/planning-v2-ipc.ts", "utf8");
+  const start = source.indexOf("const retryPlanningUnderLock");
+  const end = source.indexOf("const retryPlanning =", start);
+  const retryFlow = source.slice(start, end);
+
+  assert.match(retryFlow, /prepareExplicitPlanningResume\(remote\.planning\)/);
+  assert.doesNotMatch(retryFlow, /createPlanningPlanV2|resetProductForPlanningStage/);
+});

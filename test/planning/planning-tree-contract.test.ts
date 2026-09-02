@@ -80,21 +80,31 @@ test("treeBody 子模块不被压缩，整体滚动保留行程三栏", () => {
   assert.match(styles, /\.treeBody > \* \{[^}]*flex:\s*0 0 auto/s);
 });
 
-test("completed planning collapses the tree and keeps the terminal status next to the chevron", () => {
+test("completed planning collapses the tree and keeps its status in the compact header", () => {
   assert.match(tree, /useEffect/);
   assert.match(tree, /if \(plan\?\.status === "completed" && !rerunBusy\) setTreeCollapsed\(true\)/);
   assert.match(tree, /const terminalStatus = plan && !activeNodeLabel/);
   assert.match(tree, /\? \{ label: overallLabel\(plan\), status: plan\.status \}/);
-  assert.match(tree, /\{terminalStatus && \(/);
+  assert.match(tree, /workflowTask \? <WorkflowTaskSummary task=\{workflowTask\} \/> : terminalStatus && \(/);
   assert.match(tree, /className=\{styles\.overallStatus\}/);
   assert.match(tree, /className=\{styles\.treeTrailing\}/);
-  assert.ok(tree.indexOf("{terminalStatus && (") < tree.indexOf("className={styles.treeTitleChevron}"));
-  assert.ok(tree.indexOf("className={styles.treeTitleMain}") < tree.indexOf("{terminalStatus && ("));
+  assert.ok(tree.indexOf("WorkflowTaskSummary task={workflowTask}") < tree.indexOf("className={styles.treeTitleChevron}"));
+  assert.ok(tree.indexOf("className={styles.treeTitleMain}") < tree.indexOf("WorkflowTaskSummary task={workflowTask}"));
   assert.match(tree, /规划已完成，可进入产品审查/);
   assert.doesNotMatch(tree, /规划完成，已进入产品审查/);
   assert.match(styles, /\.treeTrailing \{[^}]*gap: 4px/);
   assert.match(styles, /\.overallStatus \{[^}]*justify-content: flex-end/);
   assert.match(styles, /\.overallStatus \{[^}]*text-overflow: ellipsis/);
+});
+
+test("后台任务合入生成规划标题，只保留一份进度", () => {
+  const taskStrip = read("src/renderer/app/views/workflow-task/TaskStrip.tsx");
+  assert.match(tree, /workflowTask: ProductWorkflowTask \| null/);
+  assert.match(tree, /workflowTask \? <WorkflowTaskSummary task=\{workflowTask\}/);
+  assert.match(tree, /!workflowTask \? <span className=\{styles\.progressValue\}/);
+  assert.match(taskStrip, /export function WorkflowTaskSummary/);
+  assert.match(taskStrip, /className=\{styles\.summaryTrack\} role="progressbar"[\s\S]*aria-valuenow=\{task\.progress\}/);
+  assert.match(taskStrip, /role="status"[\s\S]*aria-atomic="true"/);
 });
 
 test("planning v2 mutation handlers acquire the product lock before reset/update", () => {

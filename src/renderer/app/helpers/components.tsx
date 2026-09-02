@@ -1,6 +1,6 @@
-import { Briefcase, Check, Copy, Eye, FileText, LoaderCircle, Plus, Trash2, Users } from "lucide-react";
+import { Briefcase, Check, Copy, Eye, FileText, LoaderCircle, Plus, RotateCcw, Trash2, Users } from "lucide-react";
 import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import type { CreateProductInput, ProductSummary } from "../../../shared/contracts.js";
+import type { CreateProductInput, ProductSummary, WorkflowTaskRetryMode } from "../../../shared/contracts.js";
 import { PRODUCT_FORM_LABELS, type ProductForm } from "../../../shared/product-form.js";
 import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
@@ -135,15 +135,31 @@ export function WorkbenchModule({
  * 标题、状态徽章、产品 ID、账号和更新时间按视觉层级排布，
  * 查看详情 / 删除按钮保持统一的显式操作入口，同时保留点击整行内容进入详情。
  */
-export function ProductList({ products, onOpen, onDelete }: { products: ProductSummary[]; onOpen: (item: ProductSummary) => Promise<void>; onDelete: (item: ProductSummary) => Promise<boolean> }) {
+export function ProductList({ products, onOpen, onDelete, onResumeTask }: {
+  products: ProductSummary[];
+  onOpen: (item: ProductSummary) => Promise<void>;
+  onDelete: (item: ProductSummary) => Promise<boolean>;
+  onResumeTask: (
+    task: NonNullable<ProductSummary["workflowTask"]>,
+    mode: WorkflowTaskRetryMode,
+  ) => Promise<boolean>;
+}) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
   const remove = async (item: ProductSummary) => {
     if (deletingId) return;
     setDeletingId(item.id);
     const removed = await onDelete(item);
     setDeletingId(null);
     if (removed) setConfirmingId(null);
+  };
+  const resume = async (item: ProductSummary, mode: WorkflowTaskRetryMode) => {
+    const task = item.workflowTask;
+    if (!task || resumingTaskId) return;
+    setResumingTaskId(task.id);
+    await onResumeTask(task, mode);
+    setResumingTaskId(null);
   };
 
   return (
@@ -152,10 +168,12 @@ export function ProductList({ products, onOpen, onDelete }: { products: ProductS
         <li className={styles.productListItem} key={item.id}>
           <ProductRow
             item={item}
-            disabled={Boolean(deletingId)}
+            disabled={Boolean(deletingId) || Boolean(resumingTaskId)}
             confirming={confirmingId === item.id}
             deleting={deletingId === item.id}
+            resuming={resumingTaskId === item.workflowTask?.id}
             onOpen={() => void onOpen(item)}
+            onResume={(mode) => void resume(item, mode)}
             onAskDelete={() => setConfirmingId((id) => (id === item.id ? null : item.id))}
             onCancelDelete={() => setConfirmingId(null)}
             onConfirmDelete={() => void remove(item)}
@@ -166,18 +184,21 @@ export function ProductList({ products, onOpen, onDelete }: { products: ProductS
   );
 }
 
-function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete, onCancelDelete, onConfirmDelete }: {
+function ProductRow({ item, disabled, confirming, deleting, resuming, onOpen, onResume, onAskDelete, onCancelDelete, onConfirmDelete }: {
   item: ProductSummary;
   disabled: boolean;
   confirming: boolean;
   deleting: boolean;
+  resuming: boolean;
   onOpen: () => void;
+  onResume: (mode: WorkflowTaskRetryMode) => void;
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
 }) {
   const meta = productMeta(item);
   const locked = item.status === "automating" || item.workflowTask?.status === "queued" || item.workflowTask?.status === "running";
+  const canResume = item.workflowTask?.status === "needs_attention" || item.workflowTask?.status === "failed";
 
   return (
     <article className={styles.productRow} data-state={item.status}>
@@ -227,6 +248,33 @@ function ProductRow({ item, disabled, confirming, deleting, onOpen, onAskDelete,
       </div>
 
       <div className={styles.productRowActions}>
+        {canResume && (
+          <div className={styles.productRetryGroup} role="group" aria-label={`重新执行：${item.name}`}>
+            <span className={styles.productRetryLabel}>重新执行</span>
+            <button
+              className={styles.productResumeTrigger}
+              type="button"
+              onClick={() => onResume("from_error")}
+              disabled={disabled}
+              aria-label={`从报错处继续执行：${item.name}`}
+              title="从报错处继续执行"
+            >
+              {resuming ? <LoaderCircle size={14} className={styles.spin} /> : <RotateCcw size={14} />}
+              <span>从错误处</span>
+            </button>
+            <button
+              className={styles.productRestartTrigger}
+              type="button"
+              onClick={() => onResume("from_start")}
+              disabled={disabled}
+              aria-label={`从头开始重新执行：${item.name}`}
+            title="从头开始重新执行"
+          >
+              <RotateCcw size={14} />
+              <span>从头开始</span>
+            </button>
+          </div>
+        )}
         <button
           className={styles.productViewTrigger}
           type="button"

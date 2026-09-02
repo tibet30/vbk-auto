@@ -39,6 +39,8 @@ import type {
   AppAuthStatus,
 } from "./contracts-auth.js";
 
+export type WorkflowTaskRetryMode = "from_error" | "from_start";
+
 /**
  * IPC 契约：renderer ↔ main 的强类型接口。
  *
@@ -76,6 +78,8 @@ export interface VbkApi {
     get(id: string): Promise<ProductWorkflowTask>;
     /** 永久封存任务；保留关联产品与已经写入的 VBK 草稿。 */
     abandon(id: string): Promise<ProductWorkflowTask>;
+    /** 从报错处继续，或从规划起点重新执行。 */
+    resume(id: string, mode: WorkflowTaskRetryMode): Promise<ProductWorkflowTask>;
   };
   ai: {
     send(localProductId: string, content: string): Promise<void>;

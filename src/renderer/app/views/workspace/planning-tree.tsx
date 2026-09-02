@@ -15,8 +15,10 @@ import type {
   PlanningNodeState,
   PlanningPlanV2,
 } from "../../../../shared/contracts-planning.js";
+import type { ProductWorkflowTask } from "../../../../shared/contracts.js";
 import type { ProductAiUsage } from "../../../../shared/contracts-ai-usage.js";
 import shared from "../shared.module.less";
+import { WorkflowTaskSummary } from "../workflow-task/TaskStrip";
 import { PlanningRerunConfirmDialog, type PlanningRerunStage } from "./planning-rerun-confirm-dialog";
 import { PlanningUsagePanel, PlanningUsageToggle, usePlanningUsage } from "./planning-usage";
 import styles from "./planning-tree.module.less";
@@ -66,6 +68,7 @@ export function resolveActivePlanningNode(
 
 export function PlanningTree(props: {
   plan?: PlanningPlanV2;
+  workflowTask: ProductWorkflowTask | null;
   aiUsage?: ProductAiUsage;
   planningBusy: boolean;
   onResume(): Promise<void>;
@@ -82,7 +85,7 @@ export function PlanningTree(props: {
   /** 进度数值旁的小标签（生成进度 / 生成中 / 就绪度）。 */
   progressCaption: string;
 }) {
-  const { plan, aiUsage, planningBusy, onResume, onRerunMajorStage, rerunBusy, itineraryAdoptionBusy, onAcceptItinerary, readinessLabel, readinessState, progressValue, progressCaption } = props;
+  const { plan, workflowTask, aiUsage, planningBusy, onResume, onRerunMajorStage, rerunBusy, itineraryAdoptionBusy, onAcceptItinerary, readinessLabel, readinessState, progressValue, progressCaption } = props;
   const usage = usePlanningUsage(aiUsage);
   const [collapsed, setCollapsed] = useState<Partial<Record<PlanningMajorStage, boolean>>>({});
   const [treeCollapsed, setTreeCollapsed] = useState(false);
@@ -161,7 +164,7 @@ export function PlanningTree(props: {
           </button>
         )}
         <span className={styles.treeTrailing}>
-          {terminalStatus && (
+          {workflowTask ? <WorkflowTaskSummary task={workflowTask} /> : terminalStatus && (
             <span className={styles.overallStatus} data-state={terminalStatus.status} title={terminalStatus.label}>
               {overallStatusIcon(terminalStatus.status, styles.spin)}
               {terminalStatus.label}
@@ -183,10 +186,10 @@ export function PlanningTree(props: {
           ) : null}
           <span className={styles.readinessGroup}>
             <span className={shared.state} data-state={readinessState}>{readinessLabel}</span>
-            <span className={styles.progressValue}>
+            {!workflowTask ? <span className={styles.progressValue}>
               <strong>{progressValue}</strong>
               <small>{progressCaption}</small>
-            </span>
+            </span> : null}
           </span>
           <button
             className={styles.treeTitleChevron}

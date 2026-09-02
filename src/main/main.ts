@@ -113,8 +113,16 @@ let cookieStore: LocalVbkCookieStore | null = null;
 const broadcastProduct = (product: ProductDetail) => {
   const completedTask = db?.completeWorkflowTaskForProduct(product);
   if (completedTask) emitWorkflowTask(completedTask);
+  // 任务可能已被 products:get / workflowTasks:list 等读取路径提前收敛为成功，
+  // 此时 completedTask 会是 undefined，不能再依赖单独的 task event 刷新详情页。
+  // 对已保存草稿，把本机权威任务快照原子地附在 product:updated 上，避免详情页
+  // 因事件先后或订阅时机继续显示旧的失败 / 等待状态。
+  const workflowTask = product.status === "draft_saved" && product.productId
+    ? db?.latestWorkflowTaskForProduct(product.id)
+    : undefined;
+  const nextProduct = workflowTask ? { ...product, workflowTask } : product;
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-  window.webContents.send("product:updated", product);
+  window.webContents.send("product:updated", nextProduct);
 };
 let productEmitter: (product: ProductDetail) => void = broadcastProduct;
 const emitProduct = (product: ProductDetail) => productEmitter(product);
@@ -384,6 +392,7 @@ app.whenReady().then(async () => {
     db,
     get startPlanning() { return context.startPlanning; },
     get resumePlanning() { return context.resumePlanning; },
+    get retryPlanning() { return context.retryPlanning; },
     readiness,
     productWorkflows,
     get automation() { return automation; },
@@ -392,6 +401,7 @@ app.whenReady().then(async () => {
   });
   context.enqueueProductTask = (product) => productTaskScheduler.enqueue(product);
   context.abandonProductTask = (taskId) => productTaskScheduler.abandon(taskId);
+  context.resumeProductTask = (taskId, mode) => productTaskScheduler.resume(taskId, mode);
   registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
   automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));

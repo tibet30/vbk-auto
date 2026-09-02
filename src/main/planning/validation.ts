@@ -12,7 +12,10 @@ import type { PlanningModule, ModuleOutcome, PlanningSkeleton } from "../../shar
 import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
-import { VBK_RECOMMENDATION_GENERATION_MAX_BYTES } from "./schemas.js";
+import {
+  VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
+  vbkRecommendationByteLength,
+} from "./vbk-recommendation-length.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 
 export interface ValidationResult {
@@ -199,7 +202,7 @@ export function deepValidateModules(args: {
           seen.add(category);
           const text = textValue(record?.text);
           if (text.length === 0) { reasons.push("recommendation.text 缺失"); valid = false; }
-          else if (new TextEncoder().encode(text).length > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+          else if (vbkRecommendationByteLength(text) > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
             reasons.push(`recommendation[${recommendationIndex + 1}].text 超过 ${VBK_RECOMMENDATION_GENERATION_MAX_BYTES} UTF-8 字节`);
             valid = false;
           }

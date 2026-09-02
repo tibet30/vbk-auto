@@ -10,6 +10,25 @@
 
 .taskStrip:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
+.taskSummary { min-width: 0; max-width: min(42vw, 460px); display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
+.taskSummary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+.summaryIcon { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 6px; color: var(--muted-foreground); background: var(--muted); }
+.taskSummary[data-status='running'] .summaryIcon { color: var(--ai-teal); background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface)); }
+.taskSummary[data-status='running'] .summaryIcon svg { animation: task-strip-spin 900ms linear infinite; }
+.taskSummary[data-status='succeeded'] .summaryIcon { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--surface)); }
+.taskSummary[data-status='needs_attention'] .summaryIcon, .taskSummary[data-status='failed'] .summaryIcon { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 9%, var(--surface)); }
+
+.summaryCopy { min-width: 0; display: inline-flex; align-items: baseline; gap: 5px; overflow: hidden; white-space: nowrap; }
+.summaryCopy strong { flex: 0 0 auto; color: var(--foreground); font-size: var(--fs-xs); }
+.summaryCopy span { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+.summaryCopy small { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--muted-foreground); font-size: 10px; text-overflow: ellipsis; }
+.summaryProgress { width: 54px; flex: 0 0 auto; display: grid; gap: 3px; }
+.summaryProgress strong { color: var(--foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
+.summaryTrack { display: block; height: 3px; overflow: hidden; border-radius: 2px; background: var(--border); }
+.summaryTrack > span { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--ai-teal); transform-origin: left center; transition: transform 220ms ease-out; }
+.taskSummary[data-status='succeeded'] .summaryTrack > span { background: var(--success); }
+.taskSummary[data-status='failed'] .summaryTrack > span, .taskSummary[data-status='needs_attention'] .summaryTrack > span { background: var(--destructive); }
+
 .statusIcon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-control); color: var(--muted-foreground); background: var(--muted); }
 .taskStrip[data-status='running'] .statusIcon { color: var(--ai-teal); background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface)); }
 .taskStrip[data-status='running'] .statusIcon svg { animation: task-strip-spin 900ms linear infinite; }
@@ -34,5 +53,7 @@
 .taskStrip[data-status='abandoned'] .progressTrack span { background: var(--muted-foreground); }
 
 @keyframes task-strip-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .taskStrip[data-status='running'] .statusIcon svg { animation: none; } .progressTrack span { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .taskStrip[data-status='running'] .statusIcon svg, .taskSummary[data-status='running'] .summaryIcon svg { animation: none; } .progressTrack span, .summaryTrack > span { transition: none; } }
+@media (max-width: 900px) { .taskSummary { max-width: min(46vw, 360px); } .summaryCopy small { display: none; } }
+@media (max-width: 680px) { .taskSummary { max-width: none; flex: 1 1 auto; } .summaryCopy span { display: none; } }
 @media (max-width: 720px) { .taskStrip { grid-template-columns: auto minmax(0, 1fr); } .progressBlock { grid-column: 1 / -1; } }

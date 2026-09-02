@@ -189,6 +189,117 @@ test("应用重启发生在规划阶段时恢复既有规划，而不是清空 f
   assert.equal(resumePlanningCalls, 1);
 });
 
+test("用户从规划报错处继续时只重试失败节点，不重新创建产品", async () => {
+  const store = fakeTaskStore();
+  const blocked = store.createWorkflowTask(product().id, product().name);
+  store.updateWorkflowTask(blocked.id, {
+    status: "needs_attention",
+    stage: "planning",
+    progress: 45,
+    message: "任务已暂停，请打开产品处理待确认项",
+    error: "真实 POI 仅 0 个",
+    completedAt: "2026-09-02T00:00:00.000Z",
+  });
+  let startPlanningCalls = 0;
+  let resumePlanningCalls = 0;
+  let retryPlanningCalls = 0;
+  let resolveDone!: () => void;
+  const done = new Promise<void>((resolve) => { resolveDone = resolve; });
+  const scheduler = new ProductTaskScheduler({
+    db: store as never,
+    startPlanning: async () => {
+      startPlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应重新创建" } as never;
+    },
+    resumePlanning: async () => {
+      resumePlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应走退出恢复" } as never;
+    },
+    retryPlanning: async () => {
+      retryPlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "已重试失败节点" } as never;
+    },
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, work) => work() },
+    automation: { start: async () => undefined },
+    emitTask: (task) => { if (task.status === "succeeded") resolveDone(); },
+    emitProduct: () => undefined,
+  });
+
+  const queued = await scheduler.resume(blocked.id, "from_error");
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.stage, "planning");
+  assert.equal(queued.error, undefined);
+  assert.equal(queued.completedAt, undefined);
+  await done;
+
+  assert.equal(startPlanningCalls, 0);
+  assert.equal(resumePlanningCalls, 0);
+  assert.equal(retryPlanningCalls, 1);
+});
+
+test("只有报错任务可以从报错处继续", async () => {
+  const store = fakeTaskStore();
+  const queued = store.createWorkflowTask(product().id, product().name);
+  const scheduler = new ProductTaskScheduler({
+    db: store as never,
+    startPlanning: async () => ({ status: "completed", rejected: [], assistantReply: "完成" }) as never,
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, work) => work() },
+    automation: { start: async () => undefined },
+    emitTask: () => undefined,
+    emitProduct: () => undefined,
+  });
+
+  await assert.rejects(scheduler.resume(queued.id, "from_error"), /只有需要处理或执行失败/);
+});
+
+test("用户选择从头开始时重置到规划阶段并重新创建规划", async () => {
+  const store = fakeTaskStore();
+  const failed = store.createWorkflowTask(product().id, product().name);
+  store.updateWorkflowTask(failed.id, {
+    status: "failed",
+    stage: "automation",
+    progress: 85,
+    message: "任务执行失败，请打开产品查看原因",
+    error: "携程录入失败",
+  });
+  let startPlanningCalls = 0;
+  let resumePlanningCalls = 0;
+  let retryPlanningCalls = 0;
+  let resolveDone!: () => void;
+  const done = new Promise<void>((resolve) => { resolveDone = resolve; });
+  const scheduler = new ProductTaskScheduler({
+    db: store as never,
+    startPlanning: async () => {
+      startPlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "已重新创建规划" } as never;
+    },
+    resumePlanning: async () => {
+      resumePlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应走原阶段" } as never;
+    },
+    retryPlanning: async () => {
+      retryPlanningCalls += 1;
+      return { status: "completed", rejected: [], assistantReply: "不应只重试节点" } as never;
+    },
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, work) => work() },
+    automation: { start: async () => undefined },
+    emitTask: (task) => { if (task.status === "succeeded") resolveDone(); },
+    emitProduct: () => undefined,
+  });
+
+  const queued = await scheduler.resume(failed.id, "from_start");
+  assert.equal(queued.stage, "planning");
+  assert.equal(queued.progress, 0);
+  await done;
+
+  assert.equal(startPlanningCalls, 1);
+  assert.equal(resumePlanningCalls, 0);
+  assert.equal(retryPlanningCalls, 0);
+});
+
 test("排队任务永久废弃后不会启动规划，重复废弃保持终态", async () => {
   const store = fakeTaskStore();
   let planningCalls = 0;

@@ -1,4 +1,4 @@
-import type { ProductSummary, ProductWorkflowTask } from "../../../shared/contracts.js";
+import type { ProductSummary, ProductWorkflowTask, WorkflowTaskRetryMode } from "../../../shared/contracts.js";
 import { aiProviderLabel, hasActiveAiKey } from "../../../shared/contracts.js";
 import { api } from "../helpers";
 import { validateProductBrief } from "../helpers/product-brief-validation.js";
@@ -190,6 +190,29 @@ export function useProductHandlers(state: AppState) {
     }
   };
 
+  const resumeWorkflowTask = async (task: ProductWorkflowTask, mode: WorkflowTaskRetryMode) => {
+    const client = api();
+    if (!client) return false;
+    setNotice(null);
+    try {
+      const resumed = await client.workflowTasks.resume(task.id, mode);
+      setWorkflowTasks((items) => [resumed, ...items.filter((item) => item.id !== resumed.id)]);
+      setProducts((items) => items.map((item) => item.id === resumed.localProductId
+        ? { ...item, workflowTask: resumed, updatedAt: resumed.updatedAt }
+        : item));
+      setProduct((current) => current?.id === resumed.localProductId
+        ? { ...current, workflowTask: resumed }
+        : current);
+      setNotice(mode === "from_error"
+        ? `任务「${resumed.productName}」已从报错处继续执行。`
+        : `任务「${resumed.productName}」已从头开始重新执行。`);
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "继续执行失败，请重试。");
+      return false;
+    }
+  };
+
   const deleteProduct = async (item: ProductSummary) => {
     if (!api()) return false;
     setNotice(null);
@@ -212,6 +235,7 @@ export function useProductHandlers(state: AppState) {
     openProduct,
     openWorkflowTask,
     abandonWorkflowTask,
+    resumeWorkflowTask,
     deleteProduct,
   };
 }

@@ -6,10 +6,11 @@ import {
   Clock3,
   ListChecks,
   LoaderCircle,
+  RotateCcw,
   XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import type { ProductWorkflowTask, ProductWorkflowTaskStatus } from "../../../../shared/contracts.js";
+import type { ProductWorkflowTask, ProductWorkflowTaskStatus, WorkflowTaskRetryMode } from "../../../../shared/contracts.js";
 import type { AppModel } from "../../app.main.model";
 import { formatUpdatedAt } from "../../helpers/constants";
 import shared from "../shared.module.less";
@@ -26,10 +27,11 @@ const FILTERS: Array<{ key: TaskFilter; label: string }> = [
 ];
 
 export function AppTasksPage({ model }: { model: AppModel }) {
-  const { workflowTasks, openWorkflowTask, abandonWorkflowTask } = model;
+  const { workflowTasks, openWorkflowTask, abandonWorkflowTask, resumeWorkflowTask } = model;
   const [filter, setFilter] = useState<TaskFilter>("all");
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [abandoningId, setAbandoningId] = useState<string | null>(null);
+  const [resumingId, setResumingId] = useState<string | null>(null);
   const tasks = useMemo(() => workflowTasks.filter((task) => matchesFilter(task, filter)), [workflowTasks, filter]);
   const activeCount = workflowTasks.filter((task) => task.status === "queued" || task.status === "running").length;
   const abandon = async (task: ProductWorkflowTask) => {
@@ -38,6 +40,12 @@ export function AppTasksPage({ model }: { model: AppModel }) {
     const abandoned = await abandonWorkflowTask(task);
     setAbandoningId(null);
     if (abandoned) setConfirmingId(null);
+  };
+  const resume = async (task: ProductWorkflowTask, mode: WorkflowTaskRetryMode) => {
+    if (resumingId) return;
+    setResumingId(task.id);
+    await resumeWorkflowTask(task, mode);
+    setResumingId(null);
   };
 
   return (
@@ -68,7 +76,7 @@ export function AppTasksPage({ model }: { model: AppModel }) {
             {tasks.map((task) => (
               <li key={task.id} data-confirming={confirmingId === task.id || undefined}>
                 <div className={styles.taskRow}>
-                  <button type="button" className={styles.taskOpen} onClick={() => void openWorkflowTask(task)} disabled={Boolean(abandoningId)}>
+                  <button type="button" className={styles.taskOpen} onClick={() => void openWorkflowTask(task)} disabled={Boolean(abandoningId) || Boolean(resumingId)}>
                     <TaskIcon status={task.status} />
                     <span className={styles.taskBody}>
                       <span className={styles.taskTitleLine}>
@@ -84,19 +92,48 @@ export function AppTasksPage({ model }: { model: AppModel }) {
                     </span>
                     <span className={styles.openHint}>产品详情 <ChevronRight size={14} aria-hidden="true" /></span>
                   </button>
-                  {task.status !== "abandoned" && (
-                    <button
-                      className={styles.abandonTrigger}
-                      type="button"
-                      onClick={() => setConfirmingId((id) => id === task.id ? null : task.id)}
-                      disabled={Boolean(abandoningId)}
-                      aria-label={`永久废弃任务：${task.productName}`}
-                      title="永久废弃任务"
-                    >
-                      <ArchiveX size={14} aria-hidden="true" />
-                      <span>废弃</span>
-                    </button>
-                  )}
+                  <div className={styles.taskActions}>
+                    {(task.status === "needs_attention" || task.status === "failed") && (
+                      <div className={styles.retryGroup} role="group" aria-label={`重新执行：${task.productName}`}>
+                        <span className={styles.retryLabel}>重新执行</span>
+                        <button
+                          className={styles.resumeTrigger}
+                          type="button"
+                          onClick={() => void resume(task, "from_error")}
+                          disabled={Boolean(abandoningId) || Boolean(resumingId)}
+                          aria-label={`从报错处继续执行：${task.productName}`}
+                          title="从报错处继续执行"
+                        >
+                          {resumingId === task.id ? <LoaderCircle size={14} className={styles.abandonSpin} aria-hidden="true" /> : <RotateCcw size={14} aria-hidden="true" />}
+                          <span>从错误处</span>
+                        </button>
+                        <button
+                          className={styles.restartTrigger}
+                          type="button"
+                          onClick={() => void resume(task, "from_start")}
+                          disabled={Boolean(abandoningId) || Boolean(resumingId)}
+                          aria-label={`从头开始重新执行：${task.productName}`}
+                          title="从头开始重新执行"
+                        >
+                          <RotateCcw size={14} aria-hidden="true" />
+                          <span>从头开始</span>
+                        </button>
+                      </div>
+                    )}
+                    {task.status !== "abandoned" && (
+                      <button
+                        className={styles.abandonTrigger}
+                        type="button"
+                        onClick={() => setConfirmingId((id) => id === task.id ? null : task.id)}
+                        disabled={Boolean(abandoningId) || Boolean(resumingId)}
+                        aria-label={`永久废弃任务：${task.productName}`}
+                        title="永久废弃任务"
+                      >
+                        <ArchiveX size={14} aria-hidden="true" />
+                        <span>废弃</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {confirmingId === task.id && (
                   <div className={styles.abandonConfirm} role="group" aria-label={`确认永久废弃任务：${task.productName}`}>

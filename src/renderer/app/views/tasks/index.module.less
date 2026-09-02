@@ -20,7 +20,7 @@
 .filters { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
 .filters button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
 .filters button[data-active='true'] { background: var(--foreground); color: var(--primary-foreground); }
-.filters button:focus-visible, .taskOpen:focus-visible, .abandonTrigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.filters button:focus-visible, .taskOpen:focus-visible, .abandonTrigger:focus-visible, .resumeTrigger:focus-visible, .restartTrigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 .taskList { margin: 0; padding: 0; list-style: none; border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; background: var(--surface); }
 .taskList li + li { border-top: 1px solid var(--border); }
@@ -59,9 +59,16 @@
 .taskRow:has(.taskBadge[data-status='abandoned']) .progressTrack span { background: var(--muted-foreground); }
 
 .openHint { display: flex; align-items: center; gap: 3px; color: var(--muted-foreground); font-size: var(--fs-xs); white-space: nowrap; }
-.abandonTrigger { align-self: center; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; margin-right: 14px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--muted-foreground); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.taskActions { display: flex; align-items: center; gap: 4px; padding-right: 14px; }
+.retryGroup { display: inline-flex; align-items: stretch; overflow: hidden; border: 1px solid color-mix(in srgb, var(--ai-teal) 30%, var(--border)); border-radius: var(--radius-sm); }
+.retryLabel { display: inline-flex; align-items: center; padding: 0 7px; color: var(--ai-teal-foreground); background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface)); font-size: var(--fs-xs); white-space: nowrap; }
+.abandonTrigger, .resumeTrigger, .restartTrigger { align-self: center; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--muted-foreground); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.resumeTrigger { color: var(--ai-teal-foreground); border-width: 0 0 0 1px; border-radius: 0; border-color: color-mix(in srgb, var(--ai-teal) 24%, var(--border)); background: var(--surface); }
+.resumeTrigger:hover { border-color: color-mix(in srgb, var(--ai-teal) 46%, var(--border)); background: color-mix(in srgb, var(--ai-teal) 13%, var(--surface)); }
+.restartTrigger { border-width: 0 0 0 1px; border-radius: 0; border-color: color-mix(in srgb, var(--warning) 24%, var(--border)); color: var(--warning-foreground); }
+.restartTrigger:hover { background: color-mix(in srgb, var(--warning) 10%, var(--surface)); }
 .abandonTrigger:hover { border-color: color-mix(in srgb, var(--destructive) 20%, var(--border)); background: color-mix(in srgb, var(--destructive) 5%, var(--surface)); color: var(--destructive-foreground); }
-.abandonTrigger:disabled { cursor: default; opacity: 0.55; }
+.abandonTrigger:disabled, .resumeTrigger:disabled, .restartTrigger:disabled { cursor: default; opacity: 0.55; }
 
 .abandonConfirm { display: flex; align-items: center; justify-content: space-between; gap: var(--pad); padding: 12px 14px; border-top: 1px solid color-mix(in srgb, var(--destructive) 18%, var(--border)); background: color-mix(in srgb, var(--destructive) 4%, var(--surface)); }
 .abandonConfirm > div:first-child { display: grid; gap: 3px; min-width: 0; }
@@ -80,8 +87,9 @@
   .filters { align-self: flex-start; flex-wrap: wrap; }
   .taskOpen { grid-template-columns: 34px minmax(0, 1fr); }
   .openHint { display: none; }
-  .abandonTrigger span { display: none; }
-  .abandonTrigger { width: 30px; justify-content: center; padding: 0; }
+  .taskActions { gap: 2px; padding-right: 8px; }
+  .retryLabel, .abandonTrigger span, .resumeTrigger span, .restartTrigger span { display: none; }
+  .abandonTrigger, .resumeTrigger, .restartTrigger { width: 30px; justify-content: center; padding: 0; }
   .abandonConfirm { align-items: stretch; flex-direction: column; }
   .abandonActions { justify-content: flex-end; }
 }

@@ -67,6 +67,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     planningAcceptBusy,
     planningRerunMajorStage,
     planningRerunBusy,
+    currentWorkflowTask,
   } = model;
 
   if (!product) return null;
@@ -179,6 +180,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     <div className={layout.reviewWorkspace}>
       <PlanningTree
         plan={product.planning}
+        workflowTask={currentWorkflowTask}
         aiUsage={product.aiUsage}
         planningBusy={planningBusy}
         onResume={planningResume}

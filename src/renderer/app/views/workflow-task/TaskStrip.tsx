@@ -24,6 +24,38 @@ export function WorkflowTaskStrip({ task }: { task: ProductWorkflowTask | null }
   );
 }
 
+/** Compact workflow status for a stage header. Keeps the task visible without competing with its content. */
+export function WorkflowTaskSummary({ task }: { task: ProductWorkflowTask | null }) {
+  if (!task) return null;
+  const status = statusMeta(task);
+  const detail = task.error || task.message;
+  return (
+    <span
+      id="workflow-task-status"
+      className={styles.taskSummary}
+      data-status={task.status}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      tabIndex={-1}
+      title={`${status.label} · ${stageLabel(task)}${detail ? ` · ${detail}` : ""}`}
+    >
+      <span className={styles.summaryIcon} aria-hidden="true">{status.icon}</span>
+      <span className={styles.summaryCopy}>
+        <strong>{status.label}</strong>
+        <span>{stageLabel(task)}</span>
+        {detail ? <small>{detail}</small> : null}
+      </span>
+      <span className={styles.summaryProgress}>
+        <strong>{task.progress}%</strong>
+        <span className={styles.summaryTrack} role="progressbar" aria-label="后台任务进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={task.progress} aria-valuetext={`${task.progress}%`}>
+          <span style={{ transform: `scaleX(${task.progress / 100})` }} />
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function stageLabel(task: ProductWorkflowTask): string {
   if (task.status === "abandoned") return "永久废弃";
   if (task.stage === "planning") return "方案规划";

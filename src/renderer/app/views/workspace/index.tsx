@@ -10,7 +10,7 @@ export function AppWorkspaceWorkflow({ model }: { model: AppModel }) {
   if (!product) return null;
 
   return <section className={styles.workspace} data-stage={stage}>
-    <WorkflowTaskStrip task={currentWorkflowTask} />
+    {stage === "vbk" ? <WorkflowTaskStrip task={currentWorkflowTask} /> : null}
     <section className={styles.workflowStage} role="tabpanel" id={`stage-panel-${stage}`} aria-labelledby={`stage-${stage}`}>
       {stage === "review" ? <AppWorkspaceReview model={model} /> : <AppWorkspaceVbk model={model} />}
     </section>

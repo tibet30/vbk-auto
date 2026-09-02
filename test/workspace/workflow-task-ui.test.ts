@@ -19,9 +19,13 @@ test("任务中心、产品列表和产品详情共用后台任务状态", () =>
   const appView = read("src/renderer/app/views/AppView.tsx");
   const productList = read("src/renderer/app/helpers/components.tsx");
   const workspace = read("src/renderer/app/views/workspace/index.tsx");
+  const review = read("src/renderer/app/views/workspace/review.tsx");
+  const planningTree = read("src/renderer/app/views/workspace/planning-tree.tsx");
   assert.match(appView, /view === "tasks"[\s\S]*<AppTasksPage/);
   assert.match(productList, /item\.workflowTask[\s\S]*productTaskTrack/);
-  assert.match(workspace, /<WorkflowTaskStrip task=\{currentWorkflowTask\}/);
+  assert.match(workspace, /stage === "vbk" \? <WorkflowTaskStrip task=\{currentWorkflowTask\}/);
+  assert.match(review, /workflowTask=\{currentWorkflowTask\}/);
+  assert.match(planningTree, /<WorkflowTaskSummary task=\{workflowTask\}/);
 });
 
 test("从任务进入详情时定位对应阶段并聚焦状态", () => {

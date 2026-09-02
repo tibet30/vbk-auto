@@ -12,6 +12,7 @@ import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
 import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-policy.js";
+import { fitPresentationRecommendationTexts } from "./vbk-recommendation-length.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -72,6 +73,9 @@ export function sanitiseModuleValue(
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   const hit = findBlacklistedKey(value);
   if (hit) return { ok: false, reason: `AI 输出包含禁写字段 ${hit}` };
+  if (module === "presentation") {
+    value = fitPresentationRecommendationTexts(value);
+  }
   const copyBadCases = findAllVbkCopyBadCases(value);
   if (copyBadCases.length > 0) {
     return {

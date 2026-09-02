@@ -529,8 +529,28 @@
   flex-shrink: 0;
 }
 
+.productRetryGroup {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid color-mix(in srgb, var(--ai-teal) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.productRetryLabel {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  background: color-mix(in srgb, var(--ai-teal) 7%, var(--surface));
+  color: var(--ai-teal-foreground);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
 .productViewTrigger,
-.productDeleteTrigger {
+.productDeleteTrigger,
+.productResumeTrigger,
+.productRestartTrigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -555,7 +575,8 @@
 }
 
 .productViewTrigger:focus-visible,
-.productDeleteTrigger:focus-visible {
+.productDeleteTrigger:focus-visible,
+.productResumeTrigger:focus-visible {
   outline: none;
   box-shadow: var(--focus);
 }
@@ -582,6 +603,34 @@
   color: var(--destructive);
 }
 
+.productResumeTrigger {
+  color: var(--ai-teal-foreground);
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  border-color: color-mix(in srgb, var(--ai-teal) 24%, var(--border));
+  background: var(--surface);
+}
+
+.productResumeTrigger:hover:not(:disabled),
+.productResumeTrigger:focus-visible {
+  color: var(--ai-teal-foreground);
+  border-color: color-mix(in srgb, var(--ai-teal) 50%, var(--border));
+  background: color-mix(in srgb, var(--ai-teal) 13%, var(--surface));
+}
+
+.productRestartTrigger {
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--border));
+  color: var(--warning-foreground);
+}
+
+.productRestartTrigger:hover:not(:disabled),
+.productRestartTrigger:focus-visible {
+  color: var(--warning-foreground);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+}
+
 .productDeleteTrigger:hover:not(:disabled),
 .productDeleteTrigger:focus-visible {
   color: var(--destructive);
@@ -592,6 +641,12 @@
 .productDeleteTrigger:disabled {
   cursor: not-allowed;
   opacity: 0.35;
+}
+
+.productResumeTrigger:disabled,
+.productRestartTrigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* Confirmation row */
@@ -639,9 +694,14 @@
   .productRowIcon { width: 36px; height: 36px; }
   .productRowActions { padding-right: 8px; }
   .productViewTrigger span,
-  .productDeleteTrigger span { display: none; }
+  .productDeleteTrigger span,
+  .productResumeTrigger span,
+  .productRestartTrigger span,
+  .productRetryLabel { display: none; }
   .productViewTrigger,
-  .productDeleteTrigger { width: 30px; padding: 0; }
+  .productDeleteTrigger,
+  .productResumeTrigger,
+  .productRestartTrigger { width: 30px; padding: 0; }
   .productTaskLine { grid-template-columns: 90px minmax(0, 1fr); }
   .productTaskMessage {
     grid-column: 1 / -1;

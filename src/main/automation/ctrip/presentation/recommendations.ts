@@ -10,6 +10,12 @@
 import { delay, escapeRegExp, assertCount } from "../utils.js";
 import { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 import { findVbkCopyBadCase } from "../../../planning/vbk-copy-policy.js";
+import {
+  fitVbkRecommendationText,
+  normalizeVbkRecommendationPunctuation,
+  VBK_RECOMMENDATION_PLATFORM_MAX_BYTES,
+  vbkRecommendationByteLength,
+} from "../../../planning/vbk-recommendation-length.js";
 
 export interface RecommendationPlanStep {
   index: number;
@@ -17,30 +23,17 @@ export interface RecommendationPlanStep {
   text: string;
 }
 
-export const VBK_RECOMMENDATION_MAX_LENGTH = 84;
+export const VBK_RECOMMENDATION_MAX_LENGTH = VBK_RECOMMENDATION_PLATFORM_MAX_BYTES;
 
 /**
- * 现场确认 VBK 推荐理由输入框只接受这组标点的等价形式；只做无语义
- * 的标点规范化，敏感词、措辞和结构化字段必须由规划阶段重新生成。
+ * 现场确认 VBK 推荐理由输入框只接受这组标点的等价形式；同时复用规划
+ * 出口的长度收敛。敏感词和结构化字段仍由独立门禁校验。
  */
-export function normalizeVbkRecommendationPunctuation(value: string): string {
-  return value
-    .trim()
-    .replace(/[,:：;；!！?？。]/g, "，")
-    .replace(/[—–]/g, "-")
-    .replace(/，{2,}/g, "，")
-    .replace(/，+$/g, "");
-}
-
-export function normalizeVbkRecommendation(value: unknown): string {
+export function normalizeVbkRecommendation(value: unknown, category?: string): string {
   if (typeof value !== "string") {
     throw new Error("推荐理由文本必须是 string，禁止自动转换类型。");
   }
-  return normalizeVbkRecommendationPunctuation(value);
-}
-
-function recommendationByteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
+  return fitVbkRecommendationText(value, undefined, category);
 }
 
 /**
@@ -74,11 +67,11 @@ export function buildRecommendationReasonsPlan(
     if (!RECOMMENDATION_CATEGORIES.includes(category)) {
       throw new Error(`推荐理由分类「${category}」不在白名单。`);
     }
-    const normalizedText = normalizeVbkRecommendation(text);
+    const normalizedText = normalizeVbkRecommendation(text, category);
     if (!normalizedText) {
       throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
     }
-    if (recommendationByteLength(normalizedText) > VBK_RECOMMENDATION_MAX_LENGTH) {
+    if (vbkRecommendationByteLength(normalizedText) > VBK_RECOMMENDATION_MAX_LENGTH) {
       throw new Error(`推荐理由第 ${i + 1} 项超过 VBK 长度限制（${VBK_RECOMMENDATION_MAX_LENGTH} 字节），请重新生成更短文案。`);
     }
     const copyBadCase = findVbkCopyBadCase(normalizedText, `recommendations.${i}.text`);
@@ -95,6 +88,8 @@ export function buildRecommendationReasonsPlan(
   }
   return plan;
 }
+
+export { normalizeVbkRecommendationPunctuation };
 
 // VBK #pm_recommend 默认只渲染 1 行；plan 永远 3 项，所以开始填写前必须
 // 把行数补足。两按钮共享相同的蓝图标；顺序固定为「− 在前、+ 在后」。

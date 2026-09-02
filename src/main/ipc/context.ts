@@ -15,6 +15,7 @@ import type {
   ProductDetail,
   ProductReadiness,
   ProductWorkflowTask,
+  WorkflowTaskRetryMode,
   Settings,
   VbkLoginStatus,
 } from "../../shared/contracts.js";
@@ -57,8 +58,12 @@ export interface MainIpcContext {
   startPlanning?: (localProductId: string) => Promise<PlanningRunResult>;
   /** 应用重启后的规划续跑；保留已完成节点，不重置 foundation。 */
   resumePlanning?: (localProductId: string) => Promise<PlanningRunResult>;
+  /** 用户从规划报错处继续；只重置耗尽的失败节点，保留其余进度。 */
+  retryPlanning?: (localProductId: string) => Promise<PlanningRunResult>;
   /** 一键创建只负责落任务；调度器在 renderer 请求结束后继续执行。 */
   enqueueProductTask?: (product: ProductDetail) => ProductWorkflowTask;
   /** 永久废弃后台任务；运行中任务会在安全检查点停止。 */
   abandonProductTask?: (taskId: string) => Promise<ProductWorkflowTask>;
+  /** 从报错处继续，或从规划起点重新执行后台任务。 */
+  resumeProductTask?: (taskId: string, mode: WorkflowTaskRetryMode) => Promise<ProductWorkflowTask>;
 }

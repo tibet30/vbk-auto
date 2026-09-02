@@ -27,6 +27,7 @@ export function AppProductsPage({ model }: { model: AppModel }) {
     savingProduct,
     createProduct,
     deleteProduct,
+    resumeWorkflowTask,
     openProduct: openProductAction,
     setAccountMenuOpen,
     setNotice,
@@ -149,7 +150,12 @@ export function AppProductsPage({ model }: { model: AppModel }) {
           <p className={shared.sectionEmpty}>当前筛选的 VBK 账号暂无产品。</p>
         ) : (
           <>
-            <ProductList products={pagedProducts} onOpen={openProduct} onDelete={deleteProduct} />
+            <ProductList
+              products={pagedProducts}
+              onOpen={openProduct}
+              onDelete={deleteProduct}
+              onResumeTask={resumeWorkflowTask}
+            />
             {pageCount > 1 && (
               <nav className={styles.productPagination} aria-label="产品列表分页">
                 <button

@@ -5,7 +5,7 @@ import { toPlatformShortLocationName } from "../../shared/location-short-name.js
 import { AI_WRITABLE_PATHS } from "./schemas.js";
 import { expandVerifiedItinerary, resolvePlanningPoiCandidates } from "./planning-v2-pois.js";
 import type { OrchestratorRuntime } from "./types.js";
-import { isAcceptablePlanningRegionName, normaliseProvinceName } from "./runtime.js";
+import { isAcceptablePlanningRegionName, normaliseProvinceName, resolveTravelScope } from "./runtime.js";
 import { findAllVbkCopyBadCases } from "./vbk-copy-policy.js";
 import { blockingUserPoiFailure, userPoiCandidateSeeds } from "./user-intent.js";
 
@@ -35,8 +35,14 @@ export async function runFoundationLocation(
     try {
       const currentProduct = await deps.runtime.loadCurrentProduct(deps.localProductId);
       const currentBasic = asRecord(currentProduct.basicInfo) ?? {};
+      const storedCity = text(currentBasic.meetingCity) || text(currentBasic.destinationCity) || deps.skeleton.city;
+      const travelScope = resolveTravelScope(text(currentBasic.destination) || deps.skeleton.destination);
+      // 新建旧版本曾把省名临时写进城市锚点。省级输入在开始查 POI 前统一提升到
+      // 已定义的主城市；真实城市输入仍保持用户锁定值，AI 无权改写。
+      const shouldPromoteProvinceAnchor = travelScope.isProvinceLevel
+        && normaliseProvinceName(storedCity) === normaliseProvinceName(travelScope.input);
       const currentCity = toPlatformShortLocationName(
-        text(currentBasic.meetingCity) || text(currentBasic.destinationCity) || deps.skeleton.city,
+        shouldPromoteProvinceAnchor ? travelScope.primaryCity : storedCity,
       );
       const location = await deps.ai.structureLocation({
         destination: deps.skeleton.destination,
@@ -52,7 +58,13 @@ export async function runFoundationLocation(
       }
       if (errors.length === 0) {
         const write = await deps.runtime.writeModule(
-          deps.localProductId, "basicInfo", AI_WRITABLE_PATHS.basicInfo, { province },
+          deps.localProductId,
+          "basicInfo",
+          AI_WRITABLE_PATHS.basicInfo,
+          {
+            province,
+            ...(shouldPromoteProvinceAnchor ? { meetingCity: currentCity, destinationCity: currentCity } : {}),
+          },
         );
         if (!write.ok) throw new Error(write.reason || "标准目的地写入失败");
         deps.skeleton.province = province;

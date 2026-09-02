@@ -42,7 +42,6 @@ export function AppWorkspaceHomePage({ model }: { model: AppModel }) {
               <button
                 className={`${shared.btn} ${shared.btnSm}`}
                 onClick={openProductList}
-                disabled={!hasProducts}
               >
                 查看产品
               </button>

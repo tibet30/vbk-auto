@@ -20,6 +20,10 @@ import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import type { ContactCardSelection } from "../../shared/contracts.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import {
+  VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
+  vbkRecommendationByteLength,
+} from "./vbk-recommendation-length.js";
 import type {
   GenerationStateStore,
   OrchestratorRuntime,
@@ -124,6 +128,7 @@ function presentationRecommendationsValid(entries: unknown[]): boolean {
     if (typeof record.category !== "string" || !record.category.trim()) return false;
     if (!(VBK_RECOMMENDATION_CATEGORIES as readonly string[]).includes(record.category)) return false;
     if (typeof record.text !== "string" || !record.text.trim()) return false;
+    if (vbkRecommendationByteLength(record.text.trim()) > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) return false;
     nonEmptyCategoryCount += 1;
   }
   return nonEmptyCategoryCount === entries.length;

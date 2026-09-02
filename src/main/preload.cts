@@ -39,6 +39,7 @@ const api: VbkApi = {
     list: () => ipcRenderer.invoke("workflowTasks:list"),
     get: (id) => ipcRenderer.invoke("workflowTasks:get", id),
     abandon: (id) => ipcRenderer.invoke("workflowTasks:abandon", id),
+    resume: (id, mode) => ipcRenderer.invoke("workflowTasks:resume", id, mode),
   },
   ai: {
     send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),

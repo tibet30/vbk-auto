@@ -252,6 +252,7 @@ export function expandVerifiedItinerary(args: {
       return { ok: false, reason: `第 ${index + 1} 天缺少标题、描述或有效活动节点` };
     }
     const spots: Array<Record<string, unknown>> = [];
+    const morningCount = Math.ceil(draft.poiIds.length / 2);
     const cities = new Set<string>();
     for (const poiId of draft.poiIds) {
       const candidate = pool.get(poiId);
@@ -262,21 +263,32 @@ export function expandVerifiedItinerary(args: {
       if (selectedIds.has(poiId)) return { ok: false, reason: `POI ${candidate.poiName} 被重复使用` };
       selectedIds.add(poiId);
       if (candidate.city) cities.add(normaliseLocation(candidate.city));
-      spots.push({ name: candidate.poiName, poiName: candidate.poiName, poiId });
+      spots.push({
+        name: candidate.poiName,
+        poiName: candidate.poiName,
+        poiId,
+        timeOfDay: spots.length < morningCount ? "morning" : "afternoon",
+      });
     }
     if (cities.size > 1) return { ok: false, reason: `第 ${index + 1} 天跨越多个城市` };
     citySequence.push([...cities][0] ?? "");
     itinerary.push({
       day: index + 1,
       title: draft.title,
-      description: draft.description,
+      description: buildDailyDescription({
+        isFirst: index === 0,
+        isLast: index === args.days - 1,
+        morning: matchedPoiNames.slice(0, morningCount),
+        afternoon: matchedPoiNames.slice(morningCount),
+        hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
+      }),
       spots,
       // VBK 的行程 saveType=3 要求至少有一晚住宿节点；酒店名称本身
       // 仍由后续 hotelResource 阶段按 hotelTier 匹配真实资源。这里仅写
       // 一个明确的待匹配占位，避免把酒店资源误当成 AI 已确认的酒店。
       hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
-      meals: draft.meals || "早餐自理；午餐自理；晚餐自理",
-      ...(draft.mealDescriptions ? { mealDescriptions: draft.mealDescriptions } : {}),
+      meals: mealSummaryForDay(index, args.days),
+      mealDescriptions: mealDescriptionsForDay(index, args.days),
       ...(otherActivities.length ? { activities: otherActivities } : {}),
     });
   }
@@ -287,6 +299,38 @@ export function expandVerifiedItinerary(args: {
   if (omittedUserPoi) return { ok: false, reason: `用户明确指定的 POI「${omittedUserPoi.poiName || omittedUserPoi.requestedName}」未进入最终行程` };
   if (hasBacktrack(citySequence)) return { ok: false, reason: "跨日路线形成 A→B→A 折返" };
   return { ok: true, itinerary, selectedIds };
+}
+
+function mealDescriptionsForDay(index: number, totalDays: number): [string, string, string] {
+  return [
+    index === 0 ? "" : "是否含餐，以酒店房型为准。",
+    "午餐自理",
+    index === totalDays - 1 ? "" : "晚餐自理",
+  ];
+}
+
+function mealSummaryForDay(index: number, totalDays: number): string {
+  return mealDescriptionsForDay(index, totalDays)
+    .filter(Boolean)
+    .map((description) => description.replace(/[。；]+$/u, ""))
+    .join("；");
+}
+
+function buildDailyDescription(args: {
+  isFirst: boolean;
+  isLast: boolean;
+  morning: string[];
+  afternoon: string[];
+  hotel: string;
+}): string {
+  return [
+    !args.isFirst ? "早餐：是否含餐，以酒店房型为准" : "",
+    args.morning.length ? `上午游览${args.morning.join("、")}` : "",
+    "午餐自理",
+    args.afternoon.length ? `下午游览${args.afternoon.join("、")}` : "",
+    !args.isLast ? "晚餐自理" : "",
+    args.hotel ? `入住${args.hotel}` : "",
+  ].filter(Boolean).join("；");
 }
 
 function readLocationMetadata(fields: Array<{ path: string; value: string }>) {

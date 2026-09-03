@@ -45,6 +45,8 @@ export interface ProductItineraryDay {
     poiType?: { key: number; name: string } | null;
     ticketType?: { key: number; name: string } | null;
     poiData?: Record<string, unknown>;
+    /** 规划层已按时段排好顺序；缺省时按 spots 顺序均分上午/下午。 */
+    timeOfDay?: "morning" | "afternoon";
   }>;
   description: string;
   hotel: string;
@@ -67,6 +69,12 @@ export interface ProductOperations {
   reusePickupForDropoff?: boolean;
   mealsIncluded?: boolean;
 }
+
+/**
+ * 早餐是否包含取决于最终酒店房型，不能依赖旧产品快照是否已有 mealDescriptions。
+ * 录入转换是历史产品单阶段重跑的最终入口，必须在这里兜底写入平台餐饮卡片。
+ */
+export const HOTEL_ROOM_BREAKFAST_NOTE = "是否含餐，以酒店房型为准。";
 
 /**
  * 输出：VBK 协议 detail.tourInfo.tourDailyDescriptions。
@@ -106,7 +114,7 @@ export interface ReadbackDayExpectation {
   title: string;
   /** 景点 POI 列表（顺序敏感）。 */
   pois: Array<{ poiId: number; poiName: string }>;
-  /** 餐饮三餐（顺序敏感：早 / 午 / 晚）。 */
+  /** 当日餐饮（顺序敏感：首日午/晚；中间日早/午/晚；尾日早/午）。 */
   meals: Array<{
     key: "B" | "L" | "S";
     description: string;
@@ -155,7 +163,7 @@ export function buildReadbackExpectations(args: {
   stations: ResolvedStations;
 }): ReadbackExpectations {
   const { itinerary, operations, stations } = args;
-  const days: ReadbackDayExpectation[] = itinerary.map((day) => {
+  const days: ReadbackDayExpectation[] = itinerary.map((day, index) => {
     const activities = dayOtherActivities(day);
     return {
       orderDay: day.day,
@@ -166,10 +174,10 @@ export function buildReadbackExpectations(args: {
             poiName: s?.poiName || s?.name || "",
           }))
         : [],
-      meals: (["B", "L", "S"] as const).map((key, index) => ({
+      meals: (mealTypesForDay({ index, totalDays: itinerary.length })).map(({ key, index: mealIndex }) => ({
         key,
-        description: day.mealDescriptions?.[index] ?? "",
-        mealsIncluded: operations.mealsIncluded === true,
+        description: mealDescription(day, key, mealIndex),
+        mealsIncluded: key === "B" && operations.mealsIncluded === true,
       })),
       hotels: day.hotel && day.hotel.trim()
         ? [{ hotelName: day.hotel, hotelTier: operations.hotelTier }]
@@ -195,7 +203,7 @@ export function buildReadbackExpectations(args: {
 /**
  * 拼装单天 VBK tourDailyDescription：
  *   - 接机 / 送机节点仅出现在首日 / 末日；
- *   - 餐饮三段（早 / 午 / 晚）从 day.meals + mealDescriptions 派生；
+ *   - 首日不写早餐、尾日不写晚餐；午餐在上午与下午景点之间，酒店为当天末项；
  *   - 酒店节点可选（无酒店时不输出）；
  *   - 景点节点使用 buildAttractionPois 强校验；
  *   - 末尾仅在存在未匹配的用户活动时追加「其他」节点。
@@ -223,17 +231,39 @@ export function buildDayDescription(args: {
     infos.push(buildPickupInfo({ stations, sort: sort++ }));
   }
 
-  // 2) 景点节点（可由用户明确的“其他”活动替代）
+  // 2) 首日不安排早餐；其他日期的早餐是否包含由酒店房型决定。
+  if (!isFirst) {
+    infos.push(buildMealInfo({
+      sort: sort++,
+      mealKey: "B",
+      customDescription: HOTEL_ROOM_BREAKFAST_NOTE,
+      mealsIncluded: operations.mealsIncluded === true,
+    }));
+  }
+
+  // 3) 景点节点（可由用户明确的“其他”活动替代）。景点按上午/下午拆开，
+  // 让餐食自然落在两段游览之间，而不是把全天景点堆在三餐之前。
   const hasSpots = Array.isArray(day.spots) && day.spots.length > 0;
   const otherActivities = dayOtherActivities(day);
   if (!hasSpots && !otherActivities.length) {
     throw new Error(`第 ${day.day} 天缺少已验证景点或用户明确的其他活动。`);
   }
   if (hasSpots) {
-    const attractionPois = buildAttractionPois(day.spots);
-    infos.push({
+    const periods = splitSpotsByTimeOfDay(day.spots!);
+    let lunchAdded = false;
+    for (const period of periods) {
+      if (period.timeOfDay === "afternoon" && !lunchAdded) {
+        infos.push(buildMealInfo({
+          sort: sort++, mealKey: "L", customDescription: day.mealDescriptions?.[1], mealsIncluded: false,
+        }));
+        lunchAdded = true;
+      }
+      const attractionPois = buildAttractionPois(period.spots);
+      infos.push({
       tourDailyInfoId: null,
-      takeoffTime: { key: "D", name: "全天" },
+      takeoffTime: period.timeOfDay === "morning"
+        ? { key: null, name: "上午" }
+        : { key: null, name: "下午" },
       takeoffEndTime: { name: "" },
       activeType: { key: 3, name: "景点" },
       sessionTimeType: 0,
@@ -245,7 +275,7 @@ export function buildDayDescription(args: {
       productsOnSale: "",
       specialGift: "",
       warmTips: "",
-      sort,
+      sort: sort++,
       costInclude: false,
       tourDailyHotels: [],
       tourDailyTrains: [],
@@ -273,45 +303,28 @@ export function buildDayDescription(args: {
       pkgDayDesc: "",
       pkgShoppingId: "",
       versionNum: 0,
-    });
-    sort += 1;
+      });
+      // 午餐必须在上午景点之后、下午景点之前。
+      if (period.timeOfDay === "morning") {
+        infos.push(buildMealInfo({
+          sort: sort++,
+          mealKey: "L",
+          customDescription: day.mealDescriptions?.[1],
+          mealsIncluded: false,
+        }));
+        lunchAdded = true;
+      }
+    }
   }
 
-  // 3) 餐饮三段（早 / 午 / 晚）
-  const mealTypes: Array<{ key: "B" | "L" | "S"; index: 0 | 1 | 2 }> = [
-    { key: "B", index: 0 },
-    { key: "L", index: 1 },
-    { key: "S", index: 2 },
-  ];
-  for (const meal of mealTypes) {
-    const customDesc = day.mealDescriptions?.[meal.index];
-    infos.push(
-      buildMealInfo({
-        sort: sort++,
-        mealKey: meal.key,
-        customDescription: customDesc,
-        mealsIncluded: operations.mealsIncluded === true,
-      }),
-    );
+  // 没有景点、仅有用户明确的其他活动的日期，午餐仍需在活动之后补齐。
+  if (!hasSpots) {
+    infos.push(buildMealInfo({
+      sort: sort++, mealKey: "L", customDescription: day.mealDescriptions?.[1], mealsIncluded: false,
+    }));
   }
 
-  // 4) 酒店节点（仅当 day.hotel 非空时输出；新增酒店资源由 hotelResource 阶段处理）
-  if (day.hotel && day.hotel.trim()) {
-    infos.push(
-      buildHotelInfo({
-        hotelName: day.hotel,
-        hotelTier: operations.hotelTier,
-        sort: sort++,
-      }),
-    );
-  }
-
-  // 5) 服务时间（占用时段）— 由 buildOtherInfo 的 serviceTime 注入；
-  // 真实 detail 结构里「服务时间」是 tourDailyInfo 上的 startOnBoardTime /
-  // stopOnBoardTime；这里保留兼容。
-
-  // 6) 其他 / 自由活动仅承载无法匹配真实 POI 的用户活动。
-  // 已有 POI 的日程不再把 day.description 复制为自由活动，避免同一景点重复出现。
+  // 4) 其他 / 自由活动仅承载无法匹配真实 POI 的用户活动，并置于晚餐/酒店前。
   if (otherActivities.length) {
     infos.push(
       buildOtherInfo({
@@ -320,6 +333,24 @@ export function buildDayDescription(args: {
         serviceTime: { startTime: "08:00", endTime: "20:00" },
         activityTime: otherActivities[0]?.time,
         durationMinutes: otherActivities[0]?.durationMinutes,
+      }),
+    );
+  }
+
+  // 5) 非尾日的晚餐；午、晚餐均为自理。
+  if (!isLast) {
+    infos.push(buildMealInfo({
+      sort: sort++, mealKey: "S", customDescription: day.mealDescriptions?.[2], mealsIncluded: false,
+    }));
+  }
+
+  // 6) 酒店节点（仅当 day.hotel 非空时输出；新增酒店资源由 hotelResource 阶段处理）
+  if (day.hotel && day.hotel.trim()) {
+    infos.push(
+      buildHotelInfo({
+        hotelName: day.hotel,
+        hotelTier: operations.hotelTier,
+        sort: sort++,
       }),
     );
   }
@@ -339,6 +370,34 @@ export function buildDayDescription(args: {
     subDesc: "",
     dailyHighlights: [],
   };
+}
+
+type MealType = { key: "B" | "L" | "S"; index: 0 | 1 | 2 };
+
+function mealDescription(day: ProductItineraryDay, key: MealType["key"], index: MealType["index"]): string {
+  return key === "B" ? HOTEL_ROOM_BREAKFAST_NOTE : day.mealDescriptions?.[index] ?? "";
+}
+
+function mealTypesForDay(args: { index: number; totalDays: number }): MealType[] {
+  const meals: MealType[] = [];
+  if (args.index > 0) meals.push({ key: "B", index: 0 });
+  meals.push({ key: "L", index: 1 });
+  if (args.index < args.totalDays - 1) meals.push({ key: "S", index: 2 });
+  return meals;
+}
+
+function splitSpotsByTimeOfDay(spots: NonNullable<ProductItineraryDay["spots"]>) {
+  const explicitlyTimed = spots.some((spot) => spot.timeOfDay);
+  const morning = explicitlyTimed
+    ? spots.filter((spot) => spot.timeOfDay !== "afternoon")
+    : spots.slice(0, Math.ceil(spots.length / 2));
+  const afternoon = explicitlyTimed
+    ? spots.filter((spot) => spot.timeOfDay === "afternoon")
+    : spots.slice(Math.ceil(spots.length / 2));
+  return [
+    ...(morning.length ? [{ timeOfDay: "morning" as const, spots: morning }] : []),
+    ...(afternoon.length ? [{ timeOfDay: "afternoon" as const, spots: afternoon }] : []),
+  ];
 }
 
 /**

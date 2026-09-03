@@ -208,7 +208,7 @@
   opacity: 0.45;
 }
 
-.stageAction :global(.lucide-loader-circle) { animation: spin 0.8s linear infinite; }
+.stageActionSpinner { animation: spin 0.8s linear infinite; }
 
 .stageActionRetry:hover:not(:disabled) {
   background: var(--muted);
@@ -216,6 +216,10 @@
 }
 
 .stageActionEnter:hover:not(:disabled) { color: var(--foreground); }
+
+@media (prefers-reduced-motion: reduce) {
+  .stageActionSpinner { animation: none; }
+}
 
 .automationNote {
   margin: 8px 2px 0;

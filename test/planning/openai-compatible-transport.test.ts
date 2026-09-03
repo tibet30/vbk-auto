@@ -170,6 +170,9 @@ test("ThreeStage 行程提示词携带完整 VBK 文案黑名单", async (t) => 
   assert.match(messages[0].content, /VBK 文案黑名单/);
   assert.match(messages[0].content, /祈福/);
   assert.match(messages[0].content, /第一（宣传排名用语）/);
+  assert.match(messages[0].content, /区县和地址聚合/);
+  assert.match(messages[0].content, /首日不写早餐/);
+  assert.match(messages[0].content, /尾日不写晚餐/);
   assert.match(messages[1].content, /上一轮命中祈福/);
 });
 

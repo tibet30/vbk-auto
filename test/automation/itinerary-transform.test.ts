@@ -51,8 +51,8 @@ test("有真实 POI 且无未匹配用户活动时，不追加其他节点", () 
   const days = [makeDay({ day: 1, title: "第1天" }), makeDay({ day: 2, title: "第2天" }), makeDay({ day: 3, title: "第3天" })];
   const out = transformItinerary({ itinerary: days, operations: baseOps, stations: baseStations, refIdSeed: "1" });
   assert.equal(out.length, 3);
-  // 首日：接机 + 景点 + 3 餐 + 酒店 = 6
-  assert.equal(out[0].tourDailyInfos.length, 6, "首日必须有接机节点");
+  // 首日：接机 + 上午景点 + 午餐 + 晚餐 + 酒店 = 5（首日不排早餐）
+  assert.equal(out[0].tourDailyInfos.length, 5, "首日必须有接机节点，且不应出现早餐");
   assert.equal(out[0].tourDailyInfos[0].activeType?.key, 25, "首日首节点必须是集合（接机/站）");
   assert.equal(out[0].tourDailyInfos[0].activeType?.name, "集合");
   // 末日
@@ -64,7 +64,7 @@ test("有真实 POI 且无未匹配用户活动时，不追加其他节点", () 
   assert.equal(transportInMiddle.length, 0, "中间天不应该有交通节点");
 });
 
-test("每天至少包含 1 个景点节点，景点节点 tourDailyPois 长度 == spots 长度", () => {
+test("每天至少包含 1 个景点节点，上午/下午节点合计 POI 数量 == spots 长度", () => {
   const day = makeDay({
     spots: [
       { name: "玉龙雪山", poiName: "玉龙雪山", poiId: 10543884 },
@@ -72,30 +72,46 @@ test("每天至少包含 1 个景点节点，景点节点 tourDailyPois 长度 =
     ],
   });
   const out = transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" });
-  const attraction = out[0].tourDailyInfos.find((info) => info.activeType?.key === 3);
-  assert.ok(attraction, "必须有景点节点");
-  assert.equal(attraction.tourDailyPois.length, 2);
-  for (const poi of attraction.tourDailyPois) {
+  const attractions = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 3);
+  assert.equal(attractions.length, 2, "两个景点应拆为上午、下午两个节点");
+  const pois = attractions.flatMap((attraction) => attraction.tourDailyPois);
+  assert.equal(pois.length, 2);
+  for (const poi of pois) {
     assert.ok(typeof poi.poi.poiId === "number" && poi.poi.poiId > 0);
     assert.ok(poi.poi.poiName);
   }
 });
 
-test("餐饮三段：早 / 午 / 晚 activeType.key=0，dinnerType 命中模板枚举 B/L/S", () => {
-  const out = transformItinerary({ itinerary: [makeDay()], operations: baseOps, stations: baseStations, refIdSeed: "1" });
-  const meals = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 0);
-  assert.equal(meals.length, 3, "每天必须有 3 个餐饮节点");
-  assert.deepEqual(meals.map((m) => m.tourDailyDinner?.dinnerType?.key), ["B", "L", "S"]);
-  assert.deepEqual(meals.map((m) => m.tourDailyDinner?.dinnerType?.name), ["早餐", "午餐", "晚餐"]);
+test("餐饮按首尾日与时段排列：首日无早餐，尾日无晚餐，午餐位于上午/下午景点之间", () => {
+  const days = [
+    makeDay({ day: 1, spots: [{ name: "上午景点", poiName: "上午景点", poiId: 1 }, { name: "下午景点", poiName: "下午景点", poiId: 2 }] }),
+    makeDay({ day: 2, spots: [{ name: "中段景点", poiName: "中段景点", poiId: 3 }] }),
+    makeDay({ day: 3, spots: [{ name: "尾日景点", poiName: "尾日景点", poiId: 4 }], hotel: "" }),
+  ];
+  const out = transformItinerary({ itinerary: days, operations: baseOps, stations: baseStations, refIdSeed: "1" });
+  const keys = (day: typeof out[number]) => day.tourDailyInfos.map((info) =>
+    info.activeType?.key === 0 ? info.tourDailyDinner?.dinnerType?.key : info.activeType?.key,
+  );
+  assert.deepEqual(keys(out[0]), [25, 3, "L", 3, "S", 1]);
+  assert.deepEqual(keys(out[1]), ["B", 3, "L", "S", 1]);
+  assert.deepEqual(keys(out[2]), ["B", 3, "L", 26]);
+  const attractions = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 3);
+  assert.deepEqual(attractions.map((info) => info.takeoffTime?.name), ["上午", "下午"]);
 });
 
-test("mealsIncluded=true → 成人 includeAdult=费用包含；child 仍费用自理", () => {
+test("mealsIncluded=true 仅影响早餐权益；午餐和晚餐仍为自理", () => {
   const ops = { ...baseOps, mealsIncluded: true };
-  const out = transformItinerary({ itinerary: [makeDay()], operations: ops, stations: baseStations, refIdSeed: "1" });
-  const meals = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 0);
+  const out = transformItinerary({ itinerary: [
+    makeDay({ day: 1 }),
+    // 模拟没有 mealDescriptions 的历史草稿重跑；转换终点仍必须补上早餐说明。
+    makeDay({ day: 2 }),
+    makeDay({ day: 3 }),
+  ], operations: ops, stations: baseStations, refIdSeed: "1" });
+  const meals = out[1].tourDailyInfos.filter((info) => info.activeType?.key === 0);
+  assert.deepEqual(meals.map((meal) => meal.tourDailyDinner?.dinnerType?.key), ["B", "L", "S"]);
+  assert.deepEqual(meals.map((meal) => meal.tourDailyDinner?.includeAdult?.key), ["I", "E", "E"]);
+  assert.equal(meals[0].description, "是否含餐，以酒店房型为准。", "早餐补充说明必须写入平台对应输入框");
   for (const meal of meals) {
-    assert.equal(meal.tourDailyDinner?.includeAdult?.key, "I", "成人必须费用包含");
-    assert.equal(meal.tourDailyDinner?.includeAdult?.name, "费用包含");
     assert.equal(meal.tourDailyDinner?.includeChild?.key, "E", "儿童固定费用自理");
   }
 });

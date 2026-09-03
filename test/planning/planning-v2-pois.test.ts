@@ -351,6 +351,32 @@ test("itinerary only accepts pool POIs, repairs safe duplicates, and rejects A-B
   if (!backtrack.ok) assert.match(backtrack.reason, /折返/);
 });
 
+test("展开后的每日文案强制首尾餐食边界，并把景点拆为上午和下午", () => {
+  const pool = [
+    { requestedName: "甲", status: "resolved" as const, poiId: 1, poiName: "甲景点", city: "杭州" },
+    { requestedName: "乙", status: "resolved" as const, poiId: 2, poiName: "乙景点", city: "杭州" },
+    { requestedName: "丙", status: "resolved" as const, poiId: 3, poiName: "丙景点", city: "杭州" },
+  ];
+  const expanded = expandVerifiedItinerary({
+    days: 2,
+    pool,
+    drafts: [
+      { day: 1, title: "首日", description: "模型旧描述", poiIds: [1, 2], meals: "三餐自理" },
+      { day: 2, title: "尾日", description: "模型旧描述", poiIds: [3], meals: "三餐自理" },
+    ],
+  });
+  assert.equal(expanded.ok, true);
+  if (!expanded.ok) return;
+  const [first, last] = expanded.itinerary as Array<{ description: string; meals: string; mealDescriptions: string[]; spots: Array<{ timeOfDay: string }> }>;
+  assert.equal(first.meals, "午餐自理；晚餐自理");
+  assert.deepEqual(first.mealDescriptions, ["", "午餐自理", "晚餐自理"]);
+  assert.match(first.description, /^上午游览甲景点；午餐自理；下午游览乙景点；晚餐自理；入住当地住宿/);
+  assert.deepEqual(first.spots.map((spot) => spot.timeOfDay), ["morning", "afternoon"]);
+  assert.equal(last.meals, "是否含餐，以酒店房型为准；午餐自理");
+  assert.deepEqual(last.mealDescriptions, ["是否含餐，以酒店房型为准。", "午餐自理", ""]);
+  assert.doesNotMatch(last.description, /晚餐/);
+});
+
 test("多日规划的空白日只用未占用的已核验 POI 确定性补位", () => {
   const pool = Array.from({ length: 7 }, (_, index) => ({
     requestedName: `西安景点${index + 1}`,

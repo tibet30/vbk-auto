@@ -245,6 +245,20 @@ test("normaliseItinerary 保留合法 activities 并兼容 name/title", () => {
   ]);
 });
 
+test("normaliseItinerary 保留景点的上午/下午分段，供 VBK 节点按餐食拆分", () => {
+  const result = normaliseItinerary([{
+    day: 1,
+    title: "分段行程",
+    description: "上午游览甲；午餐自理；下午游览乙",
+    meals: "午餐自理；晚餐自理",
+    spots: [
+      { name: "甲", poiName: "甲", poiId: 1, timeOfDay: "morning" },
+      { name: "乙", poiName: "乙", poiId: 2, timeOfDay: "afternoon" },
+    ],
+  }]) as Array<{ spots: Array<{ timeOfDay?: string }> }>;
+  assert.deepEqual(result[0].spots.map((spot) => spot.timeOfDay), ["morning", "afternoon"]);
+});
+
 test("normaliseItinerary 对非法 activities 拒绝保留：缺字段、空字段、未知 type 降级", () => {
   const result = normaliseItinerary([
     {

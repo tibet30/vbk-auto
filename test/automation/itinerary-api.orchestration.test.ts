@@ -129,7 +129,7 @@ test("ensureItineraryApi 主路径按 getTourInfo → detail → check(8) → sc
   assert.deepEqual(sequence, expect, `实际顺序: ${sequence.join(", ")}`);
   assert.equal(result.days, 2);
   assert.equal(result.savedSpots, 2);
-  assert.equal(result.savedMeals, 6);
+  assert.equal(result.savedMeals, 4, "首日无早餐、尾日无晚餐");
   assert.equal(result.savedHotels, 0, "无酒店产品 savedHotels 应为 0");
   assert.equal(result.pickupAirport, "LJG");
   assert.equal(result.pickupTrain, "CN001LHM");

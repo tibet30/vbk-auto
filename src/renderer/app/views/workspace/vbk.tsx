@@ -144,7 +144,11 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                         {isNavigating ? <LoaderCircle size={12} /> : <Wrench size={12} />}
                       </button>
                       {retryPhases.map((phaseKey) => {
-                        const isRetrying = retryingPhase === phaseKey;
+                        // 单阶段重跑的 IPC 请求很快返回，而实际录入仍会在后台继续。
+                        // 因此不能只看 retryingPhase；以持久化的当前阶段兜底，保证
+                        // 「重新执行」图标在整段运行期间持续反馈，而非一闪即逝。
+                        const isRetrying = retryingPhase === phaseKey
+                          || (product.automation?.status === "running" && product.automation.currentPhase === phaseKey);
                         const phaseName = phaseDisplayLabel(phaseKey);
                         return (
                           <button
@@ -157,7 +161,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                             aria-label={`重新执行「${section.label}」的「${phaseName}」`}
                             title={`仅重跑 ${phaseName}，不影响其他阶段`}
                           >
-                            <span>{isRetrying ? <LoaderCircle size={12} /> : <RefreshCw size={12} />}</span>
+                            <span>{isRetrying ? <LoaderCircle size={12} className={styles.stageActionSpinner} /> : <RefreshCw size={12} />}</span>
                             <span>{`重新执行${section.phaseNames.length > 1 ? ` ${phaseName}` : ""}`}</span>
                           </button>
                         );

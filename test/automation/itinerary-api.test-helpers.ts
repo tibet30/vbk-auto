@@ -165,7 +165,7 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
     const isFirst = i === 0;
     const isLast = i === total - 1;
     const mealIncluded = opts.mealIncluded ?? false;
-    const includeAdultKey = mealIncluded ? "I" : "E";
+    const breakfastIncludeAdultKey = mealIncluded ? "I" : "E";
     days.push({
       dailyDescription: opts.title ? opts.title(i) : (i === 0 ? "第1天" : "第2天"),
       tourDailyInfos: [
@@ -184,10 +184,14 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
           activeType: { key: 3, name: "景点" },
           tourDailyPois: pois.map((p, idx) => ({ sort: idx + 1, poi: { poiId: p.poiId, poiName: p.poiName } })),
         },
-        // 三餐
-        { activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "B" }, includeAdult: { key: includeAdultKey } } },
-        { activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "L" }, includeAdult: { key: includeAdultKey } } },
-        { activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "S" }, includeAdult: { key: includeAdultKey } } },
+        // 首日不排早餐；午、晚餐固定自理；尾日不排晚餐。
+        ...(!isFirst ? [{
+          activeType: { key: 0, name: "餐饮" },
+          description: "是否含餐，以酒店房型为准。",
+          tourDailyDinner: { dinnerType: { key: "B" }, includeAdult: { key: breakfastIncludeAdultKey } },
+        }] : []),
+        { activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "L" }, includeAdult: { key: "E" } } },
+        ...(!isLast ? [{ activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "S" }, includeAdult: { key: "E" } } }] : []),
         // 酒店（仅当 hotelName 非空时）
         ...(hotelName ? [{
           activeType: { key: 1, name: "酒店" },

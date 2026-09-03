@@ -162,7 +162,20 @@ export function normaliseItinerary(value: unknown) {
     const activities = rawActivities.map(normaliseActivity)
       .filter((activity): activity is NonNullable<ReturnType<typeof normaliseActivity>> => Boolean(activity));
     const spots = Array.isArray(record.spots)
-      ? record.spots.map((spot) => typeof spot === "string" ? { name: spot.trim(), poiName: null, poiId: null } : spot && typeof spot === "object" ? { name: textValue((spot as any).name) || textValue((spot as any).poiName), poiName: textValue((spot as any).poiName) || null, poiId: normalisePoiId((spot as any).poiId) } : null).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null } => Boolean(spot?.name))
+      ? record.spots.map((spot) => {
+        if (typeof spot === "string") return { name: spot.trim(), poiName: null, poiId: null };
+        if (!spot || typeof spot !== "object") return null;
+        const raw = spot as Record<string, unknown>;
+        const timeOfDay = raw.timeOfDay === "morning" || raw.timeOfDay === "afternoon"
+          ? raw.timeOfDay
+          : undefined;
+        return {
+          name: textValue(raw.name) || textValue(raw.poiName),
+          poiName: textValue(raw.poiName) || null,
+          poiId: normalisePoiId(raw.poiId),
+          ...(timeOfDay ? { timeOfDay } : {}),
+        };
+      }).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null; timeOfDay?: "morning" | "afternoon" } => Boolean(spot?.name))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));
     const activityDescription = activities
       .map((activity) => [activity.time, activity.title, activity.detail].filter(Boolean).join(" "))

@@ -31,6 +31,7 @@ const itineraryDaySchema = z.object({
     province: z.string().nullable().optional(),
     city: z.string().nullable().optional(),
     district: z.string().nullable().optional(),
+    timeOfDay: z.enum(["morning", "afternoon"]).optional(),
   }).strict()).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),

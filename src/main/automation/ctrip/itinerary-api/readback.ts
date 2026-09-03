@@ -12,7 +12,7 @@
  *   - 服务时间（startOnBoardTime / stopOnBoardTime）；
  *   - 首日集合 / 接站（tourDailyPackageGatherList）；
  *   - 末日解散 / 送站（tourDailyPackageDismissList）；
- *   - 三餐（dinnerType key 顺序 + includeAdult 费用状态）。
+ *   - 当日应有餐食（dinnerType key 顺序 + includeAdult 费用状态）。
  *
  * 错误信息必含「第 N 天 / 字段 / 期望 / 实际」，方便定位。
  */
@@ -150,10 +150,12 @@ function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: s
   return count;
 }
 
-/** 校验三餐：dinnerType key 顺序 + includeAdult 费用状态。 */
-function checkMeals(dayLabel: string, expected: Array<{ key: "B" | "L" | "S"; mealsIncluded: boolean }>, actualInfos: InfoRecord[]): number {
+/** 校验当日餐食：dinnerType key、早餐补充说明与 includeAdult 费用状态。 */
+function checkMeals(dayLabel: string, expected: Array<{ key: "B" | "L" | "S"; description: string; mealsIncluded: boolean }>, actualInfos: InfoRecord[]): number {
   const meals = actualInfos.filter(isMeal);
-  if (meals.length !== 3) throw new Error(`${dayLabel} 回读餐饮节点数=${meals.length}，期望 3`);
+  if (meals.length !== expected.length) {
+    throw new Error(`${dayLabel} 回读餐饮节点数=${meals.length}，期望 ${expected.length}`);
+  }
   let count = 0;
   meals.forEach((meal, idx) => {
     const exp = expected[idx];
@@ -161,6 +163,14 @@ function checkMeals(dayLabel: string, expected: Array<{ key: "B" | "L" | "S"; me
     const actualKey = meal.tourDailyDinner?.dinnerType?.key ?? null;
     if (actualKey !== exp.key) {
       throw new Error(`${dayLabel} 第 ${idx + 1} 段餐饮 dinnerType key 不一致：期望=${exp.key}，实际=${String(actualKey)}`);
+    }
+    if (exp.key === "B") {
+      const actualDescription = String(meal.description ?? "").trim();
+      if (actualDescription !== exp.description) {
+        throw new Error(
+          `${dayLabel} 第 ${idx + 1} 段早餐补充说明不一致：期望=${JSON.stringify(exp.description)}，实际=${JSON.stringify(actualDescription)}`,
+        );
+      }
     }
     const actualIncluded = meal.tourDailyDinner?.includeAdult?.key;
     const expectedIncluded = exp.mealsIncluded ? "I" : "E";

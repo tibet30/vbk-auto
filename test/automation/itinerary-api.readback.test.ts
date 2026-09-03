@@ -132,13 +132,13 @@ test("字段级回读：酒店 hotelTier 不一致 → 失败", async () => {
 
 test("字段级回读：餐饮 dinnerType key 顺序错乱 → 失败", async () => {
   installHandlersForFieldMismatch({ mealIncluded: false });
-  // 改 handler 把第一段餐饮 dinnerType key 改成 L
+  // 改尾日第一段早餐的 dinnerType key 为 L
   const original = routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"];
   routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"] = (() => {
     return () => {
       const inner = original({}) as { tourInfo: { tourDailyDescriptions: Array<{ tourDailyInfos: Array<Record<string, unknown>> }> } };
       const days = inner.tourInfo.tourDailyDescriptions;
-      for (const d of days) {
+      for (const d of days.slice(1)) {
         const meals = d.tourDailyInfos.filter((i) => i.activeType?.key === 0);
         if (meals[0]) {
           (meals[0].tourDailyDinner as { dinnerType: { key: string } }).dinnerType.key = "L";
@@ -151,7 +151,7 @@ test("字段级回读：餐饮 dinnerType key 顺序错乱 → 失败", async ()
     await ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928");
     assert.fail("必须抛错");
   } catch (e) {
-    assert.match(String(e), /第 1 天 第 1 段餐饮 dinnerType key 不一致/);
+    assert.match(String(e), /第 2 天 第 1 段餐饮 dinnerType key 不一致/);
     assert.match(String(e), /期望=B/);
     assert.match(String(e), /实际=L/);
   }
@@ -182,6 +182,22 @@ test("字段级回读：餐饮 includeAdult 费用状态不一致 → 失败", a
     assert.match(String(e), /期望=E/);
     assert.match(String(e), /实际=I/);
   }
+});
+
+test("字段级回读：早餐补充说明缺失 → 失败", async () => {
+  installHandlersForFieldMismatch({});
+  const original = routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"];
+  routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"] = () => {
+    const inner = original({}) as { tourInfo: { tourDailyDescriptions: Array<{ tourDailyInfos: Array<Record<string, unknown>> }> } };
+    const breakfast = inner.tourInfo.tourDailyDescriptions[1]?.tourDailyInfos
+      .find((info) => (info.tourDailyDinner as { dinnerType?: { key?: string } } | undefined)?.dinnerType?.key === "B");
+    if (breakfast) breakfast.description = "";
+    return inner;
+  };
+  await assert.rejects(
+    ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
+    /第 2 天 第 1 段早餐补充说明不一致/,
+  );
 });
 
 test("字段级回读：其他 description 不一致 → 失败", async () => {
@@ -308,7 +324,9 @@ test("buildReadbackExpectations：title/POI/餐饮/酒店/其他/服务时间/�
   assert.equal(exp.days.length, 2);
   assert.deepEqual(exp.days.map((d) => d.title), ["第1天：抵达丽江", "第2天：玉龙雪山"]);
   assert.deepEqual(exp.days[0].pois, [{ poiId: 75924, poiName: "Old Town of Lijiang" }]);
-  assert.deepEqual(exp.days[0].meals.map((m) => m.key), ["B", "L", "S"]);
+  assert.deepEqual(exp.days[0].meals.map((m) => m.key), ["L", "S"]);
+  assert.deepEqual(exp.days[1].meals.map((m) => m.key), ["B", "L"]);
+  assert.equal(exp.days[1].meals[0].description, "是否含餐，以酒店房型为准。");
   assert.equal(exp.days[0].meals.every((m) => m.mealsIncluded === false), true);
   assert.deepEqual(exp.days[0].hotels, [{ hotelName: "和玺酒店", hotelTier: "当地4钻酒店/-4" }]);
   assert.equal(exp.days[0].other, undefined);
@@ -347,6 +365,6 @@ test("verifyItineraryReadback：字段完全匹配 → 返回 days/spots/meals/h
   const result = await verifyItineraryReadback(makeFakePage() as any, "999999999999999999", expectations);
   assert.equal(result.days, 2);
   assert.equal(result.spots, 2);
-  assert.equal(result.meals, 6);
+  assert.equal(result.meals, 4);
   assert.equal(result.hotels, 2);
 });

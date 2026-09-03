@@ -36,6 +36,7 @@ const itinerarySpotSchema = z.object({
   name: requiredText,
   poiName: z.string().trim().nullable().optional(),
   poiId: z.number().int().positive().nullable().optional(),
+  timeOfDay: z.enum(["morning", "afternoon"]).optional(),
 }).strict().superRefine((spot, ctx) => {
   if (isCombinedSpotName(spot.name)) {
     ctx.addIssue({

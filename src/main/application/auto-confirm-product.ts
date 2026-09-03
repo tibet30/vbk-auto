@@ -5,7 +5,10 @@ export interface AutoConfirmedProductDependencies {
   resumePlanning?: (localProductId: string) => Promise<PlanningRunResult>;
   readiness: (
     localProductId: string,
-    options?: { ignoreInterruptedAutomationFailure?: boolean },
+    options?: {
+      ignoreInterruptedAutomationFailure?: boolean;
+      ignoreCurrentAutomationFailure?: boolean;
+    },
   ) => ProductReadiness;
   productWorkflows: {
     runExclusive<T>(localProductId: string, kind: string, task: () => Promise<T>): Promise<T>;
@@ -80,6 +83,7 @@ export async function runAutoConfirmedCreation(
   if (resumeFrom !== "automation") onStage?.("readiness");
   const readiness = dependencies.readiness(localProductId, {
     ignoreInterruptedAutomationFailure: resumeFrom === "automation",
+    ignoreCurrentAutomationFailure: resumeFrom === "automation",
   });
   if (!readiness.ready) {
     const labels = readiness.issues.slice(0, 3).map((issue) => issue.label).join("、");

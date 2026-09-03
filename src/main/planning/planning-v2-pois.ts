@@ -267,6 +267,9 @@ export function expandVerifiedItinerary(args: {
         name: candidate.poiName,
         poiName: candidate.poiName,
         poiId,
+        ...(candidate.province ? { province: candidate.province } : {}),
+        ...(candidate.city ? { city: candidate.city } : {}),
+        ...(candidate.district ? { district: candidate.district } : {}),
         timeOfDay: spots.length < morningCount ? "morning" : "afternoon",
       });
     }
@@ -283,9 +286,9 @@ export function expandVerifiedItinerary(args: {
         hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
       }),
       spots,
-      // VBK 的行程 saveType=3 要求至少有一晚住宿节点；酒店名称本身
-      // 仍由后续 hotelResource 阶段按 hotelTier 匹配真实资源。这里仅写
-      // 一个明确的待匹配占位，避免把酒店资源误当成 AI 已确认的酒店。
+      // VBK 的行程 saveType=3 要求至少有一晚住宿节点。先写显式占位，
+      // 后续 hotelResolution 会以当日末景点从携程替换为真实酒店与五个候选；
+      // 行程取前三个，资源配置保留全部五个。
       hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
       meals: mealSummaryForDay(index, args.days),
       mealDescriptions: mealDescriptionsForDay(index, args.days),

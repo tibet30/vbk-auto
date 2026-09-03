@@ -347,6 +347,21 @@ test("buildReadbackExpectations：无酒店 → hotels 为空且 requireHotels=f
   assert.equal(exp.requireHotels, false);
 });
 
+test("buildReadbackExpectations：五家酒店候选只将前三家形成行程回读期望", () => {
+  const exp = buildReadbackExpectations({
+    itinerary: baseProduct.itinerary.map((day, index) => index === 0 ? {
+      ...day,
+      hotelCandidates: [
+        { hotelName: "和玺酒店" }, { hotelName: "备选酒店二" }, { hotelName: "备选酒店三" },
+        { hotelName: "资源候选四" }, { hotelName: "资源候选五" },
+      ],
+    } : day),
+    operations: baseProduct.operations,
+    stations: { pickupAir: makeCandidate("air", "LJG", "三义机场") },
+  });
+  assert.deepEqual(exp.days[0].hotels.map((hotel) => hotel.hotelName), ["和玺酒店", "备选酒店二", "备选酒店三"]);
+});
+
 // ───────── verifyItineraryReadback 直接调用 ─────────
 
 test("verifyItineraryReadback：字段完全匹配 → 返回 days/spots/meals/hotels/summary", async () => {

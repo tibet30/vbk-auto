@@ -202,6 +202,25 @@ test("后台任务恢复只忽略应用重启中断，普通 needs_user 仍保�
   assert.ok(businessFailure.issues.some((issue) => issue.label === "自动录入失败：presentation"));
 });
 
+test("用户选择从自动录入报错处继续时，只绕过本次将被实际重试的失败记录", () => {
+  const resumed = computeReadiness({
+    product: minimalProduct(),
+    researchTasks: [],
+    automation: needsUserRun("hotelResource", "住宿日与正住宿行程段数量不一致"),
+    ignoreCurrentAutomationFailure: true,
+  });
+  assert.equal(resumed.ready, true);
+  assert.equal(resumed.issues.some((issue) => issue.label === "自动录入失败：hotelResource"), false);
+
+  const ordinary = computeReadiness({
+    product: minimalProduct(),
+    researchTasks: [],
+    automation: needsUserRun("hotelResource", "住宿日与正住宿行程段数量不一致"),
+  });
+  assert.equal(ordinary.ready, false);
+  assert.ok(ordinary.issues.some((issue) => issue.label === "自动录入失败：hotelResource"));
+});
+
 test("needs_user 与 schema 阻断 / research task / automationBlockers 同时存在时，全部作为独立 issues 计入", () => {
   // 验证 needs_user 与其它来源的阻断不会被合并 / 吞掉：
   //   - schema 错误：product 缺 province 会产出 schema issue；

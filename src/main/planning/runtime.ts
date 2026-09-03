@@ -269,6 +269,15 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
 
+  async writeResolvedHotelResources(localProductId: string, operations: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) return { ok: false, reason: "产品不存在" };
+    const next = structuredClone(product.product);
+    next.operations = operations;
+    this.productMutations.replace(localProductId, next, { notify: false });
+    return { ok: true };
+  }
+
   async addResearchTask(localProductId: string, task: ResearchTaskProposal): Promise<string> {
     return this.db.addResearchTask(localProductId, task);
   }

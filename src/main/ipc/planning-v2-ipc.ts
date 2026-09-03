@@ -21,6 +21,7 @@ import { createPlanningPlanV2, runThreeStagePlan } from "../planning/three-stage
 import { acceptItineraryAndRerunCompletion } from "../planning/itinerary-adoption-flow.js";
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search.js";
+import { resolveItineraryHotelCandidates } from "../infrastructure/ctrip-hotel-search.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import type { MainIpcContext } from "./context.js";
@@ -138,6 +139,8 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
             destinationCity: skeleton.city,
             province: skeleton.province,
           })),
+        resolveHotels: async (itinerary) => context.productWorkflows.runVbkPageExclusive(async () =>
+          resolveItineraryHotelCandidates(itinerary, skeleton.city)),
         resolveCover: async () => context.productWorkflows.runVbkPageExclusive(async () => {
           let current = context.db.getProduct(localProductId);
           if (!current) throw productNotFound(localProductId);
@@ -330,6 +333,7 @@ const NODE_TO_STAGE: Record<string, PlanningStage> = {
   spotCandidates: "itinerary",
   poiResolution: "itinerary",
   itineraryDraft: "itinerary",
+  hotelResolution: "itinerary",
   copy: "basicInfo",
   presentation: "presentation",
   commercial: "commercial",

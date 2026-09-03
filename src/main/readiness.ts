@@ -37,6 +37,11 @@ export interface ComputeReadinessInput {
   automation?: AutomationRun;
   /** 后台任务重启续跑时只忽略“应用重启中断”本身，其他阻断仍照常生效。 */
   ignoreInterruptedAutomationFailure?: boolean;
+  /**
+   * 用户明确选择“从报错处继续自动录入”时，失败记录本身不能再次把恢复
+   * 入口拦住；本次 runner 会从对应的远端草稿断点实际重试该阶段。
+   */
+  ignoreCurrentAutomationFailure?: boolean;
 }
 
 /**
@@ -73,7 +78,7 @@ export function computeReadiness(input: ComputeReadinessInput): ProductReadiness
       const cancelled = typeof blocked.finalError === "string" && blocked.finalError.startsWith("用户中止");
       const resumableInterruption = input.ignoreInterruptedAutomationFailure
         && blocked.finalError === "应用重启导致自动录入被中断";
-      if (!cancelled && !resumableInterruption) {
+      if (!cancelled && !resumableInterruption && !input.ignoreCurrentAutomationFailure) {
         const userInstruction = typeof blocked.userInstruction === "string" ? blocked.userInstruction.trim() : "";
         const finalError = typeof blocked.finalError === "string" ? blocked.finalError.trim() : "";
         const detail = userInstruction || finalError || DEFAULT_NEEDS_USER_DETAIL;

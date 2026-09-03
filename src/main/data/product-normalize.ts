@@ -1,6 +1,7 @@
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { defaultCommercialInventory } from "./commercial-defaults.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
+import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 
 /**
  * 产品草稿归一化。
@@ -185,12 +186,14 @@ export function normaliseItinerary(value: unknown) {
     const title = textValue(record.title) || `第 ${index + 1} 天行程`;
     const description = textValue(record.description) || [textValue(record.summary), activityDescription].filter(Boolean).join("。") || title;
     const hotel = textValue(record.hotel) || textValue(record.stay);
+    const hotelCandidates = normaliseHotelCandidates(record.hotelCandidates);
     return [{
       day: Number.isInteger(record.day) && Number(record.day) > 0 ? Number(record.day) : index + 1,
       title,
       spots,
       description,
       hotel,
+      ...(hotelCandidates.length ? { hotelCandidates } : {}),
       meals: meals.summary,
       ...(meals.descriptions ? { mealDescriptions: meals.descriptions } : {}),
       ...(hotel ? { hotelDescription: hotel } : {}),
@@ -198,6 +201,24 @@ export function normaliseItinerary(value: unknown) {
     }];
   });
   return days.length ? days : undefined;
+}
+
+function normaliseHotelCandidates(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<number>();
+  const candidates = value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const row = item as Record<string, unknown>;
+    const hotelId = normalisePoiId(row.hotelId); const hotelName = textValue(row.hotelName);
+    const diamond = Number(row.diamond); const score = Number(row.score); const distanceKm = Number(row.distanceKm);
+    const cityName = textValue(row.cityName); const anchorName = textValue(row.anchorName); const anchorCityId = normalisePoiId(row.anchorCityId);
+    if (!hotelId || !hotelName || !Number.isInteger(diamond) || diamond < 1 || diamond > 5 || !Number.isFinite(score) || score < 0
+      || !Number.isFinite(distanceKm) || distanceKm < 0 || !cityName || !anchorName || !anchorCityId || seen.has(hotelId)) return [];
+    seen.add(hotelId);
+    return [{ hotelId, hotelName, diamond, score, distanceKm, cityName, anchorName, anchorCityId, ...(textValue(row.address) ? { address: textValue(row.address) } : {}) }];
+  });
+  // 候选最多五家；携程只返回一家时也保留，行程录入阶段采用其中最多前三家。
+  return candidates.length >= HOTEL_RESOURCE_MIN_CANDIDATE_COUNT && candidates.length <= HOTEL_RESOURCE_CANDIDATE_COUNT ? candidates : [];
 }
 
 /**

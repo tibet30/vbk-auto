@@ -135,7 +135,7 @@ test("从自动录入阶段恢复时不重做规划，只复核 readiness 后继
     startPlanning: async () => { calls.push("start-planning"); throw new Error("不应调用"); },
     resumePlanning: async () => { calls.push("resume-planning"); throw new Error("不应调用"); },
     readiness: (_id, options) => {
-      calls.push(`readiness:${options?.ignoreInterruptedAutomationFailure === true}`);
+      calls.push(`readiness:${options?.ignoreInterruptedAutomationFailure === true}:${options?.ignoreCurrentAutomationFailure === true}`);
       return { ready: true, completion: 100, issues: [] };
     },
     productWorkflows: { runExclusive: async (_id, _kind, task) => task() },
@@ -153,6 +153,6 @@ test("从自动录入阶段恢复时不重做规划，只复核 readiness 后继
     resumeFrom: "automation",
   });
 
-  assert.deepEqual(calls, ["readiness:true", "stage:automation", "automation"]);
+  assert.deepEqual(calls, ["readiness:true:true", "stage:automation", "automation"]);
   assert.equal(result.status, "succeeded");
 });

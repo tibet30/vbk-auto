@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import { DEFAULT_HOTEL_TIER, HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
+import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import {
   RECOMMENDATION_CATEGORIES,
   VBK_RECOMMENDATION_CATEGORIES,
@@ -35,6 +36,17 @@ const itineraryDaySchema = z.object({
   }).strict()).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),
+  hotelCandidates: z.array(z.object({
+    hotelId: z.number().int().positive(),
+    hotelName: z.string().min(1),
+    diamond: z.number().int().min(1).max(5),
+    score: z.number().nonnegative(),
+    distanceKm: z.number().nonnegative(),
+    address: z.string().min(1).optional(),
+    cityName: z.string().min(1),
+    anchorName: z.string().min(1),
+    anchorCityId: z.number().int().positive(),
+  }).strict()).min(HOTEL_RESOURCE_MIN_CANDIDATE_COUNT).max(HOTEL_RESOURCE_CANDIDATE_COUNT).optional(),
   meals: z.string().default(""),
   mealDescriptions: z.array(z.string().min(1)).length(3).optional(),
   hotelDescription: z.string().default(""),
@@ -168,7 +180,7 @@ const operationsSchema = z.object({
     .optional(),
   hotelResource: z
     .object({
-      source: z.enum(["vbk", "nonPlatform"]),
+      source: z.enum(["vbk", "ctrip", "nonPlatform"]),
       resourceId: z.number().int().positive().optional(),
       resourceName: z.string().min(1),
       supplierCode: z.string().min(1).optional(),
@@ -176,6 +188,19 @@ const operationsSchema = z.object({
       query: z.string().min(1).optional(),
       hotelTier: z.enum(HOTEL_TIER_VALUES).optional(),
       diamond: z.union([z.literal(3), z.literal(4), z.literal(5)]).optional(),
+      candidates: z.array(z.object({
+        hotelId: z.number().int().positive(), hotelName: z.string().min(1), diamond: z.number().int().min(1).max(5),
+        score: z.number().nonnegative(), distanceKm: z.number().nonnegative(), address: z.string().min(1).optional(),
+        cityName: z.string().min(1), anchorName: z.string().min(1), anchorCityId: z.number().int().positive(),
+      }).strict()).min(HOTEL_RESOURCE_MIN_CANDIDATE_COUNT).max(HOTEL_RESOURCE_CANDIDATE_COUNT).optional(),
+      dailyCandidates: z.array(z.object({
+        day: z.number().int().positive(),
+        candidates: z.array(z.object({
+          hotelId: z.number().int().positive(), hotelName: z.string().min(1), diamond: z.number().int().min(1).max(5),
+          score: z.number().nonnegative(), distanceKm: z.number().nonnegative(), address: z.string().min(1).optional(),
+          cityName: z.string().min(1), anchorName: z.string().min(1), anchorCityId: z.number().int().positive(),
+        }).strict()).min(HOTEL_RESOURCE_MIN_CANDIDATE_COUNT).max(HOTEL_RESOURCE_CANDIDATE_COUNT),
+      }).strict()).optional(),
     })
     .optional(),
 });

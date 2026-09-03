@@ -40,7 +40,10 @@ export interface MainIpcContext {
   ) => void;
   readiness: (
     localProductId: string,
-    options?: { ignoreInterruptedAutomationFailure?: boolean },
+    options?: {
+      ignoreInterruptedAutomationFailure?: boolean;
+      ignoreCurrentAutomationFailure?: boolean;
+    },
   ) => ProductReadiness;
   emitProduct: (product: ProductDetail) => void;
   /** Broadcast a snapshot already saved by Tibet; bypasses the local-write mirror. */

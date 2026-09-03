@@ -56,6 +56,8 @@ export interface OrchestratorRuntime {
   loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */
   writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
+  /** 确定性酒店检索的受控写入口；AI patch 永远不能写 operations.hotelResource。 */
+  writeResolvedHotelResources?(localProductId: string, operations: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
   /** 添加一条 research task；返回新增的 id（若 label+type 已存在则返回原 id）。 */
   addResearchTask(localProductId: string, task: ResearchTaskProposal): Promise<string>;
   /** 拉取最近历史对话（仅供 orchestrator 上下文使用）。 */

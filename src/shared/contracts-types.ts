@@ -511,12 +511,31 @@ export interface VehicleResourceMatch {
 }
 
 export interface HotelResourceMatch {
-  source: "vbk" | "nonPlatform";
+  source: "vbk" | "ctrip" | "nonPlatform";
   resourceId?: number;
   resourceName: string;
   supplierCode?: string;
   roomType?: string;
   query?: string;
+  dailyCandidates?: CtripHotelResourceDayMatch[];
+}
+
+/** 已由携程酒店列表验证的行程住宿候选；hotelId 是后续资源配置的唯一锚点。 */
+export interface CtripHotelCandidate {
+  hotelId: number;
+  hotelName: string;
+  diamond: number;
+  score: number;
+  distanceKm: number;
+  address?: string;
+  cityName: string;
+  anchorName: string;
+  anchorCityId: number;
+}
+
+export interface CtripHotelResourceDayMatch {
+  day: number;
+  candidates: CtripHotelCandidate[];
 }
 
 export interface VbkLoginStatus {

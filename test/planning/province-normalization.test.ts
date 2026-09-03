@@ -122,6 +122,7 @@ test("skeleton 阶段把省级目的地的 pickupCity 写为核心城市", async
   });
   assert.equal(result.status, "completed");
   assert.equal(skeletonValue?.pickupCity, "郑州");
+  assert.equal(skeletonValue?.hotelTier, "当地5钻酒店/-38");
 });
 
 test("真实 runtime 写入 skeleton 时同步把省级 meetingCity / destinationCity 改为核心城市", async () => {

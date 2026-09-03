@@ -207,10 +207,13 @@ export function buildMealInfo(args: {
  */
 export function buildHotelInfo(args: {
   hotelName: string;
+  /** 同一晚的备选酒店；VBK 会把同一个节点内的多条记录渲染为“或”。 */
+  hotelNames?: string[];
   hotelTier?: string;
   sort: number;
 }) {
-  const { hotelName, hotelTier, sort } = args;
+  const { hotelName, hotelNames, hotelTier, sort } = args;
+  const names = hotelNames?.length ? hotelNames : [hotelName];
   return {
     ...commonInfoFields({
       activeType: { key: 1, name: "酒店" },
@@ -221,12 +224,12 @@ export function buildHotelInfo(args: {
       costInclude: true,
       directionWay: { key: "", name: null },
     }),
-    tourDailyHotels: [
+    tourDailyHotels: names.map((name) => (
       {
         ...emptyTourDailyHotel(),
         hotel: {
           hotelId: 0,
-          hotelName,
+          hotelName: name,
           hotelNameEn: null,
           hotelAddress: null,
           location: null,
@@ -234,8 +237,8 @@ export function buildHotelInfo(args: {
           grade: { key: null, name: hotelTier ?? null },
           ishand: false,
         },
-      },
-    ],
+      }
+    )),
     tourDailyPois: [emptyTourDailyPoi()],
     tourDailyDinner: emptyTourDailyDinner(null, false),
   };

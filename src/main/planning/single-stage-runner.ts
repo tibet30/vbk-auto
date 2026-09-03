@@ -15,6 +15,7 @@ import { logInfo } from "../../shared/log-timestamp.js";
 import { resolveTravelScope } from "./runtime.js";
 import { ensurePackageName, normaliseCommercialOutcomes } from "./commercial-stage.js";
 import { ensurePresentationCover } from "./cover-default.js";
+import { FIVE_DIAMOND_HOTEL_TIER } from "../../shared/hotel-tiers.js";
 
 export interface SingleStageResult {
   state: PlanningGenerationState;
@@ -84,7 +85,8 @@ async function runSkeletonStage(args: {
   if (!alreadyAccepted.includes("skeleton")) {
     const travelScope = resolveTravelScope(skeleton.destination);
     const result = await runtime.writeModule(state.localProductId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
-      hotelTier: skeleton.productForm === "privateTour" ? "当地5钻酒店/-38" : "当地3钻酒店/-3",
+      // 未指定档次时统一选择最高的当地 5 钻；酒店候选阶段会再以此为首要排序规则。
+      hotelTier: FIVE_DIAMOND_HOTEL_TIER,
       pickupCity: travelScope.primaryCity,
       transport: "charter",
       reusePickupForDropoff: true,

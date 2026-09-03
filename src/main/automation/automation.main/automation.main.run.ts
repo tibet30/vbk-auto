@@ -258,7 +258,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         package: () => executePhase("package", () => ensurePackageApi(page, product, productId!)),
         pricingInventory: () => executePhase("pricingInventory", () => ensurePricingInventoryApi(page, product, productId!)),
         terms: () => executePhase("terms", () => fillAndSaveTerms(page, product, productId)),
-        hotelResource: () => executePhase("hotelResource", () => ensureHotelResourceApi(page, product, productId!)),
+        hotelResource: () => executePhase("hotelResource", () =>
+          ensureHotelResourceApi(page, product, productId!)),
         vehicleResource: () => executePhase("vehicleResource", () => ensureVehicleResourceApi(page, product, productId!)),
         preflight: () => executePhase("preflight", () => runProductPreflightApi(page, product, productId!)),
       };

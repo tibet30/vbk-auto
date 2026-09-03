@@ -25,7 +25,7 @@ import styles from "./planning-tree.module.less";
 
 const STAGES: PlanningRerunStage[] = [
   { id: "foundation", label: "产品骨架", description: "省市、天数、形态与交通骨架", invalidates: "产品骨架、行程规划和全部产品补全数据" },
-  { id: "itinerary", label: "行程规划", description: "候选景点、真实 POI 与逐日编排", invalidates: "景点池、POI、逐日行程和全部产品补全数据" },
+  { id: "itinerary", label: "行程规划", description: "候选景点、真实 POI、逐日编排与酒店匹配", invalidates: "景点池、POI、逐日行程、酒店候选和全部产品补全数据" },
   { id: "completion", label: "产品补全", description: "文案、商业信息、封面与用车资源", invalidates: "副标题、展示、商业信息、封面和用车资源组" },
 ];
 
@@ -34,6 +34,7 @@ const NODE_LABELS: Record<PlanningNodeId, string> = {
   spotCandidates: "AI 推荐景点池",
   poiResolution: "查询真实 POI",
   itineraryDraft: "编排每天行程",
+  hotelResolution: "匹配每日酒店候选",
   copy: "副标题 / Operation Notes",
   presentation: "推荐语 / 卖点 / 分类",
   commercial: "套餐 / 价格 / 库存 / Release",
@@ -341,7 +342,7 @@ export function PlanningTree(props: {
 
 function placeholderNodes(stage: PlanningMajorStage): PlanningNodeState[] {
   const ids = stage === "foundation" ? ["skeleton"]
-    : stage === "itinerary" ? ["spotCandidates", "poiResolution", "itineraryDraft"]
+    : stage === "itinerary" ? ["spotCandidates", "poiResolution", "itineraryDraft", "hotelResolution"]
       : ["copy", "presentation", "commercial", "cover", "vehicleResource", "finalValidation"];
   return ids.map((id) => ({ id: id as PlanningNodeId, majorStage: stage, status: "pending", attempts: 0 }));
 }

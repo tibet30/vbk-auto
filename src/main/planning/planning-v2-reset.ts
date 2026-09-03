@@ -16,6 +16,7 @@ export function resetProductForPlanningStage(
     delete next.presentation;
     next.commercial = {};
     operations.vehicleResource = {};
+    delete operations.hotelResource;
     operations.pickupCity = "";
     delete operations.transport;
   } else if (stage === "itinerary") {
@@ -25,6 +26,7 @@ export function resetProductForPlanningStage(
     delete next.presentation;
     next.commercial = {};
     operations.vehicleResource = {};
+    delete operations.hotelResource;
   } else {
     basic.subtitle = "";
     basic.operationNotes = "";

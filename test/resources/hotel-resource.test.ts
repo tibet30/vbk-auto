@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { firstHotelResource, hotelResourceQuery } from "../../src/main/operations/hotel-resource.js";
 import { hotelCandidateMatchesTier, hotelDiamondFromTier } from "../../src/shared/hotel-tiers.js";
+import { ctripResourceSegments, hotelStayGroups } from "../../src/main/automation/ctrip/hotel-resource-api.js";
 
 test("酒店资源匹配词由目的城市和酒店等级组成", () => {
   assert.equal(hotelResourceQuery({
@@ -31,4 +32,35 @@ test("资源配置酒店必须与行程钻级严格一致", () => {
   assert.equal(hotelCandidateMatchesTier("山西国贸大饭店 太原 【豪华型，5星，高质量】", "当地5钻酒店/-38"), true);
   assert.equal(hotelCandidateMatchesTier("太原景华酒店 太原 【舒适型，3钻】", "当地4钻酒店/-4"), false);
   assert.equal(hotelCandidateMatchesTier("某四星酒店 【高档型，4星】", "当地4钻酒店/-4"), false);
+});
+
+test("连续两晚合并为一个资源行程段时，五家资源覆盖每日行程前三家", () => {
+  const candidates = (ids: number[]) => ids.map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` }));
+  const segments = ctripResourceSegments([
+    { day: 1, hotelCandidates: candidates([1, 2, 3, 4, 5]) },
+    { day: 2, hotelCandidates: candidates([2, 1, 3, 4, 5]) },
+  ], [{ segmentId: "segment-1", segmentBase: { stayNights: 2 } }]);
+  assert.deepEqual(segments, [{ day: 1, segmentId: "segment-1", candidates: candidates([1, 2, 3, 4, 5]) }]);
+});
+
+test("合并住宿段以首晚候选保存资源，不因后续日期备选不同而阻断", () => {
+  assert.deepEqual(ctripResourceSegments([
+    { day: 1, hotelCandidates: [1, 2, 3, 4, 5].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })) },
+    { day: 2, hotelCandidates: [6, 7, 8, 9, 10].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })) },
+  ], [{ segmentId: "segment-1", segmentBase: { stayNights: 2 } }]), [{
+    day: 1,
+    segmentId: "segment-1",
+    candidates: [1, 2, 3, 4, 5].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })),
+  }]);
+});
+
+test("住宿资源段按连续住宿城市拆分，保留同城连续晚数", () => {
+  assert.deepEqual(hotelStayGroups([
+    { day: 1, hotelCandidates: [{ cityName: "成都" }] },
+    { day: 2, hotelCandidates: [{ cityName: "成都" }] },
+    { day: 3, hotelCandidates: [{ cityName: "都江堰" }] },
+  ]), [
+    { cityName: "成都", nights: 2 },
+    { cityName: "都江堰", nights: 1 },
+  ]);
 });

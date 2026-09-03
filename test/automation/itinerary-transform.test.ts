@@ -132,6 +132,25 @@ test("酒店节点：day.hotel 非空时产出 activeType=1 节点 + tourDailyHo
   assert.equal(hotel.tourDailyHotels[0].hotel.grade.key, null, "酒店钻级 key 留空（业务 VBK 用 grade.name 匹配）");
 });
 
+test("酒店节点：五家携程候选仅将前三家录入同一酒店节点的或关系并保持排序", () => {
+  const out = transformItinerary({
+    itinerary: [makeDay({
+      hotel: "主选酒店",
+      hotelCandidates: [
+        { hotelName: "主选酒店" }, { hotelName: "备选酒店二" }, { hotelName: "备选酒店三" },
+        { hotelName: "资源候选四" }, { hotelName: "资源候选五" },
+      ],
+    })],
+    operations: baseOps,
+    stations: baseStations,
+    refIdSeed: "1",
+  });
+  const hotels = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 1);
+  assert.equal(hotels.length, 1);
+  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.hotelName), ["主选酒店", "备选酒店二", "备选酒店三"]);
+  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.grade.name), ["当地4钻酒店/-4", "当地4钻酒店/-4", "当地4钻酒店/-4"]);
+});
+
 test("酒店节点：day.hotel 为空时不产出酒店节点", () => {
   const out = transformItinerary({
     itinerary: [makeDay({ hotel: "" })],

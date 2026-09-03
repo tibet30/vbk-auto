@@ -12,6 +12,7 @@ import { HOTEL_TIER_VALUES, LEGACY_FIVE_DIAMOND_HOTEL_TIER, FIVE_DIAMOND_HOTEL_T
 import { normaliseProductDraft } from "../../src/main/data/product-normalize.js";
 import { applyProductPatchSafe } from "../../src/main/operations/product-patch.js";
 import { productSchema } from "../../src/main/automation/schema/schema-definitions.js";
+import { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../src/shared/hotel-candidate-counts.js";
 
 test("HOTEL_TIER_VALUES 不含旧 /-5；/-38 是当前唯一 5 钻枚举", () => {
   assert.equal(HOTEL_TIER_VALUES.includes(LEGACY_FIVE_DIAMOND_HOTEL_TIER as never), false);
@@ -69,4 +70,35 @@ test("productSchema 接受 /-38，拒 绝不在白名单的旧 /-5", () => {
   // operationsSchema 的 hotelTier 是 z.enum(HOTEL_TIER_VALUES) ，旧 /-5 不在白名单 → 解析失败。
   const broken = { ...base, operations: { ...base.operations, hotelTier: "当地5钻酒店/-5" } };
   assert.equal(productSchema.safeParse(broken).success, false);
+});
+
+test("productSchema 接受一到五家携程酒店候选，避免少量结果被误判为待确认", () => {
+  const candidate = (hotelId: number) => ({
+    hotelId,
+    hotelName: `成都酒店${hotelId}`,
+    diamond: 5,
+    score: 4.7,
+    distanceKm: hotelId,
+    cityName: "成都",
+    anchorName: "锦里古街",
+    anchorCityId: 28,
+  });
+  const candidates = Array.from({ length: HOTEL_RESOURCE_CANDIDATE_COUNT }, (_, index) => candidate(index + 1));
+  const product = {
+    sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
+    basicInfo: { supplierProductName: "成都三日", supplierProductCode: "NEW", subtitle: "成都行程", days: 1, nights: 0, meetingCity: "成都", destinationCity: "成都", province: "四川", operationNotes: "n" },
+    operations: {
+      hotelSource: "nonPlatform" as const,
+      hotelTier: "当地5钻酒店/-38" as const,
+      transport: "charter" as const,
+      pickupCity: "成都",
+      reusePickupForDropoff: true,
+      mealsIncluded: false,
+      hotelResource: { source: "ctrip" as const, resourceName: candidates[0]!.hotelName, candidates, dailyCandidates: [{ day: 1, candidates }] },
+    },
+    itinerary: [{ day: 1, title: "Day 1", spots: [{ name: "锦里", poiName: "锦里", poiId: 1 }], description: "D", hotel: "", meals: "M" }],
+  };
+  assert.equal(productSchema.safeParse(product).success, true);
+  assert.equal(productSchema.safeParse({ ...product, operations: { ...product.operations, hotelResource: { ...product.operations.hotelResource, candidates: candidates.slice(0, 3), dailyCandidates: [{ day: 1, candidates: candidates.slice(0, 3) }] } } }).success, true);
+  assert.equal(productSchema.safeParse({ ...product, operations: { ...product.operations, hotelResource: { ...product.operations.hotelResource, candidates: [], dailyCandidates: [{ day: 1, candidates: [] }] } } }).success, false);
 });

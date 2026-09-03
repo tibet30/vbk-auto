@@ -18,6 +18,9 @@ import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceN
 import { emptyPlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import { buildVerifiedPool, composeItinerary, runFoundationLocation } from "./three-stage-itinerary-flow.js";
 import { validateUserIntentDays } from "./user-intent.js";
+import { resolveItineraryHotelCandidates } from "../infrastructure/ctrip-hotel-search.js";
+import { AI_WRITABLE_PATHS } from "./schemas.js";
+import { HOTEL_RESOURCE_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 
 export { runFoundationLocation };
 export interface ThreeStageOrchestratorDependencies {
@@ -30,6 +33,7 @@ export interface ThreeStageOrchestratorDependencies {
   persist(plan: PlanningPlanV2): Promise<void>;
   assertVbkLogin(): Promise<void>;
   queryPoi(name: string): Promise<PoiSuggestDetailResult>;
+  resolveHotels(itinerary: Array<Record<string, unknown>>): Promise<Awaited<ReturnType<typeof resolveItineraryHotelCandidates>>>;
   resolveCover(): Promise<{ complete: boolean; summary: string }>;
   resolveVehicle(): Promise<{ complete: boolean; summary: string }>;
   privateTour: boolean;
@@ -40,6 +44,7 @@ const NODE_DEFINITIONS: Array<[PlanningNodeId, PlanningMajorStage]> = [
   ["spotCandidates", "itinerary"],
   ["poiResolution", "itinerary"],
   ["itineraryDraft", "itinerary"],
+  ["hotelResolution", "itinerary"],
   ["copy", "completion"],
   ["presentation", "completion"],
   ["commercial", "completion"],
@@ -112,6 +117,43 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
     const itineraryResult = await composeItinerary(deps, plan, patchNode, () => plan, (next) => { plan = next; });
     if (!itineraryResult.ok) return itineraryResult.plan;
     plan = itineraryResult.plan;
+  }
+  if (!isCompleted(plan, "hotelResolution")) {
+    const current = await deps.runtime.loadCurrentProduct(deps.localProductId);
+    const itinerary = Array.isArray(current.itinerary) ? current.itinerary as Array<Record<string, unknown>> : [];
+    if (!itinerary.some((day) => text(day.hotel))) {
+      await patchNode("hotelResolution", {
+        status: "skipped",
+        summary: "行程无过夜日期，无需匹配酒店资源",
+        completedAt: new Date().toISOString(),
+      });
+    } else {
+      const attempt = node(plan, "hotelResolution").attempts + 1;
+      await patchNode("hotelResolution", { status: "running", attempts: attempt, startedAt: new Date().toISOString(), error: undefined });
+      try {
+        const resolved = await deps.resolveHotels(itinerary);
+        const first = resolved.dailyCandidates[0]?.candidates[0];
+        if (!first) throw new Error("酒店候选为空");
+        const itineraryWrite = await deps.runtime.writeModule(deps.localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, resolved.itinerary);
+        if (!itineraryWrite.ok) throw new Error(itineraryWrite.reason || "酒店候选行程写入失败");
+        const operations = asRecord(current.operations) ?? {};
+        if (!deps.runtime.writeResolvedHotelResources) throw new Error("酒店资源受控写入口不可用");
+        const resourceWrite = await deps.runtime.writeResolvedHotelResources(deps.localProductId, {
+          ...operations,
+          hotelResource: {
+            source: "ctrip", resourceId: first.hotelId, resourceName: first.hotelName, diamond: first.diamond,
+            candidates: resolved.dailyCandidates[0]!.candidates, dailyCandidates: resolved.dailyCandidates,
+          },
+        });
+        if (!resourceWrite.ok) throw new Error(resourceWrite.reason || "酒店资源配置写入失败");
+        await patchNode("hotelResolution", { status: "completed", attempts: attempt,
+          summary: `${resolved.dailyCandidates.length} 晚住宿，每晚按钻级和距离选取最多 ${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程酒店（至少 1 个即可继续）；行程录入前 ${ITINERARY_HOTEL_CANDIDATE_COUNT} 个，资源配置录入全部候选`, completedAt: new Date().toISOString() });
+      } catch (error) {
+        const message = errorMessage(error);
+        await patchNode("hotelResolution", { status: "failed", attempts: attempt, error: message });
+        return failPlan(plan, patchNode, "hotelResolution", message);
+      }
+    }
   }
   // 基础文案同时提供目的地上下文和后续提示词所需的摘要。展示与商业节点
   // 都会写产品字段并触发远端整包持久化；必须先完成 presentation 的写入与

@@ -194,12 +194,16 @@ function checkHotels(
   // 住宿按天校验：只有该天的期望里有住宿时才要求命中酒店节点。
   // 不能使用全程级的 requireHotels，否则 2天1晚产品的末日会被错误判为缺酒店。
   if (expected.length > 0 && !hotels.length) throw new Error(`${dayLabel} 回读缺少酒店节点（业务要求）`);
-  if (expected.length !== hotels.length) {
-    throw new Error(`${dayLabel} 回读酒店节点数不一致：期望 ${expected.length} 个，实际 ${hotels.length} 个`);
+  if (expected.length > 0 && hotels.length !== 1) {
+    throw new Error(`${dayLabel} 回读酒店节点数不一致：期望 1 个含备选的酒店节点，实际 ${hotels.length} 个`);
+  }
+  const slots = hotels.flatMap((info) => (info.tourDailyHotels ?? []).map((slot) => ({ info, slot })));
+  if (expected.length !== slots.length) {
+    throw new Error(`${dayLabel} 回读酒店备选数不一致：期望 ${expected.length} 个，实际 ${slots.length} 个`);
   }
   let count = 0;
   expected.forEach((expHotel, idx) => {
-    const slot = hotels[idx]?.tourDailyHotels?.[0];
+    const { info, slot } = slots[idx];
     const actualHotelName = hotelNameOf(slot);
     const actualHotelTier = hotelTierOf(slot);
     if (actualHotelName !== expHotel.hotelName) {
@@ -208,7 +212,7 @@ function checkHotels(
       );
     }
     const expectedTier = expHotel.hotelTier ?? "";
-    const description = String(hotels[idx]?.description ?? "");
+    const description = String(info?.description ?? "");
     if (expectedTier && actualHotelTier !== expectedTier && !description.includes(expectedTier)) {
       throw new Error(
         `${dayLabel} 第 ${idx + 1} 个酒店 hotelTier 不一致：期望=${JSON.stringify(expectedTier)}，实际 grade=${JSON.stringify(actualHotelTier)}，description=${JSON.stringify(description)}`,

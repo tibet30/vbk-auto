@@ -13,13 +13,16 @@
 
 import { parseProduct } from "../schema/schema.js";
 import { requiresVehicleResource } from "../../../shared/product-form.js";
+import { HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 
 /**
  * 计算某个 product 当前应当跑的阶段序列。
  */
 export function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
-  const needsHotel = product.operations?.hotelSource !== "nonPlatform"
-    && product.itinerary.some((day) => Boolean(day.hotel));
+  const hasResolvedHotelCandidates = product.itinerary.some((day) => Array.isArray(day.hotelCandidates)
+    && day.hotelCandidates.length >= HOTEL_RESOURCE_MIN_CANDIDATE_COUNT);
+  const needsHotel = hasResolvedHotelCandidates || (product.operations?.hotelSource !== "nonPlatform"
+    && product.itinerary.some((day) => Boolean(day.hotel)));
   const phases = ["basic", "presentation", "itinerary", "package"];
   if (product.commercial?.pricing || product.commercial?.inventory) phases.push("pricingInventory");
   if (needsHotel) phases.push("hotelResource");

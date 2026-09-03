@@ -26,6 +26,7 @@ import {
   buildOtherInfo,
   buildPickupInfo,
 } from "./info-builders.js";
+import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 
 /**
  * 输入：项目侧行程 + operations。
@@ -50,6 +51,8 @@ export interface ProductItineraryDay {
   }>;
   description: string;
   hotel: string;
+  /** 携程检索得到的同晚候选（最多五家）；写入行程时取前三家形成“或”酒店节点。 */
+  hotelCandidates?: Array<{ hotelName: string }>;
   meals: string;
   mealDescriptions?: string[];
   activities?: Array<{
@@ -179,9 +182,7 @@ export function buildReadbackExpectations(args: {
         description: mealDescription(day, key, mealIndex),
         mealsIncluded: key === "B" && operations.mealsIncluded === true,
       })),
-      hotels: day.hotel && day.hotel.trim()
-        ? [{ hotelName: day.hotel, hotelTier: operations.hotelTier }]
-        : [],
+      hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: operations.hotelTier })),
       ...(activities.length ? { other: { description: otherDescription(day) } } : {}),
       serviceTime: { startTime: "08:00", endTime: "20:00" },
     };
@@ -344,11 +345,14 @@ export function buildDayDescription(args: {
     }));
   }
 
-  // 6) 酒店节点（仅当 day.hotel 非空时输出；新增酒店资源由 hotelResource 阶段处理）
-  if (day.hotel && day.hotel.trim()) {
+  // 6) 酒店节点。同一节点内的多条 hotel 记录才会被携程展示为“或”关系；
+  // 不能拆成连续的三段“酒店”活动。
+  const hotelNames = hotelNamesForDay(day);
+  if (hotelNames.length) {
     infos.push(
       buildHotelInfo({
-        hotelName: day.hotel,
+        hotelName: hotelNames[0],
+        hotelNames,
         hotelTier: operations.hotelTier,
         sort: sort++,
       }),
@@ -376,6 +380,18 @@ type MealType = { key: "B" | "L" | "S"; index: 0 | 1 | 2 };
 
 function mealDescription(day: ProductItineraryDay, key: MealType["key"], index: MealType["index"]): string {
   return key === "B" ? HOTEL_ROOM_BREAKFAST_NOTE : day.mealDescriptions?.[index] ?? "";
+}
+
+function hotelNamesForDay(day: ProductItineraryDay): string[] {
+  const candidates = Array.isArray(day.hotelCandidates)
+    ? day.hotelCandidates.map((candidate) => candidate?.hotelName?.trim()).filter((name): name is string => Boolean(name))
+    : [];
+  if (candidates.length === 0) return day.hotel.trim() ? [day.hotel.trim()] : [];
+  if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT
+    || new Set(candidates).size !== candidates.length) {
+    throw new Error(`第 ${day.day} 天酒店候选必须是 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}-${HOTEL_RESOURCE_CANDIDATE_COUNT} 家不同的酒店。`);
+  }
+  return candidates.slice(0, ITINERARY_HOTEL_CANDIDATE_COUNT);
 }
 
 function mealTypesForDay(args: { index: number; totalDays: number }): MealType[] {

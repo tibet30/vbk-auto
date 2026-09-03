@@ -250,7 +250,10 @@ async function aiService(snapshot?: Settings) {
  */
 function readiness(
   localProductId: string,
-  options: { ignoreInterruptedAutomationFailure?: boolean } = {},
+  options: {
+    ignoreInterruptedAutomationFailure?: boolean;
+    ignoreCurrentAutomationFailure?: boolean;
+  } = {},
 ): ProductReadiness {
   const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
   return computeReadiness({
@@ -258,6 +261,7 @@ function readiness(
     researchTasks: product.researchTasks,
     automation: product.automation,
     ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
+    ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure,
   });
 }
 

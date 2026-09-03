@@ -48,6 +48,7 @@ export type PlanningNodeId =
   | "spotCandidates"
   | "poiResolution"
   | "itineraryDraft"
+  | "hotelResolution"
   | "copy"
   | "presentation"
   | "commercial"

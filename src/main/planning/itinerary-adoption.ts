@@ -9,6 +9,7 @@ const COMPLETION_NODES = new Set<PlanningNodeId>([
   "copy", "presentation", "commercial", "cover", "vehicleResource", "finalValidation",
 ]);
 const ITINERARY_NODES = new Set<PlanningNodeId>(["poiResolution", "itineraryDraft"]);
+const HOTEL_RESOLUTION_NODE: PlanningNodeId = "hotelResolution";
 const SETTLEMENT_NODE_NAMES = new Set(["四姑娘山镇", "新都桥镇"]);
 
 function invalidateItineraryNode(node: PlanningPlanV2["nodes"][number]) {
@@ -69,6 +70,7 @@ export function markItineraryPendingAdoption(
         summary: undefined,
       };
     }
+    if (node.id === HOTEL_RESOLUTION_NODE) return invalidateItineraryNode(node);
     return node;
   });
   return {
@@ -108,7 +110,7 @@ export function markItineraryBlocked(plan: PlanningPlanV2, itinerary: unknown, e
     ...plan,
     status: "needs_user",
     currentNode: "poiResolution",
-    nodes: plan.nodes.map((node) => ITINERARY_NODES.has(node.id) || COMPLETION_NODES.has(node.id)
+    nodes: plan.nodes.map((node) => ITINERARY_NODES.has(node.id) || node.id === HOTEL_RESOLUTION_NODE || COMPLETION_NODES.has(node.id)
       ? {
         ...invalidateItineraryNode(node),
         status: node.id === "poiResolution" ? "blocked" as const : "invalidated" as const,
@@ -157,6 +159,7 @@ export function markItineraryAccepted(plan: PlanningPlanV2, itinerary: unknown, 
     currentNode: "copy",
     nodes: plan.nodes.map((node) => {
       if (COMPLETION_NODES.has(node.id)) return invalidateItineraryNode(node);
+      if (node.id === HOTEL_RESOLUTION_NODE) return invalidateItineraryNode(node);
       if (!ITINERARY_NODES.has(node.id)) return node;
       return {
         ...node,

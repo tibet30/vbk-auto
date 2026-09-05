@@ -238,6 +238,38 @@ test("用户从规划报错处继续时只重试失败节点，不重新创建�
   assert.equal(retryPlanningCalls, 1);
 });
 
+test("用户从自动录入报错处继续时保留原 run，只调用阶段恢复入口", async () => {
+  const store = fakeTaskStore();
+  const blocked = store.createWorkflowTask(product().id, product().name);
+  store.updateWorkflowTask(blocked.id, {
+    status: "needs_attention",
+    stage: "automation",
+    progress: 85,
+    message: "任务已暂停，请打开产品处理待确认项",
+    error: "火车资源正式回读为空",
+  });
+  let starts = 0;
+  let resumes = 0;
+  let resolveDone!: () => void;
+  const done = new Promise<void>((resolve) => { resolveDone = resolve; });
+  const scheduler = new ProductTaskScheduler({
+    db: store as never,
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, work) => work() },
+    automation: {
+      start: async () => { starts += 1; },
+      resumeFromError: async () => { resumes += 1; },
+    },
+    emitTask: (task) => { if (task.status === "succeeded") resolveDone(); },
+    emitProduct: () => undefined,
+  });
+
+  await scheduler.resume(blocked.id, "from_error");
+  await done;
+  assert.equal(starts, 0);
+  assert.equal(resumes, 1);
+});
+
 test("只有报错任务可以从报错处继续", async () => {
   const store = fakeTaskStore();
   const queued = store.createWorkflowTask(product().id, product().name);

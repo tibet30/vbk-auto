@@ -26,13 +26,21 @@ export function parsePlanningUserIntent(
     const parsedKind = text(record.kind) as PlanningUserActivityKind;
     const day = Number(record.day);
     if (!parsedTitle || !ACTIVITY_KINDS.has(parsedKind) || !Number.isInteger(day) || day < 0) continue;
-    const { title, kind } = normaliseUserActivityKind(parsedTitle, parsedKind);
+    const { title, kind, alternatives, serviceNotes } = normaliseUserActivity({
+      title: parsedTitle,
+      kind: parsedKind,
+      alternatives: textList(record.alternatives, 5),
+      serviceNotes: textList(record.serviceNotes, 10),
+      detail: text(record.detail),
+    });
     const durationMinutes = positiveInteger(record.durationMinutes);
     activities.push({
       id: `user-${activities.length + 1}`,
       day,
       title,
       kind,
+      ...(alternatives.length ? { alternatives } : {}),
+      ...(serviceNotes.length ? { serviceNotes } : {}),
       ...(text(record.time) ? { time: text(record.time) } : {}),
       ...(text(record.detail) ? { detail: text(record.detail) } : {}),
       ...(durationMinutes ? { durationMinutes } : {}),
@@ -49,8 +57,16 @@ export function userPoiCandidateSeeds(intent: PlanningUserIntent): PlanningPoiCa
       status: "proposed" as const,
       source: "user" as const,
       userActivityId: activity.id,
+      ...(activity.alternatives && activity.alternatives.length > 1 ? { alternativeNames: activity.alternatives } : {}),
       ...(activity.day > 0 ? { preferredDay: activity.day } : {}),
     }));
+}
+
+/** 用户逐日写明活动时，保留其行程，不再调用 AI 补充景点。 */
+export function hasCompleteDailyUserItinerary(intent: PlanningUserIntent, days: number): boolean {
+  if (!intent.rawIdea || days < 1) return false;
+  const plannedDays = new Set(intent.activities.filter((activity) => activity.day > 0).map((activity) => activity.day));
+  return Array.from({ length: days }, (_, index) => plannedDays.has(index + 1)).every(Boolean);
 }
 
 /** 用户地点只有“确实未命中”时才能降级；地域错误、暂停营业等仍需阻断。 */
@@ -118,22 +134,94 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function textList(value: unknown, limit: number): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map(text).filter(Boolean))].slice(0, limit)
+    : [];
+}
+
 function positiveInteger(value: unknown): number | undefined {
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : undefined;
 }
 
 /** 明确“游览/参观某景点”不能被模型误降级为普通活动。 */
-function normaliseUserActivityKind(title: string, kind: PlanningUserActivityKind) {
+function normaliseUserActivity(args: {
+  title: string;
+  kind: PlanningUserActivityKind;
+  alternatives: string[];
+  serviceNotes: string[];
+  detail: string;
+}) {
+  const { title, kind } = args;
   const poiTitle = title.replace(/^(?:游览|参观|打卡|前往)\s*/, "").trim();
   const experienceActivity = /体验|手作|制作|课程|休息|自由活动|用餐|入住|接送|乘车|集合|离开|返程/.test(title);
+  const embeddedPoiTitle = namedPoiPrefix(title);
   if (kind === "poi") {
-    return experienceActivity
-      ? { title, kind: "activity" as const }
-      : { title: poiTitle || title, kind };
+    if (experienceActivity && !embeddedPoiTitle) return { title, kind: "activity" as const, alternatives: [], serviceNotes: args.serviceNotes };
+    const resolvedTitle = embeddedPoiTitle || poiTitle || title;
+    const alternatives = normalisePoiAlternatives(args.alternatives.length ? args.alternatives : [resolvedTitle]);
+    return {
+      title: alternatives[0] || stripPoiServiceMarkers(resolvedTitle),
+      kind,
+      alternatives,
+      serviceNotes: mergeServiceNotes(args.serviceNotes, title, args.detail),
+    };
   }
-  if (kind !== "activity") return { title, kind };
-  return poiTitle && poiTitle !== title && !experienceActivity
-    ? { title: poiTitle, kind: "poi" as const }
-    : { title, kind };
+  if (embeddedPoiTitle) {
+    const alternatives = normalisePoiAlternatives(args.alternatives.length ? args.alternatives : [embeddedPoiTitle]);
+    return {
+      title: alternatives[0] || embeddedPoiTitle,
+      kind: "poi" as const,
+      alternatives,
+      serviceNotes: mergeServiceNotes(args.serviceNotes, title, args.detail),
+    };
+  }
+  if (kind !== "activity") return { title, kind, alternatives: [], serviceNotes: args.serviceNotes };
+  if (!poiTitle || poiTitle === title || experienceActivity) return { title, kind, alternatives: [], serviceNotes: args.serviceNotes };
+  const alternatives = normalisePoiAlternatives(args.alternatives.length ? args.alternatives : [poiTitle]);
+  return {
+    title: alternatives[0] || stripPoiServiceMarkers(poiTitle),
+    kind: "poi" as const,
+    alternatives,
+    serviceNotes: mergeServiceNotes(args.serviceNotes, title, args.detail),
+  };
+}
+
+/**
+ * 带体验或自由活动描述时，仍可从明确的场所前缀中取出 POI；例如
+ * “西影博物馆【刻章体验】”或“回坊小吃一条街自由活动”。纯手作活动不命中。
+ */
+function namedPoiPrefix(title: string): string | undefined {
+  const prefix = title
+    .replace(/^(?:游览|参观|打卡|前往|去|到)\s*/, "")
+    .split(/[【\[]/, 1)[0]
+    .replace(/(?:自由活动|体验|手作|制作|课程|休息|用餐|入住|接送|乘车|集合|离开|返程).*$/u, "")
+    .trim();
+  return /(?:博物馆|纪念馆|美术馆|科技馆|文化馆|展览馆|图书馆|剧院|戏楼|书院|古镇|古城|古街|老街|步行街|小吃街|一条街|街区|景区|风景区|公园|广场|山|湖|寺|观|宫|城墙|遗址|陵|社)$/u.test(prefix)
+    ? prefix
+    : undefined;
+}
+
+function normalisePoiAlternatives(values: string[]): string[] {
+  return [...new Set(values.flatMap(splitPoiAlternatives).filter(Boolean))].slice(0, 5);
+}
+
+function splitPoiAlternatives(value: string): string[] {
+  const cleaned = stripPoiServiceMarkers(value)
+    .replace(/(?:\(|（)?\s*(?:二选一|任选其一)\s*(?:\)|）)?$/u, "")
+    .trim();
+  return cleaned.split(/\s*(?:或者|或|\/|／)\s*/u)
+    .map((item) => stripPoiServiceMarkers(item))
+    .filter(Boolean);
+}
+
+function stripPoiServiceMarkers(value: string): string {
+  return value.replace(/[【\[]\s*(?:配)?(?:专业)?讲解\s*[】\]]/gu, "").trim();
+}
+
+function mergeServiceNotes(notes: string[], ...sources: string[]): string[] {
+  const result = [...notes];
+  if (sources.some((source) => /(?:配|含|提供)?(?:专业)?讲解(?:服务)?/u.test(source))) result.push("讲解");
+  return [...new Set(result.map((note) => note.trim()).filter(Boolean))].slice(0, 10);
 }

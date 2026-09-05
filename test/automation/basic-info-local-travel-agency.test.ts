@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   resolveLocalTravelAgency,
+  selectAdministrativeCity,
 } from "../../src/main/automation/ctrip/basic-info/api.js";
 import {
   hasProductLineResolutionFailure,
@@ -44,6 +45,36 @@ test("basic API 在没有可用地接社时明确阻断", () => {
     () => resolveLocalTravelAgency({ localInfoID: 0 }, [{ localInfoID: 1, active: "F" }]),
     /未选择且当前账号无可用候选/,
   );
+});
+
+test("basic API 用行政短名唯一匹配平台带市尾缀的城市", () => {
+  assert.deepEqual(selectAdministrativeCity([
+    { cityId: 344775, cityName: "大理石", countryName: "美国" },
+    { cityId: 36, cityName: "大理市", provinceName: "云南", countryName: "中国" },
+    { cityId: 261270, cityName: "肯尼亚大理石采石场", countryName: "肯尼亚" },
+  ], "大理"), {
+    cityId: 36,
+    cityName: "大理市",
+    provinceName: "云南",
+    countryName: "中国",
+  });
+});
+
+test("basic API 复用自治州官方全名到平台短名的精确映射", () => {
+  assert.deepEqual(selectAdministrativeCity([
+    { cityId: 36, cityName: "大理白族自治州", provinceName: "云南" },
+  ], "大理"), { cityId: 36, cityName: "大理白族自治州", provinceName: "云南" });
+});
+
+test("basic API 的行政短名匹配仍拒绝同名多候选", () => {
+  assert.throws(() => selectAdministrativeCity([
+    { cityId: 1, cityName: "平遥市" },
+    { cityId: 2, cityName: "平遥县" },
+  ], "平遥"), /2 个规范候选/);
+  assert.throws(() => selectAdministrativeCity([
+    { cityId: 36, cityName: "大理市" },
+    { cityId: 37, cityName: "大理白族自治州" },
+  ], "大理"), /2 个规范候选/);
 });
 
 test("遗留省级城市锚点使用已确认的接送城市自愈", () => {

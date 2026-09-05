@@ -1,14 +1,10 @@
-import type {
-  PlanningItineraryDayDraft,
-  PlanningPoiCandidate,
-  PlanningPoiDisambiguationRequest,
-  PlanningPoiDisambiguationResult,
-} from "../../shared/contracts-planning.js";
+import type { PlanningItineraryDayDraft, PlanningPoiCandidate } from "../../shared/contracts-planning.js";
 import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { otherActivitiesForDay } from "./user-intent.js";
-import { resolveAmbiguousPlanningPoi } from "./planning-poi-disambiguation.js";
 import { repairMissingItineraryDays } from "./planning-itinerary-repair.js";
+
+export { resolvePlanningPoiCandidates } from "./planning-poi-resolver.js";
 
 const FACILITY_RE = /入口|出口|停车场|售票处|游客中心|服务中心|换乘中心|检票口|接驳站|码头|车站|机场/;
 
@@ -75,88 +71,6 @@ const ADMINISTRATIVE_ALIASES: Record<string, string[]> = {
   嘉峪关: ["jiayuguan"],
   张家界: ["zhangjiajie"],
 };
-
-export async function resolvePlanningPoiCandidates(args: {
-  names: string[];
-  province: string;
-  city: string;
-  concurrency?: number;
-  beforeEach: () => Promise<void>;
-  query: (name: string) => Promise<PoiSuggestDetailResult>;
-  checkAvailability?: (poiId: number) => Promise<{ status: "available" | "suspended" }>;
-  destination?: string;
-  userIdea?: string;
-  shouldDisambiguate?: (requestedName: string, index: number) => boolean;
-  preferredDay?: (requestedName: string, index: number) => number | undefined;
-  disambiguate?: (request: PlanningPoiDisambiguationRequest) => Promise<PlanningPoiDisambiguationResult>;
-}): Promise<PlanningPoiCandidate[]> {
-  const result = new Array<PlanningPoiCandidate>(args.names.length);
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < args.names.length) {
-      const index = cursor;
-      cursor += 1;
-      const requestedName = args.names[index];
-      try {
-        await args.beforeEach();
-        const detail = await args.query(requestedName);
-        const details = [detail];
-        let candidate = toPlanningCandidate(requestedName, detail, args.province, args.city);
-        const originallyAmbiguous = candidate.status === "rejected"
-          && (candidate.reason === "未命中可确认的真实 POI" || candidate.reason?.startsWith("POI 地域不匹配"));
-        // 通用名（如“长城”）首次查询可能优先返回异地 POI。不能因为首个
-        // 搜索结果地域不匹配就中断一键链路；带产品城市重查一次，仍只接受
-        // 通过同一地域校验的真实 POI，绝不猜测或复用异地 ID。
-        const cityQualifiedName = `${args.city.trim()}${requestedName}`;
-        if (originallyAmbiguous
-          && args.city.trim()
-          && !requestedName.startsWith(args.city.trim())) {
-          await args.beforeEach();
-          const cityDetail = await args.query(cityQualifiedName);
-          details.push(cityDetail);
-          candidate = toPlanningCandidate(requestedName, cityDetail, args.province, args.city);
-        }
-        if (args.disambiguate
-          && originallyAmbiguous
-          && args.shouldDisambiguate?.(requestedName, index)) {
-          const resolved = await resolveAmbiguousPlanningPoi({
-            requestedName,
-            destination: args.destination || args.city,
-            province: args.province,
-            city: args.city,
-            userIdea: args.userIdea,
-            preferredDay: args.preferredDay?.(requestedName, index),
-            details,
-            disambiguate: args.disambiguate,
-            validate: (source, best) => toPlanningCandidate(
-              requestedName,
-              { ...source, best },
-              args.province,
-              args.city,
-            ),
-          });
-          if (resolved.candidate) candidate = resolved.candidate;
-          else if (resolved.reason) candidate = { ...candidate, reason: resolved.reason };
-        }
-        if (candidate.status === "resolved" && candidate.poiId && args.checkAvailability) {
-          const availability = await args.checkAvailability(candidate.poiId);
-          result[index] = availability.status === "suspended"
-            ? { requestedName, status: "rejected", poiId: candidate.poiId, poiName: candidate.poiName, reason: "携程景点详情标记为暂停营业" }
-            : candidate;
-        } else {
-          result[index] = candidate;
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/登录|Cookie|cookie|未登录/.test(message)) throw error;
-        result[index] = { requestedName, status: "rejected", reason: `POI 查询失败：${message.slice(0, 160)}` };
-      }
-    }
-  };
-  const workerCount = Math.min(Math.max(1, args.concurrency ?? 5), args.names.length || 1);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return result;
-}
 
 export function toPlanningCandidate(
   requestedName: string,

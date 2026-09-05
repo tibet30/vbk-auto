@@ -30,6 +30,14 @@ export function interruptedAutomationResumePhase(run?: AutomationRun): string | 
     run.recovery?.phases[phase]?.finalError === "应用重启导致自动录入被中断");
 }
 
+export function failedAutomationResumePhase(run?: AutomationRun): string | undefined {
+  if (run?.status !== "failed") return undefined;
+  const needsUser = run.recovery
+    ? Object.values(run.recovery.phases).find((phase) => phase.state === "needs_user")?.phase
+    : undefined;
+  return needsUser ?? run.phases.find((phase) => phase.status === "failed")?.phase;
+}
+
 /**
  * 用户点击「停止」后区别于普通失败的语义：
  *   - run.status 走 cancelled（不是 failed）
@@ -85,6 +93,17 @@ async start(localProductId: string) {
       : undefined;
     if (queuedPhase) return this.runLocked(localProductId, queuedPhase);
     return this.runLocked(localProductId);
+  }
+
+  /** 用户选择“从报错处继续”时只复用当前 AutomationRun 的失败阶段。 */
+  async resumeFromError(localProductId: string) {
+    const product = this.db.getProduct(localProductId);
+    if (!product) throw productNotFound(localProductId);
+    const failedPhase = failedAutomationResumePhase(product.automation);
+    if (!failedPhase) {
+      throw new Error("无法从当前自动录入记录定位失败阶段，未从头重跑。");
+    }
+    return this.runLocked(localProductId, failedPhase);
   }
 
   /**

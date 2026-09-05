@@ -16,7 +16,7 @@ test("稳定的提交回调始终调用最新 createProduct，避免提交旧草
 });
 
 test("中文组合输入期间不把每个拼音字母回写为受控 textarea value", () => {
-  const form = readFileSync("src/renderer/app/helpers/components.tsx", "utf8");
+  const form = readFileSync("src/renderer/app/helpers/product-brief-form.tsx", "utf8");
   const ideaStart = form.indexOf("<textarea");
   const ideaEnd = form.indexOf("/>", ideaStart);
   const idea = form.slice(ideaStart, ideaEnd);

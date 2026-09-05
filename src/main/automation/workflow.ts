@@ -19,8 +19,10 @@ export const PHASES = [
   "itinerary",
   "package",
   "pricingInventory",
-  "terms",
+  "hotelResource",
   "vehicleResource",
+  "terms",
+  "trafficLine",
   "preflight",
 ];
 

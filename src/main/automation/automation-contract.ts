@@ -57,6 +57,7 @@ export type AutomationPhase =
   | "terms"
   | "hotelResource"
   | "vehicleResource"
+  | "trafficLine"
   | "saleControl"
   | "preflight";
 
@@ -196,6 +197,22 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     source: "vbk-runtime",
     detail: "条款由 VBK 条款页直接写入；缺不会阻断 readiness。",
     check: () => true,
+  },
+  {
+    path: "operations.trafficLine",
+    label: "线路及交通子产品",
+    phase: "trafficLine",
+    source: "vbk-runtime",
+    detail: "母产品条款完成后，系统按已核验行程及 VBK 站点候选创建飞机、火车往返子产品。",
+    check: (product) => {
+      const trafficLine = asObject(asObject(product.operations)?.trafficLine);
+      if (!trafficLine || trafficLine.enabled === false) return true;
+      const variants = trafficLine.variants;
+      return Array.isArray(variants)
+        && variants.length === 2
+        && variants.includes("flightRoundTrip")
+        && variants.includes("trainRoundTrip");
+    },
   },
   // release 草稿安全
   {

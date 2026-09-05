@@ -48,6 +48,8 @@ import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-r
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { completeVerifiedSaleControlPhase, initializeAutomationStartPhase } from "./automation.main.run-state.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
+import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
+import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 
 /**
  * 单个产品自动化阶段主循环：
@@ -261,6 +263,22 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         hotelResource: () => executePhase("hotelResource", () =>
           ensureHotelResourceApi(page, product, productId!)),
         vehicleResource: () => executePhase("vehicleResource", () => ensureVehicleResourceApi(page, product, productId!)),
+        trafficLine: () => executePhase("trafficLine", () => {
+          return ensureTrafficLinePhase({
+            page,
+            parentProductId: productId!,
+            config: product.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
+            itinerary: product.itinerary,
+            log,
+            checkpoint: run.trafficLine,
+            onCheckpoint: (checkpoint) => {
+              run.trafficLine = checkpoint;
+              persist();
+            },
+            disambiguator: ctx.disambiguator,
+            product,
+          });
+        }),
         preflight: () => executePhase("preflight", () => runProductPreflightApi(page, product, productId!)),
       };
 

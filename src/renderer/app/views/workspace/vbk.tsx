@@ -24,6 +24,7 @@ import {
   phaseDisplayLabel,
   VBK_NAV_SECTIONS,
 } from "../../helpers";
+import { TrafficLineProgress } from "../../helpers/traffic-line-progress";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import layout from "./layout.module.less";
@@ -127,10 +128,11 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                 const saleControlRequiresNoProduct = section.key === "saleControl" && Boolean(product?.productId);
                 const retryPhases = section.key === "saleControl" ? ["saleControl"] : section.phaseNames;
                 return (
-                  <div className={styles.stage} key={section.key} data-state={state}>
-                    <span className={styles.stageDot} />
-                    <span className={styles.stageLabel}>{section.label}</span>
-                    <div className={styles.stageActions}>
+                  <div key={section.key}>
+                    <div className={styles.stage} data-state={state}>
+                      <span className={styles.stageDot} />
+                      <span className={styles.stageLabel}>{section.label}</span>
+                      <div className={styles.stageActions}>
                       <button
                         type="button"
                         className={`${styles.stageAction} ${styles.stageActionEnter}`}
@@ -166,7 +168,9 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                           </button>
                         );
                       })}
+                      </div>
                     </div>
+                    {section.key === "trafficLine" ? <TrafficLineProgress automation={product.automation} /> : null}
                   </div>
                 );
               })}

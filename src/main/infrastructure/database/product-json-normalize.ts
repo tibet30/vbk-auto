@@ -21,6 +21,7 @@ import type { ProductDetail } from "../../../shared/contracts.js";
 import { normaliseProductLocationFields } from "../../../shared/location-short-name.js";
 import { DEFAULT_HOTEL_TIER } from "../../../shared/hotel-tiers.js";
 import { defaultCommercialInventory } from "../../data/commercial-defaults.js";
+import { normaliseTrafficLineConfig } from "../../../shared/contracts-traffic-line.js";
 
 /**
  * 最小可渲染 product 兜底：必须满足 schema 验证（看 schema-functions.ts 的
@@ -148,6 +149,9 @@ export function parseAndNormalizeProductJson(raw: string | null | undefined): Pr
       operations.vehicleResource,
       positiveIntegerValue(basicInfo?.days) || 1,
     );
+    const trafficLine = normaliseTrafficLineConfig(operations.trafficLine);
+    if (trafficLine) operations.trafficLine = trafficLine;
+    else delete operations.trafficLine;
   }
   const commercial = product.commercial as Record<string, unknown> | undefined;
   if (commercial && typeof commercial === "object" && !Array.isArray(commercial)) {

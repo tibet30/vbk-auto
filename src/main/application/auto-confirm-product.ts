@@ -15,6 +15,8 @@ export interface AutoConfirmedProductDependencies {
   };
   automation: {
     start(localProductId: string): Promise<void>;
+    /** 只从已持久化的失败阶段续跑；找不到失败阶段时必须阻断，不能全量重启。 */
+    resumeFromError?(localProductId: string): Promise<void>;
     stop?(localProductId: string): Promise<void>;
   };
   db: {
@@ -33,6 +35,7 @@ export type AutoConfirmedCreationResult =
 export interface AutoConfirmedCreationOptions {
   resumeFrom?: AutoConfirmedCreationStage;
   resumePlanning?: boolean;
+  resumeAutomationFromError?: boolean;
 }
 
 function automationAttentionMessage(product: ProductDetail | undefined): string {
@@ -97,8 +100,15 @@ export async function runAutoConfirmedCreation(
   }
   if (shouldStop?.()) return { status: "abandoned" };
   onStage?.("automation");
-  await dependencies.productWorkflows.runExclusive(localProductId, "automation", () =>
-    dependencies.automation.start(localProductId));
+  await dependencies.productWorkflows.runExclusive(localProductId, "automation", () => {
+    if (options.resumeAutomationFromError) {
+      if (!dependencies.automation.resumeFromError) {
+        throw new Error("自动录入服务缺少安全的报错断点恢复入口，未从头重跑。");
+      }
+      return dependencies.automation.resumeFromError(localProductId);
+    }
+    return dependencies.automation.start(localProductId);
+  });
   if (shouldStop?.()) return { status: "abandoned" };
   const completed = dependencies.db.getProduct(localProductId);
   if (completed?.automation?.status !== "succeeded" || completed.status !== "draft_saved") {

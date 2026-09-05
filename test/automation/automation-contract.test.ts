@@ -256,10 +256,18 @@ test("G4 VBK_PRODUCT_FIELDS 覆盖 presentation / basic / operations 关键 AI �
     "basicInfo.operationNotes",
     "operations.butlerContact",
     "operations.hotelTier",
+    "operations.trafficLine",
     "itinerary",
   ]) {
     assert.ok(paths.has(required), `字段 ${required} 必须被契约覆盖`);
   }
+});
+
+test("G4 默认线路及交通流程必须同时规划飞机、火车子产品", () => {
+  const enabledWithoutVariant = makeValidProduct() as Record<string, unknown>;
+  enabledWithoutVariant.operations = { trafficLine: { enabled: true, variants: [] } };
+  const result = evaluateAutomationContract(enabledWithoutVariant);
+  assert.ok(result.runtimeExceptions.some((item) => item.field.path === "operations.trafficLine"));
 });
 
 test("G4 商业三件套（pricing / inventory / terms）走 vbk-runtime，不进 failures", () => {

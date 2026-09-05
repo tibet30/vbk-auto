@@ -37,6 +37,16 @@ test("preflight 使用基本信息页作为没有独立页面时的编辑器上�
   assert.match(gotos[0], /baseInfoMerge\?productId=77752371/);
 });
 
+test("trafficLine 进入线路及交通页面", async () => {
+  const gotos: string[] = [];
+  const page = {
+    goto: async (url: string) => { gotos.push(url); },
+    reload: async () => undefined,
+  };
+  await enterPhasePageForApi({ page, productId: "77752371", phase: "trafficLine", log: () => undefined });
+  assert.match(gotos[0], /trafficLineEdit\?productid=77752371/);
+});
+
 test("Electron BrowserView 存在时，阶段切页复用受保护的浏览器导航", async () => {
   const navigated: string[] = [];
   const page = {

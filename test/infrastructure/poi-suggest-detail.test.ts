@@ -31,3 +31,23 @@ test("POI 候选严格按真实 suggestPoi district / parents 契约解析行政
   assert.equal(result.candidates[0]?.district, "Gyantse");
   assert.equal(result.candidates[0]?.address, "Gyantse");
 });
+
+test("当前 district 本身是唯一 City 时也作为城市返回", () => {
+  const result = buildPoiSuggestDetailResult({
+    httpStatus: 200,
+    businessStatus: "Success",
+    best: { poiName: "扎什伦布寺", poiId: 76348 },
+    payload: {},
+    poiList: [{
+      localName: "扎什伦布寺",
+      poiId: 76348,
+      district: {
+        districtName: "日喀则",
+        districtType: "City",
+        parents: [{ districtName: "西藏", districtType: "Province" }],
+      },
+    }],
+  });
+  assert.equal(result.candidates[0]?.province, "西藏");
+  assert.equal(result.candidates[0]?.city, "日喀则");
+});

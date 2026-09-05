@@ -5,6 +5,7 @@ import { defaultCommercialInventory } from "../../../data/commercial-defaults.js
 import { now } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
+import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../../shared/contracts-traffic-line.js";
 
 /** Build the initial product snapshot without writing local or remote state. */
 export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
@@ -58,6 +59,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
       mealsIncluded: false,
       pickupCity: "",
       vehicleResource: {},
+      trafficLine: structuredClone(DEFAULT_TRAFFIC_LINE_CONFIG),
     },
     commercial: { inventory: defaultCommercialInventory() },
     itinerary: [],

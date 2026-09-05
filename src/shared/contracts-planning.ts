@@ -2,7 +2,12 @@ import type {
   PlanningPoiDisambiguationRequest,
   PlanningPoiDisambiguationResult,
 } from "./contracts-planning-poi-disambiguation.js";
+import type {
+  PlanningPoiNameCorrectionRequest,
+  PlanningPoiNameCorrectionResult,
+} from "./contracts-planning-poi-correction.js";
 export type * from "./contracts-planning-poi-disambiguation.js";
+export type * from "./contracts-planning-poi-correction.js";
 
 /**
  * Planning subsystem contracts — provider-neutral, model-neutral.
@@ -70,6 +75,10 @@ export interface PlanningPoiCandidate {
   source?: "user" | "ai";
   userActivityId?: string;
   preferredDay?: number;
+  /** 用户二选一等备选名称，按优先顺序保存；首项就是 requestedName。 */
+  alternativeNames?: string[];
+  /** 实际命中的备选名称在用户原始列表中的位置。 */
+  selectedAlternativeIndex?: number;
   reason?: string;
   poiId?: number;
   poiName?: string;
@@ -169,6 +178,9 @@ export interface ThreeStagePlanningAi {
   disambiguatePoiCandidate?(
     request: PlanningPoiDisambiguationRequest,
   ): Promise<PlanningPoiDisambiguationResult>;
+  correctPoiName?(
+    request: PlanningPoiNameCorrectionRequest,
+  ): Promise<PlanningPoiNameCorrectionResult>;
   recommendSpotNames(request: PlanningSpotRecommendationRequest): Promise<string[]>;
   composeVerifiedItinerary(request: PlanningItineraryRequest): Promise<PlanningItineraryDayDraft[]>;
   estimateVehicleTotalCost(request: {

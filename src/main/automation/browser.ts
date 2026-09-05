@@ -14,6 +14,7 @@ import path from "node:path";
 import { chromium } from "playwright";
 import { PROFILE_DIR, URLS } from "./constants.js";
 import { APP_NAME } from "../../shared/brand.js";
+import { attachPlaywrightSessionFetch } from "../infrastructure/vbk-session-fetch-adapter.js";
 
 export class AuthenticationRequiredError extends Error {
   constructor(message = `VBK 登录态不可用，请在 ${APP_NAME} 中重新登录`) {
@@ -55,6 +56,7 @@ export async function launchVbkBrowser({ headless = false } = {}) {
   }
 
   const page = context.pages()[0] ?? (await context.newPage());
+  attachPlaywrightSessionFetch(page);
   return { context, page, profilePath };
 }
 

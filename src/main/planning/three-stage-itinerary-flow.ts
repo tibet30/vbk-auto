@@ -4,10 +4,11 @@ import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { AI_WRITABLE_PATHS } from "./schemas.js";
 import { expandVerifiedItinerary, resolvePlanningPoiCandidates } from "./planning-v2-pois.js";
+import { logPlanningPoiEvent } from "./planning-poi-resolver.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { isAcceptablePlanningRegionName, normaliseProvinceName, resolveTravelScope } from "./runtime.js";
 import { findAllVbkCopyBadCases } from "./vbk-copy-policy.js";
-import { blockingUserPoiFailure, userPoiCandidateSeeds } from "./user-intent.js";
+import { blockingUserPoiFailure, hasCompleteDailyUserItinerary, userPoiCandidateSeeds } from "./user-intent.js";
 
 export interface ThreeStageItineraryDependencies {
   localProductId: string;
@@ -103,6 +104,7 @@ export async function buildVerifiedPool(
   }
   const plannedDays = new Set(userIntent.activities.filter((activity) => activity.day > 0).map((activity) => activity.day));
   const hardMinimum = Math.max(0, deps.skeleton.days - plannedDays.size);
+  const skipAiRecommendations = hasCompleteDailyUserItinerary(userIntent, deps.skeleton.days);
   const target = Math.min(30, Math.max(10, deps.skeleton.days * 2));
   const recommendationTarget = Math.min(30, Math.max(10, deps.skeleton.days * 3));
 
@@ -123,7 +125,19 @@ export async function buildVerifiedPool(
     if (userFailure) return fail(patchNode, getPlan, "poiResolution", userFailure);
   }
 
-  for (let round = node(plan, "spotCandidates").attempts + 1; round <= PLANNING_STAGE_RETRY_LIMIT; round += 1) {
+  if (skipAiRecommendations) {
+    await patchNode("spotCandidates", {
+      status: "skipped",
+      summary: "用户已逐日指定行程，跳过 AI 推荐景点",
+      completedAt: new Date().toISOString(),
+    });
+    plan = getPlan();
+  }
+
+  const firstRecommendationRound = skipAiRecommendations
+    ? PLANNING_STAGE_RETRY_LIMIT + 1
+    : node(plan, "spotCandidates").attempts + 1;
+  for (let round = firstRecommendationRound; round <= PLANNING_STAGE_RETRY_LIMIT; round += 1) {
     const resolved = plan.poiCandidates.filter((item) => item.status === "resolved");
     if (resolved.length >= target) break;
     const seen = plan.poiCandidates.map((item) => item.requestedName);
@@ -235,7 +249,7 @@ async function resolveCandidates(
   setPlan: (plan: PlanningPlanV2) => void,
 ): Promise<{ ok: true; plan: PlanningPlanV2 } | { ok: false; error: string }> {
   try {
-    const checked = await resolvePlanningPoiCandidates({
+    let checked = await resolvePlanningPoiCandidates({
       names: candidates.map((item) => item.requestedName), province: deps.skeleton.province,
       city: deps.skeleton.city, concurrency: 5, beforeEach: deps.assertVbkLogin, query: deps.queryPoi,
       checkAvailability: deps.runtime.getPoiAvailability?.bind(deps.runtime),
@@ -243,20 +257,85 @@ async function resolveCandidates(
       userIdea: plan.userIntent?.rawIdea,
       shouldDisambiguate: (_requestedName, index) => candidates[index]?.source === "user",
       preferredDay: (_requestedName, index) => candidates[index]?.preferredDay,
+      ...(deps.ai.correctPoiName ? { correctName: deps.ai.correctPoiName.bind(deps.ai) } : {}),
+      logContext: { localProductId: deps.localProductId },
       ...(deps.ai.disambiguatePoiCandidate
         ? { disambiguate: deps.ai.disambiguatePoiCandidate.bind(deps.ai) }
         : {}),
     });
-    const byName = new Map(checked.map((item) => [item.requestedName, item]));
-    const next = { ...plan, poiCandidates: plan.poiCandidates.map((item) => {
-      const result = byName.get(item.requestedName);
-      return result ? { ...item, ...result } : item;
-    }) };
+    checked = await resolveUserPoiAlternatives(deps, candidates, checked, plan);
+    const next = {
+      ...plan,
+      poiCandidates: plan.poiCandidates.map((item) => {
+        const index = candidates.indexOf(item);
+        return index < 0 ? item : { ...item, ...checked[index] };
+      }),
+    };
+    logPlanningPoiEvent({ localProductId: deps.localProductId }, "批次汇总", {
+      target: candidates.map((item) => item.requestedName).join("、"),
+      total: checked.length,
+      resolved: checked.filter((item) => item.status === "resolved").length,
+      rejected: checked.filter((item) => item.status === "rejected").length,
+      results: checked.map((item) => ({ requestedName: item.requestedName, status: item.status, poiName: item.poiName, reason: item.reason })),
+    }, checked.some((item) => item.status === "rejected") ? "warn" : "info");
     setPlan(next);
     return { ok: true, plan: next };
   } catch (error) {
     return { ok: false, error: errorMessage(error) };
   }
+}
+
+/**
+ * “默认第一项”只表示优先级，不表示唯一候选。对用户给出的每个选项都做
+ * 同一套真实 POI、地域和营业校验，再按原始顺序选第一个可用项。
+ */
+async function resolveUserPoiAlternatives(
+  deps: ThreeStageItineraryDependencies,
+  candidates: PlanningPoiCandidate[],
+  checked: PlanningPoiCandidate[],
+  plan: PlanningPlanV2,
+): Promise<PlanningPoiCandidate[]> {
+  const next = [...checked];
+  for (const [index, candidate] of candidates.entries()) {
+    const first = checked[index];
+    const alternatives = candidate.alternativeNames?.slice(1) ?? [];
+    if (candidate.source !== "user" || !first || alternatives.length === 0) continue;
+    logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项核验开始", {
+      target: candidate.requestedName, alternatives, firstStatus: first.status, firstReason: first.reason,
+    });
+    const fallbacks = await resolvePlanningPoiCandidates({
+      names: alternatives, province: deps.skeleton.province, city: deps.skeleton.city, concurrency: Math.min(5, alternatives.length),
+      beforeEach: deps.assertVbkLogin, query: deps.queryPoi,
+      checkAvailability: deps.runtime.getPoiAvailability?.bind(deps.runtime),
+      destination: deps.skeleton.destination, userIdea: plan.userIntent?.rawIdea,
+      shouldDisambiguate: () => true,
+      preferredDay: () => candidate.preferredDay,
+      ...(deps.ai.correctPoiName ? { correctName: deps.ai.correctPoiName.bind(deps.ai) } : {}),
+      logContext: { localProductId: deps.localProductId },
+      ...(deps.ai.disambiguatePoiCandidate ? { disambiguate: deps.ai.disambiguatePoiCandidate.bind(deps.ai) } : {}),
+    });
+    const selectedIndex = [first, ...fallbacks].findIndex((option) => option.status === "resolved");
+    if (selectedIndex > 0) {
+      const fallback = fallbacks[selectedIndex - 1];
+      next[index] = { ...fallback, alternativeNames: candidate.alternativeNames, selectedAlternativeIndex: selectedIndex };
+      logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项核验选中", {
+        target: candidate.requestedName, selectedName: fallback.poiName, selectedAlternativeIndex: selectedIndex,
+      });
+    } else if (selectedIndex === 0) {
+      logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项核验选中", {
+        target: candidate.requestedName, selectedName: first.poiName, selectedAlternativeIndex: 0,
+      });
+    }
+    for (const [offset, fallback] of fallbacks.entries()) {
+      if (fallback.status !== "resolved") {
+        const name = alternatives[offset];
+        logPlanningPoiEvent({ localProductId: deps.localProductId }, "备选回退未命中", {
+          target: candidate.requestedName, fallbackName: name, selectedAlternativeIndex: offset + 1, reason: fallback.reason,
+        }, "warn");
+      }
+    }
+  }
+  return next;
 }
 
 async function fail(patchNode: PatchNode, getPlan: () => PlanningPlanV2, id: PlanningNodeId, error: string) {

@@ -16,6 +16,7 @@ import {
   RECOMMENDATION_CATEGORIES,
   VBK_RECOMMENDATION_CATEGORIES,
 } from "../../domain/product/recommendation-categories.js";
+import { DEFAULT_TRAFFIC_LINE_CONFIG, TRAFFIC_LINE_VARIANTS } from "../../../shared/contracts-traffic-line.js";
 
 export {
   RECOMMENDATION_CATEGORIES,
@@ -158,6 +159,13 @@ const bookingControlsSchema = z.object({
     .optional(),
 });
 
+const trafficLineConfigSchema = z.object({
+  // 仅兼容历史数据；新产品由草稿构造器固定创建两种子产品。
+  enabled: z.boolean().default(DEFAULT_TRAFFIC_LINE_CONFIG.enabled),
+  variants: z.array(z.enum(TRAFFIC_LINE_VARIANTS)).max(TRAFFIC_LINE_VARIANTS.length)
+    .default(DEFAULT_TRAFFIC_LINE_CONFIG.variants),
+}).strict();
+
 const operationsSchema = z.object({
   transport: z.enum(["charter", "shared", "none"]).default("charter"),
   pickupCity: z.string().min(1),
@@ -203,6 +211,7 @@ const operationsSchema = z.object({
       }).strict()).optional(),
     })
     .optional(),
+  trafficLine: trafficLineConfigSchema.optional(),
 });
 
 const commercialSchema = z.object({

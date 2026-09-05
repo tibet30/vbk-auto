@@ -86,17 +86,35 @@ export async function postSoa<TBody extends Record<string, unknown>>(
   label: string,
   options: PostSoaOptions = {},
 ): Promise<{ payload: Record<string, unknown> }> {
-  const response = await vbkSessionRequest(page, {
-    endpoint,
-    browserRequestTimeoutMs: options.browserTimeoutMs ?? 15_000,
-    evaluateTimeoutMs: options.evaluateTimeoutMs ?? 20_000,
-    errorLabel: label,
-    body,
-    headers: { "x-tt-core": "1", ...(options.headers ?? {}) },
-  });
-  const ack = statusAck(response.payload);
-  if (ack !== "Success") {
-    throw new Error(`${label}失败（Ack=${ack}）：${describeAckError(response.payload)}`);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    let response;
+    try {
+      response = await vbkSessionRequest(page, {
+        endpoint,
+        browserRequestTimeoutMs: options.browserTimeoutMs ?? 15_000,
+        evaluateTimeoutMs: options.evaluateTimeoutMs ?? 20_000,
+        errorLabel: label,
+        body,
+        headers: { "x-tt-core": "1", ...(options.headers ?? {}) },
+      });
+    } catch (error) {
+      if (!/失败：HTTP (?:401|403)(?:\D|$)/.test(error instanceof Error ? error.message : String(error))) throw error;
+      if (attempt === 3) {
+        throw new Error(`${label}连续 3 次被会话鉴权拒绝；服务端未接受写入，可在登录态恢复后安全重试。`);
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, attempt * 300));
+      continue;
+    }
+    const ack = statusAck(response.payload);
+    if (ack === "Success") return { payload: response.payload as Record<string, unknown> };
+    const detail = describeAckError(response.payload);
+    if (!/当前用户未登录|用户未登录|登录态(?:已)?失效|请(?:先|重新)登录/.test(detail)) {
+      throw new Error(`${label}失败（Ack=${ack}）：${detail}`);
+    }
+    if (attempt === 3) {
+      throw new Error(`${label}连续 3 次返回会话未登录；服务端未接受写入，可在登录态恢复后安全重试。`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, attempt * 300));
   }
-  return { payload: response.payload as Record<string, unknown> };
+  throw new Error(`${label}会话重试未完成。`);
 }

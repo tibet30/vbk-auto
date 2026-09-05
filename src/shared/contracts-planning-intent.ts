@@ -15,6 +15,10 @@ export interface PlanningUserActivityIntent {
   day: number;
   title: string;
   kind: PlanningUserActivityKind;
+  /** “甲或乙 / 二选一”时的独立候选，按用户原始顺序保存；title 为默认第一项。 */
+  alternatives?: string[];
+  /** 用户提出的服务诉求；仅供规划参考，不代表资源已经确认。 */
+  serviceNotes?: string[];
   /** 不限 / 全天 / 上午 / 下午 / 晚上 / HH:mm。 */
   time?: string;
   detail?: string;

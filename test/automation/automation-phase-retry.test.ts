@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { preparePhaseRetry, prepareQueuedPhaseResume } from "../../src/main/automation/phase-retry.js";
-import { DraftAutomation, interruptedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.class.js";
+import { DraftAutomation, failedAutomationResumePhase, interruptedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.class.js";
 import type { AutomationRun } from "../../src/shared/contracts.js";
 
 const previous = {
@@ -170,6 +170,8 @@ test("应用重启中断只恢复当前失败阶段，销售控制保留人工�
       },
     },
   }), "saleControl");
+  assert.equal(failedAutomationResumePhase(interrupted), "presentation");
+  assert.equal(failedAutomationResumePhase({ ...interrupted, status: "succeeded" }), undefined);
 });
 
 test("DraftAutomation.start 把应用中断映射为阶段重试，而不是全量重跑", async () => {

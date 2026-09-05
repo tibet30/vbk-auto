@@ -40,6 +40,8 @@ import type { ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { resolveRunStatusAfterSinglePhaseSuccess } from "./automation.main.run-one-state.js";
+import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
+import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 
 /**
  * 单阶段重新执行入口：
@@ -167,6 +169,22 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         terms: () => fillAndSaveTerms(page, productData, productId),
         hotelResource: () => ensureHotelResourceApi(page, productData, productId!),
         vehicleResource: () => ensureVehicleResourceApi(page, productData, productId!),
+        trafficLine: () => {
+          return ensureTrafficLinePhase({
+            page,
+            parentProductId: productId!,
+            config: productData.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
+            itinerary: productData.itinerary,
+            log,
+            checkpoint: run.trafficLine,
+            onCheckpoint: (checkpoint) => {
+              run.trafficLine = checkpoint;
+              persist();
+            },
+            disambiguator: ctx.disambiguator,
+            product: productData,
+          });
+        },
         preflight: () => runProductPreflightApi(page, productData, productId!),
       };
       const fillFn = fillMap[phaseName];

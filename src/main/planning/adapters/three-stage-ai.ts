@@ -7,6 +7,8 @@ import {
   type PlanningLocationRequest,
   type PlanningPoiDisambiguationRequest,
   type PlanningPoiDisambiguationResult,
+  type PlanningPoiNameCorrectionRequest,
+  type PlanningPoiNameCorrectionResult,
   type PlanningSpotRecommendationRequest,
   type ThreeStagePlanningAi,
 } from "../../../shared/contracts-planning.js";
@@ -20,7 +22,7 @@ import {
   type ChatCompletionBody,
 } from "./openai-compatible-transport.js";
 import { buildVbkCopyPolicyPrompt, sanitiseUserIdeaForAi } from "../vbk-copy-policy.js";
-import { itineraryTool, locationTool, poiDisambiguationTool, spotTool, userIntentTool, vehicleCostTool, type ThreeStageTool } from "./three-stage-tools.js";
+import { itineraryTool, locationTool, poiDisambiguationTool, poiNameCorrectionTool, spotTool, userIntentTool, vehicleCostTool, type ThreeStageTool } from "./three-stage-tools.js";
 import { parsePlanningUserIntent } from "../user-intent.js";
 
 export interface ThreeStageAiConfig {
@@ -34,12 +36,13 @@ export interface ThreeStageAiConfig {
 }
 
 const ENTRY_SOURCE: Record<
-  "ThreeStage.structureLocation" | "ThreeStage.structureUserIntent" | "ThreeStage.disambiguatePoiCandidate" | "ThreeStage.recommendSpotNames" | "ThreeStage.composeVerifiedItinerary" | "ThreeStage.estimateVehicleTotalCost",
+  "ThreeStage.structureLocation" | "ThreeStage.structureUserIntent" | "ThreeStage.disambiguatePoiCandidate" | "ThreeStage.correctPoiName" | "ThreeStage.recommendSpotNames" | "ThreeStage.composeVerifiedItinerary" | "ThreeStage.estimateVehicleTotalCost",
   AiUsageSource
 > = {
   "ThreeStage.structureLocation": "planning.structureLocation",
   "ThreeStage.structureUserIntent": "planning.structureUserIntent",
   "ThreeStage.disambiguatePoiCandidate": "planning.disambiguatePoi",
+  "ThreeStage.correctPoiName": "planning.resolvePoiName",
   "ThreeStage.recommendSpotNames": "planning.recommendSpotNames",
   "ThreeStage.composeVerifiedItinerary": "planning.composeItinerary",
   "ThreeStage.estimateVehicleTotalCost": "planning.estimateVehicleCost",
@@ -99,6 +102,8 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
           "只提取用户明确表达的内容，不补写未提及的景点、日期、时间、时长或事实。",
           "用户明确说第几天时保留 day；没有指定日期时 day=0。",
           "可查询为单一真实地点的景点 kind=poi；例如“游览翠湖公园”必须写为 title=翠湖公园、kind=poi。体验、手作、休息、自由活动等无法作为 POI 的安排使用对应非 poi kind。",
+          "出现“甲或乙”“甲或者乙”“甲/乙”“二选一”时，必须拆成独立名称并保留原顺序：title 填第一个甲（默认采用），alternatives 填 [甲,乙]；绝不把组合句或“二选一”写进 title。非 POI 活动 alternatives 为空数组。",
+          "把【配讲解】、讲解、接送等用户服务诉求写入 serviceNotes；它们只是待核实的规划诉求，不能表述为已确认的产品权益。",
           "id 依次使用 user-1、user-2；具体时间用 HH:mm，其余时间只用 不限/全天/上午/下午/晚上。",
         ].join("\n"),
       },
@@ -139,6 +144,36 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       return { decision: "uncertain", confidence, reason };
     }
     return { decision, candidateId, confidence, reason };
+  }
+
+  async correctPoiName(request: PlanningPoiNameCorrectionRequest): Promise<PlanningPoiNameCorrectionResult> {
+    const safeRequest = { ...request, userIdea: sanitiseUserIdeaForAi(request.userIdea ?? "") };
+    const messages = [
+      {
+        role: "system" as const,
+        content: [
+          "你是旅游 POI 名称纠错助手。仅在系统未命中用户输入时，提供最多 3 个可能的错别字修正或常用别名搜索词。",
+          "只纠正名称，不得生成 POI ID、地址、行程或用户未提及的新景点；没有高把握时 terms 返回空数组。",
+          "目的地和用户当天行程只能帮助判断名称，不得突破地域范围。系统会独立查询、校验地域和营业状态，不能把你的输出当作真实 POI。",
+        ].join("\n"),
+      },
+      { role: "user" as const, content: JSON.stringify(safeRequest) },
+    ];
+    const args = await this.callTool("ThreeStage.correctPoiName", messages, poiNameCorrectionTool);
+    const requested = normaliseName(request.requestedName);
+    const terms = Array.isArray(args.terms) ? args.terms : [];
+    const unique = new Map<string, string>();
+    for (const value of terms) {
+      const term = text(value);
+      const key = normaliseName(term);
+      if (term && key && key !== requested && !/\b\d{5,}\b/.test(term)) unique.set(key, term);
+    }
+    const confidence = Math.min(1, Math.max(0, Number(args.confidence) || 0));
+    return {
+      terms: confidence >= 0.9 ? [...unique.values()].slice(0, 3) : [],
+      confidence,
+      reason: text(args.reason) || "AI 未提供名称纠正依据",
+    };
   }
 
   async recommendSpotNames(request: PlanningSpotRecommendationRequest): Promise<string[]> {

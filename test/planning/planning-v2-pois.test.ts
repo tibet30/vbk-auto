@@ -6,6 +6,7 @@ import {
   toPlanningCandidate,
 } from "../../src/main/planning/planning-v2-pois.js";
 import type { PoiSuggestDetailResult } from "../../src/shared/contracts.js";
+import { installLogSink } from "../../src/shared/log-timestamp.js";
 
 function detail(args: { requested: string; poiName?: string; poiId?: number; province?: string; city?: string; district?: string; address?: string; textFields?: Array<{ path: string; value: string }> }): PoiSuggestDetailResult {
   const poiName = args.poiName ?? args.requested;
@@ -167,6 +168,69 @@ test("异地同名 POI 会以产品城市重查，命中同城结果后继续一
     district: "城关区",
     address: "北京中路",
   });
+});
+
+test("用户错别字仅在高置信纠正词命中唯一同城真实 POI 后自动采用", async () => {
+  const queries: string[] = [];
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["扎实伦布寺"], province: "西藏", city: "日喀则", beforeEach: async () => undefined,
+    query: async (name) => {
+      queries.push(name);
+      return name === "扎什伦布寺"
+        ? detail({ requested: name, poiName: "扎什伦布寺", poiId: 76329, province: "西藏", city: "日喀则" })
+        : { ...detail({ requested: name }), best: null, candidates: [] };
+    },
+    shouldDisambiguate: () => true,
+    correctName: async (request) => {
+      assert.equal(request.requestedName, "扎实伦布寺");
+      assert.equal(request.preferredDay, undefined);
+      return { terms: ["扎什伦布寺"], confidence: 0.98, reason: "仅一字形近错别字" };
+    },
+  });
+  assert.deepEqual(queries, ["扎实伦布寺", "日喀则扎实伦布寺", "扎什伦布寺"]);
+  assert.equal(candidate.status, "resolved");
+  assert.equal(candidate.poiId, 76329);
+  assert.match(candidate.reason ?? "", /名称纠正：用户输入「扎实伦布寺」按「扎什伦布寺」/);
+});
+
+test("低置信名称纠正不触发携程二次查询", async () => {
+  const queries: string[] = [];
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["扎实伦布寺"], province: "西藏", city: "日喀则", beforeEach: async () => undefined,
+    query: async (name) => { queries.push(name); return { ...detail({ requested: name }), best: null, candidates: [] }; },
+    shouldDisambiguate: () => true,
+    correctName: async () => ({ terms: [], confidence: 0.72, reason: "仅猜测，置信度不足" }),
+  });
+  assert.deepEqual(queries, ["扎实伦布寺", "日喀则扎实伦布寺"]);
+  assert.equal(candidate.status, "rejected");
+});
+
+test("POI 未命中会写入带产品标识的可检索诊断日志", async () => {
+  const events: Array<{ level: string; args: ReadonlyArray<unknown> }> = [];
+  installLogSink((level, args) => events.push({ level, args }));
+  try {
+    const [candidate] = await resolvePlanningPoiCandidates({
+      names: ["不存在的景点"], province: "西藏", city: "日喀则", beforeEach: async () => undefined,
+      query: async (name) => ({ ...detail({ requested: name }), best: null, candidates: [] }),
+      logContext: { localProductId: "4396a956-ea4b-46ae-81ac-f14e5d881ae1" },
+    });
+    assert.equal(candidate.status, "rejected");
+    const messages = events.map((event) => String(event.args[0]));
+    assert.ok(messages.some((message) => message.includes("[planning:poi] 查询结果")));
+    assert.ok(messages.some((message) => message.includes("[planning:poi] 核验结论")));
+    const conclusion = events.find((event) => String(event.args[0]).includes("核验结论"));
+    assert.equal(conclusion?.level, "warn");
+    const context = conclusion?.args[1] as Record<string, unknown>;
+    assert.equal(context.localProductId, "4396a956-ea4b-46ae-81ac-f14e5d881ae1");
+    assert.equal(context.stage, "planning");
+    assert.equal(context.phase, "poiResolution");
+    assert.equal(context.target, "不存在的景点");
+    assert.equal(context.resultStatus, "rejected");
+    assert.equal(context.reason, "未命中可确认的真实 POI");
+    assert.equal(typeof context.durationMs, "number");
+  } finally {
+    installLogSink();
+  }
 });
 
 test("用户简称未精确命中时，AI 只从同城真实候选中选择大众常游主景点", async () => {

@@ -14,12 +14,13 @@ const expectedUrls: Record<string, string> = {
   pricingInventory: `${host}/ivbk/vendor/priceInventory?productId=${productId}&from=vbk`,
   resource: `${host}/product/input/newResourceRule?productid=${productId}&from=vbk`,
   terms: `${host}/ivbk/vendor/newResourceClause?productid=${productId}&from=vbk`,
+  trafficLine: `${host}/ivbk/vendor/trafficLineEdit?productid=${productId}&istab=1&from=vbk`,
 };
 
 test("所有“进入”按钮都映射到 VBK 当前产品菜单的独立页面", () => {
   assert.deepEqual(
     VBK_NAV_SECTIONS.map((section) => section.key),
-    ["saleControl", "basic", "presentation", "itinerary", "package", "pricingInventory", "resource", "terms"],
+    ["saleControl", "basic", "presentation", "itinerary", "package", "pricingInventory", "resource", "terms", "trafficLine"],
   );
 
   for (const section of VBK_NAV_SECTIONS) {

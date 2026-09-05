@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { draftPhasesFor } from "../../src/main/automation/automation.main/automation.main.phases.js";
 import { parseProduct } from "../../src/main/automation/schema/schema.js";
 
-function makeProduct(commercial?: Record<string, unknown>) {
+function makeProduct(commercial?: Record<string, unknown>, trafficLine?: Record<string, unknown>) {
   return parseProduct({
     sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false },
     basicInfo: {
@@ -18,6 +18,7 @@ function makeProduct(commercial?: Record<string, unknown>) {
       operationNotes: "测试",
     },
     commercial,
+    ...(trafficLine ? { operations: { pickupCity: "太原", trafficLine } } : {}),
     itinerary: [
       {
         day: 1,
@@ -56,4 +57,15 @@ test("只有 inventory 时包含 pricingInventory 阶段", () => {
 test("没有 pricing 和 inventory 时不包含 pricingInventory 阶段", () => {
   assert.equal(draftPhasesFor(makeProduct()).includes("pricingInventory"), false);
   assert.equal(draftPhasesFor(makeProduct({ packageName: "标准套餐" })).includes("pricingInventory"), false);
+});
+
+test("线路及交通默认启用，并位于条款和预检之间", () => {
+  const defaultPhases = draftPhasesFor(makeProduct());
+  assert.equal(defaultPhases.includes("trafficLine"), true);
+
+  const phases = draftPhasesFor(makeProduct(undefined, {
+    enabled: true,
+    variants: ["flightRoundTrip", "trainRoundTrip"],
+  }));
+  assert.deepEqual(phases.slice(-3), ["terms", "trafficLine", "preflight"]);
 });

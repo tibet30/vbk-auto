@@ -21,6 +21,7 @@ test("ThreeStage 把 userIdea 作为需求数据结构化并记录逐日安排",
               preferences: ["节奏舒缓"],
               activities: [{
                 id: "model-id", day: 2, title: "藏香制作", kind: "activity",
+                alternatives: [], serviceNotes: [],
                 time: "下午", detail: "体验制作", durationMinutes: 120,
               }],
             }),
@@ -50,6 +51,7 @@ test("ThreeStage 把 userIdea 作为需求数据结构化并记录逐日安排",
   const messages = body.messages as Array<{ content: string }>;
   assert.match(messages[0].content, /用户原始产品想法/);
   assert.match(messages[0].content, /没有指定日期时 day=0/);
+  assert.match(messages[0].content, /title 填第一个甲/);
   assert.match(messages[1].content, /第二天下午做.*藏香/);
   assert.doesNotMatch(messages[1].content, /全网|最佳|唯一/);
   const tools = body.tools as Array<{ function: { name: string } }>;

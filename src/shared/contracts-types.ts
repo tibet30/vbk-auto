@@ -210,6 +210,8 @@ export interface AutomationRun {
   logs: Array<{ at: string; message: string; level: "info" | "warning" | "error" }>;
   screenshot?: string;
   recovery?: { phases: Record<string, PhaseRecovery> };
+  /** 线路及交通仅保存已由远端回读确认的子产品检查点。 */
+  trafficLine?: import("./contracts-traffic-line.js").TrafficLineWorkflowProgress;
 }
 
 /**

@@ -64,9 +64,12 @@ function readDistrictLocation(poi: Record<string, unknown> | null) {
     ? district.parents.map(asRecord).filter((parent): parent is Record<string, unknown> => Boolean(parent))
     : [];
   const parentOfType = (type: string) => parents.find((parent) => String(parent.districtType ?? "").toLowerCase() === type.toLowerCase());
+  const currentType = String(district?.districtType ?? "").toLowerCase();
   return {
-    province: stringValue(parentOfType("Province")?.districtName),
-    city: stringValue(parentOfType("City")?.districtName),
+    province: stringValue(parentOfType("Province")?.districtName)
+      ?? (currentType === "province" ? stringValue(district?.districtName) : null),
+    city: stringValue(parentOfType("City")?.districtName)
+      ?? (currentType === "city" ? stringValue(district?.districtName) : null),
     district: stringValue(district?.districtName),
   };
 }

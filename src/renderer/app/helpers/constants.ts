@@ -15,7 +15,12 @@ export const OPERATION_STATUS_OPTIONS: Array<{ value: OperationStatus | "all"; l
   { value: "running", label: "进行中" },
 ];
 export const emptyReadiness: ProductReadiness = { ready: false, completion: 0, issues: [] };
-export const initialInput: CreateProductInput = { destination: "", days: 2, productForm: "privateTour", userIdea: "" };
+export const initialInput: CreateProductInput = {
+  destination: "",
+  days: 2,
+  productForm: "privateTour",
+  userIdea: "",
+};
 
 // 切换产品时为新产品选择一个合理的初始阶段；用户可以随后自由切换。
 export function initialStageFor(status: ProductSummary["status"] | undefined): Stage {
@@ -192,6 +197,7 @@ export const RETRY_PHASE_LABELS: Record<string, string> = {
   pricingInventory: "班期与价格",
   hotelResource: "酒店资源",
   vehicleResource: "用车资源",
+  trafficLine: "线路及交通",
   terms: "条款",
   preflight: "上架预检",
 };
@@ -296,6 +302,12 @@ export const VBK_NAV_SECTIONS: VbkNavSection[] = [
     buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/newResourceClause?productid=${encodeURIComponent(id)}&from=vbk` : null,
     phaseNames: ["terms"],
   },
+  {
+    key: "trafficLine",
+    label: "线路及交通规划",
+    buildUrl: (id) => id ? `${VBK_HOST}/ivbk/vendor/trafficLineEdit?productid=${encodeURIComponent(id)}&istab=1&from=vbk` : null,
+    phaseNames: ["trafficLine"],
+  },
 ];
 
 // 操作日志的 stage 名 → VBK_NAV_SECTIONS 的 key。
@@ -312,6 +324,7 @@ export const OPERATION_STAGE_TO_SECTION: Record<string, string> = {
   priceInventory: "pricingInventory",
   hotelResource: "resource",
   vehicleResource: "resource",
+  trafficLine: "trafficLine",
   terms: "terms",
 };
 

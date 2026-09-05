@@ -10,7 +10,7 @@ import type { VbkDatabase } from "../../src/main/infrastructure/database/databas
 const pricing = { currency: "CNY", adult: 599, child: 399, minimumTravelers: 2 };
 const inventory = { startDate: "2026-09-01", endDate: "2026-09-30", dailyQuota: 10 };
 
-function makeProductData(commercial?: Record<string, unknown>) {
+function makeProductData(commercial?: Record<string, unknown>, trafficLine?: Record<string, unknown>) {
   return parseProduct({
     sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false },
     basicInfo: {
@@ -25,6 +25,7 @@ function makeProductData(commercial?: Record<string, unknown>) {
       operationNotes: "测试",
     },
     commercial,
+    ...(trafficLine ? { operations: { pickupCity: "太原", trafficLine } } : {}),
     itinerary: [
       {
         day: 1,
@@ -131,4 +132,22 @@ test("其它阶段不受 pricingInventory 前置校验影响", () => {
   const product = makeProductData({ packageName: "标准套餐", pricing });
 
   assert.doesNotThrow(() => assertSinglePhaseRetryPrerequisites(product, "package"));
+});
+
+test("trafficLine 单阶段重试：缺省使用默认双线路，显式历史禁用或损坏配置会阻断", () => {
+  assert.doesNotThrow(
+    () => assertSinglePhaseRetryPrerequisites(makeProductData(), "trafficLine"),
+  );
+
+  const disabled = makeProductData(undefined, { enabled: false, variants: ["flightRoundTrip"] });
+  assert.throws(
+    () => assertSinglePhaseRetryPrerequisites(disabled, "trafficLine"),
+    /历史配置禁用/,
+  );
+
+  const noVariants = makeProductData(undefined, { enabled: true, variants: [] });
+  assert.throws(
+    () => assertSinglePhaseRetryPrerequisites(noVariants, "trafficLine"),
+    /缺少默认往返类型/,
+  );
 });

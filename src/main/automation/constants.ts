@@ -30,6 +30,7 @@ export function productSectionUrl(productId, section) {
     pricingInventory: `/ivbk/vendor/priceInventory?productid=${id}&from=vbk`,
     hotelResource: `/product/input/newResourceRule?productid=${id}&from=vbk`,
     vehicleResource: `/product/input/newResourceRule?productid=${id}&from=vbk`,
+    trafficLine: `/ivbk/vendor/trafficLineEdit?productid=${id}&istab=1&from=vbk`,
     terms: `/ivbk/vendor/newResourceClause?productid=${id}&istab=1&from=vbk`,
   };
   if (!routes[section]) throw new Error(`未知产品页面：${section}`);

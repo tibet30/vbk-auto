@@ -16,6 +16,7 @@ const PHASE_PAGE_SECTIONS: Record<string, string> = {
   pricingInventory: "pricingInventory",
   hotelResource: "hotelResource",
   vehicleResource: "vehicleResource",
+  trafficLine: "trafficLine",
   terms: "terms",
   // preflight 没有独立编辑页；用基本信息页维持产品编辑器上下文。
   preflight: "basic",

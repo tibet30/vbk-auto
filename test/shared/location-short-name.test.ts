@@ -13,10 +13,16 @@ test("行政地点使用平台常用短名，最长尾缀优先", () => {
   assert.equal(toPlatformShortLocationName("甘南藏族自治州"), "甘南");
   assert.equal(toPlatformShortLocationName("红河哈尼族彝族自治州"), "红河");
   assert.equal(toPlatformShortLocationName("阿坝藏族羌族自治州"), "阿坝");
+  assert.equal(toPlatformShortLocationName("大理白族自治州"), "大理");
   assert.equal(toPlatformShortLocationName("西湖区"), "西湖");
   for (const city of ["杭州", "广州", "苏州", "郑州", "福州", "兰州"]) {
     assert.equal(toPlatformShortLocationName(city), city);
   }
+});
+
+test("非行政业务名称不会被行政短名规则误裁剪", () => {
+  assert.equal(toPlatformShortLocationName("大理古城"), "大理古城");
+  assert.equal(toPlatformShortLocationName("大理石"), "大理石");
 });
 
 test("景区、城区和其它非行政名称不被误裁", () => {

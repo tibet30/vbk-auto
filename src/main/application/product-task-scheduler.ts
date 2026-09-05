@@ -171,7 +171,11 @@ export class ProductTaskScheduler {
           message: STAGE_MESSAGE[stage],
         }),
         () => this.dependencies.db.getWorkflowTask(taskId)?.status === "abandoned",
-        { resumeFrom, resumePlanning: resuming && resumeFrom === "planning" },
+        {
+          resumeFrom,
+          resumePlanning: resuming && resumeFrom === "planning",
+          resumeAutomationFromError: retryingFromError && resumeFrom === "automation",
+        },
       );
       if (result.status === "abandoned") {
         return;

@@ -119,14 +119,15 @@ function describeAckErrors(payload: AckStatusPayload): string {
 }
 
 function assertAck(payload: AckStatusPayload, label: string): void {
-  if (payload.ResponseStatus?.Ack === "Failure") {
-    throw new Error(`${label}业务失败（Ack=Failure）：${describeAckErrors(payload)}`);
+  if (payload.ResponseStatus?.Ack !== "Success") {
+    const ack = String(payload.ResponseStatus?.Ack ?? "缺失");
+    throw new Error(`${label}业务未确认（Ack=${ack}）：${describeAckErrors(payload)}`);
   }
 }
 
 /**
  * 真实接机站搜索：返回 suggestAirport 的全部机场候选（包含 0 个 = 「找不到」）。
- *  - Ack=Failure → 抛错（业务失败）；
+ *  - Ack 非 Success（含缺失）→ 抛错（业务未确认）；
  *  - Ack=Success + airports 空数组 → 返回 []（找不到）；
  *  - Ack=Success + airports 非空 → 返回规整后的候选列表。
  */

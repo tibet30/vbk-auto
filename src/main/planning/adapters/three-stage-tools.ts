@@ -3,6 +3,8 @@ const userActivityProperties = {
   day: { type: "integer", minimum: 0 },
   title: { type: "string", minLength: 1 },
   kind: { type: "string", enum: ["poi", "activity", "transport", "meal", "hotel", "free"] },
+  alternatives: { type: "array", items: { type: "string", minLength: 1 }, maxItems: 5 },
+  serviceNotes: { type: "array", items: { type: "string", minLength: 1 }, maxItems: 10 },
   time: { type: "string" },
   detail: { type: "string" },
   durationMinutes: { type: "integer", minimum: 1 },
@@ -25,7 +27,7 @@ export const userIntentTool = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "day", "title", "kind", "time", "detail", "durationMinutes"],
+            required: ["id", "day", "title", "kind", "alternatives", "serviceNotes", "time", "detail", "durationMinutes"],
             properties: {
               ...userActivityProperties,
               time: { anyOf: [{ type: "string" }, { type: "null" }] },
@@ -94,6 +96,25 @@ export const poiDisambiguationTool = {
   },
 };
 
+export const poiNameCorrectionTool = {
+  type: "function" as const,
+  function: {
+    name: "submit_poi_name_corrections",
+    description: "提交疑似错别字或别名的安全 POI 搜索词；只供系统再次查询，不代表真实 POI 已确认。",
+    strict: true,
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["terms", "confidence", "reason"],
+      properties: {
+        terms: { type: "array", maxItems: 3, items: { type: "string", minLength: 1, maxLength: 80 } },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+        reason: { type: "string" },
+      },
+    },
+  },
+};
+
 export const itineraryTool = {
   type: "function" as const,
   function: {
@@ -147,5 +168,6 @@ export type ThreeStageTool =
   | typeof spotTool
   | typeof locationTool
   | typeof poiDisambiguationTool
+  | typeof poiNameCorrectionTool
   | typeof itineraryTool
   | typeof vehicleCostTool;

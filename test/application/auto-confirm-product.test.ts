@@ -156,3 +156,31 @@ test("从自动录入阶段恢复时不重做规划，只复核 readiness 后继
   assert.deepEqual(calls, ["readiness:true:true", "stage:automation", "automation"]);
   assert.equal(result.status, "succeeded");
 });
+
+test("从报错处恢复自动录入时调用失败阶段入口，禁止退化为全量 start", async () => {
+  const calls: string[] = [];
+  const product = {
+    ...makeProduct(),
+    status: "draft_saved",
+    automation: { id: "run-resumed", status: "succeeded", phases: [], logs: [] },
+  } as never;
+  const result = await runAutoConfirmedCreation({
+    readiness: () => ({ ready: true, completion: 100, issues: [] }),
+    productWorkflows: { runExclusive: async (_id, _kind, task) => task() },
+    automation: {
+      start: async () => { calls.push("start"); },
+      resumeFromError: async (id) => { calls.push(`resume:${id}`); },
+    },
+    db: {
+      getProduct: () => product,
+      addMessage: () => "message-1",
+      updateProduct: () => product,
+    },
+  }, "local-resumed", undefined, undefined, {
+    resumeFrom: "automation",
+    resumeAutomationFromError: true,
+  });
+
+  assert.deepEqual(calls, ["resume:local-resumed"]);
+  assert.equal(result.status, "succeeded");
+});

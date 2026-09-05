@@ -2,6 +2,7 @@ import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-
 import { defaultCommercialInventory } from "./commercial-defaults.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
+import { normaliseTrafficLineConfig } from "../../shared/contracts-traffic-line.js";
 
 /**
  * 产品草稿归一化。
@@ -348,6 +349,10 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
     if (normalisedTier) operations.hotelTier = normalisedTier;
     else delete operations.hotelTier;
     if (typeof operations.mealsIncluded !== "boolean") delete operations.mealsIncluded;
+    // 线路及交通只能由运营显式配置；这里仅归一化并保留，不根据 AI 行程推断。
+    const trafficLine = normaliseTrafficLineConfig(operations.trafficLine);
+    if (trafficLine) operations.trafficLine = trafficLine;
+    else delete operations.trafficLine;
     if (!operations.vehicleResource || typeof operations.vehicleResource !== "object" || Array.isArray(operations.vehicleResource)) {
       operations.vehicleResource = {};
     } else {

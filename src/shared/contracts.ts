@@ -5,4 +5,5 @@ export * from "./contracts-planning.js";
 export * from "./contracts-auth.js";
 export * from "./contracts-ai-usage.js";
 export * from "./contracts-vbk-binding.js";
+export * from "./contracts-traffic-line.js";
 export * from "./product-form.js";

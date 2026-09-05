@@ -15,12 +15,12 @@ const automationPhaseSchema = z.enum([
   "terms",
   "hotelResource",
   "vehicleResource",
+  "trafficLine",
   "preflight",
   "saleControl",
 ]);
 const planningMajorStageSchema = z.enum(["foundation", "itinerary", "completion"]);
 const workflowTaskRetryModeSchema = z.enum(["from_error", "from_start"]);
-
 const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "products:get", "products:delete", "products:readiness", "products:updateReviewField", "products:updateProductJson",
   "ai:send", "ai:regenerate",

@@ -2,6 +2,7 @@ import type { ContactCardSelection } from "../../../../shared/contracts.js";
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
 import { listProviderContactCards } from "../../../infrastructure/butler-contacts.js";
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
+import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { normalizeVbkSubtitle } from "./core.js";
 import {
   productLineSaveField,
@@ -138,11 +139,18 @@ async function getProductBaseInfoSaveModel(page: VbkSessionRequestBrowser, produ
 
 async function resolveCity(page: VbkSessionRequestBrowser, cityName: string): Promise<Json> {
   const payload = await post(page, "suggestDepartureCity", { keyword: cityName }, "VBK 城市查询");
-  const exact = list(payload.cities).filter((city) => String(city.cityName ?? "").trim() === cityName.trim());
-  if (exact.length !== 1) throw new Error(`城市「${cityName}」无法唯一匹配：${exact.length} 个精确候选`);
-  const city = exact[0];
+  const city = selectAdministrativeCity(payload.cities, cityName);
   if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`城市「${cityName}」缺少合法 cityId`);
   return city;
+}
+
+/** 行政字段按同一短名精确匹配；只消费 suggestDepartureCity 的城市候选。 */
+export function selectAdministrativeCity(cities: unknown, cityName: string): Json {
+  const target = toPlatformShortLocationName(cityName);
+  const exact = list(cities).filter((city) =>
+    toPlatformShortLocationName(String(city.cityName ?? "")) === target);
+  if (exact.length !== 1) throw new Error(`城市「${cityName}」无法唯一匹配：${exact.length} 个规范候选`);
+  return exact[0];
 }
 
 async function resolveProductLine(page: VbkSessionRequestBrowser, info: Json, cityId: number, cityName: string): Promise<Json> {

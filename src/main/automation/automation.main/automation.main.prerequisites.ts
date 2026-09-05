@@ -6,10 +6,21 @@
  */
 
 import { parseProduct } from "../schema/schema.js";
+import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 
 type Product = ReturnType<typeof parseProduct>;
 
 export function assertSinglePhaseRetryPrerequisites(product: Product, phase: string) {
+  if (phase === "trafficLine") {
+    const config = product.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG;
+    if (!config.enabled) {
+      throw new Error("线路及交通子产品被历史配置禁用，无法执行默认子产品流程。");
+    }
+    if (!config.variants.length) {
+      throw new Error("线路及交通子产品缺少默认往返类型，无法安全重试。");
+    }
+    return;
+  }
   if (phase !== "pricingInventory") return;
 
   const missing: string[] = [];

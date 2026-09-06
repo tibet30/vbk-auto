@@ -1,10 +1,13 @@
+import { installProductAgent } from "./agent/integration-setup.js";
+import { withAgentUsage } from "./agent/integration-usage.js";
+import { agentWorkflowPatch, recoverQueuedAgentWorkflowTasks } from "./agent/integration-workflow.js";
 /**
  * Electron main process entry: process configuration, shared runtime helpers,
  * IPC registrar composition, and application bootstrap.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, Notification } from "electron";
 import { installLogSink, logError, logInfo, logWarn } from "../shared/log-timestamp.js";
 import { createRuntimeLogCapture } from "../shared/log-redaction.js";
 import { APP_NAME } from "../shared/brand.js";
@@ -46,6 +49,8 @@ import { registerBrowserAutomationIpc } from "./ipc/browser-automation-ipc.js";
 import { registerSettingsIpc } from "./ipc/settings-ipc.js";
 import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
 import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
+import { registerAgentIpc } from "./ipc/agent-ipc.js";
+import { registerMemoryIpc } from "./ipc/memory-ipc.js";
 import { ProductTaskScheduler } from "./application/product-task-scheduler.js";
 import type { ProductWorkflowTask } from "../shared/contracts.js";
 import type { MainIpcContext } from "./ipc/context.js";
@@ -57,6 +62,8 @@ import { cleanStaleChromiumProfileDb } from "./infrastructure/chromium-profile-c
 import { createWithKnownVbkAccount } from "./infrastructure/vbk-account-status.js";
 import { createVbkBindingBootstrap } from "./infrastructure/vbk-binding-bootstrap.js";
 import { captureRuntimeLog, setOperationLogDb } from "./operations/operation-log-store.js";
+import { agentAttentionNotification } from "./infrastructure/agent-attention-notification.js";
+import { MemoryService } from "./memory/memory-service.js";
 import {
   applyStartupCommandLineSwitches,
   debuggingPort,
@@ -75,6 +82,7 @@ let window: BrowserWindow;
 let db: VbkDatabase;
 let browser: VbkBrowser;
 let automation: DraftAutomation;
+const notifiedAgentAttention = new Map<string, string>();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -111,6 +119,7 @@ let cookieStore: LocalVbkCookieStore | null = null;
  *   - 这条事件供 UI 实时刷新产品详情 / 操作日志。
  */
 const broadcastProduct = (product: ProductDetail) => {
+  product = withAgentUsage(product, db?.getAgentSnapshot(product.id));
   const completedTask = db?.completeWorkflowTaskForProduct(product);
   if (completedTask) emitWorkflowTask(completedTask);
   // 任务可能已被 products:get / workflowTasks:list 等读取路径提前收敛为成功，
@@ -147,6 +156,39 @@ const emitWorkflowTask = (task: ProductWorkflowTask) => {
   } catch {
     // 任务已持久化；窗口恢复后 workflowTasks:list 会补偿事件丢失。
   }
+};
+const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnapshot) => {
+  const attention = agentAttentionNotification(snapshot, db?.getProduct(snapshot.localProductId)?.name ?? "方案");
+  if (attention && notifiedAgentAttention.get(snapshot.localProductId) !== attention.key) {
+    notifiedAgentAttention.set(snapshot.localProductId, attention.key);
+    if (process.platform === "darwin" && Notification.isSupported()) {
+      try {
+        const notification = new Notification({ title: `${APP_NAME} · ${attention.title}`, body: attention.body });
+        notification.on("click", () => {
+          if (!window || window.isDestroyed()) return;
+          if (window.isMinimized()) window.restore();
+          window.show();
+          window.focus();
+        });
+        notification.show();
+      } catch (error) {
+        logWarn("[agent] failed to show attention notification", error);
+      }
+    }
+  }
+  if (snapshot.run) {
+    let task = db?.latestWorkflowTaskForProduct(snapshot.localProductId);
+    const product = db?.getProduct(snapshot.localProductId);
+    if (product && (!task || (['abandoned','succeeded','failed','cancelled'].includes(task.status)
+      && snapshot.run.createdAt > task.updatedAt))) {
+      task = db.createWorkflowTask(product.id, product.name);
+    }
+    if (task && (task.status !== "abandoned" || snapshot.run.status === "abandoned")) {
+      emitWorkflowTask(db.updateWorkflowTask(task.id, agentWorkflowPatch(snapshot)));
+    }
+  }
+  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
+  try { window.webContents.send("agent:updated", snapshot); } catch { /* durable snapshot is read on refresh */ }
 };
 /**
  * 删除 settings 表里某个 provider 的旧密文。
@@ -261,7 +303,7 @@ function readiness(
     researchTasks: product.researchTasks,
     automation: product.automation,
     ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
-    ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure,
+    ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure ?? Boolean(db.getAgentSnapshot(localProductId)?.run && !db.getAgentSnapshot(localProductId)?.uncertainWrite),
   });
 }
 
@@ -294,7 +336,26 @@ function registerIpc(
   registerBrowserAutomationIpc(context);
   registerSettingsIpc(context);
   registerPlanningV2Ipc(context);
+  registerAgentIpc(context);
+  registerMemoryIpc(context);
 }
+
+function scheduleMemoryMaintenance(memoryService: MemoryService): NodeJS.Timeout {
+  const run = () => {
+    try {
+      const state = memoryService.settings();
+      const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : 0;
+      const stale = !lastSuccess || Date.now() - lastSuccess >= 7 * 24 * 60 * 60 * 1000;
+      if (state.pendingCount >= 30 || stale) memoryService.maintenance();
+    } catch (error) {
+      logWarn("[memory] maintenance skipped", error);
+    }
+  };
+  queueMicrotask(run);
+  return setInterval(run, 6 * 60 * 60 * 1000);
+}
+
+let configureAutomation: () => void = () => {};
 
 async function openMainWindow(): Promise<void> {
   if (!cookieStore) throw new Error("VBK cookie store 尚未初始化，请稍后重试。");
@@ -312,6 +373,7 @@ async function openMainWindow(): Promise<void> {
       window = services.window;
       browser = services.browser;
       automation = services.automation;
+      configureAutomation();
     },
   });
   window = services.window;
@@ -347,13 +409,17 @@ app.whenReady().then(async () => {
     noteVbkAccountActive: vbkBindings.noteVbkAccountActive,
   });
   const productWorkflows = new ProductWorkflowCoordinator();
+  const memoryService = new MemoryService({
+    db,
+    getOwnerUserId: vbkBindings.getExtensionUserId,
+  });
   productEmitter = createRemoteProductMirror({
     remote: remoteProducts,
     broadcast: broadcastProduct,
     isWorkflowActive: (productId) => Boolean(productWorkflows.activeWorkflow(productId)),
     // automation 的 phases / recovery / logs 是 SQLite 运行态，需要逐节点即时
     // 呈现在审查结果；产品业务数据仍在工作流解锁后合并并写回 Tibet。
-    shouldBroadcastWhileActive: (productId) => productWorkflows.activeWorkflow(productId) === "automation",
+    shouldBroadcastWhileActive: (productId) => productWorkflows.activeWorkflow(productId) === "automation" || Boolean(db.getAgentSnapshot(productId)?.run),
   }).emit;
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
@@ -391,7 +457,12 @@ app.whenReady().then(async () => {
     detectProviderIdInMain,
     emitProductIfKnown,
     logPoiManualIpc,
+    memoryService,
+    emitAgentSnapshot,
   };
+  configureAutomation = installProductAgent(context);
+  const memoryMaintenanceTimer = scheduleMemoryMaintenance(memoryService);
+  app.once("before-quit", () => clearInterval(memoryMaintenanceTimer));
   const productTaskScheduler = new ProductTaskScheduler({
     db,
     get startPlanning() { return context.startPlanning; },
@@ -408,11 +479,22 @@ app.whenReady().then(async () => {
   context.resumeProductTask = (taskId, mode) => productTaskScheduler.resume(taskId, mode);
   registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
-  automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));
   // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
   void browser.initialise()
     .then(() => vbkBindings.afterBrowserReady())
-    .then(() => productTaskScheduler.resumeQueued())
+    .then(async () => {
+      if (!context.agentCore) return;
+      const recovered = await recoverQueuedAgentWorkflowTasks({
+        listWorkflowTasks: () => db.listWorkflowTasks(),
+        updateWorkflowTask: (id, patch) => db.updateWorkflowTask(id, patch),
+        getAgentSnapshot: (localProductId) => context.agentCore!.get(localProductId),
+        resumeAgent: (localProductId) => context.agentCore!.resume(localProductId),
+        emitWorkflowTask,
+      });
+      if (recovered.resumed || recovered.attention) {
+        logInfo("[startup] recovered queued agent workflow tasks", recovered);
+      }
+    })
     .catch((error) => logWarn("[startup] deferred VBK binding restore failed", error));
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) void openMainWindow();

@@ -19,7 +19,12 @@ import { HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candid
 /**
  * 计算某个 product 当前应当跑的阶段序列。
  */
-export function draftPhasesFor(product: ReturnType<typeof parseProduct>) {
+export function draftPhasesFor(product: {
+  itinerary: Array<{hotel?: unknown; hotelCandidates?: unknown[]}>;
+  operations?: {hotelSource?: string; trafficLine?: {enabled?: boolean}};
+  commercial?: {pricing?: unknown; inventory?: unknown};
+  sales: {productForm: ReturnType<typeof parseProduct>['sales']['productForm']};
+}) {
   const hasResolvedHotelCandidates = product.itinerary.some((day) => Array.isArray(day.hotelCandidates)
     && day.hotelCandidates.length >= HOTEL_RESOURCE_MIN_CANDIDATE_COUNT);
   const needsHotel = hasResolvedHotelCandidates || (product.operations?.hotelSource !== "nonPlatform"

@@ -41,14 +41,11 @@ export function ProductBriefForm({ input, setInput, autoConfirm, setAutoConfirm,
       {fieldErrors.userIdea ? <span id="create-product-idea-error" className={styles.fieldError} role="alert">{fieldErrors.userIdea}</span> : null}
       <span id="product-idea-hint" className={styles.ideaHint}>{ideaDraft.length} / 1000 字，AI 会把它作为需求偏好参考</span>
     </label>
-    <label className={styles.autoConfirmOption}>
-      <input type="checkbox" checked={autoConfirm} disabled={submitting} onChange={(event) => setAutoConfirm(event.target.checked)} />
-      <span><strong>一键生成并录入携程</strong><small>跳过人工确认；仅在方案通过自动核验后才会写入 VBK。</small></span>
-    </label>
+    <p className={styles.ideaHint}>AI 会先完善方案；由你在「方案协作」确认后，才开始录入 VBK。</p>
     <div className={styles.formActions}>
       <button className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button>
       <button className={shared.btn} data-variant="primary" disabled={submitting} onClick={submit}>
-        {submitting ? <><LoaderCircle size={15} className={styles.spin} />{autoConfirm ? "正在创建后台任务…" : "创建中"}</> : <><Plus size={15} />创建</>}
+        {submitting ? <><LoaderCircle size={15} className={styles.spin} />创建中</> : <><Plus size={15} />创建</>}
       </button>
     </div>
   </div>;

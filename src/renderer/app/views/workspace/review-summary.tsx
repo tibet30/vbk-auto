@@ -1,5 +1,5 @@
 import { LoaderCircle, ShieldCheck, Truck } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
   ContactCardSelection,
@@ -111,6 +111,18 @@ export function AppWorkspaceReviewSummary({
   refreshingIssues,
   onRefreshIssues,
 }: ReviewSummaryProps) {
+  const previous = useRef({ id: product.id, value: product.product });
+  const [changed, setChanged] = useState<string[]>([]);
+  useEffect(() => {
+    const sections: Record<string, string> = { basicInfo: "基础信息", presentation: "产品展示", itinerary: "每日行程", commercial: "价格、库存与条款", operations: "资源配置", sales: "产品形态" };
+    if (previous.current.id === product.id) {
+      const before = previous.current.value as Record<string, unknown>;
+      const after = product.product as Record<string, unknown>;
+      const changes = Object.keys(sections).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+      if (changes.length) setChanged(changes.map((key) => sections[key]));
+    } else setChanged([]);
+    previous.current = { id: product.id, value: product.product };
+  }, [product.id, product.product]);
   // 默认走卡片视图；切到 JSON 实时数据是「主动要求看」，不是默认体验。
   // 每次切换产品都强制回到卡片视图，避免进入新产品后还是 JSON 视图造成迷惑。
   const [viewMode, setViewMode] = useState<SummaryViewMode>("cards");
@@ -191,11 +203,12 @@ export function AppWorkspaceReviewSummary({
   );
 
   return (
-    <aside className={`${layout.panel} ${styles.summary}`} aria-label="审查结果概要">
+    <aside className={`${layout.panel} ${styles.summary}`} aria-label="审查结果概要" tabIndex={-1}>
       <AppWorkspaceReviewSummaryHead
         viewMode={viewMode}
         onChangeViewMode={setViewMode}
       />
+      {changed.length > 0 && <div className={styles.recentChanges} role="status">最近更新：{changed.join("、")}<button type="button" onClick={() => setChanged([])} aria-label="关闭更新提示">已查看</button></div>}
 
       {viewMode === "cards" ? (
         <div id="summary-view-panel" role="tabpanel" aria-labelledby="summary-view-cards" className={styles.cardsPane}>

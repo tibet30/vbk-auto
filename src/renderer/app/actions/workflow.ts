@@ -67,7 +67,7 @@ export function useWorkflowHandlers(state: AppState) {
     try {
       const confirmedId = activeTask.id;
       await api()!.research.accept(product.id, confirmedId, verificationNote.trim());
-      await api()!.ai.send(
+      await api()!.agent.send(
         product.id,
         `运营人员已完成「${activeTask.label}」核查，结果如下：${verificationNote.trim()}。请仅使用这段已核实信息更新产品草稿中对应字段；如仍缺少录入所需数据，请明确保留待核查项。`,
       );
@@ -133,18 +133,9 @@ export function useWorkflowHandlers(state: AppState) {
 
   /** 启动自动录入；切到 vbk 阶段并打开浏览器面板。 */
   const startAutomation = async () => {
-    if (!product || !readiness.ready) return;
-    setStage("vbk");
-    setNotice(null);
-    setBrowserOpen(true);
-    setLoading(true);
-    try {
-      await api()!.automation.start(product.id);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "自动录入失败，可在 VBK 中检查后重试。");
-    } finally {
-      setLoading(false);
-    }
+    if (!product) return;
+    setStage("review");
+    setNotice("请在左侧「方案协作」确认当前方案后开始录入。");
   };
 
   /** 发送停止信号；当前 in-flight 阶段会自然结束后停止后续阶段。 */
@@ -153,7 +144,7 @@ export function useWorkflowHandlers(state: AppState) {
     setStoppingAutomation(true);
     setNotice(null);
     try {
-      await api()!.automation.stop(product.id);
+      await api()!.agent.pause(product.id);
       setNotice("已发送停止信号，当前阶段完成后将中止自动录入。" );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "发送停止信号失败。");
@@ -192,8 +183,9 @@ export function useWorkflowHandlers(state: AppState) {
     setNotice(null);
     setRetryingPhase(phaseName);
     try {
-      await api()!.automation.retryOnePhase(product.id, phaseName);
-      setNotice(`已重新执行：${phaseDisplayLabel(phaseName)}。`);
+      setStage("review");
+      await api()!.agent.send(product.id, `请检查并修复${phaseDisplayLabel(phaseName)}阶段，先展示修复后的方案并请求最终确认，再继续录入。`);
+      setNotice("已在方案协作中开始检查，请在左侧查看进展并确认方案。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "重新执行失败，请在 VBK 中检查后重试。");
     } finally {

@@ -41,7 +41,11 @@ test("renderer 订阅实时事件，按当前 localProductId 防串扰，卸载�
   assert.match(subscription![0], /planningEventVersionRef\.current \+= 1/,
     "收到当前产品的实时状态后必须推进版本，防止旧 lookup 覆盖新事件");
   assert.match(subscription![0], /setPlanningState\(next\)/);
-  assert.match(subscription![0], /setPlanningStateLoadedLocalProductId\(localProductId\)/);
+  // The old loaded flag gated renderer auto-start, which Agent startup now owns.
+  const agentSession=read("src/renderer/app/views/workspace/use-agent-session.ts");
+  assert.match(agentSession, /next.localProductId !== productRef.current/);
+  assert.match(agentSession, /before === broadcastRevision/);
+  assert.match(agentSession, /unsubscribe\(\)/);
 });
 
 test("首次进入产品只做单次 planning.state 补偿，运行期不得建立 planning interval", () => {

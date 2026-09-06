@@ -78,6 +78,13 @@ export async function ensureTrafficLinePhase({
         progress = { ...progress, endpointPlan };
         persist();
       },
+      onUnavailableVariants: (unavailableVariants) => {
+        progress = { ...progress, unavailableVariants };
+        persist();
+        for (const [variant, reason] of Object.entries(unavailableVariants)) {
+          log(`${variant === "flightRoundTrip" ? "飞机" : "火车"}子产品录入前查询不可用，已跳过：${reason}`, "warning");
+        }
+      },
       onRejectedTrainStationCodes: (codes: string[]) => {
         progress = { ...progress, rejectedTrainStationCodes: [...codes] };
         persist();
@@ -100,6 +107,9 @@ export async function ensureTrafficLinePhase({
     lineDescription: child.lineDescription,
   }));
   log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
+  for (const item of result.skipped ?? []) {
+    log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品无可售资源，已跳过且不会自动重试：${item.reason}`, "warning");
+  }
   progress = { ...progress, failureReason: undefined, verifiedAt: new Date().toISOString() };
   persist();
   // 创建/复用计数需由 future checkpoint 记录；不以本轮 API 返回猜测。

@@ -36,7 +36,7 @@ test("明确游览景点即使被模型标为 activity 也会纠正为 POI", () 
     preferences: [],
     activities: [{ id: "ignored", day: 2, title: "游览翠湖公园", kind: "activity" }],
   });
-  assert.deepEqual(intent.activities, [{ id: "user-1", day: 2, title: "翠湖公园", kind: "poi" }]);
+  assert.deepEqual(intent.activities, [{ id: "user-1", day: 2, title: "翠湖公园", kind: "poi", alternatives: ["翠湖公园"] }]);
   assert.deepEqual(userPoiCandidateSeeds(intent), [{
     requestedName: "翠湖公园", status: "proposed", source: "user", userActivityId: "user-1", preferredDay: 2,
   }]);
@@ -77,7 +77,7 @@ test("场所加体验或自由活动时仍提取场所 POI，纯手作活动保�
   ]);
 });
 
-test("用户 POI 二选一默认采用第一个独立名称，并保留备选和讲解诉求", () => {
+test("用户 POI 二选一拆成独立名称，并保留备选和讲解诉求", () => {
   const intent = parsePlanningUserIntent("D2 日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】", {
     preferences: [],
     activities: [{
@@ -204,22 +204,15 @@ test("二选一首项未命中时按顺序核验后项，不把默认项当成�
   }, () => plan, (next) => { plan = next; });
   assert.equal(result.ok, true);
   assert.deepEqual(queries, ["甲景点", "拉萨甲景点", "甲景点别名", "乙景点"]);
-  assert.deepEqual(plan.poiCandidates, [{
-    requestedName: "乙景点",
-    status: "resolved",
-    source: "user",
-    userActivityId: "user-1",
-    preferredDay: 1,
-    alternativeNames: ["甲景点", "乙景点"],
-    selectedAlternativeIndex: 1,
-    poiId: 2,
-    poiName: "乙景点",
-    province: "西藏",
-    city: "拉萨",
-  }]);
+  const selected = plan.poiCandidates[0];
+  assert.equal(selected?.status, "resolved");
+  assert.equal(selected?.poiId, 2);
+  assert.equal(selected?.poiName, "乙景点");
+  assert.equal(selected?.selectedAlternativeIndex, 1);
+  assert.deepEqual(selected?.alternativeNames, ["甲景点", "乙景点"]);
 });
 
-test("二选一首项可用时仍核验全部选项，但保持首项优先", async () => {
+test("二选一多个可用时全部查出并作为同日同段备选入行程", async () => {
   let plan = {
     ...createPlanningPlanV2(),
     userIntent: parsePlanningUserIntent("第一天甲景点或者乙景点二选一", {
@@ -242,7 +235,53 @@ test("二选一首项可用时仍核验全部选项，但保持首项优先", as
   }, () => plan, (next) => { plan = next; });
   assert.equal(result.ok, true);
   assert.deepEqual(queries, ["甲景点", "乙景点"]);
-  assert.equal(plan.poiCandidates[0].poiName, "甲景点");
+  assert.deepEqual(plan.poiCandidates.map((candidate) => ({
+    requestedName: candidate.requestedName,
+    status: candidate.status,
+    poiName: candidate.poiName,
+    poiId: candidate.poiId,
+    userActivityId: candidate.userActivityId,
+    selectedAlternativeIndex: candidate.selectedAlternativeIndex,
+  })), [
+    {
+      requestedName: "甲景点",
+      status: "resolved",
+      poiName: "甲景点",
+      poiId: 1,
+      userActivityId: "user-1",
+      selectedAlternativeIndex: 0,
+    },
+    {
+      requestedName: "乙景点",
+      status: "resolved",
+      poiName: "乙景点",
+      poiId: 2,
+      userActivityId: "user-1",
+      selectedAlternativeIndex: 1,
+    },
+  ]);
+  const expanded = expandVerifiedItinerary({
+    days: 1,
+    userIntent: plan.userIntent,
+    pool: plan.poiCandidates,
+    drafts: [{ day: 1, title: "备选游览", description: "游览备选点", poiIds: [1, 2], meals: "午餐自理", mealDescriptions: ["", "午餐自理", ""] }],
+  });
+  assert.equal(expanded.ok, true);
+  if (!expanded.ok) return;
+  assert.match(String(expanded.itinerary[0].description), /甲景点或乙景点/);
+  assert.deepEqual((expanded.itinerary[0].spots as Array<{ timeOfDay: string; relation: string }>).map((spot) => spot.timeOfDay), ["morning", "morning"]);
+  assert.deepEqual((expanded.itinerary[0].spots as Array<{ relation: string }>).map((spot) => spot.relation), ["or", "or"]);
+  const split = expandVerifiedItinerary({
+    days: 1,
+    userIntent: plan.userIntent,
+    pool: [
+      ...plan.poiCandidates,
+      { requestedName: "丙景点", status: "resolved", source: "user", userActivityId: "user-2", preferredDay: 1, poiId: 3, poiName: "丙景点", province: "西藏", city: "拉萨" },
+    ],
+    drafts: [{ day: 1, title: "备选游览", description: "游览备选点", poiIds: [1, 3, 2], meals: "午餐自理", mealDescriptions: ["", "午餐自理", ""] }],
+  });
+  assert.equal(split.ok, false);
+  if (!split.ok) assert.match(split.reason, /必须连续放在同一段行程/);
 });
 
 test("未命中 POI 的用户活动保留在原日期并落为 other", () => {

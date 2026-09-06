@@ -209,7 +209,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             log(`basic 阶段开始（reason=${shouldRefill.reason}）`);
             if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
             // basicInfoSaved 已确认但 product 无缺失 → 跳过填充，直接标记完成。
-            if (shouldRefill.reason === "complete") {
+            if (!ctx.agentControlled && shouldRefill.reason === "complete") {
               log("basic 阶段无需重填，跳过 fillAndSaveBasicInfo");
               return;
             }
@@ -244,6 +244,17 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
                   resourceName: String(hr.resourceName),
                   hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
                   diamond: hr.diamond as 3 | 4 | 5,
+                };
+                ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "automating");
+              }
+              if (hr.source === "ctrip" && hr.resourceName) {
+                productData.operations!.hotelResource = {
+                  source: "ctrip",
+                  resourceName: String(hr.resourceName),
+                  hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
+                  diamond: hr.diamond as 3 | 4 | 5,
+                  candidates: productData.itinerary.find((day: any) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
+                  dailyCandidates: (hr as any).dailyCandidates,
                 };
                 ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "automating");
               }
@@ -293,7 +304,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             log(`阶段 ${phaseName} 已通过远端回读；${nextPhase ? `可从 ${nextPhase} 继续剩余录入。` : "等待继续录入。"}`);
             ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "review");
           }
-          if (run.status === "succeeded") {
+          if (run.status === "succeeded" && !ctx.agentControlled) {
             await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
             log("产品草稿已保存，未提交审核、未发布。", "warning");
             ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "draft_saved");

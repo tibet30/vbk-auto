@@ -58,3 +58,18 @@ export function hotelCandidateMatchesTier(candidate: unknown, hotelTier: unknown
   const grade = diamond === 5 ? "5(?:钻|星)" : `${diamond}钻`;
   return new RegExp(`(?:^|[，,\\s])${grade}(?:$|[，,\u3001】\\s])`).test(candidate);
 }
+
+/**
+ * 仅在用户明确写出档次时推断；未写明则返回 undefined，保留模板默认。
+ * 多个档次同时出现时取表述中最后一次，便于“不要五钻，改住四钻”这类纠正。
+ */
+export function inferHotelTierFromUserText(text: unknown): string | undefined {
+  if (typeof text !== "string" || !text.trim()) return undefined;
+  const matches = [...text.matchAll(/当地\s*([345])\s*钻|(?<![0-9])([345])\s*钻|(?<![0-9])([345])\s*星|[四五三]钻|[四五三]星级?/g)];
+  if (!matches.length) return undefined;
+  const last = matches[matches.length - 1]![0];
+  if (/[5五]/.test(last)) return HOTEL_TIER_VALUES[0];
+  if (/[4四]/.test(last)) return HOTEL_TIER_VALUES[1];
+  if (/[3三]/.test(last)) return HOTEL_TIER_VALUES[2];
+  return undefined;
+}

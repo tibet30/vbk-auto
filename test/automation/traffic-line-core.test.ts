@@ -15,9 +15,14 @@ import {
 } from "../../src/main/automation/ctrip/traffic-line/orchestrator.ts";
 import { normaliseTrafficLineExistingChildren } from "../../src/main/automation/ctrip/traffic-line/api.ts";
 import { isTrafficLineChildActive } from "../../src/main/automation/ctrip/traffic-line/relationships.ts";
-import { trainEndpointNeedsReplacement } from "../../src/main/automation/ctrip/traffic-line/main.ts";
+import {
+  isUnavailableTrafficResourceFailure,
+  trafficLineChildShouldBeSkipped,
+  trainEndpointNeedsReplacement,
+} from "../../src/main/automation/ctrip/traffic-line/main.ts";
 import {
   deriveTrafficLineCities,
+  preflightTrafficLineEndpoints,
   resolveTrafficLineEndpoints,
   resolveTrafficLineCities,
   selectUniqueTrafficLineStation,
@@ -155,6 +160,30 @@ test("多个机场必须由站点消歧器选中真实唯一候选", async () =>
   assert.equal(calls.length, 2);
 });
 
+test("录入前按交通方式独立查询，无机场时跳过飞机但保留可用火车", async () => {
+  const page = {
+    evaluate: async (_fn: unknown, request: any) => ({
+      status: 200,
+      durationMs: 1,
+      ctx: {},
+      payload: request.endpoint.includes("suggestTrainStation")
+        ? { ResponseStatus: { Ack: "Success" }, trainStations: [
+          { stationNo: 92, stationName: "日喀则", locationCode: "CN001RKO" },
+        ] }
+        : { ResponseStatus: { Ack: "Success" }, airports: [] },
+    }),
+  } as any;
+  const availability = await preflightTrafficLineEndpoints(
+    page,
+    [{ spots: [{ city: "日喀则" }] }],
+    new Date("2026-09-06T00:00:00.000Z"),
+  );
+  assert.deepEqual(availability.availableVariants, ["trainRoundTrip"]);
+  assert.equal(availability.endpointPlan.flight, undefined);
+  assert.equal(availability.endpointPlan.train?.arrival.code, "CN001RKO");
+  assert.match(availability.unavailableVariants.flightRoundTrip ?? "", /未找到唯一可确认的机场候选/);
+});
+
 test("同城多火车站只消歧一次，并排除已被资源校验拒绝的站码", async () => {
   let apiCalls = 0;
   let disambiguationCalls = 0;
@@ -207,6 +236,20 @@ test("只有正式资源零城市失败才允许替换已持久化火车站", ()
   assert.equal(trainEndpointNeedsReplacement([{ ...base, failureReason: "子产品资源回读缺少多出发城市，不能激活套餐。" }]), true);
   assert.equal(trainEndpointNeedsReplacement([{ ...base, failureReason: "当前用户未登录" }]), false);
   assert.equal(trainEndpointNeedsReplacement([{ ...base, failedStage: "itinerarySaved", failureReason: "缺少多出发城市" }]), false);
+});
+
+test("平台明确无可售资源时跳过该子产品，避免恢复时重复写入", () => {
+  const reason = "子产品资源校验后没有任何可用的多出发城市（站点：日喀则/日喀则），未激活套餐。";
+  assert.equal(isUnavailableTrafficResourceFailure(reason), true);
+  assert.equal(isUnavailableTrafficResourceFailure("浏览器请求超时"), false);
+  assert.equal(trafficLineChildShouldBeSkipped({
+    variant: "trainRoundTrip",
+    lineDescription: "火车往返",
+    completedStages: ["planned", "stationsResolved", "childCreated", "presentationCopied"],
+    verified: false,
+    failedStage: "resourcesSaved",
+    failureReason: reason,
+  }), true);
 });
 
 test("多个机场缺少安全消歧器时阻断，不按城市字样误选境外机场", async () => {

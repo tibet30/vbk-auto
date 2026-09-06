@@ -7,6 +7,9 @@ import type { ProductWorkflowCoordinator } from "../application/product-workflow
 import type { ProductMutationService } from "../application/product-mutation-service.js";
 import type { TibetProductService } from "../infrastructure/tibet-products.js";
 import type { VbkBindingSync } from "../infrastructure/vbk-binding-sync.js";
+import type { AgentCore } from "../agent/core.js";
+import type { MemoryService } from "../memory/memory-service.js";
+import type { AgentSnapshot } from "../../shared/contracts.js";
 import type {
   AiProvider,
   Planner,
@@ -57,6 +60,11 @@ export interface MainIpcContext {
   detectProviderIdInMain: () => Promise<number | null>;
   emitProductIfKnown: (accountName: string, info: unknown) => void;
   logPoiManualIpc: (event: string, context: Record<string, unknown>) => void;
+  /** Durable product-scoped agent loop; absent only while bootstrap is incomplete. */
+  agentCore?: AgentCore;
+  /** 登录用户隔离的本地记忆服务。 */
+  memoryService?: MemoryService;
+  emitAgentSnapshot?: (snapshot: AgentSnapshot) => void;
   /** 新产品三阶段规划；由 planning IPC 注册后注入，供一键创建编排复用。 */
   startPlanning?: (localProductId: string) => Promise<PlanningRunResult>;
   /** 应用重启后的规划续跑；保留已完成节点，不重置 foundation。 */

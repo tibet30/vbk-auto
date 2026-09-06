@@ -50,6 +50,18 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /礼佛/,
   },
   {
+    term: "朝圣",
+    reason: "VBK 产品图文接口实跑会判定为非法关键词",
+    alternatives: ["寺院人文参观", "藏地文化体验", "游览寺院建筑"],
+    pattern: /朝圣/,
+  },
+  {
+    term: "贵族",
+    reason: "VBK 产品图文接口实跑会判定为非法关键词",
+    alternatives: ["历史宅邸", "旧时庄园", "传统庄园文化"],
+    pattern: /贵族/,
+  },
+  {
     term: "旅游意外险",
     reason: "产品权益未经核实，且 VBK 产品图文实跑会判定相关表述为非法关键词",
     alternatives: ["直接删除该表述，不提及保险权益"],

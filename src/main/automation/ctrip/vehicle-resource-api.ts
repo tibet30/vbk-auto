@@ -236,8 +236,17 @@ export async function verifyVehicleResourceBinding(page: any, productId: string,
   };
 }
 
-/** 页面操作未落库时，按 Tour Helper 的 saveSegment/submitSegments 协议补写并回读。 */
-export async function ensureVehicleResourceBinding(page: any, productId: string, groupId: number, groupName: string) {
+/**
+ * 仅把用车组写入当前资源草稿并立即回读。交通子产品会在同一次资源提交中
+ * 结算草稿，因此不能先单独 submitSegments，否则会抢先触发“缺少交通段”校验。
+ */
+export async function ensureVehicleResourceGroupDraft(
+  page: any,
+  productId: string,
+  groupId: number,
+  groupName: string,
+  options: { verifyDraft?: boolean } = {},
+) {
   const current: any = await ensureResourceSegmentsDraftApi(page, productId);
   const segments = segmentsFromPayload(current);
   if (!segments.length) throw new Error("VBK 资源配置未返回任何行程段");
@@ -257,7 +266,15 @@ export async function ensureVehicleResourceBinding(page: any, productId: string,
   for (const segment of surplus) {
     await saveProductSegmentApi(page, withoutResourceGroup(segment, String(groupId)));
   }
-  if (targetMissing || surplus.length) await submitResourceSegmentsApi(page, productId);
+  if (!options.verifyDraft) {
+    return {
+      changed: targetMissing || surplus.length > 0,
+      resourceGroupId: groupId,
+      via: "tour-helper-api",
+      segmentCount: segments.length,
+      targetSegmentId: String(fullTripSegment.segmentId),
+    };
+  }
   const after = await getProductSegmentsApi(page, productId);
   const afterSegments = segmentsFromPayload(after);
   const matchedAfter = matchingSegments(after, String(groupId));
@@ -266,12 +283,23 @@ export async function ensureVehicleResourceBinding(page: any, productId: string,
     throw new Error(`接口回读确认失败：用车资源组 ${groupId} 应仅绑定全程首段，实际绑定 ${matchedAfter.length}/${afterSegments.length} 个行程段`);
   }
   return {
+    changed: targetMissing || surplus.length > 0,
     resourceGroupId: groupId,
-    audited: true,
     via: "tour-helper-api",
     segmentCount: afterSegments.length,
     targetSegmentId: String(targetAfter.segmentId),
   };
+}
+
+/** 页面操作未落库时，按 Tour Helper 的 saveSegment/submitSegments 协议补写并回读。 */
+export async function ensureVehicleResourceBinding(page: any, productId: string, groupId: number, groupName: string) {
+  const draft = await ensureVehicleResourceGroupDraft(page, productId, groupId, groupName);
+  if (draft.changed) await submitResourceSegmentsApi(page, productId);
+  const verified = await verifyVehicleResourceBinding(page, productId, groupId);
+  if (!verified.bound) {
+    throw new Error(`接口回读确认失败：用车资源组 ${groupId} 应仅绑定全程首段，实际绑定 ${verified.matchedCount}/${verified.segmentCount} 个行程段`);
+  }
+  return { ...draft, audited: true };
 }
 
 /** 正式自动录入入口：严格只走接口，不根据当前页面 URL 回退 DOM。 */

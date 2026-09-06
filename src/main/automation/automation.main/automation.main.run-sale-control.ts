@@ -97,10 +97,10 @@ export async function runSaleControlPhase(
       throw new Error(outcome.finalError || "销售控制重新执行未完成，请在 VBK 中确认后重试。");
     }
 
-    run.status = "succeeded";
+    run.status = ctx.agentControlled ? "queued" : "succeeded";
     run.currentPhase = undefined;
     log("销售控制已完成，产品壳 productId 已保存。", "info");
-    ctx.db.setProductLifecycle(localProductId, { status: "draft_saved" });
+    ctx.db.setProductLifecycle(localProductId, { status: ctx.agentControlled ? "review" : "draft_saved" });
     persist();
   } catch (error) {
     if (error instanceof Error && error.message === "用户中止了自动录入") return;

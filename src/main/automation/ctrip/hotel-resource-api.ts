@@ -20,13 +20,16 @@ export async function ensureHotelResourceApi(
   product: any,
   productId: string,
 ) {
-  const needsHotel = product.itinerary?.some((day: any) => Boolean(day.hotel));
+  const needsHotel = product.itinerary?.some(hasPlannedHotel);
   if (!needsHotel) return { skipped: "行程不含住宿", verified: true };
   const hotelTier = product.operations?.hotelTier;
   const diamond = hotelDiamondFromTier(hotelTier);
   if (!diamond) throw new Error(`酒店等级配置无效：${String(hotelTier || "未配置")}`);
-  const resolvedDays = product.itinerary.filter((day: any) => Boolean(day.hotel));
-  if (product.operations?.hotelResource?.source === "ctrip") {
+  const resolvedDays = product.itinerary.filter(hasPlannedHotel);
+  const hasDailyCandidates = resolvedDays.every((day: any) => Array.isArray(day.hotelCandidates)
+    && day.hotelCandidates.length >= HOTEL_RESOURCE_MIN_CANDIDATE_COUNT);
+  const source = product.operations?.hotelResource?.source === "ctrip" || hasDailyCandidates ? "ctrip" : "package-api";
+  if (source === "ctrip") {
     const missingCandidates = resolvedDays.filter((day: any) => !Array.isArray(day.hotelCandidates)
       || day.hotelCandidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT
       || day.hotelCandidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT
@@ -46,7 +49,6 @@ export async function ensureHotelResourceApi(
   if (!lodging.length) throw new Error("行程含住宿，但资源接口未返回正住宿段");
   // 套餐与全程用车属于首个全程段；住宿段只承载“指定酒店”。
   // 因此不能以正住宿段是否携带套餐作为酒店保存前提。
-  const source = product.operations?.hotelResource?.source === "ctrip" ? "ctrip" : "package-api";
   const resourceSegments = source === "ctrip" ? ctripResourceSegments(resolvedDays, lodging) : [];
   const ctripResource = source === "ctrip"
     ? await syncCtripHotelResources({
@@ -57,6 +59,7 @@ export async function ensureHotelResourceApi(
     : undefined;
   return {
     source,
+    resourceName: source === "ctrip" ? String(resolvedDays[0]?.hotel ?? "") : undefined,
     packageManaged: true,
     verified: true,
     hotelTier,
@@ -71,6 +74,12 @@ export async function ensureHotelResourceApi(
       }
       : {}),
   };
+}
+
+/** "无" 是明确的不住宿意图，不能被当作一个可配置酒店。 */
+function hasPlannedHotel(day: any) {
+  const hotel = String(day?.hotel ?? "").trim();
+  return Boolean(hotel) && hotel !== "无";
 }
 
 /**
@@ -90,11 +99,27 @@ async function normalizeHotelResourceLayout(args: {
   const [fullTrip] = segments;
   if (!fullTrip) throw new Error("VBK 资源配置未返回全程行程段");
 
-  const existingLodging = lodgingSegments(segments);
-  assertLodgingPrefix(existingLodging, expected);
-  if (existingLodging.length > expected.length) {
-    throw new Error(`住宿资源行程段超过行程住宿城市数：已有 ${existingLodging.length} 段，期望 ${expected.length} 段`);
+  let existingLodging = lodgingSegments(segments);
+  // 旧版本会把 hotel: "无" 误建成住宿段。该段没有用户酒店资源，且平台标为
+  // deleteable；不删除记录，只归零住宿与房间，避免 D2 的“不住宿”被继续配置。
+  const excess = existingLodging.slice(expected.length);
+  if (excess.length) {
+    if (excess.some((segment: any) => segment.segmentBase?.deleteable !== true)) {
+      throw new Error(`住宿资源行程段超过行程住宿城市数且不可安全归零：已有 ${existingLodging.length} 段，期望 ${expected.length} 段`);
+    }
+    for (const segment of excess) {
+      await saveProductSegmentApi(args.page, {
+        ...segment,
+        segmentBase: { ...segment.segmentBase, stayNights: 0, minStayNights: 0, maxStayNights: 0 },
+        hotel: { ...(segment.hotel ?? {}), segmentRooms: [] },
+      }, "VBK 清理无住宿日的错误资源段");
+    }
+    await submitResourceSegmentsApi(args.page, args.productId);
+    payload = await getProductSegmentsApi(args.page, args.productId);
+    segments = segmentsFromPayload(payload);
+    existingLodging = lodgingSegments(segments);
   }
+  assertLodgingPrefix(existingLodging, expected);
 
   let created = 0;
   while (lodgingSegments(segments).length < expected.length) {

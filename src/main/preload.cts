@@ -25,6 +25,16 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { VbkApi } from "../shared/contracts.js";
 
 const api: VbkApi = {
+  agent: {
+    get: (id) => ipcRenderer.invoke("agent:get", id),
+    send: (id, content) => ipcRenderer.invoke("agent:send", id, content),
+    repairIllegalKeywords: (id, input) => ipcRenderer.invoke("agent:repairIllegalKeywords", id, input),
+    respond: (id, response) => ipcRenderer.invoke("agent:respond", id, response),
+    approve: (id, response) => ipcRenderer.invoke("agent:approve", id, response),
+    pause: (id) => ipcRenderer.invoke("agent:pause", id),
+    resume: (id) => ipcRenderer.invoke("agent:resume", id),
+    abandon: (id) => ipcRenderer.invoke("agent:abandon", id),
+  },
   appAuth: {
     status: () => ipcRenderer.invoke("appAuth:status"),
     listAccounts: () => ipcRenderer.invoke("appAuth:listAccounts"),
@@ -106,6 +116,7 @@ const api: VbkApi = {
     searchCtripLibraryImages: (args) => ipcRenderer.invoke("cover:searchCtripLibraryImages", args),
   },
   events: {
+    onAgentUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, snapshot: unknown) => listener(snapshot as never); ipcRenderer.on("agent:updated", handler); return () => ipcRenderer.removeListener("agent:updated", handler); },
     onProductUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, product: unknown) => listener(product as never); ipcRenderer.on("product:updated", handler); return () => ipcRenderer.removeListener("product:updated", handler); },
     onWorkflowTaskUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, task: unknown) => listener(task as never); ipcRenderer.on("workflow-task:updated", handler); return () => ipcRenderer.removeListener("workflow-task:updated", handler); },
     onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, localProductId: unknown, state: unknown) => listener(localProductId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
@@ -123,6 +134,16 @@ const api: VbkApi = {
     state: (localProductId) => ipcRenderer.invoke("planning:state", localProductId),
     rerunMajorStage: (localProductId, stage) => ipcRenderer.invoke("planning:rerunMajorStage", localProductId, stage),
     acceptItineraryAndRerunCompletion: (localProductId) => ipcRenderer.invoke("planning:acceptItineraryAndRerunCompletion", localProductId),
+  },
+  memory: {
+    saveExplicit: (localProductId, input) => ipcRenderer.invoke("memory:saveExplicit", localProductId, input),
+    list: (localProductId, filter) => ipcRenderer.invoke("memory:list", localProductId, filter),
+    get: (localProductId, id) => ipcRenderer.invoke("memory:get", localProductId, id),
+    update: (localProductId, id, patch) => ipcRenderer.invoke("memory:update", localProductId, id, patch),
+    disable: (localProductId, id) => ipcRenderer.invoke("memory:disable", localProductId, id),
+    delete: (localProductId, id) => ipcRenderer.invoke("memory:delete", localProductId, id),
+    maintenance: (localProductId) => ipcRenderer.invoke("memory:maintenance", localProductId),
+    settings: (localProductId, settings) => ipcRenderer.invoke("memory:settings", localProductId, settings),
   },
 };
 contextBridge.exposeInMainWorld("vbk", api);

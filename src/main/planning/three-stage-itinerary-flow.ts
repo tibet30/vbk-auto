@@ -263,13 +263,22 @@ async function resolveCandidates(
         ? { disambiguate: deps.ai.disambiguatePoiCandidate.bind(deps.ai) }
         : {}),
     });
-    checked = await resolveUserPoiAlternatives(deps, candidates, checked, plan);
+    const withAlternatives = await resolveUserPoiAlternatives(deps, candidates, checked, plan);
+    checked = withAlternatives.checked;
+    const updatedCandidates = plan.poiCandidates.map((item) => {
+      const index = candidates.indexOf(item);
+      return index < 0 ? item : { ...item, ...checked[index] };
+    });
+    const existingAlternativeKeys = new Set(updatedCandidates.map(alternativeCandidateKey));
+    const appendedAlternatives = withAlternatives.additional.filter((item) => {
+      const key = alternativeCandidateKey(item);
+      if (existingAlternativeKeys.has(key)) return false;
+      existingAlternativeKeys.add(key);
+      return true;
+    });
     const next = {
       ...plan,
-      poiCandidates: plan.poiCandidates.map((item) => {
-        const index = candidates.indexOf(item);
-        return index < 0 ? item : { ...item, ...checked[index] };
-      }),
+      poiCandidates: [...updatedCandidates, ...appendedAlternatives],
     };
     logPlanningPoiEvent({ localProductId: deps.localProductId }, "批次汇总", {
       target: candidates.map((item) => item.requestedName).join("、"),
@@ -286,16 +295,17 @@ async function resolveCandidates(
 }
 
 /**
- * “默认第一项”只表示优先级，不表示唯一候选。对用户给出的每个选项都做
- * 同一套真实 POI、地域和营业校验，再按原始顺序选第一个可用项。
+ * “二选一/或者”在平台录入里按同日并列备选处理：每个用户给出的选项都做
+ * 同一套真实 POI、地域和营业校验，可用项全部保留给行程录入。
  */
 async function resolveUserPoiAlternatives(
   deps: ThreeStageItineraryDependencies,
   candidates: PlanningPoiCandidate[],
   checked: PlanningPoiCandidate[],
   plan: PlanningPlanV2,
-): Promise<PlanningPoiCandidate[]> {
+): Promise<{ checked: PlanningPoiCandidate[]; additional: PlanningPoiCandidate[] }> {
   const next = [...checked];
+  const additional: PlanningPoiCandidate[] = [];
   for (const [index, candidate] of candidates.entries()) {
     const first = checked[index];
     const alternatives = candidate.alternativeNames?.slice(1) ?? [];
@@ -314,17 +324,44 @@ async function resolveUserPoiAlternatives(
       logContext: { localProductId: deps.localProductId },
       ...(deps.ai.disambiguatePoiCandidate ? { disambiguate: deps.ai.disambiguatePoiCandidate.bind(deps.ai) } : {}),
     });
-    const selectedIndex = [first, ...fallbacks].findIndex((option) => option.status === "resolved");
-    if (selectedIndex > 0) {
-      const fallback = fallbacks[selectedIndex - 1];
-      next[index] = { ...fallback, alternativeNames: candidate.alternativeNames, selectedAlternativeIndex: selectedIndex };
-      logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项核验选中", {
-        target: candidate.requestedName, selectedName: fallback.poiName, selectedAlternativeIndex: selectedIndex,
+    const ranked = [first, ...fallbacks].map((option, selectedAlternativeIndex) => ({ option, selectedAlternativeIndex }));
+    const usable = ranked.filter((item) => item.option.status === "resolved");
+    if (usable.length > 0) {
+      const names = usable.map((item) => item.option.poiName || item.option.requestedName).join("、");
+      const [primary, ...rest] = usable;
+      next[index] = {
+        ...primary.option,
+        alternativeNames: candidate.alternativeNames,
+        selectedAlternativeIndex: primary.selectedAlternativeIndex,
+      };
+      additional.push(...rest.map((item) => ({
+        ...item.option,
+        source: "user" as const,
+        userActivityId: candidate.userActivityId,
+        preferredDay: candidate.preferredDay,
+        alternativeNames: candidate.alternativeNames,
+        selectedAlternativeIndex: item.selectedAlternativeIndex,
+        reason: `同组备选 POI：${candidate.alternativeNames?.join("或")}`,
+      })));
+      logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项核验保留", {
+        target: candidate.requestedName, usable: names, count: usable.length,
       });
-    } else if (selectedIndex === 0) {
-      logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项核验选中", {
-        target: candidate.requestedName, selectedName: first.poiName, selectedAlternativeIndex: 0,
+    } else {
+      const details = ranked.map((item) => {
+        const label = item.selectedAlternativeIndex === 0
+          ? candidate.requestedName
+          : alternatives[item.selectedAlternativeIndex - 1] || item.option.requestedName;
+        return `「${label}」${item.option.reason || "不可用"}`;
       });
+      next[index] = {
+        ...first,
+        status: "rejected",
+        alternativeNames: candidate.alternativeNames,
+        reason: `候选地点均不可用：${details.join("；")}。请补充可替换的地点，或其他安排意见。`,
+      };
+      logPlanningPoiEvent({ localProductId: deps.localProductId }, "多选项均不可用", {
+        target: candidate.requestedName, reason: next[index].reason,
+      }, "warn");
     }
     for (const [offset, fallback] of fallbacks.entries()) {
       if (fallback.status !== "resolved") {
@@ -335,7 +372,16 @@ async function resolveUserPoiAlternatives(
       }
     }
   }
-  return next;
+  return { checked: next, additional };
+}
+
+function alternativeCandidateKey(candidate: PlanningPoiCandidate): string {
+  return [
+    candidate.userActivityId || "",
+    candidate.selectedAlternativeIndex ?? "",
+    candidate.poiId ?? "",
+    candidate.requestedName,
+  ].join("|");
 }
 
 async function fail(patchNode: PatchNode, getPlan: () => PlanningPlanV2, id: PlanningNodeId, error: string) {

@@ -431,11 +431,12 @@ test("展开后的每日文案强制首尾餐食边界，并把景点拆为上�
   });
   assert.equal(expanded.ok, true);
   if (!expanded.ok) return;
-  const [first, last] = expanded.itinerary as Array<{ description: string; meals: string; mealDescriptions: string[]; spots: Array<{ timeOfDay: string }> }>;
+  const [first, last] = expanded.itinerary as Array<{ description: string; meals: string; mealDescriptions: string[]; spots: Array<{ timeOfDay: string; relation: string }> }>;
   assert.equal(first.meals, "午餐自理；晚餐自理");
   assert.deepEqual(first.mealDescriptions, ["", "午餐自理", "晚餐自理"]);
   assert.match(first.description, /^上午游览甲景点；午餐自理；下午游览乙景点；晚餐自理；入住当地住宿/);
   assert.deepEqual(first.spots.map((spot) => spot.timeOfDay), ["morning", "afternoon"]);
+  assert.deepEqual(first.spots.map((spot) => spot.relation), ["and", "and"]);
   assert.equal(last.meals, "是否含餐，以酒店房型为准；午餐自理");
   assert.deepEqual(last.mealDescriptions, ["是否含餐，以酒店房型为准。", "午餐自理", ""]);
   assert.doesNotMatch(last.description, /晚餐/);

@@ -138,6 +138,7 @@ export function expandVerifiedItinerary(args: {
     const matchedPoiNames = draft.poiIds
       .map((poiId) => pool.get(poiId)?.poiName)
       .filter((poiName): poiName is string => Boolean(poiName));
+    const displayUnits = itineraryDisplayUnits(draft.poiIds, pool);
     const otherActivities = args.userIntent
       ? otherActivitiesForDay({
         intent: args.userIntent,
@@ -161,12 +162,22 @@ export function expandVerifiedItinerary(args: {
       if (missing) {
         return { ok: false, reason: `第 ${draft.day} 天遗漏用户指定的 POI ${missing}` };
       }
+      const splitGroup = findSplitUserAlternativeGroup(draft.poiIds, pool);
+      if (splitGroup) {
+        return { ok: false, reason: `第 ${draft.day} 天用户备选 POI「${splitGroup}」必须连续放在同一段行程` };
+      }
     }
     if (!draft.title || !draft.description || (draft.poiIds.length === 0 && otherActivities.length === 0)) {
       return { ok: false, reason: `第 ${index + 1} 天缺少标题、描述或有效活动节点` };
     }
     const spots: Array<Record<string, unknown>> = [];
-    const morningCount = Math.ceil(draft.poiIds.length / 2);
+    const morningCount = Math.ceil(displayUnits.length / 2);
+    const unitByPoiId = new Map<number, number>();
+    const relationByPoiId = new Map<number, "and" | "or">();
+    displayUnits.forEach((unit, unitIndex) => unit.poiIds.forEach((poiId) => {
+      unitByPoiId.set(poiId, unitIndex);
+      relationByPoiId.set(poiId, unit.poiIds.length > 1 ? "or" : "and");
+    }));
     const cities = new Set<string>();
     for (const poiId of draft.poiIds) {
       const candidate = pool.get(poiId);
@@ -184,7 +195,8 @@ export function expandVerifiedItinerary(args: {
         ...(candidate.province ? { province: candidate.province } : {}),
         ...(candidate.city ? { city: candidate.city } : {}),
         ...(candidate.district ? { district: candidate.district } : {}),
-        timeOfDay: spots.length < morningCount ? "morning" : "afternoon",
+        timeOfDay: (unitByPoiId.get(poiId) ?? spots.length) < morningCount ? "morning" : "afternoon",
+        relation: relationByPoiId.get(poiId) ?? "and",
       });
     }
     if (cities.size > 1) return { ok: false, reason: `第 ${index + 1} 天跨越多个城市` };
@@ -195,8 +207,8 @@ export function expandVerifiedItinerary(args: {
       description: buildDailyDescription({
         isFirst: index === 0,
         isLast: index === args.days - 1,
-        morning: matchedPoiNames.slice(0, morningCount),
-        afternoon: matchedPoiNames.slice(morningCount),
+        morning: displayUnits.slice(0, morningCount).map((unit) => unit.label),
+        afternoon: displayUnits.slice(morningCount).map((unit) => unit.label),
         hotel: index < args.days - 1 ? "当地住宿（待匹配）" : "",
       }),
       spots,
@@ -216,6 +228,56 @@ export function expandVerifiedItinerary(args: {
   if (omittedUserPoi) return { ok: false, reason: `用户明确指定的 POI「${omittedUserPoi.poiName || omittedUserPoi.requestedName}」未进入最终行程` };
   if (hasBacktrack(citySequence)) return { ok: false, reason: "跨日路线形成 A→B→A 折返" };
   return { ok: true, itinerary, selectedIds };
+}
+
+function itineraryDisplayUnits(
+  poiIds: number[],
+  pool: Map<number, PlanningPoiCandidate>,
+): Array<{ label: string; poiIds: number[] }> {
+  const units: Array<{ key: string; label: string; poiIds: number[] }> = [];
+  for (const poiId of poiIds) {
+    const candidate = pool.get(poiId);
+    const name = candidate?.poiName;
+    if (!candidate || !name) continue;
+    const key = candidate.source === "user" && candidate.userActivityId
+      ? `user:${candidate.userActivityId}`
+      : `poi:${poiId}`;
+    const previous = units[units.length - 1];
+    if (previous?.key === key) {
+      previous.label = joinAlternativeLabels(previous.label, name);
+      previous.poiIds.push(poiId);
+    } else {
+      units.push({ key, label: name, poiIds: [poiId] });
+    }
+  }
+  return units.map(({ label, poiIds }) => ({ label, poiIds }));
+}
+
+function findSplitUserAlternativeGroup(
+  poiIds: number[],
+  pool: Map<number, PlanningPoiCandidate>,
+): string | undefined {
+  const positionsByActivity = new Map<string, Array<{ index: number; name: string }>>();
+  for (const [index, poiId] of poiIds.entries()) {
+    const candidate = pool.get(poiId);
+    if (candidate?.source !== "user" || !candidate.userActivityId) continue;
+    const positions = positionsByActivity.get(candidate.userActivityId) ?? [];
+    positions.push({ index, name: candidate.poiName || candidate.requestedName });
+    positionsByActivity.set(candidate.userActivityId, positions);
+  }
+  for (const positions of positionsByActivity.values()) {
+    if (positions.length < 2) continue;
+    const indexes = positions.map((item) => item.index);
+    if (Math.max(...indexes) - Math.min(...indexes) + 1 !== positions.length) {
+      return positions.map((item) => item.name).join("或");
+    }
+  }
+  return undefined;
+}
+
+function joinAlternativeLabels(existing: string, next: string): string {
+  const values = existing.split("或").concat(next).map((item) => item.trim()).filter(Boolean);
+  return [...new Set(values)].join("或");
 }
 
 function mealDescriptionsForDay(index: number, totalDays: number): [string, string, string] {

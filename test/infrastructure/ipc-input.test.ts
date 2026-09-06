@@ -46,3 +46,17 @@ test("应用账号切换只接受正整数用户 ID", () => {
     assert.throws(() => validateIpcArguments("appAuth:switchAccount", [value]), /field=userId/);
   }
 });
+
+test("记忆 IPC 校验产品 ID、正文和维护设置", () => {
+  assert.doesNotThrow(() => validateIpcArguments("memory:saveExplicit", ["p-1", {
+    topic: "copywriting",
+    content: "以后文案风格克制一些",
+  }]));
+  assert.doesNotThrow(() => validateIpcArguments("memory:list", ["p-1", { limit: 8, order: "updated" }]));
+  assert.doesNotThrow(() => validateIpcArguments("memory:update", ["p-1", "m-1", { status: "inactive" }]));
+  assert.doesNotThrow(() => validateIpcArguments("memory:settings", ["p-1", { autoCapture: true }]));
+  assert.throws(() => validateIpcArguments("memory:saveExplicit", ["../bad", { topic: "x", content: "y" }]), /field=localProductId/);
+  assert.throws(() => validateIpcArguments("memory:saveExplicit", ["p-1", { topic: "", content: "y" }]), /field=input/);
+  assert.throws(() => validateIpcArguments("memory:list", ["p-1", { limit: 1000 }]), /field=filter/);
+  assert.throws(() => validateIpcArguments("memory:update", ["p-1", "", { status: "inactive" }]), /field=id/);
+});

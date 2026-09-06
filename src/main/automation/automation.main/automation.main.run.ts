@@ -260,8 +260,22 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         package: () => executePhase("package", () => ensurePackageApi(page, product, productId!)),
         pricingInventory: () => executePhase("pricingInventory", () => ensurePricingInventoryApi(page, product, productId!)),
         terms: () => executePhase("terms", () => fillAndSaveTerms(page, product, productId)),
-        hotelResource: () => executePhase("hotelResource", () =>
-          ensureHotelResourceApi(page, product, productId!)),
+        hotelResource: () => executePhase("hotelResource", async () => {
+          const result = await ensureHotelResourceApi(page, product, productId!);
+          if ("source" in result && result.source === "ctrip" && result.verified === true) {
+            const operations = product.operations!;
+            operations.hotelResource = {
+              source: "ctrip",
+              resourceName: result.resourceName ?? String(product.itinerary.find((day) => Boolean(day.hotel))?.hotel ?? "酒店资源"),
+              hotelTier: result.hotelTier,
+              diamond: result.diamond as 3 | 4 | 5,
+              candidates: product.itinerary.find((day) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
+              dailyCandidates: result.dailyCandidates,
+            };
+            ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "automating");
+          }
+          return result;
+        }),
         vehicleResource: () => executePhase("vehicleResource", () => ensureVehicleResourceApi(page, product, productId!)),
         trafficLine: () => executePhase("trafficLine", () => {
           return ensureTrafficLinePhase({

@@ -218,11 +218,11 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   }
 
   async getPoiAvailability(poiId: number) {
-    return getCtripSightAvailability(undefined, poiId);
+    return getCtripSightAvailability(undefined, poiId, this.db);
   }
 
   async getPoiAvailabilities(poiIds: readonly number[]) {
-    return getCtripSightAvailabilities(undefined, poiIds);
+    return getCtripSightAvailabilities(undefined, poiIds, this.db);
   }
 
   async loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>> {

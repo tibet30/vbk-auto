@@ -1,8 +1,9 @@
 /**
  * 线路及交通子产品的持久化契约。
  *
- * 新产品固定规划飞机、火车两个往返子产品；地点和站点必须由已完成的行程
- * 及当前 BrowserView 会话的 VBK 候选接口确认，绝不从创建表单接收。
+ * 新产品默认尝试规划飞机、火车两个往返子产品；地点和站点必须由已完成的行程
+ * 及当前 BrowserView 会话的 VBK 候选接口确认。某种交通没有可确认站点时，
+ * 只跳过该种子产品，绝不从创建表单猜测或创建后再失败。
  */
 
 export const TRAFFIC_LINE_VARIANTS = ["flightRoundTrip", "trainRoundTrip"] as const;
@@ -38,8 +39,8 @@ export interface TrafficLineStation {
 export interface TrafficLineEndpointPlan {
   arrivalCity: string;
   departureCity: string;
-  flight: { arrival: TrafficLineStation; departure: TrafficLineStation };
-  train: { arrival: TrafficLineStation; departure: TrafficLineStation };
+  flight?: { arrival: TrafficLineStation; departure: TrafficLineStation };
+  train?: { arrival: TrafficLineStation; departure: TrafficLineStation };
   resolvedAt: string;
 }
 
@@ -63,6 +64,8 @@ export interface TrafficLineChildProgress {
   childProductId?: string;
   completedStages: TrafficLineChildStage[];
   verified: boolean;
+  /** 平台已明确确认该交通方式没有可售资源；保留子产品记录但不再自动重试。 */
+  skipped?: boolean;
   failedStage?: TrafficLineChildStage;
   failureReason?: string;
 }
@@ -70,6 +73,8 @@ export interface TrafficLineChildProgress {
 /** 仅写入可恢复、已回读的事实；不保存 Cookie、CID 或原始 VBK payload。 */
 export interface TrafficLineWorkflowProgress {
   endpointPlan?: TrafficLineEndpointPlan;
+  /** 录入前的会话查询未确认该交通方式可用；下次运行会重新查询。 */
+  unavailableVariants?: Partial<Record<TrafficLineVariant, string>>;
   /** 正式班期校验已证实无可用出发城市的火车站码；恢复时禁止循环选回。 */
   rejectedTrainStationCodes?: string[];
   children: TrafficLineChildProgress[];

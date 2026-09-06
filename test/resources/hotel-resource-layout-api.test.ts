@@ -20,6 +20,15 @@ const candidates = (start: number, cityId: number, cityName: string) => Array.fr
   anchorCityId: cityId,
 }));
 
+test('酒店字段为“无”时不创建平台酒店资源', async () => {
+  const result = await ensureHotelResourceApi(
+    { evaluate: async (fn: any, arg: any) => fn(arg) },
+    { itinerary: [{ day: 1, hotel: "无" }, { day: 2, hotel: "" }] },
+    "77977327",
+  );
+  assert.deepEqual(result, { skipped: "行程不含住宿", verified: true });
+});
+
 test("新建产品缺少住宿段时，自动按连续城市创建并让停留晚数等于住宿晚数", async () => {
   const oldFetch = globalThis.fetch;
   const oldDocument = (globalThis as any).document;

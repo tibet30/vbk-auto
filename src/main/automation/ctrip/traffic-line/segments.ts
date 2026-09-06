@@ -277,9 +277,8 @@ async function waitForValidatedSegmentReadback(
   const formal = list(record(last.productSegments)?.segments);
   verifySegmentBoundaries(formal, variant, endpoints);
   if (!validatedDepartureCityReadbackIsComplete(last, submittedCities)) {
-    const station = variant === "trainRoundTrip"
-      ? `${endpoints.train.arrival.name}/${endpoints.train.departure.name}`
-      : `${endpoints.flight.arrival.name}/${endpoints.flight.departure.name}`;
+    const stations = variant === "trainRoundTrip" ? endpoints.train : endpoints.flight;
+    const station = stations ? `${stations.arrival.name}/${stations.departure.name}` : "未确认站点";
     throw new Error(`子产品资源校验后没有任何可用的多出发城市（站点：${station}），未激活套餐。`);
   }
   return last;
@@ -324,6 +323,7 @@ function verifySegmentBoundaries(segments: Segment[], variant: TrafficLineVarian
   const lastTraffic = record(last[key]);
   if (!firstTraffic || !lastTraffic) throw new Error(`子产品资源段回读缺少首末段 ${key} 交通配置。`);
   const expected = variant === "flightRoundTrip" ? endpoints.flight : endpoints.train;
+  if (!expected) throw new Error(`子产品资源段缺少已核实的${variant === "flightRoundTrip" ? "飞机" : "火车"}站点。`);
   verifyStationReadback(firstTraffic, key, expected.arrival, "抵达");
   verifyStationReadback(lastTraffic, key, expected.departure, "返程");
 }

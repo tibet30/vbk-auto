@@ -105,43 +105,34 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     context.browser.forgetAccount(accountKey);
     return { forgotten: true };
   });
-  ipcMain.handle("automation:start", (_event, localProductId: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.automation.start(localProductId)));
+  const legacyAutomationBlocked = () => {
+    throw new Error("旧自动化入口已停用。请在 Agent 中确认单个写入阶段后继续。");
+  };
+  ipcMain.handle("automation:start", legacyAutomationBlocked);
   // 「停止」按钮的入口：立刻把 run 标记为 cancelled，runner 在下一个
   // checkpoint 跳出。不等待 Playwright 当前调用结束 ——
   // 跨进程 await click 安全中断点未知，强制 abort 可能让浏览器页面留下
   // 半成品 UI。让 in-flight handler 自然结束后下一 attempt 不再启动。
-  ipcMain.handle("automation:stop", (_event, localProductId: string) => context.automation.stop(localProductId));
+  ipcMain.handle("automation:stop", async (_event, localProductId: string) => {
+    const [result, snapshot] = await Promise.all([
+      context.automation.stop(localProductId),
+      context.agentCore?.pause(localProductId),
+    ]);
+    if (snapshot) context.emitAgentSnapshot?.(snapshot);
+    return result;
+  });
   // automation:retry 真正接到 preparePhaseRetry：如果产品当前的 automation
   // 已是 failed，则从 currentPhase / 最后失败阶段继续；否则退化为 start。
   // 先做一次窄恢复：旧版截图失败留下的「业务全成功 + run 标 failed + 产品 blocked」
   // 脏数据会因 failed phase 找不到而退化为 start（全量重跑错误）或被
   // retryPhase(preflight) 拒绝；本恢复按业务完成切回 succeeded + draft_saved。
-  ipcMain.handle("automation:retry", (_event, localProductId: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      (async () => {
-    if (await context.productWorkflows.runVbkPageExclusive(() => context.automation.recoverLegacyScreenshotFalseFailure(localProductId))) return;
-    const product = db.getProduct(localProductId);
-    if (!product) throw productNotFound(localProductId);
-    const failedPhase = product.automation?.recovery
-      ? Object.values(product.automation.recovery.phases).find((rec) => rec.state === "needs_user")?.phase
-      : product.automation?.phases.find((phase) => phase.status === "failed")?.phase;
-    if (failedPhase) return context.automation.retryPhase(localProductId, failedPhase);
-    return context.automation.start(localProductId);
-  })()));
-  ipcMain.handle("automation:retryPhase", (_event, localProductId: string, phase: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.automation.retryPhase(localProductId, phase)));
+  ipcMain.handle("automation:retry", legacyAutomationBlocked);
+  ipcMain.handle("automation:retryPhase", legacyAutomationBlocked);
   // 「重新执行」按钮的入口：单阶段重跑，不影响其他阶段。与 retryPhase
   // （失败后多阶段 forward）的区别：retryPhase 会重置后续阶段并从头跑
   // 到尾；retryOnePhase 只跑一个阶段，用于运营 review 当前页面填充效果。
-  ipcMain.handle("automation:retryOnePhase", (_event, localProductId: string, phase: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      context.automation.retryOnePhase(localProductId, phase)));
-  ipcMain.handle("automation:replaceLockedDraft", (_event, localProductId: string) =>
-    context.productWorkflows.runExclusive(localProductId, "automation", () =>
-      Promise.resolve(context.automation.replaceLockedDraft(localProductId))));
+  ipcMain.handle("automation:retryOnePhase", legacyAutomationBlocked);
+  ipcMain.handle("automation:replaceLockedDraft", legacyAutomationBlocked);
   ipcMain.handle("accounts:getFixedInfo", (_event, accountName: string) => {
     const userId = context.getExtensionUserId();
     const raw = String(accountName ?? "").trim();

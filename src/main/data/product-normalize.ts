@@ -171,13 +171,15 @@ export function normaliseItinerary(value: unknown) {
         const timeOfDay = raw.timeOfDay === "morning" || raw.timeOfDay === "afternoon"
           ? raw.timeOfDay
           : undefined;
+        const relation = raw.relation === "or" ? "or" : raw.relation === "and" ? "and" : undefined;
         return {
           name: textValue(raw.name) || textValue(raw.poiName),
           poiName: textValue(raw.poiName) || null,
           poiId: normalisePoiId(raw.poiId),
           ...(timeOfDay ? { timeOfDay } : {}),
+          ...(relation ? { relation } : {}),
         };
-      }).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null; timeOfDay?: "morning" | "afternoon" } => Boolean(spot?.name))
+      }).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null; timeOfDay?: "morning" | "afternoon"; relation?: "and" | "or" } => Boolean(spot?.name))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));
     const activityDescription = activities
       .map((activity) => [activity.time, activity.title, activity.detail].filter(Boolean).join(" "))
@@ -197,7 +199,7 @@ export function normaliseItinerary(value: unknown) {
       ...(hotelCandidates.length ? { hotelCandidates } : {}),
       meals: meals.summary,
       ...(meals.descriptions ? { mealDescriptions: meals.descriptions } : {}),
-      ...(hotel ? { hotelDescription: hotel } : {}),
+      ...(textValue(record.hotelDescription) || hotel ? { hotelDescription: textValue(record.hotelDescription) || hotel } : {}),
       ...(activities.length ? { activities } : {}),
     }];
   });

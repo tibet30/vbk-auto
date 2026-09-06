@@ -1,4 +1,5 @@
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { PRODUCT_FORM_LABELS, isProductForm } from "../../../shared/product-form.js";
 
 const head = {
   cid: "",
@@ -91,20 +92,37 @@ async function createInitialPackage(page: any, product: any, productId: string) 
   return getPackage(page, productId);
 }
 
+export function resolvePackageName(product: any): string {
+  const commercialName = String(product.commercial?.packageName ?? "").trim();
+  if (commercialName) return commercialName;
+  const basic = product.basicInfo ?? {};
+  const sales = product.sales ?? {};
+  const destination = String(basic.meetingCity || basic.destinationCity || "").trim() || "目的地";
+  const days = Number(basic.days);
+  const nights = Number.isFinite(Number(basic.nights)) ? Number(basic.nights) : days - 1;
+  const productForm = sales.productForm;
+  if (!Number.isInteger(days) || days < 1 || !Number.isInteger(nights) || nights < 0 || !isProductForm(productForm)) {
+    throw new Error("产品骨架不完整，无法自动生成套餐名称。");
+  }
+  return `${destination}${days}天${nights}晚${PRODUCT_FORM_LABELS[productForm]}`;
+}
+
 /** 直接调用 Tour Helper 同源协议更新套餐，并回读关键字段。 */
 export async function ensurePackageApi(page: any, product: any, productId: string) {
-  const commercial = product.commercial;
+  const commercial = product.commercial ?? {};
   const basic = product.basicInfo ?? {};
-  if (!commercial?.packageName) throw new Error("缺少 commercial.packageName，无法设置套餐。");
+  const packageName = resolvePackageName(product);
   const current =
     (await getPackage(page, productId, false))
     ?? (await createInitialPackage(page, product, productId));
   const days = product.itinerary?.length || current.resourceNameRule?.days || 0;
+  const hasHotel = Array.isArray(product.itinerary)
+    && product.itinerary.some((day: any) => String(day?.hotel ?? "").trim() && String(day.hotel).trim() !== "无");
   const priceInputType = product.sales?.splitGroup === true ? 5 : 1;
-  const description = `${commercial.packageName}。${product.presentation?.recommendation ?? basic.subtitle ?? ""}`;
+  const description = `${packageName}。${product.presentation?.recommendation ?? basic.subtitle ?? ""}`;
   const packageInfo = {
     ...current,
-    name: commercial.packageName,
+    name: packageName,
     description,
     vendorResourceCode: basic.supplierProductCode ?? current.vendorResourceCode,
     resourceNameRule: { ...(current.resourceNameRule ?? {}), days },
@@ -114,7 +132,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     isContainBedFee: "F",
     isNeedCustomer: "T",
     isSmsVBKNotice: "T",
-    isHotelResource: "F",
+    isHotelResource: hasHotel ? "T" : "F",
   };
   await post(page, "savePackageItem", {
     contentType: "json",
@@ -128,6 +146,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     ["供应商套餐编号", saved.vendorResourceCode, packageInfo.vendorResourceCode],
     ["套餐天数", saved.resourceNameRule?.days, days],
     ["确认时长", saved.confirmHour, 4],
+    ["是否含酒店", saved.isHotelResource, packageInfo.isHotelResource],
   ] as const;
   const failed = checks.find(([, actual, expected]) => String(actual ?? "") !== String(expected ?? ""));
   if (failed) throw new Error(`套餐接口回读不一致：${failed[0]}=${String(failed[1])}，期望 ${String(failed[2])}`);

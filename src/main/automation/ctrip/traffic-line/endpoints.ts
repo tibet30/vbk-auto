@@ -1,4 +1,4 @@
-import type { TrafficLineEndpointPlan, TrafficLineStation } from "../../../../shared/contracts-traffic-line.js";
+import type { TrafficLineEndpointPlan, TrafficLineStation, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
 import { searchAirports, searchTrainStations, type StationCandidate } from "../itinerary-api/station-search.js";
 import { suggestPoiDetail } from "../../../infrastructure/poi-suggest.js";
 import type { TrafficLinePage } from "./client.js";
@@ -14,6 +14,12 @@ export type TrafficLineStationDisambiguator = (request: {
 export interface TrafficLineEndpointResolutionOptions {
   /** 已被正式资源校验证实不可用的火车站码；恢复时不得再次选择。 */
   excludedTrainCodes?: readonly string[];
+}
+
+export interface TrafficLineEndpointAvailability {
+  endpointPlan: TrafficLineEndpointPlan;
+  availableVariants: TrafficLineVariant[];
+  unavailableVariants: Partial<Record<TrafficLineVariant, string>>;
 }
 
 type ItinerarySpot = {
@@ -46,28 +52,60 @@ export async function resolveTrafficLineEndpoints(
   product: Record<string, unknown> = { itinerary },
   options: TrafficLineEndpointResolutionOptions = {},
 ): Promise<TrafficLineEndpointPlan> {
+  const availability = await preflightTrafficLineEndpoints(
+    page, itinerary, now, disambiguator, product, ["flightRoundTrip", "trainRoundTrip"], options,
+  );
+  const unavailable = Object.entries(availability.unavailableVariants)
+    .map(([variant, reason]) => `${variant === "flightRoundTrip" ? "飞机" : "火车"}：${reason}`);
+  if (unavailable.length) throw new Error(`交通站点未能全部确认（${unavailable.join("；")}）。`);
+  return availability.endpointPlan;
+}
+
+/**
+ * 在创建任何子产品前，按交通方式独立查询首末日城市的机场/火车站。
+ * 一种方式不可用不会阻断另一种；没有任何可用方式时外层直接跳过交通子产品。
+ */
+export async function preflightTrafficLineEndpoints(
+  page: TrafficLinePage,
+  itinerary: readonly ItineraryDay[],
+  now = new Date(),
+  disambiguator?: TrafficLineStationDisambiguator,
+  product: Record<string, unknown> = { itinerary },
+  variants: readonly TrafficLineVariant[] = ["flightRoundTrip", "trainRoundTrip"],
+  options: TrafficLineEndpointResolutionOptions = {},
+): Promise<TrafficLineEndpointAvailability> {
   const { arrivalCity, departureCity } = await resolveTrafficLineCities(page, itinerary);
   const sameCity = arrivalCity === departureCity;
-  const arrivalAirPromise = resolveUniqueStation(page, "airport", arrivalCity, disambiguator, product);
-  const arrivalTrainPromise = resolveUniqueStation(
-    page, "train", arrivalCity, disambiguator, product, options.excludedTrainCodes,
-  );
-  const departureAirPromise = sameCity
-    ? arrivalAirPromise
-    : resolveUniqueStation(page, "airport", departureCity, disambiguator, product);
-  const departureTrainPromise = sameCity
-    ? arrivalTrainPromise
-    : resolveUniqueStation(page, "train", departureCity, disambiguator, product, options.excludedTrainCodes);
-  const [arrivalAir, departureAir, arrivalTrain, departureTrain] = await Promise.all([
-    arrivalAirPromise, departureAirPromise, arrivalTrainPromise, departureTrainPromise,
-  ]);
-  return {
-    arrivalCity,
-    departureCity,
-    flight: { arrival: toStation(arrivalAir), departure: toStation(departureAir) },
-    train: { arrival: toStation(arrivalTrain), departure: toStation(departureTrain) },
-    resolvedAt: now.toISOString(),
-  };
+  const endpointPlan: TrafficLineEndpointPlan = { arrivalCity, departureCity, resolvedAt: now.toISOString() };
+  const availableVariants: TrafficLineVariant[] = [];
+  const unavailableVariants: Partial<Record<TrafficLineVariant, string>> = {};
+  await Promise.all([...new Set(variants)].map(async (variant) => {
+    const kind = variant === "flightRoundTrip" ? "airport" : "train";
+    try {
+      const arrival = await resolveUniqueStation(
+        page, kind, arrivalCity, disambiguator, product,
+        variant === "trainRoundTrip" ? options.excludedTrainCodes : [],
+      );
+      const departure = sameCity ? arrival : await resolveUniqueStation(
+        page, kind, departureCity, disambiguator, product,
+        variant === "trainRoundTrip" ? options.excludedTrainCodes : [],
+      );
+      if (variant === "flightRoundTrip") endpointPlan.flight = { arrival: toStation(arrival), departure: toStation(departure) };
+      else endpointPlan.train = { arrival: toStation(arrival), departure: toStation(departure) };
+      availableVariants.push(variant);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      // 「没有站点」才是跳过该交通方式的业务结论；会话、接口、候选歧义等
+      // 不确定状态必须显式中断，不能伪装成目的地没有交通。
+      if (!isUnavailableTrafficStation(reason)) throw error;
+      unavailableVariants[variant] = reason;
+    }
+  }));
+  return { endpointPlan, availableVariants, unavailableVariants };
+}
+
+function isUnavailableTrafficStation(reason: string): boolean {
+  return /未找到唯一可确认的(?:机场|火车站)候选/.test(reason);
 }
 
 /**

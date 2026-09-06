@@ -84,9 +84,11 @@ async function runSkeletonStage(args: {
   }
   if (!alreadyAccepted.includes("skeleton")) {
     const travelScope = resolveTravelScope(skeleton.destination);
+    const current = await runtime.loadCurrentProduct(state.localProductId);
+    const existingTier = (current?.operations as { hotelTier?: string } | undefined)?.hotelTier;
     const result = await runtime.writeModule(state.localProductId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
-      // 未指定档次时统一选择最高的当地 5 钻；酒店候选阶段会再以此为首要排序规则。
-      hotelTier: FIVE_DIAMOND_HOTEL_TIER,
+      // 用户已明确几钻时保留；未指定才回落到当地 5 钻模板。
+      hotelTier: existingTier || FIVE_DIAMOND_HOTEL_TIER,
       pickupCity: travelScope.primaryCity,
       transport: "charter",
       reusePickupForDropoff: true,

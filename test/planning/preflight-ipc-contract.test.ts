@@ -10,8 +10,7 @@
  *   - try 块必须包含产品存在性检查、API Key 解析、adapter 构造、runPlan
  *     调用、addMessage、emitProduct；不再要求「safeStorage 解密」（已脱钩）。
  *   - planning:start 与 planning:resume 都委托给 runPlanning（共享包装，行为一致）；
- *   - renderer auto-start 在 result.status === "failed" 时调用 setPlanningState
- *     与 setNotice。
+ *   - renderer 不再自动调用旧 planning:start，避免与创建时启动的 Agent 重复执行。
  *
  *  与 preflight-failure.test.ts（纯函数行为）配对：契约 + 行为都能被 CI 抓到回归。
  */
@@ -143,11 +142,7 @@ test("planning:start 与 planning:resume 都委托给 runPlanning 包装（共�
     "planning:start 必须在调 runPlanning 前持久化 pending 状态");
 });
 
-test("renderer auto-start 在 result.status==='failed' 时调用 setPlanningState + setNotice", () => {
-  const autoStart = derivedSrc.match(/api\(\)!\.planning\.start[\s\S]*?\}\);/);
-  assert.ok(autoStart, "auto-planning 块必须存在");
-  const body = autoStart![0];
-  assert.match(body, /setPlanningState\(result\.state\)/, "auto-start 必须把 result.state 写回 planningState");
-  assert.match(body, /result\.status\s*===\s*["']failed["']/, "auto-start 必须检测 status==='failed'");
-  assert.match(body, /setNotice\(/, "auto-start 必须在失败时 setNotice，让 recovery strip 有上下文");
+test("renderer 不再自动触发旧 planning:start", () => {
+  assert.doesNotMatch(derivedSrc, /api\(\)!\.planning\.start/);
+  assert.doesNotMatch(derivedSrc, /shouldAutoStartPlanning|autoStartUsed/);
 });

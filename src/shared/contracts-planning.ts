@@ -75,9 +75,9 @@ export interface PlanningPoiCandidate {
   source?: "user" | "ai";
   userActivityId?: string;
   preferredDay?: number;
-  /** 用户二选一等备选名称，按优先顺序保存；首项就是 requestedName。 */
+  /** 用户“或者/二选一”等并列备选名称，按原始顺序保存；首项就是 requestedName。 */
   alternativeNames?: string[];
-  /** 实际命中的备选名称在用户原始列表中的位置。 */
+  /** 当前候选对应的备选名称在用户原始列表中的位置；多个可用项可同组入行程。 */
   selectedAlternativeIndex?: number;
   reason?: string;
   poiId?: number;
@@ -336,6 +336,8 @@ export interface PlannerContext {
   existingResearchTasks: Array<Pick<ResearchTaskProposal, "label" | "type">>;
   /** 历史会话（只用于补充上下文；orchestrator 不依赖它做决策）。 */
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  /** 用户明确保存的少量长期偏好，按预算裁剪后注入。 */
+  memoryContext?: import("./contracts-types.js").MemoryPromptContext;
   /** Provider / model 仅作为 transport 参数，schema / prompt 不依赖。 */
   transport: {
     providerLabel: string;

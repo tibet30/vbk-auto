@@ -33,12 +33,12 @@ test("实时 running 状态仍按共享阶段顺序显示已完成、进行中�
   }
 });
 
-test("三阶段规划树替代左侧恢复条，并保留失败节点继续入口", () => {
-  assert.match(reviewSrc, /<PlanningTree/);
-  assert.doesNotMatch(reviewSrc, /recoveryStrip|planning-resume-button|已接受：|缺失：/);
-  assert.match(treeSrc, /plan\.status === "needs_user" \|\| plan\.status === "failed"/);
-  assert.match(treeSrc, /从失败节点继续/);
-  assert.match(treeSrc, /onResume/);
+test("Agent 对话承载输入、确认和失败恢复", () => {
+  const agent=read("src/renderer/app/views/workspace/agent-conversation.tsx");
+  assert.match(reviewSrc, /<AgentConversation/);
+  assert.match(agent, /<AgentInput/);
+  assert.match(agent, /确认方案并录入 VBK/);
+  assert.match(agent, /agent\.resume\(product.id\)/);
 });
 
 test("规划树为横向三列，节点显式展示状态、尝试次数和 POI 数量", () => {
@@ -58,10 +58,10 @@ test("阶段标签总是中文，避免 event state 直接泄漏裸 stage id", (
   assert.equal(planningStageLabel(undefined), "当前阶段");
 });
 
-test("方案对话使用独立 ref，首次进入时可滚动到最新消息", () => {
-  assert.match(reviewSrc, /conversationRef,?/);
-  assert.match(reviewSrc, /className=\{chat\.conversation\} ref=\{conversationRef\}/);
-  assert.doesNotMatch(reviewSrc, /className=\{chat\.conversation\} ref=\{browserRef\}/);
-  assert.match(reviewSrc, /conversation\.scrollTop \+ conversation\.clientHeight < conversation\.scrollHeight/);
-  assert.match(derivedSrc, /conversation\.scrollTop \+ conversation\.clientHeight < conversation\.scrollHeight/);
+test("方案对话保留独立滚动容器和新消息提示", () => {
+  const agent=read("src/renderer/app/views/workspace/agent-conversation.tsx");
+  assert.match(agent, /ref=\{viewport\}/);
+  assert.match(agent, /if \(follow.current\) node.scrollTop = node.scrollHeight/);
+  assert.match(agent, /有新消息/);
+  assert.doesNotMatch(agent, /ref=\{browserRef\}/);
 });

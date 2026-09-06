@@ -34,6 +34,7 @@ const itineraryDaySchema = z.object({
     city: z.string().nullable().optional(),
     district: z.string().nullable().optional(),
     timeOfDay: z.enum(["morning", "afternoon"]).optional(),
+    relation: z.enum(["and", "or"]).optional(),
   }).strict()).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),
@@ -215,7 +216,7 @@ const operationsSchema = z.object({
 });
 
 const commercialSchema = z.object({
-  packageName: z.string().min(1),
+  packageName: z.string().min(1).optional(),
   pricing: z.object({
     currency: z.literal("CNY").default("CNY"),
     adult: z.number().positive(),

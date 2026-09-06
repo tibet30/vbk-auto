@@ -1,0 +1,66 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createServer } from 'vite';
+import react from '@vitejs/plugin-react';
+import { chromium } from 'playwright';
+
+test('Agent 协作真实控件：Cursor 式对话、确认、补充与窄屏', async () => {
+  const server = await createServer({ configFile: false, root:process.cwd(), plugins:[react()], server:{host:'127.0.0.1',port:0},logLevel:'error' });
+  await server.listen();
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage({viewport:{width:1440,height:900}});
+    const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(`${server.resolvedUrls!.local[0]}test/fixtures/agent-ui/index.html`);
+    assert.equal(await page.getByText('历史沟通记录').count(),0);
+    assert.equal(await page.getByText('AI 分析').count(),0);
+    const brief = page.locator('article[data-role="user"][data-brief="true"]').first();
+    assert.match(await brief.innerText(), /目的地\s*成都/);
+    assert.match(await brief.innerText(), /你的想法/);
+    assert.ok(await page.getByText('思考片刻',{exact:true}).count() >= 1);
+    assert.ok(await page.getByText(/已使用 \d+ 个工具/).count() >= 1);
+    assert.equal(await page.getByText('我会先核查适合的景点和酒店，再完善右侧行程。',{exact:true}).isVisible(),true);
+    const thinking = page.locator('details').filter({hasText:'思考片刻'}).first();
+    assert.equal(await thinking.evaluate((node) => (node as HTMLDetailsElement).open), false);
+    await thinking.evaluate((node) => { (node as HTMLDetailsElement).open = true; });
+    assert.match(await thinking.innerText(), /先核对景点和酒店资源/);
+    const tools = page.locator('details').filter({hasText:/已使用 \d+ 个工具/}).first();
+    await tools.evaluate((node) => {
+      const root = node as HTMLDetailsElement;
+      root.open = true;
+      const first = root.querySelector('details');
+      if (first) (first as HTMLDetailsElement).open = true;
+    });
+    assert.match(await tools.innerText(), /成都熊猫基地/);
+    assert.match(await tools.innerText(), /查询景点/);
+    await page.getByRole('button',{name:'提交回答并继续'}).click();
+    assert.equal(await page.getByRole('alert').count(),2);
+    await page.getByRole('button',{name:'轻松一些',exact:true}).click();
+    await page.getByRole('textbox',{name:'请补充你希望保留的文案'}).fill('慢慢旅行，留一些亲子时光。');
+    await page.getByRole('textbox',{name:'补充你的要求'}).fill('尚未发送的补充');
+    await page.evaluate(()=> (window as any).agentFixture.streamMessage('<think>正在分析'));
+    const busy = page.locator('[data-thread="assistant"][aria-busy="true"]');
+    await busy.waitFor();
+    assert.match(await busy.innerText(), /正在分析|正在思考/);
+    await page.evaluate(()=> (window as any).agentFixture.streamMessage('<think>正在分析</think>\n正在核查新的'));
+    await page.getByText('正在核查新的',{exact:true}).first().waitFor();
+    await page.evaluate(()=> (window as any).agentFixture.streamMessage('<think>正在分析</think>\n正在核查新的候选。',true));
+    assert.equal(await page.locator('[data-thread="assistant"][aria-busy="true"]').count(),0);
+    assert.ok(await page.getByText('正在核查新的候选。',{exact:true}).count() >= 1);
+    assert.equal(await page.getByRole('textbox',{name:'补充你的要求'}).inputValue(),'尚未发送的补充');
+    await page.getByRole('button',{name:'提交回答并继续'}).click();
+    await page.getByRole('button',{name:'确认方案并录入 VBK'}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'提交回答并继续'}).count(),0);
+    assert.equal(await page.getByRole('region',{name:'方案对话'}).getByRole('button',{name:'确认方案并录入 VBK'}).count(),1);
+    await page.screenshot({path:'/tmp/vbk-agent-ui-desktop.png',fullPage:true});
+    await page.getByRole('button',{name:'确认方案并录入 VBK'}).click();
+    await page.getByText('已进入 VBK 录入',{exact:true}).waitFor();
+    await page.getByRole('textbox',{name:'补充你的要求'}).fill('中文输入仍可用');
+    await page.getByRole('button',{name:'发送',exact:true}).click();
+    await page.getByText('中文输入仍可用',{exact:true}).waitFor();
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+    await page.screenshot({path:'/tmp/vbk-agent-ui-mobile.png',fullPage:true});
+    assert.deepEqual(errors,[]);
+  } finally { await browser.close();await server.close(); }
+});

@@ -109,6 +109,8 @@ const ipcRegistrarSource = [
   "src/main/ipc/planning-ipc.ts",
   "src/main/ipc/planning-v2-ipc.ts",
   "src/main/ipc/app-auth-ipc.ts",
+  "src/main/ipc/agent-ipc.ts",
+  "src/main/ipc/memory-ipc.ts",
 ].map(readSource).join("\n");
 
 test("preload.cts 里的 invoke channel 在 IPC registrars 全部注册", () => {

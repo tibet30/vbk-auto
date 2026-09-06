@@ -76,7 +76,7 @@ export async function acceptItineraryAndRerunCompletion(args: {
             const best = (await suggestPoiDetail(page, name, poiContext)).best;
             if (!best || !Number.isInteger(best.poiId) || best.poiId <= 0 || !best.poiName.trim() || isTravelNodeName(best.poiName)) return null;
             // 每个 worker 拿到 POI ID 后，立即查询营业状态；暂停营业不绑定进采用行程。
-            const availability = await getCtripSightAvailability(page, best.poiId);
+            const availability = await getCtripSightAvailability(page, best.poiId, context.db);
             return availability.status === "suspended" ? null : { poiName: best.poiName.trim(), poiId: best.poiId };
           });
         });

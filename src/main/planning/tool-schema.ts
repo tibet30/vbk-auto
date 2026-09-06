@@ -87,7 +87,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
           properties: {
             day: { type: "number", minimum: 1 },
             title: { type: "string", minLength: 1 },
-            spots: { type: "array", minItems: 1, description: "按实际游览顺序排列。每个 spot 只能是一个可独立检索的可游览地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot；机场、车站、码头、酒店、民宿、集合点、接送点等交通/住宿节点禁止写入 spots，只能写在 description。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一可游览地点名称；括号内可写同一地点别名，不能包含多个地点或交通/住宿节点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 } } } },
+            spots: { type: "array", minItems: 1, description: "按实际游览顺序排列。每个 spot 只能是一个可独立检索的可游览地点；不得把钟楼和鼓楼、回民街·钟鼓楼广场等组合地点写进同一 spot，必须拆成多个 spot；机场、车站、码头、酒店、民宿、集合点、接送点等交通/住宿节点禁止写入 spots，只能写在 description。同一时段连续参观多个景点时 relation 默认 and；只有用户明确二选一/多选一时才用 or。", items: { type: "object", additionalProperties: false, required: ["name", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1, description: "单一可游览地点名称；括号内可写同一地点别名，不能包含多个地点或交通/住宿节点" }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 }, timeOfDay: { type: "string", enum: ["morning", "afternoon"] }, relation: { type: "string", enum: ["and", "or"], description: "and=该时段全部参观；or=该时段多个景点中只选一个。缺省按 and 处理。" } } } },
             description: { type: "string", minLength: 1 },
             hotel: { type: "string" },
             meals: { type: "string", minLength: 1 },

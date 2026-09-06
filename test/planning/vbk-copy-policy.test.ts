@@ -19,6 +19,8 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   assert.match(prompt, /首次/);
   assert.match(prompt, /首选/);
   assert.match(prompt, /主席/);
+  assert.match(prompt, /朝圣/);
+  assert.match(prompt, /贵族/);
   assert.match(prompt, /第一（宣传排名用语）/);
   assert.match(prompt, /最（极限表达）/);
   assert.match(prompt, /导游否定描述/);
@@ -54,6 +56,8 @@ test("实跑敏感词与极限宣传进入黑名单，但行程序号不被误�
   assert.equal(findVbkCopyBadCase("度假首选路线")?.term, "首选");
   assert.equal(findVbkCopyBadCase("参观主席旧居")?.term, "主席");
   assert.equal(findVbkCopyBadCase("前往南普陀寺礼佛")?.term, "礼佛");
+  assert.equal(findVbkCopyBadCase("扎寺朝圣体验")?.term, "朝圣");
+  assert.equal(findVbkCopyBadCase("旧贵族宅邸")?.term, "贵族");
   assert.equal(findVbkCopyBadCase("赠送旅游意外险，行程安排更安心")?.term, "旅游意外险");
   assert.equal(findVbkCopyBadCase("送旅游意外险，出行更安心")?.term, "旅游意外险");
   assert.equal(findVbkCopyBadCase("含旅游意外险，行程安排更安心")?.term, "旅游意外险");

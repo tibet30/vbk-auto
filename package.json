@@ -8,6 +8,7 @@
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "agentmap": "npx --yes @raymondchins/agentmap",
     "dev:renderer": "vite --host 127.0.0.1",
     "dev:main": "tsc --watch",
     "package:mac:dir": "export NODE_OPTIONS='' && npm run build && electron-builder --dir --mac",

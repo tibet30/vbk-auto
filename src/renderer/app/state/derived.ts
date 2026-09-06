@@ -1,4 +1,4 @@
-import { logInfo, logWarn } from "../../../shared/log-timestamp.js";
+import { logWarn } from "../../../shared/log-timestamp.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPlanningStageProgress,
@@ -7,10 +7,8 @@ import {
 } from "../helpers";
 import { PLANNING_STAGES } from "../../../shared/contracts-planning.js";
 import { api } from "../helpers";
-import { hasActiveAiKey } from "../../../shared/ai-provider-config.js";
 import type { AppStateBase } from "./base";
 import type { PlanningGenerationState } from "../../../shared/contracts-planning.js";
-import { shouldAutoStartPlanning } from "./auto-start-policy.js";
 import {
   shouldHandleVbkPageReady,
   shouldRefreshCollections,
@@ -34,7 +32,6 @@ export function useAppStateDerived(state: AppStateBase) {
     setActiveTaskId,
     setVerificationNote,
     setExpandedDayIndexes,
-    settings,
     setSettings,
     setStage,
     checkVbkLogin,
@@ -59,15 +56,8 @@ export function useAppStateDerived(state: AppStateBase) {
     setBasicInfoButlerLoadedForLocalProductId,
   } = state as AppStateBase & { setNotice: (value: string | null) => void; setActiveTaskId: (id: string | null) => void; };
 
-  // auto-start 看到 failed/needs_user 后不再自动重跑；用户通过 planning.resume 手动续跑。
   const [planningState, setPlanningState] = useState<PlanningGenerationState | null>(null);
-  const [autoStartUsed, setAutoStartUsed] = useState<string | null>(null);
   const planningActions = usePlanningActions({ product, planningState, setPlanningState, setNotice });
-  // Per-product sentinel：标记「planning.state(localProductId) 已对当前 product 完成」。
-  // 未完成时 auto-start effect 必须空跑：这样能避免「persisted failed 产品被重新打开」
-  // 时 effect 在 lookup 回来前抢跑 planning.start，把已经失败的产品又拉起一次。
-  // 切换产品时复位为 null（由下面的 product-switch effect 负责）。
-  const [planningStateLoadedLocalProductId, setPlanningStateLoadedLocalProductId] = useState<string | null>(null);
   // 用于 planning.state() 异步回调内做产品 id 比对，避免切换产品后旧响应污染当前产品。
   const currentLocalProductIdRefForPlanning = useRef<string | null>(null);
   const currentViewRef = useRef(view);
@@ -116,7 +106,6 @@ export function useAppStateDerived(state: AppStateBase) {
       if (currentLocalProductIdRefForPlanning.current !== localProductId) return;
       planningEventVersionRef.current += 1;
       setPlanningState(next);
-      setPlanningStateLoadedLocalProductId(localProductId);
     });
 
     return () => {
@@ -205,8 +194,7 @@ export function useAppStateDerived(state: AppStateBase) {
   }, [state.activeTaskId]);
 
   // 切换产品时清空核查选择，避免上一个产品残留的 activeTaskId 落到新产品。
-  // 同时复位 planning 相关本地缓存，保证 sentinel / autoStartUsed 不会跨产品残留；
-  // planning.state 由下一个 effect 异步拉取，sentinel 复位为 null 让 auto-start 等它回来。
+  // 同时复位 planning 相关本地缓存；planning.state 由下一个 effect 异步拉取。
   useEffect(() => {
     if (!product) return;
     setActiveTaskId(null);
@@ -214,8 +202,6 @@ export function useAppStateDerived(state: AppStateBase) {
     setStage(initialStageFor(product.status));
     setExpandedDayIndexes(new Set([0]));
     setPlanningState(null);
-    setAutoStartUsed(null);
-    setPlanningStateLoadedLocalProductId(null);
     // 基础信息模块的缓存（butler 默认联系人、临时草稿、错误信息）也随产品复位。
     // basicInfoActions 不在这个文件里调用；调用方从 useAppActions() 拿到。
     setBasicInfoErrors({});
@@ -226,65 +212,10 @@ export function useAppStateDerived(state: AppStateBase) {
     setBasicInfoButlerLoadedForLocalProductId(null);
   }, [product?.id]);
 
-  // 产品进入兜底：进入仍为空草稿的产品时自动触发一次 staged planning 生成。
-  // 规划走 planner.start，由后端分阶段 + bounded retry；ai:send 仍保留供后续多轮对话。
-  // 关键不变量：必须等到 planning.state(localProductId) 已对当前 localProductId 完成（sentinel
-  // 命中）；在此之前空跑。否则 persisted failed 的产品被重新打开时，会在 lookup 还没
-  // 回来前抢跑一次 planning.start，把失败的产品又拉起一次。决策逻辑抽出到
-  // shouldAutoStartPlanning，便于纯函数单测。
-  useEffect(() => {
-    if (!product || !api()) return;
-    if (!shouldAutoStartPlanning({
-      hasProduct: true,
-      localProductId: product.id,
-      hasUserMessages: product.messages.some((message: { role: string }) => message.role === "user"),
-      hasItinerary: Array.isArray(product.product.itinerary) && (product.product.itinerary as unknown[]).length > 0,
-      hasAiKey: hasActiveAiKey(settings),
-      planningStateLoadedLocalProductId,
-      planningState,
-      autoStartUsed,
-    })) return;
-    setAutoStartUsed(product.id);
-    logInfo("[App] auto-planning fallback for empty product", { localProductId: product.id, provider: settings?.aiProvider });
-    const capturedLocalProductId = product.id;
-    let cancelled = false;
-    // planning.start IPC 会同步等待整轮 AI；先放入本地 pending，让 UI 立刻显示
-    // 0/7；后续持久化状态会由 planning:updated 事件直接推送。
-    setPlanningState({
-      localProductId: capturedLocalProductId,
-      currentStage: "skeleton",
-      completedStages: [],
-      stages: [],
-      status: "pending",
-      resumeAt: new Date().toISOString(),
-    });
-    void api()!.planning.start(capturedLocalProductId).then((result) => {
-      if (cancelled || currentLocalProductIdRefForPlanning.current !== capturedLocalProductId) return;
-      if (result.state) setPlanningState(result.state);
-      if (result.status === "failed") {
-        // preflight 失败（例如密钥不可用）→ IPC 也会返回 normal PlanningRunResult；
-        // 这里显式 setNotice，让 recovery strip 的「重试规划」按钮有上下文；
-        // assistantReply 已是 provider-neutral 中文，不会泄露密钥 / 密文。
-        setNotice(result.assistantReply || "方案规划未能启动，请检查 API Key 后重试。");
-      }
-    }).catch((error) => {
-      if (cancelled || currentLocalProductIdRefForPlanning.current !== capturedLocalProductId) return;
-      logWarn("[App] planning.start failed", error);
-      setNotice(`方案规划异常：${(error as { message?: string })?.message ?? String(error)}`);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [product?.id, settings?.aiProvider, settings?.hasMiniMaxKey, settings?.hasDeepSeekKey, planningState, planningStateLoadedLocalProductId, autoStartUsed]);
-
   // 拉取当前产品的持久化规划状态，供 UI 显示「实际接受 / 缺失」以及续跑按钮。
   // 行为契约：
-  //  - (A) lookup effect 只在 product?.id 变化时跑一次，做 sentinel
-  //    推进；把 localProductId 写入 ref，回调里比对；产品切换后旧响应不会污染当前产品。
-  //    无论结果是 state 还是 undefined，都把 sentinel 标记为当前 localProductId，让
-  //    auto-start effect 在 lookup 完成后才决定是否起跑（undefined → 允许一次起跑）。
-  //    lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错
-  //    时抢跑（lookup 失败通常意味着产品状态未知，不应擅自再生成）。
+  //  - (A) lookup effect 只在 product?.id 变化时跑一次；把 localProductId 写入 ref，
+  //    回调里比对，产品切换后旧响应不会污染当前产品。
   //  - (B) 后续状态由 planning:updated 实时事件驱动，不建立 interval；新 renderer
   //    进程或产品切换时由这一次 lookup 补偿订阅建立前可能错过的事件。
   useEffect(() => {
@@ -294,7 +225,7 @@ export function useAppStateDerived(state: AppStateBase) {
     const eventVersionAtLookup = planningEventVersionRef.current;
     let cancelled = false;
 
-    // lookup 只跑一次：写本地 cache + 推进 sentinel；后续变化由实时事件到达。
+    // lookup 只跑一次：写本地 cache；后续变化由实时事件到达。
     api()!.planning.state(capturedId).then((s) => {
       // 切换产品后旧响应必须丢弃：用 ref 比对当前 localProductId。
       if (currentLocalProductIdRefForPlanning.current !== capturedId) return;
@@ -302,17 +233,12 @@ export function useAppStateDerived(state: AppStateBase) {
       // lookup 在实时事件之后才返回时，事件携带的状态更新，不能被旧快照覆盖。
       if (planningEventVersionRef.current !== eventVersionAtLookup) return;
       if (s) setPlanningState(s);
-      // 注意：s === undefined 时也要标记为 loaded，这样 auto-start 才能在新产品里起跑。
-      setPlanningStateLoadedLocalProductId(capturedId);
     }).catch((error) => {
       if (currentLocalProductIdRefForPlanning.current !== capturedId) return;
       if (cancelled) return;
       if (planningEventVersionRef.current !== eventVersionAtLookup) return;
-      // lookup 失败也视为「已尝试」：不阻塞 UI，但也不让 auto-start 在 lookup 出错时抢跑
-      // （lookup 失败通常意味着产品状态未知，不应擅自再生成）。把 sentinel 推进；
-      // 下次重新打开该产品会再次执行一次补偿 lookup。
+      // lookup 失败不阻塞 UI；下次重新打开该产品会再次执行补偿 lookup。
       logWarn("[App] planning.state lookup failed", { localProductId: capturedId, error });
-      setPlanningStateLoadedLocalProductId(capturedId);
     });
 
     return () => {

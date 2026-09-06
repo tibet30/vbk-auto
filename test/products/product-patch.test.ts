@@ -253,10 +253,11 @@ test("normaliseItinerary 保留景点的上午/下午分段，供 VBK 节点按�
     meals: "午餐自理；晚餐自理",
     spots: [
       { name: "甲", poiName: "甲", poiId: 1, timeOfDay: "morning" },
-      { name: "乙", poiName: "乙", poiId: 2, timeOfDay: "afternoon" },
+      { name: "乙", poiName: "乙", poiId: 2, timeOfDay: "afternoon", relation: "or" },
     ],
-  }]) as Array<{ spots: Array<{ timeOfDay?: string }> }>;
+  }]) as Array<{ spots: Array<{ timeOfDay?: string; relation?: string }> }>;
   assert.deepEqual(result[0].spots.map((spot) => spot.timeOfDay), ["morning", "afternoon"]);
+  assert.deepEqual(result[0].spots.map((spot) => spot.relation), [undefined, "or"]);
 });
 
 test("normaliseItinerary 对非法 activities 拒绝保留：缺字段、空字段、未知 type 降级", () => {

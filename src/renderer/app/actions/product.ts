@@ -33,11 +33,7 @@ export function useProductHandlers(state: AppState) {
       ? product?.messages?.slice().reverse().find((message) => message.role === "user" && message.content.trim())?.content.trim()
       : "";
     const rawText = (retryContent || input || retryFallback || "").trim();
-    const hasRunningAiMessage = product?.messages.some((message) => message.role === "user" && message.taskStatus === "running") ?? false;
-    if (loading || hasRunningAiMessage) {
-      setNotice("AI 正在生成中，请稍后再试。");
-      return;
-    }
+    if (loading) return;
     if (!product) {
       if (!keepNotice) setNotice("当前未选中产品，请先打开产品后再发送。");
       return;
@@ -53,23 +49,18 @@ export function useProductHandlers(state: AppState) {
         : "请先输入要发送给 AI 的内容。");
       return;
     }
-    const shouldRetryWithStructuredHint = options.isRetry;
-    let text = rawText;
-    if (shouldRetryWithStructuredHint && !text.includes("上一次返回未通过结构化校验")) {
-      text = `${text}\n\n上一次返回未通过结构化校验，请只返回纯 JSON 对象（仅包含 reply、patch、questions、researchTasks 四个字段），并为该轮返回至少一个可写入的 patch；不得带说明文字。`;
-    }
-
+    const text = rawText;
     // 避免“点击重试后无感知”：先恢复到发送态并清理一次旧notice。
     setNotice(null);
     setInput("");
     setLoading(true);
     if (options.isRetry) {
-      setNotice("正在重发该条问题并请求结构化补齐，请稍等。");
+      setNotice("正在重新发送问题…");
     } else if (!keepNotice) {
       setNotice(null);
     }
     try {
-      await aiApi.ai.send(product.id, text);
+      await aiApi.agent.send(product.id, text);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "方案生成失败，请重试。");
     } finally {
@@ -78,13 +69,12 @@ export function useProductHandlers(state: AppState) {
   };
 
   const cancel = async () => {
-    const hasRunningAiMessage = product?.messages.some((message) => message.role === "user" && message.taskStatus === "running") ?? false;
-    if (!product || (!loading && !hasRunningAiMessage)) return;
+    if (!product) return;
     const aiApi = api();
     if (!aiApi) return;
     setNotice("正在取消本次 AI 对话…");
     try {
-      await aiApi.ai.cancel(product.id);
+      await aiApi.agent.pause(product.id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "取消 AI 对话失败，请稍后重试。");
     }
@@ -110,24 +100,17 @@ export function useProductHandlers(state: AppState) {
         ...createInput,
         destination: createInput.destination.trim(),
         userIdea: (createInput.userIdea ?? "").trim(),
-        autoConfirm: autoConfirmCreation,
+        autoConfirm: false,
       });
       const latestTask = created.workflowTask;
       const visibleCreated = latestTask
         ? { ...created, workflowTask: latestTask, updatedAt: latestTask.updatedAt }
         : created;
       setProducts((items) => [visibleCreated, ...items]);
-      if (autoConfirmCreation) {
-        if (latestTask) {
-          setWorkflowTasks((items) => [latestTask, ...items.filter((item) => item.id !== latestTask.id)]);
-        }
-        setProduct(null);
-        setView("products");
-        setNotice("产品和后台任务已创建；进入产品列表或任务中心时会读取最新进度。");
-      } else {
-        setProduct(visibleCreated);
-        setView("workspace");
-      }
+      if (latestTask) setWorkflowTasks((items) => [latestTask, ...items.filter((item) => item.id !== latestTask.id)]);
+      setProduct(visibleCreated);
+      setStage("review");
+      setView("workspace");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "创建产品失败，请重试。");
     } finally {

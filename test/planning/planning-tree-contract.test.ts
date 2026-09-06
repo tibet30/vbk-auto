@@ -13,7 +13,7 @@ const styles = read("src/renderer/app/views/workspace/planning-tree.module.less"
 const confirmDialog = read("src/renderer/app/views/workspace/planning-rerun-confirm-dialog.tsx");
 const confirmDialogStyles = read("src/renderer/app/views/workspace/planning-rerun-confirm-dialog.module.less");
 
-test("stage rerun confirms invalidated data and delegates to the derived handler", () => {
+test("legacy stage rerun remains safe while the review uses Agent conversation", () => {
   assert.doesNotMatch(tree, /window\.confirm/);
   assert.match(tree, /rerunFocusRef\.current = rerunTriggerRefs\.current\[stage\]/);
   assert.match(confirmDialog, /showModal\(\)/);
@@ -27,7 +27,8 @@ test("stage rerun confirms invalidated data and delegates to the derived handler
   assert.match(confirmDialog, /onConfirm\(\)/);
   assert.match(tree, /void onRerunMajorStage\(stage\)/);
   assert.doesNotMatch(tree, /planning\.rerunMajorStage\(/);
-  assert.match(review, /onRerunMajorStage=\{planningRerunMajorStage\}/);
+  assert.match(review, /<AgentConversation/);
+  assert.doesNotMatch(review, /onRerunMajorStage=\{planningRerunMajorStage\}/);
   assert.match(tree, /重做此阶段/);
 });
 
@@ -107,35 +108,21 @@ test("后台任务合入生成规划标题，只保留一份进度", () => {
   assert.match(taskStrip, /role="status"[\s\S]*aria-atomic="true"/);
 });
 
-test("planning v2 mutation handlers acquire the product lock before reset/update", () => {
-  for (const handler of ["planning:start", "planning:rerunMajorStage"]) {
-    const start = planningV2Ipc.indexOf(`ipcMain.handle("${handler}"`);
-    const end = planningV2Ipc.indexOf("\n  });", start);
-    assert.ok(start >= 0 && end > start, `${handler} handler must be present`);
-    const body = planningV2Ipc.slice(start, end);
-    if (handler === "planning:start") {
-      assert.match(body, /withPlanningLock\(localProductId[\s\S]*startPlanningUnderLock\(localProductId\)/,
-        "planning:start must lock before delegating to the shared start operation");
-      const sharedStart = planningV2Ipc.indexOf("const startPlanningUnderLock");
-      assert.ok(sharedStart >= 0, "shared planning:start operation must be present");
-      const sharedBody = planningV2Ipc.slice(sharedStart, start);
-      assert.ok(sharedBody.indexOf("remoteProducts.get") < sharedBody.indexOf("remoteProducts.update"),
-        "shared planning:start operation must read before update");
-      continue;
-    }
-    assert.ok(body.indexOf("withPlanningLock(localProductId") < body.indexOf("remoteProducts.update"), `${handler} must lock before update`);
-    assert.ok(body.indexOf("remoteProducts.get") > body.indexOf("withPlanningLock(localProductId"), `${handler} must read under lock`);
-  }
-  assert.match(planningV2Ipc, /const runBody = async/);
-  assert.match(planningV2Ipc, /return runBody\(localProductId, plan\)/);
+test("planning v2 mutation handlers delegate to the single Agent loop", () => {
+  assert.match(planningV2Ipc, /ipcMain\.handle\("planning:start"[\s\S]*runPlanningIntent\(localProductId, "start"\)/,
+    "planning:start must delegate to the durable Agent adapter");
+  assert.doesNotMatch(planningV2Ipc, /const startPlanningUnderLock/,
+    "the removed planning starter must not run alongside Agent");
+  assert.match(planningV2Ipc, /planning:rerunMajorStage[\s\S]*sendPlanningIntent\(localProductId,/);
+  assert.doesNotMatch(planningV2Ipc, /withPlanningLock|remoteProducts\.update|const runBody/);
 });
 
-test("itinerary adoption runs under the same planning product lock", () => {
+test("itinerary adoption is expressed as an Agent intent", () => {
   assert.match(
     planningV2Ipc,
-    /ipcMain\.handle\("planning:acceptItineraryAndRerunCompletion"[\s\S]*?withPlanningLock\(localProductId[\s\S]*?acceptItineraryAndRerunCompletion\(\{[\s\S]*?run: runBody[\s\S]*?\}\)/,
+    /ipcMain\.handle\("planning:acceptItineraryAndRerunCompletion"[\s\S]*?sendPlanningIntent\(localProductId,/,
   );
-  assert.doesNotMatch(planningV2Ipc, /acceptItineraryAndRerunCompletion\(\{[^}]*run: run\W/);
+  assert.doesNotMatch(planningV2Ipc, /acceptItineraryAndRerunCompletion\(\{/);
 });
 
 test("conversation itinerary adoption explains best-effort POI matching and manual fallback", () => {

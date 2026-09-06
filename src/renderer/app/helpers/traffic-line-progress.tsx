@@ -48,6 +48,7 @@ function statusLabel(status: string): string {
     running: "进行中",
     completed: "已确认",
     succeeded: "已确认",
+    skipped: "已跳过",
     failed: "失败",
     needs_user: "待处理",
   } as Record<string, string>)[status] || "待确认";
@@ -68,6 +69,7 @@ function childFrom(kind: TransportKind, value: unknown, endpoint?: unknown): Chi
   const departure = place(item.departure) || place(route.departure) || place(item.departureStation) || place(item.departureAirport) || place(endpointPlan.departure);
   const completed = new Set(Array.isArray(item.completedStages) ? item.completedStages.filter((stage): stage is string => typeof stage === "string") : []);
   const status = text(item.status, item.state, item.nodeStatus)
+    || (item.skipped === true ? "skipped" : undefined)
     || (item.verified === true ? "completed" : text(item.failedStage) ? "failed" : completed.size ? "running" : "pending");
   const rawNodes = record(item.nodes) || record(item.workflowNodes) || {};
   const failedStage = text(item.failedStage);

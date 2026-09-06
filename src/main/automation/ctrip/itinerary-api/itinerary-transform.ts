@@ -48,6 +48,8 @@ export interface ProductItineraryDay {
     poiData?: Record<string, unknown>;
     /** 规划层已按时段排好顺序；缺省时按 spots 顺序均分上午/下午。 */
     timeOfDay?: "morning" | "afternoon";
+    /** 同一时段内的景点关系：and=全部参观；or=多选一。缺省按 and 录入。 */
+    relation?: "and" | "or";
   }>;
   description: string;
   hotel: string;

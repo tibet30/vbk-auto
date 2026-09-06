@@ -2,6 +2,7 @@ import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { getProductBaseInfoApi } from "./basic-info/api.js";
 import { ensureHotelResourceApi } from "./hotel-resource-api.js";
 import { fetchTourDailyDetail, fetchTourInfoId } from "./itinerary-api/steps.js";
+import { resolvePackageName } from "./package-api.js";
 import { datesBetween, localBusinessDate } from "./pricing-api.js";
 import { getProductSegmentsApi, segmentsFromPayload, verifyVehicleResourceBinding } from "./vehicle-resource-api.js";
 
@@ -64,7 +65,7 @@ export async function runProductPreflightApi(page: any, product: any, productId:
   if (!String(baseInfo.vendorProductCode ?? "").trim()) throw new Error("基本信息预检缺少供应商产品编号");
 
   const packageItem = list(packages.itemList)[0];
-  if (!packageItem || String(packageItem.name ?? "") !== String(product.commercial.packageName ?? "")) {
+  if (!packageItem || String(packageItem.name ?? "") !== resolvePackageName(product)) {
     throw new Error("套餐预检回读名称不一致");
   }
   const info = record(description.info);
@@ -104,9 +105,16 @@ export async function runProductPreflightApi(page: any, product: any, productId:
   const segmentPayload = await getProductSegmentsApi(page, productId);
   const segments = segmentsFromPayload(segmentPayload);
   if (!segments.length) throw new Error("资源预检未返回任何行程段");
-  const hotel = product.itinerary.some((day: any) => Boolean(day.hotel))
+  const hotelResource = record(record(product.operations).hotelResource);
+  const hasPlannedHotel = product.itinerary.some((day: any) => {
+    const hotelName = String(day?.hotel ?? "").trim();
+    return Boolean(hotelName) && hotelName !== "无";
+  });
+  // 老数据可能把已解析的携程候选标成 nonPlatform；只要行程明确含住宿，
+  // 就必须以平台酒店资源回读为准，不能因为旧来源标签跳过核验。
+  const hotel = hasPlannedHotel
     ? await ensureHotelResourceApi(page, product, productId)
-    : { skipped: "行程不含住宿", verified: true };
+    : { skipped: hotelResource.source === "nonPlatform" ? "行程不含住宿" : "行程不含平台酒店资源", verified: true };
   let vehicle: Json | null = null;
   if (product.sales.productForm === "privateTour") {
     const groupId = Number(product.operations?.vehicleResource?.resourceGroupId);

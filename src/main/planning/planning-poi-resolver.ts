@@ -80,6 +80,7 @@ export async function resolvePlanningPoiCandidates(args: {
             userIdea: args.userIdea, preferredDay: args.preferredDay?.(requestedName, index), details,
             disambiguate: args.disambiguate,
             validate: (source, best) => toPlanningCandidate(requestedName, { ...source, best }, args.province, args.city),
+            ...(args.checkAvailability ? { checkAvailability: args.checkAvailability } : {}),
           });
           if (resolved.candidate) candidate = resolved.candidate;
           else if (resolved.reason) candidate = { ...candidate, reason: resolved.reason };

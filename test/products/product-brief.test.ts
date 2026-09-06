@@ -57,11 +57,13 @@ test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
   assert.equal(basicInfo.destinationCity, "太原");
   assert.deepEqual((product.product.operations as Record<string, unknown>).vehicleResource, {});
   assert.deepEqual(product.product.commercial, { inventory: defaultCommercialInventory() });
-  assert.match(product.messages[0].content, /目的地「太原」/);
-  // 开场白只留产品上下文事实，不再表达"AI 正在生成"等 loading 状态 —— 后者由
-  // user-running 消息下方的"正在等待 AI 回复"提示负责，避免两处文案重复。
-  assert.match(product.messages[0].content, /产品形态「私家团」/);
-  assert.match(product.messages[0].content, /行程「2天1晚」/);
+  assert.equal(product.messages.length, 1);
+  assert.equal(product.messages[0].role, "user");
+  assert.match(product.messages[0].content, /"type":"product_brief"/);
+  assert.match(product.messages[0].content, /"destination":"太原"/);
+  assert.match(product.messages[0].content, /"productFormLabel":"私家团"/);
+  assert.match(product.messages[0].content, /"days":2/);
+  assert.match(product.messages[0].content, /"nights":1/);
 });
 
 test("创建草稿先把行政目的地归一为平台短名", async (t) => {
@@ -81,8 +83,10 @@ test("创建产品会保存用户初始想法，并限制为 1000 个字", async
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-idea-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
   const db = new VbkDatabase(dataPath);
-  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "想慢一点，多安排当地文化体验。" });
-  assert.equal((product.product.basicInfo as Record<string, unknown>).userIdea, "想慢一点，多安排当地文化体验。");
+  const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "想慢一点，多安排当地文化体验，住当地4钻。" });
+  assert.equal((product.product.basicInfo as Record<string, unknown>).userIdea, "想慢一点，多安排当地文化体验，住当地4钻。");
+  assert.equal((product.product.operations as Record<string, unknown>).hotelTier, "当地4钻酒店/-4");
+  assert.match(product.messages[0].content, /住当地4钻/);
   assert.throws(
     () => db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1001) }),
     /用户想法不能超过 1000 个字/,

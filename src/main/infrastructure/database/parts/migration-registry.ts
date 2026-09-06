@@ -15,6 +15,9 @@
  *   - 0007_product_naming：把本地业务实体从 projects 迁为 products，并把
  *     关联表的 project_id / project_name 改为 local_product_id / product_name。
  *   - 0009_workflow_tasks：持久化一键创建的后台任务与当前阶段。
+ *   - 0010_agent_snapshots：agent 会话恢复与恢复上下文快照。
+ *   - 0011_user_memories：用户偏好记忆（显式记忆 + 证据 + 维护状态）。
+ *   - 0012_ctrip_poi_availability_cache：携程 POI 营业状态成功缓存。
  *
  * 注：
  *   - cookies 不再写入 SQLite：本地 0600 atomic cookie store 才是 cookie
@@ -163,6 +166,86 @@ const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_workflow_tasks_product_id ON workflow_tasks(local_product_id)`,
       `CREATE INDEX IF NOT EXISTS idx_workflow_tasks_created_at ON workflow_tasks(created_at DESC)`,
       `CREATE INDEX IF NOT EXISTS idx_workflow_tasks_status ON workflow_tasks(status)`,
+    ],
+  },
+  {
+    id: "0010_agent_snapshots",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS agent_snapshots (
+        local_product_id TEXT PRIMARY KEY,
+        snapshot_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_agent_snapshots_updated_at ON agent_snapshots(updated_at DESC)`,
+    ],
+  },
+  {
+    id: "0011_user_memories",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS user_memories (
+        id TEXT PRIMARY KEY,
+        owner_user_id INTEGER NOT NULL,
+        scope_type TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        topic TEXT NOT NULL,
+        preference_key TEXT,
+        content TEXT NOT NULL,
+        conditions_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        superseded_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_evidence_at TEXT,
+        last_used_at TEXT,
+        CHECK (scope_type IN ('global', 'product')),
+        CHECK (kind IN ('explicit', 'inferred')),
+        CHECK (status IN ('active', 'pending', 'inactive', 'archived', 'superseded'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS memory_evidence (
+        id TEXT PRIMARY KEY,
+        owner_user_id INTEGER NOT NULL,
+        memory_id TEXT NOT NULL,
+        source_event_id TEXT,
+        task_id TEXT,
+        source_kind TEXT NOT NULL,
+        raw_excerpt TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(memory_id) REFERENCES user_memories(id) ON DELETE CASCADE
+      )`,
+      `CREATE TABLE IF NOT EXISTS memory_maintenance_state (
+        owner_user_id INTEGER PRIMARY KEY,
+        auto_capture INTEGER NOT NULL DEFAULT 1,
+        scope_key TEXT,
+        last_task_id TEXT,
+        pending_count INTEGER NOT NULL DEFAULT 0,
+        last_success_at TEXT,
+        updated_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_user_memories_owner_scope_status_updated
+        ON user_memories(owner_user_id, scope_type, scope_key, status, updated_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_user_memories_owner_status_topic
+        ON user_memories(owner_user_id, status, topic)`,
+      `CREATE INDEX IF NOT EXISTS idx_memory_evidence_owner_memory
+        ON memory_evidence(owner_user_id, memory_id, created_at DESC)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_evidence_event
+        ON memory_evidence(owner_user_id, source_event_id, source_kind, memory_id)
+        WHERE source_event_id IS NOT NULL`,
+    ],
+  },
+  {
+    id: "0012_ctrip_poi_availability_cache",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS ctrip_poi_availability_cache (
+        poi_id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('available', 'suspended')),
+        open_status TEXT NOT NULL,
+        lately_open_time TEXT,
+        verified_at TEXT NOT NULL
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_ctrip_poi_availability_cache_verified_at
+        ON ctrip_poi_availability_cache(verified_at DESC)`,
     ],
   },
 ];

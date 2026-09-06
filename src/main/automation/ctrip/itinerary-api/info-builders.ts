@@ -119,7 +119,7 @@ export function buildAttractionPois(
         asyncValidateStatus: "success",
       },
       sort: index + 1,
-      orFlag: true,
+      orFlag: spot.relation === "or",
       suffixName: spot.ticketType?.key === 2
         ? { key: 11, name: "无需门票" }
         : { key: 7, name: "不含门票" },

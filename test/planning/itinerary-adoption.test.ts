@@ -213,10 +213,11 @@ test("adoption signal prerequisites reject missing local product, revision, or p
   }
 });
 
-test("sync failure cannot mirror an un-signaled itinerary", () => {
+test("legacy adoption keeps rollback while chat now delegates without parallel itinerary writes", () => {
   const aiSource = readFileSync("src/main/ipc/product-ai-ipc.ts", "utf8");
   const signalSource = readFileSync("src/main/planning/itinerary-adoption-signal.ts", "utf8");
-  assert.match(aiSource, /if \(!suppressFinalEmit\) emitProduct/);
+  assert.match(aiSource, /context.agentCore.send\(localProductId, content\)/);
+  assert.doesNotMatch(aiSource, /signalItineraryAdoption|suppressFinalEmit/);
   assert.match(signalSource, /restoreLocalFromRemote/);
   assert.match(signalSource, /new ItineraryAdoptionSyncError\(!restored\)/);
 });

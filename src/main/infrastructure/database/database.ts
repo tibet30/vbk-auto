@@ -35,7 +35,38 @@ import type {
   ProductWorkflowTask,
   ResearchTask,
   TaskStatus,
+  AgentSnapshot,
+  MemoryFilter,
+  MemoryInput,
+  MemoryPatch,
+  MemorySaveResult,
+  UserMemory,
+  UserMemoryEvidence,
+  MemoryMaintenanceState,
 } from "../../../shared/contracts.js";
+import { getAgentSnapshot, saveAgentSnapshot } from "./parts/agent.js";
+import {
+  getCachedCtripPoiAvailability,
+  saveCachedCtripPoiAvailability,
+  type CachedCtripPoiAvailability,
+} from "./parts/ctrip-poi-availability-cache.js";
+import {
+  addMemoryEvidence,
+  bumpMemoryMaintenanceCursor,
+  clearMemoryMaintenancePending,
+  createOrUpdateMemoryState,
+  deleteUserMemory,
+  disableUserMemory,
+  getMemoryByTopic,
+  getMemoryMaintenanceState,
+  getUserMemory,
+  listMemoryEvidence,
+  listUserMemories,
+  markMemorySuccess,
+  markMemoryUsed,
+  saveUserMemory,
+  updateUserMemory,
+} from "./parts/memory.js";
 
 import { OPERATION_LOG_CAP, appendOperationLog, countOperationLog, queryOperationLog, recoverOrphanOperationLog, type OperationLogRow } from "./parts/operation-log.js";
 import { deletePlanningState, loadPlanningState, recoverOrphanPlanningStates, savePlanningState } from "./parts/planning-state.js";
@@ -123,6 +154,17 @@ export class VbkDatabase {
   /** 多账号登录态当前活跃指示器需要显式删除空字符串；现有 getSetting 接口无法区分"未设置"与"空"。 */
   deleteSetting(key: string) {
     deleteSetting(this.db, key);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 携程 POI 营业状态缓存（跨产品、跨重启复用成功核验）
+  // ─────────────────────────────────────────────────────────────────────
+
+  getCachedCtripPoiAvailability(poiId: number): CachedCtripPoiAvailability | undefined {
+    return getCachedCtripPoiAvailability(this.db, poiId);
+  }
+  saveCachedCtripPoiAvailability(entry: CachedCtripPoiAvailability): void {
+    saveCachedCtripPoiAvailability(this.db, entry);
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -257,6 +299,62 @@ export class VbkDatabase {
   }
   recoverOrphanPlanningStates(): string[] {
     return recoverOrphanPlanningStates(this.db);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // agent_snapshots（Agent CORE 全量可恢复运行历史）
+  // ─────────────────────────────────────────────────────────────────────
+  getAgentSnapshot(localProductId: string): AgentSnapshot | undefined {
+    return getAgentSnapshot(this.db, localProductId);
+  }
+  saveAgentSnapshot(snapshot: AgentSnapshot): void {
+    saveAgentSnapshot(this.db, snapshot);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // user_memories（登录用户隔离的本地偏好记忆）
+  // ─────────────────────────────────────────────────────────────────────
+  saveUserMemory(input: MemoryInput): MemorySaveResult { return saveUserMemory(this.db, input); }
+  listUserMemories(ownerUserId: number, filter: MemoryFilter = {}): UserMemory[] {
+    return listUserMemories(this.db, ownerUserId, filter);
+  }
+  getUserMemory(ownerUserId: number, id: string): UserMemory | undefined {
+    return getUserMemory(this.db, ownerUserId, id);
+  }
+  updateUserMemory(ownerUserId: number, id: string, patch: MemoryPatch): UserMemory {
+    return updateUserMemory(this.db, ownerUserId, id, patch);
+  }
+  disableUserMemory(ownerUserId: number, id: string): UserMemory {
+    return disableUserMemory(this.db, ownerUserId, id);
+  }
+  deleteUserMemory(ownerUserId: number, id: string): void {
+    deleteUserMemory(this.db, ownerUserId, id);
+  }
+  markMemoryUsed(ownerUserId: number, id: string): void { markMemoryUsed(this.db, ownerUserId, id); }
+  addMemoryEvidence(input: Parameters<typeof addMemoryEvidence>[1]): UserMemoryEvidence {
+    return addMemoryEvidence(this.db, input);
+  }
+  listMemoryEvidence(ownerUserId: number, memoryId: string): UserMemoryEvidence[] {
+    return listMemoryEvidence(this.db, ownerUserId, memoryId);
+  }
+  getMemoryMaintenanceState(ownerUserId: number): MemoryMaintenanceState {
+    return getMemoryMaintenanceState(this.db, ownerUserId);
+  }
+  createOrUpdateMemoryState(
+    ownerUserId: number,
+    patch: Parameters<typeof createOrUpdateMemoryState>[2],
+  ): void {
+    createOrUpdateMemoryState(this.db, ownerUserId, patch);
+  }
+  bumpMemoryMaintenanceCursor(ownerUserId: number, cursorTaskId?: string): void {
+    bumpMemoryMaintenanceCursor(this.db, ownerUserId, cursorTaskId);
+  }
+  clearMemoryMaintenancePending(ownerUserId: number): void {
+    clearMemoryMaintenancePending(this.db, ownerUserId);
+  }
+  markMemorySuccess(ownerUserId: number): void { markMemorySuccess(this.db, ownerUserId); }
+  getMemoryByTopic(ownerUserId: number, topic: string): UserMemory[] {
+    return getMemoryByTopic(this.db, ownerUserId, topic);
   }
 
   // ─────────────────────────────────────────────────────────────────────

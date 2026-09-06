@@ -14,9 +14,11 @@ export function withTraffic(
   endpoints: TrafficLineEndpointPlan,
 ): Segment {
   const key = variant === "flightRoundTrip" ? "flight" : "train";
+  const trafficEndpoints = variant === "flightRoundTrip" ? endpoints.flight : endpoints.train;
+  if (!trafficEndpoints) throw new Error(`子产品缺少已核实的${variant === "flightRoundTrip" ? "飞机" : "火车"}站点，未保存资源段。`);
   const station = variant === "flightRoundTrip"
-    ? direction === "enter" ? endpoints.flight.arrival : endpoints.flight.departure
-    : direction === "enter" ? endpoints.train.arrival : endpoints.train.departure;
+    ? direction === "enter" ? trafficEndpoints.arrival : trafficEndpoints.departure
+    : direction === "enter" ? trafficEndpoints.arrival : trafficEndpoints.departure;
   const traffic = record(segment[key]) ?? defaultTrafficDto(key);
   return applyStationToTraffic(segment, key, traffic, station, direction);
 }

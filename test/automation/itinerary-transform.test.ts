@@ -82,6 +82,32 @@ test("每天至少包含 1 个景点节点，上午/下午节点合计 POI 数�
   }
 });
 
+test("同一时段多个连续景点默认写成且关系", () => {
+  const day = makeDay({
+    spots: [
+      { name: "帕拉庄园", poiName: "帕拉庄园", poiId: 85093, timeOfDay: "morning" },
+      { name: "江孜宗山古堡", poiName: "江孜宗山古堡", poiId: 76350, timeOfDay: "morning" },
+      { name: "白居寺", poiName: "白居寺", poiId: 76349, timeOfDay: "afternoon" },
+    ],
+  });
+  const out = transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" });
+  const attractions = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 3);
+  assert.equal(attractions[0].tourDailyPois.length, 2);
+  assert.deepEqual(attractions[0].tourDailyPois.map((poi) => poi.orFlag), [false, false]);
+});
+
+test("明确备选景点才写成或关系", () => {
+  const day = makeDay({
+    spots: [
+      { name: "日喀则非物质遗产中心", poiName: "日喀则非物质遗产中心", poiId: 1, timeOfDay: "morning", relation: "or" },
+      { name: "日喀则博物馆", poiName: "日喀则博物馆", poiId: 2, timeOfDay: "morning", relation: "or" },
+    ],
+  });
+  const out = transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" });
+  const attraction = out[0].tourDailyInfos.find((info) => info.activeType?.key === 3);
+  assert.deepEqual(attraction.tourDailyPois.map((poi) => poi.orFlag), [true, true]);
+});
+
 test("餐饮按首尾日与时段排列：首日无早餐，尾日无晚餐，午餐位于上午/下午景点之间", () => {
   const days = [
     makeDay({ day: 1, spots: [{ name: "上午景点", poiName: "上午景点", poiId: 1 }, { name: "下午景点", poiName: "下午景点", poiId: 2 }] }),

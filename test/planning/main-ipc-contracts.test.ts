@@ -93,6 +93,7 @@ function extractFunctionBody(source: string, signature: string): string {
 const mainSrc = [read("src/main/main.ts"), read("src/main/ipc/planning-ipc.ts")].join("\n");
 const productAiSrc = read("src/main/ipc/product-ai-ipc.ts");
 const browserAutomationSrc = read("src/main/ipc/browser-automation-ipc.ts");
+const planningV2Src = read("src/main/ipc/planning-v2-ipc.ts");
 const workflowCoordinatorSrc = read("src/main/application/product-workflow-coordinator.ts");
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -328,17 +329,17 @@ test("G4 · completed POI 回填只暴露名称纠正器，不会调用规划阶
     "completed 回填不可把完整 adapter 交给 runPlan，否则 generateStage 可能被调用");
 });
 
-test("G5 · 主进程以产品维度统一互斥 planning 与 AI 写流程", () => {
-  const runPlanningBody = extractFunctionBody(mainSrc, "async function runPlanning(");
-  const guardIdx = runPlanningBody.indexOf("assertPlanningIdle(localProductId)");
-  const exclusiveIdx = runPlanningBody.indexOf('productWorkflows.runExclusive(localProductId, "planning"');
-  assert.ok(guardIdx >= 0 && guardIdx < exclusiveIdx,
-    "runPlanning 必须在 preflight 前拒绝重入，再通过共享协调器取得产品锁");
-
-  assert.match(productAiSrc, /productWorkflows\.runExclusive\(localProductId,\s*"ai"/,
-    "ai:send 必须与 planning 共用同一产品工作流协调器，不能建立第二把互不相识的锁");
-  assert.match(browserAutomationSrc, /productWorkflows\.runExclusive\(localProductId,\s*"automation"/,
-    "VBK 自动录入也必须进入同一产品工作流协调器，避免与 AI/planning 覆盖状态");
+test("G5 · 旧 planning、AI 和 automation 入口统一委托 durable Agent", () => {
+  assert.match(productAiSrc, /agentCore\.send\(localProductId, content\)/,
+    "旧 ai:send 必须委托 Agent，避免建立第二套对话执行器");
+  assert.match(productAiSrc, /agentCore\.pause\(localProductId\)/,
+    "旧 ai:cancel 必须暂停同一个 Agent run");
+  assert.match(planningV2Src, /requireAgent\(\)\.send\(localProductId,/,
+    "planning:start 必须通过 Agent 启动");
+  assert.match(planningV2Src, /agent\.resume\(localProductId\)/,
+    "planning:resume 必须恢复现有 Agent run");
+  assert.match(browserAutomationSrc, /Promise\.all\(\[[\s\S]*automation\.stop\(localProductId\)[\s\S]*agentCore\?\.pause\(localProductId\)/,
+    "旧 automation:stop 必须同时停止旧 runner 并暂停 Agent");
   assert.match(workflowCoordinatorSrc, /private readonly active = new Map<string, ProductWorkflow>\(\)/,
     "协调器必须按产品记录当前长流程类型");
   assert.match(workflowCoordinatorSrc, /finally\s*\{[\s\S]*this\.active\.delete\(localProductId\)/,
@@ -351,27 +352,21 @@ test("G5 · 主进程以产品维度统一互斥 planning 与 AI 写流程", () 
     "planning:start 必须在覆盖 pending state 前拒绝并发请求");
 });
 
-test("G6 · ai:send 写入 itinerary 后先完成第二阶段并等待手动补全", () => {
-  assert.match(productAiSrc, /patchTouchesItinerary\(responsePatch\)/,
-    "行程阶段完成信号必须只在 patch 实际触达 itinerary 时触发");
-  assert.match(productAiSrc, /syncItineraryAdoptionSignal\(context, localProductId\)/,
-    "行程写回后必须标记为待采用，等待用户手动配置 POI 后再补全");
-  assert.match(productAiSrc, /await enrichItineraryPois\(/,
-    "行程回复落库后应尝试自动匹配真实 POI");
-  assert.match(productAiSrc, /responsePersisted = true/,
-    "助手回复必须在后处理前落库并对用户可见");
+test("G6 · ai:send 不再保留会与 Agent 重复写行程的旧实现", () => {
+  assert.match(productAiSrc, /ipcMain\.handle\("ai:send"[\s\S]*agentCore\.send\(localProductId, content\)/,
+    "兼容入口必须把原始用户意图交给 Agent");
+  assert.doesNotMatch(productAiSrc, /runAiReply|patchTouchesItinerary|enrichItineraryPois|responsePersisted/,
+    "旧 AI 行程写回链路必须删除，避免和 Agent 重复修改本地产品");
 });
 
-test("G7 · 重做产品补全前若 POI 已齐，直接采用当前行程并从 completion 继续", () => {
+test("G7 · 重做和采用行程入口只向 Agent 提交意图", () => {
   const planningV2Ipc = read("src/main/ipc/planning-v2-ipc.ts");
-  assert.match(planningV2Ipc, /stage === "completion"[\s\S]*itineraryAdoption\?\.status === "pending"/,
-    "completion 重做必须识别待采用的对话行程");
-  assert.match(planningV2Ipc, /itineraryPoisAreComplete\(Array\.isArray\(remote\.product\.itinerary\)/,
-    "completion 重做必须以全部每日 POI 已配置作为行程完成条件");
-  assert.match(planningV2Ipc, /planSource = markItineraryAccepted\(remote\.planning, remote\.product\.itinerary\)/,
-    "POI 齐全后必须先采用当前行程再进入 completion");
-  assert.match(planningV2Ipc, /resetProductForPlanningStage\(remote\.product, stage\)/,
-    "采用后只重置并重跑当前 completion 阶段");
+  assert.match(planningV2Ipc, /planning:rerunMajorStage[\s\S]*sendPlanningIntent\(localProductId,/,
+    "重做阶段必须变成 Agent 意图");
+  assert.match(planningV2Ipc, /planning:acceptItineraryAndRerunCompletion[\s\S]*sendPlanningIntent\(localProductId,/,
+    "采用行程必须变成 Agent 意图");
+  assert.doesNotMatch(planningV2Ipc, /runThreeStagePlan|remoteProducts\.update|resetProductForPlanningStage/,
+    "兼容入口不得隐藏执行旧三阶段 AI 或直接写远端");
 });
 
 test("手工复核字段先广播本地事务结果，再交给远端镜像同步", () => {

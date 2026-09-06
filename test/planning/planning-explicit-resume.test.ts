@@ -35,22 +35,14 @@ test("未耗尽或非失败节点在显式恢复时保持原样", () => {
   assert.equal(prepareExplicitPlanningResume(plan), plan);
 });
 
-test("后台中断恢复沿用远端规划，不走 foundation 重置", () => {
+test("planning:resume 优先恢复现有 Agent run", () => {
   const source = readFileSync("src/main/ipc/planning-v2-ipc.ts", "utf8");
-  const start = source.indexOf("const resumePlanningUnderLock");
-  const end = source.indexOf("const resumePlanning =", start);
-  const resumeFlow = source.slice(start, end);
-
-  assert.match(resumeFlow, /runBody\(localProductId, remote\.planning\)/);
-  assert.doesNotMatch(resumeFlow, /createPlanningPlanV2|resetProductForPlanningStage/);
+  assert.match(source, /mode === "resume"[\s\S]*agent\.resume\(localProductId\)/);
+  assert.doesNotMatch(source, /resumePlanningUnderLock/);
 });
 
-test("用户从后台任务报错处继续时沿用显式规划恢复规则", () => {
+test("planning:resume 不再另起旧规划恢复链路", () => {
   const source = readFileSync("src/main/ipc/planning-v2-ipc.ts", "utf8");
-  const start = source.indexOf("const retryPlanningUnderLock");
-  const end = source.indexOf("const retryPlanning =", start);
-  const retryFlow = source.slice(start, end);
-
-  assert.match(retryFlow, /prepareExplicitPlanningResume\(remote\.planning\)/);
-  assert.doesNotMatch(retryFlow, /createPlanningPlanV2|resetProductForPlanningStage/);
+  assert.doesNotMatch(source, /retryPlanningUnderLock|prepareExplicitPlanningResume/);
+  assert.match(source, /runPlanningIntent\(localProductId, "resume"\)/);
 });

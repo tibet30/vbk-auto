@@ -9,6 +9,7 @@ import {
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { assertCreatePreconditions } from "../operations/product-create-guard.js";
+import { withAgentUsage } from "../agent/integration-usage.js";
 import type { MainIpcContext } from "./context.js";
 
 export function registerRemoteProductIpc(context: MainIpcContext): void {
@@ -40,13 +41,52 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
     }
     return task;
   });
-  ipcMain.handle("workflowTasks:abandon", (_event, id: string) => {
+  ipcMain.handle("workflowTasks:abandon", async (_event, id: string) => {
     if (!context.abandonProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
-    return context.abandonProductTask(id);
+    const task = db.getWorkflowTask(id);
+    if (!task) throw new Error(`后台任务不存在：${id}`);
+    const abandoned = await context.abandonProductTask(id);
+    await context.agentCore?.abandon(task.localProductId);
+    return abandoned;
   });
-  ipcMain.handle("workflowTasks:resume", (_event, id: string, mode: "from_error" | "from_start") => {
-    if (!context.resumeProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
-    return context.resumeProductTask(id, mode);
+  ipcMain.handle("workflowTasks:resume", async (_event, id: string, mode: "from_error" | "from_start") => {
+    const task = db.getWorkflowTask(id);
+    if (!task) throw new Error("后台任务不存在。");
+    if (task.status === "abandoned") throw new Error("已永久废弃的任务不能重新执行。");
+    if (task.status !== "needs_attention" && task.status !== "failed") {
+      throw new Error("只有需要处理或执行失败的任务可以重新执行。");
+    }
+    const product = db.getProduct(task.localProductId);
+    if (mode === "from_start" && product?.productId) {
+      throw new Error("产品已进入 VBK 录入，不能从头重新规划；请从当前录入阶段继续，或另建新产品。");
+    }
+    // One-click scheduler planning callbacks are retired. All recovery goes
+    // through the durable Agent loop (resume active run, or send a continue /
+    // restart intent when no active run remains).
+    if (!context.agentCore) throw new Error("Agent 服务尚未就绪，请重启应用后重试。");
+    const agentSnapshot = await context.agentCore.get(task.localProductId);
+    if (agentSnapshot.run && !["completed", "abandoned"].includes(agentSnapshot.run.status)) {
+      if (mode === "from_start") {
+        throw new Error("当前产品由 Agent 管理，请在对话中明确要求从头重新规划；不能通过旧任务入口重置。");
+      }
+      const resumed = await context.agentCore.resume(task.localProductId);
+      context.emitAgentSnapshot?.(resumed);
+      return context.db.getWorkflowTask(id) ?? task;
+    }
+    if (mode === "from_start") {
+      const restarted = await context.agentCore.send(
+        task.localProductId,
+        "请基于当前产品从头重新规划。先读取产品和必要资源；有写入前请求明确审批。",
+      );
+      context.emitAgentSnapshot?.(restarted);
+      return context.db.getWorkflowTask(id) ?? task;
+    }
+    const continued = await context.agentCore.send(
+      task.localProductId,
+      "请继续当前产品规划与录入。先读取已有状态，不要重置或重复已验证内容。",
+    );
+    context.emitAgentSnapshot?.(continued);
+    return context.db.getWorkflowTask(id) ?? task;
   });
   ipcMain.handle("products:create", async (_event, input: CreateProductInput) => {
     const login = await context.productWorkflows.runVbkPageExclusive(() => context.browser.status(true));
@@ -73,23 +113,25 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
       });
     }
     const initialProduct = db.getProduct(created.product.id) ?? created.product;
-    if (input.autoConfirm) {
-      if (!context.enqueueProductTask) throw new Error("后台任务服务尚未就绪，请重启应用后重试。");
-      const workflowTask = context.enqueueProductTask(initialProduct);
-      // 创建接口只返回已落库的产品和任务，不再等待规划与携程录入。
-      broadcastProduct(initialProduct);
-      return { ...initialProduct, workflowTask };
-    }
+    // Every product starts one durable Agent run. The task-center record must be
+    // created first so the first Agent snapshot can advance that same task.
+    db.createWorkflowTask(initialProduct.id, initialProduct.name);
+    if (!context.agentCore) throw new Error("Agent 服务尚未就绪，请重启应用后重试。");
+    const snapshot = await context.agentCore.send(initialProduct.id,
+      "请读取刚创建的产品和用户要求，完成本地规划与资源核验；任何 VBK 写入都必须先请求明确审批。");
+    context.emitAgentSnapshot?.(snapshot);
     broadcastProduct(initialProduct);
-    return initialProduct;
+    return { ...initialProduct, workflowTask: db.latestWorkflowTaskForProduct(initialProduct.id) };
   });
   ipcMain.handle("products:get", async (_event, id: string) => {
-    const product = await getProductForRead(
+    const agent = await context.agentCore?.get(id);
+    const agentOwnsLocalWorkingSet = Boolean(agent?.run && !["completed", "abandoned"].includes(agent.run.status));
+    const product = withAgentUsage(await getProductForRead(
       db,
       remoteProducts,
       id,
-      context.productWorkflows.activeWorkflow(id),
-    );
+      agentOwnsLocalWorkingSet ? "planning" : context.productWorkflows.activeWorkflow(id),
+    ), agent);
     db.completeWorkflowTaskForProduct(product);
     return {
       ...product,

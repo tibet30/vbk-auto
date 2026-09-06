@@ -10,6 +10,7 @@ import { buildTrafficLineTargets } from "./orchestrator.js";
 import { ensureTrafficLineRelationship } from "./relationships.js";
 import { ensureTrafficLinePresentation } from "./presentation.js";
 import { ensureTrafficLineSegments } from "./segments.js";
+import { ensureVehicleResourceGroupDraft } from "../vehicle-resource-api.js";
 import { ensureTrafficLineItinerary } from "./itinerary.js";
 import { ensureTrafficLineClauses } from "./clauses.js";
 import {
@@ -18,7 +19,7 @@ import {
   type TrafficLineChildReadback,
 } from "./readback.js";
 import type { TrafficLinePage } from "./client.js";
-import { resolveTrafficLineEndpoints } from "./endpoints.js";
+import { preflightTrafficLineEndpoints, resolveTrafficLineEndpoints } from "./endpoints.js";
 import type { TrafficLineStationDisambiguator } from "./endpoints.js";
 
 export interface TrafficLineApiOptions {
@@ -31,6 +32,7 @@ export interface TrafficLineApiOptions {
   rejectedTrainStationCodes?: readonly string[];
   childProgress?: readonly TrafficLineChildProgress[];
   onEndpointPlan?: (plan: TrafficLineEndpointPlan) => void;
+  onUnavailableVariants?: (reasons: Partial<Record<TrafficLineVariant, string>>) => void;
   onRejectedTrainStationCodes?: (codes: string[]) => void;
   onChildProgress?: (progress: TrafficLineChildProgress) => void;
   disambiguator?: TrafficLineStationDisambiguator;
@@ -40,6 +42,7 @@ export interface TrafficLineApiOptions {
 export interface TrafficLineApiResult {
   enabled: boolean;
   children: Array<{ variant: TrafficLineVariant; lineDescription: string; childProductId: string; verified: TrafficLineChildReadback }>;
+  skipped?: Array<{ variant: TrafficLineVariant; lineDescription: string; reason: string }>;
 }
 
 /**
@@ -52,18 +55,44 @@ export async function ensureTrafficLineApi(
   config: TrafficLineConfig,
   options: TrafficLineApiOptions = {},
 ): Promise<TrafficLineApiResult> {
-  const targets = buildTrafficLineTargets(config);
+  let targets = buildTrafficLineTargets(config);
   if (!targets.length) return { enabled: false, children: [] };
   if (!options.itinerary?.length) {
     throw new Error("线路及交通缺少已核实的行程 POI 城市；未创建任何子产品，可安全重试。");
   }
-  const persistedEndpoints = endpointPlanCanWrite(options.endpointPlan)
+  const skipped: NonNullable<TrafficLineApiResult["skipped"]> = [];
+  targets = targets.filter((target) => {
+    const previous = options.childProgress?.find((item) => item.variant === target.variant);
+    if (!previous || !trafficLineChildShouldBeSkipped(previous)) return true;
+    const reason = previous.failureReason!;
+    skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
+    options.onChildProgress?.({
+      ...previous,
+      skipped: true,
+      failedStage: undefined,
+      failureReason: reason,
+    });
+    return false;
+  });
+  if (!targets.length) return { enabled: true, children: [], skipped };
+  const persistedEndpoints = endpointPlanCanWrite(options.endpointPlan, targets.map((target) => target.variant))
     ? structuredClone(options.endpointPlan)
     : null;
-  let endpoints: TrafficLineEndpointPlan = persistedEndpoints
-    ? persistedEndpoints
-    : await resolveTrafficLineEndpoints(page, options.itinerary, new Date(), options.disambiguator, options.product);
+  let endpoints: TrafficLineEndpointPlan;
+  if (persistedEndpoints) {
+    endpoints = persistedEndpoints;
+  } else {
+    const availability = await preflightTrafficLineEndpoints(
+      page, options.itinerary, new Date(), options.disambiguator, options.product,
+      targets.map((target) => target.variant),
+    );
+    options.onUnavailableVariants?.(availability.unavailableVariants);
+    targets = targets.filter((target) => availability.availableVariants.includes(target.variant));
+    if (!targets.length) return { enabled: true, children: [], skipped };
+    endpoints = availability.endpointPlan;
+  }
   if (persistedEndpoints && trainEndpointNeedsReplacement(options.childProgress)) {
+    if (!endpoints.train) throw new Error("火车子产品恢复时缺少已核实的火车站点，未重放资源提交。");
     const rejectedCodes = [...new Set([
       ...(options.rejectedTrainStationCodes ?? []),
       endpoints.train.arrival.code,
@@ -138,6 +167,7 @@ export async function ensureTrafficLineApi(
         sleep: options.sleep,
         beforeSubmit: async () => {
           await ensureTrafficLineItinerary(page, relationship.productId, target.variant);
+          await ensureTrafficLineVehicleDraft(page, relationship.productId, options.product);
         },
       });
       checkpoint("resourcesSaved", relationship.productId);
@@ -157,10 +187,22 @@ export async function ensureTrafficLineApi(
         snapshot: () => progress,
       });
     } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (isUnavailableTrafficResourceFailure(reason)) {
+        const skippedProgress = {
+          ...progress,
+          skipped: true,
+          failedStage: undefined,
+          failureReason: reason,
+        };
+        options.onChildProgress?.(skippedProgress);
+        skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
+        continue;
+      }
       options.onChildProgress?.({
         ...progress,
         failedStage: nextStage(progress.completedStages),
-        failureReason: error instanceof Error ? error.message : String(error),
+        failureReason: reason,
       });
       throw error;
     }
@@ -204,7 +246,21 @@ export async function ensureTrafficLineApi(
       verified,
     });
   }
-  return { enabled: true, children };
+  return { enabled: true, children, skipped };
+}
+
+/** 私家团交通子产品独立维护资源段，必须在自己的草稿首段挂上用车组。 */
+async function ensureTrafficLineVehicleDraft(page: TrafficLinePage, productId: string, product: Record<string, unknown> | undefined) {
+  const sales = product?.sales as Record<string, unknown> | undefined;
+  if (sales?.productForm !== "privateTour") return;
+  const operations = product?.operations as Record<string, unknown> | undefined;
+  const vehicle = operations?.vehicleResource as Record<string, unknown> | undefined;
+  const groupId = Number(vehicle?.resourceGroupId);
+  const groupName = String(vehicle?.resourceGroupName ?? "").trim();
+  if (!Number.isInteger(groupId) || groupId <= 0 || !groupName) {
+    throw new Error("私家团交通子产品缺少可绑定的用车资源组。");
+  }
+  await ensureVehicleResourceGroupDraft(page, productId, groupId, groupName, { verifyDraft: true });
 }
 
 /** 每次重新核验都先撤销旧完成证据，保留其它已确认阶段供安全恢复。 */
@@ -218,10 +274,14 @@ export function invalidateTrafficLineFinalReadback(progress: TrafficLineChildPro
   };
 }
 
-export function endpointPlanCanWrite(plan: TrafficLineEndpointPlan | undefined): plan is TrafficLineEndpointPlan {
-  return Boolean(plan?.flight.arrival.code && plan.flight.departure.code
-    && plan.train.arrival.code && plan.train.departure.code
-    && plan.train.arrival.resourceKey && plan.train.departure.resourceKey);
+export function endpointPlanCanWrite(
+  plan: TrafficLineEndpointPlan | undefined,
+  variants: readonly TrafficLineVariant[] = ["flightRoundTrip", "trainRoundTrip"],
+): plan is TrafficLineEndpointPlan {
+  return variants.every((variant) => variant === "flightRoundTrip"
+    ? Boolean(plan?.flight?.arrival.code && plan.flight.departure.code)
+    : Boolean(plan?.train?.arrival.code && plan.train.departure.code
+      && plan.train.arrival.resourceKey && plan.train.departure.resourceKey));
 }
 
 export function trainEndpointNeedsReplacement(progress: readonly TrafficLineChildProgress[] | undefined): boolean {
@@ -231,7 +291,18 @@ export function trainEndpointNeedsReplacement(progress: readonly TrafficLineChil
     && /(?:缺少多出发城市|没有任何可用的多出发城市)/.test(child.failureReason ?? "")));
 }
 
+/** 只有平台明确的“无可售资源”结论才会降级跳过；会话和保存失败仍严格中断。 */
+export function isUnavailableTrafficResourceFailure(reason: string): boolean {
+  return /(?:没有任何可用的多出发城市|未返回可用于(?:飞机|火车)往返的出发城市)/.test(reason);
+}
+
+export function trafficLineChildShouldBeSkipped(progress: TrafficLineChildProgress | undefined): boolean {
+  return Boolean(progress && progress.verified !== true && (progress.skipped === true
+    || (progress.failedStage === "resourcesSaved" && isUnavailableTrafficResourceFailure(progress.failureReason ?? ""))));
+}
+
 function sameTrainEndpoints(current: TrafficLineEndpointPlan, replacement: TrafficLineEndpointPlan): boolean {
+  if (!current.train || !replacement.train) return false;
   return current.train.arrival.code === replacement.train.arrival.code
     && current.train.departure.code === replacement.train.departure.code;
 }

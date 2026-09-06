@@ -1,3 +1,6 @@
+import { approvalForRun } from "../../agent/integration-gates.js";
+import { AgentUncertainWriteError } from "../../agent/types.js";
+import { prepareAgentAutomation } from "./automation.main.agent.js";
 /**
  * DraftAutomation：自动化阶段对外暴露的统一门面类。
  *   - start / stop / retryPhase / retryOnePhase：业务侧 API；
@@ -55,6 +58,9 @@ export function failedAutomationResumePhase(run?: AutomationRun): string | undef
  */
 export class DraftAutomation {
   private running = new Set<string>();
+  private readonly agentDispatched = new Set<string>();
+  private agentWriteGuard?: (localProductId: string, phase: string) => Promise<void>;
+  setAgentWriteGuard(guard: (localProductId: string, phase: string) => Promise<void>): void { this.agentWriteGuard = guard; }
   private runVbkPageExclusive = async <T>(task: () => Promise<T>): Promise<T> => task();
   // 用户主动中止的 localProductId：runner 在阶段之间和 attempt 之间检查这个集合。
   // 用 Set 而不是 boolean：避免上一次取消信号污染下一轮 run。
@@ -181,7 +187,8 @@ isCancelRequested(localProductId: string): boolean {
  * 普通阶段要求 productId 已存在；销售控制作为产品壳入口允许在无
  * productId 但已有 automation 记录时重执行。
  */
-async retryOnePhase(localProductId: string, phase: string) {
+  async retryOnePhase(localProductId: string, phase: string) {
+    if (this.agentWriteGuard) throw new Error("请通过方案协作确认后重新执行阶段。");
     const requested = typeof phase === "string" ? phase.trim() : "";
     if (!requested) throw new Error("请选择要重新执行的阶段。");
     if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
@@ -204,6 +211,43 @@ async retryOnePhase(localProductId: string, phase: string) {
     return this.runOnePhaseLocked(localProductId, requested);
   }
 
+  /**
+   * Agent 的唯一 VBK 写入入口。一次调用只执行一个明确阶段：尚未创建远端
+   * 草稿时只能执行 saleControl，随后由 Agent 根据读回结果决定下一阶段。
+   * 绝不能在这里回退到 runAutomation 的整链执行。
+   */
+  async executeAgentPhase(localProductId: string, phase: string): Promise<void> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) throw productNotFound(localProductId);
+    const agent = this.db.getAgentSnapshot(localProductId);
+    if (!agent?.run) throw new Error("缺少 Agent 任务，不能录入。");
+    if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
+    assertSinglePhaseRetryPrerequisites(parseProduct(product.product), phase);
+    const approval = approvalForRun(agent);
+    if (!approval) throw new Error("缺少最终确认，不能录入。");
+    this.db.saveAutomation(localProductId, prepareAgentAutomation(product, `${agent.run.id}:${approval.id}`, phase));
+    this.agentDispatched.delete(localProductId);
+    try {
+    if (!product.productId) {
+      if (phase !== "saleControl") {
+        throw new Error("远端草稿尚未创建；请先执行销售控制阶段。");
+      }
+      await this.runSaleControlLocked(localProductId);
+      if (!this.db.getProduct(localProductId)?.productId) throw new Error("产品壳未取得权威回读结果。");
+      return;
+    }
+    if (phase === "saleControl") {
+      throw new Error("远端草稿已存在，不能重复执行销售控制阶段。");
+    }
+    await this.runOnePhaseLocked(localProductId, phase);
+    const completed = this.db.getProduct(localProductId)?.automation?.phases.find(item=>item.phase===phase);
+    if (completed?.status !== "completed") throw new Error(`阶段 ${phase} 未完成权威回读。`);
+    } catch (error) {
+      if (this.agentDispatched.has(localProductId)) throw new AgentUncertainWriteError(error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally { this.agentDispatched.delete(localProductId); }
+  }
+
   /** 保留失败的不可改型远端草稿，重置本地绑定以创建新的可用替代草稿。 */
   async replaceLockedDraft(localProductId: string): Promise<{ previousProductId: string }> {
     if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
@@ -224,11 +268,13 @@ async retryOnePhase(localProductId: string, phase: string) {
     return { previousProductId };
   }
 
-  private runContext(): AutomationRunContext {
+  private runContext(localProductId?: string, phase?: string): AutomationRunContext {
+    const agentControlled = Boolean(localProductId && this.agentWriteGuard);
     return {
       db: this.db,
       browser: this.browser,
-      advisor: this.advisor,
+      agentControlled,
+      advisor: agentControlled ? async () => ({summary:"阶段未完成",rootCause:"等待 Agent 根据执行结果决定后续动作",action:"wait_for_user",expectedEvidence:"权威回读结果",userInstruction:"已将错误返回 Agent，未在工具内部重复写入。"}) : this.advisor,
       presentationCopyRewriter: this.presentationCopyRewriter,
       disambiguator: this.disambiguator,
       resolveActiveButlerContext: (accountName) => resolveActiveButlerContext(this.db, accountName),
@@ -236,7 +282,13 @@ async retryOnePhase(localProductId: string, phase: string) {
       markCancelled: (_localProductId, run, persist) => markCancelled(run, persist),
       cancellationRequested: this.cancellationRequested,
       ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
-      runVbkPageExclusive: this.runVbkPageExclusive,
+      runVbkPageExclusive: (task) => this.runVbkPageExclusive(async () => {
+        if (localProductId && phase && this.agentWriteGuard) {
+          await this.agentWriteGuard(localProductId, phase);
+          this.agentDispatched.add(localProductId);
+        }
+        return task();
+      }),
     };
   }
 
@@ -245,17 +297,18 @@ async retryOnePhase(localProductId: string, phase: string) {
   }
 
   private async runOnePhase(localProductId: string, phaseName: string) {
-    return runOnePhaseFlow(this.runContext(), localProductId, phaseName);
+    return runOnePhaseFlow(this.runContext(localProductId, phaseName), localProductId, phaseName);
   }
 
   private async runSaleControl(localProductId: string) {
-    return runSaleControlPhase(this.runContext(), localProductId);
+    return runSaleControlPhase(this.runContext(localProductId, "saleControl"), localProductId);
   }
 
 /**
  * 完整跑互斥包装：避免同一 localProductId 并发 + 重入前清 stale 取消信号。
  */
 private async runLocked(localProductId: string, retryFrom?: string) {
+    if (this.agentWriteGuard) throw new Error("请通过 Agent 最终确认后按模块录入。");
     if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
     this.running.add(localProductId);
 

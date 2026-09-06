@@ -30,8 +30,17 @@ import type {
   AccountFixedInfoFieldKey,
   AccountFixedInfoValue,
   ProviderContactCard,
+  MemoryFilter,
+  MemoryInput,
+  MemoryMaintenanceResult,
+  MemoryMaintenanceSettings,
+  MemoryPatch,
+  MemorySaveResult,
+  UserMemory,
+  MemoryMaintenanceState,
 } from "./contracts-types.js";
 import type { PlanningGenerationState, PlanningMajorStage, PlanningModule } from "./contracts-planning.js";
+import type { AgentSnapshot, AgentInputResponse, AgentApprovalResponse, AgentIllegalKeywordRepairInput } from "./contracts-agent.js";
 import type {
   AppAuthAccountsSnapshot,
   AppAuthCaptcha,
@@ -55,6 +64,16 @@ export type WorkflowTaskRetryMode = "from_error" | "from_start";
  */
 
 export interface VbkApi {
+  agent: {
+    get(localProductId: string): Promise<AgentSnapshot>;
+    send(localProductId: string, content: string): Promise<AgentSnapshot>;
+    repairIllegalKeywords(localProductId: string, input: AgentIllegalKeywordRepairInput): Promise<AgentSnapshot>;
+    respond(localProductId: string, response: AgentInputResponse): Promise<AgentSnapshot>;
+    approve(localProductId: string, response: AgentApprovalResponse): Promise<AgentSnapshot>;
+    pause(localProductId: string): Promise<AgentSnapshot>;
+    resume(localProductId: string): Promise<AgentSnapshot>;
+    abandon(localProductId: string): Promise<AgentSnapshot>;
+  };
   appAuth: {
     status(): Promise<AppAuthStatus>;
     listAccounts(): Promise<AppAuthAccountsSnapshot>;
@@ -236,6 +255,7 @@ export interface VbkApi {
     test(input: AiConnectionTestInput): Promise<ConnectionTest>;
   };
   events: {
+    onAgentUpdated(listener: (snapshot: AgentSnapshot) => void): () => void;
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
     /** 后台任务状态变化后推送；renderer 按当前可见页面决定是否应用。 */
     onWorkflowTaskUpdated(listener: (task: ProductWorkflowTask) => void): () => void;
@@ -262,6 +282,24 @@ export interface VbkApi {
     rerunMajorStage(localProductId: string, stage: PlanningMajorStage): Promise<PlanningRunResult>;
     /** 采用当前对话行程：先核验真实 POI，再失效并重跑全部产品补全节点。 */
     acceptItineraryAndRerunCompletion(localProductId: string): Promise<PlanningRunResult>;
+  };
+  memory: {
+    /** 主动写入明确记忆（用户明确发“记住 / 以后都”）。 */
+    saveExplicit(localProductId: string, input: Omit<MemoryInput, "ownerUserId" | "kind">): Promise<MemorySaveResult>;
+    /** 按 owner + scope 读取记忆，默认返回活跃条目。 */
+    list(localProductId: string, filter?: MemoryFilter): Promise<UserMemory[]>;
+    /** 按 ID 查询记忆明细。 */
+    get(localProductId: string, id: string): Promise<UserMemory | undefined>;
+    /** 更新可写字段。 */
+    update(localProductId: string, id: string, patch: MemoryPatch): Promise<UserMemory>;
+    /** 停用（非删除）一条记忆，保留历史。 */
+    disable(localProductId: string, id: string): Promise<UserMemory>;
+    /** 删除记忆。 */
+    delete(localProductId: string, id: string): Promise<void>;
+    /** 触发整理（可重入幂等）。 */
+    maintenance(localProductId: string): Promise<MemoryMaintenanceResult>;
+    /** 查询/更新维护设置。 */
+    settings(localProductId: string, settings?: MemoryMaintenanceSettings): Promise<MemoryMaintenanceState>;
   };
 }
 

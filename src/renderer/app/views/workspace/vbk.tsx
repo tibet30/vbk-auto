@@ -106,7 +106,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
           </div>
           <div className={styles.readinessHeroBody}>
             <strong>{readiness.ready ? "产品方案已就绪" : "先回到第一步完成核查"}</strong>
-            <small>{readiness.ready ? "切换至 VBK 录入后可开始保存草稿。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
+            <small>{readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
           </div>
           <div className={styles.readinessHeroProgress}>
             <strong>{readiness.completion}%</strong>
@@ -210,21 +210,20 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
               className={`${shared.btn} ${shared.btnLg}`}
               data-variant="primary"
               onClick={() => {
-                if (stage !== "vbk") setStage("vbk");
                 void startAutomation();
               }}
-              disabled={!readiness.ready || loading}
-              aria-label="开始自动录入"
-              title="开始自动录入"
+              disabled={loading}
+              aria-label="前往方案确认"
+              title="前往方案确认"
             >
               <Play size={15} />
-              开始自动录入
+              前往方案确认
             </button>
           )}
         </div>
         <span className={styles.productFooterMeta}>
           <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
-          {readiness.ready ? " 可开始自动录入" : ` 还需 ${readiness.issues.length} 项核查`}
+          {readiness.ready ? " 等待最终确认" : ` 还需 ${readiness.issues.length} 项核查`}
         </span>
       </footer>
     </aside>

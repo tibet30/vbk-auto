@@ -21,6 +21,43 @@ const automationPhaseSchema = z.enum([
 ]);
 const planningMajorStageSchema = z.enum(["foundation", "itinerary", "completion"]);
 const workflowTaskRetryModeSchema = z.enum(["from_error", "from_start"]);
+const memoryScopeSchema = z.enum(["global", "product"]);
+const memoryStatusSchema = z.enum(["active", "pending", "inactive", "archived", "superseded"]);
+const memoryIdSchema = z.string().trim().min(1).max(120);
+const memoryInputSchema = z.object({
+  scopeType: memoryScopeSchema.optional(),
+  scopeKey: z.string().trim().min(1).max(200).optional(),
+  topic: z.string().trim().min(1).max(80),
+  content: z.string().trim().min(1).max(1000),
+  preferenceKey: z.string().trim().min(1).max(80).optional(),
+  conditions: z.array(z.string().trim().min(1).max(160)).max(20).optional(),
+  status: memoryStatusSchema.optional(),
+  sourceKind: z.string().trim().min(1).max(80).optional(),
+  sourceEventId: z.string().trim().min(1).max(160).optional(),
+  taskId: z.string().trim().min(1).max(160).optional(),
+  rawExcerpt: z.string().trim().min(1).max(1200).optional(),
+}).strict();
+const memoryFilterSchema = z.object({
+  status: z.array(memoryStatusSchema).max(5).optional(),
+  scopeType: memoryScopeSchema.optional(),
+  scopeKey: z.string().trim().min(1).max(200).optional(),
+  includeInactive: z.boolean().optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+  offset: z.number().int().min(0).max(10_000).optional(),
+  order: z.enum(["updated", "evidence"]).optional(),
+}).strict();
+const memoryPatchSchema = z.object({
+  topic: z.string().trim().min(1).max(80).optional(),
+  preferenceKey: z.string().trim().min(1).max(80).optional(),
+  content: z.string().trim().min(1).max(1000).optional(),
+  conditions: z.array(z.string().trim().min(1).max(160)).max(20).optional(),
+  status: memoryStatusSchema.optional(),
+  supersededBy: z.string().trim().min(1).max(120).optional(),
+}).strict();
+const memorySettingsSchema = z.object({
+  autoCapture: z.boolean().optional(),
+  scopeKey: z.string().trim().min(1).max(200).nullable().optional(),
+}).strict();
 const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "products:get", "products:delete", "products:readiness", "products:updateReviewField", "products:updateProductJson",
   "ai:send", "ai:regenerate",
@@ -28,6 +65,8 @@ const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "automation:start", "automation:stop", "automation:retry", "automation:retryPhase", "automation:retryOnePhase",
   "planning:start", "planning:resume", "planning:state", "planning:rerunMajorStage", "planning:acceptItineraryAndRerunCompletion",
   "workflowTasks:get", "workflowTasks:abandon", "workflowTasks:resume",
+  "agent:get", "agent:send", "agent:repairIllegalKeywords", "agent:respond", "agent:approve", "agent:pause", "agent:resume", "agent:abandon",
+  "memory:saveExplicit", "memory:list", "memory:get", "memory:update", "memory:disable", "memory:delete", "memory:maintenance", "memory:settings",
 ]);
 
 function parse<T>(channel: string, label: string, schema: z.ZodType<T>, value: unknown): T {
@@ -65,8 +104,26 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     parse(channel, "json", z.string().min(2).max(2_000_000), args[1]);
   }
   if (channel === "ai:send") parse(channel, "content", z.string().trim().min(1).max(6000), args[1]);
+  if (channel === "agent:send") parse(channel, "content", z.string().trim().min(1).max(6000), args[1]);
+  if (channel === "agent:repairIllegalKeywords") {
+    parse(channel, "input", z.object({
+      content: z.string().trim().min(1).max(6000),
+      keywords: z.array(shortTextSchema).max(50),
+      affectedPaths: z.array(shortTextSchema).max(80),
+    }).strict(), args[1]);
+  }
+  if (channel === "agent:respond") parse(channel, "response", z.object({ requestId: shortTextSchema, answers: z.record(z.string(), z.union([z.string().max(3000), z.array(z.string().max(1000)).max(20)])).refine((value) => Object.keys(value).length <= 20) }).strict(), args[1]);
+  if (channel === "agent:approve") parse(channel, "response", z.object({ approvalId: shortTextSchema, productVersion: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), args[1]);
   if (channel === "ai:regenerate") parse(channel, "field", shortTextSchema, args[1]);
   if (channel === "workflowTasks:resume") parse(channel, "mode", workflowTaskRetryModeSchema, args[1]);
+  if (channel === "memory:saveExplicit") parse(channel, "input", memoryInputSchema, args[1]);
+  if (channel === "memory:list" && args[1] !== undefined) parse(channel, "filter", memoryFilterSchema, args[1]);
+  if (["memory:get", "memory:disable", "memory:delete"].includes(channel)) parse(channel, "id", memoryIdSchema, args[1]);
+  if (channel === "memory:update") {
+    parse(channel, "id", memoryIdSchema, args[1]);
+    parse(channel, "patch", memoryPatchSchema, args[2]);
+  }
+  if (channel === "memory:settings" && args[1] !== undefined) parse(channel, "settings", memorySettingsSchema, args[1]);
 
   if (channel === "automation:retryPhase" || channel === "automation:retryOnePhase") {
     parse(channel, "phase", automationPhaseSchema, args[1]);

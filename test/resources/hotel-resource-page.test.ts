@@ -59,6 +59,36 @@ test("酒店资源直接以 saveSegment 保存五家指定酒店，并以 getSeg
   }
 });
 
+test("酒店资源允许只保存一家指定酒店候选", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousDocument = (globalThis as any).document;
+  let segment: any = { segmentId: "s-1", segmentBase: { stayNights: 1 }, hotel: { segmentRooms: [] } };
+  (globalThis as any).document = { cookie: "GUID=fixture" };
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const endpoint = new URL(String(input)).pathname;
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (endpoint === "/restapi/soa2/15638/saveSegment") segment = body.segment;
+    const payload = endpoint === "/restapi/soa2/15638/getSegments"
+      ? { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments: [segment] } }
+      : { ResponseStatus: { Ack: "Success" } };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await syncCtripHotelResources({
+      page: { evaluate: async (fn: any, arg: any) => fn(arg) },
+      productId: "77968888",
+      dailyCandidates: [{ day: 1, segmentId: "s-1", candidates: [{ hotelId: 9, hotelName: "唯一酒店" }] }],
+    });
+    assert.equal(result.verified, true);
+    assert.deepEqual(hotelIdsFromSegment(segment), [9]);
+    assert.deepEqual(segment.hotel.segmentRooms.map((room: any) => room.squenceNumber), [1]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousDocument === undefined) delete (globalThis as any).document;
+    else (globalThis as any).document = previousDocument;
+  }
+});
+
 test("资源服务回读重排酒店后仍确认已保存，且不会重复保存", async () => {
   const previousFetch = globalThis.fetch;
   const previousDocument = (globalThis as any).document;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CreateProductInput, ProductDetail } from "../../../../shared/contracts.js";
-import { DEFAULT_HOTEL_TIER } from "../../../../shared/hotel-tiers.js";
+import { DEFAULT_HOTEL_TIER, inferHotelTierFromUserText } from "../../../../shared/hotel-tiers.js";
+import { buildProductBriefMessageContent } from "../../../../shared/product-brief-message.js";
 import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
 import { now } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
@@ -26,6 +27,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
   const destinationCity = destination;
   const province = "";
   const name = `${destination}${days}天${nights}晚${formLabel}`;
+  const hotelTier = inferHotelTierFromUserText(userIdea) ?? DEFAULT_HOTEL_TIER;
   const product = {
     sales: {
       // 创建表单只描述目的地、天数与产品形态，并没有机票 / 火车 / 轮船等
@@ -55,7 +57,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
     },
     operations: {
       hotelSource: "nonPlatform",
-      hotelTier: DEFAULT_HOTEL_TIER,
+      hotelTier,
       mealsIncluded: false,
       pickupCity: "",
       vehicleResource: {},
@@ -72,8 +74,14 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
     product,
     messages: [{
       id: randomUUID(),
-      role: "assistant",
-      content: `已创建「${name}」。已带入产品上下文：目的地「${destination}」、产品形态「${formLabel}」、行程「${days}天${nights}晚」。`,
+      role: "user",
+      content: buildProductBriefMessageContent({
+        destination,
+        productFormLabel: formLabel,
+        days,
+        nights,
+        ...(userIdea ? { userIdea } : {}),
+      }),
       createdAt,
     }],
     researchTasks: [],

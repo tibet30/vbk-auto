@@ -42,12 +42,14 @@ test("summarizeAiUsageMetric 在有费用时附带约 ¥", () => {
   assert.match(label, /约 ¥0\.12/);
 });
 
-test("规划树接入 AI usage 指标与明细面板", () => {
+test("Agent 协作进度接入 AI usage 指标与明细面板", () => {
   assert.match(tree, /aiUsage\?: ProductAiUsage/);
   assert.match(tree, /usePlanningUsage\(aiUsage\)/);
   assert.match(tree, /PlanningUsageToggle/);
   assert.match(tree, /PlanningUsagePanel/);
   assert.match(review, /aiUsage=\{product\.aiUsage\}/);
+  assert.match(review, /usePlanningUsage\(product\?\.aiUsage\)/);
+  assert.match(review, /PlanningUsageToggle/);
 });
 
 test("usage 文案覆盖本产品、上次、Token 未返回、约 ¥", () => {

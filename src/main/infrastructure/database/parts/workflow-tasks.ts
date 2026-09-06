@@ -130,6 +130,8 @@ export function completeWorkflowTaskForProduct(
   db: Database.Database,
   product: Pick<ProductSummary, "id" | "status" | "productId">,
 ): ProductWorkflowTask | undefined {
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_snapshots'").get()
+    && db.prepare("SELECT 1 FROM agent_snapshots WHERE local_product_id=?").get(product.id)) return undefined;
   if (product.status !== "draft_saved" || !product.productId?.trim()) return undefined;
   const current = latestWorkflowTaskForProduct(db, product.id);
   if (!current || current.status === "abandoned" || current.status === "succeeded") return undefined;

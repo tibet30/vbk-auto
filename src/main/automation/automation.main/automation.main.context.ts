@@ -30,6 +30,7 @@ export interface ActiveButlerContext {
  * 都通过这个对象注入，便于测试时替换。
  */
 export interface AutomationRunContext {
+  agentControlled?: boolean;
   db: VbkDatabase;
   browser: VbkBrowser;
   advisor: (req: AdvisorRequest) => Promise<AdvisorOutcome>;

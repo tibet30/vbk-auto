@@ -32,7 +32,6 @@ export function agentPatchOperations(product: ProductDetail, patch: Json): Patch
   };
   assertTrafficLineEndpointPatch(effectivePatch);
   if (Array.isArray(effectivePatch.itinerary)) {
-    assertUserNamedSpotsRetained(product, effectivePatch.itinerary);
     const contractError = itineraryInputContractError(product, effectivePatch.itinerary);
     if (contractError) throw new Error(contractError);
   }
@@ -73,26 +72,6 @@ function assertTrafficLineEndpointPatch(patch: Json): void {
   }
 }
 
-/** A conversational edit may refine a user-named stop, but cannot discard it. */
-function assertUserNamedSpotsRetained(product: ProductDetail, itinerary: Json[]): void {
-  const basicInfo = record(product.product.basicInfo) ? product.product.basicInfo : {};
-  const userIdea = typeof basicInfo.userIdea === "string" ? basicInfo.userIdea : "";
-  if (!userIdea.trim()) return;
-  const nextByDay = new Map(itinerary.map((day) => [Number(day.day), day]));
-  for (const originalDay of (product.product.itinerary ?? []) as Json[]) {
-    const nextDay = nextByDay.get(Number(originalDay.day));
-    if (!nextDay) continue;
-    const nextNames = new Set((Array.isArray(nextDay.spots) ? nextDay.spots : [])
-      .filter(record).flatMap((spot) => [cleanName(spot.name), cleanName(spot.poiName)]).filter(Boolean));
-    for (const spot of (Array.isArray(originalDay.spots) ? originalDay.spots : []).filter(record)) {
-      const name = cleanName(spot.name);
-      if (name && userIdea.includes(name) && !nextNames.has(name)) {
-        throw new Error(`用户点名景点「${name}」必须保留；未命中真实 POI 时请保留为待手动配置。`);
-      }
-    }
-  }
-}
-
 function assertLockedPlanningPatch(product: ProductDetail, patch: Json): void {
   const locked = extractLockedConstraints(product, (product.messages ?? []).filter((message) => message.role === "user"));
   const basic = record(patch.basicInfo) ? patch.basicInfo : undefined;
@@ -103,10 +82,6 @@ function assertLockedPlanningPatch(product: ProductDetail, patch: Json): void {
   if (locked.transport && operations?.transport !== undefined && operations.transport !== locked.transport) {
     throw new Error(`交通方式已锁定为 ${locked.transport}，不能覆盖`);
   }
-}
-
-function cleanName(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function mergeItineraryDays(current: unknown, incoming: unknown): Json[] {

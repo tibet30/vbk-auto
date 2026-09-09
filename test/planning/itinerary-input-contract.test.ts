@@ -61,6 +61,46 @@ test("完整每日行程禁止整体重排或替换，只允许规范化", () =>
   ]), undefined);
 });
 
+test("product.messages 中的最新纠正进入写入契约，只覆盖被纠正日期", () => {
+  const product = draft("D1 去宽窄巷子，D2 去武侯祠，包车");
+  product.messages = [
+    ...product.messages,
+    { id: "fix-1", role: "user", content: "第二天改成锦里", createdAt: "2026-09-09T00:00:00.000Z" },
+    { id: "fix-2", role: "user", content: "第二天再改为大熊猫基地", createdAt: "2026-09-09T00:00:01.000Z" },
+  ];
+  const locked = extractLockedConstraints(product, product.messages);
+  assert.equal(classifyItineraryInputMode(locked, 2), "complete");
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["宽窄巷子"] },
+    { day: 2, spots: ["大熊猫基地"] },
+  ]);
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "宽窄巷子" }] },
+    { day: 2, spots: [{ name: "大熊猫基地" }] },
+  ]), undefined);
+  assert.match(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "锦里" }] },
+    { day: 2, spots: [{ name: "大熊猫基地" }] },
+  ]) ?? "", /完整|重排|替换|缺失|宽窄巷子/);
+});
+
+test("明确取消旧景点后写入契约不再要求保留该景点", () => {
+  const product = draft("D1 去宽窄巷子，D2 去武侯祠，包车");
+  product.messages = [
+    ...product.messages,
+    { id: "cancel", role: "user", content: "不去武侯祠", createdAt: "2026-09-09T00:00:00.000Z" },
+  ];
+  const locked = extractLockedConstraints(product, product.messages);
+  assert.ok(!locked.pois.includes("武侯祠"));
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "宽窄巷子" }] },
+    { day: 2, spots: [{ name: "锦里" }] },
+  ]), undefined);
+  assert.doesNotThrow(() => agentPatchOperations(product, {
+    itinerary: [{ day: 2, spots: [{ name: "锦里" }] }],
+  }));
+});
+
 test("结构化 userIntent 优先于文本，写入前 patch 也会拒绝替换锁定景点", () => {
   const product = draft("随便写点博物馆和轻松行程", {
     version: 2,

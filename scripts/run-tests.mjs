@@ -2,11 +2,14 @@ import { readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { selectChangedTestFiles } from "./test-selection.mjs";
 
 const root = process.cwd();
 const mode = process.argv[2] ?? "unit";
-if (!["unit", "integration", "browser", "e2e", "all"].includes(mode)) {
-  console.error(`用法：node scripts/run-tests.mjs ${"unit|integration|browser|e2e|all"}`);
+const changedOnly = process.argv.slice(3).includes("--changed");
+if (!["unit", "integration", "browser", "e2e", "all"].includes(mode)
+  || process.argv.slice(3).some((argument) => argument !== "--changed")) {
+  console.error(`用法：node scripts/run-tests.mjs ${"unit|integration|browser|e2e|all"} [--changed]`);
   process.exit(2);
 }
 
@@ -21,8 +24,7 @@ for (const file of testFiles) {
   else if (await reachesLocalServer(file, new Set())) integrationFiles.push(file);
   else unitFiles.push(file);
 }
-
-const files = mode === "e2e"
+const modeFiles = mode === "e2e"
   ? e2eFiles
   : mode === "integration"
     ? integrationFiles
@@ -31,7 +33,11 @@ const files = mode === "e2e"
     : mode === "all"
       ? testFiles
       : unitFiles;
-console.log(`[test] mode=${mode} files=${files.length} e2e=${e2eFiles.length} browser=${browserFiles.length} integration=${integrationFiles.length} unit=${unitFiles.length}`);
+const selection = changedOnly
+  ? await selectChangedTestFiles({ root, testFiles: modeFiles, changedFiles: changedFilesSinceHead() })
+  : { files: modeFiles, reason: "all-tests" };
+const files = selection.files;
+console.log(`[test] mode=${mode} scope=${changedOnly ? "changed" : "all"} reason=${selection.reason} files=${files.length} e2e=${e2eFiles.length} browser=${browserFiles.length} integration=${integrationFiles.length} unit=${unitFiles.length}`);
 if (files.length === 0) process.exit(0);
 
 const result = spawnSync(process.execPath, [
@@ -108,4 +114,20 @@ function resolveLocalImport(directory, specifier) {
     if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
   }
   return undefined;
+}
+
+function changedFilesSinceHead() {
+  const tracked = runGit(["diff", "--name-only", "HEAD"]);
+  const untracked = runGit(["ls-files", "--others", "--exclude-standard"]);
+  if (tracked === undefined || untracked === undefined) {
+    console.warn("[test] 无法读取 Git 改动，改为运行当前模式的全部测试。");
+    return testFiles;
+  }
+  return [...new Set([...tracked, ...untracked])];
+}
+
+function runGit(args) {
+  const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  if (result.status !== 0) return undefined;
+  return result.stdout.split("\n").filter(Boolean);
 }

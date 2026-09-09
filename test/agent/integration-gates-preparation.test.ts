@@ -67,11 +67,14 @@ test("local planning requires final approval while stale saved draft cannot esta
 
 test("agent context keeps unmatched POIs for manual review and hands off after final confirmation", async () => {
   const context = agentTaskContext({ getProduct: () => product() } as any, "product-1");
-  assert.match(context, /绝不搜索、推断或替换成其他景点/);
-  assert.match(context, /绝不寻找替代景点/);
-  assert.match(context, /系统按已授权范围自动确定性录入与回读/);
+  const parsed = JSON.parse(context) as { rules?: string[] };
+  const rules = parsed.rules ?? [];
+  assert.ok(rules.some((rule) => rule.includes("绝不搜索、推断或替换成其他景点")));
+  assert.ok(rules.some((rule) => rule.includes("绝不寻找替代景点")));
+  assert.ok(rules.some((rule) => rule.includes("系统按已授权范围自动确定性录入与回读")));
+  assert.equal(rules.some((rule) => rule.includes("execute_vbk_phase")), false);
+  assert.equal(rules.some((rule) => rule.includes("自动检索同城、同主题、可游览的单一替代 POI")), false);
   assert.doesNotMatch(context, /execute_vbk_phase/);
-  assert.doesNotMatch(context, /自动检索同城、同主题、可游览的单一替代 POI/);
 });
 
 test("read_product exposes exact approval scope and actionable readiness without nesting old dialogue", () => {

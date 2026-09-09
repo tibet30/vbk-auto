@@ -34,7 +34,9 @@ npm run package
 
 ```bash
 npm run check
-npm test
+npm test          # 只运行本次 Git 改动直接或间接影响的单元测试
+npm run test:changed  # 按改动筛选全部测试层
+npm run test:all  # 显式全量回归
 npm run build
 ```
 

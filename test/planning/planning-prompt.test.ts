@@ -7,6 +7,8 @@ import {
   projectProductContext,
 } from "../../src/main/planning/adapters/planning-prompt.js";
 import { systemPrompt as legacySystemPrompt } from "../../src/main/minimax/minimax-constants.js";
+import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
+import { extractLockedConstraints } from "../../src/main/agent/prompt-helpers.js";
 
 const request: PlannerRequest = {
   stage: "basicInfo",
@@ -81,6 +83,32 @@ test("commercial prompt 保留商业阶段专属契约", () => {
   assert.match(prompt, /本地审核用指导价/);
   assert.match(prompt, /不是实时采购价/);
   assert.doesNotMatch(prompt, /每个 spot\.name|recommendations 恰好/);
+});
+
+test("itinerary user message 带上 lockedConstraints 和输入模式，禁止覆盖已锁定日序", () => {
+  const product = buildProductSnapshot({ destination: "成都", days: 2, productForm: "privateTour" });
+  Object.assign(product.product.basicInfo!, { userIdea: "D1 去宽窄巷子，D2 去武侯祠，包车" });
+  const locked = extractLockedConstraints(product);
+  const message = composePlanningUserMessage({
+    ...request,
+    stage: "itinerary",
+    context: {
+      ...request.context,
+      skeleton: { ...request.context.skeleton, destination: "成都" },
+      lockedConstraints: locked,
+      currentProduct: {
+        ...request.context.currentProduct,
+        basicInfo: {
+          ...(request.context.currentProduct.basicInfo as Record<string, unknown>),
+          userIdea: "D1 去宽窄巷子，D2 去武侯祠，包车",
+        },
+      },
+    },
+  });
+  assert.match(message, /行程输入模式：complete/);
+  assert.ok(message.includes(JSON.stringify(locked)));
+  assert.match(message, /禁止整体重排或替换，只允许规范化和 POI 核验/);
+  assert.doesNotMatch(message, /execute_vbk_phase/);
 });
 
 test("itinerary prompt 约束同日 POI 地理连续性和远距离交通衔接", () => {

@@ -212,6 +212,45 @@ test("跟团游不要求用车资源组，私家团缺资源组会阻塞", () =>
   assert.ok(blocked.missing.some((item) => item.includes("用车")));
 });
 
+test("缺天数时停在 foundation，不允许 request_approval", () => {
+  const product = completeDraft();
+  (product.product.basicInfo as Record<string, unknown>).days = 0;
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.equal(evaluation.ready, false);
+  assert.equal(evaluation.currentStage, "foundation");
+  assert.equal(evaluation.currentNode, "skeleton");
+  assert.ok(evaluation.missing.some((item) => item.includes("出行天数") || item.includes("days")));
+  assert.ok(!evaluation.allowedActions.includes("request_approval"));
+  assert.ok(evaluation.prohibitedActions.includes("request_approval"));
+});
+
+test("缺封面时停在 completion/cover，并开放 resolve_cover", () => {
+  const product = completeDraft();
+  delete (product.product.presentation as Record<string, unknown>).cover;
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.equal(evaluation.ready, false);
+  assert.equal(evaluation.currentStage, "completion");
+  assert.equal(evaluation.currentNode, "cover");
+  assert.ok(evaluation.missing.some((item) => item.includes("封面")));
+  assert.ok(evaluation.allowedActions.includes("resolve_cover"));
+  assert.ok(!evaluation.allowedActions.includes("request_approval"));
+});
+
+test("evaluator 从 product.messages 锁定最新纠正后的行程", () => {
+  const product = completeDraft();
+  product.messages = [
+    ...product.messages,
+    { id: "fix", role: "user", content: "第二天改成锦里", createdAt: "2026-09-09T00:00:00.000Z" },
+  ];
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.deepEqual(evaluation.lockedConstraints.itineraryOrder, [
+    { day: 1, spots: ["宽窄巷子"] },
+    { day: 2, spots: ["锦里"] },
+  ]);
+  assert.equal(evaluation.itineraryInputMode, "complete");
+  assert.ok(!evaluation.lockedConstraints.pois.includes("武侯祠"));
+});
+
 test("未完成的 POI 研究任务会阻塞批准", () => {
   const product = completeDraft();
   product.researchTasks = [{

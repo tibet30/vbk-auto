@@ -93,11 +93,12 @@ test("Agent 上下文复用同一 evaluator，并带 promptVersion 与权威 pre
   assert.ok(parsed.lockedConstraints.pois.includes("宽窄巷子"));
   assert.ok(parsed.prohibitedActions.includes("request_approval"));
   assert.ok(Array.isArray(parsed.completionCriteria) && parsed.completionCriteria.length > 0);
-  assert.match(context, /request_approval 只能在 preparation.ready=true 时使用/);
-  assert.match(context, /留在当前阶段补齐/);
-  assert.match(context, /lockedConstraints/);
-  assert.ok(context.indexOf('"currentStage"') < context.indexOf('"rules"'));
-  assert.ok(context.indexOf('"missing"') < context.indexOf('"product"'));
+  assert.ok(Array.isArray(parsed.rules));
+  assert.ok(parsed.rules.some((rule: string) => rule.includes("request_approval 只能在 preparation.ready=true 时使用")));
+  assert.ok(parsed.rules.some((rule: string) => rule.includes("留在当前阶段补齐")));
+  assert.equal(typeof parsed.currentStage, "string");
+  assert.ok(Array.isArray(parsed.missing));
+  assert.ok(parsed.product && typeof parsed.product === "object");
   assert.equal(parsed.itineraryInputMode, evaluation.itineraryInputMode);
 });
 

@@ -179,7 +179,10 @@ test('itinerary patch cannot remove a user-named unmatched POI',()=>{
   const p=product();
   (p.product.basicInfo as any).userIdea='D1 去宽窄巷子和武侯祠';
   (p.product.itinerary as any)[0].spots=[{name:'宽窄巷子',poiId:null,poiName:null},{name:'武侯祠',poiId:null,poiName:null}];
-  assert.throws(()=>agentPatchOperations(p,{itinerary:[{day:1,spots:[{name:'武侯祠',poiId:null,poiName:null}]}]}),/用户点名景点.*宽窄巷子/);
+  assert.throws(
+    ()=>agentPatchOperations(p,{itinerary:[{day:1,spots:[{name:'武侯祠',poiId:null,poiName:null}]}]}),
+    /已锁定的第 1 天景点必须保留.*宽窄巷子/,
+  );
 });
 test('final approval cannot shrink to only creating a product shell',()=>{
   const {p}=fixture();

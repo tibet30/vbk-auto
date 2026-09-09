@@ -123,6 +123,29 @@ test("skeleton 阶段把省级目的地的 pickupCity 写为核心城市", async
   assert.equal(result.status, "completed");
   assert.equal(skeletonValue?.pickupCity, "郑州");
   assert.equal(skeletonValue?.hotelTier, "当地5钻酒店/-38");
+  assert.equal(skeletonValue?.transport, "charter");
+});
+
+test("skeleton 阶段仅在当天用车缺失时按团态补默认", async () => {
+  let skeletonValue: Record<string, unknown> | undefined;
+  await runSingleStage({
+    stage: "skeleton",
+    state: { localProductId: "daily-transport", currentStage: "skeleton", completedStages: [], stages: [], status: "running", updatedAt: new Date().toISOString() },
+    skeleton: { destination: "太原", days: 2, nights: 1, productForm: "groupTour", productType: "domesticShort", supplierProductCode: "NEW" },
+    runtime: {
+      loadAcceptedModules: async () => [],
+      loadCurrentProduct: async () => ({ sales: { splitGroup: true }, operations: { transport: "none" } }),
+      writeModule: async (_id: string, _module: string, _path: string, value: unknown) => {
+        skeletonValue = value as Record<string, unknown>;
+        return { ok: true as const };
+      },
+    } as any,
+    planner: {} as any,
+    retryLimit: 1,
+    history: [],
+    existingTasks: [],
+  });
+  assert.equal(skeletonValue?.transport, "none", "人工选择不应被拼小团默认值覆盖");
 });
 
 test("真实 runtime 写入 skeleton 时同步把省级 meetingCity / destinationCity 改为核心城市", async () => {

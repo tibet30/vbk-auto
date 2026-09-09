@@ -287,10 +287,9 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
   };
   const planner2 = new ScriptedPlanner(brokenOutputs);
   const r2 = await runPlan({ localProductId: "p", skeleton, store, runtime: rt, planner: planner2, providerLabel: "minimax" });
-  assert.equal(r2.status, "needs_user", "非法 release 触发 rewind → needs_user");
-  assert.equal(store.state?.currentStage, "commercial", "release 属于 commercial 阶段 → rewind 到 commercial");
-  // planner2 必须重跑 commercial。
   assert.ok(planner2.calls.includes("commercial"), "rewind 后必须重跑 commercial");
+  const release = (rt.product.commercial as { release?: { publicPriceCeiling?: number } } | undefined)?.release;
+  assert.ok((release?.publicPriceCeiling ?? 0) > 0, "commercial fallback 会把缺失的本地审核草稿发布上限补回");
 });
 
 test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", async () => {

@@ -2,6 +2,7 @@ import { logInfo } from "../../shared/log-timestamp.js";
 import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-trigger.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
+import { syncConfirmedResearchTasksToRemote } from "../operations/research-task-remote-sync.js";
 import type { MainIpcContext } from "./context.js";
 
 export function isVehicleResourceOnlyMessage(message: string): boolean {
@@ -50,7 +51,7 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
   const { context, localProductId, message, userMessageId } = args;
   if (!isVehicleResourceOnlyMessage(message)) return false;
 
-  const { db, productMutations, emitProduct } = context;
+  const { db, productMutations, emitProduct, remoteProducts, broadcastProduct } = context;
   let product = db.getProduct(localProductId);
   if (!product) throw productNotFound(localProductId);
 
@@ -91,6 +92,7 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
           db.markResearchAccepted(localProductId, task.id, result.outcome.reason, "vbk");
         }
       }
+      await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
     }
   }
 

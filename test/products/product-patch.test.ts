@@ -81,6 +81,23 @@ test("normaliseProductDraft 保留已有合法 commercial.inventory", () => {
   assert.deepEqual((result.commercial as Record<string, unknown>).inventory, inventory);
 });
 
+test("normaliseProductDraft 接纳旧 Agent 的酒店候选 item 包装", () => {
+  const result = normaliseProductDraft({
+    itinerary: [{
+      day: 1, title: "日喀则", hotel: "维也纳酒店",
+      hotelCandidates: { item: [{
+        hotelId: "130061572", hotelName: "维也纳酒店", diamond: "4", score: "4.8", distanceKm: "1.59",
+        cityName: "江孜", anchorName: "白居寺", anchorCityId: "20859",
+      }] },
+    }],
+  });
+
+  assert.deepEqual((result.itinerary as Array<Record<string, unknown>>)[0]?.hotelCandidates, [{
+    hotelId: 130061572, hotelName: "维也纳酒店", diamond: 4, score: 4.8, distanceKm: 1.59,
+    cityName: "江孜", anchorName: "白居寺", anchorCityId: 20859,
+  }]);
+});
+
 test("草稿归一化保留空 vehicleResource 并为旧 operations 补空对象", () => {
   const result = normaliseProductDraft({
     operations: { hotelSource: "nonPlatform", hotelTier: "当地5钻酒店/-38", mealsIncluded: false },

@@ -12,14 +12,16 @@
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
 import { ProductMutationService } from "../application/product-mutation-service.js";
-import { suggestPoi } from "../infrastructure/poi-suggest.js";
+import { suggestPoi, suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { getCtripSightAvailability, getCtripSightAvailabilities } from "../infrastructure/ctrip-sight-availability.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
+import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
 import type { ContactCardSelection } from "../../shared/contracts.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import {
   VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
   vbkRecommendationByteLength,
@@ -33,6 +35,8 @@ import type {
   PlanningModule,
   ResearchTaskProposal,
 } from "../../shared/contracts-planning.js";
+import { resolvePlanningPoiAutoSelection, type PoiAutoDisambiguator } from "./poi-auto-selection.js";
+import { planningWriteContractError } from "./itinerary-input-contract.js";
 
 export class DbGenerationStateStore implements GenerationStateStore {
   constructor(
@@ -208,12 +212,30 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     private readonly browser?: VbkBrowser,
     productMutations?: ProductMutationService,
     private readonly runVbkPageExclusive?: <T>(task: () => Promise<T>) => Promise<T>,
+    private readonly trafficLineAvailabilityResolver?: (localProductId: string) => Promise<TrafficLineEndpointAvailability | null>,
+    private readonly poiDisambiguate?: PoiAutoDisambiguator,
   ) {
     this.productMutations = productMutations ?? new ProductMutationService(db);
   }
   async suggestPoi(keyword: string, context?: { destinationCity?: string; province?: string }) {
     if (!this.browser) return null;
     const query = async () => suggestPoi(await this.browser!.page(), keyword, context);
+    return this.runVbkPageExclusive ? this.runVbkPageExclusive(query) : query();
+  }
+
+  async resolvePoiSelection(localProductId: string, keyword: string, context?: { destinationCity?: string; province?: string }) {
+    if (!this.browser) return { status: "uncertain" as const };
+    const product = this.db.getProduct(localProductId);
+    if (!product) return { status: "uncertain" as const };
+    const query = async () => resolvePlanningPoiAutoSelection({
+      localProductId,
+      keyword,
+      product: product.product,
+      context,
+      detail: await suggestPoiDetail(await this.browser!.page(), keyword, context),
+      checkAvailability: (poiId) => this.getPoiAvailability(poiId),
+      disambiguate: this.poiDisambiguate,
+    });
     return this.runVbkPageExclusive ? this.runVbkPageExclusive(query) : query();
   }
 
@@ -253,8 +275,16 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       const existing = product.product.presentation && typeof product.product.presentation === "object" && !Array.isArray(product.product.presentation)
         ? product.product.presentation as Record<string, unknown>
         : {};
-      value = { ...existing, ...(value as Record<string, unknown>) };
+      const incoming = { ...(value as Record<string, unknown>) };
+      if (Object.hasOwn(incoming, "features")) {
+        const features = coerceProductFeaturesHtml(incoming.features);
+        if (!features) return { ok: false, reason: "presentation.features 必须是非空 HTML 字符串，不能是对象/数组。" };
+        incoming.features = features;
+      }
+      value = { ...existing, ...incoming };
     }
+    const contractError = planningWriteContractError(product, module, value);
+    if (contractError) return { ok: false, reason: contractError };
     const result = applyProductPatchSafe(product.product, [
       { op: "replace", path: writePath, value },
     ]);
@@ -263,7 +293,12 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       ? applyManualReviewField(result.product, { field: "butlerContact", selection: existingButler })
       : result.product;
     alignProvinceLevelBasicCities(productData, module, product.product);
-    this.productMutations.replace(localProductId, productData, { notify: false });
+    // Notify so workspace readiness refreshes after agent/planning module writes.
+    this.productMutations.replace(localProductId, productData, {
+      // itinerary 的受控规划/复核可能明确清空过期或外地 POI；不能被通用
+      // 异步快照保护重新塞回。无关模块仍保留默认保护。
+      preserveVerifiedItineraryPois: module !== "itinerary",
+    });
     const accountName = this.db.getSetting("vbkAccountName")?.value || null;
     injectAccountButler(this.db, localProductId, accountName);
     return { ok: true };
@@ -274,6 +309,22 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     if (!product) return { ok: false, reason: "产品不存在" };
     const next = structuredClone(product.product);
     next.operations = operations;
+    this.productMutations.replace(localProductId, next, { notify: false });
+    return { ok: true };
+  }
+
+  async resolveTrafficLineAvailability(localProductId: string) {
+    return this.trafficLineAvailabilityResolver?.(localProductId) ?? null;
+  }
+
+  async writeResolvedTrafficLineConfig(localProductId: string, config: TrafficLineConfig): Promise<{ ok: boolean; reason?: string }> {
+    const product = this.db.getProduct(localProductId);
+    if (!product) return { ok: false, reason: "产品不存在" };
+    const next = structuredClone(product.product);
+    const operations = next.operations && typeof next.operations === "object" && !Array.isArray(next.operations)
+      ? next.operations as Record<string, unknown>
+      : {};
+    next.operations = { ...operations, trafficLine: structuredClone(config) };
     this.productMutations.replace(localProductId, next, { notify: false });
     return { ok: true };
   }

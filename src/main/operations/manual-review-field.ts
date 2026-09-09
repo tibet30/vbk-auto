@@ -294,8 +294,8 @@ function isContactCardSelection(value: unknown): value is ContactCardSelection {
 /**
  * 把产品封面写入 presentation.cover：
  *  - 接受 ProductCover（ctripLibrary / manualUpload 二选一）；
- *  - ctripLibrary：必填 imageId（正整数）/ imageUrl（非空）/ poi / description /
- *    minQuality；可选 thumbnailUrl / previewUrl / score / resolution /
+ *  - ctripLibrary：必填 imageId（正整数）/ imageUrl（非空）/ poi；可选 description /
+ *    minQuality / thumbnailUrl / previewUrl / score / resolution /
  *    poiId / poiName / selectedAt，缺省时被剥离不写入，避免后续 UI 误判；
  *  - manualUpload：除上述三项外还需 fileId / originalName / mimeType / sizeBytes /
  *    uploadedAt 全部非空；mime 必须在白名单内（与 cover-storage 同步）；
@@ -318,10 +318,6 @@ function applyProductCover(
     ? cover.minQuality
     : null;
   if (!poi) throw new Error("封面 POI 不能为空。");
-  if (!description) throw new Error("封面描述不能为空。");
-  if (minQuality === null || minQuality < 0 || minQuality > 5) {
-    throw new Error("封面最低质量分必须为 0~5 之间的数字。");
-  }
   if (cover.source === "ctripLibrary") {
     // imageId / imageUrl 是携程图库封面「一张具体图片」的主键与展示 URL：
     // 缺其中任一字段都视为非法写入，直接抛错（与 shared CtripLibraryCover
@@ -377,14 +373,18 @@ function applyProductCover(
       imageId,
       imageUrl: imageUrlRaw,
       poi,
-      description,
-      minQuality,
+      ...(description ? { description } : {}),
+      ...(minQuality !== null && minQuality >= 0 && minQuality <= 5 ? { minQuality } : {}),
       ...optionalFields,
     } satisfies ProductCover;
     next.presentation = presentation;
     return next;
   }
   if (cover.source === "manualUpload") {
+    if (!description) throw new Error("封面描述不能为空。");
+    if (minQuality === null || minQuality < 0 || minQuality > 5) {
+      throw new Error("封面最低质量分必须为 0~5 之间的数字。");
+    }
     const fileId = typeof cover.fileId === "string" ? cover.fileId.trim() : "";
     const originalName = typeof cover.originalName === "string" ? cover.originalName.trim() : "";
     const mimeType = cover.mimeType;

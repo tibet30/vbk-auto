@@ -18,10 +18,11 @@ const EVENT_LABEL: Record<AgentEvent["type"], string> = {
 
 export const ACTION_NAMES: Record<string, string> = {
   ask_user: "询问需要补充的信息", request_approval: "准备最终确认", resolve_itinerary_pois: "核验行程景点",
-  read_product: "读取当前产品", generate_product_module: "完善产品模块", patch_product: "更新本地方案",
-  query_poi: "查询景点", query_hotel_resource: "查询酒店资源", resolve_itinerary_hotels: "匹配行程酒店",
-  resolve_cover: "匹配产品封面", query_vehicle_resource: "查询用车资源", resolve_vehicle_resource: "匹配用车资源",
-  query_station: "查询交通站点", read_vbk_phase: "核对 VBK 结果", execute_vbk_phase: "录入 VBK 模块",
+  read_product: "读取当前产品", generate_product_module: "完善产品模块", ensure_presentation_recommendations: "核验推荐理由", patch_product: "更新本地方案",
+  query_poi: "查询景点", select_itinerary_poi: "设置行程景点", query_hotel_resource: "查询酒店资源",
+  resolve_itinerary_hotels: "匹配行程酒店", resolve_cover: "匹配产品封面", query_vehicle_resource: "查询用车资源",
+  resolve_vehicle_resource: "匹配用车资源", query_station: "查询交通站点", recheck_traffic_line_availability: "重新核验大交通", read_vbk_phase: "核对 VBK 结果",
+  execute_vbk_phase: "录入 VBK 模块",
 };
 
 const MODULE_STAGE_NAMES: Record<string, string> = {
@@ -94,9 +95,16 @@ function statusText(event: AgentEvent): string {
   return STATUS[event.content as AgentRunStatus] ?? event.content;
 }
 
-export function AgentEventItem({ event, events, leadingStatus }: { event: AgentEvent; events: AgentEvent[]; leadingStatus?: AgentEvent }) {
+export function AgentEventItem({ event, events, userName, leadingStatus }: {
+  event: AgentEvent;
+  events: AgentEvent[];
+  userName: string;
+  leadingStatus?: AgentEvent;
+}) {
   if (event.type === "user") {
-    return <article className={styles.message} data-role="user">
+    const avatar = userName.slice(0, 1);
+    return <article className={styles.message} data-role="user" aria-label={`${userName}的消息`}>
+      <span className={styles.messageIdentity} aria-hidden="true"><span className={styles.messageAvatar}>{avatar}</span></span>
       <div className={styles.messageContent}>{event.content}</div>
     </article>;
   }
@@ -138,9 +146,13 @@ function ThinkingActivity({ event }: { event: AgentEvent }) {
   </details>;
 }
 
-function ToolsActivity({ events, leadingStatus }: { events: AgentEvent[]; leadingStatus?: AgentEvent }) {
+function ToolsActivity({ events, resultEvents = events, leadingStatus }: {
+  events: AgentEvent[];
+  resultEvents?: AgentEvent[];
+  leadingStatus?: AgentEvent;
+}) {
   const [open, setOpen] = useState(false);
-  const pairs = pairMethodBatchEvents(events);
+  const pairs = pairMethodBatchEvents(events, resultEvents);
   if (!pairs.length) return null;
   const labels = pairs.map((pair) => toolCallLabel(pair.call));
   const preview = labels.slice(0, 2).join("、") + (labels.length > 2 ? " 等" : "");
@@ -181,18 +193,29 @@ function AssistantAnswer({ event }: { event: AgentEvent }) {
   </div>;
 }
 
-/** Cursor 式助手线程：思考 → 工具 → 正文。 */
-export function AgentAssistantThread({ steps, leadingStatus }: { steps: AgentThreadStep[]; leadingStatus?: AgentEvent }) {
+function AssistantIdentity() {
+  return <span className={styles.assistantIdentity} aria-hidden="true"><span className={styles.assistantAvatar}>AI</span></span>;
+}
+
+/** Cursor 式助手线程：思考 → 正文 → 工具。 */
+export function AgentAssistantThread({ steps, events, leadingStatus }: {
+  steps: AgentThreadStep[];
+  events: AgentEvent[];
+  leadingStatus?: AgentEvent;
+}) {
   const streaming = steps.some((step) => step.kind === "turn" && step.event.data?.streaming === true);
   const consumed = new Set<string>();
   let leadingStatusAvailable = leadingStatus;
-  return <div className={styles.assistantThread} data-thread="assistant" data-streaming={streaming || undefined} aria-busy={streaming || undefined}>
+  return <div className={styles.assistantThread} data-thread="assistant" data-streaming={streaming || undefined} aria-label="AI 的消息" aria-busy={streaming || undefined}>
     {steps.map((step, index) => {
       if (step.kind === "methods") {
         if (consumed.has(step.id)) return null;
         const start = leadingStatusAvailable;
         leadingStatusAvailable = undefined;
-        return <ToolsActivity key={step.id} events={step.events} leadingStatus={start} />;
+        return <div key={step.id} className={styles.threadTurn}>
+          <AssistantIdentity />
+          <ToolsActivity events={step.events} resultEvents={events} leadingStatus={start} />
+        </div>;
       }
       const following = steps[index + 1];
       const methods = following?.kind === "methods" ? following : undefined;
@@ -200,9 +223,10 @@ export function AgentAssistantThread({ steps, leadingStatus }: { steps: AgentThr
       const start = leadingStatusAvailable;
       leadingStatusAvailable = undefined;
       return <div key={step.event.id} className={styles.threadTurn}>
+        <AssistantIdentity />
         <ThinkingActivity event={step.event} />
-        {methods ? <ToolsActivity events={methods.events} leadingStatus={start} /> : null}
         <AssistantAnswer event={step.event} />
+        {methods ? <ToolsActivity events={methods.events} resultEvents={events} leadingStatus={start} /> : null}
       </div>;
     })}
   </div>;

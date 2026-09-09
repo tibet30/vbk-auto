@@ -55,6 +55,7 @@ test("用车资源仅保留在全程首段，并清除住宿段上的历史绑�
     { segmentId: "hotel-2-nights", segmentResourceGroups: [vehicleGroup, hotelGroup] },
     { segmentId: "hotel-1-night", segmentResourceGroups: [hotelGroup] },
   ];
+  let submitted = false;
   (globalThis as any).document = { cookie: "GUID=fixture" };
   globalThis.fetch = (async (input: any, init?: any) => {
     const endpoint = new URL(String(input)).pathname;
@@ -65,8 +66,13 @@ test("用车资源仅保留在全程首段，并清除住宿段上的历史绑�
         ? body.segment
         : segment);
     }
+    if (endpoint.endsWith("submitSegments")) submitted = true;
     const payload = endpoint.endsWith("getSegments")
-      ? { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments } }
+      ? {
+        ResponseStatus: { Ack: "Success" },
+        draftProductSegments: { segments },
+        ...(submitted ? { productSegments: { segments: structuredClone(segments) } } : {}),
+      }
       : { ResponseStatus: { Ack: "Success" } };
     return new Response(JSON.stringify(payload), { status: 200 });
   }) as typeof fetch;
@@ -81,7 +87,9 @@ test("用车资源仅保留在全程首段，并清除住宿段上的历史绑�
     assert.deepEqual(calls.map((call) => [call.endpoint, call.segmentId]), [
       ["/restapi/soa2/15638/getSegments", undefined],
       ["/restapi/soa2/15638/saveSegment", "full-trip"],
+      ["/restapi/soa2/15638/getSegments", undefined],
       ["/restapi/soa2/15638/saveSegment", "hotel-2-nights"],
+      ["/restapi/soa2/15638/getSegments", undefined],
       ["/restapi/soa2/15638/submitSegments", undefined],
       ["/restapi/soa2/15638/getSegments", undefined],
     ]);

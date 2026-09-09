@@ -281,8 +281,32 @@ export class AgentToolRunner {
       this.snapshots.save(snapshot);
       return snapshot.run?.status === "running" ? "continue" : "waiting";
     }
-    const precondition = await this.deps.approvalPrecondition?.(id, scope);
+    // A model can lose track of an earlier approval while it works through a
+    // long sequence of phases. Reuse an approval only when it is still bound
+    // to this run, account, product version, and covers every requested scope.
+    // This is intentionally checked before validating a narrower repeat scope:
+    // the original full-scope approval remains the authority.
     let snapshot = this.snapshots.load(id);
+    if (!this.snapshots.current(snapshot, token)) return "stale";
+    const approved = this.snapshots.validApproval(snapshot);
+    if (approved) {
+      const identity = await this.deps.accountFor(id);
+      snapshot = this.snapshots.load(id);
+      if (!this.snapshots.current(snapshot, token)) return "stale";
+      if (approved.accountKey === identity.accountKey
+        && approved.productVersion === identity.productVersion
+        && approved.intentVersion === snapshot.run?.intentVersion
+        && scope.every((item) => approved.scope.includes(item))) {
+        this.snapshots.result(snapshot, call.id, "当前范围已获授权，无需再次请求。系统将按已授权范围继续自动录入与回读。", {
+          approvalId: approved.id,
+          reusedApproval: true,
+        }, token.runId);
+        this.snapshots.save(snapshot);
+        return "continue";
+      }
+    }
+    const precondition = await this.deps.approvalPrecondition?.(id, scope);
+    snapshot = this.snapshots.load(id);
     if (!this.snapshots.current(snapshot, token)) return "stale";
     if (precondition) {
       this.snapshots.blockedResult(snapshot, call.id, `当前不能审批：${precondition}`,

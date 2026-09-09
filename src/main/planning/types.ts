@@ -12,6 +12,8 @@ import type {
   PlannerContext,
   ResearchTaskProposal,
 } from "../../shared/contracts-planning.js";
+import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
+import type { PoiAutoSelectionResult } from "./poi-auto-selection.js";
 
 export interface OrchestratorRunResult {
   state: PlanningGenerationState;
@@ -48,6 +50,8 @@ export interface PoiSuggestContext {
 
 export interface OrchestratorRuntime {
   suggestPoi?(keyword: string, context?: PoiSuggestContext): Promise<{ poiName: string; poiId: number } | null>;
+  /** 规划运行时使用的受控 POI 决策：前 12 条 AI 消歧、营业核验及置信度门槛均在这里完成。 */
+  resolvePoiSelection?(localProductId: string, keyword: string, context?: PoiSuggestContext): Promise<PoiAutoSelectionResult>;
   /** 按 POI ID 从携程攻略景点详情核验实时营业状态。 */
   getPoiAvailability?(poiId: number): Promise<{ status: "available" | "suspended" }>;
   /** 以受控并发批量核验一组 POI 的营业状态。 */
@@ -58,6 +62,10 @@ export interface OrchestratorRuntime {
   writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
   /** 确定性酒店检索的受控写入口；AI patch 永远不能写 operations.hotelResource。 */
   writeResolvedHotelResources?(localProductId: string, operations: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
+  /** 用当前 VBK 会话核验端点及代表日期双向班次，只返回明确可创建的飞机 / 火车往返方式。 */
+  resolveTrafficLineAvailability?(localProductId: string): Promise<TrafficLineEndpointAvailability | null>;
+  /** 仅供接口核验结果写入 operations.trafficLine 的售卖状态；AI 只能记录用户明确的端点城市。 */
+  writeResolvedTrafficLineConfig?(localProductId: string, config: TrafficLineConfig): Promise<{ ok: boolean; reason?: string }>;
   /** 添加一条 research task；返回新增的 id（若 label+type 已存在则返回原 id）。 */
   addResearchTask(localProductId: string, task: ResearchTaskProposal): Promise<string>;
   /** 拉取最近历史对话（仅供 orchestrator 上下文使用）。 */

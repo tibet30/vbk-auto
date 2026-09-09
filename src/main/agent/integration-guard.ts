@@ -29,15 +29,35 @@ export function agentApprovalScopeError(
     return `包含当前产品不支持的录入范围。当前 requiredApprovalScope：${JSON.stringify(required)}。`;
   }
 }
+/**
+ * After final approval, automation may rewrite presentation/itinerary text or
+ * resource mirrors. Those local mutations must not invalidate the already
+ * authorised deterministic run mid-flight or on resume-from-error.
+ */
+export function isDeterministicAutomationInFlight(
+  product: ProductDetail,
+  approvalIntentVersion: string | undefined,
+  runIntentVersion: string | undefined,
+): boolean {
+  if (!approvalIntentVersion || approvalIntentVersion !== runIntentVersion) return false;
+  const status = product.automation?.status;
+  return status === 'running' || status === 'failed' || status === 'cancelled';
+}
+
 /** Run inside the browser lock, immediately before dispatching platform calls. */
 export function assertAgentWriteAuthorized(product: ProductDetail, snapshot: AgentSnapshot | undefined, phase: string, accountKey: string): void {
   const approval = approvalForRun(snapshot);
   if (!snapshot?.run || snapshot.run.status !== 'running' || snapshot.uncertainWrite) throw new AgentAuthorizationError('当前任务未处于可录入状态。');
   if (!approval || approval.intentVersion !== snapshot.run.intentVersion
-    || approval.productVersion !== agentProductVersion(product)
     || approval.accountKey !== accountKey || !accountKey
     || (product.vbkAccount && product.vbkAccount !== accountKey)
-    || !approval.scope.includes(`vbk.write_phase:${phase}`)) throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');
+    || !approval.scope.includes(`vbk.write_phase:${phase}`)) {
+    throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');
+  }
+  const versionMatches = approval.productVersion === agentProductVersion(product);
+  if (!versionMatches && !isDeterministicAutomationInFlight(product, approval.intentVersion, snapshot.run.intentVersion)) {
+    throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');
+  }
   const currentPhases = new Set(requiredAgentPhases(product));
   if (!currentPhases.has(phase)) throw new AgentAuthorizationError(`阶段 ${phase} 已不再是当前方案需要录入的范围。`);
   const scopeError = agentApprovalScopeError(product, approval.scope, {allowSupersededPhases:true});

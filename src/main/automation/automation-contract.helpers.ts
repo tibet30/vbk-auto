@@ -129,7 +129,7 @@ export function hasValidReleaseCeiling(product: Record<string, unknown>): boolea
 }
 
 /**
- * presentation 封面是否已配置（ai-planning 阶段写入 poi / description / minQuality；
+ * presentation 封面是否已配置（ai-planning 阶段写入景点 poi；
  * imageId / imageUrl / poiName 等字段由 VBK 选图后回填，本契约不强求）。
  *
  * manualUpload 由 automationBlockers 内的专门检查承担「不可自动化」语义，
@@ -139,7 +139,19 @@ export function hasValidCoverPoMeta(product: Record<string, unknown>): boolean {
   const cover = readCover(product);
   if (!cover) return false;
   if (cover.source === "manualUpload") return true;
-  return textValue(cover.poi).length > 0
-    && textValue(cover.description).length > 0
-    && Number.isFinite(cover.minQuality);
+  const coverPoi = textValue(cover.poi);
+  if (!coverPoi) return false;
+  const itinerary = asArray(product.itinerary) ?? [];
+  const spots = itinerary.flatMap((day) => asArray(asObject(day)?.spots) ?? [])
+    .map(asObject)
+    .filter((spot): spot is Record<string, unknown> => Boolean(spot));
+  if (!spots.length) return false;
+  const coverPoiId = Number(cover.poiId);
+  if (Number.isInteger(coverPoiId) && coverPoiId > 0) {
+    return spots.some((spot) => Number(spot.poiId) === coverPoiId);
+  }
+  return spots.some((spot) => {
+    const names = [textValue(spot.poiName), textValue(spot.name)].filter(Boolean);
+    return names.some((name) => name === coverPoi || name.includes(coverPoi) || coverPoi.includes(name));
+  });
 }

@@ -3,7 +3,6 @@ import {
   getProductSegmentsApi,
   saveProductSegmentApi,
   segmentsFromPayload,
-  submitResourceSegmentsApi,
 } from "./vehicle-resource-api.js";
 
 type Candidate = { hotelId: number; hotelName: string };
@@ -14,7 +13,9 @@ type ResourceSegment = { day: number; segmentId: string; candidates: Candidate[]
  *
  * 不能以页面弹窗中的查询表或 toast 作为保存依据：它们都不表示产品草稿已落库。
  * 这里每次先从 getSegments 取得完整行程段，覆盖 hotel.segmentRooms 后保存，再以
- * getSegments 回读精确确认该段保存的酒店集合。
+ * getSegments 回读精确确认该段保存的酒店集合。资源编辑器保存指定酒店时仅调用
+ * saveSegment；不能为酒店名单额外 submitSegments，否则后端会重新结算草稿并可能
+ * 覆盖刚保存的指定酒店。
  */
 export async function syncCtripHotelResources(args: {
   page: any;
@@ -49,8 +50,6 @@ export async function syncCtripHotelResources(args: {
       addedHotelIds: ids.filter((id) => !before.includes(id)),
     });
   }
-  if (changed) await submitResourceSegmentsApi(page, productId);
-
   payload = await getProductSegmentsApi(page, productId);
   for (const daily of dailyCandidates) {
     const expected = candidateIds(daily);
@@ -59,7 +58,7 @@ export async function syncCtripHotelResources(args: {
       throw new Error(`酒店资源最终接口回读不一致：行程段 ${daily.segmentId} 期望 ${expected.join("、")}，实际 ${actual.join("、") || "无"}`);
     }
   }
-  return { days, verified: true, via: changed ? "saveSegment-submitSegments-api" : "getSegments-api" };
+  return { days, verified: true, via: changed ? "saveSegment-api" : "getSegments-api" };
 }
 
 function candidateIds(daily: ResourceSegment) {

@@ -28,6 +28,11 @@ test("任务中心和产品列表共用后台任务状态，详情由 Agent 展�
   assert.match(agentConversation, /useAgentSession\(product\.id, client\)/);
 });
 
+test("产品详情优先展示实时任务更新，不被列表缓存覆盖", () => {
+  const derived = read("src/renderer/app/state/derived.ts");
+  assert.match(derived, /return product\.workflowTask\s*\?\? workflowTasks\.find/);
+});
+
 test("从任务进入详情时定位对应阶段并聚焦状态", () => {
   const action = read("src/renderer/app/actions/product.ts");
   const strip = read("src/renderer/app/views/workflow-task/TaskStrip.tsx");
@@ -41,17 +46,17 @@ test("方案对话展示自动录入 recovery 中的完整报错详情", () => {
   const styles = read("src/renderer/app/views/workspace/agent-conversation.module.less");
   assert.match(conversation, /latestAutomationFailure\(product\)/);
   assert.match(conversation, /automation\?\.recovery\?\.phases/);
-  assert.match(conversation, /automationFailureAnchorIndex\(timelineItems, events\)/);
-  assert.match(conversation, /aria-label="录入报错详情"/);
+  assert.match(conversation, /\{automationFailure \? <FailureNotice/);
+  assert.match(conversation, /录入受阻/);
   assert.match(conversation, /\{failure\.message\}/);
   assert.match(styles, /\.failureNotice p[\s\S]*white-space: pre-wrap/);
 });
 
-test("非法关键词报错在对话列表中提供 AI 重写按钮", () => {
+test("自动录入报错固定显示在聊天区末尾，并为非法关键词提供 AI 重写按钮", () => {
   const conversation = read("src/renderer/app/views/workspace/agent-conversation.tsx");
   const styles = read("src/renderer/app/views/workspace/agent-conversation.module.less");
-  assert.match(conversation, /index === failureAnchorIndex[\s\S]*<FailureNotice/);
-  assert.match(conversation, /记录黑名单并重写图文/);
+  assert.match(conversation, /\{error &&[\s\S]*\{automationFailure \? <FailureNotice/);
+  assert.match(conversation, /重写受影响的图文/);
   assert.match(conversation, /buildIllegalKeywordRepairPrompt/);
   assert.match(conversation, /非法关键词\[：:\]/);
   assert.match(conversation, /findAffectedPresentationPaths\(product\.product, keywords\)/);

@@ -6,7 +6,37 @@ import {
   nextHotelSearchDates,
   readCtripHotelCandidates,
   selectCtripHotelContext,
+  limitItineraryHotelStays,
 } from "../../src/main/infrastructure/ctrip-hotel-search.js";
+import { hasItineraryHotelStay } from "../../src/shared/itinerary-hotel.js";
+
+test("送站日的酒店“无”不会进入酒店候选检索", () => {
+  assert.equal(hasItineraryHotelStay("无"), false);
+  assert.equal(hasItineraryHotelStay("维也纳酒店"), true);
+});
+
+test("酒店候选解析只保留产品 nights 对应的住宿日", () => {
+  const itinerary = [
+    { day: 1, hotel: "江孜酒店", hotelCandidates: [{ hotelId: 1 }], hotelDescription: "D1 住宿" },
+    { day: 2, hotel: "日喀则酒店", hotelCandidates: [{ hotelId: 2 }], hotelDescription: "D2 住宿" },
+  ];
+  limitItineraryHotelStays(itinerary, 1);
+  assert.deepEqual(itinerary, [
+    { day: 1, hotel: "江孜酒店", hotelCandidates: [{ hotelId: 1 }], hotelDescription: "D1 住宿" },
+    { day: 2, hotel: "无" },
+  ]);
+});
+
+test("4天3晚保留前三个住宿日，只清除超过 nights 的送站日", () => {
+  const itinerary = [
+    { day: 1, hotel: "D1酒店" },
+    { day: 2, hotel: "D2酒店" },
+    { day: 3, hotel: "D3酒店" },
+    { day: 4, hotel: "D4酒店" },
+  ];
+  limitItineraryHotelStays(itinerary, 3);
+  assert.deepEqual(itinerary.map((day) => day.hotel), ["D1酒店", "D2酒店", "D3酒店", "无"]);
+});
 
 test("从携程 Next Flight 页面数据中提取酒店列表", () => {
   const data = JSON.stringify([1, 'J0:{"initListData":{"hotelList":[{"hotelInfo":{"summary":{"hotelId":"9"}}}]}}}']);

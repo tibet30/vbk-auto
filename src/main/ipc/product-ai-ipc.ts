@@ -4,7 +4,9 @@ import { parseProduct } from "../automation/schema/schema.js";
 import { resolveVehicleResource } from "../operations/vehicle-resource.js";
 import { resolveHotelResource } from "../operations/hotel-resource.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
+import { manualReviewSavePolicy } from "../operations/manual-review-save-policy.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
+import { syncConfirmedResearchTasksToRemote } from "../operations/research-task-remote-sync.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
@@ -27,6 +29,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     return productMutations.replace(id, next, {
       status: "review",
       allowMeetingCityCorrection: true,
+      preserveVerifiedItineraryPois: false,
     });
   });
 
@@ -45,8 +48,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       }
     }
     const next = applyManualReviewField(product.product, input);
-    parseProduct(next);
-    const { product: saved, confirmedTaskIds } = db.replaceProductAndSatisfyResearchTasks(id, next, { status: "review" });
+    const policy = manualReviewSavePolicy(product.status);
+    if (policy.requireCompleteProduct) parseProduct(next);
+    const { product: saved, confirmedTaskIds } = db.replaceProductAndSatisfyResearchTasks(id, next, { status: policy.nextStatus });
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", {
         localProductId: id,
@@ -109,17 +113,28 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     });
   });
 
-  ipcMain.handle("research:accept", (_event, localProductId: string, taskId: string, note?: string) => {
+  ipcMain.handle("research:accept", async (_event, localProductId: string, taskId: string, note?: string) => {
     db.markResearchAccepted(localProductId, taskId, note);
-    emitProduct(db.getProduct(localProductId)!);
-    return { accepted: true };
+    const product = await syncConfirmedResearchTasksToRemote({
+      db,
+      remote: remoteProducts,
+      localProductId,
+      broadcast: broadcastProduct,
+    });
+    return { accepted: true, product };
   });
-  ipcMain.handle("research:refreshIssues", (_event, localProductId: string) => {
+  ipcMain.handle("research:refreshIssues", async (_event, localProductId: string) => {
     const product = db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
     const result = refreshSatisfiedResearchTasks(db, localProductId);
-    const next = db.getProduct(localProductId)!;
-    emitProduct(next);
+    const next = result.updated > 0
+      ? await syncConfirmedResearchTasksToRemote({
+        db,
+        remote: remoteProducts,
+        localProductId,
+        broadcast: broadcastProduct,
+      })
+      : db.getProduct(localProductId)!;
     return { ...result, product: next, readiness: readiness(localProductId) };
   });
   ipcMain.handle("research:vehicleResource", (_event, localProductId: string, taskId?: string) =>
@@ -129,7 +144,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         if (!product) throw productNotFound(localProductId);
         const result = await resolveVehicleResource(await context.browser.page(), product);
         productMutations.replace(localProductId, result.product, { status: "review", notify: false });
-        if (result.resolved && taskId) db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
+        if (result.resolved && taskId) {
+          db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
+          await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
+        }
         const message = result.resolved
           ? `已完成用车估算和 VBK 资源组匹配：${result.note}`
           : `用车建议价已保留，但 VBK 资源组暂未匹配成功：${result.note}`;
@@ -144,7 +162,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         if (!product) throw productNotFound(localProductId);
         const result = await resolveHotelResource(await context.browser.page(), product);
         productMutations.replace(localProductId, result.product, { status: "review", notify: false });
-        if (taskId) db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
+        if (taskId) {
+          db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
+          await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
+        }
         db.addMessage(localProductId, "assistant", `已查询酒店资源：${result.note}`, "succeeded");
         emitProduct(db.getProduct(localProductId)!);
         return result.resolved;

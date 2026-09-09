@@ -11,6 +11,9 @@ type PoiManualLogContext = PoiSuggestLogContext & {
   keyword?: string;
   poiName?: string;
   poiId?: number;
+  province?: string;
+  city?: string;
+  district?: string;
   errorMessage?: string;
 };
 
@@ -70,6 +73,27 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
     setLoading(null);
   };
 
+  /** 人工兜底时原子写入本地 itinerary spot；不会写 VBK。 */
+  const persistPoi = async (candidate: PoiSuggestCandidate) => {
+    if (!candidate.selectable || !candidate.poiName || !candidate.poiId || !api()) {
+      throw new Error("候选 POI 缺少可保存的名称或 ID。");
+    }
+    const saveTarget = {
+      poiName: candidate.poiName,
+      poiId: candidate.poiId,
+      province: candidate.province ?? undefined,
+      city: candidate.city ?? undefined,
+      district: candidate.district ?? undefined,
+    };
+    await api()!.products.updateReviewField(localProductId, {
+      field: "itinerarySpotPoi",
+      dayIndex: item.dayIndex,
+      spotIndex: item.spotIndex,
+      ...saveTarget,
+    });
+    return saveTarget;
+  };
+
   const searchPoi = async (keywordOverride?: string) => {
     const query = (keywordOverride ?? keyword).trim();
     logPoiManual("search_start", logContext({ keyword: query }));
@@ -94,6 +118,8 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
         dayIndex: item.dayIndex,
         spotIndex: item.spotIndex,
         title: item.title,
+        destinationCity: item.city ?? undefined,
+        province: item.province ?? undefined,
       });
       const firstSelectable = next.candidates.find((candidate) => candidate.selectable);
       setDetail(next);
@@ -116,36 +142,31 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
 
   const save = async () => {
     if (!selected?.selectable || !selected.poiName || !selected.poiId || !api()) return;
-    const saveTarget = {
+    logPoiManual("save_start", logContext({
       poiName: selected.poiName,
       poiId: selected.poiId,
-      // renderer 日志上下文使用可选字符串；缺失行政区在 main 写入边界
-      // 统一归一为 null，避免在两层契约之间传播 string | null。
       province: selected.province ?? undefined,
       city: selected.city ?? undefined,
       district: selected.district ?? undefined,
-    };
-    logPoiManual("save_start", logContext(saveTarget));
+    }));
     setLoading("save");
     setError(null);
     try {
-      await api()!.products.updateReviewField(localProductId, {
-        field: "itinerarySpotPoi",
-        dayIndex: item.dayIndex,
-        spotIndex: item.spotIndex,
-        poiName: saveTarget.poiName,
-        poiId: saveTarget.poiId,
-        province: saveTarget.province,
-        city: saveTarget.city,
-        district: saveTarget.district,
-      });
-      logPoiManual("save_success", logContext(saveTarget));
+      const saved = await persistPoi(selected);
+      logPoiManual("save_success", logContext(saved));
       setEditing(false);
       setDetail(null);
       setSelected(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : "保存 POI 失败，请重试。";
-      logPoiManual("save_failure", logContext({ ...saveTarget, errorMessage: message }));
+      logPoiManual("save_failure", logContext({
+        poiName: selected.poiName,
+        poiId: selected.poiId,
+        province: selected.province ?? undefined,
+        city: selected.city ?? undefined,
+        district: selected.district ?? undefined,
+        errorMessage: message,
+      }));
       setError(message);
     } finally {
       setLoading(null);

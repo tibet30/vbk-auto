@@ -114,7 +114,7 @@ export function AppWorkspaceReviewSummaryOpenIssues({
                         issue.actionPrompt,
                       );
                     }}
-                  >处理</button>
+                  >{issue.taskId ? "手动确认" : "处理"}</button>
                 </span>
               </li>
             ))}

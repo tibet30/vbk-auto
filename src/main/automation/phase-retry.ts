@@ -51,6 +51,47 @@ export function preparePhaseRetry(
 }
 
 /**
+ * A planning correction can add a resource phase that was absent when a
+ * historical run started. Preserve every independently read-back phase, run
+ * only the inserted resource phase, then retry the failed downstream phase.
+ * This is intentionally explicit instead of treating a missing phase as an
+ * ordinary retry, which would otherwise replay vehicle/terms writes.
+ */
+export function prepareBackfilledPhaseRecovery(
+  previous: AutomationRun,
+  phases: string[],
+  insertedPhase: string,
+  failedPhase: string,
+  at = new Date().toISOString(),
+): AutomationRun {
+  if (previous.status !== "failed") throw new Error("只有失败的自动录入任务可以恢复补充阶段。");
+  if (previous.phases.some((phase) => phase.phase === insertedPhase)) {
+    throw new Error(`阶段 ${insertedPhase} 已存在，不能按补充阶段恢复。`);
+  }
+  const insertedIndex = phases.indexOf(insertedPhase);
+  const failedIndex = phases.indexOf(failedPhase);
+  const failed = previous.phases.find((phase) => phase.phase === failedPhase);
+  if (insertedIndex < 0 || failedIndex <= insertedIndex || failed?.status !== "failed") {
+    throw new Error("补充阶段恢复的阶段顺序或失败状态无效。");
+  }
+  return {
+    ...previous,
+    status: "running",
+    currentPhase: insertedPhase,
+    phases: phases.map((phase) => {
+      if (phase === insertedPhase || phase === failedPhase) return { phase, status: "pending" };
+      const prior = previous.phases.find((item) => item.phase === phase);
+      return { phase, status: prior?.status === "completed" ? "completed" : "pending" };
+    }),
+    logs: [
+      ...previous.logs,
+      { at, message: `已补入阶段 ${insertedPhase}，仅恢复该阶段及失败阶段 ${failedPhase}`, level: "warning" },
+    ],
+    screenshot: undefined,
+  };
+}
+
+/**
  * 从单阶段修复后的 queued 断点继续完整录入。
  *
  * 已完成阶段不重跑；从首个 pending 阶段开始，后续阶段统一回到 pending，

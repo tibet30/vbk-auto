@@ -113,6 +113,9 @@ function applyPatchOperation(product: Record<string, unknown>, operation: PatchO
   }
 
   const token = segments.at(-1)!;
+  if (!parent || typeof parent !== "object") {
+    throw new Error(`产品变更路径无效：${operation.path}`);
+  }
   if (Array.isArray(parent)) {
     applyArrayOperation(parent, token, operation);
     return;

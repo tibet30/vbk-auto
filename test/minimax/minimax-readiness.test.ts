@@ -29,22 +29,22 @@ test("source 不是 ctripLibrary 时无效", () => {
   }), false);
 });
 
-test("minQuality 越界或非整数时无效", () => {
+test("minQuality 是可选历史元数据，不影响 POI 封面配置", () => {
   assert.equal(hasCompleteCtripLibraryCover({
     presentation: { cover: { ...validCover, minQuality: 6 } },
     itinerary: [],
-  }), false);
+  }), true);
   assert.equal(hasCompleteCtripLibraryCover({
     presentation: { cover: { ...validCover, minQuality: -1 } },
     itinerary: [],
-  }), false);
+  }), true);
   assert.equal(hasCompleteCtripLibraryCover({
     presentation: { cover: { ...validCover, minQuality: 3.5 } },
     itinerary: [],
-  }), false);
+  }), true);
 });
 
-test("空 poi/描述时无效", () => {
+test("只有空 poi 无效，description 不参与封面配置", () => {
   assert.equal(hasCompleteCtripLibraryCover({
     presentation: { cover: { ...validCover, poi: "" } },
     itinerary: [],
@@ -52,7 +52,7 @@ test("空 poi/描述时无效", () => {
   assert.equal(hasCompleteCtripLibraryCover({
     presentation: { cover: { ...validCover, description: "  " } },
     itinerary: [],
-  }), false);
+  }), true);
 });
 
 test("携带已持久化可选图片字段（imageId/imageUrl/thumbnailUrl/previewUrl/score/resolution/poiId/poiName/selectedAt）时仍视为有效封面", () => {

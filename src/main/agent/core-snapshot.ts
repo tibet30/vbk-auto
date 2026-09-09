@@ -2,7 +2,7 @@ import type {
   AgentApproval, AgentEvent, AgentEventType, AgentInputRequest, AgentRun,
   AgentRunStatus, AgentSnapshot,
 } from "../../shared/contracts.js";
-import type { AgentSnapshotStore } from "./core.js";
+import type { AgentSnapshotStore } from "./types.js";
 import type { AgentToolCall } from "./types.js";
 
 export interface TurnToken { runId: string; userEventId?: string; modelTurnId?: string; }

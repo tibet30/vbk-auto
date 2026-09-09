@@ -266,6 +266,75 @@ test("用户简称未精确命中时，AI 只从同城真实候选中选择大�
   assert.match(candidate.reason ?? "", /AI 消歧/);
 });
 
+test("程序未命中时，AI 取得平台排序前 12 条，并在营业校验后才按 80% 门槛采用", async () => {
+  const events: string[] = [];
+  const candidates = Array.from({ length: 13 }, (_, index) => ({
+    index,
+    poiName: index === 2 ? "非物质文化遗产展示中心" : `日喀则文化候选${index + 1}`,
+    poiId: 150237360 + index,
+    selectable: true,
+    province: "西藏",
+    city: "日喀则",
+    textFields: [],
+  }));
+  const unresolved: PoiSuggestDetailResult = {
+    httpStatus: 200,
+    businessStatus: "Success",
+    poiListCount: candidates.length,
+    best: null,
+    candidates,
+  };
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["日喀则非物质遗产中心"],
+    province: "西藏",
+    city: "日喀则",
+    beforeEach: async () => undefined,
+    query: async () => unresolved,
+    shouldDisambiguate: () => true,
+    disambiguate: async (request) => {
+      events.push("ai");
+      assert.equal(request.candidates.length, 12);
+      assert.deepEqual(request.candidates.map((item) => item.poiName), candidates.slice(0, 12).map((item) => item.poiName));
+      return { decision: "selected", candidateId: "candidate-3", confidence: 0.81, reason: "名称和日喀则文化场馆语义最接近" };
+    },
+    checkAvailability: async (poiId) => {
+      events.push(`availability:${poiId}`);
+      return { status: "available" };
+    },
+  });
+  assert.deepEqual(events, ["ai", "availability:150237362"]);
+  assert.equal(candidate.status, "resolved");
+  assert.equal(candidate.poiName, "非物质文化遗产展示中心");
+});
+
+test("AI 选择后即使营业正常，置信度未高于 80% 也不采用", async () => {
+  const events: string[] = [];
+  const unresolved: PoiSuggestDetailResult = {
+    httpStatus: 200,
+    businessStatus: "Success",
+    poiListCount: 1,
+    best: null,
+    candidates: [{ index: 0, poiName: "非物质文化遗产展示中心", poiId: 150237367, selectable: true, province: "西藏", city: "日喀则", textFields: [] }],
+  };
+  const [candidate] = await resolvePlanningPoiCandidates({
+    names: ["日喀则非物质遗产中心"], province: "西藏", city: "日喀则",
+    beforeEach: async () => undefined,
+    query: async () => unresolved,
+    shouldDisambiguate: () => true,
+    disambiguate: async () => {
+      events.push("ai");
+      return { decision: "selected", candidateId: "candidate-1", confidence: 0.8, reason: "语义可能接近" };
+    },
+    checkAvailability: async (poiId) => {
+      events.push(`availability:${poiId}`);
+      return { status: "available" };
+    },
+  });
+  assert.deepEqual(events, ["ai", "availability:150237367"]);
+  assert.equal(candidate.status, "rejected");
+  assert.match(candidate.reason ?? "", /未高于 80%/);
+});
+
 test("城市重查命中内部子景点时仍由 AI 选择大众常游主景点", async () => {
   const direct: PoiSuggestDetailResult = {
     httpStatus: 200,

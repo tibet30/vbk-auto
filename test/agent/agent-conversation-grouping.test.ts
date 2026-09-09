@@ -46,11 +46,11 @@ test("初始运行中状态合并到第一条实际进展", () => {
     event("assistant", "assistant", { modelTurnId: "turn-1" }, "继续处理"),
   ]);
 
-  assert.equal(items.length, 2);
-  assert.equal(items[0]?.kind, "event");
-  if (items[0]?.kind !== "event") return;
-  assert.equal(items[0].event.id, "usage");
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.kind, "assistant_thread");
+  if (items[0]?.kind !== "assistant_thread") return;
   assert.equal(items[0].leadingStatus?.id, "running");
+  assert.equal(items[0].steps[0]?.kind, "turn");
 });
 
 test("用户请求后的运行中状态合并到第一条实际进展", () => {
@@ -64,8 +64,24 @@ test("用户请求后的运行中状态合并到第一条实际进展", () => {
   assert.equal(items[0]?.kind, "event");
   assert.equal(items[1]?.kind, "event");
   if (items[1]?.kind !== "event") return;
-  assert.equal(items[1].event.id, "usage");
-  assert.equal(items[1].leadingStatus?.id, "running");
+  assert.equal(items[1].event.id, "running");
+  assert.equal(items[1].leadingStatus, undefined);
+});
+
+test("用量记录插在调用和返回之间时，返回仍配对到原工具", () => {
+  const items = groupAgentTimelineEvents([
+    event("call-a", "tool_call", { modelTurnId: "turn-1", toolCallId: "a" }, "query_poi"),
+    event("usage", "status", { aiUsage: { id: "usage-1" } }, "AI 已完成一次分析"),
+    event("result-a", "tool_result", { toolCallId: "a" }, "poi-ok"),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.kind, "assistant_thread");
+  if (items[0]?.kind !== "assistant_thread") return;
+  const methods = items[0].steps[0];
+  assert.equal(methods?.kind, "methods");
+  if (methods?.kind !== "methods") return;
+  assert.equal(pairMethodBatchEvents(methods.events)[0]?.result?.id, "result-a");
 });
 
 test("初始运行中状态合并到第一批工具摘要", () => {
@@ -80,6 +96,21 @@ test("初始运行中状态合并到第一批工具摘要", () => {
   if (items[0]?.kind !== "assistant_thread") return;
   assert.equal(items[0].leadingStatus?.id, "running");
   assert.deepEqual(items[0].steps.map((step) => step.kind), ["methods"]);
+});
+
+test("确认事件之后迟到的工具回传作为执行结果保留，不生成孤立 AI 头像", () => {
+  const items = groupAgentTimelineEvents([
+    event("call", "tool_call", { modelTurnId: "turn-1", toolCallId: "approval-call" }, "request_approval"),
+    event("request", "approval_request", {}, "方案待确认"),
+    event("approved", "approval", {}, "用户已授权"),
+    event("result", "tool_result", { toolCallId: "approval-call" }, "授权已确认。"),
+    event("running", "status", { status: "running" }, "运行中"),
+  ]);
+
+  assert.deepEqual(items.map((item) => item.kind), ["assistant_thread", "event", "event", "event", "event"]);
+  assert.equal(items[3]?.kind, "event");
+  if (items[3]?.kind !== "event") return;
+  assert.equal(items[3].event.type, "tool_result");
 });
 
 test("没有批次标识的历史执行事件不被误合并", () => {
@@ -97,4 +128,11 @@ test("方法批次按 toolCallId 配对调用与返回", () => {
   assert.equal(pairs.length, 2);
   assert.equal(pairs[0]?.call.content, "query_hotel_resource");
   assert.equal(pairs[0]?.result?.content, "hotel-ok");
+});
+
+test("分段历史的工具调用可从完整会话找到持久化结果", () => {
+  const call = event("call", "tool_call", { modelTurnId: "turn-1", toolCallId: "a" }, "query_poi");
+  const result = event("result", "tool_result", { toolCallId: "a" }, "poi-ok");
+  const pairs = pairMethodBatchEvents([call], [call, result]);
+  assert.equal(pairs[0]?.result?.id, "result");
 });

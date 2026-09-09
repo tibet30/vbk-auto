@@ -23,17 +23,30 @@ export function poiResearchTaskName(label: string, type: string): string | undef
   return name || undefined;
 }
 
+/**
+ * 解析一条 POI 核查任务实际覆盖的景点名称。
+ *
+ * 早期行程会把用户明确的“二选一”写成一个 spot，并随之产生
+ * “核查 A 或 B 的 VBK POI 映射”任务。它不是一个叫“A 或 B”的景点；
+ * 每个备选景点都配置完成后，任务才可以自动结案。
+ */
+export function poiResearchTaskNames(label: string, type: string): string[] {
+  const name = poiResearchTaskName(label, type);
+  if (!name) return [];
+  return [...new Set(name.split(/\s*(?:或者|或)\s*/).map((item) => item.trim()).filter(Boolean))];
+}
+
 /** Converts known POI task spellings to their single canonical label. */
 export function canonicalPoiResearchTaskLabel(label: string, type: string): string {
-  const name = poiResearchTaskName(label, type);
-  return name ? poiResearchTaskLabel(name) : label;
+  const names = poiResearchTaskNames(label, type);
+  return names.length > 0 ? poiResearchTaskLabel(names.join(" 或 ")) : label;
 }
 
 export function isSamePoiResearchTask(
   left: Pick<{ label: string; type: string }, "label" | "type">,
   right: Pick<{ label: string; type: string }, "label" | "type">,
 ): boolean {
-  const leftName = poiResearchTaskName(left.label, left.type);
-  const rightName = poiResearchTaskName(right.label, right.type);
-  return !!leftName && !!rightName && leftName === rightName;
+  const leftNames = poiResearchTaskNames(left.label, left.type);
+  const rightNames = poiResearchTaskNames(right.label, right.type);
+  return leftNames.length > 0 && leftNames.join("\u0000") === rightNames.join("\u0000");
 }

@@ -7,7 +7,7 @@ import { agentWorkflowPatch, recoverQueuedAgentWorkflowTasks } from "./agent/int
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, Notification } from "electron";
+import { app, BrowserWindow } from "electron";
 import { installLogSink, logError, logInfo, logWarn } from "../shared/log-timestamp.js";
 import { createRuntimeLogCapture } from "../shared/log-redaction.js";
 import { APP_NAME } from "../shared/brand.js";
@@ -21,10 +21,11 @@ import type {
   Settings,
 } from "../shared/contracts.js";
 import { isAiProvider } from "../shared/contracts.js";
+import { resolveSystemNotificationsEnabled } from "../shared/system-notification-settings.js";
 import { DraftAutomation } from "./automation/automation.js";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import { productNotFound } from "./infrastructure/db-errors.js";
-import { computeReadiness } from "./readiness.js";
+import { evaluateVisibleReadiness } from "./planning/preparation-completion.js";
 import { detectProviderIdFromBrowser } from "./infrastructure/provider-id-source.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
 import {
@@ -63,6 +64,8 @@ import { createWithKnownVbkAccount } from "./infrastructure/vbk-account-status.j
 import { createVbkBindingBootstrap } from "./infrastructure/vbk-binding-bootstrap.js";
 import { captureRuntimeLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import { agentAttentionNotification } from "./infrastructure/agent-attention-notification.js";
+import { showSystemNotification, systemNotificationsSupported } from "./infrastructure/system-notifications.js";
+import { workflowAttentionNotification } from "./infrastructure/workflow-attention-notification.js";
 import { MemoryService } from "./memory/memory-service.js";
 import {
   applyStartupCommandLineSwitches,
@@ -83,6 +86,7 @@ let db: VbkDatabase;
 let browser: VbkBrowser;
 let automation: DraftAutomation;
 const notifiedAgentAttention = new Map<string, string>();
+const notifiedWorkflowAttention = new Map<string, string>();
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -149,7 +153,19 @@ const emitPlanningState = (state: PlanningGenerationState) => {
     // renderer 重建 / 退出期间没有可投递目标；持久化状态仍是权威来源。
   }
 };
-const emitWorkflowTask = (task: ProductWorkflowTask) => {
+const emitWorkflowTask = (task: ProductWorkflowTask, notify = true) => {
+  const attention = notify ? workflowAttentionNotification(task) : null;
+  if (getSettings().systemNotificationsEnabled
+    && attention
+    && notifiedWorkflowAttention.get(task.id) !== attention.key) {
+    notifiedWorkflowAttention.set(task.id, attention.key);
+    void showSystemNotification({ title: `${APP_NAME} · ${attention.title}`, body: attention.body }).then((result) => {
+      if (!result.shown && notifiedWorkflowAttention.get(task.id) === attention.key) {
+        notifiedWorkflowAttention.delete(task.id);
+        logWarn("[workflow] system notification failed", { message: result.message });
+      }
+    });
+  }
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
   try {
     window.webContents.send("workflow-task:updated", task);
@@ -159,22 +175,16 @@ const emitWorkflowTask = (task: ProductWorkflowTask) => {
 };
 const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnapshot) => {
   const attention = agentAttentionNotification(snapshot, db?.getProduct(snapshot.localProductId)?.name ?? "方案");
-  if (attention && notifiedAgentAttention.get(snapshot.localProductId) !== attention.key) {
+  if (getSettings().systemNotificationsEnabled
+    && attention
+    && notifiedAgentAttention.get(snapshot.localProductId) !== attention.key) {
     notifiedAgentAttention.set(snapshot.localProductId, attention.key);
-    if (process.platform === "darwin" && Notification.isSupported()) {
-      try {
-        const notification = new Notification({ title: `${APP_NAME} · ${attention.title}`, body: attention.body });
-        notification.on("click", () => {
-          if (!window || window.isDestroyed()) return;
-          if (window.isMinimized()) window.restore();
-          window.show();
-          window.focus();
-        });
-        notification.show();
-      } catch (error) {
-        logWarn("[agent] failed to show attention notification", error);
+    void showSystemNotification({ title: `${APP_NAME} · ${attention.title}`, body: attention.body }).then((result) => {
+      if (!result.shown && notifiedAgentAttention.get(snapshot.localProductId) === attention.key) {
+        notifiedAgentAttention.delete(snapshot.localProductId);
+        logWarn("[agent] system notification failed", { message: result.message });
       }
-    }
+    });
   }
   if (snapshot.run) {
     let task = db?.latestWorkflowTaskForProduct(snapshot.localProductId);
@@ -184,7 +194,7 @@ const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnaps
       task = db.createWorkflowTask(product.id, product.name);
     }
     if (task && (task.status !== "abandoned" || snapshot.run.status === "abandoned")) {
-      emitWorkflowTask(db.updateWorkflowTask(task.id, agentWorkflowPatch(snapshot)));
+      emitWorkflowTask(db.updateWorkflowTask(task.id, agentWorkflowPatch(snapshot)), false);
     }
   }
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
@@ -226,6 +236,8 @@ const getSettings = (): Settings => ({
   deepseekModel: db.getSetting("deepseekModel")?.value || "deepseek-v4-flash",
   hasMiniMaxKey: aiKeyStore ? aiKeyStore.hasKey("minimax") : false,
   hasDeepSeekKey: aiKeyStore ? aiKeyStore.hasKey("deepseek") : false,
+  systemNotificationsEnabled: resolveSystemNotificationsEnabled(db.getSetting("systemNotificationsEnabled")?.value),
+  systemNotificationsSupported: systemNotificationsSupported(),
   dataPath: app.getPath("userData"),
 });
 /**
@@ -286,9 +298,8 @@ async function aiService(snapshot?: Settings) {
  * 用于 UI 顶栏显示与 IPC 路由。
  *
  * 实际计算逻辑（needs_user 阻塞的「可见性」红线、completion 算法）已抽到
- * ./readiness.ts 的纯函数 computeReadiness，便于单测覆盖 contact 不在 VBK
- * 下拉 / 用户主动取消等场景；本函数只负责 db.getProduct + productNotFound
- * 的包装与抛错。
+ * ./readiness.ts 的纯函数 computeReadiness，再由权威 preparation evaluator
+ * 派生 UI / 确认卡可见就绪度，避免旧 readiness 100% 与审批硬门控不一致。
  */
 function readiness(
   localProductId: string,
@@ -298,10 +309,7 @@ function readiness(
   } = {},
 ): ProductReadiness {
   const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
-  return computeReadiness({
-    product: product.product,
-    researchTasks: product.researchTasks,
-    automation: product.automation,
+  return evaluateVisibleReadiness(product, db.getAgentSnapshot(localProductId), {
     ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
     ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure ?? Boolean(db.getAgentSnapshot(localProductId)?.run && !db.getAgentSnapshot(localProductId)?.uncertainWrite),
   });

@@ -57,8 +57,11 @@ function normaliseRecommendationItem(value: unknown): { category: string; text: 
 function normaliseCover(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const cover = { ...(value as Record<string, unknown>) };
-  const quality = positiveNumber(cover.minQuality);
-  cover.minQuality = quality !== undefined && quality <= 5 ? quality : 3;
+  if ("minQuality" in cover) {
+    const quality = positiveNumber(cover.minQuality);
+    if (quality !== undefined && quality <= 5) cover.minQuality = quality;
+    else delete cover.minQuality;
+  }
   return cover;
 }
 
@@ -207,9 +210,16 @@ export function normaliseItinerary(value: unknown) {
 }
 
 function normaliseHotelCandidates(value: unknown) {
-  if (!Array.isArray(value)) return [];
+  // 老版 Agent 快照曾以 { item: [...] } 包装候选；接纳该确定的导入形态，
+  // 其余对象仍按无候选处理，避免不受控的外部字段进入产品草稿。
+  const rows = Array.isArray(value)
+    ? value
+    : value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as Record<string, unknown>).item)
+      ? (value as Record<string, unknown>).item as unknown[]
+      : [];
+  if (!rows.length) return [];
   const seen = new Set<number>();
-  const candidates = value.flatMap((item) => {
+  const candidates = rows.flatMap((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
     const row = item as Record<string, unknown>;
     const hotelId = normalisePoiId(row.hotelId); const hotelName = textValue(row.hotelName);
@@ -351,7 +361,6 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
     if (normalisedTier) operations.hotelTier = normalisedTier;
     else delete operations.hotelTier;
     if (typeof operations.mealsIncluded !== "boolean") delete operations.mealsIncluded;
-    // 线路及交通只能由运营显式配置；这里仅归一化并保留，不根据 AI 行程推断。
     const trafficLine = normaliseTrafficLineConfig(operations.trafficLine);
     if (trafficLine) operations.trafficLine = trafficLine;
     else delete operations.trafficLine;

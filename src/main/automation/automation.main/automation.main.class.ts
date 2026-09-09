@@ -1,6 +1,4 @@
 import { approvalForRun } from "../../agent/integration-gates.js";
-import { AgentUncertainWriteError } from "../../agent/types.js";
-import { prepareAgentAutomation } from "./automation.main.agent.js";
 /**
  * DraftAutomation：自动化阶段对外暴露的统一门面类。
  *   - start / stop / retryPhase / retryOnePhase：业务侧 API；
@@ -24,6 +22,7 @@ import { parseProduct } from "../schema/schema.js";
 import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
 import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
+import { draftPhasesFor } from "./automation.main.phases.js";
 
 export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
   if (run?.status !== "failed") return undefined;
@@ -39,6 +38,41 @@ export function failedAutomationResumePhase(run?: AutomationRun): string | undef
     ? Object.values(run.recovery.phases).find((phase) => phase.state === "needs_user")?.phase
     : undefined;
   return needsUser ?? run.phases.find((phase) => phase.status === "failed")?.phase;
+}
+
+/**
+ * The write guard runs before `configureProductShellApi`, yet a rejected
+ * handoff had already persisted a failed automation record. There is no
+ * product ID and no phase attempt in this narrow state, so restarting from
+ * saleControl is safe; any other failed pre-shell state remains blocked for
+ * authoritative recovery instead of risking a duplicate remote draft.
+ */
+export function canRestartPreWriteAuthorizationFailure(
+  run: AutomationRun | undefined,
+  productId: string | null | undefined,
+): boolean {
+  return Boolean(
+    run?.status === "failed"
+      && !productId
+      && run.currentPhase === "saleControl"
+      && run.phases.every((phase) => phase.status === "pending")
+      && run.logs.some((entry) => entry.message === "当前任务未处于可录入状态。"),
+  );
+}
+
+/**
+ * The existing preflight owns the authoritative resource readback and can fill
+ * a newly restored hotel resource without replaying later completed modules.
+ * Do not inject a synthetic failed phase: phase-retry rightfully rejects it.
+ */
+export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: string | undefined): string | undefined {
+  const preflightError = product.automation?.recovery?.phases.preflight?.finalError ?? "";
+  const needsBackfilledHotel = failedPhase === "preflight"
+    && /酒店资源缺少每晚.*携程候选/.test(preflightError)
+    && !product.automation?.phases.some((phase) => phase.phase === "hotelResource")
+    && draftPhasesFor(parseProduct(product.product)).includes("hotelResource");
+  if (needsBackfilledHotel) return "hotelResource";
+  return failedPhase;
 }
 
 /**
@@ -58,7 +92,6 @@ export function failedAutomationResumePhase(run?: AutomationRun): string | undef
  */
 export class DraftAutomation {
   private running = new Set<string>();
-  private readonly agentDispatched = new Set<string>();
   private agentWriteGuard?: (localProductId: string, phase: string) => Promise<void>;
   setAgentWriteGuard(guard: (localProductId: string, phase: string) => Promise<void>): void { this.agentWriteGuard = guard; }
   private runVbkPageExclusive = async <T>(task: () => Promise<T>): Promise<T> => task();
@@ -109,7 +142,7 @@ async start(localProductId: string) {
     if (!failedPhase) {
       throw new Error("无法从当前自动录入记录定位失败阶段，未从头重跑。");
     }
-    return this.runLocked(localProductId, failedPhase);
+    return this.runLocked(localProductId, approvedRecoveryStartPhase(product, failedPhase));
   }
 
   /**
@@ -212,40 +245,24 @@ isCancelRequested(localProductId: string): boolean {
   }
 
   /**
-   * Agent 的唯一 VBK 写入入口。一次调用只执行一个明确阶段：尚未创建远端
-   * 草稿时只能执行 saleControl，随后由 Agent 根据读回结果决定下一阶段。
-   * 绝不能在这里回退到 runAutomation 的整链执行。
+   * Final approval transfers control to this deterministic runner. It derives
+   * the phase order from the already-approved product and never calls the
+   * Agent/model to choose a phase or a retry action.
    */
-  async executeAgentPhase(localProductId: string, phase: string): Promise<void> {
+  async executeApprovedWorkflow(localProductId: string): Promise<void> {
     const product = this.db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
     const agent = this.db.getAgentSnapshot(localProductId);
     if (!agent?.run) throw new Error("缺少 Agent 任务，不能录入。");
     if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
-    assertSinglePhaseRetryPrerequisites(parseProduct(product.product), phase);
     const approval = approvalForRun(agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
-    this.db.saveAutomation(localProductId, prepareAgentAutomation(product, `${agent.run.id}:${approval.id}`, phase));
-    this.agentDispatched.delete(localProductId);
-    try {
-    if (!product.productId) {
-      if (phase !== "saleControl") {
-        throw new Error("远端草稿尚未创建；请先执行销售控制阶段。");
-      }
-      await this.runSaleControlLocked(localProductId);
-      if (!this.db.getProduct(localProductId)?.productId) throw new Error("产品壳未取得权威回读结果。");
-      return;
+    const retryFrom = approvedRecoveryStartPhase(product, failedAutomationResumePhase(product.automation));
+    const restartPreWriteGuardFailure = canRestartPreWriteAuthorizationFailure(product.automation, product.productId);
+    if (product.automation?.status === "failed" && !retryFrom && !restartPreWriteGuardFailure) {
+      throw new Error("当前失败记录没有可安全恢复的阶段，需先进行权威核查。");
     }
-    if (phase === "saleControl") {
-      throw new Error("远端草稿已存在，不能重复执行销售控制阶段。");
-    }
-    await this.runOnePhaseLocked(localProductId, phase);
-    const completed = this.db.getProduct(localProductId)?.automation?.phases.find(item=>item.phase===phase);
-    if (completed?.status !== "completed") throw new Error(`阶段 ${phase} 未完成权威回读。`);
-    } catch (error) {
-      if (this.agentDispatched.has(localProductId)) throw new AgentUncertainWriteError(error instanceof Error ? error.message : String(error));
-      throw error;
-    } finally { this.agentDispatched.delete(localProductId); }
+    await this.runApprovedLocked(localProductId, retryFrom);
   }
 
   /** 保留失败的不可改型远端草稿，重置本地绑定以创建新的可用替代草稿。 */
@@ -282,10 +299,9 @@ isCancelRequested(localProductId: string): boolean {
       markCancelled: (_localProductId, run, persist) => markCancelled(run, persist),
       cancellationRequested: this.cancellationRequested,
       ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
-      runVbkPageExclusive: (task) => this.runVbkPageExclusive(async () => {
-        if (localProductId && phase && this.agentWriteGuard) {
-          await this.agentWriteGuard(localProductId, phase);
-          this.agentDispatched.add(localProductId);
+      runVbkPageExclusive: (task, executingPhase) => this.runVbkPageExclusive(async () => {
+        if (localProductId && executingPhase && this.agentWriteGuard) {
+          await this.agentWriteGuard(localProductId, executingPhase);
         }
         return task();
       }),
@@ -294,6 +310,10 @@ isCancelRequested(localProductId: string): boolean {
 
   private async run(localProductId: string, retryFrom?: string) {
     return runAutomationFlow(this.runContext(), localProductId, retryFrom);
+  }
+
+  private async runApproved(localProductId: string, retryFrom?: string) {
+    return runAutomationFlow(this.runContext(localProductId), localProductId, retryFrom);
   }
 
   private async runOnePhase(localProductId: string, phaseName: string) {
@@ -320,6 +340,18 @@ private async runLocked(localProductId: string, retryFrom?: string) {
       await this.run(localProductId, retryFrom);
     } finally {
       this.running.delete(localProductId);
+    }
+  }
+
+  private async runApprovedLocked(localProductId: string, retryFrom?: string) {
+    if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
+    this.running.add(localProductId);
+    this.cancellationRequested.delete(localProductId);
+    try {
+      await this.runApproved(localProductId, retryFrom);
+    } finally {
+      this.running.delete(localProductId);
+      this.cancellationRequested.delete(localProductId);
     }
   }
 

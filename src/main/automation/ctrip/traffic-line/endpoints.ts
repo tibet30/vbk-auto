@@ -1,6 +1,5 @@
-import type { TrafficLineEndpointPlan, TrafficLineStation, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
+import type { TrafficLineEndpointAvailability, TrafficLineEndpointPlan, TrafficLineStation, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
 import { searchAirports, searchTrainStations, type StationCandidate } from "../itinerary-api/station-search.js";
-import { suggestPoiDetail } from "../../../infrastructure/poi-suggest.js";
 import type { TrafficLinePage } from "./client.js";
 
 export type TrafficLineStationDisambiguator = (request: {
@@ -14,46 +13,47 @@ export type TrafficLineStationDisambiguator = (request: {
 export interface TrafficLineEndpointResolutionOptions {
   /** 已被正式资源校验证实不可用的火车站码；恢复时不得再次选择。 */
   excludedTrainCodes?: readonly string[];
+  /** 初始结构化字段发现允许一类交通候选不确定时，保留另一类已确认结果。 */
+  allowPartialAvailabilityOnUncertain?: boolean;
 }
 
-export interface TrafficLineEndpointAvailability {
-  endpointPlan: TrafficLineEndpointPlan;
-  availableVariants: TrafficLineVariant[];
-  unavailableVariants: Partial<Record<TrafficLineVariant, string>>;
-}
-
-type ItinerarySpot = {
-  name?: string | null;
-  poiName?: string | null;
-  poiId?: number | null;
-  city?: string | null;
-};
 type ItineraryDay = { spots?: ItinerarySpot[] };
-type PoiCityCandidate = { poiId: number | null; city: string | null };
-type PoiCityLookup = (spot: ItinerarySpot) => Promise<readonly PoiCityCandidate[]>;
+type ItinerarySpot = { city?: string | null };
 
 /**
- * 只接受行程首日/末日 POI 已解析的 city。目的地、接送城市和景点名称都不能
- * 作为兜底，避免把“途经/景区”误当成机场或车站所在地。
+ * 大交通端点优先采用运营或用户明确指定的城市；只有该端未指定时才以产品
+ * 目的地兜底。首末日景点可能是途经地或酒店所在地，不可再借此推断机场或车站。
  */
-export function deriveTrafficLineCities(itinerary: readonly ItineraryDay[]): { arrivalCity: string; departureCity: string } {
-  const first = itinerary[0];
-  const last = itinerary.at(-1);
-  const arrivalCity = explicitPoiCity(first?.spots, "首日");
-  const departureCity = explicitPoiCity(last?.spots, "末日");
+export function resolveTrafficLineDestination(product: Record<string, unknown>): { arrivalCity: string; departureCity: string } {
+  const basicInfo = product.basicInfo;
+  const destinationCity = basicInfo && typeof basicInfo === "object" && !Array.isArray(basicInfo)
+    ? normaliseCity((basicInfo as Record<string, unknown>).destinationCity)
+    : "";
+  const operations = product.operations;
+  const trafficLine = operations && typeof operations === "object" && !Array.isArray(operations)
+    ? (operations as Record<string, unknown>).trafficLine
+    : undefined;
+  const configured = trafficLine && typeof trafficLine === "object" && !Array.isArray(trafficLine)
+    ? trafficLine as Record<string, unknown>
+    : {};
+  const arrivalCity = normaliseCity(configured.arrivalCity) || destinationCity;
+  const departureCity = normaliseCity(configured.departureCity) || destinationCity;
+  if (!arrivalCity || !departureCity) {
+    throw new Error("产品缺少已确认的大交通端点和目的地，无法规划交通；未创建任何交通子产品。");
+  }
   return { arrivalCity, departureCity };
 }
 
 export async function resolveTrafficLineEndpoints(
   page: TrafficLinePage,
-  itinerary: readonly ItineraryDay[],
+  _itinerary: readonly ItineraryDay[],
   now = new Date(),
   disambiguator?: TrafficLineStationDisambiguator,
-  product: Record<string, unknown> = { itinerary },
+  product: Record<string, unknown> = {},
   options: TrafficLineEndpointResolutionOptions = {},
 ): Promise<TrafficLineEndpointPlan> {
   const availability = await preflightTrafficLineEndpoints(
-    page, itinerary, now, disambiguator, product, ["flightRoundTrip", "trainRoundTrip"], options,
+    page, _itinerary, now, disambiguator, product, ["flightRoundTrip", "trainRoundTrip"], options,
   );
   const unavailable = Object.entries(availability.unavailableVariants)
     .map(([variant, reason]) => `${variant === "flightRoundTrip" ? "飞机" : "火车"}：${reason}`);
@@ -62,19 +62,19 @@ export async function resolveTrafficLineEndpoints(
 }
 
 /**
- * 在创建任何子产品前，按交通方式独立查询首末日城市的机场/火车站。
+ * 在创建任何子产品前，按交通方式独立查询产品目的地的机场/火车站。
  * 一种方式不可用不会阻断另一种；没有任何可用方式时外层直接跳过交通子产品。
  */
 export async function preflightTrafficLineEndpoints(
   page: TrafficLinePage,
-  itinerary: readonly ItineraryDay[],
+  _itinerary: readonly ItineraryDay[],
   now = new Date(),
   disambiguator?: TrafficLineStationDisambiguator,
-  product: Record<string, unknown> = { itinerary },
+  product: Record<string, unknown> = {},
   variants: readonly TrafficLineVariant[] = ["flightRoundTrip", "trainRoundTrip"],
   options: TrafficLineEndpointResolutionOptions = {},
 ): Promise<TrafficLineEndpointAvailability> {
-  const { arrivalCity, departureCity } = await resolveTrafficLineCities(page, itinerary);
+  const { arrivalCity, departureCity } = resolveTrafficLineDestination(product);
   const sameCity = arrivalCity === departureCity;
   const endpointPlan: TrafficLineEndpointPlan = { arrivalCity, departureCity, resolvedAt: now.toISOString() };
   const availableVariants: TrafficLineVariant[] = [];
@@ -97,32 +97,16 @@ export async function preflightTrafficLineEndpoints(
       const reason = error instanceof Error ? error.message : String(error);
       // 「没有站点」才是跳过该交通方式的业务结论；会话、接口、候选歧义等
       // 不确定状态必须显式中断，不能伪装成目的地没有交通。
-      if (!isUnavailableTrafficStation(reason)) throw error;
+      if (!isUnavailableTrafficStation(reason) && !options.allowPartialAvailabilityOnUncertain) throw error;
       unavailableVariants[variant] = reason;
     }
   }));
-  return { endpointPlan, availableVariants, unavailableVariants };
+  const stableAvailableVariants = [...new Set(variants)].filter((variant) => availableVariants.includes(variant));
+  return { endpointPlan, availableVariants: stableAvailableVariants, unavailableVariants };
 }
 
 function isUnavailableTrafficStation(reason: string): boolean {
   return /未找到唯一可确认的(?:机场|火车站)候选/.test(reason);
-}
-
-/**
- * 新规划直接使用已落库 city；历史行程缺 city 时，按已确认 poiId 通过当前会话
- * 回查 VBK POI 候选。接口没有唯一确认每个 POI 所属城市时禁止继续。
- */
-export async function resolveTrafficLineCities(
-  page: TrafficLinePage,
-  itinerary: readonly ItineraryDay[],
-  lookup: PoiCityLookup = (spot) => lookupPoiCities(page, spot),
-): Promise<{ arrivalCity: string; departureCity: string }> {
-  const first = itinerary[0];
-  const last = itinerary.at(-1);
-  return {
-    arrivalCity: await explicitOrVerifiedPoiCity(first?.spots, "首日", lookup),
-    departureCity: await explicitOrVerifiedPoiCity(last?.spots, "末日", lookup),
-  };
 }
 
 async function resolveUniqueStation(
@@ -189,49 +173,6 @@ export function selectUniqueTrafficLineStation(
     throw new Error(`${city}未找到唯一可确认的${kindLabel}候选；未创建任何交通子产品，可在会话恢复或补全 POI 城市后安全重试。`);
   }
   throw new Error(`${city}返回${matches.length}个可匹配${kindLabel}候选；不会按列表首项猜测，请人工消歧后安全重试。`);
-}
-
-function explicitPoiCity(spots: ItineraryDay["spots"], dayLabel: string): string {
-  const cities = [...new Set((spots ?? []).map((spot) => normaliseCity(spot.city)).filter(Boolean))];
-  if (cities.length !== 1) {
-    throw new Error(`${dayLabel}行程缺少唯一的 POI 城市，无法规划抵达/返程交通；未创建任何交通子产品。`);
-  }
-  return cities[0]!;
-}
-
-async function explicitOrVerifiedPoiCity(
-  spots: ItineraryDay["spots"],
-  dayLabel: string,
-  lookup: PoiCityLookup,
-): Promise<string> {
-  const stored = [...new Set((spots ?? []).map((spot) => normaliseCity(spot.city)).filter(Boolean))];
-  if (stored.length === 1) return stored[0]!;
-  if (stored.length > 1) throw new Error(`${dayLabel}行程存在多个 POI 城市，无法唯一规划交通。`);
-  if (!spots?.length) throw new Error(`${dayLabel}行程没有可回查城市的 POI，无法规划交通。`);
-  const verified: string[] = [];
-  for (const spot of spots) {
-    const poiId = Number(spot.poiId);
-    const keyword = String(spot.poiName || spot.name || "").trim();
-    if (!Number.isInteger(poiId) || poiId <= 0 || !keyword) {
-      throw new Error(`${dayLabel}行程 POI 缺少已确认的 poiId/名称，无法通过接口核实城市。`);
-    }
-    const candidates = (await lookup(spot)).filter((candidate) => candidate.poiId === poiId);
-    if (candidates.length !== 1) {
-      throw new Error(`${dayLabel}行程 POI「${keyword}」未由 VBK 接口唯一确认，无法规划交通。`);
-    }
-    const city = normaliseCity(candidates[0]?.city);
-    if (!city) throw new Error(`${dayLabel}行程 POI「${keyword}」的 VBK 候选缺少城市，无法规划交通。`);
-    verified.push(city);
-  }
-  const cities = [...new Set(verified)];
-  if (cities.length !== 1) throw new Error(`${dayLabel}行程 POI 接口回查得到多个城市（${cities.join("、")}），无法唯一规划交通。`);
-  return cities[0]!;
-}
-
-async function lookupPoiCities(page: TrafficLinePage, spot: ItinerarySpot): Promise<readonly PoiCityCandidate[]> {
-  const keyword = String(spot.poiName || spot.name || "").trim();
-  const detail = await suggestPoiDetail(page, keyword);
-  return detail.candidates.map((candidate) => ({ poiId: candidate.poiId, city: candidate.city ?? null }));
 }
 
 function stationMatchesCity(candidate: StationCandidate, city: string, kind: "airport" | "train"): boolean {

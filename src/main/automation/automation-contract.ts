@@ -153,7 +153,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "封面图（携程图库）",
     phase: "presentation",
     source: "ai-planning",
-    detail: "需 AI 提供 poi、description、minQuality；VBK 选图后回填图片。",
+    detail: "需提供与已核验行程景点一致的封面 POI；VBK 按该景点选图后回填图片。",
     check: hasValidCoverPoMeta,
   },
   // itinerary 阶段
@@ -203,15 +203,14 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "线路及交通子产品",
     phase: "trafficLine",
     source: "vbk-runtime",
-    detail: "母产品条款完成后，系统按已核验行程及 VBK 站点候选创建飞机、火车往返子产品。",
+    detail: "母产品条款完成后，系统按已选交通方式、已核验行程及 VBK 站点候选创建往返子产品。",
     check: (product) => {
       const trafficLine = asObject(asObject(product.operations)?.trafficLine);
       if (!trafficLine || trafficLine.enabled === false) return true;
       const variants = trafficLine.variants;
       return Array.isArray(variants)
-        && variants.length === 2
-        && variants.includes("flightRoundTrip")
-        && variants.includes("trainRoundTrip");
+        && variants.length > 0
+        && variants.every((variant) => variant === "flightRoundTrip" || variant === "trainRoundTrip");
     },
   },
   // release 草稿安全
@@ -332,7 +331,7 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
   }
   const cover = readCover(product);
   if (!cover) {
-    throw new Error("产品图文缺少封面图，请先在 AI 规划阶段补全 presentation.cover（poi / description / minQuality 必填）。");
+    throw new Error("产品图文缺少封面图，请先在 AI 规划阶段补全 presentation.cover.poi（景点 POI）。");
   }
   if (cover.source === "manualUpload") {
     throw new Error("产品图文封面来自手动上传，自动化阶段不支持；请改用携程图库（ctripLibrary）或改为人工处理。");
@@ -340,9 +339,6 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
   if (cover.source === "ctripLibrary") {
     if (textValue(cover.poi).length === 0) {
       throw new Error("产品图文封面缺少代表景点（poi），请先在 AI 规划阶段补全 presentation.cover.poi。");
-    }
-    if (textValue(cover.description).length === 0) {
-      throw new Error("产品图文封面缺少描述（description），请先在 AI 规划阶段补全 presentation.cover.description。");
     }
   }
 }

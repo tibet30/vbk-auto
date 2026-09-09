@@ -430,7 +430,7 @@ export class MiniMaxService {
   }): Promise<DisambiguateOutcome> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", `尚未配置 ${this.providerLabel} API Key。`);
     if (!Array.isArray(input.candidates) || input.candidates.length === 0) {
-      return { pickedText: null, reasoning: "候选项为空" };
+      return { pickedText: null, confidence: 0, reasoning: "候选项为空" };
     }
     const startedAt = Date.now();
     try {
@@ -474,6 +474,7 @@ export class MiniMaxService {
       const pickedText = parsed.data.pickedText && input.candidates.some((c) => c.text === parsed.data.pickedText)
         ? parsed.data.pickedText
         : null;
+      const confidence = Math.min(1, Math.max(0, Number(parsed.data.confidence) || 0));
       logInfo("[AI] disambiguation completed", {
         provider: this.config.provider ?? "minimax",
         kind: input.kind,
@@ -481,7 +482,7 @@ export class MiniMaxService {
         picked: pickedText,
         elapsedMs: Date.now() - startedAt,
       });
-      return { pickedText, reasoning: parsed.data.reasoning };
+      return { pickedText, confidence, reasoning: parsed.data.reasoning };
     } catch (error) {
       const serviceError = this.providerError(error);
       this.emitUsage(input.usage, "automation.disambiguate", input.usage?.stage ?? input.kind, Date.now() - startedAt, undefined, serviceError);

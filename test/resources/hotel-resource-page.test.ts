@@ -42,16 +42,44 @@ test("酒店资源直接以 saveSegment 保存五家指定酒店，并以 getSeg
         candidates: [1, 2, 3, 4, 5].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })),
       }],
     });
-    assert.equal(result.via, "saveSegment-submitSegments-api");
+    assert.equal(result.via, "saveSegment-api");
     assert.deepEqual(calls.map((call) => call.endpoint), [
       "/restapi/soa2/15638/getSegments",
       "/restapi/soa2/15638/saveSegment",
-      "/restapi/soa2/15638/submitSegments",
       "/restapi/soa2/15638/getSegments",
     ]);
     assert.deepEqual(hotelIdsFromSegment(segment), [1, 2, 3, 4, 5]);
     assert.equal(calls[1]?.body.segment.hotel.segmentRooms.length, 5);
     assert.deepEqual(calls[1]?.body.segment.hotel.segmentRooms.map((room: any) => room.squenceNumber), [5, 4, 3, 2, 1]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousDocument === undefined) delete (globalThis as any).document;
+    else (globalThis as any).document = previousDocument;
+  }
+});
+
+test("酒店指定名单不会额外提交资源草稿，避免提交结算覆盖段内酒店", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousDocument = (globalThis as any).document;
+  const calls: string[] = [];
+  let segment: any = { segmentId: "s-1", segmentBase: { stayNights: 1 }, hotel: { segmentRooms: [] } };
+  (globalThis as any).document = { cookie: "GUID=fixture" };
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const endpoint = new URL(String(input)).pathname;
+    calls.push(endpoint);
+    if (endpoint === "/restapi/soa2/15638/saveSegment") segment = JSON.parse(String(init?.body)).segment;
+    return new Response(JSON.stringify(endpoint.endsWith("getSegments")
+      ? { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments: [segment] } }
+      : { ResponseStatus: { Ack: "Success" } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await syncCtripHotelResources({
+      page: { evaluate: async (fn: any, arg: any) => fn(arg) },
+      productId: "77968888",
+      dailyCandidates: [{ day: 1, segmentId: "s-1", candidates: [{ hotelId: 9, hotelName: "唯一酒店" }] }],
+    });
+    assert.ok(!calls.some((endpoint) => endpoint.endsWith("submitSegments")));
+    assert.deepEqual(hotelIdsFromSegment(segment), [9]);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousDocument === undefined) delete (globalThis as any).document;

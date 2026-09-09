@@ -265,3 +265,31 @@ test("无 automation / 无 recovery 时不影响 readiness 计算路径", () => 
   assert.equal(result.completion, 100);
   assert.equal(result.issues.length, 0);
 });
+
+test("当前会话已核验的大交通 availability 不是待处理事项", () => {
+  const product = minimalProduct();
+  (product.operations as Record<string, unknown>).trafficLine = {
+    enabled: true,
+    variants: ["flightRoundTrip", "trainRoundTrip"],
+    availability: {
+      endpointPlan: {
+        arrivalCity: "日喀则",
+        departureCity: "日喀则",
+        resolvedAt: "2026-09-09T07:13:06.672Z",
+        flight: {
+          arrival: { code: "RKZ", name: "和平机场" },
+          departure: { code: "RKZ", name: "和平机场" },
+        },
+        train: {
+          arrival: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+          departure: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+        },
+      },
+      availableVariants: ["flightRoundTrip", "trainRoundTrip"],
+      unavailableVariants: {},
+    },
+  };
+
+  const result = computeReadiness({ product, researchTasks: [] });
+  assert.equal(result.issues.some((issue) => issue.label === "operations.trafficLine" && /availability/.test(issue.detail)), false);
+});

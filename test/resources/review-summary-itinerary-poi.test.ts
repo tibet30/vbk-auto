@@ -18,9 +18,9 @@ test("已匹配 POI 仍保留编辑按钮，并展示候选省市地址", () => 
   assert.match(source, /title=\{`编辑 \$\{item\.title\} 的 VBK POI`\}/);
   assert.match(source, /formatPoiRegion/);
   assert.match(source, /已匹配：\$\{item\.poiName\} · \$\{region\}/);
-  assert.match(source, /province: saveTarget\.province/);
-  assert.match(source, /city: saveTarget\.city/);
-  assert.match(source, /district: saveTarget\.district/);
+  assert.match(source, /province: candidate\.province \?\? undefined/);
+  assert.match(source, /city: candidate\.city \?\? undefined/);
+  assert.match(source, /district: candidate\.district \?\? undefined/);
   assert.match(source, /province: selected\.province \?\? undefined/);
   assert.match(source, /city: selected\.city \?\? undefined/);
   assert.match(source, /district: selected\.district \?\? undefined/);
@@ -43,11 +43,13 @@ test("搜索中输入框仍可编辑，避免映射耗时导致卡住感", () =>
   assert.match(source, /正在搜索 VBK POI/);
 });
 
-test("行程 POI 搜索成功后展示全部候选并必须先手动选择合法结果", () => {
+test("行程 POI 编辑器仅供人工兜底：保留全部候选但不自动选择或写回", () => {
   assert.equal(source.includes("setSelected(next)"), false);
   assert.match(source, /detail\.candidates\.map\(\(candidate\)/);
   assert.match(source, /setSelected\(candidate\);/);
   assert.match(source, /disabled=\{loading !== null \|\| !selected\?\.selectable\}/);
+  assert.doesNotMatch(source, /next\.autoSelection/);
+  assert.doesNotMatch(source, /persistPoi\(autoSelected\)/);
   assert.doesNotMatch(source, /查看接口详情/);
   assert.doesNotMatch(source, /textFields\.map/);
 });
@@ -102,4 +104,9 @@ test("手动 POI 调试日志覆盖编辑、搜索、选择和保存链路的安
   }
   assert.match(source, /browser\.suggestPoiDetail\(query,\s*\{[\s\S]*localProductId,[\s\S]*dayIndex: item\.dayIndex,[\s\S]*spotIndex: item\.spotIndex,[\s\S]*title: item\.title,[\s\S]*\}\)/);
   assert.doesNotMatch(source, /cookie|ticket|Authorization|apiKey|responseText/i);
+});
+
+test("手动 POI 搜索将当前行程的行政区一并传到主进程", () => {
+  assert.match(source, /destinationCity: item\.city \?\? undefined/);
+  assert.match(source, /province: item\.province \?\? undefined/);
 });

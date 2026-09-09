@@ -1,3 +1,4 @@
+import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { getProductBaseInfoApi } from "./basic-info/api.js";
 import { ensureHotelResourceApi } from "./hotel-resource-api.js";
@@ -106,10 +107,7 @@ export async function runProductPreflightApi(page: any, product: any, productId:
   const segments = segmentsFromPayload(segmentPayload);
   if (!segments.length) throw new Error("资源预检未返回任何行程段");
   const hotelResource = record(record(product.operations).hotelResource);
-  const hasPlannedHotel = product.itinerary.some((day: any) => {
-    const hotelName = String(day?.hotel ?? "").trim();
-    return Boolean(hotelName) && hotelName !== "无";
-  });
+  const hasPlannedHotel = product.itinerary.some((day: any) => hasItineraryHotelStay(day?.hotel));
   // 老数据可能把已解析的携程候选标成 nonPlatform；只要行程明确含住宿，
   // 就必须以平台酒店资源回读为准，不能因为旧来源标签跳过核验。
   const hotel = hasPlannedHotel

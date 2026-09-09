@@ -48,7 +48,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复；每条 text 经首尾去空格和 VBK 标点归一后必须不超过 80 UTF-8 字节（平台上限 84 字节）。中文按每字约 3 字节估算，含标点建议不超过 26 个汉字；宁短勿超，禁止输出接近或超过上限的长句
     只有产品上下文明示已核实的免费权益时才可使用“贴心赠送”或“超值赠送”；禁止编造保险、礼品、门票、接送或其他赠送权益
  features → string（必须是 JSON 字符串，禁止对象/数组/AST/null），产品特色富文本 HTML 片段，规则见 system prompt
-  cover → {source:"ctripLibrary", poi:"代表性景点名", description:"封面图描述", minQuality:3}
+  cover → {source:"ctripLibrary", poi:"已核验的代表景点名"}
 
 【/itinerary】value 必须是数组，每天的行程为一个对象，包含以下全部字段：
   day → number，正整数，从 1 开始
@@ -166,7 +166,7 @@ export const responseJsonSchema = {
 } as const;
 
 export const presentationCoverValueSchema = z.union([
-  // ctripLibrary：必填 source / poi / description / minQuality；
+  // ctripLibrary：只要求 source / poi（景点 POI）；
   // imageId / imageUrl / thumbnailUrl / previewUrl / score / resolution /
   // poiId / poiName / selectedAt 是 product JSON 中已持久化的合法可选元数据
   // （来源：manual-review-field.applyProductCover 写入链路与 getImageInfo 派生字段），
@@ -175,8 +175,8 @@ export const presentationCoverValueSchema = z.union([
   z.object({
     source: z.literal("ctripLibrary"),
     poi: z.string().trim().min(1),
-    description: z.string().trim().min(1),
-    minQuality: z.number().int().min(0).max(5),
+    description: z.string().optional(),
+    minQuality: z.number().optional(),
   }).passthrough(),
   z.object({
     source: z.literal("manualUpload"),
@@ -193,7 +193,7 @@ export const presentationCoverValueSchema = z.union([
 
 /**
  * 判断产品 JSON 中 /presentation/cover 是否已经是一个完整的封面配置：
- *  - ctripLibrary：含 source/poi/description/minQuality 全部字段；
+ *  - ctripLibrary：含 source/poi（景点 POI）即可；
  *  - manualUpload：含 fileId/originalName/mimeType/sizeBytes/poi/description/minQuality/uploadedAt 全部字段。
  * 用于「封面图研究任务是否可被当前 product 直接满足」等收敛判断。
  */
@@ -268,14 +268,15 @@ export const disambiguateTool = {
   type: "function",
   function: {
     name: "submit_disambiguation",
-    description: "从候选项中选一个与 desired 最接近的。无合适选择返回空串。",
+    description: "从候选项中选一个与 desired 最接近的。无合适选择返回空串，并给出 0 到 1 的置信度。",
     strict: true,
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["pickedText", "reasoning"],
+      required: ["pickedText", "confidence", "reasoning"],
       properties: {
         pickedText: { type: "string" },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
         reasoning: { type: "string", minLength: 1, maxLength: 200 },
       },
     },
@@ -284,6 +285,8 @@ export const disambiguateTool = {
 
 export const disambiguateOutcomeSchema = z.object({
   pickedText: z.string(),
+  // 兼容旧版本返回；缺失时由调用方按 0 处理，绝不用于新的自动采用。
+  confidence: z.number().min(0).max(1).optional(),
   reasoning: z.string().trim().min(1).max(200),
 }).strict();
 
@@ -479,12 +482,12 @@ ${outputGuide}`;
  */
 export function disambiguateSystemPrompt(kind: DisambiguateRequest["kind"]): string {
   const base = `你是 ${APP_NAME} 选择辅助器。产品 JSON 里有一个“期望值”desired，VBK 下拉返回了一组 candidates，其中可能是同一实体的不同名称、拼写变体、括号别名、上级城市。
-你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。`;
+你必须从 candidates 里选出最像 desired 的一项（文本完全一致或者 1-2 个字之差 / 仅括号不同 / 仅上下级区别），如果有多个同等候选，选产品 JSON 上下文最契合的那一个。**绝对不要勉强选一个完全不相关的项**；如果都不像，返回 pickedText 为空串并在 reasoning 里说明原因。confidence 必须是 0 到 1 的数，表示你对所选候选就是 desired 所指地点的把握；未选择时填 0。`;
   const guidance: Record<DisambiguateRequest["kind"], string> = {
     province: `期望值是中国某个省/直辖市/自治区，例如“山西”。candidates 可能是 “中国-山西”“山西省”“山西”。选 “中国-山西” 这类带国家前缀的优先。**绝对不要选 “朝鲜-xxx”“韩国-xxx” 这种境外前缀。**`,
     city: `期望值是中国某个城市，例如“太原”。candidates 可能是 “中国-太原”“太原市”。选 “中国-xxx” 这种带国家前缀的优先，不要选同名海外城市。**只要 candidates 里有任何 “中国-xxx” 的项，优先选它；只在完全没有 “中国-” 前缀项时才考虑无前缀的项，绝不返回 “朝鲜-xxx”“北朝鲜-xxx”“韩国-xxx”。**`,
     spot: `期望值是一个具体景点，例如“云冈石窟”。candidates 是 VBK 景点下拉返回的候选，可能是“云冈石窟”“云冈石窟景区”等。选产品 JSON 推荐语/特点中明确提到的那一个；如果是城市同名 + 同一省份，选那个。**只在国内景点里选：candidates 文本中出现 “朝鲜-”“韩国-”“北朝鲜-”“日本-” 等境外前缀的项一律跳过；产品类型是境内旅游，遇到境外项请返回空串并说明 “仅含境外候选”。**`,
     station: `期望值是一个车站/机场名，例如“太原”“大同站”或“武宿机场”。candidates 是接送站下拉返回的机场或火车站。用户输入城市名时，必须只从 candidates 中选最贴近该城市、当地旅客最常用、最主流的交通站点；不要因为候选文本也含城市名就机械选择较小或较偏的通用机场/支线机场。若 user JSON 里的 stationSubtype=airport，本次只在机场候选中选择，例如“太原”候选含“武宿国际机场”和“太原尧城通用机场”时应选“武宿国际机场”；若 stationSubtype=train，本次只在火车站候选中选择，优先主站或高铁主站，避免货运站、机场站、偏远小站。只有城市级选项时，选该城市作为默认接送点。**不要选国外机场/车站（文本中带境外地名/机场代码的）。**`,
   };
-  return `${base}\n\n当前类别：${kind}\n\n专项约束：${guidance[kind]}\n\n返回时只能调用 submit_disambiguation 工具。pickedText 必须是 candidates 里某一个 text 的精确字符串；reasoning 简要说明选择理由或未选原因。`;
+  return `${base}\n\n当前类别：${kind}\n\n专项约束：${guidance[kind]}\n\n返回时只能调用 submit_disambiguation 工具。pickedText 必须是 candidates 里某一个 text 的精确字符串；confidence 必须如实填写；reasoning 简要说明选择理由或未选原因。`;
 }

@@ -12,6 +12,7 @@ import {
 import { useState } from "react";
 import type { ProductReadiness } from "../../../../shared/contracts-types.js";
 import { itineraryDayHasBorderPermitTrigger } from "../../../../shared/border-permit.js";
+import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
 import { readinessIssueSemanticKey } from "../../../../shared/readiness-issues.js";
 import { stripDayPrefix } from "../../helpers";
 import { api } from "../../helpers";
@@ -253,6 +254,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
           const visitCount = timeline.filter((t) => t.type === "visit").length;
           const mealCount = timeline.filter((t) => t.type === "meal").length;
           const hotel = day.hotel?.trim() ?? "";
+          const hasHotelStay = hasItineraryHotelStay(hotel);
           const showBorderPermitHint = Boolean(borderPermitIssue) && itineraryDayHasBorderPermitTrigger(day);
           return (
             <li key={index} className={styles.dayItem} data-expanded={expanded}>
@@ -270,7 +272,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                   <span className={styles.daySummary}>
                     {visitCount > 0 ? `${visitCount} 个景点` : "尚无景点"}
                     {mealCount > 0 ? ` · ${mealCount} 餐` : ""}
-                    {hotel ? " · 含住宿" : ""}
+                    {hasHotelStay ? " · 含住宿" : ""}
                   </span>
                 </span>
                 <span className={styles.dayChevron} aria-hidden="true">

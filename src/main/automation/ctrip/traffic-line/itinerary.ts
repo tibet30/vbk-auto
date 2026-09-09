@@ -51,7 +51,8 @@ export async function ensureTrafficLineItinerary(
 
 /** 交通子产品只认平台明确的当前 tourInfoId，旧 audit/draft/preview 均不得兜底。 */
 export function currentTrafficLineTourInfoId(linked: FetchTourInfoIdResult): string {
-  return text(linked.tourInfo.tourInfoId);
+  const current = text(linked.tourInfo.tourInfoId);
+  return current === "0" ? "" : current;
 }
 
 export async function waitForTrafficLineItineraryReadback(

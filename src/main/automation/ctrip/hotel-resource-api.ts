@@ -1,15 +1,18 @@
 import { hotelDiamondFromTier } from "../../../shared/hotel-tiers.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
+import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
+import { requiresVehicleResource } from "../../../shared/product-form.js";
 import {
   buildLodgingResourceSegment,
   ensureResourceSegmentsDraftApi,
   getProductSegmentsApi,
+  initializeResourceSegmentsDraftApi,
   resolveResourceSegmentCityApi,
   saveProductSegmentApi,
   segmentsFromPayload,
   submitResourceSegmentsApi,
 } from "./vehicle-resource-api.js";
-import { syncCtripHotelResources } from "./hotel-resource-page.js";
+import { hotelIdsFromSegment, syncCtripHotelResources } from "./hotel-resource-page.js";
 
 /**
  * 全程段承载套餐和用车；正住宿段承载指定酒店。携程来源会在每个住宿段保存
@@ -19,6 +22,7 @@ export async function ensureHotelResourceApi(
   page: any,
   product: any,
   productId: string,
+  options: { draftRepairAttempted?: boolean } = {},
 ) {
   const needsHotel = product.itinerary?.some(hasPlannedHotel);
   if (!needsHotel) return { skipped: "行程不含住宿", verified: true };
@@ -50,13 +54,26 @@ export async function ensureHotelResourceApi(
   // 套餐与全程用车属于首个全程段；住宿段只承载“指定酒店”。
   // 因此不能以正住宿段是否携带套餐作为酒店保存前提。
   const resourceSegments = source === "ctrip" ? ctripResourceSegments(resolvedDays, lodging) : [];
-  const ctripResource = source === "ctrip"
-    ? await syncCtripHotelResources({
-      page,
-      productId,
-      dailyCandidates: resourceSegments,
-    })
-    : undefined;
+  let ctripResource;
+  if (source === "ctrip") {
+    try {
+      ctripResource = await syncCtripHotelResources({ page, productId, dailyCandidates: resourceSegments });
+    } catch (error) {
+      if (!isMissingResourceDraft(error) || options.draftRepairAttempted) throw error;
+      const afterFailure = await getProductSegmentsApi(page, productId);
+      if (hasAnyRequestedHotel(afterFailure, resourceSegments)) {
+        throw new Error("VBK 指定酒店资源保存结果不确定：回读发现已有酒店绑定，已停止自动重试以避免覆盖部分保存。");
+      }
+      await initializeResourceSegmentsDraftApi(page, productId);
+      return ensureHotelResourceApi(page, product, productId, { draftRepairAttempted: true });
+    }
+    // Private-tour vehicleResource later submits the same resource draft.
+    // Group/free-travel products skip that phase, so hotel must produce
+    // formal productSegments evidence itself after rooms are in the draft.
+    if (product.sales?.productForm && !requiresVehicleResource(product.sales.productForm)) {
+      await settleHotelResourceDraft({ page, productId, resourceSegments });
+    }
+  }
   return {
     source,
     resourceName: source === "ctrip" ? String(resolvedDays[0]?.hotel ?? "") : undefined,
@@ -76,10 +93,23 @@ export async function ensureHotelResourceApi(
   };
 }
 
+function isMissingResourceDraft(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("20016116") || message.includes("产品还没有创建草稿");
+}
+
+/** A non-empty readback means the rejected save might have partially landed; never replay it. */
+function hasAnyRequestedHotel(payload: any, dailyCandidates: Array<{ segmentId: string; candidates: Array<{ hotelId: number }> }>) {
+  const requested = new Set(dailyCandidates.flatMap((day) => day.candidates.map((candidate) => Number(candidate.hotelId))));
+  return segmentsFromPayload(payload).some((segment) => {
+    const rooms = Array.isArray(segment?.hotel?.segmentRooms) ? segment.hotel.segmentRooms : [];
+    return rooms.some((room: any) => requested.has(Number(room?.masterHotelID ?? room?.hotelID)));
+  });
+}
+
 /** "无" 是明确的不住宿意图，不能被当作一个可配置酒店。 */
 function hasPlannedHotel(day: any) {
-  const hotel = String(day?.hotel ?? "").trim();
-  return Boolean(hotel) && hotel !== "无";
+  return hasItineraryHotelStay(day?.hotel);
 }
 
 /**
@@ -182,6 +212,61 @@ async function normalizeHotelResourceLayout(args: {
   });
   if (unequal.length) throw new Error(`资源行程段停留晚数与住宿晚数不一致：${unequal.map((segment: any) => String(segment.segmentId)).join("、")}`);
   return { changed: Boolean(created || corrections.length), created, expected };
+}
+
+/**
+ * saveSegment 只写草稿。非私家团没有后续 submitSegments，必须在酒店名单
+ * 已在草稿中之后提交一次，并以正式段回读作为验收。
+ */
+async function settleHotelResourceDraft(args: {
+  page: any;
+  productId: string;
+  resourceSegments: Array<{ day: number; segmentId: string; candidates: Array<{ hotelId: number }> }>;
+}) {
+  const draftPayload = await getProductSegmentsApi(args.page, args.productId);
+  assertHotelSegmentsMatch(segmentsFromPayload(draftPayload), args.resourceSegments, "草稿");
+  if (hotelSegmentsMatch(segmentsFromPayload(draftPayload, { formalOnly: true }), args.resourceSegments)) {
+    return;
+  }
+  await submitResourceSegmentsApi(args.page, args.productId);
+  const formalPayload = await getProductSegmentsApi(args.page, args.productId);
+  assertHotelSegmentsMatch(
+    segmentsFromPayload(formalPayload, { formalOnly: true }),
+    args.resourceSegments,
+    "正式",
+  );
+}
+
+function hotelSegmentsMatch(
+  segments: any[],
+  resourceSegments: Array<{ segmentId: string; candidates: Array<{ hotelId: number }> }>,
+): boolean {
+  return resourceSegments.every((daily) => {
+    const expected = daily.candidates.map((candidate) => Number(candidate.hotelId));
+    const segment = segments.find((item) => String(item.segmentId) === daily.segmentId);
+    return sameHotelIds(hotelIdsFromSegment(segment), expected);
+  });
+}
+
+function assertHotelSegmentsMatch(
+  segments: any[],
+  resourceSegments: Array<{ segmentId: string; candidates: Array<{ hotelId: number }> }>,
+  label: string,
+) {
+  for (const daily of resourceSegments) {
+    const expected = daily.candidates.map((candidate) => Number(candidate.hotelId));
+    const segment = segments.find((item) => String(item.segmentId) === daily.segmentId);
+    const actual = hotelIdsFromSegment(segment);
+    if (!sameHotelIds(actual, expected)) {
+      throw new Error(`酒店资源${label}段回读不一致：行程段 ${daily.segmentId} 期望 ${expected.join("、")}，实际 ${actual.join("、") || "无"}`);
+    }
+  }
+}
+
+function sameHotelIds(actual: number[], expected: number[]) {
+  return actual.length === expected.length
+    && new Set(actual).size === actual.length
+    && actual.every((id) => expected.includes(id));
 }
 
 function lodgingSegments(segments: any[]) {

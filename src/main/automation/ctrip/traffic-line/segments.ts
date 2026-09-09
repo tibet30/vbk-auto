@@ -1,4 +1,5 @@
 import type { TrafficLineEndpointPlan, TrafficLineStation, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
+import { datesBetween, localBusinessDate, VBK_MAX_PRICING_INVENTORY_DAYS } from "../pricing-api.js";
 import { getVbkInitialState, postTrafficLineSoa, list, record, text, type JsonRecord, type TrafficLinePage } from "./client.js";
 import {
   departureCityReadbackIsComplete,
@@ -7,8 +8,10 @@ import {
   verifyValidatedDepartureCityReadback,
 } from "./segment-departure-cities.js";
 import { withTraffic } from "./segment-traffic.js";
+import { readSegmentSubmitState, waitForSegmentSubmit } from "./segment-submit.js";
 
 export { withTraffic } from "./segment-traffic.js";
+export { trafficLineResourcePageUrl, waitForSegmentSubmit } from "./segment-submit.js";
 
 type Segment = JsonRecord;
 type City = JsonRecord;
@@ -22,7 +25,11 @@ export async function ensureTrafficLineSegments(
     maxPolls?: number;
     sleep?: (milliseconds: number) => Promise<void>;
     now?: Date;
+    /** 母产品实际售卖班期；平台用此集合而不是任意未来日期校验交通资源。 */
+    schedule?: readonly string[];
     beforeSubmit?: () => Promise<void>;
+    onSubmit?: (departureCityCount: number) => void;
+    onValidationProgress?: (attempt: number, maxPolls: number) => void;
   } = {},
 ): Promise<{ segmentCount: number; departureCityCount: number }> {
   const before = await ensureSegmentDraft(page, productId, options.sleep);
@@ -68,10 +75,15 @@ export async function ensureTrafficLineSegments(
     verifyDepartureCityReadback(await getSegments(page, productId), selectedCities);
     await options.beforeSubmit?.();
     verifySegmentBoundaries(segmentsFromPayload(await getSegments(page, productId)), variant, endpoints);
+    options.onSubmit?.(selectedCities.length);
     await postTrafficLineSoa(page, "15638", "submitSegments", {
-      productId, schedule: deterministicSchedule(options.now), adultCount: 2, childCount: 0, audit: { saveStep: 2 },
+      productId, schedule: resourceCheckSchedule(options.schedule, options.now), adultCount: 2, childCount: 0, audit: { saveStep: 2 },
     }, "提交子产品资源段");
-    const rejectedCityIds = await waitForSegmentSubmit(page, productId, options);
+    const rejectedCityIds = await waitForSegmentSubmit(page, productId, {
+      maxPolls: options.maxPolls,
+      sleep: options.sleep,
+      onProgress: options.onValidationProgress,
+    });
     if (!rejectedCityIds.length) break;
     const rejected = new Set(rejectedCityIds);
     const nextCities = selectedCities.filter((city) => !rejected.has(text(city.cityId)));
@@ -82,8 +94,7 @@ export async function ensureTrafficLineSegments(
     selectedCities = nextCities;
   }
 
-  // result=T 仍可能表示平台把全部无票城市自动剔除；只读等待正式资源，绝不
-  // 在校验结束后把原始城市集合重新写回。正式结果允许是提交集合的非空子集。
+  // result=T 可能已剔除无票城市；只读等待正式资源，不把原始城市集合写回。
   const finalPayload = await waitForValidatedSegmentReadback(
     page, productId, variant, endpoints, selectedCities, options.sleep,
   );
@@ -104,10 +115,10 @@ export async function readTrafficLineSegmentReadback(
   endpoints: TrafficLineEndpointPlan,
 ): Promise<{ segmentCount: number; departureCityCount: number }> {
   const payload = await getSegments(page, productId);
-  if (Array.isArray(record(payload.draftProductSegments)?.segments)) {
-    throw new Error("子产品资源仍存在未发布草稿，不能作为正式回读。");
-  }
   const segments = list(record(payload.productSegments)?.segments);
+  // 已激活子产品的 getSegments 可同时返回编辑草稿和已发布资源段。最终回读
+  // 只以 productSegments 的完整性为准；草稿并存不表示正式资源不存在。
+  if (!segments.length) throw new Error("子产品未返回可作为正式回读的资源段。");
   verifySegmentBoundaries(segments, variant, endpoints);
   return { segmentCount: segments.length, departureCityCount: verifyValidatedDepartureCityReadback(payload) };
 }
@@ -123,49 +134,6 @@ export function buildBoundarySegment(template: Segment, segmentNumber: number, d
       destinationCity: structuredClone(destinationCity),
     },
   };
-}
-
-export async function waitForSegmentSubmit(
-  page: TrafficLinePage,
-  productId: string,
-  options: { maxPolls?: number; sleep?: (milliseconds: number) => Promise<void> } = {},
-): Promise<string[]> {
-  const maxPolls = options.maxPolls ?? 210;
-  const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
-  let missingResultPolls = 0;
-  for (let attempt = 1; attempt <= maxPolls; attempt += 1) {
-    let payload: JsonRecord;
-    try {
-      payload = await postTrafficLineSoa(page, "15638", "getSubmitSegmentsResult", { productId }, "读取子产品资源提交结果");
-    } catch (error) {
-      // 结果记录可能短暂不可见，但该错误也可能表示 submit 根本未启动校验。
-      // 因此只做少量读回，不盲目重提；超过宽限后以可安全续跑的明确错误停止。
-      if (!segmentValidationResultMissing(error)) throw error;
-      missingResultPolls += 1;
-      if (missingResultPolls >= 5 || attempt === maxPolls) {
-        throw new Error(`子产品资源提交后未启动班期校验，已只读确认 ${missingResultPolls} 次；未重复提交，可安全重试。`);
-      }
-      await sleep(Math.min(1_500, 500 * attempt));
-      continue;
-    }
-    const result = text(payload.result);
-    if (result === "T") return [];
-    if (result === "F") {
-      const rejectedCityIds = list(payload.checkSegmentResultCities)
-        .map((item) => text(record(item.city)?.cityId))
-        .filter(Boolean);
-      if (rejectedCityIds.length) return [...new Set(rejectedCityIds)];
-      throw new Error(`子产品资源提交未通过：${messageText(payload.messages) || "VBK 未返回可用交通资源。"}`);
-    }
-    if (result !== "U") throw new Error(`子产品资源提交返回未知状态「${result || "空"}」。`);
-    if (attempt < maxPolls) await sleep(Math.min(1_500, 500 * attempt));
-  }
-  throw new Error(`子产品资源提交在 ${maxPolls} 次轮询后仍未完成。`);
-}
-
-function segmentValidationResultMissing(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("产品班期校验结果不存在") && message.includes("班期校验已经开始");
 }
 
 async function ensureSegmentDraft(
@@ -284,6 +252,26 @@ async function waitForValidatedSegmentReadback(
   return last;
 }
 
+/**
+ * 恢复超时任务时先读取上一次 submitSegments 的结果。若平台仍在处理则明确
+ * 暂停；若已成功则补齐正式资源回读；仅在明确失败/不存在时允许重新构建草稿。
+ */
+export type TrafficLineSegmentSubmitRecovery = "recovered" | "restartable" | "pending";
+
+export async function recoverPendingTrafficLineSegmentSubmit(
+  page: TrafficLinePage,
+  productId: string,
+  variant: TrafficLineVariant,
+  endpoints: TrafficLineEndpointPlan,
+  sleep?: (milliseconds: number) => Promise<void>,
+): Promise<TrafficLineSegmentSubmitRecovery> {
+  const state = await readSegmentSubmitState(page, productId);
+  if (state.status === "missing" || state.status === "failed") return "restartable";
+  if (state.status === "pending") return "pending";
+  await waitForValidatedSegmentReadback(page, productId, variant, endpoints, [], sleep);
+  return "recovered";
+}
+
 async function resolveTrafficLineModifyUser(page: TrafficLinePage, productId: string): Promise<string> {
   const endpoint = `https://vbooking.ctrip.com/ivbk/vendor/TourDays?productid=${encodeURIComponent(productId)}&istab=1&from=vbk`;
   const state = await getVbkInitialState(page, endpoint, "读取子产品当前操作账号");
@@ -308,11 +296,31 @@ function inferDestination(segments: Segment[]): City {
 
 async function compatibleDepartureCities(page: TrafficLinePage, variant: TrafficLineVariant, destination: City): Promise<City[]> {
   const payload = await postTrafficLineSoa(page, "15638", "getMultiDepartureCities.json", {}, "读取多出发城市");
-  const groups = list(payload.multiDepartureCities);
+  return selectTrafficLineValidationCities(list(payload.multiDepartureCities), variant, destination);
+}
+
+/**
+ * 只校验 VBK「热门」出发城市；字母分组仅用于补齐交通能力字段。
+ */
+export function selectTrafficLineValidationCities(groups: JsonRecord[], variant: TrafficLineVariant, destination: City): City[] {
   const key = variant === "flightRoundTrip" ? "hasAirport" : "hasTrain";
   const destinationId = text(destination.cityId);
-  return groups.flatMap((group) => list(group.departureCities))
-    .filter((city) => city[key] === true && text(city.cityId) !== destinationId);
+  const destinationName = text(destination.cityName).replace(/市$/, "");
+  const capabilityById = new Map<string, City>();
+  for (const city of groups.flatMap((group) => list(group.departureCities))) {
+    const cityId = text(city.cityId);
+    if (cityId && city[key] === true) capabilityById.set(cityId, city);
+  }
+  const hot = groups.find((group) => text(group.category) === "热门");
+  const preferred = hot ? list(hot.departureCities) : [...capabilityById.values()];
+  const selected = new Map<string, City>();
+  for (const city of preferred) {
+    const cityId = text(city.cityId);
+    const capable = capabilityById.get(cityId);
+    if (!capable || cityId === destinationId || text(capable.cityName).replace(/市$/, "") === destinationName) continue;
+    selected.set(cityId, capable);
+  }
+  return [...selected.values()];
 }
 
 function verifySegmentBoundaries(segments: Segment[], variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan): void {
@@ -350,8 +358,37 @@ function isMultiArrival(segment: Segment): boolean { return isMultiCity(record(r
 function isMultiCity(city: City | null): boolean { return text(city?.cityId) === "0"; }
 function multiCity(name: string): City { return { cityId: 0, cityName: name }; }
 
-function messageText(value: unknown): string {
-  return Array.isArray(value) ? value.map(text).filter(Boolean).join("；") : text(value);
+/**
+ * 交通资源必须按产品实际售卖班期核验，但 submitSegments 是资源可用性探测，
+ * 不是价格库存落库。用首日、中间日、末日覆盖整个售卖窗口，避免把 365 天
+ * 全量日期交给 VBK 异步校验而长期停留在 U 状态。
+ */
+export function trafficLineResourceCheckDates(
+  product: Record<string, unknown> | undefined,
+  now = new Date(),
+): string[] {
+  const commercial = record(product?.commercial);
+  const inventory = record(commercial?.inventory);
+  const startDate = text(inventory?.startDate);
+  const endDate = text(inventory?.endDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+    return [];
+  }
+  const availableDates = datesBetween(startDate, endDate)
+    .filter((date) => date >= localBusinessDate(now))
+    .slice(0, VBK_MAX_PRICING_INVENTORY_DAYS);
+  if (availableDates.length <= 3) return availableDates;
+  return [
+    availableDates[0]!,
+    availableDates[Math.floor((availableDates.length - 1) / 2)]!,
+    availableDates.at(-1)!,
+  ];
+}
+
+function resourceCheckSchedule(schedule: readonly string[] | undefined, now = new Date()): string[] {
+  const valid = [...new Set(schedule?.filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)) ?? [])];
+  // 仅供直接调用的兼容路径；正常交通主流程必须传入产品班期。
+  return valid.length ? valid : deterministicSchedule(now);
 }
 
 function deterministicSchedule(now = new Date()): string[] {

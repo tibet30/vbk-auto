@@ -78,6 +78,8 @@ test("commercial prompt 保留商业阶段专属契约", () => {
   assert.match(prompt, /套餐名由本地系统按目的地、天数、晚数和产品形态固定生成/);
   assert.match(prompt, /本阶段不要输出 packageName/);
   assert.match(prompt, /publicPriceCeiling/);
+  assert.match(prompt, /本地审核用指导价/);
+  assert.match(prompt, /不是实时采购价/);
   assert.doesNotMatch(prompt, /每个 spot\.name|recommendations 恰好/);
 });
 

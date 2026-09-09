@@ -1,4 +1,4 @@
-import type { AgentApproval, AgentEvent, AgentInputRequest } from "../../shared/contracts.js";
+import type { AgentApproval, AgentEvent, AgentInputRequest, AgentSnapshot } from "../../shared/contracts.js";
 
 export interface AgentToolCall {
   id: string;
@@ -43,6 +43,8 @@ export interface AgentFinishContext {
   runId: string;
   hadWrites: boolean;
   hadRemoteWrites: boolean;
+  /** Post-approval deterministic runner finished; durable automation is evidence. */
+  deterministicWorkflow?: boolean;
 }
 export interface AgentFinishResult {
   verified: boolean;
@@ -50,12 +52,20 @@ export interface AgentFinishResult {
   /** Optional final write approval prepared by the business readiness gate. */
   finalApproval?: { scope: string[]; summary: string };
 }
+export interface AgentSnapshotStore {
+  getAgentSnapshot(id: string): AgentSnapshot | undefined;
+  saveAgentSnapshot(snapshot: AgentSnapshot): void;
+}
 export interface AgentCoreDependencies {
   model?: AgentModel;
   modelFor?(localProductId: string): Promise<AgentModel>;
   tools: AgentTool[];
   accountFor(localProductId: string): Promise<{ accountKey: string; productVersion: string }>;
   productFingerprint?(localProductId: string): Promise<string>;
+  recoverApproval?(localProductId: string, snapshot: AgentSnapshot): Promise<AgentApproval | undefined>;
+  /** Starts the deterministic, already-authorised VBK workflow. Returns true
+   * only when Agent must yield instead of asking the model for another step. */
+  handoffApprovedWorkflow?(localProductId: string, approval: AgentApproval): boolean;
   contextFor?(localProductId: string): Promise<string>;
   finishVerified?(localProductId: string, context?: AgentFinishContext): Promise<AgentFinishResult>;
   reconcileUncertainWrite?(localProductId: string, uncertain: { toolCallId: string; message: string }): Promise<{ reconciled: boolean; retryable?: boolean; message?: string }>;

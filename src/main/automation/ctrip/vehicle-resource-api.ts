@@ -15,7 +15,8 @@ export const VBK_RESOURCE_HEAD = {
   extension: [],
 };
 
-export function segmentsFromPayload(payload: any): Segment[] {
+export function segmentsFromPayload(payload: any, options: { formalOnly?: boolean } = {}): Segment[] {
+  if (options.formalOnly) return payload?.productSegments?.segments ?? [];
   return payload?.draftProductSegments?.segments
     ?? payload?.productSegments?.segments
     ?? [];
@@ -37,12 +38,25 @@ function hasResourceGroup(segment: Segment, groupId: string) {
     && segment.segmentResourceGroups.some((group: any) => groupIdOf(group) === groupId);
 }
 
+function resourceGroupDrafts(groups: unknown): Segment["segmentResourceGroups"] {
+  if (!Array.isArray(groups)) return [];
+  return groups
+    .filter((group) => Number.isInteger(Number(groupIdOf(group))) && Number(groupIdOf(group)) > 0)
+    // VBK 资源编辑器只提交资源组 ID、排序和供应商 ID。回传的完整资源组
+    // DTO 会让 saveSegment 把旧关联合并回来，特别是在交通子产品的草稿上。
+    .map((group, sort) => ({
+      resourceGroupId: Number(groupIdOf(group)),
+      sort,
+      resourceGroup: { vendorId: group?.resourceGroup?.vendorId ?? null },
+    }));
+}
+
 function withoutResourceGroup(segment: Segment, groupId: string): Segment {
   return {
     ...segment,
-    segmentResourceGroups: (Array.isArray(segment.segmentResourceGroups)
+    segmentResourceGroups: resourceGroupDrafts((Array.isArray(segment.segmentResourceGroups)
       ? segment.segmentResourceGroups
-      : []).filter((group: any) => groupIdOf(group) !== groupId),
+      : []).filter((group: any) => groupIdOf(group) !== groupId)),
   };
 }
 
@@ -177,6 +191,15 @@ function futureSchedule() {
 export async function ensureResourceSegmentsDraftApi(page: any, productId: string) {
   const before: any = await getProductSegmentsApi(page, productId);
   if (Array.isArray(before?.draftProductSegments?.segments)) return before;
+  return initializeResourceSegmentsDraftApi(page, productId);
+}
+
+/**
+ * 资源服务偶尔会返回过期的 draftProductSegments 外壳，但 saveSegment 随后明确
+ * 拒绝并报“产品还没有创建草稿”。调用方已经读回确认没有任何段内写入时，才可
+ * 走这个受控的初始化和一次重试；不能把它用于不确定的部分保存恢复。
+ */
+export async function initializeResourceSegmentsDraftApi(page: any, productId: string) {
   const maintain = await vbkSessionRequest(page, {
     endpoint: "https://online.ctrip.com/restapi/soa2/15638/saveProductMaintainType",
     browserRequestTimeoutMs: 12_000,
@@ -200,40 +223,60 @@ export async function ensureResourceSegmentsDraftApi(page: any, productId: strin
   return current;
 }
 
-function vehicleGroup(groupId: string, groupName: string, segmentId: unknown) {
+function vehicleGroup(groupId: string, source: unknown) {
   return {
-    segmentId,
     resourceGroupId: Number(groupId),
     sort: 0,
     resourceGroup: {
-      resourceGroupId: Number(groupId),
-      resourceGroupName: groupName,
-      resourcePICategoryId: 1132,
-      resourcePICategoryName: "用车",
-      active: "T",
-      maxSelectCount: 1,
-      minSelectCount: 1,
-      maxItemCount: 20,
-      mandatory: "T",
-      locale: "zh-CN",
-      description: "",
+      vendorId: (source as any)?.resourceGroup?.vendorId ?? null,
     },
-    resources: [],
   };
 }
 
 /** 读取 Tour Helper 使用的后端数据，确认仅全程首段绑定目标用车组。 */
-export async function verifyVehicleResourceBinding(page: any, productId: string, groupId: number) {
+export async function verifyVehicleResourceBinding(
+  page: any,
+  productId: string,
+  groupId: number,
+  options: { requireFormal?: boolean } = {},
+) {
   const payload = await getProductSegmentsApi(page, productId);
-  const all = segmentsFromPayload(payload);
-  const matched = matchingSegments(payload, String(groupId));
-  const first = all[0];
+  const all = segmentsFromPayload(payload, { formalOnly: options.requireFormal });
+  const matched = all.filter((segment) => hasResourceGroup(segment, String(groupId)));
+  const first = fullTripSegmentOf(all);
   return {
-    bound: Boolean(first) && hasResourceGroup(first, String(groupId)) && matched.length === 1,
+    bound: first !== undefined && hasResourceGroup(first, String(groupId)) && matched.length === 1,
     segmentCount: all.length,
     matchedCount: matched.length,
     targetSegmentId: first ? String(first.segmentId) : undefined,
   };
+}
+
+type VehicleResourceBindingOptions = {
+  submitDraft?: boolean;
+  formalReadbackAttempts?: number;
+  formalReadbackIntervalMs?: number;
+};
+
+/**
+ * submitSegments 的 Ack 只代表平台接受了提交，不代表正式资源段已经完成异步结算。
+ * 只在提交后轮询正式段；草稿回读仍要求即时一致，避免掩盖实际的草稿写入失败。
+ */
+async function waitForFormalVehicleResourceBinding(
+  page: any,
+  productId: string,
+  groupId: number,
+  options: VehicleResourceBindingOptions,
+) {
+  const attempts = Math.max(1, options.formalReadbackAttempts ?? 8);
+  const intervalMs = Math.max(0, options.formalReadbackIntervalMs ?? 750);
+  let latest: Awaited<ReturnType<typeof verifyVehicleResourceBinding>> | undefined;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    latest = await verifyVehicleResourceBinding(page, productId, groupId, { requireFormal: true });
+    if (latest.bound || attempt === attempts) return latest;
+    if (intervalMs) await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("正式用车资源段回读未执行");
 }
 
 /**
@@ -247,55 +290,97 @@ export async function ensureVehicleResourceGroupDraft(
   groupName: string,
   options: { verifyDraft?: boolean } = {},
 ) {
-  const current: any = await ensureResourceSegmentsDraftApi(page, productId);
-  const segments = segmentsFromPayload(current);
-  if (!segments.length) throw new Error("VBK 资源配置未返回任何行程段");
-  const [fullTripSegment, ...lodgingOrTerminalSegments] = segments;
-  if (!fullTripSegment) throw new Error("VBK 资源配置未返回全程行程段");
-  const targetMissing = !hasResourceGroup(fullTripSegment, String(groupId));
-  const surplus = lodgingOrTerminalSegments.filter((segment) => hasResourceGroup(segment, String(groupId)));
-  if (targetMissing) {
-    await saveProductSegmentApi(page, {
-      ...fullTripSegment,
-      segmentResourceGroups: [
-        ...(Array.isArray(fullTripSegment.segmentResourceGroups) ? fullTripSegment.segmentResourceGroups : []),
-        vehicleGroup(String(groupId), groupName, fullTripSegment.segmentId),
-      ],
-    });
+  let changed = false;
+  let latest: Segment[] = segmentsFromPayload(await ensureResourceSegmentsDraftApi(page, productId));
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const fullTripSegment = fullTripSegmentOf(latest);
+    if (!fullTripSegment) throw new Error("VBK 资源配置未返回任何行程段");
+    if (!hasResourceGroup(fullTripSegment, String(groupId))) {
+      const source = latest.flatMap((segment) => Array.isArray(segment.segmentResourceGroups)
+        ? segment.segmentResourceGroups
+        : []).find((group: any) => groupIdOf(group) === String(groupId));
+      await saveProductSegmentApi(page, {
+        ...fullTripSegment,
+        segmentResourceGroups: [
+          ...resourceGroupDrafts(fullTripSegment.segmentResourceGroups),
+          vehicleGroup(String(groupId), source),
+        ],
+      });
+      changed = true;
+    }
+    // saveSegment 后平台会异步重排/回填段对象。每一轮都重新读取最新快照，
+    // 只清理非首段的重复绑定；绝不拿旧对象覆盖已经收敛的段。
+    latest = orderedSegments(segmentsFromPayload(await getProductSegmentsApi(page, productId)));
+    for (const segment of latest) {
+      if (String(segment.segmentId) === String(fullTripSegment.segmentId)) continue;
+      if (!hasResourceGroup(segment, String(groupId))) continue;
+      await saveProductSegmentApi(page, withoutResourceGroup(segment, String(groupId)));
+      changed = true;
+    }
+    latest = orderedSegments(segmentsFromPayload(await getProductSegmentsApi(page, productId)));
+    const target = fullTripSegmentOf(latest);
+    const matched = latest.filter((segment) => hasResourceGroup(segment, String(groupId)));
+    if (target && hasResourceGroup(target, String(groupId)) && matched.length === 1) {
+      return {
+        changed,
+        resourceGroupId: groupId,
+        via: "tour-helper-api",
+        segmentCount: latest.length,
+        targetSegmentId: String(target.segmentId),
+      };
+    }
   }
-  for (const segment of surplus) {
-    await saveProductSegmentApi(page, withoutResourceGroup(segment, String(groupId)));
-  }
-  if (!options.verifyDraft) {
-    return {
-      changed: targetMissing || surplus.length > 0,
-      resourceGroupId: groupId,
-      via: "tour-helper-api",
-      segmentCount: segments.length,
-      targetSegmentId: String(fullTripSegment.segmentId),
-    };
-  }
-  const after = await getProductSegmentsApi(page, productId);
-  const afterSegments = segmentsFromPayload(after);
-  const matchedAfter = matchingSegments(after, String(groupId));
-  const targetAfter = afterSegments[0];
-  if (!targetAfter || !hasResourceGroup(targetAfter, String(groupId)) || matchedAfter.length !== 1) {
-    throw new Error(`接口回读确认失败：用车资源组 ${groupId} 应仅绑定全程首段，实际绑定 ${matchedAfter.length}/${afterSegments.length} 个行程段`);
-  }
-  return {
-    changed: targetMissing || surplus.length > 0,
-    resourceGroupId: groupId,
-    via: "tour-helper-api",
-    segmentCount: afterSegments.length,
-    targetSegmentId: String(targetAfter.segmentId),
-  };
+  const target = fullTripSegmentOf(latest);
+  const matched = latest.filter((segment) => hasResourceGroup(segment, String(groupId)));
+  throw new Error(`接口回读确认失败：用车资源组 ${groupId} 应仅绑定全程首段，实际绑定 ${matched.length}/${latest.length} 个行程段（首段=${String(target?.segmentId ?? "无")}；重复段=${matched.map((segment) => String(segment.segmentId)).join(",") || "无"}）`);
+}
+
+function orderedSegments(segments: Segment[]): Segment[] {
+  return [...segments].sort((left, right) => Number(left.segmentBase?.segmentNumber ?? Number.MAX_SAFE_INTEGER)
+    - Number(right.segmentBase?.segmentNumber ?? Number.MAX_SAFE_INTEGER));
+}
+
+/**
+ * 交通子产品会在完整行程前后自动插入「多出发／多到达」边界段。用车组若绑在
+ * 多出发边界，VBK 会同步到真正的首个行程段，导致 2/4 重复；因此优先首个非边界段。
+ */
+function fullTripSegmentOf(segments: Segment[]): Segment | undefined {
+  const ordered = orderedSegments(segments);
+  return ordered.find((segment) => !isTrafficBoundary(segment)) ?? ordered[0];
+}
+
+function isTrafficBoundary(segment: Segment): boolean {
+  const base = segment.segmentBase ?? {};
+  const departureCity = base.departureCity ?? {};
+  const destinationCity = base.destinationCity ?? {};
+  // 交通模块创建边界段时唯一稳定的协议标记是 cityId=0；文案 cityName 会随
+  // VBK 返回 DTO 而丢失或本地化，不能只用“多出发／多到达”来判断。
+  const departure = String(departureCity.cityName ?? departureCity.name ?? "").trim();
+  const destination = String(destinationCity.cityName ?? destinationCity.name ?? "").trim();
+  return String(departureCity.cityId ?? "") === "0"
+    || String(destinationCity.cityId ?? "") === "0"
+    || departure === "多出发"
+    || destination === "多到达";
 }
 
 /** 页面操作未落库时，按 Tour Helper 的 saveSegment/submitSegments 协议补写并回读。 */
-export async function ensureVehicleResourceBinding(page: any, productId: string, groupId: number, groupName: string) {
+export async function ensureVehicleResourceBinding(
+  page: any,
+  productId: string,
+  groupId: number,
+  groupName: string,
+  options: VehicleResourceBindingOptions = {},
+) {
   const draft = await ensureVehicleResourceGroupDraft(page, productId, groupId, groupName);
-  if (draft.changed) await submitResourceSegmentsApi(page, productId);
-  const verified = await verifyVehicleResourceBinding(page, productId, groupId);
+  // 交通子产品的 submitSegments 会保留一份可读草稿；即使目标用车组已经
+  // 在这份草稿中，也必须显式提交，才能取得可作为最终证据的正式资源段。
+  const submitted = Boolean(draft.changed || options.submitDraft);
+  if (submitted) await submitResourceSegmentsApi(page, productId);
+  // After submit, draft and formal segments can coexist. Formal productSegments
+  // are the only durable binding evidence for audited completion.
+  const verified = submitted
+    ? await waitForFormalVehicleResourceBinding(page, productId, groupId, options)
+    : await verifyVehicleResourceBinding(page, productId, groupId);
   if (!verified.bound) {
     throw new Error(`接口回读确认失败：用车资源组 ${groupId} 应仅绑定全程首段，实际绑定 ${verified.matchedCount}/${verified.segmentCount} 个行程段`);
   }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { preparePhaseRetry, prepareQueuedPhaseResume } from "../../src/main/automation/phase-retry.js";
-import { DraftAutomation, failedAutomationResumePhase, interruptedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.class.js";
+import { prepareBackfilledPhaseRecovery, preparePhaseRetry, prepareQueuedPhaseResume } from "../../src/main/automation/phase-retry.js";
+import { DraftAutomation, approvedRecoveryStartPhase, canRestartPreWriteAuthorizationFailure, failedAutomationResumePhase, interruptedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.class.js";
 import type { AutomationRun } from "../../src/shared/contracts.js";
 
 const previous = {
@@ -172,6 +172,74 @@ test("应用重启中断只恢复当前失败阶段，销售控制保留人工�
   }), "saleControl");
   assert.equal(failedAutomationResumePhase(interrupted), "presentation");
   assert.equal(failedAutomationResumePhase({ ...interrupted, status: "succeeded" }), undefined);
+});
+
+test("首次销售控制在授权守卫拒绝前失败时可安全重新开始", () => {
+  const guardFailure: AutomationRun = {
+    id: "pre-write-guard",
+    status: "failed",
+    currentPhase: "saleControl",
+    phases: [{ phase: "basic", status: "pending" }],
+    logs: [{ at: "2026-09-08T00:00:00.000Z", level: "error", message: "当前任务未处于可录入状态。" }],
+  };
+  assert.equal(canRestartPreWriteAuthorizationFailure(guardFailure, null), true);
+  assert.equal(canRestartPreWriteAuthorizationFailure(guardFailure, "78100000"), false);
+  assert.equal(canRestartPreWriteAuthorizationFailure({ ...guardFailure, logs: [] }, null), false);
+});
+
+test("恢复酒店候选后，保持从原失败预检阶段继续", () => {
+  const product: any = {
+    productId: "781", product: { sales: { productForm: "privateTour" }, operations: { hotelResource: { source: "ctrip" } }, itinerary: [{ hotel: "江孜酒店", hotelCandidates: [{ hotelId: 1 }] }] },
+    automation: { phases: [{ phase: "preflight", status: "failed" }] },
+  };
+  assert.equal(approvedRecoveryStartPhase(product, "preflight"), "preflight");
+});
+
+test("预检因缺酒店候选失败且候选后补时，仅恢复酒店资源和预检", () => {
+  const previousRun: AutomationRun = {
+    id: "missing-hotel-phase",
+    status: "failed",
+    currentPhase: "preflight",
+    phases: [
+      { phase: "basic", status: "completed" },
+      { phase: "presentation", status: "completed" },
+      { phase: "itinerary", status: "completed" },
+      { phase: "package", status: "completed" },
+      { phase: "vehicleResource", status: "completed" },
+      { phase: "terms", status: "completed" },
+      { phase: "preflight", status: "failed" },
+    ],
+    logs: [],
+    recovery: {
+      phases: {
+        preflight: {
+          phase: "preflight", state: "needs_user", attempts: [],
+          finalError: "酒店资源缺少每晚至少 1 个且最多 5 个携程候选：第 1 天",
+        },
+      },
+    },
+  };
+  const phases = ["basic", "presentation", "itinerary", "package", "hotelResource", "vehicleResource", "terms", "preflight"];
+  const recovered = prepareBackfilledPhaseRecovery(previousRun, phases, "hotelResource", "preflight");
+  assert.deepEqual(recovered.phases.map((phase) => [phase.phase, phase.status]), [
+    ["basic", "completed"], ["presentation", "completed"], ["itinerary", "completed"], ["package", "completed"],
+    ["hotelResource", "pending"], ["vehicleResource", "completed"], ["terms", "completed"], ["preflight", "pending"],
+  ]);
+
+  const product: any = {
+    productId: "781",
+    product: {
+      sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false },
+      basicInfo: { supplierProductName: "日喀则2天1晚跟团游", supplierProductCode: "P-781", subtitle: "测试", days: 2, nights: 1, meetingCity: "日喀则", destinationCity: "日喀则", province: "西藏", operationNotes: "测试" },
+      operations: { pickupCity: "日喀则" },
+      itinerary: [
+        { day: 1, title: "江孜住宿", spots: [], description: "测试", hotel: "江孜酒店", hotelCandidates: [{ hotelId: 1, hotelName: "江孜酒店", diamond: 4, score: 4.8, distanceKm: 1, cityName: "江孜", anchorName: "白居寺", anchorCityId: 20859 }], meals: "敬请自理" },
+        { day: 2, title: "日喀则送站", spots: [], description: "测试", hotel: "无", meals: "敬请自理" },
+      ],
+    },
+    automation: previousRun,
+  };
+  assert.equal(approvedRecoveryStartPhase(product, "preflight"), "hotelResource");
 });
 
 test("DraftAutomation.start 把应用中断映射为阶段重试，而不是全量重跑", async () => {

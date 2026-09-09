@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  coerceProductFeaturesHtml,
   formatProductFeaturesHtml,
   productFeaturesPlainText,
 } from "../../src/main/domain/product/features-rich-text.js";
@@ -41,4 +42,18 @@ test("产品特色 HTML 可转换为普通输入框与回读比较使用的文�
     productFeaturesPlainText("<p><strong>古建巡礼：</strong>游览晋祠</p><p>专车衔接</p>"),
     "古建巡礼：游览晋祠\n专车衔接",
   );
+});
+
+test("误写成富文本 AST/对象的 features 会被收成 HTML 字符串", () => {
+  const coerced = coerceProductFeaturesHtml({
+    p: [
+      { strong: "私家团专车安排：", $text: "火车站专车接站" },
+      { strong: "扎什伦布寺游览", text: "参观措钦大殿" },
+    ],
+  });
+  assert.equal(
+    coerced,
+    "<p>私家团专车安排：火车站专车接站</p><p>扎什伦布寺游览：参观措钦大殿</p>",
+  );
+  assert.equal(coerceProductFeaturesHtml({ nested: { empty: true } }), "");
 });

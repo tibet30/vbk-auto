@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PRODUCT_FORM_LABELS, PRODUCT_FORMS, isPrivateTourForm, isProductForm, requiresGuide, requiresVehicleResource, supportsSmallGroupSettings } from "../../src/shared/product-form.js";
+import { PRODUCT_FORM_LABELS, PRODUCT_FORMS, defaultDailyTransport, isPrivateTourForm, isProductForm, requiresGuide, requiresVehicleResource, supportsSmallGroupSettings } from "../../src/shared/product-form.js";
 
 test("产品形态契约包含四类形态及稳定中文标签", () => {
   assert.deepEqual(PRODUCT_FORMS, ["privateTour", "groupTour", "freeTravel", "semiSelfGuided"]);
@@ -27,4 +27,12 @@ test("团态规则：私家团用车、跟团游导游、跟团游和半自助�
   assert.equal(supportsSmallGroupSettings("groupTour"), true);
   assert.equal(supportsSmallGroupSettings("semiSelfGuided"), true);
   assert.equal(supportsSmallGroupSettings("freeTravel"), false);
+});
+
+test("当天用车默认值按私家团、拼小团和自由行区分", () => {
+  assert.equal(defaultDailyTransport("privateTour", false), "charter");
+  assert.equal(defaultDailyTransport("groupTour", true), "shared");
+  assert.equal(defaultDailyTransport("semiSelfGuided", true), "shared");
+  assert.equal(defaultDailyTransport("freeTravel", false), "none");
+  assert.equal(defaultDailyTransport("groupTour", false), "charter");
 });

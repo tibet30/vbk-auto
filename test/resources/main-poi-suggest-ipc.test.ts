@@ -6,6 +6,8 @@ const source = [
   readFileSync("src/main/main.ts", "utf8"),
   readFileSync("src/main/startup-config.ts", "utf8"),
   readFileSync("src/main/ipc/browser-automation-ipc.ts", "utf8"),
+  readFileSync("src/main/planning/poi-auto-selection.ts", "utf8"),
+  readFileSync("src/main/planning/runtime.ts", "utf8"),
 ].join("\n");
 
 function extractHandlerBody(sourceText: string, keyword: string): string {
@@ -52,4 +54,17 @@ test("poi:suggest IPC 调试日志覆盖开始、详情、成功、空结果和�
   assert.match(handler, /poiId: result\.best\.poiId/);
   assert.match(handler, /errorMessage:/);
   assert.doesNotMatch(handler, /cookie|ticket|Authorization|apiKey|responseText|requestHeaders/i);
+});
+
+test("规划 POI 选择先走程序精确匹配，否则仅把平台前 12 条交给 AI，再核验营业和置信度", () => {
+  assert.match(source, /function resolvePlanningPoiAutoSelection/);
+  assert.match(source, /const exact = args\.detail\.best/);
+  assert.match(source, /args\.detail\.candidates\.slice\(0, 12\)/);
+  assert.match(source, /isSelectableCandidateInContext\(item, args\.context\)/);
+  assert.match(source, /checkAvailability\(candidate\.poiId\)/);
+  assert.match(source, /!exact && confidence <= 0\.8/);
+  assert.match(source, /status: "available"/);
+  assert.match(source, /async resolvePoiSelection\(localProductId: string, keyword: string/);
+  assert.match(source, /detail: await suggestPoiDetail\(await this\.browser!\.page\(\), keyword, context\)/);
+  assert.doesNotMatch(readFileSync("src/main/ipc/browser-automation-ipc.ts", "utf8"), /resolveManualPoiSelection/);
 });

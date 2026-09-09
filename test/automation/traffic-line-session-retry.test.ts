@@ -2,7 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { postTrafficLineSoa } from "../../src/main/automation/ctrip/traffic-line/client.ts";
-import { publishedSegmentReadbackIsComplete, validatedSegmentReadbackIsComplete } from "../../src/main/automation/ctrip/traffic-line/segments.ts";
+import {
+  publishedSegmentReadbackIsComplete,
+  readTrafficLineSegmentReadback,
+  trafficLineResourcePageUrl,
+  validatedSegmentReadbackIsComplete,
+} from "../../src/main/automation/ctrip/traffic-line/segments.ts";
 import { departureCityReadbackIsComplete, validatedDepartureCityReadbackIsComplete } from "../../src/main/automation/ctrip/traffic-line/segment-departure-cities.ts";
 import { postSoa } from "../../src/main/automation/ctrip/itinerary-api/transport.ts";
 
@@ -54,6 +59,37 @@ test("非会话 Ack 错误不盲目重提", async () => {
       "业务失败测试",
     ), /必选条款有更新未保存/);
     assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as { document?: unknown }).document = originalDocument;
+  }
+});
+
+test("资源校验结果读取以子产品资源页为完整来源页", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  let request: Record<string, unknown> | undefined;
+  (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    ResponseStatus: { Ack: "Success", Errors: [] }, result: "T",
+  }))) as typeof fetch;
+  try {
+    const page = {
+      evaluate: async <T, A>(fn: (arg: A) => T | Promise<T>, arg: A) => {
+        request = arg as Record<string, unknown>;
+        return fn(arg);
+      },
+    };
+    await postTrafficLineSoa(
+      page,
+      "15638",
+      "getSubmitSegmentsResult",
+      { productId: "78251133" },
+      "读取子产品资源提交结果",
+      { referrer: trafficLineResourcePageUrl("78251133"), referrerPolicy: "no-referrer-when-downgrade" },
+    );
+    assert.equal(request?.referrer, "https://vbooking.ctrip.com/product/input/newResourceRule?productid=78251133&from=vbk");
+    assert.equal(request?.referrerPolicy, "no-referrer-when-downgrade");
   } finally {
     globalThis.fetch = originalFetch;
     (globalThis as { document?: unknown }).document = originalDocument;
@@ -151,4 +187,35 @@ test("班期校验后的正式出发城市可被平台过滤，但不能为空�
   assert.equal(validatedDepartureCityReadbackIsComplete({
     productSegments: { productDepartureCity: { departureCities: [{ cityId: 99 }] } },
   }, submitted), false);
+});
+
+test("最终回读以并存响应中的正式资源段为准，不重放已激活子产品", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
+  const endpoints = {
+    arrivalCity: "南京", departureCity: "南京", resolvedAt: "2026-09-04T00:00:00.000Z",
+    flight: { arrival: { code: "NKG", name: "禄口国际机场" }, departure: { code: "NKG", name: "禄口国际机场" } },
+  };
+  const formalSegments = [
+    { segmentBase: { departureCity: { cityId: 0 } }, flight: { systemFlight: { arrivalAirport: "NKG" } } },
+    { segmentBase: { destinationCity: { cityId: 0 } }, flight: { systemFlight: { departureAirport: "NKG" } } },
+  ];
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    draftProductSegments: { segments: [{ segmentBase: {} }] },
+    productSegments: { segments: formalSegments, productDepartureCity: { departureCities: [{ cityId: 4 }] } },
+  }), { status: 200 })) as typeof fetch;
+  try {
+    const readback = await readTrafficLineSegmentReadback(
+      { evaluate: async (fn, arg) => fn(arg) } as any,
+      "child-1",
+      "flightRoundTrip",
+      endpoints,
+    );
+    assert.deepEqual(readback, { segmentCount: 2, departureCityCount: 1 });
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as { document?: unknown }).document = originalDocument;
+  }
 });

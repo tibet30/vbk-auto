@@ -8,6 +8,7 @@ import {
   ensureTrafficLineClauses,
   resolveChildTransportClauseRequirements,
   selectedClauseItems,
+  waitForTrafficLineClausePackage,
 } from "../../src/main/automation/ctrip/traffic-line/clauses.ts";
 import {
   manualRequiredClauseIdsByTab,
@@ -63,6 +64,52 @@ test("平台未生成或重复生成交通方向条款时在保存前安全阻�
     () => resolveChildTransportClauseRequirements(duplicate, "flightRoundTrip"),
     /去程项（候选 2 项）/,
   );
+});
+
+test("交通方向条款使用容器 selectedClauseItemId 时仍能识别去返程", () => {
+  const schema = childClauseSchema("flightRoundTrip");
+  const traffic = schema.clauseTypeDtos[0]!;
+  const [outbound, returning] = traffic.clauseItemDtos;
+  delete outbound!.selected;
+  delete returning!.selected;
+  traffic.clauseItemDtos = [];
+  traffic.containers = [
+    { selectedClauseItemId: outbound!.clauseItemId, clauseItemDtos: [outbound!] },
+    { selectedClauseItemId: returning!.clauseItemId, clauseItemDtos: [returning!] },
+  ];
+
+  assert.deepEqual(
+    resolveChildTransportClauseRequirements(schema, "flightRoundTrip").map((item) => item.clauseItemId),
+    [38725, 38739],
+  );
+});
+
+test("资源提交后条款 schema 延迟物化时只读等待，不会提前保存不完整条款", async () => {
+  const ready = childClauseSchema("flightRoundTrip");
+  const responses = [{ clauseTypeDtos: [] }, { clauseTypeDtos: [] }, ready];
+  let reads = 0;
+  const result = await waitForTrafficLineClausePackage(async () => {
+    const response = responses[Math.min(reads, responses.length - 1)]!;
+    reads += 1;
+    return response;
+  }, "flightRoundTrip", { intervalMs: 0, sleep: async () => undefined });
+  assert.equal(result, ready);
+  assert.equal(reads, 3);
+});
+
+test("条款方向出现重复候选时不等待并立即阻断", async () => {
+  const duplicate = childClauseSchema("flightRoundTrip");
+  duplicate.clauseTypeDtos[0]!.clauseItemDtos.push({
+    clauseItemId: 40001,
+    selected: "T",
+    clauseComponentDtos: [{ componentCode: "duplicate", value: "去程补充机票" }],
+  });
+  let reads = 0;
+  await assert.rejects(() => waitForTrafficLineClausePackage(async () => {
+    reads += 1;
+    return duplicate;
+  }, "flightRoundTrip", { intervalMs: 0, sleep: async () => undefined }), /候选 2 项/);
+  assert.equal(reads, 1);
 });
 
 test("交通子产品条款保存请求使用页面实测的 isTra=T 上下文", () => {

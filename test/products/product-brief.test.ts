@@ -55,7 +55,12 @@ test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
   assert.equal(basicInfo.nights, 1);
   assert.equal(basicInfo.meetingCity, "太原");
   assert.equal(basicInfo.destinationCity, "太原");
+  assert.equal((product.product.operations as Record<string, unknown>).transport, "charter");
   assert.deepEqual((product.product.operations as Record<string, unknown>).vehicleResource, {});
+  assert.deepEqual((product.product.operations as Record<string, unknown>).trafficLine, {
+    enabled: false,
+    variants: [],
+  });
   assert.deepEqual(product.product.commercial, { inventory: defaultCommercialInventory() });
   assert.equal(product.messages.length, 1);
   assert.equal(product.messages[0].role, "user");
@@ -64,6 +69,20 @@ test("最小产品信息创建可审查的通用私家团草稿", async (t) => {
   assert.match(product.messages[0].content, /"productFormLabel":"私家团"/);
   assert.match(product.messages[0].content, /"days":2/);
   assert.match(product.messages[0].content, /"nights":1/);
+});
+
+test("新建产品按团态预置当天用车", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-daily-transport-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+
+  const transportFor = (productForm: "privateTour" | "groupTour" | "semiSelfGuided" | "freeTravel") =>
+    (db.createProduct({ destination: "太原", days: 2, productForm }).product.operations as Record<string, unknown>).transport;
+
+  assert.equal(transportFor("privateTour"), "charter");
+  assert.equal(transportFor("groupTour"), "shared");
+  assert.equal(transportFor("semiSelfGuided"), "shared");
+  assert.equal(transportFor("freeTravel"), "none");
 });
 
 test("创建草稿先把行政目的地归一为平台短名", async (t) => {

@@ -336,6 +336,8 @@ export interface PlannerContext {
   existingResearchTasks: Array<Pick<ResearchTaskProposal, "label" | "type">>;
   /** 历史会话（只用于补充上下文；orchestrator 不依赖它做决策）。 */
   history: Array<{ role: "user" | "assistant"; content: string }>;
+  /** 用户明确指定的目的地、天数、POI、行程顺序和交通方式；模型不得覆盖。 */
+  lockedConstraints?: import("./contracts-preparation.js").LockedConstraints;
   /** 用户明确保存的少量长期偏好，按预算裁剪后注入。 */
   memoryContext?: import("./contracts-types.js").MemoryPromptContext;
   /** Provider / model 仅作为 transport 参数，schema / prompt 不依赖。 */

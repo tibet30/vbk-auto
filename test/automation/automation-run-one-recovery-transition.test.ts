@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import type { AutomationRun, PhaseAttempt } from "../../src/shared/contracts.js";
 import { prepareSinglePhaseRetry } from "../../src/main/automation/phase-retry.js";
 import { runPhaseWithRecovery } from "../../src/main/automation/recovery/recovery.js";
-import { resolveRunStatusAfterSinglePhaseSuccess } from "../../src/main/automation/automation.main/automation.main.run-one-state.js";
+import { resolveRunStatusAfterSinglePhaseSuccess, settleRunAfterVerifiedPreflight } from "../../src/main/automation/automation.main/automation.main.run-one-state.js";
 import {
   aggregateSectionState,
   recoveryNeedsUser,
@@ -117,6 +117,32 @@ function applyCompletedOutcome(run: AutomationRun, originalRunStatus: Automation
   run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
   run.currentPhase = undefined;
 }
+
+test("最终预检通过后结案全部阶段，不会重跑历史 pending 标记", () => {
+  const run = makePreviousFailedRun();
+  const settled = settleRunAfterVerifiedPreflight(run);
+  assert.equal(settled.status, "succeeded");
+  assert.equal(settled.currentPhase, undefined);
+  assert.ok(settled.phases.every((phase) => phase.status === "completed"));
+  assert.ok(Object.values(settled.recovery!.phases).every((recovery) => recovery.state === "completed"));
+});
+
+test("母产品预检通过时不结案未完成的交通子产品阶段", () => {
+  const run = makePreviousFailedRun();
+  run.phases.push({ phase: "trafficLine", status: "failed" });
+  run.recovery!.phases.trafficLine = {
+    phase: "trafficLine",
+    state: "needs_user",
+    attempts: [],
+    finalError: "子产品条款未回读",
+  };
+  const settled = settleRunAfterVerifiedPreflight(run);
+  assert.equal(settled.status, "queued");
+  assert.equal(settled.currentPhase, "trafficLine");
+  assert.equal(settled.phases.find((phase) => phase.phase === "trafficLine")?.status, "failed");
+  assert.equal(settled.recovery!.phases.trafficLine.state, "needs_user");
+  assert.ok(settled.phases.filter((phase) => phase.phase !== "trafficLine").every((phase) => phase.status === "completed"));
+});
 
 // ───────────────────────── 测试 ─────────────────────────
 

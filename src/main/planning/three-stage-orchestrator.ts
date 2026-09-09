@@ -33,7 +33,7 @@ export interface ThreeStageOrchestratorDependencies {
   persist(plan: PlanningPlanV2): Promise<void>;
   assertVbkLogin(): Promise<void>;
   queryPoi(name: string): Promise<PoiSuggestDetailResult>;
-  resolveHotels(itinerary: Array<Record<string, unknown>>): Promise<Awaited<ReturnType<typeof resolveItineraryHotelCandidates>>>;
+  resolveHotels(itinerary: Array<Record<string, unknown>>, nights?: number): Promise<Awaited<ReturnType<typeof resolveItineraryHotelCandidates>>>;
   resolveCover(): Promise<{ complete: boolean; summary: string }>;
   resolveVehicle(): Promise<{ complete: boolean; summary: string }>;
   privateTour: boolean;
@@ -131,7 +131,7 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
       const attempt = node(plan, "hotelResolution").attempts + 1;
       await patchNode("hotelResolution", { status: "running", attempts: attempt, startedAt: new Date().toISOString(), error: undefined });
       try {
-        const resolved = await deps.resolveHotels(itinerary);
+        const resolved = await deps.resolveHotels(itinerary, deps.skeleton.nights);
         const first = resolved.dailyCandidates[0]?.candidates[0];
         if (!first) throw new Error("酒店候选为空");
         const itineraryWrite = await deps.runtime.writeModule(deps.localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, resolved.itinerary);

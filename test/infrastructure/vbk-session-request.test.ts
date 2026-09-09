@@ -95,6 +95,26 @@ test("vbkSessionRequest 保留图库请求需要的 header/referrer，并支持�
   assert.equal(JSON.parse(String(captured!.init.body)).head.cid, "CID-VALUE");
 });
 
+test("vbkSessionRequest 支持资源页完整来源策略", async () => {
+  let captured: RequestInit | null = null;
+  const page = executablePage("GUID=CID-VALUE", async (_url, init) => {
+    captured = init ?? {};
+    return jsonResponse({ ResponseStatus: { Ack: "Success" } });
+  });
+  await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/getSubmitSegmentsResult",
+    browserRequestTimeoutMs: 1000,
+    evaluateTimeoutMs: 1000,
+    errorLabel: "资源提交结果",
+    referrer: "https://vbooking.ctrip.com/product/input/newResourceRule?productid=78251133&from=vbk",
+    referrerPolicy: "no-referrer-when-downgrade",
+    body: { head: { cid: "" }, productId: "78251133" },
+  });
+  assert.ok(captured);
+  assert.equal(captured!.referrer, "https://vbooking.ctrip.com/product/input/newResourceRule?productid=78251133&from=vbk");
+  assert.equal(captured!.referrerPolicy, "no-referrer-when-downgrade");
+});
+
 test("vbkSessionRequest 把超出安全整数的行程 ID 保留为精确字符串", async () => {
   const raw = '{"ResponseStatus":{"Ack":"Success"},"tourInfos":[{"tourInfoId":0,"previewTourInfoId":409226120750235682}],"ordinary":409226120750235682}';
   const page = executablePage("GUID=GUID-VALUE", async () => new Response(raw, { status: 200 }));

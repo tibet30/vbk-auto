@@ -354,15 +354,15 @@ test("image 类型封面任务在产品完全没有 cover 时仍不满足", () =
   assert.equal(task.evidence.length, 0);
 });
 
-test("image 类型封面任务在 product.presentation.cover 缺 source/poi/description/minQuality 中任一字段时仍不满足", () => {
+test("image 类型封面任务在 product.presentation.cover 缺 source/poi 或来源非法时仍不满足", () => {
   const db = withDb();
   const product = db.createProduct({ destination: "云冈石窟", days: 1, productForm: "privateTour" });
   const imageTaskId = openImageTask(db, product.id);
 
+  // ctripLibrary 仅要求 source + 非空 poi；description / minQuality 是可选历史元数据。
   const incompleteCovers = [
     { source: "ctripLibrary", description: "横版", minQuality: 3 }, // 缺 poi
-    { source: "ctripLibrary", poi: "云冈石窟", minQuality: 3 }, // 缺 description
-    { source: "ctripLibrary", poi: "云冈石窟", description: "横版" }, // 缺 minQuality
+    { source: "ctripLibrary", poi: "", description: "横版", minQuality: 3 }, // 空 poi
     { poi: "云冈石窟", description: "横版", minQuality: 3 }, // 缺 source
     { source: "vendorLibrary", poi: "云冈石窟", description: "横版", minQuality: 3 }, // 非法 source
   ];
@@ -373,7 +373,7 @@ test("image 类型封面任务在 product.presentation.cover 缺 source/poi/desc
       presentation: { cover },
     });
     const result = refreshSatisfiedResearchTasks(db, product.id);
-    assert.equal(result.updated, 0, `非法封面不应满足：${cover}`);
+    assert.equal(result.updated, 0, `非法封面不应满足：${JSON.stringify(cover)}`);
     const task = db.getProduct(product.id)!.researchTasks.find((item) => item.id === imageTaskId)!;
     assert.equal(task.state, "researching");
   }

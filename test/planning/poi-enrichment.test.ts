@@ -5,6 +5,47 @@ import { AI_WRITABLE_PATHS } from "../../src/main/planning/schemas.js";
 import type { OrchestratorRuntime } from "../../src/main/planning/types.js";
 import type { ResearchTaskProposal } from "../../src/shared/contracts-planning.js";
 
+test("规划阶段拿到已核验的 AI 候选后立即写回本地行程，不进入人工编辑器", async () => {
+  let written: unknown;
+  const runtime: OrchestratorRuntime = {
+    resolvePoiSelection: async (localProductId, keyword, context) => {
+      assert.equal(localProductId, "planning-auto-write");
+      assert.equal(keyword, "日喀则非物质文化遗产中心");
+      assert.deepEqual(context, { destinationCity: "日喀则", province: "西藏" });
+      return {
+        status: "available",
+        match: { poiName: "非物质文化遗产展示中心", poiId: 150237367, province: "西藏", city: "日喀则" },
+      };
+    },
+    loadExistingResearchTasks: async () => [],
+    writeModule: async (_localProductId, module, path, value) => {
+      assert.equal(module, "itinerary");
+      assert.equal(path, AI_WRITABLE_PATHS.itinerary);
+      written = value;
+      return { ok: true };
+    },
+    addResearchTask: async () => "task",
+    loadHistory: async () => [],
+    loadCurrentProduct: async () => ({
+      basicInfo: { destinationCity: "日喀则", province: "西藏" },
+      itinerary: [{ day: 1, spots: [{ name: "日喀则非物质文化遗产中心", poiName: null, poiId: null }] }],
+    }),
+    loadAcceptedModules: async () => ["itinerary"],
+  };
+
+  await enrichItineraryPois({
+    localProductId: "planning-auto-write", destination: "日喀则", runtime, persistedTaskKeys: new Set(),
+  });
+
+  assert.deepEqual((written as Array<{ spots: unknown[] }>)[0].spots[0], {
+    name: "日喀则非物质文化遗产中心",
+    poiName: "非物质文化遗产展示中心",
+    poiId: 150237367,
+    province: "西藏",
+    city: "日喀则",
+  });
+});
+
 test("单个 POI 查询悬挂会超时，后续景点仍写回，且不伪造未匹配任务", async () => {
   const product = {
     itinerary: [{ day: 1, spots: [
@@ -79,7 +120,7 @@ test("只有成功响应且没有候选时创建 canonical POI 核查任务", as
   assert.deepEqual(tasks, [{
     label: "核查 晋祠 的 VBK POI 映射",
     type: "vbk",
-    detail: "suggestPoi 未匹配，请人工核查",
+    detail: "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI",
   }]);
   assert.deepEqual(result, tasks);
 });
@@ -179,78 +220,45 @@ test("完整 itinerary 在补全入口中零查询、零写回", async () => {
   assert.equal(writes, 0);
 });
 
-test("原始名称未命中后，第二个 AI 替代候选命中会替换原 spot", async () => {
+test("原始名称未命中时保留原景点和原位置，并创建人工核查项", async () => {
   const queries: string[] = [];
-  const resolverAttempts: number[] = [];
-  let written: any;
   const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
+    product: { itinerary: [{ day: 1, spots: [{ name: "日喀则非物质文化遗产中心", poiName: null, poiId: null }, { name: "扎什伦布寺", poiName: "扎什伦布寺", poiId: 76348 }] }] },
     suggestPoi: async (keyword) => {
       queries.push(keyword);
-      return keyword === "西安钟楼" ? { poiName: "西安钟楼", poiId: 123 } : null;
-    },
-    write: (value) => { written = value; },
-  });
-  await enrichItineraryPois({
-    localProductId: "fallback-success", destination: "西安", runtime, persistedTaskKeys: new Set(),
-    resolvePoiName: async ({ attempt }) => {
-      resolverAttempts.push(attempt);
-      return attempt === 1 ? "回民街" : "西安钟楼";
+      return null;
     },
   });
-  assert.deepEqual(queries, ["回民街·钟鼓楼广场", "回民街", "西安钟楼"]);
-  assert.deepEqual(resolverAttempts, [1, 2]);
-  assert.deepEqual(written[0].spots[0], { name: "西安钟楼", poiName: "西安钟楼", poiId: 123 });
-  assert.equal(runtime.tasks.length, 0);
+  const result = await enrichItineraryPois({ localProductId: "unmatched-kept", destination: "日喀则", runtime, persistedTaskKeys: new Set() });
+  assert.deepEqual(queries, ["日喀则非物质文化遗产中心"]);
+  assert.deepEqual(runtime.tasks, [{
+    type: "vbk",
+    label: "核查 日喀则非物质文化遗产中心 的 VBK POI 映射",
+    detail: "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI",
+  }]);
+  assert.deepEqual(result, runtime.tasks);
+  assert.deepEqual((await runtime.loadCurrentProduct("unmatched-kept")).itinerary, [{
+    day: 1,
+    spots: [{ name: "日喀则非物质文化遗产中心", poiName: null, poiId: null }, { name: "扎什伦布寺", poiName: "扎什伦布寺", poiId: 76348 }],
+  }]);
 });
 
-test("原始景点不可查时用已查到 POI 的替代景点替换 spot.name", async () => {
-  const queries: string[] = [];
+test("原始名称直接命中会写入真实 POI", async () => {
   let written: any;
-  const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "不存在的主题馆", poiName: null, poiId: null }] }] },
-    suggestPoi: async (keyword) => {
-      queries.push(keyword);
-      return keyword === "河南博物院" ? { poiName: "河南博物院", poiId: 77934 } : null;
-    },
-    write: (value) => { written = value; },
-  });
-  await enrichItineraryPois({
-    localProductId: "replacement-success", destination: "郑州", runtime, persistedTaskKeys: new Set(),
-    resolvePoiName: async () => "河南博物院",
-  });
-
-  assert.deepEqual(queries, ["不存在的主题馆", "河南博物院"]);
-  assert.deepEqual(written[0].spots[0], { name: "河南博物院", poiName: "河南博物院", poiId: 77934 });
-  assert.equal(runtime.tasks.length, 0);
-});
-
-test("原始名称直接命中不调用 AI；第三个候选也可正常写回", async () => {
-  let resolverCalls = 0;
   const directRuntime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "西安钟楼", poiName: null, poiId: null }] }] },
     suggestPoi: async () => ({ poiName: "西安钟楼", poiId: 1 }),
-  });
-  await enrichItineraryPois({
-    localProductId: "fallback-direct", destination: "西安", runtime: directRuntime, persistedTaskKeys: new Set(),
-    resolvePoiName: async () => { resolverCalls += 1; return "不应调用"; },
-  });
-  assert.equal(resolverCalls, 0);
-
-  let written: any;
-  const thirdRuntime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
-    suggestPoi: async (keyword) => keyword === "西安鼓楼" ? { poiName: "西安鼓楼", poiId: 2 } : null,
     write: (value) => { written = value; },
   });
   await enrichItineraryPois({
-    localProductId: "fallback-third", destination: "西安", runtime: thirdRuntime, persistedTaskKeys: new Set(),
-    resolvePoiName: async ({ attempt }) => ["回民街", "西安钟楼", "西安鼓楼"][attempt - 1],
+    localProductId: "fallback-direct", destination: "西安", runtime: directRuntime, persistedTaskKeys: new Set(),
   });
-  assert.deepEqual(written[0].spots[0], { name: "西安鼓楼", poiName: "西安鼓楼", poiId: 2 });
+  assert.deepEqual(written[0].spots[0], {
+    name: "西安钟楼", poiName: "西安钟楼", poiId: 1,
+  });
 });
 
-test("官方名括号别名在 AI 前确定性查询并写回", async () => {
+test("官方名括号别名会做确定性查询并写回", async () => {
   const queried: string[] = [];
   let written: any;
   const runtime = testRuntime({
@@ -261,54 +269,19 @@ test("官方名括号别名在 AI 前确定性查询并写回", async () => {
     },
     write: (value) => { written = value; },
   });
-  let resolverCalls = 0;
   await enrichItineraryPois({
     localProductId: "bracket-alias",
     destination: "太原",
     runtime,
     persistedTaskKeys: new Set(),
-    resolvePoiName: async () => { resolverCalls += 1; return null; },
   });
   assert.deepEqual(queried, ["永祚寺（双塔寺）", "双塔寺"]);
-  assert.equal(resolverCalls, 0);
   assert.deepEqual(written[0].spots[0], {
     name: "永祚寺（双塔寺）", poiName: "双塔寺", poiId: 77967,
   });
 });
 
-test("三次 AI 仍无候选时只创建一条带次数的人工核查项", async () => {
-  const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
-    suggestPoi: async () => null,
-  });
-  const result = await enrichItineraryPois({
-    localProductId: "fallback-exhausted", destination: "西安", runtime, persistedTaskKeys: new Set(),
-    resolvePoiName: async ({ attempt }) => `西安候选${attempt}`,
-  });
-  assert.equal(runtime.tasks.length, 1);
-  assert.match(runtime.tasks[0].detail ?? "", /3 次 AI 名称纠正仍未匹配/);
-  assert.deepEqual(result, runtime.tasks);
-});
-
-test("AI 重复已查询候选不会再次请求 VBK", async () => {
-  const queries: string[] = [];
-  const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
-    suggestPoi: async (keyword) => { queries.push(keyword); return null; },
-  });
-  const seenRequests: any[] = [];
-  await enrichItineraryPois({
-    localProductId: "fallback-deduped", destination: "西安", runtime, persistedTaskKeys: new Set(),
-    resolvePoiName: async (request) => {
-      seenRequests.push(request);
-      return request.attempt === 1 ? "回民街" : "回民街";
-    },
-  });
-  assert.deepEqual(queries, ["回民街·钟鼓楼广场", "回民街"]);
-  assert.deepEqual(seenRequests[1].previousCandidates, ["回民街"]);
-});
-
-test("三次 AI 耗尽会升级已有 canonical 核查项详情，但不报告为新增", async () => {
+test("未命中时不会重复创建已有 canonical 核查项", async () => {
   const taskWrites: ResearchTaskProposal[] = [];
   const runtime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
@@ -320,42 +293,36 @@ test("三次 AI 耗尽会升级已有 canonical 核查项详情，但不报告�
   };
 
   const result = await enrichItineraryPois({
-    localProductId: "fallback-existing-exhausted", destination: "西安", runtime,
+    localProductId: "unmatched-existing", destination: "西安", runtime,
     persistedTaskKeys: new Set(["vbk::核查 回民街·钟鼓楼广场 的 VBK POI 映射"]),
-    resolvePoiName: async ({ attempt }) => `西安候选${attempt}`,
   });
 
-  assert.equal(taskWrites.length, 1, "已有任务仅更新详情，不新增数据库记录");
-  assert.match(taskWrites[0].detail ?? "", /3 次 AI 名称纠正仍未匹配/);
+  assert.equal(taskWrites.length, 0, "已有任务不重复写入");
   assert.deepEqual(result, []);
 });
 
-test("相同或组合 AI 候选被拒绝但仍计入三次，绝不查询或猜测 ID", async () => {
-  const queries: string[] = [];
-  const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
-    suggestPoi: async (keyword) => { queries.push(keyword); return null; },
-  });
-  await enrichItineraryPois({
-    localProductId: "fallback-invalid", destination: "西安", runtime, persistedTaskKeys: new Set(),
-    resolvePoiName: async ({ attempt }) => ["回民街·钟鼓楼广场", "钟楼和鼓楼", "钟楼与鼓楼"][attempt - 1],
-  });
-  assert.deepEqual(queries, ["回民街·钟鼓楼广场"]);
-  assert.match(runtime.tasks[0].detail ?? "", /3 次 AI 名称纠正仍未匹配/);
-});
-
-test("原始 POI 查询失败不调用 AI，也不创建未匹配任务", async () => {
-  let resolverCalls = 0;
+test("原始 POI 查询失败时不创建未匹配任务", async () => {
   const runtime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "网络异常景点", poiName: null, poiId: null }] }] },
     suggestPoi: async () => { throw new Error("network"); },
   });
   await enrichItineraryPois({
-    localProductId: "fallback-query-failed", destination: "西安", runtime, persistedTaskKeys: new Set(),
-    resolvePoiName: async () => { resolverCalls += 1; return "西安钟楼"; },
+    localProductId: "query-failed", destination: "西安", runtime, persistedTaskKeys: new Set(),
   });
-  assert.equal(resolverCalls, 0);
   assert.equal(runtime.tasks.length, 0);
+});
+
+test("POI 写回被拒时不记录为成功，并向调用方返回可处理的失败", async () => {
+  const runtime = testRuntime({
+    product: { itinerary: [{ day: 1, spots: [{ name: "晋祠", poiName: null, poiId: null }] }] },
+    suggestPoi: async () => ({ poiName: "晋祠博物馆", poiId: 83199 }),
+  });
+  runtime.writeModule = async () => ({ ok: false, reason: "数据库暂不可写" });
+
+  await assert.rejects(
+    enrichItineraryPois({ localProductId: "poi-write-failed", destination: "太原", runtime, persistedTaskKeys: new Set() }),
+    /POI 映射未保存：数据库暂不可写/,
+  );
 });
 
 function testRuntime(args: {

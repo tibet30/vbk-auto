@@ -483,7 +483,9 @@ function CoverDisplay({
           <span className={styles.tag} data-tone={cover.source === "manualUpload" ? "warn" : "ok"}>
             {sourceLabel}
           </span>
-          <span className={styles.tag}>质量 ≥ {cover.minQuality}</span>
+          {cover.source === "manualUpload" && typeof cover.minQuality === "number" ? (
+            <span className={styles.tag}>质量 ≥ {cover.minQuality}</span>
+          ) : null}
         </div>
         {cover.source === "ctripLibrary" ? (
           <CtripCoverMeta cover={cover} />
@@ -500,7 +502,7 @@ function CoverDisplay({
 
 /**
  * 封面文案不再单独渲染（cover.description 可能是 features 前 100 字兜底的
- * 富文本片段，与产品特色重复且截断残缺，故封面行只保留 poi / 来源 / 质量 /
+ * 富文本片段，与产品特色重复且截断残缺，故封面行只保留 poi / 来源 /
  * 图片元数据，不展示 description）。
  */
 function CtripCoverMeta({ cover }: { cover: Extract<ProductCover, { source: "ctripLibrary" }> }) {

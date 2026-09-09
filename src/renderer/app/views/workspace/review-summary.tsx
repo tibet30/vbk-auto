@@ -19,6 +19,7 @@ import { AppWorkspaceReviewSummaryHead, type SummaryViewMode } from "./review-su
 import { AppWorkspaceReviewSummaryItinerary, type ItineraryDay } from "./review-summary-itinerary";
 import { AppWorkspaceReviewSummaryJson } from "./review-summary-json";
 import { AppWorkspaceReviewSummaryOpenIssues } from "./review-summary-open-issues";
+import { AppWorkspaceReviewSummaryTraffic } from "./review-summary-traffic";
 import styles from "./review-summary.module.less";
 
 interface ReviewSummaryProps {
@@ -130,12 +131,14 @@ export function AppWorkspaceReviewSummary({
   const [itineraryCollapsed, setItineraryCollapsed] = useState(false);
   const [basicInfoCollapsed, setBasicInfoCollapsed] = useState(false);
   const [openIssuesCollapsed, setOpenIssuesCollapsed] = useState(false);
+  const [trafficCollapsed, setTrafficCollapsed] = useState(false);
   useEffect(() => {
     setViewMode("cards");
     setCopyState("idle");
     setItineraryCollapsed(false);
     setBasicInfoCollapsed(false);
     setOpenIssuesCollapsed(false);
+    setTrafficCollapsed(false);
   }, [product.id]);
 
   const { jsonText, jsonBytes, topLevelKeyCount } = useMemo(() => {
@@ -273,6 +276,12 @@ export function AppWorkspaceReviewSummary({
                 refreshing={refreshingIssues}
                 onRefresh={onRefreshIssues}
               />
+
+              <AppWorkspaceReviewSummaryTraffic
+                product={product}
+                collapsed={trafficCollapsed}
+                onToggleCollapsed={() => setTrafficCollapsed((value) => !value)}
+              />
             </div>
           )}
 
@@ -378,7 +387,7 @@ function ActiveTaskFooter({
         className={styles.taskDetailInput}
         value={verificationNote}
         onChange={(event) => setVerificationNote(event.target.value)}
-        placeholder="粘贴核查结果，例如资源组 ID、价格或链接…"
+        placeholder="填写已在 VBK 手工确认的结果，例如 POI 名称与 ID、资源组或链接…"
         aria-label="核查结果"
       />
       <div className={styles.taskDetailActions}>
@@ -401,7 +410,7 @@ function ActiveTaskFooter({
           disabled={loading || !verificationNote.trim()}
         >
           {loading ? <LoaderCircle size={15} aria-hidden="true" /> : <ShieldCheck size={15} aria-hidden="true" />}
-          保存并写入
+          确认已处理
         </button>
       </div>
     </footer>

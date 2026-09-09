@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  normaliseTrafficLineConfig,
-  normaliseTrafficLineVariant,
-} from "../../src/shared/contracts-traffic-line.ts";
+import { normaliseTrafficLineConfig, normaliseTrafficLineVariant } from "../../src/shared/contracts-traffic-line.ts";
 import { normaliseProductDraft } from "../../src/main/data/product-normalize.ts";
 import { productSchema } from "../../src/main/automation/schema/schema-definitions.ts";
 import {
@@ -21,12 +18,12 @@ import {
   trainEndpointNeedsReplacement,
 } from "../../src/main/automation/ctrip/traffic-line/main.ts";
 import {
-  deriveTrafficLineCities,
   preflightTrafficLineEndpoints,
   resolveTrafficLineEndpoints,
-  resolveTrafficLineCities,
+  resolveTrafficLineDestination,
   selectUniqueTrafficLineStation,
 } from "../../src/main/automation/ctrip/traffic-line/endpoints.ts";
+import { resolveProductTrafficLineAvailability } from "../../src/main/automation/ctrip/traffic-line/planning-availability.ts";
 
 function productWithTrafficLine(trafficLine: unknown) {
   return {
@@ -55,12 +52,14 @@ test("traffic-line 配置不接收人工机场；站点由运行期会话规划"
   const product = productWithTrafficLine({
     enabled: true,
     variants: ["flightRoundTrip", "trainRoundTrip"],
+    arrivalCity: "拉萨",
+    departureCity: "西安",
   });
   const parsed = productSchema.safeParse(product);
   assert.equal(parsed.success, true);
   if (!parsed.success) return;
   assert.deepEqual(parsed.data.operations?.trafficLine, {
-    enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"],
+    enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"], arrivalCity: "拉萨", departureCity: "西安",
   });
 });
 
@@ -73,11 +72,27 @@ test("normaliseProductDraft 保留历史类型别名但剔除人工机场", () =
       departure: { code: "", name: "无效机场" },
     },
   });
+  (product.operations as Record<string, unknown>).pickupCity = "大理";
+  (product.basicInfo as Record<string, unknown>).meetingCity = "丽江";
+  (product.basicInfo as Record<string, unknown>).destinationCity = "丽江";
+  (product.basicInfo as Record<string, unknown>).destination = "丽江";
   const normalised = normaliseProductDraft(product);
   assert.deepEqual((normalised.operations as Record<string, unknown>).trafficLine, {
     enabled: true, variants: ["trainRoundTrip", "flightRoundTrip"],
   });
   assert.equal(productSchema.safeParse(normalised).success, true);
+});
+
+test("产品归一化保留接口已确认的同城火车和飞机配置", () => {
+  const product = productWithTrafficLine({
+    enabled: true,
+    variants: ["flightRoundTrip", "trainRoundTrip"],
+  });
+  const normalised = normaliseProductDraft(product);
+  assert.deepEqual((normalised.operations as Record<string, unknown>).trafficLine, {
+    enabled: true,
+    variants: ["flightRoundTrip", "trainRoundTrip"],
+  });
 });
 
 test("线路名归一化统一历史高铁与当前火车名称", () => {
@@ -86,40 +101,48 @@ test("线路名归一化统一历史高铁与当前火车名称", () => {
   assert.equal(normaliseTrafficLineVariant("单程飞机"), null);
 });
 
-test("交通地点只取首末日唯一 POI 城市，不回退目的地或接送城市", () => {
-  assert.deepEqual(deriveTrafficLineCities([
-    { spots: [{ city: "大理市" }] },
-    { spots: [{ city: "丽江市" }] },
-  ]), { arrivalCity: "大理", departureCity: "丽江" });
-  assert.throws(() => deriveTrafficLineCities([
-    { spots: [{ city: "大理" }, { city: "丽江" }] },
-    { spots: [{ city: "丽江" }] },
-  ]), /首日行程缺少唯一的 POI 城市/);
-  assert.throws(() => deriveTrafficLineCities([{ spots: [] }]), /首日行程缺少唯一的 POI 城市/);
+test("大交通端点没有明确指定时才默认产品目的地，不读取首末日景点城市", () => {
+  assert.deepEqual(resolveTrafficLineDestination({
+    basicInfo: { destinationCity: "日喀则市" },
+    itinerary: [{ spots: [{ city: "江孜" }] }, { spots: [{ city: "拉萨" }] }],
+  }), { arrivalCity: "日喀则", departureCity: "日喀则" });
+  assert.throws(() => resolveTrafficLineDestination({ basicInfo: {} }), /缺少已确认/);
 });
 
-test("历史行程缺少 city 时按真实 poiId 回查首末日城市", async () => {
-  const calls: number[] = [];
-  const cities = new Map([[76348, "日喀则市"], [91485, "日喀则"]]);
-  const result = await resolveTrafficLineCities({ evaluate: async () => undefined } as any, [
-    { spots: [{ name: "扎什伦布寺", poiName: "扎什伦布寺", poiId: 76348 }] },
-    { spots: [{ name: "卡若拉冰川", poiName: "卡若拉冰川", poiId: 91485 }] },
-  ], async (spot) => {
-    calls.push(spot.poiId!);
-    return [{ poiId: spot.poiId!, city: cities.get(spot.poiId!)! }];
-  });
-  assert.deepEqual(result, { arrivalCity: "日喀则", departureCity: "日喀则" });
-  assert.deepEqual(calls, [76348, 91485]);
+test("大交通端点优先使用明确指定的城市，未指定的一端回退目的地", () => {
+  assert.deepEqual(resolveTrafficLineDestination({
+    basicInfo: { destinationCity: "日喀则市" },
+    operations: { trafficLine: { arrivalCity: "拉萨市", departureCity: "西安" } },
+  }), { arrivalCity: "拉萨", departureCity: "西安" });
+  assert.deepEqual(resolveTrafficLineDestination({
+    basicInfo: { destinationCity: "日喀则市" },
+    operations: { trafficLine: { arrivalCity: "拉萨市" } },
+  }), { arrivalCity: "拉萨", departureCity: "日喀则" });
 });
 
-test("POI 接口未按 poiId 唯一确认或同日跨城时安全阻断", async () => {
-  await assert.rejects(() => resolveTrafficLineCities({ evaluate: async () => undefined } as any, [
-    { spots: [{ name: "扎什伦布寺", poiId: 76348 }] },
-  ], async () => [{ poiId: 999, city: "日喀则" }]), /未由 VBK 接口唯一确认/);
+test("端点查询使用目的地，即使首日景点在外地", async () => {
+  const page = {
+    evaluate: async (_fn: unknown, request: any) => ({
+      status: 200,
+      durationMs: 1,
+      ctx: {},
+      payload: request.endpoint.includes("suggestTrainStation")
+        ? { ResponseStatus: { Ack: "Success" }, trainStations: [{ stationNo: 92, stationName: "日喀则", locationCode: "CN001RKO" }] }
+        : { ResponseStatus: { Ack: "Success" }, airports: [{ code: "RKZ", name: "日喀则和平机场" }] },
+    }),
+  } as any;
 
-  await assert.rejects(() => resolveTrafficLineCities({ evaluate: async () => undefined } as any, [
-    { spots: [{ name: "甲", poiId: 1 }, { name: "乙", poiId: 2 }] },
-  ], async (spot) => [{ poiId: spot.poiId!, city: spot.poiId === 1 ? "日喀则" : "拉萨" }]), /得到多个城市/);
+  const availability = await preflightTrafficLineEndpoints(
+    page,
+    [{ spots: [{ city: "江孜" }] }, { spots: [{ city: "拉萨" }] }],
+    new Date("2026-09-09T00:00:00.000Z"),
+    undefined,
+    { basicInfo: { destinationCity: "日喀则" } },
+  );
+
+  assert.equal(availability.endpointPlan.arrivalCity, "日喀则");
+  assert.equal(availability.endpointPlan.departureCity, "日喀则");
+  assert.deepEqual(availability.availableVariants, ["flightRoundTrip", "trainRoundTrip"]);
 });
 
 test("交通站点只接受唯一规范化城市候选，不按第一项兜底", () => {
@@ -155,7 +178,9 @@ test("多个机场必须由站点消歧器选中真实唯一候选", async () =>
       assert.equal(request.stationSubtype, "airport");
       assert.ok(request.candidates.some((candidate) => candidate.id === "XIY" && candidate.text === "咸阳国际机场"));
       return { pickedText: "咸阳国际机场", reasoning: "西安主机场" };
-    });
+    },
+    { basicInfo: { destinationCity: "西安" } },
+  );
   assert.equal(endpoints.flight.arrival.code, "XIY");
   assert.equal(calls.length, 2);
 });
@@ -177,11 +202,93 @@ test("录入前按交通方式独立查询，无机场时跳过飞机但保留�
     page,
     [{ spots: [{ city: "日喀则" }] }],
     new Date("2026-09-06T00:00:00.000Z"),
+    undefined,
+    { basicInfo: { destinationCity: "日喀则" } },
   );
   assert.deepEqual(availability.availableVariants, ["trainRoundTrip"]);
   assert.equal(availability.endpointPlan.flight, undefined);
   assert.equal(availability.endpointPlan.train?.arrival.code, "CN001RKO");
   assert.match(availability.unavailableVariants.flightRoundTrip ?? "", /未找到唯一可确认的机场候选/);
+});
+
+test("初始字段发现保留已确认的火车，不因机场候选需消歧而丢弃它", async () => {
+  const page = {
+    evaluate: async (_fn: unknown, request: any) => ({
+      status: 200,
+      durationMs: 1,
+      ctx: {},
+      payload: request.endpoint.includes("suggestTrainStation")
+        ? { ResponseStatus: { Ack: "Success" }, trainStations: [
+          { stationNo: 92, stationName: "日喀则", locationCode: "CN001RKO" },
+        ] }
+        : { ResponseStatus: { Ack: "Success" }, airports: [
+          { code: "RKZ", name: "日喀则和平机场" },
+          { code: "RKX", name: "日喀则备用机场" },
+        ] },
+    }),
+  } as any;
+
+  const availability = await preflightTrafficLineEndpoints(
+    page,
+    [{ spots: [{ city: "日喀则" }] }],
+    new Date("2026-09-09T00:00:00.000Z"),
+    undefined,
+    { basicInfo: { destinationCity: "日喀则" } },
+    ["flightRoundTrip", "trainRoundTrip"],
+    { allowPartialAvailabilityOnUncertain: true },
+  );
+
+  assert.deepEqual(availability.availableVariants, ["trainRoundTrip"]);
+  assert.match(availability.unavailableVariants.flightRoundTrip ?? "", /缺少安全消歧器/);
+});
+
+test("初始规划对飞机和高铁候选分别执行受控消歧，不会因此关闭两类检查", async () => {
+  const calls: Array<{ subtype: string; desired: string }> = [];
+  const page = {
+    evaluate: async (_fn: unknown, request: any) => ({
+      status: 200,
+      durationMs: 1,
+      ctx: {},
+      payload: request.endpoint.includes("suggestTrainStation")
+        ? { ResponseStatus: { Ack: "Success" }, trainStations: [
+          { stationNo: 92, stationName: "日喀则", locationCode: "CN001RKO" },
+          { stationNo: 93, stationName: "日喀则西", locationCode: "CN001RKX" },
+        ] }
+        : { ResponseStatus: { Ack: "Success" }, airports: [
+          { code: "RKZ", name: "日喀则和平机场" },
+          { code: "RKX", name: "日喀则备用机场" },
+        ] },
+    }),
+  } as any;
+  const availability = await resolveProductTrafficLineAvailability({
+    db: { getProduct: () => ({ product: {
+      basicInfo: { destinationCity: "日喀则" },
+      commercial: { inventory: { startDate: "2026-09-10", endDate: "2026-09-12" } },
+      itinerary: [{ spots: [] }],
+    } }) } as any,
+    browser: { page: async () => page } as any,
+    localProductId: "p",
+    disambiguateStation: async ({ stationSubtype, desired }) => {
+      calls.push({ subtype: stationSubtype, desired });
+      return stationSubtype === "train"
+        ? { pickedText: "日喀则", reasoning: "当前客运站" }
+        : { pickedText: "日喀则和平机场", reasoning: "当前机场" };
+    },
+    scheduleDependencies: {
+      loadCityGroups: async () => [
+        { category: "热门", departureCities: [{ cityId: 1, cityName: "北京" }] },
+        { category: "B", departureCities: [{ cityId: 1, cityName: "北京", hasAirport: true, hasTrain: true }] },
+      ],
+      searchOriginAirports: async () => [{ type: "air", id: "PEK", code: "PEK", name: "北京首都国际机场", raw: {} }],
+      fetchHtml: async (url) => url.includes("flights.ctrip.com") ? '\\"flightNo\\":\\"CA1234' : "共1车次",
+    },
+  });
+
+  assert.deepEqual(availability?.availableVariants, ["flightRoundTrip", "trainRoundTrip"]);
+  assert.deepEqual(calls, [
+    { subtype: "airport", desired: "日喀则" },
+    { subtype: "train", desired: "日喀则主要客运火车站" },
+  ]);
 });
 
 test("同城多火车站只消歧一次，并排除已被资源校验拒绝的站码", async () => {
@@ -215,7 +322,7 @@ test("同城多火车站只消歧一次，并排除已被资源校验拒绝的�
       assert.ok(!request.candidates.some((candidate) => candidate.id === "CN001CDW"));
       return { pickedText: "成都东", reasoning: "主高铁站" };
     },
-    {},
+    { basicInfo: { destinationCity: "成都" } },
     { excludedTrainCodes: ["CN001CDW"] },
   );
   assert.equal(endpoints.train.arrival.code, "CN001ICW");
@@ -250,6 +357,18 @@ test("平台明确无可售资源时跳过该子产品，避免恢复时重复�
     failedStage: "resourcesSaved",
     failureReason: reason,
   }), true);
+  const packageFailure = "设置火车往返子产品套餐有效失败（Ack=Failure）：产品ID：78199134 出发城市为空,不能打包。";
+  assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "trainRoundTrip"), true);
+  assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "flightRoundTrip"), false);
+  assert.equal(isUnavailableTrafficResourceFailure("本班期没有可用交通资源", "trainRoundTrip"), true);
+  assert.equal(trafficLineChildShouldBeSkipped({
+    variant: "trainRoundTrip",
+    lineDescription: "火车往返",
+    completedStages: ["planned", "childCreated", "clausesSaved"],
+    verified: false,
+    failedStage: "activated",
+    failureReason: packageFailure,
+  }), true);
 });
 
 test("多个机场缺少安全消歧器时阻断，不按城市字样误选境外机场", async () => {
@@ -269,7 +388,7 @@ test("多个机场缺少安全消歧器时阻断，不按城市字样误选境�
     }),
   } as any;
   await assert.rejects(
-    () => resolveTrafficLineEndpoints(page, [{ spots: [{ city: "西安" }] }]),
+    () => resolveTrafficLineEndpoints(page, [{ spots: [{ city: "西安" }] }], new Date(), undefined, { basicInfo: { destinationCity: "西安" } }),
     /缺少安全消歧器/,
   );
 });
@@ -376,10 +495,74 @@ test("接口适配器只接收带稳定 ID 和线路名的已有子产品", () =
   ]);
 });
 
-test("normaliseTrafficLineConfig 默认启用两种往返，历史禁用仍被保留", () => {
+test("normaliseTrafficLineConfig 仅保留明确选择的往返方式，空配置不会推断大交通", () => {
   assert.deepEqual(normaliseTrafficLineConfig({ variants: ["飞机往返"] }), {
     enabled: true,
     variants: ["flightRoundTrip"],
   });
+  assert.deepEqual(normaliseTrafficLineConfig({}), {
+    enabled: false,
+    variants: [],
+  });
+  assert.deepEqual(normaliseTrafficLineConfig({ enabled: false }), {
+    enabled: false,
+    variants: [],
+  });
+  assert.deepEqual(normaliseTrafficLineConfig({ arrivalCity: " 拉萨市 ", departureCity: " 西安 " }), {
+    enabled: false,
+    variants: [],
+    arrivalCity: "拉萨",
+    departureCity: "西安",
+  });
   assert.equal(normaliseTrafficLineConfig(null), undefined);
+});
+
+test("normaliseTrafficLineConfig 保留母产品创建前的班次结论，包括全部未通过", () => {
+  const result = normaliseTrafficLineConfig({
+    enabled: false,
+    variants: [],
+    availability: {
+      endpointPlan: {
+        arrivalCity: "日喀则市",
+        departureCity: "日喀则",
+        resolvedAt: "2026-09-09T00:00:00.000Z",
+        train: {
+          arrival: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+          departure: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+        },
+      },
+      availableVariants: [],
+      unavailableVariants: { trainRoundTrip: "代表日期内未找到可往返的携程班次。" },
+      scheduleChecks: {
+        trainRoundTrip: {
+          status: "unavailable",
+          checkedDates: ["2026-09-09", "2027-03-10", ""],
+          checkedCityCount: 12.8,
+          reason: "代表日期内未找到可往返的携程班次。",
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(result?.availability, {
+    endpointPlan: {
+      arrivalCity: "日喀则",
+      departureCity: "日喀则",
+      resolvedAt: "2026-09-09T00:00:00.000Z",
+      train: {
+        arrival: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+        departure: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+      },
+    },
+    availableVariants: [],
+    unavailableVariants: { trainRoundTrip: "代表日期内未找到可往返的携程班次。" },
+    scheduleChecks: {
+      trainRoundTrip: {
+        status: "unavailable",
+        checkedDates: ["2026-09-09", "2027-03-10"],
+        checkedCityCount: 12,
+        reason: "代表日期内未找到可往返的携程班次。",
+      },
+    },
+  });
 });

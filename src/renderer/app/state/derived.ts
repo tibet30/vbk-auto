@@ -311,8 +311,11 @@ export function useAppStateDerived(state: AppStateBase) {
 
   const currentWorkflowTask = useMemo(() => {
     if (!product) return null;
-    return workflowTasks.find((task) => task.localProductId === product.id)
-      ?? product.workflowTask
+    // 详情页会接收 workflow-task:updated；列表在 workspace 视图不会高频刷新。
+    // 因此必须优先使用产品上刚收到的任务，避免初始列表的旧「运行中 0%」
+    // 覆盖当前的 waiting_approval / needs_attention 等真实状态。
+    return product.workflowTask
+      ?? workflowTasks.find((task) => task.localProductId === product.id)
       ?? null;
   }, [product?.id, product?.workflowTask, workflowTasks]);
 

@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { MessageCircleMore, Pause, Play, Send } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { CircleAlert, MessageCircleMore, Pause, Play, Send } from "lucide-react";
 import type { AgentEvent, ProductDetail, ProductReadiness, VbkApi } from "../../../../shared/contracts";
 import { parseProductBriefMessage } from "../../../../shared/product-brief-message";
 import { AgentInput } from "./agent-input";
@@ -16,9 +16,13 @@ const PHASE_NAMES: Record<string, string> = {
 };
 function scopeLabel(scope: string) { return PHASE_NAMES[scope.replace("vbk.write_phase:", "")] ?? scope; }
 
-function TimelineItem({ item, events }: { item: ReturnType<typeof groupAgentTimelineEvents>[number]; events: ReturnType<typeof useAgentSession>["snapshot"]["events"] }) {
-  if (item.kind === "assistant_thread") return <AgentAssistantThread steps={item.steps} leadingStatus={item.leadingStatus} />;
-  return <AgentEventItem event={item.event} events={events} leadingStatus={item.leadingStatus} />;
+function TimelineItem({ item, events, userName }: {
+  item: ReturnType<typeof groupAgentTimelineEvents>[number];
+  events: ReturnType<typeof useAgentSession>["snapshot"]["events"];
+  userName: string;
+}) {
+  if (item.kind === "assistant_thread") return <AgentAssistantThread steps={item.steps} events={events} leadingStatus={item.leadingStatus} />;
+  return <AgentEventItem event={item.event} events={events} userName={userName} leadingStatus={item.leadingStatus} />;
 }
 
 function FailureNotice({ failure, disabled, busy, repairing, submitted, onRepair }: {
@@ -29,18 +33,39 @@ function FailureNotice({ failure, disabled, busy, repairing, submitted, onRepair
   submitted: boolean;
   onRepair(): void;
 }) {
-  return <section className={styles.failureNotice} role="alert" aria-label="录入报错详情">
-    <strong>{failure.phaseLabel}录入报错</strong>
-    <p>{failure.message}</p>
-    {failure.keywords.length ? <span>已记录为文案黑名单：{failure.keywords.join("、")}</span> : null}
-    <button type="button" className={styles.repairAction} disabled={disabled} onClick={onRepair}>
-      {submitted ? "已提交重写" : busy || repairing ? "正在处理…" : "记录黑名单并重写图文"}
-    </button>
+  const canRepairCopy = failure.keywords.length > 0;
+  const guidance = canRepairCopy
+    ? "已定位到受影响的产品文案。重写时会保留行程、资源、价格和库存。"
+    : failure.phase === "pricingInventory"
+      ? "请在右侧补全套餐定价与班期库存，再继续录入。"
+      : "请根据平台反馈补全对应信息，再继续录入。";
+  return <section className={styles.failureNotice} role="alert" aria-label={`${failure.phaseLabel}录入受阻`}>
+    <div className={styles.failureHeader}>
+      <span className={styles.failureIcon} aria-hidden="true"><CircleAlert size={16} strokeWidth={2.2} /></span>
+      <div className={styles.failureHeading}>
+        <span>录入受阻</span>
+        <strong>{failure.phaseLabel}暂未写入</strong>
+      </div>
+    </div>
+    <div className={styles.failureFeedback}>
+      <p>{failure.message}</p>
+    </div>
+    <div className={styles.failureGuidance}>
+      <span>下一步</span>
+      <p>{guidance}</p>
+    </div>
+    {canRepairCopy ? <div className={styles.failureRepair}>
+      <span>已加入文案黑名单：{failure.keywords.join("、")}</span>
+      <button type="button" className={styles.repairAction} disabled={disabled} onClick={onRepair}>
+        {submitted ? "已提交重写" : busy || repairing ? "正在处理…" : "重写受影响的图文"}
+      </button>
+    </div> : null}
   </section>;
 }
 
-export function AgentConversation({ product, readiness, client, input, setInput, onApproved }: {
+export function AgentConversation({ product, userName, readiness, client, input, setInput, onApproved }: {
   product: ProductDetail;
+  userName: string;
   readiness: ProductReadiness;
   client: VbkApi | undefined;
   input: string;
@@ -64,7 +89,6 @@ export function AgentConversation({ product, readiness, client, input, setInput,
   const illegalKeywordRepairRequested = events.some((event) => event.data?.illegalKeywordRepair === true);
   const illegalKeywordRepairSubmitted = illegalKeywordRepairRequested && !automationFailure?.affectedPaths.length;
   const timelineItems = groupAgentTimelineEvents(events);
-  const failureAnchorIndex = automationFailure ? automationFailureAnchorIndex(timelineItems, events) : -1;
   const draftKey = `agent-composer:${product.id}`;
   useEffect(() => {
     if (!input) {
@@ -121,7 +145,11 @@ export function AgentConversation({ product, readiness, client, input, setInput,
     }}>
       {product.messages.map((message) => {
         const brief = message.role === "user" ? parseProductBriefMessage(message.content) : undefined;
-        return <article className={styles.message} key={message.id} data-role={message.role} data-brief={brief ? "true" : undefined}>
+        const speaker = message.role === "user" ? userName : "AI";
+        const avatar = message.role === "user" ? userName.slice(0, 1) : "AI";
+        const avatarClass = message.role === "user" ? styles.messageAvatar : styles.assistantAvatar;
+        return <article className={styles.message} key={message.id} data-role={message.role} data-brief={brief ? "true" : undefined} aria-label={`${speaker}的消息`}>
+          <span className={styles.messageIdentity} aria-hidden="true"><span className={avatarClass}>{avatar}</span></span>
           {brief ? <dl className={styles.briefFields}>
             <div><dt>目的地</dt><dd>{brief.destination}</dd></div>
             <div><dt>产品形态</dt><dd>{brief.productFormLabel}</dd></div>
@@ -131,21 +159,13 @@ export function AgentConversation({ product, readiness, client, input, setInput,
         </article>;
       })}
       {!events.length && !product.messages.length && <p className={styles.empty}>告诉我旅行安排、资源要求，或希望修改的内容。我会结合查询结果完善右侧方案，最后由你确认录入。</p>}
-      {timelineItems.map((item, index) => <Fragment key={item.kind === "event" ? item.event.id : item.id}>
-        <TimelineItem item={item} events={events} />
-        {automationFailure && index === failureAnchorIndex ? <FailureNotice failure={automationFailure}
-          disabled={busy || repairingKeywords || illegalKeywordRepairSubmitted} busy={busy} repairing={repairingKeywords}
-          submitted={illegalKeywordRepairSubmitted} onRepair={() => void repairIllegalKeywords()} /> : null}
-      </Fragment>)}
-      {automationFailure && failureAnchorIndex < 0 ? <FailureNotice failure={automationFailure}
-        disabled={busy || repairingKeywords || illegalKeywordRepairSubmitted} busy={busy} repairing={repairingKeywords}
-        submitted={illegalKeywordRepairSubmitted} onRepair={() => void repairIllegalKeywords()} /> : null}
+      {timelineItems.map((item) => <TimelineItem key={item.kind === "event" ? item.event.id : item.id} item={item} events={events} userName={userName} />)}
       {request && status === "waiting_input" && <AgentInput key={request.id} request={request} busy={busy} onSubmit={async (response) => { await run((agent) => agent.respond(product.id, response)); }} />}
       {approval?.status === "pending" && status === "waiting_approval" && <section className={styles.approval} aria-label="最终方案确认">
         <strong>确认右侧方案后开始录入</strong>
         <p>{approval.summary}</p>
         <p className={styles.scope}>目标账号：{approval.accountKey}<br />录入范围：{approval.scope.map(scopeLabel).join("、")}</p>
-        {!readiness.ready && <p role="status">尚有待处理项：{readiness.issues.slice(0, 3).map((issue) => issue.label).join("、")}</p>}
+        {!readiness.ready && <p role="status">本地方案尚未准备完成，不能录入：{readiness.issues.slice(0, 3).map((issue) => issue.label).join("、")}</p>}
         <div className={styles.actions}>
           <button type="button" className={shared.btn} data-variant="primary" disabled={busy || !readiness.ready} onClick={async () => {
             const result = await run((agent) => agent.approve(product.id, { approvalId: approval.id, productVersion: approval.productVersion }));
@@ -159,6 +179,9 @@ export function AgentConversation({ product, readiness, client, input, setInput,
         </div>
       </section>}
       {error && <p className={styles.error} role="alert">{error}</p>}
+      {automationFailure ? <FailureNotice failure={automationFailure}
+        disabled={busy || repairingKeywords || illegalKeywordRepairSubmitted} busy={busy} repairing={repairingKeywords}
+        submitted={illegalKeywordRepairSubmitted} onRepair={() => void repairIllegalKeywords()} /> : null}
     </div>
     {unseen && <button className={styles.newMessages} type="button" onClick={() => {
       follow.current = true; setUnseen(false);
@@ -196,21 +219,6 @@ function latestAutomationFailure(product: ProductDetail) {
     keywords,
     affectedPaths: findAffectedPresentationPaths(product.product, keywords),
   };
-}
-
-function automationFailureAnchorIndex(items: ReturnType<typeof groupAgentTimelineEvents>, events: AgentEvent[]): number {
-  const repairEvent = events.find((event) => event.data?.illegalKeywordRepair === true);
-  const repairItemIndex = repairEvent ? items.findIndex((item) => timelineItemEventIds(item).includes(repairEvent.id)) : items.length;
-  const end = repairItemIndex >= 0 ? repairItemIndex : items.length;
-  for (let index = end - 1; index >= 0; index -= 1) {
-    if (items[index]?.kind === "assistant_thread") return index;
-  }
-  return items.length ? Math.max(0, end - 1) : -1;
-}
-
-function timelineItemEventIds(item: ReturnType<typeof groupAgentTimelineEvents>[number]): string[] {
-  if (item.kind === "event") return [item.event.id];
-  return item.steps.flatMap((step) => step.kind === "turn" ? [step.event.id] : step.events.map((event) => event.id));
 }
 
 function timestamp(value: string | undefined): number {

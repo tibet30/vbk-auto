@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { automationBlockers, productSchema } from "../../src/main/automation/schema/schema.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "../../src/main/minimax/minimax.js";
+import { extraPreparationGaps } from "../../src/main/planning/preparation-checks.js";
 
 /**
  * 完整合法规划产物（跟团游）：
@@ -54,7 +55,7 @@ const baseProduct = {
       title: "太原接站—晋祠",
       spots: [{ name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: 79413 }],
       description: "专车接站游览晋祠。",
-      hotel: "太原市区舒适酒店",
+      hotel: "无",
       meals: "早餐自理；午餐自理；晚餐自理",
     },
   ],
@@ -73,6 +74,35 @@ const validProduct = {
 test("缺少 commercial 不再作为规划 / 草稿阶段阻塞项", () => {
   const blockers = automationBlockers(baseProduct);
   assert.deepEqual(blockers.map((item) => item.label), []);
+});
+
+test("住宿日缺少携程候选由权威 evaluator 阻断，不进入旧 automationBlockers", () => {
+  const product = {
+    ...baseProduct,
+    basicInfo: { ...baseProduct.basicInfo, days: 2, nights: 1 },
+    itinerary: [{ ...baseProduct.itinerary[0], hotel: "太原市区舒适酒店" }],
+  };
+  assert.equal(automationBlockers(product).some((item) => item.label.startsWith("酒店候选")), false);
+  const gap = extraPreparationGaps(product).find((item) => item.label === "酒店候选：第 1 天");
+  assert.ok(gap);
+  assert.match(gap.detail, /1–5 个携程酒店候选/);
+});
+
+test("住宿日有 1–5 个已持久化候选不被权威准备门禁阻断", () => {
+  const product = {
+    ...baseProduct,
+    basicInfo: { ...baseProduct.basicInfo, days: 2, nights: 1 },
+    itinerary: [{
+      ...baseProduct.itinerary[0],
+      hotel: "太原市区舒适酒店",
+      hotelCandidates: [{
+        hotelId: 1001, hotelName: "太原市区舒适酒店", diamond: 3, score: 4.6, distanceKm: 1.2,
+        cityName: "太原", anchorName: "晋祠博物馆", anchorCityId: 105,
+      }],
+    }],
+  };
+  assert.equal(extraPreparationGaps(product).some((item) => item.label.startsWith("酒店候选")), false);
+  assert.equal(automationBlockers(product).some((item) => item.label.startsWith("酒店候选")), false);
 });
 
 test("用户原始想法中的绝对化用语不作为自动录入文案阻断项", () => {

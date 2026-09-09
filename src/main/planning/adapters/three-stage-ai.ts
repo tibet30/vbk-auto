@@ -140,7 +140,7 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
     const confidence = Math.min(1, Math.max(0, Number(args.confidence) || 0));
     const reason = text(args.reason) || "AI 未提供消歧理由";
     const candidateExists = request.candidates.some((candidate) => candidate.candidateId === candidateId);
-    if (decision !== "selected" || !candidateExists || confidence < 0.8) {
+    if (decision !== "selected" || !candidateExists) {
       return { decision: "uncertain", confidence, reason };
     }
     return { decision, candidateId, confidence, reason };

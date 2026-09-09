@@ -73,7 +73,7 @@ export async function runSaleControlPhase(
           throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
         }
         ctx.db.setProductLifecycle(localProductId, { productId: String(productId) });
-        });
+        }, "saleControl");
       },
       advisor: ctx.advisor,
       applyAction: async (action) => {

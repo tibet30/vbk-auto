@@ -1,6 +1,7 @@
 import { PlanningUsagePanel, PlanningUsageToggle, usePlanningUsage } from "./planning-usage";
 import { WorkflowTaskSummary } from "../workflow-task/TaskStrip";
 import type { AppModel } from "../../app.main.model";
+import { useAppAuth } from "../../auth/AppAuthContext";
 import { AgentConversation } from "./agent-conversation";
 import { api } from "../../helpers";
 import layout from "./layout.module.less";
@@ -8,6 +9,7 @@ import { AppWorkspaceReviewSummary } from "./review-summary";
 
 
 export function AppWorkspaceReview({ model }: { model: AppModel }) {
+  const { user } = useAppAuth();
   const {
     product,
     input,
@@ -69,6 +71,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
       <AgentConversation
         key={product.id}
         product={product}
+        userName={user.name.trim() || "未命名用户"}
         readiness={readiness}
         client={api() ?? undefined}
         input={input}

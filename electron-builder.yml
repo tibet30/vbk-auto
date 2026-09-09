@@ -10,6 +10,10 @@ directories:
   output: release
   buildResources: build
 
+# macOS 原生通知要求应用完成代码签名。无 Developer ID 的本地机器由该 hook
+# 补完整 adhoc 签名；正式环境若配置 Apple 证书，builder 会在后续阶段覆盖它。
+afterPack: scripts/after-pack-macos-sign.cjs
+
 files:
   # 只打包构建产物；node_modules 生产依赖由 electron-builder 按 dependencies 自动收集
   - "dist/**"

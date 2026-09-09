@@ -13,9 +13,10 @@ import type { ModuleOutcome, Planner, PlannerContext, PlanningGenerationState, P
 import type { OrchestratorRuntime } from "./types.js";
 import { logInfo } from "../../shared/log-timestamp.js";
 import { resolveTravelScope } from "./runtime.js";
-import { ensurePackageName, normaliseCommercialOutcomes } from "./commercial-stage.js";
+import { ensureCommercialFallbacks, ensurePackageName, normaliseCommercialOutcomes } from "./commercial-stage.js";
 import { ensurePresentationCover } from "./cover-default.js";
 import { FIVE_DIAMOND_HOTEL_TIER } from "../../shared/hotel-tiers.js";
+import { defaultDailyTransport, isDailyTransport } from "../../shared/product-form.js";
 
 export interface SingleStageResult {
   state: PlanningGenerationState;
@@ -84,13 +85,20 @@ async function runSkeletonStage(args: {
   }
   if (!alreadyAccepted.includes("skeleton")) {
     const travelScope = resolveTravelScope(skeleton.destination);
-    const current = await runtime.loadCurrentProduct(state.localProductId);
+    const current = typeof runtime.loadCurrentProduct === "function"
+      ? await runtime.loadCurrentProduct(state.localProductId)
+      : undefined;
     const existingTier = (current?.operations as { hotelTier?: string } | undefined)?.hotelTier;
+    const existingTransport = (current?.operations as { transport?: unknown } | undefined)?.transport;
+    const splitGroup = (current?.sales as { splitGroup?: unknown } | undefined)?.splitGroup;
     const result = await runtime.writeModule(state.localProductId, "skeleton", AI_WRITABLE_PATHS.skeleton, {
       // 用户已明确几钻时保留；未指定才回落到当地 5 钻模板。
       hotelTier: existingTier || FIVE_DIAMOND_HOTEL_TIER,
       pickupCity: travelScope.primaryCity,
-      transport: "charter",
+      // 有效的人工选择优先；仅在新产品或历史草稿缺值时按团态补默认。
+      transport: isDailyTransport(existingTransport)
+        ? existingTransport
+        : defaultDailyTransport(skeleton.productForm, splitGroup),
       reusePickupForDropoff: true,
       mealsIncluded: false,
     });
@@ -339,20 +347,32 @@ async function runAiStage(args: {
         previousError: lastError,
       });
       const exec = await executeStageOutput({ stage, output, runtime, localProductId: state.localProductId });
-      for (const m of exec.accepted) {
+      const acceptedThisAttempt = [...exec.accepted];
+      const rejectedThisAttempt = [...exec.rejected];
+      if (stage === "commercial") {
+        // 模型只要未给出有效商业字段，就用已落库的行程规模生成可审核的
+        // 指导价/库存/草稿发布配置；不把未核实的供应商报价当作真实成本。
+        const fallback = await ensureCommercialFallbacks({
+          localProductId: state.localProductId,
+          skeleton,
+          runtime,
+        });
+        acceptedThisAttempt.push(...fallback.accepted);
+        rejectedThisAttempt.push(...fallback.rejected);
+      }
+      for (const m of acceptedThisAttempt) {
         accepted.push(m);
         stageAcceptedModules?.add(m.module);
       }
-      for (const m of exec.rejected) rejected.push(m);
+      for (const m of rejectedThisAttempt) rejected.push(m);
       for (const t of exec.researchTasks) researchTasks.push(t);
-      if (exec.hasAccepted) {
+      if (acceptedThisAttempt.length > 0) {
         if (stage === "itinerary") {
           researchTasks.push(...await enrichItineraryPois({
             localProductId: state.localProductId,
             destination: skeleton.destination,
             runtime,
             persistedTaskKeys,
-            resolvePoiName: planner.resolvePoiName?.bind(planner),
             // 重跑行程规划也必须复核已绑定 POI；否则历史行程只会补空 ID，
             // 已暂停营业的景点会被错误保留。
             reviewCompletePois: true,

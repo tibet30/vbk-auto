@@ -11,6 +11,7 @@ type ChildView = {
   childId?: string;
   arrival?: string;
   departure?: string;
+  endpointVerified?: boolean;
   error?: string;
   nodes: Array<{ key: string; label: string; status: "pending" | "running" | "done" | "failed"; error?: string }>;
 };
@@ -39,6 +40,37 @@ function place(value: unknown): string | undefined {
   const item = record(value);
   if (!item) return text(value);
   return text(item.name, item.stationName, item.airportName, item.label, item.code, item.stationCode, item.airportCode);
+}
+
+function verifiedEndpoints(
+  automation: ProductDetail["automation"],
+  product: ProductDetail["product"],
+): Partial<Record<TransportKind, Pick<ChildView, "arrival" | "departure">>> {
+  const root = record(product);
+  const operations = record(root?.operations);
+  const trafficLine = record(operations?.trafficLine);
+  // 已完成的旧版只读核验会以 operations.trafficLineAvailability 留存；
+  // 新流程优先使用与配置同行的 availability，二者均来自受控端点查询。
+  const availability = record(trafficLine?.availability) ?? record(operations?.trafficLineAvailability);
+  // 自动化检查点的 endpointPlan 同样只在受控候选核验成功后写入；用它
+  // 支持既有产品的只读复核记录，无须把它伪装成已创建的子产品。
+  const checkpoint = record(record(automation)?.trafficLine);
+  const endpointPlan = record(availability?.endpointPlan) ?? record(checkpoint?.endpointPlan);
+  const variants = Array.isArray(availability?.availableVariants)
+    ? availability.availableVariants
+    : (["flight", "train"] as const).flatMap((kind) => record(endpointPlan?.[kind]) ? [kind === "flight" ? "flightRoundTrip" : "trainRoundTrip"] : []);
+  return (['flightRoundTrip', 'trainRoundTrip'] as const).flatMap((kind) => {
+    if (!variants.includes(kind)) return [];
+    const endpoints = record(endpointPlan?.[kind === 'flightRoundTrip' ? 'flight' : 'train']);
+    const arrival = place(endpoints?.arrival);
+    const departure = place(endpoints?.departure);
+    if (!arrival || !departure) return [];
+    const station = (value: string) => kind === 'trainRoundTrip' && !value.endsWith('站') ? `${value}站` : value;
+    return [[kind, { arrival: station(arrival), departure: station(departure) }] as const];
+  }).reduce<Partial<Record<TransportKind, Pick<ChildView, "arrival" | "departure">>>>((result, [kind, endpoints]) => {
+    result[kind] = endpoints;
+    return result;
+  }, {});
 }
 
 function statusLabel(status: string): string {
@@ -106,15 +138,20 @@ function childFor(trafficLine: unknown, kind: TransportKind): ChildView {
   return childFrom(kind, root[kind] ?? childMap?.[kind], endpointPlan?.[kind === "flightRoundTrip" ? "flight" : "train"]);
 }
 
-export function TrafficLineProgress({ automation }: { automation: ProductDetail["automation"] }) {
+export function TrafficLineProgress({ automation, product }: { automation: ProductDetail["automation"]; product: ProductDetail["product"] }) {
   const trafficLine = record(automation)?.trafficLine;
-  const cards = (["flightRoundTrip", "trainRoundTrip"] as const).map((kind) => childFor(trafficLine, kind));
+  const endpoints = verifiedEndpoints(automation, product);
+  const cards = (["flightRoundTrip", "trainRoundTrip"] as const).map((kind) => {
+    const card = childFor(trafficLine, kind);
+    const verified = endpoints[kind];
+    return verified ? { ...card, ...verified, endpointVerified: true } : card;
+  });
   const overallError = text(record(trafficLine)?.error, record(trafficLine)?.lastError, record(trafficLine)?.failureReason);
   return <section className={styles.section} aria-labelledby="traffic-line-progress-title">
     <div className={styles.header}>
       <div>
         <strong id="traffic-line-progress-title">线路及交通规划</strong>
-        <small>母产品完成后自动规划并核实子产品；未收到平台确认时不会显示为完成。</small>
+        <small>产品准备阶段先核验端点和代表日期班次；通过后才进入 VBK 子产品创建。</small>
       </div>
       {overallError ? <AlertTriangle size={15} aria-hidden="true" /> : null}
     </div>
@@ -131,10 +168,11 @@ export function TrafficLineProgress({ automation }: { automation: ProductDetail[
               {statusLabel(card.status)}
             </span>
           </div>
+          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />前置班次已通过 · 待写入 VBK</p> : null}
           <dl className={styles.details}>
             <div><dt>抵达</dt><dd>{card.arrival || "待根据行程规划"}</dd></div>
             <div><dt>返程</dt><dd>{card.departure || "待根据行程规划"}</dd></div>
-            <div><dt>子产品 ID</dt><dd>{card.childId || "待平台确认"}</dd></div>
+            <div><dt>VBK 子产品</dt><dd>{card.childId || "尚未创建"}</dd></div>
           </dl>
           <div className={styles.nodes} aria-label={`${card.kind === "flightRoundTrip" ? "飞机" : "火车"}子产品创建流程`}>
             {card.nodes.map((node) => <div className={styles.node} data-state={node.status} key={node.key}>

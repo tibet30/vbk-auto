@@ -200,6 +200,29 @@ test("approval scopes are normalized before precondition checks and storage", as
   assert.deepEqual(snapshot.pendingApproval?.scope, ["vbk.write_phase:basic"]);
 });
 
+test("an approved full scope is reused when the model asks for a remaining subset", async () => {
+  const { core, deps } = protocolHarness([
+    { toolCalls: [{ id: "full", name: "request_approval", arguments: { scope: ["basic", "pricingInventory"], summary: "完整录入授权" } }] },
+    { toolCalls: [{ id: "remaining", name: "request_approval", arguments: { scope: ["pricingInventory"], summary: "价格库存授权" } }] },
+    { content: "继续执行已授权阶段" },
+  ]);
+  let preconditionChecks = 0;
+  deps.approvalPrecondition = async () => { preconditionChecks += 1; return undefined; };
+  await core.send("reuse-approval", "开始");
+  await core.idle("reuse-approval");
+  const waiting = await core.get("reuse-approval");
+  await core.approve("reuse-approval", {
+    approvalId: waiting.pendingApproval!.id,
+    productVersion: waiting.pendingApproval!.productVersion,
+  });
+  await core.idle("reuse-approval");
+  const snapshot = await core.get("reuse-approval");
+  assert.equal(snapshot.events.filter((event) => event.type === "approval_request").length, 1);
+  assert.equal(snapshot.events.find((event) => event.type === "tool_result" && event.data?.toolCallId === "remaining")?.data?.reusedApproval, true);
+  // Creation and user approval each validate once; the repeated subset must not.
+  assert.equal(preconditionChecks, 2);
+});
+
 test("three approval blockers pause across reads and resume opens one finite retry window", async () => {
   const results: AgentModelResult[] = [
     ...["basic", "itinerary", "traffic"].map((scope, index) => ({ toolCalls: [

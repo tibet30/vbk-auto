@@ -74,16 +74,18 @@ export async function resolvePlanningPoiCandidates(args: {
         if (candidate.reason === "未命中可确认的真实 POI" && args.correctName && args.shouldDisambiguate?.(requestedName, index)) {
           candidate = await resolveCorrectedName({ args, requestedName, index, candidate, details });
         }
+        let aiConfidence: number | undefined;
         if (args.disambiguate && originallyAmbiguous && !candidate.reason?.startsWith("名称纠正：") && args.shouldDisambiguate?.(requestedName, index)) {
           const resolved = await resolveAmbiguousPlanningPoi({
             requestedName, destination: args.destination || args.city, province: args.province, city: args.city,
             userIdea: args.userIdea, preferredDay: args.preferredDay?.(requestedName, index), details,
             disambiguate: args.disambiguate,
             validate: (source, best) => toPlanningCandidate(requestedName, { ...source, best }, args.province, args.city),
-            ...(args.checkAvailability ? { checkAvailability: args.checkAvailability } : {}),
           });
-          if (resolved.candidate) candidate = resolved.candidate;
-          else if (resolved.reason) candidate = { ...candidate, reason: resolved.reason };
+          if (resolved.candidate) {
+            candidate = resolved.candidate;
+            aiConfidence = resolved.confidence;
+          } else if (resolved.reason) candidate = { ...candidate, reason: resolved.reason };
           logPlanningPoiEvent(args.logContext, "消歧结论", {
             target: requestedName, detailCount: details.length, ...candidateSummary(candidate),
           }, candidate.status === "rejected" ? "warn" : "info");
@@ -96,6 +98,19 @@ export async function resolvePlanningPoiCandidates(args: {
           logPlanningPoiEvent(args.logContext, "营业状态", {
             target: requestedName, poiId: candidate.poiId, poiName: candidate.poiName, availability: availability.status,
           }, availability.status === "suspended" ? "warn" : "info");
+          if (result[index].status === "resolved" && aiConfidence !== undefined && aiConfidence <= 0.8) {
+            result[index] = {
+              ...result[index],
+              status: "rejected",
+              reason: `AI 消歧置信度 ${(aiConfidence * 100).toFixed(0)}% 未高于 80%，保留待人工确认`,
+            };
+          }
+        } else if (candidate.status === "resolved" && aiConfidence !== undefined && aiConfidence <= 0.8) {
+          result[index] = {
+            ...candidate,
+            status: "rejected",
+            reason: `AI 消歧置信度 ${(aiConfidence * 100).toFixed(0)}% 未高于 80%，保留待人工确认`,
+          };
         } else result[index] = candidate;
         logPlanningPoiEvent(args.logContext, "核验结论", {
           target: requestedName, durationMs: Date.now() - startedAt, ...candidateSummary(result[index]),

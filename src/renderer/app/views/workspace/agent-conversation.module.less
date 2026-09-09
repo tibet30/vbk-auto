@@ -5,18 +5,33 @@
 .pauseAction { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; border: 1px solid var(--border) !important; background: var(--surface) !important; color: var(--foreground) !important; text-decoration: none !important; border-radius: var(--radius-control); padding: 6px 10px; min-height: 32px; font: inherit; font-size: 12px; cursor: pointer; }
 .pauseAction:disabled { opacity: .5; cursor: default; }
 .pauseAction:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
-.failureNotice { margin: -8px 0 0; max-width: 94%; align-self: flex-start; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--destructive) 28%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--destructive) 7%, var(--surface)); color: var(--destructive-foreground); }
-.failureNotice strong { display: block; font-size: 12px; font-weight: 600; }
-.failureNotice p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 12px; }
-.failureNotice span { display: block; margin-top: 6px; font-size: 12px; line-height: 1.5; }
-.repairAction { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; margin-top: 9px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--destructive) 32%, var(--border)); border-radius: var(--radius-control); background: var(--surface); color: var(--destructive-foreground); font: inherit; font-size: 12px; cursor: pointer; }
-.repairAction:hover:not(:disabled), .repairAction:focus-visible { background: color-mix(in srgb, var(--destructive) 10%, var(--surface)); border-color: color-mix(in srgb, var(--destructive) 48%, var(--border)); }
+.failureNotice { margin: -4px 0 0 40px; max-width: min(560px, calc(94% - 40px)); align-self: flex-start; display: grid; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--destructive) 32%, var(--border)); border-radius: var(--radius-card); background: var(--surface); box-shadow: var(--shadow-1); color: var(--foreground); }
+.failureHeader { display: flex; align-items: center; gap: 10px; }
+.failureIcon { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: var(--radius-control); background: color-mix(in srgb, var(--destructive) 8%, var(--surface)); color: var(--destructive); }
+.failureHeading { display: grid; gap: 2px; min-width: 0; }
+.failureHeading > span, .failureGuidance > span, .failureRepair > span { color: var(--destructive-foreground); font-size: 11px; font-weight: 500; line-height: 1.45; }
+.failureHeading strong { display: block; font-size: 14px; font-weight: 600; line-height: 1.35; }
+.failureFeedback { min-width: 0; padding: 10px 12px; background: transparent; }
+.failureNotice p { margin: 3px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; font-size: 12px; }
+.failureFeedback p { margin: 0; color: var(--destructive-foreground); }
+.failureGuidance { display: grid; gap: 2px; }
+.failureGuidance p { margin: 0; color: var(--foreground); }
+.failureRepair { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 2px; }
+.failureRepair > span { min-width: 0; }
+.repairAction { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; flex: 0 0 auto; padding: 0 11px; border: 1px solid var(--foreground); border-radius: var(--radius-control); background: var(--foreground); color: var(--surface); font: inherit; font-size: 12px; cursor: pointer; transition: background 160ms ease-out, border-color 160ms ease-out; }
+.repairAction:hover:not(:disabled) { border-color: color-mix(in srgb, var(--foreground) 82%, var(--surface)); background: color-mix(in srgb, var(--foreground) 82%, var(--surface)); }
+.repairAction:focus-visible { outline: 2px solid var(--destructive); outline-offset: 3px; }
 .repairAction:disabled { opacity: .55; cursor: default; }
 .timeline { flex: 1; min-height: 0; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; overflow-anchor: none; }
 
-.message { border: 1px solid var(--border); border-radius: var(--radius-control); padding: 12px 14px; max-width: 94%; align-self: flex-start; min-width: 0; }
-.message[data-role='user'] { background: var(--muted); align-self: flex-end; border-color: transparent; }
-.message[data-brief='true'] { width: fit-content; max-width: min(420px, 92%); }
+.message { position: relative; margin-left: 40px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-control); max-width: calc(94% - 40px); align-self: flex-start; min-width: 0; }
+.message[data-role='user'] { margin-right: 40px; margin-left: 0; background: var(--muted); align-self: flex-end; border-color: transparent; }
+.message[data-brief='true'] { width: fit-content; max-width: min(420px, calc(92% - 40px)); }
+.messageIdentity, .assistantIdentity { position: absolute; top: 0; left: 0; margin: 0; }
+.message[data-role='user'] .messageIdentity { right: 0; left: auto; }
+.message[data-role='user'] .messageAvatar { position: absolute; top: 0; right: -38px; }
+.messageAvatar, .assistantAvatar { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: 0 0 24px; font-size: 10px; font-weight: 700; line-height: 1; }
+.messageAvatar { border-radius: 50%; background: var(--foreground); color: var(--surface); }
 .meta { display: flex; gap: 12px; align-items: center; color: var(--muted-foreground); font-size: 11px; margin-bottom: 7px; }
 .meta strong { color: var(--foreground); font-size: 12px; }
 
@@ -45,9 +60,10 @@
 .briefFields dt { margin: 0; color: var(--muted-foreground); font-size: 12px; }
 .briefFields dd { margin: 0; color: var(--foreground); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; text-align: right; }
 
-.assistantThread { max-width: 94%; align-self: flex-start; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.threadTurn { display: flex; flex-direction: column; gap: 6px; }
-.assistantProse { overflow-wrap: anywhere; line-height: 1.7; font-size: 13px; color: var(--foreground); }
+.assistantThread { max-width: calc(94% - 40px); margin-left: 40px; align-self: flex-start; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.assistantAvatar { position: absolute; top: 0; left: -40px; border: 1px solid var(--ai-teal); border-radius: 50%; background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface)); color: var(--ai-teal); }
+.threadTurn { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.assistantProse { padding: 10px 12px; border-radius: var(--radius-control); background: var(--muted); overflow-wrap: anywhere; line-height: 1.7; font-size: 13px; color: var(--foreground); }
 .assistantProse p { margin: 0 0 10px; }
 .assistantProse p:last-child { margin-bottom: 0; }
 .assistantProse[data-streaming='true']::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -2px; background: var(--ai-teal); animation: stream-caret 900ms steps(1, end) infinite; }
@@ -57,8 +73,8 @@
 .activity { font-size: 12px; color: var(--muted-foreground); }
 .activity > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; color: var(--ai-teal); }
 .activity > summary::-webkit-details-marker { display: none; }
-.activity > summary::before { content: '›'; display: inline-block; transform: rotate(0deg); transition: transform 160ms ease-out; }
-.activity[open] > summary::before { transform: rotate(90deg); }
+.activity > summary::after { content: '›'; display: inline-block; font-size: 16px; font-weight: 600; line-height: 1; transform: rotate(0deg); transition: transform 160ms ease-out; }
+.activity[open] > summary::after { transform: rotate(90deg); }
 .activityBody { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-control); background: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 240px; overflow-y: auto; color: var(--foreground); display: flex; flex-direction: column; gap: 6px; }
 
 .toolRow { border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
@@ -69,7 +85,8 @@
 .toolRowBody strong { display: block; margin: 8px 0 4px; font-size: 11px; color: var(--muted-foreground); }
 .toolRowBody pre { margin: 0; padding: 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: var(--radius-control); background: var(--muted); color: var(--foreground); font-size: 12px; }
 
-.systemNote { max-width: 94%; align-self: flex-start; padding: 8px 0; color: var(--muted-foreground); font-size: 12px; }
+.systemNote { max-width: calc(94% - 40px); margin-left: 40px; align-self: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--muted-foreground); font-size: 12px; }
+.systemNote .meta { margin-bottom: 5px; }
 .systemNote .messageContent { font-size: 12px; color: var(--foreground); }
 .details { margin-top: 8px; font-size: 12px; color: var(--muted-foreground); }
 .details summary { cursor: pointer; padding: 4px 0; }
@@ -98,5 +115,6 @@
 .panel button:focus-visible, .panel textarea:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
 .panel button:disabled { opacity: .5; cursor: default; }
 
-@media (max-width: 880px) { .timeline { padding: 12px; } .composer { padding: 12px; } .status { padding: 10px 12px; flex-wrap: wrap; } .failureNotice, .message, .assistantThread { max-width: 100%; } .shortcut { display: none; } }
-@media (prefers-reduced-motion: reduce) { .timeline { scroll-behavior: auto; } .assistantProse[data-streaming='true']::after, .activity > summary::before { animation: none; transition: none; } }
+@media (max-width: 880px) { .timeline { padding: 12px; } .composer { padding: 12px; } .status { padding: 10px 12px; flex-wrap: wrap; } .failureNotice, .message, .assistantThread, .systemNote { max-width: calc(100% - 40px); } .shortcut { display: none; } }
+@media (max-width: 440px) { .failureRepair { align-items: flex-start; flex-direction: column; } .repairAction { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .timeline { scroll-behavior: auto; } .assistantProse[data-streaming='true']::after, .activity > summary::after { animation: none; transition: none; } }

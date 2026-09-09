@@ -4,78 +4,47 @@ import { enrichItineraryPois } from "../../src/main/planning/poi-enrichment.js";
 import type { OrchestratorRuntime } from "../../src/main/planning/types.js";
 import type { ResearchTaskProposal } from "../../src/shared/contracts-planning.js";
 
-test("suggestPoi 返回 poiId 为空时不算命中，会继续替换为有效 POI", async () => {
+test("交通节点不会被替换为其他景点，保留原位置并要求人工处理", async () => {
   const queries: string[] = [];
-  let written: any;
   const runtime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "哈尔滨太平国际机场", poiName: null, poiId: null }] }] },
     suggestPoi: async (keyword) => {
       queries.push(keyword);
       if (keyword === "哈尔滨太平国际机场") return { poiName: "哈尔滨太平国际机场", poiId: null as unknown as number };
-      if (keyword === "圣索菲亚教堂") return { poiName: "圣索菲亚教堂", poiId: 77064 };
       return null;
     },
-    write: (value) => { written = value; },
   });
   await enrichItineraryPois({
     localProductId: "invalid-direct-poi",
     destination: "哈尔滨",
     runtime,
     persistedTaskKeys: new Set(),
-    resolvePoiName: async () => "圣索菲亚教堂",
   });
 
-  assert.deepEqual(queries, ["圣索菲亚教堂"]);
-  assert.deepEqual(written[0].spots[0], { name: "圣索菲亚教堂", poiName: "圣索菲亚教堂", poiId: 77064 });
-  assert.equal(runtime.tasks.length, 0);
+  assert.deepEqual(queries, []);
+  assert.equal(runtime.tasks.length, 1);
+  assert.match(runtime.tasks[0].detail ?? "", /接送\/交通\/住宿节点/);
 });
 
-test("交通或住宿节点即使 suggestPoi 返回 ID 也不作为有效景点", async () => {
+test("普通景点查询返回无效 POI 时不搜索替代景点", async () => {
   const queries: string[] = [];
-  let written: any;
   const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "酒店集合点", poiName: null, poiId: null }] }] },
+    product: { itinerary: [{ day: 1, spots: [{ name: "无效景点", poiName: null, poiId: null }] }] },
     suggestPoi: async (keyword) => {
       queries.push(keyword);
-      if (keyword === "酒店集合点") return { poiName: "酒店集合点", poiId: 9001 };
-      if (keyword === "太阳岛风景区") return { poiName: "太阳岛风景区", poiId: 80630 };
-      return null;
+      return { poiName: "酒店集合点", poiId: 9001 };
     },
-    write: (value) => { written = value; },
   });
   await enrichItineraryPois({
     localProductId: "travel-node-poi",
     destination: "哈尔滨",
     runtime,
     persistedTaskKeys: new Set(),
-    resolvePoiName: async () => "太阳岛风景区",
   });
 
-  assert.deepEqual(queries, ["太阳岛风景区"]);
-  assert.deepEqual(written[0].spots[0], { name: "太阳岛风景区", poiName: "太阳岛风景区", poiId: 80630 });
-});
-
-test("AI 替代候选是交通节点时会拒绝并继续下一候选", async () => {
-  const queries: string[] = [];
-  let written: any;
-  const runtime = testRuntime({
-    product: { itinerary: [{ day: 1, spots: [{ name: "接机点", poiName: null, poiId: null }] }] },
-    suggestPoi: async (keyword) => {
-      queries.push(keyword);
-      return keyword === "圣索菲亚教堂" ? { poiName: "圣索菲亚教堂", poiId: 77064 } : null;
-    },
-    write: (value) => { written = value; },
-  });
-  await enrichItineraryPois({
-    localProductId: "fallback-travel-node",
-    destination: "哈尔滨",
-    runtime,
-    persistedTaskKeys: new Set(),
-    resolvePoiName: async ({ attempt }) => attempt === 1 ? "哈尔滨太平国际机场" : "圣索菲亚教堂",
-  });
-
-  assert.deepEqual(queries, ["圣索菲亚教堂"]);
-  assert.deepEqual(written[0].spots[0], { name: "圣索菲亚教堂", poiName: "圣索菲亚教堂", poiId: 77064 });
+  assert.deepEqual(queries, ["无效景点"]);
+  assert.equal(runtime.tasks.length, 1);
+  assert.match(runtime.tasks[0].detail ?? "", /保留原景点和原行程位置/);
 });
 
 function testRuntime(args: {

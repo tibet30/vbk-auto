@@ -23,6 +23,7 @@ import type {
   ProductSummary,
   ProductWorkflowTask,
   Settings,
+  SystemNotificationResult,
   VehicleResourceMatch,
   HotelResourceMatch,
   AccountFixedInfo,
@@ -253,6 +254,8 @@ export interface VbkApi {
     listModels(input: AiModelListInput): Promise<AiModelListResult>;
     save(input: Partial<Settings> & { apiKey?: string; deepseekApiKey?: string }): Promise<Settings>;
     test(input: AiConnectionTestInput): Promise<ConnectionTest>;
+    testNotification(): Promise<SystemNotificationResult>;
+    openNotificationSettings(): Promise<void>;
   };
   events: {
     onAgentUpdated(listener: (snapshot: AgentSnapshot) => void): () => void;

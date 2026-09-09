@@ -9,6 +9,10 @@ interface TrafficLineCheckpoint {
   variant: TrafficLineVariant;
   productId: string;
   activated: boolean;
+  completedStages: TrafficLineChildStage[];
+  verified: boolean;
+  failedStage?: TrafficLineChildStage;
+  failureReason?: string;
 }
 interface ReconciliationResult {
   reconciled: boolean;
@@ -39,16 +43,36 @@ export async function reconcileAgentShell(product: ProductDetail, snapshot: Agen
 async function reconcileHotelResource(product: ProductDetail, page: Parameters<typeof getProductBaseInfoApi>[0], _arguments: unknown, snapshot: AgentSnapshot, toolCallId: string) {
   const result = snapshot.events.find((event) => event.type === 'tool_result' && event.data?.toolCallId === toolCallId);
   const reason = String(result?.content ?? '');
-  // 仅允许已知的本地布局校验失败恢复；它发生在酒店候选写入前，不能把它伪装成成功。
-  if (!reason.includes('住宿资源行程段未按连续住宿城市拆分')) {
-    return { reconciled: false, message: '酒店资源写入结果未能从只读证据确认，已保留现场。' };
-  }
   const payload = await getProductSegmentsApi(page, product.productId!);
   const lodging = segmentsFromPayload(payload).filter((segment) => Number(segment.segmentBase?.stayNights) > 0);
+  // 旧布局校验发生在候选写入前；只有这种已知情况可以直接恢复。
+  if (reason.includes('住宿资源行程段未按连续住宿城市拆分')) {
+    return {
+      reconciled: false,
+      retryable: true,
+      message: `已只读核对到 ${lodging.length} 个住宿段；上一轮在写入候选前因旧布局校验停止，可用修复后的布局逻辑定向重试酒店阶段。`,
+    };
+  }
+  // saveSegment 收到成功响应、但 getSegments 明确没有留下任一指定酒店时，说明上一轮
+  // 没有产生可与新写入冲突的远端状态。此时允许在修复后的保存协议上定向重试；任何
+  // 部分保存都继续视为不确定，绝不能覆盖或清空已有酒店。
+  const savedHotelCount = lodging.reduce((total, segment) => total + (Array.isArray(segment.hotel?.segmentRooms)
+    ? segment.hotel.segmentRooms.length
+    : 0), 0);
+  const itinerary = Array.isArray((product.product as any).itinerary) ? (product.product as any).itinerary : [];
+  const expectedHotelCount = itinerary.reduce((total: number, day: any) => total + (Array.isArray(day?.hotelCandidates)
+    ? day.hotelCandidates.length
+    : 0), 0);
+  if (expectedHotelCount > 0 && savedHotelCount === 0) {
+    return {
+      reconciled: false,
+      retryable: true,
+      message: `已只读核对到 ${lodging.length} 个住宿段，且未保存任何指定酒店；可仅以修复后的保存协议重试酒店阶段。`,
+    };
+  }
   return {
     reconciled: false,
-    retryable: true,
-    message: `已只读核对到 ${lodging.length} 个住宿段；上一轮在写入候选前因旧布局校验停止，可用修复后的布局逻辑定向重试酒店阶段。`,
+    message: `酒店资源写入结果未能从只读证据确认（住宿段 ${lodging.length} 个，已保存指定酒店 ${savedHotelCount} 家），已保留现场。`,
   };
 }
 
@@ -72,6 +96,11 @@ async function reconcilePreflight(product: ProductDetail, page: Parameters<typeo
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
+    // preflight 是只读检查。已知的候选字段缺失代表远端没有不确定写入，
+    // 允许 Agent 先补齐本地候选，再定向重新预检。
+    if (reason.includes('酒店候选缺少城市')) {
+      return { reconciled: false, retryable: true, message: `最终预检发现本地草稿缺项：${reason}。未发生 VBK 写入，可先恢复该日酒店候选后重新预检。` };
+    }
     return { reconciled: false, message: `最终预检的只读核对未通过：${reason}。已保留现场，不会重复写入。` };
   }
 }
@@ -91,6 +120,26 @@ async function reconcileTrafficLine(product: ProductDetail, page: Parameters<typ
   });
   const failed = results.find((result) => result.reason);
   if (failed?.reason) return { reconciled: false, message: `交通阶段远端核对未通过：${failed.reason}。为避免重复写入，已保留现场。` };
+  const retryable = results.find(({ checkpoint }) => checkpoint.failedStage);
+  if (retryable?.checkpoint.failedStage) {
+    const checkpoint = retryable.checkpoint;
+    return {
+      reconciled: false,
+      retryable: true,
+      message: `已从 VBK 确认${trafficLineLabel(checkpoint.variant)}子产品 ${checkpoint.productId} 的关系和启用状态；`
+        + `该子产品仍停在 ${checkpoint.failedStage} 阶段${checkpoint.failureReason ? `（${checkpoint.failureReason}）` : ''}，可从失败节点定向重试。`,
+    };
+  }
+  const incomplete = results.find(({ checkpoint }) => !checkpoint.verified
+    || !checkpoint.completedStages.includes('finalReadback'));
+  if (incomplete) {
+    const checkpoint = incomplete.checkpoint;
+    return {
+      reconciled: false,
+      message: `已从 VBK 确认${trafficLineLabel(checkpoint.variant)}子产品 ${checkpoint.productId} 的关系和启用状态，`
+        + '但缺少最终回读证据，不能把交通阶段标记为完成。',
+    };
+  }
   const summary = results.map(({ checkpoint }) => `${trafficLineLabel(checkpoint.variant)}${checkpoint.activated ? '已启用' : '未启用'}`).join('；');
   return {
     reconciled: true,
@@ -106,6 +155,14 @@ function trafficLineCheckpoints(product: ProductDetail): TrafficLineCheckpoint[]
     const productId = child.childProductId?.trim();
     if (!variant || !productId) return [];
     const stages = new Set<TrafficLineChildStage>(child.completedStages);
-    return [{ variant, productId, activated: stages.has('activated') }];
+    return [{
+      variant,
+      productId,
+      activated: stages.has('activated'),
+      completedStages: child.completedStages,
+      verified: child.verified,
+      ...(child.failedStage ? { failedStage: child.failedStage } : {}),
+      ...(child.failureReason ? { failureReason: child.failureReason } : {}),
+    }];
   });
 }

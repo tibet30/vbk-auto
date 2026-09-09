@@ -6,10 +6,13 @@ import { AgentCore } from './core.js';
 import { OpenAIAgentModel } from './openai-model.js';
 import { createAgentBusinessTools, agentProductVersion } from './integration.js';
 import { agentPlannerContext, agentTaskContext } from './integration-context.js';
-import { agentCompletionGate, approvalForRun } from './integration-gates.js';
+import { agentCompletionGate, approvalForRun, recoverEquivalentApproval, requiredAgentPhases } from './integration-gates.js';
+import { preparationApprovalBlockReason } from '../planning/preparation-completion.js';
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from './integration-guard.js';
 import { reconcileAgentShell } from './integration-reconcile.js';
 import { recordAgentUsage } from './integration-usage.js';
+import { refreshSatisfiedResearchTasks } from '../operations/research-refresh.js';
+import { recoverResolvedHotelCandidates } from './hotel-candidate-recovery.js';
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
 export function installProductAgent(context: MainIpcContext): () => void {
@@ -60,6 +63,20 @@ export function installProductAgent(context: MainIpcContext): () => void {
           (db.getAgentSnapshot(localProductId)?.events ?? []).filter((event) => event.type === "user").map((event) => ({ role: "user" as const, content: event.content })),
           memoryContext) });
       },
+      disambiguatePoiOption: async ({ localProductId, desired, product, candidates }) => {
+        const outcome = await (await context.aiService()).disambiguateOption({
+          kind: "spot", desired, product, candidates,
+          usage: { localProductId, stage: "planningPoiSelection" },
+        });
+        return { pickedText: outcome.pickedText, confidence: outcome.confidence };
+      },
+      disambiguateStationOption: async ({ localProductId, stationSubtype, desired, product, candidates }) => {
+        const outcome = await (await context.aiService()).disambiguateOption({
+          kind: "station", stationSubtype, desired, product, candidates,
+          usage: { localProductId, stage: "trafficLineStationSelection" },
+        });
+        return { pickedText: outcome.pickedText, reasoning: outcome.reasoning };
+      },
       emitProduct,
     }),
     accountFor: async (localProductId) => {
@@ -73,6 +90,47 @@ export function installProductAgent(context: MainIpcContext): () => void {
       return { accountKey, productVersion: agentProductVersion(product) };
     },
     productFingerprint: async (localProductId) => agentProductVersion(db.getProduct(localProductId)!),
+    recoverApproval: async (localProductId, snapshot) => {
+      let product = db.getProduct(localProductId);
+      if (!product) return undefined;
+      const restored = recoverResolvedHotelCandidates(product.product as Record<string, unknown>, snapshot);
+      if (restored) {
+        product = context.productMutations.replace(localProductId, restored, { status: product.status });
+        const approval = approvalForRun(snapshot);
+        // Restoring candidates may change required phases (e.g. hotelResource).
+        // Refresh fingerprint/intent only; never silently expand write authority.
+        if (approval && snapshot.run) {
+          const required = requiredAgentPhases(product).map((phase) => `vbk.write_phase:${phase}`);
+          if (required.some((scope) => !approval.scope.includes(scope))) return undefined;
+          return {
+            ...approval,
+            productVersion: agentProductVersion(product),
+            intentVersion: snapshot.run.intentVersion,
+          };
+        }
+      }
+      return recoverEquivalentApproval(product, snapshot);
+    },
+    handoffApprovedWorkflow: (localProductId, approval) => {
+      // A remote-successful automation can outlive an interrupted desktop
+      // process before AgentCore receives its completion callback. Resume the
+      // local terminal transition only; never replay completed VBK phases.
+      if (db.getProduct(localProductId)?.automation?.status === "succeeded") {
+        void context.agentCore?.completeApprovedWorkflow(localProductId, approval.id);
+        return true;
+      }
+      // This is intentionally detached from the Agent turn. From this point on
+      // the automation runner owns phase ordering, retries and remote readback;
+      // no model completion is scheduled between phase writes.
+      void productWorkflows.runExclusive(localProductId, "automation", () =>
+        context.automation.executeApprovedWorkflow(localProductId))
+        .then(() => context.agentCore?.completeApprovedWorkflow(localProductId, approval.id))
+        .catch(async (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          await context.agentCore?.pauseApprovedWorkflow(localProductId, approval.id, message);
+        });
+      return true;
+    },
     contextFor: async (localProductId) => {
       let memoryContext;
       try {
@@ -88,8 +146,23 @@ export function installProductAgent(context: MainIpcContext): () => void {
       if (!product) return "产品不存在";
       const scopeError = agentApprovalScopeError(product, scope);
       if (scopeError) return scopeError;
+      // Phase A must leave no stale research noise before the confirmation card
+      // or VBK handoff. Satisfied-but-unconfirmed POI tasks would otherwise look
+      // like open work while readiness already reports 100%.
+      const refreshed = refreshSatisfiedResearchTasks(db, localProductId);
+      const current = db.getProduct(localProductId) ?? product;
+      if (refreshed.updated > 0) emitProduct(current);
+      const preparationBlock = preparationApprovalBlockReason(current);
+      if (preparationBlock) return preparationBlock;
       const result = readiness(localProductId);
-      return result.ready ? undefined : `尚未满足 VBK 写入前置条件：${result.issues.slice(0, 3).map((item) => item.label).join("、")}`;
+      if (!result.ready) {
+        return `本地方案尚未准备完成，不能进入 VBK 录入：${result.issues.slice(0, 3).map((item) => item.label).join("、")}`;
+      }
+      // Force the confirmation card to drop stale readiness issues after the
+      // local plan became ready (e.g. features rewritten from object to HTML).
+      const readyProduct = db.getProduct(localProductId);
+      if (readyProduct) emitProduct(readyProduct);
+      return undefined;
     },
     reconcileUncertainWrite: async (localProductId, uncertain) => productWorkflows.runVbkPageExclusive(async () => {
       const login = await context.browser.status(true);
@@ -119,6 +192,14 @@ export function installProductAgent(context: MainIpcContext): () => void {
         const approval = approvalForRun(db.getAgentSnapshot(localProductId));
         const accountKey = login.loginAccount?.trim() || login.accountName?.trim();
         if (!login.loggedIn || !accountKey || approval?.accountKey!==accountKey || (remote.vbkAccount && remote.vbkAccount!==accountKey)) return {verified:false,message:"当前账号与本轮确认不一致，请恢复对应账号后继续核对。"};
+      } else {
+        // Creating a final confirmation card is still phase A: clear satisfied
+        // research noise before readiness decides the plan is complete.
+        const refreshed = refreshSatisfiedResearchTasks(db, localProductId);
+        if (refreshed.updated > 0) {
+          const next = db.getProduct(localProductId);
+          if (next) emitProduct(next);
+        }
       }
       const product = db.getProduct(localProductId);
       if (!product) return { verified: false, message: "产品不存在" };

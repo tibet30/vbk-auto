@@ -15,7 +15,7 @@ import {
   evaluateAutomationContract,
   PRODUCT_JSON_LOCATION,
 } from "../../src/main/automation/automation-contract.js";
-import { hasValidPresentationRecommendations } from "../../src/main/automation/automation-contract.helpers.js";
+import { hasValidCoverPoMeta, hasValidPresentationRecommendations } from "../../src/main/automation/automation-contract.helpers.js";
 
 /** 完整合法规划产物。 */
 function makeValidProduct(): Record<string, unknown> {
@@ -74,6 +74,29 @@ function makeValidProduct(): Record<string, unknown> {
     ],
   };
 }
+
+test("cover POI must match a verified itinerary POI before the product is ready", () => {
+  const product = makeValidProduct();
+  assert.equal(hasValidCoverPoMeta(product), true);
+  ((product.presentation as Record<string, unknown>).cover as Record<string, unknown>).poiId = 999999;
+  assert.equal(hasValidCoverPoMeta(product), false);
+});
+
+test("cover POI name matching ignores empty itinerary spot names and coerces string poiId", () => {
+  const product = makeValidProduct();
+  const cover = (product.presentation as Record<string, unknown>).cover as Record<string, unknown>;
+  const day = (product.itinerary as Array<Record<string, unknown>>)[0]!;
+  const spots = day.spots as Array<Record<string, unknown>>;
+  delete cover.poiId;
+  cover.poi = "晋祠博物馆";
+  spots[0] = { name: "", poiName: "", poiId: "" };
+  assert.equal(hasValidCoverPoMeta(product), false);
+  spots[0] = { name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: "79413" };
+  assert.equal(hasValidCoverPoMeta(product), true);
+  cover.poiId = "79413";
+  spots[0] = { name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: "79413" };
+  assert.equal(hasValidCoverPoMeta(product), true);
+});
 
 // ────────────────────────────────────────────────────────────────────
 // G1: presentation.recommendations 阻断契约
@@ -263,11 +286,18 @@ test("G4 VBK_PRODUCT_FIELDS 覆盖 presentation / basic / operations 关键 AI �
   }
 });
 
-test("G4 默认线路及交通流程必须同时规划飞机、火车子产品", () => {
+test("G4 线路及交通未选择任何往返方式时不通过契约", () => {
   const enabledWithoutVariant = makeValidProduct() as Record<string, unknown>;
   enabledWithoutVariant.operations = { trafficLine: { enabled: true, variants: [] } };
   const result = evaluateAutomationContract(enabledWithoutVariant);
   assert.ok(result.runtimeExceptions.some((item) => item.field.path === "operations.trafficLine"));
+});
+
+test("G4 明确只安排火车往返时通过线路及交通契约", () => {
+  const product = makeValidProduct() as Record<string, unknown>;
+  product.operations = { ...(product.operations as Record<string, unknown>), trafficLine: { enabled: true, variants: ["trainRoundTrip"] } };
+  const result = evaluateAutomationContract(product);
+  assert.equal(result.runtimeExceptions.some((item) => item.field.path === "operations.trafficLine"), false);
 });
 
 test("G4 商业三件套（pricing / inventory / terms）走 vbk-runtime，不进 failures", () => {

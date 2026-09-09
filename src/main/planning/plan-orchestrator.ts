@@ -27,6 +27,7 @@ import { validateCompleteness } from "./validation.js";
 import { composeAssistantReply } from "./replies.js";
 import { runSingleStage, type SingleStageResult } from "./single-stage-runner.js";
 import { enrichItineraryPois } from "./poi-enrichment.js";
+import { syncInitialTrafficLineAvailability } from "./traffic-line-availability.js";
 import { revalidateCompletedState } from "./validation-rewind.js";
 import { logRunEnd, logRunStart, logStageEnd, logStageStart } from "./log.js";
 import type {
@@ -131,9 +132,9 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
       destination: args.skeleton.destination,
       runtime: args.runtime,
       persistedTaskKeys,
-      resolvePoiName: args.planner.resolvePoiName?.bind(args.planner),
       reviewCompletePois: true,
     });
+    await syncInitialTrafficLineAvailability(args.localProductId, args.runtime);
     state.status = "completed";
     await args.store.save(state);
     logRunEnd("续跑走到末尾确认 completed", { localProductId: args.localProductId, providerLabel: args.providerLabel, status: state.status });
@@ -160,9 +161,9 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
       destination: args.skeleton.destination,
       runtime: args.runtime,
       persistedTaskKeys,
-      resolvePoiName: args.planner.resolvePoiName?.bind(args.planner),
       reviewCompletePois: true,
     }));
+    await syncInitialTrafficLineAvailability(args.localProductId, args.runtime);
   }
 
   for (let i = startIndex; i < PLANNING_STAGES.length; i += 1) {
@@ -252,6 +253,11 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state.lastAssistantReply = result.assistantReply;
     state.lastModuleSummary = [...result.accepted, ...result.rejected];
     state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
+    // 行程完成时先核实端点；commercial 完成后已有真实库存日期，再执行完整的
+    // 城市/日期班次预检，并把通过的交通方式写入最终子产品计划。
+    if (stage === "itinerary" || stage === "commercial") {
+      await syncInitialTrafficLineAvailability(args.localProductId, args.runtime);
+    }
     await args.store.save(state);
     logStageEnd("阶段已接受，写入 completedStages", { localProductId: args.localProductId, stage, acceptedCount: result.accepted.length, rejectedCount: result.rejected.length });
     if (stage === "research" && deferredPresentationFailure) {

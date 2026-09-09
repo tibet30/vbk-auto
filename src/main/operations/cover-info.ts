@@ -28,8 +28,10 @@ export function readCover(product: Record<string, unknown>): null | {
   source: "ctripLibrary" | "manualUpload";
   fileId?: string;
   poi: string;
-  description: string;
-  minQuality: number;
+  poiId?: number;
+  poiName?: string;
+  description?: string;
+  minQuality?: number;
 } {
   const presentation = product.presentation;
   if (!presentation || typeof presentation !== "object" || Array.isArray(presentation)) return null;
@@ -42,14 +44,19 @@ export function readCover(product: Record<string, unknown>): null | {
   const description = typeof record.description === "string" ? record.description.trim() : "";
   const minQuality = typeof record.minQuality === "number" && Number.isFinite(record.minQuality)
     ? record.minQuality
-    : 3;
-  if (!poi || !description) return null;
+    : undefined;
+  const poiId = typeof record.poiId === "number" && Number.isInteger(record.poiId) && record.poiId > 0
+    ? record.poiId
+    : undefined;
+  const poiName = typeof record.poiName === "string" ? record.poiName.trim() : "";
+  if (!poi) return null;
   if (source === "manualUpload") {
     const fileId = typeof record.fileId === "string" ? record.fileId.trim() : "";
     if (!fileId) return null;
-    return { source, fileId, poi, description, minQuality };
+    if (!description || minQuality === undefined) return null;
+    return { source, fileId, poi, ...(poiId ? { poiId } : {}), ...(poiName ? { poiName } : {}), description, minQuality };
   }
-  return { source, poi, description, minQuality };
+  return { source, poi, ...(poiId ? { poiId } : {}), ...(poiName ? { poiName } : {}), description, minQuality };
 }
 
 /**

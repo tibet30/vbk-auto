@@ -7,8 +7,7 @@
  * 设计要点（参考 CLAUDE.md / AGENTS.md）：
  *   - 复用既有 searchCtripLibraryImages（阶段 A→B 直接链路），不引入新接口；
  *   - 只在 cover 缺 imageId/imageUrl 时尝试补；已有完整封面或 manualUpload 跳过；
- *   - poi 来源：cover.poi 优先；否则按行程顺序挑一个具名 spot；
- *     再否则用 basicInfo.destinationCity / meetingCity；都没有就放弃（不写半成品）；
+ *   - poi 来源：cover.poi 优先；否则按行程顺序挑已写入行程的景点；没有就放弃（不写半成品）；
  *   - 候选必须 imageId > 0 + imageUrl 非空才算"完整"——选出来的首图同时
  *     含 imageId 与 imageUrl 才落库，否则保持原状；
  *   - 失败一律 console.info 提示但不抛错：search 接口不稳、VBK 未登录、网络抖动都属常态，
@@ -45,15 +44,25 @@ function positiveInteger(value: unknown): boolean {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-function hasPublishableCoverQuality(candidate: CtripLibraryImageCandidate): boolean {
-  const score = Number.parseFloat(textValue(candidate.quality));
-  const dimensions = candidate.resolution.match(/\d+/g)?.map(Number) ?? [];
-  const [width = 0, height = 0] = dimensions;
-  return Number.isFinite(score)
-    && score >= 3
-    && width >= 1280
-    && height >= 800
-    && width >= height;
+/** A gallery image must belong to the itinerary POI it is meant to represent. */
+function matchesItineraryCoverPoi(
+  candidate: CtripLibraryImageCandidate,
+  keyword: string,
+  product: Record<string, unknown>,
+): boolean {
+  const itinerary = Array.isArray(product.itinerary) ? product.itinerary : [];
+  const spots = itinerary.flatMap((day) => {
+    const record = safeObject(day);
+    return Array.isArray(record?.spots) ? record.spots : [];
+  }).map(safeObject).filter((spot): spot is Record<string, unknown> => Boolean(spot));
+  const knownPoiIds = new Set(spots.map((spot) => spot.poiId).filter(positiveInteger));
+  if (positiveInteger(candidate.poiId) && knownPoiIds.size) return knownPoiIds.has(candidate.poiId);
+  const candidateName = textValue(candidate.poiName);
+  // Some gallery rows omit their POI name after image resolution. Allow that
+  // only when the itinerary has no bound POI IDs yet; otherwise a nameless
+  // candidate cannot prove it belongs to the known itinerary set.
+  if (!candidateName) return knownPoiIds.size === 0;
+  return candidateName === keyword || candidateName.includes(keyword) || keyword.includes(candidateName);
 }
 
 /**
@@ -87,7 +96,7 @@ export function isCtripLibraryCoverComplete(cover: Record<string, unknown> | nul
 }
 
 /**
- * 从 candidate 列表里挑第一条满足真实解析、质量、尺寸和横版比例的可用候选。
+ * 从 candidate 列表里挑第一条已真实解析、可写回的景点图候选。
  * 找不到返回 null；不会抛错。
  */
 export function pickFirstUsableCoverCandidate(
@@ -95,7 +104,7 @@ export function pickFirstUsableCoverCandidate(
 ): CtripLibraryImageCandidate | null {
   if (!Array.isArray(candidates)) return null;
   for (const candidate of candidates) {
-    if (isCoverCandidateComplete(candidate) && hasPublishableCoverQuality(candidate)) return candidate;
+    if (isCoverCandidateComplete(candidate)) return candidate;
   }
   return null;
 }
@@ -103,8 +112,7 @@ export function pickFirstUsableCoverCandidate(
 /**
  * 决定搜 POI 的关键词（单数版本，保留以兼容旧测试 / 旧 import）：
  *   - 优先用 cover.poi（用户/AI 显式给出的代表景点）；
- *   - 否则按行程顺序遍历 itinerary[].spots[].name，取第一个非空名；
- *   - 再否则用 basicInfo.destinationCity / meetingCity / title；
+ *   - 否则按行程顺序遍历 itinerary[].spots[].name / poiName；
  *   - 都没有 → 返回 null（调用方放弃，不写半成品 cover）。
  */
 export function pickCoverSearchKeyword(product: Record<string, unknown>): string | null {
@@ -122,14 +130,9 @@ export function pickCoverSearchKeyword(product: Record<string, unknown>): string
  *          - 字符串；
  *          - { name }；
  *          - { poiName }；
- *        - 若当日所有 spot 都拿不到，非通用 / 非交通类的 day title 才纳入；
- *        - basicInfo.destinationCity / meetingCity 先；
- *        - 仅当 itinerary 一无所获时，才追加 supplierProductName / subtitle
- *          （避免「代表景点 = 商品名」这种丢人的回退）。
+ *        - 不用 day title、城市、商品名或文案兜底：封面检索只以景点 POI 为依据。
  *   3. 全部为空 → null（调用方放弃，不写半成品 cover）。
  */
-const NOISY_DAY_TITLE_RE = /^(?:交通|出发|返程|送机|接机|送站|接站|抵达|离开|前往|自由活动|行程结束|大巴|car|bus|train|flight)$/i;
-
 export function collectCoverSearchKeywords(product: Record<string, unknown>): string[] | null {
   const presentation = safeObject(product.presentation);
   const cover = safeObject(presentation?.cover);
@@ -153,55 +156,19 @@ export function collectCoverSearchKeywords(product: Record<string, unknown>): st
   // 到其它具名景点（applyAutoCoverFill 会按顺序逐个尝试）。
   push(coverPoi);
 
-  let itineraryContributed = false;
   const itinerary = Array.isArray(product.itinerary) ? product.itinerary as Array<Record<string, unknown>> : [];
   for (const day of itinerary) {
     const dayRecord = safeObject(day);
     const spots = Array.isArray(dayRecord?.spots) ? dayRecord.spots as Array<unknown> : [];
-    let daySpotPushed = false;
     for (const spot of spots) {
       if (typeof spot === "string") {
-        if (push(spot)) daySpotPushed = true;
+        push(spot);
         continue;
       }
       const spotRecord = safeObject(spot);
       if (!spotRecord) continue;
       // 同一 spot 内 name > poiName 优先，去重由 push 内部保证。
-      // 已存在（被 cover.poi 等前置去重剔除）的 spot 名称同样算"已贡献"，
-      // 不再回退到 day title（避免 cover.poi 与 itinerary spot 同名时
-      // 把 day title "太原" 这种通用词误搜为 POI）。
-      const rawName = textValue(spotRecord.name);
-      const rawPoiName = textValue(spotRecord.poiName);
-      if (rawName && seen.has(rawName.toLowerCase())) {
-        daySpotPushed = true;
-      } else if (rawPoiName && seen.has(rawPoiName.toLowerCase())) {
-        daySpotPushed = true;
-      } else if (push(spotRecord.name)) {
-        daySpotPushed = true;
-      } else if (push(spotRecord.poiName)) {
-        daySpotPushed = true;
-      }
-    }
-    // 当天 spot 都拿不到 → 才看 day title；并跳过明显的通用 / 交通类标题。
-    if (!daySpotPushed) {
-      const rawTitle = textValue(dayRecord?.title);
-      if (rawTitle && !NOISY_DAY_TITLE_RE.test(rawTitle)) {
-        if (push(rawTitle)) itineraryContributed = true;
-      }
-    }
-    if (daySpotPushed) itineraryContributed = true;
-  }
-
-  // itinerary 一无所获（空 itinerary / 全空 spot / 全被过滤的 day title）才回退 basicInfo，
-  // 避免「代表景点 = 商品名」这种丢人的回退。
-  if (!itineraryContributed) {
-    const basic = safeObject(product.basicInfo);
-    const hadCity = push(basic?.destinationCity) || push(basic?.meetingCity);
-    // 仅当 destinationCity / meetingCity 都没拿到时，才用 supplierProductName / subtitle 兜底，
-    // 避免 basicInfo 同时给城市 + 商品名时把"太原2天1晚私家团"也作为 POI 拿去搜。
-    if (!hadCity) {
-      push(basic?.supplierProductName);
-      push(basic?.subtitle);
+      push(spotRecord.name) || push(spotRecord.poiName);
     }
   }
 
@@ -211,16 +178,14 @@ export function collectCoverSearchKeywords(product: Record<string, unknown>): st
 /**
  * 把 candidate 合成可写回 product JSON 的 presentation.cover 子树。
  * 不修改入参；不写 file / 不发请求；纯函数。
- * 必填字段（source / imageId / imageUrl / poi / description / minQuality）都从 cover 继承，
- * 没有 cover 入参时直接抛错（调用方应先 pickCoverSearchKeyword + isCtripLibraryCoverComplete）。
+ * 封面只由选中的景点 POI 与图片身份组成；description / minQuality 如有历史值可透传，
+ * 但不生成、不校验，也不会影响选图。
  */
 export function buildCtripLibraryCoverFromCandidate(args: {
   existingCover: Record<string, unknown> | null | undefined;
   candidate: CtripLibraryImageCandidate & { imageId: number; imageUrl: string };
   keyword: string;
   selectedAt: string;
-  /** description fallback when existingCover is null (AI didn't generate cover)。 */
-  fallbackDescription?: string;
 }): Record<string, unknown> {
   const existing = safeObject(args.existingCover);
   // cover.poi 必须代表「成功搜到 / 选中的 POI」，不能继承前一次失败的 existing.poi。
@@ -232,20 +197,17 @@ export function buildCtripLibraryCoverFromCandidate(args: {
     textValue(args.candidate.poiName)
     || textValue(args.keyword)
     || (existing ? textValue(existing.poi) : "");
-  const description = existing
-    ? (textValue(existing.description) || `${args.keyword} 封面图`)
-    : (args.fallbackDescription || `${args.keyword} 封面图`);
-  const rawQuality = existing?.minQuality;
-  const minQuality = typeof rawQuality === "number" && Number.isFinite(rawQuality) ? rawQuality : 3;
   const next: Record<string, unknown> = {
     source: "ctripLibrary",
     imageId: args.candidate.imageId,
     imageUrl: args.candidate.imageUrl,
     poi,
-    description,
-    minQuality,
     selectedAt: args.selectedAt,
   };
+  const description = textValue(existing?.description);
+  if (description) next.description = description;
+  const minQuality = existing?.minQuality;
+  if (typeof minQuality === "number" && Number.isFinite(minQuality)) next.minQuality = minQuality;
   // 透传 candidate 上的派生字段，方便 UI / 复核。
   const thumbnailUrl = textValue(args.candidate.thumbnailUrl);
   if (thumbnailUrl) next.thumbnailUrl = thumbnailUrl;
@@ -318,23 +280,9 @@ export async function applyAutoCoverFill(args: {
     return { nextProduct: product, outcome: { written: false, reason: "cover 已完整，跳过自动补齐" } };
   }
 
-  // 没有 cover 也没有 description / minQuality → 没法写「完整」cover，干脆放弃。
-  let fallbackDescription: string | undefined;
-  if (!existingCover) {
-    // cover 完全缺失时，从 AI 已生成的 features / recommendation 中提取
-    // 描述文本（取前 100 字），继续搜索图库补齐。
-    const derived = (textValue(presentation?.features) || textValue(presentation?.recommendation) || "").slice(0, 100);
-    if (!derived) {
-      return { nextProduct: product, outcome: { written: false, reason: "cover 缺失且无法从 features/recommendation 推断 description，跳过自动补齐" } };
-    }
-    fallbackDescription = derived;
-  } else if (!textValue(existingCover.description)) {
-    return { nextProduct: product, outcome: { written: false, reason: "cover 缺少 description，跳过自动补齐" } };
-  }
-
   const keywords = collectCoverSearchKeywords(product);
   if (!keywords || keywords.length === 0) {
-    return { nextProduct: product, outcome: { written: false, reason: "无可用关键词，跳过自动补齐" } };
+    return { nextProduct: product, outcome: { written: false, reason: "没有可用的景点 POI，跳过自动补齐" } };
   }
 
   // 按有序去重的关键词逐一尝试：search 抛错 / 候选空 / candidate 不完整
@@ -357,7 +305,9 @@ export async function applyAutoCoverFill(args: {
       continue;
     }
 
-    const candidate = pickFirstUsableCoverCandidate(result.candidates);
+    const candidate = result.candidates.find((item) =>
+      isCoverCandidateComplete(item) && matchesItineraryCoverPoi(item, keyword, product),
+    );
     if (!isCoverCandidateComplete(candidate)) {
       continue;
     }
@@ -367,7 +317,6 @@ export async function applyAutoCoverFill(args: {
       candidate,
       keyword,
       selectedAt: now(),
-      fallbackDescription,
     });
 
     // 不动 product 其它子树，只覆盖 presentation.cover。

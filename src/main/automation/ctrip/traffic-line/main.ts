@@ -9,8 +9,12 @@ import {
 import { buildTrafficLineTargets } from "./orchestrator.js";
 import { ensureTrafficLineRelationship } from "./relationships.js";
 import { ensureTrafficLinePresentation } from "./presentation.js";
-import { ensureTrafficLineSegments } from "./segments.js";
-import { ensureVehicleResourceGroupDraft } from "../vehicle-resource-api.js";
+import {
+  ensureTrafficLineSegments,
+  recoverPendingTrafficLineSegmentSubmit,
+  trafficLineResourceCheckDates,
+} from "./segments.js";
+import { ensureVehicleResourceBinding, ensureVehicleResourceGroupDraft } from "../vehicle-resource-api.js";
 import { ensureTrafficLineItinerary } from "./itinerary.js";
 import { ensureTrafficLineClauses } from "./clauses.js";
 import {
@@ -25,6 +29,7 @@ import type { TrafficLineStationDisambiguator } from "./endpoints.js";
 export interface TrafficLineApiOptions {
   maxSegmentPolls?: number;
   sleep?: (milliseconds: number) => Promise<void>;
+  now?: Date;
   stableReadbackIntervalMs?: number;
   stableReadbackSamples?: number;
   itinerary?: readonly { spots?: Array<{ city?: string | null }> }[];
@@ -35,6 +40,7 @@ export interface TrafficLineApiOptions {
   onUnavailableVariants?: (reasons: Partial<Record<TrafficLineVariant, string>>) => void;
   onRejectedTrainStationCodes?: (codes: string[]) => void;
   onChildProgress?: (progress: TrafficLineChildProgress) => void;
+  onStatus?: (message: string) => void;
   disambiguator?: TrafficLineStationDisambiguator;
   product?: Record<string, unknown>;
 }
@@ -59,6 +65,10 @@ export async function ensureTrafficLineApi(
   if (!targets.length) return { enabled: false, children: [] };
   if (!options.itinerary?.length) {
     throw new Error("线路及交通缺少已核实的行程 POI 城市；未创建任何子产品，可安全重试。");
+  }
+  const resourceCheckDates = trafficLineResourceCheckDates(options.product, options.now);
+  if (!resourceCheckDates.length) {
+    throw new Error("大交通缺少可核验的产品班期（commercial.inventory）；未创建任何交通子产品，可安全重试。");
   }
   const skipped: NonNullable<TrafficLineApiResult["skipped"]> = [];
   targets = targets.filter((target) => {
@@ -162,18 +172,57 @@ export async function ensureTrafficLineApi(
       }
       await ensureTrafficLinePresentation(page, parentProductId, relationship.productId);
       checkpoint("presentationCopied", relationship.productId);
-      await ensureTrafficLineSegments(page, relationship.productId, target.variant, endpoints, {
-        maxPolls: options.maxSegmentPolls,
-        sleep: options.sleep,
-        beforeSubmit: async () => {
-          await ensureTrafficLineItinerary(page, relationship.productId, target.variant);
-          await ensureTrafficLineVehicleDraft(page, relationship.productId, options.product);
-        },
-      });
-      checkpoint("resourcesSaved", relationship.productId);
+      const recoveringTimedOutSubmit = previous?.failedStage === "resourcesSaved"
+        && /(?:轮询后仍未完成|仍在 VBK 异步核验)/.test(previous.failureReason ?? "");
+      const submitRecovery = recoveringTimedOutSubmit
+        ? await recoverPendingTrafficLineSegmentSubmit(
+            page, relationship.productId, target.variant, endpoints, options.sleep,
+          )
+        : "restartable";
+      const recoveredSubmit = submitRecovery === "recovered";
+      if (recoveredSubmit) {
+        options.onStatus?.(`交通子产品 ${relationship.productId} 上次班期校验已完成，已通过正式资源回读。`);
+      }
+      const replacingLegacyPendingSubmit = submitRecovery === "pending"
+        && previous?.validationScheduleCount === undefined
+        && !previous?.validationRecoveryResubmittedAt;
+      if (submitRecovery === "pending" && !replacingLegacyPendingSubmit) {
+        throw new Error("子产品上一次资源提交仍在 VBK 异步核验；本次仅做了只读查询，未重复提交，请稍后从 trafficLine 继续。");
+      }
+      if (replacingLegacyPendingSubmit) {
+        options.onStatus?.(`交通子产品 ${relationship.productId} 的旧版全量班期校验长期未收口，正在用 ${resourceCheckDates.length} 个代表性真实班期受控重提一次。`);
+      }
+      if (!recoveredSubmit) {
+        await ensureTrafficLineSegments(page, relationship.productId, target.variant, endpoints, {
+          maxPolls: options.maxSegmentPolls,
+          sleep: options.sleep,
+          now: options.now,
+          schedule: resourceCheckDates,
+          onValidationProgress: (attempt, maxPolls) => options.onStatus?.(
+            `交通子产品 ${relationship.productId} 正在等待 VBK 班期核验（${attempt}/${maxPolls}）`,
+          ),
+          beforeSubmit: async () => {
+            await ensureTrafficLineItinerary(page, relationship.productId, target.variant);
+            await ensureTrafficLineVehicleDraft(page, relationship.productId, options.product);
+          },
+          onSubmit: (departureCityCount) => {
+            const submittedAt = new Date().toISOString();
+            progress = {
+              ...progress,
+              validationScheduleCount: resourceCheckDates.length,
+              validationDepartureCityCount: departureCityCount,
+              validationSubmittedAt: submittedAt,
+              validationRecoveryResubmittedAt: replacingLegacyPendingSubmit ? submittedAt : progress.validationRecoveryResubmittedAt,
+            };
+            options.onChildProgress?.(progress);
+          },
+        });
+      }
       // submitSegments 会再次结算资源草稿；即使提交前已有交通卡片，也必须在
-      // 提交成功后重新落一次并以当前绑定的行程回读为准。
+      // 提交成功后重新落一次，并以正式资源段回读为准。
       await ensureTrafficLineItinerary(page, relationship.productId, target.variant);
+      await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);
+      checkpoint("resourcesSaved", relationship.productId);
       checkpoint("itinerarySaved", relationship.productId);
       await ensureTrafficLineClauses(page, relationship.productId, target.variant);
       checkpoint("clausesSaved", relationship.productId);
@@ -188,7 +237,7 @@ export async function ensureTrafficLineApi(
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      if (isUnavailableTrafficResourceFailure(reason)) {
+      if (isUnavailableTrafficResourceFailure(reason, target.variant)) {
         const skippedProgress = {
           ...progress,
           skipped: true,
@@ -263,6 +312,23 @@ async function ensureTrafficLineVehicleDraft(page: TrafficLinePage, productId: s
   await ensureVehicleResourceGroupDraft(page, productId, groupId, groupName, { verifyDraft: true });
 }
 
+/**
+ * submitSegments 会消耗交通子产品的资源草稿。行程写回后必须重新创建草稿、
+ * 绑定用车组、提交并通过正式段回读；只保留草稿内的成功不能作为完成证据。
+ */
+async function ensureTrafficLineVehicleBinding(page: TrafficLinePage, productId: string, product: Record<string, unknown> | undefined) {
+  const sales = product?.sales as Record<string, unknown> | undefined;
+  if (sales?.productForm !== "privateTour") return;
+  const operations = product?.operations as Record<string, unknown> | undefined;
+  const vehicle = operations?.vehicleResource as Record<string, unknown> | undefined;
+  const groupId = Number(vehicle?.resourceGroupId);
+  const groupName = String(vehicle?.resourceGroupName ?? "").trim();
+  if (!Number.isInteger(groupId) || groupId <= 0 || !groupName) {
+    throw new Error("私家团交通子产品缺少可绑定的用车资源组。");
+  }
+  await ensureVehicleResourceBinding(page, productId, groupId, groupName, { submitDraft: true });
+}
+
 /** 每次重新核验都先撤销旧完成证据，保留其它已确认阶段供安全恢复。 */
 export function invalidateTrafficLineFinalReadback(progress: TrafficLineChildProgress): TrafficLineChildProgress {
   return {
@@ -292,13 +358,17 @@ export function trainEndpointNeedsReplacement(progress: readonly TrafficLineChil
 }
 
 /** 只有平台明确的“无可售资源”结论才会降级跳过；会话和保存失败仍严格中断。 */
-export function isUnavailableTrafficResourceFailure(reason: string): boolean {
-  return /(?:没有任何可用的多出发城市|未返回可用于(?:飞机|火车)往返的出发城市)/.test(reason);
+export function isUnavailableTrafficResourceFailure(reason: string, variant?: TrafficLineVariant): boolean {
+  if (/(?:没有任何可用的多出发城市|未返回可用于(?:飞机|火车)往返的出发城市)/.test(reason)) return true;
+  if (/(?:当前|本)班期.*(?:没有|无).*可用交通资源|(?:没有|无).*可用交通资源.*(?:当前|本)班期/.test(reason)) return true;
+  // 同城接送的火车子产品能创建，但 VBK 到套餐有效化才返回该业务结论。
+  // 这不是会话或协议失败；保留子产品记录并让其它交通方式继续完成。
+  return variant === "trainRoundTrip" && /出发城市为空\s*[,，]?\s*不能打包/.test(reason);
 }
 
 export function trafficLineChildShouldBeSkipped(progress: TrafficLineChildProgress | undefined): boolean {
   return Boolean(progress && progress.verified !== true && (progress.skipped === true
-    || (progress.failedStage === "resourcesSaved" && isUnavailableTrafficResourceFailure(progress.failureReason ?? ""))));
+    || isUnavailableTrafficResourceFailure(progress.failureReason ?? "", progress.variant)));
 }
 
 function sameTrainEndpoints(current: TrafficLineEndpointPlan, replacement: TrafficLineEndpointPlan): boolean {

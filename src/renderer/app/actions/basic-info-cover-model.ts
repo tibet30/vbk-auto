@@ -62,8 +62,6 @@ export function buildCtripLibraryCover(candidate: CtripLibraryImageCandidate): P
     imageId,
     imageUrl,
     poi: candidate.poiName || fallbackLabel,
-    description: candidate.poiName || fallbackLabel,
-    minQuality: 3,
     selectedAt: new Date().toISOString(),
     ...optionalFields,
   };

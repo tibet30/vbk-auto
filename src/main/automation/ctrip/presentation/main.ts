@@ -2,7 +2,7 @@
 /**
  * 产品图文页（productImageText）页面层：
  *   - selectCtripLibraryImage / selectCtripLibraryCover：在「从图库资源导入」弹窗里搜索 poi 并按
- *     质量 / 分辨率要求挑图，确认协议并提交；
+ *     已解析的景点 POI 图片，确认协议并提交；
  *   - fillAndSavePresentation：以显式 productId 接口保存推荐理由、产品特点与封面，
  *     每步回读成功后直接返回；不做 DOM 导航或推进。
  * 顶部带 `// @ts-nocheck`，形参 page 是动态传入。
@@ -186,10 +186,7 @@ export async function fillAndSavePresentation(page, product, explicitProductId) 
     typeof cover.imageUrl !== "string" ||
     cover.imageUrl.trim().length === 0 ||
     typeof cover.poi !== "string" ||
-    cover.poi.trim().length === 0 ||
-    typeof cover.description !== "string" ||
-    cover.description.trim().length === 0 ||
-    typeof cover.minQuality !== "number"
+    cover.poi.trim().length === 0
   ) {
     throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }

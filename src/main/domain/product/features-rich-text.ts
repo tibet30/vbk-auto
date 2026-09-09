@@ -58,6 +58,47 @@ export function formatProductFeaturesHtml(value: unknown): string {
   }).join("");
 }
 
+function textLeaf(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function collectFeatureLines(value: unknown, into: string[] = []): string[] {
+  if (value == null) return into;
+  if (typeof value === "string") {
+    const text = textLeaf(value);
+    if (text) into.push(text);
+    return into;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectFeatureLines(item, into);
+    return into;
+  }
+  if (typeof value !== "object") return into;
+  const record = value as Record<string, unknown>;
+  // Common model mistake: `{ p: [{ strong: "标题：", $text: "说明" }] }`.
+  const strong = textLeaf(record.strong ?? record.title ?? record.heading);
+  const body = textLeaf(record.$text ?? record.text ?? record.content ?? record.description);
+  if (strong || body) {
+    into.push(strong && body ? `${strong}${/[:：]$/.test(strong) ? "" : "："}${body}` : strong || body);
+    return into;
+  }
+  for (const child of Object.values(record)) collectFeatureLines(child, into);
+  return into;
+}
+
+/**
+ * Accept the required HTML string, or coerce a mistaken rich-text AST/object
+ * into the same safe HTML shape used by VBK. Empty results mean the caller
+ * must reject the write instead of persisting a non-string features value.
+ */
+export function coerceProductFeaturesHtml(value: unknown): string {
+  if (typeof value === "string") return formatProductFeaturesHtml(value);
+  if (value == null) return "";
+  const lines = collectFeatureLines(value).filter(Boolean);
+  if (!lines.length) return "";
+  return formatProductFeaturesHtml(lines.join("\n"));
+}
+
 
 /** UEditor HTML 转为普通输入框/回读比较使用的文本。 */
 export function productFeaturesPlainText(value: unknown): string {

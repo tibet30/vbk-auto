@@ -8,9 +8,17 @@ import {
 } from "../../src/main/automation/ctrip/traffic-line/client.ts";
 import { buildSaveProductClausesRequest, desiredFirstTabClauses, mergeTrafficLineClauseItems, selectedClauseItems } from "../../src/main/automation/ctrip/traffic-line/clauses.ts";
 import { applyRequiredPoiRiskPlans, currentTrafficLineTourInfoId, mergeTrafficNodes, verifyTrafficNodes, waitForTrafficLineItineraryReadback } from "../../src/main/automation/ctrip/traffic-line/itinerary.ts";
-import { buildBoundarySegment, trafficLineModifyUserFromState, waitForSegmentSubmit, withTraffic } from "../../src/main/automation/ctrip/traffic-line/segments.ts";
+import {
+  buildBoundarySegment,
+  recoverPendingTrafficLineSegmentSubmit,
+  selectTrafficLineValidationCities,
+  trafficLineModifyUserFromState,
+  trafficLineResourceCheckDates,
+  waitForSegmentSubmit,
+  withTraffic,
+} from "../../src/main/automation/ctrip/traffic-line/segments.ts";
 import { ensureTrafficLineApi, invalidateTrafficLineFinalReadback } from "../../src/main/automation/ctrip/traffic-line/main.ts";
-import { ensureTrafficLinePhase, invalidateTrafficLineWorkflowVerification } from "../../src/main/automation/ctrip/traffic-line/run-phase.ts";
+import { ensureTrafficLinePhase, invalidateTrafficLineWorkflowVerification, trafficLineConfigForProduct } from "../../src/main/automation/ctrip/traffic-line/run-phase.ts";
 import { waitForStableReadbackGroup } from "../../src/main/automation/ctrip/traffic-line/stability.ts";
 import { attachPlaywrightSessionFetch } from "../../src/main/infrastructure/vbk-session-fetch-adapter.ts";
 
@@ -409,6 +417,39 @@ test("资源校验失败时返回平台明确拒绝的城市，供安全过滤�
   }
 });
 
+test("交通资源校验使用覆盖产品库存窗口的代表性真实班期", () => {
+  const dates = trafficLineResourceCheckDates({
+    commercial: { inventory: { startDate: "2026-09-09", endDate: "2027-09-09", dailyQuota: 30 } },
+  }, new Date("2026-09-09T10:00:00+08:00"));
+
+  assert.equal(dates[0], "2026-09-09");
+  assert.equal(dates.length, 3);
+  assert.equal(dates[1], "2027-03-10");
+  assert.equal(dates.at(-1), "2027-09-08");
+  assert.deepEqual(trafficLineResourceCheckDates({ commercial: { inventory: { startDate: "bad", endDate: "2026-09-09" } } }), []);
+});
+
+test("交通资源校验只提交 VBK 热门且具备对应交通能力的城市", () => {
+  const groups = [
+    { category: "热门", departureCities: [
+      { cityId: 1, cityName: "北京", hasAirport: false, hasTrain: false },
+      { cityId: 2, cityName: "上海", hasAirport: false, hasTrain: false },
+      { cityId: 92, cityName: "日喀则", hasAirport: false, hasTrain: false },
+    ] },
+    { category: "B", departureCities: [{ cityId: 1, cityName: "北京", countryId: 1, hasAirport: true, hasTrain: true }] },
+    { category: "R", departureCities: [{ cityId: 92, cityName: "日喀则", countryId: 1, hasAirport: true, hasTrain: true }] },
+    { category: "S", departureCities: [{ cityId: 2, cityName: "上海", countryId: 1, hasAirport: true, hasTrain: true }] },
+    { category: "国际热门", departureCities: [{ cityId: 73, cityName: "新加坡", countryId: 3, hasAirport: true, hasTrain: false }] },
+    { category: "A", departureCities: [{ cityId: 97, cityName: "阿里", countryId: 1, hasAirport: true, hasTrain: false }] },
+  ];
+
+  assert.deepEqual(
+    selectTrafficLineValidationCities(groups, "flightRoundTrip", { cityId: 92, cityName: "日喀则" })
+      .map((city) => city.cityName),
+    ["北京", "上海"],
+  );
+});
+
 test("班期校验记录尚未可见时只轮询结果，不重复提交资源", async () => {
   const originalFetch = globalThis.fetch;
   const originalDocument = (globalThis as { document?: unknown }).document;
@@ -456,6 +497,62 @@ test("班期校验记录持续不存在时短路停止，不伪装成长时运�
     ), /未启动班期校验.*可安全重试/);
     assert.equal(reads, 5);
     assert.deepEqual(waits, [500, 1_000, 1_500, 1_500]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as { document?: unknown }).document = originalDocument;
+  }
+});
+
+test("班期校验持续进行时一分钟内收口，并持续回传真实轮询进度", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  let reads = 0;
+  const progress: number[] = [];
+  (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
+  globalThis.fetch = (async () => {
+    reads += 1;
+    return new Response(JSON.stringify({
+      ResponseStatus: { Ack: "Success", Errors: [] }, result: "U",
+    }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(() => waitForSegmentSubmit(
+      { evaluate: async (fn, arg) => fn(arg) } as any,
+      "child-1",
+      { sleep: async () => {}, onProgress: (attempt) => { progress.push(attempt); } },
+    ), /仍在 VBK 异步核验.*未重复提交/);
+    assert.equal(reads, 40);
+    assert.deepEqual(progress, [1, 10, 20, 30, 40]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as { document?: unknown }).document = originalDocument;
+  }
+});
+
+test("恢复时只读返回上一次班期校验状态，由上层决定旧任务的一次性迁移", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  const urls: string[] = [];
+  (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
+  globalThis.fetch = (async (input) => {
+    urls.push(String(input));
+    return new Response(JSON.stringify({
+      ResponseStatus: { Ack: "Success", Errors: [] }, result: "U",
+    }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    assert.equal(await recoverPendingTrafficLineSegmentSubmit(
+      { evaluate: async (fn, arg) => fn(arg) } as any,
+      "child-1",
+      "flightRoundTrip",
+      {
+        arrivalCity: "日喀则", departureCity: "日喀则", resolvedAt: "2026-09-09T00:00:00.000Z",
+        flight: { arrival: { code: "RKZ", name: "和平机场" }, departure: { code: "RKZ", name: "和平机场" } },
+      },
+    ), "pending");
+    assert.equal(urls.length, 1);
+    assert.match(urls[0]!, /getSubmitSegmentsResult/);
+    assert.ok(!urls.some((url) => /\/submitSegments(?:\?|$)/.test(url)));
   } finally {
     globalThis.fetch = originalFetch;
     (globalThis as { document?: unknown }).document = originalDocument;
@@ -551,4 +648,14 @@ test("运行阶段不能绕过行程证据门并把部分子产品标记完成",
     log: () => {},
   }), /缺少已核实的行程/);
   assert.equal(calls, 0);
+});
+
+test("执行阶段保留已确认的火车配置，交由平台资源阶段判断可售性", () => {
+  assert.deepEqual(
+    trafficLineConfigForProduct(
+      { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] },
+      { basicInfo: { meetingCity: "日喀则市", destinationCity: "日喀则" }, operations: { pickupCity: "日喀则" } },
+    ),
+    { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] },
+  );
 });

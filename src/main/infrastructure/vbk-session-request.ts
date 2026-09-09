@@ -10,7 +10,7 @@ export interface VbkSessionNativeRequest {
   errorLabel: string;
   headers: Record<string, string>;
   referrer?: string;
-  referrerPolicy?: "strict-origin-when-cross-origin";
+  referrerPolicy?: VbkReferrerPolicy;
   includeCidQuery: boolean;
   requireReadableCid: boolean;
 }
@@ -22,8 +22,11 @@ export interface VbkSessionNativeTextRequest {
   errorLabel: string;
   headers?: Record<string, string>;
   referrer?: string;
-  referrerPolicy?: "strict-origin-when-cross-origin";
+  referrerPolicy?: VbkReferrerPolicy;
 }
+
+/** 仅暴露已由 VBK 接口验证过的来源页策略，避免调用方传入任意字符串。 */
+export type VbkReferrerPolicy = "strict-origin-when-cross-origin" | "no-referrer-when-downgrade";
 
 export interface VbkSessionNativeTextResult {
   status: number;
@@ -63,7 +66,7 @@ export interface VbkSessionRequestOptions<TBody extends object = Record<string, 
   errorLabel: string;
   headers?: Record<string, string>;
   referrer?: string;
-  referrerPolicy?: "strict-origin-when-cross-origin";
+  referrerPolicy?: VbkReferrerPolicy;
   includeCidQuery?: boolean;
   /** 仅少数旧接口硬性要求页面可读 CID；默认允许依赖 HttpOnly/partition Cookie。 */
   requireReadableCid?: boolean;
@@ -125,7 +128,7 @@ export async function vbkSessionRequest<TBody extends object>(
     includeCidQuery: boolean;
     requireReadableCid: boolean;
     referrer?: string;
-    referrerPolicy?: "strict-origin-when-cross-origin";
+    referrerPolicy?: VbkReferrerPolicy;
     timeoutMs: number;
   }) => {
     const controller = new AbortController();

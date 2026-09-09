@@ -46,7 +46,7 @@ export interface BasicInfoSnapshot {
   /**
    * product.presentation.cover 的安全读取结果：返回 shared `ProductCover`
    * discriminated union，使 UI 调用方可以直接消费，无需再做形状转换。
-   *  - source === "ctripLibrary"：poi / description / minQuality 必填；
+   *  - source === "ctripLibrary"：poi 与已选图片必填；
    *  - source === "manualUpload"：fileId / originalName / mimeType / sizeBytes /
    *    uploadedAt 也必须齐全，缺失则整体返回 null（视为未设置）。
    */
@@ -132,16 +132,16 @@ function asProductCover(value: unknown): ProductCover | null {
   const source = value.source;
   if (source !== "ctripLibrary" && source !== "manualUpload") return null;
   const poi = asTrimmedString(value.poi) ?? "";
-  const description = asTrimmedString(value.description) ?? "";
-  const minQuality = asNumber(value.minQuality) ?? 3;
-  if (!poi || !description) return null;
+  const description = asTrimmedString(value.description);
+  const minQuality = asNumber(value.minQuality);
+  if (!poi) return null;
   if (source === "manualUpload") {
     const fileId = asTrimmedString(value.fileId);
     const originalName = asTrimmedString(value.originalName);
     const mimeType = asMimeType(value.mimeType);
     const sizeBytes = asNumber(value.sizeBytes);
     const uploadedAt = asTrimmedString(value.uploadedAt);
-    if (!fileId || !originalName || !mimeType || sizeBytes === null || !uploadedAt) {
+    if (!fileId || !originalName || !mimeType || sizeBytes === null || !uploadedAt || !description || minQuality === null) {
       return null;
     }
     return {
@@ -194,8 +194,8 @@ function asProductCover(value: unknown): ProductCover | null {
     imageId,
     imageUrl,
     poi,
-    description,
-    minQuality,
+    ...(description ? { description } : {}),
+    ...(minQuality !== null ? { minQuality } : {}),
     ...optionalFields,
   };
 }

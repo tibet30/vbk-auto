@@ -48,11 +48,13 @@ class PartialCommercialPlanner implements Planner {
     }
     if (request.stage === "commercial") {
       if (this.mode === "first") {
-        // 第一轮：本地已写 packageName，AI 仅给 pricing；缺 inventory / release。
+        // 第一轮：模型拒绝输出价格；库存可接受，但价格上限也不满足成人价。
         return {
           reply: "com",
           modules: [
-            { module: "pricing", status: "accepted", value: { currency: "CNY", adult: 1000, child: 500, minimumTravelers: 2 } },
+            // 模型给出的上限低于成人价，必须由本地规则按指导价区间修正。
+            { module: "release", status: "accepted", value: { publicPriceCeiling: 500, publicAuditRetries: 3 } },
+            { module: "inventory", status: "accepted", value: { startDate: "2026-08-10", endDate: "2026-12-31", dailyQuota: 6 } },
           ],
         };
       }
@@ -151,7 +153,7 @@ class FakeRuntime implements OrchestratorRuntime {
 
 const skeleton = { destination: "太原", days: 2, nights: 1, productForm: "privateTour" as const, productType: "domesticShort" as const, supplierProductCode: "NEW" };
 
-test("commercial 阶段首轮只 partial accepted → needs_user；resume 后 partial 不被覆盖", async () => {
+test("commercial 阶段缺失价格/发布配置时补入本地指导价，resume 后不覆盖 AI 已接受价格", async () => {
   const store = new InMemoryStore();
   const rt = new FakeRuntime();
   const p1 = new PartialCommercialPlanner("first");
@@ -159,15 +161,16 @@ test("commercial 阶段首轮只 partial accepted → needs_user；resume 后 pa
     localProductId: "p", skeleton, store, runtime: rt, planner: p1, providerLabel: "minimax",
     options: { stageRetryLimit: 1 },
   });
-  // 状态应当进 needs_user：缺 inventory / release。
-  assert.equal(r1.status, "needs_user");
-  const rejected1 = r1.rejected.map((m) => m.module).sort();
-  assert.ok(rejected1.includes("inventory"));
-  assert.ok(rejected1.includes("release"));
-  // packageName 由本地规则生成，pricing 由 AI 落地。
+  assert.equal(r1.status, "completed");
+  // packageName 由本地规则生成；模型遗漏的 pricing 由本地估价补齐。
   const c = rt.product.commercial as Record<string, unknown>;
   assert.equal(c.packageName, "太原2天1晚私家团");
-  assert.equal((c.pricing as { adult: number }).adult, 1000);
+  const estimatedAdult = (c.pricing as { adult: number }).adult;
+  assert.ok(estimatedAdult > 0);
+  assert.equal((c.pricing as { minimumTravelers: number }).minimumTravelers, 1);
+  assert.ok((c.pricing as { cost: { adult: number } }).cost.adult > 0);
+  assert.ok(c.inventory);
+  assert.ok((c.release as { publicPriceCeiling: number }).publicPriceCeiling >= estimatedAdult);
 
   // 第二次 resume：用 second-mode planner 补齐剩余模块。
   const p2 = new PartialCommercialPlanner("second");
@@ -179,7 +182,7 @@ test("commercial 阶段首轮只 partial accepted → needs_user；resume 后 pa
   // 已被接受的 packageName / pricing 仍保留原值。
   const c2 = rt.product.commercial as Record<string, unknown>;
   assert.equal(c2.packageName, "太原2天1晚私家团", "resume 不应覆盖 packageName");
-  assert.equal((c2.pricing as { adult: number }).adult, 1000, "resume 不应覆盖 pricing");
+  assert.equal((c2.pricing as { adult: number }).adult, estimatedAdult, "resume 不应覆盖 pricing");
   // 两个新模块已落地；terms 不属于 AI planning。
   assert.ok(c2.inventory);
   assert.ok(c2.release);

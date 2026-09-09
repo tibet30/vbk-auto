@@ -14,7 +14,7 @@
 
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
-import { preparePhaseRetry, prepareQueuedPhaseResume } from "../phase-retry.js";
+import { prepareBackfilledPhaseRecovery, preparePhaseRetry, prepareQueuedPhaseResume } from "../phase-retry.js";
 import {
   automationBlockers,
   parseProduct,
@@ -122,10 +122,16 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     const scenicSpotLogs: string[] = [];
 
     if (retryFrom && !productDetail.automation) throw new Error("没有可重试的自动录入记录。");
+    const isBackfilledHotelRecovery = retryFrom === "hotelResource"
+      && productDetail.automation?.status === "failed"
+      && !productDetail.automation.phases.some((phase) => phase.phase === "hotelResource")
+      && productDetail.automation.phases.some((phase) => phase.phase === "preflight" && phase.status === "failed");
     const run: AutomationRun = retryFrom
       ? productDetail.automation?.status === "queued"
         ? prepareQueuedPhaseResume(productDetail.automation, draftPhases, retryFrom)
-        : preparePhaseRetry(productDetail.automation!, draftPhases, retryFrom)
+        : isBackfilledHotelRecovery
+          ? prepareBackfilledPhaseRecovery(productDetail.automation!, draftPhases, "hotelResource", "preflight")
+          : preparePhaseRetry(productDetail.automation!, draftPhases, retryFrom)
       : { id: randomUUID(), status: "running", phases: draftPhases.map((phase) => ({ phase, status: "pending" })), logs: [] };
     const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
     const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
@@ -143,7 +149,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           log("正在创建 VBK 产品草稿…");
           // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌
           // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
-          productId = await ctx.runVbkPageExclusive(() => configureProductShellApi(page, product));
+          productId = await ctx.runVbkPageExclusive(() => configureProductShellApi(page, product), "saleControl");
           ctx.db.setProductId(localProductId, productId);
           // configureProductShellApi 已完成销售控制远端回读；先持久化销售控制
           // 的完成态并推送 UI，之后才开始 basic，避免 API 直连模式下阶段状态
@@ -184,7 +190,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
             navigate: (url) => ctx.browser.navigate(url),
             executeApi,
           });
-        });
+        }, phase);
       };
 
       const saveBasicInfo = async () => {
@@ -361,6 +367,10 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const startFrom = Math.max(1, startIndex);
       for (let index = startFrom; index < draftPhases.length; index += 1) {
         const phase = draftPhases[index];
+        if (run.phases[index]?.status === "completed") {
+          log(`跳过已通过远端回读的阶段：${phase}`);
+          continue;
+        }
         const handler = handlers[phase];
         if (!handler) throw new Error(`未注册的阶段：${phase}`);
         log(`正在保存：${phase}`);

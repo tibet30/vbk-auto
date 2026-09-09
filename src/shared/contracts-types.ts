@@ -235,6 +235,8 @@ export interface DisambiguateRequest {
 export interface DisambiguateOutcome {
   /** 选中的候选项 text，未选中返回 null。 */
   pickedText: string | null;
+  /** 模型对本次选择的置信度，范围为 0 到 1。 */
+  confidence: number;
   /** AI 的判断理由（给人看）。 */
   reasoning: string;
 }
@@ -249,7 +251,16 @@ export interface Settings {
   deepseekModel: string;
   hasMiniMaxKey: boolean;
   hasDeepSeekKey: boolean;
+  /** AI 等待用户处理或执行失败时，是否发送 macOS 系统通知。默认开启。 */
+  systemNotificationsEnabled: boolean;
+  /** 当前运行环境是否支持 Electron 原生系统通知。 */
+  systemNotificationsSupported: boolean;
   dataPath: string;
+}
+
+export interface SystemNotificationResult {
+  shown: boolean;
+  message: string;
 }
 
 export interface ConnectionTest {
@@ -296,8 +307,8 @@ export interface AiModelListResult {
 /** 携程图库封面：cover.source === "ctripLibrary"。
  *  - imageId / imageUrl 是「用户在 UI 上选中了一张具体图片」的身份与展示
  *    URL，必须在写入 cover 时一并保存，否则下游无法还原当时选中的图；
- *  - poi / description / minQuality 仍保留给 `selectCtripLibraryCover` 自动化
- *    阶段使用（按 cover.poi 进 VBK 图库弹窗、按 cover.minQuality 兜底过滤）；
+ *  - 自动化仅以 poi（景点 POI）检索图片；description / minQuality 是可选历史元数据，
+ *    不参与选图或准入；
  *  - thumbnailUrl / previewUrl / score / resolution 是 getImageInfo 返回的
  *    派生字段，便于 UI 复核与排查；非必填；
  *  - poiId / poiName 是 getImageInfo 返回的"图片所属 POI"，与候选的搜索
@@ -313,8 +324,8 @@ export interface CtripLibraryCover {
   /** 携程图库图片展示 URL（getImageInfo 返回的 thumbnailUrl / previewUrl / originalUrl 之一）。 */
   imageUrl: string;
   poi: string;
-  description: string;
-  minQuality: number;
+  description?: string;
+  minQuality?: number;
   /** 缩略图 URL（200 档），与 imageUrl 不同时保留以便 UI 区分。 */
   thumbnailUrl?: string;
   /** 预览图 URL（500 档），与 imageUrl 不同时保留以便 UI 区分。 */
@@ -484,7 +495,7 @@ export type ManualReviewFieldInput =
   | { field: "butlerContact"; selection: ContactCardSelection | null }
   /**
    * 产品封面：ctripLibrary / manualUpload 两种形态。cover 形态由 cover.source
-   * 决定：ctripLibrary 仅含 poi/description/minQuality；manualUpload 额外含
+   * 决定：ctripLibrary 以 poi 与已选图片为准，description/minQuality 可选；manualUpload 额外含
    * fileId/originalName/mimeType/sizeBytes/uploadedAt，且 fileId 必须先经
    * main 端 cover:uploadManual 写入本地副本。
    *

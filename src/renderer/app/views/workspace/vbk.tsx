@@ -72,7 +72,9 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [refreshingUrl, setRefreshingUrl] = useState(false);
 
-  const taskList = product?.researchTasks ?? [];
+  const taskList = (product?.researchTasks ?? []).filter(
+    (task) => task.state !== "confirmed" && task.state !== "resolved",
+  );
   const reviewSections = useMemo(
     () => VBK_NAV_SECTIONS.map((section) => ({
       section,
@@ -170,7 +172,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                       })}
                       </div>
                     </div>
-                    {section.key === "trafficLine" ? <TrafficLineProgress automation={product.automation} /> : null}
+                    {section.key === "trafficLine" ? <TrafficLineProgress automation={product.automation} product={product.product} /> : null}
                   </div>
                 );
               })}
@@ -329,7 +331,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
           <div className={tasks.taskRail} data-empty={taskList.length === 0}>
             <div className={tasks.taskRailHead}>
               <strong><CalendarDays size={14} />待核查</strong>
-              <small>{`${taskList.length} 项 · ${taskList.filter((task) => task.state === "confirmed" || task.state === "resolved").length} 已完成`}</small>
+              <small>{`${taskList.length} 项`}</small>
             </div>
             <div className={tasks.taskStrip}>
               {taskList.map((task) => (
@@ -338,10 +340,9 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
                   className={tasks.taskRowGrid}
                   onClick={() => setActiveTaskId(task.id)}
                   data-active={task.id === activeTaskId}
-                  data-done={task.state === "confirmed" || task.state === "resolved"}
                 >
                   <span className={tasks.marker}>
-                    {task.state === "confirmed" || task.state === "resolved" ? <CheckCircle2 size={12} /> : <CircleHelp size={12} />}
+                    <CircleHelp size={12} />
                   </span>
                   <span className={tasks.body}>
                     <span className={tasks.label}>{task.label}</span>

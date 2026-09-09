@@ -668,8 +668,8 @@ test("productCover 拒绝非法 mime / size / 空 POI / 缺 fileId", () => {
   }), /fileId/);
 });
 
-test("productCover 拒绝非法 minQuality（> 5 或 < 0）", () => {
-  assert.throws(() => applyManualReviewField(baseProduct, {
+test("productCover (ctripLibrary) 不以 minQuality 阻断 POI 封面写入", () => {
+  assert.doesNotThrow(() => applyManualReviewField(baseProduct, {
     field: "productCover",
     cover: {
       source: "ctripLibrary",
@@ -679,8 +679,8 @@ test("productCover 拒绝非法 minQuality（> 5 或 < 0）", () => {
       description: "y",
       minQuality: 6,
     },
-  }), /质量分/);
-  assert.throws(() => applyManualReviewField(baseProduct, {
+  }));
+  assert.doesNotThrow(() => applyManualReviewField(baseProduct, {
     field: "productCover",
     cover: {
       source: "ctripLibrary",
@@ -690,7 +690,7 @@ test("productCover 拒绝非法 minQuality（> 5 或 < 0）", () => {
       description: "y",
       minQuality: -1,
     },
-  }), /质量分/);
+  }));
 });
 
 test("productCover 不会写半成品：旧 presentation.cover 不会因失败而被吞掉", () => {

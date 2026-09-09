@@ -18,7 +18,9 @@ import {
 } from "../planning/product-status-sync.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { applyAutoCoverFill } from "../operations/cover-auto-fill.js";
+import { resolveProductTrafficLineAvailability } from "../automation/ctrip/traffic-line/planning-availability.js";
 import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-trigger.js";
+import { syncConfirmedResearchTasksToRemote } from "../operations/research-task-remote-sync.js";
 import { aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import type { MainIpcContext } from "./context.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
@@ -32,7 +34,10 @@ export function registerPlanningIpc(context: MainIpcContext): void {
     completedPoiBackfillPlanner,
     getSettings,
     apiKey,
+    aiService,
     productMutations,
+    remoteProducts,
+    broadcastProduct,
   } = context;
   // 规划算法位于 src/main/planning/*；本文件只负责 IPC 装配、持久化与广播。
 
@@ -105,6 +110,31 @@ export function registerPlanningIpc(context: MainIpcContext): void {
         context.browser,
         productMutations,
         (task) => context.productWorkflows.runVbkPageExclusive(task),
+        (id) => resolveProductTrafficLineAvailability({
+          db, browser: context.browser, localProductId: id,
+          runVbkPageExclusive: (task) => context.productWorkflows.runVbkPageExclusive(task),
+          disambiguateStation: async ({ stationSubtype, desired, product: trafficProduct, candidates }) => {
+            const outcome = await (await aiService()).disambiguateOption({
+              kind: "station",
+              stationSubtype,
+              desired,
+              product: trafficProduct,
+              candidates,
+              usage: { localProductId: id, stage: "trafficLineStationSelection" },
+            });
+            return { pickedText: outcome.pickedText, reasoning: outcome.reasoning };
+          },
+        }),
+        async ({ localProductId: poiProductId, desired, product: poiProduct, candidates }) => {
+          const outcome = await (await aiService()).disambiguateOption({
+            kind: "spot",
+            desired,
+            product: poiProduct,
+            candidates,
+            usage: { localProductId: poiProductId, stage: "planningPoiSelection" },
+          });
+          return { pickedText: outcome.pickedText, confidence: outcome.confidence };
+        },
       );
       const productData = (product.product ?? {}) as Record<string, unknown>;
       const basicInfo = (productData.basicInfo ?? {}) as Record<string, unknown>;
@@ -221,6 +251,7 @@ export function registerPlanningIpc(context: MainIpcContext): void {
                   db.markResearchAccepted(localProductId, task.id, vehicleResult.outcome.reason, "vbk");
                 }
               }
+              await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
               logInfo("[planning] auto vehicle resource resolved", {
                 provider: providerLabel,
                 resourceGroupId: vehicleResult.outcome.resourceGroupId,

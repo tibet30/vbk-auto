@@ -5,7 +5,7 @@ import { buildProductBriefMessageContent } from "../../../../shared/product-brie
 import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
 import { now } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
-import { isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
+import { defaultDailyTransport, isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../../shared/contracts-traffic-line.js";
 
 /** Build the initial product snapshot without writing local or remote state. */
@@ -28,6 +28,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
   const province = "";
   const name = `${destination}${days}天${nights}晚${formLabel}`;
   const hotelTier = inferHotelTierFromUserText(userIdea) ?? DEFAULT_HOTEL_TIER;
+  const splitGroup = productForm === "groupTour" || productForm === "semiSelfGuided";
   const product = {
     sales: {
       // 创建表单只描述目的地、天数与产品形态，并没有机票 / 火车 / 轮船等
@@ -35,7 +36,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
       // 在真正支持大交通卡片前，新建产品统一使用可承载一地地接行程的短途类型。
       productType: "domesticShort",
       productForm,
-      splitGroup: productForm === "groupTour" || productForm === "semiSelfGuided",
+      splitGroup,
       ...(productForm === "groupTour" || productForm === "semiSelfGuided"
         ? { squareGroup: true, maxGroupSize: 8 }
         : {}),
@@ -60,7 +61,10 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
       hotelTier,
       mealsIncluded: false,
       pickupCity: "",
+      transport: defaultDailyTransport(productForm, splitGroup),
       vehicleResource: {},
+      // 新建草稿只知道当地行程与用车；没有明确的可售机票/火车票输入时，不能
+      // 擅自创建飞机或火车往返子产品。
       trafficLine: structuredClone(DEFAULT_TRAFFIC_LINE_CONFIG),
     },
     commercial: { inventory: defaultCommercialInventory() },

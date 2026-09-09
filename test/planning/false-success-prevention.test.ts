@@ -76,7 +76,7 @@ test("部分模块缺失时，状态进入 needs_user，不发完成声明", asy
   // 缺失的模块应当被报告出来。
   const rejectedNames = result.rejected.map((m) => m.module);
   assert.ok(rejectedNames.includes("presentation"), `应当报告 presentation 缺失，实际：${rejectedNames.join(",")}`);
-  assert.ok(rejectedNames.includes("pricing"));
+  // 定价可由本地审核草稿 fallback 写入；图文缺失仍必须保持 needs_user。
   // assistant reply 不能包含「完成 / 全部完成 / 一切就绪」之类虚假措辞。
   assert.ok(!/完成|已成功|全部/.test(result.assistantReply) || result.assistantReply.includes("未完成"),
     `assistant reply 不应虚假声称完成：${result.assistantReply}`);

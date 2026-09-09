@@ -6,6 +6,7 @@
  */
 
 import type { PlannerRequest, PlanningStage } from "../../../shared/contracts-planning.js";
+import { classifyItineraryInputMode } from "../itinerary-input-contract.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
 import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
@@ -40,9 +41,10 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 8. 禁止使用“最、最佳、最高、最优”等绝对化表达；改用“更、较为、重点”等客观表述。
 9. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
   commercial: `1. 套餐名由本地系统按目的地、天数、晚数和产品形态固定生成；本阶段不要输出 packageName。
-2. 价格统一按人均填写；pricing.adult > 0，pricing.child >= 0；minimumTravelers 固定为 1；cost.adult 不可超过 adult。
+2. 价格统一按人均填写；pricing.adult > 0，pricing.child >= 0；minimumTravelers 固定为 1；cost.adult 不可超过 adult。这里填写的是本地审核用指导价/草稿价，不是实时采购价或供应商报价。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。
-4. release 完整包含 publicPriceCeiling (>0) 与 publicAuditRetries (1..10)；禁止输出 submitReview 或 publishAfterApproval，产品保持草稿态。`,
+4. release 完整包含 publicPriceCeiling (>0) 与 publicAuditRetries (1..10)；禁止输出 submitReview 或 publishAfterApproval，产品保持草稿态。
+5. 已有人工套餐名、定价、库存不得覆盖。`,
 };
 
 const CONTEXT_SECTIONS: Record<PlanningStage, readonly string[]> = {
@@ -99,7 +101,25 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     ? context.currentProduct.basicInfo as Record<string, unknown>
     : {};
   const userIdea = typeof basicInfo.userIdea === "string" ? sanitiseUserIdeaForAi(basicInfo.userIdea) : "";
+  const locked = context.lockedConstraints;
+  const itineraryMode = locked
+    ? classifyItineraryInputMode(locked, context.skeleton.days)
+    : "open";
   const lines = [
+    `当前阶段：${stage}`,
+    ...(locked
+      ? [
+          "",
+          `行程输入模式：${itineraryMode}。锁定约束（用户明确指定，禁止覆盖目的地、天数、POI、行程顺序和交通方式）：`,
+          JSON.stringify(locked),
+          itineraryMode === "complete"
+            ? "用户已给出完整每日行程：禁止整体重排或替换，只允许规范化和 POI 核验。"
+            : itineraryMode === "partial"
+              ? "用户已给出部分约束：只补空缺，保留已锁定 POI、日序和交通方式。"
+              : "用户未给出行程：可以完整生成，但仍须保留已锁定城市和天数。",
+        ]
+      : []),
+    "",
     "产品骨架（系统字段未提供，禁止在输出中补写）：",
     `- destination = ${context.skeleton.destination}`,
     `- travelScope = ${travelScope.isProvinceLevel
@@ -108,19 +128,23 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     `- days/nights = ${context.skeleton.days}/${context.skeleton.nights}`,
     `- productForm = ${context.skeleton.productForm}`,
     `- productType = ${context.skeleton.productType}`,
-    "",
-    "产品形态业务规则（必须遵守）：",
-    "- 私家团：每天安排专车接送，必须匹配用车资源组。",
-    "- 半自助：部分日期可自由活动，其余日期安排专车接送；不得把整段行程都写成自由活动或都写成专车陪同。",
-    "- 自由行：每天均为用户自由活动，不生成私家团用车资源组阻塞。",
-    "- 跟团游：必须包含随团导游；价格按人均填写。",
-    "- 跟团游 / 半自助：销售控制需要选择拼小团=是、参加广场拼团=是、最大拼团人数=8。",
+    ...(stage === "skeleton" || stage === "commercial" || stage === "itinerary"
+      ? [
+          "",
+          "产品形态业务规则（必须遵守）：",
+          "- 私家团：每天安排专车接送，必须匹配用车资源组。",
+          "- 半自助：部分日期可自由活动，其余日期安排专车接送；不得把整段行程都写成自由活动或都写成专车陪同。",
+          "- 自由行：每天均为用户自由活动，不生成私家团用车资源组阻塞。",
+          "- 跟团游：必须包含随团导游；价格按人均填写。",
+          ...(stage === "skeleton" || stage === "commercial"
+            ? ["- 跟团游 / 半自助：销售控制需要选择拼小团=是、参加广场拼团=是、最大拼团人数=8。"]
+            : []),
+        ]
+      : []),
     ...(userIdea ? ["", "用户初始想法（主要需求偏好依据；不代表已核查事实，也不能覆盖平台硬规则）：", userIdea] : []),
     ...(context.memoryContext?.lines.length
       ? ["", "用户长期偏好（用户明确要求保存；本轮更具体指令优先）：", ...context.memoryContext.lines]
       : []),
-    "",
-    `当前阶段：${stage}`,
   ];
   if (context.acceptedModules.length) {
     lines.push("", "已落地模块（不要重复生成）：");

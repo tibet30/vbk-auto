@@ -1,4 +1,7 @@
 import type { AiResponse, ProductDetail } from '../../shared/contracts.js';
+import { coerceProductFeaturesHtml } from '../domain/product/features-rich-text.js';
+import { extractLockedConstraints } from './prompt-helpers.js';
+import { itineraryInputContractError } from '../planning/itinerary-input-contract.js';
 
 type Json = Record<string, unknown>;
 type Patch = NonNullable<AiResponse['patch']>;
@@ -14,13 +17,26 @@ export function agentPatchOperations(product: ProductDetail, patch: Json): Patch
   // previously replaced the complete itinerary and silently discarded every
   // `spots` array. Keep generated/rebuilt itineraries on their dedicated tool;
   // this conversational patch path may only overlay the supplied days.
+  const presentationPatch = record(patch.presentation) ? { ...patch.presentation } : undefined;
+  if (presentationPatch && Object.hasOwn(presentationPatch, 'features')) {
+    const features = coerceProductFeaturesHtml(presentationPatch.features);
+    if (!features) throw new Error('presentation.features 必须是非空 HTML 字符串，不能是对象/数组。');
+    presentationPatch.features = features;
+  }
   const effectivePatch: Json = {
     ...patch,
+    ...(presentationPatch ? { presentation: presentationPatch } : {}),
     ...(Object.hasOwn(patch, "itinerary")
       ? { itinerary: mergeItineraryDays(product.product.itinerary, patch.itinerary) }
       : {}),
   };
-  if (Array.isArray(effectivePatch.itinerary)) assertUserNamedSpotsRetained(product, effectivePatch.itinerary);
+  assertTrafficLineEndpointPatch(effectivePatch);
+  if (Array.isArray(effectivePatch.itinerary)) {
+    assertUserNamedSpotsRetained(product, effectivePatch.itinerary);
+    const contractError = itineraryInputContractError(product, effectivePatch.itinerary);
+    if (contractError) throw new Error(contractError);
+  }
+  assertLockedPlanningPatch(product, effectivePatch);
   const operations: Patch = [];
   const walk = (before: unknown, after: unknown, parts: string[]) => {
     const key = parts.at(-1)!;
@@ -42,6 +58,21 @@ export function agentPatchOperations(product: ProductDetail, patch: Json): Patch
   return operations;
 }
 
+/** AI may transcribe an explicit endpoint choice, but availability still owns the sellable variants. */
+function assertTrafficLineEndpointPatch(patch: Json): void {
+  const operations = record(patch.operations) ? patch.operations : undefined;
+  if (!operations || !Object.hasOwn(operations, "trafficLine")) return;
+  const trafficLine = operations.trafficLine;
+  if (!record(trafficLine)) {
+    throw new Error("大交通只能补充明确端点城市；飞机/火车是否可售必须由接口核验。");
+  }
+  for (const [key, value] of Object.entries(trafficLine)) {
+    if (!["arrivalCity", "departureCity"].includes(key) || typeof value !== "string") {
+      throw new Error("大交通只能补充明确端点城市；飞机/火车是否可售必须由接口核验。");
+    }
+  }
+}
+
 /** A conversational edit may refine a user-named stop, but cannot discard it. */
 function assertUserNamedSpotsRetained(product: ProductDetail, itinerary: Json[]): void {
   const basicInfo = record(product.product.basicInfo) ? product.product.basicInfo : {};
@@ -59,6 +90,18 @@ function assertUserNamedSpotsRetained(product: ProductDetail, itinerary: Json[])
         throw new Error(`用户点名景点「${name}」必须保留；未命中真实 POI 时请保留为待手动配置。`);
       }
     }
+  }
+}
+
+function assertLockedPlanningPatch(product: ProductDetail, patch: Json): void {
+  const locked = extractLockedConstraints(product, (product.messages ?? []).filter((message) => message.role === "user"));
+  const basic = record(patch.basicInfo) ? patch.basicInfo : undefined;
+  const operations = record(patch.operations) ? patch.operations : undefined;
+  if (locked.days && basic?.days !== undefined && Number(basic.days) !== locked.days) {
+    throw new Error(`出行天数已锁定为 ${locked.days} 天，不能改为 ${basic.days}`);
+  }
+  if (locked.transport && operations?.transport !== undefined && operations.transport !== locked.transport) {
+    throw new Error(`交通方式已锁定为 ${locked.transport}，不能覆盖`);
   }
 }
 
@@ -93,12 +136,16 @@ function assertPoiReferences(product: ProductDetail, itinerary: unknown): void {
   if (!Array.isArray(itinerary)) throw new Error('行程必须是逐日列表。');
   const originals = new Set<string>();
   for (const day of (product.product.itinerary ?? []) as Json[]) {
-    for (const spot of (day.spots ?? []) as Json[]) if (spot.poiId) originals.add(`${spot.poiId}:${spot.poiName}`);
+    for (const spot of (Array.isArray(day.spots) ? day.spots : []).filter(record)) {
+      if (spot.poiId) originals.add(`${spot.poiId}:${spot.poiName}`);
+    }
   }
   for (const day of itinerary) {
     if (!record(day)) throw new Error('行程日期格式无效。');
     for (const spot of Array.isArray(day.spots) ? day.spots : []) {
-      if (record(spot) && spot.poiId && !originals.has(`${spot.poiId}:${spot.poiName}`)) throw new Error('新增景点不能直接填写 POI ID。先填写名称、poiId=null，再调用 resolve_itinerary_pois。');
+      if (record(spot) && spot.poiId && !originals.has(`${spot.poiId}:${spot.poiName}`)) {
+        throw new Error('行程补丁不能携带新增或改名后的 POI ID。请仅提交 name、timeOfDay、relation 等非 POI 字段；随后调用 resolve_itinerary_pois 统一核验并绑定。');
+      }
     }
     if (Array.isArray(day.hotelCandidates)) {
       const known = new Set(((product.product.itinerary ?? []) as Json[]).flatMap(d=>Array.isArray(d.hotelCandidates)?d.hotelCandidates:[]).map(c=>JSON.stringify(c)));

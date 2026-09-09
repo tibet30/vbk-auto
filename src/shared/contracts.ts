@@ -8,3 +8,4 @@ export * from "./contracts-vbk-binding.js";
 export * from "./contracts-traffic-line.js";
 export * from "./product-form.js";
 export * from "./contracts-agent.js";
+export * from "./system-notification-settings.js";

@@ -70,7 +70,7 @@ export const recommendationItemSchema = z.object({
 /**
  * 产品封面信息契约（presentation.cover）：
  *   - source 必须是 ctripLibrary 或 manualUpload；
- *   - ctripLibrary：携程图库导入流程；poi / description / minQuality 必填；
+ *   - ctripLibrary：携程图库导入流程；只要求景点 poi；
  *   - manualUpload：用户手动上传；本地只存引用 + 元数据，图片二进制不进 product JSON；
  *     fileId 是 main 进程分配给本地副本的稳定 id（用于 UI / 持久化 / 之后排查）。
  *     mimeType 限制在白名单（image/jpeg / image/png / image/webp）以与 cover-storage
@@ -95,15 +95,15 @@ const manualUploadCoverSchema = z.object({
 
 const ctripLibraryCoverSchema = z.object({
   source: z.literal("ctripLibrary").default("ctripLibrary"),
-  // AI 首轮允许先写 cover 语义（poi/description/minQuality），
+  // AI 首轮只需给出代表景点 poi，
   // imageId / imageUrl 由后续携程图库自动补全；真正“封面已完整”的判定
   // 仍由 hasCompleteCtripLibraryCover / review helper / 自动化 readback 单独把关。
   imageId: z.number().int().positive().optional(),
   imageUrl: z.string().min(1).optional(),
-  // 兼容自动化：selectCtripLibraryCover 仍按 cover.poi / cover.minQuality 兜底。
+  // 封面检索只按 cover.poi；其余字段是历史兼容元数据。
   poi: z.string().min(1),
-  description: z.string().min(1),
-  minQuality: z.number().min(0).max(5).default(3),
+  description: z.string().optional(),
+  minQuality: z.number().optional(),
   // 派生 / 审计字段：可缺省，缺省时 UI 走占位。
   thumbnailUrl: z.string().min(1).optional(),
   previewUrl: z.string().min(1).optional(),
@@ -160,11 +160,48 @@ const bookingControlsSchema = z.object({
     .optional(),
 });
 
+const trafficLineStationSchema = z.object({
+  code: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+  resourceKey: z.string().trim().min(1).optional(),
+}).strict();
+
+const trafficLineEndpointPairSchema = z.object({
+  arrival: trafficLineStationSchema,
+  departure: trafficLineStationSchema,
+}).strict();
+
+/**
+ * 当前 VBK 会话的只读端点核验事实。
+ *
+ * 它用于审查区展示“哪些交通方式已筛选确认、可在下一步录入”，不是
+ * trafficLine 子产品已经创建或激活的证明。该对象由受控端点查询写入，
+ * 因此必须纳入严格产品 schema，不能被 readiness 误报为未知字段。
+ */
+const trafficLineAvailabilitySchema = z.object({
+  endpointPlan: z.object({
+    arrivalCity: z.string().trim().min(1),
+    departureCity: z.string().trim().min(1),
+    resolvedAt: z.string().min(1),
+    flight: trafficLineEndpointPairSchema.optional(),
+    train: trafficLineEndpointPairSchema.optional(),
+  }).strict(),
+  availableVariants: z.array(z.enum(TRAFFIC_LINE_VARIANTS)).min(1).max(TRAFFIC_LINE_VARIANTS.length),
+  unavailableVariants: z.object({
+    flightRoundTrip: z.string().min(1).optional(),
+    trainRoundTrip: z.string().min(1).optional(),
+  }).strict(),
+}).strict();
+
 const trafficLineConfigSchema = z.object({
-  // 仅兼容历史数据；新产品由草稿构造器固定创建两种子产品。
+  // 未指定时不创建大交通子产品；接/送站属于地接行程，不等同于售卖往返票。
   enabled: z.boolean().default(DEFAULT_TRAFFIC_LINE_CONFIG.enabled),
   variants: z.array(z.enum(TRAFFIC_LINE_VARIANTS)).max(TRAFFIC_LINE_VARIANTS.length)
     .default(DEFAULT_TRAFFIC_LINE_CONFIG.variants),
+  // 明确指定的端点优先于默认目的地；首末日景点不会参与端点推断。
+  arrivalCity: z.string().trim().min(1).max(50).optional(),
+  departureCity: z.string().trim().min(1).max(50).optional(),
+  availability: trafficLineAvailabilitySchema.optional(),
 }).strict();
 
 const operationsSchema = z.object({

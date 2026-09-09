@@ -39,6 +39,17 @@ export interface TrafficLinePhaseResult {
   children: TrafficLinePhaseResultChild[];
 }
 
+/**
+ * 运行期不再按同城预先删除火车：初始端点接口确认的配置应完整进入平台
+ * 资源校验，由平台的真实可售结果决定是否可创建子产品。
+ */
+export function trafficLineConfigForProduct(
+  config: TrafficLineConfig,
+  _product: Record<string, unknown> | undefined,
+): TrafficLineConfig {
+  return config;
+}
+
 export async function ensureTrafficLinePhase({
   page,
   parentProductId,
@@ -50,7 +61,8 @@ export async function ensureTrafficLinePhase({
   disambiguator,
   product,
 }: TrafficLinePhaseInput): Promise<TrafficLinePhaseResult> {
-  if (!config.enabled || config.variants.length === 0) {
+  const executableConfig = trafficLineConfigForProduct(config, product);
+  if (!executableConfig.enabled || executableConfig.variants.length === 0) {
     log("线路及交通配置未启用或未选择往返类型，跳过该阶段。", "warning");
     return { planEnabled: false, created: 0, reused: 0, blocked: 0, children: [] };
   }
@@ -69,7 +81,7 @@ export async function ensureTrafficLinePhase({
   persist();
   let result: Awaited<ReturnType<typeof ensureTrafficLineApi>>;
   try {
-    result = await ensureTrafficLineApi(page, parentProductId, config, {
+    result = await ensureTrafficLineApi(page, parentProductId, executableConfig, {
       itinerary,
       endpointPlan: progress.endpointPlan,
       rejectedTrainStationCodes: progress.rejectedTrainStationCodes,
@@ -90,6 +102,7 @@ export async function ensureTrafficLinePhase({
         persist();
       },
       onChildProgress: upsert,
+      onStatus: (message) => log(message),
       disambiguator,
       product,
     });

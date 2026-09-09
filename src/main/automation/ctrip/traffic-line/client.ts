@@ -1,5 +1,6 @@
 import {
   vbkSessionRequest,
+  type VbkReferrerPolicy,
   type VbkSessionRequestBrowser,
 } from "../../../infrastructure/vbk-session-request.js";
 
@@ -11,17 +12,24 @@ export const TRAFFIC_LINE_HEAD = {
   cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", extension: [],
 } as const;
 
+export interface TrafficLineRequestContext {
+  referrer?: string;
+  referrerPolicy?: VbkReferrerPolicy;
+}
+
 export async function postTrafficLineSoa(
   page: TrafficLinePage,
   service: "15638" | "20046" | "20049" | "20698",
   method: string,
   body: JsonRecord,
   label: string,
+  context: TrafficLineRequestContext = {},
 ): Promise<JsonRecord> {
   return requestWithSessionAckRetry(page, {
     endpoint: `${TRAFFIC_LINE_SOA}/${service}/${method}`,
     body: { contentType: "json", head: TRAFFIC_LINE_HEAD, ...body },
     headers: { cookieorigin: "https://vbooking.ctrip.com", "x-tt-core": "1" },
+    ...context,
   }, label);
 }
 
@@ -41,7 +49,7 @@ export async function postTrafficLineRaw(
 
 async function requestWithSessionAckRetry(
   page: TrafficLinePage,
-  request: { endpoint: string; body: JsonRecord; headers: Record<string, string> },
+  request: { endpoint: string; body: JsonRecord; headers: Record<string, string> } & TrafficLineRequestContext,
   label: string,
 ): Promise<JsonRecord> {
   for (let attempt = 1; attempt <= 3; attempt += 1) {

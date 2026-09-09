@@ -39,7 +39,7 @@ import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
-import { resolveRunStatusAfterSinglePhaseSuccess } from "./automation.main.run-one-state.js";
+import { resolveRunStatusAfterSinglePhaseSuccess, settleRunAfterVerifiedPreflight } from "./automation.main.run-one-state.js";
 import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 
@@ -125,7 +125,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             navigate: (url) => ctx.browser.navigate(url),
             executeApi,
           });
-        });
+        }, phase);
       };
 
       const saveBasicInfo = async () => {
@@ -297,8 +297,13 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         default: {
           // completed：仅这个阶段被重跑过；后续阶段不动。若刚修复的是最后一
           // 个失败阶段，不能再把整条 run 恢复为 failed，否则 UI 会继续显示卡住。
-          run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
-          run.currentPhase = undefined;
+          if (phaseName === "preflight") {
+            Object.assign(run, settleRunAfterVerifiedPreflight(run));
+            log("最终预检已通过权威回读；所有产品阶段已结案，不会重跑历史待处理阶段。");
+          } else {
+            run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
+            run.currentPhase = undefined;
+          }
           if (run.status === "queued") {
             const nextPhase = run.phases.find((phase) => phase.status === "pending")?.phase;
             log(`阶段 ${phaseName} 已通过远端回读；${nextPhase ? `可从 ${nextPhase} 继续剩余录入。` : "等待继续录入。"}`);

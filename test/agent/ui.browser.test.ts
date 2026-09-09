@@ -17,6 +17,10 @@ test('Agent 协作真实控件：Cursor 式对话、确认、补充与窄屏', a
     const brief = page.locator('article[data-role="user"][data-brief="true"]').first();
     assert.match(await brief.innerText(), /目的地\s*成都/);
     assert.match(await brief.innerText(), /你的想法/);
+    assert.equal(await brief.getByText('演示用户', { exact: true }).count(), 0);
+    assert.equal(await brief.locator('[class*="messageAvatar"]').first().innerText(), '演');
+    assert.equal(await page.locator('[data-thread="assistant"]').first().getByText('AI', { exact: true }).first().isVisible(), true);
+    assert.ok(await page.locator('[data-thread="assistant"]').first().locator('[class*="assistantAvatar"]').count() >= 2);
     assert.ok(await page.getByText('思考片刻',{exact:true}).count() >= 1);
     assert.ok(await page.getByText(/已使用 \d+ 个工具/).count() >= 1);
     assert.equal(await page.getByText('我会先核查适合的景点和酒店，再完善右侧行程。',{exact:true}).isVisible(),true);
@@ -55,6 +59,10 @@ test('Agent 协作真实控件：Cursor 式对话、确认、补充与窄屏', a
     await page.screenshot({path:'/tmp/vbk-agent-ui-desktop.png',fullPage:true});
     await page.getByRole('button',{name:'确认方案并录入 VBK'}).click();
     await page.getByText('已进入 VBK 录入',{exact:true}).waitFor();
+    assert.equal(await page.getByText('确认记录', { exact: true }).isVisible(), true);
+    assert.equal(await page.getByText('任务状态', { exact: true }).isVisible(), true);
+    assert.equal(await page.getByText('用户已授权', { exact: true }).isVisible(), true);
+    await page.screenshot({path:'/tmp/vbk-agent-ui-approved.png',fullPage:true});
     await page.getByRole('textbox',{name:'补充你的要求'}).fill('中文输入仍可用');
     await page.getByRole('button',{name:'发送',exact:true}).click();
     await page.getByText('中文输入仍可用',{exact:true}).waitFor();

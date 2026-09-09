@@ -100,7 +100,7 @@ test("pickFirstUsableCoverCandidate 按顺序挑第一条完整候选", () => {
   assert.equal(pickFirstUsableCoverCandidate(listAllUnresolved), null);
 });
 
-test("pickCoverSearchKeyword 优先 cover.poi，再 itinerary spot，再 basicInfo", () => {
+test("pickCoverSearchKeyword 只从景点 POI 取词，不回退城市", () => {
   // 1) cover.poi 优先。
   const product1 = makeBaseProduct();
   assert.equal(pickCoverSearchKeyword(product1), "云冈石窟");
@@ -113,12 +113,12 @@ test("pickCoverSearchKeyword 优先 cover.poi，再 itinerary spot，再 basicIn
     },
   });
   assert.equal(pickCoverSearchKeyword(product2), "晋祠");
-  // 3) 没有 cover.poi 且 itinerary 为空，回退 basicInfo.destinationCity / meetingCity。
+  // 3) 没有景点 POI 时不把城市当作景点。
   const product3 = makeBaseProduct({
     presentation: { recommendation: "推荐语", features: "产品特点" },
     itinerary: [],
   });
-  assert.equal(pickCoverSearchKeyword(product3), "太原");
+  assert.equal(pickCoverSearchKeyword(product3), null);
   // 4) 都没有 → null。
   const product4 = {
     sales: { productType: "domesticShort", productForm: "privateTour" },
@@ -163,7 +163,7 @@ test("buildCtripLibraryCoverFromCandidate 只合成完整 cover，缺 descriptio
   assert.equal(cover.selectedAt, "2026-08-12T00:00:00.000Z");
 });
 
-test("buildCtripLibraryCoverFromCandidate 缺 existingCover 时使用 fallbackDescription", () => {
+test("buildCtripLibraryCoverFromCandidate 缺 existingCover 时不生成 description 或 minQuality", () => {
   const cover = buildCtripLibraryCoverFromCandidate({
     existingCover: null,
     candidate: {
@@ -178,17 +178,16 @@ test("buildCtripLibraryCoverFromCandidate 缺 existingCover 时使用 fallbackDe
     },
     keyword: "兵马俑",
     selectedAt: "2026-08-12T00:00:00.000Z",
-    fallbackDescription: "千年古都私家定制2日游",
   });
   assert.equal(cover.source, "ctripLibrary");
   assert.equal(cover.imageId, 1);
   assert.equal(cover.imageUrl, "https://img");
   assert.equal(cover.poi, "兵马俑");
-  assert.equal(cover.description, "千年古都私家定制2日游");
-  assert.equal(cover.minQuality, 3);
+  assert.equal(cover.description, undefined);
+  assert.equal(cover.minQuality, undefined);
 });
 
-test("buildCtripLibraryCoverFromCandidate 缺 existingCover 且无 fallbackDescription 时用 keyword 兜底", () => {
+test("buildCtripLibraryCoverFromCandidate 不用 keyword 伪造封面描述", () => {
   const cover = buildCtripLibraryCoverFromCandidate({
     existingCover: null,
     candidate: {
@@ -205,8 +204,8 @@ test("buildCtripLibraryCoverFromCandidate 缺 existingCover 且无 fallbackDescr
     selectedAt: "2026-08-12T00:00:00.000Z",
   });
   assert.equal(cover.poi, "华山");
-  assert.equal(cover.description, "华山 封面图");
-  assert.equal(cover.minQuality, 3);
+  assert.equal(cover.description, undefined);
+  assert.equal(cover.minQuality, undefined);
 });
 
 test("applyAutoCoverFill: cover 已完整时直接跳过，不发请求", async () => {
@@ -284,6 +283,38 @@ test("applyAutoCoverFill: cover 缺 imageId 时按 cover.poi 搜一次并写入�
   assert.equal(nextCover.score, 4.5);
 });
 
+test("applyAutoCoverFill: rejects a complete image that belongs to another POI", async () => {
+  const product = makeBaseProduct({
+    itinerary: [{ day: 1, title: "太原出发", spots: [{ name: "晋祠", poiName: "晋祠", poiId: 1 }] }],
+    presentation: { recommendation: "推荐语", features: "产品特点", cover: { source: "ctripLibrary", poi: "晋祠" } },
+  });
+  const result = await applyAutoCoverFill({
+    page: {} as never,
+    product,
+    injectSearch: async () => ({
+      keyword: "晋祠", poi: "", fetchedAt: "2026-08-12T00:00:00.000Z",
+      candidates: [{ stableId: "wrong", index: 0, quality: "4.5", resolution: "1920*1080", imageId: 111, imageUrl: "https://img", imageResolved: true, poiId: 2, poiName: "大益庄园" }],
+    }),
+  });
+  assert.equal(result.outcome.written, false);
+});
+
+test("applyAutoCoverFill: rejects nameless candidates when itinerary already has bound POI IDs", async () => {
+  const product = makeBaseProduct({
+    itinerary: [{ day: 1, title: "太原出发", spots: [{ name: "晋祠", poiName: "晋祠", poiId: 1 }] }],
+    presentation: { recommendation: "推荐语", features: "产品特点", cover: { source: "ctripLibrary", poi: "晋祠" } },
+  });
+  const result = await applyAutoCoverFill({
+    page: {} as never,
+    product,
+    injectSearch: async () => ({
+      keyword: "晋祠", poi: "", fetchedAt: "2026-08-12T00:00:00.000Z",
+      candidates: [{ stableId: "nameless", index: 0, quality: "4.5", resolution: "1920*1080", imageId: 222, imageUrl: "https://img", imageResolved: true }],
+    }),
+  });
+  assert.equal(result.outcome.written, false);
+});
+
 test("applyAutoCoverFill: search 抛错时返回 { written: false } 不阻塞 draft", async () => {
   const product = makeBaseProduct();
   const page = {
@@ -330,7 +361,7 @@ test("applyAutoCoverFill: manualUpload cover 永不覆盖", async () => {
   assert.equal(result.nextProduct, product);
 });
 
-test("applyAutoCoverFill: cover 缺 description 时跳过，绝不写半成品", async () => {
+test("applyAutoCoverFill: cover 缺 description 仍按景点 POI 选图", async () => {
   const product = makeBaseProduct({
     presentation: {
       recommendation: "推荐语",
@@ -338,13 +369,18 @@ test("applyAutoCoverFill: cover 缺 description 时跳过，绝不写半成品",
       cover: { source: "ctripLibrary", poi: "云冈石窟", description: "", minQuality: 3 },
     },
   });
-  const page = {
-    evaluate: async () => ({ status: 200, durationMs: 1, ctx: { hasCid: true, cookieNameCount: 1, hasGuidCookie: true, hasVbkLoginCidCookie: false }, payload: {} }),
-  };
-  const result = await applyAutoCoverFill({ page: page as never, product });
-  assert.equal(result.outcome.written, false);
-  assert.match(result.outcome.reason, /description/);
-  assert.equal(result.nextProduct, product);
+  const result = await applyAutoCoverFill({
+    page: {} as never,
+    product,
+    injectSearch: async () => ({
+      keyword: "云冈石窟", poi: "云冈石窟", fetchedAt: "2026-08-12T00:00:00.000Z",
+      candidates: [{ stableId: "poi", index: 0, quality: "", resolution: "", imageId: 9, imageUrl: "https://img", imageResolved: true }],
+    }),
+  });
+  assert.equal(result.outcome.written, true);
+  const nextCover = ((result.nextProduct.presentation as Record<string, unknown>).cover) as Record<string, unknown>;
+  assert.equal(nextCover.imageId, 9);
+  assert.equal(nextCover.description, undefined);
 });
 
 test("collectCoverSearchKeywords: cover.poi 优先纳入（不短路），再看 spot.name/poiName/字符串，去重", () => {
@@ -369,12 +405,12 @@ test("collectCoverSearchKeywords: cover.poi 优先纳入（不短路），再看
   });
   assert.deepEqual(collectCoverSearchKeywords(product2), ["晋祠", "云冈石窟", "平遥古城"]);
 
-  // 3) itinerary 为空 → 退回 basicInfo.destinationCity / meetingCity / supplierProductName / subtitle。
+  // 3) itinerary 为空 → 不退回城市或产品文案。
   const product3 = makeBaseProduct({
     presentation: { recommendation: "推荐语", features: "产品特点" },
     itinerary: [],
   });
-  assert.deepEqual(collectCoverSearchKeywords(product3), ["太原"]);
+  assert.equal(collectCoverSearchKeywords(product3), null);
 
   // 4) 全空 → null。
   const product4 = {
@@ -411,7 +447,7 @@ test("collectCoverSearchKeywords: cover.poi 优先纳入（不短路），再看
   });
   assert.deepEqual(collectCoverSearchKeywords(product6), ["晋祠"]);
 
-  // 7) day title 仅在 spot 都没有时才看，且不应"覆盖" spot 已有的关键字。
+  // 7) day title 不是景点 POI，不参与封面检索。
   const product7 = makeBaseProduct({
     presentation: {
       recommendation: "推荐语",
@@ -423,7 +459,7 @@ test("collectCoverSearchKeywords: cover.poi 优先纳入（不短路），再看
       { day: 2, title: "day2 title", spots: [] },
     ],
   });
-  assert.deepEqual(collectCoverSearchKeywords(product7), ["day1 title", "day2 title"]);
+  assert.equal(collectCoverSearchKeywords(product7), null);
 });
 
 test("applyAutoCoverFill: 第一个 POI 候选空/不完整，第二个 POI 成功时用第二个 keyword 写回", async () => {

@@ -97,7 +97,7 @@ const api: VbkApi = {
     listKnownAccounts: () => ipcRenderer.invoke("accounts:listKnownAccounts"),
     providerIdFor: (accountName) => ipcRenderer.invoke("accounts:providerIdFor", accountName),
   },
-  settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input) },
+  settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input), testNotification: () => ipcRenderer.invoke("settings:testNotification"), openNotificationSettings: () => ipcRenderer.invoke("settings:openNotificationSettings") },
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword), suggestPoi: (keyword) => ipcRenderer.invoke("contacts:suggestPoi", keyword) },
   cover: {
     uploadManual: (args) => ipcRenderer.invoke("cover:uploadManual", args),

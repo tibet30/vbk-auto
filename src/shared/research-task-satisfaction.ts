@@ -1,5 +1,5 @@
 import { HOTEL_TIER_VALUES } from "./hotel-tiers.js";
-import { poiResearchTaskName } from "./poi-research-tasks.js";
+import { poiResearchTaskNames } from "./poi-research-tasks.js";
 import {
   hasBorderPermitItineraryTrigger,
   hasResolvedBorderPermitVisibleFields,
@@ -45,6 +45,17 @@ function hasSatisfiedPoiTask(product: ProductLike, taskName: string): boolean {
   return false;
 }
 
+function hasPoiTaskSpot(product: ProductLike, taskName: string): boolean {
+  if (!Array.isArray(product.itinerary)) return false;
+  return product.itinerary.some((day) => {
+    const spots = objectValue(day)?.spots;
+    return Array.isArray(spots) && spots.some((spotValue) => {
+      const spot = objectValue(spotValue);
+      return spot && (textValue(spot.name) === taskName || textValue(spot.poiName) === taskName);
+    });
+  });
+}
+
 export function hasSatisfiedVehicleResource(product: ProductLike): boolean {
   const sales = objectValue(product.sales);
   if (sales?.productForm && sales.productForm !== "privateTour") return true;
@@ -63,22 +74,16 @@ export function isResearchTaskSatisfiedByProduct(
   product: ProductLike,
 ): boolean {
   if (task.type === "image") return false;
-  const poiTaskName = poiResearchTaskName(task.label || "", task.type || "vbk");
-  if (poiTaskName) {
-    const satisfied = hasSatisfiedPoiTask(product, poiTaskName);
-    if (satisfied) return true;
+  const poiTaskNames = poiResearchTaskNames(task.label || "", task.type || "vbk");
+  if (poiTaskNames.length > 0) {
+    // “A 或 B”不是单个 POI。仅当行程里每个备选项均有有效 poiName / poiId
+    // 时才收敛，避免只完成一项便错误放过另一项。
+    if (poiTaskNames.every((name) => hasSatisfiedPoiTask(product, name))) return true;
     // A failed suggestPoi task may become obsolete after the operator replaces
     // that attraction in the current itinerary. Only this explicit failure
     // state is auto-resolved; ordinary missing POI tasks remain actionable.
     if (/suggestPoi\s*未匹配|不能作为行程景点|请替换为可游览景点/i.test(task.detail || "")) {
-      return !Array.isArray(product.itinerary)
-        || !product.itinerary.some((day) => {
-          const spots = objectValue(day)?.spots;
-          return Array.isArray(spots) && spots.some((spotValue) => {
-            const spot = objectValue(spotValue);
-            return spot && (textValue(spot.name) === poiTaskName || textValue(spot.poiName) === poiTaskName);
-          });
-        });
+      return poiTaskNames.every((name) => !hasPoiTaskSpot(product, name));
     }
     return false;
   }

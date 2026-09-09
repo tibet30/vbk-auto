@@ -100,6 +100,44 @@ test("统一写入口只在成功落库后广播最新 ProductDetail", () => {
   assert.equal(saved.status, "review");
 });
 
+test("异步整包补全不能用旧快照抹掉已核验的同名行程 POI", () => {
+  let saved = detail({
+    itinerary: [{
+      day: 2,
+      spots: [{
+        name: "扎什伦布寺",
+        poiName: "扎什伦布寺",
+        poiId: 76348,
+        city: "日喀则",
+      }],
+    }],
+    operations: { transport: "charter" },
+  });
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) => {
+      saved = { ...saved, product: product as ProductDetail["product"], status: status ?? saved.status };
+    },
+  };
+  const service = new ProductMutationService(store);
+
+  service.replace("p-1", {
+    itinerary: [{
+      day: 2,
+      spots: [{ name: "扎什伦布寺", poiName: null, poiId: null }],
+    }],
+    operations: { transport: "charter", vehicleResource: { resourceGroupId: 2206177 } },
+  });
+
+  assert.deepEqual((saved.product.itinerary as Array<{ spots: unknown[] }>)[0]?.spots[0], {
+    name: "扎什伦布寺",
+    poiName: "扎什伦布寺",
+    poiId: 76348,
+    city: "日喀则",
+  });
+  assert.equal(((saved.product.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>).resourceGroupId, 2206177);
+});
+
 test("AI patch 写入待自动补图的 ctripLibrary cover 时不因缺 imageId/imageUrl 被拒", () => {
   let saved = detail({
     sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },

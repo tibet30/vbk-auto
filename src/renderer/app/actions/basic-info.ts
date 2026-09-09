@@ -355,14 +355,13 @@ export function useBasicInfoHandlers(state: AppState) {
 
   /**
    * 把携程图库候选写入 product.presentation.cover：
-   *  - 由候选自动推导出 cover.poi / description / minQuality，并把候选自带的
+   *  - 由候选写入 cover.poi，并把候选自带的
    *    imageId / imageUrl（缺一即拒）以及可选的 thumbnailUrl / previewUrl /
    *    score / resolution / poiId / poiName 一起写入；
    *  - candidate 缺 imageId / imageUrl 时设置 basicInfoErrors.cover 与 notice，
    *    返回 false，不调用 updateReviewField，避免空图被持久化；
-   *  - poi / description 兑底 = `携程图库图片 ${imageId}`，尽量保留候选上的
+   *  - poi 兜底 = `携程图库图片 ${imageId}`，尽量保留候选上的
    *    poiName 让 cover 展示更具语义；
-   *  - minQuality = 3（与 schema 默认保持一致）；
    *  - selectedAt = 写入瞬间的 ISO 时间戳，便于审计与对账；
    *  - 成功后由 product:updated 推送回流；失败把错误贴回 UI。
    */

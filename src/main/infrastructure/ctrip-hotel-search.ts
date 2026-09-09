@@ -7,6 +7,7 @@
 import type { Page } from "playwright";
 import type { CtripHotelCandidate } from "../../shared/contracts-types.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
+import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
 
 export const CTRIP_HOTEL_SUGGEST_ENDPOINT = "https://m.ctrip.com/restapi/soa2/21881/json/gaHotelSearchEngine";
 export { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
@@ -119,12 +120,15 @@ function rankCtripHotelCandidates(rows: unknown[], anchor: Context): CtripHotelC
 export async function resolveItineraryHotelCandidates(
   itinerary: Array<Record<string, unknown>>,
   preferredCity?: string,
+  nights?: number,
 ) {
   const dates = nextHotelSearchDates();
   const dailyCandidates: Array<{ day: number; candidates: CtripHotelCandidate[] }> = [];
   const nextItinerary = structuredClone(itinerary);
+  limitItineraryHotelStays(nextItinerary, nights);
   for (const day of nextItinerary) {
-    if (!text(day.hotel)) continue;
+    // “无” 是送站日等明确不住宿的语义，不能被当作酒店名去查询并写回候选。
+    if (!hasItineraryHotelStay(day.hotel)) continue;
     const spots = Array.isArray(day.spots) ? day.spots.map(record).filter(Boolean) : [];
     const last = spots.at(-1);
     const anchorName = text(last?.poiName) || text(last?.name);
@@ -140,6 +144,28 @@ export async function resolveItineraryHotelCandidates(
   }
   if (!dailyCandidates.length) throw new Error("行程没有需住宿的日期，无法录入酒店候选。");
   return { itinerary: nextItinerary, dailyCandidates, searchDates: dates };
+}
+
+/**
+ * 可配置住宿日不得超过产品 nights。AI 偶尔会给送站日也填酒店，
+ * 会导致 VBK 多建住宿段；保留最早的住宿日，后续统一标为“无”。
+ */
+export function limitItineraryHotelStays(
+  itinerary: Array<Record<string, unknown>>,
+  nights: number | undefined,
+): void {
+  if (!Number.isInteger(nights) || nights === undefined || nights < 0) return;
+  let remaining = nights;
+  for (const day of itinerary) {
+    if (!hasItineraryHotelStay(day.hotel)) continue;
+    if (remaining > 0) {
+      remaining -= 1;
+      continue;
+    }
+    day.hotel = "无";
+    delete day.hotelCandidates;
+    delete day.hotelDescription;
+  }
 }
 
 function nextFlightText(source: string): string | null {

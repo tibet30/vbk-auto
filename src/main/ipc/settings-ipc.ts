@@ -17,6 +17,8 @@ import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { captureRuntimeLog, loadOperationLog } from "../operations/operation-log-store.js";
 import { exportOperationLog, openOperationLogFile } from "../operations/operation-log-export.js";
+import { openSystemNotificationSettings, showSystemNotification } from "../infrastructure/system-notifications.js";
+import { APP_NAME } from "../../shared/brand.js";
 import type { MainIpcContext } from "./context.js";
 
 export function registerSettingsIpc(context: MainIpcContext): void {
@@ -38,6 +40,9 @@ export function registerSettingsIpc(context: MainIpcContext): void {
     assertTrustedSender(event, "settings:save");
     const provider = input.aiProvider;
     if (provider !== undefined && !isAiProvider(provider)) throw new Error("不支持的 AI 提供商。");
+    if (input.systemNotificationsEnabled !== undefined && typeof input.systemNotificationsEnabled !== "boolean") {
+      throw new Error("系统通知开关值无效。");
+    }
 
     const minimaxBaseUrl = input.minimaxBaseUrl?.trim();
     if (minimaxBaseUrl !== undefined) assertSafeAiServiceUrl(minimaxBaseUrl);
@@ -91,6 +96,9 @@ export function registerSettingsIpc(context: MainIpcContext): void {
       }
       // 当前模型最后切换，避免前面任一字段校验失败时留下半切换状态。
       if (provider !== undefined) db.setSetting("aiProvider", provider);
+      if (input.systemNotificationsEnabled !== undefined) {
+        db.setSetting("systemNotificationsEnabled", String(input.systemNotificationsEnabled));
+      }
     } catch (error) {
       // 任意字段失败时不能向前返回半截 settings；直接重抛给 IPC 层。
       throw error;
@@ -101,6 +109,20 @@ export function registerSettingsIpc(context: MainIpcContext): void {
     const resolved = await resolveAiConnectionInput(input, (provider) => apiKey(provider));
     await new MiniMaxService(resolved).testConnection();
     return successfulAiConnectionTest(resolved);
+  });
+  ipcMain.handle("settings:testNotification", async (event) => {
+    assertTrustedSender(event, "settings:testNotification");
+    if (!getSettings().systemNotificationsEnabled) {
+      return { shown: false, message: "请先开启系统通知。" };
+    }
+    return await showSystemNotification({
+      title: `${APP_NAME} · 系统通知测试`,
+      body: "通知已开启。之后 AI 等待回复、等待确认或执行失败时，会在这里提醒你。",
+    });
+  });
+  ipcMain.handle("settings:openNotificationSettings", async (event) => {
+    assertTrustedSender(event, "settings:openNotificationSettings");
+    await openSystemNotificationSettings();
   });
   // 读取自动化操作历史。早期版本返回内存样例，等真实写入路径就绪后再
   // 改读持久化文件；查询语义保持一致以免上层调用方重写。

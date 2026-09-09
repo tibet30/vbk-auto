@@ -134,6 +134,8 @@ export function basicInfoCompletenessIssues(product: Record<string, unknown>): s
 export function automationBlockers(product: Record<string, unknown>, options: { researchTasks?: Array<{ state: string; label?: string; type?: string }> } = {}) {
   const blockers: Array<{ label: string; detail: string }> = [];
   const commercial = product.commercial as Record<string, unknown> | undefined;
+  // 酒店候选、套餐、定价、库存属于权威 preparation evaluator，不进入
+  // computeReadiness / automationBlockers，以免污染旧草稿就绪语义。
   // 1) 核心 VBK 字段契约（ai-planning / account-fixed 缺失 = 阻断）。
   const contract = evaluateAutomationContract(product);
   for (const failure of contract.failures) {

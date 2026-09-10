@@ -1,5 +1,6 @@
 import type { ContactCardSelection } from "../../../../shared/contracts.js";
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
+import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.js";
 import { listProviderContactCards } from "../../../infrastructure/butler-contacts.js";
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
@@ -74,15 +75,7 @@ export function resolveLocalTravelAgency(sourceBooking: Json, agencies: Json[]) 
 }
 
 function ack(payload: unknown, label: string): Json {
-  const root = record(payload);
-  const status = record(root.ResponseStatus);
-  const errors = list(status.Errors);
-  const statusAck = String(status.Ack ?? "");
-  if (statusAck !== "Success" || errors.length) {
-    const detail = errors.map((item) => String(item.Message ?? item.Code ?? "")).filter(Boolean).join("、");
-    throw new Error(`${label}失败（Ack=${statusAck || "缺失"}）${detail ? `：${detail}` : ""}`);
-  }
-  return root;
+  return assertVbkAckSuccess(payload, label) as Json;
 }
 
 async function post(page: VbkSessionRequestBrowser, path: string, body: Json, label: string): Promise<Json> {

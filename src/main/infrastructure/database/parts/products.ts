@@ -330,8 +330,14 @@ export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
  * 写入产品 product_json，可选更新 status。直接覆盖整个 product 字段。
  */
 export function updateProduct(db: Database.Database, id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) {
-  db.prepare("UPDATE products SET product_json=?, status=COALESCE(?,status), updated_at=? WHERE id=?")
-    .run(JSON.stringify(product), status || null, now(), id);
+  const basicInfo = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
+    ? product.basicInfo as Record<string, unknown>
+    : undefined;
+  const nextName = typeof basicInfo?.supplierProductName === "string"
+    ? basicInfo.supplierProductName.trim()
+    : "";
+  db.prepare("UPDATE products SET product_json=?, name=CASE WHEN ?<>'' THEN ? ELSE name END, status=COALESCE(?,status), updated_at=? WHERE id=?")
+    .run(JSON.stringify(product), nextName, nextName, status || null, now(), id);
 }
 
 /**

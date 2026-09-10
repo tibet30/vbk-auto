@@ -112,6 +112,18 @@ const ctripLibraryCoverSchema = z.object({
   poiId: z.number().int().positive().optional(),
   poiName: z.string().min(1).optional(),
   selectedAt: z.string().min(1).optional(),
+  alternates: z.array(z.object({
+    imageId: z.number().int().positive(),
+    imageUrl: z.string().min(1),
+    poi: z.string().min(1),
+    thumbnailUrl: z.string().min(1).optional(),
+    previewUrl: z.string().min(1).optional(),
+    score: z.number().optional(),
+    resolution: z.string().min(1).optional(),
+    poiId: z.number().int().positive().optional(),
+    poiName: z.string().min(1).optional(),
+    selectedAt: z.string().min(1).optional(),
+  }).strict()).optional(),
 });
 
 const presentationCoverSchema = z.discriminatedUnion("source", [

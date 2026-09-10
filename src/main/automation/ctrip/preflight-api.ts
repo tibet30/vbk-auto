@@ -1,5 +1,6 @@
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { getProductBaseInfoApi } from "./basic-info/api.js";
 import { ensureHotelResourceApi } from "./hotel-resource-api.js";
 import { fetchTourDailyDetail, fetchTourInfoId } from "./itinerary-api/steps.js";
@@ -28,13 +29,7 @@ async function post(page: any, path: string, body: Json, label: string): Promise
     headers: { cookieorigin: "https://vbooking.ctrip.com" },
     body: { contentType: "json", head: HEAD, ...body },
   });
-  const payload = record(response.payload);
-  const status = record(payload.ResponseStatus);
-  const errors = list(status.Errors);
-  if (String(status.Ack ?? "") !== "Success" || errors.length) {
-    throw new Error(`${label}失败（Ack=${String(status.Ack ?? "缺失")}）`);
-  }
-  return payload;
+  return assertVbkAckSuccess(response.payload, label) as Json;
 }
 
 function remoteDate(row: Json): string {

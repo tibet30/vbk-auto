@@ -488,7 +488,10 @@ function CoverDisplay({
           ) : null}
         </div>
         {cover.source === "ctripLibrary" ? (
-          <CtripCoverMeta cover={cover} />
+          <>
+            <CtripCoverMeta cover={cover} />
+            <CtripCoverAlternates cover={cover} onOpenImage={onOpenImage} />
+          </>
         ) : (
           <span className={styles.hint}>
             文件：{cover.originalName} · {(cover.sizeBytes / 1024).toFixed(1)} KiB · 上传于 {formatTimestamp(cover.uploadedAt)}
@@ -512,6 +515,52 @@ function CtripCoverMeta({ cover }: { cover: Extract<ProductCover, { source: "ctr
       {typeof cover.score === "number" ? <> · 质量分 {cover.score.toFixed(1)}</> : null}
       {cover.resolution ? <> · {cover.resolution}</> : null}
     </span>
+  );
+}
+
+function CtripCoverAlternates({
+  cover,
+  onOpenImage,
+}: {
+  cover: Extract<ProductCover, { source: "ctripLibrary" }>;
+  onOpenImage: (item: ImageLightboxItem) => void;
+}) {
+  const alternates = Array.isArray(cover.alternates) ? cover.alternates.slice(0, 2) : [];
+  if (alternates.length === 0) return null;
+  return (
+    <div className={styles.coverAlternates} aria-label={`备用封面 ${alternates.length} 张`} data-testid="cover-alternates">
+      <span className={styles.coverAlternatesTitle}>备用封面 {alternates.length} 张</span>
+      <div className={styles.coverAlternatesList}>
+        {alternates.map((alternate) => {
+          const title = alternate.poi || alternate.poiName || `imageId ${alternate.imageId}`;
+          return (
+            <button
+              type="button"
+              key={alternate.imageId}
+              className={styles.coverAlternate}
+              onClick={() => onOpenImage({
+                src: alternate.imageUrl,
+                alt: title,
+                title,
+                subtitle: `备用封面 · imageId ${alternate.imageId}`,
+              })}
+              aria-label={`放大查看备用封面：${title}`}
+              title="放大查看备用封面"
+            >
+              <img className={styles.coverAlternateThumb} src={alternate.imageUrl} alt={title} loading="lazy" />
+              <span className={styles.coverAlternateMeta}>
+                <strong>{title}</strong>
+                <span>
+                  imageId <span className={styles.rowMetaMono}>{alternate.imageId}</span>
+                  {typeof alternate.score === "number" ? <> · {alternate.score.toFixed(1)}</> : null}
+                  {alternate.resolution ? <> · {alternate.resolution}</> : null}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

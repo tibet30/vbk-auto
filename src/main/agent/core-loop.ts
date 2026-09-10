@@ -1,9 +1,10 @@
 import type { AgentSnapshot } from "../../shared/contracts.js";
 import { completeWithRetries } from "./core-model.js";
-import { AgentSnapshotManager, type AgentStreamState, type TurnToken } from "./core-snapshot.js";
+import { AgentSnapshotManager, materialWriteResults, type AgentStreamState, type TurnToken } from "./core-snapshot.js";
 import { AgentToolRunner } from "./core-tools.js";
 import { buildModelMessages } from "./core-transcript.js";
 import { cleanList, nativeToolSchemas } from "./core-validation.js";
+import { formatToolCallPreamble } from "./tool-call-preamble.js";
 import type { AgentCoreDependencies, AgentModelMessage, AgentToolCall } from "./types.js";
 
 /** Model-turn scheduler: tool batches, completion gate, and round limit. */
@@ -62,13 +63,13 @@ export class AgentTurnLoop {
         if (!this.snapshots.current(current, token)) continue;
         const calls = output.toolCalls ?? [];
         const streamedEvent = current.events.find((event) => event.id === streamState.eventId);
-        if (streamedEvent && output.content) {
-          streamedEvent.content = output.content;
-          streamedEvent.data = { ...streamedEvent.data, streaming: false };
-        } else if (streamedEvent) {
-          current.events = current.events.filter((event) => event.id !== streamedEvent.id);
-        }
         if (!calls.length) {
+          if (streamedEvent && output.content) {
+            streamedEvent.content = output.content;
+            streamedEvent.data = { ...streamedEvent.data, streaming: false };
+          } else if (streamedEvent) {
+            current.events = current.events.filter((event) => event.id !== streamedEvent.id);
+          }
           if (output.content && !streamedEvent) this.snapshots.event(current, "assistant", output.content);
           this.snapshots.save(current);
           await this.handleNoTool(id, token);
@@ -76,7 +77,19 @@ export class AgentTurnLoop {
           continue;
         }
 
-        if (output.content && !streamedEvent) this.snapshots.event(current, "assistant", output.content, { modelTurnId });
+        const toolPreamble = (output.content?.trim() ? output.content : formatToolCallPreamble(calls)).trim();
+        if (streamedEvent) {
+          streamedEvent.content = toolPreamble;
+          streamedEvent.data = {
+            ...streamedEvent.data,
+            streaming: false,
+            ...(!output.content?.trim() ? { generatedToolPreamble: true } : {}),
+          };
+        } else if (output.content && !streamedEvent) {
+          this.snapshots.event(current, "assistant", output.content, { modelTurnId });
+        } else if (!streamedEvent) {
+          this.snapshots.event(current, "assistant", toolPreamble, { modelTurnId, generatedToolPreamble: true });
+        }
         calls.forEach((call, index) => this.snapshots.event(current, "tool_call", call.name, {
           modelTurnId, toolCallId: call.id, name: call.name, arguments: call.arguments, index, count: calls.length,
           ...(call.rawArguments !== undefined ? { rawArguments: call.rawArguments } : {}),
@@ -127,9 +140,9 @@ export class AgentTurnLoop {
   private async handleNoTool(id: string, token: TurnToken): Promise<void> {
     let snapshot = this.snapshots.load(id);
     if (!this.snapshots.current(snapshot, token) || !snapshot.run) return;
-    const results = snapshot.events.filter((event) => event.runId === snapshot.run!.id && event.type === "tool_result");
-    const hadWrites = results.some((event) => event.data?.write === true);
-    const hadRemoteWrites = results.some((event) => event.data?.remoteWrite === true);
+    const writes = materialWriteResults(snapshot, snapshot.run.id);
+    const hadWrites = writes.length > 0;
+    const hadRemoteWrites = writes.some((event) => event.data?.remoteWrite === true);
     if (!hadWrites) { this.snapshots.finish(snapshot); this.snapshots.save(snapshot); return; }
     if (!this.deps.finishVerified) {
       if (!hadRemoteWrites) this.snapshots.finish(snapshot);

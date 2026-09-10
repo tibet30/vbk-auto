@@ -40,6 +40,23 @@ test("native transcript keeps one assistant multi-call message adjacent to all r
   assert.deepEqual(history.slice(2).map((message) => message.toolCallId), ["call-a", "call-b"]);
 });
 
+test("tool calls without assistant text get a visible pre-call explanation", async () => {
+  const { core, saved } = protocolHarness([
+    { toolCalls: [{ id: "call-a", name: "read_product", arguments: {} }] },
+    { content: "done" },
+  ]);
+  await core.send("protocol-preamble", "start");
+  await core.idle("protocol-preamble");
+  const events = saved.get("protocol-preamble")!.events;
+  const assistantIndex = events.findIndex((event) => event.type === "assistant"
+    && event.data?.generatedToolPreamble === true);
+  const callIndex = events.findIndex((event) => event.type === "tool_call"
+    && event.data?.toolCallId === "call-a");
+  assert.ok(assistantIndex >= 0);
+  assert.ok(callIndex > assistantIndex);
+  assert.match(events[assistantIndex]!.content, /我先读取当前产品/);
+});
+
 test("waiting in a multi-call group cancels omitted calls and keeps protocol valid after response", async () => {
   const { core, inputs } = protocolHarness([
     { toolCalls: [
@@ -136,6 +153,60 @@ test("pure queries complete without invoking a write completion gate", async () 
   await core.idle("query");
   assert.equal((await core.get("query")).run?.status, "completed");
   assert.equal(gates, 0);
+});
+
+test("denied, cancelled, failed, and no-op local writers complete without final approval", async () => {
+  for (const [id, data] of [
+    ["denied", { preparationDenied: true, changedSections: [] }],
+    ["cancelled", { cancelled: true }],
+    ["failed", { error: "write failed" }],
+    ["no-op", { changedSections: [] }],
+  ] as const) {
+    const { core, deps } = protocolHarness([
+      { toolCalls: [{ id: `${id}-write`, name: "local", arguments: {} }] },
+      { content: "保持现状" },
+    ]);
+    let gates = 0;
+    deps.tools = [{ name: "local", description: "local", parameters: { type: "object" }, write: true,
+      requiresApproval: false, execute: async () => ({ content: "unchanged", data: { ...data } }) }];
+    deps.finishVerified = async () => {
+      gates += 1;
+      return { verified: false, finalApproval: { scope: ["vbk.write_phase:basic"], summary: "不应出现" } };
+    };
+    await core.send(id, "保持现状");
+    await core.idle(id);
+    const snapshot = await core.get(id);
+    assert.equal(snapshot.run?.status, "completed");
+    assert.equal(snapshot.pendingApproval, undefined);
+    assert.equal(gates, 0);
+  }
+});
+
+test("reading repairs a legacy synthetic approval created from a denied write", async () => {
+  const { core, saved } = protocolHarness([]);
+  const approval = {
+    id: "legacy-approval", productVersion: "version", accountKey: "account",
+    scope: ["vbk.write_phase:basic"], summary: "错误确认", status: "pending" as const,
+    createdAt: "2026-09-05T00:00:00.000Z", intentVersion: "intent",
+  };
+  saved.set("legacy-noop", {
+    localProductId: "legacy-noop",
+    run: { id: "legacy-run", status: "waiting_approval", createdAt: "2026-09-05T00:00:00.000Z",
+      updatedAt: "2026-09-05T00:00:00.000Z", intentVersion: "intent" },
+    pendingApproval: approval,
+    events: [
+      { id: "result", runId: "legacy-run", type: "tool_result", createdAt: "2026-09-05T00:00:00.000Z",
+        content: "denied", data: { toolCallId: "write", write: true, remoteWrite: false,
+          preparationDenied: true, changedSections: [] } },
+      { id: "approval", runId: "legacy-run", type: "approval_request", createdAt: "2026-09-05T00:00:00.000Z",
+        content: "错误确认", data: { approval } },
+    ],
+  });
+  const snapshot = await core.get("legacy-noop");
+  assert.equal(snapshot.run?.status, "completed");
+  assert.equal(snapshot.pendingApproval, undefined);
+  assert.ok(snapshot.events.some((event) => event.type === "approval"
+    && /错误确认请求/.test(event.content)));
 });
 
 test("write completion gate can create a durable final approval without a synthetic tool result", async () => {

@@ -171,6 +171,7 @@ function asProductCover(value: unknown): ProductCover | null {
     poiId?: number;
     poiName?: string;
     selectedAt?: string;
+    alternates?: NonNullable<Extract<ProductCover, { source: "ctripLibrary" }>["alternates"]>;
   } = {};
   const thumbnailUrl = asTrimmedString(value.thumbnailUrl);
   if (thumbnailUrl) optionalFields.thumbnailUrl = thumbnailUrl;
@@ -188,6 +189,34 @@ function asProductCover(value: unknown): ProductCover | null {
   if (poiName) optionalFields.poiName = poiName;
   const selectedAt = asTrimmedString(value.selectedAt);
   if (selectedAt) optionalFields.selectedAt = selectedAt;
+  const alternates = Array.isArray(value.alternates)
+    ? value.alternates.flatMap((item) => {
+        if (!isObject(item)) return [];
+        const alternateImageId = asPositiveInteger(item.imageId);
+        const alternateImageUrl = asTrimmedString(item.imageUrl);
+        const alternatePoi = asTrimmedString(item.poi);
+        if (alternateImageId === null || !alternateImageUrl || !alternatePoi) return [];
+        const alternateThumbnailUrl = asTrimmedString(item.thumbnailUrl);
+        const alternatePreviewUrl = asTrimmedString(item.previewUrl);
+        const alternateResolution = asTrimmedString(item.resolution);
+        const alternatePoiId = asPositiveInteger(item.poiId);
+        const alternatePoiName = asTrimmedString(item.poiName);
+        const alternateSelectedAt = asTrimmedString(item.selectedAt);
+        return [{
+          imageId: alternateImageId,
+          imageUrl: alternateImageUrl,
+          poi: alternatePoi,
+          ...(alternateThumbnailUrl ? { thumbnailUrl: alternateThumbnailUrl } : {}),
+          ...(alternatePreviewUrl ? { previewUrl: alternatePreviewUrl } : {}),
+          ...(typeof item.score === "number" && Number.isFinite(item.score) ? { score: item.score } : {}),
+          ...(alternateResolution ? { resolution: alternateResolution } : {}),
+          ...(alternatePoiId !== null ? { poiId: alternatePoiId } : {}),
+          ...(alternatePoiName ? { poiName: alternatePoiName } : {}),
+          ...(alternateSelectedAt ? { selectedAt: alternateSelectedAt } : {}),
+        }];
+      })
+    : [];
+  if (alternates.length > 0) optionalFields.alternates = alternates;
 
   return {
     source: "ctripLibrary",

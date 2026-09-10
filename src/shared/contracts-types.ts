@@ -340,6 +340,21 @@ export interface CtripLibraryCover {
   poiName?: string;
   /** UI 上确认选中的时间（ISO 字符串）。 */
   selectedAt?: string;
+  /** 备用携程图库图片；自动化写入封面时会在主图失败后按顺序尝试。 */
+  alternates?: CtripLibraryCoverAlternate[];
+}
+
+export interface CtripLibraryCoverAlternate {
+  imageId: number;
+  imageUrl: string;
+  poi: string;
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  score?: number;
+  resolution?: string;
+  poiId?: number;
+  poiName?: string;
+  selectedAt?: string;
 }
 
 /** 手动上传封面：cover.source === "manualUpload"。

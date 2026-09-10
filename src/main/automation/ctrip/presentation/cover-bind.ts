@@ -9,6 +9,7 @@ import {
   type VbkSessionRequestBrowser,
   type VbkSessionRequestResult,
 } from "../../../infrastructure/vbk-session-request.js";
+import { describeVbkFailureDetail } from "../../../infrastructure/vbk-response-error.js";
 
 const BIND_PRODUCT_IMAGE_ENDPOINT =
   "https://online.ctrip.com/restapi/soa2/20698/bindProductImage.json";
@@ -231,16 +232,19 @@ function assertBusinessSuccess(
   requireSuccess: boolean,
 ): void {
   if (result.status < 200 || result.status >= 300) {
-    throw new Error(`${label}失败：HTTP ${result.status}`);
+    const detail = describeVbkFailureDetail(result.payload);
+    throw new Error(`${label}失败：HTTP ${result.status}${detail ? `；${detail}` : ""}`);
   }
   const payload = asRecord(result.payload);
   const ack = String(asRecord(payload?.ResponseStatus)?.Ack ?? "");
   if (ack === "Failure" || ack === "Warning") {
-    throw new Error(`${label}失败：Ack=${ack}`);
+    const detail = describeVbkFailureDetail(payload);
+    throw new Error(`${label}失败：Ack=${ack}${detail ? `；${detail}` : ""}`);
   }
   if (requireSuccess && payload?.success !== true) {
-    const message = typeof payload?.message === "string" ? `：${payload.message}` : "";
-    throw new Error(`${label}失败：接口未返回 success=true${message}`);
+    const message = describeVbkFailureDetail(payload)
+      || (typeof payload?.message === "string" ? payload.message : "");
+    throw new Error(`${label}失败：接口未返回 success=true${message ? `：${message}` : ""}`);
   }
 }
 

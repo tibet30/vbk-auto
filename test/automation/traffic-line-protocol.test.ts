@@ -111,7 +111,10 @@ test("初始状态、Ack 和业务错误均严格校验", () => {
     parseInitialState('<script>window.__INITIAL_STATE__ = {"text":"} ; window.fake","childList":[]}\nwindow.__APP_SETTINGS__={}</script>', "测试页"),
     { text: "} ; window.fake", childList: [] },
   );
-  assert.throws(() => assertTrafficLineAck({ ResponseStatus: { Ack: "Success", Errors: [{ Message: "bad" }] } }, "写入"), /bad/);
+  assert.throws(
+    () => assertTrafficLineAck({ ResponseStatus: { Ack: "Success", Errors: [{ ErrorCode: "20018030", Message: "bad" }] } }, "写入"),
+    /20018030: bad/,
+  );
   assert.throws(() => assertTrafficLineAck({ ResponseStatus: { Ack: "Warning" } }, "写入"), /Ack=Warning/);
   assert.deepEqual(assertTrafficLineAck({ ResponseStatus: { Ack: "Success", Errors: [] }, data: {} }, "写入").data, {});
 });

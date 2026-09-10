@@ -188,6 +188,15 @@ test("BasicInfoCoverRow 已选 ctripLibrary cover 使用 imageUrl 渲染 + 显�
   assert.match(coverRowCode, /cover\.resolution/);
 });
 
+test("BasicInfoCoverRow 已选 ctripLibrary cover 会展示备用封面缩略图", () => {
+  assert.match(coverRowCode, /CtripCoverAlternates/);
+  assert.match(coverRowCode, /cover\.alternates/);
+  assert.match(coverRowCode, /备用封面/);
+  assert.match(coverRowCode, /data-testid="cover-alternates"/);
+  assert.match(coverRowStyleSource, /\.coverAlternates\b/);
+  assert.match(coverRowStyleSource, /\.coverAlternateThumb\b/);
+});
+
 test("BasicInfoCoverRow manualUpload 预览走 data URL，不再声称 file:// / file 路径", () => {
   // manualUpload 预览依靠 cover.read 返回的 data URL（
   //  data:${mime};base64,...），文件丢失返回 null；不再走 file://。

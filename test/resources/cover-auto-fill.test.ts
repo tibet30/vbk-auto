@@ -283,6 +283,51 @@ test("applyAutoCoverFill: cover 缺 imageId 时按 cover.poi 搜一次并写入�
   assert.equal(nextCover.score, 4.5);
 });
 
+test("applyAutoCoverFill: 从不同景点各准备一张图，主图后写入备用候选", async () => {
+  const product = makeBaseProduct({
+    presentation: {
+      recommendation: "推荐语",
+      features: "产品特点",
+      cover: { source: "ctripLibrary", poi: "", description: "d", minQuality: 3 },
+    },
+    itinerary: [
+      { day: 1, title: "太原", spots: [{ name: "晋祠" }] },
+      { day: 2, title: "云冈石窟", spots: [{ name: "云冈石窟" }] },
+      { day: 3, title: "平遥", spots: [{ name: "平遥古城" }] },
+    ],
+  });
+  const result = await applyAutoCoverFill({
+    page: {} as never,
+    product,
+    now: () => "2026-08-12T00:00:00.000Z",
+    injectSearch: async (_page, keyword) => ({
+      keyword,
+      poi: "",
+      fetchedAt: "2026-08-12T00:00:00.000Z",
+      candidates: [
+        {
+          stableId: keyword,
+          index: 0,
+          quality: "4.5",
+          resolution: "1920*1080",
+          imageId: keyword === "晋祠" ? 111 : keyword === "云冈石窟" ? 222 : 333,
+          imageUrl: `https://img/${keyword}`,
+          imageResolved: true,
+          poiName: keyword,
+        },
+      ],
+    }),
+  });
+  assert.equal(result.outcome.written, true);
+  assert.deepEqual(result.outcome.imageIds, [111, 222, 333]);
+  const nextCover = ((result.nextProduct.presentation as Record<string, unknown>).cover) as Record<string, unknown>;
+  assert.equal(nextCover.imageId, 111);
+  assert.deepEqual(
+    (nextCover.alternates as Array<Record<string, unknown>>).map((item) => [item.poi, item.imageId]),
+    [["云冈石窟", 222], ["平遥古城", 333]],
+  );
+});
+
 test("applyAutoCoverFill: rejects a complete image that belongs to another POI", async () => {
   const product = makeBaseProduct({
     itinerary: [{ day: 1, title: "太原出发", spots: [{ name: "晋祠", poiName: "晋祠", poiId: 1 }] }],

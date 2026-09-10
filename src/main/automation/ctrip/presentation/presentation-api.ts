@@ -3,6 +3,7 @@ import {
   type VbkSessionRequestBrowser,
   type VbkSessionRequestResult,
 } from "../../../infrastructure/vbk-session-request.js";
+import { describeVbkFailureDetail } from "../../../infrastructure/vbk-response-error.js";
 import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../../domain/product/features-rich-text.js";
 import { buildRecommendationReasonsPlan, type RecommendationPlanStep } from "./recommendations.js";
 import { readProductIdFromVbkUrl } from "./cover-bind.js";
@@ -216,11 +217,17 @@ function assertSaveSuccess(result: VbkSessionRequestResult, label: string): void
 }
 
 function assertAckSuccess(result: VbkSessionRequestResult, label: string): void {
-  if (result.status < 200 || result.status >= 300) throw new Error(`${label}失败：HTTP ${result.status}`);
+  if (result.status < 200 || result.status >= 300) {
+    const detail = describeVbkFailureDetail(result.payload);
+    throw new Error(`${label}失败：HTTP ${result.status}${detail ? `；${detail}` : ""}`);
+  }
   const payload = asRecord(result.payload);
   const ack = text(asRecord(payload?.ResponseStatus)?.Ack);
   if (ack && ack !== "Success") {
-    const detail = text(payload?.checkErrMsg) || text(payload?.errorMsg) || text(payload?.message);
+    const detail = describeVbkFailureDetail(payload)
+      || text(payload?.checkErrMsg)
+      || text(payload?.errorMsg)
+      || text(payload?.message);
     throw new Error(`${label}失败：Ack=${ack}${detail ? `：${detail}` : ""}`);
   }
 }

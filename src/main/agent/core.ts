@@ -5,7 +5,7 @@ import type {
 import { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
 import { AgentHandoff } from "./core-handoff.js";
 import { AgentTurnLoop } from "./core-loop.js";
-import { AgentSnapshotManager, type NoProgressBlocker } from "./core-snapshot.js";
+import { AgentSnapshotManager, hasSyntheticNoopApproval, type NoProgressBlocker } from "./core-snapshot.js";
 import { AgentToolRunner } from "./core-tools.js";
 import { validateAnswers } from "./core-validation.js";
 import type { AgentCoreDependencies, AgentSnapshotStore } from "./types.js";
@@ -45,6 +45,11 @@ export class AgentCore {
       if (detached && !handingOff) this.snapshots.interruptStreaming(snapshot, "应用中断，回复未完成。");
       if (snapshot.run?.status === "running" && detached && !handingOff) {
         this.pauseRun(snapshot, "应用重启后已在安全检查点暂停。");
+      }
+      if (hasSyntheticNoopApproval(snapshot)) {
+        this.cancelPendingInteraction(snapshot, "已清除由未生效操作产生的错误确认请求。");
+        this.snapshots.finish(snapshot);
+        return this.save(snapshot);
       }
       if (snapshot.pendingApproval?.status === "pending") {
         const blocker = await this.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);

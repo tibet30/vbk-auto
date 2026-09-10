@@ -1,5 +1,6 @@
 import { PRODUCT_FORM_LABELS, PRODUCT_TYPE_LABELS } from "../../constants.js";
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
+import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.js";
 import { supportsSmallGroupSettings, type ProductForm } from "../../../../shared/product-form.js";
 import { getProductBaseInfoApi } from "../basic-info/api.js";
 
@@ -17,14 +18,7 @@ function list(value: unknown): Json[] {
 }
 
 function assertAck(payload: unknown, label: string): Json {
-  const root = record(payload);
-  const status = record(root.ResponseStatus);
-  const errors = list(status.Errors);
-  if (String(status.Ack ?? "") !== "Success" || errors.length) {
-    const detail = errors.map((item) => String(item.Message ?? item.Code ?? "")).filter(Boolean).join("、");
-    throw new Error(`${label}失败（Ack=${String(status.Ack ?? "缺失")}）${detail ? `：${detail}` : ""}`);
-  }
-  return root;
+  return assertVbkAckSuccess(payload, label) as Json;
 }
 
 async function post(page: VbkSessionRequestBrowser, path: string, body: Json, label: string): Promise<Json> {

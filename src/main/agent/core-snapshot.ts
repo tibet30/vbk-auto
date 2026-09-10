@@ -9,6 +9,30 @@ export interface TurnToken { runId: string; userEventId?: string; modelTurnId?: 
 export interface AgentStreamState { eventId?: string; lastSavedAt: number; }
 export type NoProgressBlocker = "approval_precondition" | "authorization_denied" | "completion_blocked";
 
+/** A tool being classified as a writer is not proof that it changed anything. */
+export function isMaterialWriteResult(event: AgentEvent): boolean {
+  if (event.type !== "tool_result" || event.data?.write !== true) return false;
+  if (event.data.preparationDenied === true || event.data.cancelled === true
+    || event.data.uncertainWrite === true || event.data.error !== undefined) return false;
+  return !Array.isArray(event.data.changedSections) || event.data.changedSections.length > 0;
+}
+
+export function materialWriteResults(snapshot: AgentSnapshot, runId = snapshot.run?.id): AgentEvent[] {
+  if (!runId) return [];
+  return snapshot.events.filter((event) => event.runId === runId && isMaterialWriteResult(event));
+}
+
+/** Repair final-approval cards historically synthesized from denied/no-op tools. */
+export function hasSyntheticNoopApproval(snapshot: AgentSnapshot): boolean {
+  const approval = snapshot.pendingApproval;
+  if (!approval || approval.status !== "pending" || !snapshot.run) return false;
+  const request = [...snapshot.events].reverse().find((event) => event.runId === snapshot.run!.id
+    && event.type === "approval_request"
+    && (event.data?.approval as AgentApproval | undefined)?.id === approval.id);
+  return Boolean(request && typeof request.data?.toolCallId !== "string"
+    && materialWriteResults(snapshot, snapshot.run.id).length === 0);
+}
+
 export class AgentSnapshotManager {
   constructor(
     private readonly store: AgentSnapshotStore,
@@ -240,13 +264,7 @@ export class AgentSnapshotManager {
     for (let index = 0; index < snapshot.events.length; index += 1) {
       const event = snapshot.events[index]!;
       if (event.runId !== snapshot.run.id) continue;
-      const successfulLocalWrite = event.type === "tool_result"
-        && event.data?.write === true
-        && event.data?.remoteWrite !== true
-        && event.data?.error === undefined
-        && event.data?.cancelled !== true
-        && event.data?.uncertainWrite !== true
-        && (!Array.isArray(event.data?.changedSections) || event.data.changedSections.length > 0);
+      const successfulLocalWrite = isMaterialWriteResult(event) && event.data?.remoteWrite !== true;
       if (event.type === "user" || event.data?.noProgressRetryWindow === true || successfulLocalWrite) resetAt = index;
     }
     return snapshot.events.slice(resetAt + 1).filter((event) => event.runId === snapshot.run?.id
@@ -293,6 +311,7 @@ export class AgentSnapshotManager {
 
   private callKey(snapshot: AgentSnapshot, id: string): string | undefined {
     const event = snapshot.events.find((candidate) => candidate.type === "tool_call" && candidate.data?.toolCallId === id);
-    return event ? JSON.stringify({ name: event.content, arguments: event.data?.arguments }) : undefined;
+    const name = typeof event?.data?.name === "string" ? event.data.name : event?.content;
+    return event ? JSON.stringify({ name, arguments: event.data?.arguments }) : undefined;
   }
 }

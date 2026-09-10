@@ -152,7 +152,44 @@ async function selectSearchOption(page, dialog, id, value, description) {
 
 /** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认。 */
 export async function selectCtripLibraryCover(page, cover, productId) {
-  return bindCtripLibraryCoverViaApi(page, cover.imageId, productId);
+  const attempts = ctripLibraryCoverAttempts(cover).slice(0, 3);
+  const failures = [];
+  const attemptedImageIds = [];
+  for (const candidate of attempts) {
+    attemptedImageIds.push(candidate.imageId);
+    try {
+      const result = await bindCtripLibraryCoverViaApi(page, candidate.imageId, productId);
+      return { ...result, selectedCover: candidate, attemptedImageIds };
+    } catch (error) {
+      failures.push(
+        `${candidate.poi || "未命名景点"} imageId=${candidate.imageId}：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  throw new Error(`产品图文封面绑定失败：已尝试 ${attempts.length} 张图片；${failures.join("；")}`);
+}
+
+function ctripLibraryCoverAttempts(cover) {
+  const candidates = [];
+  const push = (source) => {
+    const imageId = Number(source?.imageId);
+    const imageUrl = typeof source?.imageUrl === "string" ? source.imageUrl.trim() : "";
+    const poi = typeof source?.poi === "string" ? source.poi.trim() : "";
+    if (!Number.isInteger(imageId) || imageId <= 0 || !imageUrl || !poi) return;
+    if (candidates.some((candidate) => candidate.imageId === imageId)) return;
+    candidates.push({
+      imageId,
+      imageUrl,
+      poi,
+      poiId: source.poiId,
+      poiName: source.poiName,
+    });
+  };
+  push(cover);
+  if (Array.isArray(cover?.alternates)) {
+    for (const alternate of cover.alternates) push(alternate);
+  }
+  return candidates;
 }
 
 /**
@@ -178,16 +215,7 @@ export async function fillAndSavePresentation(page, product, explicitProductId) 
     throw new Error("产品图文接口保存：产品 ID 缺失，无法继续。");
   }
   const cover = presentation?.cover;
-  if (
-    !cover ||
-    cover.source !== "ctripLibrary" ||
-    !Number.isInteger(cover.imageId) ||
-    cover.imageId <= 0 ||
-    typeof cover.imageUrl !== "string" ||
-    cover.imageUrl.trim().length === 0 ||
-    typeof cover.poi !== "string" ||
-    cover.poi.trim().length === 0
-  ) {
+  if (!cover || cover.source !== "ctripLibrary" || ctripLibraryCoverAttempts(cover).length === 0) {
     throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }
 

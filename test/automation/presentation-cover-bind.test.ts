@@ -11,6 +11,7 @@ import {
   readProductIdFromVbkUrl,
   responseHasBoundCover,
 } from "../../src/main/automation/ctrip/presentation/cover-bind.js";
+import { selectCtripLibraryCover } from "../../src/main/automation/ctrip/presentation/main.js";
 
 function browserWithResponses(responses: Array<{ status: number; payload: unknown }>) {
   const calls: Array<{ endpoint: string; body: unknown }> = [];
@@ -176,6 +177,94 @@ test("接口业务失败与回读不一致都不得误报成功", async () => {
       confirmationIntervalMs: 0,
     }),
     /回读未确认 imageId=1/,
+  );
+});
+
+test("封面直绑失败时展示平台返回的完整业务原因", async () => {
+  const failed = browserWithResponses([
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    {
+      status: 200,
+      payload: {
+        success: false,
+        ResponseStatus: {
+          Ack: "Failure",
+          Errors: [{ ErrorCode: "40010001", Message: "图片不属于当前供应商" }],
+        },
+      },
+    },
+  ]);
+
+  await assert.rejects(
+    bindCtripLibraryCoverViaApi(failed as never, 1, { confirmationAttempts: 1 }),
+    /直接设置产品封面失败：Ack=Failure；40010001: 图片不属于当前供应商/,
+  );
+});
+
+test("封面写入会按主图和备用图依次尝试，成功后停止", async () => {
+  const browser = browserWithResponses([
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    {
+      status: 200,
+      payload: {
+        success: false,
+        ResponseStatus: {
+          Ack: "Failure",
+          Errors: [{ ErrorCode: "40010001", Message: "主图不可用" }],
+        },
+      },
+    },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 2, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
+    ] } },
+  ]);
+
+  const result = await selectCtripLibraryCover(browser as never, {
+    source: "ctripLibrary",
+    imageId: 1,
+    imageUrl: "https://img/1",
+    poi: "晋祠",
+    alternates: [
+      { imageId: 2, imageUrl: "https://img/2", poi: "云冈石窟" },
+      { imageId: 3, imageUrl: "https://img/3", poi: "平遥古城" },
+    ],
+  }, 76983997);
+
+  assert.equal(result.imageId, 2);
+  assert.deepEqual(result.attemptedImageIds, [1, 2]);
+  assert.equal(result.selectedCover.poi, "云冈石窟");
+  assert.deepEqual(browser.calls.map((call) => call.body).filter((body) =>
+    JSON.stringify(body).includes('"isCover":true'),
+  ), [
+    buildCoverBindRequest(76983997, 1),
+    buildCoverBindRequest(76983997, 2),
+  ]);
+});
+
+test("封面候选全部绑定失败时汇总每张图片的平台原因", async () => {
+  const browser = browserWithResponses([
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    { status: 200, payload: { success: false, ResponseStatus: { Ack: "Failure", Errors: [{ Message: "主图不可用" }] } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    { status: 200, payload: { success: false, ResponseStatus: { Ack: "Failure", Errors: [{ Message: "备用一不可用" }] } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    { status: 200, payload: { success: false, ResponseStatus: { Ack: "Failure", Errors: [{ Message: "备用二不可用" }] } } },
+  ]);
+
+  await assert.rejects(
+    selectCtripLibraryCover(browser as never, {
+      source: "ctripLibrary",
+      imageId: 1,
+      imageUrl: "https://img/1",
+      poi: "晋祠",
+      alternates: [
+        { imageId: 2, imageUrl: "https://img/2", poi: "云冈石窟" },
+        { imageId: 3, imageUrl: "https://img/3", poi: "平遥古城" },
+      ],
+    }, 76983997),
+    /已尝试 3 张图片；晋祠 imageId=1：.*主图不可用.*云冈石窟 imageId=2：.*备用一不可用.*平遥古城 imageId=3：.*备用二不可用/,
   );
 });
 

@@ -187,6 +187,22 @@ test("产品标题按天数自动换算晚数", async (t) => {
   assert.equal((product.product.basicInfo as { nights: number }).nights, 3);
 });
 
+test("基础信息名称变更后同步产品列表标题", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-title-sync-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const product = db.createProduct({ destination: "西安", days: 2, productForm: "privateTour" });
+  const next = structuredClone(product.product);
+  (next.basicInfo as Record<string, unknown>).supplierProductName = "西安4天3晚私家团";
+  (next.basicInfo as Record<string, unknown>).days = 4;
+  (next.basicInfo as Record<string, unknown>).nights = 3;
+
+  db.updateProduct(product.id, next);
+
+  assert.equal(db.getProduct(product.id)?.name, "西安4天3晚私家团");
+  assert.equal(db.listProducts().find((item) => item.id === product.id)?.name, "西安4天3晚私家团");
+});
+
 test("一地多日游不因超过五天被误判为需要大交通的境内长途", async (t) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-seven-day-type-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));

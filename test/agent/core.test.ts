@@ -395,6 +395,8 @@ test("AgentCore persists tool-call/result pairing and completes a read-only run"
   await core.send("product-1", "开始"); await core.idle("product-1"); const result = await core.get("product-1");
   assert.equal(result.run?.status, "completed");
   assert.deepEqual(result.events.filter((event) => event.type === "tool_call" || event.type === "tool_result").map((event) => event.data?.toolCallId), ["call-1", "call-1"]);
+  assert.ok(result.events.some((event) => event.type === "assistant" && event.data?.generatedToolPreamble === true
+    && /read，继续推进当前产品任务/.test(event.content)));
 });
 
 test("AgentCore holds user input durably and resumes with a paired tool result", async () => {

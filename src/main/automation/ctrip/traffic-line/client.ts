@@ -3,6 +3,11 @@ import {
   type VbkReferrerPolicy,
   type VbkSessionRequestBrowser,
 } from "../../../infrastructure/vbk-session-request.js";
+import {
+  assertVbkAckSuccess,
+  describeVbkFailureDetail,
+  vbkResponseAck,
+} from "../../../infrastructure/vbk-response-error.js";
 
 export type TrafficLinePage = VbkSessionRequestBrowser;
 export type JsonRecord = Record<string, unknown>;
@@ -85,9 +90,8 @@ async function requestWithSessionAckRetry(
 }
 
 function explicitSessionFailure(payload: unknown): boolean {
-  const status = record(record(payload)?.ResponseStatus);
-  const detail = list(status?.Errors).map((item) => text(item.Message) || text(item.ErrorCode)).join("；");
-  return text(status?.Ack) !== "Success" && /当前用户未登录|用户未登录|登录态(?:已)?失效|请(?:先|重新)登录/.test(detail);
+  const detail = describeVbkFailureDetail(payload);
+  return vbkResponseAck(payload) !== "Success" && /当前用户未登录|用户未登录|登录态(?:已)?失效|请(?:先|重新)登录/.test(detail);
 }
 
 function explicitSessionHttpFailure(error: unknown): boolean {
@@ -125,20 +129,7 @@ export async function getVbkInitialState(page: TrafficLinePage, endpoint: string
 }
 
 export function assertTrafficLineAck(payload: unknown, label: string): JsonRecord {
-  const root = record(payload);
-  const status = record(root?.ResponseStatus);
-  const ack = text(status?.Ack);
-  const errors = list(status?.Errors);
-  if (ack !== "Success" || errors.length) {
-    const detail = errors.map((item) => {
-      const code = text(item.ErrorCode) || text(item.Code);
-      const message = text(item.Message);
-      return [code, message].filter(Boolean).join(":");
-    }).filter(Boolean).join("；");
-    throw new Error(`${label}失败（Ack=${ack || "缺失"}）${detail ? `：${detail}` : ""}`);
-  }
-  if (!root) throw new Error(`${label}失败：响应不是对象。`);
-  return root;
+  return assertVbkAckSuccess(payload, label);
 }
 
 export function parseInitialState(html: string, label: string): JsonRecord {

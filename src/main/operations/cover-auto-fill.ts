@@ -29,6 +29,20 @@ import type { Page } from "playwright";
 import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search.js";
 import type { CtripLibraryImageCandidate, CtripLibrarySearchResult } from "../../shared/contracts-types.js";
 import { logInfo } from "../../shared/log-timestamp.js";
+import {
+  buildCtripLibraryCoverAlternateFromCandidate,
+  buildCtripLibraryCoverFromCandidate,
+  candidatePoiKey,
+  coverImagePoiKey,
+  readPreparedCoverImages,
+} from "./cover-auto-fill-images.js";
+
+export {
+  buildCtripLibraryCoverAlternateFromCandidate,
+  buildCtripLibraryCoverFromCandidate,
+} from "./cover-auto-fill-images.js";
+
+const COVER_IMAGE_TARGET_COUNT = 3;
 
 function safeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -40,7 +54,7 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function positiveInteger(value: unknown): boolean {
+function positiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
@@ -175,53 +189,6 @@ export function collectCoverSearchKeywords(product: Record<string, unknown>): st
   return result.length > 0 ? result : null;
 }
 
-/**
- * 把 candidate 合成可写回 product JSON 的 presentation.cover 子树。
- * 不修改入参；不写 file / 不发请求；纯函数。
- * 封面只由选中的景点 POI 与图片身份组成；description / minQuality 如有历史值可透传，
- * 但不生成、不校验，也不会影响选图。
- */
-export function buildCtripLibraryCoverFromCandidate(args: {
-  existingCover: Record<string, unknown> | null | undefined;
-  candidate: CtripLibraryImageCandidate & { imageId: number; imageUrl: string };
-  keyword: string;
-  selectedAt: string;
-}): Record<string, unknown> {
-  const existing = safeObject(args.existingCover);
-  // cover.poi 必须代表「成功搜到 / 选中的 POI」，不能继承前一次失败的 existing.poi。
-  // 例如：cover.poi=云冈石窟 搜不到，回退搜 keyword=晋祠 拿到 candidate.poiName=晋祠博物馆；
-  // 此时 cover.poi 应是「晋祠博物馆」，否则 cover.poi 与 selected image 不匹配。
-  // 优先级：candidate.poiName（最贴近真实选中的 POI）→ keyword（搜索用的关键词）
-  // → existing.poi（最后兜底，避免完全空）。
-  const poi =
-    textValue(args.candidate.poiName)
-    || textValue(args.keyword)
-    || (existing ? textValue(existing.poi) : "");
-  const next: Record<string, unknown> = {
-    source: "ctripLibrary",
-    imageId: args.candidate.imageId,
-    imageUrl: args.candidate.imageUrl,
-    poi,
-    selectedAt: args.selectedAt,
-  };
-  const description = textValue(existing?.description);
-  if (description) next.description = description;
-  const minQuality = existing?.minQuality;
-  if (typeof minQuality === "number" && Number.isFinite(minQuality)) next.minQuality = minQuality;
-  // 透传 candidate 上的派生字段，方便 UI / 复核。
-  const thumbnailUrl = textValue(args.candidate.thumbnailUrl);
-  if (thumbnailUrl) next.thumbnailUrl = thumbnailUrl;
-  const previewUrl = textValue(args.candidate.previewUrl);
-  if (previewUrl) next.previewUrl = previewUrl;
-  if (typeof args.candidate.score === "number") next.score = args.candidate.score;
-  const resolution = textValue(args.candidate.resolution);
-  if (resolution) next.resolution = resolution;
-  if (positiveInteger(args.candidate.poiId)) next.poiId = args.candidate.poiId;
-  const poiName = textValue(args.candidate.poiName);
-  if (poiName) next.poiName = poiName;
-  return next;
-}
-
 export interface AutoCoverFillOutcome {
   /** 是否真的把 cover 写回了 product；false 时 nextProduct === product。 */
   written: boolean;
@@ -231,6 +198,8 @@ export interface AutoCoverFillOutcome {
   keyword?: string;
   /** 选出来的 imageId（仅在 written=true 时存在）。 */
   imageId?: number;
+  /** 实际准备好的 imageId 列表，第一张是主图，其余是备用图。 */
+  imageIds?: number[];
 }
 
 /**
@@ -275,19 +244,27 @@ export async function applyAutoCoverFill(args: {
     return { nextProduct: product, outcome: { written: false, reason: "cover 为 manualUpload，跳过自动补齐" } };
   }
 
-  // 已有完整 cover（含 imageId + imageUrl）不补。
-  if (existingCover && isCtripLibraryCoverComplete(existingCover)) {
-    return { nextProduct: product, outcome: { written: false, reason: "cover 已完整，跳过自动补齐" } };
-  }
+  const preparedImages = readPreparedCoverImages(existingCover);
+  const existingCoverComplete = existingCover && isCtripLibraryCoverComplete(existingCover);
 
   const keywords = collectCoverSearchKeywords(product);
   if (!keywords || keywords.length === 0) {
+    if (existingCoverComplete) {
+      return { nextProduct: product, outcome: { written: false, reason: "cover 已完整，但没有更多景点 POI 可补备用图" } };
+    }
     return { nextProduct: product, outcome: { written: false, reason: "没有可用的景点 POI，跳过自动补齐" } };
+  }
+  if (existingCoverComplete && preparedImages.length >= COVER_IMAGE_TARGET_COUNT) {
+    return { nextProduct: product, outcome: { written: false, reason: "cover 已准备 3 张图片，跳过自动补齐" } };
   }
 
   // 按有序去重的关键词逐一尝试：search 抛错 / 候选空 / candidate 不完整
   // 都要继续下一个；只有找到第一个 imageResolved=true 的完整候选才写回，
   // 保证不会因为第一个 keyword 没拿到图就丢掉第二个 POI 的好图。
+  const pickedImages = [...preparedImages];
+  const seenImageIds = new Set(pickedImages.map((item) => item.imageId));
+  const seenPoiKeys = new Set(pickedImages.map(coverImagePoiKey).filter(Boolean));
+  let primaryKeyword = textValue(pickedImages[0]?.poi) || undefined;
   for (const keyword of keywords) {
     let result: CtripLibrarySearchResult;
     try {
@@ -306,41 +283,90 @@ export async function applyAutoCoverFill(args: {
     }
 
     const candidate = result.candidates.find((item) =>
-      isCoverCandidateComplete(item) && matchesItineraryCoverPoi(item, keyword, product),
+      isCoverCandidateComplete(item)
+      && matchesItineraryCoverPoi(item, keyword, product)
+      && !seenImageIds.has(item.imageId)
+      && !seenPoiKeys.has(candidatePoiKey(item, keyword)),
     );
     if (!isCoverCandidateComplete(candidate)) {
       continue;
     }
 
-    const nextCover = buildCtripLibraryCoverFromCandidate({
+    const image = buildCtripLibraryCoverAlternateFromCandidate({
       existingCover,
       candidate,
       keyword,
       selectedAt: now(),
     });
+    const willBecomePrimary = pickedImages.length === 0;
+    pickedImages.push(image);
+    if (willBecomePrimary) primaryKeyword = keyword;
+    seenImageIds.add(image.imageId);
+    const poiKey = coverImagePoiKey(image);
+    if (poiKey) seenPoiKeys.add(poiKey);
+    if (pickedImages.length >= COVER_IMAGE_TARGET_COUNT) break;
+  }
 
-    // 不动 product 其它子树，只覆盖 presentation.cover。
-    const nextProduct: Record<string, unknown> = {
-      ...product,
-      presentation: {
-        ...presentation,
-        cover: nextCover,
-      },
-    };
-
+  const primary = pickedImages[0];
+  if (!primary) {
     return {
-      nextProduct,
-      outcome: { written: true, reason: "已写入携程图库封面", keyword, imageId: candidate.imageId },
+      nextProduct: product,
+      outcome: {
+        written: false,
+        reason: `所有 ${keywords.length} 个关键词（${keywords.join("、")}）都失败或未拿到完整候选，跳过自动补齐`,
+      },
     };
   }
 
-  // 全部 keyword 都没拿到完整候选：返回原 product 引用，避免污染 draft。
-  // reason 同时记下尝试的 keyword 数和列表，方便 console.info 时一眼看到排查路径。
+  if (existingCoverComplete && pickedImages.length === preparedImages.length) {
+    return {
+      nextProduct: product,
+      outcome: {
+        written: false,
+        reason: `已保留现有封面，但其它 ${keywords.length} 个关键词（${keywords.join("、")}）未补到新的备用图`,
+        keyword: primaryKeyword,
+        imageId: primary.imageId,
+        imageIds: pickedImages.map((item) => item.imageId),
+      },
+    };
+  }
+
+  const baseCover = existingCoverComplete
+    ? { ...existingCover }
+    : {
+        source: "ctripLibrary",
+        ...primary,
+        ...(textValue(existingCover?.description) ? { description: textValue(existingCover?.description) } : {}),
+        ...(typeof existingCover?.minQuality === "number" && Number.isFinite(existingCover.minQuality)
+          ? { minQuality: existingCover.minQuality }
+          : {}),
+      };
+  const alternates = pickedImages.slice(1, COVER_IMAGE_TARGET_COUNT);
+  const nextCover = {
+    ...baseCover,
+    ...(alternates.length > 0 ? { alternates } : {}),
+  };
+
+  // 不动 product 其它子树，只覆盖 presentation.cover。
+  const nextProduct: Record<string, unknown> = {
+    ...product,
+    presentation: {
+      ...presentation,
+      cover: nextCover,
+    },
+  };
+
+  const imageIds = pickedImages.map((item) => item.imageId);
   return {
-    nextProduct: product,
+    nextProduct,
     outcome: {
-      written: false,
-      reason: `所有 ${keywords.length} 个关键词（${keywords.join("、")}）都失败或未拿到完整候选，跳过自动补齐`,
+      written: true,
+      reason: existingCoverComplete
+        ? `已补充携程图库封面备用图，共准备 ${imageIds.length} 张候选`
+        : `已写入携程图库封面，并准备 ${imageIds.length} 张候选`,
+      keyword: primaryKeyword,
+      imageId: primary.imageId,
+      imageIds,
     },
   };
 }

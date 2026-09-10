@@ -9,8 +9,7 @@ type TrafficReviewItem = {
   variant: TrafficLineVariant;
   arrival: string;
   departure: string;
-  resourceState: "awaitingPreflight" | "preflightVerified" | "preflightUnavailable" | "preflightUnconfirmed" | "checking" | "verified" | "unavailable" | "failed";
-  preflightDetail?: string;
+  resourceState: "awaitingResource" | "checking" | "verified" | "unavailable" | "failed";
 };
 
 function record(value: unknown): UnknownRecord | null {
@@ -37,9 +36,7 @@ function readTrafficReviewItems(product: ProductDetail): TrafficReviewItem[] {
   const availableVariants = Array.isArray(availability?.availableVariants)
     ? availability.availableVariants.filter((item): item is TrafficLineVariant => item === "flightRoundTrip" || item === "trainRoundTrip")
     : [];
-  const scheduleChecks = record(availability?.scheduleChecks);
-  const variants = (["flightRoundTrip", "trainRoundTrip"] as const).filter((variant) =>
-    availableVariants.includes(variant) || Boolean(record(scheduleChecks?.[variant])));
+  const variants = (["flightRoundTrip", "trainRoundTrip"] as const).filter((variant) => availableVariants.includes(variant));
   const automation = record(product.automation);
   const trafficProgress = record(automation?.trafficLine);
   const children = Array.isArray(trafficProgress?.children) ? trafficProgress.children : [];
@@ -50,24 +47,12 @@ function readTrafficReviewItems(product: ProductDetail): TrafficReviewItem[] {
     const departure = stationLabel(route?.departure, train);
     const child = children.find((item) => record(item)?.variant === variant);
     const progress = record(child);
-    const schedule = record(scheduleChecks?.[variant]);
-    const scheduleStatus = schedule?.status;
-    const checkedDates = Array.isArray(schedule?.checkedDates) ? schedule.checkedDates.length : 0;
-    const checkedCityCount = typeof schedule?.checkedCityCount === "number" ? schedule.checkedCityCount : 0;
-    const matchedOrigin = typeof schedule?.matchedOriginCity === "string" ? schedule.matchedOriginCity : "";
-    const reason = typeof schedule?.reason === "string" ? schedule.reason : "";
     const resourceState = progress?.verified === true
       ? "verified"
       : progress?.skipped === true ? "unavailable"
         : progress?.failureReason ? "failed"
-          : scheduleStatus === "unavailable" ? "preflightUnavailable"
-            : scheduleStatus === "unconfirmed" ? "preflightUnconfirmed"
-              : product.productId ? "checking"
-                : scheduleStatus === "available" ? "preflightVerified" : "awaitingPreflight";
-    const preflightDetail = scheduleStatus
-      ? [matchedOrigin ? `已匹配 ${matchedOrigin}` : "", checkedCityCount ? `${checkedCityCount} 个出发城市` : "", checkedDates ? `${checkedDates} 个代表日期` : "", reason].filter(Boolean).join(" · ")
-      : undefined;
-    return arrival && departure ? [{ variant, arrival, departure, resourceState, preflightDetail }] : [];
+          : product.productId ? "checking" : "awaitingResource";
+    return arrival && departure ? [{ variant, arrival, departure, resourceState }] : [];
   });
 }
 
@@ -85,20 +70,16 @@ export function AppWorkspaceReviewSummaryTraffic({
   const items = readTrafficReviewItems(product);
   const endpointsConfirmed = items.length > 0;
   const resourceVerified = items.filter((item) => item.resourceState === "verified").length;
-  const preflightVerified = items.filter((item) => item.resourceState === "preflightVerified").length;
-  const excluded = items.filter((item) => item.resourceState === "preflightUnavailable" || item.resourceState === "unavailable").length;
-  const plannedItems = items.filter((item) => item.resourceState !== "preflightUnavailable" && item.resourceState !== "preflightUnconfirmed");
+  const plannedItems = items.filter((item) => item.resourceState !== "unavailable");
   const resourceComplete = product.productId
-    ? plannedItems.length > 0 && resourceVerified === plannedItems.length
-    : preflightVerified > 0 && preflightVerified + excluded === items.length;
-  const preflightUnconfirmed = items.some((item) => item.resourceState === "preflightUnconfirmed" || item.resourceState === "awaitingPreflight");
+    && plannedItems.length > 0 && resourceVerified === plannedItems.length;
   const resourceFailed = items.some((item) => item.resourceState === "failed");
   const headerMeta = !endpointsConfirmed
     ? "待核验"
     : product.productId && resourceComplete
       ? `${resourceVerified}/${items.length} 类班期已核验`
       : !product.productId
-        ? preflightUnconfirmed ? "前置班次待重试" : `${preflightVerified}/${items.length} 类前置班次通过`
+        ? `${items.length} 类端点已确认`
         : resourceFailed ? "班期核验需处理" : `${resourceVerified}/${plannedItems.length} 类班期已核验`;
 
   return (
@@ -134,17 +115,13 @@ export function AppWorkspaceReviewSummaryTraffic({
                     <div className={styles.itemMain}>
                       <strong>{label}</strong>
                       <span>抵达 {item.arrival} · 返程 {item.departure}</span>
-                      {item.preflightDetail ? <span>{item.preflightDetail}</span> : null}
                     </div>
                     <span className={styles.itemState} data-state={item.resourceState}>
                       {item.resourceState === "verified" ? "班期资源已确认"
                         : item.resourceState === "unavailable" ? "本班期无资源"
-                          : item.resourceState === "failed" ? "班期核验需处理"
-                            : item.resourceState === "checking" ? "正在核验班期资源"
-                              : item.resourceState === "preflightVerified" ? "前置班次已通过"
-                                : item.resourceState === "preflightUnavailable" ? "前置班次未通过"
-                                  : item.resourceState === "preflightUnconfirmed" ? "前置查询待重试"
-                                    : "等待前置班次核验"}
+                            : item.resourceState === "failed" ? "班期核验需处理"
+                              : item.resourceState === "checking" ? "正在核验班期资源"
+                              : "端点已确认，待核验班期资源"}
                     </span>
                   </div>
                 );
@@ -158,8 +135,8 @@ export function AppWorkspaceReviewSummaryTraffic({
           )}
           <p className={styles.note}>
             {endpointsConfirmed
-              ? "产品数据准备阶段会按热门出发城市和 3 个代表日期查询双向班次；只有明确通过的方式才创建子产品。创建后仍会执行 VBK 正式资源校验和最终回读。"
-              : "此处只展示当前会话已确认的端点和班次结果，不从行程内容推测。"}
+              ? "产品数据准备阶段只核验当前会话可用的端点；创建子产品后才执行 VBK 正式班期资源校验和最终回读。"
+              : "此处只展示当前会话已确认的端点，不从行程内容推测。"}
           </p>
         </div>
       )}

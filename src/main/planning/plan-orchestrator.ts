@@ -253,8 +253,7 @@ export async function runPlan(args: RunPlanArgs): Promise<OrchestratorRunResult>
     state.lastAssistantReply = result.assistantReply;
     state.lastModuleSummary = [...result.accepted, ...result.rejected];
     state.lastMissingSummary = result.rejected.filter((m) => m.status === "missing").map((m) => m.module);
-    // 行程完成时先核实端点；commercial 完成后已有真实库存日期，再执行完整的
-    // 城市/日期班次预检，并把通过的交通方式写入最终子产品计划。
+    // 行程完成后核实端点，并把当前会话确认的交通方式写入最终子产品计划。
     if (stage === "itinerary" || stage === "commercial") {
       await syncInitialTrafficLineAvailability(args.localProductId, args.runtime);
     }

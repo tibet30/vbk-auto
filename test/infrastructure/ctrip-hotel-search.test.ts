@@ -7,6 +7,8 @@ import {
   readCtripHotelCandidates,
   selectCtripHotelContext,
   limitItineraryHotelStays,
+  hotelAnchorNameForDay,
+  hotelCandidatesForTier,
 } from "../../src/main/infrastructure/ctrip-hotel-search.js";
 import { hasItineraryHotelStay } from "../../src/shared/itinerary-hotel.js";
 
@@ -25,6 +27,29 @@ test("酒店候选解析只保留产品 nights 对应的住宿日", () => {
     { day: 1, hotel: "江孜酒店", hotelCandidates: [{ hotelId: 1 }], hotelDescription: "D1 住宿" },
     { day: 2, hotel: "无" },
   ]);
+});
+
+test("明确返回目的地住宿时不用当天最后的异地景点作为酒店锚点", () => {
+  const day = {
+    day: 1,
+    title: "江孜游览后住日喀则",
+    description: "下午游览白居寺，随后返回日喀则市区，入住当地4钻酒店。",
+    hotel: "日喀则当地4钻酒店",
+    spots: [{ name: "白居寺", city: "江孜" }],
+  };
+  assert.equal(hotelAnchorNameForDay(day, "日喀则"), "日喀则");
+});
+
+test("明确4钻时排除同城5钻候选", () => {
+  const candidates = [
+    { hotelId: 1, hotelName: "日喀则5钻", diamond: 5, score: 4.9, distanceKm: 1 },
+    { hotelId: 2, hotelName: "日喀则4钻甲", diamond: 4, score: 4.8, distanceKm: 1.2 },
+    { hotelId: 3, hotelName: "日喀则4钻乙", diamond: 4, score: 4.6, distanceKm: 2 },
+  ];
+  assert.deepEqual(
+    hotelCandidatesForTier(candidates, "当地4钻酒店/-4").map((item) => item.hotelId),
+    [2, 3],
+  );
 });
 
 test("4天3晚保留前三个住宿日，只清除超过 nights 的送站日", () => {

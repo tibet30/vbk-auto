@@ -18,7 +18,7 @@ function availability(
 
 function runtimeFor(
   response: TrafficLineEndpointAvailability | null | Error,
-  product: Record<string, unknown> = { operations: { trafficLine: { enabled: false, variants: [] } } },
+  product: Record<string, unknown> = productWithTrafficLineRequest(),
 ) {
   let written: unknown;
   const runtime: OrchestratorRuntime = {
@@ -38,6 +38,13 @@ function runtimeFor(
     },
   };
   return { runtime, written: () => written };
+}
+
+function productWithTrafficLineRequest() {
+  return {
+    basicInfo: { userIdea: "含往返大交通" },
+    operations: { trafficLine: { enabled: false, variants: [] } },
+  };
 }
 
 test("首轮 POI 核验后，仅把接口确认可用的飞机/火车往返写入结构化字段", async () => {
@@ -155,6 +162,30 @@ test("机场消歧超时只保留已确认火车，并在下次规划重新核�
       enabled: true,
       variants: ["flightRoundTrip", "trainRoundTrip"],
       availability: refreshed,
+    },
+  });
+  assert.deepEqual(fake.written(), result.config);
+});
+
+test("未明确要求大交通时也默认探测站点并创建可用交通子产品配置", async () => {
+  const fake = runtimeFor(
+    availability(["flightRoundTrip", "trainRoundTrip"], "日喀则", "日喀则"),
+    {
+      basicInfo: {
+        userIdea: "D1、火车站接-帕拉庄园-住日喀则\nD2、扎什伦布寺--送火车",
+      },
+      operations: { trafficLine: { enabled: false, variants: [] } },
+    },
+  );
+
+  const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
+
+  assert.deepEqual(result, {
+    status: "updated",
+    config: {
+      enabled: true,
+      variants: ["flightRoundTrip", "trainRoundTrip"],
+      availability: availability(["flightRoundTrip", "trainRoundTrip"], "日喀则", "日喀则"),
     },
   });
   assert.deepEqual(fake.written(), result.config);

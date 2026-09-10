@@ -59,9 +59,9 @@ test("没有 pricing 和 inventory 时不包含 pricingInventory 阶段", () => 
   assert.equal(draftPhasesFor(makeProduct({ packageName: "标准套餐" })).includes("pricingInventory"), false);
 });
 
-test("线路及交通默认启用，并位于条款和预检之间", () => {
+test("线路及交通在站点确认后位于条款和预检之间", () => {
   const defaultPhases = draftPhasesFor(makeProduct());
-  assert.equal(defaultPhases.includes("trafficLine"), true);
+  assert.equal(defaultPhases.includes("trafficLine"), false);
 
   const phases = draftPhasesFor(makeProduct(undefined, {
     enabled: true,

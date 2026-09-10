@@ -26,9 +26,17 @@ import { resolveItineraryHotelCandidates } from "../infrastructure/ctrip-hotel-s
 import { getProductBaseInfoApi } from "../automation/ctrip/basic-info/api.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
+import { selfRepairItineraryForVbk } from "../planning/itinerary-self-repair.js";
+import { isTravelNodeName } from "../planning/itinerary-adoption.js";
 import type { AgentTool } from "./types.js";
 
 type JsonObject = Record<string, unknown>;
+
+function absentTravelNodeResearchTask(label: string, presentSpotNames: ReadonlySet<string>): boolean {
+  const match = label.match(/^核查\s+(.+?)\s+的\s+VBK\s+POI\s+映射$/i);
+  const name = match?.[1]?.trim() ?? "";
+  return Boolean(name && isTravelNodeName(name) && !presentSpotNames.has(name));
+}
 
 const ITINERARY_SPOT_PATCH_SCHEMA = {
   type: "object",
@@ -177,8 +185,29 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       persistedTaskKeys: new Set(current.researchTasks.map(task => `${task.type}::${task.label}`)),
       reviewCompletePois: true,
     });
+    const latest = get(localProductId);
+    const repair = selfRepairItineraryForVbk(latest.product.itinerary);
+    if (repair.changed) {
+      deps.productMutations.replace(localProductId, {
+        ...productData(latest),
+        itinerary: repair.itinerary,
+      }, { status: latest.status });
+    }
+    const removed = new Set([
+      ...repair.removedTravelNodes,
+      ...repair.selectedAlternatives.flatMap((item) => item.removed),
+    ]);
+    const presentSpotNames = new Set(repair.itinerary.flatMap((day) => Array.isArray(day.spots)
+      ? day.spots.filter((spot): spot is JsonObject => Boolean(spot) && typeof spot === "object" && !Array.isArray(spot))
+        .map((spot) => cleanText(spot.name || spot.poiName))
+      : []));
+    const satisfiedTaskIds = get(localProductId).researchTasks
+      .filter((task) => [...removed].some((name) => task.label.includes(name))
+        || absentTravelNodeResearchTask(task.label, presentSpotNames))
+      .map((task) => task.id);
+    deps.db.markResearchTasksSatisfied(localProductId, satisfiedTaskIds);
     await syncInitialTrafficLineAvailability(localProductId, runtime);
-    return tasks;
+    return { tasks, repair };
   };
   const tools: AgentTool[] = [
     ...createGenerationStageTools({
@@ -189,7 +218,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       async execute(_args, ctx) { return { content: JSON.stringify(agentProductContext(get(ctx.localProductId), deps.db.getAgentSnapshot?.(ctx.localProductId))) }; },
     },
     {
-      name: "patch_product", requiresApproval: false, description: "合并保存本地规划字段（basicInfo、presentation、itinerary、operations、commercial）；系统锁定既有 meetingCity。用户明确指定大交通抵达/返程端点时，只能写 operations.trafficLine.arrivalCity / departureCity；不得写交通方式或启用状态，系统会调用接口核验。未指定端点才默认产品目的地。itinerary 的数据结构严格为逐日对象数组：[{day:1, title:'...', spots:[{name:'...', timeOfDay:'morning'}]}]。不接受 {item:...}、嵌套数组或 hotels 顶层字段；不允许填写新的 poiId/poiName，已查询到的候选只能由 select_itinerary_poi 写入。", parameters: PRODUCT_PATCH_SCHEMA,
+      name: "patch_product", requiresApproval: false, description: "合并保存本地规划字段（basicInfo、presentation、itinerary、operations、commercial）；系统锁定既有 meetingCity。用户明确指定大交通抵达/返程端点时，只能写 operations.trafficLine.arrivalCity / departureCity；不得写交通方式或启用状态，系统会调用接口核验。未指定端点才默认产品目的地。itinerary 的数据结构严格为逐日对象数组：[{day:1, title:'...', spots:[{name:'...', timeOfDay:'morning', relation:'and'|'or'}]}]。二选一/多选一必须保留每个原始景点，连续写在同一天同一时段，且每项 relation:'or'，供 VBK 录入为“或”。不接受 {item:...}、嵌套数组或 hotels 顶层字段；不允许填写新的 poiId/poiName，已查询到的候选只能由 select_itinerary_poi 写入。", parameters: PRODUCT_PATCH_SCHEMA,
       async execute(args, ctx) {
         const patch = requirePatch(args);
         const operations = agentPatchOperations(get(ctx.localProductId), patch);
@@ -266,9 +295,10 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const current = get(ctx.localProductId); const data = productData(current);
         const itinerary = Array.isArray(data.itinerary) ? data.itinerary as JsonObject[] : [];
         const basicInfo = data.basicInfo as JsonObject | undefined;
+        const operations = data.operations as JsonObject | undefined;
         const city = cleanText(basicInfo?.destinationCity);
         const nights = Number(basicInfo?.nights);
-        const resolved = await resolveItineraryHotelCandidates(itinerary, city, nights);
+        const resolved = await resolveItineraryHotelCandidates(itinerary, city, nights, cleanText(operations?.hotelTier));
         deps.productMutations.replace(ctx.localProductId, applyResolvedItineraryHotels(data, resolved), { status: current.status });
         return { content: safeJson({ dailyCandidates: resolved.dailyCandidates, searchDates: resolved.searchDates }) };
       },
@@ -295,7 +325,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     },
     {
       name: "recheck_traffic_line_availability",
-      description: "使用当前 VBK 会话重新核验飞机和火车端点，并按热门出发城市及代表日期查询双向班次；只把明确通过的方式写入本地 operations.trafficLine 子产品计划。不会创建、保存或写入任何 VBK 交通子产品。",
+      description: "使用当前 VBK 会话重新核验飞机和火车端点；只把当前会话确认可用的方式写入本地 operations.trafficLine 子产品计划。不会创建、保存或写入任何 VBK 交通子产品。",
       parameters: { type: "object", properties: {} },
       async execute(_args, ctx) {
         const runtime = new DbOrchestratorRuntime(
@@ -307,12 +337,12 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       },
     },
     {
-      name: "resolve_itinerary_pois", description: "逐个核查当前行程的真实 POI、地区和营业状态，填入已验证 ID；未命中时保留原景点和原行程位置，创建待人工确认或手动录入 POI 的事项，绝不自动替换景点。", parameters: {type:"object",properties:{}},
+      name: "resolve_itinerary_pois", description: "逐个核查当前行程的真实 POI、地区和营业状态，填入已验证 ID。普通未命中景点保持原名原位并进入人工确认；明确二选一/多选一只要至少一个原始选项已核验，就自动保留可录入选项并记录被排除项，不再中途询问。交通、接送和入住节点自动移出 POI 列表。", parameters: {type:"object",properties:{}},
       async execute(_args, ctx) {
-        const tasks = await resolveItineraryPoisAndTraffic(ctx.localProductId);
+        const result = await resolveItineraryPoisAndTraffic(ctx.localProductId);
         refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         deps.emitProduct(get(ctx.localProductId));
-        return {content:safeJson({tasks,itinerary:get(ctx.localProductId).product.itinerary})};
+        return {content:safeJson({...result,itinerary:get(ctx.localProductId).product.itinerary})};
       },
     },
   ];

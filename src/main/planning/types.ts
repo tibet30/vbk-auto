@@ -62,7 +62,7 @@ export interface OrchestratorRuntime {
   writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
   /** 确定性酒店检索的受控写入口；AI patch 永远不能写 operations.hotelResource。 */
   writeResolvedHotelResources?(localProductId: string, operations: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
-  /** 用当前 VBK 会话核验端点及代表日期双向班次，只返回明确可创建的飞机 / 火车往返方式。 */
+  /** 用当前 VBK 会话核验机场和火车站端点，只返回可创建的飞机 / 火车往返方式。 */
   resolveTrafficLineAvailability?(localProductId: string): Promise<TrafficLineEndpointAvailability | null>;
   /** 仅供接口核验结果写入 operations.trafficLine 的售卖状态；AI 只能记录用户明确的端点城市。 */
   writeResolvedTrafficLineConfig?(localProductId: string, config: TrafficLineConfig): Promise<{ ok: boolean; reason?: string }>;

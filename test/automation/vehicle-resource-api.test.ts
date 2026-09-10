@@ -150,6 +150,52 @@ test("提交后轮询正式资源段，吸收平台异步结算", async () => {
   }
 });
 
+test("默认正式段轮询窗口足够吸收较慢的用车绑定结算", async () => {
+  const oldFetch = globalThis.fetch;
+  const oldDocument = (globalThis as any).document;
+  let submitted = false;
+  let formalReadbacks = 0;
+  let segments: any[] = [
+    { segmentId: "full", segmentBase: { segmentNumber: 1 }, segmentResourceGroups: [] },
+    { segmentId: "terminal", segmentBase: { segmentNumber: 2 }, segmentResourceGroups: [] },
+  ];
+  (globalThis as any).document = { cookie: "GUID=fixture" };
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const endpoint = new URL(String(input)).pathname;
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    if (endpoint.endsWith("saveSegment")) {
+      const saved = structuredClone(body.segment);
+      segments = segments.map((segment) => String(segment.segmentId) === String(saved.segmentId) ? saved : segment);
+    }
+    if (endpoint.endsWith("submitSegments")) submitted = true;
+    const formal = submitted && endpoint.endsWith("getSegments");
+    if (formal) formalReadbacks += 1;
+    const visibleSegments = formal && formalReadbacks < 10
+      ? segments.map((segment) => ({ ...segment, segmentResourceGroups: [] }))
+      : segments;
+    return new Response(JSON.stringify({
+      ResponseStatus: { Ack: "Success" },
+      ...(formal
+        ? { productSegments: { segments: structuredClone(visibleSegments) } }
+        : { draftProductSegments: { segments: structuredClone(segments) } }),
+    }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await ensureVehicleResourceBinding(
+      { evaluate: async (fn: any, arg: any) => fn(arg) },
+      "78193841",
+      groupId,
+      "测试用车资源组",
+      { formalReadbackIntervalMs: 0 },
+    );
+    assert.equal(result.audited, true);
+    assert.equal(formalReadbacks, 10);
+  } finally {
+    globalThis.fetch = oldFetch;
+    (globalThis as any).document = oldDocument;
+  }
+});
+
 test("提交后若仅草稿绑定、正式段未绑定，用车回读必须失败", async () => {
   const oldFetch = globalThis.fetch;
   const oldDocument = (globalThis as any).document;

@@ -123,7 +123,7 @@ export function nativeToolSchemas() {
   return [
     {
       name: "ask_user",
-      description: "向用户请求信息",
+      description: "仅在原始需求缺失、无法可靠推导且答案会实质改变产品方案时向用户提问；禁止询问阶段推进、重试恢复、资源回退或准备流程控制",
       parameters: {
         type: "object",
         additionalProperties: false,

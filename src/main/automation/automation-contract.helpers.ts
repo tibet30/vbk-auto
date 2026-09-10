@@ -19,6 +19,7 @@
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { RECOMMENDATION_CATEGORIES } from "./schema/schema-definitions.js";
 import { readCover } from "../operations/cover-info.js";
+import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 
 export function textValue(value: unknown): string {
@@ -129,16 +130,19 @@ export function hasValidReleaseCeiling(product: Record<string, unknown>): boolea
 }
 
 /**
- * presentation 封面是否已配置（ai-planning 阶段写入景点 poi；
- * imageId / imageUrl / poiName 等字段由 VBK 选图后回填，本契约不强求）。
+ * presentation 封面是否已经选定一张可写入的图。
  *
- * manualUpload 由 automationBlockers 内的专门检查承担「不可自动化」语义，
- * 这里返回 true 以避免与「封面来源」产生重复的 readiness issue。
+ * ctripLibrary 的 POI 只是检索锚点，不是封面本身；必须已有具体 imageId 和
+ * imageUrl，且仍与已核验行程 POI 一致，才能进入最终确认。manualUpload 由
+ * automationBlockers 专门报告「不可自动化」语义，此处不重复阻塞。
  */
 export function hasValidCoverPoMeta(product: Record<string, unknown>): boolean {
   const cover = readCover(product);
   if (!cover) return false;
   if (cover.source === "manualUpload") return true;
+  const presentation = asObject(product.presentation);
+  const rawCover = asObject(presentation?.cover);
+  if (!isCtripLibraryCoverComplete(rawCover)) return false;
   const coverPoi = textValue(cover.poi);
   if (!coverPoi) return false;
   const itinerary = asArray(product.itinerary) ?? [];

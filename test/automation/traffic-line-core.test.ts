@@ -263,7 +263,6 @@ test("初始规划对飞机和高铁候选分别执行受控消歧，不会因�
   const availability = await resolveProductTrafficLineAvailability({
     db: { getProduct: () => ({ product: {
       basicInfo: { destinationCity: "日喀则" },
-      commercial: { inventory: { startDate: "2026-09-10", endDate: "2026-09-12" } },
       itinerary: [{ spots: [] }],
     } }) } as any,
     browser: { page: async () => page } as any,
@@ -274,17 +273,10 @@ test("初始规划对飞机和高铁候选分别执行受控消歧，不会因�
         ? { pickedText: "日喀则", reasoning: "当前客运站" }
         : { pickedText: "日喀则和平机场", reasoning: "当前机场" };
     },
-    scheduleDependencies: {
-      loadCityGroups: async () => [
-        { category: "热门", departureCities: [{ cityId: 1, cityName: "北京" }] },
-        { category: "B", departureCities: [{ cityId: 1, cityName: "北京", hasAirport: true, hasTrain: true }] },
-      ],
-      searchOriginAirports: async () => [{ type: "air", id: "PEK", code: "PEK", name: "北京首都国际机场", raw: {} }],
-      fetchHtml: async (url) => url.includes("flights.ctrip.com") ? '\\"flightNo\\":\\"CA1234' : "共1车次",
-    },
   });
 
   assert.deepEqual(availability?.availableVariants, ["flightRoundTrip", "trainRoundTrip"]);
+  assert.equal("scheduleChecks" in (availability ?? {}), false);
   assert.deepEqual(calls, [
     { subtype: "airport", desired: "日喀则" },
     { subtype: "train", desired: "日喀则主要客运火车站" },
@@ -361,6 +353,7 @@ test("平台明确无可售资源时跳过该子产品，避免恢复时重复�
   assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "trainRoundTrip"), true);
   assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "flightRoundTrip"), false);
   assert.equal(isUnavailableTrafficResourceFailure("本班期没有可用交通资源", "trainRoundTrip"), true);
+  assert.equal(isUnavailableTrafficResourceFailure("产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。"), true);
   assert.equal(trafficLineChildShouldBeSkipped({
     variant: "trainRoundTrip",
     lineDescription: "火车往返",
@@ -517,7 +510,7 @@ test("normaliseTrafficLineConfig 仅保留明确选择的往返方式，空配�
   assert.equal(normaliseTrafficLineConfig(null), undefined);
 });
 
-test("normaliseTrafficLineConfig 保留母产品创建前的班次结论，包括全部未通过", () => {
+test("normaliseTrafficLineConfig 丢弃历史规划班期预检字段", () => {
   const result = normaliseTrafficLineConfig({
     enabled: false,
     variants: [],
@@ -532,7 +525,7 @@ test("normaliseTrafficLineConfig 保留母产品创建前的班次结论，包�
         },
       },
       availableVariants: [],
-      unavailableVariants: { trainRoundTrip: "代表日期内未找到可往返的携程班次。" },
+      unavailableVariants: { trainRoundTrip: "未找到唯一可确认的火车站候选。" },
       scheduleChecks: {
         trainRoundTrip: {
           status: "unavailable",
@@ -555,14 +548,6 @@ test("normaliseTrafficLineConfig 保留母产品创建前的班次结论，包�
       },
     },
     availableVariants: [],
-    unavailableVariants: { trainRoundTrip: "代表日期内未找到可往返的携程班次。" },
-    scheduleChecks: {
-      trainRoundTrip: {
-        status: "unavailable",
-        checkedDates: ["2026-09-09", "2027-03-10"],
-        checkedCityCount: 12,
-        reason: "代表日期内未找到可往返的携程班次。",
-      },
-    },
+    unavailableVariants: { trainRoundTrip: "未找到唯一可确认的火车站候选。" },
   });
 });

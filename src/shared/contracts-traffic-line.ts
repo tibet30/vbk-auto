@@ -1,9 +1,9 @@
 /**
  * 线路及交通子产品的持久化契约。
  *
- * 只有产品明确售卖飞机或火车往返时，才规划对应的交通子产品；地点和站点必须
- * 由已完成的行程及当前 BrowserView 会话的 VBK 候选接口确认。接站、送站和
- * 当地用车属于地接行程，绝不能被推断成大交通往返。
+ * 产品默认尝试规划飞机或火车往返交通子产品；地点和站点必须由当前
+ * BrowserView 会话的 VBK 候选接口确认。接站、送站和当地用车仍属于地接行程，
+ * 但不再阻止默认大交通子产品探测。
  */
 
 export const TRAFFIC_LINE_VARIANTS = ["flightRoundTrip", "trainRoundTrip"] as const;
@@ -16,9 +16,9 @@ export const TRAFFIC_LINE_LABELS: Readonly<Record<TrafficLineVariant, string>> =
 };
 
 export interface TrafficLineConfig {
-  /** 仅在产品明确包含可售大交通时启用。 */
+  /** 当前会话已确认至少一种可创建的大交通端点时启用。 */
   enabled: boolean;
-  /** 已明确售卖的往返类型；空数组仅可与 disabled 配置一起出现。 */
+  /** 已由平台站点查询确认可创建的往返类型。 */
   variants: TrafficLineVariant[];
   /**
    * 运营或用户明确指定的抵达端点城市。未填写时才回退产品目的地；不能从
@@ -67,16 +67,6 @@ export interface TrafficLineEndpointAvailability {
   endpointPlan: TrafficLineEndpointPlan;
   availableVariants: TrafficLineVariant[];
   unavailableVariants: Partial<Record<TrafficLineVariant, string>>;
-  /** 母产品创建前，对热门出发城市和代表日期执行的携程双向班次预检。 */
-  scheduleChecks?: Partial<Record<TrafficLineVariant, TrafficLineScheduleCheck>>;
-}
-
-export interface TrafficLineScheduleCheck {
-  status: "available" | "unavailable" | "unconfirmed";
-  checkedDates: string[];
-  checkedCityCount: number;
-  matchedOriginCity?: string;
-  reason?: string;
 }
 
 export const TRAFFIC_LINE_CHILD_STAGES = [
@@ -155,9 +145,9 @@ export function normaliseTrafficLineConfig(value: unknown): TrafficLineConfig | 
       return variant ? [variant] : [];
     }).filter((variant, index, values) => values.indexOf(variant) === index)
     : [];
-  // 缺失配置、空对象或没有可识别交通方式，均不代表产品出售大交通。历史记录
-  // 若已保存任一明确变体，仍可继续恢复；只有 `enabled: true` + 空变体保留为
-  // 上游配置错误，交给自动化契约明确拦截而不是静默猜测飞机/火车。
+  // 缺失配置、空对象或没有可识别交通方式，表示尚未完成当前会话站点探测。
+  // 历史记录若已保存任一明确变体，仍可继续恢复；只有 `enabled: true` + 空变体
+  // 保留为上游配置错误，交给自动化契约明确拦截而不是静默猜测飞机/火车。
   return {
     enabled: raw.enabled === true || (raw.enabled !== false && variants.length > 0),
     variants,
@@ -210,33 +200,11 @@ function normaliseTrafficLineAvailability(value: unknown): TrafficLineEndpointAv
   const unavailableVariants = Object.fromEntries(
     TRAFFIC_LINE_VARIANTS.flatMap((variant) => typeof unavailableRaw[variant] === "string" ? [[variant, unavailableRaw[variant]]] : []),
   ) as Partial<Record<TrafficLineVariant, string>>;
-  const checksRaw = raw.scheduleChecks && typeof raw.scheduleChecks === "object" && !Array.isArray(raw.scheduleChecks)
-    ? raw.scheduleChecks as Record<string, unknown>
-    : {};
-  const scheduleChecks = Object.fromEntries(TRAFFIC_LINE_VARIANTS.flatMap((variant) => {
-    const value = checksRaw[variant];
-    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-    const check = value as Record<string, unknown>;
-    if (!["available", "unavailable", "unconfirmed"].includes(String(check.status))) return [];
-    const checkedDates = Array.isArray(check.checkedDates)
-      ? check.checkedDates.filter((date): date is string => typeof date === "string" && Boolean(date.trim()))
-      : [];
-    const checkedCityCount = typeof check.checkedCityCount === "number" && Number.isFinite(check.checkedCityCount)
-      ? Math.max(0, Math.floor(check.checkedCityCount))
-      : 0;
-    const matchedOriginCity = normaliseTrafficLineCity(check.matchedOriginCity);
-    const reason = typeof check.reason === "string" ? check.reason.trim() : "";
-    return [[variant, {
-      status: check.status as TrafficLineScheduleCheck["status"], checkedDates, checkedCityCount,
-      ...(matchedOriginCity ? { matchedOriginCity } : {}), ...(reason ? { reason } : {}),
-    }]];
-  })) as Partial<Record<TrafficLineVariant, TrafficLineScheduleCheck>>;
-  if (!confirmed.length && !Object.keys(unavailableVariants).length && !Object.keys(scheduleChecks).length) return undefined;
+  if (!confirmed.length && !Object.keys(unavailableVariants).length) return undefined;
   return {
     endpointPlan: { arrivalCity, departureCity, resolvedAt, ...(flight ? { flight } : {}), ...(train ? { train } : {}) },
     availableVariants: confirmed,
     unavailableVariants,
-    ...(Object.keys(scheduleChecks).length ? { scheduleChecks } : {}),
   };
 }
 

@@ -13,6 +13,7 @@ import { reconcileAgentShell } from './integration-reconcile.js';
 import { recordAgentUsage } from './integration-usage.js';
 import { refreshSatisfiedResearchTasks } from '../operations/research-refresh.js';
 import { recoverResolvedHotelCandidates } from './hotel-candidate-recovery.js';
+import { repairProductForExplicitHotelCity } from './user-instruction-repair.js';
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
 export function installProductAgent(context: MainIpcContext): () => void {
@@ -90,6 +91,14 @@ export function installProductAgent(context: MainIpcContext): () => void {
       return { accountKey, productVersion: agentProductVersion(product) };
     },
     productFingerprint: async (localProductId) => agentProductVersion(db.getProduct(localProductId)!),
+    prepareUserInstruction: (localProductId, content) => {
+      const current = db.getProduct(localProductId);
+      if (!current) throw productNotFound(localProductId);
+      const repair = repairProductForExplicitHotelCity(current, content);
+      if (!repair) return;
+      const saved = context.productMutations.replace(localProductId, repair.product, { status: current.status });
+      emitProduct(saved);
+    },
     recoverApproval: async (localProductId, snapshot) => {
       let product = db.getProduct(localProductId);
       if (!product) return undefined;

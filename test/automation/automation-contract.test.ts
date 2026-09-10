@@ -57,6 +57,8 @@ function makeValidProduct(): Record<string, unknown> {
       ],
       cover: {
         source: "ctripLibrary",
+        imageId: 79413001,
+        imageUrl: "https://example.test/jinci-cover.jpg",
         poi: "晋祠博物馆",
         description: "横版晋祠外景或代表性造像",
         minQuality: 3,
@@ -80,6 +82,17 @@ test("cover POI must match a verified itinerary POI before the product is ready"
   assert.equal(hasValidCoverPoMeta(product), true);
   ((product.presentation as Record<string, unknown>).cover as Record<string, unknown>).poiId = 999999;
   assert.equal(hasValidCoverPoMeta(product), false);
+});
+
+test("仅有封面 POI 占位时不能进入 ready", () => {
+  const product = makeValidProduct();
+  const cover = (product.presentation as Record<string, unknown>).cover as Record<string, unknown>;
+  delete cover.imageId;
+  delete cover.imageUrl;
+  assert.equal(hasValidCoverPoMeta(product), false);
+  const result = evaluateAutomationContract(product);
+  assert.equal(result.ready, false);
+  assert.ok(result.failures.some((failure) => failure.field.path === "presentation.cover"));
 });
 
 test("cover POI name matching ignores empty itinerary spot names and coerces string poiId", () => {

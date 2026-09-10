@@ -61,6 +61,62 @@ test("完整每日行程禁止整体重排或替换，只允许规范化", () =>
   ]), undefined);
 });
 
+test("二选一必须完整保留，并以同一时段的 or 关系进入 VBK 录入链路", () => {
+  const product = draft("日喀则2日游\nD1、火车站接-宽窄巷子-住日喀则\nD2、日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】--扎什伦布寺--送火车");
+  const onlyFirst = [
+    { day: 1, spots: [{ name: "宽窄巷子", relation: "and", timeOfDay: "morning" }] },
+    { day: 2, spots: [{ name: "日喀则非物质遗产中心", relation: "or", timeOfDay: "morning" }] },
+  ];
+  assert.match(itineraryInputContractError(product, onlyFirst) ?? "", /二选一景点必须全部保留.*日喀则博物馆/);
+  const wrongRelation = [
+    { day: 1, spots: [{ name: "宽窄巷子", relation: "and", timeOfDay: "morning" }] },
+    { day: 2, spots: [
+      { name: "日喀则非物质遗产中心", relation: "and", timeOfDay: "morning" },
+      { name: "日喀则博物馆", relation: "and", timeOfDay: "morning" },
+    ] },
+  ];
+  assert.match(itineraryInputContractError(product, wrongRelation) ?? "", /relation: "or"/);
+  const valid = [
+    { day: 1, spots: [{ name: "宽窄巷子", relation: "and", timeOfDay: "morning" }] },
+    { day: 2, spots: [
+      { name: "日喀则非物质遗产中心", relation: "or", timeOfDay: "morning" },
+      { name: "日喀则博物馆", relation: "or", timeOfDay: "morning" },
+      { name: "扎什伦布寺", relation: "and", timeOfDay: "afternoon" },
+    ] },
+  ];
+  assert.equal(itineraryInputContractError(product, valid), undefined);
+});
+
+test("行程后的 AI 自我修复说明不能被误识别为锁定景点", () => {
+  const product = draft("日喀则2日游，4钻酒店。D1：火车站接-帕拉庄园【配讲解】-江孜宗山古堡【配讲解】-白居寺-住日喀则。D2：日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】--扎什伦布寺--送火车。资料准备好之前无需询问用户，如需处理请尽可能由 AI 自我修复。");
+  const locked = extractLockedConstraints(product);
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["帕拉庄园", "江孜宗山古堡", "白居寺"] },
+    { day: 2, spots: ["日喀则非物质遗产中心", "日喀则博物馆", "扎什伦布寺"] },
+  ]);
+  assert.ok(!locked.pois.some((poi) => poi.includes("自我修复")));
+});
+
+test("创建后的自动执行提示和端到端测试说明不能进入锁定景点", () => {
+  const product = draft("日喀则2日游\n4钻酒店\nD1、火车站接-帕拉庄园【配讲解】-江孜宗山古堡【配讲解】-白居寺-住日喀则\nD2、日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】--扎实伦布寺--送火车\n\n端到端的测试行程录入，期望在资料准备好之前不需要询问用户，如果需要的话尽可能调整成ai自我修复。");
+  product.messages = [
+    ...product.messages,
+    {
+      id: "auto-start",
+      role: "user",
+      content: "请读取刚创建的产品和用户要求，完成本地规划与资源核验；任何 VBK 写入都必须先请求明确审批。",
+      createdAt: "2026-09-10T00:00:00.000Z",
+    },
+  ];
+
+  const locked = extractLockedConstraints(product, product.messages);
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["帕拉庄园", "江孜宗山古堡", "白居寺"] },
+    { day: 2, spots: ["日喀则非物质遗产中心", "日喀则博物馆", "扎实伦布寺"] },
+  ]);
+  assert.ok(!locked.pois.some((poi) => /端到端|资料准备|询问用户|明确审批/.test(poi)));
+});
+
 test("product.messages 中的最新纠正进入写入契约，只覆盖被纠正日期", () => {
   const product = draft("D1 去宽窄巷子，D2 去武侯祠，包车");
   product.messages = [

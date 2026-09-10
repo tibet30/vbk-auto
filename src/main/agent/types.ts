@@ -62,6 +62,9 @@ export interface AgentCoreDependencies {
   tools: AgentTool[];
   accountFor(localProductId: string): Promise<{ accountKey: string; productVersion: string }>;
   productFingerprint?(localProductId: string): Promise<string>;
+  /** Applies deterministic local repairs implied by an explicit new user
+   * instruction before the next intent fingerprint and model turn are made. */
+  prepareUserInstruction?(localProductId: string, content: string): Promise<void> | void;
   recoverApproval?(localProductId: string, snapshot: AgentSnapshot): Promise<AgentApproval | undefined>;
   /** Starts the deterministic, already-authorised VBK workflow. Returns true
    * only when Agent must yield instead of asking the model for another step. */

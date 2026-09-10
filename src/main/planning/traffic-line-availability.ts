@@ -16,9 +16,10 @@ export type InitialTrafficLineSyncResult =
   | { status: "skipped"; reason: "unsupported" | "alreadyConfigured" | "unconfirmed" };
 
 /**
- * 这个步骤不猜测交通方式：接口请求、POI 城市或候选消歧未确认时，保持草稿
- * 的 disabled 空配置。用户已明确配置的交通方式不会被覆盖；但先前只因会话或
- * 消歧服务短暂失败而缺失的方式必须在后续规划中重新核验，不能永久降级为单一方式。
+ * 每个产品默认探测大交通端点：只要 VBK 当前会话能确认机场或火车站，就把
+ * 对应往返子产品配置写入草稿。用户已明确配置的交通方式不会被覆盖；但先前
+ * 只因会话或消歧服务短暂失败而缺失的方式必须在后续规划中重新核验，不能永久
+ * 降级为单一方式。
  */
 export async function syncInitialTrafficLineAvailability(
   localProductId: string,
@@ -64,9 +65,6 @@ export async function syncInitialTrafficLineAvailability(
  * 消歧失败并未证实机场不存在，下一次规划应重新查这一种方式。
  */
 function hasRetryableTrafficAvailability(config: TrafficLineConfig | undefined): boolean {
-  const availability = config?.availability;
-  if (availability && !availability.scheduleChecks) return true;
-  if (Object.values(availability?.scheduleChecks ?? {}).some((check) => check?.status === "unconfirmed")) return true;
   return Object.values(config?.availability?.unavailableVariants ?? {}).some((reason) =>
     !/未找到唯一可确认的(?:机场|火车站)候选/.test(reason),
   );

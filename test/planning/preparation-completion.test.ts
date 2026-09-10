@@ -34,7 +34,7 @@ function completeDraft(): ProductDetail {
       { category: "精选酒店", text: "入住当地五钻酒店" },
       { category: "特色美食", text: "覆盖宽窄巷子小吃" },
     ],
-    cover: { source: "ctripLibrary", poi: "宽窄巷子", description: "宽窄巷子横版封面", minQuality: 3 },
+    cover: { source: "ctripLibrary", imageId: 101001, imageUrl: "https://example.test/kuanzhai-cover.jpg", poi: "宽窄巷子", description: "宽窄巷子横版封面", minQuality: 3 },
   };
   product.product.itinerary = [
     { day: 1, title: "宽窄巷子", description: "游览宽窄巷子", hotel: "无", meals: "早餐自理；午餐自理；晚餐自理", spots: [{ name: "宽窄巷子", poiName: "宽窄巷子", poiId: 101 }] },

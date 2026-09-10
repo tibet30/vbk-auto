@@ -13,6 +13,7 @@ import type { OrchestratorRuntime } from "./types.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
 import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-policy.js";
 import { fitPresentationRecommendationTexts } from "./vbk-recommendation-length.js";
+import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -74,7 +75,17 @@ export function sanitiseModuleValue(
   const hit = findBlacklistedKey(value);
   if (hit) return { ok: false, reason: `AI 输出包含禁写字段 ${hit}` };
   if (module === "presentation") {
-    value = fitPresentationRecommendationTexts(value);
+    const presentation = value && typeof value === "object" && !Array.isArray(value)
+      ? { ...(value as Record<string, unknown>) }
+      : value;
+    if (presentation && typeof presentation === "object" && !Array.isArray(presentation)
+      && Object.hasOwn(presentation, "features")) {
+      const presentationRecord = presentation as Record<string, unknown>;
+      const features = coerceProductFeaturesHtml(presentationRecord.features);
+      if (!features) return { ok: false, reason: "presentation.features 必须包含可转换为富文本的内容" };
+      presentationRecord.features = features;
+    }
+    value = fitPresentationRecommendationTexts(presentation);
   }
   const copyBadCases = findAllVbkCopyBadCases(value);
   if (copyBadCases.length > 0) {

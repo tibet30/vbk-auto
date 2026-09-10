@@ -34,7 +34,16 @@ function fillLocalPreparation(target: ReturnType<typeof product>) {
       { category: "精选酒店", text: "入住当地五钻酒店" },
       { category: "特色美食", text: "覆盖宽窄巷子小吃" },
     ],
-    cover: { source: "ctripLibrary", poi: "宽窄巷子", description: "宽窄巷子横版封面", minQuality: 3 },
+    cover: {
+      source: "ctripLibrary",
+      poi: "宽窄巷子",
+      poiId: 101,
+      poiName: "宽窄巷子",
+      imageId: 8800101,
+      imageUrl: "https://dimg.example.com/kuanzhai.jpg",
+      description: "宽窄巷子横版封面",
+      minQuality: 3,
+    },
   };
   target.product.itinerary = [
     { day: 1, title: "宽窄巷子", description: "游览宽窄巷子", hotel: "无", meals: "早餐自理；午餐自理；晚餐自理", spots: [{ name: "宽窄巷子", poiName: "宽窄巷子", poiId: 101 }] },
@@ -69,8 +78,8 @@ test("agent context keeps unmatched POIs for manual review and hands off after f
   const context = agentTaskContext({ getProduct: () => product() } as any, "product-1");
   const parsed = JSON.parse(context) as { rules?: string[] };
   const rules = parsed.rules ?? [];
-  assert.ok(rules.some((rule) => rule.includes("绝不搜索、推断或替换成其他景点")));
-  assert.ok(rules.some((rule) => rule.includes("绝不寻找替代景点")));
+  assert.ok(rules.some((rule) => rule.includes("禁止覆盖或改换成其他地点")));
+  assert.ok(rules.some((rule) => rule.includes("只有原始需求缺少且无法可靠推导")));
   assert.ok(rules.some((rule) => rule.includes("系统按已授权范围自动确定性录入与回读")));
   assert.equal(rules.some((rule) => rule.includes("execute_vbk_phase")), false);
   assert.equal(rules.some((rule) => rule.includes("自动检索同城、同主题、可游览的单一替代 POI")), false);
@@ -104,7 +113,16 @@ test("确认卡可见就绪度消费权威 evaluator，不再出现旧 readiness
       { category: "精选酒店", text: "当地 3 钻酒店含早餐" },
       { category: "缤纷景点", text: "覆盖晋祠与博物院" },
     ],
-    cover: { source: "ctripLibrary", poi: "晋祠博物馆", description: "横版晋祠外景", minQuality: 3 },
+    cover: {
+      source: "ctripLibrary",
+      poi: "晋祠博物馆",
+      poiId: 79413,
+      poiName: "晋祠博物馆",
+      imageId: 88079413,
+      imageUrl: "https://dimg.example.com/jinci.jpg",
+      description: "横版晋祠外景",
+      minQuality: 3,
+    },
   };
   p.product.itinerary = [{
     day: 1, title: "晋祠", spots: [{ name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: 79413 }],

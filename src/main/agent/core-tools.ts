@@ -2,6 +2,11 @@ import type { AgentInputRequest, AgentQuestion } from "../../shared/contracts.js
 import { clampRetryAfterSeconds, parseRetryAfterSeconds } from "../../shared/retry-after.js";
 import { AgentSnapshotManager, type TurnToken } from "./core-snapshot.js";
 import { cleanList, parseQuestions, validateSchema } from "./core-validation.js";
+import {
+  asksForCommercialPricing,
+  asksForPrematureApproval,
+  automaticPreparationAnswer,
+} from "./preparation-question-defaults.js";
 import { isCacheableReadQuery, readQueryCacheKey, ReadQueryCache } from "./read-query-cache.js";
 import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js";
 
@@ -20,32 +25,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function optionId(question: AgentQuestion, pattern: RegExp): string | undefined {
-  return question.options?.find((option) => pattern.test(option.label))?.id;
-}
-
 function defaultAnswerForQuestion(question: AgentQuestion): string | string[] | undefined {
-  const label = question.label.replace(/\s+/g, "");
-  if (/酒店/.test(label) && /候选|备选|选择|资源/.test(label) && question.options?.length) {
-    const hotels = question.options.slice(0, 5).map((option) => option.id);
-    if (hotels.length) return question.kind === "multiple" ? hotels : hotels[0];
-  }
-  if (/用车.*座位|座位数/.test(label)) {
-    const fiveSeat = optionId(question, /(?:5\s*座|五座)/);
-    if (fiveSeat) return question.kind === "multiple" ? [fiveSeat] : fiveSeat;
-    if (question.kind === "text") return "5座";
-  }
-  if (/(?:出发城市)?交通方式|往返交通|大交通/.test(label)) {
-    if (question.kind === "multiple") {
-      const flight = optionId(question, /(?:飞机.*往返|往返.*飞机|机票)/);
-      const train = optionId(question, /(?:火车.*往返|往返.*火车|高铁.*往返|往返.*高铁|火车票|高铁票)/);
-      const answers = [flight, train].filter((value): value is string => Boolean(value));
-      if (answers.length >= 2) return answers;
-    }
-    const roundTrip = optionId(question, /(?:飞机.*火车|火车.*飞机|机票.*火车票|火车票.*机票)/);
-    if (roundTrip) return roundTrip;
-  }
-  return undefined;
+  return automaticPreparationAnswer(question);
 }
 
 function splitDefaultQuestions(questions: AgentQuestion[]) {
@@ -238,10 +219,33 @@ export class AgentToolRunner {
       return "continue";
     }
     if (!this.snapshots.current(snapshot, token)) return "stale";
-    const { visible, defaultAnswers } = splitDefaultQuestions(questions.map(normaliseQuestion));
+    const normalised = questions.map(normaliseQuestion);
+    const deferredApprovalQuestions = normalised.filter(asksForPrematureApproval);
+    const { visible, defaultAnswers } = splitDefaultQuestions(normalised.filter((question) => !asksForPrematureApproval(question)));
+    for (const question of deferredApprovalQuestions) {
+      defaultAnswers[question.id] = question.kind === "multiple" ? [] : "deferred_until_final_approval";
+    }
+    if (visible.some(asksForCommercialPricing)) {
+      this.snapshots.result(snapshot, call.id,
+        "商业定价必须依据已保存的行程自动生成本地审核指导价，不能向运营索要成人价、儿童价、起订人数或成本。请调用 generate_product_module({stage:\"commercial\"}) 补齐；运营如有需要可在生成后手动调整。",
+        { automaticCommercialPricing: true }, token.runId);
+      this.snapshots.event(snapshot, "status", "已拒绝人工定价输入：将依据行程生成本地审核指导价。", {
+        automaticCommercialPricing: true,
+        toolCallId: call.id,
+      }, token.runId);
+      this.snapshots.save(snapshot);
+      return "continue";
+    }
     if (!visible.length) {
-      this.snapshots.result(snapshot, call.id, JSON.stringify(defaultAnswers), { defaultAnswers }, token.runId);
-      this.snapshots.event(snapshot, "status", "已采用系统默认：出发城市交通为飞机和火车往返，用车座位数为 5 座；酒店候选默认保留前 5 个。", {
+      this.snapshots.result(snapshot, call.id, JSON.stringify(defaultAnswers), {
+        defaultAnswers,
+        ...(deferredApprovalQuestions.length
+          ? { deferredApprovalQuestions: deferredApprovalQuestions.map((question) => question.id) }
+          : {}),
+      }, token.runId);
+      this.snapshots.event(snapshot, "status", deferredApprovalQuestions.length
+        ? "已采用可推导的安全默认；VBK 写入授权已延后到资料准备完成后的最终确认。"
+        : "已采用可推导的系统默认，继续自动准备。", {
         defaultAnswers,
         toolCallId: call.id,
       }, token.runId);

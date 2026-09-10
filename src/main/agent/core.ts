@@ -46,6 +46,15 @@ export class AgentCore {
       if (snapshot.run?.status === "running" && detached && !handingOff) {
         this.pauseRun(snapshot, "应用重启后已在安全检查点暂停。");
       }
+      if (snapshot.pendingApproval?.status === "pending") {
+        const blocker = await this.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
+        if (blocker) {
+          this.cancelPendingInteraction(snapshot, `最终确认已失效：${blocker}`);
+          if (snapshot.run && !this.terminal(snapshot.run.status)) {
+            this.pauseRun(snapshot, `最终确认已失效：${blocker}。请继续执行，系统会从缺失项自动修复。`);
+          }
+        }
+      }
       return this.save(snapshot);
     });
   }
@@ -71,6 +80,7 @@ export class AgentCore {
         // Plan is no longer phase-A ready: drop the stale card and continue as a
         // normal turn so the model can finish local prep before re-requesting.
       }
+      await this.deps.prepareUserInstruction?.(id, text);
       const recoveryInstruction = preservesApprovedIntent(text);
       let approved = this.snapshots.validApproval(snapshot);
       if (recoveryInstruction) approved = await this.handoffs.recover(id, snapshot) ?? approved;
@@ -209,7 +219,19 @@ export class AgentCore {
       if (!snapshot.run || ["completed", "abandoned"].includes(snapshot.run.status)) return snapshot;
       const openRetryWindow = snapshot.run.status === "paused";
       if (snapshot.pendingInput) { this.waiting(snapshot, "waiting_input"); return this.save(snapshot); }
-      if (snapshot.pendingApproval) { this.waiting(snapshot, "waiting_approval"); return this.save(snapshot); }
+      if (snapshot.pendingApproval) {
+        const blocker = await this.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
+        snapshot = this.load(id);
+        if (!snapshot.pendingApproval) return snapshot;
+        if (!blocker) {
+          this.waiting(snapshot, "waiting_approval");
+          return this.save(snapshot);
+        }
+        this.cancelPendingInteraction(snapshot, `最终确认已失效：${blocker}`);
+        this.event(snapshot, "status", `最终确认已失效：${blocker}。继续从缺失项自动修复。`, {
+          noProgressBlocker: "approval_precondition",
+        });
+      }
       if (snapshot.uncertainWrite) {
         const uncertain = structuredClone(snapshot.uncertainWrite);
         const reconciliation = await this.deps.reconcileUncertainWrite?.(id, uncertain);

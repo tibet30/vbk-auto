@@ -73,6 +73,47 @@ test("a status follow-up drops a stale approval when local readiness no longer p
   await core.idle("stale-approval");
 });
 
+test("get drops a stale pending approval before the renderer can show final confirmation", async () => {
+  const { core, saved, deps } = harness([]);
+  deps.approvalPrecondition = async () => "本地方案尚未准备完成，不能进入 VBK 录入：产品封面";
+  saved.set("stale-approval-get", {
+    localProductId: "stale-approval-get",
+    run: { id: "run", status: "waiting_approval", createdAt: "x", updatedAt: "x", intentVersion: "intent" },
+    pendingApproval: {
+      id: "approval", productVersion: "version", accountKey: "account", intentVersion: "intent",
+      scope: ["vbk.write_phase:presentation"], summary: "最终确认", status: "pending", createdAt: "x",
+    },
+    events: [],
+  });
+
+  const next = await core.get("stale-approval-get");
+  assert.equal(next.pendingApproval, undefined);
+  assert.equal(next.run?.status, "paused");
+  assert.ok(next.events.some((event) => /最终确认已失效/.test(event.content)));
+});
+
+test("resume drops a stale pending approval and schedules automatic repair", async () => {
+  const { core, saved, deps } = harness([]);
+  let modelCalls = 0;
+  deps.model = { complete: async () => { modelCalls += 1; return { content: "done" }; } };
+  deps.approvalPrecondition = async () => "本地方案尚未准备完成，不能进入 VBK 录入：产品封面";
+  saved.set("stale-approval-resume", {
+    localProductId: "stale-approval-resume",
+    run: { id: "run", status: "waiting_approval", createdAt: "x", updatedAt: "x", intentVersion: "intent" },
+    pendingApproval: {
+      id: "approval", productVersion: "version", accountKey: "account", intentVersion: "intent",
+      scope: ["vbk.write_phase:presentation"], summary: "最终确认", status: "pending", createdAt: "x",
+    },
+    events: [],
+  });
+
+  const resumed = await core.resume("stale-approval-resume");
+  assert.equal(resumed.pendingApproval, undefined);
+  assert.equal(resumed.run?.status, "running");
+  await core.idle("stale-approval-resume");
+  assert.equal(modelCalls, 1);
+});
+
 test("an explicit recommendation edit does not retain a pending final approval", async () => {
   const { core, saved } = harness([{ content: "done" }]);
   saved.set("edit-recommendations", {
@@ -365,6 +406,26 @@ test("AgentCore holds user input durably and resumes with a paired tool result",
   assert.ok(done.events.some((event) => event.type === "tool_result" && event.data?.toolCallId === "ask-1"));
 });
 
+test("AgentCore rejects commercial-pricing questions and leaves the run available for automatic generation", async () => {
+  const { core } = harness([
+    { toolCalls: [{ id: "ask-price", name: "ask_user", arguments: { questions: [
+      { id: "adult_price", label: "本地成人价", kind: "text", required: true },
+      { id: "child_price", label: "儿童价", kind: "text" },
+      { id: "min_people", label: "起订人数", kind: "text" },
+    ] } }] },
+    { content: "已转为自动估价" },
+  ]);
+
+  await core.send("automatic-pricing", "规划");
+  await core.idle("automatic-pricing");
+  const done = await core.get("automatic-pricing");
+  const result = done.events.find((event) => event.type === "tool_result" && event.data?.toolCallId === "ask-price");
+  assert.equal(done.pendingInput, undefined);
+  assert.equal(done.run?.status, "completed");
+  assert.equal(result?.data?.automaticCommercialPricing, true);
+  assert.match(result?.content ?? "", /generate_product_module/);
+});
+
 test("AgentCore auto-adopts default traffic and vehicle-seat questions", async () => {
   const { core } = harness([
     { toolCalls: [{ id: "ask-1", name: "ask_user", arguments: { questions: [
@@ -386,6 +447,68 @@ test("AgentCore auto-adopts default traffic and vehicle-seat questions", async (
   assert.equal(done.pendingInput, undefined);
   const result = done.events.find((event) => event.type === "tool_result" && event.data?.toolCallId === "ask-1");
   assert.equal(result?.content, JSON.stringify({ traffic: ["flight", "train"], seats: "5" }));
+});
+
+test("AgentCore resolves inferable preparation questions and defers VBK approval to the final gate", async () => {
+  const { core } = harness([
+    { toolCalls: [{ id: "ask-preparation", name: "ask_user", arguments: { questions: [
+      { id: "pickup_city", label: "出发地 pickupCity 用哪个城市？", kind: "single", required: true, options: [
+        { id: "rikaze", label: "日喀则" }, { id: "other", label: "其他城市" },
+      ] },
+      { id: "choice", label: "D2 上午二选一怎么处理？", kind: "single", required: true, options: [
+        { id: "one", label: "只保留第一项" }, { id: "both", label: "同时保留两个 relation=or" },
+      ] },
+      { id: "station", label: "接站与送站的火车站端点？", kind: "single", required: true, options: [
+        { id: "default", label: "日喀则站（默认）" }, { id: "other", label: "其他火车站" },
+      ] },
+      { id: "approval_scope", label: "是否授权本地到 VBK 写入范围？", kind: "multiple", required: true, options: [
+        { id: "basic", label: "基础信息" }, { id: "itinerary", label: "行程" },
+      ] },
+    ] } }] },
+    { content: "继续自动准备" },
+  ]);
+
+  await core.send("preparation-defaults", "规划");
+  await core.idle("preparation-defaults");
+  const done = await core.get("preparation-defaults");
+  assert.equal(done.pendingInput, undefined);
+  const result = done.events.find((event) => event.type === "tool_result" && event.data?.toolCallId === "ask-preparation");
+  assert.equal(result?.content, JSON.stringify({
+    pickup_city: "rikaze",
+    choice: "both",
+    station: "default",
+    approval_scope: [],
+  }));
+  assert.deepEqual(result?.data?.deferredApprovalQuestions, ["approval_scope"]);
+});
+
+test("AgentCore removes an inferred lodging node from itinerary spots without asking", async () => {
+  const setup = harness([{
+    toolCalls: [{
+      id: "ask-travel-node",
+      name: "ask_user",
+      arguments: {
+        questions: [{
+          id: "travel_node",
+          label: "如何处理日喀则（入住）这一非景点 POI",
+          kind: "single",
+          required: true,
+          options: [
+            { id: "remove", label: "移出景点列表" },
+            { id: "keep", label: "保留并标注为住宿节点" },
+          ],
+        }],
+      },
+    }],
+  }, { content: "done" }]);
+
+  await setup.core.send("p1", "继续准备");
+  await setup.core.idle("p1");
+
+  const snapshot = await setup.core.get("p1");
+  assert.equal(snapshot.pendingInput, undefined);
+  const result = snapshot.events.find((event) => event.type === "tool_result" && event.data?.toolCallId === "ask-travel-node");
+  assert.match(result?.content ?? "", /"travel_node":"remove"/);
 });
 
 test("AgentCore hides default questions while preserving their answers", async () => {

@@ -29,6 +29,7 @@ import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { requiresGuide, supportsSmallGroupSettings } from "../../shared/product-form.js";
 import { readCover } from "../operations/cover-info.js";
+import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import {
   hasValidCoverPoMeta,
   hasValidItinerary,
@@ -153,7 +154,7 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "封面图（携程图库）",
     phase: "presentation",
     source: "ai-planning",
-    detail: "需提供与已核验行程景点一致的封面 POI；VBK 按该景点选图后回填图片。",
+    detail: "需选定与已核验行程景点一致的携程图库封面，并持久化 imageId 与 imageUrl。",
     check: hasValidCoverPoMeta,
   },
   // itinerary 阶段
@@ -331,14 +332,15 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
   }
   const cover = readCover(product);
   if (!cover) {
-    throw new Error("产品图文缺少封面图，请先在 AI 规划阶段补全 presentation.cover.poi（景点 POI）。");
+    throw new Error("产品图文缺少封面图，请先在 AI 规划阶段从携程图库选定一张图片。");
   }
   if (cover.source === "manualUpload") {
     throw new Error("产品图文封面来自手动上传，自动化阶段不支持；请改用携程图库（ctripLibrary）或改为人工处理。");
   }
   if (cover.source === "ctripLibrary") {
-    if (textValue(cover.poi).length === 0) {
-      throw new Error("产品图文封面缺少代表景点（poi），请先在 AI 规划阶段补全 presentation.cover.poi。");
+    const rawCover = asObject(presentation.cover);
+    if (!isCtripLibraryCoverComplete(rawCover)) {
+      throw new Error("产品图文封面尚未选定具体图片，请先持久化携程图库的 imageId 与 imageUrl。");
     }
   }
 }

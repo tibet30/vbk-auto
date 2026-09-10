@@ -7,6 +7,7 @@
 import type { Page } from "playwright";
 import type { CtripHotelCandidate } from "../../shared/contracts-types.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
+import { hotelDiamondFromTier } from "../../shared/hotel-tiers.js";
 import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
 
 export const CTRIP_HOTEL_SUGGEST_ENDPOINT = "https://m.ctrip.com/restapi/soa2/21881/json/gaHotelSearchEngine";
@@ -121,6 +122,7 @@ export async function resolveItineraryHotelCandidates(
   itinerary: Array<Record<string, unknown>>,
   preferredCity?: string,
   nights?: number,
+  hotelTier?: string,
 ) {
   const dates = nextHotelSearchDates();
   const dailyCandidates: Array<{ day: number; candidates: CtripHotelCandidate[] }> = [];
@@ -131,10 +133,11 @@ export async function resolveItineraryHotelCandidates(
     if (!hasItineraryHotelStay(day.hotel)) continue;
     const spots = Array.isArray(day.spots) ? day.spots.map(record).filter(Boolean) : [];
     const last = spots.at(-1);
-    const anchorName = text(last?.poiName) || text(last?.name);
+    const anchorName = hotelAnchorNameForDay(day, preferredCity)
+      || text(last?.poiName) || text(last?.name);
     const contexts = await fetchCtripHotelContext(anchorName);
-    const anchor = selectCtripHotelContext(contexts, { anchorName, preferredCity: text(last?.city) || preferredCity });
-    const candidates = await fetchCtripHotelCandidates(anchor, dates);
+    const anchor = selectCtripHotelContext(contexts, { anchorName, preferredCity });
+    const candidates = hotelCandidatesForTier(await fetchCtripHotelCandidates(anchor, dates), hotelTier);
     const selected = candidates[0]!;
     day.hotel = selected.hotelName;
     day.hotelCandidates = candidates;
@@ -144,6 +147,23 @@ export async function resolveItineraryHotelCandidates(
   }
   if (!dailyCandidates.length) throw new Error("行程没有需住宿的日期，无法录入酒店候选。");
   return { itinerary: nextItinerary, dailyCandidates, searchDates: dates };
+}
+
+/** An explicit product hotel tier is a constraint, not a ranking hint. */
+export function hotelCandidatesForTier(candidates: CtripHotelCandidate[], hotelTier?: string): CtripHotelCandidate[] {
+  const diamond = hotelDiamondFromTier(hotelTier);
+  if (!diamond) return candidates;
+  const matched = candidates.filter((candidate) => candidate.diamond === diamond);
+  if (!matched.length) throw new Error(`携程未找到符合当地${diamond}钻要求的酒店候选。`);
+  return matched;
+}
+
+/** 明确“住/入住某城”时，以落脚城市而不是当天最后景点作为酒店检索锚点。 */
+export function hotelAnchorNameForDay(day: Record<string, unknown>, preferredCity?: string): string {
+  const city = text(preferredCity);
+  if (!city) return "";
+  const lodgingText = [day.title, day.description, day.hotel, day.hotelDescription].map(text).join(" ");
+  return lodgingText.includes(city) && /(?:住|入住|住宿|酒店)/.test(lodgingText) ? city : "";
 }
 
 /**

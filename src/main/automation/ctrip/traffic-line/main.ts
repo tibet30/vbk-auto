@@ -67,9 +67,6 @@ export async function ensureTrafficLineApi(
     throw new Error("线路及交通缺少已核实的行程 POI 城市；未创建任何子产品，可安全重试。");
   }
   const resourceCheckDates = trafficLineResourceCheckDates(options.product, options.now);
-  if (!resourceCheckDates.length) {
-    throw new Error("大交通缺少可核验的产品班期（commercial.inventory）；未创建任何交通子产品，可安全重试。");
-  }
   const skipped: NonNullable<TrafficLineApiResult["skipped"]> = [];
   targets = targets.filter((target) => {
     const previous = options.childProgress?.find((item) => item.variant === target.variant);
@@ -193,6 +190,9 @@ export async function ensureTrafficLineApi(
         options.onStatus?.(`交通子产品 ${relationship.productId} 的旧版全量班期校验长期未收口，正在用 ${resourceCheckDates.length} 个代表性真实班期受控重提一次。`);
       }
       if (!recoveredSubmit) {
+        if (!resourceCheckDates.length) {
+          throw new Error("产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。");
+        }
         await ensureTrafficLineSegments(page, relationship.productId, target.variant, endpoints, {
           maxPolls: options.maxSegmentPolls,
           sleep: options.sleep,
@@ -359,6 +359,7 @@ export function trainEndpointNeedsReplacement(progress: readonly TrafficLineChil
 
 /** 只有平台明确的“无可售资源”结论才会降级跳过；会话和保存失败仍严格中断。 */
 export function isUnavailableTrafficResourceFailure(reason: string, variant?: TrafficLineVariant): boolean {
+  if (/没有可用于交通资源核验的销售班期/.test(reason)) return true;
   if (/(?:没有任何可用的多出发城市|未返回可用于(?:飞机|火车)往返的出发城市)/.test(reason)) return true;
   if (/(?:当前|本)班期.*(?:没有|无).*可用交通资源|(?:没有|无).*可用交通资源.*(?:当前|本)班期/.test(reason)) return true;
   // 同城接送的火车子产品能创建，但 VBK 到套餐有效化才返回该业务结论。

@@ -17,6 +17,7 @@ export function isPlanningControlMessage(content: string): boolean {
   if (parseProductBriefMessage(text)) return true;
   if (preservesApprovedIntent(text) || isPendingApprovalStatusFollowup(text)) return true;
   const compact = text.replace(/\s+/g, "").replace(/[。！!？?]+$/g, "");
+  if (/^请读取刚创建的产品和用户要求/.test(compact) && /VBK写入.*审批/.test(compact)) return true;
   if (/^(?:确认|批准|同意)(?:录入|吧|了)?$|^(?:可以录入|开始录入|录入吧|请录入|最终确认)$/.test(compact)) return true;
   return /(?:当前|现在)?(?:进度|状态)|做到哪了|怎么样了/.test(compact)
     && !/(?:改|修改|调整|变更|景点|行程|价格|酒店|套餐|POI)/i.test(compact);
@@ -120,7 +121,7 @@ function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrde
     const day = DAY_TOKEN[match[1] ?? ""] ?? Number(match[1]);
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? textValue.length;
-    const remainder = textValue.slice(start, end).replace(/^[:：、，,\s]+/, "").trim();
+    const remainder = trimPlanningControlTail(textValue.slice(start, end)).replace(/^[:：、，,\s]+/, "").trim();
     if (!Number.isInteger(day) || day < 1 || /^(?:不要|不安排|别)/.test(remainder)) continue;
     const spots = splitSpots(remainder);
     if (!spots.length) continue;
@@ -161,16 +162,33 @@ function isItineraryCorrection(value: string): boolean {
 
 function splitSpots(value: string): string[] {
   return value
+    .replace(/【[^】]*】|\[[^\]]*\]|\([^)]*\)|（[^）]*）/gu, " ")
     .replace(/包车|专车|拼车|当地[345四五三]钻.*$|钻酒店.*$/g, " ")
+    .replace(/(?:火车站接|接火车站|送火车|送站|住[^—–\-，,、。；;\n]{2,})/gu, " ")
+    .replace(/(?:二选一|多选一|任选其一)/gu, " ")
+    .replace(/(?:或者|或|\/|／)/gu, "，")
+    .replace(/[—–-]+/gu, "，")
     .split(/[和与、，,以及]+/)
     .map((item) => item.replace(/^(?:(?:必须)?(?:去|游览|安排|参观)|再?(?:改成|改为|换成|调整为|替换为|改去|换去)|再加|增加|加上)/, "").trim())
     .filter(looksLikePlaceName);
 }
 
+/**
+ * A product brief can append execution preferences after the last daily route.
+ * They are not itinerary constraints, even when the last route is introduced
+ * by a D1/D2 marker. Keeping them here would turn "AI 自我修复" into a POI.
+ */
+function trimPlanningControlTail(value: string): string {
+  return value.replace(
+    /(?:[\n。；;]\s*)+(?:端到端.*测试|资料准备|期望在资料准备|如需处理|无需(?:再)?询问用户|不需要(?:再)?询问用户|请读取刚创建的产品|任何\s*VBK\s*写入)[\s\S]*$/u,
+    "",
+  );
+}
+
 function looksLikePlaceName(item: string): boolean {
   if (item.length < 2 || item.length > 20) return false;
   if (/[{}"']/.test(item) || /destination|productForm|userIdea|nights/.test(item)) return false;
-  if (/不要|不安排|可以|希望|轻松|适合|带孩子|建议|最好|左右|一下|安排点/.test(item)) return false;
+  if (/不要|不安排|不需要|可以|希望|期望|资料|准备|询问|审批|明确|端到端|测试|轻松|适合|带孩子|建议|最好|左右|一下|安排点/.test(item)) return false;
   if (/[的了吗呢吧]/.test(item) && item.length > 6) return false;
   return true;
 }

@@ -219,8 +219,9 @@ test("an approved full scope is reused when the model asks for a remaining subse
   const snapshot = await core.get("reuse-approval");
   assert.equal(snapshot.events.filter((event) => event.type === "approval_request").length, 1);
   assert.equal(snapshot.events.find((event) => event.type === "tool_result" && event.data?.toolCallId === "remaining")?.data?.reusedApproval, true);
-  // Creation and user approval each validate once; the repeated subset must not.
-  assert.equal(preconditionChecks, 2);
+  // Creation, renderer refresh, and user approval each validate once; the
+  // repeated subset must not create another approval-precondition check.
+  assert.equal(preconditionChecks, 3);
 });
 
 test("three approval blockers pause across reads and resume opens one finite retry window", async () => {

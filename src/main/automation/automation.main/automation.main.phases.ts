@@ -6,7 +6,7 @@
  *   - 行程含住宿时附加 hotelResource；
  *   - 私家团附加 vehicleResource；
  *   - 始终附加 terms，由 VBK 条款页直接写入，不依赖 AI 规划是否生成 commercial.terms；
- *   - trafficLine 未显式禁用时，在条款后创建飞机/火车往返子产品；
+ *   - trafficLine 只要当前会话已确认任一站点，就在条款后创建飞机/火车往返子产品；
  *   - 始终追加 preflight 自检。
  *
  * 返回数组由调用方按顺序执行；run() / runOnePhase 都用同一个 draftPhases 列表保持重试对齐。
@@ -21,7 +21,7 @@ import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
  */
 export function draftPhasesFor(product: {
   itinerary: Array<{hotel?: unknown; hotelCandidates?: unknown[]}>;
-  operations?: {hotelSource?: string; trafficLine?: {enabled?: boolean}};
+  operations?: {hotelSource?: string; trafficLine?: {enabled?: boolean; variants?: unknown[]}};
   commercial?: {pricing?: unknown; inventory?: unknown};
   sales: {productForm: ReturnType<typeof parseProduct>['sales']['productForm']};
 }) {
@@ -35,10 +35,14 @@ export function draftPhasesFor(product: {
   if (needsHotel) phases.push("hotelResource");
   if (requiresVehicleResource(product.sales.productForm)) phases.push("vehicleResource");
   phases.push("terms");
-  // 母产品条款完成后默认继续创建并完善飞机、火车往返子产品。条款在前，
+  // 母产品条款完成后，只要准备阶段已确认任一大交通站点，就继续创建并完善
+  // 飞机/火车往返子产品。条款在前，
   // 是因为子产品条款 profile 必须从当前账号已验证的母产品协议取得；否则
   // 只能安全阻断，不能先留下无法激活的子产品壳。
-  if (product.operations?.trafficLine?.enabled !== false) phases.push("trafficLine");
+  const trafficLine = product.operations?.trafficLine;
+  if (trafficLine?.enabled === true && Array.isArray(trafficLine.variants) && trafficLine.variants.length > 0) {
+    phases.push("trafficLine");
+  }
   phases.push("preflight");
   return phases;
 }

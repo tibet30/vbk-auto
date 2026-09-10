@@ -151,7 +151,7 @@ export function TrafficLineProgress({ automation, product }: { automation: Produ
     <div className={styles.header}>
       <div>
         <strong id="traffic-line-progress-title">线路及交通规划</strong>
-        <small>产品准备阶段先核验端点和代表日期班次；通过后才进入 VBK 子产品创建。</small>
+        <small>产品准备阶段先核验大交通端点；班期资源在 VBK 子产品阶段核验。</small>
       </div>
       {overallError ? <AlertTriangle size={15} aria-hidden="true" /> : null}
     </div>
@@ -168,7 +168,7 @@ export function TrafficLineProgress({ automation, product }: { automation: Produ
               {statusLabel(card.status)}
             </span>
           </div>
-          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />前置班次已通过 · 待写入 VBK</p> : null}
+          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />端点已确认 · 待写入 VBK</p> : null}
           <dl className={styles.details}>
             <div><dt>抵达</dt><dd>{card.arrival || "待根据行程规划"}</dd></div>
             <div><dt>返程</dt><dd>{card.departure || "待根据行程规划"}</dd></div>

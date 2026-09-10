@@ -5,6 +5,11 @@ import type { ItineraryInputMode, LockedConstraints, LockedItineraryDay } from "
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 import { hasCompleteDailyUserItinerary } from "./user-intent.js";
 
+const DAY_TOKEN: Record<string, number> = {
+  "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
+  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+};
+
 export function classifyItineraryInputMode(
   locked: LockedConstraints,
   days: number,
@@ -28,6 +33,8 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
   if (days > 0 && itinerary.length !== days) {
     return `行程天数必须保持为已锁定的 ${days} 天，不能改成 ${itinerary.length} 天。`;
   }
+  const alternativeError = explicitAlternativeGroupError(product, itinerary);
+  if (alternativeError) return alternativeError;
   if (mode === "open") return undefined;
 
   const byDay = new Map(itinerary.map((day) => [Number(day.day), spotNames(day)]));
@@ -110,6 +117,90 @@ function spotNames(day: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
+/**
+ * 二选一不是在规划期挑出一个默认项：所有原始选项都要保留在同一天的同一段，
+ * 再由 VBK 的 orFlag 表达“任选其一”。这层也覆盖对话式 patch 路径，避免
+ * 只走三阶段 planner 时才生效。
+ */
+function explicitAlternativeGroupError(
+  product: ProductDetail,
+  itinerary: Record<string, unknown>[],
+): string | undefined {
+  const groups = explicitAlternativeGroups(product);
+  if (!groups.length) return undefined;
+  const days = new Map(itinerary.map((day) => [Number(day.day), day]));
+  for (const group of groups) {
+    const day = days.get(group.day);
+    const spots = Array.isArray(day?.spots) ? day.spots.filter(asRecord) : [];
+    const matches = group.names.map((name) => ({ name, index: spots.findIndex((spot) => samePlace(spotName(spot), name)) }));
+    const missing = matches.filter((match) => match.index < 0).map((match) => match.name);
+    if (missing.length) return `第 ${group.day} 天的二选一景点必须全部保留：${missing.join("、")}`;
+    const selected = matches.map((match) => spots[match.index]!);
+    if (!selected.every((spot) => spot.relation === "or")) {
+      return `第 ${group.day} 天的二选一景点「${group.names.join("或")}」必须都标记为 relation: "or"。`;
+    }
+    const times = new Set(selected.map((spot) => spot.timeOfDay).filter((time): time is string => time === "morning" || time === "afternoon"));
+    if (times.size !== 1) return `第 ${group.day} 天的二选一景点「${group.names.join("或")}」必须位于同一时段。`;
+    const indexes = matches.map((match) => match.index).sort((left, right) => left - right);
+    if (indexes.some((index, position) => position > 0 && index !== indexes[position - 1]! + 1)) {
+      return `第 ${group.day} 天的二选一景点「${group.names.join("或")}」必须连续放在同一段行程。`;
+    }
+  }
+  return undefined;
+}
+
+function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
+  const structured = (product.planning?.userIntent?.activities ?? []).flatMap((activity) => {
+    const names = unique([activity.title, ...(activity.alternatives ?? [])]);
+    return activity.kind === "poi" && activity.day > 0 && names.length > 1 ? [{ day: activity.day, names }] : [];
+  });
+  const basic = asRecord(product.product.basicInfo);
+  const raw = text(basic?.userIdea);
+  const parsed = rawAlternativeGroups(raw);
+  return uniqueGroups([...structured, ...parsed]);
+}
+
+function rawAlternativeGroups(value: string): Array<{ day: number; names: string[] }> {
+  const marker = /(?:D|d|第)\s*([0-9一二三四五六七八九十]+)\s*天?/g;
+  const matches = [...value.matchAll(marker)];
+  return matches.flatMap((match, index) => {
+    const day = DAY_TOKEN[match[1] ?? ""] ?? Number(match[1]);
+    const start = (match.index ?? 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? value.length;
+    if (!Number.isInteger(day) || day < 1) return [];
+    return value.slice(start, end).split(/[-—–]+/u).flatMap((segment) => {
+      if (!/(?:二选一|多选一|任选其一)/u.test(segment) || !/(?:或者|或|\/|／)/u.test(segment)) return [];
+      const names = unique(segment
+        .replace(/【[^】]*】|\[[^\]]*\]|\([^)]*\)|（[^）]*）/gu, "")
+        .replace(/(?:二选一|多选一|任选其一)/gu, "")
+        .split(/\s*(?:或者|或|\/|／)\s*/u)
+        .map(cleanAlternativeName));
+      return names.length > 1 ? [{ day, names }] : [];
+    });
+  });
+}
+
+function cleanAlternativeName(value: string): string {
+  return value
+    .replace(/^[:：、，,\s]+/u, "")
+    .replace(/^(?:去|游览|参观|安排)\s*/u, "")
+    .trim();
+}
+
+function uniqueGroups(groups: Array<{ day: number; names: string[] }>): Array<{ day: number; names: string[] }> {
+  const seen = new Set<string>();
+  return groups.filter((group) => {
+    const key = `${group.day}:${group.names.map((name) => name.replace(/\s+/g, "")).join("|")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function spotName(spot: Record<string, unknown>): string {
+  return text(spot.name) || text(spot.poiName);
+}
+
 function isNameSubsequence(haystack: string[], needles: string[]): boolean {
   let index = 0;
   for (const name of haystack) {
@@ -138,6 +229,10 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 function shortCity(value: unknown): string {

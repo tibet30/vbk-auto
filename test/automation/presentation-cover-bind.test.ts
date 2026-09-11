@@ -5,13 +5,15 @@ import {
   BIND_PRODUCT_IMAGE_ENDPOINT,
   COVER_IMAGE_TYPE_ID,
   SEARCH_PRODUCT_IMAGE_ENDPOINT,
+  bindCtripLibraryAttractionImageViaApi,
   bindCtripLibraryCoverViaApi,
   buildCoverBindRequest,
   buildImageTypeBindRequest,
   readProductIdFromVbkUrl,
+  responseHasBoundAttractionImage,
   responseHasBoundCover,
 } from "../../src/main/automation/ctrip/presentation/cover-bind.js";
-import { selectCtripLibraryCover } from "../../src/main/automation/ctrip/presentation/main.js";
+import { bindCtripLibraryPresentationImages, selectCtripLibraryCover } from "../../src/main/automation/ctrip/presentation/main.js";
 
 function browserWithResponses(responses: Array<{ status: number; payload: unknown }>) {
   const calls: Array<{ endpoint: string; body: unknown }> = [];
@@ -136,6 +138,17 @@ test("目标 imageId 已是封面时只回读，不重复绑定", async () => {
   assert.deepEqual(browser.calls.map((call) => call.endpoint), [SEARCH_PRODUCT_IMAGE_ENDPOINT]);
 });
 
+test("目标 imageId 已是景点图时只回读，不重复绑定", async () => {
+  const browser = browserWithResponses([
+    { status: 200, payload: { productImages: [
+      { imageInfo: { imageId: 19031226, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
+    ] } },
+  ]);
+  const result = await bindCtripLibraryAttractionImageViaApi(browser as never, 19031226, 76983997);
+  assert.deepEqual(result, { reused: true, productId: 76983997, imageId: 19031226 });
+  assert.deepEqual(browser.calls.map((call) => call.endpoint), [SEARCH_PRODUCT_IMAGE_ENDPOINT]);
+});
+
 test("封面直绑：显式产品 ID 不读取页面 URL", async () => {
   const browser = browserWithResponses([
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
@@ -243,6 +256,57 @@ test("封面写入会按主图和备用图依次尝试，成功后停止", async
   ]);
 });
 
+test("产品图文图片会同时绑定封面和非封面候选景点图", async () => {
+  const browser = browserWithResponses([
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
+    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 1, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
+    ] } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 1, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
+    ] } },
+    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 1, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
+      { imageInfo: { imageId: 2, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
+    ] } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 1, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
+      { imageInfo: { imageId: 2, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
+    ] } },
+    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 1, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
+      { imageInfo: { imageId: 2, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
+      { imageInfo: { imageId: 3, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
+    ] } },
+  ]);
+
+  const result = await bindCtripLibraryPresentationImages(browser as never, {
+    source: "ctripLibrary",
+    imageId: 1,
+    imageUrl: "https://img/1",
+    poi: "宗山抗英遗址-江孜宗山古堡",
+    alternates: [
+      { imageId: 2, imageUrl: "https://img/2", poi: "白居寺" },
+      { imageId: 3, imageUrl: "https://img/3", poi: "扎什伦布寺" },
+    ],
+  }, 76983997);
+
+  assert.equal(result.imageId, 1);
+  assert.deepEqual(result.attractionImages.map((item: any) => item.imageId), [2, 3]);
+  assert.deepEqual(browser.calls.map((call) => call.body).filter((body) =>
+    JSON.stringify(body).includes('"isCover":true'),
+  ), [buildCoverBindRequest(76983997, 1)]);
+  assert.deepEqual(browser.calls.map((call) => call.body).filter((body) =>
+    JSON.stringify(body).includes('"isCover":false'),
+  ), [
+    buildImageTypeBindRequest(76983997, 2, ATTRACTION_IMAGE_TYPE_ID),
+    buildImageTypeBindRequest(76983997, 3, ATTRACTION_IMAGE_TYPE_ID),
+  ]);
+});
+
 test("封面候选全部绑定失败时汇总每张图片的平台原因", async () => {
   const browser = browserWithResponses([
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [] } },
@@ -275,4 +339,7 @@ test("回读只接受目标 imageId 的封面分类", () => {
   assert.equal(responseHasBoundCover({ productImages: [
     { imageInfo: { imageId: 7, accompanyTourInfo: { imageTypeId: 3 } } },
   ] }, 7), false);
+  assert.equal(responseHasBoundAttractionImage({ productImages: [
+    { imageInfo: { imageId: 8, accompanyTourInfo: { imageTypeId: 4 } } },
+  ] }, 8), true);
 });

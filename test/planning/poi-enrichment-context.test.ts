@@ -27,14 +27,18 @@ test("POI 补全查询携带产品目的城市和省份上下文", async () => {
   assert.deepEqual(contexts, [{ destinationCity: "乌鲁木齐", province: "新疆" }]);
 });
 
-test("已完整 POI 未通过目的地省份复核时清空映射并生成核查任务", async () => {
+test("已完整 POI 续跑时不靠重新搜索清空映射", async () => {
   let written: any;
+  let queryCount = 0;
   const runtime = testRuntime({
     product: {
       basicInfo: { destinationCity: "乌鲁木齐", province: "新疆" },
       itinerary: [{ day: 3, spots: [{ name: "南山风景区", poiName: "南山风景区", poiId: 78174 }] }],
     },
-    suggestPoi: async () => null,
+    suggestPoi: async () => {
+      queryCount += 1;
+      return null;
+    },
     write: (value) => { written = value; },
   });
 
@@ -46,9 +50,9 @@ test("已完整 POI 未通过目的地省份复核时清空映射并生成核查
     reviewCompletePois: true,
   });
 
-  assert.deepEqual(written[0].spots[0], { name: "南山风景区", poiName: null, poiId: null });
-  assert.equal(result[0].label, "核查 南山风景区 的 VBK POI 映射");
-  assert.match(result[0].detail ?? "", /目的地\/省份复核/);
+  assert.equal(queryCount, 0);
+  assert.equal(written, undefined);
+  assert.deepEqual(result, []);
 });
 
 test("已绑定但暂停营业的 POI 在复核时从行程删除并创建替换任务", async () => {

@@ -35,6 +35,21 @@ const itineraryDaySchema = z.object({
     district: z.string().nullable().optional(),
     timeOfDay: z.enum(["morning", "afternoon"]).optional(),
     relation: z.enum(["and", "or"]).optional(),
+    // 录入阶段自动补齐：封面用满 10 张后剩余图按 POI 归属写入对应景点。
+    // 字段结构复用 ctripLibraryCoverSchema.alternates 的子对象，保证
+    // 解析时不会因为 strict() 拒绝未知字段。
+    images: z.array(z.object({
+      imageId: z.number().int().positive(),
+      imageUrl: z.string().min(1),
+      poi: z.string().min(1),
+      thumbnailUrl: z.string().min(1).optional(),
+      previewUrl: z.string().min(1).optional(),
+      score: z.number().optional(),
+      resolution: z.string().min(1).optional(),
+      poiId: z.number().int().positive().optional(),
+      poiName: z.string().min(1).optional(),
+      selectedAt: z.string().min(1).optional(),
+    }).strict()).optional(),
   }).strict()).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),

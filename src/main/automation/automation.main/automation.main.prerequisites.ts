@@ -13,6 +13,7 @@ type Product = ReturnType<typeof parseProduct>;
 export function assertSinglePhaseRetryPrerequisites(product: Product, phase: string) {
   if (phase === "trafficLine") {
     const config = product.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG;
+    if (!config.enabled && config.variants.length === 0) return;
     if (!config.enabled) {
       throw new Error("线路及交通子产品被历史配置禁用，无法执行默认子产品流程。");
     }

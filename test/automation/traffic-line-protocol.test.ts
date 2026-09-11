@@ -227,6 +227,74 @@ test("行程交通按 activeType 语义合并，不覆盖中间 POI，单日补�
   assert.equal(verifyTrafficNodes(oneDay, "flightRoundTrip"), 2);
 });
 
+test("飞机交通节点在资源提交前补齐航班信息卡片", () => {
+  const endpoints = {
+    arrivalCity: "日喀则",
+    departureCity: "日喀则",
+    resolvedAt: "2026-09-11T00:00:00.000Z",
+    flight: {
+      arrival: { code: "RKZ", name: "和平机场" },
+      departure: { code: "RKZ", name: "和平机场" },
+    },
+  };
+  const merged = mergeTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 1 } }] }] },
+      { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 2 } }] }] },
+    ],
+  }, { activeType: { key: 2, name: "航班" }, title: "去程" }, { activeType: { key: 2, name: "航班" }, title: "回程" }, "flightRoundTrip", endpoints);
+
+  const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
+  const outbound = days[0]!.tourDailyInfos[0]!;
+  const inbound = days[1]!.tourDailyInfos.at(-1)!;
+  assert.equal(outbound.tourDailyPackageFlights[0].arriveAirports[0].code, "RKZ");
+  assert.equal(inbound.tourDailyPackageFlights[0].departureAirports[0].code, "RKZ");
+  assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
+});
+
+test("飞机行程回读缺少航班信息卡片时不能视为完成", () => {
+  assert.throws(() => verifyTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyFlights: [] }] },
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyFlights: [] }] },
+    ],
+  }, "flightRoundTrip"), /缺少首日或末日目标交通节点/);
+});
+
+test("火车交通节点在资源提交前补齐火车信息卡片", () => {
+  const endpoints = {
+    arrivalCity: "日喀则",
+    departureCity: "日喀则",
+    resolvedAt: "2026-09-11T00:00:00.000Z",
+    train: {
+      arrival: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+      departure: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+    },
+  };
+  const merged = mergeTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 1 } }] }] },
+      { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 2 } }] }] },
+    ],
+  }, { activeType: { key: 14, name: "火车" }, title: "去程" }, { activeType: { key: 14, name: "火车" }, title: "回程" }, "trainRoundTrip", endpoints);
+
+  const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
+  const outbound = days[0]!.tourDailyInfos[0]!;
+  const inbound = days[1]!.tourDailyInfos.at(-1)!;
+  assert.equal(outbound.tourDailyPackageTrains[0].arriveTrainStations[0].stationName, "日喀则");
+  assert.equal(inbound.tourDailyPackageTrains[0].departureTrainStations[0].stationName, "日喀则");
+  assert.equal(verifyTrafficNodes(merged, "trainRoundTrip"), 2);
+});
+
+test("火车行程回读缺少火车信息卡片时不能视为完成", () => {
+  assert.throws(() => verifyTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 14, name: "火车" }, tourDailyTrains: [] }] },
+      { tourDailyInfos: [{ activeType: { key: 14, name: "火车" }, tourDailyTrains: [] }] },
+    ],
+  }, "trainRoundTrip"), /缺少首日或末日目标交通节点/);
+});
+
 test("行程保存后按同一绑定 ID 有界轮询，直到交通节点正式可见", async () => {
   let calls = 0;
   const waits: number[] = [];
@@ -238,8 +306,8 @@ test("行程保存后按同一绑定 ID 有界轮询，直到交通节点正式�
           tourInfoId: "tour-9",
           tourInfo: {
             tourDailyDescriptions: [
-              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" } }] },
-              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" } }] },
+              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{}] }] },
+              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{}] }] },
             ],
           },
         };
@@ -532,13 +600,15 @@ test("班期校验持续进行时一分钟内收口，并持续回传真实轮�
   }
 });
 
-test("恢复时只读返回上一次班期校验状态，由上层决定旧任务的一次性迁移", async () => {
+test("恢复时继续只读轮询上一次班期校验，不重复提交", async () => {
   const originalFetch = globalThis.fetch;
   const originalDocument = (globalThis as { document?: unknown }).document;
   const urls: string[] = [];
+  let reads = 0;
   (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
   globalThis.fetch = (async (input) => {
     urls.push(String(input));
+    reads += 1;
     return new Response(JSON.stringify({
       ResponseStatus: { Ack: "Success", Errors: [] }, result: "U",
     }), { status: 200 });
@@ -552,9 +622,66 @@ test("恢复时只读返回上一次班期校验状态，由上层决定旧任�
         arrivalCity: "日喀则", departureCity: "日喀则", resolvedAt: "2026-09-09T00:00:00.000Z",
         flight: { arrival: { code: "RKZ", name: "和平机场" }, departure: { code: "RKZ", name: "和平机场" } },
       },
+      { maxPolls: 3, sleep: async () => {} },
     ), "pending");
-    assert.equal(urls.length, 1);
+    assert.equal(reads, 4);
     assert.match(urls[0]!, /getSubmitSegmentsResult/);
+    assert.ok(!urls.some((url) => /\/submitSegments(?:\?|$)/.test(url)));
+  } finally {
+    globalThis.fetch = originalFetch;
+    (globalThis as { document?: unknown }).document = originalDocument;
+  }
+});
+
+test("恢复只读轮询读到成功后继续正式资源段回读", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  const urls: string[] = [];
+  let submitReads = 0;
+  const productSegments = {
+    productDepartureCity: { departureCities: [{ cityId: 101, cityName: "成都" }] },
+    segments: [
+      {
+        segmentBase: { departureCity: { cityId: 0, cityName: "多出发" }, destinationCity: { cityId: 92, cityName: "日喀则" } },
+        flight: { systemFlight: { arrivalAirport: "RKZ", departureAirport: "" } },
+      },
+      {
+        segmentBase: { departureCity: { cityId: 92, cityName: "日喀则" }, destinationCity: { cityId: 0, cityName: "多到达" } },
+        flight: { systemFlight: { arrivalAirport: "", departureAirport: "RKZ" } },
+      },
+    ],
+  };
+  (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (/getSubmitSegmentsResult/.test(url)) {
+      submitReads += 1;
+      return new Response(JSON.stringify({
+        ResponseStatus: { Ack: "Success", Errors: [] }, result: submitReads < 2 ? "U" : "T",
+      }), { status: 200 });
+    }
+    if (/getSegments/.test(url)) {
+      return new Response(JSON.stringify({
+        ResponseStatus: { Ack: "Success", Errors: [] },
+        productSegments,
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected url ${url}`);
+  }) as typeof fetch;
+  try {
+    assert.equal(await recoverPendingTrafficLineSegmentSubmit(
+      { evaluate: async (fn, arg) => fn(arg) } as any,
+      "child-1",
+      "flightRoundTrip",
+      {
+        arrivalCity: "日喀则", departureCity: "日喀则", resolvedAt: "2026-09-09T00:00:00.000Z",
+        flight: { arrival: { code: "RKZ", name: "和平机场" }, departure: { code: "RKZ", name: "和平机场" } },
+      },
+      { maxPolls: 3, sleep: async () => {} },
+    ), "recovered");
+    assert.equal(submitReads, 2);
+    assert.ok(urls.some((url) => /getSegments/.test(url)));
     assert.ok(!urls.some((url) => /\/submitSegments(?:\?|$)/.test(url)));
   } finally {
     globalThis.fetch = originalFetch;

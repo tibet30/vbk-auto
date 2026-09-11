@@ -1,6 +1,6 @@
 # VBK Desktop
 
-面向旅游产品运营人员的 macOS 桌面工作台：在同一界面完成 AI 多轮规划、资料核查、VBK 登录和安全产品录入。
+面向旅游产品运营人员的 macOS / Windows 桌面工作台：在同一界面完成 AI 多轮规划、资料核查、VBK 登录和安全产品录入。
 
 ## 工作流
 
@@ -29,6 +29,14 @@ npm run start
 ```bash
 npm run package
 ```
+
+构建 Windows 安装包：
+
+```bash
+npm run package:win
+```
+
+Windows 安装包需要在 Windows 机器上构建，确保 `better-sqlite3` 等原生依赖按 Windows 目标重新安装/重建。构建产物会输出到 `release/`，文件名形如 `三人同游-1.1.0-x64-setup.exe`。
 
 ## 验证
 

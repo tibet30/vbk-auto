@@ -1,4 +1,5 @@
-import type { TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
+import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
+import { emptyTourDailyTrain } from "../itinerary-api/info-skeletons.js";
 import type { FetchTourInfoIdResult } from "../itinerary-api/steps.js";
 import {
   calculateTourScoreStep,
@@ -14,6 +15,7 @@ export async function ensureTrafficLineItinerary(
   page: TrafficLinePage,
   productId: string,
   variant: TrafficLineVariant,
+  endpoints?: TrafficLineEndpointPlan,
 ): Promise<{ days: number; transportNodes: number }> {
   const source = await readTrafficNodesFromPage(page, productId, variant);
   const linked = await fetchTourInfoId(page, productId);
@@ -22,7 +24,7 @@ export async function ensureTrafficLineItinerary(
   if (!tourInfoId) throw new Error("子产品缺少已关联行程，无法安全合并交通节点。");
   const detail = await fetchTourDailyDetail(page, tourInfoId);
   if (!detail.tourInfo) throw new Error("子产品行程详情回读为空，无法安全合并交通节点。");
-  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant));
+  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant, endpoints));
   const descriptions = list(merged.tourDailyDescriptions);
   const base = { ...productTourInfo, productId, tourInfoId, days: descriptions.length };
   const checked8 = await checkTourDailyStep(page, base, JSON.stringify(merged), 8, "校验子产品行程交通");
@@ -91,6 +93,7 @@ export function mergeTrafficNodes(
   firstTransport: JsonRecord,
   lastTransport: JsonRecord,
   variant: TrafficLineVariant,
+  endpoints?: TrafficLineEndpointPlan,
 ): JsonRecord {
   const result = structuredClone(tourInfo);
   const days = list(result.tourDailyDescriptions);
@@ -101,14 +104,16 @@ export function mergeTrafficNodes(
   const firstInfos = list(first.tourDailyInfos);
   const lastInfos = singleDay ? firstInfos : list(last.tourDailyInfos);
   const expected = variant === "flightRoundTrip" ? 2 : 14;
-  if (!firstInfos.some((node) => isTrafficNode(node, expected))) firstInfos.unshift(structuredClone(firstTransport));
+  const firstNode = trafficNodeWithRequiredCard(firstTransport, variant, "enter", endpoints);
+  const lastNode = trafficNodeWithRequiredCard(lastTransport, variant, "leave", endpoints);
+  if (!firstInfos.some((node) => isTrafficNode(node, expected))) firstInfos.unshift(firstNode);
   const requiredLastCount = singleDay ? 2 : 1;
-  if (lastInfos.filter((node) => isTrafficNode(node, expected)).length < requiredLastCount) lastInfos.push(structuredClone(lastTransport));
-  first.tourDailyInfos = firstInfos.map((node, index) => ({ ...node, sort: index + 1 }));
+  if (lastInfos.filter((node) => isTrafficNode(node, expected)).length < requiredLastCount) lastInfos.push(lastNode);
+  first.tourDailyInfos = firstInfos.map((node, index) => finaliseTrafficNode(node, variant, "enter", index + 1, endpoints));
   if (singleDay) {
     days[0] = first;
   } else {
-    last.tourDailyInfos = lastInfos.map((node, index) => ({ ...node, sort: index + 1 }));
+    last.tourDailyInfos = lastInfos.map((node, index) => finaliseTrafficNode(node, variant, "leave", index + 1, endpoints));
     days[0] = first; days[days.length - 1] = last;
   }
   result.tourDailyDescriptions = days;
@@ -119,11 +124,11 @@ export function verifyTrafficNodes(tourInfo: JsonRecord, variant: TrafficLineVar
   const days = list(tourInfo.tourDailyDescriptions);
   if (!days.length) throw new Error("子产品行程交通回读没有任何天数。");
   const expected = variant === "flightRoundTrip" ? 2 : 14;
-  const firstCount = list(days[0]?.tourDailyInfos).filter((node) => isTrafficNode(node, expected)).length;
-  const lastCount = list(days.at(-1)?.tourDailyInfos).filter((node) => isTrafficNode(node, expected)).length;
+  const firstCount = list(days[0]?.tourDailyInfos).filter((node) => isCompleteTrafficNode(node, expected)).length;
+  const lastCount = list(days.at(-1)?.tourDailyInfos).filter((node) => isCompleteTrafficNode(node, expected)).length;
   const required = days.length === 1 ? 2 : 1;
   if (firstCount < 1 || lastCount < required) throw new Error("子产品行程交通回读缺少首日或末日目标交通节点。");
-  return days.reduce((sum, day) => sum + list(day.tourDailyInfos).filter((node) => isTrafficNode(node, expected)).length, 0);
+  return days.reduce((sum, day) => sum + list(day.tourDailyInfos).filter((node) => isCompleteTrafficNode(node, expected)).length, 0);
 }
 
 /**
@@ -189,4 +194,116 @@ function isTrafficNode(node: JsonRecord, expectedKey: number): boolean {
   return Number(activeType?.key) === expectedKey
     || (expectedKey === 2 && /航班|飞机/.test(text(activeType?.name)))
     || (expectedKey === 14 && /火车|高铁/.test(text(activeType?.name)));
+}
+
+function isCompleteTrafficNode(node: JsonRecord, expectedKey: number): boolean {
+  if (!isTrafficNode(node, expectedKey)) return false;
+  if (expectedKey === 2) return hasFlightCard(node);
+  if (expectedKey === 14) return hasTrainCard(node);
+  return true;
+}
+
+function finaliseTrafficNode(
+  node: JsonRecord,
+  variant: TrafficLineVariant,
+  direction: "enter" | "leave",
+  sort: number,
+  endpoints?: TrafficLineEndpointPlan,
+): JsonRecord {
+  const expected = variant === "flightRoundTrip" ? 2 : 14;
+  const finalised = isTrafficNode(node, expected)
+    ? trafficNodeWithRequiredCard(node, variant, direction, endpoints)
+    : structuredClone(node);
+  return { ...finalised, sort };
+}
+
+function trafficNodeWithRequiredCard(
+  node: JsonRecord,
+  variant: TrafficLineVariant,
+  direction: "enter" | "leave",
+  endpoints?: TrafficLineEndpointPlan,
+): JsonRecord {
+  const next = structuredClone(node);
+  if (variant === "trainRoundTrip") return trainNodeWithRequiredCard(next, direction, endpoints);
+  if (variant !== "flightRoundTrip") return next;
+  if (hasFlightCard(next)) return next;
+  const card = flightPackageCard(direction, endpoints);
+  next.tourDailyPackageFlights = [card];
+  return next;
+}
+
+function flightPackageCard(
+  direction: "enter" | "leave",
+  endpoints?: TrafficLineEndpointPlan,
+): JsonRecord {
+  const station = direction === "enter" ? endpoints?.flight?.arrival : endpoints?.flight?.departure;
+  const card: JsonRecord = {
+    tourDailyPackageFlightId: null,
+    sort: null,
+    directFlightFlag: { key: null, name: null },
+    flightNo: null,
+    departureLocation: null,
+    departureAirports: direction === "leave" ? [{ code: station?.code ?? "", name: station?.name ?? null }] : [{ code: "", name: null }],
+    arriveLocation: null,
+    arriveAirports: direction === "enter" ? [{ code: station?.code ?? "", name: station?.name ?? null }] : [{ code: "", name: null }],
+    departureTime: { key: "N", name: "不限" },
+    departureTimeOffset: null,
+    arriveTime: { key: "N", name: "不限" },
+    arriveDateOffset: null,
+    packageSubClass: null,
+    checkedBaggage: null,
+    piecePerPerson: null,
+    weightPerBaggage: null,
+    weightTotalBaggage: null,
+    stopLocations: [],
+    transferGroup: null,
+    refId: null,
+    parentId: null,
+  };
+  return card;
+}
+
+function trainNodeWithRequiredCard(
+  node: JsonRecord,
+  direction: "enter" | "leave",
+  endpoints?: TrafficLineEndpointPlan,
+): JsonRecord {
+  const next = structuredClone(node);
+  if (hasTrainCard(next)) return next;
+  const station = direction === "enter" ? endpoints?.train?.arrival : endpoints?.train?.departure;
+  const card: JsonRecord = {
+    tourDailyPackageTrainId: null,
+    sort: null,
+    trainNo: null,
+    departureLocation: null,
+    departureTrainStations: direction === "leave" ? [{ stationName: station?.name ?? null, locationCode: station?.code ?? null }] : [],
+    arriveLocation: null,
+    arriveTrainStations: direction === "enter" ? [{ stationName: station?.name ?? null, locationCode: station?.code ?? null }] : [],
+    departureTime: { key: "N", name: "不限" },
+    departureTimeOffset: null,
+    arriveTime: { key: "N", name: "不限" },
+    arriveDateOffset: null,
+    refId: null,
+    parentId: null,
+  };
+  next.tourDailyPackageTrains = [card];
+  const legacy = emptyTourDailyTrain() as JsonRecord;
+  const train = record(legacy.train);
+  if (train) {
+    if (direction === "enter") train.arriveStation = station?.name ?? null;
+    else train.departureStation = station?.name ?? null;
+    legacy.train = train;
+  }
+  next.tourDailyTrains = [legacy];
+  return next;
+}
+
+function hasFlightCard(node: JsonRecord): boolean {
+  return list(node.tourDailyPackageFlights).length > 0
+    || list(node.tourDailyFlights).some((item) => Boolean(record(item.flight)));
+}
+
+function hasTrainCard(node: JsonRecord): boolean {
+  return list(node.tourDailyPackageTrains).length > 0
+    || list(node.tourDailyTrains).some((item) => Boolean(record(item.train)));
 }

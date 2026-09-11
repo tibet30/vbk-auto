@@ -70,8 +70,8 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
     itinerary: () => ({
       reply: "itin",
       modules: [{ module: "itinerary", status: "accepted", value: [
-        { day: 1, title: "Day 1", spots: [{ name: "A", poiName: null, poiId: null }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
-        { day: 2, title: "Day 2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
+        { day: 1, title: "Day 1", spots: [{ name: "A", poiName: "A（VBK）", poiId: 1001 }], description: "D1", hotel: "Hotel", meals: "B/L/D" },
+        { day: 2, title: "Day 2", spots: [{ name: "B", poiName: "B（VBK）", poiId: 1002 }], description: "D2", hotel: "", meals: "含早餐；午餐自理；晚餐自理" },
       ] }],
     }),
     presentation: () => ({
@@ -82,6 +82,16 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
           { category: "优选行程", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷景点", text: "c" },
         ],
         features: "ORIGINAL FEAT",
+        cover: {
+          source: "ctripLibrary",
+          imageId: 880201,
+          imageUrl: "https://images.example.test/original-cover.jpg",
+          poi: "A",
+          poiId: 1001,
+          poiName: "A（VBK）",
+          description: "A 横版外景",
+          minQuality: 3,
+        },
       } }],
     }),
   });
@@ -105,5 +115,5 @@ test("已 valid 的 presentation / itinerary 在 resume 时不会被覆盖", asy
   // 产品里的 presentation.recommendation 仍是 ORIGINAL（未覆盖）。
   const pres = rt.product.presentation as { recommendation: string; features: string };
   assert.equal(pres.recommendation, "ORIGINAL");
-  assert.equal(pres.features, "ORIGINAL FEAT");
+  assert.equal(pres.features, "<p>ORIGINAL FEAT</p>");
 });

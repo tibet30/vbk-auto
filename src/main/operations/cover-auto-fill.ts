@@ -27,13 +27,11 @@
  */
 import type { Page } from "playwright";
 import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search.js";
-import type { CtripLibraryImageCandidate, CtripLibrarySearchResult } from "../../shared/contracts-types.js";
+import type { CtripLibraryCoverAlternate, CtripLibraryImageCandidate, CtripLibrarySearchResult, ItinerarySpot } from "../../shared/contracts-types.js";
 import { logInfo } from "../../shared/log-timestamp.js";
 import {
   buildCtripLibraryCoverAlternateFromCandidate,
   buildCtripLibraryCoverFromCandidate,
-  candidatePoiKey,
-  coverImagePoiKey,
   readPreparedCoverImages,
 } from "./cover-auto-fill-images.js";
 
@@ -42,7 +40,10 @@ export {
   buildCtripLibraryCoverFromCandidate,
 } from "./cover-auto-fill-images.js";
 
-const COVER_IMAGE_TARGET_COUNT = 3;
+/** 每个景点尽量多抓图，但同一产品封面最多准备这么多张（1 主图 + 其余备用）。 */
+const COVER_IMAGE_TARGET_COUNT = 10;
+/** 封面取满后，剩余候选图按 POI 归属写入 itinerary[].spots[].images；每个 spot 最多保留这么多张。 */
+const SPOT_IMAGE_TARGET_COUNT = 10;
 
 function safeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -200,6 +201,8 @@ export interface AutoCoverFillOutcome {
   imageId?: number;
   /** 实际准备好的 imageId 列表，第一张是主图，其余是备用图。 */
   imageIds?: number[];
+  /** 阶段三实际写入 itinerary[].spots[].images 的图张数（仅在 written=true 时存在，0 表示无剩余图可归属）。 */
+  spotImagesWritten?: number;
 }
 
 /**
@@ -255,16 +258,22 @@ export async function applyAutoCoverFill(args: {
     return { nextProduct: product, outcome: { written: false, reason: "没有可用的景点 POI，跳过自动补齐" } };
   }
   if (existingCoverComplete && preparedImages.length >= COVER_IMAGE_TARGET_COUNT) {
-    return { nextProduct: product, outcome: { written: false, reason: "cover 已准备 3 张图片，跳过自动补齐" } };
+    return { nextProduct: product, outcome: { written: false, reason: `cover 已准备 ${COVER_IMAGE_TARGET_COUNT} 张图片，跳过自动补齐` } };
   }
 
-  // 按有序去重的关键词逐一尝试：search 抛错 / 候选空 / candidate 不完整
-  // 都要继续下一个；只有找到第一个 imageResolved=true 的完整候选才写回，
-  // 保证不会因为第一个 keyword 没拿到图就丢掉第二个 POI 的好图。
+  // 阶段一：按有序去重的关键词逐个搜索，收集每个 POI 的「完整候选池」。
+  // 与旧版「每个 keyword 只 find 第一张」不同，这里把一个 keyword 下所有
+  // imageResolved=true 且匹配行程 POI 的候选都留下，交给阶段二轮询取图；
+  // 搜索抛错 / 候选空 / 候选不完整时跳过该 keyword，不阻塞整次补齐。
   const pickedImages = [...preparedImages];
   const seenImageIds = new Set(pickedImages.map((item) => item.imageId));
-  const seenPoiKeys = new Set(pickedImages.map(coverImagePoiKey).filter(Boolean));
   let primaryKeyword = textValue(pickedImages[0]?.poi) || undefined;
+
+  interface KeywordPool {
+    keyword: string;
+    candidates: CtripLibraryImageCandidate[];
+  }
+  const pools: KeywordPool[] = [];
   for (const keyword of keywords) {
     let result: CtripLibrarySearchResult;
     try {
@@ -282,29 +291,44 @@ export async function applyAutoCoverFill(args: {
       continue;
     }
 
-    const candidate = result.candidates.find((item) =>
+    const candidates = result.candidates.filter((item) =>
       isCoverCandidateComplete(item)
       && matchesItineraryCoverPoi(item, keyword, product)
-      && !seenImageIds.has(item.imageId)
-      && !seenPoiKeys.has(candidatePoiKey(item, keyword)),
+      && !seenImageIds.has(item.imageId),
     );
-    if (!isCoverCandidateComplete(candidate)) {
-      continue;
+    if (candidates.length > 0) {
+      pools.push({ keyword, candidates });
     }
+  }
 
-    const image = buildCtripLibraryCoverAlternateFromCandidate({
-      existingCover,
-      candidate,
-      keyword,
-      selectedAt: now(),
-    });
-    const willBecomePrimary = pickedImages.length === 0;
-    pickedImages.push(image);
-    if (willBecomePrimary) primaryKeyword = keyword;
-    seenImageIds.add(image.imageId);
-    const poiKey = coverImagePoiKey(image);
-    if (poiKey) seenPoiKeys.add(poiKey);
-    if (pickedImages.length >= COVER_IMAGE_TARGET_COUNT) break;
+  // 阶段二：round-robin 轮询取图——每个景点先各取 1 张（保证覆盖所有景点），
+  // 再从头轮流补足，直到达到 COVER_IMAGE_TARGET_COUNT 张或候选耗尽。
+  // 去重只按 imageId：同一张图不会重复计入，但同一 POI 允许多张（用户要求
+  // "越多越好"，不再像旧版那样每个景点强制只留 1 张）。
+  const cursor = new Array<number>(pools.length).fill(0);
+  let progressed = true;
+  while (pickedImages.length < COVER_IMAGE_TARGET_COUNT && progressed) {
+    progressed = false;
+    for (let poolIndex = 0; poolIndex < pools.length && pickedImages.length < COVER_IMAGE_TARGET_COUNT; poolIndex += 1) {
+      const pool = pools[poolIndex];
+      while (cursor[poolIndex] < pool.candidates.length) {
+        const candidate = pool.candidates[cursor[poolIndex]];
+        cursor[poolIndex] += 1;
+        if (!isCoverCandidateComplete(candidate) || seenImageIds.has(candidate.imageId)) continue;
+        const image = buildCtripLibraryCoverAlternateFromCandidate({
+          existingCover,
+          candidate,
+          keyword: pool.keyword,
+          selectedAt: now(),
+        });
+        const willBecomePrimary = pickedImages.length === 0;
+        pickedImages.push(image);
+        if (willBecomePrimary) primaryKeyword = pool.keyword;
+        seenImageIds.add(image.imageId);
+        progressed = true;
+        break; // 每轮每个 pool 只取 1 张，保证各景点轮询公平。
+      }
+    }
   }
 
   const primary = pickedImages[0];
@@ -347,26 +371,160 @@ export async function applyAutoCoverFill(args: {
     ...(alternates.length > 0 ? { alternates } : {}),
   };
 
-  // 不动 product 其它子树，只覆盖 presentation.cover。
+  // 阶段三：把封面取满 10 张后未选中的候选图按 POI 归属写入 itinerary[].spots[].images。
+  //   - seenImageIds 已包含 pickedImages 的所有 imageId，候选池里凡是已进封面的
+  //     imageId 不会再次落到景点，避免同一张图既在 cover 又在 spot；
+  //   - 匹配规则：candidate.poiId === spot.poiId 优先；否则 candidate.poiName 与
+  //     spot.name / spot.poiName 互含（与 matchesItineraryCoverPoi 同源）；
+  //   - 每个 spot 最多保留 SPOT_IMAGE_TARGET_COUNT 张（与封面同口径），按搜索
+  //     返回顺序保留前 N 张；超出部分丢弃（保持数据量可控）。
+  //   - 整次没有可写入的剩余图时，itinerary 整体不动。
+  const nextItinerary = collectSpotImageResiduals({
+    product,
+    pools,
+    coverUsedImageIds: seenImageIds,
+    existingCover,
+    now,
+  });
+
+  // 不动 product 其它子树，只覆盖 presentation.cover；如有剩余图归属，附带更新 itinerary。
   const nextProduct: Record<string, unknown> = {
     ...product,
     presentation: {
       ...presentation,
       cover: nextCover,
     },
+    ...(nextItinerary ? { itinerary: nextItinerary } : {}),
   };
 
   const imageIds = pickedImages.map((item) => item.imageId);
+  const spotImagesWritten = nextItinerary
+    ? nextItinerary.reduce<number>((sum, day) => {
+        const spots = Array.isArray((day as Record<string, unknown>).spots) ? (day as Record<string, unknown>).spots as Array<Record<string, unknown>> : [];
+        return sum + spots.reduce<number>((acc, spot) => {
+          const images = Array.isArray(spot.images) ? spot.images as Array<unknown> : [];
+          return acc + images.length;
+        }, 0);
+      }, 0)
+    : 0;
   return {
     nextProduct,
     outcome: {
       written: true,
       reason: existingCoverComplete
-        ? `已补充携程图库封面备用图，共准备 ${imageIds.length} 张候选`
-        : `已写入携程图库封面，并准备 ${imageIds.length} 张候选`,
+        ? `已补充携程图库封面备用图，共准备 ${imageIds.length} 张候选${spotImagesWritten > 0 ? `，另写入 ${spotImagesWritten} 张到行程景点` : ""}`
+        : `已写入携程图库封面，并准备 ${imageIds.length} 张候选${spotImagesWritten > 0 ? `，另写入 ${spotImagesWritten} 张到行程景点` : ""}`,
       keyword: primaryKeyword,
       imageId: primary.imageId,
       imageIds,
+      spotImagesWritten,
     },
   };
+}
+
+/**
+ * 阶段三 helper：从候选池中收集「未进封面」的图，按 POI 归属写入对应 spot.images。
+ *   - 若没有任何剩余图需要写入，返回 null（调用方不需要更新 itinerary）；
+ *   - 写回时只对真正变化了的 day / spot 重新构造对象，未变化的 day 保持原引用。
+ */
+function collectSpotImageResiduals(args: {
+  product: Record<string, unknown>;
+  pools: Array<{ keyword: string; candidates: CtripLibraryImageCandidate[] }>;
+  coverUsedImageIds: Set<number>;
+  existingCover: Record<string, unknown> | null;
+  now: () => string;
+}): Array<Record<string, unknown>> | null {
+  const { product, pools, coverUsedImageIds, existingCover, now } = args;
+  if (pools.length === 0) return null;
+  if (!Array.isArray(product.itinerary) || product.itinerary.length === 0) return null;
+
+  // 按 dayIndex:spotIndex 累计剩余图。
+  const residualBySpot = new Map<string, CtripLibraryCoverAlternate[]>();
+  for (const pool of pools) {
+    for (const candidate of pool.candidates) {
+      if (!isCoverCandidateComplete(candidate)) continue;
+      if (coverUsedImageIds.has(candidate.imageId)) continue;
+      const matched = findSpotForCandidate(product, candidate);
+      if (!matched) continue;
+      const key = `${matched.dayIndex}:${matched.spotIndex}`;
+      const list = residualBySpot.get(key) ?? [];
+      if (list.length >= SPOT_IMAGE_TARGET_COUNT) continue;
+      list.push(buildCtripLibraryCoverAlternateFromCandidate({
+        existingCover,
+        candidate,
+        keyword: pool.keyword,
+        selectedAt: now(),
+      }));
+      residualBySpot.set(key, list);
+    }
+  }
+  if (residualBySpot.size === 0) return null;
+
+  // 构造新的 itinerary：只对真正写入的 day / spot 做不可变更新。
+  const originalDays = product.itinerary as Array<Record<string, unknown>>;
+  let mutated = false;
+  const nextDays = originalDays.map((day, dayIndex) => {
+    if (!isRecord(day) || !Array.isArray(day.spots)) return day;
+    const originalSpots = day.spots as Array<Record<string, unknown>>;
+    let dayMutated = false;
+    const nextSpots = originalSpots.map((spot, spotIndex) => {
+      if (!isRecord(spot)) return spot;
+      const images = residualBySpot.get(`${dayIndex}:${spotIndex}`);
+      if (!images || images.length === 0) return spot;
+      dayMutated = true;
+      return { ...spot, images };
+    });
+    if (!dayMutated) return day;
+    mutated = true;
+    return { ...day, spots: nextSpots };
+  });
+  return mutated ? nextDays : null;
+}
+
+/**
+ * 把 candidate 映射到 itinerary 中的某个 spot。
+ * 匹配规则（与 matchesItineraryCoverPoi 共享一套语义但更宽容）：
+ *   1) candidate.poiId === spot.poiId（正整数相等）；
+ *   2) candidate.poiName 与 spot.name / spot.poiName 互含（任一非空即匹配）；
+ *   3) 都缺则不匹配（无证据证明属于行程中的某个景点）。
+ * 返回首个匹配项的索引 + 引用；找不到返回 null。
+ */
+function findSpotForCandidate(
+  product: Record<string, unknown>,
+  candidate: CtripLibraryImageCandidate,
+): { dayIndex: number; spotIndex: number; spot: ItinerarySpot } | null {
+  if (!Array.isArray(product.itinerary)) return null;
+  const candidatePoiId = positiveInteger(candidate.poiId);
+  const candidateName = textValue(candidate.poiName);
+  for (let dayIndex = 0; dayIndex < product.itinerary.length; dayIndex += 1) {
+    const day = safeObject(product.itinerary[dayIndex]);
+    if (!day || !Array.isArray(day.spots)) continue;
+    for (let spotIndex = 0; spotIndex < day.spots.length; spotIndex += 1) {
+      const raw = day.spots[spotIndex];
+      const spot = safeObject(raw) as ItinerarySpot | null;
+      if (!spot) continue;
+      // 字符串 spot 不支持 images 写入，跳过。
+      if (typeof raw === "string") continue;
+      // 1) poiId 相等优先。
+      if (candidatePoiId && positiveInteger(spot.poiId) === candidatePoiId) {
+        return { dayIndex, spotIndex, spot };
+      }
+      // 2) poiName / name 互含。
+      if (candidateName) {
+        const spotName = textValue(spot.name);
+        const spotPoiName = textValue(spot.poiName);
+        if (spotName && (candidateName === spotName || candidateName.includes(spotName) || spotName.includes(candidateName))) {
+          return { dayIndex, spotIndex, spot };
+        }
+        if (spotPoiName && (candidateName === spotPoiName || candidateName.includes(spotPoiName) || spotPoiName.includes(candidateName))) {
+          return { dayIndex, spotIndex, spot };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

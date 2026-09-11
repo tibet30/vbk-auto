@@ -74,7 +74,7 @@ test("接线 2：fillAndSavePresentation 仅通过 API 保存并回读", async (
     /savePresentationViaApi\(page, presentation, productId\)/,
     "fillAndSavePresentation 必须通过接口保存并回读确认",
   );
-  assert.match(presBody, /selectCtripLibraryCover\(page, presentation\.cover, productId\)/);
+  assert.match(presBody, /bindCtripLibraryPresentationImages\(page, presentation\.cover, productId\)/);
   assert.doesNotMatch(presBody, /saveThenAdvance\(|clickSection\(|page\.reload|waitForURL/);
   assert.match(presBody, /savedWith \}/);
   assert.doesNotMatch(presBody, /clickBasicInfoNextStep/);
@@ -82,12 +82,12 @@ test("接线 2：fillAndSavePresentation 仅通过 API 保存并回读", async (
   assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations\)/,
     "进入产品图文前必须校验完整的三条推荐理由配置");
   assert.match(presBody, /cover\.source !== "ctripLibrary"/, "产品图文必须在写入前校验完整的图库封面配置");
-  assert.match(presBody, /Number\.isInteger\(cover\.imageId\)/, "封面必须有已选图库图片的有效身份");
+  assert.match(presBody, /ctripLibraryCoverAttempts\(cover\)\.length === 0/, "封面必须有已选图库图片的有效身份");
   assert.doesNotMatch(presBody, /fillRecommendationReasons\(page/,
     "产品图文主流程不应再通过 DOM 填写推荐理由");
-  assert.match(presBody, /await selectCtripLibraryCover\(page, presentation\.cover, productId\)/,
-    "产品图文必须录入图库封面");
-  const bindCoverIdx = presBody.indexOf("await selectCtripLibraryCover(page, presentation.cover, productId)");
+  assert.match(presBody, /await bindCtripLibraryPresentationImages\(page, presentation\.cover, productId\)/,
+    "产品图文必须录入图库封面和候选景点图");
+  const bindCoverIdx = presBody.indexOf("await bindCtripLibraryPresentationImages(page, presentation.cover, productId)");
   const saveApiIdx = presBody.indexOf("savePresentationViaApi(page, presentation, productId)");
   assert.ok(bindCoverIdx >= 0 && saveApiIdx > bindCoverIdx,
     "产品图文接口保存必须在封面绑定之后执行");
@@ -124,34 +124,32 @@ test("接线 3：fillItineraryDraftApi 先走全量接口并在回读后直接�
 // —— package / terms 接线：仅保存，不接入 saveThenAdvance ——
 test("接线 4：fillAndSavePackage 不接入 saveThenAdvance 且只点保存", async () => {
   const ctrip = readCtripSource();
-  const pkgIdx = ctrip.indexOf("export async function fillAndSavePackage");
-  const pkgBody = ctrip.slice(pkgIdx, ctrip.indexOf("function dateTitle", pkgIdx));
-  // 套餐管理页面没有已确认的页面级「下一步」契约，本 helper 仅做安全保存。
+  const pkgIdx = ctrip.indexOf("export async function ensurePackageApi");
+  const pkgBody = ctrip.slice(pkgIdx, ctrip.indexOf("\n// FILE:", pkgIdx));
+  // 套餐管理阶段现在只走同源 API 写入与回读，不接入页面级「下一步」契约。
+  assert.ok(pkgIdx >= 0, "必须保留套餐 API 写入入口");
   assert.doesNotMatch(
     pkgBody,
     /saveThenAdvance\(/,
-    "fillAndSavePackage 没有已确认的页面级 Next 契约，禁止接入通用 helper",
+    "ensurePackageApi 没有页面级 Next 契约，禁止接入通用 helper",
   );
-  // 必须保留保存按钮调用。
-  assert.match(pkgBody, /clickSafeSave\(page, \["保存"\]\)/);
-  // 必须保留注释说明「仅保存不自动推进」。
-  assert.match(pkgBody, /saveThenAdvance，避免误点任何「下一步」按钮/);
+  assert.doesNotMatch(pkgBody, /clickSafeSave\(/);
+  assert.match(pkgBody, /post\(page, "savePackageItem"/);
+  assert.match(pkgBody, /getPackage\(page, productId, priceInputType\)/);
 });
 
 test("接线 5：fillAndSaveTerms 不接入 saveThenAdvance，且不得触碰提审", async () => {
   const ctrip = readCtripSource();
   const termsIdx = ctrip.indexOf("export async function fillAndSaveTerms");
-  const termsBody = ctrip.slice(termsIdx, ctrip.indexOf("export async function ensureHotelResource", termsIdx));
-  // 条款维护无页面级 Next 契约，本 helper 仅做安全保存。
+  const termsBody = ctrip.slice(termsIdx, ctrip.indexOf("\n// FILE:", termsIdx));
+  // 条款维护只允许 API 写入和回读，无页面级 Next 契约。
   assert.doesNotMatch(
     termsBody,
     /saveThenAdvance\(/,
     "fillAndSaveTerms 没有已确认的页面级 Next 契约，禁止接入通用 helper",
   );
-  // 必须保留保存按钮调用。
-  assert.match(termsBody, /clickSafeSave\(page, \["保存", "保存并下一步"\]\)/);
-  // 注释必须明确：本 helper 不触碰任何「提审」/「提交审核」入口。
-  assert.match(termsBody, /绝不触碰任何「提审」/);
+  assert.doesNotMatch(termsBody, /clickSafeSave\(/);
+  assert.match(termsBody, /saveStructuredProductClauses\(page, productId,/);
   // 实现代码（去注释后）禁止出现提审入口名。
   const codeOnly = stripComments(termsBody);
   assert.ok(!codeOnly.includes("提交审核"), "fillAndSaveTerms 不得触碰「提交审核」按钮");

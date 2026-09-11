@@ -9,6 +9,7 @@ const { execFileSync } = require("node:child_process");
  */
 module.exports = async function afterPackMacosSign(context) {
   if (context.electronPlatformName !== "darwin") return;
+  if (/mac-universal-(x64|arm64)-temp$/.test(context.appOutDir)) return;
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   execFileSync("codesign", ["--force", "--deep", "--sign", "-", appPath], { stdio: "inherit" });
 };

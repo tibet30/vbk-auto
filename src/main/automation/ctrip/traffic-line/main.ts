@@ -173,7 +173,17 @@ export async function ensureTrafficLineApi(
         && /(?:轮询后仍未完成|仍在 VBK 异步核验)/.test(previous.failureReason ?? "");
       const submitRecovery = recoveringTimedOutSubmit
         ? await recoverPendingTrafficLineSegmentSubmit(
-            page, relationship.productId, target.variant, endpoints, options.sleep,
+            page,
+            relationship.productId,
+            target.variant,
+            endpoints,
+            {
+              maxPolls: options.maxSegmentPolls,
+              sleep: options.sleep,
+              onProgress: (attempt, maxPolls) => options.onStatus?.(
+                `交通子产品 ${relationship.productId} 正在继续等待上次 VBK 班期核验（${attempt}/${maxPolls}）`,
+              ),
+            },
           )
         : "restartable";
       const recoveredSubmit = submitRecovery === "recovered";
@@ -202,7 +212,7 @@ export async function ensureTrafficLineApi(
             `交通子产品 ${relationship.productId} 正在等待 VBK 班期核验（${attempt}/${maxPolls}）`,
           ),
           beforeSubmit: async () => {
-            await ensureTrafficLineItinerary(page, relationship.productId, target.variant);
+            await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);
             await ensureTrafficLineVehicleDraft(page, relationship.productId, options.product);
           },
           onSubmit: (departureCityCount) => {
@@ -220,7 +230,7 @@ export async function ensureTrafficLineApi(
       }
       // submitSegments 会再次结算资源草稿；即使提交前已有交通卡片，也必须在
       // 提交成功后重新落一次，并以正式资源段回读为准。
-      await ensureTrafficLineItinerary(page, relationship.productId, target.variant);
+      await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);
       await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);
       checkpoint("resourcesSaved", relationship.productId);
       checkpoint("itinerarySaved", relationship.productId);

@@ -9,7 +9,7 @@ const source = readFileSync(
 
 test("交通资源提交后必须重新绑定用车组，再记录 resourcesSaved", () => {
   const submitted = source.indexOf("await ensureTrafficLineSegments(");
-  const itinerary = source.indexOf("await ensureTrafficLineItinerary(page, relationship.productId, target.variant);", submitted);
+  const itinerary = source.indexOf("await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);", submitted);
   const binding = source.indexOf("await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);", itinerary);
   const checkpoint = source.indexOf('checkpoint("resourcesSaved", relationship.productId);', binding);
 

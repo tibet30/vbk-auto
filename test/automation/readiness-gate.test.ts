@@ -44,7 +44,11 @@ const baseProduct = {
     ],
     cover: {
       source: "ctripLibrary" as const,
+      imageId: 880011,
+      imageUrl: "https://images.example.test/jinci.jpg",
       poi: "晋祠博物馆",
+      poiId: 79413,
+      poiName: "晋祠博物馆",
       description: "横版晋祠外景或代表性造像",
       minQuality: 3,
     },
@@ -171,7 +175,16 @@ test("ctripLibrary 封面不阻断 readiness", () => {
     ...baseProduct,
     presentation: {
       ...baseProduct.presentation,
-      cover: { source: "ctripLibrary", poi: "云冈石窟", description: "横版云冈石窟外景或代表性造像", minQuality: 3 },
+      cover: {
+        source: "ctripLibrary",
+        imageId: 880012,
+        imageUrl: "https://images.example.test/yungang.jpg",
+        poi: "云冈石窟",
+        poiId: 77888,
+        poiName: "云冈石窟",
+        description: "横版云冈石窟外景或代表性造像",
+        minQuality: 3,
+      },
     },
   };
   const blockers = automationBlockers(product);
@@ -282,7 +295,16 @@ test("完整 cover 只覆盖 image research task", () => {
     ...validProduct,
     presentation: {
       ...validProduct.presentation,
-      cover: { source: "ctripLibrary", poi: "云冈石窟", description: "横版云冈石窟外景或代表性造像", minQuality: 3 },
+      cover: {
+        source: "ctripLibrary",
+        imageId: 880013,
+        imageUrl: "https://images.example.test/yungang-cover.jpg",
+        poi: "云冈石窟",
+        poiId: 77888,
+        poiName: "云冈石窟",
+        description: "横版云冈石窟外景或代表性造像",
+        minQuality: 3,
+      },
     },
   };
   assert.equal(isCoverResearchTaskSatisfiedByProduct({ type: "image" }, product), true);

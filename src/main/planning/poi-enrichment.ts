@@ -63,26 +63,6 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             logInfo("[planning.poi]", { event: "suspended-poi-removed", localProductId, keyword: removedName });
             continue;
           }
-          const checked = await queryPoi({ runtime, localProductId, keyword: String(spot.poiName || keyword), queryTimeoutMs, context: poiContext });
-          if (checked.failed) continue;
-          if (checked.match && checked.match.poiId === spot.poiId && checked.match.poiName === spot.poiName) continue;
-          if (checked.match) {
-            spot.poiName = checked.match.poiName;
-            spot.poiId = checked.match.poiId;
-            poiUpdated = true;
-            logInfo("[planning.poi]", { event: "context-replacement-success", localProductId, keyword, poiName: checked.match.poiName, poiId: checked.match.poiId });
-            continue;
-          }
-          spot.poiName = null;
-          spot.poiId = null;
-          poiUpdated = true;
-          const task = buildPoiResearchTask(String(keyword), "已填 POI 未通过目的地/省份复核，请人工核查或替换为同城可用景点");
-          const key = `${task.type}::${task.label}`;
-          if (!persistedTaskKeys.has(key)) {
-            await runtime.addResearchTask(localProductId, task);
-            persistedTaskKeys.add(key);
-            addedTasks.push(task);
-          }
           continue;
         }
         const originalKeyword = String(keyword);

@@ -263,12 +263,28 @@ export async function recoverPendingTrafficLineSegmentSubmit(
   productId: string,
   variant: TrafficLineVariant,
   endpoints: TrafficLineEndpointPlan,
-  sleep?: (milliseconds: number) => Promise<void>,
+  options: {
+    maxPolls?: number;
+    sleep?: (milliseconds: number) => Promise<void>;
+    onProgress?: (attempt: number, maxPolls: number) => void;
+  } = {},
 ): Promise<TrafficLineSegmentSubmitRecovery> {
   const state = await readSegmentSubmitState(page, productId);
   if (state.status === "missing" || state.status === "failed") return "restartable";
-  if (state.status === "pending") return "pending";
-  await waitForValidatedSegmentReadback(page, productId, variant, endpoints, [], sleep);
+  if (state.status === "pending") {
+    try {
+      const rejectedCityIds = await waitForSegmentSubmit(page, productId, {
+        maxPolls: options.maxPolls,
+        sleep: options.sleep,
+        onProgress: options.onProgress,
+      });
+      if (rejectedCityIds.length) return "restartable";
+    } catch (error) {
+      if (/未启动班期校验/.test(String(error))) return "restartable";
+      return "pending";
+    }
+  }
+  await waitForValidatedSegmentReadback(page, productId, variant, endpoints, [], options.sleep);
   return "recovered";
 }
 

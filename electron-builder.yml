@@ -49,3 +49,18 @@ mac:
   # 跳过 lipo 合并，各自保留（arm64 机器加载 darwin-arm64.node，x64 机器加载 darwin-x64.node）。
   mergeASARs: true
   x64ArchFiles: "**/node_modules/better-sqlite3/prebuilds/*.node"
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+  artifactName: "${productName}-${version}-${arch}-setup.${ext}"
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 三人同游

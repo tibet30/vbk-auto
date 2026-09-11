@@ -12,7 +12,7 @@ import { delay, assertCount } from "../utils.js";
 import { findBestCtripLibraryImage, type CtripLibraryImageAspect } from "../../schema/schema-functions.js";
 import { buildRecommendationReasonsPlan } from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
-import { bindCtripLibraryCoverViaApi } from "./cover-bind.js";
+import { bindCtripLibraryAttractionImageViaApi, bindCtripLibraryCoverViaApi } from "./cover-bind.js";
 import { savePresentationViaApi } from "./presentation-api.js";
 
 export { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
@@ -150,7 +150,7 @@ async function selectSearchOption(page, dialog, id, value, description) {
   throw new Error(`${description}未找到"${value}"；可选：${seen.join("、") || "无"}`);
 }
 
-/** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认。 */
+/** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认封面。 */
 export async function selectCtripLibraryCover(page, cover, productId) {
   const attempts = ctripLibraryCoverAttempts(cover).slice(0, 3);
   const failures = [];
@@ -167,6 +167,29 @@ export async function selectCtripLibraryCover(page, cover, productId) {
     }
   }
   throw new Error(`产品图文封面绑定失败：已尝试 ${attempts.length} 张图片；${failures.join("；")}`);
+}
+
+export async function bindCtripLibraryPresentationImages(page, cover, productId) {
+  const coverResult = await selectCtripLibraryCover(page, cover, productId);
+  const imageProductId = Number(productId ?? coverResult.productId);
+  const selectedCoverId = Number(coverResult.imageId);
+  const attractionResults = [];
+  const failures = [];
+  for (const candidate of ctripLibraryCoverAttempts(cover)) {
+    if (candidate.imageId === selectedCoverId) continue;
+    try {
+      const result = await bindCtripLibraryAttractionImageViaApi(page, candidate.imageId, imageProductId);
+      attractionResults.push({ ...result, selectedImage: candidate });
+    } catch (error) {
+      failures.push(
+        `${candidate.poi || "未命名景点"} imageId=${candidate.imageId}：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`产品图文景点图绑定失败：${failures.join("；")}`);
+  }
+  return { ...coverResult, attractionImages: attractionResults };
 }
 
 function ctripLibraryCoverAttempts(cover) {
@@ -222,10 +245,10 @@ export async function fillAndSavePresentation(page, product, explicitProductId) 
   // 防御深度：仍然保留 3 条 + 白名单 + 不重复校验（buildRecommendationReasonsPlan
   // 抛错信息保持原样），避免改动影响既有运营提示。
   buildRecommendationReasonsPlan(presentation.recommendations);
-  // 推荐理由 + 产品特色 + 封面图统一走接口保存：直接由 savePresentationViaApi
-  // 写入 /15638/getdescriptionInfo → /20698/createProductDraft → /15638/savedescriptioninfo，
-  // 不再回退到 DOM / UEditor / UI SaveMonitor。
-  const coverResult = await selectCtripLibraryCover(page, presentation.cover, productId);
+  // 产品图片先通过 bindProductImage 设置封面和景点图；推荐理由 + 产品特色
+  // 再由 savePresentationViaApi 写入 /15638/getdescriptionInfo →
+  // /20698/createProductDraft → /15638/savedescriptioninfo。
+  const coverResult = await bindCtripLibraryPresentationImages(page, presentation.cover, productId);
   const savedWith = await savePresentationViaApi(page, presentation, productId);
   return { advanced: true, mode: "presentation-api", productId, coverResult, savedWith };
 }

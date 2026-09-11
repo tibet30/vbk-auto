@@ -1,4 +1,5 @@
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { PRODUCT_FORM_LABELS, isProductForm } from "../../../shared/product-form.js";
 
 const head = {
@@ -12,11 +13,15 @@ const head = {
   extension: [],
 };
 
+const PACKAGE_CREATE_READBACK_ATTEMPTS = 6;
+const PACKAGE_CREATE_READBACK_INTERVAL_MS = 1_000;
+
+interface PackageApiOptions {
+  pause?: (milliseconds: number) => Promise<void>;
+}
+
 function assertOk(payload: any, label: string) {
-  const status = payload?.ResponseStatus;
-  if (status?.Ack === "Failure" || (Array.isArray(status?.Errors) && status.Errors.length)) {
-    throw new Error(`${label}失败：${JSON.stringify(status.Errors ?? status).slice(0, 500)}`);
-  }
+  return assertVbkAckSuccess(payload, label);
 }
 
 async function post(page: any, path: string, body: Record<string, unknown>, label: string) {
@@ -25,18 +30,17 @@ async function post(page: any, path: string, body: Record<string, unknown>, labe
     browserRequestTimeoutMs: 15_000,
     evaluateTimeoutMs: 20_000,
     errorLabel: label,
-    body,
+    headers: { cookieorigin: "https://vbooking.ctrip.com" },
+    body: { contentType: "json", head, ...body },
   });
   assertOk(response.payload, label);
   return response.payload as any;
 }
 
-async function getPackage(page: any, productId: string, required = true) {
+async function getPackage(page: any, productId: string, priceInputType: number, required = true) {
   const payload = await post(page, "getPackageList", {
-    contentType: "json",
-    head,
     productId: Number(productId) || productId,
-    priceInputType: 1,
+    priceInputType,
   }, "VBK 套餐查询");
   const item = Array.isArray(payload?.itemList) ? payload.itemList[0] : undefined;
   if (!item && required) throw new Error("VBK 尚未返回套餐，无法通过接口设置套餐管理。");
@@ -71,25 +75,59 @@ async function createCustomerTemplate(page: any, vendorId: number) {
   return templateId;
 }
 
-async function createInitialPackage(page: any, product: any, productId: string) {
+function packageDays(product: any, current?: any) {
+  return product.itinerary?.length || current?.resourceNameRule?.days || Number(product.basicInfo?.days) || 0;
+}
+
+function packageHasHotel(product: any) {
+  return Array.isArray(product.itinerary)
+    && product.itinerary.some((day: any) => String(day?.hotel ?? "").trim() && String(day.hotel).trim() !== "无");
+}
+
+async function readCreatedPackage(
+  page: any,
+  productId: string,
+  priceInputType: number,
+  options: PackageApiOptions,
+) {
+  const pause = options.pause ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  for (let attempt = 1; attempt <= PACKAGE_CREATE_READBACK_ATTEMPTS; attempt += 1) {
+    const item = await getPackage(page, productId, priceInputType, false);
+    if (item) return item;
+    if (attempt < PACKAGE_CREATE_READBACK_ATTEMPTS) await pause(PACKAGE_CREATE_READBACK_INTERVAL_MS);
+  }
+  throw new Error("VBK 首套餐创建已返回成功，但套餐列表仍为空；请检查套餐管理页是否生成资源。");
+}
+
+async function createInitialPackage(
+  page: any,
+  product: any,
+  productId: string,
+  packageName: string,
+  priceInputType: number,
+  options: PackageApiOptions,
+) {
   const basic = await post(page, "getProductBaseInfo", {
-    contentType: "json", head, productId: Number(productId) || productId, needBaseInfo: true,
+    productId: Number(productId) || productId,
+    needBaseInfo: true,
   }, "VBK 套餐初始化账号查询");
   const vendorId = Number(basic?.baseInfo?.vendorId);
   if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error("VBK 套餐初始化缺少 vendorId");
   const templateId = await createCustomerTemplate(page, vendorId);
-  const days = product.itinerary?.length || Number(product.basicInfo?.days) || 0;
+  const days = packageDays(product);
+  const hasHotel = packageHasHotel(product);
   const packageInfo = {
-    name: `${days}日套餐`, needShuttle: "F", vendorConfirmModeId: 2, confirmHour: 4,
+    name: packageName, needShuttle: "F", vendorConfirmModeId: 2, confirmHour: 4,
     isHotelShareRoom: "F", isContainBedFee: "T", visaInfo: [], vendorResourceCode: "",
-    isSmsVBKNotice: "T", isMainPackage: "T", isHotelResource: "T",
+    isSmsVBKNotice: "T", isMainPackage: "T", isHotelResource: hasHotel ? "T" : "F",
+    priceInputType,
     piCustomerInfoTemplateId: templateId,
     resourceNameRule: { days, upgradeType: {}, upgradeValue: {} },
   };
   await post(page, "savePackageItem", {
-    contentType: "json", priceInputType: "1", productId: Number(productId) || productId, packageInfo,
+    priceInputType: String(priceInputType), productId: Number(productId) || productId, packageInfo,
   }, "VBK 首套餐接口创建");
-  return getPackage(page, productId);
+  return readCreatedPackage(page, productId, priceInputType, options);
 }
 
 export function resolvePackageName(product: any): string {
@@ -108,17 +146,16 @@ export function resolvePackageName(product: any): string {
 }
 
 /** 直接调用 Tour Helper 同源协议更新套餐，并回读关键字段。 */
-export async function ensurePackageApi(page: any, product: any, productId: string) {
+export async function ensurePackageApi(page: any, product: any, productId: string, options: PackageApiOptions = {}) {
   const commercial = product.commercial ?? {};
   const basic = product.basicInfo ?? {};
   const packageName = resolvePackageName(product);
-  const current =
-    (await getPackage(page, productId, false))
-    ?? (await createInitialPackage(page, product, productId));
-  const days = product.itinerary?.length || current.resourceNameRule?.days || 0;
-  const hasHotel = Array.isArray(product.itinerary)
-    && product.itinerary.some((day: any) => String(day?.hotel ?? "").trim() && String(day.hotel).trim() !== "无");
   const priceInputType = product.sales?.splitGroup === true ? 5 : 1;
+  const current =
+    (await getPackage(page, productId, priceInputType, false))
+    ?? (await createInitialPackage(page, product, productId, packageName, priceInputType, options));
+  const days = packageDays(product, current);
+  const hasHotel = packageHasHotel(product);
   const description = `${packageName}。${product.presentation?.recommendation ?? basic.subtitle ?? ""}`;
   const packageInfo = {
     ...current,
@@ -140,7 +177,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     productId: Number(productId) || productId,
     packageInfo,
   }, "VBK 套餐保存");
-  const saved = await getPackage(page, productId);
+  const saved = await getPackage(page, productId, priceInputType);
   const checks = [
     ["套餐名称", saved.name, packageInfo.name],
     ["供应商套餐编号", saved.vendorResourceCode, packageInfo.vendorResourceCode],

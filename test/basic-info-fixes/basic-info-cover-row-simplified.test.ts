@@ -188,13 +188,22 @@ test("BasicInfoCoverRow 已选 ctripLibrary cover 使用 imageUrl 渲染 + 显�
   assert.match(coverRowCode, /cover\.resolution/);
 });
 
-test("BasicInfoCoverRow 已选 ctripLibrary cover 会展示备用封面缩略图", () => {
-  assert.match(coverRowCode, /CtripCoverAlternates/);
+test("BasicInfoCoverRow 已选 ctripLibrary cover 把备用封面合并进轮播图，不再单独列缩略图导航条", () => {
+  // 备图扁平化进 useCoverCarouselItems，统一做轮播图数据源。
+  assert.match(coverRowCode, /useCoverCarouselItems/);
   assert.match(coverRowCode, /cover\.alternates/);
-  assert.match(coverRowCode, /备用封面/);
-  assert.match(coverRowCode, /data-testid="cover-alternates"/);
-  assert.match(coverRowStyleSource, /\.coverAlternates\b/);
-  assert.match(coverRowStyleSource, /\.coverAlternateThumb\b/);
+  assert.match(coverRowCode, /cover\.alternates\.slice\(\s*0,\s*MAX_COVER_IMAGES\s*-\s*1\s*\)/);
+  // 轮播图上限：主图 + 备图最多 MAX_COVER_IMAGES 张。
+  assert.match(coverRowCode, /MAX_COVER_IMAGES\s*=\s*10/);
+  // 旧的「缩略图导航条」整块下线：组件 / testid / 文案都不应再出现。
+  assert.doesNotMatch(coverRowCode, /CtripCoverAlternates\b/);
+  assert.doesNotMatch(coverRowCode, /data-testid="cover-alternates"/);
+  assert.doesNotMatch(coverRowCode, /备用封面 \$\{alternates\.length\} 张/);
+  // 圆点指示器（coverCarouselDots / coverCarouselDot）作为新的多图导航。
+  assert.match(coverRowCode, /coverCarouselDots/);
+  assert.match(coverRowCode, /coverCarouselNav/);
+  assert.match(coverRowStyleSource, /\.coverCarouselDots\b/);
+  assert.match(coverRowStyleSource, /\.coverCarouselDot\b/);
 });
 
 test("BasicInfoCoverRow manualUpload 预览走 data URL，不再声称 file:// / file 路径", () => {

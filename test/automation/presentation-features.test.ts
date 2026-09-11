@@ -258,11 +258,11 @@ test("产品图文：fillAndSavePresentation 必须通过 presentation-api 接�
   );
   // 顺序：先绑定封面，再保存图文；二者都必须使用显式 productId。
   const idxSaveApi = body.indexOf("savePresentationViaApi(");
-  const idxCover = body.indexOf("selectCtripLibraryCover(");
-  assert.ok(idxSaveApi >= 0 && idxCover >= 0, "必须同时存在封面绑定和图文保存调用");
+  const idxCover = body.indexOf("bindCtripLibraryPresentationImages(");
+  assert.ok(idxSaveApi >= 0 && idxCover >= 0, "必须同时存在图片绑定和图文保存调用");
   assert.ok(
     idxCover < idxSaveApi,
-    `封面绑定必须先于图文保存；idxCover=${idxCover}, idxSaveApi=${idxSaveApi}`,
+    `图片绑定必须先于图文保存；idxCover=${idxCover}, idxSaveApi=${idxSaveApi}`,
   );
   assert.doesNotMatch(body, /saveThenAdvance\(|clickSection\(|page\.reload|waitForURL/);
   // 反向红线：主流程不应再回退到 DOM 写入 / UI SaveMonitor

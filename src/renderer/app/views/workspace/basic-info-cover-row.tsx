@@ -17,6 +17,14 @@
  *    避免写入空 cover；
  *  - 候选列表仍然限定固定高度并内部滚动，避免拉高 review 卡。
  *
+ * 展示态（默认）行为：
+ *  - 主图 + 备用封面统一合并为一个轮播图（左右箭头 + 底部圆点指示器
+ *    + 主图左上 "n / N" 计数），由 currentIndex 同步驱动选中态；
+ *  - 只有 1 张图时不显示箭头 / 计数 / 圆点；
+ *  - 点击主图 → 多图灯箱打开到对应索引，灯箱里也能左右切换；
+ *  - 灯箱关闭语义：点击图片本体不关闭（图片接管交互），其它任意区域（含
+ *    stage 空白、header、footer、外层遮罩）都关闭。
+ *
  * 行为约束：
  *  - 默认展示态：cover 已存在时显示来源 chip + poi + 描述 + 质量分 + 关键元
  *    数据（imageId / 文件名 / sizeBytes 等）；无 cover 时显示入口；
@@ -24,8 +32,10 @@
  *    review 主体；
  *  - 与其它基础信息行共用 rowDisplay / hint / tag 样式。
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChevronLeft,
+  ChevronRight,
   ImagePlus,
   LoaderCircle,
   MapPin,
@@ -80,6 +90,8 @@ export interface BasicInfoCoverRowProps {
 const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_SIZE_MIB = Math.floor(MAX_FILE_SIZE_BYTES / 1024 / 1024);
+/** 产品封面轮播图最多展示的图片数（1 主图 + 其余备图）。 */
+const MAX_COVER_IMAGES = 10;
 
 export function BasicInfoCoverRow({
   cover,
@@ -108,7 +120,13 @@ export function BasicInfoCoverRow({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const submittedRef = useRef(false);
-  const [zoomImage, setZoomImage] = useState<ImageLightboxItem | null>(null);
+  /** 灯箱：null = 关闭；单图模式时只用 image 字段，多图模式同时传 items/index。
+   *  不在 state 中放 items 是为了避免长数组引用导致不必要 re-render。 */
+  const [zoomTarget, setZoomTarget] = useState<{
+    item: ImageLightboxItem;
+    items: ImageLightboxItem[];
+    index: number;
+  } | null>(null);
   // React state 要等下一次渲染才会禁用控件；用 ref 补住双击/回车连发窗口。
   const placeSearchInFlightRef = useRef(false);
   const imageSearchInFlightRef = useRef(false);
@@ -246,13 +264,30 @@ export function BasicInfoCoverRow({
     if (!ok) submittedRef.current = false;
   };
 
-  const openImageZoom = (item: ImageLightboxItem) => {
-    setZoomImage(item);
-  };
+  /**
+   * 打开多图灯箱。`fallbackImage` 是单图回退（用于 manualUpload 或
+   * 不存在 alternates 的兜底），传入后灯箱拿到 items 数组 + 起始 index，
+   * 在 stage 两侧渲染左右切换按钮。
+   */
+  const openImageZoom = useCallback((items: ImageLightboxItem[], index: number) => {
+    const safe = items[index] ?? items[0];
+    if (!safe) return;
+    setZoomTarget({ item: safe, items, index });
+  }, []);
 
-  const closeImageZoom = () => {
-    setZoomImage(null);
-  };
+  const updateZoomIndex = useCallback((next: number) => {
+    setZoomTarget((current) => {
+      if (!current) return current;
+      const safe = current.items[next] ?? current.items[0];
+      if (!safe) return current;
+      if (next === current.index) return current;
+      return { item: safe, items: current.items, index: next };
+    });
+  }, []);
+
+  const closeImageZoom = useCallback(() => {
+    setZoomTarget(null);
+  }, []);
 
   if (!isEditing) {
     return (
@@ -288,7 +323,13 @@ export function BasicInfoCoverRow({
             </div>
           )}
         </BasicInfoRowShell>
-        <ImageLightbox image={zoomImage} onClose={closeImageZoom} />
+        <ImageLightbox
+          image={zoomTarget?.item ?? null}
+          items={zoomTarget?.items}
+          index={zoomTarget?.index}
+          onIndexChange={updateZoomIndex}
+          onClose={closeImageZoom}
+        />
       </>
     );
   }
@@ -412,9 +453,68 @@ export function BasicInfoCoverRow({
 
         {/* 兜底提示：阶段 A 无候选时已经在 placeError 给出，不在此处重复。 */}
       </BasicInfoRowShell>
-      <ImageLightbox image={zoomImage} onClose={closeImageZoom} />
+      <ImageLightbox
+        image={zoomTarget?.item ?? null}
+        items={zoomTarget?.items}
+        index={zoomTarget?.index}
+        onIndexChange={updateZoomIndex}
+        onClose={closeImageZoom}
+      />
     </>
   );
+}
+
+/**
+ * 把 cover（主封面）+ cover.alternates（备用封面）扁平化为轮播数据项；
+ * 主封面始终在 index 0；manualUpload 没有 alternates 时退化为单图。
+ *
+ * 注意：主图手动上传走 data URL（resolvedUrl / previewUrl），不走 imageUrl；
+ * alternates 走 imageUrl（携程图库已写好的图片直链）。
+ */
+function useCoverCarouselItems(
+  cover: ProductCover,
+  resolvedUrl: string | null,
+): ImageLightboxItem[] {
+  return useMemo(() => {
+    const items: ImageLightboxItem[] = [];
+    if (cover.source === "manualUpload") {
+      if (resolvedUrl) {
+        items.push({
+          src: resolvedUrl,
+          alt: cover.poi || "封面预览",
+          title: cover.poi || "封面预览",
+          subtitle: "手动上传",
+        });
+      }
+      return items;
+    }
+    // ctripLibrary
+    if (cover.imageUrl) {
+      const title = cover.poi || "封面";
+      items.push({
+        src: cover.imageUrl,
+        alt: title,
+        title,
+        subtitle: "携程图库 · 主封面",
+      });
+    }
+    // 备图纳入轮播：主图占 1 张，备图最多再放 MAX_COVER_IMAGES - 1 张，
+    // 合计不超过 MAX_COVER_IMAGES 张（后端自动补齐按同样上限收敛）。
+    const alternates = Array.isArray(cover.alternates)
+      ? cover.alternates.slice(0, MAX_COVER_IMAGES - 1)
+      : [];
+    for (const alt of alternates) {
+      if (!alt.imageUrl) continue;
+      const title = alt.poi || alt.poiName || `imageId ${alt.imageId}`;
+      items.push({
+        src: alt.imageUrl,
+        alt: title,
+        title,
+        subtitle: `携程图库 · 备用封面`,
+      });
+    }
+    return items;
+  }, [cover, resolvedUrl]);
 }
 
 function CoverDisplay({
@@ -426,9 +526,11 @@ function CoverDisplay({
   cover: ProductCover;
   previewUrl: string | null;
   onReadPreviewUrl: (fileId: string, originalName: string) => Promise<string | null>;
-  onOpenImage: (item: ImageLightboxItem) => void;
+  onOpenImage: (items: ImageLightboxItem[], index: number) => void;
 }) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(previewUrl);
+  /** 当前轮播焦点索引，由缩略图 / 箭头点击同步。主图 = 0。 */
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
     setResolvedUrl(previewUrl);
@@ -443,55 +545,107 @@ function CoverDisplay({
     return () => { cancelled = true; };
   }, [cover, resolvedUrl, onReadPreviewUrl]);
 
-  // 渲染策略：
-  //  - manualUpload：用 main 端返回的 data URL（data:${mime};base64,...），已经
-  //    在 main 端读完 → base64 → 拼装；不要在这里再做 base64 解码或 FileReader；
-  //  - ctripLibrary：直接用 writeImageUrl / thumbnailUrl / previewUrl 之一，
-  //    URL 缺失时走 ImagePlus 占位（彻底避免 "不可点又呈现图片" 的歧义态）。
-  const displayUrl = cover.source === "manualUpload"
-    ? resolvedUrl
-    : cover.imageUrl;
-  const hasImage = Boolean(displayUrl);
-  const sourceLabel = cover.source === "manualUpload" ? "手动上传" : "携程图库";
-  const title = cover.poi || "封面预览";
+  const items = useCoverCarouselItems(cover, resolvedUrl);
+
+  // 当 cover / 数据更新导致 items 数量变化时，把索引夹紧到合法区间。
+  useEffect(() => {
+    if (currentIndex >= items.length) {
+      setCurrentIndex(Math.max(0, items.length - 1));
+    }
+  }, [items, currentIndex]);
+
+  if (items.length === 0) {
+    // 罕见兜底：cover 存在但 url 全缺时，给一个占位提示，避免"空白=有图"的歧义态。
+    return (
+      <div className={styles.coverDisplay}>
+        <div className={styles.coverPlaceholder} aria-hidden="true">
+          <ImagePlus size={16} />
+        </div>
+        <div className={styles.coverMeta}>
+          <span className={styles.hint}>封面数据存在但图片 URL 缺失，请重新编辑。</span>
+        </div>
+      </div>
+    );
+  }
+
+  const total = items.length;
+  const safeIndex = Math.min(currentIndex, total - 1);
+  const current = items[safeIndex];
+  const goPrev = () => setCurrentIndex((safeIndex - 1 + total) % total);
+  const goNext = () => setCurrentIndex((safeIndex + 1) % total);
+  const hasMultiple = total > 1;
 
   return (
-    <div className={styles.coverDisplay}>
-      {hasImage ? (
+    <div className={styles.coverDisplay} data-testid="cover-display">
+      <div className={styles.coverCarousel}>
         <button
           type="button"
           className={styles.coverThumbButton}
-          onClick={() => onOpenImage({ src: displayUrl!, alt: title, title, subtitle: sourceLabel })}
-          aria-label={`放大查看封面：${title}`}
+          onClick={() => onOpenImage(items, safeIndex)}
+          aria-label={`放大查看封面：${current.alt || current.title}`}
           title="放大查看"
           data-testid="cover-open-lightbox"
         >
-          <img className={styles.coverThumb} src={displayUrl!} alt={title} />
+          <img className={styles.coverThumb} src={current.src} alt={current.alt || current.title || "封面"} />
+          {hasMultiple ? (
+            <span className={styles.coverCarouselCounter} aria-label={`当前 ${safeIndex + 1} 张，共 ${total} 张`}>
+              {safeIndex + 1} / {total}
+            </span>
+          ) : null}
           <span className={styles.coverZoomHint} aria-hidden="true">
             <ZoomIn size={14} />
             <span>放大查看</span>
           </span>
         </button>
-      ) : (
-        <div className={styles.coverPlaceholder} aria-hidden="true">
-          <ImagePlus size={16} />
-        </div>
-      )}
+        {hasMultiple ? (
+          <>
+            <button
+              type="button"
+              className={`${styles.coverCarouselNav} ${styles.coverCarouselNavPrev}`}
+              onClick={goPrev}
+              aria-label="上一张封面"
+              data-testid="cover-carousel-prev"
+            >
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={`${styles.coverCarouselNav} ${styles.coverCarouselNavNext}`}
+              onClick={goNext}
+              aria-label="下一张封面"
+              data-testid="cover-carousel-next"
+            >
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+            <div className={styles.coverCarouselDots} role="tablist" aria-label="封面轮播指示器">
+              {items.map((_, dotIndex) => (
+                <button
+                  type="button"
+                  key={dotIndex}
+                  className={styles.coverCarouselDot}
+                  data-active={dotIndex === safeIndex}
+                  aria-label={`切换到第 ${dotIndex + 1} 张`}
+                  aria-selected={dotIndex === safeIndex}
+                  role="tab"
+                  onClick={() => setCurrentIndex(dotIndex)}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
+      </div>
       <div className={styles.coverMeta}>
         <div className={styles.rowDisplay}>
-          <strong>{cover.poi}</strong>
+          <strong>{cover.source === "manualUpload" ? cover.poi || "封面预览" : cover.poi}</strong>
           <span className={styles.tag} data-tone={cover.source === "manualUpload" ? "warn" : "ok"}>
-            {sourceLabel}
+            {cover.source === "manualUpload" ? "手动上传" : "携程图库"}
           </span>
           {cover.source === "manualUpload" && typeof cover.minQuality === "number" ? (
             <span className={styles.tag}>质量 ≥ {cover.minQuality}</span>
           ) : null}
         </div>
         {cover.source === "ctripLibrary" ? (
-          <>
-            <CtripCoverMeta cover={cover} />
-            <CtripCoverAlternates cover={cover} onOpenImage={onOpenImage} />
-          </>
+          <CtripCoverMeta cover={cover} currentAlt={pickAlternates(cover, safeIndex)} />
         ) : (
           <span className={styles.hint}>
             文件：{cover.originalName} · {(cover.sizeBytes / 1024).toFixed(1)} KiB · 上传于 {formatTimestamp(cover.uploadedAt)}
@@ -504,63 +658,40 @@ function CoverDisplay({
 }
 
 /**
- * 封面文案不再单独渲染（cover.description 可能是 features 前 100 字兜底的
- * 富文本片段，与产品特色重复且截断残缺，故封面行只保留 poi / 来源 /
- * 图片元数据，不展示 description）。
+ * 当前轮播选中图的元数据：imageId / score / resolution。
+ * 主图时读 cover 自身字段；备用时读 cover.alternates[currentIndex-1]。
+ *
+ * 元数据跟 currentIndex 联动，确保切换轮播索引时右栏始终展示与主图
+ * 对应的图片信息。
  */
-function CtripCoverMeta({ cover }: { cover: Extract<ProductCover, { source: "ctripLibrary" }> }) {
-  return (
-    <span className={styles.hint}>
-      imageId <span className={styles.rowMetaMono}>{cover.imageId}</span>
-      {typeof cover.score === "number" ? <> · 质量分 {cover.score.toFixed(1)}</> : null}
-      {cover.resolution ? <> · {cover.resolution}</> : null}
-    </span>
-  );
+function pickAlternates(
+  cover: Extract<ProductCover, { source: "ctripLibrary" }>,
+  index: number,
+) {
+  if (index === 0) return null;
+  const list = cover.alternates;
+  if (!list) return null;
+  return list[index - 1] ?? null;
 }
 
-function CtripCoverAlternates({
+function CtripCoverMeta({
   cover,
-  onOpenImage,
+  currentAlt,
 }: {
   cover: Extract<ProductCover, { source: "ctripLibrary" }>;
-  onOpenImage: (item: ImageLightboxItem) => void;
+  currentAlt: NonNullable<Extract<ProductCover, { source: "ctripLibrary" }>["alternates"]>[number] | null;
 }) {
-  const alternates = Array.isArray(cover.alternates) ? cover.alternates.slice(0, 2) : [];
-  if (alternates.length === 0) return null;
+  const alt = currentAlt ?? null;
+  const imageId = alt ? alt.imageId : cover.imageId;
+  const score = alt ? alt.score : cover.score;
+  const resolution = alt ? alt.resolution : cover.resolution;
   return (
-    <div className={styles.coverAlternates} aria-label={`备用封面 ${alternates.length} 张`} data-testid="cover-alternates">
-      <span className={styles.coverAlternatesTitle}>备用封面 {alternates.length} 张</span>
-      <div className={styles.coverAlternatesList}>
-        {alternates.map((alternate) => {
-          const title = alternate.poi || alternate.poiName || `imageId ${alternate.imageId}`;
-          return (
-            <button
-              type="button"
-              key={alternate.imageId}
-              className={styles.coverAlternate}
-              onClick={() => onOpenImage({
-                src: alternate.imageUrl,
-                alt: title,
-                title,
-                subtitle: `备用封面 · imageId ${alternate.imageId}`,
-              })}
-              aria-label={`放大查看备用封面：${title}`}
-              title="放大查看备用封面"
-            >
-              <img className={styles.coverAlternateThumb} src={alternate.imageUrl} alt={title} loading="lazy" />
-              <span className={styles.coverAlternateMeta}>
-                <strong>{title}</strong>
-                <span>
-                  imageId <span className={styles.rowMetaMono}>{alternate.imageId}</span>
-                  {typeof alternate.score === "number" ? <> · {alternate.score.toFixed(1)}</> : null}
-                  {alternate.resolution ? <> · {alternate.resolution}</> : null}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <span className={styles.hint}>
+      imageId <span className={styles.rowMetaMono}>{imageId}</span>
+      {typeof score === "number" ? <> · 质量分 {score.toFixed(1)}</> : null}
+      {resolution ? <> · {resolution}</> : null}
+      {alt ? <> · 备用封面</> : null}
+    </span>
   );
 }
 
@@ -615,6 +746,9 @@ function formatPlaceOption(place: CtripLibraryPlaceCandidate): string {
  * 阶段 B 的 image candidates 列表：仅渲染图片候选；test id 与 UI 复用 cover-search-candidates
  * 容器，便于既有「cover-candidate-pick」断言继续工作；行级数据走
  * `CtripLibraryImageCandidate`（imageId / imageUrl 必填）。
+ *
+ * 点击缩略图放大查看：仍走多图灯箱，items 仅有这一张（编辑态下还没
+ * 确认为 cover 主体，alternates 暂未结构化保存），index = 0。
  */
 function CoverCandidates({
   candidates,
@@ -625,7 +759,7 @@ function CoverCandidates({
   candidates: CtripLibraryImageCandidate[];
   onPick: (candidate: CtripLibraryImageCandidate) => void;
   saving: boolean;
-  onOpenImage: (item: ImageLightboxItem) => void;
+  onOpenImage: (items: ImageLightboxItem[], index: number) => void;
 }) {
   return (
     <ul className={styles.coverCandidates} aria-label="携程图库候选" data-testid="cover-search-candidates">
@@ -664,7 +798,7 @@ function CoverCandidates({
 
 function CoverCandidateThumb({ candidate, onOpenImage }: {
   candidate: CtripLibraryImageCandidate;
-  onOpenImage: (item: ImageLightboxItem) => void;
+  onOpenImage: (items: ImageLightboxItem[], index: number) => void;
 }) {
   // 渲染缩略图：imageUrl 优先；缺失回退 previewUrl / thumbnailUrl；
   // 三者全缺才走占位元素。
@@ -683,7 +817,7 @@ function CoverCandidateThumb({ candidate, onOpenImage }: {
           <button
             type="button"
             className={`${shared.iconBtn} ${styles.imageZoomButton}`}
-            onClick={() => onOpenImage({ src, alt, title: alt, subtitle: "携程图库候选" })}
+            onClick={() => onOpenImage([{ src, alt, title: alt, subtitle: "携程图库候选" }], 0)}
             aria-label={`放大查看 ${alt}`}
             title="放大查看"
           >

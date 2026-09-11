@@ -75,6 +75,10 @@ export function responseHasBoundCover(payload: unknown, imageId: number): boolea
   return responseHasImageType(payload, imageId, COVER_IMAGE_TYPE_ID);
 }
 
+export function responseHasBoundAttractionImage(payload: unknown, imageId: number): boolean {
+  return responseHasImageType(payload, imageId, ATTRACTION_IMAGE_TYPE_ID);
+}
+
 function responseHasImageType(payload: unknown, imageId: number, imageTypeId: number): boolean {
   const record = asRecord(payload);
   const images = Array.isArray(record?.productImages) ? record.productImages : [];
@@ -84,6 +88,30 @@ function responseHasImageType(payload: unknown, imageId: number, imageTypeId: nu
     return Number(image?.imageId) === imageId
       && Number(image?.accompanyTourInfo?.imageTypeId) === imageTypeId;
   });
+}
+
+export async function bindCtripLibraryAttractionImageViaApi(
+  page: VbkSessionRequestBrowser,
+  imageId: number,
+  productId: number,
+  options: CoverBindOptions = {},
+): Promise<{ reused: boolean; productId: number; imageId: number }> {
+  assertPositiveInteger(imageId, "景点图 imageId");
+  assertPositiveInteger(productId, "VBK 产品 ID");
+  const existingResult = await searchProductImages(page, productId);
+  assertBusinessSuccess(existingResult, "确认现有景点图", false);
+  if (responseHasBoundAttractionImage(existingResult.payload, imageId)) {
+    return { reused: true, productId, imageId };
+  }
+
+  const bindResult = await request(page, {
+    endpoint: BIND_PRODUCT_IMAGE_ENDPOINT,
+    body: buildImageTypeBindRequest(productId, imageId, ATTRACTION_IMAGE_TYPE_ID),
+    errorLabel: "直接设置景点图",
+  });
+  assertBusinessSuccess(bindResult, "直接设置景点图", true);
+  await confirmImageType(page, productId, imageId, ATTRACTION_IMAGE_TYPE_ID, "确认景点图", options);
+  return { reused: false, productId, imageId };
 }
 
 export async function bindCtripLibraryCoverViaApi(

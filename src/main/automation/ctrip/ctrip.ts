@@ -17,8 +17,10 @@ export {
   selectCtripLibraryImage,
   fillAndSavePresentation,
   buildRecommendationReasonsPlan,
+  fillRecommendationReasons,
 } from "./presentation/presentation.js";
 export { fillAndSaveTerms } from "./terms.js";
 export { saveScreenshot } from "./screenshot.js";
 export type { RecommendationPlanStep } from "./presentation/presentation.js";
-export { PRODUCT_IMAGE_TEXT_PATH } from "./basic-info/basic-info.js";
+export { PRODUCT_IMAGE_TEXT_PATH, pickCityOption } from "./basic-info/basic-info.js";
+export { isProductImageTextUrl } from "./tabs.js";

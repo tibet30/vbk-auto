@@ -174,11 +174,21 @@ function buildFakeScript(): FakeProviderScript[] {
             recommendationCategory: "优选行程",
             recommendation: "2 天串联核心景点",
             recommendations: [
-              { category: "服务保障", text: "节奏舒适不赶路" },
+              { category: "优选行程", text: "节奏舒适不赶路" },
               { category: "精选酒店", text: "当地 3 钻酒店含早餐" },
-              { category: "贴心赠送", text: "覆盖晋祠与博物院" },
+              { category: "缤纷景点", text: "覆盖晋祠与博物院" },
             ],
             features: "【古建巡礼】专业讲解\n【私享出行】独立成团",
+            cover: {
+              source: "ctripLibrary",
+              imageId: 880101,
+              imageUrl: "https://images.example.test/taiyuan-cover.jpg",
+              poi: "晋祠博物馆",
+              poiId: 79413,
+              poiName: "晋祠博物馆",
+              description: "晋祠博物馆横版外景",
+              minQuality: 3,
+            },
           },
         }],
       },
@@ -357,8 +367,8 @@ test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", asy
   const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
   for (const day of itinerary) {
     for (const spot of day.spots) {
-      spot.poiName = spot.poiName ?? "已核验景点";
-      spot.poiId = spot.poiId ?? 1;
+      spot.poiName = spot.poiName ?? `${String((spot as { name?: string }).name ?? "已核验景点")}（VBK）`;
+      spot.poiId = spot.poiId ?? 79413;
     }
   }
   runtime.moduleWrites = [];

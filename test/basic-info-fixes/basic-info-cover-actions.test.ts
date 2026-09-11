@@ -113,7 +113,8 @@ test("actions/basic-info: saveCtripLibraryCover 接受 CtripLibraryImageCandidat
   assert.match(body, /buildCtripLibraryCover\(args\.candidate\)/);
   const modelBody = extractFunctionBody(coverModelSource, "buildCtripLibraryCover");
   assert.match(modelBody, /source: "ctripLibrary"/);
-  assert.match(modelBody, /minQuality:\s*3/);
+  assert.match(modelBody, /imageId/);
+  assert.match(modelBody, /imageUrl/);
 });
 
 test("actions/basic-info: saveCtripLibraryCover 写入 imageId / imageUrl 与可选字段", () => {

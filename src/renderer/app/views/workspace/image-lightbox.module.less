@@ -28,6 +28,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .title {
@@ -43,6 +44,20 @@
   font-size: 12px;
   color: rgb(255 255 255 / 62%);
   letter-spacing: 0.02em;
+}
+
+.counter {
+  flex: 0 0 auto;
+  min-width: 56px;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: rgb(255 255 255 / 72%);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--radius-control);
+  background: rgb(255 255 255 / 8%);
 }
 
 .closeButton {
@@ -94,6 +109,44 @@
   animation: lightbox-spin 900ms linear infinite;
 }
 
+/* 多图轮播左右切换：绝对定位覆盖 stage 两侧；图片本体仍可拖拽，
+ * 按钮显式控件事件 + 上层定位避免被放大后的图片截获。 */
+.navButton {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 52%);
+  color: #fff;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: background 140ms ease, transform 140ms ease, opacity 140ms ease;
+  backdrop-filter: blur(4px);
+}
+
+.navButton:hover {
+  background: rgb(0 0 0 / 74%);
+  transform: translateY(-50%) scale(1.04);
+}
+
+.navButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ai-teal) 55%, white);
+  outline-offset: 2px;
+}
+
+.navButtonPrev {
+  left: 16px;
+}
+
+.navButtonNext {
+  right: 16px;
+}
+
 .image {
   display: block;
   max-width: calc(100% - 48px);
@@ -101,6 +154,8 @@
   object-fit: contain;
   user-select: none;
   will-change: transform;
+  position: relative;
+  z-index: 2;
 }
 
 .footer {

@@ -12,7 +12,7 @@ const argsByTarget = {
 };
 
 const target = process.argv[2] ?? "all";
-const builderArgs = argsByTarget[target];
+const builderArgs = argsByTarget[target]?.slice();
 
 if (!builderArgs) {
   console.error(`Unknown package target: ${target}`);
@@ -24,6 +24,10 @@ if (target.startsWith("win") && process.platform !== "win32" && process.env.VBK_
   console.error("Windows installers must be built on Windows because better-sqlite3 is a native dependency.");
   console.error("Run this command on a Windows machine, or set VBK_ALLOW_CROSS_PACKAGE=1 to try an unsupported cross-build.");
   process.exit(1);
+}
+
+if (target.startsWith("win") && process.platform !== "win32") {
+  builderArgs.push("-c.npmRebuild=false", "-c.win.signExecutable=false");
 }
 
 const env = { ...process.env, NODE_OPTIONS: "" };

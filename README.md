@@ -30,6 +30,16 @@ npm run start
 npm run package
 ```
 
+本地发布（升版本、检查、测试、打 macOS universal DMG 和 Windows 安装包、提交并创建本地 tag，不 push）：
+
+```bash
+npm run release:local          # 默认把 package.json 升一个 patch，例如 1.1.2 -> 1.1.3
+npm run release:local -- 1.1.3 # 或显式指定版本
+npm run release:local -- --dry-run # 只预览版本和 tag，不改文件
+```
+
+发布指令会把 `release/三人同游-<version>-universal.dmg` 和 `release/三人同游-<version>-x64-setup.exe` 都作为必需产物。Windows 安装包推荐在 Windows 机器上构建；在非 Windows 机器上设置 `VBK_ALLOW_CROSS_PACKAGE=1` 时，会复用 `better-sqlite3` 的 Windows 预编译文件并输出未签名安装包。
+
 构建 Windows 安装包：
 
 ```bash

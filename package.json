@@ -1,7 +1,7 @@
 {
   "name": "vbk-auto",
   "productName": "三人同游",
-  "version": "1.1.2",
+  "version": "1.1.4",
   "private": true,
   "type": "module",
   "description": "三人同游 本地旅游产品规划与安全录入工作台",
@@ -20,6 +20,7 @@
     "package:mac:arm64": "node scripts/package.mjs mac:arm64",
     "package:win": "node scripts/package.mjs win",
     "package:win:dir": "node scripts/package.mjs win:dir",
+    "release:local": "node scripts/release-local.mjs",
     "test": "node scripts/run-tests.mjs unit --changed",
     "test:changed": "node scripts/run-tests.mjs all --changed",
     "test:integration": "node scripts/run-tests.mjs integration",

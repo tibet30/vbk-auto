@@ -6,8 +6,10 @@
  */
 
 import {
+  TRAFFIC_LINE_VARIANTS,
   normaliseTrafficLineConfig,
   type TrafficLineConfig,
+  type TrafficLineVariant,
 } from "../../shared/contracts-traffic-line.js";
 import type { OrchestratorRuntime } from "./types.js";
 
@@ -48,9 +50,10 @@ export async function syncInitialTrafficLineAvailability(
   }
   if (!availability) return { status: "skipped", reason: "unconfirmed" };
 
+  const variants = trafficLineVariantsForResolvedAvailability(availability);
   const config: TrafficLineConfig = {
-    enabled: availability.availableVariants.length > 0,
-    variants: availability.availableVariants,
+    enabled: variants.length > 0,
+    variants,
     ...(existing?.arrivalCity ? { arrivalCity: existing.arrivalCity } : {}),
     ...(existing?.departureCity ? { departureCity: existing.departureCity } : {}),
     availability,
@@ -66,6 +69,20 @@ export async function syncInitialTrafficLineAvailability(
  */
 function hasRetryableTrafficAvailability(config: TrafficLineConfig | undefined): boolean {
   return Object.values(config?.availability?.unavailableVariants ?? {}).some((reason) =>
-    !/未找到唯一可确认的(?:机场|火车站)候选/.test(reason),
+    !isBusinessUnavailableTrafficStation(reason),
   );
+}
+
+function trafficLineVariantsForResolvedAvailability(
+  availability: { availableVariants: TrafficLineVariant[]; unavailableVariants: Partial<Record<TrafficLineVariant, string>> },
+): TrafficLineVariant[] {
+  return TRAFFIC_LINE_VARIANTS.filter((variant) => {
+    if (availability.availableVariants.includes(variant)) return true;
+    const reason = availability.unavailableVariants[variant];
+    return Boolean(reason && !isBusinessUnavailableTrafficStation(reason));
+  });
+}
+
+function isBusinessUnavailableTrafficStation(reason: string): boolean {
+  return /未找到唯一可确认的(?:机场|火车站)候选/.test(reason);
 }

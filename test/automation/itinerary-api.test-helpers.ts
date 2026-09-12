@@ -14,6 +14,7 @@
  */
 
 import type { StationCandidate } from "../../src/main/automation/ctrip/itinerary-api/station-search.ts";
+import type { VbkDailyUseCar } from "../../src/shared/product-form.js";
 
 /** ───────── fetch stub + fake page ───────── */
 
@@ -143,6 +144,7 @@ export interface ReadbackDayOverrides {
   poi?: (i: number) => Array<{ poiId: number; poiName: string }>;
   hotelName?: (i: number) => string;
   mealIncluded?: boolean;
+  useCar?: VbkDailyUseCar;
   otherDescription?: (i: number) => string;
   serviceStart?: string;
   serviceEnd?: string;
@@ -168,6 +170,7 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
     const breakfastIncludeAdultKey = mealIncluded ? "I" : "E";
     days.push({
       dailyDescription: opts.title ? opts.title(i) : (i === 0 ? "第1天" : "第2天"),
+      useCar: opts.useCar ?? { key: "B", name: "包车" },
       tourDailyInfos: [
         // 首日接机（仅首日）
         ...(isFirst ? [{
@@ -195,6 +198,8 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
         // 酒店（仅当 hotelName 非空时）
         ...(hotelName ? [{
           activeType: { key: 1, name: "酒店" },
+          useSegmentConfig: true,
+          description: `${hotelName}（当地4钻酒店/-4）`,
           tourDailyHotels: [{ hotel: { hotelName, grade: { name: "当地4钻酒店/-4" } } }],
         }] : []),
         // 其他 + 服务时间

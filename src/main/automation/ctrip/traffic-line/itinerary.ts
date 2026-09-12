@@ -1,5 +1,5 @@
 import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
-import { emptyTourDailyTrain } from "../itinerary-api/info-skeletons.js";
+import { emptyTourDailyFlight, emptyTourDailyTrain } from "../itinerary-api/info-skeletons.js";
 import type { FetchTourInfoIdResult } from "../itinerary-api/steps.js";
 import {
   calculateTourScoreStep,
@@ -24,12 +24,18 @@ export async function ensureTrafficLineItinerary(
   if (!tourInfoId) throw new Error("子产品缺少已关联行程，无法安全合并交通节点。");
   const detail = await fetchTourDailyDetail(page, tourInfoId);
   if (!detail.tourInfo) throw new Error("子产品行程详情回读为空，无法安全合并交通节点。");
+
   const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant, endpoints));
   const descriptions = list(merged.tourDailyDescriptions);
   const base = { ...productTourInfo, productId, tourInfoId, days: descriptions.length };
   const checked8 = await checkTourDailyStep(page, base, JSON.stringify(merged), 8, "校验子产品行程交通");
   const score = await calculateTourScoreStep(page, { ...base, aggregateScore: checked8.aggregateScore });
-  const checked3 = await checkTourDailyStep(page, base, JSON.stringify({ ...checked8, aggregateScore: score.aggregateScore ?? checked8.aggregateScore, tourInfoScores: score.tourInfoScores }), 3, "保存子产品行程交通");
+  const checked3 = await checkTourDailyStep(page, base, JSON.stringify({
+    ...checked8,
+    aggregateScore: score.aggregateScore ?? checked8.aggregateScore,
+    tourInfoScores: score.tourInfoScores,
+  }), 3, "保存子产品行程交通");
+  verifyTrafficNodes(checked3, variant);
   await saveTourDailyDetailStep(page, checked3);
   const savedId = text(checked3.tourInfoId);
   if (!savedId) throw new Error("子产品行程交通保存后未生成 tourInfoId。");
@@ -103,12 +109,11 @@ export function mergeTrafficNodes(
   const last = structuredClone(days.at(-1)!);
   const firstInfos = list(first.tourDailyInfos);
   const lastInfos = singleDay ? firstInfos : list(last.tourDailyInfos);
-  const expected = variant === "flightRoundTrip" ? 2 : 14;
+  const expected = expectedTrafficKey(variant);
   const firstNode = trafficNodeWithRequiredCard(firstTransport, variant, "enter", endpoints);
   const lastNode = trafficNodeWithRequiredCard(lastTransport, variant, "leave", endpoints);
-  if (!firstInfos.some((node) => isTrafficNode(node, expected))) firstInfos.unshift(firstNode);
-  const requiredLastCount = singleDay ? 2 : 1;
-  if (lastInfos.filter((node) => isTrafficNode(node, expected)).length < requiredLastCount) lastInfos.push(lastNode);
+  replaceIncompleteEdgeTraffic(firstInfos, firstNode, expected, 1, "start");
+  replaceIncompleteEdgeTraffic(lastInfos, lastNode, expected, singleDay ? 2 : 1, "end");
   first.tourDailyInfos = firstInfos.map((node, index) => finaliseTrafficNode(node, variant, "enter", index + 1, endpoints));
   if (singleDay) {
     days[0] = first;
@@ -123,12 +128,51 @@ export function mergeTrafficNodes(
 export function verifyTrafficNodes(tourInfo: JsonRecord, variant: TrafficLineVariant): number {
   const days = list(tourInfo.tourDailyDescriptions);
   if (!days.length) throw new Error("子产品行程交通回读没有任何天数。");
-  const expected = variant === "flightRoundTrip" ? 2 : 14;
+  const expected = expectedTrafficKey(variant);
   const firstCount = list(days[0]?.tourDailyInfos).filter((node) => isCompleteTrafficNode(node, expected)).length;
   const lastCount = list(days.at(-1)?.tourDailyInfos).filter((node) => isCompleteTrafficNode(node, expected)).length;
   const required = days.length === 1 ? 2 : 1;
-  if (firstCount < 1 || lastCount < required) throw new Error("子产品行程交通回读缺少首日或末日目标交通节点。");
+  if (firstCount < 1 || lastCount < required) {
+    throw new Error(`子产品行程交通回读缺少首日或末日目标交通节点（${describeEdgeDays(tourInfo, expected)}）。`);
+  }
   return days.reduce((sum, day) => sum + list(day.tourDailyInfos).filter((node) => isCompleteTrafficNode(node, expected)).length, 0);
+}
+
+/** 首末边界日的节点清单诊断：节点是否还在、交通节点是否缺车次/航班卡片。 */
+function describeEdgeDays(tourInfo: JsonRecord, expected: number): string {
+  const days = list(tourInfo.tourDailyDescriptions);
+  if (!days.length) return "行程没有任何天数";
+  const singleDay = days.length === 1;
+  const edgeDays = singleDay ? [days[0]!] : [days[0]!, days.at(-1)!];
+  const labels = singleDay ? ["唯一日"] : ["首日", "末日"];
+  return edgeDays.map((day, index) => {
+    const nodes = list(day?.tourDailyInfos).map((node) => {
+      const activeType = record(node.activeType);
+      const name = text(activeType?.name) || `key=${text(activeType?.key) || "?"}`;
+      if (isCompleteTrafficNode(node, expected)) return `${name}✓`;
+      if (isTrafficNode(node, expected)) return `${name}(缺车次/航班卡片)`;
+      return name;
+    });
+    return `${labels[index]}[${nodes.join("、") || "无节点"}]`;
+  }).join("；");
+}
+
+function expectedTrafficKey(variant: TrafficLineVariant): number {
+  return variant === "flightRoundTrip" ? 2 : 14;
+}
+
+function replaceIncompleteEdgeTraffic(
+  infos: JsonRecord[],
+  sourceNode: JsonRecord,
+  expected: number,
+  requiredCount: number,
+  insert: "start" | "end",
+): void {
+  const kept = infos.filter((node) => !isTrafficNode(node, expected) || isCompleteTrafficNode(node, expected));
+  infos.splice(0, infos.length, ...kept);
+  if (infos.filter((node) => isCompleteTrafficNode(node, expected)).length >= requiredCount) return;
+  if (insert === "start") infos.unshift(sourceNode);
+  else infos.push(sourceNode);
 }
 
 /**
@@ -182,7 +226,7 @@ async function readTrafficNodesFromPage(page: TrafficLinePage, productId: string
   const state = await getVbkInitialState(page, endpoint, "子产品行程页");
   const context = record(state.dailyContext) ?? state;
   const days = list(context.tourDailyDescriptions);
-  const expected = variant === "flightRoundTrip" ? 2 : 14;
+  const expected = expectedTrafficKey(variant);
   const first = list(days[0]?.tourDailyInfos).find((node) => isTrafficNode(node, expected));
   const last = list(days.at(-1)?.tourDailyInfos).find((node) => isTrafficNode(node, expected));
   if (!first || !last) throw new Error("子产品行程页未返回可用的首末日交通节点，需先核对资源段提交结果。");
@@ -198,6 +242,7 @@ function isTrafficNode(node: JsonRecord, expectedKey: number): boolean {
 
 function isCompleteTrafficNode(node: JsonRecord, expectedKey: number): boolean {
   if (!isTrafficNode(node, expectedKey)) return false;
+  if (node.useSegmentConfig === true) return true;
   if (expectedKey === 2) return hasFlightCard(node);
   if (expectedKey === 14) return hasTrainCard(node);
   return true;
@@ -210,7 +255,7 @@ function finaliseTrafficNode(
   sort: number,
   endpoints?: TrafficLineEndpointPlan,
 ): JsonRecord {
-  const expected = variant === "flightRoundTrip" ? 2 : 14;
+  const expected = expectedTrafficKey(variant);
   const finalised = isTrafficNode(node, expected)
     ? trafficNodeWithRequiredCard(node, variant, direction, endpoints)
     : structuredClone(node);
@@ -224,11 +269,17 @@ function trafficNodeWithRequiredCard(
   endpoints?: TrafficLineEndpointPlan,
 ): JsonRecord {
   const next = structuredClone(node);
+  if (next.useSegmentConfig === true) return next;
   if (variant === "trainRoundTrip") return trainNodeWithRequiredCard(next, direction, endpoints);
   if (variant !== "flightRoundTrip") return next;
-  if (hasFlightCard(next)) return next;
-  const card = flightPackageCard(direction, endpoints);
-  next.tourDailyPackageFlights = [card];
+  if (!list(next.tourDailyPackageFlights).some(hasUsablePackageFlight)) {
+    next.tourDailyPackageFlights = [flightPackageCard(direction, endpoints)];
+  } else {
+    next.tourDailyPackageFlights = list(next.tourDailyPackageFlights).map((card) => completeFlightPackageCard(card, direction, endpoints));
+  }
+  if (!list(next.tourDailyFlights).some((item) => hasUsableLegacyFlight(record(item.flight)))) {
+    next.tourDailyFlights = [flightLegacyCard(direction, endpoints)];
+  }
   return next;
 }
 
@@ -242,9 +293,9 @@ function flightPackageCard(
     sort: null,
     directFlightFlag: { key: null, name: null },
     flightNo: null,
-    departureLocation: null,
+    departureLocation: direction === "enter" ? trafficEndpointPlaceholder("出发地") : null,
     departureAirports: direction === "leave" ? [{ code: station?.code ?? "", name: station?.name ?? null }] : [{ code: "", name: null }],
-    arriveLocation: null,
+    arriveLocation: direction === "leave" ? trafficEndpointPlaceholder("目的地") : null,
     arriveAirports: direction === "enter" ? [{ code: station?.code ?? "", name: station?.name ?? null }] : [{ code: "", name: null }],
     departureTime: { key: "N", name: "不限" },
     departureTimeOffset: null,
@@ -263,21 +314,87 @@ function flightPackageCard(
   return card;
 }
 
+function completeFlightPackageCard(
+  card: JsonRecord,
+  direction: "enter" | "leave",
+  endpoints?: TrafficLineEndpointPlan,
+): JsonRecord {
+  const station = direction === "enter" ? endpoints?.flight?.arrival : endpoints?.flight?.departure;
+  const next = { ...card };
+  if (direction === "enter") {
+    if (!hasNamedCode(record(next.departureLocation))) next.departureLocation = trafficEndpointPlaceholder("出发地");
+    if (!list(next.arriveAirports).some(hasNamedCode)) next.arriveAirports = [{ code: station?.code ?? "", name: station?.name ?? null }];
+  } else {
+    if (!list(next.departureAirports).some(hasNamedCode)) next.departureAirports = [{ code: station?.code ?? "", name: station?.name ?? null }];
+    if (!hasNamedCode(record(next.arriveLocation))) next.arriveLocation = trafficEndpointPlaceholder("目的地");
+  }
+  return next;
+}
+
+function flightLegacyCard(
+  direction: "enter" | "leave",
+  endpoints?: TrafficLineEndpointPlan,
+): JsonRecord {
+  const legacy = emptyTourDailyFlight() as JsonRecord;
+  const flight = record(legacy.flight);
+  const station = direction === "enter" ? endpoints?.flight?.arrival : endpoints?.flight?.departure;
+  if (flight) {
+    if (direction === "enter") flight.arriveAirport = { code: station?.code ?? null, name: station?.name ?? null };
+    else flight.departureAirport = { code: station?.code ?? null, name: station?.name ?? null };
+    legacy.flight = flight;
+  }
+  return legacy;
+}
+
 function trainNodeWithRequiredCard(
   node: JsonRecord,
   direction: "enter" | "leave",
   endpoints?: TrafficLineEndpointPlan,
 ): JsonRecord {
   const next = structuredClone(node);
-  if (hasTrainCard(next)) return next;
   const station = direction === "enter" ? endpoints?.train?.arrival : endpoints?.train?.departure;
-  const card: JsonRecord = {
+  if (!list(next.tourDailyPackageTrains).some(hasUsablePackageTrain)) {
+    next.tourDailyPackageTrains = [trainPackageCard(direction, station)];
+  } else {
+    next.tourDailyPackageTrains = list(next.tourDailyPackageTrains).map((card) => completeTrainPackageCard(card, direction, station));
+  }
+  if (!list(next.tourDailyTrains).some((item) => hasUsableLegacyTrain(record(item.train)))) {
+    next.tourDailyTrains = [trainLegacyCard(direction, station)];
+  }
+  return next;
+}
+
+function completeTrainPackageCard(
+  card: JsonRecord,
+  direction: "enter" | "leave",
+  station: NonNullable<TrafficLineEndpointPlan["train"]>["arrival"] | undefined,
+): JsonRecord {
+  const next = { ...card };
+  if (direction === "enter") {
+    if (!hasNamedCode(record(next.departureLocation))) next.departureLocation = trafficEndpointPlaceholder("出发地");
+    if (!list(next.arriveTrainStations).some(hasNamedCode)) {
+      next.arriveTrainStations = [{ stationName: station?.name ?? null, locationCode: station?.code ?? null }];
+    }
+  } else {
+    if (!list(next.departureTrainStations).some(hasNamedCode)) {
+      next.departureTrainStations = [{ stationName: station?.name ?? null, locationCode: station?.code ?? null }];
+    }
+    if (!hasNamedCode(record(next.arriveLocation))) next.arriveLocation = trafficEndpointPlaceholder("目的地");
+  }
+  return next;
+}
+
+function trainPackageCard(
+  direction: "enter" | "leave",
+  station: NonNullable<TrafficLineEndpointPlan["train"]>["arrival"] | undefined,
+): JsonRecord {
+  return {
     tourDailyPackageTrainId: null,
     sort: null,
     trainNo: null,
-    departureLocation: null,
+    departureLocation: direction === "enter" ? trafficEndpointPlaceholder("出发地") : null,
     departureTrainStations: direction === "leave" ? [{ stationName: station?.name ?? null, locationCode: station?.code ?? null }] : [],
-    arriveLocation: null,
+    arriveLocation: direction === "leave" ? trafficEndpointPlaceholder("目的地") : null,
     arriveTrainStations: direction === "enter" ? [{ stationName: station?.name ?? null, locationCode: station?.code ?? null }] : [],
     departureTime: { key: "N", name: "不限" },
     departureTimeOffset: null,
@@ -286,7 +403,26 @@ function trainNodeWithRequiredCard(
     refId: null,
     parentId: null,
   };
-  next.tourDailyPackageTrains = [card];
+}
+
+function trafficEndpointPlaceholder(name: "出发地" | "目的地"): JsonRecord {
+  return {
+    globalId: null,
+    name,
+    categoryId: null,
+    type: "base",
+    code: null,
+    oversea: null,
+    parents: null,
+    trainStations: null,
+    airports: null,
+  };
+}
+
+function trainLegacyCard(
+  direction: "enter" | "leave",
+  station: NonNullable<TrafficLineEndpointPlan["train"]>["arrival"] | undefined,
+): JsonRecord {
   const legacy = emptyTourDailyTrain() as JsonRecord;
   const train = record(legacy.train);
   if (train) {
@@ -294,16 +430,52 @@ function trainNodeWithRequiredCard(
     else train.departureStation = station?.name ?? null;
     legacy.train = train;
   }
-  next.tourDailyTrains = [legacy];
-  return next;
+  return legacy;
 }
 
 function hasFlightCard(node: JsonRecord): boolean {
-  return list(node.tourDailyPackageFlights).length > 0
-    || list(node.tourDailyFlights).some((item) => Boolean(record(item.flight)));
+  return list(node.tourDailyPackageFlights).some(hasUsablePackageFlight)
+    || list(node.tourDailyFlights).some((item) => hasUsableLegacyFlight(record(item.flight)));
 }
 
 function hasTrainCard(node: JsonRecord): boolean {
-  return list(node.tourDailyPackageTrains).length > 0
-    || list(node.tourDailyTrains).some((item) => Boolean(record(item.train)));
+  return list(node.tourDailyPackageTrains).some(hasUsablePackageTrain)
+    || list(node.tourDailyTrains).some((item) => hasUsableLegacyTrain(record(item.train)));
+}
+
+function hasUsablePackageFlight(card: JsonRecord): boolean {
+  return Boolean(text(card.flightNo))
+    || list(card.departureAirports).some(hasNamedCode)
+    || list(card.arriveAirports).some(hasNamedCode)
+    || Boolean(text(card.departureLocation))
+    || Boolean(text(card.arriveLocation));
+}
+
+function hasUsableLegacyFlight(flight: JsonRecord | null): boolean {
+  if (!flight) return false;
+  return Boolean(text(flight.flightNo))
+    || hasNamedCode(record(flight.departureAirport))
+    || hasNamedCode(record(flight.arriveAirport))
+    || Boolean(text(flight.departureAirportName))
+    || Boolean(text(flight.arriveAirportName));
+}
+
+function hasUsablePackageTrain(card: JsonRecord): boolean {
+  return Boolean(text(card.trainNo))
+    || list(card.departureTrainStations).some(hasNamedCode)
+    || list(card.arriveTrainStations).some(hasNamedCode)
+    || Boolean(text(card.departureLocation))
+    || Boolean(text(card.arriveLocation));
+}
+
+function hasUsableLegacyTrain(train: JsonRecord | null): boolean {
+  if (!train) return false;
+  return Boolean(text(train.trainNo))
+    || Boolean(text(train.departureStation))
+    || Boolean(text(train.arriveStation));
+}
+
+function hasNamedCode(value: JsonRecord | null): boolean {
+  if (!value) return false;
+  return Boolean(text(value.code) || text(value.name) || text(value.locationCode) || text(value.stationName));
 }

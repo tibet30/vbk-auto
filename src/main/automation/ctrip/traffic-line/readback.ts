@@ -83,7 +83,7 @@ export async function verifyTrafficLineChildWithRepair(
     } catch (error) {
       if (error instanceof TrafficLineItineraryReadbackError && error.repairable && !itineraryRepaired) {
         itineraryRepaired = true;
-        await ensureTrafficLineItinerary(page, childProductId, variant);
+        await ensureTrafficLineItinerary(page, childProductId, variant, endpoints);
         continue;
       }
       if (error instanceof TrafficLineClauseReadbackError && !clausesRepaired) {
@@ -131,7 +131,7 @@ export async function verifyStableTrafficLineChildren(
       || (error instanceof TrafficLineItineraryReadbackError && error.repairable),
     repair: async (child, error) => {
       if (error instanceof TrafficLineItineraryReadbackError) {
-        await ensureTrafficLineItinerary(page, child.childProductId, child.variant);
+        await ensureTrafficLineItinerary(page, child.childProductId, child.variant, endpoints);
         return;
       }
       await ensureTrafficLineClauses(page, child.childProductId, child.variant);

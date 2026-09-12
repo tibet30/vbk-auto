@@ -12,7 +12,7 @@ const tree = read("src/renderer/app/views/workspace/planning-tree.tsx");
 const review = read("src/renderer/app/views/workspace/review.tsx");
 const styles = read("src/renderer/app/views/workspace/planning-usage.module.less");
 
-test("summarizeAiUsageMetric 在有费用时附带约 ¥", () => {
+test("summarizeAiUsageMetric 展示当前产品累计消耗和费用", () => {
   const aiUsage: ProductAiUsage = {
     events: [],
     lifetime: {
@@ -37,8 +37,8 @@ test("summarizeAiUsageMetric 在有费用时附带约 ¥", () => {
     byStage: [],
   };
   const label = summarizeAiUsageMetric(aiUsage);
-  assert.match(label, /本产品 1\.5k/);
-  assert.match(label, /上次 1k/);
+  assert.match(label, /当前产品累计 1\.5k/);
+  assert.doesNotMatch(label, /上次/);
   assert.match(label, /约 ¥0\.12/);
 });
 
@@ -52,9 +52,9 @@ test("Agent 协作进度接入 AI usage 指标与明细面板", () => {
   assert.match(review, /PlanningUsageToggle/);
 });
 
-test("usage 文案覆盖本产品、上次、Token 未返回、约 ¥", () => {
-  assert.match(usageFormat, /本产品/);
-  assert.match(usageFormat, /上次/);
+test("usage 文案覆盖当前产品累计、Token 未返回、约 ¥", () => {
+  assert.match(usageFormat, /当前产品累计/);
+  assert.doesNotMatch(usageFormat, /上次/);
   assert.match(usageFormat, /Token 未返回/);
   assert.match(usageFormat, /约 ¥/);
   assert.match(usageFormat, /summarizeAiUsageMetric/);

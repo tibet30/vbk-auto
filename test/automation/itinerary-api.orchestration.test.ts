@@ -143,7 +143,7 @@ test("ensureItineraryApi 主路径按 getTourInfo → detail → check(8) → sc
     .find((info: any) => info.activeType?.key === 3).tourDailyPois[0];
   assert.equal(firstPoi.poi.poiType.key, 3, "suggestPoi 的景点类型必须写入最终保存 payload");
   assert.equal(firstPoi.poi.ticketType.key, 1, "suggestPoi 的门票类型不能被清洗器丢失");
-  assert.deepEqual(firstPoi.suffixName, { key: 7, name: "不含门票" });
+  assert.deepEqual(firstPoi.suffixName, { key: 13, name: "含成人儿童首道门票" });
   const association = callLog.find((c) => c.endpoint === "/restapi/soa2/15638/saveProductTourInfo");
   assert.equal((association?.body as any).tourInfo.productId, 77035928);
   assert.equal((association?.body as any).tourInfo.auditTourInfoId, "999999999999999999");

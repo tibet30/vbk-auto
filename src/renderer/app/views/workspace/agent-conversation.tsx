@@ -122,11 +122,6 @@ export function AgentConversation({ product, userName, readiness, client, input,
       setRepairingKeywords(false);
     }
   };
-  const revealResult = () => {
-    const region = document.querySelector<HTMLElement>('[aria-label="审查结果概要"]');
-    region?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    region?.focus({ preventScroll: true });
-  };
   return <section className={`${layout.panel} ${styles.panel}`} aria-label="方案对话">
     <div className={layout.panelHeader}>
       <div className={layout.panelTitleRow}><span className={layout.panelNum}>01</span><strong className={layout.panelTitle}>方案协作</strong></div>
@@ -135,7 +130,6 @@ export function AgentConversation({ product, userName, readiness, client, input,
     <div className={styles.status} role="status"><MessageCircleMore size={15} /><span>{running ? "小助手正在根据结果继续处理，可随时暂停或补充要求" : "在这里沟通和确认，在右侧查看结构化结果"}</span>
       {running && <button type="button" className={styles.pauseAction} disabled={busy} onClick={() => void run((agent) => agent.pause(product.id))}><Pause size={14} />暂停执行</button>}
       {(status === "paused" || status === "failed") && <button type="button" className={styles.pauseAction} disabled={busy} onClick={() => void run((agent) => agent.resume(product.id))}><Play size={14} />继续执行</button>}
-      <button type="button" onClick={revealResult}>查看审查结果</button>
     </div>
     <div className={styles.timeline} ref={viewport} role="log" aria-live="polite" onScroll={() => {
       const node = viewport.current;

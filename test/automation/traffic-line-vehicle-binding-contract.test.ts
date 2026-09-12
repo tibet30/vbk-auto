@@ -6,6 +6,10 @@ const source = readFileSync(
   new URL("../../src/main/automation/ctrip/traffic-line/main.ts", import.meta.url),
   "utf8",
 );
+const readbackSource = readFileSync(
+  new URL("../../src/main/automation/ctrip/traffic-line/readback.ts", import.meta.url),
+  "utf8",
+);
 
 test("交通资源提交后必须重新绑定用车组，再记录 resourcesSaved", () => {
   const submitted = source.indexOf("await ensureTrafficLineSegments(");
@@ -24,4 +28,17 @@ test("已激活子产品直接进入最终回读，不重放其资源写入", ()
   const activeBranch = source.slice(source.indexOf("if (relationship.active === true)"), source.indexOf("await ensureTrafficLinePresentation"));
   assert.match(activeBranch, /pending\.push/);
   assert.doesNotMatch(activeBranch, /ensureTrafficLineSegments|ensureTrafficLineVehicleBinding/);
+});
+
+test("交通子产品最终行程修复必须沿用已解析端点", () => {
+  assert.match(
+    readbackSource,
+    /ensureTrafficLineItinerary\(page,\s*childProductId,\s*variant,\s*endpoints\)/,
+    "单子产品最终回读修复不能丢失机场/车站端点",
+  );
+  assert.match(
+    readbackSource,
+    /ensureTrafficLineItinerary\(page,\s*child\.childProductId,\s*child\.variant,\s*endpoints\)/,
+    "整组稳定门修复不能丢失机场/车站端点",
+  );
 });

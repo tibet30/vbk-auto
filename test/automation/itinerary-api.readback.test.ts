@@ -103,6 +103,46 @@ test("字段级回读：酒店 hotelName 不一致 → 失败", async () => {
   }
 });
 
+test("字段级回读：平台酒店收敛备选（期望 3 实际 1）→ 通过", async () => {
+  installHandlersForFieldMismatch({});
+  // 行程酒店始终为携程平台酒店：后端可收敛「或」备选，实际槽位必须能对应期望候选。
+  const product = {
+    ...baseProduct,
+    itinerary: baseProduct.itinerary.map((day, index) => index === 0 ? {
+      ...day,
+      hotelCandidates: [{ hotelName: "和玺酒店" }, { hotelName: "备选酒店二" }, { hotelName: "备选酒店三" }],
+    } : day),
+  };
+  const result = await ensureItineraryApi(makeFakePage() as any, product as any, "77035928");
+  assert.equal(result.savedHotels, 2);
+});
+
+test("字段级回读：平台酒店模式允许 VBK 将酒店槽位规范化为自选酒店", async () => {
+  installHandlersForFieldMismatch({});
+  const original = routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"];
+  routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"] = () => {
+    const inner = original({}) as { tourInfo: { tourDailyDescriptions: Array<{ tourDailyInfos: Array<Record<string, unknown>> }> } };
+    const days = inner.tourInfo.tourDailyDescriptions;
+    for (const d of days) {
+      for (const info of d.tourDailyInfos) {
+        if (info.activeType?.key === 1) {
+          info.useSegmentConfig = true;
+          info.description = "和玺酒店（当地4钻酒店/-4）";
+          const hotels = info.tourDailyHotels as Array<{ hotel: { hotelName: string } }>;
+          for (const h of hotels) h.hotel.hotelName = "自选酒店";
+        }
+      }
+    }
+    return inner;
+  };
+  try {
+    const result = await ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928");
+    assert.equal(result.savedHotels, 2);
+  } finally {
+    routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"] = original;
+  }
+});
+
 test("字段级回读：酒店 hotelTier 不一致 → 失败", async () => {
   installHandlersForFieldMismatch({});
   // 直接改 handler 在回读阶段让 grade.name 为空字符串。
@@ -114,6 +154,7 @@ test("字段级回读：酒店 hotelTier 不一致 → 失败", async () => {
       for (const d of days) {
         for (const info of d.tourDailyInfos) {
           if (info.activeType?.key === 1) {
+            info.description = "";
             const hotels = info.tourDailyHotels as Array<{ hotel: { grade: { name: string } } }>;
             for (const h of hotels) h.hotel.grade.name = "";
           }
@@ -323,6 +364,7 @@ test("buildReadbackExpectations：title/POI/餐饮/酒店/其他/服务时间/�
   });
   assert.equal(exp.days.length, 2);
   assert.deepEqual(exp.days.map((d) => d.title), ["第1天：抵达丽江", "第2天：玉龙雪山"]);
+  assert.deepEqual(exp.days.map((d) => d.useCar), [{ key: "B", name: "包车" }, { key: "B", name: "包车" }]);
   assert.deepEqual(exp.days[0].pois, [{ poiId: 75924, poiName: "Old Town of Lijiang" }]);
   assert.deepEqual(exp.days[0].meals.map((m) => m.key), ["L", "S"]);
   assert.deepEqual(exp.days[1].meals.map((m) => m.key), ["B", "L"]);

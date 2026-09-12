@@ -194,7 +194,7 @@ const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnaps
       task = db.createWorkflowTask(product.id, product.name);
     }
     if (task && (task.status !== "abandoned" || snapshot.run.status === "abandoned")) {
-      emitWorkflowTask(db.updateWorkflowTask(task.id, agentWorkflowPatch(snapshot)), false);
+      emitWorkflowTask(db.updateWorkflowTask(task.id, agentWorkflowPatch(snapshot, product)), false);
     }
   }
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;

@@ -7,7 +7,7 @@ import {
   parseInitialState,
 } from "../../src/main/automation/ctrip/traffic-line/client.ts";
 import { buildSaveProductClausesRequest, desiredFirstTabClauses, mergeTrafficLineClauseItems, selectedClauseItems } from "../../src/main/automation/ctrip/traffic-line/clauses.ts";
-import { applyRequiredPoiRiskPlans, currentTrafficLineTourInfoId, mergeTrafficNodes, verifyTrafficNodes, waitForTrafficLineItineraryReadback } from "../../src/main/automation/ctrip/traffic-line/itinerary.ts";
+import { applyRequiredPoiRiskPlans, currentTrafficLineTourInfoId, ensureTrafficLineItinerary, mergeTrafficNodes, verifyTrafficNodes, waitForTrafficLineItineraryReadback } from "../../src/main/automation/ctrip/traffic-line/itinerary.ts";
 import {
   buildBoundarySegment,
   recoverPendingTrafficLineSegmentSubmit,
@@ -209,6 +209,15 @@ test("条款绑定请求使用平台要求的 packageId 与 saveType 协议", ()
 });
 
 test("行程交通按 activeType 语义合并，不覆盖中间 POI，单日补齐双节点", () => {
+  const endpoints = {
+    arrivalCity: "日喀则",
+    departureCity: "日喀则",
+    resolvedAt: "2026-09-11T00:00:00.000Z",
+    flight: {
+      arrival: { code: "RKZ", name: "和平机场" },
+      departure: { code: "RKZ", name: "和平机场" },
+    },
+  };
   const firstTransport = { activeType: { key: 2, name: "航班" }, title: "去程" };
   const lastTransport = { activeType: { key: 2, name: "航班" }, title: "回程" };
   const merged = mergeTrafficNodes({
@@ -216,15 +225,44 @@ test("行程交通按 activeType 语义合并，不覆盖中间 POI，单日补�
       { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 1 } }] }] },
       { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 2 } }] }] },
     ],
-  }, firstTransport, lastTransport, "flightRoundTrip");
+  }, firstTransport, lastTransport, "flightRoundTrip", endpoints);
   const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<{ activeType: { key: number }; tourDailyPois?: unknown[] }> }>;
   assert.equal(days[0]?.tourDailyInfos[0]?.activeType.key, 2);
   assert.equal(days[1]?.tourDailyInfos.at(-1)?.activeType.key, 2);
   assert.equal(days[0]?.tourDailyInfos[1]?.tourDailyPois?.length, 1);
   assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
 
-  const oneDay = mergeTrafficNodes({ tourDailyDescriptions: [{ tourDailyInfos: [] }] }, firstTransport, lastTransport, "flightRoundTrip");
+  const oneDay = mergeTrafficNodes({ tourDailyDescriptions: [{ tourDailyInfos: [] }] }, firstTransport, lastTransport, "flightRoundTrip", endpoints);
   assert.equal(verifyTrafficNodes(oneDay, "flightRoundTrip"), 2);
+});
+
+test("行程交通用页面源替换不完整的边交通节点", () => {
+  const firstTransport = {
+    activeType: { key: 2, name: "航班" }, title: "去程",
+    tourDailyPackageFlights: [{ flightNo: "CA1234" }],
+  };
+  const lastTransport = {
+    activeType: { key: 2, name: "航班" }, title: "回程",
+    tourDailyPackageFlights: [{ flightNo: "CA4321" }],
+  };
+  const merged = mergeTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [
+        { activeType: { key: 2, name: "航班" }, tourDailyFlights: [], tourDailyPackageFlights: [] },
+        { activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 1 } }] },
+      ] },
+      { tourDailyInfos: [
+        { activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 2 } }] },
+        { activeType: { key: 2, name: "航班" }, tourDailyFlights: [] },
+      ] },
+    ],
+  }, firstTransport, lastTransport, "flightRoundTrip");
+  const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
+  assert.equal(days[0]?.tourDailyInfos[0]?.title, "去程");
+  assert.equal(days[0]?.tourDailyInfos[0]?.tourDailyPackageFlights[0]?.flightNo, "CA1234");
+  assert.equal(days[1]?.tourDailyInfos.at(-1)?.title, "回程");
+  assert.equal(days[1]?.tourDailyInfos.at(-1)?.tourDailyPackageFlights[0]?.flightNo, "CA4321");
+  assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
 });
 
 test("飞机交通节点在资源提交前补齐航班信息卡片", () => {
@@ -247,8 +285,63 @@ test("飞机交通节点在资源提交前补齐航班信息卡片", () => {
   const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
   const outbound = days[0]!.tourDailyInfos[0]!;
   const inbound = days[1]!.tourDailyInfos.at(-1)!;
+  assert.equal(outbound.tourDailyPackageFlights[0].departureLocation.name, "出发地");
   assert.equal(outbound.tourDailyPackageFlights[0].arriveAirports[0].code, "RKZ");
   assert.equal(inbound.tourDailyPackageFlights[0].departureAirports[0].code, "RKZ");
+  assert.equal(inbound.tourDailyPackageFlights[0].arriveLocation.name, "目的地");
+  assert.equal(outbound.tourDailyFlights[0].flight.arriveAirport.code, "RKZ");
+  assert.equal(inbound.tourDailyFlights[0].flight.departureAirport.code, "RKZ");
+  assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
+});
+
+test("飞机交通节点已存在但缺卡片时会按端点重建双形态航班卡片", () => {
+  const endpoints = {
+    arrivalCity: "日喀则",
+    departureCity: "日喀则",
+    resolvedAt: "2026-09-11T00:00:00.000Z",
+    flight: {
+      arrival: { code: "RKZ", name: "和平机场" },
+      departure: { code: "RKZ", name: "和平机场" },
+    },
+  };
+  const merged = mergeTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyFlights: [] }] },
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyFlights: [] }] },
+    ],
+  }, { activeType: { key: 2, name: "航班" }, title: "去程" }, { activeType: { key: 2, name: "航班" }, title: "回程" }, "flightRoundTrip", endpoints);
+
+  const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
+  assert.equal(days[0]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].arriveAirports[0].code, "RKZ");
+  assert.equal(days[0]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].departureLocation.name, "出发地");
+  assert.equal(days[0]!.tourDailyInfos[0]!.tourDailyFlights[0].flight.arriveAirport.code, "RKZ");
+  assert.equal(days[1]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].departureAirports[0].code, "RKZ");
+  assert.equal(days[1]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].arriveLocation.name, "目的地");
+  assert.equal(days[1]!.tourDailyInfos[0]!.tourDailyFlights[0].flight.departureAirport.code, "RKZ");
+  assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
+});
+
+test("飞机交通节点已有部分包卡片时会补齐平台要求的出发地和目的地占位", () => {
+  const endpoints = {
+    arrivalCity: "日喀则",
+    departureCity: "日喀则",
+    resolvedAt: "2026-09-11T00:00:00.000Z",
+    flight: {
+      arrival: { code: "RKZ", name: "和平机场" },
+      departure: { code: "RKZ", name: "和平机场" },
+    },
+  };
+  const merged = mergeTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{ arriveAirports: [{ code: "RKZ" }] }] }] },
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{ departureAirports: [{ code: "RKZ" }] }] }] },
+    ],
+  }, { activeType: { key: 2, name: "航班" }, title: "去程" }, { activeType: { key: 2, name: "航班" }, title: "回程" }, "flightRoundTrip", endpoints);
+
+  const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
+  assert.equal(days[0]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].departureLocation.name, "出发地");
+  assert.equal(days[1]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].arriveLocation.name, "目的地");
+  assert.equal(days[1]!.tourDailyInfos[0]!.tourDailyFlights[0].flight.departureAirport.code, "RKZ");
   assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
 });
 
@@ -259,6 +352,15 @@ test("飞机行程回读缺少航班信息卡片时不能视为完成", () => {
       { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyFlights: [] }] },
     ],
   }, "flightRoundTrip"), /缺少首日或末日目标交通节点/);
+});
+
+test("资源段承载的飞机交通节点即使无行程卡片也可作为完成证据", () => {
+  assert.equal(verifyTrafficNodes({
+    tourDailyDescriptions: [
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, useSegmentConfig: true, tourDailyFlights: [], tourDailyPackageFlights: [] }] },
+      { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, useSegmentConfig: true, tourDailyFlights: [], tourDailyPackageFlights: [] }] },
+    ],
+  }, "flightRoundTrip"), 2);
 });
 
 test("火车交通节点在资源提交前补齐火车信息卡片", () => {
@@ -306,8 +408,8 @@ test("行程保存后按同一绑定 ID 有界轮询，直到交通节点正式�
           tourInfoId: "tour-9",
           tourInfo: {
             tourDailyDescriptions: [
-              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{}] }] },
-              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{}] }] },
+              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{ arriveAirports: [{ code: "RKZ" }] }] }] },
+              { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, tourDailyPackageFlights: [{ departureAirports: [{ code: "RKZ" }] }] }] },
             ],
           },
         };
@@ -788,4 +890,105 @@ test("执行阶段保留已确认的火车配置，交由平台资源阶段判�
     ),
     { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] },
   );
+});
+
+test("行程交通回读诊断会列出首末边界日节点与卡片状态", () => {
+  try {
+    verifyTrafficNodes({
+      tourDailyDescriptions: [
+        { tourDailyInfos: [
+          { activeType: { key: 3, name: "景点" } },
+          { activeType: { key: 2, name: "航班" }, tourDailyFlights: [] },
+        ] },
+        { tourDailyInfos: [{ activeType: { key: 3, name: "景点" } }] },
+      ],
+    }, "flightRoundTrip");
+    assert.fail("应抛出带诊断的错误");
+  } catch (error) {
+    assert.match(
+      (error as Error).message,
+      /缺少首日或末日目标交通节点（首日\[景点、航班\(缺车次\/航班卡片\)\]；末日\[景点\]）/,
+    );
+  }
+});
+
+test("校验响应丢失交通卡片时立即失败并带边界诊断", async () => {
+  const requests: Array<{ path: string; body: any }> = [];
+  let check3Count = 0;
+  const trainNode = (title: string) => ({
+    activeType: { key: 14, name: "火车" },
+    title,
+    tourDailyPackageTrains: [{ trainNo: "C895" }],
+    tourDailyTrains: [],
+  });
+  const parentStateJson = JSON.stringify({
+    dailyContext: { tourDailyDescriptions: [
+      { tourDailyInfos: [trainNode("去程")] },
+      { tourDailyInfos: [trainNode("回程")] },
+    ] },
+  });
+  const parentHtml = "<script>window.__INITIAL_STATE__ = " + parentStateJson + ";</script>";
+  const detailWithoutTraffic = () => ({
+    tourInfo: {
+      tourInfoId: 9100,
+      tourDailyDescriptions: [
+        { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 1 } }] }] },
+        { tourDailyInfos: [{ activeType: { key: 3, name: "景点" }, tourDailyPois: [{ poi: { poiId: 2 } }] }] },
+      ],
+    },
+  });
+  const stripTrafficCards = (tourDailyText: string) => {
+    const payload = JSON.parse(tourDailyText) as any;
+    for (const day of payload.tourDailyDescriptions ?? []) {
+      for (const node of day.tourDailyInfos ?? []) {
+        delete node.tourDailyPackageTrains;
+        node.tourDailyTrains = [];
+      }
+    }
+    return JSON.stringify(payload);
+  };
+
+  const page = {
+    async evaluate<T, A>(fn: (arg: A) => T | Promise<T>, arg: A) {
+      const previousDocument = (globalThis as { document?: unknown }).document;
+      const previousFetch = globalThis.fetch;
+      (globalThis as { document?: { cookie: string } }).document = { cookie: "GUID=CID-VALUE" };
+      globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+        const path = new URL(String(url)).pathname.split("/").pop() ?? "";
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        requests.push({ path, body });
+        const ok = (payload: unknown) => new Response(JSON.stringify({ ResponseStatus: { Ack: "Success", Errors: [] }, ...payload }), { status: 200 });
+        if (path === "getProductTourInfoList") {
+          return ok({ tourInfos: [{ tourInfoId: 9100, main: true, sort: 0, days: 2 }] });
+        }
+        if (path === "getTourDailyDetail.json") {
+          return ok(detailWithoutTraffic());
+        }
+        if (path === "checkTourDaily") {
+          if (body.saveType === 8) return ok({ tourDaily: body.tourDaily });
+          check3Count += 1;
+          return ok({ tourDaily: stripTrafficCards(body.tourDaily) });
+        }
+        if (path === "calculateTourInfoScore") {
+          return ok({ tourInfo: { aggregateScore: 100, tourInfoScores: [] } });
+        }
+        throw new Error("unexpected path " + path);
+      }) as typeof fetch;
+      try {
+        return await fn(arg);
+      } finally {
+        globalThis.fetch = previousFetch;
+        if (previousDocument === undefined) delete (globalThis as { document?: unknown }).document;
+        else (globalThis as { document?: unknown }).document = previousDocument;
+      }
+    },
+    vbkSessionGetText: async () => ({ status: 200, text: parentHtml }),
+  };
+
+  await assert.rejects(
+    () => ensureTrafficLineItinerary(page as never, "78350600", "trainRoundTrip"),
+    /缺少首日或末日目标交通节点/,
+  );
+  assert.equal(check3Count, 1);
+  assert.equal(requests.some((request) => request.path === "saveTourDailyDetail.json"), false);
 });

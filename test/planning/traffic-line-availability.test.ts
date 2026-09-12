@@ -79,6 +79,28 @@ test("一类交通候选未确认时，保留另一类已由接口确认的配�
   });
 });
 
+test("机场消歧超时不能把飞机从应创建列表永久删除", async () => {
+  const partial = availability(["trainRoundTrip"], "日喀则", "日喀则");
+  partial.endpointPlan.train = {
+    arrival: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+    departure: { code: "CN001RKO", name: "日喀则", resourceKey: "92" },
+  };
+  partial.unavailableVariants.flightRoundTrip = "MiniMax 响应超时，请重试。";
+  const fake = runtimeFor(partial);
+
+  const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
+
+  assert.deepEqual(result, {
+    status: "updated",
+    config: {
+      enabled: true,
+      variants: ["flightRoundTrip", "trainRoundTrip"],
+      availability: partial,
+    },
+  });
+  assert.deepEqual(fake.written(), result.config);
+});
+
 test("目的地往返的端点接口确认火车后，保留火车配置供平台资源阶段核验", async () => {
   const fake = runtimeFor(availability(["flightRoundTrip", "trainRoundTrip"], "成都", "成都"));
 

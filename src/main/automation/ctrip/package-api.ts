@@ -1,6 +1,7 @@
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { PRODUCT_FORM_LABELS, isProductForm } from "../../../shared/product-form.js";
+import { ITINERARY_CTRIP_PLATFORM_HOTEL } from "../../../shared/itinerary-hotel.js";
 
 const head = {
   cid: "",
@@ -79,11 +80,6 @@ function packageDays(product: any, current?: any) {
   return product.itinerary?.length || current?.resourceNameRule?.days || Number(product.basicInfo?.days) || 0;
 }
 
-function packageHasHotel(product: any) {
-  return Array.isArray(product.itinerary)
-    && product.itinerary.some((day: any) => String(day?.hotel ?? "").trim() && String(day.hotel).trim() !== "无");
-}
-
 async function readCreatedPackage(
   page: any,
   productId: string,
@@ -115,11 +111,10 @@ async function createInitialPackage(
   if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error("VBK 套餐初始化缺少 vendorId");
   const templateId = await createCustomerTemplate(page, vendorId);
   const days = packageDays(product);
-  const hasHotel = packageHasHotel(product);
   const packageInfo = {
     name: packageName, needShuttle: "F", vendorConfirmModeId: 2, confirmHour: 4,
     isHotelShareRoom: "F", isContainBedFee: "T", visaInfo: [], vendorResourceCode: "",
-    isSmsVBKNotice: "T", isMainPackage: "T", isHotelResource: hasHotel ? "T" : "F",
+    isSmsVBKNotice: "T", isMainPackage: "T", isHotelResource: ITINERARY_CTRIP_PLATFORM_HOTEL.packageIsHotelResource,
     priceInputType,
     piCustomerInfoTemplateId: templateId,
     resourceNameRule: { days, upgradeType: {}, upgradeValue: {} },
@@ -155,7 +150,6 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     (await getPackage(page, productId, priceInputType, false))
     ?? (await createInitialPackage(page, product, productId, packageName, priceInputType, options));
   const days = packageDays(product, current);
-  const hasHotel = packageHasHotel(product);
   const description = `${packageName}。${product.presentation?.recommendation ?? basic.subtitle ?? ""}`;
   const packageInfo = {
     ...current,
@@ -169,7 +163,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     isContainBedFee: "F",
     isNeedCustomer: "T",
     isSmsVBKNotice: "T",
-    isHotelResource: hasHotel ? "T" : "F",
+    isHotelResource: ITINERARY_CTRIP_PLATFORM_HOTEL.packageIsHotelResource,
   };
   await post(page, "savePackageItem", {
     contentType: "json",

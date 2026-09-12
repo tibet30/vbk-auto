@@ -27,16 +27,12 @@ export function formatCostLabel(value: number | null | undefined): string | null
 }
 
 export function summarizeAiUsageMetric(aiUsage: ProductAiUsage | undefined): string {
-  if (!aiUsage || aiUsage.lifetime.calls === 0) return "本产品暂无 Token 记录";
+  if (!aiUsage || aiUsage.lifetime.calls === 0) return "当前产品暂无 Token 记录";
   const lifetime = aiUsage.lifetime;
-  const latest = aiUsage.latestRun;
   if (lifetime.tokensIncomplete || lifetime.totalTokens === null) {
-    return `本产品 ${formatDuration(lifetime.durationMs)} · Token 未返回`;
+    return `当前产品累计 ${formatDuration(lifetime.durationMs)} · Token 未返回`;
   }
-  const parts = [`本产品 ${formatTokens(lifetime.totalTokens)}`];
-  if (latest.totalTokens !== null && latest.runId) {
-    parts.push(`上次 ${formatTokens(latest.totalTokens)}`);
-  }
+  const parts = [`当前产品累计 ${formatTokens(lifetime.totalTokens)}`];
   const cost = formatCostLabel(lifetime.estimatedCostCny);
   if (cost) parts.push(cost);
   return parts.join(" · ");

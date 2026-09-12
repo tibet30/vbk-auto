@@ -374,12 +374,46 @@ test('a new approval in the same agent run preserves phases before preflight eve
     ['package','completed'],['trafficLine','completed'],['preflight','pending'],
   ]);
 });
-test('workflow projection preserves approval summary and reports failure instead of fake running',()=>{
+test('workflow projection shows a short waiting message instead of the full approval summary and reports failure instead of fake running',()=>{
   const {snapshot,approval}=fixture();snapshot.pendingApproval={...approval,status:'pending'};
-  assert.equal(agentWorkflowPatch(snapshot).message,approval.summary);
+  assert.equal(agentWorkflowPatch(snapshot).message,'方案已就绪，等待授权录入');
   snapshot.pendingApproval=undefined;snapshot.run!.status='failed';snapshot.run!.error='需要修复';
   assert.equal(agentWorkflowPatch(snapshot).status,'failed');assert.equal(agentWorkflowPatch(snapshot).message,'需要修复');
   assert.equal(agentWorkflowPatch(snapshot).progress,0);
+});
+
+test('workflow projection keeps planning progress moving before an approval scope exists',()=>{
+  const p=product();
+  const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r2',status:'running',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[]};
+  assert.equal(agentWorkflowPatch(snapshot).progress,5);
+  const call=(id:string,stage:string)=>({id,runId:'r2',type:'tool_call' as const,content:'',createdAt:'2026-09-05',data:{toolCallId:id,name:'generate_product_module',arguments:{stage}}});
+  const done=(id:string)=>({id:`${id}-result`,runId:'r2',type:'tool_result' as const,content:'{}',createdAt:'2026-09-05',data:{toolCallId:id}});
+  const failed=(id:string)=>({id:`${id}-error`,runId:'r2',type:'tool_result' as const,content:'{}',createdAt:'2026-09-05',data:{toolCallId:id,error:'失败'}});
+  snapshot.events=[call('c1','skeleton'),done('c1'),call('c2','itinerary'),failed('c2'),call('c3','itinerary'),done('c3')];
+  assert.equal(agentWorkflowPatch(snapshot).progress,28);
+  snapshot.run!.status='waiting_approval';
+  snapshot.pendingApproval={id:'ap',productVersion:'v',accountKey:'a',scope:[],summary:'等待确认',status:'pending',createdAt:'2026-09-05'};
+  assert.equal(agentWorkflowPatch(snapshot).progress,50);
+});
+
+test('workflow projection keeps planning progress when approved scope has no write phases yet',()=>{
+  const {snapshot,approval,p}=fixture();
+  snapshot.pendingApproval={...approval,status:'pending'};
+  assert.equal(agentWorkflowPatch(snapshot).progress,50);
+  snapshot.pendingApproval=undefined;
+  const patch=agentWorkflowPatch(snapshot,p);
+  assert.equal(patch.stage,'automation');
+  assert.equal(patch.progress,50);
+});
+
+test('workflow projection counts deterministic automation phases into entry progress',()=>{
+  const {snapshot,approval}=fixture();
+  const p=product();p.productId='123';
+  p.automation={id:'auto',status:'running',currentPhase:'presentation',logs:[],
+    phases:[{phase:'saleControl',status:'completed'},{phase:'basic',status:'completed'},{phase:'presentation',status:'running'}]} as any;
+  const patch=agentWorkflowPatch(snapshot,p);
+  assert.equal(patch.stage,'automation');
+  assert.equal(patch.progress,Math.min(99,Math.round(2/approval.scope.length*100)));
 });
 
 test('bare scope aliases normalize without granting missing phases or accepting unknown scopes',async()=>{

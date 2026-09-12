@@ -55,7 +55,7 @@ test("ensurePackageApi 创建首套餐后轮询到物化资源再保存正式套
           name: "日喀则2天1晚私家团·当地4钻",
           vendorResourceCode: "VBK-CODE-001",
           confirmHour: 4,
-          isHotelResource: "T",
+          isHotelResource: "F",
           priceInputType: 1,
           resourceNameRule: { days: 2 },
           singleResourceId: 11,
@@ -88,5 +88,54 @@ test("ensurePackageApi 创建首套餐后轮询到物化资源再保存正式套
   assert.equal(createRequest.headers.cookieorigin, "https://vbooking.ctrip.com");
   assert.equal(createRequest.body.head.cid, "CID-VALUE");
   assert.equal(createRequest.body.packageInfo.name, "日喀则2天1晚私家团·当地4钻");
-  assert.equal(createRequest.body.packageInfo.isHotelResource, "T");
+  // 行程描述始终使用携程平台酒店 → 是否含酒店 = 否（VBK 20013127）。
+  assert.equal(createRequest.body.packageInfo.isHotelResource, "F");
+});
+
+test("ensurePackageApi 行程使用携程平台酒店时套餐是否含酒店为否", async () => {
+  const requests: Array<{ path: string; body: any }> = [];
+  const product = {
+    sales: { productForm: "privateTour", splitGroup: false },
+    basicInfo: { supplierProductCode: "VBK-CODE-002", days: 2, nights: 1, meetingCity: "日喀则" },
+    presentation: { recommendation: "" },
+    commercial: { packageName: "日喀则2天1晚私家团" },
+    itinerary: [{
+      hotel: "当地4钻酒店",
+      hotelCandidates: [
+        { hotelId: 101, hotelName: "和玺酒店", cityName: "日喀则" },
+        { hotelId: 102, hotelName: "乔穆朗宗酒店", cityName: "日喀则" },
+      ],
+    }, { hotel: "无" }],
+    operations: { hotelResource: { source: "ctrip" } },
+  };
+  let packageListReads = 0;
+  const page = executablePage("GUID=CID-VALUE", async (url, init) => {
+    const path = new URL(String(url)).pathname.split("/").pop() ?? "";
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    requests.push({ path, body });
+    if (path === "getPackageList") {
+      packageListReads += 1;
+      if (packageListReads < 3) {
+        return jsonResponse({ ResponseStatus: { Ack: "Success", Errors: [] }, itemList: [] });
+      }
+      return jsonResponse({
+        ResponseStatus: { Ack: "Success", Errors: [] },
+        itemList: [{
+          name: "日喀则2天1晚私家团", vendorResourceCode: "VBK-CODE-002", confirmHour: 4,
+          isHotelResource: "F", priceInputType: 1, resourceNameRule: { days: 2 },
+          singleResourceId: 11, optionalResourceId: 22,
+        }],
+      });
+    }
+    if (path === "getProductBaseInfo") return jsonResponse({ ResponseStatus: { Ack: "Success", Errors: [] }, baseInfo: { vendorId: 38289 } });
+    if (path === "saveCustomerCpntTemplateInfo") return jsonResponse({ ResponseStatus: { Ack: "Success", Errors: [] }, cpntTemplateInfoId: 5122001 });
+    if (path === "savePackageItem") return jsonResponse({ ResponseStatus: { Ack: "Success", Errors: [] } });
+    throw new Error(`unexpected path ${path}`);
+  });
+
+  await ensurePackageApi(page, product, "78350551", { pause: async () => {} });
+
+  // 行程住宿使用携程平台酒店（有携程候选）→ 是否含酒店 = 否（VBK 20013127）。
+  const createRequest = requests.filter((request) => request.path === "savePackageItem")[0];
+  assert.equal(createRequest.body.packageInfo.isHotelResource, "F");
 });

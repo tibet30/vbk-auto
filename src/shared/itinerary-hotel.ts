@@ -9,3 +9,10 @@ export function hasItineraryHotelStay(hotel: unknown): boolean {
   const value = typeof hotel === "string" ? hotel.trim() : "";
   return value.length > 0 && !NO_HOTEL_STAY.test(value);
 }
+
+/** 行程描述住宿始终使用携程平台酒店。VBK 20013127：套餐「是否含酒店」必须为否。 */
+export const ITINERARY_CTRIP_PLATFORM_HOTEL = {
+  useSegmentConfig: true,
+  ishand: true,
+  packageIsHotelResource: "F",
+} as const;

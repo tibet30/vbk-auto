@@ -11,13 +11,17 @@
  *   - refId 一律为 null（真实 detail 样本里 refId 都是 null；不允许伪造字符串）。
  */
 
-import type { ProductItineraryDay, ProductOperations, ResolvedStations } from "./itinerary-transform.js";
+import { ITINERARY_CTRIP_PLATFORM_HOTEL } from "../../../../shared/itinerary-hotel.js";
+import type { ProductItineraryDay, ResolvedStations } from "./itinerary-transform.js";
 import {
   emptyPoiSkeleton,
   emptyTourDailyDinner,
   emptyTourDailyHotel,
   emptyTourDailyPoi,
 } from "./info-skeletons.js";
+
+const FREE_TICKET_SUFFIX = { key: 11, name: "无需门票" } as const;
+const PAID_TICKET_INCLUDED_SUFFIX = { key: 13, name: "含成人儿童首道门票" } as const;
 
 /**
  * 共用字段：每个 tourDailyInfo 都需要这些键，让 VBK 校验能逐字段对齐。
@@ -121,8 +125,8 @@ export function buildAttractionPois(
       sort: index + 1,
       orFlag: spot.relation === "or",
       suffixName: spot.ticketType?.key === 2
-        ? { key: 11, name: "无需门票" }
-        : { key: 7, name: "不含门票" },
+        ? { ...FREE_TICKET_SUFFIX }
+        : { ...PAID_TICKET_INCLUDED_SUFFIX },
       costInclude: { key: "", name: null },
       images: [],
       refId: null,
@@ -235,10 +239,12 @@ export function buildHotelInfo(args: {
           location: null,
           brand: null,
           grade: { key: null, name: hotelTier ?? null },
-          ishand: false,
+          ishand: ITINERARY_CTRIP_PLATFORM_HOTEL.ishand,
         },
+        ishand: ITINERARY_CTRIP_PLATFORM_HOTEL.ishand,
       }
     )),
+    useSegmentConfig: ITINERARY_CTRIP_PLATFORM_HOTEL.useSegmentConfig,
     tourDailyPois: [emptyTourDailyPoi()],
     tourDailyDinner: emptyTourDailyDinner(null, false),
   };

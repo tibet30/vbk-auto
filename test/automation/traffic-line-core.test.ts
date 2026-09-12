@@ -185,6 +185,42 @@ test("多个机场必须由站点消歧器选中真实唯一候选", async () =>
   assert.equal(calls.length, 2);
 });
 
+test("交通端点消歧的可重入失败最多重试两次", async () => {
+  let disambiguateCalls = 0;
+  const page = {
+    evaluate: async (_fn: unknown, request: any) => ({
+      status: 200,
+      durationMs: 1,
+      ctx: {},
+      payload: request.endpoint.includes("suggestTrainStation")
+        ? { ResponseStatus: { Ack: "Success" }, trainStations: [
+          { stationNo: 92, stationName: "日喀则", locationCode: "CN001RKO" },
+        ] }
+        : { ResponseStatus: { Ack: "Success" }, airports: [
+          { code: "RKZ", name: "日喀则和平机场" },
+          { code: "RKX", name: "日喀则备用机场" },
+        ] },
+    }),
+  } as any;
+
+  const availability = await preflightTrafficLineEndpoints(
+    page,
+    [{ spots: [{ city: "日喀则" }] }],
+    new Date("2026-09-09T00:00:00.000Z"),
+    async () => {
+      disambiguateCalls += 1;
+      if (disambiguateCalls < 3) throw new Error("MiniMax 响应超时，请重试。");
+      return { pickedText: "日喀则和平机场", reasoning: "第三次消歧成功" };
+    },
+    { basicInfo: { destinationCity: "日喀则" } },
+    ["flightRoundTrip", "trainRoundTrip"],
+  );
+
+  assert.equal(disambiguateCalls, 3);
+  assert.equal(availability.endpointPlan.flight?.arrival.code, "RKZ");
+  assert.deepEqual(availability.availableVariants, ["flightRoundTrip", "trainRoundTrip"]);
+});
+
 test("录入前按交通方式独立查询，无机场时跳过飞机但保留可用火车", async () => {
   const page = {
     evaluate: async (_fn: unknown, request: any) => ({
@@ -352,6 +388,9 @@ test("平台明确无可售资源时跳过该子产品，避免恢复时重复�
   const packageFailure = "设置火车往返子产品套餐有效失败（Ack=Failure）：产品ID：78199134 出发城市为空,不能打包。";
   assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "trainRoundTrip"), true);
   assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "flightRoundTrip"), false);
+  const trainClauseFailure = "子产品资源回读尚未生成火车去返程条款，未保存条款，可安全重试。";
+  assert.equal(isUnavailableTrafficResourceFailure(trainClauseFailure, "trainRoundTrip"), true);
+  assert.equal(isUnavailableTrafficResourceFailure(trainClauseFailure, "flightRoundTrip"), false);
   assert.equal(isUnavailableTrafficResourceFailure("本班期没有可用交通资源", "trainRoundTrip"), true);
   assert.equal(isUnavailableTrafficResourceFailure("产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。"), true);
   assert.equal(trafficLineChildShouldBeSkipped({

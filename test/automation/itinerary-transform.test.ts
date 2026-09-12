@@ -51,6 +51,11 @@ test("有真实 POI 且无未匹配用户活动时，不追加其他节点", () 
   const days = [makeDay({ day: 1, title: "第1天" }), makeDay({ day: 2, title: "第2天" }), makeDay({ day: 3, title: "第3天" })];
   const out = transformItinerary({ itinerary: days, operations: baseOps, stations: baseStations, refIdSeed: "1" });
   assert.equal(out.length, 3);
+  assert.deepEqual(out.map((day) => day.useCar), [
+    { key: "B", name: "包车" },
+    { key: "B", name: "包车" },
+    { key: "B", name: "包车" },
+  ]);
   // 首日：接机 + 上午景点 + 午餐 + 晚餐 + 酒店 = 5（首日不排早餐）
   assert.equal(out[0].tourDailyInfos.length, 5, "首日必须有接机节点，且不应出现早餐");
   assert.equal(out[0].tourDailyInfos[0].activeType?.key, 25, "首日首节点必须是集合（接机/站）");
@@ -62,6 +67,13 @@ test("有真实 POI 且无未匹配用户活动时，不追加其他节点", () 
   const middle = out[1];
   const transportInMiddle = middle.tourDailyInfos.filter((info) => [25, 26].includes(info.activeType?.key));
   assert.equal(transportInMiddle.length, 0, "中间天不应该有交通节点");
+});
+
+test("当天用车按 operations.transport 映射到 VBK 日级 useCar", () => {
+  const day = makeDay({ hotel: "" });
+  assert.deepEqual(transformItinerary({ itinerary: [day], operations: { ...baseOps, transport: "charter" }, stations: baseStations })[0].useCar, { key: "B", name: "包车" });
+  assert.deepEqual(transformItinerary({ itinerary: [day], operations: { ...baseOps, transport: "shared" }, stations: baseStations })[0].useCar, { key: "P", name: "拼车" });
+  assert.deepEqual(transformItinerary({ itinerary: [day], operations: { ...baseOps, transport: "none" }, stations: baseStations })[0].useCar, { key: "N", name: "不含" });
 });
 
 test("每天至少包含 1 个景点节点，上午/下午节点合计 POI 数量 == spots 长度", () => {
@@ -156,6 +168,9 @@ test("酒店节点：day.hotel 非空时产出 activeType=1 节点 + tourDailyHo
   // 钻级从 operations.hotelTier 派生
   assert.equal(hotel.tourDailyHotels[0].hotel.grade.name, "当地4钻酒店/-4");
   assert.equal(hotel.tourDailyHotels[0].hotel.grade.key, null, "酒店钻级 key 留空（业务 VBK 用 grade.name 匹配）");
+  assert.equal(hotel.useSegmentConfig, true, "酒店来源 radio 必须选中使用携程平台酒店");
+  assert.equal(hotel.tourDailyHotels[0].ishand, true, "行程酒店来源默认使用携程平台酒店");
+  assert.equal(hotel.tourDailyHotels[0].hotel.ishand, true, "酒店对象也保持平台酒店来源");
 });
 
 test("酒店节点：五家携程候选仅将前三家录入同一酒店节点的或关系并保持排序", () => {
@@ -297,7 +312,7 @@ test("POI 节点保留 VBK 模板关键字段：poiId / poiName / ticketType / r
   assert.ok("ticketType" in poi, "ticketType 字段必须保留");
 });
 
-test("免费景点使用 VBK 当前无需门票类型，收费景点保持不含门票", () => {
+test("免费景点使用 VBK 当前无需门票类型，收费景点默认含成人儿童首道门票", () => {
   const freeDay = makeDay({
     spots: [{
       name: "山西博物院",
@@ -321,7 +336,7 @@ test("免费景点使用 VBK 当前无需门票类型，收费景点保持不含
   });
   const paidPoi = transformItinerary({ itinerary: [paidDay], operations: baseOps, stations: baseStations })[0]
     .tourDailyInfos.find((info) => info.activeType?.key === 3).tourDailyPois[0];
-  assert.deepEqual(paidPoi.suffixName, { key: 7, name: "不含门票" });
+  assert.deepEqual(paidPoi.suffixName, { key: 13, name: "含成人儿童首道门票" });
 });
 
 test("未知 / 业务无关字段保留（customStatus / pkgTourInfoId / versionNum / directionWay）", () => {

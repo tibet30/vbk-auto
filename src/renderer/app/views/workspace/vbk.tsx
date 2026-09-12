@@ -89,8 +89,8 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     })),
     [product?.productId, product?.automation?.currentPhase, automationRecovery, automationPhases],
   );
-
   if (!product) return null;
+  const automationSucceeded = product.automation?.status === "succeeded" && product.status === "draft_saved";
 
   return <div className={`${layout.stageSplit} ${styles.vbkSplit}`} style={splitStyle}>
     <aside className={`${layout.panel} ${styles.reviewSummary}`} aria-label="审查结果与 VBK 录入">
@@ -207,6 +207,17 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
               {stoppingAutomation ? <LoaderCircle size={15} /> : <Square size={15} />}
               停止自动录入
             </button>
+          ) : automationSucceeded ? (
+            <button
+              className={`${shared.btn} ${shared.btnLg}`}
+              data-variant="primary"
+              disabled
+              aria-label="草稿已保存到 VBK"
+              title="草稿已保存到 VBK"
+            >
+              <CheckCircle2 size={15} />
+              已保存草稿
+            </button>
           ) : (
             <button
               className={`${shared.btn} ${shared.btnLg}`}
@@ -224,8 +235,8 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
           )}
         </div>
         <span className={styles.productFooterMeta}>
-          <strong>{readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
-          {readiness.ready ? " 等待最终确认" : ` 还需 ${readiness.issues.length} 项核查`}
+          <strong>{automationSucceeded ? "已录入" : readiness.ready ? "✓ 已通过" : "⏳ 进行中"}</strong>
+          {automationSucceeded ? " 草稿已保存到 VBK" : readiness.ready ? " 等待最终确认" : ` 还需 ${readiness.issues.length} 项核查`}
         </span>
       </footer>
     </aside>

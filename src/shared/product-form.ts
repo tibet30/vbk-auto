@@ -10,6 +10,19 @@ export type ProductForm = (typeof PRODUCT_FORMS)[number];
 /** 与 VBK「当天用车」单选项一致的产品内存值。 */
 export type DailyTransport = "charter" | "shared" | "none";
 
+/** VBK 日级 useCar；缺省按包车写入，避免行程页当天用车为空。 */
+export type VbkDailyUseCar = { key: "N" | "B" | "P"; name: "不含" | "包车" | "拼车" };
+
+const VBK_DAILY_USE_CAR: Record<DailyTransport, VbkDailyUseCar> = {
+  none: { key: "N", name: "不含" },
+  shared: { key: "P", name: "拼车" },
+  charter: { key: "B", name: "包车" },
+};
+
+export function toVbkDailyUseCar(transport: DailyTransport | undefined): VbkDailyUseCar {
+  return VBK_DAILY_USE_CAR[transport ?? "charter"];
+}
+
 export const PRODUCT_FORM_LABELS: Record<ProductForm, string> = {
   privateTour: "私家团",
   groupTour: "跟团游",

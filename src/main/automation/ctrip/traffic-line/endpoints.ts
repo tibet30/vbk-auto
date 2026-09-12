@@ -19,6 +19,7 @@ export interface TrafficLineEndpointResolutionOptions {
 
 type ItineraryDay = { spots?: ItinerarySpot[] };
 type ItinerarySpot = { city?: string | null };
+const RETRYABLE_ENDPOINT_RETRIES = 2;
 
 /**
  * 大交通端点优先采用运营或用户明确指定的城市；只有该端未指定时才以产品
@@ -82,16 +83,18 @@ export async function preflightTrafficLineEndpoints(
   await Promise.all([...new Set(variants)].map(async (variant) => {
     const kind = variant === "flightRoundTrip" ? "airport" : "train";
     try {
-      const arrival = await resolveUniqueStation(
-        page, kind, arrivalCity, disambiguator, product,
-        variant === "trainRoundTrip" ? options.excludedTrainCodes : [],
-      );
-      const departure = sameCity ? arrival : await resolveUniqueStation(
-        page, kind, departureCity, disambiguator, product,
-        variant === "trainRoundTrip" ? options.excludedTrainCodes : [],
-      );
-      if (variant === "flightRoundTrip") endpointPlan.flight = { arrival: toStation(arrival), departure: toStation(departure) };
-      else endpointPlan.train = { arrival: toStation(arrival), departure: toStation(departure) };
+      const endpoints = await resolveVariantEndpointsWithRetry({
+        page,
+        kind,
+        arrivalCity,
+        departureCity,
+        sameCity,
+        disambiguator,
+        product,
+        excludedTrainCodes: variant === "trainRoundTrip" ? options.excludedTrainCodes ?? [] : [],
+      });
+      if (variant === "flightRoundTrip") endpointPlan.flight = endpoints;
+      else endpointPlan.train = endpoints;
       availableVariants.push(variant);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -107,6 +110,41 @@ export async function preflightTrafficLineEndpoints(
 
 function isUnavailableTrafficStation(reason: string): boolean {
   return /未找到唯一可确认的(?:机场|火车站)候选/.test(reason);
+}
+
+async function resolveVariantEndpointsWithRetry(args: {
+  page: TrafficLinePage;
+  kind: "airport" | "train";
+  arrivalCity: string;
+  departureCity: string;
+  sameCity: boolean;
+  disambiguator: TrafficLineStationDisambiguator | undefined;
+  product: Record<string, unknown>;
+  excludedTrainCodes: readonly string[];
+}): Promise<{ arrival: TrafficLineStation; departure: TrafficLineStation }> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= RETRYABLE_ENDPOINT_RETRIES; attempt += 1) {
+    try {
+      const arrival = await resolveUniqueStation(
+        args.page, args.kind, args.arrivalCity, args.disambiguator, args.product, args.excludedTrainCodes,
+      );
+      const departure = args.sameCity ? arrival : await resolveUniqueStation(
+        args.page, args.kind, args.departureCity, args.disambiguator, args.product, args.excludedTrainCodes,
+      );
+      return { arrival: toStation(arrival), departure: toStation(departure) };
+    } catch (error) {
+      lastError = error;
+      const reason = error instanceof Error ? error.message : String(error);
+      if (attempt >= RETRYABLE_ENDPOINT_RETRIES || !isRetryableTrafficEndpointFailure(reason)) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "交通站点核验失败"));
+}
+
+function isRetryableTrafficEndpointFailure(reason: string): boolean {
+  if (isUnavailableTrafficStation(reason)) return false;
+  if (/缺少安全消歧器|不会按列表首项猜测/.test(reason)) return false;
+  return /超时|timeout|网络|暂时|稍后|重试|可安全重试|未被安全消歧/i.test(reason);
 }
 
 async function resolveUniqueStation(

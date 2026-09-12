@@ -374,7 +374,11 @@ export function isUnavailableTrafficResourceFailure(reason: string, variant?: Tr
   if (/(?:当前|本)班期.*(?:没有|无).*可用交通资源|(?:没有|无).*可用交通资源.*(?:当前|本)班期/.test(reason)) return true;
   // 同城接送的火车子产品能创建，但 VBK 到套餐有效化才返回该业务结论。
   // 这不是会话或协议失败；保留子产品记录并让其它交通方式继续完成。
-  return variant === "trainRoundTrip" && /出发城市为空\s*[,，]?\s*不能打包/.test(reason);
+  return variant === "trainRoundTrip" && (
+    /出发城市为空\s*[,，]?\s*不能打包/.test(reason)
+    || /资源回读尚未生成火车去返程条款/.test(reason)
+    || /火车票条款未分别生成去程与返程条款/.test(reason)
+  );
 }
 
 export function trafficLineChildShouldBeSkipped(progress: TrafficLineChildProgress | undefined): boolean {

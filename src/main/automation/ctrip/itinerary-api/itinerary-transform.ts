@@ -17,6 +17,8 @@
  *     VBK 协议字段写入；业务上不要求纯数字、不参与 URL 或 query 拼接。
  */
 
+import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
+import { toVbkDailyUseCar, type DailyTransport, type VbkDailyUseCar } from "../../../../shared/product-form.js";
 import type { StationCandidate } from "./station-search.js";
 import {
   buildAttractionPois,
@@ -26,7 +28,6 @@ import {
   buildOtherInfo,
   buildPickupInfo,
 } from "./info-builders.js";
-import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 
 /**
  * 输入：项目侧行程 + operations。
@@ -70,7 +71,7 @@ export interface ProductItineraryDay {
 export interface ProductOperations {
   hotelTier?: string;
   pickupCity?: string;
-  transport?: "charter" | "shared" | "none";
+  transport?: DailyTransport;
   reusePickupForDropoff?: boolean;
   mealsIncluded?: boolean;
 }
@@ -89,6 +90,7 @@ export interface VbkTourDailyDescription {
   tourDailyDescriptionId: number | null;
   orderDay: number;
   dailyDescription: string;
+  useCar: VbkDailyUseCar;
   tourDailyLocations: Array<Record<string, unknown>>;
   tourDailyInfos: Array<Record<string, unknown>>;
   seaCruise: boolean;
@@ -127,6 +129,8 @@ export interface ReadbackDayExpectation {
   }>;
   /** 酒店节点（无酒店时为空数组）。 */
   hotels: Array<{ hotelName: string; hotelTier?: string }>;
+  /** 每天标题下的“当天用车”。 */
+  useCar: VbkDailyUseCar;
   /** 仅未匹配的用户活动才写入其他 / 自由活动节点。 */
   other?: { description: string };
   /** 服务时间（其他节点写入 startOnBoardTime / stopOnBoardTime）。 */
@@ -185,6 +189,7 @@ export function buildReadbackExpectations(args: {
         mealsIncluded: key === "B" && operations.mealsIncluded === true,
       })),
       hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: operations.hotelTier })),
+      useCar: toVbkDailyUseCar(operations.transport),
       ...(activities.length ? { other: { description: otherDescription(day) } } : {}),
       serviceTime: { startTime: "08:00", endTime: "20:00" },
     };
@@ -370,6 +375,7 @@ export function buildDayDescription(args: {
     tourDailyDescriptionId: null,
     orderDay: index + 1,
     dailyDescription: day.title,
+    useCar: toVbkDailyUseCar(operations.transport),
     tourDailyLocations: [],
     tourDailyInfos: infos,
     seaCruise: false,

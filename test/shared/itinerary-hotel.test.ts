@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasItineraryHotelStay } from "../../src/shared/itinerary-hotel.js";
+import { hasItineraryHotelStay, ITINERARY_CTRIP_PLATFORM_HOTEL } from "../../src/shared/itinerary-hotel.js";
 
 test("明确的无住宿标记不算酒店晚", () => {
   assert.equal(hasItineraryHotelStay("无"), false);
@@ -19,4 +19,10 @@ test("明确的无住宿标记不算酒店晚", () => {
 test("实际酒店名称算住宿晚", () => {
   assert.equal(hasItineraryHotelStay("维也纳酒店(江孜宗山古堡店)"), true);
   assert.equal(hasItineraryHotelStay("无锡君来洲际酒店"), true);
+});
+
+test("行程描述住宿始终使用携程平台酒店，套餐是否含酒店为否", () => {
+  assert.equal(ITINERARY_CTRIP_PLATFORM_HOTEL.useSegmentConfig, true);
+  assert.equal(ITINERARY_CTRIP_PLATFORM_HOTEL.ishand, true);
+  assert.equal(ITINERARY_CTRIP_PLATFORM_HOTEL.packageIsHotelResource, "F");
 });

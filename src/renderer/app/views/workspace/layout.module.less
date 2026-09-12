@@ -83,7 +83,10 @@
 
 .stageSplit {
   width: 100%;
-  height: 100%;
+  /* 父级 .workflowStage 是 flex 列容器，可能在其上方渲染 WorkflowTaskStrip。
+   * 不能用 height: 100%（会按父级全高解析、叠加 TaskStrip 后溢出被裁掉），
+   * 必须用 flex 撑满剩余空间，否则面板底部内容不可达、表现为“无法滚动”。 */
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -105,7 +108,7 @@
 .stageSplit > .panel {
   border-left: 0;
   width: 100%;
-  height: 100%;
+  min-height: 0;
 }
 
 @media (max-width: 980px) {

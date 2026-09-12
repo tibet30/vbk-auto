@@ -1,8 +1,8 @@
-import type { AgentSnapshot, ProductWorkflowTask } from '../../shared/contracts.js';
+import type { AgentSnapshot, ProductDetail, ProductWorkflowTask } from '../../shared/contracts.js';
 import { logWarn } from '../../shared/log-timestamp.js';
 import { approvalForRun } from './integration-gates.js';
 
-export function agentWorkflowPatch(snapshot: AgentSnapshot): Partial<ProductWorkflowTask> {
+export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDetail): Partial<ProductWorkflowTask> {
   const run = snapshot.run;
   const status: ProductWorkflowTask['status'] = run?.status === 'completed' ? 'succeeded'
     : run?.status === 'failed' ? 'failed'
@@ -15,12 +15,75 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot): Partial<ProductWork
   const scopes = approval?.scope ?? [];
   const done = new Set(snapshot.events.filter(event=>event.runId===run?.id && event.type==='tool_result'
     && event.data?.verified===true).map(event=>`vbk.write_phase:${event.data?.phase}`));
-  const progress = status==='succeeded' ? 100 : scopes.length ? Math.min(99, Math.round(scopes.filter(scope=>done.has(scope)).length/scopes.length*100)) : 0;
-  const message = snapshot.pendingApproval?.summary ?? (snapshot.pendingInput ? '等待补充信息'
-    : run?.error ?? (status==='succeeded' ? '本轮任务已完成' : status==='abandoned' ? '任务已放弃'
-      : run?.status==='paused' ? '任务已暂停，可继续处理' : 'Agent 正在处理产品'));
+  // 确定性录入执行器的完成证据写在 automation.phases（无 tool_result 事件）；
+  // 不并入的话，携程录入阶段会一直停在 0%。
+  for (const phase of product?.automation?.phases ?? []) {
+    if (phase.status === 'completed') done.add(`vbk.write_phase:${phase.phase}`);
+  }
+  const progress = workflowProgress(status, snapshot, scopes, done);
+  const message = snapshot.pendingApproval ? '方案已就绪，等待授权录入'
+    : snapshot.pendingInput ? '等待补充信息'
+      : run?.error ?? (status==='succeeded' ? '本轮任务已完成' : status==='abandoned' ? '任务已放弃'
+        : run?.status==='paused' ? '任务已暂停，可继续处理' : 'Agent 正在处理产品');
   return {status,stage,progress,message,error:run?.error,
     completedAt:['succeeded','abandoned','failed'].includes(status) ? run?.updatedAt : undefined};
+}
+
+const GENERATE_STAGES = ["skeleton", "basicInfo", "itinerary", "presentation", "commercial"] as const;
+type GenerateStage = (typeof GENERATE_STAGES)[number];
+const GENERATION_STAGE_PROGRESS: Record<GenerateStage, number> = {
+  skeleton: 10, basicInfo: 18, itinerary: 28, presentation: 36, commercial: 45,
+};
+const PLANNING_STARTED_PROGRESS = 5;
+const PLANNING_AWAITING_APPROVAL_PROGRESS = 50;
+
+function workflowProgress(
+  status: ProductWorkflowTask['status'],
+  snapshot: AgentSnapshot,
+  scopes: string[],
+  done: Set<string>,
+): number {
+  if (status === 'succeeded') return 100;
+  const planning = planningProgress(snapshot, status);
+  if (!scopes.length) return planning;
+  const entry = Math.min(99, Math.round(scopes.filter((scope) => done.has(scope)).length / scopes.length * 100));
+  if (status === 'failed' || status === 'abandoned') return entry;
+  return Math.max(planning, entry || PLANNING_AWAITING_APPROVAL_PROGRESS);
+}
+
+/** generate_product_module 完成证据只在当前 run 事件里；ProductDetail.planning 没有阶段完成列表。 */
+function planningProgress(snapshot: AgentSnapshot, status: ProductWorkflowTask['status']): number {
+  if (snapshot.pendingApproval) return PLANNING_AWAITING_APPROVAL_PROGRESS;
+  const runId = snapshot.run?.id;
+  if (!runId) return 0;
+  const completed = completedGenerateStages(snapshot, runId);
+  let progress = status === 'running' || status === 'queued' ? PLANNING_STARTED_PROGRESS : 0;
+  for (const stage of GENERATE_STAGES) {
+    if (completed.has(stage)) progress = Math.max(progress, GENERATION_STAGE_PROGRESS[stage]);
+  }
+  return progress;
+}
+
+function completedGenerateStages(snapshot: AgentSnapshot, runId: string): Set<GenerateStage> {
+  const stageByCall = new Map<string, GenerateStage>();
+  for (const event of snapshot.events) {
+    if (event.runId !== runId || event.type !== 'tool_call' || event.data?.name !== 'generate_product_module') continue;
+    const stage = asGenerateStage(event.data.arguments);
+    if (stage) stageByCall.set(String(event.data.toolCallId ?? ''), stage);
+  }
+  const completed = new Set<GenerateStage>();
+  for (const event of snapshot.events) {
+    if (event.runId !== runId || event.type !== 'tool_result' || event.data?.error) continue;
+    const stage = stageByCall.get(String(event.data?.toolCallId ?? ''));
+    if (stage) completed.add(stage);
+  }
+  return completed;
+}
+
+function asGenerateStage(args: unknown): GenerateStage | undefined {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined;
+  const stage = Reflect.get(args, 'stage');
+  return GENERATE_STAGES.find((item) => item === stage);
 }
 
 export interface RecoverQueuedAgentWorkflowTasksInput {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PRODUCT_FORM_LABELS, PRODUCT_FORMS, defaultDailyTransport, isPrivateTourForm, isProductForm, requiresGuide, requiresVehicleResource, supportsSmallGroupSettings } from "../../src/shared/product-form.js";
+import { PRODUCT_FORM_LABELS, PRODUCT_FORMS, defaultDailyTransport, isPrivateTourForm, isProductForm, requiresGuide, requiresVehicleResource, supportsSmallGroupSettings, toVbkDailyUseCar } from "../../src/shared/product-form.js";
 
 test("产品形态契约包含四类形态及稳定中文标签", () => {
   assert.deepEqual(PRODUCT_FORMS, ["privateTour", "groupTour", "freeTravel", "semiSelfGuided"]);
@@ -35,4 +35,11 @@ test("当天用车默认值按私家团、拼小团和自由行区分", () => {
   assert.equal(defaultDailyTransport("semiSelfGuided", true), "shared");
   assert.equal(defaultDailyTransport("freeTravel", false), "none");
   assert.equal(defaultDailyTransport("groupTour", false), "charter");
+});
+
+test("当天用车映射到 VBK 日级 useCar，缺省为包车", () => {
+  assert.deepEqual(toVbkDailyUseCar("none"), { key: "N", name: "不含" });
+  assert.deepEqual(toVbkDailyUseCar("shared"), { key: "P", name: "拼车" });
+  assert.deepEqual(toVbkDailyUseCar("charter"), { key: "B", name: "包车" });
+  assert.deepEqual(toVbkDailyUseCar(undefined), { key: "B", name: "包车" });
 });

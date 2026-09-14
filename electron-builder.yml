@@ -64,3 +64,4 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 三人同游
+  include: build/installer.nsh

@@ -49,6 +49,7 @@ import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite
 import { completeVerifiedSaleControlPhase, initializeAutomationStartPhase } from "./automation.main.run-state.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
 import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
+import { writeAutomationProduct } from "./automation.main.persist.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 
 /**
@@ -139,7 +140,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     if (normalizedProductType.changed) {
       log("旧产品类型已在创建远端草稿前归一为境内短途，避免缺少大交通卡片导致校验失败。", "warning");
     }
-    ctx.db.updateProduct(localProductId, productDetail.product, "automating");
+    writeAutomationProduct(ctx, localProductId, productDetail.product, "automating");
     try {
       const page = await ctx.browser.page();
       let productId = productDetail.productId;
@@ -151,6 +152,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
           productId = await ctx.runVbkPageExclusive(() => configureProductShellApi(page, product), "saleControl");
           ctx.db.setProductId(localProductId, productId);
+          ctx.browser.addPinnedProductId?.(productId);
           // configureProductShellApi 已完成销售控制远端回读；先持久化销售控制
           // 的完成态并推送 UI，之后才开始 basic，避免 API 直连模式下阶段状态
           // 落后于实际保存结果。
@@ -221,7 +223,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         const refreshedSupplierCode = refreshSupplierProductCodeForPlatformWrite(product, butlerSelection, productId);
         if (refreshedSupplierCode) {
           productDetail.product = product as unknown as Record<string, unknown>;
-          ctx.db.updateProduct(localProductId, productDetail.product, "automating");
+          writeAutomationProduct(ctx, localProductId, productDetail.product, "automating");
           const supplierCode = String((product.basicInfo as Record<string, unknown>).supplierProductCode);
           log(`供应商产品编号已按本次写入时间重算：${refreshedSupplierCode}`);
           if (basicInfoSaved) {
@@ -261,7 +263,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
               disambiguator: ctx.disambiguator,
               productId,
             }),
-            dbUpdate: (id, updatedProduct, status) => ctx.db.updateProduct(id, updatedProduct, status),
+            dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
           })),
         package: () => executePhase("package", () => ensurePackageApi(page, product, productId!)),
         pricingInventory: () => executePhase("pricingInventory", () => ensurePricingInventoryApi(page, product, productId!)),
@@ -278,7 +280,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
               candidates: product.itinerary.find((day) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
               dailyCandidates: result.dailyCandidates,
             };
-            ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "automating");
+            writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "automating");
           }
           return result;
         }),
@@ -293,6 +295,9 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
             checkpoint: run.trafficLine,
             onCheckpoint: (checkpoint) => {
               run.trafficLine = checkpoint;
+              for (const child of checkpoint.children) {
+                if (child.childProductId) ctx.browser.addPinnedProductId?.(child.childProductId);
+              }
               persist();
             },
             disambiguator: ctx.disambiguator,
@@ -349,7 +354,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           run.status = "failed";
           run.phases[0].status = "failed";
           run.currentPhase = "basic";
-          ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "blocked");
+          writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "blocked");
           persist();
           return;
         }
@@ -379,7 +384,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           run.status = "failed";
           run.phases[index].status = "failed";
           run.currentPhase = phase;
-          ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "blocked");
+          writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "blocked");
           persist();
           return;
         }
@@ -398,7 +403,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       run.currentPhase = undefined;
       await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
       log("产品草稿已保存，未提交审核、未发布。", "warning");
-      ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "draft_saved");
+      writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "draft_saved");
       persist();
     } catch (error) {
       // 「停止」流程不应该被 catch 当作 failed —— stop() 已经把 run.status
@@ -413,7 +418,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const current = run.phases.find((phase: { phase: string; status: string }) => phase.phase === run.currentPhase);
       if (current && current.status !== "completed") current.status = "failed";
       log(error instanceof Error ? error.message : "自动录入发生未知错误", "error");
-      ctx.db.updateProduct(localProductId, product as unknown as Record<string, unknown>, "blocked");
+      writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "blocked");
       persist();
       throw error;
     } finally {

@@ -117,6 +117,16 @@ test("创建后的自动执行提示和端到端测试说明不能进入锁定�
   assert.ok(!locked.pois.some((poi) => /端到端|资料准备|询问用户|明确审批/.test(poi)));
 });
 
+test("端到端验证授权说明不能进入锁定景点", () => {
+  const product = draft("日喀则2日游\n4钻酒店\nD1、火车站接-帕拉庄园【配讲解】-江孜宗山古堡【配讲解】-白居寺-住日喀则\nD2、日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】--扎实伦布寺--送火车\n\n端到端的再创建产品验证。本次已授权在本地方案准备完成后录入 VBK 草稿；如果中途有问题，先修复共享问题，再重新创建新产品复验。");
+  const locked = extractLockedConstraints(product);
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["帕拉庄园", "江孜宗山古堡", "白居寺"] },
+    { day: 2, spots: ["日喀则非物质遗产中心", "日喀则博物馆", "扎实伦布寺"] },
+  ]);
+  assert.ok(!locked.pois.some((poi) => /端到端|授权|修复|复验/.test(poi)));
+});
+
 test("product.messages 中的最新纠正进入写入契约，只覆盖被纠正日期", () => {
   const product = draft("D1 去宽窄巷子，D2 去武侯祠，包车");
   product.messages = [

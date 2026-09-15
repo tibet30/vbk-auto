@@ -882,6 +882,110 @@ test("运行阶段不能绕过行程证据门并把部分子产品标记完成",
   assert.equal(calls, 0);
 });
 
+test("运行阶段复用产品配置里已核验的大交通端点，全子产品未完成时只记录原因", async () => {
+  const endpoints = {
+    arrivalCity: "成都",
+    departureCity: "成都",
+    resolvedAt: "2026-09-15T02:09:36.260Z",
+    flight: {
+      arrival: { code: "TFU", name: "天府国际机场" },
+      departure: { code: "TFU", name: "天府国际机场" },
+    },
+    train: {
+      arrival: { code: "CN001ICW", name: "成都东", resourceKey: "28" },
+      departure: { code: "CN001ICW", name: "成都东", resourceKey: "28" },
+    },
+  };
+  const seenEndpoints: string[] = [];
+  const page = {
+    vbkSessionGetText: async () => ({ status: 200, text: '<script>window.__INITIAL_STATE__ = {"childList":[]};</script>' }),
+    evaluate: async (_fn: unknown, request: any) => {
+      seenEndpoints.push(String(request?.endpoint ?? ""));
+      if (/suggestAirport|suggestTrainStation/.test(String(request?.endpoint ?? ""))) {
+        throw new Error("不应重新查询站点");
+      }
+      throw new Error("stopped after endpoint reuse");
+    },
+  };
+
+  const logs: string[] = [];
+  const result = await ensureTrafficLinePhase({
+    page,
+    parentProductId: "78483120",
+    config: {
+      enabled: true,
+      variants: ["flightRoundTrip", "trainRoundTrip"],
+      availability: {
+        endpointPlan: endpoints,
+        availableVariants: ["flightRoundTrip", "trainRoundTrip"],
+        unavailableVariants: {},
+      },
+    },
+    itinerary: [{ spots: [{ city: "成都" }] }],
+    log: (message) => logs.push(message),
+  });
+  assert.equal(seenEndpoints.some((endpoint) => /suggestAirport|suggestTrainStation/.test(endpoint)), false);
+  assert.deepEqual(result.children, []);
+  assert.equal(logs.some((message) => /子产品未完成/.test(message)), true);
+});
+
+test("单个交通子产品创建失败会跳过并继续其它子产品，不影响母产品阶段成功", async () => {
+  const endpoints = {
+    arrivalCity: "成都",
+    departureCity: "成都",
+    resolvedAt: "2026-09-15T02:09:36.260Z",
+    flight: {
+      arrival: { code: "TFU", name: "天府国际机场" },
+      departure: { code: "TFU", name: "天府国际机场" },
+    },
+    train: {
+      arrival: { code: "CN001ICW", name: "成都东", resourceKey: "28" },
+      departure: { code: "CN001ICW", name: "成都东", resourceKey: "28" },
+    },
+  };
+  const saveCalls: string[] = [];
+  const page = {
+    vbkSessionGetText: async () => ({ status: 200, text: '<script>window.__INITIAL_STATE__ = {"childList":[]};</script>' }),
+    evaluate: async (_fn: unknown, request: any) => {
+      const endpoint = String(request?.endpoint ?? "");
+      if (endpoint.endsWith("/getPackageProductDetail")) {
+        return {
+          status: 200,
+          payload: {
+            ResponseStatus: { Ack: "Success", Errors: [] },
+            generalInfoDto: { keep: true },
+            subLineInfoDto: {},
+          },
+          durationMs: 1,
+          ctx: {},
+        };
+      }
+      if (endpoint.endsWith("/saveLineInfo")) {
+        saveCalls.push(String(request?.body?.subLineInfoDto?.lineDescription ?? ""));
+        throw new Error(`创建失败:${saveCalls.length}`);
+      }
+      throw new Error(`unexpected endpoint ${endpoint}`);
+    },
+  };
+
+  const result = await ensureTrafficLineApi(page as never, "78483120", {
+    enabled: true,
+    variants: ["flightRoundTrip", "trainRoundTrip"],
+    availability: {
+      endpointPlan: endpoints,
+      availableVariants: ["flightRoundTrip", "trainRoundTrip"],
+      unavailableVariants: {},
+    },
+  }, {
+    itinerary: [{ spots: [{ city: "成都" }] }],
+    endpointPlan: endpoints,
+  });
+
+  assert.deepEqual(saveCalls, ["飞机往返", "火车往返"]);
+  assert.deepEqual(result.children, []);
+  assert.deepEqual(result.skipped?.map((item) => item.variant), ["flightRoundTrip", "trainRoundTrip"]);
+});
+
 test("执行阶段保留已确认的火车配置，交由平台资源阶段判断可售性", () => {
   assert.deepEqual(
     trafficLineConfigForProduct(

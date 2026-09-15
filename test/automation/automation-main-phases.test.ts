@@ -69,3 +69,20 @@ test("线路及交通在站点确认后位于条款和预检之间", () => {
   }));
   assert.deepEqual(phases.slice(-3), ["terms", "trafficLine", "preflight"]);
 });
+
+test("非私家团只有明确带车辆资源诉求时才加入 vehicleResource 阶段", () => {
+  const base = makeProduct();
+  const freeTravel = parseProduct({
+    ...base,
+    sales: { productType: "domesticShort", productForm: "freeTravel", splitGroup: false },
+    operations: { transport: "none", pickupCity: "太原", vehicleResource: {} },
+  });
+  assert.equal(draftPhasesFor(freeTravel).includes("vehicleResource"), false);
+
+  const withVehicleBudget = parseProduct({
+    ...base,
+    sales: { productType: "domesticShort", productForm: "freeTravel", splitGroup: false },
+    operations: { transport: "none", pickupCity: "太原", vehicleResource: { requestedTotalCost: 800 } },
+  });
+  assert.equal(draftPhasesFor(withVehicleBudget).includes("vehicleResource"), true);
+});

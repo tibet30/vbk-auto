@@ -231,7 +231,7 @@ test("新建产品缺少住宿段时，自动按连续城市创建并让停留�
   }
 });
 
-test("非私家团在酒店名单写入草稿后提交，并以正式段回读确认", async () => {
+test("非私家团酒店阶段只保存指定酒店草稿，不单独提交资源配置", async () => {
   const oldFetch = globalThis.fetch;
   const oldDocument = (globalThis as any).document;
   const rikaze = city(100, "日喀则");
@@ -254,7 +254,6 @@ test("非私家团在酒店名单写入草稿后提交，并以正式段回读�
     lodging,
     { ...lodging, segmentId: "terminal", segmentBase: { ...lodging.segmentBase, segmentNumber: 3, stayNights: 0, minStayNights: 0, maxStayNights: 0 } },
   ];
-  let submitted = false;
   const calls: string[] = [];
   (globalThis as any).document = { cookie: "GUID=fixture" };
   globalThis.fetch = (async (input: any, init?: any) => {
@@ -264,12 +263,11 @@ test("非私家团在酒店名单写入草稿后提交，并以正式段回读�
       const saved = JSON.parse(String(init?.body ?? "{}")).segment;
       segments = segments.map((segment) => String(segment.segmentId) === String(saved.segmentId) ? saved : segment);
     }
-    if (endpoint.endsWith("submitSegments")) submitted = true;
     const payload = endpoint.endsWith("getSegments")
       ? {
         ResponseStatus: { Ack: "Success" },
         draftProductSegments: { segments },
-        ...(submitted ? { productSegments: { segments: structuredClone(segments) } } : {}),
+        productSegments: { segments: segments.map((segment) => ({ ...segment, hotel: { segmentRooms: [] } })) },
       }
       : { ResponseStatus: { Ack: "Success" } };
     return new Response(JSON.stringify(payload), { status: 200 });
@@ -287,8 +285,8 @@ test("非私家团在酒店名单写入草稿后提交，并以正式段回读�
       "78120988",
     );
     assert.equal(result.verified, true);
-    assert.equal(submitted, true);
-    assert.ok(calls.some((endpoint) => endpoint.endsWith("submitSegments")));
+    assert.ok(!calls.some((endpoint) => endpoint.endsWith("submitSegments")));
+    assert.equal(result.ctripResource.verified, true);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldDocument === undefined) delete (globalThis as any).document;

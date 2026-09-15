@@ -19,6 +19,8 @@ import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, reso
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
+import type { ProductMutationService } from "../../application/product-mutation-service.js";
+import { automationNavigationPin } from "./automation.main.pin.js";
 import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
 import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
@@ -95,6 +97,7 @@ export class DraftAutomation {
   private agentWriteGuard?: (localProductId: string, phase: string) => Promise<void>;
   setAgentWriteGuard(guard: (localProductId: string, phase: string) => Promise<void>): void { this.agentWriteGuard = guard; }
   private runVbkPageExclusive = async <T>(task: () => Promise<T>): Promise<T> => task();
+  private productMutations?: ProductMutationService;
   // 用户主动中止的 localProductId：runner 在阶段之间和 attempt 之间检查这个集合。
   // 用 Set 而不是 boolean：避免上一次取消信号污染下一轮 run。
   private cancellationRequested = new Set<string>();
@@ -110,6 +113,10 @@ export class DraftAutomation {
 
   setRunVbkPageExclusive(run: <T>(task: () => Promise<T>) => Promise<T>) {
     this.runVbkPageExclusive = run;
+  }
+
+  setProductMutations(mutations: ProductMutationService): void {
+    this.productMutations = mutations;
   }
 
 /**
@@ -299,6 +306,13 @@ isCancelRequested(localProductId: string): boolean {
       markCancelled: (_localProductId, run, persist) => markCancelled(run, persist),
       cancellationRequested: this.cancellationRequested,
       ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
+      persistProduct: (id, product, status) => {
+        if (this.productMutations) {
+          this.productMutations.replace(id, product, { status, notify: false });
+          return;
+        }
+        this.db.updateProduct(id, product, status);
+      },
       runVbkPageExclusive: (task, executingPhase) => this.runVbkPageExclusive(async () => {
         if (localProductId && executingPhase && this.agentWriteGuard) {
           await this.agentWriteGuard(localProductId, executingPhase);
@@ -337,7 +351,7 @@ private async runLocked(localProductId: string, retryFrom?: string) {
     this.cancellationRequested.delete(localProductId);
 
     try {
-      await this.run(localProductId, retryFrom);
+      await this.withNavigationPin(localProductId, () => this.run(localProductId, retryFrom));
     } finally {
       this.running.delete(localProductId);
     }
@@ -348,7 +362,7 @@ private async runLocked(localProductId: string, retryFrom?: string) {
     this.running.add(localProductId);
     this.cancellationRequested.delete(localProductId);
     try {
-      await this.runApproved(localProductId, retryFrom);
+      await this.withNavigationPin(localProductId, () => this.runApproved(localProductId, retryFrom));
     } finally {
       this.running.delete(localProductId);
       this.cancellationRequested.delete(localProductId);
@@ -364,7 +378,7 @@ private async runLocked(localProductId: string, retryFrom?: string) {
     this.cancellationRequested.delete(localProductId);
 
     try {
-      await this.runOnePhase(localProductId, phaseName);
+      await this.withNavigationPin(localProductId, () => this.runOnePhase(localProductId, phaseName));
     } finally {
       this.running.delete(localProductId);
       this.cancellationRequested.delete(localProductId);
@@ -377,10 +391,19 @@ private async runLocked(localProductId: string, retryFrom?: string) {
     this.cancellationRequested.delete(localProductId);
 
     try {
-      await this.runSaleControl(localProductId);
+      await this.withNavigationPin(localProductId, () => this.runSaleControl(localProductId));
     } finally {
       this.running.delete(localProductId);
       this.cancellationRequested.delete(localProductId);
+    }
+  }
+
+  private async withNavigationPin<T>(localProductId: string, work: () => Promise<T>): Promise<T> {
+    this.browser.pinProductNavigation?.(automationNavigationPin(this.db.getProduct(localProductId)));
+    try {
+      return await work();
+    } finally {
+      this.browser.clearNavigationPin?.();
     }
   }
 

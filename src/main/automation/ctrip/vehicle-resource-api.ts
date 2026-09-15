@@ -1,4 +1,5 @@
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 
 type Segment = Record<string, any>;
 type ResourceCity = Record<string, any>;
@@ -389,10 +390,10 @@ export async function ensureVehicleResourceBinding(
 
 /** 正式自动录入入口：严格只走接口，不根据当前页面 URL 回退 DOM。 */
 export async function ensureVehicleResourceApi(page: any, product: any, productId: string) {
-  if (product.sales?.productForm !== "privateTour") return { skipped: "非私家团" };
+  if (!productNeedsVehicleResource(product)) return { skipped: "产品未配置用车资源" };
   const vehicle = product.operations?.vehicleResource;
   if (!vehicle?.resourceGroupId || !vehicle?.resourceGroupName) {
-    throw new Error("私家团缺少 operations.vehicleResource 资源组 ID/名称");
+    throw new Error("产品缺少 operations.vehicleResource 资源组 ID/名称");
   }
   return ensureVehicleResourceBinding(page, productId, Number(vehicle.resourceGroupId), String(vehicle.resourceGroupName));
 }

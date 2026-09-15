@@ -44,6 +44,12 @@ export function automaticPreparationAnswer(question: AgentQuestion): string | st
     const removeTravelNode = optionId(question, /移出景点|删除.*景点|不作为景点|住宿节点.*关闭|关闭.*研究任务|无需POI|skip|close/i);
     if (removeTravelNode) return asAnswer(question, removeTravelNode);
   }
+  if (/非景点|混入.*文本|官方名|写错|错写|错字|规范/.test(text) && /景点|POI|行程/.test(text)) {
+    const normalise = optionId(question, /规范|官方名|rename|standard/i);
+    if (normalise) return asAnswer(question, normalise);
+    const removeNoise = optionId(question, /移除|删除|只保留.*(?:景点|POI)|remove|drop/i);
+    if (removeNoise) return asAnswer(question, removeNoise);
+  }
   if (/研究任务|research/i.test(text) && /闭环|处理|推进|resolve/i.test(text)) {
     const close = optionId(question, /关闭|无需POI|住宿节点|推进|skip|close/i);
     if (close) return asAnswer(question, close);

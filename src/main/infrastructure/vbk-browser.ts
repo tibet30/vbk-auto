@@ -26,13 +26,7 @@ import { fetchCurrentUserInfo } from "./current-user.js";
 import { selectUsableVbkPage, selectVbkPage } from "./vbk-page-selection.js";
 import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/contracts-types.js";
 import type { SerialisedCookie } from "./vbk-cookie-serializer.js";
-import {
-  parseCookies,
-  cookieUrl,
-  removeUrlFromCookie,
-  normaliseSameSite,
-  normaliseExpiry,
-} from "./vbk-cookie-serializer.js";
+import { parseCookies } from "./vbk-cookie-serializer.js";
 import { waitForDomText } from "./vbk-page-wait.js";
 import { attachVbkSessionFetch } from "./vbk-session-fetch-adapter.js";
 import { navigateVbkPage } from "./vbk-navigation.js";
@@ -42,6 +36,15 @@ import {
   isVbkAuthCookieSummaryComplete,
   summarizeVbkAuthCookies,
 } from "./vbk-auth-cookies.js";
+import {
+  isPinnedVbkNavigationAllowed,
+  type VbkNavigationPin,
+} from "./vbk-navigation-pin.js";
+import {
+  clearVbkViewStorage,
+  collectVbkCookies,
+  setVbkCookieOn,
+} from "./vbk-browser-cookies.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
 const nativeDialogHandledPages = new WeakSet<Page>();
@@ -129,6 +132,8 @@ export class VbkBrowser {
   private visible = false;
   /** 缓存的 bounds，用于切换视图时恢复布局。 */
   private _bounds: Electron.Rectangle = { x: 0, y: 0, width: 0, height: 0 };
+  /** 自动录入占用期间，只允许已登记产品页和创建套装入口。 */
+  private navigationPin: VbkNavigationPin | null = null;
   /** CDP 连接（Playwright 驱动自动化用），跨 partition 共用。 */
   private cdp?: Browser;
   /** fetchCurrentUserInfo 结果缓存：同一 URL 下避免重复 HTTP。login/logout 时清除。 */
@@ -756,6 +761,25 @@ export class VbkBrowser {
     this.cachedUserInfo = undefined;
   }
 
+  pinProductNavigation(pin: VbkNavigationPin): void {
+    this.navigationPin = {
+      allowCreateSetup: pin.allowCreateSetup,
+      allowedProductIds: [...pin.allowedProductIds],
+    };
+  }
+
+  addPinnedProductId(productId: string): void {
+    const id = productId.trim();
+    if (!id || !this.navigationPin) return;
+    if (!this.navigationPin.allowedProductIds.includes(id)) {
+      this.navigationPin.allowedProductIds.push(id);
+    }
+  }
+
+  clearNavigationPin(): void {
+    this.navigationPin = null;
+  }
+
   /** 给指定 view 安装导航白名单 + 外链打开走系统浏览器。 */
   private installNavigationHooks(view: WebContentsView) {
     view.webContents.setWindowOpenHandler(({ url }) => {
@@ -773,6 +797,10 @@ export class VbkBrowser {
       if (![...allowedHosts].some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) {
         event.preventDefault();
         void shell.openExternal(url);
+        return;
+      }
+      if (!isPinnedVbkNavigationAllowed(url, this.navigationPin)) {
+        event.preventDefault();
       }
     });
   }
@@ -781,48 +809,18 @@ export class VbkBrowser {
   // 内部辅助：cookie / storage 操作
   // ─────────────────────────────────────────────────────────────
 
-  /** 清空指定 view 的所有 storage 与缓存。 */
   private async clearViewStorage(view: WebContentsView) {
     this.clearCachedUserInfo();
-    await view.webContents.session.clearStorageData({
-      storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"],
-    });
-    await view.webContents.session.clearCache();
+    await clearVbkViewStorage(view);
     this.clearCachedUserInfo();
   }
 
-  /** 抽出当前活跃 view 的全部 cookies。空数组表示未登录或已被清空。 */
   private async collectCookies(view = this.view): Promise<Electron.Cookie[]> {
-    if (!view) return [];
-    try {
-      return await view.webContents.session.cookies.get({});
-    } catch {
-      return [];
-    }
+    return collectVbkCookies(view);
   }
 
-  /**
-   * 把单条 cookie（SerialisedCookie 格式，来自 DB）写回指定 view 的 session。
-   */
   private async setCookieOn(view: WebContentsView, cookie: SerialisedCookie) {
-    const url = cookieUrl(cookie);
-    if (!url) return;
-    const details: Electron.CookiesSetDetails = {
-      url,
-      name: cookie.name,
-      value: cookie.value,
-      path: cookie.path || "/",
-      secure: Boolean(cookie.secure),
-      httpOnly: Boolean(cookie.httpOnly),
-      sameSite: normaliseSameSite(cookie.sameSite),
-      expirationDate: normaliseExpiry(cookie.expires),
-    };
-    if (cookie.domain) details.domain = cookie.domain;
-    try {
-      await view.webContents.session.cookies.set(details);
-    } catch {
-      // 极少数 cookie（无效 domain / 跨 origin）写不进去，跳过。
-    }
+    await setVbkCookieOn(view, cookie);
   }
 }
 

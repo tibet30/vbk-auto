@@ -59,3 +59,16 @@ test("所有业务 IPC registrar 统一通过 secureIpcMain 注册", () => {
       `${path} 不得绕过安全门面直接导入 electron.ipcMain`);
   }
 });
+
+test("会置换 VBK 页面的登录/导航 IPC 必须先检查页面占用", () => {
+  const content = source("src/main/ipc/browser-automation-ipc.ts");
+  for (const channel of ["browser:login", "browser:logout", "browser:navigate", "browser:addLogin", "browser:switchAccount"]) {
+    const start = content.indexOf(`ipcMain.handle("${channel}"`);
+    assert.notEqual(start, -1, `${channel} 必须存在`);
+    const block = content.slice(start, start + 400);
+    assert.match(block, /assertVbkPageIdle/, `${channel} 必须在占用检查后再置换页面`);
+  }
+  const statusStart = content.indexOf(`ipcMain.handle("browser:status"`);
+  const statusBlock = content.slice(statusStart, statusStart + 400);
+  assert.doesNotMatch(statusBlock, /assertVbkPageIdle/, "browser:status 只读，不能因占用而失败");
+});

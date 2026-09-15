@@ -122,6 +122,56 @@ test("替换掉 suggestPoi 失败景点后，历史 POI 待办会按当前行程
   }, product), false);
 });
 
+test("替换掉暂停营业景点后，历史 POI 待办会按当前行程自动收敛", () => {
+  const product = {
+    itinerary: [{
+      day: 1,
+      spots: [
+        { name: "成都大熊猫繁育研究基地", poiName: "成都大熊猫繁育研究基地", poiId: 76342 },
+        { name: "锦里", poiName: "锦里古街", poiId: 10558940 },
+      ],
+    }],
+  };
+
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "核查 金沙遗址博物馆 的 VBK POI 映射",
+    type: "vbk",
+    detail: "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点",
+  }, product), true);
+  assert.equal(isResearchTaskSatisfiedByProduct({
+    label: "核查 金沙遗址博物馆 的 VBK POI 映射",
+    type: "vbk",
+    detail: "历史遗留待处理",
+  }, product), false);
+});
+
+test("刷新待处理事项会带 detail 判断并清理已替换的暂停营业 POI task", () => {
+  const db = withDb();
+  const product = db.createProduct({ destination: "成都", days: 2, productForm: "freeTravel" });
+  db.updateProduct(product.id, {
+    ...product.product,
+    itinerary: [{
+      day: 1,
+      spots: [{ name: "成都大熊猫繁育研究基地", poiName: "成都大熊猫繁育研究基地", poiId: 76342 }],
+    }],
+  });
+  const stalePoiId = db.addResearchTask(product.id, {
+    label: "核查 金沙遗址博物馆 的 VBK POI 映射",
+    type: "vbk",
+    detail: "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点",
+  });
+  const ordinaryPoiId = openTask(db, product.id, "核查 金沙遗址公园 的 VBK POI 映射");
+
+  const result = refreshSatisfiedResearchTasks(db, product.id);
+  assert.equal(result.updated, 1);
+  assert.deepEqual(result.taskIds, [stalePoiId]);
+
+  const tasks = new Map(db.getProduct(product.id)!.researchTasks.map((task) => [task.id, task]));
+  assert.equal(tasks.get(stalePoiId)?.state, "confirmed");
+  assert.equal(tasks.get(stalePoiId)?.status, "succeeded");
+  assert.equal(tasks.get(ordinaryPoiId)?.state, "researching");
+});
+
 test("替换掉非游览节点后，历史 POI 待办会按当前行程自动收敛", () => {
   const product = {
     itinerary: [{ day: 1, spots: [{ name: "日喀则市非物质文化中心", poiName: "日喀则非遗博物馆", poiId: 12345 }] }],

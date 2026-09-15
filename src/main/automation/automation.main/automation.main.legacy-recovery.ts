@@ -22,6 +22,7 @@ import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import type { AutomationRun, ProductDetail } from "../../../shared/contracts.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
+import { writeAutomationProduct } from "./automation.main.persist.js";
 
 /**
  * 历史 bug 留下的"截图失败 = 业务失败"判定。所有条件必须同时满足：
@@ -136,7 +137,7 @@ export async function recoverLegacyScreenshotFalseFailure(
       log(`恢复路径无法获取页面：${message}（业务已完成，run 状态不受影响）`, "warning");
       next.screenshot = undefined;
       ctx.db.saveAutomation(localProductId, next);
-      ctx.db.updateProduct(localProductId, product.product, "draft_saved");
+      writeAutomationProduct(ctx, localProductId, product.product, "draft_saved");
       ctx.emit(localProductId);
       return true;
     }
@@ -144,7 +145,7 @@ export async function recoverLegacyScreenshotFalseFailure(
     await finalizeRunWithScreenshot(next, saveScreenshot, productId, page, log);
     log("产品草稿已保存，未提交审核、未发布。", "warning");
     ctx.db.saveAutomation(localProductId, next);
-    ctx.db.updateProduct(localProductId, product.product, "draft_saved");
+    writeAutomationProduct(ctx, localProductId, product.product, "draft_saved");
     ctx.emit(localProductId);
     return true;
   } finally {

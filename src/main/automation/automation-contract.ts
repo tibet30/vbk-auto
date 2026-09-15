@@ -27,7 +27,7 @@
 
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
-import { requiresGuide, supportsSmallGroupSettings } from "../../shared/product-form.js";
+import { productNeedsVehicleResource, requiresGuide, supportsSmallGroupSettings } from "../../shared/product-form.js";
 import { readCover } from "../operations/cover-info.js";
 import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import {
@@ -35,7 +35,6 @@ import {
   hasValidItinerary,
   hasValidPresentationRecommendations,
   hasValidReleaseCeiling,
-  isPrivateTour,
   textValue,
   asObject,
 } from "./automation-contract.helpers.js";
@@ -240,8 +239,8 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     label: "用车资源组",
     phase: "vehicleResource",
     source: "vbk-runtime",
-    detail: "私家团需先匹配并回填 VBK 资源组。",
-    check: (product) => isPrivateTour(product) ? hasSatisfiedVehicleResource(product) : true,
+    detail: "已配置用车的产品需先匹配并回填 VBK 资源组。",
+    check: (product) => productNeedsVehicleResource(product) ? hasSatisfiedVehicleResource(product) : true,
   },
   {
     path: "sales.guideIncluded",

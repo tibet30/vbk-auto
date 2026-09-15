@@ -20,6 +20,7 @@ import {
 import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
 import { productNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
+import { writeAutomationProduct } from "./automation.main.persist.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
@@ -162,7 +163,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             disambiguator: ctx.disambiguator,
             productId: productId ?? "",
           }),
-          dbUpdate: (id, updatedProduct, status) => ctx.db.updateProduct(id, updatedProduct, status),
+          dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
         }),
         package: () => ensurePackageApi(page, productData, productId!),
         pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!),
@@ -179,6 +180,9 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             checkpoint: run.trafficLine,
             onCheckpoint: (checkpoint) => {
               run.trafficLine = checkpoint;
+              for (const child of checkpoint.children) {
+                if (child.childProductId) ctx.browser.addPinnedProductId?.(child.childProductId);
+              }
               persist();
             },
             disambiguator: ctx.disambiguator,
@@ -195,7 +199,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             const refreshedSupplierCode = refreshSupplierProductCodeForPlatformWrite(productData, butlerSelection, productId);
             if (refreshedSupplierCode) {
               product.product = productData as unknown as Record<string, unknown>;
-              ctx.db.updateProduct(localProductId, product.product, product.status);
+              writeAutomationProduct(ctx, localProductId, product.product, product.status);
               const supplierCode = String((productData.basicInfo as Record<string, unknown>).supplierProductCode);
               log(`供应商产品编号已按本次写入时间重算：${refreshedSupplierCode}`);
               if (basicInfoSaved) {
@@ -245,7 +249,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
                   hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
                   diamond: hr.diamond as 3 | 4 | 5,
                 };
-                ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "automating");
+                writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "automating");
               }
               if (hr.source === "ctrip" && hr.resourceName) {
                 productData.operations!.hotelResource = {
@@ -256,7 +260,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
                   candidates: productData.itinerary.find((day: any) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
                   dailyCandidates: (hr as any).dailyCandidates,
                 };
-                ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "automating");
+                writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "automating");
               }
             }
             return result;
@@ -289,7 +293,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           run.status = "failed";
           run.phases[phaseIndex].status = "failed";
           run.currentPhase = phaseName;
-          ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "blocked");
+          writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "blocked");
           break;
         case "cancelled":
           ctx.markCancelled(localProductId, run, persist);
@@ -307,12 +311,12 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           if (run.status === "queued") {
             const nextPhase = run.phases.find((phase) => phase.status === "pending")?.phase;
             log(`阶段 ${phaseName} 已通过远端回读；${nextPhase ? `可从 ${nextPhase} 继续剩余录入。` : "等待继续录入。"}`);
-            ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "review");
+            writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "review");
           }
           if (run.status === "succeeded" && !ctx.agentControlled) {
             await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
             log("产品草稿已保存，未提交审核、未发布。", "warning");
-            ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "draft_saved");
+            writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "draft_saved");
           }
           break;
         }
@@ -326,7 +330,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       run.phases[phaseIndex].status = "failed";
       run.currentPhase = phaseName;
       log(error instanceof Error ? error.message : "重新执行发生未知错误", "error");
-      ctx.db.updateProduct(localProductId, productData as unknown as Record<string, unknown>, "blocked");
+      writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "blocked");
       persist();
       throw error;
     }

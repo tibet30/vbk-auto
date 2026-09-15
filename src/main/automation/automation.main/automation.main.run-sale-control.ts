@@ -9,6 +9,7 @@ import { parseProduct } from "../schema/schema.js";
 import { prepareSaleControlRetry } from "../phase-retry.js";
 import { runPhaseWithRecovery } from "../recovery/recovery.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
+import { writeAutomationProduct } from "./automation.main.persist.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
 
 type ConfigureProductShell = (page: any, product: ReturnType<typeof parseProduct>) => Promise<string>;
@@ -39,7 +40,7 @@ export async function runSaleControlPhase(
 
   ctx.db.saveAutomation(localProductId, run);
   if (normalizedProductType.changed) {
-    ctx.db.updateProduct(localProductId, product.product, "automating");
+    writeAutomationProduct(ctx, localProductId, product.product, "automating");
     log("旧产品类型已在销售控制重试前归一为境内短途，避免缺少大交通卡片导致校验失败。", "warning");
   } else {
     ctx.db.setProductLifecycle(localProductId, { status: "automating" });

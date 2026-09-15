@@ -180,7 +180,7 @@ function splitSpots(value: string): string[] {
  */
 function trimPlanningControlTail(value: string): string {
   return value.replace(
-    /(?:[\n。；;]\s*)+(?:端到端.*测试|资料准备|期望在资料准备|如需处理|无需(?:再)?询问用户|不需要(?:再)?询问用户|请读取刚创建的产品|任何\s*VBK\s*写入)[\s\S]*$/u,
+    /(?:[\n。；;]\s*)+(?:端到端.*(?:测试|验证|复验)|本次已授权|重新创建新产品|修复共享问题|资料准备|期望在资料准备|如需处理|无需(?:再)?询问用户|不需要(?:再)?询问用户|请读取刚创建的产品|任何\s*VBK\s*写入)[\s\S]*$/u,
     "",
   );
 }

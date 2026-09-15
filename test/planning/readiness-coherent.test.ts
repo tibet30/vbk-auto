@@ -102,7 +102,7 @@ test("缺少 vehicleResource 且存在车辆 research task 时只生成一个车
   const vehicleBlockers = blockers.filter((b) => /用车|车辆|资源组/.test(`${b.label} ${b.detail}`));
   assert.equal(vehicleBlockers.length, 1);
   assert.equal(vehicleBlockers[0].label, "用车资源组");
-  assert.match(vehicleBlockers[0].detail, /私家团需要在 VBK 核查并填写现有用车资源组 ID/);
+  assert.match(vehicleBlockers[0].detail, /已配置用车的产品需要在 VBK 核查并填写现有用车资源组 ID/);
 });
 
 test("release.submitReview=true 阻断自动化；false 不阻断", () => {

@@ -35,6 +35,7 @@ import {
   buildVehicleResourceQuery,
   resolveVehicleResource,
 } from "./vehicle-resource.js";
+import { productNeedsVehicleResource } from "../../shared/product-form.js";
 
 function safeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -63,7 +64,7 @@ function positiveNumber(value: unknown): number | null {
 /**
  * 业务闸门：当前产品是不是「该跑用车资源组」？
  * 判定规则：
- *   - productForm 必须是 privateTour；
+ *   - 产品形态或 operations 明确需要用车资源；
  *   - basicInfo.days >= 1；
  *   - operations.pickupCity 或 basicInfo.meetingCity / destinationCity 至少有一项非空；
  *   - operations.vehicleResource.resourceGroupId 还没被回填（已匹配过的不要重复跑）；
@@ -71,8 +72,7 @@ function positiveNumber(value: unknown): number | null {
  * 不依赖 researchTasks —— 用户没有生成用车研究任务 / 已人工 accept 时，本函数仍然返回 true。
  */
 export function shouldRunVehicleResourceResolution(product: Record<string, unknown>): boolean {
-  const sales = safeObject(product.sales);
-  if (textValue(sales?.productForm) !== "privateTour") return false;
+  if (!productNeedsVehicleResource(product)) return false;
   const basic = safeObject(product.basicInfo);
   const days = positiveInteger(basic?.days);
   if (!days) return false;
@@ -236,7 +236,7 @@ export async function applyAutoVehicleResourceTrigger(args: {
   const product = args.product;
   const productData = product.product;
   if (!shouldRunVehicleResourceResolution(productData)) {
-    return { nextProduct: product, outcome: { written: false, reason: "产品数据未指向私家团用车，跳过自动触发" } };
+    return { nextProduct: product, outcome: { written: false, reason: "产品数据未配置用车资源，跳过自动触发" } };
   }
 
   // 估算并持久化 requestedTotalCost（仅这一项）。

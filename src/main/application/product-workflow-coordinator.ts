@@ -16,6 +16,8 @@ const WORKFLOW_LABELS: Record<ProductWorkflow, string> = {
   manual: "运营手工编辑",
 };
 
+const VBK_PAGE_WORKFLOWS = new Set<ProductWorkflow>(["automation", "resource"]);
+
 export class ProductWorkflowCoordinator {
   private readonly active = new Map<string, ProductWorkflow>();
   /**
@@ -24,9 +26,15 @@ export class ProductWorkflowCoordinator {
    * 链只串行真正占用 VBK 页面的操作；纯 AI 规划仍可跨产品并行。
    */
   private vbkPageTail: Promise<void> = Promise.resolve();
+  /** 当前长占用 VBK 页面的产品（automation / resource）；登录切换必须让路。 */
+  private pageOwner?: { localProductId: string; workflow: ProductWorkflow };
 
   activeWorkflow(localProductId: string): ProductWorkflow | undefined {
     return this.active.get(localProductId);
+  }
+
+  vbkPageOwner(): { localProductId: string; workflow: ProductWorkflow } | undefined {
+    return this.pageOwner;
   }
 
   assertIdle(localProductId: string, requested: ProductWorkflow): void {
@@ -37,16 +45,28 @@ export class ProductWorkflowCoordinator {
     );
   }
 
+  assertVbkPageIdle(action: string): void {
+    if (!this.pageOwner) return;
+    throw new Error(
+      `${WORKFLOW_LABELS[this.pageOwner.workflow]}正在占用 VBK 页面，不能${action}`,
+    );
+  }
+
   async runExclusive<T>(
     localProductId: string,
     workflow: ProductWorkflow,
     task: () => Promise<T>,
   ): Promise<T> {
     this.assertIdle(localProductId, workflow);
+    if (VBK_PAGE_WORKFLOWS.has(workflow)) this.assertVbkPageIdle(`启动${WORKFLOW_LABELS[workflow]}`);
     this.active.set(localProductId, workflow);
+    if (VBK_PAGE_WORKFLOWS.has(workflow)) this.pageOwner = { localProductId, workflow };
     try {
       return await task();
     } finally {
+      if (this.pageOwner?.localProductId === localProductId && this.pageOwner.workflow === workflow) {
+        this.pageOwner = undefined;
+      }
       if (this.active.get(localProductId) === workflow) this.active.delete(localProductId);
     }
   }

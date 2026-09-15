@@ -225,6 +225,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
   });
   return () => {
   context.automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));
+  context.automation.setProductMutations(context.productMutations);
   context.automation.setAgentWriteGuard(async (localProductId, phase) => {
     const login = await context.browser.status(true);
     const product = db.getProduct(localProductId);

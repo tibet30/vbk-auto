@@ -58,13 +58,22 @@ export async function ensureTrafficLineClauses(
       );
       const central = record(productClause.centralDataDto);
       if (!central) throw new Error(`子产品条款页签 ${tabEnum} 缺少 centralDataDto。`);
-      if (tabEnum === 1) assertTrafficResourceReady(central, variant);
-      const clausePackage = tabEnum === 1
-        ? await waitForTrafficLineClausePackage(
-          () => readClausePackage(page, central),
+      const ready = tabEnum === 1
+        ? await waitForTrafficLineFirstTabReadiness(
+          async () => {
+            const latest = await postTrafficLineSoa(
+              page, "15638", "listProductClauses", { productId, tabEnum }, `重读子产品条款页签 ${tabEnum}`,
+            );
+            const latestCentral = record(latest.centralDataDto);
+            if (!latestCentral) throw new Error(`子产品条款页签 ${tabEnum} 缺少 centralDataDto。`);
+            return latestCentral;
+          },
+          (latestCentral) => readClausePackage(page, latestCentral),
           variant,
         )
-        : await readClausePackage(page, central);
+        : { central, clausePackage: await readClausePackage(page, central) };
+      const readyCentral = ready.central;
+      const clausePackage = ready.clausePackage;
       const existing = selectedClauseItems(clausePackage);
       let desired = tabEnum === 1
         ? desiredFirstTabClauses(clausePackage, existing, variant)
@@ -76,10 +85,10 @@ export async function ensureTrafficLineClauses(
       const saved = await postTrafficLineRaw(
         page,
         "https://online.ctrip.com/restapi/soa2/20046/saveClausePackage",
-        buildTrafficLineClauseSaveRequest(central, desired),
+        buildTrafficLineClauseSaveRequest(readyCentral, desired),
         `保存子产品条款页签 ${tabEnum}`,
       );
-      const clausePackageId = text(saved.clausePackageId) || text(central.clausePackageId);
+      const clausePackageId = text(saved.clausePackageId) || text(readyCentral.clausePackageId);
       if (!clausePackageId) throw new Error(`保存子产品条款页签 ${tabEnum} 后缺少 clausePackageId。`);
       // 与当前 VBK 条款页一致：条款草稿由 20698 创建，再把刚保存的包绑定。
       await postTrafficLineSoa(page, "20698", "createProductDraft", {
@@ -157,6 +166,43 @@ export async function waitForTrafficLineClausePackage(
     }
   }
   throw lastError instanceof Error ? lastError : new Error("子产品条款尚未生成。");
+}
+
+/**
+ * 交通资源提交完成后，15638 的资源标记和 20046 的条款包会分别异步物化。
+ * 两者都只做只读等待；任一项未生成时都不能提前保存条款包。
+ */
+export async function waitForTrafficLineFirstTabReadiness(
+  readCentral: () => Promise<JsonRecord>,
+  readClausePackage: (central: JsonRecord) => Promise<JsonRecord>,
+  variant: TrafficLineVariant,
+  options: { maxReads?: number; intervalMs?: number; sleep?: (milliseconds: number) => Promise<void> } = {},
+): Promise<{ central: JsonRecord; clausePackage: JsonRecord }> {
+  const maxReads = Math.max(1, options.maxReads ?? 20);
+  const intervalMs = Math.max(0, options.intervalMs ?? 1_500);
+  const sleep = options.sleep ?? ((milliseconds: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= maxReads; attempt += 1) {
+    const central = await readCentral();
+    try {
+      assertTrafficResourceReady(central, variant);
+      const clausePackage = await readClausePackage(central);
+      desiredFirstTabClauses(clausePackage, selectedClauseItems(clausePackage), variant);
+      return { central, clausePackage };
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!isPendingTrafficLineFirstTabReadiness(message) || attempt === maxReads) throw error;
+      await sleep(intervalMs);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("子产品条款页签 1 尚未生成交通资源条款。");
+}
+
+function isPendingTrafficLineFirstTabReadiness(message: string): boolean {
+  return /资源回读尚未生成(?:飞机|火车)去返程条款/.test(message)
+    || /无法唯一确认(?:去程项|返程项|儿童票说明|接送机条款)（候选 0 项）/.test(message);
 }
 
 export function buildSaveProductClausesRequest(productId: string, packageId: string, tabEnum: number): JsonRecord {

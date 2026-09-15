@@ -75,3 +75,46 @@ test("共享 VBK 页面任务失败后仍释放队列", async () => {
   );
   assert.equal(await coordinator.runVbkPageExclusive(async () => "next"), "next");
 });
+
+test("automation / resource 占用 VBK 页面时，禁止另一产品占用或切换账号", async () => {
+  const coordinator = new ProductWorkflowCoordinator();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const automation = coordinator.runExclusive("p-1", "automation", async () => {
+    await gate;
+    return "done";
+  });
+
+  assert.equal(coordinator.vbkPageOwner()?.localProductId, "p-1");
+  assert.throws(
+    () => coordinator.assertVbkPageIdle("切换账号"),
+    /VBK 自动录入正在占用 VBK 页面，不能切换账号/,
+  );
+  await assert.rejects(
+    coordinator.runExclusive("p-2", "resource", async () => "nope"),
+    /VBK 自动录入正在占用 VBK 页面/,
+  );
+
+  release();
+  assert.equal(await automation, "done");
+  assert.equal(coordinator.vbkPageOwner(), undefined);
+  coordinator.assertVbkPageIdle("切换账号");
+  assert.equal(await coordinator.runExclusive("p-2", "resource", async () => "ok"), "ok");
+});
+
+test("纯 AI / planning 不占用 VBK 页面，登录与资源核查仍可进行", async () => {
+  const coordinator = new ProductWorkflowCoordinator();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const planning = coordinator.runExclusive("p-1", "planning", async () => {
+    await gate;
+    return "planned";
+  });
+
+  assert.equal(coordinator.vbkPageOwner(), undefined);
+  coordinator.assertVbkPageIdle("切换账号");
+  assert.equal(await coordinator.runExclusive("p-2", "resource", async () => "checked"), "checked");
+
+  release();
+  assert.equal(await planning, "planned");
+});

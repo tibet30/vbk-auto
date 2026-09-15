@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PRODUCT_FORM_LABELS, PRODUCT_FORMS, defaultDailyTransport, isPrivateTourForm, isProductForm, requiresGuide, requiresVehicleResource, supportsSmallGroupSettings, toVbkDailyUseCar } from "../../src/shared/product-form.js";
+import { PRODUCT_FORM_LABELS, PRODUCT_FORMS, defaultDailyTransport, isPrivateTourForm, isProductForm, productNeedsVehicleResource, requiresGuide, requiresVehicleResource, supportsSmallGroupSettings, toVbkDailyUseCar } from "../../src/shared/product-form.js";
 
 test("产品形态契约包含四类形态及稳定中文标签", () => {
   assert.deepEqual(PRODUCT_FORMS, ["privateTour", "groupTour", "freeTravel", "semiSelfGuided"]);
@@ -42,4 +42,19 @@ test("当天用车映射到 VBK 日级 useCar，缺省为包车", () => {
   assert.deepEqual(toVbkDailyUseCar("shared"), { key: "P", name: "拼车" });
   assert.deepEqual(toVbkDailyUseCar("charter"), { key: "B", name: "包车" });
   assert.deepEqual(toVbkDailyUseCar(undefined), { key: "B", name: "包车" });
+});
+
+test("产品级用车资源判断不把自由行空配置误判为需要车辆资源", () => {
+  assert.equal(productNeedsVehicleResource({
+    sales: { productForm: "freeTravel" },
+    operations: { transport: "none", vehicleResource: {} },
+  }), false);
+  assert.equal(productNeedsVehicleResource({
+    sales: { productForm: "groupTour" },
+    operations: { transport: "charter", vehicleResource: {} },
+  }), false);
+  assert.equal(productNeedsVehicleResource({
+    sales: { productForm: "freeTravel" },
+    operations: { transport: "none", vehicleResource: { requestedTotalCost: 800 } },
+  }), true);
 });

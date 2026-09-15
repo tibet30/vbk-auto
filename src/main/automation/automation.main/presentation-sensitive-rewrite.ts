@@ -7,6 +7,7 @@ import { PresentationSensitiveWordsError } from "../ctrip/presentation/save-moni
 import { fillAndSavePresentation } from "../ctrip/presentation/main.js";
 import { buildVbkCopyPolicyPrompt, findVbkCopyBadCase } from "../../planning/vbk-copy-policy.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
+import { writeAutomationProduct } from "./automation.main.persist.js";
 
 export type PresentationCopyPath =
   | "recommendation"
@@ -121,7 +122,7 @@ export async function fillPresentationWithSensitiveRewrite(args: {
         product: args.product,
       });
       applySensitivePresentationRewrite(args.product, response, affectedPaths, error.sensitiveWords);
-      args.ctx.db.updateProduct(args.localProductId, args.product, "automating");
+      writeAutomationProduct(args.ctx, args.localProductId, args.product, "automating");
       args.ctx.emit(args.localProductId);
       args.log(`AI 已重写 ${affectedPaths.join("、")}，正在重新录入产品图文`, "warning");
     }

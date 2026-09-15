@@ -9,6 +9,7 @@
 import { parseProduct } from "../automation/schema/schema.js";
 import { normaliseProductDraft } from "../data/product-normalize.js";
 import type { AiResponse } from "../../shared/contracts.js";
+import { isAiWritablePatchPath } from "../../shared/ai-writable-paths.js";
 import { logWarn } from "../../shared/log-timestamp.js";
 
 type PatchOperation = NonNullable<AiResponse["patch"]>[number];
@@ -94,6 +95,9 @@ function applyPatchOperation(product: Record<string, unknown>, operation: PatchO
   // 必须由 VBK 或人工填充；AI 写入一律拒绝。
   if (isForbiddenPath(operation.path)) {
     throw new Error(`产品变更路径被禁写：${operation.path}`);
+  }
+  if (!isAiWritablePatchPath(operation.path)) {
+    throw new Error(`产品变更路径不在 AI 可写路径：${operation.path}`);
   }
   assertAllowedVehicleResourceValue(operation);
   const segments = operation.path.split("/").slice(1).map(decodeURIComponent);

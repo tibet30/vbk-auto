@@ -1,7 +1,7 @@
 import type { PlanningNodeId } from "../../shared/contracts-planning.js";
 import type { PreparationMajorStage, PostApprovalDeterministicItem } from "../../shared/contracts-preparation.js";
 import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
-import { requiresVehicleResource } from "../../shared/product-form.js";
+import { productNeedsVehicleResource } from "../../shared/product-form.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { normaliseTrafficLineConfig } from "../../shared/contracts-traffic-line.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
@@ -101,10 +101,10 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
     }
   }
 
-  if (requiresVehicleResource(sales?.productForm) && !hasSatisfiedVehicleResource(product)) {
+  if (productNeedsVehicleResource(product) && !hasSatisfiedVehicleResource(product)) {
     gaps.push({
       label: "用车资源组",
-      detail: "私家团需要在本地准备阶段匹配用车资源组。",
+      detail: "已配置用车的产品需要在本地准备阶段匹配用车资源组。",
       stage: "completion",
       node: "vehicleResource",
     });

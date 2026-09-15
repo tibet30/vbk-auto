@@ -7,7 +7,7 @@
  * 本文件只做类型声明，不引入运行时依赖；具体实现见 ./automation.main.class.ts 等。
  */
 
-import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
+import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ContactCardSelection, ProductSummary } from "../../../shared/contracts.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 
@@ -51,4 +51,5 @@ export interface AutomationRunContext {
   cancellationRequested: Set<string>;
   ensureBrowserHasBounds: () => void;
   runVbkPageExclusive: <T>(task: () => Promise<T>, phase?: string) => Promise<T>;
+  persistProduct?: (localProductId: string, product: Record<string, unknown>, status?: ProductSummary["status"]) => void;
 }

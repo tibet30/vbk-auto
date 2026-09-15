@@ -8,6 +8,7 @@ import {
   ensureTrafficLineClauses,
   resolveChildTransportClauseRequirements,
   selectedClauseItems,
+  waitForTrafficLineFirstTabReadiness,
   waitForTrafficLineClausePackage,
 } from "../../src/main/automation/ctrip/traffic-line/clauses.ts";
 import {
@@ -94,6 +95,30 @@ test("资源提交后条款 schema 延迟物化时只读等待，不会提前保
     return response;
   }, "flightRoundTrip", { intervalMs: 0, sleep: async () => undefined });
   assert.equal(result, ready);
+  assert.equal(reads, 3);
+});
+
+test("资源提交后页签资源标记延迟物化时只读等待，不会提前保存不完整条款", async () => {
+  const ready = childClauseSchema("flightRoundTrip");
+  let reads = 0;
+  const result = await waitForTrafficLineFirstTabReadiness(
+    async () => {
+      reads += 1;
+      return {
+        clausePackageId: 9001,
+        additionalInfoDto: { firstClassTypeIds: [1] },
+        filterConditionDto: {
+          resourceConfigDto: reads >= 3
+            ? { isIncludeSystemFlight: "T", hasOutWardTraffic: "T", hasReturnTraffic: "T" }
+            : { isIncludeSystemFlight: "F", hasOutWardTraffic: "F", hasReturnTraffic: "F" },
+        },
+      };
+    },
+    async () => ready,
+    "flightRoundTrip",
+    { intervalMs: 0, sleep: async () => undefined },
+  );
+  assert.equal(result.clausePackage, ready);
   assert.equal(reads, 3);
 });
 

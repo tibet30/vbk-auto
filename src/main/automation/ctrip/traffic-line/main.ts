@@ -15,6 +15,7 @@ import {
   trafficLineResourceCheckDates,
 } from "./segments.js";
 import { ensureVehicleResourceBinding, ensureVehicleResourceGroupDraft } from "../vehicle-resource-api.js";
+import { productNeedsVehicleResource } from "../../../../shared/product-form.js";
 import { ensureTrafficLineItinerary } from "./itinerary.js";
 import { ensureTrafficLineClauses } from "./clauses.js";
 import {
@@ -50,6 +51,8 @@ export interface TrafficLineApiResult {
   children: Array<{ variant: TrafficLineVariant; lineDescription: string; childProductId: string; verified: TrafficLineChildReadback }>;
   skipped?: Array<{ variant: TrafficLineVariant; lineDescription: string; reason: string }>;
 }
+
+const STALLED_SEGMENT_SUBMIT_RETRY_DELAY_MS = 10 * 60 * 1_000;
 
 /**
  * 可恢复的完整子产品流水线：站点规划 → 关系 → 图文 → 资源 → 行程 → 条款 →
@@ -190,14 +193,13 @@ export async function ensureTrafficLineApi(
       if (recoveredSubmit) {
         options.onStatus?.(`交通子产品 ${relationship.productId} 上次班期校验已完成，已通过正式资源回读。`);
       }
-      const replacingLegacyPendingSubmit = submitRecovery === "pending"
-        && previous?.validationScheduleCount === undefined
-        && !previous?.validationRecoveryResubmittedAt;
-      if (submitRecovery === "pending" && !replacingLegacyPendingSubmit) {
+      const replacingStalledPendingSubmit = submitRecovery === "pending"
+        && trafficLinePendingSubmitNeedsOneRecoveryRetry(previous, options.now);
+      if (submitRecovery === "pending" && !replacingStalledPendingSubmit) {
         throw new Error("子产品上一次资源提交仍在 VBK 异步核验；本次仅做了只读查询，未重复提交，请稍后从 trafficLine 继续。");
       }
-      if (replacingLegacyPendingSubmit) {
-        options.onStatus?.(`交通子产品 ${relationship.productId} 的旧版全量班期校验长期未收口，正在用 ${resourceCheckDates.length} 个代表性真实班期受控重提一次。`);
+      if (replacingStalledPendingSubmit) {
+        options.onStatus?.(`交通子产品 ${relationship.productId} 的班期校验已超过 10 分钟仍未收口，正在用 ${resourceCheckDates.length} 个代表性真实班期受控重提一次。`);
       }
       if (!recoveredSubmit) {
         if (!resourceCheckDates.length) {
@@ -222,7 +224,7 @@ export async function ensureTrafficLineApi(
               validationScheduleCount: resourceCheckDates.length,
               validationDepartureCityCount: departureCityCount,
               validationSubmittedAt: submittedAt,
-              validationRecoveryResubmittedAt: replacingLegacyPendingSubmit ? submittedAt : progress.validationRecoveryResubmittedAt,
+              validationRecoveryResubmittedAt: replacingStalledPendingSubmit ? submittedAt : progress.validationRecoveryResubmittedAt,
             };
             options.onChildProgress?.(progress);
           },
@@ -247,24 +249,19 @@ export async function ensureTrafficLineApi(
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      if (isUnavailableTrafficResourceFailure(reason, target.variant)) {
-        const skippedProgress = {
-          ...progress,
-          skipped: true,
-          failedStage: undefined,
-          failureReason: reason,
-        };
-        options.onChildProgress?.(skippedProgress);
-        skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
-        continue;
-      }
       options.onChildProgress?.({
         ...progress,
-        failedStage: nextStage(progress.completedStages),
+        skipped: true,
+        failedStage: undefined,
         failureReason: reason,
       });
-      throw error;
+      skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
+      options.onStatus?.(`${target.lineDescription}子产品未完成，已跳过继续处理其它子产品：${reason}`);
+      continue;
     }
+  }
+  if (!pending.length) {
+    return { enabled: true, children: [], skipped };
   }
   let verifiedChildren: TrafficLineChildReadback[];
   try {
@@ -282,14 +279,17 @@ export async function ensureTrafficLineApi(
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     for (const child of pending) {
+      const progress = child.snapshot();
       options.onChildProgress?.({
-        ...child.snapshot(),
+        ...progress,
         verified: false,
-        failedStage: "finalReadback",
+        skipped: true,
+        failedStage: undefined,
         failureReason: reason,
       });
+      skipped.push({ variant: child.variant, lineDescription: child.lineDescription, reason });
     }
-    throw error;
+    return { enabled: true, children: [], skipped };
   }
   const children: TrafficLineApiResult["children"] = [];
   for (const [index, child] of pending.entries()) {
@@ -308,16 +308,15 @@ export async function ensureTrafficLineApi(
   return { enabled: true, children, skipped };
 }
 
-/** 私家团交通子产品独立维护资源段，必须在自己的草稿首段挂上用车组。 */
+/** 配置了用车的交通子产品独立维护资源段，必须在自己的草稿首段挂上用车组。 */
 async function ensureTrafficLineVehicleDraft(page: TrafficLinePage, productId: string, product: Record<string, unknown> | undefined) {
-  const sales = product?.sales as Record<string, unknown> | undefined;
-  if (sales?.productForm !== "privateTour") return;
+  if (!productNeedsVehicleResource(product)) return;
   const operations = product?.operations as Record<string, unknown> | undefined;
   const vehicle = operations?.vehicleResource as Record<string, unknown> | undefined;
   const groupId = Number(vehicle?.resourceGroupId);
   const groupName = String(vehicle?.resourceGroupName ?? "").trim();
   if (!Number.isInteger(groupId) || groupId <= 0 || !groupName) {
-    throw new Error("私家团交通子产品缺少可绑定的用车资源组。");
+    throw new Error("交通子产品缺少可绑定的用车资源组。");
   }
   await ensureVehicleResourceGroupDraft(page, productId, groupId, groupName, { verifyDraft: true });
 }
@@ -327,14 +326,13 @@ async function ensureTrafficLineVehicleDraft(page: TrafficLinePage, productId: s
  * 绑定用车组、提交并通过正式段回读；只保留草稿内的成功不能作为完成证据。
  */
 async function ensureTrafficLineVehicleBinding(page: TrafficLinePage, productId: string, product: Record<string, unknown> | undefined) {
-  const sales = product?.sales as Record<string, unknown> | undefined;
-  if (sales?.productForm !== "privateTour") return;
+  if (!productNeedsVehicleResource(product)) return;
   const operations = product?.operations as Record<string, unknown> | undefined;
   const vehicle = operations?.vehicleResource as Record<string, unknown> | undefined;
   const groupId = Number(vehicle?.resourceGroupId);
   const groupName = String(vehicle?.resourceGroupName ?? "").trim();
   if (!Number.isInteger(groupId) || groupId <= 0 || !groupName) {
-    throw new Error("私家团交通子产品缺少可绑定的用车资源组。");
+    throw new Error("交通子产品缺少可绑定的用车资源组。");
   }
   await ensureVehicleResourceBinding(page, productId, groupId, groupName, { submitDraft: true });
 }
@@ -348,6 +346,21 @@ export function invalidateTrafficLineFinalReadback(progress: TrafficLineChildPro
     failedStage: undefined,
     failureReason: undefined,
   };
+}
+
+/**
+ * 已确认持续 pending 的提交可在十分钟后受控重提一次。首次重提会留下时间戳，
+ * 后续仍未完成时只能继续只读查询，避免叠加多个 submitSegments 写请求。
+ */
+export function trafficLinePendingSubmitNeedsOneRecoveryRetry(
+  progress: TrafficLineChildProgress | undefined,
+  now: Date | undefined,
+): boolean {
+  if (!progress || progress.validationRecoveryResubmittedAt) return false;
+  if (progress.validationScheduleCount === undefined) return true;
+  const submittedAt = Date.parse(progress.validationSubmittedAt ?? "");
+  if (!Number.isFinite(submittedAt)) return false;
+  return (now ?? new Date()).getTime() - submittedAt >= STALLED_SEGMENT_SUBMIT_RETRY_DELAY_MS;
 }
 
 export function endpointPlanCanWrite(
@@ -376,8 +389,6 @@ export function isUnavailableTrafficResourceFailure(reason: string, variant?: Tr
   // 这不是会话或协议失败；保留子产品记录并让其它交通方式继续完成。
   return variant === "trainRoundTrip" && (
     /出发城市为空\s*[,，]?\s*不能打包/.test(reason)
-    || /资源回读尚未生成火车去返程条款/.test(reason)
-    || /火车票条款未分别生成去程与返程条款/.test(reason)
   );
 }
 

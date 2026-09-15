@@ -1,4 +1,5 @@
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
+import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { getProductBaseInfoApi } from "./basic-info/api.js";
@@ -98,20 +99,21 @@ export async function runProductPreflightApi(page: any, product: any, productId:
     pricingEvidence = { firstDate: dates[0], remoteRowCount: rows.length };
   }
 
-  const segmentPayload = await getProductSegmentsApi(page, productId);
-  const segments = segmentsFromPayload(segmentPayload);
-  if (!segments.length) throw new Error("资源预检未返回任何行程段");
   const hotelResource = record(record(product.operations).hotelResource);
   const hasPlannedHotel = product.itinerary.some((day: any) => hasItineraryHotelStay(day?.hotel));
+  const needsVehicle = productNeedsVehicleResource(product);
+  const segmentPayload = hasPlannedHotel || needsVehicle ? await getProductSegmentsApi(page, productId) : null;
+  const segments = segmentPayload ? segmentsFromPayload(segmentPayload) : [];
+  if ((hasPlannedHotel || needsVehicle) && !segments.length) throw new Error("母产品资源预检未返回任何行程段");
   // 老数据可能把已解析的携程候选标成 nonPlatform；只要行程明确含住宿，
   // 就必须以平台酒店资源回读为准，不能因为旧来源标签跳过核验。
   const hotel = hasPlannedHotel
     ? await ensureHotelResourceApi(page, product, productId)
     : { skipped: hotelResource.source === "nonPlatform" ? "行程不含住宿" : "行程不含平台酒店资源", verified: true };
   let vehicle: Json | null = null;
-  if (product.sales.productForm === "privateTour") {
+  if (needsVehicle) {
     const groupId = Number(product.operations?.vehicleResource?.resourceGroupId);
-    if (!groupId) throw new Error("私家团未配置现有用车资源组 ID");
+    if (!groupId) throw new Error("产品未配置现有用车资源组 ID");
     vehicle = await verifyVehicleResourceBinding(page, productId, groupId);
     if (!vehicle.bound) throw new Error(`用车资源预检仅绑定 ${vehicle.matchedCount}/${vehicle.segmentCount} 个行程段`);
   }

@@ -13,7 +13,7 @@
  */
 
 import { parseProduct } from "../schema/schema.js";
-import { requiresVehicleResource } from "../../../shared/product-form.js";
+import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 
 /**
@@ -33,7 +33,7 @@ export function draftPhasesFor(product: {
   const phases = ["basic", "presentation", "itinerary", "package"];
   if (product.commercial?.pricing || product.commercial?.inventory) phases.push("pricingInventory");
   if (needsHotel) phases.push("hotelResource");
-  if (requiresVehicleResource(product.sales.productForm)) phases.push("vehicleResource");
+  if (productNeedsVehicleResource(product)) phases.push("vehicleResource");
   phases.push("terms");
   // 母产品条款完成后，只要准备阶段已确认任一大交通站点，就继续创建并完善
   // 飞机/火车往返子产品。条款在前，

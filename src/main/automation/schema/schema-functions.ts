@@ -7,7 +7,7 @@ import { hasSatisfiedVehicleResource, isResearchTaskSatisfiedByProduct } from ".
 import { readCover } from "../../operations/cover-info.js";
 import { evaluateAutomationContract } from "../automation-contract.js";
 import { findAllVbkCopyBadCases } from "../../planning/vbk-copy-policy.js";
-import { requiresGuide } from "../../../shared/product-form.js";
+import { productNeedsVehicleResource, requiresGuide } from "../../../shared/product-form.js";
 
 /**
  * 自动化层产品 schema 工具。
@@ -164,15 +164,15 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
       detail: "手动上传封面暂不支持自动录入，请改用携程图库或手动处理。",
     });
   }
-  // 3) 私家团用车资源组是预检硬阻断：VBK 资源组匹配要等 vehicleResource
+  // 3) 用车资源组是预检硬阻断：VBK 资源组匹配要等 vehicleResource
   //    阶段才能走，在那之前让运营先核查 / 重算后填好 resourceGroupId + Name。
   //    vbk-runtime 阶段的「资源组 ID 是 VBK 回填」是事实，但 readiness 必须
   //    在这之前就拦下，否则自动录入起跑后会一直走直到 vehicleResource 阶段
   //    才报错，前面的 basic / presentation / itinerary / package / pricing
   //    / terms 阶段白跑。
   const sales = product.sales as Record<string, unknown> | undefined;
-  if (sales?.productForm === "privateTour" && !hasSatisfiedVehicleResource(product)) {
-    blockers.push({ label: "用车资源组", detail: "私家团需要在 VBK 核查并填写现有用车资源组 ID。" });
+  if (productNeedsVehicleResource(product) && !hasSatisfiedVehicleResource(product)) {
+    blockers.push({ label: "用车资源组", detail: "已配置用车的产品需要在 VBK 核查并填写现有用车资源组 ID。" });
   }
   if (requiresGuide(sales?.productForm) && sales?.guideIncluded === false) {
     blockers.push({ label: "随团导游", detail: "跟团游必须带随团导游，请确认产品包含导游。" });

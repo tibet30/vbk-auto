@@ -178,8 +178,8 @@ export class VbkDatabase {
   getProduct(id: string): ProductDetail | undefined { return getProduct(this.db, id); }
   importProductSnapshot(snapshot: ProductDetail): ProductDetail { return importProductSnapshot(this.db, snapshot); }
   deleteProduct(id: string): boolean { return deleteProduct(this.db, id); }
-  updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) {
-    updateProduct(this.db, id, product, status);
+  updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"], expectedVersion?: number) {
+    updateProduct(this.db, id, product, status, expectedVersion);
   }
   /**
    * 原子地「写产品 JSON + 按字段匹配确认 research task」。仅用于手工复核路径

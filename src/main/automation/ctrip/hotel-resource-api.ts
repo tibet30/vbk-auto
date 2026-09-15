@@ -1,7 +1,6 @@
 import { hotelDiamondFromTier } from "../../../shared/hotel-tiers.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
-import { requiresVehicleResource } from "../../../shared/product-form.js";
 import {
   buildLodgingResourceSegment,
   ensureResourceSegmentsDraftApi,
@@ -12,11 +11,13 @@ import {
   segmentsFromPayload,
   submitResourceSegmentsApi,
 } from "./vehicle-resource-api.js";
-import { hotelIdsFromSegment, syncCtripHotelResources } from "./hotel-resource-page.js";
+import { syncCtripHotelResources } from "./hotel-resource-page.js";
 
 /**
- * 全程段承载套餐和用车；正住宿段承载指定酒店。携程来源会在每个住宿段保存
- * 最多五家候选，并以接口回读作为验收；携程只返回一家时也允许继续。
+ * 全程段承载套餐和用车；正住宿段承载指定酒店。携程来源会在每个住宿段用
+ * saveSegment 保存最多五家候选，并以草稿接口回读作为验收；携程只返回一家时
+ * 也允许继续。不要为指定酒店名单单独 submitSegments：平台会重新结算资源草稿，
+ * 真实环境中可能清空刚保存的 segmentRooms。
  */
 export async function ensureHotelResourceApi(
   page: any,
@@ -66,12 +67,6 @@ export async function ensureHotelResourceApi(
       }
       await initializeResourceSegmentsDraftApi(page, productId);
       return ensureHotelResourceApi(page, product, productId, { draftRepairAttempted: true });
-    }
-    // Private-tour vehicleResource later submits the same resource draft.
-    // Group/free-travel products skip that phase, so hotel must produce
-    // formal productSegments evidence itself after rooms are in the draft.
-    if (product.sales?.productForm && !requiresVehicleResource(product.sales.productForm)) {
-      await settleHotelResourceDraft({ page, productId, resourceSegments });
     }
   }
   return {
@@ -212,61 +207,6 @@ async function normalizeHotelResourceLayout(args: {
   });
   if (unequal.length) throw new Error(`资源行程段停留晚数与住宿晚数不一致：${unequal.map((segment: any) => String(segment.segmentId)).join("、")}`);
   return { changed: Boolean(created || corrections.length), created, expected };
-}
-
-/**
- * saveSegment 只写草稿。非私家团没有后续 submitSegments，必须在酒店名单
- * 已在草稿中之后提交一次，并以正式段回读作为验收。
- */
-async function settleHotelResourceDraft(args: {
-  page: any;
-  productId: string;
-  resourceSegments: Array<{ day: number; segmentId: string; candidates: Array<{ hotelId: number }> }>;
-}) {
-  const draftPayload = await getProductSegmentsApi(args.page, args.productId);
-  assertHotelSegmentsMatch(segmentsFromPayload(draftPayload), args.resourceSegments, "草稿");
-  if (hotelSegmentsMatch(segmentsFromPayload(draftPayload, { formalOnly: true }), args.resourceSegments)) {
-    return;
-  }
-  await submitResourceSegmentsApi(args.page, args.productId);
-  const formalPayload = await getProductSegmentsApi(args.page, args.productId);
-  assertHotelSegmentsMatch(
-    segmentsFromPayload(formalPayload, { formalOnly: true }),
-    args.resourceSegments,
-    "正式",
-  );
-}
-
-function hotelSegmentsMatch(
-  segments: any[],
-  resourceSegments: Array<{ segmentId: string; candidates: Array<{ hotelId: number }> }>,
-): boolean {
-  return resourceSegments.every((daily) => {
-    const expected = daily.candidates.map((candidate) => Number(candidate.hotelId));
-    const segment = segments.find((item) => String(item.segmentId) === daily.segmentId);
-    return sameHotelIds(hotelIdsFromSegment(segment), expected);
-  });
-}
-
-function assertHotelSegmentsMatch(
-  segments: any[],
-  resourceSegments: Array<{ segmentId: string; candidates: Array<{ hotelId: number }> }>,
-  label: string,
-) {
-  for (const daily of resourceSegments) {
-    const expected = daily.candidates.map((candidate) => Number(candidate.hotelId));
-    const segment = segments.find((item) => String(item.segmentId) === daily.segmentId);
-    const actual = hotelIdsFromSegment(segment);
-    if (!sameHotelIds(actual, expected)) {
-      throw new Error(`酒店资源${label}段回读不一致：行程段 ${daily.segmentId} 期望 ${expected.join("、")}，实际 ${actual.join("、") || "无"}`);
-    }
-  }
-}
-
-function sameHotelIds(actual: number[], expected: number[]) {
-  return actual.length === expected.length
-    && new Set(actual).size === actual.length
-    && actual.every((id) => expected.includes(id));
 }
 
 function lodgingSegments(segments: any[]) {

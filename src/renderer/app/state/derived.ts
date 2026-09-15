@@ -1,12 +1,6 @@
 import { logWarn } from "../../../shared/log-timestamp.js";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  buildPlanningStageProgress,
-  initialStageFor,
-  planningStageLabel,
-} from "../helpers";
-import { PLANNING_STAGES } from "../../../shared/contracts-planning.js";
-import { api } from "../helpers";
+import { api, initialStageFor } from "../helpers";
 import type { AppStateBase } from "./base";
 import type { PlanningGenerationState } from "../../../shared/contracts-planning.js";
 import {
@@ -14,10 +8,12 @@ import {
   shouldRefreshCollections,
 } from "./collection-refresh-policy.js";
 import { simulateRecoveryEffectTick } from "./recovery-policy.js";
+import { buildPlanningRecovery } from "./planning-recovery.js";
 import { subscribeCollectionLiveUpdates } from "./collection-live-updates.js";
 import { useBrowserDerived } from "./domains/browser-derived";
 import { useProductViewDerived } from "./domains/product-view-derived";
 import { usePlanningActions } from "./domains/planning-actions";
+
 export function useAppStateDerived(state: AppStateBase) {
   const {
     product,
@@ -253,61 +249,7 @@ export function useAppStateDerived(state: AppStateBase) {
     }
   }, [product?.messages.length, state.loading]);
 
-  // 规划状态摘要：把规划生成态压缩成「恢复提示 + 实际接受 / 缺失模块」两行。
-  // 运行中状态还会附上按 PLANNING_STAGES 顺序的阶段进度，供渲染层展示带顺序的进度条。
-  const planningRecovery = useMemo(() => {
-    if (!planningState) return null;
-    const stages = planningState.stages ?? [];
-    const accepted: string[] = [];
-    const missing: string[] = [];
-    for (const entry of stages) {
-      for (const m of entry.accepted ?? []) {
-        if (!accepted.includes(m.module)) accepted.push(m.module);
-      }
-      for (const m of entry.rejected ?? []) {
-        if (m.status === "missing" && !missing.includes(m.module)) missing.push(m.module);
-      }
-    }
-    const completed = planningState.completedStages ?? [];
-    const status = planningState.status;
-    const allStagesCompleted = PLANNING_STAGES.every((stage) => completed.includes(stage));
-    // 后端 terminal 状态可能先于阶段结果落盘；只有七个阶段全部覆盖时，
-    // 才允许前端把它当作整体完成并隐藏生成进度。
-    if (status === "completed" && allStagesCompleted) return null;
-    let headline = "方案规划未完成。";
-    if (status === "running") headline = "方案规划进行中…";
-    else if (status === "pending") headline = "方案规划即将开始…";
-    else if (status === "failed") headline = "方案规划失败，需要重试。";
-    else if (status === "needs_user") headline = "方案规划已暂停，等待补充缺失模块。";
-    else if (status === "completed") headline = "方案已生成部分结果，等待继续规划。";
-    // 运行中状态额外暴露阶段进度：顺序为 PLANNING_STAGES（共享合约），渲染层负责
-    // 把 completed / current / pending 分别贴不同样式与中文标签。
-    const stageProgress = status === "running" || status === "pending" || (status === "completed" && !allStagesCompleted)
-      ? buildPlanningStageProgress(planningState, PLANNING_STAGES)
-      : null;
-    const currentStageLabel = planningStageLabel(planningState.currentStage);
-    return {
-      status,
-      headline,
-      completed,
-      accepted,
-      missing,
-      currentStage: planningState.currentStage,
-      currentStageLabel,
-      stageProgress,
-      // 简短的「可以续跑 / 已完成 / 需要补齐」三态。
-      allStagesCompleted,
-      hint: status === "needs_user"
-        ? "已自动跳过已接受模块；点击「继续规划」补齐缺失项。"
-        : status === "failed"
-          ? "请检查 API Key 后点击「重试规划」。"
-          : status === "pending"
-            ? "系统正在准备下一阶段，完成后会自动跳回产品面板。"
-            : status === "completed"
-              ? "已保留当前已生成内容；后端状态已结束，需继续规划后才会补齐剩余阶段。"
-            : "系统正在分阶段生成方案，完成后会自动跳回产品面板。",
-    };
-  }, [planningState]);
+  const planningRecovery = useMemo(() => buildPlanningRecovery(planningState), [planningState]);
 
   const currentWorkflowTask = useMemo(() => {
     if (!product) return null;

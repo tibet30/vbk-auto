@@ -79,11 +79,12 @@ export async function ensureTrafficLinePhase({
     persist();
   };
   persist();
+  const endpointPlan = progress.endpointPlan ?? executableConfig.availability?.endpointPlan;
   let result: Awaited<ReturnType<typeof ensureTrafficLineApi>>;
   try {
     result = await ensureTrafficLineApi(page, parentProductId, executableConfig, {
       itinerary,
-      endpointPlan: progress.endpointPlan,
+      endpointPlan,
       rejectedTrainStationCodes: progress.rejectedTrainStationCodes,
       childProgress: progress.children,
       onEndpointPlan: (endpointPlan: TrafficLineEndpointPlan) => {
@@ -119,10 +120,10 @@ export async function ensureTrafficLinePhase({
     childProductId: child.childProductId,
     lineDescription: child.lineDescription,
   }));
-  log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
   for (const item of result.skipped ?? []) {
-    log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品无可售资源，已跳过且不会自动重试：${item.reason}`, "warning");
+    log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品未完成，已跳过继续：${item.reason}`, "warning");
   }
+  log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
   progress = { ...progress, failureReason: undefined, verifiedAt: new Date().toISOString() };
   persist();
   // 创建/复用计数需由 future checkpoint 记录；不以本轮 API 返回猜测。

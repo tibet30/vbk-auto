@@ -42,6 +42,33 @@ export function requiresVehicleResource(value: unknown): boolean {
   return value === "privateTour";
 }
 
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function positiveNumber(value: unknown): boolean {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0;
+}
+
+export function productNeedsVehicleResource(product: unknown): boolean {
+  const record = objectValue(product);
+  const sales = objectValue(record?.sales);
+  if (requiresVehicleResource(sales?.productForm)) return true;
+
+  const operations = objectValue(record?.operations);
+  const vehicle = objectValue(operations?.vehicleResource);
+  return positiveNumber(vehicle?.resourceGroupId)
+    || Boolean(textValue(vehicle?.resourceGroupName))
+    || positiveNumber(vehicle?.requestedTotalCost);
+}
+
 export function requiresGuide(value: unknown): boolean {
   return value === "groupTour";
 }

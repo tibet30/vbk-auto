@@ -11,11 +11,21 @@ import { productNotFound } from "../infrastructure/db-errors.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 
-type ProductMutationStore = Pick<VbkDatabase, "getProduct" | "updateProduct">;
+type ProductMutationStore = {
+  getProduct: VbkDatabase["getProduct"];
+  updateProduct: (
+    id: string,
+    product: Record<string, unknown>,
+    status?: ProductSummary["status"],
+    expectedVersion?: number,
+  ) => void;
+};
 
 export interface ProductMutationOptions {
   status?: ProductSummary["status"];
   notify?: boolean;
+  /** 调用方持有的 product_json 版本；与库中不一致时拒绝覆盖。 */
+  expectedVersion?: number;
   /** 人工整包编辑可显式纠正历史错误城市；AI/规划写入仍锁定既有城市锚点。 */
   allowMeetingCityCorrection?: boolean;
   /**
@@ -39,6 +49,9 @@ export class ProductMutationService {
   ): ProductDetail {
     const current = this.store.getProduct(localProductId);
     if (!current) throw productNotFound(localProductId);
+    if (options.expectedVersion !== undefined && (current.productJsonVersion ?? 0) !== options.expectedVersion) {
+      throw new Error("产品内容已变更，请刷新后重试。");
+    }
     const currentBasic = current.product.basicInfo && typeof current.product.basicInfo === "object"
       && !Array.isArray(current.product.basicInfo)
       ? current.product.basicInfo as Record<string, unknown>
@@ -52,7 +65,7 @@ export class ProductMutationService {
       ? product
       : preserveVerifiedItineraryPois(current.product, product);
     const normalised = normaliseProductLocationFields(incoming, lockedMeetingCity || undefined);
-    this.store.updateProduct(localProductId, normalised, options.status);
+    this.store.updateProduct(localProductId, normalised, options.status, current.productJsonVersion ?? 0);
     const saved = this.store.getProduct(localProductId);
     if (!saved) throw productNotFound(localProductId);
     if (options.notify !== false) this.onUpdated?.(saved);

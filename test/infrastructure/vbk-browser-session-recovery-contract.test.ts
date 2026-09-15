@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const source = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
+const cookieHelperSource = readFileSync(new URL("../../src/main/infrastructure/vbk-browser-cookies.ts", import.meta.url), "utf8");
 
 test("hidden VBK navigation cannot steal the renderer IME focus", () => {
   const createViewStart = source.indexOf("private createView(partition: string)");
@@ -143,14 +144,15 @@ test("addLogin / switchAccount 都 await saveCurrentSession", () => {
 test("新增登录 / 切换账号不会复用上一个账号的 current-user 缓存", () => {
   const activateView = source.slice(source.indexOf("  private activateView("), source.indexOf("  // ─────────────────────────────────────────────────────────────\n  // 生命周期"));
   const installNavigationHooks = source.slice(source.indexOf("  private installNavigationHooks("), source.indexOf("  // ─────────────────────────────────────────────────────────────\n  // 内部辅助：cookie"));
-  const clearViewStorage = source.slice(source.indexOf("  private async clearViewStorage("), source.indexOf("  /** 抽出当前活跃 view"));
+  const clearViewStorage = source.slice(source.indexOf("  private async clearViewStorage("), source.indexOf("  private async collectCookies("));
   assert.match(source, /private clearCachedUserInfo\(\): void \{[\s\S]*cachedUserInfoUrl = undefined;[\s\S]*cachedUserInfo = undefined;/);
   assert.match(source, /cachedUserInfoWebContentsId/);
   assert.match(source, /fetchCurrentUserInfoInView\(this\.view\)/);
   assert.match(activateView, /if \(current !== view \|\| this\.activeKey !== nextKey\) this\.clearCachedUserInfo\(\);/);
   assert.match(installNavigationHooks, /did-start-navigation[\s\S]*this\.clearCachedUserInfo\(\);/);
   assert.match(installNavigationHooks, /did-navigate-in-page[\s\S]*this\.clearCachedUserInfo\(\);/);
-  assert.match(clearViewStorage, /this\.clearCachedUserInfo\(\);[\s\S]*clearStorageData[\s\S]*clearCache\(\);[\s\S]*this\.clearCachedUserInfo\(\);/);
+  assert.match(clearViewStorage, /this\.clearCachedUserInfo\(\);[\s\S]*clearVbkViewStorage\(view\)[\s\S]*this\.clearCachedUserInfo\(\);/);
+  assert.match(cookieHelperSource, /clearStorageData[\s\S]*clearCache\(\)/);
 });
 
 test("withKnownVbkAccount：saveCurrentSession 失败被 .catch 吞掉，不会变 unhandled rejection", () => {

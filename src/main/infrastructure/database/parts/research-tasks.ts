@@ -10,7 +10,13 @@ import { isCoverResearchTaskSatisfiedByProduct } from "../../../minimax/minimax-
 import { now } from "./types.js";
 import { touchProduct } from "./products.js";
 
+const POST_CONFIRM_STATUSES = new Set(["automating", "draft_saved"]);
+
 export function addResearchTask(db: Database.Database, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
+  const statusRow = db.prepare("SELECT status FROM products WHERE id=?").get(localProductId) as { status?: string } | undefined;
+  if (statusRow && POST_CONFIRM_STATUSES.has(statusRow.status ?? "")) {
+    throw new Error("确认后的录入阶段不能再新增 research_tasks，缺失项记入自动化记录。");
+  }
   const canonicalTask = {
     ...task,
     label: canonicalPoiResearchTaskLabel(task.label, task.type),
@@ -96,10 +102,16 @@ export function findSatisfiedResearchTaskIds(
   product: Record<string, unknown>,
 ): string[] {
   const rows = db.prepare(`
-    SELECT id, label, type, state
+    SELECT id, label, type, state, detail
     FROM research_tasks
     WHERE local_product_id=?
-  `).all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; state: ResearchTask["state"] }>;
+  `).all(localProductId) as Array<{
+    id: string;
+    label: string;
+    type: ResearchTask["type"];
+    state: ResearchTask["state"];
+    detail: string | null;
+  }>;
   const satisfied: string[] = [];
   for (const row of rows) {
     if (row.state === "confirmed" || row.state === "resolved") continue;
@@ -109,7 +121,7 @@ export function findSatisfiedResearchTaskIds(
     // 谓词对 image 类型已自带「只看 type === "image"」守卫；对 vbk / web / cost
     // 类型已自带「task.type === "image" → false」守卫（见 shared/research-task-
     // satisfaction.ts）。两侧守卫互补，按 type 选一侧谓词即可。
-    if (predicate({ type: row.type, label: row.label }, product)) {
+    if (predicate({ type: row.type, label: row.label, detail: row.detail ?? undefined }, product)) {
       satisfied.push(row.id);
     }
   }

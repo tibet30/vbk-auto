@@ -9,7 +9,7 @@ test('Agent wiring is lazy until Electron browser services exist, and guards rei
     db:{}, productMutations:{}, productWorkflows:{},remoteProducts:{},
     get browser(){if(!created) throw new Error('browser not created');return {};},
     get automation(){if(!created) throw new Error('automation not created');return {
-      setRunVbkPageExclusive(){pageLocks+=1;},setAgentWriteGuard(){guards+=1;},
+      setRunVbkPageExclusive(){pageLocks+=1;},setAgentWriteGuard(){guards+=1;},setProductMutations(){},
     };},
   } as unknown as MainIpcContext;
   const configure=installProductAgent(context);

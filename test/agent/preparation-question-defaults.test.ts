@@ -27,6 +27,12 @@ test("historical preparation control questions resolve without operator interact
     [single("checkin_node", "如何处理日喀则（入住）这一景点 POI？", [
       ["drop", "移出景点列表"], ["keep", "保留并标注为住宿节点"],
     ]), "drop"],
+    [single("removeOrKeepUnknownSpots", "第2天行程中混入的两条非景点文本如何处理？", [
+      ["remove", "从行程中移除这两条，只保留非遗中心/博物馆二选一 + 扎什伦布寺"], ["keep_as_note", "保留为第2天 evening 时段的两条文字"],
+    ]), "remove"],
+    [single("tashiRename", "行程里写错了名字“扎实伦布寺”怎么办？", [
+      ["rename_to_tashi", "规范为官方名“扎什伦布寺”（POI ID 76348）"], ["keep_typo", "保留错写原名"],
+    ]), "rename_to_tashi"],
     [single("research_resolve", "如何闭环日喀则（入住）研究任务？", [
       ["close", "确认是住宿节点，关闭研究任务并推进"], ["keep", "人工补录"],
     ]), "close"],

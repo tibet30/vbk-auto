@@ -185,6 +185,7 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
     status: product.status as ProductDetail["status"],
     productId: product.product_id || undefined,
     updatedAt: product.updated_at,
+    productJsonVersion: Number((product as Record<string, unknown>).product_json_version ?? 0) || 0,
     product: parseAndNormalizeProductJson(product.product_json),
     messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
     researchTasks: coalescePoiResearchTasks(tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) }))),
@@ -329,15 +330,25 @@ export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
 /**
  * 写入产品 product_json，可选更新 status。直接覆盖整个 product 字段。
  */
-export function updateProduct(db: Database.Database, id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) {
+export function updateProduct(
+  db: Database.Database,
+  id: string,
+  product: Record<string, unknown>,
+  status?: ProductSummary["status"],
+  expectedVersion?: number,
+) {
   const basicInfo = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
     ? product.basicInfo as Record<string, unknown>
     : undefined;
   const nextName = typeof basicInfo?.supplierProductName === "string"
     ? basicInfo.supplierProductName.trim()
     : "";
-  db.prepare("UPDATE products SET product_json=?, name=CASE WHEN ?<>'' THEN ? ELSE name END, status=COALESCE(?,status), updated_at=? WHERE id=?")
-    .run(JSON.stringify(product), nextName, nextName, status || null, now(), id);
+  const current = db.prepare("SELECT product_json_version FROM products WHERE id=?").get(id) as { product_json_version?: number } | undefined;
+  if (!current) throw new Error("产品不存在");
+  const expected = expectedVersion ?? (Number(current.product_json_version ?? 0) || 0);
+  const result = db.prepare("UPDATE products SET product_json=?, name=CASE WHEN ?<>'' THEN ? ELSE name END, status=COALESCE(?,status), updated_at=?, product_json_version=product_json_version+1 WHERE id=? AND product_json_version=?")
+    .run(JSON.stringify(product), nextName, nextName, status || null, now(), id, expected);
+  if (result.changes === 0) throw new Error("产品内容已变更，请刷新后重试。");
 }
 
 /**

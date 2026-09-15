@@ -27,10 +27,14 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     emitProductIfKnown,
     detectProviderIdInMain,
   } = context;
-  ipcMain.handle("browser:login", () =>
-    context.productWorkflows.runVbkPageExclusive(() => context.browser.login()));
-  ipcMain.handle("browser:logout", () =>
-    context.productWorkflows.runVbkPageExclusive(() => context.browser.logout()));
+  ipcMain.handle("browser:login", () => {
+    context.productWorkflows.assertVbkPageIdle("登录");
+    return context.productWorkflows.runVbkPageExclusive(() => context.browser.login());
+  });
+  ipcMain.handle("browser:logout", () => {
+    context.productWorkflows.assertVbkPageIdle("退出登录");
+    return context.productWorkflows.runVbkPageExclusive(() => context.browser.logout());
+  });
   ipcMain.handle("browser:status", async (_event, refresh?: boolean) => withKnownVbkAccount(
     await context.productWorkflows.runVbkPageExclusive(() => context.browser.status(Boolean(refresh))),
   ));
@@ -80,16 +84,21 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   });
   ipcMain.handle("poi:suggestDemo", async (_event, keyword: string) =>
     context.productWorkflows.runVbkPageExclusive(() => suggestPoiDemo(context.browser, String(keyword ?? ""))));
-  ipcMain.handle("browser:navigate", (_event, url: string) =>
-    context.productWorkflows.runVbkPageExclusive(() => context.browser.navigate(url)));
+  ipcMain.handle("browser:navigate", (_event, url: string) => {
+    context.productWorkflows.assertVbkPageIdle("导航");
+    return context.productWorkflows.runVbkPageExclusive(() => context.browser.navigate(url));
+  });
   ipcMain.handle("browser:currentUrl", () => context.browser.currentUrl());
   ipcMain.handle("browser:openExternal", () => context.browser.openExternal());
   ipcMain.handle("browser:setBounds", (_event, bounds) => context.browser.setBounds(bounds));
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => context.browser.setVisible(visible));
   ipcMain.handle("browser:listLoginAccounts", () => context.browser.listKnownLoginAccounts());
-  ipcMain.handle("browser:addLogin", () =>
-    context.productWorkflows.runVbkPageExclusive(() => context.browser.addLogin()));
+  ipcMain.handle("browser:addLogin", () => {
+    context.productWorkflows.assertVbkPageIdle("新增登录");
+    return context.productWorkflows.runVbkPageExclusive(() => context.browser.addLogin());
+  });
   ipcMain.handle("browser:switchAccount", async (_event, accountKey: string) => {
+    context.productWorkflows.assertVbkPageIdle("切换账号");
     const key = String(accountKey ?? "").trim();
     await context.productWorkflows.runVbkPageExclusive(() => context.browser.switchAccount(key));
     const snapshot = context.browser.listKnownLoginAccounts();

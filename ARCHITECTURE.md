@@ -145,7 +145,9 @@ stateDiagram-v2
 
 - 同一产品的 AI、planning、automation、resource resolution 不可并发。
 - 手工 JSON/复核字段写入会在长流程运行时被拒绝。
-- 不同产品可以并行。
+- 不同产品的纯 AI / planning 可以并行。
+- automation 与 resource 额外占用共享 VBK 页面：期间拒绝登录、退出、导航、新增登录和切换账号，避免把正在录入的草稿页切走。
+- 页面操作另有 FIFO `runVbkPageExclusive`；`browser:status` 只走 FIFO，不因占用失败。
 - 锁在 `finally` 释放，失败不会造成永久占用。
 
 `ProductMutationService.applyAiPatch()` 会在提交时重新读取最新 `product_json`，然后应用 patch；禁止使用 AI 请求开始时的旧对象整包覆盖。
@@ -225,11 +227,19 @@ renderer action → window.vbk → preload ipcRenderer.invoke
 
 ## 10. 仍需关注的风险
 
-- `minimax/minimax-parsing.ts`、`infrastructure/ctrip-library-search.ts`、`vbk-browser.ts`、`shared/contracts-types.ts` 仍明显偏大；应按解析阶段、远端 endpoint、浏览器生命周期、契约领域继续拆分。
-- `renderer/state/derived.ts` 保留了约 400 行的 planning 恢复状态机。它是高风险集中逻辑，下一次拆分必须先增加 hook 级行为测试，不能只做文本搬移。
-- Legacy AI 与 staged planning 仍有两种模型输出协议。当前通过互斥和统一落盘控制风险，但还不是单一生成协议。
+- MiniMax 解析已按阶段拆到 `minimax-parsing-*.ts`；携程图库协议在 `ctrip-library-protocol.ts`；契约按领域拆到 `contracts-settings/ctrip-cover/vbk-account/operation-log/memory.ts`。`vbk-browser.ts` 仍偏大，生命周期还可继续拆。
+- `renderer/app/state/derived.ts` 已把 planning 恢复条抽到 `planning-recovery.ts` 纯函数，并有 `test/workflow/planning-recovery.test.ts`。derived 仍承担启动恢复、集合订阅与产品切换副作用，继续拆分时不要只做文本搬移。
+- Legacy AI / Agent `patch_product` 与 staged planning 仍是两套输出协议，但 RFC6902 现已强制走同一套 `AI_WRITABLE_PATHS`，并保留 `FORBIDDEN_PATH_PREFIXES`。移除 legacy 前必须先迁移 renderer 对话与历史消息。
 - 真实 VBK 页面、接口 payload、选择器和账号配置会漂移；离线测试与构建不等于真实录入成功。
-- `operation-log-store` 仍应确认是否满足长期持久化和审计需求。
+- `operation-log-store` 已有 10000 行上限、启动孤儿回收和写时脱敏；没有按时间 TTL，也没有独立审计导出策略。
+
+代码已落地的边界（2026-09-12 核验）：
+
+- 同一产品 AI / planning / automation / resource 互斥；automation 与 resource 还会占用共享 VBK 页面，期间拒绝登录、退出、导航、新增登录、切换账号，并用产品 ID 钉住导航。
+- Renderer 不能读回 AI Key；`browser:status` 只返回账号摘要。Agent 快照落盘前走 `sanitizeAgentSnapshot`。
+- 交通子产品进度在 `automation_runs.payload_json.trafficLine`，配置在 `product_json.operations.trafficLine`，没有独立表。
+- SQLite migration `0013_product_json_version`：`products.product_json_version` 乐观并发；过期整包写入会被拒绝。
+- 确认后（`automating` / `draft_saved`）不能再新增 `research_tasks`。
 
 ## 11. 验收层级
 

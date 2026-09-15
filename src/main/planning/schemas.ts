@@ -7,6 +7,7 @@
  */
 
 import { z } from "zod";
+import { AI_WRITABLE_PATHS } from "../../shared/ai-writable-paths.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { isCombinedSpotName } from "./spot-name.js";
@@ -312,20 +313,7 @@ export function parseStageOutput(stage: PlanningStage, raw: unknown): { ok: true
  * AI 写模块的固定写入路径集合。这些路径是「产品 JSON 里允许被 AI 写入的
  * 子树根」。任何 path 不在该集合内 → 立刻拒绝。
  */
-export const AI_WRITABLE_PATHS = {
-  basicInfo: "/basicInfo",
-  presentation: "/presentation",
-  itinerary: "/itinerary",
-  packageName: "/commercial/packageName",
-  pricing: "/commercial/pricing",
-  inventory: "/commercial/inventory",
-  terms: "/commercial/terms",
-  release: "/commercial/release",
-  skeleton: "/operations",
-  researchTasks: null, // research tasks 不写产品 JSON
-} as const;
-
-export type AiWritablePath = NonNullable<(typeof AI_WRITABLE_PATHS)[keyof typeof AI_WRITABLE_PATHS]>;
+export { AI_WRITABLE_PATHS, type AiWritablePath } from "../../shared/ai-writable-paths.js";
 
 /**
  * 验证 researchTask 的字段是否符合现有规则：

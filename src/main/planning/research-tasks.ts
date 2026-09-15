@@ -12,6 +12,7 @@
 import type { ResearchTaskProposal, PlanningSkeleton, PlanningModule } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { poiResearchTaskLabel } from "../../shared/poi-research-tasks.js";
+import { productNeedsVehicleResource } from "../../shared/product-form.js";
 import { hasSatisfiedHotelTier, hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { isTravelNodeName } from "./itinerary-adoption.js";
 
@@ -42,14 +43,14 @@ export function planResearchTasks(args: {
 }): PendingEvaluation[] {
   const { skeleton, product } = args;
   const pending: PendingEvaluation[] = [];
-  // 用车：私家团必须；其它形态不强求
-  if (skeleton.productForm === "privateTour" && !hasSatisfiedVehicleResource(product)) {
+  // 用车：私家团必需；其它形态只有在产品数据明确配置用车时才要求。
+  if (productNeedsVehicleResource({ ...product, sales: { productForm: skeleton.productForm } }) && !hasSatisfiedVehicleResource(product)) {
     pending.push({
       key: "vehicle::resourceGroup",
       proposal: {
         label: "核查用车资源组（按目的地 / 出行人数）",
         type: TASK_TYPE_VBK,
-        detail: "私家团在 VBK 资源库确认 resourceGroupId",
+        detail: "已配置用车的产品需在 VBK 资源库确认 resourceGroupId",
       },
     });
   }

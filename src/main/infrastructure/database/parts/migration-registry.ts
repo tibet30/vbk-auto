@@ -18,6 +18,7 @@
  *   - 0010_agent_snapshots：agent 会话恢复与恢复上下文快照。
  *   - 0011_user_memories：用户偏好记忆（显式记忆 + 证据 + 维护状态）。
  *   - 0012_ctrip_poi_availability_cache：携程 POI 营业状态成功缓存。
+ *   - 0013_product_json_version：products 加 product_json_version 乐观并发列。
  *
  * 注：
  *   - cookies 不再写入 SQLite：本地 0600 atomic cookie store 才是 cookie
@@ -246,6 +247,12 @@ const MIGRATIONS: Migration[] = [
       )`,
       `CREATE INDEX IF NOT EXISTS idx_ctrip_poi_availability_cache_verified_at
         ON ctrip_poi_availability_cache(verified_at DESC)`,
+    ],
+  },
+  {
+    id: "0013_product_json_version",
+    statements: [
+      `ALTER TABLE products ADD COLUMN product_json_version INTEGER NOT NULL DEFAULT 0`,
     ],
   },
 ];

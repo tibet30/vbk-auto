@@ -112,25 +112,18 @@ https://<your-domain>/sanrentongyou/updates/stable/latest.yml
 
 ## 发布流程设计
 
-建议新增两个命令：
+发布命令收口为一个无参数入口：
 
 ```bash
-npm run release:prepare-online:mac
-npm run release:upload-online:mac -- --confirm
+npm run release:online:mac
 ```
 
-`release:prepare-online:mac`：
+`release:online:mac`：
 
-- 升版本或读取指定版本。
+- 读取当前 `package.json` 版本。
 - 运行现有检查与测试。
 - 打 macOS universal `dmg + zip`。
-- 后续可选打 Windows x64 NSIS。
 - 验证安装包、blockmap、`latest-mac.yml` 是否存在。
-- 不上传、不 push、不部署。
-
-`release:upload-online:mac`：
-
-- 仅在用户明确确认后执行。
 - 通过 `ssh sx2` 创建版本目录。
 - 通过 `scp` 或 `rsync` 上传安装包、blockmap、更新 yml。
 - 先上传到临时目录，再原子切换到 stable 目录，避免用户读到半截文件。

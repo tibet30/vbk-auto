@@ -3,11 +3,13 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
-const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
 const packageJsonPath = path.resolve("package.json");
 const pkg = await import(`${packageJsonPath}?t=${Date.now()}`, { with: { type: "json" } });
 const version = pkg.default.version;
+const remoteHost = process.env.VBK_UPDATE_SSH_HOST || "sx2";
+const remoteRoot = process.env.VBK_UPDATE_REMOTE_ROOT || "/data/www/web/downloads/sanrentongyou/updates";
+const stableDir = `${remoteRoot}/stable`;
+const incomingDir = `${remoteRoot}/.incoming/mac-${version}-${Date.now()}`;
 const env = { ...process.env, NODE_OPTIONS: "" };
 
 validateVersion(version);
@@ -24,19 +26,10 @@ if (existing.length) {
   fail("Refusing to rebuild or upload an already packaged version. Bump package.json version first.");
 }
 
-if (dryRun) {
-  console.log("[publish-current-mac-update] dry run only; no build or upload will run");
-  console.log("[publish-current-mac-update] would run:");
-  console.log("  npm run check");
-  console.log("  npm run package:mac:universal");
-  console.log(`  npm run release:upload-online:mac -- ${version} --confirm`);
-  process.exit(0);
-}
-
 run("npm", ["run", "check"]);
 run("npm", ["run", "package:mac:universal"]);
 validateArtifacts(version);
-run("npm", ["run", "release:upload-online:mac", "--", version, "--confirm"]);
+uploadArtifacts(version);
 
 console.log(`[publish-current-mac-update] published macOS update version ${version}`);
 console.log("[publish-current-mac-update] verify:");
@@ -72,10 +65,28 @@ function versionArtifacts(version) {
   ];
 }
 
+function uploadArtifacts(version) {
+  const artifacts = [...versionArtifacts(version), path.join("release", "latest-mac.yml")];
+  run("ssh", [remoteHost, "mkdir", "-p", shellQuote(incomingDir), shellQuote(stableDir)]);
+  run("rsync", ["-av", "--", ...artifacts, `${remoteHost}:${incomingDir}/`]);
+
+  const nonManifest = artifacts
+    .filter((file) => path.basename(file) !== "latest-mac.yml")
+    .map((file) => path.basename(file));
+  for (const file of nonManifest) {
+    run("ssh", [remoteHost, "cp", shellQuote(`${incomingDir}/${file}`), shellQuote(`${stableDir}/${file}`)]);
+  }
+  run("ssh", [remoteHost, "cp", shellQuote(`${incomingDir}/latest-mac.yml`), shellQuote(`${stableDir}/latest-mac.yml`)]);
+}
+
 function run(command, commandArgs) {
   console.log(`[publish-current-mac-update] ${command} ${commandArgs.join(" ")}`);
-  const result = spawnSync(command, commandArgs, { env, stdio: "inherit", shell: process.platform === "win32" });
+  const result = spawnSync(command, commandArgs, { env, stdio: "inherit", shell: false });
   if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+function shellQuote(value) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function validateVersion(value) {

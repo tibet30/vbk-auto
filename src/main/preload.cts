@@ -98,6 +98,7 @@ const api: VbkApi = {
     providerIdFor: (accountName) => ipcRenderer.invoke("accounts:providerIdFor", accountName),
   },
   settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input), testNotification: () => ipcRenderer.invoke("settings:testNotification"), openNotificationSettings: () => ipcRenderer.invoke("settings:openNotificationSettings") },
+  updates: { status: () => ipcRenderer.invoke("updates:status"), check: () => ipcRenderer.invoke("updates:check"), download: () => ipcRenderer.invoke("updates:download"), openInstaller: () => ipcRenderer.invoke("updates:openInstaller"), showInstallerInFolder: () => ipcRenderer.invoke("updates:showInstallerInFolder"), quitAndInstall: () => ipcRenderer.invoke("updates:quitAndInstall") },
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword), suggestPoi: (keyword) => ipcRenderer.invoke("contacts:suggestPoi", keyword) },
   cover: {
     uploadManual: (args) => ipcRenderer.invoke("cover:uploadManual", args),
@@ -121,6 +122,7 @@ const api: VbkApi = {
     onWorkflowTaskUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, task: unknown) => listener(task as never); ipcRenderer.on("workflow-task:updated", handler); return () => ipcRenderer.removeListener("workflow-task:updated", handler); },
     onPlanningStateUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, localProductId: unknown, state: unknown) => listener(localProductId as string, state as never); ipcRenderer.on("planning:updated", handler); return () => ipcRenderer.removeListener("planning:updated", handler); },
     onPageReady(listener) { const handler = () => listener(); ipcRenderer.on("vbk:page-ready", handler); return () => ipcRenderer.removeListener("vbk:page-ready", handler); },
+    onUpdateChanged(listener) { const handler = (_event: Electron.IpcRendererEvent, state: unknown) => listener(state as never); ipcRenderer.on("updates:changed", handler); return () => ipcRenderer.removeListener("updates:changed", handler); },
   },
   operationLog: {
     load: (query) => ipcRenderer.invoke("operationLog:load", query),

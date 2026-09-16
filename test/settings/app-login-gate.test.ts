@@ -4,21 +4,30 @@ import fs from "node:fs";
 
 const read = (file: string) => fs.readFileSync(file, "utf8");
 const root = read("src/renderer/app/app.main.tsx");
+const frame = read("src/renderer/app/views/shell/AppFrame.tsx");
 const login = read("src/renderer/app/auth/LoginPage.tsx");
 const service = read("src/main/infrastructure/tibet-auth.ts");
 const ipc = read("src/main/ipc/app-auth-ipc.ts");
 
 test("应用根节点先通过 app auth gate，认证后才挂载现有工作台", () => {
-  assert.match(root, /auth\.phase\s*!==\s*"authenticated"/);
+  assert.match(root, /auth\.phase\s*===\s*"authenticated"\s*&&\s*auth\.user/);
   assert.match(root, /<AppLoginPage\s+controller=\{auth\}/);
-  assert.match(root, /<AuthenticatedWorkspace\s+key=\{auth\.user\?\.id\}\s*\/>/);
+  assert.match(root, /<AuthenticatedWorkspace\s+key=\{auth\.user\.id\}\s*\/>/);
+});
+
+test("全局状态栏与更新弹窗在登录判断之外渲染，未登录也能检查更新", () => {
+  assert.match(root, /<AppUpdateProvider>/);
+  assert.match(root, /<AppFrame>/);
+  assert.match(frame, /\{children\}/);
+  assert.match(frame, /<AppStatusBar\s*\/>/);
+  assert.match(frame, /<UpdateDialog\s*\/>/);
 });
 
 test("切换应用账号会清理上一账号的产品恢复指针并重挂工作台", () => {
   const context = read("src/renderer/app/auth/AppAuthContext.tsx");
   assert.match(context, /await bridge\.appAuth\.switchAccount\(userId\)/);
   assert.match(context, /localStorage\.removeItem\("vbk:activeLocalProductId"\)/);
-  assert.match(root, /key=\{auth\.user\?\.id\}/);
+  assert.match(root, /key=\{auth\.user\.id\}/);
 });
 
 test("登录页明确区分应用账号与 VBK 账号，并具备验证码刷新和错误恢复", () => {

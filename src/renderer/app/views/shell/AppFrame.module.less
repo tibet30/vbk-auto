@@ -1,0 +1,15 @@
+/* 应用外框：上方是可滚动的主体，下方是常驻的全局状态栏。 */
+.frame {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}

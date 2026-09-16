@@ -4,9 +4,9 @@ import process from "node:process";
 const argsByTarget = {
   all: [],
   "mac:dir": ["--dir", "--mac"],
-  "mac:universal": ["--mac", "dmg", "--universal"],
-  "mac:x64": ["--mac", "dmg", "--x64"],
-  "mac:arm64": ["--mac", "dmg", "--arm64"],
+  "mac:universal": ["--mac", "dmg", "zip", "--universal"],
+  "mac:x64": ["--mac", "dmg", "zip", "--x64"],
+  "mac:arm64": ["--mac", "dmg", "zip", "--arm64"],
   win: ["--win", "nsis", "--x64"],
   "win:dir": ["--dir", "--win", "--x64"],
 };

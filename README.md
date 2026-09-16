@@ -40,6 +40,65 @@ npm run release:local -- --dry-run # 只预览版本和 tag，不改文件
 
 发布指令会把 `release/三人同游-<version>-universal.dmg` 和 `release/三人同游-<version>-x64-setup.exe` 都作为必需产物。Windows 安装包推荐在 Windows 机器上构建；在非 Windows 机器上设置 `VBK_ALLOW_CROSS_PACKAGE=1` 时，会复用 `better-sqlite3` 的 Windows 预编译文件并输出未签名安装包。
 
+macOS 手动覆盖升级发布（自建更新源，App 内提示用户下载 DMG 后覆盖安装）：
+
+```bash
+npm run release:manual-update:mac                # dry-run：只列出需要的 macOS 更新产物
+npm run release:manual-update:mac -- --build     # 构建并校验当前 package.json 版本
+npm run release:manual-update:mac -- 1.1.7 --build # 构建并校验指定版本
+```
+
+该命令会运行类型检查、构建 macOS universal `dmg + zip`，并校验：
+
+- `release/三人同游-<version>-universal.dmg`
+- `release/三人同游-<version>-universal.zip`
+- 对应 `.blockmap`
+- `release/latest-mac.yml`
+
+当前无 Developer ID 时，App 不做静默自动替换安装；用户在 App 设置页检查到新版后，下载 DMG，打开安装包，并手动拖到「应用程序」覆盖旧版。`latest-mac.yml` 仍保留 zip 路径，方便以后有 Developer ID 签名后恢复真正的自动安装。
+
+上传到自建更新源默认是 dry-run：
+
+```bash
+npm run release:upload-online:mac -- 1.1.7
+```
+
+确认要上传时才加 `--confirm`：
+
+```bash
+npm run release:upload-online:mac -- 1.1.7 --confirm
+```
+
+上传脚本会把 DMG、zip、blockmap 和 `latest-mac.yml` 放到服务器的稳定更新目录。默认目标为 `sx2:/data/www/web/downloads/sanrentongyou/updates/stable`，可用环境变量覆盖：
+
+```bash
+VBK_UPDATE_SSH_HOST=sx2 \
+VBK_UPDATE_REMOTE_ROOT=/data/www/web/downloads/sanrentongyou/updates \
+npm run release:upload-online:mac -- 1.1.7 --confirm
+```
+
+上传后读取线上清单确认：
+
+```bash
+curl -fsSL https://www.atdtour.com/downloads/sanrentongyou/updates/stable/latest-mac.yml
+```
+
+也可以直接发布当前 `package.json` 版本。该命令会先检查 `release/` 中是否已经存在同版本 macOS 产物；如果存在会直接报错，要求先升级版本号，避免覆盖旧包：
+
+```bash
+npm run release:publish-current:mac -- --dry-run # 预览，不打包、不上传
+npm run release:publish-current:mac              # 检查 → 打包 → 校验 → 上传
+```
+
+执行流程：
+
+1. 读取当前 `package.json` 的 `version`。
+2. 如果 `release/三人同游-<version>-universal.dmg`、zip 或对应 blockmap 已存在，立即失败。
+3. 运行 `npm run check`。
+4. 运行 `npm run package:mac:universal`。
+5. 校验 `latest-mac.yml` 与 DMG/zip/blockmap。
+6. 执行 `npm run release:upload-online:mac -- <version> --confirm` 上传到更新源。
+
 构建 Windows 安装包：
 
 ```bash

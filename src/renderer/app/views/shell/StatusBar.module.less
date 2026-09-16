@@ -1,0 +1,93 @@
+/* 全局状态栏：跨登录态常驻，承载更新标识与版本信息。 */
+.bar {
+  flex: 0 0 auto;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 0 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  user-select: none;
+}
+
+.updateChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  max-width: 420px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.updateChip:hover { background: var(--muted); color: var(--foreground); }
+.updateChip[data-tone='ready'] { color: var(--ai-teal-foreground); }
+
+.chipText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.badge {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.updateChip[data-tone='ready'] .badge { background: color-mix(in srgb, var(--ai-teal) 14%, var(--surface)); color: var(--ai-teal-foreground); }
+.updateChip[data-tone='error'] .badge { background: #fef2f2; color: var(--destructive); }
+
+.icon { width: 12px; height: 12px; flex: 0 0 auto; display: block; }
+.iconMuted { color: var(--subtle); }
+.iconReady { color: var(--ai-teal); }
+.iconError { color: var(--destructive); }
+.spin { animation: spin 900ms linear infinite; }
+
+/* 「有新版本」的呼吸点：不抢眼，但能在余光里被注意到。 */
+.pulse {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--ai-teal);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.spacer { flex: 1 1 auto; min-width: 0; }
+
+.track { width: 92px; height: 4px; overflow: hidden; border-radius: 999px; background: var(--muted); }
+.track > span { display: block; height: 100%; border-radius: inherit; background: var(--ai-teal); transition: width 160ms ease; }
+.trackLabel { font-variant-numeric: tabular-nums; }
+
+.version { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+.quietBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.quietBtn:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
+.quietBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+@media (max-width: 720px) {
+  .updateChip { max-width: 240px; }
+  .version { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse { animation: none; }
+  .spin { animation-duration: 1.8s; }
+}

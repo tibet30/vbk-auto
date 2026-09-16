@@ -61,7 +61,12 @@ function releaseArtifacts(version) {
     {
       name: "macOS universal DMG",
       file: path.join("release", `三人同游-${version}-universal.dmg`),
-      extraFiles: [path.join("release", `三人同游-${version}-universal.dmg.blockmap`)],
+      extraFiles: [
+        path.join("release", `三人同游-${version}-universal.dmg.blockmap`),
+        path.join("release", `三人同游-${version}-universal.zip`),
+        path.join("release", `三人同游-${version}-universal.zip.blockmap`),
+        path.join("release", "latest-mac.yml"),
+      ],
       canBuild: process.platform === "darwin",
       command: ["npm", ["run", "package:mac:universal"]],
       missingMessage: "macOS universal packages must be built on macOS.",

@@ -1,5 +1,7 @@
 .loginPage {
-  min-height: 100vh;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(360px, 44%) minmax(420px, 1fr);
   background: var(--surface);
@@ -8,7 +10,7 @@
 .contextPanel {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 0;
   padding: 36px clamp(36px, 6vw, 84px) 30px;
   background: #f4f4f5;
   border-right: 1px solid var(--border);
@@ -84,7 +86,7 @@
 .submitButton:disabled { cursor: not-allowed; opacity: .48; }
 .helpText { margin: -5px 0 0; text-align: center; color: var(--muted-foreground); font-size: 11px; }
 
-.statePage { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; text-align: center; background: var(--bg); }
+.statePage { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; text-align: center; background: var(--bg); }
 .statePage > img { width: 42px; height: 42px; margin-bottom: 30px; object-fit: contain; }
 .statePage > svg { margin-bottom: 14px; color: var(--muted-foreground); }
 .statePage h1 { margin: 0 0 8px; font-size: 18px; }

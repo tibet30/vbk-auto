@@ -52,11 +52,13 @@ import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
 import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
 import { registerAgentIpc } from "./ipc/agent-ipc.js";
 import { registerMemoryIpc } from "./ipc/memory-ipc.js";
+import { registerUpdateIpc } from "./ipc/update-ipc.js";
 import { ProductTaskScheduler } from "./application/product-task-scheduler.js";
 import type { ProductWorkflowTask } from "../shared/contracts.js";
 import type { MainIpcContext } from "./ipc/context.js";
 import { ProductWorkflowCoordinator } from "./application/product-workflow-coordinator.js";
 import { ProductMutationService } from "./application/product-mutation-service.js";
+import { AppUpdateService } from "./application/app-update-service.js";
 import { createRemoteProductMirror } from "./application/remote-product-mirror.js";
 import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
 import { cleanStaleChromiumProfileDb } from "./infrastructure/chromium-profile-cleanup.js";
@@ -81,10 +83,17 @@ applyAppMetadata();
 applyStartupCommandLineSwitches();
 installProcessErrorHandlers();
 
+const userDataDirOverride = process.env.VBK_USER_DATA_DIR?.trim();
+if (userDataDirOverride) {
+  app.setPath("userData", userDataDirOverride);
+}
+
 let window: BrowserWindow;
 let db: VbkDatabase;
 let browser: VbkBrowser;
 let automation: DraftAutomation;
+let updateService: AppUpdateService;
+let isQuittingForUpdate = false;
 const notifiedAgentAttention = new Map<string, string>();
 const notifiedWorkflowAttention = new Map<string, string>();
 
@@ -346,6 +355,7 @@ function registerIpc(
   registerPlanningV2Ipc(context);
   registerAgentIpc(context);
   registerMemoryIpc(context);
+  registerUpdateIpc(updateService);
 }
 
 function scheduleMemoryMaintenance(memoryService: MemoryService): NodeJS.Timeout {
@@ -417,6 +427,10 @@ app.whenReady().then(async () => {
     noteVbkAccountActive: vbkBindings.noteVbkAccountActive,
   });
   const productWorkflows = new ProductWorkflowCoordinator();
+  updateService = new AppUpdateService({
+    getWindow: () => window,
+    onQuitAndInstall: () => { isQuittingForUpdate = true; },
+  });
   const memoryService = new MemoryService({
     db,
     getOwnerUserId: vbkBindings.getExtensionUserId,
@@ -487,6 +501,8 @@ app.whenReady().then(async () => {
   context.resumeProductTask = (taskId, mode) => productTaskScheduler.resume(taskId, mode);
   registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
   await openMainWindow();
+  updateService.scheduleStartupCheck();
+  updateService.schedulePeriodicCheck();
   // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
   void browser.initialise()
     .then(() => vbkBindings.afterBrowserReady())
@@ -517,6 +533,7 @@ app.on("window-all-closed", () => {
 });
 let isDisposing = false;
 app.on("before-quit", (event) => {
+  if (isQuittingForUpdate) return;
   if (isDisposing || !browser) return;
   isDisposing = true;
   event.preventDefault();

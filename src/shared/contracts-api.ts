@@ -23,6 +23,7 @@ import type {
   ProductSummary,
   ProductWorkflowTask,
   Settings,
+  AppUpdateState,
   SystemNotificationResult,
   VehicleResourceMatch,
   HotelResourceMatch,
@@ -257,6 +258,14 @@ export interface VbkApi {
     testNotification(): Promise<SystemNotificationResult>;
     openNotificationSettings(): Promise<void>;
   };
+  updates: {
+    status(): Promise<AppUpdateState>;
+    check(): Promise<AppUpdateState>;
+    download(): Promise<AppUpdateState>;
+    openInstaller(): Promise<void>;
+    showInstallerInFolder(): Promise<void>;
+    quitAndInstall(): Promise<void>;
+  };
   events: {
     onAgentUpdated(listener: (snapshot: AgentSnapshot) => void): () => void;
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
@@ -266,6 +275,7 @@ export interface VbkApi {
     onPlanningStateUpdated(listener: (localProductId: string, state: PlanningGenerationState) => void): () => void;
     /** VBK 页面加载完成、SPA 渲染就绪后推送；renderer 收到后触发 checkVbkLogin。 */
     onPageReady(listener: () => void): () => void;
+    onUpdateChanged(listener: (state: AppUpdateState) => void): () => void;
   };
   operationLog: {
     load(query?: OperationLogQuery): Promise<OperationLogPage>;

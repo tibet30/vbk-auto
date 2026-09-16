@@ -34,10 +34,15 @@ files:
 asarUnpack:
   - "**/*.node"
 
+publish:
+  - provider: generic
+    url: https://www.atdtour.com/downloads/sanrentongyou/updates/stable
+
 mac:
   icon: build/icon.icns
   target:
     - dmg
+    - zip
   # 产物名带上架构后缀，避免 x64 与 arm64 同名覆盖（如 三人同游-1.1.0-x64.dmg）
   artifactName: "${productName}-${version}-${arch}.${ext}"
   category: public.app-category.travel

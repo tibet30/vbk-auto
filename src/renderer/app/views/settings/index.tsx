@@ -5,6 +5,7 @@ import { AiProviderBlock } from "./minimax-block";
 import { VbkLoginBlock } from "./vbk-login-block";
 import { AppAccountBlock } from "./app-account-block";
 import { NotificationBlock } from "./notification-block";
+import { UpdateBlock } from "./update-block";
 
 export function AppSettingsPage({ model }: { model: AppModel }) {
   return <div className={styles.settingsPage}>
@@ -14,6 +15,7 @@ export function AppSettingsPage({ model }: { model: AppModel }) {
     </header>
     <div className={styles.settingsStack}>
       <AppAccountBlock />
+      <UpdateBlock />
       <NotificationBlock model={model} />
       <VbkLoginBlock model={model} />
       <AiProviderBlock model={model} />

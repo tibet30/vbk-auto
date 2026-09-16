@@ -22,7 +22,7 @@ export function UpdateBlock() {
         </span>
         <div className={styles.headingBody}>
           <h2 id="update-title">软件更新</h2>
-          <p>从自有服务器获取 macOS 新版本，下载后由你确认安装。</p>
+          <p>从自有服务器获取新版本，下载后由你确认安装。</p>
         </div>
         <span className={styles.status} data-tone={view.tone}>{view.badge}</span>
       </div>
@@ -77,7 +77,7 @@ export function UpdateBlock() {
 
           {state?.downloaded && (
             <button type="button" className={`${shared.btn} ${shared.btnSm}`} data-variant="secondary" disabled={busy !== null} onClick={() => void showInstallerInFolder()}>
-              <FolderOpen size={14} />在 Finder 中显示
+              <FolderOpen size={14} />在文件夹中显示
             </button>
           )}
 

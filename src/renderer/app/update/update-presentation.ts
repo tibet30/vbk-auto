@@ -29,11 +29,11 @@ export interface UpdatePresentation {
 const ERROR_CODES: Record<AppUpdateErrorCode, { reason: string; advice: string }> = {
   unsupported: {
     reason: "运行环境不支持",
-    advice: "只有打包后的 macOS 安装版能检查更新：开发模式（未打包）会在应用目录里找不到更新产物。请用 DMG 安装版本验证。",
+    advice: "只有打包后的 macOS 或 Windows 安装版能检查更新：开发模式（未打包）会在应用目录里找不到更新产物。请用安装版验证。",
   },
   feed_missing: {
     reason: "更新源缺少更新文件",
-    advice: "服务器上还没有这个版本的 latest-mac.yml 与安装包。如果你是发布方，请先上传更新文件再回来检查。",
+    advice: "服务器上还没有当前平台的更新清单与安装包。如果你是发布方，请先上传更新文件再回来检查。",
   },
   feed_unreachable: {
     reason: "更新源不可达",
@@ -41,7 +41,7 @@ const ERROR_CODES: Record<AppUpdateErrorCode, { reason: string; advice: string }
   },
   manifest_invalid: {
     reason: "更新清单异常",
-    advice: "更新清单缺少有效版本号，请让维护人员重新上传 latest-mac.yml。",
+    advice: "更新清单缺少有效版本号，请让维护人员重新上传更新清单。",
   },
   installer_missing: {
     reason: "清单里没有安装包",
@@ -57,16 +57,15 @@ const ERROR_CODES: Record<AppUpdateErrorCode, { reason: string; advice: string }
   },
 };
 
-/** 下载 → 打开安装包 → 拖进应用程序，这是 macOS 上唯一可靠的落地路径。 */
 const DOWNLOAD_STEPS = [
   "点击「下载新版」，安装包会保存到「下载」文件夹。",
   "下载完成后点击「打开安装包」。",
-  "把「三人同游」拖进「应用程序」覆盖旧版本，再重新打开应用。",
+  "按安装包提示覆盖旧版本，再重新打开应用。",
 ];
 
 const INSTALL_STEPS = [
   "点击「打开安装包」启动安装程序。",
-  "把「三人同游」拖进「应用程序」覆盖旧版本。",
+  "按安装包提示覆盖旧版本。",
   "重新打开应用，在设置里确认版本号已经更新。",
 ];
 
@@ -81,8 +80,8 @@ export function presentUpdate(state: AppUpdateState | null, loading = false): Up
       ...base(
         "muted",
         "不可用",
-        "当前是开发模式，无法在线更新",
-        "在线更新只在 DMG 安装的版本里启用；开发模式读取的版本号与更新产物都不完整。",
+        "当前运行方式无法在线更新",
+        "在线更新只在安装版里启用；开发模式读取的版本号与更新产物都不完整。",
       ),
       advice: ERROR_CODES.unsupported.advice,
       reason: ERROR_CODES.unsupported.reason,

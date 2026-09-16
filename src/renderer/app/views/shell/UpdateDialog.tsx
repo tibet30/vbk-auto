@@ -168,7 +168,7 @@ export function UpdateDialog() {
         <footer className={styles.foot}>
           {state?.downloaded && (
             <button type="button" className={`${shared.btn} ${shared.btnSm}`} data-variant="secondary" disabled={busy !== null} onClick={() => void showInstallerInFolder()}>
-              <FolderOpen size={14} />在 Finder 中显示
+              <FolderOpen size={14} />在文件夹中显示
             </button>
           )}
           <span className={styles.footSpacer} />

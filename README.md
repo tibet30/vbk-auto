@@ -43,42 +43,73 @@ npm run release:local -- --dry-run # 只预览版本和 tag，不改文件
 macOS 在线更新发布（自建更新源，App 内提示用户下载 DMG 后覆盖安装）：
 
 ```bash
+npm run release:online                # 推荐：打包 macOS + Windows，随后并行上传两套更新文件
+npm run release:online -- --dry-run   # 预览，不打包、不上传
 npm run release:online:mac
 ```
 
-该命令固定读取当前 `package.json` 的 `version`，不接收版本参数；要发新版时先改版本号。执行时会运行类型检查、构建 macOS universal `dmg + zip`，校验产物，然后上传到更新源：
+这些发布命令固定读取当前 `package.json` 的 `version`，不接收版本参数；要发新版时先改版本号。`release:online` 会运行类型检查，依次构建 macOS universal 包和 Windows x64 安装包，全部校验通过后并行上传两套更新文件到更新源。若 `release/` 中已经存在同版本产物，会直接报错，避免覆盖旧包。
+
+macOS 会生成并上传：
 
 - `release/三人同游-<version>-universal.dmg`
 - `release/三人同游-<version>-universal.zip`
 - 对应 `.blockmap`
 - `release/latest-mac.yml`
 
-当前无 Developer ID 时，App 不做静默自动替换安装；用户在 App 设置页检查到新版后，下载 DMG，打开安装包，并手动拖到「应用程序」覆盖旧版。`latest-mac.yml` 仍保留 zip 路径，方便以后有 Developer ID 签名后恢复真正的自动安装。
+Windows 会生成并上传：
 
-上传脚本会把 DMG、zip、blockmap 和 `latest-mac.yml` 放到服务器的稳定更新目录。默认目标为 `sx2:/data/www/web/downloads/sanrentongyou/updates/stable`，可用环境变量覆盖：
+- `release/三人同游-<version>-x64-setup.exe`
+- `release/三人同游-<version>-x64-setup.exe.blockmap`
+- `release/latest.yml`
+
+当前无 Developer ID / Windows 签名时，App 不做静默自动替换安装；用户在 App 设置页检查到新版后，下载安装包，打开安装包并按提示覆盖旧版。`latest-mac.yml` 仍保留 zip 路径，方便以后有 Developer ID 签名后恢复真正的自动安装。
+
+上传脚本会把安装包、blockmap 和平台清单放到服务器的稳定更新目录。默认目标为 `sx2:/data/www/web/downloads/sanrentongyou/updates/stable`，可用环境变量覆盖：
 
 ```bash
 VBK_UPDATE_SSH_HOST=sx2 \
 VBK_UPDATE_REMOTE_ROOT=/data/www/web/downloads/sanrentongyou/updates \
-npm run release:online:mac
+npm run release:online
 ```
 
 上传后读取线上清单确认：
 
 ```bash
 curl -fsSL https://www.atdtour.com/downloads/sanrentongyou/updates/stable/latest-mac.yml
+curl -fsSL https://www.atdtour.com/downloads/sanrentongyou/updates/stable/latest.yml
 ```
 
-该命令会先检查 `release/` 中是否已经存在同版本 macOS 产物；如果存在会直接报错，要求先升级版本号，避免覆盖旧包。
-
-执行流程：
+总发布执行流程：
 
 1. 读取当前 `package.json` 的 `version`。
-2. 如果 `release/三人同游-<version>-universal.dmg`、zip 或对应 blockmap 已存在，立即失败。
+2. 如果 `release/` 中已经有同版本 macOS 或 Windows 产物，立即失败。
 3. 运行 `npm run check`。
 4. 运行 `npm run package:mac:universal`。
-5. 校验 `latest-mac.yml` 与 DMG/zip/blockmap。
-6. 上传到更新源。
+5. 运行 `npm run package:win`（非 Windows 机器会自动使用 `VBK_ALLOW_CROSS_PACKAGE=1` 交叉构建未签名安装包）。
+6. 校验 `latest-mac.yml`、`latest.yml` 与所有安装包/blockmap。
+7. 并行上传 macOS 与 Windows 更新文件到更新源。
+
+Windows 在线更新发布（自建更新源，App 内提示用户下载 EXE 安装包后覆盖安装）：
+
+```bash
+npm run release:online:win -- --dry-run
+npm run release:online:win
+```
+
+该命令固定读取当前 `package.json` 的 `version`，不接收版本参数；要发新版时先改版本号。执行时会运行类型检查、构建 Windows x64 NSIS 安装包，校验产物，然后上传到更新源：
+
+- `release/三人同游-<version>-x64-setup.exe`
+- `release/三人同游-<version>-x64-setup.exe.blockmap`
+- `release/latest.yml`
+
+Windows 安装包推荐在 Windows 机器上构建；在非 Windows 机器上执行该命令时，会自动设置 `VBK_ALLOW_CROSS_PACKAGE=1` 做未签名交叉构建，仅适合生成当前过渡阶段的手动安装包。真正的 Windows 安装、覆盖升级、开始菜单/桌面快捷方式验收仍需要 Windows 机器执行。
+
+上传后读取线上清单确认：
+
+```bash
+curl -fsSL https://www.atdtour.com/downloads/sanrentongyou/updates/stable/latest.yml
+```
 
 构建 Windows 安装包：
 

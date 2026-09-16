@@ -45,7 +45,7 @@ export function describeUpdateFailure(error: unknown): AppUpdateFailureInfo {
   if (SEMVER_PATTERN.test(detail)) {
     return {
       code: "manifest_invalid",
-      message: "更新源上的清单缺少有效版本号，服务器上的 latest-mac.yml 可能未更新或已损坏。",
+      message: "更新源上的清单缺少有效版本号，服务器上的更新清单可能未更新或已损坏。",
       detail,
     };
   }

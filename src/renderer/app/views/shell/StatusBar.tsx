@@ -46,7 +46,7 @@ export function AppStatusBar() {
         className={styles.quietBtn}
         onClick={() => void check()}
         disabled={!canCheck}
-        title={state?.supported ? "立即检查服务器上的新版本" : "只有打包后的 macOS 安装版支持在线更新"}
+        title={state?.supported ? "立即检查服务器上的新版本" : "只有打包后的 macOS 或 Windows 安装版支持在线更新"}
       >
         {busy === "checking" ? <LoaderCircle size={12} className={styles.spin} /> : <RefreshCw size={12} />}
         检查更新

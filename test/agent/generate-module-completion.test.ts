@@ -110,3 +110,39 @@ test("generate_product_module 的 commercial 路径会执行确定性商业补�
   assert.ok((saved.product.commercial as { inventory?: unknown }).inventory);
   assert.equal(AI_WRITABLE_PATHS.packageName, "/commercial/packageName");
 });
+
+test("generate_product_module 的 presentation 模型失败时会确定性补齐图文", async () => {
+  let saved = commercialDraft();
+  saved.product.presentation = undefined;
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>, status?: ProductSummary["status"]) => {
+      saved = { ...saved, product, status: status ?? saved.status };
+    },
+    getSetting: () => undefined,
+    addResearchTask: () => "task",
+  };
+  const tools = createAgentBusinessTools({
+    db: store as any,
+    browser: {} as any,
+    automation: {} as any,
+    productWorkflows: {
+      runExclusive: async (_id: string, _kind: string, work: () => Promise<unknown>) => work(),
+      runVbkPageExclusive: async <T>(work: () => Promise<T>) => work(),
+    } as any,
+    productMutations: new ProductMutationService(store),
+    generateStage: async () => { throw new Error("模型未通过结构化工具返回本阶段模块。"); },
+    disambiguatePoiOption: async () => ({ pickedText: null, confidence: 0 }),
+    disambiguateStationOption: async () => ({ pickedText: null, reasoning: "" }),
+    emitProduct: () => undefined,
+  });
+  const tool = tools.find((item) => item.name === "generate_product_module");
+  assert.ok(tool);
+  const result = await tool!.execute({ stage: "presentation" }, { localProductId: saved.id, accountKey: "a", productVersion: "v" });
+  const payload = JSON.parse(result.content) as { accepted: Array<{ module: string; acceptedFields?: string[] }> };
+  assert.ok(payload.accepted.some((item) => item.module === "presentation" && item.acceptedFields?.includes("recommendations")));
+  const presentation = saved.product.presentation as { recommendation: string; features: string; recommendations: unknown[]; cover: { poi: string } };
+  assert.match(presentation.recommendation, /成都/);
+  assert.equal(presentation.recommendations.length, 3);
+  assert.equal(presentation.cover.poi, "宽窄巷子");
+});

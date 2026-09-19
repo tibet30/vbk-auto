@@ -385,6 +385,13 @@ test("AI 替换父对象时保留已确认的封面身份和运行时资源", ()
       },
     },
     operations: {
+      hotelSource: "nonPlatform",
+      hotelTier: "当地5钻酒店/-38",
+      transport: "charter",
+      pickupCity: "厦门",
+      reusePickupForDropoff: true,
+      mealsIncluded: false,
+      bookingControls: { butler: { contactCardId: 1, displayName: "管家A", providerId: 100 } },
       vehicleResource: { resourceGroupId: 2206240, resourceGroupName: "5座经济型" },
     },
   };
@@ -394,5 +401,7 @@ test("AI 替换父对象时保留已确认的封面身份和运行时资源", ()
   ]);
   assert.equal((result.presentation as any).cover.imageId, 28501144);
   assert.equal((result.presentation as any).cover.imageUrl, "https://images.example/cover.jpg");
+  assert.equal((result.operations as any).hotelTier, "当地5钻酒店/-38");
+  assert.deepEqual((result.operations as any).bookingControls.butler, { contactCardId: 1, displayName: "管家A", providerId: 100 });
   assert.equal((result.operations as any).vehicleResource.resourceGroupId, 2206240);
 });

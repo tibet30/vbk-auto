@@ -117,6 +117,33 @@ test("创建后的自动执行提示和端到端测试说明不能进入锁定�
   assert.ok(!locked.pois.some((poi) => /端到端|资料准备|询问用户|明确审批/.test(poi)));
 });
 
+test("Markdown 日期标题不会污染每日锁定景点", () => {
+  const product = draft("**10 月 4 号 D1：** 西宁 - 青海湖 - 茶卡盐湖 - 天峻县（天峻石林星空）\n**10 月 5 号 D2：** 天峻 - 德令哈 - 大柴旦翡翠湖");
+  Object.assign(product.product.basicInfo!, { meetingCity: "西宁", destinationCity: "西宁", destination: "西宁" });
+  const locked = extractLockedConstraints(product);
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["西宁", "青海湖", "茶卡盐湖", "天峻县"] },
+    { day: 2, spots: ["天峻", "德令哈", "大柴旦翡翠湖"] },
+  ]);
+  assert.ok(!locked.pois.some((poi) => /\*\*|10 月|D[12]/.test(poi)));
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "青海湖" }, { name: "茶卡盐湖" }] },
+    { day: 2, spots: [{ name: "德令哈" }, { name: "大柴旦翡翠湖" }] },
+  ]), undefined);
+});
+
+test("用户明确删除过境短地名后完整行程允许移除该 POI", () => {
+  const product = draft("D1：德令哈 - 大柴旦翡翠湖\nD2：瓜州 - 敦煌");
+  product.messages = [
+    { id: "m1", role: "user", content: "删除德令哈这个过境城市 POI。", createdAt: "2026-09-18T00:00:00.000Z" },
+    { id: "m2", role: "user", content: "删除瓜州、敦煌这两个散团城市 POI。", createdAt: "2026-09-18T00:00:01.000Z" },
+  ] as never;
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "大柴旦翡翠湖" }] },
+    { day: 2, spots: [] },
+  ]), undefined);
+});
+
 test("端到端验证授权说明不能进入锁定景点", () => {
   const product = draft("日喀则2日游\n4钻酒店\nD1、火车站接-帕拉庄园【配讲解】-江孜宗山古堡【配讲解】-白居寺-住日喀则\nD2、日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】--扎实伦布寺--送火车\n\n端到端的再创建产品验证。本次已授权在本地方案准备完成后录入 VBK 草稿；如果中途有问题，先修复共享问题，再重新创建新产品复验。");
   const locked = extractLockedConstraints(product);

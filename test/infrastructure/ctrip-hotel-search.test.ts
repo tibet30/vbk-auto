@@ -9,12 +9,20 @@ import {
   limitItineraryHotelStays,
   hotelAnchorNameForDay,
   hotelCandidatesForTier,
+  shouldResolveItineraryHotelForDay,
 } from "../../src/main/infrastructure/ctrip-hotel-search.js";
 import { hasItineraryHotelStay } from "../../src/shared/itinerary-hotel.js";
 
 test("送站日的酒店“无”不会进入酒店候选检索", () => {
   assert.equal(hasItineraryHotelStay("无"), false);
   assert.equal(hasItineraryHotelStay("维也纳酒店"), true);
+});
+
+test("空酒店字段会按产品 nights 进入携程行程酒店解析", () => {
+  assert.equal(shouldResolveItineraryHotelForDay({ day: 1, hotel: "" }, 0, 1), true);
+  assert.equal(shouldResolveItineraryHotelForDay({ day: 2, hotel: "" }, 1, 1), false);
+  assert.equal(shouldResolveItineraryHotelForDay({ day: 1, hotel: "无" }, 0, 1), false);
+  assert.equal(shouldResolveItineraryHotelForDay({ day: 1, hotel: "维也纳酒店" }, 0, 0), true);
 });
 
 test("酒店候选解析只保留产品 nights 对应的住宿日", () => {

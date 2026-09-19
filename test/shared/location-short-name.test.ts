@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isAdministrativeLocationName,
   normaliseProductLocationFields,
   toPlatformShortLocationName,
 } from "../../src/shared/location-short-name.js";
@@ -29,6 +30,13 @@ test("景区、城区和其它非行政名称不被误裁", () => {
   for (const value of ["宽窄巷子景区", "成都市区", "高新区园区", "老城片区", "大学校区", "矿区"]) {
     assert.equal(toPlatformShortLocationName(value), value);
   }
+});
+
+test("行政地名识别只匹配明确行政地点", () => {
+  assert.equal(isAdministrativeLocationName("天峻县"), true);
+  assert.equal(isAdministrativeLocationName("西湖区"), true);
+  assert.equal(isAdministrativeLocationName("宽窄巷子"), false);
+  assert.equal(isAdministrativeLocationName("成都市区"), false);
 });
 
 test("产品地点归一以 meetingCity 优先，并只处理明确地点字段", () => {

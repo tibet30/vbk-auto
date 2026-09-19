@@ -195,7 +195,21 @@ test("住宿日缺酒店候选才阻塞，无住宿日不要求酒店候选", ()
   assert.equal(legacy.issues.some((issue) => issue.label.includes("酒店候选")), false);
 
   const noStay = completeDraft();
+  (noStay.product.itinerary as Array<Record<string, unknown>>)[0]!.hotel = "—";
   assert.equal(evaluatePreparationCompletion(noStay).ready, true);
+});
+
+test("产品有住宿晚数但每日酒店为空时，审批前必须要求携程酒店候选", () => {
+  const product = completeDraft();
+  (product.product.itinerary as Array<Record<string, unknown>>)[0]!.hotel = "";
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.equal(evaluation.ready, false);
+  assert.equal(evaluation.currentStage, "completion");
+  assert.equal(evaluation.currentNode, "hotelResolution");
+  assert.ok(evaluation.missing.some((item) => item.includes("酒店候选：第 1 天")));
+  assert.match(evaluation.blockingReasons.join("\n"), /行程录入页使用携程平台酒店/);
+  assert.ok(evaluation.allowedActions.includes("resolve_itinerary_hotels"));
+  assert.ok(!evaluation.allowedActions.includes("request_approval"));
 });
 
 test("跟团游不要求用车资源组，私家团缺资源组会阻塞", () => {
@@ -222,6 +236,23 @@ test("缺天数时停在 foundation，不允许 request_approval", () => {
   assert.ok(evaluation.missing.some((item) => item.includes("出行天数") || item.includes("days")));
   assert.ok(!evaluation.allowedActions.includes("request_approval"));
   assert.ok(evaluation.prohibitedActions.includes("request_approval"));
+});
+
+test("基础字段齐全但无用户想法和行程时进入 itinerary，允许 AI 自主生成行程", () => {
+  const product = completeDraft();
+  product.messages = [];
+  (product.product.basicInfo as Record<string, unknown>).userIdea = "";
+  product.product.itinerary = [];
+  product.product.presentation = undefined;
+  delete (product.product.commercial as Record<string, unknown>).packageName;
+  delete (product.product.commercial as Record<string, unknown>).pricing;
+
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.equal(evaluation.ready, false);
+  assert.equal(evaluation.currentStage, "itinerary");
+  assert.equal(evaluation.currentNode, "itineraryDraft");
+  assert.equal(evaluation.itineraryInputMode, "open");
+  assert.ok(evaluation.allowedActions.includes("generate_product_module"));
 });
 
 test("缺封面时停在 completion/cover，并开放 resolve_cover", () => {

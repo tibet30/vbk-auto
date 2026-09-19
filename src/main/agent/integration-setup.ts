@@ -11,6 +11,7 @@ import { preparationApprovalBlockReason } from '../planning/preparation-completi
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from './integration-guard.js';
 import { reconcileAgentShell } from './integration-reconcile.js';
 import { recordAgentUsage } from './integration-usage.js';
+import { estimateAiUsageCostCny } from '../../shared/ai-usage-cost.js';
 import { refreshSatisfiedResearchTasks } from '../operations/research-refresh.js';
 import { recoverResolvedHotelCandidates } from './hotel-candidate-recovery.js';
 import { repairProductForExplicitInstruction } from './user-instruction-repair.js';
@@ -34,6 +35,13 @@ export function installProductAgent(context: MainIpcContext): () => void {
           status:"ok",startedAt,endedAt:new Date().toISOString(),durationMs:Date.now()-Date.parse(startedAt),
           inputTokens:usage.inputTokens ?? null,outputTokens:usage.outputTokens ?? null,
           totalTokens:usage.inputTokens!==undefined && usage.outputTokens!==undefined ? usage.inputTokens+usage.outputTokens : null,
+          cachedTokens:usage.cachedTokens ?? null,
+          estimatedCostCny:estimateAiUsageCostCny({
+            model:profile.model,
+            inputTokens:usage.inputTokens ?? null,
+            outputTokens:usage.outputTokens ?? null,
+            cachedTokens:usage.cachedTokens ?? null,
+          }),
         }),
       });
     },

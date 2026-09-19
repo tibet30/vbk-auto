@@ -3,6 +3,7 @@ import type { CreateProductInput, ProductDetail } from "../../../../shared/contr
 import { DEFAULT_HOTEL_TIER, inferHotelTierFromUserText } from "../../../../shared/hotel-tiers.js";
 import { buildProductBriefMessageContent } from "../../../../shared/product-brief-message.js";
 import { defaultCommercialInventory } from "../../../data/commercial-defaults.js";
+import { creationDiagnostics } from "../../../application/product-diagnostics.js";
 import { now } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { defaultDailyTransport, isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
@@ -68,6 +69,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
       trafficLine: structuredClone(DEFAULT_TRAFFIC_LINE_CONFIG),
     },
     commercial: { inventory: defaultCommercialInventory() },
+    diagnostics: creationDiagnostics(input),
     itinerary: [],
   };
   return {

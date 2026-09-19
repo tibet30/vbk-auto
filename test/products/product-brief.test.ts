@@ -105,6 +105,11 @@ test("创建产品会保存用户初始想法，并限制为 1000 个字", async
   const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "想慢一点，多安排当地文化体验，住当地4钻。" });
   assert.equal((product.product.basicInfo as Record<string, unknown>).userIdea, "想慢一点，多安排当地文化体验，住当地4钻。");
   assert.equal((product.product.operations as Record<string, unknown>).hotelTier, "当地4钻酒店/-4");
+  const diagnostics = product.product.diagnostics as Record<string, Record<string, unknown>>;
+  assert.deepEqual(diagnostics.creationInput.destination, "太原");
+  assert.deepEqual(diagnostics.creationInput.productForm, "privateTour");
+  assert.deepEqual(diagnostics.creationInput.days, 2);
+  assert.deepEqual(diagnostics.creationInput.userIdea, "想慢一点，多安排当地文化体验，住当地4钻。");
   assert.match(product.messages[0].content, /住当地4钻/);
   assert.throws(
     () => db.createProduct({ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1001) }),

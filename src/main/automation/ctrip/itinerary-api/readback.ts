@@ -142,6 +142,7 @@ function checkDailyUseCar(dayLabel: string, expected: VbkDailyUseCar, actualRaw:
 
 /** 校验景点 POI：poiId + poiName 顺序。 */
 function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: string }>, actualInfos: InfoRecord[]): number {
+  if (expected.length === 0) return 0;
   const attractions = actualInfos.filter(isAttraction);
   if (!attractions.length) throw new Error(`${dayLabel} 回读缺少景点节点`);
   const allPois = attractions.flatMap((a) => Array.isArray(a.tourDailyPois) ? a.tourDailyPois as PoiRecord[] : []);

@@ -94,6 +94,22 @@ test("appendAiUsage 事件无费用时保留 Tibet lifetime estimatedCostCny", (
   assert.equal(next.lifetime.estimatedCostCny, 9.99);
 });
 
+test("appendAiUsage 为历史 MiniMax 事件补算缺失费用", () => {
+  const next = appendAiUsage(undefined, [
+    event({
+      id: "agent-a",
+      model: "MiniMax-M3",
+      stage: "agent",
+      inputTokens: 100_000,
+      outputTokens: 20_000,
+      totalTokens: 120_000,
+      estimatedCostCny: undefined,
+    }),
+  ]);
+  assert.equal(next.lifetime.estimatedCostCny, 0.378);
+  assert.equal(next.byStage.find((row) => row.stage === "agent")?.totals.estimatedCostCny, 0.378);
+});
+
 test("appendAiUsage 任一 Token 缺失则 tokensIncomplete", () => {
   const next = appendAiUsage(undefined, [
     event({ id: "a", inputTokens: 10, outputTokens: 5, totalTokens: 15 }),

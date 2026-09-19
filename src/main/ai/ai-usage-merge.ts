@@ -10,6 +10,7 @@ import {
   type AiUsageTotals,
   type ProductAiUsage,
 } from "../../shared/contracts-ai-usage.js";
+import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 
 function emptyTotals(): AiUsageTotals {
   return {
@@ -41,8 +42,16 @@ function sumTokens(events: readonly AiUsageEvent[]): AiUsageTotals {
       output += event.outputTokens;
       total += event.totalTokens;
     }
-    if (typeof event.estimatedCostCny === "number" && Number.isFinite(event.estimatedCostCny)) {
-      cost = (cost ?? 0) + event.estimatedCostCny;
+    const eventCost = typeof event.estimatedCostCny === "number" && Number.isFinite(event.estimatedCostCny)
+      ? event.estimatedCostCny
+      : estimateAiUsageCostCny({
+        model: event.model,
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        cachedTokens: event.cachedTokens,
+      });
+    if (typeof eventCost === "number" && Number.isFinite(eventCost)) {
+      cost = (cost ?? 0) + eventCost;
     }
   }
 

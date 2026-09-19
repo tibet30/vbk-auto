@@ -85,6 +85,21 @@ test("交通方向条款使用容器 selectedClauseItemId 时仍能识别去返�
   );
 });
 
+test("交通方向条款由平台生成但未选中时仍会保存为必选项", () => {
+  const schema = childClauseSchema("flightRoundTrip");
+  schema.clauseTypeDtos[0]!.clauseItemDtos.forEach((item) => { item.selected = "F"; });
+  assert.deepEqual(selectedClauseItems(schema).map((item) => item.clauseItemId), []);
+
+  assert.deepEqual(
+    resolveChildTransportClauseRequirements(schema, "flightRoundTrip").map((item) => item.clauseItemId),
+    [38725, 38739],
+  );
+  assert.deepEqual(
+    desiredFirstTabClauses(schema, [], "flightRoundTrip").map((item) => item.clauseItemId),
+    [38725, 38739, 33006],
+  );
+});
+
 test("资源提交后条款 schema 延迟物化时只读等待，不会提前保存不完整条款", async () => {
   const ready = childClauseSchema("flightRoundTrip");
   const responses = [{ clauseTypeDtos: [] }, { clauseTypeDtos: [] }, ready];

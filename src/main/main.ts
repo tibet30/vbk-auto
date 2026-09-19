@@ -60,6 +60,7 @@ import { ProductWorkflowCoordinator } from "./application/product-workflow-coord
 import { ProductMutationService } from "./application/product-mutation-service.js";
 import { AppUpdateService } from "./application/app-update-service.js";
 import { createRemoteProductMirror } from "./application/remote-product-mirror.js";
+import { mergeAgentDiagnostics } from "./application/product-diagnostics.js";
 import { applyAppMetadata, applyDevDockIcon, installApplicationMenu } from "./app-branding.js";
 import { cleanStaleChromiumProfileDb } from "./infrastructure/chromium-profile-cleanup.js";
 import { createWithKnownVbkAccount } from "./infrastructure/vbk-account-status.js";
@@ -204,6 +205,17 @@ const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnaps
     }
     if (task && (task.status !== "abandoned" || snapshot.run.status === "abandoned")) {
       emitWorkflowTask(db.updateWorkflowTask(task.id, agentWorkflowPatch(snapshot, product)), false);
+    }
+    const latestProduct = db?.getProduct(snapshot.localProductId);
+    if (latestProduct) {
+      db.updateProduct(
+        latestProduct.id,
+        mergeAgentDiagnostics(latestProduct, snapshot),
+        latestProduct.status,
+        latestProduct.productJsonVersion,
+      );
+      const saved = db.getProduct(latestProduct.id);
+      if (saved) emitProduct(saved);
     }
   }
   if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;

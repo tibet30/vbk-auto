@@ -18,6 +18,7 @@
  */
 
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
+import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
 import { toVbkDailyUseCar, type DailyTransport, type VbkDailyUseCar } from "../../../../shared/product-form.js";
 import type { StationCandidate } from "./station-search.js";
 import {
@@ -204,7 +205,7 @@ export function buildReadbackExpectations(args: {
       airport: stations.dropoffAir ? { code: stations.dropoffAir.code, name: stations.dropoffAir.name } : null,
       train: stations.dropoffTrain ? { code: stations.dropoffTrain.code, name: stations.dropoffTrain.name } : null,
     },
-    requireHotels: itinerary.some((day) => Boolean(day.hotel && day.hotel.trim())),
+    requireHotels: itinerary.some((day) => hotelNamesForDay(day).length > 0),
   };
 }
 
@@ -394,7 +395,7 @@ function hotelNamesForDay(day: ProductItineraryDay): string[] {
   const candidates = Array.isArray(day.hotelCandidates)
     ? day.hotelCandidates.map((candidate) => candidate?.hotelName?.trim()).filter((name): name is string => Boolean(name))
     : [];
-  if (candidates.length === 0) return day.hotel.trim() ? [day.hotel.trim()] : [];
+  if (candidates.length === 0) return hasItineraryHotelStay(day.hotel) ? [day.hotel.trim()] : [];
   if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT
     || new Set(candidates).size !== candidates.length) {
     throw new Error(`第 ${day.day} 天酒店候选必须是 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}-${HOTEL_RESOURCE_CANDIDATE_COUNT} 家不同的酒店。`);

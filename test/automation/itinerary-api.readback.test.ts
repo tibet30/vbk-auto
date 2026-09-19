@@ -389,6 +389,17 @@ test("buildReadbackExpectations：无酒店 → hotels 为空且 requireHotels=f
   assert.equal(exp.requireHotels, false);
 });
 
+test("buildReadbackExpectations：无住宿标记不生成酒店期望", () => {
+  const exp = buildReadbackExpectations({
+    itinerary: [{ ...baseProductNoHotel.itinerary[0], hotel: "无" }],
+    operations: baseProductNoHotel.operations,
+    stations: { pickupAir: makeCandidate("air", "LJG", "三义机场") },
+  });
+
+  assert.deepEqual(exp.days[0].hotels, []);
+  assert.equal(exp.requireHotels, false);
+});
+
 test("buildReadbackExpectations：五家酒店候选只将前三家形成行程回读期望", () => {
   const exp = buildReadbackExpectations({
     itinerary: baseProduct.itinerary.map((day, index) => index === 0 ? {
@@ -424,4 +435,46 @@ test("verifyItineraryReadback：字段完全匹配 → 返回 days/spots/meals/h
   assert.equal(result.spots, 2);
   assert.equal(result.meals, 4);
   assert.equal(result.hotels, 2);
+});
+
+test("verifyItineraryReadback：无 POI 散团日允许没有景点节点", async () => {
+  installHandlersForFieldMismatch({
+    readbackDays: 1,
+    title: () => "D1 瓜州 - 敦煌散团",
+    poi: () => [],
+    omitAttraction: () => true,
+    hotelName: () => "",
+    otherDescription: () => "下午 瓜州至敦煌散团：由瓜州前往敦煌，抵达后结束本次行程。",
+    pickupAirport: "DNH",
+    pickupName: "敦煌莫高国际机场",
+    dropoffAirport: "DNH",
+    dropoffName: "敦煌莫高国际机场",
+  });
+  const expectations = buildReadbackExpectations({
+    itinerary: [{
+      day: 1,
+      title: "D1 瓜州 - 敦煌散团",
+      spots: [],
+      description: "由瓜州前往敦煌，抵达后结束本次行程。",
+      hotel: "无",
+      meals: "三餐自理",
+      activities: [{
+        time: "下午",
+        title: "瓜州至敦煌散团",
+        detail: "由瓜州前往敦煌，抵达后结束本次行程。",
+        type: "other",
+        source: "user",
+      }],
+    }],
+    operations: { ...baseProductNoHotel.operations, mealsIncluded: false },
+    stations: {
+      pickupAir: makeCandidate("air", "DNH", "敦煌莫高国际机场"),
+      dropoffAir: makeCandidate("air", "DNH", "敦煌莫高国际机场"),
+    },
+  });
+
+  const result = await verifyItineraryReadback(makeFakePage() as any, "999999999999999999", expectations);
+  assert.equal(result.days, 1);
+  assert.equal(result.spots, 0);
+  assert.equal(result.hotels, 0);
 });

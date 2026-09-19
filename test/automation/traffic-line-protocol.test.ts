@@ -986,6 +986,86 @@ test("单个交通子产品创建失败会跳过并继续其它子产品，不�
   assert.deepEqual(result.skipped?.map((item) => item.variant), ["flightRoundTrip", "trainRoundTrip"]);
 });
 
+test("飞机和火车子产品创建没有依赖关系时会并行启动", async () => {
+  const endpoints = {
+    arrivalCity: "成都",
+    departureCity: "成都",
+    resolvedAt: "2026-09-19T09:00:00.000Z",
+    flight: {
+      arrival: { code: "TFU", name: "天府国际机场" },
+      departure: { code: "TFU", name: "天府国际机场" },
+    },
+    train: {
+      arrival: { code: "CN001ICW", name: "成都东", resourceKey: "28" },
+      departure: { code: "CN001ICW", name: "成都东", resourceKey: "28" },
+    },
+  };
+  const savedChildren: Array<{ subProductId: string; lineDescription: string }> = [];
+  const saveStarts: string[] = [];
+  let releaseBothSaves: (() => void) | null = null;
+  const bothSavesStarted = new Promise<void>((resolve) => { releaseBothSaves = resolve; });
+  const saveTimeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error("飞机子产品创建未等到火车子产品并行启动")), 50);
+  });
+  const page = {
+    vbkSessionGetText: async () => ({
+      status: 200,
+      text: `<script>window.__INITIAL_STATE__ = ${JSON.stringify({ childList: savedChildren })};</script>`,
+    }),
+    evaluate: async (_fn: unknown, request: any) => {
+      const endpoint = String(request?.endpoint ?? "");
+      if (endpoint.endsWith("/getPackageProductDetail")) {
+        return {
+          status: 200,
+          payload: {
+            ResponseStatus: { Ack: "Success", Errors: [] },
+            generalInfoDto: { keep: true },
+            subLineInfoDto: {},
+          },
+          durationMs: 1,
+          ctx: {},
+        };
+      }
+      if (endpoint.endsWith("/saveLineInfo")) {
+        const lineDescription = String(request?.body?.subLineInfoDto?.lineDescription ?? "");
+        saveStarts.push(lineDescription);
+        if (saveStarts.length === 2) releaseBothSaves?.();
+        if (lineDescription === "飞机往返") {
+          await Promise.race([bothSavesStarted, saveTimeout]);
+        }
+        const subProductId = lineDescription === "飞机往返" ? "78483121" : "78483122";
+        savedChildren.push({ subProductId, lineDescription });
+        return {
+          status: 200,
+          payload: {
+            ResponseStatus: { Ack: "Success", Errors: [] },
+            data: { subProductId },
+          },
+          durationMs: 1,
+          ctx: {},
+        };
+      }
+      throw new Error(`stop after concurrent child creation: ${endpoint}`);
+    },
+  };
+
+  const result = await ensureTrafficLineApi(page as never, "78483120", {
+    enabled: true,
+    variants: ["flightRoundTrip", "trainRoundTrip"],
+    availability: {
+      endpointPlan: endpoints,
+      availableVariants: ["flightRoundTrip", "trainRoundTrip"],
+      unavailableVariants: {},
+    },
+  }, {
+    itinerary: [{ spots: [{ city: "成都" }] }],
+    endpointPlan: endpoints,
+  });
+
+  assert.deepEqual(new Set(saveStarts), new Set(["飞机往返", "火车往返"]));
+  assert.equal(result.skipped?.some((item) => /未等到火车子产品并行启动/.test(item.reason)), false);
+});
+
 test("执行阶段保留已确认的火车配置，交由平台资源阶段判断可售性", () => {
   assert.deepEqual(
     trafficLineConfigForProduct(

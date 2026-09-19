@@ -6,6 +6,7 @@ import type {
   WorkflowTaskRetryMode,
 } from "../../shared/contracts.js";
 import type { VbkDatabase } from "../infrastructure/database/database.js";
+import { mergeWorkflowTaskDiagnostics } from "./product-diagnostics.js";
 import {
   runAutoConfirmedCreation,
   type AutoConfirmedCreationStage,
@@ -19,7 +20,9 @@ export interface ProductTaskSchedulerDependencies extends AutoConfirmedProductDe
     | "abandonWorkflowTask"
     | "createWorkflowTask"
     | "getWorkflowTask"
+    | "getProduct"
     | "listWorkflowTasks"
+    | "updateProduct"
     | "updateWorkflowTask">;
   emitTask(task: ProductWorkflowTask): void;
   emitProduct(product: ProductDetail): void;
@@ -128,8 +131,20 @@ export class ProductTaskScheduler {
     // 永久废弃是不可逆终态；迟到的规划/自动化回调不得覆盖它。
     if (current.status === "abandoned") return current;
     const task = this.dependencies.db.updateWorkflowTask(taskId, patch);
+    this.persistProductDiagnostics(task);
     this.dependencies.emitTask(task);
     return task;
+  }
+
+  private persistProductDiagnostics(task: ProductWorkflowTask): void {
+    const product = this.dependencies.db.getProduct(task.localProductId);
+    if (!product) return;
+    this.dependencies.db.updateProduct(
+      product.id,
+      mergeWorkflowTaskDiagnostics(product, task),
+      product.status,
+      product.productJsonVersion,
+    );
   }
 
   private async run(taskId: string): Promise<void> {

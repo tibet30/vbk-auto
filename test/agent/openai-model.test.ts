@@ -59,6 +59,21 @@ test("OpenAI adapter streams public text and assembles fragmented tool calls", a
   assert.deepEqual(result.usage,{inputTokens:12,outputTokens:8});
 });
 
+test("OpenAI adapter forwards cached prompt token usage when present", async () => {
+  const model = modelWithChunks([
+    {
+      choices: [{ finish_reason: "stop", delta: { content: "完成" } }],
+      usage: {
+        prompt_tokens: 100,
+        completion_tokens: 10,
+        prompt_tokens_details: { cached_tokens: 40 },
+      },
+    },
+  ]);
+  const result = await model.complete({ messages: [], tools: [] });
+  assert.deepEqual(result.usage, { inputTokens: 100, outputTokens: 10, cachedTokens: 40 });
+});
+
 test("OpenAI adapter rejects an early stream EOF", async () => {
   const model = modelWithChunks([{ choices: [{ finish_reason: null, delta: { content: "未完成" } }] }]);
   await assert.rejects(model.complete({ messages: [], tools: [] }), /提前结束/);

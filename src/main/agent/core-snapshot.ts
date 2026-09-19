@@ -249,17 +249,24 @@ export class AgentSnapshotManager {
   }
 
   private pauseAfterRepeatedBlocker(snapshot: AgentSnapshot): void {
-    if (!snapshot.run || this.noProgressBlockerCount(snapshot) < 3) return;
+    const blockers = this.noProgressBlockers(snapshot);
+    if (!snapshot.run || blockers.length < 3) return;
     snapshot.run.status = "paused";
     this.touch(snapshot.run);
-    this.event(snapshot, "status", "当前要求连续三次未取得实质进展，已暂停。请调整要求或明确继续后再试。", {
+    this.event(snapshot, "status", this.noProgressPauseMessage(blockers), {
       status: "paused",
       noProgressPaused: true,
+      noProgressBlockers: blockers.slice(-3).map((event) => event.data?.noProgressBlocker),
+      noProgressLatestReason: blockers.at(-1)?.content,
     });
   }
 
   private noProgressBlockerCount(snapshot: AgentSnapshot): number {
-    if (!snapshot.run) return 0;
+    return this.noProgressBlockers(snapshot).length;
+  }
+
+  private noProgressBlockers(snapshot: AgentSnapshot): AgentEvent[] {
+    if (!snapshot.run) return [];
     let resetAt = -1;
     for (let index = 0; index < snapshot.events.length; index += 1) {
       const event = snapshot.events[index]!;
@@ -268,7 +275,19 @@ export class AgentSnapshotManager {
       if (event.type === "user" || event.data?.noProgressRetryWindow === true || successfulLocalWrite) resetAt = index;
     }
     return snapshot.events.slice(resetAt + 1).filter((event) => event.runId === snapshot.run?.id
-      && typeof event.data?.noProgressBlocker === "string").length;
+      && typeof event.data?.noProgressBlocker === "string");
+  }
+
+  private noProgressPauseMessage(blockers: AgentEvent[]): string {
+    const recent = blockers.slice(-3);
+    const types = [...new Set(recent.map((event) => event.data?.noProgressBlocker as NoProgressBlocker))];
+    const typeText = types.map((type) => ({
+      approval_precondition: "最终确认前置条件反复失效",
+      authorization_denied: "连续尝试未经授权的写入",
+      completion_blocked: "完成检查反复未通过",
+    }[type])).join("、");
+    const latestReason = recent.at(-1)?.content.trim();
+    return `当前要求连续 3 次卡在：${typeText || "同一阻塞点"}，已暂停。最近一次原因：${latestReason || "未记录具体原因"}。请调整要求或明确继续后再试。`;
   }
 
   markUncertain(snapshot: AgentSnapshot, toolCallId: string, message: string): void {

@@ -59,7 +59,16 @@ export function createGenerationStageTools(args: {
 }): AgentTool[] {
   const { deps, get, resolveTrafficAvailability, resolveItineraryPoisAndTraffic, clearUnverifiedItineraryPois } = args;
   const generateModule = async (localProductId: string, stage: GenerateStage) => {
-    const output = await deps.generateStage(localProductId, stage);
+    let output: PlanningStageOutput;
+    try {
+      output = await deps.generateStage(localProductId, stage);
+    } catch (error) {
+      if (stage !== "presentation" && stage !== "commercial") throw error;
+      output = {
+        reply: error instanceof Error ? error.message : "结构化生成失败，转入本地确定性补全。",
+        modules: [],
+      };
+    }
     if (stage === "itinerary") {
       for (const module of output.modules) {
         if (module.module === "itinerary") clearUnverifiedItineraryPois(module.value);

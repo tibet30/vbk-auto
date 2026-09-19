@@ -9,7 +9,7 @@ export interface AgentToolCall {
   argumentError?: string;
 }
 export interface AgentModelMessage { role: "system" | "user" | "assistant" | "tool"; content: string; toolCallId?: string; toolCalls?: AgentToolCall[]; }
-export interface AgentModelResult { content?: string; toolCalls?: AgentToolCall[]; usage?: { inputTokens?: number; outputTokens?: number; }; }
+export interface AgentModelResult { content?: string; toolCalls?: AgentToolCall[]; usage?: { inputTokens?: number; outputTokens?: number; cachedTokens?: number; }; }
 export interface AgentModelInput {
   messages: AgentModelMessage[];
   tools: AgentToolDefinition[];

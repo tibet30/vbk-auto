@@ -267,8 +267,13 @@ export function resolveChildTransportClauseRequirements(
   variant: TrafficLineVariant,
 ): TrafficLineClauseRequirement[] {
   const mode = variant === "flightRoundTrip" ? "机票" : "火车票";
-  const traffic = selectedClauseItems(clausePackage)
-    .filter((item) => Number(item.secondClassTypeId) === 86);
+  const traffic = allClauseItems(clausePackage)
+    .filter(({ type }) => Number(type.clauseTypeId) === 86)
+    .map(({ type, item }) => ({
+      clauseItemId: Number(item.clauseItemId),
+      secondClassTypeId: Number(type.clauseTypeId),
+      elementDtos: list(item.clauseComponentDtos).map(clauseElementFromComponent),
+    }));
   const outbound = uniqueChildTransport(traffic, "去程", mode);
   const returning = uniqueChildTransport(traffic, "返程", mode);
   if (outbound.clauseItemId === returning.clauseItemId) {

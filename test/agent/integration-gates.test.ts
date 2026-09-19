@@ -184,6 +184,17 @@ test('itinerary patch cannot remove a user-named unmatched POI',()=>{
     /已锁定的第 1 天景点必须保留.*宽窄巷子/,
   );
 });
+test('itinerary patch may remove a user-named administrative location node',()=>{
+  const p=product();
+  (p.product.basicInfo as any).userIdea='D1 天峻县/天峻-茶卡盐湖';
+  (p.product.itinerary as any)[0].spots=[
+    {name:'天峻',poiId:null,poiName:null},
+    {name:'茶卡盐湖',poiId:null,poiName:null},
+  ];
+  assert.doesNotThrow(
+    ()=>agentPatchOperations(p,{itinerary:[{day:1,spots:[{name:'茶卡盐湖',poiId:null,poiName:null}]}]}),
+  );
+});
 test('final approval cannot shrink to only creating a product shell',()=>{
   const {p}=fixture();
   assert.match(agentApprovalScopeError(p,['vbk.write_phase:saleControl'])!,/完整/);

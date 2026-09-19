@@ -317,6 +317,8 @@ test("three approval blockers pause across reads and resume opens one finite ret
   assert.equal(inputs.length, 3);
   assert.equal(accountLookups, 0);
   assert.equal(snapshot.events.filter((event) => event.data?.noProgressBlocker === "approval_precondition").length, 3);
+  assert.match(snapshot.events.at(-1)?.content ?? "", /连续 3 次卡在：最终确认前置条件反复失效/);
+  assert.match(snapshot.events.at(-1)?.content ?? "", /最近一次原因：.*当前产品还未准备好/);
   for (const call of snapshot.events.filter((event) => event.type === "tool_call")) {
     assert.ok(snapshot.events.some((event) => event.type === "tool_result" && event.data?.toolCallId === call.data?.toolCallId));
   }
@@ -348,6 +350,7 @@ test("three unauthorized writes pause even when read calls and write scopes diff
   assert.equal(inputs.length, 3);
   assert.equal(writes, 0);
   assert.equal(snapshot.events.filter((event) => event.data?.noProgressBlocker === "authorization_denied").length, 3);
+  assert.match(snapshot.events.at(-1)?.content ?? "", /连续 3 次卡在：连续尝试未经授权的写入/);
 });
 
 test("completion gate feedback reaches the model and pauses after three blocked completions", async () => {
@@ -367,6 +370,8 @@ test("completion gate feedback reaches the model and pauses after three blocked 
   assert.equal(snapshot.run?.status, "paused");
   assert.equal(inputs.length, 4);
   assert.equal(snapshot.events.filter((event) => event.data?.completionBlocked === true).length, 3);
+  assert.match(snapshot.events.at(-1)?.content ?? "", /连续 3 次卡在：完成检查反复未通过/);
+  assert.match(snapshot.events.at(-1)?.content ?? "", /最近一次原因：缺少 commercial\.packageName/);
   assert.ok(inputs[2]!.some((message) => message.role === "system"
     && message.content === "完成检查反馈：缺少 commercial.packageName"));
 });

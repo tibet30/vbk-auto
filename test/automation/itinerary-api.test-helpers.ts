@@ -142,6 +142,7 @@ export interface ReadbackDayOverrides {
   readbackDays?: number;
   title?: (i: number) => string;
   poi?: (i: number) => Array<{ poiId: number; poiName: string }>;
+  omitAttraction?: (i: number) => boolean;
   hotelName?: (i: number) => string;
   mealIncluded?: boolean;
   useCar?: VbkDailyUseCar;
@@ -183,10 +184,10 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
           }],
         }] : []),
         // 景点
-        {
+        ...(!opts.omitAttraction?.(i) ? [{
           activeType: { key: 3, name: "景点" },
           tourDailyPois: pois.map((p, idx) => ({ sort: idx + 1, poi: { poiId: p.poiId, poiName: p.poiName } })),
-        },
+        }] : []),
         // 首日不排早餐；午、晚餐固定自理；尾日不排晚餐。
         ...(!isFirst ? [{
           activeType: { key: 0, name: "餐饮" },

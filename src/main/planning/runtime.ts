@@ -19,7 +19,7 @@ import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
-import type { ContactCardSelection } from "../../shared/contracts.js";
+import type { ContactCardSelection, ProductDetail } from "../../shared/contracts.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import {
@@ -37,6 +37,7 @@ import type {
 } from "../../shared/contracts-planning.js";
 import { resolvePlanningPoiAutoSelection, type PoiAutoDisambiguator } from "./poi-auto-selection.js";
 import { planningWriteContractError } from "./itinerary-input-contract.js";
+import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 
 export class DbGenerationStateStore implements GenerationStateStore {
   constructor(
@@ -283,6 +284,9 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       }
       value = { ...existing, ...incoming };
     }
+    if (module === "itinerary" && Array.isArray(value)) {
+      value = filterRemovedItinerarySpots(product, value);
+    }
     const contractError = planningWriteContractError(product, module, value);
     if (contractError) return { ok: false, reason: contractError };
     const result = applyProductPatchSafe(product.product, [
@@ -353,6 +357,32 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     if (!product) return [];
     return detectAcceptedModulesFromProduct(product.product);
   }
+}
+
+function filterRemovedItinerarySpots(product: ProductDetail, itinerary: unknown[]): unknown[] {
+  const locked = extractLockedConstraints(product, product.messages ?? []);
+  const allowedByDay = new Map(locked.itineraryOrder.map((row) => [row.day, new Set(row.spots.map(normaliseName))]));
+  if (!allowedByDay.size) return itinerary;
+  return itinerary.map((day) => {
+    if (!day || typeof day !== "object" || Array.isArray(day)) return day;
+    const record = day as Record<string, unknown>;
+    const allowed = allowedByDay.get(Number(record.day));
+    if (!Array.isArray(record.spots)) return day;
+    if (!allowed) return { ...record, spots: [] };
+    return {
+      ...record,
+      spots: record.spots.filter((spot) => {
+        if (!spot || typeof spot !== "object" || Array.isArray(spot)) return true;
+        const name = normaliseName(String((spot as Record<string, unknown>).name ?? (spot as Record<string, unknown>).poiName ?? ""));
+        if (!name) return true;
+        return [...allowed].some((item) => name === item || name.includes(item) || item.includes(name));
+      }),
+    };
+  });
+}
+
+function normaliseName(value: string): string {
+  return value.replace(/\s+/g, "").replace(/景区|旅游景区|地质公园|博物馆|天文科普馆|科普馆/g, "");
 }
 
 function alignProvinceLevelBasicCities(

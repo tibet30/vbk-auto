@@ -269,7 +269,7 @@ async function waitForFormalVehicleResourceBinding(
   groupId: number,
   options: VehicleResourceBindingOptions,
 ) {
-  const attempts = Math.max(1, options.formalReadbackAttempts ?? 20);
+  const attempts = Math.max(1, options.formalReadbackAttempts ?? 60);
   const intervalMs = Math.max(0, options.formalReadbackIntervalMs ?? 1_500);
   let latest: Awaited<ReturnType<typeof verifyVehicleResourceBinding>> | undefined;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

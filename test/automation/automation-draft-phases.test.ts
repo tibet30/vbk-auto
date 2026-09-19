@@ -82,3 +82,16 @@ test("draftPhasesFor: 未持久化候选的住宿日也必须保留酒店资源�
   assert.ok(phases.includes("hotelResource"));
   assert.ok(phases.indexOf("hotelResource") < phases.indexOf("preflight"));
 });
+
+test("draftPhasesFor: 破折号住宿文案不创建酒店资源阶段", () => {
+  const product = parseProduct({
+    ...baseProduct,
+    basicInfo: { ...baseProduct.basicInfo, days: 2, nights: 1 },
+    itinerary: [
+      { ...baseProduct.itinerary[0], hotel: "—" },
+      { ...baseProduct.itinerary[0], day: 2, title: "太原送站", hotel: "-" },
+    ],
+  });
+
+  assert.equal(draftPhasesFor(product).includes("hotelResource"), false);
+});

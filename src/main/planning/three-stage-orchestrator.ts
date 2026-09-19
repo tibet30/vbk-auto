@@ -18,7 +18,7 @@ import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceN
 import { emptyPlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import { buildVerifiedPool, composeItinerary, runFoundationLocation } from "./three-stage-itinerary-flow.js";
 import { validateUserIntentDays } from "./user-intent.js";
-import { resolveItineraryHotelCandidates } from "../infrastructure/ctrip-hotel-search.js";
+import { resolveItineraryHotelCandidates, shouldResolveItineraryHotelForDay } from "../infrastructure/ctrip-hotel-search.js";
 import { AI_WRITABLE_PATHS } from "./schemas.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 
@@ -121,7 +121,7 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   if (!isCompleted(plan, "hotelResolution")) {
     const current = await deps.runtime.loadCurrentProduct(deps.localProductId);
     const itinerary = Array.isArray(current.itinerary) ? current.itinerary as Array<Record<string, unknown>> : [];
-    if (!itinerary.some((day) => text(day.hotel))) {
+    if (!itinerary.some((day, index) => shouldResolveItineraryHotelForDay(day, index, deps.skeleton.nights))) {
       await patchNode("hotelResolution", {
         status: "skipped",
         summary: "行程无过夜日期，无需匹配酒店资源",

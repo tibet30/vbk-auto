@@ -151,7 +151,7 @@ test("酒店节点把五个候选写入每日行程与资源配置", async () =>
     operations: { hotelTier: "当地5钻酒店/-38" },
     itinerary: [
       {
-        day: 1, title: "晋祠", hotel: "当地住宿（待匹配）", description: "入住当地住宿（待匹配）",
+        day: 1, title: "晋祠", hotel: "", description: "入住当地住宿（待匹配）",
         spots: [{ poiId: 79413, poiName: "晋祠", city: "太原" }],
       },
       { day: 2, title: "返程", hotel: "", description: "返程", spots: [{ poiId: 1, poiName: "太原古县城", city: "太原" }] },

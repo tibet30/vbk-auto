@@ -1,4 +1,4 @@
-import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
+import { isAdministrativeLocationName, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import type { ProductDetail } from "../../shared/contracts.js";
 import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import type { ItineraryInputMode, LockedConstraints, LockedItineraryDay } from "../../shared/contracts-preparation.js";
@@ -40,21 +40,24 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
   const byDay = new Map(itinerary.map((day) => [Number(day.day), spotNames(day)]));
   for (const row of locked.itineraryOrder) {
     const names = byDay.get(row.day) ?? [];
+    const requiredSpots = row.spots.filter((spot) => !isDeletableAdministrativeLocation(product, spot));
     if (mode === "complete") {
-      if (!isNameSubsequence(names, row.spots)) {
-        return `用户已给出完整第 ${row.day} 天行程，禁止整体重排或替换；只能规范化并核验 POI。缺失：${missingNames(names, row.spots).join("、") || row.spots.join("、")}`;
+      if (!isNameSubsequence(names, requiredSpots)) {
+        return `用户已给出完整第 ${row.day} 天行程，禁止整体重排或替换；只能规范化并核验 POI。缺失：${missingNames(names, requiredSpots).join("、") || requiredSpots.join("、")}`;
       }
-      const extras = extraNames(names, row.spots);
+      const extras = extraNames(names, requiredSpots);
       if (extras.length) {
         return `用户已给出完整第 ${row.day} 天行程，不能新增或替换景点：${extras.join("、")}`;
       }
-    } else if (!row.spots.every((spot) => names.some((name) => samePlace(name, spot)))) {
-      return `已锁定的第 ${row.day} 天景点必须保留：${row.spots.join("、")}`;
+    } else if (!requiredSpots.every((spot) => names.some((name) => samePlace(name, spot)))) {
+      return `已锁定的第 ${row.day} 天景点必须保留：${requiredSpots.join("、")}`;
     }
   }
   if (mode === "partial") {
     const allNames = itinerary.flatMap(spotNames);
-    const missing = locked.pois.filter((poi) => !allNames.some((name) => samePlace(name, poi)));
+    const missing = locked.pois
+      .filter((poi) => !isDeletableAdministrativeLocation(product, poi))
+      .filter((poi) => !allNames.some((name) => samePlace(name, poi)));
     if (missing.length) return `已锁定的指定 POI 必须保留：${missing.join("、")}`;
   }
   return undefined;
@@ -221,6 +224,36 @@ function samePlace(left: string, right: string): boolean {
   const a = left.replace(/\s+/g, "");
   const b = right.replace(/\s+/g, "");
   return Boolean(a) && Boolean(b) && (a === b || a.includes(b) || b.includes(a));
+}
+
+function isDeletableAdministrativeLocation(product: ProductDetail, value: string): boolean {
+  if (isAdministrativeLocationName(value)) return true;
+  const compact = value.replace(/\s+/g, "");
+  if (!compact) return false;
+  const basic = asRecord(product.product.basicInfo);
+  const operations = asRecord(product.product.operations);
+  const trafficLine = asRecord(operations?.trafficLine);
+  const productLocationNames = [
+    basic?.meetingCity,
+    basic?.destinationCity,
+    basic?.destination,
+    operations?.pickupCity,
+    trafficLine?.arrivalCity,
+    trafficLine?.departureCity,
+  ].map((item) => text(item).replace(/\s+/g, "")).filter(Boolean);
+  if (productLocationNames.includes(compact)) return true;
+  const raw = [
+    text(asRecord(product.product.basicInfo)?.userIdea),
+    ...(product.messages ?? []).filter((message) => message.role === "user").map((message) => message.content),
+  ].join("\n").replace(/\s+/g, "");
+  if (new RegExp(`(?:删除|移除|去掉|取消)(?:[^。；;]{0,40})${escapeRegExp(compact)}(?:[^。；;]{0,40})(?:行政|过境|城市|住宿|散团|节点|POI|poi)`, "u").test(raw)) {
+    return true;
+  }
+  return new RegExp(`${escapeRegExp(compact)}(?:省|市|县|区|旗|自治县|自治旗|地区|盟|自治州|特别行政区)`, "u").test(raw);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

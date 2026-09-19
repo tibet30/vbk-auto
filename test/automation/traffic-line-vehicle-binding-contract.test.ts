@@ -26,7 +26,7 @@ test("交通资源提交后必须重新绑定用车组，再记录 resourcesSave
 
 test("已激活子产品直接进入最终回读，不重放其资源写入", () => {
   const activeBranch = source.slice(source.indexOf("if (relationship.active === true)"), source.indexOf("await ensureTrafficLinePresentation"));
-  assert.match(activeBranch, /pending\.push/);
+  assert.match(activeBranch, /return \{ pending:/);
   assert.doesNotMatch(activeBranch, /ensureTrafficLineSegments|ensureTrafficLineVehicleBinding/);
 });
 

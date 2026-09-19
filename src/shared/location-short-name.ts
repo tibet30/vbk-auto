@@ -78,6 +78,14 @@ export function toPlatformShortLocationName(value: unknown): string {
   return input;
 }
 
+/** 识别明确的行政地名，供 spots/POI 合同把“路过城市/县域”与景点区分开。 */
+export function isAdministrativeLocationName(value: unknown): boolean {
+  const input = typeof value === "string" ? value.trim() : "";
+  if (!input || PROTECTED_NAME_SUFFIX.test(input)) return false;
+  if (COMMON_ADMINISTRATIVE_SHORT_NAMES.has(input)) return true;
+  return toPlatformShortLocationName(input) !== input;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>

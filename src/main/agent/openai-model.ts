@@ -7,7 +7,7 @@ export interface OpenAIAgentModelConfig {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
-  onUsage?: (usage: { inputTokens?: number; outputTokens?: number }) => void;
+  onUsage?: (usage: { inputTokens?: number; outputTokens?: number; cachedTokens?: number }) => void;
   /** Sanitized telemetry only: no prompts, API keys, or tool arguments. */
   onLog?: (entry: { model: string; toolNames: string[]; inputTokens?: number; outputTokens?: number }) => void;
 }
@@ -68,14 +68,19 @@ export class OpenAIAgentModel implements AgentModel {
     let visibleContent = "";
     let finishReason: string | null = null;
     let sawChoice = false;
-    let usage: { inputTokens?: number; outputTokens?: number } | undefined;
+    let usage: { inputTokens?: number; outputTokens?: number; cachedTokens?: number } | undefined;
     const streamedCalls = new Map<number, StreamedToolCall>();
 
     for await (const chunk of stream) {
-      if (chunk.usage) usage = {
-        inputTokens: chunk.usage.prompt_tokens,
-        outputTokens: chunk.usage.completion_tokens,
-      };
+      if (chunk.usage) {
+        usage = {
+          inputTokens: chunk.usage.prompt_tokens,
+          outputTokens: chunk.usage.completion_tokens,
+        };
+        if (typeof chunk.usage.prompt_tokens_details?.cached_tokens === "number") {
+          usage.cachedTokens = chunk.usage.prompt_tokens_details.cached_tokens;
+        }
+      }
       const choice = chunk.choices[0];
       if (!choice) continue;
       sawChoice = true;

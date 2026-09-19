@@ -16,6 +16,7 @@ import {
   isUnavailableTrafficResourceFailure,
   trafficLinePendingSubmitNeedsOneRecoveryRetry,
   trafficLineChildShouldBeSkipped,
+  trafficLineSkippedChildCanBeRetried,
   trainEndpointNeedsReplacement,
 } from "../../src/main/automation/ctrip/traffic-line/main.ts";
 import {
@@ -370,11 +371,12 @@ test("只有正式资源零城市失败才允许替换已持久化火车站", ()
     failedStage: "resourcesSaved" as const,
   };
   assert.equal(trainEndpointNeedsReplacement([{ ...base, failureReason: "子产品资源回读缺少多出发城市，不能激活套餐。" }]), true);
+  assert.equal(trainEndpointNeedsReplacement([{ ...base, failedStage: undefined, failureReason: "子产品资源校验后没有任何可用的多出发城市（站点：西安/西安），未激活套餐。" }]), true);
   assert.equal(trainEndpointNeedsReplacement([{ ...base, failureReason: "当前用户未登录" }]), false);
   assert.equal(trainEndpointNeedsReplacement([{ ...base, failedStage: "itinerarySaved", failureReason: "缺少多出发城市" }]), false);
 });
 
-test("平台明确无可售资源时跳过该子产品，避免恢复时重复写入", () => {
+test("平台明确无可售资源时默认跳过；已创建的资源零城市子产品允许受控恢复", () => {
   const reason = "子产品资源校验后没有任何可用的多出发城市（站点：日喀则/日喀则），未激活套餐。";
   assert.equal(isUnavailableTrafficResourceFailure(reason), true);
   assert.equal(isUnavailableTrafficResourceFailure("浏览器请求超时"), false);
@@ -386,6 +388,23 @@ test("平台明确无可售资源时跳过该子产品，避免恢复时重复�
     failedStage: "resourcesSaved",
     failureReason: reason,
   }), true);
+  assert.equal(trafficLineSkippedChildCanBeRetried({
+    variant: "trainRoundTrip",
+    lineDescription: "火车往返",
+    childProductId: "78305132",
+    completedStages: ["planned", "stationsResolved", "childCreated", "presentationCopied"],
+    verified: false,
+    skipped: true,
+    failureReason: reason,
+  }), true);
+  assert.equal(trafficLineSkippedChildCanBeRetried({
+    variant: "trainRoundTrip",
+    lineDescription: "火车往返",
+    completedStages: ["planned", "stationsResolved", "childCreated", "presentationCopied"],
+    verified: false,
+    skipped: true,
+    failureReason: reason,
+  }), false);
   const packageFailure = "设置火车往返子产品套餐有效失败（Ack=Failure）：产品ID：78199134 出发城市为空,不能打包。";
   assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "trainRoundTrip"), true);
   assert.equal(isUnavailableTrafficResourceFailure(packageFailure, "flightRoundTrip"), false);

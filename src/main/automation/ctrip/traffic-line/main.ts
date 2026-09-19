@@ -73,7 +73,7 @@ export async function ensureTrafficLineApi(
   const skipped: NonNullable<TrafficLineApiResult["skipped"]> = [];
   targets = targets.filter((target) => {
     const previous = options.childProgress?.find((item) => item.variant === target.variant);
-    if (!previous || !trafficLineChildShouldBeSkipped(previous)) return true;
+    if (!previous || !trafficLineChildShouldBeSkipped(previous) || trafficLineSkippedChildCanBeRetried(previous)) return true;
     const reason = previous.failureReason!;
     skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
     options.onChildProgress?.({
@@ -124,14 +124,18 @@ export async function ensureTrafficLineApi(
     endpoints = { ...endpoints, train: replacement.train, resolvedAt: replacement.resolvedAt };
   }
   options.onEndpointPlan?.(endpoints);
-  const pending: Array<{
+  type PendingTrafficLineChild = {
     variant: TrafficLineVariant;
     lineDescription: string;
     childProductId: string;
     checkpoint: (stage: TrafficLineChildStage, childProductId?: string, verified?: boolean) => void;
     snapshot: () => TrafficLineChildProgress;
-  }> = [];
-  for (const target of targets) {
+  };
+  type TrafficLineChildPipelineResult =
+    | { pending: PendingTrafficLineChild }
+    | { skipped: { variant: TrafficLineVariant; lineDescription: string; reason: string } };
+
+  const processTarget = async (target: (typeof targets)[number]): Promise<TrafficLineChildPipelineResult> => {
     const previous = options.childProgress?.find((item) => item.variant === target.variant);
     let progress: TrafficLineChildProgress = previous
       ? invalidateTrafficLineFinalReadback(previous)
@@ -161,14 +165,13 @@ export async function ensureTrafficLineApi(
       // 未来得及持久化。已有效子产品也必须等所有兄弟均激活后进入整组稳定门；
       // 不能用此刻的一次成功提前补 finalReadback。
       if (relationship.active === true) {
-        pending.push({
+        return { pending: {
           variant: target.variant,
           lineDescription: trafficLineLabel(target.variant),
           childProductId: relationship.productId,
           checkpoint,
           snapshot: () => progress,
-        });
-        continue;
+        } };
       }
       await ensureTrafficLinePresentation(page, parentProductId, relationship.productId);
       checkpoint("presentationCopied", relationship.productId);
@@ -240,13 +243,13 @@ export async function ensureTrafficLineApi(
       checkpoint("clausesSaved", relationship.productId);
       await activateTrafficLineChild(page, parentProductId, relationship, target.variant);
       checkpoint("activated", relationship.productId);
-      pending.push({
+      return { pending: {
         variant: target.variant,
         lineDescription: trafficLineLabel(target.variant),
         childProductId: relationship.productId,
         checkpoint,
         snapshot: () => progress,
-      });
+      } };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       options.onChildProgress?.({
@@ -255,11 +258,14 @@ export async function ensureTrafficLineApi(
         failedStage: undefined,
         failureReason: reason,
       });
-      skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
       options.onStatus?.(`${target.lineDescription}子产品未完成，已跳过继续处理其它子产品：${reason}`);
-      continue;
+      return { skipped: { variant: target.variant, lineDescription: target.lineDescription, reason } };
     }
-  }
+  };
+
+  const childResults = await Promise.all(targets.map((target) => processTarget(target)));
+  const pending = childResults.flatMap((result) => "pending" in result ? [result.pending] : []);
+  skipped.push(...childResults.flatMap((result) => "skipped" in result ? [result.skipped] : []));
   if (!pending.length) {
     return { enabled: true, children: [], skipped };
   }
@@ -376,7 +382,7 @@ export function endpointPlanCanWrite(
 export function trainEndpointNeedsReplacement(progress: readonly TrafficLineChildProgress[] | undefined): boolean {
   return Boolean(progress?.some((child) => child.variant === "trainRoundTrip"
     && child.verified !== true
-    && child.failedStage === "resourcesSaved"
+    && trafficLineResourceStageFailure(child)
     && /(?:缺少多出发城市|没有任何可用的多出发城市)/.test(child.failureReason ?? "")));
 }
 
@@ -395,6 +401,22 @@ export function isUnavailableTrafficResourceFailure(reason: string, variant?: Tr
 export function trafficLineChildShouldBeSkipped(progress: TrafficLineChildProgress | undefined): boolean {
   return Boolean(progress && progress.verified !== true && (progress.skipped === true
     || isUnavailableTrafficResourceFailure(progress.failureReason ?? "", progress.variant)));
+}
+
+export function trafficLineSkippedChildCanBeRetried(progress: TrafficLineChildProgress | undefined): boolean {
+  return Boolean(progress
+    && progress.verified !== true
+    && progress.childProductId
+    && trafficLineResourceStageFailure(progress)
+    && /(?:没有任何可用的多出发城市|未返回可用于(?:飞机|火车)往返的出发城市)/.test(progress.failureReason ?? ""));
+}
+
+function trafficLineResourceStageFailure(progress: TrafficLineChildProgress): boolean {
+  if (progress.failedStage === "resourcesSaved") return true;
+  if (progress.failedStage) return false;
+  if (progress.completedStages.includes("resourcesSaved")) return false;
+  return progress.completedStages.includes("presentationCopied")
+    && !progress.completedStages.includes("itinerarySaved");
 }
 
 function sameTrainEndpoints(current: TrafficLineEndpointPlan, replacement: TrafficLineEndpointPlan): boolean {

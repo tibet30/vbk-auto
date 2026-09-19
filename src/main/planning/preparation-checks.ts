@@ -45,6 +45,7 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
   const meetingCity = toPlatformShortLocationName(textValue(basic?.meetingCity || basic?.destinationCity));
   const destinationCity = toPlatformShortLocationName(textValue(basic?.destinationCity || basic?.meetingCity));
   const days = Number(basic?.days);
+  const nights = Number(basic?.nights);
 
   if (!meetingCity) {
     gaps.push({ label: "目的地", detail: "需锁定目的地城市后才能进入后续阶段。", stage: "foundation", node: "skeleton" });
@@ -89,12 +90,12 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
   const itinerary = asArray(product.itinerary) ?? [];
   for (const [index, day] of itinerary.entries()) {
     const lodgingDay = asObject(day);
-    if (!lodgingDay || !hasItineraryHotelStay(lodgingDay.hotel)) continue;
+    if (!lodgingDay || !needsItineraryHotelCandidates(lodgingDay, index, nights)) continue;
     const candidates = asArray(lodgingDay.hotelCandidates) ?? [];
     if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT) {
       gaps.push({
         label: `酒店候选：第 ${Number(lodgingDay.day) || index + 1} 天`,
-        detail: `住宿日必须先持久化 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程酒店候选。`,
+        detail: `行程录入页使用携程平台酒店；住宿日必须先持久化 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程酒店候选，酒店资源阶段再录入真实酒店资源。`,
         stage: "completion",
         node: "hotelResolution",
       });
@@ -126,6 +127,12 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
   return gaps;
 }
 
+function needsItineraryHotelCandidates(day: Record<string, unknown>, index: number, nights: number): boolean {
+  if (hasItineraryHotelStay(day.hotel)) return true;
+  if (textValue(day.hotel)) return false;
+  return Number.isInteger(nights) && nights > 0 && index < nights;
+}
+
 export function classifyReadinessIssue(label: string, detail: string): Pick<PreparationGap, "stage" | "node"> {
   const text = `${label} ${detail}`;
   if (/省份|目的地|meetingCity|destinationCity|出行天数|hotelTier|pickupCity|骨架/.test(text)) {
@@ -138,8 +145,8 @@ export function classifyReadinessIssue(label: string, detail: string): Pick<Prep
   if (/推荐/.test(text)) return { stage: "completion", node: "presentation" };
   if (/套餐|定价|价格|库存|班期/.test(text)) return { stage: "completion", node: "commercial" };
   if (/大交通/.test(text)) return { stage: "completion", node: "finalValidation" };
-  if (/每日行程|POI|suggestPoi|人工确认|手动录入/.test(text) || /景点/.test(label)) {
-    return { stage: "itinerary", node: /每日行程/.test(label) ? "itineraryDraft" : "poiResolution" };
+  if (/itinerary|每日行程|POI|suggestPoi|人工确认|手动录入/.test(text) || /景点/.test(label)) {
+    return { stage: "itinerary", node: /itinerary|每日行程/.test(label) ? "itineraryDraft" : "poiResolution" };
   }
   return { stage: "completion", node: "finalValidation" };
 }

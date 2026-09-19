@@ -128,9 +128,8 @@ export async function resolveItineraryHotelCandidates(
   const dailyCandidates: Array<{ day: number; candidates: CtripHotelCandidate[] }> = [];
   const nextItinerary = structuredClone(itinerary);
   limitItineraryHotelStays(nextItinerary, nights);
-  for (const day of nextItinerary) {
-    // “无” 是送站日等明确不住宿的语义，不能被当作酒店名去查询并写回候选。
-    if (!hasItineraryHotelStay(day.hotel)) continue;
+  for (const [index, day] of nextItinerary.entries()) {
+    if (!shouldResolveItineraryHotelForDay(day, index, nights)) continue;
     const spots = Array.isArray(day.spots) ? day.spots.map(record).filter(Boolean) : [];
     const last = spots.at(-1);
     const anchorName = hotelAnchorNameForDay(day, preferredCity)
@@ -147,6 +146,17 @@ export async function resolveItineraryHotelCandidates(
   }
   if (!dailyCandidates.length) throw new Error("行程没有需住宿的日期，无法录入酒店候选。");
   return { itinerary: nextItinerary, dailyCandidates, searchDates: dates };
+}
+
+/**
+ * 行程录入页的酒店节点使用携程平台酒店。AI 有时只写了产品 nights，
+ * 但每日 hotel 仍为空；这时按默认行程语义把前 N 天视为住宿日，
+ * 让酒店候选解析补齐携程酒店。明确写“无 / 不住宿”的日子仍然跳过。
+ */
+export function shouldResolveItineraryHotelForDay(day: Record<string, unknown>, index: number, nights?: number): boolean {
+  if (hasItineraryHotelStay(day.hotel)) return true;
+  if (text(day.hotel)) return false;
+  return Number.isInteger(nights) && nights !== undefined && nights > 0 && index < nights;
 }
 
 /** An explicit product hotel tier is a constraint, not a ranking hint. */

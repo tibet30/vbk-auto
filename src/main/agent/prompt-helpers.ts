@@ -121,7 +121,7 @@ function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrde
     const day = DAY_TOKEN[match[1] ?? ""] ?? Number(match[1]);
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? textValue.length;
-    const remainder = trimPlanningControlTail(textValue.slice(start, end)).replace(/^[:：、，,\s]+/, "").trim();
+    const remainder = cleanDayConstraintText(trimPlanningControlTail(textValue.slice(start, end)));
     if (!Number.isInteger(day) || day < 1 || /^(?:不要|不安排|别)/.test(remainder)) continue;
     const spots = splitSpots(remainder);
     if (!spots.length) continue;
@@ -162,7 +162,9 @@ function isItineraryCorrection(value: string): boolean {
 
 function splitSpots(value: string): string[] {
   return value
+    .replace(/\*\*/g, " ")
     .replace(/【[^】]*】|\[[^\]]*\]|\([^)]*\)|（[^）]*）/gu, " ")
+    .replace(/(?:^|[\n\r])\s*[0-9一二三四五六七八九十]+\s*月\s*[0-9一二三四五六七八九十]+\s*号\s*$/gu, " ")
     .replace(/包车|专车|拼车|当地[345四五三]钻.*$|钻酒店.*$/g, " ")
     .replace(/(?:火车站接|接火车站|送火车|送站|住[^—–\-，,、。；;\n]{2,})/gu, " ")
     .replace(/(?:二选一|多选一|任选其一)/gu, " ")
@@ -171,6 +173,14 @@ function splitSpots(value: string): string[] {
     .split(/[和与、，,以及]+/)
     .map((item) => item.replace(/^(?:(?:必须)?(?:去|游览|安排|参观)|再?(?:改成|改为|换成|调整为|替换为|改去|换去)|再加|增加|加上)/, "").trim())
     .filter(looksLikePlaceName);
+}
+
+function cleanDayConstraintText(value: string): string {
+  return value
+    .replace(/\*\*/g, " ")
+    .replace(/(?:^|[\n\r])\s*[0-9一二三四五六七八九十]+\s*月\s*[0-9一二三四五六七八九十]+\s*号\s*$/u, " ")
+    .replace(/^[:：、，,\s]+/, "")
+    .trim();
 }
 
 /**

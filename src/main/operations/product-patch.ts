@@ -171,10 +171,14 @@ function restoreProtectedRuntimeFields(
   const beforeOperations = asRecord(before.operations);
   const afterOperations = asRecord(after.operations);
   if (!beforeOperations || !afterOperations) return;
-  for (const key of ["butler", "hotelResource", "vehicleResource"] as const) {
+  for (const key of ["hotelSource", "hotelTier", "transport", "pickupCity", "reusePickupForDropoff", "mealsIncluded", "hotelResource", "vehicleResource"] as const) {
     if (beforeOperations[key] !== undefined && afterOperations[key] === undefined) {
       afterOperations[key] = structuredClone(beforeOperations[key]);
     }
+  }
+  const beforeBookingControls = asRecord(beforeOperations.bookingControls);
+  if (beforeBookingControls && afterOperations.bookingControls === undefined) {
+    afterOperations.bookingControls = structuredClone(beforeBookingControls);
   }
 }
 

@@ -53,6 +53,19 @@ export interface AgentSnapshot {
   pendingApproval?: AgentApproval;
   uncertainWrite?: { toolCallId: string; message: string; createdAt: string };
 }
+/** A bounded event window for renderer transport; the durable snapshot remains complete in main/SQLite. */
+export interface AgentHistoryPage {
+  events: AgentEvent[];
+  page: number;
+  pageCount: number;
+  olderEventCount: number;
+  newerEventCount: number;
+}
+/** Renderer-safe projection of an AgentSnapshot. `events` always contains the latest window. */
+export interface AgentDisplaySnapshot extends Omit<AgentSnapshot, "events"> {
+  events: AgentEvent[];
+  eventCount: number;
+}
 export interface AgentInputResponse { requestId: string; answers: Record<string, string | string[]>; }
 export interface AgentApprovalResponse { approvalId: string; productVersion: string; }
 export interface AgentIllegalKeywordRepairInput {

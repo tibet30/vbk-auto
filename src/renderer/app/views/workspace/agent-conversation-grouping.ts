@@ -1,10 +1,18 @@
 import type { AgentEvent } from "../../../../shared/contracts-agent.js";
 
-function toolBatchId(event: AgentEvent, events: AgentEvent[]): string | undefined {
+function toolBatchIds(events: AgentEvent[]): Map<string, string> {
+  const batches = new Map<string, string>();
+  for (const event of events) {
+    if (event.type !== "tool_call" || typeof event.data?.toolCallId !== "string" || typeof event.data?.modelTurnId !== "string") continue;
+    batches.set(event.data.toolCallId, event.data.modelTurnId);
+  }
+  return batches;
+}
+
+function toolBatchId(event: AgentEvent, batches: ReadonlyMap<string, string>): string | undefined {
   if (event.type === "tool_call" && typeof event.data?.modelTurnId === "string") return event.data.modelTurnId;
   if (event.type !== "tool_result" || typeof event.data?.toolCallId !== "string") return undefined;
-  const call = events.find((candidate) => candidate.type === "tool_call" && candidate.data?.toolCallId === event.data?.toolCallId);
-  return typeof call?.data?.modelTurnId === "string" ? call.data.modelTurnId : undefined;
+  return batches.get(event.data.toolCallId);
 }
 
 export type AgentThreadStep =
@@ -45,6 +53,7 @@ function hasOpenMethodBatch(thread: { steps: AgentThreadStep[] } | null, batchId
 /** 同一用户询问内的 AI 回合与工具批次收成一段助手线程。 */
 export function groupAgentTimelineEvents(events: AgentEvent[]): AgentTimelineItem[] {
   const items: AgentTimelineItem[] = [];
+  const batches = toolBatchIds(events);
   let thread: (AgentTimelineItem & { kind: "assistant_thread" }) | null = null;
   let leadingStatus: AgentEvent | undefined;
 
@@ -71,7 +80,7 @@ export function groupAgentTimelineEvents(events: AgentEvent[]): AgentTimelineIte
       continue;
     }
 
-    const batchId = toolBatchId(event, events);
+    const batchId = toolBatchId(event, batches);
     const hasOpenBatch = hasOpenMethodBatch(thread, batchId);
     // 审批、提问等语义事件会结束上一段助手线程。之后才迟到的 tool_result
     // 不能跨过这些事件重新拼回旧批次，否则只会渲染出孤立的 AI 头像；应保留为可读的执行结果记录。

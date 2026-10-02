@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 
 function safeHref(value: string): string | undefined {
   try {
@@ -9,7 +9,7 @@ function safeHref(value: string): string | undefined {
   }
 }
 
-function renderInline(value: string): ReactNode[] {
+function renderInline(value: string, keyPrefix: string): ReactNode[] {
   const pattern = /(\*\*[^*\n]+\*\*|__[^_\n]+__|`[^`\n]+`|\[[^\]\n]+\]\([^\)\n]+\)|\*[^*\n]+\*|_[^_\n]+_)/g;
   const nodes: ReactNode[] = [];
   let last = 0;
@@ -17,13 +17,13 @@ function renderInline(value: string): ReactNode[] {
     const index = match.index ?? 0;
     if (index > last) nodes.push(value.slice(last, index));
     const token = match[0];
-    if (token.startsWith("**") || token.startsWith("__")) nodes.push(<strong key={`${index}-strong`}>{token.slice(2, -2)}</strong>);
-    else if (token.startsWith("`") && token.endsWith("`")) nodes.push(<code key={`${index}-code`}>{token.slice(1, -1)}</code>);
-    else if (token.startsWith("*") || token.startsWith("_")) nodes.push(<em key={`${index}-em`}>{token.slice(1, -1)}</em>);
+    if (token.startsWith("**") || token.startsWith("__")) nodes.push(<strong key={`${keyPrefix}-${index}-strong`}>{token.slice(2, -2)}</strong>);
+    else if (token.startsWith("`") && token.endsWith("`")) nodes.push(<code key={`${keyPrefix}-${index}-code`}>{token.slice(1, -1)}</code>);
+    else if (token.startsWith("*") || token.startsWith("_")) nodes.push(<em key={`${keyPrefix}-${index}-em`}>{token.slice(1, -1)}</em>);
     else {
       const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       const href = link ? safeHref(link[2]) : undefined;
-      if (link && href) nodes.push(<a key={`${index}-link`} href={href} target="_blank" rel="noreferrer">{link[1]}</a>);
+      if (link && href) nodes.push(<a key={`${keyPrefix}-${index}-link`} href={href} target="_blank" rel="noreferrer">{link[1]}</a>);
       else nodes.push(token);
     }
     last = index + token.length;
@@ -33,7 +33,7 @@ function renderInline(value: string): ReactNode[] {
 }
 
 function renderText(lines: string[], key: string): ReactNode {
-  return <p key={key}>{lines.flatMap((line, index) => index ? [<br key={`${key}-br-${index}`} />, ...renderInline(line)] : renderInline(line))}</p>;
+  return <p key={key}>{lines.flatMap((line, index) => index ? [<br key={`${key}-br-${index}`} />, ...renderInline(line, `${key}-line-${index}`)] : renderInline(line, `${key}-line-${index}`))}</p>;
 }
 
 function splitTableRow(line: string): string[] {
@@ -67,9 +67,9 @@ function renderTable(rows: string[][], key: string): ReactNode {
   const normalise = (row: string[]) => Array.from({ length: columnCount }, (_, index) => row[index] ?? "");
   return <div key={key} className="markdown-table-scroll">
     <table>
-      <thead><tr>{normalise(head ?? []).map((cell, index) => <th key={index}>{renderInline(cell)}</th>)}</tr></thead>
+      <thead><tr>{normalise(head ?? []).map((cell, index) => <th key={index}>{renderInline(cell, `${key}-head-${index}`)}</th>)}</tr></thead>
       <tbody>{body.map((row, rowIndex) => <tr key={rowIndex}>
-        {normalise(row).map((cell, cellIndex) => <td key={cellIndex}>{renderInline(cell)}</td>)}
+        {normalise(row).map((cell, cellIndex) => <td key={cellIndex}>{renderInline(cell, `${key}-row-${rowIndex}-cell-${cellIndex}`)}</td>)}
       </tr>)}</tbody>
     </table>
   </div>;
@@ -87,7 +87,7 @@ export function renderAssistantMarkdown(content: string): ReactNode {
   const flushList = () => {
     if (!list.length) return;
     const Tag = ordered ? "ol" : "ul";
-    blocks.push(<Tag key={`list-${blocks.length}`}>{list.map((item, index) => <li key={index}>{renderInline(item)}</li>)}</Tag>);
+    blocks.push(<Tag key={`list-${blocks.length}`}>{list.map((item, index) => <li key={index}>{renderInline(item, `list-${blocks.length}-item-${index}`)}</li>)}</Tag>);
     list = [];
   };
 
@@ -111,7 +111,7 @@ export function renderAssistantMarkdown(content: string): ReactNode {
     const unordered = line.match(/^\s*[-*]\s+(.+)$/);
     const numbered = line.match(/^\s*\d+\.\s+(.+)$/);
     if (!line.trim()) { flushParagraph(); flushList(); continue; }
-    if (heading) { flushParagraph(); flushList(); const Tag = `h${heading[1].length}` as "h1" | "h2" | "h3"; blocks.push(<Tag key={`heading-${index}`}>{renderInline(heading[2])}</Tag>); continue; }
+    if (heading) { flushParagraph(); flushList(); const Tag = `h${heading[1].length}` as "h1" | "h2" | "h3"; blocks.push(<Tag key={`heading-${index}`}>{renderInline(heading[2], `heading-${index}`)}</Tag>); continue; }
     if (unordered || numbered) { flushParagraph(); if (list.length && ordered !== Boolean(numbered)) flushList(); ordered = Boolean(numbered); list.push((unordered ?? numbered)![1]); continue; }
     flushList(); paragraph.push(line);
   }

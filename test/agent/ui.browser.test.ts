@@ -72,3 +72,27 @@ test('Agent 协作真实控件：Cursor 式对话、确认、补充与窄屏', a
     assert.deepEqual(errors,[]);
   } finally { await browser.close();await server.close(); }
 });
+
+test('1916 条持久化事件只挂载最新历史窗口，并可回看旧记录', async () => {
+  const server = await createServer({ configFile: false, root:process.cwd(), plugins:[react()], server:{host:'127.0.0.1',port:0},logLevel:'error' });
+  await server.listen();
+  const browser = await chromium.launch({headless:true});
+  try {
+    const page = await browser.newPage({viewport:{width:1440,height:900}});
+    const errors:string[]=[];
+    page.on('pageerror',error=>errors.push(error.message));
+    page.on('console',message=>{ if(message.type()==='error') errors.push(message.text()); });
+    await page.goto(`${server.resolvedUrls!.local[0]}test/fixtures/agent-ui/index.html`);
+    await page.getByRole('region',{name:'方案对话'}).waitFor();
+    await page.evaluate(()=> (window as any).agentFixture.loadLargeHistory());
+    await page.getByText(/更早还有 1796 条记录/).waitFor();
+    assert.equal(await page.getByText(/当前显示第 1\/16 页/).count(),1);
+    assert.match(await page.locator('[data-thread="assistant"]').innerText(), /已使用 \d+ 个工具/);
+    assert.equal(await page.getByRole('button',{name:'查看更早记录'}).count(),1);
+    await page.getByRole('button',{name:'查看更早记录'}).click();
+    await page.getByText(/较新 120 条记录未在本页显示/).waitFor();
+    assert.equal(await page.getByRole('button',{name:'返回最新记录'}).count(),1);
+    assert.equal(await page.locator('[data-thread="assistant"]').count(),1);
+    assert.deepEqual(errors.filter((error)=>/same key|duplicate key|0-strong/i.test(error)),[]);
+  } finally { await browser.close();await server.close(); }
+});

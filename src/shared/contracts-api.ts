@@ -42,7 +42,7 @@ import type {
   MemoryMaintenanceState,
 } from "./contracts-types.js";
 import type { PlanningGenerationState, PlanningMajorStage, PlanningModule } from "./contracts-planning.js";
-import type { AgentSnapshot, AgentInputResponse, AgentApprovalResponse, AgentIllegalKeywordRepairInput } from "./contracts-agent.js";
+import type { AgentDisplaySnapshot, AgentHistoryPage, AgentInputResponse, AgentApprovalResponse, AgentIllegalKeywordRepairInput } from "./contracts-agent.js";
 import type {
   AppAuthAccountsSnapshot,
   AppAuthCaptcha,
@@ -67,14 +67,15 @@ export type WorkflowTaskRetryMode = "from_error" | "from_start";
 
 export interface VbkApi {
   agent: {
-    get(localProductId: string): Promise<AgentSnapshot>;
-    send(localProductId: string, content: string): Promise<AgentSnapshot>;
-    repairIllegalKeywords(localProductId: string, input: AgentIllegalKeywordRepairInput): Promise<AgentSnapshot>;
-    respond(localProductId: string, response: AgentInputResponse): Promise<AgentSnapshot>;
-    approve(localProductId: string, response: AgentApprovalResponse): Promise<AgentSnapshot>;
-    pause(localProductId: string): Promise<AgentSnapshot>;
-    resume(localProductId: string): Promise<AgentSnapshot>;
-    abandon(localProductId: string): Promise<AgentSnapshot>;
+    get(localProductId: string): Promise<AgentDisplaySnapshot>;
+    getHistory(localProductId: string, page: number): Promise<AgentHistoryPage>;
+    send(localProductId: string, content: string): Promise<AgentDisplaySnapshot>;
+    repairIllegalKeywords(localProductId: string, input: AgentIllegalKeywordRepairInput): Promise<AgentDisplaySnapshot>;
+    respond(localProductId: string, response: AgentInputResponse): Promise<AgentDisplaySnapshot>;
+    approve(localProductId: string, response: AgentApprovalResponse): Promise<AgentDisplaySnapshot>;
+    pause(localProductId: string): Promise<AgentDisplaySnapshot>;
+    resume(localProductId: string): Promise<AgentDisplaySnapshot>;
+    abandon(localProductId: string): Promise<AgentDisplaySnapshot>;
   };
   appAuth: {
     status(): Promise<AppAuthStatus>;
@@ -267,7 +268,7 @@ export interface VbkApi {
     quitAndInstall(): Promise<void>;
   };
   events: {
-    onAgentUpdated(listener: (snapshot: AgentSnapshot) => void): () => void;
+    onAgentUpdated(listener: (snapshot: AgentDisplaySnapshot) => void): () => void;
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
     /** 后台任务状态变化后推送；renderer 按当前可见页面决定是否应用。 */
     onWorkflowTaskUpdated(listener: (task: ProductWorkflowTask) => void): () => void;

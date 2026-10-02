@@ -72,7 +72,7 @@ export function AgentConversation({ product, userName, readiness, client, input,
   setInput(value: string): void;
   onApproved(): void;
 }) {
-  const { snapshot, error, busy, run } = useAgentSession(product.id, client);
+  const { snapshot, history, error, busy, run, loadHistoryPage } = useAgentSession(product.id, client);
   const viewport = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const follow = useRef(true);
@@ -83,8 +83,8 @@ export function AgentConversation({ product, userName, readiness, client, input,
   const running = status === "running" || status === "queued";
   const approval = snapshot.pendingApproval;
   const request = snapshot.pendingInput;
-  const events = snapshot.events;
-  const latestEvent = events.at(-1);
+  const events = history.events;
+  const latestEvent = snapshot.events.at(-1);
   const automationFailure = latestAutomationFailure(product);
   const illegalKeywordRepairRequested = events.some((event) => event.data?.illegalKeywordRepair === true);
   const illegalKeywordRepairSubmitted = illegalKeywordRepairRequested && !automationFailure?.affectedPaths.length;
@@ -153,6 +153,14 @@ export function AgentConversation({ product, userName, readiness, client, input,
         </article>;
       })}
       {!events.length && !product.messages.length && <p className={styles.empty}>告诉我旅行安排、资源要求，或希望修改的内容。我会结合查询结果完善右侧方案，最后由你确认录入。</p>}
+      {history.olderEventCount > 0 && <div className={styles.historyPager} role="status">
+        <span>当前显示第 {history.page + 1}/{history.pageCount} 页；更早还有 {history.olderEventCount} 条记录。</span>
+        <button type="button" onClick={() => void loadHistoryPage(Math.min(history.page + 1, history.pageCount - 1))}>查看更早记录</button>
+      </div>}
+      {history.newerEventCount > 0 && <div className={styles.historyPager} role="status">
+        <span>较新 {history.newerEventCount} 条记录未在本页显示。</span>
+        <button type="button" onClick={() => void loadHistoryPage(0)}>返回最新记录</button>
+      </div>}
       {timelineItems.map((item) => <TimelineItem key={item.kind === "event" ? item.event.id : item.id} item={item} events={events} userName={userName} />)}
       {request && status === "waiting_input" && <AgentInput key={request.id} request={request} busy={busy} onSubmit={async (response) => { await run((agent) => agent.respond(product.id, response)); }} />}
       {approval?.status === "pending" && status === "waiting_approval" && <section className={styles.approval} aria-label="最终方案确认">
@@ -199,6 +207,7 @@ export function AgentConversation({ product, userName, readiness, client, input,
 }
 
 function latestAutomationFailure(product: ProductDetail) {
+  if (product.status === "draft_saved" || product.automation?.status === "succeeded") return null;
   const automation = product.automation;
   const phases = Object.values(automation?.recovery?.phases ?? {})
     .filter((phase) => phase.finalError?.trim())

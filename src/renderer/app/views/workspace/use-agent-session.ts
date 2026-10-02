@@ -1,21 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentSnapshot, VbkApi } from "../../../../shared/contracts";
+import type { AgentDisplaySnapshot, AgentHistoryPage, VbkApi } from "../../../../shared/contracts";
+import { agentHistoryPage } from "../../../../shared/agent-display";
+
+export function shouldReplaceVisibleHistoryOnSnapshot(page: number): boolean {
+  return page === 0;
+}
+
+export function shouldApplyHistoryResponse(expectedProductId: string, currentProductId: string, responseSequence: number, currentSequence: number): boolean {
+  return expectedProductId === currentProductId && responseSequence === currentSequence;
+}
 
 export function useAgentSession(localProductId: string, client: VbkApi | undefined) {
-  const [snapshot, setSnapshot] = useState<AgentSnapshot>({ localProductId, run: null, events: [] });
+  const [snapshot, setSnapshot] = useState<AgentDisplaySnapshot>({ localProductId, run: null, events: [], eventCount: 0 });
+  const [history, setHistory] = useState<AgentHistoryPage>(() => agentHistoryPage([], 0));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const productRef = useRef(localProductId);
+  const acceptedUpdatedAt = useRef("");
+  const historyRef = useRef(history);
+  const historyRequestSequence = useRef(0);
   productRef.current = localProductId;
   const requestBusy = useRef(false);
-  const accept = useCallback((next: AgentSnapshot) => {
-    if (next.localProductId !== productRef.current) return;
-    setSnapshot((current) => {
-      if (current.localProductId === next.localProductId
-        && Date.parse(current.updatedAt ?? current.run?.updatedAt ?? "") > Date.parse(next.updatedAt ?? next.run?.updatedAt ?? "")) return current;
-      return next;
-    });
+  const replaceHistory = useCallback((next: AgentHistoryPage) => {
+    historyRef.current = next;
+    setHistory(next);
   }, []);
+  const accept = useCallback((next: AgentDisplaySnapshot) => {
+    if (next.localProductId !== productRef.current) return;
+    const nextUpdatedAt = next.updatedAt ?? next.run?.updatedAt ?? "";
+    if (Date.parse(acceptedUpdatedAt.current) > Date.parse(nextUpdatedAt)) return;
+    acceptedUpdatedAt.current = nextUpdatedAt;
+    setSnapshot(next);
+    if (!shouldReplaceVisibleHistoryOnSnapshot(historyRef.current.page)) return;
+    replaceHistory({
+      events: next.events,
+      page: 0,
+      pageCount: Math.max(1, Math.ceil(next.eventCount / 120)),
+      olderEventCount: Math.max(0, next.eventCount - next.events.length),
+      newerEventCount: 0,
+    });
+  }, [replaceHistory]);
+  useEffect(() => {
+    acceptedUpdatedAt.current = "";
+    historyRequestSequence.current += 1;
+    setSnapshot({ localProductId, run: null, events: [], eventCount: 0 });
+    replaceHistory(agentHistoryPage([], 0));
+  }, [localProductId, replaceHistory]);
   useEffect(() => {
     if (!client?.agent) return;
     let alive = true;
@@ -36,7 +66,18 @@ export function useAgentSession(localProductId: string, client: VbkApi | undefin
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => { alive = false; window.clearInterval(timer); unsubscribe(); };
   }, [client, localProductId, accept]);
-  const run = async (action: (agent: VbkApi["agent"]) => Promise<AgentSnapshot>) => {
+  const loadHistoryPage = async (page: number) => {
+    if (!client?.agent) return;
+    const expectedProductId = localProductId;
+    const responseSequence = historyRequestSequence.current + 1;
+    historyRequestSequence.current = responseSequence;
+    try {
+      const next = await client.agent.getHistory(expectedProductId, page);
+      if (shouldApplyHistoryResponse(expectedProductId, productRef.current, responseSequence, historyRequestSequence.current)) replaceHistory(next);
+    }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "无法读取历史沟通记录"); }
+  };
+  const run = async (action: (agent: VbkApi["agent"]) => Promise<AgentDisplaySnapshot>) => {
     if (!client?.agent || requestBusy.current) return null;
     requestBusy.current = true;
     setBusy(true);
@@ -45,5 +86,5 @@ export function useAgentSession(localProductId: string, client: VbkApi | undefin
     catch (reason) { setError(reason instanceof Error ? reason.message : "操作未完成，请重试"); return null; }
     finally { requestBusy.current = false; setBusy(false); }
   };
-  return { snapshot, error, busy, run };
+  return { snapshot, history, error, busy, run, loadHistoryPage };
 }

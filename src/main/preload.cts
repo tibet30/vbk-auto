@@ -27,6 +27,7 @@ import type { VbkApi } from "../shared/contracts.js";
 const api: VbkApi = {
   agent: {
     get: (id) => ipcRenderer.invoke("agent:get", id),
+    getHistory: (id, page) => ipcRenderer.invoke("agent:getHistory", id, page),
     send: (id, content) => ipcRenderer.invoke("agent:send", id, content),
     repairIllegalKeywords: (id, input) => ipcRenderer.invoke("agent:repairIllegalKeywords", id, input),
     respond: (id, response) => ipcRenderer.invoke("agent:respond", id, response),

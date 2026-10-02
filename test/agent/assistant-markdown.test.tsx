@@ -22,3 +22,15 @@ test("助手 Markdown 渲染 GFM 表格，而不是普通段落", () => {
   assert.match(html, /<td>basicInfo<\/td><td>✅<\/td>/);
   assert.doesNotMatch(html, /\| 模块 \| 状态 \| 内容 \|/);
 });
+
+test("多行行首强调文本有独立 React key，不重复写入运行时错误", () => {
+  const original = console.error;
+  const errors: unknown[][] = [];
+  console.error = (...args: unknown[]) => { errors.push(args); };
+  try {
+    renderToStaticMarkup(renderAssistantMarkdown("**第一行**\n**第二行**"));
+  } finally {
+    console.error = original;
+  }
+  assert.equal(errors.length, 0);
+});

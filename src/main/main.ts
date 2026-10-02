@@ -25,6 +25,7 @@ import { resolveSystemNotificationsEnabled } from "../shared/system-notification
 import { DraftAutomation } from "./automation/automation.js";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import { productNotFound } from "./infrastructure/db-errors.js";
+import { safeRendererSend } from "./infrastructure/renderer-send.js";
 import { evaluateVisibleReadiness } from "./planning/preparation-completion.js";
 import { detectProviderIdFromBrowser } from "./infrastructure/provider-id-source.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
@@ -51,6 +52,7 @@ import { registerSettingsIpc } from "./ipc/settings-ipc.js";
 import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
 import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
 import { registerAgentIpc } from "./ipc/agent-ipc.js";
+import { agentDisplaySnapshot } from "../shared/agent-display.js";
 import { registerMemoryIpc } from "./ipc/memory-ipc.js";
 import { registerUpdateIpc } from "./ipc/update-ipc.js";
 import { ProductTaskScheduler } from "./application/product-task-scheduler.js";
@@ -67,6 +69,7 @@ import { createWithKnownVbkAccount } from "./infrastructure/vbk-account-status.j
 import { createVbkBindingBootstrap } from "./infrastructure/vbk-binding-bootstrap.js";
 import { captureRuntimeLog, setOperationLogDb } from "./operations/operation-log-store.js";
 import { agentAttentionNotification } from "./infrastructure/agent-attention-notification.js";
+import { createAttentionNotificationDelivery } from "./infrastructure/attention-notification-delivery.js";
 import { showSystemNotification, systemNotificationsSupported } from "./infrastructure/system-notifications.js";
 import { workflowAttentionNotification } from "./infrastructure/workflow-attention-notification.js";
 import { MemoryService } from "./memory/memory-service.js";
@@ -95,8 +98,16 @@ let browser: VbkBrowser;
 let automation: DraftAutomation;
 let updateService: AppUpdateService;
 let isQuittingForUpdate = false;
-const notifiedAgentAttention = new Map<string, string>();
-const notifiedWorkflowAttention = new Map<string, string>();
+const deliverAgentAttention = createAttentionNotificationDelivery({
+  supported: systemNotificationsSupported,
+  show: showSystemNotification,
+  onFailure: (message) => logWarn("[agent] system notification failed", { message }),
+});
+const deliverWorkflowAttention = createAttentionNotificationDelivery({
+  supported: systemNotificationsSupported,
+  show: showSystemNotification,
+  onFailure: (message) => logWarn("[workflow] system notification failed", { message }),
+});
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -144,8 +155,7 @@ const broadcastProduct = (product: ProductDetail) => {
     ? db?.latestWorkflowTaskForProduct(product.id)
     : undefined;
   const nextProduct = workflowTask ? { ...product, workflowTask } : product;
-  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-  window.webContents.send("product:updated", nextProduct);
+  safeRendererSend(window, "product:updated", nextProduct);
 };
 let productEmitter: (product: ProductDetail) => void = broadcastProduct;
 const emitProduct = (product: ProductDetail) => productEmitter(product);
@@ -154,47 +164,21 @@ const emitProduct = (product: ProductDetail) => productEmitter(product);
  * 仍通过 planning:state 补偿，避免订阅建立前的事件丢失。
  */
 const emitPlanningState = (state: PlanningGenerationState) => {
-  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-  // isDestroyed() 与 send() 之间窗口仍可能刚好被销毁。状态已经落库，通知失败
-  // 只能丢给下一次 planning:state 补偿，绝不能让主进程规划任务因 UI 生命周期失败。
-  try {
-    window.webContents.send("planning:updated", state.localProductId, state);
-  } catch {
-    // renderer 重建 / 退出期间没有可投递目标；持久化状态仍是权威来源。
-  }
+  // 状态已落库；renderer 重建期间由 planning:state 读取路径补偿。
+  safeRendererSend(window, "planning:updated", state.localProductId, state);
 };
 const emitWorkflowTask = (task: ProductWorkflowTask, notify = true) => {
   const attention = notify ? workflowAttentionNotification(task) : null;
-  if (getSettings().systemNotificationsEnabled
-    && attention
-    && notifiedWorkflowAttention.get(task.id) !== attention.key) {
-    notifiedWorkflowAttention.set(task.id, attention.key);
-    void showSystemNotification({ title: `${APP_NAME} · ${attention.title}`, body: attention.body }).then((result) => {
-      if (!result.shown && notifiedWorkflowAttention.get(task.id) === attention.key) {
-        notifiedWorkflowAttention.delete(task.id);
-        logWarn("[workflow] system notification failed", { message: result.message });
-      }
-    });
+  if (getSettings().systemNotificationsEnabled && attention) {
+    void deliverWorkflowAttention(task.id, { ...attention, title: `${APP_NAME} · ${attention.title}` });
   }
-  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-  try {
-    window.webContents.send("workflow-task:updated", task);
-  } catch {
-    // 任务已持久化；窗口恢复后 workflowTasks:list 会补偿事件丢失。
-  }
+  // 任务已持久化；窗口恢复后 workflowTasks:list 会补偿事件丢失。
+  safeRendererSend(window, "workflow-task:updated", task);
 };
 const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnapshot) => {
   const attention = agentAttentionNotification(snapshot, db?.getProduct(snapshot.localProductId)?.name ?? "方案");
-  if (getSettings().systemNotificationsEnabled
-    && attention
-    && notifiedAgentAttention.get(snapshot.localProductId) !== attention.key) {
-    notifiedAgentAttention.set(snapshot.localProductId, attention.key);
-    void showSystemNotification({ title: `${APP_NAME} · ${attention.title}`, body: attention.body }).then((result) => {
-      if (!result.shown && notifiedAgentAttention.get(snapshot.localProductId) === attention.key) {
-        notifiedAgentAttention.delete(snapshot.localProductId);
-        logWarn("[agent] system notification failed", { message: result.message });
-      }
-    });
+  if (getSettings().systemNotificationsEnabled && attention) {
+    void deliverAgentAttention(snapshot.localProductId, { ...attention, title: `${APP_NAME} · ${attention.title}` });
   }
   if (snapshot.run) {
     let task = db?.latestWorkflowTaskForProduct(snapshot.localProductId);
@@ -218,8 +202,7 @@ const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnaps
       if (saved) emitProduct(saved);
     }
   }
-  if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-  try { window.webContents.send("agent:updated", snapshot); } catch { /* durable snapshot is read on refresh */ }
+  safeRendererSend(window, "agent:updated", agentDisplaySnapshot(snapshot));
 };
 /**
  * 删除 settings 表里某个 provider 的旧密文。

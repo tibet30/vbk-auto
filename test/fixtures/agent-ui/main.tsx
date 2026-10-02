@@ -19,13 +19,16 @@ let snapshot: AgentSnapshot = {localProductId:'fixture',run:{id:'run-1',status:'
   {id:'7',runId:'run-1',type:'assistant',createdAt:now(),content:'<think>资源已齐，向用户确认节奏和文案。</think>\n需要你补充两点后再继续完善方案。',data:{modelTurnId:'turn-2'}},
 ]};
 const listeners = new Set<(s:AgentSnapshot)=>void>();
-const emit = () => { snapshot = {...snapshot,updatedAt:now(),run:snapshot.run?{...snapshot.run,updatedAt:now()}:null}; for(const fn of listeners) fn(structuredClone(snapshot)); return structuredClone(snapshot); };
+const emit = () => { snapshot = {...snapshot,updatedAt:now(),run:snapshot.run?{...snapshot.run,updatedAt:now()}:null}; const display={...snapshot,events:snapshot.events.slice(-120),eventCount:snapshot.events.length}; for(const fn of listeners) fn(structuredClone(display)); return structuredClone(display); };
 const log=(type:any,content:string,data?:any)=>snapshot.events.push({id:crypto.randomUUID(),runId:'run-1',type,content,data,createdAt:now()});
 const client = {
-  agent:{get:async()=>structuredClone(snapshot),send:async(_id:string,content:string)=>{log('user',content);return emit();},
-    respond:async(_id:string,response:AgentInputResponse)=>{ if(response.requestId!==snapshot.pendingInput?.id) throw Error('问题已过期'); log('user','已回答：'+JSON.stringify(response.answers));snapshot.pendingInput=undefined;snapshot.run!.status='waiting_approval';snapshot.pendingApproval={id:'approval-1',productVersion:'v1',accountKey:'测试账号',scope:['vbk.write_phase:basic','vbk.write_phase:itinerary'],summary:'两天一晚，行程节奏轻松，保留你提供的文案。请查看右侧方案后确认。',status:'pending',createdAt:now()};return emit();},
-    approve:async()=>{ const approval={...snapshot.pendingApproval!,status:'approved' as const};log('approval','用户已授权',{approvalId:approval.id,approval});log('status','运行中',{status:'running'});snapshot.pendingApproval=undefined;snapshot.run!.status='running';return emit();},
-    pause:async()=>{snapshot.run!.status='paused';return emit();},resume:async()=>{snapshot.run!.status='running';return emit();},abandon:async()=>{snapshot.run!.status='abandoned';return emit();}},
+  agent:{get:async()=>({ ...structuredClone(snapshot), events:structuredClone(snapshot.events.slice(-120)), eventCount:snapshot.events.length }),getHistory:async(_id:string,page:number)=>{
+    const size=120;const end=snapshot.events.length-page*size;const start=Math.max(0,end-size);const pageCount=Math.max(1,Math.ceil(snapshot.events.length/size));
+    return {events:structuredClone(snapshot.events.slice(start,end)),page,pageCount,olderEventCount:start,newerEventCount:snapshot.events.length-end};
+  },send:async(_id:string,content:string)=>{log('user',content);return {...emit(),eventCount:snapshot.events.length};},
+    respond:async(_id:string,response:AgentInputResponse)=>{ if(response.requestId!==snapshot.pendingInput?.id) throw Error('问题已过期'); log('user','已回答：'+JSON.stringify(response.answers));snapshot.pendingInput=undefined;snapshot.run!.status='waiting_approval';snapshot.pendingApproval={id:'approval-1',productVersion:'v1',accountKey:'测试账号',scope:['vbk.write_phase:basic','vbk.write_phase:itinerary'],summary:'两天一晚，行程节奏轻松，保留你提供的文案。请查看右侧方案后确认。',status:'pending',createdAt:now()};return {...emit(),eventCount:snapshot.events.length};},
+    approve:async()=>{ const approval={...snapshot.pendingApproval!,status:'approved' as const};log('approval','用户已授权',{approvalId:approval.id,approval});log('status','运行中',{status:'running'});snapshot.pendingApproval=undefined;snapshot.run!.status='running';return {...emit(),eventCount:snapshot.events.length};},
+    pause:async()=>{snapshot.run!.status='paused';return {...emit(),eventCount:snapshot.events.length};},resume:async()=>{snapshot.run!.status='running';return {...emit(),eventCount:snapshot.events.length};},abandon:async()=>{snapshot.run!.status='abandoned';return {...emit(),eventCount:snapshot.events.length};}},
   events:{onAgentUpdated:(fn:any)=>{listeners.add(fn);return()=>listeners.delete(fn);}},
 } as unknown as VbkApi;
 (window as any).agentFixture={
@@ -34,6 +37,18 @@ const client = {
     const event=snapshot.events.find(item=>item.data?.fixtureStream===true);
     if(event){event.content=text;event.data={...event.data,streaming:!done};}
     else log('assistant',text,{fixtureStream:true,streaming:!done,modelTurnId:'stream-turn'});
+    return emit();
+  },
+  loadLargeHistory:(count=1_916)=>{
+    snapshot.events=Array.from({length:count},(_,index)=>{
+      const call=index%2===0;
+      const callId=`fixture-call-${Math.floor(index/2)}`;
+      return {
+        id:`fixture-event-${index}`,runId:'run-1',type:call?'tool_call':'tool_result',createdAt:now(),
+        content:call?'query_poi':'{"items":["成都熊猫基地"]}',
+        data:call?{toolCallId:callId,modelTurnId:`fixture-turn-${Math.floor(index/2)}`,name:'query_poi',arguments:{keyword:'成都'}}:{toolCallId:callId,status:'verified'},
+      };
+    });
     return emit();
   },
   snapshot:()=>snapshot,emit,

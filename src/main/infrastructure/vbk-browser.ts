@@ -28,7 +28,7 @@ import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/cont
 import type { SerialisedCookie } from "./vbk-cookie-serializer.js";
 import { parseCookies } from "./vbk-cookie-serializer.js";
 import { waitForDomText } from "./vbk-page-wait.js";
-import { attachVbkSessionFetch } from "./vbk-session-fetch-adapter.js";
+import { attachVbkSessionFetch, observeVbkSessionFetch } from "./vbk-session-fetch-adapter.js";
 import { navigateVbkPage } from "./vbk-navigation.js";
 import { isExpectedLoginRedirect } from "./vbk-navigation.js";
 import {
@@ -45,6 +45,7 @@ import {
   collectVbkCookies,
   setVbkCookieOn,
 } from "./vbk-browser-cookies.js";
+import { ItineraryDraftCapture } from "./itinerary-draft-capture.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
 const nativeDialogHandledPages = new WeakSet<Page>();
@@ -140,6 +141,8 @@ export class VbkBrowser {
   private cachedUserInfoUrl?: string;
   private cachedUserInfoWebContentsId?: number;
   private cachedUserInfo?: { displayName?: string; loginAccount?: string };
+  private readonly itineraryDraftCapture = new ItineraryDraftCapture();
+  private stopNativeItineraryDraftCapture?: () => void;
 
   constructor(
     private readonly window: BrowserWindow,
@@ -371,6 +374,7 @@ export class VbkBrowser {
    */
   async logout() {
     await this.ensureReadyForAction();
+    this.itineraryDraftCapture.dispose();
     const current = this.view;
     if (!current) return;
     await this.clearViewStorage(current);
@@ -446,6 +450,7 @@ export class VbkBrowser {
    */
   async addLogin() {
     await this.ensureReadyForAction();
+    this.itineraryDraftCapture.dispose();
     // 先把当前账号抓走；如果未登录，跳过这一步避免空快照落地。
     await this.saveCurrentSession();
 
@@ -474,6 +479,7 @@ export class VbkBrowser {
    */
   async switchAccount(accountKey: string) {
     await this.ensureReadyForAction();
+    this.itineraryDraftCapture.dispose();
     if (!this.sessionStore) throw new Error("本机未启用多账号登录切换。");
     const requestedKey = accountKey?.trim();
     if (!requestedKey) throw new Error("切换账号失败：账号标识不能为空。");
@@ -706,10 +712,36 @@ export class VbkBrowser {
     return page;
   }
 
+  /** Arm one read-only capture for the next itinerary save. It records no headers, cookies or URL. */
+  async armItineraryDraftCapture(productId: string) {
+    const contents = this.view?.webContents;
+    if (!contents) throw new Error("未找到当前 VBK 页面，无法开始行程草稿诊断。");
+    const page = await this.page();
+    const snapshot = await this.itineraryDraftCapture.arm(contents, productId, () => {
+      this.stopNativeItineraryDraftCapture?.();
+      this.stopNativeItineraryDraftCapture = undefined;
+    });
+    this.stopNativeItineraryDraftCapture = observeVbkSessionFetch(page, (exchange) => {
+      this.itineraryDraftCapture.observeNative(exchange.endpoint, exchange.observedAt, exchange.requestBody, exchange.responsePayload);
+    });
+    return snapshot;
+  }
+
+  readItineraryDraftCapture() {
+    return this.itineraryDraftCapture.read();
+  }
+
+  stopItineraryDraftCapture() {
+    this.itineraryDraftCapture.dispose();
+    this.stopNativeItineraryDraftCapture?.();
+    this.stopNativeItineraryDraftCapture = undefined;
+  }
+
   /**
    * 关闭 CDP 连接 + 销毁所有视图；用于完全退出应用前或调试热重启时。
    */
   async dispose() {
+    this.itineraryDraftCapture.dispose();
     if (this.cdp?.isConnected()) await this.cdp.close().catch(() => {});
     this.cdp = undefined;
     // 销毁所有 partition 视图

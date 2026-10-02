@@ -13,11 +13,11 @@ export function ProductStatusBadge({ item }: { item: ProductSummary }) {
     case "planning":
       return <span className={styles.productBadge} data-state="planning"><Sparkles size={11} aria-hidden="true" />方案规划中</span>;
     case "review":
-      return <span className={styles.productBadge} data-state="review"><CircleHelpSmall />等待确认</span>;
+      return <span className={styles.productBadge} data-state="review"><CircleHelpSmall />{item.coverNeedsReplacement ? "待录入草稿 · 禁止上架" : "等待确认"}</span>;
     case "automating":
       return <span className={styles.productBadge} data-state="automating"><LoaderCircle size={11} aria-hidden="true" />正在录入</span>;
     case "draft_saved":
-      return <span className={styles.productBadge} data-state="draft_saved"><Check size={11} aria-hidden="true" />草稿已保存</span>;
+      return <span className={styles.productBadge} data-state="draft_saved"><Check size={11} aria-hidden="true" />{item.coverNeedsReplacement ? "草稿已存 · 需换图" : "草稿已保存"}</span>;
     case "blocked":
       return <span className={styles.productBadge} data-state="blocked"><AlertTriangle size={11} aria-hidden="true" />需要处理</span>;
   }

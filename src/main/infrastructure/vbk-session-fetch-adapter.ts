@@ -8,6 +8,37 @@ import type {
   VbkSessionNativeTextResult,
 } from "./vbk-session-request.js";
 
+/**
+ * Ephemeral native-fetch observation. Consumers must immediately project their
+ * own whitelist; this adapter never persists request bodies or session data.
+ */
+export type VbkSessionFetchObserver = (exchange: {
+  endpoint: string;
+  /** Timestamp at native request start, before its response is read. */
+  observedAt: string;
+  requestBody: object;
+  responsePayload: unknown;
+}) => void;
+
+const fetchObservers = new WeakMap<object, Set<VbkSessionFetchObserver>>();
+
+export function observeVbkSessionFetch(page: Page, observer: VbkSessionFetchObserver): () => void {
+  const target = page as object;
+  const observers = fetchObservers.get(target) ?? new Set<VbkSessionFetchObserver>();
+  observers.add(observer);
+  fetchObservers.set(target, observers);
+  return () => {
+    observers.delete(observer);
+    if (!observers.size) fetchObservers.delete(target);
+  };
+}
+
+function observeNativeFetch(page: Page, endpoint: string, observedAt: string, requestBody: object, responsePayload: unknown): void {
+  for (const observer of fetchObservers.get(page as object) ?? []) {
+    try { observer({ endpoint, observedAt, requestBody, responsePayload }); } catch { /* diagnostics never affect the request */ }
+  }
+}
+
 function emptyContext(): VbkSessionContext {
   return {
     hasCid: false, cookieNameCount: 0, hasGuidCookie: false, hasVbkLoginCidCookie: false,
@@ -19,7 +50,7 @@ function emptyContext(): VbkSessionContext {
 
 function safePayload(text: string): unknown {
   const idSafeText = text.replace(
-    /("(?:tourInfoId|previewTourInfoId|auditTourInfoId|draftTourInfoId|tourInfoScoreId|tourDaily[A-Za-z]+Id)"\s*:\s*)(\d{16,})/g,
+    /("(?:tourInfoId|previewTourInfoId|auditTourInfoId|draftTourInfoId|fromTourInfoId|tourInfoScoreId|tourDaily[A-Za-z]+Id)"\s*:\s*)(\d{16,})/g,
     '$1"$2"',
   );
   return JSON.parse(idSafeText);
@@ -88,7 +119,9 @@ export function attachVbkSessionFetch(page: Page, electronSession: Session): voi
       body: JSON.stringify(parts.body),
     });
     const text = await response.text();
-    return finishSessionResponse(response.status, text, startedAt, ctx, request.errorLabel);
+    const result = finishSessionResponse(response.status, text, startedAt, ctx, request.errorLabel);
+    observeNativeFetch(page, request.endpoint, new Date(startedAt).toISOString(), parts.body, result.payload);
+    return result;
   };
   if (!target.vbkSessionGetText) target.vbkSessionGetText = async (request) => {
     const response = await electronSession.fetch(request.endpoint, {
@@ -121,7 +154,9 @@ export function attachPlaywrightSessionFetch(page: Page): void {
       headers: { ...parts.headers, referer: request.referrer ?? page.url(), "user-agent": await userAgent },
       data: JSON.stringify(parts.body),
     });
-    return finishSessionResponse(response.status(), await response.text(), startedAt, ctx, request.errorLabel);
+    const result = finishSessionResponse(response.status(), await response.text(), startedAt, ctx, request.errorLabel);
+    observeNativeFetch(page, request.endpoint, new Date(startedAt).toISOString(), parts.body, result.payload);
+    return result;
   };
   if (!target.vbkSessionGetText) target.vbkSessionGetText = async (request) => page.evaluate(async ({ endpoint, headers }) => {
     const response = await fetch(endpoint, {

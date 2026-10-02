@@ -3,7 +3,7 @@ import { isResearchTaskSatisfiedByProduct } from "../../shared/research-task-sat
 import { isCoverResearchTaskSatisfiedByProduct } from "../minimax/minimax.js";
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 
-type RefreshDb = Pick<VbkDatabase, "getProduct" | "markResearchTasksSatisfied">;
+type RefreshDb = Pick<VbkDatabase, "getProduct" | "markResearchTasksSatisfiedByProduct" | "reopenKindSupersededPoiResearchTasks">;
 
 export interface RefreshedResearchIssues {
   updated: number;
@@ -15,8 +15,10 @@ export function refreshSatisfiedResearchTasks(db: RefreshDb, localProductId: str
   if (!product) {
     throw new Error("产品不存在。");
   }
-  const satisfiedIds = satisfiedResearchTaskIds(product);
-  return db.markResearchTasksSatisfied(localProductId, satisfiedIds);
+  db.reopenKindSupersededPoiResearchTasks(localProductId, product.product);
+  const refreshedProduct = db.getProduct(localProductId);
+  if (!refreshedProduct) throw new Error("产品不存在。");
+  return db.markResearchTasksSatisfiedByProduct(localProductId, refreshedProduct.product);
 }
 
 export function satisfiedResearchTaskIds(product: ProductDetail): string[] {

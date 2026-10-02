@@ -25,6 +25,7 @@ import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
 import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
+import { needsTrafficLineBackfill } from "../traffic-line-backfill.js";
 
 export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
   if (run?.status !== "failed") return undefined;
@@ -264,6 +265,11 @@ isCancelRequested(localProductId: string): boolean {
     if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
     const approval = approvalForRun(agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
+    if (needsTrafficLineBackfill(product)) {
+      await this.runOnePhaseLocked(localProductId, "trafficLine");
+      await this.runOnePhaseLocked(localProductId, "preflight");
+      return;
+    }
     const retryFrom = approvedRecoveryStartPhase(product, failedAutomationResumePhase(product.automation));
     const restartPreWriteGuardFailure = canRestartPreWriteAuthorizationFailure(product.automation, product.productId);
     if (product.automation?.status === "failed" && !retryFrom && !restartPreWriteGuardFailure) {

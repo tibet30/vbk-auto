@@ -5,7 +5,7 @@ import { agentProductVersion, agentCompletionGate, buildAgentApproval, recoverEq
 import { assertAgentWriteAuthorized, agentApprovalScopeError, isDeterministicAutomationInFlight } from '../../src/main/agent/integration-guard.js';
 import { agentPlannerContext } from '../../src/main/agent/integration-context.js';
 import { agentPatchOperations } from '../../src/main/agent/integration-patch.js';
-import { applyResolvedItineraryHotels } from '../../src/main/agent/integration.js';
+import { applyResolvedItineraryHotels, persistedItineraryHotelResult } from '../../src/main/agent/integration.js';
 import { recoverResolvedHotelCandidates } from '../../src/main/agent/hotel-candidate-recovery.js';
 import { agentWorkflowPatch } from '../../src/main/agent/integration-workflow.js';
 import { prepareAgentAutomation } from '../../src/main/automation/automation.main/automation.main.agent.js';
@@ -85,6 +85,14 @@ test('resolved hotels persist both the daily candidates and controlled Ctrip res
   assert.deepEqual((next.itinerary as any[])[0].hotelCandidates,candidates);
   assert.equal((next.operations as any).hotelResource.source,'ctrip');
   assert.deepEqual((next.operations as any).hotelResource.dailyCandidates,[{day:1,candidates}]);
+  assert.deepEqual(persistedItineraryHotelResult({
+    itinerary: next.itinerary, dailyCandidates: [{ day: 1, candidates }], searchDates: { checkin: '2026-12-01', checkout: '2026-12-02' },
+  } as any), {
+    persisted: true, persistedPath: 'itinerary[].hotelCandidates',
+    persistenceNote: '酒店候选已自动写回本地行程，无需再调用 patch_product 更新 itinerary。',
+    dailyCandidates: [{ day: 1, candidates }], searchDates: { checkin: '2026-12-01', checkout: '2026-12-02' },
+    persistedDays: [{ day: 1, hotel: '江孜4钻酒店', candidateCount: 1, selectedHotel: { hotelId: 101, hotelName: '江孜4钻酒店', diamond: 4, cityName: '江孜' } }],
+  });
 });
 
 test('hotel recovery restores only a matching durable resolver result',()=>{

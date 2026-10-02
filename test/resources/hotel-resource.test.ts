@@ -34,24 +34,48 @@ test("资源配置酒店必须与行程钻级严格一致", () => {
   assert.equal(hotelCandidateMatchesTier("某四星酒店 【高档型，4星】", "当地4钻酒店/-4"), false);
 });
 
-test("连续两晚合并为一个资源行程段时，五家资源覆盖每日行程前三家", () => {
+test("连续同城且候选 ID 顺序相同的两晚合并为一个资源行程段", () => {
   const candidates = (ids: number[]) => ids.map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` }));
   const segments = ctripResourceSegments([
     { day: 1, hotelCandidates: candidates([1, 2, 3, 4, 5]) },
-    { day: 2, hotelCandidates: candidates([2, 1, 3, 4, 5]) },
+    { day: 2, hotelCandidates: candidates([1, 2, 3, 4, 5]) },
   ], [{ segmentId: "segment-1", segmentBase: { stayNights: 2 } }]);
   assert.deepEqual(segments, [{ day: 1, segmentId: "segment-1", candidates: candidates([1, 2, 3, 4, 5]) }]);
 });
 
-test("合并住宿段以首晚候选保存资源，不因后续日期备选不同而阻断", () => {
-  assert.deepEqual(ctripResourceSegments([
-    { day: 1, hotelCandidates: [1, 2, 3, 4, 5].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })) },
-    { day: 2, hotelCandidates: [6, 7, 8, 9, 10].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })) },
-  ], [{ segmentId: "segment-1", segmentBase: { stayNights: 2 } }]), [{
-    day: 1,
-    segmentId: "segment-1",
-    candidates: [1, 2, 3, 4, 5].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })),
-  }]);
+test("同城相邻但候选 ID 或顺序不同必须拆成独立资源行程段", () => {
+  const candidates = (ids: number[]) => ids.map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}`, cityName: "潮州" }));
+  assert.deepEqual(hotelStayGroups([
+    { day: 3, hotelCandidates: candidates([1, 2, 3, 4, 5]) },
+    { day: 4, hotelCandidates: candidates([6, 7, 8, 9, 10]) },
+  ], true), [
+    { cityName: "潮州", nights: 1 },
+    { cityName: "潮州", nights: 1 },
+  ]);
+  assert.deepEqual(hotelStayGroups([
+    { day: 3, hotelCandidates: candidates([1, 2, 3, 4, 5]) },
+    { day: 4, hotelCandidates: candidates([2, 1, 3, 4, 5]) },
+  ], true), [
+    { cityName: "潮州", nights: 1 },
+    { cityName: "潮州", nights: 1 },
+  ]);
+});
+
+test("已合并资源段却覆盖不同携程候选时拒绝静默取首晚", () => {
+  const candidates = (ids: number[]) => ids.map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` }));
+  assert.throws(() => ctripResourceSegments([
+    { day: 3, hotelCandidates: candidates([1, 2, 3, 4, 5]) },
+    { day: 4, hotelCandidates: candidates([6, 7, 8, 9, 10]) },
+  ], [{ segmentId: "segment-1", segmentBase: { stayNights: 2 } }]), /候选不一致/);
+});
+
+test("携程分段拒绝非整数或重复酒店 ID", () => {
+  assert.throws(() => hotelStayGroups([
+    { day: 1, hotelCandidates: [{ hotelId: Number.NaN, cityName: "潮州" }] },
+  ], true), /候选 ID 无效或重复/);
+  assert.throws(() => hotelStayGroups([
+    { day: 1, hotelCandidates: [{ hotelId: 1, cityName: "潮州" }, { hotelId: 1, cityName: "潮州" }] },
+  ], true), /候选 ID 无效或重复/);
 });
 
 test("住宿资源段按连续住宿城市拆分，保留同城连续晚数", () => {

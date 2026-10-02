@@ -43,6 +43,9 @@ import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite
 import { resolveRunStatusAfterSinglePhaseSuccess, settleRunAfterVerifiedPreflight } from "./automation.main.run-one-state.js";
 import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
+import { inspectManualCoverAsset } from "../manual-cover-asset.js";
+import { readActiveCoverFallback, placeholderDraftOnly } from "../../../shared/cover-fallback.js";
+import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
 
 /**
  * 单阶段重新执行入口：
@@ -54,6 +57,14 @@ import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-l
 export async function runOnePhase(ctx: AutomationRunContext, localProductId: string, phaseName: string) {
     const product = ctx.db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
+    if (readActiveCoverFallback(product.product)) {
+      if (!placeholderDraftOnly(product.product)) throw new Error("录入前检查未通过：运营占位图仅允许未提审、未上架的草稿。");
+      loadPlaceholderCoverAsset();
+    }
+    if (phaseName === "presentation") {
+      const issue = inspectManualCoverAsset(product.product).issue;
+      if (issue) throw new Error(`录入前检查未通过：${issue}`);
+    }
     const productData = parseProduct(product.product);
     const productId = product.productId;
     // 「重新执行」以前置依赖与 run() 一致：管家联系人从 product JSON 读取，
@@ -116,6 +127,9 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
         phaseRecord(phase);
         return ctx.runVbkPageExclusive(async () => {
+          if (phase === "presentation" && productData.presentation?.cover?.source === "manualUpload") {
+            ctx.ensureBrowserHasBounds();
+          }
           return executeApiWithPhasePageSync({
             page,
             productId,

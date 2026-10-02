@@ -18,7 +18,7 @@
 import type Database from "better-sqlite3";
 import type { ProductDetail, ProductSummary } from "../../../../shared/contracts.js";
 import { getProduct, updateProduct } from "./products.js";
-import { markResearchTasksSatisfiedByProduct } from "./research-tasks.js";
+import { markResearchTasksSatisfiedByProduct, reopenKindSupersededPoiResearchTasks } from "./research-tasks.js";
 
 export interface ReplaceProductAndSatisfyResearchTasksOptions {
   status?: ProductSummary["status"];
@@ -43,6 +43,7 @@ export function replaceProductAndSatisfyResearchTasks(
 ): { product: ProductDetail; confirmedTaskIds: string[] } {
   const tx = db.transaction(() => {
     updateProduct(db, localProductId, product, options.status);
+    reopenKindSupersededPoiResearchTasks(db, localProductId, product);
     const confirmed = markResearchTasksSatisfiedByProduct(
       db,
       localProductId,

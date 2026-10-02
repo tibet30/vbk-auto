@@ -1,4 +1,4 @@
-import { logInfo } from "../../shared/log-timestamp.js";
+import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import type { AiUsageEvent, ManualReviewFieldInput } from "../../shared/contracts.js";
 import { parseProduct } from "../automation/schema/schema.js";
 import { resolveVehicleResource } from "../operations/vehicle-resource.js";
@@ -15,22 +15,34 @@ import { recordAgentUsage } from "../agent/integration-usage.js";
 import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
 import type { MainIpcContext } from "./context.js";
 
+async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
+  try {
+    await context.agentCore?.reconcilePendingInput(id);
+  } catch (error) {
+    // The product was already committed. Keep its save response truthful; the
+    // next Agent read will retry reconciliation against the persisted value.
+    logWarn("[products] pending Agent question reconciliation failed", { localProductId: id, error });
+  }
+}
+
 export function registerProductAiIpc(context: MainIpcContext): void {
   const { db, emitProduct, readiness, getSettings, aiService, productMutations, remoteProducts, broadcastProduct } = context;
 
   ipcMain.handle("products:readiness", (_event, id: string) => readiness(id));
-  ipcMain.handle("products:updateProductJson", (_event, id: string, json: string) => {
+  ipcMain.handle("products:updateProductJson", async (_event, id: string, json: string) => {
     context.productWorkflows.assertIdle(id, "manual");
     const product = db.getProduct(id);
     if (!product) throw productNotFound(id);
     let next: Record<string, unknown>;
     try { next = JSON.parse(json); } catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
     parseProduct(next);
-    return productMutations.replace(id, next, {
+    const saved = productMutations.replace(id, next, {
       status: "review",
       allowMeetingCityCorrection: true,
       preserveVerifiedItineraryPois: false,
     });
+    await reconcileSavedProductQuestion(context, id);
+    return saved;
   });
 
   // Manual review fields are validated against their whitelist and committed
@@ -51,6 +63,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const policy = manualReviewSavePolicy(product.status);
     if (policy.requireCompleteProduct) parseProduct(next);
     const { product: saved, confirmedTaskIds } = db.replaceProductAndSatisfyResearchTasks(id, next, { status: policy.nextStatus });
+    await reconcileSavedProductQuestion(context, id);
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", {
         localProductId: id,

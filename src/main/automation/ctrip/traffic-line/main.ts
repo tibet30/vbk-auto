@@ -6,7 +6,7 @@ import {
   type TrafficLineEndpointPlan,
   type TrafficLineVariant,
 } from "../../../../shared/contracts-traffic-line.js";
-import { buildTrafficLineTargets } from "./orchestrator.js";
+import { buildTrafficLineTargets, trafficLineSkippedChildCanBeRevalidated } from "./orchestrator.js";
 import { ensureTrafficLineRelationship } from "./relationships.js";
 import { ensureTrafficLinePresentation } from "./presentation.js";
 import {
@@ -73,7 +73,9 @@ export async function ensureTrafficLineApi(
   const skipped: NonNullable<TrafficLineApiResult["skipped"]> = [];
   targets = targets.filter((target) => {
     const previous = options.childProgress?.find((item) => item.variant === target.variant);
-    if (!previous || !trafficLineChildShouldBeSkipped(previous) || trafficLineSkippedChildCanBeRetried(previous)) return true;
+    if (!previous || !trafficLineChildShouldBeSkipped(previous)
+      || trafficLineSkippedChildCanBeRetried(previous)
+      || trafficLineSkippedChildCanBeRevalidated(previous, config)) return true;
     const reason = previous.failureReason!;
     skipped.push({ variant: target.variant, lineDescription: target.lineDescription, reason });
     options.onChildProgress?.({
@@ -411,6 +413,10 @@ export function trafficLineSkippedChildCanBeRetried(progress: TrafficLineChildPr
     && /(?:没有任何可用的多出发城市|未返回可用于(?:飞机|火车)往返的出发城市)/.test(progress.failureReason ?? ""));
 }
 
+/**
+ * 历史 skipped 只代表当时的计划结果。当前会话再次确认该方式可用时，
+ * 不能沿用旧失败；让关系读取先复用已有子产品，再进入纯回读/有界修复。
+ */
 function trafficLineResourceStageFailure(progress: TrafficLineChildProgress): boolean {
   if (progress.failedStage === "resourcesSaved") return true;
   if (progress.failedStage) return false;

@@ -17,7 +17,7 @@ import {
   syncProductStatusAfterRunPlan,
 } from "../planning/product-status-sync.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
-import { applyAutoCoverFill } from "../operations/cover-auto-fill.js";
+import { applyAutoCoverFill, applyCoverFallback } from "../operations/cover-auto-fill.js";
 import { resolveProductTrafficLineAvailability } from "../automation/ctrip/traffic-line/planning-availability.js";
 import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-trigger.js";
 import { syncConfirmedResearchTasksToRemote } from "../operations/research-task-remote-sync.js";
@@ -225,7 +225,9 @@ export function registerPlanningIpc(context: MainIpcContext): void {
           });
           if (coverResult?.outcome.written) {
             productMutations.replace(localProductId, coverResult.nextProduct, { status: "review", notify: false });
-            logInfo("[planning] auto cover filled from Ctrip library", {
+            logInfo(coverResult.outcome.imageId
+              ? "[planning] auto cover filled from Ctrip library"
+              : "[planning] cover fallback staged for operator", {
               provider: providerLabel,
               keyword: coverResult.outcome.keyword,
               imageId: coverResult.outcome.imageId,
@@ -269,8 +271,13 @@ export function registerPlanningIpc(context: MainIpcContext): void {
               });
             }
           }
-        } else if (!browserStatus) {
-          // browser.status() reject → 已在 .catch() 里 console.info，这里仅跳过
+        } else {
+          // 未登录/状态查询失败只是暂时无法搜索；占位明确标为待重试。
+          const current = db.getProduct(localProductId)!;
+          const fallback = applyCoverFallback(current.product, "search_unavailable");
+          if (fallback.written) {
+            productMutations.replace(localProductId, fallback.nextProduct, { status: "review", notify: false });
+          }
         }
       }
       // 消息 taskStatus 必须跟 result.status 走：completed → succeeded，

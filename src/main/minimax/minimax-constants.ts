@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import { APP_NAME } from "../../shared/brand.js";
+import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cover-fallback.js";
 import type { DisambiguateRequest } from "../../shared/contracts.js";
 import { buildVbkCopyPolicyPrompt } from "../planning/vbk-copy-policy.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../domain/product/features-rich-text.js";
@@ -188,6 +189,7 @@ export const presentationCoverValueSchema = z.union([
     description: z.string().trim().min(1),
     minQuality: z.number().int().min(0).max(5),
     uploadedAt: z.string().trim().min(1),
+    remoteImageId: z.number().int().positive().optional(),
   }).strict(),
 ]);
 
@@ -223,6 +225,7 @@ export function isCoverResearchTaskSatisfiedByProduct(
   product: Record<string, unknown>,
 ): boolean {
   if (task.type !== "image") return false;
+  if (readActiveCoverFallback(product) && placeholderDraftOnly(product)) return true;
   return hasCompleteCtripLibraryCover(product);
 }
 

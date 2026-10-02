@@ -9,6 +9,7 @@ import {
   bindCtripLibraryCoverViaApi,
   buildCoverBindRequest,
   buildImageTypeBindRequest,
+  readBoundCoverByFileNameViaApi,
   readProductIdFromVbkUrl,
   responseHasBoundAttractionImage,
   responseHasBoundCover,
@@ -57,6 +58,18 @@ test("构造最小封面直绑请求", () => {
   });
   assert.equal(readProductIdFromVbkUrl("https://x.test/path?productid=123"), 123);
   assert.throws(() => readProductIdFromVbkUrl("https://x.test/path"), /正整数/);
+});
+
+test("手动上传丢失本地 checkpoint 后按唯一文件名认领已绑定封面", async () => {
+  const browser = browserWithResponses([{
+    status: 200,
+    payload: { ResponseStatus: { Ack: "Success" }, productImages: [
+      { imageInfo: { imageId: 42695861, fileName: "local-cover.jpg", accompanyTourInfo: { imageTypeId: 2 } } },
+      { imageInfo: { imageId: 99, fileName: "local-cover.jpg", accompanyTourInfo: { imageTypeId: 4 } } },
+    ] },
+  }]);
+  assert.equal(await readBoundCoverByFileNameViaApi(browser as never, 79128867, "local-cover.jpg"), 42695861);
+  assert.equal(browser.calls.length, 1);
 });
 
 test("更换封面只归类明确的旧封面，并回读旧图与新封面最终类型", async () => {

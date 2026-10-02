@@ -51,6 +51,9 @@ import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.pr
 import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
 import { writeAutomationProduct } from "./automation.main.persist.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
+import { inspectManualCoverAsset } from "../manual-cover-asset.js";
+import { readActiveCoverFallback, placeholderDraftOnly } from "../../../shared/cover-fallback.js";
+import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
 
 /**
  * 单个产品自动化阶段主循环：
@@ -71,10 +74,16 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     );
     productDetail.product = normalizedProductType.product;
     const product = parseProduct(productDetail.product);
+    if (readActiveCoverFallback(productDetail.product)) {
+      if (!placeholderDraftOnly(productDetail.product)) throw new Error("运营占位图仅允许录入未提审、未上架的草稿。");
+      loadPlaceholderCoverAsset();
+    }
     // 用户离开 VBK 页面后，自动化继续复用隐藏会话；不重新打开 BrowserView。
     // 后面几个阶段强制要求这些字段，但它们在 productSchema 里是可选的。
     // 必须在创建远程草稿之前拦下，否则会在携程留下一个半成品产品。
     const blockers = automationBlockers(productDetail.product);
+    const manualCoverIssue = inspectManualCoverAsset(productDetail.product).issue;
+    if (manualCoverIssue) blockers.push({ label: "封面图片规格", detail: manualCoverIssue });
     if (blockers.length) {
       throw new Error(`录入前检查未通过：${blockers.map((item) => item.label).join("、")}`);
     }
@@ -182,6 +191,10 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
         phaseRecord(phase);
         return ctx.runVbkPageExclusive(async () => {
+          // Manual cover upload uses VBK's interactive form, which cannot open at 0×0.
+          if (phase === "presentation" && product.presentation?.cover?.source === "manualUpload") {
+            ctx.ensureBrowserHasBounds();
+          }
           return executeApiWithPhasePageSync({
             page,
             productId,

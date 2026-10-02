@@ -52,6 +52,8 @@ import type {
   ManualUploadCoverMeta,
   ProductCover,
 } from "../../../../shared/contracts-types.js";
+import type { CoverFallback } from "../../../../shared/cover-fallback.js";
+import coverFallbackImage from "../../../assets/cover-fallback.png";
 import shared from "../shared.module.less";
 import { BasicInfoRowShell } from "./basic-info-row-shell";
 import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox";
@@ -60,6 +62,7 @@ import styles from "./review-summary-basic-info.module.less";
 export interface BasicInfoCoverRowProps {
   /** product.presentation.cover 的快照；null = 还没有封面。 */
   cover: ProductCover | null;
+  fallback: CoverFallback | null;
   /** 渲染手动上传图片用的 data URL（data:${mime};base64,...）；renderer 通过 cover.read 取得。
    *  旧实现是走本地文件路径（渲染依赖文件系统路径），新版统一走 data URL，避免
    *  Electron 沙盒 / 路径编码下破图。 */
@@ -95,6 +98,7 @@ const MAX_COVER_IMAGES = 10;
 
 export function BasicInfoCoverRow({
   cover,
+  fallback,
   previewUrl,
   saving,
   error,
@@ -301,10 +305,10 @@ export function BasicInfoCoverRow({
               className={`${shared.btn} ${shared.btnSm}`}
               data-variant="ghost"
               onClick={startEdit}
-              aria-label={cover ? "编辑产品封面" : "添加产品封面"}
+              aria-label={cover || fallback ? "替换产品封面" : "添加产品封面"}
               disabled={saving}
             >
-              <Pencil size={12} aria-hidden="true" /> {cover ? "编辑" : "添加"}
+              <Pencil size={12} aria-hidden="true" /> {fallback && !cover ? "替换" : cover ? "编辑" : "添加"}
             </button>
           }
         >
@@ -315,6 +319,20 @@ export function BasicInfoCoverRow({
               onReadPreviewUrl={onReadPreviewUrl}
               onOpenImage={openImageZoom}
             />
+          ) : fallback ? (
+            <div className={styles.coverFallbackDisplay} data-testid="cover-fallback-display">
+              <img className={styles.coverFallbackImage} src={coverFallbackImage} alt="运营占位图：请替换为真实图片，仅供草稿录入，禁止上架" />
+              <div className={styles.coverMeta}>
+                <strong>待替换真实封面</strong>
+                <span className={styles.tag} data-tone="warn">运营占位 · 禁止上架</span>
+                <span className={styles.hint}>
+                  {fallback.reason === "search_unavailable"
+                    ? "图库暂不可用，请重试找图或手动上传。"
+                    : "行程景点未找到合格图片，请上传真实图片或从图库选择。"}
+                </span>
+                <span className={styles.hint}>占位图 1586 × 992，可上传 VBK 保存未提审草稿；上架前必须换图。</span>
+              </div>
+            </div>
           ) : (
             <div className={styles.rowDisplay} data-state="empty">
               <ImagePlus size={12} aria-hidden="true" />

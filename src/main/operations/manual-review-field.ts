@@ -25,6 +25,7 @@
  */
 
 import type { ContactCardSelection, ManualReviewFieldInput, ProductCover } from "../../shared/contracts.js";
+import { normaliseItinerarySpotKind, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 /**
  * 防御式地把 unknown 转成 object 记录，遇到 null / 非对象 / 数组都返回空对象，
@@ -47,6 +48,7 @@ export function applyManualReviewField(product: Record<string, unknown>, input: 
     case "basicInfoSubtitle": next = applyBasicInfoSubtitle(product, input.subtitle); break;
     case "vehicleResource": next = applyVehicleResource(product, input); break;
     case "itinerarySpotPoi": next = applyItinerarySpotPoi(product, input); break;
+    case "itinerarySpotKind": next = applyItinerarySpotKind(product, input); break;
     case "itinerarySpotRemove": next = applyItinerarySpotRemove(product, input); break;
     case "butlerContact": next = applyButlerContact(product, input.selection); break;
     case "productCover": next = applyProductCover(product, input.cover); break;
@@ -95,6 +97,7 @@ function applyItinerarySpotPoi(
   const spot = dayRecord.spots[input.spotIndex];
   if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
 
+  if (!requiresItineraryPoi(spot as Record<string, unknown>)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
   dayRecord.spots[input.spotIndex] = {
     ...(spot as Record<string, unknown>),
     poiName,
@@ -103,6 +106,25 @@ function applyItinerarySpotPoi(
     city: optionalLocationText(input.city),
     district: optionalLocationText(input.district),
   };
+  return next;
+}
+
+function applyItinerarySpotKind(product: Record<string, unknown>, input: Extract<ManualReviewFieldInput, { field: "itinerarySpotKind" }>): Record<string, unknown> {
+  if (!["attraction", "free", "other"].includes(input.kind)) throw new Error("行程类型必须是景点、自由活动或其他。");
+  if (!Number.isInteger(input.dayIndex) || input.dayIndex < 0 || !Number.isInteger(input.spotIndex) || input.spotIndex < 0) throw new Error("行程条目索引不合法。");
+  const next = structuredClone(product) as Record<string, unknown>;
+  const day = Array.isArray(next.itinerary) ? next.itinerary[input.dayIndex] : undefined;
+  if (!day || typeof day !== "object" || Array.isArray(day) || !Array.isArray((day as Record<string, unknown>).spots)) throw new Error("目标行程条目不存在。");
+  const spots = (day as Record<string, unknown>).spots as unknown[];
+  const spot = spots[input.spotIndex];
+  if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标行程条目不存在。");
+  const updated: Record<string, unknown> = { ...(spot as Record<string, unknown>), kind: input.kind, ...(input.description === undefined ? {} : { description: input.description.trim() }) };
+  if (input.kind !== "attraction") {
+    delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType;
+  } else {
+    updated.poiId = null; updated.poiName = null; delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType;
+  }
+  spots[input.spotIndex] = normaliseItinerarySpotKind(updated);
   return next;
 }
 
@@ -377,6 +399,7 @@ function applyProductCover(
       ...(minQuality !== null && minQuality >= 0 && minQuality <= 5 ? { minQuality } : {}),
       ...optionalFields,
     } satisfies ProductCover;
+    delete presentation.coverFallback;
     next.presentation = presentation;
     return next;
   }
@@ -413,6 +436,7 @@ function applyProductCover(
       minQuality,
       uploadedAt,
     } satisfies ProductCover;
+    delete presentation.coverFallback;
     next.presentation = presentation;
     return next;
   }

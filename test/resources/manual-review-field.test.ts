@@ -758,3 +758,12 @@ test("productCover 写入后 productSchema.safeParse 必须成功，且不伪造
   assert.equal("recommendation" in presentation, false, "不应伪造 presentation.recommendation");
   assert.equal("features" in presentation, false, "不应伪造 presentation.features");
 });
+
+test("手动切换活动类型清理 POI 且拒绝未知类型而不改原产品", () => {
+  const product = structuredClone(baseProduct);
+  const free = applyManualReviewField(product, { field: "itinerarySpotKind", dayIndex: 0, spotIndex: 1, kind: "free", description: "自行安排" });
+  const spot = ((free.itinerary as Array<Record<string, unknown>>)[0].spots as Array<Record<string, unknown>>)[1];
+  assert.deepEqual({ kind: spot.kind, poiId: spot.poiId, poiName: spot.poiName, description: spot.description }, { kind: "free", poiId: null, poiName: null, description: "自行安排" });
+  assert.throws(() => applyManualReviewField(product, { field: "itinerarySpotKind", dayIndex: 0, spotIndex: 1, kind: "bad" } as never), /行程类型/);
+  assert.equal((((product.itinerary[0].spots[1]) as Record<string, unknown>).poiId), 100);
+});

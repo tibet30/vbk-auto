@@ -46,6 +46,7 @@ test("方案对话展示自动录入 recovery 中的完整报错详情", () => {
   const styles = read("src/renderer/app/views/workspace/agent-conversation.module.less");
   assert.match(conversation, /latestAutomationFailure\(product\)/);
   assert.match(conversation, /automation\?\.recovery\?\.phases/);
+  assert.match(conversation, /product\.status === "draft_saved" \|\| product\.automation\?\.status === "succeeded"[\s\S]*return null/);
   assert.match(conversation, /\{automationFailure \? <FailureNotice/);
   assert.match(conversation, /录入受阻/);
   assert.match(conversation, /\{failure\.message\}/);

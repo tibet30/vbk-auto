@@ -229,7 +229,7 @@ async function readTrafficNodesFromPage(page: TrafficLinePage, productId: string
   const expected = expectedTrafficKey(variant);
   const first = list(days[0]?.tourDailyInfos).find((node) => isTrafficNode(node, expected));
   const last = list(days.at(-1)?.tourDailyInfos).find((node) => isTrafficNode(node, expected));
-  if (!first || !last) throw new Error("子产品行程页未返回可用的首末日交通节点，需先核对资源段提交结果。");
+  if (!first || !last) throw new Error(`子产品 ${productId} 行程页未返回可用的首末日交通节点，需先核对资源段提交结果。`);
   return { first, last };
 }
 

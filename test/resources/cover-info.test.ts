@@ -74,7 +74,7 @@ test("readCover 在缺 POI / 描述时返回 null", () => {
   assert.equal(readCover(product), null);
 });
 
-test("coverReadyForAutomation 在 manualUpload 时阻断", () => {
+test("coverReadyForAutomation 接受已保存的 manualUpload 来源", () => {
   const product = {
     ...baseProduct,
     presentation: {
@@ -93,8 +93,8 @@ test("coverReadyForAutomation 在 manualUpload 时阻断", () => {
     },
   };
   const result = coverReadyForAutomation(product);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "manualUploadNotSupported");
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, "ok");
 });
 
 test("coverReadyForAutomation 在 ctripLibrary 时返回 ok", () => {

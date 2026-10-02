@@ -24,10 +24,14 @@ export async function syncCtripHotelResources(args: {
 }) {
   const { page, productId, dailyCandidates } = args;
   let payload = await getProductSegmentsApi(page, productId);
+  let resolvedCandidates = dailyCandidates;
+  if (dailyCandidates.some((daily) => !findSegment(payload, daily.segmentId))) {
+    resolvedCandidates = remapCandidatesToCurrentLodgingSegments(payload, dailyCandidates);
+  }
   let changed = false;
   const days: Array<{ day: number; segmentId: string; resourceHotelIds: number[]; addedHotelIds: number[] }> = [];
 
-  for (const daily of dailyCandidates) {
+  for (const daily of resolvedCandidates) {
     const ids = candidateIds(daily);
     let segment = findSegment(payload, daily.segmentId);
     if (!segment) throw new Error(`酒店资源接口回读未找到行程段：${daily.segmentId}`);
@@ -51,7 +55,7 @@ export async function syncCtripHotelResources(args: {
     });
   }
   payload = await getProductSegmentsApi(page, productId);
-  for (const daily of dailyCandidates) {
+  for (const daily of resolvedCandidates) {
     const expected = candidateIds(daily);
     const actual = hotelIdsFromSegment(findSegment(payload, daily.segmentId));
     if (!sameHotelSet(actual, expected) || !hasDesiredCandidateOrder(findSegment(payload, daily.segmentId), daily.candidates)) {
@@ -73,6 +77,20 @@ function candidateIds(daily: ResourceSegment) {
 
 function findSegment(payload: any, segmentId: string) {
   return segmentsFromPayload(payload).find((segment: any) => String(segment.segmentId) === String(segmentId));
+}
+
+function remapCandidatesToCurrentLodgingSegments(payload: any, dailyCandidates: ResourceSegment[]) {
+  const lodging = segmentsFromPayload(payload).filter((segment: any) => Number(segment?.segmentBase?.stayNights) > 0);
+  if (lodging.length !== dailyCandidates.length) {
+    const missing = dailyCandidates
+      .filter((daily) => !findSegment(payload, daily.segmentId))
+      .map((daily) => daily.segmentId);
+    throw new Error(`酒店资源接口回读未找到行程段：${missing.join("、") || "无"}`);
+  }
+  return dailyCandidates.map((daily, index) => ({
+    ...daily,
+    segmentId: String(lodging[index]!.segmentId),
+  }));
 }
 
 function hotelRoom(candidate: Candidate, index: number, total: number) {

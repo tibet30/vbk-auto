@@ -105,7 +105,7 @@ import {
   replaceProductAndSatisfyResearchTasks,
   type ReplaceProductAndSatisfyResearchTasksOptions,
 } from "./parts/replace-product-with-research-tasks.js";
-import { addResearchTask, markResearchAccepted, markResearchTasksSatisfied } from "./parts/research-tasks.js";
+import { addResearchTask, markResearchAccepted, markResearchTasksSatisfied, markResearchTasksSatisfiedByProduct, reopenKindSupersededPoiResearchTasks } from "./parts/research-tasks.js";
 import { deleteSetting, getSetting, setSetting } from "./parts/settings.js";
 import {
   abandonWorkflowTask,
@@ -224,6 +224,12 @@ export class VbkDatabase {
   }
   markResearchTasksSatisfied(localProductId: string, taskIds: readonly string[], note?: string) {
     return markResearchTasksSatisfied(this.db, localProductId, taskIds, note);
+  }
+  reopenKindSupersededPoiResearchTasks(localProductId: string, product: Record<string, unknown>) {
+    return reopenKindSupersededPoiResearchTasks(this.db, localProductId, product);
+  }
+  markResearchTasksSatisfiedByProduct(localProductId: string, product: Record<string, unknown>) {
+    return markResearchTasksSatisfiedByProduct(this.db, localProductId, product);
   }
   saveAutomation(localProductId: string, run: AutomationRun) {
     saveAutomation(this.db, localProductId, run);

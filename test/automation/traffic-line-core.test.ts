@@ -9,6 +9,7 @@ import {
   buildTrafficLineSaveRequest,
   buildTrafficLineTargets,
   provisionTrafficLineChildren,
+  trafficLineSkippedChildCanBeRevalidated,
 } from "../../src/main/automation/ctrip/traffic-line/orchestrator.ts";
 import { normaliseTrafficLineExistingChildren } from "../../src/main/automation/ctrip/traffic-line/api.ts";
 import { isTrafficLineChildActive } from "../../src/main/automation/ctrip/traffic-line/relationships.ts";
@@ -422,6 +423,45 @@ test("平台明确无可售资源时默认跳过；已创建的资源零城市�
     failedStage: "activated",
     failureReason: packageFailure,
   }), true);
+});
+
+test("当前会话重新确认可用时不沿用历史 skipped 失败，并保留当前计划外方式", () => {
+  const failed = {
+    variant: "flightRoundTrip" as const,
+    lineDescription: "飞机往返",
+    childProductId: "79194665",
+    completedStages: ["planned", "stationsResolved", "childCreated"] as const,
+    verified: false,
+    skipped: true,
+    failureReason: "子产品最终正式条款回读缺少：32269。",
+  };
+  assert.equal(trafficLineSkippedChildCanBeRevalidated(failed, {
+    enabled: true,
+    variants: ["flightRoundTrip"],
+    availability: {
+      endpointPlan: { arrivalCity: "成都", departureCity: "成都", resolvedAt: "2026-10-01T00:00:00.000Z" },
+      availableVariants: ["flightRoundTrip"],
+      unavailableVariants: {},
+    },
+  }), true);
+  assert.equal(trafficLineSkippedChildCanBeRevalidated({ ...failed, variant: "trainRoundTrip", lineDescription: "火车往返" }, {
+    enabled: true,
+    variants: ["flightRoundTrip"],
+    availability: {
+      endpointPlan: { arrivalCity: "成都", departureCity: "成都", resolvedAt: "2026-10-01T00:00:00.000Z" },
+      availableVariants: ["flightRoundTrip"],
+      unavailableVariants: {},
+    },
+  }), false);
+  assert.equal(trafficLineSkippedChildCanBeRevalidated(failed, {
+    enabled: true,
+    variants: ["flightRoundTrip"],
+    availability: {
+      endpointPlan: { arrivalCity: "成都", departureCity: "成都", resolvedAt: "2026-10-01T00:00:00.000Z" },
+      availableVariants: [],
+      unavailableVariants: { flightRoundTrip: "当前会话未确认可用" },
+    },
+  }), false);
 });
 
 test("持续 pending 的班期校验仅允许在超时后受控重提一次", () => {

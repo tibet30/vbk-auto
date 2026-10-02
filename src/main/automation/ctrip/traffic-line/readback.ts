@@ -197,17 +197,17 @@ async function readTrafficLineItineraryReadback(
 ): Promise<{ tourInfoId: string; transportNodes: number }> {
   const linked = await fetchTourInfoId(page, productId);
   const tourInfoId = currentTrafficLineTourInfoId(linked);
-  if (!tourInfoId) throw new TrafficLineItineraryReadbackError("子产品最终行程回读缺少 tourInfoId。");
+  if (!tourInfoId) throw new TrafficLineItineraryReadbackError(`子产品 ${productId} 最终行程回读缺少 tourInfoId。`);
   const detail = await fetchTourDailyDetail(page, tourInfoId);
-  if (!detail.tourInfo) throw new TrafficLineItineraryReadbackError("子产品最终行程回读为空。");
+  if (!detail.tourInfo) throw new TrafficLineItineraryReadbackError(`子产品 ${productId} 最终行程回读为空。`);
   const detailId = String(detail.tourInfo.tourInfoId ?? "");
   if (detailId && detailId !== tourInfoId) {
-    throw new TrafficLineItineraryReadbackError(`子产品当前绑定行程 ID=${tourInfoId}，详情却返回 ID=${detailId}。`);
+    throw new TrafficLineItineraryReadbackError(`子产品 ${productId} 当前绑定行程 ID=${tourInfoId}，详情却返回 ID=${detailId}。`);
   }
   try {
     return { tourInfoId, transportNodes: verifyTrafficNodes(detail.tourInfo, variant) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new TrafficLineItineraryReadbackError(message, true);
+    throw new TrafficLineItineraryReadbackError(`子产品 ${productId} ${message}`, true);
   }
 }

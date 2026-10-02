@@ -38,15 +38,14 @@ export async function ensureHotelResourceApi(
     const missingCandidates = resolvedDays.filter((day: any) => !Array.isArray(day.hotelCandidates)
       || day.hotelCandidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT
       || day.hotelCandidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT
-      || new Set(day.hotelCandidates.map((candidate: any) => Number(candidate.hotelId))).size !== day.hotelCandidates.length
-      || day.hotelCandidates.some((candidate: any) => Number(candidate.hotelId) <= 0));
+      || !hasValidCtripCandidateIds(day.hotelCandidates));
     if (missingCandidates.length) {
       throw new Error(`酒店资源缺少每晚至少 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT} 个且最多 ${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程候选：第 ${missingCandidates.map((day: any) => day.day).join("、")} 天`);
     }
   }
 
   let payload = await ensureResourceSegmentsDraftApi(page, productId);
-  const layout = await normalizeHotelResourceLayout({ page, productId, resolvedDays, payload });
+  const layout = await normalizeHotelResourceLayout({ page, productId, resolvedDays, payload, source });
   if (layout.changed) payload = await getProductSegmentsApi(page, productId);
   const segments = segmentsFromPayload(payload);
   if (!segments.length) throw new Error("酒店资源接口回读未返回任何行程段");
@@ -108,7 +107,7 @@ function hasPlannedHotel(day: any) {
 }
 
 /**
- * 资源配置的首段是全程随团段，只承载套餐和用车；住宿必须从第二段开始按连续住宿城市拆分。
+ * 资源配置的首段是全程随团段，只承载套餐和用车；携程指定酒店从第二段开始按连续同城且候选一致的晚次拆分。
  * 平台新建产品只有“全程段 + 末尾空段”时，自动在末尾空段之前创建连续住宿城市段；
  * 每一段的停留范围与住宿晚数必须相等。全程段不承载住宿，两个值均归零并清空指定酒店。
  */
@@ -117,8 +116,9 @@ async function normalizeHotelResourceLayout(args: {
   productId: string;
   resolvedDays: any[];
   payload: any;
+  source: "ctrip" | "package-api";
 }) {
-  const expected = hotelStayGroups(args.resolvedDays);
+  const expected = hotelStayGroups(args.resolvedDays, args.source === "ctrip");
   let payload = args.payload;
   let segments = segmentsFromPayload(payload);
   const [fullTrip] = segments;
@@ -221,26 +221,73 @@ function assertLodgingPrefix(actual: any[], expected: Array<{ cityName: string; 
       || String(segment.segmentBase?.destinationCity?.cityName ?? "").trim() !== group.cityName;
   });
   if (mismatched) {
-    throw new Error(`住宿资源行程段未按连续住宿城市拆分：期望 ${expected.map((group) => `${group.cityName}${group.nights}晚`).join("、")}`);
+    throw new Error(`住宿资源行程段未按预期住宿晚次拆分：期望 ${expected.map((group) => `${group.cityName}${group.nights}晚`).join("、")}`);
   }
 }
 
-export function hotelStayGroups(resolvedDays: any[]) {
-  const groups: Array<{ cityName: string; nights: number }> = [];
+export function hotelStayGroups(resolvedDays: any[], requireCtripIds = false) {
+  return hotelResourceGroups(resolvedDays, requireCtripIds).map(({ cityName, nights }) => ({ cityName, nights }));
+}
+
+/**
+ * A resource segment can span multiple nights only when it carries the exact
+ * same ordered Ctrip alternatives for each night.  A same-city stay with a
+ * different hotel set still needs independent segments: saveSegment has only
+ * one segmentRooms collection and would otherwise overwrite a later night.
+ */
+export function hotelResourceGroups(resolvedDays: any[], requireCtripIds = false) {
+  const groups: Array<{ cityName: string; nights: number; dayNumbers: number[]; hotelIds: number[] }> = [];
   for (const day of resolvedDays) {
-    const cityName = String(day.hotelCandidates?.[0]?.cityName ?? "").trim();
+    const candidates = Array.isArray(day.hotelCandidates) ? day.hotelCandidates : [];
+    const cityName = String(candidates[0]?.cityName ?? "").trim();
     if (!cityName) throw new Error(`第 ${day.day} 天酒店候选缺少城市`);
+    const hotelIds = candidateIds(candidates, Number(day.day), requireCtripIds);
     const previous = groups.at(-1);
-    if (previous?.cityName === cityName) previous.nights += 1;
-    else groups.push({ cityName, nights: 1 });
+    if (previous?.cityName === cityName && sameOrderedHotelIds(previous.hotelIds, hotelIds, requireCtripIds)) {
+      previous.nights += 1;
+      previous.dayNumbers.push(Number(day.day));
+    } else {
+      groups.push({ cityName, nights: 1, dayNumbers: [Number(day.day)], hotelIds });
+    }
   }
   return groups;
 }
 
 /**
- * VBK 可能将连续住宿日合并为一个资源行程段。每段最多配置五家酒店，
- * 因此以该段首晚的候选为资源候选；每日行程仍保留各自的前三家备选，
- * 不能因为不同游览锚点产生了额外备选就阻断整条录入链路。
+ * Preserve legacy package-managed grouping when a day does not carry usable
+ * Ctrip IDs.  Ctrip-backed candidates are split unless their ordered IDs are
+ * fully identical, including candidate count.
+ */
+function sameOrderedHotelIds(left: number[], right: number[], requireCtripIds: boolean): boolean {
+  // Package-managed resources do not own Ctrip hotel alternatives. Preserve
+  // their historical city-only grouping regardless of incidental candidate data.
+  if (!requireCtripIds) return true;
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
+function candidateIds(candidates: any[], day: number, requireCtripIds: boolean): number[] {
+  const ids = candidates.map((candidate: any) => Number(candidate?.hotelId));
+  if (requireCtripIds && !hasValidCtripIds(ids)) {
+    throw new Error(`第 ${day} 天携程酒店候选 ID 无效或重复。`);
+  }
+  return ids;
+}
+
+function hasValidCtripCandidateIds(candidates: any[]): boolean {
+  return hasValidCtripIds(candidates.map((candidate: any) => Number(candidate?.hotelId)));
+}
+
+function hasValidCtripIds(ids: number[]): boolean {
+  return ids.length >= HOTEL_RESOURCE_MIN_CANDIDATE_COUNT
+    && ids.length <= HOTEL_RESOURCE_CANDIDATE_COUNT
+    && ids.every((id) => Number.isSafeInteger(id) && id > 0)
+    && new Set(ids).size === ids.length;
+}
+
+/**
+ * VBK 允许连续住宿日合并为一个资源行程段，但该段只有一个 segmentRooms
+ * 集合。故只有每晚候选 ID 及顺序完全一致才可使用首晚名单；调用者若传入
+ * 已合并却不同候选的晚次必须失败，不能静默丢弃后续候选。
  */
 export function ctripResourceSegments(resolvedDays: any[], lodging: any[]) {
   let offset = 0;
@@ -250,6 +297,13 @@ export function ctripResourceSegments(resolvedDays: any[], lodging: any[]) {
     offset += nightCount;
     const first = days[0];
     if (!first) throw new Error(`住宿行程段 ${String(segment.segmentId)} 未匹配到住宿日`);
+    const firstIds = candidateIds(first.hotelCandidates ?? [], Number(first.day), true);
+    for (const day of days.slice(1)) {
+      const ids = candidateIds(day.hotelCandidates ?? [], Number(day.day), true);
+      if (!sameOrderedHotelIds(firstIds, ids, true)) {
+        throw new Error(`住宿行程段 ${String(segment.segmentId)} 覆盖的第 ${Number(first.day)}、${Number(day.day)} 天携程酒店候选不一致，拒绝只保留首晚候选。`);
+      }
+    }
     const candidates = first.hotelCandidates as Array<{ hotelId: number; hotelName: string }>;
     return { day: Number(first.day), segmentId: String(segment.segmentId), candidates };
   });

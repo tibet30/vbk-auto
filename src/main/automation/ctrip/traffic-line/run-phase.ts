@@ -124,10 +124,26 @@ export async function ensureTrafficLinePhase({
     log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品未完成，已跳过继续：${item.reason}`, "warning");
   }
   log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
-  progress = { ...progress, failureReason: undefined, verifiedAt: new Date().toISOString() };
+  const skipped = result.skipped ?? [];
+  const confirmedAvailable = new Set(executableConfig.availability?.availableVariants ?? []);
+  const unresolvedAvailable = skipped.filter((item) => confirmedAvailable.has(item.variant));
+  if (unresolvedAvailable.length) {
+    const reason = unresolvedAvailable.map((item) => `${item.variant}=${item.reason}`).join("；");
+    progress = { ...progress, failureReason: reason, verifiedAt: undefined };
+    persist();
+    throw new Error(`当前会话已确认可用的交通子产品未完成最终回读：${reason}`);
+  }
+  const fullyVerified = children.length > 0 && skipped.length === 0;
+  progress = {
+    ...progress,
+    failureReason: fullyVerified
+      ? undefined
+      : skipped.map((item) => `${item.variant}=${item.reason}`).join("；") || "交通子产品未完成最终回读。",
+    verifiedAt: fullyVerified ? new Date().toISOString() : undefined,
+  };
   persist();
   // 创建/复用计数需由 future checkpoint 记录；不以本轮 API 返回猜测。
-  return { planEnabled: result.enabled, created: 0, reused: 0, blocked: 0, children };
+  return { planEnabled: result.enabled, created: 0, reused: 0, blocked: skipped.length, children };
 }
 
 /** 新一轮远端核验开始后，旧 verifiedAt 立即失效，避免 UI 显示历史成功。 */

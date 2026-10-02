@@ -25,6 +25,8 @@ import {
   poiResearchTaskName,
 } from "../../../../shared/poi-research-tasks.js";
 import { parseAndNormalizeProductJson } from "../product-json-normalize.js";
+import { readActiveCoverFallback } from "../../../../shared/cover-fallback.js";
+import { automationJournalImport, type StoredAutomationRun } from "./automation-journal-merge.js";
 import { buildProductSnapshot } from "./product-draft.js";
 import { now, newId } from "./types.js";
 
@@ -74,8 +76,8 @@ function coalescePoiResearchTasks(tasks: ResearchTask[]): ResearchTask[] {
  * 产品列表（按 updated_at 倒序）。
  */
 export function listProducts(db: Database.Database): ProductSummary[] {
-  return (db.prepare("SELECT id,name,status,product_id,updated_at FROM products ORDER BY updated_at DESC").all() as Array<Record<string, string>>)
-    .map((row) => ({ id: row.id, name: row.name, status: row.status as ProductSummary["status"], productId: row.product_id || undefined, updatedAt: row.updated_at }));
+  return (db.prepare("SELECT id,name,status,product_id,product_json,updated_at FROM products ORDER BY updated_at DESC").all() as Array<Record<string, string>>)
+    .map(productSummaryFromRow);
 }
 
 /** 分页产品列表结果。 */
@@ -92,10 +94,24 @@ export function listProductsPaginated(db: Database.Database, page: number, pageS
   const total = (db.prepare("SELECT COUNT(*) AS n FROM products").get() as { n: number }).n;
   const offset = Math.max(0, (page - 1) * pageSize);
   const items = (db.prepare(
-    "SELECT id,name,status,product_id,updated_at FROM products ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+    "SELECT id,name,status,product_id,product_json,updated_at FROM products ORDER BY updated_at DESC LIMIT ? OFFSET ?",
   ).all(pageSize, offset) as Array<Record<string, string>>)
-    .map((row) => ({ id: row.id, name: row.name, status: row.status as ProductSummary["status"], productId: row.product_id || undefined, updatedAt: row.updated_at }));
+    .map(productSummaryFromRow);
   return { items, total };
+}
+
+function productSummaryFromRow(row: Record<string, string>): ProductSummary {
+  let coverNeedsReplacement = false;
+  try {
+    coverNeedsReplacement = Boolean(readActiveCoverFallback(JSON.parse(row.product_json) as Record<string, unknown>));
+  } catch {
+    // A malformed historical product remains visible in the list.
+  }
+  return {
+    id: row.id, name: row.name, status: row.status as ProductSummary["status"],
+    productId: row.product_id || undefined, updatedAt: row.updated_at,
+    ...(coverNeedsReplacement ? { coverNeedsReplacement } : {}),
+  };
 }
 
 export function createProduct(db: Database.Database, input: CreateProductInput): ProductDetail {
@@ -107,15 +123,38 @@ export function createProduct(db: Database.Database, input: CreateProductInput):
  *
  * Tibet is the authority for product and planning state. The SQLite row is a
  * compatibility cache for existing mutation/automation code, so a remote read
- * always replaces it even when the local timestamp happens to be newer.
+ * replaces those business fields. The local automation journal is merged by
+ * run id below rather than being deleted with the business snapshot.
  */
 export function importProductSnapshot(db: Database.Database, snapshot: ProductDetail): ProductDetail {
   const existing = getProduct(db, snapshot.id);
   const product = parseAndNormalizeProductJson(JSON.stringify(snapshot.product));
   const restoredAt = snapshot.updatedAt || now();
   const restore = db.transaction(() => {
+    // Read this journal before replacing the product row. It intentionally is
+    // not part of the remote product snapshot's destructive business import.
+    const localRuns = db.prepare(
+      "SELECT id,local_product_id,payload_json,created_at,updated_at FROM automation_runs WHERE local_product_id=?",
+    ).all(snapshot.id).map((row) => {
+      const value = row as Record<string, string>;
+      return {
+        id: value.id,
+        localProductId: value.local_product_id,
+        payloadJson: value.payload_json,
+        createdAt: value.created_at,
+        updatedAt: value.updated_at,
+      } satisfies StoredAutomationRun;
+    });
+    const foreignRunIdExists = Boolean(snapshot.automation && db.prepare(
+      "SELECT 1 FROM automation_runs WHERE id=? AND local_product_id<>? LIMIT 1",
+    ).get(snapshot.automation.id, snapshot.id));
+    const journal = automationJournalImport(
+      localRuns,
+      snapshot.automation as (typeof snapshot.automation & { updatedAt?: unknown }) | undefined,
+      restoredAt,
+      foreignRunIdExists,
+    );
     if (existing) {
-      db.prepare("DELETE FROM automation_runs WHERE local_product_id=?").run(snapshot.id);
       db.prepare("DELETE FROM research_tasks WHERE local_product_id=?").run(snapshot.id);
       db.prepare("DELETE FROM messages WHERE local_product_id=?").run(snapshot.id);
       db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(snapshot.id);
@@ -154,10 +193,14 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
         JSON.stringify(task.evidence ?? []),
       );
     }
-    if (snapshot.automation) {
+    if (journal.action === "insert") {
       db.prepare(
-        "INSERT OR IGNORE INTO automation_runs(id,local_product_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?)",
-      ).run(snapshot.automation.id, snapshot.id, JSON.stringify(snapshot.automation), restoredAt, restoredAt);
+        "INSERT INTO automation_runs(id,local_product_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?)",
+      ).run(journal.run.id, snapshot.id, JSON.stringify(journal.run), restoredAt, journal.updatedAt);
+    } else if (journal.action === "replace") {
+      db.prepare(
+        "UPDATE automation_runs SET payload_json=?,updated_at=? WHERE id=? AND local_product_id=?",
+      ).run(JSON.stringify(journal.run), journal.updatedAt, journal.run.id, snapshot.id);
     }
   });
   restore();

@@ -29,8 +29,8 @@ test("数据库读取归一化会把历史字符串 POI ID 转成数字，非法
   })) as Record<string, any>;
 
   assert.deepEqual(product.itinerary[0].spots, [
-    { name: "晋祠", poiName: "晋祠博物馆", poiId: 79413 },
-    { name: "无效景点", poiName: "无效景点", poiId: null },
+    { name: "晋祠", poiName: "晋祠博物馆", poiId: 79413, kind: "attraction" },
+    { name: "无效景点", poiName: "无效景点", poiId: null, kind: "attraction" },
   ]);
 });
 

@@ -217,7 +217,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
 
   // headMeta：所有核心行都列出（封面永远在），缺失字段追加「待补充 / 待设置」
   // 状态文案，让用户从模块头部一眼看到还需要补什么；用车按产品类型条件加入。
-  const headParts: string[] = ["封面"];
+  const headParts: string[] = [snapshot.coverFallback ? "封面待替换" : "封面"];
   headParts.push(subtitleHasValue ? "副标题" : "副标题待补充");
   headParts.push(butlerHasValue ? "管家" : "管家待补充");
   headParts.push(servicePhoneHasValue ? "400 电话" : "400 电话待设置");
@@ -272,6 +272,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
         <div id="basic-info-body" className={styles.body}>
           <BasicInfoCoverRow
             cover={snapshot.cover}
+            fallback={snapshot.coverFallback}
             previewUrl={coverPreviewUrl}
             saving={savingField === "cover"}
             error={errors.cover}

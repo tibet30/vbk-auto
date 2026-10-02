@@ -27,6 +27,10 @@ export function mergeTrafficLineClauseItems(
 export function selectedClauseItems(clausePackage: JsonRecord): JsonRecord[] {
   const items: JsonRecord[] = [];
   for (const { type, item } of allClauseItems(clausePackage)) {
+    // VBK renders selected template text with itemType=T, but the real save
+    // prevalidation excludes it. Keep legacy responses without itemType while
+    // excluding only the platform-proven non-persisted marker.
+    if (item.itemType === "T") continue;
     if (item.selected === "T" || item.hasSelectBox === "F") {
       items.push({
         clauseItemId: item.clauseItemId,

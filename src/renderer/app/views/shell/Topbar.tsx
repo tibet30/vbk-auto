@@ -61,7 +61,8 @@ export function AppTopbar({ model }: { model: AppModel }) {
               <CopyableId value={product.id} className={styles.copyableIdTopbar} />
               <span className={styles.crumbState} data-state={statusTone(product.status)}>
                 <span className={shared.dot} data-state={product.status === "blocked" ? "warn" : product.status === "draft_saved" ? "ok" : "ai"} />
-                {statusLabel(product.status)}
+                {product.status === "review" && model.productCompletionLabel === "可录入 VBK 草稿 · 禁止上架"
+                  ? model.productCompletionLabel : statusLabel(product.status)}
               </span>
             </span>
           </>

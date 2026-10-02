@@ -3,6 +3,7 @@ import { defaultCommercialInventory } from "./commercial-defaults.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 import { normaliseTrafficLineConfig } from "../../shared/contracts-traffic-line.js";
+import { normaliseItinerarySpotKind } from "../../shared/itinerary-activity-kind.js";
 
 /**
  * 产品草稿归一化。
@@ -168,21 +169,23 @@ export function normaliseItinerary(value: unknown) {
       .filter((activity): activity is NonNullable<ReturnType<typeof normaliseActivity>> => Boolean(activity));
     const spots = Array.isArray(record.spots)
       ? record.spots.map((spot) => {
-        if (typeof spot === "string") return { name: spot.trim(), poiName: null, poiId: null };
+        if (typeof spot === "string") return normaliseItinerarySpotKind({ name: spot.trim(), poiName: null, poiId: null });
         if (!spot || typeof spot !== "object") return null;
         const raw = spot as Record<string, unknown>;
         const timeOfDay = raw.timeOfDay === "morning" || raw.timeOfDay === "afternoon"
           ? raw.timeOfDay
           : undefined;
         const relation = raw.relation === "or" ? "or" : raw.relation === "and" ? "and" : undefined;
-        return {
+        return normaliseItinerarySpotKind({
           name: textValue(raw.name) || textValue(raw.poiName),
           poiName: textValue(raw.poiName) || null,
           poiId: normalisePoiId(raw.poiId),
+          ...(textValue(raw.description) ? { description: textValue(raw.description) } : {}),
           ...(timeOfDay ? { timeOfDay } : {}),
           ...(relation ? { relation } : {}),
-        };
-      }).filter((spot): spot is { name: string; poiName: string | null; poiId: number | null; timeOfDay?: "morning" | "afternoon"; relation?: "and" | "or" } => Boolean(spot?.name))
+          ...(raw.kind === "attraction" || raw.kind === "free" || raw.kind === "other" ? { kind: raw.kind } : {}),
+        });
+      }).filter((spot) => Boolean(spot?.name))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));
     const activityDescription = activities
       .map((activity) => [activity.time, activity.title, activity.detail].filter(Boolean).join(" "))

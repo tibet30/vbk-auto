@@ -51,12 +51,38 @@ export async function getProductForRead(
   id: string,
   activeWorkflow?: ProductWorkflow,
 ): Promise<ProductDetail> {
+  const local = db.getProduct(id);
   if (activeWorkflow) {
-    const local = db.getProduct(id);
     if (!local) throw productNotFound(id);
     return local;
   }
-  return getRemoteProduct(db, remoteProducts, id);
+  const remote = await remoteProducts.get(id);
+  // The fetch itself can overlap a new local write or workflow start. Read
+  // again after it resolves so this older response cannot replace that work.
+  const currentLocal = db.getProduct(id);
+  if (currentLocal && localChangedDuringRemoteRead(local, currentLocal)) return currentLocal;
+  // A remote product snapshot carries business state, while automation is a
+  // local operational journal. Import is destructive for that journal, so an
+  // idle detail read must prove the remote snapshot is newer before replacing
+  // an existing local record. Equal or unparseable timestamps fail safe.
+  if (currentLocal && !isStrictlyNewer(remote.updatedAt, currentLocal.updatedAt)) return currentLocal;
+  return db.importProductSnapshot(remote);
+}
+
+function isStrictlyNewer(remoteUpdatedAt: string, localUpdatedAt: string): boolean {
+  const remoteTime = Date.parse(remoteUpdatedAt);
+  const localTime = Date.parse(localUpdatedAt);
+  return Number.isFinite(remoteTime) && Number.isFinite(localTime) && remoteTime > localTime;
+}
+
+function localChangedDuringRemoteRead(
+  before: ProductDetail | undefined,
+  after: ProductDetail,
+): boolean {
+  if (!before) return true;
+  return before.updatedAt !== after.updatedAt
+    || before.productJsonVersion !== after.productJsonVersion
+    || before.status !== after.status;
 }
 
 export async function deleteRemoteProduct(

@@ -105,7 +105,8 @@ export function sanitiseModuleValue(
     const v = { ...(value as Record<string, unknown>) };
     if (typeof v.hotelTier === "string") {
       const normalised = normaliseHotelTier(v.hotelTier);
-      v.hotelTier = normalised ?? "当地3钻酒店/-3";
+      if (!normalised) return { ok: false, reason: `无法识别酒店档次：${v.hotelTier}` };
+      v.hotelTier = normalised;
     }
     value = v;
   }

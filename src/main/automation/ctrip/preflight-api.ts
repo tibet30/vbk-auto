@@ -3,10 +3,16 @@ import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { getProductBaseInfoApi } from "./basic-info/api.js";
-import { ensureHotelResourceApi } from "./hotel-resource-api.js";
+import { verifyHotelResourceReadback } from "./hotel-resource-readback.js";
 import { fetchTourDailyDetail, fetchTourInfoId } from "./itinerary-api/steps.js";
 import { resolvePackageName } from "./package-api.js";
-import { datesBetween, localBusinessDate } from "./pricing-api.js";
+import {
+  listProductClauseTabsForPreflight,
+  verifyBasicInfoReadback,
+  verifyPresentationReadback,
+  verifyTermsReadback,
+} from "./preflight-readback.js";
+import { verifyPricingInventoryReadback } from "./pricing-readback.js";
 import { getProductSegmentsApi, segmentsFromPayload, verifyVehicleResourceBinding } from "./vehicle-resource-api.js";
 
 const SOA = "https://online.ctrip.com/restapi/soa2/15638";
@@ -33,12 +39,13 @@ async function post(page: any, path: string, body: Json, label: string): Promise
   return assertVbkAckSuccess(response.payload, label) as Json;
 }
 
-function remoteDate(row: Json): string {
-  return String(row.adultPrice?.date ?? row.singleResourcePriceDtos?.[0]?.date ?? row.base?.productDate ?? row.date ?? "");
-}
-
 /** 聚合所有已保存模块的远端 API 证据，不打开任何 VBK 编辑页。 */
-export async function runProductPreflightApi(page: any, product: any, productId: string) {
+export async function runProductPreflightApi(
+  page: any,
+  product: any,
+  productId: string,
+  options: { itineraryTourInfoId?: string } = {},
+) {
   if (!product.commercial) throw new Error("缺少 commercial 配置");
   const inventory = product.commercial.inventory;
   const pricing = product.commercial.pricing;
@@ -51,53 +58,27 @@ export async function runProductPreflightApi(page: any, product: any, productId:
     getProductBaseInfoApi(page, productId),
     post(page, "getPackageList", { productId: Number(productId) || productId, priceInputType: 1 }, "VBK 套餐预检回读"),
     post(page, "getdescriptionInfo", { productId: Number(productId) || productId }, "VBK 图文预检回读"),
-    fetchTourInfoId(page, productId),
+    options.itineraryTourInfoId
+      ? Promise.resolve({ tourInfoId: options.itineraryTourInfoId })
+      : fetchTourInfoId(page, productId),
   ]);
-  const baseInfo = record(base.baseInfo);
-  if (String(baseInfo.productId) !== String(productId)) throw new Error("基本信息预检回读产品 ID 不一致");
-  if (Number(baseInfo.masterDepartureCityId) <= 0
-    || Number(baseInfo.destinationCityID) !== Number(baseInfo.masterDepartureCityId)) {
-    throw new Error("基本信息预检回读城市锚点不一致");
-  }
-  if (!String(baseInfo.vendorProductCode ?? "").trim()) throw new Error("基本信息预检缺少供应商产品编号");
+  const basic = verifyBasicInfoReadback(record(base.baseInfo), product, productId);
 
   const packageItem = list(packages.itemList)[0];
   if (!packageItem || String(packageItem.name ?? "") !== resolvePackageName(product)) {
     throw new Error("套餐预检回读名称不一致");
   }
-  const info = record(description.info);
-  if (list(info.pmRcmdItems).length < 3 || !String(record(info.productDesc).productDesc ?? "").trim()) {
-    throw new Error("产品图文预检回读不完整");
-  }
+  const presentation = await verifyPresentationReadback(page, product, productId, record(description.info));
   if (!tour.tourInfoId) throw new Error("行程预检回读缺少 tourInfoId");
   const detail = await fetchTourDailyDetail(page, tour.tourInfoId);
   if (detail.descriptions.length !== product.itinerary.length) {
     throw new Error(`行程预检回读天数不一致：${detail.descriptions.length}/${product.itinerary.length}`);
   }
 
-  const clauseTabs = await Promise.all([1, 2, 3, 4].map((tabEnum) =>
-    post(page, "listProductClauses", { productId: String(productId), tabEnum }, `VBK 条款页签 ${tabEnum} 预检回读`)));
-  if (clauseTabs.some((payload) => !record(payload.centralDataDto).additionalInfoDto)) {
-    throw new Error("条款预检回读缺少 centralDataDto");
-  }
+  const clauseTabs = await listProductClauseTabsForPreflight(page, productId);
+  const clauses = await verifyTermsReadback(page, product, productId, clauseTabs);
 
-  let pricingEvidence: Json | null = null;
-  if (inventory && pricing) {
-    if (!packageItem.singleResourceId || !packageItem.optionalResourceId) throw new Error("价格库存预检缺少套餐资源 ID");
-    const today = localBusinessDate();
-    const dates = datesBetween(inventory.startDate, inventory.endDate)
-      .filter((date) => date >= today)
-      .slice(0, 365);
-    if (!dates.length) throw new Error("价格库存预检没有可售业务日");
-    const snapshot = await post(page, "GetBatchOperateSchedule", {
-      packageKey: { masterResourceId: packageItem.singleResourceId, servantResourceId: packageItem.optionalResourceId },
-      productId: Number(productId) || productId,
-      yearMonth: dates[0]?.slice(0, 7),
-    }, "VBK 价格库存预检回读");
-    const rows = list(snapshot.dates);
-    if (!rows.some((row) => remoteDate(row) === dates[0])) throw new Error(`价格库存预检未读到首个业务日 ${dates[0]}`);
-    pricingEvidence = { firstDate: dates[0], remoteRowCount: rows.length };
-  }
+  const pricingEvidence = inventory && pricing ? await verifyPricingInventoryReadback(page, product, productId) : null;
 
   const hotelResource = record(record(product.operations).hotelResource);
   const hasPlannedHotel = product.itinerary.some((day: any) => hasItineraryHotelStay(day?.hotel));
@@ -108,7 +89,7 @@ export async function runProductPreflightApi(page: any, product: any, productId:
   // 老数据可能把已解析的携程候选标成 nonPlatform；只要行程明确含住宿，
   // 就必须以平台酒店资源回读为准，不能因为旧来源标签跳过核验。
   const hotel = hasPlannedHotel
-    ? await ensureHotelResourceApi(page, product, productId)
+    ? await verifyHotelResourceReadback(page, product, productId)
     : { skipped: hotelResource.source === "nonPlatform" ? "行程不含住宿" : "行程不含平台酒店资源", verified: true };
   let vehicle: Json | null = null;
   if (needsVehicle) {
@@ -120,12 +101,12 @@ export async function runProductPreflightApi(page: any, product: any, productId:
   return {
     productId: String(productId),
     verifiedWith: "remote-api-readback",
-    basic: { cityId: Number(baseInfo.masterDepartureCityId), vendorProductCode: String(baseInfo.vendorProductCode) },
-    presentation: { recommendationCount: list(info.pmRcmdItems).length },
+    basic: { ...basic, vendorProductCode: String(record(base.baseInfo).vendorProductCode) },
+    presentation,
     itinerary: { tourInfoId: String(tour.tourInfoId), days: detail.descriptions.length },
     package: { name: String(packageItem.name), resourceId: String(packageItem.singleResourceId) },
     pricingInventory: pricingEvidence,
-    clauses: clauseTabs.map((_, index) => index + 1),
+    clauses,
     resources: { segmentCount: segments.length, hotel, vehicle },
   };
 }

@@ -138,6 +138,38 @@ test("异步整包补全不能用旧快照抹掉已核验的同名行程 POI", (
   assert.equal(((saved.product.operations as Record<string, unknown>).vehicleResource as Record<string, unknown>).resourceGroupId, 2206177);
 });
 
+test("已核验 POI 仅在同日同名同类型的空映射中保留", () => {
+  let saved = detail({
+    itinerary: [
+      { day: 1, spots: [{ name: "同名景点", kind: "attraction", poiName: "第一天景点", poiId: 101 }] },
+      { day: 2, spots: [{ name: "同名景点", kind: "attraction", poiName: "第二天景点", poiId: 202 }] },
+      { day: 3, spots: [{ name: "历史接送", kind: "other", poiName: "错误旧 POI", poiId: 303 }] },
+    ],
+  });
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>) => { saved = { ...saved, product: product as ProductDetail["product"] }; },
+  };
+  const service = new ProductMutationService(store);
+
+  service.replace("p-1", {
+    itinerary: [
+      { day: 1, spots: [{ name: "同名景点", kind: "attraction", poiName: null, poiId: null }] },
+      { day: 2, spots: [
+        { name: "改名景点", kind: "attraction", poiName: null, poiId: null },
+        { name: "同名景点", kind: "other", poiName: null, poiId: null },
+      ] },
+      { day: 3, spots: [{ name: "历史接送", kind: "other", poiName: null, poiId: null }] },
+    ],
+  });
+
+  const itinerary = saved.product.itinerary as Array<{ spots: Array<Record<string, unknown>> }>;
+  assert.deepEqual(itinerary[0]?.spots[0], { name: "同名景点", kind: "attraction", poiName: "第一天景点", poiId: 101 });
+  assert.equal(itinerary[1]?.spots[0]?.poiId, null, "改名不复用旧 POI");
+  assert.equal(itinerary[1]?.spots[1]?.poiId, null, "改为 other 不复用旧 POI");
+  assert.equal(itinerary[2]?.spots[0]?.poiId, null, "历史 other 残留 POI 不得复活");
+});
+
 test("AI patch 写入待自动补图的 ctripLibrary cover 时不因缺 imageId/imageUrl 被拒", () => {
   let saved = detail({
     sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },

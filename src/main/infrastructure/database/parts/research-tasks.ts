@@ -5,12 +5,14 @@ import {
   canonicalPoiResearchTaskLabel,
   isSamePoiResearchTask,
 } from "../../../../shared/poi-research-tasks.js";
-import { isResearchTaskSatisfiedByProduct } from "../../../../shared/research-task-satisfaction.js";
+import { isResearchTaskSatisfiedByProduct, poiResearchTaskSatisfaction } from "../../../../shared/research-task-satisfaction.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "../../../minimax/minimax-constants.js";
 import { now } from "./types.js";
 import { touchProduct } from "./products.js";
 
 const POST_CONFIRM_STATUSES = new Set(["automating", "draft_saved"]);
+const NO_POI_EVIDENCE_MARKER = "[itinerary-kind:no-poi]";
+const NO_POI_EVIDENCE_TITLE = `${NO_POI_EVIDENCE_MARKER} 当前条目明确为自由活动或其他，无需 POI 核查，自动确认`;
 
 export function addResearchTask(db: Database.Database, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
   const statusRow = db.prepare("SELECT status FROM products WHERE id=?").get(localProductId) as { status?: string } | undefined;
@@ -78,6 +80,38 @@ export function markResearchTasksSatisfied(
     return { updated: before.length, taskIds: before.map((row) => row.id) };
   });
   return tx();
+}
+
+function markKindNoPoiTasksSatisfied(db: Database.Database, localProductId: string, taskIds: readonly string[]) {
+  const ids = [...new Set(taskIds.filter(Boolean))];
+  if (!ids.length) return { updated: 0, taskIds: [] as string[] };
+  const rows = db.prepare(`SELECT id,evidence_json FROM research_tasks WHERE local_product_id=? AND id IN (${ids.map(() => "?").join(",")}) AND state NOT IN ('confirmed','resolved')`).all(localProductId, ...ids) as Array<{ id: string; evidence_json: string }>;
+  for (const row of rows) {
+    let evidence: unknown[] = [];
+    try { evidence = JSON.parse(row.evidence_json); } catch { evidence = []; }
+    if (!Array.isArray(evidence)) evidence = [];
+    evidence.push({ id: randomUUID(), title: NO_POI_EVIDENCE_TITLE, source: "user", retrievedAt: now(), accepted: true });
+    db.prepare("UPDATE research_tasks SET state='confirmed', status='succeeded', evidence_json=? WHERE id=? AND local_product_id=?").run(JSON.stringify(evidence), row.id, localProductId);
+  }
+  if (rows.length) touchProduct(db, localProductId);
+  return { updated: rows.length, taskIds: rows.map((row) => row.id) };
+}
+
+/** Reopen only tasks that this feature itself closed for a non-POI kind.
+ * Human/operational confirmations and historical resolved tasks stay untouched. */
+export function reopenKindSupersededPoiResearchTasks(db: Database.Database, localProductId: string, product: Record<string, unknown>) {
+  const rows = db.prepare(`SELECT id,label,type,state,detail,evidence_json FROM research_tasks WHERE local_product_id=? AND state='confirmed'`).all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null; evidence_json: string }>;
+  const ids = rows.filter((row) => {
+    let evidence: unknown[] = [];
+    try { evidence = JSON.parse(row.evidence_json); } catch { return false; }
+    const marked = Array.isArray(evidence) && evidence.some((item) => typeof (item as { title?: unknown })?.title === "string" && (item as { title: string }).title.includes(NO_POI_EVIDENCE_MARKER));
+    return marked && poiResearchTaskSatisfaction(row, product) === null;
+  }).map((row) => row.id);
+  if (!ids.length) return { updated: 0, taskIds: [] as string[] };
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(`UPDATE research_tasks SET state='researching', status='queued' WHERE local_product_id=? AND id IN (${placeholders})`).run(localProductId, ...ids);
+  touchProduct(db, localProductId);
+  return { updated: ids.length, taskIds: ids };
 }
 
 /**
@@ -160,10 +194,10 @@ export function markResearchTasksSatisfiedByProduct(
   if (targetIds.length === 0) return { updated: 0, taskIds: [] as string[] };
   // 仍然走 markResearchTasksSatisfied，保证 evidence 写入与「只动未 confirmed
   // / resolved 的行」两道守卫生效一致（不是把所有 queued 行一锅端）。
-  return markResearchTasksSatisfied(
-    db,
-    localProductId,
-    targetIds,
-    options.note ?? "产品 JSON 写入时同步按字段匹配已满足，自动确认",
-  );
+  const rows = db.prepare(`SELECT id,label,type,detail FROM research_tasks WHERE local_product_id=? AND id IN (${targetIds.map(() => "?").join(",")})`).all(localProductId, ...targetIds) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }>;
+  const nonPoiIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "non_poi").map((row) => row.id);
+  const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id));
+  const ordinary = markResearchTasksSatisfied(db, localProductId, ordinaryIds, options.note ?? "产品 JSON 写入时同步按字段匹配已满足，自动确认");
+  const nonPoi = markKindNoPoiTasksSatisfied(db, localProductId, nonPoiIds);
+  return { updated: ordinary.updated + nonPoi.updated, taskIds: [...ordinary.taskIds, ...nonPoi.taskIds] };
 }

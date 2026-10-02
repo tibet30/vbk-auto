@@ -9,7 +9,7 @@
  * 主要导出：
  *  - HOTEL_TIER_VALUES / DEFAULT_HOTEL_TIER / FIVE_DIAMOND_HOTEL_TIER：合法档次枚举
  *  - LEGACY_FIVE_DIAMOND_HOTEL_TIER：旧的 "-5" 字符串，仅用于迁移期识别
- *  - normaliseHotelTier：把任意输入规整成白名单值
+ *  - normaliseHotelTier：把合法档次及无编码的明确档次规整成白名单值
  *  - hotelDiamondFromTier：从档次字符串中提取"钻"数字
  *  - hotelCandidateMatchesTier：判断一个酒店资源字符串是否匹配给定档次
  */
@@ -32,6 +32,7 @@ export const FIVE_DIAMOND_HOTEL_TIER = HOTEL_TIER_VALUES[0];
  * 把任何「酒店档次字符串」规整成当前白名单的合法值。
  *  - 已经是白名单之一 → 原样返回；
  *  - 旧的「当地5钻酒店/-5」 → 自动纠正为「当地5钻酒店/-38」；
+ *  - 无编码但明确的 3/4/5 钻表述 → 对应白名单值；
  *  - 任何其它值（含 2 钻、空串、null）→ 返回 undefined。
  */
 export function normaliseHotelTier(value: unknown): string | undefined {
@@ -40,6 +41,9 @@ export function normaliseHotelTier(value: unknown): string | undefined {
   if (!trimmed) return undefined;
   if ((HOTEL_TIER_VALUES as readonly string[]).includes(trimmed)) return trimmed;
   if (trimmed === LEGACY_FIVE_DIAMOND_HOTEL_TIER) return FIVE_DIAMOND_HOTEL_TIER;
+  // 模型有时省略 VBK 下拉编码；仅接受语义明确的完整档次，不猜测其它文本。
+  const unkeyed = trimmed.match(/^(?:当地)?([345])钻(?:酒店)?$/);
+  if (unkeyed) return HOTEL_TIER_VALUES[5 - Number(unkeyed[1])];
   return undefined;
 }
 

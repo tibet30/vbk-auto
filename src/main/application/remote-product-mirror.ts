@@ -34,7 +34,7 @@ export function createRemoteProductMirror(args: {
       return;
     }
     if (candidate.revision === latest.revision && candidate.updatedAt === latest.updatedAt) {
-      args.broadcast(latest);
+      broadcast(latest);
       return;
     }
     if (!latest.revision) {
@@ -51,7 +51,7 @@ export function createRemoteProductMirror(args: {
     };
     try {
       const saved = await args.remote.update(snapshot, latest.revision);
-      args.broadcast(saved);
+      broadcast(saved);
     } catch (error) {
       if (error instanceof TibetProductConflictError) {
         // AI 行程同步、usage flush 和 legacy local mutation 可能同时写同一产品。
@@ -68,7 +68,7 @@ export function createRemoteProductMirror(args: {
             updatedAt: new Date().toISOString(),
           };
           const saved = await args.remote.update(merged, error.latest.revision!);
-          args.broadcast(saved);
+          broadcast(saved);
           return;
         } catch (retryError) {
           logWarn("[tibet-product-mirror] conflict retry failed", {
@@ -76,7 +76,7 @@ export function createRemoteProductMirror(args: {
             error: message(retryError),
           });
         }
-        args.broadcast(error.latest);
+        broadcast(error.latest);
       }
       logWarn("[tibet-product-mirror] remote update failed", { productId: candidate.id, error: message(error) });
     }
@@ -98,11 +98,26 @@ export function createRemoteProductMirror(args: {
     }
   };
 
+  // Renderer delivery is not part of a Tibet write. In particular, a payload
+  // diagnostic must not turn a successful remote PATCH into a false retry.
+  const broadcast = (product: ProductDetail) => {
+    try {
+      args.broadcast(product);
+    } catch (error) {
+      logWarn("[tibet-product-mirror] renderer broadcast failed", {
+        productId: product.id,
+        error: message(error),
+      });
+    }
+  };
+
   const ensureWorker = (productId: string) => {
     if (workers.has(productId)) return;
     const worker = drain(productId);
     workers.set(productId, worker);
-    void worker.finally(() => {
+    void worker.catch((error) => {
+      logWarn("[tibet-product-mirror] worker failed", { productId, error: message(error) });
+    }).finally(() => {
       if (workers.get(productId) !== worker) return;
       workers.delete(productId);
       // sync 结束和 finally 之间若刚好收到新快照，继续启动 drain。
@@ -114,7 +129,7 @@ export function createRemoteProductMirror(args: {
     emit(product: ProductDetail): void {
       pending.set(product.id, product);
       if (args.isWorkflowActive?.(product.id) && args.shouldBroadcastWhileActive?.(product.id)) {
-        args.broadcast(product);
+        broadcast(product);
       }
       ensureWorker(product.id);
     },

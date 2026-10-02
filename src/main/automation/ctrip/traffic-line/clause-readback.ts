@@ -8,8 +8,25 @@ import { readManualRequiredClauses } from "./clause-required.js";
 import { list, positiveId, postTrafficLineSoa, record, type JsonRecord, type TrafficLinePage } from "./client.js";
 
 export class TrafficLineClauseReadbackError extends Error {
-  constructor(message: string) {
+  readonly productId?: string;
+  readonly readMode?: "sync" | "pure-stable";
+  readonly expectedIds?: readonly number[];
+  readonly formalIds?: readonly number[];
+  readonly responseKeys?: readonly string[];
+
+  constructor(message: string, details: {
+    productId?: string;
+    readMode?: "sync" | "pure-stable";
+    expectedIds?: readonly number[];
+    formalIds?: readonly number[];
+    responseKeys?: readonly string[];
+  } = {}) {
     super(message);
+    this.productId = details.productId;
+    this.readMode = details.readMode;
+    this.expectedIds = details.expectedIds;
+    this.formalIds = details.formalIds;
+    this.responseKeys = details.responseKeys;
     this.name = "TrafficLineClauseReadbackError";
   }
 }
@@ -25,11 +42,15 @@ export async function verifyTrafficLineClauses(
   variant: TrafficLineVariant,
   options: { syncRequired?: boolean } = {},
 ): Promise<{ formalClauseCount: number; expectedClauseCount: number }> {
+  const readMode = options.syncRequired === false ? "pure-stable" : "sync";
   if (options.syncRequired !== false) {
     for (let probe = 1; probe <= 2; probe += 1) {
       const pending = await readManualRequiredClauses(page, productId);
       if (pending.size) {
-        throw new TrafficLineClauseReadbackError(`子产品最终条款回读仍有平台必选项待保存：${formatPending(pending)}。`);
+        throw new TrafficLineClauseReadbackError(
+          `子产品 ${productId} 最终条款回读仍有平台必选项待保存：${formatPending(pending)}。`,
+          { productId, readMode },
+        );
       }
     }
   }
@@ -47,7 +68,7 @@ export async function verifyTrafficLineClauses(
     );
     const central = record(payload.centralDataDto);
     if (!central || !positiveId(central.clausePackageId)) {
-      throw new Error(`子产品最终条款页签 ${tabEnum} 缺少已绑定 clausePackageId。`);
+      throw new Error(`子产品 ${productId} 最终条款页签 ${tabEnum} 缺少已绑定 clausePackageId。`);
     }
     const clausePackage = await readClausePackage(page, central);
     const selected = selectedClauseItems(clausePackage);
@@ -60,7 +81,16 @@ export async function verifyTrafficLineClauses(
   const formalIds = new Set(list(formal.formalDtos).map((item) => Number(item.clauseItemId)));
   const missing = [...expectedIds].filter((id) => !formalIds.has(id));
   if (missing.length) {
-    throw new TrafficLineClauseReadbackError(`子产品最终正式条款回读缺少：${missing.join("、")}。`);
+    throw new TrafficLineClauseReadbackError(
+      `子产品 ${productId} 最终正式条款回读缺少：${missing.join("、")}；回读模式=${readMode}；期望条款=${[...expectedIds].join("、")}；正式条款=${[...formalIds].join("、")}；响应键=${Object.keys(formal).sort().join("、")}。`,
+      {
+        productId,
+        readMode,
+        expectedIds: [...expectedIds],
+        formalIds: [...formalIds],
+        responseKeys: Object.keys(formal).sort(),
+      },
+    );
   }
   return { formalClauseCount: formalIds.size, expectedClauseCount: expectedIds.size };
 }

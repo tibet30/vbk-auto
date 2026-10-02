@@ -245,7 +245,8 @@ export function desiredFirstTabClauses(
     requiredTransport,
   );
   const transferItems = allClauseItems(clausePackage)
-    .filter(({ type }) => Number(type.clauseTypeId) === 316 || text(type.clauseTypeName) === "接送");
+    .filter(({ type }) => Number(type.clauseTypeId) === 316 || text(type.clauseTypeName) === "接送")
+    .filter(({ item }) => item.itemType !== "T");
   if (transferItems.length !== 1) {
     throw new Error(`子产品条款无法唯一确认接送机条款（候选 ${transferItems.length} 项）。`);
   }

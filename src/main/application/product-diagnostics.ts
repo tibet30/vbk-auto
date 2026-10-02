@@ -1,4 +1,5 @@
 import type { AgentSnapshot, CreateProductInput, ProductDetail, ProductWorkflowTask } from "../../shared/contracts.js";
+import { redactLogString, redactLogValue } from "../../shared/log-redaction.js";
 
 type ProductJson = Record<string, unknown>;
 type DebugSnapshot = NonNullable<ProductDiagnostics["debugSnapshot"]>;
@@ -16,6 +17,12 @@ export interface ProductDiagnostics {
     progress?: number;
     message?: string;
     error?: string;
+    lastToolFailure?: {
+      name: string;
+      arguments: unknown;
+      error: string;
+      occurredAt: string;
+    };
     updatedAt: string;
   };
   debugSnapshot?: {
@@ -60,11 +67,13 @@ export function mergeAgentDiagnostics(product: ProductDetail, snapshot: AgentSna
   const run = snapshot.run;
   const lastEvent = snapshot.events.at(-1);
   const debugSnapshot = buildDebugSnapshot(product);
+  const failure = lastToolFailure(snapshot);
   return mergeDiagnostics(product.product, {
     runtime: run ? {
       status: run.status,
       message: lastEvent?.content ? safeText(lastEvent.content, 400) : undefined,
       ...(run.error ? { error: safeText(run.error, 400) } : {}),
+      ...(failure ? { lastToolFailure: failure } : {}),
       updatedAt: run.updatedAt,
     } : undefined,
     debugSnapshot: {
@@ -96,7 +105,27 @@ function buildDebugSnapshot(product: ProductDetail): DebugSnapshot {
 }
 
 function safeText(value: string, max: number): string {
-  return value.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted]").slice(0, max);
+  return redactLogString(value).slice(0, max);
+}
+
+function lastToolFailure(snapshot: AgentSnapshot): NonNullable<NonNullable<ProductDiagnostics["runtime"]>["lastToolFailure"]> | undefined {
+  if (!snapshot.run) return undefined;
+  for (const result of [...snapshot.events].reverse()) {
+    if (result.runId !== snapshot.run.id || result.type !== "tool_result" || typeof result.data?.error !== "string") continue;
+    const call = snapshot.events.find((event) => event.runId === result.runId && event.type === "tool_call"
+      && event.data?.toolCallId === result.data?.toolCallId);
+    if (!call) continue;
+    const name = typeof call.data?.name === "string" ? call.data.name : call.content;
+    const safeArguments = redactLogValue(call.data?.arguments ?? {});
+    const serialized = JSON.stringify(safeArguments);
+    return {
+      name: safeText(name, 120),
+      arguments: serialized.length > 8_000 ? { truncated: true, preview: serialized.slice(0, 8_000) } : safeArguments,
+      error: safeText(result.data.error, 2_000),
+      occurredAt: result.createdAt,
+    };
+  }
+  return undefined;
 }
 
 function record(value: unknown): Record<string, unknown> {

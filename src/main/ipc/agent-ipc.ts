@@ -1,8 +1,9 @@
 import type { AgentApprovalResponse, AgentIllegalKeywordRepairInput, AgentInputResponse } from "../../shared/contracts.js";
+import { agentDisplaySnapshot, agentHistoryPage } from "../../shared/agent-display.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import type { MainIpcContext } from "./context.js";
 
-/** Agent IPC deliberately returns the full durable snapshot after every operation. */
+/** Agent IPC projects durable snapshots for renderer transport; full state stays in main/SQLite. */
 export function registerAgentIpc(context: MainIpcContext): void {
   const agent = () => {
     if (!context.agentCore) throw new Error("Agent 服务尚未就绪，请重启应用后重试。");
@@ -10,9 +11,11 @@ export function registerAgentIpc(context: MainIpcContext): void {
   };
   const emit = (snapshot: Awaited<ReturnType<NonNullable<MainIpcContext["agentCore"]>["get"]>>) => {
     context.emitAgentSnapshot?.(snapshot);
-    return snapshot;
+    return agentDisplaySnapshot(snapshot);
   };
   ipcMain.handle("agent:get", (_event, localProductId: string) => agent().get(localProductId).then(emit));
+  ipcMain.handle("agent:getHistory", (_event, localProductId: string, page: number) => agent().get(localProductId)
+    .then((snapshot) => agentHistoryPage(snapshot.events, page)));
   ipcMain.handle("agent:send", (_event, localProductId: string, content: string) => {
     context.memoryService?.captureExplicitFromUserMessage(content, {
       localProductId,

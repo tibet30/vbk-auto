@@ -909,7 +909,8 @@ test("运行阶段复用产品配置里已核验的大交通端点，全子产�
   };
 
   const logs: string[] = [];
-  const result = await ensureTrafficLinePhase({
+  const checkpoints: any[] = [];
+  await assert.rejects(() => ensureTrafficLinePhase({
     page,
     parentProductId: "78483120",
     config: {
@@ -923,10 +924,102 @@ test("运行阶段复用产品配置里已核验的大交通端点，全子产�
     },
     itinerary: [{ spots: [{ city: "成都" }] }],
     log: (message) => logs.push(message),
-  });
+    onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+  }), /当前会话已确认可用的交通子产品未完成最终回读.*endpoint reuse/);
   assert.equal(seenEndpoints.some((endpoint) => /suggestAirport|suggestTrainStation/.test(endpoint)), false);
-  assert.deepEqual(result.children, []);
   assert.equal(logs.some((message) => /子产品未完成/.test(message)), true);
+  assert.equal(checkpoints.at(-1)?.verifiedAt, undefined);
+  assert.match(String(checkpoints.at(-1)?.failureReason), /endpoint reuse/);
+});
+
+test("当前可用方式会重验历史 skipped 子产品且不重复创建", async () => {
+  let sessionReads = 0;
+  const evaluated: string[] = [];
+  const page = {
+    vbkSessionGetText: async () => {
+      sessionReads += 1;
+      return {
+        status: 200,
+        text: '<script>window.__INITIAL_STATE__ = {"childList":[{"subProductId":"79194665","lineDescription":"飞机往返","isActiveInPackage":"T"}]};</script>',
+      };
+    },
+    evaluate: async (_fn: unknown, request: any) => {
+      evaluated.push(String(request?.endpoint ?? ""));
+      throw new Error("纯回读探针失败");
+    },
+  };
+  const result = await ensureTrafficLineApi(page as never, "79189107", {
+    enabled: true,
+    variants: ["flightRoundTrip"],
+    availability: {
+      endpointPlan: {
+        arrivalCity: "潮州",
+        departureCity: "潮州",
+        resolvedAt: "2026-10-01T00:00:00.000Z",
+        flight: { arrival: { code: "SWA", name: "揭阳潮汕机场" }, departure: { code: "SWA", name: "揭阳潮汕机场" } },
+      },
+      availableVariants: ["flightRoundTrip"],
+      unavailableVariants: {},
+    },
+  }, {
+    itinerary: [{ spots: [{ city: "潮州" }] }],
+    endpointPlan: {
+      arrivalCity: "潮州",
+      departureCity: "潮州",
+      resolvedAt: "2026-10-01T00:00:00.000Z",
+      flight: { arrival: { code: "SWA", name: "揭阳潮汕机场" }, departure: { code: "SWA", name: "揭阳潮汕机场" } },
+    },
+    childProgress: [{
+      variant: "flightRoundTrip",
+      lineDescription: "飞机往返",
+      childProductId: "79194665",
+      completedStages: ["planned", "stationsResolved", "childCreated"],
+      verified: false,
+      skipped: true,
+      failureReason: "子产品最终正式条款回读缺少：32269。",
+    }],
+    stableReadbackSamples: 1,
+    stableReadbackIntervalMs: 0,
+    sleep: async () => {},
+  });
+  assert.ok(sessionReads >= 2, "当前可用历史子产品必须进入关系/稳定回读");
+  assert.equal(evaluated.some((endpoint) => /saveLineInfo|saveProductClauses|saveClausePackage/.test(endpoint)), false);
+  assert.deepEqual(result.children, []);
+  assert.equal(result.skipped?.length, 1);
+});
+
+test("当前会话明确不可用时保留 skipped，但不写 verifiedAt 并返回 blocked", async () => {
+  const checkpoints: any[] = [];
+  const result = await ensureTrafficLinePhase({
+    page: { evaluate: async () => { throw new Error("不应读取不可用方式"); } },
+    parentProductId: "79189107",
+    config: {
+      enabled: true,
+      variants: ["flightRoundTrip"],
+      availability: {
+        endpointPlan: { arrivalCity: "潮州", departureCity: "潮州", resolvedAt: "2026-10-01T00:00:00.000Z" },
+        availableVariants: [],
+        unavailableVariants: { flightRoundTrip: "当前会话未确认可售" },
+      },
+    },
+    itinerary: [{ spots: [{ city: "潮州" }] }],
+    checkpoint: {
+      children: [{
+        variant: "flightRoundTrip",
+        lineDescription: "飞机往返",
+        childProductId: "79194665",
+        completedStages: ["planned", "stationsResolved", "childCreated"],
+        verified: false,
+        skipped: true,
+        failureReason: "当前无可售资源",
+      }],
+    },
+    log: () => {},
+    onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+  });
+  assert.equal(result.children.length, 0);
+  assert.equal(result.blocked, 1);
+  assert.equal(checkpoints.at(-1)?.verifiedAt, undefined);
 });
 
 test("单个交通子产品创建失败会跳过并继续其它子产品，不影响母产品阶段成功", async () => {

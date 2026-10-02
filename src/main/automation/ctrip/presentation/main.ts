@@ -14,6 +14,10 @@ import { buildRecommendationReasonsPlan } from "./recommendations.js";
 import { assertPresentationReadyForVbk } from "../../automation-contract.js";
 import { bindCtripLibraryAttractionImageViaApi, bindCtripLibraryCoverViaApi } from "./cover-bind.js";
 import { savePresentationViaApi } from "./presentation-api.js";
+import { inspectManualCoverAsset } from "../../manual-cover-asset.js";
+import { uploadManualCoverViaSupplierPage } from "./manual-cover-upload.js";
+import { loadPlaceholderCoverAsset } from "../../placeholder-cover-asset.js";
+import { readActiveCoverFallback } from "../../../../shared/cover-fallback.js";
 
 export { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 
@@ -217,7 +221,7 @@ function ctripLibraryCoverAttempts(cover) {
 
 /**
  * 「产品图文」阶段主入口：以显式产品 ID 接口保存推荐理由、产品特色与封面。
- * 调用方需要保证 product.presentation 含 cover 与 recommendation / features / recommendations。
+ * 调用方需要保证 product.presentation 含真实 cover 或草稿占位，以及 recommendation / features / recommendations。
  *
  * 防御深度（defense in depth）：
  *   - readiness / automationBlockers 已经在起跑前校验过 presentation 必填字段；
@@ -229,7 +233,7 @@ function ctripLibraryCoverAttempts(cover) {
  * 保存不再触碰推荐理由 textarea / UEditor DOM：统一走 /15638/getdescriptionInfo →
  * /20698/createProductDraft(desc) → /15638/savedescriptioninfo → 回读确认。
  */
-export async function fillAndSavePresentation(page, product, explicitProductId) {
+export async function fillAndSavePresentation(page, product, explicitProductId, onManualCoverBound?) {
   // 第一道防御：统一从 automation-contract 取真实契约，错误文案面向运营。
   assertPresentationReadyForVbk(product);
   const presentation = product.presentation;
@@ -238,9 +242,8 @@ export async function fillAndSavePresentation(page, product, explicitProductId) 
     throw new Error("产品图文接口保存：产品 ID 缺失，无法继续。");
   }
   const cover = presentation?.cover;
-  if (!cover || cover.source !== "ctripLibrary" || ctripLibraryCoverAttempts(cover).length === 0) {
-    throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
-  }
+  const fallback = readActiveCoverFallback(product);
+  if (!cover && !fallback) throw new Error("产品图文缺少封面配置，已停止后续录入。");
 
   // 防御深度：仍然保留 3 条 + 白名单 + 不重复校验（buildRecommendationReasonsPlan
   // 抛错信息保持原样），避免改动影响既有运营提示。
@@ -248,7 +251,32 @@ export async function fillAndSavePresentation(page, product, explicitProductId) 
   // 产品图片先通过 bindProductImage 设置封面和景点图；推荐理由 + 产品特色
   // 再由 savePresentationViaApi 写入 /15638/getdescriptionInfo →
   // /20698/createProductDraft → /15638/savedescriptioninfo。
-  const coverResult = await bindCtripLibraryPresentationImages(page, presentation.cover, productId);
+  let coverResult;
+  if (fallback) {
+    coverResult = await uploadManualCoverViaSupplierPage(
+      page, productId, loadPlaceholderCoverAsset(), String(product.basicInfo?.meetingCity ?? ""),
+      fallback.remoteImageId,
+      async (imageId) => {
+        presentation.coverFallback.remoteImageId = imageId;
+        await onManualCoverBound?.(imageId);
+      },
+    );
+  } else if (cover.source === "manualUpload") {
+    const { asset, issue } = inspectManualCoverAsset(product);
+    if (!asset) throw new Error(issue ?? "手动封面文件不可用。");
+    coverResult = await uploadManualCoverViaSupplierPage(
+      page, productId, asset.path, String(product.basicInfo?.meetingCity ?? ""),
+      Number(cover.remoteImageId) || undefined,
+      async (imageId) => {
+        cover.remoteImageId = imageId;
+        await onManualCoverBound?.(imageId);
+      },
+    );
+  } else if (cover.source === "ctripLibrary" && ctripLibraryCoverAttempts(cover).length > 0) {
+    coverResult = await bindCtripLibraryPresentationImages(page, cover, productId);
+  } else {
+    throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
+  }
   const savedWith = await savePresentationViaApi(page, presentation, productId);
   return { advanced: true, mode: "presentation-api", productId, coverResult, savedWith };
 }

@@ -405,3 +405,14 @@ test("AI 替换父对象时保留已确认的封面身份和运行时资源", ()
   assert.deepEqual((result.operations as any).bookingControls.butler, { contactCardId: 1, displayName: "管家A", providerId: 100 });
   assert.equal((result.operations as any).vehicleResource.resourceGroupId, 2206240);
 });
+
+test("normaliseItinerary 保留 free/other 类型与说明，并清除非景点 POI", () => {
+  const result = normaliseItinerary([{ day: 1, title: "类型", spots: [
+    { name: "自由活动", kind: "free", description: "自行安排", poiName: "错误POI", poiId: 9 },
+    { name: "潮汕接团", kind: "other", description: "接团服务", poiName: "错误POI", poiId: 8 },
+  ] }]) as Array<{ spots: Array<Record<string, unknown>> }>;
+  assert.deepEqual(result[0].spots.map((spot) => ({ kind: spot.kind, description: spot.description, poiId: spot.poiId, poiName: spot.poiName })), [
+    { kind: "free", description: "自行安排", poiId: null, poiName: null },
+    { kind: "other", description: "接团服务", poiId: null, poiName: null },
+  ]);
+});

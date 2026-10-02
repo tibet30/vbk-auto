@@ -430,7 +430,9 @@ test("产品图文主流程：仅使用显式产品 ID 的接口保存，不推�
   const mainPath = resolve(here, "../../../src/main/automation/ctrip/presentation/main.ts");
   const src = await readFile(mainPath, "utf8");
   assert.ok(src.includes("savePresentationViaApi(page, presentation, productId)"));
-  assert.ok(src.includes("bindCtripLibraryPresentationImages(page, presentation.cover, productId)"));
+  assert.match(src, /const cover = presentation\?\.cover;/, "图库封面绑定必须使用从 presentation 解析出的 cover");
+  assert.match(src, /bindCtripLibraryPresentationImages\(page, cover, productId\)/,
+    "图库封面绑定必须传入显式 productId");
   assert.doesNotMatch(src, /saveThenAdvance\(page|clickSection\(page|page\.reload|waitForURL/);
   assert.doesNotMatch(src, /installSaveMonitor\(page\)/, "接口保存后主流程不应再安装 UI 保存 monitor");
   // ensure tabs.ts 没有被改（守住「只收窄产品图文」红线）

@@ -20,6 +20,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   aggregateSectionState,
+  normalizedAutomationPhasesForDisplay,
+  normalizedAutomationRecoveryForDisplay,
+  vbkStageStatusText,
   VBK_NAV_SECTIONS,
   type AutomationPhaseRow,
   type AutomationRecoveryMap,
@@ -235,4 +238,66 @@ test("普通 itinerary section 聚合行为不变：productId 不影响行程描
     "itinerary 没映射到任何 phase 时，即使 productId 已保存也不能变 done，"
     + "因为本契约明确说「不为其它 section 编造 success」。",
   );
+});
+
+test("已保存草稿且自动化成功时，展示层不再用旧失败阶段染红", () => {
+  const product = {
+    status: "draft_saved",
+    automation: {
+      status: "succeeded",
+      phases: [
+        { phase: "itinerary", status: "failed" },
+        { phase: "terms", status: "pending" },
+      ] satisfies AutomationPhaseRow[],
+    },
+  };
+  const phases = normalizedAutomationPhasesForDisplay(product);
+  const recovery = normalizedAutomationRecoveryForDisplay(product, {
+    itinerary: { phase: "itinerary", state: "needs_user" },
+  });
+  assert.deepEqual(phases.map((phase) => [phase.phase, phase.status]), [
+    ["itinerary", "completed"],
+    ["terms", "completed"],
+  ]);
+  assert.equal(recovery, undefined);
+  assert.equal(
+    aggregateSectionState(itinerary!, phases, recovery, "79210884"),
+    "done",
+    "后台任务已成功且草稿已保存时，行程描述不能继续显示旧 failed 红色状态",
+  );
+});
+
+test("未成功保存时，展示层保留真实失败阶段", () => {
+  const product = {
+    status: "blocked",
+    automation: {
+      status: "failed",
+      phases: [{ phase: "itinerary", status: "failed" }] satisfies AutomationPhaseRow[],
+    },
+  };
+  assert.deepEqual(normalizedAutomationPhasesForDisplay(product), product.automation.phases);
+  assert.equal(
+    aggregateSectionState(itinerary!, normalizedAutomationPhasesForDisplay(product), undefined, "79210884"),
+    "failed",
+  );
+});
+
+test("VBK 阶段总状态：已保存草稿优先于旧 recovery 阻塞", () => {
+  const status = vbkStageStatusText({
+    status: "draft_saved",
+    automation: {
+      status: "failed",
+      recovery: {
+        phases: {
+          itinerary: {
+            phase: "itinerary",
+            state: "needs_user",
+            attempts: [],
+          },
+        },
+      },
+    },
+  } as never);
+  assert.equal(status.tone, "saved");
+  assert.equal(status.label, "草稿已保存到 VBK");
 });

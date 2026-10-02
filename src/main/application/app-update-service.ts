@@ -5,6 +5,7 @@ import electronUpdater from "electron-updater";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import type { AppUpdateState, AppUpdateStatus } from "../../shared/contracts.js";
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
+import { safeRendererSend } from "../infrastructure/renderer-send.js";
 import { AppUpdateFailure, describeUpdateFailure } from "./app-update-diagnostics.js";
 
 export const APP_UPDATE_FEED_URL = "https://www.atdtour.com/downloads/sanrentongyou/updates/stable";
@@ -225,8 +226,7 @@ export class AppUpdateService {
   private patch(patch: Partial<AppUpdateState> & { status?: AppUpdateStatus }): void {
     this.state = { ...this.state, ...patch };
     const window = this.options.getWindow();
-    if (!window || window.isDestroyed() || window.webContents.isDestroyed()) return;
-    window.webContents.send("updates:changed", this.snapshot());
+    safeRendererSend(window, "updates:changed", this.snapshot());
   }
 }
 

@@ -1,11 +1,14 @@
 import { useMemo } from "react";
 import {
   activeAdvisorHint,
+  normalizedAutomationPhasesForDisplay,
+  normalizedAutomationRecoveryForDisplay,
   recoveryNeedsUser,
   statusState,
   vbkStageStatusText,
 } from "../../helpers";
 import type { AppStateBase } from "../base";
+import { readActiveCoverFallback } from "../../../../shared/cover-fallback.js";
 
 /** 产品详情、核查、自动化与两步导航的纯派生视图模型。 */
 export function useProductViewDerived(state: AppStateBase) {
@@ -25,13 +28,18 @@ export function useProductViewDerived(state: AppStateBase) {
   const splitStyle = product
     ? { gridTemplateColumns: stage === "review" ? "minmax(0, 1.27fr) minmax(0, 1fr)" : "minmax(0, 0.515fr) minmax(0, 1fr)" }
     : undefined;
-  const productCompletionLabel = state.readiness.ready ? "可以录入" : `${state.readiness.issues.length} 项待处理`;
+  const coverFallback = product ? readActiveCoverFallback(product.product) : null;
+  const coverHandoffReady = Boolean(coverFallback && state.readiness.ready);
+  const productCompletionLabel = coverHandoffReady
+    ? "可录入 VBK 草稿 · 禁止上架"
+    : state.readiness.ready ? "可以录入" : `${state.readiness.issues.length} 项待处理`;
   const vbkStageStatus = vbkStageStatusText(product);
   const automationActive = product?.automation?.status === "running";
-  const recoveryBlocked = product?.automation ? recoveryNeedsUser(product.automation) : null;
-  const advisorHint = product?.automation ? activeAdvisorHint(product.automation) : null;
-  const automationPhases = product?.automation?.phases ?? [];
-  const automationRecovery = product?.automation?.recovery?.phases;
+  const savedSucceeded = product?.status === "draft_saved" || product?.automation?.status === "succeeded";
+  const recoveryBlocked = !savedSucceeded && product?.automation ? recoveryNeedsUser(product.automation) : null;
+  const advisorHint = !savedSucceeded && product?.automation ? activeAdvisorHint(product.automation) : null;
+  const automationPhases = normalizedAutomationPhasesForDisplay(product);
+  const automationRecovery = normalizedAutomationRecoveryForDisplay(product, product?.automation?.recovery?.phases);
   const reviewStepStatus = !product
     ? "idle"
     : state.readiness.ready ? "passed" : state.readiness.issues.length ? "inProgress" : "reviewing";

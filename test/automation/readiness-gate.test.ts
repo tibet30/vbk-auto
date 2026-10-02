@@ -89,7 +89,7 @@ test("住宿日缺少携程候选由权威 evaluator 阻断，不进入旧 autom
   assert.equal(automationBlockers(product).some((item) => item.label.startsWith("酒店候选")), false);
   const gap = extraPreparationGaps(product).find((item) => item.label === "酒店候选：第 1 天");
   assert.ok(gap);
-  assert.match(gap.detail, /1–5 个携程酒店候选/);
+  assert.match(gap.detail, /1–5 个.*携程酒店候选/);
 });
 
 test("住宿日有 1–5 个已持久化候选不被权威准备门禁阻断", () => {
@@ -115,6 +115,20 @@ test("用户原始想法中的绝对化用语不作为自动录入文案阻断�
     basicInfo: { ...baseProduct.basicInfo, userIdea: "第一天安排全网最佳、唯一的体验" },
   };
   assert.deepEqual(automationBlockers(product), []);
+});
+
+test("运行诊断不参与 VBK 文案黑名单，真实展示文案仍须拦截", () => {
+  const diagnosticOnly = { ...baseProduct, diagnostics: { runtime: { message: "最优首选仅供运行诊断" } } };
+  assert.equal(automationBlockers(diagnosticOnly).some((item) => item.label === "VBK 文案黑名单"), false);
+
+  const presentationCopy = { ...baseProduct, presentation: { ...baseProduct.presentation, recommendation: "首选行程" } };
+  assert.ok(automationBlockers(presentationCopy).some((item) => item.label === "VBK 文案黑名单"));
+
+  const itineraryCopy = { ...baseProduct, itinerary: [{ ...baseProduct.itinerary[0], description: "最值得体验的古城" }] };
+  assert.ok(automationBlockers(itineraryCopy).some((item) => item.label === "VBK 文案黑名单"));
+
+  const activityCopy = { ...baseProduct, itinerary: [{ ...baseProduct.itinerary[0], activities: [{ type: "free", title: "首选自由活动", detail: "自理" }] }] };
+  assert.ok(automationBlockers(activityCopy).some((item) => item.label === "VBK 文案黑名单"));
 });
 
 test("缺少 packageName 不再作为规划 / 草稿阶段阻塞项", () => {
@@ -146,7 +160,7 @@ test("私家团缺少用车资源组会被拦下", () => {
   assert.deepEqual(blockers.map((item) => item.label), ["用车资源组"]);
 });
 
-test("manualUpload 封面会被 readiness 明确阻断", () => {
+test("manualUpload 封面不会被错误地当成缺图或不支持来源", () => {
   const product = {
     ...baseProduct,
     presentation: {
@@ -165,9 +179,7 @@ test("manualUpload 封面会被 readiness 明确阻断", () => {
     },
   };
   const blockers = automationBlockers(product);
-  assert.ok(blockers.some((item) => item.label === "封面来源"), "manualUpload 封面必须阻断");
-  const detail = blockers.find((item) => item.label === "封面来源");
-  assert.match(detail?.detail ?? "", /手动上传封面/);
+  assert.equal(blockers.some((item) => item.label === "封面来源" || item.label === "封面图（携程图库）"), false);
 });
 
 test("ctripLibrary 封面不阻断 readiness", () => {

@@ -58,6 +58,52 @@ test("酒店资源直接以 saveSegment 保存五家指定酒店，并以 getSeg
   }
 });
 
+test("平台重建资源草稿导致旧段号失效时按当前住宿段重映射", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousDocument = (globalThis as any).document;
+  const calls: Array<{ endpoint: string; segmentId?: string }> = [];
+  let segments: any[] = [
+    { segmentId: "full", segmentBase: { stayNights: 0 }, hotel: { segmentRooms: [] } },
+    { segmentId: "fresh-1", segmentBase: { stayNights: 3 }, hotel: { segmentRooms: [] } },
+    { segmentId: "fresh-2", segmentBase: { stayNights: 1 }, hotel: { segmentRooms: [] } },
+  ];
+  (globalThis as any).document = { cookie: "GUID=fixture" };
+  globalThis.fetch = (async (input: any, init?: any) => {
+    const endpoint = new URL(String(input)).pathname;
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    calls.push({ endpoint, segmentId: body.segment?.segmentId });
+    if (endpoint === "/restapi/soa2/15638/saveSegment") {
+      segments = segments.map((segment) => String(segment.segmentId) === String(body.segment.segmentId)
+        ? body.segment
+        : segment);
+    }
+    const payload = endpoint === "/restapi/soa2/15638/getSegments"
+      ? { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments } }
+      : { ResponseStatus: { Ack: "Success" } };
+    return new Response(JSON.stringify(payload), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const result = await syncCtripHotelResources({
+      page: { evaluate: async (fn: any, arg: any) => fn(arg) },
+      productId: "77968888",
+      dailyCandidates: [
+        { day: 1, segmentId: "stale-1", candidates: [1, 2, 3, 4, 5].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })) },
+        { day: 4, segmentId: "stale-2", candidates: [6, 7, 8, 9, 10].map((hotelId) => ({ hotelId, hotelName: `酒店${hotelId}` })) },
+      ],
+    });
+    assert.equal(result.verified, true);
+    assert.deepEqual(result.days.map((day) => day.segmentId), ["fresh-1", "fresh-2"]);
+    assert.deepEqual(
+      calls.filter((call) => call.endpoint.endsWith("saveSegment")).map((call) => call.segmentId),
+      ["fresh-1", "fresh-2"],
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousDocument === undefined) delete (globalThis as any).document;
+    else (globalThis as any).document = previousDocument;
+  }
+});
+
 test("酒店指定名单不会额外提交资源草稿，避免提交结算覆盖段内酒店", async () => {
   const previousFetch = globalThis.fetch;
   const previousDocument = (globalThis as any).document;

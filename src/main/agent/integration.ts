@@ -30,6 +30,10 @@ import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import { selfRepairItineraryForVbk } from "../planning/itinerary-self-repair.js";
 import { isTravelNodeName } from "../planning/itinerary-adoption.js";
+import { createItineraryDraftTools } from "./integration-itinerary-draft-tools.js";
+import { createCreationRecoveryTools } from "./integration-creation-recovery-tools.js";
+import { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
+export { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
 import type { AgentTool } from "./types.js";
 
 type JsonObject = Record<string, unknown>;
@@ -215,9 +219,13 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     ...createGenerationStageTools({
       deps, get, resolveTrafficAvailability, resolveItineraryPoisAndTraffic, clearUnverifiedItineraryPois,
     }),
+    ...createItineraryDraftTools({ browserFor: () => deps.browser, get, withPage }),
+    ...createCreationRecoveryTools(deps, get),
     {
       name: "read_product", description: "读取当前产品结构、生命周期和已保存的自动化阶段。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { return { content: JSON.stringify(agentProductContext(get(ctx.localProductId), deps.db.getAgentSnapshot?.(ctx.localProductId))) }; },
+      async execute(_args, ctx) { return { content: JSON.stringify(agentProductContext(
+        get(ctx.localProductId), deps.db.getAgentSnapshot?.(ctx.localProductId), deps.readiness?.(ctx.localProductId),
+      )) }; },
     },
     {
       name: "patch_product", requiresApproval: false, description: "合并保存本地规划字段（basicInfo、presentation、itinerary、operations、commercial）；系统锁定既有 meetingCity。用户明确指定大交通抵达/返程端点时，只能写 operations.trafficLine.arrivalCity / departureCity；不得写交通方式或启用状态，系统会调用接口核验。未指定端点才默认产品目的地。itinerary 的数据结构严格为逐日对象数组：[{day:1, title:'...', spots:[{name:'...', timeOfDay:'morning', relation:'and'|'or'}]}]。二选一/多选一必须保留每个原始景点，连续写在同一天同一时段，且每项 relation:'or'，供 VBK 录入为“或”。不接受 {item:...}、嵌套数组或 hotels 顶层字段；不允许填写新的 poiId/poiName，已查询到的候选只能由 select_itinerary_poi 写入。", parameters: PRODUCT_PATCH_SCHEMA,
@@ -298,7 +306,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       async execute(_args, ctx) { return withPage(async () => { const product = get(ctx.localProductId); const payload = await searchVbkResources(await deps.browser.page()); const city = cleanText((productData(product).basicInfo as JsonObject | undefined)?.destinationCity); return { content: safeJson({ selected: firstHotelResource(payload, city), payload }) }; }); },
     },
     {
-      name: "resolve_itinerary_hotels", description: "为已有逐日行程查询当天最后景点附近的真实酒店候选，并安全写回 itinerary。", parameters: { type: "object", properties: {} },
+      name: "resolve_itinerary_hotels", description: "为已有逐日行程查询真实酒店候选，并自动写回 itinerary[].hotelCandidates；成功后不得再用 patch_product 重写行程。", parameters: { type: "object", properties: {} },
       async execute(_args, ctx) {
         const current = get(ctx.localProductId); const data = productData(current);
         const itinerary = Array.isArray(data.itinerary) ? data.itinerary as JsonObject[] : [];
@@ -308,7 +316,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const nights = Number(basicInfo?.nights);
         const resolved = await resolveItineraryHotelCandidates(itinerary, city, nights, cleanText(operations?.hotelTier));
         deps.productMutations.replace(ctx.localProductId, applyResolvedItineraryHotels(data, resolved), { status: current.status });
-        return { content: safeJson({ dailyCandidates: resolved.dailyCandidates, searchDates: resolved.searchDates }) };
+        return { content: safeJson(persistedItineraryHotelResult(resolved)) };
       },
     },
     {
@@ -321,7 +329,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     },
     {
       name: "resolve_cover", description: "查询携程图库并将完整封面候选安全写入 presentation.cover。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => applyAutoCoverFill({ page: await deps.browser.page(), product: productData(current) })); const result = deps.productMutations.replace(ctx.localProductId, filled.nextProduct, { status: current.status }); return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
+      async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => applyAutoCoverFill({ page: await deps.browser.page(), product: productData(current) })); const result = filled.outcome.written ? deps.productMutations.replace(ctx.localProductId, filled.nextProduct, { status: current.status }) : current; return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
     },
     {
       name: "resolve_vehicle_resource", description: "查询并选择真实 VBK 用车资源组，安全写入 operations.vehicleResource，不绑定到 VBK 产品。", parameters: { type: "object", properties: {} },

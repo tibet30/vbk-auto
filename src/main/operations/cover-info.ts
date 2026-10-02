@@ -2,8 +2,7 @@
  * 产品封面信息查询 / readiness 辅助：
  *   - readCover：从 product.presentation.cover 安全读出当前封面；
  *   - coverReadyForAutomation：判定「自动化阶段能否消费当前 cover」；
- *     ctripLibrary 已由 fillAndSavePresentation 支持；manualUpload 当前
- *     自动化不支持，必须在 readiness 阶段阻断；缺失 cover 留给其它 readiness 流程。
+ *     两种来源均可进入自动化；手动文件的可用性和尺寸由主进程预检。
  *
  * 注意：写入路径由 applyManualReviewField.handle productCover 接管（与
  * pricing / butlerContact 同级）；本文件只做读 + 阻断判断，不参与写。
@@ -62,18 +61,15 @@ export function readCover(product: Record<string, unknown>): null | {
 /**
  * 「自动化阶段能否消费当前 cover」判定：
  *  - ctripLibrary：fillAndSavePresentation 已经实现；
- *  - manualUpload：当前自动化阶段不支持，必须在 readiness 阶段阻断；
+ *  - manualUpload：由录入阶段上传本地文件；
  *  - 缺失 cover：按缺值处理，依赖其它 readiness 流程。
  */
 export function coverReadyForAutomation(product: Record<string, unknown>): {
   ok: boolean;
-  reason: "manualUploadNotSupported" | "missing" | "ok";
+  reason: "missing" | "ok";
 } {
   const cover = readCover(product);
   if (!cover) return { ok: false, reason: "missing" };
-  if (cover.source === "manualUpload") {
-    return { ok: false, reason: "manualUploadNotSupported" };
-  }
   return { ok: true, reason: "ok" };
 }
 

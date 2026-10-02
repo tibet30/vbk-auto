@@ -8,7 +8,9 @@ import type { VbkDatabase } from "./infrastructure/database/database.js";
 import type { LocalVbkCookieStore } from "./infrastructure/vbk-cookie-store.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
 import { installContentSecurityPolicy } from "./infrastructure/csp.js";
+import { safeRendererSend } from "./infrastructure/renderer-send.js";
 import type { MiniMaxService } from "./minimax/minimax.js";
+import { rendererRecoveryDelay, shouldRecoverRenderer } from "./renderer-recovery.js";
 
 interface CreateMainWindowArgs {
   db: VbkDatabase;
@@ -24,6 +26,47 @@ interface CreateMainWindowArgs {
 }
 
 const devRendererUrl = process.env.VBK_RENDERER_URL?.trim() || "http://127.0.0.1:5173";
+function diagnosticUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "<unavailable>";
+  }
+}
+
+function installRendererStartupDiagnostics(window: BrowserWindow): void {
+  let recoveryAttempts = 0;
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+    if (!isMainFrame) return;
+    logWarn("[startup] renderer load failed", {
+      errorCode,
+      errorDescription,
+      url: diagnosticUrl(validatedUrl),
+    });
+  });
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    logWarn("[startup] renderer preload failed", {
+      preloadPath: path.basename(preloadPath),
+      message: error.message,
+    });
+  });
+  window.webContents.on("render-process-gone", (_event, details) => {
+    logWarn("[startup] renderer process gone", {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+    if (!shouldRecoverRenderer(details.reason, recoveryAttempts)) return;
+    recoveryAttempts += 1;
+    const delay = rendererRecoveryDelay(recoveryAttempts);
+    logWarn("[startup] scheduling one local renderer recovery", { reason: details.reason, delay });
+    setTimeout(() => {
+      if (window.isDestroyed() || window.webContents.isDestroyed()) return;
+      logWarn("[startup] reloading local renderer after crash", { attempt: recoveryAttempts });
+      window.webContents.reload();
+    }, delay);
+  });
+}
 
 export interface MainWindowServices {
   window: BrowserWindow;
@@ -47,6 +90,7 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
       preload: path.join(args.root, "dist-electron", "main", "preload.cjs"),
     },
   });
+  installRendererStartupDiagnostics(window);
   args.onWindowCreated?.(window);
   installContentSecurityPolicy(window.webContents.session);
 
@@ -109,9 +153,7 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
   void Promise.all([rendererReady, browserReady])
     .then(() => browser.waitUntilReady())
     .then((ready) => {
-      if (ready && !window.isDestroyed() && !window.webContents.isDestroyed()) {
-        window.webContents.send("vbk:page-ready");
-      }
+      if (ready) safeRendererSend(window, "vbk:page-ready");
     })
     .catch((error) => {
       logWarn("[startup] VBK browser initialisation failed; local workspace remains available", {

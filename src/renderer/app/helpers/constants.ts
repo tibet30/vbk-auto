@@ -102,11 +102,11 @@ export function isVehicleResourceTask(task?: ProductDetail["researchTasks"][numb
 // 产品状态 → 用作第二步"草稿保存"现状文案，避免重复占用 statusLabel 的中文。
 export function vbkStageStatusText(product: ProductDetail | null): { tone: "waiting" | "running" | "saved" | "ready" | "blocked"; label: string; detail: string } {
   if (!product) return { tone: "waiting", label: "等待选择产品", detail: "创建产品后即可进入" };
+  if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   const blocked = recoveryNeedsUser(product.automation);
   if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 AI 给出的指令完成手动操作，再重新发起一次保存草稿" };
   if (product.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };
   if (product.automation?.status === "queued") return { tone: "waiting", label: "部分阶段已保存，等待继续", detail: "已修复的阶段不会重写；点击开始自动录入将从第一个未完成阶段继续" };
-  if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   return { tone: "waiting", label: "尚未录入 VBK", detail: "第一步审查通过后即可在右侧开始保存草稿" };
 }
 
@@ -337,6 +337,28 @@ export function operationStageToSection(stage: string | undefined): VbkNavSectio
 }
 
 export type AutomationPhaseRow = { phase: string; status: "pending" | "running" | "completed" | "failed" };
+type DisplayAutomationInput = {
+  status?: string;
+  automation?: { status?: string; phases?: AutomationPhaseRow[] } | null;
+};
+
+export function normalizedAutomationPhasesForDisplay(product: DisplayAutomationInput | null | undefined): AutomationPhaseRow[] {
+  const phases = product?.automation?.phases ?? [];
+  const savedSucceeded = product?.status === "draft_saved" || product?.automation?.status === "succeeded";
+  if (!savedSucceeded) return phases;
+  return phases.map((phase) => phase.status === "completed"
+    ? phase
+    : { ...phase, status: "completed" });
+}
+
+export function normalizedAutomationRecoveryForDisplay<T extends AutomationRecoveryMap | undefined>(
+  product: DisplayAutomationInput | null | undefined,
+  recovery: T,
+): T | undefined {
+  const savedSucceeded = product?.status === "draft_saved" || product?.automation?.status === "succeeded";
+  return savedSucceeded ? undefined : recovery;
+}
+
 // 使用 PhaseRecovery 的结构性子集，避免依赖完整类型；state 允许是任意
 // RecoveryState（含 running/advising/retrying/needs_user/completed）。
 export type AutomationRecoveryMap = Record<string, { phase: string; state: string }>;

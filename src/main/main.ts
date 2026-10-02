@@ -23,6 +23,7 @@ import type {
 import { isAiProvider } from "../shared/contracts.js";
 import { resolveSystemNotificationsEnabled } from "../shared/system-notification-settings.js";
 import { DraftAutomation } from "./automation/automation.js";
+import { inspectManualCoverAsset } from "./automation/manual-cover-asset.js";
 import { VbkDatabase } from "./infrastructure/database/database.js";
 import { productNotFound } from "./infrastructure/db-errors.js";
 import { safeRendererSend } from "./infrastructure/renderer-send.js";
@@ -313,10 +314,14 @@ function readiness(
   } = {},
 ): ProductReadiness {
   const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
-  return evaluateVisibleReadiness(product, db.getAgentSnapshot(localProductId), {
+  const visible = evaluateVisibleReadiness(product, db.getAgentSnapshot(localProductId), {
     ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
     ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure ?? Boolean(db.getAgentSnapshot(localProductId)?.run && !db.getAgentSnapshot(localProductId)?.uncertainWrite),
   });
+  const issue = inspectManualCoverAsset(product.product).issue;
+  if (!issue) return visible;
+  const issues = [...visible.issues, { label: "封面图片规格", detail: issue }];
+  return { ready: false, completion: Math.min(visible.completion, 92), issues };
 }
 
 

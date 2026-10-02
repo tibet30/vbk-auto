@@ -7,6 +7,7 @@
 
 import {
   normaliseTrafficLineVariant,
+  type TrafficLineChildProgress,
   trafficLineLabel,
   type TrafficLineConfig,
   type TrafficLineVariant,
@@ -19,6 +20,20 @@ import type {
   TrafficLineProvisionResult,
   TrafficLineTarget,
 } from "./types.js";
+
+/** A historical skip may be replayed only when the current enabled plan confirms the variant is usable. */
+export function trafficLineSkippedChildCanBeRevalidated(
+  progress: TrafficLineChildProgress | undefined,
+  config: TrafficLineConfig,
+): boolean {
+  return Boolean(
+    progress?.skipped === true
+    && progress.verified !== true
+    && config.enabled
+    && config.variants.includes(progress.variant)
+    && config.availability?.availableVariants.includes(progress.variant),
+  );
+}
 
 export function buildTrafficLineTargets(config: TrafficLineConfig | undefined): TrafficLineTarget[] {
   if (!config?.enabled) return [];

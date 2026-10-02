@@ -15,6 +15,18 @@ test("开发启动端口被占用时选择后续可用端口", async (t) => {
   assert.ok(selected > address.port, "不能继续使用已被占用的端口");
 });
 
+test("通配地址占用时也不能复用回环端口", async (t) => {
+  const occupied = net.createServer();
+  await new Promise<void>((resolve) => occupied.listen(0, "0.0.0.0", resolve));
+  t.after(() => occupied.close());
+
+  const address = occupied.address();
+  assert.ok(address && typeof address === "object");
+  const selected = await findAvailablePort(address.port, "127.0.0.1", 20);
+
+  assert.ok(selected > address.port, "通配地址的开发服务不能与本机渲染器共用端口");
+});
+
 test("开发启动端口空闲时保留首选端口", async () => {
   const reservation = net.createServer();
   await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));

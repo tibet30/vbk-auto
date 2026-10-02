@@ -16,6 +16,7 @@ import type {
   ProductCover,
 } from "../../../../shared/contracts-types.js";
 import { isProductForm, type ProductForm } from "../../../../shared/product-form.js";
+import { readActiveCoverFallback, type CoverFallback } from "../../../../shared/cover-fallback.js";
 
 /** 把 product 树上的基础信息字段安全读出来；缺失项显式返回 null。 */
 export interface BasicInfoSnapshot {
@@ -51,6 +52,7 @@ export interface BasicInfoSnapshot {
    *    uploadedAt 也必须齐全，缺失则整体返回 null（视为未设置）。
    */
   cover: ProductCover | null;
+  coverFallback: CoverFallback | null;
 }
 
 function asObject(value: unknown): Record<string, unknown> {
@@ -266,6 +268,7 @@ export function readBasicInfoFromProduct(product: unknown): BasicInfoSnapshot {
       requestedTotalCost,
     },
     cover: asProductCover(presentation.cover),
+    coverFallback: readActiveCoverFallback(root),
   };
 }
 

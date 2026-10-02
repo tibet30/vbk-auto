@@ -35,6 +35,30 @@ test("格式化平台保存项，并把枚举码还原成展示值", () => {
   }]);
 });
 
+test("母产品条款投影保留私家团的 selected F 项并排除模板 T 项", () => {
+  const privateTourTypes = [{
+    clauseTypeId: 21,
+    clauseItemDtos: [{
+      clauseItemId: 32269,
+      itemType: "T",
+      selected: "T",
+      clauseComponentDtos: [{ componentCode: "template", value: "模板说明" }],
+    }, {
+      clauseItemId: 1095,
+      itemType: "F",
+      selected: "T",
+      clauseComponentDtos: [{ componentCode: "privateTourRule", value: "成人陪同" }],
+    }],
+    containers: [],
+  }];
+
+  assert.deepEqual(formatSelectedClauseItems(privateTourTypes), [{
+    clauseItemId: 1095,
+    secondClassTypeId: 21,
+    elementDtos: [{ componentCode: "privateTourRule", value: "成人陪同" }],
+  }]);
+});
+
 test("容器单选项按 selectedClauseItemId 保存，门票成人与儿童可同时进入条款包", () => {
   const ticketTypes = [{
     clauseTypeId: 8,
@@ -142,6 +166,24 @@ test("成人首道门票文本仅汇总明确收费的行程景点，并按景�
   }]), "晋祠+太原古县城");
 });
 
+test("明确远观且不上桥的收费 POI 不写入门票包含条款", () => {
+  assert.equal(buildAdultTicketInclusionText([{
+    spots: [
+      { name: "广济桥", ticketType: { key: 1 }, description: "远观广济桥（不上桥）。" },
+      { name: "开元寺", ticketType: { key: 1 }, description: "入内参观。" },
+    ],
+  }]), "开元寺");
+});
+
+test("否定外观限制或明确入内时，收费 POI 仍保留门票条款", () => {
+  assert.equal(buildAdultTicketInclusionText([{
+    spots: [
+      { name: "广济桥", ticketType: { key: 1 }, description: "并非不上桥，可上桥参观。" },
+      { name: "开元寺", ticketType: { key: 1 }, description: "不是远观，入内参观。" },
+    ],
+  }]), "广济桥+开元寺");
+});
+
 test("成人和儿童门票条款分别写入对应备注字段，不改动其它组件", () => {
   const items = [{
     clauseItemId: 13,
@@ -197,4 +239,23 @@ test("默认条款集合使用已保存的平台 ID，覆盖门票成人/儿童�
   assert.match(source, /requestBaseData:\s*\{\s*locale:\s*["']zh-CN["']/);
   assert.match(source, /保存后回读缺少条款/);
   assert.doesNotMatch(source, /FORCE_CHECK|resolveClauseIdsByText|ensureClausesByText/);
+});
+
+test("条款页面执行函数不依赖构建器注入的 __name helper", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../../src/main/automation/ctrip/clauses-api.ts", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf("return page.evaluate(");
+  const end = source.indexOf("}, {", start);
+  const evaluateBody = source.slice(start, end);
+  assert.match(evaluateBody, /page\.evaluate\(async function \(/);
+  assert.match(evaluateBody, /const helpers = \{ request: null, format: null, ensure: null, setValue: null \}/);
+  assert.match(evaluateBody, /helpers\.request = async \(/);
+  assert.match(evaluateBody, /helpers\.format = \(/);
+  assert.match(evaluateBody, /helpers\.ensure = \(/);
+  assert.match(evaluateBody, /helpers\.setValue = \(/);
+  assert.doesNotMatch(evaluateBody, /function\s+(request|format|ensure|setValue)\(/);
+  assert.doesNotMatch(evaluateBody, /const\s+(request|format|ensure|setValue)\s*=\s*(async\s*)?\(/);
 });

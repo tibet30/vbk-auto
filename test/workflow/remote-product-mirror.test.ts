@@ -40,6 +40,30 @@ test("legacy local mutations are revision-patched to Tibet before broadcast", as
   assert.equal(broadcasts[0].revision, 2);
 });
 
+test("renderer broadcast failure after a remote save does not retry the remote write", async () => {
+  let updates = 0;
+  const service: TibetProductService = {
+    async list() { return []; },
+    async upsert(product) { return product; },
+    async get() { return structuredClone(base); },
+    async update(product, expectedRevision) {
+      updates += 1;
+      return { ...product, revision: expectedRevision + 1 };
+    },
+    async delete() {},
+  };
+  const mirror = createRemoteProductMirror({
+    remote: service,
+    broadcast: () => { throw new Error("Cannot clone a function"); },
+  });
+  mirror.emit({ ...base, revision: undefined });
+  await waitFor(() => updates === 1);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(updates, 1, "failed renderer delivery must not replay the saved PATCH");
+  mirror.emit({ ...base, revision: undefined, updatedAt: "2026-08-20T10:01:00.000Z" });
+  await waitFor(() => updates === 2);
+});
+
 test("409 冲突时以最新 revision 重放本地变更，并保留最新 planning", async () => {
   let remote = structuredClone(base);
   const calls: number[] = [];

@@ -15,11 +15,13 @@
 import { parseProduct } from "../schema/schema.js";
 import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
+import { explicitlyDeclinesTrafficLine } from "../../../shared/traffic-line-intent.js";
 
 /**
  * 计算某个 product 当前应当跑的阶段序列。
  */
 export function draftPhasesFor(product: {
+  basicInfo?: { userIdea?: unknown };
   itinerary: Array<{hotel?: unknown; hotelCandidates?: unknown[]}>;
   operations?: {hotelSource?: string; trafficLine?: {enabled?: boolean; variants?: unknown[]}};
   commercial?: {pricing?: unknown; inventory?: unknown};
@@ -40,7 +42,10 @@ export function draftPhasesFor(product: {
   // 是因为子产品条款 profile 必须从当前账号已验证的母产品协议取得；否则
   // 只能安全阻断，不能先留下无法激活的子产品壳。
   const trafficLine = product.operations?.trafficLine;
-  if (trafficLine?.enabled === true && Array.isArray(trafficLine.variants) && trafficLine.variants.length > 0) {
+  if (!explicitlyDeclinesTrafficLine(product as Record<string, unknown>)
+    && trafficLine?.enabled === true
+    && Array.isArray(trafficLine.variants)
+    && trafficLine.variants.length > 0) {
     phases.push("trafficLine");
   }
   phases.push("preflight");

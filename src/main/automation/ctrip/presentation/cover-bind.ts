@@ -20,8 +20,27 @@ const ATTRACTION_IMAGE_TYPE_ID = 4;
 
 interface ProductImageRecord {
   imageId?: unknown;
+  fileName?: unknown;
   imageInfo?: ProductImageRecord;
   accompanyTourInfo?: { imageTypeId?: unknown };
+}
+
+/** Recover a manually uploaded cover when the upload succeeded but its local checkpoint was lost. */
+export async function readBoundCoverByFileNameViaApi(
+  page: VbkSessionRequestBrowser,
+  productId: number,
+  fileName: string,
+): Promise<number | null> {
+  assertPositiveInteger(productId, "VBK 产品 ID");
+  const result = await searchProductImages(page, productId);
+  assertBusinessSuccess(result, "回读手动产品封面", false);
+  const matches = productImageInfos(result.payload)
+    .filter((image) => Number(image.accompanyTourInfo?.imageTypeId) === COVER_IMAGE_TYPE_ID
+      && image.fileName === fileName)
+    .map((image) => Number(image.imageId))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  if (matches.length > 1) throw new Error(`远端存在多个同名封面 ${fileName}，无法安全复用。`);
+  return matches[0] ?? null;
 }
 
 interface CoverBindOptions {
@@ -237,6 +256,20 @@ async function searchProductImages(
     },
     errorLabel: "确认产品封面",
   });
+}
+
+/** Read the authoritative cover IDs without treating an unclassified image as a cover. */
+export async function readBoundCoverImageIdsViaApi(
+  page: VbkSessionRequestBrowser,
+  productId: number,
+): Promise<number[]> {
+  assertPositiveInteger(productId, "VBK 产品 ID");
+  const result = await searchProductImages(page, productId);
+  assertBusinessSuccess(result, "回读产品封面", false);
+  return productImageInfos(result.payload)
+    .filter((image) => Number(image.accompanyTourInfo?.imageTypeId) === COVER_IMAGE_TYPE_ID)
+    .map((image) => Number(image.imageId))
+    .filter((id) => Number.isInteger(id) && id > 0);
 }
 
 async function request(

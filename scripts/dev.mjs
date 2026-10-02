@@ -1,4 +1,6 @@
 import net from "node:net";
+import { mkdir, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -6,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const DEFAULT_RENDERER_PORT = 5173;
 const MAX_PORT_ATTEMPTS = 100;
 const LOOPBACK_HOST = "127.0.0.1";
+const WILDCARD_HOST = "0.0.0.0";
 
 function canListen(port, host) {
   return new Promise((resolve, reject) => {
@@ -32,7 +35,10 @@ export async function findAvailablePort(
 
   const lastPort = Math.min(65535, preferredPort + maxAttempts - 1);
   for (let port = preferredPort; port <= lastPort; port += 1) {
-    if (await canListen(port, host)) return port;
+    // macOS can admit a loopback listener alongside an existing wildcard
+    // listener on the same port. Electron later reaches the wildcard service
+    // ambiguously, so the renderer port must be free on both addresses.
+    if (await canListen(port, host) && await canListen(port, WILDCARD_HOST)) return port;
   }
   throw new Error(`端口 ${preferredPort}-${lastPort} 均不可用`);
 }
@@ -43,6 +49,11 @@ function requestedRendererPort() {
   const port = Number(raw);
   if (!Number.isInteger(port)) throw new Error(`VBK_RENDERER_PORT 必须是整数，当前值：${raw}`);
   return port;
+}
+
+function shellArgument(value) {
+  if (process.platform === "win32") return `"${value.replaceAll("\"", "\"\"")}"`;
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 async function main() {
@@ -56,22 +67,29 @@ async function main() {
     process.platform === "win32" ? "concurrently.cmd" : "concurrently",
   );
   const env = { ...process.env, VBK_RENDERER_URL: rendererUrl };
+  const readyDirectory = await mkdir(path.join(os.tmpdir(), "vbk-auto-dev"), { recursive: true })
+    .then(() => path.join(os.tmpdir(), "vbk-auto-dev"));
+  const mainReadyFile = path.join(readyDirectory, `main-ready-${process.pid}-${Date.now()}.json`);
 
   if (port === preferredPort) console.log(`[dev] 使用开发服务端口 ${port}`);
   else console.log(`[dev] 端口 ${preferredPort} 已被占用，改用 ${port}`);
 
+  console.log("[dev] 等待本次主进程 watch 编译和模块链接校验");
+
   const child = spawn(concurrently, [
     "-k",
     `npm run dev:renderer -- --port ${port} --strictPort`,
-    "npm run dev:main",
-    `wait-on tcp:${LOOPBACK_HOST}:${port} file:dist-electron/main/main.js && electron .`,
+    `node scripts/dev-main-watch.mjs ${shellArgument(mainReadyFile)}`,
+    `wait-on tcp:${LOOPBACK_HOST}:${port} file:${shellArgument(mainReadyFile)} && electron .`,
   ], { stdio: "inherit", env });
 
   child.once("error", (error) => {
+    void rm(mainReadyFile, { force: true });
     console.error("[dev] 启动失败", error);
     process.exitCode = 1;
   });
   child.once("exit", (code, signal) => {
+    void rm(mainReadyFile, { force: true });
     if (signal) process.kill(process.pid, signal);
     else process.exitCode = code ?? 1;
   });

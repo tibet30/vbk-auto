@@ -29,12 +29,15 @@ import type { Page } from "playwright";
 import { searchCtripLibraryImages } from "../infrastructure/ctrip-library-search.js";
 import type { CtripLibraryCoverAlternate, CtripLibraryImageCandidate, CtripLibrarySearchResult, ItinerarySpot } from "../../shared/contracts-types.js";
 import { logInfo } from "../../shared/log-timestamp.js";
+import { applyCoverFallback } from "./cover-fallback.js";
+import { itineraryAttractions, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import {
   buildCtripLibraryCoverAlternateFromCandidate,
   buildCtripLibraryCoverFromCandidate,
   readPreparedCoverImages,
 } from "./cover-auto-fill-images.js";
 
+export { applyCoverFallback } from "./cover-fallback.js";
 export {
   buildCtripLibraryCoverAlternateFromCandidate,
   buildCtripLibraryCoverFromCandidate,
@@ -70,7 +73,8 @@ function matchesItineraryCoverPoi(
     const record = safeObject(day);
     return Array.isArray(record?.spots) ? record.spots : [];
   }).map(safeObject).filter((spot): spot is Record<string, unknown> => Boolean(spot));
-  const knownPoiIds = new Set(spots.map((spot) => spot.poiId).filter(positiveInteger));
+  const attractionSpots = itineraryAttractions(spots);
+  const knownPoiIds = new Set(attractionSpots.map((spot) => spot.poiId).filter(positiveInteger));
   if (positiveInteger(candidate.poiId) && knownPoiIds.size) return knownPoiIds.has(candidate.poiId);
   const candidateName = textValue(candidate.poiName);
   // Some gallery rows omit their POI name after image resolution. Allow that
@@ -95,6 +99,20 @@ export function isCoverCandidateComplete(candidate: Partial<CtripLibraryImageCan
   // 只有显式 true 才算「真实拿到」；false / undefined 都不写。
   if (candidate.imageResolved !== true) return false;
   return true;
+}
+
+/** A resolved gallery row also needs platform-sized pixels and a usable quality score. */
+export function isCoverCandidateSuitable(
+  candidate: Partial<CtripLibraryImageCandidate> | null | undefined,
+  minQuality = 3,
+): candidate is CtripLibraryImageCandidate & { imageId: number; imageUrl: string } {
+  if (!isCoverCandidateComplete(candidate)) return false;
+  const dimensions = candidate.resolution?.match(/\d+/g)?.map(Number) ?? [];
+  const [width = 0, height = 0] = dimensions;
+  if (Math.max(width, height) < 1280 || Math.min(width, height) < 800) return false;
+  const qualityScores = candidate.quality?.match(/\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  const quality = qualityScores.length ? Math.min(...qualityScores) : candidate.score;
+  return typeof quality === "number" && Number.isFinite(quality) && quality >= minQuality;
 }
 
 /**
@@ -182,6 +200,7 @@ export function collectCoverSearchKeywords(product: Record<string, unknown>): st
       }
       const spotRecord = safeObject(spot);
       if (!spotRecord) continue;
+      if (!requiresItineraryPoi(spotRecord)) continue;
       // 同一 spot 内 name > poiName 优先，去重由 push 内部保证。
       push(spotRecord.name) || push(spotRecord.poiName);
     }
@@ -191,7 +210,7 @@ export function collectCoverSearchKeywords(product: Record<string, unknown>): st
 }
 
 export interface AutoCoverFillOutcome {
-  /** 是否真的把 cover 写回了 product；false 时 nextProduct === product。 */
+  /** Whether cover or its internal fallback changed the product; false means nextProduct === product. */
   written: boolean;
   /** 没写时的简短原因（不会含任何敏感字段），用于 console.info / 日志。 */
   reason: string;
@@ -249,6 +268,8 @@ export async function applyAutoCoverFill(args: {
 
   const preparedImages = readPreparedCoverImages(existingCover);
   const existingCoverComplete = existingCover && isCtripLibraryCoverComplete(existingCover);
+  const minQuality = typeof existingCover?.minQuality === "number" && Number.isFinite(existingCover.minQuality)
+    ? existingCover.minQuality : 3;
 
   const keywords = collectCoverSearchKeywords(product);
   if (!keywords || keywords.length === 0) {
@@ -274,6 +295,7 @@ export async function applyAutoCoverFill(args: {
     candidates: CtripLibraryImageCandidate[];
   }
   const pools: KeywordPool[] = [];
+  let searchFailures = 0;
   for (const keyword of keywords) {
     let result: CtripLibrarySearchResult;
     try {
@@ -283,6 +305,7 @@ export async function applyAutoCoverFill(args: {
         ? await args.injectSearch(args.page, keyword)
         : await searchCtripLibraryImages(args.page, keyword);
     } catch (error) {
+      searchFailures += 1;
       // 单个 keyword 的搜索失败不能让整次自动补齐停掉：继续下一个 keyword。
       logInfo(
         "[cover-auto-fill] keyword 搜索失败，继续尝试下一个",
@@ -292,7 +315,7 @@ export async function applyAutoCoverFill(args: {
     }
 
     const candidates = result.candidates.filter((item) =>
-      isCoverCandidateComplete(item)
+      isCoverCandidateSuitable(item, minQuality)
       && matchesItineraryCoverPoi(item, keyword, product)
       && !seenImageIds.has(item.imageId),
     );
@@ -333,11 +356,15 @@ export async function applyAutoCoverFill(args: {
 
   const primary = pickedImages[0];
   if (!primary) {
+    const reason = searchFailures > 0 ? "search_unavailable" : "no_qualified_candidate";
+    const fallback = applyCoverFallback(product, reason, now);
     return {
-      nextProduct: product,
+      nextProduct: fallback.nextProduct,
       outcome: {
-        written: false,
-        reason: `所有 ${keywords.length} 个关键词（${keywords.join("、")}）都失败或未拿到完整候选，跳过自动补齐`,
+        written: fallback.written,
+        reason: reason === "search_unavailable"
+          ? `${keywords.length} 个景点（${keywords.join("、")}）中有 ${searchFailures} 个搜索失败，已设置待重试占位图；请重试或人工上传真实图片`
+          : `已检索 ${keywords.length} 个景点（${keywords.join("、")}）且无合格图片，已设置待替换占位图`,
       },
     };
   }
@@ -388,12 +415,11 @@ export async function applyAutoCoverFill(args: {
   });
 
   // 不动 product 其它子树，只覆盖 presentation.cover；如有剩余图归属，附带更新 itinerary。
+  const nextPresentation: Record<string, unknown> = { ...presentation, cover: nextCover };
+  delete nextPresentation.coverFallback;
   const nextProduct: Record<string, unknown> = {
     ...product,
-    presentation: {
-      ...presentation,
-      cover: nextCover,
-    },
+    presentation: nextPresentation,
     ...(nextItinerary ? { itinerary: nextItinerary } : {}),
   };
 

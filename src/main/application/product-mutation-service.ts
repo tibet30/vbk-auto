@@ -10,6 +10,7 @@ import type { VbkDatabase } from "../infrastructure/database/database.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
+import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 type ProductMutationStore = {
   getProduct: VbkDatabase["getProduct"];
@@ -93,7 +94,7 @@ type JsonRecord = Record<string, unknown>;
 /**
  * `replace` 接受的是完整产品快照，而封面/资源查询在网络往返期间可能已经过时。
  * 对同一天、同一原始景点，缺失的 incoming POI 不能抹掉已经由 VBK 核验过的绑定。
- * 新写入的完整绑定仍可覆盖旧绑定；不同景点也不会互相借用 POI。
+ * 新写入的完整绑定仍可覆盖旧绑定；不同天、不同景点或活动类型变更都不会借用 POI。
  */
 function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord): JsonRecord {
   if (!Array.isArray(current.itinerary) || !Array.isArray(incoming.itinerary)) return incoming;
@@ -118,7 +119,10 @@ function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord
     for (const spot of incomingDay.spots) {
       if (!isRecord(spot) || hasVerifiedPoi(spot)) continue;
       const verified = verifiedByName.get(text(spot.name));
-      if (!verified) continue;
+      if (!verified
+        || !requiresItineraryPoi(spot)
+        || !requiresItineraryPoi(verified)
+        || activityKind(spot) !== activityKind(verified)) continue;
       spot.poiName = verified.poiName;
       spot.poiId = verified.poiId;
       for (const field of ["province", "city", "district"] as const) {
@@ -146,4 +150,8 @@ function hasVerifiedPoi(spot: JsonRecord): boolean {
     && typeof spot.poiId === "number"
     && Number.isInteger(spot.poiId)
     && spot.poiId > 0;
+}
+
+function activityKind(spot: JsonRecord): string {
+  return text(spot.kind) || "attraction";
 }

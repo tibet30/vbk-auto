@@ -10,7 +10,12 @@ test("明确的无住宿标记不算酒店晚", () => {
   assert.equal(hasItineraryHotelStay("当日无住宿"), false);
   assert.equal(hasItineraryHotelStay("无需住宿"), false);
   assert.equal(hasItineraryHotelStay("当日返程，不安排住宿"), false);
+  assert.equal(hasItineraryHotelStay("当日行程结束，不安排过夜住宿。"), false);
+  assert.equal(hasItineraryHotelStay("当天送站，无需过夜酒店"), false);
   assert.equal(hasItineraryHotelStay("返程，无需酒店"), false);
+  assert.equal(hasItineraryHotelStay("不安排"), false);
+  assert.equal(hasItineraryHotelStay("不安排住宿"), false);
+  assert.equal(hasItineraryHotelStay("当日不安排酒店（送站）"), false);
   assert.equal(hasItineraryHotelStay("本日无住宿（行程结束送站）"), false);
   assert.equal(hasItineraryHotelStay("本日无住宿(行程结束送站)"), false);
   assert.equal(hasItineraryHotelStay(""), false);
@@ -19,6 +24,7 @@ test("明确的无住宿标记不算酒店晚", () => {
 test("实际酒店名称算住宿晚", () => {
   assert.equal(hasItineraryHotelStay("维也纳酒店(江孜宗山古堡店)"), true);
   assert.equal(hasItineraryHotelStay("无锡君来洲际酒店"), true);
+  assert.equal(hasItineraryHotelStay("安排入住潮州古城酒店"), true);
 });
 
 test("行程描述住宿始终使用携程平台酒店，套餐是否含酒店为否", () => {

@@ -151,8 +151,9 @@ const CHILD_TICKET_REMARKS_COMPONENT = "landticket2";
 export async function saveStructuredProductClauses(page, productId, options = {}) {
   const isFreeTravel = options?.productForm === "freeTravel";
   const adultTicketInclusionText = String(options?.adultTicketInclusionText ?? "").trim();
-  return page.evaluate(async ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, adultTicketInclusionText, adultTicketRemarksComponent, childTicketRemarksComponent, isFreeTravel }) => {
-    const request = async (url, body, contentType = "application/json") => {
+  return page.evaluate(async function ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, adultTicketInclusionText, adultTicketRemarksComponent, childTicketRemarksComponent, isFreeTravel }) {
+    const helpers = { request: null, format: null, ensure: null, setValue: null };
+    helpers.request = async (url, body, contentType = "application/json") => {
       const response = await fetch(url, {
         method: "POST",
         credentials: "include",
@@ -177,7 +178,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       return data;
     };
 
-    const format = (clauseTypes) => {
+    helpers.format = (clauseTypes) => {
       const result = [];
       for (const type of clauseTypes ?? []) {
         const selected = [
@@ -216,7 +217,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       return result;
     };
 
-    const ensure = (items, clauseTypes, id) => {
+    helpers.ensure = (items, clauseTypes, id) => {
       if (items.some((item) => item.clauseItemId === id)) return items;
       for (const type of clauseTypes ?? []) {
         const candidates = [
@@ -225,13 +226,13 @@ export async function saveStructuredProductClauses(page, productId, options = {}
         ];
         const target = candidates.find((item) => item.clauseItemId === id);
         if (!target) continue;
-        const copy = format([{ ...type, clauseItemDtos: [{ ...target, selected: "T" }], containers: [] }]);
+        const copy = helpers.format([{ ...type, clauseItemDtos: [{ ...target, selected: "T" }], containers: [] }]);
         return [...items, ...copy];
       }
       throw new Error(`VBK 条款包缺少必选条款 ${id}`);
     };
 
-    const setValue = (items, itemId, componentCode, value) => {
+    helpers.setValue = (items, itemId, componentCode, value) => {
       let found = false;
       const next = items.map((item) => {
         if (item.clauseItemId !== itemId) return item;
@@ -249,7 +250,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
     const savedTabs = [];
     // VBK 会在保存其它页签时做跨页校验；先落住宿费用页，避免“请勾选住宿条款”。
     for (const tabEnum of [2, 1, 3, 4]) {
-      const productClause = await request(
+      const productClause = await helpers.request(
         "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
         { contentType: "json", head, productId: String(productId), tabEnum },
       );
@@ -264,38 +265,38 @@ export async function saveStructuredProductClauses(page, productId, options = {}
         additionalInfoDto: { ...central.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
       };
       delete getBody.filterConditionDto;
-      const clausePackage = await request(
+      const clausePackage = await helpers.request(
         "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
         getBody,
         "text/plain;charset=UTF-8",
       );
-      let items = format(clausePackage.clauseTypeDtos);
+      let items = helpers.format(clausePackage.clauseTypeDtos);
       if (tabEnum === 1 && !isFreeTravel) {
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.mandarinGuide);
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.localExclusiveVehicle);
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.mandarinGuide);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.localExclusiveVehicle);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
       }
       if (tabEnum === 1 && adultTicketInclusionText) {
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.adultTicketIncluded);
-        items = setValue(items, requiredIds.adultTicketIncluded, adultTicketRemarksComponent, adultTicketInclusionText);
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
-        items = setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.adultTicketIncluded);
+        items = helpers.setValue(items, requiredIds.adultTicketIncluded, adultTicketRemarksComponent, adultTicketInclusionText);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
+        items = helpers.setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
       }
       if (tabEnum === 2 && !isFreeTravel) {
-        items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
-        items = setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
+        items = helpers.setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
       }
-      if (tabEnum === 3 && !isFreeTravel) items = ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
+      if (tabEnum === 3 && !isFreeTravel) items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
       if (!isFreeTravel) {
         for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
-          items = ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
+          items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
         }
       }
       let savePackage;
       try {
-        savePackage = await request(
+        savePackage = await helpers.request(
           "https://online.ctrip.com/restapi/soa2/20046/saveClausePackage",
           {
             ...central,
@@ -311,7 +312,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       }
       const packageId = savePackage.clausePackageId;
       if (!packageId) throw new Error(`条款页签 ${tabEnum} 保存成功但未返回条款包 ID`);
-      await request(
+      await helpers.request(
         "https://online.ctrip.com/restapi/soa2/15638/saveProductClauses.json",
         {
           contentType: "json",
@@ -324,7 +325,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
           unBookingRuleDtos: [],
         },
       );
-      const persistedClauseData = await request(
+      const persistedClauseData = await helpers.request(
         "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
         { contentType: "json", head, productId: String(productId), tabEnum },
       );
@@ -336,12 +337,12 @@ export async function saveStructuredProductClauses(page, productId, options = {}
         additionalInfoDto: { ...persistedCentral.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
       };
       delete persistedBody.filterConditionDto;
-      const persistedPackage = await request(
+      const persistedPackage = await helpers.request(
         "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
         persistedBody,
         "text/plain;charset=UTF-8",
       );
-      const persistedIds = new Set(format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
+      const persistedIds = new Set(helpers.format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
       const missingIds = isFreeTravel
         ? []
         : (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
@@ -349,7 +350,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
         throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
       }
       if (tabEnum === 1 && adultTicketInclusionText) {
-        const persistedItems = format(persistedPackage.clauseTypeDtos);
+        const persistedItems = helpers.format(persistedPackage.clauseTypeDtos);
         const persistedAdultTicket = persistedItems.find(
           (item) => item.clauseItemId === requiredIds.adultTicketIncluded,
         );

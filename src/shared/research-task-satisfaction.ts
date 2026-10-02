@@ -1,6 +1,7 @@
 import { HOTEL_TIER_VALUES } from "./hotel-tiers.js";
 import { poiResearchTaskNames } from "./poi-research-tasks.js";
 import { productNeedsVehicleResource } from "./product-form.js";
+import { requiresItineraryPoi } from "./itinerary-activity-kind.js";
 import {
   hasBorderPermitItineraryTrigger,
   hasResolvedBorderPermitVisibleFields,
@@ -26,9 +27,12 @@ function positiveInteger(value: unknown): boolean {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-function hasSatisfiedPoiTask(product: ProductLike, taskName: string): boolean {
+function poiNameSatisfaction(product: ProductLike, taskName: string): "verified" | "non_poi" | null {
   const targetName = taskName.trim();
-  if (!targetName || !Array.isArray(product.itinerary)) return false;
+  if (!targetName || !Array.isArray(product.itinerary)) return null;
+  let hasNonPoi = false;
+  let hasVerified = false;
+  let hasMissingAttraction = false;
 
   for (const day of product.itinerary) {
     const spots = objectValue(day)?.spots;
@@ -40,11 +44,15 @@ function hasSatisfiedPoiTask(product: ProductLike, taskName: string): boolean {
       const poiName = textValue(spot.poiName);
       const isMatchingSpot = spotName === targetName || poiName === targetName;
       if (!isMatchingSpot) continue;
-      if (poiName && positiveInteger(spot.poiId)) return true;
+      if (!requiresItineraryPoi(spot)) { hasNonPoi = true; continue; }
+      if (poiName && positiveInteger(spot.poiId)) { hasVerified = true; continue; }
+      hasMissingAttraction = true;
     }
   }
 
-  return false;
+  if (hasMissingAttraction) return null;
+  if (hasVerified) return "verified";
+  return hasNonPoi ? "non_poi" : null;
 }
 
 function hasPoiTaskSpot(product: ProductLike, taskName: string): boolean {
@@ -56,6 +64,21 @@ function hasPoiTaskSpot(product: ProductLike, taskName: string): boolean {
       return spot && (textValue(spot.name) === taskName || textValue(spot.poiName) === taskName);
     });
   });
+}
+
+/** A manual free/other classification supersedes the POI research question.
+ * It does not claim a POI match: the current activity simply has no POI
+ * requirement.  Switching it back to attraction makes the same task pending
+ * again unless a verified POI is present. */
+export type PoiResearchSatisfaction = "verified" | "non_poi" | null;
+
+/** All names in an "A 或 B" task must be independently resolved. */
+export function poiResearchTaskSatisfaction(task: ResearchTaskText, product: ProductLike): PoiResearchSatisfaction {
+  const names = poiResearchTaskNames(task.label || "", task.type || "vbk");
+  if (!names.length) return null;
+  const results = names.map((name) => poiNameSatisfaction(product, name));
+  if (results.some((result) => result === null)) return null;
+  return results.some((result) => result === "non_poi") ? "non_poi" : "verified";
 }
 
 function isObsoletePoiFailureDetail(detail: string | null | undefined): boolean {
@@ -82,7 +105,7 @@ export function isResearchTaskSatisfiedByProduct(
   if (poiTaskNames.length > 0) {
     // “A 或 B”不是单个 POI。仅当行程里每个备选项均有有效 poiName / poiId
     // 时才收敛，避免只完成一项便错误放过另一项。
-    if (poiTaskNames.every((name) => hasSatisfiedPoiTask(product, name))) return true;
+    if (poiResearchTaskSatisfaction(task, product) !== null) return true;
     // A failed POI task may become obsolete after the operator replaces that
     // attraction in the current itinerary. Only explicit failure/replacement
     // states are auto-resolved; ordinary missing POI tasks remain actionable.

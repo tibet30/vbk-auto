@@ -147,6 +147,7 @@ export class AgentToolRunner {
         ...(output.uncertainWrite ? { uncertainWrite: true } : {}),
       }, token.runId);
       if (output.uncertainWrite) this.snapshots.markUncertain(snapshot, call.id, output.content);
+      if (output.terminal === true && !output.uncertainWrite) this.snapshots.finish(snapshot);
       if (isCacheableReadQuery(call.name) && token.runId && !output.content.startsWith("工具失败：")) {
         this.readQueryCache.set(readQueryCacheKey({
           localProductId: id,
@@ -219,9 +220,20 @@ export class AgentToolRunner {
       return "continue";
     }
     if (!this.snapshots.current(snapshot, token)) return "stale";
-    const normalised = questions.map(normaliseQuestion);
-    const deferredApprovalQuestions = normalised.filter(asksForPrematureApproval);
-    const { visible, defaultAnswers } = splitDefaultQuestions(normalised.filter((question) => !asksForPrematureApproval(question)));
+    const normalised = questions.map((question) => {
+      const item = normaliseQuestion(question);
+      if (!/封面|cover/i.test(`${item.id} ${item.label}`)
+        || !/规格|尺寸|像素|高清|原图|resize|quality/i.test(`${item.id} ${item.label}`)) return item;
+      const options = item.options?.filter((option) =>
+        !/提交后|先提交|跳过.*(?:规格|尺寸)|post_vbk|after_submit/i.test(`${option.id} ${option.label}`));
+      return options?.length ? { ...item, options } : item;
+    });
+    const resolved = this.deps.resolvedPendingQuestions?.(id, normalised) ?? [];
+    const resolvedIds = new Set(resolved.map((item) => item.id));
+    const unresolved = normalised.filter((question) => !resolvedIds.has(question.id));
+    const deferredApprovalQuestions = unresolved.filter(asksForPrematureApproval);
+    const { visible, defaultAnswers } = splitDefaultQuestions(unresolved.filter((question) => !asksForPrematureApproval(question)));
+    for (const item of resolved) defaultAnswers[item.id] = item.answer ?? "已在当前产品中保存";
     for (const question of deferredApprovalQuestions) {
       defaultAnswers[question.id] = question.kind === "multiple" ? [] : "deferred_until_final_approval";
     }
@@ -237,15 +249,22 @@ export class AgentToolRunner {
       return "continue";
     }
     if (!visible.length) {
-      this.snapshots.result(snapshot, call.id, JSON.stringify(defaultAnswers), {
+      const resolvedMessage = resolved.map((item) => item.message).join("；");
+      this.snapshots.result(snapshot, call.id, `${JSON.stringify(defaultAnswers)}${resolvedMessage ? `\n当前产品核对：${resolvedMessage}。` : ""}`, {
         defaultAnswers,
+        ...(resolved.length ? { reconciledQuestions: [...resolvedIds] } : {}),
         ...(deferredApprovalQuestions.length
           ? { deferredApprovalQuestions: deferredApprovalQuestions.map((question) => question.id) }
           : {}),
       }, token.runId);
+      if (resolved.some((item) => item.pause)) {
+        this.snapshots.pause(snapshot, `${resolvedMessage}。已停止重复索要图片 ID；请检查当前封面规格。`);
+        this.snapshots.save(snapshot);
+        return "waiting";
+      }
       this.snapshots.event(snapshot, "status", deferredApprovalQuestions.length
         ? "已采用可推导的安全默认；VBK 写入授权已延后到资料准备完成后的最终确认。"
-        : "已采用可推导的系统默认，继续自动准备。", {
+        : resolvedMessage || "已采用可推导的系统默认，继续自动准备。", {
         defaultAnswers,
         toolCallId: call.id,
       }, token.runId);
@@ -258,6 +277,9 @@ export class AgentToolRunner {
       createdAt: this.now().toISOString(),
       ...(Object.keys(defaultAnswers).length ? { defaultAnswers } : {}),
     };
+    if (resolved.length) this.snapshots.event(snapshot, "status", resolved.map((item) => item.message).join("；"), {
+      reconciledQuestions: [...resolvedIds], toolCallId: call.id,
+    }, token.runId);
     snapshot.pendingInput = request;
     this.snapshots.event(snapshot, "input_request", "需要用户补充信息", { toolCallId: call.id, request }, token.runId);
     this.snapshots.waiting(snapshot, "waiting_input");

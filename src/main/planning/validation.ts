@@ -17,6 +17,7 @@ import {
   vbkRecommendationByteLength,
 } from "./vbk-recommendation-length.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 export interface ValidationResult {
   missing: ModuleOutcome[];
@@ -164,9 +165,13 @@ export function deepValidateModules(args: {
             continue;
           }
           const label = textValue(spot.name) || textValue(spot.poiName) || `#${spotIndex + 1}`;
-          if (!textValue(spot.poiName)) reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点「${label}」缺 poiName 映射`);
-          if (!(typeof spot.poiId === "number" && Number.isInteger(spot.poiId) && spot.poiId > 0)) {
-            reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点「${label}」缺 poiId 映射`);
+          if (requiresItineraryPoi(spot) && !hasCompletePoi(spot)) {
+            if (!textValue(spot.poiName)) {
+              reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点「${label}」缺 poiName 映射`);
+            }
+            if (!Number.isInteger(spot.poiId) || Number(spot.poiId) <= 0) {
+              reasons.push(`第 ${index + 1} 天第 ${spotIndex + 1} 个景点「${label}」缺 poiId 映射`);
+            }
           }
         }
       }

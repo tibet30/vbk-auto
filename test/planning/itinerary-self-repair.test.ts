@@ -60,3 +60,16 @@ test("普通未命中景点和全部未命中的二选一保持不动", () => {
   assert.deepEqual(result.itinerary, itinerary);
   assert.deepEqual(result.selectedAlternatives, []);
 });
+
+test("明确 other/free 即使遗留 relation=or 也保留且不跨景点二选一分组", () => {
+  const result = selfRepairItineraryForVbk([{ day: 1, spots: [
+    { name: "景点甲", poiName: null, poiId: null, relation: "or", timeOfDay: "morning" },
+    { name: "接机", kind: "other", relation: "or", timeOfDay: "morning" },
+    { name: "景点乙", poiName: "景点乙", poiId: 2, relation: "or", timeOfDay: "morning" },
+    { name: "自由活动", kind: "free", relation: "or", timeOfDay: "afternoon" },
+  ] }]);
+  const spots = result.itinerary[0].spots as Array<Record<string, unknown>>;
+  assert.deepEqual(spots.map((spot) => spot.name), ["景点甲", "接机", "景点乙", "自由活动"]);
+  assert.equal(spots[1].relation, "and");
+  assert.equal(spots[3].relation, "and");
+});

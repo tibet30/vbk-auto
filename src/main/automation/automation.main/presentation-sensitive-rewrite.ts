@@ -105,7 +105,10 @@ export async function fillPresentationWithSensitiveRewrite(args: {
   const maxAiRewrites = 2;
   for (let rewriteAttempt = 0; ; rewriteAttempt += 1) {
     try {
-      return await fillAndSavePresentation(args.page, args.product, args.productId);
+      return await fillAndSavePresentation(args.page, args.product, args.productId, () => {
+        writeAutomationProduct(args.ctx, args.localProductId, args.product, "automating");
+        args.ctx.emit(args.localProductId);
+      });
     } catch (error) {
       if (!(error instanceof PresentationSensitiveWordsError)) throw error;
       if (!args.ctx.presentationCopyRewriter || rewriteAttempt >= maxAiRewrites) throw error;

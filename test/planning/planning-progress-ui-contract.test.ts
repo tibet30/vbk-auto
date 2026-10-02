@@ -20,11 +20,12 @@ const derived = read("src/renderer/app/state/derived.ts");
 test("planning:updated 作为受控 IPC event 完整穿过 contracts、preload 和 main", () => {
   assert.match(contracts, /onPlanningStateUpdated\(listener:\s*\(localProductId:\s*string,\s*state:\s*PlanningGenerationState\)\s*=>\s*void\):\s*\(\)\s*=>\s*void/);
   assert.match(preload, /onPlanningStateUpdated\(listener\)[\s\S]*?ipcRenderer\.on\("planning:updated", handler\)[\s\S]*?removeListener\("planning:updated", handler\)/);
-  assert.match(main, /window\.webContents\.send\("planning:updated", state\.localProductId, state\)/);
+  assert.match(main, /safeRendererSend\(window,\s*"planning:updated",\s*state\.localProductId,\s*state\)/,
+    "main 必须通过安全 renderer 发送封装广播合法的 localProductId 和 state 参数");
   const emitBody = main.match(/const emitPlanningState = \(state: PlanningGenerationState\) => \{([\s\S]*?)\n\};/);
   assert.ok(emitBody, "必须存在 planning:updated 发送函数");
-  assert.match(emitBody![1], /try\s*\{[\s\S]*?webContents\.send[\s\S]*?\}\s*catch/,
-    "窗口在 isDestroyed 检查后销毁时，发送失败不得中断规划任务");
+  assert.match(emitBody![1], /safeRendererSend\(window,\s*"planning:updated",\s*state\.localProductId,\s*state\)/,
+    "planning:updated 必须由安全 renderer 发送封装按事件契约广播");
 });
 
 test("状态只在成功落库后广播，编排器和 IPC 直写路径各一写一播", () => {

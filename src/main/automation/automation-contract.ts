@@ -30,6 +30,8 @@ import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfac
 import { productNeedsVehicleResource, requiresGuide, supportsSmallGroupSettings } from "../../shared/product-form.js";
 import { readCover } from "../operations/cover-info.js";
 import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
+import { manualUploadCoverSchema } from "./schema/schema-definitions.js";
+import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cover-fallback.js";
 import {
   hasValidCoverPoMeta,
   hasValidItinerary,
@@ -150,10 +152,10 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
   },
   {
     path: "presentation.cover",
-    label: "封面图（携程图库）",
+    label: "封面图",
     phase: "presentation",
     source: "ai-planning",
-    detail: "需选定与已核验行程景点一致的携程图库封面，并持久化 imageId 与 imageUrl。",
+    detail: "需保存有效图库封面或人工封面；运营占位图仅可用于未提审草稿。",
     check: hasValidCoverPoMeta,
   },
   // itinerary 阶段
@@ -301,6 +303,16 @@ export function evaluateAutomationContract(product: Record<string, unknown>): Au
       ok = false;
     }
     if (ok) continue;
+    if (field.path === "presentation.cover") {
+      const fallback = readActiveCoverFallback(product);
+      if (fallback) {
+        failures.push({
+          field,
+          reason: "运营占位图只能录入未提审、未上架的草稿，请将发布控制设为 false。",
+        });
+        continue;
+      }
+    }
     if (field.source === "ai-planning" || field.source === "account-fixed") {
       failures.push({ field, reason: field.detail });
     } else {
@@ -316,6 +328,10 @@ export function evaluateAutomationContract(product: Record<string, unknown>): Au
  * VBK 阶段自身仍能在第一行就抛错。
  */
 export function assertPresentationReadyForVbk(product: Record<string, unknown>): void {
+  const fallback = readActiveCoverFallback(product);
+  if (fallback && !placeholderDraftOnly(product)) {
+    throw new Error("运营占位图只能录入未提审、未上架的 VBK 草稿；请先关闭发布控制。");
+  }
   const presentation = asObject(product.presentation);
   if (!presentation) {
     throw new Error("产品图文（presentation）尚未生成，请先在 AI 规划阶段补全推荐语、产品特点、推荐理由。");
@@ -330,13 +346,16 @@ export function assertPresentationReadyForVbk(product: Record<string, unknown>):
     throw new Error("推荐理由必须恰好 3 条：分类在白名单且不重复，文本非空。请补全 presentation.recommendations。");
   }
   const cover = readCover(product);
-  if (!cover) {
+  if (!cover && !fallback) {
     throw new Error("产品图文缺少封面图，请先在 AI 规划阶段从携程图库选定一张图片。");
   }
-  if (cover.source === "manualUpload") {
-    throw new Error("产品图文封面来自手动上传，自动化阶段不支持；请改用携程图库（ctripLibrary）或改为人工处理。");
+  if (cover?.source === "manualUpload" && !fallback) {
+    const rawCover = asObject(presentation.cover);
+    if (!rawCover || !manualUploadCoverSchema.safeParse(rawCover).success) {
+      throw new Error("手动上传封面元数据不完整，请重新保存封面。");
+    }
   }
-  if (cover.source === "ctripLibrary") {
+  if (cover?.source === "ctripLibrary" && !fallback) {
     const rawCover = asObject(presentation.cover);
     if (!isCtripLibraryCoverComplete(rawCover)) {
       throw new Error("产品图文封面尚未选定具体图片，请先持久化携程图库的 imageId 与 imageUrl。");

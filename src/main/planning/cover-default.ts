@@ -1,6 +1,7 @@
 import { AI_WRITABLE_PATHS } from "./schemas.js";
 import type { OrchestratorRuntime } from "./types.js";
 import type { ModuleOutcome } from "../../shared/contracts-planning.js";
+import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -17,6 +18,7 @@ function firstVerifiedPoi(product: Record<string, unknown>): string {
     for (const item of spots) {
       const spot = objectValue(item);
       if (!spot) continue;
+      if (!requiresItineraryPoi(spot)) continue;
       const poiName = textValue(spot.poiName);
       const name = textValue(spot.name);
       const poiId = spot.poiId;

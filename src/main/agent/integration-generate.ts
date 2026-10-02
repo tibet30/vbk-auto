@@ -16,6 +16,7 @@ type JsonObject = Record<string, unknown>;
 type GenerateStage = Extract<PlanningStage, "skeleton" | "basicInfo" | "itinerary" | "presentation" | "commercial">;
 
 export interface AgentBusinessDependencies {
+  readiness?: (localProductId: string) => import("../../shared/contracts.js").ProductReadiness;
   db: VbkDatabase;
   browser: VbkBrowser;
   automation: DraftAutomation;

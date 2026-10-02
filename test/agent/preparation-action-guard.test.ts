@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
 import { denyPreparationTool } from "../../src/main/agent/preparation-action-guard.js";
+import { evaluatePreparationCompletion } from "../../src/main/planning/preparation-completion.js";
 import { createAgentBusinessTools } from "../../src/main/agent/integration.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
 
@@ -29,6 +30,8 @@ test("foundation 未完成时只能补基础，不能生成行程或商业模块
   const product = foundationProduct();
   assert.equal(denyPreparationTool(product, undefined, "read_product"), undefined);
   assert.equal(denyPreparationTool(product, undefined, "ask_user"), undefined);
+  assert.equal(denyPreparationTool(product, undefined, "capture_itinerary_draft_save"), undefined);
+  assert.equal(denyPreparationTool(product, undefined, "read_itinerary_draft_diagnostic"), undefined);
   assert.equal(denyPreparationTool(product, undefined, "generate_product_module", { stage: "basicInfo" }), undefined);
   const itinerary = denyPreparationTool(product, undefined, "generate_product_module", { stage: "itinerary" });
   assert.ok(itinerary);
@@ -40,6 +43,34 @@ test("foundation 未完成时只能补基础，不能生成行程或商业模块
   assert.ok(denyPreparationTool(product, undefined, "patch_product", { patch: { commercial: { packageName: "x" } } }));
 });
 
+test("准备完成后允许本地受控修订，但不允许重新生成模块", () => {
+  const product = itineraryProduct();
+  product.researchTasks = [];
+  for (const day of product.product.itinerary!) {
+    day.spots = day.spots?.map((spot) => ({ ...spot, poiName: spot.name, poiId: day.day })) ?? [];
+  }
+  (product.product.presentation as Record<string, unknown> | undefined) ??= {
+    recommendation: "成都慢游", features: "专车衔接", recommendations: [
+      { category: "优选行程", text: "行程清晰" }, { category: "精选酒店", text: "住宿衔接" }, { category: "缤纷景点", text: "城市漫游" },
+    ], cover: { source: "ctripLibrary", imageId: 1, imageUrl: "https://example.test/cover.jpg", poi: "宽窄巷子", description: "横版封面" },
+  };
+  Object.assign(product.product.operations!, {
+    vehicleResource: { resourceGroupId: 88, resourceGroupName: "成都5座商务车" },
+    trafficLine: { enabled: false, variants: [] },
+    bookingControls: { butler: { contactCardId: 1, displayName: "管家A", providerId: 100 } },
+  });
+  product.product.commercial = {
+    packageName: "成都2天1晚私家团",
+    pricing: { currency: "CNY", adult: 1880, child: 980, minimumTravelers: 1, cost: { adult: 1500, child: 700, singleSupplement: 0, childBed: 0 } },
+    inventory: { startDate: "2026-09-01", endDate: "2027-09-01", dailyQuota: 30 },
+    release: { submitReview: false, publishAfterApproval: false, publicPriceCeiling: 2500, publicAuditRetries: 3 },
+  };
+  assert.equal(evaluatePreparationCompletion(product).ready, true);
+  const allowed = denyPreparationTool(product, undefined, "patch_product", { patch: { itinerary: [{ day: 1, description: "调整后的合规文案" }] } });
+  assert.equal(allowed, undefined);
+  assert.ok(denyPreparationTool(product, undefined, "generate_product_module", { stage: "itinerary" }));
+});
+
 test("itinerary 未完成时不能通过 commercial 或封面绕过", () => {
   const product = itineraryProduct();
   assert.equal(denyPreparationTool(product, undefined, "generate_product_module", { stage: "itinerary" }), undefined);
@@ -49,6 +80,9 @@ test("itinerary 未完成时不能通过 commercial 或封面绕过", () => {
   const payload = JSON.parse(commercial.content);
   assert.equal(payload.currentStage, "itinerary");
   assert.deepEqual(payload.missing, commercial.data.missing);
+  assert.ok(payload.currentStageMissing.some((item: string) => /每日行程|POI|核查|景点/.test(item)));
+  assert.ok(payload.laterStageMissing.some((item: string) => /封面|推荐|酒店候选/.test(item)));
+  assert.doesNotMatch(payload.error.split("后续阶段待补")[0], /封面图/);
   assert.ok(denyPreparationTool(product, undefined, "resolve_cover"));
   assert.ok(denyPreparationTool(product, undefined, "ensure_presentation_recommendations"));
   assert.ok(denyPreparationTool(product, undefined, "patch_product", { patch: { commercial: { packageName: "x" } } }));

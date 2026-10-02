@@ -10,6 +10,7 @@ import { AI_WRITABLE_PATHS } from "./schemas.js";
 import type { ResearchTaskProposal } from "../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
+import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 interface PoiEnrichmentArgs {
   localProductId: string;
@@ -28,7 +29,7 @@ export const POI_ENRICHMENT_QUERY_TIMEOUT_MS = 16_000;
 export function hasIncompleteItineraryPois(product: Record<string, unknown>): boolean {
   if (!Array.isArray(product.itinerary)) return false;
   return product.itinerary.some((day) => Array.isArray((day as { spots?: unknown }).spots)
-    && (day as { spots: unknown[] }).spots.some((spot) => !isPoiComplete(spot)));
+    && (day as { spots: unknown[] }).spots.some((spot) => requiresItineraryPoi(spot as Record<string, unknown>) && !hasCompletePoi(spot as Record<string, unknown>)));
 }
 
 export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<ResearchTaskProposal[]> {
@@ -48,7 +49,8 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
       for (const spot of Array.isArray(day?.spots) ? day.spots : []) {
         const keyword = typeof spot === "string" ? spot : spot?.name ?? spot?.poiName;
         if (!keyword) continue;
-        if (isPoiComplete(spot)) {
+        if (!requiresItineraryPoi(spot as Record<string, unknown>)) continue;
+        if (hasCompletePoi(spot as Record<string, unknown>)) {
           if (!shouldReviewCompletePois) continue;
           const availability = availabilityByPoiId.get(spot.poiId) ?? await queryPoiAvailability(runtime, localProductId, spot.poiId);
           if (availability === "suspended") {
@@ -240,7 +242,7 @@ async function queryItineraryPoiAvailabilities(
 ): Promise<Map<number, "available" | "suspended">> {
   if (!shouldReviewCompletePois || !runtime.getPoiAvailabilities) return new Map();
   const poiIds = itinerary.flatMap((day) => Array.isArray(day?.spots) ? day.spots : [])
-    .filter(isPoiComplete)
+    .filter((spot) => requiresItineraryPoi(spot as Record<string, unknown>) && hasCompletePoi(spot as Record<string, unknown>))
     .map((spot) => spot.poiId as number);
   if (poiIds.length === 0) return new Map();
   try {
@@ -261,16 +263,10 @@ function isTravelNodeName(value: string): boolean {
   return /(机场|航站楼|火车站|高铁站|动车站|汽车站|客运站|码头|酒店|宾馆|民宿|客栈|集合点|接送点|接机点|送机点|接站点|送站点)/.test(value.trim());
 }
 
-function isPoiComplete(spot: unknown): boolean {
-  if (!spot || typeof spot !== "object") return false;
-  const candidate = spot as { poiName?: unknown; poiId?: unknown };
-  return hasText(candidate.poiName) && isPositiveInteger(candidate.poiId);
-}
-
 function hasCompleteItineraryPois(product: Record<string, unknown>): boolean {
   if (!Array.isArray(product.itinerary)) return false;
   return product.itinerary.some((day) => Array.isArray((day as { spots?: unknown }).spots)
-    && (day as { spots: unknown[] }).spots.some((spot) => isPoiComplete(spot)));
+    && (day as { spots: unknown[] }).spots.some((spot) => requiresItineraryPoi(spot as Record<string, unknown>) && hasCompletePoi(spot as Record<string, unknown>)));
 }
 
 function buildPoiResearchTask(keyword: string, detail: string): ResearchTaskProposal {

@@ -353,8 +353,8 @@ test("已完成方案若 POI 被打坏，续跑会回退 itinerary 并补齐后�
     { module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary },
   ]);
   const fixed = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
-  assert.deepEqual(fixed[0].spots[0], { name: "晋祠博物馆", poiName: "晋祠博物馆（VBK）", poiId: 79413 });
-  assert.deepEqual(fixed[1].spots[0], { name: "山西博物院", poiName: "山西博物院（VBK）", poiId: 79413 });
+  assert.deepEqual(fixed[0].spots[0], { name: "晋祠博物馆", kind: "attraction", poiName: "晋祠博物馆（VBK）", poiId: 79413 });
+  assert.deepEqual(fixed[1].spots[0], { name: "山西博物院", kind: "attraction", poiName: "山西博物院（VBK）", poiId: 79413 });
 });
 
 test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", async () => {

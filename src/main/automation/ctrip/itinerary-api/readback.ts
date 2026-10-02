@@ -19,6 +19,7 @@
 
 import type { VbkDailyUseCar } from "../../../../shared/product-form.js";
 import type { ReadbackExpectations } from "./itinerary-transform.js";
+import { checkReadbackActivities, checkReadbackTimeline } from "./readback-activities.js";
 import { fetchTourDailyDetail } from "./steps.js";
 import type { ApiPage } from "./transport.js";
 
@@ -37,6 +38,8 @@ interface InfoRecord {
   useSegmentConfig?: unknown;
   startOnBoardTime?: unknown;
   stopOnBoardTime?: unknown;
+  takeoffTime?: { key?: unknown; name?: unknown };
+  takeTime?: unknown;
   tourDailyPois?: Array<Record<string, unknown>>;
   tourDailyHotels?: Array<Record<string, unknown>>;
   tourDailyDinner?: {
@@ -56,6 +59,7 @@ interface StationPackageRecord {
 
 interface PoiRecord {
   poi?: { poiId?: unknown; poiName?: unknown };
+  suffixName?: { key?: unknown; name?: unknown };
 }
 
 interface HotelRecord {
@@ -93,9 +97,6 @@ function isMeal(info: InfoRecord): boolean {
 }
 function isHotel(info: InfoRecord): boolean {
   return info.activeType?.key === 1 || info.activeType?.name === "酒店";
-}
-function isOther(info: InfoRecord): boolean {
-  return info.activeType?.key === 7 || info.activeType?.name === "自由活动";
 }
 function isGather(info: InfoRecord): boolean {
   return info.activeType?.key === 25 || info.activeType?.name === "集合";
@@ -141,11 +142,12 @@ function checkDailyUseCar(dayLabel: string, expected: VbkDailyUseCar, actualRaw:
 }
 
 /** 校验景点 POI：poiId + poiName 顺序。 */
-function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: string }>, actualInfos: InfoRecord[]): number {
+function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: string; description?: string; suffixKey?: number }>, actualInfos: InfoRecord[]): number {
   if (expected.length === 0) return 0;
   const attractions = actualInfos.filter(isAttraction);
   if (!attractions.length) throw new Error(`${dayLabel} 回读缺少景点节点`);
-  const allPois = attractions.flatMap((a) => Array.isArray(a.tourDailyPois) ? a.tourDailyPois as PoiRecord[] : []);
+  const allPois = attractions.flatMap((a) => Array.isArray(a.tourDailyPois)
+    ? (a.tourDailyPois as PoiRecord[]).map((poi) => ({ poi, description: String(a.description ?? "").trim() })) : []);
   if (expected.length !== allPois.length) {
     throw new Error(
       `${dayLabel} 回读景点 POI 数量不一致：期望 ${expected.length} 个，实际 ${allPois.length} 个`,
@@ -153,8 +155,9 @@ function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: s
   }
   let count = 0;
   expected.forEach((expPoi, idx) => {
-    const actualId = poiIdOf(allPois[idx]);
-    const actualName = poiNameOf(allPois[idx]);
+    const actual = allPois[idx];
+    const actualId = poiIdOf(actual.poi);
+    const actualName = poiNameOf(actual.poi);
     if (actualId !== expPoi.poiId) {
       throw new Error(`${dayLabel} 第 ${idx + 1} 个景点 poiId 不一致：期望=${expPoi.poiId}，实际=${actualId}`);
     }
@@ -162,6 +165,13 @@ function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: s
       throw new Error(
         `${dayLabel} 第 ${idx + 1} 个景点 poiName 不一致：期望=${JSON.stringify(expPoi.poiName)}，实际=${JSON.stringify(actualName)}`,
       );
+    }
+    if (expPoi.description && !actual.description.includes(expPoi.description)) {
+      throw new Error(`${dayLabel} 第 ${idx + 1} 个景点说明缺失：期望包含=${JSON.stringify(expPoi.description)}，实际=${JSON.stringify(actual.description)}`);
+    }
+    const actualSuffixKey = Number(actual.poi.suffixName?.key ?? 0);
+    if (expPoi.suffixKey !== undefined && actualSuffixKey !== expPoi.suffixKey) {
+      throw new Error(`${dayLabel} 第 ${idx + 1} 个景点门票标记不一致：期望=${expPoi.suffixKey}，实际=${actualSuffixKey}`);
     }
     count += 1;
   });
@@ -246,35 +256,6 @@ function matchHotelSlots(
     count += 1;
   });
   return count;
-}
-
-/** 校验「其他 / 自由活动」节点 description + 服务时间。 */
-function checkOther(
-  dayLabel: string,
-  expected: { description: string; serviceTime: { startTime: string; endTime: string } } | undefined,
-  actualInfos: InfoRecord[],
-): void {
-  if (!expected) return;
-  const others = actualInfos.filter(isOther);
-  if (!others.length) throw new Error(`${dayLabel} 回读缺少「其他 / 自由活动」节点`);
-  const otherDesc = String(others[0]?.description ?? "").trim();
-  if (otherDesc !== expected.description) {
-    throw new Error(
-      `${dayLabel} 回读「其他」description 不一致：期望=${JSON.stringify(expected.description)}，实际=${JSON.stringify(otherDesc)}`,
-    );
-  }
-  const startOnBoard = String(others[0]?.startOnBoardTime ?? "");
-  const stopOnBoard = String(others[0]?.stopOnBoardTime ?? "");
-  if (startOnBoard !== expected.serviceTime.startTime) {
-    throw new Error(
-      `${dayLabel} 回读服务时间 startOnBoardTime 不一致：期望=${expected.serviceTime.startTime}，实际=${JSON.stringify(startOnBoard)}`,
-    );
-  }
-  if (stopOnBoard !== expected.serviceTime.endTime) {
-    throw new Error(
-      `${dayLabel} 回读服务时间 stopOnBoardTime 不一致：期望=${expected.serviceTime.endTime}，实际=${JSON.stringify(stopOnBoard)}`,
-    );
-  }
 }
 
 /** 校验首日集合卡片中的机场与火车站。 */
@@ -371,7 +352,8 @@ export async function verifyItineraryReadback(
     totalSpots += checkPois(dayLabel, exp.pois, infos);
     totalMeals += checkMeals(dayLabel, exp.meals, infos);
     totalHotels += checkHotels(dayLabel, exp.hotels, infos);
-    checkOther(dayLabel, exp.other ? { description: exp.other.description, serviceTime: exp.serviceTime } : undefined, infos);
+    checkReadbackActivities(dayLabel, exp.activities, infos);
+    checkReadbackTimeline(dayLabel, exp.timeline, infos);
 
     if (dayIndex === 0) checkPickup(dayLabel, expectations, infos);
     if (dayIndex === descriptions.length - 1) checkDropoff(exp.orderDay, expectations, infos);

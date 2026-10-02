@@ -1,4 +1,5 @@
 import { isAdministrativeLocationName, toPlatformShortLocationName } from "../../shared/location-short-name.js";
+import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
 import type { ProductDetail } from "../../shared/contracts.js";
 import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import type { ItineraryInputMode, LockedConstraints, LockedItineraryDay } from "../../shared/contracts-preparation.js";
@@ -84,6 +85,13 @@ export function planningWriteContractError(
   }
   if (locked.transport && record.transport !== undefined && record.transport !== locked.transport) {
     return `交通方式已锁定为 ${locked.transport}，不能覆盖`;
+  }
+  if ((module === "skeleton" || module === "operations") && record.hotelTier !== undefined) {
+    const operations = asRecord(product.product.operations);
+    const expectedTier = locked.hotelTier || normaliseHotelTier(operations?.hotelTier);
+    if (expectedTier && normaliseHotelTier(record.hotelTier) !== expectedTier) {
+      return `酒店档次已确定为「${expectedTier}」，不能被规划阶段改成其它档次`;
+    }
   }
   return undefined;
 }

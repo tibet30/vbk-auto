@@ -41,7 +41,7 @@ export interface PlanningOtherActivity {
   time: string;
   title: string;
   detail: string;
-  type: "other";
+  type: "free" | "other";
   durationMinutes?: number;
   source: "user";
 }

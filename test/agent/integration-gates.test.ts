@@ -159,8 +159,8 @@ test('partial itinerary patch keeps existing POIs and untouched days',()=>{
   assert.equal(result.applied,true);
   assert.equal(itinerary.length,2);
   assert.equal(itinerary[0].hotel,'成都酒店');
-  assert.deepEqual(itinerary[0].spots,[{name:'宽窄巷子',poiName:'宽窄巷子',poiId:123}]);
-  assert.deepEqual(itinerary[1].spots,[{name:'武侯祠',poiName:'武侯祠',poiId:456}]);
+  assert.deepEqual(itinerary[0].spots,[{name:'宽窄巷子',poiName:'宽窄巷子',poiId:123,kind:'attraction'}]);
+  assert.deepEqual(itinerary[1].spots,[{name:'武侯祠',poiName:'武侯祠',poiId:456,kind:'attraction'}]);
 });
 test('partial itinerary patch cannot silently clear existing POIs',()=>{
   const p=product();
@@ -266,7 +266,7 @@ function enableTrafficLine(productDetail: ReturnType<typeof product>) {
   return productDetail;
 }
 
-test('remote completion rejects a traffic child without final readback',()=>{
+test('remote completion rejects a traffic child without final readback before preflight closes the mother product',()=>{
   const p=enableTrafficLine(product());
   const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
   const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
@@ -276,6 +276,31 @@ test('remote completion rejects a traffic child without final readback',()=>{
   const result=agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true});
   assert.equal(result.verified,false);
   assert.match(result.message ?? '',/交通子产品 456 尚未完成最终回读/);
+});
+test('remote completion defers failed traffic children after preflight closes the mother product',()=>{
+  const p=enableTrafficLine(product());
+  const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
+  const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
+  p.productId='123';
+  p.automation={
+    id:'auto',status:'failed',currentPhase:'trafficLine',logs:[],
+    phases:[
+      {phase:'basic',status:'completed'},
+      {phase:'presentation',status:'completed'},
+      {phase:'itinerary',status:'completed'},
+      {phase:'package',status:'completed'},
+      {phase:'pricingInventory',status:'completed'},
+      {phase:'terms',status:'completed'},
+      {phase:'trafficLine',status:'failed'},
+      {phase:'preflight',status:'completed'},
+    ],
+    trafficLine:{children:[{variant:'flightRoundTrip',lineDescription:'飞机往返',childProductId:'456',completedStages:['planned','childCreated'],verified:false,failedStage:'clausesSaved'}]},
+  } as any;
+  snapshot.events.push(...approval.scope.filter(scope=>!scope.endsWith(':trafficLine')).map((scope,index)=>({id:`done${index}`,runId:'r',type:'tool_result' as const,content:'done',createdAt:'now',data:{verified:true,approvalId:approval.id,phase:scope.split(':')[1],productId:'123'}})));
+  const result=agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true});
+  assert.equal(result.verified,true);
+  const patch=agentWorkflowPatch(snapshot,p);
+  assert.equal(patch.progress,99);
 });
 test('remote completion tolerates skipped unavailable train children',()=>{
   const p=enableTrafficLine(product());

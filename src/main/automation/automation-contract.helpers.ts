@@ -17,10 +17,12 @@
  */
 
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
-import { RECOMMENDATION_CATEGORIES } from "./schema/schema-definitions.js";
+import { RECOMMENDATION_CATEGORIES, manualUploadCoverSchema } from "./schema/schema-definitions.js";
 import { readCover } from "../operations/cover-info.js";
 import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
+import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cover-fallback.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 export function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -91,8 +93,7 @@ export function hasValidItinerary(product: Record<string, unknown>): boolean {
     for (const spot of spots) {
       const item = asObject(spot);
       if (!item || textValue(item.name).length === 0) return false;
-      if (textValue(item.poiName).length === 0) return false;
-      if (!Number.isInteger(item.poiId) || Number(item.poiId) <= 0) return false;
+      if (requiresItineraryPoi(item) && !hasCompletePoi(item)) return false;
     }
   }
   return true;
@@ -133,13 +134,18 @@ export function hasValidReleaseCeiling(product: Record<string, unknown>): boolea
  * presentation 封面是否已经选定一张可写入的图。
  *
  * ctripLibrary 的 POI 只是检索锚点，不是封面本身；必须已有具体 imageId 和
- * imageUrl，且仍与已核验行程 POI 一致，才能进入最终确认。manualUpload 由
- * automationBlockers 专门报告「不可自动化」语义，此处不重复阻塞。
+ * imageUrl，且仍与已核验行程 POI 一致，才能进入最终确认。manualUpload
+ * 仅校验已保存文件的元数据，不对照图库 imageId 或行程 POI；来源能否被
+ * 自动录入由 automationBlockers 单独判断。
  */
 export function hasValidCoverPoMeta(product: Record<string, unknown>): boolean {
+  if (readActiveCoverFallback(product)) return placeholderDraftOnly(product);
   const cover = readCover(product);
   if (!cover) return false;
-  if (cover.source === "manualUpload") return true;
+  if (cover.source === "manualUpload") {
+    const raw = asObject(asObject(product.presentation)?.cover);
+    return manualUploadCoverSchema.safeParse(raw).success;
+  }
   const presentation = asObject(product.presentation);
   const rawCover = asObject(presentation?.cover);
   if (!isCtripLibraryCoverComplete(rawCover)) return false;

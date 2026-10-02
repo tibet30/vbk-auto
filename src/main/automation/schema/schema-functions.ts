@@ -4,7 +4,6 @@ import {
 } from "./schema-definitions.js";
 import { mergeReadinessIssues } from "../../../shared/readiness-issues.js";
 import { hasSatisfiedVehicleResource, isResearchTaskSatisfiedByProduct } from "../../../shared/research-task-satisfaction.js";
-import { readCover } from "../../operations/cover-info.js";
 import { evaluateAutomationContract } from "../automation-contract.js";
 import { findAllVbkCopyBadCases } from "../../planning/vbk-copy-policy.js";
 import { productNeedsVehicleResource, requiresGuide } from "../../../shared/product-form.js";
@@ -143,27 +142,14 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
   }
   // 旧草稿可能绕过 stage-runner 的输出门禁；启动自动化前重新扫描产品文案，
   // 避免平台黑名单词进入 VBK 页面后才失败。
-  const copyScanProduct = {
-    ...product,
-    ...(product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
-      ? { basicInfo: { ...(product.basicInfo as Record<string, unknown>), userIdea: undefined } }
-      : {}),
-  };
-  const copyBadCases = findAllVbkCopyBadCases(copyScanProduct);
+  const copyBadCases = findAllVbkCopyBadCases(vbkWritableCopyProjection(product));
   for (const copyBadCase of copyBadCases) {
     blockers.push({
       label: "VBK 文案黑名单",
       detail: `${copyBadCase.path} 命中「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,
     });
   }
-  // 2) 手动上传封面是单独阻断：自动化阶段不支持，UI 上要走别的提示。
-  const cover = readCover(product);
-  if (cover?.source === "manualUpload") {
-    blockers.push({
-      label: "封面来源",
-      detail: "手动上传封面暂不支持自动录入，请改用携程图库或手动处理。",
-    });
-  }
+  // 2) 手动封面本地文件的存在与尺寸由 main 进程做 IO 预检。
   // 3) 用车资源组是预检硬阻断：VBK 资源组匹配要等 vehicleResource
   //    阶段才能走，在那之前让运营先核查 / 重算后填好 resourceGroupId + Name。
   //    vbk-runtime 阶段的「资源组 ID 是 VBK 回填」是事实，但 readiness 必须
@@ -201,6 +187,37 @@ export function automationBlockers(product: Record<string, unknown>, options: { 
     else if (blockingLabels.hotel.test(label)) blockers.push({ label: `酒店核查：${label}`, detail: "需先匹配 VBK 酒店资源。" });
   }
   return mergeReadinessIssues(blockers);
+}
+
+/** 只扫描会落入 VBK 客户可见页面或产品说明的自由文案，绝不扫描运行诊断。 */
+function vbkWritableCopyProjection(product: Record<string, unknown>) {
+  const object = (value: unknown) => value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  const basic = object(product.basicInfo); const presentation = object(product.presentation); const commercial = object(product.commercial); const cover = object(presentation.cover);
+  const itinerary = Array.isArray(product.itinerary) ? product.itinerary.map((value) => {
+    const day = object(value);
+    return {
+      title: day.title, description: day.description, hotel: day.hotel, meals: day.meals,
+      spots: Array.isArray(day.spots) ? day.spots.map((spot) => {
+        const item = object(spot);
+        return { name: item.name, description: item.description, poiName: item.poiName, requestedName: item.requestedName };
+      }) : [],
+      activities: Array.isArray(day.activities) ? day.activities.map((activity) => {
+        const item = object(activity);
+        return { title: item.title, detail: item.detail };
+      }) : [],
+      hotelCandidates: Array.isArray(day.hotelCandidates) ? day.hotelCandidates.map((candidate) => ({ hotelName: object(candidate).hotelName })) : [],
+    };
+  }) : [];
+  return {
+    basicInfo: { supplierProductName: basic.supplierProductName, subtitle: basic.subtitle, operationNotes: basic.operationNotes },
+    presentation: {
+      recommendation: presentation.recommendation, features: presentation.features, recommendations: presentation.recommendations,
+      cover: { poi: cover.poi, poiName: cover.poiName, description: cover.description },
+    },
+    itinerary,
+    commercial: { packageName: commercial.packageName },
+  };
 }
 
 /**

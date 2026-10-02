@@ -67,6 +67,54 @@ test("首轮 POI 核验后，仅把接口确认可用的飞机/火车往返写�
   });
 });
 
+test("用户明确不含飞机或火车交通子产品时锁定禁用且不探测", async () => {
+  const fake = runtimeFor(new Error("不应查询交通端点"), {
+    basicInfo: { userIdea: "运营回归产品，不含飞机或火车交通子产品" },
+    operations: { trafficLine: { enabled: false, variants: [] } },
+  });
+
+  const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
+
+  assert.deepEqual(result, { status: "skipped", reason: "userDeclined" });
+  assert.equal(fake.written(), undefined);
+});
+
+test("明确禁用交通会清理历史错误启用配置，不受端点可用性覆盖", async () => {
+  const fake = runtimeFor(new Error("不应查询交通端点"), {
+    basicInfo: { userIdea: "本产品不创建飞机或火车交通子产品" },
+    operations: { trafficLine: { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] } },
+  });
+
+  const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
+
+  assert.deepEqual(result, { status: "skipped", reason: "userDeclined" });
+  assert.deepEqual(fake.written(), { enabled: false, variants: [] });
+});
+
+test("负面导游描述不能跨短语误禁用明确需要的飞机交通", async () => {
+  const fake = runtimeFor(availability(["flightRoundTrip", "trainRoundTrip"]), {
+    basicInfo: { userIdea: "不需要导游，飞机往返交通子产品正常创建" },
+    operations: { trafficLine: { enabled: false, variants: [] } },
+  });
+
+  const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
+
+  assert.equal(result.status, "updated");
+  assert.equal((fake.written() as { enabled: boolean }).enabled, true);
+});
+
+test("仅拒绝飞机不会被扩大为同时禁用火车交通", async () => {
+  const fake = runtimeFor(availability(["flightRoundTrip", "trainRoundTrip"]), {
+    basicInfo: { userIdea: "不含飞机，保留火车往返交通子产品" },
+    operations: { trafficLine: { enabled: false, variants: [] } },
+  });
+
+  const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
+
+  assert.equal(result.status, "updated");
+  assert.deepEqual((fake.written() as { variants: string[] }).variants, ["flightRoundTrip", "trainRoundTrip"]);
+});
+
 test("一类交通候选未确认时，保留另一类已由接口确认的配置", async () => {
   const fake = runtimeFor(availability(["flightRoundTrip"]));
 

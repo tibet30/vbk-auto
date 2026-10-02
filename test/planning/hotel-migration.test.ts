@@ -13,6 +13,7 @@ import { normaliseProductDraft } from "../../src/main/data/product-normalize.js"
 import { applyProductPatchSafe } from "../../src/main/operations/product-patch.js";
 import { productSchema } from "../../src/main/automation/schema/schema-definitions.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../src/shared/hotel-candidate-counts.js";
+import { sanitiseModuleValue } from "../../src/main/planning/stage-runner.js";
 
 test("HOTEL_TIER_VALUES 不含旧 /-5；/-38 是当前唯一 5 钻枚举", () => {
   assert.equal(HOTEL_TIER_VALUES.includes(LEGACY_FIVE_DIAMOND_HOTEL_TIER as never), false);
@@ -23,9 +24,22 @@ test("HOTEL_TIER_VALUES 不含旧 /-5；/-38 是当前唯一 5 钻枚举", () =>
 test("normaliseHotelTier 把 /-5 转为 /-38；其它非法值返回 undefined", () => {
   assert.equal(normaliseHotelTier("当地5钻酒店/-5"), "当地5钻酒店/-38");
   assert.equal(normaliseHotelTier("当地5钻酒店/-38"), "当地5钻酒店/-38");
+  assert.equal(normaliseHotelTier("当地5钻酒店"), "当地5钻酒店/-38");
+  assert.equal(normaliseHotelTier("当地4钻酒店"), "当地4钻酒店/-4");
+  assert.equal(normaliseHotelTier("3钻"), "当地3钻酒店/-3");
   assert.equal(normaliseHotelTier("当地2钻酒店/-2"), undefined); // 不在白名单
   assert.equal(normaliseHotelTier(""), undefined);
   assert.equal(normaliseHotelTier(undefined), undefined);
+});
+
+test("骨架生成保留明确酒店档次，未知档次不再被静默降为3钻", () => {
+  const base = { hotelTier: "当地5钻酒店", pickupCity: "泸州", transport: "charter", reusePickupForDropoff: true, mealsIncluded: false };
+  const accepted = sanitiseModuleValue("skeleton", base);
+  assert.equal(accepted.ok, true);
+  if (accepted.ok) assert.equal((accepted.value as { hotelTier: string }).hotelTier, "当地5钻酒店/-38");
+  const rejected = sanitiseModuleValue("skeleton", { ...base, hotelTier: "当地豪华酒店" });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.reason, /无法识别酒店档次/);
 });
 
 test("hotelDiamondFromTier 接受 /-38 与 /-5（经归一）", () => {

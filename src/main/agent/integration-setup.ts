@@ -8,6 +8,7 @@ import { createAgentBusinessTools, agentProductVersion } from './integration.js'
 import { agentPlannerContext, agentTaskContext } from './integration-context.js';
 import { agentCompletionGate, approvalForRun, recoverEquivalentApproval, requiredAgentPhases } from './integration-gates.js';
 import { preparationApprovalBlockReason } from '../planning/preparation-completion.js';
+import { inspectManualCoverAsset } from '../automation/manual-cover-asset.js';
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from './integration-guard.js';
 import { reconcileAgentShell } from './integration-reconcile.js';
 import { recordAgentUsage } from './integration-usage.js';
@@ -15,6 +16,8 @@ import { estimateAiUsageCostCny } from '../../shared/ai-usage-cost.js';
 import { refreshSatisfiedResearchTasks } from '../operations/research-refresh.js';
 import { recoverResolvedHotelCandidates } from './hotel-candidate-recovery.js';
 import { repairProductForExplicitInstruction } from './user-instruction-repair.js';
+import { resolvedProductQuestions } from './pending-question-reconciliation.js';
+import { needsTrafficLineBackfill } from '../automation/traffic-line-backfill.js';
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
 export function installProductAgent(context: MainIpcContext): () => void {
@@ -87,6 +90,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
         return { pickedText: outcome.pickedText, reasoning: outcome.reasoning };
       },
       emitProduct,
+      readiness,
     }),
     accountFor: async (localProductId) => {
       const product = db.getProduct(localProductId);
@@ -99,13 +103,25 @@ export function installProductAgent(context: MainIpcContext): () => void {
       return { accountKey, productVersion: agentProductVersion(product) };
     },
     productFingerprint: async (localProductId) => agentProductVersion(db.getProduct(localProductId)!),
-    prepareUserInstruction: (localProductId, content) => {
+    resolvedPendingQuestions: (localProductId, questions) => {
+      const data = db.getProduct(localProductId)?.product;
+      if (!data) return [];
+      const inspected = inspectManualCoverAsset(data);
+      return resolvedProductQuestions(data, questions, { manualCoverAssetReady: Boolean(inspected.asset && !inspected.issue) });
+    },
+    prepareUserInstruction: (localProductId, content, selection) => {
       const current = db.getProduct(localProductId);
       if (!current) throw productNotFound(localProductId);
-      const repair = repairProductForExplicitInstruction(current, content);
+      const repair = repairProductForExplicitInstruction(
+        current,
+        content,
+        selection?.selectedLabels,
+        selection?.selectedQuestions,
+      );
       if (!repair) return;
       const saved = context.productMutations.replace(localProductId, repair.product, { status: current.status });
       emitProduct(saved);
+      return true;
     },
     recoverApproval: async (localProductId, snapshot) => {
       let product = db.getProduct(localProductId);
@@ -132,7 +148,8 @@ export function installProductAgent(context: MainIpcContext): () => void {
       // A remote-successful automation can outlive an interrupted desktop
       // process before AgentCore receives its completion callback. Resume the
       // local terminal transition only; never replay completed VBK phases.
-      if (db.getProduct(localProductId)?.automation?.status === "succeeded") {
+      const current = db.getProduct(localProductId);
+      if (current?.automation?.status === "succeeded" && !needsTrafficLineBackfill(current)) {
         void context.agentCore?.completeApprovedWorkflow(localProductId, approval.id);
         return true;
       }
@@ -155,7 +172,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       } catch {
         memoryContext = undefined;
       }
-      return agentTaskContext(db, localProductId, memoryContext);
+      return agentTaskContext(db, localProductId, memoryContext, readiness(localProductId));
     },
     normalizeApprovalScope: (localProductId, scope) => normalizeAgentApprovalScope(db.getProduct(localProductId)!, scope),
     approvalPrecondition: async (localProductId, scope) => {

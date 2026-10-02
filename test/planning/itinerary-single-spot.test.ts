@@ -77,7 +77,7 @@ test("括号内的单点别名不误判为组合地点", () => {
 
 test("历史组合 spot 的 normaliseItinerary 保持原样，不在读取时拆分或改写", () => {
   const result = normaliseItinerary([{ day: 1, title: "旧行程", spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }], description: "旧数据", meals: "自理" }]);
-  assert.deepEqual(result?.[0].spots, [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }]);
+  assert.deepEqual(result?.[0].spots, [{ name: "回民街·钟鼓楼广场", kind: "attraction", poiName: null, poiId: null }]);
 });
 
 test("历史字符串 POI ID 在 normaliseItinerary 中收敛为数字，非法值归 null", () => {
@@ -93,9 +93,9 @@ test("历史字符串 POI ID 在 normaliseItinerary 中收敛为数字，非法�
     meals: "自理",
   }]);
   assert.deepEqual(result?.[0].spots, [
-    { name: "晋祠", poiName: "晋祠博物馆", poiId: 79413 },
-    { name: "无效景点", poiName: "无效景点", poiId: null },
-    { name: "空景点", poiName: "空景点", poiId: null },
+    { name: "晋祠", kind: "attraction", poiName: "晋祠博物馆", poiId: 79413 },
+    { name: "无效景点", kind: "attraction", poiName: "无效景点", poiId: null },
+    { name: "空景点", kind: "attraction", poiName: "空景点", poiId: null },
   ]);
 });
 

@@ -117,7 +117,8 @@ test("itinerary prompt 约束同日 POI 地理连续性和远距离交通衔接"
   assert.match(prompt, /候选景点池/);
   assert.match(prompt, /单一可游览景点/);
   assert.match(prompt, /替换为同范围可查景点/);
-  assert.match(prompt, /机场、车站、码头、酒店、民宿、集合点、接送点只能写进 description/);
+  assert.match(prompt, /机场、车站、码头、酒店、民宿不能作为 attraction/);
+  assert.match(prompt, /集合点、接送点可作为 kind:'other' 写入 spots/);
   assert.match(prompt, /省、自治区或直辖市/);
   assert.match(prompt, /核心游览城市/);
   assert.match(prompt, /近邻城市/);

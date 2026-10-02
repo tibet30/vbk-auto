@@ -70,3 +70,11 @@ test("a substantive preference with no safe inference remains visible", () => {
   };
   assert.equal(automaticPreparationAnswer(question), undefined);
 });
+
+test("a cover choice cannot silently replace an uploaded image with a Ctrip image", () => {
+  const question = single("cover_resolution", "封面最终处理", [
+    ["switch_to_ctrip", "切换为携程图库封面，提供 imageId 与 imageUrl"],
+    ["keep_manual_upload", "保留手动上传封面"],
+  ]);
+  assert.equal(automaticPreparationAnswer(question), undefined);
+});

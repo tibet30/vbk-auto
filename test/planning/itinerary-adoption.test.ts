@@ -60,7 +60,7 @@ test("itinerary patch only invalidates completion and persists a stable adoption
 
 test("POI verification updates current itinerary while keeping travel nodes out of the requirement", () => {
   const spots = collectRequiredItinerarySpots(itinerary);
-  assert.deepEqual(spots.map((spot) => spot.travelNode), [false, true]);
+  assert.deepEqual(spots.map((spot) => spot.travelNode), [false]);
   const result = applyPoiMatches(itinerary, new Map([["宽窄巷子", { poiName: "宽窄巷子景区", poiId: 99 }]]));
   assert.equal(result.missing.length, 0);
   assert.deepEqual((result.itinerary[0].spots as any[])[0], { name: "宽窄巷子", poiName: "宽窄巷子景区", poiId: 99 });
@@ -220,4 +220,20 @@ test("legacy adoption keeps rollback while chat now delegates without parallel i
   assert.doesNotMatch(aiSource, /signalItineraryAdoption|suppressFinalEmit/);
   assert.match(signalSource, /restoreLocalFromRemote/);
   assert.match(signalSource, /new ItineraryAdoptionSyncError\(!restored\)/);
+});
+
+test("free/other 不进入 POI 采用链路，且未匹配策略保留原顺序", () => {
+  const activityOnly = [{ day: 1, title: "D1", spots: [
+    { name: "潮汕接团", kind: "other", description: "接团服务", poiName: null, poiId: null },
+    { name: "自由活动", kind: "free", description: "自行安排", poiName: null, poiId: null },
+  ] }];
+  assert.deepEqual(collectRequiredItinerarySpots(activityOnly), []);
+  assert.equal(itineraryPoisAreComplete(activityOnly), true);
+  const result = applyUnmatchedPoiSourcePolicy(activityOnly, new Map(), new Set());
+  assert.deepEqual(result.itinerary, activityOnly);
+  assert.deepEqual(result.removed, []);
+  assert.deepEqual(result.missing, []);
+  const accepted = markItineraryAccepted(markItineraryVerifying(createPlanningPlanV2(), activityOnly), result.itinerary);
+  assert.equal(accepted.itineraryAdoption?.status, "accepted");
+  assert.match(accepted.nodes.find((node) => node.id === "poiResolution")?.summary ?? "", /0\/0/);
 });

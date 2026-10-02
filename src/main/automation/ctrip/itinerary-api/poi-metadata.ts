@@ -4,6 +4,7 @@ import { buildPoiSuggestRequest } from "../../../infrastructure/poi-suggest.js";
 import { vbkSessionRequest } from "../../../infrastructure/vbk-session-request.js";
 import type { ApiPage } from "./transport.js";
 import type { ProductItineraryDay } from "./itinerary-transform.js";
+import { requiresItineraryPoi } from "../../../../shared/itinerary-activity-kind.js";
 
 type PoiCandidate = {
   poiId?: unknown;
@@ -41,6 +42,10 @@ export async function enrichItineraryPoiMetadata(
   for (const day of itinerary) {
     const spots = [];
     for (const spot of day.spots ?? []) {
+      if (!requiresItineraryPoi(spot)) {
+        spots.push({ ...spot });
+        continue;
+      }
       const poiId = typeof spot.poiId === "number" ? spot.poiId : 0;
       const keyword = String(spot.poiName || spot.name || "").trim();
       if (!poiId || !keyword) throw new Error(`景点缺 poiId/poiName，无法回查类型：${JSON.stringify(spot)}`);

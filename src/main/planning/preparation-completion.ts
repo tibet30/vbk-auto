@@ -9,6 +9,7 @@ import {
 import { computeReadiness, type ComputeReadinessInput } from "../readiness.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 import { classifyItineraryInputMode } from "./itinerary-input-contract.js";
+import { readActiveCoverFallback } from "../../shared/cover-fallback.js";
 import {
   classifyReadinessIssue,
   extraPreparationGaps,
@@ -34,7 +35,8 @@ export function evaluatePreparationCompletion(
   const currentNode = firstNode(gaps) ?? "finalValidation";
   const ready = gaps.length === 0;
   const hasApproval = hasActiveApproval(snapshot);
-  const actions = actionsFor(currentStage, gaps, ready, hasApproval);
+  const fallback = readActiveCoverFallback(product.product);
+  const actions = actionsFor(currentStage, gaps, ready, hasApproval, fallback?.reason === "no_qualified_candidate");
   const userMessages = (product.messages ?? [])
     .filter((message) => message.role === "user")
     .map((message) => ({ role: "user" as const, content: message.content }));
@@ -58,6 +60,12 @@ export function evaluatePreparationCompletion(
     itineraryInputMode: classifyItineraryInputMode(lockedConstraints, Number(lockedConstraints.days) || 0, product.planning?.userIntent),
     postApprovalDeterministic: [...POST_APPROVAL_DETERMINISTIC],
   };
+}
+
+/** A placeholder can proceed through approval only when every other draft field is ready. */
+export function isCoverHandoffReady(product: ProductDetail): boolean {
+  if (!readActiveCoverFallback(product.product)) return false;
+  return collectGaps(product).length === 0;
 }
 
 const READINESS_MAX_BLOCKERS = 12;
@@ -142,12 +150,13 @@ function actionsFor(
   gaps: PreparationGap[],
   ready: boolean,
   hasApproval: boolean,
+  coverSearchExhausted = false,
 ): { allowed: PreparationAction[]; prohibited: PreparationAction[] } {
   const read: PreparationAction[] = ["read_product", "ask_user"];
   if (ready) {
     return hasApproval
-      ? { allowed: read, prohibited: ["request_approval", "generate_product_module"] }
-      : { allowed: [...read, "request_approval"], prohibited: ["generate_product_module"] };
+      ? { allowed: [...read, "patch_product"], prohibited: ["request_approval", "generate_product_module"] }
+      : { allowed: [...read, "patch_product", "request_approval"], prohibited: ["generate_product_module"] };
   }
   if (stage === "foundation") {
     return { allowed: [...read, "generate_product_module", "patch_product"], prohibited: ["request_approval"] };
@@ -160,7 +169,7 @@ function actionsFor(
   }
   const allowed: PreparationAction[] = [...read, "generate_product_module", "ensure_presentation_recommendations", "patch_product"];
   const labels = gaps.map((gap) => gap.label).join(" ");
-  if (/封面/.test(labels)) allowed.push("resolve_cover");
+  if (!coverSearchExhausted && /封面/.test(labels)) allowed.push("resolve_cover");
   if (/酒店候选/.test(labels)) allowed.push("resolve_itinerary_hotels");
   if (/用车/.test(labels)) allowed.push("resolve_vehicle_resource");
   if (/大交通/.test(labels)) allowed.push("recheck_traffic_line_availability");

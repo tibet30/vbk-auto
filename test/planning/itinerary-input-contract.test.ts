@@ -61,6 +61,19 @@ test("完整每日行程禁止整体重排或替换，只允许规范化", () =>
   ]), undefined);
 });
 
+test("大于号和箭头分隔的完整日程会逐点锁定", () => {
+  const product = draft("D1: 宽窄巷子 > 锦里 → 武侯祠\nD2: 都江堰＞青城山");
+  const locked = extractLockedConstraints(product);
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["宽窄巷子", "锦里", "武侯祠"] },
+    { day: 2, spots: ["都江堰", "青城山"] },
+  ]);
+  assert.match(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "宽窄巷子" }, { name: "武侯祠" }, { name: "锦里" }] },
+    { day: 2, spots: [{ name: "都江堰" }, { name: "青城山" }] },
+  ]) ?? "", /完整|重排|替换/);
+});
+
 test("二选一必须完整保留，并以同一时段的 or 关系进入 VBK 录入链路", () => {
   const product = draft("日喀则2日游\nD1、火车站接-宽窄巷子-住日喀则\nD2、日喀则非物质遗产中心或者日喀则博物馆二选一【配讲解】--扎什伦布寺--送火车");
   const onlyFirst = [
@@ -115,6 +128,28 @@ test("创建后的自动执行提示和端到端测试说明不能进入锁定�
     { day: 2, spots: ["日喀则非物质遗产中心", "日喀则博物馆", "扎实伦布寺"] },
   ]);
   assert.ok(!locked.pois.some((poi) => /端到端|资料准备|询问用户|明确审批/.test(poi)));
+});
+
+test("每日行程后的运营设置语句不会污染最后一天的 POI", () => {
+  const product = draft(
+    "D1 潮州古城、广济桥、牌坊街。D2 潮汕历史文化博览中心、韩文公祠。D3 南澳岛、青澳湾。D4 潮州西湖、开元寺。D5 潮汕送团。接送团属于其他，自由活动用自由活动，这些不配置POI。城市固定潮州，酒店5钻，成人3680元儿童1980元，2人成团，每班库存30，出发2026-10-02至2027-09-30。保持跟团游，不影响其他私家团条款。只保存未提审草稿，不启用不提交审核。",
+  );
+  const locked = extractLockedConstraints(product);
+  assert.deepEqual(locked.itineraryOrder, [
+    { day: 1, spots: ["潮州古城", "广济桥", "牌坊街"] },
+    { day: 2, spots: ["潮汕历史文化博览中心", "韩文公祠"] },
+    { day: 3, spots: ["南澳岛", "青澳湾"] },
+    { day: 4, spots: ["潮州西湖", "开元寺"] },
+    { day: 5, spots: ["潮汕送团"] },
+  ]);
+  assert.ok(!locked.pois.some((poi) => /接送团|自由活动|城市固定|酒店|3680|1980|成团|库存|2026|跟团游|私家团|保存|提审|启用|提交审核/.test(poi)));
+});
+
+test("出发去真实 POI 的路线不会被运营日期边界误截断", () => {
+  const product = draft("D5 潮汕送团。出发去开元寺 > 广济桥");
+  assert.deepEqual(extractLockedConstraints(product).itineraryOrder, [
+    { day: 5, spots: ["潮汕送团。出发去开元寺", "广济桥"] },
+  ]);
 });
 
 test("Markdown 日期标题不会污染每日锁定景点", () => {

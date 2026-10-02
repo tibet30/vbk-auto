@@ -11,11 +11,12 @@ import {
   type TrafficLineConfig,
   type TrafficLineVariant,
 } from "../../shared/contracts-traffic-line.js";
+import { explicitlyDeclinesTrafficLine } from "../../shared/traffic-line-intent.js";
 import type { OrchestratorRuntime } from "./types.js";
 
 export type InitialTrafficLineSyncResult =
   | { status: "updated"; config: TrafficLineConfig }
-  | { status: "skipped"; reason: "unsupported" | "alreadyConfigured" | "unconfirmed" };
+  | { status: "skipped"; reason: "unsupported" | "alreadyConfigured" | "unconfirmed" | "userDeclined" };
 
 /**
  * 每个产品默认探测大交通端点：只要 VBK 当前会话能确认机场或火车站，就把
@@ -37,6 +38,20 @@ export async function syncInitialTrafficLineAvailability(
       ? (operations as Record<string, unknown>).trafficLine
       : undefined,
   );
+  if (explicitlyDeclinesTrafficLine(current)) {
+    const disabled: TrafficLineConfig = {
+      enabled: false,
+      variants: [],
+      ...(existing?.arrivalCity ? { arrivalCity: existing.arrivalCity } : {}),
+      ...(existing?.departureCity ? { departureCity: existing.departureCity } : {}),
+    };
+    if (!existing || existing.enabled || existing.variants.length > 0 || existing.availability) {
+      const written = await runtime.writeResolvedTrafficLineConfig(localProductId, disabled);
+      if (!written.ok) throw new Error(`明确禁用大交通结果未保存：${written.reason ?? "本地写入失败"}`);
+      return { status: "skipped", reason: "userDeclined" };
+    }
+    return { status: "skipped", reason: "userDeclined" };
+  }
   if ((existing?.enabled || existing?.variants.length) && !hasRetryableTrafficAvailability(existing)) {
     return { status: "skipped", reason: "alreadyConfigured" };
   }

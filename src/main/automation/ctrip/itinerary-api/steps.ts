@@ -32,8 +32,8 @@ export const DEFAULT_DAILY_TEMPLATE_ID = 3;
 
 /**
  * getProductTourInfoList：拉取行程关联列表，返回第一个 tourInfo + 选定的
- * tourInfoId（auditTourInfoId → tourInfoId → draftTourInfoId 优先级）。空
- * 列表视为"新产品"，tourInfoId=0 由 saveTourDailyDetail 后端分配。
+ * tourInfoId（formal tourInfoId 优先）用于读取既有详情。草稿写入的目标版本
+ * 由 orchestrator 从 draft/preview 显式关联字段决定，不能用 audit ID 推断。
  *
  * templateId 取值优先级：
  *   1. payload.tourInfos[0].templateId（首个 tourInfo 自带）；
@@ -73,10 +73,8 @@ export async function fetchTourInfoId(page: ApiPage, productId: string): Promise
   }
   const first = tourInfos[0];
   const candidateId = [
-    first.auditTourInfoId,
     first.tourInfoId,
     first.draftTourInfoId,
-    first.previewTourInfoId,
   ].find((value) => value !== null && value !== undefined && String(value) !== "0" && String(value) !== "") as
     string | number | undefined;
   const firstTemplateIdRaw = (first as { templateId?: unknown }).templateId;
@@ -99,9 +97,8 @@ export interface FetchDailyTemplateDetailResult {
 
 /**
  * getDailyTemplateDetail：拉取空产品 / 新建行程用的模板结构。
- *  - 仅在 existingTourInfoId=0（产品尚未有任何行程）时调用，作用是补齐
- *    newTourInfo.template / templateId 字段，让 checkTourDaily(saveType=8/3)
- *    能识别到模板，避免后端把新建行程当作「空对象」拒绝；
+ *  - 历史新建行程辅助：当前母产品草稿写入没有关联 draft/preview 时会
+ *    fail closed，不使用本模板路径猜测版本协议；
  *  - requestHeader.locale 必须 zh-CN（与 getTourDailyDetail 保持一致）；
  *  - templateId 来自 getProductTourInfoList 响应，缺省 3；
  *  - contentType 必须 "json"（与 calculateTourInfoScore 同型）。
@@ -194,14 +191,14 @@ export async function fetchTourDailyDetail(
 
 /**
  * checkTourDaily：通用包装。响应 text 字段可能是字符串化的 JSON，需要解析；
- * Ack=Success 但响应缺 tourDaily 时抛错；saveType=3 还要求响应里有
- * tourInfoId（saveType=8 是预览，不强制）。
+ * Ack=Success 但响应缺 tourDaily 时抛错。已验证的正常“存为草稿”流程只
+ * 使用已采样的 saveType=2；响应中的详情 ID 由编排层结合关联版本关系处理。
  */
 export async function checkTourDailyStep(
   page: ApiPage,
   productTourInfo: Record<string, unknown>,
   tourDailyText: string,
-  saveType: 8 | 7 | 3,
+  saveType: 2 | 8 | 3,
   label: string,
 ): Promise<Record<string, unknown>> {
   const { payload } = await postSoa(
@@ -224,7 +221,7 @@ export async function checkTourDailyStep(
   if (typeof raw === "string") {
     try {
       const idSafeRaw = raw.replace(
-        /("(?:tourInfoId|previewTourInfoId|auditTourInfoId|draftTourInfoId|tourInfoScoreId|tourDaily[A-Za-z]+Id)"\s*:\s*)(\d{16,})/g,
+        /("(?:tourInfoId|previewTourInfoId|auditTourInfoId|draftTourInfoId|fromTourInfoId|tourInfoScoreId|tourDaily[A-Za-z]+Id)"\s*:\s*)(\d{16,})/g,
         '$1"$2"',
       );
       parsed = JSON.parse(idSafeRaw) as Record<string, unknown>;
@@ -234,15 +231,15 @@ export async function checkTourDailyStep(
   } else {
     parsed = raw as Record<string, unknown>;
   }
-  if (!parsed.tourInfoId && (saveType === 3 || saveType === 7)) {
+  if (!parsed.tourInfoId) {
     throw new Error(`${label}响应未生成新 tourInfoId（Ack=Success 但结构空）`);
   }
   return parsed;
 }
 
 /**
- * calculateTourInfoScore：评分计算。仅诊断用，返回 aggregateScore 与
- * tourInfoScores，orchestrator 把它回写到 checked8 后再走 saveType=3。
+ * calculateTourInfoScore：旧行程工具的评分计算。当前母产品草稿保存不调用
+ * 此接口；保留导出供已验证的独立协议调用方使用。
  */
 export async function calculateTourScoreStep(
   page: ApiPage,
@@ -270,20 +267,21 @@ export async function calculateTourScoreStep(
  * saveTourDailyDetail：行程详情保存。
  *  - Ack=Success 但响应缺 tourInfo / result / tourInfoId → 视为结构空失败
  *    （防止后端悄悄吃掉请求）；
- *  - 后端某些路径只回 tourInfoId（顶层），不算失败；orchestrator 取
- *    savedTourInfoId 时仍以 checkTourDaily(saveType=3) 响应里的 tourInfoId
- *    为准，这里只负责"不抛错"。
+ *  - 后端某些路径只回 tourInfoId（顶层），不算失败；草稿编排会以关联列表
+ *    的 draftTourInfoId 严格核对该值。
  */
 export async function saveTourDailyDetailStep(
   page: ApiPage,
   tourInfo: Record<string, unknown>,
-): Promise<void> {
+  protocol: "draft-v2" | "legacy" = "legacy",
+): Promise<Record<string, unknown>> {
   const { payload } = await postSoa(
     page,
     SAVE_TOUR_DAILY_URL,
     {
       requestHeader: { locale: "zh-CN" },
       piCategoryId: 0,
+      ...(protocol === "draft-v2" ? { saveType: 2 } : {}),
       tourInfo,
     },
     "VBK 行程详情保存",
@@ -292,16 +290,19 @@ export async function saveTourDailyDetailStep(
   if (!payload?.tourInfo && !payload?.result && !payload?.tourInfoId) {
     throw new Error("VBK 行程详情保存响应缺 tourInfo（Ack=Success 但结构空）");
   }
+  const responseTourInfo = asRecord(payload.tourInfo) ?? asRecord(payload.result) ?? payload;
+  return responseTourInfo;
 }
 
 /**
- * saveProductTourInfo：行程关联保存。tourInfo 只取必要字段（后端只读这一组），
- * auditTourInfoId 用本次写完拿到的 savedTourInfoId（orchestrator 在外层注入）。
+ * saveProductTourInfo：行程关联保存。正常“存为草稿”会保留关联列表返回的
+ * formal/draft/audit/preview ID 和状态；严禁改写 audit、formal 或 preview 指针。
  */
 export async function saveProductTourInfoStep(
   page: ApiPage,
   tourInfo: Record<string, unknown>,
   tourDailyJson: string,
+  protocol: "draft-v2" | "legacy" = "legacy",
 ): Promise<void> {
   const { payload } = await postSoa(
     page,
@@ -309,20 +310,8 @@ export async function saveProductTourInfoStep(
     {
       contentType: "json",
       head: SOHEAD,
-      tourInfo: {
-        productId: tourInfo.productId,
-        tourInfoId: tourInfo.tourInfoId,
-        tourInfoName: tourInfo.tourInfoName ?? "",
-        tourInfoDesc: tourInfo.tourInfoDesc ?? "",
-        main: tourInfo.main ?? true,
-        sort: tourInfo.sort ?? 0,
-        draftTourInfoStatus: tourInfo.draftTourInfoStatus ?? 2,
-        auditTourInfoId: tourInfo.tourInfoId,
-        auditTourInfoStatus: 1,
-        aggregateScore: tourInfo.aggregateScore ?? 100,
-        auditStatus: tourInfo.auditStatus ?? { key: "N", value: "未提交" },
-      },
-      saveType: 3,
+      tourInfo: protocol === "draft-v2" ? tourInfo : legacyProductTourInfo(tourInfo),
+      saveType: protocol === "draft-v2" ? 2 : 3,
       tourDaily: tourDailyJson,
     },
     "VBK 行程关联保存",
@@ -330,4 +319,25 @@ export async function saveProductTourInfoStep(
   if (!payload) {
     throw new Error("VBK 行程关联保存响应空（Ack=Success 但 payload 为空）");
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+/** Preserve the established traffic-child association request unchanged. */
+function legacyProductTourInfo(tourInfo: Record<string, unknown>): Record<string, unknown> {
+  return {
+    productId: tourInfo.productId,
+    tourInfoId: tourInfo.tourInfoId,
+    tourInfoName: tourInfo.tourInfoName ?? "",
+    tourInfoDesc: tourInfo.tourInfoDesc ?? "",
+    main: tourInfo.main ?? true,
+    sort: tourInfo.sort ?? 0,
+    draftTourInfoStatus: tourInfo.draftTourInfoStatus ?? 2,
+    auditTourInfoId: tourInfo.tourInfoId,
+    auditTourInfoStatus: 1,
+    aggregateScore: tourInfo.aggregateScore ?? 100,
+    auditStatus: tourInfo.auditStatus ?? { key: "N", value: "未提交" },
+  };
 }

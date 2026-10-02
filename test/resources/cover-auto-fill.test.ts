@@ -347,7 +347,8 @@ test("applyAutoCoverFill: rejects a complete image that belongs to another POI",
       candidates: [{ stableId: "wrong", index: 0, quality: "4.5", resolution: "1920*1080", imageId: 111, imageUrl: "https://img", imageResolved: true, poiId: 2, poiName: "大益庄园" }],
     }),
   });
-  assert.equal(result.outcome.written, false);
+  assert.equal(result.outcome.written, true);
+  assert.equal((result.nextProduct.presentation as Record<string, unknown>).coverFallback !== undefined, true);
 });
 
 test("applyAutoCoverFill: rejects nameless candidates when itinerary already has bound POI IDs", async () => {
@@ -363,10 +364,11 @@ test("applyAutoCoverFill: rejects nameless candidates when itinerary already has
       candidates: [{ stableId: "nameless", index: 0, quality: "4.5", resolution: "1920*1080", imageId: 222, imageUrl: "https://img", imageResolved: true }],
     }),
   });
-  assert.equal(result.outcome.written, false);
+  assert.equal(result.outcome.written, true);
+  assert.equal((result.nextProduct.presentation as Record<string, unknown>).coverFallback !== undefined, true);
 });
 
-test("applyAutoCoverFill: search 抛错时返回 { written: false } 不阻塞 draft", async () => {
+test("applyAutoCoverFill: search 抛错时标为待重试，不误称无图", async () => {
   const product = makeBaseProduct();
   const page = {
     evaluate: async () => {
@@ -374,10 +376,10 @@ test("applyAutoCoverFill: search 抛错时返回 { written: false } 不阻塞 dr
     },
   };
   const result = await applyAutoCoverFill({ page: page as never, product });
-  assert.equal(result.outcome.written, false);
+  assert.equal(result.outcome.written, true);
   assert.match(result.outcome.reason, /失败/);
-  // 失败时 nextProduct 必须保持引用相等（不污染 product）。
-  assert.equal(result.nextProduct, product);
+  assert.equal(((result.nextProduct.presentation as Record<string, unknown>).coverFallback as Record<string, unknown>).reason, "search_unavailable");
+  assert.equal((product.presentation as Record<string, unknown>).coverFallback, undefined);
 });
 
 test("applyAutoCoverFill: manualUpload cover 永不覆盖", async () => {
@@ -425,7 +427,7 @@ test("applyAutoCoverFill: cover 缺 description 仍按景点 POI 选图", async 
     product,
     injectSearch: async () => ({
       keyword: "云冈石窟", poi: "云冈石窟", fetchedAt: "2026-08-12T00:00:00.000Z",
-      candidates: [{ stableId: "poi", index: 0, quality: "", resolution: "", imageId: 9, imageUrl: "https://img", imageResolved: true }],
+      candidates: [{ stableId: "poi", index: 0, quality: "4.5", resolution: "1920*1080", imageId: 9, imageUrl: "https://img", imageResolved: true }],
     }),
   });
   assert.equal(result.outcome.written, true);
@@ -751,7 +753,7 @@ test("applyAutoCoverFill: 第一个 keyword search 抛错，第二个 keyword �
   assert.equal(result.outcome.imageId, 333);
 });
 
-test("applyAutoCoverFill: 所有关键词都失败时返回原 product 引用且 written=false", async () => {
+test("applyAutoCoverFill: 所有候选不完整时持久化待替换占位", async () => {
   const product = makeBaseProduct({
     presentation: {
       recommendation: "推荐语",
@@ -789,13 +791,13 @@ test("applyAutoCoverFill: 所有关键词都失败时返回原 product 引用且
     },
   });
   assert.deepEqual(tried, ["晋祠", "云冈石窟"]);
-  assert.equal(result.outcome.written, false);
+  assert.equal(result.outcome.written, true);
   // reason 应当列出尝试过的关键词数（不能让排查时灰屏）。
   assert.match(result.outcome.reason, /2/);
   assert.match(result.outcome.reason, /晋祠/);
   assert.match(result.outcome.reason, /云冈石窟/);
-  // 失败时 nextProduct 保持引用相等（不污染 product）。
-  assert.equal(result.nextProduct, product);
+  assert.equal(((result.nextProduct.presentation as Record<string, unknown>).coverFallback as Record<string, unknown>).reason, "no_qualified_candidate");
+  assert.equal((product.presentation as Record<string, unknown>).coverFallback, undefined);
 });
 
 test("applyAutoCoverFill: 关键词去重——重复出现的 keyword 只搜一次", async () => {

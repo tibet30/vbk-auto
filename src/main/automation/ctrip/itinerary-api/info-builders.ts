@@ -2,8 +2,8 @@
  * tourDailyInfo 各节点构造器：把业务字段映射到 VBK 协议的 tourDailyInfo。
  *
  * 设计目标：
- *   - 每个 builder 返回的形状都与「真实 detail 抓回」一致，避免 check saveType=8/3
- *     触发字段缺失校验；
+ *   - 每个 builder 返回的形状都与「真实 detail 抓回」一致，避免平台校验因字段
+ *     缺失而拒绝；
  *   - 共用字段（takeoffTime / takeoffEndTime / activeType / costInclude 等）从
  *     commonInfoFields 拿，确保节点间字段对齐；
  *   - buildAttractionPois 在 poiId / poiName 缺失时直接抛错（业务失败而不是
@@ -13,6 +13,7 @@
 
 import { ITINERARY_CTRIP_PLATFORM_HOTEL } from "../../../../shared/itinerary-hotel.js";
 import type { ProductItineraryDay, ResolvedStations } from "./itinerary-transform.js";
+import { isExteriorOnlyVisit } from "./visit-semantics.js";
 import {
   emptyPoiSkeleton,
   emptyTourDailyDinner,
@@ -22,6 +23,27 @@ import {
 
 const FREE_TICKET_SUFFIX = { key: 11, name: "无需门票" } as const;
 const PAID_TICKET_INCLUDED_SUFFIX = { key: 13, name: "含成人儿童首道门票" } as const;
+
+const EXTERIOR_ONLY_SUFFIX = { key: 1, name: "外观" } as const;
+
+/**
+ * 票型必须由明确的游览语义决定。真实草稿回读已确认「远观且不上桥」为
+ * key=1「外观」；不能把它降级为「无需门票」，也不能保留收费景点的含票承诺。
+ */
+export function attractionTicketSuffix(spot: Pick<NonNullable<ProductItineraryDay["spots"]>[number], "ticketType" | "description">) {
+  if (isExteriorOnlyVisit(spot.description)) return { ...EXTERIOR_ONLY_SUFFIX };
+  return spot.ticketType?.key === 2
+    ? { ...FREE_TICKET_SUFFIX }
+    : { ...PAID_TICKET_INCLUDED_SUFFIX };
+}
+
+/** 将本地「显示名/协议枚举 key」合在一起的 hotelTier 拆开。 */
+export function hotelTierPresentation(hotelTier?: string): { displayName: string | null; protocolKey: number | null } {
+  const trimmed = hotelTier?.trim() ?? "";
+  const matched = trimmed.match(/^(.+?)\/(-?\d+)$/);
+  if (!matched) return { displayName: trimmed || null, protocolKey: null };
+  return { displayName: matched[1]!.trim() || null, protocolKey: Number(matched[2]) };
+}
 
 /**
  * 共用字段：每个 tourDailyInfo 都需要这些键，让 VBK 校验能逐字段对齐。
@@ -124,9 +146,7 @@ export function buildAttractionPois(
       },
       sort: index + 1,
       orFlag: spot.relation === "or",
-      suffixName: spot.ticketType?.key === 2
-        ? { ...FREE_TICKET_SUFFIX }
-        : { ...PAID_TICKET_INCLUDED_SUFFIX },
+      suffixName: attractionTicketSuffix(spot),
       costInclude: { key: "", name: null },
       images: [],
       refId: null,
@@ -207,7 +227,7 @@ export function buildMealInfo(args: {
 /**
  * 酒店节点：activeType=1（酒店），tourDailyHotels 携带一个空 hotel 占位。
  *  - 真实酒店资源（hotelId / hotelAddress / location 等）由 hotelResource 阶段
- *    补全，这里只把「酒店名称 + 钻级说明」落到 description 与 grade.name。
+ *    补全；校验响应会剥离未支持的 hotel.grade，因此这里仅写客户可见的 description。
  */
 export function buildHotelInfo(args: {
   hotelName: string;
@@ -218,11 +238,12 @@ export function buildHotelInfo(args: {
 }) {
   const { hotelName, hotelNames, hotelTier, sort } = args;
   const names = hotelNames?.length ? hotelNames : [hotelName];
+  const tier = hotelTierPresentation(hotelTier);
   return {
     ...commonInfoFields({
       activeType: { key: 1, name: "酒店" },
       sort,
-      description: hotelTier ? `${hotelName}（${hotelTier}）` : hotelName,
+      description: tier.displayName ? `${hotelName}（${tier.displayName}）` : hotelName,
       takeoffTime: { key: "N", name: "不限" },
       takeTime: 0,
       costInclude: true,
@@ -238,7 +259,6 @@ export function buildHotelInfo(args: {
           hotelAddress: null,
           location: null,
           brand: null,
-          grade: { key: null, name: hotelTier ?? null },
           ishand: ITINERARY_CTRIP_PLATFORM_HOTEL.ishand,
         },
         ishand: ITINERARY_CTRIP_PLATFORM_HOTEL.ishand,
@@ -291,7 +311,7 @@ export function buildDropoffInfo(args: {
  *  - tourDailyPois 仍带一个空 POI 占位（refId=null），避免 check 校验报错；
  *  - serviceTime 落到 startOnBoardTime / stopOnBoardTime。
  */
-export function buildOtherInfo(args: {
+export function buildFreeInfo(args: {
   description: string;
   sort: number;
   serviceTime?: { startTime: string; endTime: string };
@@ -311,6 +331,28 @@ export function buildOtherInfo(args: {
       stopOnBoardTime: serviceTime?.endTime ?? "",
       arriveTime: serviceTime?.startTime ?? "",
       departTime: serviceTime?.endTime ?? "",
+    }),
+    tourDailyPois: [emptyTourDailyPoi()],
+  };
+}
+
+/**
+ * 平台“其他”节点已通过真实请求确认使用 key=9；保持独立 builder，避免混成 key=7 的自由活动。
+ */
+export function buildOtherInfo(args: {
+  description: string;
+  sort: number;
+  serviceTime?: { startTime: string; endTime: string };
+  activityTime?: string;
+  durationMinutes?: number;
+}) {
+  const { description, sort, serviceTime } = args;
+  return {
+    ...commonInfoFields({
+      activeType: { key: 9, name: "其他" }, sort, description,
+      takeoffTime: otherActivityTime(args.activityTime), takeTime: args.durationMinutes ?? 0, costInclude: false,
+      startOnBoardTime: serviceTime?.startTime ?? "", stopOnBoardTime: serviceTime?.endTime ?? "",
+      arriveTime: serviceTime?.startTime ?? "", departTime: serviceTime?.endTime ?? "",
     }),
     tourDailyPois: [emptyTourDailyPoi()],
   };

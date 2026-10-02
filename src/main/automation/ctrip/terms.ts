@@ -1,10 +1,12 @@
 import { saveStructuredProductClauses } from "./clauses-api.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
+import { isExteriorOnlyVisit } from "./itinerary-api/visit-semantics.js";
 
 type ItinerarySpot = {
   name?: string | null;
   poiName?: string | null;
   ticketType?: { key?: number | null } | null;
+  description?: string | null;
 };
 
 type ItineraryDay = { spots?: ItinerarySpot[] | null };
@@ -18,7 +20,7 @@ export function buildAdultTicketInclusionText(itinerary: ItineraryDay[]): string
   const names = new Set<string>();
   for (const day of itinerary ?? []) {
     for (const spot of day?.spots ?? []) {
-      if (spot?.ticketType?.key !== 1) continue;
+      if (spot?.ticketType?.key !== 1 || isExteriorOnlyVisit(spot?.description)) continue;
       const name = String(spot.poiName ?? spot.name ?? "").trim();
       if (name) names.add(name);
     }

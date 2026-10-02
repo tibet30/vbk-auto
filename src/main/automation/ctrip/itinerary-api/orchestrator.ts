@@ -9,14 +9,13 @@
  *   1. 接送站解析（stations-resolver）
  *   2. 拉取当前 tourInfoId（steps.fetchTourInfoId）
  *   3. 拉取详情模板（steps.fetchTourDailyDetail）用于非破坏合并
- *   3a. 空产品补拉行程模板（steps.fetchDailyTemplateDetail）→ newTourInfo.template/templateId
+ *   3a. 读取关联的 formal/draft/audit/preview 版本；没有独立 draft 指针时
+ *       fail closed，不尝试创建或升级版本
  *   4. itinerary-transform 生成 tourDailyDescriptions
- *   5. 拼装 newTourInfo payload（含 template / templateId / days / tourDailyDescriptions）
- *   6. checkTourDaily(8) → calculateTourInfoScore → checkTourDaily(3)
- *      （关键修复：initialText / checked8Text 都用 JSON.stringify(newTourInfo)，
- *       保留 draftTourInfoId / template 等元数据，避免后端拒绝）
- *   7. saveTourDailyDetail（响应允许仅含顶层 tourInfoId）+ saveProductTourInfo
- *   8. 字段级回读校验（readback.verifyItineraryReadback）
+ *   5. 拼装 newTourInfo payload（含 templateId / days / tourDailyDescriptions）
+ *   6. checkTourDaily(saveType=2) → saveTourDailyDetail(saveType=2)
+ *   7. saveProductTourInfo(saveType=2)，原样保留关联列表的版本与状态
+ *   8. 只用 draftTourInfoId 做字段级回读校验
  *   9. 返回 ItineraryApiResult
  */
 
@@ -28,18 +27,144 @@ import {
 } from "./itinerary-transform.js";
 import { verifyItineraryReadback } from "./readback.js";
 import { enrichItineraryPoiMetadata } from "./poi-metadata.js";
-import { resolveStationsForCity } from "./stations-resolver.js";
+import { resolveStationsForItinerary } from "./stations-resolver.js";
+import { isExteriorOnlyVisit } from "./visit-semantics.js";
+import { projectDraftWrite, type DraftWriteProjection } from "./draft-write-projection.js";
+import { logInfo } from "../../../../shared/log-timestamp.js";
 import {
-  DEFAULT_DAILY_TEMPLATE_ID,
-  calculateTourScoreStep,
   checkTourDailyStep,
-  fetchDailyTemplateDetail,
   fetchTourDailyDetail,
   fetchTourInfoId,
   saveProductTourInfoStep,
   saveTourDailyDetailStep,
 } from "./steps.js";
 import type { ApiPage, ItineraryApiResult } from "./transport.js";
+
+function linkedVersionId(tourInfo: Record<string, unknown>, field: string): string | number | undefined {
+  const value = tourInfo[field];
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const id = String(value).trim();
+  return /^[1-9]\d*$/.test(id) ? id : undefined;
+}
+
+function linkedVersionSummary(tourInfo: Record<string, unknown>): string {
+  const fields = [
+    "tourInfoId",
+    "draftTourInfoId",
+    "draftTourInfoStatus",
+    "auditTourInfoId",
+    "auditTourInfoStatus",
+    "previewTourInfoId",
+    "auditStatus",
+  ];
+  const summary = Object.fromEntries(fields.map((field) => {
+    const value = tourInfo[field];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return [field, {
+        key: (value as Record<string, unknown>).key ?? null,
+        value: (value as Record<string, unknown>).value ?? null,
+      }];
+    }
+    return [field, value ?? null];
+  }));
+  return JSON.stringify(summary);
+}
+
+function isUnsubmittedAuditStatus(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const status = value as Record<string, unknown>;
+  return status.key === "N" || /未提交/.test(String(status.value ?? ""));
+}
+
+function writableTourInfoVersion(tourInfo: Record<string, unknown>): {
+  id: string | number;
+  field: "draftTourInfoId" | "previewTourInfoId" | "tourInfoId";
+} | undefined {
+  const draftTourInfoId = linkedVersionId(tourInfo, "draftTourInfoId");
+  const previewTourInfoId = linkedVersionId(tourInfo, "previewTourInfoId");
+  const formalTourInfoId = linkedVersionId(tourInfo, "tourInfoId");
+  const auditTourInfoId = linkedVersionId(tourInfo, "auditTourInfoId");
+  const draftAliases = [formalTourInfoId, auditTourInfoId, previewTourInfoId].filter(Boolean);
+  if (draftTourInfoId && !draftAliases.some((id) => id === draftTourInfoId)) {
+    return { id: draftTourInfoId, field: "draftTourInfoId" };
+  }
+  const isPreviewOnlyInitialDraft = !draftTourInfoId
+    && !formalTourInfoId
+    && !auditTourInfoId
+    && Boolean(previewTourInfoId)
+    && isUnsubmittedAuditStatus(tourInfo.auditStatus);
+  if (isPreviewOnlyInitialDraft) return { id: previewTourInfoId!, field: "previewTourInfoId" };
+  const isUnsubmittedCurrentDraft = formalTourInfoId
+    && formalTourInfoId === auditTourInfoId
+    && isUnsubmittedAuditStatus(tourInfo.auditStatus);
+  if (isUnsubmittedCurrentDraft) return { id: formalTourInfoId, field: "tourInfoId" };
+  return undefined;
+}
+
+function sameField(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function normalizedDisplay(value: string | null): string | null {
+  return value?.replace(/\s+/g, " ").trim() || null;
+}
+
+function assertRetainedVersion(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  field: "tourInfoId" | "auditTourInfoId" | "previewTourInfoId" | "auditTourInfoStatus" | "auditStatus",
+): void {
+  if (before[field] !== undefined && !sameField(before[field], after[field])) {
+    throw new Error(`VBK 草稿关联保存后 ${field} 发生未授权变化，已停止回读验收。`);
+  }
+}
+
+function assertDraftWritePayload(args: {
+  descriptions: unknown[];
+  serialized: string;
+  pickupAir?: { code: string; name: string } | null;
+  exteriorBridge: boolean;
+}): void {
+  const generated = projectDraftWrite(args.descriptions);
+  let serialized: DraftWriteProjection;
+  try { serialized = projectDraftWrite(JSON.parse(args.serialized)); } catch { throw new Error("VBK 草稿写入文本序列化失败，未发送保存请求。"); }
+  if (!sameField(generated, serialized)) {
+    throw new Error(`VBK 草稿写入本地投影在序列化前后漂移，未发送保存请求：${JSON.stringify({ generated, serialized })}`);
+  }
+  if (args.pickupAir && (generated.pickup.code !== args.pickupAir.code || generated.pickup.name !== args.pickupAir.name)) {
+    throw new Error(`VBK 草稿写入集合机场与已解析端点不一致，未发送保存请求：${JSON.stringify({ expected: args.pickupAir, actual: generated.pickup })}`);
+  }
+  if (generated.hotelGrades.some((grade) => /\/-\d+$/.test(grade.name ?? ""))) {
+    throw new Error("VBK 草稿写入酒店展示等级泄露内部 tier code，未发送保存请求。");
+  }
+  if (generated.hotelNodes.some((node) => /\/-\d+\b/.test(node.description ?? "")
+    || node.slots.some((slot) => /\/-\d+\b/.test(slot.name ?? "")))) {
+    throw new Error("VBK 草稿写入酒店名称或说明泄露内部 tier code，未发送保存请求。");
+  }
+  if (args.exteriorBridge && (generated.bridge85862?.key !== "1" || generated.bridge85862.name !== "外观")) {
+    throw new Error(`VBK 草稿写入广济桥外观票型不正确，未发送保存请求：${JSON.stringify(generated.bridge85862)}`);
+  }
+}
+
+function assertCheckedDraftPayload(expected: DraftWriteProjection, checkedDraft: Record<string, unknown>): void {
+  const actual = projectDraftWrite(checkedDraft);
+  const pickupChanged = !sameField(expected.pickup, actual.pickup);
+  const bridgeChanged = !sameField(expected.bridge85862, actual.bridge85862);
+  const hotelChanged = expected.hotelNodes.length !== actual.hotelNodes.length || expected.hotelNodes.some((expectedNode, nodeIndex) => {
+    const actualNode = actual.hotelNodes[nodeIndex];
+    if (!actualNode || expectedNode.slots.length !== actualNode.slots.length) return true;
+    if (!sameField(expectedNode.slots.map((slot) => slot.name), actualNode.slots.map((slot) => slot.name))) return true;
+    return normalizedDisplay(expectedNode.description) !== normalizedDisplay(actualNode.description)
+      || actualNode.slots.some((slot) => /\/-\d+\b/.test(slot.name ?? ""))
+      || /\/-\d+\b/.test(actualNode.description ?? "");
+  });
+  if (pickupChanged || hotelChanged || bridgeChanged) {
+    const airport = `集合机场实际=${actual.pickup.code ?? ""}/${actual.pickup.name ?? ""}，期望=${expected.pickup.code ?? ""}/${expected.pickup.name ?? ""}`;
+    const hotels = `酒店节点实际=${actual.hotelNodes.length}/${actual.hotelNodes.map((node) => node.slots.length).join(",")}，期望=${expected.hotelNodes.length}/${expected.hotelNodes.map((node) => node.slots.length).join(",")}`;
+    const bridge = `广济桥实际=${actual.bridge85862?.key ?? ""}/${actual.bridge85862?.name ?? ""}，期望=${expected.bridge85862?.key ?? ""}/${expected.bridge85862?.name ?? ""}`;
+    throw new Error(`VBK 草稿校验响应改写白名单字段：${airport}；${hotels}；${bridge}；未发送详情或关联保存。`);
+  }
+}
 
 export async function ensureItineraryApi(
   page: ApiPage,
@@ -55,37 +180,35 @@ export async function ensureItineraryApi(
   }
 
   // 1) 接送站解析（真实接口）
-  const stations = await resolveStationsForCity(page, operations.pickupCity);
-  if (!stations.pickupAir && !stations.pickupTrain) {
-    throw new Error(`接送站搜索：城市「${operations.pickupCity}」无任何可用机场/火车站候选。`);
+  const trafficLine = (operations as Record<string, unknown>).trafficLine;
+  const endpointPlan = trafficLine && typeof trafficLine === "object" && !Array.isArray(trafficLine)
+    ? (trafficLine as { availability?: { endpointPlan?: unknown } }).availability?.endpointPlan
+    : undefined;
+  const stations = await resolveStationsForItinerary(page, { pickupCity: operations.pickupCity, endpointPlan });
+  if ((!stations.pickupAir && !stations.pickupTrain) || (!stations.dropoffAir && !stations.dropoffTrain)) {
+    throw new Error(`接送站搜索：城市「${operations.pickupCity}」无任何可用机场/火车站候选，或未返回完整接送站候选。`);
   }
 
   // 2) 按 poiId 回查真实 suggestPoi 类型，避免免费景点因 ticketType 为空被拒。
   const enrichedItinerary = await enrichItineraryPoiMetadata(page, product.itinerary);
 
-  // 3) 拉取当前 tourInfoId + 模板 ID（draftTourInfoId 优先级保留）
-  const { tourInfo, tourInfoId: existingTourInfoId, templateId: fetchedTemplateId } =
+  // 3) 关联列表是版本关系的唯一来源。没有当前 draft/preview 的产品不能
+  // 凭旧 8→3 协议推断创建路径，必须停止在任何写操作之前。
+  const { tourInfo, tourInfoId: existingTourInfoId, templateId } =
     await fetchTourInfoId(page, productId);
-  const templateId = fetchedTemplateId ?? DEFAULT_DAILY_TEMPLATE_ID;
-
-  // 4) 拉取详情模板（用于非破坏合并；draftTourInfoId 场景也走这里）
-  let detailTourInfo: Record<string, unknown> | null = null;
-  if (existingTourInfoId) {
-    const detail = await fetchTourDailyDetail(page, existingTourInfoId);
-    detailTourInfo = detail.tourInfo;
+  const writableVersion = writableTourInfoVersion(tourInfo);
+  const writableTourInfoId = writableVersion?.id;
+  const previewTourInfoId = linkedVersionId(tourInfo, "previewTourInfoId");
+  const formalTourInfoId = linkedVersionId(tourInfo, "tourInfoId");
+  const auditTourInfoId = linkedVersionId(tourInfo, "auditTourInfoId");
+  if (!writableTourInfoId) {
+    throw new Error(`VBK 行程关联未返回独立的 draftTourInfoId 或首建未提交 previewTourInfoId；没有当前平台写入协议证据，已停止草稿保存。关联版本=${linkedVersionSummary(tourInfo)}`);
   }
 
-  // 4a) 空产品：拉行程模板（getDailyTemplateDetail）→ 写入 newTourInfo.template/templateId
-  let template: Record<string, unknown> | null = null;
-  if (!existingTourInfoId) {
-    const templateResult = await fetchDailyTemplateDetail(page, templateId);
-    template = templateResult.template;
-  }
-  const isPreviewDraft = Boolean(
-    tourInfo.previewTourInfoId
-    && (!tourInfo.tourInfoId || String(tourInfo.tourInfoId) === "0")
-    && !tourInfo.auditTourInfoId,
-  );
+  // 4) 草稿详情是正常草稿保存的输入模板；写入只以关联 draft ID 为源，绝不使用
+  // formal/audit 详情替代。
+  const detailId = writableTourInfoId;
+  const detailTourInfo = (await fetchTourDailyDetail(page, detailId)).tourInfo;
 
   // 5) 用 itinerary-transform 生成完整 tourDailyDescriptions
   const tourDailyDescriptions = transformItinerary({
@@ -97,85 +220,133 @@ export async function ensureItineraryApi(
   // 5) 拼装完整 tourInfo payload（含 template / templateId / days / tourDailyDescriptions）
   const newTourInfo: Record<string, unknown> = {
     ...(detailTourInfo ?? {}),
-    ...(template ? { template } : {}),
     templateId,
-    ...(!isPreviewDraft ? { productId: Number(productId) || productId } : {}),
-    tourInfoId: isPreviewDraft ? 0 : existingTourInfoId || 0,
+    productId: Number(productId) || productId,
+    tourInfoId: writableTourInfoId,
+    // Normal UI draft saves consistently send this flag; preserve it rather than
+    // inheriting a missing value from a readonly detail template.
+    isModify: true,
     days: tourDailyDescriptions.length,
     tourDailyDescriptions,
-    ...(isPreviewDraft ? { isModify: true } : {}),
   };
 
-  // 6) checkTourDaily saveType=8 → calculateTourInfoScore → checkTourDaily saveType=3
-  //    productTourInfo 同步写入 template / templateId / days，保证后端能识别。
-  const productTourInfo: Record<string, unknown> = isPreviewDraft
-    ? {
-        ...tourInfo,
-        productId: Number(productId) || productId,
-        tourInfoId: 0,
-      }
-    : {
-        ...tourInfo,
-        ...(template ? { template } : {}),
-        templateId,
-        productId: Number(productId) || productId,
-        tourInfoId: existingTourInfoId || 0,
-        days: tourDailyDescriptions.length,
-      };
-  // 关键修复：用 JSON.stringify(newTourInfo) 替代 JSON.stringify({ tourDailyDescriptions })，
-  // 保留 draftTourInfoId / template / templateId 等元数据，避免后端把请求当作"空对象"。
+  // 6) 真实 UI 证据：checkTourDaily 请求 saveType=2，productTourInfo 保持
+  // formal 身份而 tourDaily 指向独立 draft/首建 preview；不调用 8/3，也不构造 score。
+  const productTourInfo: Record<string, unknown> = {
+    ...tourInfo,
+    productId: Number(productId) || productId,
+    templateId,
+    days: tourDailyDescriptions.length,
+  };
   const initialText = JSON.stringify(newTourInfo);
-  const initialSaveType = isPreviewDraft ? 7 : 8;
-  const checked8 = await checkTourDailyStep(
+  assertDraftWritePayload({
+    descriptions: tourDailyDescriptions,
+    serialized: initialText,
+    pickupAir: stations.pickupAir,
+    exteriorBridge: enrichedItinerary.some((day) => day.spots?.some((spot) => spot.poiId === 85862 && isExteriorOnlyVisit(spot.description))),
+  });
+  const initialProjection = projectDraftWrite(tourDailyDescriptions);
+  logInfo("[vbk-itinerary-draft] before-check", { productId, projection: initialProjection });
+  const checkedDraft = await checkTourDailyStep(
     page,
     productTourInfo,
     initialText,
-    initialSaveType,
-    `VBK 行程校验(saveType=${initialSaveType})`,
+    2,
+    "VBK 行程草稿校验(saveType=2)",
   );
-  const scoreResult = await calculateTourScoreStep(page, {
-    ...productTourInfo,
-    aggregateScore: (checked8 as { aggregateScore?: number }).aggregateScore,
-  });
-  (checked8 as { aggregateScore?: number }).aggregateScore =
-    scoreResult.aggregateScore ?? (checked8 as { aggregateScore?: number }).aggregateScore;
-  (checked8 as { tourInfoScores?: unknown }).tourInfoScores = scoreResult.tourInfoScores;
-  const checked8Text = typeof checked8 === "object" ? JSON.stringify(checked8) : String(checked8);
-  const checked3 = await checkTourDailyStep(page, productTourInfo, checked8Text, 3, "VBK 行程校验(saveType=3)");
-
-  // 7) 保存详情 + 保存关联
-  //    saveTourDailyDetail 响应允许仅含顶层 tourInfoId；savedTourInfoId 一律以
-  //    checkTourDaily(saveType=3) 响应的 tourInfoId 为准，保证后续回读 ID 一致。
-  await saveTourDailyDetailStep(page, checked3);
-  const savedTourInfoId = (checked3 as { tourInfoId?: string | number }).tourInfoId;
-  if (!savedTourInfoId) {
-    throw new Error("VBK 行程详情保存后未生成新 tourInfoId");
+  assertCheckedDraftPayload(initialProjection, checkedDraft);
+  logInfo("[vbk-itinerary-draft] checked", { productId, projection: projectDraftWrite(checkedDraft) });
+  // 7) 真实 UI 证据：check 响应、详情保存和关联 tourDaily 均使用独立 draft/preview ID。
+  // 关联的 formal/audit/status 原样保留，不改审核指针。
+  const checkedDraftId = linkedVersionId(checkedDraft, "tourInfoId");
+  const checkedDraftAliases = [formalTourInfoId, auditTourInfoId].filter(Boolean);
+  const allowsCheckCreatedDraft = (writableVersion.field === "previewTourInfoId" || writableVersion.field === "tourInfoId")
+    && checkedDraftId
+    && !checkedDraftAliases.some((id) => id === checkedDraftId);
+  const effectiveWritableTourInfoId = allowsCheckCreatedDraft ? checkedDraftId : writableTourInfoId;
+  if (!checkedDraftId || (!allowsCheckCreatedDraft && checkedDraftId !== writableTourInfoId)) {
+    throw new Error(`VBK 行程草稿校验未回读 ${writableVersion.field}：期望=${String(writableTourInfoId)}，实际=${String(checkedDraftId ?? "")}`);
   }
-  const finalTourInfo = {
-    ...checked3,
-    productId: Number(productId) || productId,
-    main: productTourInfo.main ?? true,
-    sort: productTourInfo.sort ?? 0,
-    tourInfoId: savedTourInfoId,
-    auditTourInfoId: savedTourInfoId,
-    auditTourInfoStatus: 1,
-    aggregateScore: checked3.aggregateScore ?? scoreResult.aggregateScore ?? 100,
-  };
-  await saveProductTourInfoStep(page, finalTourInfo, JSON.stringify(finalTourInfo));
+  const saveDetailResult = await saveTourDailyDetailStep(page, checkedDraft, "draft-v2");
+  const savedDraftId = linkedVersionId(saveDetailResult, "tourInfoId");
+  if (!savedDraftId || String(savedDraftId) !== String(effectiveWritableTourInfoId)) {
+    throw new Error(`VBK 行程详情草稿保存未回读 ${writableVersion.field}：期望=${String(effectiveWritableTourInfoId)}，实际=${String(savedDraftId ?? "")}`);
+  }
+  const associationTourInfo = allowsCheckCreatedDraft
+    ? {
+        ...checkedDraft,
+        productId: Number(productId) || productId,
+        main: tourInfo.main ?? true,
+        sort: tourInfo.sort ?? 0,
+        tourInfoId: effectiveWritableTourInfoId,
+        auditTourInfoId: effectiveWritableTourInfoId,
+        auditTourInfoStatus: 1,
+        auditStatus: tourInfo.auditStatus ?? { key: "N", value: "未提交" },
+      }
+    : {
+        ...tourInfo,
+        productId: Number(productId) || productId,
+        main: tourInfo.main ?? true,
+        sort: tourInfo.sort ?? 0,
+      };
+  // saveProductTourInfo 使用带独立 draft/preview ID 的初始 tourDaily；不能把 check
+  // 返回对象或 formal/audit 身份混入关联请求。
+  logInfo("[vbk-itinerary-draft] before-association", { productId, projection: initialProjection });
+  const associationText = allowsCheckCreatedDraft ? JSON.stringify(checkedDraft) : initialText;
+  await saveProductTourInfoStep(page, associationTourInfo, associationText, "draft-v2");
 
-  // 8) 完整回读校验（字段级逐天比对）
+  // 8) 关联写入后重新拉取版本关系。平台可以轮换可写版本 ID，但 formal/audit
+  // 和审核状态必须保留；最终详情只从重新关联的独立未提交草稿版本回读。
+  const { tourInfo: savedRelation } = await fetchTourInfoId(page, productId);
+  const retainedFields = writableVersion.field === "draftTourInfoId"
+    ? ["tourInfoId", "auditTourInfoId", "previewTourInfoId", "auditTourInfoStatus", "auditStatus"] as const
+    : writableVersion.field === "previewTourInfoId" || writableVersion.field === "tourInfoId"
+    ? writableVersion.field === "tourInfoId"
+      ? ["auditStatus"] as const
+      : ["auditTourInfoId", "auditTourInfoStatus", "auditStatus"] as const
+    : ["auditStatus"] as const;
+  for (const field of retainedFields) {
+    assertRetainedVersion(tourInfo, savedRelation, field);
+  }
+  const savedDraftTourInfoId = linkedVersionId(savedRelation, "draftTourInfoId");
+  const savedFormalTourInfoId = linkedVersionId(savedRelation, "tourInfoId");
+  const savedAuditTourInfoId = linkedVersionId(savedRelation, "auditTourInfoId");
+  const savedPreviewTourInfoId = linkedVersionId(savedRelation, "previewTourInfoId");
+  const previewWritableTourInfoId = savedFormalTourInfoId ?? savedPreviewTourInfoId;
+  const finalWritableTourInfoId = savedDraftTourInfoId
+    ?? (writableVersion.field === "previewTourInfoId" ? previewWritableTourInfoId : undefined)
+    ?? (writableVersion.field === "tourInfoId" ? savedFormalTourInfoId : undefined);
+  const finalWritableField = savedDraftTourInfoId
+    ? "draftTourInfoId"
+    : savedFormalTourInfoId && writableVersion.field === "previewTourInfoId"
+      ? "tourInfoId"
+      : writableVersion.field;
+  const finalAliases = finalWritableField === "draftTourInfoId"
+    ? [savedFormalTourInfoId, savedAuditTourInfoId, savedPreviewTourInfoId].filter(Boolean)
+    : finalWritableField === "previewTourInfoId"
+      ? [savedFormalTourInfoId, savedAuditTourInfoId].filter(Boolean)
+      : [];
+  const finalStatusOk = finalWritableField === "draftTourInfoId"
+    ? savedRelation.draftTourInfoStatus === 1 || savedRelation.draftTourInfoStatus === "1"
+    : isUnsubmittedAuditStatus(savedRelation.auditStatus)
+      && (!savedAuditTourInfoId || savedAuditTourInfoId === finalWritableTourInfoId);
+  if (!finalWritableTourInfoId || !finalStatusOk || finalAliases.some((id) => id === finalWritableTourInfoId)) {
+    throw new Error(`VBK 草稿关联保存后未返回独立的未提交 ${finalWritableField}，已停止回读验收。关联版本=${linkedVersionSummary(savedRelation)}`);
+  }
+
+  // 9) 完整回读校验（字段级逐天比对）
   const readbackExpectations = buildReadbackExpectations({
-    itinerary: product.itinerary,
+    itinerary: enrichedItinerary,
     operations,
     stations,
   });
-  const verify = await verifyItineraryReadback(page, savedTourInfoId, readbackExpectations);
+  const verify = await verifyItineraryReadback(page, finalWritableTourInfoId, readbackExpectations);
 
-  // 9) 业务结果
+  // 10) 业务结果
   return {
     productId,
-    tourInfoId: savedTourInfoId,
-    auditTourInfoId: savedTourInfoId,
+    tourInfoId: finalWritableTourInfoId,
+    auditTourInfoId: savedAuditTourInfoId ?? auditTourInfoId ?? "",
     days: verify.days,
     savedSpots: verify.spots,
     savedMeals: verify.meals,

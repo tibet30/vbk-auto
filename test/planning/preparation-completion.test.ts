@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
-import { evaluatePreparationCompletion, preparationApprovalBlockReason } from "../../src/main/planning/preparation-completion.js";
+import { evaluatePreparationCompletion, isCoverHandoffReady, preparationApprovalBlockReason } from "../../src/main/planning/preparation-completion.js";
 import { computeReadiness } from "../../src/main/readiness.js";
-import { agentCompletionGate, buildAgentApproval } from "../../src/main/agent/integration-gates.js";
+import { productSchema } from "../../src/main/automation/schema/schema-definitions.js";
+import { agentCompletionGate, agentProductVersion, buildAgentApproval } from "../../src/main/agent/integration-gates.js";
 import { AgentCore } from "../../src/main/agent/core.js";
 import type { AgentCoreDependencies } from "../../src/main/agent/types.js";
 import type { AgentSnapshot, ProductDetail, ProductReadiness } from "../../src/shared/contracts.js";
@@ -49,6 +50,30 @@ function completeDraft(): ProductDetail {
   product.researchTasks = [];
   return product;
 }
+
+test("封面找图穷尽时只允许未提审草稿审批与录入", () => {
+  const product = completeDraft();
+  const presentation = product.product.presentation as Record<string, unknown>;
+  presentation.cover = { source: "ctripLibrary", poi: "宽窄巷子" };
+  presentation.coverFallback = {
+    slotKey: "presentation.cover", assetKey: "cover-landscape",
+    reason: "no_qualified_candidate", createdAt: "2026-09-29T00:00:00.000Z",
+  };
+  assert.equal(productSchema.safeParse(product.product).success, true);
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.equal(isCoverHandoffReady(product), true);
+  assert.equal(evaluation.ready, true);
+  assert.equal(evaluation.allowedActions.includes("resolve_cover"), false);
+  assert.equal(evaluation.allowedActions.includes("request_approval"), true);
+  assert.equal(preparationApprovalBlockReason(product), undefined);
+  assert.match(buildAgentApproval(product).summary, /仅保存未提审草稿，禁止上架/);
+  (product.product.commercial!.release as Record<string, unknown>).submitReview = true;
+  assert.equal(isCoverHandoffReady(product), false);
+  assert.match(preparationApprovalBlockReason(product) ?? "", /封面|发布/);
+  (product.product.commercial!.release as Record<string, unknown>).submitReview = false;
+  delete (product.product.commercial as Record<string, unknown>).pricing;
+  assert.equal(isCoverHandoffReady(product), false);
+});
 
 test("缺套餐名、定价、班期时不允许批准", () => {
   const product = completeDraft();
@@ -126,6 +151,7 @@ test("完成阶段三后只允许一次批准", () => {
   assert.equal(first.currentStage, "completion");
   assert.equal(first.currentNode, "finalValidation");
   assert.deepEqual(first.missing, []);
+  assert.ok(first.allowedActions.includes("patch_product"));
   assert.ok(first.allowedActions.includes("request_approval"));
   assert.ok(!first.prohibitedActions.includes("request_approval"));
 
@@ -140,6 +166,7 @@ test("完成阶段三后只允许一次批准", () => {
   };
   const second = evaluatePreparationCompletion(product, snapshot);
   assert.equal(second.ready, true);
+  assert.ok(second.allowedActions.includes("patch_product"));
   assert.ok(!second.allowedActions.includes("request_approval"));
   assert.ok(second.prohibitedActions.includes("request_approval"));
 
@@ -147,6 +174,22 @@ test("完成阶段三后只允许一次批准", () => {
   assert.equal(gate.verified, false);
   assert.ok(gate.finalApproval);
   assert.deepEqual(gate.finalApproval?.scope, buildAgentApproval(product).scope);
+});
+
+test("就绪后的本地文案修订使旧审批版本失效，不能继续外部录入", () => {
+  const product = completeDraft();
+  const productVersion = agentProductVersion(product);
+  const approval = { id: "a", productVersion, accountKey: "account", intentVersion: "intent", scope: buildAgentApproval(product).scope, summary: "最终确认", status: "approved" as const, createdAt: "t" };
+  const snapshot: AgentSnapshot = {
+    localProductId: product.id,
+    run: { id: "run", status: "running", createdAt: "t", updatedAt: "t", intentVersion: "intent" },
+    events: [{ id: "approval", runId: "run", type: "approval", content: "已确认", createdAt: "t", data: { approval } }],
+  };
+  (product.product.presentation as Record<string, unknown>).recommendation = "调整后的合规推荐语";
+  assert.notEqual(agentProductVersion(product), productVersion);
+  const gate = agentCompletionGate(product, snapshot, readyReadiness, { runId: "run", hadWrites: true, hadRemoteWrites: true });
+  assert.equal(gate.verified, false);
+  assert.match(gate.message ?? "", /当前方案与已确认版本不一致/);
 });
 
 test("未启用大交通不会被错误阻塞，启用后缺可用性核验会阻塞", () => {

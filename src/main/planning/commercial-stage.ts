@@ -37,8 +37,8 @@ export async function ensurePackageName(args: {
  * 商业阶段的本地估价兜底。
  *
  * 模型不能取得实时供应商报价时，仍需产出可审核的草稿价；这里仅基于已落库
- * 的行程规模、酒店档次、日用车形态及讲解密度计算「指导价」，不读取或猜测
- * VBK 资源组标价。真实采购价仍需在发布前按出行日复核。
+ * 的行程规模、酒店档次、已保存的全程用车成本及讲解密度计算「指导价」。
+ * 真实采购价仍需在发布前按出行日复核。
  */
 export async function ensureCommercialFallbacks(args: {
   localProductId: string;
@@ -89,7 +89,10 @@ export function estimateCommercialPricing(
 ): CommercialPricingEstimate {
   const operations = record(product.operations);
   const hotelCost = hotelNightCost(String(operations?.hotelTier ?? "")) * Math.max(0, skeleton.nights);
-  const transportCost = dailyTransportCost(String(operations?.transport ?? "")) * Math.max(1, skeleton.days);
+  const transportCost = Math.max(
+    dailyTransportCost(String(operations?.transport ?? "")) * Math.max(1, skeleton.days),
+    positiveNumber(record(operations?.vehicleResource)?.requestedTotalCost) ?? 0,
+  );
   const guideCost = guidedVisitCount(product, skeleton.days) * (skeleton.productForm === "privateTour" ? 90 : 60);
   const serviceCost = Math.max(1, skeleton.days) * 95;
   const minimumAdultCost = minimumCost(skeleton.productForm);

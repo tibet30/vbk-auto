@@ -6,6 +6,7 @@ import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfac
 import { normaliseTrafficLineConfig } from "../../shared/contracts-traffic-line.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
+import { hotelDiamondFromTier } from "../../shared/hotel-tiers.js";
 import { hasPersistedCommercialInventory, hasPersistedCommercialPricing } from "./commercial-stage.js";
 
 export interface PreparationGap {
@@ -42,6 +43,7 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
   const sales = asObject(product.sales);
   const operations = asObject(product.operations);
   const commercial = asObject(product.commercial);
+  const hotelDiamond = hotelDiamondFromTier(operations?.hotelTier);
   const meetingCity = toPlatformShortLocationName(textValue(basic?.meetingCity || basic?.destinationCity));
   const destinationCity = toPlatformShortLocationName(textValue(basic?.destinationCity || basic?.meetingCity));
   const days = Number(basic?.days);
@@ -92,10 +94,10 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
     const lodgingDay = asObject(day);
     if (!lodgingDay || !needsItineraryHotelCandidates(lodgingDay, index, nights)) continue;
     const candidates = asArray(lodgingDay.hotelCandidates) ?? [];
-    if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT) {
+    if (!hasValidItineraryHotelCandidates(candidates, hotelDiamond)) {
       gaps.push({
         label: `酒店候选：第 ${Number(lodgingDay.day) || index + 1} 天`,
-        detail: `行程录入页使用携程平台酒店；住宿日必须先持久化 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程酒店候选，酒店资源阶段再录入真实酒店资源。`,
+        detail: `行程录入页使用携程平台酒店；住宿日必须先持久化 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个含有效ID、城市、锚点、评分、距离且符合已锁定钻级的携程酒店候选，酒店资源阶段再录入真实酒店资源。`,
         stage: "completion",
         node: "hotelResolution",
       });
@@ -125,6 +127,22 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
     }
   }
   return gaps;
+}
+
+function hasValidItineraryHotelCandidates(candidates: unknown[], requiredDiamond: number | undefined): boolean {
+  if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT || !requiredDiamond) return false;
+  return candidates.every((value) => {
+    const candidate = asObject(value);
+    return Boolean(candidate
+      && Number.isInteger(candidate.hotelId) && Number(candidate.hotelId) > 0
+      && textValue(candidate.hotelName)
+      && typeof candidate.diamond === "number" && candidate.diamond === requiredDiamond
+      && typeof candidate.score === "number" && Number.isFinite(candidate.score) && candidate.score >= 0
+      && typeof candidate.distanceKm === "number" && Number.isFinite(candidate.distanceKm) && candidate.distanceKm >= 0
+      && textValue(candidate.cityName)
+      && textValue(candidate.anchorName)
+      && Number.isInteger(candidate.anchorCityId) && Number(candidate.anchorCityId) > 0);
+  });
 }
 
 function needsItineraryHotelCandidates(day: Record<string, unknown>, index: number, nights: number): boolean {

@@ -69,17 +69,30 @@ export function hasCompleteDailyUserItinerary(intent: PlanningUserIntent, days: 
   return Array.from({ length: days }, (_, index) => plannedDays.has(index + 1)).every(Boolean);
 }
 
-/** 用户地点只有“确实未命中”时才能降级；地域错误、暂停营业等仍需阻断。 */
-export function blockingUserPoiFailure(candidates: PlanningPoiCandidate[]): string | undefined {
+/** 用户明确景点的 POI 失败必须阻断；只有已关联的明确非 POI 活动可保留为 other/free。 */
+export function blockingUserPoiFailure(candidates: PlanningPoiCandidate[], intent?: PlanningUserIntent): string | undefined {
   const blocked = candidates.find((candidate) => candidate.source === "user"
     && candidate.status === "rejected"
-    // 用户明确指定到某一天的景点是硬约束。未匹配时不能静默降级为普通
-    // 活动并让 AI 用其它景点填满当天，否则“第一天/第二天”的原始计划会
-    // 被改写。未指定日期的泛化体验活动仍保留原有降级语义。
-    && (Boolean(candidate.preferredDay) || candidate.reason !== "未命中可确认的真实 POI"));
+    // A user-provided activity can produce a POI candidate before its title is
+    // normalized. Only an existing, explicitly non-POI activity is exempt.
+    // Missing links and unknown kinds fail closed so a rejected POI cannot be
+    // silently downgraded.
+    && !isExplicitNonPoiActivity(candidate.userActivityId, intent));
   return blocked
     ? `用户指定地点「${blocked.requestedName}」不能作为本次行程活动：${blocked.reason || "POI 校验失败"}`
     : undefined;
+}
+
+function isExplicitNonPoiActivity(userActivityId: string | undefined, intent?: PlanningUserIntent): boolean {
+  if (!userActivityId || !intent) return false;
+  const activity = intent.activities.find((item) => item.id === userActivityId);
+  // `free` maps to free; the remaining listed kinds map to other. Do not use
+  // `kind !== "poi"`: malformed or future kinds must remain blocked.
+  return activity?.kind === "activity"
+    || activity?.kind === "transport"
+    || activity?.kind === "meal"
+    || activity?.kind === "hotel"
+    || activity?.kind === "free";
 }
 
 export function otherActivitiesForDay(args: {
@@ -89,22 +102,18 @@ export function otherActivitiesForDay(args: {
   /** 当天已选中的真实 POI 名称。与用户活动同义时，不再重复写入「其他」。 */
   matchedPoiNames?: string[];
 }): PlanningOtherActivity[] {
-  const candidateByActivity = new Map(
-    args.candidates.filter((candidate) => candidate.userActivityId)
-      .map((candidate) => [candidate.userActivityId!, candidate]),
-  );
   return args.intent.activities.flatMap((activity) => {
     if (activity.day > 0 && activity.day !== args.day) return [];
     if (activity.day === 0) return [];
     if (args.matchedPoiNames?.some((poiName) => isSamePoiActivity(activity.title, poiName))) return [];
-    const candidate = candidateByActivity.get(activity.id);
-    if (activity.kind === "poi" && candidate?.status !== "rejected") return [];
-    if (activity.kind === "poi" && candidate?.reason !== "未命中可确认的真实 POI") return [];
+    // A failed POI lookup stays a POI research item; it must never be silently
+    // downgraded to a non-POI activity.
+    if (activity.kind === "poi") return [];
     return [{
       time: activity.time || "不限",
       title: activity.title,
       detail: activity.detail || `按用户要求安排${activity.title}；该活动未使用已验证 POI。`,
-      type: "other" as const,
+      type: activity.kind === "free" ? "free" as const : "other" as const,
       ...(activity.durationMinutes ? { durationMinutes: activity.durationMinutes } : {}),
       source: "user" as const,
     }];

@@ -38,7 +38,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
 }): Promise<PoiAutoSelectionResult> {
   const exact = args.detail.best
     ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
-      isSelectableCandidateInContext(candidate, args.context) && candidate.poiId === args.detail.best!.poiId)
+      isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword) && candidate.poiId === args.detail.best!.poiId)
     : undefined;
   let candidate = exact;
   let confidence = 1;
@@ -46,7 +46,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
   if (!candidate && args.disambiguate) {
     const choices = args.detail.candidates.slice(0, 12)
       .filter((item): item is PoiSuggestCandidate & { poiName: string; poiId: number } =>
-        isSelectableCandidateInContext(item, args.context));
+        isPlanningPoiCandidateInContext(item, args.context, args.product, args.keyword));
     if (choices.length === 0) return { status: "uncertain" };
     const outcome = await args.disambiguate({
       localProductId: args.localProductId,
@@ -58,7 +58,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
     confidence = outcome.confidence;
   }
 
-  if (!candidate || !isSelectableCandidate(candidate) || !candidateMatchesContext(candidate, args.context)) {
+  if (!candidate || !isSelectableCandidate(candidate) || !candidateMatchesContext(candidate, args.context, args.product, args.keyword)) {
     return { status: "uncertain" };
   }
   const availability = await args.checkAvailability(candidate.poiId);
@@ -80,11 +80,13 @@ function isSelectableCandidate(candidate: PoiSuggestCandidate): candidate is Poi
   return candidate.selectable && Boolean(candidate.poiName?.trim() && candidate.poiId && candidate.poiId > 0);
 }
 
-function isSelectableCandidateInContext(
+export function isPlanningPoiCandidateInContext(
   candidate: PoiSuggestCandidate,
   context: { destinationCity?: string; province?: string } | undefined,
+  product: Record<string, unknown>,
+  keyword: string,
 ): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } {
-  return isSelectableCandidate(candidate) && candidateMatchesContext(candidate, context);
+  return isSelectableCandidate(candidate) && candidateMatchesContext(candidate, context, product, keyword);
 }
 
 function candidateLabel(candidate: PoiSuggestCandidate & { poiName: string }): string {
@@ -95,24 +97,75 @@ function candidateLabel(candidate: PoiSuggestCandidate & { poiName: string }): s
 }
 
 /**
- * 自动绑定只接受能被候选行政区字段明确证明属于目的地的 POI。
- * 不能因为名称相似、搜索排序靠前或 AI 高置信度而把外地同名点写入行程。
+ * 省份必须匹配产品行政约束。跨城市 POI 只在该行程日明确提到候选城市或区县时
+ * 才允许写入，避免城市锚点为潮州时误删用户明确安排的南澳、汕头行程。
  */
 function candidateMatchesContext(
   candidate: PoiSuggestCandidate,
   context: { destinationCity?: string; province?: string } | undefined,
+  product: Record<string, unknown>,
+  keyword: string,
 ): boolean {
   const destinationCity = normaliseAdministrativeName(context?.destinationCity);
   const province = normaliseAdministrativeName(context?.province);
   const candidateCity = normaliseAdministrativeName(candidate.city);
   const candidateProvince = normaliseAdministrativeName(candidate.province);
-  if (destinationCity && candidateCity !== destinationCity) return false;
-  if (province && candidateProvince && candidateProvince !== province) return false;
+  if (province && (!candidateProvince || candidateProvince !== province)) return false;
+  if (destinationCity && !candidateCity) return false;
+  if (destinationCity && candidateCity !== destinationCity
+    && !itineraryExplicitlyAllowsLocation(product, keyword, candidateCity, candidate.district)) return false;
   return true;
+}
+
+function itineraryExplicitlyAllowsLocation(
+  product: Record<string, unknown>,
+  keyword: string,
+  candidateCity: string,
+  candidateDistrict: unknown,
+): boolean {
+  const itinerary = product.itinerary;
+  if (!Array.isArray(itinerary)) return false;
+  const locations = [candidateCity, normaliseAdministrativeName(candidateDistrict)]
+    .filter((location) => location.length >= 2);
+  if (locations.length === 0) return false;
+  return itinerary.some((day) => {
+    if (!isRecord(day) || !dayContainsKeyword(day, keyword)) return false;
+    const text = normaliseText(dayRouteText(day));
+    return locations.some((location) => text.includes(normaliseText(location)));
+  });
+}
+
+function dayContainsKeyword(day: Record<string, unknown>, keyword: string): boolean {
+  const desired = normaliseText(keyword);
+  if (desired.length < 2) return false;
+  const spots = Array.isArray(day.spots) ? day.spots : [];
+  return spots.some((spot) => {
+    if (!isRecord(spot)) return false;
+    const name = normaliseText(String(spot.name ?? ""));
+    return name.length >= 2 && (name.includes(desired) || desired.includes(name));
+  });
+}
+
+function dayRouteText(day: Record<string, unknown>): string {
+  const spots = Array.isArray(day.spots) ? day.spots : [];
+  return [day.title, day.description, ...spots.flatMap((spot) => {
+    if (!isRecord(spot)) return [];
+    return [spot.name, spot.description];
+  })]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normaliseText(value: string): string {
+  return value.replace(/\s+/gu, "").trim();
 }
 
 function normaliseAdministrativeName(value: unknown): string {
   return typeof value === "string"
-    ? value.trim().replace(/(维吾尔自治区|壮族自治区|回族自治区|自治区|特别行政区|省|市|地区|盟|州|自治州)$/u, "")
+    ? value.trim().replace(/(维吾尔自治区|壮族自治区|回族自治区|自治区|特别行政区|自治州|地区|省|市|盟|州|县|区)$/u, "")
     : "";
 }

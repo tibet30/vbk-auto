@@ -19,8 +19,10 @@ import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
+import { mergeSkeletonOperations } from "./skeleton-operation-merge.js";
 import type { ContactCardSelection, ProductDetail } from "../../shared/contracts.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import {
   VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
@@ -172,10 +174,7 @@ export function itineraryPoisAreComplete(itinerary: unknown[]): boolean {
     for (const spot of spots) {
       if (!spot || typeof spot !== "object" || Array.isArray(spot)) return false;
       const record = spot as Record<string, unknown>;
-      const poiName = typeof record.poiName === "string" ? record.poiName.trim() : "";
-      const poiId = record.poiId;
-      if (!poiName) return false;
-      if (!(typeof poiId === "number" && Number.isInteger(poiId) && poiId > 0)) return false;
+      if (requiresItineraryPoi(record) && !hasCompletePoi(record)) return false;
     }
   }
   return true;
@@ -284,8 +283,12 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       }
       value = { ...existing, ...incoming };
     }
-    if (module === "itinerary" && Array.isArray(value)) {
-      value = filterRemovedItinerarySpots(product, value);
+    if (module === "skeleton" && value && typeof value === "object" && !Array.isArray(value)) {
+      const existing = product.product.operations && typeof product.product.operations === "object"
+        && !Array.isArray(product.product.operations)
+        ? product.product.operations as Record<string, unknown>
+        : {};
+      value = mergeSkeletonOperations(existing, value as Record<string, unknown>);
     }
     const contractError = planningWriteContractError(product, module, value);
     if (contractError) return { ok: false, reason: contractError };
@@ -299,9 +302,10 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     alignProvinceLevelBasicCities(productData, module, product.product);
     // Notify so workspace readiness refreshes after agent/planning module writes.
     this.productMutations.replace(localProductId, productData, {
-      // itinerary 的受控规划/复核可能明确清空过期或外地 POI；不能被通用
-      // 异步快照保护重新塞回。无关模块仍保留默认保护。
-      preserveVerifiedItineraryPois: module !== "itinerary",
+      // 同日同名同类型的既有 POI 由统一写入口保留。规划模型重写文案时常会
+      // 回传空 poiName/poiId；它不是显式取消已核验绑定的指令。
+      // 改名、移除、类型转换或新的完整 POI 映射仍按传入值生效。
+      preserveVerifiedItineraryPois: true,
     });
     const accountName = this.db.getSetting("vbkAccountName")?.value || null;
     injectAccountButler(this.db, localProductId, accountName);
@@ -357,32 +361,6 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     if (!product) return [];
     return detectAcceptedModulesFromProduct(product.product);
   }
-}
-
-function filterRemovedItinerarySpots(product: ProductDetail, itinerary: unknown[]): unknown[] {
-  const locked = extractLockedConstraints(product, product.messages ?? []);
-  const allowedByDay = new Map(locked.itineraryOrder.map((row) => [row.day, new Set(row.spots.map(normaliseName))]));
-  if (!allowedByDay.size) return itinerary;
-  return itinerary.map((day) => {
-    if (!day || typeof day !== "object" || Array.isArray(day)) return day;
-    const record = day as Record<string, unknown>;
-    const allowed = allowedByDay.get(Number(record.day));
-    if (!Array.isArray(record.spots)) return day;
-    if (!allowed) return { ...record, spots: [] };
-    return {
-      ...record,
-      spots: record.spots.filter((spot) => {
-        if (!spot || typeof spot !== "object" || Array.isArray(spot)) return true;
-        const name = normaliseName(String((spot as Record<string, unknown>).name ?? (spot as Record<string, unknown>).poiName ?? ""));
-        if (!name) return true;
-        return [...allowed].some((item) => name === item || name.includes(item) || item.includes(name));
-      }),
-    };
-  });
-}
-
-function normaliseName(value: string): string {
-  return value.replace(/\s+/g, "").replace(/景区|旅游景区|地质公园|博物馆|天文科普馆|科普馆/g, "");
 }
 
 function alignProvinceLevelBasicCities(

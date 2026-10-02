@@ -15,6 +15,7 @@ import { poiResearchTaskLabel } from "../../shared/poi-research-tasks.js";
 import { productNeedsVehicleResource } from "../../shared/product-form.js";
 import { hasSatisfiedHotelTier, hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { isTravelNodeName } from "./itinerary-adoption.js";
+import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 const TASK_TYPE_VBK = "vbk" as const;
 const TASK_TYPE_IMAGE = "image" as const;
@@ -94,8 +95,8 @@ export function itineraryPoiTasks(itinerary: unknown, destination: string): Rese
     for (const key of ["spots", "poi", "attractions"]) {
       const value = record[key]; if (Array.isArray(value)) rawItems.push(...value); else if (value) rawItems.push(value);
     }
-    if (Array.isArray(record.activities)) rawItems.push(...record.activities);
     for (const raw of rawItems) {
+      if (raw && typeof raw === "object" && !Array.isArray(raw) && !requiresItineraryPoi(raw as Record<string, unknown>)) continue;
       const name = typeof raw === "string" ? raw.trim() : raw && typeof raw === "object" ? String((raw as any).poiName ?? (raw as any).name ?? (raw as any).title ?? "").trim() : "";
       if (!name || seen.has(name) || isTravelNodeName(name)) continue; seen.add(name);
       out.push({ label: poiResearchTaskLabel(name), type: TASK_TYPE_VBK, detail: `由目的地「${destination}」延伸` });

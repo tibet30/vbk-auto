@@ -32,6 +32,33 @@ function makeProduct(commercial?: Record<string, unknown>, trafficLine?: Record<
   });
 }
 
+function makeProductWithUserIdea(userIdea: string, trafficLine: Record<string, unknown>) {
+  return parseProduct({
+    sales: { productType: "domesticShort", productForm: "groupTour", splitGroup: false },
+    basicInfo: {
+      supplierProductName: "潮州5天4晚跟团游",
+      supplierProductCode: "TEST-TRAFFIC-OFF",
+      subtitle: "潮州经典五日游",
+      days: 5,
+      nights: 4,
+      meetingCity: "潮州",
+      destinationCity: "潮州",
+      province: "广东",
+      operationNotes: "测试",
+      userIdea,
+    },
+    operations: { pickupCity: "潮州", trafficLine },
+    itinerary: Array.from({ length: 5 }, (_, index) => ({
+      day: index + 1,
+      title: index === 0 ? "潮汕接团" : index === 4 ? "潮汕送团" : `潮州游览 D${index + 1}`,
+      spots: [],
+      description: index === 0 ? "接团后自由活动。" : index === 4 ? "送团。" : "市区游览。",
+      hotel: index < 4 ? "潮州古城有熊酒店" : "",
+      meals: "早餐自理；午餐自理；晚餐自理",
+    })),
+  });
+}
+
 test("只有 pricing 时包含 pricingInventory 阶段", () => {
   const product = makeProduct({
     packageName: "标准套餐",
@@ -68,6 +95,16 @@ test("线路及交通在站点确认后位于条款和预检之间", () => {
     variants: ["flightRoundTrip", "trainRoundTrip"],
   }));
   assert.deepEqual(phases.slice(-3), ["terms", "trafficLine", "preflight"]);
+});
+
+test("用户明确不含飞机或火车交通子产品时，即使历史配置启用也不进入 trafficLine 阶段", () => {
+  const phases = draftPhasesFor(makeProductWithUserIdea(
+    "运营回归产品，不含飞机或火车交通子产品。只保存未提审草稿。",
+    { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] },
+  ));
+
+  assert.equal(phases.includes("trafficLine"), false);
+  assert.deepEqual(phases.slice(-2), ["terms", "preflight"]);
 });
 
 test("非私家团只有明确带车辆资源诉求时才加入 vehicleResource 阶段", () => {

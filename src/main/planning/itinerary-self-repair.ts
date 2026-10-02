@@ -26,13 +26,21 @@ export function selfRepairItineraryForVbk(value: unknown): ItinerarySelfRepairRe
     const original = Array.isArray(day.spots) ? day.spots.filter(isRecord) : [];
     const withoutTravel = original.filter((spot) => {
       const name = spotName(spot);
-      if (!name || !isTravelNodeName(name)) return true;
+      if (!name || isExplicitNonPoi(spot) || !isTravelNodeName(name)) return true;
       removedTravelNodes.push(name);
       return false;
     });
     const repaired: JsonObject[] = [];
     for (let index = 0; index < withoutTravel.length;) {
       const spot = withoutTravel[index]!;
+      if (isExplicitNonPoi(spot)) {
+        // Non-POI activities are independent; an old relation:'or' must not
+        // join an attraction alternative group or stall this repair loop.
+        spot.relation = "and";
+        repaired.push(spot);
+        index += 1;
+        continue;
+      }
       if (spot.relation !== "or") {
         repaired.push(spot);
         index += 1;
@@ -42,7 +50,7 @@ export function selfRepairItineraryForVbk(value: unknown): ItinerarySelfRepairRe
       const group: JsonObject[] = [];
       while (index < withoutTravel.length) {
         const candidate = withoutTravel[index]!;
-        if (candidate.relation !== "or" || candidate.timeOfDay !== time) break;
+        if (isExplicitNonPoi(candidate) || candidate.relation !== "or" || candidate.timeOfDay !== time) break;
         group.push(candidate);
         index += 1;
       }
@@ -72,6 +80,10 @@ function hasVerifiedPoi(value: JsonObject): boolean {
 
 function spotName(value: JsonObject): string {
   return text(value.name) || text(value.poiName);
+}
+
+function isExplicitNonPoi(value: JsonObject): boolean {
+  return value.kind === "free" || value.kind === "other";
 }
 
 function isRecord(value: unknown): value is JsonObject {

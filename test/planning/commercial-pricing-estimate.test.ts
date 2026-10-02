@@ -26,3 +26,14 @@ test("私家团缺失报价时按酒店、专车和讲解密度计算可审核�
     cost: { adult: 1500, child: 700, singleSupplement: 370, childBed: 290 },
   });
 });
+
+test("已保存的全程用车成本高于日用车估算时不得低估单人成本", () => {
+  const pricing = estimateCommercialPricing(
+    { destination: "泸州", days: 2, nights: 1, productForm: "privateTour",
+      productType: "domesticShort", supplierProductCode: "" },
+    { operations: { hotelTier: "当地5钻酒店/-38", transport: "charter",
+      vehicleResource: { requestedTotalCost: 1200 } } },
+  );
+  assert.equal(pricing.cost.adult, 1910);
+  assert.equal(pricing.adult, 2390);
+});

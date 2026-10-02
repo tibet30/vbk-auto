@@ -1,4 +1,4 @@
-import type { AgentSnapshot, PlannerContext, ProductDetail } from '../../shared/contracts.js';
+import type { AgentSnapshot, PlannerContext, ProductDetail, ProductReadiness } from '../../shared/contracts.js';
 import type { VbkDatabase } from '../infrastructure/database/database.js';
 import { isProductForm } from '../../shared/product-form.js';
 import type { MemoryPromptContext } from '../../shared/contracts.js';
@@ -37,12 +37,12 @@ export function agentPlannerContext(
 }
 
 /** Do not nest the conversation or automation logs back into a tool result. */
-export function agentProductContext(product: ProductDetail, snapshot?: AgentSnapshot) {
-  return buildAgentProductContext(product, snapshot);
+export function agentProductContext(product: ProductDetail, snapshot?: AgentSnapshot, readiness?: ProductReadiness) {
+  return buildAgentProductContext(product, snapshot, readiness);
 }
 
-export function agentTaskContext(db: VbkDatabase, id: string, memoryContext?: MemoryPromptContext): string {
+export function agentTaskContext(db: VbkDatabase, id: string, memoryContext?: MemoryPromptContext, readiness?: ProductReadiness): string {
   const product = db.getProduct(id);
   if (!product) throw new Error('产品不存在');
-  return buildAgentTaskContext(product, db.getAgentSnapshot?.(id), memoryContext);
+  return buildAgentTaskContext(product, db.getAgentSnapshot?.(id), memoryContext, readiness);
 }

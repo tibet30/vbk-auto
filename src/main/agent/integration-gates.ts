@@ -6,6 +6,7 @@ import type { AgentFinishContext, AgentFinishResult } from './types.js';
 import { preservesApprovedIntent } from './approval-intent.js';
 import { trafficLineChildShouldBeSkipped } from '../automation/ctrip/traffic-line/main.js';
 import { evaluatePreparationCompletion } from '../planning/preparation-completion.js';
+import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 
 type Json = Record<string, unknown>;
 function canonical(value: unknown): unknown {
@@ -62,6 +63,20 @@ export function requiredAgentPhases(product: ProductDetail): string[] {
   const data = product.product as unknown as Parameters<typeof draftPhasesFor>[0];
   return [...(!product.productId ? ['saleControl'] : []), ...draftPhasesFor({...data,itinerary:Array.isArray(data.itinerary)?data.itinerary:[],sales:data.sales ?? {productForm:'privateTour'}})];
 }
+
+export function trafficLineCanBeDeferred(product: ProductDetail): boolean {
+  const automation = product.automation;
+  const phases = automation?.phases ?? [];
+  const trafficPhase = phases.find((phase) => phase.phase === 'trafficLine');
+  if (!trafficPhase || trafficPhase.status === 'completed') return false;
+  if (!phases.some((phase) => phase.phase === 'preflight' && phase.status === 'completed')) return false;
+  const children = automation?.trafficLine?.children ?? [];
+  return trafficPhase.status === 'failed' || children.some((child) => {
+    if (trafficLineChildShouldBeSkipped(child)) return true;
+    return !child.verified || !child.completedStages.includes('finalReadback');
+  });
+}
+
 export function approvalForRun(snapshot?: AgentSnapshot): AgentApproval | undefined {
   return snapshot?.events.filter(e=>e.runId===snapshot.run?.id && e.type==='approval')
     .map(e=>e.data?.approval as AgentApproval | undefined).reverse().find(a=>a?.status==='approved');
@@ -105,9 +120,17 @@ export function buildAgentApproval(product: ProductDetail) {
   const commercial = data.commercial as Json | undefined;
   const pricing = commercial?.pricing as Json | undefined;
   const inventory = commercial?.inventory as Json | undefined;
+  const presentation = data.presentation as Json | undefined;
+  const cover = presentation?.cover as Json | undefined;
+  const manualCoverNotice = cover?.source === "manualUpload"
+    ? "将把已保存的手动封面上传到携程；请确认拥有该图的使用授权并同意携程图片授权协议。"
+    : "";
+  const placeholderNotice = readActiveCoverFallback(product.product)
+    ? "将上传运营占位图，仅保存未提审草稿，禁止上架；运营须在上架前替换真实封面。"
+    : "";
   return {
     scope: requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`),
-    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}请核对右侧行程、资源和条款，确认后录入当前方案。`,
+    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${manualCoverNotice}${placeholderNotice}请核对右侧行程、资源和条款，确认后录入当前方案。`,
   };
 }
 export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnapshot | undefined, readiness: ProductReadiness, context?: AgentFinishContext): AgentFinishResult {
@@ -137,7 +160,8 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   const required = requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`);
   if (required.some(scope=>!approval.scope.includes(scope))) return {verified:false,message:'已确认范围不完整，请重新请求最终确认。'};
   const phases = approval.scope.filter(scope=>scope.startsWith('vbk.write_phase:')).map(scope=>scope.split(':')[1]);
-  const incompleteTrafficChild = phases.includes('trafficLine')
+  const canDeferTrafficLine = trafficLineCanBeDeferred(product);
+  const incompleteTrafficChild = phases.includes('trafficLine') && !canDeferTrafficLine
     ? product.automation?.trafficLine?.children.find((child) => {
       // Platform "no sellable resource" skips are durable success for that variant.
       if (trafficLineChildShouldBeSkipped(child)) return false;
@@ -177,6 +201,7 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
       && product.automation?.phases.some(item=>item.phase===phase && item.status==='completed')) {
       return false;
     }
+    if (phase === 'trafficLine' && canDeferTrafficLine) return false;
     return true;
   });
   if (!phases.length || missing.length) return {verified:false,message:`本轮尚未完成已确认范围的回读：${missing.join('、') || '缺少录入范围'}。请继续对应阶段。`};

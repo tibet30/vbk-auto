@@ -117,6 +117,15 @@ export const baseProduct = {
     transport: "charter",
     reusePickupForDropoff: true,
     mealsIncluded: false,
+    trafficLine: {
+      availability: {
+        endpointPlan: {
+          arrivalCity: "丽江", departureCity: "丽江", resolvedAt: "2026-09-30T00:00:00.000Z",
+          flight: { arrival: { code: "LJG", name: "三义机场" }, departure: { code: "LJG", name: "三义机场" } },
+          train: { arrival: { code: "CN001LHM", name: "丽江" }, departure: { code: "CN001LHM", name: "丽江" } },
+        },
+      },
+    },
   } as any,
   productId: "77035928",
 };
@@ -132,6 +141,15 @@ export const baseProductNoHotel = {
     transport: "charter",
     reusePickupForDropoff: true,
     mealsIncluded: false,
+    trafficLine: {
+      availability: {
+        endpointPlan: {
+          arrivalCity: "丽江", departureCity: "丽江", resolvedAt: "2026-09-30T00:00:00.000Z",
+          flight: { arrival: { code: "LJG", name: "三义机场" }, departure: { code: "LJG", name: "三义机场" } },
+          train: { arrival: { code: "CN001LHM", name: "丽江" }, departure: { code: "CN001LHM", name: "丽江" } },
+        },
+      },
+    },
   } as any,
   productId: "77035928",
 };
@@ -186,7 +204,11 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
         // 景点
         ...(!opts.omitAttraction?.(i) ? [{
           activeType: { key: 3, name: "景点" },
-          tourDailyPois: pois.map((p, idx) => ({ sort: idx + 1, poi: { poiId: p.poiId, poiName: p.poiName } })),
+          tourDailyPois: pois.map((p, idx) => ({
+            sort: idx + 1,
+            poi: { poiId: p.poiId, poiName: p.poiName },
+            suffixName: { key: 13, name: "含成人儿童首道门票" },
+          })),
         }] : []),
         // 首日不排早餐；午、晚餐固定自理；尾日不排晚餐。
         ...(!isFirst ? [{
@@ -200,13 +222,15 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
         ...(hotelName ? [{
           activeType: { key: 1, name: "酒店" },
           useSegmentConfig: true,
-          description: `${hotelName}（当地4钻酒店/-4）`,
-          tourDailyHotels: [{ hotel: { hotelName, grade: { name: "当地4钻酒店/-4" } } }],
+          description: `${hotelName}（当地4钻酒店）`,
+          tourDailyHotels: [{ hotel: { hotelName, grade: { key: -4, name: "当地4钻酒店" } } }],
         }] : []),
         // 其他 + 服务时间
         {
-          activeType: { key: 7, name: "自由活动" },
+          activeType: { key: 9, name: "其他" },
           description: opts.otherDescription ? opts.otherDescription(i) : "自由活动",
+          takeoffTime: { key: null, name: "下午" },
+          takeTime: 120,
           startOnBoardTime: opts.serviceStart ?? "08:00",
           stopOnBoardTime: opts.serviceEnd ?? "20:00",
         },
@@ -245,6 +269,8 @@ export interface HandlersOverrides {
 
 export function makeHandlers(opts: HandlersOverrides = {}) {
   const tourInfoId = opts.tourInfoId ?? "409136029189275700";
+  const draftTourInfoId = "417899634191761447";
+  const previewTourInfoId = "417815590194610231";
   const newTourInfoId = opts.newTourInfoId ?? "999999999999999999";
   const readbackDays = opts.readbackDays ?? 2;
   let detailCallCount = 0;
@@ -271,7 +297,13 @@ export function makeHandlers(opts: HandlersOverrides = {}) {
       tourInfos: opts.emptyProduct
         ? []
         : [{
-            tourInfoId: Number(tourInfoId) || tourInfoId,
+            tourInfoId,
+            draftTourInfoId,
+            auditTourInfoId: tourInfoId,
+            previewTourInfoId,
+            draftTourInfoStatus: 1,
+            auditTourInfoStatus: 2,
+            auditStatus: { key: "A", value: "审核通过" },
             productId: 77035928,
             main: true,
             sort: 0,
@@ -326,7 +358,12 @@ export function makeHandlers(opts: HandlersOverrides = {}) {
       return {
         ResponseStatus: { Ack: "Success", Errors: [] },
         tourDaily: JSON.stringify({
-          tourInfoId: newTourInfoId,
+          tourInfoId: draftTourInfoId,
+          draftTourInfoId,
+          auditTourInfoId: tourInfoId,
+          previewTourInfoId,
+          draftTourInfoStatus: 1,
+          auditTourInfoStatus: 2,
           tourDailyDescriptions: descriptions,
         }),
       };
@@ -337,7 +374,7 @@ export function makeHandlers(opts: HandlersOverrides = {}) {
     }),
     "/restapi/soa2/20049/saveTourDailyDetail.json": () => ({
       ResponseStatus: { Ack: "Success", Errors: [] },
-      tourInfo: { tourInfoId: newTourInfoId },
+      tourInfoId: draftTourInfoId,
     }),
     "/restapi/soa2/15638/saveProductTourInfo": () => ({
       ResponseStatus: { Ack: "Success", Errors: [] },

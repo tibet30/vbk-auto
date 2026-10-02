@@ -84,6 +84,19 @@ test("cover POI must match a verified itinerary POI before the product is ready"
   assert.equal(hasValidCoverPoMeta(product), false);
 });
 
+test("manual upload validates saved file metadata without matching an image ID to itinerary POIs", () => {
+  const product = makeValidProduct();
+  (product.presentation as Record<string, unknown>).cover = {
+    source: "manualUpload", fileId: "local-file", originalName: "cover.png", mimeType: "image/png",
+    sizeBytes: 1024, uploadedAt: "2026-09-29T00:00:00.000Z",
+    poi: "与行程无关的城市封面", description: "城市夜景", minQuality: 3,
+    poiId: 999999, imageId: 888888,
+  };
+  assert.equal(hasValidCoverPoMeta(product), true);
+  delete ((product.presentation as Record<string, unknown>).cover as Record<string, unknown>).fileId;
+  assert.equal(hasValidCoverPoMeta(product), false);
+});
+
 test("仅有封面 POI 占位时不能进入 ready", () => {
   const product = makeValidProduct();
   const cover = (product.presentation as Record<string, unknown>).cover as Record<string, unknown>;
@@ -260,7 +273,7 @@ test("G3 assertPresentationReadyForVbk 非白名单 category 在第一行抛错"
   assert.throws(() => assertPresentationReadyForVbk(product), /白名单/);
 });
 
-test("G3 assertPresentationReadyForVbk manualUpload 封面抛错", () => {
+test("G3 assertPresentationReadyForVbk accepts complete manualUpload metadata", () => {
   const product = makeValidProduct();
   (product.presentation as Record<string, unknown>).cover = {
     source: "manualUpload",
@@ -273,7 +286,7 @@ test("G3 assertPresentationReadyForVbk manualUpload 封面抛错", () => {
     minQuality: 3,
     uploadedAt: "2026-01-01T00:00:00.000Z",
   };
-  assert.throws(() => assertPresentationReadyForVbk(product), /手动上传/);
+  assert.doesNotThrow(() => assertPresentationReadyForVbk(product));
 });
 
 // ────────────────────────────────────────────────────────────────────

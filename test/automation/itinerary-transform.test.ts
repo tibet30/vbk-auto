@@ -166,8 +166,8 @@ test("酒店节点：day.hotel 非空时产出 activeType=1 节点 + tourDailyHo
   assert.equal(hotel.tourDailyHotels.length, 1);
   assert.equal(hotel.tourDailyHotels[0].hotel.hotelName, "丽江和玺酒店");
   // 钻级从 operations.hotelTier 派生
-  assert.equal(hotel.tourDailyHotels[0].hotel.grade.name, "当地4钻酒店/-4");
-  assert.equal(hotel.tourDailyHotels[0].hotel.grade.key, null, "酒店钻级 key 留空（业务 VBK 用 grade.name 匹配）");
+  assert.equal(hotel.tourDailyHotels[0].hotel.grade, undefined, "未知 hotel.grade 不进入草稿请求；客户钻级写在节点说明");
+  assert.doesNotMatch(hotel.description, /\/-4/, "面向客户的酒店说明不得泄露内部枚举");
   assert.equal(hotel.useSegmentConfig, true, "酒店来源 radio 必须选中使用携程平台酒店");
   assert.equal(hotel.tourDailyHotels[0].ishand, true, "行程酒店来源默认使用携程平台酒店");
   assert.equal(hotel.tourDailyHotels[0].hotel.ishand, true, "酒店对象也保持平台酒店来源");
@@ -189,7 +189,7 @@ test("酒店节点：五家携程候选仅将前三家录入同一酒店节点�
   const hotels = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 1);
   assert.equal(hotels.length, 1);
   assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.hotelName), ["主选酒店", "备选酒店二", "备选酒店三"]);
-  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.grade.name), ["当地4钻酒店/-4", "当地4钻酒店/-4", "当地4钻酒店/-4"]);
+  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.grade), [undefined, undefined, undefined]);
 });
 
 test("酒店节点：day.hotel 为空时不产出酒店节点", () => {
@@ -337,6 +337,22 @@ test("免费景点使用 VBK 当前无需门票类型，收费景点默认含成
   const paidPoi = transformItinerary({ itinerary: [paidDay], operations: baseOps, stations: baseStations })[0]
     .tourDailyInfos.find((info) => info.activeType?.key === 3).tourDailyPois[0];
   assert.deepEqual(paidPoi.suffixName, { key: 13, name: "含成人儿童首道门票" });
+});
+
+test("外观且不上桥的景点保留 POI、顺序和说明", () => {
+  const day = makeDay({
+    spots: [
+      { name: "广济桥", poiName: "广济桥", poiId: 1, ticketType: { key: 1, name: "收费" }, description: "远观广济桥（不上桥），欣赏代表性古桥景观。", timeOfDay: "morning" },
+      { name: "收费景点", poiName: "收费景点", poiId: 2, ticketType: { key: 1, name: "收费" }, description: "入内参观。", timeOfDay: "morning" },
+    ],
+  });
+  const attraction = transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations })[0]
+    .tourDailyInfos.find((info) => info.activeType?.key === 3)!;
+  assert.equal(attraction.description, "远观广济桥（不上桥），欣赏代表性古桥景观。；入内参观。");
+  assert.deepEqual(attraction.tourDailyPois.map((poi: any) => poi.poi.poiId), [1, 2]);
+  assert.deepEqual(attraction.tourDailyPois.map((poi: any) => poi.suffixName), [
+    { key: 1, name: "外观" }, { key: 13, name: "含成人儿童首道门票" },
+  ]);
 });
 
 test("未知 / 业务无关字段保留（customStatus / pkgTourInfoId / versionNum / directionWay）", () => {

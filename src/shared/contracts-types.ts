@@ -47,6 +47,8 @@ export interface ProductSummary {
   id: string;
   name: string;
   status: "planning" | "review" | "automating" | "draft_saved" | "blocked";
+  /** Persisted local cover handoff; a real image still blocks no part of this status. */
+  coverNeedsReplacement?: boolean;
   productId?: string;
   /** 创建该产品时使用的 VBK 登录账号（例如 vbk_671205）。 */
   vbkAccount?: string;
@@ -80,6 +82,8 @@ export interface PoiSuggestLogContext {
   destinationCity?: string;
   province?: string;
 }
+
+export type ItineraryActivityKind = import("./itinerary-activity-kind.js").ItineraryActivityKind;
 
 export interface PoiSuggestion {
   poiName: string;
@@ -276,6 +280,8 @@ export type ManualReviewFieldInput =
     city?: string | null;
     district?: string | null;
   }
+  /** 手动切换有序行程条目的业务类型；切到非景点时必须清空既有 POI。 */
+  | { field: "itinerarySpotKind"; dayIndex: number; spotIndex: number; kind: ItineraryActivityKind; description?: string }
   /** 每日行程 spot 手动删除：只移除指定 spot，并同步移除同名 visit 活动。 */
   | { field: "itinerarySpotRemove"; dayIndex: number; spotIndex: number }
   /**

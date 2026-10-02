@@ -29,6 +29,12 @@ export const VBK_COPY_BAD_CASES = [
     pattern: /首选/,
   },
   {
+    term: "夜骑",
+    reason: "VBK 行程描述实跑会判定为非法关键词",
+    alternatives: ["晚间街区漫步", "夜间街区游览"],
+    pattern: /夜骑/,
+  },
+  {
     term: "主席",
     reason: "VBK 行程描述实跑会判定为非法关键词",
     alternatives: ["重要人物", "相关负责人", "历史人物"],
@@ -219,7 +225,9 @@ export function repairVbkCopyPolicyValue(value: unknown, path = "value"): unknow
     // "首次到访" is the common phrase that triggered the live failure.  Its
     // preferred alternative replaces the whole phrase, rather than producing
     // the awkward "初到到访" from a character-only substitution below.
-    const phraseRepaired = value.replace(/首次到访/g, "初到");
+    const phraseRepaired = value.replace(/首次到访/g, "初到")
+      .replace(/夜骑楼风情/g, "骑楼街区风情")
+      .replace(/夜骑楼/g, "骑楼街区");
     const removedCopyFragment = VBK_COPY_BAD_CASES.some(
       (badCase) => "replacement" in badCase && badCase.replacement === "" && badCase.pattern.test(value),
     );

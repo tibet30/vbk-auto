@@ -162,6 +162,11 @@ export class AgentTurnLoop {
       this.snapshots.save(snapshot);
       return;
     }
+    if (gate.pauseReason) {
+      this.snapshots.pause(snapshot, gate.pauseReason);
+      this.snapshots.save(snapshot);
+      return;
+    }
     this.snapshots.completionBlocked(snapshot, gate.message ?? "写入尚未完成权威核对，请查询并继续。");
     this.snapshots.save(snapshot);
   }

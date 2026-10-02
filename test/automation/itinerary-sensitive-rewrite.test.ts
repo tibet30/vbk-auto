@@ -38,6 +38,34 @@ test("仅定位实际命中的行程描述字段", () => {
   );
 });
 
+test("定位并局部改写 other/free 景点描述，保留名称、类型、顺序与 POI 身份", () => {
+  const value = product();
+  value.itinerary[0].spots = [
+    { name: "镇邦美食街", kind: "other", description: "晚餐打卡镇邦美食街，体验夜骑楼风情。", poiName: "镇邦美食街", poiId: 7 },
+    { name: "自由活动", kind: "free", description: "夜骑街区体验", poiName: "官方自由活动", poiId: 8 },
+  ];
+  assert.deepEqual(findSensitiveItineraryPaths(value, ["夜骑"]), [
+    "/itinerary/0/spots/0/description", "/itinerary/0/spots/1/description",
+  ]);
+  applySensitiveItineraryRewrite(value, {
+    reply: "已改写", patch: [
+      { op: "replace", path: "/itinerary/0/spots/0/description", value: "晚餐打卡镇邦美食街，体验骑楼街区风情。" },
+      { op: "replace", path: "/itinerary/0/spots/1/description", value: "晚间街区漫步体验" },
+    ], questions: [], researchTasks: [],
+  }, ["夜骑"]);
+  assert.deepEqual(value.itinerary[0].spots, [
+    { name: "镇邦美食街", kind: "other", description: "晚餐打卡镇邦美食街，体验骑楼街区风情。", poiName: "镇邦美食街", poiId: 7 },
+    { name: "自由活动", kind: "free", description: "晚间街区漫步体验", poiName: "官方自由活动", poiId: 8 },
+  ]);
+});
+
+test("日描述缺失时仍定位 other/free 景点描述", () => {
+  const value = product();
+  delete (value.itinerary[0] as { description?: string }).description;
+  value.itinerary[0].spots = [{ name: "自由活动", kind: "free", description: "夜骑街区体验", poiName: "官方自由活动", poiId: 8 }];
+  assert.deepEqual(findSensitiveItineraryPaths(value, ["夜骑"]), ["/itinerary/0/spots/0/description"]);
+});
+
 test("AI 重写后仅更新命中的行程描述，其他天保留", () => {
   const value = product();
   applySensitiveItineraryRewrite(

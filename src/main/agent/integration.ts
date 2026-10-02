@@ -11,10 +11,12 @@ import {
 } from "./integration-generate.js";
 import { denyPreparationTool } from "./preparation-action-guard.js";
 import { enrichItineraryPois } from "../planning/poi-enrichment.js";
+import { isPlanningPoiCandidateInContext } from "../planning/poi-auto-selection.js";
 import { syncInitialTrafficLineAvailability } from "../planning/traffic-line-availability.js";
 import { resolveProductTrafficLineAvailability } from "../automation/ctrip/traffic-line/planning-availability.js";
 import type { TrafficLineStationDisambiguator } from "../automation/ctrip/traffic-line/endpoints.js";
 import type { ProductDetail } from "../../shared/contracts.js";
+import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { searchVbkResources, firstHotelResource } from "../operations/hotel-resource.js";
 import { buildVehicleResourceQuery, searchVehicleResourceGroups, extractResourceGroups, bestResourceGroup, resolveVehicleResource } from "../operations/vehicle-resource.js";
 import { applyAutoCoverFill } from "../operations/cover-auto-fill.js";
@@ -42,7 +44,7 @@ const ITINERARY_SPOT_PATCH_SCHEMA = {
   type: "object",
   required: ["name"],
   properties: {
-    name: { type: "string" }, timeOfDay: { enum: ["morning", "afternoon", "evening"] }, relation: { enum: ["and", "or"] },
+    name: { type: "string" }, kind: { enum: ["attraction", "free", "other"] }, description: { type: "string" }, timeOfDay: { enum: ["morning", "afternoon", "evening"] }, relation: { enum: ["and", "or"] },
     poiName: { type: "string" }, poiId: { type: "number" },
   },
 };
@@ -252,20 +254,26 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       },
     },
     {
-      name: "select_itinerary_poi", description: "将 query_poi 已返回的一个真实可用候选，安全绑定到当前行程中的既有景点。仅可选择本次按该景点名称查询到、地域匹配且正常营业的候选；用于别名/官方名与用户原名不同的情况，不能用 patch_product 直接填写 POI ID。", parameters: { type: "object", required: ["day", "spotName", "poiId"], properties: { day: { type: "number" }, spotName: { type: "string" }, poiId: { type: "number" } } },
+      name: "select_itinerary_poi", description: "将 query_poi 已返回的一个真实可用候选，安全绑定到当前行程中的既有景点。spotName 必须是原行程名称；别名查询时传 queryKeyword，候选仍须通过原行程日的地域与营业核验。不能用 patch_product 直接填写 POI ID。", parameters: { type: "object", required: ["day", "spotName", "poiId"], properties: { day: { type: "number" }, spotName: { type: "string" }, queryKeyword: { type: "string" }, poiId: { type: "number" } } },
       async execute(args, ctx) {
         const day = positiveInteger(args.day, "day");
         const spotName = cleanText(args.spotName);
+        const queryKeyword = cleanText(args.queryKeyword) || spotName;
         const poiId = positiveInteger(args.poiId, "poiId");
         if (!spotName) throw new Error("缺少现有景点名称。");
         const current = get(ctx.localProductId);
         const { dayIndex, spotIndex, spot } = selectItinerarySpot(current, day, spotName);
+        if (!requiresItineraryPoi(spot)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
         const basic = productData(current).basicInfo as JsonObject | undefined;
-        const detail = await withPage(async () => suggestPoiDetail(await deps.browser.page(), spotName, {
+        const context = {
           destinationCity: cleanText(basic?.destinationCity || basic?.meetingCity), province: cleanText(basic?.province),
-        }));
+        };
+        const detail = await withPage(async () => suggestPoiDetail(await deps.browser.page(), queryKeyword, context));
         const candidate = detail.candidates.find((item) => item.poiId === poiId && item.selectable && item.poiName);
-        if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${spotName}」的当前可选查询结果中。`);
+        if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${queryKeyword}」的当前可选查询结果中。`);
+        if (!isPlanningPoiCandidateInContext(candidate, context, productData(current), spotName)) {
+          throw new Error(`POI「${candidate.poiName}」与第 ${day} 天原景点「${spotName}」的地域约束不匹配。`);
+        }
         const availability = await getCtripSightAvailabilities(undefined, [poiId], deps.db);
         if (availability.get(poiId)?.status === "suspended") throw new Error(`POI「${candidate.poiName}」已暂停营业，不能写入行程。`);
         const nextSpot: JsonObject = {
@@ -282,7 +290,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         if (!result.applied) throw new Error("已核验的 POI 未能保存到行程。");
         refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         deps.emitProduct(get(ctx.localProductId));
-        return { content: safeJson({ day, spotName, poiName: candidate.poiName, poiId, province: candidate.province, city: candidate.city }) };
+        return { content: safeJson({ day, spotName, queryKeyword, poiName: candidate.poiName, poiId, province: candidate.province, city: candidate.city }) };
       },
     },
     {

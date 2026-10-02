@@ -28,6 +28,8 @@ const itineraryDaySchema = z.object({
   title: z.string().min(1),
   spots: z.array(z.object({
     name: z.string().min(1),
+    kind: z.enum(["attraction", "free", "other"]).default("attraction"),
+    description: z.string().optional(),
     poiName: z.string().nullable().optional(),
     poiId: z.number().int().positive().nullable().optional(),
     province: z.string().nullable().optional(),
@@ -50,7 +52,9 @@ const itineraryDaySchema = z.object({
       poiName: z.string().min(1).optional(),
       selectedAt: z.string().min(1).optional(),
     }).strict()).optional(),
-  }).strict()).default([]),
+  }).strict().superRefine((spot, ctx) => {
+    if (spot.kind !== "attraction" && (spot.poiName || spot.poiId)) ctx.addIssue({ code: "custom", message: "自由活动或其他活动不得绑定 POI" });
+  })).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),
   hotelCandidates: z.array(z.object({
@@ -96,7 +100,7 @@ export type ProductCoverSource = (typeof PRODUCT_COVER_SOURCES)[number];
 
 const MANUAL_UPLOAD_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
-const manualUploadCoverSchema = z.object({
+export const manualUploadCoverSchema = z.object({
   source: z.literal("manualUpload"),
   fileId: z.string().min(1),
   originalName: z.string().min(1),
@@ -106,6 +110,7 @@ const manualUploadCoverSchema = z.object({
   description: z.string().min(1),
   minQuality: z.number().min(0).max(5).default(3),
   uploadedAt: z.string().min(1),
+  remoteImageId: z.number().int().positive().optional(),
 });
 
 const ctripLibraryCoverSchema = z.object({
@@ -159,6 +164,13 @@ const presentationSchema = z.object({
   recommendations: z.array(recommendationItemSchema).length(3).optional(),
   features: z.string().min(1).optional(),
   cover: presentationCoverSchema.optional(),
+  coverFallback: z.object({
+    slotKey: z.literal("presentation.cover"),
+    assetKey: z.literal("cover-landscape"),
+    reason: z.enum(["no_qualified_candidate", "search_unavailable"]),
+    createdAt: z.string().min(1),
+    remoteImageId: z.number().int().positive().optional(),
+  }).optional(),
 });
 
 // 自动录入 VBK 基本信息时，除了产品元数据还会用到两类运营数据：

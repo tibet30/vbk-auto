@@ -1,6 +1,7 @@
 import type { AgentSnapshot, ProductDetail } from "../../shared/contracts.js";
 import type { PreparationAction, PreparationEvaluation, PreparationMajorStage } from "../../shared/contracts-preparation.js";
 import { evaluatePreparationCompletion } from "../planning/preparation-completion.js";
+import { classifyReadinessIssue } from "../planning/preparation-checks.js";
 
 const UNRESTRICTED_TOOLS = new Set([
   "read_product",
@@ -9,6 +10,8 @@ const UNRESTRICTED_TOOLS = new Set([
   "query_vehicle_resource",
   "query_station",
   "read_vbk_phase",
+  "capture_itinerary_draft_save",
+  "read_itinerary_draft_diagnostic",
 ]);
 
 const TOOL_ACTION: Record<string, PreparationAction> = {
@@ -53,6 +56,8 @@ export interface PreparationToolDenial {
     currentStage: PreparationMajorStage;
     currentNode: PreparationEvaluation["currentNode"];
     missing: string[];
+    currentStageMissing: string[];
+    laterStageMissing: string[];
   };
 }
 
@@ -73,6 +78,8 @@ export function denyPreparationTool(
     currentStage: evaluation.currentStage,
     currentNode: evaluation.currentNode,
     missing: evaluation.missing,
+    currentStageMissing: missingForCurrentStage(evaluation),
+    laterStageMissing: missingForLaterStages(evaluation),
     allowedActions: evaluation.allowedActions,
   };
   return {
@@ -82,6 +89,8 @@ export function denyPreparationTool(
       currentStage: evaluation.currentStage,
       currentNode: evaluation.currentNode,
       missing: evaluation.missing,
+      currentStageMissing: missingForCurrentStage(evaluation),
+      laterStageMissing: missingForLaterStages(evaluation),
     },
   };
 }
@@ -93,14 +102,17 @@ function actionDeniedReason(
   args: Record<string, unknown>,
 ): string | undefined {
   const { currentStage, currentNode, missing, allowedActions } = evaluation;
-  const stay = `请留在 ${currentStage}/${currentNode} 继续补齐：${missing.join("、") || "当前缺项"}`;
+  const currentMissing = missingForCurrentStage(evaluation);
+  const laterMissing = missingForLaterStages(evaluation);
+  const stay = `请留在 ${currentStage}/${currentNode} 继续补齐：${currentMissing.join("、") || "当前缺项"}`;
+  const later = laterMissing.length ? `后续阶段待补：${laterMissing.join("、")}。` : "";
   if (action && !allowedActions.includes(action)) {
-    return `当前阶段不允许 ${toolName}。${stay}`;
+    return `当前阶段不允许 ${toolName}。${stay}${later}`;
   }
   if (toolName === "generate_product_module") {
     const stage = typeof args.stage === "string" ? args.stage : "";
     if (!generateStageAllowed(currentStage, stage, missing)) {
-      return `当前处于 ${currentStage}/${currentNode}，不能执行 generate_product_module(${stage || "未知"}) 来跳过本阶段。${stay}`;
+      return `当前处于 ${currentStage}/${currentNode}，不能执行 generate_product_module(${stage || "未知"}) 来跳过本阶段。${stay}${later}`;
     }
   }
   if (toolName === "patch_product") {
@@ -109,10 +121,20 @@ function actionDeniedReason(
       : {};
     const blocked = blockedPatchFields(currentStage, patch);
     if (blocked.length) {
-      return `当前处于 ${currentStage}，不能通过 ${blocked.join("、")} 绕过本阶段。${stay}`;
+      return `当前处于 ${currentStage}，不能通过 ${blocked.join("、")} 绕过本阶段。${stay}${later}`;
     }
   }
   return undefined;
+}
+
+function missingForCurrentStage(evaluation: PreparationEvaluation): string[] {
+  const current = evaluation.missing.filter((label) => classifyReadinessIssue(label, label).stage === evaluation.currentStage);
+  return current.length ? current : evaluation.missing;
+}
+
+function missingForLaterStages(evaluation: PreparationEvaluation): string[] {
+  const current = new Set(missingForCurrentStage(evaluation));
+  return evaluation.missing.filter((label) => !current.has(label));
 }
 
 function generateStageAllowed(current: PreparationMajorStage, stage: string, missing: string[]): boolean {

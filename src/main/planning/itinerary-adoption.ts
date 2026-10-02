@@ -4,6 +4,7 @@ import type {
   PlanningNodeId,
   PlanningPlanV2,
 } from "../../shared/contracts-planning.js";
+import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 const COMPLETION_NODES = new Set<PlanningNodeId>([
   "copy", "presentation", "commercial", "cover", "vehicleResource", "finalValidation",
@@ -208,6 +209,7 @@ export function collectRequiredItinerarySpots(itinerary: unknown): RequiredItine
       const value = asRecord(spot);
       const name = text(value?.name) || text(value?.poiName) || (typeof spot === "string" ? spot.trim() : "");
       if (!name) continue;
+      if (value && !requiresItineraryPoi(value)) continue;
       result.push({ dayIndex, spotIndex, name, travelNode: isTravelNodeName(name) });
     }
   }
@@ -320,8 +322,12 @@ export function applyUnmatchedPoiSourcePolicy(
 
 export function itineraryHasRequiredPois(itinerary: unknown): boolean {
   const spots = collectRequiredItinerarySpots(itinerary).filter((spot) => !spot.travelNode);
-  if (spots.length === 0) return false;
   const days = Array.isArray(itinerary) ? itinerary : [];
+  if (days.length === 0 || days.some((day) => {
+    const record = asRecord(day); const daySpots = record?.spots;
+    return !Array.isArray(daySpots) || daySpots.length === 0 || daySpots.some((spot) => !text(asRecord(spot)?.name) && !text(asRecord(spot)?.poiName));
+  })) return false;
+  if (spots.length === 0) return true;
   return spots.every((spot) => {
     const day = asRecord(days[spot.dayIndex]);
     const value = asRecord(Array.isArray(day?.spots) ? day.spots[spot.spotIndex] : undefined);

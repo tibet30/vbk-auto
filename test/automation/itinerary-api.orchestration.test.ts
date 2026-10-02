@@ -1,11 +1,10 @@
 // itinerary-api 的"编排 + 单接口步骤"契约：
 //   - pickAirport / pickTrain 候选排序；
 //   - countItineraryApiSpots 兼容统计；
-//   - ensureItineraryApi 主路径按 6 步顺序调用（suggestAirport/suggestTrainStation
-//     → getProductTourInfoList → getTourDailyDetail → checkTourDaily(8) →
-//     calculateTourInfoScore → checkTourDaily(3) → saveTourDailyDetail →
-//     saveProductTourInfo → getTourDailyDetail 回读校验）；
-//   - 失败契约：check(8) 响应缺 tourDaily、saveTourDailyDetail 响应缺 tourInfo、
+//   - ensureItineraryApi 主路径按已采样草稿协议调用（suggestAirport/suggestTrainStation
+//     → getProductTourInfoList → getTourDailyDetail → checkTourDaily(2) →
+//     saveTourDailyDetail(2) → saveProductTourInfo(2) → draft 回读校验）；
+//   - 失败契约：check(2) 响应缺 tourDaily、saveTourDailyDetail 响应缺 tourInfo、
 //     接送站空、poiId 缺失、回读 day 数不一致 → 立即失败；
 //   - 成功结果字段完整：tourInfoId 等所有字段都在。
 //
@@ -20,6 +19,7 @@ import {
   ensureItineraryApi,
   pickAirport,
   pickTrain,
+  resolveStationsForItinerary,
 } from "../../src/main/automation/ctrip/itinerary-api.ts";
 import {
   baseProduct,
@@ -39,10 +39,9 @@ import {
 
 // ───────── pickAirport / pickTrain（纯函数） ─────────
 
-test("pickAirport：0 个候选返回 null；1 个返回该候选；多候选按精确 > 国际 > 城市机场 > 首项", () => {
+test("pickAirport：仅选择名称明确匹配城市的候选，拒绝跨城首项", () => {
   assert.equal(pickAirport([], "丽江"), null);
-  const one = pickAirport([makeCandidate("air", "LJG", "三义机场")], "丽江");
-  assert.ok(one && one.code === "LJG");
+  assert.equal(pickAirport([makeCandidate("air", "XMN", "高崎国际机场")], "潮州"), null, "单个跨城机场也不得自动选用");
   const exact = pickAirport([
     makeCandidate("air", "PVG", "浦东国际机场"),
     makeCandidate("air", "SHA", "上海"),
@@ -52,15 +51,15 @@ test("pickAirport：0 个候选返回 null；1 个返回该候选；多候选按
     makeCandidate("air", "WUX", "苏南硕放国际机场"),
     makeCandidate("air", "SHA", "上海"),
   ], "苏州");
-  assert.equal(primary?.code, "WUX", "苏州无精确匹配，落到国际机场");
+  assert.equal(primary, null, "苏州不能因国际机场字样误选无锡");
   const fallback = pickAirport([
     makeCandidate("air", "FOO", "城市机场"),
     makeCandidate("air", "BAR", "BAR"),
   ], "未知");
-  assert.equal(fallback?.code, "FOO", "都未匹配时取首项");
+  assert.equal(fallback, null, "都未匹配时拒绝首项");
 });
 
-test("pickTrain：0 个候选返回 null；1 个返回该候选；多候选精确同名优先，否则首项", () => {
+test("pickTrain：仅选择名称明确匹配城市的候选", () => {
   assert.equal(pickTrain([], "南京"), null);
   const one = pickTrain([makeCandidate("train", "CN001NJH", "南京")], "南京");
   assert.ok(one && one.code === "CN001NJH");
@@ -73,7 +72,86 @@ test("pickTrain：0 个候选返回 null；1 个返回该候选；多候选精�
     makeCandidate("train", "CN001XXX", "其他站"),
     makeCandidate("train", "CN001YYY", "其他站2"),
   ], "未知");
-  assert.equal(fallback?.code, "CN001XXX");
+  assert.equal(fallback, null);
+});
+
+test("已核验跨城端点按 name 重查并精确匹配 code/name，接送站可不同", async () => {
+  routeHandlers["/restapi/soa2/20049/suggestAirport"] = (body) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    airports: ({
+      "揭阳潮汕机场": [{ code: "SWA", name: "揭阳潮汕机场" }],
+      "深圳宝安国际机场": [{ code: "SZX", name: "深圳宝安国际机场" }],
+    } as Record<string, unknown[]>)[body.keyword] ?? [],
+  });
+  routeHandlers["/restapi/soa2/20049/suggestTrainStation"] = (body) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    trainStations: ({
+      "潮汕": [{ stationNo: 215, locationCode: "CN001CBQ", stationName: "潮汕" }],
+      "深圳北": [{ stationNo: 216, locationCode: "CN001IOQ", stationName: "深圳北" }],
+    } as Record<string, unknown[]>)[body.keyword] ?? [],
+  });
+
+  const stations = await resolveStationsForItinerary(makeFakePage() as any, {
+    pickupCity: "潮州",
+    endpointPlan: {
+      arrivalCity: "潮州", departureCity: "深圳", resolvedAt: "2026-09-30T00:00:00.000Z",
+      flight: {
+        arrival: { code: "SWA", name: "揭阳潮汕机场" },
+        departure: { code: "SZX", name: "深圳宝安国际机场" },
+      },
+      train: {
+        arrival: { code: "CN001CBQ", name: "潮汕", resourceKey: "215" },
+        departure: { code: "CN001IOQ", name: "深圳北", resourceKey: "216" },
+      },
+    },
+  });
+
+  assert.equal(stations.pickupAir?.code, "SWA");
+  assert.equal(stations.pickupTrain?.code, "CN001CBQ");
+  assert.equal(stations.dropoffAir?.code, "SZX");
+  assert.equal(stations.dropoffTrain?.code, "CN001IOQ");
+  assert.deepEqual(callLog.slice(0, 4).map((call) => call.body.keyword).sort(), [
+    "揭阳潮汕机场", "深圳宝安国际机场", "潮汕", "深圳北",
+  ].sort());
+});
+
+test("已核验端点重查到 code/name 变化时拒绝写错站并展示实际候选", async () => {
+  routeHandlers["/restapi/soa2/20049/suggestAirport"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    airports: [{ code: "SWA2", name: "揭阳潮汕国际机场" }],
+  });
+  routeHandlers["/restapi/soa2/20049/suggestTrainStation"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] }, trainStations: [],
+  });
+
+  await assert.rejects(
+    () => resolveStationsForItinerary(makeFakePage() as any, {
+      pickupCity: "潮州",
+      endpointPlan: {
+        arrivalCity: "潮州", departureCity: "潮州",
+        flight: {
+          arrival: { code: "SWA", name: "揭阳潮汕机场" },
+          departure: { code: "SWA", name: "揭阳潮汕机场" },
+        },
+      },
+    }),
+    /SWA2.*揭阳潮汕国际机场|揭阳潮汕国际机场.*SWA2/,
+  );
+});
+
+test("无已核验端点时单个跨城候选也 fail closed", async () => {
+  routeHandlers["/restapi/soa2/20049/suggestAirport"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] }, airports: [{ code: "XMN", name: "高崎国际机场" }],
+  });
+  routeHandlers["/restapi/soa2/20049/suggestTrainStation"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] }, trainStations: [],
+  });
+
+  const stations = await resolveStationsForItinerary(makeFakePage() as any, { pickupCity: "潮州" });
+  assert.equal(stations.pickupAir, null);
+  assert.equal(stations.pickupTrain, null);
+  assert.equal(stations.dropoffAir, null);
+  assert.equal(stations.dropoffTrain, null);
 });
 
 // ───────── countItineraryApiSpots 兼容 ─────────
@@ -108,7 +186,7 @@ test.after(() => {
   uninstallFetchStub();
 });
 
-test("ensureItineraryApi 主路径按 getTourInfo → detail → check(8) → score → check(3) → save → 回读 调用", async () => {
+test("ensureItineraryApi 只按已采样 draft 协议 check(2) → detail(2) → association(2)，并回读 draft", async () => {
   installHandlersForFieldMismatch({ hotelName: () => "", otherDescription: () => "自由活动", serviceStart: "08:00", serviceEnd: "20:00", title: (i) => i === 0 ? "第1天" : "第2天" });
   const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
   const sequence = callLog.map((c) => c.endpoint);
@@ -120,10 +198,9 @@ test("ensureItineraryApi 主路径按 getTourInfo → detail → check(8) → sc
     "/restapi/soa2/15638/getProductTourInfoList",
     "/restapi/soa2/20049/getTourDailyDetail.json",
     "/restapi/soa2/15638/checkTourDaily",
-    "/restapi/soa2/20049/calculateTourInfoScore",
-    "/restapi/soa2/15638/checkTourDaily",
     "/restapi/soa2/20049/saveTourDailyDetail.json",
     "/restapi/soa2/15638/saveProductTourInfo",
+    "/restapi/soa2/15638/getProductTourInfoList",
     "/restapi/soa2/20049/getTourDailyDetail.json",
   ];
   assert.deepEqual(sequence, expect, `实际顺序: ${sequence.join(", ")}`);
@@ -133,12 +210,12 @@ test("ensureItineraryApi 主路径按 getTourInfo → detail → check(8) → sc
   assert.equal(result.savedHotels, 0, "无酒店产品 savedHotels 应为 0");
   assert.equal(result.pickupAirport, "LJG");
   assert.equal(result.pickupTrain, "CN001LHM");
-  // checkTourDaily 必须 saveType=8 和 3 各一次
+  // 正常存为草稿只调用一次 check(saveType=2)，不得回退到 8/3。
   const checkCalls = callLog.filter((c) => c.endpoint === "/restapi/soa2/15638/checkTourDaily");
-  assert.equal(checkCalls.length, 2);
-  assert.equal((checkCalls[0].body as any).saveType, 8);
-  assert.equal((checkCalls[1].body as any).saveType, 3);
+  assert.equal(checkCalls.length, 1);
+  assert.equal((checkCalls[0].body as any).saveType, 2);
   const initialTourDaily = JSON.parse((checkCalls[0].body as any).tourDaily);
+  assert.equal(initialTourDaily.isModify, true, "已采样草稿协议要求显式标记行程修改");
   const firstPoi = initialTourDaily.tourDailyDescriptions[0].tourDailyInfos
     .find((info: any) => info.activeType?.key === 3).tourDailyPois[0];
   assert.equal(firstPoi.poi.poiType.key, 3, "suggestPoi 的景点类型必须写入最终保存 payload");
@@ -146,10 +223,19 @@ test("ensureItineraryApi 主路径按 getTourInfo → detail → check(8) → sc
   assert.deepEqual(firstPoi.suffixName, { key: 13, name: "含成人儿童首道门票" });
   const association = callLog.find((c) => c.endpoint === "/restapi/soa2/15638/saveProductTourInfo");
   assert.equal((association?.body as any).tourInfo.productId, 77035928);
-  assert.equal((association?.body as any).tourInfo.auditTourInfoId, "999999999999999999");
+  assert.equal((association?.body as any).saveType, 2);
+  assert.equal((association?.body as any).tourInfo.tourInfoId, "409136029189275700");
+  assert.equal((association?.body as any).tourInfo.draftTourInfoId, "417899634191761447");
+  assert.equal((association?.body as any).tourInfo.auditTourInfoId, "409136029189275700");
+  assert.equal((association?.body as any).tourInfo.auditTourInfoStatus, 2);
+  assert.equal(JSON.parse((association?.body as any).tourDaily).tourInfoId, "417899634191761447");
+  const detailSave = callLog.find((c) => c.endpoint === "/restapi/soa2/20049/saveTourDailyDetail.json");
+  assert.equal((detailSave?.body as any).saveType, 2);
+  assert.equal((detailSave?.body as any).tourInfo.tourInfoId, "417899634191761447");
+  assert.equal(result.tourInfoId, "417899634191761447");
 });
 
-test("ensureItineraryApi：check(8) 响应缺 tourDaily → 立即失败", async () => {
+test("ensureItineraryApi：check(2) 响应缺 tourDaily → 立即失败", async () => {
   const handlers = makeHandlers();
   handlers["/restapi/soa2/15638/checkTourDaily"] = () => ({
     ResponseStatus: { Ack: "Success", Errors: [] },
@@ -159,6 +245,99 @@ test("ensureItineraryApi：check(8) 响应缺 tourDaily → 立即失败", async
     () => ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
     /响应缺 tourDaily 字段/,
   );
+});
+
+test("ensureItineraryApi：check(2) 回写不同集合机场时不发送详情或关联保存", async () => {
+  const handlers = makeHandlers();
+  const normalCheck = handlers["/restapi/soa2/15638/checkTourDaily"]!;
+  handlers["/restapi/soa2/15638/checkTourDaily"] = (body) => {
+    const payload = normalCheck(body);
+    const daily = JSON.parse(payload.tourDaily);
+    const gather = daily.tourDailyDescriptions[0].tourDailyInfos.find((info: any) => info.activeType?.key === 25);
+    gather.tourDailyPackageGatherList[0].airports = [{ code: "XMN", name: "高崎国际机场" }];
+    return { ...payload, tourDaily: JSON.stringify(daily) };
+  };
+  Object.assign(routeHandlers, handlers);
+  await assert.rejects(
+    () => ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
+    /校验响应改写白名单字段/,
+  );
+  assert.equal(callLog.some((call) => /saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
+});
+
+test("ensureItineraryApi：check 可剥离酒店 grade，但保留候选和酒店说明中的客户钻级", async () => {
+  const hotelRichProduct = structuredClone(baseProduct) as any;
+  hotelRichProduct.itinerary = Array.from({ length: 5 }, (_, index) => {
+    const day = index + 1;
+    const hotel = `酒店${day}`;
+    const spot = index === 0
+      ? { name: `景点${day}`, poiName: "Old Town of Lijiang", poiId: 75924 }
+      : { name: `景点${day}`, poiName: "Jade Dragon Snow Mountain", poiId: 10543884 };
+    return {
+      day, title: `第${day}天`, spots: [spot],
+      description: "自由活动", hotel, meals: "自理",
+      ...(day <= 3 ? { hotelCandidates: [1, 2, 3].map((candidate) => ({ hotelName: `${hotel}-候选${candidate}` })) } : {}),
+    };
+  });
+  const handlers = makeHandlers({ readbackOverrides: {
+    readbackDays: 5,
+    title: (index) => `第${index + 1}天`,
+    hotelName: (index) => index < 3 ? `酒店${index + 1}-候选1` : `酒店${index + 1}`,
+  } });
+  const normalCheck = handlers["/restapi/soa2/15638/checkTourDaily"]!;
+  handlers["/restapi/soa2/15638/checkTourDaily"] = (body) => {
+    const payload = normalCheck(body);
+    const daily = JSON.parse(payload.tourDaily);
+    for (const day of daily.tourDailyDescriptions) {
+      for (const info of day.tourDailyInfos) {
+        if (info.activeType?.key !== 1) continue;
+        for (const slot of info.tourDailyHotels) delete slot.hotel.grade;
+      }
+    }
+    return { ...payload, tourDaily: JSON.stringify(daily) };
+  };
+  Object.assign(routeHandlers, handlers);
+  await ensureItineraryApi(makeFakePage() as any, hotelRichProduct, "77035928");
+  const check = callLog.find((call) => /checkTourDaily/.test(call.endpoint));
+  const checkedHotels = JSON.parse((check?.body as any).tourDaily).tourDailyDescriptions
+    .map((day: any) => day.tourDailyInfos.find((info: any) => info.activeType?.key === 1).tourDailyHotels.length);
+  assert.deepEqual(checkedHotels, [3, 3, 3, 1, 1], "十一家候选按每晚分布保留");
+  assert.equal(callLog.some((call) => /saveTourDailyDetail/.test(call.endpoint)), true);
+  assert.equal(callLog.some((call) => /saveProductTourInfo/.test(call.endpoint)), true);
+});
+
+test("ensureItineraryApi：check 改写酒店候选或移除客户钻级说明时不发送保存", async () => {
+  const handlers = makeHandlers();
+  const normalCheck = handlers["/restapi/soa2/15638/checkTourDaily"]!;
+  handlers["/restapi/soa2/15638/checkTourDaily"] = (body) => {
+    const payload = normalCheck(body);
+    const daily = JSON.parse(payload.tourDaily);
+    const hotel = daily.tourDailyDescriptions[0].tourDailyInfos.find((info: any) => info.activeType?.key === 1);
+    hotel.tourDailyHotels[0].hotel.hotelName = "被改写的酒店";
+    hotel.description = "被改写的酒店";
+    delete hotel.tourDailyHotels[0].hotel.grade;
+    return { ...payload, tourDaily: JSON.stringify(daily) };
+  };
+  Object.assign(routeHandlers, handlers);
+  await assert.rejects(
+    () => ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
+    /校验响应改写白名单字段/,
+  );
+  assert.equal(callLog.some((call) => /saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
+});
+
+test("ensureItineraryApi：check(2) 回读的 draft ID 漂移时不发送保存请求", async () => {
+  const handlers = makeHandlers();
+  handlers["/restapi/soa2/15638/checkTourDaily"] = (body) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourDaily: JSON.stringify({ ...JSON.parse(body.tourDaily), tourInfoId: "417815590194610232" }),
+  });
+  Object.assign(routeHandlers, handlers);
+  await assert.rejects(
+    () => ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
+    /草稿校验未回读 draftTourInfoId/,
+  );
+  assert.equal(callLog.some((call) => /saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
 });
 
 test("ensureItineraryApi：saveTourDailyDetail Ack=Success 但响应缺 tourInfo → 立即失败", async () => {
@@ -184,8 +363,10 @@ test("ensureItineraryApi：接送站返回 0 候选 → 失败", async () => {
     trainStations: [],
   });
   Object.assign(routeHandlers, handlers);
+  const noVerifiedEndpointProduct = structuredClone(baseProduct) as any;
+  delete noVerifiedEndpointProduct.operations.trafficLine;
   await assert.rejects(
-    () => ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
+    () => ensureItineraryApi(makeFakePage() as any, noVerifiedEndpointProduct, "77035928"),
     /无任何可用机场\/火车站候选/,
   );
 });
@@ -235,12 +416,13 @@ test("ensureItineraryApi：成功才返回，绝不在缺字段时返回部分�
 
 // ───────── 修复点 1：draftTourInfoId / 非空产品 → initialText 必须是完整 newTourInfo ─────────
 
-test("修复：check(8) tourDaily 必须是完整 newTourInfo（保留 draftTourInfoId + days + tourDailyDescriptions）", async () => {
+test("草稿关联中 draft 与 formal 同 ID 时 fail closed，且不发送 check/save", async () => {
   installHandlersForFieldMismatch({ hotelName: () => "", otherDescription: () => "自由活动", serviceStart: "08:00", serviceEnd: "20:00", title: (i) => i === 0 ? "第1天" : "第2天" });
-  // 模拟只有 draftTourInfoId 的真实草稿场景。
+  // draft 不能复用 formal 身份，否则不能作为未提交草稿目标。
   routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => ({
     ResponseStatus: { Ack: "Success", Errors: [] },
     tourInfos: [{
+      tourInfoId: "409136029189275700",
       draftTourInfoId: "409136029189275700",
       productId: 77035928,
       main: true,
@@ -248,137 +430,214 @@ test("修复：check(8) tourDaily 必须是完整 newTourInfo（保留 draftTour
       templateId: 3,
     }],
   });
-  // 首次 detail 携带草稿元数据，后续调用返回保存后的回读数据。
-  routeHandlers["/restapi/soa2/20049/getTourDailyDetail.json"] = (() => {
-    let callIdx = 0;
-    return () => {
-      callIdx += 1;
-      if (callIdx === 1) {
-        return {
-          ResponseStatus: { Ack: "Success", Errors: [] },
-          tourInfo: {
-            tourInfoId: "409136029189275700",
-            draftTourInfoId: "409136029189275700",
-            days: 2,
-            tourDailyDescriptions: [],
-          },
-        };
-      }
-      // readback 阶段（save 后 verify）— 走默认 2 天 fixture
-      const days = makeReadbackDays({ title: (i) => (i === 0 ? "第1天" : "第2天"), hotelName: () => "", otherDescription: () => "自由活动", serviceStart: "08:00", serviceEnd: "20:00" });
-      return {
-        ResponseStatus: { Ack: "Success", Errors: [] },
-        tourInfo: { tourInfoId: "999999999999999999", tourDailyDescriptions: days },
-      };
-    };
-  })();
-  await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
-  const checkCalls = callLog.filter((c) => c.endpoint === "/restapi/soa2/15638/checkTourDaily");
-  assert.equal(checkCalls.length, 2, "checkTourDaily 必须调用 2 次");
-  const initialBody = checkCalls[0].body as any;
-  // initialText 必须是字符串（newTourInfo 被 JSON.stringify 过）
-  assert.equal(typeof initialBody.tourDaily, "string", "initialText 必须是字符串");
-  // 解析后必须含完整 newTourInfo 字段（不再是裸 { tourDailyDescriptions }）
-  const initialParsed = JSON.parse(initialBody.tourDaily);
-  assert.ok("tourDailyDescriptions" in initialParsed, "必须包含 tourDailyDescriptions");
-  assert.ok("days" in initialParsed, "必须包含 days（修复前会丢）");
-  assert.ok("tourInfoId" in initialParsed, "必须包含 tourInfoId");
-  assert.ok("productId" in initialParsed, "必须包含 productId");
-  assert.ok("draftTourInfoId" in initialParsed, "detail 自带 draftTourInfoId 必须写入 initialText");
-  assert.equal(initialParsed.tourInfoId, "409136029189275700", "tourInfoId 必须等于 draftTourInfoId");
-  assert.equal(initialParsed.draftTourInfoId, "409136029189275700");
-  assert.equal(initialParsed.days, 2, "days 必须等于行程天数");
-  assert.equal(initialParsed.productId, 77035928);
-  // 不能退化成裸对象
-  const keys = Object.keys(initialParsed);
-  assert.ok(keys.length >= 6, `newTourInfo 必须含 ≥6 个字段（含 draftTourInfoId），实际=${keys.length}（${keys.join(",")}）`);
+  await assert.rejects(
+    () => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"),
+    /未返回独立的 draftTourInfoId/,
+  );
+  assert.equal(callLog.some((call) => /checkTourDaily|saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
 });
 
-test("修复：check(3) tourDaily 也保留完整 newTourInfo（aggregateScore/tourInfoScores 不丢）", async () => {
+test("草稿主路径不调用 legacy check(8/3) 或评分接口", async () => {
   installHandlersForFieldMismatch({ hotelName: () => "", otherDescription: () => "自由活动", serviceStart: "08:00", serviceEnd: "20:00", title: (i) => i === 0 ? "第1天" : "第2天" });
   await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
   const checkCalls = callLog.filter((c) => c.endpoint === "/restapi/soa2/15638/checkTourDaily");
-  const second = checkCalls[1].body as any;
-  assert.equal(typeof second.tourDaily, "string");
-  const parsed = JSON.parse(second.tourDaily);
-  assert.equal(parsed.tourInfoId, "999999999999999999", "check(3) tourDaily 必须包含新 tourInfoId");
-  assert.ok(Array.isArray(parsed.tourDailyDescriptions), "check(3) 必须保留 tourDailyDescriptions");
+  assert.equal(checkCalls.length, 1);
+  assert.equal((checkCalls[0].body as any).saveType, 2);
+  assert.equal(callLog.some((call) => call.endpoint.includes("calculateTourInfoScore")), false);
 });
 
-// ───────── 修复点 2：空产品 → getDailyTemplateDetail + template/templateId 写入 productTourInfo ─────────
+// ───────── 首建缺少真实协议证据时 fail closed ─────────
 
-test("修复：空产品走 getDailyTemplateDetail → template/templateId 写入 productTourInfo 和初始 tourDaily", async () => {
-  // 空产品：getProductTourInfoList 返回空 tourInfos + 根级 templateId
-  // readback 阶段需 hotelName 为空以匹配 baseProductNoHotel
-  Object.assign(
-    routeHandlers,
-    makeHandlers({
-      emptyProduct: true,
-      templateOverride: {
-        templateId: 3,
-        days: 2,
-        tourDailyDescriptions: [],
-        templateName: "标准跟团游模板",
-      },
-      readbackOverrides: { hotelName: () => "" },
-    }),
-  );
-  // 注入根级 templateId（与默认一致）
+test("首建关联列表为空时不猜测模板或旧 8→3 协议", async () => {
+  Object.assign(routeHandlers, makeHandlers({ emptyProduct: true }));
   routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => ({
     ResponseStatus: { Ack: "Success", Errors: [] },
     templateId: 3,
     tourInfos: [],
   });
-  // 回读返回 2 天，readback 阶段需要 readback payload（save 之后 verify 仍走 getTourDailyDetail）
-  const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
-  // 序列必须新增 getDailyTemplateDetail
-  const sequence = callLog.map((c) => c.endpoint);
-  assert.ok(
-    sequence.includes("/restapi/soa2/20049/getDailyTemplateDetail"),
-    `空产品必须调用 getDailyTemplateDetail，实际顺序=${sequence.join(",")}`,
+  await assert.rejects(
+    () => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"),
+    /未返回独立的 draftTourInfoId/,
   );
-  // getDailyTemplateDetail 请求体必须含 zh-CN / templateId / contentType
-  const templateCall = callLog.find((c) => c.endpoint === "/restapi/soa2/20049/getDailyTemplateDetail");
-  assert.ok(templateCall, "必须至少调用一次 getDailyTemplateDetail");
-  assert.equal((templateCall!.body as any).requestHeader?.locale, "zh-CN");
-  assert.equal((templateCall!.body as any).templateId, 3);
-  assert.equal((templateCall!.body as any).contentType, "json");
-  // productTourInfo（checkTourDaily 的 productTourInfo 入参）必须含 template + templateId
-  const check8 = callLog.filter((c) => c.endpoint === "/restapi/soa2/15638/checkTourDaily")[0];
-  assert.ok(check8, "checkTourDaily 必须被调用");
-  assert.equal((check8!.body as any).productTourInfo.templateId, 3, "productTourInfo.templateId 必须写入");
-  assert.ok(
-    (check8!.body as any).productTourInfo.template && typeof (check8!.body as any).productTourInfo.template === "object",
-    "productTourInfo.template 必须写入（来自 getDailyTemplateDetail）",
-  );
-  // initialText 解析后必须含 templateId + template + days + tourDailyDescriptions
-  const initialParsed = JSON.parse((check8!.body as any).tourDaily);
-  assert.equal(initialParsed.templateId, 3, "initialText 必须含 templateId");
-  assert.equal(initialParsed.days, 2, "initialText 必须含 days");
-  assert.ok(initialParsed.template, "initialText 必须含 template");
-  assert.ok(Array.isArray(initialParsed.tourDailyDescriptions), "initialText 必须含 tourDailyDescriptions");
-  // 业务结果必须正常返回
-  assert.equal(result.days, 2);
-  assert.equal(result.tourInfoId, "999999999999999999");
+  assert.equal(callLog.some((call) => call.endpoint.includes("getDailyTemplateDetail")), false);
+  assert.equal(callLog.some((call) => /checkTourDaily|saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
 });
 
-test("修复：空产品且 getProductTourInfoList 不带 templateId → 使用默认 templateId=3", async () => {
-  Object.assign(
-    routeHandlers,
-    makeHandlers({
-      emptyProduct: true,
-      readbackOverrides: { hotelName: () => "" },
-    }),
-  );
-  // 显式不返回 templateId（根级 / tourInfos 都没有）
+test("首建未提交产品只有 previewTourInfoId 时使用 preview 作为独立草稿目标", async () => {
+  installHandlersForFieldMismatch({
+    hotelName: () => "",
+    otherDescription: () => "自由活动",
+    serviceStart: "08:00",
+    serviceEnd: "20:00",
+    title: (i) => i === 0 ? "第1天" : "第2天",
+  });
+  const previewTourInfoId = "418000911988932725";
+  const checkedTourInfoId = "418082233558728760";
+  let listCalls = 0;
+  routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => {
+    listCalls += 1;
+    return {
+      ResponseStatus: { Ack: "Success", Errors: [] },
+      tourInfos: [{
+        tourInfoId: 0,
+        ...(listCalls > 1 ? { draftTourInfoId: checkedTourInfoId, draftTourInfoStatus: 1 } : {}),
+        previewTourInfoId,
+        auditStatus: { key: "N", value: "未提交" },
+        productId: 77035928,
+        main: true,
+        sort: 0,
+        templateId: 3,
+      }],
+    };
+  };
+  routeHandlers["/restapi/soa2/15638/checkTourDaily"] = (body: any) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourDaily: JSON.stringify({ ...JSON.parse(body.tourDaily), tourInfoId: checkedTourInfoId }),
+  });
+  routeHandlers["/restapi/soa2/20049/saveTourDailyDetail.json"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourInfoId: checkedTourInfoId,
+  });
+
+  const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
+
+  assert.equal(listCalls, 2);
+  assert.equal(result.tourInfoId, checkedTourInfoId);
+  const check = callLog.find((call) => call.endpoint === "/restapi/soa2/15638/checkTourDaily");
+  assert.equal(JSON.parse((check?.body as any).tourDaily).tourInfoId, previewTourInfoId);
+  const detailSave = callLog.find((call) => call.endpoint === "/restapi/soa2/20049/saveTourDailyDetail.json");
+  assert.equal((detailSave?.body as any).tourInfo.tourInfoId, checkedTourInfoId);
+  const association = callLog.find((call) => call.endpoint === "/restapi/soa2/15638/saveProductTourInfo");
+  assert.equal((association?.body as any).tourInfo.tourInfoId, checkedTourInfoId);
+  assert.equal((association?.body as any).tourInfo.auditTourInfoId, checkedTourInfoId);
+  assert.equal(JSON.parse((association?.body as any).tourDaily).tourInfoId, checkedTourInfoId);
+});
+
+test("首建 preview 保存后若平台把新草稿放入 tourInfoId，也使用该 ID 回读", async () => {
+  installHandlersForFieldMismatch({
+    hotelName: () => "",
+    otherDescription: () => "自由活动",
+    serviceStart: "08:00",
+    serviceEnd: "20:00",
+    title: (i) => i === 0 ? "第1天" : "第2天",
+  });
+  const previewTourInfoId = "418000911988932725";
+  const checkedTourInfoId = "418082233558728760";
+  let listCalls = 0;
+  routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => {
+    listCalls += 1;
+    return {
+      ResponseStatus: { Ack: "Success", Errors: [] },
+      tourInfos: [{
+        tourInfoId: listCalls > 1 ? checkedTourInfoId : 0,
+        ...(listCalls > 1 ? { auditTourInfoId: checkedTourInfoId, auditTourInfoStatus: 1 } : {}),
+        previewTourInfoId,
+        auditStatus: { key: "N", value: "未提交" },
+        productId: 77035928,
+        main: true,
+        sort: 0,
+        templateId: 3,
+      }],
+    };
+  };
+  routeHandlers["/restapi/soa2/15638/checkTourDaily"] = (body: any) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourDaily: JSON.stringify({ ...JSON.parse(body.tourDaily), tourInfoId: checkedTourInfoId }),
+  });
+  routeHandlers["/restapi/soa2/20049/saveTourDailyDetail.json"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourInfoId: checkedTourInfoId,
+  });
+
+  const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
+
+  assert.equal(listCalls, 2);
+  assert.equal(result.tourInfoId, checkedTourInfoId);
+});
+
+test("未提交产品 tourInfoId 与 auditTourInfoId 相同时可继续作为当前草稿目标", async () => {
+  installHandlersForFieldMismatch({
+    hotelName: () => "",
+    otherDescription: () => "自由活动",
+    serviceStart: "08:00",
+    serviceEnd: "20:00",
+    title: (i) => i === 0 ? "第1天" : "第2天",
+  });
+  const currentTourInfoId = "418082233558728766";
   routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => ({
     ResponseStatus: { Ack: "Success", Errors: [] },
-    tourInfos: [],
+    tourInfos: [{
+      tourInfoId: currentTourInfoId,
+      auditTourInfoId: currentTourInfoId,
+      auditTourInfoStatus: 1,
+      previewTourInfoId: "418000911988932725",
+      auditStatus: { key: "N", value: "未提交" },
+      productId: 77035928,
+      main: true,
+      sort: 0,
+      templateId: 3,
+    }],
   });
-  await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
-  const templateCall = callLog.find((c) => c.endpoint === "/restapi/soa2/20049/getDailyTemplateDetail");
-  assert.ok(templateCall);
-  assert.equal((templateCall!.body as any).templateId, 3, "缺省 templateId 必须落到 3");
+  routeHandlers["/restapi/soa2/15638/checkTourDaily"] = (body: any) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourDaily: JSON.stringify({ ...JSON.parse(body.tourDaily), tourInfoId: currentTourInfoId }),
+  });
+  routeHandlers["/restapi/soa2/20049/saveTourDailyDetail.json"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourInfoId: currentTourInfoId,
+  });
+
+  const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
+
+  assert.equal(result.tourInfoId, currentTourInfoId);
+  const association = callLog.find((call) => call.endpoint === "/restapi/soa2/15638/saveProductTourInfo");
+  assert.equal((association?.body as any).tourInfo.tourInfoId, currentTourInfoId);
+});
+
+test("未提交 current version 的 check 若生成新 ID，后续保存和关联跟随新 ID", async () => {
+  installHandlersForFieldMismatch({
+    hotelName: () => "",
+    otherDescription: () => "自由活动",
+    serviceStart: "08:00",
+    serviceEnd: "20:00",
+    title: (i) => i === 0 ? "第1天" : "第2天",
+  });
+  const currentTourInfoId = "418082233558728766";
+  const checkedTourInfoId = "418082111915507838";
+  let listCalls = 0;
+  routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => {
+    listCalls += 1;
+    const id = listCalls > 1 ? checkedTourInfoId : currentTourInfoId;
+    return {
+      ResponseStatus: { Ack: "Success", Errors: [] },
+      tourInfos: [{
+        tourInfoId: id,
+        auditTourInfoId: id,
+        auditTourInfoStatus: 1,
+        previewTourInfoId: "418000911988932725",
+        auditStatus: { key: "N", value: "未提交" },
+        productId: 77035928,
+        main: true,
+        sort: 0,
+        templateId: 3,
+      }],
+    };
+  };
+  routeHandlers["/restapi/soa2/15638/checkTourDaily"] = (body: any) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourDaily: JSON.stringify({ ...JSON.parse(body.tourDaily), tourInfoId: checkedTourInfoId }),
+  });
+  routeHandlers["/restapi/soa2/20049/saveTourDailyDetail.json"] = () => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    tourInfoId: checkedTourInfoId,
+  });
+
+  const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
+
+  assert.equal(result.tourInfoId, checkedTourInfoId);
+  const association = callLog.find((call) => call.endpoint === "/restapi/soa2/15638/saveProductTourInfo");
+  assert.equal((association?.body as any).tourInfo.tourInfoId, checkedTourInfoId);
+  assert.equal(JSON.parse((association?.body as any).tourDaily).tourInfoId, checkedTourInfoId);
 });
 
 // ───────── 修复点 3：saveTourDailyDetail 响应仅含顶层 tourInfoId → 必须接受 ─────────
@@ -388,12 +647,11 @@ test("修复：saveTourDailyDetail 响应仅含顶层 tourInfoId（无 tourInfo 
   // 让 saveTourDailyDetail 只回顶层 tourInfoId，不带 tourInfo / result
   routeHandlers["/restapi/soa2/20049/saveTourDailyDetail.json"] = () => ({
     ResponseStatus: { Ack: "Success", Errors: [] },
-    tourInfoId: "999999999999999999",
+    tourInfoId: "417899634191761447",
   });
-  // 不应抛错；savedTourInfoId 仍由 check(3) 响应给出（999999999999999999）
   const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
-  assert.equal(result.tourInfoId, "999999999999999999", "必须从 check(3) 响应拿到 savedTourInfoId");
-  assert.equal(result.auditTourInfoId, "999999999999999999");
+  assert.equal(result.tourInfoId, "417899634191761447", "最终回读目标必须是关联的 draft ID");
+  assert.equal(result.auditTourInfoId, "409136029189275700", "历史 audit ID 必须保留");
   assert.equal(result.days, 2);
 });
 
@@ -407,4 +665,50 @@ test("修复：saveTourDailyDetail 响应完全空（无 tourInfo / result / tou
     () => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"),
     /响应缺 tourInfo/,
   );
+});
+
+test("草稿关联保存后 formal/audit/preview 或审核状态漂移时拒绝最终回读", async () => {
+  const handlers = makeHandlers();
+  const list = handlers["/restapi/soa2/15638/getProductTourInfoList"];
+  let listCalls = 0;
+  handlers["/restapi/soa2/15638/getProductTourInfoList"] = (body) => {
+    const payload = list(body);
+    listCalls += 1;
+    if (listCalls === 2) (payload.tourInfos[0] as any).auditStatus = { key: "N", value: "未提交" };
+    return payload;
+  };
+  Object.assign(routeHandlers, handlers);
+  await assert.rejects(
+    () => ensureItineraryApi(makeFakePage() as any, baseProduct as any, "77035928"),
+    /auditStatus 发生未授权变化/,
+  );
+});
+
+test("本地未填票型时以 suggestPoi 的免费票型生成并回读无需门票", async () => {
+  const handlers = makeHandlers({ readbackOverrides: { hotelName: () => "" } });
+  handlers["/restapi/soa2/20049/suggestPoi"] = (body: any) => ({
+    ResponseStatus: { Ack: "Success", Errors: [] },
+    poiList: [{
+      poiId: body.keyword === "Jade Dragon Snow Mountain" ? 10543884 : 75924,
+      poiName: body.keyword,
+      poiType: { key: 3, name: "景点" },
+      ticketType: { key: 2, name: "免费" },
+    }],
+  });
+  const readDetail = handlers["/restapi/soa2/20049/getTourDailyDetail.json"];
+  handlers["/restapi/soa2/20049/getTourDailyDetail.json"] = (body: any) => {
+    const payload = readDetail(body);
+    for (const day of payload.tourInfo.tourDailyDescriptions) {
+      for (const info of day.tourDailyInfos) {
+        for (const poi of info.tourDailyPois ?? []) poi.suffixName = { key: 11, name: "无需门票" };
+      }
+    }
+    return payload;
+  };
+  Object.assign(routeHandlers, handlers);
+  await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
+  const check = callLog.find((call) => call.endpoint === "/restapi/soa2/15638/checkTourDaily");
+  const saved = JSON.parse((check?.body as any).tourDaily);
+  const attraction = saved.tourDailyDescriptions[0].tourDailyInfos.find((info: any) => info.activeType?.key === 3);
+  assert.deepEqual(attraction.tourDailyPois[0].suffixName, { key: 11, name: "无需门票" });
 });

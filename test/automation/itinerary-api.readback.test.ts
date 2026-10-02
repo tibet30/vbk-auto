@@ -365,12 +365,12 @@ test("buildReadbackExpectations：title/POI/餐饮/酒店/其他/服务时间/�
   assert.equal(exp.days.length, 2);
   assert.deepEqual(exp.days.map((d) => d.title), ["第1天：抵达丽江", "第2天：玉龙雪山"]);
   assert.deepEqual(exp.days.map((d) => d.useCar), [{ key: "B", name: "包车" }, { key: "B", name: "包车" }]);
-  assert.deepEqual(exp.days[0].pois, [{ poiId: 75924, poiName: "Old Town of Lijiang" }]);
+  assert.deepEqual(exp.days[0].pois, [{ poiId: 75924, poiName: "Old Town of Lijiang", suffixKey: 13 }]);
   assert.deepEqual(exp.days[0].meals.map((m) => m.key), ["L", "S"]);
   assert.deepEqual(exp.days[1].meals.map((m) => m.key), ["B", "L"]);
   assert.equal(exp.days[1].meals[0].description, "是否含餐，以酒店房型为准。");
   assert.equal(exp.days[0].meals.every((m) => m.mealsIncluded === false), true);
-  assert.deepEqual(exp.days[0].hotels, [{ hotelName: "和玺酒店", hotelTier: "当地4钻酒店/-4" }]);
+  assert.deepEqual(exp.days[0].hotels, [{ hotelName: "和玺酒店", hotelTier: "当地4钻酒店" }]);
   assert.equal(exp.days[0].other, undefined);
   assert.deepEqual(exp.days[0].serviceTime, { startTime: "08:00", endTime: "20:00" });
   assert.deepEqual(exp.pickup.airport, { code: "LJG", name: "三义机场" });

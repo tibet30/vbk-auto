@@ -26,7 +26,13 @@ export interface AgentToolContext {
   productVersion: string;
   approval?: AgentApproval;
 }
-export interface AgentToolResult { content: string; data?: Record<string, unknown>; uncertainWrite?: boolean; }
+export interface AgentToolResult {
+  content: string;
+  data?: Record<string, unknown>;
+  uncertainWrite?: boolean;
+  /** The tool completed the whole Agent run with its own authoritative evidence. */
+  terminal?: boolean;
+}
 /** Tool adapters throw this when a write may have reached the remote system but no readback is available. */
 export class AgentUncertainWriteError extends Error {
   readonly uncertainWrite = true;
@@ -49,6 +55,8 @@ export interface AgentFinishContext {
 export interface AgentFinishResult {
   verified: boolean;
   message?: string;
+  /** A persisted, non-repairable local prerequisite should stop the model loop. */
+  pauseReason?: string;
   /** Optional final write approval prepared by the business readiness gate. */
   finalApproval?: { scope: string[]; summary: string };
 }
@@ -64,7 +72,14 @@ export interface AgentCoreDependencies {
   productFingerprint?(localProductId: string): Promise<string>;
   /** Applies deterministic local repairs implied by an explicit new user
    * instruction before the next intent fingerprint and model turn are made. */
-  prepareUserInstruction?(localProductId: string, content: string): Promise<void> | void;
+  prepareUserInstruction?(localProductId: string, content: string, selection?: {
+    selectedLabels: string[];
+    selectedQuestions?: Array<{ id: string; label: string; selectedLabel: string }>;
+  }): Promise<boolean | void> | boolean | void;
+  /** Resolve only questions whose requested data is proved by the latest saved product. */
+  resolvedPendingQuestions?(localProductId: string, questions: AgentInputRequest["questions"]): Array<{
+    id: string; message: string; answer?: string; pause?: boolean;
+  }>;
   recoverApproval?(localProductId: string, snapshot: AgentSnapshot): Promise<AgentApproval | undefined>;
   /** Starts the deterministic, already-authorised VBK workflow. Returns true
    * only when Agent must yield instead of asking the model for another step. */

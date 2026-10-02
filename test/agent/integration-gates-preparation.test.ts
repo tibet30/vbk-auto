@@ -74,6 +74,43 @@ test("local planning requires final approval while stale saved draft cannot esta
   assert.equal(agentCompletionGate(p, snapshot, ready, { runId: "r", hadWrites: true, hadRemoteWrites: true }).verified, false);
 });
 
+test("a saved manual cover may proceed to approval when its file passes live checks", () => {
+  const p = product();
+  fillLocalPreparation(p);
+  p.product.presentation!.cover = {
+    source: "manualUpload", fileId: "saved-cover", originalName: "cover.png", mimeType: "image/png",
+    sizeBytes: 1234, uploadedAt: "2026-09-29T00:00:00.000Z", poi: "成都",
+    description: "成都封面", minQuality: 3,
+  };
+  const snapshot: AgentSnapshot = {
+    localProductId: p.id,
+    run: { id: "r", status: "running", createdAt: "2026-09-29", updatedAt: "2026-09-29" },
+    events: [],
+  };
+  const result = agentCompletionGate(p, snapshot, ready, { runId: "r", hadWrites: true, hadRemoteWrites: false });
+  assert.ok(result.finalApproval);
+  assert.match(result.finalApproval.summary, /手动封面上传到携程/);
+  assert.equal(result.pauseReason, undefined);
+});
+
+test("live manual-cover size issue reaches the Agent instead of reporting readiness", () => {
+  const p = product();
+  fillLocalPreparation(p);
+  p.product.presentation!.cover = {
+    source: "manualUpload", fileId: "saved-cover", originalName: "cover.png", mimeType: "image/png",
+    sizeBytes: 1234, uploadedAt: "2026-09-29T00:00:00.000Z", poi: "成都",
+    description: "成都封面", minQuality: 3,
+  };
+  const issue = { label: "封面图片规格", detail: "已保存手动封面（1024×1024），请上传符合尺寸的原图。" };
+  const context = agentTaskContext({ getProduct: () => p } as any, p.id, undefined, {
+    ready: false, completion: 92, issues: [issue],
+  });
+  const parsed = JSON.parse(context);
+  assert.equal(parsed.ready, false);
+  assert.ok(parsed.missing.includes("封面图片规格"));
+  assert.ok(parsed.prohibitedActions.includes("request_approval"));
+});
+
 test("agent context keeps unmatched POIs for manual review and hands off after final confirmation", async () => {
   const context = agentTaskContext({ getProduct: () => product() } as any, "product-1");
   const parsed = JSON.parse(context) as { rules?: string[] };

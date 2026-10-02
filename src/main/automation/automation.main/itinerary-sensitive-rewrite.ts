@@ -1,28 +1,28 @@
 /**
  * 行程敏感词自动恢复：平台拦截 saveType=3（如非法关键词）时，
- * 仅重写命中的 itinerary 日描述字段，再重跑行程保存。
+ * 仅重写命中的日描述或 spots[].description，再重跑行程保存。
  *
  * 约束：
- *  - 只接受 /itinerary 开头的 RFC6902 patch；
- *  - 只校验被命中的 /itinerary/{index}/description 字段是否去掉了命中词；
- *  - 其余行程结构不要求重写，但 AI 生成不得写入文案黑名单。
+ *  - 只接受命中路径的 RFC6902 replace；
+ *  - 只校验命中的 day.description 或 spots[].description 是否去掉了命中词；
+ *  - 不允许修改行程天数、景点、酒店、餐食、POI 身份或排序。
  */
 import type { AiResponse, ProductSummary } from "../../../shared/contracts.js";
-import { applyProductPatch } from "../../operations/product-patch.js";
 import { buildVbkCopyPolicyPrompt, findVbkCopyBadCase } from "../../planning/vbk-copy-policy.js";
 import type { ProductItineraryDay } from "../ctrip/itinerary-api/itinerary-transform.js";
 import type { FillItineraryDraftApiResult } from "../ctrip/itinerary/api-entry.js";
 
-export type ItineraryCopyPath = `/itinerary/${number}/description`;
+export type ItineraryCopyPath = `/itinerary/${number}/description` | `/itinerary/${number}/spots/${number}/description`;
 
 type ProductWithItinerary = Record<string, any> & { itinerary?: ProductItineraryDay[] };
 
 function readItineraryDescription(product: ProductWithItinerary, path: ItineraryCopyPath): unknown {
-  const dayStr = String(readPath(path));
-  const index = Number.parseInt(dayStr, 10);
-  if (!Number.isFinite(index) || index < 0) return undefined;
-  const value = product.itinerary?.[index];
-  return value?.description;
+  const match = /^\/itinerary\/(\d+)(?:\/spots\/(\d+))?\/description$/.exec(path);
+  const dayIndex = Number(match?.[1]);
+  if (!Number.isInteger(dayIndex) || dayIndex < 0) return undefined;
+  const day = product.itinerary?.[dayIndex];
+  const spotIndex = match?.[2];
+  return spotIndex === undefined ? day?.description : day?.spots?.[Number(spotIndex)]?.description;
 }
 
 function sanitizeWord(word: string): string {
@@ -49,11 +49,6 @@ export function extractSensitiveWords(message: string): string[] {
   return uniq;
 }
 
-function readPath(path: string): number {
-  const matched = /^\/itinerary\/(\d+)\/description$/.exec(path);
-  return matched ? Number.parseInt(matched[1], 10) : -1;
-}
-
 export function findSensitiveItineraryPaths(
   product: ProductWithItinerary,
   sensitiveWords: readonly string[],
@@ -66,9 +61,16 @@ export function findSensitiveItineraryPaths(
   const paths: ItineraryCopyPath[] = [];
   for (let i = 0; i < itinerary.length; i += 1) {
     const description = itinerary[i]?.description;
-    if (typeof description !== "string") continue;
-    if (words.some((word) => description.includes(word))) {
+    if (typeof description === "string" && words.some((word) => description.includes(word))) {
       paths.push(`/itinerary/${i}/description` as ItineraryCopyPath);
+    }
+    const spots = itinerary[i]?.spots;
+    if (!Array.isArray(spots)) continue;
+    for (let spotIndex = 0; spotIndex < spots.length; spotIndex += 1) {
+      const description = spots[spotIndex]?.description;
+      if (typeof description === "string" && words.some((word) => description.includes(word))) {
+        paths.push(`/itinerary/${i}/spots/${spotIndex}/description` as ItineraryCopyPath);
+      }
     }
   }
 
@@ -82,8 +84,16 @@ function itineraryFromResponse(response: AiResponse): NonNullable<AiResponse["pa
   return response.patch;
 }
 
-function isItineraryPatchPath(path: string): boolean {
-  return /^\/itinerary(?:\/|$)/.test(path);
+function setItineraryDescription(product: ProductWithItinerary, path: ItineraryCopyPath, value: string): void {
+  const match = /^\/itinerary\/(\d+)(?:\/spots\/(\d+))?\/description$/.exec(path);
+  const day = product.itinerary?.[Number(match?.[1])];
+  if (!day) throw new Error(`AI 重写目标不存在：${path}`);
+  if (match?.[2] === undefined) day.description = value;
+  else {
+    const spot = day.spots?.[Number(match[2])];
+    if (!spot) throw new Error(`AI 重写目标不存在：${path}`);
+    spot.description = value;
+  }
 }
 
 export function applySensitiveItineraryRewrite(
@@ -91,20 +101,17 @@ export function applySensitiveItineraryRewrite(
   response: AiResponse,
   sensitiveWords: readonly string[],
 ): void {
-  const itineraryPatch = itineraryFromResponse(response).filter((operation) => isItineraryPatchPath(operation.path));
-  if (!itineraryPatch.length) {
-    throw new Error("AI 未返回可用于行程重写的有效 patch（仅支持 /itinerary /itinerary/...）。");
-  }
-
-  const next = applyProductPatch(structuredClone(product), itineraryPatch);
-  if (!Array.isArray(next.itinerary)) {
-    throw new Error("AI 重写未返回完整行程数据（/itinerary）。");
-  }
-
   const paths = findSensitiveItineraryPaths(product, sensitiveWords);
   if (!paths.length) {
     throw new Error(`平台返回非法关键词“${sensitiveWords.join("、")}」，但未能在当前行程中定位命中字段。`);
   }
+  const allowed = new Set(paths);
+  const itineraryPatch = itineraryFromResponse(response).filter((operation) => /^\/itinerary(?:\/|$)/.test(operation.path));
+  if (!itineraryPatch.length || itineraryPatch.some((operation) => operation.op !== "replace" || !allowed.has(operation.path as ItineraryCopyPath) || typeof operation.value !== "string")) {
+    throw new Error("AI 行程敏感词恢复只能 replace 命中的 description 字段。");
+  }
+  const next = structuredClone(product);
+  for (const operation of itineraryPatch) setItineraryDescription(next, operation.path as ItineraryCopyPath, operation.value as string);
 
   for (const path of paths) {
     const before = readItineraryDescription(product, path);
@@ -134,7 +141,7 @@ function rewritePrompt(words: readonly string[], paths: readonly ItineraryCopyPa
     `仅重写命中的行程描述字段：${paths.join("、")}。`,
     "保持行程天数、景点、酒店、餐食、服务时间不变，不得再次出现上述词语。",
     buildVbkCopyPolicyPrompt(),
-    "请通过 /itinerary patch 返回完整 itinerary 字段。",
+    `仅返回对上述路径的 RFC6902 replace；例如 {"op":"replace","path":"${paths[0]}","value":"不含非法词的新描述"}。不得返回完整 itinerary 或任何其他路径。`,
   ].join("\n");
 }
 

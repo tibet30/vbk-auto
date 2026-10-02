@@ -16,6 +16,22 @@ function harness(results: Array<{ content?: string; toolCalls?: Array<{ id: stri
   return { core: new AgentCore(deps, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (value) => { saved.set(value.localProductId, structuredClone(value)); } }), saved, deps };
 }
 
+test("a terminal readback tool completes the Agent run without requesting approval", async () => {
+  const { core, deps } = harness([
+    { toolCalls: [{ id: "recovery", name: "read", arguments: {} }] },
+    { toolCalls: [{ id: "approval", name: "request_approval", arguments: { scope: ["vbk.write_phase:trafficLine"], summary: "录入交通" } }] },
+  ]);
+  deps.tools[0]!.execute = async () => ({ content: "母产品只读核验完成", terminal: true });
+
+  await core.send("terminal-recovery", "继续母产品只读核验");
+  await core.idle("terminal-recovery");
+
+  const snapshot = await core.get("terminal-recovery");
+  assert.equal(snapshot.run?.status, "completed");
+  assert.ok(snapshot.events.some((event) => event.type === "tool_result" && event.data?.toolCallId === "recovery"));
+  assert.equal(snapshot.events.some((event) => event.type === "tool_call" && event.data?.toolCallId === "approval"), false);
+});
+
 test("recovery-only wording preserves an approved intent without depending on one exact phrase", () => {
   assert.equal(preservesApprovedIntent("继续"), true);
   assert.equal(preservesApprovedIntent("从报错处继续执行"), true);

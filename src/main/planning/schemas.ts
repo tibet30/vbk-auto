@@ -35,12 +35,17 @@ const VBK_SELECTABLE_RECOMMENDATION_VALUES = [...VBK_SELECTABLE_RECOMMENDATION_C
 
 const itinerarySpotSchema = z.object({
   name: requiredText,
+  kind: z.enum(["attraction", "free", "other"]).default("attraction"),
+  description: z.string().trim().optional(),
   poiName: z.string().trim().nullable().optional(),
   poiId: z.number().int().positive().nullable().optional(),
   timeOfDay: z.enum(["morning", "afternoon"]).optional(),
   relation: z.enum(["and", "or"]).optional(),
 }).strict().superRefine((spot, ctx) => {
-  if (isCombinedSpotName(spot.name)) {
+  if (spot.kind !== "attraction" && (spot.poiName || spot.poiId)) {
+    ctx.addIssue({ code: "custom", path: ["poiId"], message: "自由活动或其他活动不得绑定 POI" });
+  }
+  if (spot.kind === "attraction" && isCombinedSpotName(spot.name)) {
     ctx.addIssue({
       code: "custom",
       path: ["name"],
@@ -369,7 +374,7 @@ ${moduleList}
 ===== 硬性规则 =====
 1. 不允许返回 RFC6902 patch、不允许 path 数组、不允许 op / replace / add 等字段。本系统**绝不接受 JSON Patch**。
 2. value 必须完整写出全部子字段，缺一不可。
-2.1 itinerary 每天 spots 只能是对象数组，每项必须为 {name, poiName, poiId}；未通过 suggestPoi 核查时 poiName/poiId 必须为 null，禁止字符串数组或猜测 ID。
+2.1 itinerary 每天 spots 只能是对象数组，每项必须为 {name, kind, poiName, poiId}；attraction 才能配置 POI，free 是独立明确自由活动，other 是接送/接团/航拍等非景点服务，free/other 的 poiName/poiId 必须为 null，不查 POI，禁止字符串数组或猜测 ID。
 3. release 模块：
    - publicPriceCeiling 必填（>0）
    - publicAuditRetries 1..10

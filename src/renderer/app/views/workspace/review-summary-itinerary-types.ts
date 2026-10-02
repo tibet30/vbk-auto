@@ -7,6 +7,7 @@ export interface ItineraryTimelineSpotItem {
   province?: string | null;
   city?: string | null;
   district?: string | null;
+  kind?: "attraction" | "free" | "other";
 }
 
 /** 省/市/区紧凑展示：西藏/日喀则/江孜；缺省返回 null。 */

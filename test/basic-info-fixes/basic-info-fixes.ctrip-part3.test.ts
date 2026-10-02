@@ -74,20 +74,21 @@ test("接线 2：fillAndSavePresentation 仅通过 API 保存并回读", async (
     /savePresentationViaApi\(page, presentation, productId\)/,
     "fillAndSavePresentation 必须通过接口保存并回读确认",
   );
-  assert.match(presBody, /bindCtripLibraryPresentationImages\(page, presentation\.cover, productId\)/);
+  assert.match(presBody, /bindCtripLibraryPresentationImages\(page, cover, productId\)/);
   assert.doesNotMatch(presBody, /saveThenAdvance\(|clickSection\(|page\.reload|waitForURL/);
   assert.match(presBody, /savedWith \}/);
   assert.doesNotMatch(presBody, /clickBasicInfoNextStep/);
   assert.doesNotMatch(presBody, /waitForSectionEnabled/);
   assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations\)/,
     "进入产品图文前必须校验完整的三条推荐理由配置");
-  assert.match(presBody, /cover\.source !== "ctripLibrary"/, "产品图文必须在写入前校验完整的图库封面配置");
-  assert.match(presBody, /ctripLibraryCoverAttempts\(cover\)\.length === 0/, "封面必须有已选图库图片的有效身份");
+  assert.match(presBody, /cover\.source === "ctripLibrary" && ctripLibraryCoverAttempts\(cover\)\.length > 0/,
+    "产品图文必须只在完整图库封面配置下绑定图库图片");
+  assert.match(presBody, /ctripLibraryCoverAttempts\(cover\)\.length > 0/, "封面必须有已选图库图片的有效身份");
   assert.doesNotMatch(presBody, /fillRecommendationReasons\(page/,
     "产品图文主流程不应再通过 DOM 填写推荐理由");
-  assert.match(presBody, /await bindCtripLibraryPresentationImages\(page, presentation\.cover, productId\)/,
+  assert.match(presBody, /await bindCtripLibraryPresentationImages\(page, cover, productId\)/,
     "产品图文必须录入图库封面和候选景点图");
-  const bindCoverIdx = presBody.indexOf("await bindCtripLibraryPresentationImages(page, presentation.cover, productId)");
+  const bindCoverIdx = presBody.indexOf("await bindCtripLibraryPresentationImages(page, cover, productId)");
   const saveApiIdx = presBody.indexOf("savePresentationViaApi(page, presentation, productId)");
   assert.ok(bindCoverIdx >= 0 && saveApiIdx > bindCoverIdx,
     "产品图文接口保存必须在封面绑定之后执行");

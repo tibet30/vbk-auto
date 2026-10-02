@@ -1,6 +1,8 @@
 import type { AgentSnapshot, ProductDetail, ProductWorkflowTask } from '../../shared/contracts.js';
 import { logWarn } from '../../shared/log-timestamp.js';
-import { approvalForRun } from './integration-gates.js';
+import { approvalForRun, trafficLineCanBeDeferred } from './integration-gates.js';
+import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
+import { isCoverHandoffReady } from '../planning/preparation-completion.js';
 
 export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDetail): Partial<ProductWorkflowTask> {
   const run = snapshot.run;
@@ -10,8 +12,10 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
     : ['waiting_input','waiting_approval','paused'].includes(run?.status ?? '') ? 'needs_attention'
     : run?.status === 'queued' ? 'queued' : 'running';
   const approval = approvalForRun(snapshot);
+  const coverFallback = product && readActiveCoverFallback(product.product);
+  const coverHandoffReady = product ? isCoverHandoffReady(product) : false;
   const stage = status==='succeeded' ? 'completed' : approval ? 'automation'
-    : snapshot.pendingApproval ? 'readiness' : status==='queued' ? 'queued' : 'planning';
+    : snapshot.pendingApproval || coverHandoffReady ? 'readiness' : status==='queued' ? 'queued' : 'planning';
   const scopes = approval?.scope ?? [];
   const done = new Set(snapshot.events.filter(event=>event.runId===run?.id && event.type==='tool_result'
     && event.data?.verified===true).map(event=>`vbk.write_phase:${event.data?.phase}`));
@@ -20,8 +24,12 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
   for (const phase of product?.automation?.phases ?? []) {
     if (phase.status === 'completed') done.add(`vbk.write_phase:${phase.phase}`);
   }
+  if (product && trafficLineCanBeDeferred(product)) done.add('vbk.write_phase:trafficLine');
   const progress = workflowProgress(status, snapshot, scopes, done);
-  const message = snapshot.pendingApproval ? '方案已就绪，等待授权录入'
+  const message = coverHandoffReady && coverFallback ? (coverFallback.reason === 'search_unavailable'
+    ? '可录入 VBK 未提审草稿；图库暂不可用，上架前需替换真实封面'
+    : '可录入 VBK 未提审草稿；运营占位图上架前需替换')
+    : snapshot.pendingApproval ? '方案已就绪，等待授权录入'
     : snapshot.pendingInput ? '等待补充信息'
       : run?.error ?? (status==='succeeded' ? '本轮任务已完成' : status==='abandoned' ? '任务已放弃'
         : run?.status==='paused' ? '任务已暂停，可继续处理' : 'Agent 正在处理产品');

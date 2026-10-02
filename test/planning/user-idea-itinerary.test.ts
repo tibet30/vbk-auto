@@ -284,19 +284,20 @@ test("二选一多个可用时全部查出并作为同日同段备选入行程",
   if (!split.ok) assert.match(split.reason, /必须连续放在同一段行程/);
 });
 
-test("未命中 POI 的用户活动保留在原日期并落为 other", () => {
-  const intent = parsePlanningUserIntent("第一天参观非遗工坊", {
+test("未命中 POI 的非景点用户体验保留在原日期并落为 other", () => {
+  const intent = parsePlanningUserIntent("第一天体验非遗手作", {
     preferences: [],
-    activities: [{ id: "x", day: 1, title: "非遗工坊", kind: "poi", time: "下午", detail: "体验手作", durationMinutes: 90 }],
+    activities: [{ id: "x", day: 1, title: "非遗手作体验", kind: "activity", time: "下午", detail: "体验手作", durationMinutes: 90 }],
   });
   const pool = [{
-    requestedName: "非遗工坊",
+    requestedName: "非遗手作体验",
     status: "rejected" as const,
     source: "user" as const,
     userActivityId: "user-1",
     preferredDay: 1,
     reason: "未命中可确认的真实 POI",
   }];
+  assert.equal(blockingUserPoiFailure(pool, intent), undefined);
   const expanded = expandVerifiedItinerary({
     days: 1,
     userIntent: intent,
@@ -308,7 +309,7 @@ test("未命中 POI 的用户活动保留在原日期并落为 other", () => {
   assert.deepEqual(expanded.itinerary[0].spots, []);
   assert.deepEqual(expanded.itinerary[0].activities, [{
     time: "下午",
-    title: "非遗工坊",
+    title: "非遗手作体验",
     detail: "体验手作",
     type: "other",
     durationMinutes: 90,
@@ -373,4 +374,28 @@ test("用户指定到某一天的 POI 未命中时不能静默降级为 other", 
     requestedName: "天安门", status: "rejected", source: "user",
     preferredDay: 1, reason: "未命中可确认的真实 POI",
   }]) ?? "", /不能作为本次行程活动/);
+});
+
+test("未排期或未关联的 POI、未知类型和明确 POI 的失败候选仍 fail-closed", () => {
+  const candidate = {
+    requestedName: "待核验地点", status: "rejected" as const, source: "user" as const,
+    preferredDay: 1, reason: "未命中可确认的真实 POI",
+  };
+  const missingActivity = parsePlanningUserIntent("第一天自由活动", {
+    preferences: [], activities: [{ day: 1, title: "自由活动", kind: "free" }],
+  });
+  assert.match(blockingUserPoiFailure([{ ...candidate, userActivityId: "missing" }], missingActivity) ?? "", /不能作为本次行程活动/);
+  const { preferredDay: _preferredDay, ...notScheduledCandidate } = candidate;
+  assert.match(blockingUserPoiFailure([notScheduledCandidate]) ?? "", /不能作为本次行程活动/);
+
+  const unknownKind = {
+    ...missingActivity,
+    activities: [{ ...missingActivity.activities[0]!, id: "unknown", kind: "unknown" as any }],
+  };
+  assert.match(blockingUserPoiFailure([{ ...candidate, userActivityId: "unknown" }], unknownKind) ?? "", /不能作为本次行程活动/);
+
+  const poiIntent = parsePlanningUserIntent("第一天待核验地点", {
+    preferences: [], activities: [{ day: 1, title: "待核验地点", kind: "poi" }],
+  });
+  assert.match(blockingUserPoiFailure([{ ...notScheduledCandidate, userActivityId: "user-1" }], poiIntent) ?? "", /不能作为本次行程活动/);
 });

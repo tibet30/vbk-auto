@@ -121,7 +121,7 @@ export async function buildVerifiedPool(
       summary: poolSummary(plan), error: undefined, completedAt: new Date().toISOString(),
     });
     plan = getPlan();
-    const userFailure = blockingUserPoiFailure(plan.poiCandidates);
+    const userFailure = blockingUserPoiFailure(plan.poiCandidates, userIntent);
     if (userFailure) return fail(patchNode, getPlan, "poiResolution", userFailure);
   }
 
@@ -185,7 +185,7 @@ export async function buildVerifiedPool(
     plan = getPlan();
   }
   const hit = plan.poiCandidates.filter((item) => item.status === "resolved").length;
-  const userFailure = blockingUserPoiFailure(plan.poiCandidates);
+  const userFailure = blockingUserPoiFailure(plan.poiCandidates, userIntent);
   if (userFailure) return fail(patchNode, getPlan, "poiResolution", userFailure);
   if (hit >= hardMinimum && node(plan, "spotCandidates").status === "failed") {
     await patchNode("spotCandidates", { status: "completed", summary: `已有 ${hit} 个真实 POI，满足最低准入门槛`, error: undefined, completedAt: new Date().toISOString() });

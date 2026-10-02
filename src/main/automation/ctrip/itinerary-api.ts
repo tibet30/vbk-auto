@@ -39,6 +39,7 @@ export {
 export {
   pickAirport,
   pickTrain,
+  resolveStationsForItinerary,
   resolveStationsForCity,
 } from "./itinerary-api/stations-resolver.js";
 

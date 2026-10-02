@@ -71,6 +71,13 @@ export function automaticPreparationAnswer(question: AgentQuestion): string | st
     if (retry) return asAnswer(question, retry);
   }
   if (/封面|cover/i.test(text)) {
+    if (/规格|尺寸|像素|高清|原图|重新上传|重传|resize|quality/i.test(text)) return undefined;
+    // An existing manual upload is a real user choice. Never infer consent to
+    // replace it merely because the model listed Ctrip as the first option.
+    if (question.options?.some((option) => /保留.*(?:手动|上传)|keep_manual/i.test(`${option.id} ${option.label}`))
+      && question.options.some((option) => /切换.*图库|提供.*image\s*id|switch_to_ctrip|supply_ctrip/i.test(`${option.id} ${option.label}`))) {
+      return undefined;
+    }
     const cover = firstOrdinaryOption(question);
     if (cover) return asAnswer(question, cover);
   }

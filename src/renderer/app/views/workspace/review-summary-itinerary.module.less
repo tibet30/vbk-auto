@@ -214,6 +214,7 @@
 .timelineItem[data-last='true'] .timelineContent { padding-bottom: 2px; }
 
 .timelineHeader { display: grid; grid-template-columns: 50px minmax(0, 1fr) 24px; gap: 8px; align-items: center; min-width: 0; }
+.timelineHeader:has(.spotKind) { grid-template-columns: 50px minmax(0, 1fr) minmax(88px, max-content) 24px; }
 
 .timelineTime {
   font-family: var(--font-mono);
@@ -235,6 +236,8 @@
 .timelineNodeOther + .timelineContent .timelineTime     { color: var(--muted-foreground); background: var(--muted); }
 
 .timelineTitle { font-size: var(--fs-sm); font-weight: 550; color: var(--foreground); letter-spacing: 0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spotKind { min-width: 88px; height: 26px; padding: 2px 24px 2px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); font-size: var(--fs-xs); line-height: 1.2; }
+.spotKind:disabled { opacity: .58; cursor: wait; }
 .spotRemove {
   width: 24px;
   height: 24px;

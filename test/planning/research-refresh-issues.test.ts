@@ -469,3 +469,58 @@ test("封面任务已 confirmed / resolved 时不再被二次覆盖（跳过收�
   assert.deepEqual(after.evidence, evidenceBefore);
   assert.equal(after.state, "confirmed");
 });
+
+test("明确 other/free 使对应 POI 核查失效，刷新幂等；切回景点后重新待核查", () => {
+  const db = withDb();
+  const product = db.createProduct({ destination: "潮汕", days: 1, productForm: "privateTour" });
+  db.updateProduct(product.id, { ...product.product, itinerary: [{ day: 1, title: "D1", spots: [{ name: "潮汕接团", kind: "other", poiName: null, poiId: null }] }] });
+  const taskId = openTask(db, product.id, "核查 潮汕接团 的 VBK POI 映射");
+  assert.equal(isResearchTaskSatisfiedByProduct({ label: "核查 潮汕接团 的 VBK POI 映射", type: "vbk" }, db.getProduct(product.id)!.product), true);
+  assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 1);
+  assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 0);
+  const saved = db.getProduct(product.id)!;
+  assert.equal(saved.researchTasks.find((task) => task.id === taskId)?.state, "confirmed");
+  const reverted = structuredClone(saved.product) as Record<string, any>;
+  reverted.itinerary[0].spots[0] = { name: "潮汕接团", kind: "attraction", poiName: null, poiId: null };
+  assert.equal(isResearchTaskSatisfiedByProduct({ label: "核查 潮汕接团 的 VBK POI 映射", type: "vbk" }, reverted), false);
+});
+
+test("SQLite 重连后仅重开由 free/other 关闭的 POI task，并保留关闭依据", () => {
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-kind-reopen-"));
+  let db = new VbkDatabase(dataPath);
+  const created = db.createProduct({ destination: "潮汕", days: 1, productForm: "privateTour" });
+  const taskId = openTask(db, created.id, "核查 潮汕接团 的 VBK POI 映射");
+  const other = structuredClone(created.product) as Record<string, any>;
+  other.itinerary = [{ day: 1, title: "D1", spots: [{ name: "潮汕接团", kind: "other", poiName: null, poiId: null }] }];
+  const first = db.replaceProductAndSatisfyResearchTasks(created.id, other, { status: "review" });
+  assert.deepEqual(first.confirmedTaskIds, [taskId]);
+  const closed = first.product.researchTasks.find((task) => task.id === taskId)!;
+  assert.equal(closed.state, "confirmed");
+  assert.match(closed.evidence?.[0]?.title ?? "", /无需 POI 核查/);
+  (db as any).db.close();
+  db = new VbkDatabase(dataPath);
+  const reopenedProduct = db.getProduct(created.id)!;
+  const attraction = structuredClone(reopenedProduct.product) as Record<string, any>;
+  attraction.itinerary[0].spots[0] = { name: "潮汕接团", kind: "attraction", poiName: null, poiId: null };
+  const second = db.replaceProductAndSatisfyResearchTasks(created.id, attraction, { status: "review" });
+  assert.deepEqual(second.confirmedTaskIds, []);
+  const reopened = second.product.researchTasks.find((task) => task.id === taskId)!;
+  assert.equal(reopened.state, "researching");
+  assert.match(reopened.evidence?.[0]?.title ?? "", /无需 POI 核查/);
+  assert.equal(refreshSatisfiedResearchTasks(db, created.id).updated, 0);
+  (db as any).db.close();
+  fs.rmSync(dataPath, { recursive: true, force: true });
+});
+
+test("refresh 路径以非 POI 依据关闭并在切回景点时重开", () => {
+  const db = withDb();
+  const product = db.createProduct({ destination: "潮汕", days: 1, productForm: "privateTour" });
+  const taskId = openTask(db, product.id, "核查 潮汕送团 的 VBK POI 映射");
+  db.updateProduct(product.id, { ...product.product, itinerary: [{ day: 1, spots: [{ name: "潮汕送团", kind: "other", poiName: null, poiId: null }] }] });
+  assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 1);
+  assert.match(db.getProduct(product.id)!.researchTasks.find((task) => task.id === taskId)?.evidence?.at(-1)?.title ?? "", /itinerary-kind:no-poi/);
+  const saved = db.getProduct(product.id)!;
+  db.updateProduct(product.id, { ...saved.product, itinerary: [{ day: 1, spots: [{ name: "潮汕送团", kind: "attraction", poiName: null, poiId: null }] }] });
+  assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 0);
+  assert.equal(db.getProduct(product.id)!.researchTasks.find((task) => task.id === taskId)?.state, "researching");
+});

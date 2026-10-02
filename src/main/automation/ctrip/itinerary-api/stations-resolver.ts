@@ -1,73 +1,126 @@
-/**
- * itinerary-api/stations-resolver.ts：
- *   - 把 project.pickupCity + dropoffCity 翻译成 ResolvedStations（airport/train × pickup/dropoff）；
- *   - 多候选时按业务规则胜出，避免选错城市：
- *       机场：精确同名 > 「国际机场」/「${city}机场」> 首项；
- *       火车站：精确同名 > 首项；
- *   - 搜索委托给 station-search.ts（真实 soa2 接口）。
- *
- * 抽成独立模块是因为 pickAirport / pickTrain 是纯函数，便于：
- *   - 单元测试聚焦"候选排序"逻辑；
- *   - orchestrator 只关心 resolveStationsForCity 一个入口。
- */
+/** Canonical pickup/dropoff station resolution for itinerary writes and preflight. */
 
 import { searchAirports, searchTrainStations, type StationCandidate } from "./station-search.js";
 import type { ResolvedStations } from "./itinerary-transform.js";
 
-/**
- * 机场候选优先级：
- *   - 0 个：返回 null（不抛错，由调用方决定业务失败）；
- *   - 1 个：返回该候选；
- *   - 多候选：精确同名（name === city）> 含「国际机场」/「${city}机场」> 首项。
- */
-export function pickAirport(
-  candidates: StationCandidate[],
-  city: string,
-): StationCandidate | null {
-  if (!candidates.length) return null;
-  if (candidates.length === 1) return candidates[0];
-  const exact = candidates.find((c) => c.name === city);
-  if (exact) return exact;
-  const primary = candidates.find(
-    (c) => /国际机场$/.test(c.name) || c.name === `${city}机场`,
-  );
-  if (primary) return primary;
-  return candidates[0];
+type StationKind = "airport" | "train";
+type VerifiedStation = { code: string; name: string };
+
+export interface ItineraryStationResolutionInput {
+  pickupCity: string;
+  /** Used only when no verified departure endpoint is available. */
+  dropoffCity?: string;
+  endpointPlan?: unknown;
 }
 
-/**
- * 火车站候选优先级：精确同名（name === city）> 首项；多候选时若 city 唯一匹配则用它。
- */
-export function pickTrain(
-  candidates: StationCandidate[],
-  city: string,
-): StationCandidate | null {
-  if (!candidates.length) return null;
-  if (candidates.length === 1) return candidates[0];
-  const exact = candidates.find((c) => c.name === city);
-  if (exact) return exact;
-  return candidates[0];
+interface VerifiedEndpointPlan {
+  arrivalCity: string;
+  departureCity: string;
+  flight?: { arrival: VerifiedStation; departure: VerifiedStation };
+  train?: { arrival: VerifiedStation; departure: VerifiedStation };
 }
 
-/**
- * 用 project.pickupCity + dropoffCity 解析接送站：
- *   - 先查 suggestAirport，再查 suggestTrainStation；
- *   - 多候选时按业务规则胜出；
- *   - 找不到（list 空）→ 返回 null，由调用方决定是否抛错。
- */
-export async function resolveStationsForCity(
-  page: { evaluate: <T, A>(fn: (arg: A) => T | Promise<T>, arg: A) => Promise<T> },
+function station(value: unknown): VerifiedStation | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const code = typeof raw.code === "string" ? raw.code.trim() : "";
+  const name = typeof raw.name === "string" ? raw.name.trim() : "";
+  return code && name ? { code, name } : undefined;
+}
+
+function pair(value: unknown): { arrival: VerifiedStation; departure: VerifiedStation } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const arrival = station(raw.arrival);
+  const departure = station(raw.departure);
+  return arrival && departure ? { arrival, departure } : undefined;
+}
+
+function verifiedPlan(value: unknown): VerifiedEndpointPlan | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const arrivalCity = typeof raw.arrivalCity === "string" ? raw.arrivalCity.trim() : "";
+  const departureCity = typeof raw.departureCity === "string" ? raw.departureCity.trim() : "";
+  if (!arrivalCity || !departureCity) return undefined;
+  const flight = pair(raw.flight);
+  const train = pair(raw.train);
+  return { arrivalCity, departureCity, ...(flight ? { flight } : {}), ...(train ? { train } : {}) };
+}
+
+/** City-only fallback: candidate name must explicitly name the queried city. */
+export function pickAirport(candidates: StationCandidate[], city: string): StationCandidate | null {
+  const trimmed = city.trim();
+  return candidates.find((candidate) => candidate.name === trimmed)
+    ?? candidates.find((candidate) => candidate.name.includes(trimmed))
+    ?? null;
+}
+
+/** City-only fallback: candidate name must explicitly name the queried city. */
+export function pickTrain(candidates: StationCandidate[], city: string): StationCandidate | null {
+  return pickAirport(candidates, city);
+}
+
+function candidateList(candidates: StationCandidate[]): string {
+  return candidates.length
+    ? candidates.slice(0, 8).map((candidate) => `${candidate.name}（${candidate.code}）`).join("、")
+    : "无";
+}
+
+function exactVerifiedCandidate(candidates: StationCandidate[], endpoint: VerifiedStation, kind: StationKind): StationCandidate {
+  const match = candidates.find((candidate) => candidate.code === endpoint.code && candidate.name === endpoint.name);
+  if (match) return match;
+  const label = kind === "airport" ? "机场" : "火车站";
+  throw new Error(`已核验${label}端点 ${endpoint.name}（${endpoint.code}）重新查询后不一致；当前候选：${candidateList(candidates)}。拒绝改用其它站点。`);
+}
+
+function cachedSearch(page: Parameters<typeof searchAirports>[0]) {
+  const cached = new Map<string, Promise<StationCandidate[]>>();
+  return (kind: StationKind, keyword: string) => {
+    const key = `${kind}:${keyword}`;
+    const existing = cached.get(key);
+    if (existing) return existing;
+    const request = kind === "airport" ? searchAirports(page, keyword) : searchTrainStations(page, keyword);
+    cached.set(key, request);
+    return request;
+  };
+}
+
+async function resolveOne(
+  search: (kind: StationKind, keyword: string) => Promise<StationCandidate[]>,
+  kind: StationKind,
   city: string,
+  endpoint: VerifiedStation | undefined,
+): Promise<StationCandidate | null> {
+  if (endpoint) return exactVerifiedCandidate(await search(kind, endpoint.name), endpoint, kind);
+  const candidates = await search(kind, city);
+  return kind === "airport" ? pickAirport(candidates, city) : pickTrain(candidates, city);
+}
+
+/** Pickup follows plan.arrival and dropoff follows plan.departure when verified. */
+export async function resolveStationsForItinerary(
+  page: Parameters<typeof searchAirports>[0],
+  input: ItineraryStationResolutionInput,
 ): Promise<ResolvedStations> {
-  const trimmed = (city ?? "").trim();
-  if (!trimmed) {
-    throw new Error("接送站搜索城市为空");
-  }
-  const [airports, trains] = await Promise.all([
-    searchAirports(page, trimmed),
-    searchTrainStations(page, trimmed),
+  const fallbackPickupCity = input.pickupCity.trim();
+  if (!fallbackPickupCity) throw new Error("接送站搜索城市为空");
+  const plan = verifiedPlan(input.endpointPlan);
+  const pickupCity = plan?.arrivalCity ?? fallbackPickupCity;
+  const dropoffCity = plan?.departureCity || input.dropoffCity?.trim() || fallbackPickupCity;
+  const search = cachedSearch(page);
+  const [pickupAir, pickupTrain, dropoffAir, dropoffTrain] = await Promise.all([
+    resolveOne(search, "airport", pickupCity, plan?.flight?.arrival),
+    resolveOne(search, "train", pickupCity, plan?.train?.arrival),
+    resolveOne(search, "airport", dropoffCity, plan?.flight?.departure),
+    resolveOne(search, "train", dropoffCity, plan?.train?.departure),
   ]);
-  const air = pickAirport(airports, trimmed);
-  const train = pickTrain(trains, trimmed);
-  return { pickupAir: air, pickupTrain: train, dropoffAir: air, dropoffTrain: train };
+  return { pickupAir, pickupTrain, dropoffAir, dropoffTrain };
+}
+
+/** Compatibility entrypoint for callers that only have one city. */
+export async function resolveStationsForCity(
+  page: Parameters<typeof searchAirports>[0],
+  city: string,
+  endpointPlan?: unknown,
+): Promise<ResolvedStations> {
+  return resolveStationsForItinerary(page, { pickupCity: city, endpointPlan });
 }

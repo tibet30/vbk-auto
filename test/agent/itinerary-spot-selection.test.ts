@@ -42,6 +42,16 @@ test("agent itinerary patch schema accepts the persisted and relation", () => {
   assert.deepEqual(schema.properties.patch.properties.itinerary.items.properties.spots.items.properties.relation.enum, ["and", "or"]);
 });
 
+test("select_itinerary_poi keeps the original spot target while accepting a separately evidenced alias query", () => {
+  const tools = createAgentBusinessTools({} as any);
+  const tool = tools.find((item) => item.name === "select_itinerary_poi")!;
+  const schema = tool.parameters as any;
+  assert.deepEqual(schema.required, ["day", "spotName", "poiId"]);
+  assert.equal(schema.properties.queryKeyword.type, "string");
+  const selected = selectItinerarySpot(product, 2, "日喀则非物质文化遗产展示中心");
+  assert.equal(selected.spot.name, "日喀则非物质文化遗产展示中心");
+});
+
 test("agent exposes a local-only traffic availability recheck", () => {
   const tools = createAgentBusinessTools({} as any);
   const tool = tools.find((item) => item.name === "recheck_traffic_line_availability")!;

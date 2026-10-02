@@ -169,9 +169,13 @@ function splitSpots(value: string): string[] {
     .replace(/(?:火车站接|接火车站|送火车|送站|住[^—–\-，,、。；;\n]{2,})/gu, " ")
     .replace(/(?:二选一|多选一|任选其一)/gu, " ")
     .replace(/(?:或者|或|\/|／)/gu, "，")
+    .replace(/[>＞→]+/gu, "，")
     .replace(/[—–-]+/gu, "，")
     .split(/[和与、，,以及]+/)
-    .map((item) => item.replace(/^(?:(?:必须)?(?:去|游览|安排|参观)|再?(?:改成|改为|换成|调整为|替换为|改去|换去)|再加|增加|加上)/, "").trim())
+    .map((item) => item
+      .replace(/^(?:(?:必须)?(?:去|游览|安排|参观)|再?(?:改成|改为|换成|调整为|替换为|改去|换去)|再加|增加|加上)/, "")
+      .replace(/[。；;]+$/u, "")
+      .trim())
     .filter(looksLikePlaceName);
 }
 
@@ -189,10 +193,15 @@ function cleanDayConstraintText(value: string): string {
  * by a D1/D2 marker. Keeping them here would turn "AI 自我修复" into a POI.
  */
 function trimPlanningControlTail(value: string): string {
-  return value.replace(
+  return value
+    .replace(
     /(?:[\n。；;]\s*)+(?:端到端.*(?:测试|验证|复验)|本次已授权|重新创建新产品|修复共享问题|资料准备|期望在资料准备|如需处理|无需(?:再)?询问用户|不需要(?:再)?询问用户|请读取刚创建的产品|任何\s*VBK\s*写入)[\s\S]*$/u,
     "",
-  );
+    )
+    .replace(
+      /(?:[\n。；;]\s*)(?=(?:接送团属于|自由活动用|这些不配置(?:POI)?|城市(?:固定|为)|酒店[0-9一二三四五六七八九十]+钻|成人[0-9一二三四五六七八九十]|儿童[0-9一二三四五六七八九十]|[0-9一二三四五六七八九十]+人成团|每班库存|出发(?:日期|时间)(?:为|是)?|出发(?=[0-9一二三四五六七八九十]{1,4}(?:年|[-/.]))|保持(?:跟团游|私家团)|只保存|不启用|不提交审核))[\s\S]*$/u,
+      "",
+    );
 }
 
 function looksLikePlaceName(item: string): boolean {

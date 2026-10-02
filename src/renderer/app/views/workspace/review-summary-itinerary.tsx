@@ -33,6 +33,8 @@ export interface ItineraryDay {
   title?: string;
   spots?: Array<{
     name: string;
+    kind?: "attraction" | "free" | "other";
+    description?: string;
     poiName?: string | null;
     poiId?: number | null;
     province?: string | null;
@@ -72,6 +74,7 @@ interface TimelineItem {
   province?: string | null;
   city?: string | null;
   district?: string | null;
+  kind?: "attraction" | "free" | "other";
 }
 
 /**
@@ -99,7 +102,7 @@ function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
       time: act.time || "",
       title: act.title,
       detail: act.detail,
-      type: spot ? "visit" : act.type ?? "other",
+      type: spot ? (spot.kind === "free" ? "free" : spot.kind === "other" ? "other" : "visit") : act.type ?? "other",
       dayIndex,
       spotIndex: spotIndex >= 0 ? spotIndex : undefined,
       poiName: spot?.poiName ?? null,
@@ -107,6 +110,7 @@ function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
       province: spot?.province ?? null,
       city: spot?.city ?? null,
       district: spot?.district ?? null,
+      kind: spot?.kind,
     };
   });
 
@@ -119,8 +123,8 @@ function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
       key: `spot-${index}`,
       time: "",
       title: spot.name,
-      detail: undefined,
-      type: "visit",
+      detail: spot.description,
+      type: spot.kind === "free" ? "free" : spot.kind === "other" ? "other" : "visit",
       dayIndex,
       spotIndex: index,
       poiName: spot.poiName ?? null,
@@ -128,6 +132,7 @@ function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
       province: spot.province ?? null,
       city: spot.city ?? null,
       district: spot.district ?? null,
+      kind: spot.kind,
     }));
 
   items.push(...activityItems, ...spotItems);
@@ -193,6 +198,7 @@ function activityNodeClass(type: ItineraryActivity["type"]): string {
  */
 export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndexes, onToggle, collapsed = false, onToggleCollapsed, readinessIssues = [] }: ReviewSummaryItineraryProps) {
   const [removingSpotKey, setRemovingSpotKey] = useState<string | null>(null);
+  const [savingKindKey, setSavingKindKey] = useState<string | null>(null);
   const borderPermitIssue = readinessIssues.find((issue) => readinessIssueSemanticKey(issue) === "travel:borderPermit");
   const removeSpot = async (item: TimelineItem) => {
     if (item.spotIndex === undefined || !api()) return;
@@ -212,6 +218,16 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
     } finally {
       setRemovingSpotKey((current) => (current === key ? null : current));
     }
+  };
+  const changeKind = async (item: TimelineItem, kind: "attraction" | "free" | "other") => {
+    if (item.spotIndex === undefined || !api()) return;
+    if (kind !== "attraction" && (item.poiName || item.poiId) && !window.confirm(`切换为${kind === "free" ? "自由活动" : "其他"}会清除已绑定 POI，是否继续？`)) return;
+    const key = `${item.dayIndex}-${item.spotIndex}`;
+    setSavingKindKey(key);
+    try {
+      await api()!.products.updateReviewField(localProductId, { field: "itinerarySpotKind", dayIndex: item.dayIndex, spotIndex: item.spotIndex, kind });
+    } catch (error) { window.alert(error instanceof Error ? error.message : "保存行程类型失败，请重试。"); }
+    finally { setSavingKindKey((current) => current === key ? null : current); }
   };
 
   // 折叠时不渲染 dayList，节省节点；header 仍然可点击重新展开。
@@ -252,6 +268,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
           const title = stripDayPrefix(day.title || "", index);
           const timeline = buildTimeline(day, index);
           const visitCount = timeline.filter((t) => t.type === "visit").length;
+          const activityCount = timeline.filter((t) => t.type === "free" || t.type === "other").length;
           const mealCount = timeline.filter((t) => t.type === "meal").length;
           const hotel = day.hotel?.trim() ?? "";
           const hasHotelStay = hasItineraryHotelStay(hotel);
@@ -271,6 +288,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                   <span className={styles.dayTitle}>{title || `Day ${index + 1}`}</span>
                   <span className={styles.daySummary}>
                     {visitCount > 0 ? `${visitCount} 个景点` : "尚无景点"}
+                    {activityCount > 0 ? ` · ${activityCount} 项活动` : ""}
                     {mealCount > 0 ? ` · ${mealCount} 餐` : ""}
                     {hasHotelStay ? " · 含住宿" : ""}
                   </span>
@@ -301,6 +319,11 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                                 <span className={styles.timelineTime}>{label}</span>
                                 <span className={styles.timelineTitle}>{item.title}</span>
                                 {item.spotIndex !== undefined && (
+                                  <select className={styles.spotKind} value={item.kind ?? "attraction"} disabled={savingKindKey === `${item.dayIndex}-${item.spotIndex}`} onChange={(event) => { void changeKind(item, event.target.value as "attraction" | "free" | "other"); }} aria-label={`${item.title} 的类型`}>
+                                    <option value="attraction">景点</option><option value="free">自由活动</option><option value="other">其他</option>
+                                  </select>
+                                )}
+                                {item.spotIndex !== undefined && (
                                   <button
                                     type="button"
                                     className={styles.spotRemove}
@@ -316,7 +339,8 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                               {item.detail && (
                                 <p className={styles.timelineDetail}>{item.detail}</p>
                               )}
-                              {item.spotIndex !== undefined && (
+                              {(item.kind === "free" || item.kind === "other") && <p className={styles.timelineDetail}>无需配置 POI</p>}
+                              {item.spotIndex !== undefined && item.kind !== "free" && item.kind !== "other" && (
                                 <ItinerarySpotPoiEditor
                                   localProductId={localProductId}
                                   item={{
@@ -328,6 +352,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                                     province: item.province,
                                     city: item.city,
                                     district: item.district,
+                                    kind: item.kind,
                                   }}
                                 />
                               )}

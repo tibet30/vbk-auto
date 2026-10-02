@@ -114,6 +114,14 @@ test("只纠正住宿时，行程日序和交通继续保留首次输入", () =>
     { day: 1, spots: ["宽窄巷子"] },
     { day: 2, spots: ["武侯祠"] },
   ]);
+  assert.equal(planningWriteContractError(product, "skeleton", { hotelTier: "当地5钻酒店/-38" }), undefined);
+  assert.match(planningWriteContractError(product, "skeleton", { hotelTier: "当地3钻酒店/-3" }) ?? "", /酒店档次已确定/);
+});
+
+test("未指定档次时规划也不能把已有5钻模板降为3钻", () => {
+  const product = draft("成都两日游");
+  assert.equal(planningWriteContractError(product, "skeleton", { hotelTier: "当地5钻酒店" }), undefined);
+  assert.match(planningWriteContractError(product, "skeleton", { hotelTier: "当地3钻酒店/-3" }) ?? "", /酒店档次已确定/);
 });
 
 test("明确取消旧景点后不再锁定该景点，未取消部分继续保留", () => {

@@ -12,6 +12,7 @@ import {
   markItineraryPendingAdoption,
   markItineraryVerifying,
 } from "./itinerary-adoption.js";
+import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 type ItineraryPoiLookup = (
   name: string,
@@ -54,7 +55,8 @@ export async function acceptItineraryAndRerunCompletion(args: {
     });
     if (malformedDay >= 0) throw new Error(`第${malformedDay + 1}天缺少可核验的景点名称，请继续调整行程。`);
     const required = collectRequiredItinerarySpots(itinerary).filter((spot) => !isTravelNodeName(spot.name));
-    if (required.length === 0) throw new Error("当前行程没有可核验的游览景点，请先继续调整行程。");
+    // A legitimate all-free/all-other day has no POI query.  It remains
+    // adoptable and later validation still checks its title/description/meals.
 
     const verifying = markItineraryVerifying(existingPlan, itinerary);
     remote = await context.remoteProducts.update({ ...remote, status: "planning", planning: verifying, updatedAt: new Date().toISOString() }, remote.revision);
@@ -64,10 +66,10 @@ export async function acceptItineraryAndRerunCompletion(args: {
     const basic = asRecord(remote.product.basicInfo) ?? {};
     const destinationCity = text(basic.destinationCity) || text(basic.meetingCity);
     const province = text(basic.province);
-    let matches: Map<string, { poiName: string; poiId: number }>;
-    if (args.lookupPoi) {
+    let matches = new Map<string, { poiName: string; poiId: number }>();
+    if (args.lookupPoi && required.length) {
       matches = await resolveBestEffortPoiMatches(required, { destinationCity, province }, args.lookupPoi);
-    } else {
+    } else if (required.length) {
       try {
         matches = await context.productWorkflows.runVbkPageExclusive(async () => {
           await context.browser.status();

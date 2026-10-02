@@ -54,6 +54,7 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
 test("实跑敏感词与极限宣传进入黑名单，但行程序号不被误伤", () => {
   assert.equal(findVbkCopyBadCase("适合首次到访的游客")?.term, "首次");
   assert.equal(findVbkCopyBadCase("度假首选路线")?.term, "首选");
+  assert.equal(findVbkCopyBadCase("体验潮汕夜骑楼风情")?.term, "夜骑");
   assert.equal(findVbkCopyBadCase("参观主席旧居")?.term, "主席");
   assert.equal(findVbkCopyBadCase("前往南普陀寺礼佛")?.term, "礼佛");
   assert.equal(findVbkCopyBadCase("扎寺朝圣体验")?.term, "朝圣");
@@ -166,6 +167,11 @@ test("确定性修复保留官方 POI 身份字段，并让未消除的命中继
     itinerary: [{ description: "初到", spots: [{ poiName: "首次公园", requestedName: "首次公园" }] }],
   });
   assert.equal(findVbkCopyBadCase(repaired)?.path, "value.itinerary[0].spots[0].poiName");
+});
+
+test("夜骑楼按完整短语改为街区风情，避免产生散步楼", () => {
+  assert.equal(repairVbkCopyPolicyValue("晚餐后体验潮汕夜骑楼风情"), "晚餐后体验潮汕骑楼街区风情");
+  assert.equal(repairVbkCopyPolicyValue("安排夜骑活动"), "安排晚间街区漫步活动");
 });
 
 test("真实图文保险权益会在写入前整段删除", () => {

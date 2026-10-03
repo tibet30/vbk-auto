@@ -3,6 +3,7 @@ import { PREPARATION_PROMPT_VERSION, type PreparationMajorStage } from "../../sh
 import { evaluatePreparationCompletion, toVisibleReadiness } from "../planning/preparation-completion.js";
 import { projectProductContext } from "../planning/adapters/planning-prompt.js";
 import { requiredAgentPhases } from "./integration-gates.js";
+import { classifyReadinessIssue } from "../planning/preparation-checks.js";
 
 export { PREPARATION_PROMPT_VERSION };
 
@@ -59,9 +60,11 @@ export function buildAgentTaskContext(
 ): string {
   const visible = buildAgentProductContext(product, snapshot, liveReadiness);
   const basic = product.product.basicInfo as Record<string, unknown> | undefined;
+  const currentMissing = visible.preparation.missing.filter((label, index) =>
+    classifyReadinessIssue(label, visible.preparation.blockingReasons[index] ?? label).stage === visible.currentStage);
   const stayOnStage = visible.preparation.ready
     ? "preparation.ready=true，允许一次 request_approval；批准后不要再让模型决定 VBK 写入步骤。"
-    : `preparation.ready=false，必须留在当前阶段补齐（${visible.currentStage}/${visible.currentNode}）：${visible.preparation.missing.join("、") || "缺项"}。request_approval 只能在 preparation.ready=true 时使用。`;
+    : `preparation.ready=false，必须留在当前阶段补齐（${visible.currentStage}/${visible.currentNode}）：${currentMissing.join("、") || "缺项"}。当前缺项解决后系统自动进入后续阶段，不需要用户授权阶段推进。request_approval 只能在 preparation.ready=true 时使用。`;
   const projected = projectProductContext(STAGE_TO_PLANNING[visible.currentStage], product.product as Record<string, unknown>);
   return JSON.stringify({
     currentStage: visible.currentStage,

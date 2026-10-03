@@ -1,5 +1,6 @@
 import type { AgentInputRequest, AgentQuestion } from "../../shared/contracts.js";
 import { clampRetryAfterSeconds, parseRetryAfterSeconds } from "../../shared/retry-after.js";
+import { trackProductExecution, waitWithoutExecutionTime } from "../operations/product-execution-clock.js";
 import { AgentSnapshotManager, type TurnToken } from "./core-snapshot.js";
 import { cleanList, parseQuestions, validateSchema } from "./core-validation.js";
 import {
@@ -137,9 +138,9 @@ export class AgentToolRunner {
     }
 
     try {
-      const output = await this.executeWithRetryAfterWait(id, tool, call, token, {
+      const output = await trackProductExecution(id, () => this.executeWithRetryAfterWait(id, tool, call, token, {
         localProductId: id, ...identity, approval,
-      }, requiresApproval);
+      }, requiresApproval));
       snapshot = this.snapshots.load(id);
       this.snapshots.result(snapshot, call.id, output.content, {
         ...(output.data ?? {}),
@@ -205,7 +206,7 @@ export class AgentToolRunner {
         toolCallId: call.id,
       }, token.runId);
       this.snapshots.save(snapshot);
-      await delay(waitSeconds * 1_000);
+      await waitWithoutExecutionTime(() => delay(waitSeconds * 1_000));
       if (!this.snapshots.current(this.snapshots.load(id), token)) throw error;
       return tool.execute(call.arguments, context);
     }

@@ -1,5 +1,6 @@
 import type { AgentSnapshot } from "../../shared/contracts.js";
 import { completeWithRetries } from "./core-model.js";
+import { trackProductExecution } from "../operations/product-execution-clock.js";
 import { AgentSnapshotManager, materialWriteResults, type AgentStreamState, type TurnToken } from "./core-snapshot.js";
 import { AgentToolRunner } from "./core-tools.js";
 import { buildModelMessages } from "./core-transcript.js";
@@ -41,10 +42,10 @@ export class AgentTurnLoop {
         const streamState: AgentStreamState = { lastSavedAt: 0 };
         let output;
         try {
-          output = await completeWithRetries(model, {
+          output = await trackProductExecution(id, () => completeWithRetries(model, {
             messages, tools: this.schemas(),
             onContent: (content) => this.snapshots.publishStreaming(id, token, modelTurnId, streamState, content),
-          });
+          }, id));
         } catch (error) {
           const failed = this.snapshots.load(id);
           if (!this.snapshots.current(failed, token)) continue;
@@ -143,9 +144,10 @@ export class AgentTurnLoop {
     const writes = materialWriteResults(snapshot, snapshot.run.id);
     const hadWrites = writes.length > 0;
     const hadRemoteWrites = writes.some((event) => event.data?.remoteWrite === true);
-    if (!hadWrites) { this.snapshots.finish(snapshot); this.snapshots.save(snapshot); return; }
+    const preparationRequired = this.deps.requiresCompletionVerification?.(id, snapshot) ?? false;
+    if (!hadWrites && !preparationRequired) { this.snapshots.finish(snapshot); this.snapshots.save(snapshot); return; }
     if (!this.deps.finishVerified) {
-      if (!hadRemoteWrites) this.snapshots.finish(snapshot);
+      if (!hadRemoteWrites && !preparationRequired) this.snapshots.finish(snapshot);
       else this.snapshots.completionBlocked(snapshot, "远端写入尚未配置权威完成检查，不能标记为完成。");
       this.snapshots.save(snapshot);
       return;
@@ -167,7 +169,9 @@ export class AgentTurnLoop {
       this.snapshots.save(snapshot);
       return;
     }
-    this.snapshots.completionBlocked(snapshot, gate.message ?? "写入尚未完成权威核对，请查询并继续。");
+    this.snapshots.completionBlocked(snapshot, (preparationRequired
+      ? "用户已授权本地规划，请继续完成本地准备，无需再次要求回复继续。" : '')
+      + (gate.message ?? "写入尚未完成权威核对，请查询并继续。"));
     this.snapshots.save(snapshot);
   }
 

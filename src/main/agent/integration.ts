@@ -192,7 +192,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       reviewCompletePois: true,
     });
     const latest = get(localProductId);
-    const repair = selfRepairItineraryForVbk(latest.product.itinerary);
+    const repair = selfRepairItineraryForVbk(latest.product.itinerary, Number((latest.product.basicInfo as JsonObject)?.nights));
     if (repair.changed) {
       deps.productMutations.replace(localProductId, {
         ...productData(latest),

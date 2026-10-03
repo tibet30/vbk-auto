@@ -70,6 +70,9 @@ export interface AgentCoreDependencies {
   tools: AgentTool[];
   accountFor(localProductId: string): Promise<{ accountKey: string; productVersion: string }>;
   productFingerprint?(localProductId: string): Promise<string>;
+  prepareWorkflowReplay?(localProductId: string, content: string): Promise<{
+    scope: string[]; summary: string; automationRunId: string; automationRunStatus?: "failed" | "succeeded";
+  } | undefined> | { scope: string[]; summary: string; automationRunId: string; automationRunStatus?: "failed" | "succeeded" } | undefined;
   /** Applies deterministic local repairs implied by an explicit new user
    * instruction before the next intent fingerprint and model turn are made. */
   prepareUserInstruction?(localProductId: string, content: string, selection?: {
@@ -86,6 +89,8 @@ export interface AgentCoreDependencies {
   handoffApprovedWorkflow?(localProductId: string, approval: AgentApproval): boolean;
   contextFor?(localProductId: string): Promise<string>;
   finishVerified?(localProductId: string, context?: AgentFinishContext): Promise<AgentFinishResult>;
+  /** Whether a historical no-write completion still needs the business readiness gate. */
+  requiresCompletionVerification?(localProductId: string, snapshot: AgentSnapshot): boolean;
   reconcileUncertainWrite?(localProductId: string, uncertain: { toolCallId: string; message: string }): Promise<{ reconciled: boolean; retryable?: boolean; message?: string }>;
   approvalPrecondition?(localProductId: string, scope: string[]): Promise<string | undefined>;
   normalizeApprovalScope?(localProductId: string, scope: string[]): string[] | Promise<string[]>;

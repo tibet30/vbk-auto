@@ -31,9 +31,9 @@ export class AgentHandoff {
   }
 
   async complete(id: string, approvalId: string): Promise<AgentSnapshot> {
-    this.ids.delete(id);
     const identity = await this.deps.accountFor(id);
     return this.command(id, async () => {
+      this.ids.delete(id);
       let snapshot = this.snapshots.load(id);
       const approval = this.snapshots.validApproval(snapshot);
       // Automation may rewrite presentation/resources after approval. Do not
@@ -62,7 +62,6 @@ export class AgentHandoff {
   }
 
   async pause(id: string, approvalId: string, message: string): Promise<AgentSnapshot> {
-    this.ids.delete(id);
     let identity: { accountKey: string; productVersion: string } | undefined;
     try {
       identity = await this.deps.accountFor(id);
@@ -70,6 +69,7 @@ export class AgentHandoff {
       identity = undefined;
     }
     return this.command(id, async () => {
+      this.ids.delete(id);
       const snapshot = this.snapshots.load(id);
       const approval = this.snapshots.validApproval(snapshot);
       if (!approval || approval.id !== approvalId || !snapshot.run || this.snapshots.terminal(snapshot.run.status)) {

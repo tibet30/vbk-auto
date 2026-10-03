@@ -6,7 +6,8 @@ import { isCoverHandoffReady } from '../planning/preparation-completion.js';
 
 export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDetail): Partial<ProductWorkflowTask> {
   const run = snapshot.run;
-  const status: ProductWorkflowTask['status'] = run?.status === 'completed' ? 'succeeded'
+  const unfinished = run?.status === 'completed' && !(product?.status === 'draft_saved' && product.productId);
+  const status: ProductWorkflowTask['status'] = unfinished ? 'needs_attention' : run?.status === 'completed' ? 'succeeded'
     : run?.status === 'failed' ? 'failed'
     : run?.status === 'abandoned' ? 'abandoned'
     : ['waiting_input','waiting_approval','paused'].includes(run?.status ?? '') ? 'needs_attention'
@@ -31,7 +32,7 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
     : '可录入 VBK 未提审草稿；运营占位图上架前需替换')
     : snapshot.pendingApproval ? '方案已就绪，等待授权录入'
     : snapshot.pendingInput ? '等待补充信息'
-      : run?.error ?? (status==='succeeded' ? '本轮任务已完成' : status==='abandoned' ? '任务已放弃'
+      : run?.error ?? (unfinished ? '产品尚未完成，可继续处理' : status==='succeeded' ? '本轮任务已完成' : status==='abandoned' ? '任务已放弃'
         : run?.status==='paused' ? '任务已暂停，可继续处理' : 'Agent 正在处理产品');
   return {status,stage,progress,message,error:run?.error,
     completedAt:['succeeded','abandoned','failed'].includes(status) ? run?.updatedAt : undefined};

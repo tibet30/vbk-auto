@@ -29,6 +29,8 @@ export function hasSyntheticNoopApproval(snapshot: AgentSnapshot): boolean {
   const request = [...snapshot.events].reverse().find((event) => event.runId === snapshot.run!.id
     && event.type === "approval_request"
     && (event.data?.approval as AgentApproval | undefined)?.id === approval.id);
+  if (approval.replayOfAutomationRunId && snapshot.events.some(event =>
+    event.runId === snapshot.run!.id && event.type === "user" && event.data?.fullWorkflowReplay === true)) return false;
   return Boolean(request && typeof request.data?.toolCallId !== "string"
     && materialWriteResults(snapshot, snapshot.run.id).length === 0);
 }

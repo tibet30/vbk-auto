@@ -7,6 +7,7 @@ import { preservesApprovedIntent } from './approval-intent.js';
 import { trafficLineChildShouldBeSkipped } from '../automation/ctrip/traffic-line/main.js';
 import { evaluatePreparationCompletion } from '../planning/preparation-completion.js';
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
+import { classifyReadinessIssue } from '../planning/preparation-checks.js';
 
 type Json = Record<string, unknown>;
 function canonical(value: unknown): unknown {
@@ -137,9 +138,13 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   if (!context?.hadRemoteWrites) {
     const evaluation = evaluatePreparationCompletion(product, snapshot);
     if (!evaluation.ready) {
+      const current = evaluation.blockingReasons.filter((reason, index) =>
+        classifyReadinessIssue(evaluation.missing[index] ?? '', reason).stage === evaluation.currentStage);
       return {
         verified: false,
-        message: `本地方案仍需完善：当前阶段 ${evaluation.currentStage}/${evaluation.currentNode}，${evaluation.missing.join('、') || evaluation.blockingReasons.join('、')}。请补齐或向用户询问。`,
+        message: `本地方案仍需完善：当前阶段 ${evaluation.currentStage}/${evaluation.currentNode}，当前缺项：${current.join('；') || evaluation.blockingReasons.join('；')}。`
+          + (evaluation.currentStage === 'itinerary' ? '若二选一已有可用 POI，请调用 resolve_itinerary_pois 自动收敛；不要用 patch_product 删除原始选项。' : '')
+          + '当前阶段缺项解决后，系统会自动进入后续阶段，无需用户授权阶段推进。请继续调用允许的工具，不能仅声明本阶段已完成。',
       };
     }
     if (!readiness.ready) return {verified:false,message:`本地方案仍需完善：${readiness.issues.map(issue=>issue.label).join('、')}。请补齐或向用户询问。`};
@@ -179,7 +184,7 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   // label (or omit saleControl from phases) even after a successful preflight
   // readback. Whitelist only those historically stale labels — never waive
   // every approved phase just because preflight completed.
-  const staleDeterministicPhaseLabels = new Set(['hotelResource', 'saleControl']);
+  const staleDeterministicPhaseLabels = new Set(['hotelResource', 'saleControl', 'vehicleResource']);
   const verifiedDeterministicPreflight = Boolean(
     context.deterministicWorkflow
       && automationSucceeded

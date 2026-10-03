@@ -7,6 +7,7 @@ import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
 import type { DraftAutomation } from "../automation/automation.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
+import { hasValidVbkRecommendationLength } from "../planning/vbk-recommendation-length.js";
 import { executeStageOutput } from "../planning/stage-runner.js";
 import { applyStageDeterministicCompletion, skeletonFromProduct } from "../planning/stage-deterministic-completion.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
@@ -40,6 +41,7 @@ export function hasCompletePresentationRecommendations(value: unknown): value is
     const category = cleanText((item as JsonObject).category);
     const text = cleanText((item as JsonObject).text);
     if (!category || !text || categories.has(category)) return false;
+    if (!hasValidVbkRecommendationLength(text)) return false;
     categories.add(category);
     return true;
   });

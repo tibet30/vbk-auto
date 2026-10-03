@@ -8,6 +8,8 @@ import { AgentTurnLoop } from "./core-loop.js";
 import { AgentSnapshotManager, hasSyntheticNoopApproval, type NoProgressBlocker } from "./core-snapshot.js";
 import { AgentToolRunner } from "./core-tools.js";
 import { resolveSelectedAnswers } from "./selected-input-answers.js";
+import { requestWorkflowReplay } from "./core-workflow-replay.js";
+import { recoverPrematureCompletion } from "./core-completion-recovery.js";
 import { validateAnswers } from "./core-validation.js";
 import type { AgentCoreDependencies, AgentSnapshotStore } from "./types.js";
 
@@ -38,6 +40,7 @@ export class AgentCore {
     return this.command(id, async () => {
       const snapshot = this.load(id);
       const detached = !this.active.has(id) && !this.scheduled.has(id);
+      if (detached) recoverPrematureCompletion(id, snapshot, this.deps, this.snapshots);
       // `handoffApprovedWorkflow` is deliberately detached from the model
       // turn. Renderer polling must not mistake that short interval for an
       // application restart and pause the freshly authorised first phase.
@@ -47,7 +50,7 @@ export class AgentCore {
       if (snapshot.run?.status === "running" && detached && !handingOff) {
         this.pauseRun(snapshot, "应用重启后已在安全检查点暂停。");
       }
-      if (hasSyntheticNoopApproval(snapshot)) {
+      if (hasSyntheticNoopApproval(snapshot) && !this.deps.requiresCompletionVerification?.(id, snapshot)) {
         this.cancelPendingInteraction(snapshot, "已清除由未生效操作产生的错误确认请求。");
         this.snapshots.finish(snapshot);
         return this.save(snapshot);
@@ -79,6 +82,8 @@ export class AgentCore {
     return this.command(id, async () => {
       const text = content.trim();
       if (!text) return this.load(id);
+      const replay = await requestWorkflowReplay({ id, content: text, deps: this.deps, snapshots: this.snapshots });
+      if (replay) return replay;
       let snapshot = this.load(id);
       if (!this.active.has(id) && !this.scheduled.has(id)) this.snapshots.recoverInterruptedCalls(snapshot);
       if (snapshot.pendingApproval && isPendingApprovalStatusFollowup(text)) {

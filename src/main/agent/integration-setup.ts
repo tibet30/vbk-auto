@@ -6,7 +6,8 @@ import { AgentCore } from './core.js';
 import { OpenAIAgentModel } from './openai-model.js';
 import { createAgentBusinessTools, agentProductVersion } from './integration.js';
 import { agentPlannerContext, agentTaskContext } from './integration-context.js';
-import { agentCompletionGate, approvalForRun, recoverEquivalentApproval, requiredAgentPhases } from './integration-gates.js';
+import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from './integration-gates.js';
+import { requestsFreshAutomationRun } from './core-workflow-replay.js';
 import { preparationApprovalBlockReason } from '../planning/preparation-completion.js';
 import { inspectManualCoverAsset } from '../automation/manual-cover-asset.js';
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from './integration-guard.js';
@@ -18,12 +19,17 @@ import { recoverResolvedHotelCandidates } from './hotel-candidate-recovery.js';
 import { repairProductForExplicitInstruction } from './user-instruction-repair.js';
 import { resolvedProductQuestions } from './pending-question-reconciliation.js';
 import { needsTrafficLineBackfill } from '../automation/traffic-line-backfill.js';
+import { isPreparationRun, isPreparationInstruction } from './preparation-run.js';
+import { preparationItineraryRecovery } from './preparation-itinerary-recovery.js';
+import { runQueuedApprovedWorkflow } from './queued-approved-workflow.js';
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
 export function installProductAgent(context: MainIpcContext): () => void {
   const {db,getSettings,apiKey,productWorkflows,remoteProducts,readiness,emitProduct} = context;
   const emitAgentSnapshot = (snapshot: Parameters<NonNullable<MainIpcContext['emitAgentSnapshot']>>[0]) => context.emitAgentSnapshot?.(snapshot);
   context.agentCore = new AgentCore({
+    requiresCompletionVerification: (id, snapshot) => isPreparationRun(snapshot)
+      && !(db.getProduct(id)?.status === 'draft_saved' && db.getProduct(id)?.productId),
     // Resolve credentials and model settings for each Agent turn. Startup remains
     // available without a key, and settings changes apply to the next request.
     modelFor: async (localProductId) => {
@@ -62,7 +68,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
         const adapter = new OpenAICompatiblePlannerAdapter({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model, ...planningTransportOptions(settings.aiProvider),
-          provider: settings.aiProvider, recordUsage: (event) => recordAgentUsage(db, localProductId, event) });
+          presentationRejectedWords: db.listRejectedPresentationWords(), provider: settings.aiProvider, recordUsage: (event) => recordAgentUsage(db, localProductId, event) });
         // The adapter owns the stage-specific function schema. Its context is
         // intentionally a single current-product snapshot for this one-shot run.
         let memoryContext;
@@ -110,15 +116,30 @@ export function installProductAgent(context: MainIpcContext): () => void {
       return resolvedProductQuestions(data, questions, { manualCoverAssetReady: Boolean(inspected.asset && !inspected.issue) });
     },
     prepareUserInstruction: (localProductId, content, selection) => {
-      const current = db.getProduct(localProductId);
+      let current = db.getProduct(localProductId);
       if (!current) throw productNotFound(localProductId);
+      let preparationRecovered = false;
+      if (isPreparationInstruction(content)) {
+        const recovery = preparationItineraryRecovery(current);
+        if (recovery) {
+          current = context.productMutations.replace(localProductId, recovery.product, {
+            status: current.status, expectedVersion: current.productJsonVersion,
+          });
+          db.markResearchTasksSatisfied(localProductId, recovery.taskIds);
+          refreshSatisfiedResearchTasks(db, localProductId);
+          preparationRecovered = true;
+        }
+      }
       const repair = repairProductForExplicitInstruction(
         current,
         content,
         selection?.selectedLabels,
         selection?.selectedQuestions,
       );
-      if (!repair) return;
+      if (!repair) {
+        if (preparationRecovered) emitProduct(db.getProduct(localProductId)!);
+        return preparationRecovered || undefined;
+      }
       const saved = context.productMutations.replace(localProductId, repair.product, { status: current.status });
       emitProduct(saved);
       return true;
@@ -144,25 +165,35 @@ export function installProductAgent(context: MainIpcContext): () => void {
       }
       return recoverEquivalentApproval(product, snapshot);
     },
+    prepareWorkflowReplay: (localProductId) => {
+      productWorkflows.assertIdle(localProductId, "automation");
+      const current = db.getProduct(localProductId);
+      if (!current?.productId || !current.automation || !["succeeded", "failed"].includes(current.automation.status)) return undefined;
+      const confirmation = buildAgentApproval(current);
+      return { ...confirmation, automationRunId: current.automation.id,
+        automationRunStatus: current.automation.status as "failed" | "succeeded",
+        summary: `重新录入全部阶段，保留当前方案和 VBK 产品 ${current.productId}，最终回读后保存未提审草稿。${confirmation.summary}` };
+    },
     handoffApprovedWorkflow: (localProductId, approval) => {
       // A remote-successful automation can outlive an interrupted desktop
       // process before AgentCore receives its completion callback. Resume the
       // local terminal transition only; never replay completed VBK phases.
       const current = db.getProduct(localProductId);
-      if (current?.automation?.status === "succeeded" && !needsTrafficLineBackfill(current)) {
+      if (current?.automation?.status === "succeeded" && !needsTrafficLineBackfill(current)
+        && !requestsFreshAutomationRun(approval, current.automation.id)) {
         void context.agentCore?.completeApprovedWorkflow(localProductId, approval.id);
         return true;
       }
       // This is intentionally detached from the Agent turn. From this point on
       // the automation runner owns phase ordering, retries and remote readback;
       // no model completion is scheduled between phase writes.
-      void productWorkflows.runExclusive(localProductId, "automation", () =>
-        context.automation.executeApprovedWorkflow(localProductId))
-        .then(() => context.agentCore?.completeApprovedWorkflow(localProductId, approval.id))
-        .catch(async (error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          await context.agentCore?.pauseApprovedWorkflow(localProductId, approval.id, message);
-        });
+      void runQueuedApprovedWorkflow({
+        id: localProductId, approval, coordinator: productWorkflows,
+        snapshot: () => db.getAgentSnapshot(localProductId) ?? undefined,
+        execute: () => context.automation.executeApprovedWorkflow(localProductId),
+        complete: () => context.agentCore?.completeApprovedWorkflow(localProductId, approval.id),
+        pause: message => context.agentCore?.pauseApprovedWorkflow(localProductId, approval.id, message),
+      });
       return true;
     },
     contextFor: async (localProductId) => {

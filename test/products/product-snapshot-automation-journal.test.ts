@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
 import type { AutomationRun, ProductDetail } from "../../src/shared/contracts.js";
+import { productReport } from "../../src/main/infrastructure/product-report.js";
 
 function makeDb() {
   const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-automation-journal-"));
@@ -62,6 +63,22 @@ test("较新的产品快照不能用旧 failed run 覆盖本地 completed journa
   } finally { cleanup(); }
 });
 
+test("较新运行检查点去掉日志后仍能更新阶段并保留本机日志和截图", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const product = db.createProduct({ destination: "潮州", days: 2, productForm: "privateTour" });
+    const localRun = { ...run("same-run", "failed", "2030-01-02T00:00:00.000Z"), screenshot: "/local.png" };
+    db.saveAutomation(product.id, localRun);
+    const compact = productReport(snapshot(product, run("same-run", "succeeded", "2030-01-03T00:00:00.000Z")));
+    assert.deepEqual(compact.automation?.logs, []);
+    assert.equal(compact.automation?.updatedAt, "2030-01-03T00:00:00.000Z");
+    const imported = db.importProductSnapshot(compact);
+    assert.equal(imported.automation?.status, "succeeded");
+    assert.deepEqual(imported.automation?.logs, localRun.logs);
+    assert.equal(imported.automation?.screenshot, "/local.png");
+  } finally { cleanup(); }
+});
+
 test("同一 run 的真实较新远端 failed 日志会替换本地 journal", () => {
   const { db, cleanup } = makeDb();
   try {
@@ -83,6 +100,7 @@ test("同一 run 的 recovery attempt 时间也能证明远端状态更新", () 
     db.importProductSnapshot(snapshot(product, runWithRecoveryAttempt("same-run", "failed", "2030-01-03T00:00:00.000Z")));
 
     assert.equal(journalRows(db, product.id)[0]?.run.status, "failed");
+    assert.equal(journalRows(db, product.id)[0]?.run.logs[0]?.message, "succeeded", "compact checkpoint must preserve local logs");
   } finally { cleanup(); }
 });
 

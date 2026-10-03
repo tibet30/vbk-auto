@@ -1,6 +1,6 @@
 /**
  * 产品级 AI Token 用量契约。
- * 挂在 ProductDetail.aiUsage（与 planning 同级），权威存储在 Tibet。
+ * 挂在 ProductDetail.aiUsage（与 planning 同级），权威存储在本机。
  */
 
 export type AiUsageSource =

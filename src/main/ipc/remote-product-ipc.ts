@@ -14,20 +14,27 @@ import type { MainIpcContext } from "./context.js";
 
 export function registerRemoteProductIpc(context: MainIpcContext): void {
   const { db, broadcastProduct, remoteProducts } = context;
-  ipcMain.handle("products:list", async () => (await listRemoteProducts(remoteProducts)).map((product) => {
-    db.completeWorkflowTaskForProduct(product);
-    const workflowTask = db.latestWorkflowTaskForProduct(product.id);
-    return {
-      ...product,
-      executionTime: db.getProductExecutionTimes([product.id])[product.id],
-      ...(workflowTask ? {
-        workflowTask,
-        updatedAt: Date.parse(workflowTask.updatedAt) > Date.parse(product.updatedAt)
-          ? workflowTask.updatedAt
-          : product.updatedAt,
-      } : {}),
-    };
-  }));
+  ipcMain.handle("products:list", async () => {
+    const products = await listRemoteProducts(remoteProducts);
+    const workflowTasks = products.map((product) => {
+      db.completeWorkflowTaskForProduct(product);
+      return db.latestWorkflowTaskForProduct(product.id);
+    });
+    const executionTimes = db.getProductExecutionTimes(products.map((product) => product.id));
+    return products.map((product, index) => {
+      const workflowTask = workflowTasks[index];
+      return {
+        ...product,
+        executionTime: executionTimes[product.id],
+        ...(workflowTask ? {
+          workflowTask,
+          updatedAt: Date.parse(workflowTask.updatedAt) > Date.parse(product.updatedAt)
+            ? workflowTask.updatedAt
+            : product.updatedAt,
+        } : {}),
+      };
+    });
+  });
   ipcMain.handle("products:executionTimes", (_event, ids: string[]) => {
     if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== "string" || !id.trim())) {
       throw new Error("耗时查询必须提供不超过 100 个产品 ID。");

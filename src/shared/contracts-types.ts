@@ -127,7 +127,7 @@ export interface ProductDetail extends ProductSummary {
   /** 基本信息是否已在 VBK 成功保存，决定重试时是否需要补跑 basic 阶段。 */
   basicInfoSaved?: boolean;
   planning?: import("./contracts-planning.js").PlanningPlanV2;
-  /** 产品级 AI Token 用量；与 planning 同级，权威在 Tibet，不进 product JSON。 */
+  /** 产品级 AI Token 用量；与 planning 同级，在本机持久化，不随诊断上传。 */
   aiUsage?: import("./contracts-ai-usage.js").ProductAiUsage;
 }
 
@@ -215,6 +215,8 @@ export interface PhaseRecovery {
 
 export interface AutomationRun {
   id: string;
+  /** 运行检查点时间；远端精简快照不含日志时仍可判断运行状态的新旧。 */
+  updatedAt?: string;
   status: TaskStatus;
   currentPhase?: string;
   phases: Array<{ phase: string; status: "pending" | "running" | "completed" | "failed" }>;

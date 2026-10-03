@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 /**
  * 销售控制入口的安全重执行：只负责创建尚未存在的 VBK 产品壳。
  * 它不进入 draftPhases，也不触碰 basic / 后续阶段的索引状态。
@@ -48,7 +49,7 @@ export async function runSaleControlPhase(
   ctx.emit(localProductId);
 
   try {
-    const page = await ctx.browser.page();
+    const page = await getVbkRequestPage(ctx.browser);
     let shellAttempted = false;
     const outcome = await runPhaseWithRecovery({
       run,

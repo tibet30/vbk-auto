@@ -27,6 +27,7 @@ import { buildProductSnapshot } from "./product-draft.js";
 import { ensureProductExecutionTime, readProductExecutionTime } from "../../../operations/product-execution-clock.js";
 import { now, newId } from "./types.js";
 import { updateProduct } from "./product-update.js";
+import { readLocalProductState } from "./local-product-state.js";
 export { updateProduct } from "./product-update.js";
 export { listProducts, listProductsPaginated, type ProductListPage } from "./product-list.js";
 
@@ -44,6 +45,7 @@ export function createProduct(db: Database.Database, input: CreateProductInput):
  */
 export function importProductSnapshot(db: Database.Database, snapshot: ProductDetail): ProductDetail {
   const existing = getProduct(db, snapshot.id);
+  const existingCreatedAt = (db.prepare("SELECT created_at FROM products WHERE id=?").get(snapshot.id) as { created_at: string } | undefined)?.created_at;
   const product = parseAndNormalizeProductJson(JSON.stringify(snapshot.product));
   const restoredAt = snapshot.updatedAt || now();
   const restore = db.transaction(() => {
@@ -73,20 +75,21 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
     if (existing) {
       db.prepare("DELETE FROM research_tasks WHERE local_product_id=?").run(snapshot.id);
       db.prepare("DELETE FROM messages WHERE local_product_id=?").run(snapshot.id);
-      db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(snapshot.id);
+      if (!readLocalProductState(db, snapshot.id)) db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(snapshot.id);
       db.prepare("DELETE FROM products WHERE id=?").run(snapshot.id);
     }
     db.prepare(
-      "INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at,basic_info_saved) VALUES(?,?,?,?,?,?,?,?)",
+      "INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at,basic_info_saved,product_json_version) VALUES(?,?,?,?,?,?,?,?,?)",
     ).run(
       snapshot.id,
       snapshot.name,
       snapshot.status,
       snapshot.productId ?? null,
       JSON.stringify(product),
-      restoredAt,
+      existingCreatedAt ?? restoredAt,
       restoredAt,
       snapshot.basicInfoSaved ? 1 : 0,
+      existing ? (existing.productJsonVersion ?? 0) + (JSON.stringify(existing.product) === JSON.stringify(product) ? 0 : 1) : 0,
     );
     const insertMessage = db.prepare(
       "INSERT OR IGNORE INTO messages(id,local_product_id,role,content,task_status,created_at) VALUES(?,?,?,?,?,?)",
@@ -141,6 +144,7 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
   const automationRow = db.prepare("SELECT payload_json FROM automation_runs WHERE local_product_id=? ORDER BY updated_at DESC LIMIT 1").get(id) as { payload_json: string } | undefined;
   return {
     id: product.id,
+    ...localProductMetadata(db, id),
     name: product.name,
     status: product.status as ProductDetail["status"],
     productId: product.product_id || undefined,
@@ -153,6 +157,13 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
     automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
     basicInfoSaved: Number(product.basic_info_saved) === 1,
   };
+}
+
+function localProductMetadata(db: Database.Database, id: string): Partial<ProductDetail> {
+  const state = readLocalProductState(db, id);
+  if (!state) return {};
+  const { ownerUserId: _owner, ...metadata } = state;
+  return metadata;
 }
 
 /**

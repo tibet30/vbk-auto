@@ -101,36 +101,50 @@ function finishSessionResponse(status: number, text: string, startedAt: number, 
 }
 
 /** 给 Playwright Page 附加同一 Electron partition 的原生 fetch，供 CORS 拒绝时使用。 */
-export function attachVbkSessionFetch(page: Page, electronSession: Session): void {
+export function attachVbkSessionFetch(page: Page, electronSession: Session, assertActive: () => void = () => {}): void {
   const target = page as Page & {
     vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult>;
     vbkSessionGetText?: (request: VbkSessionNativeTextRequest) => Promise<VbkSessionNativeTextResult>;
   };
   if (!target.vbkSessionFetch) target.vbkSessionFetch = async (request) => {
     const startedAt = Date.now();
-    const cookies = await electronSession.cookies.get({});
+    const cookies = await electronSession.cookies.get({ url: "https://vbooking.ctrip.com/" });
     const { ctx, cid, ubtVid } = sessionContext(cookies);
     const parts = sessionRequestParts(request, cid, ubtVid);
-    const response = await electronSession.fetch(parts.url, {
-      method: "POST",
-      headers: parts.headers,
-      referrer: request.referrer ?? page.url(),
-      referrerPolicy: request.referrerPolicy,
-      body: JSON.stringify(parts.body),
-    });
-    const text = await response.text();
-    const result = finishSessionResponse(response.status, text, startedAt, ctx, request.errorLabel);
-    observeNativeFetch(page, request.endpoint, new Date(startedAt).toISOString(), parts.body, result.payload);
-    return result;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), request.timeoutMs ?? 12_000);
+    try {
+      assertActive();
+      const response = await electronSession.fetch(parts.url, {
+        method: "POST",
+        credentials: "include",
+        signal: controller.signal,
+        headers: parts.headers,
+        referrer: request.referrer ?? page.url(),
+        referrerPolicy: request.referrerPolicy,
+        body: JSON.stringify(parts.body),
+      });
+      const text = await response.text();
+      const result = finishSessionResponse(response.status, text, startedAt, ctx, request.errorLabel);
+      observeNativeFetch(page, request.endpoint, new Date(startedAt).toISOString(), parts.body, result.payload);
+      return result;
+    } finally { clearTimeout(timer); }
   };
   if (!target.vbkSessionGetText) target.vbkSessionGetText = async (request) => {
-    const response = await electronSession.fetch(request.endpoint, {
-      method: "GET",
-      headers: request.headers,
-      referrer: request.referrer,
-      referrerPolicy: request.referrerPolicy,
-    });
-    return { status: response.status, text: await response.text() };
+    assertActive();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const response = await electronSession.fetch(request.endpoint, {
+        method: "GET",
+        credentials: "include",
+        signal: controller.signal,
+        headers: request.headers,
+        referrer: request.referrer,
+        referrerPolicy: request.referrerPolicy,
+      });
+      return { status: response.status, text: await response.text() };
+    } finally { clearTimeout(timer); }
   };
 }
 

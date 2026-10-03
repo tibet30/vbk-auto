@@ -280,6 +280,20 @@ const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    id: "0016_local_product_diagnostics",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS local_product_state (
+        local_product_id TEXT PRIMARY KEY,owner_user_id INTEGER NOT NULL,
+        revision INTEGER NOT NULL,payload_json TEXT NOT NULL
+      )`,
+      `CREATE TABLE IF NOT EXISTS product_diagnostic_outbox (
+        owner_user_id INTEGER NOT NULL,event_id TEXT NOT NULL,payload_json TEXT NOT NULL,
+        sent INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,
+        PRIMARY KEY(owner_user_id,event_id)
+      )`,
+    ],
+  },
 ];
 
 /** 在 VbkDatabase 启动时调用一次：按顺序应用 migrations。 */

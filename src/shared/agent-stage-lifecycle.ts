@@ -123,14 +123,22 @@ export function hydrateAgentStages(snapshot: AgentSnapshot): void {
   if (snapshot.stages !== undefined) {
     // Usage and reconciliation can append outside the model loop. Associate
     // those records without recreating already persisted checkpoints.
-    let previous: AgentEvent | undefined;
-    for (const event of snapshot.events) {
+    const cursor = snapshot.stageHydration;
+    const count = cursor?.eventCount ?? 0;
+    const valid = cursor?.version === 1 && Number.isInteger(count) && count >= 0
+      && count <= snapshot.events.length
+      && (count === 0 || snapshot.events[count - 1]?.id === cursor.lastEventId);
+    const startIndex = valid ? count : 0;
+    let previous = snapshot.events[startIndex - 1];
+    for (let index = startIndex; index < snapshot.events.length; index += 1) {
+      const event = snapshot.events[index]!;
       if (!event.data?.stageId) {
         if (previous?.runId === event.runId && previous.data?.stageId) event.data = { ...event.data, stageId: previous.data.stageId };
         recordAgentStageEvent(snapshot, event);
       }
       previous = event;
     }
+    markHydrated(snapshot);
     return;
   }
   snapshot.stages = [];
@@ -148,4 +156,10 @@ export function hydrateAgentStages(snapshot: AgentSnapshot): void {
       content: snapshot.run!.error ?? '执行过程已保留。', data: { status: current.status },
     });
   }
+  markHydrated(snapshot);
+}
+
+function markHydrated(snapshot: AgentSnapshot): void {
+  snapshot.stageHydration = { version: 1, eventCount: snapshot.events.length,
+    lastEventId: snapshot.events.at(-1)?.id };
 }

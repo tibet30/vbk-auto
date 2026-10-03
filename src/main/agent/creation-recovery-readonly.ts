@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { randomUUID } from "node:crypto";
 
 import type { AutomationRun, ProductDetail } from "../../shared/contracts.js";
@@ -91,7 +92,7 @@ export function createVbkCreationRecoveryTools(deps: CreationRecoveryReadOnlyDep
         deps.productWorkflows.runVbkPageExclusive(async () => {
           const input = recoveryInput(requireProduct(deps, ctx.localProductId), scope);
           const beforeAccount = await deps.accountFor(ctx.localProductId);
-          const page = await deps.browser.page();
+          const page = await getVbkRequestPage(deps.browser);
           const draft = await deps.readCreationVariant(page, input.productId);
           const draftTourInfoId = assertUnsubmittedDraft(draft);
 

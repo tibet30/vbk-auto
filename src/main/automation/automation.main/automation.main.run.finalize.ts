@@ -16,6 +16,11 @@ export async function finalizeRunWithScreenshot(
   page: unknown,
   log: (message: string, level?: "info" | "warning" | "error") => void,
 ): Promise<void> {
+  if ((page as { nativeOnly?: boolean } | null)?.nativeOnly) {
+    run.screenshot = undefined;
+    log("接口录入及远端回读已完成，跳过页面截图。", "info");
+    return;
+  }
   try {
     run.screenshot = await saveScreenshot(page, "desktop-draft", productId);
   } catch (error) {

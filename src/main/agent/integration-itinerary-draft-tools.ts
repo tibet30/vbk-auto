@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type { ProductDetail } from "../../shared/contracts.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
 import { readItineraryDraftDiagnostic } from "../automation/ctrip/itinerary-api/draft-diagnostics.js";
@@ -83,7 +84,7 @@ export function createItineraryDraftTools(deps: ItineraryDraftToolDependencies):
       if (!product.productId) throw new Error("当前产品尚未创建 VBK 产品，无法读取行程版本诊断。");
       return deps.withPage(async () => {
         await assertBoundReadAccount(browser, product);
-        const page = await browser.page();
+        const page = await getVbkRequestPage(browser);
         return { content: safeJson(await readItineraryDraftDiagnostic(page, product.productId!)) };
       });
     },

@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../../../infrastructure/vbk-request-page.js";
 /** Adapter that lets initial planning read traffic availability without reversing its layer dependency. */
 
 import type { VbkDatabase } from "../../../infrastructure/database/database.js";
@@ -19,7 +20,7 @@ export async function resolveProductTrafficLineAvailability(args: {
   const product = args.db.getProduct(args.localProductId);
   if (!product || !Array.isArray(product.product.itinerary)) return null;
   const query = async () => {
-    const page = await args.browser.page();
+    const page = await getVbkRequestPage(args.browser);
     return preflightTrafficLineEndpoints(
       page,
       product.product.itinerary as Array<{ spots?: Array<{

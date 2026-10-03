@@ -28,7 +28,7 @@ export async function createRemoteProduct(
     ...(vbkAccount ? { vbkAccount } : {}),
   };
   const saved = await remoteProducts.upsert(product);
-  const cached = db.importProductSnapshot(saved);
+  const cached = remoteProducts.storage === "local" ? saved : db.importProductSnapshot(saved);
   return { product: cached, injectReason: injectResult.reason, injected: injectResult.written };
 }
 
@@ -38,7 +38,7 @@ export async function getRemoteProduct(
   id: string,
 ): Promise<ProductDetail> {
   const remote = await remoteProducts.get(id);
-  return db.importProductSnapshot(remote);
+  return remoteProducts.storage === "local" ? remote : db.importProductSnapshot(remote);
 }
 
 /**
@@ -51,6 +51,7 @@ export async function getProductForRead(
   id: string,
   activeWorkflow?: ProductWorkflow,
 ): Promise<ProductDetail> {
+  if (remoteProducts.storage === "local") return remoteProducts.get(id);
   const local = db.getProduct(id);
   if (activeWorkflow) {
     if (!local) throw productNotFound(id);
@@ -90,6 +91,10 @@ export async function deleteRemoteProduct(
   remoteProducts: TibetProductService,
   id: string,
 ): Promise<boolean> {
+  if (remoteProducts.storage === "local") {
+    await remoteProducts.delete(id);
+    return true;
+  }
   const local = db.getProduct(id);
   const snapshot = local ?? await remoteProducts.get(id);
   await remoteProducts.delete(id);

@@ -11,6 +11,7 @@ import { createProduct, getProduct, importProductSnapshot, listProducts, listPro
 import { formatProductExecutionTime } from "../../src/shared/product-execution-time.js";
 import type { AgentSnapshot } from "../../src/shared/contracts.js";
 import { ProductWorkflowCoordinator } from "../../src/main/application/product-workflow-coordinator.js";
+import { readProductExecutionTimes } from "../../src/main/operations/product-execution-time-read.js";
 
 function fixture(t: test.TestContext) {
   const db = new Database(":memory:");
@@ -195,6 +196,58 @@ test("detail, list, pagination and remote reimport read the same persisted telem
   assert.deepEqual(listProductsPaginated(db, 1).items[0].executionTime, before.executionTime);
   assert.equal(JSON.stringify(getProduct(db, product.id)!.product).includes("executionTime"), false);
 });
+
+test("product lists batch clock reads and persist a legacy reconstruction", (t) => {
+  const statements: string[] = [];
+  const db = new Database(":memory:", { verbose: (statement) => statements.push(statement) });
+  runDatabaseMigrations(db);
+  t.after(() => db.close());
+  const products = [1, 2, 3].map(() => createProduct(db, { destination: "成都", days: 3, productForm: "privateTour" }));
+  statements.length = 0;
+  assert.equal(listProducts(db).length, products.length);
+  assert.equal(clockBatchReads(statements), 1);
+  statements.length = 0;
+  assert.equal(listProductsPaginated(db, 1, products.length).items.length, products.length);
+  assert.equal(clockBatchReads(statements), 1);
+
+  const legacy = products[0];
+  db.prepare("DELETE FROM product_execution_time WHERE local_product_id=?").run(legacy.id);
+  saveAgentSnapshot(db, {
+    localProductId: legacy.id,
+    events: [
+      { id: "call", type: "tool_call", createdAt: "2026-10-02T00:00:00.000Z", content: "", data: { toolCallId: "call", name: "read" } },
+      { id: "result", type: "tool_result", createdAt: "2026-10-02T00:00:02.000Z", content: "", data: { toolCallId: "call" } },
+    ],
+  });
+  statements.length = 0;
+  assert.equal(listProducts(db).find((product) => product.id === legacy.id)?.executionTime?.elapsedMs, 2000);
+  assert.ok(historyReads(statements) > 0);
+  assert.ok(db.prepare("SELECT 1 FROM product_execution_time WHERE local_product_id=?").get(legacy.id));
+  statements.length = 0;
+  assert.equal(listProducts(db).find((product) => product.id === legacy.id)?.executionTime?.elapsedMs, 2000);
+  assert.equal(historyReads(statements), 0);
+});
+
+test("execution-time reads chunk more than 500 IDs and omit unknown products", (t) => {
+  const statements: string[] = [];
+  const db = new Database(":memory:", { verbose: (statement) => statements.push(statement) });
+  runDatabaseMigrations(db);
+  t.after(() => db.close());
+  const products = Array.from({ length: 501 }, () => createProduct(db, { destination: "成都", days: 1, productForm: "privateTour" }));
+  statements.length = 0;
+  const times = readProductExecutionTimes(db, [...products.map((product) => product.id), "missing-product"]);
+  assert.equal(Object.keys(times).length, 501);
+  assert.equal(times["missing-product"], undefined);
+  assert.equal(clockBatchReads(statements), 2);
+});
+
+function clockBatchReads(statements: readonly string[]): number {
+  return statements.filter((statement) => statement.includes("LEFT JOIN product_execution_time AS clock")).length;
+}
+
+function historyReads(statements: readonly string[]): number {
+  return statements.filter((statement) => /agent_snapshots|automation_runs|operation_log/.test(statement)).length;
+}
 
 test("legacy reconstruction excludes paused calls, human interactions and retry waits; no overlapping double count", (t) => {
   const { db } = fixture(t);

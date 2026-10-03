@@ -3,6 +3,7 @@ import test from "node:test";
 import { createRemoteProductMirror } from "../../src/main/application/remote-product-mirror.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
 import { TibetProductConflictError, type TibetProductService } from "../../src/main/infrastructure/tibet-products.js";
+import { productReport } from "../../src/main/infrastructure/product-report.js";
 
 const base: ProductDetail = {
   id: "17bd40b8-8d30-4c4e-9940-0aa6fa9a7323",
@@ -56,11 +57,11 @@ test("renderer broadcast failure after a remote save does not retry the remote w
     remote: service,
     broadcast: () => { throw new Error("Cannot clone a function"); },
   });
-  mirror.emit({ ...base, revision: undefined });
+  mirror.emit({ ...base, revision: undefined, name: "变更产品名称" });
   await waitFor(() => updates === 1);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(updates, 1, "failed renderer delivery must not replay the saved PATCH");
-  mirror.emit({ ...base, revision: undefined, updatedAt: "2026-08-20T10:01:00.000Z" });
+  mirror.emit({ ...base, revision: undefined, name: "再次变更产品名称", updatedAt: "2026-08-20T10:01:00.000Z" });
   await waitFor(() => updates === 2);
 });
 
@@ -118,7 +119,7 @@ test("产品工作流进行中时镜像不写远端，释放后才同步", async
     // 模拟 AI / planning：即使持有工作流锁，也不能绕过远端权威快照。
     shouldBroadcastWhileActive: () => false,
   });
-  mirror.emit({ ...base, revision: undefined });
+  mirror.emit({ ...base, revision: undefined, name: "变更产品名称" });
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(getCalls, 0);
   assert.equal(updates, 0);
@@ -227,3 +228,32 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+test("仅本地日志截图耗时变化不 PATCH，真实业务变化即使时间相同也 PATCH", async () => {
+  const local: ProductDetail = { ...base, automation: {
+    id: "same-run", status: "running", phases: [{ phase: "basic", status: "running" }],
+    logs: [{ at: base.updatedAt, message: "local log", level: "info" }], screenshot: "/local.png",
+  } };
+  let remote = { ...productReport(local), revision: 2 };
+  let updates = 0;
+  const broadcasts: ProductDetail[] = [];
+  const mirror = createRemoteProductMirror({
+    remote: {
+      async list() { return []; }, async get() { return remote; }, async delete() {},
+      async upsert(product) { return product; },
+      async update(product) { updates++; remote = { ...productReport(product), revision: 3 }; return remote; },
+    },
+    broadcast: saved => broadcasts.push(saved),
+  });
+  mirror.emit({ ...local, updatedAt: "2026-08-21T00:00:00Z", productJsonVersion: 99,
+    automation: { ...local.automation!, logs: [{ at: "2026-08-21T00:00:00Z", message: "new local log", level: "info" }] },
+    executionTime: { elapsedMs: 100, running: true, historicalIncomplete: false } });
+  await waitFor(() => broadcasts.length === 1);
+  assert.equal(updates, 0);
+  assert.equal(broadcasts[0].revision, 2);
+  assert.equal(broadcasts[0].automation?.logs[0]?.message, "new local log");
+  mirror.emit({ ...local, revision: 2, name: "真实业务变更" });
+  await waitFor(() => broadcasts.length === 2);
+  assert.equal(updates, 1);
+  assert.equal(broadcasts[1].name, "真实业务变更");
+});

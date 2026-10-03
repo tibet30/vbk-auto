@@ -1,6 +1,7 @@
 import { logWarn } from "../../shared/log-timestamp.js";
 import type { ProductDetail } from "../../shared/contracts.js";
 import { TibetProductConflictError, type TibetProductService } from "../infrastructure/tibet-products.js";
+import { sameProductReport, withLocalProductArtifacts } from "../infrastructure/product-report.js";
 
 /**
  * Serialises legacy local mutations into Tibet. SQLite remains an operational
@@ -33,14 +34,6 @@ export function createRemoteProductMirror(args: {
       logWarn("[tibet-product-mirror] remote read failed", { productId: candidate.id, error: message(error) });
       return;
     }
-    if (candidate.revision === latest.revision && candidate.updatedAt === latest.updatedAt) {
-      broadcast(latest);
-      return;
-    }
-    if (!latest.revision) {
-      logWarn("[tibet-product-mirror] missing remote revision", { productId: candidate.id });
-      return;
-    }
     const snapshot: ProductDetail = {
       ...latest,
       ...candidate,
@@ -49,6 +42,14 @@ export function createRemoteProductMirror(args: {
       aiUsage: candidate.aiUsage ?? latest.aiUsage,
       updatedAt: new Date().toISOString(),
     };
+    if (sameProductReport(snapshot, latest)) {
+      broadcast(withLocalProductArtifacts(latest, candidate));
+      return;
+    }
+    if (!latest.revision) {
+      logWarn("[tibet-product-mirror] missing remote revision", { productId: candidate.id });
+      return;
+    }
     try {
       const saved = await args.remote.update(snapshot, latest.revision);
       broadcast(saved);

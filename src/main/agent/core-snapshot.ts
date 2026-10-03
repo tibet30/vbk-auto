@@ -52,6 +52,7 @@ export class AgentSnapshotManager {
   }
 
   save(snapshot: AgentSnapshot): AgentSnapshot {
+    hydrateAgentStages(snapshot);
     const counts = new Map<string, number>();
     for (const event of snapshot.events) {
       const stageId = event.data?.stageId;

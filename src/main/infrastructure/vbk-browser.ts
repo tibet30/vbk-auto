@@ -46,6 +46,8 @@ import {
   setVbkCookieOn,
 } from "./vbk-browser-cookies.js";
 import { ItineraryDraftCapture } from "./itinerary-draft-capture.js";
+import { createVbkRequestPage } from "./vbk-request-page.js";
+import type { VbkSessionNativeRequest } from "./vbk-session-request.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
 const nativeDialogHandledPages = new WeakSet<Page>();
@@ -322,9 +324,12 @@ export class VbkBrowser {
   }
 
   private fetchCurrentUserInfoInView(view: WebContentsView) {
-    return fetchCurrentUserInfo({
-      evaluate: <T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A) => this.evaluateInView(view, fn, arg),
-    });
+    return fetchCurrentUserInfo(createVbkRequestPage({
+      session: view.webContents.session,
+      assertActive: () => { if (view.webContents.isDestroyed()) throw new Error("VBK 账号会话已关闭"); },
+      currentUrl: () => view.webContents.getURL(),
+      interactivePage: () => this.page({ requireInteractive: true }),
+    }));
   }
 
   /**
@@ -687,6 +692,30 @@ export class VbkBrowser {
    *   - 优先按 view URL 匹配；找不到则取任意 ctrip.com 页面；
    *   - 完全拿不到时抛错让上层提示「请先登录 VBK」。
    */
+  /** Protocol access needs the captured account partition, never a CDP Page. */
+  async requestPage(): Promise<Page> {
+    await this.ensureReadyForAction();
+    const view = this.view;
+    const key = this.activeKey;
+    if (!view || view.webContents.isDestroyed()) throw new Error("VBK 账号会话尚未初始化");
+    return createVbkRequestPage({
+      session: view.webContents.session,
+      assertActive: () => {
+        if (this.view !== view || this.activeKey !== key || view.webContents.isDestroyed()) {
+          throw new Error("VBK 账号已切换或会话已关闭，已阻止使用旧账号客户端");
+        }
+      },
+      currentUrl: () => view.webContents.getURL(),
+      interactivePage: () => this.page({ requireInteractive: true }),
+    });
+  }
+
+  readonly nativeOnly = true;
+  async vbkSessionFetch(request: VbkSessionNativeRequest) {
+    const client = await this.requestPage();
+    return (client as import("./vbk-request-page.js").VbkRequestPage).vbkSessionFetch!(request);
+  }
+
   async page(options: { requireInteractive?: boolean } = {}): Promise<Page> {
     await this.ensureReadyForAction();
     if (!this.cdp?.isConnected()) {

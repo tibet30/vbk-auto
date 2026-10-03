@@ -1,3 +1,4 @@
+import { Select } from "../../helpers/Select";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiProviderLabel, hasActiveAiKey } from "../../../../shared/contracts.js";
@@ -100,8 +101,7 @@ export function AppProductsPage({ model }: { model: AppModel }) {
           </div>
           {!creating && <div className={styles.productHeadActions}>
             <label className={styles.vbkFilter}>
-              <select
-                className={shared.input}
+              <Select
                 aria-label="按 VBK 账号筛选产品"
                 value={selectedVbkAccount}
                 onChange={(event) => {
@@ -113,7 +113,7 @@ export function AppProductsPage({ model }: { model: AppModel }) {
                 {vbkAccounts.map((entry) => (
                   <option key={entry.key} value={entry.key}>{entry.label}（{entry.key}）</option>
                 ))}
-              </select>
+              </Select>
             </label>
             <button
               className={shared.btn}

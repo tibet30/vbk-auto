@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "./infrastructure/vbk-request-page.js";
 import { installProductAgent } from "./agent/integration-setup.js";
 import { withAgentUsage } from "./agent/integration-usage.js";
 import { agentWorkflowPatch, recoverQueuedAgentWorkflowTasks } from "./agent/integration-workflow.js";
@@ -43,7 +44,7 @@ import {
 import { createAppAuthStore, LOCAL_APP_AUTH_FILE_NAME } from "./infrastructure/app-auth-store.js";
 import { createTibetAuthService, type TibetAuthService } from "./infrastructure/tibet-auth.js";
 import { createTibetCopyRuleSync } from "./infrastructure/tibet-copy-rules.js";
-import { createTibetProductService } from "./infrastructure/tibet-products.js";
+import { createProductStorage } from "./application/product-storage.js";
 import { MiniMaxService } from "./minimax/minimax.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "./planning/adapters/openai-compatible-adapter.js";
 import { createMainWindow } from "./create-window.js";
@@ -328,7 +329,7 @@ function readiness(
 
 async function detectProviderIdInMain(): Promise<number | null> {
   try {
-    const page = await browser.page();
+    const page = await getVbkRequestPage(browser);
     const id = await detectProviderIdFromBrowser(page);
     const accountName = db.getSetting("vbkAccountName")?.value;
     if (id && accountName) db.setProviderIdFor(accountName, id);
@@ -414,7 +415,9 @@ app.whenReady().then(async () => {
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
   const appAuth = createTibetAuthService(appAuthStore);
-  const remoteProducts = createTibetProductService(appAuthStore);
+  const productStorage = createProductStorage({ db, store: appAuthStore, appVersion: () => app.getVersion(), settings: getSettings });
+  const remoteProducts = productStorage.products;
+  app.once("before-quit", productStorage.dispose);
   const copyRules = createTibetCopyRuleSync(appAuthStore, db);
   const syncCopyRules = () => { void copyRules.sync().catch(() => {}); };
   syncCopyRules();
@@ -442,14 +445,17 @@ app.whenReady().then(async () => {
     db,
     getOwnerUserId: vbkBindings.getExtensionUserId,
   });
-  productEmitter = createRemoteProductMirror({
+  const mirrorProduct = createRemoteProductMirror({
     remote: remoteProducts,
     broadcast: broadcastProduct,
     isWorkflowActive: (productId) => Boolean(productWorkflows.activeWorkflow(productId)),
-    // automation 的 phases / recovery / logs 是 SQLite 运行态，需要逐节点即时
-    // 呈现在审查结果；产品业务数据仍在工作流解锁后合并并写回 Tibet。
+    // 本机自动录入进展即时显示；诊断上传与产品保存互不阻塞。
     shouldBroadcastWhileActive: (productId) => productWorkflows.activeWorkflow(productId) === "automation" || Boolean(db.getAgentSnapshot(productId)?.run),
   }).emit;
+  productEmitter = product => {
+    productStorage.observe(product);
+    mirrorProduct(product);
+  };
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
   if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });

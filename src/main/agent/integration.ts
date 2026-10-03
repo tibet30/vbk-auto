@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { agentProductContext } from "./integration-context.js";
 import { agentPatchOperations } from "./integration-patch.js";
 import { agentProductVersion } from "./integration-gates.js";
@@ -254,7 +255,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const keyword = cleanText(args.keyword);
         if (!keyword) throw new Error("缺少地点名称。");
         return withPage(async () => {
-          const detail = await suggestPoiDetail(await deps.browser.page(), keyword);
+          const detail = await suggestPoiDetail(await getVbkRequestPage(deps.browser), keyword);
           const candidates = poiCandidatesForAvailability({ keyword, detail });
           const availability = await getCtripSightAvailabilities(undefined, candidates.map((item) => item.poiId!), deps.db);
           return { content: safeJson(compactPoiQueryResult({ keyword, detail, availability })) };
@@ -276,7 +277,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const context = {
           destinationCity: cleanText(basic?.destinationCity || basic?.meetingCity), province: cleanText(basic?.province),
         };
-        const detail = await withPage(async () => suggestPoiDetail(await deps.browser.page(), queryKeyword, context));
+        const detail = await withPage(async () => suggestPoiDetail(await getVbkRequestPage(deps.browser), queryKeyword, context));
         const candidate = detail.candidates.find((item) => item.poiId === poiId && item.selectable && item.poiName);
         if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${queryKeyword}」的当前可选查询结果中。`);
         if (!isPlanningPoiCandidateInContext(candidate, context, productData(current), spotName)) {
@@ -303,7 +304,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     },
     {
       name: "query_hotel_resource", description: "读取 VBK 酒店资源候选，不创建或绑定资源。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { return withPage(async () => { const product = get(ctx.localProductId); const payload = await searchVbkResources(await deps.browser.page()); const city = cleanText((productData(product).basicInfo as JsonObject | undefined)?.destinationCity); return { content: safeJson({ selected: firstHotelResource(payload, city), payload }) }; }); },
+      async execute(_args, ctx) { return withPage(async () => { const product = get(ctx.localProductId); const payload = await searchVbkResources(await getVbkRequestPage(deps.browser)); const city = cleanText((productData(product).basicInfo as JsonObject | undefined)?.destinationCity); return { content: safeJson({ selected: firstHotelResource(payload, city), payload }) }; }); },
     },
     {
       name: "resolve_itinerary_hotels", description: "为已有逐日行程查询真实酒店候选，并自动写回 itinerary[].hotelCandidates；成功后不得再用 patch_product 重写行程。", parameters: { type: "object", properties: {} },
@@ -321,23 +322,23 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     },
     {
       name: "read_vbk_phase", description: "按当前 productId 从 VBK 读取基础信息，并返回本地阶段快照，用于核对不确定写入。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const product = get(ctx.localProductId); const remote = product.productId ? await withPage(async () => getProductBaseInfoApi(await deps.browser.page(), product.productId!)) : null; return { content: safeJson({ productId: product.productId, status: product.status, automation: product.automation, remote }) }; },
+      async execute(_args, ctx) { const product = get(ctx.localProductId); const remote = product.productId ? await withPage(async () => getProductBaseInfoApi(await getVbkRequestPage(deps.browser), product.productId!)) : null; return { content: safeJson({ productId: product.productId, status: product.status, automation: product.automation, remote }) }; },
     },
     {
       name: "query_vehicle_resource", description: "按城市、座位和天数查询 VBK 用车资源候选，不绑定资源；seats 缺省为 5 座。", parameters: { type: "object", properties: { city: { type: "string" }, seats: { type: "number" }, days: { type: "number" }, tier: { type: "string" } } },
-      async execute(args) { return withPage(async () => { const query = buildVehicleResourceQuery(args); const payload = await searchVehicleResourceGroups(await deps.browser.page(), query.query); const groups = extractResourceGroups(payload); return { content: safeJson({ query, selected: bestResourceGroup(payload), groups }) }; }); },
+      async execute(args) { return withPage(async () => { const query = buildVehicleResourceQuery(args); const payload = await searchVehicleResourceGroups(await getVbkRequestPage(deps.browser), query.query); const groups = extractResourceGroups(payload); return { content: safeJson({ query, selected: bestResourceGroup(payload), groups }) }; }); },
     },
     {
       name: "resolve_cover", description: "查询携程图库并将完整封面候选安全写入 presentation.cover。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => applyAutoCoverFill({ page: await deps.browser.page(), product: productData(current) })); const result = filled.outcome.written ? deps.productMutations.replace(ctx.localProductId, filled.nextProduct, { status: current.status }) : current; return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
+      async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => applyAutoCoverFill({ page: await getVbkRequestPage(deps.browser), product: productData(current) })); const result = filled.outcome.written ? deps.productMutations.replace(ctx.localProductId, filled.nextProduct, { status: current.status }) : current; return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
     },
     {
       name: "resolve_vehicle_resource", description: "查询并选择真实 VBK 用车资源组，安全写入 operations.vehicleResource，不绑定到 VBK 产品。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const current = get(ctx.localProductId); const resolved = await withPage(async () => resolveVehicleResource(await deps.browser.page(), current)); const result = deps.productMutations.replace(ctx.localProductId, resolved.product, { status: current.status }); return { content: resolved.note, data: { productVersion: agentProductVersion(result) } }; },
+      async execute(_args, ctx) { const current = get(ctx.localProductId); const resolved = await withPage(async () => resolveVehicleResource(await getVbkRequestPage(deps.browser), current)); const result = deps.productMutations.replace(ctx.localProductId, resolved.product, { status: current.status }); return { content: resolved.note, data: { productVersion: agentProductVersion(result) } }; },
     },
     {
       name: "query_station", description: "查询机场或火车站候选，不写入行程。", parameters: { type: "object", required: ["keyword", "kind"], properties: { keyword: { type: "string" }, kind: { enum: ["airport", "train"] } } },
-      async execute(args) { return withPage(async () => { const keyword = cleanText(args.keyword); const page = await deps.browser.page(); const stations = args.kind === "train" ? await searchTrainStations(page, keyword) : await searchAirports(page, keyword); return { content: safeJson(stations) }; }); },
+      async execute(args) { return withPage(async () => { const keyword = cleanText(args.keyword); const page = await getVbkRequestPage(deps.browser); const stations = args.kind === "train" ? await searchTrainStations(page, keyword) : await searchAirports(page, keyword); return { content: safeJson(stations) }; }); },
     },
     {
       name: "recheck_traffic_line_availability",

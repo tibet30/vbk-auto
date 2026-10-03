@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type { MainIpcContext } from '../ipc/context.js';
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from '../../shared/ai-provider-config.js';
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from '../planning/adapters/openai-compatible-adapter.js';
@@ -237,7 +238,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       const product = db.getProduct(localProductId);
       const snapshot = db.getAgentSnapshot(localProductId);
       if (!product || !snapshot) return {reconciled:false,message:"产品记录不存在"};
-      const result = await reconcileAgentShell(product, snapshot, uncertain.toolCallId, await context.browser.page());
+      const result = await reconcileAgentShell(product, snapshot, uncertain.toolCallId, await getVbkRequestPage(context.browser));
       if (result.reconciled) {
         const fresh = db.getAgentSnapshot(localProductId)!;
         const event = fresh.events.find(item=>item.type==='tool_result' && item.data?.toolCallId===uncertain.toolCallId);

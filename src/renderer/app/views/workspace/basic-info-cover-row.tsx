@@ -1,3 +1,4 @@
+import { Select } from "../../helpers/Select";
 /**
  * 「产品封面」行：presentation.cover
  *
@@ -732,8 +733,7 @@ function CoverPlaces({
   onPick: (place: CtripLibraryPlaceCandidate) => void;
 }) {
   return (
-    <select
-      className={styles.select}
+    <Select
       aria-label="携程图库地点候选"
       data-testid="cover-place-select"
       value={selectedPlace?.stableId ?? ""}
@@ -749,7 +749,7 @@ function CoverPlaces({
           {formatPlaceOption(place)}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 

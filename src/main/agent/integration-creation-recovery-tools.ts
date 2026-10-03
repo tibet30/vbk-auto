@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { readItineraryDraftDiagnostic } from "../automation/ctrip/itinerary-api/draft-diagnostics.js";
 import { createVbkCreationRecoveryTools, type CreationVariantReadback } from "./creation-recovery-readonly.js";
 import type { AgentBusinessDependencies } from "./integration-generate.js";
@@ -54,7 +55,7 @@ export async function readCreationVariant(page: unknown, productId: string): Pro
 export function createCreationRecoveryTools(deps: AgentBusinessDependencies, get: GetProduct): AgentTool[] {
   return createVbkCreationRecoveryTools({
     db: deps.db,
-    browser: { page: (...args) => deps.browser.page(...args) },
+    browser: { page: () => getVbkRequestPage(deps.browser) },
     productWorkflows: deps.productWorkflows,
     // execute() already owns runVbkPageExclusive for the whole remote read. A
     // nested acquisition would queue behind itself because the coordinator is

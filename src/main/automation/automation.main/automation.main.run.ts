@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 /**
  * 自动化阶段主循环入口：runAutomation。
  *   - 拉产品 / 解析 product；
@@ -150,7 +151,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     }
     writeAutomationProduct(ctx, localProductId, productDetail.product, "automating");
     try {
-      const page = await ctx.browser.page();
+      const page = await getVbkRequestPage(ctx.browser);
       let productId = productDetail.productId;
       if (startIndex === 0) {
         initializeAutomationStartPhase(run, productId);

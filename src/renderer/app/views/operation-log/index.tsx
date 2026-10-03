@@ -1,3 +1,4 @@
+import { Select } from "../../helpers/Select";
 import { AlertTriangle, Bug, CircleHelp, Download, History, Info, ListFilter, LoaderCircle, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { LogLevel, LogSource, OperationLogEntry, OperationLogPage, OperationLogQuery, OperationStatus, OperationType } from "../../../../shared/contracts.js";
@@ -135,5 +136,5 @@ export function AppOperationLogPage({
 }
 
 function LogSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
-  return <label className={toolbarStyles.opSelect}><span className={toolbarStyles.opSelectPrefix}>{label}</span><select className={toolbarStyles.opSelectInput} value={value} onChange={(event) => onChange(event.target.value)} aria-label={`按${label}筛选`}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+  return <label className={toolbarStyles.opSelect}><span className={toolbarStyles.opSelectPrefix}>{label}</span><Select variant="plain" className={toolbarStyles.opSelectInput} value={value} onChange={(event) => onChange(event.target.value)} aria-label={`按${label}筛选`}>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></label>;
 }

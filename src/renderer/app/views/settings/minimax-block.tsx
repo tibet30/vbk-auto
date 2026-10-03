@@ -1,3 +1,4 @@
+import { Select } from "../../helpers/Select";
 import { Check, CircleCheck, CircleX, Eye, EyeOff, LoaderCircle, PlugZap, RefreshCw, Save, Zap } from "lucide-react";
 import {
   AI_PROVIDER_PROFILES,
@@ -176,9 +177,8 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
               </button>}
             </div>
             {modelOptions.length ? <>
-              <select
+              <Select
                 id="ai-model-select"
-                className={styles.modelSelect}
                 value={aiModel}
                 onChange={(event) => switchAiModel(event.target.value)}
                 disabled={loadingAiKey || refreshingAiModels}
@@ -187,7 +187,7 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
                 {modelOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </Select>
               <div className={styles.modelMeta}>
                 <small className={shared.fieldHint}>请求模型 ID：<span className={styles.inlineModelId}>{aiModel}</span></small>
                 {aiProvider === "deepseek" && <small

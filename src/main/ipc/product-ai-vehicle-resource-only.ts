@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { logInfo } from "../../shared/log-timestamp.js";
 import { applyAutoVehicleResourceTrigger } from "../operations/vehicle-resource-trigger.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
@@ -81,7 +82,7 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
 
   const result = await context.productWorkflows.runVbkPageExclusive(async () =>
     applyAutoVehicleResourceTrigger({
-      page: await context.browser.page(),
+      page: await getVbkRequestPage(context.browser),
       product,
     }));
   if (result.outcome.written) {

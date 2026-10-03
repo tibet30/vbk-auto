@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type {
   AccountFixedInfoFieldKey,
   AccountFixedInfoValue,
@@ -192,7 +193,7 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   ipcMain.handle("accounts:providerIdFor", (_event, accountName: string) => db.providerIdFor(accountName));
   ipcMain.handle("contacts:listProviderContactCards", (_event, providerId: number, searchKeyword?: string) =>
     context.productWorkflows.runVbkPageExclusive(async () => {
-      const page = await context.browser.page();
+      const page = await getVbkRequestPage(context.browser);
       return listProviderContactCards(page, providerId, searchKeyword);
     }));
   ipcMain.handle("contacts:suggestPoi", async (_event, keyword: string) => {

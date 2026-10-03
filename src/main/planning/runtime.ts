@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 /**
  * 把规划子系统接到现有 VbkDatabase 的胶水代码。
  *
@@ -220,7 +221,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   }
   async suggestPoi(keyword: string, context?: { destinationCity?: string; province?: string }) {
     if (!this.browser) return null;
-    const query = async () => suggestPoi(await this.browser!.page(), keyword, context);
+    const query = async () => suggestPoi(await getVbkRequestPage(this.browser!), keyword, context);
     return this.runVbkPageExclusive ? this.runVbkPageExclusive(query) : query();
   }
 
@@ -233,7 +234,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       keyword,
       product: product.product,
       context,
-      detail: await suggestPoiDetail(await this.browser!.page(), keyword, context),
+      detail: await suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context),
       checkAvailability: (poiId) => this.getPoiAvailability(poiId),
       disambiguate: this.poiDisambiguate,
     });

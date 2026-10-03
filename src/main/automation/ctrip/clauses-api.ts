@@ -3,12 +3,13 @@
  * VBK 新版结构化条款接口。
  *
  * 契约来源：真实 newResourceClause 页面与 tour-chrome-extension 的
- * saveClauses.ts。所有请求都在已登录 VBK Page 内执行，复用页面 cookie；
- * 不把认证信息搬到主进程，也不绕过官方条款包校验。
+ * saveClauses.ts。通过统一账号会话请求保存并回读，无需页面执行上下文。
  */
 
+import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+
 const CLAUSE_HEAD = {
-  cid: "09031059218989378081",
+  cid: "",
   ctok: "",
   cver: "1.0",
   lang: "01",
@@ -151,240 +152,159 @@ const CHILD_TICKET_REMARKS_COMPONENT = "landticket2";
 export async function saveStructuredProductClauses(page, productId, options = {}) {
   const isFreeTravel = options?.productForm === "freeTravel";
   const adultTicketInclusionText = String(options?.adultTicketInclusionText ?? "").trim();
-  return page.evaluate(async function ({ productId, head, requiredIds, defaultSelectedClauseIds, lodgingSelfPayNote, adultTicketInclusionText, adultTicketRemarksComponent, childTicketRemarksComponent, isFreeTravel }) {
-    const helpers = { request: null, format: null, ensure: null, setValue: null };
-    helpers.request = async (url, body, contentType = "application/json") => {
-      const response = await fetch(url, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          accept: "*/*",
-          "content-type": contentType,
-          cookieorigin: "https://vbooking.ctrip.com",
-          "x-ctx-locale": "zh-CN",
-        },
-        body: JSON.stringify(body),
+  const head = CLAUSE_HEAD;
+  const requiredIds = REQUIRED_CLAUSE_IDS;
+  const defaultSelectedClauseIds = DEFAULT_SELECTED_CLAUSE_IDS;
+  const lodgingSelfPayNote = LODGING_SELF_PAY_NOTE;
+  const adultTicketRemarksComponent = ADULT_TICKET_REMARKS_COMPONENT;
+  const childTicketRemarksComponent = CHILD_TICKET_REMARKS_COMPONENT;
+  const helpers = {
+    request: async (url, body, contentType = "application/json") => {
+      const response = await vbkSessionRequest(page, {
+        endpoint: url, body, errorLabel: `VBK 条款 ${url.split("/").pop()}`,
+        browserRequestTimeoutMs: 20_000, evaluateTimeoutMs: 25_000,
+        headers: { "content-type": contentType, cookieorigin: "https://vbooking.ctrip.com" },
       });
-      const text = await response.text();
-      let data = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { /* handled below */ }
-      if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
+      const data = response.payload;
       const ack = data?.ResponseStatus?.Ack;
       const errors = data?.ResponseStatus?.Errors;
-      if (ack === "Failure" || ack === "Warning" || (Array.isArray(errors) && errors.length)) {
-        const detail = errors?.map((error) => error.Message ?? error.ErrorCode).join("；") || ack;
+      if (ack !== "Success" || (Array.isArray(errors) && errors.length)) {
+        const detail = errors?.map((error) => error.Message ?? error.ErrorCode).join("；") || ack || "缺少成功确认";
         throw new Error(`${url.split("/").pop()} 失败：${detail}`);
       }
       return data;
-    };
-
-    helpers.format = (clauseTypes) => {
-      const result = [];
-      for (const type of clauseTypes ?? []) {
-        const selected = [
-          ...(type.clauseItemDtos ?? []),
-          ...(type.containers ?? []).flatMap((container) =>
-            (container.clauseItemDtos ?? []).map((item) => ({
-              ...item,
-              selected: container.selectedClauseItemId == null
-                ? item.selected
-                : String(item.clauseItemId) === String(container.selectedClauseItemId) ? "T" : "F",
-            })),
-          ),
-        ].filter((item) => {
-          if (item.itemType != null && item.itemType !== "F") return false;
-          if (item.isShow != null && item.isShow !== "T") return false;
-          if (item.hasSelectBox === "F") return true;
-          return item.selected === "T";
-        });
-        for (const item of selected) {
-          result.push({
-            clauseItemId: item.clauseItemId,
-            secondClassTypeId: type.clauseTypeId,
-            elementDtos: (item.clauseComponentDtos ?? []).map((component) => {
-              const element = component.componentElementDtos?.find(
-                (candidate) => candidate.elementCode === component.value,
-              );
-              return {
-                componentCode: component.componentCode,
-                value: element?.elementValue ?? component.value,
-                ...(element ? { elementCode: element.elementCode } : {}),
-              };
-            }),
-          });
-        }
-      }
-      return result;
-    };
-
-    helpers.ensure = (items, clauseTypes, id) => {
-      if (items.some((item) => item.clauseItemId === id)) return items;
-      for (const type of clauseTypes ?? []) {
-        const candidates = [
-          ...(type.clauseItemDtos ?? []),
-          ...(type.containers ?? []).flatMap((container) => container.clauseItemDtos ?? []),
-        ];
-        const target = candidates.find((item) => item.clauseItemId === id);
-        if (!target) continue;
-        const copy = helpers.format([{ ...type, clauseItemDtos: [{ ...target, selected: "T" }], containers: [] }]);
-        return [...items, ...copy];
-      }
-      throw new Error(`VBK 条款包缺少必选条款 ${id}`);
-    };
-
-    helpers.setValue = (items, itemId, componentCode, value) => {
-      let found = false;
-      const next = items.map((item) => {
-        if (item.clauseItemId !== itemId) return item;
-        const elementDtos = (item.elementDtos ?? []).map((element) => {
-          if (element.componentCode !== componentCode) return element;
-          found = true;
-          return { ...element, value };
-        });
-        return { ...item, elementDtos };
-      });
-      if (!found) throw new Error(`VBK 条款 ${itemId} 缺少组件 ${componentCode}`);
-      return next;
-    };
-
-    const savedTabs = [];
-    // VBK 会在保存其它页签时做跨页校验；先落住宿费用页，避免“请勾选住宿条款”。
-    for (const tabEnum of [2, 1, 3, 4]) {
-      const productClause = await helpers.request(
-        "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
-        { contentType: "json", head, productId: String(productId), tabEnum },
-      );
-      const central = productClause.centralDataDto;
-      if (!central?.additionalInfoDto?.firstClassTypeIds) {
-        throw new Error(`条款页签 ${tabEnum} 缺少 centralDataDto`);
-      }
-      const getBody = {
-        ...central,
-        clauseFilterConditionDto: central.filterConditionDto,
-        firstClassClauseTypeIds: central.additionalInfoDto.firstClassTypeIds,
-        additionalInfoDto: { ...central.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
-      };
-      delete getBody.filterConditionDto;
-      const clausePackage = await helpers.request(
-        "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
-        getBody,
-        "text/plain;charset=UTF-8",
-      );
-      let items = helpers.format(clausePackage.clauseTypeDtos);
-      if (tabEnum === 1 && !isFreeTravel) {
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.mandarinGuide);
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.localExclusiveVehicle);
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
-      }
-      if (tabEnum === 1 && adultTicketInclusionText) {
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.adultTicketIncluded);
-        items = helpers.setValue(items, requiredIds.adultTicketIncluded, adultTicketRemarksComponent, adultTicketInclusionText);
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
-        items = helpers.setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
-      }
-      if (tabEnum === 2 && !isFreeTravel) {
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
-        items = helpers.setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
-      }
-      if (tabEnum === 3 && !isFreeTravel) items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
-      if (!isFreeTravel) {
-        for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
-          items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
-        }
-      }
-      let savePackage;
-      try {
-        savePackage = await helpers.request(
-          "https://online.ctrip.com/restapi/soa2/20046/saveClausePackage",
-          {
-            ...central,
-            firstClassClauseTypeIds: central.additionalInfoDto.firstClassTypeIds,
-            clausePackageItemDtos: items,
-            requestBaseData: { locale: "zh-CN" },
-            pICategoryId: central.filterConditionDto.pICategoryId,
-          },
-          "text/plain;charset=UTF-8",
-        );
-      } catch (error) {
-        throw new Error(`条款页签 ${tabEnum} 保存失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-      const packageId = savePackage.clausePackageId;
-      if (!packageId) throw new Error(`条款页签 ${tabEnum} 保存成功但未返回条款包 ID`);
-      await helpers.request(
-        "https://online.ctrip.com/restapi/soa2/15638/saveProductClauses.json",
-        {
-          contentType: "json",
-          head,
-          packageId,
-          saveType: 3,
-          productId: String(productId),
-          tabEnum,
-          clauseEditDtos: [],
-          unBookingRuleDtos: [],
-        },
-      );
-      const persistedClauseData = await helpers.request(
-        "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
-        { contentType: "json", head, productId: String(productId), tabEnum },
-      );
-      const persistedCentral = persistedClauseData.centralDataDto;
-      const persistedBody = {
-        ...persistedCentral,
-        clauseFilterConditionDto: persistedCentral.filterConditionDto,
-        firstClassClauseTypeIds: persistedCentral.additionalInfoDto.firstClassTypeIds,
-        additionalInfoDto: { ...persistedCentral.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
-      };
-      delete persistedBody.filterConditionDto;
-      const persistedPackage = await helpers.request(
-        "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
-        persistedBody,
-        "text/plain;charset=UTF-8",
-      );
-      const persistedIds = new Set(helpers.format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
-      const missingIds = isFreeTravel
-        ? []
-        : (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
-      if (missingIds.length > 0) {
-        throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
-      }
-      if (tabEnum === 1 && adultTicketInclusionText) {
-        const persistedItems = helpers.format(persistedPackage.clauseTypeDtos);
-        const persistedAdultTicket = persistedItems.find(
-          (item) => item.clauseItemId === requiredIds.adultTicketIncluded,
-        );
-        if (!persistedAdultTicket) {
-          throw new Error(`条款页签 1 保存后回读缺少成人门票条款：${requiredIds.adultTicketIncluded}`);
-        }
-        const persistedRemarks = (persistedAdultTicket.elementDtos ?? []).find(
-          (element) => element.componentCode === adultTicketRemarksComponent,
-        );
-        if (persistedRemarks?.value !== adultTicketInclusionText) {
-          throw new Error("条款页签 1 保存后回读的成人门票景点文本不一致");
-        }
-        const persistedChildTicket = persistedItems.find(
-          (item) => item.clauseItemId === requiredIds.childTicketIncluded,
-        );
-        const persistedChildRemarks = (persistedChildTicket?.elementDtos ?? []).find(
-          (element) => element.componentCode === childTicketRemarksComponent,
-        );
-        if (persistedChildRemarks?.value !== adultTicketInclusionText) {
-          throw new Error("条款页签 1 保存后回读的儿童门票景点文本不一致");
-        }
-      }
-      savedTabs.push({ tabEnum, packageId, itemCount: items.length });
+    },
+    format: formatSelectedClauseItems,
+    ensure: ensureRequiredClause,
+    setValue: setClauseComponentValue,
+  };
+  const savedTabs = [];
+  // VBK 会在保存其它页签时做跨页校验；先落住宿费用页，避免“请勾选住宿条款”。
+  for (const tabEnum of [2, 1, 3, 4]) {
+    const productClause = await helpers.request(
+      "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
+      { contentType: "json", head, productId: String(productId), tabEnum },
+    );
+    const central = productClause.centralDataDto;
+    if (!central?.additionalInfoDto?.firstClassTypeIds) {
+      throw new Error(`条款页签 ${tabEnum} 缺少 centralDataDto`);
     }
-    return { savedTabs };
-  }, {
-    productId: String(productId),
-    head: CLAUSE_HEAD,
-    requiredIds: REQUIRED_CLAUSE_IDS,
-    defaultSelectedClauseIds: DEFAULT_SELECTED_CLAUSE_IDS,
-    lodgingSelfPayNote: LODGING_SELF_PAY_NOTE,
-    adultTicketRemarksComponent: ADULT_TICKET_REMARKS_COMPONENT,
-    childTicketRemarksComponent: CHILD_TICKET_REMARKS_COMPONENT,
-    adultTicketInclusionText,
-    isFreeTravel,
-  });
+    const getBody = {
+      ...central,
+      clauseFilterConditionDto: central.filterConditionDto,
+      firstClassClauseTypeIds: central.additionalInfoDto.firstClassTypeIds,
+      additionalInfoDto: { ...central.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
+    };
+    delete getBody.filterConditionDto;
+    const clausePackage = await helpers.request(
+      "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
+      getBody,
+      "text/plain;charset=UTF-8",
+    );
+    let items = helpers.format(clausePackage.clauseTypeDtos);
+    if (tabEnum === 1 && !isFreeTravel) {
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.mandarinGuide);
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.localExclusiveVehicle);
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
+    }
+    if (tabEnum === 1 && adultTicketInclusionText) {
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.adultTicketIncluded);
+      items = helpers.setValue(items, requiredIds.adultTicketIncluded, adultTicketRemarksComponent, adultTicketInclusionText);
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
+      items = helpers.setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
+    }
+    if (tabEnum === 2 && !isFreeTravel) {
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
+      items = helpers.setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
+    }
+    if (tabEnum === 3 && !isFreeTravel) items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
+    if (!isFreeTravel) {
+      for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
+      }
+    }
+    let savePackage;
+    try {
+      savePackage = await helpers.request(
+        "https://online.ctrip.com/restapi/soa2/20046/saveClausePackage",
+        {
+          ...central,
+          firstClassClauseTypeIds: central.additionalInfoDto.firstClassTypeIds,
+          clausePackageItemDtos: items,
+          requestBaseData: { locale: "zh-CN" },
+          pICategoryId: central.filterConditionDto.pICategoryId,
+        },
+        "text/plain;charset=UTF-8",
+      );
+    } catch (error) {
+      throw new Error(`条款页签 ${tabEnum} 保存失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+    const packageId = savePackage.clausePackageId;
+    if (!packageId) throw new Error(`条款页签 ${tabEnum} 保存成功但未返回条款包 ID`);
+    await helpers.request(
+      "https://online.ctrip.com/restapi/soa2/15638/saveProductClauses.json",
+      {
+        contentType: "json",
+        head,
+        packageId,
+        saveType: 3,
+        productId: String(productId),
+        tabEnum,
+        clauseEditDtos: [],
+        unBookingRuleDtos: [],
+      },
+    );
+    const persistedClauseData = await helpers.request(
+      "https://online.ctrip.com/restapi/soa2/15638/listProductClauses",
+      { contentType: "json", head, productId: String(productId), tabEnum },
+    );
+    const persistedCentral = persistedClauseData.centralDataDto;
+    const persistedBody = {
+      ...persistedCentral,
+      clauseFilterConditionDto: persistedCentral.filterConditionDto,
+      firstClassClauseTypeIds: persistedCentral.additionalInfoDto.firstClassTypeIds,
+      additionalInfoDto: { ...persistedCentral.additionalInfoDto, isTra: "F", isChildrenToNew: "T" },
+    };
+    delete persistedBody.filterConditionDto;
+    const persistedPackage = await helpers.request(
+      "https://online.ctrip.com/restapi/soa2/20046/getClausePackage",
+      persistedBody,
+      "text/plain;charset=UTF-8",
+    );
+    const persistedIds = new Set(helpers.format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
+    const missingIds = isFreeTravel
+      ? []
+      : (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
+    if (missingIds.length > 0) {
+      throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
+    }
+    if (tabEnum === 1 && adultTicketInclusionText) {
+      const persistedItems = helpers.format(persistedPackage.clauseTypeDtos);
+      const persistedAdultTicket = persistedItems.find(
+        (item) => item.clauseItemId === requiredIds.adultTicketIncluded,
+      );
+      if (!persistedAdultTicket) {
+        throw new Error(`条款页签 1 保存后回读缺少成人门票条款：${requiredIds.adultTicketIncluded}`);
+      }
+      const persistedRemarks = (persistedAdultTicket.elementDtos ?? []).find(
+        (element) => element.componentCode === adultTicketRemarksComponent,
+      );
+      if (persistedRemarks?.value !== adultTicketInclusionText) {
+        throw new Error("条款页签 1 保存后回读的成人门票景点文本不一致");
+      }
+      const persistedChildTicket = persistedItems.find(
+        (item) => item.clauseItemId === requiredIds.childTicketIncluded,
+      );
+      const persistedChildRemarks = (persistedChildTicket?.elementDtos ?? []).find(
+        (element) => element.componentCode === childTicketRemarksComponent,
+      );
+      if (persistedChildRemarks?.value !== adultTicketInclusionText) {
+        throw new Error("条款页签 1 保存后回读的儿童门票景点文本不一致");
+      }
+    }
+    savedTabs.push({ tabEnum, packageId, itemCount: items.length });
+  }
+  return { savedTabs };
 }

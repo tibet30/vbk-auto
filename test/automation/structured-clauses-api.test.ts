@@ -6,6 +6,7 @@ import {
   ensureRequiredClause,
   formatSelectedClauseItems,
   setClauseComponentValue,
+  saveStructuredProductClauses,
 } from "../../src/main/automation/ctrip/clauses-api.js";
 import { buildAdultTicketInclusionText } from "../../src/main/automation/ctrip/terms.js";
 
@@ -241,21 +242,50 @@ test("默认条款集合使用已保存的平台 ID，覆盖门票成人/儿童�
   assert.doesNotMatch(source, /FORCE_CHECK|resolveClauseIdsByText|ensureClausesByText/);
 });
 
-test("条款页面执行函数不依赖构建器注入的 __name helper", async () => {
-  const { readFile } = await import("node:fs/promises");
-  const source = await readFile(
-    new URL("../../src/main/automation/ctrip/clauses-api.ts", import.meta.url),
-    "utf8",
-  );
-  const start = source.indexOf("return page.evaluate(");
-  const end = source.indexOf("}, {", start);
-  const evaluateBody = source.slice(start, end);
-  assert.match(evaluateBody, /page\.evaluate\(async function \(/);
-  assert.match(evaluateBody, /const helpers = \{ request: null, format: null, ensure: null, setValue: null \}/);
-  assert.match(evaluateBody, /helpers\.request = async \(/);
-  assert.match(evaluateBody, /helpers\.format = \(/);
-  assert.match(evaluateBody, /helpers\.ensure = \(/);
-  assert.match(evaluateBody, /helpers\.setValue = \(/);
-  assert.doesNotMatch(evaluateBody, /function\s+(request|format|ensure|setValue)\(/);
-  assert.doesNotMatch(evaluateBody, /const\s+(request|format|ensure|setValue)\s*=\s*(async\s*)?\(/);
+function noPageClauseClient(tamperReadback = false) {
+  const saved = new Map<number, any[]>();
+  const order: number[] = [];
+  const client = {
+    nativeOnly: true,
+    evaluate: async () => { throw new Error("页面已关闭"); },
+    vbkSessionFetch: async ({ endpoint, body }: any) => {
+      let data: any = {};
+      const tab = body.tabEnum ?? body.testTab;
+      if (endpoint.endsWith("listProductClauses")) {
+        data.centralDataDto = { testTab: tab, additionalInfoDto: { firstClassTypeIds: [tab] }, filterConditionDto: { pICategoryId: 1003 } };
+      } else if (endpoint.endsWith("getClausePackage")) {
+        const persisted = saved.get(tab);
+        const ids = DEFAULT_SELECTED_CLAUSE_IDS[tab as keyof typeof DEFAULT_SELECTED_CLAUSE_IDS];
+        data.clauseTypeDtos = [{ clauseTypeId: tab, clauseItemDtos: ids.map(id => {
+          const item = persisted?.find(item => item.clauseItemId === id);
+          const component = id === 13 ? "landticketremarks" : id === 10087 ? "landticket2" : id === 1079 ? "otherfeewithout1" : undefined;
+          const value = item?.elementDtos.find((element: any) => element.componentCode === component)?.value ?? "";
+          return { clauseItemId: id, itemType: "F", isShow: "T", selected: "T", clauseComponentDtos: component
+            ? [{ componentCode: component, value: tamperReadback && persisted && id === 13 ? "错误景点" : value }] : [] };
+        }), containers: [] }];
+      } else if (endpoint.endsWith("saveClausePackage")) {
+        order.push(tab);
+        saved.set(tab, body.clausePackageItemDtos);
+        data.clausePackageId = 1000 + tab;
+      }
+      return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, ...data }, durationMs: 1, ctx: {} as any };
+    },
+  };
+  return { client, order, saved };
+}
+
+test("页面关闭时条款四个页签仍完成接口保存与回读，保留成人儿童门票文本", async () => {
+  const { client, order, saved } = noPageClauseClient();
+  const result = await saveStructuredProductClauses(client, "79232466", { adultTicketInclusionText: "晋祠+太原古县城" });
+  assert.deepEqual(order, [2, 1, 3, 4]);
+  assert.equal(result.savedTabs.length, 4);
+  for (const id of [13, 10087]) {
+    assert.equal(saved.get(1)?.find(item => item.clauseItemId === id)?.elementDtos[0].value, "晋祠+太原古县城");
+  }
+});
+
+test("无页面条款保存仍会拒绝远端回读文本不一致", async () => {
+  const { client, order } = noPageClauseClient(true);
+  await assert.rejects(saveStructuredProductClauses(client, "79232466", { adultTicketInclusionText: "晋祠" }), /成人门票景点文本不一致/);
+  assert.deepEqual(order, [2, 1]);
 });

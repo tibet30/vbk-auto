@@ -6,6 +6,7 @@ import path from "node:path";
 import { createAppAuthStore } from "../../src/main/infrastructure/app-auth-store.js";
 import { createTibetProductService, TibetProductConflictError } from "../../src/main/infrastructure/tibet-products.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
+import { productReport } from "../../src/main/infrastructure/product-report.js";
 
 const future = "2099-08-27 12:00:00";
 
@@ -54,7 +55,7 @@ test("Tibet 产品列表使用登录 token 且解析远端摘要", async (t) => 
   }]);
 });
 
-test("Tibet 产品创建发送完整快照并读取服务端记录", async (t) => {
+test("Tibet 产品创建发送业务快照并读取服务端记录", async (t) => {
   const store = fixture(t);
   const service = createTibetProductService(store, {
     baseUrl: "https://example.test",
@@ -65,6 +66,85 @@ test("Tibet 产品创建发送完整快照并读取服务端记录", async (t) =
     },
   });
   assert.deepEqual(await service.upsert(product), product);
+});
+
+test("创建和更新排除本地日志截图与版本，并保留业务和脱敏失败诊断", async t => {
+  const local: ProductDetail = {
+    ...product,
+    revision: 3,
+    productJsonVersion: 42,
+    basicInfoSaved: true,
+    productId: "vbk-123",
+    product: {
+      ...product.product,
+      itinerary: [{ day: 1, spots: [{ poiId: 123, name: "景区" }] }],
+      diagnostics: {
+        creationInput: { destination: "拉萨", days: 3, productForm: "privateTour" },
+        debugSnapshot: { pendingApproval: true, rawPage: "unnecessary" },
+        runtime: { status: "failed", rawTrace: "unnecessary", lastToolFailure: {
+          name: "upload_cover", arguments: { Authorization: "Bearer private-token", city: "拉萨" },
+          error: "token=private-token failed", occurredAt: product.updatedAt,
+        } },
+      },
+    },
+    automation: {
+      id: "run-1", status: "failed", currentPhase: "basic", phases: [{ phase: "basic", status: "failed" }],
+      logs: [{ at: product.updatedAt, message: "local journal", level: "error" }],
+      screenshot: "/private/screenshot.png",
+      recovery: { phases: { basic: { phase: "basic", state: "needs_user", attempts: [] } } },
+    },
+  };
+  const bodies: ProductDetail[] = [];
+  const service = createTibetProductService(fixture(t), {
+    baseUrl: "https://example.test",
+    fetchImpl: async (_input, init) => {
+      const sent = JSON.parse(String(init?.body)).product;
+      bodies.push(sent);
+      return response({ code: 200, data: { product: { ...sent, revision: 4 } } });
+    },
+  });
+  const created = await service.upsert(local);
+  const updated = await service.update(local, 3);
+  assert.deepEqual(bodies[0], bodies[1]);
+  const sent = bodies[0];
+  assert.equal("revision" in sent, false);
+  assert.equal("productJsonVersion" in sent, false);
+  assert.equal("screenshot" in sent.automation!, false);
+  assert.deepEqual(sent.automation?.logs, []);
+  assert.deepEqual(sent.automation?.recovery, local.automation?.recovery);
+  assert.deepEqual(sent.product.itinerary, local.product.itinerary);
+  assert.equal(sent.productId, "vbk-123");
+  assert.equal(sent.basicInfoSaved, true);
+  const serialized = JSON.stringify(sent);
+  assert.equal(serialized.includes("private-token"), false);
+  assert.equal(serialized.includes("unnecessary"), false);
+  assert.equal(serialized.includes("upload_cover"), true);
+  for (const result of [created, updated]) {
+    assert.deepEqual(result.automation?.logs, local.automation?.logs);
+    assert.equal(result.automation?.screenshot, local.automation?.screenshot);
+    assert.equal(result.productJsonVersion, 42);
+    assert.equal(result.revision, 4);
+  }
+  assert.equal(JSON.stringify(local).includes("private-token"), true, "projection must not mutate local state");
+});
+
+test("上报完整保留规划、核查、会话和 AI 用量，失败参数有大小上限", () => {
+  const local = {
+    ...product,
+    planning: { version: 2, runId: "plan", status: "needs_user", currentNode: "poiResolution", nodes: [], poiCandidates: [], createdAt: "now", updatedAt: "now" },
+    researchTasks: [{ id: "task", label: "景区确认", type: "vbk", status: "succeeded", state: "confirmed", evidence: [] }],
+    messages: [{ id: "m1", role: "user", content: "修改行程", createdAt: "now" }],
+    aiUsage: { events: [], lifetime: { calls: 1, totalTokens: 100 } },
+    product: { diagnostics: { runtime: { lastToolFailure: {
+      name: "tool", arguments: { payload: "a".repeat(10_000) }, error: "e".repeat(3000),
+    } } } },
+  } as unknown as ProductDetail;
+  const sent = productReport(local);
+  for (const key of ["planning", "researchTasks", "messages", "aiUsage"] as const) assert.deepEqual(sent[key], local[key]);
+  const diagnostics = sent.product.diagnostics as any;
+  assert.equal(diagnostics.runtime.lastToolFailure.arguments.truncated, true);
+  assert.equal(diagnostics.runtime.lastToolFailure.arguments.preview.length, 8000);
+  assert.equal(diagnostics.runtime.lastToolFailure.error.length, 2000);
 });
 
 test("本地执行耗时不随产品创建和更新提交到远端", async t => {

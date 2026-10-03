@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type { PlanningPlanV2, PlanningRunResult } from "../../shared/contracts.js";
 import type { MainIpcContext } from "../ipc/context.js";
 import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
@@ -73,7 +74,7 @@ export async function acceptItineraryAndRerunCompletion(args: {
       try {
         matches = await context.productWorkflows.runVbkPageExclusive(async () => {
           await context.browser.status();
-          const page = await context.browser.page();
+          const page = await getVbkRequestPage(context.browser);
           return resolveBestEffortPoiMatches(required, { destinationCity, province }, async (name, poiContext) => {
             const best = (await suggestPoiDetail(page, name, poiContext)).best;
             if (!best || !Number.isInteger(best.poiId) || best.poiId <= 0 || !best.poiName.trim() || isTravelNodeName(best.poiName)) return null;

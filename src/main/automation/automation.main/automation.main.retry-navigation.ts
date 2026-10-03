@@ -24,6 +24,7 @@ const PHASE_PAGE_SECTIONS: Record<string, string> = {
 };
 
 type PhasePage = {
+  nativeOnly?: boolean;
   goto: (url: string, options?: { waitUntil?: "domcontentloaded" }) => Promise<unknown>;
   reload: (options?: { waitUntil?: "domcontentloaded" }) => Promise<unknown>;
   waitForLoadState?: (state: "networkidle", options?: { timeout?: number }) => Promise<unknown>;
@@ -117,7 +118,7 @@ export async function executeApiWithPhasePageSync<T>(args: {
   if (!productId) throw new Error(`phase=${phase} 缺少产品 ID，无法执行阶段`);
   const expectedUrl = phasePageUrl(productId, phase);
   const syncPage = isPageVisible();
-  if (requiresPhasePage) {
+  if (requiresPhasePage && !page.nativeOnly) {
     ensureBrowserHasBounds();
     await enterPhasePageForApi({ page, productId, phase, log, navigate });
   } else {

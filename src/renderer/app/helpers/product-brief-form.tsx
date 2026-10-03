@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { LoaderCircle, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { CreateProductInput } from "../../../shared/contracts.js";
@@ -32,7 +33,7 @@ export function ProductBriefForm({ input, setInput, autoConfirm, setAutoConfirm,
     <div><h3>新建产品</h3><p className={shared.viewSub}>填写基础信息和你的初步想法，进入产品后 AI 会据此开始规划。</p></div>
     <div className={styles.briefGrid}>
       <label><span className={shared.fieldLabel}>目的地</span><input className={shared.input} autoFocus placeholder="例如：太原" value={input.destination} aria-invalid={Boolean(fieldErrors.destination)} aria-describedby={fieldErrors.destination ? "create-product-destination-error" : undefined} onChange={(event) => updateInput("destination", { ...input, destination: event.target.value })} />{fieldErrors.destination ? <span id="create-product-destination-error" className={styles.fieldError} role="alert">{fieldErrors.destination}</span> : null}</label>
-      <label><span className={shared.fieldLabel}>产品形态</span><select className={shared.input} value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProductInput["productForm"] })}>{(Object.entries(PRODUCT_FORM_LABELS) as Array<[ProductForm, string]>).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label><span className={shared.fieldLabel}>产品形态</span><Select value={input.productForm} onChange={(event) => setInput({ ...input, productForm: event.target.value as CreateProductInput["productForm"] })}>{(Object.entries(PRODUCT_FORM_LABELS) as Array<[ProductForm, string]>).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
       <label><span className={shared.fieldLabel}>天数</span><input className={shared.input} type="number" min={CREATE_PRODUCT_MIN_DAYS} max={CREATE_PRODUCT_MAX_DAYS} value={productDaysInputValue(input.days)} aria-invalid={Boolean(fieldErrors.days)} aria-describedby={fieldErrors.days ? "create-product-days-error" : undefined} onChange={(event) => updateInput("days", { ...input, days: parseProductDaysInput(event.target.value) })} />{fieldErrors.days ? <span id="create-product-days-error" className={styles.fieldError} role="alert">{fieldErrors.days}</span> : null}</label>
     </div>
     <label className={styles.ideaField}>

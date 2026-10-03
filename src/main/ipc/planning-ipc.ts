@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import { aiProviderConfig } from "../../shared/ai-provider-config.js";
 import { PLANNING_STAGES } from "../../shared/contracts.js";
@@ -215,7 +216,7 @@ export function registerPlanningIpc(context: MainIpcContext): void {
           // 封面图：从携程图库搜索补齐 imageId / imageUrl
           const coverResult = await context.productWorkflows.runVbkPageExclusive(async () =>
             applyAutoCoverFill({
-              page: await context.browser.page(),
+              page: await getVbkRequestPage(context.browser),
               product: productAfter.product,
             })).catch((e: unknown) => {
             logInfo("[planning] auto cover fill raised", {
@@ -237,7 +238,7 @@ export function registerPlanningIpc(context: MainIpcContext): void {
           // 用车资源组：触发 VBK 接口匹配 resourceGroupId / resourceGroupName
           const vehicleResult = await context.productWorkflows.runVbkPageExclusive(async () =>
             applyAutoVehicleResourceTrigger({
-              page: await context.browser.page(),
+              page: await getVbkRequestPage(context.browser),
               product: db.getProduct(localProductId)!,
             })).catch((e: unknown) => {
             logInfo("[planning] auto vehicle resource trigger raised", {

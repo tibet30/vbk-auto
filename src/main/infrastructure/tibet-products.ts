@@ -1,6 +1,7 @@
 import type { ProductDetail, ProductSummary } from "../../shared/contracts.js";
 import type { AppAuthStore } from "./app-auth-store.js";
 import { resolveTibetApiBaseUrl } from "./tibet-auth.js";
+import { productReport, withLocalProductArtifacts } from "./product-report.js";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 type FetchLike = typeof fetch;
@@ -12,6 +13,7 @@ interface TibetEnvelope {
 }
 
 export interface TibetProductService {
+  storage?: "local";
   list(): Promise<ProductSummary[]>;
   upsert(product: ProductDetail): Promise<ProductDetail>;
   update(product: ProductDetail, expectedRevision: number): Promise<ProductDetail>;
@@ -118,7 +120,7 @@ export function createTibetProductService(
       return items as ProductSummary[];
     },
     async upsert(product) {
-      const { executionTime: _localTelemetry, ...snapshot } = product;
+      const snapshot = productReport(product);
       const envelope = await request("/api/extension/desktop-products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -127,10 +129,10 @@ export function createTibetProductService(
       const data = record(envelope.data);
       const saved = productDetail(data?.product);
       if (!saved) throw new Error("Tibet 未返回有效的产品记录，请稍后重试。");
-      return saved;
+      return withLocalProductArtifacts(saved, product);
     },
     async update(product, expectedRevision) {
-      const { executionTime: _localTelemetry, ...snapshot } = product;
+      const snapshot = productReport(product);
       const envelope = await request(`/api/extension/desktop-products/${encodeURIComponent(product.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -140,7 +142,7 @@ export function createTibetProductService(
       const saved = productDetail(data?.product);
       if (!saved) throw new Error("Tibet 未返回有效的产品记录，请稍后重试。");
       if (envelope.code === 409) throw new TibetProductConflictError(saved, messageOf(envelope, "产品已在其他位置更新，请刷新后重试。"));
-      return saved;
+      return withLocalProductArtifacts(saved, product);
     },
     async get(id) {
       const envelope = await request(`/api/extension/desktop-products/${encodeURIComponent(id)}`);

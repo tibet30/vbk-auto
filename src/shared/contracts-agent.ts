@@ -67,6 +67,8 @@ export interface AgentSnapshot {
   run: AgentRun | null;
   events: AgentEvent[];
   stages?: AgentStage[];
+  /** Durable prefix already associated with stages; legacy snapshots migrate once. */
+  stageHydration?: { version: 1; eventCount: number; lastEventId?: string };
   pendingInput?: AgentInputRequest;
   pendingApproval?: AgentApproval;
   uncertainWrite?: { toolCallId: string; message: string; createdAt: string };

@@ -95,3 +95,6 @@ Desktop.ini
 
 docs/plans/
 output/
+.playwright-cli/
+.playwright-mcp/
+.DS_Store

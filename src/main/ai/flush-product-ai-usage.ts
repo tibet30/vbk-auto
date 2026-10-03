@@ -1,6 +1,6 @@
 /**
- * 把本地采集到的 AI usage 事件 append 进 Tibet 产品快照。
- * 409 冲突时按 event.id 合并后重试一次。
+ * 把采集到的 AI usage 事件 append 进产品存储（当前为本机适配器）。
+ * 版本冲突时按 event.id 合并后重试一次；不属于诊断上传。
  */
 
 import { logWarn } from "../../shared/log-timestamp.js";

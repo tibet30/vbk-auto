@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import type { AiUsageEvent, ManualReviewFieldInput } from "../../shared/contracts.js";
 import { parseProduct } from "../automation/schema/schema.js";
@@ -155,7 +156,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       context.productWorkflows.runVbkPageExclusive(async () => {
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
-        const result = await resolveVehicleResource(await context.browser.page(), product);
+        const result = await resolveVehicleResource(await getVbkRequestPage(context.browser), product);
         productMutations.replace(localProductId, result.product, { status: "review", notify: false });
         if (result.resolved && taskId) {
           db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
@@ -173,7 +174,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       context.productWorkflows.runVbkPageExclusive(async () => {
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
-        const result = await resolveHotelResource(await context.browser.page(), product);
+        const result = await resolveHotelResource(await getVbkRequestPage(context.browser), product);
         productMutations.replace(localProductId, result.product, { status: "review", notify: false });
         if (taskId) {
           db.markResearchAccepted(localProductId, taskId, result.note, "vbk");

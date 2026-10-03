@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 import { runAutomationExclusive } from "./automation.main.execution.js";
 import { approvalForRun } from "../../agent/integration-gates.js";
 /**
@@ -267,7 +268,7 @@ isCancelRequested(localProductId: string): boolean {
     if (!product) throw productNotFound(localProductId);
     const { previousProductId, replacementProduct } = prepareLockedDraftReplacement(product);
     const remote = await this.runVbkPageExclusive(async () =>
-      getProductBaseInfoApi(await this.browser.page(), previousProductId));
+      getProductBaseInfoApi(await getVbkRequestPage(this.browser), previousProductId));
     assertRemoteDraftCanBeReplaced(remote);
     this.db.updateProduct(localProductId, replacementProduct, "review");
     this.db.setProductLifecycle(localProductId, { productId: null, status: "review", basicInfoSaved: false });

@@ -107,6 +107,11 @@ export class ProductExecutionClock {
     if (delta || activity.since !== undefined) this.ensure(id);
     this.db.prepare("UPDATE product_execution_time SET elapsed_ms=elapsed_ms+?,active_since=? WHERE local_product_id=?")
       .run(delta, activity.since ?? null, id);
+    // Keep disabled activities so a later re-enable can restore their gate;
+    // idle activities have no state left that needs to be retained.
+    if (activity.count === 0 && activity.disabled.size === 0 && this.activities.get(id) === activity) {
+      this.activities.delete(id);
+    }
   }
 }
 

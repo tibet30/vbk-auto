@@ -17,7 +17,7 @@
  * 启动只做 `runDatabaseMigrations()` 建表 + 列变更；任何写入都直接满足当前 schema。
  */
 
-import { ProductExecutionDatabase } from "./execution-database.js";
+import { LocalProductDatabase } from "./local-product-database.js";
 
 import type {
   AccountFixedInfo,
@@ -123,7 +123,7 @@ import {
  * 实现策略：所有 SQL 都委托给 parts/ 子模块；本类仅做"对外统一 facade"
  * ——保持 VbkDatabase.method() 调用形态不变，避免修改 IPC handler / 测试。
  */
-export class VbkDatabase extends ProductExecutionDatabase {
+export class VbkDatabase extends LocalProductDatabase {
   /** Optional Tibet extension user id for scoped accountFixedInfo reads. */
   private extensionUserIdResolver: (() => number | null) | null = null;
 

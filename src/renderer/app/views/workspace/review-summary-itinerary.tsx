@@ -1,3 +1,4 @@
+import { Select } from "../../helpers/Select";
 import {
   CalendarDays,
   ChevronDown,
@@ -319,9 +320,9 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                                 <span className={styles.timelineTime}>{label}</span>
                                 <span className={styles.timelineTitle}>{item.title}</span>
                                 {item.spotIndex !== undefined && (
-                                  <select className={styles.spotKind} value={item.kind ?? "attraction"} disabled={savingKindKey === `${item.dayIndex}-${item.spotIndex}`} onChange={(event) => { void changeKind(item, event.target.value as "attraction" | "free" | "other"); }} aria-label={`${item.title} 的类型`}>
+                                  <Select className={styles.spotKind} value={item.kind ?? "attraction"} disabled={savingKindKey === `${item.dayIndex}-${item.spotIndex}`} onChange={(event) => { void changeKind(item, event.target.value as "attraction" | "free" | "other"); }} aria-label={`${item.title} 的类型`}>
                                     <option value="attraction">景点</option><option value="free">自由活动</option><option value="other">其他</option>
-                                  </select>
+                                  </Select>
                                 )}
                                 {item.spotIndex !== undefined && (
                                   <button

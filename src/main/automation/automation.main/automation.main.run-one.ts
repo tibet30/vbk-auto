@@ -1,3 +1,4 @@
+import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 /**
  * 自动化「单阶段重新执行」入口：runOnePhase。
  *   - 仅重跑指定 phase，其它阶段保留原状态（不全清）；
@@ -113,7 +114,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
     ctx.db.saveAutomation(localProductId, run);
 
     try {
-      const page = await ctx.browser.page();
+      const page = await getVbkRequestPage(ctx.browser);
       // 入口仍保留当前产品上下文；每个 attempt 的 executePhase 会在录入前
       // 独占页面并进入目标 phase，避免 recovery 与执行阶段重复导航。
 

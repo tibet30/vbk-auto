@@ -1,4 +1,6 @@
 export interface VbkSessionRequestBrowser {
+  /** Session clients have no renderer execution context. */
+  nativeOnly?: boolean;
   evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
   vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult>;
   vbkSessionGetText?: (request: VbkSessionNativeTextRequest) => Promise<VbkSessionNativeTextResult>;
@@ -111,6 +113,18 @@ export async function vbkSessionRequest<TBody extends object>(
 ): Promise<VbkSessionRequestResult> {
   const browserRequestTimeoutMs = timeoutOrDefault(options.browserRequestTimeoutMs, 12_000);
   const evaluateTimeoutMs = timeoutOrDefault(options.evaluateTimeoutMs, 15_000);
+  if (browser.nativeOnly) {
+    if (!browser.vbkSessionFetch) throw new Error(`${options.errorLabel}缺少账号会话请求客户端`);
+    const result = await rejectAfter(browser.vbkSessionFetch({
+      endpoint: options.endpoint, body: options.body, errorLabel: options.errorLabel,
+      headers: { ...DEFAULT_VBK_SOA_HEADERS, ...(options.headers ?? {}) },
+      referrer: options.referrer, referrerPolicy: options.referrerPolicy,
+      includeCidQuery: options.includeCidQuery !== false,
+      requireReadableCid: options.requireReadableCid === true, timeoutMs: browserRequestTimeoutMs,
+    }), evaluateTimeoutMs, `${options.errorLabel}会话请求超时（${evaluateTimeoutMs}ms）`);
+    if (result.status < 200 || result.status >= 300) throw new Error(`${options.errorLabel}失败：HTTP ${result.status}`);
+    return result;
+  }
   const evaluation = browser.evaluate(async ({
     body,
     endpoint,

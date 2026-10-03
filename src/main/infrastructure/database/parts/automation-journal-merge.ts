@@ -103,5 +103,12 @@ export function automationJournalImport(
   if (!remoteUpdatedAt || !localUpdatedAt || Date.parse(remoteUpdatedAt) <= Date.parse(localUpdatedAt)) {
     return { action: "keep" };
   }
-  return { action: "replace", run: remoteRun, updatedAt: remoteUpdatedAt };
+  // Remote transport carries a checkpoint with an empty logs array. A newer
+  // checkpoint may advance phases, but must not erase this device's journal.
+  const localRun = parseRun(local.payloadJson) as (RemoteAutomationRun & { logs?: unknown[]; screenshot?: unknown }) | null;
+  const incoming = remoteRun as RemoteAutomationRun & { logs?: unknown[] };
+  const run = Array.isArray(incoming.logs) && incoming.logs.length === 0 && localRun
+    ? { ...remoteRun, logs: localRun.logs ?? [], ...(localRun.screenshot ? { screenshot: localRun.screenshot } : {}) }
+    : remoteRun;
+  return { action: "replace", run, updatedAt: remoteUpdatedAt };
 }

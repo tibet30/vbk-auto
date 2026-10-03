@@ -12,6 +12,7 @@ import {
   submitResourceSegmentsApi,
 } from "./vehicle-resource-api.js";
 import { syncCtripHotelResources } from "./hotel-resource-page.js";
+import { unchangedResourceSegments } from "./resource-segment-readback.js";
 
 /**
  * 全程段承载套餐和用车；正住宿段承载指定酒店。携程来源会在每个住宿段用
@@ -61,10 +62,13 @@ export async function ensureHotelResourceApi(
     } catch (error) {
       if (!isMissingResourceDraft(error) || options.draftRepairAttempted) throw error;
       const afterFailure = await getProductSegmentsApi(page, productId);
-      if (hasAnyRequestedHotel(afterFailure, resourceSegments)) {
-        throw new Error("VBK 指定酒店资源保存结果不确定：回读发现已有酒店绑定，已停止自动重试以避免覆盖部分保存。");
+      if (!unchangedResourceSegments(payload, afterFailure)) {
+        throw new Error("VBK 指定酒店资源保存结果不确定：保存前后资源内容发生变化，已停止自动重试以避免覆盖部分保存。");
       }
-      await initializeResourceSegmentsDraftApi(page, productId);
+      const repaired = await initializeResourceSegmentsDraftApi(page, productId);
+      if (!unchangedResourceSegments(afterFailure, repaired)) {
+        throw new Error("VBK 资源草稿恢复后内容发生变化，已停止酒店写入并保留现场。");
+      }
       return ensureHotelResourceApi(page, product, productId, { draftRepairAttempted: true });
     }
   }
@@ -90,15 +94,6 @@ export async function ensureHotelResourceApi(
 function isMissingResourceDraft(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("20016116") || message.includes("产品还没有创建草稿");
-}
-
-/** A non-empty readback means the rejected save might have partially landed; never replay it. */
-function hasAnyRequestedHotel(payload: any, dailyCandidates: Array<{ segmentId: string; candidates: Array<{ hotelId: number }> }>) {
-  const requested = new Set(dailyCandidates.flatMap((day) => day.candidates.map((candidate) => Number(candidate.hotelId))));
-  return segmentsFromPayload(payload).some((segment) => {
-    const rooms = Array.isArray(segment?.hotel?.segmentRooms) ? segment.hotel.segmentRooms : [];
-    return rooms.some((room: any) => requested.has(Number(room?.masterHotelID ?? room?.hotelID)));
-  });
 }
 
 /** "无" 是明确的不住宿意图，不能被当作一个可配置酒店。 */

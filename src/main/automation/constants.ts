@@ -25,7 +25,7 @@ export function productSectionUrl(productId, section) {
   const routes = {
     basic: `/ivbk/vendor/baseInfoMerge?productId=${id}&from=vbk`,
     presentation: `/product/input/productImageText?productId=${id}&pattern=4&from=vbk`,
-    itinerary: `/ivbk/vendor/tourdays?productid=${id}&istab=1&from=vbk`,
+    itinerary: `/ivbk/vendor/tourdays?productid=${id}&from=vbk`,
     packageManage: `/ivbk/vendor/packageManage?productid=${id}&from=vbk`,
     pricingInventory: `/ivbk/vendor/priceInventory?productid=${id}&from=vbk`,
     hotelResource: `/product/input/newResourceRule?productid=${id}&from=vbk`,

@@ -65,6 +65,72 @@ export function uploadedImageId(payload: unknown): number | null {
   return item.success === true && Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/** Navigation recovery is limited to file preparation, before any upload submission. */
+export async function prepareManualCoverUpload(
+  page: any, productId: number, file: CoverUploadFile, city: string,
+  beforeWrite?: () => Promise<void>,
+): Promise<any> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await page.goto(`${IMAGE_PAGE}?productId=${productId}&pattern=4&from=vbk`, {
+        waitUntil: "domcontentloaded", timeout: 30_000,
+      });
+      const coverSection = activeManualCoverSection(page);
+      await coverSection.waitFor({ state: "visible", timeout: 20_000 });
+      const title = (await coverSection.locator("h3.image-category-title").innerText()).trim();
+      if (title !== "*封面") throw new Error(`供应商封面区域标题异常：${title}`);
+      // VBK keeps a hidden skeleton dialog during transitions; bind only the live modal.
+      const dialog = activeManualCoverDialog(page);
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const uploadEntry = coverSection.getByText("上传图片", { exact: true });
+        if (await coverSection.getByText("替换封面", { exact: true }).count()) {
+          await coverSection.getByText("替换封面", { exact: true }).first()
+            .locator("..").evaluate((element: HTMLElement) => element.click());
+        } else if (!(await uploadEntry.first().isVisible())) {
+          const add = coverSection.getByText("添加图片", { exact: true });
+          // The text itself belongs to a hover menu; its wrapper is the hit target.
+          if (await add.count()) await add.first().locator("..").hover({ timeout: 5_000 });
+        }
+        await uploadEntry.first().waitFor({ state: "visible", timeout: 5_000 });
+        // BrowserView may be detached while a task runs in the background.
+        // Invoke the visible menu wrapper instead of moving the desktop pointer,
+        // which also hides this hover menu before its click can be delivered.
+        await uploadEntry.first().locator("..").evaluate((element: HTMLElement) => element.click());
+        try {
+          await dialog.waitFor({ state: "visible", timeout: 3_000 });
+          break;
+        } catch (error) {
+          if (attempt === 2) {
+            throw new Error(`供应商封面上传弹窗未打开（page=${page.url()}）：${String(error)}`);
+          }
+          await delay(400);
+        }
+      }
+      const selectedType = await dialog.locator("#imageType").evaluate(
+        (input: HTMLElement) => input.closest(".ant-select")?.querySelector(".ant-select-selection-item")?.textContent?.trim(),
+      );
+      if (selectedType !== "封面") throw new Error(`供应商上传弹窗的图片类型不是封面（当前：${selectedType || "空"}）。`);
+      await selectManualCoverCity(page, dialog, city);
+      const agreement = dialog.locator("#knowlicense");
+      if (!(await agreement.isChecked())) throw new Error("供应商图片授权协议尚未确认，请在平台核查授权。");
+
+      await beforeWrite?.();
+      const [chooser] = await Promise.all([
+        page.waitForEvent("filechooser", { timeout: 5_000 }),
+        dialog.locator(".uploadpic-modal-addpic").evaluate((element: HTMLElement) => element.click()),
+      ]);
+      await chooser.setFiles(file);
+      await dialog.locator(".uploadpic-modal-picitem img").first().waitFor({ state: "visible", timeout: 10_000 });
+      return dialog;
+    } catch (error) {
+      if (attempt === 1 || !/Execution context was destroyed|most likely because of a navigation/i.test(String(error))) throw error;
+      // Reopen the correct product page and acquire a fresh file chooser.
+      // Authorization, city and license checks are all repeated on the live dialog.
+    }
+  }
+  throw new Error("封面文件准备未完成。");
+}
+
 export async function uploadManualCoverViaSupplierPage(
   page: any,
   productId: number,
@@ -72,13 +138,14 @@ export async function uploadManualCoverViaSupplierPage(
   city: string,
   previousRemoteImageId?: number,
   onUploaded?: (imageId: number) => Promise<void> | void,
+  beforeWrite?: () => Promise<void>,
 ): Promise<{ imageId: number; reused: boolean }> {
   if (!Number.isInteger(productId) || productId <= 0) throw new Error("手动封面上传缺少 VBK 产品 ID。");
   const fileName = typeof file === "string" ? basename(file) : file.name;
   if (previousRemoteImageId && Number.isInteger(previousRemoteImageId)) {
     const bound = await readBoundCoverImageIdsViaApi(page, productId);
     if (bound.includes(previousRemoteImageId)) return { imageId: previousRemoteImageId, reused: true };
-    await bindCtripLibraryCoverViaApi(page, previousRemoteImageId, productId);
+    await bindCtripLibraryCoverViaApi(page, previousRemoteImageId, productId, { beforeWrite });
     return { imageId: previousRemoteImageId, reused: true };
   }
 
@@ -90,54 +157,13 @@ export async function uploadManualCoverViaSupplierPage(
 
   const before = await readBoundCoverImageIdsViaApi(page, productId);
   if (before.length > 1) throw new Error("远端存在多个封面，无法安全上传新封面。");
-  await page.goto(`${IMAGE_PAGE}?productId=${productId}&pattern=4&from=vbk`, {
-    waitUntil: "domcontentloaded", timeout: 30_000,
-  });
-  const coverSection = activeManualCoverSection(page);
-  await coverSection.waitFor({ state: "visible", timeout: 20_000 });
-  const title = (await coverSection.locator("h3.image-category-title").innerText()).trim();
-  if (title !== "*封面") throw new Error(`供应商封面区域标题异常：${title}`);
-  // VBK keeps a hidden skeleton dialog during transitions; bind only the live modal.
-  const dialog = activeManualCoverDialog(page);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (await coverSection.getByText("替换封面", { exact: true }).count()) {
-      await coverSection.getByText("替换封面", { exact: true }).first()
-        .evaluate((element: HTMLElement) => element.click());
-    } else {
-      const add = coverSection.getByText("添加图片", { exact: true });
-      if (await add.count()) await add.first().evaluate((element: HTMLElement) => element.click());
-    }
-    const uploadEntry = coverSection.getByText("上传图片", { exact: true });
-    await uploadEntry.first().waitFor({ state: "visible", timeout: 5_000 });
-    await uploadEntry.first().evaluate((element: HTMLElement) => element.click());
-    try {
-      await dialog.waitFor({ state: "visible", timeout: 3_000 });
-      break;
-    } catch (error) {
-      if (attempt === 2) {
-        throw new Error(`供应商封面上传弹窗未打开（page=${page.url()}）：${String(error)}`);
-      }
-      await delay(400);
-    }
-  }
-  const selectedType = await dialog.locator("#imageType").evaluate(
-    (input: HTMLElement) => input.closest(".ant-select")?.querySelector(".ant-select-selection-item")?.textContent?.trim(),
-  );
-  if (selectedType !== "封面") throw new Error(`供应商上传弹窗的图片类型不是封面（当前：${selectedType || "空"}）。`);
-  await selectManualCoverCity(page, dialog, city);
-  const agreement = dialog.locator("#knowlicense");
-  if (!(await agreement.isChecked())) throw new Error("供应商图片授权协议尚未确认，请在平台核查授权。");
-
-  const chooserPromise = page.waitForEvent("filechooser", { timeout: 5_000 });
-  await dialog.locator(".uploadpic-modal-addpic").evaluate((element: HTMLElement) => element.click());
-  const chooser = await chooserPromise;
-  await chooser.setFiles(file);
-  await dialog.locator(".uploadpic-modal-picitem img").first().waitFor({ state: "visible", timeout: 10_000 });
+  const dialog = await prepareManualCoverUpload(page, productId, file, city, beforeWrite);
 
   const uploadResponse = page.waitForResponse(
     (response: any) => /\/20698\/uploadImage\.json/.test(response.url()),
     { timeout: 30_000 },
   );
+  await beforeWrite?.();
   await submitManualCoverUpload(page, dialog);
   let response: any;
   try {

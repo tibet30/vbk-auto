@@ -16,6 +16,7 @@ import {
   RECOMMENDATION_CATEGORIES,
   VBK_RECOMMENDATION_CATEGORIES,
 } from "../../domain/product/recommendation-categories.js";
+import { hasValidVbkRecommendationLength } from "../../planning/vbk-recommendation-length.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG, TRAFFIC_LINE_VARIANTS } from "../../../shared/contracts-traffic-line.js";
 
 export {
@@ -83,7 +84,7 @@ const itineraryDaySchema = z.object({
 
 export const recommendationItemSchema = z.object({
   category: z.enum(RECOMMENDATION_CATEGORIES),
-  text: z.string().min(1),
+  text: z.string().min(1).refine(hasValidVbkRecommendationLength, "推荐理由不在 VBK 平台 30～84 字符范围内"),
 });
 
 /**

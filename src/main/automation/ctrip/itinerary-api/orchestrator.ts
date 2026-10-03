@@ -10,7 +10,7 @@
  *   2. 拉取当前 tourInfoId（steps.fetchTourInfoId）
  *   3. 拉取详情模板（steps.fetchTourDailyDetail）用于非破坏合并
  *   3a. 读取关联的 formal/draft/audit/preview 版本；没有独立 draft 指针时
- *       fail closed，不尝试创建或升级版本
+ *       通过平台 check(2) 创建独立草稿；其他未知关系 fail closed
  *   4. itinerary-transform 生成 tourDailyDescriptions
  *   5. 拼装 newTourInfo payload（含 templateId / days / tourDailyDescriptions）
  *   6. checkTourDaily(saveType=2) → saveTourDailyDetail(saveType=2)
@@ -26,6 +26,7 @@ import {
   transformItinerary,
 } from "./itinerary-transform.js";
 import { verifyItineraryReadback } from "./readback.js";
+import { readExistingItineraryDraft, saveAssociationBeforeReadback } from "./association-save.js";
 import { enrichItineraryPoiMetadata } from "./poi-metadata.js";
 import { resolveStationsForItinerary } from "./stations-resolver.js";
 import { isExteriorOnlyVisit } from "./visit-semantics.js";
@@ -34,89 +35,18 @@ import { logInfo } from "../../../../shared/log-timestamp.js";
 import {
   checkTourDailyStep,
   fetchTourDailyDetail,
+  fetchDailyTemplateDetail,
+  DEFAULT_DAILY_TEMPLATE_ID,
   fetchTourInfoId,
   saveProductTourInfoStep,
   saveTourDailyDetailStep,
 } from "./steps.js";
 import type { ApiPage, ItineraryApiResult } from "./transport.js";
-
-function linkedVersionId(tourInfo: Record<string, unknown>, field: string): string | number | undefined {
-  const value = tourInfo[field];
-  if (typeof value !== "string" && typeof value !== "number") return undefined;
-  const id = String(value).trim();
-  return /^[1-9]\d*$/.test(id) ? id : undefined;
-}
-
-function linkedVersionSummary(tourInfo: Record<string, unknown>): string {
-  const fields = [
-    "tourInfoId",
-    "draftTourInfoId",
-    "draftTourInfoStatus",
-    "auditTourInfoId",
-    "auditTourInfoStatus",
-    "previewTourInfoId",
-    "auditStatus",
-  ];
-  const summary = Object.fromEntries(fields.map((field) => {
-    const value = tourInfo[field];
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      return [field, {
-        key: (value as Record<string, unknown>).key ?? null,
-        value: (value as Record<string, unknown>).value ?? null,
-      }];
-    }
-    return [field, value ?? null];
-  }));
-  return JSON.stringify(summary);
-}
-
-function isUnsubmittedAuditStatus(value: unknown): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const status = value as Record<string, unknown>;
-  return status.key === "N" || /未提交/.test(String(status.value ?? ""));
-}
-
-function writableTourInfoVersion(tourInfo: Record<string, unknown>): {
-  id: string | number;
-  field: "draftTourInfoId" | "previewTourInfoId" | "tourInfoId";
-} | undefined {
-  const draftTourInfoId = linkedVersionId(tourInfo, "draftTourInfoId");
-  const previewTourInfoId = linkedVersionId(tourInfo, "previewTourInfoId");
-  const formalTourInfoId = linkedVersionId(tourInfo, "tourInfoId");
-  const auditTourInfoId = linkedVersionId(tourInfo, "auditTourInfoId");
-  const draftAliases = [formalTourInfoId, auditTourInfoId, previewTourInfoId].filter(Boolean);
-  if (draftTourInfoId && !draftAliases.some((id) => id === draftTourInfoId)) {
-    return { id: draftTourInfoId, field: "draftTourInfoId" };
-  }
-  const isPreviewOnlyInitialDraft = !draftTourInfoId
-    && !formalTourInfoId
-    && !auditTourInfoId
-    && Boolean(previewTourInfoId)
-    && isUnsubmittedAuditStatus(tourInfo.auditStatus);
-  if (isPreviewOnlyInitialDraft) return { id: previewTourInfoId!, field: "previewTourInfoId" };
-  const isUnsubmittedCurrentDraft = formalTourInfoId
-    && formalTourInfoId === auditTourInfoId
-    && isUnsubmittedAuditStatus(tourInfo.auditStatus);
-  if (isUnsubmittedCurrentDraft) return { id: formalTourInfoId, field: "tourInfoId" };
-  return undefined;
-}
-
-function sameField(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-}
+import { linkedVersionId, linkedVersionSummary, sameField, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
+import { approvedFormalDraftSource, assertCreatedDraftRelation } from "./draft-source.js";
 
 function normalizedDisplay(value: string | null): string | null {
   return value?.replace(/\s+/g, " ").trim() || null;
-}
-
-function assertRetainedVersion(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-  field: "tourInfoId" | "auditTourInfoId" | "previewTourInfoId" | "auditTourInfoStatus" | "auditStatus",
-): void {
-  if (before[field] !== undefined && !sameField(before[field], after[field])) {
-    throw new Error(`VBK 草稿关联保存后 ${field} 发生未授权变化，已停止回读验收。`);
-  }
 }
 
 function assertDraftWritePayload(args: {
@@ -170,6 +100,7 @@ export async function ensureItineraryApi(
   page: ApiPage,
   product: { itinerary: ProductItineraryDay[]; operations?: ProductOperations; productId?: string | number },
   productId: string,
+  options: { readOnlyBeforeWrite?: boolean } = {},
 ): Promise<ItineraryApiResult> {
   if (!Array.isArray(product?.itinerary) || !product.itinerary.length) {
     throw new Error("行程数组为空，无法走接口保存。");
@@ -192,23 +123,37 @@ export async function ensureItineraryApi(
   // 2) 按 poiId 回查真实 suggestPoi 类型，避免免费景点因 ticketType 为空被拒。
   const enrichedItinerary = await enrichItineraryPoiMetadata(page, product.itinerary);
 
-  // 3) 关联列表是版本关系的唯一来源。没有当前 draft/preview 的产品不能
-  // 凭旧 8→3 协议推断创建路径，必须停止在任何写操作之前。
-  const { tourInfo, tourInfoId: existingTourInfoId, templateId } =
+  // 3) 关联列表是版本关系的唯一来源。空列表通过模板 + check(2) 首建；
+  // 已有版本只沿已验证的关联路径写入，未知关系不猜测 ID 或回退 8→3。
+  const { tourInfo, emptyAssociation, templateId: relationTemplateId } =
     await fetchTourInfoId(page, productId);
-  const writableVersion = writableTourInfoVersion(tourInfo);
+  const initialCreation = emptyAssociation === true;
+  let templateId = relationTemplateId;
+  const formalSource = approvedFormalDraftSource(tourInfo);
+  const writableVersion = writableTourInfoVersion(tourInfo)
+    ?? (formalSource ? { id: formalSource, field: "tourInfoId" as const } : undefined)
+    ?? (initialCreation ? { id: 0, field: "tourInfoId" as const } : undefined);
   const writableTourInfoId = writableVersion?.id;
   const previewTourInfoId = linkedVersionId(tourInfo, "previewTourInfoId");
   const formalTourInfoId = linkedVersionId(tourInfo, "tourInfoId");
   const auditTourInfoId = linkedVersionId(tourInfo, "auditTourInfoId");
-  if (!writableTourInfoId) {
+  if (!writableVersion) {
     throw new Error(`VBK 行程关联未返回独立的 draftTourInfoId 或首建未提交 previewTourInfoId；没有当前平台写入协议证据，已停止草稿保存。关联版本=${linkedVersionSummary(tourInfo)}`);
   }
 
+  if (options.readOnlyBeforeWrite && (formalSource || initialCreation)) throw new Error("VBK 尚无独立行程草稿，不能把正式稿或空模板作为写入恢复回读。");
+  if (options.readOnlyBeforeWrite) return readExistingItineraryDraft(page, productId, writableVersion.id, auditTourInfoId ?? "", { itinerary: enrichedItinerary, operations, stations });
+
   // 4) 草稿详情是正常草稿保存的输入模板；写入只以关联 draft ID 为源，绝不使用
-  // formal/audit 详情替代。
-  const detailId = writableTourInfoId;
-  const detailTourInfo = (await fetchTourDailyDetail(page, detailId)).tourInfo;
+  // formal/audit 详情替代；已采样的正式稿复制路径只把正式稿用作只读输入。
+  let detailTourInfo: Record<string, unknown> | null;
+  if (initialCreation) {
+    const initial = await fetchDailyTemplateDetail(page, templateId ?? DEFAULT_DAILY_TEMPLATE_ID);
+    templateId = initial.templateId;
+    detailTourInfo = { template: initial.template, templateId, isNew: true, fromTourInfoId: 0 };
+  } else {
+    detailTourInfo = (await fetchTourDailyDetail(page, writableVersion.id)).tourInfo;
+  }
 
   // 5) 用 itinerary-transform 生成完整 tourDailyDescriptions
   const tourDailyDescriptions = transformItinerary({
@@ -225,13 +170,13 @@ export async function ensureItineraryApi(
     tourInfoId: writableTourInfoId,
     // Normal UI draft saves consistently send this flag; preserve it rather than
     // inheriting a missing value from a readonly detail template.
-    isModify: true,
+    isModify: !initialCreation,
     days: tourDailyDescriptions.length,
     tourDailyDescriptions,
   };
 
   // 6) 真实 UI 证据：checkTourDaily 请求 saveType=2，productTourInfo 保持
-  // formal 身份而 tourDaily 指向独立 draft/首建 preview；不调用 8/3，也不构造 score。
+  // formal 身份；tourDaily 使用草稿或已采样的正式稿只读模板。不调用 8/3。
   const productTourInfo: Record<string, unknown> = {
     ...tourInfo,
     productId: Number(productId) || productId,
@@ -247,12 +192,14 @@ export async function ensureItineraryApi(
   });
   const initialProjection = projectDraftWrite(tourDailyDescriptions);
   logInfo("[vbk-itinerary-draft] before-check", { productId, projection: initialProjection });
+  let checkedRelation: Record<string, unknown> | undefined;
   const checkedDraft = await checkTourDailyStep(
     page,
     productTourInfo,
     initialText,
     2,
     "VBK 行程草稿校验(saveType=2)",
+    (relation) => { checkedRelation = relation; },
   );
   assertCheckedDraftPayload(initialProjection, checkedDraft);
   logInfo("[vbk-itinerary-draft] checked", { productId, projection: projectDraftWrite(checkedDraft) });
@@ -260,11 +207,12 @@ export async function ensureItineraryApi(
   // 关联的 formal/audit/status 原样保留，不改审核指针。
   const checkedDraftId = linkedVersionId(checkedDraft, "tourInfoId");
   const checkedDraftAliases = [formalTourInfoId, auditTourInfoId].filter(Boolean);
-  const allowsCheckCreatedDraft = (writableVersion.field === "previewTourInfoId" || writableVersion.field === "tourInfoId")
+  if (formalSource) assertCreatedDraftRelation(tourInfo, checkedRelation, checkedDraftId);
+  const allowsCheckCreatedDraft = !formalSource && (initialCreation || writableVersion.field === "previewTourInfoId" || writableVersion.field === "tourInfoId")
     && checkedDraftId
     && !checkedDraftAliases.some((id) => id === checkedDraftId);
-  const effectiveWritableTourInfoId = allowsCheckCreatedDraft ? checkedDraftId : writableTourInfoId;
-  if (!checkedDraftId || (!allowsCheckCreatedDraft && checkedDraftId !== writableTourInfoId)) {
+  const effectiveWritableTourInfoId = formalSource || allowsCheckCreatedDraft ? checkedDraftId! : writableTourInfoId;
+  if (!checkedDraftId || (!formalSource && !allowsCheckCreatedDraft && checkedDraftId !== writableTourInfoId)) {
     throw new Error(`VBK 行程草稿校验未回读 ${writableVersion.field}：期望=${String(writableTourInfoId)}，实际=${String(checkedDraftId ?? "")}`);
   }
   const saveDetailResult = await saveTourDailyDetailStep(page, checkedDraft, "draft-v2");
@@ -272,7 +220,7 @@ export async function ensureItineraryApi(
   if (!savedDraftId || String(savedDraftId) !== String(effectiveWritableTourInfoId)) {
     throw new Error(`VBK 行程详情草稿保存未回读 ${writableVersion.field}：期望=${String(effectiveWritableTourInfoId)}，实际=${String(savedDraftId ?? "")}`);
   }
-  const associationTourInfo = allowsCheckCreatedDraft
+  const associationTourInfo = formalSource ? checkedRelation! : allowsCheckCreatedDraft
     ? {
         ...checkedDraft,
         productId: Number(productId) || productId,
@@ -290,15 +238,15 @@ export async function ensureItineraryApi(
         sort: tourInfo.sort ?? 0,
       };
   // saveProductTourInfo 使用带独立 draft/preview ID 的初始 tourDaily；不能把 check
-  // 返回对象或 formal/audit 身份混入关联请求。
+  // 返回对象混入关联正文；正式稿复制路径保留正常 UI 的输入模板身份。
   logInfo("[vbk-itinerary-draft] before-association", { productId, projection: initialProjection });
   const associationText = allowsCheckCreatedDraft ? JSON.stringify(checkedDraft) : initialText;
-  await saveProductTourInfoStep(page, associationTourInfo, associationText, "draft-v2");
+  await saveAssociationBeforeReadback(() => saveProductTourInfoStep(page, associationTourInfo, associationText, "draft-v2"));
 
   // 8) 关联写入后重新拉取版本关系。平台可以轮换可写版本 ID，但 formal/audit
   // 和审核状态必须保留；最终详情只从重新关联的独立未提交草稿版本回读。
   const { tourInfo: savedRelation } = await fetchTourInfoId(page, productId);
-  const retainedFields = writableVersion.field === "draftTourInfoId"
+  const retainedFields = formalSource || writableVersion.field === "draftTourInfoId"
     ? ["tourInfoId", "auditTourInfoId", "previewTourInfoId", "auditTourInfoStatus", "auditStatus"] as const
     : writableVersion.field === "previewTourInfoId" || writableVersion.field === "tourInfoId"
     ? writableVersion.field === "tourInfoId"

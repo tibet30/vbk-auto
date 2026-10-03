@@ -7,7 +7,7 @@ import type {
   TrafficLineVariant,
   TrafficLineWorkflowProgress,
 } from "../../../../shared/contracts-traffic-line.js";
-import { ensureTrafficLineApi } from "./main.js";
+import { ensureTrafficLineApi, isUnavailableTrafficResourceFailure } from "./main.js";
 import type { TrafficLinePage } from "./client.js";
 import type { TrafficLineStationDisambiguator } from "./endpoints.js";
 
@@ -126,7 +126,10 @@ export async function ensureTrafficLinePhase({
   log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
   const skipped = result.skipped ?? [];
   const confirmedAvailable = new Set(executableConfig.availability?.availableVariants ?? []);
-  const unresolvedAvailable = skipped.filter((item) => confirmedAvailable.has(item.variant));
+  // 端点存在不等于当前班期有可售资源；平台明确无资源时保留
+  // skipped 证据并继续母产品预检，会话/保存/回读失败仍必须阻断。
+  const unresolvedAvailable = skipped.filter((item) => confirmedAvailable.has(item.variant)
+    && !isUnavailableTrafficResourceFailure(item.reason, item.variant));
   if (unresolvedAvailable.length) {
     const reason = unresolvedAvailable.map((item) => `${item.variant}=${item.reason}`).join("；");
     progress = { ...progress, failureReason: reason, verifiedAt: undefined };

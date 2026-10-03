@@ -1,9 +1,11 @@
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import {
   getProductSegmentsApi,
+  initializeResourceSegmentsDraftApi,
   saveProductSegmentApi,
   segmentsFromPayload,
 } from "./vehicle-resource-api.js";
+import { unchangedResourceSegments } from "./resource-segment-readback.js";
 
 type Candidate = { hotelId: number; hotelName: string };
 type ResourceSegment = { day: number; segmentId: string; candidates: Candidate[] };
@@ -28,33 +30,82 @@ export async function syncCtripHotelResources(args: {
   if (dailyCandidates.some((daily) => !findSegment(payload, daily.segmentId))) {
     resolvedCandidates = remapCandidatesToCurrentLodgingSegments(payload, dailyCandidates);
   }
+  const originalSegments = segmentsFromPayload(payload);
+  const slots = resolvedCandidates.map((daily) => originalSegments.findIndex((segment: any) => String(segment.segmentId) === daily.segmentId));
+  const slotKeys = originalSegments.map(lodgingSlotKey);
+  const remapSlots = () => {
+    const currentSegments = segmentsFromPayload(payload);
+    if (currentSegments.length !== originalSegments.length
+      || currentSegments.some((item: any, slot: number) => lodgingSlotKey(item) !== slotKeys[slot])) {
+      throw new Error("酒店资源保存后住宿段结构发生变化，停止继续绑定酒店");
+    }
+    resolvedCandidates = resolvedCandidates.map((item, position) => ({
+      ...item, segmentId: String(currentSegments[slots[position]!]!.segmentId),
+    }));
+    for (let position = 0; position < days.length; position += 1) {
+      days[position]!.segmentId = resolvedCandidates[position]!.segmentId;
+    }
+  };
+  const restoreDraft = async () => {
+    const restored = await initializeResourceSegmentsDraftApi(page, productId);
+    if (!unchangedResourceSegments(payload, restored)) {
+      throw new Error("VBK 资源草稿恢复后内容发生变化，停止酒店写入并保留已保存内容");
+    }
+    payload = restored;
+    remapSlots();
+  };
   let changed = false;
   const days: Array<{ day: number; segmentId: string; resourceHotelIds: number[]; addedHotelIds: number[] }> = [];
 
-  for (const daily of resolvedCandidates) {
+  for (let index = 0; index < resolvedCandidates.length; index += 1) {
+    const daily = resolvedCandidates[index]!;
     const ids = candidateIds(daily);
     let segment = findSegment(payload, daily.segmentId);
     if (!segment) throw new Error(`酒店资源接口回读未找到行程段：${daily.segmentId}`);
 
     const before = hotelIdsFromSegment(segment);
     if (!sameHotelSet(before, ids) || !hasDesiredCandidateOrder(segment, daily.candidates)) {
-      await saveProductSegmentApi(page, {
-        ...segment,
-        hotel: {
-          ...(asRecord(segment.hotel) ?? {}),
-          segmentRooms: daily.candidates.map((candidate, index, all) => hotelRoom(candidate, index, all.length)),
-        },
-      }, "VBK 指定酒店资源保存");
+      // saveSegment 可能提交当前草稿。每一段都独立检查可写草稿，恢复时以
+      // 上一次权威回读为基线，不能把本轮前面已保存的酒店误判为外部变化。
+      if (!Array.isArray(asRecord(payload)?.draftProductSegments?.segments)) await restoreDraft();
+      const save = async () => {
+        segment = findSegment(payload, resolvedCandidates[index]!.segmentId);
+        if (!segment) throw new Error("酒店资源草稿恢复后未找到目标住宿段");
+        await saveProductSegmentApi(page, {
+          ...segment,
+          hotel: {
+            ...(asRecord(segment.hotel) ?? {}),
+            segmentRooms: daily.candidates.map((candidate, index, all) => hotelRoom(candidate, index, all.length)),
+          },
+        }, "VBK 指定酒店资源保存");
+      };
+      try {
+        await save();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/20016116|产品还没有创建草稿/.test(message)) throw error;
+        const afterFailure = await getProductSegmentsApi(page, productId);
+        if (!unchangedResourceSegments(payload, afterFailure)) {
+          throw new Error("VBK 指定酒店资源保存结果不确定：本次保存前后资源内容发生变化，停止重试并保留已保存内容");
+        }
+        payload = afterFailure;
+        await restoreDraft();
+        await save();
+      }
       changed = true;
+      // saveSegment can renumber the whole draft and reuse an earlier ID.
+      // Refresh every slot before the next write, even when that old ID exists.
+      payload = await getProductSegmentsApi(page, productId);
+      remapSlots();
     }
     days.push({
       day: daily.day,
-      segmentId: daily.segmentId,
+      segmentId: resolvedCandidates[index]!.segmentId,
       resourceHotelIds: ids,
       addedHotelIds: ids.filter((id) => !before.includes(id)),
     });
   }
-  payload = await getProductSegmentsApi(page, productId);
+  if (!changed) payload = await getProductSegmentsApi(page, productId);
   for (const daily of resolvedCandidates) {
     const expected = candidateIds(daily);
     const actual = hotelIdsFromSegment(findSegment(payload, daily.segmentId));
@@ -63,6 +114,11 @@ export async function syncCtripHotelResources(args: {
     }
   }
   return { days, verified: true, via: changed ? "saveSegment-api" : "getSegments-api" };
+}
+
+function lodgingSlotKey(segment: any): string {
+  const base = segment?.segmentBase ?? {};
+  return JSON.stringify([base.stayNights, base.segmentNumber, base.destinationCity]);
 }
 
 function candidateIds(daily: ResourceSegment) {

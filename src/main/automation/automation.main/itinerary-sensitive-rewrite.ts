@@ -7,6 +7,7 @@
  *  - 只校验命中的 day.description 或 spots[].description 是否去掉了命中词；
  *  - 不允许修改行程天数、景点、酒店、餐食、POI 身份或排序。
  */
+import { extractSensitiveWords } from "../../../shared/sensitive-words.js";
 import type { AiResponse, ProductSummary } from "../../../shared/contracts.js";
 import { buildVbkCopyPolicyPrompt, findVbkCopyBadCase } from "../../planning/vbk-copy-policy.js";
 import type { ProductItineraryDay } from "../ctrip/itinerary-api/itinerary-transform.js";
@@ -25,29 +26,7 @@ function readItineraryDescription(product: ProductWithItinerary, path: Itinerary
   return spotIndex === undefined ? day?.description : day?.spots?.[Number(spotIndex)]?.description;
 }
 
-function sanitizeWord(word: string): string {
-  return word
-    .replace(/^\s*["“”‘’'`]+/, "")
-    .replace(/["“”‘’'`]+\s*$/, "")
-    .replace(/[；;。.,，、]+/g, "")
-    .trim();
-}
-
-export function extractSensitiveWords(message: string): string[] {
-  if (typeof message !== "string") return [];
-  // 先取到“请修改/请更换”等平台提示之前，再按顿号/逗号拆词；
-  // 否则全角顿号会被当作一次完整匹配的结束，后续词不会进入 matchAll。
-  const hits = [...message.matchAll(/非法(?:词|关键词)[：:]\s*([^。\n]+?)(?=\s*(?:[，,、;；]\s*请|[。\n]|$))/g)];
-  const raw = hits.flatMap((match) => {
-    const words = match[1]?.split(/[、,，;；]/) ?? [];
-    return words.map(sanitizeWord).filter(Boolean);
-  });
-  const uniq: string[] = [];
-  for (const word of raw) {
-    if (!uniq.includes(word)) uniq.push(word);
-  }
-  return uniq;
-}
+export { extractSensitiveWords };
 
 export function findSensitiveItineraryPaths(
   product: ProductWithItinerary,

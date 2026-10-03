@@ -8,10 +8,9 @@
  *     负责尝试 → advisor → 决策；
  *   - cancelled 由 AutomationCancelledError 短路，failed 落库 blocked 状态。
  *
- * 设计偏好：每次 recovery 重试前先刷新当前 phase 的编辑页，再重新执行 handler，
- * 避免图片 / 富文本等 VBK 页面脏状态泄漏到下一轮。
+ * API 阶段使用登录会话与明确的产品 ID；页面仅在回读后同步显示。
+ * 手动封面上传依赖编辑页，必须在执行前完成导航。
  */
-
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
 import { prepareBackfilledPhaseRecovery, preparePhaseRetry, prepareQueuedPhaseResume } from "../phase-retry.js";
@@ -26,6 +25,7 @@ import {
   saveScreenshot,
 } from "../ctrip/ctrip.js";
 import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
+import { resourceRecoveryPhases, resourcePhaseHandlers, completeUnsupportedVehiclePhase } from "./automation.main.resource-handlers.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
@@ -39,18 +39,14 @@ import {
   isProductLineResolutionError,
 } from "../ctrip/basic-info/api.js";
 import { configureProductShellApi } from "../ctrip/sale-control/api.js";
-import { ensureHotelResourceApi } from "../ctrip/hotel-resource-api.js";
 import { runProductPreflightApi } from "../ctrip/preflight-api.js";
-import { ensureVehicleResourceApi } from "../ctrip/vehicle-resource-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { AutomationRun, ContactCardSelection } from "../../../shared/contracts.js";
 import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { completeVerifiedSaleControlPhase, initializeAutomationStartPhase } from "./automation.main.run-state.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
-import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
 import { writeAutomationProduct } from "./automation.main.persist.js";
-import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 import { inspectManualCoverAsset } from "../manual-cover-asset.js";
 import { readActiveCoverFallback, placeholderDraftOnly } from "../../../shared/cover-fallback.js";
 import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
@@ -68,6 +64,8 @@ import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
 export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
     const productDetail = ctx.db.getProduct(localProductId);
     if (!productDetail) throw new Error("产品不存在");
+    const readOnlyItineraryRecovery = retryFrom === "itinerary"
+      && /VBK 行程关联保存.*超时/u.test(productDetail.automation?.recovery?.phases?.itinerary?.finalError ?? "");
     const normalizedProductType = normalizeUnsupportedProductTypeBeforeShell(
       productDetail.product,
       productDetail.productId,
@@ -90,7 +88,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     // product JSON 里的「管家联系人」是 basic 阶段实际依赖的来源；创建产品时
     // 已从账号固定信息固化进去，自动化阶段不再回读账号 butlerName，避免账号
     // 后续改动覆盖当前产品负责人。400 电话仍来自账号固定信息。
-    const draftPhases = draftPhasesFor(product);
+    const draftPhases = resourceRecoveryPhases(product, draftPhasesFor(product), productDetail.automation, retryFrom);
     const startIndex = retryFrom ? draftPhases.indexOf(retryFrom) : 0;
     if (retryFrom && startIndex < 0) throw new Error(`当前产品没有阶段：${retryFrom}`);
     if (retryFrom && !productDetail.productId) throw new Error("远程草稿尚未创建，不能从中间阶段重试。");
@@ -174,9 +172,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         if (!productId) throw new Error("产品 ID 缺失，无法继续后续阶段。");
         log(`产品基本信息阶段开始：${productId}`);
       } else {
-        // 中间阶段重试复用当前登录会话，并用显式 productId 先进入对应模块页，
-        // 再调用 API；不依赖上一轮遗留的编辑器 URL 或当前 tab。
-        log(`已从 ${retryFrom} 阶段继续录入（将进入对应模块页面）`);
+        // 中间阶段重试使用显式 productId，不依赖上一轮编辑器 URL。
+        log(`已从 ${retryFrom} 阶段继续录入（通过 API 保存并回读）`);
       }
 
       // 每个 phase 处理器共享一份 productId 闭包，并独立被 runPhaseWithRecovery 包裹。
@@ -203,6 +200,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
             isPageVisible: () => ctx.browser.isVisible(),
             ensureBrowserHasBounds: ctx.ensureBrowserHasBounds,
             navigate: (url) => ctx.browser.navigate(url),
+            requiresPhasePage: phase === "presentation" && product.presentation?.cover?.source === "manualUpload",
             executeApi,
           });
         }, phase);
@@ -274,61 +272,21 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
             log,
             executeItinerary: () => fillItineraryDraftApi(page, product, {
               disambiguator: ctx.disambiguator,
+              readOnlyBeforeWrite: readOnlyItineraryRecovery,
               productId,
             }),
             dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
           })),
         package: () => executePhase("package", () => ensurePackageApi(page, product, productId!)),
-        pricingInventory: () => executePhase("pricingInventory", () => ensurePricingInventoryApi(page, product, productId!)),
+        pricingInventory: () => executePhase("pricingInventory", () => ensurePricingInventoryApi(page, product, productId!, {
+          onProgress: (message, level) => log(message, level),
+        })),
         terms: () => executePhase("terms", () => fillAndSaveTerms(page, product, productId)),
-        hotelResource: () => executePhase("hotelResource", async () => {
-          const result = await ensureHotelResourceApi(page, product, productId!);
-          if ("source" in result && result.source === "ctrip" && result.verified === true) {
-            const operations = product.operations!;
-            operations.hotelResource = {
-              source: "ctrip",
-              resourceName: result.resourceName ?? String(product.itinerary.find((day) => Boolean(day.hotel))?.hotel ?? "酒店资源"),
-              hotelTier: result.hotelTier,
-              diamond: result.diamond as 3 | 4 | 5,
-              candidates: product.itinerary.find((day) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
-              dailyCandidates: result.dailyCandidates,
-            };
-            writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "automating");
-          }
-          return result;
-        }),
-        vehicleResource: () => executePhase("vehicleResource", () => ensureVehicleResourceApi(page, product, productId!)),
-        trafficLine: () => executePhase("trafficLine", () => {
-          return ensureTrafficLinePhase({
-            page,
-            parentProductId: productId!,
-            config: product.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
-            itinerary: product.itinerary,
-            log,
-            checkpoint: run.trafficLine,
-            onCheckpoint: (checkpoint) => {
-              run.trafficLine = checkpoint;
-              for (const child of checkpoint.children) {
-                if (child.childProductId) ctx.browser.addPinnedProductId?.(child.childProductId);
-              }
-              persist();
-            },
-            disambiguator: ctx.disambiguator,
-            product,
-          });
-        }),
+        ...resourcePhaseHandlers({ ctx, localProductId, page, product, productId: productId!, run, log, persist, executePhase }),
         preflight: () => executePhase("preflight", () => runProductPreflightApi(page, product, productId!)),
       };
 
-      // 重建 ctx 的 factory：每个阶段都使用同一份 run；同一 runner 第二次进入时
-      // 会重置 attempts（recovery.ts 已保证）。
-      //
-      // productIdExists 每次进入阶段都重新从 DB 读取最新值：basic 阶段成功后
-      // 会通过 setProductId 落库，但若 basic 失败后这一轮被外部（例如 UI
-      // 重试或 orphan recover）触发再次进入，闭包内的本地 productId 仍是
-      // 旧值；从 DB 读能避免 advisor 拿到 stale productIdExists=false 误判
-      // reopen_editor_and_retry_phase。basicInfoSaved 仍走同步读取，因为
-      // 它由本次 runner 在 basic 成功后置位，不会被外部并发覆盖。
+      // 每个阶段共用 run，并从数据库读取最新产品 ID。
       const makeCtx = (phase: string, execute: () => Promise<unknown>, phaseIndex: number): RecoveryContext => {
         const latestProductId = ctx.db.getProduct(localProductId)?.productId;
         return {
@@ -389,6 +347,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           log(`跳过已通过远端回读的阶段：${phase}`);
           continue;
         }
+        if (completeUnsupportedVehiclePhase(product, run, phase, index, log, persist)) continue;
         const handler = handlers[phase];
         if (!handler) throw new Error(`未注册的阶段：${phase}`);
         log(`正在保存：${phase}`);

@@ -44,6 +44,7 @@ export async function readBoundCoverByFileNameViaApi(
 }
 
 interface CoverBindOptions {
+  beforeWrite?: () => Promise<void>;
   confirmationAttempts?: number;
   confirmationIntervalMs?: number;
 }
@@ -123,6 +124,7 @@ export async function bindCtripLibraryAttractionImageViaApi(
     return { reused: true, productId, imageId };
   }
 
+  await options.beforeWrite?.();
   const bindResult = await request(page, {
     endpoint: BIND_PRODUCT_IMAGE_ENDPOINT,
     body: buildImageTypeBindRequest(productId, imageId, ATTRACTION_IMAGE_TYPE_ID),
@@ -170,6 +172,7 @@ export async function bindCtripLibraryCoverViaApi(
     if (!Number.isInteger(oldCoverId) || oldCoverId <= 0) {
       throw new Error("更换封面失败：远端当前封面缺少合法 imageId，已停止写入。");
     }
+    await options.beforeWrite?.();
     const reclassifyResult = await request(page, {
       endpoint: BIND_PRODUCT_IMAGE_ENDPOINT,
       body: buildImageTypeBindRequest(productId, oldCoverId, ATTRACTION_IMAGE_TYPE_ID),
@@ -187,6 +190,7 @@ export async function bindCtripLibraryCoverViaApi(
     reclassifiedOldCoverId = oldCoverId;
   }
 
+  await options.beforeWrite?.();
   const bindResult = await request(page, {
     endpoint: BIND_PRODUCT_IMAGE_ENDPOINT,
     body: buildCoverBindRequest(productId, imageId),

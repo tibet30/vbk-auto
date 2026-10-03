@@ -7,8 +7,9 @@ import {
   buildGroupPricingExpectation,
   matchingGroupPricingDates,
   retryBusyGroupRequest,
-  type GroupPricingExpectation,
 } from "./pricing-group-contract.js";
+import { priceInventorySingleProductBody } from "./pricing-group-submit.js";
+import { submitGroupPricingBatches } from "./pricing-group-batch.js";
 
 export {
   VBK_ASYNC_REQUEST_ACCEPTED_ERROR_CODE,
@@ -137,62 +138,6 @@ function priceInventoryBody(productId: string, item: any, dates: string[], prici
   };
 }
 
-function priceInventorySingleProductBody(
-  productId: string,
-  item: any,
-  dates: string[],
-  pricing: any,
-  expected: GroupPricingExpectation,
-) {
-  const singleResourcePriceInventory = {
-    adultCostPrice: expected.adultCostPrice,
-    adultSalePrice: expected.adultSalePrice,
-    chdCostPrice: expected.childCostPrice,
-    chdSalePrice: expected.childSalePrice,
-    isLimit: "T",
-    isExceed: "F",
-    total: expected.dailyQuota,
-  };
-  const cost = pricing.cost ?? {};
-  const singleSupplementCost = Number(cost.singleSupplement ?? 0);
-  const singleSupplementSale = Number(
-    pricing.singleSupplementSale
-      ?? (singleSupplementCost > 0 && Number(cost.adult) > 0
-        ? Math.ceil(singleSupplementCost * Number(pricing.adult) / Number(cost.adult))
-        : singleSupplementCost),
-  );
-  const unitPrices = expected.units.map((unit) => ({
-    costPrice: unit.costPrice,
-    salePrice: unit.salePrice,
-    unitInfo: { ageBandId: unit.ageBandId, tierId: unit.tierId },
-  }));
-  const body: Record<string, unknown> = {
-    productId: Number(productId) || productId,
-    singleResourceId: item.singleResourceId,
-    optionResourceId: item.optionalResourceId,
-    childOccupationBedResourceId: item.childOccupationBedResourceId,
-    priceTerms: 1,
-    range: "PI",
-    dateChoose: { submitType: "D", dates },
-    priceOperate: "COVER",
-    inventoryOperate: "COVER",
-    singleResourceUnitPriceInventory: {
-      singleResourceUnitPriceDtos: dates.flatMap((date) => unitPrices.map((price) => ({ ...price, date }))),
-      singleResourceInventoryVO: singleResourcePriceInventory,
-    },
-  };
-  if (item.isHotelResource === "T") {
-    body.optionalResourcePriceInventory = {
-      costPrice: singleSupplementCost,
-      salePrice: singleSupplementSale,
-      isLimit: "T",
-      isExceed: "F",
-      total: expected.dailyQuota,
-    };
-  }
-  return body;
-}
-
 async function readMonth(page: any, productId: string, item: any, yearMonth: string) {
   return post(page, "GetBatchOperateSchedule", {
     contentType: "json",
@@ -229,6 +174,7 @@ async function ensureSmallGroupConfig(page: any, product: any, productId: string
 
 interface PricingApiOptions {
   pause?: (milliseconds: number) => Promise<void>;
+  onProgress?: (message: string, level?: "info" | "warning" | "error") => void;
 }
 
 /** 直接调用 Tour Helper 同源协议设置价格、库存，并按日期回读验证。 */
@@ -258,9 +204,9 @@ export async function ensurePricingInventoryApi(
     ? buildGroupPricingExpectation(groupConfig.ageBands, pricing, inventory.dailyQuota)
     : null;
   const pause = options.pause ?? ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
-  // 拼团接口在单次请求包含多个业务日时会重复合并首日 DTO；按日提交虽然
-  // 往返更多，但与 VBK 前端的单日维护协议一致，避免服务端 Duplicate key。
-  const chunkSize = isByGroup ? 1 : 300;
+  // Group pricing uses one four-tier template plus dateChoose, as the supplier
+  // form does; one DTO set per date would create duplicate tier keys.
+  const chunkSize = 300;
   const existingGroupDates = new Set<string>();
   if (isByGroup && groupExpectation) {
     const existingSnapshots = await Promise.all(
@@ -271,24 +217,24 @@ export async function ensurePricingInventoryApi(
   }
   const datesToSubmit = dates.filter((date) => !existingGroupDates.has(date));
   const dateChunks = chunks(datesToSubmit, chunkSize);
+  const months = [...new Set(dates.map((date) => date.slice(0, 7)))];
+  const readRows = async () => {
+    const snapshots = await Promise.all(months.map((month) => readMonth(page, productId, item, month)));
+    return snapshots.flatMap((snapshot: any) => Array.isArray(snapshot?.dates) ? snapshot.dates : []);
+  };
   if (isByGroup && groupExpectation) {
-    for (let index = 0; index < dateChunks.length; index += 1) {
-      const dateChunk = dateChunks[index];
-      await postGroupPriceWhenAvailable(
+    await submitGroupPricingBatches({ dates, remainingDates: datesToSubmit, expected: groupExpectation,
+      submit: (dateChunk) => postGroupPriceWhenAvailable(
         page,
         priceInventorySingleProductBody(productId, item, dateChunk, pricing, groupExpectation),
         pause,
-      );
-      if (index < dateChunks.length - 1) await pause(VBK_GROUP_DAILY_REQUEST_INTERVAL_MS);
-    }
+      ), readRows, pause: () => pause(VBK_GROUP_DAILY_REQUEST_INTERVAL_MS), onProgress: options.onProgress });
   } else {
     for (const dateChunk of dateChunks) {
       await post(page, "savePriceInventory", priceInventoryBody(productId, item, dateChunk, pricing, inventory.dailyQuota), "VBK 价格库存保存");
     }
   }
-  const months = [...new Set(dates.map((date) => date.slice(0, 7)))];
-  const snapshots = await Promise.all(months.map((month) => readMonth(page, productId, item, month)));
-  const rows = snapshots.flatMap((snapshot: any) => Array.isArray(snapshot?.dates) ? snapshot.dates : []);
+  const rows = await readRows();
   const expected = new Set(dates);
   let matchedCount: number;
   if (isByGroup && groupExpectation) {

@@ -1,3 +1,4 @@
+import { getProductBaseInfoApi } from "../basic-info/api.js";
 import {
   vbkSessionRequest,
   type VbkSessionRequestBrowser,
@@ -7,7 +8,7 @@ import { describeVbkFailureDetail } from "../../../infrastructure/vbk-response-e
 import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../../domain/product/features-rich-text.js";
 import { buildRecommendationReasonsPlan, type RecommendationPlanStep } from "./recommendations.js";
 import { readProductIdFromVbkUrl } from "./cover-bind.js";
-import { PresentationSensitiveWordsError } from "./save-monitor.js";
+import { assertNoPresentationRejectedWords } from "./copy-errors.js";
 import { findVbkCopyBadCase } from "../../../planning/vbk-copy-policy.js";
 
 const SOA_15638 = "https://online.ctrip.com/restapi/soa2/15638";
@@ -29,10 +30,16 @@ export interface PresentationApiResult {
   savedWith: "presentation-api";
 }
 
+export interface PresentationSaveOptions {
+  beforeWrite?: () => Promise<void>;
+  reconcile?: boolean;
+}
+
 export async function savePresentationViaApi(
   page: VbkSessionRequestBrowser & { url(): string },
   presentation: any,
   explicitProductId?: number,
+  options: PresentationSaveOptions = {},
 ): Promise<PresentationApiResult> {
   const productId = explicitProductId ?? readProductIdFromVbkUrl(page.url());
   if (!Number.isInteger(productId) || productId <= 0) throw new Error("VBK 产品 ID必须是正整数。");
@@ -46,7 +53,11 @@ export async function savePresentationViaApi(
     loadRecommendationCategories(page),
     loadDescriptionInfo(page, productId),
   ]);
+  if (options.reconcile && descriptionMatches(current, recommendations, featuresHtml)) {
+    return { productId, recommendationCount: current.pmRcmdItems?.length ?? 0, featuresSaved: true, savedWith: "presentation-api" };
+  }
   await checkPresentationSensitiveWords(page, productId, presentation, recommendations, featuresHtml);
+  await options.beforeWrite?.();
   await createDescriptionDraft(page, productId);
 
   const pmRcmdItems = buildPmRcmdItems(recommendations, categoryMap, current.pmRcmdItems ?? []);
@@ -65,11 +76,23 @@ export async function savePresentationViaApi(
       addInfoCode: current.addInfoCode,
     },
   };
-  const saveResult = await request(page, {
-    endpoint: `${SOA_15638}/savedescriptioninfo`,
-    body,
-    errorLabel: "产品图文接口保存",
-  });
+  await options.beforeWrite?.();
+  let saveResult: VbkSessionRequestResult;
+  try {
+    saveResult = await request(page, {
+      endpoint: `${SOA_15638}/savedescriptioninfo`, body, errorLabel: "产品图文接口保存",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/响应丢失|超时|timeout|failed to fetch|fetch failed|ECONN|Target.*closed|Execution context.*destroyed/i.test(message)) throw error;
+    // 响应丢失可能发生在写入之后。先回读，不能未经核对就重复写入。
+    const saved = await loadDescriptionInfo(page, productId).catch(() => null);
+    if (saved && descriptionMatches(saved, recommendations, featuresHtml)) {
+      return { productId, recommendationCount: saved.pmRcmdItems?.length ?? 0, featuresSaved: true, savedWith: "presentation-api" };
+    }
+    throw error;
+  }
+  assertNoPresentationRejectedWords(saveResult, "savedescriptioninfo");
   assertSaveSuccess(saveResult, "产品图文接口保存");
 
   const saved = await confirmDescriptionInfo(page, productId, recommendations, featuresHtml);
@@ -134,13 +157,20 @@ async function checkPresentationSensitiveWords(
     ...recommendations.map((item) => item.text),
   ].map(text).filter(Boolean).join("\n");
   if (!content) return;
+  const base = await getProductBaseInfoApi(page, String(productId));
+  const sale = asRecord(base.saleControlInfo);
+  const categoryId = Number(sale?.pICategoryId);
+  const locale = text(sale?.inputLocale);
+  if (!Number.isInteger(categoryId) || categoryId <= 0 || !locale) {
+    throw new Error("产品图文敏感词检查缺少已保存的产品分类或语言，已停止提交。");
+  }
   const result = await request(page, {
     endpoint: `${SOA_15638}/checkSensitiveWord`,
-    body: { content, productId },
+    body: { content, productId, categoryId, requestBaseData: { locale } },
     errorLabel: "产品图文敏感词检查",
   });
-  const words = readSensitiveWords(result.payload);
-  if (words.length > 0) throw new PresentationSensitiveWordsError(words, result.status);
+  assertNoPresentationRejectedWords(result, "checkSensitiveWord");
+  assertAckSuccess(result, "产品图文敏感词检查");
 }
 
 async function createDescriptionDraft(page: VbkSessionRequestBrowser, productId: number): Promise<void> {
@@ -186,10 +216,18 @@ async function confirmDescriptionInfo(
   }
   const savedText = productFeaturesPlainText(saved.productDesc?.productDesc);
   const expectedText = productFeaturesPlainText(featuresHtml);
-  if (!savedText.includes(expectedText.slice(0, Math.min(40, expectedText.length)))) {
+  if (normalizeCopy(savedText) !== normalizeCopy(expectedText)) {
     throw new Error("产品图文产品特色回读不一致：接口保存后未读到目标富文本。");
   }
   return saved;
+}
+
+function normalizeCopy(value: string): string { return value.replace(/\s+/g, "").trim(); }
+
+function descriptionMatches(saved: ProductDescriptionInfo, recommendations: RecommendationPlanStep[], featuresHtml: string): boolean {
+  const items = saved.pmRcmdItems ?? [];
+  return recommendations.every(expected => items.some(item => text(item.rcmdDesc) === expected.text.trim()))
+    && normalizeCopy(productFeaturesPlainText(saved.productDesc?.productDesc)) === normalizeCopy(productFeaturesPlainText(featuresHtml));
 }
 
 async function request(
@@ -230,11 +268,6 @@ function assertAckSuccess(result: VbkSessionRequestResult, label: string): void 
       || text(payload?.message);
     throw new Error(`${label}失败：Ack=${ack}${detail ? `：${detail}` : ""}`);
   }
-}
-
-function readSensitiveWords(payload: unknown): string[] {
-  const raw = asRecord(payload)?.sensitiveWords ?? asRecord(payload)?.SensitiveWords ?? [];
-  return Array.isArray(raw) ? raw.map(text).filter(Boolean) : [];
 }
 
 function asRecord(value: unknown): Record<string, any> | null {

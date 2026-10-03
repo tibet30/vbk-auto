@@ -2,7 +2,7 @@
  * 自动化「单阶段重新执行」入口：runOnePhase。
  *   - 仅重跑指定 phase，其它阶段保留原状态（不全清）；
  *   - 调用 prepareSinglePhaseRetry 准备新 AutomationRun，run.status 临时变 running；
- *   - recovery 重试前会刷新目标阶段页，避免沿用上轮脏 DOM；
+ *   - API 保存与回读不依赖目标页；交互式封面上传仍先进入编辑页；
  *   - 完成后保留原有 completed / cancelled 语义；若修复了最后一个失败阶段但
  *     仍有后续 pending 阶段，则切为 queued，允许从断点继续。
  */
@@ -138,6 +138,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             isPageVisible: () => ctx.browser.isVisible(),
             ensureBrowserHasBounds: ctx.ensureBrowserHasBounds,
             navigate: (url) => ctx.browser.navigate(url),
+            requiresPhasePage: phase === "presentation" && productData.presentation?.cover?.source === "manualUpload",
             executeApi,
           });
         }, phase);

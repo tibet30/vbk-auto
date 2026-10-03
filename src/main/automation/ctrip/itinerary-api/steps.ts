@@ -25,6 +25,8 @@ export interface FetchTourInfoIdResult {
   /** 行程模板 ID（空产品 / 新建行程时用于 getDailyTemplateDetail）。缺省值由 orchestrator 决定（默认 3）。 */
   templateId?: number;
   isNew: boolean;
+  /** True only when the server returned an empty association list. */
+  emptyAssociation?: boolean;
 }
 
 /** 空产品默认模板 ID：tourInfoList 响应未带 templateId 时使用。 */
@@ -53,7 +55,8 @@ export async function fetchTourInfoId(page: ApiPage, productId: string): Promise
   );
   const rootTemplateIdRaw = (payload as { templateId?: unknown })?.templateId;
   const rootTemplateId = parseTemplateId(rootTemplateIdRaw);
-  const tourInfos = Array.isArray(payload?.tourInfos) ? payload.tourInfos as Array<Record<string, unknown>> : [];
+  if (!Array.isArray(payload?.tourInfos)) throw new Error("VBK 行程关联查询响应缺 tourInfos，未判定为首建空草稿。");
+  const tourInfos = payload.tourInfos as Array<Record<string, unknown>>;
   if (!tourInfos.length) {
     return {
       tourInfo: {
@@ -69,6 +72,7 @@ export async function fetchTourInfoId(page: ApiPage, productId: string): Promise
       tourInfoId: 0,
       templateId: rootTemplateId,
       isNew: true,
+      emptyAssociation: true,
     };
   }
   const first = tourInfos[0];
@@ -97,8 +101,7 @@ export interface FetchDailyTemplateDetailResult {
 
 /**
  * getDailyTemplateDetail：拉取空产品 / 新建行程用的模板结构。
- *  - 历史新建行程辅助：当前母产品草稿写入没有关联 draft/preview 时会
- *    fail closed，不使用本模板路径猜测版本协议；
+ *  - 仅服务端明确返回空关联列表时使用此首建模板；未知版本关系 fail closed；
  *  - requestHeader.locale 必须 zh-CN（与 getTourDailyDetail 保持一致）；
  *  - templateId 来自 getProductTourInfoList 响应，缺省 3；
  *  - contentType 必须 "json"（与 calculateTourInfoScore 同型）。
@@ -200,6 +203,7 @@ export async function checkTourDailyStep(
   tourDailyText: string,
   saveType: 2 | 8 | 3,
   label: string,
+  onProductTourInfo?: (relation: Record<string, unknown> | undefined) => void,
 ): Promise<Record<string, unknown>> {
   const { payload } = await postSoa(
     page,
@@ -213,6 +217,7 @@ export async function checkTourDailyStep(
     },
     label,
   );
+  onProductTourInfo?.(asRecord(payload.productTourInfo));
   const raw = payload?.tourDaily;
   if (!raw) {
     throw new Error(`${label}响应缺 tourDaily 字段`);

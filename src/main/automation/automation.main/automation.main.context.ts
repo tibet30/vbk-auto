@@ -31,6 +31,7 @@ export interface ActiveButlerContext {
  */
 export interface AutomationRunContext {
   agentControlled?: boolean;
+  assertWriteAuthorized?: (localProductId: string, phase: string) => Promise<void>;
   db: VbkDatabase;
   browser: VbkBrowser;
   advisor: (req: AdvisorRequest) => Promise<AdvisorOutcome>;

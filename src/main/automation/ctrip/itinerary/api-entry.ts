@@ -24,6 +24,7 @@ import type { ProductItineraryDay, ProductOperations } from "../itinerary-api/it
 
 export interface FillItineraryDraftApiOptions {
   disambiguator?: unknown;
+  readOnlyBeforeWrite?: boolean;
   productId?: string | number;
 }
 
@@ -61,7 +62,7 @@ export async function fillItineraryDraftApi(
     itinerary: product.itinerary,
     operations: product.operations,
     productId: product.productId,
-  }, productId);
+  }, productId, { readOnlyBeforeWrite: options.readOnlyBeforeWrite });
   if (!apiResult?.tourInfoId) {
     throw new Error("行程阶段全量接口保存：ensureItineraryApi 未返回合法 tourInfoId。");
   }

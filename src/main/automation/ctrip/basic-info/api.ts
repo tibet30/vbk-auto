@@ -4,6 +4,7 @@ import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.
 import { listProviderContactCards } from "../../../infrastructure/butler-contacts.js";
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
+import { getProductBaseInfoSaveModel } from "./save-model.js";
 import { normalizeVbkSubtitle } from "./core.js";
 import {
   productLineSaveField,
@@ -107,28 +108,6 @@ export async function getProductBaseInfoApi(page: VbkSessionRequestBrowser, prod
   }, "VBK 基本信息回读");
 }
 
-async function getProductBaseInfoSaveModel(page: VbkSessionRequestBrowser, productId: string): Promise<Json> {
-  return page.evaluate(async (id) => {
-    const response = await fetch(`https://vbooking.ctrip.com/ivbk/vendor/baseInfoMerge?productId=${encodeURIComponent(id)}&from=vbk`, {
-      method: "GET",
-      credentials: "include",
-      headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
-    });
-    if (!response.ok) throw new Error(`VBK 基本信息保存模型读取失败：HTTP ${response.status}`);
-    const html = await response.text();
-    const match = html.match(/window\.__INITIAL_STATE__\s*=\s*(.*)/);
-    if (!match) throw new Error("VBK 基本信息页面缺少 __INITIAL_STATE__");
-    let state: any;
-    try { state = JSON.parse(match[1]); } catch { throw new Error("VBK 基本信息保存模型 JSON 无效"); }
-    const model = state?.productBaseInfo;
-    if (!model || typeof model !== "object") throw new Error("VBK 基本信息页面缺少 productBaseInfo 保存模型");
-    return {
-      ...model,
-      resourceFields: state?.resourceFields ?? {},
-      localInfoDtos: state?.localInfoDtos ?? [],
-    };
-  }, productId);
-}
 
 async function resolveCity(page: VbkSessionRequestBrowser, cityName: string): Promise<Json> {
   const payload = await post(page, "suggestDepartureCity", { keyword: cityName }, "VBK 城市查询");

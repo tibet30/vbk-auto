@@ -18,6 +18,7 @@
 
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { RECOMMENDATION_CATEGORIES, manualUploadCoverSchema } from "./schema/schema-definitions.js";
+import { hasValidVbkRecommendationLength } from "../planning/vbk-recommendation-length.js";
 import { readCover } from "../operations/cover-info.js";
 import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cover-fallback.js";
@@ -43,6 +44,7 @@ export function isRecommendationItemValid(value: unknown): boolean {
   const category = textValue(record.category);
   const text = textValue(record.text);
   if (!category || !text) return false;
+  if (!hasValidVbkRecommendationLength(text)) return false;
   return (RECOMMENDATION_CATEGORIES as readonly string[]).includes(category);
 }
 

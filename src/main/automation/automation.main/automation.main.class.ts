@@ -1,3 +1,4 @@
+import { runAutomationExclusive } from "./automation.main.execution.js";
 import { approvalForRun } from "../../agent/integration-gates.js";
 /**
  * DraftAutomation：自动化阶段对外暴露的统一门面类。
@@ -8,6 +9,7 @@ import { approvalForRun } from "../../agent/integration-gates.js";
  * 调用方（IPC handler）只需要 new DraftAutomation(...) 即可获得 dashboard 需要的全部方法。
  */
 
+import { makeAutomationRunContext } from "./automation.main.make-context.js";
 import { AutomationRunContext } from "./automation.main.context.js";
 import { runAutomation as runAutomationFlow } from "./automation.main.run.js";
 import { runOnePhase as runOnePhaseFlow } from "./automation.main.run-one.js";
@@ -15,7 +17,7 @@ import { productNotFound } from "../../infrastructure/db-errors.js";
 import { VbkDatabase } from "../../infrastructure/database/database.js";
 import { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ProductDetail } from "../../../shared/contracts.js";
-import { ensureBrowserHasBounds, markCancelled, resolveActiveButlerContext, resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
+import { resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
@@ -26,22 +28,10 @@ import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { needsTrafficLineBackfill } from "../traffic-line-backfill.js";
+import { isVerifiedAutomationComplete } from "./automation.main.resume-phase.js";
 
-export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
-  if (run?.status !== "failed") return undefined;
-  const phases = [run.currentPhase, ...run.phases.map((phase) => phase.phase)]
-    .filter((phase): phase is string => Boolean(phase));
-  return phases.find((phase) =>
-    run.recovery?.phases[phase]?.finalError === "应用重启导致自动录入被中断");
-}
-
-export function failedAutomationResumePhase(run?: AutomationRun): string | undefined {
-  if (run?.status !== "failed") return undefined;
-  const needsUser = run.recovery
-    ? Object.values(run.recovery.phases).find((phase) => phase.state === "needs_user")?.phase
-    : undefined;
-  return needsUser ?? run.phases.find((phase) => phase.status === "failed")?.phase;
-}
+import { interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
+export { interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
 
 /**
  * The write guard runs before `configureProductShellApi`, yet a rejected
@@ -171,6 +161,7 @@ async start(localProductId: string) {
     const run = product.automation;
     if (!run || run.status !== "running") return;
     this.cancellationRequested.add(localProductId);
+    this.db.executionClock?.setEnabled(localProductId, false, "automation");
 
     // 即时更新 UI：把 run 切成 cancelled。runner 也会再写一次最终状态，
     // 这里先落盘让「停止」点击立刻可见，无需等待下一个 checkpoint。
@@ -253,9 +244,7 @@ isCancelRequested(localProductId: string): boolean {
   }
 
   /**
-   * Final approval transfers control to this deterministic runner. It derives
-   * the phase order from the already-approved product and never calls the
-   * Agent/model to choose a phase or a retry action.
+   * Final approval transfers phase ordering and recovery to this deterministic runner.
    */
   async executeApprovedWorkflow(localProductId: string): Promise<void> {
     const product = this.db.getProduct(localProductId);
@@ -265,17 +254,25 @@ isCancelRequested(localProductId: string): boolean {
     if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
     const approval = approvalForRun(agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
-    if (needsTrafficLineBackfill(product)) {
+    if (isVerifiedAutomationComplete(product)) return;
+    const fullReplay = approval.replayOfAutomationRunId === product.automation?.id && Boolean(product.automation?.id);
+    if (!fullReplay && needsTrafficLineBackfill(product)) {
       await this.runOnePhaseLocked(localProductId, "trafficLine");
       await this.runOnePhaseLocked(localProductId, "preflight");
       return;
     }
-    const retryFrom = approvedRecoveryStartPhase(product, failedAutomationResumePhase(product.automation));
+    const retryFrom = fullReplay ? undefined : approvedRecoveryStartPhase(product, failedAutomationResumePhase(product.automation));
     const restartPreWriteGuardFailure = canRestartPreWriteAuthorizationFailure(product.automation, product.productId);
-    if (product.automation?.status === "failed" && !retryFrom && !restartPreWriteGuardFailure) {
+    if (product.automation?.status === "failed" && !retryFrom && !restartPreWriteGuardFailure && !fullReplay) {
       throw new Error("当前失败记录没有可安全恢复的阶段，需先进行权威核查。");
     }
     await this.runApprovedLocked(localProductId, retryFrom);
+    const result = this.db.getProduct(localProductId)?.automation;
+    if (result?.status !== "succeeded") {
+      const phase = result?.currentPhase;
+      const failure = phase && result?.recovery?.phases[phase]?.finalError;
+      throw new Error(failure || `自动录入未完成：${phase ?? result?.status ?? "缺少执行记录"}`);
+    }
   }
 
   /** 保留失败的不可改型远端草稿，重置本地绑定以创建新的可用替代草稿。 */
@@ -299,33 +296,13 @@ isCancelRequested(localProductId: string): boolean {
   }
 
   private runContext(localProductId?: string, phase?: string): AutomationRunContext {
-    const agentControlled = Boolean(localProductId && this.agentWriteGuard);
-    return {
-      db: this.db,
-      browser: this.browser,
-      agentControlled,
-      advisor: agentControlled ? async () => ({summary:"阶段未完成",rootCause:"等待 Agent 根据执行结果决定后续动作",action:"wait_for_user",expectedEvidence:"权威回读结果",userInstruction:"已将错误返回 Agent，未在工具内部重复写入。"}) : this.advisor,
-      presentationCopyRewriter: this.presentationCopyRewriter,
-      disambiguator: this.disambiguator,
-      resolveActiveButlerContext: (accountName) => resolveActiveButlerContext(this.db, accountName),
-      emit: (localProductId) => this.emit(localProductId),
-      markCancelled: (_localProductId, run, persist) => markCancelled(run, persist),
-      cancellationRequested: this.cancellationRequested,
-      ensureBrowserHasBounds: () => ensureBrowserHasBounds(this.browser),
-      persistProduct: (id, product, status) => {
-        if (this.productMutations) {
-          this.productMutations.replace(id, product, { status, notify: false });
-          return;
-        }
-        this.db.updateProduct(id, product, status);
-      },
-      runVbkPageExclusive: (task, executingPhase) => this.runVbkPageExclusive(async () => {
-        if (localProductId && executingPhase && this.agentWriteGuard) {
-          await this.agentWriteGuard(localProductId, executingPhase);
-        }
-        return task();
-      }),
-    };
+    return makeAutomationRunContext({
+      db: this.db, browser: this.browser, emit: id => this.emit(id),
+      localProductId, guard: this.agentWriteGuard, mutations: this.productMutations,
+      advisor: this.advisor, presentationCopyRewriter: this.presentationCopyRewriter,
+      disambiguator: this.disambiguator, cancellationRequested: this.cancellationRequested,
+      exclusive: task => this.runVbkPageExclusive(task),
+    });
   }
 
   private async run(localProductId: string, retryFrom?: string) {
@@ -349,59 +326,26 @@ isCancelRequested(localProductId: string): boolean {
  */
 private async runLocked(localProductId: string, retryFrom?: string) {
     if (this.agentWriteGuard) throw new Error("请通过 Agent 最终确认后按模块录入。");
-    if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
-    this.running.add(localProductId);
-
-    // 清理上一轮可能的取消信号 —— stop() 会写进 cancellationRequested，但
-    // run 结束后 finally 会清理；保险起见重入前再清一次。
-    this.cancellationRequested.delete(localProductId);
-
-    try {
-      await this.withNavigationPin(localProductId, () => this.run(localProductId, retryFrom));
-    } finally {
-      this.running.delete(localProductId);
-    }
+    return this.runExclusive(localProductId, () => this.run(localProductId, retryFrom));
   }
 
   private async runApprovedLocked(localProductId: string, retryFrom?: string) {
-    if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
-    this.running.add(localProductId);
-    this.cancellationRequested.delete(localProductId);
-    try {
-      await this.withNavigationPin(localProductId, () => this.runApproved(localProductId, retryFrom));
-    } finally {
-      this.running.delete(localProductId);
-      this.cancellationRequested.delete(localProductId);
-    }
+    return this.runExclusive(localProductId, () => this.runApproved(localProductId, retryFrom));
   }
 
-/**
- * 单阶段重跑互斥包装：与 runLocked 同型，仅不依赖 retryFrom，多清一次 cancellationRequested。
- */
   private async runOnePhaseLocked(localProductId: string, phaseName: string) {
-    if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
-    this.running.add(localProductId);
-    this.cancellationRequested.delete(localProductId);
-
-    try {
-      await this.withNavigationPin(localProductId, () => this.runOnePhase(localProductId, phaseName));
-    } finally {
-      this.running.delete(localProductId);
-      this.cancellationRequested.delete(localProductId);
-    }
+    return this.runExclusive(localProductId, () => this.runOnePhase(localProductId, phaseName));
   }
 
   private async runSaleControlLocked(localProductId: string) {
-    if (this.running.has(localProductId)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
-    this.running.add(localProductId);
-    this.cancellationRequested.delete(localProductId);
+    return this.runExclusive(localProductId, () => this.runSaleControl(localProductId));
+  }
 
-    try {
-      await this.withNavigationPin(localProductId, () => this.runSaleControl(localProductId));
-    } finally {
-      this.running.delete(localProductId);
-      this.cancellationRequested.delete(localProductId);
-    }
+  private runExclusive<T>(localProductId: string, work: () => Promise<T>) {
+    return runAutomationExclusive({
+      localProductId, running: this.running, cancellationRequested: this.cancellationRequested,
+      clock: this.db.executionClock, work: () => this.withNavigationPin(localProductId, work),
+    });
   }
 
   private async withNavigationPin<T>(localProductId: string, work: () => Promise<T>): Promise<T> {

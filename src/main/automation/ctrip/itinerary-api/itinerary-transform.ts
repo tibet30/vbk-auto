@@ -19,12 +19,13 @@
 
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
-import { toVbkDailyUseCar, type DailyTransport, type VbkDailyUseCar } from "../../../../shared/product-form.js";
-import { itineraryAttractions, itinerarySpotKind } from "../../../../shared/itinerary-activity-kind.js";
-import type { StationCandidate } from "./station-search.js";
+import { toVbkDailyUseCar } from "../../../../shared/product-form.js";
+import { itineraryAttractions, effectiveItinerarySpotKind } from "../../../../shared/itinerary-activity-kind.js";
+import { effectiveTimedSpots, dayOtherActivities, buildAttractionInfo, dayTimeline, otherDescriptionForActivity } from "./itinerary-timeline.js";
+import type { ProductItineraryDay, ProductOperations, VbkTourDailyDescription, ResolvedStations, ReadbackDayExpectation, ReadbackExpectations } from "./itinerary-types.js";
+export type { ProductItineraryDay, ProductOperations, VbkTourDailyDescription, ResolvedStations, ReadbackDayExpectation, ReadbackExpectations } from "./itinerary-types.js";
 import {
   attractionTicketSuffix,
-  buildAttractionPois,
   buildDropoffInfo,
   buildHotelInfo,
   buildMealInfo,
@@ -35,195 +36,10 @@ import {
 } from "./info-builders.js";
 
 /**
- * 输入：项目侧行程 + operations。
- *   - day 字段：{ day, title, spots, description, hotel, meals, mealDescriptions? }
- *   - spots 字段：{ name, poiName?, poiId?, province?, city?, district? }（poiId 是 VBK 系统 POI 唯一 ID）
- */
-export interface ProductItineraryDay {
-  day: number;
-  title: string;
-  spots?: Array<{
-    name: string;
-    poiName?: string | null;
-    poiId?: number | null;
-    province?: string | null;
-    city?: string | null;
-    district?: string | null;
-    poiType?: { key: number; name: string } | null;
-    ticketType?: { key: number; name: string } | null;
-    poiData?: Record<string, unknown>;
-    /** 景点必须使用 attraction；明确自由活动与其他服务不进入 POI 链路。 */
-    kind?: "attraction" | "free" | "other";
-    description?: string;
-    /** 规划层已按时段排好顺序；缺省时按 spots 顺序均分上午/下午。 */
-    timeOfDay?: "morning" | "afternoon";
-    /** 同一时段内的景点关系：and=全部参观；or=多选一。缺省按 and 录入。 */
-    relation?: "and" | "or";
-  }>;
-  description: string;
-  hotel: string;
-  /** 携程检索得到的同晚候选（最多五家）；写入行程时取前三家形成“或”酒店节点。 */
-  hotelCandidates?: Array<{ hotelName: string }>;
-  meals: string;
-  mealDescriptions?: string[];
-  activities?: Array<{
-    time: string;
-    title: string;
-    detail: string;
-    type?: "transport" | "visit" | "meal" | "hotel" | "free" | "other";
-    durationMinutes?: number;
-    source?: "user" | "ai";
-  }>;
-}
-
-export interface ProductOperations {
-  hotelTier?: string;
-  pickupCity?: string;
-  transport?: DailyTransport;
-  reusePickupForDropoff?: boolean;
-  mealsIncluded?: boolean;
-}
-
-/**
  * 早餐是否包含取决于最终酒店房型，不能依赖旧产品快照是否已有 mealDescriptions。
  * 录入转换是历史产品单阶段重跑的最终入口，必须在这里兜底写入平台餐饮卡片。
  */
 export const HOTEL_ROOM_BREAKFAST_NOTE = "是否含餐，以酒店房型为准。";
-
-/**
- * 输出：VBK 协议 detail.tourInfo.tourDailyDescriptions。
- * 这里只声明外层结构，便于单测做类型断言；具体每个 info 的形状由 builder 构造。
- */
-export interface VbkTourDailyDescription {
-  tourDailyDescriptionId: number | null;
-  orderDay: number;
-  dailyDescription: string;
-  useCar: VbkDailyUseCar;
-  tourDailyLocations: Array<Record<string, unknown>>;
-  tourDailyInfos: Array<Record<string, unknown>>;
-  seaCruise: boolean;
-  subDesc: string;
-  dailyHighlights: unknown[];
-}
-
-/** 接送站（机场/火车）解析结果，由 station-search 返回。 */
-export interface ResolvedStations {
-  /** 接机机场（pickup 当天 airport）；不存在时为 null。 */
-  pickupAir?: StationCandidate | null;
-  /** 接机火车站；不存在时为 null。 */
-  pickupTrain?: StationCandidate | null;
-  /** 送机机场；不存在时为 null。 */
-  dropoffAir?: StationCandidate | null;
-  /** 送机火车站；不存在时为 null。 */
-  dropoffTrain?: StationCandidate | null;
-  /** 是否使用了多选 fallback（如 AI 选中）；用于日志诊断。 */
-  source?: "exact" | "single" | "fallback-first" | "primary-airport" | "ai";
-}
-
-/**
- * 单天回读期望（由 buildReadbackExpectations 生成）。verifyItineraryReadback
- * 会按 orderDay 顺序逐项比对，错误信息含「第 N 天 / 字段 / 期望 / 实际」。
- */
-export interface ReadbackDayExpectation {
-  orderDay: number;
-  title: string;
-  /** 景点 POI 列表（顺序敏感）。 */
-  pois: Array<{ poiId: number; poiName: string; description?: string; suffixKey?: number }>;
-  /** 当日餐饮（顺序敏感：首日午/晚；中间日早/午/晚；尾日早/午）。 */
-  meals: Array<{
-    key: "B" | "L" | "S";
-    description: string;
-    mealsIncluded: boolean;
-  }>;
-  /** 酒店节点（无酒店时为空数组）。 */
-  hotels: Array<{ hotelName: string; hotelTier?: string }>;
-  /** 每天标题下的“当天用车”。 */
-  useCar: VbkDailyUseCar;
-  /** 非景点卡片逐项回读，free/other 的模块类型与顺序均不可混用。 */
-  activities: Array<{ kind: "free" | "other"; description: string; time: string; durationMinutes?: number }>;
-  /** 剔除餐饮、酒店、接送后的业务卡片顺序；用于防止平台把其他活动挪到日末。 */
-  timeline: Array<{ kind: "attraction"; pois: Array<{ poiId: number; poiName: string }> } | { kind: "free" | "other"; description: string; time: string; durationMinutes?: number }>;
-  /** 服务时间（其他节点写入 startOnBoardTime / stopOnBoardTime）。 */
-  serviceTime: { startTime: string; endTime: string };
-}
-
-export interface ReadbackExpectations {
-  days: ReadbackDayExpectation[];
-  /** 接送站（首日接机 / 接站；末日送机 / 送站）。 */
-  pickup: { airport?: { code: string; name: string } | null; train?: { code: string; name: string } | null };
-  dropoff: { airport?: { code: string; name: string } | null; train?: { code: string; name: string } | null };
-  /** 是否有酒店业务（业务要求 → 每天回读必须有酒店节点）。 */
-  requireHotels: boolean;
-}
-
-type TimedSpot = { spot: NonNullable<ProductItineraryDay["spots"]>[number]; kind: "attraction" | "free" | "other"; timeOfDay: "morning" | "afternoon" };
-
-function effectiveTimedSpots(spots: NonNullable<ProductItineraryDay["spots"]>): TimedSpot[] {
-  return spots.map((spot, index) => ({ spot, kind: itinerarySpotKind(spot), timeOfDay: spot.timeOfDay ?? (index < Math.ceil(spots.length / 2) ? "morning" : "afternoon") }));
-}
-
-function dayOtherActivities(day: ProductItineraryDay) {
-  const spotActivities = effectiveTimedSpots(day.spots ?? []).flatMap(({ spot, kind, timeOfDay }) => {
-    if (kind === "attraction") return [];
-    const time = timeOfDay === "morning" ? "上午" : "下午";
-    return [{ time, title: spot.name, detail: spot.description?.trim() || spot.name, type: kind, durationMinutes: undefined, source: "user" as const }];
-  });
-  const legacyActivities = (day.activities ?? []).filter((activity) =>
-    (activity.type === "other" || activity.type === "free")
-      && typeof activity.time === "string" && Boolean(activity.time.trim())
-      && typeof activity.title === "string" && Boolean(activity.title.trim())
-      && typeof activity.detail === "string" && Boolean(activity.detail.trim()));
-  // A migrated product can carry the same activity in the old list and unified spots.
-  return [...spotActivities, ...legacyActivities.filter((activity) => !spotActivities.some((spot) =>
-    spot.title === activity.title && spot.type === activity.type))];
-}
-
-function otherDescription(day: ProductItineraryDay): string {
-  const activities = dayOtherActivities(day);
-  return activities.map((activity) => {
-    const prefix = activity.time && activity.time !== "不限" ? `${activity.time} ` : "";
-    return `${prefix}${activity.title}：${activity.detail}`;
-  }).join("；");
-}
-
-function buildAttractionInfo(spots: NonNullable<ProductItineraryDay["spots"]>, timeOfDay: "morning" | "afternoon", sort: number): Record<string, unknown> {
-  const description = spots.map((spot) => spot.description?.trim()).filter(Boolean).join("；");
-  return {
-    tourDailyInfoId: null, takeoffTime: { key: null, name: timeOfDay === "morning" ? "上午" : "下午" }, takeoffEndTime: { name: "" },
-    activeType: { key: 3, name: "景点" }, sessionTimeType: 0, distance: 0, driveTime: 0, takeTime: 240, takeTimeType: 0,
-    description, productsOnSale: "", specialGift: "", warmTips: "", sort, costInclude: false,
-    tourDailyHotels: [], tourDailyTrains: [], tourDailyFlights: [], tourDailyPois: buildAttractionPois(spots), tourDailyThemes: [],
-    tourDailyPackageGatherList: [], tourDailyPackageDismissList: [], tourDailyDistricts: [], tourDailyPackageFlights: [],
-    tourDailyPackageTrains: [], tourDailyPackageIntermodals: [], tourDailyPackageShips: [], tourDailyPackageHotels: [],
-    startOnBoardTime: "", stopOnBoardTime: "", communication: "", customStatus: 0, arriveTime: "", departTime: "",
-    directionWay: { key: "", name: "" }, recommendActivities: [], pkgProductId: 0, pkgTourInfoId: 0, pkgDayDesc: "", pkgShoppingId: "", versionNum: 0,
-  };
-}
-
-function dayTimeline(day: ProductItineraryDay): ReadbackDayExpectation["timeline"] {
-  const source = effectiveTimedSpots(day.spots ?? []);
-  // Legacy products did not persist a unified activity timeline.  Their old
-  // fixture/card can be checked by checkActivities, but must not become an
-  // unexpected ordering contract during migration.
-  if (!(day.spots ?? []).some((spot) => spot.kind === "attraction" || spot.kind === "free" || spot.kind === "other")) return [];
-  const entries: ReadbackDayExpectation["timeline"] = [];
-  for (let i = 0; i < source.length;) {
-    const entry = source[i]; const { spot, kind } = entry;
-    if (kind !== "attraction") {
-      const time = entry.timeOfDay === "morning" ? "上午" : "下午";
-      entries.push({ kind, description: `${time} ${spot.name}：${spot.description?.trim() || spot.name}`, time });
-      i += 1; continue;
-    }
-    const time = entry.timeOfDay;
-    const run = [spot]; i += 1;
-    while (i < source.length && source[i].kind === "attraction" && source[i].timeOfDay === time) run.push(source[i++].spot);
-    entries.push({ kind: "attraction", pois: run.map((item) => ({ poiId: typeof item.poiId === "number" ? item.poiId : 0, poiName: item.poiName || item.name })) });
-  }
-  for (const activity of dayOtherActivities(day).filter((activity) => !source.some((entry) => entry.spot.name === activity.title && entry.kind === activity.type))) {
-    entries.push({ kind: activity.type === "free" ? "free" : "other", description: otherDescriptionForActivity(activity), time: activity.time, durationMinutes: activity.durationMinutes });
-  }
-  return entries;
-}
 
 /**
  * 把项目侧 day 转成回读期望：title / pois / meals / hotel / 必要时的其他 / serviceTime。
@@ -356,7 +172,7 @@ export function buildDayDescription(args: {
   if (otherActivities.length) {
     // Legacy activities have no unified spots order.  Retain them after migrated
     // timeline entries; new data always supplies its order through spots.
-    for (const activity of otherActivities.filter((activity) => !sourceSpots.some((spot) => spot.name === activity.title && itinerarySpotKind(spot) === activity.type))) {
+    for (const activity of otherActivities.filter((activity) => !sourceSpots.some((spot) => spot.name === activity.title && effectiveItinerarySpotKind(spot) === activity.type))) {
       const args = {
         description: otherDescriptionForActivity(activity), sort: sort++, serviceTime: { startTime: "08:00", endTime: "20:00" },
         activityTime: activity.time, durationMinutes: activity.durationMinutes,
@@ -402,11 +218,6 @@ export function buildDayDescription(args: {
     subDesc: "",
     dailyHighlights: [],
   };
-}
-
-function otherDescriptionForActivity(activity: NonNullable<ProductItineraryDay["activities"]>[number]): string {
-  const prefix = activity.time && activity.time !== "不限" ? `${activity.time} ` : "";
-  return `${prefix}${activity.title}：${activity.detail}`;
 }
 
 type MealType = { key: "B" | "L" | "S"; index: 0 | 1 | 2 };

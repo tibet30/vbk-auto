@@ -1,6 +1,7 @@
 /**
- * API phase page navigation. Every execution enters its target editor page;
- * recovery only records the retry so it cannot race that entry navigation.
+ * API phases use the authenticated session and explicit product ID. Editor
+ * navigation only synchronizes the visible UI after authoritative readback;
+ * interactive operations can explicitly require the editor before execution.
  */
 
 import type { AdvisorAction } from "../../../shared/contracts.js";
@@ -90,11 +91,7 @@ export async function refreshPhasePageAfterApi(args: {
   }
 }
 
-/**
- * 一次阶段执行只在开始时决定是否同步右侧页面。若执行期间用户刚好打开或关闭
- * BrowserView，不能在 API 返回后改用新的可见性状态刷新当前页，否则可能把
- * 用户刚打开的产品列表误刷新；下一阶段会按新的可见性重新做一次完整判断。
- */
+/** 页面同步不决定 API 成败；只有交互式操作必须先进入目标编辑页。 */
 export async function executeApiWithPhasePageSync<T>(args: {
   page: PhasePage;
   productId?: string | null;
@@ -103,6 +100,7 @@ export async function executeApiWithPhasePageSync<T>(args: {
   isPageVisible: () => boolean;
   ensureBrowserHasBounds: () => void;
   navigate: (url: string) => Promise<void>;
+  requiresPhasePage?: boolean;
   executeApi: () => Promise<T>;
 }): Promise<T> {
   const {
@@ -113,21 +111,35 @@ export async function executeApiWithPhasePageSync<T>(args: {
     isPageVisible,
     ensureBrowserHasBounds,
     navigate,
+    requiresPhasePage = false,
     executeApi,
   } = args;
+  if (!productId) throw new Error(`phase=${phase} 缺少产品 ID，无法执行阶段`);
+  const expectedUrl = phasePageUrl(productId, phase);
   const syncPage = isPageVisible();
-  if (syncPage) {
+  if (requiresPhasePage) {
     ensureBrowserHasBounds();
     await enterPhasePageForApi({ page, productId, phase, log, navigate });
   } else {
-    log(`phase=${phase} 后台执行：VBK 页面未打开，跳过页面进入`, "info");
+    log(`phase=${phase} 通过 API 录入：跳过页面进入，使用登录会话与产品 ID`, "info");
   }
 
   const result = await executeApi();
-  if (syncPage) {
-    await refreshPhasePageAfterApi({ page, productId, phase, log });
+  // 用户在执行中关闭页面后，不再导航；执行中刚打开页面也留到下一阶段同步。
+  if (syncPage && isPageVisible()) {
+    try {
+      ensureBrowserHasBounds();
+      if (page.url?.() === expectedUrl) {
+        await refreshPhasePageAfterApi({ page, productId, phase, log });
+      } else {
+        await enterPhasePageForApi({ page, productId, phase, log, navigate });
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      log(`phase=${phase} API 远端回读已确认；页面同步未完成，不影响阶段成功：${reason}`, "warning");
+    }
   } else {
-    log(`phase=${phase} API 远端回读完成：VBK 页面已关闭，跳过页面刷新`, "info");
+    log(`phase=${phase} API 远端回读完成：跳过页面刷新（页面未打开或已关闭）`, "info");
   }
   return result;
 }
@@ -141,7 +153,7 @@ export function recordPhaseRetry(args: {
 }): void {
   const { productId, phase, action, attempt, log } = args;
   log(
-    `phase=${phase} attempt=${attempt} API retry action=${action} productId=${productId ?? "pending"}；下一次执行将在录入前进入模块页面`,
+    `phase=${phase} attempt=${attempt} API retry action=${action} productId=${productId ?? "pending"}；下一次执行由阶段处理器重新调用 API，交互式操作先进入模块页面`,
     "info",
   );
 }

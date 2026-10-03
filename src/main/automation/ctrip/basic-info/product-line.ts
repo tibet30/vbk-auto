@@ -1,3 +1,5 @@
+import { toWritableAdministrativeCityName } from "../../../../shared/region-overrides.js";
+
 type Json = Record<string, any>;
 
 function record(value: unknown): Json {
@@ -32,7 +34,7 @@ export function resolveBasicInfoCityAnchor(product: Json): string {
   }
   const pickupCity = String(record(product.operations).pickupCity ?? "").trim();
   if (pickupCity && PROVINCE_LEVEL_NAMES.has(trimAdministrativeSuffix(meetingCity))) return pickupCity;
-  return meetingCity;
+  return toWritableAdministrativeCityName(meetingCity);
 }
 
 /** 精确城市优先；只有省级范围产品可唯一降级到“省内/全景”线路。 */

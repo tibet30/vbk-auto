@@ -155,14 +155,15 @@ async function selectSearchOption(page, dialog, id, value, description) {
 }
 
 /** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认封面。 */
-export async function selectCtripLibraryCover(page, cover, productId) {
+export async function selectCtripLibraryCover(page, cover, productId, options = {}) {
   const attempts = ctripLibraryCoverAttempts(cover).slice(0, 3);
   const failures = [];
   const attemptedImageIds = [];
   for (const candidate of attempts) {
+    await options.beforeWrite?.();
     attemptedImageIds.push(candidate.imageId);
     try {
-      const result = await bindCtripLibraryCoverViaApi(page, candidate.imageId, productId);
+      const result = await bindCtripLibraryCoverViaApi(page, candidate.imageId, productId, options);
       return { ...result, selectedCover: candidate, attemptedImageIds };
     } catch (error) {
       failures.push(
@@ -173,16 +174,17 @@ export async function selectCtripLibraryCover(page, cover, productId) {
   throw new Error(`产品图文封面绑定失败：已尝试 ${attempts.length} 张图片；${failures.join("；")}`);
 }
 
-export async function bindCtripLibraryPresentationImages(page, cover, productId) {
-  const coverResult = await selectCtripLibraryCover(page, cover, productId);
+export async function bindCtripLibraryPresentationImages(page, cover, productId, options = {}) {
+  const coverResult = await selectCtripLibraryCover(page, cover, productId, options);
   const imageProductId = Number(productId ?? coverResult.productId);
   const selectedCoverId = Number(coverResult.imageId);
   const attractionResults = [];
   const failures = [];
   for (const candidate of ctripLibraryCoverAttempts(cover)) {
     if (candidate.imageId === selectedCoverId) continue;
+    await options.beforeWrite?.();
     try {
-      const result = await bindCtripLibraryAttractionImageViaApi(page, candidate.imageId, imageProductId);
+      const result = await bindCtripLibraryAttractionImageViaApi(page, candidate.imageId, imageProductId, options);
       attractionResults.push({ ...result, selectedImage: candidate });
     } catch (error) {
       failures.push(
@@ -233,7 +235,7 @@ function ctripLibraryCoverAttempts(cover) {
  * 保存不再触碰推荐理由 textarea / UEditor DOM：统一走 /15638/getdescriptionInfo →
  * /20698/createProductDraft(desc) → /15638/savedescriptioninfo → 回读确认。
  */
-export async function fillAndSavePresentation(page, product, explicitProductId, onManualCoverBound?) {
+export async function fillAndSavePresentation(page, product, explicitProductId, onManualCoverBound?, options = {}) {
   // 第一道防御：统一从 automation-contract 取真实契约，错误文案面向运营。
   assertPresentationReadyForVbk(product);
   const presentation = product.presentation;
@@ -252,14 +254,17 @@ export async function fillAndSavePresentation(page, product, explicitProductId, 
   // 再由 savePresentationViaApi 写入 /15638/getdescriptionInfo →
   // /20698/createProductDraft → /15638/savedescriptioninfo。
   let coverResult;
+  await options.beforeWrite?.();
   if (fallback) {
     coverResult = await uploadManualCoverViaSupplierPage(
       page, productId, loadPlaceholderCoverAsset(), String(product.basicInfo?.meetingCity ?? ""),
       fallback.remoteImageId,
       async (imageId) => {
+        await options.beforeWrite?.();
         presentation.coverFallback.remoteImageId = imageId;
         await onManualCoverBound?.(imageId);
       },
+      options.beforeWrite,
     );
   } else if (cover.source === "manualUpload") {
     const { asset, issue } = inspectManualCoverAsset(product);
@@ -268,16 +273,19 @@ export async function fillAndSavePresentation(page, product, explicitProductId, 
       page, productId, asset.path, String(product.basicInfo?.meetingCity ?? ""),
       Number(cover.remoteImageId) || undefined,
       async (imageId) => {
+        await options.beforeWrite?.();
         cover.remoteImageId = imageId;
         await onManualCoverBound?.(imageId);
       },
+      options.beforeWrite,
     );
   } else if (cover.source === "ctripLibrary" && ctripLibraryCoverAttempts(cover).length > 0) {
-    coverResult = await bindCtripLibraryPresentationImages(page, cover, productId);
+    coverResult = await bindCtripLibraryPresentationImages(page, cover, productId, options);
   } else {
     throw new Error("产品图文缺少完整的携程图库封面配置，已停止后续录入。");
   }
-  const savedWith = await savePresentationViaApi(page, presentation, productId);
+  options.onImagesBound?.(coverResult);
+  const savedWith = await savePresentationViaApi(page, presentation, productId, options);
   return { advanced: true, mode: "presentation-api", productId, coverResult, savedWith };
 }
 

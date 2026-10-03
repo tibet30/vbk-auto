@@ -15,6 +15,7 @@ import {
 import { waitForStableReadbackGroup, type StableReadbackOptions } from "./stability.js";
 import type { TrafficLineExistingChild } from "./types.js";
 import type { TrafficLinePage } from "./client.js";
+import { settleTrafficLineClausesBeforeActivation } from "./clause-itinerary-recovery.js";
 
 export interface TrafficLineChildReadback {
   child: TrafficLineExistingChild;
@@ -146,7 +147,7 @@ export async function activateAndVerifyTrafficLineChild(
   variant: TrafficLineVariant,
   endpoints: TrafficLineEndpointPlan,
 ): Promise<TrafficLineChildReadback> {
-  const active = await activateTrafficLineChild(page, parentProductId, child, variant);
+  const active = await activateTrafficLineChild(page, parentProductId, child, variant, endpoints);
   return verifyTrafficLineChildWithRepair(page, parentProductId, active.productId, variant, endpoints);
 }
 
@@ -155,8 +156,24 @@ export async function activateTrafficLineChild(
   parentProductId: string,
   child: TrafficLineExistingChild,
   variant: TrafficLineVariant,
+  endpoints?: TrafficLineEndpointPlan,
 ): Promise<TrafficLineExistingChild> {
-  await verifyOrRepairTrafficLineClauses(page, child.productId, variant);
+  await settleTrafficLineClausesBeforeActivation({
+    settleClauses: () => verifyOrRepairTrafficLineClauses(page, child.productId, variant),
+    itineraryNeedsRepair: async () => {
+      if (!endpoints) return false;
+      try {
+        await readTrafficLineItineraryReadback(page, child.productId, variant);
+        return false;
+      } catch (error) {
+        if (error instanceof TrafficLineItineraryReadbackError && error.repairable) return true;
+        throw error;
+      }
+    },
+    repairItinerary: () => ensureTrafficLineItinerary(page, child.productId, variant, endpoints!),
+    saveClauses: () => ensureTrafficLineClauses(page, child.productId, variant),
+    verifyClauses: () => verifyTrafficLineClauses(page, child.productId, variant),
+  });
   let active: TrafficLineExistingChild;
   try {
     active = await ensureTrafficLinePackageActive(page, parentProductId, child);

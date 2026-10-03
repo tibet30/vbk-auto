@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { stripBasicInfoIllegalKeywords as stripIllegalKeywords } from "./name-keywords.js";
+export { stripBasicInfoIllegalKeywords as stripIllegalKeywords } from "./name-keywords.js";
 /**
  * 「基本信息」面板的统一入口与终态校验：
  *   - fillBasicInfo：按 product.basicInfo 完整填「基本信息」面板（副标题、供应商名/编号、操作
@@ -121,19 +123,6 @@ function truncateVbkText(value, limit) {
     total += width;
   }
   return result;
-}
-
-export function stripIllegalKeywords(value, keywords) {
-  let next = String(value ?? "");
-  for (const keyword of keywords) {
-    const token = String(keyword ?? "").trim();
-    if (token) next = next.split(token).join("");
-  }
-  return next
-    .replace(/([·+｜|/])\1+/g, "$1")
-    .replace(/([，,；;。])\1+/g, "$1")
-    .replace(/^[·+｜|/，,；;。\s]+|[·+｜|/，,；;。\s]+$/g, "")
-    .trim();
 }
 
 async function repairBasicInfoIllegalKeywords(page, info) {

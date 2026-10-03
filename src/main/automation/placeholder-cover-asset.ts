@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
-export const PLACEHOLDER_COVER_FILE_NAME = "operator-placeholder-cover.png";
+export const PLACEHOLDER_COVER_FILE_NAME = "draft-fallback-cover-v2.png";
 
 /** Reads the bundled image as bytes so Playwright can upload it even from an ASAR package. */
 export function loadPlaceholderCoverAsset(appPath?: string): { name: string; mimeType: "image/png"; buffer: Buffer } {

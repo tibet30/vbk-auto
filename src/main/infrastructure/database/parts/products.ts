@@ -189,6 +189,7 @@ export function deleteProduct(db: Database.Database, id: string): boolean {
     db.prepare("DELETE FROM research_tasks WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM messages WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(localProductId);
+    db.prepare("DELETE FROM local_product_state WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM products WHERE id=?").run(localProductId);
     return true;
   });

@@ -24,7 +24,7 @@ export async function saveAssociationBeforeReadback(save: () => Promise<unknown>
     await save();
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    if (!/VBK 行程关联保存(?:浏览器请求|页面执行)超时/u.test(reason)) throw error;
+    if (!/VBK 行程关联保存(?:浏览器请求|页面执行|BrowserView 执行)超时/u.test(reason)) throw error;
     logInfo("[vbk-itinerary-draft] association-timeout-readback", {
       message: "行程关联保存超时；仅继续严格版本与字段回读，不重发保存请求。",
     });

@@ -97,8 +97,7 @@ export function recordAgentStageEvent(snapshot: AgentSnapshot, event: AgentEvent
     stage.status = approval(event)?.status === 'approved' ? 'resolved' : 'superseded';
     if (stage.status === 'superseded') { stage.summary = event.content; stage.nextStep = '原确认已失效，需要重新核验方案。'; }
   }
-  if (event.type === 'tool_result' && call && !event.data.error && !event.data.cancelled
-    && !event.data.uncertainWrite && !event.data.preparationDenied) {
+  if (event.type === 'tool_result' && call && !failedAgentToolResult(event)) {
     const name = String(call.data?.name ?? call.content);
     if (ACTIONS[name]) {
       const label = ACTIONS[name]!;

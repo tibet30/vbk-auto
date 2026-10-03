@@ -160,16 +160,19 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   // 持久化，再刷新 plan，最后启动 commercial，避免旧 presentation 快照在
   // commercial 的 packageName/pricing 等写回后覆盖新字段。
   if (!isCompleted(plan, "copy")) {
-    await runCompletionAiNode(deps, plan, "copy", "basicInfo", patchNode);
+    const completed = await runCompletionAiNode(deps, plan, "copy", "basicInfo", patchNode);
     plan = { ...plan, nodes: [...plan.nodes] };
+    if (!completed) return plan;
   }
   if (!isCompleted(plan, "presentation")) {
-    await runCompletionAiNode(deps, plan, "presentation", "presentation", patchNode);
+    const completed = await runCompletionAiNode(deps, plan, "presentation", "presentation", patchNode);
     plan = { ...plan, nodes: [...plan.nodes] };
+    if (!completed) return plan;
   }
   if (!isCompleted(plan, "commercial")) {
-    await runCompletionAiNode(deps, plan, "commercial", "commercial", patchNode);
+    const completed = await runCompletionAiNode(deps, plan, "commercial", "commercial", patchNode);
     plan = { ...plan, nodes: [...plan.nodes] };
+    if (!completed) return plan;
   }
 
   // 封面与用车查询都会驱动同一个 VBK BrowserView 导航，不能并行使用页面。
@@ -215,7 +218,7 @@ async function runCompletionAiNode(
   id: "copy" | "presentation" | "commercial",
   stage: "basicInfo" | "presentation" | "commercial",
   patchNode: (id: PlanningNodeId, patch: Partial<PlanningNodeState>) => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   await patchNode(id, { status: "running", startedAt: new Date().toISOString(), error: undefined });
   const result = await runLegacyStage(deps, stage, node(plan, id).attempts);
   if (result.status === "completed") {
@@ -227,11 +230,13 @@ async function runCompletionAiNode(
         attempts: result.attempts,
         error: `${stage} 节点虽返回成功，但实际产品字段未落库：${missing.join("、")}`,
       });
-      return;
+      return false;
     }
     await patchNode(id, { status: "completed", attempts: result.attempts, summary: stageSummary(stage), completedAt: new Date().toISOString() });
+    return true;
   } else {
     await patchNode(id, { status: "failed", attempts: result.attempts, error: result.error });
+    return false;
   }
 }
 

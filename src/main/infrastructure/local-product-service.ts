@@ -59,14 +59,14 @@ export function createLocalProductService(args: {
     storage: "local",
     async list() {
       const userId = owner();
-      if (args.db.ownedLocalProductIds(userId).length) void bootstrap(userId);
-      else await bootstrap(userId);
+      let products = args.db.listOwnedLocalProductSummaries(userId);
+      if (products.length) void bootstrap(userId);
+      else {
+        await bootstrap(userId);
+        products = args.db.listOwnedLocalProductSummaries(userId);
+      }
       if (owner() !== userId) throw new Error("账号已切换，请刷新产品列表。");
-      return args.db.ownedLocalProductIds(userId).map(id => {
-        const product = owned(id, userId);
-        return { id: product.id, name: product.name, status: product.status, productId: product.productId,
-          vbkAccount: product.vbkAccount, updatedAt: product.updatedAt, revision: product.revision };
-      });
+      return products;
     },
     async get(id) {
       const userId = owner();

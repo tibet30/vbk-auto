@@ -1,4 +1,5 @@
 import type { AgentInputRequest, AgentQuestion } from "../../shared/contracts.js";
+import { failedAgentToolResult } from "../../shared/agent-tool-outcomes.js";
 import { clampRetryAfterSeconds, parseRetryAfterSeconds } from "../../shared/retry-after.js";
 import { trackProductExecution, waitWithoutExecutionTime } from "../operations/product-execution-clock.js";
 import { AgentSnapshotManager, type TurnToken } from "./core-snapshot.js";
@@ -63,7 +64,7 @@ export class AgentToolRunner {
     if (call.argumentError) {
       const snapshot = this.snapshots.load(id);
       this.snapshots.result(snapshot, call.id, `参数 JSON 无效：${call.argumentError}。请修正后重新调用。`,
-        { malformedArguments: true }, token.runId);
+        { malformedArguments: true, executionRejected: true }, token.runId);
       this.snapshots.save(snapshot);
       return "continue";
     }
@@ -73,13 +74,13 @@ export class AgentToolRunner {
     const tool = this.deps.tools.find((candidate) => candidate.name === call.name);
     const initial = this.snapshots.load(id);
     if (!tool) {
-      this.snapshots.result(initial, call.id, `未知工具：${call.name}`, undefined, token.runId);
+      this.snapshots.result(initial, call.id, `未知工具：${call.name}`, { executionRejected: true }, token.runId);
       this.snapshots.save(initial);
       return "continue";
     }
     const validationError = tool.validate?.(call.arguments) ?? validateSchema(tool.parameters, call.arguments);
     if (validationError) {
-      this.snapshots.result(initial, call.id, `参数无效：${validationError}`, undefined, token.runId);
+      this.snapshots.result(initial, call.id, `参数无效：${validationError}`, { executionRejected: true }, token.runId);
       this.snapshots.save(initial);
       return "continue";
     }
@@ -148,9 +149,10 @@ export class AgentToolRunner {
         ...(output.uncertainWrite ? { uncertainWrite: true } : {}),
         ...(output.terminal ? { terminal: true } : {}),
       }, token.runId);
+      const failed = failedAgentToolResult(snapshot.events.at(-1)!);
       if (output.uncertainWrite) this.snapshots.markUncertain(snapshot, call.id, output.content);
-      if (output.terminal === true && !output.uncertainWrite) this.snapshots.finish(snapshot);
-      if (isCacheableReadQuery(call.name) && token.runId && !output.content.startsWith("工具失败：")) {
+      if (output.terminal === true && !failed) this.snapshots.finish(snapshot);
+      if (isCacheableReadQuery(call.name) && token.runId && !failed && !output.content.startsWith("工具失败：")) {
         this.readQueryCache.set(readQueryCacheKey({
           localProductId: id,
           runId: token.runId,
@@ -217,7 +219,7 @@ export class AgentToolRunner {
     const snapshot = this.snapshots.load(id);
     const questions = parseQuestions(call.arguments.questions);
     if (!questions) {
-      this.snapshots.result(snapshot, call.id, "问题格式无效。", undefined, token.runId);
+      this.snapshots.result(snapshot, call.id, "问题格式无效。", { executionRejected: true }, token.runId);
       this.snapshots.save(snapshot);
       return "continue";
     }
@@ -295,7 +297,7 @@ export class AgentToolRunner {
     const summary = typeof call.arguments.summary === "string" ? call.arguments.summary.trim() : "";
     if (!scope.length || !summary) {
       const snapshot = this.snapshots.load(id);
-      this.snapshots.result(snapshot, call.id, "审批范围或说明无效。", undefined, token.runId);
+      this.snapshots.result(snapshot, call.id, "审批范围或说明无效。", { executionRejected: true }, token.runId);
       this.snapshots.save(snapshot);
       return "continue";
     }

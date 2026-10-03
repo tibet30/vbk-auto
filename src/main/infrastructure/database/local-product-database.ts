@@ -12,6 +12,7 @@ export class LocalProductDatabase extends ProductExecutionDatabase {
     return state.saveLocalProductState(this.db, product, owner, revision);
   }
   ownedLocalProductIds(owner: number) { return state.ownedLocalProductIds(this.db, owner); }
+  listOwnedLocalProductSummaries(owner: number) { return state.listOwnedLocalProductSummaries(this.db, owner); }
   enqueueDiagnostic(owner: number, eventId: string, report: ProductTelemetryReport) {
     state.enqueueDiagnostic(this.db, owner, eventId, report);
   }

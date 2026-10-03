@@ -376,8 +376,8 @@ test("completion gate feedback reaches the model and pauses after three blocked 
     && message.content === "完成检查反馈：缺少 commercial.packageName"));
 });
 
-test("only a local write with material changes resets the blocker count", async () => {
-  for (const [changedSections, expected] of [[[], "paused"], [["basicInfo"], "completed"]] as const) {
+test("only a local write with material changes resets the blocker count, unresolved approval still blocks completion", async () => {
+  for (const changedSections of [[], ["basicInfo"]]) {
     const results: AgentModelResult[] = [
       { toolCalls: [{ id: "approval-1", name: "request_approval", arguments: { scope: ["one"], summary: "one" } }] },
       { toolCalls: [{ id: "approval-2", name: "request_approval", arguments: { scope: ["two"], summary: "two" } }] },
@@ -392,7 +392,11 @@ test("only a local write with material changes resets the blocker count", async 
       execute: async () => ({ content: "saved", data: { changedSections: [...changedSections] } }) }];
     await core.send(`material-${changedSections.length}`, "start");
     await core.idle(`material-${changedSections.length}`);
-    assert.equal((await core.get(`material-${changedSections.length}`)).run?.status, expected);
+    const snapshot = await core.get(`material-${changedSections.length}`);
+    assert.equal(snapshot.run?.status, "paused");
+    assert.equal(snapshot.events.filter(event => event.data?.noProgressBlocker === "approval_precondition").length,
+      changedSections.length ? 4 : 3);
+    assert.equal(snapshot.events.some(event => event.data?.noProgressPaused === true), !changedSections.length);
   }
 });
 

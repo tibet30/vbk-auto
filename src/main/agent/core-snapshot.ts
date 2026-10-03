@@ -5,7 +5,7 @@ import type {
 import type { AgentSnapshotStore } from "./types.js";
 import type { AgentToolCall } from "./types.js";
 import { hydrateAgentStages, recordAgentStageEvent } from "../../shared/agent-stage-lifecycle.js";
-import { hasUnresolvedAgentToolFailure, UNRESOLVED_TOOL_SUMMARY } from "../../shared/agent-tool-outcomes.js";
+import { failedAgentToolResult, hasUnresolvedAgentToolFailure, UNRESOLVED_TOOL_SUMMARY } from "../../shared/agent-tool-outcomes.js";
 
 export interface TurnToken { runId: string; userEventId?: string; modelTurnId?: string; }
 export interface AgentStreamState { eventId?: string; lastSavedAt: number; }
@@ -14,8 +14,7 @@ export type NoProgressBlocker = "approval_precondition" | "authorization_denied"
 /** A tool being classified as a writer is not proof that it changed anything. */
 export function isMaterialWriteResult(event: AgentEvent): boolean {
   if (event.type !== "tool_result" || event.data?.write !== true) return false;
-  if (event.data.preparationDenied === true || event.data.cancelled === true
-    || event.data.uncertainWrite === true || event.data.error !== undefined) return false;
+  if (failedAgentToolResult(event)) return false;
   return !Array.isArray(event.data.changedSections) || event.data.changedSections.length > 0;
 }
 
@@ -161,7 +160,7 @@ export class AgentSnapshotManager {
     runId = snapshot.run?.id,
   ): void {
     if (!scope.length || !summary || !snapshot.run) {
-      if (toolCallId) this.result(snapshot, toolCallId, "审批范围或说明无效。", undefined, runId);
+      if (toolCallId) this.result(snapshot, toolCallId, "审批范围或说明无效。", { executionRejected: true }, runId);
       return;
     }
     const approval: AgentApproval = {

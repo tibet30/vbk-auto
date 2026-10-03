@@ -7,7 +7,7 @@ import {
   refreshPhasePageAfterApi,
 } from "../../src/main/automation/automation.main/automation.main.retry-navigation.js";
 
-test("每个 API 模块在执行前进入对应页面，并在成功后刷新该页面", async () => {
+test("显式页面同步入口进入对应模块，并刷新该页面", async () => {
   const events: string[] = [];
   let currentUrl = "";
   const page = {
@@ -113,7 +113,7 @@ test("阶段开始时右侧关闭，执行中途打开也不误刷新当前页�
   assert.ok(events.some((event) => event.includes("跳过页面刷新")));
 });
 
-test("阶段开始时右侧打开，执行期间关闭仍只完成本阶段的一次页面同步", async () => {
+test("阶段开始时右侧打开，执行期间关闭后不再导航或刷新", async () => {
   const events: string[] = [];
   let visible = true;
   let currentUrl = "";
@@ -137,10 +137,9 @@ test("阶段开始时右侧打开，执行期间关闭仍只完成本阶段的�
     },
   });
 
-  assert.equal(events.filter((event) => event.startsWith("navigate:")).length, 1);
-  assert.equal(events.filter((event) => event === "reload").length, 1);
-  assert.ok(events.indexOf("api") > events.findIndex((event) => event.startsWith("navigate:")));
-  assert.ok(events.indexOf("reload") > events.indexOf("api"));
+  assert.equal(events.filter((event) => event.startsWith("navigate:")).length, 0);
+  assert.equal(events.filter((event) => event === "reload").length, 0);
+  assert.ok(events.includes("api"));
 });
 
 test("恢复动作不导航；每次 attempt 只由执行前入口进入一次目标页面", async () => {
@@ -169,5 +168,5 @@ test("恢复动作不导航；每次 attempt 只由执行前入口进入一次�
 
   assert.equal(events.filter((event) => event.startsWith("goto:")).length, 2);
   assert.match(events[1], /tourdays/);
-  assert.ok(events.some((event) => event.includes("下一次执行将在录入前进入模块页面")));
+  assert.ok(events.some((event) => event.includes("交互式操作先进入模块页面")));
 });

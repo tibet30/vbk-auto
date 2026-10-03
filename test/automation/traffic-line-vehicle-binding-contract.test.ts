@@ -11,17 +11,17 @@ const readbackSource = readFileSync(
   "utf8",
 );
 
-test("交通资源提交后必须重新绑定用车组，再记录 resourcesSaved", () => {
+test("全部交通与用车资源提交后再写回行程，避免正式交通节点被回滚", () => {
   const submitted = source.indexOf("await ensureTrafficLineSegments(");
-  const itinerary = source.indexOf("await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);", submitted);
-  const binding = source.indexOf("await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);", itinerary);
+  const binding = source.indexOf("await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);", submitted);
+  const itinerary = source.indexOf("await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);", binding);
   const checkpoint = source.indexOf('checkpoint("resourcesSaved", relationship.productId);', binding);
 
   assert.ok(submitted >= 0, "必须先提交交通资源段");
   assert.ok(itinerary > submitted, "交通资源提交后必须写回交通行程");
-  assert.ok(binding > itinerary, "交通行程写回后必须重新绑定用车组");
+  assert.ok(itinerary > binding, "用车正式提交后必须重新保存交通行程");
   assert.ok(checkpoint > binding, "正式段回读成功前不得记录 resourcesSaved");
-  assert.match(source, /ensureVehicleResourceBinding\(page, productId, groupId, groupName, \{ submitDraft: true \}\)/);
+  assert.match(readFileSync(new URL("../../src/main/automation/ctrip/traffic-line/helpers.ts", import.meta.url), "utf8"), /ensureVehicleResourceBinding\(page, productId, groupId, groupName, \{ submitDraft: true \}\)/);
 });
 
 test("已激活子产品直接进入最终回读，不重放其资源写入", () => {

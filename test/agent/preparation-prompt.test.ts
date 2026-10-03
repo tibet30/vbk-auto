@@ -22,6 +22,15 @@ function draft(): ProductDetail {
   return product;
 }
 
+test("日喀则末日后的产品要求不能变成锁定景点", () => {
+  const product = draft();
+  product.product.basicInfo!.userIdea = "第一天：接火车 → 萨迦寺 → 住日喀则。\n第二天：羊卓雍湖 → 住日喀则。\n第三天：日喀则博物馆或非遗中心参观 → 扎什伦布寺参观 → 送火车。\n沿用最近产品要求：3天2晚私家团，当地5钻酒店、不含餐。重新生成全部方案及资源核验；本次已授权录入VBK并保存草稿。";
+  const locked = extractLockedConstraints(product, []);
+  assert.ok(locked.pois.includes("羊卓雍湖"));
+  assert.ok(locked.itineraryOrder.find((row) => row.day === 3)?.spots.some((spot) => spot.includes("扎什伦布寺")));
+  assert.ok(locked.pois.every((poi) => !/沿用|产品要求|重新生成|[接送]火车/.test(poi)));
+});
+
 test("状态询问和继续执行不会污染行程需求", () => {
   const messages = [
     { role: "user" as const, content: "第二天不要安排购物" },

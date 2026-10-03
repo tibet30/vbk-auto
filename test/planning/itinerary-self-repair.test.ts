@@ -2,6 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { selfRepairItineraryForVbk } from "../../src/main/planning/itinerary-self-repair.js";
 
+test("末日明确不住宿才清理误填酒店，保留真实住宿与普通待核验 POI", () => {
+  const original = [
+    { day: 1, hotel: "酒店", spots: [{ name: "景点" }] },
+    { day: 2, hotel: "酒店", spots: [{ name: "景点" }] },
+    { day: 3, hotel: "酒店", hotelDescription: "送火车日不实际安排住宿", hotelCandidates: [{ hotelId: 1 }], spots: [{ name: "景点" }] },
+  ];
+  const result = selfRepairItineraryForVbk(original, 2);
+  assert.equal(result.itinerary[0].hotel, "酒店");
+  assert.equal(result.itinerary[2].hotel, "无");
+  assert.equal(result.itinerary[2].hotelCandidates, undefined);
+  assert.equal(original[2].hotel, "酒店");
+  assert.equal(selfRepairItineraryForVbk(original, 3).itinerary[2].hotel, "酒店");
+  original[2].hotelDescription = "入住酒店";
+  assert.equal(selfRepairItineraryForVbk(original, 2).itinerary[2].hotel, "酒店");
+});
+
 test("交通和入住节点移出 POI 列表，已核验二选一自动收敛", () => {
   const result = selfRepairItineraryForVbk([
     {

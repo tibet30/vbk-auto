@@ -15,9 +15,9 @@ const product = {
   presentation: {
     cover: { source: "ctripLibrary", imageId: 25345261 },
     recommendations: [
-      { category: "服务保障", text: "专属行程服务" },
-      { category: "贴心赠送", text: "出行贴心安排" },
-      { category: "精选酒店", text: "舒适住宿体验" },
+      { category: "服务保障", text: "专属行程服务全程跟随，接送与衔接清晰，陌生路况也可安心出行" },
+      { category: "贴心赠送", text: "出行贴心安排，覆盖接送与餐饮赠送，体验更丰富，整体安排更省心" },
+      { category: "精选酒店", text: "舒适住宿体验当地品质酒店，方便每日出行与休息，整体体验更舒适" },
     ],
     features: "<p>古城与海岛深度体验</p>",
   },
@@ -41,6 +41,16 @@ test("基本信息回读锁定潮州 5 天 4 晚", () => {
   }, product, "79189107"), {
     cityId: 100, meetingCity: "潮州", destinationCity: "潮州", days: 5, nights: 4,
   });
+});
+
+test("潮汕平台行政城市映射仍精确回读汕头，拒绝潮州或不一致本地锚点", () => {
+  const remote = { productId: 1, masterDepartureCityId: 447, destinationCityID: 447,
+    masterDepartureCityName: "汕头", destinationCityName: "汕头", travelDays: 5,
+    maxTravelDays: 5, travelNights: 4, vendorProductCode: "CS-5D" };
+  const local = { basicInfo: { meetingCity: "潮汕", destinationCity: "潮汕", days: 5, nights: 4 } };
+  assert.equal(verifyBasicInfoReadback(remote, local, "1").meetingCity, "汕头");
+  assert.throws(() => verifyBasicInfoReadback({ ...remote, destinationCityName: "潮州" }, local, "1"), /城市锚点不一致/);
+  assert.throws(() => verifyBasicInfoReadback(remote, { basicInfo: { ...local.basicInfo, destinationCity: "汕头" } }, "1"), /本地.*不一致/);
 });
 
 test("产品图文只接受唯一的真实图库封面与已保存文案", async () => {

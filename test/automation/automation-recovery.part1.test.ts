@@ -160,7 +160,7 @@ test("retry 前先刷新当前 phase 页面，再重新执行 handler", async ()
   ]);
 });
 
-test("API-only presentation 重试仅记录动作，页面进入由下一次执行负责", () => {
+test("API-only presentation 重试仅记录动作，由阶段处理器重新调用 API", () => {
   const logs: string[] = [];
   recordPhaseRetry({
     productId: "77025968",
@@ -169,7 +169,7 @@ test("API-only presentation 重试仅记录动作，页面进入由下一次执�
     attempt: 1,
     log: (message) => logs.push(message),
   });
-  assert.match(logs[0], /下一次执行将在录入前进入模块页面/);
+  assert.match(logs[0], /重新调用 API，交互式操作先进入模块页面/);
 });
 
 test("reload_and_retry_phase：attempt=1 reload + handler 再执行成功", async () => {

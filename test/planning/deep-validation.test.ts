@@ -171,19 +171,19 @@ test("presentation 必须是 3 条互不重复 + category 在白名单的 recomm
   assert.ok(out.invalid.some((m) => m.module === "presentation"));
 });
 
-test("生成阶段拒绝超过 VBK 安全字节上限的推荐理由", () => {
+test("生成阶段拒绝超过 VBK 平台字符宽度上限的推荐理由", () => {
   const result = validateModuleValue("presentation", {
     recommendationCategory: "优选行程",
     recommendation: "太原文化之旅",
     recommendations: [
-      { category: "优选行程", text: "太原古建与博物馆深度串联，兼顾晋祠古韵、城市人文与舒适节奏。" },
-      { category: "精选酒店", text: "城区住宿安排" },
-      { category: "缤纷景点", text: "核心景点串联" },
+      { category: "优选行程", text: "游".repeat(43) },
+      { category: "精选酒店", text: "当地住宿安排合理，方便每日出行与休息，整体体验舒适，按产品说明安排" },
+      { category: "缤纷景点", text: "串联太原周边核心景点，兼顾自然风光与人文历史，内容更丰富，按产品说明安排" },
     ],
     features: "<p>特色</p>",
   });
   assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /不得超过 80 UTF-8 字节/);
+  if (!result.ok) assert.match(result.reason, /30～84.*字符/);
 });
 
 test("commercial.release.submitReview=true 不再被 deep validation 拒绝（历史 / 人工标记保留）", () => {

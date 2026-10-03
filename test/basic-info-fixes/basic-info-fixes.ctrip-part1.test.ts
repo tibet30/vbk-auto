@@ -517,8 +517,8 @@ test("pickKeySpotsFromItinerary 优先 poiName（贴近 VBK 内部标签名）",
 
 test("全量录入和单阶段 basic 重试统一走 basic API", () => {
   const source = readAutomationSource();
-  const fullStart = source.indexOf("export async function runAutomation");
-  const onePhaseStart = source.indexOf("export async function runOnePhase");
+  const fullStart = source.indexOf("export async function runAutomation(");
+  const onePhaseStart = source.indexOf("export async function runOnePhase(");
   const fullRun = source.slice(fullStart, source.indexOf("\n// FILE:", fullStart));
   const onePhase = source.slice(onePhaseStart, source.indexOf("\n// FILE:", onePhaseStart));
   for (const runner of [fullRun, onePhase]) {

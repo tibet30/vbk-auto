@@ -448,12 +448,12 @@ test("草稿主路径不调用 legacy check(8/3) 或评分接口", async () => {
 
 // ───────── 首建缺少真实协议证据时 fail closed ─────────
 
-test("首建关联列表为空时不猜测模板或旧 8→3 协议", async () => {
+test("关联列表含未知空版本时不猜测模板或旧 8→3 协议", async () => {
   Object.assign(routeHandlers, makeHandlers({ emptyProduct: true }));
   routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => ({
     ResponseStatus: { Ack: "Success", Errors: [] },
     templateId: 3,
-    tourInfos: [],
+    tourInfos: [{ tourInfoId: 0 }],
   });
   await assert.rejects(
     () => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"),

@@ -253,7 +253,7 @@ test("产品图文：fillAndSavePresentation 必须通过 presentation-api 接�
   // 接线：必须通过接口保存模块把产品特色 + 推荐理由落库
   assert.match(
     body,
-    /savePresentationViaApi\(page,\s*presentation,\s*productId\)/,
+    /savePresentationViaApi\(page,\s*presentation,\s*productId,\s*options\)/,
     "fillAndSavePresentation 必须通过接口保存模块写入产品特色与推荐理由",
   );
   // 顺序：先绑定封面，再保存图文；二者都必须使用显式 productId。

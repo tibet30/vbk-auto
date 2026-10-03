@@ -57,14 +57,15 @@ function browserWithHandler(handler: (path: string, body: any, calls: BrowserCal
   };
 }
 
-function rowFromSaveBody(body: any) {
+function mergeRowsFromSaveBody(rows: any[], body: any) {
   const inventory = body.singleResourceUnitPriceInventory.singleResourceInventoryVO;
   const units = body.singleResourceUnitPriceInventory.singleResourceUnitPriceDtos;
-  return {
-    productDate: units[0].date,
-    inventory: { total: inventory.total },
-    singleResourceUnitPriceDtos: units,
-  };
+  for (const date of body.dateChoose.dates) {
+    const row = { productDate: date, inventory: { total: inventory.total },
+      singleResourceUnitPriceDtos: units.map((unit: any) => ({ ...unit, date })) };
+    const index = rows.findIndex(item => item.productDate === date);
+    if (index < 0) rows.push(row); else rows[index] = row;
+  }
 }
 
 function baseEndpointPayload(path: string) {
@@ -85,7 +86,7 @@ function baseEndpointPayload(path: string) {
   return null;
 }
 
-test("缺失 cost 时按 queryAgeBandConfig 的实际 ID 生成有限价格，并逐日串行重试", async () => {
+test("缺失 cost 时按实际年龄段ID生成四档模板，平台写锁只串行重试当前批次", async () => {
   const acceptedRows: any[] = [];
   let readCount = 0;
   let firstDateAttempts = 0;
@@ -106,7 +107,7 @@ test("缺失 cost 时按 queryAgeBandConfig 的实际 ID 生成有限价格，�
           },
         };
       }
-      acceptedRows.push(rowFromSaveBody(body));
+      mergeRowsFromSaveBody(acceptedRows, body);
       return success;
     }
     throw new Error(`unexpected endpoint: ${path}`);
@@ -119,11 +120,10 @@ test("缺失 cost 时按 queryAgeBandConfig 的实际 ID 生成有限价格，�
 
   const saves = browser.calls.filter((call) => call.path === "savePriceInventorySingleProduct");
   assert.deepEqual(saves.map((call) => call.body.dateChoose.dates), [
-    [firstDate],
-    [firstDate],
-    [secondDate],
+    [firstDate, secondDate],
+    [firstDate, secondDate],
   ]);
-  assert.deepEqual(pauses, [VBK_GROUP_DAILY_REQUEST_INTERVAL_MS, VBK_GROUP_DAILY_REQUEST_INTERVAL_MS]);
+  assert.deepEqual(pauses, [VBK_GROUP_DAILY_REQUEST_INTERVAL_MS]);
   assert.equal(result.dateCount, 2);
 
   const firstAccepted = saves[1].body.singleResourceUnitPriceInventory;
@@ -177,7 +177,7 @@ test("已有四层但任一价格错误时不会跳过该日期，而会精确�
       return { ...success, dates: readCount === 1 ? [wrongExistingRow] : acceptedRows };
     }
     if (path === "savePriceInventorySingleProduct") {
-      acceptedRows.push(rowFromSaveBody(body));
+      mergeRowsFromSaveBody(acceptedRows, body);
       return success;
     }
     throw new Error(`unexpected endpoint: ${path}`);
@@ -186,8 +186,8 @@ test("已有四层但任一价格错误时不会跳过该日期，而会精确�
   await ensurePricingInventoryApi(browser as never, product, "123", { pause: async () => {} });
   assert.deepEqual(
     browser.calls.filter((call) => call.path === "savePriceInventorySingleProduct")
-      .map((call) => call.body.dateChoose.dates[0]),
-    [firstDate, secondDate],
+      .map((call) => call.body.dateChoose.dates),
+    [[firstDate, secondDate]],
   );
 });
 
@@ -315,7 +315,7 @@ test("最终月回读价格为零时整次保存失败", async () => {
       return { ...success, dates: wrongRows };
     }
     if (path === "savePriceInventorySingleProduct") {
-      acceptedRows.push(rowFromSaveBody(body));
+      mergeRowsFromSaveBody(acceptedRows, body);
       return success;
     }
     throw new Error(`unexpected endpoint: ${path}`);

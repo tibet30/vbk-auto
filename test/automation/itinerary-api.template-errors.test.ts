@@ -23,19 +23,19 @@ test.beforeEach(() => {
 test.afterEach(() => clearRouteHandlers());
 test.after(() => uninstallFetchStub());
 
-test("首建缺关联版本时在模板查询前 fail closed", async () => {
+test("首建空草稿缺模板时禁止写入", async () => {
   Object.assign(routeHandlers, makeHandlers({
     emptyProduct: true,
     templatePayloadOverride: { ResponseStatus: { Ack: "Success", Errors: [] } },
   }));
   await assert.rejects(
     () => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"),
-    /未返回独立的 draftTourInfoId/,
+    /模板查询响应缺 template 字段/,
   );
-  assert.equal(callLog.some((call) => call.endpoint.includes("getDailyTemplateDetail")), false);
+  assert.equal(callLog.some((call) => /checkTourDaily|saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
 });
 
-test("首建缺关联版本时不调用草稿写入接口", async () => {
+test("首建空草稿模板为空时禁止写入", async () => {
   Object.assign(routeHandlers, makeHandlers({
     emptyProduct: true,
     templatePayloadOverride: {
@@ -45,7 +45,7 @@ test("首建缺关联版本时不调用草稿写入接口", async () => {
   }));
   await assert.rejects(
     () => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"),
-    /未返回独立的 draftTourInfoId/,
+    /template 为空对象/,
   );
   assert.equal(callLog.some((call) => /checkTourDaily|saveTourDailyDetail|saveProductTourInfo/.test(call.endpoint)), false);
 });

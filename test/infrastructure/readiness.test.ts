@@ -49,9 +49,9 @@ function minimalProduct(): Record<string, unknown> {
       features: "测试特点",
       recommendationCategory: "优选行程",
       recommendations: [
-        { category: "优选行程", text: "A" },
-        { category: "精选酒店", text: "B" },
-        { category: "缤纷景点", text: "C" },
+        { category: "优选行程", text: "一日私家串联太原食品街与平遥古城，节奏从容不赶路，体验山西人文历史" },
+        { category: "精选酒店", text: "精选当地品质住宿含早餐，方便每日出行与休息，性价比更均衡舒适" },
+        { category: "缤纷景点", text: "覆盖太原食品街与平遥古城，兼顾美食与古建，行程内容更丰富完整" },
       ],
       cover: { source: "ctripLibrary", imageId: 1, imageUrl: "x", poi: "太原", description: "y", minQuality: 0 },
     },

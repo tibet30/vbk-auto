@@ -38,9 +38,9 @@ const baseProduct = {
     recommendation: "推荐",
     features: "特色",
     recommendations: [
-      { category: "优选行程", text: "节奏舒适不赶路" },
-      { category: "精选酒店", text: "当地 3 钻酒店含早餐" },
-      { category: "缤纷景点", text: "覆盖晋祠与博物院" },
+      { category: "优选行程", text: "一日私家串联晋祠与博物馆，节奏从容不赶路，体验山西人文历史" },
+      { category: "精选酒店", text: "精选当地 3 钻酒店住宿含早餐，方便每日出行与休息，性价比更均衡" },
+      { category: "缤纷景点", text: "覆盖晋祠与山西博物院，兼顾古建与文物鉴赏，行程内容更丰富完整" },
     ],
     cover: {
       source: "ctripLibrary" as const,

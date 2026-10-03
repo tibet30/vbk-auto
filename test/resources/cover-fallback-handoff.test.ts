@@ -1,3 +1,4 @@
+import { runDatabaseMigrations } from "../../src/main/infrastructure/database/parts/migration-registry.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,9 +17,9 @@ const product = {
     recommendation: "推荐",
     features: "特色",
     recommendations: [
-      { category: "优选行程", text: "行程清晰" },
-      { category: "精选酒店", text: "住宿便利" },
-      { category: "缤纷景点", text: "覆盖景点" },
+      { category: "优选行程", text: "一日私家串联晋祠与太原景点，行程清晰不赶路，体验山西人文历史" },
+      { category: "精选酒店", text: "精选当地住宿便利景点与餐饮，方便每日出行与休息，整体体验更舒适" },
+      { category: "缤纷景点", text: "覆盖晋祠等太原周边景点，兼顾古建与美食，城市漫游内容更丰富完整" },
     ],
     cover: { source: "ctripLibrary", poi: "晋祠博物馆" },
   },
@@ -93,15 +94,15 @@ test("运营占位资源符合 VBK 上传尺寸并可作为内存文件载入", 
   assert.ok(data.readUInt32BE(20) >= 800);
   assert.ok(data.length < 8 * 1024 * 1024);
   const uploaded = loadPlaceholderCoverAsset(process.cwd());
-  assert.equal(uploaded.name, "operator-placeholder-cover.png");
+  assert.equal(uploaded.name, "draft-fallback-cover-v2.png");
   assert.deepEqual(uploaded.buffer, data);
 });
 
 test("数据库读回后产品列表标出待换图，真实封面不再标记", () => {
   const db = new Database(":memory:");
   try {
-    db.exec("CREATE TABLE products(id TEXT,name TEXT,status TEXT,product_id TEXT,product_json TEXT,updated_at TEXT)");
-    const insert = db.prepare("INSERT INTO products VALUES(?,?,?,?,?,?)");
+    runDatabaseMigrations(db);
+    const insert = db.prepare("INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at) VALUES(?,?,?,?,?,?,'2026-09-29')");
     const fallback = applyCoverFallback(product, "no_qualified_candidate").nextProduct;
     insert.run("needs-cover", "待换封面", "review", null, JSON.stringify(fallback), "2026-09-29");
     insert.run("has-cover", "已有封面", "review", null, JSON.stringify({

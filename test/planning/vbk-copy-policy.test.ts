@@ -134,9 +134,9 @@ test("规划阶段用已验证替代词修复首次文案后才写入", async ()
     recommendationCategory: "优选行程",
     recommendation: "首次到访西藏，行程安排清晰",
     recommendations: [
-      { category: "优选行程", text: "高原风光与城市文化结合" },
-      { category: "精选酒店", text: "住宿安排与每日行程衔接" },
-      { category: "缤纷景点", text: "预留舒缓节奏适应高原环境" },
+      { category: "优选行程", text: "高原风光与城市文化结合，游览节奏舒适" },
+      { category: "精选酒店", text: "住宿安排与每日行程衔接，方便每日出行" },
+      { category: "缤纷景点", text: "预留舒缓节奏适应高原环境，兼顾风光与人文" },
     ],
     features: "<p><strong>行程节奏：</strong>预留适应时间。</p>",
   };

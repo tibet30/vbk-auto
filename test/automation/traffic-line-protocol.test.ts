@@ -934,6 +934,7 @@ test("运行阶段复用产品配置里已核验的大交通端点，全子产�
 
 test("当前可用方式会重验历史 skipped 子产品且不重复创建", async () => {
   let sessionReads = 0;
+  const checkpoints: any[] = [];
   const evaluated: string[] = [];
   const page = {
     vbkSessionGetText: async () => {
@@ -979,6 +980,7 @@ test("当前可用方式会重验历史 skipped 子产品且不重复创建", as
       failureReason: "子产品最终正式条款回读缺少：32269。",
     }],
     stableReadbackSamples: 1,
+    onChildProgress: (progress) => checkpoints.push(progress),
     stableReadbackIntervalMs: 0,
     sleep: async () => {},
   });
@@ -986,6 +988,8 @@ test("当前可用方式会重验历史 skipped 子产品且不重复创建", as
   assert.equal(evaluated.some((endpoint) => /saveLineInfo|saveProductClauses|saveClausePackage/.test(endpoint)), false);
   assert.deepEqual(result.children, []);
   assert.equal(result.skipped?.length, 1);
+  assert.equal(checkpoints.find((item) => !item.failureReason)?.skipped, false, "重验检查点撤销历史跳过标记");
+  assert.equal(checkpoints.at(-1)?.skipped, true, "本次回读失败仍保留跳过证据");
 });
 
 test("当前会话明确不可用时保留 skipped，但不写 verifiedAt 并返回 blocked", async () => {

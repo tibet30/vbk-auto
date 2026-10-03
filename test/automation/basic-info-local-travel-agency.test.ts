@@ -77,6 +77,13 @@ test("basic API 的行政短名匹配仍拒绝同名多候选", () => {
   ], "大理"), /2 个规范候选/);
 });
 
+test("潮汕行政城市在平台边界映射汕头，保留本地锁定值并拒绝不一致锚点", () => {
+  const product = { basicInfo: { meetingCity: "潮汕", destinationCity: "潮汕" } };
+  assert.equal(resolveBasicInfoCityAnchor(product), "汕头");
+  assert.equal(product.basicInfo.meetingCity, "潮汕");
+  assert.throws(() => resolveBasicInfoCityAnchor({ basicInfo: { meetingCity: "潮汕", destinationCity: "汕头" } }), /同一已锁定城市/);
+});
+
 test("遗留省级城市锚点使用已确认的接送城市自愈", () => {
   assert.equal(resolveBasicInfoCityAnchor({
     basicInfo: { meetingCity: "河南", destinationCity: "河南" },

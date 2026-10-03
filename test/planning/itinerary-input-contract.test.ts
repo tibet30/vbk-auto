@@ -5,6 +5,29 @@ import { classifyItineraryInputMode, itineraryInputContractError } from "../../s
 import { extractLockedConstraints } from "../../src/main/agent/prompt-helpers.js";
 import { agentPatchOperations } from "../../src/main/agent/integration-patch.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
+import { selfRepairItineraryForVbk } from "../../src/main/planning/itinerary-self-repair.js";
+
+test("日喀则真实卡点：或选项核验收敛后允许继续修正文案和末日住宿", () => {
+  const product = draft("第一天：接火车 → 萨迦古城 → 萨迦寺 → 冲拉山欣赏珠峰东坡 → 住日喀则。\n第二天：帕拉庄园 → 满拉水库 → 卡若拉冰川 → 羊卓雍湖 → 住日喀则。\n第三天：日喀则博物馆或非遗中心参观 → 扎什伦布寺参观 → 送火车。");
+  Object.assign(product.product.basicInfo!, { days: 3, nights: 2, meetingCity: "日喀则", destinationCity: "日喀则" });
+  product.product.itinerary = [
+    { day: 1, spots: ["萨迦古城", "萨迦寺", "冲拉山欣赏珠峰东坡"].map(name => ({ name })) },
+    { day: 2, spots: ["帕拉庄园", "满拉水库", "卡若拉冰川", "羊卓雍湖"].map(name => ({ name })) },
+    { day: 3, hotel: "日喀则当地5钻酒店", hotelDescription: "送火车日不实际安排住宿", spots: [
+      { name: "日喀则博物馆", poiName: "日喀则博物馆", poiId: 79437758, relation: "or", timeOfDay: "morning" },
+      { name: "非遗中心参观", poiName: null, poiId: null, relation: "or", timeOfDay: "morning" },
+      { name: "扎什伦布寺参观", poiName: "扎什伦布寺", poiId: 76348, relation: "and", timeOfDay: "afternoon" },
+    ] },
+  ] as never;
+  const repaired = selfRepairItineraryForVbk(product.product.itinerary, 2);
+  assert.equal(itineraryInputContractError(product, repaired.itinerary), undefined);
+  assert.equal(repaired.itinerary[2].hotel, "无");
+  product.product.itinerary = repaired.itinerary as never;
+  assert.doesNotThrow(() => agentPatchOperations(product, { itinerary: [{ day: 3, description: "参观后送站" }] }));
+  const tampered = structuredClone(repaired.itinerary);
+  (tampered[2].spots as Array<Record<string, unknown>>)[0].poiId = 123;
+  assert.match(itineraryInputContractError(product, tampered) ?? "", /保留|缺失/);
+});
 
 function draft(userIdea: string, intent?: ProductDetail["planning"]): ProductDetail {
   const product = buildProductSnapshot({ destination: "成都", days: 2, productForm: "privateTour" });
@@ -72,6 +95,32 @@ test("大于号和箭头分隔的完整日程会逐点锁定", () => {
     { day: 1, spots: [{ name: "宽窄巷子" }, { name: "武侯祠" }, { name: "锦里" }] },
     { day: 2, spots: [{ name: "都江堰" }, { name: "青城山" }] },
   ]) ?? "", /完整|重排|替换/);
+});
+
+test("完整行程中的送火车活动不是额外景点，不能用其他活动类型掩盖新增景点", () => {
+  const product = draft("D1：宽窄巷子。D2：武侯祠 → 送火车。\n沿用最近产品要求：2天1晚私家团。");
+  const route = [{ day: 1, spots: [{ name: "宽窄巷子" }] },
+    { day: 2, spots: [{ name: "武侯祠" }, { name: "送火车", kind: "other" }] }];
+  assert.equal(itineraryInputContractError(product, route), undefined);
+  route[1]!.spots[1] = { name: "锦里", kind: "other" };
+  assert.match(itineraryInputContractError(product, route) ?? "", /新增或替换景点.*锦里/);
+});
+
+test("日喀则三日实际回放保持景点和二选一，排除接送与末尾运营说明", () => {
+  const product = draft("第一天：接火车 → 萨迦古城 → 萨迦寺 → 冲拉山欣赏珠峰东坡 → 住日喀则。\n第二天：帕拉庄园 → 满拉水库 → 卡若拉冰川 → 羊卓雍湖 → 住日喀则。\n第三天：日喀则博物馆或非遗中心参观 → 扎什伦布寺参观 → 送火车。\n沿用最近产品要求：3天2晚私家团，当地5钻酒店、不含餐。");
+  product.product.basicInfo!.days = 3;
+  const route = [
+    { day: 1, spots: ["萨迦古城", "萨迦寺", "冲拉山欣赏珠峰东坡"].map(name => ({ name })) },
+    { day: 2, spots: ["帕拉庄园", "满拉水库", "卡若拉冰川", "羊卓雍湖"].map(name => ({ name })) },
+    { day: 3, spots: [
+      { name: "日喀则博物馆", relation: "or", timeOfDay: "morning" },
+      { name: "非遗中心参观", relation: "or", timeOfDay: "morning" },
+      { name: "扎什伦布寺参观", relation: "and", timeOfDay: "afternoon" },
+      { name: "送火车", kind: "other" },
+    ] },
+  ];
+  assert.equal(itineraryInputContractError(product, route), undefined);
+  assert.equal(extractLockedConstraints(product).pois.includes("接火车"), false);
 });
 
 test("二选一必须完整保留，并以同一时段的 or 关系进入 VBK 录入链路", () => {

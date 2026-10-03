@@ -30,9 +30,9 @@ function fillLocalPreparation(target: ReturnType<typeof product>) {
     recommendation: "两日慢游成都",
     features: "专车接送与精选酒店",
     recommendations: [
-      { category: "服务保障", text: "专车接送行程更省心" },
-      { category: "精选酒店", text: "入住当地五钻酒店" },
-      { category: "特色美食", text: "覆盖宽窄巷子小吃" },
+      { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
+      { category: "精选酒店", text: "优先安排当地高品质住宿，位置与卫生双重把关，整体休息体验更舒适安心" },
+      { category: "特色美食", text: "沿途安排宽窄巷子与本地老店特色小吃，餐食与景点结合，体验更丰富" },
     ],
     cover: {
       source: "ctripLibrary",
@@ -146,9 +146,9 @@ test("确认卡可见就绪度消费权威 evaluator，不再出现旧 readiness
   p.product.presentation = {
     recommendation: "推荐", features: "特色",
     recommendations: [
-      { category: "优选行程", text: "节奏舒适不赶路" },
-      { category: "精选酒店", text: "当地 3 钻酒店含早餐" },
-      { category: "缤纷景点", text: "覆盖晋祠与博物院" },
+      { category: "优选行程", text: "一日私家串联晋祠与博物馆，节奏从容不赶路，体验山西人文历史" },
+      { category: "精选酒店", text: "精选当地 3 钻酒店住宿含早餐，方便每日出行与休息，性价比更均衡" },
+      { category: "缤纷景点", text: "覆盖晋祠与山西博物院，兼顾古建与文物鉴赏，行程内容更丰富完整" },
     ],
     cover: {
       source: "ctripLibrary",

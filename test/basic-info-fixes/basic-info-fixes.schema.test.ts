@@ -94,7 +94,7 @@ test("shouldRefillBasicInfo 任意 productId 已存在都重跑 basic", () => {
 
 test("阶段重试只重新调用 API，不再打开产品编辑页", async () => {
   const source = readAutomationSource();
-  const start = source.indexOf("export async function runAutomation");
+  const start = source.indexOf("export async function runAutomation(");
   const runSource = source.slice(start, source.indexOf("\n// FILE:", start));
   assert.match(runSource, /ensureBasicInfoApi\(/);
   assert.doesNotMatch(runSource, /openProductEditor\(/);
@@ -107,10 +107,10 @@ test("retryFrom>0 保留恢复日志并由统一执行链导航", async () => {
   // 填写统一交给下方 runPhaseWithRecovery(makeCtx("basic", basicExecute, 0))
   // 这一处。
   const source = readAutomationSource();
-  const start = source.indexOf("export async function runAutomation");
+  const start = source.indexOf("export async function runAutomation(");
   const runSource = source.slice(start, source.indexOf("\n// FILE:", start));
 
-  assert.match(runSource, /已从 \$\{retryFrom\} 阶段继续录入（将进入对应模块页面）/);
+  assert.match(runSource, /已从 \$\{retryFrom\} 阶段继续录入（通过 API 保存并回读）/);
   assert.doesNotMatch(runSource, /openProductEditor\(/);
   assert.doesNotMatch(runSource, /fillAndSaveBasicInfo\(/);
 

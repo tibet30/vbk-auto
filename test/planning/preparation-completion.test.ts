@@ -31,9 +31,9 @@ function completeDraft(): ProductDetail {
     recommendation: "两日慢游成都",
     features: "专车接送与精选酒店",
     recommendations: [
-      { category: "服务保障", text: "专车接送行程更省心" },
-      { category: "精选酒店", text: "入住当地五钻酒店" },
-      { category: "特色美食", text: "覆盖宽窄巷子小吃" },
+      { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
+      { category: "精选酒店", text: "优先安排当地高品质住宿，位置与卫生双重把关，整体休息体验更舒适安心" },
+      { category: "特色美食", text: "沿途安排宽窄巷子与本地老店特色小吃，餐食与景点结合，体验更丰富" },
     ],
     cover: { source: "ctripLibrary", imageId: 101001, imageUrl: "https://example.test/kuanzhai-cover.jpg", poi: "宽窄巷子", description: "宽窄巷子横版封面", minQuality: 3 },
   };

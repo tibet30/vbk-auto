@@ -67,6 +67,23 @@ test("Tibet 产品创建发送完整快照并读取服务端记录", async (t) =
   assert.deepEqual(await service.upsert(product), product);
 });
 
+test("本地执行耗时不随产品创建和更新提交到远端", async t => {
+  const store = fixture(t);
+  const local = { ...product, executionTime: { elapsedMs: 3000, running: false, historicalIncomplete: false } };
+  const sent: unknown[] = [];
+  const service = createTibetProductService(store, {
+    baseUrl: "https://example.test",
+    fetchImpl: async (_input, init) => {
+      sent.push(JSON.parse(String(init?.body)).product);
+      return response({ code: 200, data: { product } });
+    },
+  });
+  await service.upsert(local);
+  await service.update(local, 1);
+  assert.deepEqual(sent, [product, product]);
+  assert.equal(local.executionTime.elapsedMs, 3000);
+});
+
 test("Tibet 产品详情保留 aiUsage 且不混入 product 正文", async (t) => {
   const store = fixture(t);
   const withUsage: ProductDetail = {

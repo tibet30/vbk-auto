@@ -8,9 +8,9 @@ import {
 import { RECOMMENDATION_CATEGORIES } from "../../src/main/automation/schema/schema.js";
 
 const recommendations = [
-  { category: "优选行程", text: "行程安排合理" },
-  { category: "精选酒店", text: "精选舒适酒店" },
-  { category: "缤纷景点", text: "覆盖代表性景点" },
+  { category: "优选行程", text: "行程安排合理，节奏舒适不赶路，整体节奏方便一日游走多个核心点" },
+  { category: "精选酒店", text: "精选舒适酒店，住宿衔接景点与餐饮，方便每日出行与休息，整体体验舒适" },
+  { category: "缤纷景点", text: "覆盖代表性景点与核心游览区域，兼顾自然风光与人文古迹，行程内容更丰富" },
 ];
 
 let browser: Browser;

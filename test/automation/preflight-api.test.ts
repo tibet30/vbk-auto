@@ -15,9 +15,9 @@ const success = (payload: Record<string, unknown>) => ({
 const preflightPresentation = {
   cover: { source: "ctripLibrary", imageId: 99001 },
   recommendations: [
-    { category: "服务保障", text: "专属行程服务" },
-    { category: "贴心赠送", text: "出行贴心安排" },
-    { category: "精选酒店", text: "舒适住宿体验" },
+    { category: "服务保障", text: "专属行程服务全程跟随，接送与衔接清晰，陌生路况也可安心出行" },
+    { category: "贴心赠送", text: "出行贴心安排，覆盖接送与餐饮赠送，体验更丰富，整体安排更省心" },
+    { category: "精选酒店", text: "舒适住宿体验当地品质酒店，方便每日出行与休息，整体体验更舒适" },
   ],
   features: "<p>潮州深度体验</p>",
 };

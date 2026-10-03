@@ -56,6 +56,8 @@ export interface ProductSummary {
   revision?: number;
   /** 本机最近一条一键创建任务；不写入 Tibet 产品业务快照。 */
   workflowTask?: ProductWorkflowTask;
+  /** 本机执行耗时，不进入产品业务数据。 */
+  executionTime?: import("./product-execution-time.js").ProductExecutionTime;
 }
 
 export interface CreateProductInput {

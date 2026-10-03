@@ -87,6 +87,8 @@ export interface VbkApi {
     logout(): Promise<void>;
   };
   products: {
+    /** Optional local telemetry capability; older preload builds use list snapshots. */
+    executionTimes?(ids: string[]): Promise<Record<string, import("./product-execution-time.js").ProductExecutionTime>>;
     list(): Promise<ProductSummary[]>;
     create(input: CreateProductInput): Promise<ProductDetail>;
     get(id: string): Promise<ProductDetail>;

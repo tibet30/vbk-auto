@@ -60,6 +60,8 @@ function positiveNumber(value: unknown): boolean {
 export function productNeedsVehicleResource(product: unknown): boolean {
   const record = objectValue(product);
   const sales = objectValue(record?.sales);
+  // VBK 禁止跟团游和半自助游绑定用车资源组；历史配置不能覆盖团态限制。
+  if (sales?.productForm === "groupTour" || sales?.productForm === "semiSelfGuided") return false;
   if (requiresVehicleResource(sales?.productForm)) return true;
 
   const operations = objectValue(record?.operations);

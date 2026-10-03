@@ -8,7 +8,17 @@ export type ItinerarySpotLike = {
   description?: unknown;
   poiId?: unknown;
   poiName?: unknown;
+  remark?: unknown;
 };
+
+export const RETAINED_TEXT_ONLY_POI_REMARK = "已保留原景点和原行程位置，仅以文字录入";
+export const RETAINED_TEXT_ONLY_DETAIL_PATTERN = /已保留原景点和原行程位置/u;
+
+/** Only an explicit retained-text marker changes how an unresolved spot is written. */
+export function effectiveItinerarySpotKind(spot: ItinerarySpotLike): ItineraryActivityKind {
+  if (!hasCompletePoi(spot) && text(spot.remark).includes(RETAINED_TEXT_ONLY_POI_REMARK)) return "other";
+  return itinerarySpotKind(spot);
+}
 
 const SERVICE_ACTIVITY = /(接团|送团|接机|送机|接站|送站|接送|航拍|无人机|办理入住|集合|解散|乘车|返程)/u;
 const PLACE_SUFFIX = /(博物馆|纪念馆|美术馆|科技馆|文化馆|展览馆|图书馆|剧院|戏楼|书院|古镇|古城|古街|老街|步行街|小吃街|一条街|街区|景区|风景区|公园|广场|山|湖|寺|观|宫|城墙|遗址|陵|社)$/u;
@@ -25,7 +35,7 @@ export function itinerarySpotKind(spot: ItinerarySpotLike): ItineraryActivityKin
 }
 
 export function requiresItineraryPoi(spot: ItinerarySpotLike): boolean {
-  return itinerarySpotKind(spot) === "attraction";
+  return effectiveItinerarySpotKind(spot) === "attraction";
 }
 
 export function hasCompletePoi(spot: ItinerarySpotLike): boolean {

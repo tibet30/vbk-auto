@@ -26,6 +26,8 @@ export interface AgentApproval {
   status: "pending" | "approved" | "invalidated";
   createdAt: string;
   intentVersion?: string;
+  /** Explicit full replay of this completed automation; normal recovery remains resumable. */
+  replayOfAutomationRunId?: string;
 }
 export interface AgentRun {
   id: string;

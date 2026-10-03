@@ -8,6 +8,7 @@
  * 外层调用方按 errorCode 决定 retry / 回退 / 报错。
  */
 
+import { rewritePresentationCopy } from "./presentation-copy-rewriter.js";
 import OpenAI, { APIConnectionError, APIConnectionTimeoutError, AuthenticationError, RateLimitError } from "openai";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AiUsageEvent, AiUsageSource, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
@@ -142,6 +143,11 @@ export class MiniMaxService {
    * / empty_model_output 等可重试错误最多重试 4 次；最终抛 MiniMaxServiceError。
    * 区分首版生成（强制携带 patch）与对话微调（patch 可选但仍要走结构化）。
    */
+  async rewritePresentationCopy(input: { message: string; product: Record<string, unknown> }): Promise<AiResponse> {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 AI API Key。");
+    return rewritePresentationCopy(this.client(replyTimeout()), this.config.model, input);
+  }
+
   async reply(input: {
     message: string;
     product: Record<string, unknown>;

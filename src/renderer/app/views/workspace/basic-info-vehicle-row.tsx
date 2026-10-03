@@ -20,6 +20,7 @@ import { parseRequestedTotalCostDraft } from "./review-summary-basic-info.helper
 import styles from "./review-summary-basic-info.module.less";
 
 export interface BasicInfoVehicleRowProps {
+  bindingVerified?: boolean;
   resourceGroupId: number | null;
   resourceGroupName: string | null;
   requestedTotalCost: number | null;
@@ -33,6 +34,7 @@ export interface BasicInfoVehicleRowProps {
 }
 
 export function BasicInfoVehicleRow({
+  bindingVerified = false,
   resourceGroupId,
   resourceGroupName,
   requestedTotalCost,
@@ -172,7 +174,9 @@ export function BasicInfoVehicleRow({
             ) : (
               <strong>待输入全程总成本并搜索 VBK</strong>
             )}
-            <span className={styles.tag} data-tone="ai">手动可改 · 待核查</span>
+            <span className={styles.tag} data-tone={bindingVerified ? "ok" : "ai"}>
+              {bindingVerified ? "资源已核验 · 成本可改" : "手动可改 · 待核查"}
+            </span>
           </div>
         )}
       </div>

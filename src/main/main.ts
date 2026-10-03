@@ -42,6 +42,7 @@ import {
 } from "./infrastructure/vbk-cookie-store.js";
 import { createAppAuthStore, LOCAL_APP_AUTH_FILE_NAME } from "./infrastructure/app-auth-store.js";
 import { createTibetAuthService, type TibetAuthService } from "./infrastructure/tibet-auth.js";
+import { createTibetCopyRuleSync } from "./infrastructure/tibet-copy-rules.js";
 import { createTibetProductService } from "./infrastructure/tibet-products.js";
 import { MiniMaxService } from "./minimax/minimax.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "./planning/adapters/openai-compatible-adapter.js";
@@ -414,6 +415,12 @@ app.whenReady().then(async () => {
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
   const appAuth = createTibetAuthService(appAuthStore);
   const remoteProducts = createTibetProductService(appAuthStore);
+  const copyRules = createTibetCopyRuleSync(appAuthStore, db);
+  const syncCopyRules = () => { void copyRules.sync().catch(() => {}); };
+  syncCopyRules();
+  const copySyncTimer = setInterval(syncCopyRules, 60_000);
+  copySyncTimer.unref();
+  app.once("before-quit", () => clearInterval(copySyncTimer));
   const vbkBindings = createVbkBindingBootstrap({
     appAuthStore,
     db,
@@ -499,7 +506,7 @@ app.whenReady().then(async () => {
   context.enqueueProductTask = (product) => productTaskScheduler.enqueue(product);
   context.abandonProductTask = (taskId) => productTaskScheduler.abandon(taskId);
   context.resumeProductTask = (taskId, mode) => productTaskScheduler.resume(taskId, mode);
-  registerIpc(context, appAuth, { onAuthenticated: vbkBindings.onAuthenticated });
+  registerIpc(context, appAuth, { onAuthenticated: async (user, source) => { syncCopyRules(); await vbkBindings.onAuthenticated(user, source); } });
   await openMainWindow();
   updateService.scheduleStartupCheck();
   updateService.schedulePeriodicCheck();
@@ -533,6 +540,7 @@ app.on("window-all-closed", () => {
 });
 let isDisposing = false;
 app.on("before-quit", (event) => {
+  db?.executionClock.dispose();
   if (isQuittingForUpdate) return;
   if (isDisposing || !browser) return;
   isDisposing = true;

@@ -336,6 +336,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
 
           {vehicleVisible ? (
             <BasicInfoVehicleRow
+              bindingVerified={product.status === "draft_saved" && product.automation?.phases.some(phase => phase.phase === "vehicleResource" && phase.status === "completed")}
               resourceGroupId={snapshot.vehicleResource.resourceGroupId}
               resourceGroupName={snapshot.vehicleResource.resourceGroupName}
               requestedTotalCost={snapshot.vehicleResource.requestedTotalCost}

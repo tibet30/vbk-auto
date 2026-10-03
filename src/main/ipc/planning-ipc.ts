@@ -169,6 +169,7 @@ export function registerPlanningIpc(context: MainIpcContext): void {
         providerLabel = resolveAiProviderLabel(turnSettings);
         planner = new OpenAICompatiblePlannerAdapter({
           apiKey: decryptedKey,
+          presentationRejectedWords: db.listRejectedPresentationWords(),
           baseUrl: providerProfile.baseUrl,
           model: providerProfile.model,
           ...planningTransportOptions(turnSettings.aiProvider),

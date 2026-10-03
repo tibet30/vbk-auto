@@ -136,7 +136,7 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
     },
     async (request) => {
       args.getSettings();
-      return (await args.aiService()).reply({ ...request, history: [] });
+      return (await args.aiService()).rewritePresentationCopy(request);
     },
   );
   const services = { window, browser, automation };

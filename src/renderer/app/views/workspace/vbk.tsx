@@ -22,7 +22,7 @@ import {
   copyText,
   formatBrowserPath,
   phaseDisplayLabel,
-  VBK_NAV_SECTIONS,
+  visibleVbkNavSections,
 } from "../../helpers";
 import { TrafficLineProgress } from "../../helpers/traffic-line-progress";
 import type { AppModel } from "../../app.main.model";
@@ -76,7 +76,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     (task) => task.state !== "confirmed" && task.state !== "resolved",
   );
   const reviewSections = useMemo(
-    () => VBK_NAV_SECTIONS.map((section) => ({
+    () => visibleVbkNavSections(product).map((section) => ({
       section,
       state: aggregateSectionState(
         section,
@@ -87,7 +87,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
       ),
       url: product ? section.buildUrl(product.productId) : null,
     })),
-    [product?.productId, product?.automation?.currentPhase, automationRecovery, automationPhases],
+    [product, automationRecovery, automationPhases],
   );
   if (!product) return null;
   const automationSucceeded = product.automation?.status === "succeeded" && product.status === "draft_saved";
@@ -107,8 +107,8 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
             {readiness.ready ? <CheckCircle2 size={18} /> : <CircleHelp size={18} />}
           </div>
           <div className={styles.readinessHeroBody}>
-            <strong>{readiness.ready ? "产品方案已就绪" : "先回到第一步完成核查"}</strong>
-            <small>{readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
+            <strong>{automationSucceeded ? "产品草稿已保存" : readiness.ready ? "产品方案已就绪" : "先回到第一步完成核查"}</strong>
+            <small>{automationSucceeded ? "全部录入阶段已通过远端回读。" : readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
           </div>
           <div className={styles.readinessHeroProgress}>
             <strong>{readiness.completion}%</strong>
@@ -120,7 +120,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
               <span className={layout.panelNum}>C</span>
               <strong className={styles.productSectionTitle}>自动录入进度</strong>
               <span className={styles.productSectionMeta}>
-                {product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
+                {automationSucceeded ? "全部完成" : product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
               </span>
             </div>
             <div className={styles.automation}>

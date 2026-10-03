@@ -12,7 +12,7 @@ export const PRODUCT_FEATURES_RICH_TEXT_GUIDE = `features 必须是 JSON 字符�
 
 function escapeText(value: string): string {
   return value
-    .replace(/&(?!(?:amp|lt|gt|quot|#39|#\d+);)/gi, "&amp;")
+    .replace(/&(?!(?:amp|lt|gt|quot|#39|#\d+|#x[0-9a-f]+);)/gi, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
@@ -109,6 +109,10 @@ export function productFeaturesPlainText(value: unknown): string {
     .replace(/&nbsp;/gi, " ")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&#(x[0-9a-f]+|\d+);/gi, (entity, code: string) => {
+      const point = code[0]?.toLowerCase() === "x" ? parseInt(code.slice(1), 16) : Number(code);
+      return point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : entity;
+    })
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&amp;/gi, "&")

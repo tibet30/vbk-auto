@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Circle, LoaderCircle, Plane, TrainFront } from "lucide-react";
 import type { ProductDetail } from "../../../shared/contracts.js";
 import styles from "./traffic-line-progress.module.less";
+import { trafficLineChildStatus, trafficLineEndpointHint, latestTrafficLineEndpointPlan } from "./traffic-line-child-status.js";
 
 type TransportKind = "flightRoundTrip" | "trainRoundTrip";
 type UnknownRecord = Record<string, unknown>;
@@ -55,7 +56,7 @@ function verifiedEndpoints(
   // 自动化检查点的 endpointPlan 同样只在受控候选核验成功后写入；用它
   // 支持既有产品的只读复核记录，无须把它伪装成已创建的子产品。
   const checkpoint = record(record(automation)?.trafficLine);
-  const endpointPlan = record(availability?.endpointPlan) ?? record(checkpoint?.endpointPlan);
+  const endpointPlan = latestTrafficLineEndpointPlan(checkpoint?.endpointPlan, availability?.endpointPlan);
   const variants = Array.isArray(availability?.availableVariants)
     ? availability.availableVariants
     : (["flight", "train"] as const).flatMap((kind) => record(endpointPlan?.[kind]) ? [kind === "flight" ? "flightRoundTrip" : "trainRoundTrip"] : []);
@@ -100,9 +101,7 @@ function childFrom(kind: TransportKind, value: unknown, endpoint?: unknown): Chi
   const arrival = place(item.arrival) || place(route.arrival) || place(item.arrivalStation) || place(item.arrivalAirport) || place(endpointPlan.arrival);
   const departure = place(item.departure) || place(route.departure) || place(item.departureStation) || place(item.departureAirport) || place(endpointPlan.departure);
   const completed = new Set(Array.isArray(item.completedStages) ? item.completedStages.filter((stage): stage is string => typeof stage === "string") : []);
-  const status = text(item.status, item.state, item.nodeStatus)
-    || (item.skipped === true ? "skipped" : undefined)
-    || (item.verified === true ? "completed" : text(item.failedStage) ? "failed" : completed.size ? "running" : "pending");
+  const status = trafficLineChildStatus(item, completed.size > 0);
   const rawNodes = record(item.nodes) || record(item.workflowNodes) || {};
   const failedStage = text(item.failedStage);
   const nodes = NODE_LABELS.map(([key, label], index) => {
@@ -168,7 +167,7 @@ export function TrafficLineProgress({ automation, product }: { automation: Produ
               {statusLabel(card.status)}
             </span>
           </div>
-          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />端点已确认 · 待写入 VBK</p> : null}
+          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />{trafficLineEndpointHint(card.status, Boolean(card.childId))}</p> : null}
           <dl className={styles.details}>
             <div><dt>抵达</dt><dd>{card.arrival || "待根据行程规划"}</dd></div>
             <div><dt>返程</dt><dd>{card.departure || "待根据行程规划"}</dd></div>

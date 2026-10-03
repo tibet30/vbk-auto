@@ -6,6 +6,8 @@ import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
 import { ProductStatusBadge, productTaskStageLabel } from "./product-task-status";
+import { useProductExecutionTimes } from "../state/product-execution-time";
+import { ProductExecutionTimeLabel } from "./product-execution-time-label";
 export { ProductBriefForm } from "./product-brief-form";
 
 export function WorkbenchModule({
@@ -58,6 +60,7 @@ export function ProductList({ products, onOpen, onDelete, onResumeTask }: {
   ) => Promise<boolean>;
 }) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const executionTimes = useProductExecutionTimes(products);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [resumingTaskId, setResumingTaskId] = useState<string | null>(null);
   const remove = async (item: ProductSummary) => {
@@ -80,7 +83,7 @@ export function ProductList({ products, onOpen, onDelete, onResumeTask }: {
       {products.map((item) => (
         <li className={styles.productListItem} key={item.id}>
           <ProductRow
-            item={item}
+            item={{ ...item, executionTime: executionTimes[item.id] }}
             disabled={Boolean(deletingId) || Boolean(resumingTaskId)}
             confirming={confirmingId === item.id}
             deleting={deletingId === item.id}
@@ -147,6 +150,8 @@ function ProductRow({ item, disabled, confirming, deleting, resuming, onOpen, on
             </span>
             <span className={styles.metaSep} aria-hidden="true">·</span>
             <span className={`${styles.metaItem} ${styles.metaMuted}`}>更新 {formatUpdatedAt(item.updatedAt)}</span>
+            <span className={styles.metaSep} aria-hidden="true">·</span>
+            <span className={`${styles.metaItem} ${styles.metaMuted}`}><ProductExecutionTimeLabel time={item.executionTime} /></span>
           </span>
           {item.workflowTask && (
             <span className={styles.productTaskLine} data-status={item.workflowTask.status}>

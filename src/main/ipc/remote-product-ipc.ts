@@ -19,6 +19,7 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
     const workflowTask = db.latestWorkflowTaskForProduct(product.id);
     return {
       ...product,
+      executionTime: db.getProductExecutionTimes([product.id])[product.id],
       ...(workflowTask ? {
         workflowTask,
         updatedAt: Date.parse(workflowTask.updatedAt) > Date.parse(product.updatedAt)
@@ -27,6 +28,12 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
       } : {}),
     };
   }));
+  ipcMain.handle("products:executionTimes", (_event, ids: string[]) => {
+    if (!Array.isArray(ids) || ids.length > 100 || ids.some(id => typeof id !== "string" || !id.trim())) {
+      throw new Error("耗时查询必须提供不超过 100 个产品 ID。");
+    }
+    return db.getProductExecutionTimes(ids);
+  });
   ipcMain.handle("workflowTasks:list", () => {
     db.completeSavedProductWorkflowTasks();
     return db.listWorkflowTasks();

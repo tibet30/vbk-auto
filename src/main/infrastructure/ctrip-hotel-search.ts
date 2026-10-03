@@ -11,6 +11,7 @@ import { hotelDiamondFromTier } from "../../shared/hotel-tiers.js";
 import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { itineraryAttractions } from "../../shared/itinerary-activity-kind.js";
+import { toWritableAdministrativeCityName, hotelLocationFromHotelText } from "../../shared/region-overrides.js";
 
 export const CTRIP_HOTEL_SUGGEST_ENDPOINT = "https://m.ctrip.com/restapi/soa2/21881/json/gaHotelSearchEngine";
 export { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
@@ -145,30 +146,26 @@ export async function resolveItineraryHotelCandidates(
   limitItineraryHotelStays(nextItinerary, nights);
   for (const [index, day] of nextItinerary.entries()) {
     if (!shouldResolveItineraryHotelForDay(day, index, nights)) continue;
-    const spots = Array.isArray(day.spots) ? day.spots.map(record).filter(Boolean) : [];
-    const last = spots.at(-1);
-    const lodgingCity = hotelAnchorNameForDay(day, preferredCity);
-    const spotCity = toPlatformShortLocationName(text(last?.city));
-    const contextCity = lodgingCity || spotCity;
+    const contextCity = hotelSearchContextCityForDay(day, preferredCity);
     const anchorNames = hotelSearchAnchorNames(day, contextCity);
     let anchor: Context | undefined;
-    for (const anchorName of anchorNames) {
-      const contexts = await fetchCtripHotelContext(anchorName);
-      try {
-        anchor = selectCtripHotelContext(contexts, {
-          anchorName, preferredCity: contextCity, requirePreferredCity: Boolean(contextCity),
-        });
-        break;
-      } catch (error) {
-        if (anchorName === anchorNames.at(-1)) throw error;
-      }
-    }
-    if (!anchor) throw new Error("缺少可定位的酒店检索地标。");
     let candidates: CtripHotelCandidate[];
     try {
+      for (const anchorName of anchorNames) {
+        const contexts = await fetchCtripHotelContext(anchorName);
+        try {
+          anchor = selectCtripHotelContext(contexts, {
+            anchorName, preferredCity: contextCity, requirePreferredCity: Boolean(contextCity),
+          });
+          break;
+        } catch (error) {
+          if (anchorName === anchorNames.at(-1)) throw error;
+        }
+      }
+      if (!anchor) throw new Error("缺少可定位的酒店检索地标。");
       candidates = await fetchCtripHotelCandidates(anchor, dates, fetch, hotelTier);
     } catch (error) {
-      const city = contextCity || anchor.cityName || "未识别城市";
+      const city = contextCity || anchor?.cityName || "未识别城市";
       const diamond = hotelDiamondFromTier(hotelTier);
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`第 ${Number(day.day) || index + 1} 天住宿（检索城市：${city}，要求：${diamond ? `当地${diamond}钻` : hotelTier || "未配置档次"}）未完成：${reason}`);
@@ -176,7 +173,7 @@ export async function resolveItineraryHotelCandidates(
     const selected = candidates[0]!;
     day.hotel = selected.hotelName;
     day.hotelCandidates = candidates;
-    day.hotelDescription = `优先入住${selected.hotelName}（${selected.diamond}钻，距${anchor.name}${selected.distanceKm}km）；备选：${candidates.slice(1).map((item) => item.hotelName).join("、")}`;
+    day.hotelDescription = `优先入住${selected.hotelName}（${selected.diamond}钻，距${anchor!.name}${selected.distanceKm}km）；备选：${candidates.slice(1).map((item) => item.hotelName).join("、")}`;
     day.description = text(day.description).replace("入住当地住宿（待匹配）", `入住${selected.hotelName}`);
     dailyCandidates.push({ day: Number(day.day), candidates });
   }
@@ -219,13 +216,24 @@ export function hotelAnchorNameForDay(day: Record<string, unknown>, preferredCit
 }
 
 /** 先用同城末景点定位距离；异地末景点则直接按明确的住宿城市检索。 */
+export function hotelSearchContextCityForDay(day: Record<string, unknown>, preferredCity?: string): string {
+  const explicit = hotelAnchorNameForDay(day, preferredCity)
+    || hotelLocationFromHotelText([day.hotel, day.hotelDescription].map(text).join(" "));
+  const city = explicit || text(preferredCity);
+  if (city) return toPlatformShortLocationName(toWritableAdministrativeCityName(city));
+  const rawSpots = Array.isArray(day.spots)
+    ? day.spots.map(record).filter((spot): spot is Record<string, unknown> => Boolean(spot)) : [];
+  const spots = itineraryAttractions(rawSpots) as Array<Record<string, unknown>>;
+  return toPlatformShortLocationName(toWritableAdministrativeCityName(text(spots.at(-1)?.city)));
+}
+
 export function hotelSearchAnchorNames(day: Record<string, unknown>, preferredCity?: string): string[] {
   const rawSpots = Array.isArray(day.spots) ? day.spots.map(record).filter((spot): spot is Record<string, unknown> => Boolean(spot)) : [];
   const spots = itineraryAttractions(rawSpots) as Array<Record<string, unknown>>;
   const last = spots.at(-1);
   const spotName = text(last?.poiName) || text(last?.name);
   const spotCity = toPlatformShortLocationName(text(last?.city));
-  const lodgingCity = hotelAnchorNameForDay(day, preferredCity);
+  const lodgingCity = hotelSearchContextCityForDay(day, preferredCity);
   // An other/free-only day has no POI anchor.  Keep hotel search viable by using
   // the locked planning city instead of accidentally querying an activity title.
   if (!lodgingCity) return spotName ? [spotName] : (toPlatformShortLocationName(text(preferredCity)) ? [toPlatformShortLocationName(text(preferredCity))] : []);

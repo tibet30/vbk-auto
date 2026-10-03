@@ -255,6 +255,31 @@ const MIGRATIONS: Migration[] = [
       `ALTER TABLE products ADD COLUMN product_json_version INTEGER NOT NULL DEFAULT 0`,
     ],
   },
+  {
+    id: "0014_vbk_copy_feedback",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS vbk_copy_feedback (
+        word TEXT NOT NULL,module TEXT NOT NULL,paths_json TEXT NOT NULL,
+        source TEXT NOT NULL,detail TEXT NOT NULL,first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,hits INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY(word,module)
+      )`,
+      `CREATE TABLE IF NOT EXISTS vbk_copy_recovery (
+        local_product_id TEXT PRIMARY KEY,payload_json TEXT NOT NULL,updated_at TEXT NOT NULL
+      )`,
+    ],
+  },
+  {
+    id: "0015_product_execution_time",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS product_execution_time (
+        local_product_id TEXT PRIMARY KEY,
+        elapsed_ms INTEGER NOT NULL,
+        active_since INTEGER,
+        historical_incomplete INTEGER NOT NULL
+      )`,
+    ],
+  },
 ];
 
 /** 在 VbkDatabase 启动时调用一次：按顺序应用 migrations。 */

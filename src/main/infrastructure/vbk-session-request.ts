@@ -13,6 +13,7 @@ export interface VbkSessionNativeRequest {
   referrerPolicy?: VbkReferrerPolicy;
   includeCidQuery: boolean;
   requireReadableCid: boolean;
+  timeoutMs?: number;
 }
 
 export type VbkSessionNativeResult = VbkSessionRequestResult;
@@ -315,7 +316,7 @@ export async function vbkSessionRequest<TBody extends object>(
     ) as VbkSessionRequestResult;
   } catch (error) {
     if (!browser.vbkSessionFetch
-      || !/Failed to fetch|NetworkError|CORS|Execution context was destroyed|Cannot find context with specified id/i.test(String(error))) {
+      || !/Failed to fetch|NetworkError|CORS|Execution context was destroyed|Cannot find context with specified id|Target page, context or browser has been closed/i.test(String(error))) {
       throw error;
     }
     result = await browser.vbkSessionFetch({
@@ -327,6 +328,7 @@ export async function vbkSessionRequest<TBody extends object>(
       referrerPolicy: options.referrerPolicy,
       includeCidQuery: options.includeCidQuery !== false,
       requireReadableCid: options.requireReadableCid === true,
+      timeoutMs: browserRequestTimeoutMs,
     });
   }
   if (result.status < 200 || result.status >= 300) {

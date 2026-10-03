@@ -17,9 +17,7 @@
  * 启动只做 `runDatabaseMigrations()` 建表 + 列变更；任何写入都直接满足当前 schema。
  */
 
-import Database from "better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
+import { ProductExecutionDatabase } from "./execution-database.js";
 
 import type {
   AccountFixedInfo,
@@ -45,6 +43,7 @@ import type {
   MemoryMaintenanceState,
 } from "../../../shared/contracts.js";
 import { getAgentSnapshot, saveAgentSnapshot } from "./parts/agent.js";
+import * as copyFeedback from "./parts/vbk-copy-feedback.js";
 import {
   getCachedCtripPoiAvailability,
   saveCachedCtripPoiAvailability,
@@ -70,7 +69,6 @@ import {
 
 import { OPERATION_LOG_CAP, appendOperationLog, countOperationLog, queryOperationLog, recoverOrphanOperationLog, type OperationLogRow } from "./parts/operation-log.js";
 import { deletePlanningState, loadPlanningState, recoverOrphanPlanningStates, savePlanningState } from "./parts/planning-state.js";
-import { runDatabaseMigrations } from "./parts/migration-registry.js";
 import { hasColumn } from "./parts/migrations.js";
 import {
   fixedInfoSchema as partFixedInfoSchema,
@@ -125,17 +123,9 @@ import {
  * 实现策略：所有 SQL 都委托给 parts/ 子模块；本类仅做"对外统一 facade"
  * ——保持 VbkDatabase.method() 调用形态不变，避免修改 IPC handler / 测试。
  */
-export class VbkDatabase {
-  private db: Database.Database;
+export class VbkDatabase extends ProductExecutionDatabase {
   /** Optional Tibet extension user id for scoped accountFixedInfo reads. */
   private extensionUserIdResolver: (() => number | null) | null = null;
-
-  constructor(dataPath: string) {
-    fs.mkdirSync(dataPath, { recursive: true });
-    this.db = new Database(path.join(dataPath, "vbk-desktop.sqlite"));
-    this.db.pragma("journal_mode = WAL");
-    runDatabaseMigrations(this.db);
-  }
 
   setExtensionUserIdResolver(resolver: (() => number | null) | null): void {
     this.extensionUserIdResolver = resolver;
@@ -148,6 +138,11 @@ export class VbkDatabase {
   getSetting(key: string) {
     return getSetting(this.db, key);
   }
+  listLocalRejectedPresentationWords() { return copyFeedback.listRejectedPresentationWords(this.db); }
+  listRejectedPresentationWords() { return copyFeedback.listRejectedPresentationWords(this.db, this.extensionUserIdResolver?.()); }
+  recordCopyFeedback(entry: Parameters<typeof copyFeedback.recordCopyFeedback>[1]) { copyFeedback.recordCopyFeedback(this.db, entry); }
+  getPresentationCopyRecovery(id: string) { return copyFeedback.getPresentationCopyRecovery(this.db, id); }
+  savePresentationCopyRecovery(id: string, entry: Parameters<typeof copyFeedback.savePresentationCopyRecovery>[2]) { copyFeedback.savePresentationCopyRecovery(this.db, id, entry); }
   setSetting(key: string, value: string) {
     setSetting(this.db, key, value);
   }
@@ -315,6 +310,7 @@ export class VbkDatabase {
   }
   saveAgentSnapshot(snapshot: AgentSnapshot): void {
     saveAgentSnapshot(this.db, snapshot);
+    this.executionClock.setEnabled(snapshot.localProductId, snapshot.run?.status === "running", "agent");
   }
 
   // ─────────────────────────────────────────────────────────────────────

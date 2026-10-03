@@ -118,10 +118,11 @@ export function createTibetProductService(
       return items as ProductSummary[];
     },
     async upsert(product) {
+      const { executionTime: _localTelemetry, ...snapshot } = product;
       const envelope = await request("/api/extension/desktop-products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: product.id, product }),
+        body: JSON.stringify({ client_id: product.id, product: snapshot }),
       });
       const data = record(envelope.data);
       const saved = productDetail(data?.product);
@@ -129,10 +130,11 @@ export function createTibetProductService(
       return saved;
     },
     async update(product, expectedRevision) {
+      const { executionTime: _localTelemetry, ...snapshot } = product;
       const envelope = await request(`/api/extension/desktop-products/${encodeURIComponent(product.id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: product.id, expected_revision: expectedRevision, product }),
+        body: JSON.stringify({ client_id: product.id, expected_revision: expectedRevision, product: snapshot }),
       }, true);
       const data = record(envelope.data);
       const saved = productDetail(data?.product);

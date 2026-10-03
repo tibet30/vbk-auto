@@ -20,99 +20,15 @@ import type {
   ResearchTask,
   TaskStatus,
 } from "../../../../shared/contracts.js";
-import {
-  canonicalPoiResearchTaskLabel,
-  poiResearchTaskName,
-} from "../../../../shared/poi-research-tasks.js";
+import { coalescePoiResearchTasks } from "./product-research-tasks.js";
 import { parseAndNormalizeProductJson } from "../product-json-normalize.js";
-import { readActiveCoverFallback } from "../../../../shared/cover-fallback.js";
 import { automationJournalImport, type StoredAutomationRun } from "./automation-journal-merge.js";
 import { buildProductSnapshot } from "./product-draft.js";
+import { ensureProductExecutionTime, readProductExecutionTime } from "../../../operations/product-execution-clock.js";
 import { now, newId } from "./types.js";
-
-function preferLogicalPoiTask(current: ResearchTask, candidate: ResearchTask): ResearchTask {
-  const rank: Record<ResearchTask["state"], number> = {
-    proposed: 0,
-    researching: 1,
-    blocked: 2,
-    confirmed: 3,
-    resolved: 4,
-    needs_confirmation: 2,
-  };
-  return rank[candidate.state] > rank[current.state] ? candidate : current;
-}
-
-/**
- * Legacy POI rows remain untouched for auditability. Detail reads expose their
- * semantic union as one canonical task, so operators do not see duplicate work.
- */
-function coalescePoiResearchTasks(tasks: ResearchTask[]): ResearchTask[] {
-  const result: ResearchTask[] = [];
-  const groups = new Map<string, ResearchTask[]>();
-  for (const task of tasks) {
-    const name = poiResearchTaskName(task.label, task.type);
-    if (!name) {
-      result.push(task);
-      continue;
-    }
-    const key = `${task.type}::${name}`;
-    groups.set(key, [...(groups.get(key) ?? []), task]);
-  }
-  for (const group of groups.values()) {
-    const primary = group.reduce(preferLogicalPoiTask);
-    const detail = [...new Set(group.map((task) => task.detail).filter((value): value is string => !!value))].join("；") || undefined;
-    const evidence = group.flatMap((task) => task.evidence ?? []);
-    result.push({
-      ...primary,
-      label: canonicalPoiResearchTaskLabel(primary.label, primary.type),
-      detail,
-      evidence,
-    });
-  }
-  return result;
-}
-
-/**
- * 产品列表（按 updated_at 倒序）。
- */
-export function listProducts(db: Database.Database): ProductSummary[] {
-  return (db.prepare("SELECT id,name,status,product_id,product_json,updated_at FROM products ORDER BY updated_at DESC").all() as Array<Record<string, string>>)
-    .map(productSummaryFromRow);
-}
-
-/** 分页产品列表结果。 */
-export interface ProductListPage {
-  items: ProductSummary[];
-  total: number;
-}
-
-/**
- * 分页产品列表（按 updated_at 倒序）。
- * page 从 1 起；pageSize 默认 10。
- */
-export function listProductsPaginated(db: Database.Database, page: number, pageSize = 10): ProductListPage {
-  const total = (db.prepare("SELECT COUNT(*) AS n FROM products").get() as { n: number }).n;
-  const offset = Math.max(0, (page - 1) * pageSize);
-  const items = (db.prepare(
-    "SELECT id,name,status,product_id,product_json,updated_at FROM products ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-  ).all(pageSize, offset) as Array<Record<string, string>>)
-    .map(productSummaryFromRow);
-  return { items, total };
-}
-
-function productSummaryFromRow(row: Record<string, string>): ProductSummary {
-  let coverNeedsReplacement = false;
-  try {
-    coverNeedsReplacement = Boolean(readActiveCoverFallback(JSON.parse(row.product_json) as Record<string, unknown>));
-  } catch {
-    // A malformed historical product remains visible in the list.
-  }
-  return {
-    id: row.id, name: row.name, status: row.status as ProductSummary["status"],
-    productId: row.product_id || undefined, updatedAt: row.updated_at,
-    ...(coverNeedsReplacement ? { coverNeedsReplacement } : {}),
-  };
-}
+import { updateProduct } from "./product-update.js";
+export { updateProduct } from "./product-update.js";
+export { listProducts, listProductsPaginated, type ProductListPage } from "./product-list.js";
 
 export function createProduct(db: Database.Database, input: CreateProductInput): ProductDetail {
   return importProductSnapshot(db, buildProductSnapshot(input));
@@ -204,6 +120,7 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
     }
   });
   restore();
+  ensureProductExecutionTime(db, snapshot.id);
   return {
     ...getProduct(db, snapshot.id)!,
     vbkAccount: snapshot.vbkAccount,
@@ -228,6 +145,7 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
     status: product.status as ProductDetail["status"],
     productId: product.product_id || undefined,
     updatedAt: product.updated_at,
+    executionTime: readProductExecutionTime(db, id),
     productJsonVersion: Number((product as Record<string, unknown>).product_json_version ?? 0) || 0,
     product: parseAndNormalizeProductJson(product.product_json),
     messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
@@ -368,30 +286,6 @@ export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
   });
   tx();
   return touchedProducts;
-}
-
-/**
- * 写入产品 product_json，可选更新 status。直接覆盖整个 product 字段。
- */
-export function updateProduct(
-  db: Database.Database,
-  id: string,
-  product: Record<string, unknown>,
-  status?: ProductSummary["status"],
-  expectedVersion?: number,
-) {
-  const basicInfo = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
-    ? product.basicInfo as Record<string, unknown>
-    : undefined;
-  const nextName = typeof basicInfo?.supplierProductName === "string"
-    ? basicInfo.supplierProductName.trim()
-    : "";
-  const current = db.prepare("SELECT product_json_version FROM products WHERE id=?").get(id) as { product_json_version?: number } | undefined;
-  if (!current) throw new Error("产品不存在");
-  const expected = expectedVersion ?? (Number(current.product_json_version ?? 0) || 0);
-  const result = db.prepare("UPDATE products SET product_json=?, name=CASE WHEN ?<>'' THEN ? ELSE name END, status=COALESCE(?,status), updated_at=?, product_json_version=product_json_version+1 WHERE id=? AND product_json_version=?")
-    .run(JSON.stringify(product), nextName, nextName, status || null, now(), id, expected);
-  if (result.changes === 0) throw new Error("产品内容已变更，请刷新后重试。");
 }
 
 /**

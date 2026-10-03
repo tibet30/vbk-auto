@@ -10,8 +10,8 @@
  *         接收已选 place { poiId, ... }，调 searchImage（soa2/12719/searchImage）
  *         拿 imageIds，再用 fetchCtripImageInfoMap 拉详情（thumbnail / preview /
  *         score / resolution / poiName / ...）；
- *   - 旧入口 searchCtripLibraryImages 保留为「自动取首个 POI」的兼容 wrapper，
- *     内部等价于「places → 取第一个 → searchImage → getImageInfo」；
+ *   - 旧入口 searchCtripLibraryImages 优先选择唯一精确同名 POI，
+ *     没有精确同名时保留首项兼容行为；
  *   - 浏览器侧的 fetch 都在 BrowserView evaluate 内完成，cookie / header /
  *     原始响应 body 不走 IPC，不进主进程日志；
  *   - **evaluate 函数体序列化到 BrowserView 里执行**，因此**不能**引用模块
@@ -38,6 +38,7 @@ import {
   type CoverPlaceSearchSessionContext,
 } from "./cover-place-search-logger.js";
 import { vbkSessionRequest } from "./vbk-session-request.js";
+import { selectAutomaticLibraryPlace } from "./ctrip-library-place-selection.js";
 import {
   SUGGESTPOI_ENDPOINT,
   SEARCH_IMAGE_ENDPOINT,
@@ -194,7 +195,7 @@ export async function searchCtripLibraryImagesForPlace(
 /**
  * 携程图库封面查询主入口（cover:searchCtripLibrary 旧链路 / 向后兼容 wrapper）：
  *  1. 调 suggestPoiPlaces 解析所有候选；
- *  2. 取第一个合法 POI（与旧 single-stage 行为一致）；
+ *  2. 优先唯一精确同名 POI；没有精确同名时取首项，同名歧义拒绝自动选择；
  *  3. 调 searchImage 拿 imageIds；
  *  4. 调 fetchCtripImageInfoMap 把 imageId 转成完整 URL / 评分 / 分辨率；
  *  5. 按搜索顺序组装 CtripLibrarySearchResult 返回；
@@ -212,7 +213,7 @@ export async function searchCtripLibraryImages(
   if (placesResult.places.length === 0) {
     throw new Error(`suggestPoi 未找到匹配 POI：${placesResult.keyword}`);
   }
-  const first = placesResult.places[0];
+  const first = selectAutomaticLibraryPlace(placesResult.places, placesResult.keyword);
   return searchCtripLibraryImagesForPlace(
     browser,
     { keyword: placesResult.keyword, place: first },

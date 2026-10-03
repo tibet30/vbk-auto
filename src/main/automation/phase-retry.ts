@@ -28,7 +28,11 @@ export function preparePhaseRetry(
   const interruptedRecovery = failed?.status === "running"
     && previous.recovery?.phases[retryPhase]?.state === "needs_user"
     && previous.recovery.phases[retryPhase].finalError === "应用重启导致自动录入被中断";
-  if (failed?.status !== "failed" && !interruptedRecovery) {
+  const parentAfterTrafficFailure = retryPhase === "preflight" && failed?.status === "pending"
+    && previous.phases.some((phase) => phase.phase === "trafficLine" && phase.status === "failed")
+    && phases.slice(0, retryIndex).filter((phase) => phase !== "trafficLine")
+      .every((phase) => previous.phases.some((item) => item.phase === phase && item.status === "completed"));
+  if (failed?.status !== "failed" && !interruptedRecovery && !parentAfterTrafficFailure) {
     throw new Error(`阶段 ${retryPhase} 当前不是失败状态。`);
   }
 
@@ -38,7 +42,8 @@ export function preparePhaseRetry(
     currentPhase: retryPhase,
     phases: phases.map((phase, index) => ({
       phase,
-      status: index < retryIndex && previous.phases.find((item) => item.phase === phase)?.status === "completed"
+      status: parentAfterTrafficFailure && phase === "trafficLine" ? "failed"
+        : index < retryIndex && previous.phases.find((item) => item.phase === phase)?.status === "completed"
         ? "completed"
         : "pending",
     })),

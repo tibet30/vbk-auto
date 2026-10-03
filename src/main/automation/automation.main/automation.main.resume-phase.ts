@@ -55,6 +55,12 @@ export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: 
   if (failedPhase === "trafficLine" && product.automation?.phases.some((phase) => phase.phase === failedPhase)
     && product.automation.phases.find((phase) => phase.phase === failedPhase)?.status === "failed") {
     const phases = draftPhasesFor(parseProduct(product.product));
+    if (product.productId && product.automation.phases.some((item) => item.phase === "preflight" && item.status === "pending")
+      && phases.includes("preflight") && phases
+      .filter((phase) => phase !== "trafficLine" && phase !== "preflight")
+      .every((phase) => product.automation?.phases.some((item) => item.phase === phase && item.status === "completed"))) {
+      return "preflight";
+    }
     if (phases.includes(failedPhase)) return failedPhase;
     return phases.find((phase) => product.automation?.phases.find((item) => item.phase === phase)?.status !== "completed");
   }
@@ -66,5 +72,5 @@ export function isVerifiedAutomationComplete(product: ProductDetail): boolean {
   return Boolean(product.productId && product.automation?.status === "succeeded"
     && product.automation.phases.some(item => item.phase === "preflight" && item.status === "completed")
     && draftPhasesFor(parseProduct(product.product)).every(phase =>
-      product.automation!.phases.some(item => item.phase === phase && item.status === "completed")));
+      phase === "trafficLine" || product.automation!.phases.some(item => item.phase === phase && item.status === "completed")));
 }

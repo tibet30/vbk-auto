@@ -127,7 +127,7 @@ export async function ensureTrafficLinePhase({
   const skipped = result.skipped ?? [];
   const confirmedAvailable = new Set(executableConfig.availability?.availableVariants ?? []);
   // 端点存在不等于当前班期有可售资源；平台明确无资源时保留
-  // skipped 证据并继续母产品预检，会话/保存/回读失败仍必须阻断。
+  // skipped 证据；会话/保存/回读失败保留子产品失败态，由外层继续母产品预检。
   const unresolvedAvailable = skipped.filter((item) => confirmedAvailable.has(item.variant)
     && !isUnavailableTrafficResourceFailure(item.reason, item.variant));
   if (unresolvedAvailable.length) {

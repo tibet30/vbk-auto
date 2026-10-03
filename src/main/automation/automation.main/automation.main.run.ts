@@ -11,6 +11,7 @@
  * API 阶段使用登录会话与明确的产品 ID；页面仅在回读后同步显示。
  * 手动封面上传依赖编辑页，必须在执行前完成导航。
  */
+import { runDraftPhaseWithRecovery } from "./optional-traffic-phase.js";
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
 import { prepareBackfilledPhaseRecovery, preparePhaseRetry, prepareQueuedPhaseResume } from "../phase-retry.js";
@@ -54,7 +55,7 @@ import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
 /**
  * 单个产品自动化阶段主循环：
  *   - retryFrom 为 undefined 时从第 0 阶段跑完整轮；否则按 preparePhaseRetry 重置并按该阶段重跑；
- *   - 任一阶段 needs_user → run.status="failed" + 更新 product 为 blocked 并 return；
+ *   - 母产品阶段 needs_user → failed/blocked；大交通失败保留证据并继续预检。
  *   - 任一阶段 cancelled → ctx.markCancelled 接管；handler 抛错走 catch；
  *   - 全部完成 → status=succeeded，附 desktop-draft 截图落档。
  *
@@ -286,7 +287,6 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         preflight: () => executePhase("preflight", () => runProductPreflightApi(page, product, productId!)),
       };
 
-      // 每个阶段共用 run，并从数据库读取最新产品 ID。
       const makeCtx = (phase: string, execute: () => Promise<unknown>, phaseIndex: number): RecoveryContext => {
         const latestProductId = ctx.db.getProduct(localProductId)?.productId;
         return {
@@ -314,7 +314,6 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         };
       };
 
-      // basic 阶段也走 runner：attempt 1..3，最多 3 次；runner 不创建新草稿。
       // 仅在 startIndex === 0（首次运行或重跑 basic）时跑 basic；中间阶段
       // 重试（startIndex > 0）偏好「在当前页面去重试」，不再强制跑 basic
       // 段，信任之前的 basic 阶段已完成，避免其 clickSection 把页面拽回
@@ -351,7 +350,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         const handler = handlers[phase];
         if (!handler) throw new Error(`未注册的阶段：${phase}`);
         log(`正在保存：${phase}`);
-        const outcome = await runPhaseWithRecovery(makeCtx(phase, handler, index));
+        const outcome = await runDraftPhaseWithRecovery(makeCtx(phase, handler, index));
+        if (phase === "trafficLine" && outcome.status === "needs_user") continue;
         if (outcome.status === "needs_user") {
           run.status = "failed";
           run.phases[index].status = "failed";

@@ -11,12 +11,15 @@ export function resolveRunStatusAfterSinglePhaseSuccess(
   run: AutomationRun,
   originalRunStatus: AutomationRun["status"],
 ): AutomationRun["status"] {
-  if (run.phases.length > 0 && run.phases.every((phase) => phase.status === "completed")) {
+  const parentPhases = run.phases.filter((phase) => phase.phase !== "trafficLine");
+  const parentVerified = parentPhases.some((phase) => phase.phase === "preflight" && phase.status === "completed")
+    && parentPhases.every((phase) => phase.status === "completed");
+  if (parentVerified || (run.phases.length > 0 && run.phases.every((phase) => phase.status === "completed"))) {
     return "succeeded";
   }
 
-  const hasUnresolvedFailure = run.phases.some((phase) => phase.status === "failed")
-    || Object.values(run.recovery?.phases ?? {}).some((recovery) => recovery.state === "needs_user");
+  const hasUnresolvedFailure = parentPhases.some((phase) => phase.status === "failed")
+    || Object.entries(run.recovery?.phases ?? {}).some(([phase, recovery]) => phase !== "trafficLine" && recovery.state === "needs_user");
   const hasPendingPhase = run.phases.some((phase) => phase.status === "pending");
   if (originalRunStatus === "failed" && !hasUnresolvedFailure && hasPendingPhase) {
     return "queued";

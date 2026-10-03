@@ -7,12 +7,13 @@
  *     仍有后续 pending 阶段，则切为 queued，允许从断点继续。
  */
 
-import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
+import type { RecoveryContext } from "../recovery/recovery.js";
 import {
   parseProduct,
   pickKeySpotsFromItinerary,
   shouldRefillBasicInfo,
 } from "../schema/schema.js";
+import { runDraftPhaseWithRecovery } from "./optional-traffic-phase.js";
 import { prepareSinglePhaseRetry } from "../phase-retry.js";
 import {
   fillAndSaveTerms,
@@ -302,9 +303,16 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         shouldCancel: () => ctx.cancellationRequested.has(localProductId),
       };
 
-      const outcome = await runPhaseWithRecovery(recoveryCtx);
+      const outcome = await runDraftPhaseWithRecovery(recoveryCtx);
       switch (outcome.status) {
         case "needs_user":
+          if (phaseName === "trafficLine") {
+            run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
+            run.currentPhase = undefined;
+            writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>,
+              run.status === "succeeded" ? "draft_saved" : run.status === "failed" ? "blocked" : "review");
+            break;
+          }
           run.status = "failed";
           run.phases[phaseIndex].status = "failed";
           run.currentPhase = phaseName;

@@ -28,10 +28,10 @@ import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { needsTrafficLineBackfill } from "../traffic-line-backfill.js";
-import { isVerifiedAutomationComplete } from "./automation.main.resume-phase.js";
+import { approvedRecoveryStartPhase, isVerifiedAutomationComplete } from "./automation.main.resume-phase.js";
 
 import { interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
-export { interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
+export { approvedRecoveryStartPhase, interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
 
 /**
  * The write guard runs before `configureProductShellApi`, yet a rejected
@@ -51,21 +51,6 @@ export function canRestartPreWriteAuthorizationFailure(
       && run.phases.every((phase) => phase.status === "pending")
       && run.logs.some((entry) => entry.message === "当前任务未处于可录入状态。"),
   );
-}
-
-/**
- * The existing preflight owns the authoritative resource readback and can fill
- * a newly restored hotel resource without replaying later completed modules.
- * Do not inject a synthetic failed phase: phase-retry rightfully rejects it.
- */
-export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: string | undefined): string | undefined {
-  const preflightError = product.automation?.recovery?.phases.preflight?.finalError ?? "";
-  const needsBackfilledHotel = failedPhase === "preflight"
-    && /酒店资源缺少每晚.*携程候选/.test(preflightError)
-    && !product.automation?.phases.some((phase) => phase.phase === "hotelResource")
-    && draftPhasesFor(parseProduct(product.product)).includes("hotelResource");
-  if (needsBackfilledHotel) return "hotelResource";
-  return failedPhase;
 }
 
 /**

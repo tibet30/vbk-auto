@@ -155,7 +155,7 @@ export class AgentTurnLoop {
     const gate = await this.deps.finishVerified(id, { runId: snapshot.run.id, hadWrites, hadRemoteWrites });
     snapshot = this.snapshots.load(id);
     if (!this.snapshots.current(snapshot, token)) return;
-    if (gate.verified) { this.snapshots.finish(snapshot); this.snapshots.save(snapshot); return; }
+    if (gate.verified) { this.snapshots.finish(snapshot, true); this.snapshots.save(snapshot); return; }
     if (gate.finalApproval) {
       const identity = await this.deps.accountFor(id);
       snapshot = this.snapshots.load(id);
@@ -178,7 +178,12 @@ export class AgentTurnLoop {
   private async messages(snapshot: AgentSnapshot): Promise<AgentModelMessage[]> {
     const context = await this.deps.contextFor?.(snapshot.localProductId) ?? "";
     return buildModelMessages(
-      `你是旅行产品操作助手。${context}\n外部写入前必须请求精确范围授权，远端写入后必须读回验证。`,
+      `你是旅行产品操作助手。${context}\n外部写入前必须请求精确范围授权，远端写入后必须读回验证。\n`
+        + "交互方式：执行期间持续简述正在做什么、工具返回了什么以及后续动作；无需用户决策时自动继续。"
+        + "调用 ask_user 时在 summary 中总结本阶段已完成的事、结果、待决定事项和回答后的下一步，再提供明确问题。"
+        + "request_approval 的 summary 要说明已完成的方案与待确认范围。"
+        + "全部工作完成时输出整个请求的最终总结：成果、关键用户决定、验证依据、剩余事项和下一步。"
+        + "暂停、受阻或等待授权不等于任务完成；不得把计划、未保存或未回读的结果描述成已完成。",
       snapshot.events,
     );
   }

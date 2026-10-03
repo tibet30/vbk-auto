@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, MessageCircleMore, Pause, Play, Send } from "lucide-react";
-import type { AgentEvent, ProductDetail, ProductReadiness, VbkApi } from "../../../../shared/contracts";
+import type { ProductDetail, ProductReadiness, VbkApi } from "../../../../shared/contracts";
 import { parseProductBriefMessage } from "../../../../shared/product-brief-message";
 import { AgentInput } from "./agent-input";
-import { groupAgentTimelineEvents } from "./agent-conversation-grouping";
-import { AgentAssistantThread, AgentEventItem, STATUS } from "./agent-conversation-items";
+import { AgentStageTimeline } from "./agent-stage-timeline";
+import { STATUS } from "./agent-conversation-items";
 import { useAgentSession } from "./use-agent-session";
 import shared from "../shared.module.less";
 import layout from "./layout.module.less";
@@ -15,15 +15,6 @@ const PHASE_NAMES: Record<string, string> = {
   pricingInventory: "价格与库存", hotelResource: "住宿资源", vehicleResource: "用车资源", terms: "条款", trafficLine: "大交通", preflight: "整体核验",
 };
 function scopeLabel(scope: string) { return PHASE_NAMES[scope.replace("vbk.write_phase:", "")] ?? scope; }
-
-function TimelineItem({ item, events, userName }: {
-  item: ReturnType<typeof groupAgentTimelineEvents>[number];
-  events: ReturnType<typeof useAgentSession>["snapshot"]["events"];
-  userName: string;
-}) {
-  if (item.kind === "assistant_thread") return <AgentAssistantThread steps={item.steps} events={events} leadingStatus={item.leadingStatus} />;
-  return <AgentEventItem event={item.event} events={events} userName={userName} leadingStatus={item.leadingStatus} />;
-}
 
 function FailureNotice({ failure, disabled, busy, repairing, submitted, onRepair }: {
   failure: NonNullable<ReturnType<typeof latestAutomationFailure>>;
@@ -88,7 +79,6 @@ export function AgentConversation({ product, userName, readiness, client, input,
   const automationFailure = latestAutomationFailure(product);
   const illegalKeywordRepairRequested = events.some((event) => event.data?.illegalKeywordRepair === true);
   const illegalKeywordRepairSubmitted = illegalKeywordRepairRequested && !automationFailure?.affectedPaths.length;
-  const timelineItems = groupAgentTimelineEvents(events);
   const draftKey = `agent-composer:${product.id}`;
   useEffect(() => {
     if (!input) {
@@ -99,9 +89,18 @@ export function AgentConversation({ product, userName, readiness, client, input,
   useLayoutEffect(() => {
     const node = viewport.current;
     if (!node) return;
-    if (follow.current) node.scrollTop = node.scrollHeight;
+    if (history.page > 0) { setUnseen(true); return; }
+    if (follow.current) {
+      node.scrollTop = node.scrollHeight;
+      if (request || approval) {
+        const summary = node.querySelector<HTMLElement>('[data-agent-stage]:last-child [data-stage-summary]');
+        if (summary && summary.offsetHeight > node.clientHeight) {
+          node.scrollTop += summary.getBoundingClientRect().top - node.getBoundingClientRect().top;
+        }
+      }
+    }
     else setUnseen(true);
-  }, [events.length, latestEvent?.id, latestEvent?.content.length, request?.id, approval?.id]);
+  }, [events.length, latestEvent?.id, latestEvent?.content.length, request?.id, approval?.id, snapshot.stages?.at(-1)?.status, history.page]);
   const send = async () => {
     if (!input.trim() || busy || composing.current) return;
     const content = input.trim();
@@ -155,17 +154,16 @@ export function AgentConversation({ product, userName, readiness, client, input,
       {!events.length && !product.messages.length && <p className={styles.empty}>告诉我旅行安排、资源要求，或希望修改的内容。我会结合查询结果完善右侧方案，最后由你确认录入。</p>}
       {history.olderEventCount > 0 && <div className={styles.historyPager} role="status">
         <span>当前显示第 {history.page + 1}/{history.pageCount} 页；更早还有 {history.olderEventCount} 条记录。</span>
-        <button type="button" onClick={() => void loadHistoryPage(Math.min(history.page + 1, history.pageCount - 1))}>查看更早记录</button>
+        <button type="button" onClick={() => { follow.current = false; void loadHistoryPage(Math.min(history.page + 1, history.pageCount - 1)); }}>查看更早记录</button>
       </div>}
       {history.newerEventCount > 0 && <div className={styles.historyPager} role="status">
         <span>较新 {history.newerEventCount} 条记录未在本页显示。</span>
-        <button type="button" onClick={() => void loadHistoryPage(0)}>返回最新记录</button>
+        <button type="button" onClick={() => { follow.current = true; void loadHistoryPage(0); }}>返回最新记录</button>
       </div>}
-      {timelineItems.map((item) => <TimelineItem key={item.kind === "event" ? item.event.id : item.id} item={item} events={events} userName={userName} />)}
+      <AgentStageTimeline snapshot={snapshot} events={events} userName={userName} latestPage={history.page === 0}>
       {request && status === "waiting_input" && <AgentInput key={request.id} request={request} busy={busy} onSubmit={async (response) => { await run((agent) => agent.respond(product.id, response)); }} />}
       {approval?.status === "pending" && status === "waiting_approval" && <section className={styles.approval} aria-label="最终方案确认">
         <strong>确认右侧方案后开始录入</strong>
-        <p>{approval.summary}</p>
         <p className={styles.scope}>目标账号：{approval.accountKey}<br />录入范围：{approval.scope.map(scopeLabel).join("、")}</p>
         {!readiness.ready && <p role="status">本地方案尚未准备完成，不能录入：{readiness.issues.slice(0, 3).map((issue) => issue.label).join("、")}</p>}
         <div className={styles.actions}>
@@ -180,6 +178,7 @@ export function AgentConversation({ product, userName, readiness, client, input,
           }}>继续调整</button>
         </div>
       </section>}
+      </AgentStageTimeline>
       {error && <p className={styles.error} role="alert">{error}</p>}
       {automationFailure ? <FailureNotice failure={automationFailure}
         disabled={busy || repairingKeywords || illegalKeywordRepairSubmitted} busy={busy} repairing={repairingKeywords}
@@ -191,7 +190,7 @@ export function AgentConversation({ product, userName, readiness, client, input,
     }}>有新消息 · 回到最新</button>}
     <div className={styles.composer}>
       <textarea id="agent-composer" aria-label="补充你的要求" placeholder="提出需求、补充文案，或继续调整右侧方案…"
-        value={input} onChange={(event) => setInput(event.target.value)} rows={3} maxLength={6000}
+        value={input} onChange={(event) => setInput(event.target.value)} rows={2} maxLength={6000}
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
         onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
       <div className={styles.actions}>

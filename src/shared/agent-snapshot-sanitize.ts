@@ -11,6 +11,13 @@ export function sanitizeAgentSnapshot(snapshot: AgentSnapshot): AgentSnapshot {
       }
       : snapshot.run,
     events: snapshot.events.map(sanitizeAgentEvent),
+    ...(snapshot.stages ? { stages: snapshot.stages.map((stage) => ({
+      ...stage,
+      ...(stage.summary ? { summary: redactLogString(stage.summary) } : {}),
+      ...(stage.decision ? { decision: redactLogString(stage.decision) } : {}),
+      ...(stage.nextStep ? { nextStep: redactLogString(stage.nextStep) } : {}),
+      returnedActions: stage.returnedActions.map(redactLogString),
+    })) } : {}),
     ...(snapshot.uncertainWrite
       ? {
         uncertainWrite: {

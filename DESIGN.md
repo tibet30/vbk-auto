@@ -81,6 +81,12 @@ The browser is not a modal or separate application window. It is a first-class S
 ## AI Workspace
 
 - Conversation is the primary interaction surface, not a narrow support chat.
+- Use the approved continuous-conversation interaction (variant A): while work is running, expand the assistant's progress, actions, and returned results. Keep raw call parameters behind an explicit details control.
+- At a decision, approval, pause, failure, or completion checkpoint, collapse the preceding process into an expandable record and show the stage summary inline. The summary explains results, unresolved work, the requested decision, and the next action.
+- Keep questions and final approval within the current stage summary. A submitted answer becomes a persistent decision record; the next stage continues below it. A stage answer never grants VBK write authority.
+- Stage identity, summaries, decisions, and event associations belong to persisted Agent state. Reloading or paging history must not manufacture stage boundaries from message wording or discard earlier results.
+- A final summary covers the entire current request and its key decisions. Show completion only after the existing business completion gate passes; pauses, failures, and invalidated approvals remain distinct.
+- Follow new output only while the operator is reading the latest content. When a decision form exceeds the viewport, show its summary first; reading older pages or expanding a process must not force a jump to the newest output.
 - The structured result is always reachable beside or above the conversation inside the AI side; it must never be hidden in raw JSON.
 - AI messages can attach proposed changes, resource matches, evidence, and questions.
 - Proposed data shows an explicit state: proposed, researching, resolved, needs confirmation, confirmed, or blocked.

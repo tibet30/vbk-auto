@@ -129,6 +129,7 @@ export function nativeToolSchemas() {
         additionalProperties: false,
         required: ["questions"],
         properties: {
+          summary: { type: "string", description: "本阶段已做的事、已有结果、需要用户决定的原因，以及回答后将继续做什么。不得把计划写成已完成。" },
           questions: {
             type: "array",
             minItems: 1,

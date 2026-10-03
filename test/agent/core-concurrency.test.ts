@@ -324,7 +324,7 @@ test("restart treats a dispatched external write without a result as uncertain a
   assert.equal(writes, 0);
 });
 
-test("restart closes an interrupted tool group only after authoritative reconciliation", async () => {
+test("restart reconciles the dispatched write but does not complete an omitted read", async () => {
   let stored: AgentSnapshot | undefined = {
     localProductId: "restart-group",
     run: { id: "run", status: "running", createdAt: "x", updatedAt: "x", intentVersion: "intent" },
@@ -356,7 +356,8 @@ test("restart closes an interrupted tool group only after authoritative reconcil
   await core.idle("restart-group");
   const snapshot = await core.get("restart-group");
   assert.equal(executions, 0);
-  assert.equal(snapshot.run?.status, "completed");
+  assert.equal(snapshot.run?.status, "paused");
+  assert.match(snapshot.stages!.at(-1)!.summary!, /未执行/);
   assert.equal(snapshot.events.find((event) => event.type === "tool_result"
     && event.data?.toolCallId === "read-2")?.data?.cancelled, true);
   const history = inputs[0]!.slice(1);

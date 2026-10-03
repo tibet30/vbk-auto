@@ -277,7 +277,7 @@ export class AgentCore {
         const message = reconciliation.message ?? "不确定写入已核对。";
         this.snapshots.reconcileCall(snapshot, uncertain.toolCallId, message);
         snapshot.uncertainWrite = undefined;
-        this.event(snapshot, "status", message, { reconciled: true });
+        this.event(snapshot, "status", message, { reconciled: true, toolCallId: uncertain.toolCallId });
         }
       }
       // The product-list recovery button does not create a new user message.

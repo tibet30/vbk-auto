@@ -146,6 +146,7 @@ export class AgentToolRunner {
         ...(output.data ?? {}),
         ...(tool.write ? { write: true, remoteWrite: requiresApproval } : {}),
         ...(output.uncertainWrite ? { uncertainWrite: true } : {}),
+        ...(output.terminal ? { terminal: true } : {}),
       }, token.runId);
       if (output.uncertainWrite) this.snapshots.markUncertain(snapshot, call.id, output.content);
       if (output.terminal === true && !output.uncertainWrite) this.snapshots.finish(snapshot);
@@ -282,7 +283,8 @@ export class AgentToolRunner {
       reconciledQuestions: [...resolvedIds], toolCallId: call.id,
     }, token.runId);
     snapshot.pendingInput = request;
-    this.snapshots.event(snapshot, "input_request", "需要用户补充信息", { toolCallId: call.id, request }, token.runId);
+    const stageSummary = typeof call.arguments.summary === "string" ? call.arguments.summary.trim() : undefined;
+    this.snapshots.event(snapshot, "input_request", "需要用户补充信息", { toolCallId: call.id, request, ...(stageSummary ? { stageSummary } : {}) }, token.runId);
     this.snapshots.waiting(snapshot, "waiting_input");
     this.snapshots.save(snapshot);
     return "waiting";

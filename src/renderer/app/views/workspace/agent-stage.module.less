@@ -1,0 +1,30 @@
+// A: continuous work followed by a durable checkpoint, keeping decisions inline.
+.stage { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.process { margin-left: 40px; min-width: 0; }
+.process > summary { color: var(--muted-foreground); cursor: pointer; font-size: 12px; padding: 6px 0; }
+.processBody { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.process .processBody { margin-left: -40px; padding-top: 8px; }
+.summary { margin-left: 40px; padding: 12px 0 16px; max-width: calc(100% - 40px); border-top: 1px solid var(--border); color: var(--foreground); }
+.heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.heading strong { font-size: 15px; }
+.heading time { color: var(--muted-foreground); font-size: 11px; }
+.prose { font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.prose p { margin: 0 0 10px; }
+.prose h1, .prose h2, .prose h3 { font-size: 16px; line-height: 1.5; margin: 12px 0 8px; }
+.prose ul, .prose ol { padding-left: 20px; margin: 8px 0; }
+.prose li + li { margin-top: 5px; }
+.prose a { color: var(--link-blue); text-decoration: underline; }
+.prose code { background: var(--muted); padding: 2px 4px; border-radius: var(--radius-sm); }
+.prose pre { overflow-x: auto; padding: 10px; background: var(--muted); }
+.prose :global(.markdown-table-scroll) { overflow-x: auto; }
+.prose table { border-collapse: collapse; font-size: 12px; }
+.prose td, .prose th { border: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+.note, .next { color: var(--muted-foreground); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+.next { margin: 12px 0 0; }
+.decisionRecord { margin: 14px 0 0; padding: 10px 12px; background: var(--muted); border-radius: var(--radius-control); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.decisionRecord strong { font-size: 12px; }
+.interaction { margin-top: 14px; }
+.stage[data-stage-status='failed'] .heading strong, .stage[data-stage-status='paused'] .heading strong { color: var(--warning-amber); }
+.stage[data-stage-status='completed'] .heading strong { color: var(--success-green); }
+.process > summary:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+@media (max-width: 440px) { .summary { margin-left: 0; max-width: 100%; } .heading { align-items: flex-start; } }

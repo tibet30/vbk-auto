@@ -8,7 +8,7 @@ import styles from "./agent-conversation.module.less";
 
 export const STATUS: Record<AgentRunStatus, string> = {
   queued: "等待执行", running: "正在处理", waiting_input: "等待你的回答", waiting_approval: "等待最终确认",
-  paused: "任务已暂停", completed: "本轮已完成", failed: "需要处理", abandoned: "任务已废弃",
+  paused: "任务已暂停", completed: "任务已完成", failed: "需要处理", abandoned: "任务已废弃",
 };
 
 const EVENT_LABEL: Record<AgentEvent["type"], string> = {
@@ -146,12 +146,13 @@ function ThinkingActivity({ event }: { event: AgentEvent }) {
   </details>;
 }
 
-function ToolsActivity({ events, resultEvents = events, leadingStatus }: {
+function ToolsActivity({ events, resultEvents = events, leadingStatus, expanded = false }: {
   events: AgentEvent[];
   resultEvents?: AgentEvent[];
   leadingStatus?: AgentEvent;
+  expanded?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(expanded);
   const pairs = pairMethodBatchEvents(events, resultEvents);
   if (!pairs.length) return null;
   const labels = pairs.map((pair) => toolCallLabel(pair.call));
@@ -160,18 +161,18 @@ function ToolsActivity({ events, resultEvents = events, leadingStatus }: {
   const title = (leadingStatus ? `${statusText(leadingStatus)} · ` : "")
     + `已使用 ${pairs.length} 个工具` + (preview ? ` · ${preview}` : "") + (done < pairs.length ? ` · ${done}/${pairs.length}` : "");
 
-  return <details className={styles.activity} open={open} onToggle={(item) => setOpen(item.currentTarget.open)}>
+  return <details className={styles.activity} data-expanded={expanded || undefined} open={open} onToggle={(item) => setOpen(item.currentTarget.open)}>
     <summary>{title}</summary>
     <div className={styles.activityBody}>
       {pairs.map((pair) => {
         const structured = !!pair.result && /^[\s]*[\[{]/.test(pair.result.content);
-        return <details key={pair.call.id} className={styles.toolRow}>
+        return <details key={pair.call.id} className={styles.toolRow} open={expanded}>
           <summary>
             <span>{toolCallLabel(pair.call)}</span>
             <span className={styles.toolStatus}>{pair.result ? "已返回" : "执行中"}</span>
           </summary>
           <div className={styles.toolRowBody}>
-            <div><strong>调用</strong><pre>{JSON.stringify(pair.call.data?.arguments ?? pair.call.data ?? {}, null, 2)}</pre></div>
+            <details><summary>查看调用参数</summary><pre>{JSON.stringify(pair.call.data?.arguments ?? pair.call.data ?? {}, null, 2)}</pre></details>
             {pair.result && <div><strong>返回</strong><pre>{structured || pair.result.data
               ? `${pair.result.content}${pair.result.data ? `\n\n${JSON.stringify(pair.result.data, null, 2)}` : ""}`
               : pair.result.content}</pre></div>}
@@ -198,10 +199,11 @@ function AssistantIdentity() {
 }
 
 /** Cursor 式助手线程：思考 → 正文 → 工具。 */
-export function AgentAssistantThread({ steps, events, leadingStatus }: {
+export function AgentAssistantThread({ steps, events, leadingStatus, expanded = false }: {
   steps: AgentThreadStep[];
   events: AgentEvent[];
   leadingStatus?: AgentEvent;
+  expanded?: boolean;
 }) {
   const streaming = steps.some((step) => step.kind === "turn" && step.event.data?.streaming === true);
   const consumed = new Set<string>();
@@ -214,7 +216,7 @@ export function AgentAssistantThread({ steps, events, leadingStatus }: {
         leadingStatusAvailable = undefined;
         return <div key={step.id} className={styles.threadTurn}>
           <AssistantIdentity />
-          <ToolsActivity events={step.events} resultEvents={events} leadingStatus={start} />
+          <ToolsActivity events={step.events} resultEvents={events} leadingStatus={start} expanded={expanded} />
         </div>;
       }
       const following = steps[index + 1];
@@ -226,7 +228,7 @@ export function AgentAssistantThread({ steps, events, leadingStatus }: {
         <AssistantIdentity />
         <ThinkingActivity event={step.event} />
         <AssistantAnswer event={step.event} />
-        {methods ? <ToolsActivity events={methods.events} resultEvents={events} leadingStatus={start} /> : null}
+        {methods ? <ToolsActivity events={methods.events} resultEvents={events} leadingStatus={start} expanded={expanded} /> : null}
       </div>;
     })}
   </div>;

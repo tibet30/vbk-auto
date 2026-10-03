@@ -96,7 +96,7 @@
 .historyPager { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--muted); color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
 .historyPager button { flex: 0 0 auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); padding: 5px 8px; font: inherit; cursor: pointer; }
 .inputRequest, .approval { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
-.inputRequest fieldset { padding: 0; border: 0; margin: 18px 0; min-width: 0; }
+.inputRequest fieldset { padding: 0; border: 0; margin: 12px 0; min-width: 0; }
 .inputRequest legend { font-size: 13px; margin-bottom: 8px; line-height: 1.6; }
 .inputRequest legend span { color: var(--muted-foreground); font-size: 11px; }
 .inputRequest textarea, .composer textarea { width: 100%; resize: vertical; background: var(--surface); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--radius-control); padding: 10px 12px; font: inherit; line-height: 1.6; box-sizing: border-box; }
@@ -109,7 +109,7 @@
 .scope { font-size: 12px; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .composer { padding: 14px 18px; border-top: 1px solid var(--border); background: var(--surface); }
-.composer textarea { max-height: 180px; min-height: 78px; margin-bottom: 10px; }
+.composer textarea { max-height: 180px; min-height: 64px; margin-bottom: 8px; }
 .shortcut { flex: 1; text-align: right; color: var(--muted-foreground); font-size: 11px; }
 .newMessages { position: absolute; bottom: 174px; align-self: center; padding: 8px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--foreground); color: var(--surface); cursor: pointer; }
 .abandon { font-size: 12px; margin-top: 10px; line-height: 1.8; }
@@ -120,3 +120,6 @@
 @media (max-width: 880px) { .timeline { padding: 12px; } .composer { padding: 12px; } .status { padding: 10px 12px; flex-wrap: wrap; } .failureNotice, .message, .assistantThread, .systemNote { max-width: calc(100% - 40px); } .shortcut { display: none; } }
 @media (max-width: 440px) { .failureRepair { align-items: flex-start; flex-direction: column; } .repairAction { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .timeline { scroll-behavior: auto; } .assistantProse[data-streaming='true']::after, .activity > summary::after { animation: none; transition: none; } }
+
+.activity[data-expanded='true'] .activityBody { max-height: none; background: transparent; padding: 6px 0; }
+.assistantProse { background: transparent; padding: 6px 0; }

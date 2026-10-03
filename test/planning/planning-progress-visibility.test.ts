@@ -61,7 +61,7 @@ test("阶段标签总是中文，避免 event state 直接泄漏裸 stage id", (
 test("方案对话保留独立滚动容器和新消息提示", () => {
   const agent=read("src/renderer/app/views/workspace/agent-conversation.tsx");
   assert.match(agent, /ref=\{viewport\}/);
-  assert.match(agent, /if \(follow.current\) node.scrollTop = node.scrollHeight/);
+  assert.match(agent, /if \(follow.current\) \{\s*node.scrollTop = node.scrollHeight/);
   assert.match(agent, /有新消息/);
   assert.doesNotMatch(agent, /ref=\{browserRef\}/);
 });

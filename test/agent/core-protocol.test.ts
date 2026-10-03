@@ -155,7 +155,7 @@ test("pure queries complete without invoking a write completion gate", async () 
   assert.equal(gates, 0);
 });
 
-test("denied, cancelled, failed, and no-op local writers complete without final approval", async () => {
+test("denied, cancelled and failed local writers pause; no-op completes without final approval", async () => {
   for (const [id, data] of [
     ["denied", { preparationDenied: true, changedSections: [] }],
     ["cancelled", { cancelled: true }],
@@ -176,7 +176,7 @@ test("denied, cancelled, failed, and no-op local writers complete without final 
     await core.send(id, "保持现状");
     await core.idle(id);
     const snapshot = await core.get(id);
-    assert.equal(snapshot.run?.status, "completed");
+    assert.equal(snapshot.run?.status, id === "no-op" ? "completed" : "paused");
     assert.equal(snapshot.pendingApproval, undefined);
     assert.equal(gates, 0);
   }
@@ -203,7 +203,7 @@ test("reading repairs a legacy synthetic approval created from a denied write", 
     ],
   });
   const snapshot = await core.get("legacy-noop");
-  assert.equal(snapshot.run?.status, "completed");
+  assert.equal(snapshot.run?.status, "paused");
   assert.equal(snapshot.pendingApproval, undefined);
   assert.ok(snapshot.events.some((event) => event.type === "approval"
     && /错误确认请求/.test(event.content)));

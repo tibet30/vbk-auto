@@ -1,3 +1,4 @@
+import { hydrateAgentStages, recordAgentStageEvent } from '../../../src/shared/agent-stage-lifecycle';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgentConversation } from '../../../src/renderer/app/views/workspace/agent-conversation';
@@ -18,17 +19,20 @@ let snapshot: AgentSnapshot = {localProductId:'fixture',run:{id:'run-1',status:'
   {id:'6',runId:'run-1',type:'tool_result',createdAt:now(),content:'{"items":["亲子主题酒店"]}',data:{toolCallId:'b',status:'verified'}},
   {id:'7',runId:'run-1',type:'assistant',createdAt:now(),content:'<think>资源已齐，向用户确认节奏和文案。</think>\n需要你补充两点后再继续完善方案。',data:{modelTurnId:'turn-2'}},
 ]};
+snapshot.events.push({id:'input',runId:'run-1',type:'input_request',createdAt:now(),content:'需要补充',data:{request,stageSummary:'已查询景点与酒店资源，需要你决定行程节奏并补充文案。回答后继续完善方案。'}});
+snapshot.events.push({id:'waiting',runId:'run-1',type:'status',createdAt:now(),content:'等待你的决定',data:{status:'waiting_input'}});
+hydrateAgentStages(snapshot);
 const listeners = new Set<(s:AgentSnapshot)=>void>();
 const emit = () => { snapshot = {...snapshot,updatedAt:now(),run:snapshot.run?{...snapshot.run,updatedAt:now()}:null}; const display={...snapshot,events:snapshot.events.slice(-120),eventCount:snapshot.events.length}; for(const fn of listeners) fn(structuredClone(display)); return structuredClone(display); };
-const log=(type:any,content:string,data?:any)=>snapshot.events.push({id:crypto.randomUUID(),runId:'run-1',type,content,data,createdAt:now()});
+const log=(type:any,content:string,data?:any)=>{ const event={id:crypto.randomUUID(),runId:'run-1',type,content,data,createdAt:now()};snapshot.events.push(event);recordAgentStageEvent(snapshot,event); };
 const client = {
   agent:{get:async()=>({ ...structuredClone(snapshot), events:structuredClone(snapshot.events.slice(-120)), eventCount:snapshot.events.length }),getHistory:async(_id:string,page:number)=>{
     const size=120;const end=snapshot.events.length-page*size;const start=Math.max(0,end-size);const pageCount=Math.max(1,Math.ceil(snapshot.events.length/size));
     return {events:structuredClone(snapshot.events.slice(start,end)),page,pageCount,olderEventCount:start,newerEventCount:snapshot.events.length-end};
-  },send:async(_id:string,content:string)=>{log('user',content);return {...emit(),eventCount:snapshot.events.length};},
-    respond:async(_id:string,response:AgentInputResponse)=>{ if(response.requestId!==snapshot.pendingInput?.id) throw Error('问题已过期'); log('user','已回答：'+JSON.stringify(response.answers));snapshot.pendingInput=undefined;snapshot.run!.status='waiting_approval';snapshot.pendingApproval={id:'approval-1',productVersion:'v1',accountKey:'测试账号',scope:['vbk.write_phase:basic','vbk.write_phase:itinerary'],summary:'两天一晚，行程节奏轻松，保留你提供的文案。请查看右侧方案后确认。',status:'pending',createdAt:now()};return {...emit(),eventCount:snapshot.events.length};},
+  },send:async(_id:string,content:string)=>{log('user',content);snapshot.run!.status='running';log('status','运行中',{status:'running'});return {...emit(),eventCount:snapshot.events.length};},
+    respond:async(_id:string,response:AgentInputResponse)=>{ if(response.requestId!==snapshot.pendingInput?.id) throw Error('问题已过期'); log('user','已回答：'+JSON.stringify(response.answers),{requestId:response.requestId,answers:response.answers});snapshot.pendingInput=undefined;log('status','运行中',{status:'running'});snapshot.run!.status='waiting_approval';snapshot.pendingApproval={id:'approval-1',productVersion:'v1',accountKey:'测试账号',scope:['vbk.write_phase:basic','vbk.write_phase:itinerary'],summary:'两天一晚，行程节奏轻松，保留你提供的文案。请查看右侧方案后确认。',status:'pending',createdAt:now()};log('approval_request',snapshot.pendingApproval.summary,{approval:snapshot.pendingApproval});log('status','等待最终确认',{status:'waiting_approval'});return {...emit(),eventCount:snapshot.events.length};},
     approve:async()=>{ const approval={...snapshot.pendingApproval!,status:'approved' as const};log('approval','用户已授权',{approvalId:approval.id,approval});log('status','运行中',{status:'running'});snapshot.pendingApproval=undefined;snapshot.run!.status='running';return {...emit(),eventCount:snapshot.events.length};},
-    pause:async()=>{snapshot.run!.status='paused';return {...emit(),eventCount:snapshot.events.length};},resume:async()=>{snapshot.run!.status='running';return {...emit(),eventCount:snapshot.events.length};},abandon:async()=>{snapshot.run!.status='abandoned';return {...emit(),eventCount:snapshot.events.length};}},
+    pause:async()=>{snapshot.run!.status='paused';log('status','执行已暂停',{status:'paused'});return {...emit(),eventCount:snapshot.events.length};},resume:async()=>{snapshot.run!.status='running';log('status','运行中',{status:'running'});return {...emit(),eventCount:snapshot.events.length};},abandon:async()=>{snapshot.run!.status='abandoned';log('status','任务已废弃',{status:'abandoned'});return {...emit(),eventCount:snapshot.events.length};}},
   events:{onAgentUpdated:(fn:any)=>{listeners.add(fn);return()=>listeners.delete(fn);}},
 } as unknown as VbkApi;
 (window as any).agentFixture={
@@ -49,8 +53,10 @@ const client = {
         data:call?{toolCallId:callId,modelTurnId:`fixture-turn-${Math.floor(index/2)}`,name:'query_poi',arguments:{keyword:'成都'}}:{toolCallId:callId,status:'verified'},
       };
     });
+    snapshot.stages=undefined;hydrateAgentStages(snapshot);
     return emit();
   },
+  completeTask:()=>{snapshot.run!.status='completed';log('status','任务已完成',{status:'completed'});return emit();},
   snapshot:()=>snapshot,emit,
 };
 const product={id:'fixture',name:'成都2天1晚亲子游',messages:[

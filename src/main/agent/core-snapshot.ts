@@ -4,6 +4,8 @@ import type {
 } from "../../shared/contracts.js";
 import type { AgentSnapshotStore } from "./types.js";
 import type { AgentToolCall } from "./types.js";
+import { hydrateAgentStages, recordAgentStageEvent } from "../../shared/agent-stage-lifecycle.js";
+import { hasUnresolvedAgentToolFailure, UNRESOLVED_TOOL_SUMMARY } from "../../shared/agent-tool-outcomes.js";
 
 export interface TurnToken { runId: string; userEventId?: string; modelTurnId?: string; }
 export interface AgentStreamState { eventId?: string; lastSavedAt: number; }
@@ -44,10 +46,18 @@ export class AgentSnapshotManager {
 
   load(id: string): AgentSnapshot {
     const stored = this.store.getAgentSnapshot(id);
-    return stored ? structuredClone(stored) : { localProductId: id, run: null, events: [] };
+    const snapshot = stored ? structuredClone(stored) : { localProductId: id, run: null, events: [] };
+    hydrateAgentStages(snapshot);
+    return snapshot;
   }
 
   save(snapshot: AgentSnapshot): AgentSnapshot {
+    const counts = new Map<string, number>();
+    for (const event of snapshot.events) {
+      const stageId = event.data?.stageId;
+      if (typeof stageId === "string") counts.set(stageId, (counts.get(stageId) ?? 0) + 1);
+    }
+    snapshot.stages?.forEach((stage) => { stage.eventCount = counts.get(stage.id) ?? 0; });
     snapshot.updatedAt = this.now().toISOString();
     const saved = structuredClone(snapshot);
     this.store.saveAgentSnapshot(saved);
@@ -61,7 +71,9 @@ export class AgentSnapshotManager {
     data?: Record<string, unknown>,
     runId = snapshot.run?.id ?? "",
   ): void {
-    snapshot.events.push({ id: this.id(), runId, type, createdAt: this.now().toISOString(), content, ...(data ? { data } : {}) });
+    const event = { id: this.id(), runId, type, createdAt: this.now().toISOString(), content, ...(data ? { data } : {}) };
+    snapshot.events.push(event);
+    recordAgentStageEvent(snapshot, event);
   }
 
   result(snapshot: AgentSnapshot, toolCallId: string, content: string, data?: Record<string, unknown>, runId?: string): void {
@@ -91,16 +103,26 @@ export class AgentSnapshotManager {
 
   pause(snapshot: AgentSnapshot, content: string): void {
     if (!snapshot.run) return;
+    if (snapshot.run.status === "completed") {
+      const stage = snapshot.stages?.at(-1);
+      if (stage?.runId === snapshot.run.id && stage.status === "completed") {
+        stage.status = "superseded"; stage.summary = "此前的完成结论已撤销，执行过程保留。"; stage.nextStep = undefined;
+      }
+    }
     snapshot.run.status = "paused";
     this.touch(snapshot.run);
     this.event(snapshot, "status", content, { status: "paused" });
   }
 
-  finish(snapshot: AgentSnapshot): void {
+  finish(snapshot: AgentSnapshot, verified = false): void {
     if (!snapshot.run) return;
+    if (!verified && hasUnresolvedAgentToolFailure(snapshot.events, snapshot.run.id)) {
+      this.pause(snapshot, UNRESOLVED_TOOL_SUMMARY);
+      return;
+    }
     snapshot.run.status = "completed";
     this.touch(snapshot.run);
-    this.event(snapshot, "status", "任务已完成", { status: "completed" });
+    this.event(snapshot, "status", "任务已完成", { status: "completed", ...(verified ? { completionVerified: true } : {}) });
   }
 
   terminal(status: AgentRunStatus): boolean { return ["completed", "abandoned"].includes(status); }

@@ -37,6 +37,21 @@ export interface AgentRun {
   error?: string;
   intentVersion?: string;
 }
+export interface AgentStage {
+  id: string;
+  runId: string;
+  status: AgentRunStatus | "resolved" | "superseded";
+  startedAt: string;
+  updatedAt: string;
+  eventCount: number;
+  /** A checkpoint is persisted independently of the renderer's history page. */
+  summary?: string;
+  returnedActions: string[];
+  requestId?: string;
+  approvalId?: string;
+  decision?: string;
+  nextStep?: string;
+}
 export interface AgentEvent {
   id: string;
   runId: string;
@@ -51,6 +66,7 @@ export interface AgentSnapshot {
   updatedAt?: string;
   run: AgentRun | null;
   events: AgentEvent[];
+  stages?: AgentStage[];
   pendingInput?: AgentInputRequest;
   pendingApproval?: AgentApproval;
   uncertainWrite?: { toolCallId: string; message: string; createdAt: string };

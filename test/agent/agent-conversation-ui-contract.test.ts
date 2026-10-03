@@ -4,11 +4,16 @@ import { readFileSync } from "node:fs";
 
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("方案对话采用 Cursor 式连续线程：正文优先，思考与工具收成活动摘要", () => {
+test("方案对话采用 A 版阶段容器：持续过程与阶段总结内联", () => {
   const conversation = read("src/renderer/app/views/workspace/agent-conversation.tsx");
   const items = read("src/renderer/app/views/workspace/agent-conversation-items.tsx");
   const less = read("src/renderer/app/views/workspace/agent-conversation.module.less");
-  assert.match(conversation, /item\.kind === "assistant_thread"/);
+  const stages = read("src/renderer/app/views/workspace/agent-stage-timeline.tsx");
+  assert.match(conversation, /AgentStageTimeline/);
+  assert.match(stages, /item\.kind === 'assistant_thread'/);
+  assert.match(stages, /任务最终总结/);
+  assert.match(stages, /查看本阶段全部过程/);
+  assert.match(stages, /active && children/);
   assert.match(items, /AgentAssistantThread/);
   assert.match(items, /思考片刻/);
   assert.match(items, /已使用/);

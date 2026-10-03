@@ -26,6 +26,7 @@ import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-act
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import {
   VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
+  hasValidVbkRecommendationLength,
   vbkRecommendationByteLength,
 } from "./vbk-recommendation-length.js";
 import type {
@@ -135,7 +136,7 @@ function presentationRecommendationsValid(entries: unknown[]): boolean {
     if (typeof record.category !== "string" || !record.category.trim()) return false;
     if (!(VBK_RECOMMENDATION_CATEGORIES as readonly string[]).includes(record.category)) return false;
     if (typeof record.text !== "string" || !record.text.trim()) return false;
-    if (vbkRecommendationByteLength(record.text.trim()) > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) return false;
+    if (!hasValidVbkRecommendationLength(record.text)) return false;
     nonEmptyCategoryCount += 1;
   }
   return nonEmptyCategoryCount === entries.length;

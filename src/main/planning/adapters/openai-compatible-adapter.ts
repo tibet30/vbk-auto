@@ -63,6 +63,7 @@ export interface OpenAICompatibleAdapterConfig {
   timeoutMs?: number;
   /** 每次 Chat Completions 完成后回调；记账失败不得影响主流程。 */
   recordUsage?: (event: AiUsageEvent) => void;
+  presentationRejectedWords?: readonly string[];
 }
 
 export class OpenAICompatiblePlannerAdapter implements Planner {
@@ -90,7 +91,7 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     const toolSchema = buildStageToolSchema(stage);
     const userMessage = composePlanningUserMessage(request);
     const messages = [
-      { role: "system", content: composePlanningSystemPrompt(stage) },
+      { role: "system", content: composePlanningSystemPrompt(stage, this.config.presentationRejectedWords) },
       { role: "user", content: userMessage },
     ];
     // Adapter 单次传输尝试：transport 失败直接抛错，由 orchestrator 决定是否 stage retry。

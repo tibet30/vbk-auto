@@ -10,7 +10,7 @@ import {
   type PlanningSkeleton,
   type ThreeStagePlanningAi,
 } from "../../shared/contracts-planning.js";
-import { runSingleStage } from "./single-stage-runner.js";
+import { runSingleStage } from "./timed-stage-runner.js";
 import type { OrchestratorRuntime } from "./types.js";
 import type { PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";

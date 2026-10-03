@@ -14,10 +14,7 @@ import { isCombinedSpotName } from "./spot-name.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
 import { normalisePackageNameValue } from "./package-name.js";
-import {
-  VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
-  vbkRecommendationByteLength,
-} from "./vbk-recommendation-length.js";
+import { hasValidVbkRecommendationLength } from "./vbk-recommendation-length.js";
 import {
   PLANNING_STAGES,
   type PlanningStage,
@@ -94,12 +91,11 @@ const presentationModuleValueSchema = z.object({
       ctx.addIssue({ code: "custom", path: ["recommendations", index, "category"], message: "推荐理由 category 必须互不重复" });
     }
     seen.add(entry.category);
-    const byteLength = vbkRecommendationByteLength(entry.text.trim());
-    if (byteLength > VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+    if (!hasValidVbkRecommendationLength(entry.text)) {
       ctx.addIssue({
         code: "custom",
         path: ["recommendations", index, "text"],
-        message: `推荐理由不得超过 ${VBK_RECOMMENDATION_GENERATION_MAX_BYTES} UTF-8 字节（VBK 硬上限 84 字节）`,
+        message: "推荐理由不在 30～84 个字符范围内",
       });
     }
   });

@@ -1,4 +1,5 @@
 import type { PoiSuggestCandidate, PoiSuggestDetailResult } from "../../shared/contracts-types.js";
+import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 
 export interface PoiAutoSelectionMatch {
   poiName: string;
@@ -113,7 +114,7 @@ function candidateMatchesContext(
   if (province && (!candidateProvince || candidateProvince !== province)) return false;
   if (destinationCity && !candidateCity) return false;
   if (destinationCity && candidateCity !== destinationCity
-    && !itineraryExplicitlyAllowsLocation(product, keyword, candidateCity, candidate.district)) return false;
+    && !itineraryExplicitlyAllowsLocation(product, keyword, candidateCity, candidate.district, candidate.poiName)) return false;
   return true;
 }
 
@@ -122,6 +123,7 @@ function itineraryExplicitlyAllowsLocation(
   keyword: string,
   candidateCity: string,
   candidateDistrict: unknown,
+  candidatePoiName?: string | null,
 ): boolean {
   const itinerary = product.itinerary;
   if (!Array.isArray(itinerary)) return false;
@@ -131,6 +133,11 @@ function itineraryExplicitlyAllowsLocation(
   return itinerary.some((day) => {
     if (!isRecord(day) || !dayContainsKeyword(day, keyword)) return false;
     const text = normaliseText(dayRouteText(day));
+    // 羊卓雍湖是用户明确安排的山南景点；只认可同地点官方别名的山南候选。
+    // 不把整个跨城行程日改成山南，也不放开西藏境内的任意同名候选。
+    const lakeName = /^(?:羊卓雍湖|羊卓雍错)$/u;
+    if (candidateCity === "山南" && lakeName.test(normaliseText(keyword))
+      && lakeName.test(normaliseText(candidatePoiName ?? ""))) return true;
     return locations.some((location) => text.includes(normaliseText(location)));
   });
 }
@@ -165,7 +172,5 @@ function normaliseText(value: string): string {
 }
 
 function normaliseAdministrativeName(value: unknown): string {
-  return typeof value === "string"
-    ? value.trim().replace(/(维吾尔自治区|壮族自治区|回族自治区|自治区|特别行政区|自治州|地区|省|市|盟|州|县|区)$/u, "")
-    : "";
+  return toPlatformShortLocationName(value);
 }

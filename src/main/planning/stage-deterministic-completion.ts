@@ -1,6 +1,7 @@
 import { isProductForm } from "../../shared/product-form.js";
 import type { ModuleOutcome, PlanningSkeleton, PlanningStage } from "../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "./types.js";
+import { hasValidVbkRecommendationLength } from "./vbk-recommendation-length.js";
 import { ensureCommercialFallbacks, ensurePackageName } from "./commercial-stage.js";
 import { ensurePresentationCover } from "./cover-default.js";
 import { AI_WRITABLE_PATHS } from "./schemas.js";
@@ -85,9 +86,9 @@ async function ensurePresentationContent(args: {
     recommendation: text(presentation.recommendation) || `${city}${dayCount}日私家小团，串联${spotText}，专车衔接更省心。`,
     features: text(presentation.features) || `围绕${city}代表性景点安排行程，节奏从容，适合家庭、朋友或小团队轻松出游。`,
     recommendations: validRecommendations(presentation.recommendations) ?? [
-      { category: "服务保障", text: "专车接送衔接景区与酒店，出行更省心。" },
-      { category: "精选酒店", text: "优先安排当地高品质酒店，休息更舒适。" },
-      { category: "缤纷景点", text: `精选${spotText}，兼顾人文与城市体验。` },
+      { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
+      { category: "精选酒店", text: "优先安排当地高品质住宿，位置与卫生双重把关，整体休息体验更舒适安心" },
+      { category: "缤纷景点", text: `精选${spotText}代表性景点组合，行程兼顾人文历史与城市风光，出游体验更丰富` },
     ],
   };
   const result = await args.runtime.writeModule(args.localProductId, "presentation", AI_WRITABLE_PATHS.presentation, nextPresentation);
@@ -117,6 +118,7 @@ function validRecommendations(value: unknown): Array<{ category: string; text: s
     const category = text(row?.category);
     const content = text(row?.text);
     if (!category || !content || seen.has(category)) return undefined;
+    if (!hasValidVbkRecommendationLength(content)) return undefined;
     seen.add(category);
     rows.push({ category, text: content });
   }

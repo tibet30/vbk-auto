@@ -13,6 +13,26 @@ export function vbkRecommendationByteLength(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 
+/**
+ * 推荐理由有效字符数：先去除首尾空格，再按 VBK 平台标点规则归一
+ * （句号/问号/叹号/冒号等统一为逗号，尾随逗号清掉），最后按平台宽度
+ * 计数（Latin-1 每个码元 1，其余每个 UTF-16 码元 2）。现场中文计数为 40/84。
+ */
+export function vbkRecommendationCharacterLength(value: string): number {
+  return normalizeVbkRecommendationPunctuation(value).replace(/[^\x00-\xff]/g, "aa").length;
+}
+
+/**
+ * 推荐理由是否落在 VBK 平台 30～84 字符合同范围内：长度按字符计数，
+ * 边界外一律视作无效，给录入和准备阶段提供统一的硬性闸门。
+ */
+export function hasValidVbkRecommendationLength(value: string): boolean {
+  const length = vbkRecommendationCharacterLength(value);
+  return length >= VBK_RECOMMENDATION_MIN_CHARACTERS && length <= VBK_RECOMMENDATION_PLATFORM_MAX_BYTES;
+}
+
+export const VBK_RECOMMENDATION_MIN_CHARACTERS = 30;
+
 export function normalizeVbkRecommendationPunctuation(value: string): string {
   return value
     .trim()
@@ -35,7 +55,7 @@ const CATEGORY_FALLBACKS: Readonly<Record<string, string>> = {
 };
 
 function safeFallback(category?: string): string {
-  return CATEGORY_FALLBACKS[String(category ?? "").trim()] ?? "行程亮点安排清晰";
+  return `${CATEGORY_FALLBACKS[String(category ?? "").trim()] ?? "行程亮点安排清晰"}，按产品说明安排`;
 }
 
 export function fitVbkRecommendationText(
@@ -44,17 +64,21 @@ export function fitVbkRecommendationText(
   category?: string,
 ): string {
   const normalized = normalizeVbkRecommendationPunctuation(value);
-  if (!normalized || vbkRecommendationByteLength(normalized) <= maxBytes) return normalized;
+  if (!normalized) return normalized;
+  const characterLength = vbkRecommendationCharacterLength(normalized);
+  if (characterLength >= VBK_RECOMMENDATION_MIN_CHARACTERS && characterLength <= VBK_RECOMMENDATION_PLATFORM_MAX_BYTES
+    && vbkRecommendationByteLength(normalized) <= maxBytes) return normalized;
 
   const clauses = normalized.match(/[^，-]+[，-]?/gu) ?? [normalized];
   let completePrefix = "";
   for (const clause of clauses) {
     const candidate = completePrefix + clause;
-    if (vbkRecommendationByteLength(candidate) > maxBytes) break;
+    if (vbkRecommendationByteLength(candidate) > maxBytes
+      || vbkRecommendationCharacterLength(candidate) > VBK_RECOMMENDATION_PLATFORM_MAX_BYTES) break;
     completePrefix = candidate;
   }
   completePrefix = completePrefix.replace(/[，、\-\s]+$/u, "").trim();
-  if (completePrefix) return completePrefix;
+  if (completePrefix && vbkRecommendationCharacterLength(completePrefix) >= VBK_RECOMMENDATION_MIN_CHARACTERS) return completePrefix;
 
   const fallback = safeFallback(category);
   if (vbkRecommendationByteLength(fallback) <= maxBytes) return fallback;
@@ -72,7 +96,13 @@ export function fitPresentationRecommendationTexts(value: unknown): unknown {
       const recommendation = entry as Record<string, unknown>;
       if (typeof recommendation.text !== "string") return entry;
       const category = typeof recommendation.category === "string" ? recommendation.category : undefined;
-      return { ...recommendation, text: fitVbkRecommendationText(recommendation.text, undefined, category) };
+      const normalized = normalizeVbkRecommendationPunctuation(recommendation.text);
+      if (hasValidVbkRecommendationLength(normalized)
+        && vbkRecommendationByteLength(normalized) <= VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+        return { ...recommendation, text: normalized };
+      }
+      const fitted = fitVbkRecommendationText(recommendation.text, undefined, category);
+      return { ...recommendation, text: fitted };
     }),
   };
 }

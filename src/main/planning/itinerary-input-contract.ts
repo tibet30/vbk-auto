@@ -4,6 +4,7 @@ import type { ProductDetail } from "../../shared/contracts.js";
 import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import type { ItineraryInputMode, LockedConstraints, LockedItineraryDay } from "../../shared/contracts-preparation.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
+import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
 import { hasCompleteDailyUserItinerary } from "./user-intent.js";
 
 const DAY_TOKEN: Record<string, number> = {
@@ -38,10 +39,12 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
   if (alternativeError) return alternativeError;
   if (mode === "open") return undefined;
 
+  const excludedAlternatives = verifiedAlternativeExclusions(product, itinerary);
   const byDay = new Map(itinerary.map((day) => [Number(day.day), spotNames(day)]));
   for (const row of locked.itineraryOrder) {
     const names = byDay.get(row.day) ?? [];
-    const requiredSpots = row.spots.filter((spot) => !isDeletableAdministrativeLocation(product, spot));
+    const requiredSpots = row.spots.filter((spot) => !isDeletableAdministrativeLocation(product, spot)
+      && !excludedAlternatives.get(row.day)?.some((name) => samePlace(name, spot)));
     if (mode === "complete") {
       if (!isNameSubsequence(names, requiredSpots)) {
         return `用户已给出完整第 ${row.day} 天行程，禁止整体重排或替换；只能规范化并核验 POI。缺失：${missingNames(names, requiredSpots).join("、") || requiredSpots.join("、")}`;
@@ -58,6 +61,7 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
     const allNames = itinerary.flatMap(spotNames);
     const missing = locked.pois
       .filter((poi) => !isDeletableAdministrativeLocation(product, poi))
+      .filter((poi) => ![...excludedAlternatives.values()].flat().some((name) => samePlace(name, poi)))
       .filter((poi) => !allNames.some((name) => samePlace(name, poi)));
     if (missing.length) return `已锁定的指定 POI 必须保留：${missing.join("、")}`;
   }
@@ -123,6 +127,10 @@ function spotNames(day: Record<string, unknown>): string[] {
     .flatMap((spot) => {
       if (typeof spot === "string") return [spot.trim()];
       const record = asRecord(spot);
+      // POI locks exclude the plain transfer service stripped from the brief.
+      // Do not ignore arbitrary kind:"other" nodes or any verified POI.
+      if (record?.kind === "other" && !hasCompletePoi(record)
+        && /^(?:接火车站?|火车站接|送火车站?|接站|送站|接机|送机|接团|送团)(?:返程)?$/u.test(text(record.name))) return [];
       return record ? [text(record.name) || text(record.poiName)] : [];
     })
     .filter(Boolean);
@@ -140,14 +148,16 @@ function explicitAlternativeGroupError(
   const groups = explicitAlternativeGroups(product);
   if (!groups.length) return undefined;
   const days = new Map(itinerary.map((day) => [Number(day.day), day]));
+  const exclusions = verifiedAlternativeExclusions(product, itinerary);
   for (const group of groups) {
     const day = days.get(group.day);
     const spots = Array.isArray(day?.spots) ? day.spots.filter(asRecord) : [];
-    const matches = group.names.map((name) => ({ name, index: spots.findIndex((spot) => samePlace(spotName(spot), name)) }));
+    const names = group.names.filter((name) => !exclusions.get(group.day)?.includes(name));
+    const matches = names.map((name) => ({ name, index: spots.findIndex((spot) => samePlace(spotName(spot), name)) }));
     const missing = matches.filter((match) => match.index < 0).map((match) => match.name);
     if (missing.length) return `第 ${group.day} 天的二选一景点必须全部保留：${missing.join("、")}`;
     const selected = matches.map((match) => spots[match.index]!);
-    if (!selected.every((spot) => spot.relation === "or")) {
+    if (!selected.every((spot) => spot.relation === (names.length === 1 ? "and" : "or"))) {
       return `第 ${group.day} 天的二选一景点「${group.names.join("或")}」必须都标记为 relation: "or"。`;
     }
     const times = new Set(selected.map((spot) => spot.timeOfDay).filter((time): time is string => time === "morning" || time === "afternoon"));
@@ -158,6 +168,27 @@ function explicitAlternativeGroupError(
     }
   }
   return undefined;
+}
+
+/** Only a persisted verified original option can justify dropping an unavailable sibling. */
+function verifiedAlternativeExclusions(product: ProductDetail, itinerary: Record<string, unknown>[]): Map<number, string[]> {
+  const excluded = new Map<number, string[]>();
+  for (const group of explicitAlternativeGroups(product)) {
+    const current = asDayList(product.product.itinerary)?.find((day) => Number(day.day) === group.day);
+    const next = itinerary.find((day) => Number(day.day) === group.day);
+    const before = (Array.isArray(current?.spots) ? current.spots : []).filter(asRecord);
+    const after = (Array.isArray(next?.spots) ? next.spots : []).filter(asRecord);
+    const missing = group.names.filter((name) => !after.some((spot) => samePlace(spotName(spot), name)));
+    if (!missing.length || missing.some((name) => before.some((spot) => samePlace(spotName(spot), name) && hasCompletePoi(spot)))) continue;
+    const kept = group.names.filter((name) => !missing.includes(name));
+    if (!kept.length || !kept.every((name) => {
+      const spot = after.find((item) => samePlace(spotName(item), name));
+      return spot && hasCompletePoi(spot) && before.some((item) => samePlace(spotName(item), name)
+        && hasCompletePoi(item) && item.poiId === spot.poiId && item.poiName === spot.poiName);
+    })) continue;
+    excluded.set(group.day, [...(excluded.get(group.day) ?? []), ...missing]);
+  }
+  return excluded;
 }
 
 function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
@@ -179,8 +210,9 @@ function rawAlternativeGroups(value: string): Array<{ day: number; names: string
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? value.length;
     if (!Number.isInteger(day) || day < 1) return [];
-    return value.slice(start, end).split(/[-—–]+/u).flatMap((segment) => {
-      if (!/(?:二选一|多选一|任选其一)/u.test(segment) || !/(?:或者|或|\/|／)/u.test(segment)) return [];
+    return value.slice(start, end).split(/[-—–→]+/u).flatMap((segment) => {
+      if (!/(?:或者|或)/u.test(segment)
+        && !(/(?:二选一|多选一|任选其一)/u.test(segment) && /(?:\/|／)/u.test(segment))) return [];
       const names = unique(segment
         .replace(/【[^】]*】|\[[^\]]*\]|\([^)]*\)|（[^）]*）/gu, "")
         .replace(/(?:二选一|多选一|任选其一)/gu, "")

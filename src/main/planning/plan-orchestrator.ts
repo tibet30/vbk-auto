@@ -25,7 +25,7 @@ import {
 } from "../../shared/contracts-planning.js";
 import { validateCompleteness } from "./validation.js";
 import { composeAssistantReply } from "./replies.js";
-import { runSingleStage, type SingleStageResult } from "./single-stage-runner.js";
+import { runSingleStage, type SingleStageResult } from "./timed-stage-runner.js";
 import { enrichItineraryPois } from "./poi-enrichment.js";
 import { syncInitialTrafficLineAvailability } from "./traffic-line-availability.js";
 import { revalidateCompletedState } from "./validation-rewind.js";

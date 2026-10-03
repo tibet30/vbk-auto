@@ -15,7 +15,7 @@ export interface ItinerarySelfRepairResult {
  * For an explicit `or` group, a verified original option is sufficient: drop
  * only the unavailable siblings instead of asking the operator to choose.
  */
-export function selfRepairItineraryForVbk(value: unknown): ItinerarySelfRepairResult {
+export function selfRepairItineraryForVbk(value: unknown, nights?: number): ItinerarySelfRepairResult {
   const itinerary = Array.isArray(value)
     ? value.filter(isRecord).map((day) => structuredClone(day))
     : [];
@@ -23,6 +23,12 @@ export function selfRepairItineraryForVbk(value: unknown): ItinerarySelfRepairRe
   const selectedAlternatives: ItinerarySelfRepairResult["selectedAlternatives"] = [];
 
   for (const day of itinerary) {
+    if (day === itinerary.at(-1) && Number.isInteger(nights) && Number(nights) < itinerary.length
+      && /(?:不实际安排住宿|不安排住宿|无需住宿|无住宿)/u.test(text(day.hotelDescription))) {
+      day.hotel = "无";
+      day.hotelDescription = "当日返程，不安排住宿";
+      delete day.hotelCandidates;
+    }
     const original = Array.isArray(day.spots) ? day.spots.filter(isRecord) : [];
     const withoutTravel = original.filter((spot) => {
       const name = spotName(spot);

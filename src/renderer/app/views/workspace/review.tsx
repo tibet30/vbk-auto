@@ -1,5 +1,3 @@
-import { PlanningUsagePanel, PlanningUsageToggle, usePlanningUsage } from "./planning-usage";
-import { WorkflowTaskSummary } from "../workflow-task/TaskStrip";
 import type { AppModel } from "../../app.main.model";
 import { useAppAuth } from "../../auth/AppAuthContext";
 import { AgentConversation } from "./agent-conversation";
@@ -51,22 +49,13 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     expandedDayIndexes,
     setExpandedDayIndexes,
     planningRecovery,
-    currentWorkflowTask,
   } = model;
 
-  const usage = usePlanningUsage(product?.aiUsage);
   if (!product) return null;
 
   const taskList = product.researchTasks ?? [];
   return (
     <div className={layout.reviewWorkspace}>
-      <div className={layout.panelHeader}>
-        <strong>协作进度</strong>
-        <WorkflowTaskSummary task={currentWorkflowTask} />
-        {usage.visible && <PlanningUsageToggle label={usage.label} open={usage.open} onToggle={()=>usage.setOpen(!usage.open)} />}
-      </div>
-      {usage.visible && usage.open && product.aiUsage && <PlanningUsagePanel aiUsage={product.aiUsage} recent={usage.recent} onClose={()=>usage.setOpen(false)} />}
-
       <div className={layout.stageSplit} style={splitStyle}>
       <AgentConversation
         key={product.id}

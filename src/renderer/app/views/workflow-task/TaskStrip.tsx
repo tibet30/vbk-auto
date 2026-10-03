@@ -3,11 +3,11 @@ import type { ProductWorkflowTask } from "../../../../shared/contracts.js";
 import { formatUpdatedAt } from "../../helpers/constants";
 import styles from "./TaskStrip.module.less";
 
-export function WorkflowTaskStrip({ task }: { task: ProductWorkflowTask | null }) {
+export function WorkflowTaskStrip({ task, statusId = "workflow-task-status", detailed = false }: { task: ProductWorkflowTask | null; statusId?: string; detailed?: boolean }) {
   if (!task) return null;
   const status = statusMeta(task);
   return (
-    <section id="workflow-task-status" className={styles.taskStrip} data-status={task.status} aria-live="polite" tabIndex={-1}>
+    <section id={statusId} className={styles.taskStrip} data-status={task.status} data-detailed={detailed} aria-live="polite" tabIndex={-1}>
       <span className={styles.statusIcon} aria-hidden="true">{status.icon}</span>
       <span className={styles.taskCopy}>
         <span className={styles.titleLine}>
@@ -16,22 +16,22 @@ export function WorkflowTaskStrip({ task }: { task: ProductWorkflowTask | null }
         </span>
         <span className={styles.message}>{task.error || task.message}</span>
       </span>
-      <span className={styles.progressBlock}>
+      {(!detailed || task.status === "running" || task.status === "queued") && <span className={styles.progressBlock}>
         <span className={styles.progressMeta}><strong>{task.progress}%</strong><small>更新 {formatUpdatedAt(task.updatedAt)}</small></span>
         <span className={styles.progressTrack} role="progressbar" aria-label="后台任务进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={task.progress}><span style={{ transform: `scaleX(${task.progress / 100})` }} /></span>
-      </span>
+      </span>}
     </section>
   );
 }
 
 /** Compact workflow status for a stage header. Keeps the task visible without competing with its content. */
-export function WorkflowTaskSummary({ task }: { task: ProductWorkflowTask | null }) {
+export function WorkflowTaskSummary({ task, compact = false }: { task: ProductWorkflowTask | null; compact?: boolean }) {
   if (!task) return null;
   const status = statusMeta(task);
   const detail = task.error || task.message;
   return (
     <span
-      id="workflow-task-status"
+      id={compact ? undefined : "workflow-task-status"}
       className={styles.taskSummary}
       data-status={task.status}
       role="status"
@@ -43,15 +43,15 @@ export function WorkflowTaskSummary({ task }: { task: ProductWorkflowTask | null
       <span className={styles.summaryIcon} aria-hidden="true">{status.icon}</span>
       <span className={styles.summaryCopy}>
         <strong>{status.label}</strong>
-        <span>{stageLabel(task)}</span>
-        {detail ? <small>{detail}</small> : null}
+        {!compact && <span>{stageLabel(task)}</span>}
+        {!compact && detail ? <small>{detail}</small> : null}
       </span>
-      <span className={styles.summaryProgress}>
+      {(!compact || task.status === "running") && <span className={styles.summaryProgress}>
         <strong>{task.progress}%</strong>
         <span className={styles.summaryTrack} role="progressbar" aria-label="后台任务进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={task.progress} aria-valuetext={`${task.progress}%`}>
           <span style={{ transform: `scaleX(${task.progress / 100})` }} />
         </span>
-      </span>
+      </span>}
     </span>
   );
 }

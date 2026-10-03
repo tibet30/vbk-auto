@@ -9,7 +9,7 @@ const read = (file: string) => readFileSync(path.resolve(process.cwd(), file), "
 const usage = read("src/renderer/app/views/workspace/planning-usage.tsx");
 const usageFormat = read("src/renderer/app/views/workspace/planning-usage-format.ts");
 const tree = read("src/renderer/app/views/workspace/planning-tree.tsx");
-const review = read("src/renderer/app/views/workspace/review.tsx");
+const details = read("src/renderer/app/views/stage-nav/StageTaskDetails.tsx");
 const styles = read("src/renderer/app/views/workspace/planning-usage.module.less");
 
 test("summarizeAiUsageMetric 展示当前产品累计消耗和费用", () => {
@@ -42,14 +42,14 @@ test("summarizeAiUsageMetric 展示当前产品累计消耗和费用", () => {
   assert.match(label, /约 ¥0\.12/);
 });
 
-test("Agent 协作进度接入 AI usage 指标与明细面板", () => {
+test("Agent 生成规划与顶部任务详情保留 AI usage 明细", () => {
   assert.match(tree, /aiUsage\?: ProductAiUsage/);
   assert.match(tree, /usePlanningUsage\(aiUsage\)/);
   assert.match(tree, /PlanningUsageToggle/);
   assert.match(tree, /PlanningUsagePanel/);
-  assert.match(review, /aiUsage=\{product\.aiUsage\}/);
-  assert.match(review, /usePlanningUsage\(product\?\.aiUsage\)/);
-  assert.match(review, /PlanningUsageToggle/);
+  assert.match(details, /aiUsage=\{product\.aiUsage\}/);
+  assert.match(details, /usePlanningUsage\(product\?\.aiUsage\)/);
+  assert.match(details, /PlanningUsagePanel/);
 });
 
 test("usage 文案覆盖当前产品累计、Token 未返回、约 ¥", () => {

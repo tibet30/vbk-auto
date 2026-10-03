@@ -20,7 +20,6 @@ export function AppTopbar({ model }: { model: AppModel }) {
     setView,
     setAccountMenuOpen,
     accountMenuOpen,
-    readiness,
     currentAccountName,
     accountInitial,
     vbkLogin,
@@ -75,20 +74,6 @@ export function AppTopbar({ model }: { model: AppModel }) {
 
       {showProductTools && (
         <>
-          <div className={styles.topbarStatusChip} aria-label="方案就绪状态">
-            <span
-              className={shared.dot}
-              data-state={readiness.ready ? "ok" : readiness.issues.length ? "warn" : "ai"}
-            />
-            <strong>{readiness.completion}%</strong>
-            <small>·</small>
-            <small>
-              {readiness.ready
-                ? "可以录入 VBK"
-                : `${readiness.issues.length} 项待处理`}
-            </small>
-          </div>
-
           <div className={styles.topbarToolRail}>
             <button
           className={styles.topbarAccountChip}

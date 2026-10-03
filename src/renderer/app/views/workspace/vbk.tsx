@@ -96,10 +96,8 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     <aside className={`${layout.panel} ${styles.reviewSummary}`} aria-label="审查结果与 VBK 录入">
       <div className={layout.panelHeader}>
         <div className={layout.panelTitleRow}>
-          <span className={layout.panelNum}>02</span>
           <strong className={layout.panelTitle}>审查结果汇总</strong>
         </div>
-        <span className={shared.state} data-state={vbkStageStatus.tone}>{vbkStageStatus.label}</span>
       </div>
       <div className={styles.productScroll}>
         <div className={`${styles.readinessHero} ${readiness.ready ? styles.ready : ""}`} data-ready={readiness.ready}>
@@ -243,7 +241,6 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     <section className={`${layout.panel} ${browser.browser} ${browserFullscreen ? browser.browserFullscreen : ""}`} aria-label="VBK 浏览器">
       <div className={layout.panelHeader}>
         <div className={layout.panelTitleRow}>
-          <span className={layout.panelNum}>03</span>
           <strong className={layout.panelTitle}>VBK 浏览器</strong>
         </div>
         <button

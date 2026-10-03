@@ -123,7 +123,7 @@ export function AgentConversation({ product, userName, readiness, client, input,
   };
   return <section className={`${layout.panel} ${styles.panel}`} aria-label="方案对话">
     <div className={layout.panelHeader}>
-      <div className={layout.panelTitleRow}><span className={layout.panelNum}>01</span><strong className={layout.panelTitle}>方案协作</strong></div>
+      <div className={layout.panelTitleRow}><strong className={layout.panelTitle}>方案协作</strong></div>
       <span className={layout.panelSubLine}>{status ? STATUS[status] : "说说你想做什么"}</span>
     </div>
     <div className={styles.status} role="status"><MessageCircleMore size={15} /><span>{running ? "小助手正在根据结果继续处理，可随时暂停或补充要求" : "在这里沟通和确认，在右侧查看结构化结果"}</span>

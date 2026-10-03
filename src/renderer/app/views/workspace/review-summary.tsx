@@ -214,7 +214,7 @@ export function AppWorkspaceReviewSummary({
       {changed.length > 0 && <div className={styles.recentChanges} role="status">最近更新：{changed.join("、")}<button type="button" onClick={() => setChanged([])} aria-label="关闭更新提示">已查看</button></div>}
 
       {viewMode === "cards" ? (
-        <div id="summary-view-panel" role="tabpanel" aria-labelledby="summary-view-cards" className={styles.cardsPane}>
+        <div id="summary-view-panel" role="region" aria-label="审查结果卡片" className={styles.cardsPane}>
           {isGenerating && !showPartialGeneration ? (
             <GeneratingSkeleton />
           ) : (
@@ -300,7 +300,7 @@ export function AppWorkspaceReviewSummary({
 
         </div>
       ) : (
-        <div id="summary-view-panel" role="tabpanel" aria-labelledby="summary-view-json" className={styles.jsonPane}>
+        <div id="summary-view-panel" role="region" aria-label="审查结果 JSON" className={styles.jsonPane}>
           <AppWorkspaceReviewSummaryJson
             jsonText={jsonText}
             jsonBytes={jsonBytes}

@@ -20,10 +20,12 @@ test("任务中心和产品列表共用后台任务状态，详情由 Agent 展�
   const productList = read("src/renderer/app/helpers/components.tsx");
   const workspace = read("src/renderer/app/views/workspace/index.tsx");
   const review = read("src/renderer/app/views/workspace/review.tsx");
+  const details = read("src/renderer/app/views/stage-nav/StageTaskDetails.tsx");
   const agentConversation = read("src/renderer/app/views/workspace/agent-conversation.tsx");
   assert.match(appView, /view === "tasks"[\s\S]*<AppTasksPage/);
   assert.match(productList, /item\.workflowTask[\s\S]*productTaskTrack/);
-  assert.match(workspace, /stage === "vbk" \? <WorkflowTaskStrip task=\{currentWorkflowTask\}/);
+  assert.doesNotMatch(workspace, /<WorkflowTaskStrip/);
+  assert.match(details, /<WorkflowTaskStrip task=\{task\}/);
   assert.match(review, /<AgentConversation/);
   assert.match(agentConversation, /useAgentSession\(product\.id, client\)/);
 });
@@ -35,7 +37,7 @@ test("产品详情优先展示实时任务更新，不被列表缓存覆盖", ()
 
 test("从任务进入详情时定位对应阶段并聚焦状态", () => {
   const action = read("src/renderer/app/actions/product.ts");
-  const strip = read("src/renderer/app/views/workflow-task/TaskStrip.tsx");
+  const strip = read("src/renderer/app/views/stage-nav/StageNav.tsx");
   assert.match(action, /task\.stage === "automation" \|\| task\.stage === "completed" \? "vbk" : "review"/);
   assert.match(action, /getElementById\("workflow-task-status"\)\?\.focus\(\)/);
   assert.match(strip, /id="workflow-task-status"[\s\S]*tabIndex=\{-1\}/);

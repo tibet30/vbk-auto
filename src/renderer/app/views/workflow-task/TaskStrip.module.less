@@ -41,6 +41,9 @@
 .titleLine strong { font-size: var(--fs-sm); }
 .titleLine span { color: var(--muted-foreground); }
 .message { overflow: hidden; color: var(--muted-foreground); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+.taskStrip[data-detailed='true'] .message { overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; }
+.taskStrip[data-detailed='true'] { grid-template-columns: auto minmax(0, 1fr); }
+.taskStrip[data-detailed='true'] .progressBlock { grid-column: 1 / -1; }
 
 .progressBlock { display: grid; gap: 4px; }
 .progressMeta { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }

@@ -20,6 +20,8 @@ const coverRowPath = resolve(__dirname, "../../src/renderer/app/views/workspace/
 const coverRowSource = readFileSync(coverRowPath, "utf8");
 const coverRowStylePath = resolve(__dirname, "../../src/renderer/app/views/workspace/review-summary-basic-info.module.less");
 const coverRowStyleSource = readFileSync(coverRowStylePath, "utf8");
+const selectSource = readFileSync(resolve(__dirname, "../../src/renderer/app/helpers/Select.tsx"), "utf8");
+const selectStyleSource = readFileSync(resolve(__dirname, "../../src/renderer/app/helpers/Select.module.less"), "utf8");
 
 /**
  * 去掉块注释 / 行注释 / JSDoc，再做"用户可见旧文案/旧输入"断言。
@@ -113,7 +115,9 @@ test("BasicInfoCoverRow 选用 cover-search-keyword / cover-search-submit 暴露
 
 test("BasicInfoCoverRow 地址候选 select 始终渲染，受控于 selectedPlace.stableId，选中后自动查询图片", () => {
   // select 始终渲染（不再用 !selectedPlace 条件包裹收起）。
-  assert.match(coverRowCode, /<select\b/);
+  assert.match(coverRowCode, /<Select\b/);
+  assert.match(selectSource, /<select\b/);
+  assert.match(selectSource, /\{\.\.\.props\}/);
   assert.match(coverRowCode, /aria-label="携程图库地点候选"/);
   assert.doesNotMatch(coverRowCode, /!selectedPlace \? \(/);
   // select 必须用受控 value 绑定 selectedPlace.stableId，不能再用 defaultValue。
@@ -194,7 +198,7 @@ test("BasicInfoCoverRow 已选 ctripLibrary cover 把备用封面合并进轮播
   assert.match(coverRowCode, /cover\.alternates/);
   assert.match(coverRowCode, /cover\.alternates\.slice\(\s*0,\s*MAX_COVER_IMAGES\s*-\s*1\s*\)/);
   // 轮播图上限：主图 + 备图最多 MAX_COVER_IMAGES 张。
-  assert.match(coverRowCode, /MAX_COVER_IMAGES\s*=\s*10/);
+  assert.match(coverRowCode, /MAX_COVER_IMAGES\s*=\s*20/);
   // 旧的「缩略图导航条」整块下线：组件 / testid / 文案都不应再出现。
   assert.doesNotMatch(coverRowCode, /CtripCoverAlternates\b/);
   assert.doesNotMatch(coverRowCode, /data-testid="cover-alternates"/);
@@ -226,7 +230,7 @@ test("BasicInfoCoverRow 提示文案仅使用「景点名称 / 景点名」，�
 });
 
 test("BasicInfoCoverRow 样式文件定义 select、coverCandidates 滚动容器 + 缩略图占位 + 工具条", () => {
-  assert.match(coverRowStyleSource, /\.select\b/);
+  assert.match(selectStyleSource, /\.select\b/);
   // .coverCandidates 限定最大高度，避免候选过多时拉高整个 review 卡。
   assert.match(coverRowStyleSource, /\.coverCandidates\b/);
   assert.match(coverRowStyleSource, /max-height\s*:\s*260px|height\s*:\s*260px/);

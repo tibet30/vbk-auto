@@ -1,25 +1,35 @@
-import type { VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
+import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
+import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.js";
+import { getProductBaseInfoApi } from "./read-base.js";
+import { readDefaultBookingContacts, REQUIRED_BOOKING_CONTACT_IDS } from "./default-contacts.js";
 
-/** Read the editor model through the account session, independently of visible-page navigation. */
-export async function getProductBaseInfoSaveModel(page: VbkSessionRequestBrowser, productId: string) {
-  const endpoint = `https://vbooking.ctrip.com/ivbk/vendor/baseInfoMerge?productId=${encodeURIComponent(productId)}&from=vbk`;
-  const headers = { accept: "text/html,application/xhtml+xml,*/*;q=0.8" };
-  const response = page.vbkSessionGetText
-    ? await page.vbkSessionGetText({ endpoint, headers, errorLabel: "VBK 基本信息保存模型读取" })
-    : await page.evaluate(async ({ endpoint, headers }) => {
-      const result = await fetch(endpoint, { method: "GET", credentials: "include", headers });
-      return { status: result.status, text: await result.text() };
-    }, { endpoint, headers });
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`VBK 基本信息保存模型读取失败：HTTP ${response.status}`);
+/** The platform's base-info and local-agency APIs replace editor HTML parsing. */
+export async function getProductBaseInfoSaveModel(
+  page: VbkSessionRequestBrowser, productId: string, remote?: Record<string, any>,
+): Promise<Record<string, any>> {
+  const model = remote ?? await getProductBaseInfoApi(page, productId);
+  if (!model.baseInfo || typeof model.baseInfo !== "object" || Array.isArray(model.baseInfo)) {
+    throw new Error("VBK 基本信息接口缺少 baseInfo 保存模型");
   }
-  const match = response.text.match(/window\.__INITIAL_STATE__\s*=\s*(.*)/);
-  if (!match) throw new Error("VBK 基本信息页面缺少 __INITIAL_STATE__");
-  let state: Record<string, any>;
-  try { state = JSON.parse(match[1]); } catch { throw new Error("VBK 基本信息保存模型 JSON 无效"); }
-  const model = state?.productBaseInfo;
-  if (!model || typeof model !== "object" || Array.isArray(model)) {
-    throw new Error("VBK 基本信息页面缺少 productBaseInfo 保存模型");
+  const response = await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/getProviderLocalInfo",
+    browserRequestTimeoutMs: 20_000, evaluateTimeoutMs: 25_000,
+    errorLabel: "VBK 地接社候选读取", headers: { cookieorigin: "https://vbooking.ctrip.com" },
+    body: { contentType: "json", id: productId, idType: "product",
+      head: { cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", extension: [] } },
+  });
+  const agencies = assertVbkAckSuccess(response.payload, "VBK 地接社候选读取") as Record<string, any>;
+  if (!Array.isArray(agencies.localInfoDtos)) throw new Error("VBK 地接社接口缺少 localInfoDtos 候选列表");
+  const { ResponseStatus: _status, ...fields } = model;
+  const booking = model.bookingControls ?? model.bookingControl;
+  let bookingControls = booking;
+  if (booking && REQUIRED_BOOKING_CONTACT_IDS.some(key => Number(booking[key]) <= 0 || !booking[key])) {
+    const defaults = await readDefaultBookingContacts(page, productId, Number(model.baseInfo.vendorId));
+    bookingControls = { ...booking };
+    for (const key of REQUIRED_BOOKING_CONTACT_IDS) {
+      if (!(Number(booking[key]) > 0)) bookingControls[key] = defaults[key];
+    }
   }
-  return { ...model, resourceFields: state?.resourceFields ?? {}, localInfoDtos: state?.localInfoDtos ?? [] };
+  return { ...fields, ...(bookingControls ? { bookingControls } : {}),
+    resourceFields: model.resourceFields ?? {}, localInfoDtos: agencies.localInfoDtos };
 }

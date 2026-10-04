@@ -1,4 +1,5 @@
 /** Upload a manual or bundled draft cover through the supplier's own cover upload form. */
+import { uploadNewManualCoverViaApi } from "./manual-cover-api.js";
 import { delay } from "../utils.js";
 import { basename } from "node:path";
 import { bindCtripLibraryCoverViaApi, readBoundCoverByFileNameViaApi, readBoundCoverImageIdsViaApi } from "./cover-bind.js";
@@ -157,6 +158,11 @@ export async function uploadManualCoverViaSupplierPage(
 
   const before = await readBoundCoverImageIdsViaApi(page, productId);
   if (before.length > 1) throw new Error("远端存在多个封面，无法安全上传新封面。");
+  if (page.nativeOnly) {
+    return uploadNewManualCoverViaApi(page, productId, file, city, onUploaded, beforeWrite);
+  }
+  // Compatibility path for standalone page-based runners.
+  if (page.acquireInteractivePage) page = await page.acquireInteractivePage();
   const dialog = await prepareManualCoverUpload(page, productId, file, city, beforeWrite);
 
   const uploadResponse = page.waitForResponse(

@@ -37,6 +37,8 @@ export interface CtripLibraryCover {
   selectedAt?: string;
   /** 备用携程图库图片；自动化写入封面时会在主图失败后按顺序尝试。 */
   alternates?: CtripLibraryCoverAlternate[];
+  /** 图库未能提供图片的收费/待确认景点，供定制师补图。 */
+  missingPoiImages?: string[];
 }
 
 export interface CtripLibraryCoverAlternate {

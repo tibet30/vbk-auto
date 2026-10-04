@@ -5,7 +5,11 @@ import { listProviderContactCards } from "../../../infrastructure/butler-contact
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { getProductBaseInfoSaveModel } from "./save-model.js";
+import { getProductBaseInfoApi } from "./read-base.js";
+export { getProductBaseInfoApi } from "./read-base.js";
 import { normalizeVbkSubtitle } from "./core.js";
+import { privateTourSubtitle } from "../../../../shared/private-tour-copy.js";
+import { privateTourTitleSpots } from "./private-tour.js";
 import {
   productLineSaveField,
   resolveBasicInfoCityAnchor,
@@ -91,22 +95,6 @@ async function post(page: VbkSessionRequestBrowser, path: string, body: Json, la
   return ack(response.payload, label);
 }
 
-export async function getProductBaseInfoApi(page: VbkSessionRequestBrowser, productId: string): Promise<Json> {
-  return post(page, "getProductBaseInfo", {
-    productId,
-    needAdvancedSettings: true,
-    needBaseInfo: true,
-    needBookingControls: true,
-    needContractInfo: true,
-    needMeta: true,
-    needNameArea: true,
-    need4135PackageInfo: true,
-    needSaleControlInfo: true,
-    needViewLink: true,
-    needDistrictScenicSpots: true,
-    needParentChildren: true,
-  }, "VBK 基本信息回读");
-}
 
 
 async function resolveCity(page: VbkSessionRequestBrowser, cityName: string): Promise<Json> {
@@ -191,12 +179,10 @@ export async function ensureBasicInfoApi(
   servicePhone: string,
   options: BasicInfoApiOptions = {},
 ): Promise<BasicInfoApiResult> {
-  const [saveModel, remote] = await Promise.all([
-    getProductBaseInfoSaveModel(page, productId),
-    getProductBaseInfoApi(page, productId),
-  ]);
+  const remote = await getProductBaseInfoApi(page, productId);
+  const saveModel = await getProductBaseInfoSaveModel(page, productId, remote);
   const sourceBase = record(remote.baseInfo);
-  const sourceBooking = record(remote.bookingControl ?? remote.bookingControls);
+  const sourceBooking = record(saveModel.bookingControls ?? saveModel.bookingControl);
   const agencies = list(saveModel.localInfoDtos);
   const localTravelAgency = resolveLocalTravelAgency(sourceBooking, agencies);
   const info = record(product.basicInfo);
@@ -211,11 +197,16 @@ export async function ensureBasicInfoApi(
     : await resolveProductLine(page, info, Number(city.cityId), String(city.cityName ?? meetingCity).trim());
   const advance = resolveAdvanceBooking(product);
   if (!advance) throw new Error("提前预订配置非法");
-  const scenicRules = desiredScenicRules(product, city, remote);
+  const privateTour = record(product.sales).productForm === "privateTour";
+  const titleSpots = privateTour ? await privateTourTitleSpots(page, product.itinerary ?? []) : undefined;
+  const scenicRules = desiredScenicRules(titleSpots ? { itinerary: [{ spots: titleSpots }] } : product, city, remote);
   if (!scenicRules.length) throw new Error("国家景区前置数据未返回合法景点 ID");
   const pattern = String(record(remote.meta).nameJoinRuleDto?.pattern ?? "").trim();
   const duration = `${Number(info.days)}日${Number(info.nights) > 0 ? `${Number(info.nights)}晚` : ""}`;
   const mainName = `${scenicRules.map((rule) => rule.pOIScenicSpotName).join("+")}${duration}${pattern}`;
+  const subtitle = privateTour
+    ? privateTourSubtitle(info.subtitle, scenicRules.map(rule => String(rule.pOIScenicSpotName)))
+    : normalizeVbkSubtitle(info.subtitle, meetingCity);
   const baseInfo = {
     ...withoutKeys(sourceBase, ["destinationInfo", "extNumberId", "productLineID"]),
     productId: Number(productId),
@@ -223,8 +214,9 @@ export async function ensureBasicInfoApi(
     maxTravelDays: Number(info.days),
     travelNights: Number(info.nights),
     mainName,
-    name: `${mainName}·${normalizeVbkSubtitle(info.subtitle, meetingCity)}`,
-    subName: normalizeVbkSubtitle(info.subtitle, meetingCity),
+    name: `${mainName}·${subtitle}`,
+    subName: subtitle,
+    ...(privateTour ? { isAutoCalculateProductLevel: "F" } : {}),
     providerProductName: String(info.supplierProductName ?? "").trim(),
     vendorProductCode: String(info.supplierProductCode ?? "").trim(),
     ...productLineSaveField(productLine),
@@ -239,8 +231,14 @@ export async function ensureBasicInfoApi(
     destinationCountryName: city.countryName,
     phone400: String(phone.extNumberId ?? phone.extNumberID ?? phone.id),
   };
+  const childPrice = Number(product.commercial?.pricing?.child);
+  // Zero-priced child inventory is not sellable on this platform. Keeping
+  // forChild=T then makes later base-info saves fail with 20011227.
+  const forChild = Number.isFinite(childPrice) && childPrice >= 0
+    ? (childPrice > 0 ? "T" : "F") : String(sourceBooking.forChild ?? "F");
   const bookingControl = {
     ...mergeContact(sourceBooking, contact),
+    forChild,
     advanceBookingDays: advance.days,
     advanceBookingTime: advance.time,
     personQuantity: {
@@ -282,6 +280,10 @@ export async function ensureBasicInfoApi(
     phone: String(phone.extNumberId ?? phone.extNumberID ?? phone.id),
     contactCardId: Number(butler.contactCardId),
     localTravelAgencyId: localTravelAgency.id,
+    complaintContactId: Number(sourceBooking.vendorComplainContactId),
+    bookingContactId: Number(sourceBooking.vendorBookingContactId),
+    emergencyContactId: Number(sourceBooking.vendorBookingEmergencyContactId),
+    forChild,
   };
   const savedLocalTravelAgencyId = Number(savedBooking.localInfoID
     ?? (Array.isArray(savedBooking.localInfoIds) ? savedBooking.localInfoIds[0] : 0));
@@ -290,7 +292,12 @@ export async function ensureBasicInfoApi(
     || (expected.productLineId !== null && Number(savedBase.productLineID) !== expected.productLineId)
     || String(savedBase.vendorProductCode ?? "") !== expected.code
     || String(savedBase.phone400 ?? "") !== expected.phone
+    || (privateTour && (savedBase.isAutoCalculateProductLevel !== "F" || savedBase.subName !== subtitle))
     || Number(savedBooking.vendorBookingSeneschalContactId) !== expected.contactCardId
+    || Number(savedBooking.vendorComplainContactId) !== expected.complaintContactId
+    || Number(savedBooking.vendorBookingContactId) !== expected.bookingContactId
+    || Number(savedBooking.vendorBookingEmergencyContactId) !== expected.emergencyContactId
+    || String(savedBooking.forChild) !== expected.forChild
     || savedLocalTravelAgencyId !== expected.localTravelAgencyId) {
     throw new Error("VBK 基本信息保存后远端回读不一致");
   }

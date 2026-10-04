@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { stripBasicInfoIllegalKeywords as stripIllegalKeywords } from "./name-keywords.js";
+import { privateTourTitleSpots } from "./private-tour.js";
+import { privateTourSubtitle } from "../../../../shared/private-tour-copy.js";
 export { stripBasicInfoIllegalKeywords as stripIllegalKeywords } from "./name-keywords.js";
 /**
  * 「基本信息」面板的统一入口与终态校验：
@@ -41,12 +43,15 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   const info = product.basicInfo;
   await page.getByText("基本信息", { exact: true }).waitFor();
 
+  const keySpots = product.sales?.productForm === "privateTour"
+    ? (await privateTourTitleSpots(page, product.itinerary ?? [])).map(spot => String(spot.name || spot.poiName || ""))
+    : extra.keySpots;
   const preferredCountry = info.province && info.province.trim() ? "中国" : undefined;
   const cityContext = { disambiguator: extra?.disambiguator, product };
   if (info.province) await fillScenicAreaProvince(page, info.province, cityContext);
   const scenicSpotLogs = Array.isArray(extra?.scenicSpotLogs) ? extra.scenicSpotLogs : [];
-  if (info.province && Array.isArray(extra?.keySpots) && extra.keySpots.length) {
-    await fillScenicAreaSpots(page, info.province, extra.keySpots, scenicSpotLogs, cityContext);
+  if (info.province && Array.isArray(keySpots) && keySpots.length) {
+    await fillScenicAreaSpots(page, info.province, keySpots, scenicSpotLogs, cityContext);
   }
 
   const numberInputs = page.locator("input.ant-input-number-input");
@@ -57,7 +62,12 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   await numberInputs.nth(0).fill(String(info.days));
   await numberInputs.nth(1).fill(String(info.nights));
 
-  info.subtitle = normalizeVbkSubtitle(info.subtitle, info.meetingCity || info.destinationCity);
+  if (product.sales?.productForm === "privateTour") {
+    const autoLevel = page.locator('[id="baseInfo.isAutoCalculateProductLevel"]');
+    await assertCount(autoLevel, 1, "是否自动打钻");
+    await autoLevel.locator('input[value="F"]').check();
+    info.subtitle = privateTourSubtitle(info.subtitle, keySpots ?? []);
+  } else info.subtitle = normalizeVbkSubtitle(info.subtitle, info.meetingCity || info.destinationCity);
   await fillById(page, "baseInfo.subName", info.subtitle, "副标题输入框");
   await fillById(
     page,

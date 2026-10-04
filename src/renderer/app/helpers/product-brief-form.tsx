@@ -41,6 +41,7 @@ export function ProductBriefForm({ input, setInput, autoConfirm, setAutoConfirm,
       <textarea ref={ideaRef} className={shared.input} rows={5} maxLength={1000} placeholder="例如：希望节奏慢一点，多安排当地文化体验，适合带孩子出行……" defaultValue={input.userIdea ?? ""} onCompositionStart={() => { ideaComposingRef.current = true; }} onCompositionEnd={(event) => { ideaComposingRef.current = false; const userIdea = event.currentTarget.value.slice(0, 1000); setIdeaDraft(userIdea); updateInput("userIdea", { ...input, userIdea }); }} onChange={(event) => { const userIdea = event.target.value.slice(0, 1000); if (ideaComposingRef.current) return; setIdeaDraft(userIdea); updateInput("userIdea", { ...input, userIdea }); }} aria-invalid={Boolean(fieldErrors.userIdea)} aria-describedby={fieldErrors.userIdea ? "create-product-idea-error" : "product-idea-hint"} />
       {fieldErrors.userIdea ? <span id="create-product-idea-error" className={styles.fieldError} role="alert">{fieldErrors.userIdea}</span> : null}
       <span id="product-idea-hint" className={styles.ideaHint}>{ideaDraft.length} / 1000 字，AI 会把它作为需求偏好参考</span>
+      {input.productForm === "privateTour" ? <span className={styles.ideaGuide}>建议补充：付费景点及门票是否包含、特色体验、适合客群、游览节奏和已确认服务。AI 会结合行程提炼卖点；私家团副标题固定包含“一单一团+24h线上管家”。</span> : null}
     </label>
     <p className={styles.ideaHint}>AI 会先完善方案；由你在「方案协作」确认后，才开始录入 VBK。</p>
     <div className={styles.formActions}>

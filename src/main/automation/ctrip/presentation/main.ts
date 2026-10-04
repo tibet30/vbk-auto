@@ -192,10 +192,8 @@ export async function bindCtripLibraryPresentationImages(page, cover, productId,
       );
     }
   }
-  if (failures.length > 0) {
-    throw new Error(`产品图文景点图绑定失败：${failures.join("；")}`);
-  }
-  return { ...coverResult, attractionImages: attractionResults };
+  // 景点图尽量绑定，单张缺失或不可用不阻断后续图文保存。
+  return { ...coverResult, attractionImages: attractionResults, ...(failures.length ? { imageWarnings: failures } : {}) };
 }
 
 function ctripLibraryCoverAttempts(cover) {

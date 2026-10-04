@@ -95,7 +95,7 @@ const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"] as const;
 const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_SIZE_MIB = Math.floor(MAX_FILE_SIZE_BYTES / 1024 / 1024);
 /** 产品封面轮播图最多展示的图片数（1 主图 + 其余备图）。 */
-const MAX_COVER_IMAGES = 10;
+const MAX_COVER_IMAGES = 20;
 
 export function BasicInfoCoverRow({
   cover,
@@ -314,12 +314,15 @@ export function BasicInfoCoverRow({
           }
         >
           {cover ? (
+            <>
             <CoverDisplay
               cover={cover}
               previewUrl={previewUrl}
               onReadPreviewUrl={onReadPreviewUrl}
               onOpenImage={openImageZoom}
             />
+            {cover.source === "ctripLibrary" && cover.missingPoiImages?.length ? <span className={styles.hint} data-tone="warn">待补景点图片：{cover.missingPoiImages.join("、")}。可按需补充，不影响确认和录入。</span> : null}
+            </>
           ) : fallback ? (
             <div className={styles.coverFallbackDisplay} data-testid="cover-fallback-display">
               <img className={styles.coverFallbackImage} src={coverFallbackImage} alt="运营占位图：请替换为真实图片，仅供草稿录入，禁止上架" />

@@ -15,8 +15,7 @@ import {
   hasValidVbkRecommendationLength,
   normalizeVbkRecommendationPunctuation,
   VBK_RECOMMENDATION_MIN_CHARACTERS,
-  VBK_RECOMMENDATION_PLATFORM_MAX_BYTES,
-  vbkRecommendationByteLength,
+  VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS,
   vbkRecommendationCharacterLength,
 } from "../../../planning/vbk-recommendation-length.js";
 
@@ -26,7 +25,7 @@ export interface RecommendationPlanStep {
   text: string;
 }
 
-export const VBK_RECOMMENDATION_MAX_LENGTH = VBK_RECOMMENDATION_PLATFORM_MAX_BYTES;
+export const VBK_RECOMMENDATION_MAX_LENGTH = VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS;
 
 /**
  * 现场确认 VBK 推荐理由输入框只接受这组标点的等价形式；若文本已落在
@@ -39,10 +38,10 @@ export function normalizeVbkRecommendation(value: unknown, category?: string): s
   }
   const normalized = normalizeVbkRecommendationPunctuation(value);
   const characterLength = vbkRecommendationCharacterLength(normalized);
-  if (characterLength >= VBK_RECOMMENDATION_MIN_CHARACTERS && characterLength <= VBK_RECOMMENDATION_PLATFORM_MAX_BYTES) {
+  if (characterLength >= VBK_RECOMMENDATION_MIN_CHARACTERS && characterLength <= VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS) {
     return normalized;
   }
-  if (characterLength > VBK_RECOMMENDATION_PLATFORM_MAX_BYTES) {
+  if (characterLength > VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS) {
     return fitVbkRecommendationText(normalized, undefined, category);
   }
   return normalized;

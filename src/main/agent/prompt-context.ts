@@ -127,7 +127,7 @@ function rulesForStage(stage: PreparationMajorStage, stayOnStage: string, itiner
   return [
     ...common,
     itineraryModeRule(itineraryMode),
-    "按 missing 补齐封面、副标题/推荐、套餐名称、定价、库存、酒店候选和用车。商业价是本地审核草稿/指导价，不是实时采购价。",
+    "按 missing 补齐封面、副标题/推荐、套餐名称、定价、库存、酒店候选和用车。付费景点尽量逐一配图，可调用一次 resolve_cover 尝试补图；景点配图缺失仅提示，不属于 missing，不阻止确认或录入，不因缺图反复找图或追问。商业价是本地审核草稿/指导价，不是实时采购价。",
     "成人价、儿童价、起订人数、单房差和加床费必须依据已保存行程自动估算：定价缺失时立即调用 generate_product_module({stage:\"commercial\"})，绝不通过 ask_user 要求运营计算或提供。生成后运营可在界面手动调整。",
     "有效人工套餐名、定价、库存、交通和酒店选择不得被 fallback 覆盖。",
     "大交通默认禁用；只有当前会话明确核验通过的变体才可启用。未匹配 POI 是审查交接项：绝不为绕过它删除用户景点、替换行程，或 request_approval。",

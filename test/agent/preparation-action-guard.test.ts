@@ -54,7 +54,7 @@ test("准备完成后允许本地受控修订，但不允许重新生成模块",
       { category: "优选行程", text: "一日或两日私家串联宽窄巷子与武侯祠，行程节奏清晰不赶路，体验成都文化" },
       { category: "精选酒店", text: "精选当地住宿衔接景点与餐饮，方便每日出行与休息，整体体验更舒适" },
       { category: "缤纷景点", text: "覆盖宽窄巷子与武侯祠等景点，兼顾美食与古建，城市漫游内容更丰富完整" },
-    ], cover: { source: "ctripLibrary", imageId: 1, imageUrl: "https://example.test/cover.jpg", poi: "宽窄巷子", description: "横版封面" },
+    ], cover: { source: "ctripLibrary", imageId: 1, imageUrl: "https://example.test/cover.jpg", alternates: [{ imageId: 2, imageUrl: "https://example.test/second.jpg", poi: "武侯祠", poiId: 2 }], poi: "宽窄巷子", description: "横版封面" },
   };
   Object.assign(product.product.operations!, {
     vehicleResource: { resourceGroupId: 88, resourceGroupName: "成都5座商务车" },

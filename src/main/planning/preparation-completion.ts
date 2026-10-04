@@ -10,6 +10,7 @@ import { computeReadiness, type ComputeReadinessInput } from "../readiness.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 import { classifyItineraryInputMode } from "./itinerary-input-contract.js";
 import { readActiveCoverFallback } from "../../shared/cover-fallback.js";
+import { itineraryStructureError } from "./itinerary-structure.js";
 import {
   classifyReadinessIssue,
   extraPreparationGaps,
@@ -19,7 +20,7 @@ import {
 
 const STAGE_ORDER: readonly PreparationMajorStage[] = ["foundation", "itinerary", "completion"];
 const NODE_ORDER: readonly PlanningNodeId[] = [
-  "skeleton", "spotCandidates", "poiResolution", "itineraryDraft", "hotelResolution",
+  "skeleton", "spotCandidates", "itineraryDraft", "poiResolution", "hotelResolution",
   "copy", "presentation", "commercial", "cover", "vehicleResource", "finalValidation",
 ];
 
@@ -117,8 +118,19 @@ function collectGaps(product: ProductDetail, readinessOptions?: ReadinessOptions
     ignoreCurrentAutomationFailure: readinessOptions?.ignoreCurrentAutomationFailure ?? true,
     ignoreInterruptedAutomationFailure: readinessOptions?.ignoreInterruptedAutomationFailure,
   });
+  const structureError = itineraryStructureError(product.product);
   for (const issue of readiness.issues) {
-    push({ label: issue.label, detail: issue.detail, ...classifyReadinessIssue(issue.label, issue.detail) });
+    const classified = /^itinerary\.\d+\.hotelCandidates(?:\.|$)/.test(issue.label)
+      ? { stage: "completion" as const, node: "hotelResolution" as const }
+      : classifyReadinessIssue(issue.label, issue.detail);
+    const itineraryIssue = classified.stage === "itinerary" && (classified.node === "itineraryDraft" || classified.node === "poiResolution");
+    push({
+      label: issue.label,
+      detail: issue.detail,
+      ...(itineraryIssue
+        ? { stage: "itinerary" as const, node: structureError ? "itineraryDraft" as const : "poiResolution" as const }
+        : classified),
+    });
   }
   for (const gap of extraPreparationGaps(product.product)) push(gap);
   return gaps;
@@ -156,7 +168,7 @@ function actionsFor(
   if (ready) {
     return hasApproval
       ? { allowed: [...read, "patch_product"], prohibited: ["request_approval", "generate_product_module"] }
-      : { allowed: [...read, "patch_product", "request_approval"], prohibited: ["generate_product_module"] };
+      : { allowed: [...read, "patch_product", ...(!coverSearchExhausted ? ["resolve_cover" as const] : []), "request_approval"], prohibited: ["generate_product_module"] };
   }
   if (stage === "foundation") {
     return { allowed: [...read, "generate_product_module", "patch_product"], prohibited: ["request_approval"] };

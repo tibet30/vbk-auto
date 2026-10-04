@@ -196,3 +196,12 @@ test("后续取消旧景点并改去新景点时以最新输入为准", () => {
   assert.ok(locked.pois.includes("大熊猫基地"));
   assert.equal(locked.transport, "shared");
 });
+
+test("验收第二轮和产品名中的序号不作为天数标记，顺序说明不作为景点", () => {
+  const product = draft();
+  product.product.basicInfo!.userIdea = '接口验收第二轮-勿发布。供应商产品名“接口验收第二轮勿发布-泸州2天1晚私家团”。第一天忠山公园、金龙寺；第二天尧坝古镇、泸县玉蟾山景区，景点顺序保持上述安排。5钻酒店住1晚，成人1200元。';
+  assert.deepEqual(extractLockedConstraints(product).itineraryOrder, [
+    { day: 1, spots: ["忠山公园", "金龙寺"] },
+    { day: 2, spots: ["尧坝古镇", "泸县玉蟾山景区"] },
+  ]);
+});

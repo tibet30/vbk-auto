@@ -9,6 +9,8 @@ import type { DraftAutomation } from "../automation/automation.js";
 import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { hasValidVbkRecommendationLength } from "../planning/vbk-recommendation-length.js";
 import { executeStageOutput } from "../planning/stage-runner.js";
+import { itineraryInputContractError } from "../planning/itinerary-input-contract.js";
+import { itineraryStructureError } from "../planning/itinerary-structure.js";
 import { applyStageDeterministicCompletion, skeletonFromProduct } from "../planning/stage-deterministic-completion.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import type { AgentTool } from "./types.js";
@@ -94,9 +96,20 @@ export function createGenerationStageTools(args: {
     });
     applied.accepted.push(...extra.accepted);
     applied.rejected.push(...extra.rejected);
-    if (stage === "itinerary" && applied.accepted.some((outcome) => outcome.module === "itinerary")) {
+    if (stage === "itinerary") {
+      const itineraryAccepted = applied.accepted.some((outcome) => outcome.module === "itinerary");
+      if (!itineraryAccepted) {
+        const detail = applied.rejected
+          .filter((outcome) => outcome.module === "itinerary")
+          .map((outcome) => outcome.reason)
+          .filter(Boolean)
+          .join("；");
+        throw new Error(`每日行程未处理：生成结果未通过结构或锁定校验${detail ? `（${detail}）` : ""}。`);
+      }
+      assertPersistedItinerary(get(localProductId));
       await resolveItineraryPoisAndTraffic(localProductId);
       refreshSatisfiedResearchTasks(deps.db, localProductId);
+      assertPersistedItinerary(get(localProductId));
     }
     if (stage === "presentation") {
       if (!applied.accepted.some((outcome) => outcome.module === "presentation")) {
@@ -154,3 +167,11 @@ export function createGenerationStageTools(args: {
 
 function cleanText(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }
 function safeJson(value: unknown): string { return JSON.stringify(value, null, 2).slice(0, 24_000); }
+
+function assertPersistedItinerary(product: ProductDetail): void {
+  const itinerary = product.product.itinerary;
+  const structureError = itineraryStructureError(product.product as JsonObject);
+  if (structureError) throw new Error(`每日行程未处理：写入后回读结构无效（${structureError}）。`);
+  const contract = itineraryInputContractError(product, itinerary);
+  if (contract) throw new Error(`每日行程未处理：写入后回读未通过锁定行程校验（${contract}）。`);
+}

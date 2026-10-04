@@ -10,7 +10,10 @@ import { AgentToolRunner } from "./core-tools.js";
 import { resolveSelectedAnswers } from "./selected-input-answers.js";
 import { requestWorkflowReplay } from "./core-workflow-replay.js";
 import { recoverPrematureCompletion } from "./core-completion-recovery.js";
+import { refreshPendingInput } from "./core-pending-input.js";
 import { validateAnswers } from "./core-validation.js";
+import { isPreparationStatusQuery, preparationStatusReply } from "./preparation-status-query.js";
+import { isPreparationRun } from "./preparation-run.js";
 import type { AgentCoreDependencies, AgentSnapshotStore } from "./types.js";
 
 export type { AgentSnapshotStore } from "./types.js";
@@ -64,8 +67,10 @@ export class AgentCore {
           }
         }
       }
-      this.refreshPendingInput(id, snapshot);
-      return this.save(snapshot);
+      const refresh = this.refreshPendingInput(id, snapshot);
+      const saved = this.save(snapshot);
+      if (refresh.shouldSchedule) this.loop.schedule(id);
+      return saved;
     });
   }
 
@@ -73,8 +78,11 @@ export class AgentCore {
   async reconcilePendingInput(id: string): Promise<AgentSnapshot> {
     return this.command(id, async () => {
       const snapshot = this.load(id);
-      if (!this.refreshPendingInput(id, snapshot)) return snapshot;
-      return this.save(snapshot);
+      const refresh = this.refreshPendingInput(id, snapshot);
+      if (!refresh.changed) return snapshot;
+      const saved = this.save(snapshot);
+      if (refresh.shouldSchedule) this.loop.schedule(id);
+      return saved;
     });
   }
 
@@ -100,6 +108,11 @@ export class AgentCore {
         }
         // Plan is no longer phase-A ready: drop the stale card and continue as a
         // normal turn so the model can finish local prep before re-requesting.
+      }
+      if (isPreparationRun(snapshot) && isPreparationStatusQuery(text)) {
+        this.event(snapshot, "user", text, { readOnlyStatusQuery: true });
+        this.event(snapshot, "assistant", preparationStatusReply(snapshot, this.deps.preparationProduct?.(id)), { readOnlyStatusQuery: true });
+        return this.save(snapshot);
       }
       await this.deps.prepareUserInstruction?.(id, text);
       const recoveryInstruction = preservesApprovedIntent(text);
@@ -245,7 +258,12 @@ export class AgentCore {
       let snapshot = this.load(id);
       if (!this.active.has(id) && !this.scheduled.has(id)) this.snapshots.recoverInterruptedCalls(snapshot);
       if (!snapshot.run || ["completed", "abandoned"].includes(snapshot.run.status)) return snapshot;
-      if (this.refreshPendingInput(id, snapshot)) return this.save(snapshot);
+      const refresh = this.refreshPendingInput(id, snapshot);
+      if (refresh.changed) {
+        const saved = this.save(snapshot);
+        if (refresh.shouldSchedule) this.loop.schedule(id);
+        return saved;
+      }
       const openRetryWindow = snapshot.run.status === "paused";
       if (snapshot.pendingInput) { this.waiting(snapshot, "waiting_input"); return this.save(snapshot); }
       if (snapshot.pendingApproval) {
@@ -332,28 +350,8 @@ export class AgentCore {
   }
 
   private cancelPendingInteraction(snapshot: AgentSnapshot, reason: string): void { this.snapshots.cancelPendingInteraction(snapshot, reason); }
-  private refreshPendingInput(id: string, snapshot: AgentSnapshot): boolean {
-    const questions = snapshot.pendingInput?.questions;
-    if (!questions?.length || snapshot.run?.status !== "waiting_input") return false;
-    const resolved = this.deps.resolvedPendingQuestions?.(id, questions) ?? [];
-    const resolvedIds = new Set(resolved.map((item) => item.id));
-    if (!resolvedIds.size) return false;
-    const remaining = questions.filter((question) => !resolvedIds.has(question.id));
-    const message = resolved.map((item) => item.message).join("；");
-    if (remaining.length) {
-      snapshot.pendingInput = {
-        ...snapshot.pendingInput!, questions: remaining,
-        defaultAnswers: {
-          ...snapshot.pendingInput!.defaultAnswers,
-          ...Object.fromEntries(resolved.map((item) => [item.id, item.answer ?? "已在当前产品中保存"])),
-        },
-      };
-      this.event(snapshot, "status", `${message}。其余问题仍需回答。`, { reconciledQuestions: [...resolvedIds] });
-    } else {
-      this.cancelPendingInteraction(snapshot, message);
-      this.pauseRun(snapshot, `${message}。旧问题已撤销，请继续当前方案。`);
-    }
-    return true;
+  private refreshPendingInput(id: string, snapshot: AgentSnapshot) {
+    return refreshPendingInput({ id, snapshot, deps: this.deps, snapshots: this.snapshots });
   }
   private blockedResult(snapshot: AgentSnapshot, toolCallId: string, message: string, blocker: NoProgressBlocker,
     data?: Record<string, unknown>, runId?: string): void {

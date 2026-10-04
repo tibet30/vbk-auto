@@ -349,7 +349,7 @@ export class AgentSnapshotManager {
   }
 
   private latestUserId(snapshot: AgentSnapshot): string | undefined {
-    return [...snapshot.events].reverse().find((event) => event.type === "user")?.id;
+    return [...snapshot.events].reverse().find((event) => event.type === "user" && event.data?.readOnlyStatusQuery !== true)?.id;
   }
 
   private callKey(snapshot: AgentSnapshot, id: string): string | undefined {

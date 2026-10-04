@@ -5,6 +5,7 @@ import { hasValidVbkRecommendationLength } from "./vbk-recommendation-length.js"
 import { ensureCommercialFallbacks, ensurePackageName } from "./commercial-stage.js";
 import { ensurePresentationCover } from "./cover-default.js";
 import { AI_WRITABLE_PATHS } from "./schemas.js";
+import { presentationFallback } from "./presentation-fallback.js";
 
 export function skeletonFromProduct(product: Record<string, unknown>): PlanningSkeleton {
   const basic = record(product.basicInfo);
@@ -74,22 +75,13 @@ async function ensurePresentationContent(args: {
   const product = await args.runtime.loadCurrentProduct(args.localProductId);
   const presentation = record(product.presentation) ?? {};
   if (hasPresentationContent(presentation)) return undefined;
-  const basic = record(product.basicInfo);
-  const city = text(basic?.meetingCity) || text(basic?.destinationCity) || text(basic?.destination) || "目的地";
-  const days = Number(basic?.days);
-  const dayCount = Number.isInteger(days) && days > 0 ? days : 1;
-  const spotNames = itinerarySpotNames(product).slice(0, 4);
-  const spotText = spotNames.length ? spotNames.map(safeMarketingPlaceName).join("、") : `${city}经典景点`;
+  const fallback = presentationFallback(product);
   const nextPresentation = {
     ...presentation,
     recommendationCategory: text(presentation.recommendationCategory) || "优选行程",
-    recommendation: text(presentation.recommendation) || `${city}${dayCount}日私家小团，串联${spotText}，专车衔接更省心。`,
-    features: text(presentation.features) || `围绕${city}代表性景点安排行程，节奏从容，适合家庭、朋友或小团队轻松出游。`,
-    recommendations: validRecommendations(presentation.recommendations) ?? [
-      { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
-      { category: "精选酒店", text: "优先安排当地高品质住宿，位置与卫生双重把关，整体休息体验更舒适安心" },
-      { category: "缤纷景点", text: `精选${spotText}代表性景点组合，行程兼顾人文历史与城市风光，出游体验更丰富` },
-    ],
+    recommendation: text(presentation.recommendation) || fallback.recommendation,
+    features: text(presentation.features) || fallback.features,
+    recommendations: validRecommendations(presentation.recommendations) ?? fallback.recommendations,
   };
   const result = await args.runtime.writeModule(args.localProductId, "presentation", AI_WRITABLE_PATHS.presentation, nextPresentation);
   if (!result.ok) return { module: "presentation", status: "rejected", reason: result.reason || "图文兜底写入失败" };
@@ -99,10 +91,6 @@ async function ensurePresentationContent(args: {
     writePath: AI_WRITABLE_PATHS.presentation,
     acceptedFields: ["recommendation", "features", "recommendations"],
   };
-}
-
-function safeMarketingPlaceName(value: string): string {
-  return value.replace(/黑独山/g, "特色戈壁景观");
 }
 
 function hasPresentationContent(presentation: Record<string, unknown>): boolean {
@@ -123,20 +111,6 @@ function validRecommendations(value: unknown): Array<{ category: string; text: s
     rows.push({ category, text: content });
   }
   return rows;
-}
-
-function itinerarySpotNames(product: Record<string, unknown>): string[] {
-  const names: string[] = [];
-  for (const day of Array.isArray(product.itinerary) ? product.itinerary : []) {
-    const spots = record(day)?.spots;
-    if (!Array.isArray(spots)) continue;
-    for (const item of spots) {
-      const spot = record(item);
-      const name = text(spot?.poiName) || text(spot?.name);
-      if (name && !names.includes(name)) names.push(name);
-    }
-  }
-  return names;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

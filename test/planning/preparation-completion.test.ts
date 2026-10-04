@@ -11,6 +11,20 @@ import type { AgentSnapshot, ProductDetail, ProductReadiness } from "../../src/s
 
 const readyReadiness = { ready: true, issues: [] } as unknown as ProductReadiness;
 
+test("明确不录入大交通却已启用时阻止确认，并开放受控修复入口", () => {
+  const product = completeDraft();
+  product.product.basicInfo!.userIdea = "仅本地游览，不录入飞机、火车等大交通。";
+  const operations = product.product.operations as Record<string, unknown>;
+  operations.trafficLine = { enabled: true, variants: ["flightRoundTrip"], availability: { availableVariants: ["flightRoundTrip"], unavailableVariants: {} } };
+  const evaluation = evaluatePreparationCompletion(product);
+  assert.equal(evaluation.ready, false);
+  assert.ok(evaluation.missing.includes("大交通禁用配置"));
+  assert.ok(evaluation.allowedActions.includes("recheck_traffic_line_availability"));
+  assert.ok(!evaluation.allowedActions.includes("request_approval"));
+  operations.trafficLine = { enabled: false, variants: [] };
+  assert.equal(evaluatePreparationCompletion(product).ready, true);
+});
+
 function completeDraft(): ProductDetail {
   const product = buildProductSnapshot({ destination: "成都", days: 2, productForm: "privateTour" });
   Object.assign(product.product.basicInfo!, {
@@ -35,7 +49,8 @@ function completeDraft(): ProductDetail {
       { category: "精选酒店", text: "优先安排当地高品质住宿，位置与卫生双重把关，整体休息体验更舒适安心" },
       { category: "特色美食", text: "沿途安排宽窄巷子与本地老店特色小吃，餐食与景点结合，体验更丰富" },
     ],
-    cover: { source: "ctripLibrary", imageId: 101001, imageUrl: "https://example.test/kuanzhai-cover.jpg", poi: "宽窄巷子", description: "宽窄巷子横版封面", minQuality: 3 },
+    cover: { source: "ctripLibrary", imageId: 101001, imageUrl: "https://example.test/kuanzhai-cover.jpg", alternates: [{ imageId: 101002, imageUrl: "https://example.test/wuhou.jpg", poi: "武侯祠", poiId: 102 }], poi: "宽窄巷子", description: "宽窄巷子横版封面", minQuality: 3,
+      alternates: [{ imageId: 101002, imageUrl: "https://example.test/wuhou.jpg", poi: "武侯祠" }] },
   };
   product.product.itinerary = [
     { day: 1, title: "宽窄巷子", description: "游览宽窄巷子", hotel: "无", meals: "早餐自理；午餐自理；晚餐自理", spots: [{ name: "宽窄巷子", poiName: "宽窄巷子", poiId: 101 }] },
@@ -340,4 +355,20 @@ test("未完成的 POI 研究任务会阻塞批准", () => {
   assert.equal(evaluation.ready, false);
   assert.equal(evaluation.currentStage, "itinerary");
   assert.ok(!evaluation.allowedActions.includes("request_approval"));
+});
+
+test("付费景点缺图不阻止确认；补图可选且缺图清单不成为卡点", () => {
+  const product = completeDraft();
+  const cover = product.product.presentation!.cover as any;
+  delete cover.alternates;
+  delete cover.missingPoiImages;
+  for (const missingPoiImages of [undefined, ["武侯祠"]]) {
+    cover.missingPoiImages = missingPoiImages;
+    const result = evaluatePreparationCompletion(product);
+    assert.equal(result.ready, true, JSON.stringify(result.missing));
+    assert.ok(result.allowedActions.includes("request_approval"));
+    assert.ok(result.allowedActions.includes("resolve_cover"));
+    assert.ok(!result.missing.some(item => /配图|景点图片/.test(item)));
+    assert.equal(preparationApprovalBlockReason(product), undefined);
+  }
 });

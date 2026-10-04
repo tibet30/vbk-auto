@@ -6,6 +6,7 @@ import { AgentToolRunner } from "./core-tools.js";
 import { buildModelMessages } from "./core-transcript.js";
 import { cleanList, nativeToolSchemas } from "./core-validation.js";
 import { formatToolCallPreamble } from "./tool-call-preamble.js";
+import { nextPreparationLoopDecision } from "./core-preparation.js";
 import type { AgentCoreDependencies, AgentModelMessage, AgentToolCall } from "./types.js";
 
 /** Model-turn scheduler: tool batches, completion gate, and round limit. */
@@ -33,6 +34,46 @@ export class AgentTurnLoop {
         const before = this.snapshots.load(id);
         if (before.run?.status !== "running" || before.uncertainWrite) break;
         const token = this.snapshots.token(before);
+        const preparation = nextPreparationLoopDecision(this.deps, before);
+        const isPreparationRepairWindow = preparation.kind === "model" && preparation.modelRepairWindow === true;
+        if (preparation.kind === "pause") {
+          this.snapshots.pause(before, preparation.reason);
+          this.snapshots.save(before);
+          break;
+        }
+        if (preparation.kind === "execute") {
+          const call: AgentToolCall = { id: this.id(), name: preparation.action.name, arguments: preparation.action.arguments };
+          this.snapshots.event(before, "status", `自动推进本地准备：${preparation.action.node}`, {
+            deterministicPreparation: true,
+            node: preparation.action.node,
+            progressKey: preparation.action.progressKey,
+            name: preparation.action.name,
+          }, token.runId);
+          this.snapshots.event(before, "tool_call", call.name, {
+            toolCallId: call.id,
+            name: call.name,
+            arguments: call.arguments,
+            index: 0,
+            count: 1,
+            deterministicPreparation: true,
+            node: preparation.action.node,
+            progressKey: preparation.action.progressKey,
+          }, token.runId);
+          this.snapshots.save(before);
+          const outcome = await this.toolRunner.execute(id, call, token);
+          if (outcome !== "continue") break;
+          continue;
+        }
+        if (preparation.modelRepairWindow) {
+          this.snapshots.event(before, "status", `当前节点 ${preparation.action!.node} 已自动尝试两次。请基于前两次真实工具结果和当前保存事实仅修复一次，不能只询问是否继续；必须保留锁定城市、天数和已绑定 POI。`, {
+            deterministicPreparationModelRepair: true,
+            modelFeedback: true,
+            node: preparation.action!.node,
+            progressKey: preparation.action!.progressKey,
+            name: preparation.action!.name,
+          }, token.runId);
+          this.snapshots.save(before);
+        }
         const messages = await this.messages(before);
         if (!this.snapshots.current(this.snapshots.load(id), token)) continue;
         const model = await this.model(id);
@@ -73,6 +114,11 @@ export class AgentTurnLoop {
           }
           if (output.content && !streamedEvent) this.snapshots.event(current, "assistant", output.content);
           this.snapshots.save(current);
+          // A repair-window answer with no tool has not changed the saved
+          // product. Let the bounded preparation controller record its own
+          // concrete pause instead of treating a prior local tool failure as
+          // a generic completion attempt.
+          if (isPreparationRepairWindow) continue;
           await this.handleNoTool(id, token);
           if (this.snapshots.load(id).run?.status !== "running") break;
           continue;

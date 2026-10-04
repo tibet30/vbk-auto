@@ -26,9 +26,7 @@ import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import {
-  VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
   hasValidVbkRecommendationLength,
-  vbkRecommendationByteLength,
 } from "./vbk-recommendation-length.js";
 import type {
   GenerationStateStore,
@@ -42,6 +40,7 @@ import type {
 import { resolvePlanningPoiAutoSelection, type PoiAutoDisambiguator } from "./poi-auto-selection.js";
 import { planningWriteContractError } from "./itinerary-input-contract.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
+import { privateTourSubtitle } from "../../shared/private-tour-copy.js";
 
 export class DbGenerationStateStore implements GenerationStateStore {
   constructor(
@@ -270,6 +269,9 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
         ? product.product.basicInfo as Record<string, unknown>
         : {};
       const incoming = { ...(value as Record<string, unknown>) };
+      if ((product.product.sales as { productForm?: unknown } | undefined)?.productForm === "privateTour" && typeof incoming.subtitle === "string") {
+        incoming.subtitle = privateTourSubtitle(incoming.subtitle);
+      }
       if (typeof incoming.province === "string") incoming.province = normaliseProvinceName(incoming.province);
       value = { ...existing, ...incoming };
     }

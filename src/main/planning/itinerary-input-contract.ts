@@ -203,14 +203,18 @@ function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number;
 }
 
 function rawAlternativeGroups(value: string): Array<{ day: number; names: string[] }> {
-  const marker = /(?:D|d|第)\s*([0-9一二三四五六七八九十]+)\s*天?/g;
+  const marker = /(?:[Dd]\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/g;
   const matches = [...value.matchAll(marker)];
   return matches.flatMap((match, index) => {
-    const day = DAY_TOKEN[match[1] ?? ""] ?? Number(match[1]);
+    const token = match[1] ?? match[2] ?? "";
+    const day = DAY_TOKEN[token] ?? Number(token);
     const start = (match.index ?? 0) + match[0].length;
     const end = matches[index + 1]?.index ?? value.length;
     if (!Number.isInteger(day) || day < 1) return [];
-    return value.slice(start, end).split(/[-—–→]+/u).flatMap((segment) => {
+    // Operational sentences after a day's route are not scenic alternatives.
+    return value.slice(start, end).split(/[-—–→。；;\n，,]+/u).flatMap((segment) => {
+      if (/^\s*(?:不含|不包含|不安排|不提交|不发布|不需要|无需|不要)/u.test(segment)) return [];
+      if (/^\s*(?:第\s*[0-9一二三四五六七八九十]+\s*晚|(?:参考)?酒店|住宿|入住)/u.test(segment)) return [];
       if (!/(?:或者|或)/u.test(segment)
         && !(/(?:二选一|多选一|任选其一)/u.test(segment) && /(?:\/|／)/u.test(segment))) return [];
       const names = unique(segment

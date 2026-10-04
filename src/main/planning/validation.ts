@@ -13,9 +13,7 @@ import { REQUIRED_MODULES } from "../../shared/contracts-planning.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import {
-  VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
   hasValidVbkRecommendationLength,
-  vbkRecommendationByteLength,
 } from "./vbk-recommendation-length.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";

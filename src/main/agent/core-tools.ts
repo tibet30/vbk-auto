@@ -9,6 +9,7 @@ import {
   asksForPrematureApproval,
   automaticPreparationAnswer,
 } from "./preparation-question-defaults.js";
+import { automaticRepairFlowAnswer, mustKeepRepairQuestionVisible } from "./core-preparation.js";
 import { isCacheableReadQuery, readQueryCacheKey, ReadQueryCache } from "./read-query-cache.js";
 import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js";
 
@@ -23,6 +24,11 @@ function actionName(call: AgentToolCall): string {
   return typeof call.name === "string" && call.name ? call.name : "unknown";
 }
 
+function isDeterministicPreparationCall(snapshot: import("../../shared/contracts.js").AgentSnapshot, call: AgentToolCall): boolean {
+  return snapshot.events.some((event) => event.type === "tool_call" && event.data?.toolCallId === call.id
+    && event.data?.deterministicPreparation === true);
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -31,11 +37,17 @@ function defaultAnswerForQuestion(question: AgentQuestion): string | string[] | 
   return automaticPreparationAnswer(question);
 }
 
-function splitDefaultQuestions(questions: AgentQuestion[]) {
+function splitDefaultQuestions(
+  questions: AgentQuestion[],
+  deps: AgentCoreDependencies,
+  snapshot: import("../../shared/contracts.js").AgentSnapshot,
+) {
   const visible: AgentQuestion[] = [];
   const defaultAnswers: Record<string, string | string[]> = {};
   for (const question of questions) {
-    const answer = defaultAnswerForQuestion(question);
+    const answer = mustKeepRepairQuestionVisible(deps, snapshot, question)
+      ? undefined
+      : defaultAnswerForQuestion(question) ?? automaticRepairFlowAnswer(deps, snapshot, question);
     if (answer === undefined) visible.push(question);
     else defaultAnswers[question.id] = answer;
   }
@@ -170,7 +182,8 @@ export class AgentToolRunner {
       } else this.snapshots.result(snapshot, call.id, failureContent, { error: message, retryHint: "once" }, token.runId);
       if ((error as { uncertainWrite?: boolean }).uncertainWrite) {
         this.snapshots.markUncertain(snapshot, call.id, message);
-      } else if (this.snapshots.failures(snapshot, call, message) >= 2 && snapshot.run?.id === token.runId) {
+      } else if (!isDeterministicPreparationCall(snapshot, call)
+        && this.snapshots.failures(snapshot, call, message) >= 2 && snapshot.run?.id === token.runId) {
         this.snapshots.pause(snapshot, "相同工具和参数连续失败两次，已暂停。请调整后再继续。");
       }
       this.snapshots.save(snapshot);
@@ -236,7 +249,9 @@ export class AgentToolRunner {
     const resolvedIds = new Set(resolved.map((item) => item.id));
     const unresolved = normalised.filter((question) => !resolvedIds.has(question.id));
     const deferredApprovalQuestions = unresolved.filter(asksForPrematureApproval);
-    const { visible, defaultAnswers } = splitDefaultQuestions(unresolved.filter((question) => !asksForPrematureApproval(question)));
+    const { visible, defaultAnswers } = splitDefaultQuestions(
+      unresolved.filter((question) => !asksForPrematureApproval(question)), this.deps, snapshot,
+    );
     for (const item of resolved) defaultAnswers[item.id] = item.answer ?? "已在当前产品中保存";
     for (const question of deferredApprovalQuestions) {
       defaultAnswers[question.id] = question.kind === "multiple" ? [] : "deferred_until_final_approval";

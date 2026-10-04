@@ -329,7 +329,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       async execute(args) { return withPage(async () => { const query = buildVehicleResourceQuery(args); const payload = await searchVehicleResourceGroups(await getVbkRequestPage(deps.browser), query.query); const groups = extractResourceGroups(payload); return { content: safeJson({ query, selected: bestResourceGroup(payload), groups }) }; }); },
     },
     {
-      name: "resolve_cover", description: "查询携程图库并将完整封面候选安全写入 presentation.cover。", parameters: { type: "object", properties: {} },
+      name: "resolve_cover", description: "查询携程图库并将完整封面候选安全写入 presentation.cover，尽量逐一覆盖付费景点；缺少景点配图只记录提示，不阻止确认或录入。", parameters: { type: "object", properties: {} },
       async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => applyAutoCoverFill({ page: await getVbkRequestPage(deps.browser), product: productData(current) })); const result = filled.outcome.written ? deps.productMutations.replace(ctx.localProductId, filled.nextProduct, { status: current.status }) : current; return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
     },
     {

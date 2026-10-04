@@ -7,6 +7,22 @@ import { agentPatchOperations } from "../../src/main/agent/integration-patch.js"
 import type { ProductDetail } from "../../src/shared/contracts.js";
 import { selfRepairItineraryForVbk } from "../../src/main/planning/itinerary-self-repair.js";
 
+test("完整路线后的交通排除和草稿边界不被识别为景点二选一", () => {
+  const product = draft("第一天忠山公园、金龙寺，第二天尧坝古镇、玉蟾山，保留此顺序。当地5钻酒店、不含餐；不含飞机或火车交通子产品。仅保存草稿，不提交审核或发布。");
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "忠山公园" }, { name: "金龙寺" }] },
+    { day: 2, spots: [{ name: "尧坝古镇" }, { name: "玉蟾山" }] },
+  ]), undefined);
+});
+
+test("每日路线后的第1晚酒店候选不能被当成第2天的景点二选一", () => {
+  const product = draft("第1天：忠山公园→金龙寺；第2天：尧坝古镇→泸县玉蟾山景区。景点顺序保持不变。5钻酒店，第1晚四川巨洋国际大饭店或泸州建国饭店，最后一天不住宿。");
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "忠山公园" }, { name: "金龙寺" }] },
+    { day: 2, spots: [{ name: "尧坝古镇" }, { name: "泸县玉蟾山景区" }] },
+  ]), undefined);
+});
+
 test("日喀则真实卡点：或选项核验收敛后允许继续修正文案和末日住宿", () => {
   const product = draft("第一天：接火车 → 萨迦古城 → 萨迦寺 → 冲拉山欣赏珠峰东坡 → 住日喀则。\n第二天：帕拉庄园 → 满拉水库 → 卡若拉冰川 → 羊卓雍湖 → 住日喀则。\n第三天：日喀则博物馆或非遗中心参观 → 扎什伦布寺参观 → 送火车。");
   Object.assign(product.product.basicInfo!, { days: 3, nights: 2, meetingCity: "日喀则", destinationCity: "日喀则" });

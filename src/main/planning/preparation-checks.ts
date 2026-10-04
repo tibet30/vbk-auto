@@ -4,6 +4,7 @@ import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
 import { productNeedsVehicleResource } from "../../shared/product-form.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { normaliseTrafficLineConfig } from "../../shared/contracts-traffic-line.js";
+import { explicitlyDeclinesTrafficLine } from "../../shared/traffic-line-intent.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { hotelDiamondFromTier } from "../../shared/hotel-tiers.js";
@@ -114,6 +115,14 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
   }
 
   const traffic = normaliseTrafficLineConfig(operations?.trafficLine);
+  if (explicitlyDeclinesTrafficLine(product) && traffic && (traffic.enabled || traffic.variants.length || traffic.availability)) {
+    gaps.push({
+      label: "大交通禁用配置",
+      detail: "用户明确不录入大交通，需由受控核验入口清除错误启用的交通计划后再确认方案。",
+      stage: "completion",
+      node: "finalValidation",
+    });
+  }
   if (traffic?.enabled) {
     const available = new Set(traffic.availability?.availableVariants ?? []);
     const confirmed = traffic.variants.length > 0 && traffic.variants.every((variant) => available.has(variant));

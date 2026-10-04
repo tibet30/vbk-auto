@@ -91,6 +91,15 @@ test("明确禁用交通会清理历史错误启用配置，不受端点可用�
   assert.deepEqual(fake.written(), { enabled: false, variants: [] });
 });
 
+test("仅本地游览、不录入大交通时清理自动生成的交通计划", async () => {
+  const fake = runtimeFor(new Error("不应查询交通端点"), {
+    basicInfo: { userIdea: "仅本地游览，不录入大交通。仅保存未提审草稿。" },
+    operations: { trafficLine: { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] } },
+  });
+  assert.deepEqual(await syncInitialTrafficLineAvailability("p", fake.runtime), { status: "skipped", reason: "userDeclined" });
+  assert.deepEqual(fake.written(), { enabled: false, variants: [] });
+});
+
 test("负面导游描述不能跨短语误禁用明确需要的飞机交通", async () => {
   const fake = runtimeFor(availability(["flightRoundTrip", "trainRoundTrip"]), {
     basicInfo: { userIdea: "不需要导游，飞机往返交通子产品正常创建" },

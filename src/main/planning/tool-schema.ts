@@ -69,7 +69,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
               required: ["category", "text"],
               properties: {
                 category: { type: "string", enum: [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] },
-                text: { type: "string", minLength: 1, description: "首尾去空格和 VBK 标点归一后不得超过 80 UTF-8 字节（平台硬上限 84 字节）；建议不超过 26 个汉字。" },
+                text: { type: "string", minLength: 1, description: "按平台中文2、英文1计数，30～84个平台字符；建议30～40个汉字（60～80个平台字符），写具体行程特色，不按UTF-8字节计数。" },
               },
             },
           },

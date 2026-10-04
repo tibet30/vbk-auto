@@ -41,6 +41,7 @@ function fillLocalPreparation(target: ReturnType<typeof product>) {
       poiName: "宽窄巷子",
       imageId: 8800101,
       imageUrl: "https://dimg.example.com/kuanzhai.jpg",
+      alternates: [{ imageId: 8800102, imageUrl: "https://dimg.example.com/wuhou.jpg", poi: "武侯祠", poiId: 102 }],
       description: "宽窄巷子横版封面",
       minQuality: 3,
     },

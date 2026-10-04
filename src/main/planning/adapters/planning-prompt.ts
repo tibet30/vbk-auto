@@ -13,6 +13,7 @@ import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES
 import { resolveTravelScope } from "../runtime.js";
 import { buildVbkCopyPolicyPrompt, sanitiseUserIdeaForAi } from "../vbk-copy-policy.js";
 import { buildPresentationFeedbackPrompt } from "../vbk-copy-feedback.js";
+import { PRIVATE_TOUR_COPY_GUIDE } from "../../../shared/private-tour-copy.js";
 
 const RECOMMENDATION_CATEGORIES = VBK_RECOMMENDATION_CATEGORIES.join("、");
 const SELECTABLE_RECOMMENDATION_CATEGORIES = VBK_SELECTABLE_RECOMMENDATION_CATEGORIES.join("、");
@@ -38,7 +39,7 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 3. presentation 模块的外层形状必须是 {"module":"presentation","status":"accepted","value":{...四个 presentation 字段...},"reason":null}；reason 只能在 value 右侧与 value 同级，绝不能放进 value 对象。
 4. recommendation 与 recommendations[].text 使用面向游客的中文产品文案，不得虚构已核查的资源事实。
 5. 只有当前结构化产品上下文明示了已核实的免费权益时，才可使用“贴心赠送”；禁止自行编造保险、礼品、门票、接送或其他赠送权益。没有已核实赠品时，从服务保障、精选酒店、特色美食中选择有事实依据的分类与文案。
-6. 每条 recommendations[].text 经首尾去空格和 VBK 标点归一后必须不超过 80 UTF-8 字节（平台硬上限 84 字节）；中文含标点建议不超过 26 个汉字。生成后逐条自行核对，宁短勿超，禁止输出接近或超过上限的长句。
+6. 每条 recommendations[].text 按平台中文2、英文1计数，必须在30～84个字符范围内；建议写30～40个汉字（60～80个平台字符），充分提炼行程体验，禁止按UTF-8字节截短。
 7. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
 8. 禁止使用“最、最佳、最高、最优”等绝对化表达；改用“更、较为、重点”等客观表述。
 9. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
@@ -51,9 +52,9 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 
 const CONTEXT_SECTIONS: Record<PlanningStage, readonly string[]> = {
   skeleton: ["sales", "basicInfo", "operations"],
-  basicInfo: ["basicInfo"],
+  basicInfo: ["sales", "basicInfo", "operations", "itinerary"],
   itinerary: ["basicInfo", "operations", "itinerary"],
-  presentation: ["basicInfo", "itinerary", "presentation"],
+  presentation: ["sales", "basicInfo", "operations", "itinerary", "presentation"],
   commercial: ["sales", "basicInfo", "operations", "itinerary", "presentation", "commercial"],
   research: [],
   validation: ["sales", "basicInfo", "operations", "itinerary", "presentation", "commercial"],
@@ -110,6 +111,8 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     : "open";
   const lines = [
     `当前阶段：${stage}`,
+    ...(context.skeleton.productForm === "privateTour" && (stage === "basicInfo" || stage === "presentation")
+      ? [PRIVATE_TOUR_COPY_GUIDE] : []),
     ...(locked
       ? [
           "",

@@ -29,6 +29,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
   const {db,getSettings,apiKey,productWorkflows,remoteProducts,readiness,emitProduct} = context;
   const emitAgentSnapshot = (snapshot: Parameters<NonNullable<MainIpcContext['emitAgentSnapshot']>>[0]) => context.emitAgentSnapshot?.(snapshot);
   context.agentCore = new AgentCore({
+    preparationProduct: (localProductId) => db.getProduct(localProductId),
     requiresCompletionVerification: (id, snapshot) => isPreparationRun(snapshot)
       && !(db.getProduct(id)?.status === 'draft_saved' && db.getProduct(id)?.productId),
     // Resolve credentials and model settings for each Agent turn. Startup remains

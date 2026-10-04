@@ -6,8 +6,8 @@
  * 分类的保守短句，避免从任意字符处截断而留下残句。
  */
 
-export const VBK_RECOMMENDATION_GENERATION_MAX_BYTES = 80;
-export const VBK_RECOMMENDATION_PLATFORM_MAX_BYTES = 84;
+export const VBK_RECOMMENDATION_GENERATION_MAX_CHARACTERS = 80;
+export const VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS = 84;
 
 export function vbkRecommendationByteLength(value: string): number {
   return new TextEncoder().encode(value).length;
@@ -28,7 +28,7 @@ export function vbkRecommendationCharacterLength(value: string): number {
  */
 export function hasValidVbkRecommendationLength(value: string): boolean {
   const length = vbkRecommendationCharacterLength(value);
-  return length >= VBK_RECOMMENDATION_MIN_CHARACTERS && length <= VBK_RECOMMENDATION_PLATFORM_MAX_BYTES;
+  return length >= VBK_RECOMMENDATION_MIN_CHARACTERS && length <= VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS;
 }
 
 export const VBK_RECOMMENDATION_MIN_CHARACTERS = 30;
@@ -60,29 +60,27 @@ function safeFallback(category?: string): string {
 
 export function fitVbkRecommendationText(
   value: string,
-  maxBytes = VBK_RECOMMENDATION_GENERATION_MAX_BYTES,
+  maxCharacters = VBK_RECOMMENDATION_GENERATION_MAX_CHARACTERS,
   category?: string,
 ): string {
   const normalized = normalizeVbkRecommendationPunctuation(value);
   if (!normalized) return normalized;
   const characterLength = vbkRecommendationCharacterLength(normalized);
-  if (characterLength >= VBK_RECOMMENDATION_MIN_CHARACTERS && characterLength <= VBK_RECOMMENDATION_PLATFORM_MAX_BYTES
-    && vbkRecommendationByteLength(normalized) <= maxBytes) return normalized;
+  if (characterLength >= VBK_RECOMMENDATION_MIN_CHARACTERS && characterLength <= VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS) return normalized;
 
   const clauses = normalized.match(/[^，-]+[，-]?/gu) ?? [normalized];
   let completePrefix = "";
   for (const clause of clauses) {
     const candidate = completePrefix + clause;
-    if (vbkRecommendationByteLength(candidate) > maxBytes
-      || vbkRecommendationCharacterLength(candidate) > VBK_RECOMMENDATION_PLATFORM_MAX_BYTES) break;
+    if (vbkRecommendationCharacterLength(candidate) > Math.min(maxCharacters, VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS)) break;
     completePrefix = candidate;
   }
   completePrefix = completePrefix.replace(/[，、\-\s]+$/u, "").trim();
   if (completePrefix && vbkRecommendationCharacterLength(completePrefix) >= VBK_RECOMMENDATION_MIN_CHARACTERS) return completePrefix;
 
   const fallback = safeFallback(category);
-  if (vbkRecommendationByteLength(fallback) <= maxBytes) return fallback;
-  throw new Error(`VBK 推荐理由安全短句超过 ${maxBytes} UTF-8 字节。`);
+  if (vbkRecommendationCharacterLength(fallback) <= maxCharacters) return fallback;
+  throw new Error(`VBK 推荐理由安全短句超过 ${maxCharacters} 平台字符。`);
 }
 
 export function fitPresentationRecommendationTexts(value: unknown): unknown {
@@ -97,8 +95,7 @@ export function fitPresentationRecommendationTexts(value: unknown): unknown {
       if (typeof recommendation.text !== "string") return entry;
       const category = typeof recommendation.category === "string" ? recommendation.category : undefined;
       const normalized = normalizeVbkRecommendationPunctuation(recommendation.text);
-      if (hasValidVbkRecommendationLength(normalized)
-        && vbkRecommendationByteLength(normalized) <= VBK_RECOMMENDATION_GENERATION_MAX_BYTES) {
+      if (hasValidVbkRecommendationLength(normalized)) {
         return { ...recommendation, text: normalized };
       }
       const fitted = fitVbkRecommendationText(recommendation.text, undefined, category);

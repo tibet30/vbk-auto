@@ -1,4 +1,4 @@
-import type { AgentApproval, AgentEvent, AgentInputRequest, AgentSnapshot } from "../../shared/contracts.js";
+import type { AgentApproval, AgentEvent, AgentInputRequest, AgentSnapshot, ProductDetail } from "../../shared/contracts.js";
 
 export interface AgentToolCall {
   id: string;
@@ -91,6 +91,8 @@ export interface AgentCoreDependencies {
   finishVerified?(localProductId: string, context?: AgentFinishContext): Promise<AgentFinishResult>;
   /** Whether a historical no-write completion still needs the business readiness gate. */
   requiresCompletionVerification?(localProductId: string, snapshot: AgentSnapshot): boolean;
+  /** Current persisted product for bounded deterministic preparation steps. */
+  preparationProduct?(localProductId: string): ProductDetail | undefined;
   reconcileUncertainWrite?(localProductId: string, uncertain: { toolCallId: string; message: string }): Promise<{ reconciled: boolean; retryable?: boolean; message?: string }>;
   approvalPrecondition?(localProductId: string, scope: string[]): Promise<string | undefined>;
   normalizeApprovalScope?(localProductId: string, scope: string[]): string[] | Promise<string[]>;

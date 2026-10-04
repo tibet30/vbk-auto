@@ -7,6 +7,17 @@ type DailyCandidates = { day: number; candidates: Candidate[] };
 function record(value: unknown): value is Json { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function text(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }
 
+/** Reconcile only the deterministic projector placeholder after the selected
+ * hotel is present in the persisted candidate set. Other day copy is retained. */
+export function reconcileResolvedHotelCopy(day: Json): Json {
+  const hotel = text(day.hotel);
+  const candidates = Array.isArray(day.hotelCandidates) ? day.hotelCandidates.filter(record) : [];
+  const description = text(day.description);
+  if (!hotel || !description.includes("酒店待运营匹配。")
+    || !candidates.some((item) => text(item.hotelName) === hotel)) return day;
+  return { ...day, description: description.replace("酒店待运营匹配。", `已匹配${hotel}。`) };
+}
+
 function candidate(value: unknown): Candidate | null {
   if (!record(value)) return null;
   const hotelId = Number(value.hotelId); const diamond = Number(value.diamond); const score = Number(value.score);
@@ -46,7 +57,7 @@ export function recoverResolvedHotelCandidates(product: Json, snapshot: AgentSna
   })) return null;
   const nextItinerary = itinerary.map((day) => {
     const match = daily.find((entry) => entry.day === Number(day.day));
-    return match ? { ...day, hotelCandidates: match.candidates } : structuredClone(day);
+    return match ? reconcileResolvedHotelCopy({ ...day, hotelCandidates: match.candidates }) : structuredClone(day);
   });
   const first = daily[0]!.candidates[0]!;
   const operations = record(product.operations) ? product.operations : {};

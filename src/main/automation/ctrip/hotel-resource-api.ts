@@ -1,6 +1,7 @@
 import { hotelDiamondFromTier } from "../../../shared/hotel-tiers.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
+import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import {
   buildLodgingResourceSegment,
   ensureResourceSegmentsDraftApi,
@@ -9,16 +10,16 @@ import {
   resolveResourceSegmentCityApi,
   saveProductSegmentApi,
   segmentsFromPayload,
-  submitResourceSegmentsApi,
 } from "./vehicle-resource-api.js";
 import { syncCtripHotelResources } from "./hotel-resource-page.js";
+import { finalizeParentResourceSegments } from "./resource-segment-finalization.js";
 import { unchangedResourceSegments } from "./resource-segment-readback.js";
 
 /**
  * 全程段承载套餐和用车；正住宿段承载指定酒店。携程来源会在每个住宿段用
- * saveSegment 保存最多五家候选，并以草稿接口回读作为验收；携程只返回一家时
- * 也允许继续。不要为指定酒店名单单独 submitSegments：平台会重新结算资源草稿，
- * 真实环境中可能清空刚保存的 segmentRooms。
+ * saveSegment 保存最多五家候选，并以草稿接口回读作为阶段内验收；携程只返回一家时
+ * 也允许继续。无后续用车阶段时，最终统一发布资源模块并以正式段回读验收；需要用车
+ * 的产品保留草稿，由用车阶段在所有资源写完后统一发布。
  */
 export async function ensureHotelResourceApi(
   page: any,
@@ -72,6 +73,10 @@ export async function ensureHotelResourceApi(
       return ensureHotelResourceApi(page, product, productId, { draftRepairAttempted: true });
     }
   }
+  const freshPayload = await getProductSegmentsApi(page, productId);
+  const finalization = productNeedsVehicleResource(product)
+    ? { deferred: true, reason: "等待用车资源阶段统一发布" }
+    : await finalizeParentResourceSegments(page, productId, freshPayload, {});
   return {
     source,
     resourceName: source === "ctrip" ? String(resolvedDays[0]?.hotel ?? "") : undefined,
@@ -82,6 +87,7 @@ export async function ensureHotelResourceApi(
     positiveSegmentCount: lodging.length,
     segmentIds: lodging.map((segment) => String(segment.segmentId)),
     layout,
+    finalization,
     ...(source === "ctrip"
       ? {
         dailyCandidates: resolvedDays.map((day: any) => ({ day: Number(day.day), candidates: day.hotelCandidates })),
@@ -134,7 +140,6 @@ async function normalizeHotelResourceLayout(args: {
         hotel: { ...(segment.hotel ?? {}), segmentRooms: [] },
       }, "VBK 清理无住宿日的错误资源段");
     }
-    await submitResourceSegmentsApi(args.page, args.productId);
     payload = await getProductSegmentsApi(args.page, args.productId);
     segments = segmentsFromPayload(payload);
     existingLodging = lodgingSegments(segments);
@@ -192,7 +197,6 @@ async function normalizeHotelResourceLayout(args: {
   for (const segment of corrections) {
     await saveProductSegmentApi(args.page, segment, "VBK 资源行程段晚数修正");
   }
-  if (created || corrections.length) await submitResourceSegmentsApi(args.page, args.productId);
   const verified = segmentsFromPayload(await getProductSegmentsApi(args.page, args.productId));
   assertLodgingPrefix(lodgingSegments(verified), expected);
   const unequal = verified.filter((segment: any) => {

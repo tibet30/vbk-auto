@@ -58,6 +58,7 @@ test("停留在列表且酒店页跳转失败时，酒店仍通过 API 保存并
   const result = await executeApiWithPhasePageSync({
     ...args, page,
     executeApi: () => ensureHotelResourceApi(page, {
+      sales: { productForm: "privateTour" },
       operations: { hotelTier: "当地5钻酒店/-38", hotelResource: { source: "ctrip" } },
       itinerary: [{ day: 1, hotel: "汕头龙光喜来登酒店", hotelCandidates: [
         { hotelId: 694781, hotelName: "汕头龙光喜来登酒店", cityName: "汕头", anchorCityId: 447 },

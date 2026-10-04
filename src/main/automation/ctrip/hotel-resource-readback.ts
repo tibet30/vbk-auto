@@ -18,7 +18,7 @@ export async function verifyHotelResourceReadback(page: any, product: any, produ
     || days.every((day: any) => Array.isArray(day.hotelCandidates) && day.hotelCandidates.length > 0)
     ? "ctrip" : "package-api";
   const expected = hotelGroups(days, source);
-  const segments = segmentsFromPayload(await getProductSegmentsApi(page, productId));
+  const segments = segmentsFromPayload(await getProductSegmentsApi(page, productId), { formalOnly: true });
   const lodging = segments.slice(1).filter((segment: Json) => Number(segment.segmentBase?.stayNights) > 0);
   if (lodging.length !== expected.length) {
     throw new Error(`酒店资源只读回读住宿段数量不一致：期望 ${expected.length}，实际 ${lodging.length}`);

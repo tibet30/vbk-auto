@@ -11,6 +11,7 @@ import { hasValidVbkRecommendationLength } from "../planning/vbk-recommendation-
 import { executeStageOutput } from "../planning/stage-runner.js";
 import { itineraryInputContractError } from "../planning/itinerary-input-contract.js";
 import { itineraryStructureError } from "../planning/itinerary-structure.js";
+import { projectCompleteItinerary } from "../planning/complete-itinerary-projection.js";
 import { applyStageDeterministicCompletion, skeletonFromProduct } from "../planning/stage-deterministic-completion.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import type { AgentTool } from "./types.js";
@@ -65,14 +66,19 @@ export function createGenerationStageTools(args: {
   const { deps, get, resolveTrafficAvailability, resolveItineraryPoisAndTraffic, clearUnverifiedItineraryPois } = args;
   const generateModule = async (localProductId: string, stage: GenerateStage) => {
     let output: PlanningStageOutput;
-    try {
-      output = await deps.generateStage(localProductId, stage);
-    } catch (error) {
-      if (stage !== "presentation" && stage !== "commercial") throw error;
-      output = {
-        reply: error instanceof Error ? error.message : "结构化生成失败，转入本地确定性补全。",
-        modules: [],
-      };
+    const projected = stage === "itinerary" ? projectCompleteItinerary(get(localProductId)) : undefined;
+    if (projected) {
+      output = projected;
+    } else {
+      try {
+        output = await deps.generateStage(localProductId, stage);
+      } catch (error) {
+        if (stage !== "presentation" && stage !== "commercial") throw error;
+        output = {
+          reply: error instanceof Error ? error.message : "结构化生成失败，转入本地确定性补全。",
+          modules: [],
+        };
+      }
     }
     if (stage === "itinerary") {
       for (const module of output.modules) {

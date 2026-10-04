@@ -6,7 +6,7 @@ import { assertAgentWriteAuthorized, agentApprovalScopeError, isDeterministicAut
 import { agentPlannerContext } from '../../src/main/agent/integration-context.js';
 import { agentPatchOperations } from '../../src/main/agent/integration-patch.js';
 import { applyResolvedItineraryHotels, persistedItineraryHotelResult } from '../../src/main/agent/integration.js';
-import { recoverResolvedHotelCandidates } from '../../src/main/agent/hotel-candidate-recovery.js';
+import { reconcileResolvedHotelCopy, recoverResolvedHotelCandidates } from '../../src/main/agent/hotel-candidate-recovery.js';
 import { agentWorkflowPatch } from '../../src/main/agent/integration-workflow.js';
 import { prepareAgentAutomation } from '../../src/main/automation/automation.main/automation.main.agent.js';
 import { applyProductPatchSafe } from '../../src/main/operations/product-patch.js';
@@ -79,10 +79,11 @@ test('resolved hotels persist both the daily candidates and controlled Ctrip res
   const p=product();
   const candidates=[{hotelId:101,hotelName:'江孜4钻酒店',diamond:4,score:4.8,distanceKm:1.2,cityName:'江孜',anchorName:'白居寺',anchorCityId:20859}];
   const next=applyResolvedItineraryHotels(p.product as any,{
-    itinerary:[{...p.product.itinerary![0]!,hotel:'江孜4钻酒店',hotelCandidates:candidates}],
+    itinerary:[{...p.product.itinerary![0]!,description:'当晚按用户要求住江孜，酒店待运营匹配。',hotel:'江孜4钻酒店',hotelCandidates:candidates}],
     dailyCandidates:[{day:1,candidates}],searchDates:{checkin:'2026-12-01',checkout:'2026-12-02'},
   });
   assert.deepEqual((next.itinerary as any[])[0].hotelCandidates,candidates);
+  assert.equal((next.itinerary as any[])[0].description,'当晚按用户要求住江孜，已匹配江孜4钻酒店。');
   assert.equal((next.operations as any).hotelResource.source,'ctrip');
   assert.deepEqual((next.operations as any).hotelResource.dailyCandidates,[{day:1,candidates}]);
   assert.deepEqual(persistedItineraryHotelResult({
@@ -108,6 +109,14 @@ test('hotel recovery restores only a matching durable resolver result',()=>{
   assert.equal((restored.operations as any).hotelResource.source,'ctrip');
   (p.product.itinerary as any)[0].hotel='用户改过的酒店';
   assert.equal(recoverResolvedHotelCandidates(p.product as any,snapshot),null);
+});
+
+test('resolved hotel copy replaces only the projector placeholder for a persisted selection',()=>{
+  const candidate={hotelId:101,hotelName:'日喀则希尔顿酒店',diamond:5,score:4.8,distanceKm:1,cityName:'日喀则',anchorName:'市政府',anchorCityId:92};
+  const day={day:1,hotel:'日喀则希尔顿酒店',hotelCandidates:[candidate],description:'当晚按用户要求住日喀则，酒店待运营匹配。'};
+  assert.equal(reconcileResolvedHotelCopy(day).description,'当晚按用户要求住日喀则，已匹配日喀则希尔顿酒店。');
+  assert.equal(reconcileResolvedHotelCopy({...day,hotel:'其他酒店'}).description,day.description);
+  assert.equal(reconcileResolvedHotelCopy({...day,description:'运营已确认入住日喀则希尔顿酒店。'}).description,'运营已确认入住日喀则希尔顿酒店。');
 });
 
 test('recovery-only messages migrate an older equivalent approval without a second prompt',()=>{

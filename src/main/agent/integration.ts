@@ -33,6 +33,7 @@ import { selfRepairItineraryForVbk } from "../planning/itinerary-self-repair.js"
 import { isTravelNodeName } from "../planning/itinerary-adoption.js";
 import { createItineraryDraftTools } from "./integration-itinerary-draft-tools.js";
 import { createCreationRecoveryTools } from "./integration-creation-recovery-tools.js";
+import { reconcileResolvedHotelCopy } from "./hotel-candidate-recovery.js";
 import { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
 export { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
 import type { AgentTool } from "./types.js";
@@ -102,7 +103,7 @@ export function applyResolvedItineraryHotels(
     : {};
   return {
     ...structuredClone(product),
-    itinerary: resolved.itinerary,
+    itinerary: resolved.itinerary.map((day) => reconcileResolvedHotelCopy(day as JsonObject)),
     operations: {
       ...operations,
       hotelResource: {

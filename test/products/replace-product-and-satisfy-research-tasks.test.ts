@@ -196,6 +196,30 @@ test("保存有效 itinerarySpotPoi 后，匹配 POI task 持久化确认（stat
   } finally { cleanup(); }
 });
 
+test("POI 写入与系统缺失说明收敛在同一事务中", () => {
+  const { db, cleanup } = makeDb();
+  try {
+    const product = db.createProduct({ destination: "日喀则", days: 1, productForm: "privateTour" });
+    db.updateProduct(product.id, {
+      ...product.product,
+      itinerary: [{ day: 1, title: "非遗中心", spots: [{ name: "非遗中心参观", poiName: null, poiId: null }] }],
+    });
+    const taskId = db.addResearchTask(product.id, {
+      label: "核查 非遗中心参观 的 VBK POI 映射", type: "vbk",
+      detail: "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI",
+    });
+    const next = structuredClone(db.getProduct(product.id)!.product) as Record<string, any>;
+    next.itinerary[0].spots[0] = { name: "非遗中心参观", poiName: "非物质文化遗产展示中心", poiId: 150237367 };
+
+    const saved = db.replaceProductAndSatisfyResearchTasks(product.id, next, { status: "review" }).product;
+    const task = saved.researchTasks.find((item) => item.id === taskId)!;
+    assert.equal(task.state, "confirmed");
+    assert.equal(task.status, "succeeded");
+    assert.equal(task.detail, "当前行程已保存有效的 VBK POI 映射。");
+    assert.equal(task.evidence?.length, 1);
+  } finally { cleanup(); }
+});
+
 // ───────────── 主路径：cover ─────────────
 
 test("保存有效 productCover (ctripLibrary) 后，匹配 image cover task 持久化确认", () => {

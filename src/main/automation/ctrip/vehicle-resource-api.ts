@@ -1,9 +1,9 @@
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { productNeedsVehicleResource } from "../../../shared/product-form.js";
-
+import { finalizeParentResourceSegments } from "./resource-segment-finalization.js";
 type Segment = Record<string, any>;
 type ResourceCity = Record<string, any>;
-
 export const VBK_RESOURCE_HEAD = {
   cid: "",
   ctok: "",
@@ -15,23 +15,14 @@ export const VBK_RESOURCE_HEAD = {
   xsid: "",
   extension: [],
 };
-
 export function segmentsFromPayload(payload: any, options: { formalOnly?: boolean } = {}): Segment[] {
   if (options.formalOnly) return payload?.productSegments?.segments ?? [];
   return payload?.draftProductSegments?.segments
     ?? payload?.productSegments?.segments
     ?? [];
 }
-
 function groupIdOf(value: any): string {
   return String(value?.resourceGroupId ?? value?.resourceGroup?.resourceGroupId ?? "");
-}
-
-function matchingSegments(payload: any, groupId: string): Segment[] {
-  return segmentsFromPayload(payload).filter((segment) =>
-    Array.isArray(segment.segmentResourceGroups)
-    && segment.segmentResourceGroups.some((group: any) => groupIdOf(group) === groupId),
-  );
 }
 
 function hasResourceGroup(segment: Segment, groupId: string) {
@@ -69,14 +60,11 @@ export async function getProductSegmentsApi(page: any, productId: string) {
     errorLabel: "VBK 资源配置查询",
     body: { contentType: "json", head: VBK_RESOURCE_HEAD, productId: Number(productId) || productId },
   });
-  return response.payload;
+  return assertVbkAckSuccess(response.payload, "VBK 资源配置查询");
 }
 
 export function assertVbkResourceResponse(payload: any, label: string) {
-  const status = payload?.ResponseStatus;
-  if (status?.Ack === "Failure" || (Array.isArray(status?.Errors) && status.Errors.length)) {
-    throw new Error(`${label}失败：${JSON.stringify(status.Errors ?? status).slice(0, 400)}`);
-  }
+  assertVbkAckSuccess(payload, label);
 }
 
 /** 按资源编辑器的 /15638/saveSegment 协议保存完整行程段。 */
@@ -239,9 +227,9 @@ export async function verifyVehicleResourceBinding(
   page: any,
   productId: string,
   groupId: number,
-  options: { requireFormal?: boolean } = {},
+  options: { requireFormal?: boolean; payload?: any } = {},
 ) {
-  const payload = await getProductSegmentsApi(page, productId);
+  const payload = options.payload ?? await getProductSegmentsApi(page, productId);
   const all = segmentsFromPayload(payload, { formalOnly: options.requireFormal });
   const matched = all.filter((segment) => hasResourceGroup(segment, String(groupId)));
   const first = fullTripSegmentOf(all);
@@ -395,5 +383,18 @@ export async function ensureVehicleResourceApi(page: any, product: any, productI
   if (!vehicle?.resourceGroupId || !vehicle?.resourceGroupName) {
     throw new Error("产品缺少 operations.vehicleResource 资源组 ID/名称");
   }
-  return ensureVehicleResourceBinding(page, productId, Number(vehicle.resourceGroupId), String(vehicle.resourceGroupName));
+  const groupId = Number(vehicle.resourceGroupId);
+  const current: any = await getProductSegmentsApi(page, productId);
+  const hasDraft = Array.isArray(current?.draftProductSegments?.segments);
+  const formal = await verifyVehicleResourceBinding(page, productId, groupId, { requireFormal: true, payload: current });
+  if (formal.bound && !hasDraft) {
+    return {
+      changed: false, resourceGroupId: groupId, audited: true,
+      segmentCount: formal.segmentCount, targetSegmentId: formal.targetSegmentId,
+    };
+  }
+  const draft = await ensureVehicleResourceGroupDraft(page, productId, groupId, String(vehicle.resourceGroupName));
+  const expected = await getProductSegmentsApi(page, productId);
+  const finalized = await finalizeParentResourceSegments(page, productId, expected, { vehicleGroupId: groupId });
+  return { ...draft, ...finalized, resourceGroupId: groupId };
 }

@@ -50,7 +50,7 @@ test("已有指定酒店但拒绝保存前后内容未变化时，恢复草稿�
   try {
     const result = await ensureHotelResourceApi(
       { evaluate: async (fn: any, arg: any) => fn(arg) },
-      { operations: { hotelTier: "当地4钻酒店/-4", hotelResource: { source: "ctrip" } }, itinerary: [{ day: 1, hotel: "日喀则酒店1", hotelCandidates: candidates(100, 100, "日喀则") }] },
+      { sales: { productForm: "privateTour" }, operations: { hotelTier: "当地4钻酒店/-4", hotelResource: { source: "ctrip" } }, itinerary: [{ day: 1, hotel: "日喀则酒店1", hotelCandidates: candidates(100, 100, "日喀则") }] },
       "78159725",
     );
     assert.equal(result.verified, true);

@@ -84,7 +84,7 @@ export async function runProductPreflightApi(
   const hasPlannedHotel = product.itinerary.some((day: any) => hasItineraryHotelStay(day?.hotel));
   const needsVehicle = productNeedsVehicleResource(product);
   const segmentPayload = hasPlannedHotel || needsVehicle ? await getProductSegmentsApi(page, productId) : null;
-  const segments = segmentPayload ? segmentsFromPayload(segmentPayload) : [];
+  const segments = segmentPayload ? segmentsFromPayload(segmentPayload, { formalOnly: true }) : [];
   if ((hasPlannedHotel || needsVehicle) && !segments.length) throw new Error("母产品资源预检未返回任何行程段");
   // 老数据可能把已解析的携程候选标成 nonPlatform；只要行程明确含住宿，
   // 就必须以平台酒店资源回读为准，不能因为旧来源标签跳过核验。
@@ -95,7 +95,7 @@ export async function runProductPreflightApi(
   if (needsVehicle) {
     const groupId = Number(product.operations?.vehicleResource?.resourceGroupId);
     if (!groupId) throw new Error("产品未配置现有用车资源组 ID");
-    vehicle = await verifyVehicleResourceBinding(page, productId, groupId);
+    vehicle = await verifyVehicleResourceBinding(page, productId, groupId, { requireFormal: true });
     if (!vehicle.bound) throw new Error(`用车资源预检仅绑定 ${vehicle.matchedCount}/${vehicle.segmentCount} 个行程段`);
   }
   return {

@@ -68,6 +68,7 @@ test("送站日写成“当日返程，不安排住宿”时只校验真实住�
     const result = await ensureHotelResourceApi(
       { evaluate: async (fn: any, arg: any) => fn(arg) },
       {
+        sales: { productForm: "privateTour" },
         operations: { hotelTier: "当地5钻酒店/-38" },
         itinerary: [
           { day: 1, hotel: "日喀则酒店", hotelCandidates: candidates(100, 100, "日喀则") },
@@ -115,7 +116,7 @@ test("指定酒店保存明确提示草稿不存在且回读为空时，重建�
   try {
     const result = await ensureHotelResourceApi(
       { evaluate: async (fn: any, arg: any) => fn(arg) },
-      { operations: { hotelTier: "当地4钻酒店/-4", hotelResource: { source: "ctrip" } }, itinerary: [{ day: 1, hotel: "日喀则酒店1", hotelCandidates: candidates(100, 100, "日喀则") }] },
+      { sales: { productForm: "privateTour" }, operations: { hotelTier: "当地4钻酒店/-4", hotelResource: { source: "ctrip" } }, itinerary: [{ day: 1, hotel: "日喀则酒店1", hotelCandidates: candidates(100, 100, "日喀则") }] },
       "78159725",
     );
     assert.equal(result.verified, true);
@@ -198,6 +199,7 @@ test("新建产品缺少住宿段时，自动按连续城市创建并让停留�
     const result = await ensureHotelResourceApi(
       { evaluate: async (fn: any, arg: any) => fn(arg) },
       {
+        sales: { productForm: "privateTour" },
         operations: { hotelTier: "当地5钻酒店/-38", hotelResource: { source: "ctrip" } },
         itinerary: [
           { day: 1, hotel: "成都酒店1", hotelCandidates: candidates(100, 28, "成都") },
@@ -224,126 +226,6 @@ test("新建产品缺少住宿段时，自动按连续城市创建并让停留�
     assert.deepEqual(segments[0].segmentResourceGroups, [{ resourceGroupId: 9001 }]);
     assert.deepEqual(segments[1].hotel.segmentRooms.map((room: any) => room.masterHotelID), [100, 101, 102, 103, 104]);
     assert.deepEqual(segments[2].hotel.segmentRooms.map((room: any) => room.masterHotelID), [200, 201, 202, 203, 204]);
-  } finally {
-    globalThis.fetch = oldFetch;
-    if (oldDocument === undefined) delete (globalThis as any).document;
-    else (globalThis as any).document = oldDocument;
-  }
-});
-
-test("非私家团酒店阶段只保存指定酒店草稿，不单独提交资源配置", async () => {
-  const oldFetch = globalThis.fetch;
-  const oldDocument = (globalThis as any).document;
-  const rikaze = city(100, "日喀则");
-  const lodging = {
-    segmentId: "lodging-1",
-    productId: 78120988,
-    segmentBase: {
-      segmentNumber: 2,
-      departureCity: rikaze,
-      destinationCity: rikaze,
-      stayNights: 1,
-      minStayNights: 1,
-      maxStayNights: 1,
-      deleteable: true,
-    },
-    hotel: { segmentRooms: [] },
-  };
-  let segments = [
-    { ...lodging, segmentId: "full-trip", segmentBase: { ...lodging.segmentBase, segmentNumber: 1, stayNights: 0, minStayNights: 0, maxStayNights: 0, deleteable: false } },
-    lodging,
-    { ...lodging, segmentId: "terminal", segmentBase: { ...lodging.segmentBase, segmentNumber: 3, stayNights: 0, minStayNights: 0, maxStayNights: 0 } },
-  ];
-  const calls: string[] = [];
-  (globalThis as any).document = { cookie: "GUID=fixture" };
-  globalThis.fetch = (async (input: any, init?: any) => {
-    const endpoint = new URL(String(input)).pathname;
-    calls.push(endpoint);
-    if (endpoint.endsWith("saveSegment")) {
-      const saved = JSON.parse(String(init?.body ?? "{}")).segment;
-      segments = segments.map((segment) => String(segment.segmentId) === String(saved.segmentId) ? saved : segment);
-    }
-    const payload = endpoint.endsWith("getSegments")
-      ? {
-        ResponseStatus: { Ack: "Success" },
-        draftProductSegments: { segments },
-        productSegments: { segments: segments.map((segment) => ({ ...segment, hotel: { segmentRooms: [] } })) },
-      }
-      : { ResponseStatus: { Ack: "Success" } };
-    return new Response(JSON.stringify(payload), { status: 200 });
-  }) as typeof fetch;
-  try {
-    const result = await ensureHotelResourceApi(
-      { evaluate: async (fn: any, arg: any) => fn(arg) },
-      {
-        sales: { productForm: "groupTour" },
-        operations: { hotelTier: "当地5钻酒店/-38" },
-        itinerary: [
-          { day: 1, hotel: "日喀则酒店", hotelCandidates: candidates(100, 100, "日喀则") },
-        ],
-      },
-      "78120988",
-    );
-    assert.equal(result.verified, true);
-    assert.ok(!calls.some((endpoint) => endpoint.endsWith("submitSegments")));
-    assert.equal(result.ctripResource.verified, true);
-  } finally {
-    globalThis.fetch = oldFetch;
-    if (oldDocument === undefined) delete (globalThis as any).document;
-    else (globalThis as any).document = oldDocument;
-  }
-});
-
-test("私家团酒店阶段不提交资源草稿，留给后续用车阶段", async () => {
-  const oldFetch = globalThis.fetch;
-  const oldDocument = (globalThis as any).document;
-  const rikaze = city(100, "日喀则");
-  const lodging = {
-    segmentId: "lodging-1",
-    productId: 78120988,
-    segmentBase: {
-      segmentNumber: 2,
-      departureCity: rikaze,
-      destinationCity: rikaze,
-      stayNights: 1,
-      minStayNights: 1,
-      maxStayNights: 1,
-      deleteable: true,
-    },
-    hotel: { segmentRooms: [] },
-  };
-  let segments = [
-    { ...lodging, segmentId: "full-trip", segmentBase: { ...lodging.segmentBase, segmentNumber: 1, stayNights: 0, minStayNights: 0, maxStayNights: 0, deleteable: false } },
-    lodging,
-    { ...lodging, segmentId: "terminal", segmentBase: { ...lodging.segmentBase, segmentNumber: 3, stayNights: 0, minStayNights: 0, maxStayNights: 0 } },
-  ];
-  const calls: string[] = [];
-  (globalThis as any).document = { cookie: "GUID=fixture" };
-  globalThis.fetch = (async (input: any, init?: any) => {
-    const endpoint = new URL(String(input)).pathname;
-    calls.push(endpoint);
-    if (endpoint.endsWith("saveSegment")) {
-      const saved = JSON.parse(String(init?.body ?? "{}")).segment;
-      segments = segments.map((segment) => String(segment.segmentId) === String(saved.segmentId) ? saved : segment);
-    }
-    const payload = endpoint.endsWith("getSegments")
-      ? { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments } }
-      : { ResponseStatus: { Ack: "Success" } };
-    return new Response(JSON.stringify(payload), { status: 200 });
-  }) as typeof fetch;
-  try {
-    await ensureHotelResourceApi(
-      { evaluate: async (fn: any, arg: any) => fn(arg) },
-      {
-        sales: { productForm: "privateTour" },
-        operations: { hotelTier: "当地5钻酒店/-38" },
-        itinerary: [
-          { day: 1, hotel: "日喀则酒店", hotelCandidates: candidates(100, 100, "日喀则") },
-        ],
-      },
-      "78120988",
-    );
-    assert.ok(!calls.some((endpoint) => endpoint.endsWith("submitSegments")));
   } finally {
     globalThis.fetch = oldFetch;
     if (oldDocument === undefined) delete (globalThis as any).document;

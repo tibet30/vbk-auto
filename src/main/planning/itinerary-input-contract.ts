@@ -191,7 +191,7 @@ function verifiedAlternativeExclusions(product: ProductDetail, itinerary: Record
   return excluded;
 }
 
-function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
+export function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
   const structured = (product.planning?.userIntent?.activities ?? []).flatMap((activity) => {
     const names = unique([activity.title, ...(activity.alternatives ?? [])]);
     return activity.kind === "poi" && activity.day > 0 && names.length > 1 ? [{ day: activity.day, names }] : [];

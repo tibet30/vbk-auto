@@ -75,6 +75,47 @@ test("刷新待处理事项会清理产品行程中已保存有效 POI 的 canon
   assert.equal(task.status, "succeeded");
 });
 
+test("刷新会修复已确认 POI task 的旧缺失说明且保留原 evidence", () => {
+  const db = withDb();
+  const product = db.createProduct({ destination: "日喀则", days: 1, productForm: "privateTour" });
+  db.updateProduct(product.id, {
+    ...product.product,
+    itinerary: [{ day: 1, title: "非遗中心", spots: [{
+      name: "非遗中心参观", poiName: "非物质文化遗产展示中心", poiId: 150237367,
+    }] }],
+  });
+  const taskId = db.addResearchTask(product.id, {
+    label: "核查 非遗中心参观 的 VBK POI 映射", type: "vbk",
+    detail: "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI",
+  });
+  db.markResearchAccepted(product.id, taskId, "运营已手工保存 POI");
+  const evidence = db.getProduct(product.id)!.researchTasks.find((task) => task.id === taskId)!.evidence;
+
+  const result = refreshSatisfiedResearchTasks(db, product.id);
+  assert.equal(result.updated, 1);
+  assert.deepEqual(result.taskIds, [taskId]);
+  const repaired = db.getProduct(product.id)!.researchTasks.find((task) => task.id === taskId)!;
+  assert.equal(repaired.state, "confirmed");
+  assert.equal(repaired.detail, "当前行程已保存有效的 VBK POI 映射。");
+  assert.deepEqual(repaired.evidence, evidence);
+  assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 0);
+});
+
+test("满足 POI task 时保留不属于系统缺失模板的运营详情", () => {
+  const db = withDb();
+  const product = db.createProduct({ destination: "西安", days: 1, productForm: "privateTour" });
+  db.updateProduct(product.id, {
+    ...product.product,
+    itinerary: [{ day: 1, title: "城墙", spots: [{ name: "西安明城墙", poiName: "西安城墙", poiId: 75686 }] }],
+  });
+  const taskId = db.addResearchTask(product.id, {
+    label: "核查 西安明城墙 的 VBK POI 映射", type: "vbk", detail: "运营备注：南门进入，保留人工复核记录",
+  });
+  assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 1);
+  assert.equal(db.getProduct(product.id)!.researchTasks.find((task) => task.id === taskId)?.detail,
+    "运营备注：南门进入，保留人工复核记录");
+});
+
 test("POI task 只有对应 spot 且保存非空 poiName / 正整数 poiId 时才满足", () => {
   const task = { label: "核查 西安明城墙 的 VBK POI 映射", type: "vbk" };
   const product = (spot: Record<string, unknown>) => ({ itinerary: [{ day: 1, spots: [spot] }] });

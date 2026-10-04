@@ -13,6 +13,14 @@ import { touchProduct } from "./products.js";
 const POST_CONFIRM_STATUSES = new Set(["automating", "draft_saved"]);
 const NO_POI_EVIDENCE_MARKER = "[itinerary-kind:no-poi]";
 const NO_POI_EVIDENCE_TITLE = `${NO_POI_EVIDENCE_MARKER} 当前条目明确为自由活动或其他，无需 POI 核查，自动确认`;
+const SAVED_POI_DETAIL = "当前行程已保存有效的 VBK POI 映射。";
+
+/** Only generated lookup-failure copy is replaced. Operator-authored notes and
+ * unrelated research details remain part of the audit record. */
+function reconciledSatisfiedDetail(type: ResearchTask["type"], detail: string | null): string | null {
+  if (type !== "vbk" || !detail?.includes("未找到对应的 VBK POI")) return detail;
+  return /(?:已保留原景点|手动录入\s*POI)/u.test(detail) ? SAVED_POI_DETAIL : detail;
+}
 
 export function addResearchTask(db: Database.Database, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
   const statusRow = db.prepare("SELECT status FROM products WHERE id=?").get(localProductId) as { status?: string } | undefined;
@@ -67,15 +75,16 @@ export function markResearchTasksSatisfied(
   const placeholders = ids.map(() => "?").join(",");
   const tx = db.transaction(() => {
     const before = db.prepare(`
-      SELECT id FROM research_tasks
+      SELECT id,type,detail FROM research_tasks
       WHERE local_product_id=? AND id IN (${placeholders}) AND state NOT IN ('confirmed','resolved')
-    `).all(localProductId, ...ids) as Array<{ id: string }>;
+    `).all(localProductId, ...ids) as Array<{ id: string; type: ResearchTask["type"]; detail: string | null }>;
     if (!before.length) return { updated: 0, taskIds: [] as string[] };
-    db.prepare(`
-      UPDATE research_tasks
-      SET state='confirmed', status='succeeded', evidence_json=?
-      WHERE local_product_id=? AND id IN (${placeholders}) AND state NOT IN ('confirmed','resolved')
-    `).run(evidence, localProductId, ...ids);
+    const update = db.prepare(`UPDATE research_tasks
+      SET state='confirmed', status='succeeded', evidence_json=?, detail=?
+      WHERE id=? AND local_product_id=? AND state NOT IN ('confirmed','resolved')`);
+    for (const row of before) {
+      update.run(evidence, reconciledSatisfiedDetail(row.type, row.detail), row.id, localProductId);
+    }
     touchProduct(db, localProductId);
     return { updated: before.length, taskIds: before.map((row) => row.id) };
   });
@@ -187,17 +196,39 @@ export function markResearchTasksSatisfiedByProduct(
   product: Record<string, unknown>,
   options: SatisfyResearchTasksByProductOptions = {},
 ) {
-  const matched = findSatisfiedResearchTaskIds(db, localProductId, product);
-  const targetIds = options.onlyTaskIds && options.onlyTaskIds.length > 0
-    ? matched.filter((id) => options.onlyTaskIds!.includes(id))
-    : matched;
-  if (targetIds.length === 0) return { updated: 0, taskIds: [] as string[] };
-  // 仍然走 markResearchTasksSatisfied，保证 evidence 写入与「只动未 confirmed
-  // / resolved 的行」两道守卫生效一致（不是把所有 queued 行一锅端）。
-  const rows = db.prepare(`SELECT id,label,type,detail FROM research_tasks WHERE local_product_id=? AND id IN (${targetIds.map(() => "?").join(",")})`).all(localProductId, ...targetIds) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }>;
-  const nonPoiIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "non_poi").map((row) => row.id);
-  const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id));
-  const ordinary = markResearchTasksSatisfied(db, localProductId, ordinaryIds, options.note ?? "产品 JSON 写入时同步按字段匹配已满足，自动确认");
-  const nonPoi = markKindNoPoiTasksSatisfied(db, localProductId, nonPoiIds);
-  return { updated: ordinary.updated + nonPoi.updated, taskIds: [...ordinary.taskIds, ...nonPoi.taskIds] };
+  const tx = db.transaction(() => {
+    const matched = findSatisfiedResearchTaskIds(db, localProductId, product);
+    const targetIds = options.onlyTaskIds && options.onlyTaskIds.length > 0
+      ? matched.filter((id) => options.onlyTaskIds!.includes(id))
+      : matched;
+    const rows = targetIds.length ? db.prepare(`SELECT id,label,type,detail FROM research_tasks WHERE local_product_id=? AND id IN (${targetIds.map(() => "?").join(",")})`)
+      .all(localProductId, ...targetIds) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }> : [];
+    const nonPoiIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "non_poi").map((row) => row.id);
+    const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id));
+    const ordinary = markResearchTasksSatisfied(db, localProductId, ordinaryIds, options.note ?? "产品 JSON 写入时同步按字段匹配已满足，自动确认");
+    const nonPoi = markKindNoPoiTasksSatisfied(db, localProductId, nonPoiIds);
+    const reconciled = reconcileConfirmedPoiDetails(db, localProductId, product, options.onlyTaskIds);
+    const taskIds = [...ordinary.taskIds, ...nonPoi.taskIds, ...reconciled]
+      .filter((id, index, values) => values.indexOf(id) === index);
+    return { updated: ordinary.updated + nonPoi.updated + reconciled.length, taskIds };
+  });
+  return tx();
+}
+
+function reconcileConfirmedPoiDetails(
+  db: Database.Database,
+  localProductId: string,
+  product: Record<string, unknown>,
+  onlyTaskIds?: readonly string[],
+): string[] {
+  const rows = db.prepare(`SELECT id,label,type,detail FROM research_tasks
+    WHERE local_product_id=? AND state IN ('confirmed','resolved') AND type='vbk'`)
+    .all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }>;
+  const repaired = rows.filter((row) => (!onlyTaskIds?.length || onlyTaskIds.includes(row.id))
+    && reconciledSatisfiedDetail(row.type, row.detail) !== row.detail
+    && isResearchTaskSatisfiedByProduct(row, product));
+  const update = db.prepare("UPDATE research_tasks SET detail=? WHERE id=? AND local_product_id=?");
+  for (const row of repaired) update.run(SAVED_POI_DETAIL, row.id, localProductId);
+  if (repaired.length) touchProduct(db, localProductId);
+  return repaired.map((row) => row.id);
 }

@@ -124,7 +124,7 @@ test("含酒店的预检只读取已保存资源段，不初始化或保存酒�
       if (endpoint.endsWith("/listProductClauses")) return success(preflightClauses());
       if (endpoint.endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
       if (endpoint.endsWith("/searchProductImage.json")) return success(preflightCover());
-      if (endpoint.endsWith("/getSegments")) return success({ draftProductSegments: { segments: [
+      if (endpoint.endsWith("/getSegments")) return success({ productSegments: { segments: [
         { segmentId: 1, segmentBase: { stayNights: 0 } },
         { segmentId: 2, segmentBase: { stayNights: 1, minStayNights: 1, maxStayNights: 1, destinationCity: { cityName: "成都" } }, hotel: { segmentRooms: [
           { masterHotelID: 101 }, { masterHotelID: 102 }, { masterHotelID: 103 },
@@ -220,7 +220,7 @@ test("酒店资源回读逐日覆盖 5/2/5/5/0；同城但候选不同的夜晚�
   const d4 = candidates([41, 42, 43, 44, 45], "潮州");
   const page = { evaluate: async (_fn: unknown, request: any) => {
     if (!String(request?.endpoint ?? "").endsWith("/getSegments")) throw new Error(`unexpected endpoint ${request?.endpoint}`);
-    return success({ draftProductSegments: { segments: [
+    return success({ productSegments: { segments: [
       { segmentId: "full", segmentBase: { stayNights: 0 } },
       ...[d1, d2, d3, d4].map((day, index) => ({
         segmentId: `stay-${index + 1}`,
@@ -250,10 +250,19 @@ test("酒店资源回读逐日覆盖 5/2/5/5/0；同城但候选不同的夜晚�
   ]);
 });
 
-function hotelReadbackPage(actualIds: unknown[]) {
+function hotelReadbackPage(actualIds: unknown[], draftIds: unknown[] = []) {
   return { evaluate: async (_fn: unknown, request: any) => {
     if (!String(request?.endpoint ?? "").endsWith("/getSegments")) throw new Error(`unexpected endpoint ${request?.endpoint}`);
-    return success({ draftProductSegments: { segments: [
+    return success({
+      draftProductSegments: { segments: draftIds.length ? [
+        { segmentId: "draft-full", segmentBase: { stayNights: 0 } },
+        {
+          segmentId: "draft-stay-1",
+          segmentBase: { stayNights: 1, minStayNights: 1, maxStayNights: 1, destinationCity: { cityName: "潮州" } },
+          hotel: { segmentRooms: draftIds.map((masterHotelID) => ({ masterHotelID })) },
+        },
+      ] : [] },
+      productSegments: { segments: [
       { segmentId: "full", segmentBase: { stayNights: 0 } },
       {
         segmentId: "stay-1",
@@ -263,7 +272,8 @@ function hotelReadbackPage(actualIds: unknown[]) {
             : typeof masterHotelID === "object" ? masterHotelID : { masterHotelID }
         )) },
       },
-    ] } });
+      ] },
+    });
   } };
 }
 
@@ -289,6 +299,24 @@ test("酒店资源回读允许平台重排真实 5 个候选 ID，但保留资�
   assert.deepEqual(result.segments.map((segment: any) => segment.hotelIds), [[
     27846526, 99917488, 108846358, 115628789, 132012928,
   ]]);
+});
+
+test("酒店资源回读忽略错误草稿，以正式资源段作为通过依据", async () => {
+  const formalIds = [27846526, 99917488, 108846358, 115628789, 132012928];
+  const result = await verifyHotelResourceReadback(
+    hotelReadbackPage(formalIds, [1, 2, 3, 4, 5]),
+    fiveHotelCandidateProduct,
+    "78490992",
+  );
+  assert.deepEqual(result.segments.map((segment: any) => segment.hotelIds), [formalIds]);
+});
+
+test("酒店资源回读不接受正确草稿掩盖错误正式资源段", async () => {
+  const expectedIds = [108846358, 27846526, 99917488, 132012928, 115628789];
+  await assert.rejects(
+    () => verifyHotelResourceReadback(hotelReadbackPage([], expectedIds), fiveHotelCandidateProduct, "78490992"),
+    /候选 ID 集合不一致/,
+  );
 });
 
 test("酒店资源回读候选缺漏、多项或重复时失败，不只按数量放行", async () => {

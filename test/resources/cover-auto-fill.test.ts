@@ -224,7 +224,7 @@ test("applyAutoCoverFill: cover 已准备满目标张数时直接跳过，不发
         alternates: Array.from({ length: 9 }, (_, index) => ({
           imageId: 100 + index,
           imageUrl: `https://img/${100 + index}`,
-          poi: "云冈石窟",
+          poi: index === 0 ? "晋祠" : "云冈石窟",
         })),
       },
     },

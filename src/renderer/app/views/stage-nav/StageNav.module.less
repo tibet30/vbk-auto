@@ -1,10 +1,10 @@
 .stageNav { flex: 0 0 auto; min-width: 0; background: var(--surface); border-bottom: 1px solid var(--border); }
-.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 5px var(--pad); min-height: 44px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px var(--pad); min-height: 56px; }
 .stageTabs { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-.stageStep { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 8px; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--muted-foreground); font-size: var(--fs-xs); white-space: nowrap; }
+.stageStep { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; border: 1px solid transparent; border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--fs-base); white-space: nowrap; }
 .stageStep:hover { background: var(--muted); color: var(--foreground); }
 .stageStep[data-active='true'] { background: var(--muted); border-color: var(--border); color: var(--foreground); }
-.stageStepIndex { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.stageStepIndex { font-size: inherit; font-variant-numeric: tabular-nums; }
 .stageIssueCount { color: var(--warning); font-size: var(--fs-xs); }
 .usageMetric { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--muted-foreground); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .usageMetric + .stageNavSummary { margin-left: 8px; }

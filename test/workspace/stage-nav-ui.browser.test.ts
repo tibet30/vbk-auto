@@ -15,6 +15,9 @@ test("紧凑双行：阶段、任务详情、异常、JSON 和窄屏可用", asy
     page.on("pageerror", error => errors.push(error.message));
     await page.goto(`${server.resolvedUrls!.local[0]}test/fixtures/stage-nav-ui/index.html`);
     await page.getByRole("tab", { name: "方案审查", exact: true }).waitFor();
+    for (const tab of await page.getByRole("tab").all()) {
+      assert.ok((await tab.boundingBox())!.height >= 44, "阶段 Tab 的点击高度至少为 44px");
+    }
     assert.equal(await page.locator("#workflow-task-status").count(), 1);
     assert.equal(await page.getByText("草稿已保存 · 未发布", { exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("progressbar").count(), 0);
@@ -24,7 +27,7 @@ test("紧凑双行：阶段、任务详情、异常、JSON 和窄屏可用", asy
     assert.equal(await usageMetric.isVisible(), true);
     assert.match(await usageMetric.innerText(), /1\.5k Token\s*· 约 ¥0\.12/);
     const title = page.getByText("方案协作", { exact: true });
-    assert.ok((await title.locator("..").boundingBox())!.y <= 90, "正文标题栏应紧接全局顶栏与 44px 阶段栏");
+    assert.ok((await title.locator("..").boundingBox())!.y <= 104, "正文标题栏应紧接全局顶栏与 56px 阶段栏");
     assert.equal(await page.getByLabel("方案就绪状态").count(), 0, "全局顶栏不重复展示就绪度胶囊");
     await page.getByRole("button", { name: "查看 JSON", exact: true }).click();
     await page.getByText("JSON 产品数据", { exact: true }).waitFor();

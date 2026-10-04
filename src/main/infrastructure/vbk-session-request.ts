@@ -7,6 +7,8 @@ export interface VbkSessionRequestBrowser {
 }
 
 export interface VbkSessionNativeRequest {
+  /** Per-request business selection; never changes the account cookie jar. */
+  businessContext?: { businessId: number; travelType: number };
   endpoint: string;
   body: object;
   errorLabel: string;
@@ -62,6 +64,7 @@ export interface VbkSessionRequestResult {
 }
 
 export interface VbkSessionRequestOptions<TBody extends object = Record<string, unknown>> {
+  businessContext?: VbkSessionNativeRequest["businessContext"];
   endpoint: string;
   body: TBody;
   browserRequestTimeoutMs: number;
@@ -100,6 +103,11 @@ export const DEFAULT_VBK_SOA_HEADERS: Record<string, string> = {
   "x-input-locale": "zh-CN",
 };
 
+function requestHeaders(overrides: Record<string, string> = {}): Record<string, string> {
+  return Object.fromEntries([...Object.entries(DEFAULT_VBK_SOA_HEADERS), ...Object.entries(overrides)]
+    .map(([key, value]) => [key.toLowerCase(), value]));
+}
+
 export class VbkSessionRequestTimeoutError extends Error {
   constructor(message: string) {
     super(message);
@@ -117,8 +125,9 @@ export async function vbkSessionRequest<TBody extends object>(
     if (!browser.vbkSessionFetch) throw new Error(`${options.errorLabel}缺少账号会话请求客户端`);
     const result = await rejectAfter(browser.vbkSessionFetch({
       endpoint: options.endpoint, body: options.body, errorLabel: options.errorLabel,
-      headers: { ...DEFAULT_VBK_SOA_HEADERS, ...(options.headers ?? {}) },
+      headers: requestHeaders(options.headers),
       referrer: options.referrer, referrerPolicy: options.referrerPolicy,
+      businessContext: options.businessContext,
       includeCidQuery: options.includeCidQuery !== false,
       requireReadableCid: options.requireReadableCid === true, timeoutMs: browserRequestTimeoutMs,
     }), evaluateTimeoutMs, `${options.errorLabel}会话请求超时（${evaluateTimeoutMs}ms）`);
@@ -315,7 +324,7 @@ export async function vbkSessionRequest<TBody extends object>(
     body: options.body,
     timeoutMs: browserRequestTimeoutMs,
     errorLabel: options.errorLabel,
-    headers: { ...DEFAULT_VBK_SOA_HEADERS, ...(options.headers ?? {}) },
+    headers: requestHeaders(options.headers),
     referrer: options.referrer,
     referrerPolicy: options.referrerPolicy,
     includeCidQuery: options.includeCidQuery !== false,
@@ -337,7 +346,7 @@ export async function vbkSessionRequest<TBody extends object>(
       endpoint: options.endpoint,
       body: options.body,
       errorLabel: options.errorLabel,
-      headers: { ...DEFAULT_VBK_SOA_HEADERS, ...(options.headers ?? {}) },
+      headers: requestHeaders(options.headers),
       referrer: options.referrer,
       referrerPolicy: options.referrerPolicy,
       includeCidQuery: options.includeCidQuery !== false,

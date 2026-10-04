@@ -87,9 +87,17 @@ function sessionRequestParts(request: VbkSessionNativeRequest, cid: string, ubtV
   const headers = {
     ...request.headers,
     ...(ubtVid ? { "x-ctx-ubt-vid": ubtVid, "x-ctx-ubt-sid": "11" } : {}),
-    ...(request.referrer ? { referer: request.referrer } : {}),
   };
   return { url: url.toString(), body, headers };
+}
+
+/** Chromium validates a manually supplied Referer against its default policy. */
+function nativeReferrer(endpoint: string, source?: string, policy?: VbkSessionNativeRequest["referrerPolicy"]): string | undefined {
+  if (!source) return undefined;
+  const target = new URL(endpoint);
+  const from = new URL(source);
+  if (!/^https?:$/.test(from.protocol) || (from.protocol === "https:" && target.protocol === "http:")) return undefined;
+  return from.origin === target.origin || policy === "no-referrer-when-downgrade" ? from.href : `${from.origin}/`;
 }
 
 function finishSessionResponse(status: number, text: string, startedAt: number, ctx: VbkSessionContext, errorLabel: string): VbkSessionNativeResult {
@@ -115,12 +123,36 @@ export function attachVbkSessionFetch(page: Page, electronSession: Session, asse
     const timer = setTimeout(() => controller.abort(), request.timeoutMs ?? 12_000);
     try {
       assertActive();
+      const referrer = nativeReferrer(parts.url, request.referrer ?? page.url(), request.referrerPolicy);
+      const origin = referrer && new URL(referrer).hostname === "vbooking.ctrip.com"
+        && new URL(parts.url).hostname === "online.ctrip.com" ? new URL(referrer).origin : undefined;
+      let businessCookies: string | undefined;
+      if (request.businessContext) {
+        const target = new URL(parts.url);
+        if (target.origin !== "https://online.ctrip.com" || target.pathname !== "/restapi/soa2/15638/saveSaleControlInfo") {
+          throw new Error("业务上下文仅用于携程产品创建接口");
+        }
+        const { businessId, travelType } = request.businessContext;
+        if (!Number.isInteger(businessId) || businessId <= 0 || !Number.isInteger(travelType) || travelType < 0) {
+          throw new Error("无效的产品业务上下文");
+        }
+        const endpointCookies = await electronSession.cookies.get({ url: parts.url });
+        businessCookies = endpointCookies.filter(cookie => !cookie.name.startsWith("vbk-menu-business-"))
+          .map(cookie => `${cookie.name}=${cookie.value}`).concat([
+            `vbk-menu-business-id=${businessId}`,
+            `vbk-menu-business-parameter=${encodeURIComponent(JSON.stringify({ businessId: String(businessId), travelType: String(travelType) }))}`,
+          ]).join("; ");
+      }
+      assertActive();
       const response = await electronSession.fetch(parts.url, {
         method: "POST",
-        credentials: "include",
+        // Chromium otherwise replaces an explicit Cookie header with its jar.
+        // The scoped header already carries this account's endpoint cookies.
+        credentials: businessCookies ? "omit" : "include",
         signal: controller.signal,
-        headers: parts.headers,
-        referrer: request.referrer ?? page.url(),
+        headers: { ...parts.headers, ...(referrer ? { referer: referrer } : {}), ...(origin ? { origin } : {}),
+          ...(businessCookies ? { cookie: businessCookies } : {}) },
+        referrer,
         referrerPolicy: request.referrerPolicy,
         body: JSON.stringify(parts.body),
       });
@@ -135,12 +167,13 @@ export function attachVbkSessionFetch(page: Page, electronSession: Session, asse
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 20_000);
     try {
+      const referrer = nativeReferrer(request.endpoint, request.referrer, request.referrerPolicy);
       const response = await electronSession.fetch(request.endpoint, {
         method: "GET",
         credentials: "include",
         signal: controller.signal,
-        headers: request.headers,
-        referrer: request.referrer,
+        headers: { ...request.headers, ...(referrer ? { referer: referrer } : {}) },
+        referrer,
         referrerPolicy: request.referrerPolicy,
       });
       return { status: response.status, text: await response.text() };

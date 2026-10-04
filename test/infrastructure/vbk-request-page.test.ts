@@ -68,3 +68,76 @@ test("规划和录入入口优先获取请求客户端，兼容独立 Playwright
   assert.equal(await getVbkRequestPage({ requestPage: async () => client, page: async () => { throw new Error("页面不可用"); } }), client);
   assert.equal(await getVbkRequestPage({ page: async () => client }), client);
 });
+
+test("空白视图使用 VBK 来源，不依赖打开业务页面", async () => {
+  const page = createVbkRequestPage({
+    session: {} as any, assertActive: () => undefined,
+    currentUrl: () => "about:blank", interactivePage: async () => { throw new Error("不应打开页面"); },
+  });
+  assert.equal(page.url(), "https://vbooking.ctrip.com/");
+});
+
+test("阶段来源不打开页面，并发产品隔离且结束后恢复默认来源", async () => {
+  const sent: RequestInit[] = [];
+  const page = createVbkRequestPage({
+    session: { cookies: { get: async () => [] }, fetch: async (_url: string, options: RequestInit) => {
+      sent.push(options); return { status: 200, text: async () => '{"ResponseStatus":{"Ack":"Success"}}' };
+    } } as any,
+    assertActive: () => {}, currentUrl: () => "about:blank",
+    interactivePage: async () => { throw Error("禁止获取页面"); },
+  });
+  const request = (productId: number) => vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/getPackageList", body: { productId },
+    errorLabel: "套餐", browserRequestTimeoutMs: 1000, evaluateTimeoutMs: 1000,
+  });
+  await Promise.all([1, 2].map(id => page.withRequestSource(
+    `https://vbooking.ctrip.com/ivbk/vendor/packageManage?productid=${id}&from=vbk`,
+    async () => { await Promise.resolve(); await request(id); },
+  )));
+  for (const options of sent) {
+    const id = JSON.parse(String(options.body)).productId;
+    assert.equal((options.headers as any).referer, `https://vbooking.ctrip.com/ivbk/vendor/packageManage?productid=${id}&from=vbk`);
+    assert.equal((options.headers as any)["x-ctx-locale"], "zh-CN");
+    assert.equal(Object.keys(options.headers as any).filter(key => key.toLowerCase() === "x-ctx-locale").length, 1);
+  }
+  await request(3);
+  assert.equal((sent[2].headers as any).referer, "https://vbooking.ctrip.com/");
+  assert.equal(page.url(), "https://vbooking.ctrip.com/");
+  await vbkSessionRequest(page, {
+    endpoint: "https://online.ctrip.com/restapi/soa2/15638/suggestDepartureCity", body: {},
+    errorLabel: "语言字段", browserRequestTimeoutMs: 1000, evaluateTimeoutMs: 1000,
+    headers: { "x-ctx-Locale": "en-US", "x-input-Locale": "en-US" },
+  });
+  assert.equal((sent[3].headers as any)["x-ctx-locale"], "en-US");
+  assert.equal(Object.keys(sent[3].headers as any).filter(key => key.toLowerCase() === "x-ctx-locale").length, 1);
+});
+
+test("创建业务上下文只覆盖本次接口请求，保留账号凭据且不写 Cookie", async () => {
+  const requests: RequestInit[] = [];
+  const original = [{ name: "vbkticket", value: "synthetic-ticket" },
+    { name: "vbk-menu-business-id", value: "6" }, { name: "vbk-menu-business-parameter", value: "old-context" }];
+  const page = createVbkRequestPage({
+    session: { cookies: { get: async () => original, set: async () => { throw Error("不允许写 Cookie"); } },
+      fetch: async (_url: string, options: RequestInit) => {
+        requests.push(options);
+        return { status: 200, text: async () => '{"ResponseStatus":{"Ack":"Success"}}' };
+      },
+    } as any,
+    assertActive: () => {}, currentUrl: () => "https://vbooking.ctrip.com/",
+    interactivePage: async () => { throw Error("不允许打开页面"); },
+  });
+  const options = { endpoint: "https://online.ctrip.com/restapi/soa2/15638/saveSaleControlInfo", body: {},
+    errorLabel: "创建", browserRequestTimeoutMs: 1000, evaluateTimeoutMs: 1000 };
+  await vbkSessionRequest(page, { ...options, businessContext: { businessId: 1, travelType: 1 } });
+  const headers = requests[0].headers as Record<string, string>;
+  assert.equal(requests[0].credentials, "omit");
+  assert.match(headers.cookie, /vbkticket=synthetic-ticket/);
+  assert.match(headers.cookie, /vbk-menu-business-id=1(?:;|$)/);
+  assert.doesNotMatch(headers.cookie, /old-context|business-id=6/);
+  await vbkSessionRequest(page, options);
+  assert.equal((requests[1].headers as Record<string, string>).cookie, undefined);
+  assert.equal(requests[1].credentials, "include");
+  assert.equal(original[1].value, "6");
+  await assert.rejects(vbkSessionRequest(page, { ...options, endpoint: "https://example.com/", businessContext: { businessId: 1, travelType: 1 } }), /仅用于携程产品创建接口/);
+  assert.equal(requests.length, 2);
+});

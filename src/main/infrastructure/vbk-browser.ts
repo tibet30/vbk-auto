@@ -27,7 +27,6 @@ import { selectUsableVbkPage, selectVbkPage } from "./vbk-page-selection.js";
 import type { LoginAccountsSnapshot, SavedLoginAccount } from "../../shared/contracts-types.js";
 import type { SerialisedCookie } from "./vbk-cookie-serializer.js";
 import { parseCookies } from "./vbk-cookie-serializer.js";
-import { waitForDomText } from "./vbk-page-wait.js";
 import { attachVbkSessionFetch, observeVbkSessionFetch } from "./vbk-session-fetch-adapter.js";
 import { navigateVbkPage } from "./vbk-navigation.js";
 import { isExpectedLoginRedirect } from "./vbk-navigation.js";
@@ -76,17 +75,6 @@ function ensureNativeDialogHandler(page: Page): void {
   });
 }
 
-// DOM 抓取时丢弃的菜单/标签类文本：VBK 后台大量 class 名带 user / account
-// 的导航项（如「账号管理」「用户管理」），会先于真实账号名命中旧 selector，
-// 导致抓出"管理"两个字误显示。命中这里任一文本就视为假阳性。
-const MENU_FALSE_POSITIVES = new Set([
-  "管理", "管理员",
-  "账号管理", "账号设置", "账号中心", "我的账号", "账号信息",
-  "用户管理", "用户设置", "用户中心", "我的用户",
-  "供应商管理", "登录", "退出登录", "退出",
-  "新手指引", "帮助中心", "设置",
-]);
-
 /**
  * 多账号登录需要的存储接口。
  * 抽成接口而不是直接 import VbkDatabase，避免 vbk-browser.ts 与 database.ts
@@ -133,6 +121,7 @@ export class VbkBrowser {
   private initialiseError?: string;
   /** 视图可见性标记（用于 setVisible 状态同步）。 */
   private visible = false;
+  private readonly initialPageLoads = new Map<number, Promise<void>>();
   /** 缓存的 bounds，用于切换视图时恢复布局。 */
   private _bounds: Electron.Rectangle = { x: 0, y: 0, width: 0, height: 0 };
   /** 自动录入占用期间，只允许已登记产品页和创建套装入口。 */
@@ -205,6 +194,9 @@ export class VbkBrowser {
       view = this.createView(this.getPartition(accountKey));
       this.accounts.set(accountKey, view);
     }
+    // Initialise Chromium's frame tree without loading a supplier page. A view
+    // with no document makes CDP discovery hang when an upload later needs it.
+    if (!view.webContents.getURL()) await view.webContents.loadURL("about:blank");
 
     // 首次创建：迁移调用方已经验证过的 cookie 快照（后续 Electron 自动持久化）。
     if (cookies.length > 0) {
@@ -271,7 +263,7 @@ export class VbkBrowser {
     if (activeKey && cookies.length > 0 && isVbkAuthCookieSummaryComplete(authSummary)) {
       const view = await this.ensureAccountView(activeKey, cookies);
       this.activateView(view, activeKey);
-      await view.webContents.loadURL(URLS.list);
+      // A restored account is ready for protocol requests before any page loads.
     } else {
       const view = this.ensureDefaultView();
       this.activateView(view);
@@ -299,6 +291,9 @@ export class VbkBrowser {
   setVisible(visible: boolean) {
     this.visible = visible;
     this.view?.setVisible(visible);
+    if (visible && this.view && /^(?:about:blank)?$/.test(this.view.webContents.getURL())) {
+      void this.ensureInitialPage().catch(error => logWarn("[vbk] visible page load failed", error));
+    }
   }
 
   isVisible(): boolean {
@@ -356,12 +351,24 @@ export class VbkBrowser {
     await navigateVbkPage(this.view?.webContents, url);
   }
 
+  private async ensureInitialPage(): Promise<void> {
+    const contents = this.view?.webContents;
+    if (!contents) throw new Error("VBK 浏览器尚未初始化");
+    const pending = this.initialPageLoads.get(contents.id);
+    if (pending) return pending;
+    if (!/^(?:about:blank)?$/.test(contents.getURL())) return;
+    const task = navigateVbkPage(contents, URLS.list, { allowRedirect: isExpectedLoginRedirect });
+    this.initialPageLoads.set(contents.id, task);
+    try { await task; } finally { this.initialPageLoads.delete(contents.id); }
+  }
+
   /**
    * 便捷登录入口：setVisible(true) + 跳到产品列表 URL。
    */
   async login() {
     await this.ensureReadyForAction();
-    this.setVisible(true);
+    this.visible = true;
+    this.view?.setVisible(true);
     await navigateVbkPage(this.view?.webContents, URLS.list, {
       allowRedirect: isExpectedLoginRedirect,
     });
@@ -508,7 +515,6 @@ export class VbkBrowser {
 
     // 获取或创建 partition 视图，并以持久化快照重建目标登录态。
     const view = await this.ensureAccountView(trimmedKey, cookies);
-    await view.webContents.loadURL(URLS.list);
     const restoredUser = await this.fetchCurrentUserInfoInView(view).catch(() => null);
     if (restoredUser?.loginAccount !== trimmedKey) {
       throw new Error(
@@ -518,6 +524,9 @@ export class VbkBrowser {
 
     // 只有目标视图完成真实账号读回后，才提交活动账号与可见视图。
     this.activateView(view, trimmedKey);
+    if (this.visible) {
+      void this.ensureInitialPage().catch(error => logWarn("[vbk] switched account page load failed", error));
+    }
   }
 
   /**
@@ -583,13 +592,11 @@ export class VbkBrowser {
   // ─────────────────────────────────────────────────────────────
 
   async status(refresh = false) {
-    let shouldNavigate = refresh;
     if (this.initialiseState !== "ready") {
       if (refresh) {
         try {
           if (this.initialiseState === "failed") this.initialisePromise = undefined;
           await this.initialise();
-          shouldNavigate = false;
         } catch {
           return { loggedIn: false, message: this.initialiseError || "VBK 页面加载失败，请重试。" };
         }
@@ -603,14 +610,9 @@ export class VbkBrowser {
       }
     }
     if (!this.view) return { loggedIn: false, message: "VBK 浏览器尚未准备好。" };
-    if (shouldNavigate) await this.navigate(URLS.list);
-    const url = this.view.webContents.getURL();
-    if (/login|passport/i.test(url)) return { loggedIn: false, message: "尚未登录 VBK。" };
-    const productListVisible = await this.view.webContents.executeJavaScript(`
-      document.body?.innerText?.includes("产品列表") === true
-    `, true).catch(() => false);
-    if (!productListVisible) return { loggedIn: false, message: "尚未登录 VBK。" };
-    const authSummary = summarizeVbkAuthCookies(await this.collectCookies());
+    const checkedView = this.view;
+    const url = checkedView.webContents.getURL();
+    const authSummary = summarizeVbkAuthCookies(await this.collectCookies(checkedView));
     if (!isVbkAuthCookieSummaryComplete(authSummary)) {
       return { loggedIn: false, message: VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE };
     }
@@ -620,9 +622,9 @@ export class VbkBrowser {
     //    等会在短时间内多次触发 status，每次都发一次 providerId 接口）。
     let accountName: string | undefined;
     let loginAccount: string | undefined;
-    const currentWebContentsId = this.view.webContents.id;
+    const currentWebContentsId = checkedView.webContents.id;
     if (
-      url === this.cachedUserInfoUrl
+      !refresh && url === this.cachedUserInfoUrl
       && currentWebContentsId === this.cachedUserInfoWebContentsId
       && this.cachedUserInfo
     ) {
@@ -630,7 +632,7 @@ export class VbkBrowser {
       loginAccount = this.cachedUserInfo.loginAccount;
     } else {
       try {
-        const user = await this.fetchCurrentUserInfoInView(this.view);
+        const user = await this.fetchCurrentUserInfoInView(checkedView);
         const display = user?.displayName?.trim();
         const login = user?.loginAccount?.trim();
         if (login) loginAccount = login;
@@ -643,31 +645,22 @@ export class VbkBrowser {
           this.cachedUserInfo = { displayName: accountName, loginAccount };
         }
       } catch {
-        // API 失败（CDP 未就绪、接口变更、网络异常）→ fallback 到 DOM 抓取
+        // Authoritative session failure is never promoted from stale page text.
+        this.clearCachedUserInfo();
       }
     }
 
-    // 2) Fallback：DOM 抓取 + 菜单白名单过滤。
-    if (!accountName) {
-      const scraped = await this.view.webContents.executeJavaScript(`
-        (() => {
-          const selectors = [
-            '[class*="user"]', '[class*="account"]', '[class*="avatar"]',
-            '[class*="profile"]', '.user-name', '.account-name'
-          ];
-          const candidates = selectors
-            .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-            .map((node) => node.textContent?.trim())
-            .filter(Boolean)
-            .filter((text) => text.length >= 2 && text.length <= 32);
-          const body = document.body?.innerText || "";
-          const bodyMatch = body.match(/(?:供应商|账号|用户|登录人)[:：\\s]*([^\\n\\s]{2,24})/);
-          return candidates[0] || bodyMatch?.[1] || "";
-        })()
-      `, true).catch(() => "");
-      if (scraped && !MENU_FALSE_POSITIVES.has(scraped)) {
-        accountName = scraped;
-      }
+    if (this.view !== checkedView || checkedView.webContents.isDestroyed()) {
+      this.clearCachedUserInfo();
+      return { loggedIn: false, message: "登录核验期间账号已切换，请重新核验。" };
+    }
+    if (!loginAccount || !accountName) {
+      this.clearCachedUserInfo();
+      return { loggedIn: false, message: "VBK 登录会话未通过当前用户接口核验，请重新登录。" };
+    }
+    if (this.activeKey && loginAccount !== this.activeKey) {
+      this.clearCachedUserInfo();
+      return { loggedIn: false, message: "VBK 当前登录身份与账号分区不一致，请重新登录。" };
     }
 
     const accounts = accountName ? Array.from(new Set([accountName, loginAccount].filter(Boolean) as string[])) : [];
@@ -686,12 +679,6 @@ export class VbkBrowser {
   // Playwright / CDP
   // ─────────────────────────────────────────────────────────────
 
-  /**
-   * 拿一个绑定到当前 VBK WebView 的 Playwright Page：
-   *   - 复用 this.cdp（CDP over debuggingPort），避免重复连接累积 WebSocket；
-   *   - 优先按 view URL 匹配；找不到则取任意 ctrip.com 页面；
-   *   - 完全拿不到时抛错让上层提示「请先登录 VBK」。
-   */
   /** Protocol access needs the captured account partition, never a CDP Page. */
   async requestPage(): Promise<Page> {
     await this.ensureReadyForAction();
@@ -718,6 +705,12 @@ export class VbkBrowser {
 
   async page(options: { requireInteractive?: boolean } = {}): Promise<Page> {
     await this.ensureReadyForAction();
+    if (options.requireInteractive && (this._bounds.width <= 0 || this._bounds.height <= 0)) {
+      const [width, height] = this.window.getSize();
+      const editorWidth = Math.max(640, Math.round(width * 0.66));
+      this.setBounds({ x: width - editorWidth, y: 0, width: editorWidth, height });
+    }
+    await this.ensureInitialPage();
     if (!this.cdp?.isConnected()) {
       this.cdp = await chromium.connectOverCDP(`http://127.0.0.1:${this.debuggingPort}`);
     }
@@ -793,10 +786,10 @@ export class VbkBrowser {
    * 启动时等待当前 VBK 页面渲染出"产品列表"。
    * 进程重启后 loadURL 虽已完成，但 SPA 客户端路由、数据加载可能
    * 仍在进行；调用方在收到 true 后即可安全调用 status() 检测登录态。
-   * 超时或页面跳转到登录页时返回 false。
+   * 通过当前用户接口核验登录态，不等待页面或 DOM 文本。
    */
   async waitUntilReady(): Promise<boolean> {
-    return waitForDomText(this.view?.webContents, "产品列表", 10_000);
+    return (await this.status(true)).loggedIn;
   }
 
   // ─────────────────────────────────────────────────────────────

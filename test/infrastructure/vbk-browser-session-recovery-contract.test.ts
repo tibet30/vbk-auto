@@ -84,7 +84,7 @@ test("保存和状态检测都必须先校验 VBK 鉴权 cookie 完整性", () =
   const saveCurrentSession = source.slice(source.indexOf("  async saveCurrentSession()"), source.indexOf("  /**\n   * \"新增登录\""));
   const status = source.slice(source.indexOf("  async status("), source.indexOf("  // ─────────────────────────────────────────────────────────────\n  // Playwright"));
   assert.match(saveCurrentSession, /const authSummary = summarizeVbkAuthCookies\(cookies\);[\s\S]*if \(!isVbkAuthCookieSummaryComplete\(authSummary\)\) return null;/);
-  assert.match(status, /const authSummary = summarizeVbkAuthCookies\(await this\.collectCookies\(\)\);[\s\S]*VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE/);
+  assert.match(status, /const authSummary = summarizeVbkAuthCookies\(await this\.collectCookies\(checkedView\)\);[\s\S]*VBK_AUTH_COOKIE_INCOMPLETE_MESSAGE/);
 });
 
 test("withKnownVbkAccount 只在真实保存成功后写入活跃账号 key", () => {
@@ -147,7 +147,7 @@ test("新增登录 / 切换账号不会复用上一个账号的 current-user 缓
   const clearViewStorage = source.slice(source.indexOf("  private async clearViewStorage("), source.indexOf("  private async collectCookies("));
   assert.match(source, /private clearCachedUserInfo\(\): void \{[\s\S]*cachedUserInfoUrl = undefined;[\s\S]*cachedUserInfo = undefined;/);
   assert.match(source, /cachedUserInfoWebContentsId/);
-  assert.match(source, /fetchCurrentUserInfoInView\(this\.view\)/);
+  assert.match(source, /fetchCurrentUserInfoInView\(checkedView\)/);
   assert.match(activateView, /if \(current !== view \|\| this\.activeKey !== nextKey\) this\.clearCachedUserInfo\(\);/);
   assert.match(installNavigationHooks, /did-start-navigation[\s\S]*this\.clearCachedUserInfo\(\);/);
   assert.match(installNavigationHooks, /did-navigate-in-page[\s\S]*this\.clearCachedUserInfo\(\);/);

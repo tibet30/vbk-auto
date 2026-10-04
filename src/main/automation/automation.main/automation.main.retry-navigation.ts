@@ -25,6 +25,7 @@ const PHASE_PAGE_SECTIONS: Record<string, string> = {
 
 type PhasePage = {
   nativeOnly?: boolean;
+  withRequestSource?: <T>(url: string, execute: () => Promise<T>) => Promise<T>;
   goto: (url: string, options?: { waitUntil?: "domcontentloaded" }) => Promise<unknown>;
   reload: (options?: { waitUntil?: "domcontentloaded" }) => Promise<unknown>;
   waitForLoadState?: (state: "networkidle", options?: { timeout?: number }) => Promise<unknown>;
@@ -125,7 +126,11 @@ export async function executeApiWithPhasePageSync<T>(args: {
     log(`phase=${phase} 通过 API 录入：跳过页面进入，使用登录会话与产品 ID`, "info");
   }
 
-  const result = await executeApi();
+  // This is request metadata, never a navigation. Scope it per async phase so
+  // concurrent products cannot borrow each other's editor/product source.
+  const result = page.withRequestSource
+    ? await page.withRequestSource(expectedUrl, executeApi)
+    : await executeApi();
   // 用户在执行中关闭页面后，不再导航；执行中刚打开页面也留到下一阶段同步。
   if (syncPage && isPageVisible()) {
     try {

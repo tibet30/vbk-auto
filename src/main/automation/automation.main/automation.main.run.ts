@@ -1,17 +1,6 @@
+import { recoverCreatedShell } from "./automation.main.recover-shell.js";
 import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
-/**
- * 自动化阶段主循环入口：runAutomation。
- *   - 拉产品 / 解析 product；
- *   - 前置兜底：setVisible + ensureBrowserHasBounds；
- *   - 自动化 blocker 检查 + 管家联系人 / 400 电话凭证准备；
- *   - 根据 startIndex（首次或 retryFrom）创建或重置 AutomationRun；
- *   - 用 handlers Map 把每个 phase 包成 local execute，runPhaseWithRecovery
- *     负责尝试 → advisor → 决策；
- *   - cancelled 由 AutomationCancelledError 短路，failed 落库 blocked 状态。
- *
- * API 阶段使用登录会话与明确的产品 ID；页面仅在回读后同步显示。
- * 手动封面上传依赖编辑页，必须在执行前完成导航。
- */
+/** 自动录入主循环：保存并回读各阶段，持久化进度与失败断点。 */
 import { runDraftPhaseWithRecovery } from "./optional-traffic-phase.js";
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
@@ -90,6 +79,10 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     // product JSON 里的「管家联系人」是 basic 阶段实际依赖的来源；创建产品时
     // 已从账号固定信息固化进去，自动化阶段不再回读账号 butlerName，避免账号
     // 后续改动覆盖当前产品负责人。400 电话仍来自账号固定信息。
+    if (retryFrom === "saleControl") {
+      await recoverCreatedShell(ctx, productDetail);
+      retryFrom = "basic";
+    }
     const draftPhases = resourceRecoveryPhases(product, draftPhasesFor(product), productDetail.automation, retryFrom);
     const startIndex = retryFrom ? draftPhases.indexOf(retryFrom) : 0;
     if (retryFrom && startIndex < 0) throw new Error(`当前产品没有阶段：${retryFrom}`);
@@ -159,7 +152,10 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
           log("正在创建 VBK 产品草稿…");
           // configureProductShell 现在原子化完成销售控制（产品类型/形态/线路品牌
           // /分销渠道 + 点下一步），并返回携程产品 ID，不再单独调 createProductShell。
-          productId = await ctx.runVbkPageExclusive(() => configureProductShellApi(page, product), "saleControl");
+          productId = await ctx.runVbkPageExclusive(() => configureProductShellApi(page, product, createdId => {
+            ctx.db.setProductId(localProductId, createdId);
+            log(`携程已返回产品壳 ID：${createdId}，正在核验销售控制。`);
+          }), "saleControl");
           ctx.db.setProductId(localProductId, productId);
           ctx.browser.addPinnedProductId?.(productId);
           // configureProductShellApi 已完成销售控制远端回读；先持久化销售控制
@@ -190,10 +186,6 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
         phaseRecord(phase);
         return ctx.runVbkPageExclusive(async () => {
-          // Manual cover upload uses VBK's interactive form, which cannot open at 0×0.
-          if (phase === "presentation" && product.presentation?.cover?.source === "manualUpload") {
-            ctx.ensureBrowserHasBounds();
-          }
           return executeApiWithPhasePageSync({
             page,
             productId,

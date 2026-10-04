@@ -1,5 +1,6 @@
 export type DraftWriteProjection = {
   pickup: { code: string | null; name: string | null };
+  transportNodes: Array<{ day: number; position: number; time: string; description: string }>;
   hotelGrades: Array<{ key: string | null; name: string | null }>;
   hotelNodes: Array<{
     description: string | null;
@@ -21,6 +22,12 @@ export function projectDraftWrite(value: unknown): DraftWriteProjection {
   const infos: Record<string, unknown>[] = days.flatMap((day) => Array.isArray(day.tourDailyInfos)
     ? day.tourDailyInfos.map(record).filter((info): info is Record<string, unknown> => Boolean(info))
     : []);
+  const transportNodes = days.flatMap((day, dayIndex) => (Array.isArray(day.tourDailyInfos) ? day.tourDailyInfos : [])
+    .flatMap((item, position) => {
+      const info = record(item);
+      return Number(record(info?.activeType)?.key) === 8
+        ? [{ day: dayIndex + 1, position, time: String(record(info?.takeoffTime)?.key ?? ""), description: String(info?.description ?? "").trim() }] : [];
+    }));
   const gather = infos.find((info) => record(info.activeType)?.key === 25);
   const packages: unknown[] = gather && Array.isArray(gather.tourDailyPackageGatherList) ? gather.tourDailyPackageGatherList : [];
   const airports = record(packages[0])?.airports;
@@ -48,7 +55,7 @@ export function projectDraftWrite(value: unknown): DraftWriteProjection {
     .find((item) => String(record(item?.poi)?.poiId ?? "") === "85862");
   const suffix = record(bridge?.suffixName) ?? record(record(bridge?.poi)?.suffixName);
   return {
-    pickup: { code: typeof airport?.code === "string" ? airport.code : null, name: typeof airport?.name === "string" ? airport.name : null }, hotelGrades, hotelNodes,
+    pickup: { code: typeof airport?.code === "string" ? airport.code : null, name: typeof airport?.name === "string" ? airport.name : null }, hotelGrades, hotelNodes, transportNodes,
     bridge85862: suffix ? {
       key: typeof suffix.key === "string" || typeof suffix.key === "number" ? String(suffix.key) : null,
       name: typeof suffix.name === "string" ? suffix.name : null,

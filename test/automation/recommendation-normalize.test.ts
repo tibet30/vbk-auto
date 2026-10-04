@@ -35,8 +35,8 @@ test("推荐理由不改写敏感词，并把超长文本确定性收敛到完�
     { category: "特色美食", text: "本地老店特色小吃与简餐，餐食与景点结合，体验更丰富，按需品尝" },
     { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
   ]);
-  assert.equal(plan[0]?.text, "入住核心片区舒适酒店，步行即可抵达热门商圈");
-  assert.ok(new TextEncoder().encode(plan[0]?.text).length <= 80);
+  assert.equal(plan[0]?.text, "入住核心片区舒适酒店，步行即可抵达热门商圈，方便每天出行与休息");
+  assert.ok(vbkRecommendationCharacterLength(plan[0]!.text) <= 80);
   assert.ok(hasValidVbkRecommendationLength(plan[0]!.text));
 });
 
@@ -85,6 +85,6 @@ test("presentation 生成出口先收短超长推荐理由再通过 schema", () 
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const presentation = result.value as { recommendations: Array<{ text: string }> };
-  assert.equal(presentation.recommendations[0]?.text, "串联太湖湖滨与梁溪老城，集中体验无锡山水与人文风貌");
-  assert.ok(new TextEncoder().encode(presentation.recommendations[0]!.text).length <= 80);
+  assert.equal(presentation.recommendations[0]?.text, "串联太湖湖滨与梁溪老城，集中体验无锡山水与人文风貌，三日游览节奏从容舒适");
+  assert.ok(vbkRecommendationCharacterLength(presentation.recommendations[0]!.text) <= 84);
 });

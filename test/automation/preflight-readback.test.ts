@@ -175,6 +175,7 @@ test("只读恢复预检补齐免费 POI 票型并接受远端无需门票回读
           useCar: { key: "B", name: "包车" },
           tourDailyInfos: [
             { activeType: { key: 25, name: "集合" }, tourDailyPackageGatherList: [{ serviceAllDay: true }] },
+            { activeType: { key: 8, name: "交通" }, takeoffTime: { key: "D", name: "全天" }, description: "第1天：开元寺，全天用车" },
             { activeType: { key: 3, name: "景点" }, tourDailyPois: [{
               poi: { poiId: 85864, poiName: "开元寺" }, suffixName: { key: 11, name: "无需门票" },
             }] },

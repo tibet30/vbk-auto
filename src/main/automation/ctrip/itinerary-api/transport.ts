@@ -11,7 +11,7 @@
  *   - 测试时只替换 postSoa 或 page.evaluate 一处即可拦截全部 6 个 endpoint。
  */
 
-import { vbkSessionRequest } from "../../../infrastructure/vbk-session-request.js";
+import { vbkSessionRequest, type VbkReferrerPolicy } from "../../../infrastructure/vbk-session-request.js";
 
 export const GET_TOUR_INFO_LIST_URL = "https://online.ctrip.com/restapi/soa2/15638/getProductTourInfoList";
 export const GET_TOUR_DAILY_URL = "https://online.ctrip.com/restapi/soa2/20049/getTourDailyDetail.json";
@@ -70,6 +70,8 @@ export function describeAckError(payload: unknown): string {
 
 export interface PostSoaOptions {
   headers?: Record<string, string>;
+  referrer?: string;
+  referrerPolicy?: VbkReferrerPolicy;
   browserTimeoutMs?: number;
   evaluateTimeoutMs?: number;
 }
@@ -95,7 +97,9 @@ export async function postSoa<TBody extends Record<string, unknown>>(
         evaluateTimeoutMs: options.evaluateTimeoutMs ?? 20_000,
         errorLabel: label,
         body,
-        headers: { "x-tt-core": "1", ...(options.headers ?? {}) },
+        headers: { cookieorigin: "https://vbooking.ctrip.com", "x-tt-core": "1", ...(options.headers ?? {}) },
+        referrer: options.referrer,
+        referrerPolicy: options.referrerPolicy,
       });
     } catch (error) {
       if (!/失败：HTTP (?:401|403)(?:\D|$)/.test(error instanceof Error ? error.message : String(error))) throw error;

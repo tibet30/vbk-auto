@@ -15,6 +15,7 @@ import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cove
 import type { DisambiguateRequest } from "../../shared/contracts.js";
 import { buildVbkCopyPolicyPrompt } from "../planning/vbk-copy-policy.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../domain/product/features-rich-text.js";
+import { PRIVATE_TOUR_COPY_GUIDE } from "../../shared/private-tour-copy.js";
 
 const writablePatchGuide = `patch 可写路径白名单（共 16 个）：
 /sales/productType, /sales/productForm, /sales/splitGroup
@@ -27,7 +28,7 @@ const writablePatchGuide = `patch 可写路径白名单（共 16 个）：
 
 黑名单（绝对禁止写入）：supplierProductCode、vehicleResource 除 requestedTotalCost 外的任何字段（含 vehicleId/resourceId/resourceGroupId/resourceGroupName/supplierCode）、providerId、contactCardId、城市 ID、资源 ID、供应商编码、管家联系人。`;
 
-const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
+const outputGuide = `${PRIVATE_TOUR_COPY_GUIDE}\n只输出一个 JSON 对象，不能有 Markdown、解释文字或外层 data/result：
 {"reply":"给运营看的简明中文回复","patch":[...],"questions":[],"researchTasks":[...]}
 
 仅允许这 4 个一级字段：reply / patch / questions / researchTasks。多余字段直接视为无效。
@@ -46,7 +47,7 @@ const outputGuide = `只输出一个 JSON 对象，不能有 Markdown、解释�
   recommendationCategory → string，从以下 15 个值中选一：
     优选行程 / 服务保障 / 贴心赠送 / 精选酒店 / 缤纷景点 / 特色美食 / 度假首选 / 超值赠送 / 五星精选 / 限时秒杀 / 尊享入住 / 大牌驾到 / 优质交通 / 优良资质 / 缤纷体验
   recommendation → string，一句推荐语
-  recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复；每条 text 经首尾去空格和 VBK 标点归一后必须不超过 80 UTF-8 字节（平台上限 84 字节）。中文按每字约 3 字节估算，含标点建议不超过 26 个汉字；宁短勿超，禁止输出接近或超过上限的长句
+  recommendations → array，恰好 3 个对象 [{"category":"15选1","text":"推荐理由"}, ...]，3 条 category 不得重复；每条 text 按平台中文2、英文1计数，必须在30～84个平台字符范围内；建议30～40个汉字（60～80个平台字符），写清具体体验，不按UTF-8字节截短
     只有产品上下文明示已核实的免费权益时才可使用“贴心赠送”或“超值赠送”；禁止编造保险、礼品、门票、接送或其他赠送权益
  features → string（必须是 JSON 字符串，禁止对象/数组/AST/null），产品特色富文本 HTML 片段，规则见 system prompt
   cover → {source:"ctripLibrary", poi:"已核验的代表景点名"}
@@ -460,7 +461,7 @@ export const systemPrompt = `你是 ${APP_NAME} 的旅游产品运营助手。�
 6. 当前产品草稿是产品状态的唯一事实来源；历史消息声称"已生成"但草稿字段为空时，必须重新生成并返回可写 patch。
 7. patch 必须是 RFC6902 风格，只能修改可写路径。
 8. 最多追问一个真正阻塞生成的问题；不阻塞就先给出完整第一版。
-9. presentation 的每条 recommendations[].text 必须经首尾去空格和 VBK 标点归一后不超过 80 UTF-8 字节（平台硬上限 84 字节）；中文含标点建议不超过 26 个汉字。生成后逐条自行核对，宁短勿超。
+9. presentation 的每条 recommendations[].text 按平台中文2、英文1计数，必须在30～84个平台字符范围内；建议30～40个汉字（60～80个平台字符），充分提炼具体行程，不按UTF-8字节截短。
 
 ${buildVbkCopyPolicyPrompt()}
 

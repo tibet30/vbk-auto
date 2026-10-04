@@ -220,3 +220,15 @@ test("销售控制行提供重执行入口，但仍保持空 phaseNames 的 done
   assert.match(source, /retryPhases\.map\(\(phaseKey\)/);
   assert.match(source, /disabled=\{!!retryingPhase \|\| !url \|\| isNavigating \|\| automationActive \|\| saleControlRequiresNoProduct\}/);
 });
+
+test("创建成功后的回读失败保留产品 ID，再次创建明确拒绝", async () => {
+  const product = makeProduct();
+  const { ctx } = makeContext(product);
+  await assert.rejects(runSaleControlPhase(ctx, product.id, async (_page, _product, onCreated) => {
+    onCreated?.("76543211");
+    throw new Error("远端权限回读失败");
+  }));
+  assert.equal(product.productId, "76543211");
+  assert.equal(product.status, "blocked");
+  await assert.rejects(runSaleControlPhase(ctx, product.id, async () => { throw new Error("不应创建"); }), /避免重复创建/);
+});

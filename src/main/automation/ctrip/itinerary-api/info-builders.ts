@@ -12,6 +12,7 @@
  */
 
 import { ITINERARY_CTRIP_PLATFORM_HOTEL } from "../../../../shared/itinerary-hotel.js";
+import { HOTEL_SELECTION_NOTE, dailyTransportDescription } from "../../../../shared/itinerary-service-copy.js";
 import type { ProductItineraryDay, ResolvedStations } from "./itinerary-transform.js";
 import { isExteriorOnlyVisit } from "./visit-semantics.js";
 import {
@@ -107,6 +108,12 @@ function commonInfoFields(args: {
     pkgShoppingId: "",
     versionNum: 0,
   };
+}
+
+/** 平台模板交通（8）仅要求时间、说明；不伪造班次或车辆资源。 */
+export function buildDailyTransportInfo(title: string, sort: number) {
+  return commonInfoFields({ activeType: { key: 8, name: "交通" }, sort,
+    takeoffTime: { key: "D", name: "全天" }, description: dailyTransportDescription(title), costInclude: true });
 }
 
 /**
@@ -243,7 +250,7 @@ export function buildHotelInfo(args: {
     ...commonInfoFields({
       activeType: { key: 1, name: "酒店" },
       sort,
-      description: tier.displayName ? `${hotelName}（${tier.displayName}）` : hotelName,
+      description: `${tier.displayName ? `${hotelName}（${tier.displayName}）` : hotelName}\n${HOTEL_SELECTION_NOTE}`,
       takeoffTime: { key: "N", name: "不限" },
       takeTime: 0,
       costInclude: true,

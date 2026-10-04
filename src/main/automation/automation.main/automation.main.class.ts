@@ -106,7 +106,7 @@ async start(localProductId: string) {
     if (interruptedPhase) {
       const resumable = product?.automation?.phases.some((phase) =>
         phase.phase === interruptedPhase && phase.status === "failed");
-      if (!resumable) {
+      if (!resumable && !(interruptedPhase === "saleControl" && product?.productId)) {
         throw new Error("应用在销售控制创建产品壳期间退出，请先核查 VBK 是否已生成草稿，避免重复创建。");
       }
       return this.runLocked(localProductId, interruptedPhase);
@@ -240,13 +240,13 @@ isCancelRequested(localProductId: string): boolean {
     if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
     const approval = approvalForRun(agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
-    if (isVerifiedAutomationComplete(product)) return;
     const fullReplay = approval.replayOfAutomationRunId === product.automation?.id && Boolean(product.automation?.id);
     if (!fullReplay && needsTrafficLineBackfill(product)) {
       await this.runOnePhaseLocked(localProductId, "trafficLine");
       await this.runOnePhaseLocked(localProductId, "preflight");
       return;
     }
+    if (!fullReplay && isVerifiedAutomationComplete(product)) return;
     const retryFrom = fullReplay ? undefined : approvedRecoveryStartPhase(product, failedAutomationResumePhase(product.automation));
     const restartPreWriteGuardFailure = canRestartPreWriteAuthorizationFailure(product.automation, product.productId);
     if (product.automation?.status === "failed" && !retryFrom && !restartPreWriteGuardFailure && !fullReplay) {

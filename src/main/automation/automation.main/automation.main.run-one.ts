@@ -129,9 +129,6 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
       const executePhase = async (phase: string, executeApi: () => Promise<unknown>) => {
         phaseRecord(phase);
         return ctx.runVbkPageExclusive(async () => {
-          if (phase === "presentation" && productData.presentation?.cover?.source === "manualUpload") {
-            ctx.ensureBrowserHasBounds();
-          }
           return executeApiWithPhasePageSync({
             page,
             productId,

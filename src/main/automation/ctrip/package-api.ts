@@ -154,6 +154,7 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
   const packageInfo = {
     ...current,
     name: packageName,
+    needShuttle: "F",
     description,
     vendorResourceCode: basic.supplierProductCode ?? current.vendorResourceCode,
     resourceNameRule: { ...(current.resourceNameRule ?? {}), days },
@@ -177,6 +178,9 @@ export async function ensurePackageApi(page: any, product: any, productId: strin
     ["供应商套餐编号", saved.vendorResourceCode, packageInfo.vendorResourceCode],
     ["套餐天数", saved.resourceNameRule?.days, days],
     ["确认时长", saved.confirmHour, 4],
+    // The official editor uses getOriginData("needShuttle") || "F";
+    // getPackageList omits this optional field when the saved value is false.
+    ["需要接送备注", saved.needShuttle || "F", "F"],
     ["是否含酒店", saved.isHotelResource, packageInfo.isHotelResource],
   ] as const;
   const failed = checks.find(([, actual, expected]) => String(actual ?? "") !== String(expected ?? ""));

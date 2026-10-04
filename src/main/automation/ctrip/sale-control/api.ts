@@ -3,6 +3,9 @@ import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infra
 import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.js";
 import { supportsSmallGroupSettings, type ProductForm } from "../../../../shared/product-form.js";
 import { getProductBaseInfoApi } from "../basic-info/api.js";
+import { fetchCurrentUserInfo } from "../../../infrastructure/current-user.js";
+import { resolveCreateBusinessContext } from "./business-context.js";
+import type { VbkSessionNativeRequest } from "../../../infrastructure/vbk-session-request.js";
 
 const SOA = "https://online.ctrip.com/restapi/soa2/15638";
 const CREATE_PAGE = "https://vbooking.ctrip.com/ivbk/vendor/saleControlMerge?producttype=0&from=vbk";
@@ -21,7 +24,8 @@ function assertAck(payload: unknown, label: string): Json {
   return assertVbkAckSuccess(payload, label) as Json;
 }
 
-async function post(page: VbkSessionRequestBrowser, path: string, body: Json, label: string): Promise<Json> {
+async function post(page: VbkSessionRequestBrowser, path: string, body: Json, label: string,
+  businessContext?: VbkSessionNativeRequest["businessContext"]): Promise<Json> {
   const response = await vbkSessionRequest(page, {
     endpoint: `${SOA}/${path}`,
     browserRequestTimeoutMs: 20_000,
@@ -29,41 +33,24 @@ async function post(page: VbkSessionRequestBrowser, path: string, body: Json, la
     errorLabel: label,
     headers: { cookieorigin: "https://vbooking.ctrip.com" },
     referrer: CREATE_PAGE,
+    referrerPolicy: "no-referrer-when-downgrade",
+    businessContext,
     body: { contentType: "json", head: HEAD, ...body },
   });
   return assertAck(response.payload, label);
 }
 
 export async function loadSaleControlCreateState(page: VbkSessionRequestBrowser): Promise<Json> {
-  const headers = { accept: "text/html,application/xhtml+xml,*/*;q=0.8" };
-  let status: number;
-  let html: string;
-  if (page.vbkSessionGetText) {
-    const response = await page.vbkSessionGetText({
-      endpoint: CREATE_PAGE,
-      errorLabel: "VBK 销售控制前置数据读取",
-      headers,
-    });
-    status = response.status;
-    html = response.text;
-  } else {
-    const response = await page.evaluate(async ({ url, requestHeaders }) => {
-      const result = await fetch(url, {
-        method: "GET",
-        credentials: "include",
-        headers: requestHeaders,
-      });
-      return { status: result.status, text: await result.text() };
-    }, { url: CREATE_PAGE, requestHeaders: headers });
-    status = response.status;
-    html = response.text;
+  const user = await fetchCurrentUserInfo(page);
+  if (!user?.partyId) throw new Error("VBK 销售控制无法确认当前账号供应商 ID");
+  const state = await post(page, "getSaleControlInfo", {
+    id: user.partyId, idType: "providerId",
+  }, "VBK 销售控制前置数据读取");
+  if (Number(state.vendorId) !== user.partyId) throw new Error("VBK 销售控制配置与当前账号供应商不一致");
+  if (!Array.isArray(state.contractDtos) || !Array.isArray(state.regionDistributionChannelDtos)) {
+    throw new Error("VBK 销售控制接口缺少合同或分销区域配置");
   }
-  if (status < 200 || status >= 300) {
-    throw new Error(`VBK 销售控制前置数据读取失败：HTTP ${status}`);
-  }
-  const match = html.match(/window\.__INITIAL_STATE__\s*=\s*(.*)/);
-  if (!match) throw new Error("VBK 销售控制页面缺少 __INITIAL_STATE__");
-  try { return JSON.parse(match[1]); } catch { throw new Error("VBK 销售控制前置数据 JSON 无效"); }
+  return state;
 }
 
 function exactOne(items: Json[], key: string, value: string, label: string): Json {
@@ -89,10 +76,11 @@ function enabledChinaChannels(state: Json): { names: string[]; regions: Json[] }
   const regions = list(state.regionDistributionChannelDtos);
   const china = regions.find((item) => item.region === "CN");
   if (!china) throw new Error("VBK 销售控制缺少 CN 分销区域配置");
+  // 与官方私家团新建页的默认渠道一致，父渠道 merchants 也需要保留。
+  const defaultChannels = new Set(["ctripshop", "bestone", "youtripshop", "bestoneb2b", "tripsystem", "ctrip", "merchants", "routine108"]);
   const names = list(china.distributionChannels)
-    .filter((channel) => list(channel.childChannels).length === 0)
     .map((channel) => String(channel.channelName ?? ""))
-    .filter((name) => name && !["ctripcustomchannel", "tripsystemoversea"].includes(name));
+    .filter((name) => defaultChannels.has(name));
   if (!names.length) throw new Error("VBK 销售控制未返回可用的中国区分销渠道");
   return {
     names,
@@ -117,11 +105,13 @@ function formOf(product: Json): ProductForm {
 export async function configureProductShellApi(
   page: VbkSessionRequestBrowser,
   product: Json,
+  onCreated?: (productId: string) => void | Promise<void>,
 ): Promise<string> {
   const state = await loadSaleControlCreateState(page);
   const vendorId = Number(state.vendorId ?? record(state.userInfo).vendorId);
   if (!Number.isInteger(vendorId) || vendorId <= 0) throw new Error("VBK 销售控制缺少合法 vendorId");
   const form = formOf(product);
+  const businessContext = await resolveCreateBusinessContext(page, vendorId, form);
   const type = record(product.sales).productType === "domesticLong" ? "domesticLong" : "domesticShort";
   const contracts = list(state.contractDtos).filter((contract) =>
     list(contract.categoryDtos).some((item) => item.productCategoryName === PRODUCT_TYPE_LABELS[type])
@@ -150,7 +140,8 @@ export async function configureProductShellApi(
     },
     priceInputType: 1,
     distributionChannels: channels.names,
-    maintainType: "S",
+    // 软件使用携程资源配置；官方私家团的新建请求使用 P。
+    maintainType: "P",
     inputLocale: "zh-CN",
     isExtendToStay: "F",
     regionDistributionChannelDtos: channels.regions,
@@ -163,12 +154,13 @@ export async function configureProductShellApi(
     isPerformanceProduct: "F",
   };
   const saved = await post(page, "saveSaleControlInfo", {
-    id: vendorId,
+    id: String(vendorId),
     idType: "providerId",
     saleControlInfoDto: dto,
-  }, "VBK 销售控制产品壳创建");
+  }, "VBK 销售控制产品壳创建", businessContext);
   const productId = String(saved.productId ?? "");
   if (!/^\d+$/.test(productId) || Number(productId) <= 0) throw new Error("VBK 销售控制创建未返回合法产品 ID");
+  await onCreated?.(productId);
   const readback = await getProductBaseInfoApi(page, productId);
   const sale = record(readback.saleControlInfo);
   if (Number(sale.productCategoryID ?? sale.productCategoryId) !== dto.productCategoryId
@@ -181,4 +173,26 @@ export async function configureProductShellApi(
     throw new Error("VBK 拼小团设置创建后远端回读不一致");
   }
   return productId;
+}
+
+/** Read-only recovery after the shell ID was persisted but creation readback was interrupted. */
+export async function verifyExistingProductShellApi(page: VbkSessionRequestBrowser, product: Json, productId: string): Promise<void> {
+  const state = await loadSaleControlCreateState(page);
+  const form = formOf(product);
+  const type = record(product.sales).productType === "domesticLong" ? "domesticLong" : "domesticShort";
+  const readback = await getProductBaseInfoApi(page, productId);
+  const sale = record(readback.saleControlInfo);
+  const matches = list(state.contractDtos).filter(contract =>
+    list(contract.categoryDtos).some(item => item.productCategoryName === PRODUCT_TYPE_LABELS[type]
+      && Number(item.productCategoryId) === Number(sale.productCategoryID ?? sale.productCategoryId))
+    && list(contract.patternDtos).some(item => item.productPatternName === PRODUCT_FORM_LABELS[form]
+      && Number(item.productPatternId) === Number(sale.productPatternID ?? sale.productPatternId)));
+  if (matches.length !== 1 || !(Number(sale.brandId) > 0)) {
+    throw new Error("已有产品壳销售控制回读不一致，不能继续录入。");
+  }
+  const maxGroupSize = Math.min(Math.max(Number(record(product.sales).maxGroupSize) || 8, 1), 9);
+  if (supportsSmallGroupSettings(form)
+    && (sale.joinPurchasePlaza !== "T" || Number(sale.maxSmallGroupSize) !== maxGroupSize)) {
+    throw new Error("已有产品壳拼小团设置回读不一致，不能继续录入。");
+  }
 }

@@ -154,7 +154,8 @@ export async function saveStructuredProductClauses(page, productId, options = {}
   const adultTicketInclusionText = String(options?.adultTicketInclusionText ?? "").trim();
   const head = CLAUSE_HEAD;
   const requiredIds = REQUIRED_CLAUSE_IDS;
-  const defaultSelectedClauseIds = DEFAULT_SELECTED_CLAUSE_IDS;
+  const childBookable = options?.childBookable !== false;
+  const defaultSelectedClauseIds = { ...DEFAULT_SELECTED_CLAUSE_IDS, 1: DEFAULT_SELECTED_CLAUSE_IDS[1].filter(id => childBookable || ![10091, 10087].includes(id)) };
   const lodgingSelfPayNote = LODGING_SELF_PAY_NOTE;
   const adultTicketRemarksComponent = ADULT_TICKET_REMARKS_COMPONENT;
   const childTicketRemarksComponent = CHILD_TICKET_REMARKS_COMPONENT;
@@ -207,13 +208,15 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.localExclusiveVehicle);
       items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.itineraryHotelIncluded);
       items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.hotelTwoPerRoom);
-      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
+      if (childBookable) items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childNoBed);
     }
     if (tabEnum === 1 && adultTicketInclusionText) {
       items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.adultTicketIncluded);
       items = helpers.setValue(items, requiredIds.adultTicketIncluded, adultTicketRemarksComponent, adultTicketInclusionText);
-      items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
-      items = helpers.setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
+      if (childBookable) {
+        items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.childTicketIncluded);
+        items = helpers.setValue(items, requiredIds.childTicketIncluded, childTicketRemarksComponent, adultTicketInclusionText);
+      }
     }
     if (tabEnum === 2 && !isFreeTravel) {
       items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.lodgingIncluded);
@@ -300,7 +303,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
       const persistedChildRemarks = (persistedChildTicket?.elementDtos ?? []).find(
         (element) => element.componentCode === childTicketRemarksComponent,
       );
-      if (persistedChildRemarks?.value !== adultTicketInclusionText) {
+      if (childBookable && persistedChildRemarks?.value !== adultTicketInclusionText) {
         throw new Error("条款页签 1 保存后回读的儿童门票景点文本不一致");
       }
     }

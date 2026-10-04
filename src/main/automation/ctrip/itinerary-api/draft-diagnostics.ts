@@ -24,6 +24,8 @@ export interface ItineraryVersionDiagnostic {
   pickup: DraftWriteProjection["pickup"] | null;
   hotelGrades: DraftWriteProjection["hotelGrades"];
   poi85862: ItineraryPoiDiagnostic | null;
+  /** Optional transport-only projection for child-version diagnosis. */
+  transportTypes?: Array<{ day: number; keys: number[] }>;
 }
 
 export interface ItineraryDraftDiagnostic {
@@ -94,7 +96,7 @@ function poiDiagnostic(tourInfo: Record<string, unknown>): ItineraryPoiDiagnosti
 }
 
 /** Read all explicitly linked itinerary versions without inferring server status enums. */
-export async function readItineraryDraftDiagnostic(page: ApiPage, productId: string): Promise<ItineraryDraftDiagnostic> {
+export async function readItineraryDraftDiagnostic(page: ApiPage, productId: string, options: { transportTypes?: boolean } = {}): Promise<ItineraryDraftDiagnostic> {
   const { payload } = await postSoa(page, GET_TOUR_INFO_LIST_URL, {
     contentType: "json", head: SOHEAD, productId: Number(productId) || productId,
   }, "VBK 行程草稿诊断关联读取");
@@ -111,12 +113,18 @@ export async function readItineraryDraftDiagnostic(page: ApiPage, productId: str
     // Reuse the established protocol request shape, including its fixed departureDate for existing tour detail reads.
     const { tourInfo: detail } = await fetchTourDailyDetail(page, id);
     const writeProjection = detail ? projectDraftWrite(detail) : null;
+    const dailyDescriptions = Array.isArray(detail?.tourDailyDescriptions) ? detail.tourDailyDescriptions : [];
     versions.push({
       version, tourInfoId: rawId, linkedTourInfoIds, statuses,
       detail: detail ? "available" : "notAvailable",
       pickup: writeProjection?.pickup ?? null,
       hotelGrades: writeProjection?.hotelGrades ?? [],
       poi85862: detail ? poiDiagnostic(detail) : null,
+      ...(options.transportTypes ? { transportTypes: dailyDescriptions.map((day: any, index: number) => ({
+        day: index + 1,
+        keys: (Array.isArray(day.tourDailyInfos) ? day.tourDailyInfos : []).map((node: any) => Number(node.activeType?.key))
+          .filter((key: number) => [2, 8, 14, 24, 25].includes(key)),
+      })) } : {}),
     });
   }
   return { productId, versions };

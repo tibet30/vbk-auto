@@ -13,7 +13,7 @@ import type { AutomationRunContext } from "./automation.main.context.js";
 import { writeAutomationProduct } from "./automation.main.persist.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
 
-type ConfigureProductShell = (page: any, product: ReturnType<typeof parseProduct>) => Promise<string>;
+type ConfigureProductShell = (page: any, product: ReturnType<typeof parseProduct>, onCreated?: (productId: string) => void) => Promise<string>;
 
 export async function runSaleControlPhase(
   ctx: AutomationRunContext,
@@ -68,10 +68,13 @@ export async function runSaleControlPhase(
         if (latest?.productId) {
           throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
         }
-        const productId = await configureShell(page, productData);
+        const productId = await configureShell(page, productData, createdId => {
+          ctx.db.setProductLifecycle(localProductId, { productId: createdId });
+          log(`携程已返回产品壳 ID：${createdId}，正在核验销售控制。`);
+        });
         if (!productId) throw new Error("销售控制已完成，但携程未返回产品 ID。");
         const afterCreate = ctx.db.getProduct(localProductId);
-        if (afterCreate?.productId) {
+        if (afterCreate?.productId && String(afterCreate.productId) !== String(productId)) {
           throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
         }
         ctx.db.setProductLifecycle(localProductId, { productId: String(productId) });

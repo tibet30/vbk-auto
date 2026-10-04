@@ -1,6 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareManualCoverUpload } from "../../src/main/automation/ctrip/presentation/manual-cover-upload.js";
+import { prepareManualCoverUpload, uploadManualCoverViaSupplierPage } from "../../src/main/automation/ctrip/presentation/manual-cover-upload.js";
+import { EMPTY_VBK_SESSION_CONTEXT } from "../../src/main/infrastructure/vbk-session-request.js";
+
+test("复用远端已上传封面与拒绝非法新图片均不获取页面", async () => {
+  let existing = true;
+  let acquired = 0;
+  const client = {
+    nativeOnly: true,
+    async evaluate() { throw new Error("不应执行页面脚本"); },
+    async vbkSessionFetch() {
+      return { status: 200, durationMs: 1, ctx: { ...EMPTY_VBK_SESSION_CONTEXT },
+        payload: { productImages: existing ? [{ imageInfo: {
+          imageId: 123, fileName: "cover.png", accompanyTourInfo: { imageTypeId: 2 },
+        } }] : [] } };
+    },
+    async acquireInteractivePage() { acquired++; throw new Error("抵达新图片上传边界"); },
+  };
+  const file = { name: "cover.png", mimeType: "image/png" as const, buffer: Buffer.from("image") };
+  assert.deepEqual(await uploadManualCoverViaSupplierPage(client, 79232466, file, "泸州"), { imageId: 123, reused: true });
+  assert.equal(acquired, 0);
+  existing = false;
+  await assert.rejects(uploadManualCoverViaSupplierPage(client, 79232466, file, "泸州"), /JPEG 或 PNG/);
+  assert.equal(acquired, 0);
+});
 
 function supplierPage(failures: Error[], license = true) {
   const events: string[] = [];

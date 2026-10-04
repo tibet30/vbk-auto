@@ -42,6 +42,7 @@ export async function fillAndSaveTerms(page: unknown, product: any, productId?: 
     : [];
   return saveStructuredProductClauses(page, productId, {
     productForm: product.sales?.productForm,
+    childBookable: Number(product.commercial?.pricing?.child) !== 0,
     adultTicketInclusionText: buildAdultTicketInclusionText(enrichedItinerary),
   });
 }

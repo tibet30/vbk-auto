@@ -1,3 +1,4 @@
+import { HOTEL_SELECTION_NOTE } from "../../src/shared/itinerary-service-copy.js";
 /**
  * itinerary-api.test-helpers.ts：行程 soa2 接口测试的共享基础设施。
  *
@@ -201,6 +202,13 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
             useCar: { key: "1", name: "专车" },
           }],
         }] : []),
+        // 首日不排早餐；午、晚餐固定自理；尾日不排晚餐。
+        ...(!isFirst ? [{
+          activeType: { key: 0, name: "餐饮" },
+          description: "是否含餐，以酒店房型为准。",
+          tourDailyDinner: { dinnerType: { key: "B" }, includeAdult: { key: breakfastIncludeAdultKey } },
+        }] : []),
+        { activeType: { key: 8, name: "交通" }, takeoffTime: { key: "D", name: "全天" }, description: `${opts.title ? opts.title(i) : (i === 0 ? "第1天" : "第2天")}，全天用车` },
         // 景点
         ...(!opts.omitAttraction?.(i) ? [{
           activeType: { key: 3, name: "景点" },
@@ -210,19 +218,13 @@ export function makeReadbackDays(opts: ReadbackDayOverrides = {}) {
             suffixName: { key: 13, name: "含成人儿童首道门票" },
           })),
         }] : []),
-        // 首日不排早餐；午、晚餐固定自理；尾日不排晚餐。
-        ...(!isFirst ? [{
-          activeType: { key: 0, name: "餐饮" },
-          description: "是否含餐，以酒店房型为准。",
-          tourDailyDinner: { dinnerType: { key: "B" }, includeAdult: { key: breakfastIncludeAdultKey } },
-        }] : []),
         { activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "L" }, includeAdult: { key: "E" } } },
         ...(!isLast ? [{ activeType: { key: 0, name: "餐饮" }, tourDailyDinner: { dinnerType: { key: "S" }, includeAdult: { key: "E" } } }] : []),
         // 酒店（仅当 hotelName 非空时）
         ...(hotelName ? [{
           activeType: { key: 1, name: "酒店" },
           useSegmentConfig: true,
-          description: `${hotelName}（当地4钻酒店）`,
+          description: `${hotelName}（当地4钻酒店）\n${HOTEL_SELECTION_NOTE}`,
           tourDailyHotels: [{ hotel: { hotelName, grade: { key: -4, name: "当地4钻酒店" } } }],
         }] : []),
         // 其他 + 服务时间

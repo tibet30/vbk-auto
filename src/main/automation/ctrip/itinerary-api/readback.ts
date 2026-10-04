@@ -20,6 +20,7 @@
 import type { VbkDailyUseCar } from "../../../../shared/product-form.js";
 import type { ReadbackExpectations } from "./itinerary-transform.js";
 import { checkReadbackActivities, checkReadbackTimeline } from "./readback-activities.js";
+import { checkServiceCards } from "./readback-service-cards.js";
 import { fetchTourDailyDetail } from "./steps.js";
 import type { ApiPage } from "./transport.js";
 
@@ -352,6 +353,7 @@ export async function verifyItineraryReadback(
     totalSpots += checkPois(dayLabel, exp.pois, infos);
     totalMeals += checkMeals(dayLabel, exp.meals, infos);
     totalHotels += checkHotels(dayLabel, exp.hotels, infos);
+    checkServiceCards(dayLabel, exp, infos);
     checkReadbackActivities(dayLabel, exp.activities, infos);
     checkReadbackTimeline(dayLabel, exp.timeline, infos);
 

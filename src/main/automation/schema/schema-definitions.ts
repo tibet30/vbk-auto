@@ -133,6 +133,7 @@ const ctripLibraryCoverSchema = z.object({
   poiId: z.number().int().positive().optional(),
   poiName: z.string().min(1).optional(),
   selectedAt: z.string().min(1).optional(),
+  missingPoiImages: z.array(z.string().min(1)).optional(),
   alternates: z.array(z.object({
     imageId: z.number().int().positive(),
     imageUrl: z.string().min(1),

@@ -20,6 +20,7 @@
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
 import { toVbkDailyUseCar } from "../../../../shared/product-form.js";
+import { HOTEL_SELECTION_NOTE, dailyTransportDescription } from "../../../../shared/itinerary-service-copy.js";
 import { itineraryAttractions, effectiveItinerarySpotKind } from "../../../../shared/itinerary-activity-kind.js";
 import { effectiveTimedSpots, dayOtherActivities, buildAttractionInfo, dayTimeline, otherDescriptionForActivity } from "./itinerary-timeline.js";
 import type { ProductItineraryDay, ProductOperations, VbkTourDailyDescription, ResolvedStations, ReadbackDayExpectation, ReadbackExpectations } from "./itinerary-types.js";
@@ -27,6 +28,7 @@ export type { ProductItineraryDay, ProductOperations, VbkTourDailyDescription, R
 import {
   attractionTicketSuffix,
   buildDropoffInfo,
+  buildDailyTransportInfo,
   buildHotelInfo,
   buildMealInfo,
   buildFreeInfo,
@@ -68,7 +70,8 @@ export function buildReadbackExpectations(args: {
         description: mealDescription(day, key, mealIndex),
         mealsIncluded: key === "B" && operations.mealsIncluded === true,
       })),
-      hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: hotelTierPresentation(operations.hotelTier).displayName ?? undefined })),
+      hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: hotelTierPresentation(operations.hotelTier).displayName ?? undefined, selectionNote: HOTEL_SELECTION_NOTE })),
+      transport: operations.transport === "charter" ? { description: dailyTransportDescription(day.title) } : undefined,
       useCar: toVbkDailyUseCar(operations.transport),
       activities: activities.map((activity) => ({
         kind: activity.type === "free" ? "free" : "other",
@@ -132,6 +135,8 @@ export function buildDayDescription(args: {
       mealsIncluded: operations.mealsIncluded === true,
     }));
   }
+
+  if (operations.transport === "charter") infos.push(buildDailyTransportInfo(day.title, sort++));
 
   // 3) 景点节点（可由用户明确的“其他”活动替代）。景点按上午/下午拆开，
   // 让餐食自然落在两段游览之间，而不是把全天景点堆在三餐之前。

@@ -80,6 +80,7 @@ function assertCheckedDraftPayload(expected: DraftWriteProjection, checkedDraft:
   const actual = projectDraftWrite(checkedDraft);
   const pickupChanged = !sameField(expected.pickup, actual.pickup);
   const bridgeChanged = !sameField(expected.bridge85862, actual.bridge85862);
+  const transportChanged = !sameField(expected.transportNodes, actual.transportNodes);
   const hotelChanged = expected.hotelNodes.length !== actual.hotelNodes.length || expected.hotelNodes.some((expectedNode, nodeIndex) => {
     const actualNode = actual.hotelNodes[nodeIndex];
     if (!actualNode || expectedNode.slots.length !== actualNode.slots.length) return true;
@@ -88,11 +89,11 @@ function assertCheckedDraftPayload(expected: DraftWriteProjection, checkedDraft:
       || actualNode.slots.some((slot) => /\/-\d+\b/.test(slot.name ?? ""))
       || /\/-\d+\b/.test(actualNode.description ?? "");
   });
-  if (pickupChanged || hotelChanged || bridgeChanged) {
+  if (pickupChanged || hotelChanged || bridgeChanged || transportChanged) {
     const airport = `集合机场实际=${actual.pickup.code ?? ""}/${actual.pickup.name ?? ""}，期望=${expected.pickup.code ?? ""}/${expected.pickup.name ?? ""}`;
     const hotels = `酒店节点实际=${actual.hotelNodes.length}/${actual.hotelNodes.map((node) => node.slots.length).join(",")}，期望=${expected.hotelNodes.length}/${expected.hotelNodes.map((node) => node.slots.length).join(",")}`;
     const bridge = `广济桥实际=${actual.bridge85862?.key ?? ""}/${actual.bridge85862?.name ?? ""}，期望=${expected.bridge85862?.key ?? ""}/${expected.bridge85862?.name ?? ""}`;
-    throw new Error(`VBK 草稿校验响应改写白名单字段：${airport}；${hotels}；${bridge}；未发送详情或关联保存。`);
+    throw new Error(`VBK 草稿校验响应改写白名单字段：${airport}；${hotels}；${bridge}；交通卡片${transportChanged ? "被改写或丢失" : "一致"}；未发送详情或关联保存。`);
   }
 }
 

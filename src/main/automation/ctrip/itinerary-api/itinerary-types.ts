@@ -97,7 +97,8 @@ export interface ReadbackDayExpectation {
     mealsIncluded: boolean;
   }>;
   /** 酒店节点（无酒店时为空数组）。 */
-  hotels: Array<{ hotelName: string; hotelTier?: string }>;
+  hotels: Array<{ hotelName: string; hotelTier?: string; selectionNote?: string }>;
+  transport?: { description: string };
   /** 每天标题下的“当天用车”。 */
   useCar: VbkDailyUseCar;
   /** 非景点卡片逐项回读，free/other 的模块类型与顺序均不可混用。 */
@@ -116,4 +117,3 @@ export interface ReadbackExpectations {
   /** 是否有酒店业务（业务要求 → 每天回读必须有酒店节点）。 */
   requireHotels: boolean;
 }
-

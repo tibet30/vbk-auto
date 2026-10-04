@@ -57,7 +57,7 @@ test("有真实 POI 且无未匹配用户活动时，不追加其他节点", () 
     { key: "B", name: "包车" },
   ]);
   // 首日：接机 + 上午景点 + 午餐 + 晚餐 + 酒店 = 5（首日不排早餐）
-  assert.equal(out[0].tourDailyInfos.length, 5, "首日必须有接机节点，且不应出现早餐");
+  assert.equal(out[0].tourDailyInfos.length, 6, "首日必须有接机和全天交通节点，且不应出现早餐");
   assert.equal(out[0].tourDailyInfos[0].activeType?.key, 25, "首日首节点必须是集合（接机/站）");
   assert.equal(out[0].tourDailyInfos[0].activeType?.name, "集合");
   // 末日
@@ -130,9 +130,9 @@ test("餐饮按首尾日与时段排列：首日无早餐，尾日无晚餐，�
   const keys = (day: typeof out[number]) => day.tourDailyInfos.map((info) =>
     info.activeType?.key === 0 ? info.tourDailyDinner?.dinnerType?.key : info.activeType?.key,
   );
-  assert.deepEqual(keys(out[0]), [25, 3, "L", 3, "S", 1]);
-  assert.deepEqual(keys(out[1]), ["B", 3, "L", "S", 1]);
-  assert.deepEqual(keys(out[2]), ["B", 3, "L", 26]);
+  assert.deepEqual(keys(out[0]), [25, 8, 3, "L", 3, "S", 1]);
+  assert.deepEqual(keys(out[1]), ["B", 8, 3, "L", "S", 1]);
+  assert.deepEqual(keys(out[2]), ["B", 8, 3, "L", 26]);
   const attractions = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 3);
   assert.deepEqual(attractions.map((info) => info.takeoffTime?.name), ["上午", "下午"]);
 });

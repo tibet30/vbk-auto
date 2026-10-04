@@ -320,6 +320,11 @@ export async function saveProductTourInfoStep(
       tourDaily: tourDailyJson,
     },
     "VBK 行程关联保存",
+    {
+      referrer: `https://vbooking.ctrip.com/ivbk/vendor/tourdays?productid=${encodeURIComponent(String(tourInfo.productId))}&from=vbk`,
+      referrerPolicy: "no-referrer-when-downgrade",
+      headers: { "x-ctx-locale": "zh-CN", "x-input-locale": "zh-CN" },
+    },
   );
   if (!payload) {
     throw new Error("VBK 行程关联保存响应空（Ack=Success 但 payload 为空）");

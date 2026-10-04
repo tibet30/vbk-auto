@@ -1,3 +1,4 @@
+import { HOTEL_SELECTION_NOTE } from "../../src/shared/itinerary-service-copy.js";
 // itinerary-api 的字段级回读契约：
 //   - buildReadbackExpectations 把 product.itinerary + operations + stations
 //     派生为完整期望（title / POI / 三餐 / 酒店 / 其他 / 服务时间 / 接送站）；
@@ -127,7 +128,7 @@ test("字段级回读：平台酒店模式允许 VBK 将酒店槽位规范化为
       for (const info of d.tourDailyInfos) {
         if (info.activeType?.key === 1) {
           info.useSegmentConfig = true;
-          info.description = "和玺酒店（当地4钻酒店/-4）";
+          info.description = `和玺酒店（当地4钻酒店/-4）\n${HOTEL_SELECTION_NOTE}`;
           const hotels = info.tourDailyHotels as Array<{ hotel: { hotelName: string } }>;
           for (const h of hotels) h.hotel.hotelName = "自选酒店";
         }
@@ -154,7 +155,7 @@ test("字段级回读：酒店 hotelTier 不一致 → 失败", async () => {
       for (const d of days) {
         for (const info of d.tourDailyInfos) {
           if (info.activeType?.key === 1) {
-            info.description = "";
+            info.description = HOTEL_SELECTION_NOTE;
             const hotels = info.tourDailyHotels as Array<{ hotel: { grade: { name: string } } }>;
             for (const h of hotels) h.hotel.grade.name = "";
           }
@@ -370,7 +371,7 @@ test("buildReadbackExpectations：title/POI/餐饮/酒店/其他/服务时间/�
   assert.deepEqual(exp.days[1].meals.map((m) => m.key), ["B", "L"]);
   assert.equal(exp.days[1].meals[0].description, "是否含餐，以酒店房型为准。");
   assert.equal(exp.days[0].meals.every((m) => m.mealsIncluded === false), true);
-  assert.deepEqual(exp.days[0].hotels, [{ hotelName: "和玺酒店", hotelTier: "当地4钻酒店" }]);
+  assert.deepEqual(exp.days[0].hotels, [{ hotelName: "和玺酒店", hotelTier: "当地4钻酒店", selectionNote: HOTEL_SELECTION_NOTE }]);
   assert.equal(exp.days[0].other, undefined);
   assert.deepEqual(exp.days[0].serviceTime, { startTime: "08:00", endTime: "20:00" });
   assert.deepEqual(exp.pickup.airport, { code: "LJG", name: "三义机场" });

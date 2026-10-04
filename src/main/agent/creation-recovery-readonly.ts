@@ -20,8 +20,9 @@ type RecoveryScope = "all" | "parent-only";
 export interface CreationVariantReadback {
   /** The exact Ctrip representation used for this read; recovery accepts draft only. */
   variant: CreationVariant;
-  /** Must be set by the dedicated draft reader, never inferred from a formal/audit response. */
+  /** Set only by the dedicated reader after explicit draft or unsubmitted-main guards. */
   unsubmittedDraftVerified: boolean;
+  draftSource?: "independent" | "unsubmitted-main";
   ids: Partial<Record<Exclude<CreationVariant, "unknown">, string>>;
   poi85862?: { suffixName?: string; description?: string };
 }
@@ -320,6 +321,7 @@ function projectCreationVariant(value: CreationVariantReadback) {
   return {
     variant: value.variant,
     unsubmittedDraftVerified: value.unsubmittedDraftVerified,
+    ...(value.draftSource ? { draftSource: value.draftSource } : {}),
     ids: value.ids,
     ...(value.poi85862 ? { poi85862: value.poi85862 } : {}),
   };

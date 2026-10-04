@@ -194,7 +194,8 @@ export async function verifyTermsReadback(
   const expectedTicketText = buildAdultTicketInclusionText(enrichedItinerary);
   const adultText = clauseText(firstTabItems, 13, "landticketremarks");
   const childText = clauseText(firstTabItems, 10087, "landticket2");
-  if (adultText !== expectedTicketText || childText !== expectedTicketText) {
+  const childBookable = Number(productRecord(product).commercial?.pricing?.child) !== 0;
+  if (adultText !== expectedTicketText || (childBookable && childText !== expectedTicketText)) {
     throw new Error(`条款预检门票文本不一致：成人=${adultText || "无"}，儿童=${childText || "无"}，期望=${expectedTicketText || "无"}`);
   }
   return { tabs: packages, adultTicketInclusionText: expectedTicketText };

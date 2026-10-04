@@ -242,7 +242,7 @@ test("默认条款集合使用已保存的平台 ID，覆盖门票成人/儿童�
   assert.doesNotMatch(source, /FORCE_CHECK|resolveClauseIdsByText|ensureClausesByText/);
 });
 
-function noPageClauseClient(tamperReadback = false) {
+function noPageClauseClient(tamperReadback = false, childBookable = true) {
   const saved = new Map<number, any[]>();
   const order: number[] = [];
   const client = {
@@ -256,7 +256,7 @@ function noPageClauseClient(tamperReadback = false) {
       } else if (endpoint.endsWith("getClausePackage")) {
         const persisted = saved.get(tab);
         const ids = DEFAULT_SELECTED_CLAUSE_IDS[tab as keyof typeof DEFAULT_SELECTED_CLAUSE_IDS];
-        data.clauseTypeDtos = [{ clauseTypeId: tab, clauseItemDtos: ids.map(id => {
+        data.clauseTypeDtos = [{ clauseTypeId: tab, clauseItemDtos: ids.filter(id => childBookable || ![10091, 10087].includes(id)).map(id => {
           const item = persisted?.find(item => item.clauseItemId === id);
           const component = id === 13 ? "landticketremarks" : id === 10087 ? "landticket2" : id === 1079 ? "otherfeewithout1" : undefined;
           const value = item?.elementDtos.find((element: any) => element.componentCode === component)?.value ?? "";
@@ -288,4 +288,14 @@ test("无页面条款保存仍会拒绝远端回读文本不一致", async () =>
   const { client, order } = noPageClauseClient(true);
   await assert.rejects(saveStructuredProductClauses(client, "79232466", { adultTicketInclusionText: "晋祠" }), /成人门票景点文本不一致/);
   assert.deepEqual(order, [2, 1]);
+});
+
+
+test("不售儿童时平台省略儿童条款，仍保存成人条款并独立回读", async () => {
+  const { client, saved } = noPageClauseClient(false, false);
+  const result = await saveStructuredProductClauses(client, "79232466", { childBookable: false, adultTicketInclusionText: "晋祠" });
+  assert.equal(result.savedTabs.length, 4);
+  assert.equal(saved.get(1)?.find(item => item.clauseItemId === 13)?.elementDtos[0].value, "晋祠");
+  assert.ok(!saved.get(1)?.some(item => [10091, 10087].includes(item.clauseItemId)));
+  await assert.rejects(saveStructuredProductClauses(client, "79232466", { childBookable: true }), /缺少必选条款 10091/);
 });

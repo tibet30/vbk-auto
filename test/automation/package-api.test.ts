@@ -55,7 +55,7 @@ test("ensurePackageApi 创建首套餐后轮询到物化资源再保存正式套
           name: "日喀则2天1晚私家团·当地4钻",
           vendorResourceCode: "VBK-CODE-001",
           confirmHour: 4,
-          isHotelResource: "F",
+          isHotelResource: "F", // The live API omits needShuttle when false.
           priceInputType: 1,
           resourceNameRule: { days: 2 },
           singleResourceId: 11,
@@ -92,6 +92,19 @@ test("ensurePackageApi 创建首套餐后轮询到物化资源再保存正式套
   assert.equal(createRequest.body.packageInfo.isHotelResource, "F");
 });
 
+test("套餐回读明确开启接送备注时仍阻断，不把真值归一成否", async () => {
+  const product = { basicInfo: { days: 2, supplierProductCode: "CODE" }, commercial: { packageName: "测试套餐" }, itinerary: [{}, {}] };
+  const page = { nativeOnly: true, evaluate: async () => { throw Error("不应打开页面"); },
+    vbkSessionFetch: async (request: any) => ({ status: 200, durationMs: 1, ctx: {} as any,
+      payload: { ResponseStatus: { Ack: "Success" }, ...(request.endpoint.endsWith("getPackageList") ? {
+        itemList: [{ name: "测试套餐", singleResourceId: 10, vendorResourceCode: "CODE", confirmHour: 4,
+          resourceNameRule: { days: 2 }, isHotelResource: "F", needShuttle: "T" }],
+      } : {}) },
+    }),
+  };
+  await assert.rejects(ensurePackageApi(page, product, "42"), /需要接送备注=T/);
+});
+
 test("ensurePackageApi 行程使用携程平台酒店时套餐是否含酒店为否", async () => {
   const requests: Array<{ path: string; body: any }> = [];
   const product = {
@@ -122,7 +135,7 @@ test("ensurePackageApi 行程使用携程平台酒店时套餐是否含酒店为
         ResponseStatus: { Ack: "Success", Errors: [] },
         itemList: [{
           name: "日喀则2天1晚私家团", vendorResourceCode: "VBK-CODE-002", confirmHour: 4,
-          isHotelResource: "F", priceInputType: 1, resourceNameRule: { days: 2 },
+          isHotelResource: "F", needShuttle: "F", priceInputType: 1, resourceNameRule: { days: 2 },
           singleResourceId: 11, optionalResourceId: 22,
         }],
       });

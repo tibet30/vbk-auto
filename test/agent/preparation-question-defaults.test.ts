@@ -8,7 +8,7 @@ function single(id: string, label: string, options: Array<[string, string]>): Ag
 }
 
 test("historical preparation control questions resolve without operator interaction", () => {
-  const cases: Array<[AgentQuestion, string | string[]]> = [
+  const cases: Array<[AgentQuestion, string | string[] | undefined]> = [
     [single("poi_pending", "日喀则非物质遗产中心 VBK 未匹配到本地可用候选，如何处理？", [
       ["keep_pending", "保持原名、原位、POI 留空，由你后续人工录入"], ["drop_spot", "移除"],
     ]), "keep_pending"],
@@ -29,7 +29,7 @@ test("historical preparation control questions resolve without operator interact
     ]), "drop"],
     [single("removeOrKeepUnknownSpots", "第2天行程中混入的两条非景点文本如何处理？", [
       ["remove", "从行程中移除这两条，只保留非遗中心/博物馆二选一 + 扎什伦布寺"], ["keep_as_note", "保留为第2天 evening 时段的两条文字"],
-    ]), "remove"],
+    ]), undefined],
     [single("tashiRename", "行程里写错了名字“扎实伦布寺”怎么办？", [
       ["rename_to_tashi", "规范为官方名“扎什伦布寺”（POI ID 76348）"], ["keep_typo", "保留错写原名"],
     ]), "rename_to_tashi"],
@@ -68,6 +68,13 @@ test("a substantive preference with no safe inference remains visible", () => {
     kind: "text",
     required: true,
   };
+  assert.equal(automaticPreparationAnswer(question), undefined);
+});
+
+test("明确命名的二选一景点不能被默认删除", () => {
+  const question = single("named-or", "二选一原景点混入文本如何处理？", [
+    ["remove", "删除非遗中心参观"], ["keep", "保留原景点，等待运营手动配置"],
+  ]);
   assert.equal(automaticPreparationAnswer(question), undefined);
 });
 

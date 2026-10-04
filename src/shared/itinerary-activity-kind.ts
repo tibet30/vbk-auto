@@ -14,9 +14,8 @@ export type ItinerarySpotLike = {
 export const RETAINED_TEXT_ONLY_POI_REMARK = "已保留原景点和原行程位置，仅以文字录入";
 export const RETAINED_TEXT_ONLY_DETAIL_PATTERN = /已保留原景点和原行程位置/u;
 
-/** Only an explicit retained-text marker changes how an unresolved spot is written. */
+/** Only an explicit activity kind can make a non-POI spot complete. */
 export function effectiveItinerarySpotKind(spot: ItinerarySpotLike): ItineraryActivityKind {
-  if (!hasCompletePoi(spot) && text(spot.remark).includes(RETAINED_TEXT_ONLY_POI_REMARK)) return "other";
   return itinerarySpotKind(spot);
 }
 

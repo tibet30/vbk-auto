@@ -119,7 +119,7 @@ function rulesForStage(stage: PreparationMajorStage, stayOnStage: string, itiner
     return [
       ...common,
       itineraryModeRule(itineraryMode),
-      "普通未匹配 POI 必须保留原地点和位置，不得替换。遇到景点二选一/多选一时，先把每个原始名称连续写入同一天、同一时段并标记 relation=\"or\"，再统一调用 resolve_itinerary_pois；只要至少一个原始选项可用，系统会自动保留可录入选项并记录未命中项，不要 ask_user。全部原始选项均未命中时才保留原名原位并进入人工确认。",
+      "普通未匹配 POI 必须保留原地点和位置，不得替换。遇到景点二选一/多选一时，先把每个原始名称连续写入同一天、同一时段并标记 relation=\"or\"，再统一调用 resolve_itinerary_pois；每个运营明确命名的原始选项都必须独立核验。任一选项未命中时均保留原名原位并进入聚合人工确认，只有运营手动删除才可移除，不能 ask_user 选择删除。",
       "一个可用候选的官方名与原景点名不同，也应调用 select_itinerary_poi(day, spotName, poiId) 保存该候选，绝不使用 patch_product 直接填写 poiId。不要为补 POI 重生成 itinerary。",
       "禁止通过 commercial、封面或用车动作绕过当前行程阶段。",
     ];

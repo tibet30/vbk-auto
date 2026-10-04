@@ -14,6 +14,7 @@ import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { flushProductAiUsage } from "../ai/flush-product-ai-usage.js";
 import { recordAgentUsage } from "../agent/integration-usage.js";
 import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
+import { clearReappearedTrustedOperatorItineraryRemovals, sameTrustedOperatorItineraryRemovals } from "../../shared/trusted-operator-itinerary-removals.js";
 import type { MainIpcContext } from "./context.js";
 
 async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
@@ -36,6 +37,12 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     if (!product) throw productNotFound(id);
     let next: Record<string, unknown>;
     try { next = JSON.parse(json); } catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
+    if (!sameTrustedOperatorItineraryRemovals(product.product, next)) {
+      throw new Error("运营删除凭证只能通过每日行程的手动删除操作生成或保留。");
+    }
+    // A visible, exact slot re-add is an operator change of mind. Revoke only
+    // that receipt before validation; raw JSON can never create or alter one.
+    clearReappearedTrustedOperatorItineraryRemovals(next);
     parseProduct(next);
     const saved = productMutations.replace(id, next, {
       status: "review",

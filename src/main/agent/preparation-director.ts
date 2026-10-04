@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { evaluatePreparationCompletion } from "../planning/preparation-completion.js";
 
 export interface PreparationDirectedAction {
-  node: "itineraryDraft" | "poiResolution" | "hotelResolution";
-  name: "generate_product_module" | "resolve_itinerary_pois" | "resolve_itinerary_hotels";
+  node: "itineraryDraft" | "poiResolution" | "hotelResolution" | "presentation";
+  name: "generate_product_module" | "resolve_itinerary_pois" | "resolve_itinerary_hotels" | "ensure_presentation_recommendations";
   arguments: Record<string, unknown>;
   progressKey: string;
 }
@@ -25,7 +25,7 @@ export function decidePreparationAction(
     progressKey: progressKey({
       node: action.node,
       locked: lockedItineraryContext(product.product),
-      missing: evaluation.missing.filter(isItineraryRelevantGap).sort(),
+      missing: evaluation.missing.filter(isPreparationRelevantGap).sort(),
       itinerary: itineraryProgress(product.product),
       research: product.researchTasks
         .filter((task) => task.state !== "confirmed" && task.state !== "resolved")
@@ -45,6 +45,9 @@ function actionForNode(node: string): Omit<PreparationDirectedAction, "progressK
   }
   if (node === "hotelResolution") {
     return { node, name: "resolve_itinerary_hotels", arguments: {} };
+  }
+  if (node === "presentation") {
+    return { node, name: "ensure_presentation_recommendations", arguments: {} };
   }
   return undefined;
 }
@@ -89,8 +92,8 @@ function itineraryProgress(product: Record<string, unknown>): unknown[] {
   }) : [];
 }
 
-function isItineraryRelevantGap(value: string): boolean {
-  return /itinerary|每日行程|POI|景点|酒店候选|人工确认|手动录入|suggestPoi/i.test(value);
+function isPreparationRelevantGap(value: string): boolean {
+  return /itinerary|每日行程|POI|景点|酒店候选|人工确认|手动录入|suggestPoi|推荐|派生行程文案/i.test(value);
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {

@@ -5,7 +5,6 @@ import { classifyItineraryInputMode, itineraryInputContractError } from "../../s
 import { extractLockedConstraints } from "../../src/main/agent/prompt-helpers.js";
 import { agentPatchOperations } from "../../src/main/agent/integration-patch.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
-import { selfRepairItineraryForVbk } from "../../src/main/planning/itinerary-self-repair.js";
 
 test("完整路线后的交通排除和草稿边界不被识别为景点二选一", () => {
   const product = draft("第一天忠山公园、金龙寺，第二天尧坝古镇、玉蟾山，保留此顺序。当地5钻酒店、不含餐；不含飞机或火车交通子产品。仅保存草稿，不提交审核或发布。");
@@ -21,28 +20,6 @@ test("每日路线后的第1晚酒店候选不能被当成第2天的景点二选
     { day: 1, spots: [{ name: "忠山公园" }, { name: "金龙寺" }] },
     { day: 2, spots: [{ name: "尧坝古镇" }, { name: "泸县玉蟾山景区" }] },
   ]), undefined);
-});
-
-test("日喀则真实卡点：或选项核验收敛后允许继续修正文案和末日住宿", () => {
-  const product = draft("第一天：接火车 → 萨迦古城 → 萨迦寺 → 冲拉山欣赏珠峰东坡 → 住日喀则。\n第二天：帕拉庄园 → 满拉水库 → 卡若拉冰川 → 羊卓雍湖 → 住日喀则。\n第三天：日喀则博物馆或非遗中心参观 → 扎什伦布寺参观 → 送火车。");
-  Object.assign(product.product.basicInfo!, { days: 3, nights: 2, meetingCity: "日喀则", destinationCity: "日喀则" });
-  product.product.itinerary = [
-    { day: 1, spots: ["萨迦古城", "萨迦寺", "冲拉山欣赏珠峰东坡"].map(name => ({ name })) },
-    { day: 2, spots: ["帕拉庄园", "满拉水库", "卡若拉冰川", "羊卓雍湖"].map(name => ({ name })) },
-    { day: 3, hotel: "日喀则当地5钻酒店", hotelDescription: "送火车日不实际安排住宿", spots: [
-      { name: "日喀则博物馆", poiName: "日喀则博物馆", poiId: 79437758, relation: "or", timeOfDay: "morning" },
-      { name: "非遗中心参观", poiName: null, poiId: null, relation: "or", timeOfDay: "morning" },
-      { name: "扎什伦布寺参观", poiName: "扎什伦布寺", poiId: 76348, relation: "and", timeOfDay: "afternoon" },
-    ] },
-  ] as never;
-  const repaired = selfRepairItineraryForVbk(product.product.itinerary, 2);
-  assert.equal(itineraryInputContractError(product, repaired.itinerary), undefined);
-  assert.equal(repaired.itinerary[2].hotel, "无");
-  product.product.itinerary = repaired.itinerary as never;
-  assert.doesNotThrow(() => agentPatchOperations(product, { itinerary: [{ day: 3, description: "参观后送站" }] }));
-  const tampered = structuredClone(repaired.itinerary);
-  (tampered[2].spots as Array<Record<string, unknown>>)[0].poiId = 123;
-  assert.match(itineraryInputContractError(product, tampered) ?? "", /保留|缺失/);
 });
 
 function draft(userIdea: string, intent?: ProductDetail["planning"]): ProductDetail {

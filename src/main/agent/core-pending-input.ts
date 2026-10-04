@@ -1,5 +1,6 @@
 import type { AgentSnapshot } from "../../shared/contracts.js";
 import { isPreparationRun } from "./preparation-run.js";
+import { requiredItineraryPoiSatisfaction } from "./core-preparation-poi-input.js";
 import type { AgentSnapshotManager } from "./core-snapshot.js";
 import type { AgentCoreDependencies } from "./types.js";
 
@@ -17,7 +18,8 @@ export function refreshPendingInput(args: {
 }): PendingInputRefresh {
   const { id, snapshot, deps, snapshots } = args;
   const request = snapshot.pendingInput;
-  if (!request || !request.questions.length || snapshot.run?.status !== "waiting_input") {
+  if (!request) return resumeManualPoiBlocked(args);
+  if (!request.questions.length || snapshot.run?.status !== "waiting_input") {
     return { changed: false, shouldSchedule: false };
   }
   const questions = request.questions;
@@ -79,4 +81,23 @@ function hasActiveApprovedIntent(snapshot: AgentSnapshot): boolean {
 function hasRemoteWriteInRun(snapshot: AgentSnapshot): boolean {
   return snapshot.events.some((event) => event.runId === snapshot.run?.id && event.type === "tool_result"
     && event.data?.remoteWrite === true);
+}
+
+function resumeManualPoiBlocked(args: {
+  id: string; snapshot: AgentSnapshot; deps: AgentCoreDependencies; snapshots: AgentSnapshotManager;
+}): PendingInputRefresh {
+  const { id, snapshot, deps, snapshots } = args;
+  if (snapshot.run?.status !== "paused" || !isPreparationRun(snapshot) || snapshot.uncertainWrite || snapshot.pendingApproval
+    || hasActiveApprovedIntent(snapshot) || hasRemoteWriteInRun(snapshot)) return { changed: false, shouldSchedule: false };
+  const latestPause = [...snapshot.events].reverse().find((event) => event.runId === snapshot.run?.id
+    && event.type === "status" && event.data?.status === "paused");
+  if (latestPause?.data?.manualPoiBlocked !== true) return { changed: false, shouldSchedule: false };
+  const product = deps.preparationProduct?.(id);
+  const satisfaction = product ? requiredItineraryPoiSatisfaction(product) : undefined;
+  if (!satisfaction?.hasRequiredPoi || !satisfaction.satisfied) return { changed: false, shouldSchedule: false };
+  snapshots.running(snapshot);
+  snapshots.event(snapshot, "status", "手动保存的 POI 已齐全，继续本地规划。", {
+    manualPoiBlockedResolved: true, automaticallyResumed: true, poiSlotKey: latestPause.data?.poiSlotKey,
+  });
+  return { changed: true, shouldSchedule: true };
 }

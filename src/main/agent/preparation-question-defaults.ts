@@ -45,10 +45,13 @@ export function automaticPreparationAnswer(question: AgentQuestion): string | st
     if (removeTravelNode) return asAnswer(question, removeTravelNode);
   }
   if (/非景点|混入.*文本|官方名|写错|错写|错字|规范/.test(text) && /景点|POI|行程/.test(text)) {
+    if (/二选一|多选一|原景点|明确景点|锁定景点/.test(text)) return undefined;
     const normalise = optionId(question, /规范|官方名|rename|standard/i);
     if (normalise) return asAnswer(question, normalise);
-    const removeNoise = optionId(question, /移除|删除|只保留.*(?:景点|POI)|remove|drop/i);
-    if (removeNoise) return asAnswer(question, removeNoise);
+    // A model label is not evidence that an explicitly named attraction is
+    // disposable. Keep deletion visible to an operator unless it is a known
+    // transfer/check-in node handled by the dedicated branch above.
+    return undefined;
   }
   if (/研究任务|research/i.test(text) && /闭环|处理|推进|resolve/i.test(text)) {
     const close = optionId(question, /关闭|无需POI|住宿节点|推进|skip|close/i);

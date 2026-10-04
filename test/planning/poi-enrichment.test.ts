@@ -125,14 +125,14 @@ test("只有成功响应且没有候选时创建 canonical POI 核查任务", as
   assert.deepEqual(result, tasks);
 });
 
-test("已存在的未匹配 POI 核查项不再重复写入", async () => {
-  let taskWrites = 0;
+test("已存在 canonical POI 核查项会更新未命中证据而不重复报告新增", async () => {
+  const taskWrites: ResearchTaskProposal[] = [];
   const runtime: OrchestratorRuntime = {
     suggestPoi: async () => null,
     loadExistingResearchTasks: async () => [],
     writeModule: async () => ({ ok: true }),
-    addResearchTask: async () => {
-      taskWrites += 1;
+    addResearchTask: async (_localProductId, task) => {
+      taskWrites.push(task);
       return "existing-task";
     },
     loadHistory: async () => [],
@@ -149,7 +149,8 @@ test("已存在的未匹配 POI 核查项不再重复写入", async () => {
     persistedTaskKeys: new Set(["vbk::核查 晋祠 的 VBK POI 映射"]),
   });
 
-  assert.equal(taskWrites, 0);
+  assert.equal(taskWrites.length, 1);
+  assert.match(taskWrites[0]!.detail ?? "", /未找到对应的 VBK POI/);
   assert.deepEqual(result, []);
 });
 
@@ -281,7 +282,7 @@ test("官方名括号别名会做确定性查询并写回", async () => {
   });
 });
 
-test("未命中时不会重复创建已有 canonical 核查项", async () => {
+test("未命中时更新已有 canonical 核查项的证据而不重复报告新增", async () => {
   const taskWrites: ResearchTaskProposal[] = [];
   const runtime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "回民街·钟鼓楼广场", poiName: null, poiId: null }] }] },
@@ -297,7 +298,8 @@ test("未命中时不会重复创建已有 canonical 核查项", async () => {
     persistedTaskKeys: new Set(["vbk::核查 回民街·钟鼓楼广场 的 VBK POI 映射"]),
   });
 
-  assert.equal(taskWrites.length, 0, "已有任务不重复写入");
+  assert.equal(taskWrites.length, 1, "已有任务要接收最新未命中证据");
+  assert.match(taskWrites[0]!.detail ?? "", /未找到对应的 VBK POI/);
   assert.deepEqual(result, []);
 });
 

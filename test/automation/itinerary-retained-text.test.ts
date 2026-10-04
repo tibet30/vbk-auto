@@ -4,11 +4,13 @@ import { materializeRetainedItinerary } from "../../src/main/automation/automati
 import { requiresItineraryPoi } from "../../src/shared/itinerary-activity-kind.js";
 const product = () => ({ itinerary: [{ spots: [{ name: "开元寺", kind: "attraction", poiId: null, poiName: null, description: "游览寺院" }] }] });
 const task = { state: "confirmed", type: "vbk", label: "核查 开元寺 的 VBK POI 映射", detail: "已保留原景点和原行程位置" };
-test("已接受文字保留的准备状态落实到自动录入，保留顺序和说明", () => {
+test("旧文字保留标记不能免除已命名景点的真实 POI 要求", () => {
   const original = product(); const result = materializeRetainedItinerary(original, [task]);
   assert.equal(result.changed, true);
   const spot = (result.product.itinerary as any[])[0].spots[0];
-  assert.equal(requiresItineraryPoi(spot), false);
+  assert.equal(requiresItineraryPoi(spot), true);
+  assert.equal(spot.name, "开元寺");
+  assert.equal(spot.kind, "attraction");
   assert.equal(spot.description, "游览寺院");
   assert.equal(spot.poiId, null);
   assert.equal(requiresItineraryPoi(original.itinerary[0].spots[0]), true);

@@ -4,8 +4,9 @@ import type { ProductDetail } from "../../shared/contracts.js";
 import type { PlanningUserIntent } from "../../shared/contracts-planning-intent.js";
 import type { ItineraryInputMode, LockedConstraints, LockedItineraryDay } from "../../shared/contracts-preparation.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
-import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
+import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { hasCompleteDailyUserItinerary } from "./user-intent.js";
+import { alternativeGroupKey, hasTrustedOperatorItineraryRemoval } from "../../shared/trusted-operator-itinerary-removals.js";
 
 const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -39,12 +40,12 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
   if (alternativeError) return alternativeError;
   if (mode === "open") return undefined;
 
-  const excludedAlternatives = verifiedAlternativeExclusions(product, itinerary);
   const byDay = new Map(itinerary.map((day) => [Number(day.day), spotNames(day)]));
+  const dayRecords = new Map(itinerary.map((day) => [Number(day.day), day]));
   for (const row of locked.itineraryOrder) {
     const names = byDay.get(row.day) ?? [];
     const requiredSpots = row.spots.filter((spot) => !isDeletableAdministrativeLocation(product, spot)
-      && !excludedAlternatives.get(row.day)?.some((name) => samePlace(name, spot)));
+      && !hasTrustedOperatorAlternativeDeletion(product, row.day, spot));
     if (mode === "complete") {
       if (!isNameSubsequence(names, requiredSpots)) {
         return `用户已给出完整第 ${row.day} 天行程，禁止整体重排或替换；只能规范化并核验 POI。缺失：${missingNames(names, requiredSpots).join("、") || requiredSpots.join("、")}`;
@@ -56,14 +57,28 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
     } else if (!requiredSpots.every((spot) => names.some((name) => samePlace(name, spot)))) {
       return `已锁定的第 ${row.day} 天景点必须保留：${requiredSpots.join("、")}`;
     }
+    const disguised = requiredSpots.filter(requiresLockedAttraction).find((name) => {
+      const candidateDay = dayRecords.get(row.day);
+      const currentSpots: unknown[] = Array.isArray(candidateDay?.spots) ? candidateDay.spots : [];
+      const spot = currentSpots.flatMap((item) => {
+        const record = asRecord(item);
+        return record ? [record] : [];
+      }).find((item) => samePlace(spotName(item), name));
+      return spot && !requiresItineraryPoi(spot);
+    });
+    if (disguised) return `已锁定的第 ${row.day} 天景点必须保留为景点类型，不能用自由活动或其他活动隐藏：${disguised}`;
   }
   if (mode === "partial") {
     const allNames = itinerary.flatMap(spotNames);
     const missing = locked.pois
       .filter((poi) => !isDeletableAdministrativeLocation(product, poi))
-      .filter((poi) => ![...excludedAlternatives.values()].flat().some((name) => samePlace(name, poi)))
+      .filter((poi) => !hasTrustedOperatorAlternativeDeletionOnAnyDay(product, poi))
       .filter((poi) => !allNames.some((name) => samePlace(name, poi)));
     if (missing.length) return `已锁定的指定 POI 必须保留：${missing.join("、")}`;
+    const disguised = locked.pois.filter(requiresLockedAttraction).find((poi) => !hasTrustedOperatorAlternativeDeletionOnAnyDay(product, poi)
+      && itinerary.some((day) => (Array.isArray(day.spots) ? day.spots : []).filter(asRecord)
+        .some((spot) => samePlace(spotName(spot), poi) && !requiresItineraryPoi(spot))));
+    if (disguised) return `已锁定的指定 POI 必须保留为景点类型，不能用自由活动或其他活动隐藏：${disguised}`;
   }
   return undefined;
 }
@@ -136,6 +151,13 @@ function spotNames(day: Record<string, unknown>): string[] {
     .filter(Boolean);
 }
 
+/** This uses the locked user wording only; a generated kind must not hide a named attraction. */
+function requiresLockedAttraction(name: string): boolean {
+  const value = text(name);
+  if (/^(?:上午|下午|晚上|全天)?\s*自由活动$/u.test(value)) return false;
+  return !/(?:接团|送团|接机|送机|接站|送站|接送|无人机航拍|航拍|办理入住|集合|解散|乘车|返程)(?:服务)?$/u.test(value);
+}
+
 /**
  * 二选一不是在规划期挑出一个默认项：所有原始选项都要保留在同一天的同一段，
  * 再由 VBK 的 orFlag 表达“任选其一”。这层也覆盖对话式 patch 路径，避免
@@ -148,15 +170,17 @@ function explicitAlternativeGroupError(
   const groups = explicitAlternativeGroups(product);
   if (!groups.length) return undefined;
   const days = new Map(itinerary.map((day) => [Number(day.day), day]));
-  const exclusions = verifiedAlternativeExclusions(product, itinerary);
   for (const group of groups) {
     const day = days.get(group.day);
     const spots = Array.isArray(day?.spots) ? day.spots.filter(asRecord) : [];
-    const names = group.names.filter((name) => !exclusions.get(group.day)?.includes(name));
+    const names = group.names.filter((name) => !hasTrustedOperatorAlternativeDeletion(product, group.day, name, group));
     const matches = names.map((name) => ({ name, index: spots.findIndex((spot) => samePlace(spotName(spot), name)) }));
     const missing = matches.filter((match) => match.index < 0).map((match) => match.name);
     if (missing.length) return `第 ${group.day} 天的二选一景点必须全部保留：${missing.join("、")}`;
     const selected = matches.map((match) => spots[match.index]!);
+    if (!selected.every(requiresItineraryPoi)) {
+      return `第 ${group.day} 天的二选一景点必须保留为景点类型，不能用自由活动或其他活动隐藏。`;
+    }
     if (!selected.every((spot) => spot.relation === (names.length === 1 ? "and" : "or"))) {
       return `第 ${group.day} 天的二选一景点「${group.names.join("或")}」必须都标记为 relation: "or"。`;
     }
@@ -170,25 +194,31 @@ function explicitAlternativeGroupError(
   return undefined;
 }
 
-/** Only a persisted verified original option can justify dropping an unavailable sibling. */
-function verifiedAlternativeExclusions(product: ProductDetail, itinerary: Record<string, unknown>[]): Map<number, string[]> {
-  const excluded = new Map<number, string[]>();
-  for (const group of explicitAlternativeGroups(product)) {
-    const current = asDayList(product.product.itinerary)?.find((day) => Number(day.day) === group.day);
-    const next = itinerary.find((day) => Number(day.day) === group.day);
-    const before = (Array.isArray(current?.spots) ? current.spots : []).filter(asRecord);
-    const after = (Array.isArray(next?.spots) ? next.spots : []).filter(asRecord);
-    const missing = group.names.filter((name) => !after.some((spot) => samePlace(spotName(spot), name)));
-    if (!missing.length || missing.some((name) => before.some((spot) => samePlace(spotName(spot), name) && hasCompletePoi(spot)))) continue;
-    const kept = group.names.filter((name) => !missing.includes(name));
-    if (!kept.length || !kept.every((name) => {
-      const spot = after.find((item) => samePlace(spotName(item), name));
-      return spot && hasCompletePoi(spot) && before.some((item) => samePlace(spotName(item), name)
-        && hasCompletePoi(item) && item.poiId === spot.poiId && item.poiName === spot.poiName);
-    })) continue;
-    excluded.set(group.day, [...(excluded.get(group.day) ?? []), ...missing]);
+/** Only the trusted manual-review IPC may authorize a named original POI to disappear. */
+export function hasTrustedOperatorAlternativeDeletion(
+  product: ProductDetail, day: number, name: string, group?: { day: number; names: readonly string[] },
+): boolean {
+  const groups = explicitAlternativeGroups(product).filter((candidate) => candidate.day === day && candidate.names.some((item) => samePlace(item, name)));
+  const target = group ?? (groups.length === 1 ? groups[0] : undefined);
+  if (target) {
+    const ambiguous = groups.length > 1;
+    return hasTrustedOperatorItineraryRemoval(product.product, day, name, alternativeGroupKey(day, target.names), ambiguous);
   }
-  return excluded;
+  if (groups.length > 1) {
+    // A shared spelling can occur in separate OR groups. A receipt for one
+    // group cannot authorize the other; only one receipt per group can.
+    return groups.every((candidate) => hasTrustedOperatorItineraryRemoval(
+      product.product, day, name, alternativeGroupKey(day, candidate.names), true,
+    ));
+  }
+  // A legacy day/name receipt has no positional evidence. Do not let it exempt
+  // duplicate same-day OR members; an operator must delete the exact slot again.
+  return groups.length === 0 && hasTrustedOperatorItineraryRemoval(product.product, day, name);
+}
+
+function hasTrustedOperatorAlternativeDeletionOnAnyDay(product: ProductDetail, name: string): boolean {
+  return (asDayList(product.product.itinerary) ?? []).some((day) =>
+    hasTrustedOperatorAlternativeDeletion(product, Number(day.day), name));
 }
 
 export function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {

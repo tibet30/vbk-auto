@@ -1,5 +1,3 @@
-import { isTravelNodeName } from "./itinerary-adoption.js";
-
 type JsonObject = Record<string, unknown>;
 
 export interface ItinerarySelfRepairResult {
@@ -12,8 +10,8 @@ export interface ItinerarySelfRepairResult {
 /**
  * Convert model-friendly itinerary notes into the stricter VBK POI shape.
  * Travel and lodging nodes belong in descriptions, not in tourDailyPois.
- * For an explicit `or` group, a verified original option is sufficient: drop
- * only the unavailable siblings instead of asking the operator to choose.
+ * Explicitly named attractions stay in their original order until an operator
+ * resolves or removes them.  A missing POI never selects an `or` sibling.
  */
 export function selfRepairItineraryForVbk(value: unknown, nights?: number): ItinerarySelfRepairResult {
   const itinerary = Array.isArray(value)
@@ -32,7 +30,7 @@ export function selfRepairItineraryForVbk(value: unknown, nights?: number): Itin
     const original = Array.isArray(day.spots) ? day.spots.filter(isRecord) : [];
     const withoutTravel = original.filter((spot) => {
       const name = spotName(spot);
-      if (!name || isExplicitNonPoi(spot) || !isTravelNodeName(name)) return true;
+      if (!name || isExplicitNonPoi(spot) || !isExplicitTravelNode(day, spot)) return true;
       removedTravelNodes.push(name);
       return false;
     });
@@ -47,31 +45,8 @@ export function selfRepairItineraryForVbk(value: unknown, nights?: number): Itin
         index += 1;
         continue;
       }
-      if (spot.relation !== "or") {
-        repaired.push(spot);
-        index += 1;
-        continue;
-      }
-      const time = spot.timeOfDay;
-      const group: JsonObject[] = [];
-      while (index < withoutTravel.length) {
-        const candidate = withoutTravel[index]!;
-        if (isExplicitNonPoi(candidate) || candidate.relation !== "or" || candidate.timeOfDay !== time) break;
-        group.push(candidate);
-        index += 1;
-      }
-      const verified = group.filter(hasVerifiedPoi);
-      if (group.length > 1 && verified.length > 0 && verified.length < group.length) {
-        const removed = group.filter((candidate) => !hasVerifiedPoi(candidate)).map(spotName).filter(Boolean);
-        const kept = verified.map((candidate) => {
-          candidate.relation = verified.length > 1 ? "or" : "and";
-          return spotName(candidate);
-        }).filter(Boolean);
-        repaired.push(...verified);
-        selectedAlternatives.push({ day: Number(day.day) || 0, kept, removed });
-      } else {
-        repaired.push(...group);
-      }
+      repaired.push(spot);
+      index += 1;
     }
     day.spots = repaired;
   }
@@ -80,16 +55,20 @@ export function selfRepairItineraryForVbk(value: unknown, nights?: number): Itin
   return { itinerary, changed, removedTravelNodes, selectedAlternatives };
 }
 
-function hasVerifiedPoi(value: JsonObject): boolean {
-  return Boolean(text(value.poiName)) && Number.isInteger(value.poiId) && Number(value.poiId) > 0;
-}
-
 function spotName(value: JsonObject): string {
   return text(value.name) || text(value.poiName);
 }
 
 function isExplicitNonPoi(value: JsonObject): boolean {
   return value.kind === "free" || value.kind === "other";
+}
+
+function isExplicitTravelNode(day: JsonObject, spot: JsonObject): boolean {
+  const name = spotName(spot);
+  if (/^(?:接站|送站|接机|送机|接团|送团|接送|接火车|送火车)/u.test(name)) return true;
+  if (/(?:\(|（)(?:入住|住宿)(?:\)|）)|^(?:入住|住宿)/u.test(name)) return true;
+  if (!/(?:机场|航站楼|火车站|高铁站|动车站|汽车站|客运站|码头)/u.test(name)) return false;
+  return /(?:接站|送站|接机|送机|接火车|送火车|接送)/u.test(`${text(day.title)} ${text(day.description)}`);
 }
 
 function isRecord(value: unknown): value is JsonObject {

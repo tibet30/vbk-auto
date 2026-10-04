@@ -165,3 +165,13 @@ test("presentation prompt 要求产品特色输出安全结构化富文本", () 
   assert.match(legacySystemPrompt, /<p><strong>古建巡礼：<\/strong>/);
   assert.match(legacySystemPrompt, /导游否定描述/);
 });
+
+test("presentation user message 仅将可信运营手动删除的 OR 项排除文案", () => {
+  const message = composePlanningUserMessage({
+    ...request,
+    stage: "presentation",
+    context: { ...request.context, excludedItineraryAlternatives: ["非遗中心参观"] },
+  });
+  assert.match(message, /仅因可信运营手动删除而排除/);
+  assert.doesNotMatch(message, /因真实 POI 绑定而收敛/);
+});

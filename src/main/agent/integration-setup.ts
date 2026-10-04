@@ -23,6 +23,10 @@ import { needsTrafficLineBackfill } from '../automation/traffic-line-backfill.js
 import { isPreparationRun, isPreparationInstruction } from './preparation-run.js';
 import { preparationItineraryRecovery } from './preparation-itinerary-recovery.js';
 import { runQueuedApprovedWorkflow } from './queued-approved-workflow.js';
+import { clearTrustedOperatorItineraryRemoval, trustedOperatorItineraryRemovals } from '../../shared/trusted-operator-itinerary-removals.js';
+import { explicitAlternativeGroups } from '../planning/itinerary-input-contract.js';
+import { restoreExplicitAlternativeGroupSpots } from '../planning/restore-explicit-itinerary-spots.js';
+import { extractLockedConstraints } from './prompt-helpers.js';
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
 export function installProductAgent(context: MainIpcContext): () => void {
@@ -121,6 +125,20 @@ export function installProductAgent(context: MainIpcContext): () => void {
       let current = db.getProduct(localProductId);
       if (!current) throw productNotFound(localProductId);
       let preparationRecovered = false;
+      const receiptProduct = structuredClone(current.product);
+      if (restoreExplicitOperatorDeletion(receiptProduct, content)) {
+        current = context.productMutations.replace(localProductId, receiptProduct, {
+          status: current.status, expectedVersion: current.productJsonVersion,
+        });
+        preparationRecovered = true;
+      }
+      const restored = restoreExplicitAlternativeSlots(current, content);
+      if (restored) {
+        current = context.productMutations.replace(localProductId, restored, {
+          status: current.status, expectedVersion: current.productJsonVersion,
+        });
+        preparationRecovered = true;
+      }
       if (isPreparationInstruction(content)) {
         const recovery = preparationItineraryRecovery(current);
         if (recovery) {
@@ -293,4 +311,53 @@ export function installProductAgent(context: MainIpcContext): () => void {
       login.loginAccount?.trim() || login.accountName?.trim() || "");
   });
   };
+}
+
+/** Only a direct user request can revoke an exact manual deletion receipt. */
+export function restoreExplicitOperatorDeletion(product: Record<string, unknown>, content: string): boolean {
+  if (!/(恢复|加回|新增|重新加入|保留)/.test(content)) return false;
+  let changed = false;
+  const receipts = trustedOperatorItineraryRemovals(product);
+  for (const receipt of receipts) {
+    if (!content.replace(/\s+/g, "").includes(receipt.name.replace(/\s+/g, ""))) continue;
+    if (!mentionsDay(content, receipt.day)) continue;
+    if (!restoreContextIdentifiesReceipt(receipt, receipts, content)) continue;
+    changed = clearTrustedOperatorItineraryRemoval(product, receipt.day, receipt.name, receipt.groupKey) || changed;
+  }
+  return changed;
+}
+
+function restoreContextIdentifiesReceipt(
+  receipt: ReturnType<typeof trustedOperatorItineraryRemovals>[number],
+  receipts: ReturnType<typeof trustedOperatorItineraryRemovals>, content: string,
+): boolean {
+  const sameSlotName = receipts.filter((item) => item.day === receipt.day && item.name.replace(/\s+/g, "") === receipt.name.replace(/\s+/g, ""));
+  if (sameSlotName.length === 1) return true;
+  if (!receipt.groupKey?.startsWith(`or:${receipt.day}:`)) return false;
+  const peers = receipt.groupKey.slice(`or:${receipt.day}:`.length).split("\u001f")
+    .filter((name) => name && name !== receipt.name.replace(/\s+/g, ""));
+  const compact = content.replace(/\s+/g, "");
+  return peers.some((name) => compact.includes(name));
+}
+
+function mentionsDay(content: string, day: number): boolean {
+  const chinese = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][day] ?? "";
+  return new RegExp(`(?:第${day}(?:天|日)|[dD]${day}\\b|第${chinese}天)`).test(content);
+}
+
+/** Recreate old auto-removed explicit alternatives locally before any new run. */
+export function restoreExplicitAlternativeSlots(detail: import("../../shared/contracts.js").ProductDetail, content: string): Record<string, unknown> | undefined {
+  if (!/(?:恢复|加回|新增|重新加入|保留|修改|调整)/u.test(content)) return undefined;
+  const locked = extractLockedConstraints(detail);
+  let itinerary = detail.product.itinerary;
+  let changed = false;
+  for (const group of explicitAlternativeGroups(detail)) {
+    const row = locked.itineraryOrder.find((item) => item.day === group.day);
+    if (!row) continue;
+    const result = restoreExplicitAlternativeGroupSpots(detail, itinerary, row.spots, group);
+    if (!result.changed) continue;
+    itinerary = result.itinerary;
+    changed = true;
+  }
+  return changed ? { ...detail.product, itinerary } : undefined;
 }

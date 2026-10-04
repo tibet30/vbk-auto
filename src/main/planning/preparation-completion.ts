@@ -8,7 +8,7 @@ import {
 } from "../../shared/contracts-preparation.js";
 import { computeReadiness, type ComputeReadinessInput } from "../readiness.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
-import { classifyItineraryInputMode } from "./itinerary-input-contract.js";
+import { classifyItineraryInputMode, itineraryInputContractError } from "./itinerary-input-contract.js";
 import { readActiveCoverFallback } from "../../shared/cover-fallback.js";
 import { itineraryStructureError } from "./itinerary-structure.js";
 import {
@@ -119,6 +119,10 @@ function collectGaps(product: ProductDetail, readinessOptions?: ReadinessOptions
     ignoreInterruptedAutomationFailure: readinessOptions?.ignoreInterruptedAutomationFailure,
   });
   const structureError = itineraryStructureError(product.product);
+  const itineraryContractError = itineraryInputContractError(product, product.product.itinerary);
+  if (itineraryContractError) {
+    push({ label: "每日行程", detail: itineraryContractError, stage: "itinerary", node: structureError ? "itineraryDraft" : "poiResolution" });
+  }
   for (const issue of readiness.issues) {
     const classified = /^itinerary\.\d+\.hotelCandidates(?:\.|$)/.test(issue.label)
       ? { stage: "completion" as const, node: "hotelResolution" as const }
@@ -132,7 +136,7 @@ function collectGaps(product: ProductDetail, readinessOptions?: ReadinessOptions
         : classified),
     });
   }
-  for (const gap of extraPreparationGaps(product.product)) push(gap);
+  for (const gap of extraPreparationGaps(product.product, product)) push(gap);
   return gaps;
 }
 

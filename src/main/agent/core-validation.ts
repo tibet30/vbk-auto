@@ -66,8 +66,16 @@ export function validateAnswers(
   });
 }
 
+function allowsEmptyString(schema: JsonSchema): boolean {
+  return schema.minLength === 0;
+}
+
 function validateValue(schema: JsonSchema, value: unknown, path: string): string | undefined {
-  if (schema.type === "string" && (typeof value !== "string" || !value.trim())) return `${path} 必须是非空字符串`;
+  if (schema.type === "string") {
+    if (typeof value !== "string") return `${path} 必须是非空字符串`;
+    if (!allowsEmptyString(schema) && !value.trim()) return `${path} 必须是非空字符串`;
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) return `${path} 长度不足`;
+  }
   if (schema.type === "number" && (typeof value !== "number" || !Number.isFinite(value))) return `${path} 类型错误`;
   if (schema.type === "boolean" && typeof value !== "boolean") return `${path} 类型错误`;
   if (schema.type === "array") {
@@ -96,7 +104,7 @@ export function validateSchema(schema: JsonSchema, args: Record<string, unknown>
   for (const key of Array.isArray(schema.required) ? schema.required : []) {
     if (typeof key !== "string") continue;
     const value = args[key];
-    if (value === undefined || value === null || (typeof value === "string" && !value.trim())) {
+    if (value === undefined || value === null || (typeof value === "string" && !value.trim() && !allowsEmptyString(properties[key] ?? {}))) {
       return `缺少 ${prefix}${key}`;
     }
   }

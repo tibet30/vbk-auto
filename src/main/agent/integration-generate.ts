@@ -12,6 +12,8 @@ import { executeStageOutput } from "../planning/stage-runner.js";
 import { itineraryInputContractError } from "../planning/itinerary-input-contract.js";
 import { itineraryStructureError } from "../planning/itinerary-structure.js";
 import { projectCompleteItinerary } from "../planning/complete-itinerary-projection.js";
+import { repairExcludedAlternativeCopy } from "../planning/itinerary-alternative-copy.js";
+import { excludedItineraryCopyConflicts } from "../planning/itinerary-alternative-consistency.js";
 import { applyStageDeterministicCompletion, skeletonFromProduct } from "../planning/stage-deterministic-completion.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import type { AgentTool } from "./types.js";
@@ -64,7 +66,20 @@ export function createGenerationStageTools(args: {
   clearUnverifiedItineraryPois: (itinerary: unknown) => void;
 }): AgentTool[] {
   const { deps, get, resolveTrafficAvailability, resolveItineraryPoisAndTraffic, clearUnverifiedItineraryPois } = args;
+  const removeConvergedAlternativeDayCopy = (localProductId: string): boolean => {
+    const saved = get(localProductId);
+    const repaired = repairExcludedAlternativeCopy(saved, saved.product.itinerary);
+    if (repaired.changed) {
+      deps.productMutations.replace(localProductId, {
+        ...saved.product,
+        itinerary: repaired.itinerary,
+      }, { status: saved.status });
+      deps.emitProduct(get(localProductId));
+    }
+    return repaired.changed;
+  };
   const generateModule = async (localProductId: string, stage: GenerateStage) => {
+    if (stage === "presentation") removeConvergedAlternativeDayCopy(localProductId);
     let output: PlanningStageOutput;
     const projected = stage === "itinerary" ? projectCompleteItinerary(get(localProductId)) : undefined;
     if (projected) {
@@ -125,6 +140,10 @@ export function createGenerationStageTools(args: {
       if (!hasCompletePresentationRecommendations((get(localProductId).product as JsonObject).presentation)) {
         throw new Error("推荐理由未处理：写入后必须恰好保留 3 条分类不重复、文本非空的 recommendations。");
       }
+      const conflicts = excludedItineraryCopyConflicts(get(localProductId));
+      if (conflicts.length) {
+        throw new Error(`推荐理由未处理：写入后仍描述已排除的行程选项（${conflicts.join("、")}）。`);
+      }
     }
     return { applied, extra };
   };
@@ -158,7 +177,8 @@ export function createGenerationStageTools(args: {
       parameters: { type: "object", properties: {} },
       async execute(_toolArgs, ctx) {
         const current = get(ctx.localProductId).product as JsonObject;
-        if (hasCompletePresentationRecommendations(current.presentation)) {
+        if (hasCompletePresentationRecommendations(current.presentation)
+          && excludedItineraryCopyConflicts(get(ctx.localProductId)).length === 0) {
           return { content: "推荐理由已处理完成：当前已保存 3 条有效且分类不重复的推荐理由。", data: { recommendationsVerified: true, alreadySatisfied: true } };
         }
         const { applied } = await generateModule(ctx.localProductId, "presentation");

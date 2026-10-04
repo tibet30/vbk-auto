@@ -58,7 +58,7 @@ const ITINERARY_DAY_PATCH_SCHEMA = {
   type: "object",
   required: ["day"],
   properties: {
-    day: { type: "number" }, title: { type: "string" }, description: { type: "string" }, hotel: { type: "string" },
+    day: { type: "number" }, title: { type: "string" }, description: { type: "string" }, hotel: { type: "string", minLength: 0 },
     meals: { type: "string" }, hotelDescription: { type: "string" }, spots: { type: "array", items: ITINERARY_SPOT_PATCH_SCHEMA },
   },
 };
@@ -355,7 +355,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       },
     },
     {
-      name: "resolve_itinerary_pois", description: "逐个核查当前行程的真实 POI、地区和营业状态，填入已验证 ID。普通未命中景点保持原名原位并进入人工确认；明确二选一/多选一只要至少一个原始选项已核验，就自动保留可录入选项并记录被排除项，不再中途询问。交通、接送和入住节点自动移出 POI 列表。", parameters: {type:"object",properties:{}},
+      name: "resolve_itinerary_pois", description: "逐个核查当前行程的真实 POI、地区和营业状态，填入已验证 ID。所有运营明确命名的景点（含二选一/多选一的每个原始选项）都保持原名、原位、原顺序并各自核验；未命中时进入运营手动 POI 配置或由运营手动删除，Agent 不得删除。交通、接送和入住节点不作为 POI 景点处理。", parameters: {type:"object",properties:{}},
       async execute(_args, ctx) {
         const result = await resolveItineraryPoisAndTraffic(ctx.localProductId);
         refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);

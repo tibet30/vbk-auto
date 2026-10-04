@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
 import { parseProduct } from "../../src/main/automation/schema/schema.js";
 import { defaultCommercialInventory } from "../../src/main/data/commercial-defaults.js";
+import { clearReappearedTrustedOperatorItineraryRemovals, sameTrustedOperatorItineraryRemovals } from "../../src/shared/trusted-operator-itinerary-removals.js";
 
 // ───────────────────────── helpers ─────────────────────────
 
@@ -67,6 +68,10 @@ async function updateProductJsonLikeIpc(db: VbkDatabase, id: string, json: strin
   let next: Record<string, unknown>;
   try { next = JSON.parse(json); }
   catch { throw new Error("产品 JSON 无法解析，请检查格式。"); }
+  if (!sameTrustedOperatorItineraryRemovals(product.product, next)) {
+    throw new Error("运营删除凭证只能通过每日行程的手动删除操作生成或保留。");
+  }
+  clearReappearedTrustedOperatorItineraryRemovals(next);
   parseProduct(next);
   db.updateProduct(id, next, "review");
   return db.getProduct(id)!;

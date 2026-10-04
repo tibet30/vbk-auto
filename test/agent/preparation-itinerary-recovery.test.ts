@@ -26,18 +26,18 @@ function product() {
   return p;
 }
 
-test("恢复入口落实已核验二选一与不住宿末日，推进到补全阶段且只结清关联问题", () => {
+test("恢复入口不再自动删除已命名二选一景点，保留原槽位等待真实 POI 处理", () => {
   const p = product();
   const before = structuredClone(p);
   const recovery = preparationItineraryRecovery(p)!;
   assert.ok(recovery);
-  assert.deepEqual(recovery.taskIds, ["removed", "combined"]);
+  assert.deepEqual(recovery.taskIds, []);
   assert.equal(recovery.product.itinerary[2].hotel, "无");
-  assert.deepEqual((recovery.product.itinerary[2].spots as Array<{ name: string }>).map(x => x.name), ["日喀则博物馆", "扎什伦布寺参观"]);
+  assert.deepEqual((recovery.product.itinerary[2].spots as Array<{ name: string }>).map(x => x.name), ["日喀则博物馆", "非遗中心参观", "扎什伦布寺参观"]);
   assert.deepEqual(p, before);
-  const after = { ...p, product: recovery.product, researchTasks: [] };
+  const after = { ...p, product: recovery.product, researchTasks: p.researchTasks };
   const evaluation = evaluatePreparationCompletion(after);
-  assert.equal(evaluation.currentStage, "completion");
+  assert.equal(evaluation.currentNode, "poiResolution");
   assert.ok(!evaluation.missing.includes("酒店候选：第 3 天"));
   assert.equal(preparationItineraryRecovery(after), undefined);
 });
@@ -51,4 +51,12 @@ test("已创建携程产品不改动已批准方案，全部不可用时不移�
   const recovery = preparationItineraryRecovery(p)!;
   assert.equal((recovery.product.itinerary[2].spots as unknown[]).length, 3);
   assert.deepEqual(recovery.taskIds, []);
+});
+
+test("历史行程缺少 OR 首项且无人工凭证时，准备状态不能假装 ready", () => {
+  const p = product();
+  (p.product.itinerary![2]!.spots as Array<Record<string, unknown>>).shift();
+  const evaluation = evaluatePreparationCompletion(p);
+  assert.equal(evaluation.ready, false);
+  assert.ok(evaluation.blockingReasons.some((reason) => /二选一景点必须全部保留.*日喀则博物馆/.test(reason)));
 });

@@ -331,6 +331,15 @@ const commercialSchema = z.object({
   }).optional(),
 });
 
+const manualReviewSchema = z.object({
+  itinerarySpotRemovals: z.array(z.object({
+    day: z.number().int().positive(),
+    name: z.string().min(1),
+    removedAt: z.string().min(1),
+    groupKey: z.string().min(1).optional(),
+  }).strict()).default([]),
+}).strict();
+
 export const productSchema = z
   .object({
     sales: z.object({
@@ -362,6 +371,7 @@ export const productSchema = z
     presentation: presentationSchema.optional(),
     operations: operationsSchema.optional(),
     commercial: commercialSchema.optional(),
+    manualReview: manualReviewSchema.optional(),
     itinerary: z.array(itineraryDaySchema).min(1),
   })
   .superRefine((product, ctx) => {

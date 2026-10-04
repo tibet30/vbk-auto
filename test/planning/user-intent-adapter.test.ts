@@ -52,6 +52,8 @@ test("ThreeStage 把 userIdea 作为需求数据结构化并记录逐日安排",
   assert.match(messages[0].content, /用户原始产品想法/);
   assert.match(messages[0].content, /没有指定日期时 day=0/);
   assert.match(messages[0].content, /title 填第一个甲/);
+  assert.match(messages[0].content, /所有运营明确选项都必须保留/);
+  assert.match(messages[0].content, /poiName\/poiId 为 null/);
   assert.match(messages[1].content, /第二天下午做.*藏香/);
   assert.doesNotMatch(messages[1].content, /全网|最佳|唯一/);
   const tools = body.tools as Array<{ function: { name: string } }>;

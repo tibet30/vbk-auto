@@ -109,6 +109,9 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
   const itineraryMode = locked
     ? classifyItineraryInputMode(locked, context.skeleton.days)
     : "open";
+  const excludedAlternatives = stage === "presentation"
+    ? (context.excludedItineraryAlternatives ?? [])
+    : [];
   const lines = [
     `当前阶段：${stage}`,
     ...(context.skeleton.productForm === "privateTour" && (stage === "basicInfo" || stage === "presentation")
@@ -123,6 +126,14 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
             : itineraryMode === "partial"
               ? "用户已给出部分约束：只补空缺，保留已锁定 POI、日序和交通方式。"
               : "用户未给出行程：可以完整生成，但仍须保留已锁定城市和天数。",
+        ]
+      : []),
+    ...(excludedAlternatives.length
+      ? [
+          "",
+          "派生文案规则：当前产品草稿 itinerary[].spots 是唯一活动行程真值。以下原始二选一备选仅因可信运营手动删除而排除，推荐语、推荐理由和产品特色不得再描述它们：",
+          JSON.stringify(excludedAlternatives),
+          "保留当前活动景点、日序与已核验事实；不要根据用户原想法或锁定约束把已排除备选写回文案。",
         ]
       : []),
     "",

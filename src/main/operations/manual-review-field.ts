@@ -25,7 +25,7 @@
  */
 
 import type { ContactCardSelection, ManualReviewFieldInput, ProductCover } from "../../shared/contracts.js";
-import { normaliseItinerarySpotKind, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
+import { applyItinerarySpotKind, applyItinerarySpotPoi, applyItinerarySpotRemove } from "./manual-review-itinerary-field.js";
 
 /**
  * 防御式地把 unknown 转成 object 记录，遇到 null / 非对象 / 数组都返回空对象，
@@ -75,101 +75,6 @@ function repairLegacyCoverQuality(product: Record<string, unknown>): Record<stri
     minQuality: Number.isFinite(quality) && quality >= 0 && quality <= 5 ? quality : 3,
   };
   return product;
-}
-
-function applyItinerarySpotPoi(
-  product: Record<string, unknown>,
-  input: Extract<ManualReviewFieldInput, { field: "itinerarySpotPoi" }>,
-): Record<string, unknown> {
-  if (!Number.isInteger(input.dayIndex) || input.dayIndex < 0) throw new Error("行程天数索引不合法。");
-  if (!Number.isInteger(input.spotIndex) || input.spotIndex < 0) throw new Error("景点索引不合法。");
-  const poiName = input.poiName.trim();
-  if (!poiName) throw new Error("POI 名称不能为空。");
-  if (!Number.isInteger(input.poiId) || input.poiId <= 0) throw new Error("POI ID 必须是正整数。");
-
-  const next = structuredClone(product) as Record<string, unknown>;
-  if (!Array.isArray(next.itinerary)) throw new Error("当前产品没有可写入的每日行程。");
-  const day = next.itinerary[input.dayIndex];
-  if (!day || typeof day !== "object" || Array.isArray(day)) throw new Error("目标行程天数不存在。");
-
-  const dayRecord = day as Record<string, unknown>;
-  if (!Array.isArray(dayRecord.spots)) throw new Error("目标行程没有可写入的景点列表。");
-  const spot = dayRecord.spots[input.spotIndex];
-  if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
-
-  if (!requiresItineraryPoi(spot as Record<string, unknown>)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
-  dayRecord.spots[input.spotIndex] = {
-    ...(spot as Record<string, unknown>),
-    poiName,
-    poiId: input.poiId,
-    province: optionalLocationText(input.province),
-    city: optionalLocationText(input.city),
-    district: optionalLocationText(input.district),
-  };
-  return next;
-}
-
-function applyItinerarySpotKind(product: Record<string, unknown>, input: Extract<ManualReviewFieldInput, { field: "itinerarySpotKind" }>): Record<string, unknown> {
-  if (!["attraction", "free", "other"].includes(input.kind)) throw new Error("行程类型必须是景点、自由活动或其他。");
-  if (!Number.isInteger(input.dayIndex) || input.dayIndex < 0 || !Number.isInteger(input.spotIndex) || input.spotIndex < 0) throw new Error("行程条目索引不合法。");
-  const next = structuredClone(product) as Record<string, unknown>;
-  const day = Array.isArray(next.itinerary) ? next.itinerary[input.dayIndex] : undefined;
-  if (!day || typeof day !== "object" || Array.isArray(day) || !Array.isArray((day as Record<string, unknown>).spots)) throw new Error("目标行程条目不存在。");
-  const spots = (day as Record<string, unknown>).spots as unknown[];
-  const spot = spots[input.spotIndex];
-  if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标行程条目不存在。");
-  const updated: Record<string, unknown> = { ...(spot as Record<string, unknown>), kind: input.kind, ...(input.description === undefined ? {} : { description: input.description.trim() }) };
-  if (input.kind !== "attraction") {
-    delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType;
-  } else {
-    updated.poiId = null; updated.poiName = null; delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType;
-  }
-  spots[input.spotIndex] = normaliseItinerarySpotKind(updated);
-  return next;
-}
-
-function optionalLocationText(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  return text || null;
-}
-
-function applyItinerarySpotRemove(
-  product: Record<string, unknown>,
-  input: Extract<ManualReviewFieldInput, { field: "itinerarySpotRemove" }>,
-): Record<string, unknown> {
-  if (!Number.isInteger(input.dayIndex) || input.dayIndex < 0) throw new Error("行程天数索引不合法。");
-  if (!Number.isInteger(input.spotIndex) || input.spotIndex < 0) throw new Error("景点索引不合法。");
-
-  const next = structuredClone(product) as Record<string, unknown>;
-  if (!Array.isArray(next.itinerary)) throw new Error("当前产品没有可删除的每日行程。");
-  const day = next.itinerary[input.dayIndex];
-  if (!day || typeof day !== "object" || Array.isArray(day)) throw new Error("目标行程天数不存在。");
-
-  const dayRecord = day as Record<string, unknown>;
-  if (!Array.isArray(dayRecord.spots)) throw new Error("目标行程没有可删除的景点列表。");
-  const spot = dayRecord.spots[input.spotIndex];
-  if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
-
-  const spotName = typeof (spot as Record<string, unknown>).name === "string"
-    ? ((spot as Record<string, unknown>).name as string).trim()
-    : "";
-  dayRecord.spots = dayRecord.spots.filter((_, index) => index !== input.spotIndex);
-  if (spotName && Array.isArray(dayRecord.activities)) {
-    let removedActivity = false;
-    dayRecord.activities = dayRecord.activities.filter((activity) => {
-      if (removedActivity || !activity || typeof activity !== "object" || Array.isArray(activity)) return true;
-      const record = activity as Record<string, unknown>;
-      const title = typeof record.title === "string" ? record.title.trim() : "";
-      const type = typeof record.type === "string" ? record.type : undefined;
-      if (title === spotName && (type === undefined || type === "visit" || type === "other")) {
-        removedActivity = true;
-        return false;
-      }
-      return true;
-    });
-  }
-  return next;
 }
 
 function applyPricing(product: Record<string, unknown>, adult: number, child: number, minimumTravelers: number): Record<string, unknown> {

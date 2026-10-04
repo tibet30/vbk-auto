@@ -338,6 +338,8 @@ export interface PlannerContext {
   history: Array<{ role: "user" | "assistant"; content: string }>;
   /** 用户明确指定的目的地、天数、POI、行程顺序和交通方式；模型不得覆盖。 */
   lockedConstraints?: import("./contracts-preparation.js").LockedConstraints;
+  /** 已由真实 POI 绑定收敛的原始二选一备选；仅用于后续派生文案，不改变用户原始约束。 */
+  excludedItineraryAlternatives?: Array<{ day: number; names: string[] }>;
   /** 用户明确保存的少量长期偏好，按预算裁剪后注入。 */
   memoryContext?: import("./contracts-types.js").MemoryPromptContext;
   /** Provider / model 仅作为 transport 参数，schema / prompt 不依赖。 */

@@ -173,6 +173,8 @@ test("ThreeStage 行程提示词携带完整 VBK 文案黑名单", async (t) => 
   assert.match(messages[0].content, /区县和地址聚合/);
   assert.match(messages[0].content, /首日不写早餐/);
   assert.match(messages[0].content, /尾日不写晚餐/);
+  assert.match(messages[0].content, /真实非 POI 服务可使当日 poiIds 为空/);
+  assert.match(messages[0].content, /未命中也必须在原日期原位置保留为 attraction/);
   assert.match(messages[1].content, /上一轮命中祈福/);
 });
 

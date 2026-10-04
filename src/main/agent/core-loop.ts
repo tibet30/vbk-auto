@@ -35,9 +35,17 @@ export class AgentTurnLoop {
         if (before.run?.status !== "running" || before.uncertainWrite) break;
         const token = this.snapshots.token(before);
         const preparation = nextPreparationLoopDecision(this.deps, before);
-        const isPreparationRepairWindow = preparation.kind === "model" && preparation.modelRepairWindow === true;
+        const isPreparationRepairWindow = preparation.kind === "model"
+          && (preparation.modelRepairWindow === true || preparation.manualPoiModelWindow === true);
         if (preparation.kind === "pause") {
           this.snapshots.pause(before, preparation.reason);
+          if (preparation.manualPoiBlocked) {
+            const pause = before.events.at(-1);
+            if (pause?.type === "status") pause.data = {
+              ...pause.data, manualPoiBlocked: true, poiSlotKey: preparation.poiSlotKey,
+              manualPoiAnswerSlotKey: preparation.manualPoiAnswerSlotKey,
+            };
+          }
           this.snapshots.save(before);
           break;
         }
@@ -64,6 +72,22 @@ export class AgentTurnLoop {
           if (outcome !== "continue") break;
           continue;
         }
+        if (preparation.kind === "askPoiInput") {
+          const call: AgentToolCall = { id: this.id(), name: "ask_user", arguments: { questions: [preparation.input.question] } };
+          this.snapshots.event(before, "status", "未找到真实 POI，等待人工确认准确名称或手动配置。", {
+            manualPoiInput: true, node: preparation.action.node, progressKey: preparation.action.progressKey,
+            poiSlotKey: preparation.input.key, poiSlots: preparation.input.slots,
+          }, token.runId);
+          this.snapshots.event(before, "tool_call", call.name, {
+            toolCallId: call.id, name: call.name, arguments: call.arguments, index: 0, count: 1,
+            manualPoiInput: true, node: preparation.action.node, progressKey: preparation.action.progressKey,
+            poiSlotKey: preparation.input.key, poiSlots: preparation.input.slots,
+          }, token.runId);
+          this.snapshots.save(before);
+          const outcome = await this.toolRunner.execute(id, call, token);
+          if (outcome !== "continue") break;
+          continue;
+        }
         if (preparation.modelRepairWindow) {
           this.snapshots.event(before, "status", `当前节点 ${preparation.action!.node} 已自动尝试两次。请基于前两次真实工具结果和当前保存事实仅修复一次，不能只询问是否继续；必须保留锁定城市、天数和已绑定 POI。`, {
             deterministicPreparationModelRepair: true,
@@ -71,6 +95,14 @@ export class AgentTurnLoop {
             node: preparation.action!.node,
             progressKey: preparation.action!.progressKey,
             name: preparation.action!.name,
+          }, token.runId);
+          this.snapshots.save(before);
+        }
+        if (preparation.manualPoiModelWindow) {
+          this.snapshots.event(before, "status", "请根据用户补充先调用 query_poi 查询新名称（多项可逐一查询），再调用 select_itinerary_poi 逐个绑定原行程槽位；不得改动景点名、日次、顺序、relation，也不得猜测 POI ID。", {
+            manualPoiModelWindow: true, modelFeedback: true, node: preparation.action!.node,
+            progressKey: preparation.action!.progressKey, poiSlotKey: preparation.poiSlotKey,
+            manualPoiAnswerSlotKey: preparation.manualPoiAnswerSlotKey,
           }, token.runId);
           this.snapshots.save(before);
         }

@@ -143,7 +143,7 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
       return {
         verified: false,
         message: `本地方案仍需完善：当前阶段 ${evaluation.currentStage}/${evaluation.currentNode}，当前缺项：${current.join('；') || evaluation.blockingReasons.join('；')}。`
-          + (evaluation.currentStage === 'itinerary' ? '若二选一已有可用 POI，请调用 resolve_itinerary_pois 自动收敛；不要用 patch_product 删除原始选项。' : '')
+          + (evaluation.currentStage === 'itinerary' ? '请调用 resolve_itinerary_pois 逐项核验所有明确命名景点；任一未命中均保留原位并进入运营手动配置，不能用 patch_product 删除原始选项。' : '')
           + '当前阶段缺项解决后，系统会自动进入后续阶段，无需用户授权阶段推进。请继续调用允许的工具，不能仅声明本阶段已完成。',
       };
     }

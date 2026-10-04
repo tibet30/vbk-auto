@@ -55,7 +55,7 @@ test("已完整 POI 续跑时不靠重新搜索清空映射", async () => {
   assert.deepEqual(result, []);
 });
 
-test("已绑定但暂停营业的 POI 在复核时从行程删除并创建替换任务", async () => {
+test("已绑定但暂停营业的 POI 保留原槽位、清空失效绑定并创建人工任务", async () => {
   let written: any;
   const runtime = testRuntime({
     product: {
@@ -78,9 +78,12 @@ test("已绑定但暂停营业的 POI 在复核时从行程删除并创建替换
     localProductId: "poi-suspended", destination: "成都", runtime, persistedTaskKeys: new Set(), reviewCompletePois: true,
   });
 
-  assert.deepEqual(written[0].spots, [{ name: "武侯祠", poiName: "武侯祠", poiId: 67890 }]);
+  assert.deepEqual(written[0].spots, [
+    { name: "金沙遗址博物馆", poiName: null, poiId: null },
+    { name: "武侯祠", poiName: "武侯祠", poiId: 67890 },
+  ]);
   assert.equal(result[0]?.label, "核查 金沙遗址博物馆 的 VBK POI 映射");
-  assert.match(result[0]?.detail ?? "", /暂停营业，已从行程移除/);
+  assert.match(result[0]?.detail ?? "", /暂停营业，已保留原景点和原行程位置/);
   assert.deepEqual([...new Set(batchIds)].sort(), [12345, 67890]);
 });
 

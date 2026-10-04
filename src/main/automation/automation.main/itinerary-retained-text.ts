@@ -3,7 +3,7 @@ import { poiResearchTaskNames } from "../../../shared/poi-research-tasks.js";
 
 type Task = { state: string; type?: string; label?: string; detail?: string };
 
-/** 将准备阶段已经接受的文字保留决定落实到写入方消费的行程字段。 */
+/** 保留旧任务说明；标记不能免除真实 POI 校验，也不能重复追加。 */
 export function materializeRetainedItinerary(product: Record<string, unknown>, tasks: readonly Task[]) {
   const names = new Set(tasks.filter(task =>
     (task.state === "confirmed" || task.state === "resolved") && RETAINED_TEXT_ONLY_DETAIL_PATTERN.test(task.detail || ""),
@@ -14,6 +14,7 @@ export function materializeRetainedItinerary(product: Record<string, unknown>, t
     if (!day || !Array.isArray(day.spots)) continue;
     for (const spot of day.spots) {
       if (!spot || typeof spot !== "object" || hasCompletePoi(spot) || !requiresItineraryPoi(spot) || !names.has(spot.name)) continue;
+      if (typeof spot.remark === "string" && spot.remark.includes(RETAINED_TEXT_ONLY_POI_REMARK)) continue;
       spot.remark = [spot.remark, RETAINED_TEXT_ONLY_POI_REMARK].filter(Boolean).join("；");
       changed = true;
     }

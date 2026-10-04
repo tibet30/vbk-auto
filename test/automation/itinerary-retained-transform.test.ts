@@ -15,23 +15,25 @@ const day = (): ProductItineraryDay => ({
 });
 const build = (value: ProductItineraryDay) => buildDayDescription({ day: value, index: 1, totalDays: 3, operations: {}, stations: {} });
 
-test("已保留文字的羊卓雍湖在原时段和顺序写入，不进入强制 POI 构造器", () => {
+test("旧文字保留景点必须先绑定真实 POI，绑定后保留原时段与顺序", () => {
+  const unresolved = day(); const unresolvedBefore = structuredClone(unresolved);
+  assert.throws(() => build(unresolved), /缺 poiId\/poiName/);
+  assert.deepEqual(unresolved, unresolvedBefore);
   const input = day(); const before = structuredClone(input);
+  Object.assign(input.spots![1], { poiId: 78569, poiName: "羊卓雍湖" });
+  Object.assign(before.spots![1], { poiId: 78569, poiName: "羊卓雍湖" });
   const result = build(input);
   const visits = result.tourDailyInfos.filter(info => [3, 9].includes(Number((info.activeType as { key: number }).key)));
-  assert.equal(visits.length, 3);
-  assert.equal((visits[0].tourDailyPois as any[])[0].poi.poiId, 91485);
-  assert.equal(visits[1].description, "下午 羊卓雍湖：从岗巴拉山口俯瞰湖面");
-  assert.ok((visits[1].tourDailyPois as any[]).every(poi => !Number(poi.poi.poiId)));
-  assert.equal((visits[2].tourDailyPois as any[])[0].poi.poiId, 76348);
+  assert.equal(visits.length, 1);
+  assert.deepEqual((visits[0].tourDailyPois as any[]).map(poi => poi.poi.poiId), [91485, 78569, 76348]);
   const expected = buildReadbackExpectations({ itinerary: [input], operations: {}, stations: {} }).days[0];
-  assert.deepEqual(expected.pois.map(poi => poi.poiId), [91485, 76348]);
-  assert.deepEqual(expected.timeline.map(entry => entry.kind), ["attraction", "other", "attraction"]);
-  assert.equal(expected.activities[0].description, visits[1].description);
+  assert.deepEqual(expected.pois.map(poi => poi.poiId), [91485, 78569, 76348]);
+  assert.deepEqual(expected.timeline.map(entry => entry.kind), ["attraction"]);
+  assert.equal(expected.activities.length, 0);
   checkReadbackActivities("第2天", expected.activities, result.tourDailyInfos);
   checkReadbackTimeline("第2天", expected.timeline, result.tourDailyInfos);
-  assert.throws(() => checkReadbackActivities("第2天", expected.activities,
-    result.tourDailyInfos.filter(info => info !== visits[1])), /节点数不一致/);
+  assert.throws(() => checkReadbackTimeline("第2天", expected.timeline,
+    result.tourDailyInfos.filter(info => info !== visits[0])));
   assert.deepEqual(input, before);
 });
 
@@ -40,11 +42,11 @@ test("未明确保留的缺失 POI 仍然阻断写入", () => {
   assert.throws(() => build(input), /缺 poiId\/poiName/);
 });
 
-test("准备阶段确认的保留决定贯通到转换和回读期望", () => {
+test("旧研究任务确认不能绕过转换阶段的真实 POI 校验", () => {
   const input = day(); delete input.spots![1].remark;
   const retained = materializeRetainedItinerary({ itinerary: [input] }, [{
     state: "confirmed", type: "vbk", label: "核查 羊卓雍湖 的 VBK POI 映射", detail: RETAINED_TEXT_ONLY_POI_REMARK,
   }]);
   assert.equal(retained.changed, true);
-  assert.doesNotThrow(() => build((retained.product.itinerary as ProductItineraryDay[])[0]));
+  assert.throws(() => build((retained.product.itinerary as ProductItineraryDay[])[0]), /缺 poiId\/poiName/);
 });

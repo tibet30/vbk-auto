@@ -111,6 +111,20 @@ test("Agent 上下文复用同一 evaluator，并带 promptVersion 与权威 pre
   assert.equal(parsed.itineraryInputMode, evaluation.itineraryInputMode);
 });
 
+test("行程提示要求二选一的每个命名景点独立核验", () => {
+  const product = draft();
+  product.product.basicInfo!.userIdea = "第一天：宽窄巷子或锦里。第二天：武侯祠。";
+  product.product.itinerary![0]!.spots = [
+    { name: "宽窄巷子", relation: "or", timeOfDay: "morning", poiName: "宽窄巷子", poiId: 101 },
+    { name: "锦里", relation: "or", timeOfDay: "morning", poiName: null, poiId: null },
+  ];
+  Object.assign(product.product.operations!, { pickupCity: "成都", transport: "charter", hotelTier: "当地4钻酒店/-4" });
+  const parsed = JSON.parse(agentTaskContext({ getProduct: () => product, getAgentSnapshot: () => undefined } as any, product.id));
+  const rules = parsed.rules.join("\n");
+  assert.match(rules, /每个运营明确命名的原始选项都必须独立核验/);
+  assert.doesNotMatch(rules, /只要至少一个原始选项可用/);
+});
+
 test("普通描述不会被解析成 lockedConstraints", () => {
   const product = draft();
   (product.product.basicInfo as { userIdea?: string }).userIdea = "成都两日慢游，想轻松一点，适合带孩子去博物馆看看";

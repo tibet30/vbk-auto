@@ -1,3 +1,4 @@
+import type { ProductDetail } from "../../shared/contracts.js";
 import type { PlanningNodeId } from "../../shared/contracts-planning.js";
 import type { PreparationMajorStage, PostApprovalDeterministicItem } from "../../shared/contracts-preparation.js";
 import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
@@ -9,6 +10,7 @@ import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } fr
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { hotelDiamondFromTier } from "../../shared/hotel-tiers.js";
 import { hasPersistedCommercialInventory, hasPersistedCommercialPricing } from "./commercial-stage.js";
+import { excludedItineraryCopyConflicts } from "./itinerary-alternative-consistency.js";
 
 export interface PreparationGap {
   label: string;
@@ -38,7 +40,7 @@ function asArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? value : undefined;
 }
 
-export function extraPreparationGaps(product: Record<string, unknown>): PreparationGap[] {
+export function extraPreparationGaps(product: Record<string, unknown>, detail?: ProductDetail): PreparationGap[] {
   const gaps: PreparationGap[] = [];
   const basic = asObject(product.basicInfo);
   const sales = asObject(product.sales);
@@ -91,6 +93,10 @@ export function extraPreparationGaps(product: Record<string, unknown>): Preparat
   }
 
   const itinerary = asArray(product.itinerary) ?? [];
+  const copyConflicts = detail ? excludedItineraryCopyConflicts(detail) : [];
+  if (copyConflicts.length) gaps.push({
+    label: "派生行程文案", detail: `当前活动行程已排除 ${copyConflicts.join("、")}，需重建推荐与产品特色后才能确认。`, stage: "completion", node: "presentation",
+  });
   for (const [index, day] of itinerary.entries()) {
     const lodgingDay = asObject(day);
     if (!lodgingDay || !needsItineraryHotelCandidates(lodgingDay, index, nights)) continue;
@@ -169,7 +175,7 @@ export function classifyReadinessIssue(label: string, detail: string): Pick<Prep
   if (/封面/.test(text)) return { stage: "completion", node: "cover" };
   if (/用车|资源组/.test(text)) return { stage: "completion", node: "vehicleResource" };
   if (/副标题|运营备注|产品特点/.test(text)) return { stage: "completion", node: "copy" };
-  if (/推荐/.test(text)) return { stage: "completion", node: "presentation" };
+  if (/推荐|派生行程文案/.test(text)) return { stage: "completion", node: "presentation" };
   if (/套餐|定价|价格|库存|班期/.test(text)) return { stage: "completion", node: "commercial" };
   if (/大交通/.test(text)) return { stage: "completion", node: "finalValidation" };
   if (/itinerary|每日行程|POI|suggestPoi|人工确认|手动录入/.test(text) || /景点/.test(label)) {

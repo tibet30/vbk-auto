@@ -11,6 +11,7 @@ import {
 } from "./preparation-question-defaults.js";
 import { automaticRepairFlowAnswer, mustKeepRepairQuestionVisible } from "./core-preparation.js";
 import { isCacheableReadQuery, readQueryCacheKey, ReadQueryCache } from "./read-query-cache.js";
+import { excludedItineraryCopyConflicts } from "../planning/itinerary-alternative-consistency.js";
 import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js";
 
 export type CallOutcome = "continue" | "waiting" | "stale";
@@ -326,6 +327,17 @@ export class AgentToolRunner {
       this.snapshots.blockedResult(snapshot, call.id, `当前不能审批：${message}`, "approval_precondition", undefined, token.runId);
       this.snapshots.save(snapshot);
       return snapshot.run?.status === "running" ? "continue" : "waiting";
+    }
+    const product = this.deps.preparationProduct?.(id);
+    const summaryConflicts = product ? excludedItineraryCopyConflicts(product, [summary]) : [];
+    if (summaryConflicts.length) {
+      const snapshot = this.snapshots.load(id);
+      if (!this.snapshots.current(snapshot, token)) return "stale";
+      this.snapshots.blockedResult(snapshot, call.id,
+        `当前不能审批：审批说明仍描述已排除的行程选项（${summaryConflicts.join("、")}），请根据当前每日行程修正说明后重试。`,
+        "approval_precondition", { staleItinerarySummary: true, conflicts: summaryConflicts }, token.runId);
+      this.snapshots.save(snapshot);
+      return "continue";
     }
     // A model can lose track of an earlier approval while it works through a
     // long sequence of phases. Reuse an approval only when it is still bound

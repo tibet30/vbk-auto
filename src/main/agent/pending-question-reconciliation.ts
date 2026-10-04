@@ -2,6 +2,7 @@ import type { AgentQuestion } from "../../shared/contracts.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { hasPersistedCommercialInventory, hasPersistedCommercialPricing } from "../planning/commercial-stage.js";
 import { persistedCoverSource } from "./cover-input-reconciliation.js";
+import { requiredItineraryPoiSatisfaction } from "./core-preparation-poi-input.js";
 
 type Json = Record<string, unknown>;
 
@@ -81,10 +82,9 @@ export function resolvedProductQuestions(product: Json, questions: readonly Agen
       if (text(commercial.packageName)) message = "套餐名称已保存";
     } else if (/管家联系人|管家卡片|butlerContact/i.test(target)) {
       if (positiveInteger(butler.contactCardId) && positiveInteger(butler.providerId) && text(butler.displayName)) message = "管家联系人已保存";
-    } else if (/景点.*POI|POI.*景点|poiResolution/i.test(target)) {
-      if (spots.length && spots.every((spot) => positiveInteger(record(spot).poiId) && text(record(spot).poiName))) {
-        message = "行程景点的 POI 已核验并保存";
-      }
+    } else if (/景点.*POI|POI.*景点|poiResolution|待手动配置\s*POI|manual-poi/i.test(target)) {
+      const satisfaction = requiredItineraryPoiSatisfaction(product);
+      if (satisfaction.hasRequiredPoi && satisfaction.satisfied) message = "行程景点的 POI 已核验并保存";
     }
     return message ? [{ id: question.id, message, ...(source === "manualUpload" && /封面|cover|image\s*id|image\s*url/i.test(target) ? { pause: true } : {}) }] : [];
   });

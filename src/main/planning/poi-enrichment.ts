@@ -54,15 +54,19 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           if (!shouldReviewCompletePois) continue;
           const availability = availabilityByPoiId.get(spot.poiId) ?? await queryPoiAvailability(runtime, localProductId, spot.poiId);
           if (availability === "suspended") {
-            const removedName = String(spot.poiName || keyword);
-            day.spots.splice(day.spots.indexOf(spot), 1);
+            const retainedName = String(spot.name || keyword);
+            spot.poiName = null;
+            spot.poiId = null;
+            delete spot.province;
+            delete spot.city;
+            delete spot.district;
             poiUpdated = true;
             await addPoiResearchTask({
               runtime, localProductId, persistedTaskKeys, addedTasks,
-              keyword: removedName,
-              detail: "携程景点详情标记为暂停营业，已从行程移除；请替换为正常营业景点",
+              keyword: retainedName,
+              detail: "携程景点详情标记为暂停营业，已保留原景点和原行程位置；请待恢复营业后重新查询或手动绑定 POI",
             });
-            logInfo("[planning.poi]", { event: "suspended-poi-removed", localProductId, keyword: removedName });
+            logInfo("[planning.poi]", { event: "suspended-poi-retained", localProductId, keyword: retainedName });
             continue;
           }
           continue;
@@ -104,20 +108,15 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (!queryFailed) {
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
-          const task = buildPoiResearchTask(
-            String(keyword),
-            suspended
-              ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
-              : isTravelNodeName(originalKeyword)
-              ? "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点"
-              : "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI",
-          );
-          const key = `${task.type}::${task.label}`;
-          if (!persistedTaskKeys.has(key)) {
-            await runtime.addResearchTask(localProductId, task);
-            persistedTaskKeys.add(key);
-            addedTasks.push(task);
-          }
+          const detail = suspended
+            ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
+            : isTravelNodeName(originalKeyword)
+            ? "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点"
+            : "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI";
+          await addPoiResearchTask({
+            runtime, localProductId, persistedTaskKeys, addedTasks,
+            keyword: String(keyword), detail,
+          });
         }
       }
     }

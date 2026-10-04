@@ -14,11 +14,10 @@ import { refreshPendingInput } from "./core-pending-input.js";
 import { validateAnswers } from "./core-validation.js";
 import { isPreparationStatusQuery, preparationStatusReply } from "./preparation-status-query.js";
 import { isPreparationRun } from "./preparation-run.js";
+import { canResumeLocalPreparation, mustIsolateApprovedRun } from "./core-preparation-resume.js";
 import type { AgentCoreDependencies, AgentSnapshotStore } from "./types.js";
-
 export type { AgentSnapshotStore } from "./types.js";
 export { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
-
 export class AgentCore {
   private readonly active = new Set<string>();
   private readonly scheduled = new Set<string>();
@@ -29,7 +28,6 @@ export class AgentCore {
   private readonly toolRunner: AgentToolRunner;
   private readonly handoffs: AgentHandoff;
   private readonly loop: AgentTurnLoop;
-
   constructor(private readonly deps: AgentCoreDependencies, store: AgentSnapshotStore) {
     this.now = deps.now ?? (() => new Date());
     this.id = deps.id ?? (() => crypto.randomUUID());
@@ -38,7 +36,6 @@ export class AgentCore {
     this.handoffs = new AgentHandoff(deps, this.snapshots, (id, operation) => this.command(id, operation));
     this.loop = new AgentTurnLoop(deps, this.snapshots, this.toolRunner, this.id, this.active, this.scheduled);
   }
-
   async get(id: string): Promise<AgentSnapshot> {
     return this.command(id, async () => {
       const snapshot = this.load(id);
@@ -73,7 +70,6 @@ export class AgentCore {
       return saved;
     });
   }
-
   /** A product edit can satisfy questions that were asked from an older snapshot. */
   async reconcilePendingInput(id: string): Promise<AgentSnapshot> {
     return this.command(id, async () => {
@@ -85,7 +81,6 @@ export class AgentCore {
       return saved;
     });
   }
-
   async send(id: string, content: string): Promise<AgentSnapshot> {
     return this.command(id, async () => {
       const text = content.trim();
@@ -120,9 +115,15 @@ export class AgentCore {
       if (recoveryInstruction) approved = await this.handoffs.recover(id, snapshot) ?? approved;
       const preserveIntent = recoveryInstruction && Boolean(approved);
       const intentVersion = preserveIntent ? snapshot.run!.intentVersion : await this.intent(id);
+      const isolatesApprovedRun = !recoveryInstruction && mustIsolateApprovedRun(
+        snapshot,
+        approved,
+        this.deps.preparationProduct?.(id),
+        this.handoffs.has(id),
+      );
       this.snapshots.interruptStreaming(snapshot, "已由新的要求中止。");
       this.cancelPendingInteraction(snapshot, "新请求已替代此前等待中的交互。");
-      const startsNewRun = !snapshot.run || this.terminal(snapshot.run.status);
+      const startsNewRun = !snapshot.run || this.terminal(snapshot.run.status) || isolatesApprovedRun;
       if (startsNewRun) {
         snapshot = { ...snapshot, run: this.run("queued"), pendingInput: undefined, pendingApproval: undefined };
       }
@@ -134,7 +135,8 @@ export class AgentCore {
           recoveredApproval: true,
         });
       }
-      this.event(snapshot, "user", text, preserveIntent ? { approvalPreservingRecovery: true } : undefined);
+      this.event(snapshot, "user", text, preserveIntent ? { approvalPreservingRecovery: true }
+        : (isolatesApprovedRun ? { isolatedFromApprovedRun: true } : undefined));
       if (snapshot.uncertainWrite) this.pauseRun(snapshot, "写入结果尚未权威核对；已保存新要求，核对后才能继续。");
       else this.running(snapshot);
       const saved = this.save(snapshot);
@@ -151,7 +153,6 @@ export class AgentCore {
       return this.load(id);
     });
   }
-
   async repairIllegalKeywords(id: string, input: AgentIllegalKeywordRepairInput): Promise<AgentSnapshot> {
     return this.command(id, async () => {
       const text = input.content.trim();
@@ -183,7 +184,6 @@ export class AgentCore {
       return saved;
     });
   }
-
   async respond(id: string, response: AgentInputResponse): Promise<AgentSnapshot> {
     return this.command(id, async () => {
       const snapshot = this.load(id);
@@ -298,11 +298,13 @@ export class AgentCore {
         this.event(snapshot, "status", message, { reconciled: true, toolCallId: uncertain.toolCallId });
         }
       }
-      // The product-list recovery button does not create a new user message.
-      // Treat it as an operational retry and migrate an equivalent historical
-      // approval before the next write is evaluated.
+      // The recovery button is an operational retry, so recover prior approval first.
       await this.handoffs.recover(id, snapshot);
+      const preparationRetry = openRetryWindow && isPreparationRun(snapshot) && canResumeLocalPreparation(snapshot, Boolean(this.snapshots.validApproval(snapshot)));
       if (openRetryWindow) this.snapshots.openNoProgressRetryWindow(snapshot);
+      if (preparationRetry) {
+        this.event(snapshot, "user", "继续当前本地规划与资源核验。", { preparationResume: true });
+      }
       snapshot.run!.error = undefined;
       this.running(snapshot);
       const saved = this.save(snapshot);

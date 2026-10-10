@@ -73,6 +73,7 @@ function itineraryProgress(product: Record<string, unknown>): unknown[] {
       mealsPresent: Boolean(text(item?.meals)),
       hotel: text(item?.hotel),
       hotelTier: text(record(product.operations)?.hotelTier),
+      hotelRequirement: record(item?.hotelRequirement),
       hotelCandidates: Array.isArray(item?.hotelCandidates) ? item!.hotelCandidates.map((candidate) => {
         const value = record(candidate);
         return {

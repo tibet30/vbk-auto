@@ -1,23 +1,83 @@
+/**
+ * AgentCore ——agent 主循环入口。
+ *
+ * 这是「slim 编排层」：把每个 public method 的实现抽到 core/ 子文件里
+ * （get / send / approve / respond / pause / resume / ...），本文件只保留
+ * 类声明、构造器、command gate 串行化、以及 1 行委托给 helper 的 method。
+ *
+ * 调用方拿到的仍是 AgentCore 类，API 形态完全不变。
+ *
+ * core/*.ts 的 helper 通过 `AgentCoreInternals` 接口访问 private 成员：
+ * 不在仓库其它位置 import AgentCoreInternals；这是包内 friend 约定。
+ */
+
 import type {
-  AgentApproval, AgentApprovalResponse, AgentEvent, AgentEventType,
-  AgentIllegalKeywordRepairInput, AgentInputResponse, AgentRun, AgentRunStatus, AgentSnapshot,
+  AgentApprovalResponse,
+  AgentEvent,
+  AgentEventType,
+  AgentIllegalKeywordRepairInput,
+  AgentInputResponse,
+  AgentRun,
+  AgentRunStatus,
+  AgentSnapshot,
 } from "../../shared/contracts.js";
-import { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
 import { AgentHandoff } from "./core-handoff.js";
 import { AgentTurnLoop } from "./core-loop.js";
 import { AgentSnapshotManager, hasSyntheticNoopApproval, type NoProgressBlocker } from "./core-snapshot.js";
 import { AgentToolRunner } from "./core-tools.js";
-import { resolveSelectedAnswers } from "./selected-input-answers.js";
-import { requestWorkflowReplay } from "./core-workflow-replay.js";
-import { recoverPrematureCompletion } from "./core-completion-recovery.js";
 import { refreshPendingInput } from "./core-pending-input.js";
-import { validateAnswers } from "./core-validation.js";
-import { isPreparationStatusQuery, preparationStatusReply } from "./preparation-status-query.js";
-import { isPreparationRun } from "./preparation-run.js";
-import { canResumeLocalPreparation, mustIsolateApprovedRun } from "./core-preparation-resume.js";
 import type { AgentCoreDependencies, AgentSnapshotStore } from "./types.js";
 export type { AgentSnapshotStore } from "./types.js";
 export { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
+
+import { getSnapshot, reconcilePendingInput } from "./core/get.js";
+import { sendCommand } from "./core/send.js";
+import {
+  approveCommand,
+  repairIllegalKeywordsCommand,
+  respondCommand,
+} from "./core/approval.js";
+import {
+  abandonCommand,
+  pauseCommand,
+  resumeCommand,
+} from "./core/lifecycle.js";
+
+/**
+ * 内部 view ——供同包内的 core/*.ts helper 访问 AgentCore 的 private 成员。
+ * 不要在仓库其它位置 import 本类型；所有外部调用都走 AgentCore 的 public 方法。
+ */
+export interface AgentCoreInternals {
+  readonly deps: AgentCoreDependencies;
+  readonly active: Set<string>;
+  readonly scheduled: Set<string>;
+  readonly snapshots: AgentSnapshotManager;
+  readonly handoffs: AgentHandoff;
+  readonly loop: AgentTurnLoop;
+  command<T>(id: string, operation: () => Promise<T>): Promise<T>;
+  load(id: string): AgentSnapshot;
+  save(snapshot: AgentSnapshot): AgentSnapshot;
+  event(snapshot: AgentSnapshot, type: AgentEvent["type"], content: string, data?: Record<string, unknown>, runId?: string): void;
+  result(snapshot: AgentSnapshot, toolCallId: string, content: string, data?: Record<string, unknown>, runId?: string): void;
+  cancelPendingInteraction(snapshot: AgentSnapshot, reason: string): void;
+  refreshPendingInput(id: string, snapshot: AgentSnapshot): { changed: boolean; shouldSchedule: boolean };
+  blockedResult(snapshot: AgentSnapshot, toolCallId: string, message: string, blocker: NoProgressBlocker, data?: Record<string, unknown>, runId?: string): void;
+  completionBlocked(snapshot: AgentSnapshot, message: string, blocker?: NoProgressBlocker): void;
+  pendingCallId(snapshot: AgentSnapshot, type: AgentEventType, interactionId: string): string | undefined;
+  run(status: AgentRunStatus): AgentRun;
+  touch(run: AgentRun): void;
+  running(snapshot: AgentSnapshot): void;
+  waiting(snapshot: AgentSnapshot, status: "waiting_input" | "waiting_approval"): void;
+  pauseRun(snapshot: AgentSnapshot, content: string): void;
+  terminal(status: AgentRunStatus): boolean;
+  intent(id: string): Promise<string>;
+}
+
+/** Cast helper：core/*.ts 在函数顶部使用，避免每个调用点都重复 `as unknown as AgentCoreInternals`。 */
+export function asCoreInternals(core: AgentCore): AgentCoreInternals {
+  return core as unknown as AgentCoreInternals;
+}
+
 export class AgentCore {
   private readonly active = new Set<string>();
   private readonly scheduled = new Set<string>();
@@ -28,6 +88,7 @@ export class AgentCore {
   private readonly toolRunner: AgentToolRunner;
   private readonly handoffs: AgentHandoff;
   private readonly loop: AgentTurnLoop;
+
   constructor(private readonly deps: AgentCoreDependencies, store: AgentSnapshotStore) {
     this.now = deps.now ?? (() => new Date());
     this.id = deps.id ?? (() => crypto.randomUUID());
@@ -36,293 +97,18 @@ export class AgentCore {
     this.handoffs = new AgentHandoff(deps, this.snapshots, (id, operation) => this.command(id, operation));
     this.loop = new AgentTurnLoop(deps, this.snapshots, this.toolRunner, this.id, this.active, this.scheduled);
   }
-  async get(id: string): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const snapshot = this.load(id);
-      const detached = !this.active.has(id) && !this.scheduled.has(id);
-      if (detached) recoverPrematureCompletion(id, snapshot, this.deps, this.snapshots);
-      // `handoffApprovedWorkflow` is deliberately detached from the model
-      // turn. Renderer polling must not mistake that short interval for an
-      // application restart and pause the freshly authorised first phase.
-      const handingOff = this.handoffs.has(id);
-      if (detached && !handingOff) this.snapshots.recoverInterruptedCalls(snapshot);
-      if (detached && !handingOff) this.snapshots.interruptStreaming(snapshot, "应用中断，回复未完成。");
-      if (snapshot.run?.status === "running" && detached && !handingOff) {
-        this.pauseRun(snapshot, "应用重启后已在安全检查点暂停。");
-      }
-      if (hasSyntheticNoopApproval(snapshot) && !this.deps.requiresCompletionVerification?.(id, snapshot)) {
-        this.cancelPendingInteraction(snapshot, "已清除由未生效操作产生的错误确认请求。");
-        this.snapshots.finish(snapshot);
-        return this.save(snapshot);
-      }
-      if (snapshot.pendingApproval?.status === "pending") {
-        const blocker = await this.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
-        if (blocker) {
-          this.cancelPendingInteraction(snapshot, `最终确认已失效：${blocker}`);
-          if (snapshot.run && !this.terminal(snapshot.run.status)) {
-            this.pauseRun(snapshot, `最终确认已失效：${blocker}。请继续执行，系统会从缺失项自动修复。`);
-          }
-        }
-      }
-      const refresh = this.refreshPendingInput(id, snapshot);
-      const saved = this.save(snapshot);
-      if (refresh.shouldSchedule) this.loop.schedule(id);
-      return saved;
-    });
-  }
-  /** A product edit can satisfy questions that were asked from an older snapshot. */
-  async reconcilePendingInput(id: string): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const snapshot = this.load(id);
-      const refresh = this.refreshPendingInput(id, snapshot);
-      if (!refresh.changed) return snapshot;
-      const saved = this.save(snapshot);
-      if (refresh.shouldSchedule) this.loop.schedule(id);
-      return saved;
-    });
-  }
-  async send(id: string, content: string): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const text = content.trim();
-      if (!text) return this.load(id);
-      const replay = await requestWorkflowReplay({ id, content: text, deps: this.deps, snapshots: this.snapshots });
-      if (replay) return replay;
-      let snapshot = this.load(id);
-      if (!this.active.has(id) && !this.scheduled.has(id)) this.snapshots.recoverInterruptedCalls(snapshot);
-      if (snapshot.pendingApproval && isPendingApprovalStatusFollowup(text)) {
-        const precondition = await this.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
-        snapshot = this.load(id);
-        if (!precondition && snapshot.pendingApproval) {
-          this.snapshots.interruptStreaming(snapshot, "已收到对待处理状态的追问。");
-          this.event(snapshot, "user", text, { pendingApprovalRetained: true });
-          this.event(snapshot, "assistant", "当前方案已通过本地校验，原最终确认仍有效；无需重新生成推荐理由或重新申请确认。", {
-            pendingApprovalRetained: true,
-          });
-          this.waiting(snapshot, "waiting_approval");
-          return this.save(snapshot);
-        }
-        // Plan is no longer phase-A ready: drop the stale card and continue as a
-        // normal turn so the model can finish local prep before re-requesting.
-      }
-      if (isPreparationRun(snapshot) && isPreparationStatusQuery(text)) {
-        this.event(snapshot, "user", text, { readOnlyStatusQuery: true });
-        this.event(snapshot, "assistant", preparationStatusReply(snapshot, this.deps.preparationProduct?.(id)), { readOnlyStatusQuery: true });
-        return this.save(snapshot);
-      }
-      await this.deps.prepareUserInstruction?.(id, text);
-      const recoveryInstruction = preservesApprovedIntent(text);
-      let approved = this.snapshots.validApproval(snapshot);
-      if (recoveryInstruction) approved = await this.handoffs.recover(id, snapshot) ?? approved;
-      const preserveIntent = recoveryInstruction && Boolean(approved);
-      const intentVersion = preserveIntent ? snapshot.run!.intentVersion : await this.intent(id);
-      const isolatesApprovedRun = !recoveryInstruction && mustIsolateApprovedRun(
-        snapshot,
-        approved,
-        this.deps.preparationProduct?.(id),
-        this.handoffs.has(id),
-      );
-      this.snapshots.interruptStreaming(snapshot, "已由新的要求中止。");
-      this.cancelPendingInteraction(snapshot, "新请求已替代此前等待中的交互。");
-      const startsNewRun = !snapshot.run || this.terminal(snapshot.run.status) || isolatesApprovedRun;
-      if (startsNewRun) {
-        snapshot = { ...snapshot, run: this.run("queued"), pendingInput: undefined, pendingApproval: undefined };
-      }
-      snapshot.run!.intentVersion = intentVersion;
-      snapshot.run!.error = undefined;
-      if (startsNewRun && preserveIntent && approved) {
-        this.event(snapshot, "approval", "已复用既有授权", {
-          approval: approved,
-          recoveredApproval: true,
-        });
-      }
-      this.event(snapshot, "user", text, preserveIntent ? { approvalPreservingRecovery: true }
-        : (isolatesApprovedRun ? { isolatedFromApprovedRun: true } : undefined));
-      if (snapshot.uncertainWrite) this.pauseRun(snapshot, "写入结果尚未权威核对；已保存新要求，核对后才能继续。");
-      else this.running(snapshot);
-      const saved = this.save(snapshot);
-      if (saved.run?.status !== "running") return saved;
-      if (preserveIntent && approved && this.handoffs.isDeterministic(approved)) {
-        await this.handoffs.refreshFingerprint(id, approved);
-        const ready = this.snapshots.validApproval(this.load(id)) ?? approved;
-        if (this.handoffs.tryStart(id, ready)) return this.load(id);
-        const paused = this.load(id);
-        this.pauseRun(paused, "已确认方案的自动录入未能重新启动；请再次点击继续执行，不会改回 AI 规划。");
-        return this.save(paused);
-      }
-      if (!(preserveIntent && approved && this.handoffs.tryStart(id, approved))) this.loop.schedule(id);
-      return this.load(id);
-    });
-  }
-  async repairIllegalKeywords(id: string, input: AgentIllegalKeywordRepairInput): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const text = input.content.trim();
-      if (!text) return this.load(id);
-      const intentVersion = await this.intent(id);
-      let snapshot = this.load(id);
-      if (!this.active.has(id) && !this.scheduled.has(id)) this.snapshots.recoverInterruptedCalls(snapshot);
-      this.snapshots.interruptStreaming(snapshot, "已由非法关键词修复任务接管。");
-      this.cancelPendingInteraction(snapshot, "非法关键词修复任务已替代此前等待中的交互。");
-      if (!snapshot.run || this.terminal(snapshot.run.status)) {
-        snapshot = { ...snapshot, run: this.run("queued"), pendingInput: undefined, pendingApproval: undefined };
-      }
-      snapshot.run!.intentVersion = intentVersion;
-      snapshot.run!.error = undefined;
-      this.event(snapshot, "user", text, {
-        illegalKeywordRepair: true,
-        keywords: input.keywords,
-        affectedPaths: input.affectedPaths,
-      });
-      this.event(snapshot, "status", `已记录 VBK 文案黑名单：${input.keywords.join("、") || "见错误详情"}，开始重写图文。`, {
-        illegalKeywordRepair: true,
-        keywords: input.keywords,
-        affectedPaths: input.affectedPaths,
-      });
-      snapshot.uncertainWrite = undefined;
-      this.running(snapshot);
-      const saved = this.save(snapshot);
-      this.loop.schedule(id);
-      return saved;
-    });
-  }
-  async respond(id: string, response: AgentInputResponse): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const snapshot = this.load(id);
-      const request = snapshot.pendingInput;
-      if (!request || !["waiting_input", "paused"].includes(snapshot.run?.status ?? "")
-        || request.id !== response.requestId || !validateAnswers(request, response.answers)) return snapshot;
-      const resolved = resolveSelectedAnswers(request, response.answers);
-      const changed = await this.deps.prepareUserInstruction?.(id, resolved.instruction, {
-        selectedLabels: resolved.selectedLabels,
-        selectedQuestions: resolved.selectedQuestions,
-      });
-      if (changed && snapshot.run) snapshot.run.intentVersion = await this.intent(id);
-      snapshot.pendingInput = undefined;
-      const toolCallId = this.pendingCallId(snapshot, "input_request", request.id);
-      const answers = { ...(request.defaultAnswers ?? {}), ...response.answers };
-      const resolvedAnswers = { ...answers, ...resolved.answers };
-      if (toolCallId) this.result(snapshot, toolCallId, JSON.stringify(resolvedAnswers), { requestId: request.id, answers, resolvedAnswers });
-      this.event(snapshot, "user", `用户回答：${JSON.stringify(resolvedAnswers)}`, { requestId: request.id, answers, resolvedAnswers });
-      this.running(snapshot);
-      const saved = this.save(snapshot);
-      this.loop.schedule(id);
-      return saved;
-    });
-  }
 
-  async approve(id: string, response: AgentApprovalResponse): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const pending = this.load(id).pendingApproval;
-      if (!pending || pending.id !== response.approvalId || pending.productVersion !== response.productVersion) return this.load(id);
-      const precondition = await this.deps.approvalPrecondition?.(id, pending.scope);
-      const identity = precondition ? undefined : await this.deps.accountFor(id);
-      const snapshot = this.load(id);
-      const approval = snapshot.pendingApproval;
-      if (!approval || !["waiting_approval", "paused"].includes(snapshot.run?.status ?? "")
-        || approval.id !== response.approvalId || approval.productVersion !== response.productVersion) return snapshot;
-      const toolCallId = this.pendingCallId(snapshot, "approval_request", approval.id);
-      let granted: AgentApproval | undefined;
-      if (precondition || !identity || approval.accountKey !== identity.accountKey || approval.productVersion !== identity.productVersion
-        || approval.intentVersion !== snapshot.run?.intentVersion) {
-        approval.status = "invalidated";
-        snapshot.pendingApproval = undefined;
-        this.event(snapshot, "approval", "授权已失效", { approval });
-        const message = precondition ? `授权前置条件已变化：${precondition}` : "授权已失效，请重新申请。";
-        const blocker: NoProgressBlocker = precondition ? "approval_precondition" : "authorization_denied";
-        if (toolCallId) this.blockedResult(snapshot, toolCallId, message, blocker, { approvalId: approval.id });
-        else this.completionBlocked(snapshot, message, blocker);
-      } else {
-        approval.status = "approved";
-        approval.trafficRouteReviewAuthorized = response.trafficRouteReviewAuthorized === true;
-        granted = approval;
-        snapshot.pendingApproval = undefined;
-        this.event(snapshot, "approval", "用户已授权", { approval });
-        if (toolCallId) this.result(snapshot, toolCallId, "授权已确认。", { approval });
-      }
-      if (snapshot.run?.status !== "paused") this.running(snapshot);
-      const saved = this.save(snapshot);
-      if (saved.run?.status === "running" && !(granted && this.handoffs.tryStart(id, granted))) this.loop.schedule(id);
-      return saved;
-    });
+  get(id: string): Promise<AgentSnapshot> { return getSnapshot(this, id); }
+  reconcilePendingInput(id: string): Promise<AgentSnapshot> { return reconcilePendingInput(this, id); }
+  send(id: string, content: string): Promise<AgentSnapshot> { return sendCommand(this, id, content); }
+  repairIllegalKeywords(id: string, input: AgentIllegalKeywordRepairInput): Promise<AgentSnapshot> {
+    return repairIllegalKeywordsCommand(this, id, input);
   }
-
-  async pause(id: string): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const snapshot = this.load(id);
-      this.snapshots.interruptStreaming(snapshot, "已暂停，回复未完成。");
-      if (snapshot.run && !this.terminal(snapshot.run.status)) this.pauseRun(snapshot, "运行已暂停");
-      return this.save(snapshot);
-    });
-  }
-
-  async resume(id: string): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      let snapshot = this.load(id);
-      if (!this.active.has(id) && !this.scheduled.has(id)) this.snapshots.recoverInterruptedCalls(snapshot);
-      if (!snapshot.run || ["completed", "abandoned"].includes(snapshot.run.status)) return snapshot;
-      const refresh = this.refreshPendingInput(id, snapshot);
-      if (refresh.changed) {
-        const saved = this.save(snapshot);
-        if (refresh.shouldSchedule) this.loop.schedule(id);
-        return saved;
-      }
-      const openRetryWindow = snapshot.run.status === "paused";
-      if (snapshot.pendingInput) { this.waiting(snapshot, "waiting_input"); return this.save(snapshot); }
-      if (snapshot.pendingApproval) {
-        const blocker = await this.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
-        snapshot = this.load(id);
-        if (!snapshot.pendingApproval) return snapshot;
-        if (!blocker) {
-          this.waiting(snapshot, "waiting_approval");
-          return this.save(snapshot);
-        }
-        this.cancelPendingInteraction(snapshot, `最终确认已失效：${blocker}`);
-        this.event(snapshot, "status", `最终确认已失效：${blocker}。继续从缺失项自动修复。`, {
-          noProgressBlocker: "approval_precondition",
-        });
-      }
-      if (snapshot.uncertainWrite) {
-        const uncertain = structuredClone(snapshot.uncertainWrite);
-        const reconciliation = await this.deps.reconcileUncertainWrite?.(id, uncertain);
-        snapshot = this.load(id);
-        if (!snapshot.uncertainWrite || snapshot.uncertainWrite.toolCallId !== uncertain.toolCallId) return snapshot;
-        if (!reconciliation?.reconciled && !reconciliation?.retryable) {
-          this.pauseRun(snapshot, reconciliation?.message ?? "写入结果尚未权威核对，不能继续。");
-          return this.save(snapshot);
-        }
-        if (reconciliation.retryable) {
-          snapshot.uncertainWrite = undefined;
-          this.event(snapshot, "status", reconciliation.message ?? "已确认上一轮未形成可验证写入，可定向重试。", { retryable: true });
-        } else {
-        const message = reconciliation.message ?? "不确定写入已核对。";
-        this.snapshots.reconcileCall(snapshot, uncertain.toolCallId, message);
-        snapshot.uncertainWrite = undefined;
-        this.event(snapshot, "status", message, { reconciled: true, toolCallId: uncertain.toolCallId });
-        }
-      }
-      // The recovery button is an operational retry, so recover prior approval first.
-      await this.handoffs.recover(id, snapshot);
-      const preparationRetry = openRetryWindow && isPreparationRun(snapshot) && canResumeLocalPreparation(snapshot, Boolean(this.snapshots.validApproval(snapshot)));
-      if (openRetryWindow) this.snapshots.openNoProgressRetryWindow(snapshot);
-      if (preparationRetry) {
-        this.event(snapshot, "user", "继续当前本地规划与资源核验。", { preparationResume: true });
-      }
-      snapshot.run!.error = undefined;
-      this.running(snapshot);
-      const saved = this.save(snapshot);
-      const approval = this.snapshots.validApproval(saved);
-      if (approval && this.handoffs.isDeterministic(approval)) {
-        // Phase B resume must never fall back to the model loop.
-        await this.handoffs.refreshFingerprint(id, approval);
-        const ready = this.snapshots.validApproval(this.load(id)) ?? approval;
-        if (this.handoffs.tryStart(id, ready)) return this.load(id);
-        const paused = this.load(id);
-        this.pauseRun(paused, "已确认方案的自动录入未能重新启动；请再次点击继续执行，不会改回 AI 规划。");
-        return this.save(paused);
-      }
-      if (!(approval && this.handoffs.tryStart(id, approval))) this.loop.schedule(id);
-      return this.load(id);
-    });
-  }
+  respond(id: string, response: AgentInputResponse): Promise<AgentSnapshot> { return respondCommand(this, id, response); }
+  approve(id: string, response: AgentApprovalResponse): Promise<AgentSnapshot> { return approveCommand(this, id, response); }
+  pause(id: string): Promise<AgentSnapshot> { return pauseCommand(this, id); }
+  resume(id: string): Promise<AgentSnapshot> { return resumeCommand(this, id); }
+  abandon(id: string): Promise<AgentSnapshot> { return abandonCommand(this, id); }
 
   async completeApprovedWorkflow(id: string, approvalId: string): Promise<AgentSnapshot> {
     return this.handoffs.complete(id, approvalId);
@@ -330,20 +116,6 @@ export class AgentCore {
 
   async pauseApprovedWorkflow(id: string, approvalId: string, message: string): Promise<AgentSnapshot> {
     return this.handoffs.pause(id, approvalId, message);
-  }
-
-  async abandon(id: string): Promise<AgentSnapshot> {
-    return this.command(id, async () => {
-      const snapshot = this.load(id);
-      if (snapshot.run && !this.terminal(snapshot.run.status)) {
-        this.snapshots.interruptStreaming(snapshot, "任务已废弃，回复未完成。");
-        this.cancelPendingInteraction(snapshot, "运行已放弃。");
-        snapshot.run.status = "abandoned";
-        this.touch(snapshot.run);
-        this.event(snapshot, "status", "运行已放弃", { status: "abandoned" });
-      }
-      return this.save(snapshot);
-    });
   }
 
   async idle(id: string): Promise<void> {
@@ -397,3 +169,7 @@ export class AgentCore {
     finally { release(); if (this.commandTails.get(id) === tail) this.commandTails.delete(id); }
   }
 }
+
+// `hasSyntheticNoopApproval` 在 getCommand 中通过 imports 引入；core.ts 不直接使用，
+// 但下游会依赖它作为 AgentCore 内部逻辑的一部分，保留 re-export 以避免破坏现有 import 路径。
+export { hasSyntheticNoopApproval };

@@ -1,41 +1,57 @@
+/**
+ * agent/integration-setup 入口（barrel + installProductAgent）：
+ *   - restore.ts：restoreExplicitOperatorDeletion + mentionsDay +
+ *     restoreContextIdentifiesReceipt + restoreExplicitAlternativeSlots；
+ *
+ * installProductAgent 是 AgentCore 的胶水代码：
+ *   - 注入 OpenAI model + tools + 各种 gate（approval precondition / finish
+ *     verified / workflow replay / uncertain write reconciliation）；
+ *   - 启动后返回的 cleanup 函数把 runVbkPageExclusive / productMutations /
+ *     agentWriteGuard 装回 automation runner；
+ *   - 不在此处做具体业务执行，只做依赖注入。
+ */
+
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
-import type { MainIpcContext } from '../ipc/context.js';
-import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from '../../shared/ai-provider-config.js';
-import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from '../planning/adapters/openai-compatible-adapter.js';
-import { productNotFound } from '../infrastructure/db-errors.js';
-import { AgentCore } from './core.js';
-import { OpenAIAgentModel } from './openai-model.js';
-import { createAgentBusinessTools, agentProductVersion } from './integration.js';
-import { agentPlannerContext, agentTaskContext } from './integration-context.js';
-import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from './integration-gates.js';
-import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from './core-workflow-replay.js';
-import { preparationApprovalBlockReason } from '../planning/preparation-completion.js';
-import { inspectManualCoverAsset } from '../automation/manual-cover-asset.js';
-import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from './integration-guard.js';
-import { reconcileAgentShell } from './integration-reconcile.js';
-import { recordAgentUsage } from './integration-usage.js';
-import { estimateAiUsageCostCny } from '../../shared/ai-usage-cost.js';
-import { refreshSatisfiedResearchTasks } from '../operations/research-refresh.js';
-import { recoverResolvedHotelCandidates } from './hotel-candidate-recovery.js';
-import { repairProductForExplicitInstruction } from './user-instruction-repair.js';
-import { resolvedProductQuestions } from './pending-question-reconciliation.js';
-import { needsTrafficLineBackfill } from '../automation/traffic-line-backfill.js';
-import { isPreparationRun, isPreparationInstruction } from './preparation-run.js';
-import { preparationItineraryRecovery } from './preparation-itinerary-recovery.js';
-import { runQueuedApprovedWorkflow } from './queued-approved-workflow.js';
-import { clearTrustedOperatorItineraryRemoval, trustedOperatorItineraryRemovals } from '../../shared/trusted-operator-itinerary-removals.js';
-import { explicitAlternativeGroups } from '../planning/itinerary-input-contract.js';
-import { restoreExplicitAlternativeGroupSpots } from '../planning/restore-explicit-itinerary-spots.js';
-import { extractLockedConstraints } from './prompt-helpers.js';
+import type { MainIpcContext } from "../ipc/context.js";
+import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
+import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "../planning/adapters/openai-compatible-adapter.js";
+import { productNotFound } from "../infrastructure/db-errors.js";
+import { AgentCore } from "./core.js";
+import { OpenAIAgentModel } from "./openai-model.js";
+import { createAgentBusinessTools, agentProductVersion } from "./integration.js";
+import { agentPlannerContext, agentTaskContext } from "./integration-context.js";
+import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from "./integration-gates.js";
+import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from "./core-workflow-replay.js";
+import { preparationApprovalBlockReason } from "../planning/preparation-completion.js";
+import { inspectManualCoverAsset } from "../automation/manual-cover-asset.js";
+import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from "./integration-guard.js";
+import { reconcileAgentShell } from "./integration-reconcile.js";
+import { recordAgentUsage } from "./integration-usage.js";
+import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
+import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
+import { recoverResolvedHotelCandidates } from "./hotel-candidate-recovery.js";
+import { repairProductForExplicitInstruction } from "./user-instruction-repair.js";
+import { resolvedProductQuestions } from "./pending-question-reconciliation.js";
+import { needsTrafficLineBackfill } from "../automation/traffic-line-backfill.js";
+import { isPreparationRun, isPreparationInstruction } from "./preparation-run.js";
+import { preparationItineraryRecovery } from "./preparation-itinerary-recovery.js";
+import { runQueuedApprovedWorkflow } from "./queued-approved-workflow.js";
+import { restoreExplicitOperatorDeletion, restoreExplicitAlternativeSlots } from "./integration-setup/restore.js";
+
+export {
+  restoreExplicitOperatorDeletion,
+  restoreExplicitAlternativeSlots,
+  mentionsDay,
+} from "./integration-setup/restore.js";
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
 export function installProductAgent(context: MainIpcContext): () => void {
-  const {db,getSettings,apiKey,productWorkflows,remoteProducts,readiness,emitProduct} = context;
-  const emitAgentSnapshot = (snapshot: Parameters<NonNullable<MainIpcContext['emitAgentSnapshot']>>[0]) => context.emitAgentSnapshot?.(snapshot);
+  const { db, getSettings, apiKey, productWorkflows, remoteProducts, readiness, emitProduct } = context;
+  const emitAgentSnapshot = (snapshot: Parameters<NonNullable<MainIpcContext["emitAgentSnapshot"]>>[0]) => context.emitAgentSnapshot?.(snapshot);
   context.agentCore = new AgentCore({
     preparationProduct: (localProductId) => db.getProduct(localProductId),
     requiresCompletionVerification: (id, snapshot) => isPreparationRun(snapshot)
-      && !(db.getProduct(id)?.status === 'draft_saved' && db.getProduct(id)?.productId),
+      && !(db.getProduct(id)?.status === "draft_saved" && db.getProduct(id)?.productId),
     // Resolve credentials and model settings for each Agent turn. Startup remains
     // available without a key, and settings changes apply to the next request.
     modelFor: async (localProductId) => {
@@ -47,16 +63,16 @@ export function installProductAgent(context: MainIpcContext): () => void {
       return new OpenAIAgentModel({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model,
         extraParams: planningTransportOptions(settings.aiProvider).extraParams,
         onUsage: (usage) => recordAgentUsage(db, localProductId, {
-          id: crypto.randomUUID(),source:"chat.reply",stage:"agent",model:profile.model,provider:settings.aiProvider,
-          status:"ok",startedAt,endedAt:new Date().toISOString(),durationMs:Date.now()-Date.parse(startedAt),
-          inputTokens:usage.inputTokens ?? null,outputTokens:usage.outputTokens ?? null,
-          totalTokens:usage.inputTokens!==undefined && usage.outputTokens!==undefined ? usage.inputTokens+usage.outputTokens : null,
-          cachedTokens:usage.cachedTokens ?? null,
-          estimatedCostCny:estimateAiUsageCostCny({
-            model:profile.model,
-            inputTokens:usage.inputTokens ?? null,
-            outputTokens:usage.outputTokens ?? null,
-            cachedTokens:usage.cachedTokens ?? null,
+          id: crypto.randomUUID(), source: "chat.reply", stage: "agent", model: profile.model, provider: settings.aiProvider,
+          status: "ok", startedAt, endedAt: new Date().toISOString(), durationMs: Date.now() - Date.parse(startedAt),
+          inputTokens: usage.inputTokens ?? null, outputTokens: usage.outputTokens ?? null,
+          totalTokens: usage.inputTokens !== undefined && usage.outputTokens !== undefined ? usage.inputTokens + usage.outputTokens : null,
+          cachedTokens: usage.cachedTokens ?? null,
+          estimatedCostCny: estimateAiUsageCostCny({
+            model: profile.model,
+            inputTokens: usage.inputTokens ?? null,
+            outputTokens: usage.outputTokens ?? null,
+            cachedTokens: usage.cachedTokens ?? null,
           }),
         }),
       });
@@ -259,16 +275,16 @@ export function installProductAgent(context: MainIpcContext): () => void {
       const login = await context.browser.status(true);
       const remote = await remoteProducts.get(localProductId);
       const account = login.loginAccount?.trim() || login.accountName?.trim();
-      if (!login.loggedIn || !account || (remote.vbkAccount && remote.vbkAccount !== account)) return {reconciled:false,message:"请先登录产品绑定的 VBK 账号再核查。"};
+      if (!login.loggedIn || !account || (remote.vbkAccount && remote.vbkAccount !== account)) return { reconciled: false, message: "请先登录产品绑定的 VBK 账号再核查。" };
       const product = db.getProduct(localProductId);
       const snapshot = db.getAgentSnapshot(localProductId);
-      if (!product || !snapshot) return {reconciled:false,message:"产品记录不存在"};
+      if (!product || !snapshot) return { reconciled: false, message: "产品记录不存在" };
       const result = await reconcileAgentShell(product, snapshot, uncertain.toolCallId, await getVbkRequestPage(context.browser));
       if (result.reconciled) {
         const fresh = db.getAgentSnapshot(localProductId)!;
-        const event = fresh.events.find(item=>item.type==='tool_result' && item.data?.toolCallId===uncertain.toolCallId);
-        if (event) event.data = {...event.data,approvalId:approvalForRun(fresh)?.id,verified:true,phase:result.phase,productId:product.productId};
-        else fresh.events.push({id:crypto.randomUUID(),runId:fresh.run!.id,type:"tool_result",createdAt:new Date().toISOString(),content:result.message,data:{toolCallId:uncertain.toolCallId,write:true,remoteWrite:true,approvalId:approvalForRun(fresh)?.id,verified:true,phase:result.phase,productId:product.productId}});
+        const event = fresh.events.find(item => item.type === "tool_result" && item.data?.toolCallId === uncertain.toolCallId);
+        if (event) event.data = { ...event.data, approvalId: approvalForRun(fresh)?.id, verified: true, phase: result.phase, productId: product.productId };
+        else fresh.events.push({ id: crypto.randomUUID(), runId: fresh.run!.id, type: "tool_result", createdAt: new Date().toISOString(), content: result.message, data: { toolCallId: uncertain.toolCallId, write: true, remoteWrite: true, approvalId: approvalForRun(fresh)?.id, verified: true, phase: result.phase, productId: product.productId } });
         db.saveAgentSnapshot(fresh);
       }
       return result;
@@ -282,7 +298,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
         const remote = await remoteProducts.get(localProductId);
         const approval = approvalForRun(db.getAgentSnapshot(localProductId));
         const accountKey = login.loginAccount?.trim() || login.accountName?.trim();
-        if (!login.loggedIn || !accountKey || approval?.accountKey!==accountKey || (remote.vbkAccount && remote.vbkAccount!==accountKey)) return {verified:false,message:"当前账号与本轮确认不一致，请恢复对应账号后继续核对。"};
+        if (!login.loggedIn || !accountKey || approval?.accountKey !== accountKey || (remote.vbkAccount && remote.vbkAccount !== accountKey)) return { verified: false, message: "当前账号与本轮确认不一致，请恢复对应账号后继续核对。" };
       } else {
         // Creating a final confirmation card is still phase A: clear satisfied
         // research noise before readiness decides the plan is complete.
@@ -296,7 +312,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       if (!product) return { verified: false, message: "产品不存在" };
       const result = agentCompletionGate(product, db.getAgentSnapshot(localProductId), readiness(localProductId), finishContext);
       if (result.verified && finishContext?.hadRemoteWrites) {
-        db.setProductLifecycle(localProductId, {status:"draft_saved"});
+        db.setProductLifecycle(localProductId, { status: "draft_saved" });
         emitProduct(db.getProduct(localProductId)!);
       }
       return result;
@@ -306,64 +322,15 @@ export function installProductAgent(context: MainIpcContext): () => void {
     saveAgentSnapshot: (snapshot) => { db.saveAgentSnapshot(snapshot); emitAgentSnapshot(snapshot); },
   });
   return () => {
-  context.automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));
-  context.automation.setProductMutations(context.productMutations);
-  context.automation.setAgentWriteGuard(async (localProductId, phase) => {
-    const login = await context.browser.status(true);
-    const product = db.getProduct(localProductId);
-    if (!product || !login.loggedIn) throw new Error("请登录产品对应的 VBK 账号。");
-    const remote = await remoteProducts.get(localProductId);
-    assertAgentWriteAuthorized({...product,vbkAccount:remote.vbkAccount}, db.getAgentSnapshot(localProductId), phase,
-      login.loginAccount?.trim() || login.accountName?.trim() || "");
-  });
+    context.automation.setRunVbkPageExclusive((task) => productWorkflows.runVbkPageExclusive(task));
+    context.automation.setProductMutations(context.productMutations);
+    context.automation.setAgentWriteGuard(async (localProductId, phase) => {
+      const login = await context.browser.status(true);
+      const product = db.getProduct(localProductId);
+      if (!product || !login.loggedIn) throw new Error("请登录产品对应的 VBK 账号。");
+      const remote = await remoteProducts.get(localProductId);
+      assertAgentWriteAuthorized({ ...product, vbkAccount: remote.vbkAccount }, db.getAgentSnapshot(localProductId), phase,
+        login.loginAccount?.trim() || login.accountName?.trim() || "");
+    });
   };
-}
-
-/** Only a direct user request can revoke an exact manual deletion receipt. */
-export function restoreExplicitOperatorDeletion(product: Record<string, unknown>, content: string): boolean {
-  if (!/(恢复|加回|新增|重新加入|保留)/.test(content)) return false;
-  let changed = false;
-  const receipts = trustedOperatorItineraryRemovals(product);
-  for (const receipt of receipts) {
-    if (!content.replace(/\s+/g, "").includes(receipt.name.replace(/\s+/g, ""))) continue;
-    if (!mentionsDay(content, receipt.day)) continue;
-    if (!restoreContextIdentifiesReceipt(receipt, receipts, content)) continue;
-    changed = clearTrustedOperatorItineraryRemoval(product, receipt.day, receipt.name, receipt.groupKey) || changed;
-  }
-  return changed;
-}
-
-function restoreContextIdentifiesReceipt(
-  receipt: ReturnType<typeof trustedOperatorItineraryRemovals>[number],
-  receipts: ReturnType<typeof trustedOperatorItineraryRemovals>, content: string,
-): boolean {
-  const sameSlotName = receipts.filter((item) => item.day === receipt.day && item.name.replace(/\s+/g, "") === receipt.name.replace(/\s+/g, ""));
-  if (sameSlotName.length === 1) return true;
-  if (!receipt.groupKey?.startsWith(`or:${receipt.day}:`)) return false;
-  const peers = receipt.groupKey.slice(`or:${receipt.day}:`.length).split("\u001f")
-    .filter((name) => name && name !== receipt.name.replace(/\s+/g, ""));
-  const compact = content.replace(/\s+/g, "");
-  return peers.some((name) => compact.includes(name));
-}
-
-function mentionsDay(content: string, day: number): boolean {
-  const chinese = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][day] ?? "";
-  return new RegExp(`(?:第${day}(?:天|日)|[dD]${day}\\b|第${chinese}天)`).test(content);
-}
-
-/** Recreate old auto-removed explicit alternatives locally before any new run. */
-export function restoreExplicitAlternativeSlots(detail: import("../../shared/contracts.js").ProductDetail, content: string): Record<string, unknown> | undefined {
-  if (!/(?:恢复|加回|新增|重新加入|保留|修改|调整)/u.test(content)) return undefined;
-  const locked = extractLockedConstraints(detail);
-  let itinerary = detail.product.itinerary;
-  let changed = false;
-  for (const group of explicitAlternativeGroups(detail)) {
-    const row = locked.itineraryOrder.find((item) => item.day === group.day);
-    if (!row) continue;
-    const result = restoreExplicitAlternativeGroupSpots(detail, itinerary, row.spots, group);
-    if (!result.changed) continue;
-    itinerary = result.itinerary;
-    changed = true;
-  }
-  return changed ? { ...detail.product, itinerary } : undefined;
 }

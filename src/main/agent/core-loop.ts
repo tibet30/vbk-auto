@@ -117,6 +117,13 @@ export class AgentTurnLoop {
           }, token.runId);
           this.snapshots.save(before);
         }
+        if (preparation.hotelInputModelWindow) {
+          this.snapshots.event(before, "status", "酒店资料已回答，请读取该答案并用 patch_product 和 resolve_itinerary_hotels 落实到真实住宿候选；不能重复 ask_user，不能猜测酒店 ID、改变用户明确的住宿地点或只回复检索策略。", {
+            hotelInputModelWindow: true, modelFeedback: true, node: preparation.action!.node,
+            progressKey: preparation.action!.progressKey,
+          }, token.runId);
+          this.snapshots.save(before);
+        }
         const messages = await this.messages(before);
         if (!this.snapshots.current(this.snapshots.load(id), token)) continue;
         const model = await this.model(id);

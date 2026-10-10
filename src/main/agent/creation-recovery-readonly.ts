@@ -1,62 +1,38 @@
-import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
+/**
+ * creation-recovery-readonly 入口（barrel + createVbkCreationRecoveryTools）：
+ *   - types.ts：所有 interface / type（CreationVariant / RecoveryScope /
+ *     CreationVariantReadback / CreationRecoveryReadOnlyDependencies /
+ *     RecoveryTarget / RecoveryInput）；
+ *   - snapshots.ts：productJsonSnapshot / canonical / workflowSnapshot / assertUnchanged；
+ *   - recovery-run.ts：parseRecoveryScope / requireProduct / recoveryInput /
+ *     uniqueVariants / assertUnsubmittedDraft；
+ *   - recovery-input.ts：verifyTrafficTargets；
+ *   - project.ts：projectCreationVariant / projectPreflight / projectTrafficTarget；
+ *
+ * createVbkCreationRecoveryTools 是 read_vbk_creation_recovery 工具工厂，
+ *   全程只读 VBK，不会创建 / 保存 / 启用 / 提交 / 发布任何 VBK 产品。
+ *   写入必须在 all 远端读回 + 第二次本地版本守卫通过之后。
+ */
+
 import { randomUUID } from "node:crypto";
-
-import type { AutomationRun, ProductDetail } from "../../shared/contracts.js";
-import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../shared/contracts-traffic-line.js";
-import { normaliseTrafficLineConfig, normaliseTrafficLineVariant, trafficLineLabel } from "../../shared/contracts-traffic-line.js";
-import { draftPhasesFor } from "../automation/automation.main/automation.main.phases.js";
+import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { runProductReadOnlyPreflightApi } from "../automation/ctrip/preflight-readonly.js";
-import { verifyTrafficLineChild, type TrafficLineChildReadback } from "../automation/ctrip/traffic-line/readback.js";
+import { verifyTrafficLineChild } from "../automation/ctrip/traffic-line/readback.js";
 import { readTrafficLineChildren } from "../automation/ctrip/traffic-line/relationships.js";
-import type { TrafficLineExistingChild } from "../automation/ctrip/traffic-line/types.js";
-import type { ProductWorkflowCoordinator } from "../application/product-workflow-coordinator.js";
-import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
-import type { VbkDatabase } from "../infrastructure/database/database.js";
+import { draftPhasesFor } from "../automation/automation.main/automation.main.phases.js";
+import type { AutomationRun } from "../../shared/contracts.js";
 import type { AgentTool } from "./types.js";
+import { assertUnsubmittedDraft, parseRecoveryScope, recoveryInput, requireProduct, uniqueVariants } from "./creation-recovery-readonly/recovery-run.js";
+import { verifyTrafficTargets } from "./creation-recovery-readonly/recovery-input.js";
+import { assertUnchanged } from "./creation-recovery-readonly/snapshots.js";
+import { projectCreationVariant, projectPreflight, projectTrafficTarget } from "./creation-recovery-readonly/project.js";
+import type { CreationRecoveryReadOnlyDependencies, RecoveryInput, RecoveryScope, RecoveryTarget } from "./creation-recovery-readonly/types.js";
 
-type CreationVariant = "draft" | "formal" | "audit" | "preview" | "unknown";
-type RecoveryScope = "all" | "parent-only";
-
-export interface CreationVariantReadback {
-  /** The exact Ctrip representation used for this read; recovery accepts draft only. */
-  variant: CreationVariant;
-  /** Set only by the dedicated reader after explicit draft or unsubmitted-main guards. */
-  unsubmittedDraftVerified: boolean;
-  draftSource?: "independent" | "unsubmitted-main";
-  ids: Partial<Record<Exclude<CreationVariant, "unknown">, string>>;
-  poi85862?: { suffixName?: string; description?: string };
-}
-
-export interface CreationRecoveryReadOnlyDependencies {
-  db: Pick<VbkDatabase, "getProduct" | "writeAutomationWithProductStatus">;
-  browser: Pick<VbkBrowser, "page">;
-  productWorkflows: Pick<ProductWorkflowCoordinator, "runExclusive" | "runVbkPageExclusive">;
-  /** Includes the current BrowserView login and remote product binding check. */
-  accountFor(localProductId: string): Promise<{ accountKey: string; productVersion: string }>;
-  readCreationVariant(page: unknown, productId: string): Promise<CreationVariantReadback>;
-  readPreflight?: typeof runProductReadOnlyPreflightApi;
-  readTrafficChildren?: typeof readTrafficLineChildren;
-  verifyTrafficChild?: typeof verifyTrafficLineChild;
-  now?: () => string;
-  id?: () => string;
-  emitProduct?(product: ProductDetail): void;
-}
-
-interface RecoveryTarget {
-  variant: TrafficLineVariant;
-  child: TrafficLineExistingChild;
-  readback: TrafficLineChildReadback;
-}
-
-interface RecoveryInput {
-  product: ProductDetail;
-  productId: string;
-  productJsonVersion: number;
-  productJsonSnapshot: string;
-  workflowSnapshot: string;
-  endpointPlan?: TrafficLineEndpointPlan;
-  variants: TrafficLineVariant[];
-}
+export type { CreationVariant, RecoveryScope, CreationVariantReadback, CreationRecoveryReadOnlyDependencies, RecoveryTarget, RecoveryInput } from "./creation-recovery-readonly/types.js";
+export { parseRecoveryScope, requireProduct, recoveryInput, uniqueVariants, assertUnsubmittedDraft } from "./creation-recovery-readonly/recovery-run.js";
+export { assertUnchanged, canonical, productJsonSnapshot, workflowSnapshot } from "./creation-recovery-readonly/snapshots.js";
+export { verifyTrafficTargets } from "./creation-recovery-readonly/recovery-input.js";
+export { projectCreationVariant, projectPreflight, projectTrafficTarget } from "./creation-recovery-readonly/project.js";
 
 /**
  * Read-only reconciliation for a product that was already saved by VBK while
@@ -69,7 +45,7 @@ export function createVbkCreationRecoveryTools(deps: CreationRecoveryReadOnlyDep
   const readTrafficChildren = deps.readTrafficChildren ?? readTrafficLineChildren;
   const verifyTrafficChild = deps.verifyTrafficChild ?? verifyTrafficLineChild;
   const now = deps.now ?? (() => new Date().toISOString());
-  const id = deps.id ?? randomUUID;
+  const id = deps.id ?? (() => randomUUID());
 
   return [{
     name: "read_vbk_creation_recovery",
@@ -152,134 +128,6 @@ export function createVbkCreationRecoveryTools(deps: CreationRecoveryReadOnlyDep
   }];
 }
 
-function parseRecoveryScope(args: Record<string, unknown>): RecoveryScope {
-  const value = args.scope;
-  if (value === undefined || value === "all") return "all";
-  if (value === "parent-only") return "parent-only";
-  throw new Error("scope 只能是 all 或 parent-only。");
-}
-
-function requireProduct(deps: CreationRecoveryReadOnlyDependencies, localProductId: string): ProductDetail {
-  const product = deps.db.getProduct(localProductId);
-  if (!product) throw new Error("产品不存在，无法执行只读恢复。");
-  return product;
-}
-
-function recoveryInput(product: ProductDetail, scope: RecoveryScope): RecoveryInput {
-  const productId = product.productId?.trim();
-  if (!productId) throw new Error("当前产品没有已保存的 VBK productId；不能安全恢复，也不会创建产品。");
-  const traffic = normaliseTrafficLineConfig((product.product.operations as Record<string, unknown> | undefined)?.trafficLine);
-  const availability = traffic?.availability;
-  const variants = uniqueVariants(traffic?.variants ?? [], "产品交通计划");
-  // An explicitly disabled traffic plan has no traffic child to verify. It is
-  // safe to recover the complete parent draft without inventing endpoints or
-  // forcing a parent-only recovery solely because a historical run had one.
-  const requiresTrafficReadback = scope === "all" && traffic?.enabled === true;
-  if (requiresTrafficReadback) {
-    if (!traffic?.enabled || !variants.length || !availability?.endpointPlan) {
-      throw new Error("缺少当前会话已核验的大交通端点计划；不能把历史交通阶段恢复为完成。");
-    }
-    const available = uniqueVariants(availability.availableVariants, "交通可用方式");
-    if (variants.length !== available.length || variants.some((variant) => !available.includes(variant))) {
-      throw new Error("交通计划与当前会话已核验的可用方式不一致，不能混合历史结果恢复。");
-    }
-    for (const variant of variants) {
-      if (variant === "flightRoundTrip" && !availability.endpointPlan.flight) {
-        throw new Error("飞机往返缺少已核验端点计划，不能恢复。");
-      }
-      if (variant === "trainRoundTrip" && !availability.endpointPlan.train) {
-        throw new Error("火车往返缺少已核验端点计划，不能恢复。");
-      }
-    }
-  }
-  return {
-    product,
-    productId,
-    productJsonVersion: product.productJsonVersion ?? 0,
-    productJsonSnapshot: productJsonSnapshot(product),
-    workflowSnapshot: workflowSnapshot(product),
-    ...(availability?.endpointPlan ? { endpointPlan: availability.endpointPlan } : {}),
-    variants,
-  };
-}
-
-function uniqueVariants(values: readonly TrafficLineVariant[], label: string): TrafficLineVariant[] {
-  const unique = [...new Set(values)];
-  if (unique.length !== values.length) throw new Error(`${label}存在重复方式，不能安全恢复。`);
-  return unique;
-}
-
-function assertUnsubmittedDraft(readback: CreationVariantReadback): string {
-  if (readback.variant !== "draft" || readback.unsubmittedDraftVerified !== true) {
-    throw new Error("未读取到已确认的未提审草稿 variant；不会把 formal、audit 或 preview 结果混作草稿完成证据。");
-  }
-  const draftId = readback.ids.draft?.trim();
-  if (!draftId) throw new Error("未提审草稿回读缺少 draft ID，不能安全恢复。");
-  return draftId;
-}
-
-async function verifyTrafficTargets(args: {
-  children: TrafficLineExistingChild[];
-  input: RecoveryInput;
-  page: unknown;
-  verifyTrafficChild: typeof verifyTrafficLineChild;
-}): Promise<RecoveryTarget[]> {
-  const byVariant = new Map<TrafficLineVariant, TrafficLineExistingChild[]>();
-  for (const child of args.children) {
-    const variant = normaliseTrafficLineVariant(child.lineDescription);
-    if (!variant) throw new Error(`母产品交通子产品存在无法识别的方式「${child.lineDescription}」，不能安全恢复。`);
-    const list = byVariant.get(variant) ?? [];
-    list.push(child);
-    byVariant.set(variant, list);
-  }
-  for (const variant of args.input.variants) {
-    const matches = byVariant.get(variant) ?? [];
-    if (matches.length !== 1) {
-      throw new Error(`${trafficLineLabel(variant)}子产品回读数量为 ${matches.length}，无法唯一确认母子关系。`);
-    }
-  }
-  const extras = [...byVariant.keys()].filter((variant) => !args.input.variants.includes(variant));
-  if (extras.length) throw new Error(`母产品出现未在本次已核验交通计划中的子产品：${extras.map(trafficLineLabel).join("、")}。`);
-
-  const targets: RecoveryTarget[] = [];
-  if (!args.input.endpointPlan) throw new Error("缺少当前会话已核验的大交通端点计划，不能回读交通子产品。");
-  for (const variant of args.input.variants) {
-    const child = byVariant.get(variant)![0]!;
-    const readback = await args.verifyTrafficChild(args.page as never, args.input.productId, child.productId, variant, args.input.endpointPlan);
-    targets.push({ variant, child, readback });
-  }
-  return targets;
-}
-
-function assertUnchanged(deps: CreationRecoveryReadOnlyDependencies, localProductId: string, initial: RecoveryInput): void {
-  const current = requireProduct(deps, localProductId);
-  const changes: string[] = [];
-  if (current.productId?.trim() !== initial.productId) changes.push("productId");
-  if (productJsonSnapshot(current) !== initial.productJsonSnapshot) changes.push("productJson");
-  if (workflowSnapshot(current) !== initial.workflowSnapshot) changes.push("status/automation/trafficLine");
-  if (changes.length) {
-    throw new Error(`恢复读取期间产品或自动化流程版本已变化（变化字段：${changes.join("、")}），未写入本地完成状态。`);
-  }
-}
-
-function productJsonSnapshot(product: ProductDetail): string {
-  const data = structuredClone(product.product) as Record<string, unknown>;
-  delete data.diagnostics;
-  return JSON.stringify(canonical(data));
-}
-
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => [key, canonical(item)]));
-}
-
-function workflowSnapshot(product: ProductDetail): string {
-  return JSON.stringify({ status: product.status, automation: product.automation, trafficLine: (product.product.operations as Record<string, unknown> | undefined)?.trafficLine });
-}
-
 function completedRecoveryRun(input: RecoveryInput, targets: RecoveryTarget[], scope: RecoveryScope, at: string, runId: string): AutomationRun {
   const phaseNames = draftPhasesFor(input.product.product as Parameters<typeof draftPhasesFor>[0]);
   const hasTrafficPhase = phaseNames.includes("trafficLine");
@@ -324,48 +172,5 @@ function completedRecoveryRun(input: RecoveryInput, targets: RecoveryTarget[], s
         },
       }
       : preservedParentTrafficLine ? { trafficLine: preservedParentTrafficLine } : {}),
-  };
-}
-
-function projectCreationVariant(value: CreationVariantReadback) {
-  return {
-    variant: value.variant,
-    unsubmittedDraftVerified: value.unsubmittedDraftVerified,
-    ...(value.draftSource ? { draftSource: value.draftSource } : {}),
-    ids: value.ids,
-    ...(value.poi85862 ? { poi85862: value.poi85862 } : {}),
-  };
-}
-
-function projectPreflight(value: unknown): Record<string, unknown> {
-  const evidence = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-  return {
-    productId: evidence.productId,
-    verifiedWith: evidence.verifiedWith,
-    basic: evidence.basic,
-    presentation: evidence.presentation,
-    itinerary: evidence.itinerary,
-    package: evidence.package,
-    pricingInventory: evidence.pricingInventory,
-    clauses: evidence.clauses,
-    resources: evidence.resources,
-  };
-}
-
-function projectTrafficTarget(target: RecoveryTarget) {
-  return {
-    variant: target.variant,
-    productId: target.child.productId,
-    lineDescription: target.child.lineDescription,
-    packageId: target.child.packageId,
-    active: target.child.active,
-    finalReadback: {
-      tourInfoId: target.readback.tourInfoId,
-      segmentCount: target.readback.segmentCount,
-      departureCityCount: target.readback.departureCityCount,
-      transportNodes: target.readback.transportNodes,
-      clauseCount: target.readback.clauseCount,
-      presentationVerified: target.readback.presentationVerified,
-    },
   };
 }

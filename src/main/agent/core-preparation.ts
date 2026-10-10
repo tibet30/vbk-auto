@@ -10,7 +10,7 @@ export type PreparationLoopDecision =
   | { kind: "execute"; action: PreparationDirectedAction }
   | { kind: "askPoiInput"; action: PreparationDirectedAction; input: NonNullable<ReturnType<typeof manualPoiInput>> }
   | { kind: "askHotelInput"; action: PreparationDirectedAction; questions: AgentQuestion[] }
-  | { kind: "model"; action?: PreparationDirectedAction; modelRepairWindow?: true; manualPoiModelWindow?: true; poiSlotKey?: string; manualPoiAnswerSlotKey?: string }
+  | { kind: "model"; action?: PreparationDirectedAction; modelRepairWindow?: true; manualPoiModelWindow?: true; hotelInputModelWindow?: true; poiSlotKey?: string; manualPoiAnswerSlotKey?: string }
   | { kind: "pause"; reason: string; manualPoiBlocked?: true; poiSlotKey?: string; manualPoiAnswerSlotKey?: string };
 
 export function nextPreparationLoopDecision(
@@ -27,6 +27,17 @@ export function nextPreparationLoopDecision(
   if (!action) return { kind: "model" };
   const events = eventsSinceLatestUser(snapshot);
   const runEvents = snapshot.events.filter((event) => event.runId === snapshot.run?.id);
+  if (action.node === "hotelResolution") {
+    const answered = events.findIndex(event => event.type === "tool_result"
+      && events.some(call => call.type === "tool_call" && call.data?.hotelAvailabilityInput === true
+        && call.data?.progressKey === action.progressKey && call.data?.toolCallId === event.data?.toolCallId));
+    if (answered >= 0) {
+      const turns = events.slice(answered + 1).filter(event => event.type === "status"
+        && event.data?.hotelInputModelWindow === true && event.data?.progressKey === action.progressKey).length;
+      if (turns < 3) return { kind: "model", action, hotelInputModelWindow: true };
+      return { kind: "pause", reason: "酒店资料已自动回答并尝试落实三轮，仍未取得符合住宿要求的真实候选。已保留当前行程和已核验酒店，请检查具体住宿地点或资源检索结果后重试。" };
+    }
+  }
   const manualInput = action.node === "poiResolution" ? manualPoiInput(unmatchedCanonicalPoiSlots(product)) : undefined;
   if (manualInput) {
     const answer = answeredManualPoiInput(runEvents, manualInput);

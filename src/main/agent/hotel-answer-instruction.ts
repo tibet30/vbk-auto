@@ -12,11 +12,13 @@ export function hotelAnswerInstruction(events: readonly AgentEvent[]): string {
     if (event.type === "input_request" && record(request) && typeof request.id === "string" && Array.isArray(request.questions)) {
       requests.set(request.id, request.questions.filter(record));
     }
-    if (event.type !== "user") continue;
+    const automatic = (event.type === "tool_result" || event.type === "status") && event.data?.automaticProductInput === true;
+    if (event.type !== "user" && !automatic) continue;
     const resolved = event.data?.resolvedAnswers;
     instructions.push(record(resolved) ? JSON.stringify(resolved) : event.content);
     const requestId = event.data?.requestId;
-    const questions = typeof requestId === "string" ? requests.get(requestId) : undefined;
+    const questions = automatic && Array.isArray(event.data?.questions)
+      ? event.data.questions.filter(record) : typeof requestId === "string" ? requests.get(requestId) : undefined;
     if (!questions || !record(resolved)) continue;
     const canonical: Json = {};
     for (const question of questions) {

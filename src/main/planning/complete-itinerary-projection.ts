@@ -3,6 +3,7 @@ import type { PlanningStageOutput } from "../../shared/contracts-planning.js";
 import { extractLockedConstraints, isPlanningControlMessage } from "../agent/prompt-helpers.js";
 import { classifyItineraryInputMode, explicitAlternativeGroups, itineraryInputContractError } from "./itinerary-input-contract.js";
 import { itineraryStructureError } from "./itinerary-structure.js";
+import { projectDatedRoute } from "./dated-route-projection.js";
 
 type JsonObject = Record<string, unknown>;
 type LockedDay = { day: number; spots: string[] };
@@ -28,6 +29,15 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
   if (classifyItineraryInputMode(locked, days, product.planning?.userIntent) !== "complete") return undefined;
   const order = reliableCompleteOrder(locked.itineraryOrder, days);
   if (!order) return undefined;
+  const dated = projectDatedRoute(product);
+  if (dated && !itineraryStructureError({ ...product.product, itinerary: dated }) && !itineraryInputContractError(product, dated)) {
+    return { reply: "已保留完整原路线、各日终点及括号观星安排，生成待核验行程。",
+      modules: [{ module: "itinerary", status: "proposed", value: dated }] };
+  }
+  // Parenthetical experiences contain source details absent from the compact
+  // POI locks (night photography, camps, etc.). Let the normal planner preserve
+  // them instead of inventing overnight stays at the meeting-city anchor.
+  if (order.some(row => /[（(](?!二选一[）)])[^）)]+[）)]/u.test(rawDayText(product, row.day)))) return undefined;
 
   const alternativeGroups = explicitAlternativeGroups(product);
   const expandedOrder = expandAlternativeGroups(order, alternativeGroups);

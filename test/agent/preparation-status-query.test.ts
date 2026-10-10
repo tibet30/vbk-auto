@@ -68,3 +68,34 @@ test("运行中的纯状态查询不清除同一语义进度的两次自动预�
   assert.equal(after.modelRepairWindow, true);
   assert.equal(saved.events.at(-2)?.data?.readOnlyStatusQuery, true);
 });
+
+test("模型修复读取产品后还有执行机会，连续三轮只读才暂停", () => {
+  const current = snapshot({ id: "run", status: "running", intentVersion: "v", createdAt: "now", updatedAt: "now" });
+  current.pendingInput = undefined;
+  const deps = { tools: [], accountFor: async () => ({ accountKey: "a", productVersion: "v" }), preparationProduct: () => product() };
+  const first = nextPreparationLoopDecision(deps, current);
+  assert.equal(first.kind, "execute");
+  if (first.kind !== "execute") return;
+  for (const i of [1, 2]) current.events.push({ id: `auto${i}`, runId: "run", type: "tool_call", content: "", createdAt: "now", data: { name: first.action.name, progressKey: first.action.progressKey, deterministicPreparation: true } });
+  current.events.push({ id: "repair", runId: "run", type: "status", content: "", createdAt: "now", data: { name: first.action.name, progressKey: first.action.progressKey, deterministicPreparationModelRepair: true } });
+  for (const i of [1, 2, 3]) {
+    current.events.push({ id: `read${i}`, runId: "run", type: "tool_call", content: "", createdAt: "now", data: { name: "read_product", toolCallId: `read${i}` } });
+    current.events.push({ id: `result${i}`, runId: "run", type: "tool_result", content: "当前产品", createdAt: "now", data: { toolCallId: `read${i}` } });
+    assert.equal(nextPreparationLoopDecision(deps, current).kind, i < 3 ? "model" : "pause");
+  }
+});
+
+test("一轮并行查询三个地点后仍有应用结果的机会，三轮无进展才暂停", () => {
+  const current = snapshot({ id: "run", status: "running", intentVersion: "v", createdAt: "now", updatedAt: "now" });
+  current.pendingInput = undefined;
+  const deps = { tools: [], accountFor: async () => ({ accountKey: "a", productVersion: "v" }), preparationProduct: () => product() };
+  const first = nextPreparationLoopDecision(deps, current);
+  if (first.kind !== "execute") throw new Error("expected preparation action");
+  for (const i of [1, 2]) current.events.push({ id: `auto${i}`, runId: "run", type: "tool_call", content: "", createdAt: "now", data: { name: first.action.name, progressKey: first.action.progressKey, deterministicPreparation: true } });
+  current.events.push({ id: "repair", runId: "run", type: "status", content: "", createdAt: "now", data: { name: first.action.name, progressKey: first.action.progressKey, deterministicPreparationModelRepair: true } });
+  for (const round of [1, 2, 3]) {
+    for (const i of [1, 2, 3]) current.events.push({ id: `query-${round}-${i}`, runId: "run", type: "tool_call", content: "", createdAt: "now", data: { name: "query_poi", modelTurnId: `turn-${round}`, toolCallId: `query-${round}-${i}` } });
+    for (const index of [1, 2]) current.events.push({ id: `usage-${round}-${index}`, runId: "run", type: "status", content: "", createdAt: "now", data: { aiUsage: { source: "planning.generate" } } });
+    assert.equal(nextPreparationLoopDecision(deps, current).kind, round < 3 ? "model" : "pause");
+  }
+});

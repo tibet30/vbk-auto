@@ -111,7 +111,13 @@ test("真实 no-match enrichment 更新 queued canonical task 后进入人工确
   }
 });
 
-test("多个未命中 POI 只提出一张无选项输入卡，并保留原顺序和 OR 关系", async () => {
+function automaticPoiAnswer(input: any, value = "保留原地点，查询同日区域锚点") {
+  if (input.tools.length) return undefined;
+  const payload = JSON.parse(input.messages.at(-1).content);
+  return { content: JSON.stringify(Object.fromEntries(payload.questions.map((question: { id: string }) => [question.id, value]))) };
+}
+
+test("多个未命中 POI 由 AI 聚合回答，并保留原顺序和 OR 关系", async () => {
   const current = product(); const saved = new Map<string, AgentSnapshot>();
   current.product.itinerary![0]!.spots = [
     { name: "广济桥", relation: "or", timeOfDay: "morning", poiName: null, poiId: null },
@@ -119,15 +125,16 @@ test("多个未命中 POI 只提出一张无选项输入卡，并保留原顺序
   ];
   current.researchTasks[0]!.label = "核查 广济桥 或 开元寺 的 VBK POI 映射";
   const core = new AgentCore({
-    model: { complete: async () => ({ content: "无需模型" }) },
+    model: { complete: async (input) => automaticPoiAnswer(input) ?? { content: "真实检索无匹配" } },
     tools: [{ name: "resolve_itinerary_pois", description: "resolve", parameters: {}, write: true, requiresApproval: false, execute: async () => ({ content: "no match" }) }],
     accountFor: async () => ({ accountKey: "a", productVersion: "v" }), preparationProduct: () => current,
   }, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (item) => saved.set(item.localProductId, structuredClone(item)) });
   await core.send(current.id, PRODUCT_PREPARATION_INSTRUCTION); await core.idle(current.id);
   const waiting = await core.get(current.id);
-  assert.equal(waiting.pendingInput?.questions.length, 1);
-  assert.equal(waiting.pendingInput?.questions[0]?.options, undefined);
-  assert.match(waiting.pendingInput?.questions[0]?.label ?? "", /广济桥.*开元寺/);
+  assert.equal(waiting.pendingInput, undefined);
+  assert.equal(waiting.events.some(event => event.type === "input_request"), false);
+  const answer = waiting.events.find(event => event.data?.automaticProductInput === true);
+  assert.match(JSON.stringify(answer?.data?.questions), /广济桥.*开元寺/);
   assert.deepEqual(current.product.itinerary![0]!.spots!.map((spot) => [spot.name, spot.relation, spot.timeOfDay]), [
     ["广济桥", "or", "morning"], ["开元寺", "or", "morning"],
   ]);
@@ -141,7 +148,7 @@ test("回答后模型先查询再绑定原槽位，耗尽不会重复提问", as
     { content: "已绑定。" },
   ];
   const core = new AgentCore({
-    model: { complete: async () => outputs.shift() ?? { content: "done" } },
+    model: { complete: async (input) => automaticPoiAnswer(input) ?? outputs.shift() ?? { content: "done" } },
     tools: [
       { name: "resolve_itinerary_pois", description: "resolve", parameters: {}, write: true, requiresApproval: false, execute: async () => { calls.push("resolve"); return { content: "no match" }; } },
       { name: "query_poi", description: "query", parameters: {}, execute: async () => { calls.push("query"); return { content: "found 101" }; } },
@@ -150,12 +157,9 @@ test("回答后模型先查询再绑定原槽位，耗尽不会重复提问", as
     requiresCompletionVerification: () => true, finishVerified: async () => ({ verified: true }),
   }, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (item) => saved.set(item.localProductId, structuredClone(item)) });
   await core.send(current.id, PRODUCT_PREPARATION_INSTRUCTION); await core.idle(current.id);
-  const waiting = await core.get(current.id); assert.equal(waiting.run?.status, "waiting_input");
-  await core.respond(current.id, { requestId: waiting.pendingInput!.id, answers: { [waiting.pendingInput!.questions[0]!.id]: "广济桥景区" } });
-  await core.idle(current.id);
   const done = await core.get(current.id);
   assert.deepEqual(calls, ["resolve", "resolve", "query", "select"], JSON.stringify(done.events.map((event) => ({ type: event.type, content: event.content, data: event.data }))));
-  assert.equal(done.events.some((event) => event.type === "input_request"), true);
+  assert.equal(done.events.some((event) => event.type === "input_request"), false);
   assert.notEqual(done.run?.status, "paused");
 });
 
@@ -202,7 +206,7 @@ test("手动保存要求每个命名 OR 景点都有 POI，other/free 不阻碍"
 });
 
 
-test("真实 Core 手动保存后局部保持等待，全部保存自动恢复", async () => {
+test("真实 Core 历史 POI 输入即使仅局部保存也转交 AI，不等待运营", async () => {
   const question = { id: "manual-poi", label: "待手动配置 POI", kind: "text" as const, required: true };
   const data = { itinerary: [{ spots: [
     { name: "景点 A", relation: "or", timeOfDay: "morning", poiName: "A", poiId: 1 },
@@ -223,20 +227,11 @@ test("真实 Core 手动保存后局部保持等待，全部保存自动恢复",
     resolvedPendingQuestions: (_id, questions) => resolvedProductQuestions(data, questions),
   }, { getAgentSnapshot: () => saved, saveAgentSnapshot: (next) => { saved = structuredClone(next); } });
   const partial = await core.reconcilePendingInput("saved");
-  assert.equal(partial.run?.status, "waiting_input");
-  assert.equal(partial.pendingInput?.questions[0]?.id, "manual-poi");
-  (data.itinerary[0]!.spots[3] as { poiName: string; poiId: number }).poiName = "C";
-  (data.itinerary[0]!.spots[3] as { poiName: string; poiId: number }).poiId = 3;
-  const stillPartial = await core.reconcilePendingInput("saved");
-  assert.equal(stillPartial.run?.status, "waiting_input");
-  (data.itinerary[0]!.spots[1] as { poiName: string; poiId: number }).poiName = "B";
-  (data.itinerary[0]!.spots[1] as { poiName: string; poiId: number }).poiId = 2;
-  (data.itinerary[0]!.spots[4] as { poiName: string; poiId: number }).poiName = "D";
-  (data.itinerary[0]!.spots[4] as { poiName: string; poiId: number }).poiId = 4;
-  const resumed = await core.reconcilePendingInput("saved");
-  assert.equal(resumed.pendingInput, undefined);
-  assert.equal(resumed.run?.status, "running");
-  assert.equal(resumed.events.some((event) => event.type === "tool_result" && event.data?.automaticallyResumed === true), true);
+  assert.equal(partial.run?.status, "running");
+  assert.equal(partial.pendingInput, undefined);
+  assert.equal(partial.events.some(event => event.data?.automaticInputRedirect === true), true);
+  await core.idle("saved");
+  assert.equal((await core.get("saved")).pendingInput, undefined);
 });
 
 test("别名窗口暂停后仅在全部手动 POI 保存时自动恢复，普通暂停不恢复", async () => {
@@ -254,14 +249,11 @@ test("别名窗口暂停后仅在全部手动 POI 保存时自动恢复，普通
   ];
   const outputs = [{ content: "请查询。" }, { content: "请继续查询。" }, { content: "仍需查询。" }];
   const core = new AgentCore({
-    model: { complete: async () => outputs.shift() ?? { content: "不会继续调用" } },
+    model: { complete: async (input) => automaticPoiAnswer(input) ?? outputs.shift() ?? { content: "不会继续调用" } },
     tools: [{ name: "resolve_itinerary_pois", description: "resolve", parameters: {}, write: true, requiresApproval: false, execute: async () => ({ content: "no match" }) }],
     accountFor: async () => ({ accountKey: "a", productVersion: "v" }), preparationProduct: () => current,
   }, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (item) => saved.set(item.localProductId, structuredClone(item)) });
   await core.send(current.id, PRODUCT_PREPARATION_INSTRUCTION); await core.idle(current.id);
-  const waiting = await core.get(current.id);
-  await core.respond(current.id, { requestId: waiting.pendingInput!.id, answers: { [waiting.pendingInput!.questions[0]!.id]: "景点 A=景点A新名；景点 C=景点C新名" } });
-  await core.idle(current.id);
   const blocked = await core.get(current.id);
   assert.equal(blocked.run?.status, "paused");
   assert.equal(blocked.pendingInput, undefined);
@@ -320,7 +312,7 @@ test("一次多点回答按剩余槽位继承窗口，新增或改名不继承",
     { content: "已完成" },
   ];
   const core = new AgentCore({
-    model: { complete: async () => outputs.shift() ?? { content: "done" } },
+    model: { complete: async (input) => automaticPoiAnswer(input) ?? outputs.shift() ?? { content: "done" } },
     tools: [
       { name: "resolve_itinerary_pois", description: "resolve", parameters: {}, write: true, requiresApproval: false, execute: async () => { calls.push("resolve"); return { content: "no match" }; } },
       { name: "query_poi", description: "query", parameters: {}, execute: async (args) => { calls.push(`query:${args.keyword}`); return { content: "found" }; } },
@@ -331,12 +323,9 @@ test("一次多点回答按剩余槽位继承窗口，新增或改名不继承",
     ], accountFor: async () => ({ accountKey: "a", productVersion: "v" }), preparationProduct: () => current,
   }, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (item) => saved.set(item.localProductId, structuredClone(item)) });
   await core.send(current.id, PRODUCT_PREPARATION_INSTRUCTION); await core.idle(current.id);
-  const waiting = await core.get(current.id);
-  await core.respond(current.id, { requestId: waiting.pendingInput!.id, answers: { [waiting.pendingInput!.questions[0]!.id]: "景点 A=别名A；景点 B=别名B" } });
-  await core.idle(current.id);
   const done = await core.get(current.id);
   assert.deepEqual(calls, ["resolve", "resolve", "query:别名A", "select:景点 A", "query:别名B", "select:景点 B"]);
-  assert.equal(done.events.filter((event) => event.type === "input_request").length, 1);
+  assert.equal(done.events.filter((event) => event.type === "input_request").length, 0);
   assert.deepEqual(current.product.itinerary![0]!.spots!.map((spot) => [spot.name, spot.relation, spot.timeOfDay]), [
     ["景点 A", "and", "morning"], ["景点 B", "and", "afternoon"],
   ]);

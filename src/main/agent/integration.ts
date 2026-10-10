@@ -1,6 +1,11 @@
+import { PRODUCT_PATCH_SCHEMA } from "./integration-patch-schema.js";
+import { resolveAdministrativeRouteNodes } from "./integration-route-administrative.js";
+import { historicalHotelTierInstruction } from "./historical-hotel-tier-choices.js";
+import { hotelAnswerInstruction } from "./hotel-answer-instruction.js";
+import { createItineraryHotelTool } from "./integration-itinerary-hotel-tool.js";
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { agentProductContext } from "./integration-context.js";
-import { agentPatchOperations } from "./integration-patch.js";
+import { agentPatchOperations, applyPersistedHotelTierChoices } from "./integration-patch.js";
 import { agentProductVersion } from "./integration-gates.js";
 export { agentProductVersion } from "./integration-gates.js";
 export { hasCompletePresentationRecommendations, type AgentBusinessDependencies } from "./integration-generate.js";
@@ -34,7 +39,6 @@ import { isTravelNodeName } from "../planning/itinerary-adoption.js";
 import { createItineraryDraftTools } from "./integration-itinerary-draft-tools.js";
 import { createCreationRecoveryTools } from "./integration-creation-recovery-tools.js";
 import { reconcileResolvedHotelCopy } from "./hotel-candidate-recovery.js";
-import { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
 export { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
 import type { AgentTool } from "./types.js";
 
@@ -46,35 +50,6 @@ function absentTravelNodeResearchTask(label: string, presentSpotNames: ReadonlyS
   return Boolean(name && isTravelNodeName(name) && !presentSpotNames.has(name));
 }
 
-const ITINERARY_SPOT_PATCH_SCHEMA = {
-  type: "object",
-  required: ["name"],
-  properties: {
-    name: { type: "string" }, kind: { enum: ["attraction", "free", "other"] }, description: { type: "string" }, timeOfDay: { enum: ["morning", "afternoon", "evening"] }, relation: { enum: ["and", "or"] },
-    poiName: { type: "string" }, poiId: { type: "number" },
-  },
-};
-const ITINERARY_DAY_PATCH_SCHEMA = {
-  type: "object",
-  required: ["day"],
-  properties: {
-    day: { type: "number" }, title: { type: "string" }, description: { type: "string" }, hotel: { type: "string", minLength: 0 },
-    meals: { type: "string" }, hotelDescription: { type: "string" }, spots: { type: "array", items: ITINERARY_SPOT_PATCH_SCHEMA },
-  },
-};
-const PRODUCT_PATCH_SCHEMA = {
-  type: "object",
-  required: ["patch"],
-  properties: {
-    patch: {
-      type: "object",
-      properties: {
-        basicInfo: { type: "object" }, presentation: { type: "object" }, operations: { type: "object" }, commercial: { type: "object" },
-        itinerary: { type: "array", items: ITINERARY_DAY_PATCH_SCHEMA },
-      },
-    },
-  },
-};
 
 function productData(product: ProductDetail): JsonObject { return product.product as JsonObject; }
 function cleanText(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }
@@ -184,7 +159,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     disambiguateStation: trafficStationDisambiguator(localProductId),
   });
   const resolveItineraryPoisAndTraffic = async (localProductId: string) => {
-    const current = get(localProductId);
+    const { current, converted } = await resolveAdministrativeRouteNodes(get(localProductId), deps, withPage);
     const runtime = new DbOrchestratorRuntime(deps.db, deps.browser, deps.productMutations, task => withPage(task), resolveTrafficAvailability, deps.disambiguatePoiOption);
     const tasks = await enrichItineraryPois({
       localProductId,
@@ -215,7 +190,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       .map((task) => task.id);
     deps.db.markResearchTasksSatisfied(localProductId, satisfiedTaskIds);
     await syncInitialTrafficLineAvailability(localProductId, runtime);
-    return { tasks, repair };
+    return { tasks, repair, administrativeNodes: converted };
   };
   const tools: AgentTool[] = [
     ...createGenerationStageTools({
@@ -223,6 +198,16 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     }),
     ...createItineraryDraftTools({ browserFor: () => deps.browser, get, withPage }),
     ...createCreationRecoveryTools(deps, get),
+    {
+      name: "continue_approved_workflow",
+      requiresApproval: true,
+      description: "在当前产品已有有效录入授权时，继续执行已确认的自动录入阶段。不会重新规划或创建母产品；由自动化执行器负责既有交通子产品的资源同步、保存和最终回读。",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+      async execute(_args, ctx) {
+        await deps.automation.executeApprovedWorkflow(ctx.localProductId);
+        return { content: "已启动当前授权范围内的自动录入阶段，等待资源保存与最终远端回读。", terminal: true };
+      },
+    },
     {
       name: "read_product", description: "读取当前产品结构、生命周期和已保存的自动化阶段。", parameters: { type: "object", properties: {} },
       async execute(_args, ctx) { return { content: JSON.stringify(agentProductContext(
@@ -233,10 +218,14 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       name: "patch_product", requiresApproval: false, description: "合并保存本地规划字段（basicInfo、presentation、itinerary、operations、commercial）；系统锁定既有 meetingCity。用户明确指定大交通抵达/返程端点时，只能写 operations.trafficLine.arrivalCity / departureCity；不得写交通方式或启用状态，系统会调用接口核验。未指定端点才默认产品目的地。itinerary 的数据结构严格为逐日对象数组：[{day:1, title:'...', spots:[{name:'...', timeOfDay:'morning', relation:'and'|'or'}]}]。二选一/多选一必须保留每个原始景点，连续写在同一天同一时段，且每项 relation:'or'，供 VBK 录入为“或”。不接受 {item:...}、嵌套数组或 hotels 顶层字段；不允许填写新的 poiId/poiName，已查询到的候选只能由 select_itinerary_poi 写入。", parameters: PRODUCT_PATCH_SCHEMA,
       async execute(args, ctx) {
         const patch = requirePatch(args);
-        const operations = agentPatchOperations(get(ctx.localProductId), patch);
+        const instruction = [historicalHotelTierInstruction(deps.db, get(ctx.localProductId)), hotelAnswerInstruction(deps.db.getAgentSnapshot?.(ctx.localProductId)?.events ?? [])].filter(Boolean).join("\n");
+        const operations = agentPatchOperations(get(ctx.localProductId), patch, { hotelTierInstruction: instruction });
         const result = deps.productMutations.applyAiPatch(ctx.localProductId, operations);
         if (!result.applied) throw new Error("没有可安全应用的产品修改。");
-        const saved = result.product;
+        const persistedChoices = applyPersistedHotelTierChoices(productData(result.product), instruction);
+        const saved = JSON.stringify(persistedChoices) === JSON.stringify(productData(result.product))
+          ? result.product
+          : deps.productMutations.replace(ctx.localProductId, persistedChoices, { status: result.product.status });
         if (patchRequestsRecommendations(patch)
           && !hasCompletePresentationRecommendations(productData(saved).presentation)) {
           throw new Error("推荐理由未持久化：必须恰好保留 3 条分类不重复、文本非空的 recommendations；请调用 ensure_presentation_recommendations。");
@@ -281,7 +270,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const detail = await withPage(async () => suggestPoiDetail(await getVbkRequestPage(deps.browser), queryKeyword, context));
         const candidate = detail.candidates.find((item) => item.poiId === poiId && item.selectable && item.poiName);
         if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${queryKeyword}」的当前可选查询结果中。`);
-        if (!isPlanningPoiCandidateInContext(candidate, context, productData(current), spotName)) {
+        if (!isPlanningPoiCandidateInContext(candidate, context, productData(current), spotName, detail.candidates)) {
           throw new Error(`POI「${candidate.poiName}」与第 ${day} 天原景点「${spotName}」的地域约束不匹配。`);
         }
         const availability = await getCtripSightAvailabilities(undefined, [poiId], deps.db);
@@ -307,20 +296,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       name: "query_hotel_resource", description: "读取 VBK 酒店资源候选，不创建或绑定资源。", parameters: { type: "object", properties: {} },
       async execute(_args, ctx) { return withPage(async () => { const product = get(ctx.localProductId); const payload = await searchVbkResources(await getVbkRequestPage(deps.browser)); const city = cleanText((productData(product).basicInfo as JsonObject | undefined)?.destinationCity); return { content: safeJson({ selected: firstHotelResource(payload, city), payload }) }; }); },
     },
-    {
-      name: "resolve_itinerary_hotels", description: "为已有逐日行程查询真实酒店候选，并自动写回 itinerary[].hotelCandidates；成功后不得再用 patch_product 重写行程。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) {
-        const current = get(ctx.localProductId); const data = productData(current);
-        const itinerary = Array.isArray(data.itinerary) ? data.itinerary as JsonObject[] : [];
-        const basicInfo = data.basicInfo as JsonObject | undefined;
-        const operations = data.operations as JsonObject | undefined;
-        const city = cleanText(basicInfo?.destinationCity);
-        const nights = Number(basicInfo?.nights);
-        const resolved = await resolveItineraryHotelCandidates(itinerary, city, nights, cleanText(operations?.hotelTier));
-        deps.productMutations.replace(ctx.localProductId, applyResolvedItineraryHotels(data, resolved), { status: current.status });
-        return { content: safeJson(persistedItineraryHotelResult(resolved)) };
-      },
-    },
+    createItineraryHotelTool(deps, get),
     {
       name: "read_vbk_phase", description: "按当前 productId 从 VBK 读取基础信息，并返回本地阶段快照，用于核对不确定写入。", parameters: { type: "object", properties: {} },
       async execute(_args, ctx) { const product = get(ctx.localProductId); const remote = product.productId ? await withPage(async () => getProductBaseInfoApi(await getVbkRequestPage(deps.browser), product.productId!)) : null; return { content: safeJson({ productId: product.productId, status: product.status, automation: product.automation, remote }) }; },

@@ -6,11 +6,13 @@ import { productNeedsVehicleResource } from "../../shared/product-form.js";
 import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfaction.js";
 import { normaliseTrafficLineConfig } from "../../shared/contracts-traffic-line.js";
 import { explicitlyDeclinesTrafficLine } from "../../shared/traffic-line-intent.js";
+import { trafficLinePlanMatchesExplicitCities } from "../../shared/traffic-line-user-endpoints.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../shared/hotel-candidate-counts.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { hotelDiamondFromTier } from "../../shared/hotel-tiers.js";
 import { hasPersistedCommercialInventory, hasPersistedCommercialPricing } from "./commercial-stage.js";
 import { excludedItineraryCopyConflicts } from "./itinerary-alternative-consistency.js";
+import { hotelCandidateMeetsStay, hotelStayRequirement, hotelDiamondForStay } from "../../shared/hotel-stay-requirement.js";
 
 export interface PreparationGap {
   label: string;
@@ -101,7 +103,9 @@ export function extraPreparationGaps(product: Record<string, unknown>, detail?: 
     const lodgingDay = asObject(day);
     if (!lodgingDay || !needsItineraryHotelCandidates(lodgingDay, index, nights)) continue;
     const candidates = asArray(lodgingDay.hotelCandidates) ?? [];
-    if (!hasValidItineraryHotelCandidates(candidates, hotelDiamond)) {
+    const requirement = hotelStayRequirement(product, lodgingDay);
+    if (!hasValidItineraryHotelCandidates(candidates, hotelDiamondForStay(typeof operations?.hotelTier === "string" ? operations.hotelTier : undefined, requirement) ?? hotelDiamond)
+      || !candidates.every(candidate => hotelCandidateMeetsStay(asObject(candidate) ?? {}, requirement))) {
       gaps.push({
         label: `酒店候选：第 ${Number(lodgingDay.day) || index + 1} 天`,
         detail: `行程录入页使用携程平台酒店；住宿日必须先持久化 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个含有效ID、城市、锚点、评分、距离且符合已锁定钻级的携程酒店候选，酒店资源阶段再录入真实酒店资源。`,
@@ -132,10 +136,10 @@ export function extraPreparationGaps(product: Record<string, unknown>, detail?: 
   if (traffic?.enabled) {
     const available = new Set(traffic.availability?.availableVariants ?? []);
     const confirmed = traffic.variants.length > 0 && traffic.variants.every((variant) => available.has(variant));
-    if (!traffic.availability || !confirmed) {
+    if (!traffic.availability || !confirmed || !trafficLinePlanMatchesExplicitCities(product, traffic.availability.endpointPlan)) {
       gaps.push({
         label: "大交通端点可用性核验",
-        detail: "已启用大交通时，必须先完成当前会话的端点可用性核验；同城不得被推断为不可售。",
+        detail: "已启用大交通时，必须核验用户指定抵达和离开城市的当前端点；旧城市核验不能用于确认方案，同城不得被推断为不可售。",
         stage: "completion",
         node: "finalValidation",
       });
@@ -145,7 +149,7 @@ export function extraPreparationGaps(product: Record<string, unknown>, detail?: 
 }
 
 function hasValidItineraryHotelCandidates(candidates: unknown[], requiredDiamond: number | undefined): boolean {
-  if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT || !requiredDiamond) return false;
+  if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT || requiredDiamond === undefined) return false;
   return candidates.every((value) => {
     const candidate = asObject(value);
     return Boolean(candidate
@@ -172,7 +176,7 @@ export function classifyReadinessIssue(label: string, detail: string): Pick<Prep
     return { stage: "foundation", node: "skeleton" };
   }
   if (/酒店候选/.test(text)) return { stage: "completion", node: "hotelResolution" };
-  if (/封面/.test(text)) return { stage: "completion", node: "cover" };
+  if (/封面/.test(text) || /^presentation\.cover(?:\.|$)/.test(label)) return { stage: "completion", node: "cover" };
   if (/用车|资源组/.test(text)) return { stage: "completion", node: "vehicleResource" };
   if (/副标题|运营备注|产品特点/.test(text)) return { stage: "completion", node: "copy" };
   if (/推荐|派生行程文案/.test(text)) return { stage: "completion", node: "presentation" };

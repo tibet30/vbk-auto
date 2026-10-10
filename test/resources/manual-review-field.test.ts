@@ -383,9 +383,9 @@ test("行程站点手动删除只移除目标 spot 和同名游览活动", () =>
   const day = (next.itinerary as Array<Record<string, unknown>>)[0];
   assert.deepEqual(day.spots, [{ name: "已有景点", poiName: "已有 POI", poiId: 100 }]);
   assert.deepEqual(day.activities, [
-    { time: "12:00", title: "午餐自理", type: "meal", detail: "午餐自理" },
     { time: "14:00", title: "已有景点", type: "visit", detail: "继续游览" },
   ]);
+  assert.equal(day.meals, "自理");
   assert.deepEqual((next.itinerary as Array<Record<string, unknown>>)[1], baseProduct.itinerary[1]);
   assert.equal(baseProduct.itinerary[0].spots.length, 2);
 });

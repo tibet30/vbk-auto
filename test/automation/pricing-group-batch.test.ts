@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {datesBetween, ensurePricingInventoryApi, localBusinessDate} from '../../src/main/automation/ctrip/pricing-api.js';
+import {datesBetween, ensurePricingInventoryApi, localBusinessDate, pricingInventoryDates} from '../../src/main/automation/ctrip/pricing-api.js';
 import {priceInventorySingleProductBody} from '../../src/main/automation/ctrip/pricing-group-submit.js';
 import {buildGroupPricingExpectation} from '../../src/main/automation/ctrip/pricing-group-contract.js';
 import {success, ageBands, product, browserWithHandler, rowsFromSaveBody, baseEndpointPayload} from './pricing-fixture.js';
@@ -9,6 +9,13 @@ function yearlyProduct() {
   const end=new Date(); end.setDate(end.getDate()+364);
   return {...product, commercial:{...product.commercial,inventory:{...product.commercial.inventory,endDate:localBusinessDate(end)}}};
 }
+
+test('库存窗口跨天重试时不把平台未写入的第 366 天加入预检',()=>{
+  const dates=pricingInventoryDates('2026-10-06','2027-10-06','2026-10-07');
+  assert.equal(dates.length,364);
+  assert.equal(dates[0],'2026-10-07');
+  assert.equal(dates.at(-1),'2027-10-05');
+});
 
 test('全年 365 天首次录入使用 300+65 两批，均为四档模板并回读每一天', async()=>{
   const p=yearlyProduct(); const dates=datesBetween(p.commercial.inventory.startDate,p.commercial.inventory.endDate);

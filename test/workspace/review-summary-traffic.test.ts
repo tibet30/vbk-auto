@@ -11,6 +11,6 @@ test("审查态只展示端点核验，班期资源留到子产品阶段", () =>
 });
 
 test("真实班期失败仍以异常状态展示，不会被审查态文案掩盖", () => {
-  assert.match(source, /progress\?\.failureReason \? "failed"/);
+  assert.match(source, /progress\?\.failureReason \|\| trafficProgress\?\.failureReason \? "failed"/);
   assert.match(source, /班期核验需处理/);
 });

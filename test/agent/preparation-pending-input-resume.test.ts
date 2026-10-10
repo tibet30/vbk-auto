@@ -46,20 +46,22 @@ test("satisfied preparation input resumes the loop and reaches approval without 
   assert.equal(hasUnresolvedAgentToolFailure(current().events, "run"), false);
 });
 
-test("mixed satisfied input retains the unanswered question and does not schedule", async () => {
+test("mixed saved and missing product answers resume AI preparation without operator input", async () => {
   const snapshot = waiting("mixed");
   snapshot.pendingInput!.questions.push({ id: "hotel", label: "请确认酒店", kind: "text", required: true });
   (snapshot.events[2]!.data!.request as { questions: unknown[] }).questions = snapshot.pendingInput!.questions;
   const { core, current, calls } = harness(snapshot, [{ id: "poi", message: "POI 已保存" }]);
   await core.reconcilePendingInput("mixed");
-  assert.equal(calls(), 0);
-  assert.equal(current().run?.status, "waiting_input");
-  assert.deepEqual(current().pendingInput?.questions.map((question) => question.id), ["hotel"]);
-  assert.equal(current().pendingInput?.defaultAnswers?.poi, "已在当前产品中保存");
+  await core.idle("mixed");
+  assert.equal(calls(), 1);
+  assert.equal(current().run?.status, "waiting_approval");
+  assert.equal(current().pendingInput, undefined);
+  assert.equal(current().events.find(event => event.data?.automaticInputRedirect)?.data?.defaultAnswers
+    && (current().events.find(event => event.data?.automaticInputRedirect)!.data!.defaultAnswers as Record<string, string>).poi, "已在当前产品中保存");
 });
 
 for (const [name, preparation, pause, uncertain] of [
-  ["manual pause", true, true, false], ["ordinary query", false, false, false], ["uncertain write", true, false, true],
+  ["ordinary query", false, false, false], ["uncertain write", true, false, true],
 ] as const) {
   test(`${name} never auto-resumes a reconciled input`, async () => {
     const snapshot = waiting(name, preparation);
@@ -70,6 +72,15 @@ for (const [name, preparation, pause, uncertain] of [
     assert.equal(current().run?.status, "paused");
   });
 }
+
+test("a voluntary user pause remains paused even with an old product input", async () => {
+  const snapshot = waiting("paused");
+  snapshot.run!.status = "paused";
+  const { core, current, calls } = harness(snapshot, [{ id: "poi", message: "POI 已保存" }]);
+  await core.reconcilePendingInput("paused");
+  assert.equal(calls(), 0);
+  assert.equal(current().run?.status, "paused");
+});
 
 for (const name of ["approved intent", "remote write"] as const) {
   test(`${name} never re-enters model planning from an old reconciled input`, async () => {

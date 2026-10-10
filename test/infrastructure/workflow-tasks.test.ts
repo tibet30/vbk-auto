@@ -154,6 +154,27 @@ test("产品草稿保存后把最近任务收敛为成功，且迟到回调不�
   }
 });
 
+test("同名新产品已完成时收敛旧的失败任务", () => {
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-workflow-superseded-"));
+  try {
+    const db = new VbkDatabase(dataPath);
+    const oldProduct = db.createProduct({ destination: "西宁", days: 6, productForm: "privateTour" });
+    const oldTask = db.createWorkflowTask(oldProduct.id, oldProduct.name);
+    db.updateWorkflowTask(oldTask.id, { status: "failed", stage: "planning", progress: 36, error: "旧规划失败" });
+    const replacement = db.createProduct({ destination: "西宁", days: 6, productForm: "privateTour" });
+    db.setProductLifecycle(replacement.id, { productId: "78668429", status: "draft_saved" });
+
+    const [reconciled] = db.reconcileSupersededWorkflowTasks();
+    assert.equal(reconciled.id, oldTask.id);
+    assert.equal(reconciled.status, "succeeded");
+    assert.equal(reconciled.stage, "completed");
+    assert.match(reconciled.message, /新草稿 78668429 接管/);
+    assert.equal(db.reconcileSupersededWorkflowTasks().length, 0);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
 test("已永久废弃的任务不因产品后来保存而被改写", () => {
   const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-workflow-abandoned-complete-"));
   try {
@@ -168,4 +189,20 @@ test("已永久废弃的任务不因产品后来保存而被改写", () => {
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
+});
+
+test('母产品回读完成后，交通网络失败仍待处理，明确无资源后才结束',()=>{
+  const dataPath=fs.mkdtempSync(path.join(os.tmpdir(),'vbk-optional-traffic-'));
+  try{
+    const db=new VbkDatabase(dataPath);const product=db.createProduct({destination:'西安',days:6,productForm:'privateTour'});const task=db.createWorkflowTask(product.id,product.name);
+    const draft=db.getProduct(product.id)!.product;Object.assign(draft.operations!,{trafficLine:{enabled:true,variants:['flightRoundTrip','trainRoundTrip']}});db.updateProduct(product.id,draft);
+    db.setProductLifecycle(product.id,{productId:'123',status:'draft_saved',basicInfoSaved:true});
+    db.saveAgentSnapshot({localProductId:product.id,run:{id:'r',status:'paused',intentVersion:'intent',createdAt:'now',updatedAt:'now'},events:[]});
+    db.saveAutomation(product.id,{id:'auto',status:'succeeded',createdAt:'now',updatedAt:'now',phases:[{phase:'trafficLine',status:'completed'},{phase:'preflight',status:'completed'}],logs:[],trafficLine:{children:[],failureReason:'net::ERR_FAILED'}} as any);
+    db.completeSavedProductWorkflowTasks();assert.equal(db.getWorkflowTask(task.id)?.status,'needs_attention');assert.ok(db.getWorkflowTask(task.id)!.progress<100);
+    assert.equal(db.getProduct(product.id)?.automation?.trafficLine?.failureReason,'net::ERR_FAILED');
+    assert.equal(db.completeSavedProductWorkflowTasks().length,0);
+    const automation=db.getProduct(product.id)!.automation!;automation.trafficLine!.failureReason='当前无可售资源';db.saveAutomation(product.id,automation);
+    db.completeSavedProductWorkflowTasks();assert.equal(db.getWorkflowTask(task.id)?.status,'succeeded');
+  }finally{fs.rmSync(dataPath,{recursive:true,force:true});}
 });

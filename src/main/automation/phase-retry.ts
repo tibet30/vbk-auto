@@ -21,7 +21,7 @@ export function preparePhaseRetry(
   retryPhase: string,
   at = new Date().toISOString(),
 ): AutomationRun {
-  if (previous.status !== "failed") throw new Error("只有失败的自动录入任务可以单独重试。");
+  if (previous.status !== "failed" && previous.status !== "cancelled") throw new Error("只有失败或已取消的自动录入任务可以从断点重试。");
   const retryIndex = phases.indexOf(retryPhase);
   if (retryIndex < 0) throw new Error(`无法重试未知阶段：${retryPhase}`);
   const failed = previous.phases.find((item) => item.phase === retryPhase);

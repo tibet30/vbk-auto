@@ -281,3 +281,40 @@ test("资源发布严格拒绝 Warning Ack", async () => {
     /Ack=Warning/,
   );
 });
+
+
+test("正式资源异步同步超过旧等待窗口时继续回读，不重复提交", async () => {
+  const fixture = pageFor({ afterPublish: { productSegments: { segments: resourceSegments() } } });
+  const fetch = fixture.page.vbkSessionFetch;
+  let polls = 0;
+  fixture.page.vbkSessionFetch = async request => {
+    const response = await fetch(request);
+    if (request.endpoint.endsWith("/getSegments") && fixture.publishCalls() && ++polls < 12) {
+      return success({ productSegments: { segments: resourceSegments(false) } });
+    }
+    return response;
+  };
+  const result = await finalizeParentResourceSegments(fixture.page, productId,
+    { draftProductSegments: { segments: fixture.draft } }, { vehicleGroupId: groupId, sleep: async () => {} });
+  assert.equal(result.audited, true);
+  assert.equal(polls, 12);
+  assert.equal(fixture.publishCalls(), 1);
+});
+
+test("正式资源异步同步超过两分钟时仍继续回读，不把迟到回读误判为失败", async () => {
+  const fixture = pageFor({ afterPublish: { productSegments: { segments: resourceSegments() } } });
+  const fetch = fixture.page.vbkSessionFetch;
+  let polls = 0;
+  fixture.page.vbkSessionFetch = async request => {
+    const response = await fetch(request);
+    if (request.endpoint.endsWith("/getSegments") && fixture.publishCalls() && ++polls <= 70) {
+      return success({ productSegments: { segments: resourceSegments(false) } });
+    }
+    return response;
+  };
+  const result = await finalizeParentResourceSegments(fixture.page, productId,
+    { draftProductSegments: { segments: fixture.draft } }, { vehicleGroupId: groupId, sleep: async () => {} });
+  assert.equal(result.audited, true);
+  assert.equal(polls, 71);
+  assert.equal(fixture.publishCalls(), 1);
+});

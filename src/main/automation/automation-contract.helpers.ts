@@ -23,6 +23,7 @@ import { readCover } from "../operations/cover-info.js";
 import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cover-fallback.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
 export function textValue(value: unknown): string {
@@ -81,8 +82,9 @@ export function hasValidItinerary(product: Record<string, unknown>): boolean {
   const itinerary = asArray(product.itinerary);
   if (!itinerary || itinerary.length === 0) return false;
   for (const day of itinerary) {
-    const record = asObject(day);
-    if (!record) return false;
+    const source = asObject(day);
+    if (!source || !Array.isArray(source.spots)) return false;
+    const record = normaliseItinerarySupport(source);
     if (textValue(record.title).length === 0) return false;
     if (textValue(record.description).length === 0) return false;
     if (textValue(record.meals).length === 0) return false;
@@ -158,10 +160,8 @@ export function hasValidCoverPoMeta(product: Record<string, unknown>): boolean {
     .map(asObject)
     .filter((spot): spot is Record<string, unknown> => Boolean(spot));
   if (!spots.length) return false;
-  const coverPoiId = Number(cover.poiId);
-  if (Number.isInteger(coverPoiId) && coverPoiId > 0) {
-    return spots.some((spot) => Number(spot.poiId) === coverPoiId);
-  }
+  // 图库地点与 VBK POI 属于不同 ID 命名空间；不能因数字不同否定同一景点。
+  // 仍要求图库地点名称与当前行程吻合，删除景点后的旧封面不能借 ID 放行。
   return spots.some((spot) => {
     const names = [textValue(spot.poiName), textValue(spot.name)].filter(Boolean);
     return names.some((name) => name === coverPoi || name.includes(coverPoi) || coverPoi.includes(name));

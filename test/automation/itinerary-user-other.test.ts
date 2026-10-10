@@ -70,7 +70,7 @@ test("统一 spots 保留景点、其他、自由活动、景点的携程卡片�
     day: 1, title: "混合活动", description: "", hotel: "", meals: "自理",
     spots: [
       { name: "甲", poiName: "甲POI", poiId: 1, kind: "attraction", timeOfDay: "morning" },
-      { name: "潮汕接团", kind: "other", description: "工作人员接团", timeOfDay: "morning" },
+      { name: "航拍体验", kind: "other", description: "独立航拍体验", timeOfDay: "morning" },
       { name: "自由活动", kind: "free", description: "自行安排", timeOfDay: "afternoon" },
       { name: "乙", poiName: "乙POI", poiId: 2, kind: "attraction", timeOfDay: "afternoon" },
     ],
@@ -82,13 +82,13 @@ test("统一 spots 保留景点、其他、自由活动、景点的携程卡片�
   assert.deepEqual(expected.map((entry) => entry.kind), ["attraction", "other", "free", "attraction"]);
 });
 
-test("未标时段的统一 spots 在转换与回读期望使用同一均分时段", () => {
+test("接团分离后，游览站点在转换与回读期望使用同一均分时段", () => {
   const day: ProductItineraryDay = { day: 1, title: "默认时段", description: "", hotel: "", meals: "自理", spots: [
     { name: "甲", kind: "attraction", poiName: "甲", poiId: 1 },
     { name: "接团", kind: "other", description: "服务" },
     { name: "乙", kind: "attraction", poiName: "乙", poiId: 2 },
   ] };
   const business = transformItinerary({ itinerary: [day], operations, stations })[0]!.tourDailyInfos.filter((info) => [3, 9].includes(Number(info.activeType?.key)));
-  assert.deepEqual(business.map((info) => [info.activeType?.key, info.takeoffTime?.name]), [[3, "上午"], [9, "上午"], [3, "下午"]]);
-  assert.deepEqual(buildReadbackExpectations({ itinerary: [day], operations, stations }).days[0].timeline.map((entry) => entry.kind), ["attraction", "other", "attraction"]);
+  assert.deepEqual(business.map((info) => [info.activeType?.key, info.takeoffTime?.name]), [[3, "上午"], [3, "下午"]]);
+  assert.deepEqual(buildReadbackExpectations({ itinerary: [day], operations, stations }).days[0].timeline.map((entry) => entry.kind), ["attraction", "attraction"]);
 });

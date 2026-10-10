@@ -113,7 +113,7 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     }).strict(), args[1]);
   }
   if (channel === "agent:respond") parse(channel, "response", z.object({ requestId: shortTextSchema, answers: z.record(z.string(), z.union([z.string().max(3000), z.array(z.string().max(1000)).max(20)])).refine((value) => Object.keys(value).length <= 20) }).strict(), args[1]);
-  if (channel === "agent:approve") parse(channel, "response", z.object({ approvalId: shortTextSchema, productVersion: z.string().regex(/^[a-f0-9]{64}$/) }).strict(), args[1]);
+  if (channel === "agent:approve") parse(channel, "response", z.object({ approvalId: shortTextSchema, productVersion: z.string().regex(/^[a-f0-9]{64}$/), trafficRouteReviewAuthorized: z.boolean().optional() }).strict(), args[1]);
   if (channel === "ai:regenerate") parse(channel, "field", shortTextSchema, args[1]);
   if (channel === "workflowTasks:resume") parse(channel, "mode", workflowTaskRetryModeSchema, args[1]);
   if (channel === "memory:saveExplicit") parse(channel, "input", memoryInputSchema, args[1]);

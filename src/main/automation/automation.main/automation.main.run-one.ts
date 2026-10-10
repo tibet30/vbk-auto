@@ -44,6 +44,7 @@ import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-r
 import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { resolveRunStatusAfterSinglePhaseSuccess, settleRunAfterVerifiedPreflight } from "./automation.main.run-one-state.js";
 import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
+import { trafficRouteReviewAuthorized } from "../../../shared/traffic-route-review-approval.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 import { inspectManualCoverAsset } from "../manual-cover-asset.js";
 import { readActiveCoverFallback, placeholderDraftOnly } from "../../../shared/cover-fallback.js";
@@ -188,6 +189,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           return ensureTrafficLinePhase({
             page,
             parentProductId: productId!,
+            routeReviewAuthorized: trafficRouteReviewAuthorized(ctx.db.getAgentSnapshot(localProductId)),
             config: productData.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
             itinerary: productData.itinerary,
             log,
@@ -324,7 +326,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           // 个失败阶段，不能再把整条 run 恢复为 failed，否则 UI 会继续显示卡住。
           if (phaseName === "preflight") {
             Object.assign(run, settleRunAfterVerifiedPreflight(run));
-            log("最终预检已通过权威回读；所有产品阶段已结案，不会重跑历史待处理阶段。");
+            log("最终预检已通过权威回读；母产品录入阶段已结案，交通套餐仍以各子产品最终回读为准。");
           } else {
             run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
             run.currentPhase = undefined;
@@ -336,7 +338,7 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
           }
           if (run.status === "succeeded" && !ctx.agentControlled) {
             await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
-            log("产品草稿已保存，未提交审核、未发布。", "warning");
+            log("母产品草稿已保存；交通套餐完成状态以各子产品最终回读为准。", "warning");
             writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "draft_saved");
           }
           break;

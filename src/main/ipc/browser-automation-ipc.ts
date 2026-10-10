@@ -119,6 +119,10 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     throw new Error("旧自动化入口已停用。请在 Agent 中确认单个写入阶段后继续。");
   };
   ipcMain.handle("automation:start", legacyAutomationBlocked);
+  ipcMain.handle("automation:continueApproved", async (_event, localProductId: string) => {
+    await context.automation.executeApprovedWorkflow(localProductId);
+    return context.db.getProduct(localProductId);
+  });
   // 「停止」按钮的入口：立刻把 run 标记为 cancelled，runner 在下一个
   // checkpoint 跳出。不等待 Playwright 当前调用结束 ——
   // 跨进程 await click 安全中断点未知，强制 abort 可能让浏览器页面留下

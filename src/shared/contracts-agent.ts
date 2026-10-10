@@ -28,6 +28,8 @@ export interface AgentApproval {
   intentVersion?: string;
   /** Explicit full replay of this completed automation; normal recovery remains resumable. */
   replayOfAutomationRunId?: string;
+  /** 用户在最终确认时另行明确授权玩法线路匹配审核。 */
+  trafficRouteReviewAuthorized?: boolean;
 }
 export interface AgentRun {
   id: string;
@@ -87,7 +89,7 @@ export interface AgentDisplaySnapshot extends Omit<AgentSnapshot, "events"> {
   eventCount: number;
 }
 export interface AgentInputResponse { requestId: string; answers: Record<string, string | string[]>; }
-export interface AgentApprovalResponse { approvalId: string; productVersion: string; }
+export interface AgentApprovalResponse { approvalId: string; productVersion: string; trafficRouteReviewAuthorized?: boolean; }
 export interface AgentIllegalKeywordRepairInput {
   content: string;
   keywords: string[];

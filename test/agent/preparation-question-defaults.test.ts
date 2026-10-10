@@ -71,6 +71,16 @@ test("a substantive preference with no safe inference remains visible", () => {
   assert.equal(automaticPreparationAnswer(question), undefined);
 });
 
+test("自动封面选择不能替用户承诺上传原图", () => {
+  assert.equal(automaticPreparationAnswer(single("cover-resolution", "封面最终处理", [
+    ["upload-now", "我现在上传符合规格的真实原图"],
+  ])), undefined);
+  assert.equal(automaticPreparationAnswer(single("cover-resolution", "封面最终处理", [
+    ["upload-now", "我现在上传符合规格的真实原图"],
+    ["library", "自动检索行程景点图库"],
+  ])), "library");
+});
+
 test("明确命名的二选一景点不能被默认删除", () => {
   const question = single("named-or", "二选一原景点混入文本如何处理？", [
     ["remove", "删除非遗中心参观"], ["keep", "保留原景点，等待运营手动配置"],

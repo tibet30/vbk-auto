@@ -1,4 +1,5 @@
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
+import { productJsonSaveStatus } from "../operations/product-json-save-policy.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import type { AiUsageEvent, ManualReviewFieldInput } from "../../shared/contracts.js";
 import { parseProduct } from "../automation/schema/schema.js";
@@ -45,9 +46,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     clearReappearedTrustedOperatorItineraryRemovals(next);
     parseProduct(next);
     const saved = productMutations.replace(id, next, {
-      status: "review",
+      status: productJsonSaveStatus(product.product, next, product.status),
       allowMeetingCityCorrection: true,
       preserveVerifiedItineraryPois: false,
+      allowItineraryRemovalRestore: true,
     });
     await reconcileSavedProductQuestion(context, id);
     return saved;

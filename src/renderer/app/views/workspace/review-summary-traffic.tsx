@@ -1,6 +1,7 @@
 import { BadgeCheck, ChevronDown, Plane, TrainFront } from "lucide-react";
 import type { ProductDetail } from "../../../../shared/contracts-types.js";
 import type { TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
+import { isUnavailableTrafficResourceFailure } from "../../../../shared/traffic-resource-status.js";
 import styles from "./review-summary-traffic.module.less";
 
 type UnknownRecord = Record<string, unknown>;
@@ -32,13 +33,14 @@ function readTrafficReviewItems(product: ProductDetail): TrafficReviewItem[] {
   const operations = record(root?.operations);
   const trafficLine = record(operations?.trafficLine);
   const availability = record(trafficLine?.availability) ?? record(operations?.trafficLineAvailability);
-  const endpointPlan = record(availability?.endpointPlan);
   const availableVariants = Array.isArray(availability?.availableVariants)
     ? availability.availableVariants.filter((item): item is TrafficLineVariant => item === "flightRoundTrip" || item === "trainRoundTrip")
     : [];
   const variants = (["flightRoundTrip", "trainRoundTrip"] as const).filter((variant) => availableVariants.includes(variant));
   const automation = record(product.automation);
   const trafficProgress = record(automation?.trafficLine);
+  const endpointPlan = record(trafficProgress?.endpointPlan) ?? record(availability?.endpointPlan);
+  const checking = automation?.status === "running" && automation?.currentPhase === "trafficLine";
   const children = Array.isArray(trafficProgress?.children) ? trafficProgress.children : [];
   return variants.flatMap((variant) => {
     const route = record(endpointPlan?.[variant === "flightRoundTrip" ? "flight" : "train"]);
@@ -49,9 +51,9 @@ function readTrafficReviewItems(product: ProductDetail): TrafficReviewItem[] {
     const progress = record(child);
     const resourceState = progress?.verified === true
       ? "verified"
-      : progress?.skipped === true ? "unavailable"
-        : progress?.failureReason ? "failed"
-          : product.productId ? "checking" : "awaitingResource";
+      : progress?.skipped === true && isUnavailableTrafficResourceFailure(String(progress.failureReason ?? ""), variant) ? "unavailable"
+        : progress?.failureReason || trafficProgress?.failureReason ? "failed"
+          : checking ? "checking" : "awaitingResource";
     return arrival && departure ? [{ variant, arrival, departure, resourceState }] : [];
   });
 }
@@ -80,7 +82,8 @@ export function AppWorkspaceReviewSummaryTraffic({
       ? `${resourceVerified}/${items.length} 类班期已核验`
       : !product.productId
         ? `${items.length} 类端点已确认`
-        : resourceFailed ? "班期核验需处理" : `${resourceVerified}/${plannedItems.length} 类班期已核验`;
+        : resourceFailed ? "班期核验需处理"
+          : plannedItems.length === 0 ? "当前班期暂无可用资源" : `${resourceVerified}/${plannedItems.length} 类班期已核验`;
 
   return (
     <section

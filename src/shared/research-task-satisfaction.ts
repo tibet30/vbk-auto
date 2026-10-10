@@ -1,7 +1,8 @@
 import { HOTEL_TIER_VALUES } from "./hotel-tiers.js";
 import { poiResearchTaskNames } from "./poi-research-tasks.js";
 import { productNeedsVehicleResource } from "./product-form.js";
-import { requiresItineraryPoi } from "./itinerary-activity-kind.js";
+import { hasCompletePoi, requiresItineraryPoi } from "./itinerary-activity-kind.js";
+import { hasVerifiedRouteAdministrativeNode } from "./route-administrative-nodes.js";
 import {
   hasBorderPermitItineraryTrigger,
   hasResolvedBorderPermitVisibleFields,
@@ -52,6 +53,23 @@ function poiNameSatisfaction(product: ProductLike, taskName: string): "verified"
 
   if (hasMissingAttraction) return null;
   if (hasVerified) return "verified";
+  if (hasVerifiedRouteAdministrativeNode(product, targetName)) return "non_poi";
+  // An explicitly saved night shoot is an independent activity, not a new
+  // sightseeing stop. Do not keep a stale POI question for its location once
+  // that day's actual attractions are verified. Missing attractions above
+  // still win, including when the same name is also used for a night shoot.
+  const escaped = targetName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const nightTitle = new RegExp(`^${escaped}(?:星空(?:拍摄)?|夜拍|星空夜拍)$`, "u");
+  if (product.itinerary.some(value => {
+    const day = objectValue(value);
+    const spots = Array.isArray(day?.spots) ? day.spots : [];
+    const activities = Array.isArray(day?.activities) ? day.activities : [];
+    return spots.filter(requiresItineraryPoi).every(hasCompletePoi) && activities.some(value => {
+      const activity = objectValue(value);
+      return activity?.type === "other" && textValue(activity.time) === "晚上"
+        && nightTitle.test(textValue(activity.title));
+    });
+  })) return "non_poi";
   return hasNonPoi ? "non_poi" : null;
 }
 

@@ -63,6 +63,17 @@ function basicInfoRequest(): PlannerRequest {
   };
 }
 
+test("provider length finish cannot accept even a parseable module fragment", async (t) => {
+  const url = await startServer(t, (res) => {
+    const body = JSON.parse(toolResponse("submit_basicInfo_module", { reply: "ok", modules: [] }));
+    body.choices[0].finish_reason = "length";
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(body));
+  });
+  const adapter = new OpenAICompatiblePlannerAdapter({ apiKey: "k", baseUrl: url, model: "m" });
+  await assert.rejects(adapter.generateStage(basicInfoRequest()), /输出长度限制/);
+});
+
 test("generateStage 成功时记录 presentation/basicInfo stage 的 input+output tokens", async (t) => {
   const events: AiUsageEvent[] = [];
   const url = await startServer(t, (res) => {

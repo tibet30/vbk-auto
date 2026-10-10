@@ -4,13 +4,18 @@ import {
   containsExcludedAlternativeMention,
   excludedItineraryAlternativeGroups,
 } from "./itinerary-alternative-copy.js";
+import { trustedOperatorItineraryRemovals } from "../../shared/trusted-operator-itinerary-removals.js";
 
 type Json = Record<string, unknown>;
 
 /** Derived copy may only describe the active itinerary after an OR group converges. */
 export function excludedItineraryCopyConflicts(product: ProductDetail, extraCopy: readonly string[] = []): string[] {
   const itinerary = Array.isArray(product.product.itinerary) ? product.product.itinerary : [];
-  const excluded = excludedItineraryAlternativeGroups(product, itinerary);
+  const excluded = [
+    ...excludedItineraryAlternativeGroups(product, itinerary),
+    ...trustedOperatorItineraryRemovals(product.product).filter(receipt => !receipt.groupKey)
+      .map(receipt => ({ day: receipt.day, names: [receipt.name] })),
+  ];
   if (!excluded.length) return [];
   const presentation = record(product.product.presentation);
   const globalCopy = [

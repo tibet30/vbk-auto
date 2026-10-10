@@ -57,6 +57,8 @@ test("暂停优先报告修复窗口最后一个被拒绝的 patch", () => {
   base.events.push({ id: "patch-result", runId: "run", type: "tool_result", content: "参数无效：patch.itinerary[1].hotel 必须是非空字符串", createdAt: "now", data: { toolCallId: "patch", executionRejected: true } } as never);
   base.events.push({ id: "read", runId: "run", type: "tool_call", content: "read_product", createdAt: "now", data: { toolCallId: "read", name: "read_product" } } as never);
   base.events.push({ id: "read-result", runId: "run", type: "tool_result", content: "无关的只读产品快照", createdAt: "now", data: { toolCallId: "read" } } as never);
+  assert.equal(nextPreparationLoopDecision(deps, base).kind, "model", "被拒绝的修改仍应保留下一轮修复机会");
+  base.events.push({ id: "read-again", runId: "run", type: "tool_call", content: "read_product", createdAt: "now", data: { toolCallId: "read-again", name: "read_product" } } as never);
   const paused = nextPreparationLoopDecision(deps, base);
   assert.equal(paused.kind, "pause");
   assert.match(paused.reason, /patch\.itinerary\[1\]\.hotel/);

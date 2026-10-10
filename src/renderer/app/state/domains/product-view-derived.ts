@@ -9,6 +9,7 @@ import {
 } from "../../helpers";
 import type { AppStateBase } from "../base";
 import { readActiveCoverFallback } from "../../../../shared/cover-fallback.js";
+import { replacementDraftProductId } from "../../../../shared/product-replacement.js";
 
 /** 产品详情、核查、自动化与两步导航的纯派生视图模型。 */
 export function useProductViewDerived(state: AppStateBase) {
@@ -35,7 +36,7 @@ export function useProductViewDerived(state: AppStateBase) {
     : state.readiness.ready ? "可以录入" : `${state.readiness.issues.length} 项待处理`;
   const vbkStageStatus = vbkStageStatusText(product);
   const automationActive = product?.automation?.status === "running";
-  const savedSucceeded = product?.status === "draft_saved" || product?.automation?.status === "succeeded";
+  const savedSucceeded = product?.status === "draft_saved" || product?.automation?.status === "succeeded" || Boolean(replacementDraftProductId(product));
   const recoveryBlocked = !savedSucceeded && product?.automation ? recoveryNeedsUser(product.automation) : null;
   const advisorHint = !savedSucceeded && product?.automation ? activeAdvisorHint(product.automation) : null;
   const automationPhases = normalizedAutomationPhasesForDisplay(product);

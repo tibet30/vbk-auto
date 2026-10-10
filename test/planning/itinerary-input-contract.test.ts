@@ -6,6 +6,16 @@ import { extractLockedConstraints } from "../../src/main/agent/prompt-helpers.js
 import { agentPatchOperations } from "../../src/main/agent/integration-patch.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
 
+test("送机或高铁的服务说明不生成景点二选一，真实景点选项仍锁定", () => {
+  const product = draft("D1：宽窄巷子或锦里；D2：武侯祠；第2天送机或高铁不安排住宿。");
+  const valid = [
+    { day: 1, spots: [{ name: "宽窄巷子", relation: "or", timeOfDay: "morning" }, { name: "锦里", relation: "or", timeOfDay: "morning" }] },
+    { day: 2, spots: [{ name: "武侯祠" }] },
+  ];
+  assert.equal(itineraryInputContractError(product, valid), undefined);
+  assert.match(itineraryInputContractError(product, [{ ...valid[0], spots: valid[0]!.spots.slice(0, 1) }, valid[1]]) ?? "", /必须全部保留/);
+});
+
 test("完整路线后的交通排除和草稿边界不被识别为景点二选一", () => {
   const product = draft("第一天忠山公园、金龙寺，第二天尧坝古镇、玉蟾山，保留此顺序。当地5钻酒店、不含餐；不含飞机或火车交通子产品。仅保存草稿，不提交审核或发布。");
   assert.equal(itineraryInputContractError(product, [
@@ -32,6 +42,16 @@ function draft(userIdea: string, intent?: ProductDetail["planning"]): ProductDet
   if (intent) product.planning = intent;
   return product;
 }
+
+test("部分行程的送机约束允许保存在交通活动，不能强迫生成送机POI", () => {
+  const product = draft("必须去宽窄巷子。D2：送机");
+  const itinerary = [
+    { day: 1, spots: [{ name: "宽窄巷子" }] },
+    { day: 2, spots: [], activities: [{ type: "transport", title: "送机", detail: "按航班时间送往机场" }] },
+  ];
+  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+  assert.match(itineraryInputContractError(product, [{ day: 1, spots: [] }, itinerary[1]]) ?? "", /宽窄巷子/);
+});
 
 test("无用户行程时允许完整生成", () => {
   const product = draft("想轻松一点，适合带孩子");
@@ -204,8 +224,8 @@ test("Markdown 日期标题不会污染每日锁定景点", () => {
   ]);
   assert.ok(!locked.pois.some((poi) => /\*\*|10 月|D[12]/.test(poi)));
   assert.equal(itineraryInputContractError(product, [
-    { day: 1, spots: [{ name: "青海湖" }, { name: "茶卡盐湖" }] },
-    { day: 2, spots: [{ name: "德令哈" }, { name: "大柴旦翡翠湖" }] },
+    { day: 1, description: "西宁 - 青海湖 - 茶卡盐湖 - 天峻县（天峻石林星空）", spots: [{ name: "青海湖" }, { name: "茶卡盐湖" }] },
+    { day: 2, description: "天峻 - 德令哈 - 大柴旦翡翠湖", spots: [{ name: "德令哈" }, { name: "大柴旦翡翠湖" }] },
   ]), undefined);
 });
 

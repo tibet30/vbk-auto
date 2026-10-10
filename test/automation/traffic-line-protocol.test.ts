@@ -354,13 +354,23 @@ test("飞机行程回读缺少航班信息卡片时不能视为完成", () => {
   }, "flightRoundTrip"), /缺少首日或末日目标交通节点/);
 });
 
-test("资源段承载的飞机交通节点即使无行程卡片也可作为完成证据", () => {
-  assert.equal(verifyTrafficNodes({
+test("资源段配置不能代替平台要求的航班卡片，恢复时补齐首末日", () => {
+  const tour = {
     tourDailyDescriptions: [
       { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, useSegmentConfig: true, tourDailyFlights: [], tourDailyPackageFlights: [] }] },
       { tourDailyInfos: [{ activeType: { key: 2, name: "航班" }, useSegmentConfig: true, tourDailyFlights: [], tourDailyPackageFlights: [] }] },
     ],
-  }, "flightRoundTrip"), 2);
+  };
+  assert.throws(() => verifyTrafficNodes(tour, "flightRoundTrip"), /缺少首日或末日目标交通节点/);
+  const endpoints = { arrivalCity: "西安", departureCity: "汉中", resolvedAt: "2026-10-08",
+    flight: { arrival: { code: "XIY", name: "咸阳国际机场" }, departure: { code: "HZG", name: "城固机场" } } };
+  const source = { activeType: { key: 2, name: "航班" }, useSegmentConfig: true };
+  const merged = mergeTrafficNodes(tour, source, source, "flightRoundTrip", endpoints);
+  assert.equal(verifyTrafficNodes(merged, "flightRoundTrip"), 2);
+  const days = merged.tourDailyDescriptions as Array<{ tourDailyInfos: Array<Record<string, any>> }>;
+  assert.equal(days[0]!.tourDailyInfos[0]!.useSegmentConfig, false);
+  assert.equal(days[0]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].arriveAirports[0].code, "XIY");
+  assert.equal(days[1]!.tourDailyInfos[0]!.tourDailyPackageFlights[0].departureAirports[0].code, "HZG");
 });
 
 test("火车交通节点在资源提交前补齐火车信息卡片", () => {
@@ -590,15 +600,15 @@ test("资源校验失败时返回平台明确拒绝的城市，供安全过滤�
   }
 });
 
-test("交通资源校验使用覆盖产品库存窗口的代表性真实班期", () => {
+test("交通资源校验使用满足提前预订的近期真实班期", () => {
   const dates = trafficLineResourceCheckDates({
     commercial: { inventory: { startDate: "2026-09-09", endDate: "2027-09-09", dailyQuota: 30 } },
   }, new Date("2026-09-09T10:00:00+08:00"));
 
-  assert.equal(dates[0], "2026-09-09");
+  assert.equal(dates[0], "2026-09-11");
   assert.equal(dates.length, 3);
-  assert.equal(dates[1], "2027-03-10");
-  assert.equal(dates.at(-1), "2027-09-08");
+  assert.equal(dates[1], "2026-09-12");
+  assert.equal(dates.at(-1), "2026-09-13");
   assert.deepEqual(trafficLineResourceCheckDates({ commercial: { inventory: { startDate: "bad", endDate: "2026-09-09" } } }), []);
 });
 
@@ -946,6 +956,10 @@ test("当前可用方式会重验历史 skipped 子产品且不重复创建", as
     },
     evaluate: async (_fn: unknown, request: any) => {
       evaluated.push(String(request?.endpoint ?? ""));
+      if (String(request?.endpoint).endsWith("getdescriptionInfo")) return {
+        status: 200, durationMs: 1, ctx: {},
+        payload: { ResponseStatus: { Ack: "Success" }, info: { productDesc: { productDesc: "<p>same</p>" }, pmRcmdItems: [] } },
+      };
       throw new Error("纯回读探针失败");
     },
   };
@@ -989,7 +1003,7 @@ test("当前可用方式会重验历史 skipped 子产品且不重复创建", as
   assert.deepEqual(result.children, []);
   assert.equal(result.skipped?.length, 1);
   assert.equal(checkpoints.find((item) => !item.failureReason)?.skipped, false, "重验检查点撤销历史跳过标记");
-  assert.equal(checkpoints.at(-1)?.skipped, true, "本次回读失败仍保留跳过证据");
+  assert.equal(checkpoints.at(-1)?.skipped, false, "回读协议失败保留可重试失败态，不能标成无资源跳过");
 });
 
 test("当前会话明确不可用时保留 skipped，但不写 verifiedAt 并返回 blocked", async () => {
@@ -1272,4 +1286,20 @@ test("校验响应丢失交通卡片时立即失败并带边界诊断", async ()
   );
   assert.equal(check3Count, 1);
   assert.equal(requests.some((request) => request.path === "saveTourDailyDetail.json"), false);
+});
+
+test("持续pending到恢复阈值停止只读等待，成功结果不触发恢复", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as { document?: unknown }).document;
+  let result = "U", reads = 0;
+  (globalThis as { document?: unknown }).document = { cookie: "GUID=traffic-test" };
+  globalThis.fetch = (async () => { reads++; return new Response(JSON.stringify({ ResponseStatus: { Ack: "Success", Errors: [] }, result }), { status: 200 }); }) as typeof fetch;
+  try {
+    const page = { evaluate: async (fn: any, arg: any) => fn(arg) } as any;
+    await assert.rejects(() => waitForSegmentSubmit(page, "child", { shouldStopWaiting: () => true, sleep: async () => {} }), /异步核验.*恢复阈值/);
+    assert.equal(reads, 1);
+    result = "T";
+    assert.deepEqual(await waitForSegmentSubmit(page, "child", { shouldStopWaiting: () => true }), []);
+    assert.equal(reads, 2);
+  } finally { globalThis.fetch = originalFetch; (globalThis as { document?: unknown }).document = originalDocument; }
 });

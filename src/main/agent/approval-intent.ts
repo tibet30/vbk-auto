@@ -1,10 +1,12 @@
 /** Operational recovery keeps the already approved business intent intact. */
 export function preservesApprovedIntent(content: string): boolean {
   const text = content.trim().replace(/\s+/g, "").replace(/[。！!]+$/g, "");
+  // Persisted recovery commands emitted by the retired task entry carry no edit.
+  if (text === "请继续当前产品规划与录入。先读取已有状态，不要重置或重复已验证内容") return true;
   // A recovery command has no new business noun/value. Keep this deliberately
   // conservative: any edit verb, explicit field, price, date, or new POI turns
   // the message into a new intent and therefore requires a new approval.
-  const explicitlyPreservesPlan = /(?:不要|无需|不再|别|勿).{0,6}(?:修改|调整|变更)/.test(text)
+  const explicitlyPreservesPlan = /(?:不要|无需|不再|别|勿|不).{0,6}(?:修改|调整|变更)/.test(text)
     && /(?:保持|沿用|按|使用).{0,10}(?:当前|原|既有).{0,8}(?:方案|行程|设置)/.test(text)
     && /(?:重试|继续|恢复|从.+阶段)/.test(text);
   if (!explicitlyPreservesPlan && /(?:改|修改|调整|变更|新增|删除|替换|更换|重做|重新规划|重新生成|添加).{0,20}(?:价格|成人|儿童|酒店|行程|景点|POI|日期|人数|套餐|用车|资源|城市)/i.test(text)) return false;

@@ -1,5 +1,7 @@
 import type { PoiSuggestCandidate, PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
+import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
+import { buildPoiContextForItineraryDay } from "./poi-context.js";
 
 export interface PoiAutoSelectionMatch {
   poiName: string;
@@ -11,6 +13,7 @@ export interface PoiAutoSelectionMatch {
 
 export interface PoiAutoSelectionResult {
   status: "available" | "suspended" | "uncertain";
+  reason?: "no_candidate" | "location_mismatch" | "ambiguous";
   match?: PoiAutoSelectionMatch;
 }
 
@@ -34,21 +37,32 @@ export async function resolvePlanningPoiAutoSelection(args: {
   /** 当前产品的目的地约束；缺失时保守地仅保留既有候选选择规则。 */
   context?: { destinationCity?: string; province?: string };
   detail: PoiSuggestDetailResult;
+  /** Prior human confirmation; still requires a current candidate, location and availability check. */
+  confirmedPoiId?: number;
   checkAvailability(poiId: number): Promise<{ status: "available" | "suspended" }>;
   disambiguate?: PoiAutoDisambiguator;
 }): Promise<PoiAutoSelectionResult> {
-  const exact = args.detail.best
+  const confirmed = args.confirmedPoiId ? args.detail.candidates.find(candidate => candidate.poiId === args.confirmedPoiId
+    && isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)) : undefined;
+  if (args.confirmedPoiId && !confirmed) return { status: "uncertain", reason: args.detail.candidates.length ? "location_mismatch" : "no_candidate" };
+  const exact = confirmed ?? (args.detail.best
     ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
-      isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword) && candidate.poiId === args.detail.best!.poiId)
-    : undefined;
+      isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates) && candidate.poiId === args.detail.best!.poiId)
+    : undefined);
   let candidate = exact;
   let confidence = 1;
 
   if (!candidate && args.disambiguate) {
-    const choices = args.detail.candidates.slice(0, 12)
+    const choices = args.detail.candidates
       .filter((item): item is PoiSuggestCandidate & { poiName: string; poiId: number } =>
-        isPlanningPoiCandidateInContext(item, args.context, args.product, args.keyword));
-    if (choices.length === 0) return { status: "uncertain" };
+        isPlanningPoiCandidateInContext(item, args.context, args.product, args.keyword, args.detail.candidates))
+      .slice(0, 12);
+    if (choices.length === 0) {
+      return {
+        status: "uncertain",
+        reason: args.detail.candidates.length > 0 ? "location_mismatch" : "no_candidate",
+      };
+    }
     const outcome = await args.disambiguate({
       localProductId: args.localProductId,
       desired: args.keyword,
@@ -59,12 +73,15 @@ export async function resolvePlanningPoiAutoSelection(args: {
     confidence = outcome.confidence;
   }
 
-  if (!candidate || !isSelectableCandidate(candidate) || !candidateMatchesContext(candidate, args.context, args.product, args.keyword)) {
-    return { status: "uncertain" };
+  if (!candidate || !isSelectableCandidate(candidate) || !candidateMatchesContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)) {
+    return {
+      status: "uncertain",
+      reason: args.detail.candidates.length > 0 ? "location_mismatch" : "no_candidate",
+    };
   }
   const availability = await args.checkAvailability(candidate.poiId);
   if (availability.status === "suspended") return { status: "suspended" };
-  if (!exact && confidence <= 0.8) return { status: "uncertain" };
+  if (!exact && confidence <= 0.8) return { status: "uncertain", reason: "ambiguous" };
   return {
     status: "available",
     match: {
@@ -86,8 +103,9 @@ export function isPlanningPoiCandidateInContext(
   context: { destinationCity?: string; province?: string } | undefined,
   product: Record<string, unknown>,
   keyword: string,
+  candidates?: PoiSuggestCandidate[],
 ): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } {
-  return isSelectableCandidate(candidate) && candidateMatchesContext(candidate, context, product, keyword);
+  return isSelectableCandidate(candidate) && candidateMatchesContext(candidate, context, product, keyword, candidates);
 }
 
 function candidateLabel(candidate: PoiSuggestCandidate & { poiName: string }): string {
@@ -106,6 +124,7 @@ function candidateMatchesContext(
   context: { destinationCity?: string; province?: string } | undefined,
   product: Record<string, unknown>,
   keyword: string,
+  candidates?: PoiSuggestCandidate[],
 ): boolean {
   const destinationCity = normaliseAdministrativeName(context?.destinationCity);
   const province = normaliseAdministrativeName(context?.province);
@@ -113,9 +132,54 @@ function candidateMatchesContext(
   const candidateProvince = normaliseAdministrativeName(candidate.province);
   if (province && (!candidateProvince || candidateProvince !== province)) return false;
   if (destinationCity && !candidateCity) return false;
-  if (destinationCity && candidateCity !== destinationCity
+  const days = Array.isArray(product.itinerary)
+    ? product.itinerary.filter(day => isRecord(day) && dayContainsKeyword(day, keyword)) : [];
+  const dayCities = new Set(days.map(day => normaliseAdministrativeName(
+    buildPoiContextForItineraryDay(product, destinationCity, day).destinationCity,
+  )).filter(city => city && city !== destinationCity));
+  if (dayCities.size === 1 && !dayCities.has(candidateCity)
     && !itineraryExplicitlyAllowsLocation(product, keyword, candidateCity, candidate.district, candidate.poiName)) return false;
+  if (destinationCity && candidateCity !== destinationCity
+    && !itineraryExplicitlyAllowsLocation(product, keyword, candidateCity, candidate.district, candidate.poiName)
+    && !(province && explicitlyNamedUniquePoi(product, keyword, candidate, candidates, province))) return false;
   return true;
+}
+
+/** 原要求指定地点有同省唯一官方名候选时，地点名本身就是跨城行程证据。
+ * 允许景区类别尾缀，以及当天明确写出的官方名前缀；不借用酒店/旧 POI，
+ * 不接受同名多地点；省份与营业门仍由调用链核验。
+ */
+function explicitlyNamedUniquePoi(product: Record<string, unknown>, keyword: string,
+  candidate: PoiSuggestCandidate, candidates: PoiSuggestCandidate[] | undefined, province: string): boolean {
+  const desired = normaliseText(keyword);
+  if (!desired || !candidates) return false;
+  const basic = isRecord(product.basicInfo) ? product.basicInfo : {};
+  if (!normaliseText(String(basic.userIdea ?? "")).includes(desired)) return false;
+  if (!Array.isArray(product.itinerary)) return false;
+  const days = product.itinerary.filter(day => isRecord(day) && dayContainsKeyword(day, keyword));
+  const matchesName = (name: string) => {
+    const core = normaliseText(name).replace(/[（）()]/gu, "")
+      .replace(/(?:旅游景区|地质公园|风景名胜区|风景区|景区)$/u, "");
+    return normaliseText(name) === desired || core === desired || (desired.length >= 4 && core.endsWith(desired)
+      && days.some(day => normaliseText(dayRouteText(day)).includes(core)
+        || hasVerifiedOriginalRouteNeighbour(day, basic, candidate, province)));
+  };
+  if (!days.length || !matchesName(candidate.poiName ?? "")) return false;
+  const ids = new Set(candidates.filter(item => isSelectableCandidate(item)
+    && matchesName(item.poiName ?? "")
+    && normaliseAdministrativeName(item.province) === province).map(item => item.poiId));
+  return ids.size === 1 && ids.has(candidate.poiId);
+}
+
+/** A different, verified original stop establishes the day's city, never a hotel or stale alias. */
+function hasVerifiedOriginalRouteNeighbour(day: Record<string, unknown>, basic: Record<string, unknown>,
+  candidate: PoiSuggestCandidate, province: string): boolean {
+  const raw = normaliseText(String(basic.userIdea ?? ""));
+  const city = normaliseAdministrativeName(candidate.city);
+  return Boolean(city) && (Array.isArray(day.spots) ? day.spots : []).some(spot => isRecord(spot)
+    && hasCompletePoi(spot) && spot.poiId !== candidate.poiId
+    && normaliseText(String(spot.name ?? "")).length >= 4 && raw.includes(normaliseText(String(spot.name)))
+    && normaliseAdministrativeName(spot.province) === province && normaliseAdministrativeName(spot.city) === city);
 }
 
 function itineraryExplicitlyAllowsLocation(
@@ -127,7 +191,10 @@ function itineraryExplicitlyAllowsLocation(
 ): boolean {
   const itinerary = product.itinerary;
   if (!Array.isArray(itinerary)) return false;
-  const locations = [candidateCity, normaliseAdministrativeName(candidateDistrict)]
+  const locations = [
+    ...locationNameVariants(candidateCity),
+    ...locationNameVariants(candidateDistrict),
+  ]
     .filter((location) => location.length >= 2);
   if (locations.length === 0) return false;
   return itinerary.some((day) => {
@@ -155,9 +222,13 @@ function dayContainsKeyword(day: Record<string, unknown>, keyword: string): bool
 
 function dayRouteText(day: Record<string, unknown>): string {
   const spots = Array.isArray(day.spots) ? day.spots : [];
+  const activities = Array.isArray(day.activities) ? day.activities : [];
   return [day.title, day.description, ...spots.flatMap((spot) => {
     if (!isRecord(spot)) return [];
     return [spot.name, spot.description];
+  }), ...activities.flatMap((activity) => {
+    if (!isRecord(activity)) return [];
+    return [activity.title, activity.detail];
   })]
     .filter((value): value is string => typeof value === "string")
     .join(" ");
@@ -173,4 +244,10 @@ function normaliseText(value: string): string {
 
 function normaliseAdministrativeName(value: unknown): string {
   return toPlatformShortLocationName(value);
+}
+
+function locationNameVariants(value: unknown): string[] {
+  const raw = typeof value === "string" ? normaliseText(value) : "";
+  const short = normaliseText(normaliseAdministrativeName(value));
+  return [...new Set([raw, short].filter(Boolean))];
 }

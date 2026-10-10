@@ -162,3 +162,9 @@ test("planner 上下文和 itinerary prompt 使用最新锁定约束", () => {
   assert.ok(prompt.includes(JSON.stringify(planner.lockedConstraints)));
   assert.match(prompt, /禁止整体重排或替换，只允许规范化和 POI 核验/);
 });
+
+
+test("商业配置标题后的天数和指定住宿不应被锁成行程景点", () => {
+  const product = draft("D1 宽窄巷子\nD2 武侯祠\n住宿与商业配置：第1晚5钻；第2天返程不住宿。指定住宿地点周边5公里；成人销售价4280元，儿童销售价2180元。");
+  assert.deepEqual(lockedOf(product).itineraryOrder, [{ day: 1, spots: ["宽窄巷子"] }, { day: 2, spots: ["武侯祠"] }]);
+});

@@ -43,5 +43,5 @@ test("修复窗口中的只读状态问询不关闭无选项 confirm 自动恢�
   assert.equal(snapshot.events.some((event) => event.data?.defaultAnswers
     && (event.data.defaultAnswers as Record<string, unknown>)["repair-confirm"] === "true"), true);
   assert.equal(snapshot.run?.status, "paused");
-  assert.equal(snapshot.events.some((event) => /自动尝试 2 次且模型修复一次/.test(event.content)), true);
+  assert.equal(snapshot.events.some((event) => /自动尝试 2 次且模型修复三轮/.test(event.content)), true);
 });

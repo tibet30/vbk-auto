@@ -303,3 +303,18 @@
   font-weight: 500;
   line-height: 1.45;
 }
+
+/* Operational arrangements stay outside the numbered sightseeing timeline. */
+.supportRow {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+.supportRow .hotelIcon { color: var(--muted-foreground); background: var(--muted); }
+.supportRow .hotelTitle { color: var(--foreground); }
+.supportRow .hotelText { color: var(--foreground); white-space: normal; overflow-wrap: anywhere; }

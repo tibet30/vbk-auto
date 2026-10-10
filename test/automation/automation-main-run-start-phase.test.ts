@@ -44,3 +44,23 @@ test("销售控制远端回读通过：先完成销售控制，再切换到产�
   assert.equal(run.currentPhase, "basic");
   assert.equal(run.phases.find((phase) => phase.phase === "basic")?.status, "running");
 });
+
+test("取消后继续必须复用未完成阶段，不能从已保存基础信息开始", async () => {
+  const { failedAutomationResumePhase } = await import("../../src/main/automation/automation.main/automation.main.resume-phase.js");
+  const run: AutomationRun = { id: "cancelled", status: "cancelled", currentPhase: "trafficLine", phases: [{ phase: "basic", status: "completed" }, { phase: "trafficLine", status: "failed" }], logs: [] };
+  assert.equal(failedAutomationResumePhase(run), "trafficLine");
+  const { preparePhaseRetry } = await import("../../src/main/automation/phase-retry.js");
+  const resumed = preparePhaseRetry(run, ["basic", "trafficLine"], "trafficLine");
+  assert.deepEqual(resumed.phases.map(phase => phase.status), ["completed", "pending"]);
+  assert.equal(failedAutomationResumePhase({ ...run, status: "succeeded" }), undefined);
+});
+
+test("停止立即落盘失败断点，重载后显式继续仍保留此前阶段", async () => {
+  const { DraftAutomation } = await import("../../src/main/automation/automation.main/automation.main.class.js");
+  let saved: AutomationRun = { id: "stop", status: "running", currentPhase: "trafficLine", phases: [{ phase: "basic", status: "completed" }, { phase: "trafficLine", status: "running" }], logs: [] };
+  const db = { getProduct: () => ({ automation: saved }), saveAutomation: (_id: string, next: AutomationRun) => { saved = next; } } as any;
+  const automation = new DraftAutomation(db, {} as any, () => {}, async () => ({}) as any);
+  await automation.stop("local");
+  assert.equal(saved.status, "cancelled");
+  assert.deepEqual(saved.phases.map(phase => phase.status), ["completed", "failed"]);
+});

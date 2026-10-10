@@ -1,8 +1,11 @@
+import { buildTimeline, type TimelineItem, type ItineraryActivity, type ItineraryDay } from "./review-summary-itinerary-timeline";
+export type { ItineraryActivity, ItineraryDay } from "./review-summary-itinerary-timeline";
+import { itinerarySupportingArrangements } from "../../../../shared/itinerary-support-arrangements.js";
 import { Select } from "../../helpers/Select";
 import {
   CalendarDays,
   ChevronDown,
-  Coffee,
+  BusFront,
   Hotel,
   MapPin,
   ShieldAlert,
@@ -22,34 +25,6 @@ import { ItinerarySpotPoiEditor } from "./review-summary-itinerary-poi";
 import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
 import styles from "./review-summary-itinerary.module.less";
 
-export interface ItineraryActivity {
-  time: string;
-  title: string;
-  detail?: string;
-  type?: "transport" | "visit" | "meal" | "hotel" | "free" | "other";
-}
-
-export interface ItineraryDay {
-  day?: number;
-  title?: string;
-  spots?: Array<{
-    name: string;
-    kind?: "attraction" | "free" | "other";
-    description?: string;
-    poiName?: string | null;
-    poiId?: number | null;
-    province?: string | null;
-    city?: string | null;
-    district?: string | null;
-  }>;
-  description?: string;
-  hotel?: string;
-  hotelDescription?: string;
-  meals?: string;
-  mealDescriptions?: string[];
-  activities?: ItineraryActivity[];
-}
-
 interface ReviewSummaryItineraryProps {
   localProductId: string;
   days: ItineraryDay[];
@@ -62,122 +37,10 @@ interface ReviewSummaryItineraryProps {
   readinessIssues?: ProductReadiness["issues"];
 }
 
-interface TimelineItem {
-  key: string;
-  time: string;
-  title: string;
-  detail?: string;
-  type: ItineraryActivity["type"];
-  dayIndex: number;
-  spotIndex?: number;
-  poiName?: string | null;
-  poiId?: number | null;
-  province?: string | null;
-  city?: string | null;
-  district?: string | null;
-  kind?: "attraction" | "free" | "other";
-}
-
-/**
- * 把 Day 的 activities 与 spots 合并成一条从上到下的时间线。
- * - activities 已有 time/Title，直接使用，按 time 升序排列；
- * - 没有 time 的 spots 视作「待安排」占位，排在末尾；
- * - meals 字段作为独立的「用餐」节点插入到活动之间（紧跟其前一个 visit 之后）。
- */
-function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem[] {
-  const activities = (day.activities ?? []).slice();
-  const spots = (day.spots ?? []).filter(Boolean);
-  const meals = day.meals?.trim() ?? "";
-  const items: TimelineItem[] = [];
-
-  const claimedSpotIndexes = new Set<number>();
-  const activityItems: TimelineItem[] = activities.map((act, idx) => {
-    const canAttachSpot = act.type === "visit" || act.type === undefined || act.type === "other";
-    const spotIndex = canAttachSpot
-      ? spots.findIndex((spot, index) => !claimedSpotIndexes.has(index) && spot.name.trim() === act.title.trim())
-      : -1;
-    const spot = spotIndex >= 0 ? spots[spotIndex] : undefined;
-    if (spotIndex >= 0) claimedSpotIndexes.add(spotIndex);
-    return {
-      key: `act-${idx}`,
-      time: act.time || "",
-      title: act.title,
-      detail: act.detail,
-      type: spot ? (spot.kind === "free" ? "free" : spot.kind === "other" ? "other" : "visit") : act.type ?? "other",
-      dayIndex,
-      spotIndex: spotIndex >= 0 ? spotIndex : undefined,
-      poiName: spot?.poiName ?? null,
-      poiId: spot?.poiId ?? null,
-      province: spot?.province ?? null,
-      city: spot?.city ?? null,
-      district: spot?.district ?? null,
-      kind: spot?.kind,
-    };
-  });
-
-  // spots 未在 activities 里出现的，追加到末尾作为未排时间的景点。
-  const usedTitles = new Set(activityItems.map((a) => a.title.trim()));
-  const spotItems: TimelineItem[] = spots
-    .map((spot, index) => ({ spot, index }))
-    .filter(({ spot, index }) => !claimedSpotIndexes.has(index) && !usedTitles.has(spot.name.trim()))
-    .map<TimelineItem>(({ spot, index }) => ({
-      key: `spot-${index}`,
-      time: "",
-      title: spot.name,
-      detail: spot.description,
-      type: spot.kind === "free" ? "free" : spot.kind === "other" ? "other" : "visit",
-      dayIndex,
-      spotIndex: index,
-      poiName: spot.poiName ?? null,
-      poiId: spot.poiId ?? null,
-      province: spot.province ?? null,
-      city: spot.city ?? null,
-      district: spot.district ?? null,
-      kind: spot.kind,
-    }));
-
-  items.push(...activityItems, ...spotItems);
-
-  // 用餐节点：作为单独的餐食条目插入（meal 类型），紧跟 visit 之后。
-  if (meals && !items.some((item) => item.type === "meal")) {
-    const insertAt = (() => {
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type === "visit") return i + 1;
-      }
-      return items.length;
-    })();
-    items.splice(insertAt, 0, {
-      key: "meal",
-      time: "",
-      title: meals,
-      type: "meal",
-      dayIndex,
-    });
-  }
-
-  // 按 time 升序排序（有 time 的排前）。
-  items.sort((a, b) => {
-    const at = parseTimeOrInfinity(a.time);
-    const bt = parseTimeOrInfinity(b.time);
-    return at - bt;
-  });
-
-  return items;
-}
-
-function parseTimeOrInfinity(raw: string): number {
-  const match = raw.match(/^(\d{1,2}):?(\d{2})?$/);
-  if (!match) return Number.POSITIVE_INFINITY;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2] ?? 0);
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) return Number.POSITIVE_INFINITY;
-  return hours * 60 + minutes;
-}
-
 function activityIcon(type: ItineraryActivity["type"]) {
   if (type === "meal") return <Utensils size={11} aria-hidden="true" />;
   if (type === "hotel") return <Hotel size={11} aria-hidden="true" />;
-  if (type === "transport") return <Coffee size={11} aria-hidden="true" />;
+  if (type === "transport") return <BusFront size={11} aria-hidden="true" />;
   if (type === "visit") return <MapPin size={11} aria-hidden="true" />;
   return <Sparkles size={11} aria-hidden="true" />;
 }
@@ -270,7 +133,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
           const timeline = buildTimeline(day, index);
           const visitCount = timeline.filter((t) => t.type === "visit").length;
           const activityCount = timeline.filter((t) => t.type === "free" || t.type === "other").length;
-          const mealCount = timeline.filter((t) => t.type === "meal").length;
+          const arrangements = itinerarySupportingArrangements(day);
           const hotel = day.hotel?.trim() ?? "";
           const hasHotelStay = hasItineraryHotelStay(hotel);
           const showBorderPermitHint = Boolean(borderPermitIssue) && itineraryDayHasBorderPermitTrigger(day);
@@ -284,13 +147,13 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                 aria-expanded={expanded}
                 aria-controls={`day-body-${index}`}
               >
-                <span className={styles.dayNum}>D{index + 1}</span>
+                <span className={styles.dayNum}>D{day.day ?? index + 1}</span>
                 <span className={styles.dayHeadBody}>
                   <span className={styles.dayTitle}>{title || `Day ${index + 1}`}</span>
                   <span className={styles.daySummary}>
-                    {visitCount > 0 ? `${visitCount} 个景点` : "尚无景点"}
+                    {visitCount > 0 ? `${visitCount} 个景点` : arrangements.some((item) => item.type === "transport") ? "接送安排" : "当日安排"}
                     {activityCount > 0 ? ` · ${activityCount} 项活动` : ""}
-                    {mealCount > 0 ? ` · ${mealCount} 餐` : ""}
+                    {day.meals?.trim() ? " · 含餐食说明" : ""}
                     {hasHotelStay ? " · 含住宿" : ""}
                   </span>
                 </span>
@@ -363,14 +226,26 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                       })}
                     </ol>
                   ) : (
-                    <p className={styles.timelineEmpty}>本天尚无安排。</p>
+                    <>{arrangements.length === 0 && <p className={styles.timelineEmpty}>本天尚无游览安排。</p>}</>
                   )}
+                  {arrangements.filter((item) => item.type !== "hotel").map((item, i) => (
+                    <div className={styles.supportRow} key={`support-${i}`}>
+                      <span className={styles.hotelIcon}>{activityIcon(item.type)}</span>
+                      <div className={styles.hotelBody}>
+                        <strong className={styles.hotelTitle}>{item.type === "transport" ? "接送安排" : "餐食"}</strong>
+                        <span className={styles.hotelText}>{item.detail || item.title}</span>
+                      </div>
+                    </div>
+                  ))}
                   {hotel && (
                     <div className={styles.hotelCard}>
                       <span className={styles.hotelIcon}><Hotel size={12} aria-hidden="true" /></span>
                       <div className={styles.hotelBody}>
-                        <strong className={styles.hotelTitle}>入住</strong>
+                        <strong className={styles.hotelTitle}>住宿</strong>
                         <span className={styles.hotelText}>{hotel}</span>
+                        {day.hotelDescription && day.hotelDescription !== hotel && (
+                          <span className={styles.hotelText}>{day.hotelDescription}</span>
+                        )}
                       </div>
                     </div>
                   )}

@@ -1,4 +1,4 @@
-import type { AgentApproval, AgentSnapshot } from "../../shared/contracts.js";
+import type { AgentApproval, AgentSnapshot, ProductDetail } from "../../shared/contracts.js";
 import type { AgentSnapshotManager } from "./core-snapshot.js";
 import type { AgentCoreDependencies } from "./types.js";
 
@@ -16,6 +16,14 @@ export function isFullWorkflowReplayInstruction(content: string): boolean {
 
 export function requestsFreshAutomationRun(approval: AgentApproval, automationRunId?: string): boolean {
   return Boolean(automationRunId && approval.replayOfAutomationRunId === automationRunId);
+}
+
+/** An unknown old shell must never be recreated by the ordinary resume button. */
+export function requestsLegacyShellReplacement(product: ProductDetail, content: string): boolean {
+  const run = product.automation;
+  return isFullWorkflowReplayInstruction(content) && /重新创建(?:携程)?(?:草稿|产品)/u.test(content)
+    && !product.productId && run?.status === "failed" && run.currentPhase === "saleControl"
+    && run.phases.length > 0 && run.phases.every(phase => phase.status === "pending");
 }
 
 export async function requestWorkflowReplay(args: {

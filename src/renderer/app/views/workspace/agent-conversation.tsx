@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, MessageCircleMore, Pause, Play, Send } from "lucide-react";
-import type { ProductDetail, ProductReadiness, VbkApi } from "../../../../shared/contracts";
+import type { ProductDetail, ProductReadiness, TrafficLineConfig, VbkApi } from "../../../../shared/contracts";
+import { incompleteTrafficVariants } from "../../../../shared/traffic-resource-status";
 import { parseProductBriefMessage } from "../../../../shared/product-brief-message";
 import { AgentInput } from "./agent-input";
 import { AgentStageTimeline } from "./agent-stage-timeline";
@@ -29,7 +30,9 @@ function FailureNotice({ failure, disabled, busy, repairing, submitted, onRepair
     ? "已定位到受影响的产品文案。重写时会保留行程、资源、价格和库存。"
     : failure.phase === "pricingInventory"
       ? "请在右侧补全套餐定价与班期库存，再继续录入。"
-      : "请根据平台反馈补全对应信息，再继续录入。";
+      : failure.phase === "trafficLine"
+        ? "已保存的草稿会保留。请根据平台反馈修正交通套餐，再继续交通阶段。"
+        : "请根据平台反馈补全对应信息，再继续录入。";
   return <section className={styles.failureNotice} role="alert" aria-label={`${failure.phaseLabel}录入受阻`}>
     <div className={styles.failureHeader}>
       <span className={styles.failureIcon} aria-hidden="true"><CircleAlert size={16} strokeWidth={2.2} /></span>
@@ -69,14 +72,19 @@ export function AgentConversation({ product, userName, readiness, client, input,
   const follow = useRef(true);
   const [unseen, setUnseen] = useState(false);
   const [showAbandon, setShowAbandon] = useState(false);
+  const [routeReviewAuthorized, setRouteReviewAuthorized] = useState(false);
   const [repairingKeywords, setRepairingKeywords] = useState(false);
   const status = snapshot.run?.status;
   const running = status === "running" || status === "queued";
   const approval = snapshot.pendingApproval;
+  useEffect(() => { setRouteReviewAuthorized(false); }, [product.id, approval?.id]);
   const request = snapshot.pendingInput;
   const events = history.events;
   const latestEvent = snapshot.events.at(-1);
   const automationFailure = latestAutomationFailure(product);
+  const pausedReason = status === "paused" || status === "failed"
+    ? automationFailure?.message || snapshot.events.slice().reverse().find((event) => event.type === "status" && event.data?.status === status)?.content || "可继续执行或补充要求。"
+    : undefined;
   const illegalKeywordRepairRequested = events.some((event) => event.data?.illegalKeywordRepair === true);
   const illegalKeywordRepairSubmitted = illegalKeywordRepairRequested && !automationFailure?.affectedPaths.length;
   const draftKey = `agent-composer:${product.id}`;
@@ -130,6 +138,10 @@ export function AgentConversation({ product, userName, readiness, client, input,
       {running && <button type="button" className={styles.pauseAction} disabled={busy} onClick={() => void run((agent) => agent.pause(product.id))}><Pause size={14} />暂停执行</button>}
       {(status === "paused" || status === "failed") && <button type="button" className={styles.pauseAction} disabled={busy} onClick={() => void run((agent) => agent.resume(product.id))}><Play size={14} />继续执行</button>}
     </div>
+    {pausedReason && <div className={styles.pauseReason} role="status" aria-label="任务暂停原因">
+      <strong>{automationFailure ? `${automationFailure.phaseLabel}未完成` : "任务暂停原因"}</strong>
+      <p>{pausedReason}</p>
+    </div>}
     <div className={styles.timeline} ref={viewport} role="log" aria-live="polite" onScroll={() => {
       const node = viewport.current;
       if (!node) return;
@@ -165,10 +177,14 @@ export function AgentConversation({ product, userName, readiness, client, input,
       {approval?.status === "pending" && status === "waiting_approval" && <section className={styles.approval} aria-label="最终方案确认">
         <strong>确认右侧方案后开始录入</strong>
         <p className={styles.scope}>目标账号：{approval.accountKey}<br />录入范围：{approval.scope.map(scopeLabel).join("、")}</p>
+        {approval.scope.includes("vbk.write_phase:trafficLine") && <label className={styles.scope}>
+          <input type="checkbox" checked={routeReviewAuthorized} disabled={busy} onChange={event => setRouteReviewAuthorized(event.target.checked)} />
+          同时授权玩法线路匹配审核（飞机／火车套餐启用前置）
+        </label>}
         {!readiness.ready && <p role="status">本地方案尚未准备完成，不能录入：{readiness.issues.slice(0, 3).map((issue) => issue.label).join("、")}</p>}
         <div className={styles.actions}>
           <button type="button" className={shared.btn} data-variant="primary" disabled={busy || !readiness.ready} onClick={async () => {
-            const result = await run((agent) => agent.approve(product.id, { approvalId: approval.id, productVersion: approval.productVersion }));
+            const result = await run((agent) => agent.approve(product.id, { approvalId: approval.id, productVersion: approval.productVersion, trafficRouteReviewAuthorized: routeReviewAuthorized }));
             if (result?.events.some((event) => event.type === "approval" && (event.data?.approvalId ?? (event.data?.approval as { id?: string } | undefined)?.id) === approval.id
               && (event.data?.approval as { status?: string } | undefined)?.status === "approved")) onApproved();
           }}>确认方案并录入 VBK</button>
@@ -206,6 +222,15 @@ export function AgentConversation({ product, userName, readiness, client, input,
 }
 
 function latestAutomationFailure(product: ProductDetail) {
+  const config = (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine;
+  const incomplete = incompleteTrafficVariants(config, product.automation?.trafficLine);
+  if (incomplete.length) {
+    const reasons = [...new Set(product.automation?.trafficLine?.children
+      .filter((child) => incomplete.includes(child.variant))
+      .map((child) => child.failureReason?.trim()).filter(Boolean))];
+    if (reasons.length) return { phaseLabel: "交通套餐", phase: "trafficLine", keywords: [], affectedPaths: [],
+      message: `母产品草稿${product.status === "draft_saved" ? "已保存" : "尚未保存"}；交通套餐尚未完成。${reasons.join("；") || "尚未通过最终回读，请继续交通阶段。"}` };
+  }
   if (product.status === "draft_saved" || product.automation?.status === "succeeded") return null;
   const automation = product.automation;
   const phases = Object.values(automation?.recovery?.phases ?? {})

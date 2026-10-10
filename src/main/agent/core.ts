@@ -232,6 +232,7 @@ export class AgentCore {
         else this.completionBlocked(snapshot, message, blocker);
       } else {
         approval.status = "approved";
+        approval.trafficRouteReviewAuthorized = response.trafficRouteReviewAuthorized === true;
         granted = approval;
         snapshot.pendingApproval = undefined;
         this.event(snapshot, "approval", "用户已授权", { approval });

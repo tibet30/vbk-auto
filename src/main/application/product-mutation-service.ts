@@ -11,6 +11,10 @@ import { productNotFound } from "../infrastructure/db-errors.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
+import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
+import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
+import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
+import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
 
 type ProductMutationStore = {
   getProduct: VbkDatabase["getProduct"];
@@ -35,6 +39,8 @@ export interface ProductMutationOptions {
    * 人工整包 JSON 编辑可显式关闭，保留人工清空或替换 POI 的权利。
    */
   preserveVerifiedItineraryPois?: boolean;
+  /** 仅人工整包编辑或明确的用户加回指令可以撤销删除凭证。 */
+  allowItineraryRemovalRestore?: boolean;
 }
 
 export class ProductMutationService {
@@ -65,8 +71,11 @@ export class ProductMutationService {
     const incoming = options.preserveVerifiedItineraryPois === false
       ? product
       : preserveVerifiedItineraryPois(current.product, product);
-    const normalised = normaliseProductLocationFields(incoming, lockedMeetingCity || undefined);
-    this.store.updateProduct(localProductId, normalised, options.status, current.productJsonVersion ?? 0);
+    const protectedIncoming = options.allowItineraryRemovalRestore ? incoming : preserveItineraryRemovals(current.product, incoming);
+    const normalised = normaliseProductLocationFields(protectedIncoming, lockedMeetingCity || undefined);
+    if (Array.isArray(normalised.itinerary)) normalised.itinerary = normalised.itinerary.map((day) =>
+      day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
+    this.store.updateProduct(localProductId, reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0);
     const saved = this.store.getProduct(localProductId);
     if (!saved) throw productNotFound(localProductId);
     if (options.notify !== false) this.onUpdated?.(saved);
@@ -117,12 +126,13 @@ function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord
       if (name) verifiedByName.set(name, spot);
     }
     for (const spot of incomingDay.spots) {
-      if (!isRecord(spot) || hasVerifiedPoi(spot)) continue;
+      if (!isRecord(spot)) continue;
       const verified = verifiedByName.get(text(spot.name));
       if (!verified
         || !requiresItineraryPoi(spot)
         || !requiresItineraryPoi(verified)
         || activityKind(spot) !== activityKind(verified)) continue;
+      if (hasVerifiedPoi(spot) && (spot.poiId !== verified.poiId || spot.poiName !== verified.poiName)) continue;
       spot.poiName = verified.poiName;
       spot.poiId = verified.poiId;
       for (const field of ["province", "city", "district"] as const) {

@@ -23,6 +23,7 @@ import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.
 import { mergeSkeletonOperations } from "./skeleton-operation-merge.js";
 import type { ContactCardSelection, ProductDetail } from "../../shared/contracts.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import {
@@ -38,6 +39,7 @@ import type {
   ResearchTaskProposal,
 } from "../../shared/contracts-planning.js";
 import { resolvePlanningPoiAutoSelection, type PoiAutoDisambiguator } from "./poi-auto-selection.js";
+import { historicalConfirmedPoiId } from "./historical-poi-selection.js";
 import { planningWriteContractError } from "./itinerary-input-contract.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 import { privateTourSubtitle } from "../../shared/private-tour-copy.js";
@@ -166,8 +168,9 @@ export function itineraryPoisAreComplete(itinerary: unknown[]): boolean {
   if (itinerary.length === 0) return false;
   for (const day of itinerary) {
     if (!day || typeof day !== "object" || Array.isArray(day)) return false;
-    const spots = (day as Record<string, unknown>).spots;
-    if (!Array.isArray(spots)) return false;
+    if (!Array.isArray((day as Record<string, unknown>).spots)) return false;
+    const normalised = normaliseItinerarySupport(day);
+    const spots = (normalised as Record<string, unknown>).spots as unknown[];
     if (spots.length === 0) {
       if (dayHasUserOtherActivity(day)) continue;
       return false;
@@ -234,6 +237,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       product: product.product,
       context,
       detail: await suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context),
+      confirmedPoiId: historicalConfirmedPoiId(this.db, product, keyword),
       checkAvailability: (poiId) => this.getPoiAvailability(poiId),
       disambiguate: this.poiDisambiguate,
     });

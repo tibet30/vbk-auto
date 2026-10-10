@@ -219,3 +219,13 @@ test("最终回读以并存响应中的正式资源段为准，不重放已激�
     (globalThis as { document?: unknown }).document = originalDocument;
   }
 });
+
+test('native network errors retry only explicitly read-only traffic methods', async () => {
+  let calls=0;
+  const page:any={nativeOnly:true,vbkSessionFetch:async()=>{if(++calls===1)throw new Error('net::ERR_FAILED');return {status:200,payload:{ResponseStatus:{Ack:'Success'}}};}};
+  await postTrafficLineSoa(page,'15638','getSegments',{productId:'123'},'read');
+  assert.equal(calls,2);
+  calls=0;
+  await assert.rejects(postTrafficLineSoa(page,'15638','saveSegments',{productId:'123'},'write'),/ERR_FAILED/);
+  assert.equal(calls,1);
+});

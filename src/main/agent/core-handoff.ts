@@ -55,7 +55,7 @@ export class AgentHandoff {
           return this.snapshots.save(snapshot);
         }
       }
-      this.snapshots.event(snapshot, "status", "已按本次授权完成全部 VBK 阶段并通过最终回读。", { deterministicWorkflow: true });
+      this.snapshots.event(snapshot, "status", "母产品已按本次授权录入并通过最终回读；交通套餐结果见各子产品记录。", { deterministicWorkflow: true });
       this.snapshots.finish(snapshot);
       return this.snapshots.save(snapshot);
     });
@@ -107,7 +107,13 @@ export class AgentHandoff {
     if (!recovered) return current;
     const event = [...snapshot.events].reverse().find((item) =>
       item.type === "approval" && (item.data?.approval as AgentApproval | undefined)?.id === recovered.id);
-    if (event) event.data = { ...(event.data ?? {}), approval: recovered, recoveredApproval: true };
+    if (event && event.runId === snapshot.run?.id) {
+      event.data = { ...(event.data ?? {}), approval: recovered, recoveredApproval: true };
+    } else {
+      this.snapshots.event(snapshot, "approval", "已复用未变更方案的既有授权", {
+        approval: recovered, recoveredApproval: true,
+      });
+    }
     return recovered;
   }
 }

@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AgentCore } from "../../src/main/agent/core.js";
-import { isFullWorkflowReplayInstruction, requestsFreshAutomationRun } from "../../src/main/agent/core-workflow-replay.js";
+import { isFullWorkflowReplayInstruction, requestsFreshAutomationRun, requestsLegacyShellReplacement } from "../../src/main/agent/core-workflow-replay.js";
 import type { AgentCoreDependencies } from "../../src/main/agent/types.js";
 import type { AgentSnapshot } from "../../src/shared/contracts.js";
 
 const instruction = "保持当前方案不变，从基础信息开始重新执行完整 VBK 录入，不提交审核、不发布。";
+
+test("无编号旧创建失败必须明确重新创建才可发起新的确认", () => {
+  const product: any = { automation: { status: "failed", currentPhase: "saleControl", phases: [{ phase: "basic", status: "pending" }] } };
+  assert.equal(requestsLegacyShellReplacement(product, instruction), false);
+  const replacement = `${instruction}重新创建草稿。`;
+  assert.equal(requestsLegacyShellReplacement(product, replacement), true);
+  assert.equal(requestsLegacyShellReplacement({ ...product, productId: "79249440" }, replacement), false);
+  assert.equal(requestsLegacyShellReplacement({ ...product, automation: { ...product.automation, status: "running" } }, replacement), false);
+  assert.equal(requestsLegacyShellReplacement({ ...product, automation: { ...product.automation, phases: [{ phase: "basic", status: "completed" }] } }, replacement), false);
+});
 function fixture() {
   let saved: AgentSnapshot = { localProductId: "p", run: {
     id: "old-agent", status: "completed", createdAt: "x", updatedAt: "x",

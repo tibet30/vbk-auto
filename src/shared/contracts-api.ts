@@ -164,6 +164,7 @@ export interface VbkApi {
   };
   automation: {
     start(localProductId: string): Promise<void>;
+    continueApproved(localProductId: string): Promise<unknown>;
     retry(localProductId: string): Promise<void>;
     retryPhase(localProductId: string, phase: string): Promise<void>;
     /**

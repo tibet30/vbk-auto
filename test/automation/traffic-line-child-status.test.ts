@@ -26,3 +26,12 @@ test("泸州资源核验改站后展示实际执行站点而非旧准备站点",
   assert.deepEqual(latestTrafficLineEndpointPlan(latest, initial), latest);
   assert.deepEqual(latestTrafficLineEndpointPlan(undefined, initial), initial);
 });
+
+
+test("保存和有效化失败不显示为本班期已跳过", () => {
+  assert.equal(trafficLineChildStatus({ verified: false, skipped: true, variant: "flightRoundTrip",
+    failureReason: "当前产品未匹配玩法线路，请提交审核匹配线路" }, true), "failed");
+  assert.match(trafficLineEndpointHint("failed", true), /仍需处理/);
+  assert.equal(trafficLineChildStatus({ verified: false, skipped: true, variant: "trainRoundTrip",
+    failureReason: "子产品资源校验后没有任何可用的多出发城市" }, true), "skipped");
+});

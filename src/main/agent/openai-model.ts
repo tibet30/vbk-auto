@@ -7,6 +7,7 @@ export interface OpenAIAgentModelConfig {
   baseUrl: string;
   model: string;
   timeoutMs?: number;
+  extraParams?: Record<string, unknown>;
   onUsage?: (usage: { inputTokens?: number; outputTokens?: number; cachedTokens?: number }) => void;
   /** Sanitized telemetry only: no prompts, API keys, or tool arguments. */
   onLog?: (entry: { model: string; toolNames: string[]; inputTokens?: number; outputTokens?: number }) => void;
@@ -47,6 +48,7 @@ export class OpenAIAgentModel implements AgentModel {
     this.client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, timeout: config.timeoutMs ?? 90_000, maxRetries: 0 });
   }
   async complete(input: AgentModelInput) {
+    const deadline = AbortSignal.timeout(this.config.timeoutMs ?? 90_000);
     const stream = await this.client.chat.completions.create({
       model: this.config.model,
       messages: input.messages.map((message) => ({
@@ -62,7 +64,8 @@ export class OpenAIAgentModel implements AgentModel {
       tools: input.tools.map((tool) => ({ type: "function" as const, function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
       stream: true,
       stream_options: { include_usage: true },
-    });
+      ...(this.config.extraParams ?? {}),
+    }, { signal: deadline });
 
     let rawContent = "";
     let visibleContent = "";
@@ -102,6 +105,7 @@ export class OpenAIAgentModel implements AgentModel {
       if (choice.finish_reason) finishReason = choice.finish_reason;
     }
 
+    if (deadline.aborted) throw new Error("模型响应超时，请重试。");
     if (!sawChoice) throw new Error("模型响应为空：未返回流式 choices。");
     if (!finishReason) throw new Error("模型流式响应提前结束，请重试。");
     if (finishReason === "length") {

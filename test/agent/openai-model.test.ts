@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
 import { OpenAIAgentModel, parseOpenAIToolCalls } from "../../src/main/agent/openai-model.js";
 
 test("OpenAI adapter preserves malformed function arguments for protocol feedback", () => {
@@ -77,4 +78,23 @@ test("OpenAI adapter forwards cached prompt token usage when present", async () 
 test("OpenAI adapter rejects an early stream EOF", async () => {
   const model = modelWithChunks([{ choices: [{ finish_reason: null, delta: { content: "未完成" } }] }]);
   await assert.rejects(model.complete({ messages: [], tools: [] }), /提前结束/);
+});
+
+test("OpenAI adapter bounds a stream that keeps sending data without finishing", async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    const timer = setInterval(() => response.write('data: {"choices":[{"delta":{},"finish_reason":null}]}\n\n'), 10);
+    response.on("close", () => clearInterval(timer));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  try {
+    const model = new OpenAIAgentModel({ apiKey: "test", baseUrl: `http://127.0.0.1:${address.port}`, model: "test", timeoutMs: 120 });
+    const started = Date.now();
+    await assert.rejects(model.complete({ messages: [], tools: [] }), /abort|timeout|超时/i);
+    assert.ok(Date.now() - started < 1500, "stream must release even while chunks arrive");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });

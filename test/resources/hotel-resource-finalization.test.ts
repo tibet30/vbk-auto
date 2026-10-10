@@ -22,6 +22,10 @@ function fixture(options: { productForm: "groupTour" | "privateTour"; promote?: 
   let formal = draft.map((segment) => ({ ...segment, hotel: { segmentRooms: [] } }));
   const calls: string[] = [];
   const oldFetch = globalThis.fetch;
+  const oldTimeout = globalThis.setTimeout;
+  // 加速有界轮询等待，保留请求超时和实际业务回读判断。
+  globalThis.setTimeout = ((callback: any, delay: number, ...args: any[]) =>
+    oldTimeout(callback, delay <= 1500 ? 0 : delay, ...args)) as typeof setTimeout;
   const oldDocument = (globalThis as any).document;
   (globalThis as any).document = { cookie: "GUID=fixture" };
   globalThis.fetch = (async (input: any, init?: any) => {
@@ -50,6 +54,7 @@ function fixture(options: { productForm: "groupTour" | "privateTour"; promote?: 
   }, "78120988");
   const restore = () => {
     globalThis.fetch = oldFetch;
+    globalThis.setTimeout = oldTimeout;
     if (oldDocument === undefined) delete (globalThis as any).document;
     else (globalThis as any).document = oldDocument;
   };

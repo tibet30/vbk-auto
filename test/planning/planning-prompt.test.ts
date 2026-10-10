@@ -118,7 +118,7 @@ test("itinerary prompt 约束同日 POI 地理连续性和远距离交通衔接"
   assert.match(prompt, /单一可游览景点/);
   assert.match(prompt, /替换为同范围可查景点/);
   assert.match(prompt, /机场、车站、码头、酒店、民宿不能作为 attraction/);
-  assert.match(prompt, /集合点、接送点可作为 kind:'other' 写入 spots/);
+  assert.match(prompt, /接送统一写 activities\.transport/);
   assert.match(prompt, /省、自治区或直辖市/);
   assert.match(prompt, /核心游览城市/);
   assert.match(prompt, /近邻城市/);
@@ -174,4 +174,12 @@ test("presentation user message 仅将可信运营手动删除的 OR 项排除�
   });
   assert.match(message, /仅因可信运营手动删除而排除/);
   assert.doesNotMatch(message, /因真实 POI 绑定而收敛/);
+});
+
+test('完整连字符编号路线作为complete需求，禁止新增景点',()=>{
+  const input=structuredClone(request);input.stage='itinerary';
+  input.context.currentProduct.basicInfo={userIdea:'1-太原接---住太原\n2-太原---晋中送机'};
+  input.context.lockedConstraints={destinationCity:'太原',meetingCity:'太原',days:2,nights:1,pois:[],itineraryOrder:[]} as any;
+  const message=composePlanningUserMessage(input);
+  assert.match(message,/行程输入模式：complete/);assert.match(message,/禁止新增景点/);assert.match(message,/途经城市只写交通/);
 });

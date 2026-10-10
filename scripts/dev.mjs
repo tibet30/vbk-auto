@@ -10,6 +10,10 @@ const MAX_PORT_ATTEMPTS = 100;
 const LOOPBACK_HOST = "127.0.0.1";
 const WILDCARD_HOST = "0.0.0.0";
 
+// Electron（第三个命令）决定开发会话结果；关闭 App 后的服务清理不算失败。
+// 服务或编译器先退出时，-k 会终止 Electron，仍会返回失败。
+export const DEV_PROCESS_OPTIONS = ["-k", "--success", "command-2"];
+
 function canListen(port, host) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -77,7 +81,7 @@ async function main() {
   console.log("[dev] 等待本次主进程 watch 编译和模块链接校验");
 
   const child = spawn(concurrently, [
-    "-k",
+    ...DEV_PROCESS_OPTIONS,
     `npm run dev:renderer -- --port ${port} --strictPort`,
     `node scripts/dev-main-watch.mjs ${shellArgument(mainReadyFile)}`,
     `wait-on tcp:${LOOPBACK_HOST}:${port} file:${shellArgument(mainReadyFile)} && electron .`,

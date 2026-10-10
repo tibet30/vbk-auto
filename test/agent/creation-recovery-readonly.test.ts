@@ -152,7 +152,7 @@ test("only persists a new recovery run after all readbacks verify", async () => 
   assert.ok(saved[0].trafficLine.children.every((child: any) => child.verified && child.completedStages.includes("finalReadback")));
   assert.equal(current().status, "draft_saved");
   assert.deepEqual(preflightIds, [{ itineraryTourInfoId: "79189107" }]);
-  assert.equal(result.terminal, undefined);
+  assert.equal(result.terminal, true);
   assert.match(result.content, /只读恢复已完成/);
   assert.equal(externalWrites(), 0);
 });
@@ -207,6 +207,19 @@ test("parent-only does not require traffic configuration or an endpoint plan", a
   assert.deepEqual(result.data?.trafficLine, { scope: "parent-only", deferred: true, variants: [] });
   assert.equal(childReads(), 0);
   assert.equal(childVerifications(), 0);
+});
+
+test("all scope completes a product that explicitly disables traffic without requiring endpoints", async () => {
+  const { tool, saved, childReads, childVerifications, current } = harness({ trafficDisabled: true });
+  const result = await tool.execute({ scope: "all" }, { localProductId: "local-product", accountKey: "", productVersion: "" });
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].phases.some((phase: any) => phase.phase === "trafficLine"), false);
+  assert.equal(saved[0].trafficLine, undefined);
+  assert.equal(childReads(), 0);
+  assert.equal(childVerifications(), 0);
+  assert.equal(current().status, "draft_saved");
+  assert.equal(result.data?.automation.finalReadbackVerified, true);
+  assert.deepEqual(result.data?.trafficLine, []);
 });
 
 test("rejects duplicate traffic children instead of choosing one", async () => {

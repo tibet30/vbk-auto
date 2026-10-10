@@ -2,6 +2,7 @@ import { type VbkNavSection } from "./vbk-nav-sections.js";
 export { VBK_HOST, VBK_NAV_SECTIONS, formatBrowserPath, operationStageToSection, visibleVbkNavSections, type VbkNavSection } from "./vbk-nav-sections.js";
 import type { CreateProductInput, FieldState, OperationStatus, ProductDetail, ProductReadiness, ProductSummary } from "../../../shared/contracts.js";
 import type { PlanningStage } from "../../../shared/contracts-planning.js";
+import { replacementDraftProductId } from "../../../shared/product-replacement.js";
 
 export type Stage = "review" | "vbk";
 export type View = "workspace" | "products" | "settings" | "operation-log";
@@ -104,6 +105,8 @@ export function isVehicleResourceTask(task?: ProductDetail["researchTasks"][numb
 // 产品状态 → 用作第二步"草稿保存"现状文案，避免重复占用 statusLabel 的中文。
 export function vbkStageStatusText(product: ProductDetail | null): { tone: "waiting" | "running" | "saved" | "ready" | "blocked"; label: string; detail: string } {
   if (!product) return { tone: "waiting", label: "等待选择产品", detail: "创建产品后即可进入" };
+  const replacementProductId = replacementDraftProductId(product);
+  if (replacementProductId) return { tone: "saved", label: `已由草稿 ${replacementProductId} 接管`, detail: "当前历史壳没有访问权限；已保存的替代草稿才是可继续操作的 VBK 产品。" };
   if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
   const blocked = recoveryNeedsUser(product.automation);
   if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 AI 给出的指令完成手动操作，再重新发起一次保存草稿" };

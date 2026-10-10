@@ -80,7 +80,7 @@ function pick(value: unknown, keys: string[]): Record<string, unknown> {
 }
 
 function compactDiagnostics(value: unknown): Record<string, unknown> {
-  const source = pick(value, ["creationInput", "runtime", "debugSnapshot"]);
+  const source = pick(value, ["creationInput", "runtime", "debugSnapshot", "routeAdministrativeNodes"]);
   const runtime = pick(source.runtime, ["status", "stage", "progress", "message", "error", "updatedAt", "lastToolFailure"]);
   const failure = pick(runtime.lastToolFailure, ["name", "arguments", "error", "occurredAt"]);
   if (typeof failure.name === "string" && typeof failure.error === "string") {
@@ -97,6 +97,10 @@ function compactDiagnostics(value: unknown): Record<string, unknown> {
     if (typeof runtime[key] === "string") runtime[key] = redactLogString(runtime[key]).slice(0, 2_000);
   }
   return {
+    ...(Array.isArray(source.routeAdministrativeNodes) ? { routeAdministrativeNodes: source.routeAdministrativeNodes
+      .map(node => pick(node, ["day", "name", "districtId"]))
+      .filter(node => Number.isInteger(node.day) && Number(node.day) > 0 && typeof node.name === "string"
+        && node.name.trim() && Number.isInteger(node.districtId) && Number(node.districtId) > 0) } : {}),
     ...(source.creationInput !== undefined ? { creationInput: pick(source.creationInput, ["destination", "productForm", "days", "userIdea"]) } : {}),
     ...(source.runtime !== undefined ? { runtime } : {}),
     ...(source.debugSnapshot !== undefined ? { debugSnapshot: pick(source.debugSnapshot, ["localProductId", "productId", "basicInfoSaved", "pendingInput", "pendingApproval", "uncertainWrite"]) } : {}),

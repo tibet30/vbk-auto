@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect } from "react";
-import { api } from "../../helpers";
+import { api, VBK_NAV_SECTIONS } from "../../helpers";
 import type { AppStateBase } from "../base";
 
 /** BrowserView 布局、可见性、URL 同步与账号展示派生。 */
@@ -45,6 +45,30 @@ export function useBrowserDerived(state: AppStateBase, browserShouldMount: boole
       setBrowserOpen(true);
     }
   }, [browserOpen, product, vbkLogin?.loggedIn, view, stage]);
+
+  // 已保存草稿在切换产品后必须打开自己的 VBK 页面。此时 BrowserView 已挂载，
+  // 避免在 setView 后的同一轮渲染中抢先导航而落到空白页或上一产品。
+  useEffect(() => {
+    if (!api() || !browserShouldMount || view !== "workspace" || stage !== "vbk"
+      || product?.status !== "draft_saved" || !product.productId) return;
+    const targetUrl = VBK_NAV_SECTIONS.find((section) => section.key === "basic")?.buildUrl(product.productId);
+    if (!targetUrl) return;
+    let cancelled = false;
+    void (async () => {
+      const current = await api()!.browser.currentUrl().catch(() => "");
+      const currentProductId = current ? new URL(current).searchParams.get("productId") : null;
+      if (currentProductId === product.productId) {
+        if (!cancelled) setBrowserUrl(current);
+        return;
+      }
+      await api()!.browser.navigate(targetUrl);
+      const next = await api()!.browser.currentUrl().catch(() => "");
+      if (!cancelled && next) setBrowserUrl(next);
+    })().catch(() => {
+      // 用户仍可通过“进入产品信息”手动重试；不把未挂载完成的瞬态错误显示为产品失败。
+    });
+    return () => { cancelled = true; };
+  }, [browserShouldMount, product?.id, product?.productId, product?.status, setBrowserUrl, stage, view]);
 
   useEffect(() => {
     if (!api() || !browserShouldMount || view !== "workspace") return;

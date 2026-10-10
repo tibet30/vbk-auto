@@ -143,7 +143,7 @@ export async function recoverLegacyScreenshotFalseFailure(
     }
 
     await finalizeRunWithScreenshot(next, saveScreenshot, productId, page, log);
-    log("产品草稿已保存，未提交审核、未发布。", "warning");
+    log("母产品草稿已保存；交通套餐完成状态以各子产品最终回读为准。", "warning");
     ctx.db.saveAutomation(localProductId, next);
     writeAutomationProduct(ctx, localProductId, product.product, "draft_saved");
     ctx.emit(localProductId);

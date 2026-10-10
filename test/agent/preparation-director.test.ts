@@ -11,6 +11,17 @@ function product() {
   return value;
 }
 
+test("已有逐日结构但遗漏用户路线时修复行程，不能反复核验现存 POI", () => {
+  const value = product();
+  value.product.basicInfo!.userIdea = "1-广济桥---牌坊街\n2-南澳大桥---海岸游览";
+  value.product.itinerary = [
+    { day: 1, title: "广济桥", description: "游览广济桥", hotel: "无", meals: "自理", spots: [{ name: "广济桥", poiName: "广济桥", poiId: 101 }] },
+    { day: 2, title: "南澳海岸", description: "游览南澳大桥，海岸游览", hotel: "无", meals: "自理", spots: [{ name: "南澳大桥", poiName: "南澳大桥", poiId: 102 }] },
+  ];
+  assert.equal(evaluatePreparationCompletion(value).currentNode, "itineraryDraft");
+  assert.equal(decidePreparationAction(value)?.name, "generate_product_module");
+});
+
 test("缺少行程结构时优先生成，不因旧 POI research task 重复 resolve", () => {
   const value = product();
   value.researchTasks = [{

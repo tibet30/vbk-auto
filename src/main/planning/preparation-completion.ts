@@ -121,7 +121,7 @@ function collectGaps(product: ProductDetail, readinessOptions?: ReadinessOptions
   const structureError = itineraryStructureError(product.product);
   const itineraryContractError = itineraryInputContractError(product, product.product.itinerary);
   if (itineraryContractError) {
-    push({ label: "每日行程", detail: itineraryContractError, stage: "itinerary", node: structureError ? "itineraryDraft" : "poiResolution" });
+    push({ label: "每日行程", detail: itineraryContractError, stage: "itinerary", node: "itineraryDraft" });
   }
   for (const issue of readiness.issues) {
     const classified = /^itinerary\.\d+\.hotelCandidates(?:\.|$)/.test(issue.label)
@@ -172,7 +172,7 @@ function actionsFor(
   if (ready) {
     return hasApproval
       ? { allowed: [...read, "patch_product"], prohibited: ["request_approval", "generate_product_module"] }
-      : { allowed: [...read, "patch_product", ...(!coverSearchExhausted ? ["resolve_cover" as const] : []), "request_approval"], prohibited: ["generate_product_module"] };
+      : { allowed: [...read, "patch_product", "resolve_itinerary_hotels", ...(!coverSearchExhausted ? ["resolve_cover" as const] : []), "request_approval"], prohibited: ["generate_product_module"] };
   }
   if (stage === "foundation") {
     return { allowed: [...read, "generate_product_module", "patch_product"], prohibited: ["request_approval"] };
@@ -185,7 +185,7 @@ function actionsFor(
   }
   const allowed: PreparationAction[] = [...read, "generate_product_module", "ensure_presentation_recommendations", "patch_product"];
   const labels = gaps.map((gap) => gap.label).join(" ");
-  if (!coverSearchExhausted && /封面/.test(labels)) allowed.push("resolve_cover");
+  if (!coverSearchExhausted && /封面|(?:^|\s)presentation\.cover(?:\.|\s|$)/.test(labels)) allowed.push("resolve_cover");
   if (/酒店候选/.test(labels)) allowed.push("resolve_itinerary_hotels");
   if (/用车/.test(labels)) allowed.push("resolve_vehicle_resource");
   if (/大交通/.test(labels)) allowed.push("recheck_traffic_line_availability");

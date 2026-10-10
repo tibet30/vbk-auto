@@ -36,7 +36,7 @@ export class AgentTurnLoop {
         const token = this.snapshots.token(before);
         const preparation = nextPreparationLoopDecision(this.deps, before);
         const isPreparationRepairWindow = preparation.kind === "model"
-          && (preparation.modelRepairWindow === true || preparation.manualPoiModelWindow === true);
+          && (Boolean(preparation.action) || preparation.manualPoiModelWindow === true);
         if (preparation.kind === "pause") {
           this.snapshots.pause(before, preparation.reason);
           if (preparation.manualPoiBlocked) {
@@ -72,9 +72,20 @@ export class AgentTurnLoop {
           if (outcome !== "continue") break;
           continue;
         }
+        if (preparation.kind === "askHotelInput") {
+          const call: AgentToolCall = { id: this.id(), name: "ask_user", arguments: { questions: preparation.questions } };
+          this.snapshots.event(before, "tool_call", call.name, {
+            toolCallId: call.id, name: call.name, arguments: call.arguments, index: 0, count: 1,
+            hotelAvailabilityInput: true, node: preparation.action.node, progressKey: preparation.action.progressKey,
+          }, token.runId);
+          this.snapshots.save(before);
+          const outcome = await this.toolRunner.execute(id, call, token);
+          if (outcome !== "continue") break;
+          continue;
+        }
         if (preparation.kind === "askPoiInput") {
           const call: AgentToolCall = { id: this.id(), name: "ask_user", arguments: { questions: [preparation.input.question] } };
-          this.snapshots.event(before, "status", "未找到真实 POI，等待人工确认准确名称或手动配置。", {
+          this.snapshots.event(before, "status", "未找到独立 POI，正在由 AI 自动判断名称和同日地点锚点。", {
             manualPoiInput: true, node: preparation.action.node, progressKey: preparation.action.progressKey,
             poiSlotKey: preparation.input.key, poiSlots: preparation.input.slots,
           }, token.runId);
@@ -89,7 +100,7 @@ export class AgentTurnLoop {
           continue;
         }
         if (preparation.modelRepairWindow) {
-          this.snapshots.event(before, "status", `当前节点 ${preparation.action!.node} 已自动尝试两次。请基于前两次真实工具结果和当前保存事实仅修复一次，不能只询问是否继续；必须保留锁定城市、天数和已绑定 POI。`, {
+          this.snapshots.event(before, "status", `当前节点 ${preparation.action!.node} 已自动尝试两次。请基于前两次真实工具结果和当前保存事实在最多三轮内读取并修复，不能只询问是否继续；必须保留锁定城市、天数和已绑定 POI。`, {
             deterministicPreparationModelRepair: true,
             modelFeedback: true,
             node: preparation.action!.node,
@@ -144,7 +155,7 @@ export class AgentTurnLoop {
           } else if (streamedEvent) {
             current.events = current.events.filter((event) => event.id !== streamedEvent.id);
           }
-          if (output.content && !streamedEvent) this.snapshots.event(current, "assistant", output.content);
+          if (output.content && !streamedEvent) this.snapshots.event(current, "assistant", output.content, { modelTurnId });
           this.snapshots.save(current);
           // A repair-window answer with no tool has not changed the saved
           // product. Let the bounded preparation controller record its own

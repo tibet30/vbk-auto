@@ -25,6 +25,11 @@ export function readinessIssueSemanticKey(issue: Pick<ReadinessIssue, "label" | 
   const label = issue.label || "";
   const detail = issue.detail || "";
   const text = `${label} ${detail}`;
+  // 每日候选是不同日期的阻塞，不能被文案中的“酒店资源”合并成一个泛化事项。
+  const hotelDay = label.match(/酒店候选[：:]?\s*第\s*(\d+)\s*天/);
+  if (hotelDay) return `itinerary:hotel:${Number(hotelDay[1])}`;
+  const hotelPath = label.match(/^itinerary\.(\d+)\.hotelCandidates(?:\.|$)/);
+  if (hotelPath) return `itinerary:hotel:${Number(hotelPath[1]) + 1}`;
   if (vehiclePattern.test(text)) return "resource:vehicle";
   if (hotelPattern.test(text)) return "resource:hotel";
   if (coverPattern.test(text)) return "presentation:cover";

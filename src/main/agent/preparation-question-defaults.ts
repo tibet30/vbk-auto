@@ -81,7 +81,10 @@ export function automaticPreparationAnswer(question: AgentQuestion): string | st
       && question.options.some((option) => /切换.*图库|提供.*image\s*id|switch_to_ctrip|supply_ctrip/i.test(`${option.id} ${option.label}`))) {
       return undefined;
     }
-    const cover = firstOrdinaryOption(question);
+    // Uploading needs a real user file. An automatic answer cannot promise
+    // that the operator will upload one or turn a placeholder into evidence.
+    const cover = question.options?.find((option) =>
+      !/上传|upload|原图|提供.*(?:fileId|imageId|imageUrl)|手动|人工|暂停|保持当前|保留当前/i.test(`${option.id} ${option.label}`))?.id;
     if (cover) return asAnswer(question, cover);
   }
   if (/套餐名称|package_name/i.test(text)) {

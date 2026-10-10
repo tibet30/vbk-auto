@@ -1,6 +1,6 @@
 import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 import { runAutomationExclusive } from "./automation.main.execution.js";
-import { approvalForRun } from "../../agent/integration-gates.js";
+import { approvalForRun, recoverEquivalentApproval } from "../../agent/integration-gates.js";
 /**
  * DraftAutomation：自动化阶段对外暴露的统一门面类。
  *   - start / stop / retryPhase / retryOnePhase：业务侧 API；
@@ -154,6 +154,8 @@ async start(localProductId: string) {
     const next: AutomationRun = {
       ...run,
       status: "cancelled",
+      phases: run.phases.map(phase => phase.phase === run.currentPhase && phase.status !== "completed"
+        ? { ...phase, status: "failed" as const } : phase),
       logs: [
         ...run.logs,
         { at: new Date().toISOString(), message: "用户中止了自动录入", level: "warning" },
@@ -238,7 +240,10 @@ isCancelRequested(localProductId: string): boolean {
     const agent = this.db.getAgentSnapshot(localProductId);
     if (!agent?.run) throw new Error("缺少 Agent 任务，不能录入。");
     if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
-    const approval = approvalForRun(agent);
+    // The deterministic retry button can be used after a recovered agent run
+    // has completed. Reuse a historical approval only through the same strict
+    // fingerprint + recovery-only-instruction gate used by AgentCore.
+    const approval = approvalForRun(agent) ?? recoverEquivalentApproval(product, agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
     const fullReplay = approval.replayOfAutomationRunId === product.automation?.id && Boolean(product.automation?.id);
     if (!fullReplay && needsTrafficLineBackfill(product)) {

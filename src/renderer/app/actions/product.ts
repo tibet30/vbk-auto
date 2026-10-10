@@ -26,6 +26,7 @@ export function useProductHandlers(state: AppState) {
     setStage,
     setAccountMenuOpen,
     setActiveTaskId,
+    setBrowserOpen,
   } = state;
 
   const send = async (retryContent?: string, keepNotice = false, options: { isRetry?: boolean } = {}) => {
@@ -126,9 +127,15 @@ export function useProductHandlers(state: AppState) {
     setCreating(false);
     setAccountMenuOpen(false);
     try {
-      setProduct(await api()!.products.get(item.id));
+      const opened = await api()!.products.get(item.id);
+      setProduct(opened);
       setActiveTaskId(null);
+      const savedDraft = opened.status === "draft_saved" && Boolean(opened.productId);
+      setStage(savedDraft ? "vbk" : "review");
       setView("workspace");
+      if (savedDraft) {
+        setBrowserOpen(true);
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "打开产品失败，请重试。");
     }

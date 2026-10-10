@@ -71,7 +71,10 @@ export function alternativeMentionAliases(name: string): string[] {
     .replace(/(?:参观|游览|打卡)$/u, "");
   const shortActivity = action && /^非遗(?:中心)?$/u.test(simplified)
     ? `${simplified.replace(/中心$/u, "")}${action}` : "";
-  return [...new Set([exact, exact.replace(/(?:参观|游览|打卡)$/u, ""), simplified, shortActivity].filter(Boolean))]
+  const localName = exact.replace(/^[\p{Script=Han}]{1,8}?(?:市|县)/u, "");
+  const museumName = localName.endsWith("博物馆") ? localName.replace(/博物馆$/u, "") : "";
+  return [...new Set([exact, exact.replace(/(?:参观|游览|打卡)$/u, ""), simplified, shortActivity, localName,
+    ...(museumName.length >= 3 ? [museumName] : [])].filter(Boolean))]
     .sort((left, right) => right.length - left.length);
 }
 
@@ -122,7 +125,7 @@ function hasTitleChoiceExpression(value: string): boolean {
 
 function removeAlternativeName(source: string, name: string): string {
   const escaped = escapeRegExp(name);
-  const tail = "(?=\\s*(?:[、，,·/／→。；;]|$|或者|或|与|和|二选一|多选一|任选其一|参观|游览|安排|打卡|后|再|并))";
+  const tail = "(?=\\s*(?:[、，,·/／→。；;]|$|或者|或|与|和|等(?:人文)?景点|等人文|二选一|多选一|任选其一|参观|游览|安排|打卡|后|再|并))";
   return source
     .replace(new RegExp(`(?:或者|或|与|和)\\s*${escaped}${tail}`, "gu"), "")
     .replace(new RegExp(`${escaped}\\s*(?:或者|或|与|和)`, "gu"), "")
@@ -131,7 +134,7 @@ function removeAlternativeName(source: string, name: string): string {
 
 function hasActivityMention(source: string, name: string): boolean {
   const escaped = escapeRegExp(name);
-  return new RegExp(`(^|[、，,·/／→\\s]|(?:或者|或|与|和)|安排|前往|游览|参观)${escaped}(?=\\s*(?:[、，,·/／→。；;]|$|或者|或|与|和|二选一|多选一|任选其一|参观|游览|安排|打卡|后|再|并))`, "u").test(source);
+  return new RegExp(`(^|[、，,·/／→\\s]|(?:或者|或|与|和)|安排|前往|游览|参观)${escaped}(?=\\s*(?:[、，,·/／→。；;]|$|或者|或|与|和|等(?:人文)?景点|等人文|二选一|多选一|任选其一|参观|游览|安排|打卡|后|再|并))`, "u").test(source);
 }
 
 function tidyCopy(value: string): string {

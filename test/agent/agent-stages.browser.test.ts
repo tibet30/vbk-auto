@@ -57,7 +57,10 @@ test('A interaction: checkpoint, durable decision, continuous output, final summ
     await page.evaluate(() => (window as any).agentFixture.completeTask());
     const final = page.getByRole('article', { name: '任务最终总结' });
     await final.waitFor(); assert.match(await final.innerText(), /本次核验完成/);
+    assert.doesNotMatch(await final.innerText(), /用户已授权/);
+    await final.getByText('查看历史确认记录（已处理）', { exact: true }).click();
     assert.match(await final.innerText(), /用户已授权/);
+    await final.getByText('查看历史确认记录（已处理）', { exact: true }).click();
     await page.screenshot({ path: '/tmp/vbk-agent-a-final.png', fullPage: true });
     // Reading history must not be moved by a fresh event.
     await page.locator('[role="log"]').evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event('scroll')); });

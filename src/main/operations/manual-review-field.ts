@@ -26,6 +26,8 @@
 
 import type { ContactCardSelection, ManualReviewFieldInput, ProductCover } from "../../shared/contracts.js";
 import { applyItinerarySpotKind, applyItinerarySpotPoi, applyItinerarySpotRemove } from "./manual-review-itinerary-field.js";
+import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
+import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
 
 /**
  * 防御式地把 unknown 转成 object 记录，遇到 null / 非对象 / 数组都返回空对象，
@@ -58,7 +60,9 @@ export function applyManualReviewField(product: Record<string, unknown>, input: 
       throw new Error(`不支持的 ManualReviewFieldInput：${(exhaustive as { field?: string }).field ?? "unknown"}`);
     }
   }
-  return repairLegacyCoverQuality(next);
+  if (Array.isArray(next.itinerary)) next.itinerary = next.itinerary.map(day =>
+    day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
+  return repairLegacyCoverQuality(reconcileHotelStays(next));
 }
 
 /** 手工修改任意字段都会经过整份 product schema 校验，顺便修复历史封面脏值。 */

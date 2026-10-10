@@ -10,7 +10,11 @@ export async function recoverCreatedShell(
   verify = verifyExistingProductShellApi,
 ): Promise<void> {
   const previous = product.automation;
-  if (!product.productId) throw new Error("请先核查 VBK 是否已生成草稿，避免重复创建。");
+  if (!product.productId) {
+    const originalError = previous?.logs.filter(entry => entry.level === "error").at(-1)?.message;
+    throw new Error("首次创建草稿失败后未保存携程产品编号，无法确认远端是否已创建。请先核查首次创建的草稿编号，再回读原草稿继续；直接重试可能重复创建。"
+      + (originalError ? `\n首次失败：${originalError}` : ""));
+  }
   if (previous?.status !== "failed" || previous.currentPhase !== "saleControl"
     || previous.phases.some(phase => phase.status !== "pending")) {
     throw new Error("销售控制断点状态不一致，需先核查已完成阶段。");

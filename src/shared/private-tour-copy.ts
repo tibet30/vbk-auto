@@ -33,7 +33,8 @@ function fitWidth(value: string, maximum: number): string {
 
 /** 固定服务特色放在前面，确保截短时不会丢失；其余文字不重复主标题。 */
 export function privateTourSubtitle(value: unknown, mainSpotNames: string[] = []): string {
-  let highlight = String(value ?? "").trim().replaceAll(PRIVATE_TOUR_SERVICE_FEATURE, "")
+  // VBK 保存会静默删除乘号；写前改成平台保留的连接符，避免成功保存后回读失败。
+  let highlight = String(value ?? "").trim().replaceAll("×", "+").replaceAll(PRIVATE_TOUR_SERVICE_FEATURE, "")
     .replace(/一单一团|24\s*[hH小时]+线上管家|\d+\s*[天日](?:\d+\s*晚)?|私家团/gu, "");
   for (const name of [...mainSpotNames].sort((a, b) => b.length - a.length)) {
     if (name) highlight = highlight.replaceAll(name, "");

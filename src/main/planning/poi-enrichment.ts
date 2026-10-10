@@ -11,6 +11,7 @@ import type { ResearchTaskProposal } from "../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
+import { buildPoiContextForItineraryDay } from "./poi-context.js";
 
 interface PoiEnrichmentArgs {
   localProductId: string;
@@ -36,7 +37,6 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
   const { localProductId, runtime, persistedTaskKeys } = args;
   const queryTimeoutMs = timeoutOrDefault(args.queryTimeoutMs, POI_ENRICHMENT_QUERY_TIMEOUT_MS);
   const product = await runtime.loadCurrentProduct(localProductId);
-  const poiContext = buildPoiContext(product, args.destination);
   const shouldReviewCompletePois = args.reviewCompletePois === true && hasProductPoiContext(product);
   const addedTasks: ResearchTaskProposal[] = [];
 
@@ -46,6 +46,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
     const availabilityByPoiId = await queryItineraryPoiAvailabilities(runtime, localProductId, updated, shouldReviewCompletePois);
     let poiUpdated = false;
     for (const day of updated) {
+      const poiContext = buildPoiContextForItineraryDay(product, args.destination, day);
       for (const spot of Array.isArray(day?.spots) ? day.spots : []) {
         const keyword = typeof spot === "string" ? spot : spot?.name ?? spot?.poiName;
         if (!keyword) continue;
@@ -78,6 +79,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         let match = firstQuery.match;
         let queryFailed = firstQuery.failed;
         let suspended = firstQuery.suspended;
+        let selectionReason = firstQuery.reason;
         // “永祚寺（双塔寺）”这类官方名+同地点别名先做确定性别名查询，
         // 避免整串关键词召回外地同名前缀，也避免模型原样重复后耗尽重试。
         if (!match && !queryFailed && !suspended) {
@@ -87,6 +89,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             match = aliasQuery.match;
             queryFailed = aliasQuery.failed;
             suspended = aliasQuery.suspended;
+            selectionReason = aliasQuery.reason;
             if (match || queryFailed || suspended) break;
           }
         }
@@ -112,6 +115,10 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
             : isTravelNodeName(originalKeyword)
             ? "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点"
+            : selectionReason === "location_mismatch"
+            ? "已找到候选 POI，但其地域与产品主城市不一致；请确认当天行程地点范围或手动绑定 POI"
+            : selectionReason === "ambiguous"
+            ? "已找到多个候选 POI，但程序无法安全确定唯一地点；请手动选择 POI"
             : "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI";
           await addPoiResearchTask({
             runtime, localProductId, persistedTaskKeys, addedTasks,
@@ -145,7 +152,12 @@ async function queryPoi(args: {
   keyword: string;
   queryTimeoutMs: number;
   context?: { destinationCity?: string; province?: string };
-}): Promise<{ match: PoiMatch | null; failed: boolean; suspended: boolean }> {
+}): Promise<{
+  match: PoiMatch | null;
+  failed: boolean;
+  suspended: boolean;
+  reason?: "no_candidate" | "location_mismatch" | "ambiguous";
+}> {
   try {
     logInfo("[planning.poi]", { event: "query-start", localProductId: args.localProductId, keyword: args.keyword });
     if (args.runtime.resolvePoiSelection) {
@@ -157,6 +169,7 @@ async function queryPoi(args: {
         match: selected.match ? normalisePoiMatch(selected.match) : null,
         failed: false,
         suspended: selected.status === "suspended",
+        reason: selected.reason,
       };
     }
     const candidate = await rejectPoiQueryAfter(args.runtime.suggestPoi!(args.keyword, args.context), args.queryTimeoutMs);
@@ -165,6 +178,7 @@ async function queryPoi(args: {
       match: availability === "suspended" ? null : normalisePoiMatch(candidate),
       failed: availability === "unverified",
       suspended: availability === "suspended",
+      reason: undefined,
     };
   } catch (error) {
     logWarn("[planning.poi]", {
@@ -173,18 +187,8 @@ async function queryPoi(args: {
       keyword: args.keyword,
       error: error instanceof Error ? error.message : String(error),
     });
-    return { match: null, failed: true, suspended: false };
+    return { match: null, failed: true, suspended: false, reason: undefined };
   }
-}
-
-function buildPoiContext(product: Record<string, unknown>, destination: string): { destinationCity?: string; province?: string } {
-  const basic = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
-    ? product.basicInfo as Record<string, unknown>
-    : {};
-  return {
-    destinationCity: textValue(basic.destinationCity) || textValue(basic.meetingCity) || destination,
-    province: textValue(basic.province) || destination,
-  };
 }
 
 function hasProductPoiContext(product: Record<string, unknown>): boolean {

@@ -345,6 +345,7 @@ export interface CtripHotelCandidate {
   cityName: string;
   anchorName: string;
   anchorCityId: number;
+  ratingType?: "diamond" | "star" | "homestay";
 }
 
 export interface CtripHotelResourceDayMatch {

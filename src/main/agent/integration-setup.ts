@@ -8,7 +8,7 @@ import { OpenAIAgentModel } from './openai-model.js';
 import { createAgentBusinessTools, agentProductVersion } from './integration.js';
 import { agentPlannerContext, agentTaskContext } from './integration-context.js';
 import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from './integration-gates.js';
-import { requestsFreshAutomationRun } from './core-workflow-replay.js';
+import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from './core-workflow-replay.js';
 import { preparationApprovalBlockReason } from '../planning/preparation-completion.js';
 import { inspectManualCoverAsset } from '../automation/manual-cover-asset.js';
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from './integration-guard.js';
@@ -45,6 +45,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       const key = await apiKey(settings.aiProvider);
       if (!key) throw new Error("请先在设置中配置当前 AI 服务的密钥。");
       return new OpenAIAgentModel({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model,
+        extraParams: planningTransportOptions(settings.aiProvider).extraParams,
         onUsage: (usage) => recordAgentUsage(db, localProductId, {
           id: crypto.randomUUID(),source:"chat.reply",stage:"agent",model:profile.model,provider:settings.aiProvider,
           status:"ok",startedAt,endedAt:new Date().toISOString(),durationMs:Date.now()-Date.parse(startedAt),
@@ -129,6 +130,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       if (restoreExplicitOperatorDeletion(receiptProduct, content)) {
         current = context.productMutations.replace(localProductId, receiptProduct, {
           status: current.status, expectedVersion: current.productJsonVersion,
+          allowItineraryRemovalRestore: true,
         });
         preparationRecovered = true;
       }
@@ -185,14 +187,18 @@ export function installProductAgent(context: MainIpcContext): () => void {
       }
       return recoverEquivalentApproval(product, snapshot);
     },
-    prepareWorkflowReplay: (localProductId) => {
+    prepareWorkflowReplay: (localProductId, content) => {
       productWorkflows.assertIdle(localProductId, "automation");
       const current = db.getProduct(localProductId);
-      if (!current?.productId || !current.automation || !["succeeded", "failed"].includes(current.automation.status)) return undefined;
+      if (!current?.automation || !["succeeded", "failed"].includes(current.automation.status)) return undefined;
+      const replaceUnknownShell = requestsLegacyShellReplacement(current, content);
+      if (!current.productId && !replaceUnknownShell) return undefined;
       const confirmation = buildAgentApproval(current);
       return { ...confirmation, automationRunId: current.automation.id,
         automationRunStatus: current.automation.status as "failed" | "succeeded",
-        summary: `重新录入全部阶段，保留当前方案和 VBK 产品 ${current.productId}，最终回读后保存未提审草稿。${confirmation.summary}` };
+        summary: replaceUnknownShell
+          ? `旧创建失败记录未保存携程编号，远端结果无法确认；本次明确重新创建一个草稿，保留旧失败记录，立即保存新编号，再录入全部阶段。仅保存未提审草稿，不发布。${confirmation.summary}`
+          : `重新录入全部阶段，保留当前方案和 VBK 产品 ${current.productId}，最终回读后保存未提审草稿。${confirmation.summary}` };
     },
     handoffApprovedWorkflow: (localProductId, approval) => {
       // A remote-successful automation can outlive an interrupted desktop

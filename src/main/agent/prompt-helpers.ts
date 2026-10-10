@@ -115,14 +115,15 @@ function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrde
   const itineraryOrder: LockedItineraryDay[] = [];
   const pois: string[] = [];
   const marker = /(?:[Dd]\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/g;
-  const matches = [...textValue.matchAll(marker)];
+  const routeText = textValue.replace(/(?:^|[\n\r])\s*(?:住宿与商业配置|住宿配置|商业配置|录入配置|(?:已确认的?)?住宿(?:要求|安排)|已确认的?业务要求)[:：][\s\S]*$/u, "");
+  const matches = [...routeText.matchAll(marker)];
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index]!;
     const token = match[1] ?? match[2] ?? "";
     const day = DAY_TOKEN[token] ?? Number(token);
     const start = (match.index ?? 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? textValue.length;
-    const remainder = cleanDayConstraintText(trimPlanningControlTail(textValue.slice(start, end)));
+    const end = matches[index + 1]?.index ?? routeText.length;
+    const remainder = cleanDayConstraintText(trimPlanningControlTail(routeText.slice(start, end)));
     if (!Number.isInteger(day) || day < 1 || /^(?:不要|不安排|别)/.test(remainder)) continue;
     const spots = splitSpots(remainder);
     if (!spots.length) continue;

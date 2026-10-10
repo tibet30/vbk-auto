@@ -10,7 +10,7 @@ import { z } from "zod";
 import { AI_WRITABLE_PATHS } from "../../shared/ai-writable-paths.js";
 import { HOTEL_TIER_VALUES } from "../../shared/hotel-tiers.js";
 import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
-import { isCombinedSpotName } from "./spot-name.js";
+import { itineraryDaySchema } from "./itinerary-day-schema.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { buildVbkCopyPolicyPrompt } from "./vbk-copy-policy.js";
 import { normalisePackageNameValue } from "./package-name.js";
@@ -30,26 +30,7 @@ const vbkSubtitle = z.string().trim().min(2).max(40, "subtitle 最多 40 个字�
 const VBK_RECOMMENDATION_VALUES = [...VBK_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
 const VBK_SELECTABLE_RECOMMENDATION_VALUES = [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] as [string, ...string[]];
 
-const itinerarySpotSchema = z.object({
-  name: requiredText,
-  kind: z.enum(["attraction", "free", "other"]).default("attraction"),
-  description: z.string().trim().optional(),
-  poiName: z.string().trim().nullable().optional(),
-  poiId: z.number().int().positive().nullable().optional(),
-  timeOfDay: z.enum(["morning", "afternoon"]).optional(),
-  relation: z.enum(["and", "or"]).optional(),
-}).strict().superRefine((spot, ctx) => {
-  if (spot.kind !== "attraction" && (spot.poiName || spot.poiId)) {
-    ctx.addIssue({ code: "custom", path: ["poiId"], message: "自由活动或其他活动不得绑定 POI" });
-  }
-  if (spot.kind === "attraction" && isCombinedSpotName(spot.name)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["name"],
-      message: "Spot 场所只能指定一个地点；请将组合地点拆分为两个或多个 spots",
-    });
-  }
-});
+
 const basicInfoModuleValueSchema = z.object({
   subtitle: vbkSubtitle,
   province: requiredText,
@@ -101,15 +82,6 @@ const presentationModuleValueSchema = z.object({
   });
 });
 
-const itineraryDaySchema = z.object({
-  day: z.number().int().min(1),
-  title: requiredText,
-  spots: z.array(itinerarySpotSchema).min(1),
-  description: requiredText,
-  hotel: z.string().default(""),
-  meals: requiredText,
-  mealDescriptions: z.array(requiredText).length(3).optional(),
-}).strict();
 
 const itineraryModuleValueSchema = z.array(itineraryDaySchema).min(1);
 
@@ -370,13 +342,13 @@ ${moduleList}
 ===== 硬性规则 =====
 1. 不允许返回 RFC6902 patch、不允许 path 数组、不允许 op / replace / add 等字段。本系统**绝不接受 JSON Patch**。
 2. value 必须完整写出全部子字段，缺一不可。
-2.1 itinerary 每天 spots 只能是对象数组，每项必须为 {name, kind, poiName, poiId}；attraction 才能配置 POI，free 是独立明确自由活动，other 是接送/接团/航拍等非景点服务，free/other 的 poiName/poiId 必须为 null，不查 POI，禁止字符串数组或猜测 ID。
+2.1 spots 只承载游览地点与独立体验，每项为 {name, kind, poiName, poiId}。接送、机场、车站、酒店出发点不进入 spots；接送写 activities 的 transport，餐食写 meals，住宿写 hotel。attraction 才配置 POI，free/other 不查 POI，禁止猜测 ID。
 3. release 模块：
    - publicPriceCeiling 必填（>0）
    - publicAuditRetries 1..10
    - submitReview / publishAfterApproval 即使你写 true，系统也会忽略并强制 false。这是「草稿态默认安全」规则，不可被覆盖。
 4. presentation.recommendations 必须恰好 3 条，category 互不重复且必须从 VBK 推荐理由下拉可选分类中选取：${VBK_RECOMMENDATION_VALUES.join("、")}。
-5. itinerary 每天至少 1 个 spots；mealDescriptions 恰好 3 条。
+5. 纯接送日允许 spots: []，必须在 activities 中写明确的 transport 安排（time/title/detail），不能为凑站点添加机场、车站、酒店或自由活动；mealDescriptions 恰好 3 条。
 6. pricing.adult > 0；pricing.child >= 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. Terms 不属于 AI 规划模块，由 VBK 自动录入阶段处理；不得生成或返回 terms。

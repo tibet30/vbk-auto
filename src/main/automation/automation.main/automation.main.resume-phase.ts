@@ -1,6 +1,7 @@
 import type { AutomationRun, ProductDetail } from "../../../shared/contracts.js";
 import { parseProduct } from "../schema/schema.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
+import { preflightRepairPhase } from "./preflight-repair-phase.js";
 
 export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
   if (run?.status !== "failed") return undefined;
@@ -11,11 +12,20 @@ export function interruptedAutomationResumePhase(run?: AutomationRun): string | 
 }
 
 export function failedAutomationResumePhase(run?: AutomationRun): string | undefined {
-  if (run?.status !== "failed") return undefined;
+  if (run?.status !== "failed" && run?.status !== "cancelled") return undefined;
   const needsUser = run.recovery
     ? Object.values(run.recovery.phases).find((phase) => phase.state === "needs_user")?.phase
     : undefined;
-  return needsUser ?? run.phases.find((phase) => phase.status === "failed")?.phase;
+  const failed = needsUser ?? run.phases.find((phase) => phase.status === "failed")?.phase;
+  if (failed) return failed;
+  // Older shell failures predate phase recovery records. Route them through
+  // recoverCreatedShell, which requires an ID and verifies the existing draft.
+  if (run.status === "failed" && run.currentPhase === "saleControl"
+    && run.phases.length > 0 && run.phases.every(phase => phase.status === "pending")
+    && !canRestartPreWriteAuthorizationFailure(run, undefined)) {
+    return "saleControl";
+  }
+  return undefined;
 }
 
 /**
@@ -45,6 +55,8 @@ export function canRestartPreWriteAuthorizationFailure(
  */
 export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: string | undefined): string | undefined {
   const preflightError = product.automation?.recovery?.phases.preflight?.finalError ?? "";
+  const repairPhase = failedPhase === "preflight" ? preflightRepairPhase(preflightError) : undefined;
+  if (repairPhase && draftPhasesFor(parseProduct(product.product)).includes(repairPhase)) return repairPhase;
   const needsBackfilledHotel = failedPhase === "preflight"
     && /酒店资源缺少每晚.*携程候选/.test(preflightError)
     && !product.automation?.phases.some((phase) => phase.phase === "hotelResource")
@@ -55,6 +67,14 @@ export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: 
   if (failedPhase === "trafficLine" && product.automation?.phases.some((phase) => phase.phase === failedPhase)
     && product.automation.phases.find((phase) => phase.phase === failedPhase)?.status === "failed") {
     const phases = draftPhasesFor(parseProduct(product.product));
+    // 交通子产品校验依赖母产品正式住宿段。历史任务可能在本地已有酒店候选，
+    // 但远端住宿段仍为空；先补写 hotelResource，再回到 trafficLine，避免
+    // preflight 的只读门永远先以“实际 0”阻断修复。
+    if (product.productId
+      && phases.includes("hotelResource")
+      && product.automation.phases.some((item) => item.phase === "hotelResource")) {
+      return "hotelResource";
+    }
     if (product.productId && product.automation.phases.some((item) => item.phase === "preflight" && item.status === "pending")
       && phases.includes("preflight") && phases
       .filter((phase) => phase !== "trafficLine" && phase !== "preflight")
@@ -72,5 +92,5 @@ export function isVerifiedAutomationComplete(product: ProductDetail): boolean {
   return Boolean(product.productId && product.automation?.status === "succeeded"
     && product.automation.phases.some(item => item.phase === "preflight" && item.status === "completed")
     && draftPhasesFor(parseProduct(product.product)).every(phase =>
-      phase === "trafficLine" || product.automation!.phases.some(item => item.phase === phase && item.status === "completed")));
+      product.automation!.phases.some(item => item.phase === phase && item.status === "completed")));
 }

@@ -4,10 +4,12 @@ import { isPreparationRun } from "./preparation-run.js";
 import { decidePreparationAction, type PreparationDirectedAction } from "./preparation-director.js";
 import { evaluatePreparationCompletion } from "../planning/preparation-completion.js";
 import { manualPoiInput, unmatchedCanonicalPoiSlots, type ManualPoiSlot } from "./core-preparation-poi-input.js";
+import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 
 export type PreparationLoopDecision =
   | { kind: "execute"; action: PreparationDirectedAction }
   | { kind: "askPoiInput"; action: PreparationDirectedAction; input: NonNullable<ReturnType<typeof manualPoiInput>> }
+  | { kind: "askHotelInput"; action: PreparationDirectedAction; questions: AgentQuestion[] }
   | { kind: "model"; action?: PreparationDirectedAction; modelRepairWindow?: true; manualPoiModelWindow?: true; poiSlotKey?: string; manualPoiAnswerSlotKey?: string }
   | { kind: "pause"; reason: string; manualPoiBlocked?: true; poiSlotKey?: string; manualPoiAnswerSlotKey?: string };
 
@@ -37,7 +39,9 @@ export function nextPreparationLoopDecision(
         kind: "model", action, manualPoiModelWindow: true, poiSlotKey: manualInput.key, manualPoiAnswerSlotKey: answer.originKey,
       };
       return { kind: "pause", manualPoiBlocked: true, poiSlotKey: manualInput.key, manualPoiAnswerSlotKey: answer.originKey,
-        reason: `未找到真实 POI 的人工确认已尝试查询绑定 ${modelAttempts} 次仍未完成。请前往产品审查→每日行程→待手动配置 POI 搜索并保存：${manualInput.question.label}` };
+        reason: runEvents.some(event => event.data?.automaticProductInput === true)
+          ? `AI 已自动判断资料并尝试 POI 查询绑定 ${modelAttempts} 次，真实资源检索仍未完成。已保留原行程，等待资源服务恢复后重试。`
+          : `未找到真实 POI 的人工确认已尝试查询绑定 ${modelAttempts} 次仍未完成。请前往产品审查→每日行程→待手动配置 POI 搜索并保存：${manualInput.question.label}` };
     }
   }
   const attempts = events.filter((event) => event.runId === snapshot.run?.id
@@ -62,11 +66,23 @@ export function nextPreparationLoopDecision(
   const repairOutcome = [...repairEvents].reverse().find((event) => event.runId === snapshot.run?.id && event.type === "tool_result" && event.data?.toolCallId
     && repairEvents.some((call) => call.type === "tool_call" && call.data?.toolCallId === event.data?.toolCallId
       && !isReadOnlyTool(call.data?.name)));
+  // 读取产品不是修复。给模型最多三轮完成读取、判断和实际修复，防止读完即暂停。
+  const repairTurns = repairEvents.filter((event) => event.runId === snapshot.run?.id
+    && event.type === "status" && event.data?.aiUsage
+    && (!(event.data.aiUsage as { source?: string }).source || (event.data.aiUsage as { source?: string }).source === "chat.reply")).length;
+  // 一轮可并行查询多个地点；不能把工具数量当成模型轮次，查完就剥夺绑定机会。
+  // 同一进度下失败的写工具也不算修复成功，仍允许模型完成有界的三轮修复。
+  const toolTurns = new Set(repairEvents.filter(event => event.runId === snapshot.run?.id
+    && (event.type === "tool_call" || event.type === "assistant") && event.data?.deterministicPreparation !== true)
+    .map(event => event.data?.modelTurnId ?? event.id)).size;
+  if (Math.max(repairTurns, toolTurns) < 3) return { kind: "model", action };
   const automaticOutcome = [...events].reverse().find((event) => event.type === "tool_result" && event.data?.toolCallId
     && events.some((call) => call.type === "tool_call" && call.data?.toolCallId === event.data?.toolCallId
       && call.data?.deterministicPreparation === true && call.data?.progressKey === action.progressKey));
   const detail = (repairOutcome ?? automaticOutcome)?.content.replace(/\s+/g, " ").slice(0, 240) || "自动动作未返回可验证的产品进展";
-  return { kind: "pause", reason: `本地准备在 ${action.node} 已自动尝试 ${attempts} 次且模型修复一次后仍无业务进展。当前缺项：${missing.join("、") || "见最新产品核验"}。最近结果：${detail}` };
+  const questions = action.node === "hotelResolution" ? hotelAvailabilityQuestions(product, automaticOutcome?.content ?? "") : [];
+  if (questions.length) return { kind: "askHotelInput", action, questions };
+  return { kind: "pause", reason: `本地准备在 ${action.node} 已自动尝试 ${attempts} 次且模型修复三轮后仍无业务进展。当前缺项：${missing.join("、") || "见最新产品核验"}。最近结果：${detail}` };
 }
 
 function eventsSinceLatestUser(snapshot: AgentSnapshot) {
@@ -172,6 +188,8 @@ function isSlotSubset(current: readonly ManualPoiSlot[], origin: readonly Manual
 
 function hasManualPoiAnswer(events: AgentSnapshot["events"], toolCallId: unknown, questionId: string): boolean {
   if (typeof toolCallId !== "string") return false;
+  if (events.some(event => event.type === "tool_result" && event.data?.toolCallId === toolCallId
+    && event.data?.automaticProductInput === true && hasQuestionAnswer(event.data?.answers, questionId))) return true;
   const request = events.find((event) => event.type === "input_request" && event.data?.toolCallId === toolCallId);
   const questions = request?.data?.request && typeof request.data.request === "object"
     ? (request.data.request as { questions?: unknown }).questions : undefined;

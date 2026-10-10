@@ -183,6 +183,15 @@ export function useWorkflowHandlers(state: AppState) {
     setNotice(null);
     setRetryingPhase(phaseName);
     try {
+      // A verified parent draft can have only its optional traffic children
+      // unfinished. Their work must resume through the confirmed workflow,
+      // rather than creating another Agent conversation that cannot perform
+      // the already-approved write.
+      if (phaseName === "trafficLine" && product.status === "draft_saved") {
+        await api()!.automation.continueApproved(product.id);
+        setNotice("已继续执行已确认的交通子产品录入与最终回读。");
+        return;
+      }
       setStage("review");
       await api()!.agent.send(product.id, `请检查并修复${phaseDisplayLabel(phaseName)}阶段，先展示修复后的方案并请求最终确认，再继续录入。`);
       setNotice("已在方案协作中开始检查，请在左侧查看进展并确认方案。");

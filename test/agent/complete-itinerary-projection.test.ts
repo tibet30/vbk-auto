@@ -68,6 +68,19 @@ test("只对完整且当前结构无效的输入投影", () => {
   assert.equal(projectCompleteItinerary(draft("日喀则轻松游。")), undefined);
 });
 
+test('dated cross-city routes preserve night experiences and overnight endpoints through projection', () => {
+  const product = buildProductSnapshot({ destination: '西宁', days: 2, productForm: 'privateTour',
+    userIdea: '**10 月 4 号 D1：** 西宁 - 青海湖 - 茶卡盐湖 - 天峻县（天俊石林星空）\n**10 月 5 号 D2：** 天峻 - 德令哈 - 大柴旦翡翠湖' });
+  product.product.itinerary = [];
+  Object.assign(product.product.basicInfo!, { province: '青海', subtitle: '星空路线', operationNotes: '保留原始路线' });
+  const itinerary = projectedItinerary(product);
+  assert.match(String(itinerary[0]!.hotel), /天峻县/);
+  assert.doesNotMatch(String(itinerary[0]!.hotel), /西宁/);
+  assert.match(JSON.stringify(itinerary[0]!.activities), /天俊石林星空/);
+  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+  assert.equal(itinerary[1]!.hotel, '无');
+});
+
 test("投影保留类似名称景点，后续逐日住宿修正则回退", () => {
   const product = draft(RIKAZE_ROUTE.replace("萨迦古城", "接送码头公园-萨迦古城"));
   const itinerary = projectedItinerary(product);

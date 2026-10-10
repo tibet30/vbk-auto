@@ -1,6 +1,7 @@
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import { readItineraryDraftDiagnostic } from "../automation/ctrip/itinerary-api/draft-diagnostics.js";
 import { runProductReadOnlyPreflightApi } from "../automation/ctrip/preflight-readonly.js";
+import { verifyTrafficLineChild } from "../automation/ctrip/traffic-line/readback.js";
 import { productSectionUrl } from "../automation/constants.js";
 import { createVbkCreationRecoveryTools, type CreationVariantReadback } from "./creation-recovery-readonly.js";
 import type { AgentBusinessDependencies } from "./integration-generate.js";
@@ -84,6 +85,23 @@ export function readCreationRecoveryPreflight(
     : read();
 }
 
+export function readCreationRecoveryTrafficChild(
+  page: Parameters<typeof verifyTrafficLineChild>[0],
+  parentProductId: string,
+  childProductId: string,
+  variant: Parameters<typeof verifyTrafficLineChild>[3],
+  endpoints: Parameters<typeof verifyTrafficLineChild>[4],
+  verify = verifyTrafficLineChild,
+) {
+  const read = () => verify(page, parentProductId, childProductId, variant, endpoints);
+  const nativePage = page as typeof page & {
+    withRequestSource?: <T>(url: string, execute: () => Promise<T>) => Promise<T>;
+  };
+  return nativePage.withRequestSource
+    ? nativePage.withRequestSource(productSectionUrl(childProductId, "hotelResource"), read)
+    : read();
+}
+
 /** Keeps recovery wiring out of the primary Agent integration factory. */
 export function createCreationRecoveryTools(deps: AgentBusinessDependencies, get: GetProduct): AgentTool[] {
   return createVbkCreationRecoveryTools({
@@ -104,5 +122,6 @@ export function createCreationRecoveryTools(deps: AgentBusinessDependencies, get
     },
     readCreationVariant, emitProduct: deps.emitProduct,
     readPreflight: readCreationRecoveryPreflight,
+    verifyTrafficChild: readCreationRecoveryTrafficChild,
   });
 }

@@ -16,6 +16,7 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
   const { db, broadcastProduct, remoteProducts } = context;
   ipcMain.handle("products:list", async () => {
     const products = await listRemoteProducts(remoteProducts);
+    db.reconcileSupersededWorkflowTasks();
     const workflowTasks = products.map((product) => {
       db.completeWorkflowTaskForProduct(product);
       return db.latestWorkflowTaskForProduct(product.id);
@@ -43,6 +44,7 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
   });
   ipcMain.handle("workflowTasks:list", () => {
     db.completeSavedProductWorkflowTasks();
+    db.reconcileSupersededWorkflowTasks();
     return db.listWorkflowTasks();
   });
   ipcMain.handle("workflowTasks:get", (_event, id: string) => {
@@ -97,7 +99,7 @@ export function registerRemoteProductIpc(context: MainIpcContext): void {
     }
     const continued = await context.agentCore.send(
       task.localProductId,
-      "请继续当前产品规划与录入。先读取已有状态，不要重置或重复已验证内容。",
+      "继续",
     );
     context.emitAgentSnapshot?.(continued);
     return context.db.getWorkflowTask(id) ?? task;

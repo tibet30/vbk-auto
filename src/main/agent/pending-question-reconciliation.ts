@@ -3,6 +3,9 @@ import { hasSatisfiedVehicleResource } from "../../shared/research-task-satisfac
 import { hasPersistedCommercialInventory, hasPersistedCommercialPricing } from "../planning/commercial-stage.js";
 import { persistedCoverSource } from "./cover-input-reconciliation.js";
 import { requiredItineraryPoiSatisfaction } from "./core-preparation-poi-input.js";
+import { isHotelRecoveryQuestion } from "./core-preparation-hotel-input.js";
+import { reusableHotelCandidates } from "../infrastructure/ctrip-hotel-candidate-cache.js";
+import { hotelStayRequirement } from "../../shared/hotel-stay-requirement.js";
 
 type Json = Record<string, unknown>;
 
@@ -64,6 +67,12 @@ export function resolvedProductQuestions(product: Json, questions: readonly Agen
     }
     // A saved value cannot answer a new preference or approval question.
     if (question.kind !== "text" || /是否|要不要|需不需要|希望|偏好|选择|选哪|改为|修改|调整|更换|替换|确认/.test(target)) return [];
+    if (isHotelRecoveryQuestion(question)) {
+      const day = itinerary.map(record).find(day => Number(day.day) === Number(question.id.slice(5)));
+      const candidates = day ? reusableHotelCandidates(day, text(operations.hotelTier), hotelStayRequirement(product, day)) : undefined;
+      return candidates ? [{ id: question.id, message: `第 ${day!.day} 天住宿候选已核验并保存`,
+        answer: `已保存${day!.hotel}，沿用当前住宿地点和评级，不再重复检索旧锚点` }] : [];
+    }
     let message: string | undefined;
     if (/封面|cover|image\s*id|image\s*url/i.test(target)) {
       if (source === "manualUpload") message = "已保存手动上传封面，封面并不缺失；自动录入会先检查原图规格，无需提供 imageId 或 imageUrl";

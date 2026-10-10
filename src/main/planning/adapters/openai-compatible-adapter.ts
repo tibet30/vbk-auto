@@ -105,13 +105,18 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
       model: this.config.model,
       messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
       temperature: 0.1,
-      max_completion_tokens: 4096,
+      max_completion_tokens: stage === "itinerary"
+        ? Math.min(16_384, Math.max(4096, request.context.skeleton.days * 1024))
+        : 4096,
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: toolSchema.function.name } },
       ...(this.config.extraParams ?? {}),
     }, { source: "planning.generateStage", stage });
 
     const message = response.choices[0]?.message;
+    if (response.choices[0]?.finish_reason === "length") {
+      throw new PlannerError("invalid_model_output", "规划响应达到输出长度限制，结构化行程被截断，未写入。请精简每日描述后重试。");
+    }
     if (!message) throw new PlannerError("empty_model_output", "模型未返回任何内容。");
     const toolCall = (message.tool_calls ?? []).find(
       (call) => "function" in call && call.function.name === toolSchema.function.name,

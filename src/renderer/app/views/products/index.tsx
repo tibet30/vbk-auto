@@ -2,6 +2,7 @@ import { Select } from "../../helpers/Select";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiProviderLabel, hasActiveAiKey } from "../../../../shared/contracts.js";
+import { replacementDraftProductId } from "../../../../shared/product-replacement.js";
 import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { ProductBriefForm, ProductList, EmptyProductState } from "../../helpers";
@@ -39,6 +40,7 @@ export function AppProductsPage({ model }: { model: AppModel }) {
   } = model;
   const [selectedVbkAccount, setSelectedVbkAccount] = useState("all");
   const [page, setPage] = useState(1);
+  const [targetPage, setTargetPage] = useState("1");
   const createProductRef = useRef(createProduct);
   createProductRef.current = createProduct;
 
@@ -86,9 +88,18 @@ export function AppProductsPage({ model }: { model: AppModel }) {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
+  useEffect(() => {
+    setTargetPage(String(page));
+  }, [page]);
+
   const openProduct = async (item: (typeof products)[number]) => {
     setNotice(null);
-    await openProductAction(item);
+    const replacementProductId = replacementDraftProductId(item);
+    const target = replacementProductId
+      ? products.find((candidate) => candidate.productId === replacementProductId) ?? item
+      : item;
+    await openProductAction(target);
+    if (target !== item) setNotice(`已打开接管该历史记录的 VBK 草稿 ${replacementProductId}。`);
   };
 
   return (
@@ -177,6 +188,31 @@ export function AppProductsPage({ model }: { model: AppModel }) {
                 >
                   <ChevronRight size={15} />
                 </button>
+                <form
+                  className={styles.pageJump}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const nextPage = Number(targetPage);
+                    if (Number.isInteger(nextPage) && nextPage >= 1 && nextPage <= pageCount) {
+                      setPage(nextPage);
+                    }
+                  }}
+                >
+                  <label htmlFor="product-page-jump">跳至</label>
+                  <input
+                    id="product-page-jump"
+                    aria-label="跳转页码"
+                    type="number"
+                    min={1}
+                    max={pageCount}
+                    step={1}
+                    required
+                    value={targetPage}
+                    onChange={(event) => setTargetPage(event.target.value)}
+                  />
+                  <span>页</span>
+                  <button className={`${shared.btn} ${shared.btnSm}`} type="submit">跳转</button>
+                </form>
               </nav>
             )}
           </>

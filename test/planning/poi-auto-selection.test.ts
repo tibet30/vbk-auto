@@ -2,6 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isPlanningPoiCandidateInContext, resolvePlanningPoiAutoSelection } from "../../src/main/planning/poi-auto-selection.js";
 
+test("先核对地域再限制AI候选数量，外省结果不能挤掉同省行程的正确候选", async () => {
+  const candidates = Array.from({ length: 12 }, (_, index) => ({ index, poiName: "同名古镇", poiId: index + 1, province: "江苏", city: "苏州", selectable: true, textFields: [] }));
+  candidates.push({ index: 12, poiName: "目标古镇", poiId: 999, province: "浙江", city: "宁波", selectable: true, textFields: [] });
+  const result = await resolvePlanningPoiAutoSelection({ localProductId: "filtered", keyword: "古镇",
+    product: { itinerary: [{ title: "宁波古镇游", spots: [{ name: "古镇" }] }] }, context: { province: "浙江", destinationCity: "杭州" },
+    detail: { httpStatus: 200, businessStatus: "Success", poiListCount: 13, best: null, candidates },
+    disambiguate: async ({ candidates: choices }) => { assert.equal(choices.length, 1); return { pickedText: choices[0].text, confidence: 0.95 }; },
+    checkAvailability: async () => ({ status: "available" }),
+  });
+  assert.equal(result.match?.poiId, 999);
+});
+
 test("程序无法确定时只交前 12 条给 AI，营业正常且置信度高于 80% 后返回可写入的候选", async () => {
   const candidates = Array.from({ length: 13 }, (_, index) => ({
     index: index + 1,
@@ -53,7 +65,7 @@ test("AI 选中的暂停营业或低置信度候选不会返回给本地行程�
     ...base,
     disambiguate: async ({ candidates }) => ({ pickedText: candidates[0]!.text, confidence: 0.8 }),
     checkAvailability: async () => ({ status: "available" as const }),
-  }), { status: "uncertain" });
+  }), { status: "uncertain", reason: "ambiguous" });
 });
 
 test("目的地为日喀则时，外地同名候选即使是精确首选也不能自动绑定", async () => {
@@ -84,7 +96,7 @@ test("目的地为日喀则时，外地同名候选即使是精确首选也不�
     },
   });
 
-  assert.deepEqual(result, { status: "uncertain" });
+  assert.deepEqual(result, { status: "uncertain", reason: "location_mismatch" });
   assert.equal(availabilityCalls, 0, "外地候选不得进入营业状态检查或写入路径");
 });
 
@@ -128,7 +140,7 @@ test("同名北回归线候选跨省时，即使用户安排该景点也不能�
     checkAvailability: async () => ({ status: "available" as const }),
   });
 
-  assert.deepEqual(result, { status: "uncertain" });
+  assert.deepEqual(result, { status: "uncertain", reason: "location_mismatch" });
 });
 
 test("别名查询候选按原行程景点所在日核验地域", () => {
@@ -183,8 +195,8 @@ test("目的地已锁定时，缺少候选城市或仅由旧 POI、酒店字段�
     },
   });
 
-  assert.deepEqual(missingCity, { status: "uncertain" });
-  assert.deepEqual(pollutedEvidence, { status: "uncertain" });
+  assert.deepEqual(missingCity, { status: "uncertain", reason: "location_mismatch" });
+  assert.deepEqual(pollutedEvidence, { status: "uncertain", reason: "location_mismatch" });
   assert.equal(availabilityCalls, 0);
 });
 
@@ -193,4 +205,58 @@ test("省份已锁定时，候选缺少省份也不能通过别名绑定", () =>
   assert.equal(isPlanningPoiCandidateInContext({
     index: 1, poiName: "南澳岛·孤独的树", poiId: 148709633, city: "汕头", district: "南澳县", selectable: true, textFields: [],
   }, { destinationCity: "潮州", province: "广东" }, product, "孤独榕树村"), false);
+});
+
+test("当天活动文案明确写出区县时，允许绑定产品主城市之外的同省 POI", async () => {
+  const result = await resolvePlanningPoiAutoSelection({
+    localProductId: "poi-auto-taibaishan",
+    keyword: "太白山唐镇",
+    product: {
+      basicInfo: { meetingCity: "西安", destinationCity: "西安", province: "陕西" },
+      itinerary: [{
+        day: 1,
+        spots: [{ name: "太白山唐镇" }],
+        activities: [{ title: "西安接团", detail: "行车约 4 小时到眉县太白山唐镇" }],
+      }],
+    },
+    context: { destinationCity: "西安", province: "陕西" },
+    detail: {
+      httpStatus: 200,
+      businessStatus: "Success",
+      poiListCount: 1,
+      best: { poiName: "太白山唐镇", poiId: 112647382 },
+      candidates: [{
+        index: 1,
+        poiName: "太白山唐镇",
+        poiId: 112647382,
+        province: "陕西",
+        city: "宝鸡",
+        district: "眉县",
+        selectable: true,
+        textFields: [],
+      }],
+    },
+    checkAvailability: async () => ({ status: "available" as const }),
+  });
+
+  assert.deepEqual(result, {
+    status: "available",
+    match: { poiName: "太白山唐镇", poiId: 112647382, province: "陕西", city: "宝鸡", district: "眉县" },
+  });
+});
+
+test("原要求直接指定跨城地点且同省唯一精确命中，不要求用户额外填写城市", async () => {
+  const item = { index: 1, poiName: "太白山唐镇", poiId: 112647382, province: "陕西", city: "宝鸡", district: "眉县", selectable: true, textFields: [] };
+  const product = { basicInfo: { meetingCity: "西安", destinationCity: "西安", province: "陕西", userIdea: "1-西安接---住太白山唐镇---泡温泉" }, itinerary: [{ day: 1, spots: [{ name: "太白山唐镇" }], activities: [{ title: "专车接送", detail: "西安接团，送往太白山唐镇" }] }] };
+  let checked = 0;
+  const result = await resolvePlanningPoiAutoSelection({ localProductId: "route-exact", keyword: "太白山唐镇", product,
+    context: product.basicInfo, detail: { httpStatus: 200, businessStatus: "Success", poiListCount: 1, best: item, candidates: [item] },
+    checkAvailability: async id => { checked = id; return { status: "available" }; } });
+  assert.equal(result.status, "available");
+  assert.equal(checked, item.poiId);
+  assert.equal(product.basicInfo.destinationCity, "西安");
+  assert.equal(isPlanningPoiCandidateInContext(item, product.basicInfo, product, "太白山唐镇", [item]), true);
+  assert.equal(isPlanningPoiCandidateInContext(item, product.basicInfo, product, "太白山唐镇", [item, { ...item, poiId: 2, city: "汉中" }]), false);
+  assert.equal(isPlanningPoiCandidateInContext({ ...item, province: "四川" }, product.basicInfo, product, "太白山唐镇", [{ ...item, province: "四川" }]), false);
+  assert.equal(isPlanningPoiCandidateInContext(item, product.basicInfo, { ...product, basicInfo: { ...product.basicInfo, userIdea: "西安游览" } }, "太白山唐镇", [item]), false);
 });

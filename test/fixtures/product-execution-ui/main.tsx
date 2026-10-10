@@ -1,3 +1,4 @@
+import "../../../src/renderer/styles/tokens.css";
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
 import { ProductList } from "../../../src/renderer/app/helpers/components";

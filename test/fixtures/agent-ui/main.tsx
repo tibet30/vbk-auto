@@ -57,6 +57,10 @@ const client = {
     return emit();
   },
   completeTask:()=>{snapshot.run!.status='completed';log('status','任务已完成',{status:'completed'});return emit();},
+  setPausedProduct:(value:Partial<ProductDetail>)=>{
+    Object.assign(product,value);snapshot.run!.status='paused';snapshot.pendingInput=undefined;snapshot.pendingApproval=undefined;
+    log('status','执行已暂停',{status:'paused'});return emit();
+  },
   snapshot:()=>snapshot,emit,
 };
 const product={id:'fixture',name:'成都2天1晚亲子游',messages:[

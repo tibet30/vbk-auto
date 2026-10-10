@@ -68,9 +68,21 @@ test("准备完成后允许本地受控修订，但不允许重新生成模块",
     release: { submitReview: false, publishAfterApproval: false, publicPriceCeiling: 2500, publicAuditRetries: 3 },
   };
   assert.equal(evaluatePreparationCompletion(product).ready, true);
+  assert.equal(denyPreparationTool(product, undefined, "resolve_itinerary_hotels"), undefined);
   const allowed = denyPreparationTool(product, undefined, "patch_product", { patch: { itinerary: [{ day: 1, description: "调整后的合规文案" }] } });
   assert.equal(allowed, undefined);
   assert.ok(denyPreparationTool(product, undefined, "generate_product_module", { stage: "itinerary" }));
+  // Schema errors use field paths rather than the localized cover label.
+  (product.product.presentation as Record<string, unknown>).cover = {
+    source: "manualUpload", fileId: "uploaded-file", mimeType: "image/jpeg",
+    width: 1280, height: 800, sizeBytes: "204800", originalName: "cover.jpg",
+  };
+  const invalidCover = evaluatePreparationCompletion(product);
+  assert.equal(invalidCover.ready, false);
+  assert.equal(invalidCover.currentNode, "cover");
+  assert.ok(invalidCover.missing.includes("presentation.cover.sizeBytes"));
+  assert.equal(denyPreparationTool(product, undefined, "resolve_cover"), undefined);
+  assert.ok(denyPreparationTool(product, undefined, "request_approval"));
 });
 
 test("itinerary 未完成时不能通过 commercial 或封面绕过", () => {

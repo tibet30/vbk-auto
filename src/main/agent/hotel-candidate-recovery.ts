@@ -1,7 +1,7 @@
 import type { AgentSnapshot } from "../../shared/contracts.js";
 
 type Json = Record<string, unknown>;
-type Candidate = { hotelId: number; hotelName: string; diamond: number; score: number; distanceKm: number; cityName: string; anchorName: string; anchorCityId: number; address?: string };
+type Candidate = { hotelId: number; hotelName: string; diamond: number; score: number; distanceKm: number; cityName: string; anchorName: string; anchorCityId: number; address?: string; ratingType?: "diamond" | "star" | "homestay" };
 type DailyCandidates = { day: number; candidates: Candidate[] };
 
 function record(value: unknown): value is Json { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
@@ -20,12 +20,14 @@ export function reconcileResolvedHotelCopy(day: Json): Json {
 
 function candidate(value: unknown): Candidate | null {
   if (!record(value)) return null;
-  const hotelId = Number(value.hotelId); const diamond = Number(value.diamond); const score = Number(value.score);
+  const hotelId = Number(value.hotelId); const diamond = value.diamond == null ? NaN : Number(value.diamond); const score = Number(value.score);
   const distanceKm = Number(value.distanceKm); const anchorCityId = Number(value.anchorCityId);
-  if (!Number.isInteger(hotelId) || hotelId <= 0 || !Number.isInteger(diamond) || diamond < 1 || diamond > 5
+  if (!Number.isInteger(hotelId) || hotelId <= 0 || !Number.isInteger(diamond) || diamond < 0 || diamond > 5
     || !Number.isFinite(score) || score < 0 || !Number.isFinite(distanceKm) || distanceKm < 0
     || !Number.isInteger(anchorCityId) || anchorCityId <= 0 || !text(value.hotelName) || !text(value.cityName) || !text(value.anchorName)) return null;
-  return { hotelId, hotelName: text(value.hotelName), diamond, score, distanceKm, cityName: text(value.cityName), anchorName: text(value.anchorName), anchorCityId, ...(text(value.address) ? { address: text(value.address) } : {}) };
+  const ratingType = value.ratingType === "diamond" || value.ratingType === "star" || value.ratingType === "homestay" ? value.ratingType : undefined;
+  return { hotelId, hotelName: text(value.hotelName), diamond, score, distanceKm, cityName: text(value.cityName), anchorName: text(value.anchorName), anchorCityId,
+    ...(ratingType ? { ratingType } : {}), ...(text(value.address) ? { address: text(value.address) } : {}) };
 }
 
 function resolvedDailyCandidates(snapshot: AgentSnapshot): DailyCandidates[] | null {

@@ -32,12 +32,11 @@ export function resolveRunStatusAfterSinglePhaseSuccess(
  * preflight 是母产品模块的权威只读验收。它成功时，早期迁移或中断遗留的
  * pending 标记不能再驱动旧阶段重跑；否则会把已验收的图文、行程等再次写入。
  *
- * 交通子产品不在母产品 preflight 范围内：未完成的 trafficLine 保留诊断证据，
- * 但不再卡住母产品结案。后续可以单独从大交通阶段继续修复。
+ * 交通子产品不在母产品 preflight 范围内：失败的 trafficLine 按已跳过处理，
+ * 保留诊断证据，但不再卡住母产品结案。
  */
 export function settleRunAfterVerifiedPreflight(run: AutomationRun): AutomationRun {
   const phases = run.phases.map((phase) => {
-    if (phase.phase === "trafficLine" && phase.status !== "completed") return phase;
     return { ...phase, status: "completed" as const };
   });
   return {
@@ -49,7 +48,7 @@ export function settleRunAfterVerifiedPreflight(run: AutomationRun): AutomationR
       ...run.recovery,
       phases: Object.fromEntries(Object.entries(run.recovery.phases).map(([phase, recovery]) => [
         phase,
-        phase === "trafficLine" ? recovery : { ...recovery, state: "completed" as const },
+        { ...recovery, state: "completed" as const },
       ])),
     } : undefined,
   };

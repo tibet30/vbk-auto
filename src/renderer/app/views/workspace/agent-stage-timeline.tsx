@@ -54,7 +54,10 @@ function Stage({ stage, events, allEvents, userName, active, finalStages, childr
       <div className={styles.heading}><strong>{label}</strong><time dateTime={stage.updatedAt}>{new Date(stage.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
       <div className={styles.prose}>{renderAssistantMarkdown(stage.summary!)}</div>
       {actions.length > 0 && <p className={styles.note}>已返回的动作：{actions.join('、')}</p>}
-      {final && finalStages.filter((item) => item.runId === stage.runId && item.decision).map((item) => <p key={item.id} className={styles.decisionRecord}><strong>本次决定</strong><br />{item.decision}</p>)}
+      {final && finalStages.some((item) => item.runId === stage.runId && item.decision) && <details className={styles.process}>
+        <summary>查看历史确认记录（已处理）</summary>
+        {finalStages.filter((item) => item.runId === stage.runId && item.decision).map((item) => <p key={item.id} className={styles.decisionRecord}>{item.decision}</p>)}
+      </details>}
       {stage.decision && !final && <p className={styles.decisionRecord}><strong>你的决定</strong><br />{stage.decision}</p>}
       {stage.nextStep && <p className={styles.next}>{stage.nextStep}</p>}
       {active && children && <div className={styles.interaction}>{children}</div>}

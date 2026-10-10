@@ -112,12 +112,12 @@ test("live manual-cover size issue reaches the Agent instead of reporting readin
   assert.ok(parsed.prohibitedActions.includes("request_approval"));
 });
 
-test("agent context keeps unmatched POIs for manual review and hands off after final confirmation", async () => {
+test("agent context delegates missing product information to AI and hands off after final confirmation", async () => {
   const context = agentTaskContext({ getProduct: () => product() } as any, "product-1");
   const parsed = JSON.parse(context) as { rules?: string[] };
   const rules = parsed.rules ?? [];
   assert.ok(rules.some((rule) => rule.includes("禁止覆盖或改换成其他地点")));
-  assert.ok(rules.some((rule) => rule.includes("只有原始需求缺少且无法可靠推导")));
+  assert.ok(rules.some((rule) => rule.includes("普通缺项由 AI 自行判断和补齐，不向运营反问")));
   assert.ok(rules.some((rule) => rule.includes("系统按已授权范围自动确定性录入与回读")));
   assert.equal(rules.some((rule) => rule.includes("execute_vbk_phase")), false);
   assert.equal(rules.some((rule) => rule.includes("自动检索同城、同主题、可游览的单一替代 POI")), false);

@@ -5,6 +5,11 @@ export const PRODUCT_PREPARATION_INSTRUCTION =
 
 /** Explicit preparation requests must produce a plan, even if the model only reads. */
 export function isPreparationRun(snapshot: AgentSnapshot): boolean {
+  const latest = [...snapshot.events].reverse().find(event => event.runId === snapshot.run?.id && event.type === "user");
+  // A narrowly requested read-only reconciliation must not regenerate a saved
+  // itinerary merely because this run began as preparation months earlier.
+  if (latest && /^仅进行只读恢复[:：]/u.test(latest.content)
+    && latest.content.includes("read_vbk_creation_recovery")) return false;
   return snapshot.events.some((event) => event.runId === snapshot.run?.id && event.type === "user"
     && isPreparationInstruction(event.content));
 }

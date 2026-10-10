@@ -7,6 +7,10 @@ import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { hasCompleteDailyUserItinerary } from "./user-intent.js";
 import { alternativeGroupKey, hasTrustedOperatorItineraryRemoval } from "../../shared/trusted-operator-itinerary-removals.js";
+import { supportArrangementType } from "../../shared/itinerary-support-arrangements.js";
+import { numberedRouteConstraintError } from "./numbered-route-constraints.js";
+import { hasVerifiedRouteAdministrativeNode } from "../../shared/route-administrative-nodes.js";
+import { datedRouteDetailError } from "./dated-route-projection.js";
 
 const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -36,21 +40,26 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
   if (days > 0 && itinerary.length !== days) {
     return `行程天数必须保持为已锁定的 ${days} 天，不能改成 ${itinerary.length} 天。`;
   }
+  const numberedError = numberedRouteConstraintError(product, itinerary);
+  if (numberedError) return numberedError;
+  const datedError = datedRouteDetailError(product, itinerary);
+  if (datedError) return datedError;
   const alternativeError = explicitAlternativeGroupError(product, itinerary);
   if (alternativeError) return alternativeError;
   if (mode === "open") return undefined;
 
-  const byDay = new Map(itinerary.map((day) => [Number(day.day), spotNames(day)]));
+  const byDay = new Map(itinerary.map((day) => [Number(day.day), spotNames(day).filter((name) => !supportArrangementType({ name }))]));
   const dayRecords = new Map(itinerary.map((day) => [Number(day.day), day]));
   for (const row of locked.itineraryOrder) {
     const names = byDay.get(row.day) ?? [];
-    const requiredSpots = row.spots.filter((spot) => !isDeletableAdministrativeLocation(product, spot)
+    const requiredSpots = row.spots.filter((spot) => !isSupportingLockedSpot(product, row.day, spot, dayRecords.get(row.day)) && !isDeletableAdministrativeLocation(product, spot, row.day)
       && !hasTrustedOperatorAlternativeDeletion(product, row.day, spot));
     if (mode === "complete") {
       if (!isNameSubsequence(names, requiredSpots)) {
         return `用户已给出完整第 ${row.day} 天行程，禁止整体重排或替换；只能规范化并核验 POI。缺失：${missingNames(names, requiredSpots).join("、") || requiredSpots.join("、")}`;
       }
-      const extras = extraNames(names, requiredSpots);
+      // Optional route/support nodes remain original input, not added attractions.
+      const extras = extraNames(names, row.spots);
       if (extras.length) {
         return `用户已给出完整第 ${row.day} 天行程，不能新增或替换景点：${extras.join("、")}`;
       }
@@ -71,6 +80,8 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
   if (mode === "partial") {
     const allNames = itinerary.flatMap(spotNames);
     const missing = locked.pois
+      .filter((poi) => !locked.itineraryOrder.some((row) => row.spots.some((spot) => samePlace(spot, poi))
+        && isSupportingLockedSpot(product, row.day, poi, dayRecords.get(row.day))))
       .filter((poi) => !isDeletableAdministrativeLocation(product, poi))
       .filter((poi) => !hasTrustedOperatorAlternativeDeletionOnAnyDay(product, poi))
       .filter((poi) => !allNames.some((name) => samePlace(name, poi)));
@@ -81,6 +92,13 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
     if (disguised) return `已锁定的指定 POI 必须保留为景点类型，不能用自由活动或其他活动隐藏：${disguised}`;
   }
   return undefined;
+}
+
+function isSupportingLockedSpot(product: ProductDetail, dayNumber: number, name: string, nextDay?: Record<string, unknown>): boolean {
+  const source = (asDayList(product.product.itinerary) ?? []).find(day => Number(day.day) === dayNumber);
+  const existing = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
+    .find(spot => spot && samePlace(spotName(spot), name));
+  return Boolean(supportArrangementType(existing ?? { name, kind: "other" }, source ?? nextDay));
 }
 
 export function planningWriteContractError(
@@ -243,6 +261,8 @@ function rawAlternativeGroups(value: string): Array<{ day: number; names: string
     if (!Number.isInteger(day) || day < 1) return [];
     // Operational sentences after a day's route are not scenic alternatives.
     return value.slice(start, end).split(/[-—–→。；;\n，,]+/u).flatMap((segment) => {
+      // 接送方式的“或”属于服务选择，不能锁成必须同时保留的景点 OR 组。
+      if (supportArrangementType({ name: segment.trim() }) === "transport") return [];
       if (/^\s*(?:不含|不包含|不安排|不提交|不发布|不需要|无需|不要)/u.test(segment)) return [];
       if (/^\s*(?:第\s*[0-9一二三四五六七八九十]+\s*晚|(?:参考)?酒店|住宿|入住)/u.test(segment)) return [];
       if (!/(?:或者|或)/u.test(segment)
@@ -300,7 +320,8 @@ function samePlace(left: string, right: string): boolean {
   return Boolean(a) && Boolean(b) && (a === b || a.includes(b) || b.includes(a));
 }
 
-function isDeletableAdministrativeLocation(product: ProductDetail, value: string): boolean {
+function isDeletableAdministrativeLocation(product: ProductDetail, value: string, day?: number): boolean {
+  if (hasVerifiedRouteAdministrativeNode(product.product, value, day)) return true;
   if (isAdministrativeLocationName(value)) return true;
   const compact = value.replace(/\s+/g, "");
   if (!compact) return false;

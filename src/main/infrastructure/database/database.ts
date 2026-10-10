@@ -114,6 +114,7 @@ import {
   latestWorkflowTaskForProduct,
   listWorkflowTasks,
   recoverOrphanWorkflowTasks,
+  reconcileSupersededWorkflowTasks,
   updateWorkflowTask,
 } from "./parts/workflow-tasks.js";
 
@@ -244,6 +245,9 @@ export class VbkDatabase extends LocalProductDatabase {
   }
   completeSavedProductWorkflowTasks(): ProductWorkflowTask[] {
     return completeSavedProductWorkflowTasks(this.db);
+  }
+  reconcileSupersededWorkflowTasks(): ProductWorkflowTask[] {
+    return reconcileSupersededWorkflowTasks(this.db);
   }
   getWorkflowTask(id: string): ProductWorkflowTask | undefined { return getWorkflowTask(this.db, id); }
   latestWorkflowTaskForProduct(localProductId: string): ProductWorkflowTask | undefined {

@@ -15,6 +15,19 @@ test("2天1晚只要求真实住宿日的携程酒店候选", () => {
   assert.ok(!missing.includes("酒店候选：第 2 天"));
 });
 
+test("秦岭6天5晚的送站日不要求酒店候选", () => {
+  const product = {
+    basicInfo: { meetingCity: "西安", destinationCity: "西安", days: 6, nights: 5 },
+    itinerary: [
+      ...Array.from({ length: 5 }, (_, index) => ({ day: index + 1, hotel: "住宿酒店" })),
+      { day: 6, hotel: "无当日住宿安排" },
+    ],
+  };
+  const missing = extraPreparationGaps(product).map((gap) => gap.label);
+  assert.ok(missing.includes("酒店候选：第 5 天"));
+  assert.ok(!missing.includes("酒店候选：第 6 天"));
+});
+
 test("酒店候选必须含携程ID和与已锁定档次一致的可验证字段", () => {
   const candidate = {
     hotelId: 101, hotelName: "潮州腾瑞皇冠假日酒店", diamond: 5, score: 4.8,

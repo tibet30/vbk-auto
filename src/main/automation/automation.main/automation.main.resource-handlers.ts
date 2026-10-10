@@ -7,6 +7,7 @@ import { ensureVehicleResourceApi } from "../ctrip/vehicle-resource-api.js";
 import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 import { writeAutomationProduct } from "./automation.main.persist.js";
+import { trafficRouteReviewAuthorized } from "../../../shared/traffic-route-review-approval.js";
 
 /** 保留已移除的历史失败断点，使原 run 能跳过它并继续后续阶段。 */
 export function resourceRecoveryPhases(product: unknown, phases: string[], previous: AutomationRun | undefined, retryFrom?: string): string[] {
@@ -51,6 +52,7 @@ export function resourcePhaseHandlers(input: {
           return ensureTrafficLinePhase({
             page,
             parentProductId: productId!,
+            routeReviewAuthorized: trafficRouteReviewAuthorized(ctx.db.getAgentSnapshot(localProductId)),
             config: product.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
             itinerary: product.itinerary,
             log,

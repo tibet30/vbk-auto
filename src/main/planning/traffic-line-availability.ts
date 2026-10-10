@@ -12,6 +12,7 @@ import {
   type TrafficLineVariant,
 } from "../../shared/contracts-traffic-line.js";
 import { explicitlyDeclinesTrafficLine } from "../../shared/traffic-line-intent.js";
+import { trafficLinePlanMatchesExplicitCities } from "../../shared/traffic-line-user-endpoints.js";
 import type { OrchestratorRuntime } from "./types.js";
 
 export type InitialTrafficLineSyncResult =
@@ -52,7 +53,8 @@ export async function syncInitialTrafficLineAvailability(
     }
     return { status: "skipped", reason: "userDeclined" };
   }
-  if ((existing?.enabled || existing?.variants.length) && !hasRetryableTrafficAvailability(existing)) {
+  if ((existing?.enabled || existing?.variants.length) && !hasRetryableTrafficAvailability(existing)
+    && trafficLinePlanMatchesExplicitCities(current, existing?.availability?.endpointPlan)) {
     return { status: "skipped", reason: "alreadyConfigured" };
   }
 

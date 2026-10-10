@@ -5,7 +5,7 @@ import { PRODUCT_FORM_LABELS, type ProductForm } from "../../../shared/product-f
 import shared from "../views/shared.module.less";
 import { copyText, formatUpdatedAt } from "./constants";
 import styles from "./components.module.less";
-import { ProductStatusBadge, productTaskStageLabel } from "./product-task-status";
+import { isProductSupersededByReplacement, ProductStatusBadge, productTaskStageLabel } from "./product-task-status";
 import { useProductExecutionTimes } from "../state/product-execution-time";
 import { ProductExecutionTimeLabel } from "./product-execution-time-label";
 export { ProductBriefForm } from "./product-brief-form";
@@ -113,11 +113,14 @@ function ProductRow({ item, disabled, confirming, deleting, resuming, onOpen, on
   onConfirmDelete: () => void;
 }) {
   const meta = productMeta(item);
+  const displayState = isProductSupersededByReplacement(item) ? "draft_saved" : item.status;
+  const draftSaved = item.status === "draft_saved";
+  const progress = draftSaved ? 100 : item.workflowTask?.progress ?? 0;
   const locked = item.status === "automating" || item.workflowTask?.status === "queued" || item.workflowTask?.status === "running";
   const canResume = item.workflowTask?.status === "needs_attention" || item.workflowTask?.status === "failed";
 
   return (
-    <article className={styles.productRow} data-state={item.status}>
+    <article className={styles.productRow} data-state={displayState}>
       <div
         className={styles.productRowOpen}
         role="button"
@@ -154,11 +157,11 @@ function ProductRow({ item, disabled, confirming, deleting, resuming, onOpen, on
             <span className={`${styles.metaItem} ${styles.metaMuted}`}><ProductExecutionTimeLabel time={item.executionTime} /></span>
           </span>
           {item.workflowTask && (
-            <span className={styles.productTaskLine} data-status={item.workflowTask.status}>
-              <span className={styles.productTaskTrack} role="progressbar" aria-label="后台任务进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.workflowTask.progress}>
-                <span style={{ transform: `scaleX(${item.workflowTask.progress / 100})` }} />
+            <span className={styles.productTaskLine} data-status={draftSaved ? "succeeded" : item.workflowTask.status}>
+              <span className={styles.productTaskTrack} role="progressbar" aria-label={draftSaved ? "母产品草稿保存进度" : "后台任务进度"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                <span style={{ transform: `scaleX(${progress / 100})` }} />
               </span>
-              <span>{productTaskStageLabel(item.workflowTask.stage, item.workflowTask.status)} · {item.workflowTask.progress}%</span>
+              <span>{draftSaved ? "母产品草稿保存" : productTaskStageLabel(item.workflowTask.stage, item.workflowTask.status)} · {progress}%</span>
               <span className={styles.productTaskMessage}>{item.workflowTask.error || item.workflowTask.message}</span>
             </span>
           )}

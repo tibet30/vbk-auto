@@ -30,7 +30,9 @@ function toolsFor(output: unknown, options: { persistWrites?: boolean } = {}) {
     markResearchTasksSatisfiedByProduct: () => ({ updated: 0, taskIds: [] }),
   };
   const tools = createAgentBusinessTools({
-    db: store as never, browser: {} as never, automation: {} as never,
+    db: store as never, browser: { requestPage: async () => ({
+      evaluate: async () => { throw new Error("测试未提供可验证的远端资源"); },
+    }) } as never, automation: {} as never,
     productWorkflows: { runExclusive: async (_id: string, _kind: string, work: () => Promise<unknown>) => work(),
       runVbkPageExclusive: async <T>(work: () => Promise<T>) => work() } as never,
     productMutations: new ProductMutationService(store),

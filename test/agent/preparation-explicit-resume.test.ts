@@ -63,7 +63,7 @@ test("准备运行的继续按钮写入一次控制事件并允许本地生成�
   await h.core.idle(value.id);
   assert.equal(h.snapshot().run?.status, "paused");
   assert.deepEqual(h.calls, ["generate", "generate"]);
-  assert.equal(h.modelCalls(), 1);
+  assert.equal(h.modelCalls(), 3);
 
   h.enableSave();
   await h.core.resume(value.id);
@@ -93,7 +93,7 @@ test("状态查询不重开窗口，第二次无进展继续仍有界", async ()
   const resumed = h.snapshot();
   assert.equal(resumed.run?.status, "paused");
   assert.deepEqual(h.calls, ["generate", "generate", "generate", "generate"]);
-  assert.equal(h.modelCalls(), 2);
+  assert.equal(h.modelCalls(), 6);
   assert.equal(resumed.events.filter((event) => event.data?.preparationResume === true).length, 1);
   assert.equal(resumed.pendingInput, undefined);
   assert.equal(resumed.pendingApproval, undefined);

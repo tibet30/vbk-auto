@@ -47,6 +47,16 @@ function productWithTrafficLineRequest() {
   };
 }
 
+test("已保存西安往返核验不能掩盖用户明确的汉中返程，重新查询", async () => {
+  const fake = runtimeFor(availability(["flightRoundTrip", "trainRoundTrip"], "西安", "汉中"), {
+    basicInfo: { destinationCity: "西安", userIdea: "1-西安接;6-汉中送飞机/送高铁" },
+    operations: { trafficLine: { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"],
+      availability: availability(["flightRoundTrip", "trainRoundTrip"], "西安", "西安") } },
+  });
+  assert.equal((await syncInitialTrafficLineAvailability("p", fake.runtime)).status, "updated");
+  assert.equal((fake.written() as { availability: TrafficLineEndpointAvailability }).availability.endpointPlan.departureCity, "汉中");
+});
+
 test("首轮 POI 核验后，仅把接口确认可用的飞机/火车往返写入结构化字段", async () => {
   const fake = runtimeFor(availability(["flightRoundTrip", "trainRoundTrip"]));
 

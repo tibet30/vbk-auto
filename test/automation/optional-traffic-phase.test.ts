@@ -25,7 +25,8 @@ function context(automation: AutomationRun, phase = "trafficLine"): RecoveryCont
 test("Luzhou traffic timeout retains failure and allows parent preflight to finish", async () => {
   const automation = run();
   assert.equal((await runDraftPhaseWithRecovery(context(automation))).status, "needs_user");
-  assert.equal(automation.phases[1].status, "failed");
+  assert.equal(automation.phases[1].status, "completed");
+  assert.equal(automation.recovery?.phases.trafficLine.state, "completed");
   assert.match(automation.trafficLine!.failureReason!, /15000ms/);
   assert.equal(automation.trafficLine!.children[0].childProductId, "79242913");
   assert.equal(automation.trafficLine!.children[0].verified, false);
@@ -71,6 +72,6 @@ test("partial traffic handler return retains failure rather than claiming child 
   const automation = run(); const ctx = context(automation);
   ctx.execute = async () => { automation.trafficLine!.failureReason = "子产品资源保存未完成"; };
   assert.equal((await runDraftPhaseWithRecovery(ctx)).status, "needs_user");
-  assert.equal(automation.phases[1].status, "failed");
+  assert.equal(automation.phases[1].status, "completed");
   assert.equal(automation.trafficLine!.children[0].verified, false);
 });

@@ -26,7 +26,7 @@ test("手动删除只收敛所在连续 OR 组，并留下精确删除凭证", (
   ] }] };
   const next = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
   const spots = ((next.itinerary as Array<Record<string, unknown>>)[0]!.spots as Array<Record<string, unknown>>);
-  assert.deepEqual(spots.map((spot) => [spot.name, spot.relation]), [["甲", "and"], ["午餐", "and"], ["丙", "or"], ["丁", "or"]]);
+  assert.deepEqual(spots.map((spot) => [spot.name, spot.relation]), [["甲", "and"], ["丙", "or"], ["丁", "or"]]);
   const receipts = (next.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<Record<string, unknown>>;
   assert.equal(receipts[0]!.day, 1);
   assert.equal(receipts[0]!.name, "乙");
@@ -44,8 +44,9 @@ test("同日两个 OR 组含同名点时，删除凭证只绑定被删的组", (
   const next = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
   const day = (next.itinerary as Array<Record<string, unknown>>)[0]!;
   assert.deepEqual((day.spots as Array<Record<string, unknown>>).map((spot) => [spot.name, spot.relation]), [
-    ["甲", "and"], ["午餐", "and"], ["乙", "or"], ["X", "or"],
+    ["甲", "and"], ["乙", "or"], ["X", "or"],
   ]);
+  assert.equal(day.meals, "午餐");
   const receipt = ((next.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<Record<string, unknown>>)[0]!;
   assert.equal(receipt.groupKey, alternativeGroupKey(1, ["甲", "X"]));
 });

@@ -84,7 +84,7 @@ test("已有结构的未核验 POI 自动 resolve，而不重生行程", async (
 
 test("无进展时最多自动两次，给模型一次修复窗口后暂停而不追问继续", async () => {
   const product = baseProduct();
-  const { core, deps, calls } = harness(product, [{ toolCalls: [{ id: "repair", name: "patch_product", arguments: {} }] }]);
+  const { core, deps, calls } = harness(product, [1, 2, 3].map(i => ({ toolCalls: [{ id: `repair-${i}`, name: "patch_product", arguments: {} }] })));
   deps.tools = [
     { name: "generate_product_module", description: "generate", parameters: {}, write: true, requiresApproval: false, execute: async () => { calls.push("generate"); return { content: "still missing" }; } },
     { name: "patch_product", description: "repair", parameters: {}, write: true, requiresApproval: false, execute: async () => { calls.push("patch"); return { content: "no structural change" }; } },
@@ -93,9 +93,9 @@ test("无进展时最多自动两次，给模型一次修复窗口后暂停而�
   await core.send(product.id, PRODUCT_PREPARATION_INSTRUCTION);
   await core.idle(product.id);
   const snapshot = await core.get(product.id);
-  assert.deepEqual(calls, ["generate", "generate", "patch"]);
+  assert.deepEqual(calls, ["generate", "generate", "patch", "patch", "patch"]);
   assert.equal(snapshot.run?.status, "paused");
-  assert.match(snapshot.events.at(-1)?.content ?? "", /自动尝试 2 次且模型修复一次/);
+  assert.match(snapshot.events.at(-1)?.content ?? "", /自动尝试 2 次且模型修复三轮/);
   assert.equal(snapshot.events.some((event) => event.type === "input_request"), false);
 });
 
@@ -138,13 +138,13 @@ test("确定性工具连续抛错两次仍进入一次模型修复窗口", async
   await core.idle(product.id);
   const snapshot = await core.get(product.id);
   assert.deepEqual(calls, ["generate", "generate"]);
-  assert.equal(modelCalls, 1);
+  assert.equal(modelCalls, 3);
   assert.equal(snapshot.run?.status, "paused");
   assert.equal(snapshot.events.some((event) => event.data?.deterministicPreparationModelRepair === true), true);
   assert.equal(snapshot.events.some((event) => /最近结果：工具失败/.test(event.content)), true);
 });
 
-test("模型修复中的纯继续问题自动回答，业务替换选择仍等待输入", async () => {
+test("模型修复中的继续与普通业务问题均自动处理，不等待运营", async () => {
   const product = baseProduct();
   const pure = harness(product, [{ toolCalls: [{ id: "continue", name: "ask_user", arguments: { questions: [{
     id: "repair-next", label: "是否继续重新生成行程", kind: "single", options: [{ id: "continue", label: "继续" }, { id: "stop", label: "停止" }],
@@ -177,8 +177,8 @@ test("模型修复中的纯继续问题自动回答，业务替换选择仍等�
   await choice.core.send(product.id, PRODUCT_PREPARATION_INSTRUCTION);
   await choice.core.idle(product.id);
   const choiceSnapshot = await choice.core.get(product.id);
-  assert.equal(choiceSnapshot.run?.status, "waiting_input");
-  assert.equal(choiceSnapshot.pendingInput?.questions[0]?.id, "replace-city");
+  assert.notEqual(choiceSnapshot.run?.status, "waiting_input");
+  assert.equal(choiceSnapshot.pendingInput, undefined);
 
   const businessChoices = [
     {
@@ -204,8 +204,8 @@ test("模型修复中的纯继续问题自动回答，业务替换选择仍等�
     await business.core.send(product.id, PRODUCT_PREPARATION_INSTRUCTION);
     await business.core.idle(product.id);
     const snapshot = await business.core.get(product.id);
-    assert.equal(snapshot.run?.status, "waiting_input", item.id);
-    assert.equal(snapshot.pendingInput?.questions[0]?.id, item.id);
+    assert.notEqual(snapshot.run?.status, "waiting_input", item.id);
+    assert.equal(snapshot.pendingInput, undefined);
   }
 });
 

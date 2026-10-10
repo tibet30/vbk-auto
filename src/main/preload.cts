@@ -82,6 +82,7 @@ const api: VbkApi = {
   },
   automation: {
     start: (localProductId) => ipcRenderer.invoke("automation:start", localProductId),
+    continueApproved: (localProductId) => ipcRenderer.invoke("automation:continueApproved", localProductId),
     retry: (localProductId) => ipcRenderer.invoke("automation:retry", localProductId),
     retryPhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryPhase", localProductId, phase),
     retryOnePhase: (localProductId, phase) => ipcRenderer.invoke("automation:retryOnePhase", localProductId, phase),

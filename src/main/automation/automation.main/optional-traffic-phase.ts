@@ -1,7 +1,7 @@
 import { runPhaseWithRecovery, type RecoveryContext, type RunPhaseOutcome } from "../recovery/recovery.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 
-/** Child failures retain their diagnostics; the parent must still reach preflight. */
+/** Child failures retain diagnostics, but an optional traffic phase is skipped rather than blocking the parent. */
 export async function runDraftPhaseWithRecovery(ctx: RecoveryContext): Promise<RunPhaseOutcome> {
   if (ctx.phase !== "trafficLine") return runPhaseWithRecovery(ctx);
   try {
@@ -22,9 +22,14 @@ export async function runDraftPhaseWithRecovery(ctx: RecoveryContext): Promise<R
 
 function recordTrafficFailure(ctx: RecoveryContext, reason: string): void {
   const phase = ctx.run.phases.find((item) => item.phase === "trafficLine");
-  if (phase) phase.status = "failed";
+  // Traffic children are optional for the parent product. A failed child is a
+  // recorded skip, not a failed parent phase; otherwise the runner reaches
+  // preflight successfully but the persisted task is still rendered blocked.
+  if (phase) phase.status = "completed";
+  const recovery = ctx.run.recovery?.phases?.trafficLine;
+  if (recovery) recovery.state = "completed";
   ctx.run.trafficLine = { ...ctx.run.trafficLine, children: ctx.run.trafficLine?.children ?? [],
     failureReason: ctx.run.trafficLine?.failureReason || reason, verifiedAt: undefined };
-  ctx.log(`大交通录入未完成，保留失败记录并继续母产品预检：${reason}`, "warning");
+  ctx.log(`大交通子产品本轮失败，已跳过并保留诊断；继续母产品预检：${reason}`, "warning");
   ctx.persist();
 }

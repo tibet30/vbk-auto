@@ -98,7 +98,7 @@ export function createVbkCreationRecoveryTools(deps: CreationRecoveryReadOnlyDep
           const draftTourInfoId = assertUnsubmittedDraft(draft);
 
           const preflight = await readPreflight(page, input.product.product, input.productId, { itineraryTourInfoId: draftTourInfoId });
-          const targets = scope === "all"
+          const targets = scope === "all" && input.variants.length > 0
             ? await verifyTrafficTargets({
               children: await readTrafficChildren(page, input.productId),
               input,
@@ -116,14 +116,17 @@ export function createVbkCreationRecoveryTools(deps: CreationRecoveryReadOnlyDep
           assertUnchanged(deps, ctx.localProductId, input);
 
           const run = completedRecoveryRun(input, targets, scope, now(), id());
+          const verifiedTraffic = scope === "all" && input.variants.length > 0;
           deps.db.writeAutomationWithProductStatus(ctx.localProductId, run, "draft_saved");
           const saved = requireProduct(deps, ctx.localProductId);
           deps.emitProduct?.(saved);
           return {
-            content: scope === "all"
+            content: scope === "all" && verifiedTraffic
               ? "只读恢复已完成：VBK 草稿、母产品预检和全部交通子产品均已回读确认；已追加新的本地恢复检查点，未重复创建、保存、启用或提审。"
+              : scope === "all"
+                ? "只读恢复已完成：VBK 草稿和母产品预检均已回读确认；产品明确不录入大交通，未创建、保存、启用或提审。"
               : "只读母产品恢复已完成：VBK 草稿和母产品预检均已回读确认；交通子产品保持历史状态并延后 backfill，未重复创建、保存、启用或提审。",
-            ...(scope === "parent-only" ? { terminal: true } : {}),
+            terminal: true,
             data: {
               productId: input.productId,
               productJsonVersionAtRead: input.productJsonVersion,
@@ -168,7 +171,11 @@ function recoveryInput(product: ProductDetail, scope: RecoveryScope): RecoveryIn
   const traffic = normaliseTrafficLineConfig((product.product.operations as Record<string, unknown> | undefined)?.trafficLine);
   const availability = traffic?.availability;
   const variants = uniqueVariants(traffic?.variants ?? [], "产品交通计划");
-  if (scope === "all") {
+  // An explicitly disabled traffic plan has no traffic child to verify. It is
+  // safe to recover the complete parent draft without inventing endpoints or
+  // forcing a parent-only recovery solely because a historical run had one.
+  const requiresTrafficReadback = scope === "all" && traffic?.enabled === true;
+  if (requiresTrafficReadback) {
     if (!traffic?.enabled || !variants.length || !availability?.endpointPlan) {
       throw new Error("缺少当前会话已核验的大交通端点计划；不能把历史交通阶段恢复为完成。");
     }
@@ -275,8 +282,9 @@ function workflowSnapshot(product: ProductDetail): string {
 
 function completedRecoveryRun(input: RecoveryInput, targets: RecoveryTarget[], scope: RecoveryScope, at: string, runId: string): AutomationRun {
   const phaseNames = draftPhasesFor(input.product.product as Parameters<typeof draftPhasesFor>[0]);
-  if (scope === "all" && (!phaseNames.includes("trafficLine") || !input.endpointPlan)) {
-    throw new Error("当前产品阶段不包含交通子产品，拒绝写入交通恢复检查点。");
+  const hasTrafficPhase = phaseNames.includes("trafficLine");
+  if (scope === "all" && phaseNames.includes("trafficLine") && !input.endpointPlan) {
+    throw new Error("当前产品交通阶段缺少端点计划，拒绝写入交通恢复检查点。");
   }
   const motherPhaseNames = scope === "parent-only"
     ? phaseNames.filter((phase) => phase !== "trafficLine")
@@ -295,11 +303,13 @@ function completedRecoveryRun(input: RecoveryInput, targets: RecoveryTarget[], s
     logs: [{
       at,
       level: "info",
-      message: scope === "all"
+      message: scope === "all" && hasTrafficPhase
         ? "只读恢复：已完成母产品预检、未提审草稿和交通子产品最终回读；未调用任何 VBK 写入。"
+        : scope === "all"
+          ? "只读恢复：已完成母产品预检和未提审草稿回读；产品明确不录入大交通，未调用任何 VBK 写入。"
         : "只读母产品恢复：已完成母产品预检和未提审草稿回读；保留交通子产品历史并延后 backfill；未调用任何 VBK 写入。",
     }],
-    ...(scope === "all"
+    ...(scope === "all" && hasTrafficPhase
       ? {
         trafficLine: {
           endpointPlan: input.endpointPlan,

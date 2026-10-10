@@ -43,7 +43,46 @@ test("保存后住宿结构发生变化时停止后续写入，不能仅按旧�
   }) as typeof fetch;
   try {
     await assert.rejects(syncCtripHotelResources({ page: { evaluate: async (fn: any, arg: any) => fn(arg) }, productId: "1",
-      dailyCandidates: [1, 2].map(day => ({ day, segmentId: String(day), candidates: [{ hotelId: 100 + day, hotelName: `酒店${day}` }] })) }), /住宿段结构发生变化/);
+      dailyCandidates: [1, 2].map(day => ({ day, segmentId: String(day), candidates: [{ hotelId: 100 + day, hotelName: `酒店${day}` }] })) }), /住宿段结构发生变化.*段数 2→1/);
     assert.equal(saves, 1);
   } finally { globalThis.fetch = previousFetch; (globalThis as any).document = previousDocument; }
+});
+
+test("平台规范城市DTO字段顺序和数字类型不误判为住宿段变化", async () => {
+  let segments: any[] = [1, 2].map(segmentId => ({ segmentId, segmentBase: { stayNights: 1,
+    segmentNumber: segmentId, destinationCity: { cityId: 1920, cityName: "洋县" } }, hotel: { segmentRooms: [] } }));
+  const saved: number[] = [];
+  const page = { evaluate: async (_fn: unknown, request: any) => {
+    const endpoint = new URL(request.endpoint).pathname;
+    if (endpoint.endsWith("saveSegment")) {
+      const index = segments.findIndex(segment => segment.segmentId === request.body.segment.segmentId);
+      saved.push(index);
+      segments[index] = request.body.segment;
+      segments = segments.map(segment => ({ ...segment, segmentBase: { ...segment.segmentBase,
+        stayNights: String(segment.segmentBase.stayNights), segmentNumber: String(segment.segmentBase.segmentNumber),
+        destinationCity: { cityName: "洋县", provinceName: "陕西", cityId: "1920" } } }));
+    }
+    return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments: structuredClone(segments) } } };
+  } };
+  const result = await syncCtripHotelResources({ page, productId: "1", dailyCandidates: [1, 2]
+    .map(day => ({ day, segmentId: String(day), candidates: [{ hotelId: 100 + day, hotelName: `酒店${day}` }] })) });
+  assert.equal(result.verified, true);
+  assert.deepEqual(saved, [0, 1]);
+});
+
+test("实际住宿城市被替换时停止酒店绑定", async () => {
+  let segments: any[] = [1, 2].map(segmentId => ({ segmentId, segmentBase: { stayNights: 1,
+    segmentNumber: segmentId, destinationCity: { cityId: 1920, cityName: "洋县" } }, hotel: { segmentRooms: [] } }));
+  let saves = 0;
+  const page = { evaluate: async (_fn: unknown, request: any) => {
+    if (request.endpoint.endsWith("saveSegment")) {
+      saves++;
+      segments[0] = request.body.segment;
+      segments[1].segmentBase.destinationCity = { cityId: 129, cityName: "汉中" };
+    }
+    return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, draftProductSegments: { segments: structuredClone(segments) } } };
+  } };
+  await assert.rejects(syncCtripHotelResources({ page, productId: "1", dailyCandidates: [1, 2]
+    .map(day => ({ day, segmentId: String(day), candidates: [{ hotelId: 100 + day, hotelName: `酒店${day}` }] })) }), /住宿段结构发生变化.*第2段.*id:1920.*id:129/);
+  assert.equal(saves, 1);
 });

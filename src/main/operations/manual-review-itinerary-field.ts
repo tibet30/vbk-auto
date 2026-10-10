@@ -1,6 +1,7 @@
 import type { ManualReviewFieldInput } from "../../shared/contracts.js";
 import { normaliseItinerarySpotKind, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { alternativeGroupKey, appendTrustedOperatorItineraryRemoval } from "../../shared/trusted-operator-itinerary-removals.js";
+import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
 
 type Json = Record<string, unknown>;
 function objectValue(value: unknown): Json { return value && typeof value === "object" && !Array.isArray(value) ? value as Json : {}; }
@@ -63,7 +64,7 @@ export function applyItinerarySpotRemove(product: Json, input: Extract<ManualRev
     normaliseRemainingAlternativeRelation(remaining, alternatives, input.spotIndex);
   }
   if (spotName && Array.isArray(dayRecord.activities)) removeMatchingActivity(dayRecord, spotName);
-  return next;
+  return preserveItineraryRemovals(next, next);
 }
 
 function locationText(value: unknown): string | null { return typeof value === "string" && value.trim() ? value.trim() : null; }

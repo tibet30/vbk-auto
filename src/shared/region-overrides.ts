@@ -43,6 +43,14 @@ export function isNonWritableCityAlias(value: unknown): boolean {
 
 /** 酒店描述中存在多个并存的城市时，按优先级返回最具体的地点。 */
 export function hotelLocationFromHotelText(value: string): string {
+  // 每晚住宿字段中的明确市县优先；不能把跨城线路都回退到产品接团城市。
+  // 只读取字段开头，不从途经描述或酒店品牌中猜城市。
+  const administrative = value.trim().replace(/^(?:安排)?(?:入住|住在|住宿于)\s*/, "")
+    .match(/^([\p{Script=Han}]{1,12}?(?:自治县|县级市|市|县|旗))/u)?.[1];
+  if (administrative) return administrative;
+  // Generated lodging placeholders use platform short names as well as 县/市.
+  const shortLocality = value.trim().match(/^([\p{Script=Han}]{2,12}?)(?:当地|市区)(?:[1-5一二三四五]\s*(?:钻|星))?(?:酒店|住宿|民宿|客栈)/u)?.[1];
+  if (shortLocality && !/(?:镇|村|景区|片区|园区|街区)$/u.test(shortLocality)) return shortLocality;
   for (const candidate of HOTEL_LOCATION_PRIORITY_ORDER) {
     if (value.includes(candidate)) return candidate;
   }

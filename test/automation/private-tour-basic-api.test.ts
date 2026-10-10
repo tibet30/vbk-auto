@@ -54,3 +54,15 @@ test("儿童零价不启用儿童可订，正价启用，并通过保存回读",
     assert.equal(c.saved().bookingControl.forChild, child > 0 ? "T" : "F");
   }
 });
+
+test("平台静默清理乘号：保存前规范化分隔符，远端精确回读仍必须通过", async () => {
+  const c = client();
+  await ensureBasicInfoApi(c.page as any, { ...product, basicInfo: { ...product.basicInfo, subtitle: "秦岭秘境×汉中人文，温泉启程与山地古镇体验" } }, "1", butler, "400-test", { skipProductLine: true });
+  assert.match(c.saved().baseInfo.subName, /秦岭秘境\+汉中人文/);
+  assert.doesNotMatch(c.saved().baseInfo.subName, /×/);
+});
+
+test("基本信息失败提供字段差异，不能只返回无法定位的笼统错误", async () => {
+  const c = client("T");
+  await assert.rejects(ensureBasicInfoApi(c.page as any, product, "1", butler, "400-test", { skipProductLine: true }), /isAutoCalculateProductLevel（期望 "F"，实际 "T"）/);
+});

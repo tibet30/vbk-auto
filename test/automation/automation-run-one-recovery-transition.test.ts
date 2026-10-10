@@ -127,7 +127,7 @@ test("最终预检通过后结案全部阶段，不会重跑历史 pending 标�
   assert.ok(Object.values(settled.recovery!.phases).every((recovery) => recovery.state === "completed"));
 });
 
-test("母产品预检通过时结案但保留未完成交通子产品诊断", () => {
+test("母产品预检通过时把失败交通子产品视为跳过并保留诊断", () => {
   const run = makePreviousFailedRun();
   run.phases.push({ phase: "trafficLine", status: "failed" });
   run.recovery!.phases.trafficLine = {
@@ -139,8 +139,8 @@ test("母产品预检通过时结案但保留未完成交通子产品诊断", ()
   const settled = settleRunAfterVerifiedPreflight(run);
   assert.equal(settled.status, "succeeded");
   assert.equal(settled.currentPhase, undefined);
-  assert.equal(settled.phases.find((phase) => phase.phase === "trafficLine")?.status, "failed");
-  assert.equal(settled.recovery!.phases.trafficLine.state, "needs_user");
+  assert.equal(settled.phases.find((phase) => phase.phase === "trafficLine")?.status, "completed");
+  assert.equal(settled.recovery!.phases.trafficLine.state, "completed");
   assert.ok(settled.phases.filter((phase) => phase.phase !== "trafficLine").every((phase) => phase.status === "completed"));
 });
 

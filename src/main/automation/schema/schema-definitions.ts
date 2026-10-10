@@ -58,16 +58,20 @@ const itineraryDaySchema = z.object({
   })).default([]),
   description: z.string().default(""),
   hotel: z.string().default(""),
+  hotelRequirement: z.object({ anchorName: z.string().min(1), cityName: z.string().min(1).optional(),
+    maxDistanceKm: z.number().positive().optional(), diamond: z.number().int().min(0).max(5).optional(),
+    ratingType: z.enum(["diamond", "star", "homestay"]).optional() }).strict().optional(),
   hotelCandidates: z.array(z.object({
     hotelId: z.number().int().positive(),
     hotelName: z.string().min(1),
-    diamond: z.number().int().min(1).max(5),
+    diamond: z.number().int().min(0).max(5),
     score: z.number().nonnegative(),
     distanceKm: z.number().nonnegative(),
     address: z.string().min(1).optional(),
     cityName: z.string().min(1),
     anchorName: z.string().min(1),
     anchorCityId: z.number().int().positive(),
+    ratingType: z.enum(["diamond", "star", "homestay"]).optional(),
   }).strict()).min(HOTEL_RESOURCE_MIN_CANDIDATE_COUNT).max(HOTEL_RESOURCE_CANDIDATE_COUNT).optional(),
   meals: z.string().default(""),
   mealDescriptions: z.array(z.string().min(1)).length(3).optional(),
@@ -250,6 +254,7 @@ const operationsSchema = z.object({
   pickupCity: z.string().min(1),
   reusePickupForDropoff: z.boolean().default(true),
   hotelSource: z.literal("nonPlatform").default("nonPlatform"),
+  hotelFallbackPolicy: z.object({ allowDowngrade: z.boolean().default(true) }).strict().default({ allowDowngrade: true }),
   hotelTier: z
     .enum(HOTEL_TIER_VALUES)
     .default(DEFAULT_HOTEL_TIER),
@@ -274,18 +279,20 @@ const operationsSchema = z.object({
       roomType: z.string().min(1).optional(),
       query: z.string().min(1).optional(),
       hotelTier: z.enum(HOTEL_TIER_VALUES).optional(),
-      diamond: z.union([z.literal(3), z.literal(4), z.literal(5)]).optional(),
+      diamond: z.number().int().min(0).max(5).optional(),
       candidates: z.array(z.object({
-        hotelId: z.number().int().positive(), hotelName: z.string().min(1), diamond: z.number().int().min(1).max(5),
+        hotelId: z.number().int().positive(), hotelName: z.string().min(1), diamond: z.number().int().min(0).max(5),
         score: z.number().nonnegative(), distanceKm: z.number().nonnegative(), address: z.string().min(1).optional(),
         cityName: z.string().min(1), anchorName: z.string().min(1), anchorCityId: z.number().int().positive(),
+        ratingType: z.enum(["diamond", "star", "homestay"]).optional(),
       }).strict()).min(HOTEL_RESOURCE_MIN_CANDIDATE_COUNT).max(HOTEL_RESOURCE_CANDIDATE_COUNT).optional(),
       dailyCandidates: z.array(z.object({
         day: z.number().int().positive(),
         candidates: z.array(z.object({
-          hotelId: z.number().int().positive(), hotelName: z.string().min(1), diamond: z.number().int().min(1).max(5),
+          hotelId: z.number().int().positive(), hotelName: z.string().min(1), diamond: z.number().int().min(0).max(5),
           score: z.number().nonnegative(), distanceKm: z.number().nonnegative(), address: z.string().min(1).optional(),
           cityName: z.string().min(1), anchorName: z.string().min(1), anchorCityId: z.number().int().positive(),
+          ratingType: z.enum(["diamond", "star", "homestay"]).optional(),
         }).strict()).min(HOTEL_RESOURCE_MIN_CANDIDATE_COUNT).max(HOTEL_RESOURCE_CANDIDATE_COUNT),
       }).strict()).optional(),
     })

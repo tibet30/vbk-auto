@@ -4,7 +4,7 @@ import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 import { runDraftPhaseWithRecovery } from "./optional-traffic-phase.js";
 import { randomUUID } from "node:crypto";
 import { runPhaseWithRecovery, type RecoveryContext } from "../recovery/recovery.js";
-import { prepareBackfilledPhaseRecovery, preparePhaseRetry, prepareQueuedPhaseResume } from "../phase-retry.js";
+import { prepareAutomationResumeRun } from "./automation.main.resume-state.js";
 import {
   automationBlockers,
   parseProduct,
@@ -45,7 +45,7 @@ import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
 /**
  * 单个产品自动化阶段主循环：
  *   - retryFrom 为 undefined 时从第 0 阶段跑完整轮；否则按 preparePhaseRetry 重置并按该阶段重跑；
- *   - 母产品阶段 needs_user → failed/blocked；大交通失败保留证据并继续预检。
+ *   - 母产品阶段 needs_user → failed/blocked；大交通子产品失败按跳过处理，保留证据并继续预检。
  *   - 任一阶段 cancelled → ctx.markCancelled 接管；handler 抛错走 catch；
  *   - 全部完成 → status=succeeded，附 desktop-draft 截图落档。
  *
@@ -125,16 +125,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
     const scenicSpotLogs: string[] = [];
 
     if (retryFrom && !productDetail.automation) throw new Error("没有可重试的自动录入记录。");
-    const isBackfilledHotelRecovery = retryFrom === "hotelResource"
-      && productDetail.automation?.status === "failed"
-      && !productDetail.automation.phases.some((phase) => phase.phase === "hotelResource")
-      && productDetail.automation.phases.some((phase) => phase.phase === "preflight" && phase.status === "failed");
     const run: AutomationRun = retryFrom
-      ? productDetail.automation?.status === "queued"
-        ? prepareQueuedPhaseResume(productDetail.automation, draftPhases, retryFrom)
-        : isBackfilledHotelRecovery
-          ? prepareBackfilledPhaseRecovery(productDetail.automation!, draftPhases, "hotelResource", "preflight")
-          : preparePhaseRetry(productDetail.automation!, draftPhases, retryFrom)
+      ? prepareAutomationResumeRun(productDetail.automation!, draftPhases, retryFrom)
       : { id: randomUUID(), status: "running", phases: draftPhases.map((phase) => ({ phase, status: "pending" })), logs: [] };
     const log = (message: string, level: "info" | "warning" | "error" = "info") => { run.logs.push({ at: new Date().toISOString(), message, level }); ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
     const persist = () => { ctx.db.saveAutomation(localProductId, run); ctx.emit(localProductId); };
@@ -367,7 +359,7 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       run.status = "succeeded";
       run.currentPhase = undefined;
       await finalizeRunWithScreenshot(run, saveScreenshot, productId!, page, log);
-      log("产品草稿已保存，未提交审核、未发布。", "warning");
+      log("母产品草稿已保存；交通套餐完成状态以各子产品最终回读为准。", "warning");
       writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "draft_saved");
       persist();
     } catch (error) {

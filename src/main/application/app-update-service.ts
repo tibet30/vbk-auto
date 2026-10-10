@@ -1,3 +1,17 @@
+/**
+ * AppUpdateService 主类（barrel）：
+ *   - 管理 AppUpdateState（currentVersion / platform / supported / status / progress …）；
+ *   - 串起 autoUpdater 事件 → patch + 通过 safeRendererSend 广播到 renderer；
+ *   - 自动检查（启动延时 + 周期）；
+ *   - 应用层手动检查 / 下载 / 打开 / 显示文件 / 退出并安装。
+ *
+ * 子文件分工：
+ *   - feed.ts：feed URL + 平台判定 + ensureTrailingSlash + normalizeProgress；
+ *   - manifest.ts：fetchLatestManifest + parseLatestManifest + compareSemver；
+ *   - download.ts：selectInstallerFile + downloadFile；
+ *   - diagnostics.ts（外部）：AppUpdateFailure + describeUpdateFailure。
+ */
+
 import fs from "node:fs";
 import path from "node:path";
 import { app, shell, type BrowserWindow } from "electron";
@@ -7,17 +21,13 @@ import type { AppUpdateState, AppUpdateStatus } from "../../shared/contracts.js"
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
 import { safeRendererSend } from "../infrastructure/renderer-send.js";
 import { AppUpdateFailure, describeUpdateFailure } from "./app-update-diagnostics.js";
+import { downloadFile, ensureTrailingSlashUrl, selectInstallerFile } from "./app-update-service/download.js";
+import { devForced, feedUrl, isSupportedUpdatePlatform } from "./app-update-service/feed.js";
+import { compareSemver, fetchLatestManifest, parseLatestManifest } from "./app-update-service/manifest.js";
 
-export const APP_UPDATE_FEED_URL = "https://www.atdtour.com/downloads/sanrentongyou/updates/stable";
-const feedUrl = process.env.VBK_UPDATE_FEED_URL || APP_UPDATE_FEED_URL;
-/**
- * 在线更新只在打包后的桌面应用中启用：未打包时 app.getVersion() 读的是
- * 开发用的 package.json，产物目录也不存在，检查更新没有意义。
- * VBK_UPDATE_DEV_FORCE=1 仅供开发时预览更新界面与错误文案。
- */
-const devForced = process.env.VBK_UPDATE_DEV_FORCE === "1";
+export { APP_UPDATE_FEED_URL } from "./app-update-service/feed.js";
+
 const { autoUpdater } = electronUpdater;
-type SupportedUpdatePlatform = "darwin" | "win32";
 
 export interface AppUpdateServiceOptions {
   getWindow: () => BrowserWindow | undefined;
@@ -169,7 +179,7 @@ export class AppUpdateService {
     this.patch({
       status: "downloading",
       progress: {
-        percent: normalizeProgress(progress.percent),
+        percent: Math.max(0, Math.min(100, Math.round(progress.percent || 0))),
         transferred: progress.transferred,
         total: progress.total,
         bytesPerSecond: progress.bytesPerSecond,
@@ -190,7 +200,7 @@ export class AppUpdateService {
   private async downloadInstaller(version: string): Promise<string> {
     const manifest = parseLatestManifest(await fetchLatestManifest());
     const installerFile = selectInstallerFile(manifest.source, version);
-    const url = new URL(encodeURI(installerFile), ensureTrailingSlash(feedUrl)).toString();
+    const url = new URL(encodeURI(installerFile), ensureTrailingSlashUrl(feedUrl)).toString();
     const targetPath = path.join(app.getPath("downloads"), installerFile);
     const temporaryPath = `${targetPath}.download`;
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
@@ -208,7 +218,7 @@ export class AppUpdateService {
   private requireInstallerPath(): string {
     const installerPath = this.state.installerPath;
     if (!installerPath) throw new Error("安装包尚未下载完成。");
-    if (!fs.existsSync(installerPath)) throw new Error("安装包文件不存在，请重新下载。");
+    if (!fsPathExists(installerPath)) throw new Error("安装包文件不存在，请重新下载。");
     return installerPath;
   }
 
@@ -230,147 +240,6 @@ export class AppUpdateService {
   }
 }
 
-function normalizeProgress(percent: number): number {
-  if (!Number.isFinite(percent)) return 0;
-  return Math.max(0, Math.min(100, Math.round(percent)));
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith("/") ? value : `${value}/`;
-}
-
-function isSupportedUpdatePlatform(platform: NodeJS.Platform): platform is SupportedUpdatePlatform {
-  return platform === "darwin" || platform === "win32";
-}
-
-function manifestFileName(): string {
-  return process.platform === "win32" ? "latest.yml" : "latest-mac.yml";
-}
-
-function installerKind(): { extension: ".dmg" | ".exe"; label: string } {
-  return process.platform === "win32"
-    ? { extension: ".exe", label: "Windows 安装包" }
-    : { extension: ".dmg", label: "macOS 安装包" };
-}
-
-async function fetchLatestManifest(): Promise<string> {
-  const manifestName = manifestFileName();
-  const manifestUrl = new URL(manifestName, ensureTrailingSlash(feedUrl));
-  let response: Response;
-  try {
-    response = await fetch(manifestUrl);
-  } catch (error) {
-    throw new AppUpdateFailure(
-      "feed_unreachable",
-      "连接更新服务器失败，请确认本机网络可以访问更新源后重试。",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-  if (response.status === 404) {
-    throw new AppUpdateFailure(
-      "feed_missing",
-      `更新源上还没有 ${manifestName}，请先把当前平台的更新包上传到更新目录。`,
-      `HTTP 404 · ${manifestUrl.toString()}`,
-    );
-  }
-  if (!response.ok) {
-    throw new AppUpdateFailure(
-      "feed_unreachable",
-      `读取更新清单失败（HTTP ${response.status}），请稍后重试。`,
-      manifestUrl.toString(),
-    );
-  }
-  const contentType = response.headers.get("content-type") ?? "";
-  const text = await response.text();
-  const head = text.trimStart().slice(0, 160);
-  if (contentType.includes("text/html") || /^<!doctype html|^<html/i.test(head)) {
-    throw new AppUpdateFailure(
-      "feed_missing",
-      `更新源返回的是网站页面而不是 ${manifestName}，说明服务器上还没有发布当前平台的更新文件。`,
-      `content-type: ${contentType || "unknown"} · 响应开头：${head.slice(0, 100)}`,
-    );
-  }
-  if (!text.trim()) {
-    throw new AppUpdateFailure("manifest_invalid", `更新清单是空文件，请重新上传 ${manifestName}。`);
-  }
-  return text;
-}
-
-function parseLatestManifest(source: string): { version: string; releaseDate?: string; source: string } {
-  const version = source.match(/^version:\s*([^\s'"]+)\s*$/m)?.[1]?.trim();
-  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-    throw new AppUpdateFailure(
-      "manifest_invalid",
-      `更新清单缺少有效版本号，请确认 ${manifestFileName()} 已正确上传。`,
-      source.trim().slice(0, 160),
-    );
-  }
-  const releaseDate = source.match(/^releaseDate:\s*['"]?([^'"\n]+)['"]?\s*$/m)?.[1]?.trim();
-  return { version, releaseDate, source };
-}
-
-function compareSemver(left: string, right: string): number {
-  const leftParts = left.split(".").map((part) => Number(part));
-  const rightParts = right.split(".").map((part) => Number(part));
-  for (let i = 0; i < 3; i += 1) {
-    const delta = leftParts[i] - rightParts[i];
-    if (delta !== 0) return delta;
-  }
-  return 0;
-}
-
-function selectInstallerFile(manifest: string, version: string): string {
-  const { extension, label } = installerKind();
-  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedExtension = extension.replace(".", "\\.");
-  const match = manifest.match(new RegExp(`url:\\s*([^\\n]+${escapedVersion}[^\\n]+${escapedExtension})\\s*$`, "m"));
-  if (match) return match[1].trim().replace(/^['"]|['"]$/g, "");
-  const fallback = manifest.match(new RegExp(`url:\\s*([^\\n]+${escapedExtension})\\s*$`, "m"));
-  if (fallback) return fallback[1].trim().replace(/^['"]|['"]$/g, "");
-  throw new AppUpdateFailure(
-    "installer_missing",
-    `更新清单里没有找到${label}（${extension}），请确认打包产物与清单一致后重新上传。`,
-  );
-}
-
-async function downloadFile(
-  url: string,
-  targetPath: string,
-  onProgress: (progress: ProgressInfo) => void,
-): Promise<void> {
-  const response = await fetch(url);
-  if (!response.ok || !response.body) throw new Error(`下载安装包失败：${response.status}`);
-  const total = Number(response.headers.get("content-length") || 0);
-  const startedAt = Date.now();
-  let transferred = 0;
-  const file = fs.createWriteStream(targetPath);
-  try {
-    for await (const chunk of response.body) {
-      const buffer = Buffer.from(chunk);
-      transferred += buffer.byteLength;
-      if (!file.write(buffer)) await new Promise((resolve) => file.once("drain", resolve));
-      const elapsedSeconds = Math.max(1, (Date.now() - startedAt) / 1000);
-      onProgress({
-        total,
-        transferred,
-        percent: total ? (transferred / total) * 100 : 0,
-        bytesPerSecond: Math.round(transferred / elapsedSeconds),
-        delta: buffer.byteLength,
-      });
-    }
-  } catch (error) {
-    fs.rmSync(targetPath, { force: true });
-    throw error;
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      file.end((error?: Error | null) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    });
-  }
-  if (transferred <= 0) {
-    fs.rmSync(targetPath, { force: true });
-    throw new Error("安装包下载为空，请重新下载。");
-  }
+function fsPathExists(value: string): boolean {
+  return fs.existsSync(value);
 }

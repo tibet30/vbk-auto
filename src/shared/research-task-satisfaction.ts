@@ -3,6 +3,7 @@ import { poiResearchTaskNames } from "./poi-research-tasks.js";
 import { productNeedsVehicleResource } from "./product-form.js";
 import { hasCompletePoi, requiresItineraryPoi } from "./itinerary-activity-kind.js";
 import { hasVerifiedRouteAdministrativeNode } from "./route-administrative-nodes.js";
+import { trustedOperatorItineraryRemovals } from "./trusted-operator-itinerary-removals.js";
 import {
   hasBorderPermitItineraryTrigger,
   hasResolvedBorderPermitVisibleFields,
@@ -28,7 +29,7 @@ function positiveInteger(value: unknown): boolean {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-function poiNameSatisfaction(product: ProductLike, taskName: string): "verified" | "non_poi" | null {
+function poiNameSatisfaction(product: ProductLike, taskName: string): PoiResearchSatisfaction {
   const targetName = taskName.trim();
   if (!targetName || !Array.isArray(product.itinerary)) return null;
   let hasNonPoi = false;
@@ -43,7 +44,8 @@ function poiNameSatisfaction(product: ProductLike, taskName: string): "verified"
       if (!spot) continue;
       const spotName = textValue(spot.name);
       const poiName = textValue(spot.poiName);
-      const isMatchingSpot = spotName === targetName || poiName === targetName;
+      const compact = (value: string) => value.replace(/\s+/gu, "");
+      const isMatchingSpot = compact(spotName) === compact(targetName) || compact(poiName) === compact(targetName);
       if (!isMatchingSpot) continue;
       if (!requiresItineraryPoi(spot)) { hasNonPoi = true; continue; }
       if (poiName && positiveInteger(spot.poiId)) { hasVerified = true; continue; }
@@ -53,6 +55,10 @@ function poiNameSatisfaction(product: ProductLike, taskName: string): "verified"
 
   if (hasMissingAttraction) return null;
   if (hasVerified) return "verified";
+  // Absence alone is not evidence. Only trusted manual deletion receipts can
+  // retire an absent POI question, including location/ambiguity failures.
+  if (!hasNonPoi && trustedOperatorItineraryRemovals(product).some((receipt) =>
+    receipt.name.replace(/\s+/gu, "") === targetName.replace(/\s+/gu, ""))) return "removed";
   if (hasVerifiedRouteAdministrativeNode(product, targetName)) return "non_poi";
   // An explicitly saved night shoot is an independent activity, not a new
   // sightseeing stop. Do not keep a stale POI question for its location once
@@ -88,7 +94,7 @@ function hasPoiTaskSpot(product: ProductLike, taskName: string): boolean {
  * It does not claim a POI match: the current activity simply has no POI
  * requirement.  Switching it back to attraction makes the same task pending
  * again unless a verified POI is present. */
-export type PoiResearchSatisfaction = "verified" | "non_poi" | null;
+export type PoiResearchSatisfaction = "verified" | "non_poi" | "removed" | null;
 
 /** All names in an "A 或 B" task must be independently resolved. */
 export function poiResearchTaskSatisfaction(task: ResearchTaskText, product: ProductLike): PoiResearchSatisfaction {
@@ -96,6 +102,7 @@ export function poiResearchTaskSatisfaction(task: ResearchTaskText, product: Pro
   if (!names.length) return null;
   const results = names.map((name) => poiNameSatisfaction(product, name));
   if (results.some((result) => result === null)) return null;
+  if (results.some((result) => result === "removed")) return "removed";
   return results.some((result) => result === "non_poi") ? "non_poi" : "verified";
 }
 

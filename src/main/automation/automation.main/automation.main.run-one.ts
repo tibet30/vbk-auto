@@ -1,4 +1,3 @@
-import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 /**
  * 自动化「单阶段重新执行」入口：runOnePhase。
  *   - 仅重跑指定 phase，其它阶段保留原状态（不全清）；
@@ -6,20 +5,25 @@ import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
  *   - API 保存与回读不依赖目标页；交互式封面上传仍先进入编辑页；
  *   - 完成后保留原有 completed / cancelled 语义；若修复了最后一个失败阶段但
  *     仍有后续 pending 阶段，则切为 queued，允许从断点继续。
+ *
+ * 拆分子文件：
+ *   - fill-map.ts：8 个阶段的 fill 函数 + hotelResource 结果写回 helper。
+ *
+ * 与 run()（多阶段自动跑完整轮）相比：
+ *   - 产品 / product 校验、管家凭证按阶段名决定是否必带；
+ *   - 构造 fillMap：basic 阶段额外处理 setBasicInfoSaved + scenicSpotLogs，其它阶段直接调 fill*；
+ *   - 用 makeRecoveryCtx 拿到 RecoveryContext，让 runPhaseWithRecovery 走完整 advisor 链；
+ *   - cancelled / needs_user / failed 分支与 run() 保持一致；completed 时恢复原 status。
  */
 
+import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 import type { RecoveryContext } from "../recovery/recovery.js";
 import {
   parseProduct,
-  pickKeySpotsFromItinerary,
   shouldRefillBasicInfo,
 } from "../schema/schema.js";
 import { runDraftPhaseWithRecovery } from "./optional-traffic-phase.js";
 import { prepareSinglePhaseRetry } from "../phase-retry.js";
-import {
-  fillAndSaveTerms,
-} from "../ctrip/ctrip.js";
-import { fillItineraryDraftApi } from "../ctrip/itinerary/api-entry.js";
 import { productNotFound } from "../../infrastructure/db-errors.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { writeAutomationProduct } from "./automation.main.persist.js";
@@ -28,35 +32,19 @@ import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import { refreshSupplierProductCodeForPlatformWrite, resolveActiveServicePhoneContext, resolveProductButlerSelection } from "./automation.main.class.helpers.js";
 import { executeApiWithPhasePageSync, recordPhaseRetry } from "./automation.main.retry-navigation.js";
-import { ensurePricingInventoryApi } from "../ctrip/pricing-api.js";
-import { ensurePackageApi } from "../ctrip/package-api.js";
 import {
   ensureBasicInfoApi,
   hasProductLineResolutionFailure,
   isProductLineResolutionError,
 } from "../ctrip/basic-info/api.js";
-import { ensureHotelResourceApi } from "../ctrip/hotel-resource-api.js";
-import { runProductPreflightApi } from "../ctrip/preflight-api.js";
-import { ensureVehicleResourceApi } from "../ctrip/vehicle-resource-api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import type { ContactCardSelection } from "../../../shared/contracts.js";
-import { fillPresentationWithSensitiveRewrite } from "./presentation-sensitive-rewrite.js";
-import { fillItineraryWithSensitiveRewrite } from "./itinerary-sensitive-rewrite.js";
 import { resolveRunStatusAfterSinglePhaseSuccess, settleRunAfterVerifiedPreflight } from "./automation.main.run-one-state.js";
-import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
-import { trafficRouteReviewAuthorized } from "../../../shared/traffic-route-review-approval.js";
-import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
 import { inspectManualCoverAsset } from "../manual-cover-asset.js";
 import { readActiveCoverFallback, placeholderDraftOnly } from "../../../shared/cover-fallback.js";
 import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
+import { applyHotelResourceResult, buildFillMap, type FillMapContext } from "./automation.main.run-one/fill-map.js";
 
-/**
- * 单阶段重新执行入口：
- *   - 产品 / product 校验、管家凭证按阶段名决定是否必带；
- *   - 构造 fillMap：basic 阶段额外处理 setBasicInfoSaved + scenicSpotLogs，其它阶段直接调 fill*；
- *   - 用 makeRecoveryCtx 拿到 RecoveryContext，让 runPhaseWithRecovery 走完整 advisor 链；
- *   - cancelled / needs_user / failed 分支与 run() 保持一致；completed 时恢复原 status。
- */
 export async function runOnePhase(ctx: AutomationRunContext, localProductId: string, phaseName: string) {
     const product = ctx.db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
@@ -98,8 +86,6 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
       }
     }
-    const keySpots = pickKeySpotsFromItinerary(product.product);
-    const scenicSpotLogs: string[] = [];
 
     const draftPhases = draftPhasesFor(productData);
     const phaseIndex = draftPhases.indexOf(phaseName);
@@ -164,53 +150,11 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
         }
       };
 
-      // basic 阶段特殊：会动 setBasicInfoSaved / scenicSpotLogs。其他阶段直接
-      // 调 fill 函数 + 标记 completed 即可。这块逻辑与 run() 里的 handler
-      // 同型 — 仅去掉 multi-phase forward 部分。
-      const fillMap: Record<string, () => Promise<unknown>> = {
-        presentation: () => fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product: productData, productId: productId!, log }),
-        itinerary: () => fillItineraryWithSensitiveRewrite({
-          ctx,
-          localProductId,
-          product: productData,
-          log,
-          executeItinerary: () => fillItineraryDraftApi(page, productData, {
-            disambiguator: ctx.disambiguator,
-            productId: productId ?? "",
-          }),
-          dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
-        }),
-        package: () => ensurePackageApi(page, productData, productId!),
-        pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!),
-        terms: () => fillAndSaveTerms(page, productData, productId),
-        hotelResource: () => ensureHotelResourceApi(page, productData, productId!),
-        vehicleResource: () => ensureVehicleResourceApi(page, productData, productId!),
-        trafficLine: () => {
-          return ensureTrafficLinePhase({
-            page,
-            parentProductId: productId!,
-            routeReviewAuthorized: trafficRouteReviewAuthorized(ctx.db.getAgentSnapshot(localProductId)),
-            config: productData.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
-            itinerary: productData.itinerary,
-            log,
-            checkpoint: run.trafficLine,
-            onCheckpoint: (checkpoint) => {
-              run.trafficLine = checkpoint;
-              for (const child of checkpoint.children) {
-                if (child.childProductId) ctx.browser.addPinnedProductId?.(child.childProductId);
-              }
-              persist();
-            },
-            disambiguator: ctx.disambiguator,
-            product: productData,
-          });
-        },
-        preflight: () => runProductPreflightApi(page, productData, productId!),
-      };
-      const fillFn = fillMap[phaseName];
+      const fillMap = buildFillMap({ ctx, localProductId, page, productData, productId: productId ?? undefined, run, log, persist } satisfies FillMapContext);
 
       const execute: () => Promise<unknown> = phaseName === "basic"
         ? async () => executePhase("basic", async () => {
+            const scenicSpotLogs: string[] = [];
             scenicSpotLogs.length = 0;
             const refreshedSupplierCode = refreshSupplierProductCodeForPlatformWrite(productData, butlerSelection, productId);
             if (refreshedSupplierCode) {
@@ -239,11 +183,12 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             ctx.db.setBasicInfoSaved(localProductId);
           })
         : async () => {
+            const fillFn = fillMap[phaseName];
             if (!fillFn) throw new Error(`未注册的阶段：${phaseName}`);
             return executePhase(phaseName, async () => {
-            const result = await fillFn();
+            const outcome = await fillFn();
             if (phaseName === "vehicleResource") {
-              const vehicleResult = result as { skipped?: unknown; resourceGroupId?: unknown; audited?: unknown };
+              const vehicleResult = outcome as { skipped?: unknown; resourceGroupId?: unknown; audited?: unknown };
               if (vehicleResult.skipped) {
                 throw new Error(`用车资源重新执行未完成：${String(vehicleResult.skipped)}`);
               }
@@ -256,30 +201,9 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
             // 都用 source / resourceId / resourceName / hotelTier / diamond
             // 几个字段判断是否需要写回产品。
             if (phaseName === "hotelResource") {
-              const hr = result as { source?: unknown; resourceId?: unknown; resourceName?: unknown; hotelTier?: unknown; diamond?: unknown };
-              if (hr.source === "vbk" && hr.resourceId && hr.resourceName) {
-                productData.operations!.hotelResource = {
-                  source: "vbk",
-                  resourceId: hr.resourceId as number,
-                  resourceName: String(hr.resourceName),
-                  hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
-                  diamond: hr.diamond as 3 | 4 | 5,
-                };
-                writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "automating");
-              }
-              if (hr.source === "ctrip" && hr.resourceName) {
-                productData.operations!.hotelResource = {
-                  source: "ctrip",
-                  resourceName: String(hr.resourceName),
-                  hotelTier: hr.hotelTier as "当地3钻酒店/-3" | "当地4钻酒店/-4" | "当地5钻酒店/-38" | undefined,
-                  diamond: hr.diamond as 3 | 4 | 5,
-                  candidates: productData.itinerary.find((day: any) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
-                  dailyCandidates: (hr as any).dailyCandidates,
-                };
-                writeAutomationProduct(ctx, localProductId, productData as unknown as Record<string, unknown>, "automating");
-              }
+              applyHotelResourceResult(ctx, localProductId, product, productData, outcome as { source?: unknown; resourceId?: unknown; resourceName?: unknown; hotelTier?: unknown; diamond?: unknown; dailyCandidates?: unknown });
             }
-            return result;
+            return outcome;
             });
           };
 

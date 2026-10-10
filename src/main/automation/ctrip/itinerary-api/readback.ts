@@ -1,28 +1,36 @@
 /**
- * itinerary-api/readback.ts：
- *   - 字段级回读校验：verifyItineraryReadback
- *   - 单个 info 节点的类型 + 字段提取 helpers
- *   - 回读结果摘要类型 VerifyReadbackSummary
- *
- * 校验项（每日逐项）：
- *   - dailyDescription.title；
- *   - 景点 POI（poiId + poiName 顺序）；
- *   - 酒店（hotelName + hotelTier；平台酒店备选可被后端收敛，实际槽位必须能对应期望候选）；
- *   - 其他 / 自由活动 description；
- *   - 服务时间（startOnBoardTime / stopOnBoardTime）；
- *   - 首日集合 / 接站（tourDailyPackageGatherList）；
- *   - 末日解散 / 送站（tourDailyPackageDismissList）；
- *   - 当日应有餐食（dinnerType key 顺序 + includeAdult 费用状态）。
+ * itinerary-api/readback 入口（barrel）：
+ *   - types.ts：InfoRecord / PoiRecord / HotelRecord / StationPackageRecord 等窄类型，
+ *     poiIdOf / poiNameOf / hotelNameOf / hotelTierOf / isAttraction / isMeal / isHotel
+ *     / isGather / isDismiss / stationCode / stationName 等安全字段读取；
+ *   - checks.ts：checkTitle / checkDailyUseCar / checkPois / checkMeals / checkHotels
+ *     + matchHotelSlots / checkPickup / checkDropoff；
+ *   - verifyItineraryReadback 入口。
  *
  * 错误信息必含「第 N 天 / 字段 / 期望 / 实际」，方便定位。
  */
 
-import type { VbkDailyUseCar } from "../../../../shared/product-form.js";
 import type { ReadbackExpectations } from "./itinerary-transform.js";
 import { checkReadbackActivities, checkReadbackTimeline } from "./readback-activities.js";
 import { checkServiceCards } from "./readback-service-cards.js";
 import { fetchTourDailyDetail } from "./steps.js";
 import type { ApiPage } from "./transport.js";
+import {
+  asInfoArray,
+  type InfoRecord,
+  type PoiRecord,
+  type HotelRecord,
+  type StationPackageRecord,
+} from "./readback/types.js";
+import {
+  checkDailyUseCar,
+  checkDropoff,
+  checkHotels,
+  checkMeals,
+  checkPickup,
+  checkPois,
+  checkTitle,
+} from "./readback/checks.js";
 
 export interface VerifyReadbackSummary {
   days: number;
@@ -32,292 +40,12 @@ export interface VerifyReadbackSummary {
   sample: unknown;
 }
 
-/** 单个 info 节点的安全类型（用于字段级比对）。 */
-interface InfoRecord {
-  activeType?: { key?: unknown; name?: unknown };
-  description?: unknown;
-  useSegmentConfig?: unknown;
-  startOnBoardTime?: unknown;
-  stopOnBoardTime?: unknown;
-  takeoffTime?: { key?: unknown; name?: unknown };
-  takeTime?: unknown;
-  tourDailyPois?: Array<Record<string, unknown>>;
-  tourDailyHotels?: Array<Record<string, unknown>>;
-  tourDailyDinner?: {
-    dinnerType?: { key?: unknown; name?: unknown };
-    includeAdult?: { key?: unknown; name?: unknown };
-  };
-  tourDailyPackageGatherList?: StationPackageRecord[];
-  tourDailyPackageDismissList?: StationPackageRecord[];
-}
-
-interface StationPackageRecord {
-  airports?: unknown[];
-  trainStations?: unknown[];
-  serviceAllDay?: unknown;
-  useCar?: { key?: unknown };
-}
-
-interface PoiRecord {
-  poi?: { poiId?: unknown; poiName?: unknown };
-  suffixName?: { key?: unknown; name?: unknown };
-}
-
-interface HotelRecord {
-  hotel?: { hotelName?: unknown; grade?: { name?: unknown } };
-}
-
-function asInfoArray(value: unknown): InfoRecord[] {
-  if (!Array.isArray(value)) return [];
-  return value as InfoRecord[];
-}
-
-function poiIdOf(poi: PoiRecord | undefined): number {
-  if (!poi?.poi) return 0;
-  const id = poi.poi.poiId;
-  return typeof id === "number" ? id : Number(id ?? 0);
-}
-
-function poiNameOf(poi: PoiRecord | undefined): string {
-  return String(poi?.poi?.poiName ?? "").trim();
-}
-
-function hotelNameOf(hotel: HotelRecord | undefined): string {
-  return String(hotel?.hotel?.hotelName ?? "").trim();
-}
-
-function hotelTierOf(hotel: HotelRecord | undefined): string {
-  return String(hotel?.hotel?.grade?.name ?? "").trim();
-}
-
-function isAttraction(info: InfoRecord): boolean {
-  return info.activeType?.key === 3 || info.activeType?.name === "景点";
-}
-function isMeal(info: InfoRecord): boolean {
-  return info.activeType?.key === 0 || info.activeType?.name === "餐饮";
-}
-function isHotel(info: InfoRecord): boolean {
-  return info.activeType?.key === 1 || info.activeType?.name === "酒店";
-}
-function isGather(info: InfoRecord): boolean {
-  return info.activeType?.key === 25 || info.activeType?.name === "集合";
-}
-function isDismiss(info: InfoRecord): boolean {
-  return info.activeType?.key === 26 || info.activeType?.name === "解散";
-}
-
-function stationCode(value: unknown, kind: "air" | "train"): string {
-  if (typeof value === "string") return value;
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
-  const record = value as Record<string, unknown>;
-  return String(kind === "air" ? record.code ?? "" : record.locationCode ?? record.stationNo ?? "");
-}
-
-function stationName(value: unknown, kind: "air" | "train"): string {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
-  const record = value as Record<string, unknown>;
-  return String(kind === "air" ? record.name ?? "" : record.stationName ?? "");
-}
-
-/** 校验 dailyDescription.title。 */
-function checkTitle(dayLabel: string, expected: string, actualRaw: unknown): void {
-  const actual = String(actualRaw ?? "").trim();
-  if (actual !== expected) {
-    throw new Error(`${dayLabel} 回读 title 不一致：期望=${JSON.stringify(expected)}，实际=${JSON.stringify(actual)}`);
-  }
-}
-
-/** 校验每天标题下的“当天用车”。 */
-function checkDailyUseCar(dayLabel: string, expected: VbkDailyUseCar, actualRaw: unknown): void {
-  const record = actualRaw && typeof actualRaw === "object" && !Array.isArray(actualRaw)
-    ? actualRaw as { key?: unknown; name?: unknown }
-    : {};
-  const actualKey = String(record.key ?? "");
-  const actualName = String(record.name ?? "").trim();
-  if (actualKey !== expected.key) {
-    throw new Error(`${dayLabel} 当天用车不一致：期望=${expected.key}（${expected.name}），实际=${actualKey || JSON.stringify(record)}`);
-  }
-  if (actualName && actualName !== expected.name) {
-    throw new Error(`${dayLabel} 当天用车名称不一致：期望=${JSON.stringify(expected.name)}，实际=${JSON.stringify(actualName)}`);
-  }
-}
-
-/** 校验景点 POI：poiId + poiName 顺序。 */
-function checkPois(dayLabel: string, expected: Array<{ poiId: number; poiName: string; description?: string; suffixKey?: number }>, actualInfos: InfoRecord[]): number {
-  if (expected.length === 0) return 0;
-  const attractions = actualInfos.filter(isAttraction);
-  if (!attractions.length) throw new Error(`${dayLabel} 回读缺少景点节点`);
-  const allPois = attractions.flatMap((a) => Array.isArray(a.tourDailyPois)
-    ? (a.tourDailyPois as PoiRecord[]).map((poi) => ({ poi, description: String(a.description ?? "").trim() })) : []);
-  if (expected.length !== allPois.length) {
-    throw new Error(
-      `${dayLabel} 回读景点 POI 数量不一致：期望 ${expected.length} 个，实际 ${allPois.length} 个`,
-    );
-  }
-  let count = 0;
-  expected.forEach((expPoi, idx) => {
-    const actual = allPois[idx];
-    const actualId = poiIdOf(actual.poi);
-    const actualName = poiNameOf(actual.poi);
-    if (actualId !== expPoi.poiId) {
-      throw new Error(`${dayLabel} 第 ${idx + 1} 个景点 poiId 不一致：期望=${expPoi.poiId}，实际=${actualId}`);
-    }
-    if (actualName !== expPoi.poiName) {
-      throw new Error(
-        `${dayLabel} 第 ${idx + 1} 个景点 poiName 不一致：期望=${JSON.stringify(expPoi.poiName)}，实际=${JSON.stringify(actualName)}`,
-      );
-    }
-    if (expPoi.description && !actual.description.includes(expPoi.description)) {
-      throw new Error(`${dayLabel} 第 ${idx + 1} 个景点说明缺失：期望包含=${JSON.stringify(expPoi.description)}，实际=${JSON.stringify(actual.description)}`);
-    }
-    const actualSuffixKey = Number(actual.poi.suffixName?.key ?? 0);
-    if (expPoi.suffixKey !== undefined && actualSuffixKey !== expPoi.suffixKey) {
-      throw new Error(`${dayLabel} 第 ${idx + 1} 个景点门票标记不一致：期望=${expPoi.suffixKey}，实际=${actualSuffixKey}`);
-    }
-    count += 1;
-  });
-  return count;
-}
-
-/** 校验当日餐食：dinnerType key、早餐补充说明与 includeAdult 费用状态。 */
-function checkMeals(dayLabel: string, expected: Array<{ key: "B" | "L" | "S"; description: string; mealsIncluded: boolean }>, actualInfos: InfoRecord[]): number {
-  const meals = actualInfos.filter(isMeal);
-  if (meals.length !== expected.length) {
-    throw new Error(`${dayLabel} 回读餐饮节点数=${meals.length}，期望 ${expected.length}`);
-  }
-  let count = 0;
-  meals.forEach((meal, idx) => {
-    const exp = expected[idx];
-    if (!exp) throw new Error(`${dayLabel} 回读第 ${idx + 1} 段餐饮无对应期望`);
-    const actualKey = meal.tourDailyDinner?.dinnerType?.key ?? null;
-    if (actualKey !== exp.key) {
-      throw new Error(`${dayLabel} 第 ${idx + 1} 段餐饮 dinnerType key 不一致：期望=${exp.key}，实际=${String(actualKey)}`);
-    }
-    if (exp.key === "B") {
-      const actualDescription = String(meal.description ?? "").trim();
-      if (actualDescription !== exp.description) {
-        throw new Error(
-          `${dayLabel} 第 ${idx + 1} 段早餐补充说明不一致：期望=${JSON.stringify(exp.description)}，实际=${JSON.stringify(actualDescription)}`,
-        );
-      }
-    }
-    const actualIncluded = meal.tourDailyDinner?.includeAdult?.key;
-    const expectedIncluded = exp.mealsIncluded ? "I" : "E";
-    if (actualIncluded !== expectedIncluded) {
-      throw new Error(
-        `${dayLabel} 第 ${idx + 1} 段餐饮 includeAdult 不一致：期望=${expectedIncluded}（${exp.mealsIncluded ? "费用包含" : "费用自理"}），实际=${String(actualIncluded)}`,
-      );
-    }
-    count += 1;
-  });
-  return count;
-}
-
-/** 校验酒店：实际槽位必须是期望候选的非空子集（平台酒店可收敛备选）。 */
-function checkHotels(
-  dayLabel: string,
-  expected: Array<{ hotelName: string; hotelTier?: string }>,
-  actualInfos: InfoRecord[],
-): number {
-  const hotels = actualInfos.filter(isHotel);
-  if (expected.length > 0 && !hotels.length) throw new Error(`${dayLabel} 回读缺少酒店节点（业务要求）`);
-  if (expected.length > 0 && hotels.length !== 1) {
-    throw new Error(`${dayLabel} 回读酒店节点数不一致：期望 1 个含备选的酒店节点，实际 ${hotels.length} 个`);
-  }
-  const slots = hotels.flatMap((info) => (info.tourDailyHotels ?? []).map((slot) => ({ info, slot: slot as HotelRecord })));
-  if (expected.length > 0 && !slots.length) throw new Error(`${dayLabel} 回读缺少酒店备选（业务要求）`);
-  return matchHotelSlots(dayLabel, expected, slots);
-}
-
-function matchHotelSlots(
-  dayLabel: string,
-  expected: Array<{ hotelName: string; hotelTier?: string }>,
-  slots: Array<{ info: InfoRecord; slot: HotelRecord }>,
-): number {
-  let count = 0;
-  slots.forEach(({ info, slot }, idx) => {
-    const actualHotelName = hotelNameOf(slot);
-    const actualHotelTier = hotelTierOf(slot);
-    const description = String(info?.description ?? "");
-    const matched = expected.find((expHotel) => expHotel.hotelName === actualHotelName)
-      ?? (actualHotelName === "自选酒店"
-        ? expected.find((expHotel) => description.includes(expHotel.hotelName))
-        : undefined);
-    if (!matched) {
-      throw new Error(
-        `${dayLabel} 第 ${idx + 1} 个酒店 hotelName 不一致：实际=${JSON.stringify(actualHotelName)}，期望候选=${JSON.stringify(expected.map((hotel) => hotel.hotelName))}`,
-      );
-    }
-    const expectedTier = matched.hotelTier ?? "";
-    if (expectedTier && actualHotelTier !== expectedTier && !description.includes(expectedTier)) {
-      throw new Error(
-        `${dayLabel} 第 ${idx + 1} 个酒店 hotelTier 不一致：期望=${JSON.stringify(expectedTier)}，实际 grade=${JSON.stringify(actualHotelTier)}，description=${JSON.stringify(description)}`,
-      );
-    }
-    count += 1;
-  });
-  return count;
-}
-
-/** 校验首日集合卡片中的机场与火车站。 */
-function checkPickup(
-  dayLabel: string,
-  expectations: ReadbackExpectations,
-  actualInfos: InfoRecord[],
-): void {
-  const pickup = actualInfos.find(isGather);
-  if (!pickup) throw new Error(`${dayLabel} 回读缺少集合节点`);
-  const station = pickup.tourDailyPackageGatherList?.[0];
-  if (!station) throw new Error(`${dayLabel} 集合节点缺 tourDailyPackageGatherList`);
-  const expectedAirportCode = expectations.pickup.airport?.code ?? null;
-  const expectedTrainCode = expectations.pickup.train?.code ?? null;
-  const actualAirportCode = stationCode(station.airports?.[0], "air");
-  const actualTrainCode = stationCode(station.trainStations?.[0], "train");
-  if (expectedAirportCode && actualAirportCode !== expectedAirportCode) {
-    throw new Error(`${dayLabel} 接机机场代码不一致：期望=${expectedAirportCode}，实际=${actualAirportCode}`);
-  }
-  if (expectedTrainCode && actualTrainCode !== expectedTrainCode) {
-    throw new Error(`${dayLabel} 接站火车站代码不一致：期望=${expectedTrainCode}，实际=${actualTrainCode}`);
-  }
-  const expectedAirportName = expectations.pickup.airport?.name ?? null;
-  const actualAirportName = stationName(station.airports?.[0], "air");
-  if (expectedAirportName && actualAirportName !== expectedAirportName) {
-    throw new Error(`${dayLabel} 接机机场名称不一致：期望=${JSON.stringify(expectedAirportName)}，实际=${JSON.stringify(actualAirportName)}`);
-  }
-  if (station.serviceAllDay !== true) {
-    throw new Error(`${dayLabel} 集合服务时间不是全天：实际=${String(station.serviceAllDay)}`);
-  }
-}
-
-/** 校验末日解散卡片中的机场与火车站。 */
-function checkDropoff(
-  orderDay: number,
-  expectations: ReadbackExpectations,
-  actualInfos: InfoRecord[],
-): void {
-  const dropoff = actualInfos.find(isDismiss);
-  if (!dropoff) throw new Error(`末日（第 ${orderDay} 天）回读缺少解散节点`);
-  const station = dropoff.tourDailyPackageDismissList?.[0];
-  if (!station) throw new Error(`末日（第 ${orderDay} 天）解散节点缺 tourDailyPackageDismissList`);
-  const expectedAirportCode = expectations.dropoff.airport?.code ?? null;
-  const expectedTrainCode = expectations.dropoff.train?.code ?? null;
-  const actualAirportCode = stationCode(station.airports?.[0], "air");
-  const actualTrainCode = stationCode(station.trainStations?.[0], "train");
-  if (expectedAirportCode && actualAirportCode !== expectedAirportCode) {
-    throw new Error(`末日（第 ${orderDay} 天）送机机场代码不一致：期望=${expectedAirportCode}，实际=${actualAirportCode}`);
-  }
-  if (expectedTrainCode && actualTrainCode !== expectedTrainCode) {
-    throw new Error(`末日（第 ${orderDay} 天）送站火车站代码不一致：期望=${expectedTrainCode}，实际=${actualTrainCode}`);
-  }
-  const expectedAirportName = expectations.dropoff.airport?.name ?? null;
-  const actualAirportName = stationName(station.airports?.[0], "air");
-  if (expectedAirportName && actualAirportName !== expectedAirportName) {
-    throw new Error(`末日（第 ${orderDay} 天）送机机场名称不一致：期望=${JSON.stringify(expectedAirportName)}，实际=${JSON.stringify(actualAirportName)}`);
-  }
-  if (station.serviceAllDay !== true) {
-    throw new Error(`末日（第 ${orderDay} 天）解散服务时间不是全天：实际=${String(station.serviceAllDay)}`);
-  }
-}
+export type {
+  InfoRecord,
+  PoiRecord,
+  HotelRecord,
+  StationPackageRecord,
+} from "./readback/types.js";
 
 /**
  * 字段级回读校验：每个 day 都按 expectations 严格比对，错误信息必含

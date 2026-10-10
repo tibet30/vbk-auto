@@ -1,69 +1,53 @@
-import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
-import { runAutomationExclusive } from "./automation.main.execution.js";
-import { approvalForRun, recoverEquivalentApproval } from "../../agent/integration-gates.js";
 /**
  * DraftAutomation：自动化阶段对外暴露的统一门面类。
- *   - start / stop / retryPhase / retryOnePhase：业务侧 API；
+ *   - start / stop / retryPhase / retryOnePhase / executeApprovedWorkflow /
+ *     replaceLockedDraft / recoverLegacyScreenshotFalseFailure：业务侧 API；
  *   - running / cancellationRequested：互斥与取消状态字段；
- *   - runLocked / runOnePhaseLocked：私有互斥包装，避免同一产品并发跑两轮。
+ *   - runVbkPageExclusive / agentWriteGuard：运行时可选注入的互斥与写守卫。
  *
  * 调用方（IPC handler）只需要 new DraftAutomation(...) 即可获得 dashboard 需要的全部方法。
+ *
+ * 子文件分工：
+ *   - lifecycle.ts：canRestartPreWriteAuthorizationFailure（写失败时能否从 saleControl 重跑）；
+ *   - runners.ts   ：buildRunContext / runFull / runOne / runSaleControl / runExclusive
+ *                    / withNavigationPin，主类私有 helper 集中此处。
  */
 
+import { runAutomationExclusive } from "./automation.main.execution.js";
+import { approvalForRun, recoverEquivalentApproval } from "../../agent/integration-gates.js";
 import { makeAutomationRunContext } from "./automation.main.make-context.js";
-import { AutomationRunContext } from "./automation.main.context.js";
-import { runAutomation as runAutomationFlow } from "./automation.main.run.js";
-import { runOnePhase as runOnePhaseFlow } from "./automation.main.run-one.js";
+import type { AutomationRunContext } from "./automation.main.context.js";
 import { productNotFound } from "../../infrastructure/db-errors.js";
-import { VbkDatabase } from "../../infrastructure/database/database.js";
-import { VbkBrowser } from "../../infrastructure/vbk-browser.js";
+import type { VbkDatabase } from "../../infrastructure/database/database.js";
+import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ProductDetail } from "../../../shared/contracts.js";
-import { resolveButlerSelection, resolveServicePhone } from "./automation.main.class.helpers.js";
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
 import type { ProductMutationService } from "../../application/product-mutation-service.js";
-import { automationNavigationPin } from "./automation.main.pin.js";
-import { runSaleControlPhase } from "./automation.main.run-sale-control.js";
 import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { needsTrafficLineBackfill } from "../traffic-line-backfill.js";
-import { approvedRecoveryStartPhase, isVerifiedAutomationComplete } from "./automation.main.resume-phase.js";
+import {
+  approvedRecoveryStartPhase,
+  failedAutomationResumePhase,
+  interruptedAutomationResumePhase,
+  isVerifiedAutomationComplete,
+} from "./automation.main.resume-phase.js";
+import { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
+import {
+  buildRunContext,
+  runExclusive,
+  runFull,
+  runOne,
+  runSaleControl,
+  type RunContextBindings,
+} from "./automation.main.class/runners.js";
 
-import { interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
 export { approvedRecoveryStartPhase, interruptedAutomationResumePhase, failedAutomationResumePhase } from "./automation.main.resume-phase.js";
+export { canRestartPreWriteAuthorizationFailure };
 
-/**
- * The write guard runs before `configureProductShellApi`, yet a rejected
- * handoff had already persisted a failed automation record. There is no
- * product ID and no phase attempt in this narrow state, so restarting from
- * saleControl is safe; any other failed pre-shell state remains blocked for
- * authoritative recovery instead of risking a duplicate remote draft.
- */
-export function canRestartPreWriteAuthorizationFailure(
-  run: AutomationRun | undefined,
-  productId: string | null | undefined,
-): boolean {
-  return Boolean(
-    run?.status === "failed"
-      && !productId
-      && run.currentPhase === "saleControl"
-      && run.phases.every((phase) => phase.status === "pending")
-      && run.logs.some((entry) => entry.message === "当前任务未处于可录入状态。"),
-  );
-}
-
-/**
- * 用户点击「停止」后区别于普通失败的语义：
- *   - run.status 走 cancelled（不是 failed）
- *   - product.status 走 blocked（产品可被再次「保存草稿」覆盖）
- *   - 不计入「自动录入失败」诊断，UI 顶部状态显示「已停止」
- *
- * 当前 runner 通过 recovery 的 `cancelled` 状态返回 + markCancelled() 走
- * 取消路径；保留 export 以供 handler 未来需要主动取消（例如在页面
- * 检测到 VBK 上下线后）抛出。
- */
 /**
  * DraftAutomation 主页面：
  *   - 持有 db / browser / onUpdate / advisor / disambiguator 等依赖；
@@ -84,7 +68,13 @@ export class DraftAutomation {
     private browser: VbkBrowser,
     private onUpdate: (product: ProductDetail) => void,
     private advisor: (req: AdvisorRequest) => Promise<AdvisorOutcome>,
-    private disambiguator?: (req: { kind: "province" | "city" | "spot" | "station"; stationSubtype?: "airport" | "train"; desired: string; candidates: Array<{ id?: string; text: string }>; product: Record<string, unknown> }) => Promise<{ pickedText: string | null; reasoning: string }>,
+    private disambiguator?: (req: {
+      kind: "province" | "city" | "spot" | "station";
+      stationSubtype?: "airport" | "train";
+      desired: string;
+      candidates: Array<{ id?: string; text: string }>;
+      product: Record<string, unknown>;
+    }) => Promise<{ pickedText: string | null; reasoning: string }>,
     private presentationCopyRewriter?: (req: { message: string; product: Record<string, unknown> }) => Promise<AiResponse>,
   ) {}
 
@@ -96,11 +86,30 @@ export class DraftAutomation {
     this.productMutations = mutations;
   }
 
-/**
- * 启动自动录入：首次从 basic 开始；单阶段修复后若有 queued 断点，则从首个
- * pending 阶段继续，避免重写已经真实保存的内容。
- */
-async start(localProductId: string) {
+  private bindings(): RunContextBindings {
+    return {
+      db: this.db,
+      browser: this.browser,
+      onUpdate: this.onUpdate,
+      advisor: this.advisor,
+      disambiguator: this.disambiguator,
+      presentationCopyRewriter: this.presentationCopyRewriter,
+      productMutations: this.productMutations,
+      agentWriteGuard: this.agentWriteGuard,
+      running: this.running,
+      cancellationRequested: this.cancellationRequested,
+    };
+  }
+
+  private get runVbkPageExclusiveBinding() {
+    return (task: () => Promise<unknown>) => this.runVbkPageExclusive(task as () => Promise<never>);
+  }
+
+  /**
+   * 启动自动录入：首次从 basic 开始；单阶段修复后若有 queued 断点，则从首个
+   * pending 阶段继续，避免重写已经真实保存的内容。
+   */
+  async start(localProductId: string) {
     const product = this.db.getProduct(localProductId);
     const interruptedPhase = interruptedAutomationResumePhase(product?.automation);
     if (interruptedPhase) {
@@ -118,7 +127,7 @@ async start(localProductId: string) {
     return this.runLocked(localProductId);
   }
 
-  /** 用户选择“从报错处继续”时只复用当前 AutomationRun 的失败阶段。 */
+  /** 用户选择"从报错处继续"时只复用当前 AutomationRun 的失败阶段。 */
   async resumeFromError(localProductId: string) {
     const product = this.db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
@@ -165,10 +174,10 @@ async start(localProductId: string) {
     this.emit(localProductId);
   }
 
-/**
- * 仅供测试使用：查询产品是否被标记为取消。
- */
-isCancelRequested(localProductId: string): boolean {
+  /**
+   * 仅供测试使用：查询产品是否被标记为取消。
+   */
+  isCancelRequested(localProductId: string): boolean {
     return this.cancellationRequested.has(localProductId);
   }
 
@@ -202,11 +211,11 @@ isCancelRequested(localProductId: string): boolean {
     return recoverLegacyScreenshotFalseFailureFlow(this.runContext(), localProductId, lock);
   }
 
-/**
- * 「重新执行」按钮：单阶段重跑一个阶段、用于 review 执行效果。
- * 普通阶段要求 productId 已存在；销售控制作为产品壳入口允许在无
- * productId 但已有 automation 记录时重执行。
- */
+  /**
+   * 「重新执行」按钮：单阶段重跑一个阶段、用于 review 执行效果。
+   * 普通阶段要求 productId 已存在；销售控制作为产品壳入口允许在无
+   * productId 但已有 automation 记录时重执行。
+   */
   async retryOnePhase(localProductId: string, phase: string) {
     if (this.agentWriteGuard) throw new Error("请通过方案协作确认后重新执行阶段。");
     const requested = typeof phase === "string" ? phase.trim() : "";
@@ -273,7 +282,7 @@ isCancelRequested(localProductId: string): boolean {
     if (!product) throw productNotFound(localProductId);
     const { previousProductId, replacementProduct } = prepareLockedDraftReplacement(product);
     const remote = await this.runVbkPageExclusive(async () =>
-      getProductBaseInfoApi(await getVbkRequestPage(this.browser), previousProductId));
+      getProductBaseInfoApi(await this.vbkPage(), previousProductId));
     assertRemoteDraftCanBeReplaced(remote);
     this.db.updateProduct(localProductId, replacementProduct, "review");
     this.db.setProductLifecycle(localProductId, { productId: null, status: "review", basicInfoSaved: false });
@@ -286,66 +295,48 @@ isCancelRequested(localProductId: string): boolean {
     return { previousProductId };
   }
 
+  private vbkPage() {
+    return import("../../infrastructure/vbk-request-page.js").then(mod => mod.getVbkRequestPage(this.browser));
+  }
+
   private runContext(localProductId?: string, phase?: string): AutomationRunContext {
-    return makeAutomationRunContext({
-      db: this.db, browser: this.browser, emit: id => this.emit(id),
-      localProductId, guard: this.agentWriteGuard, mutations: this.productMutations,
-      advisor: this.advisor, presentationCopyRewriter: this.presentationCopyRewriter,
-      disambiguator: this.disambiguator, cancellationRequested: this.cancellationRequested,
-      exclusive: task => this.runVbkPageExclusive(task),
-    });
+    return buildRunContext(this.bindings(), localProductId, phase);
   }
 
   private async run(localProductId: string, retryFrom?: string) {
-    return runAutomationFlow(this.runContext(), localProductId, retryFrom);
+    return runFull(this.bindings(), this.runContext(), localProductId, retryFrom);
   }
 
   private async runApproved(localProductId: string, retryFrom?: string) {
-    return runAutomationFlow(this.runContext(localProductId), localProductId, retryFrom);
+    return runFull(this.bindings(), this.runContext(localProductId), localProductId, retryFrom);
   }
 
   private async runOnePhase(localProductId: string, phaseName: string) {
-    return runOnePhaseFlow(this.runContext(localProductId, phaseName), localProductId, phaseName);
+    return runOne(this.bindings(), this.runContext(localProductId, phaseName), localProductId, phaseName);
   }
 
   private async runSaleControl(localProductId: string) {
-    return runSaleControlPhase(this.runContext(localProductId, "saleControl"), localProductId);
+    return runSaleControl(this.bindings(), this.runContext(localProductId, "saleControl"), localProductId);
   }
 
-/**
- * 完整跑互斥包装：避免同一 localProductId 并发 + 重入前清 stale 取消信号。
- */
-private async runLocked(localProductId: string, retryFrom?: string) {
+  /**
+   * 完整跑互斥包装：避免同一 localProductId 并发 + 重入前清 stale 取消信号。
+   */
+  private async runLocked(localProductId: string, retryFrom?: string) {
     if (this.agentWriteGuard) throw new Error("请通过 Agent 最终确认后按模块录入。");
-    return this.runExclusive(localProductId, () => this.run(localProductId, retryFrom));
+    return runExclusive(this.bindings(), localProductId, () => this.run(localProductId, retryFrom));
   }
 
   private async runApprovedLocked(localProductId: string, retryFrom?: string) {
-    return this.runExclusive(localProductId, () => this.runApproved(localProductId, retryFrom));
+    return runExclusive(this.bindings(), localProductId, () => this.runApproved(localProductId, retryFrom));
   }
 
   private async runOnePhaseLocked(localProductId: string, phaseName: string) {
-    return this.runExclusive(localProductId, () => this.runOnePhase(localProductId, phaseName));
+    return runExclusive(this.bindings(), localProductId, () => this.runOnePhase(localProductId, phaseName));
   }
 
   private async runSaleControlLocked(localProductId: string) {
-    return this.runExclusive(localProductId, () => this.runSaleControl(localProductId));
-  }
-
-  private runExclusive<T>(localProductId: string, work: () => Promise<T>) {
-    return runAutomationExclusive({
-      localProductId, running: this.running, cancellationRequested: this.cancellationRequested,
-      clock: this.db.executionClock, work: () => this.withNavigationPin(localProductId, work),
-    });
-  }
-
-  private async withNavigationPin<T>(localProductId: string, work: () => Promise<T>): Promise<T> {
-    this.browser.pinProductNavigation?.(automationNavigationPin(this.db.getProduct(localProductId)));
-    try {
-      return await work();
-    } finally {
-      this.browser.clearNavigationPin?.();
-    }
+    return runExclusive(this.bindings(), localProductId, () => this.runSaleControl(localProductId));
   }
 
   private emit(localProductId: string) {

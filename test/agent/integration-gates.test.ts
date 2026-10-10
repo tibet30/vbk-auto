@@ -294,7 +294,18 @@ test('remote completion rejects a traffic child without final readback before pr
   assert.equal(result.verified,false);
   assert.match(result.message ?? '',/交通子产品 456 尚未完成最终回读/);
 });
-test('remote completion defers failed traffic children after preflight closes the mother product',()=>{
+test('remote completion rejects missing configured traffic children even when the parent phases are completed',()=>{
+  const p=enableTrafficLine(product());
+  const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
+  const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
+  p.productId='123';
+  p.automation={status:'succeeded',phases:approval.scope.map(scope=>({phase:scope.split(':')[1],status:'completed'})),trafficLine:{children:[],failureReason:'net::ERR_FAILED'}} as any;
+  snapshot.events.push(...approval.scope.map((scope,index)=>({id:`done${index}`,runId:'r',type:'tool_result' as const,content:'done',createdAt:'now',data:{verified:true,approvalId:approval.id,phase:scope.split(':')[1],productId:'123'}})));
+  const result=agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true});
+  assert.equal(result.verified,false);
+  assert.match(result.message ?? '',/飞机套餐尚未创建/);
+});
+test('remote completion retains failed traffic children after mother preflight succeeds',()=>{
   const p=enableTrafficLine(product());
   const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
   const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
@@ -315,9 +326,10 @@ test('remote completion defers failed traffic children after preflight closes th
   } as any;
   snapshot.events.push(...approval.scope.filter(scope=>!scope.endsWith(':trafficLine')).map((scope,index)=>({id:`done${index}`,runId:'r',type:'tool_result' as const,content:'done',createdAt:'now',data:{verified:true,approvalId:approval.id,phase:scope.split(':')[1],productId:'123'}})));
   const result=agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true});
-  assert.equal(result.verified,true);
+  assert.equal(result.verified,false);
+  assert.match(result.message ?? "", /交通子产品 456 尚未完成最终回读/);
   const patch=agentWorkflowPatch(snapshot,p);
-  assert.equal(patch.progress,99);
+  assert.equal(patch.progress,90);
 });
 test('remote completion tolerates skipped unavailable train children',()=>{
   const p=enableTrafficLine(product());
@@ -483,4 +495,16 @@ test('provider reasoning blocks are excluded from public answers',async()=>{
   assert.equal(stripAgentReasoning('<think>internal analysis</think>\n请补充套餐名称。'),'请补充套餐名称。');
   assert.equal(stripAgentReasoning('<think>unfinished'),'');
   assert.equal(stripAgentReasoning('正常回答'),'正常回答');
+});
+
+test('saved mother cannot hide a traffic network failure; confirmed unavailable resources can finish',()=>{
+  const p=enableTrafficLine(product());const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'now'};
+  const snapshot:AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'now',updatedAt:'now'},events:[{id:'a',runId:'r',type:'approval',content:'确认',createdAt:'now',data:{approval}}]};
+  p.productId='123';p.status='draft_saved';p.basicInfoSaved=true;
+  p.automation={status:'succeeded',phases:[...approval.scope.filter(scope=>!scope.endsWith(':trafficLine')).map(scope=>({phase:scope.split(':')[1],status:'completed'})),{phase:'trafficLine',status:'failed'}],trafficLine:{children:[],failureReason:'net::ERR_FAILED'}} as any;
+  assert.equal(agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true,deterministicWorkflow:true}).verified,false);
+  p.automation!.trafficLine!.failureReason='当前无可售资源';
+  assert.equal(agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true,deterministicWorkflow:true}).verified,true);
+  p.automation!.phases.find(item=>item.phase==='preflight')!.status='failed';
+  assert.equal(agentCompletionGate(p,snapshot,ready,{runId:'r',hadWrites:true,hadRemoteWrites:true,deterministicWorkflow:true}).verified,false);
 });

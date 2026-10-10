@@ -1,97 +1,13 @@
+export { ensureTrafficLineItinerary, waitForTrafficLineItineraryReadback } from "./itinerary-materialization.js";
 import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
 import { emptyTourDailyFlight, emptyTourDailyTrain } from "../itinerary-api/info-skeletons.js";
 import type { FetchTourInfoIdResult } from "../itinerary-api/steps.js";
-import {
-  calculateTourScoreStep,
-  checkTourDailyStep,
-  fetchTourDailyDetail,
-  fetchTourInfoId,
-  saveProductTourInfoStep,
-  saveTourDailyDetailStep,
-} from "../itinerary-api/steps.js";
 import { getVbkInitialState, list, record, text, type JsonRecord, type TrafficLinePage } from "./client.js";
-
-export async function ensureTrafficLineItinerary(
-  page: TrafficLinePage,
-  productId: string,
-  variant: TrafficLineVariant,
-  endpoints?: TrafficLineEndpointPlan,
-): Promise<{ days: number; transportNodes: number }> {
-  const source = await readTrafficNodesFromPage(page, productId, variant);
-  const linked = await fetchTourInfoId(page, productId);
-  const productTourInfo = linked.tourInfo;
-  const tourInfoId = currentTrafficLineTourInfoId(linked);
-  if (!tourInfoId) throw new Error("子产品缺少已关联行程，无法安全合并交通节点。");
-  const detail = await fetchTourDailyDetail(page, tourInfoId);
-  if (!detail.tourInfo) throw new Error("子产品行程详情回读为空，无法安全合并交通节点。");
-
-  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant, endpoints));
-  const descriptions = list(merged.tourDailyDescriptions);
-  const base = { ...productTourInfo, productId, tourInfoId, days: descriptions.length };
-  const checked8 = await checkTourDailyStep(page, base, JSON.stringify(merged), 8, "校验子产品行程交通");
-  const score = await calculateTourScoreStep(page, { ...base, aggregateScore: checked8.aggregateScore });
-  const checked3 = await checkTourDailyStep(page, base, JSON.stringify({
-    ...checked8,
-    aggregateScore: score.aggregateScore ?? checked8.aggregateScore,
-    tourInfoScores: score.tourInfoScores,
-  }), 3, "保存子产品行程交通");
-  verifyTrafficNodes(checked3, variant);
-  await saveTourDailyDetailStep(page, checked3);
-  const savedId = text(checked3.tourInfoId);
-  if (!savedId) throw new Error("子产品行程交通保存后未生成 tourInfoId。");
-  const final = {
-    ...checked3,
-    productId,
-    tourInfoId: savedId,
-    auditTourInfoId: savedId,
-    main: productTourInfo.main ?? true,
-    sort: productTourInfo.sort ?? 0,
-  };
-  await saveProductTourInfoStep(page, final, JSON.stringify(final));
-  return waitForTrafficLineItineraryReadback(async () => {
-    const linked = await fetchTourInfoId(page, productId);
-    const linkedId = currentTrafficLineTourInfoId(linked);
-    if (linkedId !== savedId) return { tourInfoId: linkedId, tourInfo: null };
-    const readback = await fetchTourDailyDetail(page, linkedId);
-    return { tourInfoId: linkedId, tourInfo: readback.tourInfo ?? null };
-  }, savedId, variant);
-}
 
 /** 交通子产品只认平台明确的当前 tourInfoId，旧 audit/draft/preview 均不得兜底。 */
 export function currentTrafficLineTourInfoId(linked: FetchTourInfoIdResult): string {
   const current = text(linked.tourInfo.tourInfoId);
   return current === "0" ? "" : current;
-}
-
-export async function waitForTrafficLineItineraryReadback(
-  read: () => Promise<{ tourInfoId: string | number; tourInfo: JsonRecord | null }>,
-  expectedTourInfoId: string,
-  variant: TrafficLineVariant,
-  options: {
-    maxPolls?: number;
-    sleep?: (milliseconds: number) => Promise<void>;
-  } = {},
-): Promise<{ days: number; transportNodes: number }> {
-  const maxPolls = options.maxPolls ?? 8;
-  const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= maxPolls; attempt += 1) {
-    try {
-      const readback = await read();
-      const actualId = text(readback.tourInfoId);
-      if (actualId !== expectedTourInfoId) {
-        throw new Error(`当前绑定行程 ID=${actualId || "空"}，期望=${expectedTourInfoId}`);
-      }
-      if (!readback.tourInfo) throw new Error("当前绑定行程详情为空");
-      const transportNodes = verifyTrafficNodes(readback.tourInfo, variant);
-      return { days: list(readback.tourInfo.tourDailyDescriptions).length, transportNodes };
-    } catch (error) {
-      lastError = error;
-    }
-    if (attempt < maxPolls) await sleep(Math.min(1_500, attempt * 500));
-  }
-  const detail = lastError instanceof Error ? lastError.message : String(lastError ?? "未知错误");
-  throw new Error(`子产品行程交通保存后在 ${maxPolls} 次只读回读中未收敛：${detail}`);
 }
 
 export function mergeTrafficNodes(
@@ -221,7 +137,7 @@ function riskCostInclude(dailyPoi: JsonRecord, node: JsonRecord): "T" | "F" | nu
   return null;
 }
 
-async function readTrafficNodesFromPage(page: TrafficLinePage, productId: string, variant: TrafficLineVariant): Promise<{ first: JsonRecord; last: JsonRecord }> {
+export async function readTrafficNodesFromPage(page: TrafficLinePage, productId: string, variant: TrafficLineVariant): Promise<{ first: JsonRecord; last: JsonRecord }> {
   const endpoint = `https://vbooking.ctrip.com/ivbk/vendor/TourDays?productid=${encodeURIComponent(productId)}&istab=1&from=vbk`;
   const state = await getVbkInitialState(page, endpoint, "子产品行程页");
   const context = record(state.dailyContext) ?? state;
@@ -242,7 +158,6 @@ function isTrafficNode(node: JsonRecord, expectedKey: number): boolean {
 
 function isCompleteTrafficNode(node: JsonRecord, expectedKey: number): boolean {
   if (!isTrafficNode(node, expectedKey)) return false;
-  if (node.useSegmentConfig === true) return true;
   if (expectedKey === 2) return hasFlightCard(node);
   if (expectedKey === 14) return hasTrainCard(node);
   return true;
@@ -269,7 +184,15 @@ function trafficNodeWithRequiredCard(
   endpoints?: TrafficLineEndpointPlan,
 ): JsonRecord {
   const next = structuredClone(node);
-  if (next.useSegmentConfig === true) return next;
+  if (variant === "trainRoundTrip"
+    && list(next.tourDailyPackageTrains).some(card =>
+      list(card.departureStationList).some(hasNamedCode) || list(card.arriveStationList).some(hasNamedCode))) {
+    next.useSegmentConfig = false;
+    return next;
+  }
+  // Resource configuration does not replace explicit itinerary cards. Disable it
+  // for both variants before validation, including empty legacy train nodes.
+  next.useSegmentConfig = false;
   if (variant === "trainRoundTrip") return trainNodeWithRequiredCard(next, direction, endpoints);
   if (variant !== "flightRoundTrip") return next;
   if (!list(next.tourDailyPackageFlights).some(hasUsablePackageFlight)) {
@@ -462,6 +385,8 @@ function hasUsableLegacyFlight(flight: JsonRecord | null): boolean {
 
 function hasUsablePackageTrain(card: JsonRecord): boolean {
   return Boolean(text(card.trainNo))
+    || list(card.departureStationList).some(hasNamedCode)
+    || list(card.arriveStationList).some(hasNamedCode)
     || list(card.departureTrainStations).some(hasNamedCode)
     || list(card.arriveTrainStations).some(hasNamedCode)
     || Boolean(text(card.departureLocation))

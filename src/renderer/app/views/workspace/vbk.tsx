@@ -1,3 +1,5 @@
+import { trafficResourceStatus } from "../../../../shared/traffic-resource-status.js";
+import type { TrafficLineConfig } from "../../../../shared/contracts-traffic-line.js";
 import {
   CalendarDays,
   Check,
@@ -90,7 +92,12 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
     [product, automationRecovery, automationPhases],
   );
   if (!product) return null;
-  const automationSucceeded = product.automation?.status === "succeeded" && product.status === "draft_saved";
+  const draftSaved = product.status === "draft_saved" && Boolean(product.productId) && Boolean(product.automation?.phases.some(phase => phase.phase === "preflight" && phase.status === "completed"));
+  const optionalTrafficPending = trafficResourceStatus(
+    (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
+    product.automation?.trafficLine,
+  ).hasIncompleteTraffic;
+  const automationSucceeded = draftSaved;
 
   return <div className={`${layout.stageSplit} ${styles.vbkSplit}`} style={splitStyle}>
     <aside className={`${layout.panel} ${styles.reviewSummary}`} aria-label="审查结果与 VBK 录入">
@@ -105,8 +112,8 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
             {readiness.ready ? <CheckCircle2 size={18} /> : <CircleHelp size={18} />}
           </div>
           <div className={styles.readinessHeroBody}>
-            <strong>{automationSucceeded ? "产品草稿已保存" : readiness.ready ? "产品方案已就绪" : "先回到第一步完成核查"}</strong>
-            <small>{automationSucceeded ? "全部录入阶段已通过远端回读。" : readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
+            <strong>{draftSaved ? "产品草稿已保存" : readiness.ready ? "产品方案已就绪" : "先回到第一步完成核查"}</strong>
+            <small>{draftSaved ? optionalTrafficPending ? "母产品已完成并通过回读；未完成的交通套餐可单独重试。" : "母产品及交通套餐已通过远端回读。" : readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
           </div>
           <div className={styles.readinessHeroProgress}>
             <strong>{readiness.completion}%</strong>
@@ -118,7 +125,7 @@ export function AppWorkspaceVbk({ model }: { model: AppModel }) {
               <span className={layout.panelNum}>C</span>
               <strong className={styles.productSectionTitle}>自动录入进度</strong>
               <span className={styles.productSectionMeta}>
-                {automationSucceeded ? "全部完成" : product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
+                {draftSaved ? optionalTrafficPending ? "母产品已完成" : "全部完成" : product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
               </span>
             </div>
             <div className={styles.automation}>

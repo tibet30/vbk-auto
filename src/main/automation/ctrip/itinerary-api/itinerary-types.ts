@@ -1,5 +1,6 @@
 import type { DailyTransport, VbkDailyUseCar } from "../../../../shared/product-form.js";
 import type { StationCandidate } from "./station-search.js";
+import type { HotelStayRequirement, HotelRatingType } from "../../../../shared/hotel-stay-requirement.js";
 
 /**
  * 输入：项目侧行程 + operations。
@@ -30,7 +31,8 @@ export interface ProductItineraryDay {
   description: string;
   hotel: string;
   /** 携程检索得到的同晚候选（最多五家）；写入行程时取前三家形成“或”酒店节点。 */
-  hotelCandidates?: Array<{ hotelName: string }>;
+  hotelCandidates?: Array<{ hotelName: string; diamond?: number; ratingType?: HotelRatingType }>;
+  hotelRequirement?: HotelStayRequirement;
   meals: string;
   mealDescriptions?: string[];
   activities?: Array<{

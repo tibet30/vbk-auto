@@ -37,7 +37,11 @@ export async function syncCtripHotelResources(args: {
     const currentSegments = segmentsFromPayload(payload);
     if (currentSegments.length !== originalSegments.length
       || currentSegments.some((item: any, slot: number) => lodgingSlotKey(item) !== slotKeys[slot])) {
-      throw new Error("酒店资源保存后住宿段结构发生变化，停止继续绑定酒店");
+      const changes = currentSegments.length !== originalSegments.length
+        ? `段数 ${originalSegments.length}→${currentSegments.length}`
+        : currentSegments.flatMap((item: any, slot: number) => lodgingSlotKey(item) !== slotKeys[slot]
+          ? [`第${slot + 1}段 ${slotKeys[slot]}→${lodgingSlotKey(item)}`] : []).join("；");
+      throw new Error(`酒店资源保存后住宿段结构发生变化，停止继续绑定酒店（${changes}）`);
     }
     resolvedCandidates = resolvedCandidates.map((item, position) => ({
       ...item, segmentId: String(currentSegments[slots[position]!]!.segmentId),
@@ -118,7 +122,14 @@ export async function syncCtripHotelResources(args: {
 
 function lodgingSlotKey(segment: any): string {
   const base = segment?.segmentBase ?? {};
-  return JSON.stringify([base.stayNights, base.segmentNumber, base.destinationCity]);
+  const numeric = (value: unknown) => value === undefined || value === null || value === ""
+    ? null : Number.isFinite(Number(value)) ? Number(value) : String(value);
+  const city = base.destinationCity ?? {};
+  // 平台会重排城市 DTO 字段、补充省份信息并把数字转为字符串；这些不是换城。
+  // 段数、晚数、顺序及城市身份仍须保持一致，不能仅按旧数组位置继续写入。
+  const cityKey = city.cityId !== undefined && city.cityId !== null && city.cityId !== ""
+    ? `id:${String(city.cityId)}` : `name:${String(city.cityName ?? city.name ?? "").trim()}`;
+  return JSON.stringify([numeric(base.stayNights), numeric(base.segmentNumber), cityKey]);
 }
 
 function candidateIds(daily: ResourceSegment) {

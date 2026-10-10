@@ -243,7 +243,7 @@ test("fillBasicInfo 按 VBK 产品信息页面从上到下录入已覆盖字段"
     ["400 电话", "fillServicePhone(page, servicePhone)"],
     ["操作说明", '"baseInfo.operationNote"'],
     ["提前预订", "fillAdvanceBooking(page, advance)"],
-    ["联系人", "fillButlerContact(page, butlerSelection)"],
+    ["联系人", "fillButlerContact(page, butlerSelection"],
   ];
   let previous = -1;
   for (const [label, anchor] of anchors) {

@@ -3,7 +3,7 @@ import {
   assertGroupPricingReadback,
   buildGroupPricingExpectation,
 } from "./pricing-group-contract.js";
-import { datesBetween, localBusinessDate, VBK_MAX_PRICING_INVENTORY_DAYS } from "./pricing-api.js";
+import { localBusinessDate, pricingInventoryDates } from "./pricing-api.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 
 const HEAD = { cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", extension: [] };
@@ -13,9 +13,7 @@ export async function verifyPricingInventoryReadback(page: any, product: any, pr
   const pricing = product?.commercial?.pricing;
   const inventory = product?.commercial?.inventory;
   if (!pricing || !inventory) return null;
-  const dates = datesBetween(inventory.startDate, inventory.endDate)
-    .filter((date) => date >= localBusinessDate())
-    .slice(0, VBK_MAX_PRICING_INVENTORY_DAYS);
+  const dates = pricingInventoryDates(inventory.startDate, inventory.endDate, localBusinessDate());
   if (!dates.length) throw new Error("价格库存预检没有可售业务日");
   const item = await packageItem(page, productId);
   const months = [...new Set(dates.map((date) => date.slice(0, 7)))];

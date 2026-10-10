@@ -16,8 +16,10 @@ import { dirname, resolve } from "node:path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const coverRowPath = resolve(__dirname, "../../src/renderer/app/views/workspace/basic-info-cover-row.tsx");
-const coverRowSource = readFileSync(coverRowPath, "utf8");
+const workspacePath = resolve(__dirname, "../../src/renderer/app/views/workspace");
+const coverRowSource = ["cover-row.tsx", "cover-lightbox.tsx", "cover-search.tsx"]
+  .map(file => readFileSync(resolve(workspacePath, file), "utf8"))
+  .join("\n");
 const coverRowStylePath = resolve(__dirname, "../../src/renderer/app/views/workspace/review-summary-basic-info.module.less");
 const coverRowStyleSource = readFileSync(coverRowStylePath, "utf8");
 const selectSource = readFileSync(resolve(__dirname, "../../src/renderer/app/helpers/Select.tsx"), "utf8");
@@ -124,11 +126,11 @@ test("BasicInfoCoverRow 地址候选 select 始终渲染，受控于 selectedPla
   assert.doesNotMatch(coverRowCode, /defaultValue=""/);
   assert.match(coverRowCode, /value=\{selectedPlace\?\.stableId \?\? ""\}/);
   // onChange / onPick / 阶段 B 自动查询 仍存在。
-  assert.match(coverRowCode, /onChange=\{\(event\) => \{/);
+  assert.match(coverRowCode, /onChange=\{event => \{/);
   assert.match(coverRowCode, /if \(place\) onPick\(place\)/);
   assert.match(coverRowCode, /formatPlaceOption\(place\)/);
-  assert.match(coverRowCode, /onSearchCtripLibraryImages\(\{ keyword, place \}\)/);
-  assert.match(coverRowCode, /disabled=\{imageSearching \|\| saving\}/);
+  assert.match(coverRowCode, /onSearchCtripLibraryImages\(\{ keyword: searchKeyword\.trim\(\), place \}\)/);
+  assert.match(coverRowCode, /disabled=\{props\.imageSearching \|\| props\.saving\}/);
   // 「已选地址」摘要已被 select 自身取代：避免与 select 重复呈现同一信息。
   assert.doesNotMatch(coverRowCode, /data-testid="cover-selected-place"/);
   assert.doesNotMatch(coverRowCode, /已选地址/);
@@ -137,13 +139,14 @@ test("BasicInfoCoverRow 地址候选 select 始终渲染，受控于 selectedPla
 test("BasicInfoCoverRow 查询与上传在进行中不可重复触发", () => {
   assert.match(coverRowCode, /placeSearchInFlightRef/);
   assert.match(coverRowCode, /imageSearchInFlightRef/);
-  assert.match(coverRowCode, /if \(placeSearchInFlightRef\.current \|\| imageSearchInFlightRef\.current \|\| saving \|\| uploading\) return;/);
-  assert.match(coverRowCode, /if \(imageSearchInFlightRef\.current \|\| saving \|\| uploading\) return;/);
-  assert.match(coverRowCode, /disabled=\{saving \|\| uploading \|\| placeSearching \|\| imageSearching\}/);
+  assert.match(coverRowCode, /if \(placeSearchInFlightRef\.current \|\| imageSearchInFlightRef\.current \|\| props\.saving \|\| uploading\) return;/);
+  assert.match(coverRowCode, /if \(imageSearchInFlightRef\.current \|\| props\.saving \|\| uploading\) return;/);
+  assert.match(coverRowCode, /const busy = props\.saving \|\| uploading \|\| placeSearching \|\| imageSearching/);
 });
 
 test("BasicInfoCoverRow 关键词变化会清除旧地点和图片候选", () => {
-  assert.match(coverRowCode, /setSearchKeyword\(event\.target\.value\);[\s\S]*setPlaceResult\(null\);[\s\S]*setSelectedPlace\(null\);[\s\S]*setImageResult\(null\);/);
+  assert.match(coverRowCode, /onKeywordChange=\{value => \{ setSearchKeyword\(value\); resetSearch\(\); \}\}/);
+  assert.match(coverRowCode, /const resetSearch[\s\S]*setPlaceResult\(null\);[\s\S]*setSelectedPlace\(null\);[\s\S]*setImageResult\(null\);/);
 });
 
 test("BasicInfoCoverRow 编辑态改为紧凑工具条，不再使用 coverSection 大块卡片", () => {
@@ -196,7 +199,7 @@ test("BasicInfoCoverRow 已选 ctripLibrary cover 把备用封面合并进轮播
   // 备图扁平化进 useCoverCarouselItems，统一做轮播图数据源。
   assert.match(coverRowCode, /useCoverCarouselItems/);
   assert.match(coverRowCode, /cover\.alternates/);
-  assert.match(coverRowCode, /cover\.alternates\.slice\(\s*0,\s*MAX_COVER_IMAGES\s*-\s*1\s*\)/);
+  assert.match(coverRowCode, /cover\.alternates\?\.slice\(\s*0,\s*MAX_COVER_IMAGES\s*-\s*1\s*\)/);
   // 轮播图上限：主图 + 备图最多 MAX_COVER_IMAGES 张。
   assert.match(coverRowCode, /MAX_COVER_IMAGES\s*=\s*20/);
   // 旧的「缩略图导航条」整块下线：组件 / testid / 文案都不应再出现。

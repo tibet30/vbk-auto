@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 「产品特色」React 同步相关的纯 helper（无副作用、不依赖 page 调用）：
  *   - normalize：归一化字符串（去空白 / 全角空格）；
@@ -23,7 +22,7 @@ function normalize(value: string): string {
  *    - __reactInternalInstance$<random>：React 16 旧版
  *    - __reactProps$<random>：React 17+ 组件 props 引用
  */
-function readFiberKeys(element: any): string[] {
+function readFiberKeys(element: unknown): string[] {
   if (!element || typeof element !== "object") return [];
   const keys: string[] = [];
   for (const key of Object.getOwnPropertyNames(element)) {
@@ -48,7 +47,7 @@ function pickFiberKey(keys: ReadonlyArray<string>): string | null {
 }
 
 /** 安全判断某 fiber 节点是否可遍历（弱引用防循环）。 */
-function isFiberObject(node: unknown, visited: WeakSet<object>): node is Record<string, any> {
+function isFiberObject(node: unknown, visited: WeakSet<object>): node is Record<string, unknown> {
   if (typeof node !== "object" || node === null) return false;
   if (visited.has(node as object)) return false;
   visited.add(node as object);

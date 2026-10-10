@@ -1,10 +1,11 @@
+import type { TrafficLineConfig } from '../../shared/contracts-traffic-line.js';
 import { createHash } from 'node:crypto';
 import type { AgentApproval, AgentSnapshot, ProductDetail, ProductReadiness } from '../../shared/contracts.js';
 import { productSchema, parseProduct } from '../automation/schema/schema.js';
 import { draftPhasesFor } from '../automation/automation.main/automation.main.phases.js';
 import type { AgentFinishContext, AgentFinishResult } from './types.js';
 import { preservesApprovedIntent } from './approval-intent.js';
-import { trafficLineChildShouldBeSkipped } from '../automation/ctrip/traffic-line/main.js';
+import { isUnavailableTrafficResourceFailure, isTrafficLineRouteReviewRequired, trafficResourceStatus } from '../../shared/traffic-resource-status.js';
 import { evaluatePreparationCompletion } from '../planning/preparation-completion.js';
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { classifyReadinessIssue } from '../planning/preparation-checks.js';
@@ -66,16 +67,16 @@ export function requiredAgentPhases(product: ProductDetail): string[] {
 }
 
 export function trafficLineCanBeDeferred(product: ProductDetail): boolean {
-  const automation = product.automation;
-  const phases = automation?.phases ?? [];
-  const trafficPhase = phases.find((phase) => phase.phase === 'trafficLine');
-  if (!trafficPhase || trafficPhase.status === 'completed') return false;
-  if (!phases.some((phase) => phase.phase === 'preflight' && phase.status === 'completed')) return false;
-  const children = automation?.trafficLine?.children ?? [];
-  return trafficPhase.status === 'failed' || children.some((child) => {
-    if (trafficLineChildShouldBeSkipped(child)) return true;
-    return !child.verified || !child.completedStages.includes('finalReadback');
-  });
+  const trafficStatus = trafficResourceStatus(
+    (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
+    product.automation?.trafficLine,
+  );
+  // 母草稿成功不代表交通完成；只允许平台明确无可售资源的变体跳过。
+  return product.status === "draft_saved" && Boolean(product.productId)
+    && Boolean(product.automation?.phases?.some(phase => phase.phase === "preflight" && phase.status === "completed"))
+    && !trafficStatus.hasIncompleteTraffic
+    && !product.automation?.trafficLine?.children.some(child => !child.verified
+      && !isUnavailableTrafficResourceFailure(child.failureReason ?? "", child.variant));
 }
 
 export function approvalForRun(snapshot?: AgentSnapshot): AgentApproval | undefined {
@@ -89,13 +90,19 @@ export function approvalForRun(snapshot?: AgentSnapshot): AgentApproval | undefi
  * user message is an explicit recovery-only instruction.
  */
 export function recoverEquivalentApproval(product: ProductDetail, snapshot: AgentSnapshot): AgentApproval | undefined {
-  const approval = approvalForRun(snapshot);
+  const approval = approvalForRun(snapshot) ?? [...snapshot.events].reverse()
+    .filter(event => event.type === 'approval')
+    .map(event => event.data?.approval as AgentApproval | undefined)
+    .find(item => item?.status === 'approved');
   if (!approval || !snapshot.run) return undefined;
   const approvalIndex = snapshot.events.findIndex((event) => event.type === 'approval'
     && (event.data?.approval as AgentApproval | undefined)?.id === approval.id);
   if (approvalIndex < 0) return undefined;
   const laterUserEvents = snapshot.events.slice(approvalIndex + 1).filter((event) => event.type === 'user');
   if (laterUserEvents.some((event) => !preservesApprovedIntent(event.content))) return undefined;
+  if (approval.productVersion === agentProductVersion(product)) {
+    return { ...approval, intentVersion: snapshot.run.intentVersion };
+  }
   for (let index = approvalIndex - 1; index >= 0; index -= 1) {
     const event = snapshot.events[index]!;
     if (event.type !== 'tool_result' || !event.content.startsWith('{')) continue;
@@ -169,14 +176,28 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   const incompleteTrafficChild = phases.includes('trafficLine') && !canDeferTrafficLine
     ? product.automation?.trafficLine?.children.find((child) => {
       // Platform "no sellable resource" skips are durable success for that variant.
-      if (trafficLineChildShouldBeSkipped(child)) return false;
+      if (isUnavailableTrafficResourceFailure(child.failureReason ?? "", child.variant)) return false;
       return !child.verified || !child.completedStages.includes('finalReadback');
     })
     : undefined;
+  const trafficStatus = trafficResourceStatus(
+    (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
+    product.automation?.trafficLine,
+  );
+  const missingTraffic = phases.includes('trafficLine') && !canDeferTrafficLine
+    ? trafficStatus.incompleteVariants
+      .find(variant => !product.automation?.trafficLine?.children.some(child => child.variant === variant))
+    : undefined;
+  if (missingTraffic) return { verified:false, message:`${missingTraffic === 'flightRoundTrip' ? '飞机' : '火车'}套餐尚未创建并完成最终回读；母产品仍需通过预检，不能结束任务。请继续录入。` };
   if (incompleteTrafficChild) {
+    const routeReview = isTrafficLineRouteReviewRequired(incompleteTrafficChild.failureReason ?? "");
+    const parentSaved = product.status === "draft_saved"
+      && product.automation?.phases.some(item => item.phase === "preflight" && item.status === "completed");
     return {
       verified:false,
-      message:`交通子产品 ${incompleteTrafficChild.childProductId ?? incompleteTrafficChild.lineDescription} 尚未完成最终回读，不能结束任务。请从 ${incompleteTrafficChild.failedStage ?? 'trafficLine'} 阶段继续。`,
+      message: routeReview
+        ? `${parentSaved ? `母产品 ${product.productId} 草稿已保存` : "母产品仍需完成预检"}；交通子产品 ${incompleteTrafficChild.childProductId ?? incompleteTrafficChild.lineDescription} 需先在 VBK 提交玩法线路匹配审核。审核通过后从 activated 继续，不要重复创建或录入子产品。当前尚未启用，不能标记完成。`
+        : `交通子产品 ${incompleteTrafficChild.childProductId ?? incompleteTrafficChild.lineDescription} 尚未完成最终回读，不能结束任务。请从 ${incompleteTrafficChild.failedStage ?? 'trafficLine'} 阶段继续。`,
     };
   }
   const evidence = snapshot?.events.filter(e=>e.runId===context.runId && e.type==='tool_result' && e.data?.verified===true && e.data?.approvalId===approval.id && e.data?.productId===product.productId) ?? [];

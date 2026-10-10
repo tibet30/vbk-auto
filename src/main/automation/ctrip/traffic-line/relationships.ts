@@ -25,20 +25,35 @@ export async function ensureTrafficLineRelationship(
   page: TrafficLinePage,
   parentProductId: string,
   target: TrafficLineTarget,
+  options: { expectedChildId?: string; onCreated?: (productId: string) => void;
+    maxReadbacks?: number; sleep?: (milliseconds: number) => Promise<void> } = {},
 ): Promise<TrafficLineExistingChild> {
   const before = await readTrafficLineChildren(page, parentProductId);
   const matches = matchingChildren(before, target.variant);
-  if (matches.length === 1) return matches[0]!;
+  if (matches.length === 1) {
+    if (options.expectedChildId && matches[0]!.productId !== options.expectedChildId) {
+      throw new Error(`已保存子产品 ${options.expectedChildId} 与当前母子关系不一致，停止创建。`);
+    }
+    return matches[0]!;
+  }
   if (matches.length > 1) throw new Error(`母产品下存在 ${matches.length} 个「${target.lineDescription}」子产品，无法安全继续。`);
 
-  const template = await getTrafficLineCreateTemplate(page, parentProductId);
-  const saved = await saveTrafficLineChild(page, buildTrafficLineSaveRequest(parentProductId, target, template));
-  const after = await readTrafficLineChildren(page, parentProductId);
-  const verified = matchingChildren(after, target.variant);
-  if (verified.length !== 1 || verified[0]?.productId !== saved.productId) {
-    throw new Error(`创建${target.lineDescription}子产品后母子关系回读不一致。`);
+  let childId = options.expectedChildId;
+  if (!childId) {
+    const template = await getTrafficLineCreateTemplate(page, parentProductId);
+    const saved = await saveTrafficLineChild(page, buildTrafficLineSaveRequest(parentProductId, target, template));
+    childId = saved.productId;
+    options.onCreated?.(childId);
   }
-  return verified[0];
+  const sleep = options.sleep ?? ((milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds)));
+  const attempts = Math.max(1, options.maxReadbacks ?? 30);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const verified = matchingChildren(await readTrafficLineChildren(page, parentProductId), target.variant);
+    if (verified.length === 1 && verified[0]!.productId === childId) return verified[0]!;
+    if (verified.length) throw new Error(`创建${target.lineDescription}子产品 ${childId} 后母子关系回读不一致，停止重复创建。`);
+    if (attempt < attempts) await sleep(1000);
+  }
+  throw new Error(`创建${target.lineDescription}子产品 ${childId} 后母子关系仍未完成，保留已创建记录，停止重复创建。`);
 }
 
 export function matchingChildren(

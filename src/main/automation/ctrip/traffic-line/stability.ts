@@ -11,6 +11,7 @@ export interface StableReadbackOptions {
   requiredConsecutive?: number;
   maxSamples?: number;
   sleep?: (milliseconds: number) => Promise<void>;
+  onProgress?: (sample: number, maxSamples: number, consecutive: number, requiredConsecutive: number) => void;
 }
 
 /**
@@ -34,6 +35,7 @@ export async function waitForStableReadbackGroup<T, R>(
   let consecutive = 0;
 
   for (let sample = 1; sample <= maxSamples; sample += 1) {
+    options.onProgress?.(sample, maxSamples, consecutive, requiredConsecutive);
     await sleep(intervalMs);
     const results: R[] = [];
     let repairedThisSample = false;

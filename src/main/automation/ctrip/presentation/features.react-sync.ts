@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 「产品特色」React 状态窄同步 helper（with **direct onChange(html) + ancestor state 校验**）：
  *

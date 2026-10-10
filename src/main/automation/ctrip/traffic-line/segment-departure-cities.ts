@@ -49,7 +49,10 @@ export function verifyValidatedDepartureCityReadback(
 ): number {
   const product = record(payload.productSegments);
   const actual = list(record(product?.productDepartureCity)?.departureCities);
-  if (!actual.length) throw new Error("子产品资源校验后没有任何可用的多出发城市。");
+  if (!actual.length) throw new Error("子产品班期校验已返回，但正式资源回读缺少可核验的出发城市；结果待确认，未激活套餐。");
+  if (actual.some(city => !/^\d+$/.test(text(city.cityId)) || Number(city.cityId) <= 0)) {
+    throw new Error("子产品正式资源的出发城市标识无效；结果待确认，未激活套餐。");
+  }
   if (!submittedCities.length) return actual.length;
 
   const submittedIds = new Set(submittedCities.map((city) => text(city.cityId)).filter(Boolean));

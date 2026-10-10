@@ -1,9 +1,11 @@
+import { validatedSegmentReadbackIsComplete, waitForValidatedSegmentReadback } from "./segment-validation-readback.js";
+export { validatedSegmentReadbackIsComplete } from "./segment-validation-readback.js";
 import type { TrafficLineEndpointPlan, TrafficLineStation, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
+import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
 import { datesBetween, localBusinessDate, VBK_MAX_PRICING_INVENTORY_DAYS } from "../pricing-api.js";
 import { getVbkInitialState, postTrafficLineSoa, list, record, text, type JsonRecord, type TrafficLinePage } from "./client.js";
 import {
   departureCityReadbackIsComplete,
-  validatedDepartureCityReadbackIsComplete,
   verifyDepartureCityReadback,
   verifyValidatedDepartureCityReadback,
 } from "./segment-departure-cities.js";
@@ -30,6 +32,7 @@ export async function ensureTrafficLineSegments(
     beforeSubmit?: () => Promise<void>;
     onSubmit?: (departureCityCount: number) => void;
     onValidationProgress?: (attempt: number, maxPolls: number) => void;
+    shouldStopWaiting?: () => boolean;
   } = {},
 ): Promise<{ segmentCount: number; departureCityCount: number }> {
   const before = await ensureSegmentDraft(page, productId, options.sleep);
@@ -80,9 +83,11 @@ export async function ensureTrafficLineSegments(
       productId, schedule: resourceCheckSchedule(options.schedule, options.now), adultCount: 2, childCount: 0, audit: { saveStep: 2 },
     }, "提交子产品资源段");
     const rejectedCityIds = await waitForSegmentSubmit(page, productId, {
+      submittedCityIds: selectedCities.map(city => text(city.cityId)),
       maxPolls: options.maxPolls,
       sleep: options.sleep,
       onProgress: options.onValidationProgress,
+      shouldStopWaiting: options.shouldStopWaiting,
     });
     if (!rejectedCityIds.length) break;
     const rejected = new Set(rejectedCityIds);
@@ -157,7 +162,7 @@ async function ensureSegmentDraft(
   throw lastError instanceof Error ? lastError : new Error("子产品资源草稿初始化后仍不可写。");
 }
 
-async function getSegments(page: TrafficLinePage, productId: string): Promise<JsonRecord> {
+export async function getSegments(page: TrafficLinePage, productId: string): Promise<JsonRecord> {
   return postTrafficLineSoa(page, "15638", "getSegments", { productId }, "读取子产品资源段");
 }
 
@@ -210,48 +215,6 @@ export function publishedSegmentReadbackIsComplete(
   }
 }
 
-export function validatedSegmentReadbackIsComplete(
-  payload: JsonRecord,
-  variant: TrafficLineVariant,
-  endpoints: TrafficLineEndpointPlan,
-  submittedCities: City[] = [],
-): boolean {
-  if (Array.isArray(record(payload.draftProductSegments)?.segments)) return false;
-  try {
-    verifySegmentBoundaries(list(record(payload.productSegments)?.segments), variant, endpoints);
-    return validatedDepartureCityReadbackIsComplete(payload, submittedCities);
-  } catch {
-    return false;
-  }
-}
-
-async function waitForValidatedSegmentReadback(
-  page: TrafficLinePage,
-  productId: string,
-  variant: TrafficLineVariant,
-  endpoints: TrafficLineEndpointPlan,
-  submittedCities: City[],
-  sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
-): Promise<JsonRecord> {
-  let last: JsonRecord = {};
-  for (let attempt = 1; attempt <= 8; attempt += 1) {
-    last = await getSegments(page, productId);
-    if (validatedSegmentReadbackIsComplete(last, variant, endpoints, submittedCities)) return last;
-    if (attempt < 8) await sleep(Math.min(1_500, attempt * 300));
-  }
-  if (Array.isArray(record(last.draftProductSegments)?.segments)) {
-    throw new Error("子产品资源校验完成后仍存在未结算草稿，未激活套餐。");
-  }
-  const formal = list(record(last.productSegments)?.segments);
-  verifySegmentBoundaries(formal, variant, endpoints);
-  if (!validatedDepartureCityReadbackIsComplete(last, submittedCities)) {
-    const stations = variant === "trainRoundTrip" ? endpoints.train : endpoints.flight;
-    const station = stations ? `${stations.arrival.name}/${stations.departure.name}` : "未确认站点";
-    throw new Error(`子产品资源校验后没有任何可用的多出发城市（站点：${station}），未激活套餐。`);
-  }
-  return last;
-}
-
 /**
  * 恢复超时任务时先读取上一次 submitSegments 的结果。若平台仍在处理则明确
  * 暂停；若已成功则补齐正式资源回读；仅在明确失败/不存在时允许重新构建草稿。
@@ -267,6 +230,7 @@ export async function recoverPendingTrafficLineSegmentSubmit(
     maxPolls?: number;
     sleep?: (milliseconds: number) => Promise<void>;
     onProgress?: (attempt: number, maxPolls: number) => void;
+    shouldStopWaiting?: () => boolean;
   } = {},
 ): Promise<TrafficLineSegmentSubmitRecovery> {
   const state = await readSegmentSubmitState(page, productId);
@@ -277,6 +241,7 @@ export async function recoverPendingTrafficLineSegmentSubmit(
         maxPolls: options.maxPolls,
         sleep: options.sleep,
         onProgress: options.onProgress,
+        shouldStopWaiting: options.shouldStopWaiting,
       });
       if (rejectedCityIds.length) return "restartable";
     } catch (error) {
@@ -339,7 +304,7 @@ export function selectTrafficLineValidationCities(groups: JsonRecord[], variant:
   return [...selected.values()];
 }
 
-function verifySegmentBoundaries(segments: Segment[], variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan): void {
+export function verifySegmentBoundaries(segments: Segment[], variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan): void {
   const first = segments[0]; const last = segments.at(-1);
   if (!first || !last || !isMultiDeparture(first) || !isMultiArrival(last)) throw new Error("子产品资源段回读缺少多出发或多到达边界。");
   const key = variant === "flightRoundTrip" ? "flight" : "train";
@@ -376,8 +341,8 @@ function multiCity(name: string): City { return { cityId: 0, cityName: name }; }
 
 /**
  * 交通资源必须按产品实际售卖班期核验，但 submitSegments 是资源可用性探测，
- * 不是价格库存落库。用首日、中间日、末日覆盖整个售卖窗口，避免把 365 天
- * 全量日期交给 VBK 异步校验而长期停留在 U 状态。
+ * 不是价格库存落库。仅探测满足提前预订的近期真实班期；今天违反预订
+ * 规则，半年/一年后的酒店和车票可能尚不可订，不能据此断定没有资源。
  */
 export function trafficLineResourceCheckDates(
   product: Record<string, unknown> | undefined,
@@ -390,15 +355,14 @@ export function trafficLineResourceCheckDates(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
     return [];
   }
+  const booking = resolveAdvanceBooking(product ?? {});
+  if (!booking) return [];
+  const earliest = new Date(now);
+  earliest.setDate(earliest.getDate() + Math.max(1, booking.days + 1));
   const availableDates = datesBetween(startDate, endDate)
-    .filter((date) => date >= localBusinessDate(now))
+    .filter((date) => date >= localBusinessDate(earliest))
     .slice(0, VBK_MAX_PRICING_INVENTORY_DAYS);
-  if (availableDates.length <= 3) return availableDates;
-  return [
-    availableDates[0]!,
-    availableDates[Math.floor((availableDates.length - 1) / 2)]!,
-    availableDates.at(-1)!,
-  ];
+  return availableDates.slice(0, 3);
 }
 
 function resourceCheckSchedule(schedule: readonly string[] | undefined, now = new Date()): string[] {

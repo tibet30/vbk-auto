@@ -1,3 +1,4 @@
+import { retryVbkRead } from "../../../infrastructure/vbk-read-retry.js";
 import {
   vbkSessionRequest,
   type VbkReferrerPolicy,
@@ -30,12 +31,14 @@ export async function postTrafficLineSoa(
   label: string,
   context: TrafficLineRequestContext = {},
 ): Promise<JsonRecord> {
-  return requestWithSessionAckRetry(page, {
+  const readOnly = new Set(["getdescriptionInfo", "getSegments", "getMultiDepartureCities.json", "getSubmitSegmentsResult", "getProductClause"]);
+  const request = () => requestWithSessionAckRetry(page, {
     endpoint: `${TRAFFIC_LINE_SOA}/${service}/${method}`,
     body: { contentType: "json", head: TRAFFIC_LINE_HEAD, ...body },
     headers: { cookieorigin: "https://vbooking.ctrip.com", "x-tt-core": "1" },
     ...context,
   }, label);
+  return readOnly.has(method) ? retryVbkRead(request) : request();
 }
 
 /** 20046 条款服务使用独立的 text/plain payload，不能强塞 15638 的 head。 */
@@ -108,7 +111,7 @@ export async function getVbkInitialState(page: TrafficLinePage, endpoint: string
     throw new Error(`${label}缺少当前 BrowserView 会话适配器；未发起请求，可在登录态恢复后安全重试。`);
   }
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const response = await page.vbkSessionGetText({ endpoint, errorLabel: label });
+    const response = await retryVbkRead(() => page.vbkSessionGetText!({ endpoint, errorLabel: label }));
     const { status, text: html } = response;
     if (status === 401 || status === 403) {
       if (attempt === 3) throw new Error(`${label}连续 3 次被会话鉴权拒绝；只读请求未改变平台，可安全重试。`);

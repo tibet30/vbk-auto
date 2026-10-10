@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 产品图文页「推荐理由」3 行写入工具集：
  *   - buildRecommendationReasonsPlan：把 recommendations 校验成白名单内 3 项 + 类别不重复 + 文本非空；
@@ -10,6 +9,7 @@
 import { delay, escapeRegExp, assertCount } from "../utils.js";
 import { RECOMMENDATION_CATEGORIES } from "../../schema/schema-definitions.js";
 import { findVbkCopyBadCase } from "../../../planning/vbk-copy-policy.js";
+import type { VbkPage } from "../locator-types.js";
 import {
   fitVbkRecommendationText,
   hasValidVbkRecommendationLength,
@@ -75,7 +75,7 @@ export function buildRecommendationReasonsPlan(
     if (typeof text !== "string") {
       throw new Error(`推荐理由第 ${i + 1} 项文本必须是 string，禁止自动转换类型。`);
     }
-    if (!RECOMMENDATION_CATEGORIES.includes(category)) {
+    if (!(RECOMMENDATION_CATEGORIES as readonly string[]).includes(category)) {
       throw new Error(`推荐理由分类「${category}」不在白名单。`);
     }
     const normalizedText = normalizeVbkRecommendation(text, category);
@@ -116,7 +116,7 @@ const RECOMMEND_APPEND_BUTTON_SELECTOR =
  * - 找不到行 / + 按钮抛错（带 rowCount 信息便于排查 VBK DOM 变更）。
  * - 若一次 wait 超时，第二次再短超时兜一次（应对网络抖动 / React 重渲染）。
  */
-async function appendRecommendationRow(page: any, currentCount: number) {
+async function appendRecommendationRow(page: VbkPage, currentCount: number): Promise<void> {
   const rows = page.locator("#pm_recommend .ant-form-item");
   const rowCount = await rows.count();
   if (rowCount === 0) {
@@ -155,7 +155,7 @@ async function appendRecommendationRow(page: any, currentCount: number) {
  *   - 分类不对时打开下拉，挑 enabled 选项里的精确匹配，再回读校验选中值；
  *   - 文本后填 + 等待下一行可见（确保 VBK React 已渲染完成再动下一行）。
  */
-export async function fillRecommendationReasons(page: any, recommendations: Array<{ category: string; text: string }>) {
+export async function fillRecommendationReasons(page: VbkPage, recommendations: Array<{ category: string; text: string }>) {
   const plan = buildRecommendationReasonsPlan(recommendations);
   const section = page.locator("#pm_recommend");
   await assertCount(section, 1, "推荐理由区域");

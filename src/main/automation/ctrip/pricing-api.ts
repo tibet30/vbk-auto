@@ -54,6 +54,21 @@ export function datesBetween(start: string, end: string) {
   return dates;
 }
 
+/**
+ * VBK 价格库存的 365 天上限是相对产品库存窗口起点计算的，不是相对
+ * 每次重试当天滚动计算。否则产品创建后跨过一天，预检会凭空要求原本
+ * 从未写入的平台最后一天。
+ */
+export function pricingInventoryDates(
+  startDate: string,
+  endDate: string,
+  today = localBusinessDate(),
+): string[] {
+  return datesBetween(startDate, endDate)
+    .slice(0, VBK_MAX_PRICING_INVENTORY_DAYS)
+    .filter((date) => date >= today);
+}
+
 function chunks<T>(items: T[], size: number) {
   const result: T[][] = [];
   for (let i = 0; i < items.length; i += size) result.push(items.slice(i, i + size));
@@ -192,9 +207,7 @@ export async function ensurePricingInventoryApi(
   // 平台不会为过去的业务日落价格库存；规划与真正执行之间可能跨日。
   // 在实际写入时剔除过去日期，避免把无法写入的历史日误判为回读缺失。
   const today = localBusinessDate();
-  const dates = datesBetween(inventory.startDate, inventory.endDate)
-    .filter((date) => date >= today)
-    .slice(0, VBK_MAX_PRICING_INVENTORY_DAYS);
+  const dates = pricingInventoryDates(inventory.startDate, inventory.endDate, today);
   if (!dates.length) throw new Error("价格库存日期范围为空。");
   const item = await packageInfo(page, productId);
   const groupConfig = await ensureSmallGroupConfig(page, product, productId, item);

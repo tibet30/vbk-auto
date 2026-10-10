@@ -5,6 +5,12 @@ import { getVbkInitialState } from "./traffic-line/client.js";
 type Json = Record<string, any>;
 
 const SOA = "https://online.ctrip.com/restapi/soa2/15638";
+// VBK publishes resource modules asynchronously. 60 reads only covered roughly
+// two minutes and was shorter than the platform's delayed formalization window.
+// Keep this bounded, but allow the normal path to absorb that delay without
+// making the user manually resume the product.
+const DEFAULT_MAX_READBACKS = 180;
+const MAX_READBACK_BACKOFF_MS = 1_500;
 const HEAD = {
   cid: "", ctok: "", cver: "1.0", lang: "01", sid: "8888", syscode: "09", auth: "", xsid: "", extension: [],
 };
@@ -94,11 +100,13 @@ function roomIds(segment: Json): string[] | null {
   if (!Array.isArray(rooms)) return [];
   const projected = rooms.map((room: Json, index: number) => ({
     id: Number(room?.masterHotelID ?? room?.hotelID),
-    order: Number(room?.sequenceNumber ?? room?.sort ?? room?.sequence ?? room?.priority),
+    order: Number(room?.squenceNumber !== undefined ? -Number(room.squenceNumber) : room?.sequenceNumber ?? room?.sort ?? room?.sequence ?? room?.priority),
     index,
   }));
   if (projected.some(({ id }) => !Number.isSafeInteger(id) || id <= 0)) return null;
   const explicitOrder = projected.every(({ order }) => Number.isFinite(order));
+  if (projected.some(({ order }) => Number.isFinite(order)) && !explicitOrder) return null;
+  if (explicitOrder && new Set(projected.map(room => room.order)).size !== projected.length) return null;
   projected.sort(explicitOrder
     ? (left, right) => left.order - right.order || left.index - right.index
     : (left, right) => left.id - right.id || left.index - right.index);
@@ -114,18 +122,14 @@ function resourceGroupIds(segment: Json): string[] | null {
 }
 
 function packageIds(segment: Json): string[] {
-  const ids = new Set<string>();
-  const visit = (value: unknown, parentKey = "") => {
-    if (Array.isArray(value)) return value.forEach((item) => visit(item, parentKey));
-    if (!value || typeof value !== "object") return;
-    for (const [key, item] of Object.entries(value as Json)) {
-      if ((/id$/i.test(key) || /Id$/.test(key)) && /package|resource/i.test(`${parentKey}.${key}`)
-        && /^\d+$/.test(String(item)) && Number(item) > 0) ids.add(String(item));
-      else visit(item, `${parentKey}.${key}`);
-    }
-  };
-  visit(segment.packages, "packages");
-  return [...ids].sort();
+  if (!Array.isArray(segment.packages)) return [];
+  // Segment/product IDs are platform-owned identities, not package resources.
+  // Keep the role as well as the resource ID: swapping adult/child resources
+  // must fail even if the same unordered set of IDs remains present.
+  return segment.packages.map((item: Json) => JSON.stringify(
+    Object.entries(item).filter(([key]) => /^(?:packageId|(?:master|servant|childOccupationBed)?resourceId)$/i.test(key))
+      .map(([key, value]) => [key, String(value)]).sort(([left], [right]) => left!.localeCompare(right!)),
+  )).sort();
 }
 
 function sameValues(left: readonly unknown[], right: readonly unknown[]): boolean {
@@ -159,7 +163,9 @@ export function formalResourcesMatchDraft(formalInput: Json[], draftInput: Json[
     const expectedRooms = roomIds(expected);
     const actualGroups = resourceGroupIds(actual);
     const expectedGroups = resourceGroupIds(expected);
-    return sameStay && sameCity && actualRooms !== null && expectedRooms !== null
+    const expectedHasPriority = expected.hotel?.segmentRooms?.some((room: Json) => room.squenceNumber !== undefined);
+    const actualHasPriority = actual.hotel?.segmentRooms?.every((room: Json) => room.squenceNumber !== undefined);
+    return (!expectedHasPriority || actualHasPriority) && sameStay && sameCity && actualRooms !== null && expectedRooms !== null
       && actualGroups !== null && expectedGroups !== null
       && sameValues(actualRooms, expectedRooms)
       && sameValues(actualGroups, expectedGroups)
@@ -196,15 +202,23 @@ export async function finalizeParentResourceSegments(
     if (!uncertainPublish(error)) throw error;
     timedOut = true;
   }
-  const maxReadbacks = Math.max(1, options.maxReadbacks ?? 8);
+  const maxReadbacks = Math.max(1, options.maxReadbacks ?? DEFAULT_MAX_READBACKS);
   const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  let lastFormal: Json[] = [];
   for (let attempt = 1; attempt <= maxReadbacks; attempt += 1) {
     const payload = await readSegments(page, productId);
+    lastFormal = formalResourceSegments(payload);
     if (formalResourcesMatchDraft(formalResourceSegments(payload), expected, options.vehicleGroupId)) {
       return { audited: true, published: true, recovered: timedOut, segmentCount: expected.length };
     }
-    if (attempt < maxReadbacks) await sleep(Math.min(1_500, attempt * 300));
+    if (attempt < maxReadbacks) await sleep(Math.min(MAX_READBACK_BACKOFF_MS, attempt * 300));
   }
   if (timedOut) throw new Error("VBK 资源模块发布结果不确定：正式资源回读未证明草稿已完整落库；未重复发布。");
-  throw new Error("VBK 资源模块发布后正式资源回读不一致。");
+  const mismatch = ordered(expected).findIndex((segment, index) =>
+    !formalResourcesMatchDraft(lastFormal[index] ? [ordered(lastFormal)[index]!] : [], [segment]));
+  const expectedSegment = ordered(expected)[mismatch];
+  const actualSegment = ordered(lastFormal)[mismatch];
+  throw new Error(`VBK 资源模块发布后正式资源回读不一致：资源段${mismatch + 1}；` +
+    `酒店期望=${JSON.stringify(expectedSegment ? roomIds(expectedSegment) : [])}、实际=${JSON.stringify(actualSegment ? roomIds(actualSegment) : [])}；` +
+    `套餐期望=${JSON.stringify(expectedSegment ? packageIds(expectedSegment) : [])}、实际=${JSON.stringify(actualSegment ? packageIds(actualSegment) : [])}。`);
 }

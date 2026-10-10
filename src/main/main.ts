@@ -1,35 +1,20 @@
-import { getVbkRequestPage } from "./infrastructure/vbk-request-page.js";
 import { installProductAgent } from "./agent/integration-setup.js";
 import { withAgentUsage } from "./agent/integration-usage.js";
 import { agentWorkflowPatch, recoverQueuedAgentWorkflowTasks } from "./agent/integration-workflow.js";
-/**
- * Electron main process entry: process configuration, shared runtime helpers,
- * IPC registrar composition, and application bootstrap.
- */
+/** Electron main process entry and application bootstrap. */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow } from "electron";
 import { installLogSink, logError, logInfo, logWarn } from "../shared/log-timestamp.js";
 import { createRuntimeLogCapture } from "../shared/log-redaction.js";
 import { APP_NAME } from "../shared/brand.js";
-import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import type {
-  AiProvider,
-  Planner,
   PlanningGenerationState,
   ProductDetail,
-  ProductReadiness,
-  Settings,
 } from "../shared/contracts.js";
-import { isAiProvider } from "../shared/contracts.js";
-import { resolveSystemNotificationsEnabled } from "../shared/system-notification-settings.js";
 import { DraftAutomation } from "./automation/automation.js";
-import { inspectManualCoverAsset } from "./automation/manual-cover-asset.js";
 import { VbkDatabase } from "./infrastructure/database/database.js";
-import { productNotFound } from "./infrastructure/db-errors.js";
 import { safeRendererSend } from "./infrastructure/renderer-send.js";
-import { evaluateVisibleReadiness } from "./planning/preparation-completion.js";
-import { detectProviderIdFromBrowser } from "./infrastructure/provider-id-source.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
 import {
   createLocalAiKeyStore,
@@ -42,22 +27,11 @@ import {
   type LocalVbkCookieStore,
 } from "./infrastructure/vbk-cookie-store.js";
 import { createAppAuthStore, LOCAL_APP_AUTH_FILE_NAME } from "./infrastructure/app-auth-store.js";
-import { createTibetAuthService, type TibetAuthService } from "./infrastructure/tibet-auth.js";
+import { createTibetAuthService } from "./infrastructure/tibet-auth.js";
 import { createTibetCopyRuleSync } from "./infrastructure/tibet-copy-rules.js";
 import { createProductStorage } from "./application/product-storage.js";
-import { MiniMaxService } from "./minimax/minimax.js";
-import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "./planning/adapters/openai-compatible-adapter.js";
 import { createMainWindow } from "./create-window.js";
-import { registerProductAiIpc } from "./ipc/product-ai-ipc.js";
-import { registerRemoteProductIpc } from "./ipc/remote-product-ipc.js";
-import { registerBrowserAutomationIpc } from "./ipc/browser-automation-ipc.js";
-import { registerSettingsIpc } from "./ipc/settings-ipc.js";
-import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
-import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
-import { registerAgentIpc } from "./ipc/agent-ipc.js";
 import { agentDisplaySnapshot } from "../shared/agent-display.js";
-import { registerMemoryIpc } from "./ipc/memory-ipc.js";
-import { registerUpdateIpc } from "./ipc/update-ipc.js";
 import { ProductTaskScheduler } from "./application/product-task-scheduler.js";
 import type { ProductWorkflowTask } from "../shared/contracts.js";
 import type { MainIpcContext } from "./ipc/context.js";
@@ -76,6 +50,14 @@ import { createAttentionNotificationDelivery } from "./infrastructure/attention-
 import { showSystemNotification, systemNotificationsSupported } from "./infrastructure/system-notifications.js";
 import { workflowAttentionNotification } from "./infrastructure/workflow-attention-notification.js";
 import { MemoryService } from "./memory/memory-service.js";
+import {
+  createMainAiRuntime,
+  createProviderIdDetector,
+  evaluateMainReadiness,
+  safeRemoveLegacyCiphertext,
+  scheduleMemoryMaintenance,
+} from "./main-runtime.js";
+import { registerMainIpc } from "./main-ipc.js";
 import {
   applyStartupCommandLineSwitches,
   debuggingPort,
@@ -130,6 +112,17 @@ if (!gotSingleInstanceLock) {
  * main.ts initialises this in `bootstrap()` together with the database.
  */
 let aiKeyStore: LocalAiKeyStore | null = null;
+const {
+  getSettings,
+  apiKey,
+  aiService,
+  completedPoiBackfillPlanner,
+} = createMainAiRuntime({
+  getDb: () => db,
+  getAiKeyStore: () => aiKeyStore,
+  dataPath: () => app.getPath("userData"),
+  defaultMiniMaxModel,
+});
 /**
  * Local VBK cookie-session store. Same 0600 JSON file pattern as the AI
  * key store. Created in `bootstrap()` together with the database and
@@ -207,172 +200,18 @@ const emitAgentSnapshot = (snapshot: import("../shared/contracts.js").AgentSnaps
   }
   safeRendererSend(window, "agent:updated", agentDisplaySnapshot(snapshot));
 };
-/**
- * 删除 settings 表里某个 provider 的旧密文。
- * 安全的意义上：只删一行 key，失败会 warn 但不抛错；不应让表清理错误
- * 阻塞主流程的设置保存。这是用户决策「脱离 Electron Keychain-backed
- * 加密」后的迁移路径 —— 旧的 `minimaxApiKey` / `deepseekApiKey` 字段
- * 保存的是历史密文（base64），本地 store 接手后不再读取这些字段，留
- * 在表里只会造成隐患。
- *
- * 任何失败都只 warn，不会抛出。此函数不阻塞主流程：设置保存本身的
- * 成功链路已走 aiKeyStore.setKey，即使这里出现异常也不应该带异常外。
- */
-function safeRemoveLegacyCiphertext(db: VbkDatabase, key: string): void {
-  try {
-    if (!db.getSetting(key)) return;
-    db.deleteSetting(key);
-  } catch (error) {
-    logWarn("[settings] failed to remove legacy cipher row", { key, message: (error as { message?: string })?.message ?? "unknown" });
-  }
-}
-
-/**
- * 把 settings 表中的字段聚合成对外的 Settings 对象（含 hasKey 这类派生布尔）。
- * 当 db 里没值时回落到默认值；用于 UI 渲染 / IPC 拿 setting 时不必关心落库字段。
- *
- * hasKey 一律从本地 aiKeyStore 读取（0600 JSON 文件），不再读取 SQLite 里的
- * legacy ciphertext —— 老字段一律视为未配置，避免把无效密文算成"已配置"。
- * 必须等待 aiKeyStore 初始化完成，否则本地 store 还没就绪时 UI 会错报未配置。
- */
-const getSettings = (): Settings => ({
-  aiProvider: isAiProvider(db.getSetting("aiProvider")?.value) ? db.getSetting("aiProvider")!.value as AiProvider : "minimax",
-  minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || "https://api.minimaxi.com/v1",
-  minimaxModel: db.getSetting("minimaxModel")?.value || defaultMiniMaxModel,
-  deepseekBaseUrl: db.getSetting("deepseekBaseUrl")?.value || "https://api.evolink.ai/v1",
-  deepseekModel: db.getSetting("deepseekModel")?.value || "deepseek-v4-flash",
-  hasMiniMaxKey: aiKeyStore ? aiKeyStore.hasKey("minimax") : false,
-  hasDeepSeekKey: aiKeyStore ? aiKeyStore.hasKey("deepseek") : false,
-  systemNotificationsEnabled: resolveSystemNotificationsEnabled(db.getSetting("systemNotificationsEnabled")?.value),
-  systemNotificationsSupported: systemNotificationsSupported(),
-  dataPath: app.getPath("userData"),
-});
-/**
- * 异步加载指定 provider 的真实 API Key：
- *   - 走本地 aiKeyStore（0600 JSON 文件），不再依赖 Keychain 加密层；
- *   - probe 失败时（store 尚未初始化、文件被外部破坏）返回空串，让上层按
- *     "未配置" 安全降级，而不是把错误冒泡到 UI。
- */
-async function apiKey(provider: AiProvider = getSettings().aiProvider) {
-  if (!aiKeyStore) return "";
-  return aiKeyStore.getKey(provider);
-}
-
-/** 已完成方案只允许 POI 查询/名称纠正；Key 不可用时安全降级到人工核查。 */
-async function completedPoiBackfillPlanner(localProductId: string): Promise<{ planner: Planner; providerLabel?: string }> {
-  const planner: Planner = {
-    generateStage: async () => { throw new Error("已完成 POI 回填不应调用 AI planner"); },
-  };
-  const settings = getSettings();
-  const hasActiveKey = settings.aiProvider === "deepseek" ? settings.hasDeepSeekKey : settings.hasMiniMaxKey;
-  if (!hasActiveKey) return { planner };
-  try {
-    const decryptedKey = await apiKey(settings.aiProvider);
-    const providerProfile = aiProviderConfig(settings, settings.aiProvider);
-    const resolverAdapter = new OpenAICompatiblePlannerAdapter({
-      apiKey: decryptedKey,
-      baseUrl: providerProfile.baseUrl,
-      model: providerProfile.model,
-      ...planningTransportOptions(settings.aiProvider),
-    });
-    return {
-      planner: { ...planner, resolvePoiName: resolverAdapter.resolvePoiName.bind(resolverAdapter) },
-      providerLabel: resolveAiProviderLabel(settings),
-    };
-  } catch (error) {
-    logWarn(`[planning] poi_backfill.resolver_unavailable localProductId=${localProductId}`, error);
-    return { planner };
-  }
-}
-/**
- * 按当前 settings 构造 MiniMaxService：
- *   - provider=deepseek 时切到 Evolink baseUrl/model；
- *   - apiKey 通过本地 aiKeyStore（0600 JSON 文件）异步读取；
- *   - snapshot 可注入，用于在 IPC 上下文里使用「最新 settings」构造服务（避免双重读盘）。
- */
-async function aiService(snapshot?: Settings) {
-  const settings = snapshot ?? getSettings();
-  const isDeepSeek = settings.aiProvider === "deepseek";
-  return new MiniMaxService({
-    apiKey: await apiKey(settings.aiProvider),
-    baseUrl: isDeepSeek ? settings.deepseekBaseUrl : settings.minimaxBaseUrl,
-    model: isDeepSeek ? settings.deepseekModel : settings.minimaxModel,
-    provider: settings.aiProvider,
-  });
-}
-/**
- * 计算产品 readiness：把产品当前状态、已保存自动化运行、是否阻塞等映射到对外的 ProductReadiness。
- * 用于 UI 顶栏显示与 IPC 路由。
- *
- * 实际计算逻辑（needs_user 阻塞的「可见性」红线、completion 算法）已抽到
- * ./readiness.ts 的纯函数 computeReadiness，再由权威 preparation evaluator
- * 派生 UI / 确认卡可见就绪度，避免旧 readiness 100% 与审批硬门控不一致。
- */
-function readiness(
+const readiness = (
   localProductId: string,
-  options: {
-    ignoreInterruptedAutomationFailure?: boolean;
-    ignoreCurrentAutomationFailure?: boolean;
-  } = {},
-): ProductReadiness {
-  const product = db.getProduct(localProductId); if (!product) throw productNotFound(localProductId);
-  const visible = evaluateVisibleReadiness(product, db.getAgentSnapshot(localProductId), {
-    ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
-    ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure ?? Boolean(db.getAgentSnapshot(localProductId)?.run && !db.getAgentSnapshot(localProductId)?.uncertainWrite),
-  });
-  const issue = inspectManualCoverAsset(product.product).issue;
-  if (!issue) return visible;
-  const issues = [...visible.issues, { label: "封面图片规格", detail: issue }];
-  return { ready: false, completion: Math.min(visible.completion, 92), issues };
-}
+  options: Parameters<typeof evaluateMainReadiness>[2] = {},
+) => evaluateMainReadiness(db, localProductId, options);
 
-
-async function detectProviderIdInMain(): Promise<number | null> {
-  try {
-    const page = await getVbkRequestPage(browser);
-    const id = await detectProviderIdFromBrowser(page);
-    const accountName = db.getSetting("vbkAccountName")?.value;
-    if (id && accountName) db.setProviderIdFor(accountName, id);
-    return id;
-  } catch (error) {
-    logWarn("[accounts] detectProviderId failed", error);
-    return null;
-  }
-}
+const detectProviderIdInMain = createProviderIdDetector({
+  getBrowser: () => browser,
+  getDb: () => db,
+});
 
 function emitProductIfKnown(_accountName: string, _info: unknown): void {
   // Reserved for future account-fixed-info renderer notifications.
-}
-
-function registerIpc(
-  context: MainIpcContext,
-  appAuth: TibetAuthService,
-  onAuthenticated?: Parameters<typeof registerAppAuthIpc>[1],
-): void {
-  registerAppAuthIpc(appAuth, onAuthenticated);
-  registerRemoteProductIpc(context);
-  registerProductAiIpc(context);
-  registerBrowserAutomationIpc(context);
-  registerSettingsIpc(context);
-  registerPlanningV2Ipc(context);
-  registerAgentIpc(context);
-  registerMemoryIpc(context);
-  registerUpdateIpc(updateService);
-}
-
-function scheduleMemoryMaintenance(memoryService: MemoryService): NodeJS.Timeout {
-  const run = () => {
-    try {
-      const state = memoryService.settings();
-      const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : 0;
-      const stale = !lastSuccess || Date.now() - lastSuccess >= 7 * 24 * 60 * 60 * 1000;
-      if (state.pendingCount >= 30 || stale) memoryService.maintenance();
-    } catch (error) {
-      logWarn("[memory] maintenance skipped", error);
-    }
-  };
-  queueMicrotask(run);
-  return setInterval(run, 6 * 60 * 60 * 1000);
 }
 
 let configureAutomation: () => void = () => {};
@@ -512,7 +351,12 @@ app.whenReady().then(async () => {
   context.enqueueProductTask = (product) => productTaskScheduler.enqueue(product);
   context.abandonProductTask = (taskId) => productTaskScheduler.abandon(taskId);
   context.resumeProductTask = (taskId, mode) => productTaskScheduler.resume(taskId, mode);
-  registerIpc(context, appAuth, { onAuthenticated: async (user, source) => { syncCopyRules(); await vbkBindings.onAuthenticated(user, source); } });
+  registerMainIpc(context, appAuth, updateService, {
+    onAuthenticated: async (user, source) => {
+      syncCopyRules();
+      await vbkBindings.onAuthenticated(user, source);
+    },
+  });
   await openMainWindow();
   updateService.scheduleStartupCheck();
   updateService.schedulePeriodicCheck();

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 「产品特色」写入 + 回读 + 重试 helper：
  *   - writeToEditor：把 value 写入目标编辑器；iframe body 走 frame.evaluate + UEditor
@@ -16,6 +15,14 @@ import type { EditorTarget } from "./features.types.js";
 import { delay } from "../utils.js";
 import { syncReactStateForTarget, type ReactSyncOutcome } from "./features.react-sync.js";
 import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../../domain/product/features-rich-text.js";
+import type { VbkPage } from "../locator-types.js";
+
+interface EditorReadback {
+  bodyText: string;
+  hiddenText: string;
+  ueditor: boolean;
+  content?: string;
+}
 
 /**
  * 把 value 写入目标编辑器：
@@ -31,8 +38,8 @@ async function writeToEditor(target: EditorTarget, value: string): Promise<boole
   if (target.type === "iframe-body") {
     // UEditor owns the iframe body.  Use only the exact same-origin instance; never
     // scan arbitrary editors or rely on blur to synchronize its hidden textarea.
-    const result = await target.locator.evaluate((body: HTMLElement | null, html: string) => {
-      if (!body) return { ok: false, ueditor: false };
+    const result = await target.locator.evaluate((element: HTMLElement | SVGElement, html: string) => {
+      const body = element as HTMLElement;
       const parentWindow = window.parent;
       const instants = (parentWindow as any)?.UE?.instants;
       const editor = instants && Object.values(instants).find((candidate: any) => candidate?.body === body) as any;
@@ -61,15 +68,16 @@ async function writeToEditor(target: EditorTarget, value: string): Promise<boole
  * 回读编辑器当前值：iframe body 走 innerText；contenteditable 走 innerText；其他走 inputValue。
  * 容忍 undefined 返回，便于 mock。
  */
-async function readFromEditor(target: EditorTarget): Promise<any> {
+async function readFromEditor(target: EditorTarget): Promise<string | EditorReadback> {
   if (target.type === "iframe-body") {
-    return await target.locator.evaluate((body: HTMLElement | null) => {
+    return await target.locator.evaluate((element: HTMLElement | SVGElement) => {
+      const body = element as HTMLElement;
       const editor = Object.values((window.parent as any)?.UE?.instants || {})
         .find((candidate: any) => candidate?.body === body) as any;
       const bodyText = body?.innerText || "";
       if (!editor) return { bodyText, hiddenText: "", ueditor: false };
       const name = editor.options?.textarea;
-      const hidden = name ? Array.from(window.parent.document.getElementsByName(name)).find((node: any) => node instanceof window.parent.HTMLTextAreaElement) as HTMLTextAreaElement | undefined : undefined;
+      const hidden = name ? Array.from(window.parent.document.getElementsByName(name)).find(node => node.tagName === "TEXTAREA") as HTMLTextAreaElement | undefined : undefined;
       return { bodyText, hiddenText: hidden?.value || "", ueditor: true, content: editor.getContent?.() || "" };
     }).catch(() => ({ bodyText: "", hiddenText: "", ueditor: false }));
   }
@@ -84,7 +92,7 @@ function normalize(value: string): string {
   return String(value || "").replace(/\s+/g, "").replace(/　/g, "");
 }
 
-function readbackIncludes(readback: any, value: string): boolean {
+function readbackIncludes(readback: string | EditorReadback, value: string): boolean {
   const expectedHtml = normalize(formatProductFeaturesHtml(value));
   const expectedText = normalize(productFeaturesPlainText(expectedHtml));
   if (readback && typeof readback === "object") {
@@ -102,7 +110,7 @@ function readbackIncludes(readback: any, value: string): boolean {
 /**
  * 在候选作用域上重试一次写入：用于 readback 与目标不匹配时，再触发一次 fill 强制同步。
  */
-async function retryWrite(target: EditorTarget, value: string) {
+async function retryWrite(target: EditorTarget, value: string): Promise<void> {
   if (target.type === "iframe-body") {
     await writeToEditor(target, value);
     return;
@@ -124,7 +132,7 @@ async function retryWrite(target: EditorTarget, value: string) {
  * 并保留 features.write.ts 这个 barrel 调用面，避免 features.ts 跨文件依赖
  * features.react-sync.ts 的具体入口（layered 模块边界）。
  */
-async function trySyncReactState(target: EditorTarget, value: string, page: any): Promise<ReactSyncOutcome> {
+async function trySyncReactState(target: EditorTarget, value: string, page: VbkPage): Promise<ReactSyncOutcome> {
   return syncReactStateForTarget(target, value, page);
 }
 

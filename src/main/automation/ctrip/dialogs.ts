@@ -7,21 +7,22 @@
  *
  * 顶部带 `// @ts-nocheck`，dialog 是动态 page.locator。
  */
-// @ts-nocheck
 // 通用弹窗 / modal 自愈：关闭 Playwright 操作过程中挡路的 VBK 弹窗。
 // - closeBlockingDialogs：通用"关所有挡路弹窗"，safeClick 失败后会自愈。
 // - dismissKnownNoticeDialogs：保存成功、线路变更提示、必填提示等轻量提示弹窗。
 // - dismissDataRiskDialog：境内短途旅游但下拉选了境外同名项时的 VBK 阻断。
 // - dismissCustomizationModal：分销渠道二次确认（泛定制加返协议等）。
 
-const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+import type { VbkPage } from "./locator-types.js";
+
+const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 /**
  * 通用「关挡路弹窗」迭代器：扫 .ant-modal / .ant-drawer / popconfirm / popover / tooltip /
  * role=dialog 之类的可见弹窗；keepOpenSelectors 用于排除不能关的关键弹窗（如「请输入供应商编码」）。
  * 命中后尝试 .ant-modal-close / 取消 / 关闭 / Escape 等多种路径强制关闭；关闭过则返回 true。
  */
-async function closeBlockingDialogs(page, keepOpenSelectors = []) {
+async function closeBlockingDialogs(page: VbkPage, keepOpenSelectors: readonly string[] = []): Promise<boolean> {
   const candidates = [
     ".ant-modal-wrap:not(.ant-modal-wrap-hidden) .ant-modal",
     ".ant-drawer-open .ant-drawer-content",
@@ -31,7 +32,7 @@ async function closeBlockingDialogs(page, keepOpenSelectors = []) {
     '[role="dialog"]:not([aria-hidden="true"])',
     '[role="alertdialog"]:not([aria-hidden="true"])',
   ];
-  const seen = new Set();
+  const seen = new Set<string>();
   let closedAny = false;
   for (const selector of candidates) {
     if (keepOpenSelectors.some((keep) => keep === selector || selector.includes(keep))) continue;
@@ -84,7 +85,7 @@ async function closeBlockingDialogs(page, keepOpenSelectors = []) {
  *   - 默认 800ms 内扫一轮任一已知的提示并点「我知道了 / 知道了 / 确定」关闭。
  * 用于保存后等提示自动清掉再继续，避免 stage 误读弹窗。
  */
-async function dismissKnownNoticeDialogs(page, { waitForSaveSuccess = false } = {}) {
+async function dismissKnownNoticeDialogs(page: VbkPage, { waitForSaveSuccess = false }: { waitForSaveSuccess?: boolean } = {}): Promise<boolean> {
   const deadline = Date.now() + (waitForSaveSuccess ? 5_000 : 800);
   // 线路变更提示是可安全确认的轻量白名单提示；未知/风险 modal 不匹配，绝不点击。
   const knownNotice = /保存成功|不能输入重复的国家或省或景区、景点、其他地区|线路变更提示/;
@@ -142,7 +143,7 @@ async function dismissKnownNoticeDialogs(page, { waitForSaveSuccess = false } = 
  * 请修改后重新操作！"的阻断弹窗。点确定/我知道了关闭，调用方应决定
  * 是跳过（景点）还是报错（省份）。
  */
-async function dismissDataRiskDialog(page, timeoutMs = 3_000) {
+async function dismissDataRiskDialog(page: VbkPage, timeoutMs = 3_000): Promise<string | null> {
   const deadline = Date.now() + timeoutMs;
   const pattern = /数据风险/;
   const buttonName = /^(我知道了|知道了|确\s*定|确定|关闭|取\s*消|取消)$/;
@@ -172,7 +173,7 @@ async function dismissDataRiskDialog(page, timeoutMs = 3_000) {
  * modal 含"确定 / 取消"两个按钮，本函数一律关闭（点取消或 × ）以保留"默认
  * 不勾泛定制-C"的语义；其它未预期的弹窗也走 Esc 关闭。
  */
-async function dismissCustomizationModal(page) {
+async function dismissCustomizationModal(page: VbkPage): Promise<string | null> {
   const candidates = ["取消", "我知道了", "确定"];
   for (const name of candidates) {
     const buttons = page.getByRole("button", { name, exact: true });

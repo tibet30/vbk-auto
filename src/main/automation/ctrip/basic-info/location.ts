@@ -1,16 +1,16 @@
-// @ts-nocheck
 /**
  * 基本信息面板里「城市 / 产品线」类下拉的写入：
  *   - fillCitySelect：在 div[id=${id}] 的选择框里按城市 + preferredCountry 精确挑选项；
  *     没有精确匹配时使用注入的 disambiguator（AI）做兜底消歧，但绝不回退到「其它国家同名城市」；
  *   - fillProductLine：按「目的地一地 / 省份一地」白名单尝试选择；未命中则跳过。
- * 顶部带 `// @ts-nocheck`，page 是动态传入。
+ * 页面与定位器统一使用携程自动化的 Playwright 类型边界。
  */
 
-import { delay, assertCount, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption } from "../utils.js";
-import { matchDropdownOption } from "../../dropdown-match.js";
+import { delay, assertCount, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption, type LocatorSnapshot } from "../utils.js";
+import { matchDropdownOption, type Disambiguator } from "../../dropdown-match.js";
 import { pickCityOption } from "./types.js";
 import { logInfo } from "../../../../shared/log-timestamp.js";
+import type { VbkPage } from "../locator-types.js";
 
 const CITY_SEARCH_TIMEOUT_MS = 3_000;
 const CITY_OPTION_SETTLE_MS = 400;
@@ -20,7 +20,13 @@ const CITY_OPTION_SETTLE_MS = 400;
  * 命中失败时按 preferredCountry / ambiguous / missing 给出对应错误，preferredCountry 场景下
  * 拒绝回退到其它同名国家。AI 消歧仅在 disambiguator 注入并匹配 kind 时启用。
  */
-export async function fillCitySelect(page, id, city, preferredCountry, extra = {}) {
+export async function fillCitySelect(
+  page: VbkPage,
+  id: string,
+  city: string,
+  preferredCountry?: string,
+  extra: { disambiguator?: Disambiguator; product?: Record<string, unknown> } = {},
+): Promise<void> {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product ?? {};
   const select = page.locator(`div[id="${id}"]`);
@@ -65,7 +71,8 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
   await input.fill(city);
 
   const options = await getControlledDropdownOptions(page, selection);
-  const commitCityOption = async (expected) => {
+  const commitCityOption = async (expected: LocatorSnapshot | undefined): Promise<boolean> => {
+    if (!expected) return false;
     if (!(await clickLocatorSnapshotOption(options, expected))) return false;
     const commitDeadline = Date.now() + 2_000;
     while (Date.now() < commitDeadline) {
@@ -78,7 +85,7 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
   };
   const deadline = Date.now() + CITY_SEARCH_TIMEOUT_MS;
   let lastSeen: string[] = [];
-  let lastSnapshot = [];
+  let lastSnapshot: LocatorSnapshot[] = [];
   let lastDecision: ReturnType<typeof pickCityOption> = { kind: "missing", seen: [], reason: "notFound" };
   let stableMatchKey = "";
   let stableMatchSince = 0;
@@ -165,7 +172,11 @@ export async function fillCitySelect(page, id, city, preferredCountry, extra = {
  *   - 不退回默认第一项，避免错选；
  *   - 未找到候选时只记录并跳过：产品线不是自动录入硬阻断项。
  */
-export async function fillProductLine(page, destinationCity, province) {
+export async function fillProductLine(
+  page: VbkPage,
+  destinationCity: unknown,
+  province: unknown,
+): Promise<void> {
   const provinceBase = String(province || "")
     .trim()
     .replace(/(维吾尔自治区|壮族自治区|回族自治区|特别行政区|自治区|省|市)$/g, "");
@@ -252,7 +263,11 @@ export async function fillProductLine(page, destinationCity, province) {
 /**
  * 测试切片占位：实现见 ../tabs.ts；保留签名让 source-slicing 识别 basic-info/location 这一段。
  */
-export async function openProductEditor(page, productId, options = {}) {
+export async function openProductEditor(
+  page: VbkPage,
+  productId: string | number,
+  options: { stayOnCurrentTab?: boolean } = {},
+): Promise<never> {
   void page; void productId; void options;
   throw new Error("openProductEditor sentinel in basic-info/location.ts; runtime uses tabs.ts implementation");
 }

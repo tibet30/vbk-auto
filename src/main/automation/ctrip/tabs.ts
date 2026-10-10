@@ -8,8 +8,6 @@
  * 负责跨产品入口跳转与基本 tab 定位。
  */
 
-// @ts-nocheck
-
 /**
  * 「保存 → 进入目标 tab」状态机（窄修复版）：
  *   1) 调 clickSafeSave 保存并吃「保存成功」弹窗；
@@ -21,7 +19,19 @@
  *   6) 都不命中 → 若有 fallbackUrl 则直接导航；再不行就抛错。
  *   注：count > 0 时仍按原路径走按钮点击，绝不能提前跳过。
  */
-async function saveThenAdvance(page, options) {
+interface SaveThenAdvanceOptions {
+  phase: string;
+  targetTabLabel: string;
+  saveButtonNames: string[];
+  targetTabLabels: string[];
+  isTargetUrl: (url: string) => boolean;
+  nextButtonLabel?: string;
+  savedWith?: string;
+  fallbackUrl?: string;
+  advanceTimeoutMs?: number;
+}
+
+async function saveThenAdvance(page: VbkPage, options: SaveThenAdvanceOptions) {
   const {
     phase,
     targetTabLabel,
@@ -163,7 +173,10 @@ async function saveThenAdvance(page, options) {
  * 在候选 label 中找第一个 tab：可见且 aria-disabled != "true"。命中返回 label，否则 null。
  * 用于 saveThenAdvance 探测目标 tab 是否已经被前序保存解锁。
  */
-async function findUnlockedSectionLabel(page, labels) {
+async function findUnlockedSectionLabel(
+  page: VbkPage,
+  labels: string | string[],
+): Promise<string | null> {
   const candidates = Array.isArray(labels) ? labels : [labels];
   return page.evaluate((expected) => {
     const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
@@ -183,7 +196,6 @@ async function findUnlockedSectionLabel(page, labels) {
 
 
 
-// @ts-nocheck
 // Tab / Section 导航：负责点击 tab、安全保存、save-then-advance 状态机。
 // 这些 helpers 在多个 phase 模块之间共享，是"录入流程"的核心跳转原语。
 
@@ -192,6 +204,7 @@ import { closeBlockingDialogs, dismissKnownNoticeDialogs } from "./dialogs.js";
 import { formatValidationErrors, inspectAndRepairValidationErrors } from "./save-validation.js";
 import { productEditorUrl } from "../constants.js";
 import { logWarn } from "../../../shared/log-timestamp.js";
+import type { VbkLocator, VbkPage } from "./locator-types.js";
 
 /**
  * 点击 section / tab，优先按 role=tab 定位（新版 VBK 顶层 tab），再回退到精确文本；
@@ -199,7 +212,7 @@ import { logWarn } from "../../../shared/log-timestamp.js";
  *   - 命中 disabled / aria-disabled 时记下 disabledLabel，最后统一抛错；
  *   - URL 含 packageManage / priceInventory / newResourceRule 时直接 return（不重复导航）。
  */
-async function clickSection(page, labels) {
+async function clickSection(page: VbkPage, labels: string | string[]): Promise<void> {
   const candidates = Array.isArray(labels) ? labels : [labels];
   let disabledLabel = "";
   const url = page.url();
@@ -289,7 +302,11 @@ async function clickSection(page, labels) {
  * 轮询（间隔 250ms，最多 timeoutMs）直到候选 label 任一 tab 可见且 aria-disabled != "true"；
  * 超时抛错，常用于保存之后等下一个 tab 解锁。
  */
-async function waitForSectionEnabled(page, labels, timeout = 15_000) {
+async function waitForSectionEnabled(
+  page: VbkPage,
+  labels: string | string[],
+  timeout = 15_000,
+): Promise<string> {
   const candidates = Array.isArray(labels) ? labels : [labels];
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -317,10 +334,10 @@ async function waitForSectionEnabled(page, labels, timeout = 15_000) {
  *   - 找不到再回退到「文本严格相等（去空白）」扫所有按钮；
  * 命中后点击 + 顺手 dismissKnownNoticeDialogs。找不到抛出。
  */
-async function clickSafeSave(page, names) {
+async function clickSafeSave(page: VbkPage, names: string[]): Promise<string> {
   for (const name of names) {
     const button = page.getByRole("button", { name, exact: true });
-    let target = null;
+    let target: VbkLocator | null = null;
     if ((await button.count()) && (await button.first().isVisible())) {
       target = button.first();
     } else {
@@ -347,7 +364,7 @@ async function clickSafeSave(page, names) {
 /**
  * 直接点「提交审核并下一步」按钮并 assert 唯一可见，用于部分 phase 末尾一次性提交。
  */
-async function submitCurrentSectionAndNext(page) {
+async function submitCurrentSectionAndNext(page: VbkPage) {
   const label = "提交审核并下一步";
   const button = page.getByRole("button", { name: label, exact: true });
   await assertCount(button, 1, `${label}按钮`);
@@ -362,13 +379,17 @@ async function submitCurrentSectionAndNext(page) {
  *   - timeoutMs = 0 立即返回；
  *   - timeoutMs > 0 轮询 150ms 直到命中或超时。
  */
-async function findActiveTabLabel(page, labels, timeoutMs = 0) {
+async function findActiveTabLabel(
+  page: VbkPage,
+  labels: string | string[],
+  timeoutMs = 0,
+): Promise<string | null> {
   const candidates = Array.isArray(labels) ? labels : [labels];
   // locator.count/evaluate 会在 VBK 的晚到导航期间等待 navigation finished，
   // 即使目标页 DOM 已经可用也可能整整卡满默认 30 秒。页面内只读探针不
   // 绑定导航生命周期，适合这里的瞬时状态判断。
   const probe = async () => page.evaluate((expected) => {
-    const visible = (element) => {
+    const visible = (element: Element) => {
       const rect = element.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     };
@@ -382,7 +403,7 @@ async function findActiveTabLabel(page, labels, timeoutMs = 0) {
   }, candidates).catch(() => null);
   if (timeoutMs <= 0) return probe();
   const deadline = Date.now() + timeoutMs;
-  let last = null;
+  let last: string | null = null;
   while (Date.now() < deadline) {
     last = await probe();
     if (last) return last;
@@ -399,13 +420,13 @@ async function findActiveTabLabel(page, labels, timeoutMs = 0) {
 // 子路径，也避免误命中查询串里的 productImageText 关键字。
 const PRODUCT_IMAGE_TEXT_REGEX = /(^|[/?&])productImageText([/?&]|$)/;
 
-export function isProductImageTextUrl(url) {
+export function isProductImageTextUrl(url: unknown): boolean {
   if (typeof url !== "string" || !url) return false;
   return PRODUCT_IMAGE_TEXT_REGEX.test(url);
 }
 
 /** 真实 VBK 行程描述页路径；产品图文保存后刷新可能直接落到这里。 */
-export function isItineraryUrl(url) {
+export function isItineraryUrl(url: unknown): boolean {
   if (typeof url !== "string" || !url) return false;
   try {
     const parsed = new URL(url);
@@ -416,7 +437,7 @@ export function isItineraryUrl(url) {
 }
 
 // forward declaration，避免循环依赖
-declare function assertCount(locator: any, expected: number, description: string): Promise<any>;
+declare function assertCount(locator: VbkLocator, expected: number, description: string): Promise<VbkLocator>;
 
 /**
  * 跳到 productEditorUrl 并等 baseInfoMerge / tourdays 路径之一落点：
@@ -424,7 +445,11 @@ declare function assertCount(locator: any, expected: number, description: string
  *   - 通过 window.location.href 在浏览器内导航（保留 CSP / 不走 goto 防误刷新）；
  *   - 落点后等「基本信息」文本出现，便于后续 phase 进一步操作。
  */
-async function openProductEditor(page, productId, options = {}) {
+async function openProductEditor(
+  page: VbkPage,
+  productId: string,
+  options: { stayOnCurrentTab?: boolean } = {},
+): Promise<void> {
   const { stayOnCurrentTab = false } = options;
   const targetUrl = productEditorUrl(productId);
   const current = page.url();
@@ -439,7 +464,10 @@ async function openProductEditor(page, productId, options = {}) {
   }
   await page.evaluate((url) => { window.location.href = url; }, targetUrl);
   await page.waitForURL(
-    (url) => typeof url === "string" && (url.includes("baseInfoMerge") || /\/ivbk\/vendor\/tourdays\?/.test(url)),
+    (url) => {
+      const value = url.toString();
+      return value.includes("baseInfoMerge") || /\/ivbk\/vendor\/tourdays\?/.test(value);
+    },
     { timeout: 30_000 },
   ).catch(() => {});
   await page.getByText("基本信息", { exact: true }).first().waitFor({ timeout: 30_000 });
@@ -448,7 +476,7 @@ async function openProductEditor(page, productId, options = {}) {
 /**
  * 「基本信息」tab 可见性兜底：若当前不可见则按 role=tab 试「基本信息」/「产品信息」点开。
  */
-async function ensureBasicInfoTabVisible(page) {
+async function ensureBasicInfoTabVisible(page: VbkPage): Promise<void> {
   const visible = await page.getByText("基本信息", { exact: true }).first().isVisible().catch(() => false);
   if (visible) return;
   for (const label of ["基本信息", "产品信息"]) {

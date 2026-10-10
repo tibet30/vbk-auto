@@ -3,7 +3,7 @@ import { list, postTrafficLineSoa, record, text, type TrafficLinePage } from "./
 export type SegmentSubmitState =
   | { status: "missing" }
   | { status: "pending" }
-  | { status: "succeeded" }
+  | { status: "succeeded"; removedDepartureCityCount?: number }
   | { status: "failed"; rejectedCityIds: string[]; message: string };
 
 /**
@@ -37,7 +37,11 @@ export async function readSegmentSubmitState(
     throw error;
   }
   const result = text(payload.result);
-  if (result === "T") return { status: "succeeded" };
+  const messages = messageText(payload.messages);
+  if (result === "T") {
+    const removed = messages.match(/出发城市中有(\d+)个城市不符合.*(?:火车票|航班).*自动移除/u)?.[1];
+    return { status: "succeeded", ...(removed ? { removedDepartureCityCount: Number(removed) } : {}) };
+  }
   if (result === "U") return { status: "pending" };
   if (result !== "F") throw new Error(`子产品资源提交返回未知状态「${result || "空"}」。`);
   const rejectedCityIds = list(payload.checkSegmentResultCities)
@@ -46,7 +50,8 @@ export async function readSegmentSubmitState(
   return {
     status: "failed",
     rejectedCityIds: [...new Set(rejectedCityIds)],
-    message: messageText(payload.messages) || "VBK 未返回可用交通资源。",
+    message: [...new Set([messages, ...list(payload.checkSegmentResultCities).flatMap(item =>
+      list(item.errors).map(error => `${text(error.schedule)}：${text(error.message).split("Message:")[0]}`))].filter(Boolean))].slice(0, 5).join("；") || "VBK 未返回可用交通资源。",
   };
 }
 
@@ -54,20 +59,33 @@ export async function waitForSegmentSubmit(
   page: TrafficLinePage,
   productId: string,
   options: {
+    submittedCityIds?: readonly string[];
     maxPolls?: number;
     sleep?: (milliseconds: number) => Promise<void>;
     onProgress?: (attempt: number, maxPolls: number) => void;
+    shouldStopWaiting?: () => boolean;
   } = {},
 ): Promise<string[]> {
-  // 一轮最长约 60 秒。超时后持久化为可恢复状态，下一次只读既有校验，
-  // 不让界面无反馈地挂七分钟，也不重复提交仍在处理的写请求。
+  // 默认一轮约 60 秒；真实录入可提供更长预算并持续回报进度。
+  // 全程只读既有校验；超时后持久化为可恢复状态，不重复提交处理中的写请求。
   const maxPolls = options.maxPolls ?? 40;
   const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   let missingResultPolls = 0;
   for (let attempt = 1; attempt <= maxPolls; attempt += 1) {
     const state = await readSegmentSubmitState(page, productId);
-    if (state.status === "succeeded") return [];
+    if (state.status === "succeeded") {
+      if (state.removedDepartureCityCount && state.removedDepartureCityCount === options.submittedCityIds?.length) {
+        return [...options.submittedCityIds];
+      }
+      return [];
+    }
+    if (state.status === "pending" && options.shouldStopWaiting?.()) {
+      throw new Error("子产品资源提交仍在 VBK 异步核验（持续超过恢复阈值）；未重复提交。");
+    }
     if (state.status === "failed") {
+      if (/提前预订|酒店不可订|酒店.*(?:无房|不可用)|用车|套餐|权限|登录|超时|异常/u.test(state.message)) {
+        throw new Error(`子产品资源校验未通过（预订规则或地接资源问题，不能判定为无交通资源）：${state.message}`);
+      }
       if (state.rejectedCityIds.length) return state.rejectedCityIds;
       throw new Error(`子产品资源提交未通过：${state.message}`);
     }

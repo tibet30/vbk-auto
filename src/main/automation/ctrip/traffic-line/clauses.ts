@@ -82,6 +82,8 @@ export async function ensureTrafficLineClauses(
         desired,
         clauseRequirementsByIds(clausePackage, requiredByTab.get(tabEnum) ?? [], tabEnum),
       );
+      // 必选项探针可能同时提示互斥儿童票型，保存前仍只保留已确认选项。
+      if (tabEnum === 1) desired = desiredFirstTabClauses(clausePackage, desired, variant);
       const saved = await postTrafficLineRaw(
         page,
         "https://online.ctrip.com/restapi/soa2/20046/saveClausePackage",
@@ -238,10 +240,18 @@ export function desiredFirstTabClauses(
 ): JsonRecord[] {
   const requiredTransport = resolveChildTransportClauseRequirements(clausePackage, variant);
   const legacyMainTransportIds = new Set([3035, 10081, 4]);
+  const childOptionIds = new Set(allClauseItems(clausePackage)
+    .filter(({ type, item }) => Number(type.clauseTypeId) === 86
+      && list(item.clauseComponentDtos).some(component => text(component.value).includes("儿童")
+        && text(component.value).includes("火车票")))
+    .map(({ item }) => Number(item.clauseItemId)));
+  const requiredIds = new Set(requiredTransport.map(item => item.clauseItemId));
   let desired = mergeTrafficLineClauseItems(
     existing
       .filter((item) => Number(item.secondClassTypeId) !== 316)
-      .filter((item) => !legacyMainTransportIds.has(Number(item.clauseItemId))),
+      .filter((item) => !legacyMainTransportIds.has(Number(item.clauseItemId)))
+      .filter((item) => variant !== "trainRoundTrip" || !childOptionIds.has(Number(item.clauseItemId))
+        || requiredIds.has(Number(item.clauseItemId))),
     requiredTransport,
   );
   const transferItems = allClauseItems(clausePackage)
@@ -282,9 +292,18 @@ export function resolveChildTransportClauseRequirements(
   }
   const result = [outbound, returning];
   if (variant === "trainRoundTrip") {
-    const children = traffic.filter((item) => {
+    const childOptions = traffic.filter((item) => {
       const value = requirementText(item);
       return value.includes("儿童") && value.includes("火车票");
+    });
+    const selectedIds = new Set(selectedClauseItems(clausePackage).map(item => Number(item.clauseItemId)));
+    let children = childOptions.length === 1 ? childOptions
+      : childOptions.filter(item => selectedIds.has(item.clauseItemId));
+    // 初建子产品可能不预选儿童票型。仅回退到平台唯一的按订单年龄判断项，
+    // 不擅自承诺半价或全价；已选项和多个已选项仍按原规则处理。
+    if (!children.length) children = childOptions.filter(item => {
+      const value = requirementText(item);
+      return value.includes("是否含火车票") && value.includes("订单") && value.includes("儿童年龄");
     });
     if (children.length !== 1) {
       throw new Error(`子产品火车票条款无法唯一确认儿童票说明（候选 ${children.length} 项），未保存。`);

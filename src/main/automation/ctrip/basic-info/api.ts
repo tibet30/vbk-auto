@@ -10,6 +10,7 @@ export { getProductBaseInfoApi } from "./read-base.js";
 import { normalizeVbkSubtitle } from "./core.js";
 import { privateTourSubtitle } from "../../../../shared/private-tour-copy.js";
 import { privateTourTitleSpots } from "./private-tour.js";
+import { assertBasicInfoReadback } from "./verify-readback.js";
 import {
   productLineSaveField,
   resolveBasicInfoCityAnchor,
@@ -285,22 +286,7 @@ export async function ensureBasicInfoApi(
     emergencyContactId: Number(sourceBooking.vendorBookingEmergencyContactId),
     forChild,
   };
-  const savedLocalTravelAgencyId = Number(savedBooking.localInfoID
-    ?? (Array.isArray(savedBooking.localInfoIds) ? savedBooking.localInfoIds[0] : 0));
-  if (Number(savedBase.masterDepartureCityId) !== expected.cityId
-    || Number(savedBase.destinationCityID) !== expected.cityId
-    || (expected.productLineId !== null && Number(savedBase.productLineID) !== expected.productLineId)
-    || String(savedBase.vendorProductCode ?? "") !== expected.code
-    || String(savedBase.phone400 ?? "") !== expected.phone
-    || (privateTour && (savedBase.isAutoCalculateProductLevel !== "F" || savedBase.subName !== subtitle))
-    || Number(savedBooking.vendorBookingSeneschalContactId) !== expected.contactCardId
-    || Number(savedBooking.vendorComplainContactId) !== expected.complaintContactId
-    || Number(savedBooking.vendorBookingContactId) !== expected.bookingContactId
-    || Number(savedBooking.vendorBookingEmergencyContactId) !== expected.emergencyContactId
-    || String(savedBooking.forChild) !== expected.forChild
-    || savedLocalTravelAgencyId !== expected.localTravelAgencyId) {
-    throw new Error("VBK 基本信息保存后远端回读不一致");
-  }
+  assertBasicInfoReadback(savedBase, savedBooking, expected, privateTour ? subtitle : undefined);
   const savedScenicIds = new Set(list(readback.nameAreas).map((rule) => Number(rule.pOIScenicSpotID)));
   if (scenicRules.some((rule) => !savedScenicIds.has(Number(rule.pOIScenicSpotID)))) {
     throw new Error("VBK 国家景区保存后远端回读不一致");

@@ -1,16 +1,16 @@
-// @ts-nocheck
 /**
  * 「基本信息」面板里几个相对独立的小字段段写入 helper：
  *   - fillServicePhone：线上 400 电话（必填，缺则抛错）；
  *   - fillAdvanceBooking：提前预订（天/点几分两个数值控件）；
  *   - fillLocalTravelAgency：地接社已选项（如已选直接 return）；
  *   - fillButlerContact：预订联系人，复用管家联系人 selection.contactCardId 精确定位。
- * 顶部带 `// @ts-nocheck`，page 是动态传入。
+ * 页面与定位器统一使用携程自动化的 Playwright 类型边界。
  */
 
-import { delay, assertCount, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption } from "../utils.js";
+import { delay, assertCount, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption, type LocatorSnapshot } from "../utils.js";
 import { findFirstEnabledOptionIndex, findButlerOptionIndex } from "../../schema/schema-functions.js";
 import { NonAdvisableAutomationError } from "../../automation.main/automation.main.errors.js";
+import type { VbkLocator, VbkPage } from "../locator-types.js";
 
 const BASIC_INFO_VISIBLE_WAIT_MS = 5_000;
 const BASIC_INFO_SEARCH_TIMEOUT_MS = 3_000;
@@ -23,7 +23,7 @@ const SERVICE_PHONE_POLL_INTERVAL_MS = 150;
  *   - 必要时滚动到容器可视区域；
  *   - 在打开的下拉里精确匹配 phone 文本，未匹配到抛错（含可选列表便于运营排查）。
  */
-export async function fillServicePhone(page, phone) {
+export async function fillServicePhone(page: VbkPage, phone: string): Promise<void> {
   const target = (phone || "").trim();
   if (!target) throw new Error("线上 400 电话（servicePhone）未配置，无法继续录入。");
   const labelLocator = page.locator("label[for=\"baseInfo.phone400\"]");
@@ -39,11 +39,11 @@ export async function fillServicePhone(page, phone) {
       el.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
       const form = document.querySelector('.ant-form');
       if (form && form.scrollHeight > form.clientHeight) {
-        form.scrollTop = Math.max(0, el.offsetTop - form.clientHeight / 2);
+        form.scrollTop = Math.max(0, (el as HTMLElement).offsetTop - form.clientHeight / 2);
       }
       const main = document.querySelector('.vbk_layout_layout-main');
       if (main && main.scrollHeight > main.clientHeight) {
-        main.scrollTop = Math.max(0, el.offsetTop - main.clientHeight / 2);
+        main.scrollTop = Math.max(0, (el as HTMLElement).offsetTop - main.clientHeight / 2);
       }
     }
   });
@@ -51,7 +51,7 @@ export async function fillServicePhone(page, phone) {
   await assertCount(trigger, 1, "线上 400 电话 combobox");
   await trigger.click();
   const options = await getControlledDropdownOptions(page, trigger);
-  let texts = [];
+  let texts: string[] = [];
   // 真实 VBK 会在打开后异步请求账号可用号码；连续新建产品时，候选可能
   // 稍晚才替换“暂无数据”。这里收紧到 3 秒，避免把简单精确匹配拖成长等待。
   const searchDeadline = Date.now() + BASIC_INFO_SEARCH_TIMEOUT_MS;
@@ -83,7 +83,10 @@ export async function fillServicePhone(page, phone) {
  *   - 时间走 ant-time-picker 面板（小时列 + 分钟列各点一项），提交后回读 inputValue 等于 time；
  *   - 面板结构异常 / 时间未成功提交时抛错。
  */
-export async function fillAdvanceBooking(page, { days, time }) {
+export async function fillAdvanceBooking(
+  page: VbkPage,
+  { days, time }: { days: number; time: string },
+): Promise<void> {
   const labelLocator = page.locator("label[for=\"bookingControls.advanceBooking\"]");
   await assertCount(labelLocator, 1, "提前预订 label[for=bookingControls.advanceBooking]");
   const formItem = labelLocator.locator("xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]");
@@ -117,7 +120,7 @@ export async function fillAdvanceBooking(page, { days, time }) {
  * 「地接社」字段：已有已选项 → return；否则清空既有 + 在下拉挑第一个 enabled 选项写入。
  * VBK 必须先在地接社维护里有可用项，否则抛错给上层 advisor。
  */
-export async function fillLocalTravelAgency(page) {
+export async function fillLocalTravelAgency(page: VbkPage): Promise<void> {
   const scope = page.locator("div[id=\"bookingControls.localInfoIds\"]");
   await assertCount(scope, 1, "地接社容器 div#bookingControls.localInfoIds");
   await scope.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS });
@@ -169,7 +172,7 @@ export async function fillLocalTravelAgency(page) {
  * bookingControls.vendorBookingAssistant；若后续页面只保留中文 label，则回退按
  * 「预订联系人 / 预定联系人」定位到同一个表单项。
  */
-async function findBookingContactScope(page) {
+async function findBookingContactScope(page: VbkPage): Promise<{ scope: VbkLocator; description: string }> {
   const stableScope = page.locator('div[id="bookingControls.vendorBookingAssistant"]');
   if ((await stableScope.count()) === 1) {
     return { scope: stableScope, description: "预订联系人容器 div#bookingControls.vendorBookingAssistant" };
@@ -192,14 +195,18 @@ async function findBookingContactScope(page) {
  *   - 在下拉中拿所有 option 的 data-value / data-id 与 selection.contactCardId 比对，
  *     文本与 id 同时匹配 findButlerOptionIndex；找不到抛错附可选列表。
  */
-export async function fillButlerContact(page, selection) {
+export async function fillButlerContact(
+  page: VbkPage,
+  selection: { contactCardId?: number; displayName?: string },
+): Promise<void> {
   if (!selection || typeof selection !== "object") {
     throw new Error("预订联系人使用管家联系人信息，但管家联系人未配置，请在账号设置里维护后重试。");
   }
   const { contactCardId, displayName } = selection;
-  if (!Number.isInteger(contactCardId) || contactCardId <= 0) {
+  if (typeof contactCardId !== "number" || !Number.isInteger(contactCardId) || contactCardId <= 0) {
     throw new Error("预订联系人使用的管家联系人 contactCardId 缺失或非法。");
   }
+  const validContactCardId = contactCardId as number;
   const { scope, description } = await findBookingContactScope(page);
   await assertCount(scope, 1, description);
   await scope.waitFor({ state: "visible", timeout: BASIC_INFO_VISIBLE_WAIT_MS }).catch(() => {});
@@ -216,8 +223,8 @@ export async function fillButlerContact(page, selection) {
   // 下拉打开时会先显示空关键词第一页（最多 50 条），`search.fill()` 后服务端
   // 过滤结果异步替换这一批 DOM。不能看到首项就立即采集，否则会把仍在途的
   // 精确联系人误判为“不存在”。持续读取当前可见候选，直到目标真正出现。
-  let collected = [];
-  let collectedSnapshot = [];
+  let collected: Array<{ value: string; label: string }> = [];
+  let collectedSnapshot: LocatorSnapshot[] = [];
   let targetIndex = -1;
   const searchDeadline = Date.now() + BASIC_INFO_SEARCH_TIMEOUT_MS;
   while (Date.now() < searchDeadline) {
@@ -227,13 +234,13 @@ export async function fillButlerContact(page, selection) {
       value: option.value || option.id,
       label: option.text.replace(/\s+/g, " ").trim(),
     }));
-    targetIndex = findButlerOptionIndex(collected, { contactCardId, displayName });
+    targetIndex = findButlerOptionIndex(collected, { contactCardId: validContactCardId, displayName });
     if (targetIndex >= 0) break;
     await delay(150);
   }
   if (targetIndex < 0) {
     const texts = collected.map((option) => option.label);
-    const who = displayName ? `「${displayName}」(ID ${contactCardId})` : `ID ${contactCardId}`;
+    const who = displayName ? `「${displayName}」(ID ${validContactCardId})` : `ID ${validContactCardId}`;
     const detail = `预订联系人使用管家联系人${who}，但该联系人不在 VBK 联系人下拉中（缺少 ID / 姓名精确匹配项）；请在 VBK 维护该联系人或更新账号固定信息后再重试。可选：${texts.filter(Boolean).join("、") || "无"}`;
     throw new Error(detail);
   }

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 保存/提交后页面校验错误采集与已知错误自动修复。
  *
@@ -8,15 +7,29 @@
  */
 
 import { delay } from "./utils.js";
+import type { VbkLocator, VbkPage } from "./locator-types.js";
 
 const HOTEL_SOURCE_LABELS = ["使用携程平台酒店", "携程平台酒店"];
 
-function normalizeText(value) {
+interface ValidationError {
+  label: string;
+  message: string;
+  text: string;
+}
+
+interface ValidationRepairResult {
+  errors: ValidationError[];
+  repaired: boolean;
+  repairs: string[];
+  after: ValidationError[];
+}
+
+function normalizeText(value: unknown): string {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
-async function collectVisibleValidationErrors(page) {
-  return page.evaluate(String.raw`(function () {
+async function collectVisibleValidationErrors(page: VbkPage): Promise<ValidationError[]> {
+  return page.evaluate<ValidationError[]>(String.raw`(function () {
     function visible(element) {
       if (!(element instanceof HTMLElement)) return false;
       const style = window.getComputedStyle(element);
@@ -59,7 +72,7 @@ async function collectVisibleValidationErrors(page) {
   })()`);
 }
 
-async function isRadioOptionChecked(scope, optionLabel) {
+async function isRadioOptionChecked(scope: VbkLocator, optionLabel: string): Promise<boolean> {
   const matches = scope.getByText(optionLabel, { exact: true });
   for (let index = 0; index < (await matches.count()); index += 1) {
     const match = matches.nth(index);
@@ -75,7 +88,7 @@ async function isRadioOptionChecked(scope, optionLabel) {
   return false;
 }
 
-async function chooseRadioOption(scope, labels, description) {
+async function chooseRadioOption(scope: VbkLocator, labels: readonly string[], description: string): Promise<string> {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     for (const label of labels) {
       const text = scope.getByText(label, { exact: true });
@@ -96,7 +109,7 @@ async function chooseRadioOption(scope, labels, description) {
   throw new Error(`${description}未能选中：${labels.join(" / ")}`);
 }
 
-async function repairHotelSource(page) {
+async function repairHotelSource(page: VbkPage): Promise<{ repaired: boolean; message: string }> {
   const formItems = page.locator(".ant-form-item, .form-item, [class*='formItem']").filter({ hasText: "酒店来源" });
   for (let index = 0; index < (await formItems.count()); index += 1) {
     const item = formItems.nth(index);
@@ -107,11 +120,11 @@ async function repairHotelSource(page) {
   return { repaired: false, message: "未找到酒店来源表单项" };
 }
 
-function needsHotelSourceRepair(errors) {
+function needsHotelSourceRepair(errors: readonly ValidationError[]): boolean {
   return errors.some((entry) => /酒店来源/.test(`${entry.label} ${entry.text}`) && /请选择|required|必填/.test(`${entry.message} ${entry.text}`));
 }
 
-async function inspectAndRepairValidationErrors(page) {
+async function inspectAndRepairValidationErrors(page: VbkPage): Promise<ValidationRepairResult> {
   const before = await collectVisibleValidationErrors(page);
   const repairs = [];
   if (needsHotelSourceRepair(before)) {
@@ -130,7 +143,7 @@ async function inspectAndRepairValidationErrors(page) {
   return { errors: before, repaired: false, repairs, after: before };
 }
 
-function formatValidationErrors(errors) {
+function formatValidationErrors(errors: readonly ValidationError[]): string {
   const parts = errors
     .map((entry) => {
       const label = normalizeText(entry.label);

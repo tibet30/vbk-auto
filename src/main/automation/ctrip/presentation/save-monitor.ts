@@ -1,5 +1,4 @@
 import { logWarn } from "../../../../shared/log-timestamp.js";
-// @ts-nocheck
 /**
  * 「产品图文」阶段保存结果严格门禁 monitor：
  *

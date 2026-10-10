@@ -3,6 +3,8 @@ import { logWarn } from '../../shared/log-timestamp.js';
 import { approvalForRun, trafficLineCanBeDeferred } from './integration-gates.js';
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { isCoverHandoffReady } from '../planning/preparation-completion.js';
+import { trafficResourceStatus } from '../../shared/traffic-resource-status.js';
+import type { TrafficLineConfig } from '../../shared/contracts-traffic-line.js';
 
 export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDetail): Partial<ProductWorkflowTask> {
   const run = snapshot.run;
@@ -27,7 +29,16 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
   }
   if (product && trafficLineCanBeDeferred(product)) done.add('vbk.write_phase:trafficLine');
   const progress = workflowProgress(status, snapshot, scopes, done);
-  const message = coverHandoffReady && coverFallback ? (coverFallback.reason === 'search_unavailable'
+  const trafficStatus = product ? trafficResourceStatus(
+    (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
+    product.automation?.trafficLine,
+  ) : undefined;
+  const routeReviewPending = ['paused', 'failed'].includes(run?.status ?? '')
+    && trafficStatus?.requiresRouteReview;
+  const message = routeReviewPending ? (product?.status === 'draft_saved'
+    ? '母产品草稿已保存；交通套餐待玩法线路匹配审核，审核通过后继续'
+    : '交通套餐待玩法线路匹配审核，审核通过后继续')
+    : coverHandoffReady && coverFallback ? (coverFallback.reason === 'search_unavailable'
     ? '可录入 VBK 未提审草稿；图库暂不可用，上架前需替换真实封面'
     : '可录入 VBK 未提审草稿；运营占位图上架前需替换')
     : snapshot.pendingApproval ? '方案已就绪，等待授权录入'

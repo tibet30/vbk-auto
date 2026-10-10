@@ -10,6 +10,7 @@ import type {
 import { ensureTrafficLineApi, isUnavailableTrafficResourceFailure } from "./main.js";
 import type { TrafficLinePage } from "./client.js";
 import type { TrafficLineStationDisambiguator } from "./endpoints.js";
+import { ensureAuthorizedTrafficRouteReview } from "./authorized-route-review.js";
 
 type TrafficLineLog = (message: string, level?: "info" | "warning" | "error") => void;
 
@@ -23,6 +24,7 @@ interface TrafficLinePhaseInput {
   onCheckpoint?: (checkpoint: TrafficLineWorkflowProgress) => void;
   disambiguator?: TrafficLineStationDisambiguator;
   product?: Record<string, unknown>;
+  routeReviewAuthorized?: boolean;
 }
 
 interface TrafficLinePhaseResultChild {
@@ -60,6 +62,7 @@ export async function ensureTrafficLinePhase({
   onCheckpoint,
   disambiguator,
   product,
+  routeReviewAuthorized,
 }: TrafficLinePhaseInput): Promise<TrafficLinePhaseResult> {
   const executableConfig = trafficLineConfigForProduct(config, product);
   if (!executableConfig.enabled || executableConfig.variants.length === 0) {
@@ -82,7 +85,10 @@ export async function ensureTrafficLinePhase({
   const endpointPlan = progress.endpointPlan ?? executableConfig.availability?.endpointPlan;
   let result: Awaited<ReturnType<typeof ensureTrafficLineApi>>;
   try {
+    await ensureAuthorizedTrafficRouteReview(page, parentProductId, routeReviewAuthorized === true, log);
     result = await ensureTrafficLineApi(page, parentProductId, executableConfig, {
+      // 平台核验不是同步保存；有界只读等待覆盖超过一分钟的正常异步结算。
+      maxSegmentPolls: 600,
       itinerary,
       endpointPlan,
       rejectedTrainStationCodes: progress.rejectedTrainStationCodes,
@@ -121,15 +127,13 @@ export async function ensureTrafficLinePhase({
     lineDescription: child.lineDescription,
   }));
   for (const item of result.skipped ?? []) {
-    log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品未完成，已跳过继续：${item.reason}`, "warning");
+    log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品未完成，已记录未完成原因：${item.reason}`, "warning");
   }
   log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
   const skipped = result.skipped ?? [];
-  const confirmedAvailable = new Set(executableConfig.availability?.availableVariants ?? []);
   // 端点存在不等于当前班期有可售资源；平台明确无资源时保留
   // skipped 证据；会话/保存/回读失败保留子产品失败态，由外层继续母产品预检。
-  const unresolvedAvailable = skipped.filter((item) => confirmedAvailable.has(item.variant)
-    && !isUnavailableTrafficResourceFailure(item.reason, item.variant));
+  const unresolvedAvailable = skipped.filter((item) => !isUnavailableTrafficResourceFailure(item.reason, item.variant));
   if (unresolvedAvailable.length) {
     const reason = unresolvedAvailable.map((item) => `${item.variant}=${item.reason}`).join("；");
     progress = { ...progress, failureReason: reason, verifiedAt: undefined };

@@ -1,6 +1,7 @@
 import { saveStructuredProductClauses } from "./clauses-api.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
 import { isExteriorOnlyVisit } from "./itinerary-api/visit-semantics.js";
+import type { VbkSessionRequestBrowser } from "../../infrastructure/vbk-session-request.js";
 
 type ItinerarySpot = {
   name?: string | null;
@@ -34,7 +35,7 @@ export function buildAdultTicketInclusionText(itinerary: ItineraryDay[]): string
  * 旧的页面 tab/textarea 保存路径已经废弃：自动化主链会在产品壳创建完成后
  * 调用本函数，因此缺少 productId 必须明确失败，不能降级为 DOM 点击。
  */
-export async function fillAndSaveTerms(page: unknown, product: any, productId?: string) {
+export async function fillAndSaveTerms(page: VbkSessionRequestBrowser, product: any, productId?: string) {
   if (!productId) throw new Error("条款 API 写入需要 VBK 产品 ID");
   const itinerary = Array.isArray(product.itinerary) ? product.itinerary : [];
   const enrichedItinerary = itinerary.length

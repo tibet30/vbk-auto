@@ -1,6 +1,7 @@
 import type { TrafficLineEndpointAvailability, TrafficLineEndpointPlan, TrafficLineStation, TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
 import { searchAirports, searchTrainStations, type StationCandidate } from "../itinerary-api/station-search.js";
 import type { TrafficLinePage } from "./client.js";
+import { explicitTrafficLineCities } from "../../../../shared/traffic-line-user-endpoints.js";
 
 export type TrafficLineStationDisambiguator = (request: {
   kind: "station";
@@ -30,13 +31,7 @@ export function resolveTrafficLineDestination(product: Record<string, unknown>):
   const destinationCity = basicInfo && typeof basicInfo === "object" && !Array.isArray(basicInfo)
     ? normaliseCity((basicInfo as Record<string, unknown>).destinationCity)
     : "";
-  const operations = product.operations;
-  const trafficLine = operations && typeof operations === "object" && !Array.isArray(operations)
-    ? (operations as Record<string, unknown>).trafficLine
-    : undefined;
-  const configured = trafficLine && typeof trafficLine === "object" && !Array.isArray(trafficLine)
-    ? trafficLine as Record<string, unknown>
-    : {};
+  const configured = explicitTrafficLineCities(product);
   const arrivalCity = normaliseCity(configured.arrivalCity) || destinationCity;
   const departureCity = normaliseCity(configured.departureCity) || destinationCity;
   if (!arrivalCity || !departureCity) {
@@ -60,6 +55,24 @@ export async function resolveTrafficLineEndpoints(
     .map(([variant, reason]) => `${variant === "flightRoundTrip" ? "飞机" : "火车"}：${reason}`);
   if (unavailable.length) throw new Error(`交通站点未能全部确认（${unavailable.join("；")}）。`);
   return availability.endpointPlan;
+}
+
+/** 只替换不可售的火车站，已核实的飞机端点不参与重新消歧。 */
+export async function resolveTrainReplacementEndpoints(
+  page: TrafficLinePage,
+  itinerary: readonly ItineraryDay[],
+  now = new Date(),
+  disambiguator?: TrafficLineStationDisambiguator,
+  product: Record<string, unknown> = {},
+  options: TrafficLineEndpointResolutionOptions = {},
+): Promise<TrafficLineEndpointPlan> {
+  const result = await preflightTrafficLineEndpoints(
+    page, itinerary, now, disambiguator, product, ["trainRoundTrip"], options,
+  );
+  if (!result.endpointPlan.train) {
+    throw new Error(result.unavailableVariants.trainRoundTrip ?? "火车站替换未返回接口确认的站点。");
+  }
+  return result.endpointPlan;
 }
 
 /**
@@ -144,7 +157,7 @@ async function resolveVariantEndpointsWithRetry(args: {
 function isRetryableTrafficEndpointFailure(reason: string): boolean {
   if (isUnavailableTrafficStation(reason)) return false;
   if (/缺少安全消歧器|不会按列表首项猜测/.test(reason)) return false;
-  return /超时|timeout|网络|暂时|稍后|重试|可安全重试|未被安全消歧/i.test(reason);
+  return /超时|timeout|网络|暂时|稍后|重试|可安全重试|未被安全消歧|选择结果不合法/i.test(reason);
 }
 
 async function resolveUniqueStation(

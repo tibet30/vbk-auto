@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 供应商产品编号的最小同步路径。
  *
@@ -7,8 +6,9 @@
  */
 import { clickSection } from "../tabs.js";
 import { dismissKnownNoticeDialogs } from "../dialogs.js";
+import type { VbkLocator, VbkPage } from "../locator-types.js";
 
-export async function syncSupplierProductCode(page, supplierProductCode) {
+export async function syncSupplierProductCode(page: VbkPage, supplierProductCode: string): Promise<void> {
   await clickSection(page, ["产品信息", "基本信息"]).catch(() => {});
   const input = await findVisibleSupplierProductCodeInput(page);
   await input.fill(supplierProductCode);
@@ -36,7 +36,7 @@ export async function syncSupplierProductCode(page, supplierProductCode) {
   }
 }
 
-async function findVisibleSupplierProductCodeInput(page) {
+async function findVisibleSupplierProductCodeInput(page: VbkPage): Promise<VbkLocator> {
   const inputs = page.locator("#baseInfo\\.vendorProductCode");
   const count = await inputs.count();
   for (let index = 0; index < count; index += 1) {

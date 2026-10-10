@@ -37,6 +37,36 @@ export class TrafficLineItineraryReadbackError extends Error {
   }
 }
 
+/** 只有当前正式行程明确缺交通节点时修复，网络或版本关系错误不得触发写入。 */
+export async function repairTrafficLineItineraryIfMissing(
+  page: TrafficLinePage, productId: string, variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan,
+): Promise<void> {
+  if (await trafficLineItineraryNeedsRepair(page, productId, variant)) {
+    await ensureTrafficLineItinerary(page, productId, variant, endpoints);
+  }
+}
+
+async function trafficLineItineraryNeedsRepair(page: TrafficLinePage, productId: string, variant: TrafficLineVariant) {
+  try { await readTrafficLineItineraryReadback(page, productId, variant); return false; }
+  catch (error) {
+    if (error instanceof TrafficLineItineraryReadbackError && error.repairable) return true;
+    throw error;
+  }
+}
+
+/** 首次录入也处理资源结算迟到引起的行程回退，不能只在手动恢复时修复。 */
+export async function ensureTrafficLineClausesWithItineraryRecovery(
+  page: TrafficLinePage, productId: string, variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan,
+): Promise<void> {
+  await settleTrafficLineClausesBeforeActivation({
+    settleClauses: async () => { await ensureTrafficLineClauses(page, productId, variant); },
+    itineraryNeedsRepair: () => trafficLineItineraryNeedsRepair(page, productId, variant),
+    repairItinerary: () => ensureTrafficLineItinerary(page, productId, variant, endpoints),
+    saveClauses: () => ensureTrafficLineClauses(page, productId, variant),
+    verifyClauses: () => verifyTrafficLineClauses(page, productId, variant),
+  });
+}
+
 /** 最终聚合门保持纯读；任何定向修复只由外层稳定门在明确业务缺失后触发。 */
 export async function verifyTrafficLineChild(
   page: TrafficLinePage,
@@ -160,16 +190,7 @@ export async function activateTrafficLineChild(
 ): Promise<TrafficLineExistingChild> {
   await settleTrafficLineClausesBeforeActivation({
     settleClauses: () => verifyOrRepairTrafficLineClauses(page, child.productId, variant),
-    itineraryNeedsRepair: async () => {
-      if (!endpoints) return false;
-      try {
-        await readTrafficLineItineraryReadback(page, child.productId, variant);
-        return false;
-      } catch (error) {
-        if (error instanceof TrafficLineItineraryReadbackError && error.repairable) return true;
-        throw error;
-      }
-    },
+    itineraryNeedsRepair: () => endpoints ? trafficLineItineraryNeedsRepair(page, child.productId, variant) : Promise.resolve(false),
     repairItinerary: () => ensureTrafficLineItinerary(page, child.productId, variant, endpoints!),
     saveClauses: () => ensureTrafficLineClauses(page, child.productId, variant),
     verifyClauses: () => verifyTrafficLineClauses(page, child.productId, variant),

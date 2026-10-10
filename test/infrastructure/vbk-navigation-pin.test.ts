@@ -44,6 +44,6 @@ test("拒绝列表页、其它产品和无关图库页", () => {
 });
 
 test("VbkBrowser 导航钩子必须咨询产品钉住规则", () => {
-  const source = readFileSync(resolve(import.meta.dirname, "../../src/main/infrastructure/vbk-browser.ts"), "utf8");
+  const source = readFileSync(resolve(import.meta.dirname, "../../src/main/infrastructure/vbk-browser-view-manager.ts"), "utf8");
   assert.match(source, /isPinnedVbkNavigationAllowed\(url, this\.navigationPin\)/);
 });

@@ -1,16 +1,20 @@
-// @ts-nocheck
 /** 基本信息 → 国家景区的省份、景区与景点写入。 */
 
-import { delay, assertCount, pickSearchInput, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption } from "../utils.js";
-import { matchDropdownOption } from "../../dropdown-match.js";
+import { delay, assertCount, pickSearchInput, readLocatorSnapshot, getControlledDropdownOptions, clickLocatorSnapshotOption, type LocatorSnapshot } from "../utils.js";
+import { matchDropdownOption, type Disambiguator } from "../../dropdown-match.js";
 import { findProvinceOptionIndex } from "../../schema/schema-functions.js";
 import { dismissDataRiskDialog } from "../dialogs.js";
 import { logInfo } from "../../../../shared/log-timestamp.js";
+import type { VbkLocator, VbkPage } from "../locator-types.js";
 
 const DIRECT_ADMIN_MUNICIPALITIES = new Set(["北京", "上海", "天津", "重庆"]);
 const SCENIC_SEARCH_TIMEOUT_MS = 3_000;
 
-export async function fillScenicAreaProvince(page, province, extra = {}) {
+export async function fillScenicAreaProvince(
+  page: VbkPage,
+  province: string,
+  extra: { disambiguator?: Disambiguator; product?: Record<string, unknown> } = {},
+): Promise<void> {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product ?? {};
   const label = (province || "").trim();
@@ -29,7 +33,7 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
     throw new Error(`国家景区级联下拉结构异常：仅找到 ${comboboxCount} 个下拉框`);
   }
   /** 等待当前省份下拉至少出现一个可用项，最多 3 秒。 */
-  async function availableOptions(description) {
+  async function availableOptions(description: string) {
     const deadline = Date.now() + SCENIC_SEARCH_TIMEOUT_MS;
     while (Date.now() < deadline) {
       const snapshot = await readLocatorSnapshot(optionNodes);
@@ -103,19 +107,25 @@ export async function fillScenicAreaProvince(page, province, extra = {}) {
  * 按省级 + 景点数组，依次在「景点 → 城市/景区」两个级联下拉里挑选项；命中后点「添加」并
  * 轮询确认标签被写入 #scenic_area。任何一步失败 / 触发数据风险弹窗都记录到 logs 而不抛错。
  */
-export async function fillScenicAreaSpots(page, province, spots, logs = [], extra = {}) {
+export async function fillScenicAreaSpots(
+  page: VbkPage,
+  province: string,
+  spots: string[],
+  logs: string[] = [],
+  extra: { disambiguator?: Disambiguator; product?: Record<string, unknown> } = {},
+): Promise<void> {
   const disambiguator = extra?.disambiguator;
   const product = extra?.product ?? {};
   const container = page.locator("#scenic_area");
   await assertCount(container, 1, "国家景区容器 #scenic_area");
   const provinceLabel = (province || "").trim();
   if (!provinceLabel) return;
-  const seen = new Set();
+  const seen = new Set<string>();
   // 只计入本次确认新增的标签：历史已有、下拉未命中和风险弹窗都不占名额。
   let newlyAddedCount = 0;
 
-  const optionLabel = (text) => String(text || "").split(/\r?\n/)[0].trim();
-  const normalizeCommittedLabel = (text) => String(text || "").replace(/\s+/g, "");
+  const optionLabel = (text: unknown) => String(text || "").split(/\r?\n/)[0].trim();
+  const normalizeCommittedLabel = (text: unknown) => String(text || "").replace(/\s+/g, "");
   const committedChoiceSelector = ".ant-select-selection__choice, .ant-select-selection-item";
   const readCommittedLabels = async () => {
     const tags = (await container.locator(".ant-tag").allTextContents()).map(normalizeCommittedLabel);
@@ -135,8 +145,8 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
   //   - .ant-select-selection-selected-value（旧版/部分容器）
   //   - .ant-select-selection-item（cascade 当前值常见渲染）
   // 两个类任一命中即视为未提交，不计入 committedLabels。
-  const readCascadeCurrentValues = async (comboboxes) => {
-    const exclude = new Set();
+  const readCascadeCurrentValues = async (comboboxes: VbkLocator): Promise<Set<string>> => {
+    const exclude = new Set<string>();
     const cascadeTotal = await comboboxes.count();
     for (let index = 0; index < cascadeTotal; index += 1) {
       const cb = comboboxes.nth(index);
@@ -158,7 +168,12 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     }
     return exclude;
   };
-  const chooseExact = async (combobox, target, aliases, description) => {
+  const chooseExact = async (
+    combobox: VbkLocator,
+    target: string,
+    aliases: string[],
+    description: string,
+  ): Promise<boolean> => {
     const selected = combobox.locator(".ant-select-selection-selected-value");
     if (await selected.count()) {
       const current = ((await selected.getAttribute("title")) || (await selected.innerText().catch(() => ""))).trim();
@@ -172,7 +187,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     const deadline = Date.now() + SCENIC_SEARCH_TIMEOUT_MS;
     let last: string[] = [];
     let lastDisableds: boolean[] = [];
-    let lastSnapshot = [];
+    let lastSnapshot: LocatorSnapshot[] = [];
     while (Date.now() < deadline) {
       const snapshot = await readLocatorSnapshot(options);
       lastSnapshot = snapshot;
@@ -254,7 +269,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     provinceShapes.add(`${prov}(国家)`);
     provinceShapes.add(`${prov}（国家）`);
   }
-  const isProvinceShapeLabel = (text) => provinceShapes.has(text);
+  const isProvinceShapeLabel = (text: string) => provinceShapes.has(text);
 
   const readCommittedSpotCount = async () => {
     const cbs = container.getByRole("combobox");
@@ -295,7 +310,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     if (total < 4) {
       throw new Error(`国家景区级联下拉结构异常：预期国家/省/城市景区/景点四级，实际 ${total}`);
     }
-    const hasSpotText = (text) => normalizedAliases.some((name) => text.includes(name));
+    const hasSpotText = (text: string) => normalizedAliases.some((name) => text.includes(name));
     // 把已提交标签/choice 与 4 个级联 combobox 当前未提交选择值分开：级联当前
     // 选择只是「选了下拉但还没点添加」的状态，不算已添加；漏掉这一步会让
     // 第四级显示「西安明城墙」时把同名点全部误判为已存在。
@@ -351,7 +366,7 @@ export async function fillScenicAreaSpots(page, province, spots, logs = [], extr
     }
   const commitDeadline = Date.now() + SCENIC_SEARCH_TIMEOUT_MS;
     let committed = false;
-    let delayedDataRisk = null;
+    let delayedDataRisk: string | null = null;
     while (Date.now() < commitDeadline) {
       // 提交成功后级联应已复位为 placeholder，cascadeCurrentValues 多半为空；
       // 仍过滤以防 VBK 把保留值留在 combobox 内被误判。

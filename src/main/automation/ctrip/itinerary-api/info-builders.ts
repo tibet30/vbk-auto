@@ -326,13 +326,17 @@ export function buildFreeInfo(args: {
   durationMinutes?: number;
 }) {
   const { description, sort, serviceTime } = args;
+  if (args.durationMinutes !== undefined && (!Number.isFinite(args.durationMinutes) || args.durationMinutes <= 0)) {
+    throw new Error("自由活动时长必须大于0。");
+  }
   return {
     ...commonInfoFields({
       activeType: { key: 7, name: "自由活动" },
       sort,
       description,
       takeoffTime: otherActivityTime(args.activityTime),
-      takeTime: args.durationMinutes ?? 0,
+      // 自由活动必须有正数时长才能通过正式行程审核；未指定时预留一小时。
+      takeTime: args.durationMinutes ?? 60,
       costInclude: false,
       startOnBoardTime: serviceTime?.startTime ?? "",
       stopOnBoardTime: serviceTime?.endTime ?? "",

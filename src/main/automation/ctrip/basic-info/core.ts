@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { stripBasicInfoIllegalKeywords as stripIllegalKeywords } from "./name-keywords.js";
 import { privateTourTitleSpots } from "./private-tour.js";
 import { privateTourSubtitle } from "../../../../shared/private-tour-copy.js";
@@ -9,7 +8,7 @@ export { stripBasicInfoIllegalKeywords as stripIllegalKeywords } from "./name-ke
  *     说明、出发/目的地、产品线、国家景区、提前预订、地接社、管家联系人等）；
  *   - assertBasicInfoNoRedErrors：保存后扫 .ant-form-item-with-help / .has-error，限定
  *     只关注「国家景区 / 提前预订 / 地接社 / 管家 / 预订联系人」几类，给出本地化错误。
- * 顶部带 `// @ts-nocheck`，page 是动态传入。
+ * 页面与定位器统一使用携程自动化的 Playwright 类型边界。
  */
 
 import { delay, assertCount, fillById, readLocatorSnapshot } from "../utils.js";
@@ -28,6 +27,17 @@ import {
   fillLocalTravelAgency,
   fillButlerContact,
 } from "./sections.js";
+import type { VbkLocator, VbkPage } from "../locator-types.js";
+import type { Disambiguator } from "../../dropdown-match.js";
+
+type BasicInfoProduct = Record<string, any>;
+type ButlerSelection = Record<string, any>;
+export interface BasicInfoExtra {
+  keySpots?: string[];
+  disambiguator?: Disambiguator;
+  scenicSpotLogs?: string[];
+  servicePhone?: string;
+}
 
 /**
  * 写入「基本信息」面板完整字段：
@@ -39,12 +49,17 @@ import {
  *   - 提前预订（按 resolveAdvanceBooking 解析）；
  *   - 地接社 + 预订联系人（使用管家联系人信息；但仅在外部传入时填）。
  */
-export async function fillBasicInfo(page, product, butlerSelection, extra = {}) {
+export async function fillBasicInfo(
+  page: VbkPage,
+  product: BasicInfoProduct,
+  butlerSelection: unknown,
+  extra: BasicInfoExtra = {},
+) {
   const info = product.basicInfo;
   await page.getByText("基本信息", { exact: true }).waitFor();
 
   const keySpots = product.sales?.productForm === "privateTour"
-    ? (await privateTourTitleSpots(page, product.itinerary ?? [])).map(spot => String(spot.name || spot.poiName || ""))
+    ? (await privateTourTitleSpots(page, product.itinerary ?? [])).map((spot: Record<string, unknown>) => String(spot.name || spot.poiName || ""))
     : extra.keySpots;
   const preferredCountry = info.province && info.province.trim() ? "中国" : undefined;
   const cityContext = { disambiguator: extra?.disambiguator, product };
@@ -97,7 +112,9 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
   const advance = resolveAdvanceBooking(product);
   if (advance) await fillAdvanceBooking(page, advance);
   await fillLocalTravelAgency(page);
-  if (butlerSelection) await fillButlerContact(page, butlerSelection);
+  if (butlerSelection && typeof butlerSelection === "object") {
+    await fillButlerContact(page, butlerSelection as ButlerSelection);
+  }
   await repairBasicInfoIllegalKeywords(page, info);
 }
 
@@ -106,7 +123,7 @@ export async function fillBasicInfo(page, product, butlerSelection, extra = {}) 
  * 这在本地 schema 合法但会在真实页面保存时触发红框。保留原文并补充
  * 目的地/体验边界，按 VBK 的中文 2、ASCII 1 计数规则控制在 80 上限内。
  */
-export function normalizeVbkSubtitle(value, city = "") {
+export function normalizeVbkSubtitle(value: unknown, city: unknown = ""): string {
   const current = String(value ?? "").trim();
   if (vbkTextLength(current) >= 30) return truncateVbkText(current, 80);
   const location = String(city ?? "").trim();
@@ -116,14 +133,14 @@ export function normalizeVbkSubtitle(value, city = "") {
   return truncateVbkText(`${normalized}，适合轻松出行`, 80);
 }
 
-export function vbkTextLength(value) {
+export function vbkTextLength(value: unknown): number {
   return Array.from(String(value ?? "")).reduce(
     (total, character) => total + (/^[\x00-\xff]$/.test(character) ? 1 : 2),
     0,
   );
 }
 
-function truncateVbkText(value, limit) {
+function truncateVbkText(value: unknown, limit: number): string {
   let total = 0;
   let result = "";
   for (const character of Array.from(String(value ?? ""))) {
@@ -135,7 +152,7 @@ function truncateVbkText(value, limit) {
   return result;
 }
 
-async function repairBasicInfoIllegalKeywords(page, info) {
+async function repairBasicInfoIllegalKeywords(page: VbkPage, info: Record<string, any>): Promise<void> {
   const fields = [
     { id: "baseInfo.subName", key: "subtitle", label: "副标题" },
     { id: "baseInfo.operationNote", key: "operationNotes", label: "操作说明" },
@@ -171,20 +188,20 @@ async function repairBasicInfoIllegalKeywords(page, info) {
  *   - 只关注「国家景区 / 提前预订 / 地接社 / 管家 / 预订联系人」等高风险区域，避免被无关注入噪音导致 false positive；
  *   - 任一区域内有红色校验项则抛错，错误信息列出区域名供 UI 直显。
  */
-export async function assertBasicInfoNoRedErrors(page) {
+export async function assertBasicInfoNoRedErrors(page: VbkPage): Promise<void> {
   await delay(800);
   const watched = ["国家景区", "提前预订", "地接社", "管家", "预订联系人", "预定联系人", "副标题", "操作说明"];
   const withHelp = page.locator(".ant-form-item-with-help");
   const withControlError = page.locator(".ant-form-item:has(.ant-form-item-control.has-error)");
   const total = (await withHelp.count()) + (await withControlError.count());
   if (!total) return;
-  const seen = new Set();
+  const seen = new Set<string>();
   const labels: string[] = [];
   /**
    * 内联 helper：把 withHelp / withControlError 形式的 locator 集合转为「监视频次的 label 列表」，
    * 使用 seen 去重避免同一关键词在 help 与 control 列表里被重复报。
    */
-  async function consider(locator: any) {
+  async function consider(locator: VbkLocator) {
     const snapshot = await readLocatorSnapshot(locator);
     for (const item of snapshot) {
       const text = item.text.replace(/\s+/g, " ").trim();

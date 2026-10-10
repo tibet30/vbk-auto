@@ -26,7 +26,11 @@ import { test } from "node:test";
 const mainSource = readFileSync(new URL("../../src/main/main.ts", import.meta.url), "utf8");
 const accountStatusSource = readFileSync(new URL("../../src/main/infrastructure/vbk-account-status.ts", import.meta.url), "utf8");
 const createWindowSource = readFileSync(new URL("../../src/main/create-window.ts", import.meta.url), "utf8");
-const browserSource = readFileSync(new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url), "utf8");
+const browserSource = [
+  "vbk-browser.ts",
+  "vbk-browser-accounts.ts",
+  "vbk-browser-view-manager.ts",
+].map((file) => readFileSync(new URL(`../../src/main/infrastructure/${file}`, import.meta.url), "utf8")).join("\n");
 const cookieStoreSource = readFileSync(new URL("../../src/main/infrastructure/vbk-cookie-store.ts", import.meta.url), "utf8");
 
 test("production code never imports electron.safeStorage", () => {
@@ -85,7 +89,7 @@ test("create-window.ts wires VbkBrowser through cookieStore only (fail-closed le
 test("vbk-browser.saveCurrentSession awaits store saveSession and catches errors", () => {
   const saveCurrentSession = browserSource.slice(
     browserSource.indexOf("  async saveCurrentSession()"),
-    browserSource.indexOf("  /**\n   * \"新增登录\""),
+    browserSource.indexOf("  async addLogin()"),
   );
   // Must await the store's saveSession (via Promise.resolve to be safe
   // for both sync and async implementations).
@@ -102,11 +106,11 @@ test("VbkBrowser.saveCurrentSession / addLogin / switchAccount propagate errors 
   // which is the documented IPC/UI boundary contract.
   const addLogin = browserSource.slice(
     browserSource.indexOf("  async addLogin()"),
-    browserSource.indexOf("  /**\n   * 切换"),
+    browserSource.indexOf("  async switchAccount("),
   );
   const switchAccount = browserSource.slice(
     browserSource.indexOf("  async switchAccount("),
-    browserSource.indexOf("  /**\n   * 忘记"),
+    browserSource.indexOf("  forgetAccount(", browserSource.indexOf("  async switchAccount(")),
   );
   assert.match(addLogin, /await this\.saveCurrentSession\(\);/, "addLogin must await saveCurrentSession");
   assert.match(switchAccount, /await this\.saveCurrentSession\(\);/, "switchAccount must await saveCurrentSession");

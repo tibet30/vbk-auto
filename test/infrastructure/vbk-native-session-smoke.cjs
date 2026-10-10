@@ -71,9 +71,10 @@ app.whenReady().then(async () => {
           user: { name: "测试账号", account: "vbk_test", partyId: 123 } }));
       } },
     } };
-    const browser = Object.assign(Object.create(VbkBrowser.prototype), {
-      initialiseState: "ready", accounts: new Map([["vbk_test", view]]), activeKey: "vbk_test",
-    });
+    const browser = new VbkBrowser({ contentView: {}, getSize: () => [1280, 800] }, "0");
+    browser.initialiseState = "ready";
+    browser.views.accounts.set("vbk_test", view);
+    browser.views.activeKey = "vbk_test";
     assert.equal((await browser.status(true)).loggedIn, true);
     assert.equal(await browser.waitUntilReady(), true);
     assert.equal(requests, 2);

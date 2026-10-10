@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 「基本信息」tab 阶段入口：fillAndSaveBasicInfo。
  *   - 先 dismissKnownNoticeDialogs 吃掉轻量提示；
@@ -11,14 +10,20 @@
 
 import { clickSection, saveThenAdvance } from "../tabs.js";
 import { dismissKnownNoticeDialogs } from "../dialogs.js";
-import { fillBasicInfo, assertBasicInfoNoRedErrors } from "./core.js";
+import { fillBasicInfo, assertBasicInfoNoRedErrors, type BasicInfoExtra } from "./core.js";
 import { isProductImageTextUrl } from "../tabs.js";
+import type { VbkPage } from "../locator-types.js";
 
 /**
  * 基本信息面板保存主入口，返回 saveThenAdvance 的 { advanced, mode, savedWith }。
  * 任一阶段报错会让上层 stage-runner 走 advisor 兜底。
  */
-export async function fillAndSaveBasicInfo(page, product, butlerSelection, extra = {}) {
+export async function fillAndSaveBasicInfo(
+  page: VbkPage,
+  product: Record<string, unknown>,
+  butlerSelection: unknown,
+  extra: BasicInfoExtra = {},
+) {
   await dismissKnownNoticeDialogs(page);
   await clickSection(page, ["产品信息", "基本信息"]).catch(() => {});
   await fillBasicInfo(page, product, butlerSelection, extra);

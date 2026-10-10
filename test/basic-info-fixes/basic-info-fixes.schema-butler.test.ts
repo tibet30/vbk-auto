@@ -134,8 +134,8 @@ test("fillButlerContact 错误信息必须包含 contactCardId / displayName / �
   // 可选列表，便于运营一眼定位是「联系人被 VBK 移除」还是「同姓名误选」。
   const body = readFillButlerContactBody();
   // 错误文案必须同时携带 contactCardId、displayName（若有）、可选列表。
-  assert.match(body, /\$\{contactCardId\}/, "错误信息必须显式携带 contactCardId");
-  assert.match(body, /\$\{displayName\}/, "错误信息必须显式携带 displayName");
+  assert.match(body, /const who = displayName \? `「\$\{displayName\}」\(ID \$\{validContactCardId\}\)`/,
+    "错误信息必须显式携带 contactCardId 和 displayName");
   assert.match(body, /可选[：:]/, "错误信息必须列出可选列表供运营核对");
   // 必须明确指引「在 VBK 维护该联系人或更新账号固定信息后重试」。
   assert.match(body, /在 VBK 维护该联系人或更新账号固定信息/);

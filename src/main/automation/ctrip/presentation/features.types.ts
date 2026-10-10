@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 「产品特色」/「产品特点」helper 的常量与类型契约：
  *   - LABEL_KEYWORDS / FEATURES_FALLBACK_CONTAINERS：按优先级链组织；
@@ -8,6 +7,7 @@
  * 与 features.write.ts / features.find.ts / features.ts 配合使用，本文件只暴露纯数据与类型，
  * 不持有任何运行时副作用，便于测试切片识别与独立单测。
  */
+import type { FrameLocator, Locator } from "playwright";
 
 /** 「产品特色」/「产品特点」label 关键词优先级：VBK 新版在前，老版兜底。 */
 const LABEL_KEYWORDS = ["产品特色", "产品特点"] as const;
@@ -38,13 +38,13 @@ export interface FeaturesResult {
 }
 
 interface LabelScope {
-  scope: any;
+  scope: Locator;
   source: "label";
   matchedKeyword: string;
 }
 
 interface FallbackScope {
-  scope: any;
+  scope: Locator;
   source: "fallback";
   containerId: string;
 }
@@ -52,9 +52,9 @@ interface FallbackScope {
 type AnyScope = LabelScope | FallbackScope;
 
 interface EditorTarget {
-  locator: any;
+  locator: Locator;
   type: FeaturesEditorType;
-  frame?: any;
+  frame?: FrameLocator;
 }
 
 export {

@@ -81,7 +81,7 @@ test("接线 2：fillAndSavePresentation 仅通过 API 保存并回读", async (
   assert.doesNotMatch(presBody, /waitForSectionEnabled/);
   assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations\)/,
     "进入产品图文前必须校验完整的三条推荐理由配置");
-  assert.match(presBody, /cover\.source === "ctripLibrary" && ctripLibraryCoverAttempts\(cover\)\.length > 0/,
+  assert.match(presBody, /cover\?\.source === "ctripLibrary" && ctripLibraryCoverAttempts\(cover\)\.length > 0/,
     "产品图文必须只在完整图库封面配置下绑定图库图片");
   assert.match(presBody, /ctripLibraryCoverAttempts\(cover\)\.length > 0/, "封面必须有已选图库图片的有效身份");
   assert.doesNotMatch(presBody, /fillRecommendationReasons\(page/,

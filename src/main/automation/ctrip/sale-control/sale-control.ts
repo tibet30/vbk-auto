@@ -1,4 +1,3 @@
-// @ts-nocheck
 // 销售控制页（saleControlMerge）：新建草稿的产品壳配置。
 // 包括 1. 产品类型 / 2. 产品形态 / 3. 是否拆团 / 4. 线路品牌 / 5. 分销渠道
 // / 6. 点击下一步并返回携程产品 ID。
@@ -24,12 +23,16 @@ import {
   waitForPrimaryNextButton,
 } from "./sale-control.workflow.js";
 import { isProductForm, supportsSmallGroupSettings } from "../../../../shared/product-form.js";
+import type { VbkPage } from "../locator-types.js";
+
+type SaleControlProduct = Record<string, any>;
+interface SaleControlError { Message?: unknown }
 
 /**
  * 探查产品列表页状态：是否存在「新增产品」按钮、可见行数、当前 URL 与页面 title。
  * 用于初次登入页后的可用性检查（assertCount 检查新增按钮唯一）。
  */
-async function inspectProductList(page) {
+async function inspectProductList(page: VbkPage) {
   const addButton = page.locator("a.clego-order-btn").filter({
     hasText: "新增产品",
   });
@@ -57,7 +60,7 @@ async function inspectProductList(page) {
  *      的渠道全部勾上；disabled 的（如「携程门店」「携程系分销」）不动。
  *   5. 点「下一步」并等待携程跳转到 baseInfoMerge 等产品详情页，返回产品 ID。
  */
-async function configureProductShell(page, product) {
+async function configureProductShell(page: VbkPage, product: SaleControlProduct): Promise<string> {
   const productType = product?.sales?.productType === "domesticLong"
     ? "domesticLong"
     : "domesticShort";
@@ -115,7 +118,11 @@ async function configureProductShell(page, product) {
   return productId;
 }
 
-async function persistSmallGroupAfterCreation(page, productId, maxGroupSize) {
+async function persistSmallGroupAfterCreation(
+  page: VbkPage,
+  productId: string,
+  maxGroupSize: unknown,
+): Promise<void> {
   const requestedMaxGroupSize = Math.min(Math.max(Number(maxGroupSize) || 8, 1), 9);
   const saleControlUrl = `https://vbooking.ctrip.com/ivbk/vendor/saleControlMerge?productid=${encodeURIComponent(productId)}&from=vbk`;
   await page.goto(saleControlUrl, {
@@ -166,9 +173,9 @@ async function persistSmallGroupAfterCreation(page, productId, maxGroupSize) {
   await page.getByText("基本信息", { exact: true }).waitFor({ state: "visible", timeout: 30_000 });
 }
 
-function isOnlyNonStructuredPoiChannelWarning(errors) {
+function isOnlyNonStructuredPoiChannelWarning(errors: unknown): boolean {
   if (!Array.isArray(errors) || errors.length === 0) return false;
-  return errors.every((error) => /^产品id:\s*\d+\s+Ctrip售卖产品中景点、购物点、酒店不可有非结构化poi，请在行程中修改后再添加Ctrip渠道$/.test(
+  return errors.every((error: SaleControlError) => /^产品id:\s*\d+\s+Ctrip售卖产品中景点、购物点、酒店不可有非结构化poi，请在行程中修改后再添加Ctrip渠道$/.test(
     String(error?.Message ?? "").trim(),
   ));
 }

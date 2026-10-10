@@ -1,16 +1,21 @@
 import { test, assert, MiniMaxService, MiniMaxServiceError, diagnosisInput, hasMiniMaxCode, sendDiagnosis, createDiagnosisService, validDiagnosis } from "./minimax.core.shared.js";
 
 test("下拉 AI 消歧使用独立短超时，不沿用规划对话 90 秒超时", async () => {
-  const source = await import("node:fs/promises").then((fs) => fs.readFile(
-    new URL("../../src/main/minimax/minimax-service.ts", import.meta.url),
+  const fs = await import("node:fs/promises");
+  const runtimeSource = await fs.readFile(
+    new URL("../../src/main/minimax/minimax-runtime.ts", import.meta.url),
     "utf8",
-  ));
-  assert.match(source, /function disambiguationTimeout\(\)/);
-  assert.match(source, /return Number\.isFinite\(parsed\)[\s\S]*?8_000/);
-  const start = source.indexOf("async disambiguateOption");
-  const body = source.slice(start, source.indexOf("\n  /**", start + 10));
-  assert.match(body, /this\.client\(disambiguationTimeout\(\)\)/);
-  assert.doesNotMatch(body, /this\.client\(replyTimeout\(\)\)/);
+  );
+  const operationsSource = await fs.readFile(
+    new URL("../../src/main/minimax/minimax-operations.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(runtimeSource, /function disambiguationTimeout\(\)/);
+  assert.match(runtimeSource, /return Number\.isFinite\(parsed\)[\s\S]*?8_000/);
+  const start = operationsSource.indexOf("export async function disambiguateOption");
+  const body = operationsSource.slice(start, operationsSource.indexOf("\nexport async function", start + 10));
+  assert.match(body, /createMiniMaxClient\(config, disambiguationTimeout\(\)\)/);
+  assert.doesNotMatch(body, /replyTimeout\(\)/);
 });
 test("diagnoseAutomationFailure 严格解析白名单诊断并只发送最小安全上下文", async (t) => {
   const { service, requestBody } = await createDiagnosisService(t, (response) => sendDiagnosis(response, validDiagnosis));

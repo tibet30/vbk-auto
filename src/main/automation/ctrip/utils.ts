@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * ctrip 阶段共用工具集（最初和 phase handler 一起写在 automation/ctrip.ts，后拆出）：
  *   - delay / escapeRegExp / pollUntil / assertCount 通用辅助；
@@ -8,23 +7,35 @@
  *
  * 源码头部带 `// @ts-nocheck`，因为 helper 接收的 locator 类型是松散接住的。
  */
+import { closeBlockingDialogs } from "./dialogs.js";
+import type { VbkLocator, VbkPage } from "./locator-types.js";
 
+export interface LocatorSnapshot {
+  text: string;
+  title: string;
+  nameTitle: string;
+  className: string;
+  value: string;
+  id: string;
+  ariaSelected: boolean;
+  ariaDisabled: boolean;
+}
 
 /**
  * 简易异步 sleep：把 setTimeout 包成 Promise，参数 milliseconds。
  */
-const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 /**
  * 把任意字符串中的正则元字符转义，便于动态拼正则。
  */
-const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (value: unknown): string => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**
  * 返回真正可写入的搜索控件：直接传入 input / textarea / contenteditable 时返回自身；
  * 传入 Ant combobox 外层时，仅从其内部挑出唯一可见、可编辑的输入控件。
  */
-async function pickSearchInput(locator, description) {
+async function pickSearchInput(locator: VbkLocator, description: string): Promise<VbkLocator> {
   const count = await locator.count();
   if (count !== 1) throw new Error(`${description}搜索输入框数量异常：期望 1，实际 ${count}`);
   const isDirectInput = await locator.evaluate((element) => {
@@ -59,7 +70,7 @@ async function pickSearchInput(locator, description) {
  *   - predicate 抛错视为 false；
  *   - 超时后最后一次再调一次，避免刚好卡时间窗。
  */
-async function pollUntil(locator, predicate, timeoutMs = 3_000) {
+async function pollUntil(locator: VbkLocator, predicate: (locator: VbkLocator) => boolean | Promise<boolean>, timeoutMs = 3_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     let result = false;
@@ -71,14 +82,14 @@ async function pollUntil(locator, predicate, timeoutMs = 3_000) {
     if (result) return true;
     await delay(150);
   }
-  return predicate(locator).catch(() => false);
+  return Promise.resolve(predicate(locator)).catch(() => false);
 }
 
 /**
  * 断言 locator 数量 == expected，否则抛错；
  * 当 expected > 0 时还会等第一个匹配可见（最多 5s），用于在 phase 之间做前置检查。
  */
-async function assertCount(locator, expected, description) {
+async function assertCount(locator: VbkLocator, expected: number, description: string): Promise<VbkLocator> {
   const count = await locator.count();
   if (count !== expected) {
     throw new Error(`${description}数量异常：期望 ${expected}，实际 ${count}`);
@@ -97,9 +108,9 @@ async function assertCount(locator, expected, description) {
  * 一次 page.evaluateAll 读取动态列表，避免「先 count、再逐个 nth」期间 React
  * 替换节点后，Playwright 对已经不存在的索引自动等待 30 秒。
  */
-async function readLocatorSnapshot(locator) {
+async function readLocatorSnapshot(locator: VbkLocator): Promise<LocatorSnapshot[]> {
   return locator.evaluateAll((elements) => elements.map((element) => {
-    const html = element;
+    const html = element as HTMLElement;
     const nameNode = html.querySelector?.(".Name[title]");
     return {
       text: String(html.innerText || html.textContent || "").trim(),
@@ -118,7 +129,7 @@ async function readLocatorSnapshot(locator) {
  * 只返回当前 combobox 通过 aria-controls 绑定的下拉候选。页面可能同时残留
  * 多个“未隐藏”弹层；全局查询会把上一步产品线候选误当成下一步省份候选。
  */
-async function getControlledDropdownOptions(page, combobox) {
+async function getControlledDropdownOptions(page: VbkPage, combobox: VbkLocator): Promise<VbkLocator> {
   const controlId = String(await combobox.getAttribute("aria-controls") || "").trim();
   if (!controlId) throw new Error("下拉框缺少 aria-controls，无法确认候选归属。");
   const escaped = controlId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -133,7 +144,7 @@ async function getControlledDropdownOptions(page, combobox) {
  * 等待。Ant v3 的远程 Select 会在 mousedown 阶段提交候选，所以这里派发一组
  * 完整鼠标事件，而不是只调用 HTMLElement.click()。
  */
-async function clickLocatorSnapshotOption(locator, expected) {
+async function clickLocatorSnapshotOption(locator: VbkLocator, expected: LocatorSnapshot | undefined | null): Promise<boolean> {
   if (!expected) return false;
   return locator.evaluateAll((elements, wanted) => {
     const wantedIdentity = wanted.value || wanted.id || wanted.nameTitle || wanted.title || wanted.text;
@@ -143,7 +154,7 @@ async function clickLocatorSnapshotOption(locator, expected) {
       const id = String(element.getAttribute?.("data-id") || "");
       const nameTitle = String(nameNode?.getAttribute?.("title") || "").trim();
       const title = String(element.getAttribute?.("title") || "").trim();
-      const text = String(element.innerText || element.textContent || "").trim();
+      const text = String((element as HTMLElement).innerText || element.textContent || "").trim();
       const identity = value || id || nameTitle || title || text;
       return identity === wantedIdentity;
     });
@@ -181,7 +192,7 @@ async function clickLocatorSnapshotOption(locator, expected) {
 /**
  * 在当前打开的下拉里选名为 `label`（精确匹配）的选项，并先 assertCount=1 防止歧义。
  */
-async function selectVisibleOption(page, label) {
+async function selectVisibleOption(page: VbkPage, label: string): Promise<void> {
   const option = page.getByRole("option", { name: label, exact: true });
   await assertCount(option, 1, `选项“${label}”`);
   await option.click();
@@ -190,7 +201,7 @@ async function selectVisibleOption(page, label) {
 /**
  * 带「一次重试」的 click：第一次失败时尝试关掉阻塞弹窗（closeBlockingDialogs）再点一次。
  */
-async function safeClick(page, locator, options = {}) {
+async function safeClick(page: VbkPage, locator: VbkLocator, options: Parameters<VbkLocator["click"]>[0] = {}): Promise<void> {
   try {
     return await locator.click(options);
   } catch (error) {
@@ -203,7 +214,7 @@ async function safeClick(page, locator, options = {}) {
 /**
  * 按 DOM id 唯一定位输入框并 fill（会断言 locator 数量 = 1）。
  */
-async function fillById(page, id, value, description) {
+async function fillById(page: VbkPage, id: string, value: unknown, description: string): Promise<void> {
   const locator = page.locator(`[id="${id}"]`);
   await assertCount(locator, 1, description);
   await locator.fill(String(value));
@@ -213,8 +224,8 @@ async function fillById(page, id, value, description) {
  * 把 values 顺序填到 locator 当前可见的输入框里：先把可见子集筛出来再写入；
  * 可见数量不足会抛错，undefined 值会跳过，避免覆盖之前的内容。
  */
-async function fillVisibleInputs(locator, values, description) {
-  const visible = [];
+async function fillVisibleInputs(locator: VbkLocator, values: readonly unknown[], description: string): Promise<void> {
+  const visible: VbkLocator[] = [];
   for (let index = 0; index < (await locator.count()); index += 1) {
     if (await locator.nth(index).isVisible()) visible.push(locator.nth(index));
   }

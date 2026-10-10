@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * VBK 新版结构化条款接口。
  *
@@ -6,7 +5,20 @@
  * saveClauses.ts。通过统一账号会话请求保存并回读，无需页面执行上下文。
  */
 
-import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../infrastructure/vbk-session-request.js";
+
+type ClauseRecord = Record<string, any>;
+interface ClauseElement {
+  componentCode?: unknown;
+  elementCode?: unknown;
+  elementValue?: unknown;
+  value?: unknown;
+}
+interface SelectedClauseItem {
+  clauseItemId: number;
+  secondClassTypeId: number;
+  elementDtos: ClauseElement[];
+}
 
 const CLAUSE_HEAD = {
   cid: "",
@@ -62,20 +74,20 @@ export const DEFAULT_SELECTED_CLAUSE_IDS = {
   ],
 } as const;
 
-export function formatSelectedClauseItems(clauseTypeDtos) {
-  const result = [];
+export function formatSelectedClauseItems(clauseTypeDtos: ClauseRecord[] = []): SelectedClauseItem[] {
+  const result: SelectedClauseItem[] = [];
   for (const type of clauseTypeDtos ?? []) {
     const selectedItems = [
       ...(type.clauseItemDtos ?? []),
-      ...(type.containers ?? []).flatMap((container) =>
-        (container.clauseItemDtos ?? []).map((item) => ({
+      ...(type.containers ?? []).flatMap((container: ClauseRecord) =>
+        (container.clauseItemDtos ?? []).map((item: ClauseRecord) => ({
           ...item,
           selected: container.selectedClauseItemId == null
             ? item.selected
             : String(item.clauseItemId) === String(container.selectedClauseItemId) ? "T" : "F",
         })),
       ),
-    ].filter((item) => {
+    ].filter((item: ClauseRecord) => {
       if (item.itemType != null && item.itemType !== "F") return false;
       if (item.isShow != null && item.isShow !== "T") return false;
       if (item.hasSelectBox === "F") return true;
@@ -85,9 +97,9 @@ export function formatSelectedClauseItems(clauseTypeDtos) {
       result.push({
         clauseItemId: item.clauseItemId,
         secondClassTypeId: type.clauseTypeId,
-        elementDtos: (item.clauseComponentDtos ?? []).map((component) => {
+        elementDtos: (item.clauseComponentDtos ?? []).map((component: ClauseRecord) => {
           const element = component.componentElementDtos?.find(
-            (candidate) => candidate.elementCode === component.value,
+            (candidate: ClauseRecord) => candidate.elementCode === component.value,
           );
           return {
             componentCode: component.componentCode,
@@ -101,23 +113,27 @@ export function formatSelectedClauseItems(clauseTypeDtos) {
   return result;
 }
 
-export function ensureRequiredClause(items, clauseTypeDtos, clauseItemId) {
+export function ensureRequiredClause(
+  items: SelectedClauseItem[],
+  clauseTypeDtos: ClauseRecord[] = [],
+  clauseItemId: number,
+): SelectedClauseItem[] {
   if (items.some((item) => item.clauseItemId === clauseItemId)) return items;
   for (const type of clauseTypeDtos ?? []) {
     const candidates = [
       ...(type.clauseItemDtos ?? []),
-      ...(type.containers ?? []).flatMap((container) => container.clauseItemDtos ?? []),
+      ...(type.containers ?? []).flatMap((container: ClauseRecord) => container.clauseItemDtos ?? []),
     ];
-    const target = candidates.find((item) => item.clauseItemId === clauseItemId);
+    const target = candidates.find((item: ClauseRecord) => item.clauseItemId === clauseItemId);
     if (!target) continue;
     return [
       ...items,
       {
         clauseItemId: target.clauseItemId,
         secondClassTypeId: type.clauseTypeId,
-        elementDtos: (target.clauseComponentDtos ?? []).map((component) => {
+        elementDtos: (target.clauseComponentDtos ?? []).map((component: ClauseRecord) => {
           const element = component.componentElementDtos?.find(
-            (candidate) => candidate.elementCode === component.value,
+            (candidate: ClauseRecord) => candidate.elementCode === component.value,
           );
           return {
             componentCode: component.componentCode,
@@ -131,7 +147,12 @@ export function ensureRequiredClause(items, clauseTypeDtos, clauseItemId) {
   throw new Error(`VBK 条款包缺少必选条款 ${clauseItemId}`);
 }
 
-export function setClauseComponentValue(items, clauseItemId, componentCode, value) {
+export function setClauseComponentValue(
+  items: SelectedClauseItem[],
+  clauseItemId: number,
+  componentCode: string,
+  value: unknown,
+): SelectedClauseItem[] {
   let found = false;
   const next = items.map((item) => {
     if (item.clauseItemId !== clauseItemId) return item;
@@ -149,28 +170,35 @@ export function setClauseComponentValue(items, clauseItemId, componentCode, valu
 const ADULT_TICKET_REMARKS_COMPONENT = "landticketremarks";
 const CHILD_TICKET_REMARKS_COMPONENT = "landticket2";
 
-export async function saveStructuredProductClauses(page, productId, options = {}) {
+export async function saveStructuredProductClauses(
+  page: VbkSessionRequestBrowser,
+  productId: string | number,
+  options: { productForm?: string; adultTicketInclusionText?: string; childBookable?: boolean } = {},
+) {
   const isFreeTravel = options?.productForm === "freeTravel";
   const adultTicketInclusionText = String(options?.adultTicketInclusionText ?? "").trim();
   const head = CLAUSE_HEAD;
   const requiredIds = REQUIRED_CLAUSE_IDS;
   const childBookable = options?.childBookable !== false;
-  const defaultSelectedClauseIds = { ...DEFAULT_SELECTED_CLAUSE_IDS, 1: DEFAULT_SELECTED_CLAUSE_IDS[1].filter(id => childBookable || ![10091, 10087].includes(id)) };
+  const defaultSelectedClauseIds: Record<number, readonly number[]> = {
+    ...DEFAULT_SELECTED_CLAUSE_IDS,
+    1: DEFAULT_SELECTED_CLAUSE_IDS[1].filter((id) => childBookable || ![10091, 10087].includes(id)),
+  };
   const lodgingSelfPayNote = LODGING_SELF_PAY_NOTE;
   const adultTicketRemarksComponent = ADULT_TICKET_REMARKS_COMPONENT;
   const childTicketRemarksComponent = CHILD_TICKET_REMARKS_COMPONENT;
   const helpers = {
-    request: async (url, body, contentType = "application/json") => {
+    request: async (url: string, body: object, contentType = "application/json"): Promise<ClauseRecord> => {
       const response = await vbkSessionRequest(page, {
         endpoint: url, body, errorLabel: `VBK 条款 ${url.split("/").pop()}`,
         browserRequestTimeoutMs: 20_000, evaluateTimeoutMs: 25_000,
         headers: { "content-type": contentType, cookieorigin: "https://vbooking.ctrip.com" },
       });
-      const data = response.payload;
+      const data = response.payload as ClauseRecord;
       const ack = data?.ResponseStatus?.Ack;
       const errors = data?.ResponseStatus?.Errors;
       if (ack !== "Success" || (Array.isArray(errors) && errors.length)) {
-        const detail = errors?.map((error) => error.Message ?? error.ErrorCode).join("；") || ack || "缺少成功确认";
+        const detail = errors?.map((error: ClauseRecord) => error.Message ?? error.ErrorCode).join("；") || ack || "缺少成功确认";
         throw new Error(`${url.split("/").pop()} 失败：${detail}`);
       }
       return data;
@@ -179,7 +207,7 @@ export async function saveStructuredProductClauses(page, productId, options = {}
     ensure: ensureRequiredClause,
     setValue: setClauseComponentValue,
   };
-  const savedTabs = [];
+  const savedTabs: Array<{ tabEnum: number; packageId: unknown; itemCount: number }> = [];
   // VBK 会在保存其它页签时做跨页校验；先落住宿费用页，避免“请勾选住宿条款”。
   for (const tabEnum of [2, 1, 3, 4]) {
     const productClause = await helpers.request(

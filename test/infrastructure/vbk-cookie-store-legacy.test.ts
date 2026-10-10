@@ -114,14 +114,14 @@ test("legacy fail-closed: cookie store 写入后不会创建或修改 .sqlite �
 
 test("VbkBrowser.saveCurrentSession: cookie store 抛错时被 try/catch 捕获，函数返回 null", () => {
   const source = fs.readFileSync(
-    new URL("../../src/main/infrastructure/vbk-browser.ts", import.meta.url),
+    new URL("../../src/main/infrastructure/vbk-browser-accounts.ts", import.meta.url),
     "utf8",
   );
   // 必须包在 try / catch 里，catch 里 console.warn + return null，
   // 不让错误冒泡到 IPC handler。
   const saveCurrentSession = source.slice(
     source.indexOf("async saveCurrentSession()"),
-    source.indexOf("  /**\n   * \"新增登录\""),
+    source.indexOf("  async addLogin()"),
   );
   assert.match(saveCurrentSession, /try\s*\{/);
   assert.match(saveCurrentSession, /catch\s*\(/);

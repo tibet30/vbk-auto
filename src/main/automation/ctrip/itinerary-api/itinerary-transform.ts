@@ -17,8 +17,10 @@
  *     VBK 协议字段写入；业务上不要求纯数字、不参与 URL 或 query 拼接。
  */
 
+import { orderItineraryMeals } from "./meal-order.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
+import { normaliseItinerarySupport, dayHasTransportArrangement } from "../../../../shared/itinerary-support-arrangements.js";
 import { toVbkDailyUseCar } from "../../../../shared/product-form.js";
 import { HOTEL_SELECTION_NOTE, dailyTransportDescription } from "../../../../shared/itinerary-service-copy.js";
 import { itineraryAttractions, effectiveItinerarySpotKind } from "../../../../shared/itinerary-activity-kind.js";
@@ -52,7 +54,8 @@ export function buildReadbackExpectations(args: {
   stations: ResolvedStations;
 }): ReadbackExpectations {
   const { itinerary, operations, stations } = args;
-  const days: ReadbackDayExpectation[] = itinerary.map((day, index) => {
+  const days: ReadbackDayExpectation[] = itinerary.map((rawDay, index) => {
+    const day = normaliseItinerarySupport(rawDay);
     const activities = dayOtherActivities(day);
     return {
       orderDay: day.day,
@@ -70,7 +73,7 @@ export function buildReadbackExpectations(args: {
         description: mealDescription(day, key, mealIndex),
         mealsIncluded: key === "B" && operations.mealsIncluded === true,
       })),
-      hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: hotelTierPresentation(operations.hotelTier).displayName ?? undefined, selectionNote: HOTEL_SELECTION_NOTE })),
+      hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: hotelRatingForDay(day, operations.hotelTier), selectionNote: HOTEL_SELECTION_NOTE })),
       transport: operations.transport === "charter" ? { description: dailyTransportDescription(day.title) } : undefined,
       useCar: toVbkDailyUseCar(operations.transport),
       activities: activities.map((activity) => ({
@@ -112,7 +115,8 @@ export function buildDayDescription(args: {
   operations: ProductOperations;
   stations: ResolvedStations;
 }): VbkTourDailyDescription {
-  const { day, index, totalDays, operations, stations } = args;
+  const { index, totalDays, operations, stations } = args;
+  const day = normaliseItinerarySupport(args.day);
   if (!day.title || !day.title.trim()) {
     throw new Error(`第 ${day.day} 天 title 缺失（行程标题必填）。`);
   }
@@ -144,7 +148,7 @@ export function buildDayDescription(args: {
   const attractionSpots = itineraryAttractions(sourceSpots);
   const hasSpots = attractionSpots.length > 0;
   const otherActivities = dayOtherActivities(day);
-  if (!hasSpots && !otherActivities.length) {
+  if (!hasSpots && !otherActivities.length && !dayHasTransportArrangement(day)) {
     throw new Error(`第 ${day.day} 天缺少已验证景点或用户明确的其他活动。`);
   }
   let lunchAdded = false;
@@ -173,7 +177,7 @@ export function buildDayDescription(args: {
     }));
   }
 
-  // 4) 其他 / 自由活动仅承载无法匹配真实 POI 的用户活动，并置于晚餐/酒店前。
+  // 4) 其他 / 自由活动承载无法匹配真实 POI 的用户活动；输出前按活动时间安放餐饮节点。
   if (otherActivities.length) {
     // Legacy activities have no unified spots order.  Retain them after migrated
     // timeline entries; new data always supplies its order through spots.
@@ -201,7 +205,7 @@ export function buildDayDescription(args: {
       buildHotelInfo({
         hotelName: hotelNames[0],
         hotelNames,
-        hotelTier: operations.hotelTier,
+        hotelTier: hotelRatingForDay(day, operations.hotelTier),
         sort: sort++,
       }),
     );
@@ -218,7 +222,7 @@ export function buildDayDescription(args: {
     dailyDescription: day.title,
     useCar: toVbkDailyUseCar(operations.transport),
     tourDailyLocations: [],
-    tourDailyInfos: infos,
+    tourDailyInfos: orderItineraryMeals(infos),
     seaCruise: false,
     subDesc: "",
     dailyHighlights: [],
@@ -229,6 +233,18 @@ type MealType = { key: "B" | "L" | "S"; index: 0 | 1 | 2 };
 
 function mealDescription(day: ProductItineraryDay, key: MealType["key"], index: MealType["index"]): string {
   return key === "B" ? HOTEL_ROOM_BREAKFAST_NOTE : day.mealDescriptions?.[index] ?? "";
+}
+
+/** 客户可见评级来自当晚实际住宿；全程目标档次不能冒充降档结果。 */
+function hotelRatingForDay(day: ProductItineraryDay, targetTier?: string): string | undefined {
+  const candidate = day.hotelCandidates?.[0];
+  const diamond = candidate?.diamond ?? day.hotelRequirement?.diamond;
+  const type = candidate?.ratingType ?? day.hotelRequirement?.ratingType;
+  if (diamond === 0) return "当地酒店";
+  if (diamond && diamond >= 1 && diamond <= 5) {
+    return type === "star" ? `${diamond}星酒店` : type === "homestay" ? `${diamond}钻民宿` : `当地${diamond}钻酒店`;
+  }
+  return hotelTierPresentation(targetTier).displayName ?? undefined;
 }
 
 function hotelNamesForDay(day: ProductItineraryDay): string[] {

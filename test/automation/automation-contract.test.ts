@@ -77,10 +77,12 @@ function makeValidProduct(): Record<string, unknown> {
   };
 }
 
-test("cover POI must match a verified itinerary POI before the product is ready", () => {
+test("图库地点 ID 与 VBK POI ID 不同仍按同一行程地点验证封面", () => {
   const product = makeValidProduct();
   assert.equal(hasValidCoverPoMeta(product), true);
   ((product.presentation as Record<string, unknown>).cover as Record<string, unknown>).poiId = 999999;
+  assert.equal(hasValidCoverPoMeta(product), true);
+  ((product.presentation as Record<string, unknown>).cover as Record<string, unknown>).poi = "不在行程的景区";
   assert.equal(hasValidCoverPoMeta(product), false);
 });
 

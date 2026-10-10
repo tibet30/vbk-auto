@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 「产品特色」作用域 + 编辑器定位 helper：
  *   - findFeaturesFormItem：用可见「产品特色」/「产品特点」label 反查最近的 .ant-form-item 容器；
@@ -20,6 +19,8 @@
 
 import type { AnyScope, EditorTarget, FallbackScope, LabelScope } from "./features.types.js";
 import { FEATURES_FALLBACK_CONTAINERS, LABEL_KEYWORDS } from "./features.types.js";
+import type { VbkLocator, VbkPage } from "../locator-types.js";
+import type { FrameLocator } from "playwright";
 
 /**
  * 在页面上找可见的「产品特色」/「产品特点」label，并向上反查最近 .ant-form-item 容器：
@@ -27,10 +28,10 @@ import { FEATURES_FALLBACK_CONTAINERS, LABEL_KEYWORDS } from "./features.types.j
  *   - 再回退到任意含「产品特色」/「产品特点」文本的 label（覆盖 ant-form-item-label 包裹层）；
  *   - 找不到或可见性 / 容器数异常时返回 null，让 fillProductFeatures 走 fallback。
  */
-async function findFeaturesFormItem(page): Promise<LabelScope | null> {
+async function findFeaturesFormItem(page: VbkPage): Promise<LabelScope | null> {
   // 顺序：for* 精确匹配（任意 label 文本）→ 文本关键词（按优先级遍历）。每条候选内的
   // label 都按可见性 + .ant-form-item 唯一性筛选；任一命中即返回。
-  const candidates: Array<{ labels: any; matchedKeyword: string }> = [
+  const candidates: Array<{ labels: VbkLocator; matchedKeyword: string }> = [
     { labels: page.locator('label[for*="features" i]'), matchedKeyword: "for*='features'" },
   ];
   for (const keyword of LABEL_KEYWORDS) {
@@ -61,7 +62,7 @@ async function findFeaturesFormItem(page): Promise<LabelScope | null> {
  * 必须 count=1 + 可见，否则跳过；返回所有可用候选（按优先级排序）。
  * 严禁全页 scan：每个容器都用具体 ID 锚定。
  */
-async function findFeaturesFallbackContainers(page): Promise<FallbackScope[]> {
+async function findFeaturesFallbackContainers(page: VbkPage): Promise<FallbackScope[]> {
   const result: FallbackScope[] = [];
   for (const containerId of FEATURES_FALLBACK_CONTAINERS) {
     const container = page.locator(containerId);
@@ -92,7 +93,7 @@ function describeScope(resolved: AnyScope): string {
  *   - 多候选取第一个可见 / 可写的（绝不允许全页 scan）；
  *   - 找不到返回 null，由 fillProductFeatures 决定如何报错。
  */
-async function findEditorInScope(scope): Promise<EditorTarget | null> {
+async function findEditorInScope(scope: VbkLocator): Promise<EditorTarget | null> {
   // textarea
   const textareas = scope.locator('textarea:visible:not([disabled]):not([readonly])');
   for (let i = 0; i < (await textareas.count()); i += 1) {
@@ -124,13 +125,9 @@ async function findEditorInScope(scope): Promise<EditorTarget | null> {
   const iframes = scope.locator("iframe:visible");
   for (let i = 0; i < (await iframes.count()); i += 1) {
     const node = iframes.nth(i);
-    let frameLocator: any = null;
+    let frameLocator: FrameLocator | null = null;
     try {
-      const result = node.contentFrame();
-      frameLocator =
-        result && typeof (result as any).then === "function"
-          ? await (result as Promise<any>).catch(() => null)
-          : result;
+      frameLocator = node.contentFrame();
     } catch {
       frameLocator = null;
     }
@@ -138,9 +135,8 @@ async function findEditorInScope(scope): Promise<EditorTarget | null> {
     const body = frameLocator.locator("body");
     // 校验 body 真正可写：避免命中隐藏 _ueditor / sync textarea 等不可写 iframe
     const writable = await body
-      .evaluate((el: HTMLElement | null) => {
-        if (!el) return false;
-        if ((el as any).isContentEditable === true) return true;
+      .evaluate((el: HTMLElement | SVGElement) => {
+        if ("isContentEditable" in el && el.isContentEditable === true) return true;
         const ce = (el.getAttribute("contenteditable") || "").toLowerCase();
         if (ce === "true" || ce === "") return true;
         return false;

@@ -22,19 +22,17 @@
  *     「… 待补充 / 待设置」文案标记，文案保持中文、紧凑、操作型。
  *  6. 视觉密度收紧：单层 label + value + actions 三段，无嵌套大卡。
  *
- * 拆分：
- *  - .row.tsx            行壳 + 紧凑展示/编辑态切换（实际未使用 row.tsx，保留命名一致性）
- *  - basic-info-row-shell.tsx  共享行 chrome
- *  - basic-info-subtitle-row.tsx       副标题行
- *  - basic-info-butler-row.tsx         管家联系人行
- *  - basic-info-pricing-row.tsx        套餐定价行
- *  - basic-info-inventory-row.tsx      班期库存行
- *  - basic-info-vehicle-row.tsx        用车资源组行
- *  - basic-info-service-phone-row.tsx  400 电话行
- *  - review-summary-basic-info.helpers.ts  纯数据抽取 / 草稿解析
+ * 子文件：
+ *   - review-summary-basic-info/util.ts   : sameContactCard / buildHeadParts /
+ *                                           derivePricingDraft / deriveInventoryDraft；
+ *   - review-summary-basic-info/hooks.ts  : useReviewSummaryBasicInfoState（effects +
+ *                                           派生展示态 + headMeta）。
+ *
+ * 子行组件（位于同级目录，未参与本次拆分）：
+ *   - basic-info-cover-row / subtitle / butler / pricing / inventory / vehicle /
+ *     service-phone-row。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ClipboardList } from "lucide-react";
 import type {
   ContactCardSelection,
@@ -52,8 +50,7 @@ import { BasicInfoPricingRow } from "./basic-info-pricing-row";
 import { BasicInfoServicePhoneRow } from "./basic-info-service-phone-row";
 import { BasicInfoSubtitleRow } from "./basic-info-subtitle-row";
 import { BasicInfoVehicleRow } from "./basic-info-vehicle-row";
-import { readBasicInfoFromProduct, shouldShowVehicleResourceRow } from "./review-summary-basic-info.helpers";
-import { api } from "../../helpers";
+import { useReviewSummaryBasicInfoState } from "./review-summary-basic-info/hooks.js";
 import styles from "./review-summary-basic-info.module.less";
 
 export interface ReviewSummaryBasicInfoProps {
@@ -112,137 +109,60 @@ export interface ReviewSummaryBasicInfoProps {
   onToggleCollapsed: () => void;
 }
 
-export function AppWorkspaceReviewSummaryBasicInfo({
-  product,
-  currentAccountName,
-  savingField,
-  errors,
-  accountButlerDefault,
-  accountServicePhone,
-  fixedInfoReloadToken,
-  loadAccountFixedInfo,
-  draft,
-  setDraft,
-  saveSubtitle,
-  regenerateSubtitle,
-  saveButler,
-  savePricing,
-  saveInventory,
-  saveVehicleCost,
-  uploadAndSaveManualCover,
-  saveCtripLibraryCover,
-  searchCtripLibraryPlaces,
-  searchCtripLibraryImages,
-  clearError,
-  collapsed,
-  onToggleCollapsed,
-}: ReviewSummaryBasicInfoProps) {
-  const snapshot = useMemo(() => readBasicInfoFromProduct(product.product), [product.product]);
+export function AppWorkspaceReviewSummaryBasicInfo(props: ReviewSummaryBasicInfoProps) {
+  const {
+    product,
+    currentAccountName,
+    savingField,
+    errors,
+    accountButlerDefault,
+    accountServicePhone,
+    fixedInfoReloadToken,
+    loadAccountFixedInfo,
+    draft,
+    setDraft,
+    saveSubtitle,
+    regenerateSubtitle,
+    saveButler,
+    savePricing,
+    saveInventory,
+    saveVehicleCost,
+    uploadAndSaveManualCover,
+    saveCtripLibraryCover,
+    searchCtripLibraryPlaces,
+    searchCtripLibraryImages,
+    clearError,
+    collapsed,
+    onToggleCollapsed,
+  } = props;
 
-  // 「手动上传封面」预览 data URL：仅 manualUpload 时需要解析；
-  // 旧实现返回 file:// URL 在沙盒下偶发破图，新实现改为 data: URL，
-  // 直接喂给 img 标签 src 即可，不再依赖文件系统路径。
-  const [coverPreviewUrl, setCoverPreviewUrl] = useState<string | null>(null);
-  const autoSyncedButlerKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const cover = snapshot.cover;
-    if (!cover || cover.source !== "manualUpload" || !cover.fileId) {
-      setCoverPreviewUrl(null);
-      return () => { cancelled = true; };
-    }
-    if (!api()) return () => { cancelled = true; };
-    void api()!.cover.read({ fileId: cover.fileId, originalName: cover.originalName ?? "" })
-      .then((res) => { if (!cancelled) setCoverPreviewUrl(res.url); })
-      .catch(() => { if (!cancelled) setCoverPreviewUrl(null); });
-    return () => { cancelled = true; };
-  }, [snapshot.cover]);
+  const state = useReviewSummaryBasicInfoState({
+    product,
+    currentAccountName,
+    fixedInfoReloadToken,
+    accountButlerDefault,
+    accountServicePhone,
+    savingField,
+    draft,
+    setDraft,
+    loadAccountFixedInfo,
+    saveButler,
+  });
 
-  // 进入「基础信息」模块时拉一次当前账号的 fixedInfo；
-  // loadAccountFixedInfo 内部已对 localProductId 做去重，不会重复 IO。
-  useEffect(() => {
-    loadAccountFixedInfo(product.id, currentAccountName);
-  }, [product.id, currentAccountName, fixedInfoReloadToken, loadAccountFixedInfo]);
-
-  // 账号固定信息是默认来源：账号联系人变化后，自动同步当前产品，
-  // 保证自动录入仍读取完整的产品级 ContactCardSelection。
-  const accountButlerKey = accountButlerDefault
-    ? `${accountButlerDefault.contactCardId}:${accountButlerDefault.providerId}:${accountButlerDefault.displayName}`
-    : "none";
-  useEffect(() => {
-    if (!accountButlerDefault || savingField === "butler") return;
-    if (sameContactCard(snapshot.butler, accountButlerDefault)) return;
-    const syncKey = `${product.id}:${accountButlerKey}`;
-    if (autoSyncedButlerKeyRef.current === syncKey) return;
-    autoSyncedButlerKeyRef.current = syncKey;
-    void saveButler(product.id, accountButlerDefault);
-  }, [accountButlerDefault, accountButlerKey, product.id, saveButler, savingField, snapshot.butler]);
-
-  // 「行级可渲染」判定：
-  //  - 封面 / 副标题 / 管家 / 400 电话 / 套餐定价 始终挂载（用户验收门
-  //    #1/#2：基础信息「始终展示」+ 缺失字段在各自行内显示紧凑空状态）；
-  //  - 用车资源组保持既有产品类型逻辑（私家团 / 已有数据才显示）；
-  //  - 模块整体不返回 null：封面始终挂载意味着任意 product 下都能展开。
-  const subtitleHasValue = snapshot.subtitle !== null;
-  const butlerHasValue = snapshot.butler !== null;
-  // 定价展示态要求三字段同时具备；任一缺失（含 minimumTravelers）都走空状态。
-  const pricingHasValue = snapshot.adult !== null
-    && snapshot.child !== null
-    && snapshot.minimumTravelers !== null;
-  const inventoryHasValue = snapshot.inventory.startDate !== null
-    && snapshot.inventory.endDate !== null
-    && snapshot.inventory.dailyQuota !== null;
-  const vehicleVisible = shouldShowVehicleResourceRow(snapshot);
-  const vehicleHasValue = vehicleVisible && (
-    snapshot.vehicleResource.resourceGroupId !== null
-    || (snapshot.vehicleResource.resourceGroupName !== null
-      && snapshot.vehicleResource.resourceGroupName.trim().length > 0)
-    || snapshot.vehicleResource.requestedTotalCost !== null
-  );
-  const servicePhoneRaw = typeof accountServicePhone === "string" ? accountServicePhone.trim() : "";
-  const servicePhoneHasValue = servicePhoneRaw.length > 0;
-
-  const subtitleDraft = draft.subtitle ?? "";
-  const pricingDraft = {
-    adult: draft.adult ?? "",
-    child: draft.child ?? "",
-    minimumTravelers: draft.minimumTravelers ?? "",
-  };
-  const inventoryDraft = {
-    startDate: draft.startDate ?? "",
-    endDate: draft.endDate ?? "",
-    dailyQuota: draft.dailyQuota ?? "",
-  };
-  const costDraft = draft.requestedTotalCost ?? "";
-
-  // headMeta：所有核心行都列出（封面永远在），缺失字段追加「待补充 / 待设置」
-  // 状态文案，让用户从模块头部一眼看到还需要补什么；用车按产品类型条件加入。
-  const headParts: string[] = [snapshot.coverFallback ? "封面待替换" : "封面"];
-  headParts.push(subtitleHasValue ? "副标题" : "副标题待补充");
-  headParts.push(butlerHasValue ? "管家" : "管家待补充");
-  headParts.push(servicePhoneHasValue ? "400 电话" : "400 电话待设置");
-  headParts.push(pricingHasValue ? "定价" : "定价待设置");
-  headParts.push(inventoryHasValue ? "库存" : "库存待设置");
-  if (vehicleVisible) {
-    headParts.push(vehicleHasValue ? "用车" : "用车待匹配");
-  }
-  const headMeta = headParts.join(" · ");
-
-  const updateDraft = (key: string, value: string) => setDraft({ ...draft, [key]: value });
-  const updatePricingDraft = (next: { adult: string; child: string; minimumTravelers: string }) =>
-    setDraft({
-      ...draft,
-      adult: next.adult,
-      child: next.child,
-      minimumTravelers: next.minimumTravelers,
-    });
-  const updateInventoryDraft = (next: { startDate: string; endDate: string; dailyQuota: string }) =>
-    setDraft({
-      ...draft,
-      startDate: next.startDate,
-      endDate: next.endDate,
-      dailyQuota: next.dailyQuota,
-    });
+  const {
+    snapshot,
+    coverPreviewUrl,
+    readPreviewUrl,
+    headMeta,
+    subtitleDraft,
+    pricingDraft,
+    inventoryDraft,
+    costDraft,
+    vehicleVisible,
+    updateDraft,
+    updatePricingDraft,
+    updateInventoryDraft,
+  } = state;
 
   return (
     <section
@@ -281,11 +201,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
             onPickCtripLibrary={(args) => saveCtripLibraryCover(product.id, args)}
             onSearchCtripLibraryPlaces={(args) => searchCtripLibraryPlaces(product.id, args)}
             onSearchCtripLibraryImages={(args) => searchCtripLibraryImages(product.id, args)}
-            onReadPreviewUrl={async (fileId, originalName) => {
-              if (!api()) return null;
-              const result = await api()!.cover.read({ fileId, originalName });
-              return result.url;
-            }}
+            onReadPreviewUrl={async (fileId, originalName) => readPreviewUrl(fileId, originalName)}
           />
 
           <BasicInfoSubtitleRow
@@ -307,7 +223,7 @@ export function AppWorkspaceReviewSummaryBasicInfo({
           />
 
           <BasicInfoServicePhoneRow
-            servicePhone={servicePhoneRaw.length > 0 ? servicePhoneRaw : null}
+            servicePhone={state.servicePhoneRaw.length > 0 ? state.servicePhoneRaw : null}
           />
 
           <BasicInfoPricingRow
@@ -352,18 +268,5 @@ export function AppWorkspaceReviewSummaryBasicInfo({
         </div>
       ) : null}
     </section>
-  );
-}
-
-function sameContactCard(
-  left: ContactCardSelection | null,
-  right: ContactCardSelection | null,
-): boolean {
-  return Boolean(
-    left
-    && right
-    && left.contactCardId === right.contactCardId
-    && left.providerId === right.providerId
-    && left.displayName.trim() === right.displayName.trim(),
   );
 }

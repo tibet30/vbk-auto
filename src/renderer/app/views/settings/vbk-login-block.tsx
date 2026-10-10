@@ -1,21 +1,11 @@
-import { useEffect, useState } from "react";
 import { Pencil, Phone, PlugZap, RotateCw, Shield, UserRound, UserSquare2 } from "lucide-react";
-import type { AccountFixedInfo, ContactCardSelection, SavedLoginAccount } from "../../../../shared/contracts.js";
 import { useAppAuth } from "../../auth/AppAuthContext";
-import { api } from "../../helpers";
-import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import { AccountList } from "./vbk-login-account-list";
 import styles from "./vbk-login-block.module.less";
-
-function hasBindingValues(info: AccountFixedInfo): boolean {
-  const phone = typeof info.values.servicePhone === "string" ? info.values.servicePhone.trim() : "";
-  const raw = info.values.butlerName;
-  const butler = raw && typeof raw === "object" && "displayName" in raw
-    ? String((raw as ContactCardSelection).displayName || "").trim()
-    : "";
-  return Boolean(phone || butler);
-}
+import type { AppModel } from "../../app.main.model";
+import { useVbkLoginBlockState } from "./vbk-login-block/state.js";
+import { resolveButlerDisplay, resolveFilledCount } from "./vbk-login-block/util.js";
 
 /**
  * 多账号登录：把每个 VBK 账号的 cookies 抽出来本机持久化，
@@ -33,16 +23,10 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
     checkingVbkLogin,
     openLogin,
     addNewLogin,
-    checkVbkLogin,
     logoutVbk,
     openAccountEditor,
-    refreshVbkLoginAccounts,
     vbkLoginAccounts,
-    switchAccount,
-    forgetAccount,
     loadingLoginAccounts,
-    fixedInfoReloadToken,
-    setFixedInfoReloadToken,
   } = model;
 
   const loggedIn = !!vbkLogin?.loggedIn;
@@ -58,88 +42,24 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
       }
     : snapCurrent;
 
-  const [accountInfo, setAccountInfo] = useState<AccountFixedInfo | null>(null);
-  const [loadingAccountInfo, setLoadingAccountInfo] = useState(false);
-  /** Tibet 绑定有 400/管家，但本机 VBK webview 未登录。 */
-  const [boundOffline, setBoundOffline] = useState(false);
-  const [confirmForgetKey, setConfirmForgetKey] = useState<string | null>(null);
-  const [busyAccount, setBusyAccount] = useState<string | null>(null);
-
-  // App 账号切换后 workspace 会按 user.id remount；main 侧 sync 是 fire-and-forget，
-  // 这里立刻刷新并延迟再 bump token，让设置页读到新用户的 scoped 绑定。
-  useEffect(() => {
-    void refreshVbkLoginAccounts();
-    void checkVbkLogin(true);
-    setFixedInfoReloadToken((value) => value + 1);
-    const timer = window.setTimeout(() => {
-      setFixedInfoReloadToken((value) => value + 1);
-      void refreshVbkLoginAccounts();
-    }, 800);
-    return () => window.clearTimeout(timer);
-    // checkVbkLogin 引用不稳定，刻意只跟 user.id。
-  }, [user.id]);
-
-  useEffect(() => {
-    const client = api();
-    if (!client) return;
-    let cancelled = false;
-    setLoadingAccountInfo(true);
-
-    const finish = (info: AccountFixedInfo | null, offlineBound: boolean) => {
-      if (cancelled) return;
-      setAccountInfo(info);
-      setBoundOffline(offlineBound);
-      setLoadingAccountInfo(false);
-    };
-
-    void (async () => {
-      try {
-        if (currentAccount) {
-          finish(await client.accounts.getFixedInfo(currentAccountKey ?? currentAccount), false);
-          return;
-        }
-        // 未登录 VBK：用本机已记录账号 key 探测 scoped 绑定（有 400/管家则提示待登录）。
-        const keys = [
-          snapCurrent?.accountKey,
-          snapCurrent?.accountName,
-          ...snapSaved.flatMap((entry) => [entry.accountKey, entry.accountName]),
-        ]
-          .map((key) => (typeof key === "string" ? key.trim() : ""))
-          .filter(Boolean);
-        for (const key of [...new Set(keys)]) {
-          const info = await client.accounts.getFixedInfo(key);
-          if (hasBindingValues(info)) {
-            finish(info, true);
-            return;
-          }
-        }
-        finish(null, false);
-      } catch {
-        finish(null, false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentAccount, currentAccountKey, vbkLoginAccounts, fixedInfoReloadToken]);
-
-  useEffect(() => {
-    void refreshVbkLoginAccounts();
-  }, [refreshVbkLoginAccounts, vbkLogin?.loggedIn]);
+  const {
+    accountInfo,
+    loadingAccountInfo,
+    boundOffline,
+    confirmForgetKey,
+    busyAccount,
+    handleSwitch,
+    handleForget,
+    handleRefreshStatus,
+    setConfirmForgetKey,
+  } = useVbkLoginBlockState(model, user.id, currentAccount, currentAccountKey ?? null, snapCurrent, snapSaved);
 
   const phoneValue =
     typeof accountInfo?.values.servicePhone === "string"
       ? accountInfo.values.servicePhone.trim()
       : "";
-  const butlerValue = (() => {
-    const raw = accountInfo?.values.butlerName;
-    if (raw && typeof raw === "object" && "displayName" in raw) {
-      return (raw as ContactCardSelection).displayName;
-    }
-    return "";
-  })();
-  const filledCount = (phoneValue ? 1 : 0) + (butlerValue ? 1 : 0);
+  const butlerValue = resolveButlerDisplay(accountInfo?.values.butlerName);
+  const filledCount = resolveFilledCount(phoneValue, butlerValue);
   const accountInfoState: "confirmed" | "needs" | "blocked" = !loggedIn
     ? "blocked"
     : loadingAccountInfo
@@ -149,40 +69,6 @@ export function VbkLoginBlock({ model }: { model: AppModel }) {
         : filledCount === 1
           ? "needs"
           : "blocked";
-
-  const handleSwitch = async (target: SavedLoginAccount) => {
-    if (busyAccount || target.accountKey === snapCurrent?.accountKey) return;
-    setBusyAccount(target.accountKey);
-    try {
-      await switchAccount(target.accountKey);
-    } finally {
-      setBusyAccount(null);
-    }
-  };
-
-  const handleForget = async (target: SavedLoginAccount) => {
-    if (busyAccount) return;
-    if (target.accountKey === snapCurrent?.accountKey) return;
-    setBusyAccount(target.accountKey);
-    try {
-      if (confirmForgetKey === target.accountKey) {
-        await forgetAccount(target.accountKey);
-        setConfirmForgetKey(null);
-      } else {
-        setConfirmForgetKey(target.accountKey);
-        window.setTimeout(() => {
-          setConfirmForgetKey((current) => (current === target.accountKey ? null : current));
-        }, 4000);
-      }
-    } finally {
-      setBusyAccount(null);
-    }
-  };
-
-  const handleRefreshStatus = async () => {
-    await checkVbkLogin(true);
-    await refreshVbkLoginAccounts();
-  };
 
   const offlineAccountLabel = !loggedIn && boundOffline
     ? (accountInfo?.accountName || snapCurrent?.accountName || null)

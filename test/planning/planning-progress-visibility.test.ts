@@ -15,7 +15,10 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (rel: string) => readFileSync(path.join(repoRoot, rel), "utf8");
 const reviewSrc = read("src/renderer/app/views/workspace/review.tsx");
-const treeSrc = read("src/renderer/app/views/workspace/planning-tree.tsx");
+const treeSrc = read("src/renderer/app/views/workspace/planning-tree.tsx")
+  + "\n" + read("src/renderer/app/views/workspace/planning-tree/constants.ts")
+  + "\n" + read("src/renderer/app/views/workspace/planning-tree/component.tsx")
+  + "\n" + read("src/renderer/app/views/workspace/planning-tree/helpers.tsx");
 const lessSrc = read("src/renderer/app/views/workspace/planning-tree.module.less");
 const derivedSrc = read("src/renderer/app/state/derived.ts");
 

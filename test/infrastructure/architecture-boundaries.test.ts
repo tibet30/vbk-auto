@@ -31,7 +31,14 @@ test("planning schema 与工具 schema 通过 stage-contract 单向共享阶段�
   assert.doesNotMatch(source("src/main/planning/tool-schema.ts"), /from\s+["']\.\/schemas\.js["']/);
   assert.doesNotMatch(source("src/main/planning/schemas.ts"), /from\s+["']\.\/tool-schema\.js["']/);
   assert.match(source("src/main/planning/tool-schema.ts"), /from\s+["']\.\/stage-contract\.js["']/);
-  assert.match(source("src/main/planning/schemas.ts"), /from\s+["']\.\/stage-contract\.js["']/);
+  // After split, schemas.ts is a barrel; concrete stage-contract imports live
+  // in schemas/{validate,system-prompt}.ts. Verify one of them uses stage-contract.
+  const subSchemaSrc = [
+    source("src/main/planning/schemas.ts"),
+    source("src/main/planning/schemas/validate.ts"),
+    source("src/main/planning/schemas/system-prompt.ts"),
+  ].join("\n");
+  assert.match(subSchemaSrc, /from\s+["']\.{1,2}\/stage-contract\.js["']/);
 });
 
 test("跨工作流产品分类契约只有一个领域定义源", () => {
@@ -45,18 +52,26 @@ test("跨工作流产品分类契约只有一个领域定义源", () => {
 });
 
 test("所有业务 IPC registrar 统一通过 secureIpcMain 注册", () => {
+  // After splitting, some registrars are barrels that delegate to sub-files.
+  // The test now reads both the registrar path and any planning-ipc/* siblings.
   const registrars = [
-    "src/main/ipc/product-ai-ipc.ts",
-    "src/main/ipc/planning-ipc.ts",
-    "src/main/ipc/browser-automation-ipc.ts",
-    "src/main/ipc/settings-ipc.ts",
+    ["src/main/ipc/product-ai-ipc.ts"],
+    [
+      "src/main/ipc/planning-ipc.ts",
+      "src/main/ipc/planning-ipc/ipc-handlers.ts",
+      "src/main/ipc/planning-ipc/run-planning.ts",
+      "src/main/ipc/planning-ipc/preflight-failure.ts",
+    ],
+    ["src/main/ipc/browser-automation-ipc.ts"],
+    ["src/main/ipc/settings-ipc.ts"],
   ];
-  for (const path of registrars) {
-    const content = source(path);
-    assert.match(content, /import \{ secureIpcMain as ipcMain \} from ["'][^"']*ipc-sender\.js["']/,
-      `${path} 必须使用统一安全 IPC 门面`);
-    assert.doesNotMatch(content, /import \{[^}]*\bipcMain\b[^}]*\} from ["']electron["']/,
-      `${path} 不得绕过安全门面直接导入 electron.ipcMain`);
+  for (const group of registrars) {
+    const combined = group.map(source).join("\n");
+    const label = group[0];
+    assert.match(combined, /import \{ secureIpcMain as ipcMain \} from ["'][^"']*ipc-sender\.js["']/,
+      `${label} 必须使用统一安全 IPC 门面`);
+    assert.doesNotMatch(combined, /import \{[^}]*\bipcMain\b[^}]*\} from ["']electron["']/,
+      `${label} 不得绕过安全门面直接导入 electron.ipcMain`);
   }
 });
 

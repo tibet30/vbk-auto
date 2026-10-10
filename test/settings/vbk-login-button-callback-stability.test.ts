@@ -27,6 +27,9 @@ function read(relPath: string): string {
 
 const baseSrc = read("src/renderer/app/state/base.ts");
 const blockSrc = read("src/renderer/app/views/settings/vbk-login-block.tsx");
+const blockStateSrc = read("src/renderer/app/views/settings/vbk-login-block/state.ts");
+const blockUtilSrc = read("src/renderer/app/views/settings/vbk-login-block/util.ts");
+const blockFull = blockSrc + '\n' + blockStateSrc + '\n' + blockUtilSrc;
 
 test("refreshVbkLoginAccounts 由 useCallback 包装且 deps 为空，跨 render 引用稳定", () => {
   // 必须形如：const refreshVbkLoginAccounts = useCallback(async () => { ... }, []);
@@ -47,8 +50,8 @@ test("vbk-login-block 的 effect 把 refreshVbkLoginAccounts 放进 deps", () =>
   // deps 列表里出现 refreshVbkLoginAccounts 是这次「稳定引用」契约生效的前置条件：
   // 如果 effect 不依赖它，useCallback 的稳定性也无从验证；如果连这个 effect 都没了，
   // 已记录账号列表永远不会刷新。
-  const effect = blockSrc.match(
-    /useEffect\s*\(\s*\(\s*\)\s*=>\s*\{\s*void\s+refreshVbkLoginAccounts\s*\(\s*\)\s*;\s*\}\s*,\s*\[\s*refreshVbkLoginAccounts\s*(?:,\s*vbkLogin\?\.loggedIn\s*)?\]\s*\)/
+  const effect = blockFull.match(
+    /useEffect\s*\(\s*\(\s*\)\s*=>\s*\{\s*void\s+refreshVbkLoginAccounts\s*\(\s*\)\s*;\s*\}\s*,\s*\[\s*refreshVbkLoginAccounts\s*(?:,\s*model\.vbkLogin\?\.loggedIn\s*|\s*,\s*vbkLogin\?\.loggedIn\s*)?\]\s*\)/
   );
   assert.ok(
     effect,

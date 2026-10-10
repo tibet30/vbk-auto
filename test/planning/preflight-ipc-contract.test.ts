@@ -77,7 +77,12 @@ function extractFunctionBody(source: string, signature: string): string {
   return source.slice(start, i);
 }
 
-const mainSrc = read("src/main/ipc/planning-ipc.ts");
+const mainSrc = [
+  read("src/main/ipc/planning-ipc.ts"),
+  read("src/main/ipc/planning-ipc/ipc-handlers.ts"),
+  read("src/main/ipc/planning-ipc/run-planning.ts"),
+  read("src/main/ipc/planning-ipc/preflight-failure.ts"),
+].join("\n");
 const helperSrc = read("src/main/planning/preflight-failure.ts");
 const derivedSrc = read("src/renderer/app/state/derived.ts");
 

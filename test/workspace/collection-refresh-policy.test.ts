@@ -42,7 +42,10 @@ test("后台 VBK 页面跳转不能刷新产品表单或列表页", () => {
 });
 
 test("后台任务状态通过受控事件实时更新，列表接口负责进入页面时补偿", () => {
-  const main = readFileSync("src/main/main.ts", "utf8");
+  const main = [
+    readFileSync("src/main/main.ts", "utf8"),
+    readFileSync("src/main/main-events.ts", "utf8"),
+  ].join("\n");
   const preload = readFileSync("src/main/preload.cts", "utf8");
   const api = readFileSync("src/shared/contracts-api.ts", "utf8");
   const derived = readFileSync("src/renderer/app/state/derived.ts", "utf8");

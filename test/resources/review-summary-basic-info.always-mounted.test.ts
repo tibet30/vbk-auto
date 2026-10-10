@@ -30,6 +30,8 @@ const subtitlePath = resolve(workspaceDir, "basic-info-subtitle-row.tsx");
 const moduleCssPath = resolve(workspaceDir, "review-summary-basic-info.module.less");
 
 const parentSource = readFileSync(parentPath, "utf8");
+const reviewSummaryBasicInfoUtilSrc = readFileSync(resolve(workspaceDir, "review-summary-basic-info/util.ts"), "utf8");
+const reviewSummaryBasicInfoFull = parentSource + '\n' + reviewSummaryBasicInfoUtilSrc;
 const pricingSource = readFileSync(pricingPath, "utf8");
 const inventorySource = readFileSync(inventoryPath, "utf8");
 const servicePhoneSource = readFileSync(servicePhonePath, "utf8");
@@ -109,12 +111,13 @@ test("父组件不再用 servicePhone / adult / subtitle 的非空条件挂载�
 });
 
 test("父组件 headMeta 在缺失字段时使用「待补充 / 待设置」文案", () => {
-  assert.match(parentSource, /副标题待补充/);
-  assert.match(parentSource, /管家待补充/);
-  assert.match(parentSource, /400 电话待设置/);
-  assert.match(parentSource, /定价待设置/);
-  assert.match(parentSource, /库存待设置/);
-  assert.match(parentSource, /用车待匹配/);
+  // After split, the placeholder strings live in review-summary-basic-info/util.ts.
+  assert.match(reviewSummaryBasicInfoFull, /副标题待补充/);
+  assert.match(reviewSummaryBasicInfoFull, /管家待补充/);
+  assert.match(reviewSummaryBasicInfoFull, /400 电话待设置/);
+  assert.match(reviewSummaryBasicInfoFull, /定价待设置/);
+  assert.match(reviewSummaryBasicInfoFull, /库存待设置/);
+  assert.match(reviewSummaryBasicInfoFull, /用车待匹配/);
 });
 
 test("BasicInfoInventoryRow 接受 null 并沿用 parseInventoryDraft 校验", () => {

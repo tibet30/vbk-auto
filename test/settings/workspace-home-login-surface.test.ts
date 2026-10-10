@@ -43,6 +43,12 @@ const homePanelLessSrc = read("src/renderer/app/views/workspace-home/login-brows
 const homeIndexLessSrc = read("src/renderer/app/views/workspace-home/index.module.less");
 const workflowSrc = read("src/renderer/app/actions/workflow.ts");
 const vbkLoginBlockSrc = read("src/renderer/app/views/settings/vbk-login-block.tsx");
+const vbkLoginBlockStateSrc = read("src/renderer/app/views/settings/vbk-login-block/state.ts");
+const vbkLoginBlockUtilSrc = read("src/renderer/app/views/settings/vbk-login-block/util.ts");
+const vbkLoginBlockFull = vbkLoginBlockSrc + '\n' + vbkLoginBlockStateSrc + '\n' + vbkLoginBlockUtilSrc;
+const workflowActionsSrc = read("src/renderer/app/actions/workflow/automation.ts");
+const workflowLoginSrc = read("src/renderer/app/actions/workflow/login.ts");
+const workflowFull = workflowSrc + '\n' + workflowActionsSrc + '\n' + workflowLoginSrc;
 
 function sliceBetween(haystack: string, start: number, stop: number): string {
   // 闭区间 [start, stop]
@@ -63,12 +69,13 @@ test("VBK 已记录账号的当前徽章跟随实时账号名称，避免显示�
 });
 
 test("VBK 刷新状态后同步刷新已记录账号列表", () => {
+  // After split, handleRefreshStatus is defined in vbk-login-block/state.ts.
   assert.match(
-    vbkLoginBlockSrc,
+    vbkLoginBlockStateSrc,
     /const\s+handleRefreshStatus\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]*?await\s+checkVbkLogin\(true\)[\s\S]*?await\s+refreshVbkLoginAccounts\(\)[\s\S]*?\};/,
     "刷新状态必须同时重新读取已记录账号，避免磁盘已有账号但界面列表仍是旧快照。",
   );
-  assert.match(vbkLoginBlockSrc, /onClick=\{\(\)\s*=>\s*void\s+handleRefreshStatus\(\)\}/);
+  assert.match(vbkLoginBlockFull, /onClick=\{\(\)\s*=>\s*void\s+handleRefreshStatus\(\)\}/);
 });
 
 test("工作台空产品时仍可进入产品列表", () => {
@@ -201,13 +208,13 @@ test("openLogin 与 addNewLogin 都必须把 view 切到 workspace 并设 stage=
   // openLogin 函数体（从「const openLogin = 」起截到下一个「};」）必须包含
   // setView("workspace") / setBrowserOpen(true) / setStage("vbk") / setLoginPanelOpen(true)；
   // 顺序上 setView 必须先于 setLoginPanelOpen，避免路由切换晚于面板打开。
-  const openLoginMatch = workflowSrc.match(/const\s+openLogin\s*=\s*\(\s*\)\s*=>\s*\{/);
+  const openLoginMatch = workflowFull.match(/const\s+openLogin\s*=\s*\(\s*\)\s*=>\s*\{/);
   assert.ok(openLoginMatch, "workflow.ts 必须存在 const openLogin = () => { ... }");
   const openLoginStart = openLoginMatch.index! + openLoginMatch[0].length;
   // 用一个简单的括号匹配扫描到下一个「};」开头的位置。
-  const closeIdx = workflowSrc.indexOf("\n  };", openLoginStart);
+  const closeIdx = workflowFull.indexOf("\n  };", openLoginStart);
   assert.notEqual(closeIdx, -1, "无法定位 openLogin 闭合边界");
-  const openLoginBody = sliceBetween(workflowSrc, openLoginStart, closeIdx + "\n  };".length);
+  const openLoginBody = sliceBetween(workflowFull, openLoginStart, closeIdx + "\n  };".length);
 
   for (const required of [
     'setView("workspace")',
@@ -233,12 +240,12 @@ test("openLogin 与 addNewLogin 都必须把 view 切到 workspace 并设 stage=
   // addNewLogin 函数体必须同样包含上面四个 setter，且必须显式 setVbkLogin(null)
   // 清空 stale 登录判断，否则 derived.ts 的「已登录且 loginPanelOpen 则自动收起」
   // effect 会立刻把它关掉。
-  const addNewLoginMatch = workflowSrc.match(/const\s+addNewLogin\s*=\s*async\s*\(\s*\)\s*=>\s*\{/);
+  const addNewLoginMatch = workflowFull.match(/const\s+addNewLogin\s*=\s*async\s*\(\s*\)\s*=>\s*\{/);
   assert.ok(addNewLoginMatch, "workflow.ts 必须存在 const addNewLogin = async () => { ... }");
   const addNewLoginStart = addNewLoginMatch.index! + addNewLoginMatch[0].length;
-  const addNewLoginCloseIdx = workflowSrc.indexOf("\n  };", addNewLoginStart);
+  const addNewLoginCloseIdx = workflowFull.indexOf("\n  };", addNewLoginStart);
   assert.notEqual(addNewLoginCloseIdx, -1, "无法定位 addNewLogin 闭合边界");
-  const addNewLoginBody = sliceBetween(workflowSrc, addNewLoginStart, addNewLoginCloseIdx + "\n  };".length);
+  const addNewLoginBody = sliceBetween(workflowFull, addNewLoginStart, addNewLoginCloseIdx + "\n  };".length);
 
   for (const required of [
     'setView("workspace")',
@@ -268,11 +275,11 @@ test("openLogin 的 catch 必须 setNotice 显式抛错并保留登录 surface",
   //   - 至少一次 setNotice(...)
   //   - 不允许 setLoginPanelOpen(false) / setBrowserOpen(false) —— 失败时必须保留 surface
   //   - 不允许 setVbkLogin({ loggedIn: false, ... }) —— 旧写法等价于「无提示的失败兜底」
-  const openLoginMatch = workflowSrc.match(/const\s+openLogin\s*=\s*\(\s*\)\s*=>\s*\{/);
+  const openLoginMatch = workflowFull.match(/const\s+openLogin\s*=\s*\(\s*\)\s*=>\s*\{/);
   assert.ok(openLoginMatch, "workflow.ts 必须存在 const openLogin = () => { ... }");
   const openLoginStart = openLoginMatch.index! + openLoginMatch[0].length;
-  const closeIdx = workflowSrc.indexOf("\n  };", openLoginStart);
-  const openLoginBody = sliceBetween(workflowSrc, openLoginStart, closeIdx + "\n  };".length);
+  const closeIdx = workflowFull.indexOf("\n  };", openLoginStart);
+  const openLoginBody = sliceBetween(workflowFull, openLoginStart, closeIdx + "\n  };".length);
 
   const catchMatch = openLoginBody.match(/\.catch\s*\(\s*\([^)]*\)\s*=>\s*\{([\s\S]*?)\}\s*\)/);
   assert.ok(catchMatch, "openLogin 必须存在 browser.login().catch(...) 错误处理分支");
@@ -302,13 +309,13 @@ test("openLogin 的 catch 必须 setNotice 显式抛错并保留登录 surface",
 
 test("登录面板打开期间不自动探测，必须等待用户手动确认", () => {
   const derivedSrc = read("src/renderer/app/state/derived.ts");
-  const workflowOpenLogin = workflowSrc.slice(
-    workflowSrc.indexOf("  const openLogin = () => {"),
-    workflowSrc.indexOf("  /**\n   * 「新增登录」"),
+  const workflowOpenLogin = workflowFull.slice(
+    workflowFull.indexOf("  const openLogin = () => {"),
+    workflowFull.indexOf("  /**\n   * 「新增登录」"),
   );
-  const workflowAddLogin = workflowSrc.slice(
-    workflowSrc.indexOf("  const addNewLogin = async () => {"),
-    workflowSrc.indexOf("  /**\n   * 切换到本机已记录"),
+  const workflowAddLogin = workflowFull.slice(
+    workflowFull.indexOf("  const addNewLogin = async () => {"),
+    workflowFull.indexOf("  /**\n   * 切换到本机已记录"),
   );
   assert.match(
     derivedSrc,

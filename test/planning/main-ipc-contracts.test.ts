@@ -90,7 +90,16 @@ function extractFunctionBody(source: string, signature: string): string {
   return source.slice(start, i);
 }
 
-const mainSrc = [read("src/main/main.ts"), read("src/main/ipc/planning-ipc.ts")].join("\n");
+const mainSrc = [
+  read("src/main/main.ts"),
+  read("src/main/main-runtime.ts"),
+  read("src/main/ipc/planning-ipc.ts"),
+  read("src/main/ipc/planning-ipc/ipc-handlers.ts"),
+  read("src/main/ipc/planning-ipc/run-planning.ts"),
+  read("src/main/ipc/planning-ipc/preflight-failure.ts"),
+  read("src/main/ipc/planning-ipc/stable-result.ts"),
+  read("src/main/ipc/planning-ipc/postprocess.ts"),
+].join("\n");
 const productAiSrc = read("src/main/ipc/product-ai-ipc.ts");
 const browserAutomationSrc = read("src/main/ipc/browser-automation-ipc.ts");
 const planningV2Src = read("src/main/ipc/planning-v2-ipc.ts");
@@ -312,7 +321,7 @@ test("G4 · completed POI 回填只暴露名称纠正器，不会调用规划阶
   assert.match(body, /completedPoiBackfillPlanner\(localProductId\)/,
     "completed 回填必须使用专用 planner 装配，不可落入正常规划 adapter");
 
-  const helperStart = mainSrc.indexOf("async function completedPoiBackfillPlanner(");
+  const helperStart = mainSrc.indexOf("completedPoiBackfillPlanner =");
   const helperEnd = mainSrc.indexOf("/**", helperStart + 1);
   assert.notEqual(helperStart, -1, "completed POI 回填专用 planner 必须存在");
   assert.notEqual(helperEnd, -1, "completed POI 回填专用 planner 后必须保留模块边界");

@@ -18,12 +18,14 @@ test("主菜单固定为产品之后紧跟任务中心", () => {
 test("任务中心和产品列表共用后台任务状态，详情由 Agent 展示执行状态", () => {
   const appView = read("src/renderer/app/views/AppView.tsx");
   const productList = read("src/renderer/app/helpers/components.tsx");
+  const productListSub = read("src/renderer/app/helpers/components/product-list.tsx");
+  const productListFull = productList + '\n' + productListSub;
   const workspace = read("src/renderer/app/views/workspace/index.tsx");
   const review = read("src/renderer/app/views/workspace/review.tsx");
   const details = read("src/renderer/app/views/stage-nav/StageTaskDetails.tsx");
   const agentConversation = read("src/renderer/app/views/workspace/agent-conversation.tsx");
   assert.match(appView, /view === "tasks"[\s\S]*<AppTasksPage/);
-  assert.match(productList, /item\.workflowTask[\s\S]*productTaskTrack/);
+  assert.match(productListFull, /item\.workflowTask[\s\S]*productTaskTrack/);
   assert.doesNotMatch(workspace, /<WorkflowTaskStrip/);
   assert.match(details, /<WorkflowTaskStrip task=\{task\}/);
   assert.match(review, /<AgentConversation/);
@@ -77,9 +79,11 @@ test("自动录入报错固定显示在聊天区末尾，并为非法关键词�
 test("任务筛选和三处进度均暴露可访问状态", () => {
   const taskPage = read("src/renderer/app/views/tasks/index.tsx");
   const productList = read("src/renderer/app/helpers/components.tsx");
+  const productListSub = read("src/renderer/app/helpers/components/product-list.tsx");
+  const productListFull = productList + '\n' + productListSub;
   const taskStrip = read("src/renderer/app/views/workflow-task/TaskStrip.tsx");
   assert.match(taskPage, /aria-pressed=\{filter === item\.key\}/);
-  for (const source of [taskPage, productList, taskStrip]) {
+  for (const source of [taskPage, productListFull, taskStrip]) {
     assert.match(source, /role="progressbar"[\s\S]*aria-valuenow=/);
   }
 });

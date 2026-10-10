@@ -8,7 +8,12 @@ import type { ProductAiUsage } from "../../src/shared/contracts-ai-usage.js";
 const read = (file: string) => readFileSync(path.resolve(process.cwd(), file), "utf8");
 const usage = read("src/renderer/app/views/workspace/planning-usage.tsx");
 const usageFormat = read("src/renderer/app/views/workspace/planning-usage-format.ts");
-const tree = read("src/renderer/app/views/workspace/planning-tree.tsx");
+const tree = [
+  read("src/renderer/app/views/workspace/planning-tree.tsx"),
+  read("src/renderer/app/views/workspace/planning-tree/component.tsx"),
+  read("src/renderer/app/views/workspace/planning-tree/constants.ts"),
+  read("src/renderer/app/views/workspace/planning-tree/helpers.tsx"),
+].join("\n");
 const details = read("src/renderer/app/views/stage-nav/StageTaskDetails.tsx");
 const styles = read("src/renderer/app/views/workspace/planning-usage.module.less");
 

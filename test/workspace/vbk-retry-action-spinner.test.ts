@@ -13,14 +13,16 @@ import path from "node:path";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (relativePath: string) => readFileSync(path.join(repoRoot, relativePath), "utf8");
 const view = read("src/renderer/app/views/workspace/vbk.tsx");
+const viewReview = read("src/renderer/app/views/workspace/vbk/review.tsx");
+const viewFull = view + '\n' + viewReview;
 const styles = read("src/renderer/app/views/workspace/vbk.module.less");
 
 test("重新执行图标在持久化阶段仍运行时保持旋转", () => {
   assert.match(
-    view,
+    viewFull,
     /retryingPhase === phaseKey\s*\|\|\s*\(product\.automation\?\.status === "running" && product\.automation\.currentPhase === phaseKey\)/,
   );
-  assert.match(view, /<LoaderCircle size=\{12\} className=\{styles\.stageActionSpinner\} \/>/);
+  assert.match(viewFull, /<LoaderCircle size=\{12\} className=\{styles\.stageActionSpinner\} \/>/);
   assert.match(styles, /\.stageActionSpinner\s*\{\s*animation:\s*spin 0\.8s linear infinite;/);
 });
 

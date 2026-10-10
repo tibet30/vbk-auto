@@ -12,8 +12,16 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 const read = (rel: string) => readFileSync(path.join(repoRoot, rel), "utf8");
 const contracts = read("src/shared/contracts-api.ts");
 const preload = read("src/main/preload.cts");
-const main = read("src/main/main.ts");
-const planningIpc = read("src/main/ipc/planning-ipc.ts");
+const main = [
+  read("src/main/main.ts"),
+  read("src/main/main-events.ts"),
+].join("\n");
+const planningIpc = [
+  read("src/main/ipc/planning-ipc.ts"),
+  read("src/main/ipc/planning-ipc/preflight-failure.ts"),
+  read("src/main/ipc/planning-ipc/ipc-handlers.ts"),
+  read("src/main/ipc/planning-ipc/run-planning.ts"),
+].join("\n");
 const runtime = read("src/main/planning/runtime.ts");
 const derived = read("src/renderer/app/state/derived.ts");
 
@@ -22,7 +30,7 @@ test("planning:updated 作为受控 IPC event 完整穿过 contracts、preload �
   assert.match(preload, /onPlanningStateUpdated\(listener\)[\s\S]*?ipcRenderer\.on\("planning:updated", handler\)[\s\S]*?removeListener\("planning:updated", handler\)/);
   assert.match(main, /safeRendererSend\(window,\s*"planning:updated",\s*state\.localProductId,\s*state\)/,
     "main 必须通过安全 renderer 发送封装广播合法的 localProductId 和 state 参数");
-  const emitBody = main.match(/const emitPlanningState = \(state: PlanningGenerationState\) => \{([\s\S]*?)\n\};/);
+  const emitBody = main.match(/const emitPlanningState = \(state: PlanningGenerationState\) => \{([\s\S]*?)\n\s*\};/);
   assert.ok(emitBody, "必须存在 planning:updated 发送函数");
   assert.match(emitBody![1], /safeRendererSend\(window,\s*"planning:updated",\s*state\.localProductId,\s*state\)/,
     "planning:updated 必须由安全 renderer 发送封装按事件契约广播");

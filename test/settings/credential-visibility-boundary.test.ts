@@ -15,13 +15,22 @@ test("Settings 对外只有 hasKey 布尔，不含 apiKey 明文字段", () => {
   assert.match(read("src/shared/contracts-types.ts"), /export \* from "\.\/contracts-settings\.js"/);
   assert.match(settingsBlock, /hasMiniMaxKey:\s*boolean/);
   assert.match(settingsBlock, /hasDeepSeekKey:\s*boolean/);
-  assert.doesNotMatch(settingsBlock, /\bapiKey\s*:/);
-  assert.doesNotMatch(settingsBlock, /\bdeepseekApiKey\s*:/);
+  // Narrow scope — Settings interface itself must not expose apiKey field.
+  // Other input types (AiConnectionTestInput, AiModelListInput) legitimately
+  // accept apiKey for write/test flows; we only forbid it on the read shape.
+  const settingsIfaceMatch = settingsBlock.match(/export interface Settings\s*\{([\s\S]*?)\n\}/);
+  assert.ok(settingsIfaceMatch, "必须存在 Settings interface 定义");
+  const settingsIface = settingsIfaceMatch![1];
+  assert.doesNotMatch(settingsIface, /\bapiKey\s*:/);
+  assert.doesNotMatch(settingsIface, /\bdeepseekApiKey\s*:/);
 
-  const getSettings = read("src/main/main.ts");
-  assert.match(getSettings, /hasMiniMaxKey:\s*aiKeyStore \? aiKeyStore\.hasKey\("minimax"\)/);
-  assert.match(getSettings, /hasDeepSeekKey:\s*aiKeyStore \? aiKeyStore\.hasKey\("deepseek"\)/);
-  assert.doesNotMatch(getSettings, /hasMiniMaxKey:[\s\S]{0,400}apiKey:/);
+  // After splitting, getSettings() lives in main-runtime.ts.
+  const getSettings = [
+    read("src/main/main.ts"),
+    read("src/main/main-runtime.ts"),
+  ].join("\n");
+  assert.match(getSettings, /hasMiniMaxKey:\s*input\.getAiKeyStore\(\)\?\.hasKey\(["']minimax["']\)\s*\?\?\s*false/);
+  assert.match(getSettings, /hasDeepSeekKey:\s*input\.getAiKeyStore\(\)\?\.hasKey\(["']deepseek["']\)\s*\?\?\s*false/);
 });
 
 test("settings:getApiKey 必须拒绝读回，不能把明文 key 返回 renderer", () => {

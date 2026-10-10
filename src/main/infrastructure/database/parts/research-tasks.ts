@@ -13,6 +13,8 @@ import { touchProduct } from "./products.js";
 const POST_CONFIRM_STATUSES = new Set(["automating", "draft_saved"]);
 const NO_POI_EVIDENCE_MARKER = "[itinerary-kind:no-poi]";
 const NO_POI_EVIDENCE_TITLE = `${NO_POI_EVIDENCE_MARKER} 当前条目明确为自由活动或其他，无需 POI 核查，自动确认`;
+const REMOVED_POI_EVIDENCE_MARKER = "[itinerary-operator:removed]";
+const REMOVED_POI_EVIDENCE_TITLE = `${REMOVED_POI_EVIDENCE_MARKER} 运营已手动删除对应景点，按删除凭证结清核查任务`;
 const SAVED_POI_DETAIL = "当前行程已保存有效的 VBK POI 映射。";
 
 /** Only generated lookup-failure copy is replaced. Operator-authored notes and
@@ -91,7 +93,7 @@ export function markResearchTasksSatisfied(
   return tx();
 }
 
-function markKindNoPoiTasksSatisfied(db: Database.Database, localProductId: string, taskIds: readonly string[]) {
+function markKindNoPoiTasksSatisfied(db: Database.Database, localProductId: string, taskIds: readonly string[], title = NO_POI_EVIDENCE_TITLE) {
   const ids = [...new Set(taskIds.filter(Boolean))];
   if (!ids.length) return { updated: 0, taskIds: [] as string[] };
   const rows = db.prepare(`SELECT id,evidence_json FROM research_tasks WHERE local_product_id=? AND id IN (${ids.map(() => "?").join(",")}) AND state NOT IN ('confirmed','resolved')`).all(localProductId, ...ids) as Array<{ id: string; evidence_json: string }>;
@@ -99,7 +101,7 @@ function markKindNoPoiTasksSatisfied(db: Database.Database, localProductId: stri
     let evidence: unknown[] = [];
     try { evidence = JSON.parse(row.evidence_json); } catch { evidence = []; }
     if (!Array.isArray(evidence)) evidence = [];
-    evidence.push({ id: randomUUID(), title: NO_POI_EVIDENCE_TITLE, source: "user", retrievedAt: now(), accepted: true });
+    evidence.push({ id: randomUUID(), title, source: "user", retrievedAt: now(), accepted: true });
     db.prepare("UPDATE research_tasks SET state='confirmed', status='succeeded', evidence_json=? WHERE id=? AND local_product_id=?").run(JSON.stringify(evidence), row.id, localProductId);
   }
   if (rows.length) touchProduct(db, localProductId);
@@ -113,7 +115,8 @@ export function reopenKindSupersededPoiResearchTasks(db: Database.Database, loca
   const ids = rows.filter((row) => {
     let evidence: unknown[] = [];
     try { evidence = JSON.parse(row.evidence_json); } catch { return false; }
-    const marked = Array.isArray(evidence) && evidence.some((item) => typeof (item as { title?: unknown })?.title === "string" && (item as { title: string }).title.includes(NO_POI_EVIDENCE_MARKER));
+    const marked = Array.isArray(evidence) && evidence.some((item) => typeof (item as { title?: unknown })?.title === "string"
+      && [NO_POI_EVIDENCE_MARKER, REMOVED_POI_EVIDENCE_MARKER].some(marker => (item as { title: string }).title.includes(marker)));
     return marked && poiResearchTaskSatisfaction(row, product) === null;
   }).map((row) => row.id);
   if (!ids.length) return { updated: 0, taskIds: [] as string[] };
@@ -204,13 +207,15 @@ export function markResearchTasksSatisfiedByProduct(
     const rows = targetIds.length ? db.prepare(`SELECT id,label,type,detail FROM research_tasks WHERE local_product_id=? AND id IN (${targetIds.map(() => "?").join(",")})`)
       .all(localProductId, ...targetIds) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }> : [];
     const nonPoiIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "non_poi").map((row) => row.id);
-    const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id));
+    const removedIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "removed").map((row) => row.id);
+    const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id) && !removedIds.includes(id));
     const ordinary = markResearchTasksSatisfied(db, localProductId, ordinaryIds, options.note ?? "产品 JSON 写入时同步按字段匹配已满足，自动确认");
     const nonPoi = markKindNoPoiTasksSatisfied(db, localProductId, nonPoiIds);
+    const removed = markKindNoPoiTasksSatisfied(db, localProductId, removedIds, REMOVED_POI_EVIDENCE_TITLE);
     const reconciled = reconcileConfirmedPoiDetails(db, localProductId, product, options.onlyTaskIds);
-    const taskIds = [...ordinary.taskIds, ...nonPoi.taskIds, ...reconciled]
+    const taskIds = [...ordinary.taskIds, ...nonPoi.taskIds, ...removed.taskIds, ...reconciled]
       .filter((id, index, values) => values.indexOf(id) === index);
-    return { updated: ordinary.updated + nonPoi.updated + reconciled.length, taskIds };
+    return { updated: ordinary.updated + nonPoi.updated + removed.updated + reconciled.length, taskIds };
   });
   return tx();
 }
@@ -226,7 +231,7 @@ function reconcileConfirmedPoiDetails(
     .all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }>;
   const repaired = rows.filter((row) => (!onlyTaskIds?.length || onlyTaskIds.includes(row.id))
     && reconciledSatisfiedDetail(row.type, row.detail) !== row.detail
-    && isResearchTaskSatisfiedByProduct(row, product));
+    && poiResearchTaskSatisfaction(row, product) === "verified");
   const update = db.prepare("UPDATE research_tasks SET detail=? WHERE id=? AND local_product_id=?");
   for (const row of repaired) update.run(SAVED_POI_DETAIL, row.id, localProductId);
   if (repaired.length) touchProduct(db, localProductId);

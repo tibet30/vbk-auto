@@ -4,119 +4,33 @@
  * 这是 main 进程与本地数据库交互的唯一入口；上层 IPC handler 只调本类方法，
  * 不直接写 SQL。表结构与迁移以 `runDatabaseMigrations()` 为准——新表/列需在这里添加。
  *
- * 主要能力（按职责分区到 parts/ 子模块）：
- *  - 产品 CRUD：listProducts / createProduct / getProduct / deleteProduct / updateProduct…
- *  - 会话消息：addMessage / updateMessageStatus / recoverUnansweredMessages
- *  - 设置：getSetting / setSetting / deleteSetting
- *  - Research 任务：addResearchTask / markResearchAccepted / markResearchTasksSatisfied
- *  - Automation Run：saveAutomation / recoverOrphanAutomationRuns
- *  - Planning 状态：loadPlanningState / savePlanningState / deletePlanningState / recoverOrphanPlanningStates
- *  - Provider ID 缓存：providerIdFor / setProviderIdFor / listKnownAccounts
- *  - 操作日志：appendOperationLog / queryOperationLog / countOperationLog / recoverOrphanOperationLog
+ * 主要能力（按职责分区到 database/ 子模块）：
+ *  - 产品 CRUD（products.ts）
+ *  - 会话消息（products.ts）
+ *  - 设置 / 复制反馈（settings.ts）
+ *  - Research 任务（products.ts）
+ *  - Automation Run（products.ts）
+ *  - Workflow 任务（agent.ts）
+ *  - Planning 状态（agent.ts）
+ *  - Agent Snapshot（agent.ts）
+ *  - Provider ID 缓存 / 多账号 fixedInfo（settings.ts）
+ *  - User memory（memory.ts）
+ *  - 操作日志（operation-log.ts）
  *
  * 启动只做 `runDatabaseMigrations()` 建表 + 列变更；任何写入都直接满足当前 schema。
+ *
+ * 子文件方法集合通过 `Object.assign(VbkDatabase.prototype, ...)` 在类声明
+ * 完成后挂载到原型；static 字段同样挂载到类上。
  */
 
 import { LocalProductDatabase } from "./local-product-database.js";
-
-import type {
-  AccountFixedInfo,
-  AccountFixedInfoField,
-  AccountFixedInfoFieldKey,
-  AccountFixedInfoValue,
-  AutomationRun,
-  ConversationMessage,
-  CreateProductInput,
-  PlanningGenerationState,
-  ProductDetail,
-  ProductSummary,
-  ProductWorkflowTask,
-  ResearchTask,
-  TaskStatus,
-  AgentSnapshot,
-  MemoryFilter,
-  MemoryInput,
-  MemoryPatch,
-  MemorySaveResult,
-  UserMemory,
-  UserMemoryEvidence,
-  MemoryMaintenanceState,
-} from "../../../shared/contracts.js";
-import { getAgentSnapshot, saveAgentSnapshot } from "./parts/agent.js";
-import * as copyFeedback from "./parts/vbk-copy-feedback.js";
-import {
-  getCachedCtripPoiAvailability,
-  saveCachedCtripPoiAvailability,
-  type CachedCtripPoiAvailability,
-} from "./parts/ctrip-poi-availability-cache.js";
-import {
-  addMemoryEvidence,
-  bumpMemoryMaintenanceCursor,
-  clearMemoryMaintenancePending,
-  createOrUpdateMemoryState,
-  deleteUserMemory,
-  disableUserMemory,
-  getMemoryByTopic,
-  getMemoryMaintenanceState,
-  getUserMemory,
-  listMemoryEvidence,
-  listUserMemories,
-  markMemorySuccess,
-  markMemoryUsed,
-  saveUserMemory,
-  updateUserMemory,
-} from "./parts/memory.js";
-
-import { OPERATION_LOG_CAP, appendOperationLog, countOperationLog, queryOperationLog, recoverOrphanOperationLog, type OperationLogRow } from "./parts/operation-log.js";
-import { deletePlanningState, loadPlanningState, recoverOrphanPlanningStates, savePlanningState } from "./parts/planning-state.js";
-import { hasColumn } from "./parts/migrations.js";
-import {
-  fixedInfoSchema as partFixedInfoSchema,
-  getAccountFixedInfo as partGetAccountFixedInfo,
-  listKnownAccounts as partListKnownAccounts,
-  providerIdFor as partProviderIdFor,
-  setAccountFixedInfo as partSetAccountFixedInfo,
-  setProviderIdFor as partSetProviderIdFor,
-} from "./parts/provider-accounts.js";
-import {
-  addMessage,
-  createProduct,
-  deleteProduct,
-  getProduct,
-  importProductSnapshot,
-  listProducts,
-  listProductsPaginated,
-  type ProductListPage,
-  recoverOrphanAutomationRuns,
-  recoverUnansweredMessages,
-  saveAutomation,
-  setBasicInfoSaved,
-  setProductId,
-  setProductLifecycle,
-  updateBasicInfoField,
-  updateMessageStatus,
-  updateProduct,
-  writeAutomationWithProductStatus,
-} from "./parts/products.js";
-import { buildProductSnapshot } from "./parts/product-draft.js";
-import {
-  replaceProductAndSatisfyResearchTasks,
-  type ReplaceProductAndSatisfyResearchTasksOptions,
-} from "./parts/replace-product-with-research-tasks.js";
-import { addResearchTask, markResearchAccepted, markResearchTasksSatisfied, markResearchTasksSatisfiedByProduct, reopenKindSupersededPoiResearchTasks } from "./parts/research-tasks.js";
-import { deleteSetting, getSetting, setSetting } from "./parts/settings.js";
-import {
-  abandonWorkflowTask,
-  completeSavedProductWorkflowTasks,
-  completeWorkflowTaskForProduct,
-  createWorkflowTask,
-  getWorkflowTask,
-  latestWorkflowTaskForProduct,
-  listWorkflowTasks,
-  recoverOrphanWorkflowTasks,
-  reconcileSupersededWorkflowTasks,
-  updateWorkflowTask,
-} from "./parts/workflow-tasks.js";
+import { productMethods } from "./database/products.js";
+import { settingsMethods, settingsStatics } from "./database/settings.js";
+import { agentMethods } from "./database/agent.js";
+import { memoryMethods } from "./database/memory.js";
+import { operationLogMethods, operationLogStatics } from "./database/operation-log.js";
+import type { VbkDatabasePrototype } from "./database/types.js";
+import type { AccountFixedInfoField } from "../../../shared/contracts.js";
 
 /**
  * SQLite 数据访问对象，main 进程与本地数据库的唯一入口。
@@ -126,267 +40,27 @@ import {
  */
 export class VbkDatabase extends LocalProductDatabase {
   /** Optional Tibet extension user id for scoped accountFixedInfo reads. */
-  private extensionUserIdResolver: (() => number | null) | null = null;
+  extensionUserIdResolver: (() => number | null) | null = null;
 
   setExtensionUserIdResolver(resolver: (() => number | null) | null): void {
     this.extensionUserIdResolver = resolver;
   }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // settings 表（KV）
-  // ─────────────────────────────────────────────────────────────────────
-
-  getSetting(key: string) {
-    return getSetting(this.db, key);
-  }
-  listLocalRejectedPresentationWords() { return copyFeedback.listRejectedPresentationWords(this.db); }
-  listRejectedPresentationWords() { return copyFeedback.listRejectedPresentationWords(this.db, this.extensionUserIdResolver?.()); }
-  recordCopyFeedback(entry: Parameters<typeof copyFeedback.recordCopyFeedback>[1]) { copyFeedback.recordCopyFeedback(this.db, entry); }
-  getPresentationCopyRecovery(id: string) { return copyFeedback.getPresentationCopyRecovery(this.db, id); }
-  savePresentationCopyRecovery(id: string, entry: Parameters<typeof copyFeedback.savePresentationCopyRecovery>[2]) { copyFeedback.savePresentationCopyRecovery(this.db, id, entry); }
-  setSetting(key: string, value: string) {
-    setSetting(this.db, key, value);
-  }
-  /** 多账号登录态当前活跃指示器需要显式删除空字符串；现有 getSetting 接口无法区分"未设置"与"空"。 */
-  deleteSetting(key: string) {
-    deleteSetting(this.db, key);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // 携程 POI 营业状态缓存（跨产品、跨重启复用成功核验）
-  // ─────────────────────────────────────────────────────────────────────
-
-  getCachedCtripPoiAvailability(poiId: number): CachedCtripPoiAvailability | undefined {
-    return getCachedCtripPoiAvailability(this.db, poiId);
-  }
-  saveCachedCtripPoiAvailability(entry: CachedCtripPoiAvailability): void {
-    saveCachedCtripPoiAvailability(this.db, entry);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // products / messages / research_tasks / automation_runs
-  // ─────────────────────────────────────────────────────────────────────
-
-  listProducts(): ProductSummary[] { return listProducts(this.db); }
-  listProductsPaginated(page: number, pageSize?: number): ProductListPage { return listProductsPaginated(this.db, page, pageSize); }
-  createProduct(input: CreateProductInput): ProductDetail { return createProduct(this.db, input); }
-  buildProductSnapshot(input: CreateProductInput): ProductDetail { return buildProductSnapshot(input); }
-  getProduct(id: string): ProductDetail | undefined { return getProduct(this.db, id); }
-  importProductSnapshot(snapshot: ProductDetail): ProductDetail { return importProductSnapshot(this.db, snapshot); }
-  deleteProduct(id: string): boolean { return deleteProduct(this.db, id); }
-  updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"], expectedVersion?: number) {
-    updateProduct(this.db, id, product, status, expectedVersion);
-  }
-  /**
-   * 原子地「写产品 JSON + 按字段匹配确认 research task」。仅用于手工复核路径
-   * （products:updateReviewField）；AI / 自动化 / 规划路径仍走 productMutations。
-   * 详见 parts/products.ts 注释。
-   */
-  replaceProductAndSatisfyResearchTasks(
-    localProductId: string,
-    product: Record<string, unknown>,
-    options?: ReplaceProductAndSatisfyResearchTasksOptions,
-  ): { product: ProductDetail; confirmedTaskIds: string[] } {
-    return replaceProductAndSatisfyResearchTasks(this.db, localProductId, product, options);
-  }
-  updateBasicInfoField(localProductId: string, field: string, value: string): ProductDetail {
-    return updateBasicInfoField(this.db, localProductId, field, value);
-  }
-  setProductId(localProductId: string, productId: string) {
-    setProductId(this.db, localProductId, productId);
-  }
-  setBasicInfoSaved(localProductId: string, saved = true) {
-    setBasicInfoSaved(this.db, localProductId, saved);
-  }
-  setProductLifecycle(localProductId: string, updates: { productId?: string | null; status?: ProductSummary["status"]; basicInfoSaved?: boolean }): void {
-    setProductLifecycle(this.db, localProductId, updates);
-  }
-  writeAutomationWithProductStatus(localProductId: string, run: AutomationRun, status: ProductSummary["status"]): void {
-    writeAutomationWithProductStatus(this.db, localProductId, run, status);
-  }
-  addMessage(localProductId: string, role: ConversationMessage["role"], content: string, taskStatus?: ConversationMessage["taskStatus"]) {
-    return addMessage(this.db, localProductId, role, content, taskStatus);
-  }
-  updateMessageStatus(localProductId: string, messageId: string, taskStatus: TaskStatus) {
-    updateMessageStatus(this.db, localProductId, messageId, taskStatus);
-  }
-  recoverUnansweredMessages() { recoverUnansweredMessages(this.db); }
-  recoverOrphanAutomationRuns() { return recoverOrphanAutomationRuns(this.db); }
-  addResearchTask(localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
-    return addResearchTask(this.db, localProductId, task);
-  }
-  markResearchAccepted(localProductId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") {
-    markResearchAccepted(this.db, localProductId, taskId, note, source);
-  }
-  markResearchTasksSatisfied(localProductId: string, taskIds: readonly string[], note?: string) {
-    return markResearchTasksSatisfied(this.db, localProductId, taskIds, note);
-  }
-  reopenKindSupersededPoiResearchTasks(localProductId: string, product: Record<string, unknown>) {
-    return reopenKindSupersededPoiResearchTasks(this.db, localProductId, product);
-  }
-  markResearchTasksSatisfiedByProduct(localProductId: string, product: Record<string, unknown>) {
-    return markResearchTasksSatisfiedByProduct(this.db, localProductId, product);
-  }
-  saveAutomation(localProductId: string, run: AutomationRun) {
-    saveAutomation(this.db, localProductId, run);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // workflow_tasks（一键创建后台任务）
-  // ─────────────────────────────────────────────────────────────────────
-
-  createWorkflowTask(localProductId: string, productName: string): ProductWorkflowTask {
-    return createWorkflowTask(this.db, localProductId, productName);
-  }
-  completeWorkflowTaskForProduct(
-    product: Pick<ProductSummary, "id" | "status" | "productId">,
-  ): ProductWorkflowTask | undefined {
-    return completeWorkflowTaskForProduct(this.db, product);
-  }
-  completeSavedProductWorkflowTasks(): ProductWorkflowTask[] {
-    return completeSavedProductWorkflowTasks(this.db);
-  }
-  reconcileSupersededWorkflowTasks(): ProductWorkflowTask[] {
-    return reconcileSupersededWorkflowTasks(this.db);
-  }
-  getWorkflowTask(id: string): ProductWorkflowTask | undefined { return getWorkflowTask(this.db, id); }
-  latestWorkflowTaskForProduct(localProductId: string): ProductWorkflowTask | undefined {
-    return latestWorkflowTaskForProduct(this.db, localProductId);
-  }
-  listWorkflowTasks(): ProductWorkflowTask[] { return listWorkflowTasks(this.db); }
-  abandonWorkflowTask(id: string): ProductWorkflowTask { return abandonWorkflowTask(this.db, id); }
-  updateWorkflowTask(
-    id: string,
-    patch: Parameters<typeof updateWorkflowTask>[2],
-  ): ProductWorkflowTask {
-    return updateWorkflowTask(this.db, id, patch);
-  }
-  recoverOrphanWorkflowTasks(): ProductWorkflowTask[] { return recoverOrphanWorkflowTasks(this.db); }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // account fixed info / providerId / known accounts
-  // ─────────────────────────────────────────────────────────────────────
-
-  static fixedInfoSchema(): AccountFixedInfoField[] { return partFixedInfoSchema(); }
-  getAccountFixedInfo(accountName: string): AccountFixedInfo {
-    const name = accountName.trim();
-    const userId = this.extensionUserIdResolver?.() ?? null;
-    // Logged-in Tibet user: scoped cache only — no legacy fallback (cross-user bleed).
-    if (userId != null && name) {
-      const scoped = partGetAccountFixedInfo(this.db, `${userId}:${name}`);
-      return { accountName: name, values: scoped.values };
-    }
-    return partGetAccountFixedInfo(this.db, accountName);
-  }
-  setAccountFixedInfo(accountName: string, values: Partial<Record<AccountFixedInfoFieldKey, AccountFixedInfoValue | null>>): AccountFixedInfo {
-    return partSetAccountFixedInfo(this.db, accountName, values);
-  }
-  providerIdFor(accountName: string): number | null { return partProviderIdFor(this.db, accountName); }
-  setProviderIdFor(accountName: string, providerId: number | null) {
-    partSetProviderIdFor(this.db, accountName, providerId);
-  }
-  listKnownAccounts(): Array<{ accountName: string; providerId?: number }> {
-    return partListKnownAccounts(this.db);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // planning_generation（持久化规划状态）
-  // ─────────────────────────────────────────────────────────────────────
-
-  loadPlanningState(localProductId: string): PlanningGenerationState | undefined {
-    return loadPlanningState(this.db, localProductId);
-  }
-  savePlanningState(state: PlanningGenerationState): void {
-    savePlanningState(this.db, state);
-  }
-  deletePlanningState(localProductId: string): void {
-    deletePlanningState(this.db, localProductId);
-  }
-  recoverOrphanPlanningStates(): string[] {
-    return recoverOrphanPlanningStates(this.db);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // agent_snapshots（Agent CORE 全量可恢复运行历史）
-  // ─────────────────────────────────────────────────────────────────────
-  getAgentSnapshot(localProductId: string): AgentSnapshot | undefined {
-    return getAgentSnapshot(this.db, localProductId);
-  }
-  saveAgentSnapshot(snapshot: AgentSnapshot): void {
-    saveAgentSnapshot(this.db, snapshot);
-    this.executionClock.setEnabled(snapshot.localProductId, snapshot.run?.status === "running", "agent");
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // user_memories（登录用户隔离的本地偏好记忆）
-  // ─────────────────────────────────────────────────────────────────────
-  saveUserMemory(input: MemoryInput): MemorySaveResult { return saveUserMemory(this.db, input); }
-  listUserMemories(ownerUserId: number, filter: MemoryFilter = {}): UserMemory[] {
-    return listUserMemories(this.db, ownerUserId, filter);
-  }
-  getUserMemory(ownerUserId: number, id: string): UserMemory | undefined {
-    return getUserMemory(this.db, ownerUserId, id);
-  }
-  updateUserMemory(ownerUserId: number, id: string, patch: MemoryPatch): UserMemory {
-    return updateUserMemory(this.db, ownerUserId, id, patch);
-  }
-  disableUserMemory(ownerUserId: number, id: string): UserMemory {
-    return disableUserMemory(this.db, ownerUserId, id);
-  }
-  deleteUserMemory(ownerUserId: number, id: string): void {
-    deleteUserMemory(this.db, ownerUserId, id);
-  }
-  markMemoryUsed(ownerUserId: number, id: string): void { markMemoryUsed(this.db, ownerUserId, id); }
-  addMemoryEvidence(input: Parameters<typeof addMemoryEvidence>[1]): UserMemoryEvidence {
-    return addMemoryEvidence(this.db, input);
-  }
-  listMemoryEvidence(ownerUserId: number, memoryId: string): UserMemoryEvidence[] {
-    return listMemoryEvidence(this.db, ownerUserId, memoryId);
-  }
-  getMemoryMaintenanceState(ownerUserId: number): MemoryMaintenanceState {
-    return getMemoryMaintenanceState(this.db, ownerUserId);
-  }
-  createOrUpdateMemoryState(
-    ownerUserId: number,
-    patch: Parameters<typeof createOrUpdateMemoryState>[2],
-  ): void {
-    createOrUpdateMemoryState(this.db, ownerUserId, patch);
-  }
-  bumpMemoryMaintenanceCursor(ownerUserId: number, cursorTaskId?: string): void {
-    bumpMemoryMaintenanceCursor(this.db, ownerUserId, cursorTaskId);
-  }
-  clearMemoryMaintenancePending(ownerUserId: number): void {
-    clearMemoryMaintenancePending(this.db, ownerUserId);
-  }
-  markMemorySuccess(ownerUserId: number): void { markMemorySuccess(this.db, ownerUserId); }
-  getMemoryByTopic(ownerUserId: number, topic: string): UserMemory[] {
-    return getMemoryByTopic(this.db, ownerUserId, topic);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // operation_log（真实持久化 + 上限 10000 行）
-  // ─────────────────────────────────────────────────────────────────────
-
-  /** 操作日志默认上限：超过则按时间最早删。 */
-  static readonly OPERATION_LOG_CAP = OPERATION_LOG_CAP;
-
-  appendOperationLog(entry: Record<string, unknown> & { id: string; type: string; name: string; status: string; startedAt: string }): void {
-    appendOperationLog(this.db, entry);
-  }
-  countOperationLog(): number { return countOperationLog(this.db); }
-  queryOperationLog(query: Parameters<typeof queryOperationLog>[1]): Array<OperationLogRow> {
-    return queryOperationLog(this.db, query);
-  }
-  recoverOrphanOperationLog(): number {
-    return recoverOrphanOperationLog(this.db);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────
-  // 列存在性 helper（公开给上层做迁移兼容判定；旧调用方仍在使用）
-  // ─────────────────────────────────────────────────────────────────────
-
-  /** 表是否包含某列（用于运行时迁移兼容旧 db 文件）。 */
-  hasColumn(table: string, column: string): boolean {
-    return hasColumn(this.db, table, column);
-  }
 }
+
+// 同名 interface 声明合并 ——把原型方法（Object.assign 运行时挂载）注册进类型。
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+export interface VbkDatabase extends VbkDatabasePrototype {}
+export namespace VbkDatabase {
+  export declare const OPERATION_LOG_CAP: number;
+  export declare function fixedInfoSchema(): AccountFixedInfoField[];
+}
+
+// 把分散在各子文件的方法集合挂到类原型 + 类本身。
+Object.assign(VbkDatabase.prototype, settingsMethods);
+Object.assign(VbkDatabase.prototype, productMethods);
+Object.assign(VbkDatabase.prototype, agentMethods);
+Object.assign(VbkDatabase.prototype, memoryMethods);
+Object.assign(VbkDatabase.prototype, operationLogMethods);
+
+Object.assign(VbkDatabase, settingsStatics);
+Object.assign(VbkDatabase, operationLogStatics);

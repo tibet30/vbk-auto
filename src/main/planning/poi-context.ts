@@ -26,7 +26,7 @@ export function buildPoiContextForItineraryDay(
   day: unknown,
 ): PoiSuggestContext {
   const base = buildPoiContext(product, destination);
-  const dayCity = inferExplicitDayCity(day);
+  const dayCity = inferExplicitPoiDayCity(day);
   return dayCity ? { ...base, destinationCity: dayCity } : base;
 }
 
@@ -35,7 +35,7 @@ export function hasProductPoiContext(product: Record<string, unknown>): boolean 
   return Boolean(textValue(basic.destinationCity) || textValue(basic.meetingCity) || textValue(basic.province));
 }
 
-function inferExplicitDayCity(day: unknown): string | undefined {
+export function inferExplicitPoiDayCity(day: unknown): string | undefined {
   // 接团城市与游览城市可能同时出现在交通说明中；先以游览标题和景点为准。
   if (isRecord(day)) {
     const spots = Array.isArray(day.spots) ? day.spots : [];

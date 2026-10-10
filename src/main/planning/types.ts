@@ -60,6 +60,8 @@ export interface OrchestratorRuntime {
   loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */
   writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
+  /** 核验器可以清空错误/停业 POI；拒绝覆盖核验期间人工修改的行程。 */
+  writeResolvedItineraryPois?(localProductId: string, itinerary: unknown[], previousItinerary: unknown[]): Promise<{ ok: boolean; reason?: string }>;
   /** 确定性酒店检索的受控写入口；AI patch 永远不能写 operations.hotelResource。 */
   writeResolvedHotelResources?(localProductId: string, operations: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
   /** 用当前 VBK 会话核验机场和火车站端点，只返回可创建的飞机 / 火车往返方式。 */

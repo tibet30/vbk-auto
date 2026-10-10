@@ -12,6 +12,7 @@ import type { OrchestratorRuntime } from "./types.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { buildPoiContextForItineraryDay } from "./poi-context.js";
+import { isPlanningPoiCandidateInContext } from "./poi-auto-selection.js";
 
 interface PoiEnrichmentArgs {
   localProductId: string;
@@ -51,6 +52,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         const keyword = typeof spot === "string" ? spot : spot?.name ?? spot?.poiName;
         if (!keyword) continue;
         if (!requiresItineraryPoi(spot as Record<string, unknown>)) continue;
+        let invalidLocation = false;
         if (hasCompletePoi(spot as Record<string, unknown>)) {
           if (!shouldReviewCompletePois) continue;
           const availability = availabilityByPoiId.get(spot.poiId) ?? await queryPoiAvailability(runtime, localProductId, spot.poiId);
@@ -70,7 +72,15 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             logInfo("[planning.poi]", { event: "suspended-poi-retained", localProductId, keyword: retainedName });
             continue;
           }
-          continue;
+          // Unknown historical metadata stays intact. Known mismatches must
+          // be re-resolved; having an ID is not evidence of the right city.
+          invalidLocation = Boolean(spot.city && spot.province) && !isPlanningPoiCandidateInContext({
+            ...spot, index: 0, selectable: true, textFields: [],
+          }, poiContext, product, String(keyword));
+          if (!invalidLocation) continue;
+          spot.poiName = null; spot.poiId = null;
+          delete spot.province; delete spot.city; delete spot.district;
+          poiUpdated = true;
         }
         const originalKeyword = String(keyword);
         const firstQuery = isTravelNodeName(originalKeyword)
@@ -109,7 +119,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           };
           poiUpdated = true;
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
-        } else if (!queryFailed) {
+        } else if (!queryFailed || invalidLocation) {
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
           const detail = suspended
             ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
@@ -128,7 +138,9 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
       }
     }
     if (poiUpdated) {
-      const writeResult = await runtime.writeModule(localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, updated);
+      const writeResult = runtime.writeResolvedItineraryPois
+        ? await runtime.writeResolvedItineraryPois(localProductId, updated, product.itinerary as unknown[])
+        : await runtime.writeModule(localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, updated);
       if (!writeResult.ok) {
         const reason = writeResult.reason || "本地写入被拒";
         logWarn("[planning.poi]", { event: "write-back-failed", localProductId, reason });

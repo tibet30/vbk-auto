@@ -1,7 +1,7 @@
 import type { PoiSuggestCandidate, PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
-import { buildPoiContextForItineraryDay } from "./poi-context.js";
+import { inferExplicitPoiDayCity } from "./poi-context.js";
 
 export interface PoiAutoSelectionMatch {
   poiName: string;
@@ -134,9 +134,7 @@ function candidateMatchesContext(
   if (destinationCity && !candidateCity) return false;
   const days = Array.isArray(product.itinerary)
     ? product.itinerary.filter(day => isRecord(day) && dayContainsKeyword(day, keyword)) : [];
-  const dayCities = new Set(days.map(day => normaliseAdministrativeName(
-    buildPoiContextForItineraryDay(product, destinationCity, day).destinationCity,
-  )).filter(city => city && city !== destinationCity));
+  const dayCities = new Set(days.map(day => normaliseAdministrativeName(inferExplicitPoiDayCity(day))).filter(Boolean));
   if (dayCities.size === 1 && !dayCities.has(candidateCity)
     && !itineraryExplicitlyAllowsLocation(product, keyword, candidateCity, candidate.district, candidate.poiName)) return false;
   if (destinationCity && candidateCity !== destinationCity

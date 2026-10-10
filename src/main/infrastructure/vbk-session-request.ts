@@ -1,119 +1,48 @@
-export interface VbkSessionRequestBrowser {
-  /** Session clients have no renderer execution context. */
-  nativeOnly?: boolean;
-  evaluate<T, A = unknown>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
-  vbkSessionFetch?: (request: VbkSessionNativeRequest) => Promise<VbkSessionNativeResult>;
-  vbkSessionGetText?: (request: VbkSessionNativeTextRequest) => Promise<VbkSessionNativeTextResult>;
-}
+/**
+ * vbk-session-request 主流程（barrel）：
+ *   - nativeOnly：直接走 Node 端 vbkSessionFetch（要求会话 cookie jar 已在 Node 端）；
+ *   - 默认路径：在 BrowserView 里 evaluate，extract cookies + 注入反作弊头（x-ctx-ubt-vid / -sid），
+ *     fetch 之后做：(i) 18 位行程 ID 转字符串（防 Number.MAX_SAFE_INTEGER 静默改写末位），
+ *     (ii) 统计 Ack + poiDtos / body / poiList 条目数作为会话上下文 ctx；
+ *   - evaluate 失败时如发现"页面被销毁/CORS/上下文消失"，自动降级到 vbkSessionFetch。
+ *
+ * 子文件分工：
+ *   - types.ts：所有 interface + 常量（DEFAULT_VBK_SOA_HEADERS / EMPTY_VBK_SESSION_CONTEXT）；
+ *   - timeout.ts：VbkSessionRequestTimeoutError + rejectAfter + timeoutOrDefault；
+ *   - headers.ts：requestHeaders 合并。
+ */
 
-export interface VbkSessionNativeRequest {
-  /** Per-request business selection; never changes the account cookie jar. */
-  businessContext?: { businessId: number; travelType: number };
-  endpoint: string;
-  body: object;
-  errorLabel: string;
-  headers: Record<string, string>;
-  referrer?: string;
-  referrerPolicy?: VbkReferrerPolicy;
-  includeCidQuery: boolean;
-  requireReadableCid: boolean;
-  timeoutMs?: number;
-}
+import { requestHeaders } from "./vbk-session-request/headers.js";
+import { rejectAfter, timeoutOrDefault } from "./vbk-session-request/timeout.js";
+import type {
+  VbkReferrerPolicy,
+  VbkSessionNativeRequest,
+  VbkSessionRequestBrowser,
+  VbkSessionRequestOptions,
+  VbkSessionRequestResult,
+} from "./vbk-session-request/types.js";
 
-export type VbkSessionNativeResult = VbkSessionRequestResult;
+export {
+  VbkSessionRequestTimeoutError,
+  rejectAfter,
+  timeoutOrDefault,
+} from "./vbk-session-request/timeout.js";
+export { requestHeaders } from "./vbk-session-request/headers.js";
+export {
+  DEFAULT_VBK_SOA_HEADERS,
+  EMPTY_VBK_SESSION_CONTEXT,
+  type VbkReferrerPolicy,
+  type VbkSessionContext,
+  type VbkSessionNativeRequest,
+  type VbkSessionNativeResult,
+  type VbkSessionNativeTextRequest,
+  type VbkSessionNativeTextResult,
+  type VbkSessionRequestBrowser,
+  type VbkSessionRequestOptions,
+  type VbkSessionRequestResult,
+} from "./vbk-session-request/types.js";
 
-export interface VbkSessionNativeTextRequest {
-  endpoint: string;
-  errorLabel: string;
-  headers?: Record<string, string>;
-  referrer?: string;
-  referrerPolicy?: VbkReferrerPolicy;
-}
-
-/** 仅暴露已由 VBK 接口验证过的来源页策略，避免调用方传入任意字符串。 */
-export type VbkReferrerPolicy = "strict-origin-when-cross-origin" | "no-referrer-when-downgrade";
-
-export interface VbkSessionNativeTextResult {
-  status: number;
-  text: string;
-}
-
-export interface VbkSessionContext {
-  hasCid: boolean;
-  cookieNameCount: number;
-  hasGuidCookie: boolean;
-  hasVbkLoginCidCookie: boolean;
-  /** VBK 反作弊/会话追踪 cookie 是否存在（仅记 bool，不记值）。 */
-  hasUbtVidCookie: boolean;
-  hasVbkTicketCookie: boolean;
-  hasBticketCookie: boolean;
-  hasJsSessionIdCookie: boolean;
-  hasBusinessIdCookie: boolean;
-  hasBfaCookie: boolean;
-  /** suggestPoi / searchImage 响应的 Ack 字段文本（原始值，截断 ≤ 200）。 */
-  responseAck: string;
-  /** suggestPoi 返回的 poiList / body 长度（有数据 > 0）。 */
-  responseDataItemCount: number;
-}
-
-export interface VbkSessionRequestResult {
-  status: number;
-  payload: unknown;
-  durationMs: number;
-  ctx: VbkSessionContext;
-}
-
-export interface VbkSessionRequestOptions<TBody extends object = Record<string, unknown>> {
-  businessContext?: VbkSessionNativeRequest["businessContext"];
-  endpoint: string;
-  body: TBody;
-  browserRequestTimeoutMs: number;
-  evaluateTimeoutMs: number;
-  errorLabel: string;
-  headers?: Record<string, string>;
-  referrer?: string;
-  referrerPolicy?: VbkReferrerPolicy;
-  includeCidQuery?: boolean;
-  /** 仅少数旧接口硬性要求页面可读 CID；默认允许依赖 HttpOnly/partition Cookie。 */
-  requireReadableCid?: boolean;
-}
-
-export const EMPTY_VBK_SESSION_CONTEXT: VbkSessionContext = {
-  hasCid: false,
-  cookieNameCount: 0,
-  hasGuidCookie: false,
-  hasVbkLoginCidCookie: false,
-  hasUbtVidCookie: false,
-  hasVbkTicketCookie: false,
-  hasBticketCookie: false,
-  hasJsSessionIdCookie: false,
-  hasBusinessIdCookie: false,
-  hasBfaCookie: false,
-  responseAck: "",
-  responseDataItemCount: 0,
-};
-
-export const DEFAULT_VBK_SOA_HEADERS: Record<string, string> = {
-  accept: "*/*",
-  "content-type": "application/json;charset=UTF-8",
-  "accept-language": "zh-CN,zh;q=0.9",
-  "x-ctx-currency": "CNY",
-  "x-ctx-locale": "zh-CN",
-  // suggestPoi 的行政区名语言由 x-input-locale 决定；缺省时西藏等地会回英文 Gyantse。
-  "x-input-locale": "zh-CN",
-};
-
-function requestHeaders(overrides: Record<string, string> = {}): Record<string, string> {
-  return Object.fromEntries([...Object.entries(DEFAULT_VBK_SOA_HEADERS), ...Object.entries(overrides)]
-    .map(([key, value]) => [key.toLowerCase(), value]));
-}
-
-export class VbkSessionRequestTimeoutError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "VbkSessionRequestTimeoutError";
-  }
-}
+const EVALUATE_RETRY_NETWORK_PATTERN = /Failed to fetch|NetworkError|CORS|Execution context was destroyed|Cannot find context with specified id|Target page, context or browser has been closed/i;
 
 export async function vbkSessionRequest<TBody extends object>(
   browser: VbkSessionRequestBrowser,
@@ -210,7 +139,7 @@ export async function vbkSessionRequest<TBody extends object>(
             break;
         }
       }
-      const ctx: VbkSessionContext = {
+      const ctx: import("./vbk-session-request/types.js").VbkSessionContext = {
         hasCid: Boolean(cid),
         cookieNameCount: cookieNames.length,
         hasGuidCookie,
@@ -339,7 +268,7 @@ export async function vbkSessionRequest<TBody extends object>(
     ) as VbkSessionRequestResult;
   } catch (error) {
     if (!browser.vbkSessionFetch
-      || !/Failed to fetch|NetworkError|CORS|Execution context was destroyed|Cannot find context with specified id|Target page, context or browser has been closed/i.test(String(error))) {
+      || !EVALUATE_RETRY_NETWORK_PATTERN.test(String(error))) {
       throw error;
     }
     result = await browser.vbkSessionFetch({
@@ -358,16 +287,4 @@ export async function vbkSessionRequest<TBody extends object>(
     throw new Error(`${options.errorLabel}失败：HTTP ${result.status}`);
   }
   return result;
-}
-
-function timeoutOrDefault(value: number | undefined, fallback: number) {
-  return Number.isFinite(value) && value! > 0 ? Math.floor(value!) : fallback;
-}
-
-function rejectAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return new Promise<T>((resolve, reject) => {
-    timer = setTimeout(() => reject(new VbkSessionRequestTimeoutError(message)), timeoutMs);
-    promise.then(resolve, reject).finally(() => { if (timer) clearTimeout(timer); });
-  });
 }

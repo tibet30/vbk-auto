@@ -1,415 +1,76 @@
-import type {
-  PlanningPoiDisambiguationRequest,
-  PlanningPoiDisambiguationResult,
-} from "./contracts-planning-poi-disambiguation.js";
-import type {
-  PlanningPoiNameCorrectionRequest,
-  PlanningPoiNameCorrectionResult,
-} from "./contracts-planning-poi-correction.js";
+/**
+ * Planning 子系统契约（provider-neutral, model-neutral）的 barrel。
+ *
+ * 整套规划子系统都从这里导入。Prompt / schema / validator / 重试策略 /
+ * status / research 规则都不能包含 provider 或 model 字样；只有
+ * adapter（src/main/planning/adapters/*）里允许出现具体的 transport 参数。
+ *
+ * 本文件不持有具体类型：内容按"职责"拆分到 `./contracts-planning/` 子目录：
+ *   - stages.ts         阶段 / 节点 / itinerary adoption 状态；
+ *   - modules.ts        模块白名单 + 模块裁决 + research 提案；
+ *   - poi.ts            POI 候选 + 备选名管理；
+ *   - requests.ts       阶段请求形状（spot / itinerary / location）；
+ *   - plan.ts           单次 planning run 的实时快照（PlanningPlanV2）；
+ *   - output.ts         阶段输出 + 阶段错误契约；
+ *   - state.ts          持久化的 module / stage / generation 状态；
+ *   - planner.ts        Planner 接口 + context + skeleton + 请求类型；
+ *   - errors.ts         PlannerError 错误类。
+ *
+ * 调用方继续 `import {...} from "../contracts-planning.js"`，符号由下面这
+ * 9 行再聚合出去。
+ */
+
+export type {
+  PlanningStage,
+  PlanningMajorStage,
+  PlanningNodeId,
+  PlanningNodeStatus,
+  PlanningNodeState,
+  ItineraryAdoptionStatus,
+  ItineraryAdoptionState,
+} from "./contracts-planning/stages.js";
+export { PLANNING_STAGES, PLANNING_STAGE_RETRY_LIMIT } from "./contracts-planning/stages.js";
+
+export type {
+  PlanningModule,
+  ModuleStatus,
+  ModuleOutcome,
+  ResearchTaskProposal,
+} from "./contracts-planning/modules.js";
+export { REQUIRED_MODULES } from "./contracts-planning/modules.js";
+
+export type { PlanningPoiCandidate } from "./contracts-planning/poi.js";
+
+export type {
+  PlanningSpotRecommendationRequest,
+  PlanningItineraryRequest,
+  PlanningItineraryDayDraft,
+  PlanningLocationRequest,
+  PlanningLocation,
+} from "./contracts-planning/requests.js";
+
+export type { PlanningPlanV2 } from "./contracts-planning/plan.js";
+
+export type { PlanningStageOutput, PlanningStageError } from "./contracts-planning/output.js";
+
+export type {
+  ModulePersistedState,
+  StagePersistedState,
+  PlanningGenerationState,
+} from "./contracts-planning/state.js";
+
+export type {
+  ThreeStagePlanningAi,
+  PlanningSkeleton,
+  PlannerContext,
+  PlannerRequest,
+  Planner,
+  PoiNameResolutionRequest,
+} from "./contracts-planning/planner.js";
+
+export { PlannerError } from "./contracts-planning/errors.js";
+
+// 子目录再 export 一次 POI disambiguation / correction，保留原文件顶层
+// `export type * from "./contracts-planning-poi-disambiguation.js"` 等价的形状。
 export type * from "./contracts-planning-poi-disambiguation.js";
 export type * from "./contracts-planning-poi-correction.js";
-
-/**
- * Planning subsystem contracts — provider-neutral, model-neutral.
- *
- * 整套规划子系统都使用本文件里定义的类型。Prompt / schema / validator / 重试
- * 策略 / status / research 规则都不能包含 provider 或 model 字样；只有
- * adapter（src/main/planning/adapters/*）里允许出现具体的 transport 参数。
- */
-
-// ──────────────────────────────────────────────────────────────────────────
-// 阶段：每一轮规划都按顺序经过 5 个阶段；任一阶段失败可单独重跑，
-// 已通过阶段的结果会持久化下来用于续跑。
-// ──────────────────────────────────────────────────────────────────────────
-export type PlanningStage =
-  | "skeleton"
-  | "basicInfo"
-  | "itinerary"
-  | "presentation"
-  | "commercial"
-  | "research"
-  | "validation";
-
-export const PLANNING_STAGES: readonly PlanningStage[] = [
-  "skeleton",
-  "basicInfo",
-  "itinerary",
-  "presentation",
-  "commercial",
-  "research",
-  "validation",
-] as const;
-
-/**
- * 默认每阶段最多重试次数（含首跑）；超过后会进入 needs_user。
- * 与 adapter 的 maxAttempts=1 组合后，单个 AI 阶段在合理情况下的
- * planner 调用上限 = retryLimit（≤ 3）。
- */
-export const PLANNING_STAGE_RETRY_LIMIT = 3;
-
-export type PlanningMajorStage = "foundation" | "itinerary" | "completion";
-export type PlanningNodeId =
-  | "skeleton"
-  | "spotCandidates"
-  | "poiResolution"
-  | "itineraryDraft"
-  | "hotelResolution"
-  | "copy"
-  | "presentation"
-  | "commercial"
-  | "cover"
-  | "vehicleResource"
-  | "finalValidation";
-export type PlanningNodeStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "blocked"
-  | "skipped"
-  | "invalidated";
-
-export interface PlanningPoiCandidate {
-  requestedName: string;
-  status: "proposed" | "resolved" | "rejected" | "selected";
-  source?: "user" | "ai";
-  userActivityId?: string;
-  preferredDay?: number;
-  /** 用户“或者/二选一”等并列备选名称，按原始顺序保存；首项就是 requestedName。 */
-  alternativeNames?: string[];
-  /** 当前候选对应的备选名称在用户原始列表中的位置；多个可用项可同组入行程。 */
-  selectedAlternativeIndex?: number;
-  reason?: string;
-  poiId?: number;
-  poiName?: string;
-  province?: string;
-  city?: string;
-  district?: string;
-  address?: string;
-}
-
-export interface PlanningNodeState {
-  id: PlanningNodeId;
-  majorStage: PlanningMajorStage;
-  status: PlanningNodeStatus;
-  attempts: number;
-  summary?: string;
-  error?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-export type ItineraryAdoptionStatus = "pending" | "verifying" | "accepted" | "blocked";
-
-/**
- * 行程由对话 patch 产生后，必须先由运营显式采用；completion 不能继续沿用
- * 旧行程生成的派生数据。这个信号与 PlanningPlanV2 一起落到 Tibet。
- */
-export interface ItineraryAdoptionState {
-  status: ItineraryAdoptionStatus;
-  itineraryRevision: string;
-  triggeredAt: string;
-  /** 本轮用户消息中明确点名的景点；未命中 POI 时允许保留给运营手动处理。 */
-  userRecommendedSpotNames?: string[];
-  error?: string;
-}
-
-export interface PlanningPlanV2 {
-  version: 2;
-  runId: string;
-  status: "pending" | "running" | "needs_user" | "completed" | "failed";
-  currentNode: PlanningNodeId;
-  nodes: PlanningNodeState[];
-  poiCandidates: PlanningPoiCandidate[];
-  userIntent?: import("./contracts-planning-intent.js").PlanningUserIntent;
-  createdAt: string;
-  updatedAt: string;
-  itineraryAdoption?: ItineraryAdoptionState;
-}
-
-export interface PlanningSpotRecommendationRequest {
-  destination: string;
-  province: string;
-  city: string;
-  days: number;
-  targetCount: number;
-  excludedNames: string[];
-  rejectedNames: string[];
-  userIdea?: string;
-  userIntent?: import("./contracts-planning-intent.js").PlanningUserIntent;
-}
-
-export interface PlanningItineraryRequest {
-  destination: string;
-  days: number;
-  candidates: Array<Required<Pick<PlanningPoiCandidate, "poiId" | "poiName">> &
-    Pick<PlanningPoiCandidate, "province" | "city" | "district" | "address">>;
-  previousError?: string;
-  userIdea?: string;
-  userIntent?: import("./contracts-planning-intent.js").PlanningUserIntent;
-}
-
-export interface PlanningItineraryDayDraft {
-  day: number;
-  title: string;
-  description: string;
-  poiIds: number[];
-  meals: string;
-  mealDescriptions?: [string, string, string];
-}
-
-export interface PlanningLocationRequest {
-  destination: string;
-  currentProvince?: string;
-  currentDestinationCity?: string;
-  previousError?: string;
-}
-
-export interface PlanningLocation {
-  province: string;
-  destinationCity: string;
-}
-
-export interface ThreeStagePlanningAi {
-  structureLocation(request: PlanningLocationRequest): Promise<PlanningLocation>;
-  structureUserIntent(
-    request: import("./contracts-planning-intent.js").PlanningUserIntentRequest,
-  ): Promise<import("./contracts-planning-intent.js").PlanningUserIntent>;
-  disambiguatePoiCandidate?(
-    request: PlanningPoiDisambiguationRequest,
-  ): Promise<PlanningPoiDisambiguationResult>;
-  correctPoiName?(
-    request: PlanningPoiNameCorrectionRequest,
-  ): Promise<PlanningPoiNameCorrectionResult>;
-  recommendSpotNames(request: PlanningSpotRecommendationRequest): Promise<string[]>;
-  composeVerifiedItinerary(request: PlanningItineraryRequest): Promise<PlanningItineraryDayDraft[]>;
-  estimateVehicleTotalCost(request: {
-    destination: string;
-    province: string;
-    city: string;
-    days: number;
-    itinerary: unknown[];
-  }): Promise<number>;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// 模块：每个阶段会落盘若干模块；模块是「产品 JSON 里的一个子树」或
-// 「一组运营数据」。系统只接受规划子系统显式声明的模块，不接受任意路径。
-// ──────────────────────────────────────────────────────────────────────────
-export type PlanningModule =
-  | "basicInfo"
-  | "presentation"
-  | "itinerary"
-  | "packageName"
-  | "pricing"
-  | "inventory"
-  | "terms"
-  | "release"
-  | "researchTasks"
-  | "skeleton";
-
-export const REQUIRED_MODULES: readonly PlanningModule[] = [
-  "basicInfo",
-  "presentation",
-  "itinerary",
-  "packageName",
-  "pricing",
-  "inventory",
-  "release",
-  "researchTasks",
-] as const;
-
-export type ModuleStatus = "missing" | "proposed" | "accepted" | "rejected";
-
-export interface ModuleOutcome {
-  module: PlanningModule;
-  status: ModuleStatus;
-  /** Module-level 校验失败的原因（如有）。 */
-  reason?: string;
-  /** Module 级 research tasks（仅 researchTasks 模块使用）。 */
-  researchTasks?: ResearchTaskProposal[];
-  /** Module 实际被写入的「固定路径」——不接受 RFC6902。 */
-  writePath?: string;
-  /** 系统从结构化输出里真正读到的字段摘要，供 UI 显示「接受到 / 缺失」。 */
-  acceptedFields?: string[];
-  /** 缺失字段列表（按 REQUIRED_MODULES + 子字段），供系统生成对话回复。 */
-  missingFields?: string[];
-  /** 模块原始 value（仅 orchestrator 内部使用，UI 不必展示）。 */
-  value?: unknown;
-}
-
-/**
- * research task 提案：与现有 ResearchTask 一致结构，但这是 AI 输出 → 等待
- * VBK 或人工确认。AI 不能写「已解决」。
- */
-export interface ResearchTaskProposal {
-  label: string;
-  type: "vbk" | "web" | "cost" | "image";
-  detail?: string;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// 阶段输出：每个阶段只允许返回这一种结构。AI 不能写 RFC6902 patch。
-// ──────────────────────────────────────────────────────────────────────────
-export interface PlanningStageOutput {
-  /** 给运营的中文回复，简短说明本阶段结果。 */
-  reply: string;
-  /** 本阶段产出的模块；可能是空（全部失败）或部分。 */
-  modules: ModuleOutcome[];
-  /** 阶段级问题（最多 1 条），仅当完全阻塞下一阶段才返回。 */
-  question?: string;
-}
-
-export interface PlanningStageError {
-  stage: PlanningStage;
-  attempt: number;
-  message: string;
-  code: string;
-  /** 失败原因细节（保留以便 UI 显示），但绝不持久化为产品字段。 */
-  details?: string;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// 持久化：生成状态按 local_product_id 单行存储；用于「中途重启后从失败阶段续跑」。
-// ──────────────────────────────────────────────────────────────────────────
-export interface ModulePersistedState {
-  module: PlanningModule;
-  status: ModuleStatus;
-  reason?: string;
-  /** 真正写入的固定路径。AI 不允许自由路径。 */
-  writePath?: string;
-  acceptedFields?: string[];
-  missingFields?: string[];
-  /** 模块写入或失败时的 ISO timestamp。 */
-  updatedAt: string;
-}
-
-export interface StagePersistedState {
-  stage: PlanningStage;
-  /** 已接受并写入成功的模块集合。 */
-  accepted: ModulePersistedState[];
-  /** 失败 / 拒绝的模块；用于 UI 显示「缺失 / 被拒」。 */
-  rejected: ModulePersistedState[];
-  /** 该阶段累计尝试次数；超过 retry-limit 时进入 needs_user。 */
-  attempts: number;
-  /** 阶段最近一次失败原因。 */
-  lastError?: PlanningStageError;
-  /** 阶段最近一次成功时间。 */
-  updatedAt: string;
-}
-
-export interface PlanningGenerationState {
-  localProductId: string;
-  /** 当前正在运行或下一个要跑的阶段。 */
-  currentStage: PlanningStage;
-  /** 已完成阶段；这些阶段不会被重跑。 */
-  completedStages: PlanningStage[];
-  /** 各阶段状态（按 stage 索引）。 */
-  stages: StagePersistedState[];
-  /** 上次成功的 AI 回复（结构化），用于 UI 显示「已接受」。 */
-  lastAssistantReply?: string;
-  /** 上次结构化输出的 module 摘要，方便 UI 直接读。 */
-  lastModuleSummary?: ModuleOutcome[];
-  /** 上次结构化输出的「缺失模块」摘要，方便系统回复用户。 */
-  lastMissingSummary?: string[];
-  /** 整体状态：pending → running → needs_user | completed | failed */
-  status: "pending" | "running" | "needs_user" | "completed" | "failed";
-  /** 续跑锚点：上次完成到哪个 stage。重启后 orchestrator 从 currentStage 开始。 */
-  resumeAt: string;
-  /** Provider 标签：仅用于日志和 UI 显示「上一轮跑的是哪个 provider」；
-   *  prompt / schema / validator 永远不允许依赖这个值。 */
-  providerLabel?: string;
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// 规划器接口：provider-neutral。任何 adapter 必须实现该接口；orchestrator
-// 只能调用接口方法，不能直接判断 provider / model。
-// ──────────────────────────────────────────────────────────────────────────
-export interface PlannerContext {
-  /** 已固化的产品骨架（destination / days / nights / productForm / sales）。 */
-  skeleton: PlanningSkeleton;
-  /** 当前产品草稿（来自数据库），用于 incremental 合并。 */
-  currentProduct: Record<string, unknown>;
-  /** 已接受的模块（来自 generation state），用于 incremental 输入。 */
-  acceptedModules: PlanningGenerationState["stages"][number]["accepted"];
-  /** 已声明的 research tasks（用于「避免重复添加」）。 */
-  existingResearchTasks: Array<Pick<ResearchTaskProposal, "label" | "type">>;
-  /** 历史会话（只用于补充上下文；orchestrator 不依赖它做决策）。 */
-  history: Array<{ role: "user" | "assistant"; content: string }>;
-  /** 用户明确指定的目的地、天数、POI、行程顺序和交通方式；模型不得覆盖。 */
-  lockedConstraints?: import("./contracts-preparation.js").LockedConstraints;
-  /** 已由真实 POI 绑定收敛的原始二选一备选；仅用于后续派生文案，不改变用户原始约束。 */
-  excludedItineraryAlternatives?: Array<{ day: number; names: string[] }>;
-  /** 用户明确保存的少量长期偏好，按预算裁剪后注入。 */
-  memoryContext?: import("./contracts-types.js").MemoryPromptContext;
-  /** Provider / model 仅作为 transport 参数，schema / prompt 不依赖。 */
-  transport: {
-    providerLabel: string;
-    model: string;
-  };
-}
-
-/** 骨架字段；AI 不能修改，只能填占位。 */
-export interface PlanningSkeleton {
-  destination: string;
-  days: number;
-  nights: number;
-  productForm: import("./product-form.js").ProductForm;
-  productType: "domesticShort" | "domesticLong";
-  /** 系统生成的供应商产品编号（AI 不可修改）。 */
-  supplierProductCode: string;
-}
-
-export interface PlannerRequest {
-  stage: PlanningStage;
-  context: PlannerContext;
-  /** 上次失败的错误信息（用于 retry hint）；orchestrator 只透传给 adapter。 */
-  previousError?: PlanningStageError;
-}
-
-export interface Planner {
-  /**
-   * 调用 provider 返回结构化输出；本方法**只能**返回 PlanningStageOutput，
-   * 不允许 RFC6902 patch。失败时抛出 PlannerError，orchestrator 捕获后
-   * 走 retry 流程。
-   */
-  generateStage(request: PlannerRequest): Promise<PlanningStageOutput>;
-  /**
-   * 原始景点名称在 VBK suggestPoi 中未命中时，给出一个可再次查询的单一
-   * POI 名称；该名称可作为同目的地/同核心城市内的替代景点。返回 null
-   * 表示本轮无法给出安全候选；调用方不会猜测 ID。
-   */
-  resolvePoiName?(request: PoiNameResolutionRequest): Promise<string | null>;
-}
-
-export interface PoiNameResolutionRequest {
-  originalName: string;
-  destination: string;
-  /** 1-based，最多三次。 */
-  attempt: number;
-  /** 已经实际交给 VBK suggestPoi 查询但未命中的候选；重试时不得重复。 */
-  previousCandidates: readonly string[];
-}
-
-/**
- * 统一错误类。orchestrator 根据 code 决定是否重试；不暴露 provider 细节。
- */
-export class PlannerError extends Error {
-  constructor(
-    public readonly code:
-      | "provider_not_configured"
-      | "provider_connection"
-      | "provider_timeout"
-      | "provider_rate_limit"
-      | "provider_authentication"
-      | "invalid_model_output"
-      | "empty_model_output"
-      | "missing_module"
-      | "rejected_path"
-      | "unknown",
-    message: string,
-    public readonly details?: string,
-  ) {
-    super(message);
-  }
-}

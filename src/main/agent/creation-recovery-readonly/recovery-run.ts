@@ -13,9 +13,9 @@
 
 import type { ProductDetail } from "../../../shared/contracts.js";
 import type { TrafficLineVariant } from "../../../shared/contracts-traffic-line.js";
-import { normaliseTrafficLineConfig, normaliseTrafficLineVariant, trafficLineLabel } from "../../../shared/contracts-traffic-line.js";
-import { draftPhasesFor } from "../../automation/automation.main/automation.main.phases.js";
+import { normaliseTrafficLineConfig } from "../../../shared/contracts-traffic-line.js";
 import type { CreationRecoveryReadOnlyDependencies, RecoveryInput, RecoveryScope } from "./types.js";
+import { productJsonSnapshot, workflowSnapshot } from "./snapshots.js";
 
 export function parseRecoveryScope(args: Record<string, unknown>): RecoveryScope {
   const value = args.scope;
@@ -57,8 +57,6 @@ export function recoveryInput(product: ProductDetail, scope: RecoveryScope): Rec
       }
     }
   }
-  // Lazy import to avoid cycle with snapshots.ts (which imports this file).
-  const { productJsonSnapshot, workflowSnapshot } = require("./snapshots.js") as typeof import("./snapshots.js");
   return {
     product,
     productId,

@@ -2,12 +2,7 @@ import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import type { AutomationRun } from "../../../shared/contracts.js";
 import type { parseProduct } from "../schema/schema.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
-import { ensureHotelResourceApi } from "../ctrip/hotel-resource-api.js";
-import { ensureVehicleResourceApi } from "../ctrip/vehicle-resource-api.js";
-import { ensureTrafficLinePhase } from "../ctrip/traffic-line/run-phase.js";
-import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../shared/contracts-traffic-line.js";
-import { writeAutomationProduct } from "./automation.main.persist.js";
-import { trafficRouteReviewAuthorized } from "../../../shared/traffic-route-review-approval.js";
+import { buildFillMap } from "./automation.main.run-one/fill-map.js";
 
 /** 保留已移除的历史失败断点，使原 run 能跳过它并继续后续阶段。 */
 export function resourceRecoveryPhases(product: unknown, phases: string[], previous: AutomationRun | undefined, retryFrom?: string): string[] {
@@ -29,46 +24,11 @@ export function resourcePhaseHandlers(input: {
   persist: () => void;
   executePhase: (phase: string, execute: () => Promise<unknown>) => Promise<unknown>;
 }): Record<string, () => Promise<unknown>> {
-  const {ctx, localProductId, page, product, productId, run, log, persist, executePhase} = input;
-  return {
-        hotelResource: () => executePhase("hotelResource", async () => {
-          const result = await ensureHotelResourceApi(page, product, productId!);
-          if ("source" in result && result.source === "ctrip" && result.verified === true) {
-            const operations = product.operations!;
-            operations.hotelResource = {
-              source: "ctrip",
-              resourceName: result.resourceName ?? String(product.itinerary.find((day) => Boolean(day.hotel))?.hotel ?? "酒店资源"),
-              hotelTier: result.hotelTier,
-              diamond: result.diamond as 3 | 4 | 5,
-              candidates: product.itinerary.find((day) => Array.isArray(day.hotelCandidates))?.hotelCandidates,
-              dailyCandidates: result.dailyCandidates,
-            };
-            writeAutomationProduct(ctx, localProductId, product as unknown as Record<string, unknown>, "automating");
-          }
-          return result;
-        }),
-        vehicleResource: () => executePhase("vehicleResource", () => ensureVehicleResourceApi(page, product, productId!)),
-        trafficLine: () => executePhase("trafficLine", () => {
-          return ensureTrafficLinePhase({
-            page,
-            parentProductId: productId!,
-            routeReviewAuthorized: trafficRouteReviewAuthorized(ctx.db.getAgentSnapshot(localProductId)),
-            config: product.operations?.trafficLine ?? DEFAULT_TRAFFIC_LINE_CONFIG,
-            itinerary: product.itinerary,
-            log,
-            checkpoint: run.trafficLine,
-            onCheckpoint: (checkpoint) => {
-              run.trafficLine = checkpoint;
-              for (const child of checkpoint.children) {
-                if (child.childProductId) ctx.browser.addPinnedProductId?.(child.childProductId);
-              }
-              persist();
-            },
-            disambiguator: ctx.disambiguator,
-            product,
-          });
-        }),
-  };
+  const fillMap = buildFillMap({ ctx: input.ctx, localProductId: input.localProductId,
+    page: input.page, productData: input.product, productId: input.productId,
+    run: input.run, log: input.log, persist: input.persist });
+  return Object.fromEntries(["hotelResource", "vehicleResource", "trafficLine"].map(phase =>
+    [phase, () => input.executePhase(phase, fillMap[phase])]));
 }
 
 /** 不属于当前团态的历史失败阶段只更新执行记录，绝不进入平台写入锁。 */

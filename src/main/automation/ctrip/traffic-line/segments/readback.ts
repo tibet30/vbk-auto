@@ -13,7 +13,7 @@
 import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../../../../shared/contracts-traffic-line.js";
 import { departureCityReadbackIsComplete, verifyValidatedDepartureCityReadback } from "../segment-departure-cities.js";
 import type { JsonRecord, TrafficLinePage } from "../client.js";
-import { record } from "../client.js";
+import { list, record } from "../client.js";
 import { getSegments } from "./draft.js";
 import { segmentsFromPayload, verifySegmentBoundaries } from "./boundaries.js";
 
@@ -26,7 +26,7 @@ export async function readTrafficLineSegmentReadback(
   endpoints: TrafficLineEndpointPlan,
 ): Promise<{ segmentCount: number; departureCityCount: number }> {
   const payload = await getSegments(page, productId);
-  const segments = segmentsFromPayload(payload);
+  const segments = list(record(payload.productSegments)?.segments);
   if (!segments.length) throw new Error("子产品未返回可作为正式回读的资源段。");
   verifySegmentBoundaries(segments, variant, endpoints);
   return { segmentCount: segments.length, departureCityCount: verifyValidatedDepartureCityReadback(payload) };

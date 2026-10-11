@@ -1,311 +1,37 @@
-/**
- * 自动化阶段失败时的重试 + 诊断循环入口：runPhaseWithRecovery。
- *   - 重跑当前 phase 最多 MAX_PHASE_ATTEMPTS 次；
- *   - 每次失败后调 ctx.advisor() 拿下一步 action（retry / reload / reopen / wait_for_user）；
- *   - advisor 抛错 / 返回非法形状时退化为 wait_for_user 状态；
- *   - 用户中途取消则返回 status="cancelled" 且不打断正在跑的 handler；
- *   - 归档历史 attempts 到 attemptsHistory 以便 UI 展示过往诊断。
- */
+import { MAX_PHASE_ATTEMPTS, isoNow, stripSensitive, type RecoveryContext, type RunPhaseOutcome } from "./recovery-core.js";
+import { AutomationCancelledError, NonAdvisableAutomationError } from "../automation.main/automation.main.errors.js";
+import { beginPhaseRecovery, blockedRecovery, cancelledRecovery, completedRecovery } from "./recovery-state.js";
+import { advisePhaseRecovery } from "./recovery-advisor.js";
 
-import {
-  DEFAULT_USER_INSTRUCTION,
-  MAX_PHASE_ATTEMPTS,
-  RecoveryContext,
-  RunPhaseOutcome,
-  SafeErrorShape,
-  buildDiagnosisHistory,
-  isAdvisorAction,
-  isoNow,
-  stripSensitive,
-} from "./recovery-core.js";
-import type { PhaseRecovery } from "../../../shared/contracts.js";
-import type {
-  AdvisorAction,
-  AdvisorOutcome,
-  AdvisorRequest,
-  PhaseAttempt,
-} from "../../../shared/contracts.js";
-import { NonAdvisableAutomationError } from "../automation.main/automation.main.errors.js";
-
-/**
- * 统一把“处理器正常返回”落成可观察的阶段完成态。
- *
- * 每个 API 处理器必须自行完成远端回读，不满足即抛错；只有其成功返回且用户
- * 没有在执行期间停止时，才能在这里更新阶段状态。销售控制没有普通 phase row，
- * 因此允许找不到行，仍由其专用状态交接记录 recovery 完成态。
- */
-function completeVerifiedPhase(run: RecoveryContext["run"], phase: string): void {
-  const phaseRow = run.phases.find((item) => item.phase === phase);
-  if (phaseRow) phaseRow.status = "completed";
-}
-
-/**
- * 对单个 phase 做「尝试 → 失败 → 调 advisor → 应用 action → 重试」主循环。
- * 返回 status ∈ { completed, cancelled, needs_user }：
- *   - completed：handler 跑成功，或用户在 handler 结束后才取消；
- *   - cancelled：用户在 attempt 顶部检测到取消信号并直接退出循环；
- *   - needs_user：达到尝试上限 / advisor 失败 / wait_for_user。
- *
- * 把 attempts / attemptsHistory / userInstruction 等写到 ctx.run.recovery.phases[phase]，
- * 每次状态变更都调一次 ctx.persist()（失败也不影响主流程）。
- */
-export async function runPhaseWithRecovery(
-  ctx: RecoveryContext,
-): Promise<RunPhaseOutcome> {
+/** Bounded attempts; only handler errors enter diagnosis, persistence errors stop the runner. */
+export async function runPhaseWithRecovery(ctx: RecoveryContext): Promise<RunPhaseOutcome> {
   const now = ctx.now ?? (() => new Date());
-  const persist = () => {
-    try {
-      ctx.persist();
-    } catch {
-      // 持久化失败不影响 runner 主流程
-    }
-  };
-
-  ctx.run.recovery ??= { phases: {} };
-  const recoveryByPhase = ctx.run.recovery.phases;
-  let rec: PhaseRecovery = recoveryByPhase[ctx.phase] ?? {
-    phase: ctx.phase,
-    state: "running",
-    attempts: [],
-  };
-  recoveryByPhase[ctx.phase] = rec;
-
-  // 同一 runner 第二次进入 phase时，把旧 attempts 归档到 attemptsHistory 让 UI
-  // 仍能看见上轮的诊断记录；再清空 rec.attempts / userInstruction / finalError
-  // 准备一轮重试。当 rec.state=completed 时不归档（不要把成功的 attempt
-  // 当作“上一轮需要重跑”）。
-  const wasUnfinished = rec.state !== "completed" && rec.attempts.length > 0;
-  if (wasUnfinished) {
-    const history = [...(rec.attemptsHistory ?? []), ...rec.attempts];
-    if (history.length) rec.attemptsHistory = history;
-  }
-  rec = {
-    phase: ctx.phase,
-    state: "running",
-    attempts: rec.attempts,
-    ...(rec.attemptsHistory ? { attemptsHistory: rec.attemptsHistory } : {}),
-  };
-  recoveryByPhase[ctx.phase] = rec;
-  rec.state = "running";
-  rec.attempts = [];
-  rec.userInstruction = undefined;
-  rec.finalError = undefined;
-  persist();
-
-  let lastError: SafeErrorShape | undefined;
-
+  const rec = beginPhaseRecovery(ctx);
+  let lastError = "AI 诊断失败";
   for (let attempt = 1; attempt <= MAX_PHASE_ATTEMPTS; attempt++) {
+    if (ctx.shouldCancel?.()) return cancelledRecovery(ctx, rec);
     rec.state = "running";
-    persist();
-
-    // 用户中止检查：放在 attempt 顶部而不是 handler 内部 —— 当前 handler
-    // 已经在跑就让它自然结束，避免掐断 Playwright 调用让页面留下半成品 UI。
-    // 下一次 attempt 不再启动。status 走 cancelled，由 runner 负责更新
-    // run.status / product.status。
-    if (ctx.shouldCancel?.()) {
-      rec.state = "needs_user";
-      rec.finalError = "用户中止了自动录入";
-      if (!rec.userInstruction) rec.userInstruction = "已停止，请核查当前页面后重新保存草稿。";
-      ctx.log(`phase=${ctx.phase} cancelled before attempt=${attempt}`, "warning");
-      persist();
-      return { status: "cancelled", finalError: rec.finalError };
+    ctx.persist();
+    let failure: { error: unknown } | undefined;
+    try { await ctx.execute(); }
+    catch (error) { failure = { error }; }
+    if (ctx.shouldCancel?.() || failure?.error instanceof AutomationCancelledError) {
+      return cancelledRecovery(ctx, rec);
     }
-
-    try {
-      await ctx.execute();
-      // handler 跑完了但用户可能在期间点了停止；这种情况下「阶段已成功」
-      // 不重要，立刻退出，避免再启下一阶段。保留 attempts 为空 ——
-      // 不诊断一个成功的阶段。
-      if (ctx.shouldCancel?.()) {
-        rec.state = "needs_user";
-        rec.finalError = "用户中止了自动录入";
-        if (!rec.userInstruction) rec.userInstruction = "已停止，请核查当前页面后重新保存草稿。";
-        ctx.log(`phase=${ctx.phase} cancelled after attempt=${attempt}`, "warning");
-        persist();
-        return { status: "cancelled", finalError: rec.finalError };
-      }
-      completeVerifiedPhase(ctx.run, ctx.phase);
-      rec.state = "completed";
-      ctx.log(`phase=${ctx.phase} attempt=${attempt} resultVerified`, "info");
-      persist();
-      return { status: "completed" };
-    } catch (err) {
-      lastError = stripSensitive(err);
-      const errorMessage = lastError.message;
-
-      const attemptRecord: PhaseAttempt = {
-        attempt,
-        error: errorMessage,
-        at: isoNow(now),
-      };
-      rec.attempts.push(attemptRecord);
-      ctx.log(`phase=${ctx.phase} attempt=${attempt} failed`, "warning");
-      persist();
-
-      // VBK 下拉明确缺少账号固定数据等确定性系统错误，不是“不会选”。
-      // 保留原错误并立即交给上层失败路径，禁止调用 AI advisor 或盲目重试。
-      if (err instanceof NonAdvisableAutomationError) {
-        rec.state = "needs_user";
-        rec.finalError = errorMessage;
-        ctx.log(`phase=${ctx.phase} nonAdvisableFailure`, "error");
-        persist();
-        throw err;
-      }
-
-      // 达到上限后：不再 advisor、不再 applyAction，直接 needs_user
-      if (attempt >= MAX_PHASE_ATTEMPTS) {
-        break;
-      }
-
-      // 调 advisor
-      rec.state = "advising";
-      persist();
-
-      const advisorReq: AdvisorRequest = {
-        phase: ctx.phase,
-        attempt,
-        error: errorMessage,
-        productIdExists: ctx.productIdExists,
-        basicInfoSaved: ctx.basicInfoSaved,
-        completedPhases: ctx.completedPhases,
-        diagnosisHistory: buildDiagnosisHistory(rec.attempts),
-      };
-
-      let outcome: AdvisorOutcome;
-      try {
-        outcome = await ctx.advisor(advisorReq);
-      } catch (advisorErr) {
-        ctx.log(
-          `phase=${ctx.phase} attempt=${attempt} advisorError code=${
-            (advisorErr as { code?: string }).code ?? "advisor_failed"
-          }`,
-          "error",
-        );
-        // advisor 抛错 → 等价 wait_for_user
-        rec.state = "needs_user";
-        rec.finalError = "AI 诊断失败";
-        if (!rec.userInstruction) {
-          rec.userInstruction = DEFAULT_USER_INSTRUCTION;
-        }
-        persist();
-        return { status: "needs_user", finalError: rec.finalError };
-      }
-
-      // 严格校验 outcome 形状
-      const safeAction = outcome && isAdvisorAction(outcome.action)
-        ? outcome.action
-        : null;
-      const isValidShape =
-        safeAction !== null &&
-        typeof outcome.summary === "string" &&
-        outcome.summary.length > 0 &&
-        typeof outcome.rootCause === "string" &&
-        outcome.rootCause.length > 0 &&
-        typeof outcome.expectedEvidence === "string" &&
-        outcome.expectedEvidence.length > 0;
-
-      if (!isValidShape) {
-        ctx.log(
-          `phase=${ctx.phase} attempt=${attempt} advisorInvalidShape`,
-          "error",
-        );
-        rec.state = "needs_user";
-        rec.finalError = "AI 诊断失败：模型返回不在白名单";
-        if (!rec.userInstruction) {
-          rec.userInstruction = DEFAULT_USER_INSTRUCTION;
-        }
-        persist();
-        return { status: "needs_user", finalError: rec.finalError };
-      }
-
-      // wait_for_user：要求 userInstruction 非空
-      if (safeAction === "wait_for_user") {
-        if (
-          !outcome.userInstruction ||
-          typeof outcome.userInstruction !== "string" ||
-          outcome.userInstruction.length === 0
-        ) {
-          ctx.log(
-            `phase=${ctx.phase} attempt=${attempt} advisorMissingUserInstruction`,
-            "error",
-          );
-          rec.state = "needs_user";
-          rec.finalError = "AI 诊断失败：缺少可执行的用户指令";
-          if (!rec.userInstruction) {
-            rec.userInstruction = DEFAULT_USER_INSTRUCTION;
-          }
-          persist();
-          return { status: "needs_user", finalError: rec.finalError };
-        }
-        const last = rec.attempts[rec.attempts.length - 1];
-        if (last) {
-          last.diagnosis = {
-            summary: outcome.summary,
-            rootCause: outcome.rootCause,
-            expectedEvidence: outcome.expectedEvidence,
-          };
-          last.action = "wait_for_user";
-        }
-        rec.state = "needs_user";
-        rec.userInstruction = outcome.userInstruction;
-        rec.finalError = errorMessage;
-        ctx.log(`phase=${ctx.phase} attempt=${attempt} waitForUser`, "warning");
-        persist();
-        return { status: "needs_user", finalError: rec.finalError };
-      }
-
-      // 其他三类的执行：写入本次 diagnosis + action（带降级）
-      let action: AdvisorAction = safeAction;
-      if (action === "reopen_editor_and_retry_phase" && !ctx.productIdExists) {
-        action = "retry_same_phase";
-      }
-
-      const last2 = rec.attempts[rec.attempts.length - 1];
-      if (last2) {
-        last2.diagnosis = {
-          summary: outcome.summary,
-          rootCause: outcome.rootCause,
-          expectedEvidence: outcome.expectedEvidence,
-        };
-        last2.action = action;
-      }
-      rec.state = "retrying";
-      persist();
-
-      ctx.log(
-        `phase=${ctx.phase} attempt=${attempt} retrying action=${action}`,
-        "info",
-      );
-
-      try {
-        await ctx.applyAction(action, attempt);
-      } catch (applyErr) {
-        // applyAction 抛错 → 当前上下文里我们的实现一律 noop，正常不会抛错。
-        // 即便抛错：attempts 数组里已经记录了上一次 handler 失败 + advisor 诊断，
-        // 这次 apply 失败本身只是 advisor 提议的副作用失败，没有新诊断可写。
-        // 把合成错误塞进 lastError，下一次 attempt 顶部 ctx.execute() 抛出的
-        // 错误会覆盖 lastError（这是预期行为）；如果下一次 handler 这次意外地
-        // 成功，lastError 也不会被消费，attempts 仍然完整。
-        ctx.log(
-          `phase=${ctx.phase} attempt=${attempt} applyFailed action=${action}`,
-          "error",
-        );
-        const synthMessage = `apply_action_failed: ${stripSensitive(applyErr).message}`;
-        lastError = { message: synthMessage };
-      }
+    if (!failure) return completedRecovery(ctx, rec, attempt);
+    lastError = stripSensitive(failure.error).message;
+    rec.attempts.push({ attempt, error: lastError, at: isoNow(now) });
+    ctx.log(`phase=${ctx.phase} attempt=${attempt} failed`, "warning");
+    ctx.persist();
+    if (failure.error instanceof NonAdvisableAutomationError) {
+      blockedRecovery(ctx, rec, lastError);
+      ctx.log(`phase=${ctx.phase} nonAdvisableFailure`, "error");
+      throw failure.error;
     }
+    if (attempt === MAX_PHASE_ATTEMPTS) break;
+    const advised = await advisePhaseRecovery(ctx, rec, attempt, lastError);
+    if (advised) return advised;
   }
-
-  // 退出主循环：attempts 已达 MAX_PHASE_ATTEMPTS 且仍失败
-  rec.state = "needs_user";
-  rec.finalError = lastError?.message ?? "AI 诊断失败";
-  if (!rec.userInstruction) {
-    rec.userInstruction = DEFAULT_USER_INSTRUCTION;
-  }
-  ctx.log(
-    `phase=${ctx.phase} reached max attempts ${MAX_PHASE_ATTEMPTS}, blocked`,
-    "error",
-  );
-  persist();
-  return { status: "needs_user", finalError: rec.finalError };
+  ctx.log(`phase=${ctx.phase} reached max attempts ${MAX_PHASE_ATTEMPTS}, blocked`, "error");
+  return blockedRecovery(ctx, rec, lastError);
 }

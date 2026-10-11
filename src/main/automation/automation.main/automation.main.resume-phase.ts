@@ -2,6 +2,8 @@ import type { AutomationRun, ProductDetail } from "../../../shared/contracts.js"
 import { parseProduct } from "../schema/schema.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { preflightRepairPhase } from "./preflight-repair-phase.js";
+import { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
+export { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
 
 export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
   if (run?.status !== "failed") return undefined;
@@ -13,39 +15,26 @@ export function interruptedAutomationResumePhase(run?: AutomationRun): string | 
 
 export function failedAutomationResumePhase(run?: AutomationRun): string | undefined {
   if (run?.status !== "failed" && run?.status !== "cancelled") return undefined;
+  const current = run.phases.find(item => item.phase === run.currentPhase);
+  if (run.currentPhase && (current?.status === "failed"
+    || run.recovery?.phases[run.currentPhase]?.state === "needs_user"
+    || (run.status === "cancelled" && run.currentPhase === "preflight" && current?.status === "completed"))) {
+    return run.currentPhase;
+  }
   const needsUser = run.recovery
-    ? Object.values(run.recovery.phases).find((phase) => phase.state === "needs_user")?.phase
+    ? Object.values(run.recovery.phases).find((phase) => phase.phase !== "trafficLine" && phase.state === "needs_user")?.phase
     : undefined;
-  const failed = needsUser ?? run.phases.find((phase) => phase.status === "failed")?.phase;
+  const failed = needsUser ?? run.phases.find((phase) => phase.phase !== "trafficLine" && phase.status === "failed")?.phase
+    ?? run.phases.find(phase => phase.status === "failed")?.phase;
   if (failed) return failed;
   // Older shell failures predate phase recovery records. Route them through
   // recoverCreatedShell, which requires an ID and verifies the existing draft.
-  if (run.status === "failed" && run.currentPhase === "saleControl"
+  if (run.currentPhase === "saleControl"
     && run.phases.length > 0 && run.phases.every(phase => phase.status === "pending")
     && !canRestartPreWriteAuthorizationFailure(run, undefined)) {
     return "saleControl";
   }
   return undefined;
-}
-
-/**
- * The write guard runs before `configureProductShellApi`, yet a rejected
- * handoff had already persisted a failed automation record. There is no
- * product ID and no phase attempt in this narrow state, so restarting from
- * saleControl is safe; any other failed pre-shell state remains blocked for
- * authoritative recovery instead of risking a duplicate remote draft.
- */
-export function canRestartPreWriteAuthorizationFailure(
-  run: AutomationRun | undefined,
-  productId: string | null | undefined,
-): boolean {
-  return Boolean(
-    run?.status === "failed"
-      && !productId
-      && run.currentPhase === "saleControl"
-      && run.phases.every((phase) => phase.status === "pending")
-      && run.logs.some((entry) => entry.message === "当前任务未处于可录入状态。"),
-  );
 }
 
 /**
@@ -91,6 +80,6 @@ export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: 
 export function isVerifiedAutomationComplete(product: ProductDetail): boolean {
   return Boolean(product.productId && product.automation?.status === "succeeded"
     && product.automation.phases.some(item => item.phase === "preflight" && item.status === "completed")
-    && draftPhasesFor(parseProduct(product.product)).every(phase =>
+    && draftPhasesFor(parseProduct(product.product)).filter(phase => phase !== "trafficLine").every(phase =>
       product.automation!.phases.some(item => item.phase === phase && item.status === "completed")));
 }

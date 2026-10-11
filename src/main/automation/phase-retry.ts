@@ -32,7 +32,8 @@ export function preparePhaseRetry(
     && previous.phases.some((phase) => phase.phase === "trafficLine" && phase.status === "failed")
     && phases.slice(0, retryIndex).filter((phase) => phase !== "trafficLine")
       .every((phase) => previous.phases.some((item) => item.phase === phase && item.status === "completed"));
-  if (failed?.status !== "failed" && !interruptedRecovery && !parentAfterTrafficFailure) {
+  const cancelledVerifiedPreflight = previous.status === "cancelled" && retryPhase === "preflight" && failed?.status === "completed";
+  if (failed?.status !== "failed" && !interruptedRecovery && !parentAfterTrafficFailure && !cancelledVerifiedPreflight) {
     throw new Error(`阶段 ${retryPhase} 当前不是失败状态。`);
   }
 
@@ -113,7 +114,7 @@ export function prepareQueuedPhaseResume(
   if (resumeIndex < 0) throw new Error(`无法继续未知阶段：${resumePhase}`);
   const target = previous.phases.find((item) => item.phase === resumePhase);
   if (target?.status !== "pending") throw new Error(`阶段 ${resumePhase} 当前不是待继续状态。`);
-  if (previous.phases.some((item) => item.status === "failed")) {
+  if (previous.phases.some((item) => item.phase !== "trafficLine" && item.status === "failed")) {
     throw new Error("仍有失败阶段，请先重新执行该阶段。");
   }
 
@@ -123,7 +124,8 @@ export function prepareQueuedPhaseResume(
     currentPhase: resumePhase,
     phases: phases.map((phase, index) => ({
       phase,
-      status: index < resumeIndex
+      status: phase === "trafficLine" && previous.phases.find(item => item.phase === phase)?.status === "failed" && index < resumeIndex
+        ? "failed" : index < resumeIndex
         ? previous.phases.find((item) => item.phase === phase)?.status === "completed" ? "completed" : "pending"
         : "pending",
     })),
@@ -170,7 +172,7 @@ export function prepareSinglePhaseRetry(
       ...(previous.recovery ?? { phases: {} }),
       phases: {
         ...(previous.recovery?.phases ?? {}),
-        [retryPhase]: { phase: retryPhase, state: "running", attempts: [] },
+        [retryPhase]: freshPhaseRecovery(previous, retryPhase),
       },
     },
     logs: [
@@ -200,7 +202,7 @@ export function prepareSaleControlRetry(
       ...(previous.recovery ?? { phases: {} }),
       phases: {
         ...(previous.recovery?.phases ?? {}),
-        saleControl: { phase: "saleControl", state: "running", attempts: [] },
+        saleControl: freshPhaseRecovery(previous, "saleControl"),
       },
     },
     logs: [
@@ -209,4 +211,11 @@ export function prepareSaleControlRetry(
     ],
     screenshot: undefined,
   };
+}
+
+function freshPhaseRecovery(previous: AutomationRun, phase: string) {
+  const record = previous.recovery?.phases[phase];
+  const history = [...(record?.attemptsHistory ?? []), ...(record?.attempts ?? [])];
+  return { phase, state: "running" as const, attempts: [],
+    ...(history.length ? { attemptsHistory: structuredClone(history) } : {}) };
 }

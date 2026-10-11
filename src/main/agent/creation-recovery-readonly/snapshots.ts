@@ -41,8 +41,7 @@ export function assertUnchanged(deps: CreationRecoveryReadOnlyDependencies, loca
 }
 
 function requireProductLocal(deps: CreationRecoveryReadOnlyDependencies, localProductId: string): ProductDetail {
-  return requireProduct(deps, localProductId);
+  const product = deps.db.getProduct(localProductId);
+  if (!product) throw new Error("产品不存在，无法执行只读恢复。");
+  return product;
 }
-
-// Imported here so callers don't need to chase the dependency chain.
-import { requireProduct } from "./recovery-run.js";

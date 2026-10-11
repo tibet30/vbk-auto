@@ -113,9 +113,9 @@ test("无 productId 且有 automation 记录：销售控制重试复用壳配置
 
   assert.equal(configureCalls, 1);
   assert.equal(product.productId, "76543210");
-  assert.equal(product.status, "draft_saved");
+  assert.equal(product.status, "review");
   const finalRun = savedRuns.at(-1)!;
-  assert.equal(finalRun.status, "succeeded");
+  assert.equal(finalRun.status, "queued");
   assert.equal(finalRun.currentPhase, undefined);
   assert.equal(finalRun.phases.some((phase) => phase.phase === "saleControl"), false);
   assert.equal(finalRun.recovery?.phases.saleControl.state, "completed");
@@ -215,7 +215,7 @@ test("应用在销售控制创建产品壳期间退出时不会自动重复创�
 });
 
 test("销售控制行提供重执行入口，但仍保持空 phaseNames 的 done 聚合设计", () => {
-  const source = readFileSync("src/renderer/app/views/workspace/vbk.tsx", "utf8");
+  const source = readFileSync("src/renderer/app/views/workspace/vbk/review.tsx", "utf8");
   assert.match(source, /section\.key === "saleControl" \? \["saleControl"\] : section\.phaseNames/);
   assert.match(source, /retryPhases\.map\(\(phaseKey\)/);
   assert.match(source, /disabled=\{!!retryingPhase \|\| !url \|\| isNavigating \|\| automationActive \|\| saleControlRequiresNoProduct\}/);

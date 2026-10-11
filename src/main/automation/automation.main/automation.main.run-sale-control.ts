@@ -11,6 +11,8 @@ import { prepareSaleControlRetry } from "../phase-retry.js";
 import { runPhaseWithRecovery } from "../recovery/recovery.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import { writeAutomationProduct } from "./automation.main.persist.js";
+import { automationSession } from "./runtime/index.js";
+import { AutomationCancelledError } from "./automation.main.errors.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "./automation.main.product-type.js";
 
 type ConfigureProductShell = (page: any, product: ReturnType<typeof parseProduct>, onCreated?: (productId: string) => void) => Promise<string>;
@@ -29,17 +31,10 @@ export async function runSaleControlPhase(
   product.product = normalizedProductType.product;
   const productData = parseProduct(product.product);
   const run = prepareSaleControlRetry(product.automation);
-  const log = (message: string, level: "info" | "warning" | "error" = "info") => {
-    run.logs.push({ at: new Date().toISOString(), message, level });
-    ctx.db.saveAutomation(localProductId, run);
-    ctx.emit(localProductId);
-  };
-  const persist = () => {
-    ctx.db.saveAutomation(localProductId, run);
-    ctx.emit(localProductId);
-  };
-
-  ctx.db.saveAutomation(localProductId, run);
+  const page = await getVbkRequestPage(ctx.browser);
+  const session = automationSession(ctx, localProductId, run);
+  const { log, persist } = session;
+  persist();
   if (normalizedProductType.changed) {
     writeAutomationProduct(ctx, localProductId, product.product, "automating");
     log("旧产品类型已在销售控制重试前归一为境内短途，避免缺少大交通卡片导致校验失败。", "warning");
@@ -49,7 +44,6 @@ export async function runSaleControlPhase(
   ctx.emit(localProductId);
 
   try {
-    const page = await getVbkRequestPage(ctx.browser);
     let shellAttempted = false;
     const outcome = await runPhaseWithRecovery({
       run,
@@ -59,25 +53,26 @@ export async function runSaleControlPhase(
       basicInfoSaved: product.basicInfoSaved ?? false,
       execute: async () => {
         return ctx.runVbkPageExclusive(async () => {
-        if (ctx.browser.isVisible()) ctx.ensureBrowserHasBounds();
-        if (shellAttempted) {
-          throw new Error("销售控制本轮已尝试创建产品壳但未取得 productId，请先在 VBK 确认结果后再继续。");
-        }
-        shellAttempted = true;
-        const latest = ctx.db.getProduct(localProductId);
-        if (latest?.productId) {
-          throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
-        }
-        const productId = await configureShell(page, productData, createdId => {
-          ctx.db.setProductLifecycle(localProductId, { productId: createdId });
-          log(`携程已返回产品壳 ID：${createdId}，正在核验销售控制。`);
-        });
-        if (!productId) throw new Error("销售控制已完成，但携程未返回产品 ID。");
-        const afterCreate = ctx.db.getProduct(localProductId);
-        if (afterCreate?.productId && String(afterCreate.productId) !== String(productId)) {
-          throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
-        }
-        ctx.db.setProductLifecycle(localProductId, { productId: String(productId) });
+          if (ctx.cancellationRequested.has(localProductId)) throw new AutomationCancelledError();
+          if (ctx.browser.isVisible()) ctx.ensureBrowserHasBounds();
+          if (shellAttempted) {
+            throw new Error("销售控制本轮已尝试创建产品壳但未取得 productId，请先在 VBK 确认结果后再继续。");
+          }
+          shellAttempted = true;
+          const latest = ctx.db.getProduct(localProductId);
+          if (latest?.productId) {
+            throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
+          }
+          const productId = await configureShell(page, productData, createdId => {
+            ctx.db.setProductLifecycle(localProductId, { productId: createdId });
+            log(`携程已返回产品壳 ID：${createdId}，正在核验销售控制。`);
+          });
+          if (!productId) throw new Error("销售控制已完成，但携程未返回产品 ID。");
+          const afterCreate = ctx.db.getProduct(localProductId);
+          if (afterCreate?.productId && String(afterCreate.productId) !== String(productId)) {
+            throw new Error("产品壳已创建（已有 productId），不能重新执行销售控制，避免重复创建产品。");
+          }
+          ctx.db.setProductLifecycle(localProductId, { productId: String(productId) });
         }, "saleControl");
       },
       advisor: ctx.advisor,
@@ -91,7 +86,7 @@ export async function runSaleControlPhase(
     });
 
     if (outcome.status === "cancelled") {
-      ctx.markCancelled(localProductId, run, persist);
+      session.cancel();
       return;
     }
     if (outcome.status !== "completed") {
@@ -102,20 +97,21 @@ export async function runSaleControlPhase(
       throw new Error(outcome.finalError || "销售控制重新执行未完成，请在 VBK 中确认后重试。");
     }
 
-    run.status = ctx.agentControlled ? "queued" : "succeeded";
+    run.status = "queued";
     run.currentPhase = undefined;
     log("销售控制已完成，产品壳 productId 已保存。", "info");
-    ctx.db.setProductLifecycle(localProductId, { status: ctx.agentControlled ? "review" : "draft_saved" });
+    ctx.db.setProductLifecycle(localProductId, { status: "review" });
     persist();
   } catch (error) {
-    if (error instanceof Error && error.message === "用户中止了自动录入") return;
+    if (error instanceof AutomationCancelledError || ctx.cancellationRequested.has(localProductId)) {
+      session.cancel();
+      return;
+    }
     if (run.status !== "failed" && run.status !== "cancelled") {
-      run.status = "failed";
-      run.currentPhase = "saleControl";
-      log(error instanceof Error ? error.message : "销售控制重新执行发生未知错误", "error");
-      ctx.db.setProductLifecycle(localProductId, { status: "blocked" });
-      persist();
+      session.fail(error, "saleControl");
     }
     throw error;
+  } finally {
+    ctx.cancellationRequested.delete(localProductId);
   }
 }

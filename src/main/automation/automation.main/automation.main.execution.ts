@@ -12,7 +12,9 @@ export async function runAutomationExclusive<T>(args: {
   if (running.has(id)) throw new Error("该产品的自动录入正在进行中，请等待本轮结束。");
   running.add(id);
   cancellationRequested.delete(id);
-  clock?.setEnabled(id, true, "automation");
-  try { return await (clock ? clock.track(id, work) : work()); }
+  try {
+    clock?.setEnabled(id, true, "automation");
+    return await (clock ? clock.track(id, work) : work());
+  }
   finally { running.delete(id); cancellationRequested.delete(id); }
 }

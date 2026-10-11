@@ -25,7 +25,7 @@ test("approved traffic backfill runs before the completed-parent shortcut withou
     ] }) },
     agentWriteGuard: () => {},
     runApprovedLocked: () => { throw Error("must not rewrite the completed parent"); },
-    runOnePhaseLocked: async (id: string, phase: string) => { assert.equal(id, product.id); phases.push(phase); },
+    runApprovedBackfillLocked: async (id: string) => { assert.equal(id, product.id); phases.push("trafficLine", "preflight"); },
   };
   await DraftAutomation.prototype.executeApprovedWorkflow.call(mock, product.id);
   assert.deepEqual(phases, ["trafficLine", "preflight"]);
@@ -54,7 +54,7 @@ test("traffic retry accepts only an equivalent historical approval after a recov
     }) },
     agentWriteGuard: () => {},
     runApprovedLocked: () => { throw Error("must not rewrite the completed parent"); },
-    runOnePhaseLocked: async (_id: string, phase: string) => { phases.push(phase); },
+    runApprovedBackfillLocked: async () => { phases.push("trafficLine", "preflight"); },
   };
   await DraftAutomation.prototype.executeApprovedWorkflow.call(mock, product.id);
   assert.deepEqual(phases, ["trafficLine", "preflight"]);

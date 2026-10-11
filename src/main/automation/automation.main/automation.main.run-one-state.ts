@@ -14,30 +14,26 @@ export function resolveRunStatusAfterSinglePhaseSuccess(
   const parentPhases = run.phases.filter((phase) => phase.phase !== "trafficLine");
   const parentVerified = parentPhases.some((phase) => phase.phase === "preflight" && phase.status === "completed")
     && parentPhases.every((phase) => phase.status === "completed");
-  if (parentVerified || (run.phases.length > 0 && run.phases.every((phase) => phase.status === "completed"))) {
+  if (parentVerified) {
     return "succeeded";
   }
 
   const hasUnresolvedFailure = parentPhases.some((phase) => phase.status === "failed")
     || Object.entries(run.recovery?.phases ?? {}).some(([phase, recovery]) => phase !== "trafficLine" && recovery.state === "needs_user");
-  const hasPendingPhase = run.phases.some((phase) => phase.status === "pending");
-  if (originalRunStatus === "failed" && !hasUnresolvedFailure && hasPendingPhase) {
-    return "queued";
-  }
-
-  return originalRunStatus === "running" ? "running" : originalRunStatus;
+  if (hasUnresolvedFailure) return "failed";
+  return originalRunStatus === "cancelled" ? "cancelled" : "queued";
 }
 
 /**
  * preflight 是母产品模块的权威只读验收。它成功时，早期迁移或中断遗留的
  * pending 标记不能再驱动旧阶段重跑；否则会把已验收的图文、行程等再次写入。
  *
- * 交通子产品不在母产品 preflight 范围内：失败的 trafficLine 按已跳过处理，
- * 保留诊断证据，但不再卡住母产品结案。
+ * 交通子产品不在母产品 preflight 范围内：失败的 trafficLine 保留失败状态
+ * 与诊断证据，不阻止母产品结案。
  */
 export function settleRunAfterVerifiedPreflight(run: AutomationRun): AutomationRun {
   const phases = run.phases.map((phase) => {
-    return { ...phase, status: "completed" as const };
+    return phase.phase === "trafficLine" ? phase : { ...phase, status: "completed" as const };
   });
   return {
     ...run,
@@ -48,7 +44,8 @@ export function settleRunAfterVerifiedPreflight(run: AutomationRun): AutomationR
       ...run.recovery,
       phases: Object.fromEntries(Object.entries(run.recovery.phases).map(([phase, recovery]) => [
         phase,
-        { ...recovery, state: "completed" as const },
+        phase === "trafficLine" ? recovery : { ...recovery, state: "completed" as const,
+          finalError: undefined, userInstruction: undefined },
       ])),
     } : undefined,
   };

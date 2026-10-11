@@ -7,8 +7,7 @@
  *   - runExclusive：底层「同一 localProductId 互斥」包装；
  *   - withNavigationPin：注入自动化导航钉，离开时清理。
  *
- * 拆出来的目的：把主类 DraftAutomation 的骨架压缩到 100 行内，便于在
- * barrel 文件里一目了然地看到业务面 API 与 lifecycle 钩子。
+ * 对外门面只保留业务 API；执行上下文和互斥生命周期集中在本文件。
  */
 
 import { runAutomationExclusive } from "../automation.main.execution.js";
@@ -85,8 +84,8 @@ export function runExclusive<T>(bindings: RunContextBindings, localProductId: st
 }
 
 async function withNavigationPin<T>(bindings: RunContextBindings, localProductId: string, work: () => Promise<T>): Promise<T> {
-  bindings.browser.pinProductNavigation?.(automationNavigationPin(bindings.db.getProduct(localProductId)));
   try {
+    bindings.browser.pinProductNavigation?.(automationNavigationPin(bindings.db.getProduct(localProductId)));
     return await work();
   } finally {
     bindings.browser.clearNavigationPin?.();

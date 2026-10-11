@@ -32,5 +32,5 @@ export { readTrafficLineSegmentReadback, publishedSegmentReadbackIsComplete } fr
 export { segmentsFromPayload, buildBoundarySegment, verifySegmentBoundaries } from "./segments/boundaries.js";
 export { compatibleDepartureCities, selectTrafficLineValidationCities } from "./segments/cities.js";
 export { resourceCheckSchedule, deterministicSchedule } from "./segments/dates.js";
-export { getSegments } from "./segments/draft.js";
+export { getSegments, trafficLineModifyUserFromState } from "./segments/draft.js";
 export type { TrafficLineSegmentSubmitRecovery } from "./segments/submit.js";

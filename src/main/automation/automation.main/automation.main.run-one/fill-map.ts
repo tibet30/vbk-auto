@@ -1,7 +1,7 @@
 /**
- * 单阶段重新执行 fillMap：把 presentation / itinerary / package /
+ * 完整录入与单阶段修复共用 fillMap：把 presentation / itinerary / package /
  * pricingInventory / terms / hotelResource / vehicleResource / preflight
- * 8 个阶段各自的 fill 函数集中起来，主函数 runOnePhase 只挑选使用。
+ * 各阶段的 fill 函数集中起来，runner 按执行计划挑选使用。
  *
  *   - presentation / itinerary：仍走带 rewrite 的填表函数（与 run() 一致）；
  *   - hotelResource / vehicleResource：run 完毕后会把回填的 resourceId /
@@ -48,6 +48,7 @@ export interface FillMapContext {
   run: import("../../../../shared/contracts.js").AutomationRun;
   log: (message: string, level?: "info" | "warning" | "error") => void;
   persist: () => void;
+  productDetail?: ProductDetail;
 }
 
 export type FillFn = () => Promise<unknown>;
@@ -64,14 +65,27 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
       executeItinerary: () => fillItineraryDraftApi(page, productData, {
         disambiguator: ctx.disambiguator,
         productId: productId ?? "",
+        readOnlyBeforeWrite: /VBK 行程关联保存.*超时/u.test(
+          args.productDetail?.automation?.recovery?.phases.itinerary?.finalError ?? ""),
       }),
       dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
     }),
     package: () => ensurePackageApi(page, productData, productId!),
-    pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!),
+    pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!, { onProgress: log }),
     terms: () => fillAndSaveTerms(page, productData, productId!),
-    hotelResource: () => ensureHotelResourceApi(page, productData, productId!),
-    vehicleResource: () => ensureVehicleResourceApi(page, productData, productId!),
+    hotelResource: async () => {
+      const result = await ensureHotelResourceApi(page, productData, productId!);
+      if ("source" in result) applyHotelResourceResult(ctx, localProductId, args.productDetail, productData, result);
+      return result;
+    },
+    vehicleResource: async () => {
+      const result = await ensureVehicleResourceApi(page, productData, productId!);
+      if ("skipped" in result) throw new Error(`用车资源重新执行未完成：${String(result.skipped)}`);
+      if (!result.resourceGroupId || result.audited !== true) {
+        throw new Error("用车资源重新执行未完成：未取得已绑定资源组的确认结果。");
+      }
+      return result;
+    },
     trafficLine: () => {
       return ensureTrafficLinePhase({
         page,
@@ -109,7 +123,7 @@ export interface HotelResourceFillResult {
 export function applyHotelResourceResult(
   ctx: AutomationRunContext,
   localProductId: string,
-  productDetail: ProductDetail,
+  productDetail: ProductDetail | undefined,
   productData: ParsedProduct,
   result: HotelResourceFillResult,
 ): void {

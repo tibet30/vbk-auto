@@ -28,95 +28,7 @@ import {
 
 // ───────────────────────── helpers ─────────────────────────
 
-const ALL_PHASES = ["basic", "presentation", "itinerary", "package"] as const;
-
-/** 构造一个「presentation 上一次失败、其它阶段混合状态」的 AutomationRun。 */
-function makePreviousFailedRun(): AutomationRun {
-  const priorAttempts: PhaseAttempt[] = [
-    {
-      attempt: 1,
-      error: "presentation 上传失败",
-      at: "2026-08-11T10:00:00.000Z",
-      diagnosis: {
-        summary: "图片上传被拒绝",
-        rootCause: "图片尺寸超过限制",
-        expectedEvidence: "VBK 图文编辑器接受图片",
-      },
-      action: "retry_same_phase",
-    },
-    {
-      attempt: 2,
-      error: "presentation 保存超时",
-      at: "2026-08-11T10:01:30.000Z",
-      diagnosis: {
-        summary: "保存按钮未触发",
-        rootCause: "等待 save 按钮可见超时",
-        expectedEvidence: "save 按钮变为 enabled",
-      },
-      action: "reload_and_retry_phase",
-    },
-  ];
-  return {
-    id: "run-presentation-failed",
-    status: "failed",
-    currentPhase: "presentation",
-    phases: [
-      { phase: "basic", status: "completed" },
-      { phase: "presentation", status: "failed" },
-      { phase: "itinerary", status: "completed" },
-      { phase: "package", status: "pending" },
-    ],
-    logs: [
-      { at: "2026-08-11T09:59:00.000Z", message: "自动录入启动", level: "info" },
-      { at: "2026-08-11T10:02:00.000Z", message: "presentation 阶段失败", level: "error" },
-    ],
-    recovery: {
-      phases: {
-        presentation: {
-          phase: "presentation",
-          state: "needs_user",
-          attempts: priorAttempts,
-          attemptsHistory: [
-            {
-              attempt: 1,
-              error: "首次图片 URL 404",
-              at: "2026-08-11T09:30:00.000Z",
-              diagnosis: {
-                summary: "图床链接已失效",
-                rootCause: "VBK CDN 已下架",
-                expectedEvidence: "图床可访问",
-              },
-              action: "reopen_editor_and_retry_phase",
-            },
-          ],
-          userInstruction: "请在 VBK 手动确认产品图文已保存后再次发起保存草稿。",
-          finalError: "保存超时",
-        },
-        basic: {
-          phase: "basic",
-          state: "completed",
-          attempts: [{ attempt: 1, error: "ok", at: "2026-08-11T09:59:30.000Z" }],
-        },
-        itinerary: {
-          phase: "itinerary",
-          state: "completed",
-          attempts: [],
-        },
-      },
-    },
-  };
-}
-
-/** runOnePhase 同型的「执行器」：直接成功，不调 advisor、不抛错。 */
-async function successfulExecute(): Promise<unknown> {
-  return "ok";
-}
-
-/** 模拟 runOnePhase 的成功分支：恢复 run.status + run.currentPhase */
-function applyCompletedOutcome(run: AutomationRun, originalRunStatus: AutomationRun["status"]): void {
-  run.status = resolveRunStatusAfterSinglePhaseSuccess(run, originalRunStatus);
-  run.currentPhase = undefined;
-}
+import { ALL_PHASES, makePreviousFailedRun, successfulExecute, applyCompletedOutcome } from "./automation-run-one-recovery-transition/helpers.js";
 
 test("最终预检通过后结案全部阶段，不会重跑历史 pending 标记", () => {
   const run = makePreviousFailedRun();
@@ -127,7 +39,7 @@ test("最终预检通过后结案全部阶段，不会重跑历史 pending 标�
   assert.ok(Object.values(settled.recovery!.phases).every((recovery) => recovery.state === "completed"));
 });
 
-test("母产品预检通过时把失败交通子产品视为跳过并保留诊断", () => {
+test("母产品预检通过时保留交通子产品的失败状态与诊断", () => {
   const run = makePreviousFailedRun();
   run.phases.push({ phase: "trafficLine", status: "failed" });
   run.recovery!.phases.trafficLine = {
@@ -139,8 +51,8 @@ test("母产品预检通过时把失败交通子产品视为跳过并保留诊�
   const settled = settleRunAfterVerifiedPreflight(run);
   assert.equal(settled.status, "succeeded");
   assert.equal(settled.currentPhase, undefined);
-  assert.equal(settled.phases.find((phase) => phase.phase === "trafficLine")?.status, "completed");
-  assert.equal(settled.recovery!.phases.trafficLine.state, "completed");
+  assert.equal(settled.phases.find((phase) => phase.phase === "trafficLine")?.status, "failed");
+  assert.equal(settled.recovery!.phases.trafficLine.state, "needs_user");
   assert.ok(settled.phases.filter((phase) => phase.phase !== "trafficLine").every((phase) => phase.status === "completed"));
 });
 
@@ -180,7 +92,7 @@ test("失败 presentation 重试成功后：recovery[presentation] 不再停留�
   applyCompletedOutcome(run, originalRunStatus);
 
   // 关键断言：recovery[presentation] 不再是 needs_user，
-  // 旧的 userInstruction / finalError / attemptsHistory 全部丢失。
+  // 旧的 userInstruction / finalError 清空，失败尝试保留在历史。
   const presentationRec = run.recovery!.phases.presentation;
   assert.equal(presentationRec.state, "completed", "recovery[presentation] 必须切到 completed");
   assert.notEqual(presentationRec.state, "needs_user", "不能再停在 needs_user，否则 UI 会保留旧 banner");

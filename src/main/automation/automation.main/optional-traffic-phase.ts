@@ -22,12 +22,13 @@ export async function runDraftPhaseWithRecovery(ctx: RecoveryContext): Promise<R
 
 function recordTrafficFailure(ctx: RecoveryContext, reason: string): void {
   const phase = ctx.run.phases.find((item) => item.phase === "trafficLine");
-  // Traffic children are optional for the parent product. A failed child is a
-  // recorded skip, not a failed parent phase; otherwise the runner reaches
-  // preflight successfully but the persisted task is still rendered blocked.
-  if (phase) phase.status = "completed";
-  const recovery = ctx.run.recovery?.phases?.trafficLine;
-  if (recovery) recovery.state = "completed";
+  // Parent completion excludes this optional stage; child failure remains a
+  // durable failure so a later repair can locate it without inferring success.
+  if (phase) phase.status = "failed";
+  ctx.run.recovery ??= { phases: {} };
+  const recovery = ctx.run.recovery.phases.trafficLine;
+  ctx.run.recovery.phases.trafficLine = { ...recovery, phase: "trafficLine",
+    state: "needs_user", finalError: reason, attempts: recovery?.attempts ?? [] };
   ctx.run.trafficLine = { ...ctx.run.trafficLine, children: ctx.run.trafficLine?.children ?? [],
     failureReason: ctx.run.trafficLine?.failureReason || reason, verifiedAt: undefined };
   ctx.log(`大交通子产品本轮失败，已跳过并保留诊断；继续母产品预检：${reason}`, "warning");

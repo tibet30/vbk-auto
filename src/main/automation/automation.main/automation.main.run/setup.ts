@@ -28,10 +28,7 @@ import {
   resourceRecoveryPhases,
 } from "../automation.main.resource-handlers.js";
 import { prepareAutomationResumeRun } from "../automation.main.resume-state.js";
-import {
-  resolveActiveServicePhoneContext,
-  resolveProductButlerSelection,
-} from "../automation.main.class.helpers.js";
+import { automationAccountContext, automationSession } from "../runtime/index.js";
 import { writeAutomationProduct } from "../automation.main.persist.js";
 import { inspectManualCoverAsset } from "../../manual-cover-asset.js";
 import {
@@ -62,8 +59,6 @@ export interface AutomationSetup {
   normalizedProductTypeChanged: boolean;
 }
 
-const TIMEOUT_VBK_RECOVERY_REGEX = /VBK 行程关联保存.*超时/u;
-
 /**
  * 阶段 1：拉取产品 + 归一 + blocker 检查 + 解析账号上下文（按需） + 创建/恢复 AutomationRun。
  * 失败时抛错（preflight 失败 / 远程草稿未创建 / 中间阶段不在 draftPhases 内 / ...），
@@ -76,9 +71,6 @@ export async function prepareAutomationSetup(
 ): Promise<AutomationSetup> {
   const productDetail = ctx.db.getProduct(localProductId);
   if (!productDetail) throw new Error("产品不存在");
-
-  const readOnlyItineraryRecovery = retryFrom === "itinerary"
-    && TIMEOUT_VBK_RECOVERY_REGEX.test(productDetail.automation?.recovery?.phases?.itinerary?.finalError ?? "");
 
   const normalizedProductType = normalizeUnsupportedProductTypeBeforeShell(
     productDetail.product,
@@ -124,31 +116,9 @@ export async function prepareAutomationSetup(
     productDetail.automation?.recovery?.phases.basic,
   );
 
-  const accountName = ctx.db.getSetting("vbkAccountName")?.value;
-  const shouldRequireAccountContext = startIndex === 0 || !basicInfoSaved;
-  let butlerSelection: ContactCardSelection | null = null;
-  let servicePhone = "";
-
-  if (shouldRequireAccountContext) {
-    butlerSelection = resolveProductButlerSelection(productDetail.product);
-    if (!butlerSelection) {
-      throw new Error("录入前检查未通过：产品 JSON 缺少管家联系人（请重新创建或在基础信息中写入负责人）");
-    }
-    const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
-    if (!phoneContext) {
-      if (!accountName) throw new Error("未检测到当前登录的 VBK 账号，无法读取 400 电话。");
-      throw new Error("录入前检查未通过：400 电话（请在账号设置里维护）");
-    }
-    servicePhone = phoneContext.servicePhone;
-    if (phoneContext.fallbackUsed) {
-      ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
-    }
-  } else {
-    const phoneContext = resolveActiveServicePhoneContext(ctx.db, accountName);
-    if (phoneContext?.fallbackUsed) {
-      ctx.db.setSetting("vbkAccountName", phoneContext.accountName);
-    }
-  }
+  const { butlerSelection, servicePhone } = automationAccountContext(
+    ctx.db, productDetail.product, startIndex === 0 || !basicInfoSaved,
+  );
 
   const keySpots = pickKeySpotsFromItinerary(productDetail.product);
   const scenicSpotLogs: string[] = [];
@@ -166,25 +136,18 @@ export async function prepareAutomationSetup(
         logs: [],
       };
 
-  const persist = () => {
-    ctx.db.saveAutomation(localProductId, run);
-    ctx.emit(localProductId);
-  };
-  const log = (message: string, level: AutomationLogLevel = "info") => {
-    run.logs.push({ at: new Date().toISOString(), message, level });
-    ctx.db.saveAutomation(localProductId, run);
-    ctx.emit(localProductId);
-  };
-
-  ctx.db.saveAutomation(localProductId, run);
+  // Acquire the request surface before publishing a running record. A connection
+  // failure leaves the previous durable checkpoint intact and retryable.
+  const page = await getVbkRequestPage(ctx.browser);
+  const { persist, log } = automationSession(ctx, localProductId, run);
+  run.currentPhase = mutableRetryFrom ?? (productDetail.productId ? "basic" : "saleControl");
+  persist();
 
   if (normalizedProductType.changed) {
     log("旧产品类型已在创建远端草稿前归一为境内短途，避免缺少大交通卡片导致校验失败。", "warning");
   }
 
   writeAutomationProduct(ctx, localProductId, productDetail.product, "automating");
-
-  const page = await getVbkRequestPage(ctx.browser);
 
   return {
     productDetail,

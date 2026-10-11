@@ -167,7 +167,13 @@ test("已核验 POI 仅在同日同名同类型的空映射中保留", () => {
   assert.deepEqual(itinerary[0]?.spots[0], { name: "同名景点", kind: "attraction", poiName: "第一天景点", poiId: 101 });
   assert.equal(itinerary[1]?.spots[0]?.poiId, null, "改名不复用旧 POI");
   assert.equal(itinerary[1]?.spots[1]?.poiId, null, "改为 other 不复用旧 POI");
-  assert.equal(itinerary[2]?.spots[0]?.poiId, null, "历史 other 残留 POI 不得复活");
+  assert.deepEqual(itinerary[2]?.spots, [], "历史接送不再占用景点位置");
+  assert.deepEqual((saved.product.itinerary as Array<Record<string, unknown>>)[2]?.activities,
+    [{ time: "不限", title: "历史接送", detail: "历史接送", type: "transport" }],
+    "接送迁入服务活动，名称保留且不复活错误 POI");
+  const firstSave = structuredClone(saved.product);
+  service.replace("p-1", saved.product);
+  assert.deepEqual(saved.product, firstSave, "重复保存不重复创建接送活动");
 });
 
 test("AI patch 写入待自动补图的 ctripLibrary cover 时不因缺 imageId/imageUrl 被拒", () => {

@@ -38,10 +38,23 @@ export function itinerarySupportingArrangements(day: unknown): SupportingArrange
     if (type && text(item.title)) result.push({ time: text(item.time) || "不限", title: text(item.title), detail: text(item.detail) || text(item.title), type });
   }
   const serviceSpots = (Array.isArray(row.spots) ? row.spots : []).filter((spot) => supportArrangementType(spot, row));
-  const transfer = serviceSpots.filter((spot) => supportArrangementType(spot, row) !== "meal");
-  if (transfer.some((spot) => supportArrangementType(spot, row) === "transport") && !result.some((item) => item.type === "transport")) {
-    result.push({ time: "不限", title: text(row.title) || "接送与出发安排",
-      detail: text(row.description) || transfer.map((spot) => text(record(spot).name)).join("；"), type: "transport" });
+  const transportSpots = serviceSpots.filter((spot) => supportArrangementType(spot, row) === "transport");
+  if (transportSpots.length) {
+    const transportNames = transportSpots.map((spot) => text(record(spot).name)).filter(Boolean);
+    const transportDetails = transportSpots.map((spot) => text(record(spot).description)).filter(Boolean);
+    const detailParts = [text(row.description), ...transportNames, ...transportDetails].filter(Boolean);
+    const existingIndex = result.findIndex((item) => item.type === "transport");
+    if (existingIndex >= 0) {
+      const existing = result[existingIndex]!;
+      result[existingIndex] = {
+        ...existing,
+        title: [...new Set([existing.title, ...transportNames])].filter(Boolean).join("；") || existing.title,
+        detail: [...new Set([existing.detail, ...detailParts])].filter(Boolean).join("；") || "接送安排",
+      };
+    } else {
+      result.push({ time: "不限", title: transportNames.join("；") || text(row.title) || "接送与出发安排",
+        detail: [...new Set(detailParts)].join("；") || "接送安排", type: "transport" });
+    }
   }
   const meals = text(row.meals) || serviceSpots.filter((spot) => supportArrangementType(spot, row) === "meal")
     .map((spot) => text(record(spot).description) || text(record(spot).name)).join("；");
@@ -65,7 +78,11 @@ export function normaliseItinerarySupport<T extends object>(day: T): T {
   });
   // Meals and overnight lodging have canonical fields, so they must not be duplicated as activities.
   const transports = arrangements.filter((item) => item.type === "transport");
-  const meal = arrangements.filter((item) => item.type === "meal").map((item) => item.detail).join("；");
+  const meal = arrangements.filter((item) => item.type === "meal").map((item) => {
+    // Keep which meal was specified when moving an activity to the canonical field.
+    return item.title === "餐食说明" || item.detail.includes(item.title)
+      ? item.detail : `${item.title}${item.detail}`;
+  }).join("；");
   const lodging = arrangements.filter((item) => item.type === "hotel").map((item) => item.detail).join("；");
   return { ...day, spots, ...(!text(row.meals) && meal ? { meals: meal } : {}),
     ...(!text(row.hotel) && lodging ? { hotel: lodging } : {}),

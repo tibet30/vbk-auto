@@ -41,8 +41,16 @@ test("真实 runtime 写入保留完整用户行程，并继续拒绝重排", as
   const runtime = new DbOrchestratorRuntime(db as any, undefined, new ProductMutationService(db as any));
 
   assert.deepEqual(await runtime.writeModule(detail.id, "itinerary", "/itinerary", itinerary()), { ok: true });
-  const persisted = saved.itinerary as Array<{ spots: unknown[] }>;
-  assert.deepEqual(persisted.map((day) => day.spots.length), [2, 10, 8, 8, 1]);
+  const persisted = saved.itinerary as Array<{ spots: Array<{ name: string }>; activities?: Array<Record<string, unknown>> }>;
+  assert.deepEqual(persisted.map((day) => day.spots.length), [1, 10, 8, 8, 0]);
+  assert.deepEqual(persisted.flatMap((day) => day.spots.map((spot) => spot.name)).filter((name) => name !== "自由活动"), [
+    "南澳大桥", "长山尾灯塔", "彩虹公路", "三囱崖灯塔", "无人机航拍", "青澳湾", "北回归线", "2 号公路", "彩虹海", "孤独榕树村",
+    "炮台公园", "英歌小镇", "菩提禅寺", "潮汕历史文化博览中心", "小公园", "南生百货", "汕头邮政总局", "镇邦美食街",
+    "龙湖古寨", "韩文公祠", "潮人公园", "潮州古城", "广济桥", "牌坊街", "甲第巷", "开元寺",
+  ]);
+  const transportText = persisted.flatMap((day) => day.activities ?? []).filter((activity) => activity.type === "transport").map((activity) => `${activity.title ?? ""} ${activity.detail ?? ""}`).join("；");
+  assert.match(transportText, /潮汕接团/);
+  assert.match(transportText, /潮汕送团/);
   assert.deepEqual((persisted[1]?.spots[1] as { name: string }).name, "长山尾灯塔");
   assert.deepEqual((persisted[3]?.spots[7] as { name: string }).name, "开元寺");
 
@@ -59,5 +67,5 @@ test("真实 runtime 写入保留完整用户行程，并继续拒绝重排", as
   [reordered[1]!.spots[0], reordered[1]!.spots[1]] = [reordered[1]!.spots[1]!, reordered[1]!.spots[0]!];
   const rejected = await runtime.writeModule(detail.id, "itinerary", "/itinerary", reordered);
   assert.match(rejected.reason ?? "", /完整|重排|替换/);
-  assert.deepEqual((saved.itinerary as Array<{ spots: unknown[] }>).map((day) => day.spots.length), [2, 10, 8, 8, 1]);
+  assert.deepEqual((saved.itinerary as Array<{ spots: unknown[] }>).map((day) => day.spots.length), [1, 10, 8, 8, 0]);
 });

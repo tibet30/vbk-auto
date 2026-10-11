@@ -33,6 +33,22 @@ test("保存归一化把后勤地点迁出 spots，接送合并且反复保存�
   assert.deepEqual((product.itinerary as any[])[0].spots, []);
 });
 
+test("接送站点的名称和说明合并到已有 transport 且重复保存不重复", () => {
+  const source = {
+    title: "第1天", description: "当天路线说明",
+    spots: [{ name: "潮汕接团", description: "机场接待说明", kind: "other" as const, poiId: null, poiName: null }],
+  };
+  const merged = normaliseItinerarySupport({ ...source, activities: [{ type: "transport", title: "用车安排", detail: "司机待确认" }] }) as any;
+  assert.deepEqual(merged.spots, []);
+  assert.equal(merged.activities.length, 1);
+  assert.equal(merged.activities[0].type, "transport");
+  assert.equal(merged.activities[0].title, "用车安排；潮汕接团");
+  assert.match(merged.activities[0].detail, /司机待确认/);
+  assert.match(merged.activities[0].detail, /潮汕接团/);
+  assert.match(merged.activities[0].detail, /机场接待说明/);
+  assert.deepEqual(normaliseItinerarySupport(merged), merged);
+});
+
 test("有明确接送的无景点日通过所有准入，真正空白日和仅有餐食仍失败", () => {
   const day = normaliseItinerarySupport(transferDay);
   assert.equal(hasValidItinerary({ itinerary: [day] }), true);

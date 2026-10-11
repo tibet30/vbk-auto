@@ -23,8 +23,9 @@ import { normalisePoiId, textValue } from "./helpers.js";
  * 统一输出 summary（中文拼接）+ 可选 descriptions（三餐逐条）。
  */
 function normaliseMeals(value: unknown) {
-  if (typeof value === "string") return { summary: value, descriptions: undefined };
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { summary: "餐食以实际确认单为准", descriptions: undefined };
+  if (typeof value === "string") return { summary: value === "餐食以实际确认单为准" ? "" : value, descriptions: undefined };
+  // Leave missing meals empty until service activities have been migrated.
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { summary: "", descriptions: undefined };
   const record = value as Record<string, unknown>;
   const entries = [
     ["早餐", textValue(record.breakfast)],
@@ -81,7 +82,7 @@ export function normaliseItinerary(value: unknown) {
     const description = textValue(record.description) || [textValue(record.summary), activityDescription].filter(Boolean).join("。") || title;
     const hotel = textValue(record.hotel) || textValue(record.stay);
     const hotelCandidates = normaliseHotelCandidates(record.hotelCandidates);
-    return [normaliseItinerarySupport({
+    const normalised = normaliseItinerarySupport({
       day: Number.isInteger(record.day) && Number(record.day) > 0 ? Number(record.day) : index + 1,
       title,
       spots,
@@ -93,7 +94,9 @@ export function normaliseItinerary(value: unknown) {
       ...(meals.descriptions ? { mealDescriptions: meals.descriptions } : {}),
       ...(textValue(record.hotelDescription) || hotel ? { hotelDescription: textValue(record.hotelDescription) || hotel } : {}),
       ...(activities.length ? { activities } : {}),
-    })];
+    });
+    if (!normalised.meals.trim()) normalised.meals = "餐食以实际确认单为准";
+    return [normalised];
   });
   return days.length ? days : undefined;
 }

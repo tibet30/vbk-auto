@@ -172,7 +172,7 @@ test("presentation user message 仅将可信运营手动删除的 OR 项排除�
     stage: "presentation",
     context: { ...request.context, excludedItineraryAlternatives: ["非遗中心参观"] },
   });
-  assert.match(message, /仅因可信运营手动删除而排除/);
+  assert.match(message, /已由运营明确手动删除/);
   assert.doesNotMatch(message, /因真实 POI 绑定而收敛/);
 });
 

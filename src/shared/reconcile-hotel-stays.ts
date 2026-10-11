@@ -1,5 +1,5 @@
 import { hotelCandidateMeetsStay, hotelStayRequirement } from "./hotel-stay-requirement.js";
-import { normaliseReturnDayLodging } from "./itinerary-hotel.js";
+import { isExplicitNoHotelStay, normaliseReturnDayLodging } from "./itinerary-hotel.js";
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json => value && typeof value === "object" && !Array.isArray(value) ? value as Json : {};
 
@@ -10,6 +10,10 @@ export function reconcileHotelStays(product: Json): Json {
   const affected = new Set<number>();
   next.itinerary = next.itinerary.map(value => {
     const day = normaliseReturnDayLodging(object(value), object(next.basicInfo));
+    if (isExplicitNoHotelStay(day.hotel)) {
+      if (Array.isArray(object(value).hotelCandidates) && (object(value).hotelCandidates as unknown[]).length) affected.add(Number(day.day));
+      return day;
+    }
     const requirement = hotelStayRequirement(next, day);
     if (!requirement) return day;
     const candidates = Array.isArray(day.hotelCandidates) ? day.hotelCandidates.map(object) : [];
@@ -30,6 +34,10 @@ export function reconcileHotelStays(product: Json): Json {
   const cached = object(object(next.operations).hotelResource).dailyCandidates;
   for (const entry of Array.isArray(cached) ? cached.map(object) : []) {
     const day = (next.itinerary as unknown[]).map(object).find(day => Number(day.day) === Number(entry.day));
+    if (day && isExplicitNoHotelStay(day.hotel)) {
+      affected.add(Number(entry.day));
+      continue;
+    }
     const requirement = day && hotelStayRequirement(next, day);
     if (requirement && Array.isArray(entry.candidates)
       && entry.candidates.map(object).some(candidate => !hotelCandidateMeetsStay(candidate, requirement))) affected.add(Number(entry.day));

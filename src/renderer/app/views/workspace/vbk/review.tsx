@@ -19,6 +19,7 @@ import type { TrafficLineConfig } from "../../../../../shared/contracts-traffic-
 import shared from "../../shared.module.less";
 import layout from "../layout.module.less";
 import styles from "../vbk.module.less";
+import { StageRetryMenu } from "./stage-retry-menu";
 import type { AppModel } from "../../../app.main.model";
 
 export interface ReviewAsideProps {
@@ -102,11 +103,19 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
               const canNav = Boolean(url) && !loading && !navigatingSection && !retryingPhase;
               const saleControlRequiresNoProduct = section.key === "saleControl" && Boolean(product?.productId);
               const retryPhases = section.key === "saleControl" ? ["saleControl"] : section.phaseNames;
+              const retryDisabled = !!retryingPhase || !url || isNavigating || automationActive || saleControlRequiresNoProduct;
+              const disabledReason = !url ? "尚未生成 VBK 产品" : saleControlRequiresNoProduct ? "已有产品，不能重新创建"
+                : isNavigating ? "正在打开页面，请稍候" : "自动录入执行中，请结束后重试";
+              const retryOptions = retryPhases.map(key => ({ key, label: phaseDisplayLabel(key),
+                busy: retryingPhase === key || (product.automation?.status === "running" && product.automation.currentPhase === key),
+              }));
               return (
                 <div key={section.key}>
                   <div className={styles.stage} data-state={state}>
-                    <span className={styles.stageDot} />
-                    <span className={styles.stageLabel}>{section.label}</span>
+                    <span className={styles.stageHeading}>
+                      <span className={styles.stageDot} />
+                      <span className={styles.stageLabel}>{section.label}</span>
+                    </span>
                     <div className={styles.stageActions}>
                       <button
                         type="button"
@@ -120,7 +129,14 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
                         <span>进入</span>
                         {isNavigating ? <LoaderCircle size={12} /> : <Wrench size={12} />}
                       </button>
-                      {retryPhases.map((phaseKey) => {
+                      {retryPhases.length > 1 ? <StageRetryMenu
+                        key={product.id}
+                        sectionLabel={section.label}
+                        options={retryOptions}
+                        disabled={retryDisabled}
+                        disabledReason={disabledReason}
+                        onRetry={phaseKey => void retryOnePhaseAutomation(section.key, phaseKey)}
+                      /> : retryPhases.map((phaseKey) => {
                         // 单阶段重跑的 IPC 请求很快返回，而实际录入仍会在后台继续。
                         // 因此不能只看 retryingPhase；以持久化的当前阶段兜底，保证
                         // 「重新执行」图标在整段运行期间持续反馈，而非一闪即逝。
@@ -133,7 +149,7 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
                             type="button"
                             className={`${styles.stageAction} ${styles.stageActionRetry}`}
                             onClick={() => void retryOnePhaseAutomation(section.key, phaseKey)}
-                            disabled={!!retryingPhase || !url || isNavigating || automationActive || saleControlRequiresNoProduct}
+                            disabled={retryDisabled}
                             data-busy={isRetrying}
                             aria-label={`重新执行「${section.label}」的「${phaseName}」`}
                             title={`仅重跑 ${phaseName}，不影响其他阶段`}

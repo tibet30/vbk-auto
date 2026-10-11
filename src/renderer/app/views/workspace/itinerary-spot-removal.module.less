@@ -1,0 +1,17 @@
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.actions { display: flex; gap: 8px; margin-left: auto; }
+.error { flex-basis: 100%; margin: 0; color: var(--destructive-foreground); line-height: 1.5; }
+.notice { margin: 8px 16px; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }

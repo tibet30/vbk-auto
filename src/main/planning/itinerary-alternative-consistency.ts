@@ -8,14 +8,20 @@ import { trustedOperatorItineraryRemovals } from "../../shared/trusted-operator-
 
 type Json = Record<string, unknown>;
 
-/** Derived copy may only describe the active itinerary after an OR group converges. */
-export function excludedItineraryCopyConflicts(product: ProductDetail, extraCopy: readonly string[] = []): string[] {
+/** Use the same trusted exclusions for generation and persisted-copy validation. */
+export function excludedItineraryCopyGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
   const itinerary = Array.isArray(product.product.itinerary) ? product.product.itinerary : [];
-  const excluded = [
+  return [
     ...excludedItineraryAlternativeGroups(product, itinerary),
     ...trustedOperatorItineraryRemovals(product.product).filter(receipt => !receipt.groupKey)
       .map(receipt => ({ day: receipt.day, names: [receipt.name] })),
   ];
+}
+
+/** Derived copy may only describe the active itinerary after an OR group converges. */
+export function excludedItineraryCopyConflicts(product: ProductDetail, extraCopy: readonly string[] = []): string[] {
+  const itinerary = Array.isArray(product.product.itinerary) ? product.product.itinerary : [];
+  const excluded = excludedItineraryCopyGroups(product);
   if (!excluded.length) return [];
   const presentation = record(product.product.presentation);
   const globalCopy = [

@@ -1,5 +1,5 @@
 import type { PreparationGap } from "../../../shared/contracts-preparation.js";
-import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
+import { needsItineraryHotelCandidates } from "../../../shared/itinerary-hotel.js";
 import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { hasSatisfiedVehicleResource } from "../../../shared/research-task-satisfaction.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
@@ -57,10 +57,3 @@ function hasValidItineraryHotelCandidates(candidates: unknown[], requiredDiamond
       && Number.isInteger(candidate.anchorCityId) && Number(candidate.anchorCityId) > 0);
   });
 }
-
-function needsItineraryHotelCandidates(day: Record<string, unknown>, index: number, nights: number): boolean {
-  if (hasItineraryHotelStay(day.hotel)) return true;
-  if (textValue(day.hotel)) return false;
-  return Number.isInteger(nights) && nights > 0 && index < nights;
-}
-

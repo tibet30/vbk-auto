@@ -8,12 +8,19 @@ import { excludedItineraryCopyConflicts } from "../planning/itinerary-alternativ
 import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js";
 import { handleAgentInputRequest } from "./core-input-request.js";
 import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
+import { classifyPlatformFailure } from "../application/platform-operation-service.js";
 
 export type CallOutcome = "continue" | "waiting" | "stale";
 
 /** 失败信息回传模型，供其判断是否再自调用一次。 */
-export function formatToolFailureForModel(name: string, message: string): string {
+export function formatToolFailureForModel(name: string, message: string, protocolBlocked = false): string {
+  if (protocolBlocked) return `工具失败：${message}\n工具：${name}\n车辆资源查询响应协议异常，已暂停。更换城市、座位或切换车辆查询工具不能修复协议；请修复接口适配后再明确继续。`;
   return `工具失败：${message}\n工具：${name}\n请根据上述错误判断是否再自行调用一次；同一工具同一参数最多再试一次，仍失败请换策略或 ask_user。`;
+}
+
+function isVehicleProtocolFailure(name: string, error: unknown): boolean {
+  return (name === "query_vehicle_resource" || name === "resolve_vehicle_resource")
+    && error instanceof Error && classifyPlatformFailure(error) === "protocol_failure";
 }
 
 function actionName(call: AgentToolCall): string {
@@ -143,12 +150,17 @@ export class AgentToolRunner {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       snapshot = this.snapshots.load(id);
-      const failureContent = formatToolFailureForModel(call.name, message);
+      const protocolBlocked = isVehicleProtocolFailure(call.name, error);
+      const failureContent = formatToolFailureForModel(call.name, message, protocolBlocked);
       if ((error as {authorizationDenied?: boolean}).authorizationDenied) {
         this.snapshots.blockedResult(snapshot, call.id, failureContent, "authorization_denied", {error:message}, token.runId);
-      } else this.snapshots.result(snapshot, call.id, failureContent, { error: message, retryHint: "once" }, token.runId);
+      } else this.snapshots.result(snapshot, call.id, failureContent, {
+        error: message, retryHint: protocolBlocked ? "after_protocol_fix" : "once", ...(protocolBlocked ? { protocolBlocked: true } : {}),
+      }, token.runId);
       if ((error as { uncertainWrite?: boolean }).uncertainWrite) {
         this.snapshots.markUncertain(snapshot, call.id, message);
+      } else if (protocolBlocked && snapshot.run?.id === token.runId) {
+        this.snapshots.pause(snapshot, `车辆资源查询协议异常，已暂停；请修复接口适配后继续。最近原因：${message}`);
       } else if (!isDeterministicPreparationCall(snapshot, call)
         && this.snapshots.failures(snapshot, call, message) >= 2 && snapshot.run?.id === token.runId) {
         const product = call.name === "resolve_itinerary_hotels" ? this.deps.preparationProduct?.(id) : undefined;
@@ -183,7 +195,7 @@ export class AgentToolRunner {
       return await tool.execute(call.arguments, context);
     } catch (error) {
       if ((error as { authorizationDenied?: boolean }).authorizationDenied
-        || (error as { uncertainWrite?: boolean }).uncertainWrite) {
+        || (error as { uncertainWrite?: boolean }).uncertainWrite || isVehicleProtocolFailure(call.name, error)) {
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);

@@ -1,5 +1,6 @@
 import { nightlyHotelAlternatives } from "../ctrip-hotel-locality.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
+export { needsItineraryHotelCandidates as shouldResolveItineraryHotelForDay } from "../../../shared/itinerary-hotel.js";
 import { toPlatformShortLocationName } from "../../../shared/location-short-name.js";
 import { itineraryAttractions } from "../../../shared/itinerary-activity-kind.js";
 import { toWritableAdministrativeCityName, hotelLocationFromHotelText } from "../../../shared/region-overrides.js";
@@ -10,11 +11,6 @@ import { record, text, escapeRegExp } from "./helpers.js";
  * 但每日 hotel 仍为空；这时按默认行程语义把前 N 天视为住宿日，
  * 让酒店候选解析补齐携程酒店。明确写“无 / 不住宿”的日子仍然跳过。
  */
-export function shouldResolveItineraryHotelForDay(day: Record<string, unknown>, index: number, nights?: number): boolean {
-  if (hasItineraryHotelStay(day.hotel)) return true;
-  if (text(day.hotel)) return false;
-  return Number.isInteger(nights) && nights !== undefined && nights > 0 && index < nights;
-}
 
 /** An explicit product hotel tier is a constraint, not a ranking hint. */
 /** 明确“住/入住某城”时，以落脚城市而不是当天最后景点作为酒店检索锚点。 */

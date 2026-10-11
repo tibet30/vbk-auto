@@ -10,6 +10,7 @@ import { buildProductSnapshot } from "../../src/main/infrastructure/database/par
 import { evaluatePreparationCompletion, preparationApprovalBlockReason } from "../../src/main/planning/preparation-completion.js";
 import { composePlanningUserMessage } from "../../src/main/planning/adapters/planning-prompt.js";
 import { repairExcludedAlternativeCopy } from "../../src/main/planning/itinerary-alternative-copy.js";
+import { excludedItineraryCopyGroups, excludedItineraryCopyConflicts } from "../../src/main/planning/itinerary-alternative-consistency.js";
 import { alternativeGroupKey } from "../../src/shared/trusted-operator-itinerary-removals.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
 
@@ -48,6 +49,30 @@ function cleanPresentation() {
     recommendations: RECOMMENDATIONS,
   };
 }
+
+test("普通 POI 人工删除与 OR 删除使用同一份生成及校验约束，不从缺失绑定推断删除", () => {
+  const product = staleProduct();
+  product.product.manualReview = { itinerarySpotRemovals: [
+    { day: 3, name: "南生百货", removedAt: "2026-10-11T00:00:00.000Z" },
+    { day: 3, name: "镇邦美食街", removedAt: "2026-10-11T00:00:00.000Z" },
+    { day: 3, name: "非物质文化遗产中心参观", removedAt: "2026-10-11T00:00:00.000Z",
+      groupKey: alternativeGroupKey(3, ["日喀则博物馆", "非物质文化遗产中心参观"]) },
+  ] };
+  product.product.presentation = { ...cleanPresentation(), features: "<p>游览南生百货，随后前往镇邦美食街。</p>" };
+  const before = structuredClone(product);
+  const context = agentPlannerContext(product, "test", "model");
+  assert.deepEqual(context.excludedItineraryAlternatives,
+    excludedItineraryCopyGroups(product).map(({ day, names }) => ({ day, names })));
+  const prompt = composePlanningUserMessage({ stage: "presentation", context });
+  assert.match(prompt, /已由运营明确手动删除/);
+  assert.match(prompt, /删除记录优先于/);
+  assert.match(prompt, /"names":\["南生百货"\]/);
+  assert.match(prompt, /"names":\["镇邦美食街"\]/);
+  assert.match(excludedItineraryCopyConflicts(product).join(" "), /南生百货/);
+  assert.deepEqual(product, before, "生成上下文不能改变路线、绑定或删除凭证");
+  delete product.product.manualReview;
+  assert.equal(agentPlannerContext(product, "test", "model").excludedItineraryAlternatives, undefined);
+});
 
 test("C05 无可信删除凭证时保留 OR 文案，并因缺失明确景点阻断 readiness", () => {
   const product = staleProduct();

@@ -4,7 +4,7 @@ import { isProductForm } from '../../shared/product-form.js';
 import type { MemoryPromptContext } from '../../shared/contracts.js';
 import { buildAgentProductContext, buildAgentTaskContext } from './prompt-context.js';
 import { extractLockedConstraints, filterPlanningRequirementMessages } from './prompt-helpers.js';
-import { excludedItineraryAlternatives } from '../planning/itinerary-alternative-copy.js';
+import { excludedItineraryCopyGroups } from '../planning/itinerary-alternative-consistency.js';
 
 /** Shared production context assembly; replay replaces only the model transport. */
 export function agentPlannerContextForRun(db: VbkDatabase, localProductId: string,
@@ -33,7 +33,7 @@ export function agentPlannerContext(
   // The original persisted user idea stays intact. Later control messages are
   // not planning requirements and must not be concatenated into userIdea.
   (currentProduct.basicInfo as Record<string, unknown>).userIdea = [basic.userIdea, ...planningMessages.map((message) => message.content)].filter(Boolean).join('\n');
-  const excluded = excludedItineraryAlternatives(product, data.itinerary);
+  const excluded = excludedItineraryCopyGroups(product);
   return {
     skeleton: {
       destination: String(basic.meetingCity || basic.destinationCity || ''), days, nights: Number(basic.nights ?? days - 1),
@@ -43,7 +43,7 @@ export function agentPlannerContext(
     currentProduct, acceptedModules: [], existingResearchTasks: product.researchTasks.map(({label,type})=>({label,type})),
     history: planningMessages,
     lockedConstraints: extractLockedConstraints(product, messages),
-    ...(excluded.size ? { excludedItineraryAlternatives: [...excluded].map(([day, names]) => ({ day, names })) } : {}),
+    ...(excluded.length ? { excludedItineraryAlternatives: excluded.map(({ day, names }) => ({ day, names })) } : {}),
     memoryContext: memoryContext?.lines.length ? memoryContext : undefined,
     transport: { providerLabel, model },
   };

@@ -18,6 +18,9 @@ export interface ResourceResultGuard {
 }
 export class ProductCommandConflict extends Error {
   readonly retryable = true;
+  constructor(message: string, readonly fieldPath?: readonly string[]) {
+    super(fieldPath ? `${message}（冲突字段：${fieldPath.join('.')}）` : message);
+  }
 }
 interface Store {
   getProduct(id: string): ProductDetail | undefined;
@@ -52,14 +55,19 @@ export class ProductCommandService {
   /** Changed fields are compared with the captured baseline, not an entire stale product. */
   mergeChanges(id: string, baseline: ProductDetail, next: Record<string, unknown>, source: ProductCommandSource,
     options: ProductMutationOptions = {}, guard?: ResourceResultGuard): ProductDetail {
-    const changes = diff(baseline.product, next);
+    const proposedChanges = diff(baseline.product, next);
     const current = this.requireProduct(id);
     if (guard && (canonicalJson(at(current.product, guard.queryPath)) !== guard.queryFingerprint
       || canonicalJson(at(current.product, guard.targetPath)) !== guard.targetFingerprint)) {
       throw new ProductCommandConflict('资源核验条件或目标字段已变化，请按最新方案重试。');
     }
+    // A checkpoint may already have persisted the proposed value (including
+    // execution diagnostics). Keep that value without treating it as a conflict.
+    // Different concurrent values must still reject the whole command.
+    const changes = proposedChanges.filter(change =>
+      canonicalJson(at(current.product, change.path)) !== canonicalJson(change.after));
     for (const change of changes) if (canonicalJson(at(current.product, change.path)) !== canonicalJson(change.before)) {
-      throw new ProductCommandConflict('产品目标字段已变更，请刷新后重试。');
+      throw new ProductCommandConflict('产品目标字段已变更，请刷新后重试。', change.path);
     }
     return this.commit({ localProductId: id, source, expectedVersion: current.productJsonVersion ?? 0 }, latest => {
       const product = structuredClone(latest.product);

@@ -7,6 +7,7 @@ import {
   ChevronDown,
   BusFront,
   Hotel,
+  LoaderCircle,
   MapPin,
   ShieldAlert,
   Sparkles,
@@ -24,6 +25,8 @@ import shared from "../shared.module.less";
 import { ItinerarySpotPoiEditor } from "./review-summary-itinerary-poi";
 import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
 import styles from "./review-summary-itinerary.module.less";
+import removalStyles from "./itinerary-spot-removal.module.less";
+import { useItinerarySpotRemoval } from "./use-itinerary-spot-removal";
 
 interface ReviewSummaryItineraryProps {
   localProductId: string;
@@ -61,28 +64,9 @@ function activityNodeClass(type: ItineraryActivity["type"]): string {
  * - 多天可同时展开（不互斥），再次点击已展开的天即收起该天。
  */
 export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expandedDayIndexes, onToggle, collapsed = false, onToggleCollapsed, readinessIssues = [] }: ReviewSummaryItineraryProps) {
-  const [removingSpotKey, setRemovingSpotKey] = useState<string | null>(null);
+  const removal = useItinerarySpotRemoval(localProductId, days);
   const [savingKindKey, setSavingKindKey] = useState<string | null>(null);
   const borderPermitIssue = readinessIssues.find((issue) => readinessIssueSemanticKey(issue) === "travel:borderPermit");
-  const removeSpot = async (item: TimelineItem) => {
-    if (item.spotIndex === undefined || !api()) return;
-    const confirmed = window.confirm(`确认删除「${item.title}」这一站？`);
-    if (!confirmed) return;
-    const key = `${item.dayIndex}-${item.spotIndex}`;
-    setRemovingSpotKey(key);
-    try {
-      await api()!.products.updateReviewField(localProductId, {
-        field: "itinerarySpotRemove",
-        dayIndex: item.dayIndex,
-        spotIndex: item.spotIndex,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "删除站点失败，请重试。";
-      window.alert(message);
-    } finally {
-      setRemovingSpotKey((current) => (current === key ? null : current));
-    }
-  };
   const changeKind = async (item: TimelineItem, kind: "attraction" | "free" | "other") => {
     if (item.spotIndex === undefined || !api()) return;
     if (kind !== "attraction" && (item.poiName || item.poiId) && !window.confirm(`切换为${kind === "free" ? "自由活动" : "其他"}会清除已绑定 POI，是否继续？`)) return;
@@ -126,6 +110,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
   return (
     <section className={styles.block} aria-label="每日行程" data-collapsed={collapsed}>
       {renderHeader(`共 ${days.length} 天`, "itinerary-day-body")}
+      {removal.notice ? <p className={removalStyles.notice} role="status">{removal.notice}</p> : null}
       <ol className={styles.dayList} id="itinerary-day-body">
         {days.map((day, index) => {
           const expanded = expandedDayIndexes.has(index);
@@ -191,8 +176,8 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                                   <button
                                     type="button"
                                     className={styles.spotRemove}
-                                    onClick={() => { void removeSpot(item); }}
-                                    disabled={removingSpotKey === `${item.dayIndex}-${item.spotIndex}`}
+                                    onClick={() => removal.requestRemoval(item)}
+                                    disabled={removal.saving}
                                     title={`删除 ${item.title}`}
                                     aria-label={`删除 ${item.title}`}
                                   >
@@ -200,6 +185,19 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                                   </button>
                                 )}
                               </div>
+                              {removal.confirmation?.item.dayIndex === item.dayIndex && removal.confirmation.item.spotIndex === item.spotIndex && (
+                                <div className={removalStyles.confirm} role="group" aria-label={`确认删除 ${item.title}`}>
+                                  <span>删除「{item.title}」这一站？</span>
+                                  <div className={removalStyles.actions}>
+                                    <button type="button" className={`${shared.btn} ${shared.btnSm}`} disabled={removal.saving} onClick={removal.cancelRemoval}>取消</button>
+                                    <button type="button" className={`${shared.btn} ${shared.btnSm}`} data-variant="danger-solid" disabled={removal.saving} onClick={() => void removal.confirmRemoval()}>
+                                      {removal.saving ? <LoaderCircle size={12} aria-hidden="true" /> : null}
+                                      {removal.saving ? "删除中…" : "确认删除"}
+                                    </button>
+                                  </div>
+                                  {removal.error ? <p className={removalStyles.error} role="alert">{removal.error}</p> : null}
+                                </div>
+                              )}
                               {item.detail && (
                                 <p className={styles.timelineDetail}>{item.detail}</p>
                               )}

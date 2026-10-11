@@ -15,6 +15,7 @@ import { resolveTravelScope } from "../runtime.js";
 import { buildVbkCopyPolicyPrompt, sanitiseUserIdeaForAi } from "../vbk-copy-policy.js";
 import { buildPresentationFeedbackPrompt } from "../vbk-copy-feedback.js";
 import { PRIVATE_TOUR_COPY_GUIDE } from "../../../shared/private-tour-copy.js";
+import { ITINERARY_LODGING_GUIDE } from "../../../shared/itinerary-hotel.js";
 
 const RECOMMENDATION_CATEGORIES = VBK_RECOMMENDATION_CATEGORIES.join("、");
 const SELECTABLE_RECOMMENDATION_CATEGORIES = VBK_SELECTABLE_RECOMMENDATION_CATEGORIES.join("、");
@@ -32,6 +33,7 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 3. spots 必须是对象数组，每项包含 name、kind、poiName、poiId；kind 只能为 attraction、free、other。attraction 是真实景点，未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID；free 仅限独立明确自由活动，other 用于航拍等独立体验；接团、送团、接送必须写 activities 的 transport（time/title/detail），机场、车站、酒店出发点不得进入 spots。纯接送日允许 spots: []，不得凑景点，两者 poiName/poiId 均为 null 且不查 POI。可选 relation 只允许 and/or：同一上午或下午连续参观多个景点默认 and，只有用户明确“二选一/任选其一/或者”时才标 or。本地系统会尽力匹配接口；用户明确推荐的景点未命中时仍保留 name，后续由运营手动配置或删除；仅由 AI 推荐且未命中的景点会从行程中删除，必要时只能替换为同范围可查景点。
 4. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
 5. 机场、车站、码头、酒店、民宿不能作为 attraction；机场、车站、码头、酒店和集合接送点均不得写入 spots，接送统一写 activities.transport，餐食与住宿分别写 meals 和 hotel。
+5a. ${ITINERARY_LODGING_GUIDE}
 6. 如果 destination 是省、自治区或直辖市，默认只围绕系统指定的核心游览城市选点；需要第二个核心城市时，只能选择系统给出的近邻城市，禁止全省撒点。
 7. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
 8. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。
@@ -133,9 +135,9 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     ...(excludedAlternatives.length
       ? [
           "",
-          "派生文案规则：当前产品草稿 itinerary[].spots 是唯一活动行程真值。以下原始二选一备选仅因可信运营手动删除而排除，推荐语、推荐理由和产品特色不得再描述它们：",
+          "派生文案规则：当前产品草稿 itinerary[].spots 是唯一活动行程真值。以下景点或二选一备选已由运营明确手动删除，推荐语、推荐理由和产品特色不得再描述它们：",
           JSON.stringify(excludedAlternatives),
-          "保留当前活动景点、日序与已核验事实；不要根据用户原想法或锁定约束把已排除备选写回文案。",
+          "保留当前活动景点、日序与已核验事实；删除记录优先于用户原想法、锁定约束和已有旧文案，不得把已删除地点写回文案。必须同步重建 recommendation、features 和全部 recommendations。",
         ]
       : []),
     "",

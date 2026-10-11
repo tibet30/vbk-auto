@@ -33,7 +33,7 @@ export async function searchVehicleResourceGroups(page: Page, query: string) {
       pageSize: 10,
     },
   });
-  assertPlatformQueryResponse(response.payload, [['resourceGroupInfoList'], ['resourceGroups'],
-    ['data', 'list'], ['data', 'resourceGroupInfoList'], ['data', 'resourceGroups'], ['list']], 'VBK 车辆资源查询');
+  assertPlatformQueryResponse(response.payload, [['resourceGroupDtos'], ['resourceGroupInfoList'], ['resourceGroups'],
+    ['data', 'resourceGroupDtos'], ['data', 'list'], ['data', 'resourceGroupInfoList'], ['data', 'resourceGroups'], ['list']], 'VBK 车辆资源查询');
   return response.payload;
 }

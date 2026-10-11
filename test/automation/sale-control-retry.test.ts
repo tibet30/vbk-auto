@@ -218,7 +218,9 @@ test("销售控制行提供重执行入口，但仍保持空 phaseNames 的 done
   const source = readFileSync("src/renderer/app/views/workspace/vbk/review.tsx", "utf8");
   assert.match(source, /section\.key === "saleControl" \? \["saleControl"\] : section\.phaseNames/);
   assert.match(source, /retryPhases\.map\(\(phaseKey\)/);
-  assert.match(source, /disabled=\{!!retryingPhase \|\| !url \|\| isNavigating \|\| automationActive \|\| saleControlRequiresNoProduct\}/);
+  assert.match(source, /const retryDisabled = !!retryingPhase \|\| !url \|\| isNavigating \|\| automationActive \|\| saleControlRequiresNoProduct;/);
+  assert.equal((source.match(/disabled=\{retryDisabled\}/g) ?? []).length, 2,
+    "多阶段菜单和单阶段重执行按钮必须共用全部禁用条件");
 });
 
 test("创建成功后的回读失败保留产品 ID，再次创建明确拒绝", async () => {

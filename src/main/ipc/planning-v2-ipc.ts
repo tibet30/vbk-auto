@@ -2,12 +2,13 @@ import type {
   AgentSnapshot,
   PlanningGenerationState,
   PlanningMajorStage,
-  PlanningPlanV2,
   PlanningRunResult,
-  PlanningStage,
 } from "../../shared/contracts.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
+import { toLegacyState } from "../planning/planning-state-projection.js";
 import type { MainIpcContext } from "./context.js";
+
+export { toLegacyState } from "../planning/planning-state-projection.js";
 
 export function registerPlanningV2Ipc(context: MainIpcContext): void {
   const requireAgent = () => {
@@ -92,33 +93,4 @@ export function registerPlanningV2Ipc(context: MainIpcContext): void {
   ipcMain.handle("planning:acceptItineraryAndRerunCompletion", (_event, localProductId: string) =>
     sendPlanningIntent(localProductId,
       "请采用当前每日行程作为后续工作的来源，核对所有景点 POI 后继续产品补全；缺失或歧义项先向我提问。"));
-}
-
-const NODE_TO_STAGE: Record<string, PlanningStage> = {
-  skeleton: "skeleton",
-  spotCandidates: "itinerary",
-  poiResolution: "itinerary",
-  itineraryDraft: "itinerary",
-  hotelResolution: "itinerary",
-  copy: "basicInfo",
-  presentation: "presentation",
-  commercial: "commercial",
-  cover: "research",
-  vehicleResource: "research",
-  finalValidation: "validation",
-};
-
-export function toLegacyState(localProductId: string, plan: PlanningPlanV2): PlanningGenerationState {
-  const completed = new Set<PlanningStage>();
-  for (const item of plan.nodes) {
-    if (item.status === "completed" || item.status === "skipped") completed.add(NODE_TO_STAGE[item.id]);
-  }
-  return {
-    localProductId,
-    currentStage: NODE_TO_STAGE[plan.currentNode],
-    completedStages: [...completed],
-    stages: [],
-    status: plan.status,
-    resumeAt: plan.updatedAt,
-  };
 }

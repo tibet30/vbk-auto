@@ -20,7 +20,6 @@ export {
 export { persistedItineraryHotelResult } from "./integration-itinerary-hotel-result.js";
 
 export {
-  JsonObject,
   productData,
   cleanText,
   safeJson,
@@ -31,4 +30,5 @@ export {
   selectItinerarySpot,
   clearUnverifiedItineraryPois,
 } from "./integration/util.js";
+export type { JsonObject } from "./integration/util.js";
 export { createAgentBusinessTools } from "./integration/tools.js";

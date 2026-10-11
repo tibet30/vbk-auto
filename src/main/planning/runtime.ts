@@ -45,6 +45,10 @@ import {
   readValidProductButler,
 } from "./runtime/basic-merges.js";
 
+// Keep the historical runtime barrel imports stable while the implementation
+// lives in runtime-accepted-modules.ts.
+export { detectAcceptedModulesFromProduct, itineraryPoisAreComplete } from "./runtime-accepted-modules.js";
+
 export {
   isAcceptablePlanningRegionName,
   isProvinceLevelName,

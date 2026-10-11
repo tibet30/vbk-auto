@@ -46,12 +46,26 @@ export interface PostApprovalDeterministicItem {
   reason: string;
 }
 
+export type PreparationGapCode =
+  | "foundation" | "itinerary" | "poi" | "hotel" | "copy"
+  | "presentation" | "commercial" | "cover" | "vehicle" | "traffic" | "validation";
+
+/** Classified once at the readiness boundary; policy never parses display copy. */
+export interface PreparationGap {
+  code: PreparationGapCode;
+  label: string;
+  detail: string;
+  stage: PreparationMajorStage;
+  node: PlanningNodeId;
+}
+
 export interface PreparationEvaluation {
   promptVersion: string;
   ready: boolean;
   currentStage: PreparationMajorStage;
   currentNode: PlanningNodeId;
   missing: string[];
+  gaps: PreparationGap[];
   blockingReasons: string[];
   allowedActions: PreparationAction[];
   prohibitedActions: PreparationAction[];

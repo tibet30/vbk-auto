@@ -43,19 +43,21 @@ export class OpenAIThreeStagePlanningAi implements ThreeStagePlanningAi {
       timeout: this.timeoutMs,
       maxRetries: 0,
     });
+    const owner = this;
     this.deps = {
       client: this.client,
       timeoutMs: this.timeoutMs,
       provider: config.provider,
       model: config.model,
       recordUsage: config.recordUsage,
-      get usageScope() { return undefined; },
+      get usageScope() { return owner.usageScope; },
     };
   }
 
   withUsageScope(scope: { localProductId: string; runId?: string }): this {
+    // The transport dependency exposes a read-only getter; update the owner
+    // state that getter reads instead of assigning to the getter-only member.
     this.usageScope = scope;
-    (this.deps as { usageScope?: typeof scope }).usageScope = scope;
     return this;
   }
 

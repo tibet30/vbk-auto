@@ -109,6 +109,11 @@ test("live manual-cover size issue reaches the Agent instead of reporting readin
   const parsed = JSON.parse(context);
   assert.equal(parsed.ready, false);
   assert.ok(parsed.missing.includes("封面图片规格"));
+  assert.deepEqual(parsed.preparation.gaps.filter((gap: { code: string }) => gap.code === "cover"), [
+    { ...issue, code: "cover", stage: "completion", node: "cover" },
+  ]);
+  assert.ok(parsed.rules.some((rule: string) => rule.includes("completion/cover）：封面图片规格")));
+  assert.deepEqual(parsed.missing, parsed.preparation.gaps.map((gap: { label: string }) => gap.label));
   assert.ok(parsed.prohibitedActions.includes("request_approval"));
 });
 

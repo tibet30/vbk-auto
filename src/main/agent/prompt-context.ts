@@ -1,9 +1,9 @@
 import type { AgentSnapshot, MemoryPromptContext, ProductDetail, ProductReadiness } from "../../shared/contracts.js";
-import { PREPARATION_PROMPT_VERSION, type PreparationMajorStage } from "../../shared/contracts-preparation.js";
+import { PREPARATION_PROMPT_VERSION, type PreparationGap, type PreparationMajorStage } from "../../shared/contracts-preparation.js";
 import { evaluatePreparationCompletion, toVisibleReadiness } from "../planning/preparation-completion.js";
 import { projectProductContext } from "../planning/adapters/planning-prompt.js";
 import { requiredAgentPhases } from "./integration-gates.js";
-import { classifyReadinessIssue } from "../planning/preparation-checks.js";
+import { preparationStageGaps } from "../planning/preparation/policy.js";
 
 export { PREPARATION_PROMPT_VERSION };
 
@@ -17,13 +17,18 @@ export function buildAgentProductContext(product: ProductDetail, snapshot?: Agen
   const requiredPhases = requiredAgentPhases(product);
   const base = evaluatePreparationCompletion(product, snapshot);
   const assetIssue = liveReadiness?.issues.find((issue) => issue.label === "封面图片规格");
+  const gaps: PreparationGap[] = assetIssue ? [
+    ...base.gaps.filter((gap) => gap.label !== assetIssue.label),
+    { ...assetIssue, code: "cover", stage: "completion", node: "cover" },
+  ] : base.gaps;
   const preparation = assetIssue ? {
     ...base,
     ready: false,
     currentStage: "completion" as const,
     currentNode: "cover" as const,
-    missing: [...base.missing, assetIssue.label],
-    blockingReasons: [...base.blockingReasons, `${assetIssue.label}：${assetIssue.detail}`],
+    gaps,
+    missing: gaps.map((gap) => gap.label),
+    blockingReasons: gaps.map((gap) => `${gap.label}：${gap.detail}`),
     allowedActions: base.allowedActions.filter((action) => action !== "request_approval"),
     prohibitedActions: [...new Set([...base.prohibitedActions, "request_approval" as const])],
   } : base;
@@ -60,8 +65,7 @@ export function buildAgentTaskContext(
 ): string {
   const visible = buildAgentProductContext(product, snapshot, liveReadiness);
   const basic = product.product.basicInfo as Record<string, unknown> | undefined;
-  const currentMissing = visible.preparation.missing.filter((label, index) =>
-    classifyReadinessIssue(label, visible.preparation.blockingReasons[index] ?? label).stage === visible.currentStage);
+  const currentMissing = preparationStageGaps(visible.preparation).map((gap) => gap.label);
   const stayOnStage = visible.preparation.ready
     ? "preparation.ready=true，允许一次 request_approval；批准后不要再让模型决定 VBK 写入步骤。"
     : `preparation.ready=false，必须留在当前阶段补齐（${visible.currentStage}/${visible.currentNode}）：${currentMissing.join("、") || "缺项"}。当前缺项解决后系统自动进入后续阶段，不需要用户授权阶段推进。request_approval 只能在 preparation.ready=true 时使用。`;

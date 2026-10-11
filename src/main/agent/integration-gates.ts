@@ -8,7 +8,7 @@ import { preservesApprovedIntent } from './approval-intent.js';
 import { isUnavailableTrafficResourceFailure, isTrafficLineRouteReviewRequired, trafficResourceStatus } from '../../shared/traffic-resource-status.js';
 import { evaluatePreparationCompletion } from '../planning/preparation-completion.js';
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
-import { classifyReadinessIssue } from '../planning/preparation-checks.js';
+import { preparationStageGaps } from "../planning/preparation/policy.js";
 
 type Json = Record<string, unknown>;
 function canonical(value: unknown): unknown {
@@ -145,8 +145,7 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   if (!context?.hadRemoteWrites) {
     const evaluation = evaluatePreparationCompletion(product, snapshot);
     if (!evaluation.ready) {
-      const current = evaluation.blockingReasons.filter((reason, index) =>
-        classifyReadinessIssue(evaluation.missing[index] ?? '', reason).stage === evaluation.currentStage);
+      const current = preparationStageGaps(evaluation).map((gap) => `${gap.label}：${gap.detail}`);
       return {
         verified: false,
         message: `本地方案仍需完善：当前阶段 ${evaluation.currentStage}/${evaluation.currentNode}，当前缺项：${current.join('；') || evaluation.blockingReasons.join('；')}。`

@@ -1,10 +1,7 @@
 import type { AgentSnapshot, ProductDetail, ProductReadiness } from "../../shared/contracts.js";
-import type { PlanningNodeId } from "../../shared/contracts-planning.js";
 import {
   PREPARATION_PROMPT_VERSION,
-  type PreparationAction,
   type PreparationEvaluation,
-  type PreparationMajorStage,
 } from "../../shared/contracts-preparation.js";
 import { computeReadiness, type ComputeReadinessInput } from "../readiness.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
@@ -18,11 +15,7 @@ import {
   type PreparationGap,
 } from "./preparation-checks.js";
 
-const STAGE_ORDER: readonly PreparationMajorStage[] = ["foundation", "itinerary", "completion"];
-const NODE_ORDER: readonly PlanningNodeId[] = [
-  "skeleton", "spotCandidates", "itineraryDraft", "poiResolution", "hotelResolution",
-  "copy", "presentation", "commercial", "cover", "vehicleResource", "finalValidation",
-];
+import { preparationActions, preparationPosition } from "./preparation/policy.js";
 
 type ReadinessOptions = Pick<ComputeReadinessInput, "ignoreInterruptedAutomationFailure" | "ignoreCurrentAutomationFailure">;
 
@@ -32,12 +25,14 @@ export function evaluatePreparationCompletion(
   readinessOptions?: ReadinessOptions,
 ): PreparationEvaluation {
   const gaps = collectGaps(product, readinessOptions);
-  const currentStage = firstStage(gaps) ?? "completion";
-  const currentNode = firstNode(gaps) ?? "finalValidation";
+  const { stage: currentStage, node: currentNode } = preparationPosition(gaps);
   const ready = gaps.length === 0;
   const hasApproval = hasActiveApproval(snapshot);
   const fallback = readActiveCoverFallback(product.product);
-  const actions = actionsFor(currentStage, gaps, ready, hasApproval, fallback?.reason === "no_qualified_candidate");
+  const actions = preparationActions({
+    stage: currentStage, gaps, ready, hasApproval,
+    coverSearchExhausted: fallback?.reason === "no_qualified_candidate",
+  });
   const userMessages = (product.messages ?? [])
     .filter((message) => message.role === "user")
     .map((message) => ({ role: "user" as const, content: message.content }));
@@ -48,6 +43,7 @@ export function evaluatePreparationCompletion(
     currentStage,
     currentNode,
     missing: gaps.map((gap) => gap.label),
+    gaps,
     blockingReasons: gaps.map((gap) => `${gap.label}：${gap.detail}`),
     allowedActions: actions.allowed,
     prohibitedActions: actions.prohibited,
@@ -121,33 +117,23 @@ function collectGaps(product: ProductDetail, readinessOptions?: ReadinessOptions
   const structureError = itineraryStructureError(product.product);
   const itineraryContractError = itineraryInputContractError(product, product.product.itinerary);
   if (itineraryContractError) {
-    push({ label: "每日行程", detail: itineraryContractError, stage: "itinerary", node: "itineraryDraft" });
+    push({ code: "itinerary", label: "每日行程", detail: itineraryContractError, stage: "itinerary", node: "itineraryDraft" });
   }
   for (const issue of readiness.issues) {
     const classified = /^itinerary\.\d+\.hotelCandidates(?:\.|$)/.test(issue.label)
-      ? { stage: "completion" as const, node: "hotelResolution" as const }
+      ? { code: "hotel" as const, stage: "completion" as const, node: "hotelResolution" as const }
       : classifyReadinessIssue(issue.label, issue.detail);
     const itineraryIssue = classified.stage === "itinerary" && (classified.node === "itineraryDraft" || classified.node === "poiResolution");
     push({
       label: issue.label,
       detail: issue.detail,
       ...(itineraryIssue
-        ? { stage: "itinerary" as const, node: structureError ? "itineraryDraft" as const : "poiResolution" as const }
+        ? { code: structureError ? "itinerary" as const : "poi" as const, stage: "itinerary" as const, node: structureError ? "itineraryDraft" as const : "poiResolution" as const }
         : classified),
     });
   }
   for (const gap of extraPreparationGaps(product.product, product)) push(gap);
   return gaps;
-}
-
-function firstStage(gaps: PreparationGap[]): PreparationMajorStage | undefined {
-  return STAGE_ORDER.find((stage) => gaps.some((gap) => gap.stage === stage));
-}
-
-function firstNode(gaps: PreparationGap[]): PlanningNodeId | undefined {
-  const stage = firstStage(gaps);
-  const stageGaps = stage ? gaps.filter((gap) => gap.stage === stage) : gaps;
-  return NODE_ORDER.find((node) => stageGaps.some((gap) => gap.node === node)) ?? stageGaps[0]?.node;
 }
 
 function hasActiveApproval(snapshot?: AgentSnapshot): boolean {
@@ -159,35 +145,4 @@ function hasActiveApproval(snapshot?: AgentSnapshot): boolean {
     .reverse()
     .find((item) => item?.status === "approved");
   return Boolean(approved && approved.intentVersion === snapshot.run?.intentVersion);
-}
-
-function actionsFor(
-  stage: PreparationMajorStage,
-  gaps: PreparationGap[],
-  ready: boolean,
-  hasApproval: boolean,
-  coverSearchExhausted = false,
-): { allowed: PreparationAction[]; prohibited: PreparationAction[] } {
-  const read: PreparationAction[] = ["read_product", "ask_user"];
-  if (ready) {
-    return hasApproval
-      ? { allowed: [...read, "patch_product"], prohibited: ["request_approval", "generate_product_module"] }
-      : { allowed: [...read, "patch_product", "resolve_itinerary_hotels", ...(!coverSearchExhausted ? ["resolve_cover" as const] : []), "request_approval"], prohibited: ["generate_product_module"] };
-  }
-  if (stage === "foundation") {
-    return { allowed: [...read, "generate_product_module", "patch_product"], prohibited: ["request_approval"] };
-  }
-  if (stage === "itinerary") {
-    return {
-      allowed: [...read, "generate_product_module", "patch_product", "query_poi", "select_itinerary_poi", "resolve_itinerary_pois"],
-      prohibited: ["request_approval"],
-    };
-  }
-  const allowed: PreparationAction[] = [...read, "generate_product_module", "ensure_presentation_recommendations", "patch_product"];
-  const labels = gaps.map((gap) => gap.label).join(" ");
-  if (!coverSearchExhausted && /封面|(?:^|\s)presentation\.cover(?:\.|\s|$)/.test(labels)) allowed.push("resolve_cover");
-  if (/酒店候选/.test(labels)) allowed.push("resolve_itinerary_hotels");
-  if (/用车/.test(labels)) allowed.push("resolve_vehicle_resource");
-  if (/大交通/.test(labels)) allowed.push("recheck_traffic_line_availability");
-  return { allowed: [...new Set(allowed)], prohibited: ["request_approval"] };
 }

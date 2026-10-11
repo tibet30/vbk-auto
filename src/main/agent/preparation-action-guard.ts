@@ -1,7 +1,7 @@
 import type { AgentSnapshot, ProductDetail } from "../../shared/contracts.js";
 import type { PreparationAction, PreparationEvaluation, PreparationMajorStage } from "../../shared/contracts-preparation.js";
 import { evaluatePreparationCompletion } from "../planning/preparation-completion.js";
-import { classifyReadinessIssue } from "../planning/preparation-checks.js";
+import { preparationGenerationAllowed, preparationStageGaps } from "../planning/preparation/policy.js";
 
 const UNRESTRICTED_TOOLS = new Set([
   "read_product",
@@ -26,14 +26,6 @@ const TOOL_ACTION: Record<string, PreparationAction> = {
   resolve_vehicle_resource: "resolve_vehicle_resource",
   recheck_traffic_line_availability: "recheck_traffic_line_availability",
   request_approval: "request_approval",
-};
-
-const GENERATE_MAJOR: Record<string, PreparationMajorStage> = {
-  skeleton: "foundation",
-  basicInfo: "foundation",
-  itinerary: "itinerary",
-  presentation: "completion",
-  commercial: "completion",
 };
 
 const FOUNDATION_OPERATIONS_KEYS = new Set([
@@ -111,7 +103,7 @@ function actionDeniedReason(
   }
   if (toolName === "generate_product_module") {
     const stage = typeof args.stage === "string" ? args.stage : "";
-    if (!generateStageAllowed(currentStage, stage, missing)) {
+    if (!preparationGenerationAllowed(evaluation, stage)) {
       return `当前处于 ${currentStage}/${currentNode}，不能执行 generate_product_module(${stage || "未知"}) 来跳过本阶段。${stay}${later}`;
     }
   }
@@ -128,25 +120,12 @@ function actionDeniedReason(
 }
 
 function missingForCurrentStage(evaluation: PreparationEvaluation): string[] {
-  const current = evaluation.missing.filter((label) => classifyReadinessIssue(label, label).stage === evaluation.currentStage);
-  return current.length ? current : evaluation.missing;
+  return preparationStageGaps(evaluation).map((gap) => gap.label);
 }
 
 function missingForLaterStages(evaluation: PreparationEvaluation): string[] {
   const current = new Set(missingForCurrentStage(evaluation));
   return evaluation.missing.filter((label) => !current.has(label));
-}
-
-function generateStageAllowed(current: PreparationMajorStage, stage: string, missing: string[]): boolean {
-  const major = GENERATE_MAJOR[stage];
-  if (!major) return false;
-  if (current === "foundation") return major === "foundation";
-  if (current === "itinerary") return major === "itinerary";
-  if (major !== "completion") return false;
-  const text = missing.join(" ");
-  if (stage === "presentation") return /封面|推荐|副标题|运营备注|特色/.test(text);
-  if (stage === "commercial") return /套餐|定价|价格|库存|班期/.test(text);
-  return false;
 }
 
 function blockedPatchFields(current: PreparationMajorStage, patch: Record<string, unknown>): string[] {

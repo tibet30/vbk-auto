@@ -24,6 +24,8 @@ type GenerateStage = ProductGenerationStage;
 
 export interface AgentBusinessDependencies {
   resourceQueries?: ResourceQueryOverrides;
+  generateCover?: import("../operations/generated-cover.js").CoverGenerator;
+  inspectCover?: typeof import("../automation/manual-cover-asset.js").inspectManualCoverAsset;
   readiness?: (localProductId: string) => import("../../shared/contracts.js").ProductReadiness;
   db: VbkDatabase;
   browser: VbkBrowser;

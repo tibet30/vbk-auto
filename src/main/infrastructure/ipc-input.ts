@@ -86,7 +86,7 @@ function assertPlainObject(channel: string, label: string, value: unknown): void
 
 /** 在业务 handler 执行前校验通道公共边界，不把原始输入写入错误或日志。 */
 export function validateIpcArguments(channel: string, args: unknown[]): void {
-  if (PRODUCT_ID_FIRST_CHANNELS.has(channel)) {
+  if (PRODUCT_ID_FIRST_CHANNELS.has(channel) || channel === "cover:generate") {
     parse(channel, "localProductId", localProductIdSchema, args[0]);
   }
 
@@ -171,6 +171,6 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     parse(channel, "userId", z.number().int().positive(), args[0]);
   }
   if (channel.startsWith("cover:")) {
-    if (!new Set(["cover:listManualCovers"]).has(channel)) assertPlainObject(channel, "input", args[0]);
+    if (!new Set(["cover:listManualCovers", "cover:generate"]).has(channel)) assertPlainObject(channel, "input", args[0]);
   }
 }

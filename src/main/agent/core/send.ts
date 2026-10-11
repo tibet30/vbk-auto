@@ -8,6 +8,7 @@ import { requestWorkflowReplay } from "../core-workflow-replay.js";
 import { isPreparationStatusQuery, preparationStatusReply } from "../preparation-status-query.js";
 import { isPreparationRun } from "../preparation-run.js";
 import { mustIsolateApprovedRun } from "../core-preparation-resume.js";
+import { reopenChangedApproval } from "./changed-approval.js";
 import type { AgentSnapshot } from "../../../shared/contracts.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
 
@@ -74,9 +75,7 @@ export async function sendCommand(core: AgentCore, id: string, content: string):
     if (saved.run?.status !== "running") return saved;
     if (preserveIntent && approved && c.handoffs.isDeterministic(approved)) {
       if (!await c.handoffs.refreshFingerprint(id, approved)) {
-        const changed = c.load(id);
-        c.pauseRun(changed, "方案或账号已变化，请重新确认后录入。");
-        return c.save(changed);
+        return reopenChangedApproval(c, id, approved);
       }
       const ready = c.snapshots.validApproval(c.load(id)) ?? approved;
       if (c.handoffs.tryStart(id, ready)) return c.load(id);

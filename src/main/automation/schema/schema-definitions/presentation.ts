@@ -44,6 +44,10 @@ export const manualUploadCoverSchema = z.object({
   minQuality: z.number().min(0).max(5).default(3),
   uploadedAt: z.string().min(1),
   remoteImageId: z.number().int().positive().optional(),
+  generation: z.object({
+    provider: z.literal("minimax"), model: z.literal("image-01"), style: z.literal("themeIllustration"),
+    prompt: z.string().min(1).max(1500), productFingerprint: z.string().min(1), generatedAt: z.string().min(1),
+  }).optional(),
 });
 
 const ctripLibraryCoverSchema = z.object({
@@ -96,6 +100,7 @@ export const presentationSchema = z.object({
   recommendations: z.array(recommendationItemSchema).length(3).optional(),
   features: z.string().min(1).optional(),
   cover: presentationCoverSchema.optional(),
+  preservedManualCovers: z.array(manualUploadCoverSchema).optional(),
   coverFallback: z.object({
     slotKey: z.literal("presentation.cover"),
     assetKey: z.literal("cover-landscape"),

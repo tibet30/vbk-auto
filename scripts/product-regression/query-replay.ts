@@ -18,6 +18,7 @@ export function createQueryReplay(fixture: RegressionFixture, provider: Provider
       return structuredClone(item.availability) as { status: 'available' | 'suspended' };
     },
     hotelFetch: hotelTransport(provider, calls, missing),
+    coverGenerationFetch: async () => missing("cover:image_generation"),
     coverSearch: async (_page, keyword) => {
       calls.push(`cover:${keyword}`);
       const recording = provider.covers.find(row => row.keyword === keyword);

@@ -11,6 +11,7 @@
  *   - 不在此处做具体业务执行，只做依赖注入。
  */
 
+import { productCoverGenerator } from "../operations/generated-cover.js";
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type { ResourceQueryOverrides } from "../planning/resource-query-overrides.js";
 import type { MainIpcContext } from "../ipc/context.js";
@@ -54,7 +55,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
   context.agentCore = new AgentCore({
     preparationProduct: (localProductId) => db.getProduct(localProductId),
     requiresCompletionVerification: (id, snapshot) => isPreparationRun(snapshot)
-      && !(db.getProduct(id)?.status === "draft_saved" && db.getProduct(id)?.productId),
+      && (!(db.getProduct(id)?.status === "draft_saved" && db.getProduct(id)?.productId)
+        || snapshot.events.some(event => event.runId === snapshot.run?.id && event.data?.changedApprovalRecovery === true)),
     // Resolve credentials and model settings for each Agent turn. Startup remains
     // available without a key, and settings changes apply to the next request.
     modelFor: async (localProductId) => {
@@ -82,6 +84,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
     },
     tools: createAgentBusinessTools({
       resourceQueries,
+      generateCover: productCoverGenerator(context, resourceQueries?.coverGenerationFetch, inspectCover),
+      inspectCover,
       db,
       get browser() { return context.browser; },
       get automation() { return context.automation; },

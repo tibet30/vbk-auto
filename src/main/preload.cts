@@ -104,6 +104,7 @@ const api: VbkApi = {
   updates: { status: () => ipcRenderer.invoke("updates:status"), check: () => ipcRenderer.invoke("updates:check"), download: () => ipcRenderer.invoke("updates:download"), openInstaller: () => ipcRenderer.invoke("updates:openInstaller"), showInstallerInFolder: () => ipcRenderer.invoke("updates:showInstallerInFolder"), quitAndInstall: () => ipcRenderer.invoke("updates:quitAndInstall") },
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword), suggestPoi: (keyword) => ipcRenderer.invoke("contacts:suggestPoi", keyword) },
   cover: {
+    generate: (id) => ipcRenderer.invoke("cover:generate", id),
     uploadManual: (args) => ipcRenderer.invoke("cover:uploadManual", args),
     read: (args) => ipcRenderer.invoke("cover:read", args),
     listManual: () => ipcRenderer.invoke("cover:listManualCovers"),

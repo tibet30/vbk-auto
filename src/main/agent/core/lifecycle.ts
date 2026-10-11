@@ -5,6 +5,7 @@
 
 import { isPreparationRun } from "../preparation-run.js";
 import { canResumeLocalPreparation } from "../core-preparation-resume.js";
+import { reopenChangedApproval } from "./changed-approval.js";
 import type { AgentSnapshot } from "../../../shared/contracts.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
 
@@ -79,11 +80,9 @@ export async function resumeCommand(core: AgentCore, id: string): Promise<AgentS
     const saved = c.save(snapshot);
     const approval = c.snapshots.validApproval(saved);
     if (approval && c.handoffs.isDeterministic(approval)) {
-      // Phase B resume must never fall back to the model loop.
+      // Unchanged phase B stays deterministic; changed plans need fresh approval.
       if (!await c.handoffs.refreshFingerprint(id, approval)) {
-        const changed = c.load(id);
-        c.pauseRun(changed, "方案或账号已变化，请重新确认后录入。");
-        return c.save(changed);
+        return reopenChangedApproval(c, id, approval);
       }
       const ready = c.snapshots.validApproval(c.load(id)) ?? approval;
       if (c.handoffs.tryStart(id, ready)) return c.load(id);

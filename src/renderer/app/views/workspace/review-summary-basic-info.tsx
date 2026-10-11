@@ -191,6 +191,7 @@ export function AppWorkspaceReviewSummaryBasicInfo(props: ReviewSummaryBasicInfo
       {!collapsed ? (
         <div id="basic-info-body" className={styles.body}>
           <BasicInfoCoverRow
+            localProductId={product.id}
             cover={snapshot.cover}
             fallback={snapshot.coverFallback}
             previewUrl={coverPreviewUrl}

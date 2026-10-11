@@ -60,3 +60,11 @@ test("记忆 IPC 校验产品 ID、正文和维护设置", () => {
   assert.throws(() => validateIpcArguments("memory:list", ["p-1", { limit: 1000 }]), /field=filter/);
   assert.throws(() => validateIpcArguments("memory:update", ["p-1", "", { status: "inactive" }]), /field=id/);
 });
+
+
+test("AI 封面生成接受产品 ID 并在供应商调用前拒绝无效参数", () => {
+  assert.doesNotThrow(() => validateIpcArguments("cover:generate", ["fc9e5303-1ec5-40da-800a-7cc516df093e"]));
+  for (const value of [undefined, "", {}, "../secret"]) {
+    assert.throws(() => validateIpcArguments("cover:generate", [value]), /field=localProductId/);
+  }
+});

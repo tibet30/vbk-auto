@@ -156,6 +156,11 @@ function asProductCover(value: unknown): ProductCover | null {
       description,
       minQuality,
       uploadedAt,
+      ...(isObject(value.generation) && value.generation.provider === "minimax"
+        && value.generation.model === "image-01" && value.generation.style === "themeIllustration"
+        && typeof value.generation.prompt === "string" && typeof value.generation.productFingerprint === "string"
+        && typeof value.generation.generatedAt === "string"
+        ? { generation: value.generation as unknown as import("../../../../shared/contracts-types.js").GeneratedCoverInfo } : {}),
     };
   }
   // ctripLibrary：imageId / imageUrl 是必填，缺任一即视为未设置。

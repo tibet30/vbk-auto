@@ -1,3 +1,4 @@
+import { generateProductCover } from "../operations/generate-product-cover.js";
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type {
   AccountFixedInfoFieldKey,
@@ -206,6 +207,7 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
     return context.productWorkflows.runVbkPageExclusive(() => suggestPoi(context.browser, query));
   });
   // 产品封面：手动上传 + 携程图库候选查询。所有入口先做 trusted sender 校验。
+  ipcMain.handle("cover:generate", (_event, id: string) => generateProductCover(context, id));
   ipcMain.handle("cover:uploadManual", (event, args) => uploadManualCover(event, args));
   ipcMain.handle("cover:read", (event, args) => readManualCover(event, args));
   ipcMain.handle("cover:listManualCovers", (event) => listManualCoverMetas(event));

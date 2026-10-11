@@ -1,6 +1,6 @@
 /**
  * applyAutoCoverFill 主流程：
- *   - manualUpload → 直接不写（不让自动化覆盖用户上传）；
+ *   - manualUpload → 合格原图不写；尺寸不足时保留原图并查找图库替代；
  *   - 已完整 + 已有足够多图 + 无缺失 POI → 不写；
  *   - 阶段一：按 collectCoverSearchKeywords 有序去重逐个搜，收集每个 POI 的完整候选池；
  *   - 阶段二：先把 requiredTourImagePois 的代表图按 imageId 去重轮询挑一张，再轮询补足到 imageTargetCount；
@@ -8,11 +8,13 @@
  *   - 失败时走 applyCoverFallback 占位并返回简短原因。
  *
  * 关键约束：
- *   - cover 的 source 永远不会被改成 manualUpload → ctripLibrary；
+ *   - 仅主进程确认尺寸不足后允许 manualUpload → ctripLibrary；
  *   - 单次搜索失败不停下整次补齐；
  *   - 每个 pool 每轮只取 1 张，保证各景点公平轮询。
  */
 
+import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
+import { inspectManualCoverAsset } from "../../automation/manual-cover-asset.js";
 import type { Page } from "playwright";
 import { searchCtripLibraryImages } from "../../infrastructure/ctrip-library-search.js";
 import type { CtripLibraryImageCandidate, CtripLibrarySearchResult } from "../../../shared/contracts-types.js";
@@ -39,6 +41,8 @@ export async function applyAutoCoverFill(args: {
    * 默认走 searchCtripLibraryImages；不引入这个参数时，生产路径不变。
    * 单测可借此直接返回完整候选，避免伪造整个 Ctrip 网络栈。
    */
+  generateCover?: import("../generated-cover.js").CoverGenerator;
+  inspectManualCover?: typeof inspectManualCoverAsset;
   injectSearch?: (page: Page, keyword: string) => Promise<CtripLibrarySearchResult>;
 }): Promise<{ nextProduct: Record<string, unknown>; outcome: AutoCoverFillOutcome }> {
   const product = args.product;
@@ -46,15 +50,22 @@ export async function applyAutoCoverFill(args: {
   const existingCover = safeObject(presentation?.cover);
   const now = args.now ?? (() => new Date().toISOString());
 
-  // manualUpload 的 cover 不应该被改成 ctripLibrary（用户已上传文件，自动化不应覆盖）；
-  // 必须在「已完整」判断之前拦截，否则 isCtripLibraryCoverComplete 会因 manualUpload
-  // 视为已完整而吞掉 manualUpload 专用 reason，日志排查不便。
+  let replaceManualCover = false;
   if (existingCover && textValue(existingCover.source) === "manualUpload") {
-    return { nextProduct: product, outcome: { written: false, reason: "cover 为 manualUpload，跳过自动补齐" } };
+    // Only a decoded local file with insufficient dimensions permits replacement.
+    // Missing/corrupt files and unverified assets keep the original and its gate.
+    try {
+      replaceManualCover = (args.inspectManualCover ?? inspectManualCoverAsset)(product).reason === "dimensions";
+    } catch {
+      replaceManualCover = false;
+    }
+    if (!replaceManualCover) {
+      return { nextProduct: product, outcome: { written: false, reason: "cover 为 manualUpload，跳过自动补齐" } };
+    }
   }
 
-  const preparedImages = readPreparedCoverImages(existingCover);
-  const existingCoverComplete = existingCover && isCtripLibraryCoverComplete(existingCover);
+  const preparedImages = replaceManualCover ? [] : readPreparedCoverImages(existingCover);
+  const existingCoverComplete = !replaceManualCover && existingCover && isCtripLibraryCoverComplete(existingCover);
   const minQuality = typeof existingCover?.minQuality === "number" && Number.isFinite(existingCover.minQuality)
     ? existingCover.minQuality : 3;
 
@@ -94,6 +105,7 @@ export async function applyAutoCoverFill(args: {
         ? await args.injectSearch(args.page, keyword)
         : await searchCtripLibraryImages(args.page, keyword);
     } catch (error) {
+      if (isReplayDataMissing(error)) throw error;
       searchFailures += 1;
       // 单个 keyword 的搜索失败不能让整次自动补齐停掉：继续下一个 keyword。
       logInfo(
@@ -158,6 +170,31 @@ export async function applyAutoCoverFill(args: {
 
   const primary = pickedImages[0];
 
+  if (!primary && searchFailures === 0 && args.generateCover) {
+    try {
+      const generated = await args.generateCover(product);
+      const nextPresentation: Record<string, unknown> = { ...presentation, cover: generated };
+      if (replaceManualCover) {
+        const preserved = Array.isArray(presentation?.preservedManualCovers) ? presentation.preservedManualCovers : [];
+        nextPresentation.preservedManualCovers = preserved.some(item => safeObject(item)?.fileId === existingCover?.fileId)
+          ? preserved : [...preserved, { ...existingCover }];
+      }
+      delete nextPresentation.coverFallback;
+      return { nextProduct: { ...product, presentation: nextPresentation }, outcome: { written: true,
+        reason: "图库无合格候选，已按当前产品生成主题插画并保存本地副本；请重新审批。" } };
+    } catch (error) {
+      if (isReplayDataMissing(error)) throw error;
+      return { nextProduct: product, outcome: { written: false,
+        reason: error instanceof Error ? error.message : "AI 封面生成失败，已保留原封面。" } };
+    }
+  }
+
+  if (!primary && replaceManualCover) {
+    return { nextProduct: product, outcome: { written: false, reason: searchFailures > 0
+      ? "图库查询暂不可用，已保留手动原图；尺寸门禁仍阻塞，请稍后重试。"
+      : "未找到合格图库候选，已保留手动原图；尺寸门禁仍阻塞。" } };
+  }
+
   if (!primary) {
     const reason = searchFailures > 0 ? "search_unavailable" : "no_qualified_candidate";
     const fallback = applyCoverFallback(product, reason, now);
@@ -190,7 +227,7 @@ export async function applyAutoCoverFill(args: {
     : {
         source: "ctripLibrary",
         ...primary,
-        ...(textValue(existingCover?.description) ? { description: existingCoverComplete ? primary.poi : textValue(existingCover?.description) } : {}),
+        ...(textValue(existingCover?.description) ? { description: existingCoverComplete || replaceManualCover ? primary.poi : textValue(existingCover?.description) } : {}),
         ...(typeof existingCover?.minQuality === "number" && Number.isFinite(existingCover.minQuality)
           ? { minQuality: existingCover.minQuality }
           : {}),
@@ -213,6 +250,11 @@ export async function applyAutoCoverFill(args: {
 
   // 不动 product 其它子树，只覆盖 presentation.cover；如有剩余图归属，附带更新 itinerary。
   const nextPresentation: Record<string, unknown> = { ...presentation, cover: nextCover };
+  if (replaceManualCover) {
+    const preserved = Array.isArray(presentation?.preservedManualCovers) ? presentation.preservedManualCovers : [];
+    nextPresentation.preservedManualCovers = preserved.some(item => safeObject(item)?.fileId === existingCover?.fileId)
+      ? preserved : [...preserved, { ...existingCover }];
+  }
   delete nextPresentation.coverFallback;
   const nextProduct: Record<string, unknown> = {
     ...product,
@@ -235,7 +277,9 @@ export async function applyAutoCoverFill(args: {
     outcome: {
       written: true,
       missingPoiImages: nextCover.missingPoiImages,
-      reason: existingCoverComplete
+      reason: replaceManualCover
+        ? "手动封面尺寸不足，已保留原图并换用合格携程图库封面；当前方案必须重新审批。"
+        : existingCoverComplete
         ? `已补充携程图库封面备用图，共准备 ${imageIds.length} 张候选${spotImagesWritten > 0 ? `，另写入 ${spotImagesWritten} 张到行程景点` : ""}`
         : `已写入携程图库封面，并准备 ${imageIds.length} 张候选${spotImagesWritten > 0 ? `，另写入 ${spotImagesWritten} 张到行程景点` : ""}`,
       keyword: primaryKeyword,

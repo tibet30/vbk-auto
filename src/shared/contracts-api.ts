@@ -208,6 +208,7 @@ export interface VbkApi {
     suggestPoi(keyword: string): Promise<{ poiName: string; poiId: number } | null>;
   };
   cover: {
+    generate(localProductId: string): Promise<ProductDetail>;
     /**
      * 手动上传封面图片：
      *  - renderer 把图片转 base64 → main 端解码 → 走 cover-storage 校验 →

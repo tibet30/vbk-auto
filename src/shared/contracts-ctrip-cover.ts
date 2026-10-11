@@ -61,8 +61,18 @@ export interface CtripLibraryCoverAlternate {
  *  - 与 CtripLibraryCover 共享 poi / description / minQuality 字段，方便
  *    UI 通用展示 / 业务代码按 source 分支处理。
  */
+export interface GeneratedCoverInfo {
+  provider: "minimax";
+  model: "image-01";
+  style: "themeIllustration";
+  prompt: string;
+  productFingerprint: string;
+  generatedAt: string;
+}
+
 export interface ManualUploadCover {
   source: "manualUpload";
+  generation?: GeneratedCoverInfo;
   fileId: string;
   originalName: string;
   mimeType: "image/jpeg" | "image/png" | "image/webp";

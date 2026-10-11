@@ -9,7 +9,7 @@ const MAX_COVER_IMAGES = 20;
 function useCoverCarouselItems(cover: ProductCover, resolvedUrl: string | null): ImageLightboxItem[] {
   return useMemo(() => {
     if (cover.source === "manualUpload") return resolvedUrl ? [{
-      src: resolvedUrl, alt: cover.poi || "封面预览", title: cover.poi || "封面预览", subtitle: "手动上传",
+      src: resolvedUrl, alt: cover.poi || "封面预览", title: cover.poi || "封面预览", subtitle: cover.generation ? "AI 主题插画" : "手动上传",
     }] : [];
     const items: ImageLightboxItem[] = [];
     if (cover.imageUrl) {
@@ -84,7 +84,7 @@ export function CoverDisplay({ cover, previewUrl, onReadPreviewUrl, onOpenImage 
       <div className={styles.rowDisplay}>
         <strong>{cover.source === "manualUpload" ? cover.poi || "封面预览" : cover.poi}</strong>
         <span className={styles.tag} data-tone={cover.source === "manualUpload" ? "warn" : "ok"}>
-          {cover.source === "manualUpload" ? "手动上传" : "携程图库"}
+          {cover.source === "manualUpload" ? cover.generation ? "AI 主题插画" : "手动上传" : "携程图库"}
         </span>
         {cover.source === "manualUpload" && typeof cover.minQuality === "number" ? <span className={styles.tag}>质量 ≥ {cover.minQuality}</span> : null}
       </div>

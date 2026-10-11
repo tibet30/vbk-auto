@@ -33,8 +33,8 @@ test("resuming a paused approved workflow hands control back to the deterministi
   await core.idle("handoff-resume");
   assert.equal(handoffs, 1);
 });
-test("phase-B resume refuses a changed plan without refreshing authority or calling the model", async () => {
-  const { core, saved, deps } = harness([{ content: "model must not run" }]);
+test("phase-B resume rechecks a changed plan without refreshing old authority or starting remote writes", async () => {
+  const { core, saved, deps } = harness([{ content: "recheck current plan" }]);
   let handoffs = 0;
   let modelCalls = 0;
   deps.accountFor = async () => ({ accountKey: "account", productVersion: "post-failure-version" });
@@ -49,13 +49,19 @@ test("phase-B resume refuses a changed plan without refreshing authority or call
     }}],
   });
 
+  deps.requiresCompletionVerification = () => true;
+  deps.finishVerified = async () => ({ verified: false, finalApproval: {
+    scope: ["vbk.write_phase:basic", "vbk.write_phase:preflight"], summary: "新方案需确认",
+  } });
   const resumed = await core.resume("phase-b-resume");
   await core.idle("phase-b-resume");
   assert.equal(handoffs, 0);
-  assert.equal(modelCalls, 0);
-  const approval = resumed.events.find((event) => event.type === "approval")?.data?.approval as { productVersion?: string } | undefined;
-  assert.equal(approval?.productVersion, "pre-write-version");
-  assert.equal(resumed.run?.status, "paused");
+  assert.equal(modelCalls, 1);
+  assert.notEqual(resumed.run?.id, "run");
+  const next = saved.get("phase-b-resume")!;
+  assert.equal(next.run?.status, "waiting_approval");
+  assert.equal(next.pendingApproval?.productVersion, "post-failure-version");
+  assert.equal((next.events[0]!.data?.approval as { status: string }).status, "invalidated");
 });
 
 test("phase-B resume stays paused when deterministic handoff cannot start", async () => {

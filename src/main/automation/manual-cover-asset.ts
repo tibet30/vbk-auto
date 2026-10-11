@@ -23,7 +23,7 @@ export function inspectManualCoverAsset(
   product: Record<string, unknown>,
   dataPath?: string,
   readSize: (path: string) => { width: number; height: number } | null = decodedImageSize,
-): { asset: ManualCoverAsset | null; issue: string | null } {
+): { asset: ManualCoverAsset | null; issue: string | null; reason?: "dimensions" } {
   const cover = readCover(product);
   if (cover?.source !== "manualUpload") return { asset: null, issue: null };
   const actualDataPath = dataPath ?? electronApi().app.getPath("userData");
@@ -45,6 +45,7 @@ export function inspectManualCoverAsset(
   if (Math.max(width, height) < 1280 || Math.min(width, height) < 800) {
     return {
       asset: null,
+      reason: "dimensions",
       issue: `已保存手动封面（${width}×${height}），但携程封面要求至少 1280×800 或 800×1280 像素。请上传符合尺寸的原图。`,
     };
   }

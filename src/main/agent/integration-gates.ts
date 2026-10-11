@@ -82,6 +82,7 @@ export function buildAgentApproval(product: ProductDetail) {
   const inventory = commercial?.inventory as Json | undefined;
   const presentation = data.presentation as Json | undefined;
   const cover = presentation?.cover as Json | undefined;
+  const generatedCoverNotice = cover?.generation ? "当前封面为 AI 生成的产品主题插画，请核对画面内容后批准。" : "";
   const manualCoverNotice = cover?.source === "manualUpload"
     ? "将把已保存的手动封面上传到携程；请确认拥有该图的使用授权并同意携程图片授权协议。"
     : "";
@@ -90,7 +91,7 @@ export function buildAgentApproval(product: ProductDetail) {
     : "";
   return {
     scope: requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`),
-    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${manualCoverNotice}${placeholderNotice}请核对右侧行程、资源和条款，确认后录入当前方案。`,
+    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${manualCoverNotice}${generatedCoverNotice}${placeholderNotice}请核对右侧行程、资源和条款，确认后录入当前方案。`,
   };
 }
 export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnapshot | undefined, readiness: ProductReadiness, context?: AgentFinishContext): AgentFinishResult {

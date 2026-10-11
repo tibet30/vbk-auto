@@ -7,6 +7,7 @@
  * 拆分原因：原 runPlanning 的尾部后处理占据约 90 行，单独抽出便于阅读 / 覆盖单测。
  */
 
+import { productCoverGenerator } from "../../operations/generated-cover.js";
 import { logInfo } from "../../../shared/log-timestamp.js";
 import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
 import { applyAutoCoverFill, applyCoverFallback } from "../../operations/cover-auto-fill.js";
@@ -43,6 +44,7 @@ export async function applyCompletedAfterPlanningResult(context: MainIpcContext,
     applyAutoCoverFill({
       page: await getVbkRequestPage(browser),
       product: productAfter.product,
+      generateCover: productCoverGenerator(context),
     })).catch((e: unknown) => {
     logInfo("[planning] auto cover fill raised", {
       provider: args.providerLabel,

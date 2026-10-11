@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ImagePlus, LoaderCircle, Pencil, X } from "lucide-react";
+import { ImagePlus, LoaderCircle, Pencil, Sparkles, X } from "lucide-react";
 import type {
   CtripLibraryImageCandidate,
   CtripLibraryPlaceCandidate,
@@ -10,6 +10,7 @@ import type {
 } from "../../../../shared/contracts-types.js";
 import type { CoverFallback } from "../../../../shared/cover-fallback.js";
 import coverFallbackImage from "../../../assets/cover-fallback.png";
+import { api } from "../../helpers";
 import shared from "../shared.module.less";
 import { BasicInfoRowShell } from "./basic-info-row-shell";
 import { CoverDisplay } from "./cover-lightbox";
@@ -18,6 +19,7 @@ import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox";
 import styles from "./review-summary-basic-info.module.less";
 
 export interface BasicInfoCoverRowProps {
+  localProductId?: string;
   cover: ProductCover | null;
   fallback: CoverFallback | null;
   /** Manual previews are data URLs (`data:${mime};base64,...`), never local file URLs. */
@@ -37,6 +39,23 @@ const MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_SIZE_MIB = MAX_FILE_SIZE_BYTES / 1024 / 1024;
 
 export function BasicInfoCoverRow(props: BasicInfoCoverRowProps) {
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState<string>();
+  const generationInFlight = useRef(false);
+  const generate = async () => {
+    if (generationInFlight.current || props.saving || !props.localProductId) return;
+    generationInFlight.current = true;
+    setGenerating(true); setGenerationError(undefined); props.onClearError();
+    try {
+      const ipc = api();
+      if (!ipc) throw new Error("生成服务尚未就绪，请稍后重试。");
+      await ipc.cover.generate(props.localProductId);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "AI 封面生成失败，请重试。");
+    } finally {
+      generationInFlight.current = false; setGenerating(false);
+    }
+  };
   const [isEditing, setIsEditing] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [placeResult, setPlaceResult] = useState<CtripLibraryPlaceSearchResult | null>(null);
@@ -161,11 +180,17 @@ export function BasicInfoCoverRow(props: BasicInfoCoverRowProps) {
     onIndexChange={updateZoomIndex} onClose={() => setZoomTarget(null)} />;
 
   if (!isEditing) return <>
-    <BasicInfoRowShell rowId="cover" labelTitle="产品封面" actions={<button type="button"
+    <BasicInfoRowShell rowId="cover" labelTitle="产品封面" error={generationError || props.error} actions={<><button type="button"
       className={`${shared.btn} ${shared.btnSm}`} data-variant="ghost" onClick={startEdit}
-      aria-label={props.cover || props.fallback ? "替换产品封面" : "添加产品封面"} disabled={props.saving}>
+      aria-label={props.cover || props.fallback ? "替换产品封面" : "添加产品封面"} disabled={props.saving || generating}>
       <Pencil size={12} aria-hidden="true" /> {props.fallback && !props.cover ? "替换" : props.cover ? "编辑" : "添加"}
-    </button>}>
+    </button>
+    <button type="button" className={`${shared.btn} ${shared.btnSm}`} data-variant="ghost"
+      onClick={() => { void generate(); }} disabled={props.saving || generating || !props.localProductId}
+      aria-label="AI 生成产品封面" aria-busy={generating} title="按当前产品生成主题插画，保留原图并重新请求审批">
+      {generating ? <LoaderCircle size={12} className={styles.spin} aria-hidden="true" /> : <Sparkles size={12} aria-hidden="true" />}
+      {generating ? "生成中…" : "AI 生成"}
+    </button></>}>
       {props.cover ? <>
         <CoverDisplay cover={props.cover} previewUrl={props.previewUrl} onReadPreviewUrl={props.onReadPreviewUrl} onOpenImage={openImageZoom} />
         {props.cover.source === "ctripLibrary" && props.cover.missingPoiImages?.length

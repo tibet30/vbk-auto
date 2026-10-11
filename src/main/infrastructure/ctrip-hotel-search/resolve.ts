@@ -93,13 +93,14 @@ async function resolveItineraryHotelCandidates(
 
 /** Injectable provider boundary; production calls preserve the original positional API. */
 export function createHotelCandidateResolver(fetcher?: typeof fetch) {
-  return (...[itinerary, preferredCity, nights, hotelTier, onProgress, requirements, allowDowngrade, candidatePool]: HotelResolverArgs) =>
+  return (...[itinerary, preferredCity, nights, hotelTier, onProgress, requirements, allowDowngrade, candidatePool, queryFetcher]: HotelResolverArgs) =>
     resolveItineraryHotelCandidates(itinerary, preferredCity, nights, hotelTier, onProgress,
-      requirements, allowDowngrade, candidatePool, fetcher ?? fetch);
+      requirements, allowDowngrade, candidatePool, queryFetcher ?? fetcher ?? fetch);
 }
 type HotelResolverArgs = [
   itinerary: Array<Record<string, unknown>>, preferredCity?: string, nights?: number, hotelTier?: string,
   onProgress?: Parameters<typeof resolveItineraryHotelCandidates>[4], requirements?: Map<number, HotelStayRequirement>,
   allowDowngrade?: boolean | Map<number, boolean>, candidatePool?: CtripHotelCandidate[],
+  queryFetcher?: typeof fetch,
 ];
 export const resolveHotelCandidates = createHotelCandidateResolver();

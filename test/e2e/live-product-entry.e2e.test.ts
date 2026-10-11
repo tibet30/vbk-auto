@@ -1,4 +1,4 @@
-// @test-layer e2e
+// @test-layer e2e-live
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

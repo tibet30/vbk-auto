@@ -107,3 +107,17 @@ async function createFixture(context: test.TestContext, files: Record<string, st
 function relativeFiles(root: string, files: string[]) {
   return files.map((file) => path.relative(root, file));
 }
+
+test('任意代码变动附带固定产品回归，即使没有导入关系', async context => {
+  const fixture = await createFixture(context, {
+    'test/e2e/product-regression.e2e.test.ts': '// @test-layer e2e\n',
+    'test/e2e/product-regression-negative.e2e.test.ts': '// @test-layer e2e\n',
+    'test/other.test.ts': "test('other', () => {});\n",
+  });
+  for (const changedFiles of [['src/renderer/unrelated.tsx'], ['src/renderer/theme.less'], ['scripts/tool.mjs'], ['test/fixtures/product-regression/xian.json'], ['.env.production'], ['.npmrc'], ['Makefile'], ['Dockerfile'], ['config/runtime.ini'], ['.github/workflows/test.yml'], [path.resolve(fixture.root, 'config/extensionless')]]) {
+    const result = await selectChangedTestFiles({ root: fixture.root, testFiles: fixture.testFiles, changedFiles });
+    assert.deepEqual(relativeFiles(fixture.root, result.files), ['test/e2e/product-regression-negative.e2e.test.ts', 'test/e2e/product-regression.e2e.test.ts']);
+  }
+  const docs = await selectChangedTestFiles({ root: fixture.root, testFiles: fixture.testFiles, changedFiles: ['README.md'] });
+  assert.deepEqual(docs.files, []);
+});

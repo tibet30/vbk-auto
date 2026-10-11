@@ -30,7 +30,10 @@
     "test:browser": "node scripts/run-tests.mjs browser",
     "test:e2e": "node scripts/run-tests.mjs e2e",
     "test:all": "node scripts/run-tests.mjs all",
-    "check": "tsc --noEmit && tsc -p tsconfig.renderer.json"
+    "check": "tsc --noEmit && tsc -p tsconfig.renderer.json",
+    "test:e2e:live": "node scripts/run-tests.mjs e2e-live",
+    "test:e2e:online": "node --import tsx scripts/product-regression/online.ts",
+    "test:e2e:export": "python3 scripts/product-regression/export.py"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.2",

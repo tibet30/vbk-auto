@@ -46,3 +46,10 @@ test("已核验但城市过期的大交通仍阻止准备完成", async () => {
   draft.operations.trafficLine.availability.endpointPlan.departureCity = "敦煌";
   assert.ok(!extraPreparationGaps(draft).some(gap => gap.label === "大交通端点可用性核验"));
 });
+
+test('未指明城市的火车站接送不把火车站当成大交通城市', () => {
+  const product = { basicInfo: { destinationCity: '日喀则',
+    userIdea: '日喀则2日游\nD1、火车站接-帕拉庄园-住日喀则\nD2、扎什伦布寺--送火车' } };
+  assert.deepEqual(explicitTrafficLineCities(product), { arrivalCity: undefined, departureCity: undefined });
+  assert.deepEqual(resolveTrafficLineDestination(product), { arrivalCity: '日喀则', departureCity: '日喀则' });
+});

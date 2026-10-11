@@ -6,6 +6,16 @@ import { buildAgentProductContext, buildAgentTaskContext } from './prompt-contex
 import { extractLockedConstraints, filterPlanningRequirementMessages } from './prompt-helpers.js';
 import { excludedItineraryAlternatives } from '../planning/itinerary-alternative-copy.js';
 
+/** Shared production context assembly; replay replaces only the model transport. */
+export function agentPlannerContextForRun(db: VbkDatabase, localProductId: string,
+  providerLabel: string, model: string, memoryContext?: MemoryPromptContext): PlannerContext {
+  const product = db.getProduct(localProductId);
+  if (!product) throw new Error('产品不存在');
+  return agentPlannerContext(product, providerLabel, model,
+    (db.getAgentSnapshot(localProductId)?.events ?? []).filter(event => event.type === 'user')
+      .map(event => ({ role: 'user' as const, content: event.content })), memoryContext);
+}
+
 export function agentPlannerContext(
   product: ProductDetail,
   providerLabel: string,

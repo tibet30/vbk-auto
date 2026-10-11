@@ -22,6 +22,7 @@ function electronApi(): typeof import("electron") {
 export function inspectManualCoverAsset(
   product: Record<string, unknown>,
   dataPath?: string,
+  readSize: (path: string) => { width: number; height: number } | null = decodedImageSize,
 ): { asset: ManualCoverAsset | null; issue: string | null } {
   const cover = readCover(product);
   if (cover?.source !== "manualUpload") return { asset: null, issue: null };
@@ -38,9 +39,9 @@ export function inspectManualCoverAsset(
   }
   const filePath = resolveManualCoverPath({ dataPath: actualDataPath, fileId: cover.fileId!, originalName });
   if (!filePath) return { asset: null, issue: "手动封面的本地文件已失效，请重新上传原图。" };
-  const image = electronApi().nativeImage.createFromPath(filePath);
-  if (image.isEmpty()) return { asset: null, issue: "手动封面无法解码，请重新上传 JPEG 或 PNG 原图。" };
-  const { width, height } = image.getSize();
+  const size = readSize(filePath);
+  if (!size) return { asset: null, issue: "手动封面无法解码，请重新上传 JPEG 或 PNG 原图。" };
+  const { width, height } = size;
   if (Math.max(width, height) < 1280 || Math.min(width, height) < 800) {
     return {
       asset: null,
@@ -48,4 +49,9 @@ export function inspectManualCoverAsset(
     };
   }
   return { asset: { path: filePath, width, height, fileId: cover.fileId! }, issue: null };
+}
+
+function decodedImageSize(path: string): { width: number; height: number } | null {
+  const image = electronApi().nativeImage.createFromPath(path);
+  return image.isEmpty() ? null : image.getSize();
 }

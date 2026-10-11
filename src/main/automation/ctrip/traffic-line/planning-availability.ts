@@ -4,6 +4,7 @@ import { getVbkRequestPage } from "../../../infrastructure/vbk-request-page.js";
 import type { VbkDatabase } from "../../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../../infrastructure/vbk-browser.js";
 import type { TrafficLineEndpointAvailability } from "../../../../shared/contracts-traffic-line.js";
+import { normaliseTrafficLineConfig } from "../../../../shared/contracts-traffic-line.js";
 import {
   preflightTrafficLineEndpoints,
   type TrafficLineStationDisambiguator,
@@ -21,6 +22,7 @@ export async function resolveProductTrafficLineAvailability(args: {
   if (!product || !Array.isArray(product.product.itinerary)) return null;
   const query = async () => {
     const page = await getVbkRequestPage(args.browser);
+    const configured = normaliseTrafficLineConfig((product.product.operations as Record<string, unknown>)?.trafficLine);
     return preflightTrafficLineEndpoints(
       page,
       product.product.itinerary as Array<{ spots?: Array<{
@@ -30,7 +32,8 @@ export async function resolveProductTrafficLineAvailability(args: {
       city?: string | null;
     }> }>,
       new Date(), args.disambiguateStation, product.product,
-      ["flightRoundTrip", "trainRoundTrip"], { allowPartialAvailabilityOnUncertain: true },
+      configured?.enabled && configured.variants.length && !configured.availability
+        ? configured.variants : ["flightRoundTrip", "trainRoundTrip"], { allowPartialAvailabilityOnUncertain: true },
     );
   };
   return args.runVbkPageExclusive ? args.runVbkPageExclusive(query) : query();

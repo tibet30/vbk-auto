@@ -1,3 +1,4 @@
+import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
 /**
  * Provider-specific transport 适配层（与具体 adapter 解耦）。
  *
@@ -46,6 +47,7 @@ export function planningTransportOptions(provider: "minimax" | "deepseek") {
  *  每个分支在 `details` 里保留原 error 的可读信息（status / code / message），
  *  供 UI 在「重试」按钮旁打出原服务错误码——这是产品侧的可观测性需求。 */
 export function normaliseTransportError(error: unknown): PlannerError {
+  if (isReplayDataMissing(error)) throw error;
   if (error instanceof PlannerError) return error;
   const causeMessage = error instanceof Error && error.message ? error.message : String(error);
   if (error instanceof AuthenticationError) {

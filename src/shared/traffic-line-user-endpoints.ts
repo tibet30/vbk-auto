@@ -15,7 +15,8 @@ export function explicitTrafficLineCities(product: Record<string, unknown>): Cit
         .map(pattern => clause.match(pattern)).find(Boolean);
       return match ? [toPlatformShortLocationName(match[1])] : [];
     }))];
-    return cities.length === 1 ? cities[0] : undefined;
+    const administrative = cities.filter(city => !/^(?:火车站|高铁站|车站|机场|酒店|集合点|接送点)$/u.test(city));
+    return administrative.length === 1 ? administrative[0] : undefined;
   };
   return {
     arrivalCity: toPlatformShortLocationName(configured.arrivalCity)

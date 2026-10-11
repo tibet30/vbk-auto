@@ -205,7 +205,7 @@ test("接口或 POI 城市未确认时保持默认关闭，不凭失败结果猜
   assert.equal(fake.written(), undefined);
 });
 
-test("不覆盖已经明确配置的大交通", async () => {
+test("明确配置但没有端点证据时必须查询，并保留原套餐让缺失证据阻塞门禁", async () => {
   const fake = runtimeFor(
     availability(["trainRoundTrip"]),
     { operations: { trafficLine: { enabled: true, variants: ["flightRoundTrip"] } } },
@@ -213,8 +213,9 @@ test("不覆盖已经明确配置的大交通", async () => {
 
   const result = await syncInitialTrafficLineAvailability("p", fake.runtime);
 
-  assert.deepEqual(result, { status: "skipped", reason: "alreadyConfigured" });
-  assert.equal(fake.written(), undefined);
+  assert.equal(result.status, 'updated');
+  assert.deepEqual(fake.written(), { enabled: true, variants: ['flightRoundTrip'],
+    availability: availability(['trainRoundTrip']) });
 });
 
 test("机场消歧超时只保留已确认火车，并在下次规划重新核验飞机", async () => {

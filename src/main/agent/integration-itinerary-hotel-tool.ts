@@ -51,7 +51,7 @@ export function createItineraryHotelTool(deps: AgentBusinessDependencies, get: (
         progressBaseline = deps.productMutations.commands.mergeChanges(ctx.localProductId, progressBaseline,
           mergeResolvedHotelProgress(productData(progressBaseline), itinerary, progress), 'resource', { status: latest.status });
         queryIdentity = hotelQueryIdentity(progressBaseline.product);
-      }, requirements, new Map(itinerary.map(day => [Number(day.day), hotelFallbackAllowed(instruction, Number(day.day), (operations?.hotelFallbackPolicy as JsonObject | undefined)?.allowDowngrade as boolean | undefined)])), historicalHotelCandidatePool(deps.db, ctx.localProductId)), undefined, 'ctrip');
+      }, requirements, new Map(itinerary.map(day => [Number(day.day), hotelFallbackAllowed(instruction, Number(day.day), (operations?.hotelFallbackPolicy as JsonObject | undefined)?.allowDowngrade as boolean | undefined)])), historicalHotelCandidatePool(deps.db, ctx.localProductId), deps.resourceQueries?.hotelFetch), undefined, 'ctrip');
       return { content: safeJson(persistedItineraryHotelResult(resolved)) };
     },
   };

@@ -37,9 +37,9 @@ export function platformBusinessQueries(db: VbkDatabase, id: string, page: Page)
     mother(productId: string) {
       return gateway.query('mother_readback', { productId }, () => getProductBaseInfoApi(page, productId));
     },
-    cover(product: Record<string, unknown>) {
+    cover(product: Record<string, unknown>, injectSearch?: Parameters<typeof applyAutoCoverFill>[0]['injectSearch']) {
       return gateway.query('cover', { itinerary: product.itinerary, presentation: product.presentation },
-        () => applyAutoCoverFill({ page, product }), undefined, 'ctrip');
+        () => applyAutoCoverFill({ page, product, injectSearch }), undefined, 'ctrip');
     },
     resolveVehicle(product: ProductDetail) {
       return gateway.query('vehicle_groups', product.product.operations, () => resolveVehicleResource(page, product));

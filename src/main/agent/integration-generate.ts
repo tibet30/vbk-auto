@@ -17,11 +17,13 @@ import {
 } from "../planning/product-generation.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import type { AgentTool } from "./types.js";
+import type { ResourceQueryOverrides } from '../planning/resource-query-overrides.js';
 
 type JsonObject = Record<string, unknown>;
 type GenerateStage = ProductGenerationStage;
 
 export interface AgentBusinessDependencies {
+  resourceQueries?: ResourceQueryOverrides;
   readiness?: (localProductId: string) => import("../../shared/contracts.js").ProductReadiness;
   db: VbkDatabase;
   browser: VbkBrowser;
@@ -66,6 +68,7 @@ export function createGenerationStageTools(args: {
       (task) => deps.productWorkflows.runVbkPageExclusive(task),
       resolveTrafficAvailability,
       deps.disambiguatePoiOption,
+      deps.resourceQueries,
     ),
     beforePresentation: (localProductId) => {
       removeConvergedAlternativeDayCopy(localProductId);

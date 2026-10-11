@@ -53,7 +53,7 @@ export async function syncInitialTrafficLineAvailability(
     }
     return { status: "skipped", reason: "userDeclined" };
   }
-  if ((existing?.enabled || existing?.variants.length) && !hasRetryableTrafficAvailability(existing)
+  if ((existing?.enabled || existing?.variants.length) && existing?.availability && !hasRetryableTrafficAvailability(existing)
     && trafficLinePlanMatchesExplicitCities(current, existing?.availability?.endpointPlan)) {
     return { status: "skipped", reason: "alreadyConfigured" };
   }
@@ -67,7 +67,11 @@ export async function syncInitialTrafficLineAvailability(
   }
   if (!availability) return { status: "skipped", reason: "unconfirmed" };
 
-  const variants = trafficLineVariantsForResolvedAvailability(availability);
+  const resolvedVariants = trafficLineVariantsForResolvedAvailability(availability);
+  // A fresh explicit package selection is input, not evidence. Keep it intact;
+  // unavailable endpoints must block confirmation rather than rewrite intent.
+  const variants = existing?.enabled && existing.variants.length && !existing.availability
+    ? existing.variants : resolvedVariants;
   const config: TrafficLineConfig = {
     enabled: variants.length > 0,
     variants,

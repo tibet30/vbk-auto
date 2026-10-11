@@ -12,6 +12,7 @@
  */
 
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
+import type { ResourceQueryOverrides } from "../planning/resource-query-overrides.js";
 import type { MainIpcContext } from "../ipc/context.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "../planning/adapters/openai-compatible-adapter.js";
@@ -19,7 +20,7 @@ import { productNotFound } from "../infrastructure/db-errors.js";
 import { AgentCore } from "./core.js";
 import { OpenAIAgentModel } from "./openai-model.js";
 import { createAgentBusinessTools, agentProductVersion } from "./integration.js";
-import { agentPlannerContext, agentTaskContext } from "./integration-context.js";
+import { agentPlannerContextForRun, agentTaskContext } from "./integration-context.js";
 import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from "./integration-gates.js";
 import { persistReconciledPhase, settleReconciledDispatches } from '../application/product-reconciled-phase.js';
 import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from "./core-workflow-replay.js";
@@ -46,7 +47,8 @@ export {
 } from "./integration-setup/restore.js";
 
 /** Wire the loop now; install browser guards when Electron creates its services. */
-export function installProductAgent(context: MainIpcContext): () => void {
+export function installProductAgent(context: MainIpcContext, resourceQueries?: ResourceQueryOverrides,
+  inspectCover: typeof inspectManualCoverAsset = inspectManualCoverAsset): () => void {
   const { db, getSettings, apiKey, productWorkflows, remoteProducts, readiness, emitProduct } = context;
   const emitAgentSnapshot = (snapshot: Parameters<NonNullable<MainIpcContext["emitAgentSnapshot"]>>[0]) => context.emitAgentSnapshot?.(snapshot);
   context.agentCore = new AgentCore({
@@ -79,6 +81,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       });
     },
     tools: createAgentBusinessTools({
+      resourceQueries,
       db,
       get browser() { return context.browser; },
       get automation() { return context.automation; },
@@ -101,9 +104,8 @@ export function installProductAgent(context: MainIpcContext): () => void {
         } catch {
           memoryContext = undefined;
         }
-        return adapter.generateStage({ stage, context: agentPlannerContext(product, resolveAiProviderLabel(settings), profile.model,
-          (db.getAgentSnapshot(localProductId)?.events ?? []).filter((event) => event.type === "user").map((event) => ({ role: "user" as const, content: event.content })),
-          memoryContext) });
+        return adapter.generateStage({ stage, context: agentPlannerContextForRun(db, localProductId,
+          resolveAiProviderLabel(settings), profile.model, memoryContext) });
       },
       disambiguatePoiOption: async ({ localProductId, desired, product, candidates }) => {
         const outcome = await (await context.aiService()).disambiguateOption({
@@ -136,7 +138,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
     resolvedPendingQuestions: (localProductId, questions) => {
       const data = db.getProduct(localProductId)?.product;
       if (!data) return [];
-      const inspected = inspectManualCoverAsset(data);
+      const inspected = inspectCover(data);
       return resolvedProductQuestions(data, questions, { manualCoverAssetReady: Boolean(inspected.asset && !inspected.issue) });
     },
     prepareUserInstruction: (localProductId, content, selection) => {

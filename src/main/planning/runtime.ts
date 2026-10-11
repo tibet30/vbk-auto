@@ -1,4 +1,5 @@
 import { platformResourceGateway } from "../infrastructure/platform-resource-gateway.js";
+import type { ResourceQueryOverrides } from './resource-query-overrides.js';
 /**
  * 把规划子系统接到现有 VbkDatabase 的胶水代码（barrel）：
  *   - DbGenerationStateStore：把 PlanningGenerationState 存到 planning_generation 表；
@@ -81,6 +82,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     private readonly runVbkPageExclusive?: <T>(task: () => Promise<T>) => Promise<T>,
     private readonly trafficLineAvailabilityResolver?: (localProductId: string) => Promise<TrafficLineEndpointAvailability | null>,
     private readonly poiDisambiguate?: PoiAutoDisambiguator,
+    private readonly resourceQueries?: ResourceQueryOverrides,
   ) {
     this.productMutations = productMutations ?? new ProductMutationService(db);
   }
@@ -99,7 +101,8 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       keyword,
       product: product.product,
       context,
-      detail: await platformResourceGateway(this.db, localProductId).query('poi', { keyword, context }, async () => suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context), value => !value.candidates.length),
+      detail: await platformResourceGateway(this.db, localProductId).query('poi', { keyword, context }, async () => this.resourceQueries?.poi
+        ? this.resourceQueries.poi(keyword, context) : suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context), value => !value.candidates.length),
       confirmedPoiId: historicalConfirmedPoiId(this.db, product, keyword),
       checkAvailability: (poiId) => this.getPoiAvailability(poiId),
       disambiguate: this.poiDisambiguate,
@@ -108,10 +111,12 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   }
 
   async getPoiAvailability(poiId: number) {
+    if (this.resourceQueries?.poiAvailability) return this.resourceQueries.poiAvailability(poiId);
     return getCtripSightAvailability(undefined, poiId, this.db);
   }
 
   async getPoiAvailabilities(poiIds: readonly number[]) {
+    if (this.resourceQueries?.poiAvailability) return new Map(await Promise.all(poiIds.map(async id => [id, await this.getPoiAvailability(id)] as const)));
     return getCtripSightAvailabilities(undefined, poiIds, this.db);
   }
 

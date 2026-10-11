@@ -1,3 +1,4 @@
+import { REQUIRED_PRODUCT_SUITES, requiresProductRegression } from "./product-regression-contract.mjs";
 import { existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,10 +8,12 @@ const GLOBAL_TEST_RUNTIME_FILES = new Set([
   "package-lock.json",
   "scripts/run-tests.mjs",
   "scripts/test-selection.mjs",
+  "scripts/product-regression-contract.mjs",
+  "scripts/product-regression-reporter.mjs",
 ]);
 
 /**
- * Select only test files whose local import graph reaches a changed file.
+ * Select affected imports plus the fixed product corpus for code/config changes.
  * A changed test is always selected; a test-runner/config change selects all
  * tests because it can alter execution for every suite.
  */
@@ -24,7 +27,10 @@ export async function selectChangedTestFiles({ root, testFiles, changedFiles }) 
 
   const files = [];
   for (const file of testFiles) {
-    if (changed.has(file) || await reachesChangedDependency(file, changed, new Set())) {
+    const relative = path.relative(root, file).replaceAll("\\", "/");
+    const requiredRegression = REQUIRED_PRODUCT_SUITES.includes(relative)
+      && requiresProductRegression(root, changedFiles);
+    if (requiredRegression || changed.has(file) || await reachesChangedDependency(file, changed, new Set())) {
       files.push(file);
     }
   }

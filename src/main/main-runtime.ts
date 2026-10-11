@@ -3,8 +3,6 @@ import { isAiProvider } from "../shared/contracts.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../shared/ai-provider-config.js";
 import { resolveSystemNotificationsEnabled } from "../shared/system-notification-settings.js";
 import { logWarn } from "../shared/log-timestamp.js";
-import { inspectManualCoverAsset } from "./automation/manual-cover-asset.js";
-import { evaluateVisibleReadiness } from "./planning/preparation-completion.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "./planning/adapters/openai-compatible-adapter.js";
 import { MiniMaxService } from "./minimax/minimax.js";
 import { productNotFound } from "./infrastructure/db-errors.js";
@@ -98,27 +96,7 @@ export function createMainAiRuntime(input: {
   return { getSettings, apiKey, aiService, completedPoiBackfillPlanner };
 }
 
-export function evaluateMainReadiness(
-  db: VbkDatabase,
-  localProductId: string,
-  options: {
-    ignoreInterruptedAutomationFailure?: boolean;
-    ignoreCurrentAutomationFailure?: boolean;
-  } = {},
-): ProductReadiness {
-  const product = db.getProduct(localProductId);
-  if (!product) throw productNotFound(localProductId);
-  const snapshot = db.getAgentSnapshot(localProductId);
-  const visible = evaluateVisibleReadiness(product, snapshot, {
-    ignoreInterruptedAutomationFailure: options.ignoreInterruptedAutomationFailure,
-    ignoreCurrentAutomationFailure: options.ignoreCurrentAutomationFailure
-      ?? Boolean(snapshot?.run && !snapshot?.uncertainWrite),
-  });
-  const issue = inspectManualCoverAsset(product.product).issue;
-  if (!issue) return visible;
-  const issues = [...visible.issues, { label: "封面图片规格", detail: issue }];
-  return { ready: false, completion: Math.min(visible.completion, 92), issues };
-}
+export { evaluateMainReadiness } from "./application/product-readiness.js";
 
 export function scheduleMemoryMaintenance(memoryService: MemoryService): NodeJS.Timeout {
   const run = () => {

@@ -33,7 +33,7 @@ export async function applyCompletedAfterPlanningResult(context: MainIpcContext,
     const current = db.getProduct(args.localProductId)!;
     const fallback = applyCoverFallback(current.product, "search_unavailable");
     if (fallback.written) {
-      productMutations.replace(args.localProductId, fallback.nextProduct, { status: "review", notify: false });
+      productMutations.commands.mergeChanges(args.localProductId, current, fallback.nextProduct, 'resource', { status: "review", notify: false });
     }
     return;
   }
@@ -51,7 +51,7 @@ export async function applyCompletedAfterPlanningResult(context: MainIpcContext,
     return null;
   });
   if (coverResult?.outcome.written) {
-    productMutations.replace(args.localProductId, coverResult.nextProduct, { status: "review", notify: false });
+    productMutations.commands.mergeChanges(args.localProductId, productAfter, coverResult.nextProduct, 'resource', { status: "review", notify: false });
     logInfo(coverResult.outcome.imageId
       ? "[planning] auto cover filled from Ctrip library"
       : "[planning] cover fallback staged for operator", {
@@ -61,10 +61,11 @@ export async function applyCompletedAfterPlanningResult(context: MainIpcContext,
     });
   }
   // 用车资源组：触发 VBK 接口匹配 resourceGroupId / resourceGroupName
+  const vehicleBaseline = db.getProduct(args.localProductId)!;
   const vehicleResult = await productWorkflows.runVbkPageExclusive(async () =>
     applyAutoVehicleResourceTrigger({
       page: await getVbkRequestPage(browser),
-      product: db.getProduct(args.localProductId)!,
+      product: vehicleBaseline,
     })).catch((e: unknown) => {
     logInfo("[planning] auto vehicle resource trigger raised", {
       provider: args.providerLabel,
@@ -73,13 +74,8 @@ export async function applyCompletedAfterPlanningResult(context: MainIpcContext,
     return null;
   });
   if (!vehicleResult?.outcome.written) return;
-  productMutations.replace(args.localProductId, vehicleResult.nextProduct.product, { status: "review", notify: false });
+  productMutations.commands.mergeChanges(args.localProductId, vehicleBaseline, vehicleResult.nextProduct.product, 'resource', { status: "review", notify: false });
   if (vehicleResult.outcome.resourceGroupId) {
-    for (const task of vehicleResult.nextProduct.researchTasks) {
-      if (task.state !== "confirmed" && task.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(task.label || "")) {
-        db.markResearchAccepted(args.localProductId, task.id, vehicleResult.outcome.reason, "vbk");
-      }
-    }
     await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId: args.localProductId, broadcast: broadcastProduct });
     logInfo("[planning] auto vehicle resource resolved", {
       provider: args.providerLabel,

@@ -100,7 +100,7 @@ export function syncProductStatusAfterFailure(db: VbkDatabase, localProductId: s
   if (!product) return { applied: false };
   const decision = shouldSyncProductToBlocked({ runStatus: "failed", productStatus: product.status });
   if (!decision.apply) return { applied: false };
-  db.updateProduct(product.id, product.product, "blocked");
+  db.setProductLifecycle(product.id, { status: "blocked" });
   return { applied: true };
 }
 
@@ -126,13 +126,13 @@ export function syncProductStatusAfterRunPlan(
       allowBlockedAfterRetry: options.allowBlockedToReviewOnCompletion,
     });
     if (!decision.apply) return { applied: false };
-    db.updateProduct(product.id, product.product, "review");
+    db.setProductLifecycle(product.id, { status: "review" });
     return { applied: true };
   }
   if (runStatus === "failed" || runStatus === "needs_user") {
     const decision = shouldSyncProductToBlocked({ runStatus, productStatus: product.status });
     if (!decision.apply) return { applied: false };
-    db.updateProduct(product.id, product.product, "blocked");
+    db.setProductLifecycle(product.id, { status: "blocked" });
     return { applied: true };
   }
   return { applied: false };
@@ -163,6 +163,6 @@ export function restoreProductToPlanningForRetry(
     planningGenerationStatus,
   });
   if (!decision.apply) return { restored: false, newStatus: product.status };
-  db.updateProduct(product.id, product.product, "planning");
+  db.setProductLifecycle(product.id, { status: "planning" });
   return { restored: true, newStatus: "planning" };
 }

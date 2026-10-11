@@ -88,7 +88,7 @@ test("无用户回答时真实酒店工具使用默认降档并持久化，不�
   let current: any = { id: "local", status: "planning", product: { basicInfo: { destinationCity: "西宁", nights: 1 },
     operations: { hotelTier: "当地5钻酒店" }, itinerary: [{ day: 1, hotel: "大柴旦当地酒店" }] } };
   const deps: any = { db: { listProducts: () => [], getAgentSnapshot: () => ({ events: [] }) },
-    productMutations: { replace: (_id: string, product: unknown) => (current = { ...current, product }) } };
+    productMutations: { commands: { mergeChanges: (_id: string, _baseline: unknown, product: unknown) => (current = { ...current, product }) } } };
   const original = globalThis.fetch;
   globalThis.fetch = async input => String(input).includes("gaHotelSearchEngine")
     ? Response.json({ Response: { searchResults: [municipal] } })

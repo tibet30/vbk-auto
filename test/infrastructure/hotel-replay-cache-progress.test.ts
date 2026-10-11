@@ -19,7 +19,10 @@ test("原始逐晚评级在第一次搜索前生效，已确认的新评级优�
 test("没有距离范围或城市信息的跨产品缓存仍必须匹配住宿地点", () => {
   assert.equal(reusableHotelCandidatesFromPool([candidate], "当地5钻酒店", { anchorName: "宁波" }), undefined);
   assert.equal(reusableHotelCandidatesFromPool([candidate], "当地5钻酒店"), undefined);
-  assert.deepEqual(reusableHotelCandidatesFromPool([candidate], "当地5钻酒店", { anchorName: "杭州" }), [candidate]);
+  assert.equal(reusableHotelCandidatesFromPool([candidate], "当地5钻酒店", { anchorName: "杭州" }), undefined,
+    "西湖距离不能证明与杭州城市锚点的距离，不能扩大旧证据的范围");
+  const cityCandidate = { ...candidate, anchorName: "杭州市人民政府" };
+  assert.deepEqual(reusableHotelCandidatesFromPool([cityCandidate], "当地5钻酒店", { anchorName: "杭州" }), [cityCandidate]);
 });
 
 test("酒店进度字段顺序变化不算修改，真实评级变化仍拒绝", () => {

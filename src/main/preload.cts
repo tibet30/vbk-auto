@@ -25,6 +25,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { VbkApi } from "../shared/contracts.js";
 
 const api: VbkApi = {
+  workspace: { get: id => ipcRenderer.invoke('workspace:get', id) },
   agent: {
     get: (id) => ipcRenderer.invoke("agent:get", id),
     getHistory: (id, page) => ipcRenderer.invoke("agent:getHistory", id, page),
@@ -119,6 +120,11 @@ const api: VbkApi = {
     searchCtripLibraryImages: (args) => ipcRenderer.invoke("cover:searchCtripLibraryImages", args),
   },
   events: {
+    onWorkspaceUpdated: listener => {
+      const handler = (_event: Electron.IpcRendererEvent, snapshot: import('../shared/contracts-product-architecture.js').ProductWorkspaceSnapshot) => listener(snapshot);
+      ipcRenderer.on('workspace:updated', handler);
+      return () => { ipcRenderer.removeListener('workspace:updated', handler); };
+    },
     onAgentUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, snapshot: unknown) => listener(snapshot as never); ipcRenderer.on("agent:updated", handler); return () => ipcRenderer.removeListener("agent:updated", handler); },
     onProductUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, product: unknown) => listener(product as never); ipcRenderer.on("product:updated", handler); return () => ipcRenderer.removeListener("product:updated", handler); },
     onWorkflowTaskUpdated(listener) { const handler = (_event: Electron.IpcRendererEvent, task: unknown) => listener(task as never); ipcRenderer.on("workflow-task:updated", handler); return () => ipcRenderer.removeListener("workflow-task:updated", handler); },

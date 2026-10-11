@@ -30,9 +30,8 @@ export function agentApprovalScopeError(
   }
 }
 /**
- * After final approval, automation may rewrite presentation/itinerary text or
- * resource mirrors. Those local mutations must not invalidate the already
- * authorised deterministic run mid-flight or on resume-from-error.
+ * Describes lifecycle only. Write authority still requires the fingerprint
+ * maintained by controlled product transactions; status cannot waive it.
  */
 export function isDeterministicAutomationInFlight(
   product: ProductDetail,
@@ -55,7 +54,7 @@ export function assertAgentWriteAuthorized(product: ProductDetail, snapshot: Age
     throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');
   }
   const versionMatches = approval.productVersion === agentProductVersion(product);
-  if (!versionMatches && !isDeterministicAutomationInFlight(product, approval.intentVersion, snapshot.run.intentVersion)) {
+  if (!versionMatches) {
     throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');
   }
   const currentPhases = new Set(requiredAgentPhases(product));

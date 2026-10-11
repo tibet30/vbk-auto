@@ -66,7 +66,7 @@ export const productMethods = {
   getProduct(this: { db: Database.Database }, id: string): ProductDetail | undefined { return getProduct(this.db, id); },
   importProductSnapshot(this: { db: Database.Database }, snapshot: ProductDetail): ProductDetail { return importProductSnapshot(this.db, snapshot); },
   deleteProduct(this: { db: Database.Database }, id: string): boolean { return deleteProduct(this.db, id); },
-  updateProduct(this: { db: Database.Database }, id: string, product: Record<string, unknown>, status?: ProductSummary["status"], expectedVersion?: number) { updateProduct(this.db, id, product, status, expectedVersion); },
+  updateProduct(this: { db: Database.Database }, id: string, product: Record<string, unknown>, status?: ProductSummary["status"], expectedVersion?: number, source?: string) { updateProduct(this.db, id, product, status, expectedVersion, source); },
   replaceProductAndSatisfyResearchTasks(
     this: { db: Database.Database },
     localProductId: string,

@@ -61,7 +61,7 @@ export interface VbkDatabasePrototype {
   getProduct(id: string): ProductDetail | undefined;
   importProductSnapshot(snapshot: ProductDetail): ProductDetail;
   deleteProduct(id: string): boolean;
-  updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"], expectedVersion?: number): void;
+  updateProduct(id: string, product: Record<string, unknown>, status?: ProductSummary["status"], expectedVersion?: number, source?: string): void;
   replaceProductAndSatisfyResearchTasks(localProductId: string, product: Record<string, unknown>, options?: ReplaceProductAndSatisfyResearchTasksOptions): { product: ProductDetail; confirmedTaskIds: string[] };
   updateBasicInfoField(localProductId: string, field: string, value: string): ProductDetail;
   setProductId(localProductId: string, productId: string): void;

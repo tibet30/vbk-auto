@@ -21,6 +21,7 @@ import { OpenAIAgentModel } from "./openai-model.js";
 import { createAgentBusinessTools, agentProductVersion } from "./integration.js";
 import { agentPlannerContext, agentTaskContext } from "./integration-context.js";
 import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from "./integration-gates.js";
+import { persistReconciledPhase, settleReconciledDispatches } from '../application/product-reconciled-phase.js';
 import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from "./core-workflow-replay.js";
 import { preparationApprovalBlockReason } from "../planning/preparation-completion.js";
 import { inspectManualCoverAsset } from "../automation/manual-cover-asset.js";
@@ -144,7 +145,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       let preparationRecovered = false;
       const receiptProduct = structuredClone(current.product);
       if (restoreExplicitOperatorDeletion(receiptProduct, content)) {
-        current = context.productMutations.replace(localProductId, receiptProduct, {
+        current = context.productMutations.commands.mergeChanges(localProductId, current, receiptProduct, 'user', {
           status: current.status, expectedVersion: current.productJsonVersion,
           allowItineraryRemovalRestore: true,
         });
@@ -152,7 +153,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       }
       const restored = restoreExplicitAlternativeSlots(current, content);
       if (restored) {
-        current = context.productMutations.replace(localProductId, restored, {
+        current = context.productMutations.commands.mergeChanges(localProductId, current, restored, 'user', {
           status: current.status, expectedVersion: current.productJsonVersion,
         });
         preparationRecovered = true;
@@ -160,7 +161,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
       if (isPreparationInstruction(content)) {
         const recovery = preparationItineraryRecovery(current);
         if (recovery) {
-          current = context.productMutations.replace(localProductId, recovery.product, {
+          current = context.productMutations.commands.mergeChanges(localProductId, current, recovery.product, 'resource', {
             status: current.status, expectedVersion: current.productJsonVersion,
           });
           db.markResearchTasksSatisfied(localProductId, recovery.taskIds);
@@ -178,7 +179,7 @@ export function installProductAgent(context: MainIpcContext): () => void {
         if (preparationRecovered) emitProduct(db.getProduct(localProductId)!);
         return preparationRecovered || undefined;
       }
-      const saved = context.productMutations.replace(localProductId, repair.product, { status: current.status });
+      const saved = context.productMutations.commands.mergeChanges(localProductId, current, repair.product, 'resource', { status: current.status });
       emitProduct(saved);
       return true;
     },
@@ -187,11 +188,11 @@ export function installProductAgent(context: MainIpcContext): () => void {
       if (!product) return undefined;
       const restored = recoverResolvedHotelCandidates(product.product as Record<string, unknown>, snapshot);
       if (restored) {
-        product = context.productMutations.replace(localProductId, restored, { status: product.status });
+        product = context.productMutations.commands.mergeChanges(localProductId, product, restored, 'resource', { status: product.status });
         const approval = approvalForRun(snapshot);
         // Restoring candidates may change required phases (e.g. hotelResource).
         // Refresh fingerprint/intent only; never silently expand write authority.
-        if (approval && snapshot.run) {
+        if (approval && snapshot.run && approval.productVersion === agentProductVersion(product)) {
           const required = requiredAgentPhases(product).map((phase) => `vbk.write_phase:${phase}`);
           if (required.some((scope) => !approval.scope.includes(scope))) return undefined;
           return {
@@ -280,7 +281,11 @@ export function installProductAgent(context: MainIpcContext): () => void {
       const snapshot = db.getAgentSnapshot(localProductId);
       if (!product || !snapshot) return { reconciled: false, message: "产品记录不存在" };
       const result = await reconcileAgentShell(product, snapshot, uncertain.toolCallId, await getVbkRequestPage(context.browser));
+      if (result.retryable && uncertain.toolCallId.startsWith('phase:')) {
+        settleReconciledDispatches(db, localProductId, uncertain.toolCallId.slice('phase:'.length));
+      }
       if (result.reconciled) {
+        if (result.phase) persistReconciledPhase(db, localProductId, result.phase);
         const fresh = db.getAgentSnapshot(localProductId)!;
         const event = fresh.events.find(item => item.type === "tool_result" && item.data?.toolCallId === uncertain.toolCallId);
         if (event) event.data = { ...event.data, approvalId: approvalForRun(fresh)?.id, verified: true, phase: result.phase, productId: product.productId };

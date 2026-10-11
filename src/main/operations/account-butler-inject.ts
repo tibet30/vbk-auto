@@ -1,3 +1,4 @@
+import { ProductMutationService } from '../application/product-mutation-service.js';
 /**
  * 「当前账号的管家联系人」自动注入到 product 的小工具。
  *
@@ -102,7 +103,7 @@ export function injectAccountButler(
   } catch (error) {
     return { written: false, reason: `applyManualReviewField 拒绝：${(error as Error).message}` };
   }
-  db.updateProduct(localProductId, next, "review");
+  new ProductMutationService(db).commands.mergeChanges(localProductId, product, next, 'user', { status: 'review', notify: false });
   return { written: true };
 }
 

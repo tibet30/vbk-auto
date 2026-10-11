@@ -16,7 +16,9 @@ test('short-name overnight placeholders retain the nightly city instead of the X
 test('a verified overnight city is not overwritten by a POI broad administrative parent', () => {
   const day = { day: 4, hotel: '冷湖当地酒店', hotelRequirement: { anchorName: '冷湖镇', cityName: '茫崖', maxDistanceKm: 5 },
     spots: [{ name: '冷湖', poiName: '冷湖', poiId: 22881469, city: '海西', district: '海西' }] };
-  assert.equal(hotelStayRequirement({ basicInfo: { userIdea: 'D4：俄博梁 - 冷湖' } }, day)?.cityName, '茫崖');
+  for (const meetingCity of ['西宁', '茫崖', undefined]) {
+    assert.equal(hotelStayRequirement({ basicInfo: { meetingCity, userIdea: 'D4：俄博梁 - 冷湖' } }, day)?.cityName, '茫崖');
+  }
 });
 
 test('generic overnight lodging uses the verified final POI city while an explicit return to Xining wins', () => {

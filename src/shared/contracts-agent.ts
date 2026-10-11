@@ -18,6 +18,7 @@ export interface AgentInputRequest {
   defaultAnswers?: Record<string, string | string[]>;
 }
 export interface AgentApproval {
+  migrationProof?: { version: 1; previousFingerprint: string };
   id: string;
   productVersion: string;
   accountKey: string;

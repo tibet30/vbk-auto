@@ -2,8 +2,13 @@ import type { ProductDetail } from "../../../shared/contracts.js";
 import type { ProductTelemetryReport } from "../../../shared/product-usage-report.js";
 import { ProductExecutionDatabase } from "./execution-database.js";
 import * as state from "./parts/local-product-state.js";
+import { recordResourceObservation } from './parts/product-architecture-store.js';
+import type { ProductResourceEvidence } from '../../../shared/contracts-product-architecture.js';
 
 export class LocalProductDatabase extends ProductExecutionDatabase {
+  recordResourceObservation(id: string, observation: NonNullable<ProductResourceEvidence['observations']>[number]) {
+    recordResourceObservation(this.db, id, observation);
+  }
   readLocalProductState(id: string) { return state.readLocalProductState(this.db, id); }
   attachLocalProductState(product: ProductDetail, owner: number, revision: number) {
     state.attachLocalProductState(this.db, product, owner, revision);

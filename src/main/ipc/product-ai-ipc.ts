@@ -17,6 +17,8 @@ import { recordAgentUsage } from "../agent/integration-usage.js";
 import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
 import { clearReappearedTrustedOperatorItineraryRemovals, sameTrustedOperatorItineraryRemovals } from "../../shared/trusted-operator-itinerary-removals.js";
 import type { MainIpcContext } from "./context.js";
+import { canonicalJson } from '../../shared/product-storage-projection.js';
+import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
 
 async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
   try {
@@ -45,7 +47,8 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     // that receipt before validation; raw JSON can never create or alter one.
     clearReappearedTrustedOperatorItineraryRemovals(next);
     parseProduct(next);
-    const saved = productMutations.replace(id, next, {
+    const saved = productMutations.commands.replaceFull({ localProductId: id, source: 'user',
+      expectedVersion: product.productJsonVersion ?? 0 }, next, {
       status: productJsonSaveStatus(product.product, next, product.status),
       allowMeetingCityCorrection: true,
       preserveVerifiedItineraryPois: false,
@@ -72,7 +75,10 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const next = applyManualReviewField(product.product, input);
     const policy = manualReviewSavePolicy(product.status);
     if (policy.requireCompleteProduct) parseProduct(next);
-    const { product: saved, confirmedTaskIds } = db.replaceProductAndSatisfyResearchTasks(id, next, { status: policy.nextStatus });
+    const beforeConfirmed = new Set(product.researchTasks.filter(task => task.state === 'confirmed').map(task => task.id));
+    const saved = productMutations.commands.manualField({ localProductId: id, source: 'user',
+      expectedVersion: product.productJsonVersion ?? 0 }, input, { status: policy.nextStatus });
+    const confirmedTaskIds = saved.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
     await reconcileSavedProductQuestion(context, id);
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", {
@@ -165,10 +171,13 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       context.productWorkflows.runVbkPageExclusive(async () => {
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
-        const result = await resolveVehicleResource(await getVbkRequestPage(context.browser), product);
-        productMutations.replace(localProductId, result.product, { status: "review", notify: false });
+        const result = await platformResourceGateway(db, localProductId).query('vehicle_groups', product.product.operations,
+          async () => resolveVehicleResource(await getVbkRequestPage(context.browser), product));
+        productMutations.commands.mergeChanges(localProductId, product, result.product, 'resource', { status: "review", notify: false }, {
+          queryPath: ['operations'], queryFingerprint: canonicalJson(product.product.operations),
+          targetPath: ['operations', 'vehicleResource'], targetFingerprint: canonicalJson((product.product.operations as Record<string, unknown>)?.vehicleResource),
+        });
         if (result.resolved && taskId) {
-          db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
           await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
         }
         const message = result.resolved
@@ -183,10 +192,13 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       context.productWorkflows.runVbkPageExclusive(async () => {
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
-        const result = await resolveHotelResource(await getVbkRequestPage(context.browser), product);
-        productMutations.replace(localProductId, result.product, { status: "review", notify: false });
+        const result = await platformResourceGateway(db, localProductId).query('hotel_library', product.product.operations,
+          async () => resolveHotelResource(await getVbkRequestPage(context.browser), product));
+        productMutations.commands.mergeChanges(localProductId, product, result.product, 'resource', { status: "review", notify: false }, {
+          queryPath: ['operations'], queryFingerprint: canonicalJson(product.product.operations),
+          targetPath: ['operations', 'hotelResource'], targetFingerprint: canonicalJson((product.product.operations as Record<string, unknown>)?.hotelResource),
+        });
         if (taskId) {
-          db.markResearchAccepted(localProductId, taskId, result.note, "vbk");
           await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
         }
         db.addMessage(localProductId, "assistant", `已查询酒店资源：${result.note}`, "succeeded");

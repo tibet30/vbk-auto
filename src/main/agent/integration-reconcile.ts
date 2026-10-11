@@ -4,6 +4,7 @@ import { getProductBaseInfoApi } from '../automation/ctrip/basic-info/api.js';
 import { getProductSegmentsApi, segmentsFromPayload } from '../automation/ctrip/vehicle-resource-api.js';
 import { runProductPreflightApi } from '../automation/ctrip/preflight-api.js';
 import { readTrafficLineChildren } from '../automation/ctrip/traffic-line/relationships.js';
+import { verifyBasicInfoReadback } from '../automation/ctrip/preflight-readback.js';
 
 interface TrafficLineCheckpoint {
   variant: TrafficLineVariant;
@@ -24,7 +25,8 @@ interface ReconciliationResult {
 /** Reconciliation is deliberately read-only. A shell without an ID cannot be recreated safely. */
 export async function reconcileAgentShell(product: ProductDetail, snapshot: AgentSnapshot, toolCallId: string, page: Parameters<typeof getProductBaseInfoApi>[0]): Promise<ReconciliationResult> {
   const call=snapshot.events.find(event=>event.type==='tool_call' && event.data?.toolCallId===toolCallId);
-  const phase=(call?.data?.arguments as Record<string,unknown> | undefined)?.phase;
+  const phase=(call?.data?.arguments as Record<string,unknown> | undefined)?.phase
+    ?? (toolCallId.startsWith('phase:') ? toolCallId.slice('phase:'.length) : undefined);
   if (!product.productId) return {reconciled:false,message:'产品创建结果不确定，尚无可核对的产品编号。请先在 VBK 产品库核查，避免重复创建。'};
   if (phase==='trafficLine') return reconcileTrafficLine(product, page);
   if (phase==='preflight') return reconcilePreflight(product, page);
@@ -83,6 +85,8 @@ async function reconcileBasicInfo(product: ProductDetail, page: Parameters<typeo
   if (String(base?.productId) !== String(product.productId) || !code || String(base?.vendorProductCode) !== String(code)) {
     return { reconciled: false, message: '基础信息远端产品编号或供应商编号与本地不一致，仍需核查。' };
   }
+  try { verifyBasicInfoReadback(base, product.product, product.productId!); }
+  catch (error) { return { reconciled: false, message: `基础信息尚未通过完整回读：${String(error)}` }; }
   return { reconciled: true, message: `已从 VBK 核对产品 ${product.productId} 的基础信息，已有保存结果不会重复提交。`, phase: 'basic' };
 }
 

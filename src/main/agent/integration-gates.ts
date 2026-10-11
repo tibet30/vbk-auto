@@ -1,7 +1,10 @@
+type Json = Record<string, unknown>;
+import { approvedPlanVersion as agentProductVersion } from "../application/product-approval-projection.js";
+export { approvedPlanVersion as agentProductVersion } from "../application/product-approval-projection.js";
+
 import type { TrafficLineConfig } from '../../shared/contracts-traffic-line.js';
-import { createHash } from 'node:crypto';
 import type { AgentApproval, AgentSnapshot, ProductDetail, ProductReadiness } from '../../shared/contracts.js';
-import { productSchema, parseProduct } from '../automation/schema/schema.js';
+import { parseProduct } from '../automation/schema/schema.js';
 import { draftPhasesFor } from '../automation/automation.main/automation.main.phases.js';
 import type { AgentFinishContext, AgentFinishResult } from './types.js';
 import { preservesApprovedIntent } from './approval-intent.js';
@@ -10,57 +13,6 @@ import { evaluatePreparationCompletion } from '../planning/preparation-completio
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { preparationStageGaps } from "../planning/preparation/policy.js";
 
-type Json = Record<string, unknown>;
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,canonical(item)]));
-}
-/** Generated vendor codes and platform binding metadata are not operator choices. */
-export function agentProductVersion(product: ProductDetail): string {
-  const parsed = productSchema.safeParse(product.product);
-  const data = structuredClone(parsed.success ? parsed.data : product.product) as unknown as Json;
-  if (data.basicInfo) delete (data.basicInfo as Json).supplierProductCode;
-  const ops = data.operations as Json | undefined;
-  const resource = ops?.hotelResource as Json | undefined;
-  // The itinerary owns the approved per-day hotel choices. hotelResource is a
-  // derived mirror written after the platform phase succeeds (source, selected
-  // name, tier, candidates, segment ids, and other readback metadata). Keeping
-  // that mirror in the fingerprint invalidates the approval immediately after
-  // a successful hotelResource write even though no operator choice changed.
-  const days = (Array.isArray(data.itinerary) ? data.itinerary : []) as Json[];
-  if (resource && days.some(day=>Array.isArray(day.hotelCandidates) && day.hotelCandidates.length)) {
-    // Keep the operator's effective hotel choice (source, resource ID/name,
-    // room type, query and tier) in the approval fingerprint. Only strip
-    // readback/candidate mirrors that are populated by the platform phase.
-    const candidates = days.flatMap(day => Array.isArray(day.hotelCandidates) ? day.hotelCandidates as Json[] : []);
-    // Only treat hotelResource as a pure platform mirror when the selected
-    // name matches an itinerary candidate. Diamond alone is too weak: a
-    // different property at the same tier must remain fingerprinted.
-    const selectedFromItinerary = candidates.some(candidate => candidate.hotelName === resource.resourceName);
-    if (selectedFromItinerary && !resource.query && !resource.roomType) {
-      // A resource generated from the approved daily candidates has no extra
-      // operator decision. Ignore its whole platform mirror, while an explicit
-      // query/room-type selection remains fingerprinted.
-      delete ops!.hotelResource;
-    } else {
-      delete resource.candidates;
-      delete resource.dailyCandidates;
-      delete resource.resourceId;
-      delete resource.supplierCode;
-    }
-  }
-  // Once daily hotel candidates exist, the candidate set is the resource
-  // choice. Hotel resolution may later replace the generic display label and
-  // description with the first candidate without changing anything submitted
-  // to VBK. These derived strings must not invalidate the final approval.
-  for (const day of days) {
-    if (!Array.isArray(day.hotelCandidates) || !day.hotelCandidates.length) continue;
-    delete day.hotel;
-    delete day.hotelDescription;
-  }
-  return createHash('sha256').update(JSON.stringify(canonical(data))).digest('hex');
-}
 export function requiredAgentPhases(product: ProductDetail): string[] {
   const data = product.product as unknown as Parameters<typeof draftPhasesFor>[0];
   return [...(!product.productId ? ['saleControl'] : []), ...draftPhasesFor({...data,itinerary:Array.isArray(data.itinerary)?data.itinerary:[],sales:data.sales ?? {productForm:'privateTour'}})];
@@ -162,10 +114,8 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   }
   const currentVersion = agentProductVersion(product);
   const automationSucceeded = product.automation?.status === 'succeeded';
-  // Deterministic handoff may rewrite presentation/resources after approval.
-  // Tolerate fingerprint drift only when the durable automation run succeeded.
-  if (approval.productVersion !== currentVersion
-    && !(context.deterministicWorkflow && automationSucceeded)) {
+  // Controlled automation advances fingerprints in its product transaction.
+  if (approval.productVersion !== currentVersion) {
     return {verified:false,message:'当前方案与已确认版本不一致，请重新请求最终确认。'};
   }
   const required = requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`);

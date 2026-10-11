@@ -14,9 +14,9 @@ export async function resolveAdministrativeRouteNodes(
   if (!result) return { current };
   const diagnostics = current.product.diagnostics as Record<string, unknown> | undefined;
   const receipts = Array.isArray(diagnostics?.routeAdministrativeNodes) ? diagnostics.routeAdministrativeNodes : [];
-  deps.productMutations.replace(current.id, { ...current.product, itinerary: result.itinerary,
+  deps.productMutations.commands.mergeChanges(current.id, current, { ...current.product, itinerary: result.itinerary,
     diagnostics: { ...diagnostics, routeAdministrativeNodes: [...receipts, ...result.converted] },
-  }, { status: current.status });
+  }, 'resource', { status: current.status });
   const names = new Set(result.converted.map(item => item.name));
   deps.db.markResearchTasksSatisfied(current.id, current.researchTasks.filter(task =>
     [...names].some(name => task.label === `核查 ${name} 的 VBK POI 映射`)).map(task => task.id));

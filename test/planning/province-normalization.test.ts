@@ -162,9 +162,9 @@ test("真实 runtime 写入 skeleton 时同步把省级 meetingCity / destinatio
     getSetting() { return null; },
   };
   const productMutations = {
-    replace(_localProductId: string, product: Record<string, unknown>) {
+    commands: { mergeChanges(_localProductId: string, _baseline: unknown, product: Record<string, unknown>) {
       savedProduct = product;
-    },
+    } },
   };
   const runtime = new DbOrchestratorRuntime(db as any, undefined, productMutations as any);
   const result = await runtime.writeModule("province-runtime", "skeleton", "/operations", {

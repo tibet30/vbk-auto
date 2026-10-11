@@ -17,6 +17,9 @@ export async function getSnapshot(core: AgentCore, id: string): Promise<AgentSna
   const c = asCoreInternals(core);
   return c.command(id, async () => {
     const snapshot = c.load(id);
+    if (snapshot.pendingApproval?.status === 'invalidated') {
+      c.cancelPendingInteraction(snapshot, '历史最终确认已失效，请按当前方案重新确认。');
+    }
     const detached = !c.active.has(id) && !c.scheduled.has(id);
     if (detached) recoverPrematureCompletion(id, snapshot, c.deps, c.snapshots);
     // `handoffApprovedWorkflow` is deliberately detached from the model

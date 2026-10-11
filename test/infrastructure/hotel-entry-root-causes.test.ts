@@ -18,6 +18,15 @@ test("已核验POI区县保存后仍能推断华阳住宿城市，纠正旧的�
   assert.equal(requirement.maxDistanceKm, 10);
 });
 
+test("旧 POI 不能覆盖运营新选的住宿锚点，未核验 POI 不能纠正已保存城市", () => {
+  const poi = { name: "华阳古镇", poiName: "华阳古镇", poiId: 112647382, city: "汉中", district: "洋县" };
+  const day = { day: 4, hotel: "华阳住宿", spots: [poi],
+    hotelRequirement: { anchorName: "汉中", cityName: "汉中" } };
+  assert.equal(hotelStayRequirement({}, day)?.cityName, "汉中");
+  assert.equal(hotelStayRequirement({}, { ...day, spots: [{ ...poi, poiId: undefined }],
+    hotelRequirement: { anchorName: "华阳古镇", cityName: "西安" } })?.cityName, "西安");
+});
+
 const context = (cityId: number, cityName: string) => ({ id: String(cityId), word: "华阳古镇", cityId, cityName, gLat: 33.59, gLon: 107.54, type: "Markland" });
 test("未知行政城市按官方唯一地标解析，跨城市同名拒绝猜测", () => {
   assert.equal(selectCtripHotelContext([context(1920, "洋县")], { anchorName: "华阳古镇" }).cityName, "洋县");

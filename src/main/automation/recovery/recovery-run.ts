@@ -23,6 +23,10 @@ export async function runPhaseWithRecovery(ctx: RecoveryContext): Promise<RunPha
     rec.attempts.push({ attempt, error: lastError, at: isoNow(now) });
     ctx.log(`phase=${ctx.phase} attempt=${attempt} failed`, "warning");
     ctx.persist();
+    if ((failure.error as { uncertainWrite?: boolean })?.uncertainWrite) {
+      blockedRecovery(ctx, rec, lastError, '平台写入结果不明，先核查当前阶段的权威回读，不能直接重复写入。');
+      throw failure.error;
+    }
     if (failure.error instanceof NonAdvisableAutomationError) {
       blockedRecovery(ctx, rec, lastError);
       ctx.log(`phase=${ctx.phase} nonAdvisableFailure`, "error");

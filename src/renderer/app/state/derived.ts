@@ -7,7 +7,9 @@ import {
   shouldHandleVbkPageReady,
   shouldRefreshCollections,
 } from "./collection-refresh-policy.js";
-import { simulateRecoveryEffectTick } from "./recovery-policy.js";
+import { useRecentProductRecovery } from "./recent-product-recovery.js";
+import { useWorkspacePlanning } from "./workspace-planning-subscription.js";
+import { workspaceSnapshots } from "./workspace-snapshot-store.js";
 import { buildPlanningRecovery } from "./planning-recovery.js";
 import { subscribeCollectionLiveUpdates } from "./collection-live-updates.js";
 import { useBrowserDerived } from "./domains/browser-derived";
@@ -91,24 +93,18 @@ export function useAppStateDerived(state: AppStateBase) {
     }, 1200);
     const unsubscribeCollections = subscribeCollectionLiveUpdates({
       events: api()!.events,
-      state: { setProduct, setProducts, setWorkflowTasks, updateReadiness },
+      state: { setProduct, setProducts, setWorkflowTasks, updateReadiness, setReadiness: state.setReadiness },
       current: () => ({
         view: currentViewRef.current,
         creating: currentCreatingRef.current,
         localProductId: currentLocalProductIdRefForPlanning.current,
       }),
     });
-    const unsubscribePlanning = api()!.events.onPlanningStateUpdated((localProductId, next) => {
-      if (currentLocalProductIdRefForPlanning.current !== localProductId) return;
-      planningEventVersionRef.current += 1;
-      setPlanningState(next);
-    });
 
     return () => {
       window.clearTimeout(retryLoginCheck);
       unsubscribePageReady();
       unsubscribeCollections();
-      unsubscribePlanning();
     };
   }, []);
 
@@ -117,71 +113,15 @@ export function useAppStateDerived(state: AppStateBase) {
     void refreshRef.current();
   }, [view, creating]);
 
-  // 启动 / 刷新时恢复最近打开的产品：只持久化 id 不足以让 React 看到
-  // ProductDetail，必须再向主进程拉一次权威数据。
-  //
-  // 关键不变量（详见 ./recovery-policy.ts 的纯函数决策）：
-  //   - 只在 view === "workspace" 时恢复。切到 products / settings / operation-log 后
-  //     用户明确离开详情，effect 必须短路，不再发起请求或回填 product；
-  //   - 同一会话内只尝试一次（hasAttempted gate）：点"工作台"按钮
-  //     （setProduct(null) + setView("workspace")）后 view 仍是 workspace，如果
-  //     只看 view 会再次触发，把刚被用户清掉的产品又塞回来。点击"产品"/"设置"/
-  //     "操作日志"时则由 view gate 拦截；
-  //   - 用户在初始化期间手动 openProduct(A) 时同样消费本会话恢复机会——
-  //     主动接管产品选择之后，session 内不应再自动恢复，否则清掉 product
-  //     回 workspace 又被拉回详情（核心防回填，详见 simulateRecoveryEffectTick）；
-  //   - 产品不存在 / 主进程报错 → 清掉残留 id + activeLocalProductId，让下次启动不再
-  //     尝试恢复；但 view 已切走时不清理（用户可能想用 localStorage 里的 id
-  //     重新打开）；
-  //   - 异步取消：cleanup 把 cancelled 置 true，.then() / .catch() 跳过；用
-  //     currentViewForRecoveryRef + currentActiveLocalProductIdForRecoveryRef 在
-  //     in-flight 期间 view / activeLocalProductId 切换时再次确认（refs 在每次 render
-  //     同步更新，闭包读到的总是最新值），避免旧请求覆盖目标产品。
-  const recoveryAttemptedRef = useRef(false);
-  const currentViewForRecoveryRef = useRef<typeof view>(view);
-  const currentActiveLocalProductIdForRecoveryRef = useRef<string | null>(activeLocalProductId);
-  currentViewForRecoveryRef.current = view;
-  currentActiveLocalProductIdForRecoveryRef.current = activeLocalProductId;
+  useRecentProductRecovery(state);
+  useWorkspacePlanning(product?.id, setPlanningState);
 
   useEffect(() => {
-    const decision = simulateRecoveryEffectTick({
-      hasApi: Boolean(api()),
-      view,
-      hasProduct: Boolean(product),
-      hasActiveLocalProductId: Boolean(activeLocalProductId),
-      hasAttempted: recoveryAttemptedRef.current,
-    });
-    recoveryAttemptedRef.current = decision.nextHasAttempted;
-    if (!decision.shouldRequest) return;
-    const targetId = activeLocalProductId as string;
-    let cancelled = false;
-    void api()!.products.get(targetId).then((detail) => {
-      if (cancelled) return;
-      // 即便 cancelled 标志位为 false，也再校验一次当前 view + activeLocalProductId：
-      // 用户可能在 in-flight 期间主动退出详情页（setProduct(null) → sync effect
-      // 把 activeLocalProductId 清掉）或切到非 workspace 视图，此时不能把已拉到手的
-      // 旧产品再塞回去。
-      if (currentViewForRecoveryRef.current !== "workspace") return;
-      if (currentActiveLocalProductIdForRecoveryRef.current !== targetId) return;
-      setProduct(detail);
-    }).catch(() => {
-      if (cancelled) return;
-      // view 已切走时不清理 localStorage / activeLocalProductId：用户可能还在用
-      // products 视图，需要保留 id 以便重新打开。
-      if (currentViewForRecoveryRef.current !== "workspace") return;
-      if (currentActiveLocalProductIdForRecoveryRef.current !== targetId) return;
-      // 产品已被删除或主进程暂时不可达：清掉 localStorage，让 UI 回落到
-      // 工作台首页（AppWorkspaceHomePage），下次启动不再尝试恢复。
-      try { localStorage.removeItem("vbk:activeLocalProductId"); } catch { /* 忽略 */ }
-      setActiveLocalProductId(null);
-    });
-    return () => { cancelled = true; };
-    // activeLocalProductId / product?.id / view 都进 deps：用户在拉取期间切走时 effect
-    // 会 cleanup + 重新跑，重新跑时会被 policy 的几条短路拦住（product 已存在 /
-    // activeLocalProductId 已清 / view 非 workspace / 已 attempt 过），不再发起多余请求。
-  }, [activeLocalProductId, product?.id, view]);
-
-  useEffect(() => {
+    if (api()?.workspace && product) {
+      const snapshot = workspaceSnapshots.get(product.id);
+      if (snapshot) state.setReadiness(snapshot.readiness);
+      return;
+    }
     void updateReadiness(product);
   }, [product?.id, product?.updatedAt]);
 
@@ -206,40 +146,6 @@ export function useAppStateDerived(state: AppStateBase) {
     setBasicInfoButlerDefault(null);
     setBasicInfoServicePhone(null);
     setBasicInfoButlerLoadedForLocalProductId(null);
-  }, [product?.id]);
-
-  // 拉取当前产品的持久化规划状态，供 UI 显示「实际接受 / 缺失」以及续跑按钮。
-  // 行为契约：
-  //  - (A) lookup effect 只在 product?.id 变化时跑一次；把 localProductId 写入 ref，
-  //    回调里比对，产品切换后旧响应不会污染当前产品。
-  //  - (B) 后续状态由 planning:updated 实时事件驱动，不建立 interval；新 renderer
-  //    进程或产品切换时由这一次 lookup 补偿订阅建立前可能错过的事件。
-  useEffect(() => {
-    if (!product || !api()) return;
-    const capturedId = product.id;
-    currentLocalProductIdRefForPlanning.current = capturedId;
-    const eventVersionAtLookup = planningEventVersionRef.current;
-    let cancelled = false;
-
-    // lookup 只跑一次：写本地 cache；后续变化由实时事件到达。
-    api()!.planning.state(capturedId).then((s) => {
-      // 切换产品后旧响应必须丢弃：用 ref 比对当前 localProductId。
-      if (currentLocalProductIdRefForPlanning.current !== capturedId) return;
-      if (cancelled) return;
-      // lookup 在实时事件之后才返回时，事件携带的状态更新，不能被旧快照覆盖。
-      if (planningEventVersionRef.current !== eventVersionAtLookup) return;
-      if (s) setPlanningState(s);
-    }).catch((error) => {
-      if (currentLocalProductIdRefForPlanning.current !== capturedId) return;
-      if (cancelled) return;
-      if (planningEventVersionRef.current !== eventVersionAtLookup) return;
-      // lookup 失败不阻塞 UI；下次重新打开该产品会再次执行补偿 lookup。
-      logWarn("[App] planning.state lookup failed", { localProductId: capturedId, error });
-    });
-
-    return () => {
-      cancelled = true;
-    };
   }, [product?.id]);
 
   useEffect(() => {

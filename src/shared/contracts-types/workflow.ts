@@ -19,6 +19,7 @@ export type ProductWorkflowTaskStage =
   | "completed";
 
 export interface ProductWorkflowTask {
+  retryMode?: 'from_error' | 'from_start';
   id: string;
   localProductId: string;
   productName: string;

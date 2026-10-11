@@ -23,6 +23,7 @@ export class ProductExecutionDatabase {
   getProductExecutionTimes(ids: readonly string[]): Record<string, ProductExecutionTime> {
     return readProductExecutionTimes(this.db, ids, this.now());
   }
+  runProductTransaction<T>(task: () => T): T { return this.db.transaction(task)(); }
 
   close(): void {
     if (!this.db.open) return;

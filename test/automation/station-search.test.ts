@@ -287,3 +287,15 @@ test("searchAirports / searchTrainStations 空 keyword 直接返回 []，不发�
     searchTrainStations(pageStub as never, " ").then((r: StationCandidate[]) => assert.deepEqual(r, [])),
   ]);
 });
+
+test('站点接口集合缺失是解析失败，登录错误码不得丢失', async () => {
+  const original = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' } }))) as typeof fetch;
+    await assert.rejects(searchAirports(fakePage() as never, '成都'), /协议解析失败/);
+    await assert.rejects(searchTrainStations(fakePage() as never, '成都'), /协议解析失败/);
+    globalThis.fetch = (async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Failure',
+      Errors: [{ ErrorCode: '40010001' }] } }))) as typeof fetch;
+    await assert.rejects(searchAirports(fakePage() as never, '成都'), /40010001/);
+  } finally { globalThis.fetch = original; }
+});

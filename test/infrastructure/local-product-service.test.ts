@@ -66,6 +66,8 @@ test("本地业务版本变化后拒绝过期快照；本地删除不回写云�
   const first = await service.upsert(f.db.buildProductSnapshot({ destination: "潮州", days: 2, productForm: "privateTour" }));
   f.db.updateProduct(first.id, { ...first.product, customNote: "newer local edit" }, first.status, first.productJsonVersion);
   await assert.rejects(service.update(first, 1), error => error instanceof TibetProductConflictError);
+  const { productJsonVersion: _removed, ...unversioned } = await service.get(first.id);
+  await assert.rejects(service.update(unversioned, 1), error => error instanceof TibetProductConflictError);
   assert.equal((await service.get(first.id)).product.customNote, "newer local edit");
   assert.equal(await deleteRemoteProduct(f.db, service, first.id), true);
   assert.deepEqual(await service.list(), []);

@@ -10,6 +10,9 @@ import { historicalHotelCandidatePool } from "./historical-hotel-candidates.js";
 import type { AgentBusinessDependencies } from "./integration-generate.js";
 import type { ProductDetail } from "../../shared/contracts.js";
 import type { AgentTool } from "./types.js";
+import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
+import { canonicalJson } from '../../shared/product-storage-projection.js';
+import { ProductCommandConflict } from '../application/product-command-service.js';
 type JsonObject = Record<string, unknown>;
 const productData = (product: ProductDetail) => product.product as JsonObject;
 const cleanText = (value: unknown) => typeof value === "string" ? value.trim() : "";
@@ -29,7 +32,7 @@ export function createItineraryHotelTool(deps: AgentBusinessDependencies, get: (
       }
       const data = productData(JSON.stringify(withChoices) === JSON.stringify(productData(current))
         ? current
-        : deps.productMutations.replace(ctx.localProductId, withChoices, { status: current.status }));
+        : deps.productMutations.commands.mergeChanges(ctx.localProductId, current, withChoices, 'user', { status: current.status }));
       const itinerary = Array.isArray(data.itinerary) ? data.itinerary as JsonObject[] : [];
       const basicInfo = data.basicInfo as JsonObject | undefined;
       const operations = data.operations as JsonObject | undefined;
@@ -39,11 +42,26 @@ export function createItineraryHotelTool(deps: AgentBusinessDependencies, get: (
         const requirement = hotelStayRequirement(data, day);
         return requirement ? [[Number(day.day), requirement] as const] : [];
       }));
-      const resolved = await resolveItineraryHotelCandidates(itinerary, city, nights, cleanText(operations?.hotelTier), (progress) => {
+      let queryIdentity = hotelQueryIdentity(data);
+      let progressBaseline = get(ctx.localProductId);
+      const resolved = await platformResourceGateway(deps.db, ctx.localProductId).query('daily_hotels', queryIdentity,
+        () => resolveItineraryHotelCandidates(itinerary, city, nights, cleanText(operations?.hotelTier), (progress) => {
         const latest = get(ctx.localProductId);
-        deps.productMutations.replace(ctx.localProductId, mergeResolvedHotelProgress(productData(latest), itinerary, progress), { status: latest.status });
-      }, requirements, new Map(itinerary.map(day => [Number(day.day), hotelFallbackAllowed(instruction, Number(day.day), (operations?.hotelFallbackPolicy as JsonObject | undefined)?.allowDowngrade as boolean | undefined)])), historicalHotelCandidatePool(deps.db, ctx.localProductId));
+        if (hotelQueryIdentity(latest.product) !== queryIdentity) throw new ProductCommandConflict('酒店核验条件已变化，请按最新方案重试。');
+        progressBaseline = deps.productMutations.commands.mergeChanges(ctx.localProductId, progressBaseline,
+          mergeResolvedHotelProgress(productData(progressBaseline), itinerary, progress), 'resource', { status: latest.status });
+        queryIdentity = hotelQueryIdentity(progressBaseline.product);
+      }, requirements, new Map(itinerary.map(day => [Number(day.day), hotelFallbackAllowed(instruction, Number(day.day), (operations?.hotelFallbackPolicy as JsonObject | undefined)?.allowDowngrade as boolean | undefined)])), historicalHotelCandidatePool(deps.db, ctx.localProductId)), undefined, 'ctrip');
       return { content: safeJson(persistedItineraryHotelResult(resolved)) };
     },
   };
+}
+
+function hotelQueryIdentity(data: JsonObject): string {
+  const basic = data.basicInfo as JsonObject | undefined;
+  const ops = data.operations as JsonObject | undefined;
+  return canonicalJson({ city: basic?.meetingCity, nights: basic?.nights, tier: ops?.hotelTier,
+    fallback: ops?.hotelFallbackPolicy, days: (data.itinerary as JsonObject[] ?? []).map(day => ({
+      day: day.day, requirement: hotelStayRequirement(data, day),
+    })) });
 }

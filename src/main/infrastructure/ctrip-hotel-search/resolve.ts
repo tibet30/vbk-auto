@@ -48,6 +48,8 @@ async function resolveItineraryHotelCandidates(
       : hotelSearchAnchorNames(day, preferredCity);
     let anchor: Context | undefined;
     let candidates: CtripHotelCandidate[] | undefined;
+    let searchFailure: unknown;
+    const searchedContexts = new Set<string>();
     try {
       for (const anchorName of anchorNames) {
         const contexts = await fetchCtripHotelContext(anchorName, fetcher);
@@ -56,14 +58,20 @@ async function resolveItineraryHotelCandidates(
             anchorName, preferredCity: nightlyHotelAlternatives(text(day.hotel)).length ? undefined : contextCity, requirePreferredCity: Boolean(contextCity) && !nightlyHotelAlternatives(text(day.hotel)).length,
             requirement: nightlyHotelAlternatives(text(day.hotel)).length ? { ...requirement, anchorName, maxDistanceKm: requirement?.maxDistanceKm ?? 5 } : requirement,
           });
+          // Alias suggestions can resolve to the same official landmark. Do not
+          // restart the complete tier budget for that identical query context.
+          const contextKey = JSON.stringify([anchor.cityId, anchor.id, anchor.coordinate, anchor.requirement]);
+          if (searchedContexts.has(contextKey)) continue;
+          searchedContexts.add(contextKey);
           candidates = await fetchHotelCandidatesWithFallback(anchor, dates, dayTier, anchor.requirement ?? requirement, isHotelDowngradeAllowed(allowDowngrade, Number(day.day)), fetcher);
           break;
         } catch (error) {
+          searchFailure = error;
           if (anchorName === anchorNames.at(-1) || !(error instanceof HotelCandidatesUnavailableError || error instanceof HotelSearchEmptyResultError || error instanceof Error && /未找到.*酒店检索地标/u.test(error.message))) throw error;
         }
       }
       if (!anchor) throw new Error("缺少可定位的酒店检索地标。");
-      if (!candidates?.length) throw new Error("未取得有效酒店候选。");
+      if (!candidates?.length) throw searchFailure ?? new Error("未取得有效酒店候选。");
     } catch (error) {
       const city = contextCity || anchor?.cityName || "未识别城市";
       const diamond = requirement?.diamond ?? hotelDiamondFromTier(hotelTier);

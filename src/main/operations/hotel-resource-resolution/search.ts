@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { assertPlatformQueryResponse } from '../../infrastructure/platform-query-response.js';
 
 export async function searchVbkResources(page: Page) {
   const response = await vbkSessionRequest(page, {
@@ -16,5 +17,6 @@ export async function searchVbkResources(page: Page) {
       vendorResourceCodes: [], businessOwner: "CUSTOM",
     },
   });
+  assertPlatformQueryResponse(response.payload, [['resources']], 'VBK 酒店资源查询');
   return response.payload;
 }

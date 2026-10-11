@@ -5,6 +5,7 @@ import { useAccountBrowserState } from "./domains/account-browser-state";
 import { useAiSettingsState } from "./domains/ai-settings-state";
 import { useNavigationState } from "./domains/navigation-state";
 import { useProductState } from "./domains/product-state";
+import { workspaceSnapshots } from './workspace-snapshot-store.js';
 
 /**
  * Renderer 状态组合根。
@@ -71,10 +72,14 @@ export function useAppStateBase() {
     ]);
     if (collectionScopeRef.current !== requestScope) return;
     if (taskResult.status === "fulfilled") {
-      productState.setWorkflowTasks(taskResult.value);
+      productState.setWorkflowTasks(taskResult.value.map(task => workspaceSnapshots.get(task.localProductId)?.execution.task ?? task));
     }
     if (productResult.status === "fulfilled") {
-      const next = productResult.value;
+      const next = productResult.value.map(summary => {
+        const product = workspaceSnapshots.get(summary.id)?.product;
+        return product ? { ...summary, name: product.name, status: product.status, productId: product.productId,
+          updatedAt: product.updatedAt, workflowTask: product.workflowTask } : summary;
+      });
       productState.setProducts(next);
       productState.setProduct((current: ProductDetail | null) =>
         current && next.some((item: ProductSummary) => item.id === current.id) ? current : null);

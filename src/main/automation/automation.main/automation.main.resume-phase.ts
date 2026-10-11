@@ -78,7 +78,12 @@ export function approvedRecoveryStartPhase(product: ProductDetail, failedPhase: 
 
 
 export function isVerifiedAutomationComplete(product: ProductDetail): boolean {
-  return Boolean(product.productId && product.automation?.status === "succeeded"
+  return product.automation?.status === 'succeeded' && hasVerifiedMotherPhases(product);
+}
+
+/** Mother evidence is independent of a failed traffic execution status. */
+export function hasVerifiedMotherPhases(product: ProductDetail): boolean {
+  return Boolean(product.productId && product.automation
     && product.automation.phases.some(item => item.phase === "preflight" && item.status === "completed")
     && draftPhasesFor(parseProduct(product.product)).filter(phase => phase !== "trafficLine").every(phase =>
       product.automation!.phases.some(item => item.phase === phase && item.status === "completed")));

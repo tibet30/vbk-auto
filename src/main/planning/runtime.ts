@@ -1,3 +1,4 @@
+import { platformResourceGateway } from "../infrastructure/platform-resource-gateway.js";
 /**
  * 把规划子系统接到现有 VbkDatabase 的胶水代码（barrel）：
  *   - DbGenerationStateStore：把 PlanningGenerationState 存到 planning_generation 表；
@@ -98,7 +99,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       keyword,
       product: product.product,
       context,
-      detail: await suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context),
+      detail: await platformResourceGateway(this.db, localProductId).query('poi', { keyword, context }, async () => suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context), value => !value.candidates.length),
       confirmedPoiId: historicalConfirmedPoiId(this.db, product, keyword),
       checkAvailability: (poiId) => this.getPoiAvailability(poiId),
       disambiguate: this.poiDisambiguate,
@@ -153,7 +154,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       : result.product;
     alignProvinceLevelBasicCities(productData, module, product.product);
     // Notify so workspace readiness refreshes after agent/planning module writes.
-    this.productMutations.replace(localProductId, productData, {
+    this.productMutations.commands.mergeChanges(localProductId, product, productData, 'ai', {
       // 同日同名同类型的既有 POI 由统一写入口保留。规划模型重写文案时常会
       // 回传空 poiName/poiId；它不是显式取消已核验绑定的指令。
       // 改名、移除、类型转换或新的完整 POI 映射仍按传入值生效。
@@ -172,7 +173,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     }
     const reason = planningWriteContractError(current, "itinerary", itinerary);
     if (reason) return { ok: false, reason };
-    this.productMutations.replace(localProductId, { ...current.product, itinerary }, {
+    this.productMutations.commands.mergeChanges(localProductId, current, { ...current.product, itinerary }, 'resource', {
       preserveVerifiedItineraryPois: false, expectedVersion: current.productJsonVersion ?? 0,
     });
     return { ok: true };
@@ -183,7 +184,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     if (!product) return { ok: false, reason: "产品不存在" };
     const next = structuredClone(product.product);
     next.operations = operations;
-    this.productMutations.replace(localProductId, next, { notify: false });
+    this.productMutations.commands.mergeChanges(localProductId, product, next, 'resource', { notify: false });
     return { ok: true };
   }
 
@@ -199,7 +200,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       ? next.operations as Record<string, unknown>
       : {};
     next.operations = { ...operations, trafficLine: structuredClone(config) };
-    this.productMutations.replace(localProductId, next, { notify: false });
+    this.productMutations.commands.mergeChanges(localProductId, product, next, 'resource', { notify: false });
     return { ok: true };
   }
 

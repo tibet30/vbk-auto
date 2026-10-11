@@ -66,6 +66,9 @@ export type WorkflowTaskRetryMode = "from_error" | "from_start";
  */
 
 export interface VbkApi {
+  workspace: {
+    get(id: string): Promise<import('./contracts-product-architecture.js').ProductWorkspaceSnapshot>;
+  };
   agent: {
     get(localProductId: string): Promise<AgentDisplaySnapshot>;
     getHistory(localProductId: string, page: number): Promise<AgentHistoryPage>;
@@ -271,6 +274,7 @@ export interface VbkApi {
     quitAndInstall(): Promise<void>;
   };
   events: {
+    onWorkspaceUpdated(listener: (snapshot: import('./contracts-product-architecture.js').ProductWorkspaceSnapshot) => void): () => void;
     onAgentUpdated(listener: (snapshot: AgentDisplaySnapshot) => void): () => void;
     onProductUpdated(listener: (product: ProductDetail) => void): () => void;
     /** 后台任务状态变化后推送；renderer 按当前可见页面决定是否应用。 */

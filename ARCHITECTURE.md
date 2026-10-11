@@ -134,7 +134,7 @@ saleControl → basic → presentation → itinerary → package
 - 完整录入和单阶段修复共用处理器、执行上下文与恢复规则。
 - 每阶段最多三次尝试；本地检查点保存失败时终止，避免重复平台写入。
 - 停止后让当前请求结束；等待中的页面操作、迟到诊断动作与后续阶段检查取消信号。
-- 授权守卫在平台调用前核对账号、意图、范围与产品；确定性执行中允许受控生成的产品指纹变化，具体例外见 `integration-guard.ts`。
+- 授权守卫在平台调用前严格核对账号、意图、范围与产品指纹。确定性回填只能在匹配旧方案的产品事务内推进授权；价格、酒店及 POI 选择等业务变化不适用。恢复、暂停和完成不会直接刷新授权。
 - 母产品可在交通失败后通过预检；`succeeded` / `draft_saved` 不能证明每个交通子产品完成。
 - 子产品完成读取自身 `verified`、`finalReadback` 和正式资源段。不可售/延后单独说明，不能伪造成功。
 - 当前工作流止于保存草稿。提审、发布由运营另行操作。
@@ -145,7 +145,10 @@ saleControl → basic → presentation → itinerary → package
 
 | 事实 | 来源 | 用途与限制 |
 | --- | --- | --- |
-| 产品内容、版本与编号 | SQLite `products.product_json`、版本、`product_id` | 本地内容权威；有编号不代表完成录入 |
+| 产品方案、版本与编号 | SQLite `products.product_json`、`plan_version`、`product_id` | 方案权威；有编号不代表完成录入 |
+| 资源候选、行政核验与平台镜像 | `product_resource_evidence`、`evidence_version` | 与方案组合读取，保留来源；候选及明确选择继续参与最终授权 |
+| 运行诊断 | `product_runtime_diagnostics` | 不改变方案版本或授权指纹；执行检查点仍由各耐久记录保存 |
+| 工作台更新顺序 | `products.view_revision` | 方案、证据、Agent、任务、消息等提交触发递增；跨窗口和重连使用相同合并规则 |
 | 本地归属与产品附属状态 | `local-product-service` / 本地产品状态 | 按应用账号管理；历史云端产品只读迁入，不覆盖已有本地业务 |
 | Agent 运行与授权 | `agent_snapshots` | 意图、事件、重试、人工输入、确认；文本不代表业务完成 |
 | 规划进度 | 当前产品 `planning` 节点与兼容投影；旧 `planning_generation` | 节点进度和旧续跑状态；准备完成从产品检查判断 |
@@ -160,8 +163,13 @@ saleControl → basic → presentation → itinerary → package
 
 ## 6. 写入、并发与安全
 
-- `ProductMutationService` 提交时读取最新产品，保护城市锚点、已核验 POI 和人工删除凭证；保存成功后重读并广播。
-- 产品内容使用版本校验；数据库还保留人工字段与核查任务的原子写入路径，并非所有写入只经过一个类。
+- `ProductCommandService` 提交时读取最新产品，按字段与读取时的基线比较；调用 `ProductMutationService` 执行城市、已核验 POI、人工删除与酒店一致性规则。保存后重读，再广播。
+- 人工字段与严格匹配的核查任务在同一事务中保存；资源和 AI 命令也在产品事务内核对任务。旧完整编辑入口适配到有版本的完整编辑命令。
+- 内部通过存储实现拆分方案、资源证据和诊断；兼容的 `ProductDetail.product` 仍可组合读取，但异步调用方只提交其负责的变化。
+- `ProductExecutionService` 聚合持久化阶段、Agent 和任务事实，在写入处更新任务投影。查询及广播不修复业务状态；任务管理门面委托 Agent。
+- `platform-business-queries` 提供 POI、酒店资源库、车辆、交通站点、封面及母产品回读接口，协议解析集中在既有底层实现；每日酒店仍使用独立类型及查询适配。
+- `PlatformOperationService` 记录账号、查询条件指纹和来源，区分空结果、登录、网络、解析与业务错误。阶段写入在页面锁内重新检查授权及取消；发出前持久化记录，结果不明或执行期间重启会进入 Agent 核查，先走只读回读。
+- `workspace:get` 与 `workspace:updated` 返回同一事务快照。前端缓存按应用账号及产品隔离，只接受更大的 `viewRevision`；账号切换清空，窗口恢复重读。
 - `meetingCity` 是创建时城市锚点，`destinationCity` 与其一致；行政字段去尾缀，POI 和片区名称保留。
 - 指定行程保留日期、顺序、点名地点、备选与活动。接送写交通活动，餐食/住宿写各自字段；纯接送日可无景点。
 - `ProductWorkflowCoordinator` 保护同一产品的长流程。排队录入也预留产品，避免等待期间被改写。
@@ -194,8 +202,11 @@ Agent 集成层可以装配跨模块能力，不能据此将规划与平台执�
 逐项证据和失败定位见 [2026-10-11 架构问题核验](docs/architecture-audit-2026-10-11.md)。
 
 - 旧文档的浏览器大文件、无日志导出、两套正式规划循环等描述已过时。
-- 界面 `derived.ts` 仍集中若干恢复副作用；日志已有容量上限，但没有按时间 TTL。
+- 界面初始化与恢复已拆出快照订阅、规划状态和近期产品恢复职责；日志已有容量上限，但没有按时间 TTL。
 - 平台协议与登录会话漂移风险仍存在；本地测试不能替代真实账号回读。
 - 初次核验的 5 项失败已处理：3 项旧预期、2 项餐食迁移涉及实现缺陷及旧预期。修复后重点回归 140 项通过，类型检查通过；详见核验记录。
 - `npm test` 当前只运行变化相关单元测试；全量入口是 `npm run test:all`。
-- 本次仅核验当前源码与本地测试，未执行真实模型调用、平台写入、打包或上线验证。
+- 五阶段重构的本地验收与基线失败比较见 [重构验收记录](docs/product-architecture-validation.md)；迁移和旧版恢复见 [迁移说明](docs/product-architecture-migration.md)。
+- 真实模型调用、业务库迁移、平台写入和发布尚未执行。
+
+复审新增边界、修复及验收见 [架构与业务一致性复审](docs/product-architecture-review.md)。

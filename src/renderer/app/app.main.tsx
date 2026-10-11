@@ -1,6 +1,8 @@
 import { AppView } from "./views/AppView";
 import { useAppModel } from "./app.main.model";
-import { AppAuthProvider, useAppAuthController } from "./auth/AppAuthContext";
+import { AppAuthProvider, useAppAuthController, useAppAuth } from "./auth/AppAuthContext";
+import { workspaceSnapshots } from './state/workspace-snapshot-store';
+import { useEffect } from 'react';
 import { AppLoginPage } from "./auth/LoginPage";
 import { AppFrame } from "./views/shell/AppFrame";
 import { AppUpdateProvider } from "./update/AppUpdateContext";
@@ -24,5 +26,11 @@ export function App() {
 }
 
 function AuthenticatedWorkspace() {
+  const { user } = useAppAuth();
+  workspaceSnapshots.changeOwner(user.id);
+  useEffect(() => {
+    workspaceSnapshots.changeOwner(user.id);
+    return () => workspaceSnapshots.clearOwner(user.id);
+  }, [user.id]);
   return <AppView {...useAppModel()} />;
 }

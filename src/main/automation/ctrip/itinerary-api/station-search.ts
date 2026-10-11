@@ -16,6 +16,7 @@
  */
 
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
+import { assertPlatformQueryResponse } from '../../../infrastructure/platform-query-response.js';
 
 const SUGGEST_AIRPORT_ENDPOINT =
   "https://online.ctrip.com/restapi/soa2/20049/suggestAirport";
@@ -106,14 +107,14 @@ export function normalizeTrainCandidates(items: unknown): StationCandidate[] {
 interface AckStatusPayload {
   ResponseStatus?: {
     Ack?: unknown;
-    Errors?: Array<{ Message?: unknown; message?: unknown }>;
+    Errors?: Array<{ ErrorCode?: unknown; Message?: unknown; message?: unknown }>;
   };
 }
 
 function describeAckErrors(payload: AckStatusPayload): string {
   const errors = payload.ResponseStatus?.Errors;
   if (Array.isArray(errors) && errors.length) {
-    return errors.map((e) => e?.Message || e?.message || String(e)).join(", ");
+    return errors.map((e) => `${e?.ErrorCode ?? ''} ${e?.Message || e?.message || String(e)}`).join(", ");
   }
   return "未知业务失败";
 }
@@ -150,6 +151,7 @@ export async function searchAirports(
     headers: { "x-tt-core": "1" },
   });
   assertAck(response.payload as AckStatusPayload, "VBK 接机站搜索");
+  assertPlatformQueryResponse(response.payload, [['airports']], 'VBK 接机站搜索');
   const airports = (response.payload as { airports?: unknown }).airports;
   return normalizeAirportCandidates(airports);
 }
@@ -178,6 +180,7 @@ export async function searchTrainStations(
     headers: { "x-tt-core": "1" },
   });
   assertAck(response.payload as AckStatusPayload, "VBK 火车站搜索");
+  assertPlatformQueryResponse(response.payload, [['trainStations']], 'VBK 火车站搜索');
   const trainStations = (response.payload as { trainStations?: unknown }).trainStations;
   return normalizeTrainCandidates(trainStations);
 }

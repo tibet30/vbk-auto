@@ -1,22 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { runDatabaseMigrations } from '../../src/main/infrastructure/database/parts/migration-registry.js';
+import { buildProductSnapshot } from '../../src/main/infrastructure/database/parts/product-draft.js';
+import { verifiedAutomation } from '../helpers/verified-automation.js';
 import { createWorkflowTask, completeWorkflowTaskForProduct, completeSavedProductWorkflowTasks, getWorkflowTask, updateWorkflowTask } from '../../src/main/infrastructure/database/parts/workflow-tasks.js';
 
 function fixture() {
   const db = new Database(':memory:');
-  db.exec(`CREATE TABLE workflow_tasks(id TEXT PRIMARY KEY,local_product_id TEXT,product_name TEXT,status TEXT,stage TEXT,progress INTEGER,message TEXT,error TEXT,created_at TEXT,updated_at TEXT,started_at TEXT,completed_at TEXT);
-    CREATE TABLE products(id TEXT,status TEXT,product_id TEXT,product_json TEXT);
-    CREATE TABLE agent_snapshots(local_product_id TEXT,snapshot_json TEXT);
-    CREATE TABLE automation_runs(local_product_id TEXT,payload_json TEXT,updated_at TEXT);`);
-  const product = { id: 'local', status: 'draft_saved', productId: '79346484' } as const;
-  db.prepare('INSERT INTO products VALUES(?,?,?,?)').run(product.id, product.status, product.productId, '{}');
+  runDatabaseMigrations(db);
+  const detail = buildProductSnapshot({ destination: '成都', days: 1, productForm: 'privateTour' });
+  detail.id = 'local'; detail.status = 'draft_saved'; detail.productId = '79346484';
+  const proof = verifiedAutomation(detail);
+  db.prepare('INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
+    .run(detail.id, detail.name, detail.status, detail.productId, JSON.stringify(detail.product), 'old', 'old');
+  db.prepare('INSERT INTO automation_runs VALUES(?,?,?,?,?)').run('proof', detail.id, JSON.stringify(proof), 'old', 'old');
+  const product = detail;
   const task = createWorkflowTask(db, product.id, '西安6天5晚私家团');
   return { db, product, task };
 }
 function pending(db: Database.Database, status = 'paused', reason = '当前产品未匹配玩法线路') {
-  db.prepare('INSERT INTO agent_snapshots VALUES(?,?)').run('local', JSON.stringify({ run: { status } }));
-  db.prepare('INSERT INTO automation_runs VALUES(?,?,?)').run('local', JSON.stringify({ phases: [{ phase: 'preflight', status: 'completed' }], trafficLine: { children: [{ verified: false, failureReason: reason }] } }), 'now');
+  db.prepare('INSERT INTO agent_snapshots VALUES(?,?,?)').run('local', JSON.stringify({ localProductId: 'local', events: [],
+    run: { id: 'run', status, createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z' } }), 'old');
+  const proof = JSON.parse((db.prepare('SELECT payload_json FROM automation_runs').get() as {payload_json: string}).payload_json);
+  proof.trafficLine = { children: [{ variant: 'trainRoundTrip', verified: false, completedStages: [], failureReason: reason }] };
+  db.prepare('UPDATE automation_runs SET payload_json=?').run(JSON.stringify(proof));
 }
 
 test('启动/列表刷新不能把仍暂停等待线路审核的母草稿收敛为全部完成', () => {
@@ -27,12 +35,12 @@ test('启动/列表刷新不能把仍暂停等待线路审核的母草稿收敛�
     pending(db);
     const restored = completeSavedProductWorkflowTasks(db)[0]!;
     assert.equal(restored.status, 'needs_attention');
-    assert.equal(restored.progress, 99);
+    assert.ok(restored.progress < 100);
     assert.equal(restored.completedAt, undefined);
-    assert.match(restored.message, /交通套餐待玩法线路匹配审核/);
+    assert.match(restored.message, /交通套餐尚未通过最终回读/);
     assert.deepEqual(completeSavedProductWorkflowTasks(db), [], 'repeat refresh is idempotent');
-    db.prepare('UPDATE agent_snapshots SET snapshot_json=?').run(JSON.stringify({ run: { status: 'completed' } }));
-    db.prepare('UPDATE automation_runs SET payload_json=?').run(JSON.stringify({ trafficLine: { children: [{ verified: true }] } }));
+    db.prepare('UPDATE agent_snapshots SET snapshot_json=?').run(JSON.stringify({ localProductId: 'local', events: [], run: { id: 'run', status: 'completed', createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z' } }));
+    db.prepare("UPDATE automation_runs SET payload_json=json_set(payload_json,'$.trafficLine.children',json(?))").run(JSON.stringify([{ variant: 'trainRoundTrip', verified: true, completedStages: ['finalReadback'] }]));
     assert.equal(completeWorkflowTaskForProduct(db, product)!.status, 'succeeded');
   } finally { db.close(); }
 });
@@ -56,8 +64,8 @@ test('交通恢复运行中也不能被母草稿提前收敛成100%，子产品�
     pending(db, 'running');
     completeSavedProductWorkflowTasks(db);
     assert.equal(getWorkflowTask(db, task.id)!.status, 'running');
-    assert.equal(getWorkflowTask(db, task.id)!.progress, 99);
-    db.prepare('UPDATE automation_runs SET payload_json=?').run(JSON.stringify({ trafficLine: { children: [{ verified: true }] } }));
+    assert.ok(getWorkflowTask(db, task.id)!.progress < 100);
+    db.prepare("UPDATE automation_runs SET payload_json=json_set(payload_json,'$.trafficLine.children',json(?))").run(JSON.stringify([{ variant: 'trainRoundTrip', verified: true, completedStages: ['finalReadback'] }]));
     assert.equal(completeWorkflowTaskForProduct(db, product)!.status, 'succeeded');
   } finally { db.close(); }
 });

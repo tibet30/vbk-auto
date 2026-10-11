@@ -54,5 +54,7 @@ test("phase-B failure recovery stays on the deterministic runner", async () => {
   assert.match(core, /不会改回 AI 规划/);
   assert.match(handoff, /refreshFingerprint/);
   assert.match(automation, /failedAutomationResumePhase/);
-  assert.match(automation, /executeApprovedWorkflow[\s\S]*failedAutomationResumePhase/);
+  assert.match(automation, /executeApprovedWorkflow[\s\S]*approvedWorkflowPlan\(product/);
+  const policy = await read("src/main/automation/automation.main/runtime/workflow-plan.ts");
+  assert.match(policy, /approvedWorkflowPlan[\s\S]*failedAutomationResumePhase\(product\.automation\)/);
 });

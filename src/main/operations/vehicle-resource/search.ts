@@ -7,6 +7,7 @@
 
 import type { Page } from "playwright";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
+import { assertPlatformQueryResponse } from '../../infrastructure/platform-query-response.js';
 
 export async function searchVehicleResourceGroups(page: Page, query: string) {
   const response = await vbkSessionRequest(page, {
@@ -32,5 +33,7 @@ export async function searchVehicleResourceGroups(page: Page, query: string) {
       pageSize: 10,
     },
   });
+  assertPlatformQueryResponse(response.payload, [['resourceGroupInfoList'], ['resourceGroups'],
+    ['data', 'list'], ['data', 'resourceGroupInfoList'], ['data', 'resourceGroups'], ['list']], 'VBK 车辆资源查询');
   return response.payload;
 }

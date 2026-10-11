@@ -22,6 +22,9 @@ import { buildProductSnapshot } from "../product-draft.js";
 import { ensureProductExecutionTime, readProductExecutionTime } from "../../../../operations/product-execution-clock.js";
 import { now } from "../types.js";
 import { readLocalProductState } from "../local-product-state.js";
+import { readProductArchitecture, writeProductArchitecture } from '../product-architecture-store.js';
+import { canonicalJson, splitProduct } from '../../../../../shared/product-storage-projection.js';
+import { approvedPlanVersion } from '../../../../application/product-approval-projection.js';
 
 export function createProduct(db: Database.Database, input: CreateProductInput): ProductDetail {
   return importProductSnapshot(db, buildProductSnapshot(input));
@@ -32,6 +35,9 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
   const existingCreatedAt = (db.prepare("SELECT created_at FROM products WHERE id=?").get(snapshot.id) as { created_at: string } | undefined)?.created_at;
   const product = parseAndNormalizeProductJson(JSON.stringify(snapshot.product));
   const restoredAt = snapshot.updatedAt || now();
+  const version = existing ? (existing.planVersion ?? existing.productJsonVersion ?? 0) + Number(
+    canonicalJson(existing.plan) !== canonicalJson(splitProduct(product).plan)
+      || approvedPlanVersion(existing) !== approvedPlanVersion({ product })) : 0;
   const restore = db.transaction(() => {
     // Read this journal before replacing the product row. It intentionally is
     // not part of the remote product snapshot's destructive business import.
@@ -63,7 +69,7 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
       db.prepare("DELETE FROM products WHERE id=?").run(snapshot.id);
     }
     db.prepare(
-      "INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at,basic_info_saved,product_json_version) VALUES(?,?,?,?,?,?,?,?,?)",
+      "INSERT INTO products(id,name,status,product_id,product_json,created_at,updated_at,basic_info_saved,product_json_version,plan_version,view_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
     ).run(
       snapshot.id,
       snapshot.name,
@@ -73,8 +79,12 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
       existingCreatedAt ?? restoredAt,
       restoredAt,
       snapshot.basicInfoSaved ? 1 : 0,
-      existing ? (existing.productJsonVersion ?? 0) + (JSON.stringify(existing.product) === JSON.stringify(product) ? 0 : 1) : 0,
+      version,
+      version,
+      (existing?.viewRevision ?? 0) + 1,
     );
+    const separated = writeProductArchitecture(db, snapshot.id, product);
+    db.prepare('UPDATE products SET product_json=? WHERE id=?').run(JSON.stringify(separated.plan), snapshot.id);
     const insertMessage = db.prepare(
       "INSERT OR IGNORE INTO messages(id,local_product_id,role,content,task_status,created_at) VALUES(?,?,?,?,?,?)",
     );
@@ -126,6 +136,7 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
   const messages = db.prepare("SELECT * FROM messages WHERE local_product_id=? ORDER BY created_at").all(id) as Array<Record<string, string>>;
   const tasks = db.prepare("SELECT * FROM research_tasks WHERE local_product_id=?").all(id) as Array<Record<string, string>>;
   const automationRow = db.prepare("SELECT payload_json FROM automation_runs WHERE local_product_id=? ORDER BY updated_at DESC LIMIT 1").get(id) as { payload_json: string } | undefined;
+  const architecture = readProductArchitecture(db, id, JSON.parse(product.product_json));
   return {
     id: product.id,
     ...localProductMetadata(db, id),
@@ -135,7 +146,12 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
     updatedAt: product.updated_at,
     executionTime: readProductExecutionTime(db, id),
     productJsonVersion: Number((product as Record<string, unknown>).product_json_version ?? 0) || 0,
-    product: parseAndNormalizeProductJson(product.product_json),
+    planVersion: Number(product.plan_version) || 0,
+    evidenceVersion: architecture.evidenceVersion,
+    viewRevision: Number(product.view_revision) || 0,
+    plan: JSON.parse(product.product_json),
+    resourceEvidence: architecture.evidence,
+    product: parseAndNormalizeProductJson(JSON.stringify(architecture.product)),
     messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
     researchTasks: coalescePoiResearchTasks(tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) }))),
     automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
@@ -174,6 +190,8 @@ export function deleteProduct(db: Database.Database, id: string): boolean {
     db.prepare("DELETE FROM messages WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM planning_generation WHERE local_product_id=?").run(localProductId);
     db.prepare("DELETE FROM local_product_state WHERE local_product_id=?").run(localProductId);
+    db.prepare('DELETE FROM product_resource_evidence WHERE local_product_id=?').run(localProductId);
+    db.prepare('DELETE FROM product_runtime_diagnostics WHERE local_product_id=?').run(localProductId);
     db.prepare("DELETE FROM products WHERE id=?").run(localProductId);
     return true;
   });

@@ -55,7 +55,7 @@ test("行程 POI 编辑器仅供人工兜底：保留全部候选但不自动选
 });
 
 test("POI 保存成功后广播产品更新并退出保存态", () => {
-  assert.match(ipcSource, /replaceProductAndSatisfyResearchTasks\([\s\S]*emitProduct\(saved\);[\s\S]*return saved;/);
+  assert.match(ipcSource, /commands\.manualField\([\s\S]*emitProduct\(saved\);[\s\S]*return saved;/);
   assert.match(source, /logPoiManual\("save_success"[\s\S]*setEditing\(false\);[\s\S]*setDetail\(null\);[\s\S]*setSelected\(null\);/);
   assert.match(source, /finally\s*\{\s*setLoading\(null\);\s*\}/);
 });

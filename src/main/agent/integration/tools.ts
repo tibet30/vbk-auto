@@ -1,3 +1,6 @@
+import { platformBusinessQueries } from '../../infrastructure/platform-business-queries.js';
+import { canonicalJson } from '../../../shared/product-storage-projection.js';
+import { platformResourceGateway } from "../../infrastructure/platform-resource-gateway.js";
 /**
  * createAgentBusinessTools：把 generation / itineraryDraft / creationRecovery 三组
  * 子工具合并为一个 AgentTool[]，并对每个 tool 包装：
@@ -34,14 +37,8 @@ import { resolveProductTrafficLineAvailability } from "../../automation/ctrip/tr
 import type { TrafficLineStationDisambiguator } from "../../automation/ctrip/traffic-line/endpoints.js";
 import type { ProductDetail } from "../../../shared/contracts.js";
 import { requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
-import { searchVbkResources, firstHotelResource } from "../../operations/hotel-resource.js";
-import { buildVehicleResourceQuery, searchVehicleResourceGroups, extractResourceGroups, bestResourceGroup, resolveVehicleResource } from "../../operations/vehicle-resource.js";
-import { applyAutoCoverFill } from "../../operations/cover-auto-fill.js";
-import { suggestPoiDetail } from "../../infrastructure/poi-suggest.js";
 import { getCtripSightAvailabilities } from "../../infrastructure/ctrip-sight-availability.js";
 import { compactPoiQueryResult, poiCandidatesForAvailability } from "../poi-query-compact.js";
-import { searchAirports, searchTrainStations } from "../../automation/ctrip/itinerary-api/station-search.js";
-import { getProductBaseInfoApi } from "../../automation/ctrip/basic-info/api.js";
 import { DbOrchestratorRuntime } from "../../planning/runtime.js";
 import { refreshSatisfiedResearchTasks } from "../../operations/research-refresh.js";
 import { selfRepairItineraryForVbk } from "../../planning/itinerary-self-repair.js";
@@ -59,13 +56,13 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
   const withPage = <T>(work: () => Promise<T>) => deps.productWorkflows.runVbkPageExclusive(work);
   const trafficStationDisambiguator = (localProductId: string): TrafficLineStationDisambiguator => async (request) =>
     deps.disambiguateStationOption({ localProductId, ...request });
-  const resolveTrafficAvailability = (localProductId: string) => resolveProductTrafficLineAvailability({
+  const resolveTrafficAvailability = (localProductId: string) => platformResourceGateway(deps.db, localProductId).query('traffic_endpoints', get(localProductId).product.operations, () => resolveProductTrafficLineAvailability({
     db: deps.db,
     browser: deps.browser,
     localProductId,
     runVbkPageExclusive: task => withPage(task),
     disambiguateStation: trafficStationDisambiguator(localProductId),
-  });
+  }));
   const resolveItineraryPoisAndTraffic = async (localProductId: string) => {
     const { current, converted } = await resolveAdministrativeRouteNodes(get(localProductId), deps, withPage);
     const runtime = new DbOrchestratorRuntime(deps.db, deps.browser, deps.productMutations, task => withPage(task), resolveTrafficAvailability, deps.disambiguatePoiOption);
@@ -79,10 +76,10 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     const latest = get(localProductId);
     const repair = selfRepairItineraryForVbk(latest.product.itinerary, Number((latest.product.basicInfo as JsonObject)?.nights));
     if (repair.changed) {
-      deps.productMutations.replace(localProductId, {
+      deps.productMutations.commands.mergeChanges(localProductId, latest, {
         ...productData(latest),
         itinerary: repair.itinerary,
-      }, { status: latest.status });
+      }, 'ai', { status: latest.status });
     }
     const removed = new Set([
       ...repair.removedTravelNodes,
@@ -133,7 +130,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const persistedChoices = applyPersistedHotelTierChoices(productData(result.product), instruction);
         const saved = JSON.stringify(persistedChoices) === JSON.stringify(productData(result.product))
           ? result.product
-          : deps.productMutations.replace(ctx.localProductId, persistedChoices, { status: result.product.status });
+          : deps.productMutations.commands.mergeChanges(ctx.localProductId, result.product, persistedChoices, 'user', { status: result.product.status });
         if (patchRequestsRecommendations(patch)
           && !hasCompletePresentationRecommendations(productData(saved).presentation)) {
           throw new Error("推荐理由未持久化：必须恰好保留 3 条分类不重复、文本非空的 recommendations；请调用 ensure_presentation_recommendations。");
@@ -149,11 +146,11 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     },
     {
       name: "query_poi", description: "按名称查询 VBK POI 候选和详情，并标注 usable（可查到且未暂停营业）；返回精简结果，不写入平台。", parameters: { type: "object", required: ["keyword"], properties: { keyword: { type: "string" } } },
-      async execute(args) {
+      async execute(args, ctx) {
         const keyword = cleanText(args.keyword);
         if (!keyword) throw new Error("缺少地点名称。");
         return withPage(async () => {
-          const detail = await suggestPoiDetail(await getVbkRequestPage(deps.browser), keyword);
+          const detail = await platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).poi(keyword);
           const candidates = poiCandidatesForAvailability({ keyword, detail });
           const availability = await getCtripSightAvailabilities(undefined, candidates.map((item) => item.poiId!), deps.db);
           return { content: safeJson(compactPoiQueryResult({ keyword, detail, availability })) };
@@ -175,7 +172,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const context = {
           destinationCity: cleanText(basic?.destinationCity || basic?.meetingCity), province: cleanText(basic?.province),
         };
-        const detail = await withPage(async () => suggestPoiDetail(await getVbkRequestPage(deps.browser), queryKeyword, context));
+        const detail = await withPage(async () => platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).poi(queryKeyword, context));
         const candidate = detail.candidates.find((item) => item.poiId === poiId && item.selectable && item.poiName);
         if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${queryKeyword}」的当前可选查询结果中。`);
         if (!isPlanningPoiCandidateInContext(candidate, context, productData(current), spotName, detail.candidates)) {
@@ -191,10 +188,13 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
           city: cleanText(candidate.city) || null,
           district: cleanText(candidate.district) || null,
         };
-        const result = deps.productMutations.applyAiPatch(ctx.localProductId, [
-          { op: "replace", path: `/itinerary/${dayIndex}/spots/${spotIndex}`, value: nextSpot },
-        ]);
-        if (!result.applied) throw new Error("已核验的 POI 未能保存到行程。");
+        const next = structuredClone(current.product);
+        const itinerary = next.itinerary as JsonObject[];
+        (itinerary[dayIndex]!.spots as JsonObject[])[spotIndex] = nextSpot;
+        deps.productMutations.commands.mergeChanges(ctx.localProductId, current, next, 'resource', {}, {
+          queryPath: ['basicInfo'], queryFingerprint: canonicalJson(current.product.basicInfo),
+          targetPath: ['itinerary'], targetFingerprint: canonicalJson(current.product.itinerary),
+        });
         refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         deps.emitProduct(get(ctx.localProductId));
         return { content: safeJson({ day, spotName, queryKeyword, poiName: candidate.poiName, poiId, province: candidate.province, city: candidate.city }) };
@@ -202,28 +202,28 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     },
     {
       name: "query_hotel_resource", description: "读取 VBK 酒店资源候选，不创建或绑定资源。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { return withPage(async () => { const product = get(ctx.localProductId); const payload = await searchVbkResources(await getVbkRequestPage(deps.browser)); const city = cleanText((productData(product).basicInfo as JsonObject | undefined)?.destinationCity); return { content: safeJson({ selected: firstHotelResource(payload, city), payload }) }; }); },
+      async execute(_args, ctx) { return withPage(async () => { const product = get(ctx.localProductId); const city = cleanText((productData(product).basicInfo as JsonObject | undefined)?.destinationCity); return { content: safeJson(await platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).hotelLibrary(city)) }; }); },
     },
     createItineraryHotelTool(deps, get),
     {
       name: "read_vbk_phase", description: "按当前 productId 从 VBK 读取基础信息，并返回本地阶段快照，用于核对不确定写入。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const product = get(ctx.localProductId); const remote = product.productId ? await withPage(async () => getProductBaseInfoApi(await getVbkRequestPage(deps.browser), product.productId!)) : null; return { content: safeJson({ productId: product.productId, status: product.status, automation: product.automation, remote }) }; },
+      async execute(_args, ctx) { const product = get(ctx.localProductId); const remote = product.productId ? await withPage(async () => platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).mother(product.productId!)) : null; return { content: safeJson({ productId: product.productId, status: product.status, automation: product.automation, remote }) }; },
     },
     {
       name: "query_vehicle_resource", description: "按城市、座位和天数查询 VBK 用车资源候选，不绑定资源；seats 缺省为 5 座。", parameters: { type: "object", properties: { city: { type: "string" }, seats: { type: "number" }, days: { type: "number" }, tier: { type: "string" } } },
-      async execute(args) { return withPage(async () => { const query = buildVehicleResourceQuery(args); const payload = await searchVehicleResourceGroups(await getVbkRequestPage(deps.browser), query.query); const groups = extractResourceGroups(payload); return { content: safeJson({ query, selected: bestResourceGroup(payload), groups }) }; }); },
+      async execute(args, ctx) { return withPage(async () => { return { content: safeJson(await platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).vehicle(args)) }; }); },
     },
     {
       name: "resolve_cover", description: "查询携程图库并将完整封面候选安全写入 presentation.cover，尽量逐一覆盖付费景点；缺少景点配图只记录提示，不阻止确认或录入。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => applyAutoCoverFill({ page: await getVbkRequestPage(deps.browser), product: productData(current) })); const result = filled.outcome.written ? deps.productMutations.replace(ctx.localProductId, filled.nextProduct, { status: current.status }) : current; return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
+      async execute(_args, ctx) { const current = get(ctx.localProductId); const filled = await withPage(async () => platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).cover(productData(current))); const result = filled.outcome.written ? deps.productMutations.commands.mergeChanges(ctx.localProductId, current, filled.nextProduct, 'resource', { status: current.status }, { queryPath: ['itinerary'], queryFingerprint: canonicalJson(current.product.itinerary), targetPath: ['presentation', 'cover'], targetFingerprint: canonicalJson((current.product.presentation as JsonObject)?.cover) }) : current; return { content: safeJson(filled.outcome), data: { productVersion: agentProductVersion(result) } }; },
     },
     {
       name: "resolve_vehicle_resource", description: "查询并选择真实 VBK 用车资源组，安全写入 operations.vehicleResource，不绑定到 VBK 产品。", parameters: { type: "object", properties: {} },
-      async execute(_args, ctx) { const current = get(ctx.localProductId); const resolved = await withPage(async () => resolveVehicleResource(await getVbkRequestPage(deps.browser), current)); const result = deps.productMutations.replace(ctx.localProductId, resolved.product, { status: current.status }); return { content: resolved.note, data: { productVersion: agentProductVersion(result) } }; },
+      async execute(_args, ctx) { const current = get(ctx.localProductId); const resolved = await withPage(async () => platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).resolveVehicle(current)); const result = deps.productMutations.commands.mergeChanges(ctx.localProductId, current, resolved.product, 'resource', { status: current.status }, { queryPath: ['operations'], queryFingerprint: canonicalJson(current.product.operations), targetPath: ['operations', 'vehicleResource'], targetFingerprint: canonicalJson((current.product.operations as JsonObject)?.vehicleResource) }); return { content: resolved.note, data: { productVersion: agentProductVersion(result) } }; },
     },
     {
       name: "query_station", description: "查询机场或火车站候选，不写入行程。", parameters: { type: "object", required: ["keyword", "kind"], properties: { keyword: { type: "string" }, kind: { enum: ["airport", "train"] } } },
-      async execute(args) { return withPage(async () => { const keyword = cleanText(args.keyword); const page = await getVbkRequestPage(deps.browser); const stations = args.kind === "train" ? await searchTrainStations(page, keyword) : await searchAirports(page, keyword); return { content: safeJson(stations) }; }); },
+      async execute(args, ctx) { return withPage(async () => { const keyword = cleanText(args.keyword); const page = await getVbkRequestPage(deps.browser); const stations = await platformBusinessQueries(deps.db, ctx.localProductId, page).station(keyword, args.kind === 'train' ? 'train' : 'airport'); return { content: safeJson(stations) }; }); },
     },
     {
       name: "recheck_traffic_line_availability",

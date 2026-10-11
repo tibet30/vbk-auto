@@ -1,3 +1,5 @@
+import { useRef } from "react";
+import { workspaceSnapshots } from "../state/workspace-snapshot-store.js";
 import type { ProductSummary, ProductWorkflowTask, WorkflowTaskRetryMode } from "../../../shared/contracts.js";
 import { aiProviderLabel, hasActiveAiKey } from "../../../shared/contracts.js";
 import { api } from "../helpers";
@@ -5,6 +7,7 @@ import { validateProductBrief } from "../helpers/product-brief-validation.js";
 import type { AppState } from "../state/useAppState";
 
 export function useProductHandlers(state: AppState) {
+  const openSequence = useRef(0);
   const {
     product,
     input,
@@ -127,7 +130,10 @@ export function useProductHandlers(state: AppState) {
     setCreating(false);
     setAccountMenuOpen(false);
     try {
-      const opened = await api()!.products.get(item.id);
+      const sequence = ++openSequence.current;
+      const client = api()!;
+      const opened = client.workspace ? (await workspaceSnapshots.read(client, item.id)).product : await client.products.get(item.id);
+      if (sequence !== openSequence.current) return;
       setProduct(opened);
       setActiveTaskId(null);
       const savedDraft = opened.status === "draft_saved" && Boolean(opened.productId);
@@ -147,7 +153,11 @@ export function useProductHandlers(state: AppState) {
     setCreating(false);
     setAccountMenuOpen(false);
     try {
-      setProduct(await api()!.products.get(task.localProductId));
+      const sequence = ++openSequence.current;
+      const client = api()!;
+      const opened = client.workspace ? (await workspaceSnapshots.read(client, task.localProductId)).product : await client.products.get(task.localProductId);
+      if (sequence !== openSequence.current) return;
+      setProduct(opened);
       setActiveTaskId(null);
       setStage(task.stage === "automation" || task.stage === "completed" ? "vbk" : "review");
       setView("workspace");

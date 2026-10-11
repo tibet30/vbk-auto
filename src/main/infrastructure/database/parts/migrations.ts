@@ -16,6 +16,7 @@ import type Database from "better-sqlite3";
 export interface Migration {
   id: string;
   statements: string[];
+  migrate?: (db: Database.Database) => void;
 }
 
 /**
@@ -30,7 +31,7 @@ export function applyMigrations(db: Database.Database, migrations: Migration[]):
   const record = db.prepare(`INSERT INTO migrations(id, applied_at) VALUES(?, ?)`);
   for (const migration of migrations) {
     if (applied.has(migration.id)) continue;
-    if (migration.statements.length) {
+    {
       const tx = db.transaction((statements: string[]) => {
         for (const stmt of statements) {
           try {
@@ -43,10 +44,11 @@ export function applyMigrations(db: Database.Database, migrations: Migration[]):
             throw error;
           }
         }
+        migration.migrate?.(db);
+        record.run(migration.id, new Date().toISOString());
       });
       tx(migration.statements);
     }
-    record.run(migration.id, new Date().toISOString());
   }
 }
 

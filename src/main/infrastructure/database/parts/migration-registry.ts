@@ -30,6 +30,7 @@
 import type Database from "better-sqlite3";
 import { applyMigrations } from "./migrations.js";
 import type { Migration } from "./migrations.js";
+import { prepareArchitectureMigration, productArchitectureMigration } from './product-architecture-migration.js';
 
 const BASELINE_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS migrations (
@@ -65,7 +66,7 @@ const BASELINE_STATEMENTS: string[] = [
   )`,
 ];
 
-const MIGRATIONS: Migration[] = [
+export const legacyMigrations: Migration[] = [
   {
     id: "0001_baseline",
     statements: BASELINE_STATEMENTS,
@@ -298,5 +299,6 @@ const MIGRATIONS: Migration[] = [
 
 /** 在 VbkDatabase 启动时调用一次：按顺序应用 migrations。 */
 export function runDatabaseMigrations(db: Database.Database): void {
-  applyMigrations(db, MIGRATIONS);
+  prepareArchitectureMigration(db);
+  applyMigrations(db, [...legacyMigrations, productArchitectureMigration]);
 }

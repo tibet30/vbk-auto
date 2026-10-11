@@ -22,6 +22,9 @@ export async function resumeCommand(core: AgentCore, id: string): Promise<AgentS
   const c = asCoreInternals(core);
   return c.command(id, async () => {
     let snapshot = c.load(id);
+    if (snapshot.pendingApproval?.status === 'invalidated') {
+      c.cancelPendingInteraction(snapshot, '历史最终确认已失效，请按当前方案重新确认。');
+    }
     if (!c.active.has(id) && !c.scheduled.has(id)) c.snapshots.recoverInterruptedCalls(snapshot);
     if (!snapshot.run || ["completed", "abandoned"].includes(snapshot.run.status)) return snapshot;
     const refresh = c.refreshPendingInput(id, snapshot);
@@ -77,7 +80,11 @@ export async function resumeCommand(core: AgentCore, id: string): Promise<AgentS
     const approval = c.snapshots.validApproval(saved);
     if (approval && c.handoffs.isDeterministic(approval)) {
       // Phase B resume must never fall back to the model loop.
-      await c.handoffs.refreshFingerprint(id, approval);
+      if (!await c.handoffs.refreshFingerprint(id, approval)) {
+        const changed = c.load(id);
+        c.pauseRun(changed, "方案或账号已变化，请重新确认后录入。");
+        return c.save(changed);
+      }
       const ready = c.snapshots.validApproval(c.load(id)) ?? approval;
       if (c.handoffs.tryStart(id, ready)) return c.load(id);
       const paused = c.load(id);

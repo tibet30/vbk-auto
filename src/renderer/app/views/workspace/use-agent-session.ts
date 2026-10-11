@@ -1,3 +1,4 @@
+import { workspaceSnapshots } from "../../state/workspace-snapshot-store.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentDisplaySnapshot, AgentHistoryPage, VbkApi } from "../../../../shared/contracts";
 import { agentHistoryPage } from "../../../../shared/agent-display";
@@ -48,6 +49,22 @@ export function useAgentSession(localProductId: string, client: VbkApi | undefin
   }, [localProductId, replaceHistory]);
   useEffect(() => {
     if (!client?.agent) return;
+    if (client.workspace) {
+      let alive = true;
+      const apply = () => {
+        const next = workspaceSnapshots.get(localProductId)?.agent;
+        if (alive && next) accept(next);
+      };
+      const unsubscribe = workspaceSnapshots.subscribe(next => {
+        if (next.localProductId === localProductId) apply();
+      });
+      apply();
+      const refresh = () => { void workspaceSnapshots.read(client, localProductId).then(apply)
+        .catch(reason => { if (alive) setError(reason instanceof Error ? reason.message : '无法读取协作记录'); }); };
+      refresh();
+      window.addEventListener('focus', refresh);
+      return () => { alive = false; unsubscribe(); window.removeEventListener('focus', refresh); };
+    }
     let alive = true;
     let broadcastRevision = 0;
     const unsubscribe = client.events.onAgentUpdated((next) => {
@@ -82,7 +99,14 @@ export function useAgentSession(localProductId: string, client: VbkApi | undefin
     requestBusy.current = true;
     setBusy(true);
     setError(null);
-    try { const next = await action(client.agent); accept(next); return next; }
+    try {
+      const next = await action(client.agent);
+      if (client.workspace) {
+        const latest = await workspaceSnapshots.read(client, localProductId);
+        if (latest.agent) accept(latest.agent);
+      } else accept(next);
+      return next;
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : "操作未完成，请重试"); return null; }
     finally { requestBusy.current = false; setBusy(false); }
   };

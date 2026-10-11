@@ -43,25 +43,18 @@ test("状态只在成功落库后广播，编排器和 IPC 直写路径各一写
   assert.match(planningIpc, /db\.savePlanningState\(pendingState\);\s*\n\s*emitPlanningState\(pendingState\);/);
 });
 
-test("renderer 订阅实时事件，按当前 localProductId 防串扰，卸载时取消订阅", () => {
-  const subscription = derived.match(/const unsubscribePlanning = api\(\)!\.events\.onPlanningStateUpdated\([\s\S]*?unsubscribePlanning\(\);/);
-  assert.ok(subscription, "必须订阅并在 cleanup 时取消 planning:updated");
-  assert.match(subscription![0], /currentLocalProductIdRefForPlanning\.current !== localProductId/);
-  assert.match(subscription![0], /planningEventVersionRef\.current \+= 1/,
-    "收到当前产品的实时状态后必须推进版本，防止旧 lookup 覆盖新事件");
-  assert.match(subscription![0], /setPlanningState\(next\)/);
-  // The old loaded flag gated renderer auto-start, which Agent startup now owns.
-  const agentSession=read("src/renderer/app/views/workspace/use-agent-session.ts");
-  assert.match(agentSession, /next.localProductId !== productRef.current/);
-  assert.match(agentSession, /before === broadcastRevision/);
-  assert.match(agentSession, /unsubscribe\(\)/);
+test("renderer 订阅按产品隔离的版本快照，卸载后取消订阅", () => {
+  const subscription = read("src/renderer/app/state/workspace-planning-subscription.ts");
+  assert.match(derived, /useWorkspacePlanning/);
+  assert.match(subscription, /snapshot.localProductId === id/);
+  assert.match(subscription, /alive = false; unsubscribe\(\)/);
+  const store = read("src/renderer/app/state/workspace-snapshot-store.ts");
+  assert.match(store, /snapshot.viewRevision <= old.viewRevision/);
 });
 
-test("首次进入产品只做单次 planning.state 补偿，运行期不得建立 planning interval", () => {
-  assert.match(derived, /api\(\)!\.planning\.state\(capturedId\)/);
-  assert.match(derived, /\}, \[product\?\.id\]\);/);
-  assert.match(derived, /eventVersionAtLookup/,
-    "单次补偿必须在实时事件先到时丢弃旧快照，不能覆盖实时进度");
-  assert.match(derived, /planningEventVersionRef\.current !== eventVersionAtLookup/);
-  assert.doesNotMatch(derived, /PLANNING_POLL_INTERVAL_MS|pollOnce|pollerRef|setInterval\(pollOnce/);
+test("首次读取、重连与订阅使用同一快照合并规则，不建立规划轮询", () => {
+  const subscription = read("src/renderer/app/state/workspace-planning-subscription.ts");
+  assert.match(subscription, /workspaceSnapshots.read\(client, id\)/);
+  assert.match(subscription, /addEventListener\('focus', refresh\)/);
+  assert.doesNotMatch(subscription, /setInterval|pollerRef/);
 });

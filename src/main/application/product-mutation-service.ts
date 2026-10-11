@@ -15,14 +15,19 @@ import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-remov
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
 import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
+import { ProductCommandService } from './product-command-service.js';
 
 type ProductMutationStore = {
+  runProductTransaction?: <T>(task: () => T) => T;
+  markResearchTasksSatisfiedByProduct?: VbkDatabase['markResearchTasksSatisfiedByProduct'];
+  reopenKindSupersededPoiResearchTasks?: VbkDatabase['reopenKindSupersededPoiResearchTasks'];
   getProduct: VbkDatabase["getProduct"];
   updateProduct: (
     id: string,
     product: Record<string, unknown>,
     status?: ProductSummary["status"],
     expectedVersion?: number,
+    source?: string,
   ) => void;
 };
 
@@ -41,13 +46,27 @@ export interface ProductMutationOptions {
   preserveVerifiedItineraryPois?: boolean;
   /** 仅人工整包编辑或明确的用户加回指令可以撤销删除凭证。 */
   allowItineraryRemovalRestore?: boolean;
+  /** Set by the command service, never inferred from an active automation run. */
+  source?: string;
 }
 
 export class ProductMutationService {
+  readonly commands: ProductCommandService;
   constructor(
     private readonly store: ProductMutationStore,
     private readonly onUpdated?: (product: ProductDetail) => void,
-  ) {}
+  ) {
+    this.commands = new ProductCommandService({
+      getProduct: id => store.getProduct(id),
+      replace: (id, product, options) => this.replace(id, product, options),
+      transaction: task => store.runProductTransaction ? store.runProductTransaction(task) : task(),
+      notify: product => onUpdated?.(product),
+      satisfyResearch: store.markResearchTasksSatisfiedByProduct
+        ? (id, product) => store.markResearchTasksSatisfiedByProduct!(id, product) : undefined,
+      reopenResearch: store.reopenKindSupersededPoiResearchTasks
+        ? (id, product) => { store.reopenKindSupersededPoiResearchTasks!(id, product); } : undefined,
+    });
+  }
 
   replace(
     localProductId: string,
@@ -75,7 +94,7 @@ export class ProductMutationService {
     const normalised = normaliseProductLocationFields(protectedIncoming, lockedMeetingCity || undefined);
     if (Array.isArray(normalised.itinerary)) normalised.itinerary = normalised.itinerary.map((day) =>
       day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
-    this.store.updateProduct(localProductId, reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0);
+    this.store.updateProduct(localProductId, reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0, options.source);
     const saved = this.store.getProduct(localProductId);
     if (!saved) throw productNotFound(localProductId);
     if (options.notify !== false) this.onUpdated?.(saved);
@@ -92,7 +111,7 @@ export class ProductMutationService {
     const result = applyProductPatchSafe(current.product, patch);
     if (!result.applied) return { product: current, applied: false };
     return {
-      product: this.replace(localProductId, result.product, options),
+      product: this.commands.mergeChanges(localProductId, current, result.product, 'ai', options),
       applied: true,
     };
   }

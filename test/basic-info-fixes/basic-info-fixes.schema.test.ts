@@ -15,6 +15,7 @@ import {
   productFixture,
   PRODUCT_IMAGE_TEXT_PATH,
   readAutomationSource,
+  readAutomationFile,
   readCtripSource,
   resolveAdvanceBooking,
   shouldRefillBasicInfo,
@@ -92,77 +93,43 @@ test("shouldRefillBasicInfo 任意 productId 已存在都重跑 basic", () => {
   assert.equal(result.refill, true);
 });
 
-test("阶段重试只重新调用 API，不再打开产品编辑页", async () => {
-  const source = readAutomationSource();
-  const start = source.indexOf("export async function runAutomation(");
-  const runSource = source.slice(start, source.indexOf("\n// FILE:", start));
-  assert.match(runSource, /ensureBasicInfoApi\(/);
-  assert.doesNotMatch(runSource, /openProductEditor\(/);
-  assert.doesNotMatch(runSource, /fillAndSaveBasicInfo\(/);
+test("阶段重试共用 API 执行器，不由入口重新打开编辑页", () => {
+  for (const file of ["automation.main/automation.main.run.ts", "automation.main/automation.main.run-one.ts"]) {
+    const runner = readAutomationFile(file);
+    assert.match(runner, /buildBasicExecute\(ctx/);
+    assert.doesNotMatch(runner, /openProductEditor\(|fillAndSaveBasicInfo\(/);
+  }
+  assert.match(readAutomationFile("automation.main/runtime/basic.ts"), /await ensureBasicInfoApi\(/);
 });
 
-test("retryFrom>0 保留恢复日志并由统一执行链导航", async () => {
-  // retryFrom>0 分支只保留精确日志，不允许在 else 块里直接调用 fillAndSaveBasicInfo 或
-  // setBasicInfoSaved，也不允许写 basicInfoSaved = true；真正的 basic
-  // 填写统一交给下方 runPhaseWithRecovery(makeCtx("basic", basicExecute, 0))
-  // 这一处。
-  const source = readAutomationSource();
-  const start = source.indexOf("export async function runAutomation(");
-  const runSource = source.slice(start, source.indexOf("\n// FILE:", start));
-
-  assert.match(runSource, /已从 \$\{retryFrom\} 阶段继续录入（通过 API 保存并回读）/);
-  assert.doesNotMatch(runSource, /openProductEditor\(/);
-  assert.doesNotMatch(runSource, /fillAndSaveBasicInfo\(/);
-
-  // 下方必须存在一处（且只能期望一处）basic runner 调用：
-  // runPhaseWithRecovery(makeCtx("basic", basicExecute, 0))
-  const basicRunnerMatches = runSource.match(
-    /runPhaseWithRecovery\(makeCtx\(\s*"basic"\s*,\s*basicExecute\s*,\s*0\s*\)\)/g,
-  );
-  assert.ok(basicRunnerMatches, "必须存在统一一次的 basic runner 调用");
-  assert.equal(
-    basicRunnerMatches!.length,
-    1,
-    `basic runner 调用必须只有一处，实际找到 ${basicRunnerMatches!.length} 处`,
-  );
-
-  // basic runner 之后必须做 needs_user 收敛 + productId 校验 + 成功日志
-  const runnerIdx = source.indexOf('runPhaseWithRecovery(makeCtx("basic", basicExecute, 0))');
-  const tail = source.slice(runnerIdx);
-  assert.match(tail, /needs_user/);
-  assert.match(tail, /产品 ID 缺失，无法继续后续阶段/);
-  assert.match(tail, /产品基本信息已保存：\$\{productId\}/);
+test("retryFrom>0 保留恢复日志并由共享阶段执行链导航", () => {
+  const runner = readAutomationFile("automation.main/automation.main.run.ts");
+  assert.match(runner, /已从 \$\{retryFrom\} 阶段继续录入（通过 API 保存并回读）/);
+  assert.doesNotMatch(runner, /openProductEditor\(|fillAndSaveBasicInfo\(/);
+  assert.match(runner, /index = setup\.startIndex/);
+  assert.equal(runner.match(/basic: buildBasicExecute\(ctx, setup, productIdRef\)/g)?.length, 1);
+  assert.equal(runner.match(/await recoverDraftPhase\(/g)?.length, 1, "统一循环每阶段只有一个恢复入口");
+  assert.match(runner, /needs_user/);
+  assert.match(runner, /产品 ID 缺失，无法继续后续阶段/);
+  const phase = readAutomationFile("automation.main/runtime/phase.ts");
+  assert.match(phase, /executeApiWithPhasePageSync\(/);
+  assert.match(phase, /runDraftPhaseWithRecovery\(/);
 });
 
-test("basicExecute 开头清空 scenicSpotLogs，防止 runner 重试重复记录", async () => {
-  const source = readAutomationSource();
-  // 切出 basicExecute 的函数体：从 `const basicExecute = async () => {`
-  // 到下一个匹配的 `};` 之前。
-  const startMatch = source.match(/const basicExecute = async \(\) => \{/);
-  assert.ok(startMatch, "找不到 basicExecute 定义");
-  const bodyStart = startMatch.index! + startMatch[0].length;
-  // 阶段进度和页面导航统一由 executePhase 管理；其 API body 必须在此之后
-  // 清空 scenicSpotLogs，再做 shouldRefillBasicInfo 判断。
-  const executePhaseIdx = source.indexOf('executePhase("basic"', bodyStart);
-  assert.ok(executePhaseIdx > 0, "basicExecute 缺少 executePhase(\"basic\")");
-  const refillIdx = source.indexOf("shouldRefillBasicInfo", executePhaseIdx);
-  assert.ok(refillIdx > 0, "basicExecute 缺少 shouldRefillBasicInfo 调用");
-  const region = source.slice(executePhaseIdx, refillIdx);
-  assert.match(
-    region,
-    /scenicSpotLogs\.length\s*=\s*0/,
-    "basicExecute 必须在 executePhase 之后、shouldRefillBasicInfo 之前清空 scenicSpotLogs",
-  );
+test("共享 basic 执行器在每次 API 尝试前清空 scenicSpotLogs", () => {
+  const basic = readAutomationFile("automation.main/runtime/basic.ts");
+  const execute = basic.indexOf('executeDraftPhase(');
+  const clear = basic.indexOf('scenicSpotLogs.length = 0');
+  const refill = basic.indexOf('const shouldRefill = shouldRefillBasicInfo(');
+  assert.ok(execute >= 0 && clear > execute && refill > clear);
 });
 
-test("全量 runner 在 basic 已保存且产品完整时跳过重复填充", () => {
-  const source = readAutomationSource();
-  const start = source.indexOf("const basicExecute = async () =>");
-  const body = source.slice(start, source.indexOf("const handlers:", start));
-  assert.match(body, /shouldRefill\.reason === "complete"/);
-  assert.match(body, /basic 阶段已保存且产品数据完整，跳过重复填充/);
-  assert.match(body, /executePhase\("basic"/);
-  assert.match(source, /await refreshPhasePageAfterApi\(/);
+test("非 Agent basic 已保存且数据完整时保留跳过重复填充的条件", () => {
+  const basic = readAutomationFile("automation.main/runtime/basic.ts");
+  assert.match(basic, /!ctx\.agentControlled && shouldRefill\.reason === "complete"/);
+  assert.match(basic, /basic 阶段已保存且产品数据完整，跳过重复填充/);
+  assert.match(basic, /executeDraftPhase\([\s\S]*"basic"/);
+  assert.match(readAutomationFile("automation.main/automation.main.retry-navigation.ts"), /await refreshPhasePageAfterApi\(/);
 });
 
 test("basicInfoCompletenessIssues 报告省份缺失", () => {

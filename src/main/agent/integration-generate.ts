@@ -48,10 +48,10 @@ export function createGenerationStageTools(args: {
     const saved = get(localProductId);
     const repaired = repairExcludedAlternativeCopy(saved, saved.product.itinerary);
     if (repaired.changed) {
-      deps.productMutations.replace(localProductId, {
+      deps.productMutations.commands.mergeChanges(localProductId, saved, {
         ...saved.product,
         itinerary: repaired.itinerary,
-      }, { status: saved.status });
+      }, 'ai', { status: saved.status });
       deps.emitProduct(get(localProductId));
     }
     return repaired.changed;

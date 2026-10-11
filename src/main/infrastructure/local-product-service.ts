@@ -86,8 +86,8 @@ export function createLocalProductService(args: {
     async update(product, expectedRevision) {
       const userId = owner();
       const latest = owned(product.id, userId);
-      if (expectedRevision !== latest.revision || (product.productJsonVersion !== undefined
-        && product.productJsonVersion !== latest.productJsonVersion)) throw new TibetProductConflictError(latest);
+      if (expectedRevision !== latest.revision || product.productJsonVersion === undefined
+        || product.productJsonVersion !== latest.productJsonVersion) throw new TibetProductConflictError(latest);
       const saved = args.db.saveLocalProductState({ ...product, updatedAt: new Date().toISOString() }, userId, expectedRevision + 1);
       args.capture(saved);
       return saved;

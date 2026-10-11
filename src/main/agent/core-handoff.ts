@@ -36,12 +36,13 @@ export class AgentHandoff {
       this.ids.delete(id);
       let snapshot = this.snapshots.load(id);
       const approval = this.snapshots.validApproval(snapshot);
-      // Automation may rewrite presentation/resources after approval. Do not
-      // require the pre-write fingerprint; refresh it and reuse the shared gate.
+      // Controlled writes already advanced the fingerprint transactionally.
       if (!approval || approval.id !== approvalId || approval.accountKey !== identity.accountKey
         || !snapshot.run || this.snapshots.terminal(snapshot.run.status)) return snapshot;
-      approval.productVersion = identity.productVersion;
-      this.snapshots.save(snapshot);
+      if (approval.productVersion !== identity.productVersion) {
+        this.snapshots.pause(snapshot, "方案已变化，请重新确认后录入。");
+        return this.snapshots.save(snapshot);
+      }
       if (this.deps.finishVerified) {
         const gate = await this.deps.finishVerified(id, {
           runId: snapshot.run.id,
@@ -75,28 +76,28 @@ export class AgentHandoff {
       if (!approval || approval.id !== approvalId || !snapshot.run || this.snapshots.terminal(snapshot.run.status)) {
         return snapshot;
       }
-      // Keep the authorised intent usable after automation rewrote local fields.
-      if (identity && approval.accountKey === identity.accountKey) {
-        approval.productVersion = identity.productVersion;
-      }
-      this.snapshots.pause(snapshot, `自动录入已暂停：${message}`);
-      this.snapshots.event(snapshot, "status", "已保留已完成阶段；恢复时将从失败阶段继续，不会重新请求授权。", {
+      // A pause preserves authority; it never adopts a changed business plan.
+      const changed = identity && (approval.accountKey !== identity.accountKey || approval.productVersion !== identity.productVersion);
+      this.snapshots.pause(snapshot, changed ? "方案或账号已变化，请重新确认后录入。" : `自动录入已暂停：${message}`);
+      this.snapshots.event(snapshot, "status", changed ? "已保留检查点；方案或账号变化后需要重新确认。"
+        : "已保留已完成阶段；恢复时将从失败阶段继续，不会重新请求授权。", {
         deterministicWorkflow: true,
       });
       return this.snapshots.save(snapshot);
     });
   }
 
-  async refreshFingerprint(id: string, approval: AgentApproval): Promise<void> {
+  async refreshFingerprint(id: string, approval: AgentApproval): Promise<boolean> {
     try {
       const identity = await this.deps.accountFor(id);
       const snapshot = this.snapshots.load(id);
       const current = this.snapshots.validApproval(snapshot);
-      if (!current || current.id !== approval.id || current.accountKey !== identity.accountKey) return;
-      current.productVersion = identity.productVersion;
-      this.snapshots.save(snapshot);
+      if (!current || current.id !== approval.id || current.accountKey !== identity.accountKey) return false;
+      // Fingerprints advance only with the controlled product transaction.
+      // A resume action cannot authorize a newer business plan.
+      return current.productVersion === identity.productVersion;
     } catch {
-      // Keep the existing fingerprint when the account cannot be verified yet.
+      return false;
     }
   }
 

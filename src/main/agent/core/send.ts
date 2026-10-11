@@ -73,7 +73,11 @@ export async function sendCommand(core: AgentCore, id: string, content: string):
     const saved = c.save(snapshot);
     if (saved.run?.status !== "running") return saved;
     if (preserveIntent && approved && c.handoffs.isDeterministic(approved)) {
-      await c.handoffs.refreshFingerprint(id, approved);
+      if (!await c.handoffs.refreshFingerprint(id, approved)) {
+        const changed = c.load(id);
+        c.pauseRun(changed, "方案或账号已变化，请重新确认后录入。");
+        return c.save(changed);
+      }
       const ready = c.snapshots.validApproval(c.load(id)) ?? approved;
       if (c.handoffs.tryStart(id, ready)) return c.load(id);
       const paused = c.load(id);

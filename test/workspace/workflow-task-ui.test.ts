@@ -99,20 +99,21 @@ test("一键创建进入 Agent 工作区，并先建任务记录再启动 Agent"
   assert.doesNotMatch(ipc, /await runAutoConfirmedCreation/);
 });
 
-test("任务中心续跑只走 Agent，不再回退到已退役的一键调度器", () => {
+test("任务中心续跑委托 Agent 调度外观，不再使用一键创建循环", () => {
   const ipc = read("src/main/ipc/remote-product-ipc.ts");
+  const scheduler = read("src/main/application/product-task-scheduler.ts");
   const handler = ipc.slice(ipc.indexOf('ipcMain.handle("workflowTasks:resume"'), ipc.indexOf('ipcMain.handle("products:create"'));
-  assert.match(handler, /context\.agentCore\.resume\(task\.localProductId\)/);
-  assert.match(handler, /agentSnapshot\.run/);
-  assert.match(handler, /context\.agentCore\.send\(/);
-  assert.doesNotMatch(handler, /context\.resumeProductTask/);
-  assert.match(handler, /mode === "from_start" && product\?\.productId/);
-  assert.match(handler, /产品已进入 VBK 录入，不能从头重新规划/);
+  assert.match(handler, /context\.resumeProductTask\(id, mode\)/);
+  assert.match(scheduler, /deps\.agent\.resume\(task\.localProductId\)/);
+  assert.match(scheduler, /deps\.agent\.send\(/);
+  assert.doesNotMatch(scheduler, /runAutoConfirmedCreation/);
+  assert.match(scheduler, /mode === 'from_start' && product\?\.productId/);
+  assert.match(scheduler, /产品已进入 VBK 录入，不能从头重新规划/);
 });
 
 test("Agent 未终止时 products:get 保留本地规划工作集", () => {
   const ipc = read("src/main/ipc/remote-product-ipc.ts");
-  assert.match(ipc, /agentCore\?\.get\(id\)/);
+  assert.match(ipc, /db\.getAgentSnapshot\(id\)/);
   assert.match(ipc, /!\["completed", "abandoned"\]\.includes\(agent\.run\.status\)/);
   assert.match(ipc, /agentOwnsLocalWorkingSet \? "planning" : context\.productWorkflows\.activeWorkflow\(id\)/);
   assert.match(ipc, /withAgentUsage\(await getProductForRead\([\s\S]*\), agent\)/);

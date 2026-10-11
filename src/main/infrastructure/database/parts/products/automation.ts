@@ -13,11 +13,15 @@
 import type Database from "better-sqlite3";
 import type { AutomationRun, ProductSummary } from "../../../../../shared/contracts.js";
 import { now } from "../types.js";
+import { synchronizeProductExecution } from '../product-execution-sync.js';
+import { getAgentSnapshot } from '../agent.js';
+import type { ProductResourceEvidence } from '../../../../../shared/contracts-product-architecture.js';
 
 export function saveAutomation(db: Database.Database, localProductId: string, run: AutomationRun) {
   const tx = db.transaction(() => {
     db.prepare("INSERT INTO automation_runs(id,local_product_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at")
       .run(run.id, localProductId, JSON.stringify(run), now(), now());
+    synchronizeProductExecution(db, localProductId);
   });
   tx();
 }
@@ -31,6 +35,7 @@ export function writeAutomationWithProductStatus(db: Database.Database, localPro
     db.prepare("UPDATE products SET status=?, updated_at=? WHERE id=?").run(status, now(), localProductId);
     db.prepare("INSERT INTO automation_runs(id,local_product_id,payload_json,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at")
       .run(run.id, localProductId, JSON.stringify(run), now(), now());
+    synchronizeProductExecution(db, localProductId);
   });
   tx();
 }
@@ -42,17 +47,18 @@ export function writeAutomationWithProductStatus(db: Database.Database, localPro
  */
 export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
   const orphans = db.prepare(`
-    SELECT local_product_id, payload_json FROM automation_runs
+    SELECT id, local_product_id, payload_json FROM automation_runs
     WHERE payload_json LIKE '%"status":"running"%'
-  `).all() as Array<{ local_product_id: string; payload_json: string }>;
+  `).all() as Array<{ id: string; local_product_id: string; payload_json: string }>;
   const touchedProducts: string[] = [];
-  const updateRun = db.prepare("UPDATE automation_runs SET payload_json=?, updated_at=? WHERE local_product_id=? AND payload_json LIKE '%\"status\":\"running\"%'");
+  const updateRun = db.prepare('UPDATE automation_runs SET payload_json=?, updated_at=? WHERE id=? AND local_product_id=?');
   const updateProduct = db.prepare("UPDATE products SET status=?, updated_at=? WHERE id=?");
   const tx = db.transaction(() => {
     for (const row of orphans) {
       try {
         const run = JSON.parse(row.payload_json) as AutomationRun;
         if (run.status !== "running") continue;
+        const interrupted = run.phases.some(phase => phase.status === 'running');
         run.status = "failed";
         run.recovery ??= { phases: {} };
         const markInterrupted = (phase: string) => {
@@ -82,15 +88,42 @@ export function recoverOrphanAutomationRuns(db: Database.Database): string[] {
         }
         if (!markedCurrentPhase && run.currentPhase) markInterrupted(run.currentPhase);
         run.logs.push({ at: new Date().toISOString(), message: "应用重启，已保留完成阶段并准备从断点继续", level: "warning" });
-        updateRun.run(JSON.stringify(run), now(), row.local_product_id);
+        updateRun.run(JSON.stringify(run), now(), row.id, row.local_product_id);
+        if (interrupted) {
+          const snapshot = getAgentSnapshot(db, row.local_product_id);
+          if (snapshot && !snapshot.uncertainWrite) {
+            snapshot.uncertainWrite = { toolCallId: `phase:${run.currentPhase ?? 'unknown'}`, createdAt: now(),
+              message: '应用在平台阶段执行期间退出，写入结果尚未核查。' };
+            db.prepare('UPDATE agent_snapshots SET snapshot_json=? WHERE local_product_id=?')
+              .run(JSON.stringify(snapshot), row.local_product_id);
+          }
+        }
         const product = db.prepare("SELECT status FROM products WHERE id=?").get(row.local_product_id) as { status: string } | undefined;
         if (product && product.status !== "draft_saved" && product.status !== "blocked") {
           updateProduct.run("blocked", now(), row.local_product_id);
         }
         touchedProducts.push(row.local_product_id);
-      } catch { /* leave unreadable legacy payload untouched */ }
+      } catch (error) { throw new Error(`恢复录入记录失败 ${row.id}: ${String(error)}`); }
+    }
+    // A provider may return just before local checkpoint persistence fails.
+    // Such a journal can already be failed, so running rows alone are insufficient.
+    const evidenceRows = db.prepare('SELECT local_product_id,payload_json FROM product_resource_evidence').all() as {
+      local_product_id: string; payload_json: string;
+    }[];
+    for (const row of evidenceRows) {
+      const observations = (JSON.parse(row.payload_json) as ProductResourceEvidence).observations ?? [];
+      const completed = new Set(observations.filter(item => item.status !== 'write_dispatched').map(item => item.id));
+      const unresolved = [...observations].reverse().find(item => item.status === 'write_dispatched' && !completed.has(item.id));
+      if (!unresolved) continue;
+      const snapshot = getAgentSnapshot(db, row.local_product_id);
+      if (!snapshot || snapshot.uncertainWrite) continue;
+      snapshot.uncertainWrite = { toolCallId: `phase:${unresolved.capability.replace(/^write_phase:/, '')}`,
+        createdAt: unresolved.observedAt, message: '平台调用已发出，但没有耐久返回记录，请先核查。' };
+      db.prepare('UPDATE agent_snapshots SET snapshot_json=? WHERE local_product_id=?').run(JSON.stringify(snapshot), row.local_product_id);
+      if (!touchedProducts.includes(row.local_product_id)) touchedProducts.push(row.local_product_id);
     }
   });
   tx();
+  for (const id of new Set(touchedProducts)) synchronizeProductExecution(db, id);
   return touchedProducts;
 }

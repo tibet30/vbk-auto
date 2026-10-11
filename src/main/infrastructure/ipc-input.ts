@@ -59,6 +59,7 @@ const memorySettingsSchema = z.object({
   scopeKey: z.string().trim().min(1).max(200).nullable().optional(),
 }).strict();
 const PRODUCT_ID_FIRST_CHANNELS = new Set([
+  'workspace:get',
   "products:get", "products:delete", "products:readiness", "products:updateReviewField", "products:updateProductJson",
   "ai:send", "ai:regenerate",
   "research:accept", "research:refreshIssues", "research:vehicleResource", "research:hotelResource",

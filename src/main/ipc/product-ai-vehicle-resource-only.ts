@@ -62,7 +62,7 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
       field: "vehicleResource",
       requestedTotalCost,
     });
-    product = productMutations.replace(localProductId, nextJson, { status: "review", notify: false });
+    product = productMutations.commands.mergeChanges(localProductId, product, nextJson, 'user', { status: "review", notify: false });
   }
 
   const login = await context.productWorkflows.runVbkPageExclusive(() => context.browser.status());
@@ -86,13 +86,8 @@ export async function tryHandleVehicleResourceOnlyRequest(args: {
       product,
     }));
   if (result.outcome.written) {
-    productMutations.replace(localProductId, result.nextProduct.product, { status: "review", notify: false });
+    productMutations.commands.mergeChanges(localProductId, product, result.nextProduct.product, 'resource', { status: "review", notify: false });
     if (result.outcome.resourceGroupId) {
-      for (const task of result.nextProduct.researchTasks) {
-        if (task.state !== "confirmed" && task.state !== "resolved" && /用车|车辆|资源组|接送|司机/.test(task.label || "")) {
-          db.markResearchAccepted(localProductId, task.id, result.outcome.reason, "vbk");
-        }
-      }
       await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
     }
   }

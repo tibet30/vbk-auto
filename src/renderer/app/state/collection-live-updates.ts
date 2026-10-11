@@ -6,15 +6,33 @@ import {
   shouldApplyWorkflowTaskDetailUpdate,
 } from "./collection-refresh-policy.js";
 import { upsertProductToTop } from "./product-list-helper.js";
+import { workspaceSnapshots } from './workspace-snapshot-store.js';
+import { subscribeWorkspaceTransport } from './workspace-subscription.js';
 
 type LiveUpdateState = Pick<AppStateBase,
-  "setProduct" | "setProducts" | "setWorkflowTasks" | "updateReadiness">;
+  "setProduct" | "setProducts" | "setWorkflowTasks" | "updateReadiness"> & Partial<Pick<AppStateBase, 'setReadiness'>>;
 
 export function subscribeCollectionLiveUpdates(args: {
   events: VbkApi["events"];
   state: LiveUpdateState;
   current: () => { view: AppStateBase["view"]; creating: boolean; localProductId: string | null };
 }): () => void {
+  if (typeof args.events.onWorkspaceUpdated === 'function') {
+    const unsubscribeStore = workspaceSnapshots.subscribe(snapshot => {
+      const current = args.current();
+      const next = snapshot.product;
+      if (shouldApplyProductUpdate(current.view, current.localProductId, next.id)) {
+        args.state.setProduct(product => product?.id === next.id ? next : product);
+        args.state.setReadiness?.(snapshot.readiness);
+      }
+      if (shouldApplyCollectionUpdate(current.view, current.creating)) {
+        args.state.setProducts(products => upsertProductToTop(products, next));
+        if (next.workflowTask) args.state.setWorkflowTasks(tasks => [next.workflowTask!, ...tasks.filter(task => task.id !== next.workflowTask!.id)]);
+      }
+    });
+    const unsubscribeTransport = subscribeWorkspaceTransport(args.events);
+    return () => { unsubscribeTransport(); unsubscribeStore(); };
+  }
   const unsubscribeProduct = args.events.onProductUpdated((next) => {
     const current = args.current();
     if (shouldApplyProductUpdate(current.view, current.localProductId, next.id)) {

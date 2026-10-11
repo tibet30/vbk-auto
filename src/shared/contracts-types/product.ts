@@ -42,6 +42,11 @@ export interface ProductReadiness {
 }
 
 export interface ProductDetail extends ProductSummary {
+  planVersion?: number;
+  evidenceVersion?: number;
+  viewRevision?: number;
+  plan?: import('../contracts-product-architecture.js').ProductPlan;
+  resourceEvidence?: import('../contracts-product-architecture.js').ProductResourceEvidence;
   product: Record<string, unknown>;
   messages: ConversationMessage[];
   researchTasks: ResearchTask[];

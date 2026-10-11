@@ -211,7 +211,7 @@ app.whenReady().then(async () => {
     db,
     getOwnerUserId: vbkBindings.getExtensionUserId,
   });
-  // 把 productEmitter 切换到 productStorage + remoteMirror 链
+  // 安装只读事件转发器，持久化观察在写入提交处执行
   installProductEmitter();
   db.recoverUnansweredMessages();
   const orphanProducts = db.recoverOrphanAutomationRuns();
@@ -234,7 +234,10 @@ app.whenReady().then(async () => {
     apiKey,
     aiService,
     productWorkflows,
-    productMutations: new ProductMutationService(db, emitProduct),
+    productMutations: new ProductMutationService(db, product => {
+      productStorage?.observe(product);
+      emitProduct(product);
+    }),
     remoteProducts,
     bindingSync: vbkBindings.bindingSync,
     getExtensionUserId: vbkBindings.getExtensionUserId,
@@ -259,12 +262,12 @@ app.whenReady().then(async () => {
   app.once("before-quit", () => clearInterval(memoryMaintenanceTimer));
   const productTaskScheduler = new ProductTaskScheduler({
     db,
-    get startPlanning() { return context.startPlanning!; },
-    get resumePlanning() { return context.resumePlanning!; },
-    get retryPlanning() { return context.retryPlanning!; },
-    readiness,
-    productWorkflows,
-    get automation() { return automation ?? undefined; },
+    agent: {
+      get: id => context.agentCore!.get(id),
+      send: (id, content) => context.agentCore!.send(id, content),
+      resume: id => context.agentCore!.resume(id),
+      abandon: id => context.agentCore!.abandon(id),
+    },
     emitTask: emitWorkflowTask,
     emitProduct,
   });

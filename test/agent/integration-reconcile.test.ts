@@ -2,6 +2,29 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { reconcileAgentShell } from "../../src/main/agent/integration-reconcile.js";
 
+test('基础信息核查不能仅凭产品编号和供应商编号确认完成', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = (globalThis as any).document;
+  (globalThis as any).document = { cookie: 'GUID=fixture' };
+  const basic = { productId: '78090372', vendorProductCode: 'supplier', masterDepartureCityName: '成都',
+    destinationCityName: '成都', masterDepartureCityId: 1, destinationCityID: 1, travelDays: 2, maxTravelDays: 2, travelNights: 1 };
+  const value = { productId: '78090372', product: { basicInfo: { supplierProductCode: 'supplier',
+    meetingCity: '成都', destinationCity: '成都', days: 2, nights: 1 } } } as any;
+  try {
+    for (const [remote, expected] of [[{ productId: basic.productId, vendorProductCode: 'supplier' }, false],
+      [{ ...basic, travelDays: 3 }, false], [basic, true]] as const) {
+      globalThis.fetch = (async () => new Response(JSON.stringify({ ResponseStatus: { Ack: 'Success' }, baseInfo: remote }))) as typeof fetch;
+      const result = await reconcileAgentShell(value, { events: [] } as any, 'phase:basic',
+        { evaluate: async (fn: any, arg: any) => fn(arg) } as any);
+      assert.equal(result.reconciled, expected);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDocument === undefined) delete (globalThis as any).document;
+    else (globalThis as any).document = originalDocument;
+  }
+});
+
 function hotelSnapshot(message: string) {
   return {
     events: [

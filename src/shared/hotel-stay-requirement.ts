@@ -56,7 +56,18 @@ export function hotelStayRequirement(product: Json, day: Json): HotelStayRequire
     Number(spot.poiId) > 0 && [text(spot.name), text(spot.poiName)].some(name => name && (name.includes(anchorName) || anchorName.includes(name))));
   const poiCity = text(anchorSpot?.district) || text(anchorSpot?.city);
   const storedCity = text(storedAnchor) && text(stored.cityName) ? text(stored.cityName) : "";
-  const city = storedCity || poiCity || hotelLocationFromHotelText(text(day.hotel)) || hotelLocationFromHotelText(text(day.hotelDescription))
+  // Repair only an inherited arrival-city default. A saved overnight city
+  // can be more specific than the POI's broad administrative parent (for
+  // example, Mangya rather than Haixi) and must remain authoritative.
+  const basic = object(product.basicInfo);
+  const arrivalCity = toPlatformShortLocationName(text(basic.meetingCity) || text(basic.destinationCity));
+  const inheritedArrivalCity = arrivalCity && toPlatformShortLocationName(storedCity) === arrivalCity;
+  const district = text(anchorSpot?.district);
+  const parentCity = text(anchorSpot?.city);
+  const specificDistrict = district && parentCity
+    && toPlatformShortLocationName(district) !== toPlatformShortLocationName(parentCity);
+  const city = (inheritedArrivalCity && specificDistrict ? poiCity : "") || storedCity || poiCity
+    || hotelLocationFromHotelText(text(day.hotel)) || hotelLocationFromHotelText(text(day.hotelDescription))
     || routeCity || text(candidates[0]?.cityName) || text(stored.cityName);
   const locality = storedAnchor && !malformedRouteAnchor ? stored.maxDistanceKm !== undefined : location ? /镇|村|古镇|片区|街区|景区|园区|山|岛/u.test(anchorName)
     || /附近|周边/u.test(stayText ?? "")

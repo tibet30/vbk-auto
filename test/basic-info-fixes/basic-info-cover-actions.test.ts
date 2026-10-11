@@ -12,7 +12,7 @@ import path from "node:path";
 
 const here = new URL(".", import.meta.url).pathname;
 const productRoot = path.resolve(here, "..", "..");
-const actionsPath = path.join(productRoot, "src/renderer/app/actions/basic-info.ts");
+const actionsPath = path.join(productRoot, "src/renderer/app/actions/basic-info/cover.ts");
 const actionsSource = readFileSync(actionsPath, "utf8");
 const coverModelSource = readFileSync(path.join(productRoot, "src/renderer/app/actions/basic-info-cover-model.ts"), "utf8");
 

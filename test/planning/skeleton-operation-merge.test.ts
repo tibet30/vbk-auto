@@ -26,7 +26,7 @@ test("真实骨架写入不会删除交通子产品配置", async () => {
     getSetting: () => null,
   };
   const runtime = new DbOrchestratorRuntime(db as any, undefined, {
-    replace: (_id: string, product: Record<string, unknown>) => { saved = product; },
+    commands: { mergeChanges: (_id: string, _baseline: unknown, product: Record<string, unknown>) => { saved = product; } },
   } as any);
   const result = await runtime.writeModule("product", "skeleton", "/operations", {
     hotelTier: "当地3钻酒店/-3", pickupCity: "泸州", transport: "charter", mealsIncluded: false,

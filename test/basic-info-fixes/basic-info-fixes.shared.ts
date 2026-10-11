@@ -70,6 +70,9 @@ function stripComments(source: string): string {
 function readCtripSource() { return readSourceTree(ctripSourceRoot); }
 
 function readAutomationSource() { return readSourceTree(automationSourceRoot); }
+function readAutomationFile(relative: string) {
+  return readFileSync(path.join(automationSourceRoot, relative), "utf8");
+}
 
 export {
   test,
@@ -80,6 +83,7 @@ export {
   stripComments,
   readCtripSource,
   readAutomationSource,
+  readAutomationFile,
   basicInfoCompletenessIssues,
   findButlerOptionIndex,
   findFirstEnabledOptionIndex,

@@ -7,7 +7,7 @@ import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, Product
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
-import type { ProductMutationService } from "../../application/product-mutation-service.js";
+import { ProductMutationService } from "../../application/product-mutation-service.js";
 import { getProductBaseInfoApi } from "../ctrip/basic-info/api.js";
 import { assertRemoteDraftCanBeReplaced, prepareLockedDraftReplacement } from "./automation.main.replace-locked-draft.js";
 import {
@@ -196,7 +196,8 @@ export class DraftAutomation {
     const remote = await this.runVbkPageExclusive(async () =>
       getProductBaseInfoApi(await this.vbkPage(), previousProductId));
     assertRemoteDraftCanBeReplaced(remote);
-    this.db.updateProduct(localProductId, replacementProduct, "review");
+    (this.productMutations ?? new ProductMutationService(this.db)).commands.mergeChanges(
+      localProductId, product, replacementProduct, 'automation', { status: 'review', notify: false });
     this.db.setProductLifecycle(localProductId, { productId: null, status: "review", basicInfoSaved: false });
     this.db.addMessage(
       localProductId,

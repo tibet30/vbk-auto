@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createAppAuthStore } from "../../src/main/infrastructure/app-auth-store.js";
-import { createTibetProductService, TibetProductConflictError } from "../../src/main/infrastructure/tibet-products.js";
+import { createTibetProductService, TibetProductConflictError, TibetProductNotFoundError } from "../../src/main/infrastructure/tibet-products.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
 import { productReport } from "../../src/main/infrastructure/product-report.js";
 
@@ -253,4 +253,29 @@ test("Tibet 非 JSON 响应保留通用 HTTP 诊断", async (t) => {
     }),
   });
   await assert.rejects(service.list(), /desktop-products.*HTTP 404/);
+});
+
+test("旧账号请求迟到的 401 不清除新账号登录态", async t => {
+  const store = fixture(t);
+  const service = createTibetProductService(store, {
+    baseUrl: "https://example.test",
+    fetchImpl: async () => {
+      store.set({ token: "new-token", expiresAt: future,
+        user: { id: 8, name: "新账号", phone: "test", status: "active", expiresAt: future } });
+      return response({ code: 401, message: "旧登录失效" }, 401);
+    },
+  });
+  await assert.rejects(service.get(product.id), /旧登录失效/);
+  assert.equal(store.get()?.user.id, 8);
+  assert.equal(store.get()?.token, "new-token");
+});
+
+test("明确的产品 404 使用专门错误，网络错误和服务端错误不当成缺产品", async t => {
+  const store = fixture(t);
+  const missing = createTibetProductService(store, { baseUrl: "https://example.test",
+    fetchImpl: async () => response({ code: 404 }, 404) });
+  await assert.rejects(missing.get(product.id), TibetProductNotFoundError);
+  const unavailable = createTibetProductService(store, { baseUrl: "https://example.test",
+    fetchImpl: async () => response({ code: 503 }, 503) });
+  await assert.rejects(unavailable.get(product.id), error => !(error instanceof TibetProductNotFoundError));
 });

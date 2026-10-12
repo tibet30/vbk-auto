@@ -5,7 +5,7 @@ import type { AppAuthStore } from "./app-auth-store.js";
 import { TibetProductConflictError, type TibetProductService } from "./tibet-products.js";
 
 /** Local authority with a read-only bridge for historical cloud products.
- * No product mutation is sent to Tibet. Diagnostics are queued separately.
+ * Local mutations are saved first; the storage boundary replicates them to Tibet.
  */
 export function createLocalProductService(args: {
   db: VbkDatabase; store: AppAuthStore;

@@ -28,6 +28,13 @@ export class TibetProductConflictError extends Error {
   }
 }
 
+export class TibetProductNotFoundError extends Error {
+  constructor() {
+    super("产品不存在。");
+    this.name = "TibetProductNotFoundError";
+  }
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -101,9 +108,11 @@ export function createTibetProductService(
       throw nonJsonResponseError(path, response);
     }
     if (response.status === 401 || response.status === 403) {
-      store.clear();
+      const current = store.get();
+      if (current?.user.id === session.user.id && current.token === session.token) store.clear();
       throw new Error(messageOf(envelope, "应用登录已失效，请重新登录。"));
     }
+    if (response.status === 404) throw new TibetProductNotFoundError();
     if ((!response.ok || envelope.code !== 200) && !(allowConflict && response.status === 409)) {
       throw new Error(messageOf(envelope, "Tibet 产品服务请求失败，请稍后重试。"));
     }

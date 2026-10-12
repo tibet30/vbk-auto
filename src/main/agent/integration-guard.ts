@@ -53,6 +53,12 @@ export function assertAgentWriteAuthorized(product: ProductDetail, snapshot: Age
     || !approval.scope.includes(`vbk.write_phase:${phase}`)) {
     throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');
   }
+  if (phase === "trafficLine" && approval.generateTrafficChildren === false) {
+    throw new AgentAuthorizationError("本次未授权生成子产品，请在产品录入页手动创建并录入子产品。");
+  }
+  if (approval.trafficChildrenOnly && !["trafficLine", "preflight"].includes(phase)) {
+    throw new AgentAuthorizationError("本次仅授权子产品录入，不能重写母产品阶段。");
+  }
   const versionMatches = approval.productVersion === agentProductVersion(product);
   if (!versionMatches) {
     throw new AgentAuthorizationError('方案、意图或账号已变化，请重新确认后录入。');

@@ -30,6 +30,7 @@ import type { AgentCoreDependencies, AgentSnapshotStore } from "./types.js";
 export type { AgentSnapshotStore } from "./types.js";
 export { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
 
+import { createTrafficChildrenCommand } from "./core/traffic-children.js";
 import { getSnapshot, reconcilePendingInput } from "./core/get.js";
 import { sendCommand } from "./core/send.js";
 import {
@@ -106,6 +107,9 @@ export class AgentCore {
   }
   respond(id: string, response: AgentInputResponse): Promise<AgentSnapshot> { return respondCommand(this, id, response); }
   approve(id: string, response: AgentApprovalResponse): Promise<AgentSnapshot> { return approveCommand(this, id, response); }
+  createTrafficChildren(id: string, routeReviewAuthorized: boolean): Promise<AgentSnapshot> {
+    return createTrafficChildrenCommand(this, id, routeReviewAuthorized);
+  }
   pause(id: string): Promise<AgentSnapshot> { return pauseCommand(this, id); }
   resume(id: string): Promise<AgentSnapshot> { return resumeCommand(this, id); }
   abandon(id: string): Promise<AgentSnapshot> { return abandonCommand(this, id); }

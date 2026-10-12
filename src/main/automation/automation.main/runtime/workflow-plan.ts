@@ -33,9 +33,9 @@ export function automationStartPhase(product: ProductDetail | undefined): string
   return undefined;
 }
 
-export function approvedWorkflowPlan(product: ProductDetail, replayOfAutomationRunId?: string): ApprovedWorkflowPlan {
+export function approvedWorkflowPlan(product: ProductDetail, replayOfAutomationRunId?: string, generateTrafficChildren = true): ApprovedWorkflowPlan {
   if (product.automation?.id && replayOfAutomationRunId === product.automation.id) return { kind: "run" };
-  if (needsTrafficLineBackfill(product)) return { kind: "traffic-backfill" };
+  if (generateTrafficChildren && needsTrafficLineBackfill(product)) return { kind: "traffic-backfill" };
   if (isVerifiedAutomationComplete(product)) return { kind: "complete" };
   if (canRestartPreWriteAuthorizationFailure(product.automation, product.productId)) return { kind: "run" };
   const queued = product.productId && product.automation?.status === "queued"

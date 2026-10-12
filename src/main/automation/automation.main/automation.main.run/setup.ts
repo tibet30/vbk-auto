@@ -9,6 +9,7 @@
  * 给 handlers.ts 复用，避免再次重复 resolve。
  */
 
+import { approvalForRun } from "../../../agent/integration-gates.js";
 import { randomUUID } from "node:crypto";
 import { getVbkRequestPage } from "../../../infrastructure/vbk-request-page.js";
 import {
@@ -101,7 +102,8 @@ export async function prepareAutomationSetup(
 
   const draftPhases = resourceRecoveryPhases(
     product,
-    draftPhasesFor(product),
+    draftPhasesFor(product).filter(phase => phase !== "trafficLine"
+      || approvalForRun(ctx.db.getAgentSnapshot(localProductId))?.generateTrafficChildren !== false),
     productDetail.automation,
     mutableRetryFrom,
   );

@@ -28,14 +28,27 @@ export function nextPreparationLoopDecision(
   const events = eventsSinceLatestUser(snapshot);
   const runEvents = snapshot.events.filter((event) => event.runId === snapshot.run?.id);
   if (action.node === "hotelResolution") {
+    const rejectedAnswer = [...events].reverse().find(event => event.type === "tool_result" && event.data?.executionRejected === true
+      && events.some(call => call.type === "tool_call" && call.data?.hotelAvailabilityInput === true
+        && call.data?.progressKey === action.progressKey && call.data?.toolCallId === event.data?.toolCallId));
+    if (rejectedAnswer) {
+      const hotelFailure = [...events].reverse().find(event => event.type === "tool_result" && event.data?.error
+        && events.some(call => call.type === "tool_call" && call.data?.name === "resolve_itinerary_hotels" && call.data?.toolCallId === event.data?.toolCallId));
+      return { kind: "pause", reason: `自动酒店资料回答失败，未取得有效答案：${rejectedAnswer.content}。住宿尚未核验通过：${hotelFailure?.data?.error ?? "没有真实酒店候选成功收据"}` };
+    }
     const answered = events.findIndex(event => event.type === "tool_result"
+      && event.data?.executionRejected !== true && !event.data?.error
+      && (event.data?.answers || event.data?.resolvedAnswers)
       && events.some(call => call.type === "tool_call" && call.data?.hotelAvailabilityInput === true
         && call.data?.progressKey === action.progressKey && call.data?.toolCallId === event.data?.toolCallId));
     if (answered >= 0) {
       const turns = events.slice(answered + 1).filter(event => event.type === "status"
         && event.data?.hotelInputModelWindow === true && event.data?.progressKey === action.progressKey).length;
       if (turns < 3) return { kind: "model", action, hotelInputModelWindow: true };
-      return { kind: "pause", reason: "酒店资料已自动回答并尝试落实三轮，仍未取得符合住宿要求的真实候选。已保留当前行程和已核验酒店，请检查具体住宿地点或资源检索结果后重试。" };
+      const lastHotelFailure = [...events].reverse().find(event => event.type === "tool_result" && event.data?.error
+        && events.some(call => call.type === "tool_call" && call.data?.name === "resolve_itinerary_hotels" && call.data?.toolCallId === event.data?.toolCallId));
+      const gaps = evaluatePreparationCompletion(product, snapshot).gaps.filter(gap => gap.node === "hotelResolution");
+      return { kind: "pause", reason: `酒店资料已回答，但三轮处理后住宿门禁仍未通过。${gaps.map(gap => `${gap.label}：${gap.detail}`).join("；")}。最近酒店核验结果：${lastHotelFailure?.data?.error ?? "尚未取得真实酒店查询成功收据"}` };
     }
   }
   const manualInput = action.node === "poiResolution" ? manualPoiInput(unmatchedCanonicalPoiSlots(product)) : undefined;

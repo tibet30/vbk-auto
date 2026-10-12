@@ -36,6 +36,10 @@ export function selectCtripHotelContext(rows: unknown[], args: { anchorName: str
   if (selected && !city && candidates.some(candidate => candidate.score === selected.score && candidate.cityId !== selected.cityId)) {
     throw new Error(`住宿地标「${args.anchorName}」在多个城市同名，需确认每日住宿城市后再查询。`);
   }
-  if (!selected) throw new Error(`携程未找到${city || "目标城市"}内可定位的酒店检索地标：${args.anchorName}`);
+  if (!selected) {
+    const local = rows.map(record).filter(row => row && (!city || normalise(toPlatformShortLocationName(text(row.cityName))) === city));
+    const missingCoordinates = local.filter(row => !coordinates(row)).length;
+    throw new Error(`携程未找到${city || "目标城市"}内可定位的酒店检索地标：${args.anchorName}；要求同城且含有效ID、城市ID、坐标的地标至少1个，实际返回${rows.length}条、同城${local.length}条、同城缺坐标${missingCoordinates}条、通过全部条件0条（0＜1）；酒店列表尚未完成核验`);
+  }
   return selected;
 }

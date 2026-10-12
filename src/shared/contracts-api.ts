@@ -75,6 +75,7 @@ export interface VbkApi {
     send(localProductId: string, content: string): Promise<AgentDisplaySnapshot>;
     repairIllegalKeywords(localProductId: string, input: AgentIllegalKeywordRepairInput): Promise<AgentDisplaySnapshot>;
     respond(localProductId: string, response: AgentInputResponse): Promise<AgentDisplaySnapshot>;
+    createTrafficChildren(localProductId: string, routeReviewAuthorized: boolean): Promise<AgentDisplaySnapshot>;
     approve(localProductId: string, response: AgentApprovalResponse): Promise<AgentDisplaySnapshot>;
     pause(localProductId: string): Promise<AgentDisplaySnapshot>;
     resume(localProductId: string): Promise<AgentDisplaySnapshot>;

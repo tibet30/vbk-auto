@@ -7,8 +7,9 @@ import { HotelCandidatesUnavailableError, HotelSearchEmptyResultError } from "..
 import type { HotelSearchContext as Context } from "../ctrip-hotel-search-types.js";
 import { nextHotelSearchDates, fetchCtripHotelContext } from "./provider.js";
 import { selectCtripHotelContext } from "./context.js";
-import { limitItineraryHotelStays, shouldResolveItineraryHotelForDay, hotelSearchContextCityForDay, hotelSearchAnchorNames } from "./itinerary-policy.js";
+import { limitItineraryHotelStays, shouldResolveItineraryHotelForDay, hotelSearchContextCityForDay, hotelSearchAnchorNames, explicitHotelName } from "./itinerary-policy.js";
 import { fetchHotelCandidatesWithFallback, isHotelDowngradeAllowed } from "./matching.js";
+import { fetchHotelDetail, namedHotelSuggestion, matchNamedHotelTier } from "./detail.js";
 import { applyHotelCandidates } from "./projection.js";
 import { text } from "./helpers.js";
 
@@ -51,23 +52,38 @@ async function resolveItineraryHotelCandidates(
     let searchFailure: unknown;
     const searchedContexts = new Set<string>();
     try {
-      for (const anchorName of anchorNames) {
-        const contexts = await fetchCtripHotelContext(anchorName, fetcher);
-        try {
-          anchor = selectCtripHotelContext(contexts, {
-            anchorName, preferredCity: nightlyHotelAlternatives(text(day.hotel)).length ? undefined : contextCity, requirePreferredCity: Boolean(contextCity) && !nightlyHotelAlternatives(text(day.hotel)).length,
-            requirement: nightlyHotelAlternatives(text(day.hotel)).length ? { ...requirement, anchorName, maxDistanceKm: requirement?.maxDistanceKm ?? 5 } : requirement,
-          });
-          // Alias suggestions can resolve to the same official landmark. Do not
-          // restart the complete tier budget for that identical query context.
-          const contextKey = JSON.stringify([anchor.cityId, anchor.id, anchor.coordinate, anchor.requirement]);
-          if (searchedContexts.has(contextKey)) continue;
-          searchedContexts.add(contextKey);
-          candidates = await fetchHotelCandidatesWithFallback(anchor, dates, dayTier, anchor.requirement ?? requirement, isHotelDowngradeAllowed(allowDowngrade, Number(day.day)), fetcher);
-          break;
-        } catch (error) {
-          searchFailure = error;
-          if (anchorName === anchorNames.at(-1) || !(error instanceof HotelCandidatesUnavailableError || error instanceof HotelSearchEmptyResultError || error instanceof Error && /未找到.*酒店检索地标/u.test(error.message))) throw error;
+      const named = !requirement ? explicitHotelName(day, contextCity) : undefined;
+      if (named && contextCity) {
+        const keyword = named.includes(contextCity) ? named : `${contextCity}${named}`;
+        const rows = await fetchCtripHotelContext(keyword, fetcher);
+        const id = namedHotelSuggestion(rows, named, contextCity);
+        const { candidate: detail, coordinate } = await fetchHotelDetail(id, contextCity, fetcher);
+        candidates = matchNamedHotelTier(detail, hotelDiamondFromTier(dayTier), isHotelDowngradeAllowed(allowDowngrade, Number(day.day)));
+        anchor = { id: String(id), cityId: detail.anchorCityId!, cityName: detail.cityName!, name: detail.hotelName,
+          coordinate };
+      } else {
+        // Keep successful original queries stable; only expand failed plain landmarks.
+        const additional = !requirement && contextCity
+          ? anchorNames.filter(name => name !== contextCity && !name.includes(contextCity)).map(name => `${contextCity}${name}`) : [];
+        const queries = [...new Set([...anchorNames, ...additional])];
+        for (const anchorName of queries) {
+          const contexts = await fetchCtripHotelContext(anchorName, fetcher);
+          try {
+            anchor = selectCtripHotelContext(contexts, {
+              anchorName, preferredCity: nightlyHotelAlternatives(text(day.hotel)).length ? undefined : contextCity, requirePreferredCity: Boolean(contextCity) && !nightlyHotelAlternatives(text(day.hotel)).length,
+              requirement: nightlyHotelAlternatives(text(day.hotel)).length ? { ...requirement, anchorName, maxDistanceKm: requirement?.maxDistanceKm ?? 5 } : requirement,
+            });
+            // Alias suggestions can resolve to the same official landmark. Do not
+            // restart the complete tier budget for that identical query context.
+            const contextKey = JSON.stringify([anchor.cityId, anchor.id, anchor.coordinate, anchor.requirement]);
+            if (searchedContexts.has(contextKey)) continue;
+            searchedContexts.add(contextKey);
+            candidates = await fetchHotelCandidatesWithFallback(anchor, dates, dayTier, anchor.requirement ?? requirement, isHotelDowngradeAllowed(allowDowngrade, Number(day.day)), fetcher);
+            break;
+          } catch (error) {
+            searchFailure = error;
+            if (anchorName === queries.at(-1) || !(error instanceof HotelCandidatesUnavailableError || error instanceof HotelSearchEmptyResultError || error instanceof Error && /未找到.*酒店检索地标/u.test(error.message))) throw error;
+          }
         }
       }
       if (!anchor) throw new Error("缺少可定位的酒店检索地标。");
@@ -76,7 +92,7 @@ async function resolveItineraryHotelCandidates(
       const city = contextCity || anchor?.cityName || "未识别城市";
       const diamond = requirement?.diamond ?? hotelDiamondFromTier(hotelTier);
       const reason = error instanceof Error ? error.message : String(error);
-      const failure = `第 ${Number(day.day) || index + 1} 天住宿（检索城市：${city}，要求：${diamond ? `当地${diamond}钻` : hotelTier || "未配置档次"}）未完成：${reason}`;
+      const failure = `第 ${Number(day.day) || index + 1} 天住宿（检索城市：${city}，要求：${diamond ? `当地${diamond}钻` : hotelTier || "未配置档次"}）未完成：${reason}；要求保存1–5个真实候选，实际本日保存0个，差异0＜1；降档${isHotelDowngradeAllowed(allowDowngrade, Number(day.day)) ? "允许" : "禁止"}。`;
       if (!onProgress) throw new Error(failure);
       failures.push(failure);
       continue;

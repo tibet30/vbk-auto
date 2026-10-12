@@ -32,6 +32,7 @@ const api: VbkApi = {
     send: (id, content) => ipcRenderer.invoke("agent:send", id, content),
     repairIllegalKeywords: (id, input) => ipcRenderer.invoke("agent:repairIllegalKeywords", id, input),
     respond: (id, response) => ipcRenderer.invoke("agent:respond", id, response),
+    createTrafficChildren: (id, routeReviewAuthorized) => ipcRenderer.invoke("agent:createTrafficChildren", id, routeReviewAuthorized),
     approve: (id, response) => ipcRenderer.invoke("agent:approve", id, response),
     pause: (id) => ipcRenderer.invoke("agent:pause", id),
     resume: (id) => ipcRenderer.invoke("agent:resume", id),

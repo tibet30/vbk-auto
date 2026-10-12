@@ -12,6 +12,7 @@ import { vbkSessionRequest } from "../../../infrastructure/vbk-session-request.j
 import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.js";
 import type { ResourceCity, Segment } from "./types.js";
 import { VBK_RESOURCE_HEAD } from "./types.js";
+import { selectAdministrativeCity, type AdministrativeCityContext } from "../basic-info/administrative-city.js";
 
 export async function getProductSegmentsApi(page: any, productId: string) {
   const response = await vbkSessionRequest(page, {
@@ -44,7 +45,7 @@ export async function saveProductSegmentApi(page: any, segment: Segment, errorLa
  * 资源编辑器的城市选择框同样使用 suggestDepartureCity。只接受唯一的精确城市，
  * 防止同名地级市或区县被误写到住宿行程段。
  */
-export async function resolveResourceSegmentCityApi(page: any, cityName: string): Promise<ResourceCity> {
+export async function resolveResourceSegmentCityApi(page: any, cityName: string, context: AdministrativeCityContext = {}): Promise<ResourceCity> {
   const expected = cityName.trim();
   if (!expected) throw new Error("住宿资源行程段缺少城市名称");
   const response = await vbkSessionRequest(page, {
@@ -59,11 +60,9 @@ export async function resolveResourceSegmentCityApi(page: any, cityName: string)
   const cities = Array.isArray((response.payload as any)?.cities)
     ? (response.payload as any).cities
     : [];
-  const matches = cities.filter((city: any) => String(city?.cityName ?? "").trim() === expected);
-  if (matches.length !== 1 || Number(matches[0]?.cityId) <= 0) {
-    throw new Error(`住宿城市「${expected}」无法唯一匹配：${matches.length} 个精确候选`);
-  }
-  return structuredClone(matches[0]);
+  const city = selectAdministrativeCity(cities, expected, context);
+  if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`住宿城市「${expected}」缺少合法 cityId`);
+  return structuredClone(city);
 }
 
 /**

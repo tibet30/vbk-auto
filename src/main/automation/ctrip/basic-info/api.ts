@@ -3,7 +3,8 @@ import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../../infra
 import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.js";
 import { listProviderContactCards } from "../../../infrastructure/butler-contacts.js";
 import { resolveAdvanceBooking } from "../../schema/schema-functions.js";
-import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
+import { selectAdministrativeCity, type AdministrativeCityContext } from "./administrative-city.js";
+export { selectAdministrativeCity } from "./administrative-city.js";
 import { getProductBaseInfoSaveModel } from "./save-model.js";
 import { getProductBaseInfoApi } from "./read-base.js";
 export { getProductBaseInfoApi } from "./read-base.js";
@@ -98,20 +99,11 @@ async function post(page: VbkSessionRequestBrowser, path: string, body: Json, la
 
 
 
-async function resolveCity(page: VbkSessionRequestBrowser, cityName: string): Promise<Json> {
+async function resolveCity(page: VbkSessionRequestBrowser, cityName: string, context: AdministrativeCityContext): Promise<Json> {
   const payload = await post(page, "suggestDepartureCity", { keyword: cityName }, "VBK 城市查询");
-  const city = selectAdministrativeCity(payload.cities, cityName);
+  const city = selectAdministrativeCity(payload.cities, cityName, context);
   if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`城市「${cityName}」缺少合法 cityId`);
   return city;
-}
-
-/** 行政字段按同一短名精确匹配；只消费 suggestDepartureCity 的城市候选。 */
-export function selectAdministrativeCity(cities: unknown, cityName: string): Json {
-  const target = toPlatformShortLocationName(cityName);
-  const exact = list(cities).filter((city) =>
-    toPlatformShortLocationName(String(city.cityName ?? "")) === target);
-  if (exact.length !== 1) throw new Error(`城市「${cityName}」无法唯一匹配：${exact.length} 个规范候选`);
-  return exact[0];
 }
 
 async function resolveProductLine(page: VbkSessionRequestBrowser, info: Json, cityId: number, cityName: string): Promise<Json> {
@@ -189,7 +181,7 @@ export async function ensureBasicInfoApi(
   const info = record(product.basicInfo);
   const meetingCity = resolveBasicInfoCityAnchor(product);
   const [city, phone, contact] = await Promise.all([
-    resolveCity(page, meetingCity),
+    resolveCity(page, meetingCity, { province: info.province }),
     resolvePhone(page, sourceBase, servicePhone),
     resolveContact(page, butler),
   ]);

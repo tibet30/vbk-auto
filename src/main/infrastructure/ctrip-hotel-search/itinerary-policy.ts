@@ -6,6 +6,20 @@ import { itineraryAttractions } from "../../../shared/itinerary-activity-kind.js
 import { toWritableAdministrativeCityName, hotelLocationFromHotelText } from "../../../shared/region-overrides.js";
 import { record, text, escapeRegExp } from "./helpers.js";
 
+/** A named property must not be replaced by an arbitrary nearby hotel. */
+export function explicitHotelName(day: Record<string, unknown>, city?: string): string | undefined {
+  // Lodging prose is generated into this field alongside the property name.
+  // Remove only explicit stay instructions; retain city and branch qualifiers.
+  const hotel = text(day.hotel)
+    .replace(/^(?:入住|下榻|住宿于|住宿在)\s*/u, "")
+    .replace(/[，,；;\s]*(?:住宿|入住|住)(?:一|两|二|三|四|五|六|七|八|九|十|\d+)晚[。.]?$/u, "")
+    .trim();
+  if (!/(?:酒店|宾馆|客栈)/u.test(hotel) || /当地|区域|待核验|待匹配|[1-5一二三四五]钻|无住宿|无需|或|内(?:度假|特色)|附近|周边/u.test(hotel)) return undefined;
+  const stem = hotel.replace(/[（(].*$/u, "").replace(/(?:酒店|宾馆|客栈).*$/u, "").trim();
+  if (stem.length < 2 || stem === toPlatformShortLocationName(city) || /市区|城区|真实|测试/u.test(stem)) return undefined;
+  return hotel;
+}
+
 /**
  * 行程录入页的酒店节点使用携程平台酒店。AI 有时只写了产品 nights，
  * 但每日 hotel 仍为空；这时按默认行程语义把前 N 天视为住宿日，

@@ -72,12 +72,13 @@ export function AgentConversation({ product, userName, readiness, client, input,
   const follow = useRef(true);
   const [unseen, setUnseen] = useState(false);
   const [showAbandon, setShowAbandon] = useState(false);
+  const [generateTrafficChildren, setGenerateTrafficChildren] = useState(false);
   const [routeReviewAuthorized, setRouteReviewAuthorized] = useState(true);
   const [repairingKeywords, setRepairingKeywords] = useState(false);
   const status = snapshot.run?.status;
   const running = status === "running" || status === "queued";
   const approval = snapshot.pendingApproval;
-  useEffect(() => { setRouteReviewAuthorized(true); }, [product.id, approval?.id]);
+  useEffect(() => { setRouteReviewAuthorized(true); setGenerateTrafficChildren(false); }, [product.id, approval?.id]);
   const request = snapshot.pendingInput;
   const events = history.events;
   const latestEvent = snapshot.events.at(-1);
@@ -176,15 +177,19 @@ export function AgentConversation({ product, userName, readiness, client, input,
       {request && status === "waiting_input" && <AgentInput key={request.id} request={request} busy={busy} onSubmit={async (response) => { await run((agent) => agent.respond(product.id, response)); }} />}
       {approval?.status === "pending" && status === "waiting_approval" && <section className={styles.approval} aria-label="最终方案确认">
         <strong>确认右侧方案后开始录入</strong>
-        <p className={styles.scope}>目标账号：{approval.accountKey}<br />录入范围：{approval.scope.map(scopeLabel).join("、")}</p>
+        <p className={styles.scope}>目标账号：{approval.accountKey}<br />录入范围：{approval.scope.filter(scope => scope !== "vbk.write_phase:trafficLine" || generateTrafficChildren).map(scopeLabel).join("、")}</p>
         {approval.scope.includes("vbk.write_phase:trafficLine") && <label className={styles.routeReviewAuthorization}>
+          <input type="checkbox" checked={generateTrafficChildren} disabled={busy} onChange={event => setGenerateTrafficChildren(event.target.checked)} />
+          <span>是否生成子产品（飞机／火车套餐），可稍后在产品录入页手动创建</span>
+        </label>}
+        {generateTrafficChildren && approval.scope.includes("vbk.write_phase:trafficLine") && <label className={styles.routeReviewAuthorization}>
           <input type="checkbox" checked={routeReviewAuthorized} disabled={busy} onChange={event => setRouteReviewAuthorized(event.target.checked)} />
           <span>同时授权玩法线路匹配审核（飞机／火车套餐启用前置）</span>
         </label>}
         {!readiness.ready && <p role="status">本地方案尚未准备完成，不能录入：{readiness.issues.slice(0, 3).map((issue) => issue.label).join("、")}</p>}
         <div className={styles.actions}>
           <button type="button" className={shared.btn} data-variant="primary" disabled={busy || !readiness.ready} onClick={async () => {
-            const result = await run((agent) => agent.approve(product.id, { approvalId: approval.id, productVersion: approval.productVersion, trafficRouteReviewAuthorized: routeReviewAuthorized }));
+            const result = await run((agent) => agent.approve(product.id, { approvalId: approval.id, productVersion: approval.productVersion, trafficRouteReviewAuthorized: routeReviewAuthorized, generateTrafficChildren }));
             if (result?.events.some((event) => event.type === "approval" && (event.data?.approvalId ?? (event.data?.approval as { id?: string } | undefined)?.id) === approval.id
               && (event.data?.approval as { status?: string } | undefined)?.status === "approved")) onApproved();
           }}>确认方案并录入 VBK</button>

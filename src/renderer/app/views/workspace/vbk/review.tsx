@@ -19,6 +19,7 @@ import type { TrafficLineConfig } from "../../../../../shared/contracts-traffic-
 import shared from "../../shared.module.less";
 import layout from "../layout.module.less";
 import styles from "../vbk.module.less";
+import { TrafficChildrenAction } from "./traffic-children-action";
 import { StageRetryMenu } from "./stage-retry-menu";
 import type { AppModel } from "../../../app.main.model";
 
@@ -129,7 +130,7 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
                         <span>进入</span>
                         {isNavigating ? <LoaderCircle size={12} /> : <Wrench size={12} />}
                       </button>
-                      {retryPhases.length > 1 ? <StageRetryMenu
+                      {section.key === "trafficLine" ? null : retryPhases.length > 1 ? <StageRetryMenu
                         key={product.id}
                         sectionLabel={section.label}
                         options={retryOptions}
@@ -161,7 +162,10 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
                       })}
                     </div>
                   </div>
-                  {section.key === "trafficLine" ? <TrafficLineProgress automation={product.automation} product={product.product} /> : null}
+                  {section.key === "trafficLine" ? <>
+                    <TrafficChildrenAction key={product.id} product={product} disabled={loading || automationActive || !!retryingPhase || !!navigatingSection} />
+                    <TrafficLineProgress automation={product.automation} product={product.product} />
+                  </> : null}
                 </div>
               );
             })}

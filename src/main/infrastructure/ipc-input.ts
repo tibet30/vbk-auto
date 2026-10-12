@@ -66,7 +66,7 @@ const PRODUCT_ID_FIRST_CHANNELS = new Set([
   "automation:start", "automation:stop", "automation:retry", "automation:retryPhase", "automation:retryOnePhase",
   "planning:start", "planning:resume", "planning:state", "planning:rerunMajorStage", "planning:acceptItineraryAndRerunCompletion",
   "workflowTasks:get", "workflowTasks:abandon", "workflowTasks:resume",
-  "agent:get", "agent:send", "agent:repairIllegalKeywords", "agent:respond", "agent:approve", "agent:pause", "agent:resume", "agent:abandon",
+  "agent:get", "agent:send", "agent:repairIllegalKeywords", "agent:respond", "agent:approve", "agent:createTrafficChildren", "agent:pause", "agent:resume", "agent:abandon",
   "memory:saveExplicit", "memory:list", "memory:get", "memory:update", "memory:disable", "memory:delete", "memory:maintenance", "memory:settings",
 ]);
 
@@ -114,7 +114,8 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     }).strict(), args[1]);
   }
   if (channel === "agent:respond") parse(channel, "response", z.object({ requestId: shortTextSchema, answers: z.record(z.string(), z.union([z.string().max(3000), z.array(z.string().max(1000)).max(20)])).refine((value) => Object.keys(value).length <= 20) }).strict(), args[1]);
-  if (channel === "agent:approve") parse(channel, "response", z.object({ approvalId: shortTextSchema, productVersion: z.string().regex(/^[a-f0-9]{64}$/), trafficRouteReviewAuthorized: z.boolean().optional() }).strict(), args[1]);
+  if (channel === "agent:approve") parse(channel, "response", z.object({ approvalId: shortTextSchema, productVersion: z.string().regex(/^[a-f0-9]{64}$/), trafficRouteReviewAuthorized: z.boolean().optional(), generateTrafficChildren: z.boolean().optional() }).strict(), args[1]);
+  if (channel === "agent:createTrafficChildren") parse(channel, "routeReviewAuthorized", z.boolean(), args[1]);
   if (channel === "ai:regenerate") parse(channel, "field", shortTextSchema, args[1]);
   if (channel === "workflowTasks:resume") parse(channel, "mode", workflowTaskRetryModeSchema, args[1]);
   if (channel === "memory:saveExplicit") parse(channel, "input", memoryInputSchema, args[1]);

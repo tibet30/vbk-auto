@@ -31,6 +31,10 @@ export interface AgentApproval {
   replayOfAutomationRunId?: string;
   /** 用户在最终确认时另行明确授权玩法线路匹配审核。 */
   trafficRouteReviewAuthorized?: boolean;
+  /** 本次录入是否包含交通子产品；旧授权未记录时保持原范围。 */
+  generateTrafficChildren?: boolean;
+  /** 运营在母产品保存后单独触发子产品录入。 */
+  trafficChildrenOnly?: boolean;
 }
 export interface AgentRun {
   id: string;
@@ -90,7 +94,7 @@ export interface AgentDisplaySnapshot extends Omit<AgentSnapshot, "events"> {
   eventCount: number;
 }
 export interface AgentInputResponse { requestId: string; answers: Record<string, string | string[]>; }
-export interface AgentApprovalResponse { approvalId: string; productVersion: string; trafficRouteReviewAuthorized?: boolean; }
+export interface AgentApprovalResponse { approvalId: string; productVersion: string; trafficRouteReviewAuthorized?: boolean; generateTrafficChildren?: boolean; }
 export interface AgentIllegalKeywordRepairInput {
   content: string;
   keywords: string[];

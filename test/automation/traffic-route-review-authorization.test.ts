@@ -31,7 +31,7 @@ test("最终确认从用户响应持久化独立审核授权，模型请求不�
     const core = new AgentCore({ tools: [], model: { complete: async () => ({ content: "unused" }) },
       accountFor: async () => ({ accountKey: "a", productVersion: "version" }), handoffApprovedWorkflow: () => true },
     { getAgentSnapshot: () => saved, saveAgentSnapshot: s => { saved = structuredClone(s); } });
-    await core.approve("p", { approvalId: "approval", productVersion: "version", trafficRouteReviewAuthorized: explicit });
+    await core.approve("p", { approvalId: "approval", productVersion: "version", trafficRouteReviewAuthorized: explicit, generateTrafficChildren: true });
     assert.equal(trafficRouteReviewAuthorized(saved), explicit);
   }
 });

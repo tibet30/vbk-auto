@@ -39,7 +39,8 @@ export async function approveCommand(core: AgentCore, id: string, response: Agen
       else c.completionBlocked(snapshot, message, blocker);
     } else {
       approval.status = "approved";
-      approval.trafficRouteReviewAuthorized = response.trafficRouteReviewAuthorized === true;
+      approval.generateTrafficChildren = response.generateTrafficChildren === true;
+      approval.trafficRouteReviewAuthorized = approval.generateTrafficChildren && response.trafficRouteReviewAuthorized === true;
       granted = approval;
       snapshot.pendingApproval = undefined;
       c.event(snapshot, "approval", "用户已授权", { approval });

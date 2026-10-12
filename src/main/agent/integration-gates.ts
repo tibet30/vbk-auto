@@ -121,7 +121,8 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   }
   const required = requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`);
   if (required.some(scope=>!approval.scope.includes(scope))) return {verified:false,message:'已确认范围不完整，请重新请求最终确认。'};
-  const phases = approval.scope.filter(scope=>scope.startsWith('vbk.write_phase:')).map(scope=>scope.split(':')[1]);
+  const phases = approval.scope.filter(scope=>scope.startsWith('vbk.write_phase:')).map(scope=>scope.split(':')[1])
+    .filter(phase => phase !== 'trafficLine' || approval.generateTrafficChildren !== false);
   const canDeferTrafficLine = trafficLineCanBeDeferred(product);
   const incompleteTrafficChild = phases.includes('trafficLine') && !canDeferTrafficLine
     ? product.automation?.trafficLine?.children.find((child) => {

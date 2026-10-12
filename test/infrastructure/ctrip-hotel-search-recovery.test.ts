@@ -65,7 +65,7 @@ test("城市兜底仍为异地结果时阻断，错误包含住宿日与钻级",
   await replay(islandRows, [], async (queries) => {
     await assert.rejects(resolveItineraryHotelCandidates([day], "潮汕", 4, "当地5钻酒店/-38"),
       /第 2 天住宿（检索城市：汕头，要求：当地5钻）未完成：携程未找到汕头内/);
-    assert.deepEqual(queries, ["青澳湾", "汕头"]);
+    assert.deepEqual(queries, ["青澳湾", "汕头", "汕头青澳湾"]);
   });
 });
 

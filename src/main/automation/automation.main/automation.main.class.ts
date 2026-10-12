@@ -175,7 +175,8 @@ export class DraftAutomation {
     // fingerprint + recovery-only-instruction gate used by AgentCore.
     const approval = approvalForRun(agent) ?? recoverEquivalentApproval(product, agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
-    const plan = approvedWorkflowPlan(product, approval.replayOfAutomationRunId);
+    const plan = approval.trafficChildrenOnly ? { kind: "traffic-backfill" as const }
+      : approvedWorkflowPlan(product, approval.replayOfAutomationRunId, approval.generateTrafficChildren !== false);
     if (plan.kind === "complete") return;
     if (plan.kind === "traffic-backfill") {
       await this.runApprovedBackfillLocked(localProductId);

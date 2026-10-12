@@ -42,6 +42,7 @@ export function registerAgentIpc(context: MainIpcContext): void {
     }
     return agent().respond(localProductId, response).then(emit);
   });
+  ipcMain.handle("agent:createTrafficChildren", (_event, id: string, routeReviewAuthorized: boolean) => agent().createTrafficChildren(id, routeReviewAuthorized).then(emit));
   ipcMain.handle("agent:approve", (_event, localProductId: string, response: AgentApprovalResponse) => agent().approve(localProductId, response).then(emit));
   ipcMain.handle("agent:pause", (_event, localProductId: string) => agent().pause(localProductId).then(emit));
   ipcMain.handle("agent:resume", (_event, localProductId: string) => agent().resume(localProductId).then(emit));

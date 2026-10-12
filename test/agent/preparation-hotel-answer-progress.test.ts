@@ -35,6 +35,14 @@ test("酒店资料自动回答后必须给模型落实机会，无业务进展�
       data: { hotelInputModelWindow: true, progressKey: key } });
   }
   assert.equal(nextPreparationLoopDecision(deps, snapshot).kind, "pause");
+  const validAnswer = snapshot.events.find(event => event.id === "answer")!;
+  validAnswer.data = { toolCallId: "q", executionRejected: true };
+  validAnswer.content = "自动资料问答失败：AI 自动资料回答不是有效 JSON";
+  const rejected = nextPreparationLoopDecision(deps, snapshot);
+  assert.equal(rejected.kind, "pause");
+  if (rejected.kind !== "pause") throw new Error("missing failure receipt");
+  assert.match(rejected.reason, /自动酒店资料回答失败.*不是有效 JSON/);
+  assert.doesNotMatch(rejected.reason, /酒店资料已回答|已自动回答/);
   (product.product.itinerary![0] as unknown as Record<string, unknown>).hotelRequirement = {
     cityName: "汕头", anchorName: "汕头万象城", diamond: 5,
   };

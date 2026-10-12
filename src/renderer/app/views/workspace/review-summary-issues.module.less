@@ -259,10 +259,14 @@
   min-width: 64px;
 }
 
+/* 定宽按钮，文案必须水平居中：
+ * .btn 的基础态是 inline-flex + 默认 flex-start，定宽后「处理」会偏左留白；
+ * 这里显式居中，并把左右 padding 收敛到 6px，给最长的「手动确认」留出余量。*/
 .itemActionBtn {
   width: 64px;
   height: var(--control-sm);
   flex: 0 0 auto;
   white-space: nowrap;
-  padding: 0 8px;
+  padding: 0 6px;
+  justify-content: center;
 }

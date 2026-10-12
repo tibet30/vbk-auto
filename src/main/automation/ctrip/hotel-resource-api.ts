@@ -159,7 +159,9 @@ async function normalizeHotelResourceLayout(args: {
     if (!departureCity || typeof departureCity !== "object") {
       throw new Error("VBK 资源配置全程段缺少到达城市，无法新增住宿段");
     }
-    const destinationCity = await resolveResourceSegmentCityApi(args.page, group.cityName);
+    const destinationCity = await resolveResourceSegmentCityApi(args.page, group.cityName, {
+      countryName: departureCity.countryName,
+    });
     const draft = buildLodgingResourceSegment({
       terminalTemplate: terminal,
       segmentNumber: Number(terminal.segmentBase?.segmentNumber),

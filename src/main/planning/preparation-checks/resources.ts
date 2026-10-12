@@ -4,7 +4,7 @@ import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { hasSatisfiedVehicleResource } from "../../../shared/research-task-satisfaction.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import { hotelDiamondFromTier } from "../../../shared/hotel-tiers.js";
-import { hotelCandidateMeetsStay, hotelStayRequirement, hotelDiamondForStay } from "../../../shared/hotel-stay-requirement.js";
+import { hotelCandidateMeetsStay, hotelStayRequirement, hotelDiamondForStay, type HotelStayRequirement } from "../../../shared/hotel-stay-requirement.js";
 import { asArray, asObject, textValue } from "./common.js";
 
 export function resourceGaps(product: Record<string, unknown>): PreparationGap[] {
@@ -23,7 +23,8 @@ export function resourceGaps(product: Record<string, unknown>): PreparationGap[]
       || !candidates.every(candidate => hotelCandidateMeetsStay(asObject(candidate) ?? {}, requirement))) {
       gaps.push({
         code: "hotel", label: `酒店候选：第 ${Number(lodgingDay.day) || index + 1} 天`,
-        detail: `行程录入页使用携程平台酒店；住宿日必须先持久化 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个含有效ID、城市、锚点、评分、距离且符合已锁定钻级的携程酒店候选，酒店资源阶段再录入真实酒店资源。`,
+        detail: hotelGapDetail(candidates, hotelDiamondForStay(typeof operations?.hotelTier === "string" ? operations.hotelTier : undefined, requirement) ?? hotelDiamond,
+          requirement?.cityName || textValue(basic?.meetingCity), operations?.hotelFallbackPolicy, requirement),
         stage: "completion",
         node: "hotelResolution",
       });
@@ -40,6 +41,30 @@ export function resourceGaps(product: Record<string, unknown>): PreparationGap[]
   }
 
   return gaps;
+}
+
+function hotelGapDetail(candidates: unknown[], diamond: number | undefined, city: string, fallback: unknown, requirement?: HotelStayRequirement): string {
+  const required = `要求：${city || "住宿城市"}，${diamond === undefined ? "有效钻级" : `${diamond}钻`}${requirement?.anchorName ? `，住宿地点${requirement.anchorName}` : ""}${requirement?.maxDistanceKm !== undefined ? `，距离≤${requirement.maxDistanceKm}km` : ""}，保存 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}–${HOTEL_RESOURCE_CANDIDATE_COUNT} 个含有效酒店ID、城市、锚点、评分及距离的真实携程酒店候选`;
+  const valid = candidates.filter(candidate => hasValidItineraryHotelCandidates([candidate], diamond)
+    && hotelCandidateMeetsStay(asObject(candidate) ?? {}, requirement));
+  const actual = candidates.map(value => {
+    const candidate = asObject(value);
+    const missing = ["hotelId", "hotelName", "diamond", "score", "distanceKm", "cityName", "anchorName", "anchorCityId"]
+      .filter(key => candidate?.[key] === undefined || candidate?.[key] === null || candidate?.[key] === "");
+    const differences = [candidate?.diamond !== diamond ? `实际${candidate?.diamond ?? "缺失"}钻≠要求${diamond ?? "缺失"}钻` : "",
+      textValue(candidate?.cityName) !== city && city ? `实际城市${textValue(candidate?.cityName) || "缺失"}≠要求${city}` : "",
+      requirement?.maxDistanceKm !== undefined && Number(candidate?.distanceKm) > requirement.maxDistanceKm
+        ? `实际距离${candidate?.distanceKm}km＞允许${requirement.maxDistanceKm}km` : "",
+      requirement?.ratingType && (candidate?.ratingType ?? "diamond") !== requirement.ratingType
+        ? `实际评级类型${candidate?.ratingType ?? "diamond"}≠要求${requirement.ratingType}` : "",
+      requirement?.anchorName && !textValue(candidate?.anchorName).includes(requirement.anchorName.replace(/(?:市|县|镇|村)$/u, ""))
+        ? `实际锚点${textValue(candidate?.anchorName) || "缺失"}不属于要求住宿地点${requirement.anchorName}` : "",
+      missing.length ? `缺少字段${missing.join("、")}` : ""].filter(Boolean);
+    return `${textValue(candidate?.hotelName) || "未命名酒店"}：${differences.join("，") || "身份或字段值校验未通过"}`;
+  });
+  const difference = candidates.length === 0 ? "差异：0＜1，缺少真实酒店候选"
+    : `差异：候选数量或身份、城市、评级、评分、距离字段未满足门禁${actual.length ? `（${actual.join("；")}）` : ""}`;
+  return `行程录入页使用携程平台酒店；${required}；实际：已保存${candidates.length}个，通过身份/字段/钻级检查${valid.length}个；${difference}；降档规则：${asObject(fallback)?.allowDowngrade === false ? "禁止" : "按已有许可逐级核验"}。`;
 }
 
 function hasValidItineraryHotelCandidates(candidates: unknown[], requiredDiamond: number | undefined): boolean {

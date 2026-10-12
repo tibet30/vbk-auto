@@ -77,6 +77,20 @@ test("basic API 的行政短名匹配仍拒绝同名多候选", () => {
   ], "大理"), /2 个规范候选/);
 });
 
+test("广安的三个真实同名候选按已有四川筛选，排除越南，不按返回顺序选择", () => {
+  const cities = [
+    { cityId: 807649, cityName: "广安", countryId: 111, countryName: "越南", provinceName: "清化省" },
+    { cityId: 697166, cityName: "广安", countryId: 111, countryName: "越南", provinceName: "广宁省" },
+    { cityId: 1100, cityName: "广安", countryId: 1, countryName: "中国", provinceName: "四川" },
+  ];
+  assert.equal(selectAdministrativeCity(cities, "广安", { province: "四川省" }).cityId, 1100);
+  assert.throws(() => selectAdministrativeCity(cities.slice(0, 2), "广安", { province: "四川" }),
+    /要求中国\/四川\/广安.*实际同名2个.*筛选后0个.*0≠1.*越南\/清化省/);
+  assert.throws(() => selectAdministrativeCity([...cities, { ...cities[2], cityId: 123 }], "广安", { province: "四川" }),
+    /筛选后2个.*2≠1/);
+  assert.throws(() => selectAdministrativeCity(cities, "广安"), /3 个规范候选/);
+});
+
 test("潮汕行政城市在平台边界映射汕头，保留本地锁定值并拒绝不一致锚点", () => {
   const product = { basicInfo: { meetingCity: "潮汕", destinationCity: "潮汕" } };
   assert.equal(resolveBasicInfoCityAnchor(product), "汕头");

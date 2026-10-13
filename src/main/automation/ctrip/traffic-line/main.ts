@@ -66,7 +66,7 @@ export async function ensureTrafficLineApi(
     throw new Error("线路及交通缺少已核实的行程 POI 城市；未创建任何子产品，可安全重试。");
   }
   // 交通阶段的只读前置核验会检查母产品正式住宿段；历史产品可能只有
-  // 本地候选而远端资源仍为空。先补齐母产品，再把同一份住宿证据同步到子产品。
+  // 本地规则而远端资源仍为空。先补齐母产品，再把住宿规则同步到子产品。
   if (options.product) {
     await ensureHotelResourceApi(page, options.product, parentProductId);
   }

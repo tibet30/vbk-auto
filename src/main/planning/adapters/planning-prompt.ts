@@ -1,3 +1,4 @@
+import { PLATFORM_HOTEL_GUIDE } from "../../../shared/platform-hotel-rules.js";
 import { hasCompleteNumberedRoute } from "../numbered-route-constraints.js";
 /**
  * 阶段级 planning prompt。
@@ -22,7 +23,7 @@ const SELECTABLE_RECOMMENDATION_CATEGORIES = VBK_SELECTABLE_RECOMMENDATION_CATEG
 
 const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, string> = {
   skeleton: `1. skeleton.value 只包含 hotelTier、pickupCity、transport、reusePickupForDropoff、mealsIncluded、vehicleResource。
-1a. hotelTier 是全程目标档次，必须使用 VBK 完整白名单值：当地5钻酒店/-38、当地4钻酒店/-4、当地3钻酒店/-3；已有档次不得擅自更改。住宿工具会按 hotelFallbackPolicy 在原定住宿地点优先匹配目标档次，找不到合格候选时可逐晚降档，真实等级和原因保存于每日住宿，不得修改全程目标档次、扩大到远处县城或伪装评级类型。用户禁止降档时设置 operations.hotelFallbackPolicy.allowDowngrade=false。
+1a. hotelTier 仅保留内部成本估算兼容字段，不代表住宿承诺。${PLATFORM_HOTEL_GUIDE}
 2. vehicleResource 只包含 requestedTotalCost；按整段行程每天的实际用车、跨区移动、接送和行程密度估算全程总成本，禁止输出日均价，也禁止按产品售价、毛利或起订人数倒推。不确定可填 null。
 3. 禁止输出任何系统编码、资源 ID、供应商信息、管家或联系人信息。`,
   basicInfo: `1. 只提交 basicInfo 一个模块；value 必须包含 subtitle、province、destinationCity、meetingCity、operationNotes；地点字段只输出名称，不输出或猜测任何 ID。
@@ -33,7 +34,7 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 3. spots 必须是对象数组，每项包含 name、kind、poiName、poiId；kind 只能为 attraction、free、other。attraction 是真实景点，未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID；free 仅限独立明确自由活动，other 用于航拍等独立体验；接团、送团、接送必须写 activities 的 transport（time/title/detail），机场、车站、酒店出发点不得进入 spots。纯接送日允许 spots: []，不得凑景点，两者 poiName/poiId 均为 null 且不查 POI。可选 relation 只允许 and/or：同一上午或下午连续参观多个景点默认 and，只有用户明确“二选一/任选其一/或者”时才标 or。本地系统会尽力匹配接口；用户明确推荐的景点未命中时仍保留 name，后续由运营手动配置或删除；仅由 AI 推荐且未命中的景点会从行程中删除，必要时只能替换为同范围可查景点。
 4. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
 5. 机场、车站、码头、酒店、民宿不能作为 attraction；机场、车站、码头、酒店和集合接送点均不得写入 spots，接送统一写 activities.transport，餐食与住宿分别写 meals 和 hotel。
-5a. ${ITINERARY_LODGING_GUIDE}
+5a. ${ITINERARY_LODGING_GUIDE} ${PLATFORM_HOTEL_GUIDE}
 6. 如果 destination 是省、自治区或直辖市，默认只围绕系统指定的核心游览城市选点；需要第二个核心城市时，只能选择系统给出的近邻城市，禁止全省撒点。
 7. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
 8. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。

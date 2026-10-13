@@ -1,3 +1,4 @@
+import { defaultPlatformHotelRules } from "../../../../shared/platform-hotel-rules.js";
 import { randomUUID } from "node:crypto";
 import type { CreateProductInput, ProductDetail } from "../../../../shared/contracts.js";
 import { DEFAULT_HOTEL_TIER, inferHotelTierFromUserText } from "../../../../shared/hotel-tiers.js";
@@ -58,6 +59,8 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
       userIdea,
     },
     operations: {
+      hotelMatchingMode: "rules",
+      hotelRules: defaultPlatformHotelRules(),
       hotelSource: "nonPlatform",
       hotelTier,
       mealsIncluded: false,

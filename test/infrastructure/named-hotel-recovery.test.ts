@@ -126,7 +126,8 @@ test("生产酒店工具持久化详情核验结果，重新读取后住宿门�
     productMutations: { commands: { mergeChanges: (_id: string, _baseline: unknown, product: unknown) => (current = structuredClone({ ...current, product })) } } };
   const receipt = await createItineraryHotelTool(deps, () => structuredClone(current)).execute({}, { localProductId: "local" } as any);
   assert.equal(JSON.parse(receipt.content).persisted, true);
-  assert.equal(current.product.itinerary[0].hotelCandidates[0].hotelId, id);
-  assert.equal(current.product.itinerary[0].hotelRequirement.diamond, 3);
+  assert.equal(current.product.itinerary[0].hotelCandidates, undefined);
+  assert.equal(current.product.itinerary[0].hotelRequirement, undefined);
+  assert.deepEqual(current.product.operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
   assert.equal(resourceGaps(structuredClone(current.product)).length, 0);
 });

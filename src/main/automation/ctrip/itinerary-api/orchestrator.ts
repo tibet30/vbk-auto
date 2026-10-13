@@ -1,3 +1,4 @@
+import { normalisePlatformHotelProduct } from "../../../../shared/platform-hotel-rules.js";
 /**
  * itinerary-api/orchestrator.ts：
  *   - 行程阶段主入口 ensureItineraryApi / ensureItinerarySpotsApi / countItineraryApiSpots；
@@ -106,6 +107,7 @@ export async function ensureItineraryApi(
   if (!Array.isArray(product?.itinerary) || !product.itinerary.length) {
     throw new Error("行程数组为空，无法走接口保存。");
   }
+  product = normalisePlatformHotelProduct(product) as typeof product;
   const operations: ProductOperations = product.operations ?? {};
   if (!operations.pickupCity) {
     throw new Error("operations.pickupCity 缺失，无法解析接送站。");

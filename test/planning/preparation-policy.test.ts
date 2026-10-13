@@ -83,3 +83,9 @@ test("persisted reload preserves next action and retry fingerprint without chang
   assert.equal(product.product.basicInfo!.meetingCity, "潮州");
   assert.equal(product.product.basicInfo!.destinationCity, "潮州");
 });
+
+ test("就绪方案默认使用平台住宿，不开放本地酒店准备入口", () => {
+  const ready = preparationActions({ stage: "completion", gaps: [], ready: true, hasApproval: false, coverSearchExhausted: false });
+  assert.ok(!ready.allowed.includes("resolve_itinerary_hotels"));
+  assert.ok(ready.allowed.includes("request_approval"));
+});

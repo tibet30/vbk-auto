@@ -27,7 +27,8 @@ test('verified lodging POI corrects a stale hotel city after save without changi
   });
   const saved = db.getProduct(id)!;
   const day = (saved.product.itinerary as Record<string, unknown>[])[0]!;
-  assert.deepEqual(day.hotelRequirement, { anchorName: '华阳古镇', cityName: '洋', maxDistanceKm: 10 });
+  assert.equal(day.hotelRequirement, undefined);
+  assert.equal(day.hotelCity, '洋');
   assert.equal((saved.product.basicInfo as Record<string, unknown>).meetingCity, '成都');
   assert.equal((saved.product.basicInfo as Record<string, unknown>).destinationCity, '成都');
 }));

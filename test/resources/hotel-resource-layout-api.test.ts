@@ -121,7 +121,8 @@ test("指定酒店保存明确提示草稿不存在且回读为空时，重建�
     );
     assert.equal(result.verified, true);
     assert.equal(saveAttempts, 2);
-    assert.deepEqual(segment.hotel.segmentRooms.map((room: any) => room.masterHotelID), [100, 101, 102, 103, 104]);
+    assert.deepEqual(segment.hotel.segmentRooms, []);
+    assert.deepEqual(segment.hotel.systemHotel.hotelStar, [3, 4, 5]);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldDocument === undefined) delete (globalThis as any).document;
@@ -224,8 +225,10 @@ test("新建产品缺少住宿段时，自动按连续城市创建并让停留�
       { city: "成都", stay: 0, min: 0, max: 0 },
     ]);
     assert.deepEqual(segments[0].segmentResourceGroups, [{ resourceGroupId: 9001 }]);
-    assert.deepEqual(segments[1].hotel.segmentRooms.map((room: any) => room.masterHotelID), [100, 101, 102, 103, 104]);
-    assert.deepEqual(segments[2].hotel.segmentRooms.map((room: any) => room.masterHotelID), [200, 201, 202, 203, 204]);
+    assert.deepEqual(segments[1].hotel.segmentRooms, []);
+    assert.deepEqual(segments[1].hotel.systemHotel.hotelStar, [3, 4, 5]);
+    assert.deepEqual(segments[2].hotel.segmentRooms, []);
+    assert.deepEqual(segments[2].hotel.systemHotel.hotelStar, [3, 4, 5]);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldDocument === undefined) delete (globalThis as any).document;

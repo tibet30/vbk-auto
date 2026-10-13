@@ -104,9 +104,10 @@ test("VBK 酒店匹配遵守锁定城市，不回退到异地第一条资源", (
   assert.equal(firstHotelResource({ resources: resources.slice(0, 1) }, "成都"), undefined);
 });
 
-test("缺少酒店城市时在发出平台查询前拒绝", async () => {
+test("酒店规则配置不查询平台酒店库", async () => {
   let queried = false;
   const page = { evaluate: async () => { queried = true; throw new Error("不应查询"); } };
-  await assert.rejects(resolveHotelResource(page as never, { product: {} } as never), /缺少目的城市/);
+  const result = await resolveHotelResource(page as never, { product: {} } as never);
+  assert.deepEqual(result.resolved.rules, { autoMatch: true, grades: [3, 4, 5] });
   assert.equal(queried, false);
 });

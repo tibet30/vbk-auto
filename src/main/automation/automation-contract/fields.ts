@@ -22,6 +22,7 @@
  */
 
 import { HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
+import { usesPlatformHotelRules, validPlatformHotelRules, platformHotelRulesRequired } from "../../../shared/platform-hotel-rules.js";
 import { hasSatisfiedVehicleResource } from "../../../shared/research-task-satisfaction.js";
 import { productNeedsVehicleResource, requiresGuide, supportsSmallGroupSettings } from "../../../shared/product-form.js";
 import {
@@ -224,9 +225,15 @@ export const VBK_PRODUCT_FIELDS: readonly VbkFieldContract[] = [
     source: "ai-planning",
     detail: "需 AI 写入白名单 hotelTier，用于匹配 VBK 酒店档次。",
     check: (product) => {
+      if (usesPlatformHotelRules(product)) return true;
       const tier = textValue(asObject(product.operations)?.hotelTier);
       return (HOTEL_TIER_VALUES as readonly string[]).includes(tier);
     },
+  },
+  {
+    path: "operations.hotelRules", label: "平台酒店规则", phase: "hotelResource", source: "ai-planning",
+    detail: "酒店规则缺失或无效：必须自动匹配三钻、四钻、五钻。住宿使用平台资源，无需准备酒店。",
+    check: product => !usesPlatformHotelRules(product) || !platformHotelRulesRequired(product) || validPlatformHotelRules(asObject(product.operations)?.hotelRules),
   },
   {
     path: "operations.vehicleResource",

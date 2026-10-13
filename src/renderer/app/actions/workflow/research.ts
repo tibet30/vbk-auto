@@ -7,6 +7,7 @@
  */
 
 import { api } from "../../helpers";
+import { usesPlatformHotelRules } from "../../../../shared/platform-hotel-rules.js";
 import type { WorkflowDeps } from "./types.js";
 
 export function buildResearchHandlers(deps: WorkflowDeps) {
@@ -92,6 +93,12 @@ export function buildResearchHandlers(deps: WorkflowDeps) {
     setRefreshingIssues(true);
     setNotice(null);
     try {
+      if (usesPlatformHotelRules(product.product) && product.automation?.phases.some(phase => phase.phase === "hotelResource" && phase.status === "failed")) {
+        const result = await api()!.automation.refreshHotelDraftState(product.id);
+        setProduct(result.product); setReadiness(result.readiness);
+        setNotice("住宿规则草稿已回读确认，指定酒店为空。任务保持暂停，其余阶段尚未执行。");
+        return;
+      }
       const result = await api()!.research.refreshIssues(product.id);
       setProduct(result.product);
       state.setReadiness(result.readiness);

@@ -11,6 +11,7 @@ import { normaliseProductDraft } from "../data/product-normalize.js";
 import type { AiResponse } from "../../shared/contracts.js";
 import { isAiWritablePatchPath } from "../../shared/ai-writable-paths.js";
 import { logWarn } from "../../shared/log-timestamp.js";
+import { validPlatformHotelRules } from "../../shared/platform-hotel-rules.js";
 
 type PatchOperation = NonNullable<AiResponse["patch"]>[number];
 
@@ -140,7 +141,17 @@ function applyPatchOperation(product: Record<string, unknown>, operation: PatchO
 function applyPatchMutably(product: Record<string, unknown>, patch: PatchOperation[]) {
   for (const operation of patch) {
     applyPatchOperation(product, operation);
+    assertPatchedHotelRules(product, operation.path);
   }
+}
+
+/** An incomplete draft may omit rules, but malformed model values must never replace valid rules. */
+function assertPatchedHotelRules(product: Record<string, unknown>, path: string) {
+  if (path !== "/operations" && path !== "/operations/hotelRules" && !path.startsWith("/operations/hotelRules/")) return;
+  const rules = asRecord(product.operations)?.hotelRules;
+  if (rules === undefined) return;
+  if (!validPlatformHotelRules(rules) || Object.keys(rules).some(key => !["autoMatch", "grades"].includes(key)))
+    throw new Error('住宿规则必须为 {autoMatch:true,grades:[3,4,5]}；true 必须是布尔值，不接受指定酒店或城市名单字段。');
 }
 
 /**
@@ -224,6 +235,7 @@ export function applyProductPatchSafe(
     try {
       const next = structuredClone(result) as Record<string, unknown>;
       applyPatchOperation(next, operation);
+      assertPatchedHotelRules(next, operation.path);
       result = next;
       applied = true;
     } catch (error) {

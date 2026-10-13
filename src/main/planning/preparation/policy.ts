@@ -28,7 +28,7 @@ export function preparationActions(args: {
   if (ready) {
     return hasApproval
       ? { allowed: [...read, "patch_product"], prohibited: ["request_approval", "generate_product_module"] }
-      : { allowed: [...read, "patch_product", "resolve_itinerary_hotels", ...(!coverSearchExhausted ? ["resolve_cover" as const] : []), "request_approval"], prohibited: ["generate_product_module"] };
+      : { allowed: [...read, "patch_product", ...(!coverSearchExhausted ? ["resolve_cover" as const] : []), "request_approval"], prohibited: ["generate_product_module"] };
   }
   if (stage === "foundation") {
     return { allowed: [...read, "generate_product_module", "patch_product"], prohibited: ["request_approval"] };

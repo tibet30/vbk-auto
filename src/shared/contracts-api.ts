@@ -135,6 +135,8 @@ export interface VbkApi {
     openExternal(): Promise<void>;
     setBounds(bounds: { x: number; y: number; width: number; height: number }): Promise<void>;
     setVisible(visible: boolean): Promise<void>;
+    /** 页面弹窗遮挡原生浏览器；解除后按最新显示请求恢复。 */
+    setOverlayOpen(open: boolean): Promise<void>;
     /**
      * 列出当前 WebView 实际账号 + 本机已保存的所有 VBK 登录账号（按最近使用排序）。
      * "新增登录" / "切换到 xxx" / "忘记 xxx" 都依赖这个视图。
@@ -167,6 +169,9 @@ export interface VbkApi {
     suggestPoiDemo(keyword: string): Promise<unknown>;
   };
   automation: {
+    prepareHotelDraftRetry(localProductId: string): Promise<import("./hotel-draft-retry.js").HotelDraftRetryPlan>;
+    saveHotelDraftRetry(token: string): Promise<import("./hotel-draft-retry.js").HotelDraftRetryResult>;
+    refreshHotelDraftState(localProductId: string): Promise<{ product: ProductDetail; readiness: ProductReadiness }>;
     start(localProductId: string): Promise<void>;
     continueApproved(localProductId: string): Promise<unknown>;
     retry(localProductId: string): Promise<void>;

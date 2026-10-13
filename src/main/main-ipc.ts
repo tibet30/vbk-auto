@@ -1,6 +1,7 @@
 import { registerProductAiIpc } from "./ipc/product-ai-ipc.js";
 import { registerRemoteProductIpc } from "./ipc/remote-product-ipc.js";
 import { registerBrowserAutomationIpc } from "./ipc/browser-automation-ipc.js";
+import { registerHotelDraftRetryIpc } from "./ipc/hotel-draft-retry-ipc.js";
 import { registerSettingsIpc } from "./ipc/settings-ipc.js";
 import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
 import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
@@ -21,6 +22,7 @@ export function registerMainIpc(
   registerRemoteProductIpc(context);
   registerProductAiIpc(context);
   registerBrowserAutomationIpc(context);
+  registerHotelDraftRetryIpc(context);
   registerSettingsIpc(context);
   registerPlanningV2Ipc(context);
   registerAgentIpc(context);

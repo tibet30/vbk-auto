@@ -17,7 +17,7 @@ function fixture(instruction: string) {
   return { tool: createItineraryHotelTool(deps, () => saved), service, get: () => saved };
 }
 
-test("真实酒店工具恢复逐日回答，经统一保存同步文案并保持锁定接团城市", async () => {
+test("酒店工具转换为规则匹配，移除旧要求与文案并保持接团城市", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error("已有核验候选不得再次请求"); };
   try {
@@ -28,9 +28,10 @@ test("真实酒店工具恢复逐日回答，经统一保存同步文案并保�
     const saved = f.get().product as any;
     assert.equal(saved.basicInfo.meetingCity, "西安");
     assert.equal(saved.basicInfo.destinationCity, "西安");
-    assert.equal(saved.itinerary[0].hotelRequirement.ratingType, "homestay");
-    assert.equal(saved.operations.hotelFallbackPolicy.allowDowngrade, true);
-    assert.match(saved.basicInfo.operationNotes, /3民宿圆钻/);
+    assert.equal(saved.itinerary[0].hotelRequirement, undefined);
+    assert.equal(saved.itinerary[0].hotelCandidates, undefined);
+    assert.equal(saved.itinerary[0].hotelCity, "留坝");
+    assert.deepEqual(saved.operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
     assert.doesNotMatch(saved.basicInfo.operationNotes, /全程当地5钻/);
   } finally { globalThis.fetch = originalFetch; }
 });

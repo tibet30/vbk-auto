@@ -30,7 +30,7 @@ export function assertBasicInfoReadback(base: Json, booking: Json, expected: Exp
   ];
   if (expected.productLineId !== null) fields.push(["productLineID", expected.productLineId, Number(base.productLineID)]);
   if (subtitle !== undefined) fields.push(
-    ["isAutoCalculateProductLevel", "F", base.isAutoCalculateProductLevel],
+    ["isAutoCalculateProductLevel", "T", base.isAutoCalculateProductLevel],
     ["subName", subtitle, base.subName],
   );
   const differences = fields.filter(([, wanted, actual]) => wanted !== actual);

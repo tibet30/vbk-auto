@@ -31,7 +31,7 @@ for (const key of CASE_KEYS) {
     if (result.snapshot.run?.status !== 'waiting_approval') console.log(JSON.stringify({ case: key,
       status: result.snapshot.run?.status, missing: evaluatePreparationCompletion(saved).missing,
       events: result.snapshot.events.filter(e => ['tool_result', 'status'].includes(e.type)).map(e => e.content.slice(0, 250)) }));
-    assert.ok(result.checkpoints.some(c => c.days === fixture.product.basicInfo.days && c.boundPois === 0 && c.hotelDays === 0),
+    assert.ok(result.checkpoints.some(c => c.days === fixture.product.basicInfo.days && c.boundPois === 0),
       '必须先保存未绑定资源的生成行程，再筛查绑定资源');
     assert.ok(result.checkpoints.some(c => c.boundPois > 0 && c.hotelDays === fixture.product.basicInfo.nights));
     const reader = new VbkDatabase(root);
@@ -47,9 +47,9 @@ for (const key of CASE_KEYS) {
     assert.deepEqual([...new Set(result.stages)].sort(), ['basicInfo', 'commercial', 'itinerary', 'presentation', 'skeleton']);
     assert.deepEqual(routeSignature(p), routeSignature(fixture.product), '路线顺序、二选一、活动类型必须保留');
     assertRepresentativeFeatures(key, p);
-    assert.ok(result.queries.filter(q => q.startsWith('hotel-context:')).length >= fixture.product.basicInfo.nights);
-    assert.ok(result.queries.filter(q => q.startsWith('hotel-list:')).length >= fixture.product.basicInfo.nights,
-      '每晚必须查询地标及原始列表，经生产解析、过滤、排序后保存');
+    assert.equal(result.queries.some(q => /^hotel-(context|list):/.test(q)), false, '平台规则匹配不得查询具体酒店');
+    assert.deepEqual(p.operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
+    assert.ok(p.itinerary.every((day: Json) => !day.hotelCandidates && !day.hotelRequirement));
     if (key === 'rikaze') assert.equal(result.queries.some(q => q.endsWith('/suggestAirport')), false,
       '仅火车套餐不得扩展机场查询');
     if (key === 'luzhou') assert.equal(result.queries.some(q => /suggestAirport|suggestTrainStation|searchResourceGroup/u.test(q)), false);

@@ -1,7 +1,7 @@
 const NO_HOTEL_STAY = /^(?:无|—|-|(?:本日|当日|当天)?(?:无住宿|不住宿)|无(?:本日|当日|当天)?住宿安排|无需住宿|(?:本日|当日|当天)?不安排(?:过夜)?(?:住宿|酒店)?|(?:本日|当日|当天)?(?:返程日?|送站日?|送机日?|行程结束)[，,、；;\s]*(?:不安排|不|无需|无)(?:过夜)?(?:住宿|酒店))(?:[。.!！])?(?:[（(].*[）)])?$/;
 const EXCLUDED_HOTEL_STAY = /^(?:(?:本日|当日|当天|返程当日)[，,、\s]*)?(?:不含|不包含|不提供|无需)(?:当晚|本晚|今晚|当日|当天|本日|过夜)?住宿(?:安排)?(?:[。.!！])?(?:[（(].*[）)])?$/u;
 export const NO_ITINERARY_HOTEL = "无当日住宿安排";
-export const ITINERARY_LODGING_GUIDE = `不住宿日的 hotel 和 hotelDescription 统一填“${NO_ITINERARY_HOTEL}”，不输出 hotelRequirement 或 hotelCandidates。D天D-1晚的最后送站/送机日不增加住宿，保留当天接送安排；“不含当晚住宿”等明确否定住宿的措辞与该标记语义相同。真实酒店和明确自理住宿日必须保留。`;
+export const ITINERARY_LODGING_GUIDE = `不住宿日的 hotel 和 hotelDescription 统一填“${NO_ITINERARY_HOTEL}”，不输出 hotelRequirement 或 hotelCandidates。D天D-1晚的最后送站/送机日不增加住宿，保留当天接送安排；“不含当晚住宿”等明确否定住宿的措辞与该标记语义相同。住宿日统一使用携程平台自动匹配三钻、四钻、五钻酒店；不生成具体酒店名称、逐晚档次、民宿或距离限制。`;
 
 export function isExplicitNoHotelStay(hotel: unknown): boolean {
   const value = typeof hotel === "string" ? hotel.trim() : "";

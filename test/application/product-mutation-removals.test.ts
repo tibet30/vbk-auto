@@ -36,7 +36,7 @@ test("AI 修改酒店时重放旧行程，删除凭证优先于旧 spots 和旧�
   const day = saved().product.itinerary![0]!;
   assert.deepEqual(day.spots.map((spot) => spot.name), ["佛坪熊猫谷"]);
   assert.equal(day.spots[0]!.poiId, 22883772);
-  assert.equal(day.hotel, "汉中4钻酒店");
+  assert.equal(day.hotel, "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店");
   assert.doesNotMatch(day.description!, /古汉台博物馆/);
   assert.equal((saved().product.manualReview as { itinerarySpotRemovals: unknown[] }).itinerarySpotRemovals.length, 1);
 });

@@ -44,6 +44,7 @@ export const itineraryDaySchema = z.object({
     if (spot.kind !== "attraction" && (spot.poiName || spot.poiId)) ctx.addIssue({ code: "custom", message: "自由活动或其他活动不得绑定 POI" });
   })).default([]),
   description: z.string().default(""),
+  hotelCity: z.string().min(1).optional(),
   hotel: z.string().default(""),
   hotelRequirement: z.object({ anchorName: z.string().min(1), cityName: z.string().min(1).optional(),
     maxDistanceKm: z.number().positive().optional(), diamond: z.number().int().min(0).max(5).optional(),

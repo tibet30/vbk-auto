@@ -50,7 +50,7 @@ export function evaluatePreparationCompletion(
     completionCriteria: [
       "foundation：锁定目的地、天数和已有基础字段，不得覆盖 meetingCity",
       "itinerary：无用户行程则完整规划；有部分约束则只补空缺；完整输入只做规范化和 POI 核验",
-      "completion：封面、副标题/推荐、套餐名称、定价、库存班期、适用酒店候选、适用用车、启用大交通时的端点核验",
+      "completion：封面、副标题/推荐、套餐名称、定价、库存班期、适用平台酒店规则、适用用车、启用大交通时的端点核验",
       "request_approval 仅在 ready=true 时允许一次；条款属于批准后确定性写入",
     ],
     lockedConstraints,
@@ -120,7 +120,7 @@ function collectGaps(product: ProductDetail, readinessOptions?: ReadinessOptions
     push({ code: "itinerary", label: "每日行程", detail: itineraryContractError, stage: "itinerary", node: "itineraryDraft" });
   }
   for (const issue of readiness.issues) {
-    const classified = /^itinerary\.\d+\.hotelCandidates(?:\.|$)/.test(issue.label)
+    const classified = issue.label === "平台酒店规则" || /^itinerary\.\d+\.hotelCandidates(?:\.|$)/.test(issue.label)
       ? { code: "hotel" as const, stage: "completion" as const, node: "hotelResolution" as const }
       : classifyReadinessIssue(issue.label, issue.detail);
     const itineraryIssue = classified.stage === "itinerary" && (classified.node === "itineraryDraft" || classified.node === "poiResolution");

@@ -13,6 +13,7 @@ import { assertVbkAckSuccess } from "../../../infrastructure/vbk-response-error.
 import type { ResourceCity, Segment } from "./types.js";
 import { VBK_RESOURCE_HEAD } from "./types.js";
 import { selectAdministrativeCity, type AdministrativeCityContext } from "../basic-info/administrative-city.js";
+import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 
 export async function getProductSegmentsApi(page: any, productId: string) {
   const response = await vbkSessionRequest(page, {
@@ -48,18 +49,26 @@ export async function saveProductSegmentApi(page: any, segment: Segment, errorLa
 export async function resolveResourceSegmentCityApi(page: any, cityName: string, context: AdministrativeCityContext = {}): Promise<ResourceCity> {
   const expected = cityName.trim();
   if (!expected) throw new Error("住宿资源行程段缺少城市名称");
-  const response = await vbkSessionRequest(page, {
-    endpoint: "https://online.ctrip.com/restapi/soa2/15638/suggestDepartureCity",
-    browserRequestTimeoutMs: 12_000,
-    evaluateTimeoutMs: 15_000,
-    errorLabel: "VBK 住宿城市查询",
-    headers: { cookieorigin: "https://vbooking.ctrip.com" },
-    body: { contentType: "json", head: VBK_RESOURCE_HEAD, keyword: expected },
-  });
-  assertVbkResourceResponse(response.payload, "VBK 住宿城市查询");
-  const cities = Array.isArray((response.payload as any)?.cities)
-    ? (response.payload as any).cities
-    : [];
+  const query = async (keyword: string) => {
+    const response = await vbkSessionRequest(page, {
+      endpoint: "https://online.ctrip.com/restapi/soa2/15638/suggestDepartureCity",
+      browserRequestTimeoutMs: 12_000,
+      evaluateTimeoutMs: 15_000,
+      errorLabel: "VBK 住宿城市查询",
+      headers: { cookieorigin: "https://vbooking.ctrip.com" },
+      body: { contentType: "json", head: VBK_RESOURCE_HEAD, keyword },
+    });
+    assertVbkResourceResponse(response.payload, "VBK 住宿城市查询");
+    if (!Array.isArray((response.payload as any)?.cities)) throw new Error("VBK 住宿城市查询缺少 cities 列表");
+    return (response.payload as any).cities as ResourceCity[];
+  };
+  let cities = await query(expected);
+  // 单字县名的短名（眉、洋等）不能命中平台建议接口。仅补查询完整县名，
+  // 仍由同一行政短名及国家/省份门禁选出唯一结果，不借用邻近城市。
+  if (/^\p{Script=Han}$/u.test(expected) && (context.countryName === "中国" || context.province)
+    && !cities.some(city => toPlatformShortLocationName(city.cityName) === expected)) {
+    cities = await query(`${expected}县`);
+  }
   const city = selectAdministrativeCity(cities, expected, context);
   if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`住宿城市「${expected}」缺少合法 cityId`);
   return structuredClone(city);

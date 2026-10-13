@@ -15,6 +15,8 @@ export class VbkBrowserViewManager {
   activeKey?: string;
   defaultView?: WebContentsView;
   visible = false;
+  private requestedVisible = false;
+  private overlayOpen = false;
   bounds: Electron.Rectangle = { x: 0, y: 0, width: 0, height: 0 };
   private navigationPin: VbkNavigationPin | null = null;
   private cachedUserInfoUrl?: string;
@@ -82,9 +84,20 @@ export class VbkBrowserViewManager {
   }
 
   setVisible(visible: boolean): void {
-    this.visible = visible;
-    this.view?.setVisible(visible);
-    if (visible && this.view && /^(?:about:blank)?$/.test(this.view.webContents.getURL())) this.onVisibleBlank();
+    this.requestedVisible = visible;
+    this.applyVisibility();
+  }
+
+  /** 原生视图高于页面弹窗；遮挡期间仍接收页面与自动任务的显示请求。 */
+  setOverlayOpen(open: boolean): void {
+    this.overlayOpen = open;
+    this.applyVisibility();
+  }
+
+  private applyVisibility(): void {
+    this.visible = this.requestedVisible && !this.overlayOpen;
+    this.view?.setVisible(this.visible);
+    if (this.visible && this.view && /^(?:about:blank)?$/.test(this.view.webContents.getURL())) this.onVisibleBlank();
   }
 
   currentUrl(): string { return this.view?.webContents.getURL() || ""; }

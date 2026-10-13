@@ -192,8 +192,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       context.productWorkflows.runVbkPageExclusive(async () => {
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
-        const result = await platformResourceGateway(db, localProductId).query('hotel_library', product.product.operations,
-          async () => resolveHotelResource(await getVbkRequestPage(context.browser), product));
+        const result = await resolveHotelResource(undefined, product);
         productMutations.commands.mergeChanges(localProductId, product, result.product, 'resource', { status: "review", notify: false }, {
           queryPath: ['operations'], queryFingerprint: canonicalJson(product.product.operations),
           targetPath: ['operations', 'hotelResource'], targetFingerprint: canonicalJson((product.product.operations as Record<string, unknown>)?.hotelResource),
@@ -201,7 +200,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         if (taskId) {
           await syncConfirmedResearchTasksToRemote({ db, remote: remoteProducts, localProductId, broadcast: broadcastProduct });
         }
-        db.addMessage(localProductId, "assistant", `已查询酒店资源：${result.note}`, "succeeded");
+        db.addMessage(localProductId, "assistant", `已配置酒店规则：${result.note}`, "succeeded");
         emitProduct(db.getProduct(localProductId)!);
         return result.resolved;
       })));

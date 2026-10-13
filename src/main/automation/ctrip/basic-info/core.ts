@@ -80,7 +80,7 @@ export async function fillBasicInfo(
   if (product.sales?.productForm === "privateTour") {
     const autoLevel = page.locator('[id="baseInfo.isAutoCalculateProductLevel"]');
     await assertCount(autoLevel, 1, "是否自动打钻");
-    await autoLevel.locator('input[value="F"]').check();
+    await autoLevel.locator('input[value="T"]').check();
     info.subtitle = privateTourSubtitle(info.subtitle, keySpots ?? []);
   } else info.subtitle = normalizeVbkSubtitle(info.subtitle, info.meetingCity || info.destinationCity);
   await fillById(page, "baseInfo.subName", info.subtitle, "副标题输入框");

@@ -264,7 +264,7 @@ test("隔离 SQLite 经结构、POI、酒店三节点写回后重启仍可读", 
     await core.idle(initial.id);
     const beforeRestart = db.getAgentSnapshot(initial.id)!;
     assert.deepEqual(beforeRestart.events.filter((event) => event.type === "tool_call" && event.data?.deterministicPreparation === true)
-      .map((event) => event.data?.name), ["generate_product_module", "resolve_itinerary_pois", "resolve_itinerary_hotels"]);
+      .map((event) => event.data?.name), ["generate_product_module", "resolve_itinerary_pois"]);
     assert.equal(beforeRestart.events.some((event) => event.type === "input_request"), false);
     assert.equal(beforeRestart.run?.status, "waiting_approval");
     db.close();
@@ -275,8 +275,9 @@ test("隔离 SQLite 经结构、POI、酒店三节点写回后重启仍可读", 
     assert.equal(reloaded.product.basicInfo?.destinationCity, "潮州");
     assert.equal(reloaded.product.basicInfo?.days, 2);
     assert.deepEqual(reloaded.product.itinerary?.map((day) => day.title), ["潮州古城", "南澳海岸"]);
-    assert.equal(reloaded.product.itinerary?.[0]?.hotelCandidates?.length, 3);
-    assert.equal(reloaded.product.itinerary?.[0]?.hotelCandidates?.every((candidate) => candidate.diamond === 5 && candidate.cityName === "潮州"), true);
+    assert.equal(reloaded.product.itinerary?.[0]?.hotelCandidates, undefined);
+    assert.equal(reloaded.product.itinerary?.[0]?.hotelCity, "潮州");
+    assert.deepEqual((reloaded.product.operations as any).hotelRules, { autoMatch: true, grades: [3, 4, 5] });
     const evaluation = evaluatePreparationCompletion(reloaded);
     assert.equal(evaluation.missing.some((label) => /每日行程|POI|酒店候选/.test(label)), false);
     assert.equal(snapshot.run?.status, "waiting_approval");

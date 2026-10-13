@@ -1,3 +1,4 @@
+import { platformHotelRuleProjection } from "./hotel-rule-protocol.js";
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../infrastructure/vbk-session-request.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { getVbkInitialState } from "./traffic-line/client.js";
@@ -165,7 +166,8 @@ export function formalResourcesMatchDraft(formalInput: Json[], draftInput: Json[
     const expectedGroups = resourceGroupIds(expected);
     const expectedHasPriority = expected.hotel?.segmentRooms?.some((room: Json) => room.squenceNumber !== undefined);
     const actualHasPriority = actual.hotel?.segmentRooms?.every((room: Json) => room.squenceNumber !== undefined);
-    return (!expectedHasPriority || actualHasPriority) && sameStay && sameCity && actualRooms !== null && expectedRooms !== null
+    return JSON.stringify(platformHotelRuleProjection(actual)) === JSON.stringify(platformHotelRuleProjection(expected))
+      && (!expectedHasPriority || actualHasPriority) && sameStay && sameCity && actualRooms !== null && expectedRooms !== null
       && actualGroups !== null && expectedGroups !== null
       && sameValues(actualRooms, expectedRooms)
       && sameValues(actualGroups, expectedGroups)

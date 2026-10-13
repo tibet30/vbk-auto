@@ -144,7 +144,7 @@ test("completion nodes run in order and preserve presentation plus commercial fi
   assert.equal(AI_WRITABLE_PATHS.presentation, "/presentation");
 });
 
-test("酒店节点把五个候选写入每日行程与资源配置", async () => {
+test("酒店节点只保存平台规则，不调用酒店候选查询", async () => {
   const runtime = new CompletionRuntime();
   runtime.product = {
     basicInfo: { province: "山西", meetingCity: "太原", destinationCity: "太原" },
@@ -157,13 +157,6 @@ test("酒店节点把五个候选写入每日行程与资源配置", async () =>
       { day: 2, title: "返程", hotel: "", description: "返程", spots: [{ poiId: 1, poiName: "太原古县城", city: "太原" }] },
     ],
   };
-  const candidates = [
-    { hotelId: 101, hotelName: "近处5钻", diamond: 5, score: 4.7, distanceKm: 2, cityName: "太原", anchorName: "晋祠", anchorCityId: 105 },
-    { hotelId: 102, hotelName: "稍远5钻", diamond: 5, score: 4.9, distanceKm: 5, cityName: "太原", anchorName: "晋祠", anchorCityId: 105 },
-    { hotelId: 103, hotelName: "最近4钻", diamond: 4, score: 4.9, distanceKm: 1, cityName: "太原", anchorName: "晋祠", anchorCityId: 105 },
-    { hotelId: 104, hotelName: "再远5钻", diamond: 5, score: 4.6, distanceKm: 8, cityName: "太原", anchorName: "晋祠", anchorCityId: 105 },
-    { hotelId: 105, hotelName: "远处5钻", diamond: 5, score: 4.5, distanceKm: 10, cityName: "太原", anchorName: "晋祠", anchorCityId: 105 },
-  ];
   const plan = createPlanningPlanV2();
   const initialPlan: PlanningPlanV2 = {
     ...plan,
@@ -177,17 +170,16 @@ test("酒店节点把五个候选写入每日行程与资源配置", async () =>
     localProductId: "hotel-e2e", skeleton: { destination: "太原", province: "山西", city: "太原", days: 2, nights: 1, productForm: "groupTour", productType: "domesticShort", supplierProductCode: "HOTEL" },
     planner: {} as Planner, ai: {} as ThreeStagePlanningAi, runtime, initialPlan, persist: async () => undefined,
     assertVbkLogin: async () => undefined, queryPoi: async () => ({ best: null, candidates: [] }),
-    resolveHotels: async (itinerary) => ({
-      itinerary: itinerary.map((day) => day.day === 1 ? { ...day, hotel: candidates[0]!.hotelName, hotelCandidates: candidates } : day),
-      dailyCandidates: [{ day: 1, candidates }], searchDates: { checkin: "2026-12-01", checkout: "2026-12-02" },
-    }),
+    resolveHotels: async () => { throw new Error("禁止酒店查询"); },
     resolveCover: async () => ({ complete: true, summary: "not used" }), resolveVehicle: async () => ({ complete: true, summary: "not used" }), privateTour: false,
   });
   assert.equal(result.status, "completed");
   const itinerary = runtime.product.itinerary as Array<Record<string, unknown>>;
-  assert.equal(itinerary[0]?.hotel, "近处5钻");
-  assert.deepEqual(itinerary[0]?.hotelCandidates, candidates);
-  const resource = (runtime.product.operations as Record<string, unknown>).hotelResource as Record<string, unknown>;
-  assert.equal(resource.resourceId, 101);
-  assert.deepEqual(resource.dailyCandidates, [{ day: 1, candidates }]);
+  assert.equal(itinerary[0]?.hotel, "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店");
+  assert.equal(itinerary[0]?.hotelCandidates, undefined);
+  assert.equal(itinerary[0]?.hotelCity, "太原");
+  assert.equal(result.nodes.find(node => node.id === "hotelResolution")?.status, "skipped");
+  const operations = runtime.product.operations as Record<string, unknown>;
+  assert.equal(operations.hotelResource, undefined);
+  assert.deepEqual(operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
 });

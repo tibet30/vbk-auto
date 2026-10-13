@@ -1,4 +1,5 @@
 import type { ProductDetail } from "../../../shared/contracts.js";
+import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 import { requiresVehicleResource } from "../../../shared/product-form.js";
 
 // 自动录入阶段的展示文案 + VBK 入口 URL。
@@ -27,13 +28,9 @@ function record(value: unknown): Record<string, unknown> {
 /** 与自动化阶段矩阵保持一致：仅显示当前产品实际会执行的资源阶段。 */
 export function resourcePhaseNamesForProduct(product: ProductDetail | null | undefined): string[] {
   const data = record(product?.product);
-  const operations = record(data.operations);
   const sales = record(data.sales);
   const itinerary = Array.isArray(data.itinerary) ? data.itinerary : [];
-  const platformHotel = record(operations.hotelResource).source === "ctrip"
-    || product?.automation?.phases.some(item => item.phase === "hotelResource" && item.status === "completed");
-  const needsHotel = (operations.hotelSource !== "nonPlatform" || platformHotel)
-    && itinerary.some((day) => Boolean(record(day).hotel));
+  const needsHotel = itinerary.some(day => hasItineraryHotelStay(record(day).hotel));
   const phases: string[] = [];
   if (needsHotel) phases.push("hotelResource");
   if (requiresVehicleResource(sales.productForm)) phases.push("vehicleResource");

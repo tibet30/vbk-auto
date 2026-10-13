@@ -15,6 +15,7 @@ import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-remov
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
 import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
+import { normalisePlatformHotelProduct, usesPlatformHotelRules } from "../../shared/platform-hotel-rules.js";
 import { ProductCommandService } from './product-command-service.js';
 
 type ProductMutationStore = {
@@ -94,7 +95,7 @@ export class ProductMutationService {
     const normalised = normaliseProductLocationFields(protectedIncoming, lockedMeetingCity || undefined);
     if (Array.isArray(normalised.itinerary)) normalised.itinerary = normalised.itinerary.map((day) =>
       day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
-    this.store.updateProduct(localProductId, reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0, options.source);
+    this.store.updateProduct(localProductId, usesPlatformHotelRules(normalised) ? normalisePlatformHotelProduct(normalised) : reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0, options.source);
     const saved = this.store.getProduct(localProductId);
     if (!saved) throw productNotFound(localProductId);
     if (options.notify !== false) this.onUpdated?.(saved);

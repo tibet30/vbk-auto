@@ -68,7 +68,7 @@ test("准备完成后允许本地受控修订，但不允许重新生成模块",
     release: { submitReview: false, publishAfterApproval: false, publicPriceCeiling: 2500, publicAuditRetries: 3 },
   };
   assert.equal(evaluatePreparationCompletion(product).ready, true);
-  assert.equal(denyPreparationTool(product, undefined, "resolve_itinerary_hotels"), undefined);
+  assert.ok(denyPreparationTool(product, undefined, "resolve_itinerary_hotels"));
   const allowed = denyPreparationTool(product, undefined, "patch_product", { patch: { itinerary: [{ day: 1, description: "调整后的合规文案" }] } });
   assert.equal(allowed, undefined);
   assert.ok(denyPreparationTool(product, undefined, "generate_product_module", { stage: "itinerary" }));

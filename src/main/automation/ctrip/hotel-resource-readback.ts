@@ -1,3 +1,5 @@
+import { usesPlatformHotelRules } from "../../../shared/platform-hotel-rules.js";
+import { verifyPlatformHotelRulesReadback } from "./hotel-rule-api.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 import { hotelResourceGroups } from "./hotel-resource-api.js";
@@ -11,6 +13,7 @@ type Json = Record<string, any>;
  * use from a read-only recovery flow.
  */
 export async function verifyHotelResourceReadback(page: any, product: any, productId: string) {
+  if (usesPlatformHotelRules(product)) return verifyPlatformHotelRulesReadback(page, product, productId);
   const itineraryDays = Array.isArray(product?.itinerary) ? product.itinerary : [];
   const days = itineraryDays.filter((day: any) => hasItineraryHotelStay(day?.hotel));
   if (!days.length) return { skipped: "行程不含住宿", verified: true };

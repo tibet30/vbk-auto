@@ -10,6 +10,7 @@
  */
 
 import { api, phaseDisplayLabel, type VbkNavSection } from "../../helpers";
+import { confirmHotelDraftRetry } from "./hotel-draft-confirm.js";
 import type { WorkflowDeps } from "./types.js";
 
 export function buildAutomationHandlers(deps: WorkflowDeps) {
@@ -80,6 +81,13 @@ export function buildAutomationHandlers(deps: WorkflowDeps) {
     setNotice(null);
     setRetryingPhase(phaseName);
     try {
+      if (phaseName === "hotelResource") {
+        const plan = await api()!.automation.prepareHotelDraftRetry(product.id);
+        if (!await confirmHotelDraftRetry(plan)) return;
+        await api()!.automation.saveHotelDraftRetry(plan.token);
+        setNotice("住宿规则草稿已保存并回读：平台自动匹配三钻、四钻、五钻，指定酒店为空。");
+        return;
+      }
       // A verified parent draft can have only its optional traffic children
       // unfinished. Their work must resume through the confirmed workflow,
       // rather than creating another Agent conversation that cannot perform

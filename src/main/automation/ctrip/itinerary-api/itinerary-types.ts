@@ -30,7 +30,8 @@ export interface ProductItineraryDay {
   }>;
   description: string;
   hotel: string;
-  /** 携程检索得到的同晚候选（最多五家）；写入行程时取前三家形成“或”酒店节点。 */
+  hotelCity?: string;
+  /** 历史候选兼容字段；平台规则转换时清空。 */
   hotelCandidates?: Array<{ hotelName: string; diamond?: number; ratingType?: HotelRatingType }>;
   hotelRequirement?: HotelStayRequirement;
   meals: string;

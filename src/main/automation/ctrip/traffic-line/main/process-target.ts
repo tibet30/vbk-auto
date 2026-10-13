@@ -108,7 +108,7 @@ export async function processTrafficLineTarget(
     await ensureTrafficLinePresentation(page, parentProductId, relationship.productId);
     checkpoint("presentationCopied", relationship.productId);
     // 交通子产品独立走 VBK 行程校验；复制母产品图文不会复制住宿资源。
-    // 先把母产品已核实的住宿候选写入子产品，否则 checkTourDaily 会以
+    // 先把母产品已核实的住宿规则写入子产品，否则 checkTourDaily 会以
     // hotelGrades=[] 拒绝"至少包含一晚酒店"，即使母产品本身已有酒店。
     if (options.product) {
       await ensureHotelResourceApi(page, options.product, relationship.productId);

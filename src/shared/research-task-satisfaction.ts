@@ -1,4 +1,5 @@
 import { HOTEL_TIER_VALUES } from "./hotel-tiers.js";
+import { usesPlatformHotelRules, validPlatformHotelRules } from "./platform-hotel-rules.js";
 import { poiResearchTaskNames } from "./poi-research-tasks.js";
 import { productNeedsVehicleResource } from "./product-form.js";
 import { hasCompletePoi, requiresItineraryPoi } from "./itinerary-activity-kind.js";
@@ -13,7 +14,7 @@ type ProductLike = Record<string, unknown>;
 type ResearchTaskText = { label?: string; detail?: string | null; type?: string };
 
 const vehiclePattern = /用车|车辆|接送|司机|资源组|vehicle|vehicleResource|resourceGroupId/i;
-const hotelPattern = /酒店|住宿|客栈|民宿/;
+const hotelPattern = /酒店|住宿|客栈|民宿|hotelTier|hotelCandidates/i;
 const commercialPattern = /成人价|儿童价|成人成本|儿童成本|价格|起订人数|最低成团|库存|班期|每日配额|起止日期|配额|套餐名称|费用包含|不包含|退改|政策|成本口径|packageName|pricing|inventory|terms/i;
 const obsoletePoiFailurePattern = /suggestPoi\s*未匹配|未找到对应的\s*VBK\s*POI|暂停营业|停止营业|永久关闭|已关闭|可能已关闭|temporarily\s+closed|permanently\s+closed|不能加入行程|不能写入行程|不能作为行程景点|请替换为(?:正常营业|可游览)景点|替换为(?:正常营业|可游览)景点|手动录入\s*POI|人工核查/i;
 
@@ -118,6 +119,7 @@ export function hasSatisfiedVehicleResource(product: ProductLike): boolean {
 
 export function hasSatisfiedHotelTier(product: ProductLike): boolean {
   const operations = objectValue(product.operations);
+  if (usesPlatformHotelRules(product)) return validPlatformHotelRules(operations?.hotelRules);
   return (HOTEL_TIER_VALUES as readonly string[]).includes(textValue(operations?.hotelTier));
 }
 

@@ -19,7 +19,7 @@ function resourcePhases(value: any) {
 test("资源配置只列出当前团态实际需要的阶段", () => {
   assert.deepEqual(resourcePhases(product("privateTour")), ["vehicleResource"]);
   assert.deepEqual(resourcePhases(product("privateTour", "当地酒店")), ["hotelResource", "vehicleResource"]);
-  assert.deepEqual(resourcePhases(product("privateTour", "当地酒店", "nonPlatform")), ["vehicleResource"]);
+  assert.deepEqual(resourcePhases(product("privateTour", "当地酒店", "nonPlatform")), ["hotelResource", "vehicleResource"]);
   assert.deepEqual(resourcePhases(product("groupTour", "当地酒店")), ["hotelResource"]);
   assert.deepEqual(resourcePhases(product("semiSelfGuided", "当地酒店")), ["hotelResource"]);
   assert.deepEqual(resourcePhases(product("freeTravel", "当地酒店")), ["hotelResource"]);

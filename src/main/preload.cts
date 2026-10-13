@@ -74,6 +74,7 @@ const api: VbkApi = {
     openExternal: () => ipcRenderer.invoke("browser:openExternal"),
     setBounds: (bounds) => ipcRenderer.invoke("browser:setBounds", bounds),
     setVisible: (visible) => ipcRenderer.invoke("browser:setVisible", visible),
+    setOverlayOpen: (open) => ipcRenderer.invoke("browser:setOverlayOpen", open),
     listLoginAccounts: () => ipcRenderer.invoke("browser:listLoginAccounts"),
     addLogin: () => ipcRenderer.invoke("browser:addLogin"),
     switchAccount: (accountKey) => ipcRenderer.invoke("browser:switchAccount", accountKey),
@@ -83,6 +84,9 @@ const api: VbkApi = {
     suggestPoiDemo: (keyword: string) => ipcRenderer.invoke("poi:suggestDemo", keyword),
   },
   automation: {
+    prepareHotelDraftRetry: (id) => ipcRenderer.invoke("automation:prepareHotelDraftRetry", id),
+    saveHotelDraftRetry: (token) => ipcRenderer.invoke("automation:saveHotelDraftRetry", token),
+    refreshHotelDraftState: (id) => ipcRenderer.invoke("automation:refreshHotelDraftState", id),
     start: (localProductId) => ipcRenderer.invoke("automation:start", localProductId),
     continueApproved: (localProductId) => ipcRenderer.invoke("automation:continueApproved", localProductId),
     retry: (localProductId) => ipcRenderer.invoke("automation:retry", localProductId),

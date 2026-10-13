@@ -209,7 +209,7 @@ export async function ensureBasicInfoApi(
     mainName,
     name: `${mainName}·${subtitle}`,
     subName: subtitle,
-    ...(privateTour ? { isAutoCalculateProductLevel: "F" } : {}),
+    ...(privateTour ? { isAutoCalculateProductLevel: "T" } : {}),
     providerProductName: String(info.supplierProductName ?? "").trim(),
     vendorProductCode: String(info.supplierProductCode ?? "").trim(),
     ...productLineSaveField(productLine),

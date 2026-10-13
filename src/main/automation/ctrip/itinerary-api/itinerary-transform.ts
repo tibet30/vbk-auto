@@ -1,3 +1,4 @@
+import { PLATFORM_HOTEL_DESCRIPTION } from "../../../../shared/platform-hotel-rules.js";
 /**
  * itinerary 转换层主入口：
  *   - 类型声明（ProductItineraryDay / ProductOperations / ResolvedStations /
@@ -237,26 +238,11 @@ function mealDescription(day: ProductItineraryDay, key: MealType["key"], index: 
 
 /** 客户可见评级来自当晚实际住宿；全程目标档次不能冒充降档结果。 */
 function hotelRatingForDay(day: ProductItineraryDay, targetTier?: string): string | undefined {
-  const candidate = day.hotelCandidates?.[0];
-  const diamond = candidate?.diamond ?? day.hotelRequirement?.diamond;
-  const type = candidate?.ratingType ?? day.hotelRequirement?.ratingType;
-  if (diamond === 0) return "当地酒店";
-  if (diamond && diamond >= 1 && diamond <= 5) {
-    return type === "star" ? `${diamond}星酒店` : type === "homestay" ? `${diamond}钻民宿` : `当地${diamond}钻酒店`;
-  }
-  return hotelTierPresentation(targetTier).displayName ?? undefined;
+  return undefined;
 }
 
 function hotelNamesForDay(day: ProductItineraryDay): string[] {
-  const candidates = Array.isArray(day.hotelCandidates)
-    ? day.hotelCandidates.map((candidate) => candidate?.hotelName?.trim()).filter((name): name is string => Boolean(name))
-    : [];
-  if (candidates.length === 0) return hasItineraryHotelStay(day.hotel) ? [day.hotel.trim()] : [];
-  if (candidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT || candidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT
-    || new Set(candidates).size !== candidates.length) {
-    throw new Error(`第 ${day.day} 天酒店候选必须是 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT}-${HOTEL_RESOURCE_CANDIDATE_COUNT} 家不同的酒店。`);
-  }
-  return candidates.slice(0, ITINERARY_HOTEL_CANDIDATE_COUNT);
+  return hasItineraryHotelStay(day.hotel) ? [PLATFORM_HOTEL_DESCRIPTION] : [];
 }
 
 function mealTypesForDay(args: { index: number; totalDays: number }): MealType[] {

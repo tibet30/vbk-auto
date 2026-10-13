@@ -88,6 +88,7 @@ export class VbkBrowser {
 
   setBounds(bounds: Electron.Rectangle): void { this.views.setBounds(bounds); }
   setVisible(visible: boolean): void { this.views.setVisible(visible); }
+  setOverlayOpen(open: boolean): void { this.views.setOverlayOpen(open); }
   isVisible(): boolean { return this.views.visible; }
   currentUrl(): string { return this.views.currentUrl(); }
 
@@ -120,8 +121,7 @@ export class VbkBrowser {
 
   async login(): Promise<void> {
     await this.ensureReadyForAction();
-    this.views.visible = true;
-    this.views.view?.setVisible(true);
+    this.setVisible(true);
     await navigateVbkPage(this.views.view?.webContents, URLS.list, { allowRedirect: isExpectedLoginRedirect });
   }
 

@@ -1,3 +1,4 @@
+import { PLATFORM_HOTEL_GUIDE } from "../../../shared/platform-hotel-rules.js";
 /**
  * MiniMax / Evolink 各类系统 prompt：
  *   - writablePatchGuide、outputGuide：作为 systemPrompt 内部组装段，本身不导出；
@@ -125,7 +126,7 @@ export const systemPrompt = `你是 ${APP_NAME} 的旅游产品运营助手。�
    - 费用包含/不包含/预订须知/退改政策
    - 封面图（直接生成 ctripLibrary cover，不创建 image 类 researchTask）
    - 套餐名称
-4. 车辆资源和酒店资源由系统自动匹配 VBK 资源库，AI 不需要创建对应的 researchTask。
+4. ${PLATFORM_HOTEL_GUIDE} 车辆资源由系统匹配 VBK 资源库，AI 不需要创建对应的 researchTask。
 5. 只有真正的运营数据缺失（如价格需要人工复核）时，才创建 researchTask。
 6. 当前产品草稿是产品状态的唯一事实来源；历史消息声称"已生成"但草稿字段为空时，必须重新生成并返回可写 patch。
 7. patch 必须是 RFC6902 风格，只能修改可写路径。

@@ -1,125 +1,30 @@
-import { hotelDiamondFromTier } from "../../../shared/hotel-tiers.js";
+import { ensurePlatformHotelRulesApi } from "./hotel-rule-api.js";
+import { platformHotelStayGroups } from "../../../shared/platform-hotel-rules.js";
+import { toPlatformShortLocationName } from "../../../shared/location-short-name.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
-import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
-import { productNeedsVehicleResource } from "../../../shared/product-form.js";
-import {
-  buildLodgingResourceSegment,
-  ensureResourceSegmentsDraftApi,
-  getProductSegmentsApi,
-  initializeResourceSegmentsDraftApi,
-  resolveResourceSegmentCityApi,
-  saveProductSegmentApi,
-  segmentsFromPayload,
-} from "./vehicle-resource-api.js";
-import { syncCtripHotelResources } from "./hotel-resource-page.js";
-import { finalizeParentResourceSegments } from "./resource-segment-finalization.js";
-import { unchangedResourceSegments } from "./resource-segment-readback.js";
+import { buildLodgingResourceSegment, getProductSegmentsApi, resolveResourceSegmentCityApi, saveProductSegmentApi, segmentsFromPayload } from "./vehicle-resource-api.js";
 
-/**
- * 全程段承载套餐和用车；正住宿段承载指定酒店。携程来源会在每个住宿段用
- * saveSegment 保存最多五家候选，并以草稿接口回读作为阶段内验收；携程只返回一家时
- * 也允许继续。无后续用车阶段时，最终统一发布资源模块并以正式段回读验收；需要用车
- * 的产品保留草稿，由用车阶段在所有资源写完后统一发布。
- */
+/** Save platform automatic matching rules, then read them back before completion. */
 export async function ensureHotelResourceApi(
   page: any,
   product: any,
   productId: string,
   options: { draftRepairAttempted?: boolean } = {},
 ) {
-  const needsHotel = product.itinerary?.some(hasPlannedHotel);
-  if (!needsHotel) return { skipped: "行程不含住宿", verified: true };
-  const hotelTier = product.operations?.hotelTier;
-  const diamond = hotelDiamondFromTier(hotelTier);
-  if (!diamond) throw new Error(`酒店等级配置无效：${String(hotelTier || "未配置")}`);
-  const resolvedDays = product.itinerary.filter(hasPlannedHotel);
-  const hasDailyCandidates = resolvedDays.every((day: any) => Array.isArray(day.hotelCandidates)
-    && day.hotelCandidates.length >= HOTEL_RESOURCE_MIN_CANDIDATE_COUNT);
-  const source = product.operations?.hotelResource?.source === "ctrip" || hasDailyCandidates ? "ctrip" : "package-api";
-  if (source === "ctrip") {
-    const missingCandidates = resolvedDays.filter((day: any) => !Array.isArray(day.hotelCandidates)
-      || day.hotelCandidates.length < HOTEL_RESOURCE_MIN_CANDIDATE_COUNT
-      || day.hotelCandidates.length > HOTEL_RESOURCE_CANDIDATE_COUNT
-      || !hasValidCtripCandidateIds(day.hotelCandidates));
-    if (missingCandidates.length) {
-      throw new Error(`酒店资源缺少每晚至少 ${HOTEL_RESOURCE_MIN_CANDIDATE_COUNT} 个且最多 ${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程候选：第 ${missingCandidates.map((day: any) => day.day).join("、")} 天`);
-    }
-  }
-
-  let payload = await ensureResourceSegmentsDraftApi(page, productId);
-  const layout = await normalizeHotelResourceLayout({ page, productId, resolvedDays, payload, source });
-  if (layout.changed) payload = await getProductSegmentsApi(page, productId);
-  const segments = segmentsFromPayload(payload);
-  if (!segments.length) throw new Error("酒店资源接口回读未返回任何行程段");
-  const lodging = segments.filter((segment) => Number(segment.segmentBase?.stayNights) > 0);
-  if (!lodging.length) throw new Error("行程含住宿，但资源接口未返回正住宿段");
-  // 套餐与全程用车属于首个全程段；住宿段只承载“指定酒店”。
-  // 因此不能以正住宿段是否携带套餐作为酒店保存前提。
-  const resourceSegments = source === "ctrip" ? ctripResourceSegments(resolvedDays, lodging) : [];
-  let ctripResource;
-  if (source === "ctrip") {
-    try {
-      ctripResource = await syncCtripHotelResources({ page, productId, dailyCandidates: resourceSegments });
-    } catch (error) {
-      if (!isMissingResourceDraft(error) || options.draftRepairAttempted) throw error;
-      const afterFailure = await getProductSegmentsApi(page, productId);
-      if (!unchangedResourceSegments(payload, afterFailure)) {
-        throw new Error("VBK 指定酒店资源保存结果不确定：保存前后资源内容发生变化，已停止自动重试以避免覆盖部分保存。");
-      }
-      const repaired = await initializeResourceSegmentsDraftApi(page, productId);
-      if (!unchangedResourceSegments(afterFailure, repaired)) {
-        throw new Error("VBK 资源草稿恢复后内容发生变化，已停止酒店写入并保留现场。");
-      }
-      return ensureHotelResourceApi(page, product, productId, { draftRepairAttempted: true });
-    }
-  }
-  const freshPayload = await getProductSegmentsApi(page, productId);
-  const finalization = productNeedsVehicleResource(product)
-    ? { deferred: true, reason: "等待用车资源阶段统一发布" }
-    : await finalizeParentResourceSegments(page, productId, freshPayload, {});
-  return {
-    source,
-    resourceName: source === "ctrip" ? String(resolvedDays[0]?.hotel ?? "") : undefined,
-    packageManaged: true,
-    verified: true,
-    hotelTier,
-    diamond,
-    positiveSegmentCount: lodging.length,
-    segmentIds: lodging.map((segment) => String(segment.segmentId)),
-    layout,
-    finalization,
-    ...(source === "ctrip"
-      ? {
-        dailyCandidates: resolvedDays.map((day: any) => ({ day: Number(day.day), candidates: day.hotelCandidates })),
-        ctripResource,
-      }
-      : {}),
-  };
+  return ensurePlatformHotelRulesApi(page, product, productId);
 }
 
-function isMissingResourceDraft(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("20016116") || message.includes("产品还没有创建草稿");
-}
-
-/** "无" 是明确的不住宿意图，不能被当作一个可配置酒店。 */
-function hasPlannedHotel(day: any) {
-  return hasItineraryHotelStay(day?.hotel);
-}
-
-/**
- * 资源配置的首段是全程随团段，只承载套餐和用车；携程指定酒店从第二段开始按连续同城且候选一致的晚次拆分。
- * 平台新建产品只有“全程段 + 末尾空段”时，自动在末尾空段之前创建连续住宿城市段；
- * 每一段的停留范围与住宿晚数必须相等。全程段不承载住宿，两个值均归零并清空指定酒店。
- */
-async function normalizeHotelResourceLayout(args: {
+/** Keep the full-trip package/vehicle segment separate from lodging rules. */
+export async function normalizeHotelResourceLayout(args: {
   page: any;
   productId: string;
   resolvedDays: any[];
   payload: any;
-  source: "ctrip" | "package-api";
+  source: "ctrip" | "package-api" | "rules";
+  province?: string;
+  provinceForCity?: (cityName: string) => string | undefined;
 }) {
-  const expected = hotelStayGroups(args.resolvedDays, args.source === "ctrip");
+  const expected = args.source === "rules" ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights }) => ({ cityName, nights })) : hotelStayGroups(args.resolvedDays, args.source === "ctrip");
   let payload = args.payload;
   let segments = segmentsFromPayload(payload);
   const [fullTrip] = segments;
@@ -137,12 +42,34 @@ async function normalizeHotelResourceLayout(args: {
       await saveProductSegmentApi(args.page, {
         ...segment,
         segmentBase: { ...segment.segmentBase, stayNights: 0, minStayNights: 0, maxStayNights: 0 },
-        hotel: { ...(segment.hotel ?? {}), segmentRooms: [] },
+        hotel: { segmentRooms: [] },
       }, "VBK 清理无住宿日的错误资源段");
     }
     payload = await getProductSegmentsApi(args.page, args.productId);
     segments = segmentsFromPayload(payload);
     existingLodging = lodgingSegments(segments);
+  }
+  if (args.source === "rules") {
+    for (let index = 0; index < existingLodging.length; index++) {
+      const segment = existingLodging[index];
+      const group = expected[index]!;
+      const province = args.provinceForCity?.(group.cityName) ?? args.province;
+      const destination = segment.segmentBase?.destinationCity;
+      const country = fullTrip.segmentBase?.destinationCity?.countryName;
+      const sameCity = toPlatformShortLocationName(destination?.cityName) === toPlatformShortLocationName(group.cityName)
+        && (!province || toPlatformShortLocationName(destination?.provinceName) === toPlatformShortLocationName(province))
+        && (!country || destination?.countryName === country);
+      if (Number(segment.segmentBase?.stayNights) === group.nights && sameCity) continue;
+      const city = sameCity ? segment.segmentBase.destinationCity
+        : await resolveResourceSegmentCityApi(args.page, group.cityName, {
+          province, countryName: country,
+        });
+      await saveProductSegmentApi(args.page, { ...segment, segmentBase: { ...segment.segmentBase, destinationCity: city,
+        stayNights: group.nights, minStayNights: group.nights, maxStayNights: group.nights } }, "VBK 酒店规则住宿段转换");
+      payload = await getProductSegmentsApi(args.page, args.productId);
+      segments = segmentsFromPayload(payload);
+      existingLodging = lodgingSegments(segments);
+    }
   }
   assertLodgingPrefix(existingLodging, expected);
 
@@ -161,6 +88,7 @@ async function normalizeHotelResourceLayout(args: {
     }
     const destinationCity = await resolveResourceSegmentCityApi(args.page, group.cityName, {
       countryName: departureCity.countryName,
+      province: args.provinceForCity?.(group.cityName) ?? args.province,
     });
     const draft = buildLodgingResourceSegment({
       terminalTemplate: terminal,
@@ -188,12 +116,12 @@ async function normalizeHotelResourceLayout(args: {
     const needsNightCorrection = nights !== targetNights
       || Number(base.minStayNights) !== targetNights
       || Number(base.maxStayNights) !== targetNights;
-    const needsHotelCleanup = isFullTrip && Array.isArray(rooms) && rooms.length > 0;
+    const needsHotelCleanup = targetNights === 0 && (Boolean(segment.hotel?.systemHotel) || Array.isArray(rooms) && rooms.length > 0);
     if (!needsNightCorrection && !needsHotelCleanup) return [];
     return [{
       ...segment,
       segmentBase: { ...base, stayNights: targetNights, minStayNights: targetNights, maxStayNights: targetNights },
-      ...(isFullTrip ? { hotel: { ...(segment.hotel ?? {}), segmentRooms: [] } } : {}),
+      ...(isFullTrip || needsHotelCleanup ? { hotel: { segmentRooms: [] } } : {}),
     }];
   });
   for (const segment of corrections) {
@@ -219,7 +147,7 @@ function assertLodgingPrefix(actual: any[], expected: Array<{ cityName: string; 
     const group = expected[index];
     if (!group) return true;
     return Number(segment.segmentBase?.stayNights) !== group.nights
-      || String(segment.segmentBase?.destinationCity?.cityName ?? "").trim() !== group.cityName;
+      || toPlatformShortLocationName(segment.segmentBase?.destinationCity?.cityName) !== toPlatformShortLocationName(group.cityName);
   });
   if (mismatched) {
     throw new Error(`住宿资源行程段未按预期住宿晚次拆分：期望 ${expected.map((group) => `${group.cityName}${group.nights}晚`).join("、")}`);

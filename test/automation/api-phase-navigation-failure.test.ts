@@ -66,7 +66,8 @@ test("停留在列表且酒店页跳转失败时，酒店仍通过 API 保存并
     }, "79239782"),
   });
   assert.equal(result.verified, true);
-  assert.deepEqual(lodging.hotel.segmentRooms.map((room: any) => room.masterHotelID), [694781]);
+  assert.deepEqual(lodging.hotel.segmentRooms, []);
+  assert.deepEqual(lodging.hotel.systemHotel.hotelStar, [3, 4, 5]);
   assert.equal(events.filter(event => event === "saveSegment").length, 1);
   assert.ok(events.lastIndexOf("getSegments") > events.indexOf("saveSegment"));
   assert.ok(events.indexOf("navigate") > events.lastIndexOf("getSegments"));

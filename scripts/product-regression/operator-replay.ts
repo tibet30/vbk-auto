@@ -8,6 +8,7 @@ import { applyManualReviewField } from '../../src/main/operations/manual-review-
 import { storeManualCoverFile } from '../../src/main/infrastructure/database/parts/cover-storage.js';
 import { FIXTURE_ROOT, type RegressionFixture, type Json } from './corpus.js';
 import type { GenerationReplay } from './generation-replay.js';
+import { toPlatformShortLocationName } from '../../src/shared/location-short-name.js';
 
 export function applyInitialOperatorInputs(db: VbkDatabase, mutations: ProductMutationService, id: string, trace: GenerationReplay) {
   const current = db.getProduct(id)!;
@@ -34,8 +35,10 @@ export function operatorReplay(db: VbkDatabase, getMutations: () => ProductMutat
     for (const { day, requirement } of trace.hotelRequirements) {
       const target = p.itinerary.find((d: Json) => d.day === day);
       if (!target) throw new Error(`住宿输入缺少行程日：${day}`);
-      target.hotelRequirement = structuredClone(requirement);
-      actions.push(`hotel-requirement:${day}`);
+      const city = toPlatformShortLocationName(requirement.cityName);
+      if (!city) throw new Error(`住宿输入缺少实际行政城市：${day}`);
+      target.hotelCity = city;
+      actions.push(`hotel-city:${day}`);
     }
     getMutations().commands.mergeChanges(updated.id, db.getProduct(updated.id)!, p, 'user');
     for (const removal of trace.removals) {

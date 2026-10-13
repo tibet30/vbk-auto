@@ -31,6 +31,7 @@ import { AppWorkspaceReviewSummaryTraffic } from "../review-summary-traffic";
 import styles from "../review-summary.module.less";
 import { ActiveTaskFooter } from "./active-task-footer";
 import { GeneratingSkeleton } from "./generating-skeleton";
+import { usesPlatformHotelRules } from "../../../../../shared/platform-hotel-rules.js";
 
 export interface ReviewSummaryProps {
   product: ProductDetail;
@@ -276,6 +277,7 @@ export function AppWorkspaceReviewSummary({
               />
 
               <AppWorkspaceReviewSummaryOpenIssues
+                hotelStateRefreshNeeded={usesPlatformHotelRules(product.product) && Boolean(product.automation?.phases.some(p => p.phase === "hotelResource" && p.status === "failed"))}
                 readiness={readiness}
                 taskList={taskList}
                 setComposerInput={setComposerInput}

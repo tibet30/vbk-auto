@@ -4,7 +4,7 @@
  *   1) 拉当前产品 → 抽取 userIdea → 标准化 skeleton.city → 跑 foundation；
  *   2) 解析 userIntent（userIdea 非空时）→ 验证 days → 写入 plan；
  *   3) 跑 itinerary：buildVerifiedPool → composeItinerary；
- *   4) 跑 hotelResolution：按是否有过夜日期决定 skipped / resolveHotels + 写 itinerary / 写酒店资源；
+ *   4) 跑 hotelResolution：按是否有过夜日期决定 skipped / 写平台酒店规则；
  *   5) 跑 completion：copy → presentation → commercial（必须先 presentation 写完再刷新 plan，
  *      避免旧 snapshot 覆盖新字段）；
  *   6) 串行跑 cover / vehicleResource（共享 VBK BrowserView，不能并行）；
@@ -15,8 +15,8 @@ import type { PlanningNodeId, PlanningNodeState, PlanningPlanV2 } from "../../..
 import { emptyPlanningUserIntent } from "../../../shared/contracts-planning-intent.js";
 import { toPlatformShortLocationName } from "../../../shared/location-short-name.js";
 import { AI_WRITABLE_PATHS } from "../schemas.js";
-import { HOTEL_RESOURCE_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
-import { resolveItineraryHotelCandidates, shouldResolveItineraryHotelForDay } from "../../infrastructure/ctrip-hotel-search.js";
+import { normalisePlatformHotelProduct, validPlatformHotelRules } from "../../../shared/platform-hotel-rules.js";
+import { needsItineraryHotelCandidates } from "../../../shared/itinerary-hotel.js";
 import { validateUserIntentDays } from "../user-intent.js";
 import { buildVerifiedPool, composeItinerary, runFoundationLocation } from "../three-stage-itinerary-flow.js";
 import { asRecord, errorMessage, failPlan, hasStandardLocation, isCompleted, node, text } from "./helpers.js";
@@ -81,7 +81,7 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
   if (!isCompleted(plan, "hotelResolution")) {
     const current = await deps.runtime.loadCurrentProduct(deps.localProductId);
     const itinerary = Array.isArray(current.itinerary) ? current.itinerary as Array<Record<string, unknown>> : [];
-    if (!itinerary.some((day, index) => shouldResolveItineraryHotelForDay(day, index, deps.skeleton.nights))) {
+    if (!itinerary.some((day, index) => needsItineraryHotelCandidates(day, index, deps.skeleton.nights))) {
       await patchNode("hotelResolution", {
         status: "skipped",
         summary: "行程无过夜日期，无需匹配酒店资源",
@@ -89,25 +89,18 @@ export async function runThreeStagePlan(deps: ThreeStageOrchestratorDependencies
       });
     } else {
       const attempt = node(plan, "hotelResolution").attempts + 1;
-      await patchNode("hotelResolution", { status: "running", attempts: attempt, startedAt: new Date().toISOString(), error: undefined });
+
       try {
-        const resolved = await deps.resolveHotels(itinerary, deps.skeleton.nights);
-        const first = resolved.dailyCandidates[0]?.candidates[0];
-        if (!first) throw new Error("酒店候选为空");
-        const itineraryWrite = await deps.runtime.writeModule(deps.localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, resolved.itinerary);
-        if (!itineraryWrite.ok) throw new Error(itineraryWrite.reason || "酒店候选行程写入失败");
-        const operations = asRecord(current.operations) ?? {};
-        if (!deps.runtime.writeResolvedHotelResources) throw new Error("酒店资源受控写入口不可用");
-        const resourceWrite = await deps.runtime.writeResolvedHotelResources(deps.localProductId, {
-          ...operations,
-          hotelResource: {
-            source: "ctrip", resourceId: first.hotelId, resourceName: first.hotelName, diamond: first.diamond,
-            candidates: resolved.dailyCandidates[0]!.candidates, dailyCandidates: resolved.dailyCandidates,
-          },
-        });
-        if (!resourceWrite.ok) throw new Error(resourceWrite.reason || "酒店资源配置写入失败");
-        await patchNode("hotelResolution", { status: "completed", attempts: attempt,
-          summary: `${resolved.dailyCandidates.length} 晚住宿，每晚按钻级和距离选取最多 ${HOTEL_RESOURCE_CANDIDATE_COUNT} 个携程酒店（至少 1 个即可继续）；行程录入前 ${ITINERARY_HOTEL_CANDIDATE_COUNT} 个，资源配置录入全部候选`, completedAt: new Date().toISOString() });
+        const normalized = normalisePlatformHotelProduct({ ...current,
+          basicInfo: { ...asRecord(current.basicInfo), nights: deps.skeleton.nights } });
+        if (!validPlatformHotelRules(normalized.operations.hotelRules)) throw new Error("酒店规则缺失或无效");
+        const itineraryWrite = await deps.runtime.writeModule(deps.localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, normalized.itinerary);
+        if (!itineraryWrite.ok) throw new Error(itineraryWrite.reason || "平台酒店行程写入失败");
+        if (!deps.runtime.writeResolvedHotelResources) throw new Error("酒店规则受控写入口不可用");
+        const resourceWrite = await deps.runtime.writeResolvedHotelResources(deps.localProductId, normalized.operations);
+        if (!resourceWrite.ok) throw new Error(resourceWrite.reason || "酒店规则配置写入失败");
+        await patchNode("hotelResolution", { status: "skipped", attempts: attempt,
+          summary: "默认使用平台资源，无需准备住宿资源", completedAt: new Date().toISOString() });
       } catch (error) {
         const message = errorMessage(error);
         await patchNode("hotelResolution", { status: "failed", attempts: attempt, error: message });

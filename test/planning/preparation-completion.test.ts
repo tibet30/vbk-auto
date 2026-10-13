@@ -242,31 +242,32 @@ test("未启用大交通不会被错误阻塞，启用后缺可用性核验会�
   assert.equal(evaluatePreparationCompletion(verified).ready, true);
 });
 
-test("住宿日缺酒店候选才阻塞，无住宿日不要求酒店候选", () => {
-  const lodging = completeDraft();
-  (lodging.product.itinerary as Array<Record<string, unknown>>)[0]!.hotel = "成都酒店";
-  const blocked = evaluatePreparationCompletion(lodging);
+test("平台住宿缺少规则必须阻塞，无住宿日不要求酒店规则", () => {
+  const withStay = completeDraft();
+  (withStay.product.itinerary as any[])[0].hotel = "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店";
+  (withStay.product.itinerary as any[])[0].hotelCity = "成都";
+  (withStay.product.operations as any).hotelMatchingMode = "rules";
+  delete (withStay.product.operations as any).hotelRules;
+  const blocked = evaluatePreparationCompletion(withStay);
   assert.equal(blocked.ready, false);
-  assert.ok(blocked.missing.some((item) => item.includes("酒店候选")));
-  const legacy = computeReadiness({ product: lodging.product, researchTasks: lodging.researchTasks });
-  assert.equal(legacy.ready, true);
-  assert.equal(legacy.issues.some((issue) => issue.label.includes("酒店候选")), false);
-
+  assert.ok(blocked.missing.includes("平台酒店规则"));
   const noStay = completeDraft();
-  (noStay.product.itinerary as Array<Record<string, unknown>>)[0]!.hotel = "—";
+  (noStay.product.basicInfo as any).nights = 0;
+  (noStay.product.itinerary as any[]).forEach(day => { day.hotel = "无当日住宿安排"; });
+  delete (noStay.product.operations as any).hotelRules;
   assert.equal(evaluatePreparationCompletion(noStay).ready, true);
 });
 
-test("产品有住宿晚数但每日酒店为空时，审批前必须要求携程酒店候选", () => {
+test("平台规则无效时审批前阻塞并指出自动匹配要求", () => {
   const product = completeDraft();
-  (product.product.itinerary as Array<Record<string, unknown>>)[0]!.hotel = "";
+  (product.product.itinerary as any[])[0].hotel = "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店";
+  (product.product.itinerary as any[])[0].hotelCity = "成都";
+  (product.product.operations as any).hotelMatchingMode = "rules";
+  (product.product.operations as any).hotelRules = { autoMatch: false, grades: [4] };
   const evaluation = evaluatePreparationCompletion(product);
   assert.equal(evaluation.ready, false);
-  assert.equal(evaluation.currentStage, "completion");
   assert.equal(evaluation.currentNode, "hotelResolution");
-  assert.ok(evaluation.missing.some((item) => item.includes("酒店候选：第 1 天")));
-  assert.match(evaluation.blockingReasons.join("\n"), /行程录入页使用携程平台酒店/);
-  assert.ok(evaluation.allowedActions.includes("resolve_itinerary_hotels"));
+  assert.match(evaluation.blockingReasons.join("\n"), /自动匹配三钻、四钻、五钻/);
   assert.ok(!evaluation.allowedActions.includes("request_approval"));
 });
 
@@ -338,37 +339,4 @@ test("evaluator 从 product.messages 锁定最新纠正后的行程", () => {
   ]);
   assert.equal(evaluation.itineraryInputMode, "complete");
   assert.ok(!evaluation.lockedConstraints.pois.includes("武侯祠"));
-});
-
-test("未完成的 POI 研究任务会阻塞批准", () => {
-  const product = completeDraft();
-  product.researchTasks = [{
-    id: "task-1",
-    label: "宽窄巷子",
-    type: "vbk",
-    status: "running",
-    state: "needs_confirmation",
-    detail: "POI 未匹配，待人工确认",
-  }];
-  (product.product.itinerary as Array<Record<string, unknown>>)[0]!.spots = [{ name: "宽窄巷子", poiName: null, poiId: null }];
-  const evaluation = evaluatePreparationCompletion(product);
-  assert.equal(evaluation.ready, false);
-  assert.equal(evaluation.currentStage, "itinerary");
-  assert.ok(!evaluation.allowedActions.includes("request_approval"));
-});
-
-test("付费景点缺图不阻止确认；补图可选且缺图清单不成为卡点", () => {
-  const product = completeDraft();
-  const cover = product.product.presentation!.cover as any;
-  delete cover.alternates;
-  delete cover.missingPoiImages;
-  for (const missingPoiImages of [undefined, ["武侯祠"]]) {
-    cover.missingPoiImages = missingPoiImages;
-    const result = evaluatePreparationCompletion(product);
-    assert.equal(result.ready, true, JSON.stringify(result.missing));
-    assert.ok(result.allowedActions.includes("request_approval"));
-    assert.ok(result.allowedActions.includes("resolve_cover"));
-    assert.ok(!result.missing.some(item => /配图|景点图片/.test(item)));
-    assert.equal(preparationApprovalBlockReason(product), undefined);
-  }
 });

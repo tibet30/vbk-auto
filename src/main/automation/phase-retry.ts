@@ -100,8 +100,8 @@ export function prepareBackfilledPhaseRecovery(
 /**
  * 从单阶段修复后的 queued 断点继续完整录入。
  *
- * 已完成阶段不重跑；从首个 pending 阶段开始，后续阶段统一回到 pending，
- * 使「开始自动录入」真正从断点恢复而不是重写整个产品。
+ * 断点之前已完成阶段不重跑，后续依赖重新验证。
+ * 住宿或用车修复不影响已保存条款，保留该独立模块；最终预检重新回读。
  */
 export function prepareQueuedPhaseResume(
   previous: AutomationRun,
@@ -122,13 +122,13 @@ export function prepareQueuedPhaseResume(
     ...previous,
     status: "running",
     currentPhase: resumePhase,
-    phases: phases.map((phase, index) => ({
-      phase,
-      status: phase === "trafficLine" && previous.phases.find(item => item.phase === phase)?.status === "failed" && index < resumeIndex
-        ? "failed" : index < resumeIndex
-        ? previous.phases.find((item) => item.phase === phase)?.status === "completed" ? "completed" : "pending"
-        : "pending",
-    })),
+    phases: phases.map((phase, index) => {
+      const prior = previous.phases.find(item => item.phase === phase);
+      const independentTerms = phase === "terms" && ["hotelResource", "vehicleResource"].includes(resumePhase);
+      const status = phase === "trafficLine" && prior?.status === "failed" && index < resumeIndex ? "failed"
+        : (index < resumeIndex || independentTerms) && prior?.status === "completed" ? "completed" : "pending";
+      return { phase, status };
+    }),
     logs: [
       ...previous.logs,
       { at, message: `正在从已修复断点继续：${resumePhase}`, level: "info" },

@@ -96,8 +96,8 @@ test("无用户回答时真实酒店工具使用默认降档并持久化，不�
   try {
     const receipt = await createItineraryHotelTool(deps, () => current).execute({}, { localProductId: "local" } as any);
     assert.equal(JSON.parse(receipt.content).persisted, true);
-    assert.equal(current.product.itinerary[0].hotelRequirement.diamond, 3);
-    assert.equal(current.product.itinerary[0].hotelCandidates[0].hotelId, 1001);
+    assert.equal(current.product.itinerary[0].hotelRequirement, undefined);
+    assert.equal(current.product.itinerary[0].hotelCandidates, undefined);
   } finally { globalThis.fetch = original; }
 });
 

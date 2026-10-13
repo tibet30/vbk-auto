@@ -35,7 +35,8 @@ export interface CtripHotelResourceDayMatch {
 }
 
 export interface HotelResourceMatch {
-  source: "vbk" | "ctrip" | "nonPlatform";
+  source: "vbk" | "ctrip" | "nonPlatform" | "rules";
+  rules?: { autoMatch: boolean; grades: number[] };
   resourceId?: number;
   resourceName: string;
   supplierCode?: string;

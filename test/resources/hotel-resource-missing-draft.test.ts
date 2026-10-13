@@ -20,7 +20,7 @@ const candidates = (start: number, cityId: number, cityName: string) => Array.fr
   anchorCityId: cityId,
 }));
 
-test("已有指定酒店但拒绝保存前后内容未变化时，恢复草稿并保留原绑定", async () => {
+test("已有指定酒店但拒绝保存前后内容未变化时，恢复草稿并转换为自动匹配规则", async () => {
   const oldFetch = globalThis.fetch;
   const oldDocument = (globalThis as any).document;
   const rikaze = city(100, "日喀则");
@@ -55,7 +55,8 @@ test("已有指定酒店但拒绝保存前后内容未变化时，恢复草稿�
     );
     assert.equal(result.verified, true);
     assert.equal(saveAttempts, 2);
-    assert.deepEqual(segment.hotel.segmentRooms.map((room: any) => room.masterHotelID), [100, 101, 102, 103, 104]);
+    assert.deepEqual(segment.hotel.segmentRooms, []);
+    assert.deepEqual(segment.hotel.systemHotel.hotelStar, [3, 4, 5]);
   } finally {
     globalThis.fetch = oldFetch;
     if (oldDocument === undefined) delete (globalThis as any).document;

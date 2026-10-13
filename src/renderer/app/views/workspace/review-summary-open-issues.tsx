@@ -29,6 +29,7 @@ export interface ReviewSummaryOpenIssuesProps {
   onToggleCollapsed: () => void;
   refreshing: boolean;
   onRefresh: () => void;
+  hotelStateRefreshNeeded?: boolean;
 }
 
 function sendToComposer(setComposerInput: ((value: string) => void) | undefined, fallback: (value: string) => void, content: string) {
@@ -46,14 +47,15 @@ export function AppWorkspaceReviewSummaryOpenIssues({
   onToggleCollapsed,
   refreshing,
   onRefresh,
+  hotelStateRefreshNeeded = false,
 }: ReviewSummaryOpenIssuesProps) {
   const rows = buildOpenIssueRows(readiness, taskList);
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !hotelStateRefreshNeeded) return null;
 
   const total = rows.length;
 
   return (
-    <section className={styles.block} aria-label="统一待处理事项" data-collapsed={collapsed}>
+    <section className={styles.block} aria-label={total ? "统一待处理事项" : "酒店状态同步"} data-collapsed={collapsed}>
       <div className={styles.head}>
         <button
           type="button"
@@ -65,8 +67,8 @@ export function AppWorkspaceReviewSummaryOpenIssues({
           <span className={styles.headIcon} aria-hidden="true">
             <ListChecks size={13} />
           </span>
-          <strong className={styles.headTitle}>待处理事项</strong>
-          <small className={styles.headMeta}>{total} 项</small>
+          <strong className={styles.headTitle}>{total ? "待处理事项" : "酒店状态同步"}</strong>
+          {total > 0 && <small className={styles.headMeta}>{total} 项</small>}
           <span className={styles.headChevron} aria-hidden="true">
             <ChevronDown size={13} />
           </span>
@@ -83,10 +85,10 @@ export function AppWorkspaceReviewSummaryOpenIssues({
           }}
         >
           {refreshing ? <LoaderCircle size={13} className={styles.refreshSpin} /> : <RefreshCw size={13} />}
-          <span>{refreshing ? "刷新中…" : "刷新"}</span>
+          <span>{refreshing ? "刷新中…" : hotelStateRefreshNeeded ? "核验酒店草稿" : "刷新"}</span>
         </button>
       </div>
-      {!collapsed && (
+      {!collapsed && total > 0 && (
         <div className={styles.body} id="open-issues-body" data-min-visible={total >= 3}>
           <ul className={styles.list}>
             {rows.map((issue, index) => (

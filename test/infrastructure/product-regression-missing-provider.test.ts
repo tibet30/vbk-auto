@@ -10,7 +10,7 @@ import { loadCase } from '../../scripts/product-regression/corpus.js';
 import { loadProviderReplay } from '../../scripts/product-regression/provider-replay.js';
 import { forbidNetwork } from '../../scripts/product-regression/isolation.js';
 
-test('必要酒店回放缺失时，生产准备循环不能形成录入审批', async context => {
+test('平台规则匹配不依赖酒店列表回放且能进入审批', async context => {
   context.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-11T04:00:00Z') });
   const isolation = forbidNetwork();
   const root = mkdtempSync(path.join(os.tmpdir(), 'vbk-missing-provider-'));
@@ -20,9 +20,10 @@ test('必要酒店回放缺失时，生产准备循环不能形成录入审批',
   const provider = loadProviderReplay('xian');
   provider.lists = [];
   const result = await runFullPreparation(db, loadCase('xian'), root, provider);
-  assert.ok(result.misses.some(query => query.startsWith('hotel-list:')));
-  assert.equal(evaluatePreparationCompletion(result.saved).ready, false);
-  assert.notEqual(result.snapshot.run?.status, 'waiting_approval');
-  assert.equal(Boolean(result.snapshot.pendingApproval), false);
+  assert.equal(result.queries.some(query => query.startsWith('hotel-list:')), false);
+  assert.deepEqual(result.misses, []);
+  assert.equal(evaluatePreparationCompletion(result.saved).ready, true);
+  assert.equal(result.snapshot.run?.status, 'waiting_approval');
+  assert.equal(Boolean(result.snapshot.pendingApproval), true);
   assert.deepEqual(result.blockedWrites, []);
 });

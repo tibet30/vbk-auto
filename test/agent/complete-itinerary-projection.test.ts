@@ -207,8 +207,8 @@ test("隔离 SQLite 中完整行程不调用模型，写入后重连仍可读", 
     assert.equal(reloaded.product.itinerary?.length, 3);
     assert.deepEqual(reloaded.product.itinerary?.[0]?.spots?.map((spot) => spot.name), ["萨迦古城", "萨迦寺", "冲拉山欣赏珠峰东坡"]);
     assert.equal(reloaded.product.itinerary?.flatMap((day) => day.spots ?? []).length, 10);
-    assert.match(reloaded.product.itinerary?.[0]?.hotel ?? "", /日喀则/);
-    assert.match(reloaded.product.itinerary?.[1]?.hotel ?? "", /日喀则/);
+    assert.equal(reloaded.product.itinerary?.[0]?.hotelCity, "日喀则");
+    assert.equal(reloaded.product.itinerary?.[1]?.hotelCity, "日喀则");
     assert.equal(reloaded.product.itinerary?.[2]?.hotel, "无当日住宿安排");
     const alternative = reloaded.product.itinerary?.[2]?.spots?.filter((spot) => /日喀则博物馆|非遗中心参观/.test(spot.name)) ?? [];
     assert.equal(alternative.length, 2);

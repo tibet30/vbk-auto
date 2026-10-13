@@ -1,3 +1,4 @@
+import { normalisePlatformHotelProduct } from "../../../../shared/platform-hotel-rules.js";
 /**
  * 完整录入与单阶段修复共用 fillMap：把 presentation / itinerary / package /
  * pricingInventory / terms / hotelResource / vehicleResource / preflight
@@ -127,6 +128,12 @@ export function applyHotelResourceResult(
   productData: ParsedProduct,
   result: HotelResourceFillResult,
 ): void {
+  if (result.source === "rules") {
+    const normalized = normalisePlatformHotelProduct(productData);
+    Object.assign(productData, normalized);
+    writeAutomationProduct(ctx, localProductId, normalized, "automating");
+    return;
+  }
   if (result.source === "vbk" && result.resourceId && result.resourceName) {
     const looseOperations = productData.operations as unknown as Record<string, unknown>;
     looseOperations.hotelResource = {

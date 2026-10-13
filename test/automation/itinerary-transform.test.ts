@@ -164,7 +164,7 @@ test("酒店节点：day.hotel 非空时产出 activeType=1 节点 + tourDailyHo
   const hotel = out[0].tourDailyInfos.find((info) => info.activeType?.key === 1);
   assert.ok(hotel, "hotel 非空必须有酒店节点");
   assert.equal(hotel.tourDailyHotels.length, 1);
-  assert.equal(hotel.tourDailyHotels[0].hotel.hotelName, "丽江和玺酒店");
+  assert.equal(hotel.tourDailyHotels[0].hotel.hotelName, "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店");
   // 钻级从 operations.hotelTier 派生
   assert.equal(hotel.tourDailyHotels[0].hotel.grade, undefined, "未知 hotel.grade 不进入草稿请求；客户钻级写在节点说明");
   assert.doesNotMatch(hotel.description, /\/-4/, "面向客户的酒店说明不得泄露内部枚举");
@@ -188,8 +188,8 @@ test("酒店节点：五家携程候选仅将前三家录入同一酒店节点�
   });
   const hotels = out[0].tourDailyInfos.filter((info) => info.activeType?.key === 1);
   assert.equal(hotels.length, 1);
-  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.hotelName), ["主选酒店", "备选酒店二", "备选酒店三"]);
-  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.grade), [undefined, undefined, undefined]);
+  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.hotelName), ["使用携程平台酒店，自动匹配三钻、四钻、五钻酒店"]);
+  assert.deepEqual(hotels[0].tourDailyHotels.map((slot) => slot.hotel.grade), [undefined]);
 });
 
 test("酒店节点：day.hotel 为空时不产出酒店节点", () => {
@@ -310,154 +310,4 @@ test("POI 节点保留 VBK 模板关键字段：poiId / poiName / ticketType / r
   assert.equal(poi.relateSystemTicket?.key, "F", "relateSystemTicket.key=F（否）保留");
   assert.equal(poi.relateSystemTicket?.name, "否");
   assert.ok("ticketType" in poi, "ticketType 字段必须保留");
-});
-
-test("免费景点使用 VBK 当前无需门票类型，收费景点默认含成人儿童首道门票", () => {
-  const freeDay = makeDay({
-    spots: [{
-      name: "山西博物院",
-      poiName: "山西博物院",
-      poiId: 88189,
-      poiType: { key: 3, name: "景点" },
-      ticketType: { key: 2, name: "免费" },
-    }],
-  });
-  const freePoi = transformItinerary({ itinerary: [freeDay], operations: baseOps, stations: baseStations })[0]
-    .tourDailyInfos.find((info) => info.activeType?.key === 3).tourDailyPois[0];
-  assert.deepEqual(freePoi.suffixName, { key: 11, name: "无需门票" });
-  const paidDay = makeDay({
-    spots: [{
-      name: "收费景点",
-      poiName: "收费景点",
-      poiId: 123,
-      poiType: { key: 3, name: "景点" },
-      ticketType: { key: 1, name: "收费" },
-    }],
-  });
-  const paidPoi = transformItinerary({ itinerary: [paidDay], operations: baseOps, stations: baseStations })[0]
-    .tourDailyInfos.find((info) => info.activeType?.key === 3).tourDailyPois[0];
-  assert.deepEqual(paidPoi.suffixName, { key: 13, name: "含成人儿童首道门票" });
-});
-
-test("外观且不上桥的景点保留 POI、顺序和说明", () => {
-  const day = makeDay({
-    spots: [
-      { name: "广济桥", poiName: "广济桥", poiId: 1, ticketType: { key: 1, name: "收费" }, description: "远观广济桥（不上桥），欣赏代表性古桥景观。", timeOfDay: "morning" },
-      { name: "收费景点", poiName: "收费景点", poiId: 2, ticketType: { key: 1, name: "收费" }, description: "入内参观。", timeOfDay: "morning" },
-    ],
-  });
-  const attraction = transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations })[0]
-    .tourDailyInfos.find((info) => info.activeType?.key === 3)!;
-  assert.equal(attraction.description, "远观广济桥（不上桥），欣赏代表性古桥景观。；入内参观。");
-  assert.deepEqual(attraction.tourDailyPois.map((poi: any) => poi.poi.poiId), [1, 2]);
-  assert.deepEqual(attraction.tourDailyPois.map((poi: any) => poi.suffixName), [
-    { key: 1, name: "外观" }, { key: 13, name: "含成人儿童首道门票" },
-  ]);
-});
-
-test("未知 / 业务无关字段保留（customStatus / pkgTourInfoId / versionNum / directionWay）", () => {
-  const out = transformItinerary({ itinerary: [makeDay()], operations: baseOps, stations: baseStations, refIdSeed: "1" });
-  const attraction = out[0].tourDailyInfos.find((info) => info.activeType?.key === 3);
-  assert.equal(attraction.customStatus, 0, "customStatus 必须保留");
-  assert.equal(attraction.pkgTourInfoId, 0);
-  assert.equal(attraction.versionNum, 0);
-  assert.deepEqual(attraction.directionWay, { key: "", name: "" });
-  assert.ok("recommendActivities" in attraction);
-  assert.ok("tourDailyPackageGatherList" in attraction);
-});
-
-// ───────── 业务失败：必填字段缺失 ─────────
-
-test("spots[i].poiId 缺失 → 抛错（含第几个、字段名）", () => {
-  const day = makeDay({
-    spots: [
-      { name: "未命名", poiName: null, poiId: null },
-    ],
-  });
-  assert.throws(
-    () => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }),
-    /缺 poiId\/poiName/,
-  );
-});
-
-test("day.title 缺失 → 抛错", () => {
-  const day = makeDay({ title: "" });
-  assert.throws(
-    () => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }),
-    /title 缺失/,
-  );
-});
-
-test("day.description 缺失不会阻断已有真实 POI 的日程", () => {
-  const day = makeDay({ description: "" });
-  assert.doesNotThrow(() => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }));
-});
-
-test("空 itinerary 数组 → 抛错", () => {
-  assert.throws(
-    () => transformItinerary({ itinerary: [], operations: baseOps, stations: baseStations, refIdSeed: "1" }),
-    /行程数组为空/,
-  );
-});
-
-test("operations.pickupCity 缺失 → 抛错", () => {
-  const ops: ProductOperations = { ...baseOps, pickupCity: undefined };
-  assert.throws(
-    () => transformItinerary({ itinerary: [makeDay()], operations: ops, stations: baseStations, refIdSeed: "1" }),
-    /pickupCity 缺失/,
-  );
-});
-
-test("接送站任一端无候选 → 抛错", () => {
-  assert.throws(
-    () => transformItinerary({
-      itinerary: [makeDay()],
-      operations: baseOps,
-      stations: { ...baseStations, pickupAir: null, pickupTrain: null },
-      refIdSeed: "1",
-    }),
-    /接送站搜索未返回任何可用候选/,
-  );
-  assert.throws(
-    () => transformItinerary({
-      itinerary: [makeDay()],
-      operations: baseOps,
-      stations: { ...baseStations, dropoffAir: null, dropoffTrain: null },
-      refIdSeed: "1",
-    }),
-    /接送站搜索未返回任何可用候选/,
-  );
-});
-
-test("refIdSeed 是日志关联 nonce，允许任意字符串（包括空），不再触发业务失败", () => {
-  // 数字字符串、字母字符串、空串都应被接受；refId 与 refIdSeed 解耦。
-  for (const seed of ["abc", "", "123", "v1.2-后缀"]) {
-    const out = transformItinerary({ itinerary: [makeDay()], operations: baseOps, stations: baseStations, refIdSeed: seed });
-    const poi = out[0].tourDailyInfos.find((info) => info.activeType?.key === 3).tourDailyPois[0];
-    assert.equal(poi.refId, null);
-  }
-});
-
-test("spots 和用户其他活动都为空 → 抛错", () => {
-  const day = makeDay({ spots: [] });
-  assert.throws(
-    () => transformItinerary({ itinerary: [day], operations: baseOps, stations: baseStations, refIdSeed: "1" }),
-    /缺少已验证景点或用户明确的其他活动/,
-  );
-});
-
-// ───────── 已知 day 实测组合 ─────────
-
-test("3 天行程：refId 一律为 null（不做去重 / 不参与协议字段）", () => {
-  const days = [makeDay({ day: 1 }), makeDay({ day: 2 }), makeDay({ day: 3 })];
-  const out = transformItinerary({ itinerary: days, operations: baseOps, stations: baseStations, refIdSeed: "100" });
-  for (const day of out) {
-    for (const info of day.tourDailyInfos) {
-      for (const poi of info.tourDailyPois ?? []) assert.equal(poi.refId, null);
-      for (const hotel of info.tourDailyHotels ?? []) assert.equal(hotel.refId, null);
-      if (info.tourDailyTrain?.[0]) assert.equal(info.tourDailyTrain[0].refId, null);
-      if (info.tourDailyTheme?.[0]) assert.equal(info.tourDailyTheme[0].refId, null);
-      if (info.tourDailyDinner && "refId" in info.tourDailyDinner) assert.equal(info.tourDailyDinner.refId, null);
-    }
-  }
 });

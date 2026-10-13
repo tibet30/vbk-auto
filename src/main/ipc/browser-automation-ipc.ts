@@ -94,6 +94,7 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   ipcMain.handle("browser:openExternal", () => context.browser.openExternal());
   ipcMain.handle("browser:setBounds", (_event, bounds) => context.browser.setBounds(bounds));
   ipcMain.handle("browser:setVisible", (_event, visible: boolean) => context.browser.setVisible(visible));
+  ipcMain.handle("browser:setOverlayOpen", (_event, open: boolean) => context.browser.setOverlayOpen(Boolean(open)));
   ipcMain.handle("browser:listLoginAccounts", () => context.browser.listKnownLoginAccounts());
   ipcMain.handle("browser:addLogin", () => {
     context.productWorkflows.assertVbkPageIdle("新增登录");

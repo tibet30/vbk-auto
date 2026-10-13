@@ -93,6 +93,8 @@ export const operationsSchema = z.object({
   transport: z.enum(["charter", "shared", "none"]).default("charter"),
   pickupCity: z.string().min(1),
   reusePickupForDropoff: z.boolean().default(true),
+  hotelMatchingMode: z.literal("rules").optional(),
+  hotelRules: z.object({ autoMatch: z.boolean(), grades: z.array(z.number().int()) }).strict().optional(),
   hotelSource: z.literal("nonPlatform").default("nonPlatform"),
   hotelFallbackPolicy: z.object({ allowDowngrade: z.boolean().default(true) }).strict().default({ allowDowngrade: true }),
   hotelTier: z

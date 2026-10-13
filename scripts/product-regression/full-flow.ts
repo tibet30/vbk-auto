@@ -38,7 +38,7 @@ export async function runFullPreparation(db: VbkDatabase, fixture: RegressionFix
       const days = persisted.product.itinerary as Array<Record<string, any>>;
       checkpoints.push({ version: persisted.productJsonVersion ?? 0, days: days.length,
         boundPois: days.flatMap(d => d.spots ?? []).filter(s => s.poiId).length,
-        hotelDays: days.filter(d => d.hotelCandidates?.length).length });
+        hotelDays: days.filter(d => d.hotelCity).length });
       operators.onUpdated(persisted);
       const corrupted = faults.corruptSaved?.(structuredClone(db.getProduct(updated.id)!.product));
       if (corrupted) {

@@ -11,6 +11,7 @@
  * 错误信息必含「第 N 天 / 字段 / 期望 / 实际」，方便定位。
  */
 
+import { PLATFORM_HOTEL_DESCRIPTION } from "../../../../../shared/platform-hotel-rules.js";
 import type { VbkDailyUseCar } from "../../../../../shared/product-form.js";
 import type { ReadbackExpectations } from "../itinerary-transform.js";
 import {
@@ -156,6 +157,8 @@ export function matchHotelSlots(
         `${dayLabel} 第 ${idx + 1} 个酒店 hotelName 不一致：实际=${JSON.stringify(actualHotelName)}，期望候选=${JSON.stringify(expected.map((hotel) => hotel.hotelName))}`,
       );
     }
+    if (matched.hotelName === PLATFORM_HOTEL_DESCRIPTION && (!description.includes(PLATFORM_HOTEL_DESCRIPTION) || info.useSegmentConfig !== true || slots.length !== 1))
+      throw new Error(`${dayLabel} 平台酒店匹配说明或来源不一致`);
     const expectedTier = matched.hotelTier ?? "";
     if (expectedTier && actualHotelTier !== expectedTier && !description.includes(expectedTier)) {
       throw new Error(

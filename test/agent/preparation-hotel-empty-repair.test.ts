@@ -34,7 +34,7 @@ test("hotel 显式空字符串可写本地，title/name 空字符串仍被拒绝
   const payload = { patch: { itinerary: [{ day: 1, hotel: "" }] } };
   assert.equal(validateSchema(patch.parameters, payload), undefined);
   await patch.execute(payload, { localProductId: saved.id, accountKey: "a", productVersion: "v" });
-  assert.equal(saved.product.itinerary?.[0]?.hotel, "");
+  assert.equal(saved.product.itinerary?.[0]?.hotel, "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店");
   assert.equal(saved.product.itinerary?.[0]?.spots?.[0]?.poiId, 101);
   assert.match(validateSchema(patch.parameters, { patch: { itinerary: [{ day: 1, title: "" }] } }) ?? "", /title/);
   assert.match(validateSchema(patch.parameters, { patch: { itinerary: [{ day: 1, spots: [{ name: "" }] }] } }) ?? "", /name/);

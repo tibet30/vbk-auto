@@ -88,6 +88,7 @@ export function normaliseItinerary(value: unknown) {
       spots,
       description,
       hotel,
+      ...(textValue(record.hotelCity) ? { hotelCity: textValue(record.hotelCity) } : {}),
       ...(record.hotelRequirement && typeof record.hotelRequirement === "object" && !Array.isArray(record.hotelRequirement) ? { hotelRequirement: structuredClone(record.hotelRequirement) } : {}),
       ...(hotelCandidates.length ? { hotelCandidates } : {}),
       meals: meals.summary,

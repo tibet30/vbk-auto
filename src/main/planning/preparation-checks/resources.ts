@@ -1,3 +1,4 @@
+import { usesPlatformHotelRules, validPlatformHotelRules, platformHotelStayGroups, PLATFORM_HOTEL_DESCRIPTION } from "../../../shared/platform-hotel-rules.js";
 import type { PreparationGap } from "../../../shared/contracts-preparation.js";
 import { needsItineraryHotelCandidates } from "../../../shared/itinerary-hotel.js";
 import { productNeedsVehicleResource } from "../../../shared/product-form.js";
@@ -14,7 +15,18 @@ export function resourceGaps(product: Record<string, unknown>): PreparationGap[]
   const hotelDiamond = hotelDiamondFromTier(operations?.hotelTier);
   const nights = Number(basic?.nights);
   const itinerary = asArray(product.itinerary) ?? [];
+  if (usesPlatformHotelRules(product)) {
+    if (itinerary.some((day: any, index) => needsItineraryHotelCandidates(day, index, nights))) {
+      let detail = validPlatformHotelRules(operations?.hotelRules) ? "" : "酒店规则缺失或无效：必须自动匹配三钻、四钻、五钻";
+      try { platformHotelStayGroups(product); } catch (error) { detail ||= String(error); }
+      if (itinerary.some((day: any, index) => needsItineraryHotelCandidates(day, index, nights)
+        && (day.hotel !== PLATFORM_HOTEL_DESCRIPTION || !day.hotelCity || day.hotelCandidates !== undefined || day.hotelRequirement !== undefined)))
+        detail ||= "住宿安排未转换为平台酒店规则或缺少实际住宿城市";
+      if (detail) gaps.push({ code: "hotel", label: "平台酒店规则", detail, stage: "completion", node: "hotelResolution" });
+    }
+  }
   for (const [index, day] of itinerary.entries()) {
+    if (usesPlatformHotelRules(product)) break;
     const lodgingDay = asObject(day);
     if (!lodgingDay || !needsItineraryHotelCandidates(lodgingDay, index, nights)) continue;
     const candidates = asArray(lodgingDay.hotelCandidates) ?? [];

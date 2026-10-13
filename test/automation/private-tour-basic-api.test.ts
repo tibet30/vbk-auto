@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ensureBasicInfoApi } from "../../src/main/automation/ctrip/basic-info/api.js";
 
-function client(readbackGrade = "F") {
+function client(readbackGrade = "T") {
   const calls: any[] = [];
   let saved: any;
-  const source = { baseInfo: { productId: 1, vendorId: 1, isAutoCalculateProductLevel: "T" }, bookingControls: { forChild: "T", localInfoID: 3, vendorComplainContactId: 11, vendorBookingContactId: 12, vendorBookingEmergencyContactId: 13 }, meta: { nameJoinRuleDto: { pattern: "私家团" } } };
+  const source = { baseInfo: { productId: 1, vendorId: 1, isAutoCalculateProductLevel: "F" }, bookingControls: { forChild: "T", localInfoID: 3, vendorComplainContactId: 11, vendorBookingContactId: 12, vendorBookingEmergencyContactId: 13 }, meta: { nameJoinRuleDto: { pattern: "私家团" } } };
   const page = { nativeOnly: true, vbkSessionFetch: async (request: any) => {
     calls.push(request);
     const path = request.endpoint.split("/").at(-1);
@@ -30,11 +30,11 @@ const product = { sales: { productForm: "privateTour" }, basicInfo: { days: 2, n
   ] }] };
 const butler = { contactCardId: 6, providerId: 1, displayName: "管家" } as any;
 
-test("私家团基本信息实际保存链：自动打钻否，主标题收费景点，副标题固定服务", async () => {
+test("私家团基本信息实际保存链：自动打钻是，主标题收费景点，副标题固定服务", async () => {
   const c = client();
   await ensureBasicInfoApi(c.page as any, product, "1", butler, "400-test", { skipProductLine: true });
   const saved = c.saved();
-  assert.equal(saved.baseInfo.isAutoCalculateProductLevel, "F");
+  assert.equal(saved.baseInfo.isAutoCalculateProductLevel, "T");
   assert.equal(saved.baseInfo.mainName, "晋祠2日1晚私家团");
   assert.deepEqual(saved.nameAreaRules.map((rule: any) => rule.pOIScenicSpotID), ["2"]);
   assert.match(saved.baseInfo.subName, /^一单一团\+24h线上管家/);
@@ -42,8 +42,8 @@ test("私家团基本信息实际保存链：自动打钻否，主标题收费�
   assert.equal(c.calls.filter(call => call.endpoint.endsWith("getProductBaseInfo")).length, 2);
 });
 
-test("平台回读自动打钻仍为是时拒绝报成功", async () => {
-  const c = client("T");
+test("平台回读自动打钻仍为否时拒绝报成功", async () => {
+  const c = client("F");
   await assert.rejects(ensureBasicInfoApi(c.page as any, product, "1", butler, "400-test", { skipProductLine: true }), /回读/);
 });
 
@@ -63,6 +63,6 @@ test("平台静默清理乘号：保存前规范化分隔符，远端精确回�
 });
 
 test("基本信息失败提供字段差异，不能只返回无法定位的笼统错误", async () => {
-  const c = client("T");
-  await assert.rejects(ensureBasicInfoApi(c.page as any, product, "1", butler, "400-test", { skipProductLine: true }), /isAutoCalculateProductLevel（期望 "F"，实际 "T"）/);
+  const c = client("F");
+  await assert.rejects(ensureBasicInfoApi(c.page as any, product, "1", butler, "400-test", { skipProductLine: true }), /isAutoCalculateProductLevel（期望 "T"，实际 "F"）/);
 });

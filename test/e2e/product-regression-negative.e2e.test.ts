@@ -27,7 +27,11 @@ for (const key of CASE_KEYS) for (const fault of faults) {
     const model = loadGenerationReplay(key);
     const options: RegressionFaults = { model };
     if (fault === 'missing_model') delete model.stageResponses.commercial;
-    if (fault === 'missing_resource') provider.lists = [];
+    if (fault === 'missing_resource') options.corruptSaved = product => {
+      if (product.operations?.hotelMatchingMode !== 'rules') return;
+      delete product.operations.hotelRules;
+      return product;
+    };
     if (fault === 'wrong_poi_match') {
       const rows = provider.native.filter(row => row.endpoint.endsWith('/suggestPoi'));
       for (const row of rows) {
@@ -48,7 +52,7 @@ for (const key of CASE_KEYS) for (const fault of faults) {
     }
     if (fault === 'corrupted_saved_match') options.corruptSaved = product => {
       const days = product.itinerary as Json[];
-      if (!days.some(day => day.hotelCandidates?.length)) return;
+      if (!days.some(day => day.hotelCity)) return;
       const spot = days.flatMap(day => day.spots ?? []).find(spot => spot.poiId);
       if (!spot) return;
       spot.poiId = null; spot.poiName = null;
@@ -56,7 +60,7 @@ for (const key of CASE_KEYS) for (const fault of faults) {
     };
     const result = await runFullPreparation(db, fixture, root, provider, options);
     if (fault === 'missing_model') assert.ok(result.modelMisses.includes('stage:submit_commercial_module'));
-    if (fault === 'missing_resource') assert.ok(result.misses.some(query => query.startsWith('hotel-list:')));
+    if (fault === 'missing_resource') { assert.ok(result.corruptions > 0); assert.equal(result.saved.product.operations?.hotelRules, undefined); }
     if (fault === 'wrong_poi_match') {
       assert.ok(result.queries.some(query => query.startsWith('poi:')));
       assert.deepEqual(result.misses, [], '地域破坏不能靠缺少查询回放造成失败');

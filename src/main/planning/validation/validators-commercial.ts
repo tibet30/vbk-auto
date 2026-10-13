@@ -9,6 +9,7 @@
  */
 
 import { HOTEL_TIER_VALUES } from "../../../shared/hotel-tiers.js";
+import { usesPlatformHotelRules, validPlatformHotelRules, platformHotelRulesRequired } from "../../../shared/platform-hotel-rules.js";
 import type { ModuleOutcome } from "../../../shared/contracts-planning.js";
 import { asArray, asRecord, textValue } from "./helpers.js";
 
@@ -88,7 +89,9 @@ export function validateSkeleton(product: Record<string, unknown>, accepted: boo
   if (!operations) return { module: "skeleton", status: "rejected", reason: "operations 缺失" };
   const reasons: string[] = [];
   const hotelTier = textValue(operations.hotelTier);
-  if (!(HOTEL_TIER_VALUES as readonly string[]).includes(hotelTier)) reasons.push("operations.hotelTier 不在白名单");
+  if (usesPlatformHotelRules(product)) {
+    if (platformHotelRulesRequired(product) && !validPlatformHotelRules(operations.hotelRules)) reasons.push("酒店规则缺失或无效");
+  } else if (!(HOTEL_TIER_VALUES as readonly string[]).includes(hotelTier)) reasons.push("operations.hotelTier 不在白名单");
   if (textValue(operations.pickupCity).length === 0) reasons.push("operations.pickupCity 缺失");
   if (!["charter", "shared", "none"].includes(textValue(operations.transport))) reasons.push("operations.transport 不合法");
   if (!reasons.length) return null;

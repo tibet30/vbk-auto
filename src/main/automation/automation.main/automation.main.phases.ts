@@ -28,9 +28,8 @@ export function draftPhasesFor(product: {
   sales: {productForm: ReturnType<typeof parseProduct>['sales']['productForm']};
 }) {
   // Whether a hotel phase is required is a property of the itinerary, not of
-  // when its Ctrip candidates happened to be persisted. Candidate completeness
-  // is an approval/evaluator gate; the hotelResource handler still verifies
-  // the durable candidate contract before writing VBK.
+  // when its Ctrip candidates happened to be persisted. Only lodging cities, nights and platform automatic rules are saved;
+  // no hotel-list query or specified hotel binding is required.
   const needsHotel = product.itinerary.some((day) => hasItineraryHotelStay(day.hotel));
   const phases = ["basic", "presentation", "itinerary", "package"];
   if (product.commercial?.pricing || product.commercial?.inventory) phases.push("pricingInventory");

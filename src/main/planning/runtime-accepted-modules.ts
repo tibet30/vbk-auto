@@ -4,13 +4,14 @@ import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrang
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { hasValidVbkRecommendationLength } from "./vbk-recommendation-length.js";
 import type { PlanningModule } from "../../shared/contracts-planning.js";
+import { usesPlatformHotelRules, validPlatformHotelRules, platformHotelRulesRequired } from "../../shared/platform-hotel-rules.js";
 
 /**
  * 从持久化产品 JSON 反推「哪些模块已经落地」。
  *
  *  这是「真」的唯一来源；orchestrator 不依赖内存 accumulator。
  *
- *  - skeleton：operations.hotelTier / pickupCity / transport / mealsIncluded 都在；
+ *  - skeleton：平台酒店规则或旧 hotelTier / pickupCity / transport 都在；
  *  - presentation：对象存在 + recommendation + recommendations.length === 3 + 至少
  *    一条 category 命中白名单；
  *  - itinerary：数组非空 + 长度 = basicInfo.days + 每条 day 字段是 1..n 顺序递增
@@ -32,7 +33,7 @@ export function detectAcceptedModulesFromProduct(product: Record<string, unknown
   if (
     operations
     && typeof operations === "object"
-    && operations.hotelTier
+    && (usesPlatformHotelRules(product) ? !platformHotelRulesRequired(product) || validPlatformHotelRules(operations.hotelRules) : operations.hotelTier)
     && operations.pickupCity
     && operations.transport
   ) {

@@ -1,3 +1,4 @@
+import { normalisePlatformHotelProduct } from "../../../../shared/platform-hotel-rules.js";
 import { buildTimeline, type TimelineItem, type ItineraryActivity, type ItineraryDay } from "./review-summary-itinerary-timeline";
 export type { ItineraryActivity, ItineraryDay } from "./review-summary-itinerary-timeline";
 import { itinerarySupportingArrangements } from "../../../../shared/itinerary-support-arrangements.js";
@@ -17,7 +18,6 @@ import {
 import { useState } from "react";
 import type { ProductReadiness } from "../../../../shared/contracts-types.js";
 import { itineraryDayHasBorderPermitTrigger } from "../../../../shared/border-permit.js";
-import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
 import { readinessIssueSemanticKey } from "../../../../shared/readiness-issues.js";
 import { stripDayPrefix } from "../../helpers";
 import { api } from "../../helpers";
@@ -112,15 +112,13 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
       {renderHeader(`共 ${days.length} 天`, "itinerary-day-body")}
       {removal.notice ? <p className={removalStyles.notice} role="status">{removal.notice}</p> : null}
       <ol className={styles.dayList} id="itinerary-day-body">
-        {days.map((day, index) => {
+        {(normalisePlatformHotelProduct({ itinerary: days }).itinerary as ItineraryDay[]).map((day, index) => {
           const expanded = expandedDayIndexes.has(index);
           const title = stripDayPrefix(day.title || "", index);
           const timeline = buildTimeline(day, index);
           const visitCount = timeline.filter((t) => t.type === "visit").length;
           const activityCount = timeline.filter((t) => t.type === "free" || t.type === "other").length;
           const arrangements = itinerarySupportingArrangements(day);
-          const hotel = day.hotel?.trim() ?? "";
-          const hasHotelStay = hasItineraryHotelStay(hotel);
           const showBorderPermitHint = Boolean(borderPermitIssue) && itineraryDayHasBorderPermitTrigger(day);
           return (
             <li key={index} className={styles.dayItem} data-expanded={expanded}>
@@ -139,7 +137,6 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                     {visitCount > 0 ? `${visitCount} 个景点` : arrangements.some((item) => item.type === "transport") ? "接送安排" : "当日安排"}
                     {activityCount > 0 ? ` · ${activityCount} 项活动` : ""}
                     {day.meals?.trim() ? " · 含餐食说明" : ""}
-                    {hasHotelStay ? " · 含住宿" : ""}
                   </span>
                 </span>
                 <span className={styles.dayChevron} aria-hidden="true">
@@ -235,18 +232,6 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
                       </div>
                     </div>
                   ))}
-                  {hotel && (
-                    <div className={styles.hotelCard}>
-                      <span className={styles.hotelIcon}><Hotel size={12} aria-hidden="true" /></span>
-                      <div className={styles.hotelBody}>
-                        <strong className={styles.hotelTitle}>住宿</strong>
-                        <span className={styles.hotelText}>{hotel}</span>
-                        {day.hotelDescription && day.hotelDescription !== hotel && (
-                          <span className={styles.hotelText}>{day.hotelDescription}</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
                   {showBorderPermitHint && borderPermitIssue && (
                     <div className={styles.permitCard}>
                       <span className={styles.permitIcon}><ShieldAlert size={12} aria-hidden="true" /></span>

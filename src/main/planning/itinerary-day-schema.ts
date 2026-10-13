@@ -35,6 +35,7 @@ export const itineraryDaySchema = z.object({
   }).strict()).optional(),
   description: requiredText,
   hotel: z.string().default(""),
+  hotelCity: z.string().trim().optional(),
   meals: requiredText,
   mealDescriptions: z.array(requiredText).length(3).optional(),
 }).strict().superRefine((day, ctx) => {

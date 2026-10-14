@@ -64,6 +64,7 @@ import {
 import { installLogSink } from "../shared/log-timestamp.js";
 import { createMainEventBroadcasters } from "./main-events.js";
 import { isSafeDevelopmentStartup } from "./development-startup.js";
+import { acquireSingleInstanceLock, applyStartupUserDataDir } from "./startup-data-dir.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const safeDevelopmentStartup = isSafeDevelopmentStartup(isDev);
@@ -71,9 +72,18 @@ applyAppMetadata();
 applyStartupCommandLineSwitches();
 installProcessErrorHandlers();
 
-const userDataDirOverride = process.env.VBK_USER_DATA_DIR?.trim();
-if (userDataDirOverride) {
-  app.setPath("userData", userDataDirOverride);
+// userData 与单实例锁都必须在 app.whenReady() 之前确定：
+// 安装实例与 dev 实例若共用 userData，会争抢同一把锁并共写同一个业务库，
+// 后启动的实例会「窗口一闪即关」。拿不到锁的实例在这里直接退出，不再注册引导。
+const userDataDir = applyStartupUserDataDir(app, process.env, app.isPackaged);
+const gotSingleInstanceLock = acquireSingleInstanceLock(app, () => {
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+});
+if (userDataDir.isolated) {
+  logWarn("[startup] development userData isolated", { userData: userDataDir.directory, override: "VBK_USER_DATA_DIR" });
 }
 
 let window!: BrowserWindow;
@@ -171,6 +181,7 @@ async function openMainWindow(): Promise<void> {
 let configureAutomation: () => void = () => {};
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   applyDevDockIcon(root);
   installApplicationMenu();
   // 启动期清理 Chromium 上一版本遗留的 ServiceWorker / QuotaManager 脏库：
@@ -318,18 +329,6 @@ app.whenReady().then(async () => {
   logError(`${APP_NAME} 启动失败：`, error);
   app.quit();
 });
-
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
-if (!gotSingleInstanceLock) {
-  app.quit();
-} else {
-  app.on("second-instance", () => {
-    if (!window || window.isDestroyed()) return;
-    if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
-  });
-}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

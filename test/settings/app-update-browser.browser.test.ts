@@ -29,7 +29,7 @@ test("页面弹窗遮挡真实原生 VBK 视图，更新、酒店和重生成确
       const {VbkBrowserViewManager}=require(${JSON.stringify(path.resolve("src/main/infrastructure/vbk-browser-view-manager.ts"))});
       app.setPath('userData',${JSON.stringify(path.join(directory, "user-data"))});
       global.updateBrowserNativeReady=app.whenReady().then(async()=>{
-        const win=new BrowserWindow({width:1200,height:850,webPreferences:{preload:__dirname+'/preload.cjs'}});
+        const win=new BrowserWindow({width:1200,height:850,show:false,webPreferences:{preload:__dirname+'/preload.cjs'}});
         const blockExternal=(details,callback)=>callback({cancel:!details.url.startsWith('http://127.0.0.1:')&&!details.url.startsWith('ws://127.0.0.1:')&&!details.url.startsWith('data:')});
         session.defaultSession.webRequest.onBeforeRequest(blockExternal);
         const views=new VbkBrowserViewManager(win,undefined,async()=>{throw Error('No external page')},()=>{throw Error('No blank page navigation')});
@@ -67,6 +67,13 @@ test("页面弹窗遮挡真实原生 VBK 视图，更新、酒店和重生成确
     delete env.ELECTRON_RUN_AS_NODE;
     desktop = await electron.launch({ args: [path.join(directory, "main.cjs")], env });
     await desktop.evaluate(async () => { await (globalThis as any).updateBrowserNativeReady; });
+    // 回归窗口必须保持隐藏：它渲染的是真实 App 外壳，一旦可见就会在开发机桌面
+    // 弹出「App 一闪即关」的假象（历史问题）。capturePage 依赖 paintWhenInitiallyHidden。
+    assert.deepEqual(
+      await desktop.evaluate(async ({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => win.isVisible())),
+      [false],
+      "测试窗口不得可见",
+    );
     const page = desktop.windows().find(page => page.url().startsWith(server.resolvedUrls!.local[0]))!;
     assert.ok(page, "选择应用页面，而不是原生 VBK 子视图");
     const errors: string[] = [];

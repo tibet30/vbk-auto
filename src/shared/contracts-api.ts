@@ -121,7 +121,10 @@ export interface VbkApi {
   };
   research: {
     accept(localProductId: string, taskId: string, note?: string): Promise<void>;
-    refreshIssues(localProductId: string): Promise<{ updated: number; taskIds: string[]; product: ProductDetail; readiness: ProductReadiness }>;
+    refreshIssues(localProductId: string): Promise<{
+      updated: number; taskIds: string[]; confirmed: number; confirmedTaskIds: string[];
+      reopened: number; reopenedTaskIds: string[]; product: ProductDetail; readiness: ProductReadiness;
+    }>;
     resolveVehicleResource(localProductId: string, taskId?: string): Promise<VehicleResourceMatch | undefined>;
     resolveHotelResource(localProductId: string, taskId?: string): Promise<HotelResourceMatch>;
   };
@@ -169,6 +172,10 @@ export interface VbkApi {
     suggestPoiDemo(keyword: string): Promise<unknown>;
   };
   automation: {
+    getItineraryReviewUnlockState(localProductId: string): Promise<import("./itinerary-review-unlock.js").ItineraryReviewUnlockState | null>;
+    prepareItineraryReviewUnlock(localProductId: string): Promise<import("./itinerary-review-unlock.js").ItineraryReviewUnlockPlan>;
+    executeItineraryReviewUnlock(token: string): Promise<import("./itinerary-review-unlock.js").ItineraryReviewUnlockReceipt>;
+    refreshItineraryReviewUnlock(localProductId: string): Promise<import("./itinerary-review-unlock.js").ItineraryReviewUnlockState>;
     prepareHotelDraftRetry(localProductId: string): Promise<import("./hotel-draft-retry.js").HotelDraftRetryPlan>;
     saveHotelDraftRetry(token: string): Promise<import("./hotel-draft-retry.js").HotelDraftRetryResult>;
     refreshHotelDraftState(localProductId: string): Promise<{ product: ProductDetail; readiness: ProductReadiness }>;

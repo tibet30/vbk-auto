@@ -19,6 +19,7 @@ import type { TrafficLineConfig } from "../../../../../shared/contracts-traffic-
 import shared from "../../shared.module.less";
 import layout from "../layout.module.less";
 import styles from "../vbk.module.less";
+import { ItineraryReviewUnlockAction } from "./itinerary-review-unlock-action";
 import { TrafficChildrenAction } from "./traffic-children-action";
 import { StageRetryMenu } from "./stage-retry-menu";
 import type { AppModel } from "../../../app.main.model";
@@ -166,6 +167,11 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
                     <TrafficChildrenAction key={product.id} product={product} disabled={loading || automationActive || !!retryingPhase || !!navigatingSection} />
                     <TrafficLineProgress automation={product.automation} product={product.product} />
                   </> : null}
+                  {section.key === "itinerary" ? <ItineraryReviewUnlockAction
+                    key={`${product.id}:${product.productId ?? ""}:${product.vbkAccount ?? ""}:${product.productJsonVersion ?? 0}`}
+                    product={product}
+                    disabled={loading || automationActive || !!retryingPhase || !!navigatingSection}
+                  /> : null}
                 </div>
               );
             })}
@@ -181,7 +187,7 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
                 <span>{`建议在 VBK 里重试「${advisorHint.displayPhase}」：第 ${advisorHint.currentAttempt} 次（${advisorHint.action === "advising" ? "AI 重试建议" : "手动重试"}）。`}</span>
               </div>
             )}
-            <p className={styles.automationNote}>只保存草稿，不提交审核或发布。</p>
+            <p className={styles.automationNote}>录入授权后自动保存产品、审核行程并解锁标签；产品保持未发布。</p>
           </div>
         </section>
       </div>

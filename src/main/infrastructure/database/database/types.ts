@@ -36,6 +36,8 @@ import type { CachedCtripPoiAvailability } from "../parts/ctrip-poi-availability
 import type { OperationLogRow } from "../parts/operation-log.js";
 import type { ProductListPage } from "../parts/products.js";
 import type { ReplaceProductAndSatisfyResearchTasksOptions } from "../parts/replace-product-with-research-tasks.js";
+import type { ItineraryReviewUnlockState } from "../../../../shared/itinerary-review-unlock.js";
+import type { VerifiedPoiMapping } from "../../../planning/types.js";
 
 export interface VbkDatabasePrototype {
   // settings
@@ -75,6 +77,8 @@ export interface VbkDatabasePrototype {
   addResearchTask(localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">): ReturnType<typeof import("../parts/research-tasks.js").addResearchTask>;
   markResearchAccepted(localProductId: string, taskId: string, note?: string, source?: "vbk" | "web" | "user"): void;
   markResearchTasksSatisfied(localProductId: string, taskIds: readonly string[], note?: string): ReturnType<typeof import("../parts/research-tasks.js").markResearchTasksSatisfied>;
+  confirmVerifiedPoiResearchTasks(localProductId: string, mappings: readonly VerifiedPoiMapping[]): ReturnType<typeof import("../parts/verified-poi-research.js").confirmVerifiedPoiResearchTasks>;
+  reopenAmbiguousAutoConfirmedPoiResearchTasks(localProductId: string): ReturnType<typeof import("../parts/research-tasks.js").reopenAmbiguousAutoConfirmedPoiResearchTasks>;
   reopenKindSupersededPoiResearchTasks(localProductId: string, product: Record<string, unknown>): ReturnType<typeof import("../parts/research-tasks.js").reopenKindSupersededPoiResearchTasks>;
   markResearchTasksSatisfiedByProduct(localProductId: string, product: Record<string, unknown>): ReturnType<typeof import("../parts/research-tasks.js").markResearchTasksSatisfiedByProduct>;
   saveAutomation(localProductId: string, run: AutomationRun): void;
@@ -122,6 +126,8 @@ export interface VbkDatabasePrototype {
   queryOperationLog(query: Parameters<typeof import("../parts/operation-log.js").queryOperationLog>[1]): Array<OperationLogRow>;
   recoverOrphanOperationLog(): number;
   hasColumn(table: string, column: string): boolean;
+  getItineraryReviewUnlockState(localProductId: string): ItineraryReviewUnlockState | undefined;
+  saveItineraryReviewUnlockState(state: ItineraryReviewUnlockState): void;
 }
 
 export interface VbkDatabaseStatics {

@@ -84,6 +84,10 @@ const api: VbkApi = {
     suggestPoiDemo: (keyword: string) => ipcRenderer.invoke("poi:suggestDemo", keyword),
   },
   automation: {
+    getItineraryReviewUnlockState: (id) => ipcRenderer.invoke("automation:getItineraryReviewUnlockState", id),
+    prepareItineraryReviewUnlock: (id) => ipcRenderer.invoke("automation:prepareItineraryReviewUnlock", id),
+    executeItineraryReviewUnlock: (token) => ipcRenderer.invoke("automation:executeItineraryReviewUnlock", token),
+    refreshItineraryReviewUnlock: (id) => ipcRenderer.invoke("automation:refreshItineraryReviewUnlock", id),
     prepareHotelDraftRetry: (id) => ipcRenderer.invoke("automation:prepareHotelDraftRetry", id),
     saveHotelDraftRetry: (token) => ipcRenderer.invoke("automation:saveHotelDraftRetry", token),
     refreshHotelDraftState: (id) => ipcRenderer.invoke("automation:refreshHotelDraftState", id),

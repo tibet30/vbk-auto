@@ -1,3 +1,5 @@
+import type { WizardStageRetryPhase } from "./wizard-stage-retry.js";
+
 export type AgentRunStatus = "queued" | "running" | "waiting_input" | "waiting_approval" | "paused" | "completed" | "failed" | "abandoned";
 export type AgentEventType = "user" | "assistant" | "tool_call" | "tool_result" | "status" | "input_request" | "approval_request" | "approval";
 
@@ -33,9 +35,21 @@ export interface AgentApproval {
   trafficRouteReviewAuthorized?: boolean;
   /** 本次录入是否包含交通子产品；旧授权未记录时保持原范围。 */
   generateTrafficChildren?: boolean;
+  /** 本次普通录入是否明确包含母产品行程审核与菜单解锁。 */
+  itineraryReviewUnlockAuthorized?: boolean;
+  /**
+   * 从 VBK 向导页显式重试单个已保存阶段的窄范围确认。
+   * `alreadyAdvanced` 表示远端菜单已越过该阶段；后续执行只能核验，不能
+   * 重复调用“下一步”接口。
+   */
+  wizardStageRetry?: {
+    phase: WizardStageRetryPhase;
+    alreadyAdvanced: boolean;
+  };
   /** 运营在母产品保存后单独触发子产品录入。 */
   trafficChildrenOnly?: boolean;
 }
+export type { WizardStageRetryPhase } from "./wizard-stage-retry.js";
 export interface AgentRun {
   id: string;
   status: AgentRunStatus;
@@ -94,7 +108,7 @@ export interface AgentDisplaySnapshot extends Omit<AgentSnapshot, "events"> {
   eventCount: number;
 }
 export interface AgentInputResponse { requestId: string; answers: Record<string, string | string[]>; }
-export interface AgentApprovalResponse { approvalId: string; productVersion: string; trafficRouteReviewAuthorized?: boolean; generateTrafficChildren?: boolean; }
+export interface AgentApprovalResponse { approvalId: string; productVersion: string; trafficRouteReviewAuthorized?: boolean; generateTrafficChildren?: boolean; itineraryReviewUnlockAuthorized?: boolean; }
 export interface AgentIllegalKeywordRepairInput {
   content: string;
   keywords: string[];

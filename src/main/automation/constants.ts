@@ -10,8 +10,20 @@
  */
 
 // @ts-nocheck
+const LIST_URL = "https://vbooking.ctrip.com/product/input/productListMerge?from=vbk";
+
+/**
+ * 登录入口必须显式带 backurl 进 accountV2 登录页。
+ *
+ * 未登录（或会话过期）时直接请求列表页，VBK 返回的是携程 500 错误页
+ * 「很抱歉，程序有误，需要重新选择目的地。」而不是 302 到登录页；
+ * 登录页带 backurl，登录成功后会自动回到列表。
+ */
+const LOGIN_URL = `https://vbooking.ctrip.com/ivbk/accountV2/login?backurl=${encodeURIComponent(LIST_URL)}`;
+
 export const URLS = {
-  list: "https://vbooking.ctrip.com/product/input/productListMerge?from=vbk",
+  list: LIST_URL,
+  login: LOGIN_URL,
   createSetup:
     "https://vbooking.ctrip.com/ivbk/vendor/saleControlMerge?producttype=0&from=vbk",
 };

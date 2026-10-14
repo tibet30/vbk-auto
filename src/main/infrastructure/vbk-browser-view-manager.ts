@@ -6,6 +6,7 @@ import type { VbkNavigationPin } from "./vbk-navigation-pin.js";
 import { isPinnedVbkNavigationAllowed } from "./vbk-navigation-pin.js";
 import { clearVbkViewStorage, collectVbkCookies, setVbkCookieOn } from "./vbk-browser-cookies.js";
 import { createVbkRequestPage } from "./vbk-request-page.js";
+import { vbkEntryUrl } from "./vbk-navigation.js";
 import { fetchCurrentUserInfo } from "./current-user.js";
 
 const allowedHosts = new Set(["vbooking.ctrip.com", "ctrip.com", "www.ctrip.com"]);
@@ -48,6 +49,18 @@ export class VbkBrowserViewManager {
   ensureDefaultView(): WebContentsView {
     if (!this.defaultView) this.defaultView = this.createView("persist:vbk");
     return this.defaultView;
+  }
+
+  /**
+   * 本次会话应打开的入口页面：
+   *   - 有已保存账号会话（cookies 已恢复）→ 直接回产品列表；
+   *   - 没有账号会话（首次运行 / 已登出 / 会话过期）→ 显式登录页。
+   *
+   * 未登录时直接请求列表页，VBK 返回的是携程 500 错误页
+   * 「很抱歉，程序有误，需要重新选择目的地。」而不是跳登录页。
+   */
+  entryUrl(): string {
+    return vbkEntryUrl(Boolean(this.sessionStore?.getActiveAccountKey()));
   }
 
   async ensureAccountView(accountKey: string, cookies: SerialisedCookie[]): Promise<WebContentsView> {

@@ -28,7 +28,7 @@ export class VbkBrowserAccounts {
     this.sessionStore?.clearActiveAccountKey();
     const defaultView = this.views.ensureDefaultView();
     this.views.activateView(defaultView);
-    await defaultView.webContents.loadURL(URLS.list);
+    await defaultView.webContents.loadURL(this.views.entryUrl());
   }
 
   async saveCurrentSession(): Promise<SavedLoginAccount | null> {
@@ -72,7 +72,7 @@ export class VbkBrowserAccounts {
     await this.views.clearViewStorage(defaultView);
     this.sessionStore?.clearActiveAccountKey();
     this.views.activateView(defaultView);
-    await defaultView.webContents.loadURL("https://vbooking.ctrip.com/");
+    await defaultView.webContents.loadURL(URLS.login);
   }
 
   async switchAccount(accountKey: string): Promise<void> {

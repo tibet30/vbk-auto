@@ -4,7 +4,7 @@ import type { Page } from "playwright";
 import { logWarn } from "../../shared/log-timestamp.js";
 import { URLS } from "../automation/constants.js";
 import { openExternalUrl } from "./external-url.js";
-import { navigateVbkPage, isExpectedLoginRedirect } from "./vbk-navigation.js";
+import { navigateVbkPage, isExpectedLoginRedirect, isVbkLoginEntryArrival } from "./vbk-navigation.js";
 import { parseCookies } from "./vbk-cookie-serializer.js";
 import { isVbkAuthCookieSummaryComplete, summarizeVbkAuthCookies } from "./vbk-auth-cookies.js";
 import type { VbkNavigationPin } from "./vbk-navigation-pin.js";
@@ -86,7 +86,7 @@ export class VbkBrowser {
     } else {
       const view = this.views.ensureDefaultView();
       this.views.activateView(view);
-      await view.webContents.loadURL(URLS.list);
+      await view.webContents.loadURL(this.views.entryUrl());
     }
     this.setVisible(false);
   }
@@ -125,7 +125,7 @@ export class VbkBrowser {
     const pending = this.initialPageLoads.get(contents.id);
     if (pending) return pending;
     if (!/^(?:about:blank)?$/.test(contents.getURL())) return;
-    const task = navigateVbkPage(contents, URLS.list, { allowRedirect: isExpectedLoginRedirect });
+    const task = navigateVbkPage(contents, this.views.entryUrl(), { allowRedirect: isExpectedLoginRedirect });
     this.initialPageLoads.set(contents.id, task);
     try { await task; } finally { this.initialPageLoads.delete(contents.id); }
   }
@@ -133,7 +133,11 @@ export class VbkBrowser {
   async login(): Promise<void> {
     await this.ensureReadyForAction();
     this.setVisible(true);
-    await navigateVbkPage(this.views.view?.webContents, URLS.list, { allowRedirect: isExpectedLoginRedirect });
+    // 登录按钮必须落到登录页本身：未登录时列表页只会返回携程 500 错误页
+    // （「程序有误，需要重新选择目的地」），不会 302 到登录页。
+    await navigateVbkPage(this.views.view?.webContents, URLS.login, {
+      allowRedirect: isVbkLoginEntryArrival,
+    });
   }
 
   logout(): Promise<void> { return this.accountService.logout(); }

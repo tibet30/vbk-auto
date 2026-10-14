@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -115,6 +116,36 @@ test("上下文注入按条数和预算裁剪", () => {
     assert.equal(context.maxItems, 8);
     assert.ok(context.skipped >= 4);
     assert.ok(context.budgets.usedTokens <= context.budgets.budgetTokens);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test("全新库首次读取维护状态会落地默认行（scheduleMemoryMaintenance 首轮路径）", () => {
+  const { dataPath, db } = tempDb();
+  try {
+    const service = new MemoryService({ db, getOwnerUserId: () => 1001 });
+    // main-runtime.scheduleMemoryMaintenance 的首轮就是无参 settings()，
+    // 此时 memory_maintenance_state 还没有该 owner 的行。
+    const state = service.settings();
+    assert.equal(state.ownerUserId, 1001);
+    assert.equal(state.autoCapture, true);
+    assert.equal(state.pendingCount, 0);
+    assert.equal(state.lastSuccessAt, null);
+
+    // 独立连接回读，确认默认行真的写入了 SQLite，而不是只返回 fallback。
+    const raw = new Database(path.join(dataPath, "vbk-desktop.sqlite"), { readonly: true });
+    try {
+      const row = raw
+        .prepare("SELECT owner_user_id, auto_capture, pending_count FROM memory_maintenance_state WHERE owner_user_id=?")
+        .get(1001) as { owner_user_id: number; auto_capture: number; pending_count: number } | undefined;
+      assert.ok(row, "首次读取后必须存在维护状态行");
+      assert.equal(row.owner_user_id, 1001);
+      assert.equal(row.auto_capture, 1);
+      assert.equal(row.pending_count, 0);
+    } finally {
+      raw.close();
+    }
   } finally {
     fs.rmSync(dataPath, { recursive: true, force: true });
   }

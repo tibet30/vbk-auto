@@ -24,6 +24,19 @@
  */
 
 import type { Event, WebContents } from "electron";
+import { URLS } from "../automation/constants.js";
+
+/**
+ * 本次会话应打开的入口页面：
+ *   - 有已保存账号会话（cookies 已恢复）→ 直接回产品列表；
+ *   - 没有账号会话（首次运行 / 已登出 / 会话过期）→ 显式登录页。
+ *
+ * 未登录时直接请求列表页，VBK 返回的是携程 500 错误页
+ * 「很抱歉，程序有误，需要重新选择目的地。」而不是 302 到登录页。
+ */
+export function vbkEntryUrl(hasSavedAccountSession: boolean): string {
+  return hasSavedAccountSession ? URLS.list : URLS.login;
+}
 
 /** 与 vbk-browser.ts 中的白名单保持一致：仅允许携程域。 */
 const ALLOWED_HOSTS = new Set([
@@ -68,17 +81,37 @@ export interface NavigateVbkPageOptions {
   allowRedirect?: (target: string, current: string) => boolean;
 }
 
-function isExpectedLoginRedirect(target: string, current: string): boolean {
-  let parsedCurrent: URL;
+/**
+ * 当前地址是否就是 VBK 登录页（忽略 backurl 等查询参数差异）。
+ * 登录入口自己加载登录页时，服务端可能规范化 / 补参数，抵达登录页即算成功。
+ */
+export function isVbkLoginPage(current: string): boolean {
+  let parsed: URL;
   try {
-    parsedCurrent = new URL(current);
+    parsed = new URL(current);
   } catch {
     return false;
   }
-  if (parsedCurrent.hostname !== "vbooking.ctrip.com") return false;
-  if (!/^\/ivbk\/accountV2\/login$/i.test(parsedCurrent.pathname)) return false;
-  const backurl = parsedCurrent.searchParams.get("backurl") ?? "";
+  if (parsed.hostname !== "vbooking.ctrip.com") return false;
+  return /^\/ivbk\/accountV2\/login$/i.test(parsed.pathname);
+}
+
+function isExpectedLoginRedirect(target: string, current: string): boolean {
+  if (!isVbkLoginPage(current)) return false;
+  const backurl = new URL(current).searchParams.get("backurl") ?? "";
   return urlsMatch(target, backurl);
+}
+
+/**
+ * 登录入口导航的「抵达」判定。以下三种都算成功，不算导航失败：
+ *   - 停在登录页本身（服务端可能补齐 / 规范化 backurl 参数）；
+ *   - 服务端把登录页 302 回 backurl（即产品列表）；
+ *   - 已有会话时登录页直接跳回产品列表。
+ */
+export function isVbkLoginEntryArrival(target: string, current: string): boolean {
+  return isExpectedLoginRedirect(target, current)
+    || isVbkLoginPage(current)
+    || urlsMatch(URLS.list, current);
 }
 
 /**

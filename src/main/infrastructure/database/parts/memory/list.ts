@@ -7,6 +7,7 @@
 import type Database from "better-sqlite3";
 import type { MemoryFilter, UserMemory } from "../../../../../shared/contracts.js";
 import { toUserMemory, type MaintenanceRow, type MemoryRow } from "./types.js";
+import { createMemoryState } from "./state.js";
 import { now } from "../types.js";
 
 export function listUserMemories(
@@ -106,6 +107,3 @@ export function getMemoryMaintenanceState(
   };
 }
 
-// Forward declaration to avoid circular import between list.ts and state.ts.
-// 实际创建走 ./state.ts 的 createMemoryState。
-declare function createMemoryState(db: Database.Database, ownerUserId: number): void;

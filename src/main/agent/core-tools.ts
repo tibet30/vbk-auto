@@ -9,6 +9,7 @@ import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js
 import { handleAgentInputRequest } from "./core-input-request.js";
 import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 import { classifyPlatformFailure } from "../application/platform-operation-service.js";
+import { externalAgentActionsBlocked, pauseSafeStartupExternalAction, SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-guard.js";
 
 export type CallOutcome = "continue" | "waiting" | "stale";
 
@@ -91,6 +92,9 @@ export class AgentToolRunner {
     }
 
     const requiresApproval = tool.requiresApproval ?? !!tool.write;
+    if (requiresApproval && externalAgentActionsBlocked(this.deps.externalAgentActionsEnabled)) {
+      return this.pauseForSafeStartupExternalAction(id, call, token);
+    }
     const identity = requiresApproval
       ? await this.deps.accountFor(id)
       : {
@@ -217,6 +221,9 @@ export class AgentToolRunner {
   }
 
   private async requestApproval(id: string, call: AgentToolCall, token: TurnToken): Promise<CallOutcome> {
+    if (externalAgentActionsBlocked(this.deps.externalAgentActionsEnabled)) {
+      return this.pauseForSafeStartupExternalAction(id, call, token);
+    }
     let scope = cleanList(call.arguments.scope);
     const summary = typeof call.arguments.summary === "string" ? call.arguments.summary.trim() : "";
     if (!scope.length || !summary) {
@@ -284,6 +291,18 @@ export class AgentToolRunner {
     snapshot = this.snapshots.load(id);
     if (!this.snapshots.current(snapshot, token)) return "stale";
     this.snapshots.createApproval(snapshot, scope, summary, identity, call.id, token.runId);
+    this.snapshots.save(snapshot);
+    return "waiting";
+  }
+
+  private pauseForSafeStartupExternalAction(id: string, call: AgentToolCall, token: TurnToken): CallOutcome {
+    const snapshot = this.snapshots.load(id);
+    if (!this.snapshots.current(snapshot, token)) return "stale";
+    this.snapshots.result(snapshot, call.id, SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON, {
+      safeStartupExternalActionBlocked: true,
+      externalAction: call.name,
+    }, token.runId);
+    pauseSafeStartupExternalAction(snapshot, (current, reason) => this.snapshots.pause(current, reason));
     this.snapshots.save(snapshot);
     return "waiting";
   }

@@ -26,7 +26,12 @@ export class VbkBrowser {
   private readonly accountService: VbkBrowserAccounts;
   private readonly pageDriver: VbkBrowserPageDriver;
 
-  constructor(window: BrowserWindow, debuggingPort: string, sessionStore?: LoginSessionStore) {
+  constructor(
+    window: BrowserWindow,
+    debuggingPort: string,
+    sessionStore?: LoginSessionStore,
+    private readonly initialiseEnabled = true,
+  ) {
     this.views = new VbkBrowserViewManager(
       window,
       sessionStore,
@@ -49,6 +54,12 @@ export class VbkBrowser {
   }
 
   initialise(): Promise<void> {
+    if (!this.initialiseEnabled) {
+      const message = "安全开发启动已禁用 VBK 连接；请以普通模式重启后再操作平台。";
+      this.initialiseState = "failed";
+      this.initialiseError = message;
+      return Promise.reject(new Error(message));
+    }
     if (this.initialisePromise) return this.initialisePromise;
     this.initialiseState = "initialising";
     this.initialiseError = undefined;

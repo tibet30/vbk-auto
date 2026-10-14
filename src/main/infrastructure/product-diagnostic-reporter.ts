@@ -10,7 +10,7 @@ import { buildProductUsageReport } from "../application/product-usage-builder.js
 export function createProductDiagnosticReporter(args: {
   db: VbkDatabase; store: AppAuthStore; environment(): DiagnosticEnvironment;
   fetchImpl?: typeof fetch; baseUrl?: string;
-  now?: () => number;
+  now?: () => number; autoFlush?: boolean;
 }) {
   let working: Promise<void> | undefined;
   const now = args.now ?? Date.now;
@@ -75,7 +75,7 @@ export function createProductDiagnosticReporter(args: {
         }
         const usage = buildProductUsageReport(product, args.environment(), snapshot);
         if (usage) args.db.enqueueDiagnostic(owner, `usage:${usage.reportId}`, usage);
-        void flush();
+        if (args.autoFlush !== false) void flush();
       } catch {
         logWarn("[product-diagnostics] collection deferred; local product remains saved");
       }

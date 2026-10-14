@@ -8,6 +8,7 @@ import { canResumeLocalPreparation } from "../core-preparation-resume.js";
 import { reopenChangedApproval } from "./changed-approval.js";
 import type { AgentSnapshot } from "../../../shared/contracts.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
+import { externalAgentActionsBlocked, pauseSafeStartupExternalAction } from "../safe-startup-agent-guard.js";
 
 export async function pauseCommand(core: AgentCore, id: string): Promise<AgentSnapshot> {
   const c = asCoreInternals(core);
@@ -37,7 +38,9 @@ export async function resumeCommand(core: AgentCore, id: string): Promise<AgentS
     const openRetryWindow = snapshot.run.status === "paused";
     if (snapshot.pendingInput) { c.waiting(snapshot, "waiting_input"); return c.save(snapshot); }
     if (snapshot.pendingApproval) {
-      const blocker = await c.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
+      const blocker = await c.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope, {
+        wizardStageRetry: snapshot.pendingApproval.wizardStageRetry?.phase,
+      });
       snapshot = c.load(id);
       if (!snapshot.pendingApproval) return snapshot;
       if (!blocker) {
@@ -79,6 +82,11 @@ export async function resumeCommand(core: AgentCore, id: string): Promise<AgentS
     c.running(snapshot);
     const saved = c.save(snapshot);
     const approval = c.snapshots.validApproval(saved);
+    if (approval && c.handoffs.isDeterministic(approval)
+      && externalAgentActionsBlocked(c.deps.externalAgentActionsEnabled)) {
+      pauseSafeStartupExternalAction(saved, (current, reason) => c.pauseRun(current, reason));
+      return c.save(saved);
+    }
     if (approval && c.handoffs.isDeterministic(approval)) {
       // Unchanged phase B stays deterministic; changed plans need fresh approval.
       if (!await c.handoffs.refreshFingerprint(id, approval)) {

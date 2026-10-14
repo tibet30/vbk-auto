@@ -1,6 +1,7 @@
 import type { AgentApproval, AgentSnapshot } from "../../shared/contracts.js";
 import type { AgentSnapshotManager } from "./core-snapshot.js";
 import type { AgentCoreDependencies } from "./types.js";
+import { externalAgentActionsBlocked } from "./safe-startup-agent-guard.js";
 
 type Command = <T>(id: string, operation: () => Promise<T>) => Promise<T>;
 
@@ -23,6 +24,7 @@ export class AgentHandoff {
   }
 
   tryStart(id: string, approval: AgentApproval): boolean {
+    if (externalAgentActionsBlocked(this.deps.externalAgentActionsEnabled)) return false;
     if (!this.isDeterministic(approval)) return false;
     if (this.ids.has(id)) return true;
     const accepted = this.deps.handoffApprovedWorkflow?.(id, approval) === true;
@@ -41,6 +43,14 @@ export class AgentHandoff {
         || !snapshot.run || this.snapshots.terminal(snapshot.run.status)) return snapshot;
       if (approval.productVersion !== identity.productVersion) {
         this.snapshots.pause(snapshot, "方案已变化，请重新确认后录入。");
+        return this.snapshots.save(snapshot);
+      }
+      if (approval.wizardStageRetry) {
+        this.snapshots.event(snapshot, "status", `已按本次授权完成${approval.wizardStageRetry.phase === "basic" ? "产品信息" : "产品图文"}官方下一步并回读菜单。`, {
+          deterministicWorkflow: true,
+          wizardStageRetry: approval.wizardStageRetry,
+        });
+        this.snapshots.finish(snapshot, true);
         return this.snapshots.save(snapshot);
       }
       if (this.deps.finishVerified) {

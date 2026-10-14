@@ -8,6 +8,7 @@ import { cleanList, nativeToolSchemas } from "./core-validation.js";
 import { formatToolCallPreamble } from "./tool-call-preamble.js";
 import { nextPreparationLoopDecision } from "./core-preparation.js";
 import type { AgentCoreDependencies, AgentModelMessage, AgentToolCall } from "./types.js";
+import { externalAgentActionsBlocked, pauseSafeStartupExternalAction } from "./safe-startup-agent-guard.js";
 
 /** Model-turn scheduler: tool batches, completion gate, and round limit. */
 export class AgentTurnLoop {
@@ -253,6 +254,11 @@ export class AgentTurnLoop {
     if (!this.snapshots.current(snapshot, token)) return;
     if (gate.verified) { this.snapshots.finish(snapshot, true); this.snapshots.save(snapshot); return; }
     if (gate.finalApproval) {
+      if (externalAgentActionsBlocked(this.deps.externalAgentActionsEnabled)) {
+        pauseSafeStartupExternalAction(snapshot, (current, reason) => this.snapshots.pause(current, reason));
+        this.snapshots.save(snapshot);
+        return;
+      }
       const identity = await this.deps.accountFor(id);
       snapshot = this.snapshots.load(id);
       if (!this.snapshots.current(snapshot, token)) return;

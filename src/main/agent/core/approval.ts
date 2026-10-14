@@ -14,13 +14,22 @@ import type {
 } from "../../../shared/contracts.js";
 import type { NoProgressBlocker } from "../core-snapshot.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
+import { ITINERARY_REVIEW_UNLOCK_SCOPE } from "../../../shared/itinerary-review-approval.js";
+import { externalAgentActionsBlocked, pauseSafeStartupExternalAction } from "../safe-startup-agent-guard.js";
 
 export async function approveCommand(core: AgentCore, id: string, response: AgentApprovalResponse): Promise<AgentSnapshot> {
   const c = asCoreInternals(core);
   return c.command(id, async () => {
-    const pending = c.load(id).pendingApproval;
+    const initial = c.load(id);
+    const pending = initial.pendingApproval;
     if (!pending || pending.id !== response.approvalId || pending.productVersion !== response.productVersion) return c.load(id);
-    const precondition = await c.deps.approvalPrecondition?.(id, pending.scope);
+    if (externalAgentActionsBlocked(c.deps.externalAgentActionsEnabled)) {
+      pauseSafeStartupExternalAction(initial, (snapshot, reason) => c.pauseRun(snapshot, reason));
+      return c.save(initial);
+    }
+    const precondition = await c.deps.approvalPrecondition?.(id, pending.scope, {
+      wizardStageRetry: pending.wizardStageRetry?.phase,
+    });
     const identity = precondition ? undefined : await c.deps.accountFor(id);
     const snapshot = c.load(id);
     const approval = snapshot.pendingApproval;
@@ -41,6 +50,9 @@ export async function approveCommand(core: AgentCore, id: string, response: Agen
       approval.status = "approved";
       approval.generateTrafficChildren = response.generateTrafficChildren === true;
       approval.trafficRouteReviewAuthorized = approval.generateTrafficChildren && response.trafficRouteReviewAuthorized === true;
+      // A fresh full-scope confirmation includes automatic menu unlock; old draft scopes never do.
+      approval.itineraryReviewUnlockAuthorized = approval.scope.includes(ITINERARY_REVIEW_UNLOCK_SCOPE)
+        && response.itineraryReviewUnlockAuthorized !== false;
       granted = approval;
       snapshot.pendingApproval = undefined;
       c.event(snapshot, "approval", "用户已授权", { approval });

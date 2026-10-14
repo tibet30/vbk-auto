@@ -17,6 +17,8 @@ interface CreateMainWindowArgs {
   cookieStore: LocalVbkCookieStore;
   root: string;
   isDev: boolean;
+  /** Explicit dev-only safe startup defers all provider page traffic. */
+  initialiseVbkBrowser?: boolean;
   debuggingPort: string;
   getSettings: () => Settings;
   aiService: (snapshot?: Settings) => Promise<MiniMaxService>;
@@ -103,7 +105,7 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
     getActiveAccountKey: () => args.db.getSetting("vbkActiveAccountKey")?.value,
     setActiveAccountKey: (key) => args.db.setSetting("vbkActiveAccountKey", key),
     clearActiveAccountKey: () => args.db.deleteSetting("vbkActiveAccountKey"),
-  });
+  }, args.initialiseVbkBrowser !== false);
   const automation = new DraftAutomation(
     args.db,
     browser,
@@ -149,17 +151,19 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
   const rendererReady = args.isDev
     ? window.loadURL(devRendererUrl)
     : window.loadFile(path.join(args.root, "dist", "index.html"));
-  const browserReady = browser.initialise();
-  void Promise.all([rendererReady, browserReady])
-    .then(() => browser.waitUntilReady())
-    .then((ready) => {
-      if (ready) safeRendererSend(window, "vbk:page-ready");
-    })
-    .catch((error) => {
-      logWarn("[startup] VBK browser initialisation failed; local workspace remains available", {
-        message: error instanceof Error ? error.message : String(error),
+  if (args.initialiseVbkBrowser !== false) {
+    const browserReady = browser.initialise();
+    void Promise.all([rendererReady, browserReady])
+      .then(() => browser.waitUntilReady())
+      .then((ready) => {
+        if (ready) safeRendererSend(window, "vbk:page-ready");
+      })
+      .catch((error) => {
+        logWarn("[startup] VBK browser initialisation failed; local workspace remains available", {
+          message: error instanceof Error ? error.message : String(error),
+        });
       });
-    });
+  }
   await rendererReady;
   return services;
 }

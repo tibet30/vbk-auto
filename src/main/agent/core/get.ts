@@ -10,13 +10,46 @@
 import { recoverPrematureCompletion } from "../core-completion-recovery.js";
 import { refreshPendingInput } from "../core-pending-input.js";
 import { hasSyntheticNoopApproval } from "../core-snapshot.js";
-import type { AgentSnapshot } from "../../../shared/contracts.js";
+import {
+  externalAgentActionsBlocked,
+  isRecoverableSafeStartupIdentityFailure,
+  SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON,
+} from "../safe-startup-agent-guard.js";
+import type { AgentApproval, AgentSnapshot } from "../../../shared/contracts.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
+
+function invalidateApprovalsForSafeStartupRecovery(snapshot: AgentSnapshot): void {
+  snapshot.pendingApproval = undefined;
+  for (const event of snapshot.events) {
+    const approval = event.data?.approval as AgentApproval | undefined;
+    if (!approval || !["approved", "pending"].includes(approval.status)) continue;
+    event.data = {
+      ...event.data,
+      approval: { ...approval, status: "invalidated" },
+      safeStartupRequiresNewApproval: true,
+    };
+  }
+}
 
 export async function getSnapshot(core: AgentCore, id: string): Promise<AgentSnapshot> {
   const c = asCoreInternals(core);
   return c.command(id, async () => {
     const snapshot = c.load(id);
+    if (externalAgentActionsBlocked(c.deps.externalAgentActionsEnabled)
+      && c.deps.safeStartupLocalPreparationReady?.(id) === true
+      && isRecoverableSafeStartupIdentityFailure(snapshot)) {
+      invalidateApprovalsForSafeStartupRecovery(snapshot);
+      snapshot.run!.error = undefined;
+      c.pauseRun(snapshot, SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON);
+      const status = snapshot.events.at(-1);
+      if (status?.type === "status") status.data = {
+        ...status.data,
+        safeStartupIdentityRecovery: true,
+        safeStartupRequiresNewApproval: true,
+        preDispatchIdentityFailure: true,
+      };
+      return c.save(snapshot);
+    }
     if (snapshot.pendingApproval?.status === 'invalidated') {
       c.cancelPendingInteraction(snapshot, '历史最终确认已失效，请按当前方案重新确认。');
     }
@@ -37,7 +70,9 @@ export async function getSnapshot(core: AgentCore, id: string): Promise<AgentSna
       return c.save(snapshot);
     }
     if (snapshot.pendingApproval?.status === "pending") {
-      const blocker = await c.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
+      const blocker = await c.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope, {
+        wizardStageRetry: snapshot.pendingApproval.wizardStageRetry?.phase,
+      });
       if (blocker) {
         c.cancelPendingInteraction(snapshot, `最终确认已失效：${blocker}`);
         if (snapshot.run && !c.terminal(snapshot.run.status)) {

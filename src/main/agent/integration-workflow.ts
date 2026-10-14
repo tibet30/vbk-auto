@@ -5,6 +5,7 @@ import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { isCoverHandoffReady } from '../planning/preparation-completion.js';
 import { trafficResourceStatus } from '../../shared/traffic-resource-status.js';
 import type { TrafficLineConfig } from '../../shared/contracts-traffic-line.js';
+import { ITINERARY_REVIEW_UNLOCK_SCOPE } from '../../shared/itinerary-review-approval.js';
 
 export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDetail): Partial<ProductWorkflowTask> {
   const run = snapshot.run;
@@ -19,13 +20,18 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
   const coverHandoffReady = product ? isCoverHandoffReady(product) : false;
   const stage = status==='succeeded' ? 'completed' : approval ? 'automation'
     : snapshot.pendingApproval || coverHandoffReady ? 'readiness' : status==='queued' ? 'queued' : 'planning';
-  const scopes = approval?.scope ?? [];
+  const scopes = (approval?.scope ?? []).filter(scope => scope !== ITINERARY_REVIEW_UNLOCK_SCOPE
+    || approval?.itineraryReviewUnlockAuthorized === true);
   const done = new Set(snapshot.events.filter(event=>event.runId===run?.id && event.type==='tool_result'
     && event.data?.verified===true).map(event=>`vbk.write_phase:${event.data?.phase}`));
   // 确定性录入执行器的完成证据写在 automation.phases（无 tool_result 事件）；
   // 不并入的话，携程录入阶段会一直停在 0%。
   for (const phase of product?.automation?.phases ?? []) {
     if (phase.status === 'completed') done.add(`vbk.write_phase:${phase.phase}`);
+  }
+  if (approval?.itineraryReviewUnlockAuthorized === true
+    && product?.automation?.phases.some(phase => phase.phase === 'preflight' && phase.status === 'completed')) {
+    done.add(ITINERARY_REVIEW_UNLOCK_SCOPE);
   }
   if (product && trafficLineCanBeDeferred(product)) done.add('vbk.write_phase:trafficLine');
   const progress = workflowProgress(status, snapshot, scopes, done);
@@ -35,7 +41,8 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
   ) : undefined;
   const routeReviewPending = ['paused', 'failed'].includes(run?.status ?? '')
     && trafficStatus?.requiresRouteReview;
-  const message = routeReviewPending ? (product?.status === 'draft_saved'
+  const safeStartupPause = latestSafeStartupPause(snapshot, run?.id);
+  const message = safeStartupPause ?? (routeReviewPending ? (product?.status === 'draft_saved'
     ? '母产品草稿已保存；交通套餐待玩法线路匹配审核，审核通过后继续'
     : '交通套餐待玩法线路匹配审核，审核通过后继续')
     : coverHandoffReady && coverFallback ? (coverFallback.reason === 'search_unavailable'
@@ -44,9 +51,16 @@ export function agentWorkflowPatch(snapshot: AgentSnapshot, product?: ProductDet
     : snapshot.pendingApproval ? '方案已就绪，等待授权录入'
     : snapshot.pendingInput ? '等待补充信息'
       : run?.error ?? (unfinished ? '产品尚未完成，可继续处理' : status==='succeeded' ? '本轮任务已完成' : status==='abandoned' ? '任务已放弃'
-        : run?.status==='paused' ? '任务已暂停，可继续处理' : 'Agent 正在处理产品');
+        : run?.status==='paused' ? '任务已暂停，可继续处理' : 'Agent 正在处理产品'));
   return {status,stage,progress,message,error:run?.error,
     completedAt:['succeeded','abandoned','failed'].includes(status) ? run?.updatedAt : undefined};
+}
+
+function latestSafeStartupPause(snapshot: AgentSnapshot, runId?: string): string | undefined {
+  const status = [...snapshot.events].reverse().find(event => event.runId === runId && event.type === 'status');
+  if (!status || (status.data?.safeStartupIdentityRecovery !== true
+    && status.data?.safeStartupExternalActionBlocked !== true)) return undefined;
+  return status.content;
 }
 
 const GENERATE_STAGES = ["skeleton", "basicInfo", "itinerary", "presentation", "commercial"] as const;

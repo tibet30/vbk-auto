@@ -62,7 +62,7 @@ function isExpired(expiresAt: string): boolean {
 
 export function createTibetAuthService(
   store: AppAuthStore,
-  options: { baseUrl?: string; fetchImpl?: FetchLike } = {},
+  options: { baseUrl?: string; fetchImpl?: FetchLike; skipRemoteStatusValidation?: boolean } = {},
 ): TibetAuthService {
   const baseUrl = resolveTibetApiBaseUrl(options.baseUrl);
   const fetchImpl = options.fetchImpl ?? fetch;
@@ -119,11 +119,18 @@ export function createTibetAuthService(
   return {
     async status() {
       const session = store.get();
+      if (session && options.skipRemoteStatusValidation) {
+        return isExpired(session.expiresAt)
+          ? { state: "unauthenticated" }
+          : { state: "authenticated", user: session.user };
+      }
       return session ? validate(session) : { state: "unauthenticated" };
     },
     async listAccounts() {
-      for (const session of store.list()) {
-        if (isExpired(session.expiresAt)) store.remove(session.user.id);
+      if (!options.skipRemoteStatusValidation) {
+        for (const session of store.list()) {
+          if (isExpired(session.expiresAt)) store.remove(session.user.id);
+        }
       }
       return {
         currentUserId: store.get()?.user.id ?? null,

@@ -1,4 +1,11 @@
-import type { AgentApproval, AgentEvent, AgentInputRequest, AgentSnapshot, ProductDetail } from "../../shared/contracts.js";
+import type {
+  AgentApproval,
+  AgentEvent,
+  AgentInputRequest,
+  AgentSnapshot,
+  ProductDetail,
+} from "../../shared/contracts.js";
+import type { WizardStageRetryPhase } from "../../shared/wizard-stage-retry.js";
 
 export interface AgentToolCall {
   id: string;
@@ -65,6 +72,10 @@ export interface AgentSnapshotStore {
   saveAgentSnapshot(snapshot: AgentSnapshot): void;
 }
 export interface AgentCoreDependencies {
+  /** Explicit development safe startup blocks only account-bound external actions. */
+  externalAgentActionsEnabled?: boolean;
+  /** Lets safe-startup recovery state a completed local-preparation fact truthfully. */
+  safeStartupLocalPreparationReady?(localProductId: string): boolean;
   model?: AgentModel;
   modelFor?(localProductId: string): Promise<AgentModel>;
   tools: AgentTool[];
@@ -73,6 +84,22 @@ export interface AgentCoreDependencies {
   prepareWorkflowReplay?(localProductId: string, content: string): Promise<{
     scope: string[]; summary: string; automationRunId: string; automationRunStatus?: "failed" | "succeeded";
   } | undefined> | { scope: string[]; summary: string; automationRunId: string; automationRunStatus?: "failed" | "succeeded" } | undefined;
+  /**
+   * Read-only preparation for an explicit VBK wizard-stage retry. The adapter
+   * must derive this from the saved product and current remote menu state; it
+   * does not perform the “下一步” write itself.
+   */
+  prepareWizardStageRetry?(localProductId: string, phase: WizardStageRetryPhase): Promise<{
+    scope: string[];
+    summary: string;
+    phase: WizardStageRetryPhase;
+    alreadyAdvanced: boolean;
+  } | undefined> | {
+    scope: string[];
+    summary: string;
+    phase: WizardStageRetryPhase;
+    alreadyAdvanced: boolean;
+  } | undefined;
   /** Applies deterministic local repairs implied by an explicit new user
    * instruction before the next intent fingerprint and model turn are made. */
   prepareUserInstruction?(localProductId: string, content: string, selection?: {
@@ -94,7 +121,11 @@ export interface AgentCoreDependencies {
   /** Current persisted product for bounded deterministic preparation steps. */
   preparationProduct?(localProductId: string): ProductDetail | undefined;
   reconcileUncertainWrite?(localProductId: string, uncertain: { toolCallId: string; message: string }): Promise<{ reconciled: boolean; retryable?: boolean; message?: string }>;
-  approvalPrecondition?(localProductId: string, scope: string[]): Promise<string | undefined>;
+  approvalPrecondition?(
+    localProductId: string,
+    scope: string[],
+    options?: { wizardStageRetry?: WizardStageRetryPhase },
+  ): Promise<string | undefined>;
   normalizeApprovalScope?(localProductId: string, scope: string[]): string[] | Promise<string[]>;
   now?: () => Date;
   id?: () => string;

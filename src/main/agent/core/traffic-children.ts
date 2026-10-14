@@ -3,11 +3,15 @@ import type { AgentApproval, AgentSnapshot } from "../../../shared/contracts.js"
 import { hasVerifiedMotherPhases } from "../../automation/automation.main/automation.main.resume-phase.js";
 import { agentProductVersion, requiredAgentPhases } from "../integration-gates.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
+import { externalAgentActionsBlocked, SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "../safe-startup-agent-guard.js";
 
 /** 按钮点击是本次子产品写入授权；不复用母产品录入时的未勾选决定。 */
 export async function createTrafficChildrenCommand(core: AgentCore, id: string, routeReviewAuthorized: boolean): Promise<AgentSnapshot> {
   const c = asCoreInternals(core);
   return c.command(id, async () => {
+    if (externalAgentActionsBlocked(c.deps.externalAgentActionsEnabled)) {
+      throw new Error(SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON);
+    }
     let snapshot = c.load(id);
     if (c.active.has(id) || c.scheduled.has(id) || c.handoffs.has(id)
       || ["running", "queued", "waiting_approval", "waiting_input"].includes(snapshot.run?.status ?? "")) {

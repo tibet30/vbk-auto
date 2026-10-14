@@ -9,6 +9,7 @@ import { isPreparationStatusQuery, preparationStatusReply } from "../preparation
 import { isPreparationRun } from "../preparation-run.js";
 import { mustIsolateApprovedRun } from "../core-preparation-resume.js";
 import { reopenChangedApproval } from "./changed-approval.js";
+import { requestWizardStageRetry } from "./wizard-stage-retry.js";
 import type { AgentSnapshot } from "../../../shared/contracts.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
 
@@ -19,10 +20,14 @@ export async function sendCommand(core: AgentCore, id: string, content: string):
     if (!text) return c.load(id);
     const replay = await requestWorkflowReplay({ id, content: text, deps: c.deps, snapshots: c.snapshots });
     if (replay) return replay;
+    const wizardStageRetry = await requestWizardStageRetry(core, id, text);
+    if (wizardStageRetry) return wizardStageRetry;
     let snapshot = c.load(id);
     if (!c.active.has(id) && !c.scheduled.has(id)) c.snapshots.recoverInterruptedCalls(snapshot);
     if (snapshot.pendingApproval && isPendingApprovalStatusFollowup(text)) {
-      const precondition = await c.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope);
+      const precondition = await c.deps.approvalPrecondition?.(id, snapshot.pendingApproval.scope, {
+        wizardStageRetry: snapshot.pendingApproval.wizardStageRetry?.phase,
+      });
       snapshot = c.load(id);
       if (!precondition && snapshot.pendingApproval) {
         c.snapshots.interruptStreaming(snapshot, "已收到对待处理状态的追问。");

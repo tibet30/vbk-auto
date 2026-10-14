@@ -10,25 +10,22 @@
  *     agentWriteGuard 装回 automation runner；
  *   - 不在此处做具体业务执行，只做依赖注入。
  */
-
 import { productCoverGenerator } from "../operations/generated-cover.js";
-import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
 import type { ResourceQueryOverrides } from "../planning/resource-query-overrides.js";
 import type { MainIpcContext } from "../ipc/context.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "../planning/adapters/openai-compatible-adapter.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { AgentCore } from "./core.js";
+import { SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-guard.js";
 import { OpenAIAgentModel } from "./openai-model.js";
 import { createAgentBusinessTools, agentProductVersion } from "./integration.js";
 import { agentPlannerContextForRun, agentTaskContext } from "./integration-context.js";
 import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from "./integration-gates.js";
-import { persistReconciledPhase, settleReconciledDispatches } from '../application/product-reconciled-phase.js';
 import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from "./core-workflow-replay.js";
 import { preparationApprovalBlockReason } from "../planning/preparation-completion.js";
 import { inspectManualCoverAsset } from "../automation/manual-cover-asset.js";
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from "./integration-guard.js";
-import { reconcileAgentShell } from "./integration-reconcile.js";
 import { recordAgentUsage } from "./integration-usage.js";
 import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
@@ -40,6 +37,8 @@ import { isPreparationRun, isPreparationInstruction } from "./preparation-run.js
 import { preparationItineraryRecovery } from "./preparation-itinerary-recovery.js";
 import { runQueuedApprovedWorkflow } from "./queued-approved-workflow.js";
 import { restoreExplicitOperatorDeletion, restoreExplicitAlternativeSlots } from "./integration-setup/restore.js";
+import { reconcileUncertainAgentWrite } from "./integration-setup/reconcile-uncertain-write.js";
+import { handoffWizardStageRetry, prepareWizardStageRetry } from "./integration-setup/wizard-stage-retry.js";
 
 export {
   restoreExplicitOperatorDeletion,
@@ -53,6 +52,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
   const { db, getSettings, apiKey, productWorkflows, remoteProducts, readiness, emitProduct } = context;
   const emitAgentSnapshot = (snapshot: Parameters<NonNullable<MainIpcContext["emitAgentSnapshot"]>>[0]) => context.emitAgentSnapshot?.(snapshot);
   context.agentCore = new AgentCore({
+    externalAgentActionsEnabled: context.externalAgentActionsEnabled,
+    safeStartupLocalPreparationReady: (localProductId) => readiness(localProductId).ready,
     preparationProduct: (localProductId) => db.getProduct(localProductId),
     requiresCompletionVerification: (id, snapshot) => isPreparationRun(snapshot)
       && (!(db.getProduct(id)?.status === "draft_saved" && db.getProduct(id)?.productId)
@@ -129,6 +130,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       readiness,
     }),
     accountFor: async (localProductId) => {
+      if (context.externalAgentActionsEnabled === false) throw new Error(SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON);
       const product = db.getProduct(localProductId);
       if (!product) throw productNotFound(localProductId);
       const remote = await remoteProducts.get(localProductId);
@@ -223,7 +225,9 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
           ? `旧创建失败记录未保存携程编号，远端结果无法确认；本次明确重新创建一个草稿，保留旧失败记录，立即保存新编号，再录入全部阶段。仅保存未提审草稿，不发布。${confirmation.summary}`
           : `重新录入全部阶段，保留当前方案和 VBK 产品 ${current.productId}，最终回读后保存未提审草稿。${confirmation.summary}` };
     },
+    prepareWizardStageRetry: (localProductId, phase) => prepareWizardStageRetry(context, localProductId, phase),
     handoffApprovedWorkflow: (localProductId, approval) => {
+      if (approval.wizardStageRetry) return handoffWizardStageRetry(context, localProductId, approval);
       // A remote-successful automation can outlive an interrupted desktop
       // process before AgentCore receives its completion callback. Resume the
       // local terminal transition only; never replay completed VBK phases.
@@ -255,10 +259,10 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       return agentTaskContext(db, localProductId, memoryContext, readiness(localProductId));
     },
     normalizeApprovalScope: (localProductId, scope) => normalizeAgentApprovalScope(db.getProduct(localProductId)!, scope),
-    approvalPrecondition: async (localProductId, scope) => {
+    approvalPrecondition: async (localProductId, scope, options) => {
       const product = db.getProduct(localProductId);
       if (!product) return "产品不存在";
-      const scopeError = agentApprovalScopeError(product, scope);
+      const scopeError = agentApprovalScopeError(product, scope, { wizardStageRetry: options?.wizardStageRetry });
       if (scopeError) return scopeError;
       // Phase A must leave no stale research noise before the confirmation card
       // or VBK handoff. Satisfied-but-unconfirmed POI tasks would otherwise look
@@ -278,28 +282,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       if (readyProduct) emitProduct(readyProduct);
       return undefined;
     },
-    reconcileUncertainWrite: async (localProductId, uncertain) => productWorkflows.runVbkPageExclusive(async () => {
-      const login = await context.browser.status(true);
-      const remote = await remoteProducts.get(localProductId);
-      const account = login.loginAccount?.trim() || login.accountName?.trim();
-      if (!login.loggedIn || !account || (remote.vbkAccount && remote.vbkAccount !== account)) return { reconciled: false, message: "请先登录产品绑定的 VBK 账号再核查。" };
-      const product = db.getProduct(localProductId);
-      const snapshot = db.getAgentSnapshot(localProductId);
-      if (!product || !snapshot) return { reconciled: false, message: "产品记录不存在" };
-      const result = await reconcileAgentShell(product, snapshot, uncertain.toolCallId, await getVbkRequestPage(context.browser));
-      if (result.retryable && uncertain.toolCallId.startsWith('phase:')) {
-        settleReconciledDispatches(db, localProductId, uncertain.toolCallId.slice('phase:'.length));
-      }
-      if (result.reconciled) {
-        if (result.phase) persistReconciledPhase(db, localProductId, result.phase);
-        const fresh = db.getAgentSnapshot(localProductId)!;
-        const event = fresh.events.find(item => item.type === "tool_result" && item.data?.toolCallId === uncertain.toolCallId);
-        if (event) event.data = { ...event.data, approvalId: approvalForRun(fresh)?.id, verified: true, phase: result.phase, productId: product.productId };
-        else fresh.events.push({ id: crypto.randomUUID(), runId: fresh.run!.id, type: "tool_result", createdAt: new Date().toISOString(), content: result.message, data: { toolCallId: uncertain.toolCallId, write: true, remoteWrite: true, approvalId: approvalForRun(fresh)?.id, verified: true, phase: result.phase, productId: product.productId } });
-        db.saveAgentSnapshot(fresh);
-      }
-      return result;
-    }),
+    reconcileUncertainWrite: reconcileUncertainAgentWrite(context),
     // A model cannot declare the run complete after a single write. Completion
     // is accepted only from the durable automation snapshot produced after the
     // platform-side phase readbacks have converged.

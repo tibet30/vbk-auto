@@ -25,6 +25,8 @@ import type {
 
 /** Shared, explicitly injected dependencies for main-process IPC registrars. */
 export interface MainIpcContext {
+  /** Explicit development safe startup keeps local planning but blocks external Agent actions. */
+  externalAgentActionsEnabled?: boolean;
   db: VbkDatabase;
   browser: VbkBrowser;
   automation: DraftAutomation;

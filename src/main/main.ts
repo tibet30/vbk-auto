@@ -63,8 +63,10 @@ import {
 } from "./startup-config.js";
 import { installLogSink } from "../shared/log-timestamp.js";
 import { createMainEventBroadcasters } from "./main-events.js";
+import { isSafeDevelopmentStartup } from "./development-startup.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const safeDevelopmentStartup = isSafeDevelopmentStartup(isDev);
 applyAppMetadata();
 applyStartupCommandLineSwitches();
 installProcessErrorHandlers();
@@ -148,6 +150,7 @@ async function openMainWindow(): Promise<void> {
     cookieStore,
     root,
     isDev,
+    initialiseVbkBrowser: !safeDevelopmentStartup,
     debuggingPort,
     getSettings,
     aiService,
@@ -173,23 +176,25 @@ app.whenReady().then(async () => {
   // 启动期清理 Chromium 上一版本遗留的 ServiceWorker / QuotaManager 脏库：
   // 必须在构造 VbkDatabase / 创建 BrowserWindow 之前完成，否则 storage service
   // 已经开始读这些库就会撞到 schema 不兼容报错。
-  cleanStaleChromiumProfileDb(app.getPath("userData"));
+  if (!safeDevelopmentStartup) cleanStaleChromiumProfileDb(app.getPath("userData"));
   db = new VbkDatabase(app.getPath("userData"));
   setOperationLogDb(db);
   installLogSink((level, args) => captureRuntimeLog(createRuntimeLogCapture(level, "main", args)));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
-  const appAuth = createTibetAuthService(appAuthStore);
-  productStorage = createProductStorage({ db, store: appAuthStore, appVersion: () => app.getVersion(), settings: getSettings });
+  const appAuth = createTibetAuthService(appAuthStore, { skipRemoteStatusValidation: safeDevelopmentStartup });
+  productStorage = createProductStorage({ db, store: appAuthStore, appVersion: () => app.getVersion(), settings: getSettings, enableBackgroundSync: !safeDevelopmentStartup });
   const remoteProducts = productStorage.products;
   app.once("before-quit", productStorage.dispose);
   const copyRules = createTibetCopyRuleSync(appAuthStore, db);
   const syncCopyRules = () => { void copyRules.sync().catch(() => {}); };
-  syncCopyRules();
-  const copySyncTimer = setInterval(syncCopyRules, 60_000);
-  copySyncTimer.unref();
-  app.once("before-quit", () => clearInterval(copySyncTimer));
+  if (!safeDevelopmentStartup) {
+    syncCopyRules();
+    const copySyncTimer = setInterval(syncCopyRules, 60_000);
+    copySyncTimer.unref();
+    app.once("before-quit", () => clearInterval(copySyncTimer));
+  }
   const vbkBindings = createVbkBindingBootstrap({
     appAuthStore,
     db,
@@ -200,7 +205,7 @@ app.whenReady().then(async () => {
   const withKnownVbkAccount = createWithKnownVbkAccount({
     db,
     getBrowser: () => browser,
-    noteVbkAccountActive: vbkBindings.noteVbkAccountActive,
+    noteVbkAccountActive: safeDevelopmentStartup ? () => {} : vbkBindings.noteVbkAccountActive,
   });
   productWorkflows = new ProductWorkflowCoordinator();
   updateService = new AppUpdateService({
@@ -213,19 +218,22 @@ app.whenReady().then(async () => {
   });
   // 安装只读事件转发器，持久化观察在写入提交处执行
   installProductEmitter();
-  db.recoverUnansweredMessages();
-  const orphanProducts = db.recoverOrphanAutomationRuns();
-  if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });
-  const orphanPlanning = db.recoverOrphanPlanningStates();
-  if (orphanPlanning.length) logWarn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
-  const orphanLogs = db.recoverOrphanOperationLog();
-  if (orphanLogs) logWarn("[startup] recovered interrupted log entries", { count: orphanLogs });
-  const completedWorkflowTasks = db.completeSavedProductWorkflowTasks();
-  if (completedWorkflowTasks.length) logWarn("[startup] reconciled completed product tasks", { count: completedWorkflowTasks.length });
-  const orphanWorkflowTasks = db.recoverOrphanWorkflowTasks();
-  if (orphanWorkflowTasks.length) logWarn("[startup] recovered interrupted product tasks", { count: orphanWorkflowTasks.length });
+  if (!safeDevelopmentStartup) {
+    db.recoverUnansweredMessages();
+    const orphanProducts = db.recoverOrphanAutomationRuns();
+    if (orphanProducts.length) logWarn("[startup] recovered orphan automation runs", { count: orphanProducts.length });
+    const orphanPlanning = db.recoverOrphanPlanningStates();
+    if (orphanPlanning.length) logWarn("[startup] recovered orphan planning runs", { count: orphanPlanning.length });
+    const orphanLogs = db.recoverOrphanOperationLog();
+    if (orphanLogs) logWarn("[startup] recovered interrupted log entries", { count: orphanLogs });
+    const completedWorkflowTasks = db.completeSavedProductWorkflowTasks();
+    if (completedWorkflowTasks.length) logWarn("[startup] reconciled completed product tasks", { count: completedWorkflowTasks.length });
+    const orphanWorkflowTasks = db.recoverOrphanWorkflowTasks();
+    if (orphanWorkflowTasks.length) logWarn("[startup] recovered interrupted product tasks", { count: orphanWorkflowTasks.length });
+  }
 
   const context: MainIpcContext = {
+    externalAgentActionsEnabled: !safeDevelopmentStartup,
     db,
     get browser() { return browser ?? undefined; },
     get automation() { return automation ?? undefined; },
@@ -241,7 +249,7 @@ app.whenReady().then(async () => {
     remoteProducts,
     bindingSync: vbkBindings.bindingSync,
     getExtensionUserId: vbkBindings.getExtensionUserId,
-    noteVbkAccountActive: vbkBindings.noteVbkAccountActive,
+    noteVbkAccountActive: safeDevelopmentStartup ? () => {} : vbkBindings.noteVbkAccountActive,
     readiness,
     emitProduct,
     broadcastProduct,
@@ -258,8 +266,8 @@ app.whenReady().then(async () => {
     emitAgentSnapshot,
   };
   configureAutomation = installProductAgent(context);
-  const memoryMaintenanceTimer = scheduleMemoryMaintenance(memoryService);
-  app.once("before-quit", () => clearInterval(memoryMaintenanceTimer));
+  const memoryMaintenanceTimer = safeDevelopmentStartup ? undefined : scheduleMemoryMaintenance(memoryService);
+  if (memoryMaintenanceTimer) app.once("before-quit", () => clearInterval(memoryMaintenanceTimer));
   const productTaskScheduler = new ProductTaskScheduler({
     db,
     agent: {
@@ -276,30 +284,33 @@ app.whenReady().then(async () => {
   context.resumeProductTask = (taskId, mode) => productTaskScheduler.resume(taskId, mode);
   registerMainIpc(context, appAuth, updateService, {
     onAuthenticated: async (user, source) => {
+      if (safeDevelopmentStartup && source === "status") return;
       syncCopyRules();
       await vbkBindings.onAuthenticated(user, source);
     },
   });
   await openMainWindow();
-  updateService.scheduleStartupCheck();
-  updateService.schedulePeriodicCheck();
-  // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
-  browser!.initialise()
-    .then(() => vbkBindings.afterBrowserReady())
-    .then(async () => {
-      if (!context.agentCore) return;
-      const recovered = await recoverQueuedAgentWorkflowTasks({
-        listWorkflowTasks: () => db!.listWorkflowTasks(),
-        updateWorkflowTask: (id, patch) => db!.updateWorkflowTask(id, patch),
-        getAgentSnapshot: (localProductId) => context.agentCore!.get(localProductId),
-        resumeAgent: (localProductId) => context.agentCore!.resume(localProductId),
-        emitWorkflowTask,
-      });
-      if (recovered.resumed || recovered.attention) {
-        logWarn("[startup] recovered queued agent workflow tasks", recovered);
-      }
-    })
-    .catch((error) => logWarn("[startup] deferred VBK binding restore failed", error));
+  if (!safeDevelopmentStartup) {
+    updateService.scheduleStartupCheck();
+    updateService.schedulePeriodicCheck();
+    // 本地 renderer 已可交互；VBK 恢复与远端绑定同步在后台串接，失败不退出应用。
+    browser!.initialise()
+      .then(() => vbkBindings.afterBrowserReady())
+      .then(async () => {
+        if (!context.agentCore) return;
+        const recovered = await recoverQueuedAgentWorkflowTasks({
+          listWorkflowTasks: () => db!.listWorkflowTasks(),
+          updateWorkflowTask: (id, patch) => db!.updateWorkflowTask(id, patch),
+          getAgentSnapshot: (localProductId) => context.agentCore!.get(localProductId),
+          resumeAgent: (localProductId) => context.agentCore!.resume(localProductId),
+          emitWorkflowTask,
+        });
+        if (recovered.resumed || recovered.attention) {
+          logWarn("[startup] recovered queued agent workflow tasks", recovered);
+        }
+      })
+      .catch((error) => logWarn("[startup] deferred VBK binding restore failed", error));
+  }
   app.on("activate", () => {
     if (!BrowserWindow.getAllWindows().length) void openMainWindow();
   });

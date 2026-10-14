@@ -3,13 +3,15 @@
  *   - startAutomation：切到 review 阶段并提示运营先在左侧「方案协作」确认；
  *   - stopAutomation：发送停止信号；当前 in-flight 阶段会自然结束后停止
  *     后续阶段；
- *   - retryOnePhaseAutomation：单阶段重跑；trafficLine + 已保存母产品走
- *     automation.continueApproved；其它阶段让 Agent 在左侧展示修复方案；
+ *   - retryOnePhaseAutomation：基础信息 / 产品图文走受控的官方向导下一步确认；
+ *     trafficLine + 已保存母产品走 automation.continueApproved；其余阶段让 Agent
+ *     在左侧展示修复方案；
  *   - openSection：在右侧 VBK WebView 打开某个导航区域（基本信息 / 行程 /
  *     价格库存 等）。
  */
 
 import { api, phaseDisplayLabel, type VbkNavSection } from "../../helpers";
+import { formatWizardStageRetryInstruction } from "../../../../shared/wizard-stage-retry.js";
 import { confirmHotelDraftRetry } from "./hotel-draft-confirm.js";
 import type { WorkflowDeps } from "./types.js";
 
@@ -97,8 +99,11 @@ export function buildAutomationHandlers(deps: WorkflowDeps) {
         setNotice("已继续执行已确认的交通子产品录入与最终回读。");
         return;
       }
+      const instruction = phaseName === "basic" || phaseName === "presentation"
+        ? formatWizardStageRetryInstruction(phaseName)
+        : `请检查并修复${phaseDisplayLabel(phaseName)}阶段，先展示修复后的方案并请求最终确认，再继续录入。`;
       setStage("review");
-      await api()!.agent.send(product.id, `请检查并修复${phaseDisplayLabel(phaseName)}阶段，先展示修复后的方案并请求最终确认，再继续录入。`);
+      await api()!.agent.send(product.id, instruction);
       setNotice("已在方案协作中开始检查，请在左侧查看进展并确认方案。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "重新执行失败，请在 VBK 中检查后重试。");

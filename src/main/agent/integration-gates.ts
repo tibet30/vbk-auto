@@ -12,6 +12,7 @@ import { isUnavailableTrafficResourceFailure, isTrafficLineRouteReviewRequired, 
 import { evaluatePreparationCompletion } from '../planning/preparation-completion.js';
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { preparationStageGaps } from "../planning/preparation/policy.js";
+import { ITINERARY_REVIEW_UNLOCK_SCOPE } from "../../shared/itinerary-review-approval.js";
 
 export function requiredAgentPhases(product: ProductDetail): string[] {
   const data = product.product as unknown as Parameters<typeof draftPhasesFor>[0];
@@ -90,8 +91,9 @@ export function buildAgentApproval(product: ProductDetail) {
     ? "将上传运营占位图，仅保存未提审草稿，禁止上架；运营须在上架前替换真实封面。"
     : "";
   return {
-    scope: requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`),
-    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${manualCoverNotice}${generatedCoverNotice}${placeholderNotice}请核对右侧行程、资源和条款，确认后录入当前方案。`,
+    scope: [...requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`),
+      ...(placeholderNotice ? [] : [ITINERARY_REVIEW_UNLOCK_SCOPE])],
+    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${manualCoverNotice}${generatedCoverNotice}${placeholderNotice}${placeholderNotice ? '' : '本次录入包含自动提交母产品行程审核并解锁全部标签，不发布。'}请核对右侧行程、资源和条款，确认后录入当前方案。`,
   };
 }
 export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnapshot | undefined, readiness: ProductReadiness, context?: AgentFinishContext): AgentFinishResult {
@@ -122,7 +124,7 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   const required = requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`);
   if (required.some(scope=>!approval.scope.includes(scope))) return {verified:false,message:'已确认范围不完整，请重新请求最终确认。'};
   const phases = approval.scope.filter(scope=>scope.startsWith('vbk.write_phase:')).map(scope=>scope.split(':')[1])
-    .filter(phase => phase !== 'trafficLine' || approval.generateTrafficChildren !== false);
+    .filter(phase => phase !== 'trafficLine' || approval.generateTrafficChildren === true);
   const canDeferTrafficLine = trafficLineCanBeDeferred(product);
   const incompleteTrafficChild = phases.includes('trafficLine') && !canDeferTrafficLine
     ? product.automation?.trafficLine?.children.find((child) => {

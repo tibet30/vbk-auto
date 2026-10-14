@@ -25,7 +25,14 @@ import { ensureHotelResourceApi } from "../../ctrip/hotel-resource-api.js";
 import { ensureVehicleResourceApi } from "../../ctrip/vehicle-resource-api.js";
 import { runProductPreflightApi } from "../../ctrip/preflight-api.js";
 import { ensureTrafficLinePhase } from "../../ctrip/traffic-line/run-phase.js";
+import { advanceSavedProductWizardStage } from "../../ctrip/product-wizard.js";
+import { AutomationCancelledError } from "../automation.main.errors.js";
 import { trafficRouteReviewAuthorized } from "../../../../shared/traffic-route-review-approval.js";
+import {
+  canReuseVerifiedItineraryReview,
+  canResumeVerifiedItineraryReviewOnly,
+  runWorkflowItineraryReviewUnlock,
+} from "../runtime/itinerary-review-unlock.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../../shared/contracts-traffic-line.js";
 import type { ProductDetail } from "../../../../shared/contracts.js";
 
@@ -50,27 +57,98 @@ export interface FillMapContext {
   log: (message: string, level?: "info" | "warning" | "error") => void;
   persist: () => void;
   productDetail?: ProductDetail;
+  wizardAdvanceOnly?: ReadonlySet<string>;
 }
 
 export type FillFn = () => Promise<unknown>;
 
 export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
   const { ctx, localProductId, page, productData, productId, run, log, persist } = args;
+  const assertPresentationAdvanceCurrent = async () => {
+    if (ctx.cancellationRequested.has(localProductId)) throw new AutomationCancelledError();
+    if (ctx.agentControlled && !ctx.assertWriteAuthorized) {
+      throw new Error("产品图文下一步写入授权校验尚未就绪");
+    }
+    await ctx.assertWriteAuthorized?.(localProductId, "presentation");
+    if (ctx.cancellationRequested.has(localProductId)) throw new AutomationCancelledError();
+  };
+  const unlockItineraryReview = () => runWorkflowItineraryReviewUnlock({
+    localProductId, productId: productId!, product: productData, page,
+    snapshot: () => ctx.db.getAgentSnapshot(localProductId),
+    productIdentity: () => ctx.db.getProduct(localProductId)?.productId,
+    accountIdentity: () => ctx.db.getSetting("vbkActiveAccountKey")?.value,
+    cancelled: () => ctx.cancellationRequested.has(localProductId),
+    assertAuthorized: async () => {
+      if (!ctx.assertWriteAuthorized) throw new Error("自动录入写入授权校验尚未就绪");
+      await ctx.assertWriteAuthorized(localProductId, "itinerary");
+    },
+    stateStore: {
+      get: id => ctx.db.getItineraryReviewUnlockState(id),
+      save: state => ctx.db.saveItineraryReviewUnlockState(state),
+    },
+  });
+  const requireItineraryReviewUnlock = async () => {
+    const previous = ctx.db.getItineraryReviewUnlockState(localProductId);
+    if (previous?.status === "verified" && previous.productId === productId && previous.receipt) {
+      return previous.receipt;
+    }
+    const result = await unlockItineraryReview();
+    if ("skipped" in result) {
+      throw new Error("行程草稿已保存；“提交审核并下一步”需要本次独立授权，未继续套餐及后续模块。");
+    }
+    return result.receipt;
+  };
   return {
-    presentation: () => fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product: productData, productId: productId!, log }),
-    itinerary: () => fillItineraryWithSensitiveRewrite({
-      ctx,
-      localProductId,
-      product: productData,
-      log,
-      executeItinerary: () => fillItineraryDraftApi(page, productData, {
-        disambiguator: ctx.disambiguator,
-        productId: productId ?? "",
-        readOnlyBeforeWrite: /VBK 行程关联保存.*超时/u.test(
-          args.productDetail?.automation?.recovery?.phases.itinerary?.finalError ?? ""),
-      }),
-      dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
-    }),
+    presentation: async () => {
+      if (args.wizardAdvanceOnly?.has("presentation")) {
+        const advanced = await advanceSavedProductWizardStage(
+          page, productId!, "pictureAndText", { assertCurrent: assertPresentationAdvanceCurrent },
+        );
+        if (advanced.advanced) log("产品图文已按 VBK 官方下一步推进，行程描述已解锁。");
+        return advanced;
+      }
+      const result = await fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product: productData, productId: productId!, log });
+      const advanced = await advanceSavedProductWizardStage(
+        page, productId!, "pictureAndText", { assertCurrent: assertPresentationAdvanceCurrent },
+      );
+      if (advanced.advanced) log("产品图文已按 VBK 官方下一步推进，行程描述已解锁。");
+      return result;
+    },
+    itinerary: async () => {
+      if (canReuseVerifiedItineraryReview({
+        snapshot: ctx.db.getAgentSnapshot(localProductId),
+        state: ctx.db.getItineraryReviewUnlockState(localProductId),
+        productId: productId!,
+      })) {
+        const receipt = await requireItineraryReviewUnlock();
+        log("已复用本次批准流程的行程审核完整回读，不重复保存或提交审核。", "warning");
+        return { reviewOnly: true, receipt };
+      }
+      if (canResumeVerifiedItineraryReviewOnly({
+        snapshot: ctx.db.getAgentSnapshot(localProductId),
+        state: ctx.db.getItineraryReviewUnlockState(localProductId),
+        productId: productId!,
+      })) {
+        const receipt = await requireItineraryReviewUnlock();
+        log("已跳过重复保存行程；只读方案核验通过，继续本次已批准的行程审核。", "warning");
+        return { reviewOnly: true, receipt };
+      }
+      const result = await fillItineraryWithSensitiveRewrite({
+        ctx,
+        localProductId,
+        product: productData,
+        log,
+        executeItinerary: () => fillItineraryDraftApi(page, productData, {
+          disambiguator: ctx.disambiguator,
+          productId: productId ?? "",
+          readOnlyBeforeWrite: /VBK 行程关联保存.*超时/u.test(
+            args.productDetail?.automation?.recovery?.phases.itinerary?.finalError ?? ""),
+        }),
+        dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
+      });
+      await requireItineraryReviewUnlock();
+      return result;
+    },
     package: () => ensurePackageApi(page, productData, productId!),
     pricingInventory: () => ensurePricingInventoryApi(page, productData, productId!, { onProgress: log }),
     terms: () => fillAndSaveTerms(page, productData, productId!),
@@ -107,7 +185,15 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
         product: productData,
       });
     },
-    preflight: () => runProductPreflightApi(page, productData, productId!),
+    preflight: async () => {
+      if (!ctx.agentControlled) return runProductPreflightApi(page, productData, productId!);
+      const receipt = await requireItineraryReviewUnlock();
+      const result = await runProductPreflightApi(page, productData, productId!, {
+        itineraryTourInfoId: receipt.tourInfoId,
+      });
+      if (!result.menus.fullyUnlocked) throw new Error("行程审核后菜单未保持全部解锁，已停止完成预检。");
+      return result;
+    },
   };
 }
 

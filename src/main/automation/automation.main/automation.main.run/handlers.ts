@@ -17,7 +17,8 @@ export function buildAutomationHandlers(ctx: AutomationRunContext, setup: Automa
   productIdRef: { current: string | undefined }): Record<string, () => Promise<unknown>> {
   const fillMap = buildFillMap({ ctx, localProductId: setup.productDetail.id,
     productDetail: setup.productDetail, page: setup.page, productData: setup.product,
-    productId: productIdRef.current, run: setup.run, log: setup.log, persist: setup.persist });
+    productId: productIdRef.current, run: setup.run, log: setup.log, persist: setup.persist,
+    wizardAdvanceOnly: setup.wizardAdvanceOnly });
   return Object.fromEntries(Object.entries(fillMap).map(([phase, fill]) => [phase,
     () => executeAutomationPhase(ctx, setup, phase, productIdRef.current!, fill)]));
 }

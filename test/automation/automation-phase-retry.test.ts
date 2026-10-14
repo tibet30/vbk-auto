@@ -185,6 +185,12 @@ test("首次销售控制在授权守卫拒绝前失败时可安全重新开始",
   assert.equal(canRestartPreWriteAuthorizationFailure(guardFailure, null), true);
   assert.equal(canRestartPreWriteAuthorizationFailure(guardFailure, "78100000"), false);
   assert.equal(canRestartPreWriteAuthorizationFailure({ ...guardFailure, logs: [] }, null), false);
+  assert.equal(canRestartPreWriteAuthorizationFailure({ ...guardFailure, logs: [{
+    at: "2026-10-14T08:12:26.254Z", level: "error", message: "方案、意图或账号已变化，请重新确认后录入。",
+  }] }, null), true);
+  assert.equal(canRestartPreWriteAuthorizationFailure({ ...guardFailure, logs: [{
+    at: "2026-10-14T08:12:26.254Z", level: "error", message: "VBK 销售控制创建超时",
+  }] }, null), false);
 });
 
 test("恢复酒店候选后，保持从原失败预检阶段继续", () => {

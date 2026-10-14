@@ -50,7 +50,14 @@ export function createVbkRequestPage(args: {
       referrerPolicy: request.referrerPolicy ?? (source ? "no-referrer-when-downgrade" : undefined),
     });
   };
-  client.vbkSessionGetText = async request => { args.assertActive(); return get(request); };
+  client.vbkSessionGetText = async request => {
+    args.assertActive();
+    const source = requestSource.getStore();
+    return get({ ...request,
+      referrer: request.referrer ?? source,
+      referrerPolicy: request.referrerPolicy ?? (source ? "no-referrer-when-downgrade" : undefined),
+    });
+  };
   return client;
 }
 

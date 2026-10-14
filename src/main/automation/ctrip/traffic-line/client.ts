@@ -21,6 +21,8 @@ export const TRAFFIC_LINE_HEAD = {
 export interface TrafficLineRequestContext {
   referrer?: string;
   referrerPolicy?: VbkReferrerPolicy;
+  /** Called before every transport attempt, including safe session retries for writes. */
+  beforeAttempt?: () => void | Promise<void>;
 }
 
 export async function postTrafficLineSoa(
@@ -31,7 +33,7 @@ export async function postTrafficLineSoa(
   label: string,
   context: TrafficLineRequestContext = {},
 ): Promise<JsonRecord> {
-  const readOnly = new Set(["getdescriptionInfo", "getSegments", "getMultiDepartureCities.json", "getSubmitSegmentsResult", "getProductClause"]);
+  const readOnly = new Set(["getdescriptionInfo", "getSegments", "getMultiDepartureCities.json", "getSubmitSegmentsResult", "getProductClause", "getSubMenu.json"]);
   const request = () => requestWithSessionAckRetry(page, {
     endpoint: `${TRAFFIC_LINE_SOA}/${service}/${method}`,
     body: { contentType: "json", head: TRAFFIC_LINE_HEAD, ...body },
@@ -60,11 +62,13 @@ async function requestWithSessionAckRetry(
   request: { endpoint: string; body: JsonRecord; headers: Record<string, string> } & TrafficLineRequestContext,
   label: string,
 ): Promise<JsonRecord> {
+  const { beforeAttempt, ...sessionRequest } = request;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await beforeAttempt?.();
     let response;
     try {
       response = await vbkSessionRequest(page, {
-        ...request,
+        ...sessionRequest,
         browserRequestTimeoutMs: 15_000,
         evaluateTimeoutMs: 20_000,
         errorLabel: label,

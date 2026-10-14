@@ -16,6 +16,10 @@ import {
 } from "./automation.main.resume-phase.js";
 import { automationStartPhase, approvedWorkflowPlan } from "./runtime/workflow-plan.js";
 import { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
+import { itineraryReviewUnlockApproval } from "../../../shared/itinerary-review-approval.js";
+import type { WizardStageRetryPhase } from "../../../shared/wizard-stage-retry.js";
+import { advanceSavedProductWizardStage } from "../ctrip/product-wizard.js";
+import { AutomationCancelledError } from "./automation.main.errors.js";
 import {
   buildRunContext,
   runExclusive,
@@ -175,8 +179,13 @@ export class DraftAutomation {
     // fingerprint + recovery-only-instruction gate used by AgentCore.
     const approval = approvalForRun(agent) ?? recoverEquivalentApproval(product, agent);
     if (!approval) throw new Error("缺少最终确认，不能录入。");
+    const reviewApproval = itineraryReviewUnlockApproval(agent);
+    const reviewState = reviewApproval ? this.db.getItineraryReviewUnlockState(localProductId) : undefined;
+    const reviewPending = Boolean(reviewApproval && (reviewState?.status !== "verified"
+      || reviewState.approvalId !== reviewApproval.id || reviewState.agentRunId !== agent.run.id));
     const plan = approval.trafficChildrenOnly ? { kind: "traffic-backfill" as const }
-      : approvedWorkflowPlan(product, approval.replayOfAutomationRunId, approval.generateTrafficChildren !== false);
+      : approvedWorkflowPlan(product, approval.replayOfAutomationRunId,
+        approval.generateTrafficChildren === true, reviewPending);
     if (plan.kind === "complete") return;
     if (plan.kind === "traffic-backfill") {
       await this.runApprovedBackfillLocked(localProductId);
@@ -187,6 +196,44 @@ export class DraftAutomation {
       const failure = phase && result?.recovery?.phases[phase]?.finalError;
       throw new Error(failure || `自动录入未完成：${phase ?? result?.status ?? "缺少执行记录"}`);
     }
+  }
+
+  /** Executes one already-saved wizard boundary; it never enters itinerary review. */
+  async executeApprovedWizardStage(localProductId: string, phase: WizardStageRetryPhase): Promise<void> {
+    if (!this.agentWriteGuard) throw new Error("录入确认校验尚未就绪。");
+    return runExclusive(this.bindings(), localProductId, async () => {
+      const product = this.db.getProduct(localProductId);
+      if (!product) throw productNotFound(localProductId);
+      if (!product.productId) throw new Error("远程草稿尚未创建，不能推进向导下一步。");
+      if (!product.automation) throw new Error("缺少已保存的自动录入记录，不能安全推进向导下一步。");
+      const ctx = this.runContext(localProductId, phase);
+      const result = await ctx.runVbkPageExclusive(async () => {
+        const current = this.db.getProduct(localProductId);
+        if (!current?.productId || current.productId !== product.productId) {
+          throw new Error("产品草稿身份已变化，不能推进向导下一步。");
+        }
+        const assertCurrent = async () => {
+          if (this.cancellationRequested.has(localProductId)) throw new AutomationCancelledError();
+          await ctx.assertWriteAuthorized!(localProductId, phase);
+          if (this.cancellationRequested.has(localProductId)) throw new AutomationCancelledError();
+        };
+        return advanceSavedProductWizardStage(await this.vbkPage(), current.productId,
+          phase === "basic" ? "basicInfo" : "pictureAndText", { assertCurrent });
+      }, phase);
+      const latest = this.db.getProduct(localProductId);
+      if (!latest?.automation) throw new Error("向导回读完成后缺少自动录入记录，不能确认结果。");
+      this.db.saveAutomation(localProductId, {
+        ...latest.automation,
+        logs: [...latest.automation.logs, {
+          at: new Date().toISOString(),
+          level: "info",
+          message: result.advanced
+            ? `${phase === "basic" ? "产品信息" : "产品图文"}已按官方下一步推进并完成菜单回读。`
+            : `${phase === "basic" ? "产品信息" : "产品图文"}菜单已越过本步骤，未重复保存。`,
+        }],
+      });
+      this.emit(localProductId);
+    });
   }
 
   async replaceLockedDraft(localProductId: string): Promise<{ previousProductId: string }> {

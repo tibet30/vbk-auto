@@ -8,6 +8,11 @@
 
 import type { AutomationRun } from "../../../../shared/contracts.js";
 
+const PRE_WRITE_AUTHORIZATION_FAILURES = new Set([
+  "当前任务未处于可录入状态。",
+  "方案、意图或账号已变化，请重新确认后录入。",
+]);
+
 export function canRestartPreWriteAuthorizationFailure(
   run: AutomationRun | undefined,
   productId: string | null | undefined,
@@ -17,6 +22,6 @@ export function canRestartPreWriteAuthorizationFailure(
       && !productId
       && run.currentPhase === "saleControl"
       && run.phases.every((phase: { status: string }) => phase.status === "pending")
-      && run.logs.some((entry: { message: string }) => entry.message === "当前任务未处于可录入状态。"),
+      && run.logs.some((entry: { message: string }) => PRE_WRITE_AUTHORIZATION_FAILURES.has(entry.message)),
   );
 }

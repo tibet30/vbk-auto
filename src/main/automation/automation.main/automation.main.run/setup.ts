@@ -28,7 +28,10 @@ import { draftPhasesFor } from "../automation.main.phases.js";
 import {
   resourceRecoveryPhases,
 } from "../automation.main.resource-handlers.js";
-import { prepareAutomationResumeRun } from "../automation.main.resume-state.js";
+import {
+  prepareAutomationResumeRun,
+  prepareWizardMenuRecovery,
+} from "../automation.main.resume-state.js";
 import { automationAccountContext, automationSession } from "../runtime/index.js";
 import { writeAutomationProduct } from "../automation.main.persist.js";
 import { inspectManualCoverAsset } from "../../manual-cover-asset.js";
@@ -38,6 +41,12 @@ import {
 } from "../../../../shared/cover-fallback.js";
 import { loadPlaceholderCoverAsset } from "../../placeholder-cover-asset.js";
 import { hasProductLineResolutionFailure } from "../../ctrip/basic-info/api.js";
+import {
+  isItineraryReviewCompletedMenus,
+  productWizardRecoveryPhase,
+  readProductMenus,
+} from "../../ctrip/product-menu-readback.js";
+import { itineraryReviewRequestSource } from "../../../operations/itinerary-review-request-source.js";
 import type { AutomationRunContext } from "../automation.main.context.js";
 
 type AutomationLogLevel = "info" | "warning" | "error";
@@ -47,6 +56,7 @@ export interface AutomationSetup {
   product: ReturnType<typeof parseProduct>;
   draftPhases: string[];
   startIndex: number;
+  wizardAdvanceOnly: ReadonlySet<string>;
   run: AutomationRun;
   basicInfoSaved: boolean;
   productLineBlocked: boolean;
@@ -103,11 +113,11 @@ export async function prepareAutomationSetup(
   const draftPhases = resourceRecoveryPhases(
     product,
     draftPhasesFor(product).filter(phase => phase !== "trafficLine"
-      || approvalForRun(ctx.db.getAgentSnapshot(localProductId))?.generateTrafficChildren !== false),
+      || approvalForRun(ctx.db.getAgentSnapshot(localProductId))?.generateTrafficChildren === true),
     productDetail.automation,
     mutableRetryFrom,
   );
-  const startIndex = mutableRetryFrom ? draftPhases.indexOf(mutableRetryFrom) : 0;
+  let startIndex = mutableRetryFrom ? draftPhases.indexOf(mutableRetryFrom) : 0;
   if (mutableRetryFrom && startIndex < 0) throw new Error(`当前产品没有阶段：${mutableRetryFrom}`);
   if (mutableRetryFrom && !productDetail.productId) {
     throw new Error("远程草稿尚未创建，不能从中间阶段重试。");
@@ -118,29 +128,52 @@ export async function prepareAutomationSetup(
     productDetail.automation?.recovery?.phases.basic,
   );
 
-  const { butlerSelection, servicePhone } = automationAccountContext(
-    ctx.db, productDetail.product, startIndex === 0 || !basicInfoSaved,
-  );
-
-  const keySpots = pickKeySpotsFromItinerary(productDetail.product);
-  const scenicSpotLogs: string[] = [];
-
   if (mutableRetryFrom && !productDetail.automation) {
     throw new Error("没有可重试的自动录入记录。");
   }
 
-  const run: AutomationRun = mutableRetryFrom
-    ? prepareAutomationResumeRun(productDetail.automation!, draftPhases, mutableRetryFrom)
-    : {
-        id: randomUUID(),
-        status: "running",
-        phases: draftPhases.map((phase) => ({ phase, status: "pending" })),
-        logs: [],
-      };
-
   // Acquire the request surface before publishing a running record. A connection
   // failure leaves the previous durable checkpoint intact and retryable.
   const page = await getVbkRequestPage(ctx.browser);
+  let wizardAdvanceOnly: ReadonlySet<string> = new Set();
+  let run: AutomationRun;
+  if (mutableRetryFrom) {
+    // Historical API-only runs may mark basic/presentation completed without
+    // having advanced their respective VBK wizard menu boundaries. Read this
+    // durable remote state before the first local checkpoint or write.
+    const menus = await readProductMenus(
+      itineraryReviewRequestSource(page, productDetail.productId!), productDetail.productId!,
+    );
+    const remotePhase = productWizardRecoveryPhase(menus);
+    if (!menus.fullyUnlocked && !remotePhase && !isItineraryReviewCompletedMenus(menus)) {
+      throw new Error("VBK 菜单处于非官方或不连续的锁定状态，不能自动恢复录入。");
+    }
+    const recovery = prepareWizardMenuRecovery(
+      productDetail.automation!, draftPhases, mutableRetryFrom, remotePhase, basicInfoSaved,
+    );
+    if (recovery) {
+      mutableRetryFrom = recovery.retryFrom;
+      startIndex = draftPhases.indexOf(mutableRetryFrom);
+      if (startIndex < 0) throw new Error("VBK 向导恢复阶段不在当前产品录入计划中。");
+      wizardAdvanceOnly = recovery.wizardAdvanceOnly;
+      run = recovery.run;
+    } else {
+      run = prepareAutomationResumeRun(productDetail.automation!, draftPhases, mutableRetryFrom);
+    }
+  } else {
+    run = {
+      id: randomUUID(),
+      status: "running",
+      phases: draftPhases.map((phase) => ({ phase, status: "pending" })),
+      logs: [],
+    };
+  }
+
+  const { butlerSelection, servicePhone } = automationAccountContext(
+    ctx.db, productDetail.product, startIndex === 0 || !basicInfoSaved,
+  );
+  const keySpots = pickKeySpotsFromItinerary(productDetail.product);
+  const scenicSpotLogs: string[] = [];
   const { persist, log } = automationSession(ctx, localProductId, run);
   run.currentPhase = mutableRetryFrom ?? (productDetail.productId ? "basic" : "saleControl");
   persist();
@@ -156,6 +189,7 @@ export async function prepareAutomationSetup(
     product,
     draftPhases,
     startIndex,
+    wizardAdvanceOnly,
     run,
     basicInfoSaved,
     productLineBlocked,

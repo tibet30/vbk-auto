@@ -33,8 +33,16 @@ export function automationStartPhase(product: ProductDetail | undefined): string
   return undefined;
 }
 
-export function approvedWorkflowPlan(product: ProductDetail, replayOfAutomationRunId?: string, generateTrafficChildren = true): ApprovedWorkflowPlan {
+export function approvedWorkflowPlan(product: ProductDetail, replayOfAutomationRunId?: string,
+  generateTrafficChildren = false, itineraryReviewPending = false): ApprovedWorkflowPlan {
   if (product.automation?.id && replayOfAutomationRunId === product.automation.id) return { kind: "run" };
+  if (itineraryReviewPending && isVerifiedAutomationComplete(product)) return { kind: "run", retryFrom: "preflight" };
+  if (itineraryReviewPending && product.productId
+    && /^VBK 菜单尚未解锁/u.test(product.automation?.recovery?.phases.preflight?.finalError ?? "")) {
+    // Existing drafts may already have every module persisted but have stopped
+    // at the final menu gate. Preflight now performs the approved unlock first.
+    return { kind: "run", retryFrom: "preflight" };
+  }
   if (generateTrafficChildren && needsTrafficLineBackfill(product)) return { kind: "traffic-backfill" };
   if (isVerifiedAutomationComplete(product)) return { kind: "complete" };
   if (canRestartPreWriteAuthorizationFailure(product.automation, product.productId)) return { kind: "run" };

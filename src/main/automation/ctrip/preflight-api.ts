@@ -1,3 +1,4 @@
+import { verifyProductDraftMenus } from "./product-menu-readback.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 import { productNeedsVehicleResource } from "../../../shared/product-form.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
@@ -58,9 +59,7 @@ export async function runProductPreflightApi(
     getProductBaseInfoApi(page, productId),
     post(page, "getPackageList", { productId: Number(productId) || productId, priceInputType: 1 }, "VBK 套餐预检回读"),
     post(page, "getdescriptionInfo", { productId: Number(productId) || productId }, "VBK 图文预检回读"),
-    options.itineraryTourInfoId
-      ? Promise.resolve({ tourInfoId: options.itineraryTourInfoId })
-      : fetchTourInfoId(page, productId),
+    fetchTourInfoId(page, productId),
   ]);
   const basic = verifyBasicInfoReadback(record(base.baseInfo), product, productId);
 
@@ -69,8 +68,9 @@ export async function runProductPreflightApi(
     throw new Error("套餐预检回读名称不一致");
   }
   const presentation = await verifyPresentationReadback(page, product, productId, record(description.info));
-  if (!tour.tourInfoId) throw new Error("行程预检回读缺少 tourInfoId");
-  const detail = await fetchTourDailyDetail(page, tour.tourInfoId);
+  const detailTourInfoId = options.itineraryTourInfoId ?? tour.tourInfoId;
+  if (!detailTourInfoId) throw new Error("行程预检回读缺少 tourInfoId");
+  const detail = await fetchTourDailyDetail(page, detailTourInfoId);
   if (detail.descriptions.length !== product.itinerary.length) {
     throw new Error(`行程预检回读天数不一致：${detail.descriptions.length}/${product.itinerary.length}`);
   }
@@ -98,12 +98,16 @@ export async function runProductPreflightApi(
     vehicle = await verifyVehicleResourceBinding(page, productId, groupId, { requireFormal: true });
     if (!vehicle.bound) throw new Error(`用车资源预检仅绑定 ${vehicle.matchedCount}/${vehicle.segmentCount} 个行程段`);
   }
+  const menus = await verifyProductDraftMenus(page, productId, {
+    base, tourInfo: tour.tourInfo, verifiedTourInfoId: detailTourInfoId,
+  });
   return {
+    menus,
     productId: String(productId),
     verifiedWith: "remote-api-readback",
     basic: { ...basic, vendorProductCode: String(record(base.baseInfo).vendorProductCode) },
     presentation,
-    itinerary: { tourInfoId: String(tour.tourInfoId), days: detail.descriptions.length },
+    itinerary: { tourInfoId: String(detailTourInfoId), days: detail.descriptions.length },
     package: { name: String(packageItem.name), resourceId: String(packageItem.singleResourceId) },
     pricingInventory: pricingEvidence,
     clauses,

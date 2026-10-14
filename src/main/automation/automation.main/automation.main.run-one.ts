@@ -47,7 +47,8 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
   try {
     const basicState = { productDetail: product, product: productData, run, page, ...session, ...account,
       scenicSpotLogs: [] as string[], basicInfoSaved,
-      productLineBlocked: hasProductLineResolutionFailure(product.automation.recovery?.phases.basic) };
+      productLineBlocked: hasProductLineResolutionFailure(product.automation.recovery?.phases.basic),
+      wizardAdvanceOnly: new Set<string>() };
     const fillMap = buildFillMap({ ctx, localProductId, productDetail: product, page,
       productData, productId: product.productId, run, ...session });
     const execute = phaseName === "basic"

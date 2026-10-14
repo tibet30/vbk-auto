@@ -1,6 +1,7 @@
 import { ArrowRight, Check, ChevronRight, CircleAlert, Copy, Download, ExternalLink, FolderOpen, Info, LoaderCircle, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "../../helpers";
+import { closeModalAboveVbk, showModalAboveVbk } from "../../helpers/vbk-modal-visibility";
 import { useAppUpdate } from "../../update/AppUpdateContext";
 import { dialogTitle, diagnosticText, formatCheckedAt, presentUpdate } from "../../update/update-presentation";
 import shared from "../shared.module.less";
@@ -27,13 +28,22 @@ export function UpdateDialog() {
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    let cancelled = false;
     if (dialogOpen) {
-      if (!dialog.open) dialog.showModal();
-      requestAnimationFrame(() => closeRef.current?.focus());
-      return;
+      // 先等待原生视图隐藏，防止 showModal 后仍被 VBK 页面盖住。
+      void (async () => {
+        await showModalAboveVbk(dialog, () => !cancelled);
+        if (cancelled) return;
+        requestAnimationFrame(() => { if (!cancelled) closeRef.current?.focus(); });
+      })().catch((error) => {
+        console.error("隐藏 VBK 浏览器失败", error);
+        if (!cancelled) closeDialog();
+      });
+    } else {
+      closeModalAboveVbk(dialog);
+      setCopyState("idle");
     }
-    if (dialog.open) dialog.close();
-    setCopyState("idle");
+    return () => { cancelled = true; };
   }, [dialogOpen]);
 
   useEffect(() => () => {

@@ -10,7 +10,7 @@ import { reconcileResolvedHotelCopy, recoverResolvedHotelCandidates } from '../.
 import { agentWorkflowPatch } from '../../src/main/agent/integration-workflow.js';
 import { prepareAgentAutomation } from '../../src/main/automation/automation.main/automation.main.agent.js';
 import { applyProductPatchSafe } from '../../src/main/operations/product-patch.js';
-import type { AgentSnapshot, ProductReadiness } from '../../src/shared/contracts.js';
+import type { AgentApproval, AgentSnapshot, ProductReadiness } from '../../src/shared/contracts.js';
 
 const product = () => {
   const p=buildProductSnapshot({destination:'成都',days:2,productForm:'privateTour'});
@@ -224,6 +224,24 @@ test('final approval cannot shrink to only creating a product shell',()=>{
   assert.match(agentApprovalScopeError(p,['vbk.write_phase:saleControl'])!,/完整/);
   assert.equal(agentApprovalScopeError(p,buildAgentApproval(p).scope),undefined);
 });
+test('wizard retry grants only its requested page and never writes an already-advanced page',()=>{
+  const {p,snapshot,approval}=fixture();
+  const retry = approval as AgentApproval;
+  retry.scope = ['vbk.write_phase:basic'];
+  retry.wizardStageRetry = {phase:'basic',alreadyAdvanced:false};
+  assert.equal(agentApprovalScopeError(p,retry.scope,{wizardStageRetry:'basic'}),undefined);
+  assert.match(agentApprovalScopeError(p,retry.scope)!,/完整/);
+  assert.doesNotThrow(()=>assertAgentWriteAuthorized(p,snapshot,'basic','account'));
+  assert.throws(()=>assertAgentWriteAuthorized(p,snapshot,'presentation','account'),/方案、意图或账号已变化/);
+  assert.throws(()=>assertAgentWriteAuthorized(p,snapshot,'itinerary','account'),/方案、意图或账号已变化/);
+  retry.wizardStageRetry = {phase:'presentation',alreadyAdvanced:false};
+  assert.match(agentApprovalScopeError(p,retry.scope,{wizardStageRetry:'presentation'})!,/完整/);
+  assert.throws(()=>assertAgentWriteAuthorized(p,snapshot,'basic','account'),/仅授权当前向导页/);
+  retry.wizardStageRetry = {phase:'basic',alreadyAdvanced:true};
+  assert.throws(()=>assertAgentWriteAuthorized(p,snapshot,'basic','account'),/仅授权当前向导页/);
+  retry.wizardStageRetry = {phase:'basic'} as any;
+  assert.throws(()=>assertAgentWriteAuthorized(p,snapshot,'basic','account'),/仅授权当前向导页/);
+});
 test('dispatch rechecks pause, account, business version and new intent',()=>{
   const {p,snapshot}=fixture();
   assert.doesNotThrow(()=>assertAgentWriteAuthorized(p,snapshot,'saleControl','account'));
@@ -286,7 +304,7 @@ test('remote completion reuses verified durable basic info without rewriting it 
 
 test('remote completion rejects a traffic child without final readback before preflight closes the mother product',()=>{
   const p=enableTrafficLine(product());
-  const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
+  const approval={id:'a',generateTrafficChildren:true,...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
   const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
   p.productId='123';
   p.automation={trafficLine:{children:[{variant:'flightRoundTrip',lineDescription:'飞机往返',childProductId:'456',completedStages:['planned','childCreated'],verified:false,failedStage:'clausesSaved'}]}} as any;
@@ -297,7 +315,7 @@ test('remote completion rejects a traffic child without final readback before pr
 });
 test('remote completion rejects missing configured traffic children even when the parent phases are completed',()=>{
   const p=enableTrafficLine(product());
-  const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
+  const approval={id:'a',generateTrafficChildren:true,...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
   const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
   p.productId='123';
   p.automation={status:'succeeded',phases:approval.scope.map(scope=>({phase:scope.split(':')[1],status:'completed'})),trafficLine:{children:[],failureReason:'net::ERR_FAILED'}} as any;

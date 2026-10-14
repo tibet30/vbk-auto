@@ -20,7 +20,7 @@ const confirmDialogStyles = read("src/renderer/app/views/workspace/planning-reru
 test("legacy stage rerun remains safe while the review uses Agent conversation", () => {
   assert.doesNotMatch(treeFull, /window\.confirm/);
   assert.match(treeFull, /rerunFocusRef\.current = rerunTriggerRefs\.current\[stage\]/);
-  assert.match(confirmDialog, /showModal\(\)/);
+  assert.match(confirmDialog, /showModalAboveVbk\(dialog,/);
   assert.match(confirmDialog, /onCancel=\{\(event\) =>/);
   assert.match(confirmDialog, /aria-labelledby=\{TITLE_ID\}/);
   assert.match(confirmDialog, /aria-describedby=\{DESCRIPTION_ID\}/);

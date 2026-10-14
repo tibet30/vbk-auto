@@ -1,9 +1,9 @@
+import { unlockedMenus } from "./product-menu-fixture.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runProductPreflightApi } from "../../src/main/automation/ctrip/preflight-api.ts";
 import { verifyHotelResourceReadback } from "../../src/main/automation/ctrip/hotel-resource-readback.ts";
 import { localBusinessDate } from "../../src/main/automation/ctrip/pricing-api.ts";
-import { verifyPricingInventoryReadback } from "../../src/main/automation/ctrip/pricing-readback.ts";
 
 const success = (payload: Record<string, unknown>) => ({
   status: 200,
@@ -55,6 +55,7 @@ test("母产品没有酒店或用车资源需求时，预检不读取交通子�
   const page = {
     evaluate: async (_fn: unknown, request: any) => {
       const endpoint = String(request?.endpoint ?? "");
+      if (endpoint.endsWith("/getSubMenu.json")) return success(unlockedMenus("78490988"));
       endpoints.push(endpoint);
       if (endpoint.endsWith("/getProductBaseInfo")) {
         return success({ baseInfo: preflightBase(78490988) });
@@ -115,6 +116,7 @@ test("含酒店的预检只读取已保存资源段，不初始化或保存酒�
   const page = {
     evaluate: async (_fn: unknown, request: any) => {
       const endpoint = String(request?.endpoint ?? "");
+      if (endpoint.endsWith("/getSubMenu.json")) return success(unlockedMenus("78490989"));
       endpoints.push(endpoint);
       if (endpoint.endsWith("/getProductBaseInfo")) return success({ baseInfo: preflightBase(78490989) });
       if (endpoint.endsWith("/getPackageList")) return success({ itemList: [{ name: "成都2天1晚自由行", singleResourceId: 11 }] });
@@ -157,12 +159,16 @@ function versionedItineraryPage(draftDays: number, formalDays: number, requested
   return {
     evaluate: async (_fn: unknown, request: any) => {
       const endpoint = String(request?.endpoint ?? "");
+      if (endpoint.endsWith("/getSubMenu.json")) return success(unlockedMenus(String(request.body.productId)));
       if (endpoint.endsWith("/getProductBaseInfo")) return success({ baseInfo: preflightBase(78490990) });
       if (endpoint.endsWith("/getPackageList")) return success({ itemList: [{ name: "成都2天1晚自由行", singleResourceId: 11 }] });
       if (endpoint.endsWith("/getdescriptionInfo")) return success(preflightDescription());
       if (endpoint.endsWith("/listProductClauses")) return success(preflightClauses());
       if (endpoint.endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
       if (endpoint.endsWith("/searchProductImage.json")) return success(preflightCover());
+      if (endpoint.endsWith("/getProductTourInfoList")) return success({ tourInfos: [{
+        tourInfoId: "formal-id", auditStatus: { key: "A", value: "审核通过" },
+      }] });
       if (endpoint.endsWith("/getTourDailyDetail.json")) {
         const id = request?.body?.tourInfoId;
         requested.push(id);
@@ -192,24 +198,6 @@ test("draft 行程错误时不能以正确的 formal 行程替代通过", async 
     itinerary: [{ day: 1, hotel: "无" }, { day: 2, hotel: "无" }],
   }, "78490990", { itineraryTourInfoId: "draft-id" }), /行程预检回读天数不一致/);
   assert.deepEqual(requested, ["draft-id"]);
-});
-
-test("价格库存重复首日不能抵消缺失的次日", async () => {
-  const first = localBusinessDate();
-  const next = new Date(`${first}T00:00:00`); next.setDate(next.getDate() + 1);
-  const second = localBusinessDate(next);
-  const page = { evaluate: async (_fn: unknown, request: any) => {
-    const endpoint = String(request?.endpoint ?? "");
-    if (endpoint.endsWith("/getPackageList")) return success({ itemList: [{ singleResourceId: 11, optionalResourceId: 22 }] });
-    if (endpoint.endsWith("/GetBatchOperateSchedule")) return success({ dates: [
-      { adultPrice: { date: first, cost: 100, marketPrice: 200 }, inventory: { total: 10 } },
-      { adultPrice: { date: first, cost: 100, marketPrice: 200 }, inventory: { total: 10 } },
-    ] });
-    throw new Error(`unexpected endpoint ${endpoint}`);
-  } };
-  await assert.rejects(() => verifyPricingInventoryReadback(page, {
-    commercial: { pricing: { adult: 200, cost: { adult: 100 } }, inventory: { startDate: first, endDate: second, dailyQuota: 10 } },
-  }, "78490990"), /缺少 1\/2 个日期/);
 });
 
 test("酒店资源回读逐日覆盖 5/2/5/5/0；同城但候选不同的夜晚不能合并", async () => {

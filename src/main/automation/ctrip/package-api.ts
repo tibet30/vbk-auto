@@ -63,7 +63,7 @@ async function createCustomerTemplate(page: any, vendorId: number) {
       componentItems: [
         { code: "title", name: "预订用户填写信息", itemValue: [] },
         { code: "fill_in_number_limit", name: "每单填写出行人数", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "A", itemValue: "全部出行人", isChecked: true }] },
-        { code: "is_need_certificate", name: "是否需要证件", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "T", itemValue: "是", isChecked: true }, { itemId: "F", itemValue: "否", isChecked: false }] },
+        { code: "is_need_certificate", name: "是否需要证件", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "T", itemValue: "是", isChecked: false }, { itemId: "F", itemValue: "否", isChecked: true }] },
         { code: "customer_info", name: "出行人信息", isNeed: true, isDisplay: true, componentType: "radio", itemValue: [{ itemId: "1", itemValue: "出行人信息模板", isChecked: true }, { itemId: "2", itemValue: "自定义资料项包", isChecked: false }] },
         { code: "customer_info_package", name: "出行人资料项包", isNeed: true, isDisplay: false, componentType: "select", itemValue: [{ itemId: "5122001", itemValue: "个人信息", isChecked: false }] },
         { code: "customer_info_template", name: "出行人信息模板", isNeed: true, isDisplay: true, componentType: "select", itemValue: [{ itemId: "auto_match_template", itemValue: "自动匹配模板", isChecked: true }] },

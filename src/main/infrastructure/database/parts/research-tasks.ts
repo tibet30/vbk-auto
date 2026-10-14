@@ -5,7 +5,11 @@ import {
   canonicalPoiResearchTaskLabel,
   isSamePoiResearchTask,
 } from "../../../../shared/poi-research-tasks.js";
-import { isResearchTaskSatisfiedByProduct, poiResearchTaskSatisfaction } from "../../../../shared/research-task-satisfaction.js";
+import {
+  hasAmbiguousManualPoiSelection,
+  isResearchTaskSatisfiedByProduct,
+  poiResearchTaskSatisfaction,
+} from "../../../../shared/research-task-satisfaction.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "../../../minimax/minimax-constants.js";
 import { now } from "./types.js";
 import { touchProduct } from "./products.js";
@@ -16,6 +20,7 @@ const NO_POI_EVIDENCE_TITLE = `${NO_POI_EVIDENCE_MARKER} 当前条目明确为�
 const REMOVED_POI_EVIDENCE_MARKER = "[itinerary-operator:removed]";
 const REMOVED_POI_EVIDENCE_TITLE = `${REMOVED_POI_EVIDENCE_MARKER} 运营已手动删除对应景点，按删除凭证结清核查任务`;
 const SAVED_POI_DETAIL = "当前行程已保存有效的 VBK POI 映射。";
+export const DEFAULT_AUTO_RESEARCH_CONFIRMATION = "产品 JSON 写入时同步按字段匹配已满足，自动确认";
 
 /** Only generated lookup-failure copy is replaced. Operator-authored notes and
  * unrelated research details remain part of the audit record. */
@@ -127,6 +132,40 @@ export function reopenKindSupersededPoiResearchTasks(db: Database.Database, loca
 }
 
 /**
+ * Repair only the historic path where an ambiguous POI lookup was closed by a
+ * later same-name/positive-ID JSON write. This deliberately does not touch
+ * manual confirmations, removal receipts, resolved tasks, or product JSON.
+ */
+export function reopenAmbiguousAutoConfirmedPoiResearchTasks(db: Database.Database, localProductId: string) {
+  const rows = db.prepare(`SELECT id,type,detail,evidence_json FROM research_tasks
+    WHERE local_product_id=? AND type='vbk' AND state='confirmed'`).all(localProductId) as Array<{
+    id: string;
+    type: ResearchTask["type"];
+    detail: string | null;
+    evidence_json: string;
+  }>;
+  const ids = rows.filter((row) => hasAmbiguousManualPoiSelection(row)
+    && hasOnlyDefaultAutoConfirmation(row.evidence_json)).map((row) => row.id);
+  if (!ids.length) return { updated: 0, taskIds: [] as string[] };
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(`UPDATE research_tasks SET state='researching', status='queued'
+    WHERE local_product_id=? AND id IN (${placeholders})`).run(localProductId, ...ids);
+  touchProduct(db, localProductId);
+  return { updated: ids.length, taskIds: ids };
+}
+
+function hasOnlyDefaultAutoConfirmation(evidenceJson: string): boolean {
+  let evidence: unknown;
+  try { evidence = JSON.parse(evidenceJson); } catch { return false; }
+  return Array.isArray(evidence) && evidence.length === 1 && evidence.every((item) => {
+    const row = item && typeof item === "object" && !Array.isArray(item)
+      ? item as { title?: unknown }
+      : undefined;
+    return row?.title === DEFAULT_AUTO_RESEARCH_CONFIRMATION;
+  });
+}
+
+/**
  * 持久化的 `research_tasks` 行级确认：扫描当前产品的 research task 列表，
  * **逐条**用 strict 谓词判断它是否已经被新写入的 product JSON 满足。
  * 严格按 task 的 label / type 与 product 字段一一对应：
@@ -209,7 +248,7 @@ export function markResearchTasksSatisfiedByProduct(
     const nonPoiIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "non_poi").map((row) => row.id);
     const removedIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "removed").map((row) => row.id);
     const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id) && !removedIds.includes(id));
-    const ordinary = markResearchTasksSatisfied(db, localProductId, ordinaryIds, options.note ?? "产品 JSON 写入时同步按字段匹配已满足，自动确认");
+    const ordinary = markResearchTasksSatisfied(db, localProductId, ordinaryIds, options.note ?? DEFAULT_AUTO_RESEARCH_CONFIRMATION);
     const nonPoi = markKindNoPoiTasksSatisfied(db, localProductId, nonPoiIds);
     const removed = markKindNoPoiTasksSatisfied(db, localProductId, removedIds, REMOVED_POI_EVIDENCE_TITLE);
     const reconciled = reconcileConfirmedPoiDetails(db, localProductId, product, options.onlyTaskIds);

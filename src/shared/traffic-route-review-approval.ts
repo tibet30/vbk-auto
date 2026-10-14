@@ -5,7 +5,7 @@ export function trafficRouteReviewAuthorized(snapshot: AgentSnapshot | undefined
   if (!snapshot?.run) return false;
   const approval = [...snapshot.events].reverse().find(event => event.runId === snapshot.run?.id
     && event.type === "approval")?.data?.approval as AgentApproval | undefined;
-  return approval?.status === "approved" && approval.trafficRouteReviewAuthorized === true && approval.generateTrafficChildren !== false
+  return approval?.status === "approved" && approval.trafficRouteReviewAuthorized === true && approval.generateTrafficChildren === true
     && approval.intentVersion === snapshot.run.intentVersion
     && approval.scope.includes("vbk.write_phase:trafficLine");
 }

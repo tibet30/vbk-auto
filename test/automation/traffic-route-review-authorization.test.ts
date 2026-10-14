@@ -6,7 +6,7 @@ import { ensureAuthorizedTrafficRouteReview } from "../../src/main/automation/ct
 import type { AgentApproval, AgentSnapshot } from "../../src/shared/contracts-agent.js";
 
 const approval: AgentApproval = { id: "approval", accountKey: "a", productVersion: "version", scope: ["vbk.write_phase:trafficLine"],
-  summary: "录入交通套餐", status: "approved", createdAt: "now", intentVersion: "intent", trafficRouteReviewAuthorized: true };
+  summary: "录入交通套餐", status: "approved", createdAt: "now", intentVersion: "intent", generateTrafficChildren: true, trafficRouteReviewAuthorized: true };
 function snapshot(value = approval): AgentSnapshot {
   return { localProductId: "p", run: { id: "run", status: "running", createdAt: "now", updatedAt: "now", intentVersion: "intent" },
     events: [{ id: "e", runId: "run", type: "approval", content: "用户确认", createdAt: "now", data: { approval: value } }] };
@@ -14,7 +14,7 @@ function snapshot(value = approval): AgentSnapshot {
 
 test("线路审核只接受当前意图最后一次明确用户授权", () => {
   assert.equal(trafficRouteReviewAuthorized(snapshot()), true);
-  for (const patch of [{ trafficRouteReviewAuthorized: undefined }, { status: "pending" as const },
+  for (const patch of [{ generateTrafficChildren: undefined }, { generateTrafficChildren: false }, { trafficRouteReviewAuthorized: undefined }, { status: "pending" as const },
     { intentVersion: "old" }, { scope: ["vbk.write_phase:itinerary"] }]) {
     assert.equal(trafficRouteReviewAuthorized(snapshot({ ...approval, ...patch })), false);
   }

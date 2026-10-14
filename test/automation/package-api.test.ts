@@ -84,7 +84,16 @@ test("ensurePackageApi 创建首套餐后轮询到物化资源再保存正式套
     days: 2,
   });
   assert.equal(packageListReads, 4);
+  const templateRequest = requests.find((request) => request.path === "saveCustomerCpntTemplateInfo");
+  const certificateField = templateRequest?.body.componentItems.find((item: any) => item.code === "is_need_certificate");
+  assert.deepEqual(certificateField?.itemValue, [
+    { itemId: "T", itemValue: "是", isChecked: false },
+    { itemId: "F", itemValue: "否", isChecked: true },
+  ]);
+  const travelerField = templateRequest?.body.componentItems.find((item: any) => item.code === "fill_in_number_limit");
+  assert.deepEqual(travelerField?.itemValue, [{ itemId: "A", itemValue: "全部出行人", isChecked: true }]);
   const createRequest = requests.filter((request) => request.path === "savePackageItem")[0];
+  assert.equal(createRequest.body.packageInfo.piCustomerInfoTemplateId, 5122001);
   assert.equal(createRequest.headers.cookieorigin, "https://vbooking.ctrip.com");
   assert.equal(createRequest.body.head.cid, "CID-VALUE");
   assert.equal(createRequest.body.packageInfo.name, "日喀则2天1晚私家团·当地4钻");

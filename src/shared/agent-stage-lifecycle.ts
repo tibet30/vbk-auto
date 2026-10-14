@@ -59,7 +59,7 @@ function checkpointSummary(snapshot: AgentSnapshot, stage: AgentStage, event: Ag
       && call.data.modelTurnId === item.data?.modelTurnId));
   const verifiedWorkflow = records.some((item) => item.runId === stage.runId
     && item.type === 'status' && item.data?.deterministicWorkflow === true && /最终回读/.test(item.content));
-  if (hasUnresolvedAgentToolFailure(records, stage.runId)) return UNRESOLVED_TOOL_SUMMARY;
+  if (hasUnresolvedAgentToolFailure(records, stage.runId, snapshot.stages)) return UNRESOLVED_TOOL_SUMMARY;
   if (verifiedWorkflow) return '已按本次授权完成 VBK 录入并通过最终回读。产品已保存，请在 VBK 检查草稿并手动发布。';
   const terminalResult = [...records].reverse().find((item) => item.runId === stage.runId
     && item.type === 'tool_result' && item.data?.terminal === true && !failedAgentToolResult(item));

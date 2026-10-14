@@ -48,10 +48,10 @@ test("poi:suggest IPC 调试日志覆盖开始、详情、成功、空结果和�
   assert.match(handler, /const result = await suggestPoiDetailWithRawPayload\(context\.browser, query(?:, \{[\s\S]*?\})?\)/);
   assert.match(handler, /rawPayload: stringifyPoiPayloadForLog\(result\.rawPayload\)/);
   assert.match(handler, /const \{ rawPayload: _rawPayload, \.\.\.detail \} = result;/);
-  assert.match(handler, /return detail;/);
-  assert.match(handler, /candidateCount: result\.candidates\.length/);
-  assert.match(handler, /poiName: result\.best\.poiName/);
-  assert.match(handler, /poiId: result\.best\.poiId/);
+  assert.match(handler, /return detail;|return \{ \.\.\.detail,/);
+  assert.match(handler, /candidateCount: (?:screened|result)\.candidates\.length/);
+  assert.match(handler, /poiName: (?:screened|result)\.best\.poiName/);
+  assert.match(handler, /poiId: (?:screened|result)\.best\.poiId/);
   assert.match(handler, /errorMessage:/);
   assert.doesNotMatch(handler, /cookie|ticket|Authorization|apiKey|responseText|requestHeaders/i);
 });

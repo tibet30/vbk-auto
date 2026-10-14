@@ -44,6 +44,35 @@ test('controlled automation advances the matching approval in the same transacti
   assert.doesNotThrow(() => assertAgentWriteAuthorized(db.getProduct(id)!, snapshot, 'basic', 'account'));
 }));
 
+test('controlled writes keep approval aligned with separately stored traffic evidence', () => fixture((db, id, mutations) => {
+  let current = db.getProduct(id)!;
+  const availability = {
+    endpointPlan: { arrivalCity: '成都', departureCity: '成都', resolvedAt: '2026-10-14T08:00:00.000Z',
+      train: { arrival: { code: 'CN001CDW', name: '成都东' }, departure: { code: 'CN001CDW', name: '成都东' } } },
+    availableVariants: ['trainRoundTrip'], unavailableVariants: {},
+  };
+  const withTraffic = structuredClone(current.product) as Record<string, any>;
+  withTraffic.operations.trafficLine = { enabled: true, variants: ['trainRoundTrip'], availability };
+  mutations.commands.mergeChanges(id, current, withTraffic, 'user');
+  current = db.getProduct(id)!;
+  const snapshot = db.getAgentSnapshot(id)!;
+  const preparedApproval = snapshot.events[0]!.data!.approval as { productVersion: string; scope: string[] };
+  preparedApproval.productVersion = agentProductVersion(current);
+  preparedApproval.scope = requiredAgentPhases(current).map(phase => `vbk.write_phase:${phase}`);
+  db.saveAgentSnapshot(snapshot);
+
+  const automated = { ...current.product,
+    basicInfo: { ...current.product.basicInfo as object, subtitle: '自动化规范化写回' } };
+  mutations.commands.mergeChanges(id, current, automated, 'automation');
+
+  const saved = db.getProduct(id)!;
+  const savedSnapshot = db.getAgentSnapshot(id)!;
+  const approval = savedSnapshot.events[0]!.data!.approval as { productVersion: string };
+  assert.deepEqual((saved.product.operations as Record<string, any>).trafficLine.availability, availability);
+  assert.equal(approval.productVersion, agentProductVersion(saved));
+  assert.doesNotThrow(() => assertAgentWriteAuthorized(saved, savedSnapshot, 'basic', 'account'));
+}));
+
 test('operator changes during a deterministic run cannot be adopted by a later controlled write', () => fixture((db, id, mutations) => {
   const before = db.getProduct(id)!;
   const oldFingerprint = agentProductVersion(before);

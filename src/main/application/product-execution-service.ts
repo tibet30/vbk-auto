@@ -1,5 +1,6 @@
 import type { AgentSnapshot, ProductDetail, ProductWorkflowTask } from '../../shared/contracts.js';
 import type { ProductExecutionView } from '../../shared/contracts-product-architecture.js';
+import { approvalForRun } from '../agent/integration-gates.js';
 import { agentWorkflowPatch } from '../agent/integration-workflow.js';
 import { hasVerifiedMotherPhases, failedAutomationResumePhase, approvedRecoveryStartPhase } from '../automation/automation.main/automation.main.resume-phase.js';
 import { incompleteTrafficVariants, isUnavailableTrafficResourceFailure } from '../../shared/traffic-resource-status.js';
@@ -18,11 +19,7 @@ export function productExecutionView(product: ProductDetail, snapshot?: AgentSna
   const verified = hasVerifiedMother(product);
   const children = product.automation?.trafficLine?.children ?? [];
   const phase = product.automation?.currentPhase;
-  const pendingTraffic = incompleteTrafficVariants(
-    (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
-    product.automation?.trafficLine).length > 0 || children.some(child => !child.skipped
-      && !(child.verified && (child.completedStages ?? []).includes('finalReadback'))
-      && !isUnavailableTrafficResourceFailure(child.failureReason ?? '', child.variant));
+  const pendingTraffic = hasPendingTraffic(product, snapshot);
   const run = snapshot?.run;
   const nextAction: ProductExecutionView['nextAction'] = task?.status === 'abandoned' || run?.status === 'abandoned' ? 'none'
     : snapshot?.uncertainWrite ? 'verify_write'
@@ -44,6 +41,16 @@ export function productExecutionView(product: ProductDetail, snapshot?: AgentSna
 
 function hasVerifiedMother(product: ProductDetail): boolean {
   try { return hasVerifiedMotherPhases(product); } catch { return false; }
+}
+
+function hasPendingTraffic(product: ProductDetail, snapshot?: AgentSnapshot): boolean {
+  const approval = approvalForRun(snapshot);
+  if (approval && approval.generateTrafficChildren !== true) return false;
+  const config = (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine;
+  const children = product.automation?.trafficLine?.children ?? [];
+  return incompleteTrafficVariants(config, product.automation?.trafficLine).length > 0
+    || children.some(child => !(child.verified && (child.completedStages ?? []).includes('finalReadback')) && !child.skipped
+      && !isUnavailableTrafficResourceFailure(child.failureReason ?? '', child.variant));
 }
 
 /** The only application policy translating durable execution facts into task state. */
@@ -73,10 +80,7 @@ export class ProductExecutionService {
     }
     const view = productExecutionView(product, snapshot, task);
     let patch = snapshot?.run ? agentWorkflowPatch(snapshot, product) : {};
-    const config = (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine;
-    const pending = incompleteTrafficVariants(config, product.automation?.trafficLine).length > 0
-      || (product.automation?.trafficLine?.children ?? []).some(child => !(child.verified && (child.completedStages ?? []).includes('finalReadback')) && !child.skipped
-        && !isUnavailableTrafficResourceFailure(child.failureReason ?? '', child.variant));
+    const pending = hasPendingTraffic(product, snapshot);
     if (snapshot?.uncertainWrite) {
       patch = { ...patch, status: 'needs_attention', progress: Math.min(task.progress, 99),
         message: '平台写入结果不明，请先核查回读', error: snapshot.uncertainWrite.message, completedAt: undefined };

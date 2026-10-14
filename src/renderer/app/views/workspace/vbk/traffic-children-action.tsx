@@ -12,7 +12,7 @@ export function TrafficChildrenAction({ product, disabled }: { product: ProductD
   const parentSaved = product.status === "draft_saved" && Boolean(product.productId)
     && product.automation?.phases.some(phase => phase.phase === "preflight" && phase.status === "completed");
   return <div className={styles.action}>
-    <p>可单独创建并录入子产品；已有子产品将从保存的进度继续。只保存草稿。</p>
+    <p>默认不创建子产品。母产品录入完成后，可在此单独创建；已有子产品将从保存的进度继续。只保存草稿。</p>
     <label>
       <input type="checkbox" checked={routeReview} disabled={disabled || busy} onChange={event => setRouteReview(event.target.checked)} />
       同时授权玩法线路匹配审核

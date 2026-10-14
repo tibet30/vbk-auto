@@ -37,7 +37,7 @@ function enableTrafficLine(productDetail: ReturnType<typeof product>) {
 
 test('remote completion retains failed traffic children after mother preflight succeeds',()=>{
   const p=enableTrafficLine(product());
-  const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
+  const approval={id:'a',generateTrafficChildren:true,...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
   const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
   p.productId='123';
   p.automation={
@@ -66,7 +66,7 @@ test('remote completion tolerates skipped unavailable train children',()=>{
   Object.assign(p.product.operations as Record<string, unknown>, {
     trafficLine: { enabled: true, variants: ['flightRoundTrip', 'trainRoundTrip'] },
   });
-  const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
+  const approval={id:'a',generateTrafficChildren:true,...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'2026-09-05'};
   const snapshot: AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'2026-09-05',updatedAt:'2026-09-05'},events:[{id:'e',runId:'r',type:'approval',content:'确认',createdAt:'2026-09-05',data:{approval}}]};
   p.productId='123';
   p.automation={
@@ -100,7 +100,7 @@ test('deterministic completion requires a matching approved fingerprint as well 
 test('verified deterministic preflight closes stale sale-control and hotel labels without another write',()=>{
   const {p,snapshot,approval}=fixture();
   p.productId='123';
-  const phases = approval.scope.map((scope) => {
+  const phases = approval.scope.filter(scope => scope.startsWith('vbk.write_phase:')).map((scope) => {
     const phase = scope.split(':')[1]!;
     // hotelResource may remain pending after a successful preflight readback.
     return { phase, status: phase === 'hotelResource' ? 'pending' : 'completed' };
@@ -210,7 +210,8 @@ test('workflow projection counts deterministic automation phases into entry prog
     phases:[{phase:'saleControl',status:'completed'},{phase:'basic',status:'completed'},{phase:'presentation',status:'running'}]} as any;
   const patch=agentWorkflowPatch(snapshot,p);
   assert.equal(patch.stage,'automation');
-  assert.equal(patch.progress,Math.min(99,Math.round(2/approval.scope.length*100)));
+  const writeScopes = approval.scope.filter(scope => scope.startsWith('vbk.write_phase:'));
+  assert.equal(patch.progress,Math.min(99,Math.round(2/writeScopes.length*100)));
 });
 
 test('bare scope aliases normalize without granting missing phases or accepting unknown scopes',async()=>{
@@ -230,7 +231,7 @@ test('provider reasoning blocks are excluded from public answers',async()=>{
 });
 
 test('saved mother cannot hide a traffic network failure; confirmed unavailable resources can finish',()=>{
-  const p=enableTrafficLine(product());const approval={id:'a',...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'now'};
+  const p=enableTrafficLine(product());const approval={id:'a',generateTrafficChildren:true,...buildAgentApproval(p),accountKey:'account',productVersion:agentProductVersion(p),intentVersion:'intent',status:'approved' as const,createdAt:'now'};
   const snapshot:AgentSnapshot={localProductId:p.id,run:{id:'r',status:'running',intentVersion:'intent',createdAt:'now',updatedAt:'now'},events:[{id:'a',runId:'r',type:'approval',content:'确认',createdAt:'now',data:{approval}}]};
   p.productId='123';p.status='draft_saved';p.basicInfoSaved=true;
   p.automation={status:'succeeded',phases:[...approval.scope.filter(scope=>!scope.endsWith(':trafficLine')).map(scope=>({phase:scope.split(':')[1],status:'completed'})),{phase:'trafficLine',status:'failed'}],trafficLine:{children:[],failureReason:'net::ERR_FAILED'}} as any;

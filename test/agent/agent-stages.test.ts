@@ -204,6 +204,77 @@ test('an earlier run failure does not block the current run', () => {
   assert.equal(snapshot.stages!.at(-1)!.summary, '本次请求已处理');
 });
 
+test('a superseded undispatched cancellation does not block a later stage', () => {
+  const { manager, snapshot } = fixture(); snapshot.run = manager.newRun('running');
+  manager.event(snapshot, 'user', '执行旧请求'); manager.running(snapshot);
+  manager.event(snapshot, 'tool_call', 'continue_approved_workflow', {
+    name: 'continue_approved_workflow', toolCallId: 'old-write', arguments: {},
+  });
+  const oldStage = snapshot.stages!.at(-1)!;
+  manager.result(snapshot, 'old-write', '应用中断前尚未执行。', { cancelled: true, recovered: true });
+  manager.pause(snapshot, '应用中断');
+
+  manager.event(snapshot, 'user', '只读核验当前状态'); manager.running(snapshot);
+  manager.event(snapshot, 'assistant', '当前状态已核验。'); manager.finish(snapshot);
+
+  assert.equal(oldStage.status, 'superseded');
+  assert.equal(snapshot.run.status, 'completed');
+  assert.equal(snapshot.stages!.at(-1)!.summary, '当前状态已核验。');
+});
+
+for (const [name, data] of [
+  ['error', { error: '请求超时' }],
+  ['uncertain write', { uncertainWrite: true }],
+] as const) {
+  test(`a superseded ${name} still blocks a later stage`, () => {
+    const { manager, snapshot } = fixture(); snapshot.run = manager.newRun('running');
+    manager.event(snapshot, 'user', '执行旧请求'); manager.running(snapshot);
+    manager.event(snapshot, 'tool_call', 'execute_vbk_phase', {
+      name: 'execute_vbk_phase', toolCallId: 'old-write', arguments: { phase: 'basic' },
+    });
+    manager.result(snapshot, 'old-write', '旧请求未确认', data);
+    manager.pause(snapshot, '旧请求受阻');
+
+    manager.event(snapshot, 'user', '只读核验当前状态'); manager.running(snapshot);
+    manager.event(snapshot, 'assistant', '当前状态已核验。'); manager.finish(snapshot);
+
+    assert.equal(snapshot.run.status, 'paused');
+    assert.match(snapshot.stages!.at(-1)!.summary!, /工具操作失败/);
+  });
+}
+
+test('a recovered cancellation in the active stage still blocks completion', () => {
+  const { manager, snapshot } = fixture(); snapshot.run = manager.newRun('running');
+  manager.event(snapshot, 'user', '执行当前请求'); manager.running(snapshot);
+  manager.event(snapshot, 'tool_call', 'continue_approved_workflow', {
+    name: 'continue_approved_workflow', toolCallId: 'active-write', arguments: {},
+  });
+  manager.result(snapshot, 'active-write', '应用中断前尚未执行。', { cancelled: true, recovered: true });
+  manager.event(snapshot, 'assistant', '当前状态已核验。'); manager.finish(snapshot);
+
+  assert.equal(snapshot.run.status, 'paused');
+  assert.match(snapshot.stages!.at(-1)!.summary!, /工具操作失败/);
+});
+
+test('a superseded recovered cancellation with a dispatch receipt still blocks completion', () => {
+  const { manager, snapshot } = fixture(); snapshot.run = manager.newRun('running');
+  manager.event(snapshot, 'user', '执行旧请求'); manager.running(snapshot);
+  manager.event(snapshot, 'tool_call', 'continue_approved_workflow', {
+    name: 'continue_approved_workflow', toolCallId: 'dispatched-write', arguments: {},
+  });
+  manager.event(snapshot, 'status', '已发送外部操作', {
+    toolCallId: 'dispatched-write', writeDispatch: true,
+  });
+  manager.result(snapshot, 'dispatched-write', '应用中断前结果未知。', { cancelled: true, recovered: true });
+  manager.pause(snapshot, '应用中断');
+
+  manager.event(snapshot, 'user', '只读核验当前状态'); manager.running(snapshot);
+  manager.event(snapshot, 'assistant', '当前状态已核验。'); manager.finish(snapshot);
+
+  assert.equal(snapshot.run.status, 'paused');
+  assert.match(snapshot.stages!.at(-1)!.summary!, /工具操作失败/);
+});
+
 test('whole-request terminal readback clears failures but never hides a later failure', () => {
   const { manager, snapshot } = fixture(); snapshot.run = manager.newRun('running');
   manager.result(snapshot, 'old', '失败', { error: '超时' });

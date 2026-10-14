@@ -215,7 +215,9 @@ test("隔离 SQLite 中完整行程不调用模型，写入后重连仍可读", 
     assert.ok(alternative.every((spot) => spot.relation === "or" && spot.timeOfDay === alternative[0]!.timeOfDay));
     assert.equal(reloaded.product.basicInfo?.meetingCity, "日喀则");
     assert.equal(reloaded.product.basicInfo?.destinationCity, "日喀则");
-    assert.equal(reloaded.product.operations?.hotelTier, "当地5钻酒店/-38");
+    assert.equal(reloaded.product.operations?.hotelMatchingMode, "rules");
+    assert.deepEqual(reloaded.product.operations?.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
+    assert.equal(reloaded.product.operations?.hotelTier, undefined);
   } finally {
     db.close();
     rmSync(dataPath, { recursive: true, force: true });

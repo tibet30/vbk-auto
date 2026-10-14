@@ -51,22 +51,15 @@ interface VbkApiMethod {
  */
 function extractVbkApiMethods(contractsSource: string): VbkApiMethod[] {
   const out: VbkApiMethod[] = [];
-  const ifaceBlock = contractsSource.match(/export interface VbkApi \{[\s\S]*?^\}/m);
-  if (!ifaceBlock) return out;
-  const block = ifaceBlock[0];
-  // 逐个 category: { method: ..., method: ... }
-  const categoryRe = /(\w+):\s*\{([\s\S]*?)\};/g;
-  let categoryMatch: RegExpExecArray | null;
-  while ((categoryMatch = categoryRe.exec(block))) {
-    const category = categoryMatch[1];
-    const body = categoryMatch[2];
-    // 只匹配“以方法名 + ( 开头的行”，避免误吃参数名 / 返回类型。
-    const methodRe = /^\s*(\w+)\s*\(/gm;
-    let methodMatch: RegExpExecArray | null;
-    while ((methodMatch = methodRe.exec(body))) {
-      const method = methodMatch[1];
-      out.push({ category, method });
-    }
+  const block = contractsSource.match(/export interface VbkApi \{([\s\S]*?)^\}/m)?.[1];
+  if (!block) return out;
+  let category = "";
+  for (const line of block.split("\n")) {
+    const group = line.match(/^  (\w+): \{$/);
+    if (group) category = group[1];
+    const member = line.match(/^    (\w+)\??\(/);
+    if (category && member) out.push({ category, method: member[1] });
+    if (/^  };$/.test(line)) category = "";
   }
   return out;
 }
@@ -76,25 +69,18 @@ function extractVbkApiMethods(contractsSource: string): VbkApiMethod[] {
  * preload.cts 用 `category: { method: (args) => ipcRenderer.invoke("category:method", ...) }`
  */
 function extractPreloadBindings(preloadSource: string): Map<string, string> {
-  // key = category.method, value = invoke channel
   const map = new Map<string, string>();
-  const blockMatch = preloadSource.match(/const api: VbkApi = \{[\s\S]*?\};/m);
-  if (!blockMatch) return map;
-  const block = blockMatch[0];
-  // 提取 category 块
-  const categoryRe = /(\w+):\s*\{([\s\S]*?)\}/g;
-  let categoryMatch: RegExpExecArray | null;
-  while ((categoryMatch = categoryRe.exec(block))) {
-    const category = categoryMatch[1];
-    const body = categoryMatch[2];
-    // 提取 method + 对应 invoke channel
-    const methodRe = /(\w+)\s*:\s*(?:\(([^)]*)\)\s*=>\s*)?(?:ipcRenderer\.invoke\(\s*["']([^"']+)["']|\{)/g;
-    let methodMatch: RegExpExecArray | null;
-    while ((methodMatch = methodRe.exec(body))) {
-      const method = methodMatch[1];
-      const channel = methodMatch[3];
-      if (channel) map.set(`${category}.${method}`, channel);
+  const block = preloadSource.match(/const api: VbkApi = \{([\s\S]*)^};/m)?.[1];
+  if (!block) return map;
+  let category = "";
+  for (const line of block.split("\n")) {
+    const group = line.match(/^  (\w+): \{/);
+    if (group) category = group[1];
+    const members = /(\w+)\s*:\s*(?:\([^)]*\)|[\w$]+)\s*=>\s*ipcRenderer\.invoke\(\s*["']([^"']+)["']/g;
+    for (const match of line.matchAll(members)) {
+      if (category) map.set(`${category}.${match[1]}`, match[2]);
     }
+    if (/^  },$/.test(line)) category = "";
   }
   return map;
 }
@@ -105,6 +91,8 @@ const ipcRegistrarSource = [
   "src/main/ipc/product-ai-ipc.ts",
   "src/main/ipc/remote-product-ipc.ts",
   "src/main/ipc/browser-automation-ipc.ts",
+  "src/main/ipc/hotel-draft-retry-ipc.ts",
+  "src/main/ipc/itinerary-review-unlock-ipc.ts",
   "src/main/ipc/settings-ipc.ts",
   "src/main/ipc/planning-ipc.ts",
   "src/main/ipc/planning-v2-ipc.ts",
@@ -134,9 +122,10 @@ test("IPC registrars 注册的 channel 都在 preload 用到了（避免泄漏�
 });
 
 test("contracts.ts VbkApi 里的每个方法在 preload.cts 都有绑定", () => {
-  const contracts = readSource("src/shared/contracts.ts");
+  const contracts = readSource("src/shared/contracts-api.ts");
   const preload = readSource("src/main/preload.cts");
   const methods = extractVbkApiMethods(contracts);
+  assert.ok(methods.length > 50, "IPC 契约必须实际读取 VbkApi，不能对空 barrel 通过检查");
   const bindings = extractPreloadBindings(preload);
   const missing: string[] = [];
   for (const m of methods) {
@@ -167,6 +156,10 @@ test("preload 的 category.method → channel 命名约定（同名简化）", (
     ["ai.send", "ai:send"],
     ["ai.regenerate", "ai:regenerate"],
     ["automation.start", "automation:start"],
+    ["automation.getItineraryReviewUnlockState", "automation:getItineraryReviewUnlockState"],
+    ["automation.prepareItineraryReviewUnlock", "automation:prepareItineraryReviewUnlock"],
+    ["automation.executeItineraryReviewUnlock", "automation:executeItineraryReviewUnlock"],
+    ["automation.refreshItineraryReviewUnlock", "automation:refreshItineraryReviewUnlock"],
     ["automation.retry", "automation:retry"],
     ["automation.retryPhase", "automation:retryPhase"],
     ["automation.retryOnePhase", "automation:retryOnePhase"],

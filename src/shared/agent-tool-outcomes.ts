@@ -1,4 +1,4 @@
-import type { AgentEvent } from './contracts-agent.js';
+import type { AgentEvent, AgentStage } from './contracts-agent.js';
 
 export function failedAgentToolResult(event: AgentEvent): boolean {
   return event.type === 'tool_result' && (event.data?.error !== undefined
@@ -14,12 +14,42 @@ function stableValue(value: unknown): unknown {
   return value;
 }
 
+function supersededStages(stages: readonly AgentStage[], runId: string): ReadonlySet<string> {
+  return new Set(stages.filter((stage) => stage.runId === runId && stage.status === 'superseded')
+    .map((stage) => stage.id));
+}
+
+/**
+ * An interrupted call with no dispatch record is persisted as cancelled/recovered.
+ * Once its whole stage is replaced, it is no longer a pending operation for the
+ * new request. Do not extend this exception to errors or uncertain writes.
+ */
+function supersededUndispatchedCancellation(
+  event: AgentEvent,
+  stages: ReadonlySet<string>,
+  dispatched: ReadonlySet<string>,
+): boolean {
+  const stageId = event.data?.stageId;
+  const callId = event.data?.toolCallId;
+  return event.data?.cancelled === true && event.data?.recovered === true
+    && typeof stageId === 'string' && stages.has(stageId)
+    && typeof callId === 'string' && !dispatched.has(callId);
+}
+
 /** A successful retry clears only the same operation, never an unrelated query. */
-export function hasUnresolvedAgentToolFailure(events: AgentEvent[], runId: string): boolean {
+export function hasUnresolvedAgentToolFailure(
+  events: AgentEvent[],
+  runId: string,
+  stages: readonly AgentStage[] = [],
+): boolean {
   const calls = new Map<string, string>();
   const names = new Map<string, string>();
   const failures = new Set<string>();
   const rejected = new Set<string>();
+  const superseded = supersededStages(stages, runId);
+  const dispatched = new Set(events.filter((event) => event.runId === runId
+    && event.data?.writeDispatch === true && typeof event.data.toolCallId === 'string')
+    .map((event) => event.data!.toolCallId as string));
   for (const event of events) {
     if (event.runId !== runId) continue;
     const callId = event.data?.toolCallId;
@@ -28,6 +58,7 @@ export function hasUnresolvedAgentToolFailure(events: AgentEvent[], runId: strin
       calls.set(callId, JSON.stringify([event.data?.name ?? event.content, stableValue(event.data?.arguments ?? {})]));
     }
     if (event.type === 'tool_result') {
+      if (supersededUndispatchedCancellation(event, superseded, dispatched)) continue;
       const key = typeof callId === 'string' ? calls.get(callId) ?? callId : event.id;
       const name = typeof callId === 'string' ? names.get(callId) ?? key : key;
       if (failedAgentToolResult(event)) {

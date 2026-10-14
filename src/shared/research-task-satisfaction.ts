@@ -17,6 +17,8 @@ const vehiclePattern = /用车|车辆|接送|司机|资源组|vehicle|vehicleRes
 const hotelPattern = /酒店|住宿|客栈|民宿|hotelTier|hotelCandidates/i;
 const commercialPattern = /成人价|儿童价|成人成本|儿童成本|价格|起订人数|最低成团|库存|班期|每日配额|起止日期|配额|套餐名称|费用包含|不包含|退改|政策|成本口径|packageName|pricing|inventory|terms/i;
 const obsoletePoiFailurePattern = /suggestPoi\s*未匹配|未找到对应的\s*VBK\s*POI|暂停营业|停止营业|永久关闭|已关闭|可能已关闭|temporarily\s+closed|permanently\s+closed|不能加入行程|不能写入行程|不能作为行程景点|请替换为(?:正常营业|可游览)景点|替换为(?:正常营业|可游览)景点|手动录入\s*POI|人工核查/i;
+const poiCandidateAmbiguityPattern = /多个候选|无法(?:安全)?确定(?:唯一|其一)|不能(?:安全)?(?:默认)?选择(?:其一|候选)/u;
+const explicitManualPoiSelectionPattern = /(?:手动|人工|运营人员?)\s*(?:选择|确认)(?:\s*(?:POI|景点|地点|候选))?/u;
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -97,6 +99,24 @@ function hasPoiTaskSpot(product: ProductLike, taskName: string): boolean {
  * again unless a verified POI is present. */
 export type PoiResearchSatisfaction = "verified" | "non_poi" | "removed" | null;
 
+/** A result that asks an operator to choose between candidates cannot become
+ * an automatic confirmation merely because a later JSON write has a POI ID.
+ * Explicit removal/free-activity receipts remain independently valid. */
+export function requiresManualPoiSelection(task: ResearchTaskText): boolean {
+  if (task.type !== "vbk") return false;
+  const detail = textValue(task.detail);
+  return poiCandidateAmbiguityPattern.test(detail) || explicitManualPoiSelectionPattern.test(detail);
+}
+
+/** Narrow migration/recovery predicate for the historic auto-confirm bug.
+ * A generic manual-input note is not enough: the detail must say both that
+ * candidates are ambiguous and that a human must choose one. */
+export function hasAmbiguousManualPoiSelection(task: ResearchTaskText): boolean {
+  if (task.type !== "vbk") return false;
+  const detail = textValue(task.detail);
+  return poiCandidateAmbiguityPattern.test(detail) && explicitManualPoiSelectionPattern.test(detail);
+}
+
 /** All names in an "A 或 B" task must be independently resolved. */
 export function poiResearchTaskSatisfaction(task: ResearchTaskText, product: ProductLike): PoiResearchSatisfaction {
   const names = poiResearchTaskNames(task.label || "", task.type || "vbk");
@@ -132,7 +152,13 @@ export function isResearchTaskSatisfiedByProduct(
   if (poiTaskNames.length > 0) {
     // “A 或 B”不是单个 POI。仅当行程里每个备选项均有有效 poiName / poiId
     // 时才收敛，避免只完成一项便错误放过另一项。
-    if (poiResearchTaskSatisfaction(task, product) !== null) return true;
+    const poiSatisfaction = poiResearchTaskSatisfaction(task, product);
+    if (poiSatisfaction !== null) {
+      // “已找到多个候选…请手动选择” is a durable operator decision gate.
+      // A trusted removal/free-activity receipt still settles the task; only a
+      // same-name + positive-ID mapping is prohibited from auto-confirming it.
+      return poiSatisfaction !== "verified" || !requiresManualPoiSelection(task);
+    }
     // A failed POI task may become obsolete after the operator replaces that
     // attraction in the current itinerary. Only explicit failure/replacement
     // states are auto-resolved; ordinary missing POI tasks remain actionable.

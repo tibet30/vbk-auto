@@ -46,12 +46,23 @@ test("默认授权不生成子产品：拒绝交通写入，母产品可独立�
     { runId: "run", hadWrites: true, hadRemoteWrites: true, deterministicWorkflow: true }).verified, true);
 });
 
+test("缺少子产品选择的旧授权不会自动补录或授予交通写入", async () => {
+  const f = fixture();
+  await f.core.approve(f.product.id, { approvalId: f.approval.id, productVersion: f.approval.productVersion });
+  const snapshot = f.read();
+  delete approvalForRun(snapshot)!.generateTrafficChildren;
+  assert.deepEqual(approvedWorkflowPlan(f.product), { kind: "complete" });
+  assert.throws(() => assertAgentWriteAuthorized(f.product, snapshot, "trafficLine", "account"), /未授权生成子产品/);
+  assert.equal(agentCompletionGate(f.product, snapshot, { ready: true } as ProductReadiness,
+    { runId: "run", hadWrites: true, hadRemoteWrites: true, deterministicWorkflow: true }).verified, true);
+});
+
 test("勾选生成子产品才授予交通写入权限", async () => {
   const f = fixture();
   await f.core.approve(f.product.id, { approvalId: f.approval.id, productVersion: f.approval.productVersion, generateTrafficChildren: true });
   assert.equal(approvalForRun(f.read())!.generateTrafficChildren, true);
   assert.doesNotThrow(() => assertAgentWriteAuthorized(f.product, f.read(), "trafficLine", "account"));
-  assert.deepEqual(approvedWorkflowPlan(f.product), { kind: "traffic-backfill" });
+  assert.deepEqual(approvedWorkflowPlan(f.product, undefined, true), { kind: "traffic-backfill" });
 });
 
 test("稍后手动录入生成新授权并保留编号与进度，只允许子产品和回读", async () => {

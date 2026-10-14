@@ -104,7 +104,11 @@ export function buildResearchHandlers(deps: WorkflowDeps) {
       state.setReadiness(result.readiness);
       setActiveTaskId(null);
       setVerificationNote("");
-      setNotice(result.updated > 0 ? `已刷新待处理事项，清理 ${result.updated} 项。` : "已刷新待处理事项，暂无可自动清理项。");
+      const changes = [
+        result.reopened > 0 ? `重新打开 ${result.reopened} 项人工核验。` : "",
+        result.confirmed > 0 ? `清理 ${result.confirmed} 项。` : "",
+      ].filter(Boolean);
+      setNotice(changes.length > 0 ? `已刷新待处理事项，${changes.join("")}` : "已刷新待处理事项，暂无可自动清理项。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "刷新待处理事项失败。");
     } finally {

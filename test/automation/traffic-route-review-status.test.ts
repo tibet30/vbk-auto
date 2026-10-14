@@ -15,7 +15,7 @@ test('母草稿通过预检但交通待线路审核时，Agent 明确给出前�
   const p = buildProductSnapshot({ destination: '西安', days: 6, productForm: 'privateTour' });
   p.productId = '79346484'; p.status = 'draft_saved';
   (p.product.operations as any).trafficLine = { enabled: true, variants: ['flightRoundTrip'] };
-  const approval = { id: 'approval', ...buildAgentApproval(p), productVersion: agentProductVersion(p), intentVersion: 'intent', accountKey: 'account', status: 'approved', createdAt: 'now' };
+  const approval = { id: 'approval', ...buildAgentApproval(p), productVersion: agentProductVersion(p), intentVersion: 'intent', accountKey: 'account', status: 'approved', createdAt: 'now', generateTrafficChildren: true };
   p.automation = { status: 'succeeded', phases: [{ phase: 'trafficLine', status: 'completed' }, { phase: 'preflight', status: 'completed' }], trafficLine: { children: [{ variant: 'flightRoundTrip', childProductId: '79357948', completedStages: ['clausesSaved'], verified: false, failedStage: 'activated', failureReason: '当前产品未匹配玩法线路，请去行程描述/资源配置页面提交审核匹配线路' }] } } as any;
   const result = agentCompletionGate(p, { localProductId: p.id, run: { id: 'run', intentVersion: 'intent' }, events: [{ type: 'approval', runId: 'run', data: { approval } }] } as any, { ready: true, issues: [], completion: 100 }, { hadRemoteWrites: true, deterministicWorkflow: true, runId: 'run' } as any);
   assert.equal(result.verified, false);

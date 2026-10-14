@@ -31,6 +31,7 @@ import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../s
 import type {
   GenerationStateStore,
   OrchestratorRuntime,
+  VerifiedPoiMapping,
 } from "./types.js";
 import type {
   PlanningGenerationState,
@@ -170,7 +171,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     return { ok: true };
   }
 
-  async writeResolvedItineraryPois(localProductId: string, itinerary: unknown[], previousItinerary: unknown[]) {
+  async writeResolvedItineraryPois(localProductId: string, itinerary: unknown[], previousItinerary: unknown[], verifiedMappings: readonly VerifiedPoiMapping[] = []) {
     const current = this.db.getProduct(localProductId);
     if (!current) return { ok: false, reason: "产品不存在" };
     if (JSON.stringify(current.product.itinerary) !== JSON.stringify(previousItinerary)) {
@@ -181,6 +182,7 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     this.productMutations.commands.mergeChanges(localProductId, current, { ...current.product, itinerary }, 'resource', {
       preserveVerifiedItineraryPois: false, expectedVersion: current.productJsonVersion ?? 0,
     });
+    if (verifiedMappings.length) this.db.confirmVerifiedPoiResearchTasks(localProductId, verifiedMappings);
     return { ok: true };
   }
 

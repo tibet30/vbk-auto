@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { closeModalAboveVbk, showModalAboveVbk } from "../../helpers/vbk-modal-visibility";
 import shared from "../shared.module.less";
 import styles from "./planning-rerun-confirm-dialog.module.less";
 
@@ -35,17 +36,21 @@ export function PlanningRerunConfirmDialog({
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    let cancelled = false;
     if (open) {
-      if (!dialog.open) dialog.showModal();
-      wasOpen.current = true;
-      requestAnimationFrame(() => cancelRef.current?.focus());
-      return;
+      void showModalAboveVbk(dialog, () => !cancelled).then(() => {
+        if (cancelled) return;
+        wasOpen.current = true;
+        requestAnimationFrame(() => { if (!cancelled) cancelRef.current?.focus(); });
+      }).catch(() => { if (!cancelled) onCancel(); });
+    } else {
+      closeModalAboveVbk(dialog);
+      if (wasOpen.current) {
+        wasOpen.current = false;
+        returnFocusRef.current?.focus();
+      }
     }
-    if (dialog.open) dialog.close();
-    if (wasOpen.current) {
-      wasOpen.current = false;
-      returnFocusRef.current?.focus();
-    }
+    return () => { cancelled = true; };
   }, [open, stage?.id, returnFocusRef]);
 
   useEffect(() => {

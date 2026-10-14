@@ -14,6 +14,7 @@ import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-act
 import { buildPoiContextForItineraryDay } from "./poi-context.js";
 import { queryPoi, applyPoiMatch, queryPoiAvailability, queryItineraryPoiAvailabilities, isTravelNodeName } from "./poi-enrichment/query.js";
 import { isPlanningPoiCandidateInContext } from "./poi-auto-selection.js";
+import type { VerifiedPoiMapping } from "./types.js";
 
 interface PoiEnrichmentArgs {
   localProductId: string;
@@ -41,6 +42,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
   const product = await runtime.loadCurrentProduct(localProductId);
   const shouldReviewCompletePois = args.reviewCompletePois === true && hasProductPoiContext(product);
   const addedTasks: ResearchTaskProposal[] = [];
+  const verifiedMappings: VerifiedPoiMapping[] = [];
 
   if ((runtime.suggestPoi || runtime.resolvePoiSelection) && Array.isArray(product.itinerary)
     && (hasIncompleteItineraryPois(product) || (shouldReviewCompletePois && hasCompleteItineraryPois(product)))) {
@@ -107,6 +109,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         if (match && spot && typeof spot === "object" && !Array.isArray(spot)) {
           applyPoiMatch(spot, match);
           poiUpdated = true;
+          recordVerifiedMapping(verifiedMappings, runtime, day, originalKeyword, match);
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (match && typeof spot === "string") {
           const index = day.spots.indexOf(spot);
@@ -119,6 +122,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             ...(match.district ? { district: match.district } : {}),
           };
           poiUpdated = true;
+          recordVerifiedMapping(verifiedMappings, runtime, day, originalKeyword, match);
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (!queryFailed || invalidLocation) {
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
@@ -140,7 +144,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
     }
     if (poiUpdated) {
       const writeResult = runtime.writeResolvedItineraryPois
-        ? await runtime.writeResolvedItineraryPois(localProductId, updated, product.itinerary as unknown[])
+        ? await runtime.writeResolvedItineraryPois(localProductId, updated, product.itinerary as unknown[], verifiedMappings)
         : await runtime.writeModule(localProductId, "itinerary", AI_WRITABLE_PATHS.itinerary, updated);
       if (!writeResult.ok) {
         const reason = writeResult.reason || "本地写入被拒";
@@ -152,6 +156,22 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
   }
 
   return addedTasks;
+}
+
+function recordVerifiedMapping(
+  mappings: VerifiedPoiMapping[],
+  runtime: OrchestratorRuntime,
+  day: Record<string, unknown>,
+  spotName: string,
+  match: { poiName: string; poiId: number; province?: string; city?: string; district?: string },
+): void {
+  // Only the production controlled selector proves candidate context,
+  // availability and confidence. A bare suggestPoi result cannot settle a
+  // durable operator-selection gate.
+  if (!runtime.resolvePoiSelection) return;
+  const dayNumber = Number(day.day);
+  if (!Number.isInteger(dayNumber) || dayNumber <= 0) return;
+  mappings.push({ day: dayNumber, spotName, ...match });
 }
 
 function bracketAliases(value: string): string[] {

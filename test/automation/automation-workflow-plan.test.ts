@@ -97,8 +97,10 @@ test("parent preflight settlement leaves each traffic failure and final readback
   assert.equal(value.automation.phases.find(row => row.phase === "trafficLine")?.status, "failed");
   assert.deepEqual(value.automation.trafficLine, children);
   assert.deepEqual(approvedWorkflowPlan(value), { kind: "complete" });
+  assert.deepEqual(approvedWorkflowPlan(value, undefined, false, true), { kind: "run", retryFrom: "preflight" });
   Object.assign(value.product.operations!, { trafficLine: { enabled: true, variants: ["flightRoundTrip"] } });
-  assert.deepEqual(approvedWorkflowPlan(value), { kind: "traffic-backfill" });
+  assert.deepEqual(approvedWorkflowPlan(value, undefined, true), { kind: "traffic-backfill" });
+  assert.deepEqual(approvedWorkflowPlan(value, undefined, true, true), { kind: "run", retryFrom: "preflight" });
 });
 
 test("optional traffic failure does not prevent queued parent preflight from resuming", () => {

@@ -20,6 +20,7 @@ import {
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import type { MainIpcContext } from "./context.js";
+import { screenManualPoiCandidates } from "../operations/manual-review-poi-selection.js";
 
 export function registerBrowserAutomationIpc(context: MainIpcContext): void {
   const {
@@ -58,23 +59,27 @@ export function registerBrowserAutomationIpc(context: MainIpcContext): void {
           destinationCity: inputContext?.destinationCity,
           province: inputContext?.province,
         });
+        const product = inputContext?.localProductId ? db.getProduct(inputContext.localProductId) : undefined;
+        const screened = product && Number.isInteger(inputContext?.dayIndex) && Number.isInteger(inputContext?.spotIndex)
+          ? screenManualPoiCandidates(product.product, inputContext!.dayIndex, inputContext!.spotIndex, result)
+          : result;
         logPoiManualIpc("ipc_search_detail", {
           ...logContext,
-          httpStatus: result.httpStatus,
-          businessStatus: result.businessStatus,
-          poiListCount: result.poiListCount,
-          candidateCount: result.candidates.length,
+          httpStatus: screened.httpStatus,
+          businessStatus: screened.businessStatus,
+          poiListCount: screened.poiListCount,
+          candidateCount: screened.candidates.length,
           rawPayload: stringifyPoiPayloadForLog(result.rawPayload),
         });
-        if (!result.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: result.candidates.length });
+        if (!screened.best) logPoiManualIpc("ipc_search_empty", { ...logContext, candidateCount: screened.candidates.length });
         else logPoiManualIpc("ipc_search_success", {
           ...logContext,
-          poiName: result.best.poiName,
-          poiId: result.best.poiId,
-          candidateCount: result.candidates.length,
+          poiName: screened.best.poiName,
+          poiId: screened.best.poiId,
+          candidateCount: screened.candidates.length,
         });
         const { rawPayload: _rawPayload, ...detail } = result;
-        return detail;
+        return { ...detail, best: screened.best, candidates: screened.candidates };
       } catch (err) {
         logPoiManualIpc("ipc_search_failure", {
           ...logContext,

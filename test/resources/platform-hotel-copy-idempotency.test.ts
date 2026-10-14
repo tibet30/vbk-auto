@@ -41,3 +41,20 @@ test("删除住宿限制保留同句景点与交通距离", () => {
     itinerary: [{ day: 1, hotel: "当地民宿", title: "游览青城山后入住当地民宿" }] });
   assert.match(normalized.itinerary[0].title, /游览青城山后/);
 });
+
+test("平台自动匹配会清除旧的指定酒店来源和档次", () => {
+  const normalized = normalisePlatformHotelProduct({
+    basicInfo: { meetingCity: "成都", nights: 1 },
+    operations: {
+      hotelMatchingMode: "rules",
+      hotelRules: { autoMatch: true, grades: [3, 4, 5] },
+      hotelSource: "nonPlatform",
+      hotelTier: "当地5钻酒店/-38",
+    },
+    itinerary: [{ day: 1, hotel: "旧酒店" }],
+  });
+  assert.equal(normalized.operations.hotelMatchingMode, "rules");
+  assert.deepEqual(normalized.operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
+  assert.equal(normalized.operations.hotelSource, undefined);
+  assert.equal(normalized.operations.hotelTier, undefined);
+});

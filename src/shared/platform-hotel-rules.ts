@@ -2,6 +2,7 @@ import { normalisePlatformHotelCopy, cleanPlatformHotelCopy } from "./platform-h
 import { hasItineraryHotelStay, needsItineraryHotelCandidates, normaliseReturnDayLodging, NO_ITINERARY_HOTEL } from "./itinerary-hotel.js";
 import { hotelStayRequirement } from "./hotel-stay-requirement.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
+import { isNonWritableCityAlias } from "./region-overrides.js";
 
 type Json = Record<string, any>;
 export interface PlatformHotelRules { autoMatch: boolean; grades: number[] }
@@ -26,6 +27,11 @@ export function normalisePlatformHotelProduct(product: Json): Json {
   const ops = { ...(next.operations ?? {}) };
   if (ops.hotelMatchingMode !== "rules") ops.hotelRules = defaultPlatformHotelRules();
   ops.hotelMatchingMode = "rules";
+  // Rules mode is mutually exclusive with the legacy named-hotel contract.
+  // Leaving either field behind can make a later writer reinterpret this
+  // product as a specified-hotel draft.
+  delete ops.hotelSource;
+  delete ops.hotelTier;
   delete ops.hotelResource;
   delete ops.hotelFallbackPolicy;
   next.operations = ops;
@@ -62,6 +68,9 @@ export function platformHotelStayGroups(product: Json) {
     if (!hasItineraryHotelStay(day.hotel)) continue;
     const cityName = toPlatformShortLocationName(day.hotelCity);
     if (!cityName) throw new Error(`第 ${day.day} 天缺少住宿城市`);
+    if (isNonWritableCityAlias(cityName)) {
+      throw new Error(`第 ${day.day} 天住宿城市「${cityName}」不是可写行政城市，请填写当晚实际住宿城市`);
+    }
     const last = groups.at(-1);
     if (last?.cityName === cityName && last.dayNumbers.at(-1)! + 1 === Number(day.day)) {
       last.nights++; last.dayNumbers.push(Number(day.day));

@@ -55,8 +55,10 @@ import {
   markResearchAccepted,
   markResearchTasksSatisfied,
   markResearchTasksSatisfiedByProduct,
+  reopenAmbiguousAutoConfirmedPoiResearchTasks,
   reopenKindSupersededPoiResearchTasks,
 } from "../parts/research-tasks.js";
+import { confirmVerifiedPoiResearchTasks } from "../parts/verified-poi-research.js";
 
 export const productMethods = {
   listProducts(this: { db: Database.Database }): ProductSummary[] { return listProducts(this.db); },
@@ -87,6 +89,8 @@ export const productMethods = {
   addResearchTask(this: { db: Database.Database }, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) { return addResearchTask(this.db, localProductId, task); },
   markResearchAccepted(this: { db: Database.Database }, localProductId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") { markResearchAccepted(this.db, localProductId, taskId, note, source); },
   markResearchTasksSatisfied(this: { db: Database.Database }, localProductId: string, taskIds: readonly string[], note?: string) { return markResearchTasksSatisfied(this.db, localProductId, taskIds, note); },
+  confirmVerifiedPoiResearchTasks(this: { db: Database.Database }, localProductId: string, mappings: Parameters<typeof confirmVerifiedPoiResearchTasks>[2]) { return confirmVerifiedPoiResearchTasks(this.db, localProductId, mappings); },
+  reopenAmbiguousAutoConfirmedPoiResearchTasks(this: { db: Database.Database }, localProductId: string) { return reopenAmbiguousAutoConfirmedPoiResearchTasks(this.db, localProductId); },
   reopenKindSupersededPoiResearchTasks(this: { db: Database.Database }, localProductId: string, product: Record<string, unknown>) { return reopenKindSupersededPoiResearchTasks(this.db, localProductId, product); },
   markResearchTasksSatisfiedByProduct(this: { db: Database.Database }, localProductId: string, product: Record<string, unknown>) { return markResearchTasksSatisfiedByProduct(this.db, localProductId, product); },
   saveAutomation(this: { db: Database.Database }, localProductId: string, run: AutomationRun) { saveAutomation(this.db, localProductId, run); },

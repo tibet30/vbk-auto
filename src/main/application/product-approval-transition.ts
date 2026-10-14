@@ -5,12 +5,15 @@ import { toPlatformShortLocationName } from '../../shared/location-short-name.js
 
 function selections(product: Record<string, unknown>) {
   const basic = record(product.basicInfo); const ops = record(product.operations);
+  const platformHotelRules = ops.hotelMatchingMode === "rules";
   return {
     commercial: product.commercial,
     days: basic.days, nights: basic.nights,
     meetingCity: toPlatformShortLocationName(basic.meetingCity),
     destinationCity: toPlatformShortLocationName(basic.destinationCity),
-    hotelTier: ops.hotelTier, hotelSource: ops.hotelSource, vehicle: ops.vehicleResource,
+    hotelTier: platformHotelRules ? undefined : ops.hotelTier,
+    hotelSource: platformHotelRules ? undefined : ops.hotelSource,
+    vehicle: ops.vehicleResource,
     itinerary: (Array.isArray(product.itinerary) ? product.itinerary : []).map(value => {
       const day = record(value);
       return { day: day.day, hotelRequirement: day.hotelRequirement, hotelCandidates: day.hotelCandidates,

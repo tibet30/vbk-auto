@@ -14,6 +14,13 @@ export function legacyProductVersion(product: Pick<ProductDetail, "product">): s
   const data = structuredClone(parsed.success ? parsed.data : product.product) as unknown as Json;
   if (data.basicInfo) delete (data.basicInfo as Json).supplierProductCode;
   const ops = data.operations as Json | undefined;
+  // In platform-rules mode the legacy named-hotel fields are forbidden and
+  // deterministically removed on persistence. They cannot represent a user
+  // choice or make an otherwise matching approval stale.
+  if (ops?.hotelMatchingMode === "rules") {
+    delete ops.hotelTier;
+    delete ops.hotelSource;
+  }
   const resource = ops?.hotelResource as Json | undefined;
   // The itinerary owns the approved per-day hotel choices. hotelResource is a
   // derived mirror written after the platform phase succeeds (source, selected

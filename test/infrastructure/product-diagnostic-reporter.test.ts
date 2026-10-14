@@ -63,6 +63,23 @@ test("只上报原始输入和失败，普通产品变更不上传，重复/恢�
   assert.equal(bodies.length, 2);
 });
 
+test("关闭自动 flush 时只持久化本地待发送诊断，直到显式调用 flush", async t => {
+  const f = fixture(t);
+  let calls = 0;
+  const reporter = createProductDiagnosticReporter({ db: f.db, store: f.store, environment: () => env,
+    autoFlush: false, baseUrl: "https://example.test", fetchImpl: async (_input, init) => {
+      calls += 1;
+      return acknowledge(JSON.parse(String(init?.body)));
+    } });
+  const service = createLocalProductService({ db: f.db, store: f.store, capture: product => reporter.capture(product) });
+  await service.upsert(f.db.buildProductSnapshot({ destination: "潮州", days: 2, productForm: "privateTour" }));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 0);
+  assert.equal(f.db.pendingDiagnostics(1).length, 1);
+  await reporter.flush();
+  assert.equal(calls, 1);
+});
+
 test("断网和未确认回包保留队列，重启后补传，诊断失败不阻塞本机保存", async t => {
   const f = fixture(t);
   let reporter = createProductDiagnosticReporter({ db: f.db, store: f.store, environment: () => env,

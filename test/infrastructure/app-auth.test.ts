@@ -73,6 +73,35 @@ test("无本地 token 时不请求远端，直接返回未登录", async (t) => 
   assert.equal(calls, 0);
 });
 
+test("安全开发启动只使用未过期的本地账号摘要，不发起状态核验", async (t) => {
+  const { store } = fixture(t);
+  store.set({ token: "safe-start-token", expiresAt: future, user });
+  let calls = 0;
+  const auth = createTibetAuthService(store, {
+    baseUrl: "https://example.test",
+    skipRemoteStatusValidation: true,
+    fetchImpl: async () => { calls += 1; return jsonResponse({}); },
+  });
+  assert.deepEqual(await auth.status(), { state: "authenticated", user });
+  assert.equal(calls, 0);
+});
+
+test("安全开发启动不清理过期的本地会话", async (t) => {
+  const { store } = fixture(t);
+  const expired = { ...user, expiresAt: "2000-01-01 00:00:00" };
+  store.set({ token: "expired-safe-token", expiresAt: expired.expiresAt, user: expired });
+  let calls = 0;
+  const auth = createTibetAuthService(store, {
+    baseUrl: "https://example.test",
+    skipRemoteStatusValidation: true,
+    fetchImpl: async () => { calls += 1; return jsonResponse({}); },
+  });
+  assert.deepEqual(await auth.status(), { state: "unauthenticated" });
+  assert.equal((await auth.listAccounts()).saved.length, 1);
+  assert.equal(store.get()?.token, "expired-safe-token");
+  assert.equal(calls, 0);
+});
+
 test("有效 token 通过 extension/auth/me 恢复登录并更新用户摘要", async (t) => {
   const { store } = fixture(t);
   store.set({ token: "valid-token", expiresAt: future, user });

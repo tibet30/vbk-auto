@@ -1,3 +1,4 @@
+import { unlockedMenus } from "./product-menu-fixture.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runProductPreflightApi } from "../../src/main/automation/ctrip/preflight-api.ts";
@@ -38,6 +39,7 @@ function vehicleSegment(id: string, bound: boolean) {
 function preflightPage(segments: { draft: unknown[]; formal: unknown[] }) {
   return { evaluate: async (_fn: unknown, request: any) => {
     const endpoint = String(request?.endpoint ?? "");
+    if (endpoint.endsWith("/getSubMenu.json")) return success(unlockedMenus(productId));
     if (endpoint.endsWith("/getProductBaseInfo")) return success({ baseInfo: {
       productId: Number(productId), masterDepartureCityId: 28, masterDepartureCityName: "成都",
       destinationCityID: 28, destinationCityName: "成都", travelDays: 2, maxTravelDays: 2,
@@ -87,5 +89,75 @@ test("预检不接受正确草稿掩盖空的正式资源段", async () => {
       formal: [],
     }), product, productId),
     /母产品资源预检未返回任何行程段/,
+  );
+});
+
+test("所有模块回读正确但菜单锁定时，最终预检仍失败且不写携程", async () => {
+  const base = preflightPage({ draft: [], formal: [vehicleSegment("formal-full", true)] });
+  const requests: string[] = [];
+  const page = { evaluate: async (fn: unknown, request: any) => {
+    requests.push(request.endpoint);
+    if (request.endpoint.endsWith("/getSubMenu.json")) {
+      const menus = unlockedMenus(productId); menus.maxStep = -60;
+      menus.menus[4].enabled = "F";
+      return success(menus);
+    }
+    return base.evaluate(fn, request);
+  } };
+  await assert.rejects(() => runProductPreflightApi(page, product, productId), /VBK 菜单尚未解锁/);
+  assert.equal(requests.some(endpoint => /save|create|submit|upload/i.test(endpoint)), false);
+});
+
+async function assertReviewBoundary(auditStatus: { key: "A" | "N"; value: string }, itineraryTourInfoId?: string) {
+  const base = preflightPage({ draft: [], formal: [vehicleSegment("formal-full", true)] });
+  const requests: string[] = [];
+  const page = { evaluate: async (fn: unknown, request: any) => {
+    const endpoint = String(request.endpoint);
+    requests.push(endpoint);
+    if (endpoint.endsWith("/getSubMenu.json")) {
+      const menus = unlockedMenus(productId); menus.maxStep = -60;
+      menus.menus.forEach((menu, index) => { menu.enabled = index < 4 ? "T" : "F"; });
+      return success(menus);
+    }
+    if (endpoint.endsWith("/getProductBaseInfo")) return success({ baseInfo: {
+      productId: Number(productId), masterDepartureCityId: 28, masterDepartureCityName: "成都",
+      destinationCityID: 28, destinationCityName: "成都", travelDays: 2, maxTravelDays: 2,
+      travelNights: 1, vendorProductCode: `VBK-${productId}`,
+    }, isCruise: false });
+    if (endpoint.endsWith("/getProductTourInfoList")) {
+      return success({ tourInfos: [auditStatus.key === "N"
+        ? { tourInfoId: 0, draftTourInfoId: 1001, auditStatus }
+        : { tourInfoId: 1001, auditStatus },
+      ] });
+    }
+    if (endpoint.endsWith("/inSwitch")) return success({ switched: true });
+    return base.evaluate(fn, request);
+  } };
+  const result = await runProductPreflightApi(page, product, productId, { itineraryTourInfoId });
+  assert.equal(result.menus.fullyUnlocked, false);
+  assert.deepEqual(result.menus.lockedMenus, ["combomanage", "inventory", "travelOptionNew", "newResourceClause", "trafficLineEdit", "advancedSettings"]);
+  assert.equal(result.menus.advancementRequiresReview, true);
+  assert.equal(result.menus.draftSaved, true);
+  assert.equal(result.menus.savedItineraryTourInfoId, itineraryTourInfoId ?? "1001");
+  assert.deepEqual(result.menus.auditStatus, auditStatus);
+  assert.equal(requests.some(endpoint => /save|create|submit|upload/i.test(endpoint)), false);
+}
+
+test("审核通过的官方行程审核边界保留只读预检", async () => {
+  await assertReviewBoundary({ key: "A", value: "审核通过" });
+});
+
+test("未提交的官方行程审核边界保留只读预检", async () => {
+  await assertReviewBoundary({ key: "N", value: "未提交" });
+});
+
+test("显式草稿行程 ID 与关联草稿一致时可通过审核边界", async () => {
+  await assertReviewBoundary({ key: "N", value: "未提交" }, "1001");
+});
+
+test("显式草稿行程 ID 与关联草稿不一致时拒绝预检", async () => {
+  await assert.rejects(
+    () => assertReviewBoundary({ key: "N", value: "未提交" }, "2002"),
+    /VBK 菜单尚未解锁/,
   );
 });

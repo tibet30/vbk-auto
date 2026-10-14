@@ -21,7 +21,7 @@ test("approved traffic backfill runs before the completed-parent shortcut withou
   const phases: string[] = [];
   const mock: any = {
     db: { getProduct: () => product, getAgentSnapshot: () => ({ run: { id: "agent" }, events: [
-      { runId: "agent", type: "approval", data: { approval: { status: "approved", scope } } },
+      { runId: "agent", type: "approval", data: { approval: { status: "approved", generateTrafficChildren: true, scope } } },
     ] }) },
     agentWriteGuard: () => {},
     runApprovedLocked: () => { throw Error("must not rewrite the completed parent"); },
@@ -47,7 +47,7 @@ test("traffic retry accepts only an equivalent historical approval after a recov
     db: { getProduct: () => product, getAgentSnapshot: () => ({
       run: { id: "recovery", status: "completed", intentVersion: "recovery-intent" },
       events: [
-        { runId: "original", type: "approval", data: { approval: { id: "approved", status: "approved", scope,
+        { runId: "original", type: "approval", data: { approval: { id: "approved", status: "approved", generateTrafficChildren: true, scope,
           accountKey: "account", productVersion: agentProductVersion(product), intentVersion: "original", createdAt: "x", summary: "交通补录" } } },
         { runId: "recovery", type: "user", content: "从报错处继续执行", createdAt: "x" },
       ],

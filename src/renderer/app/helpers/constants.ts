@@ -107,7 +107,7 @@ export function vbkStageStatusText(product: ProductDetail | null): { tone: "wait
   if (!product) return { tone: "waiting", label: "等待选择产品", detail: "创建产品后即可进入" };
   const replacementProductId = replacementDraftProductId(product);
   if (replacementProductId) return { tone: "saved", label: `已由草稿 ${replacementProductId} 接管`, detail: "当前历史壳没有访问权限；已保存的替代草稿才是可继续操作的 VBK 产品。" };
-  if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "提交审核与发布仍需在 VBK 手工完成" };
+  if (product.automation?.status === "succeeded" || product.status === "draft_saved") return { tone: "saved", label: "草稿已保存到 VBK", detail: "可在程序内审核行程并解锁标签；发布仍需单独处理" };
   const blocked = recoveryNeedsUser(product.automation);
   if (blocked) return { tone: "blocked", label: "已停止，等待处理", detail: "请先在右侧按 AI 给出的指令完成手动操作，再重新发起一次保存草稿" };
   if (product.automation?.status === "running") return { tone: "running", label: "正在录入 VBK", detail: "浏览器自动化进行中，可在右侧观察执行进度" };

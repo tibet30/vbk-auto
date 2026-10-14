@@ -24,6 +24,12 @@ test("AI 消息、自动化阶段和产品 JSON 有明确运行时上限", () =>
   assert.throws(() => validateIpcArguments("products:updateProductJson", ["p-1", "x".repeat(2_000_001)]), /field=json/);
 });
 
+test("最终录入授权接受行程审核解锁标记，并拒绝畸形标记", () => {
+  const approval = { approvalId: "approval-1", productVersion: "a".repeat(64), itineraryReviewUnlockAuthorized: true };
+  assert.doesNotThrow(() => validateIpcArguments("agent:approve", ["product-1", approval]));
+  assert.throws(() => validateIpcArguments("agent:approve", ["product-1", { ...approval, itineraryReviewUnlockAuthorized: "true" }]), /field=response/);
+});
+
 test("浏览器 bounds、导航 URL 与 providerId 拒绝错误类型", () => {
   assert.doesNotThrow(() => validateIpcArguments("browser:setBounds", [{ x: 0, y: 0, width: 1200, height: 800 }]));
   assert.throws(() => validateIpcArguments("browser:setBounds", [{ x: 0, y: 0, width: -1, height: 800 }]), /field=bounds/);

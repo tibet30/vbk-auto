@@ -106,7 +106,7 @@ export class AgentSnapshotManager {
 
   finish(snapshot: AgentSnapshot, verified = false): void {
     if (!snapshot.run) return;
-    if (!verified && hasUnresolvedAgentToolFailure(snapshot.events, snapshot.run.id)) {
+    if (!verified && hasUnresolvedAgentToolFailure(snapshot.events, snapshot.run.id, snapshot.stages ?? [])) {
       this.pause(snapshot, UNRESOLVED_TOOL_SUMMARY);
       return;
     }

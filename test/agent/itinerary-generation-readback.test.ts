@@ -26,7 +26,8 @@ function toolsFor(output: unknown, options: { persistWrites?: boolean } = {}) {
     getSetting: () => undefined,
     addResearchTask: () => "task",
     markResearchTasksSatisfied: () => undefined,
-    reopenKindSupersededPoiResearchTasks: () => undefined,
+    reopenKindSupersededPoiResearchTasks: () => ({ updated: 0, taskIds: [] }),
+    reopenAmbiguousAutoConfirmedPoiResearchTasks: () => ({ updated: 0, taskIds: [] }),
     markResearchTasksSatisfiedByProduct: () => ({ updated: 0, taskIds: [] }),
   };
   const tools = createAgentBusinessTools({

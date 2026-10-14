@@ -3,11 +3,18 @@ import { isResearchTaskSatisfiedByProduct } from "../../shared/research-task-sat
 import { isCoverResearchTaskSatisfiedByProduct } from "../minimax/minimax.js";
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 
-type RefreshDb = Pick<VbkDatabase, "getProduct" | "markResearchTasksSatisfiedByProduct" | "reopenKindSupersededPoiResearchTasks">;
+type RefreshDb = Pick<VbkDatabase,
+  "getProduct" | "markResearchTasksSatisfiedByProduct" | "reopenAmbiguousAutoConfirmedPoiResearchTasks" | "reopenKindSupersededPoiResearchTasks"
+>;
 
 export interface RefreshedResearchIssues {
+  /** Backward-compatible alias for `confirmed`; reopening alone is not a confirmation. */
   updated: number;
   taskIds: string[];
+  confirmed: number;
+  confirmedTaskIds: string[];
+  reopened: number;
+  reopenedTaskIds: string[];
 }
 
 export function refreshSatisfiedResearchTasks(db: RefreshDb, localProductId: string): RefreshedResearchIssues {
@@ -15,10 +22,25 @@ export function refreshSatisfiedResearchTasks(db: RefreshDb, localProductId: str
   if (!product) {
     throw new Error("产品不存在。");
   }
-  db.reopenKindSupersededPoiResearchTasks(localProductId, product.product);
+  const kindReopened = db.reopenKindSupersededPoiResearchTasks(localProductId, product.product);
+  const ambiguousReopened = db.reopenAmbiguousAutoConfirmedPoiResearchTasks(localProductId);
   const refreshedProduct = db.getProduct(localProductId);
   if (!refreshedProduct) throw new Error("产品不存在。");
-  return db.markResearchTasksSatisfiedByProduct(localProductId, refreshedProduct.product);
+  const confirmed = db.markResearchTasksSatisfiedByProduct(localProductId, refreshedProduct.product);
+  const reopenedTaskIds = [...kindReopened.taskIds, ...ambiguousReopened.taskIds];
+  return {
+    updated: confirmed.updated,
+    taskIds: confirmed.taskIds,
+    confirmed: confirmed.updated,
+    confirmedTaskIds: confirmed.taskIds,
+    reopened: reopenedTaskIds.length,
+    reopenedTaskIds,
+  };
+}
+
+/** Reopening a stale local task must never create a cloud write by itself. */
+export function shouldSyncConfirmedResearchTasks(result: Pick<RefreshedResearchIssues, "confirmed">): boolean {
+  return result.confirmed > 0;
 }
 
 export function satisfiedResearchTaskIds(product: ProductDetail): string[] {

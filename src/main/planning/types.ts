@@ -48,6 +48,16 @@ export interface PoiSuggestContext {
   province?: string;
 }
 
+export interface VerifiedPoiMapping {
+  day: number;
+  spotName: string;
+  poiName: string;
+  poiId: number;
+  province?: string;
+  city?: string;
+  district?: string;
+}
+
 export interface OrchestratorRuntime {
   suggestPoi?(keyword: string, context?: PoiSuggestContext): Promise<{ poiName: string; poiId: number } | null>;
   /** 规划运行时使用的受控 POI 决策：前 12 条 AI 消歧、营业核验及置信度门槛均在这里完成。 */
@@ -61,7 +71,12 @@ export interface OrchestratorRuntime {
   /** 写入一个产品的模块（指定固定路径）。 */
   writeModule(localProductId: string, module: PlanningModule, writePath: string, value: unknown): Promise<{ ok: boolean; reason?: string }>;
   /** 核验器可以清空错误/停业 POI；拒绝覆盖核验期间人工修改的行程。 */
-  writeResolvedItineraryPois?(localProductId: string, itinerary: unknown[], previousItinerary: unknown[]): Promise<{ ok: boolean; reason?: string }>;
+  writeResolvedItineraryPois?(
+    localProductId: string,
+    itinerary: unknown[],
+    previousItinerary: unknown[],
+    verifiedMappings?: readonly VerifiedPoiMapping[],
+  ): Promise<{ ok: boolean; reason?: string }>;
   /** 确定性酒店检索的受控写入口；AI patch 永远不能写 operations.hotelResource。 */
   writeResolvedHotelResources?(localProductId: string, operations: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
   /** 用当前 VBK 会话核验机场和火车站端点，只返回可创建的飞机 / 火车往返方式。 */

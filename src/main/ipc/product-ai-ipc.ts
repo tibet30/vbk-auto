@@ -7,7 +7,7 @@ import { resolveVehicleResource } from "../operations/vehicle-resource.js";
 import { resolveHotelResource } from "../operations/hotel-resource.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { manualReviewSavePolicy } from "../operations/manual-review-save-policy.js";
-import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
+import { refreshSatisfiedResearchTasks, shouldSyncConfirmedResearchTasks } from "../operations/research-refresh.js";
 import { syncConfirmedResearchTasksToRemote } from "../operations/research-task-remote-sync.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
@@ -19,6 +19,8 @@ import { clearReappearedTrustedOperatorItineraryRemovals, sameTrustedOperatorIti
 import type { MainIpcContext } from "./context.js";
 import { canonicalJson } from '../../shared/product-storage-projection.js';
 import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
+import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
+import { verifyManualPoiSelection } from "../operations/manual-review-poi-selection.js";
 
 async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
   try {
@@ -65,25 +67,33 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     context.productWorkflows.assertIdle(id, "manual");
     const product = db.getProduct(id);
     if (!product) throw productNotFound(id);
+    let verifiedInput = input;
     if (input.field === "itinerarySpotPoi") {
+      const detail = await context.productWorkflows.runVbkPageExclusive(async () =>
+        suggestPoiDetail(await getVbkRequestPage(context.browser), input.poiName, {
+          destinationCity: String((product.product.basicInfo as Record<string, unknown> | undefined)?.destinationCity ?? ""),
+          province: String((product.product.basicInfo as Record<string, unknown> | undefined)?.province ?? ""),
+        }));
+      const verifiedPoiInput = verifyManualPoiSelection(product.product, input, detail);
+      verifiedInput = verifiedPoiInput;
       const availability = await context.productWorkflows.runVbkPageExclusive(() =>
-        getCtripSightAvailability(context.browser, input.poiId, db));
+        getCtripSightAvailability(context.browser, verifiedPoiInput.poiId, db));
       if (availability.status === "suspended") {
-        throw new Error(`“${input.poiName}”在携程景点详情中标记为${availability.openStatus}，不能加入行程。`);
+        throw new Error(`“${verifiedPoiInput.poiName}”在携程景点详情中标记为${availability.openStatus}，不能加入行程。`);
       }
     }
-    const next = applyManualReviewField(product.product, input);
+    const next = applyManualReviewField(product.product, verifiedInput);
     const policy = manualReviewSavePolicy(product.status);
     if (policy.requireCompleteProduct) parseProduct(next);
     const beforeConfirmed = new Set(product.researchTasks.filter(task => task.state === 'confirmed').map(task => task.id));
     const saved = productMutations.commands.manualField({ localProductId: id, source: 'user',
-      expectedVersion: product.productJsonVersion ?? 0 }, input, { status: policy.nextStatus });
+      expectedVersion: product.productJsonVersion ?? 0 }, verifiedInput, { status: policy.nextStatus });
     const confirmedTaskIds = saved.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
     await reconcileSavedProductQuestion(context, id);
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", {
         localProductId: id,
-        field: input.field,
+        field: verifiedInput.field,
         confirmedTaskIds,
       });
     }
@@ -156,7 +166,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const product = db.getProduct(localProductId);
     if (!product) throw productNotFound(localProductId);
     const result = refreshSatisfiedResearchTasks(db, localProductId);
-    const next = result.updated > 0
+    const next = shouldSyncConfirmedResearchTasks(result)
       ? await syncConfirmedResearchTasksToRemote({
         db,
         remote: remoteProducts,

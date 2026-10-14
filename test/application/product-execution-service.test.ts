@@ -36,6 +36,43 @@ test('verified mother and failed traffic child remain separate outcomes', () => 
   assert.equal(view.nextAction, 'resume');
 });
 
+function approvalSnapshot(value: ReturnType<typeof product>, generateTrafficChildren: boolean) {
+  const run = { id: 'run', status: 'completed', createdAt: 'old', updatedAt: 'new' };
+  return { localProductId: value.id, run, events: [{ runId: run.id, type: 'approval', data: {
+    approval: { status: 'approved', generateTrafficChildren },
+  } }] } as never;
+}
+
+function incompleteTraffic(value: ReturnType<typeof product>) {
+  (value.product.operations as any).trafficLine = { enabled: true, variants: ['trainRoundTrip'] };
+  value.automation!.trafficLine = { children: [{ variant: 'trainRoundTrip', childProductId: 'child',
+    verified: false, completedStages: ['childCreated'] }] } as never;
+}
+
+test('unapproved traffic children do not block a verified mother task', () => {
+  const value = product(); incompleteTraffic(value);
+  const snapshot = approvalSnapshot(value, false);
+  let task = { id: 'task', localProductId: value.id, status: 'needs_attention', progress: 99 } as never;
+  const service = new ProductExecutionService({ getProduct: () => value, getAgentSnapshot: () => snapshot,
+    latestWorkflowTaskForProduct: () => task, createWorkflowTask: () => task,
+    updateWorkflowTask: (_id, patch) => { task = { ...task, ...patch } as never; return task; } });
+  assert.equal(service.read(value.id).nextAction, 'none');
+  const result = service.reconcile(value.id)!;
+  assert.equal(result.status, 'succeeded'); assert.equal(result.progress, 100);
+});
+
+test('approved traffic children still require final readback', () => {
+  const value = product(); incompleteTraffic(value);
+  const snapshot = approvalSnapshot(value, true);
+  let task = { id: 'task', localProductId: value.id, status: 'needs_attention', progress: 99 } as never;
+  const service = new ProductExecutionService({ getProduct: () => value, getAgentSnapshot: () => snapshot,
+    latestWorkflowTaskForProduct: () => task, createWorkflowTask: () => task,
+    updateWorkflowTask: (_id, patch) => { task = { ...task, ...patch } as never; return task; } });
+  assert.equal(service.read(value.id).nextAction, 'resume');
+  const result = service.reconcile(value.id)!;
+  assert.equal(result.status, 'needs_attention'); assert.equal(result.progress, 99);
+});
+
 test('uncertain write requires verification and cannot turn into task success', () => {
   const value = product();
   const snapshot = { localProductId: value.id, events: [], run: null,

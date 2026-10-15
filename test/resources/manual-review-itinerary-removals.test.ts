@@ -50,3 +50,17 @@ test("同日两个 OR 组含同名点时，删除凭证只绑定被删的组", (
   const receipt = ((next.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<Record<string, unknown>>)[0]!;
   assert.equal(receipt.groupKey, alternativeGroupKey(1, ["甲", "X"]));
 });
+
+test("删除标题中的路线点时保留同一标题的其它锚点", () => {
+  const product = {
+    itinerary: [{ day: 3, title: "太白县—留坝县美食—张良庙，留侯住宿",
+      description: "上午前往留坝县品当地美食，下午游览张良庙，傍晚前往留侯镇入住。", spots: [{ name: "张良庙" }] }],
+  };
+  const next = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0 });
+  const day = (next.itinerary as Array<Record<string, unknown>>)[0]!;
+  assert.match(String(day.title), /太白县/);
+  assert.match(String(day.title), /留坝县美食/);
+  assert.doesNotMatch(String(day.title), /张良庙/);
+  assert.match(String(day.description), /留坝县/);
+  assert.doesNotMatch(String(day.description), /张良庙/);
+});

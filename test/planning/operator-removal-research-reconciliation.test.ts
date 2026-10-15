@@ -53,3 +53,47 @@ test("无人工凭证的消失、另一天同名未核验、组合任务中的�
   assert.equal(isResearchTaskSatisfiedByProduct(task("甲 或 乙"), { ...receipt, itinerary: [{ day: 2, spots: [{ name: "乙" }] }] }), false);
   assert.equal(isResearchTaskSatisfiedByProduct(task("甲 或 乙"), { ...receipt, itinerary: [{ day: 2, spots: [{ name: "乙", poiName: "乙", poiId: 12 }] }] }), true);
 });
+
+test("删除凭证按 POI 名等价键结清括号注释 / 动作词写法不同的核查任务", () => {
+  const product = { manualReview: { itinerarySpotRemovals: [{ day: 2, name: "广济桥", removedAt: "2026-10-14T00:00:00.000Z" }] }, itinerary: [] };
+  assert.equal(isResearchTaskSatisfiedByProduct(task("广济桥"), product), true);
+  assert.equal(isResearchTaskSatisfiedByProduct(task("广济桥（不上桥）"), product), true);
+  assert.equal(isResearchTaskSatisfiedByProduct(task("非遗中心参观"), {
+    manualReview: { itinerarySpotRemovals: [{ day: 3, name: "非遗中心", removedAt: "2026-10-14T00:00:00.000Z" }] }, itinerary: [],
+  }), true);
+  // 同城不同景点不能被名称包含关系误结案。
+  assert.equal(isResearchTaskSatisfiedByProduct(task("汉中市古汉台博物馆"), {
+    manualReview: { itinerarySpotRemovals: [{ day: 1, name: "汉中", removedAt: "2026-10-14T00:00:00.000Z" }] }, itinerary: [],
+  }), false);
+});
+
+test("删除凭证不能结清另一天仍未匹配的同名景点", () => {
+  const product = {
+    manualReview: { itinerarySpotRemovals: [{ day: 1, name: "广济桥", removedAt: "2026-10-14T00:00:00.000Z" }] },
+    itinerary: [
+      { day: 1, spots: [] },
+      { day: 2, spots: [{ name: "广济桥", poiName: null, poiId: null, kind: "attraction" }] },
+    ],
+  };
+  assert.equal(isResearchTaskSatisfiedByProduct(task("广济桥（不上桥）"), product), false);
+  assert.equal(isResearchTaskSatisfiedByProduct(task("广济桥"), product), false);
+  // 另一天的同名景点补齐 POI 后，任务才允许结案。
+  (product.itinerary[1]!.spots[0] as { poiName: string | null; poiId: number | null }).poiName = "广济桥";
+  (product.itinerary[1]!.spots[0] as { poiName: string | null; poiId: number | null }).poiId = 85862;
+  assert.equal(isResearchTaskSatisfiedByProduct(task("广济桥（不上桥）"), product), true);
+});
+
+test("suggestPoi 未匹配兜底分支同样按 POI 名等价键判断是否有同类景点", () => {
+  const obsolete = "suggestPoi 未匹配；已保留原景点和原行程位置，仅以文字录入";
+  const listed = (name: string) => ({ label: `核查 ${name} 的 VBK POI 映射`, type: "vbk" as const, detail: obsolete });
+  const product = {
+    manualReview: { itinerarySpotRemovals: [{ day: 1, name: "广济桥", removedAt: "2026-10-14T00:00:00.000Z" }] },
+    itinerary: [
+      { day: 1, spots: [] },
+      { day: 2, spots: [{ name: "广济桥", kind: "attraction", poiName: null, poiId: null }] },
+    ],
+  };
+  assert.equal(isResearchTaskSatisfiedByProduct(listed("广济桥（不上桥）"), product), false);
+  (product.itinerary[1]!.spots as unknown[]).length = 0;
+  assert.equal(isResearchTaskSatisfiedByProduct(listed("广济桥（不上桥）"), product), true);
+});

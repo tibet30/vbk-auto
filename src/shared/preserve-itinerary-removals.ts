@@ -35,10 +35,12 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
     for (const field of ["title", "description"] as const) {
       const copy = text(day[field]);
       if (!copy || !aliases.some((name) => copy.includes(name))) continue;
-      // Keep unrelated clauses, rather than rebuilding a day from an old model response.
-      day[field] = (copy.match(/[^，,。！？!?]+[，,。！？!?]?/gu) ?? [])
-        .filter((clause) => !aliases.some((name) => clause.includes(name)))
-        .join("").replace(/[，,]$/u, "。").trim();
+      // 编号路线的标题用「—/→/·/，」串联同一行的多个路线点：标题优先按分段
+      // 只删命中点。否则整句过滤在标题含其它分隔符时会连未删除的锚点一起丢掉，
+      // 下文「编号路线校验」会把它们报成未保留。描述是散文，仍优先整句过滤。
+      const segmented = dropRouteSegments(copy, aliases);
+      const claused = dropMentionedClauses(copy, aliases);
+      day[field] = field === "title" ? segmented || claused : claused || segmented;
       if (!day[field]) {
         const kept = (day.spots as unknown[]).map((spot) => text(record(spot).name)).filter(Boolean).join("、");
         day[field] = field === "title" ? kept || `第${day.day}天行程`
@@ -53,6 +55,23 @@ function mentionAliases(name: string): string[] {
   const full = name.trim();
   const short = full.replace(/^[\p{Script=Han}]{1,8}?(?:市|县)/u, "");
   return [...new Set([full, short].filter((value) => value.length >= 2))];
+}
+
+/** 整句过滤：只丢掉提到被删除景点的句子，保留无关文案。 */
+function dropMentionedClauses(copy: string, aliases: readonly string[]): string {
+  return (copy.match(/[^，,。！？!?]+[，,。！？!?]?/gu) ?? [])
+    .filter((clause) => !aliases.some((name) => clause.includes(name)))
+    .join("").replace(/[，,]$/u, "。").trim();
+}
+
+/** 只删命中删除凭证的路线点分段，保留同一标题里的其它锁定路线点。 */
+function dropRouteSegments(copy: string, aliases: readonly string[]): string {
+  return copy.split(/([—–\-·、，,→/／])/u)
+    .filter((part) => !aliases.some((name) => part.includes(name)))
+    .join("")
+    .replace(/^[\s—–\-·、，,→/／]+|[\s—–\-·、，,→/／]+$/gu, "")
+    .replace(/([—–\-·、，,→/／])\s*(?=[—–\-·、，,→/／])/gu, "")
+    .trim();
 }
 
 function groupMatches(spots: readonly unknown[], index: number, day: number, key: string): boolean {

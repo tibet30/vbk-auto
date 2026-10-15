@@ -5,7 +5,7 @@ import { PlatformOperationService } from '../../application/platform-operation-s
 import { AutomationCancelledError } from './automation.main.errors.js';
 
 export function makeAutomationRunContext(args: Pick<AutomationRunContext,
-  "db" | "browser" | "emit" | "advisor" | "presentationCopyRewriter" | "disambiguator" | "cancellationRequested">
+  "db" | "browser" | "emit" | "advisor" | "presentationCopyRewriter" | "itineraryCopyRewriter" | "disambiguator" | "cancellationRequested">
   & { localProductId?: string; guard?: AutomationRunContext["assertWriteAuthorized"]; mutations?: ProductMutationService;
     exclusive: <T>(task: () => Promise<T>) => Promise<T> }): AutomationRunContext {
   const baselines = new Map<string, NonNullable<ReturnType<typeof args.db.getProduct>>>();
@@ -21,6 +21,7 @@ export function makeAutomationRunContext(args: Pick<AutomationRunContext,
       ? async () => ({ summary: "阶段未完成", rootCause: "等待 Agent 根据执行结果决定后续动作", action: "wait_for_user", expectedEvidence: "权威回读结果", userInstruction: "已将错误返回 Agent，未在工具内部重复写入。" })
       : args.advisor,
     presentationCopyRewriter: args.presentationCopyRewriter,
+    itineraryCopyRewriter: args.itineraryCopyRewriter,
     disambiguator: args.disambiguator,
     resolveActiveButlerContext: accountName => resolveActiveButlerContext(args.db, accountName),
     markCancelled: (_id, run, persist) => markCancelled(run, persist),

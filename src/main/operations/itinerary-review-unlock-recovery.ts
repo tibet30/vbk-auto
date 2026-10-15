@@ -1,6 +1,8 @@
 import type { ProductDetail } from "../../shared/contracts.js";
 import {
+  ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE,
   ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE,
+  isItineraryReviewRejectedWithoutWrite,
   type ItineraryReviewUnlockState,
 } from "../../shared/itinerary-review-unlock.js";
 
@@ -36,6 +38,16 @@ export function isValidationOnlyNormalizationMismatch(state: ItineraryReviewUnlo
     && mismatch.paths.every(path => NORMALIZED_VALIDATION_PATHS.some(pattern => pattern.test(path)));
 }
 
+/**
+ * 只读核查可以恢复的两种「未形成写入」判定：
+ *  - 平台规范化字段差异（既有逻辑）；
+ *  - 平台在只读校验步骤以非法关键词驳回（历史 uncertain 状态，回执为空）。
+ * 两者都要求同一份 plan-level 回读证明远端草稿未变化。
+ */
+export function isValidationOnlyReviewRecoverable(state: ItineraryReviewUnlockState | undefined): boolean {
+  return isValidationOnlyNormalizationMismatch(state) || isItineraryReviewRejectedWithoutWrite(state);
+}
+
 /** Fresh, full plan readback is required before a validation-only dispatch becomes retryable. */
 export async function recoverValidationOnlyReview(args: {
   product: ProductDetail;
@@ -46,8 +58,8 @@ export async function recoverValidationOnlyReview(args: {
   updatedAt: string;
 }): Promise<ItineraryReviewUnlockState | undefined> {
   const { product, previous, evidence } = args;
-  if (!isValidationOnlyNormalizationMismatch(previous)) return undefined;
-  if (!previous || previous.localProductId !== product.id || previous.productId !== product.productId
+  if (!previous || !isValidationOnlyReviewRecoverable(previous)) return undefined;
+  if (previous.localProductId !== product.id || previous.productId !== product.productId
     || previous.accountKey !== product.vbkAccount || previous.tourInfoId !== evidence.tourInfoId
     || previous.productId !== evidence.productId) return undefined;
   const planned = await args.verifyPlan();
@@ -66,7 +78,9 @@ export async function recoverValidationOnlyReview(args: {
     tourInfoId: evidence.tourInfoId,
     beforeDigest: evidence.contentDigest,
     requestSteps: [],
-    message: ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE,
+    message: isItineraryReviewRejectedWithoutWrite(previous)
+      ? ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE
+      : ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE,
     updatedAt: args.updatedAt,
   };
 }

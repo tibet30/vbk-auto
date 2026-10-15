@@ -140,6 +140,10 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
       args.getSettings();
       return (await args.aiService()).rewritePresentationCopy(request);
     },
+    async (request) => {
+      args.getSettings();
+      return (await args.aiService()).rewriteItineraryCopy(request);
+    },
   );
   const services = { window, browser, automation };
   // IPC handlers are registered before createMainWindow. Publish all service

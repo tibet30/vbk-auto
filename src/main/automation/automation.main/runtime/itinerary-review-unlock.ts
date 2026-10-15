@@ -7,6 +7,7 @@ import type {
 } from "../../../../shared/itinerary-review-unlock.js";
 import {
   ITINERARY_REVIEW_LEGACY_VALIDATION_ONLY_RECOVERY_MESSAGE,
+  ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE,
   ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE,
   itineraryReviewDigestMismatchFromError,
 } from "../../../../shared/itinerary-review-unlock.js";
@@ -28,6 +29,7 @@ interface Protocol {
   submit(page: VbkSessionRequestBrowser, evidence: ItineraryReviewEvidence, options: {
     assertCurrent?: () => void | Promise<void>;
     onStep?: (step: ItineraryReviewStepReceipt) => void;
+    onWrite?: () => void;
   }): Promise<void>;
   verify(page: VbkSessionRequestBrowser, productId: string, digest?: string,
     product?: unknown): Promise<ItineraryReviewUnlockReceipt>;
@@ -168,9 +170,11 @@ export async function runWorkflowItineraryReviewUnlock(args: WorkflowItineraryRe
     message: "已批准的自动录入正在提交行程审核；完成前禁止重复提交", updatedAt: now(),
   };
   args.stateStore.save(state);
+  let remoteWriteDispatched = false;
   try {
     await protocol.submit(page, evidence, {
       assertCurrent,
+      onWrite: () => { remoteWriteDispatched = true; },
       onStep: step => {
         state = { ...state, requestSteps: [...(state.requestSteps ?? []), step], updatedAt: now() };
         args.stateStore.save(state);
@@ -183,10 +187,24 @@ export async function runWorkflowItineraryReviewUnlock(args: WorkflowItineraryRe
     args.stateStore.save(verifiedState(args, initialApproval, agentRunId, attemptId, receipt, now()));
     return { verified: true as const, receipt };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     const digestMismatch = itineraryReviewDigestMismatchFromError(error);
+    // 平台只在只读校验阶段驳回（如行程文案非法关键词）时，本次提交没有派发任何远端写入：
+    // 保留可重试的审核边界，让同一批准流程修正文案后重新提交，而不是留下“写入结果不明”。
+    if (!remoteWriteDispatched && !digestMismatch) {
+      const rejected = {
+        ...state,
+        status: "requires_review" as const,
+        attemptId: "",
+        message: `${ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE}：${message}`,
+        updatedAt: now(),
+      };
+      args.stateStore.save(rejected);
+      throw Object.assign(new Error(message), { itineraryReviewValidationOnly: true });
+    }
     state = { ...state, status: "uncertain",
       ...(digestMismatch ? { digestMismatch } : {}),
-      message: error instanceof Error ? error.message : String(error), updatedAt: now() };
+      message, updatedAt: now() };
     try { args.stateStore.save(state); } catch { /* durable dispatched barrier remains */ }
     throw Object.assign(new Error(state.message), {
       uncertainWrite: true,

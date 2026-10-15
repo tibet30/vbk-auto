@@ -14,7 +14,7 @@ import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-
 import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
 import { resolveTravelScope } from "../runtime.js";
 import { buildVbkCopyPolicyPrompt, sanitiseUserIdeaForAi } from "../vbk-copy-policy.js";
-import { buildPresentationFeedbackPrompt } from "../vbk-copy-feedback.js";
+import { buildItineraryFeedbackPrompt, buildPresentationFeedbackPrompt } from "../vbk-copy-feedback.js";
 import { PRIVATE_TOUR_COPY_GUIDE } from "../../../shared/private-tour-copy.js";
 import { ITINERARY_LODGING_GUIDE } from "../../../shared/itinerary-hotel.js";
 
@@ -91,11 +91,19 @@ export function projectProductContext(stage: PlanningStage, product: Record<stri
   return projected;
 }
 
-export function composePlanningSystemPrompt(stage: PlanningStage, presentationRejectedWords: readonly string[] = []): string {
+export function composePlanningSystemPrompt(
+  stage: PlanningStage,
+  presentationRejectedWords: readonly string[] = [],
+  itineraryRejectedWords: readonly string[] = [],
+): string {
   if (stage === "research") {
     return `你是「三人同游」旅游产品运营助手。当前阶段：research。\n\nresearch tasks 由本地 deterministic 生成；不要返回模块或核查结果，只通过工具提交可选的一句话备注。`;
   }
-  const feedback = stage === "presentation" ? buildPresentationFeedbackPrompt(presentationRejectedWords) : "";
+  const feedback = stage === "presentation"
+    ? buildPresentationFeedbackPrompt(presentationRejectedWords)
+    : stage === "itinerary"
+      ? buildItineraryFeedbackPrompt(itineraryRejectedWords)
+      : "";
   const allowed = STAGE_ALLOWED_MODULES[stage].join("、") || "无";
   const stageRules = stage === "validation"
     ? "本阶段不生成新模块；只按工具 schema 返回结果，不得改写产品草稿。"

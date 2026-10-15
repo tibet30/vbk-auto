@@ -110,6 +110,7 @@ export function createRunPlanning(context: MainIpcContext, handlePreflightFailur
         planner = new OpenAICompatiblePlannerAdapter({
           apiKey: decryptedKey,
           presentationRejectedWords: db.listRejectedPresentationWords(),
+          itineraryRejectedWords: db.listRejectedItineraryWords(),
           baseUrl: providerProfile.baseUrl,
           model: providerProfile.model,
           ...planningTransportOptions(turnSettings.aiProvider),

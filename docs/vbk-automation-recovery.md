@@ -43,6 +43,16 @@
 - 用户停止后，当前平台请求自然结束；等待中的页面操作、迟到的诊断动作及下一阶段不会继续执行。
 - 收尾截图为辅助证据，截图失败仅记警告，不改变已验证的业务结果。
 
+## 行程文案被平台驳回时的自动修复
+
+VBK 只在只读校验步骤（`checkTourDaily` saveType=8/3）判定行程文案非法关键词，草稿保存（saveType=2）不做该判定。因此这类驳回表示「平台只校验、未接受任何写入」，必须就地自愈，而不是留成人工核对的 `uncertain` 写入：
+
+1. `runtime/itinerary-review-unlock.ts` 用 `submitItineraryReviewUnlock` 的 `onWrite` 回调记录本次是否真的派发过远端写入；未派发且无摘要差异时，状态回落为可重试的 `requires_review`（`ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE`），并抛出 `itineraryReviewValidationOnly` 标记。
+2. `itinerary-review-copy-repair.ts` 捕获该标记：用 `itinerary-copy-paths.ts` 定位命中的可见文案路径（天标题 / 天描述 / 景点描述 / 其他与自由活动标题与详情 / 餐食描述），调用行程专属 AI 改写器（`ctx.itineraryCopyRewriter`）定点重写，落库后重跑草稿保存，再重新提交审核；预算 2 轮，用尽如实上抛。
+3. 已发生的写入失败（`saveTourDailyDetail` / `saveProductTourInfo` 之后）仍走原来的 `uncertain` 人工核对门禁，不放宽边界。
+4. 平台驳回的词写入 `vbk_copy_feedback(module='itinerary')`：既用于提交前的预防性改写，也进入 itinerary 阶段的生成提示，避免重复踩同一个词。
+5. 旧版本留下的 `uncertain + 空回执 + 校验驳回文案` 状态，只有在只读核查（`recoverValidationOnlyReview`）用完整方案回读证明远端草稿未变化后，才回落为可重试边界。
+
 ## 验证范围
 
 核心测试覆盖恢复决策、共享队列和授权传递、取消检查点、锁释放、诊断历史、产品壳交接及真实临时 SQLite 持久化读回。

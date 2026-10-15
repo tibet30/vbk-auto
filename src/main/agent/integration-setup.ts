@@ -100,7 +100,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
         const adapter = new OpenAICompatiblePlannerAdapter({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model, ...planningTransportOptions(settings.aiProvider),
-          presentationRejectedWords: db.listRejectedPresentationWords(), provider: settings.aiProvider, recordUsage: (event) => recordAgentUsage(db, localProductId, event) });
+          presentationRejectedWords: db.listRejectedPresentationWords(), itineraryRejectedWords: db.listRejectedItineraryWords(), provider: settings.aiProvider, recordUsage: (event) => recordAgentUsage(db, localProductId, event) });
         // The adapter owns the stage-specific function schema. Its context is
         // intentionally a single current-product snapshot for this one-shot run.
         let memoryContext;

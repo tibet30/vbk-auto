@@ -20,6 +20,7 @@ import type { AutomationRunContext } from "../automation.main.context.js";
 import type { VbkBrowser } from "../../../infrastructure/vbk-browser.js";
 import type { VbkDatabase } from "../../../infrastructure/database/database.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, ProductDetail } from "../../../../shared/contracts.js";
+import type { ItineraryCopyRewriter } from "../../../../shared/itinerary-copy-rewrite.js";
 import type { ProductMutationService } from "../../../application/product-mutation-service.js";
 
 export interface RunContextBindings {
@@ -35,6 +36,7 @@ export interface RunContextBindings {
     product: Record<string, unknown>;
   }) => Promise<{ pickedText: string | null; reasoning: string }>;
   presentationCopyRewriter?: (req: { message: string; product: Record<string, unknown> }) => Promise<AiResponse>;
+  itineraryCopyRewriter?: ItineraryCopyRewriter;
   productMutations?: ProductMutationService;
   agentWriteGuard?: (localProductId: string, phase: string) => Promise<void>;
   running: Set<string>;
@@ -55,6 +57,7 @@ export function buildRunContext(bindings: RunContextBindings, localProductId?: s
     mutations: bindings.productMutations,
     advisor: bindings.advisor,
     presentationCopyRewriter: bindings.presentationCopyRewriter,
+    itineraryCopyRewriter: bindings.itineraryCopyRewriter,
     disambiguator: bindings.disambiguator,
     cancellationRequested: bindings.cancellationRequested,
     exclusive: bindings.exclusive ?? (<T>(task: () => Promise<T>) => task()),

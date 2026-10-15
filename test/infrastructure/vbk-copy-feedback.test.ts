@@ -25,6 +25,21 @@ test("新非法词和修复预算本地持久化，生成提示只作用于图�
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("行程审核校验驳回的词单独落库，并只进入 itinerary 阶段的提示", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-itinerary-feedback-"));
+  try {
+    const db = new VbkDatabase(directory);
+    db.recordCopyFeedback({ word: "药浴", module: "itinerary",
+      paths: ["/itinerary/0/activities/0/detail"], source: "review-check",
+      detail: "行程审核校验失败（Ack=Failure）：保存第1天行程描述，提示非法关键词：药浴，请修改后重新提交" });
+    const reopened = new VbkDatabase(directory);
+    assert.deepEqual(reopened.listRejectedItineraryWords(), ["药浴"]);
+    assert.deepEqual(reopened.listRejectedPresentationWords(), []);
+    assert.match(composePlanningSystemPrompt("itinerary", [], reopened.listRejectedItineraryWords()), /药浴/);
+    assert.doesNotMatch(composePlanningSystemPrompt("presentation", [], reopened.listRejectedItineraryWords()), /药浴/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("远端词库缓存持久化并按当前应用账号读取，不反向上传其他账号词库", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-copy-cloud-"));
   try {

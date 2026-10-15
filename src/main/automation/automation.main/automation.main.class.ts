@@ -4,6 +4,7 @@ import { productNotFound } from "../../infrastructure/db-errors.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ProductDetail } from "../../../shared/contracts.js";
+import type { ItineraryCopyRewriter } from "../../../shared/itinerary-copy-rewrite.js";
 import { recoverLegacyScreenshotFalseFailure as recoverLegacyScreenshotFalseFailureFlow } from "./automation.main.legacy-recovery.js";
 import { assertSinglePhaseRetryPrerequisites } from "./automation.main.prerequisites.js";
 import { parseProduct } from "../schema/schema.js";
@@ -56,6 +57,7 @@ export class DraftAutomation {
       product: Record<string, unknown>;
     }) => Promise<{ pickedText: string | null; reasoning: string }>,
     private presentationCopyRewriter?: (req: { message: string; product: Record<string, unknown> }) => Promise<AiResponse>,
+    private itineraryCopyRewriter?: ItineraryCopyRewriter,
   ) {}
 
   setRunVbkPageExclusive(run: <T>(task: () => Promise<T>) => Promise<T>) {
@@ -74,6 +76,7 @@ export class DraftAutomation {
       advisor: this.advisor,
       disambiguator: this.disambiguator,
       presentationCopyRewriter: this.presentationCopyRewriter,
+      itineraryCopyRewriter: this.itineraryCopyRewriter,
       productMutations: this.productMutations,
       agentWriteGuard: this.agentWriteGuard,
       running: this.running,

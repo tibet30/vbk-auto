@@ -20,6 +20,12 @@ export function listRejectedPresentationWords(db: Database.Database, userId?: nu
   return [...new Set([...local, ...cachedPresentationWords(cache?.value)])];
 }
 
+/** 平台在行程审核校验里拒绝过的词：只用于行程文案的生成与修复提示。 */
+export function listRejectedItineraryWords(db: Database.Database): string[] {
+  return (db.prepare("SELECT word FROM vbk_copy_feedback WHERE module='itinerary' ORDER BY word").all() as Array<{ word: string }>)
+    .map(row => row.word);
+}
+
 export function getPresentationCopyRecovery(db: Database.Database, localProductId: string): VbkCopyRecovery | undefined {
   const row = db.prepare("SELECT payload_json FROM vbk_copy_recovery WHERE local_product_id=?").get(localProductId) as { payload_json: string } | undefined;
   return row ? JSON.parse(row.payload_json) as VbkCopyRecovery : undefined;

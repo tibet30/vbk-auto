@@ -5,7 +5,11 @@ import { approvalForRun } from "../integration-gates.js";
 import { reconcileAgentShell } from "../integration-reconcile.js";
 import type { AgentCoreDependencies } from "../types.js";
 import type { ItineraryReviewUnlockState } from "../../../shared/itinerary-review-unlock.js";
-import { ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE } from "../../../shared/itinerary-review-unlock.js";
+import {
+  ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE,
+  ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE,
+  isItineraryReviewRejectedWithoutWrite,
+} from "../../../shared/itinerary-review-unlock.js";
 import type { AgentSnapshot, ProductDetail } from "../../../shared/contracts.js";
 
 type ReconcileUncertainWrite = NonNullable<AgentCoreDependencies["reconcileUncertainWrite"]>;
@@ -19,29 +23,52 @@ function reconcileValidationOnlyItinerary(
 ) {
   if (uncertain.toolCallId !== "phase:itinerary") return undefined;
   const approval = approvalForRun(snapshot);
-  if (review?.status === "verified" && review.receipt?.verified === true
-    && review.productId === product?.productId && review.localProductId === product?.id
-    && review.accountKey === product?.vbkAccount && review.agentRunId === snapshot?.run?.id
-    && review.approvalId === approval?.id && review.accountKey === approval?.accountKey
-    && approval?.itineraryReviewUnlockAuthorized === true) {
+  const baseIdentityMatches = Boolean(review && product && snapshot?.run && approval
+    && review.localProductId === product.id && review.productId === product.productId
+    && review.accountKey === product.vbkAccount && review.agentRunId === snapshot.run.id
+    && review.accountKey === approval.accountKey
+    && approval.itineraryReviewUnlockAuthorized === true);
+  const identityMatches = baseIdentityMatches && review?.approvalId === approval?.id;
+  if (identityMatches && review?.status === "verified" && review.receipt?.verified === true) {
     return { reconciled: true, phase: "itinerary",
       message: "已通过远端方案、审核状态和菜单边界回读确认行程审核成功。" };
   }
-  if (review?.status === "requires_review" && review.attemptId === ""
+  // 平台只在只读校验阶段驳回（如行程文案非法关键词），本次提交没有派发任何远端写入：
+  // 保留当前批准范围，让行程阶段重新回读方案后自动修正文案并重新提交。
+  const refreshedRejectedWithoutWrite = review?.status === "requires_review"
+    && review.attemptId === ""
+    && review.message === ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE;
+  if ((identityMatches || (baseIdentityMatches && refreshedRejectedWithoutWrite))
+    && isItineraryReviewRejectedWithoutWrite(review)) {
+    return { reconciled: false, retryable: true, resetRejectedWithoutWrite: true,
+      message: "平台只在只读校验阶段驳回了行程文案，未形成远端写入；将自动修正文案后重新提交。" };
+  }
+  if (identityMatches && review?.status === "requires_review" && review.attemptId === ""
     && review.message === ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE
-    && Array.isArray(review.requestSteps) && review.requestSteps.length === 0
+    && review.requestSteps?.length === 0
     && review.digestMismatch === undefined && review.afterDigest === undefined
-    && review.receipt === undefined && review.routeId === undefined
-    && product?.id === review.localProductId && product.productId === review.productId
-    && product.vbkAccount === review.accountKey && snapshot?.run?.id === review.agentRunId
-    && approval !== undefined && approval.id === review.approvalId && approval.accountKey === review.accountKey
-    && approval.itineraryReviewUnlockAuthorized === true) {
+    && review.receipt === undefined && review.routeId === undefined) {
     return { reconciled: false, retryable: true,
       message: "已只读确认平台校验未改动当前方案，继续执行同一批准范围。" };
   }
   return {
     reconciled: false,
     message: "行程审核校验可能已到达 VBK，缺少完整解锁回读；不会以旧确认自动重试。",
+  };
+}
+
+/** 驳回状态只保留可重试的审核边界；不写入任何回执，也不改变产品与授权。 */
+function resetRejectedReviewState(review: ItineraryReviewUnlockState): ItineraryReviewUnlockState {
+  return {
+    ...review,
+    status: "requires_review",
+    attemptId: "",
+    digestMismatch: undefined,
+    afterDigest: undefined,
+    routeId: undefined,
+    receipt: undefined,
+    message: ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE,
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -54,7 +81,13 @@ export function reconcileUncertainAgentWrite(context: MainIpcContext): Reconcile
     const itinerary = reconcileValidationOnlyItinerary(uncertain, review, current, currentSnapshot);
     if (itinerary) {
       if (itinerary.reconciled) persistReconciledPhase(context.db, localProductId, "itinerary");
-      else if (itinerary.retryable) settleReconciledDispatches(context.db, localProductId, "itinerary");
+      else if (itinerary.retryable) {
+        // 平台只在只读校验阶段驳回了文案：保留可重试的审核边界，清掉 dispatched 屏障。
+        if ("resetRejectedWithoutWrite" in itinerary && itinerary.resetRejectedWithoutWrite && review) {
+          context.db.saveItineraryReviewUnlockState(resetRejectedReviewState(review));
+        }
+        settleReconciledDispatches(context.db, localProductId, "itinerary");
+      }
       return itinerary;
     }
     if (uncertain.toolCallId === "phase:preflight" && review?.status === "uncertain"

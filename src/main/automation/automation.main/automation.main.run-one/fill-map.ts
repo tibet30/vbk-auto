@@ -16,6 +16,7 @@ import { normalisePlatformHotelProduct } from "../../../../shared/platform-hotel
 import type { AutomationRunContext } from "../automation.main.context.js";
 import { fillPresentationWithSensitiveRewrite } from "../presentation-sensitive-rewrite.js";
 import { fillItineraryWithSensitiveRewrite } from "../itinerary-sensitive-rewrite.js";
+import { runItineraryReviewWithCopyRepair } from "../itinerary-review-copy-repair.js";
 import { writeAutomationProduct } from "../automation.main.persist.js";
 import { fillItineraryDraftApi } from "../../ctrip/itinerary/api-entry.js";
 import { fillAndSaveTerms } from "../../ctrip/ctrip.js";
@@ -98,6 +99,29 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
     }
     return result.receipt;
   };
+  const saveItineraryDraft = () => fillItineraryWithSensitiveRewrite({
+    ctx,
+    localProductId,
+    product: productData,
+    log,
+    executeItinerary: () => fillItineraryDraftApi(page, productData, {
+      disambiguator: ctx.disambiguator,
+      productId: productId ?? "",
+      readOnlyBeforeWrite: /VBK 行程关联保存.*超时/u.test(
+        args.productDetail?.automation?.recovery?.phases.itinerary?.finalError ?? ""),
+    }),
+    dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
+  });
+  /** 审核提交前把命中路径的行程文案改好、重存草稿，再重试审核；只读校验驳回时可安全重试。 */
+  const submitItineraryReview = () => runItineraryReviewWithCopyRepair({
+    ctx,
+    localProductId,
+    product: productData,
+    log,
+    submitReview: () => requireItineraryReviewUnlock(),
+    saveDraft: saveItineraryDraft,
+    persist: () => writeAutomationProduct(ctx, localProductId, productData, "automating"),
+  });
   return {
     presentation: async () => {
       if (args.wizardAdvanceOnly?.has("presentation")) {
@@ -133,20 +157,8 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
         log("已跳过重复保存行程；只读方案核验通过，继续本次已批准的行程审核。", "warning");
         return { reviewOnly: true, receipt };
       }
-      const result = await fillItineraryWithSensitiveRewrite({
-        ctx,
-        localProductId,
-        product: productData,
-        log,
-        executeItinerary: () => fillItineraryDraftApi(page, productData, {
-          disambiguator: ctx.disambiguator,
-          productId: productId ?? "",
-          readOnlyBeforeWrite: /VBK 行程关联保存.*超时/u.test(
-            args.productDetail?.automation?.recovery?.phases.itinerary?.finalError ?? ""),
-        }),
-        dbUpdate: (id, updatedProduct, status) => writeAutomationProduct(ctx, id, updatedProduct, status),
-      });
-      await requireItineraryReviewUnlock();
+      const result = await saveItineraryDraft();
+      await submitItineraryReview();
       return result;
     },
     package: () => ensurePackageApi(page, productData, productId!),
@@ -187,7 +199,7 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
     },
     preflight: async () => {
       if (!ctx.agentControlled) return runProductPreflightApi(page, productData, productId!);
-      const receipt = await requireItineraryReviewUnlock();
+      const receipt = await submitItineraryReview();
       const result = await runProductPreflightApi(page, productData, productId!, {
         itineraryTourInfoId: receipt.tourInfoId,
       });

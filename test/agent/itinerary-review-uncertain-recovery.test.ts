@@ -41,12 +41,14 @@ function snapshot(overrides: Record<string, unknown> = {}) {
 function harness(state = review(), product: any = { id: localProductId, productId }, agent = snapshot()) {
   const calls = { status: 0, remote: 0 };
   const observations: any[] = [];
+  const savedReviewStates: any[] = [];
   const context = {
     db: {
       runProductTransaction: (work: () => unknown) => work(),
       getItineraryReviewUnlockState: () => state,
       getProduct: () => product,
       getAgentSnapshot: () => agent,
+      saveItineraryReviewUnlockState: (value: any) => { savedReviewStates.push(value); },
       recordResourceObservation: (_id: string, observation: any) => {
         observations.push(observation);
         const rows = product?.resourceEvidence?.observations;
@@ -58,7 +60,7 @@ function harness(state = review(), product: any = { id: localProductId, productI
     browser: { status: async () => { calls.status += 1; throw new Error("must not reach VBK"); } },
     remoteProducts: { get: async () => { calls.remote += 1; throw new Error("must not reach product service"); } },
   } as any;
-  return { calls, observations, run: reconcileUncertainAgentWrite(context) };
+  return { calls, observations, savedReviewStates, run: reconcileUncertainAgentWrite(context) };
 }
 
 function itineraryDispatchProduct() {
@@ -124,6 +126,66 @@ test("历史 validation-only 标记也不能重新启用 write_dispatched 收据
   assert.deepEqual(blocked.observations, []);
   assert.equal(blockedProduct.resourceEvidence.observations[0].status, "write_dispatched");
   assert.deepEqual(blocked.calls, { status: 0, remote: 0 });
+});
+
+test("平台只读校验驳回行程文案的历史 uncertain 状态可自动重试并重置审核边界", async () => {
+  const product = itineraryDispatchProduct();
+  const target = harness(review({
+    status: "uncertain",
+    attemptId: "27e48053-4995-44e3-8f02-509b5e43c151",
+    message: "行程审核校验失败（Ack=Failure）：保存第1天行程描述，提示非法关键词：药浴，请修改后重新提交",
+  }), product);
+  const result = await target.run(localProductId, { toolCallId: "phase:itinerary", message: "不确定" });
+  assert.equal(result.reconciled, false);
+  assert.equal(result.retryable, true);
+  assert.match(result.message ?? "", /自动修正文案后重新提交/);
+  assert.equal(product.resourceEvidence.observations[0].status, "write_checked");
+  assert.deepEqual(target.calls, { status: 0, remote: 0 });
+  assert.equal(target.savedReviewStates.length, 1);
+  const reset = target.savedReviewStates[0];
+  assert.equal(reset.status, "requires_review");
+  assert.equal(reset.attemptId, "");
+  assert.deepEqual(reset.requestSteps, []);
+  assert.equal(reset.digestMismatch, undefined);
+  assert.equal(reset.receipt, undefined);
+  assert.match(reset.message, /^平台在只读校验阶段驳回了行程文案/);
+});
+
+test("完整只读核查确认零写入后允许跨旧审批清障，后续仍由方案指纹要求新审批", async () => {
+  const product = itineraryDispatchProduct();
+  const currentApprovalId = "4160cb75-bfd5-47d7-bb08-6cab9c259bdc";
+  const agent = snapshot({
+    events: [{ runId, type: "approval", data: { approval: {
+      id: currentApprovalId, accountKey, status: "approved", itineraryReviewUnlockAuthorized: true,
+    } } }],
+  });
+  const target = harness(review({
+    approvalId: "bef0de4e-40da-4423-b4e3-3181ebc252f1",
+    message: "平台在只读校验阶段驳回了行程文案，未形成远端写入，可修正文案后重新提交",
+  }), product, agent);
+  const result = await target.run(localProductId, { toolCallId: "phase:itinerary", message: "不确定" });
+  assert.equal(result.reconciled, false);
+  assert.equal(result.retryable, true);
+  assert.equal(product.resourceEvidence.observations[0].status, "write_checked");
+  assert.deepEqual(target.calls, { status: 0, remote: 0 });
+});
+
+test("未经过完整只读核查的历史驳回不能跨审批清障", async () => {
+  const currentApprovalId = "4160cb75-bfd5-47d7-bb08-6cab9c259bdc";
+  const agent = snapshot({
+    events: [{ runId, type: "approval", data: { approval: {
+      id: currentApprovalId, accountKey, status: "approved", itineraryReviewUnlockAuthorized: true,
+    } } }],
+  });
+  const target = harness(review({
+    status: "uncertain",
+    attemptId: "27e48053-4995-44e3-8f02-509b5e43c151",
+    message: "行程审核校验失败（Ack=Failure）：保存第1天行程描述，提示非法关键词：药浴，请修改后重新提交",
+  }), itineraryDispatchProduct(), agent);
+  const result = await target.run(localProductId, { toolCallId: "phase:itinerary", message: "不确定" });
+  assert.equal(result.retryable, undefined);
+  assert.match(result.message ?? "", /不会以旧确认自动重试/);
+  assert.deepEqual(target.observations, []);
 });
 
 test("行程 uncertain 缺少任一可信标记时保持停止且不请求平台", async (t) => {

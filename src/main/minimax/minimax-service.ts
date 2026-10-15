@@ -9,6 +9,8 @@
  */
 
 import { rewritePresentationCopy } from "./presentation-copy-rewriter.js";
+import { rewriteItineraryCopy } from "./itinerary-copy-rewriter.js";
+import type { ItineraryCopyRewriteRequest } from "../../shared/itinerary-copy-rewrite.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AiUsageEvent, AiUsageSource, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
 import { logAIPrompt } from "../ai/prompt-log.js";
@@ -93,6 +95,12 @@ export class MiniMaxService {
   async rewritePresentationCopy(input: { message: string; product: Record<string, unknown> }): Promise<AiResponse> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 AI API Key。");
     return rewritePresentationCopy(this.client(replyTimeout()), this.config.model, input);
+  }
+
+  /** 行程文案被平台判为非法关键词时的定点改写，只能返回调用方给出的命中路径。 */
+  async rewriteItineraryCopy(input: ItineraryCopyRewriteRequest): Promise<AiResponse> {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 AI API Key。");
+    return rewriteItineraryCopy(this.client(replyTimeout()), this.config.model, input);
   }
 
   async reply(input: {

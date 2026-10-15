@@ -8,6 +8,7 @@
  */
 
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AutomationRun, ContactCardSelection, ProductSummary } from "../../../shared/contracts.js";
+import type { ItineraryCopyRewriter } from "../../../shared/itinerary-copy-rewrite.js";
 import type { VbkDatabase } from "../../infrastructure/database/database.js";
 import type { VbkBrowser } from "../../infrastructure/vbk-browser.js";
 
@@ -39,6 +40,8 @@ export interface AutomationRunContext {
     message: string;
     product: Record<string, unknown>;
   }) => Promise<AiResponse>;
+  /** 行程文案定点改写：只改命中路径，供草稿保存与审核校验的非法关键词恢复使用。 */
+  itineraryCopyRewriter?: ItineraryCopyRewriter;
   disambiguator?: (req: {
     kind: "province" | "city" | "spot" | "station";
     stationSubtype?: "airport" | "train";

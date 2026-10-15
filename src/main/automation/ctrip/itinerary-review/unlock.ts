@@ -85,7 +85,12 @@ function assertCheckedAssociation(association: Record<string, unknown> | undefin
 export async function submitItineraryReviewUnlock(
   page: TrafficLinePage,
   before: ItineraryReviewEvidence,
-  options: { assertCurrent?: () => void | Promise<void>; onStep?: (step: ItineraryReviewStepReceipt) => void } = {},
+  options: {
+    assertCurrent?: () => void | Promise<void>;
+    onStep?: (step: ItineraryReviewStepReceipt) => void;
+    /** 第一次真正派发远端写入前调用：此前的失败都只发生只读校验阶段。 */
+    onWrite?: () => void;
+  } = {},
 ): Promise<void> {
   if (before.fullyUnlocked) return;
   const check = async () => { await options.assertCurrent?.(); };
@@ -116,6 +121,7 @@ export async function submitItineraryReviewUnlock(
   options.onStep?.(receipt("check3", "15638/checkTourDaily", 3));
 
   await check();
+  options.onWrite?.();
   const saved = await saveTourDailyDetailStep(page, checked3);
   if (String(saved.tourInfoId ?? "") !== String(checked3.tourInfoId ?? "")) throw new Error("审核行程详情保存未返回当前行程 ID。");
   options.onStep?.(receipt("saveDaily", "20049/saveTourDailyDetail.json"));
@@ -131,6 +137,7 @@ export async function submitItineraryReviewUnlock(
   options.onStep?.(receipt("calculateNeedAppliedVisa", "15638/calculateNeedAppliedVisa"));
 
   await check();
+  options.onWrite?.();
   const association = associationForSubmit(submitAssociation ?? checkedAssociation ?? before.relation, productId, String(checked3.tourInfoId));
   await postSoa(page, SAVE_TOUR_INFO_URL, {
     contentType: "json", head: SOHEAD, saveType: 3, tourInfo: association, tourDaily: JSON.stringify(checked3),

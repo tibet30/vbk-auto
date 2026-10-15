@@ -4,6 +4,7 @@ import {
   extractSensitiveWords,
   applySensitiveItineraryRewrite,
   findSensitiveItineraryPaths,
+  fillItineraryWithSensitiveRewrite,
 } from "../../src/main/automation/automation.main/itinerary-sensitive-rewrite.js";
 
 function product() {
@@ -126,7 +127,7 @@ test("AI 返回未修改命中字段时报错", () => {
       },
       ["巅峰"],
     );
-  }, /AI 未重写命中的行程描述字段/);
+  }, /AI 未重写命中的行程文案字段/);
 });
 
 test("支持解析含空格与结尾提示的非法关键词文案", () => {
@@ -139,4 +140,84 @@ test("支持解析含空格与结尾提示的非法关键词文案", () => {
     extractSensitiveWords("非法关键词：巅峰,极端，请修改后重新提交"),
     ["巅峰", "极端"],
   );
+});
+
+test("审核校验驳回第1天自由活动详情时，只改写该活动文案", () => {
+  const value = product();
+  value.itinerary[0].activities = [
+    { time: "晚上", title: "泡温泉", detail: "体验太白山唐镇南山温泉，含室外汤池与药浴。", type: "free", durationMinutes: 120 },
+  ];
+  assert.deepEqual(findSensitiveItineraryPaths(value, ["药浴"]), ["/itinerary/0/activities/0/detail"]);
+  applySensitiveItineraryRewrite(value, {
+    reply: "已改写",
+    patch: [{
+      op: "replace",
+      path: "/itinerary/0/activities/0/detail",
+      value: "体验太白山唐镇南山温泉室外汤池。",
+    }],
+    questions: [], researchTasks: [],
+  }, ["药浴"]);
+  assert.deepEqual(value.itinerary[0].activities, [
+    { time: "晚上", title: "泡温泉", detail: "体验太白山唐镇南山温泉室外汤池。", type: "free", durationMinutes: 120 },
+  ]);
+});
+
+test("AI 只允许改命中路径：返回其他文案路径时拒绝落库", () => {
+  const value = product();
+  value.itinerary[0].activities = [
+    { time: "晚上", title: "泡温泉", detail: "体验南山温泉药浴。", type: "free" },
+  ];
+  assert.throws(() => {
+    applySensitiveItineraryRewrite(value, {
+      reply: "已改写",
+      patch: [
+        { op: "replace", path: "/itinerary/0/activities/0/detail", value: "体验南山温泉汤池。" },
+        { op: "replace", path: "/itinerary/1/description", value: "顺带改写未命中的第二天。" },
+      ],
+      questions: [], researchTasks: [],
+    }, ["药浴"]);
+  }, /只能 replace 命中的行程文案字段/);
+  assert.equal(value.itinerary[0].activities[0].detail, "体验南山温泉药浴。");
+});
+
+test("草稿保存被平台驳回时重写命中文案并重跑保存", async () => {
+  const value = product();
+  value.itinerary[0].activities = [
+    { time: "晚上", title: "泡温泉", detail: "体验太白山唐镇南山温泉，含室外汤池与药浴。", type: "free" },
+  ];
+  const updates: Array<[string, string, string]> = [];
+  let calls = 0;
+  const result = await fillItineraryWithSensitiveRewrite({
+    ctx: { itineraryCopyRewriter: async () => ({
+      reply: "已改写",
+      patch: [{ op: "replace", path: "/itinerary/0/activities/0/detail", value: "体验太白山唐镇南山温泉室外汤池。" }],
+      questions: [], researchTasks: [],
+    }) },
+    localProductId: "local",
+    product: value,
+    log: () => {},
+    executeItinerary: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("VBK 行程草稿校验(saveType=2)失败（Ack=Failure）：非法关键词：药浴");
+      return { savedWith: "itinerary-api", days: 1, apiResult: {} };
+    },
+    dbUpdate: (id, updated, status) => { updates.push([id, status, (updated as any).itinerary[0].activities[0].detail]); },
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.savedWith, "itinerary-api");
+  assert.deepEqual(updates, [["local", "automating", "体验太白山唐镇南山温泉室外汤池。"]]);
+  assert.equal(value.itinerary[0].activities[0].detail, "体验太白山唐镇南山温泉室外汤池。");
+});
+
+test("没有配置行程文案改写器时如实上抛平台错误", async () => {
+  const value = product();
+  value.itinerary[0].activities = [{ time: "晚上", title: "泡温泉", detail: "含药浴。", type: "free" }];
+  await assert.rejects(fillItineraryWithSensitiveRewrite({
+    ctx: {},
+    localProductId: "local",
+    product: value,
+    log: () => {},
+    executeItinerary: async () => { throw new Error("非法关键词：药浴"); },
+    dbUpdate: () => {},
+  }), /非法关键词：药浴/);
 });

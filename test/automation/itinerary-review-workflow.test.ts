@@ -7,6 +7,7 @@ import {
 } from "../../src/main/automation/automation.main/runtime/itinerary-review-unlock.js";
 import { itineraryContentDigest, submitItineraryReviewUnlock, verifyItineraryReviewUnlock } from "../../src/main/automation/ctrip/itinerary-review/index.js";
 import {
+  ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE,
   ITINERARY_REVIEW_VALIDATION_ONLY_RECOVERY_MESSAGE,
   readItineraryReviewDigestMismatch,
   type ItineraryReviewUnlockState,
@@ -236,7 +237,7 @@ test("尾随菜单未解锁时，已授权工作流也不能提交审核", async
 });
 
 
-function productionSession(options: { changeText?: boolean } = {}) {
+function productionSession(options: { changeText?: boolean; rejectCheckWith?: string[] } = {}) {
   let unlocked = false;
   const requests: string[] = [];
   const productId = "100";
@@ -272,6 +273,8 @@ function productionSession(options: { changeText?: boolean } = {}) {
       else if (method === "getSubMenu.json") payload = { hasPermission: true, maxStep: unlocked ? 10 : -60, menus: menus() };
       else if (method === "inSwitch") payload = { switched: true };
       else if (method === "checkTourDaily") {
+        const rejection = options.rejectCheckWith?.shift();
+        if (rejection) return { status: 200, payload: { ResponseStatus: { Ack: "Failure", Errors: [{ Message: rejection }] } }, ctx: {} };
         const tourDaily = JSON.parse(body.tourDaily);
         if (options.changeText) tourDaily.tourDailyDescriptions[0].tourDailyInfos[0].description = "被改写";
         payload = { productTourInfo: relation(), tourDaily: JSON.stringify(tourDaily) };
@@ -286,6 +289,30 @@ function productionSession(options: { changeText?: boolean } = {}) {
   };
   return { page, requests, productId, tourInfoId };
 }
+
+test("审核校验被平台以非法关键词驳回时保留可重试边界，不写成不确定写入", async () => {
+  const f = setup(true);
+  const session = productionSession({ rejectCheckWith: ["保存第1天行程描述，提示非法关键词：药浴，请修改后重新提交"] });
+  f.args.productId = session.productId;
+  f.args.page = session.page;
+  f.args.protocol = { submit: submitItineraryReviewUnlock };
+  f.args.verifyPlan = async (_page: any, _product: any, _productId: string, tourInfoId: string) => ({
+    tourInfoId, days: 1, contentDigest: itineraryContentDigest({
+      tourDailyDescriptions: [{ orderDay: 1, tourDailyInfos: [{ activeType: { key: 3 }, description: "保留行程", tourDailyPois: [{ poi: { poiId: 85218 } }] }] }],
+    }),
+  });
+  await assert.rejects(runWorkflowItineraryReviewUnlock(f.args), (error: any) =>
+    error.itineraryReviewValidationOnly === true && error.uncertainWrite === undefined
+    && /药浴/.test(error.message));
+  assert.equal(session.requests.filter(method => method === "checkTourDaily").length, 1);
+  assert.equal(f.state?.status, "requires_review");
+  assert.equal(f.state?.attemptId, "");
+  assert.deepEqual(f.state?.requestSteps, []);
+  assert.equal(f.state?.digestMismatch, undefined);
+  assert.equal(f.state?.receipt, undefined);
+  assert.ok(f.state?.message?.startsWith(ITINERARY_REVIEW_REJECTED_WITHOUT_WRITE_MESSAGE));
+  assert.equal(f.state?.message?.includes("药浴"), true);
+});
 
 test("current authorization runs production review steps and persists the verified receipt", async () => {
   const f = setup(true); const session = productionSession();

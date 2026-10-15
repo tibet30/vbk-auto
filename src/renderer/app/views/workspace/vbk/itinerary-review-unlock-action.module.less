@@ -1,19 +1,71 @@
-.action { display: grid; gap: 9px; margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
-.copy { display: flex; align-items: flex-start; gap: 8px; color: var(--ai-teal); }
-.copy > div { min-width: 0; }
-.copy strong { color: var(--foreground); font-size: var(--fs-sm); }
-.copy p { margin: 3px 0 0; color: var(--muted-foreground); font-size: var(--fs-xs); line-height: 1.5; }
-.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.verified, .pending { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); }
-.verified { color: var(--success); }
-.pending { color: var(--warning); }
-.notice { display: flex; align-items: flex-start; gap: 5px; margin: 0; color: var(--muted-foreground); font-size: var(--fs-xs); line-height: 1.5; }
-.notice[data-tone='success'] { color: var(--success); }
-.notice[data-tone='warning'] { color: var(--warning); }
-.notice[data-tone='error'] { color: var(--destructive); }
-.mismatch { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--warning); border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--fs-xs); line-height: 1.5; }
+/* 「自动录入进度」列表底部的行程审核边界说明。
+   异常态 banner 与同区域的 .recoveryBanner 保持同一视觉语言，
+   正常态只占一行 .note，不再渲染任何卡片容器。 */
+
+.note {
+  margin: 8px 2px 0;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.note[data-tone='error'] { color: var(--destructive); }
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-control);
+  background: #fffbeb;
+  color: #8a4b09;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.banner[data-tone='error'] {
+  border-color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 6%, var(--surface));
+  color: var(--destructive);
+}
+
+.banner > svg { flex: 0 0 auto; }
+
+.bannerText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.banner button { flex: 0 0 auto; }
+
+.mismatch {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
 .mismatch strong { color: var(--warning); }
-.mismatch ul { display: grid; gap: 2px; margin: 0; padding-left: 18px; }
-.mismatch code { overflow-wrap: anywhere; color: var(--foreground); }
+
+.mismatch ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.mismatch code {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+
 .spin { animation: spin .8s linear infinite; }
+
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

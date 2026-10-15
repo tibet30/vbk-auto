@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ProductDetail } from "../../../src/shared/contracts";
-import type { ItineraryReviewUnlockState } from "../../../src/shared/itinerary-review-unlock";
+import type { ItineraryReviewMenu, ItineraryReviewUnlockState } from "../../../src/shared/itinerary-review-unlock";
 import { ItineraryReviewUnlockAction } from "../../../src/renderer/app/views/workspace/vbk/itinerary-review-unlock-action";
 import "../../../src/renderer/styles/global.css";
 
@@ -10,19 +10,37 @@ const product = (id: string, account: string, version: number): ProductDetail =>
   id, name: `隔离产品 ${id}`, status: "draft_saved", productId: id === "one" ? "79713744" : "79713745",
   vbkAccount: account, productJsonVersion: version, product: {} as ProductDetail["product"],
 });
-const state = (id: string, mode: Mode): ItineraryReviewUnlockState => ({
-  localProductId: id, status: mode, attemptId: mode === "uncertain" ? "attempt" : "", productId: id === "one" ? "79713744" : "79713745",
-  accountKey: "vbk_isolated", tourInfoId: "tour-isolated", beforeDigest: "digest-isolated",
-  ...(mode === "uncertain" ? {
-    message: "上次结果未确认，只能只读核查",
-    digestMismatch: {
-      step: "审核校验", beforeDigest: "a".repeat(64), afterDigest: "b".repeat(64),
-      paths: ["$.tourDailyDescriptions[0].tourDailyInfos[0].description"],
-      body: "保留行程正文",
-    } as ItineraryReviewUnlockState["digestMismatch"],
-  } : {}),
-  ...(mode === "failed" ? { message: "自动审核尚未完成" } : {}), updatedAt: "2099-01-01T00:00:00.000Z",
+const MENU_TITLES = ["销售控制", "产品信息", "产品图文", "行程描述", "套餐管理",
+  "价格库存班期", "资源配置", "条款维护", "高级设置", "自研扩展"];
+const menusFor = (productId: string): ItineraryReviewMenu[] => MENU_TITLES.map((title, index) => ({
+  key: `menu${index}`, title, url: `https://vbooking.ctrip.com/ivbk/vendor/menu?productId=${productId}`, enabled: "T",
+}));
+const verifiedReceipt = (productId: string) => ({
+  verified: true as const, productId, tourInfoId: "tour-isolated",
+  contentDigest: "d".repeat(64), beforeDigest: "digest-isolated", afterDigest: "d".repeat(64),
+  routeId: 1, maxStep: 10, menus: menusFor(productId),
+  publication: { active: "F" as const, isonline: "F" as const, releaseActive: "F" as const },
+  trafficChildren: 0 as const, checkedAt: "2099-01-01T00:00:00.000Z",
+  tabs: menusFor(productId).map(menu => ({ key: menu.key, title: menu.title, url: menu.url, verified: true as const })),
+  requestSteps: [],
 });
+const state = (id: string, mode: Mode): ItineraryReviewUnlockState => {
+  const productId = id === "one" ? "79713744" : "79713745";
+  return {
+    localProductId: id, status: mode, attemptId: mode === "uncertain" ? "attempt" : "", productId,
+    accountKey: "vbk_isolated", tourInfoId: "tour-isolated", beforeDigest: "digest-isolated",
+    ...(mode === "verified" ? { receipt: verifiedReceipt(productId) } : {}),
+    ...(mode === "uncertain" ? {
+      message: "上次结果未确认，只能只读核查",
+      digestMismatch: {
+        step: "审核校验", beforeDigest: "a".repeat(64), afterDigest: "b".repeat(64),
+        paths: ["$.tourDailyDescriptions[0].tourDailyInfos[0].description"],
+        body: "保留行程正文",
+      } as ItineraryReviewUnlockState["digestMismatch"],
+    } : {}),
+    ...(mode === "failed" ? { message: "自动审核尚未完成" } : {}), updatedAt: "2099-01-01T00:00:00.000Z",
+  };
+};
 
 function Fixture() {
   const [id, setId] = useState("one");

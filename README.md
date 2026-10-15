@@ -30,6 +30,20 @@ npm run start
 npm run package
 ```
 
+## 一键发布（推荐入口）
+
+用户说「执行发布」时，唯一入口是 `scripts/publish.sh`：升一个 patch 版本、跑回归门禁、提交并 push 版本号、打包两个平台并上传更新源、回读线上清单核对版本。
+
+```bash
+bash scripts/publish.sh              # 1.1.17 -> 1.1.18，check + 打包 + 上传 + 线上核对
+bash scripts/publish.sh --dry-run    # 只预览版本、git 动作与打包上传步骤，不改文件
+bash scripts/publish.sh --no-bump    # 沿用当前 package.json 版本重发（例如上次上传中断）
+bash scripts/publish.sh --mac-only   # 只发 macOS（--win-only 只发 Windows）
+bash scripts/publish.sh --version 1.2.0 --tag   # 指定版本并额外创建、push tag
+```
+
+脚本只把 `package.json` 的版本号改动提交为 `chore: release vX.Y.Z` 再 push 当前分支，不会把工作区其他脏改动卷进发布提交；若 `package.json` 还有别的未提交改动会直接报错。`--skip-tests`、`--no-commit`、`--no-push`、`--no-verify` 为逃生开关，详见脚本头部注释。
+
 本地发布（升版本、检查、测试、打 macOS universal DMG 和 Windows 安装包、提交并创建本地 tag，不 push）：
 
 ```bash

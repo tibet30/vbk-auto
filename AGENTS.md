@@ -105,6 +105,14 @@
   - 凭据持久化、外部提交、对外投递
 - 需要授权时必须先列出动作清单并等待确认。
 
+### 发布动作的唯一入口
+
+- 用户说「执行发布」「发布新版本」时，唯一入口是仓库内 `scripts/publish.sh`：`bash scripts/publish.sh`；不得临时拼装 `npm run release:online*`、手工打包或手工 `scp`/`rsync` 上传。
+- 该脚本默认流程：升一个 patch 版本 → 跑 `npm run test:changed` 门禁 → 只把 `package.json` 的版本号改动提交为 `chore: release vX.Y.Z` 并 push 当前分支 → 打包 macOS universal 与 Windows x64 并上传更新源 → 回读线上清单核对版本。
+- 运行该脚本即视为用户对其中「在线发布 + 版本号 commit/push」的显式授权；脚本之外的部署、发布、上传仍按第 5 节红线处理，需另行授权。
+- 预览用 `--dry-run`，不改文件、不提交、不上传；`--skip-tests`、`--no-commit`、`--no-push`、`--no-verify` 属需用户明确指定的逃生开关。
+- 修改脚本的默认范围、门禁或上传目标时，必须同步更新 [README.md](/Users/cisco/Documents/vbk-auto/README.md) 的发布说明。
+
 <!-- 暂停：执行器不可用时的阻塞规则
 ### 6. 执行器不可用
 

@@ -4,6 +4,7 @@ import { poiResearchTaskNames } from "./poi-research-tasks.js";
 import { productNeedsVehicleResource } from "./product-form.js";
 import { hasCompletePoi, requiresItineraryPoi } from "./itinerary-activity-kind.js";
 import { hasVerifiedRouteAdministrativeNode } from "./route-administrative-nodes.js";
+import { samePoiName } from "./poi-name-key.js";
 import { trustedOperatorItineraryRemovals } from "./trusted-operator-itinerary-removals.js";
 import {
   hasBorderPermitItineraryTrigger,
@@ -47,8 +48,9 @@ function poiNameSatisfaction(product: ProductLike, taskName: string): PoiResearc
       if (!spot) continue;
       const spotName = textValue(spot.name);
       const poiName = textValue(spot.poiName);
-      const compact = (value: string) => value.replace(/\s+/gu, "");
-      const isMatchingSpot = compact(spotName) === compact(targetName) || compact(poiName) === compact(targetName);
+      // 与删除凭证共用同一把等价键：否则「广济桥」被删、另一天仍有未匹配的
+      // 「广济桥」时，任务会在当前景点扫描里漏判、再被凭证误结案。
+      const isMatchingSpot = samePoiName(spotName, targetName) || samePoiName(poiName, targetName);
       if (!isMatchingSpot) continue;
       if (!requiresItineraryPoi(spot)) { hasNonPoi = true; continue; }
       if (poiName && positiveInteger(spot.poiId)) { hasVerified = true; continue; }
@@ -60,8 +62,10 @@ function poiNameSatisfaction(product: ProductLike, taskName: string): PoiResearc
   if (hasVerified) return "verified";
   // Absence alone is not evidence. Only trusted manual deletion receipts can
   // retire an absent POI question, including location/ambiguity failures.
+  // 名称比较走 poiNameKey：任务标签可能带括号注释或尾随动作词（“广济桥（不上桥）”
+  // 对应删除凭证里的“广济桥”），逐字符相等会把已删除的 POI 永久留在待处理里。
   if (!hasNonPoi && trustedOperatorItineraryRemovals(product).some((receipt) =>
-    receipt.name.replace(/\s+/gu, "") === targetName.replace(/\s+/gu, ""))) return "removed";
+    samePoiName(receipt.name, targetName))) return "removed";
   if (hasVerifiedRouteAdministrativeNode(product, targetName)) return "non_poi";
   // An explicitly saved night shoot is an independent activity, not a new
   // sightseeing stop. Do not keep a stale POI question for its location once
@@ -88,7 +92,9 @@ function hasPoiTaskSpot(product: ProductLike, taskName: string): boolean {
     const spots = objectValue(day)?.spots;
     return Array.isArray(spots) && spots.some((spotValue) => {
       const spot = objectValue(spotValue);
-      return spot && (textValue(spot.name) === taskName || textValue(spot.poiName) === taskName);
+      // 与 poiNameSatisfaction 共用同一等价键，否则“suggestPoi 未匹配”兜底分支
+      // 会在另一天仍有未匹配同名景点时把任务误判为已满足。
+      return spot && (samePoiName(textValue(spot.name), taskName) || samePoiName(textValue(spot.poiName), taskName));
     });
   });
 }

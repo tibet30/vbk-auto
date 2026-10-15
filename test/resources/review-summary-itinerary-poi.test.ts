@@ -55,7 +55,10 @@ test("行程 POI 编辑器仅供人工兜底：保留全部候选但不自动选
 });
 
 test("POI 保存成功后广播产品更新并退出保存态", () => {
-  assert.match(ipcSource, /commands\.manualField\([\s\S]*emitProduct\(saved\);[\s\S]*return saved;/);
+  // 手工选定 POI 后额外 settle research task，最终广播 / 返回的是同一份最新
+  // 产品（saved 或 settlement 后的 resultProduct），仍要求同一变量，不等
+  // 远端镜像完成才刷新界面。
+  assert.match(ipcSource, /commands\.manualField\([\s\S]*?emitProduct\((\w+)\);[\s\S]*?return \1;/);
   assert.match(source, /logPoiManual\("save_success"[\s\S]*setEditing\(false\);[\s\S]*setDetail\(null\);[\s\S]*setSelected\(null\);/);
   assert.match(source, /finally\s*\{\s*setLoading\(null\);\s*\}/);
 });

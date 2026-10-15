@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
+import { applyManualReviewField } from "../../src/main/operations/manual-review-field.js";
 import { agentPatchOperations } from "../../src/main/agent/integration-patch.js";
 import { itineraryInputContractError } from "../../src/main/planning/itinerary-input-contract.js";
 import {
@@ -126,3 +127,22 @@ function draft(userIdea: string, intent?: ProductDetail["planning"]): ProductDet
   if (intent) product.planning = intent;
   return product;
 }
+
+test("Markdown 强调标记不参与二选一组身份，运营删除其中一项后不再被要求保留", () => {
+  const product = draft("第三天：** 日喀则博物馆或非遗中心参观 → 扎什伦布寺参观。");
+  Object.assign(product.product.basicInfo!, { days: 3, nights: 2, meetingCity: "日喀则", destinationCity: "日喀则" });
+  product.product.itinerary = [
+    { day: 1, spots: [{ name: "帕拉庄园", kind: "attraction" }] },
+    { day: 2, spots: [{ name: "白居寺", kind: "attraction" }] },
+    { day: 3, spots: [
+      { name: "日喀则博物馆", relation: "or", timeOfDay: "morning", kind: "attraction", poiName: "日喀则博物馆", poiId: 79437758 },
+      { name: "非遗中心参观", relation: "or", timeOfDay: "morning", kind: "attraction" },
+      { name: "扎什伦布寺参观", relation: "and", timeOfDay: "afternoon", kind: "attraction" },
+    ] },
+  ] as never;
+  assert.equal(itineraryInputContractError(product, product.product.itinerary), undefined);
+
+  const next = applyManualReviewField(product.product, { field: "itinerarySpotRemove", dayIndex: 2, spotIndex: 1 });
+  const saved = { ...product, product: next } as ProductDetail;
+  assert.equal(itineraryInputContractError(saved, next.itinerary as never), undefined);
+});

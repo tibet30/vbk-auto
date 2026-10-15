@@ -108,6 +108,43 @@ export function isPlanningPoiCandidateInContext(
   return isSelectableCandidate(candidate) && candidateMatchesContext(candidate, context, product, keyword, candidates);
 }
 
+/**
+ * 人工兜底专用谓词：在自动路径的地域判定之外，补一条「同日已有已核验邻接景点」的证据。
+ *
+ * 与自动路径的边界：自动路径还要求搜索词本身是同省唯一官方名
+ * （见 explicitlyNamedUniquePoi），机器不得在多名同名候选之间猜身份；
+ * 人工路径由用户显式点击候选完成身份消歧，因此只保留省份一致 + 同日同城邻接证据，
+ * 不放开外省候选、也不放开邻接景点城市之外的候选。
+ */
+export function isManualPoiCandidateInVerifiedRouteContext(
+  candidate: PoiSuggestCandidate,
+  context: { destinationCity?: string; province?: string } | undefined,
+  product: Record<string, unknown>,
+  keyword: string,
+  candidates?: PoiSuggestCandidate[],
+): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } {
+  if (isPlanningPoiCandidateInContext(candidate, context, product, keyword, candidates)) return true;
+  return hasVerifiedRouteNeighbourEvidence(candidate, context, product, keyword);
+}
+
+/** 同一天里已核验（poiName + poiId）且与候选同省同城的邻接景点，即证明这天路线落在候选城市。 */
+function hasVerifiedRouteNeighbourEvidence(
+  candidate: PoiSuggestCandidate,
+  context: { destinationCity?: string; province?: string } | undefined,
+  product: Record<string, unknown>,
+  keyword: string,
+): boolean {
+  if (!isSelectableCandidate(candidate)) return false;
+  const province = normaliseAdministrativeName(context?.province);
+  if (!province || normaliseAdministrativeName(candidate.province) !== province) return false;
+  if (!normaliseAdministrativeName(candidate.city)) return false;
+  const basic = isRecord(product.basicInfo) ? product.basicInfo : {};
+  if (!Array.isArray(product.itinerary)) return false;
+  return product.itinerary.some(day => isRecord(day)
+    && dayContainsKeyword(day, keyword)
+    && hasVerifiedOriginalRouteNeighbour(day, basic, candidate, province));
+}
+
 function candidateLabel(candidate: PoiSuggestCandidate & { poiName: string }): string {
   const location = [candidate.province, candidate.city, candidate.district]
     .filter((value): value is string => Boolean(value?.trim()))

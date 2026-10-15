@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isPlanningPoiCandidateInContext, resolvePlanningPoiAutoSelection } from '../../src/main/planning/poi-auto-selection.js';
+import { isManualPoiCandidateInVerifiedRouteContext, isPlanningPoiCandidateInContext, resolvePlanningPoiAutoSelection } from '../../src/main/planning/poi-auto-selection.js';
 
 const candidate = { index: 1, poiName: '乌素特水上雅丹地质公园', poiId: 46781314, province: '青海', city: '海西', district: '格尔木', selectable: true, textFields: [] };
 function fixture() {
@@ -34,4 +34,22 @@ test('missing or foreign evidence, different province, multiple principal POIs a
   assert.equal(isPlanningPoiCandidateInContext(candidate, context, fixture(), '水上雅丹', [candidate, { ...candidate, poiId: 2 }]), false);
   const facility = { ...candidate, poiName: '乌素特水上雅丹地质公园-望海台' };
   assert.equal(isPlanningPoiCandidateInContext(facility, context, fixture(), '水上雅丹', [facility]), false);
+});
+test('manual fallback adds the verified-neighbour evidence without loosening the automatic path', () => {
+  const duplicatePrincipalPois = [candidate, { ...candidate, poiId: 2 }];
+  // 自动路径仍要求同省唯一官方名，机器不得在两名同名候选之间猜身份。
+  assert.equal(isPlanningPoiCandidateInContext(candidate, context, fixture(), '水上雅丹', duplicatePrincipalPois), false);
+  // 人工兜底由用户显式点击候选完成身份消歧，只要同日同城邻接证据成立即可选择。
+  assert.equal(isManualPoiCandidateInVerifiedRouteContext(candidate, context, fixture(), '水上雅丹', duplicatePrincipalPois), true);
+  for (const variant of ['unverified', 'other-day', 'not-original', 'wrong-city', 'wrong-province']) {
+    const p = fixture(); const neighbour = p.itinerary[0]!.spots[0]!;
+    if (variant === 'unverified') neighbour.poiId = null;
+    if (variant === 'other-day') p.itinerary.push({ day: 2, title: '', spots: [p.itinerary[0]!.spots.shift()!] });
+    if (variant === 'not-original') neighbour.name = '额外生成的景点';
+    if (variant === 'wrong-city') neighbour.city = '西宁';
+    if (variant === 'wrong-province') neighbour.province = '甘肃';
+    assert.equal(isManualPoiCandidateInVerifiedRouteContext(candidate, context, p, '水上雅丹', [candidate]), false, variant);
+  }
+  assert.equal(isManualPoiCandidateInVerifiedRouteContext({ ...candidate, province: '甘肃' }, context, fixture(), '水上雅丹', [{ ...candidate, province: '甘肃' }]), false);
+  assert.equal(isManualPoiCandidateInVerifiedRouteContext({ ...candidate, selectable: false }, context, fixture(), '水上雅丹', []), false);
 });

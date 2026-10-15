@@ -151,7 +151,9 @@ test("G7 · 重做和采用行程入口只向 Agent 提交意图", () => {
 
 test("手工复核字段先广播本地事务结果，再交给远端镜像同步", () => {
   const productAiSrc = read("src/main/ipc/product-ai-ipc.ts");
-  assert.match(productAiSrc, /const saved = productMutations\.commands\.manualField[\s\S]*?broadcastProduct\(saved\);\s*emitProduct\(saved\);/,
+  // broadcastProduct 与 emitProduct 的入参必须是同一变量（可能在 manualField
+  // 之后经历过研究任务结案settle），但不能等远端镜像完成才刷新界面。
+  assert.match(productAiSrc, /productMutations\.commands\.manualField[\s\S]*?broadcastProduct\((\w+)\);\s*emitProduct\(\1\);/,
     "手工删除/POI 保存不能等待远端镜像完成后才刷新界面");
 });
 

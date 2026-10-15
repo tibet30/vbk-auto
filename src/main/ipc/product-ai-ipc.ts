@@ -20,7 +20,7 @@ import type { MainIpcContext } from "./context.js";
 import { canonicalJson } from '../../shared/product-storage-projection.js';
 import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
-import { verifyManualPoiSelection } from "../operations/manual-review-poi-selection.js";
+import { verifyManualPoiSelection, verifiedMappingForManualPoi } from "../operations/manual-review-poi-selection.js";
 
 async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
   try {
@@ -88,7 +88,18 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const beforeConfirmed = new Set(product.researchTasks.filter(task => task.state === 'confirmed').map(task => task.id));
     const saved = productMutations.commands.manualField({ localProductId: id, source: 'user',
       expectedVersion: product.productJsonVersion ?? 0 }, verifiedInput, { status: policy.nextStatus });
-    const confirmedTaskIds = saved.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
+    // 显式人工选定 POI 就是「请手动选择 POI」决策门的运营决策本身：落库后按
+    // 持久化行程取证结清同名 task。自动确认谓词仍拒绝把同名 + 正整数 POI ID
+    // 当作结清依据，所以这条受控凭证必须在这里补上，否则运营选完 POI 仍会
+    // 在待核查列表里看到同一项。
+    const manualPoiMapping = verifiedInput.field === "itinerarySpotPoi"
+      ? verifiedMappingForManualPoi(saved.product, verifiedInput)
+      : null;
+    const settledPoiTasks = manualPoiMapping
+      ? db.confirmVerifiedPoiResearchTasks(id, [manualPoiMapping])
+      : { taskIds: [] as string[] };
+    const resultProduct = settledPoiTasks.taskIds.length ? db.getProduct(id) ?? saved : saved;
+    const confirmedTaskIds = resultProduct.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
     await reconcileSavedProductQuestion(context, id);
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", {
@@ -97,9 +108,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
         confirmedTaskIds,
       });
     }
-    broadcastProduct(saved);
-    emitProduct(saved);
-    return saved;
+    broadcastProduct(resultProduct);
+    emitProduct(resultProduct);
+    return resultProduct;
   });
 
   // Released renderers may still call these channels. They now delegate to the

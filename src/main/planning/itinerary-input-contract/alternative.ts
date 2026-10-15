@@ -2,8 +2,8 @@
  * itinerary-input-contract 二选一（OR group）相关：
  *   - rawAlternativeGroups：从 basicInfo.userIdea 文本里解析"第 N 天：A 或 B"形式的
  *     二选一景点（中文 / 阿拉伯数字 day token 都支持）；
- *   - cleanAlternativeName：去前缀（去 / 游览 / 参观 / 安排）+ 去括号注释 + 切分 "或者 /
- *     / ／ / 二选一 / 多选一 / 任选其一"；
+ *   - cleanAlternativeName：去 Markdown 强调/标题标记（**、_、`、#）+ 去前缀
+ *     （去 / 游览 / 参观 / 安排）+ 去括号注释；
  *   - uniqueGroups：按 day:names 串去重；
  *   - explicitAlternativeGroups：合并 userIntent.activities 与 userIdea 文本；
  *   - explicitAlternativeGroupError：调用方校验必须保证：
@@ -63,6 +63,10 @@ export function rawAlternativeGroups(value: string): Array<{ day: number; names:
 
 export function cleanAlternativeName(value: string): string {
   return value
+    // 用户想法常用 Markdown 强调/标题标记包裹景点名（“** 日喀则博物馆”）。
+    // 标记留在组名里会让组身份与行程 spot 名不一致，运营删除二选一项后
+    // 凭证永远匹配不上，行程校验继续要求保留该项。
+    .replace(/[*_`~#]+/gu, " ")
     .replace(/^[:：、，,\s]+/u, "")
     .replace(/^(?:去|游览|参观|安排)\s*/u, "")
     .trim();

@@ -43,7 +43,7 @@ test.before(() => installFetchStub());
 test.after(() => uninstallFetchStub());
 test.beforeEach(() => { clearRouteHandlers(); resetCallLog(); });
 
-test("未提交 current version 的 check 若生成新 ID，后续保存和关联跟随新 ID", async () => {
+test("未提交 current version 的 check 若生成新 ID，详情与 tourDaily 跟随新 ID，正式/审核身份不动", async () => {
   installHandlersForFieldMismatch({
     hotelName: () => "",
     otherDescription: () => "自由活动",
@@ -56,13 +56,13 @@ test("未提交 current version 的 check 若生成新 ID，后续保存和关�
   let listCalls = 0;
   routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => {
     listCalls += 1;
-    const id = listCalls > 1 ? checkedTourInfoId : currentTourInfoId;
     return {
       ResponseStatus: { Ack: "Success", Errors: [] },
       tourInfos: [{
-        tourInfoId: id,
-        auditTourInfoId: id,
+        tourInfoId: currentTourInfoId,
+        auditTourInfoId: currentTourInfoId,
         auditTourInfoStatus: 1,
+        ...(listCalls > 1 ? { draftTourInfoId: checkedTourInfoId, draftTourInfoStatus: 1 } : {}),
         previewTourInfoId: "418000911988932725",
         auditStatus: { key: "N", value: "未提交" },
         productId: 77035928,
@@ -85,7 +85,9 @@ test("未提交 current version 的 check 若生成新 ID，后续保存和关�
 
   assert.equal(result.tourInfoId, checkedTourInfoId);
   const association = callLog.find((call) => call.endpoint === "/restapi/soa2/15638/saveProductTourInfo");
-  assert.equal((association?.body as any).tourInfo.tourInfoId, checkedTourInfoId);
+  assert.equal((association?.body as any).tourInfo.tourInfoId, currentTourInfoId, "正式身份保持既有版本");
+  assert.equal((association?.body as any).tourInfo.auditTourInfoId, currentTourInfoId, "审核指针保持既有版本");
+  assert.equal((association?.body as any).tourInfo.draftTourInfoId, checkedTourInfoId);
   assert.equal(JSON.parse((association?.body as any).tourDaily).tourInfoId, checkedTourInfoId);
 });
 

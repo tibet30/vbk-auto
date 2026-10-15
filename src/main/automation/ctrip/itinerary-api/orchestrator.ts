@@ -31,7 +31,8 @@ import { readExistingItineraryDraft, saveAssociationBeforeReadback } from "./ass
 import { enrichItineraryPoiMetadata } from "./poi-metadata.js";
 import { resolveStationsForItinerary } from "./stations-resolver.js";
 import { isExteriorOnlyVisit } from "./visit-semantics.js";
-import { projectDraftWrite, type DraftWriteProjection } from "./draft-write-projection.js";
+import { projectDraftWrite } from "./draft-write-projection.js";
+import { assertCheckedDraftPayload, assertDraftWritePayload } from "./draft-write-guards.js";
 import { logInfo } from "../../../../shared/log-timestamp.js";
 import {
   checkTourDailyStep,
@@ -43,60 +44,8 @@ import {
   saveTourDailyDetailStep,
 } from "./steps.js";
 import type { ApiPage, ItineraryApiResult } from "./transport.js";
-import { linkedVersionId, linkedVersionSummary, sameField, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
+import { linkedVersionId, linkedVersionSummary, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
 import { approvedFormalDraftSource, assertCreatedDraftRelation } from "./draft-source.js";
-
-function normalizedDisplay(value: string | null): string | null {
-  return value?.replace(/\s+/g, " ").trim() || null;
-}
-
-function assertDraftWritePayload(args: {
-  descriptions: unknown[];
-  serialized: string;
-  pickupAir?: { code: string; name: string } | null;
-  exteriorBridge: boolean;
-}): void {
-  const generated = projectDraftWrite(args.descriptions);
-  let serialized: DraftWriteProjection;
-  try { serialized = projectDraftWrite(JSON.parse(args.serialized)); } catch { throw new Error("VBK 草稿写入文本序列化失败，未发送保存请求。"); }
-  if (!sameField(generated, serialized)) {
-    throw new Error(`VBK 草稿写入本地投影在序列化前后漂移，未发送保存请求：${JSON.stringify({ generated, serialized })}`);
-  }
-  if (args.pickupAir && (generated.pickup.code !== args.pickupAir.code || generated.pickup.name !== args.pickupAir.name)) {
-    throw new Error(`VBK 草稿写入集合机场与已解析端点不一致，未发送保存请求：${JSON.stringify({ expected: args.pickupAir, actual: generated.pickup })}`);
-  }
-  if (generated.hotelGrades.some((grade) => /\/-\d+$/.test(grade.name ?? ""))) {
-    throw new Error("VBK 草稿写入酒店展示等级泄露内部 tier code，未发送保存请求。");
-  }
-  if (generated.hotelNodes.some((node) => /\/-\d+\b/.test(node.description ?? "")
-    || node.slots.some((slot) => /\/-\d+\b/.test(slot.name ?? "")))) {
-    throw new Error("VBK 草稿写入酒店名称或说明泄露内部 tier code，未发送保存请求。");
-  }
-  if (args.exteriorBridge && (generated.bridge85862?.key !== "1" || generated.bridge85862.name !== "外观")) {
-    throw new Error(`VBK 草稿写入广济桥外观票型不正确，未发送保存请求：${JSON.stringify(generated.bridge85862)}`);
-  }
-}
-
-function assertCheckedDraftPayload(expected: DraftWriteProjection, checkedDraft: Record<string, unknown>): void {
-  const actual = projectDraftWrite(checkedDraft);
-  const pickupChanged = !sameField(expected.pickup, actual.pickup);
-  const bridgeChanged = !sameField(expected.bridge85862, actual.bridge85862);
-  const transportChanged = !sameField(expected.transportNodes, actual.transportNodes);
-  const hotelChanged = expected.hotelNodes.length !== actual.hotelNodes.length || expected.hotelNodes.some((expectedNode, nodeIndex) => {
-    const actualNode = actual.hotelNodes[nodeIndex];
-    if (!actualNode || expectedNode.slots.length !== actualNode.slots.length) return true;
-    if (!sameField(expectedNode.slots.map((slot) => slot.name), actualNode.slots.map((slot) => slot.name))) return true;
-    return normalizedDisplay(expectedNode.description) !== normalizedDisplay(actualNode.description)
-      || actualNode.slots.some((slot) => /\/-\d+\b/.test(slot.name ?? ""))
-      || /\/-\d+\b/.test(actualNode.description ?? "");
-  });
-  if (pickupChanged || hotelChanged || bridgeChanged || transportChanged) {
-    const airport = `集合机场实际=${actual.pickup.code ?? ""}/${actual.pickup.name ?? ""}，期望=${expected.pickup.code ?? ""}/${expected.pickup.name ?? ""}`;
-    const hotels = `酒店节点实际=${actual.hotelNodes.length}/${actual.hotelNodes.map((node) => node.slots.length).join(",")}，期望=${expected.hotelNodes.length}/${expected.hotelNodes.map((node) => node.slots.length).join(",")}`;
-    const bridge = `广济桥实际=${actual.bridge85862?.key ?? ""}/${actual.bridge85862?.name ?? ""}，期望=${expected.bridge85862?.key ?? ""}/${expected.bridge85862?.name ?? ""}`;
-    throw new Error(`VBK 草稿校验响应改写白名单字段：${airport}；${hotels}；${bridge}；交通卡片${transportChanged ? "被改写或丢失" : "一致"}；未发送详情或关联保存。`);
-  }
-}
 
 export async function ensureItineraryApi(
   page: ApiPage,
@@ -223,17 +172,31 @@ export async function ensureItineraryApi(
   if (!savedDraftId || String(savedDraftId) !== String(effectiveWritableTourInfoId)) {
     throw new Error(`VBK 行程详情草稿保存未回读 ${writableVersion.field}：期望=${String(effectiveWritableTourInfoId)}，实际=${String(savedDraftId ?? "")}`);
   }
+  // 平台已有正式/审核身份时，check(2) 新建的版本只能作为独立草稿写回；把
+  // tourInfoId/auditTourInfoId 改到新草稿会移动既有正式与审核指针，平台按
+  // 「请求参数错误」驳回（2026-10-14/15 真实失败）。只有空关联首建和仅 preview
+  // 的首建还没有任何身份，此时新版本才可以成为当前身份。
+  const createsCurrentIdentity = initialCreation || writableVersion.field === "previewTourInfoId";
   const associationTourInfo = formalSource ? checkedRelation! : allowsCheckCreatedDraft
-    ? {
-        ...checkedDraft,
-        productId: Number(productId) || productId,
-        main: tourInfo.main ?? true,
-        sort: tourInfo.sort ?? 0,
-        tourInfoId: effectiveWritableTourInfoId,
-        auditTourInfoId: effectiveWritableTourInfoId,
-        auditTourInfoStatus: 1,
-        auditStatus: tourInfo.auditStatus ?? { key: "N", value: "未提交" },
-      }
+    ? createsCurrentIdentity
+      ? {
+          ...checkedDraft,
+          productId: Number(productId) || productId,
+          main: tourInfo.main ?? true,
+          sort: tourInfo.sort ?? 0,
+          tourInfoId: effectiveWritableTourInfoId,
+          auditTourInfoId: effectiveWritableTourInfoId,
+          auditTourInfoStatus: 1,
+          auditStatus: tourInfo.auditStatus ?? { key: "N", value: "未提交" },
+        }
+      : {
+          ...tourInfo,
+          productId: Number(productId) || productId,
+          main: tourInfo.main ?? true,
+          sort: tourInfo.sort ?? 0,
+          draftTourInfoId: effectiveWritableTourInfoId,
+          draftTourInfoStatus: 1,
+        }
     : {
         ...tourInfo,
         productId: Number(productId) || productId,

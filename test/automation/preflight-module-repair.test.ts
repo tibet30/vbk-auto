@@ -4,7 +4,7 @@ import {preflightRepairPhase} from '../../src/main/automation/automation.main/pr
 import {prepareAutomationResumeRun} from '../../src/main/automation/automation.main/automation.main.resume-state.js';
 import type {AutomationRun} from '../../src/shared/contracts.js';
 test('precise preflight mismatches reopen the affected module and dependent readback gates',()=>{
- for(const [error,phase] of [['产品图文预检推荐理由不一致：缺少「当前理由」','presentation'],['酒店资源只读回读住宿段数量不一致：期望 1，实际 0','hotelResource'],['酒店资源只读回读第 1 段候选 ID 集合不一致：期望=123,456，实际=','hotelResource']]){
+ for(const [error,phase] of [['产品图文预检推荐理由不一致：缺少「当前理由」','presentation'],['产品图文预检缺少已绑定的真实封面 remote imageId','presentation'],['产品图文预检封面绑定不一致：期望唯一 imageId=123，实际=无','presentation'],['酒店资源只读回读住宿段数量不一致：期望 1，实际 0','hotelResource'],['酒店资源只读回读第 1 段候选 ID 集合不一致：期望=123,456，实际=','hotelResource']]){
  assert.equal(preflightRepairPhase(error),phase);
  const phases=['basic','presentation','hotelResource','trafficLine','preflight'];
  const old={id:'r',status:'failed',currentPhase:'preflight',logs:[],phases:phases.map(phase=>({phase,status:phase==='preflight'?'failed':'completed'})),recovery:{phases:{preflight:{finalError:error}}}} as AutomationRun;

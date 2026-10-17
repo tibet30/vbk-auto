@@ -6,6 +6,7 @@ import { canonicalJson } from '../../../../shared/product-storage-projection.js'
 import { approvedPlanVersion } from '../../../application/product-approval-projection.js';
 import { advanceAutomationApproval } from '../../../application/product-approval-transition.js';
 import { getAgentSnapshot } from './agent.js';
+import { dedupeProductItineraryPois } from '../../../../shared/itinerary-poi-deduplication.js';
 
 /**
  * 写入产品 product_json，可选更新 status。直接覆盖整个 product 字段。
@@ -19,8 +20,9 @@ export function updateProduct(
   source?: string,
 ) {
   const write = db.transaction(() => {
-    const basicInfo = product.basicInfo && typeof product.basicInfo === "object" && !Array.isArray(product.basicInfo)
-      ? product.basicInfo as Record<string, unknown>
+    const durableInput = dedupeProductItineraryPois(product);
+    const basicInfo = durableInput.basicInfo && typeof durableInput.basicInfo === "object" && !Array.isArray(durableInput.basicInfo)
+      ? durableInput.basicInfo as Record<string, unknown>
       : undefined;
     const nextName = typeof basicInfo?.supplierProductName === "string"
       ? basicInfo.supplierProductName.trim()
@@ -33,7 +35,7 @@ export function updateProduct(
     if (expected !== (current.product_json_version ?? 0)) throw new Error('产品内容已变更，请刷新后重试。');
     const oldPlan = JSON.parse(current.product_json) as Record<string, unknown>;
     const old = readProductArchitecture(db, id, oldPlan).product;
-    const { plan } = writeProductArchitecture(db, id, product);
+    const { plan } = writeProductArchitecture(db, id, durableInput);
     const durableProduct = readProductArchitecture(db, id, plan).product;
     const contentChanged = canonicalJson(oldPlan) !== canonicalJson(plan);
     // Evidence fields are stored outside product_json and composed back by

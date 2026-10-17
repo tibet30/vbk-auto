@@ -5,6 +5,7 @@ import type { AgentSnapshotManager } from "./core-snapshot.js";
 import type { AgentCoreDependencies } from "./types.js";
 import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 import { canAutomaticallyAnswerProductQuestion, isAutomaticProductInputRun } from "./automatic-product-input.js";
+import { domesticShortPoiRiskInput } from "../../shared/domestic-short-poi-risk.js";
 
 export interface PendingInputRefresh {
   changed: boolean;
@@ -21,6 +22,8 @@ export function refreshPendingInput(args: {
   const { id, snapshot, deps, snapshots } = args;
   const request = snapshot.pendingInput;
   if (!request) {
+    const riskDecision = recoverDomesticShortPoiRiskInput(args);
+    if (riskDecision.changed && snapshot.pendingInput) return refreshPendingInput(args);
     const hotelRecovery = recoverPausedHotelInput(args);
     if (hotelRecovery.changed && snapshot.pendingInput) return refreshPendingInput(args);
     return hotelRecovery.changed ? hotelRecovery : resumeManualPoiBlocked(args);
@@ -90,6 +93,29 @@ export function refreshPendingInput(args: {
   });
   snapshots.running(snapshot);
   return { changed: true, shouldSchedule: true };
+}
+
+/** Convert current and historical read-only VBK risk pauses into an explicit
+ * operator decision. This is local state reconciliation and never retries the
+ * platform write or adopts the previous approval for a changed itinerary. */
+function recoverDomesticShortPoiRiskInput(args: {
+  snapshot: AgentSnapshot; snapshots: AgentSnapshotManager;
+}): PendingInputRefresh {
+  const { snapshot, snapshots } = args;
+  if (snapshot.run?.status !== "paused" || snapshot.uncertainWrite) return { changed: false, shouldSchedule: false };
+  const pause = [...snapshot.events].reverse().find((event) => event.runId === snapshot.run?.id
+    && event.type === "status" && event.data?.status === "paused");
+  if (!pause) return { changed: false, shouldSchedule: false };
+  const request = domesticShortPoiRiskInput(pause.content, `risk-decision-${pause.id}`);
+  if (!request) return { changed: false, shouldSchedule: false };
+  snapshot.pendingInput = request;
+  snapshots.event(snapshot, "input_request", "需要确认是否剔除平台拒绝的 POI", {
+    request,
+    stageSummary: "VBK 在只读校验阶段拒绝了一个结构化 POI。确认剔除前，系统不会修改行程或再次提交审核。",
+    domesticShortPoiRisk: true,
+  });
+  snapshots.waiting(snapshot, "waiting_input");
+  return { changed: true, shouldSchedule: false };
 }
 
 function hasActiveApprovedIntent(snapshot: AgentSnapshot): boolean {

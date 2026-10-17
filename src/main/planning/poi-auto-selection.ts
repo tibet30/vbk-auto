@@ -1,6 +1,7 @@
 import type { PoiSuggestCandidate, PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
+import { isKnownPoiNameAlias } from "../../shared/poi-name-aliases.js";
 import { inferExplicitPoiDayCity } from "./poi-context.js";
 
 export interface PoiAutoSelectionMatch {
@@ -49,7 +50,11 @@ export async function resolvePlanningPoiAutoSelection(args: {
     ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
       isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates) && candidate.poiId === args.detail.best!.poiId)
     : undefined);
-  let candidate = exact;
+  const uniqueNamed = exact ? undefined : args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
+    isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)
+    && explicitlyNamedUniquePoi(args.product, args.keyword, candidate, args.detail.candidates,
+      normaliseAdministrativeName(args.context?.province)));
+  let candidate = exact ?? uniqueNamed;
   let confidence = 1;
 
   if (!candidate && args.disambiguate) {
@@ -189,13 +194,21 @@ function explicitlyNamedUniquePoi(product: Record<string, unknown>, keyword: str
   const desired = normaliseText(keyword);
   if (!desired || !candidates) return false;
   const basic = isRecord(product.basicInfo) ? product.basicInfo : {};
-  if (!normaliseText(String(basic.userIdea ?? "")).includes(desired)) return false;
+  const rawIdea = normaliseText(String(basic.userIdea ?? ""));
+  const orthographicDesired = /措$/u.test(desired) ? desired.replace(/措$/u, "错")
+    : /错$/u.test(desired) ? desired.replace(/错$/u, "措") : desired;
+  if (!rawIdea.includes(desired) && !rawIdea.includes(orthographicDesired)) return false;
   if (!Array.isArray(product.itinerary)) return false;
   const days = product.itinerary.filter(day => isRecord(day) && dayContainsKeyword(day, keyword));
   const matchesName = (name: string) => {
     const core = normaliseText(name).replace(/[（）()]/gu, "")
       .replace(/(?:旅游景区|地质公园|风景名胜区|风景区|景区)$/u, "");
-    return normaliseText(name) === desired || core === desired || (desired.length >= 4 && core.endsWith(desired)
+    const desiredIdentity = poiIdentityCore(desired);
+    const candidateIdentity = poiIdentityCore(core);
+    return normaliseText(name) === desired || core === desired
+      || isKnownPoiNameAlias(desired, core)
+      || (desiredIdentity.length >= 4 && desiredIdentity === candidateIdentity)
+      || (desired.length >= 4 && core.endsWith(desired)
       && days.some(day => normaliseText(dayRouteText(day)).includes(core)
         || hasVerifiedOriginalRouteNeighbour(day, basic, candidate, province)));
   };
@@ -204,6 +217,13 @@ function explicitlyNamedUniquePoi(product: Record<string, unknown>, keyword: str
     && matchesName(item.poiName ?? "")
     && normaliseAdministrativeName(item.province) === province).map(item => item.poiId));
   return ids.size === 1 && ids.has(candidate.poiId);
+}
+
+function poiIdentityCore(value: string): string {
+  return normaliseText(value)
+    .replace(/^远眺/u, "")
+    .replace(/措$/u, "错")
+    .replace(/(?:山体冰川遗迹|冰川遗迹|冰川群|冰川|雪山)$/u, "");
 }
 
 /** A different, verified original stop establishes the day's city, never a hotel or stale alias. */
@@ -237,9 +257,7 @@ function itineraryExplicitlyAllowsLocation(
     const text = normaliseText(dayRouteText(day));
     // 羊卓雍湖是用户明确安排的山南景点；只认可同地点官方别名的山南候选。
     // 不把整个跨城行程日改成山南，也不放开西藏境内的任意同名候选。
-    const lakeName = /^(?:羊卓雍湖|羊卓雍错)$/u;
-    if (candidateCity === "山南" && lakeName.test(normaliseText(keyword))
-      && lakeName.test(normaliseText(candidatePoiName ?? ""))) return true;
+    if (candidateCity === "山南" && isKnownPoiNameAlias(keyword, candidatePoiName ?? "")) return true;
     return locations.some((location) => text.includes(normaliseText(location)));
   });
 }

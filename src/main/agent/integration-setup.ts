@@ -15,6 +15,7 @@ import type { ResourceQueryOverrides } from "../planning/resource-query-override
 import type { MainIpcContext } from "../ipc/context.js";
 import { aiProviderConfig, aiProviderLabel as resolveAiProviderLabel } from "../../shared/ai-provider-config.js";
 import { OpenAICompatiblePlannerAdapter, planningTransportOptions } from "../planning/adapters/openai-compatible-adapter.js";
+import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { AgentCore } from "./core.js";
 import { SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-guard.js";
@@ -36,6 +37,7 @@ import { needsTrafficLineBackfill } from "../automation/traffic-line-backfill.js
 import { isPreparationRun, isPreparationInstruction } from "./preparation-run.js";
 import { preparationItineraryRecovery } from "./preparation-itinerary-recovery.js";
 import { runQueuedApprovedWorkflow } from "./queued-approved-workflow.js";
+import { removeConfirmedDomesticShortPoiRisk } from "./domestic-short-poi-removal.js";
 import { restoreExplicitOperatorDeletion, restoreExplicitAlternativeSlots } from "./integration-setup/restore.js";
 import { reconcileUncertainAgentWrite } from "./integration-setup/reconcile-uncertain-write.js";
 import { handoffWizardStageRetry, prepareWizardStageRetry } from "./integration-setup/wizard-stage-retry.js";
@@ -100,7 +102,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
         const product = db.getProduct(localProductId);
         if (!product) throw productNotFound(localProductId);
         const adapter = new OpenAICompatiblePlannerAdapter({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model, ...planningTransportOptions(settings.aiProvider),
-          presentationRejectedWords: db.listRejectedPresentationWords(), itineraryRejectedWords: db.listRejectedItineraryWords(), provider: settings.aiProvider, recordUsage: (event) => recordAgentUsage(db, localProductId, event) });
+          presentationRejectedWords: db.listRejectedPresentationWords(), itineraryRejectedWords: db.listRejectedItineraryWords(), basicInfoRejectedWords: db.listRejectedBasicInfoWords(), provider: settings.aiProvider, recordUsage: (event) => recordAgentUsage(db, localProductId, event) });
         // The adapter owns the stage-specific function schema. Its context is
         // intentionally a single current-product snapshot for this one-shot run.
         let memoryContext;
@@ -109,8 +111,18 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
         } catch {
           memoryContext = undefined;
         }
-        return adapter.generateStage({ stage, context: agentPlannerContextForRun(db, localProductId,
-          resolveAiProviderLabel(settings), profile.model, memoryContext) });
+        const plannerContext = agentPlannerContextForRun(
+          db, localProductId, resolveAiProviderLabel(settings), profile.model, memoryContext,
+        );
+        if (stage === "presentation") {
+          const policyRuntime = new DbOrchestratorRuntime(
+            db, context.browser, context.productMutations,
+            (task) => productWorkflows.runVbkPageExclusive(task),
+            undefined, undefined, resourceQueries,
+          );
+          plannerContext.recommendationCategoryPolicy = await policyRuntime.resolveRecommendationCategoryPolicy(localProductId);
+        }
+        return adapter.generateStage({ stage, context: plannerContext });
       },
       disambiguatePoiOption: async ({ localProductId, desired, product, candidates }) => {
         const outcome = await (await context.aiService()).disambiguateOption({
@@ -157,6 +169,14 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
           status: current.status, expectedVersion: current.productJsonVersion,
           allowItineraryRemovalRestore: true,
         });
+        preparationRecovered = true;
+      }
+      const riskRemoval = removeConfirmedDomesticShortPoiRisk(current, selection?.selectedQuestions ?? []);
+      if (riskRemoval?.removed) {
+        current = context.productMutations.commands.mergeChanges(localProductId, current, riskRemoval.product, "user", {
+          status: current.status, expectedVersion: current.productJsonVersion, allowItineraryRemovalRestore: true,
+        });
+        emitProduct(current);
         preparationRecovered = true;
       }
       const restored = restoreExplicitAlternativeSlots(current, content);

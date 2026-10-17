@@ -19,6 +19,7 @@ import type Database from "better-sqlite3";
 import type { ProductDetail, ProductSummary } from "../../../../shared/contracts.js";
 import { getProduct, updateProduct } from "./products.js";
 import { markResearchTasksSatisfiedByProduct, reopenKindSupersededPoiResearchTasks } from "./research-tasks.js";
+import { dedupeProductItineraryPois } from "../../../../shared/itinerary-poi-deduplication.js";
 
 export interface ReplaceProductAndSatisfyResearchTasksOptions {
   status?: ProductSummary["status"];
@@ -42,12 +43,13 @@ export function replaceProductAndSatisfyResearchTasks(
   options: ReplaceProductAndSatisfyResearchTasksOptions = {},
 ): { product: ProductDetail; confirmedTaskIds: string[] } {
   const tx = db.transaction(() => {
-    updateProduct(db, localProductId, product, options.status);
-    reopenKindSupersededPoiResearchTasks(db, localProductId, product);
+    const durableInput = dedupeProductItineraryPois(product);
+    updateProduct(db, localProductId, durableInput, options.status);
+    reopenKindSupersededPoiResearchTasks(db, localProductId, durableInput);
     const confirmed = markResearchTasksSatisfiedByProduct(
       db,
       localProductId,
-      product,
+      durableInput,
       {
         note: options.researchEvidenceTitle ?? options.note,
         source: options.source ?? "user",

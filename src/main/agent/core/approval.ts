@@ -16,6 +16,23 @@ import type { NoProgressBlocker } from "../core-snapshot.js";
 import { type AgentCore, asCoreInternals } from "../core.js";
 import { ITINERARY_REVIEW_UNLOCK_SCOPE } from "../../../shared/itinerary-review-approval.js";
 import { externalAgentActionsBlocked, pauseSafeStartupExternalAction } from "../safe-startup-agent-guard.js";
+import { domesticShortPoiRiskDecision } from "../../../shared/domestic-short-poi-risk.js";
+
+function invalidateApprovalsForDecisionRecheck(snapshot: AgentSnapshot): AgentApproval | undefined {
+  const runId = snapshot.run?.id;
+  let latest: AgentApproval | undefined;
+  for (const event of snapshot.events) {
+    const approval = event.data?.approval as AgentApproval | undefined;
+    if (event.runId !== runId || !approval || !["approved", "pending"].includes(approval.status)) continue;
+    latest = { ...approval, status: "invalidated" };
+    event.data = { ...event.data, approval: latest };
+  }
+  if (snapshot.pendingApproval && ["approved", "pending"].includes(snapshot.pendingApproval.status)) {
+    latest = { ...snapshot.pendingApproval, status: "invalidated" };
+  }
+  snapshot.pendingApproval = undefined;
+  return latest;
+}
 
 export async function approveCommand(core: AgentCore, id: string, response: AgentApprovalResponse): Promise<AgentSnapshot> {
   const c = asCoreInternals(core);
@@ -72,18 +89,58 @@ export async function respondCommand(core: AgentCore, id: string, response: Agen
     const request = snapshot.pendingInput;
     if (!request || !["waiting_input", "paused"].includes(snapshot.run?.status ?? "")
       || request.id !== response.requestId || !validateAnswers(request, response.answers)) return snapshot;
+    const riskDecision = domesticShortPoiRiskDecision(request, response.answers);
     const resolved = resolveSelectedAnswers(request, response.answers);
+    if (riskDecision?.action === "keep") {
+      snapshot.pendingInput = undefined;
+      const toolCallId = c.pendingCallId(snapshot, "input_request", request.id);
+      const answers = { ...(request.defaultAnswers ?? {}), ...response.answers };
+      const resolvedAnswers = { ...answers, ...resolved.answers };
+      if (toolCallId) c.result(snapshot, toolCallId, JSON.stringify(resolvedAnswers), { requestId: request.id, answers, resolvedAnswers });
+      c.event(snapshot, "user", `用户回答：${JSON.stringify(resolvedAnswers)}`, { requestId: request.id, answers, resolvedAnswers });
+      c.pauseRun(snapshot, `已按你的选择保留「${riskDecision.poiName}」，自动录入保持停止。`);
+      return c.save(snapshot);
+    }
     const changed = await c.deps.prepareUserInstruction?.(id, resolved.instruction, {
       selectedLabels: resolved.selectedLabels,
       selectedQuestions: resolved.selectedQuestions,
     });
-    if (changed && snapshot.run) snapshot.run.intentVersion = await c.intent(id);
+    const changedIntentVersion = changed && snapshot.run ? await c.intent(id) : undefined;
+    if (changedIntentVersion && snapshot.run) snapshot.run.intentVersion = changedIntentVersion;
     snapshot.pendingInput = undefined;
     const toolCallId = c.pendingCallId(snapshot, "input_request", request.id);
     const answers = { ...(request.defaultAnswers ?? {}), ...response.answers };
     const resolvedAnswers = { ...answers, ...resolved.answers };
     if (toolCallId) c.result(snapshot, toolCallId, JSON.stringify(resolvedAnswers), { requestId: request.id, answers, resolvedAnswers });
     c.event(snapshot, "user", `用户回答：${JSON.stringify(resolvedAnswers)}`, { requestId: request.id, answers, resolvedAnswers });
+    if (riskDecision?.action === "remove" && !changed) {
+      c.pauseRun(snapshot, `未在当前行程找到可剔除的「${riskDecision.poiName}」绑定，自动录入保持停止。`);
+      return c.save(snapshot);
+    }
+    if (riskDecision?.action === "remove") {
+      const previousRunId = snapshot.run?.id;
+      const invalidated = invalidateApprovalsForDecisionRecheck(snapshot);
+      if (invalidated) c.event(snapshot, "approval", "方案已调整，旧确认失效；自动重新核验当前方案。", {
+        approval: invalidated,
+        decisionDrivenRecheck: true,
+      }, previousRunId);
+      snapshot.run = c.run("queued");
+      snapshot.run.intentVersion = changedIntentVersion ?? await c.intent(id);
+      c.event(snapshot, "user", "继续当前本地规划与资源核验：读取已保存的调整后方案，重新执行程序检查；核验通过后请求新的录入确认，确认前禁止任何 VBK 写入。", {
+        preparationResume: true,
+        changedApprovalRecovery: true,
+        decisionDrivenRecheck: true,
+      });
+      c.event(snapshot, "status", `已按确认从行程剔除所有绑定为「${riskDecision.poiName}」的条目并保留人工删除记录；正在自动重新核对调整后的方案。`, {
+        domesticShortPoiRiskResolved: true,
+        decisionDrivenRecheck: true,
+        poiName: riskDecision.poiName,
+      });
+      c.running(snapshot);
+      const saved = c.save(snapshot);
+      c.loop.schedule(id);
+      return saved;
+    }
     c.running(snapshot);
     const saved = c.save(snapshot);
     c.loop.schedule(id);

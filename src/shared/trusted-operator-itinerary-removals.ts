@@ -1,5 +1,15 @@
+import { isKnownPoiNameAlias } from "./poi-name-aliases.js";
+
 type Json = Record<string, unknown>;
-export type TrustedItineraryRemoval = { day: number; name: string; removedAt: string; groupKey?: string };
+export type TrustedItineraryRemoval = {
+  day: number;
+  name: string;
+  removedAt: string;
+  groupKey?: string;
+  poiName?: string;
+  poiId?: number;
+};
+export type TrustedItineraryRemovalIdentity = { poiName?: string; poiId?: number };
 
 /** Stable identity for one ordered, same-time `or` group. */
 export function alternativeGroupKey(day: number, names: readonly string[]): string {
@@ -10,19 +20,38 @@ export function alternativeGroupKey(day: number, names: readonly string[]): stri
 export function hasTrustedOperatorItineraryRemoval(
   product: Json, day: number, name: string, groupKey?: string, ambiguous = false,
 ): boolean {
-  const matches = removals(product).filter((item) => item.day === day && sameName(item.name, name));
+  const matches = removals(product).filter((item) => item.day === day
+    && (sameName(item.name, name) || Boolean(item.poiName && isKnownPoiNameAlias(item.poiName, name))));
   if (groupKey) return matches.some((item) => item.groupKey === groupKey || (!item.groupKey && !ambiguous));
   return matches.some((item) => !item.groupKey);
 }
 
 export function appendTrustedOperatorItineraryRemoval(
   product: Json, day: number, name: string, removedAt: string, groupKey?: string,
+  identity: TrustedItineraryRemovalIdentity = {},
 ): void {
   const manualReview = record(product.manualReview) ?? {}; const current = removals(product);
-  if (!current.some((item) => item.day === day && sameName(item.name, name) && item.groupKey === groupKey)) {
-    current.push({ day, name: name.trim(), removedAt, ...(groupKey ? { groupKey } : {}) });
+  const existing = current.find((item) => item.day === day && sameName(item.name, name) && item.groupKey === groupKey);
+  if (existing) applyIdentity(existing, identity);
+  else {
+    const receipt: TrustedItineraryRemoval = { day, name: name.trim(), removedAt, ...(groupKey ? { groupKey } : {}) };
+    applyIdentity(receipt, identity); current.push(receipt);
   }
   manualReview.itinerarySpotRemovals = current; product.manualReview = manualReview;
+}
+
+/** Upgrade an existing legacy receipt after the same rejected POI reappears under an alias. */
+export function bindTrustedOperatorItineraryRemovalIdentity(
+  product: Json, day: number, name: string, identity: TrustedItineraryRemovalIdentity,
+): boolean {
+  const current = removals(product);
+  const receipt = current.find((item) => item.day === day && sameName(item.name, name));
+  if (!receipt) return false;
+  const before = JSON.stringify(receipt); applyIdentity(receipt, identity);
+  if (before === JSON.stringify(receipt)) return false;
+  const manualReview = record(product.manualReview) ?? {};
+  manualReview.itinerarySpotRemovals = current; product.manualReview = manualReview;
+  return true;
 }
 
 /** A later explicit operator instruction restores this exact receipt. */
@@ -68,8 +97,16 @@ function removals(product: Json): TrustedItineraryRemoval[] {
   const manualReview = record(product.manualReview); const value = Array.isArray(manualReview?.itinerarySpotRemovals) ? manualReview.itinerarySpotRemovals : [];
   return value.flatMap((item) => {
     const receipt = record(item); const day = Number(receipt?.day); const name = text(receipt?.name); const removedAt = text(receipt?.removedAt); const groupKey = text(receipt?.groupKey);
-    return Number.isInteger(day) && day > 0 && name && removedAt ? [{ day, name, removedAt, ...(groupKey ? { groupKey } : {}) }] : [];
+    const poiName = text(receipt?.poiName); const poiId = Number(receipt?.poiId);
+    return Number.isInteger(day) && day > 0 && name && removedAt ? [{ day, name, removedAt,
+      ...(groupKey ? { groupKey } : {}), ...(poiName ? { poiName } : {}),
+      ...(Number.isInteger(poiId) && poiId > 0 ? { poiId } : {}) }] : [];
   });
+}
+function applyIdentity(receipt: TrustedItineraryRemoval, identity: TrustedItineraryRemovalIdentity): void {
+  const poiName = text(identity.poiName); const poiId = Number(identity.poiId);
+  if (poiName) receipt.poiName = poiName;
+  if (Number.isInteger(poiId) && poiId > 0) receipt.poiId = poiId;
 }
 function sameName(left: string, right: string): boolean { const a = normalise(left); const b = normalise(right); return Boolean(a) && a === b; }
 function normalise(value: string): string { return value.replace(/\s+/g, "").trim(); }

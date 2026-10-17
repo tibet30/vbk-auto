@@ -13,6 +13,7 @@
  */
 
 import { requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
+import { dedupeSameDayItinerarySpots } from "../../../shared/itinerary-poi-deduplication.js";
 import type { RequiredItinerarySpot } from "./state-types.js";
 import { SETTLEMENT_NODE_NAMES, asRecord, normaliseMentionText, positiveInteger, text } from "./utils.js";
 
@@ -66,7 +67,14 @@ export function applyPoiMatches(
     }
     if (day) day.spots = spots;
   }
-  return { itinerary: next, missing };
+  for (const day of next) {
+    if (!day || !Array.isArray(day.spots)) continue;
+    day.spots = dedupeSameDayItinerarySpots(day.spots);
+  }
+  const missingKeys = new Set(missing.map((spot) => `${spot.dayIndex}\u0000${spot.name}`));
+  const remainingMissing = collectRequiredItinerarySpots(next)
+    .filter((spot) => missingKeys.has(`${spot.dayIndex}\u0000${spot.name}`));
+  return { itinerary: next, missing: remainingMissing };
 }
 
 /** 用户点名的未命中景点保留；AI 自荐但未命中的景点从行程中移除。 */

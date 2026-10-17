@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AgentInputRequest, AgentInputResponse } from "../../../../shared/contracts-agent";
 import shared from "../shared.module.less";
 import styles from "./agent-conversation.module.less";
+import { isDomesticShortPoiRiskQuestionId } from "../../../../shared/domestic-short-poi-risk";
 
 export function validateAgentAnswers(request: AgentInputRequest, answers: AgentInputResponse["answers"]): string[] {
   return request.questions.filter((question) => {
@@ -18,6 +19,7 @@ export function AgentInput({ request, busy, onSubmit }: {
   busy: boolean;
   onSubmit(response: AgentInputResponse): Promise<void>;
 }) {
+  const isRiskDecision = request.questions.some((question) => isDomesticShortPoiRiskQuestionId(question.id));
   const storageKey = `agent-input:${request.id}`;
   const [answers, setAnswers] = useState<AgentInputResponse["answers"]>(() => {
     try { return JSON.parse(sessionStorage.getItem(storageKey) ?? "{}"); } catch { return {}; }
@@ -36,7 +38,7 @@ export function AgentInput({ request, busy, onSubmit }: {
     if (errors.length || busy) return;
     await onSubmit({ requestId: request.id, answers });
   }}>
-    <strong>需要你补充</strong>
+    <strong>{isRiskDecision ? "需要你确认" : "需要你补充"}</strong>
     {request.questions.map((question, index) => <fieldset key={question.id} disabled={busy}>
       <legend>{index + 1}. {question.label}{question.required ? <span> · 必答</span> : <span> · 选填</span>}</legend>
       {question.kind === "text" ? <textarea
@@ -57,6 +59,6 @@ export function AgentInput({ request, busy, onSubmit }: {
       </div>}
       {invalid.includes(question.id) && <small role="alert">请完成这道题，或选择有效选项。</small>}
     </fieldset>)}
-    <button className={shared.btn} data-variant="primary" disabled={busy} type="submit">{busy ? "正在提交…" : "提交回答并继续"}</button>
+    <button className={shared.btn} data-variant="primary" disabled={busy} type="submit">{busy ? "正在提交…" : isRiskDecision ? "提交决定" : "提交回答并继续"}</button>
   </form>;
 }

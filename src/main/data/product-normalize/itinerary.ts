@@ -16,6 +16,7 @@ import { normaliseActivity } from "../product-normalize-activity.js";
 import { normaliseReturnDayLodging } from "../../../shared/itinerary-hotel.js";
 import { normaliseItinerarySupport } from "../../../shared/itinerary-support-arrangements.js";
 import { normaliseItinerarySpotKind } from "../../../shared/itinerary-activity-kind.js";
+import { dedupeSameDayItinerarySpots } from "../../../shared/itinerary-poi-deduplication.js";
 import { normalisePoiId, textValue } from "./helpers.js";
 
 /**
@@ -53,7 +54,7 @@ export function normaliseItinerary(value: unknown) {
     const activities = rawActivities.map(normaliseActivity)
       .filter((activity): activity is NonNullable<ReturnType<typeof normaliseActivity>> => Boolean(activity));
     const spots = Array.isArray(record.spots)
-      ? record.spots.map((spot) => {
+      ? dedupeSameDayItinerarySpots(record.spots.map((spot) => {
         if (typeof spot === "string") return normaliseItinerarySpotKind({ name: spot.trim(), poiName: null, poiId: null });
         if (!spot || typeof spot !== "object") return null;
         const raw = spot as Record<string, unknown>;
@@ -71,7 +72,7 @@ export function normaliseItinerary(value: unknown) {
           ...(relation ? { relation } : {}),
           ...(raw.kind === "attraction" || raw.kind === "free" || raw.kind === "other" ? { kind: raw.kind } : {}),
         });
-      }).filter((spot) => Boolean(spot?.name))
+      }).filter((spot) => Boolean(spot?.name)))
       : rawActivities.map((activity) => textValue(activity.title) || textValue(activity.name)).filter((name) => name && !/接站|接机|送站|送机|早餐|午餐|晚餐|入住|酒店/.test(name));
     const activityDescription = activities
       .map((activity) => [activity.time, activity.title, activity.detail].filter(Boolean).join(" "))

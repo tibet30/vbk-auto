@@ -23,6 +23,7 @@ import { DEFAULT_HOTEL_TIER } from "../../../shared/hotel-tiers.js";
 import { defaultCommercialInventory } from "../../data/commercial-defaults.js";
 import { normaliseTrafficLineConfig } from "../../../shared/contracts-traffic-line.js";
 import { normaliseItinerarySpotKind } from "../../../shared/itinerary-activity-kind.js";
+import { dedupeSameDayItinerarySpots } from "../../../shared/itinerary-poi-deduplication.js";
 
 /**
  * 最小可渲染 product 兜底：必须满足 schema 验证（看 schema-functions.ts 的
@@ -65,12 +66,12 @@ function normaliseItineraryPois(value: unknown) {
     if (!day || typeof day !== "object" || Array.isArray(day)) return day;
     const record = day as Record<string, unknown>;
     if (!Array.isArray(record.spots)) return day;
-    record.spots = record.spots.map((spot) => {
+    record.spots = dedupeSameDayItinerarySpots(record.spots.map((spot) => {
       if (typeof spot === "string") return { name: spot.trim(), poiName: null, poiId: null };
       if (!spot || typeof spot !== "object" || Array.isArray(spot)) return spot;
       const candidate = spot as Record<string, unknown>;
       return normaliseItinerarySpotKind({ ...candidate, poiId: normalisePoiId(candidate.poiId) });
-    });
+    }));
     return record;
   });
 }

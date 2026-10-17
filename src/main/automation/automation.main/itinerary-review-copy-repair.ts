@@ -12,8 +12,46 @@ import type { AutomationRunContext } from "./automation.main.context.js";
 import { extractSensitiveWords } from "../../../shared/sensitive-words.js";
 import { findSensitiveItineraryPaths, type ItineraryCopyProduct } from "./itinerary-copy-paths.js";
 import { applySensitiveItineraryRewrite, itineraryRewriteRequest } from "./itinerary-sensitive-rewrite.js";
+import { domesticShortPoiRiskName } from "../../../shared/domestic-short-poi-risk.js";
 
 export const ITINERARY_REVIEW_COPY_REPAIR_LIMIT = 2;
+
+interface PoiRiskOccurrence {
+  day: number;
+  names: string[];
+}
+
+function poiRiskOccurrences(product: ItineraryCopyProduct, poiName: string): PoiRiskOccurrence[] {
+  const result: PoiRiskOccurrence[] = [];
+  for (const [dayIndex, day] of (product.itinerary ?? []).entries()) {
+    const names: string[] = (Array.isArray(day?.spots) ? day.spots : [])
+      .filter((spot: Record<string, unknown>) => [spot.name, spot.poiName]
+        .some((value) => typeof value === "string" && value.includes(poiName)))
+      .map((spot: Record<string, unknown>): string => String(spot.name ?? spot.poiName ?? poiName));
+    if (names.length) result.push({ day: Number(day?.day) || dayIndex + 1, names: [...new Set(names)] });
+  }
+  return result;
+}
+
+/** 把平台的结构化 POI 风险转成用户决策门禁；不自动改 POI、产品类型或行程。 */
+export function domesticShortPoiDecisionMessage(
+  error: unknown,
+  product: ItineraryCopyProduct,
+): string | undefined {
+  const original = error instanceof Error ? error.message : String(error ?? "");
+  const poiName = domesticShortPoiRiskName(original);
+  if (!poiName) return undefined;
+  const affected = poiRiskOccurrences(product, poiName)
+    .map((item) => `第${item.day}天「${item.names.join("」「")}」`)
+    .join("、");
+  return [
+    `行程审核需要用户决定：VBK 不接受结构化 POI「${poiName}」与「境内短途旅游」的组合。`,
+    affected ? `受影响条目：${affected}。` : `当前行程包含该结构化 POI。`,
+    `确认后，系统会从行程各天剔除所有绑定为「${poiName}」的条目并保留人工删除记录；也可以选择暂不剔除并停止自动录入。`,
+    "系统未修改 POI、未删除路线、未再次提交审核。",
+    `平台原始原因：${original}`,
+  ].join("\n");
+}
 
 /** 只读校验阶段的驳回：远端没有接受任何写入，可修正文案后重试。 */
 export function isValidationOnlyReviewFailure(error: unknown): boolean {
@@ -86,6 +124,11 @@ export async function runItineraryReviewWithCopyRepair<T>(args: ItineraryReviewC
       return await args.submitReview();
     } catch (error) {
       if (!isValidationOnlyReviewFailure(error)) throw error;
+      const decisionMessage = domesticShortPoiDecisionMessage(error, args.product);
+      if (decisionMessage) {
+        args.log(decisionMessage, "warning");
+        throw new Error(decisionMessage);
+      }
       const message = error instanceof Error ? error.message : String(error);
       const words = extractSensitiveWords(message);
       if (!words.length) throw error;

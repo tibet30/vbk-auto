@@ -2,6 +2,7 @@ import { ensureBasicInfoApi, isProductLineResolutionError } from "../../ctrip/ba
 import { advanceSavedProductWizardStage } from "../../ctrip/product-wizard.js";
 import { shouldRefillBasicInfo } from "../../schema/schema.js";
 import { writeAutomationProduct } from "../automation.main.persist.js";
+import { runBasicInfoSaveWithCopyRepair } from "../basic-info-copy-repair.js";
 import { refreshSupplierProductCodeForPlatformWrite } from "../automation.main.class.helpers.js";
 import type { AutomationRunContext } from "../automation.main.context.js";
 import { AutomationCancelledError } from "../automation.main.errors.js";
@@ -37,8 +38,31 @@ export function buildBasicExecute(
     const { productDetail, product, butlerSelection, servicePhone, scenicSpotLogs } = setup;
 
     const saveBasicInfo: typeof ensureBasicInfoApi = async (...args) => {
-      try { return await ensureBasicInfoApi(...args); }
-      catch (error) {
+      const productPayload = args[1] as Record<string, any>;
+      const executeBasicInfoApi = async () => {
+        const result = await ensureBasicInfoApi(...args);
+        return result;
+      };
+      try {
+        return await runBasicInfoSaveWithCopyRepair({
+          product: productPayload,
+          save: executeBasicInfoApi,
+          // 只改基本信息的自由文案，落库后仍由平台回读验收。
+          persist: () => {
+            productDetail.product = productPayload as unknown as Record<string, unknown>;
+            writeAutomationProduct(ctx, setup.productDetail.id, productDetail.product, "automating");
+          },
+          log: setup.log,
+          knownRejectedWords: ctx.db.listRejectedBasicInfoWords?.() ?? [],
+          onLearned: (words, labels, detail) => {
+            for (const word of words) {
+              try {
+                ctx.db.recordCopyFeedback({ word, module: "basicInfo", paths: [...labels], source: "basic-info-save", detail });
+              } catch { /* 学习失败不影响本次修复。 */ }
+            }
+          },
+        });
+      } catch (error) {
         if (isProductLineResolutionError(error)) setup.productLineBlocked = true;
         throw error;
       }

@@ -124,6 +124,11 @@ test("共享 basic 执行器在每次 API 尝试前清空 scenicSpotLogs", () =>
   assert.ok(execute >= 0 && clear > execute && refill > clear);
 });
 
+test("基本信息文案修复持久化实际传给保存 API 的产品对象", () => {
+  const basic = readAutomationFile("automation.main/runtime/basic.ts");
+  assert.match(basic, /product: productPayload,[\s\S]*?persist: \(\) => \{\s*productDetail\.product = productPayload/);
+});
+
 test("非 Agent basic 已保存且数据完整时保留跳过重复填充的条件", () => {
   const basic = readAutomationFile("automation.main/runtime/basic.ts");
   assert.match(basic, /!ctx\.agentControlled && shouldRefill\.reason === "complete"/);

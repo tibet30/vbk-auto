@@ -3,12 +3,8 @@ import type { AppAuthStore } from "../infrastructure/app-auth-store.js";
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import { createLocalProductService } from "../infrastructure/local-product-service.js";
 import { createProductDiagnosticReporter } from "../infrastructure/product-diagnostic-reporter.js";
-import { createLocalProductCloudSync } from "./local-product-cloud-sync.js";
-import { createTibetProductService } from "../infrastructure/tibet-products.js";
 
-/** One composition boundary: durable local products, independent diagnostic
- * upload, full cloud replication, and import of historical cloud products.
- */
+/** Durable local products plus minimal abnormal-stop reporting. */
 export function createProductStorage(args: {
   db: VbkDatabase;
   store: AppAuthStore;
@@ -26,22 +22,16 @@ export function createProductStorage(args: {
         provider: settings.aiProvider };
     }, autoFlush: backgroundSyncEnabled,
   });
-  const remote = createTibetProductService(args.store);
-  const cloud = createLocalProductCloudSync({ db: args.db, store: args.store, remote });
   const observe = (product: ProductDetail) => {
     diagnostics.capture(product, args.db.getAgentSnapshot(product.id));
-    if (backgroundSyncEnabled) void cloud.flush();
   };
-  const products = createLocalProductService({ db: args.db, store: args.store,
-    legacy: backgroundSyncEnabled ? remote : undefined, capture: observe,
-  });
+  const products = createLocalProductService({ db: args.db, store: args.store, capture: observe });
   const timer = backgroundSyncEnabled
-    ? setInterval(() => { void diagnostics.flush(); void cloud.flush(); }, 60_000)
+    ? setInterval(() => { void diagnostics.flush(); }, 60_000)
     : undefined;
   timer?.unref();
   if (backgroundSyncEnabled) {
     void diagnostics.flush();
-    void cloud.flush();
   }
-  return { products, observe, dispose: () => { if (timer) clearInterval(timer); cloud.dispose(); } };
+  return { products, observe, dispose: () => { if (timer) clearInterval(timer); } };
 }

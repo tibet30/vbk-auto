@@ -43,6 +43,6 @@ test("安全启动隔离启动期同步、VBK 页面初始化和工作流恢复"
   assert.match(browserSource, /private readonly initialiseEnabled = true/);
   assert.match(browserSource, /if \(!this\.initialiseEnabled\)/);
   assert.match(productStorageSource, /const backgroundSyncEnabled = args\.enableBackgroundSync !== false/);
-  assert.match(productStorageSource, /legacy: backgroundSyncEnabled \? remote : undefined/);
+  assert.doesNotMatch(productStorageSource, /createTibetProductService|createLocalProductCloudSync|desktop-products/);
   assert.match(diagnosticSource, /if \(args\.autoFlush !== false\) void flush\(\)/);
 });

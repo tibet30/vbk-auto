@@ -73,35 +73,19 @@ test("本地业务版本变化后拒绝过期快照；本地删除不回写云�
   assert.deepEqual(await service.list(), []);
 });
 
-test("历史云端只读迁移保留本机进度、消息、版本和规划运行记录", async t => {
+test("未归属的旧产品不会被本地服务读取或隐式迁移", async t => {
   const f = fixture(t);
   const local = f.db.createProduct({ destination: "潮州", days: 2, productForm: "privateTour" });
   f.db.updateProduct(local.id, { ...local.product, localOnly: "keep" }, "review", local.productJsonVersion);
-  f.db.addMessage(local.id, "user", "本机补充要求");
-  f.db.savePlanningState({ localProductId: local.id, status: "needs_user" } as PlanningGenerationState);
-  const before = f.db.getProduct(local.id)!;
-  let reads = 0;
-  const service = createLocalProductService({ db: f.db, store: f.store, capture() {}, legacy: {
-    async list() { reads++; return [local]; },
-    async get() { reads++; return { ...local, vbkAccount: "vbk_test", revision: 9, status: "planning" }; },
-  } });
-  assert.equal((await service.list()).length, 1);
-  const loaded = await service.get(local.id);
-  assert.deepEqual(loaded.product, before.product);
-  assert.deepEqual(loaded.messages, before.messages);
-  assert.equal(loaded.productJsonVersion, before.productJsonVersion);
-  assert.equal(loaded.status, "review");
-  assert.equal(loaded.vbkAccount, "vbk_test");
-  assert.equal(f.db.loadPlanningState(local.id)?.status, "needs_user");
-  await service.list();
-  assert.equal(reads, 2);
+  const service = createLocalProductService({ db: f.db, store: f.store, capture() {} });
+  assert.deepEqual(await service.list(), []);
+  await assert.rejects(service.get(local.id), /产品不存在/);
+  assert.equal(f.db.getProduct(local.id)?.product.localOnly, "keep");
 });
 
-test("旧云端不可用时仍可创建、修改和读取新本机产品", async t => {
+test("创建、修改和读取新产品只依赖本机数据库", async t => {
   const f = fixture(t);
-  const service = createLocalProductService({ db: f.db, store: f.store, capture() {}, legacy: {
-    async list() { throw new Error("offline"); }, async get() { throw new Error("offline"); },
-  } });
+  const service = createLocalProductService({ db: f.db, store: f.store, capture() {} });
   const first = await service.upsert(f.db.buildProductSnapshot({ destination: "潮州", days: 2, productForm: "privateTour" }));
   const saved = await service.update({ ...first, name: "本机产品" }, 1);
   assert.equal((await service.get(first.id)).name, saved.name);

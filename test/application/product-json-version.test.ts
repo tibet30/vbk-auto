@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import Database from "better-sqlite3";
 import { ProductMutationService } from "../../src/main/application/product-mutation-service.js";
 import { VbkDatabase } from "../../src/main/infrastructure/database/database.js";
 
@@ -42,6 +43,36 @@ test("ProductMutationService 按读到的版本提交，过期 expectedVersion �
     );
     assert.equal((db.getProduct(created.id)!.product as { tag?: string }).tag, "a");
   } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test("数据库统一写入口不会持久化同一天的重复 POI 身份", () => {
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-poi-dedupe-write-"));
+  const db = new VbkDatabase(dataPath);
+  try {
+    const created = db.createProduct({ destination: "拉萨", days: 1, productForm: "privateTour" });
+    db.updateProduct(created.id, {
+      ...created.product,
+      itinerary: [{
+        day: 1,
+        spots: [
+          { name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105 },
+          { name: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
+        ],
+      }],
+    }, "planning", created.productJsonVersion);
+
+    const reader = new Database(path.join(dataPath, "vbk-desktop.sqlite"), { readonly: true });
+    try {
+      const row = reader.prepare("SELECT product_json FROM products WHERE id=?").get(created.id) as { product_json: string };
+      const saved = JSON.parse(row.product_json) as { itinerary: Array<{ spots: Array<{ name: string }> }> };
+      assert.deepEqual(saved.itinerary[0].spots.map((spot) => spot.name), ["羊卓雍措"]);
+    } finally {
+      reader.close();
+    }
+  } finally {
+    db.close();
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });

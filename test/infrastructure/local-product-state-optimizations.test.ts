@@ -44,19 +44,11 @@ function fixture(t: test.TestContext) {
   return { db, store, login };
 }
 
-test("空本机列表仍完成一次历史迁移，并按当前账号返回摘要", async (t) => {
+test("空本机列表直接返回，不尝试历史云端迁移", async (t) => {
   const { db, store } = fixture(t);
-  const remote = db.buildProductSnapshot({ destination: "潮州", days: 2, productForm: "privateTour" });
-  let reads = 0;
-  const service = createLocalProductService({ db, store, capture() {}, legacy: {
-    async list() { reads++; return [remote]; },
-    async get() { reads++; return { ...remote, vbkAccount: "historical-account" }; },
-  } });
+  const service = createLocalProductService({ db, store, capture() {} });
   const listed = await service.list();
-  assert.equal(reads, 2);
-  assert.deepEqual(listed.map((product) => product.id), [remote.id]);
-  assert.equal(listed[0].vbkAccount, "historical-account");
-  assert.equal(listed[0].revision, 1);
+  assert.deepEqual(listed, []);
 });
 
 test("删除在同一产品事务中清理归属，允许另一账号以相同 ID 重存", async (t) => {

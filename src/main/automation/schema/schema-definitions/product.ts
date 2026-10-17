@@ -21,6 +21,8 @@ export const manualReviewSchema = z.object({
     name: z.string().min(1),
     removedAt: z.string().min(1),
     groupKey: z.string().min(1).optional(),
+    poiName: z.string().min(1).optional(),
+    poiId: z.number().int().positive().optional(),
   }).strict()).default([]),
 }).strict();
 

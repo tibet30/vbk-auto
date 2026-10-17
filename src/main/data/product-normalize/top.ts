@@ -29,6 +29,8 @@ import type { NormaliseOptions } from "./types.js";
  */
 export function normaliseProductDraft(product: Record<string, unknown>, options?: NormaliseOptions) {
   const result = structuredClone(product);
+  const basicInfo = normaliseBasicInfoDuration(result.basicInfo);
+  if (basicInfo) result.basicInfo = basicInfo;
   const presentation = normalisePresentation(result.presentation);
   const itinerary = normaliseItinerary(result.itinerary);
   if (presentation) result.presentation = presentation;
@@ -87,4 +89,20 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
     if (Object.keys(commercial).length) result.commercial = commercial; else delete result.commercial;
   }
   return result;
+}
+
+/** Repair persisted numeric strings without hiding malformed or out-of-range duration values. */
+function normaliseBasicInfoDuration(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const basicInfo = { ...(value as Record<string, unknown>) };
+  normaliseDurationField(basicInfo, "days", 1, 60);
+  normaliseDurationField(basicInfo, "nights", 0, 59);
+  return basicInfo;
+}
+
+function normaliseDurationField(target: Record<string, unknown>, key: "days" | "nights", min: number, max: number): void {
+  const value = target[key];
+  if (typeof value !== "string" || !/^\d+$/.test(value.trim())) return;
+  const parsed = Number(value.trim());
+  if (Number.isInteger(parsed) && parsed >= min && parsed <= max) target[key] = parsed;
 }

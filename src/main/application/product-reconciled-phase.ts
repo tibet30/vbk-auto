@@ -1,5 +1,6 @@
 import type { AutomationRun, ProductDetail } from '../../shared/contracts.js';
 import type { ProductResourceEvidence } from '../../shared/contracts-product-architecture.js';
+import { stampCompletedEntryPhase } from './product-entry-phase-fingerprint.js';
 
 interface ReconciliationStore {
   runProductTransaction<T>(task: () => T): T;
@@ -28,6 +29,7 @@ export function persistReconciledPhase(db: ReconciliationStore, id: string, phas
     const existing = run.phases.find(item => item.phase === phase);
     if (existing) existing.status = 'completed';
     else run.phases.push({ phase, status: 'completed' });
+    stampCompletedEntryPhase(run, product.product, phase);
     if (run.recovery?.phases[phase]) {
       run.recovery.phases[phase]!.state = 'completed';
       run.recovery.phases[phase]!.finalError = undefined;

@@ -48,6 +48,29 @@ test("异步资源整包保存不能用删除之前的快照覆盖删除凭证",
   assert.equal((saved().product.manualReview as { itinerarySpotRemovals: unknown[] }).itinerarySpotRemovals.length, 1);
 });
 
+test("同一 POI 换展示名回填时仍受删除凭证拦截", () => {
+  let saved = buildProductSnapshot({ destination: "拉萨", days: 1, productForm: "privateTour" });
+  saved.product.itinerary = [{ day: 1, title: "冈仁波齐", description: "参观冈仁波齐。", spots: [
+    { name: "冈仁波齐", poiName: "冈仁波齐", poiId: 10758151, kind: "attraction" },
+  ] }];
+  saved.product = applyItinerarySpotRemove(saved.product, {
+    field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0,
+  }) as typeof saved.product;
+  const incoming = structuredClone(saved.product);
+  incoming.itinerary![0]!.spots = [
+    { name: "冈仁波齐山体冰川遗迹", poiName: "冈仁波齐", poiId: 10758151, kind: "attraction" },
+  ];
+  incoming.itinerary![0]!.description = "参观冈仁波齐山体冰川遗迹。";
+  const service = new ProductMutationService({ getProduct: () => saved,
+    updateProduct: (_id, next, status) => { saved = { ...saved, product: next as typeof saved.product, status: status ?? saved.status }; } });
+  service.replace(saved.id, incoming);
+  assert.deepEqual(saved.product.itinerary![0]!.spots, []);
+  assert.doesNotMatch(saved.product.itinerary![0]!.description!, /冈仁波齐/);
+  const receipt = (saved.product.manualReview as { itinerarySpotRemovals: Array<{ poiName?: string; poiId?: number }> })
+    .itinerarySpotRemovals[0]!;
+  assert.deepEqual({ poiName: receipt.poiName, poiId: receipt.poiId }, { poiName: "冈仁波齐", poiId: 10758151 });
+});
+
 test("统一保存入口把接送地点迁出站点，重复 AI 整包覆盖不会重建后勤站点", () => {
   const { stale, service, saved } = setup();
   stale.itinerary = [{ day: 6, title: "汉中送站", description: "酒店出发送至汉中站", hotel: "无当日住宿安排",

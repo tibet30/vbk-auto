@@ -75,10 +75,13 @@ async function ensurePresentationContent(args: {
   const product = await args.runtime.loadCurrentProduct(args.localProductId);
   const presentation = record(product.presentation) ?? {};
   if (hasPresentationContent(presentation)) return undefined;
-  const fallback = presentationFallback(product);
+  if (!args.runtime.resolveRecommendationCategoryPolicy) throw new Error("规划运行时未提供推荐理由类别策略查询。");
+  const policy = await args.runtime.resolveRecommendationCategoryPolicy(args.localProductId);
+  const fallback = presentationFallback(product, policy.categories);
   const nextPresentation = {
     ...presentation,
-    recommendationCategory: text(presentation.recommendationCategory) || "优选行程",
+    recommendationCategory: policy.categories.includes(text(presentation.recommendationCategory))
+      ? text(presentation.recommendationCategory) : policy.categories[0],
     recommendation: text(presentation.recommendation) || fallback.recommendation,
     features: text(presentation.features) || fallback.features,
     recommendations: validRecommendations(presentation.recommendations) ?? fallback.recommendations,

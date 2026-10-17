@@ -4,9 +4,10 @@ import { extractLockedConstraints, isPlanningControlMessage } from "../agent/pro
 import { classifyItineraryInputMode, explicitAlternativeGroups, itineraryInputContractError } from "./itinerary-input-contract.js";
 import { itineraryStructureError } from "./itinerary-structure.js";
 import { projectDatedRoute } from "./dated-route-projection.js";
+import { selfRepairItineraryForVbk } from "./itinerary-self-repair.js";
 
 type JsonObject = Record<string, unknown>;
-type LockedDay = { day: number; spots: string[] };
+type LockedDay = { day: number; spots: string[]; unorderedSpots?: string[] };
 const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
   一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
@@ -19,7 +20,9 @@ const DAY_TOKEN: Record<string, number> = {
  * readback and POI-resolution gates still run.
  */
 export function projectCompleteItinerary(product: ProductDetail): PlanningStageOutput | undefined {
-  if (!itineraryStructureError(product.product as JsonObject)) return undefined;
+  const currentItinerary = product.product.itinerary;
+  if (!itineraryStructureError(product.product as JsonObject)
+    && !itineraryInputContractError(product, currentItinerary)) return undefined;
   const basic = record(product.product.basicInfo);
   const days = positiveInteger(basic?.days);
   if (!days) return undefined;
@@ -34,15 +37,10 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
     return { reply: "已保留完整原路线、各日终点及括号观星安排，生成待核验行程。",
       modules: [{ module: "itinerary", status: "proposed", value: dated }] };
   }
-  // Parenthetical experiences contain source details absent from the compact
-  // POI locks (night photography, camps, etc.). Let the normal planner preserve
-  // them instead of inventing overnight stays at the meeting-city anchor.
-  if (order.some(row => /[（(](?!二选一[）)])[^）)]+[）)]/u.test(rawDayText(product, row.day)))) return undefined;
-
   const alternativeGroups = explicitAlternativeGroups(product);
   const expandedOrder = expandAlternativeGroups(order, alternativeGroups);
   if (!expandedOrder || expandedOrder.some((row) => row.spots.every(isTravelService))) return undefined;
-  const itinerary = expandedOrder.map((row) => projectDay({
+  const projected = expandedOrder.map((row) => projectDay({
     row,
     days,
     nights: positiveInteger(basic?.nights) ?? 0,
@@ -50,6 +48,8 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
     rawDayText: rawDayText(product, row.day),
     alternativeGroups,
   }));
+  const itinerary = selfRepairItineraryForVbk(projected, positiveInteger(basic?.nights) ?? 0,
+    product.product as JsonObject).itinerary;
   if (itineraryStructureError({ ...product.product, itinerary }) || itineraryInputContractError(product, itinerary)) return undefined;
   return {
     reply: "已按用户完整逐日行程生成待核验草案，保留原日序、景点顺序和二选一关系。",
@@ -66,10 +66,11 @@ function projectDay(args: {
   alternativeGroups: Array<{ day: number; names: string[] }>;
 }): JsonObject {
   const travelServices = serviceNotes(args.rawDayText, args.row.spots);
-  const attractions = args.row.spots.filter((name) => !isTravelService(name));
+  const attractions = [...args.row.spots, ...(args.row.unorderedSpots ?? [])].filter((name) => !isTravelService(name));
   const groups = args.alternativeGroups.filter((group) => group.day === args.row.day);
   const title = formatAttractionSequence(attractions, groups, " · ");
   const description = formatAttractionSequence(attractions, groups, "、");
+  const sourceNotes = parentheticalNotes(args.rawDayText);
   const spots = attractions.map((name, index) => ({
     name,
     kind: "attraction",
@@ -85,6 +86,7 @@ function projectDay(args: {
     spots,
     description: [
       `按用户原定顺序安排：${description}。`,
+      ...(sourceNotes.length ? [`原始补充：${sourceNotes.join("、")}。`] : []),
       ...travelServices,
       stay ? `当晚按用户要求住${stay}，酒店待运营匹配。` : "当日返程，不安排住宿。",
     ].join(""),
@@ -102,8 +104,10 @@ function reliableCompleteOrder(value: unknown, days: number): LockedDay[] | unde
     const day = positiveInteger(item.day);
     const rawSpots = item.spots;
     const spots = Array.isArray(rawSpots) ? rawSpots.map(text).filter(Boolean) : [];
+    const rawUnorderedSpots = item.unorderedSpots;
+    const unorderedSpots = Array.isArray(rawUnorderedSpots) ? rawUnorderedSpots.map(text).filter(Boolean) : [];
     if (!day || !spots.length || byDay.has(day)) return undefined;
-    byDay.set(day, { day, spots });
+    byDay.set(day, { day, spots, ...(unorderedSpots.length ? { unorderedSpots } : {}) });
   }
   const order = Array.from({ length: days }, (_, index) => byDay.get(index + 1));
   return order.every(Boolean) ? order as LockedDay[] : undefined;
@@ -134,8 +138,16 @@ function expandAlternativeGroups(order: LockedDay[], groups: Array<{ day: number
 
 function stayForDay(args: { row: LockedDay; nights: number; fallbackStay: string; rawDayText: string }): string | undefined {
   if (args.row.day > args.nights) return undefined;
-  const explicit = args.rawDayText.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n]{2,30})/u)?.[1]?.trim();
+  const parenthesized = args.rawDayText.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim();
+  const explicit = parenthesized
+    || args.rawDayText.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n]{2,30})/u)?.[1]?.trim();
   return explicit || args.fallbackStay || "当地酒店";
+}
+
+function parentheticalNotes(raw: string): string[] {
+  return [...raw.matchAll(/[（(]([^）)]+)[）)]/gu)]
+    .map((match) => match[1]?.trim() ?? "")
+    .filter((note) => note.length > 0 && !/^宿\s*/u.test(note) && note !== "二选一");
 }
 
 function rawDayText(product: ProductDetail, day: number): string {
@@ -152,8 +164,26 @@ function rawDayText(product: ProductDetail, day: number): string {
  * full correction contract and is the conservative fallback. */
 function hasUnmergedRequirement(product: ProductDetail): boolean {
   const original = text(record(product.product.basicInfo)?.userIdea);
-  return userMessages(product).some((message) => message.content.trim() !== original
+  return userMessages(product).some((message) => !messageRestatesOriginalBrief(message.content, original)
+    && !requestsOriginalRouteReplay(message.content)
     && !isPlanningControlMessage(message.content));
+}
+
+function requestsOriginalRouteReplay(content: string): boolean {
+  const value = content.replace(/\s+/gu, "");
+  return /(?:从头)?重新(?:规划|生成|执行)/u.test(value)
+    && /(?:原始|原定)(?:完整)?(?:逐日)?(?:行程|路线|方案)/u.test(value)
+    && !/(?:改为|修改|替换|新增|删除|移除|取消|不再)/u.test(value);
+}
+
+function messageRestatesOriginalBrief(content: string, original: string): boolean {
+  if (content.trim() === original) return true;
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    return record(parsed)?.type === "product_brief" && text(record(parsed)?.userIdea) === original;
+  } catch {
+    return false;
+  }
 }
 
 /** The compact projector records only the train services it can preserve in a

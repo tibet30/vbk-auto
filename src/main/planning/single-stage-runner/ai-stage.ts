@@ -32,6 +32,7 @@ import type {
 import type { OrchestratorRuntime } from "../types.js";
 import { makeStageResult, now } from "./result.js";
 import type { SingleStageResult } from "./types.js";
+import { unavailableRecommendationCategories } from "../../../shared/recommendation-category-policy.js";
 
 export async function runAiStage(args: {
   stage: PlanningStage;
@@ -57,6 +58,18 @@ export async function runAiStage(args: {
   let attempts = args.attempts;
   let lastError = args.lastError;
   const persistedTaskKeys = new Set(existingTasks.map((task) => `${task.type}::${task.label}`));
+  let recommendationCategoryPolicy: PlannerContext["recommendationCategoryPolicy"];
+  if (stage === "presentation") {
+    try {
+      if (!runtime.resolveRecommendationCategoryPolicy) throw new Error("规划运行时未提供推荐理由类别策略查询。");
+      recommendationCategoryPolicy = await runtime.resolveRecommendationCategoryPolicy(state.localProductId);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      rejected.push({ module: "presentation", status: "rejected", reason });
+      lastError = { stage, attempt: 0, code: "missing_module", message: reason };
+      return makeStageResult({ state, stage, accepted, rejected, researchTasks, attempts: 0, lastError, status: "needs_user" });
+    }
+  }
 
   if (stage === "commercial") {
     const packageNameResult = await ensurePackageName({ state, skeleton, runtime });
@@ -93,7 +106,11 @@ export async function runAiStage(args: {
     if (stage === "itinerary" || stage === "presentation") {
       const alreadyAccepted = await runtime.loadAcceptedModules(state.localProductId);
       const sole = stage === "itinerary" ? "itinerary" : "presentation";
-      if (alreadyAccepted.includes(sole)) {
+      const currentProduct = await runtime.loadCurrentProduct(state.localProductId);
+      const policyInvalid = stage === "presentation" && recommendationCategoryPolicy
+        ? unavailableRecommendationCategories(currentProduct.presentation, recommendationCategoryPolicy).length > 0
+        : false;
+      if (alreadyAccepted.includes(sole) && !policyInvalid) {
         if (stage === "itinerary") logInfo("[planning.poi]", { event: "skip", localProductId: state.localProductId });
         accepted.push({
           module: sole,
@@ -107,6 +124,7 @@ export async function runAiStage(args: {
     const ctx: PlannerContext = {
       skeleton,
       currentProduct: await runtime.loadCurrentProduct(state.localProductId),
+      recommendationCategoryPolicy,
       acceptedModules: accepted.map((m) => ({
         module: m.module,
         status: "accepted",

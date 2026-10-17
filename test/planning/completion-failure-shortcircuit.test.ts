@@ -13,6 +13,7 @@ import type {
 } from "../../src/shared/contracts-planning.js";
 
 class Runtime implements OrchestratorRuntime {
+  async resolveRecommendationCategoryPolicy() { return fixedRecommendationPolicy(); }
   product: Record<string, unknown> = {
     basicInfo: { province: "山西", meetingCity: "太原", destinationCity: "太原" },
     commercial: {},
@@ -39,6 +40,8 @@ class Runtime implements OrchestratorRuntime {
   }
 }
 
+function fixedRecommendationPolicy() { return { source: "fixed-replay" as const, inputLocale: "zh-CN", productPatternId: 4, limited: true, categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"], fetchedAt: "2026-10-16T00:00:00.000Z" }; }
+
 class PlannerStub implements Planner {
   calls: string[] = [];
   constructor(private readonly failStage: string) {}
@@ -53,9 +56,9 @@ class PlannerStub implements Planner {
     }
     if (request.stage === "presentation") {
       return { reply: "展示文案", modules: [{ module: "presentation", status: "accepted", value: {
-        recommendationCategory: "优选行程",
+        recommendationCategory: "服务保障",
         recommendation: "舒适串联太原核心景点", recommendations: [
-          { category: "优选行程", text: "节奏舒适" }, { category: "精选酒店", text: "精选住宿" }, { category: "缤纷景点", text: "覆盖核心景点" },
+          { category: "服务保障", text: "节奏舒适" }, { category: "精选酒店", text: "精选住宿" }, { category: "缤纷体验", text: "覆盖核心景点" },
         ], features: "精选体验",
       } }] };
     }

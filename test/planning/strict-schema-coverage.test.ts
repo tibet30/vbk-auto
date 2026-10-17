@@ -12,6 +12,11 @@ import assert from "node:assert/strict";
 import { PLANNING_STAGES } from "../../src/shared/contracts-planning.js";
 import { buildStageToolSchema } from "../../src/main/planning/tool-schema.js";
 
+const LIVE_CATEGORIES = ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"];
+const schemaFor = (stage: (typeof PLANNING_STAGES)[number]) => buildStageToolSchema(
+  stage, stage === "presentation" ? { recommendationCategories: LIVE_CATEGORIES } : {},
+);
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -53,7 +58,7 @@ function assertStrictRequired(value: unknown, path: string): void {
 
 test("每个 stage 的 AI tool schema 都满足 strict 模式 required 覆盖", () => {
   for (const stage of PLANNING_STAGES) {
-    const schema = buildStageToolSchema(stage);
+    const schema = schemaFor(stage);
     // 顶层 type=function 是 OpenAI 容器；递归检查 function.parameters。
     assertStrictRequired(schema.function.parameters, `${stage}.parameters`);
   }
@@ -72,7 +77,7 @@ test("research 阶段的 AI schema 不暴露 modules / value / question / resear
 test("每个 stage（research 除外）的 modules.items 把 module 与 value 通过 oneOf 绑死", () => {
   for (const stage of PLANNING_STAGES) {
     if (stage === "research") continue;
-    const schema = buildStageToolSchema(stage);
+    const schema = schemaFor(stage);
     const params = schema.function.parameters as Record<string, unknown>;
     const props = (params.properties ?? {}) as Record<string, unknown>;
     const modules = props.modules as Record<string, unknown>;
@@ -113,7 +118,7 @@ test("stage tool_call schema 没有遗留 researchTasks / question 顶级字段"
   // research 阶段以外也不应有 researchTasks 顶级字段：AI 不应被问到。
   for (const stage of PLANNING_STAGES) {
     if (stage === "research") continue;
-    const schema = buildStageToolSchema(stage);
+    const schema = schemaFor(stage);
     const props = ((schema.function.parameters as Record<string, unknown>).properties ?? {}) as Record<string, unknown>;
     assert.equal(props.researchTasks, undefined, `${stage}: AI schema 不应有 researchTasks 顶级字段`);
     assert.equal(props.question, undefined, `${stage}: AI schema 不应有 question 顶级字段`);

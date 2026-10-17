@@ -33,9 +33,9 @@ class AllStagesOkPlanner implements Planner {
     if (request.stage === "presentation") {
       return {
         reply: "pres", modules: [{ module: "presentation", status: "accepted", value: {
-          recommendationCategory: "优选行程", recommendation: "R",
+          recommendationCategory: "服务保障", recommendation: "R",
           recommendations: [
-            { category: "优选行程", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷景点", text: "c" },
+            { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
           ],
           features: "f",
         } }],
@@ -62,6 +62,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
+  async resolveRecommendationCategoryPolicy() { return fixedRecommendationPolicy(); }
   product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   async loadExistingResearchTasks() { return []; }
   async writeModule(_id: string, _m: PlanningModule, path: string, value: unknown) {
@@ -83,6 +84,8 @@ class FakeRuntime implements OrchestratorRuntime {
   async loadCurrentProduct() { return this.product; }
   async loadAcceptedModules() { return detectAcceptedModulesFromProduct(this.product); }
 }
+
+function fixedRecommendationPolicy() { return { source: "fixed-replay" as const, inputLocale: "zh-CN", productPatternId: 4, limited: true, categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"], fetchedAt: "2026-10-16T00:00:00.000Z" }; }
 
 const skeleton = { destination: "太原", days: 2, nights: 1, productForm: "privateTour" as const, productType: "domesticShort" as const, supplierProductCode: "NEW" };
 
@@ -155,10 +158,10 @@ test("itinerary spot POI 映射完整时 deep validation 接受", () => {
 test("presentation 必须是 3 条互不重复 + category 在白名单的 recommendations", () => {
   const product = {
     presentation: {
-      recommendationCategory: "优选行程",
+      recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "优选行程", text: "a" }, { category: "优选行程", text: "b" }, { category: "缤纷景点", text: "c" },
+        { category: "服务保障", text: "a" }, { category: "服务保障", text: "b" }, { category: "缤纷体验", text: "c" },
       ],
       features: "f",
     },
@@ -173,12 +176,12 @@ test("presentation 必须是 3 条互不重复 + category 在白名单的 recomm
 
 test("生成阶段拒绝超过 VBK 平台字符宽度上限的推荐理由", () => {
   const result = validateModuleValue("presentation", {
-    recommendationCategory: "优选行程",
+    recommendationCategory: "服务保障",
     recommendation: "太原文化之旅",
     recommendations: [
-      { category: "优选行程", text: "游".repeat(43) },
+      { category: "服务保障", text: "游".repeat(43) },
       { category: "精选酒店", text: "当地住宿安排合理，方便每日出行与休息，整体体验舒适，按产品说明安排" },
-      { category: "缤纷景点", text: "串联太原周边核心景点，兼顾自然风光与人文历史，内容更丰富，按产品说明安排" },
+      { category: "缤纷体验", text: "串联太原周边核心景点，兼顾自然风光与人文历史，内容更丰富，按产品说明安排" },
     ],
     features: "<p>特色</p>",
   });

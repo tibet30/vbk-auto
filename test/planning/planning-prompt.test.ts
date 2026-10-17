@@ -148,11 +148,12 @@ test("省级目的地 user message 明确核心游览城市和近邻城市", () 
 });
 
 test("presentation prompt 要求产品特色输出安全结构化富文本", () => {
-  const prompt = composePlanningSystemPrompt("presentation");
+  const prompt = composePlanningSystemPrompt("presentation", [], [], [], ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"]);
   assert.match(prompt, /严禁在 value 内再次放 reason 或 value/);
   assert.match(prompt, /reason 只能在 value 右侧与 value 同级/);
   assert.match(prompt, /status=accepted 时 reason 固定为 null/);
   assert.match(prompt, /数组长度必须严格等于 3/);
+  assert.match(prompt, /服务保障、贴心赠送、精选酒店、特色美食、缤纷体验/);
   assert.match(prompt, /按平台中文2、英文1计数/);
   assert.match(prompt, /30～84/);
   assert.match(prompt, /features 必须是 JSON 字符串值/);

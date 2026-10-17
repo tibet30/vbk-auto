@@ -14,6 +14,7 @@ import type {
 import type { ProductDetail } from "../../src/shared/contracts.js";
 
 class MemoryRuntime implements OrchestratorRuntime {
+  async resolveRecommendationCategoryPolicy() { return fixedRecommendationPolicy(); }
   readonly writes: PlanningModule[] = [];
   constructor(readonly detail: ProductDetail) {}
   async loadExistingResearchTasks() { return []; }
@@ -28,6 +29,11 @@ class MemoryRuntime implements OrchestratorRuntime {
   async loadAcceptedModules() {
     return detectAcceptedModulesFromProduct(this.detail.product as Record<string, unknown>);
   }
+}
+
+function fixedRecommendationPolicy() {
+  return { source: "fixed-replay" as const, inputLocale: "zh-CN", productPatternId: 4, limited: true,
+    categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"], fetchedAt: "2026-10-16T00:00:00.000Z" };
 }
 
 function product(): ProductDetail {

@@ -40,6 +40,7 @@ class InMemoryStore implements GenerationStateStore {
 }
 
 class FakeRuntime implements OrchestratorRuntime {
+  async resolveRecommendationCategoryPolicy() { return fixedRecommendationPolicy(); }
   product: Record<string, unknown> = { basicInfo: { province: "山西" } };
   /**
    * 模拟「运营 / 手工改坏」持久化产品：每次 loadAcceptedModules 都重新检测。
@@ -84,6 +85,8 @@ class FakeRuntime implements OrchestratorRuntime {
   }
 }
 
+function fixedRecommendationPolicy() { return { source: "fixed-replay" as const, inputLocale: "zh-CN", productPatternId: 4, limited: true, categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"], fetchedAt: "2026-10-16T00:00:00.000Z" }; }
+
 const skeleton = { destination: "太原", days: 2, nights: 1, productForm: "privateTour" as const, productType: "domesticShort" as const, supplierProductCode: "NEW" };
 
 test("detectAcceptedModulesFromProduct 在骨架 2 天但 itinerary 只 1 天时不会把 itinerary 算 accepted", () => {
@@ -104,10 +107,10 @@ test("detectAcceptedModulesFromProduct 在骨架 2 天但 itinerary 只 1 天时
 test("detectAcceptedModulesFromProduct 对 presentation 三条 recommendations 缺字段也拒绝", () => {
   const product = {
     presentation: {
-      recommendationCategory: "优选行程",
+      recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "优选行程", text: "a" },
+        { category: "服务保障", text: "a" },
         { category: "精选酒店", text: "b" },
         { category: "", text: "" },
       ],
@@ -121,10 +124,10 @@ test("detectAcceptedModulesFromProduct 对 presentation 三条 recommendations �
 test("detectAcceptedModulesFromProduct 不把遗留超长推荐理由算作 accepted", () => {
   const product = {
     presentation: {
-      recommendationCategory: "优选行程",
+      recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "优选行程", text: "行程安排清晰" },
+        { category: "服务保障", text: "行程安排清晰" },
         { category: "精选酒店", text: "住宿位置便利" },
         { category: "服务保障", text: "这是一条会超过平台限制并且不应被规划恢复逻辑静默跳过的推荐理由".repeat(2) },
       ],
@@ -193,10 +196,10 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
       ] }],
     },
     presentation: { reply: "p", modules: [{ module: "presentation", status: "accepted", value: {
-      recommendationCategory: "优选行程",
+      recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "优选行程", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷景点", text: "c" },
+        { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
       ],
       features: "f",
     } }] },
@@ -250,10 +253,10 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
       { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
     ] }] },
     presentation: { reply: "p", modules: [{ module: "presentation", status: "accepted", value: {
-      recommendationCategory: "优选行程",
+      recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "优选行程", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷景点", text: "c" },
+        { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
       ],
       features: "f",
     } }] },
@@ -301,10 +304,10 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
       { day: 2, title: "D2", spots: [{ name: "B", poiName: null, poiId: null }], description: "D", hotel: "", meals: "B/L/D" },
     ] }] },
     presentation: { reply: "p", modules: [{ module: "presentation", status: "accepted", value: {
-      recommendationCategory: "优选行程",
+      recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "优选行程", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷景点", text: "c" },
+        { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
       ],
       features: "f",
     } }] },

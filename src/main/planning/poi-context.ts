@@ -27,7 +27,17 @@ export function buildPoiContextForItineraryDay(
 ): PoiSuggestContext {
   const base = buildPoiContext(product, destination);
   const dayCity = inferExplicitPoiDayCity(day);
-  return dayCity ? { ...base, destinationCity: dayCity } : base;
+  if (dayCity) return { ...base, destinationCity: dayCity };
+  return hasCrossCityStayPlan(product, base.destinationCity)
+    ? { province: base.province }
+    : base;
+}
+
+function hasCrossCityStayPlan(product: Record<string, unknown>, arrivalCity: string | undefined): boolean {
+  if (!Array.isArray(product.itinerary) || !arrivalCity) return false;
+  return product.itinerary.some((day) => isRecord(day)
+    && textValue(day.hotelCity)
+    && textValue(day.hotelCity) !== arrivalCity);
 }
 
 export function hasProductPoiContext(product: Record<string, unknown>): boolean {

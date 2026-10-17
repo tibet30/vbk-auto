@@ -27,6 +27,44 @@ test("POI 补全查询携带产品目的城市和省份上下文", async () => {
   assert.deepEqual(contexts, [{ destinationCity: "乌鲁木齐", province: "新疆" }]);
 });
 
+test("跨城住宿路线不把所有 POI 查询错误锁在接团城市", async () => {
+  const contexts: unknown[] = [];
+  const runtime = testRuntime({
+    product: {
+      basicInfo: { destinationCity: "拉萨", province: "西藏" },
+      itinerary: [
+        { day: 1, hotelCity: "日喀则", spots: [{ name: "卡若拉冰川", poiName: null, poiId: null }] },
+        { day: 2, hotelCity: "定日", spots: [] },
+      ],
+    },
+    suggestPoi: async (_keyword, context) => {
+      contexts.push(context);
+      return { poiName: "卡若拉冰川", poiId: 91485 };
+    },
+  });
+  await enrichItineraryPois({ localProductId: "tibet-cross-city", destination: "拉萨", runtime, persistedTaskKeys: new Set() });
+  assert.deepEqual(contexts, [{ province: "西藏" }]);
+});
+
+test("措错正字差异会查询官方别名并写回原景点槽位", async () => {
+  const queries: string[] = [];
+  let written: any;
+  const runtime = testRuntime({
+    product: { basicInfo: { destinationCity: "拉萨", province: "西藏" },
+      itinerary: [{ day: 4, title: "公珠措", spots: [{ name: "公珠措", poiName: null, poiId: null }] }] },
+    suggestPoi: async (keyword) => {
+      queries.push(keyword);
+      return keyword === "公珠错" ? { poiName: "公珠错", poiId: 91992 } : null;
+    },
+    write: (value) => { written = value; },
+  });
+  await enrichItineraryPois({ localProductId: "orthographic-alias", destination: "拉萨", runtime, persistedTaskKeys: new Set() });
+  assert.deepEqual(queries, ["公珠措", "公珠错"]);
+  assert.equal(written[0].spots[0].name, "公珠措");
+  assert.equal(written[0].spots[0].poiName, "公珠错");
+  assert.equal(written[0].spots[0].poiId, 91992);
+});
+
 test("已完整 POI 续跑时不靠重新搜索清空映射", async () => {
   let written: any;
   let queryCount = 0;

@@ -25,6 +25,8 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
     save: async (next) => { Object.assign(state, structuredClone(next)); },
   };
   const runtime: OrchestratorRuntime = {
+    resolveRecommendationCategoryPolicy: async () => ({ source: "fixed-replay", inputLocale: "zh-CN", productPatternId: 4, limited: true,
+      categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"], fetchedAt: "2026-10-16T00:00:00.000Z" }),
     suggestPoi: async (keyword) => {
       events.push(`poi:${keyword}`);
       return { poiName: "晋祠博物馆", poiId: 83199 };
@@ -47,11 +49,11 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
         return {
           reply: "presentation",
           modules: [{ module: "presentation", status: "accepted", value: {
-            recommendationCategory: "优选行程", recommendation: "推荐",
+            recommendationCategory: "服务保障", recommendation: "推荐",
             recommendations: [
-              { category: "优选行程", text: "行程" },
+              { category: "服务保障", text: "行程" },
               { category: "精选酒店", text: "酒店" },
-              { category: "缤纷景点", text: "景点" },
+              { category: "缤纷体验", text: "景点" },
             ], features: "特色",
           } }],
         };
@@ -62,11 +64,11 @@ test("resume 在 presentation 前只补 itinerary 缺失 POI，不重跑 itinera
 
   await runPlan({ localProductId: "resume-poi", skeleton, store, runtime, planner, options: { stageRetryLimit: 1 } });
 
-  assert.deepEqual(events.slice(0, 3), [
+  assert.deepEqual(events.slice(0, 2), [
     "poi:晋祠",
     `write:${AI_WRITABLE_PATHS.itinerary}`,
-    "planner:presentation",
   ]);
+  assert.ok(events.indexOf("planner:presentation") > 1);
   assert.ok(!events.includes("planner:itinerary"));
   const spot = ((product.itinerary as Array<{ spots: Array<{ poiName: string; poiId: number }> }>)[0].spots[0]);
   assert.deepEqual(spot, { name: "晋祠", poiName: "晋祠博物馆", poiId: 83199 });

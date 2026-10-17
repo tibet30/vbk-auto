@@ -96,7 +96,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         // “永祚寺（双塔寺）”这类官方名+同地点别名先做确定性别名查询，
         // 避免整串关键词召回外地同名前缀，也避免模型原样重复后耗尽重试。
         if (!match && !queryFailed && !suspended) {
-          for (const alias of bracketAliases(originalKeyword)) {
+          for (const alias of queryAliases(originalKeyword)) {
             if (isTravelNodeName(alias)) continue;
             const aliasQuery = await queryPoi({ runtime, localProductId, keyword: alias, queryTimeoutMs, context: poiContext });
             match = aliasQuery.match;
@@ -176,6 +176,13 @@ function recordVerifiedMapping(
 
 function bracketAliases(value: string): string[] {
   const aliases = Array.from(value.matchAll(/[（(]([^）)]+)[）)]/g), (match) => match[1].trim());
+  return [...new Set(aliases.filter((alias) => alias && alias !== value.trim()))];
+}
+
+function queryAliases(value: string): string[] {
+  const aliases = bracketAliases(value);
+  if (/措$/u.test(value)) aliases.push(value.replace(/措$/u, "错"));
+  else if (/错$/u.test(value)) aliases.push(value.replace(/错$/u, "措"));
   return [...new Set(aliases.filter((alias) => alias && alias !== value.trim()))];
 }
 

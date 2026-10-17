@@ -9,7 +9,7 @@ import { PlannerError, type PlanningStage, type PlanningStageOutput, type Planni
 import { AI_WRITABLE_PATHS, validateModuleValue, validateResearchTaskProposal } from "./schemas.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 import { normaliseHotelTier } from "../../shared/hotel-tiers.js";
-import { PLATFORM_HOTEL_DESCRIPTION } from "../../shared/platform-hotel-rules.js";
+import { isPlatformHotelRuleValue } from "../../shared/platform-hotel-rules.js";
 import type { OrchestratorRuntime } from "./types.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "./runtime.js";
 import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-policy.js";
@@ -105,7 +105,7 @@ export function sanitiseModuleValue(
   if (module === "skeleton" && value && typeof value === "object" && !Array.isArray(value)) {
     const v = { ...(value as Record<string, unknown>) };
     // Platform auto-matching is a rule, not a single legacy hotel grade.
-    if (v.hotelTier === PLATFORM_HOTEL_DESCRIPTION) {
+    if (isPlatformHotelRuleValue(v.hotelTier)) {
       delete v.hotelTier;
     } else if (typeof v.hotelTier === "string") {
       const normalised = normaliseHotelTier(v.hotelTier);

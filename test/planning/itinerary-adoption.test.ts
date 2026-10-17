@@ -66,6 +66,24 @@ test("POI verification updates current itinerary while keeping travel nodes out 
   assert.deepEqual((result.itinerary[0].spots as any[])[0], { name: "宽窄巷子", poiName: "宽窄巷子景区", poiId: 99 });
 });
 
+test("POI verification collapses same-day aliases resolved to one provider POI", () => {
+  const result = applyPoiMatches([{
+    day: 1,
+    spots: [
+      { name: "羊卓雍措", poiName: null, poiId: null, timeOfDay: "morning", relation: "and" },
+      { name: "羊卓雍湖", poiName: null, poiId: null, timeOfDay: "morning", relation: "and" },
+    ],
+  }], new Map([
+    ["羊卓雍措", { poiName: "羊卓雍错", poiId: 82105 }],
+    ["羊卓雍湖", { poiName: "羊卓雍错", poiId: 82105 }],
+  ]));
+
+  assert.equal(result.missing.length, 0);
+  assert.deepEqual((result.itinerary[0].spots as any[]), [{
+    name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, timeOfDay: "morning", relation: "and",
+  }]);
+});
+
 test("unmatched user-recommended spots remain adoptable and are marked for manual POI configuration", () => {
   const recommended = [{ day: 1, spots: [{ name: "用户推荐秘境", poiName: null, poiId: null }] }];
   const hydrated = applyPoiMatches(recommended, new Map());

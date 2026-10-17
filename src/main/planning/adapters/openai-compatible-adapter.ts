@@ -66,6 +66,8 @@ export interface OpenAICompatibleAdapterConfig {
   presentationRejectedWords?: readonly string[];
   /** 平台在行程审核校验里拒绝过的词，用于 itinerary 阶段的行程文案生成。 */
   itineraryRejectedWords?: readonly string[];
+  /** 平台在基本信息保存时拒绝过的词，用于 basicInfo 阶段的副标题与操作说明。 */
+  basicInfoRejectedWords?: readonly string[];
 }
 
 export class OpenAICompatiblePlannerAdapter implements Planner {
@@ -90,10 +92,14 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
   async generateStage(request: PlannerRequest): Promise<PlanningStageOutput> {
     const stage = request.stage;
     const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
-    const toolSchema = buildStageToolSchema(stage);
+    const recommendationCategories = request.context.recommendationCategoryPolicy?.categories;
+    if (stage === "presentation" && !recommendationCategories?.length) {
+      throw new PlannerError("missing_module", "未读取到 VBK 推荐理由可用类别，已停止产品图文生成。");
+    }
+    const toolSchema = buildStageToolSchema(stage, { recommendationCategories });
     const userMessage = composePlanningUserMessage(request);
     const messages = [
-      { role: "system", content: composePlanningSystemPrompt(stage, this.config.presentationRejectedWords, this.config.itineraryRejectedWords) },
+      { role: "system", content: composePlanningSystemPrompt(stage, this.config.presentationRejectedWords, this.config.itineraryRejectedWords, this.config.basicInfoRejectedWords, recommendationCategories) },
       { role: "user", content: userMessage },
     ];
     // Adapter 单次传输尝试：transport 失败直接抛错，由 orchestrator 决定是否 stage retry。

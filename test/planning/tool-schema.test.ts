@@ -11,6 +11,13 @@ import { PLANNING_STAGES } from "../../src/shared/contracts-planning.js";
 import { buildStageToolSchema } from "../../src/main/planning/tool-schema.js";
 
 const FORBIDDEN_VALUE_KEYS = new Set(["_def", "_type", "parse", "safeParse"]);
+const LIVE_RECOMMENDATION_CATEGORIES = ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"];
+
+function schemaFor(stage: (typeof PLANNING_STAGES)[number]) {
+  return buildStageToolSchema(stage, stage === "presentation"
+    ? { recommendationCategories: LIVE_RECOMMENDATION_CATEGORIES }
+    : {});
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -75,7 +82,7 @@ function assertValidJsonSchema(value: unknown, path: string): void {
 
 test("buildStageToolSchema 产出合法 strict JSON schema（无 Zod / 函数 / 非法关键字）", () => {
   for (const stage of PLANNING_STAGES) {
-    const schema = buildStageToolSchema(stage);
+    const schema = schemaFor(stage);
     assert.equal(schema.type, "function");
     assert.equal(schema.function.strict, true);
     // 顶层 type=function 是 OpenAI 容器；递归校验 function.parameters 才进入 JSON schema 主体。
@@ -86,7 +93,7 @@ test("buildStageToolSchema 产出合法 strict JSON schema（无 Zod / 函数 / 
 
 test("每个 stage 的 modules.value 与允许 module 列表一致", () => {
   for (const stage of PLANNING_STAGES) {
-    const schema = buildStageToolSchema(stage);
+    const schema = schemaFor(stage);
     const params = schema.function.parameters as Record<string, unknown>;
     const props = (params.properties ?? {}) as Record<string, unknown>;
     // skeleton / validation 是本地阶段，不调用 AI；但 schema 仍可生成（空模块列表）。
@@ -125,7 +132,7 @@ test("每个 stage 的 modules.value 与允许 module 列表一致", () => {
 
 test("tool_call parameters.required 包含 reply 与 modules（strict mode 强制）", () => {
   for (const stage of PLANNING_STAGES) {
-    const schema = buildStageToolSchema(stage);
+    const schema = schemaFor(stage);
     const required = (schema.function.parameters as Record<string, unknown>).required as string[];
     if (stage === "research") {
       // research 阶段本地 deterministic，AI schema 只暴露 reply。
@@ -138,7 +145,7 @@ test("tool_call parameters.required 包含 reply 与 modules（strict mode 强�
 });
 
 test("value 子节点不会出现 Zod 内部字段 / 函数 / moduleProperties 这类非法关键字", () => {
-  const schema = buildStageToolSchema("presentation");
+  const schema = schemaFor("presentation");
   const params = schema.function.parameters as Record<string, unknown>;
   const stringified = JSON.stringify(params);
   assert.ok(!stringified.includes("moduleProperties"), "tool schema 不应包含 moduleProperties 这类非法关键字");
@@ -147,7 +154,7 @@ test("value 子节点不会出现 Zod 内部字段 / 函数 / moduleProperties �
 });
 
 test("presentation 推荐理由只使用 VBK 当前可选分类", () => {
-  const schema = buildStageToolSchema("presentation");
+  const schema = schemaFor("presentation");
   const params = schema.function.parameters as Record<string, unknown>;
   const modules = (params.properties as Record<string, unknown>).modules as Record<string, unknown>;
   const value = ((modules.items as Record<string, unknown>).properties as Record<string, unknown>).value as Record<string, unknown>;
@@ -155,6 +162,10 @@ test("presentation 推荐理由只使用 VBK 当前可选分类", () => {
   const primary = (props.recommendationCategory as Record<string, unknown>).enum;
   const recommendation = props.recommendations as Record<string, unknown>;
   const itemProps = ((recommendation.items as Record<string, unknown>).properties as Record<string, unknown>);
-  assert.deepEqual((itemProps.category as Record<string, unknown>).enum, ["服务保障", "贴心赠送", "精选酒店", "特色美食"]);
-  assert.deepEqual(primary, ["优选行程", "服务保障", "贴心赠送", "精选酒店", "缤纷景点", "特色美食", "度假首选", "超值赠送", "五星精选"]);
+  assert.deepEqual((itemProps.category as Record<string, unknown>).enum, LIVE_RECOMMENDATION_CATEGORIES);
+  assert.deepEqual(primary, LIVE_RECOMMENDATION_CATEGORIES);
+});
+
+test("presentation 缺少实时类别策略时拒绝构造 schema", () => {
+  assert.throws(() => buildStageToolSchema("presentation"), /缺少 VBK 实时推荐理由类别策略/);
 });

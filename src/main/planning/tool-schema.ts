@@ -18,7 +18,6 @@
 
 import type { PlanningStage, PlanningModule } from "../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
-import { VBK_RECOMMENDATION_CATEGORIES, VBK_SELECTABLE_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 
 /**
  * 共享子 schema：把 reason 等可有可无的字段编码为 nullable（required 仍包含），
@@ -39,7 +38,7 @@ const STATUS_FIELD: Record<string, unknown> = {
  * 模块 value 子 schema（每个 module 一个独立分支）；这些 schema 都遵守
  * strict：type=object 时 additionalProperties=false + required 全覆盖。
  */
-function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> {
+function moduleValueJsonSchema(module: PlanningModule, recommendationCategories?: readonly string[]): Record<string, unknown> {
   switch (module) {
     case "basicInfo":
       return {
@@ -54,12 +53,13 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
         },
       };
     case "presentation":
+      if (!recommendationCategories?.length) throw new Error("presentation schema 缺少 VBK 实时推荐理由类别策略。");
       return {
         type: "object",
         additionalProperties: false,
         required: ["recommendationCategory", "recommendation", "recommendations", "features"],
         properties: {
-          recommendationCategory: { type: "string", enum: [...VBK_RECOMMENDATION_CATEGORIES] },
+          recommendationCategory: { type: "string", enum: [...recommendationCategories] },
           recommendation: { type: "string", minLength: 1 },
           recommendations: {
             type: "array", minItems: 3, maxItems: 3, description: "数组长度必须严格等于 3；只输出三条，禁止第四条或更多。",
@@ -68,7 +68,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
               additionalProperties: false,
               required: ["category", "text"],
               properties: {
-                category: { type: "string", enum: [...VBK_SELECTABLE_RECOMMENDATION_CATEGORIES] },
+                category: { type: "string", enum: [...recommendationCategories] },
                 text: { type: "string", minLength: 1, description: "按平台中文2、英文1计数，30～84个平台字符；建议30～40个汉字（60～80个平台字符），写具体行程特色，不按UTF-8字节计数。" },
               },
             },
@@ -186,7 +186,7 @@ function moduleValueJsonSchema(module: PlanningModule): Record<string, unknown> 
  * 这样即使某个 stage 的 allowed 列表同时含 packageName 与 pricing，模型也
  * 无法把 packageName 配上 pricing-shape value（或反过来）。
  */
-function moduleBranch(module: PlanningModule): Record<string, unknown> {
+function moduleBranch(module: PlanningModule, recommendationCategories?: readonly string[]): Record<string, unknown> {
   return {
     type: "object",
     additionalProperties: false,
@@ -194,7 +194,7 @@ function moduleBranch(module: PlanningModule): Record<string, unknown> {
     properties: {
       module: { type: "string", const: module },
       status: STATUS_FIELD,
-      value: moduleValueJsonSchema(module),
+      value: moduleValueJsonSchema(module, recommendationCategories),
       reason: REASON_FIELD,
     },
   };
@@ -204,8 +204,8 @@ function moduleBranch(module: PlanningModule): Record<string, unknown> {
  * 给定一组允许 module，构建对应 oneOf branch 数组。
  * 单一 module 时直接返回该 branch，避免在 strict 模式下引入一层不必要的 oneOf。
  */
-function modulesItemsSchema(allowed: readonly PlanningModule[]): Record<string, unknown> {
-  const branches = allowed.map(moduleBranch);
+function modulesItemsSchema(allowed: readonly PlanningModule[], recommendationCategories?: readonly string[]): Record<string, unknown> {
+  const branches = allowed.map((module) => moduleBranch(module, recommendationCategories));
   if (branches.length === 1) return branches[0];
   return { oneOf: branches };
 }
@@ -219,7 +219,9 @@ function modulesItemsSchema(allowed: readonly PlanningModule[]): Record<string, 
  *  研究阶段（research）：不暴露 modules / value；这是本地 deterministic 阶段，
  *  AI tool schema 仅保留 reply 给模型留个接话空间（仍然 optional / nullable）。
  */
-export function buildStageToolSchema(stage: PlanningStage): {
+export function buildStageToolSchema(stage: PlanningStage, options: {
+  recommendationCategories?: readonly string[];
+} = {}): {
   type: "function";
   function: {
     name: string;
@@ -247,7 +249,7 @@ export function buildStageToolSchema(stage: PlanningStage): {
     };
   }
   const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
-  const moduleValue = modulesItemsSchema(allowed);
+  const moduleValue = modulesItemsSchema(allowed, options.recommendationCategories);
   return {
     type: "function",
     function: {

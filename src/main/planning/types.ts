@@ -14,6 +14,7 @@ import type {
 } from "../../shared/contracts-planning.js";
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
 import type { PoiAutoSelectionResult } from "./poi-auto-selection.js";
+import type { RecommendationCategoryPolicy } from "../../shared/recommendation-category-policy.js";
 
 export interface OrchestratorRunResult {
   state: PlanningGenerationState;
@@ -59,6 +60,8 @@ export interface VerifiedPoiMapping {
 }
 
 export interface OrchestratorRuntime {
+  /** 读取当前产品形态在 VBK 实际可选的推荐理由类别；查询失败必须阻断图文规划。 */
+  resolveRecommendationCategoryPolicy?(localProductId: string): Promise<RecommendationCategoryPolicy>;
   suggestPoi?(keyword: string, context?: PoiSuggestContext): Promise<{ poiName: string; poiId: number } | null>;
   /** 规划运行时使用的受控 POI 决策：前 12 条 AI 消歧、营业核验及置信度门槛均在这里完成。 */
   resolvePoiSelection?(localProductId: string, keyword: string, context?: PoiSuggestContext): Promise<PoiAutoSelectionResult>;

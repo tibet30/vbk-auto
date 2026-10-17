@@ -52,6 +52,20 @@ test("明确修正的住宿城市优先于旧酒店要求，重复保存不会�
   assert.equal(normalisePlatformHotelProduct(result).itinerary[0].hotelCity, "都江堰");
 });
 
+test("跨城原始宿点修复误继承的接团城市，且保持平台自动匹配规则", () => {
+  const input = { basicInfo: { meetingCity: "拉萨", nights: 2,
+    userIdea: "阿里南线 D1天：拉萨—日喀则（宿日喀则） D2天：日喀则—珠峰（宿珠峰小镇） D3天：珠峰—拉萨" },
+    operations: {}, itinerary: [
+      { day: 1, hotel: description, hotelCity: "拉萨", spots: [] },
+      { day: 2, hotel: description, hotelCity: "拉萨", spots: [] },
+      { day: 3, hotel: "无", spots: [] },
+    ] };
+  const result = normalisePlatformHotelProduct(input);
+  assert.deepEqual(result.itinerary.map((day: any) => day.hotelCity), ["日喀则", "定日", undefined]);
+  assert.deepEqual(result.operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
+  assert.deepEqual(normalisePlatformHotelProduct(result), result);
+});
+
 test("平台规则草稿及正式回读拒绝指定酒店、错误等级和额外筛选条件", () => {
   const segment: any = { segmentId: "1", segmentBase: { destinationCity: { cityId: 28, cityName: "成都" } } };
   const rules = defaultPlatformHotelRules(); segment.hotel = buildPlatformHotelRule(segment, rules);

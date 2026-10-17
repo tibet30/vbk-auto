@@ -1,5 +1,5 @@
 import { hotelDiamondFromTier } from "./hotel-tiers.js";
-import { hotelLocationFromHotelText } from "./region-overrides.js";
+import { hotelLocationFromHotelText, toWritableAdministrativeCityName } from "./region-overrides.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
 
 export type HotelRatingType = "diamond" | "star" | "homestay";
@@ -18,17 +18,18 @@ const object = (value: unknown): Json => value && typeof value === "object" && !
 /** 用户逐日住宿地点优先于解析器选中的酒店名称，重试不能扩大到整个县。 */
 export function hotelStayRequirement(product: Json, day: Json): HotelStayRequirement | undefined {
   const brief = text(object(product.basicInfo).userIdea);
-  const line = brief.split(/[\n；;]/u).find(line => Number(line.match(/^\s*(?:D|第)?(\d+)(?:天|日)?\s*[-、.:：\s]/iu)?.[1]) === Number(day.day));
+  const line = originalDaySection(brief, Number(day.day));
   const segments = line?.replace(/^\s*(?:D|第)?\d+(?:天|日)?\s*[-、.:：\s]/iu, "").split(/-+|→|—|>/u) ?? [];
-  const stay = [...segments].reverse().find(segment => /(?:住|住宿)/u.test(segment) && !/不住|无住宿|无需住宿/u.test(segment));
+  const stay = [...segments].reverse().find(segment => /(?:宿|住|住宿)/u.test(segment) && !/不住|无住宿|无需住宿/u.test(segment));
   const nightlyClauses = [...brief.matchAll(new RegExp(`第\\s*${day.day}\\s*晚([^。；;\\n，,]*)`, "gu"))].map(match => match[1]!);
   const explicitStay = nightlyClauses.find(clause => /^(?:优先|入住|住在|住宿于|住)/u.test(clause.trim()));
   const stayText = stay ?? explicitStay;
   const projectedStay = originalDatedRouteStay(brief, day);
-  const location = (stay
+  const parenthesizedStay = stay?.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim();
+  const location = (parenthesizedStay || (stay
     ? stay.replace(/^\s*(?:入住|住宿于|住在|住)/u, "").replace(/(?:住宿|入住).*$/u, "").replace(/[，,（(].*$/u, "").trim()
     : explicitStay?.replace(/^\s*(?:优先|入住|住宿于|住在|住)\s*/u, "")
-      .replace(/(?:附近|周边|当地|营地|民宿|酒店|住宿|入住).*$/u, "").replace(/[，,（(].*$/u, "").trim()) || projectedStay;
+      .replace(/(?:附近|周边|当地|营地|民宿|酒店|住宿|入住).*$/u, "").replace(/[，,（(].*$/u, "").trim())) || projectedStay;
   const stored = object(day.hotelRequirement);
   const nightly = [brief.match(new RegExp(`(?:D${day.day}|第\\s*${day.day}\\s*(?:天|晚))[^。；;\\n，,]*`, "i"))?.[0] ?? "", ...nightlyClauses].join(" ");
   const gradeToken = nightly.match(/([1-5一二三四五])\s*(?:民宿)?(?:圆)?(?:钻|星)/u)?.[1];
@@ -66,7 +67,8 @@ export function hotelStayRequirement(product: Json, day: Json): HotelStayRequire
   const parentCity = text(anchorSpot?.city);
   const specificDistrict = district && parentCity
     && toPlatformShortLocationName(district) !== toPlatformShortLocationName(parentCity);
-  const city = (inheritedArrivalCity && specificDistrict ? poiCity : "") || storedCity || poiCity
+  const explicitOvernightCity = parenthesizedStay ? toWritableAdministrativeCityName(parenthesizedStay) : "";
+  const city = explicitOvernightCity || (inheritedArrivalCity && specificDistrict ? poiCity : "") || storedCity || poiCity
     || hotelLocationFromHotelText(text(day.hotel)) || hotelLocationFromHotelText(text(day.hotelDescription))
     || routeCity || text(candidates[0]?.cityName) || text(stored.cityName);
   const locality = storedAnchor && !malformedRouteAnchor ? stored.maxDistanceKm !== undefined : location ? /镇|村|古镇|片区|街区|景区|园区|山|岛/u.test(anchorName)
@@ -91,6 +93,16 @@ export function hotelStayRequirement(product: Json, day: Json): HotelStayRequire
       ],
     } : {}),
   };
+}
+
+function originalDaySection(brief: string, dayNumber: number): string | undefined {
+  const marker = /(?:^|[\s；;])(?:(?:D|第)\s*)?(\d+)(?:天|日)?\s*[-、.:：]/giu;
+  const matches = [...brief.matchAll(marker)];
+  const current = matches.find((match) => Number(match[1]) === dayNumber);
+  if (!current || current.index === undefined) return undefined;
+  const next = matches.find((match) => (match.index ?? -1) > current.index!);
+  return brief.slice(current.index, next?.index ?? brief.length).replace(/^[\s；;]+/u, "")
+    .split(/\r?\n/u)[0]?.trim();
 }
 
 /** The generated overnight placeholder is evidence only when it matches this day's original endpoint. */

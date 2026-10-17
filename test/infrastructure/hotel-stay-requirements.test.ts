@@ -197,6 +197,18 @@ test("hotelN 单选数组能恢复降档，多选和其他日期不能授权", (
   assert.equal(applyPersistedHotelTierChoices(product, '用户回答：{"hotel40":["降为4钻酒店"]}'), product);
 });
 
+test("单行 D1-D7 路线能逐晚读取括号宿点并换成实际行政城市", () => {
+  const product = { basicInfo: { meetingCity: "拉萨", userIdea: [
+    "阿里南线7日 D1天：拉萨—羊卓雍措—日喀则（宿日喀则）海拔3800m",
+    "D2天：日喀则—珠峰（宿珠峰小镇） D3天：巴松村—萨嘎（宿萨嘎）",
+    "D4天：萨嘎—冈仁波齐（宿塔尔钦） D5天：塔钦--札达--塔钦（宿塔尔钦）",
+    "D6天：塔钦--仲巴--萨嘎（宿萨嘎） D7天：萨嘎--日喀则--拉萨",
+  ].join(" ") } };
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map(day => hotelStayRequirement(product, { day })?.cityName),
+    ["日喀则", "定日", "萨嘎", "普兰", "普兰", "萨嘎"]);
+  assert.equal(hotelStayRequirement(product, { day: 7 }), undefined);
+});
+
 test("后续日期核验失败时仍提交已复用候选的进度", async () => {
   const candidate = { hotelId: 136003100, hotelName: "绿景铂越酒店", diamond: 4, score: 0,
     distanceKm: 1.54, cityName: "太白县", anchorName: "太白县咀头镇人民政府", anchorCityId: 21821, ratingType: "diamond" as const };

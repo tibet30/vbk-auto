@@ -2,11 +2,12 @@ import { normalisePlatformHotelCopy, cleanPlatformHotelCopy } from "./platform-h
 import { hasItineraryHotelStay, needsItineraryHotelCandidates, normaliseReturnDayLodging, NO_ITINERARY_HOTEL } from "./itinerary-hotel.js";
 import { hotelStayRequirement } from "./hotel-stay-requirement.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
-import { isNonWritableCityAlias } from "./region-overrides.js";
+import { isNonWritableCityAlias, toWritableAdministrativeCityName } from "./region-overrides.js";
 
 type Json = Record<string, any>;
 export interface PlatformHotelRules { autoMatch: boolean; grades: number[] }
 export const PLATFORM_HOTEL_DESCRIPTION = "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店";
+export const PLATFORM_HOTEL_MODEL_TOKEN = "platform_auto_3_4_5";
 export const PLATFORM_HOTEL_GUIDE = `住宿统一为“${PLATFORM_HOTEL_DESCRIPTION}”。hotelCity 填当晚实际住宿的行政城市短名；住宿默认使用平台资源，无需本地资源准备或酒店选择。只保留住宿城市和晚数，不指定酒店，不保留逐晚钻级、民宿或距离限制，不生成 hotelCandidates、hotelRequirement。无住宿日保持无当日住宿安排。`;
 export function defaultPlatformHotelRules(): PlatformHotelRules { return { autoMatch: true, grades: [3, 4, 5] }; }
 export function validPlatformHotelRules(value: unknown): value is PlatformHotelRules {
@@ -15,6 +16,9 @@ export function validPlatformHotelRules(value: unknown): value is PlatformHotelR
     && new Set(rule.grades).size === 3 && [3, 4, 5].every(grade => rule.grades.includes(grade));
 }
 export function usesPlatformHotelRules(product: Json): boolean { return product.operations?.hotelMatchingMode === "rules"; }
+export function isPlatformHotelRuleValue(value: unknown): boolean {
+  return value === PLATFORM_HOTEL_DESCRIPTION || value === PLATFORM_HOTEL_MODEL_TOKEN;
+}
 export function platformHotelRulesRequired(product: Json): boolean {
   const days = Array.isArray(product.itinerary) ? product.itinerary : [];
   const nights = Number(product.basicInfo?.nights);
@@ -41,8 +45,12 @@ export function normalisePlatformHotelProduct(product: Json): Json {
     const day = normaliseReturnDayLodging(raw, basic) as Json;
     const stay = needsItineraryHotelCandidates(day, index, Number(basic.nights));
     const requirement = stay ? hotelStayRequirement(next, day) : undefined;
-    const city = toPlatformShortLocationName(day.hotelCity || requirement?.cityName || day.hotelRequirement?.cityName
-      || day.hotelCandidates?.[0]?.cityName || basic.meetingCity || basic.destinationCity);
+    const savedCity = toPlatformShortLocationName(day.hotelCity);
+    const arrivalCity = toPlatformShortLocationName(basic.meetingCity || basic.destinationCity);
+    const requestedCity = toPlatformShortLocationName(toWritableAdministrativeCityName(requirement?.cityName));
+    const inheritedArrival = savedCity && requestedCity && savedCity === arrivalCity && requestedCity !== arrivalCity;
+    const city = inheritedArrival ? requestedCity : toPlatformShortLocationName(savedCity || requestedCity
+      || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || arrivalCity);
     const result: Json = { ...day, hotel: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL,
       hotelDescription: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL };
     delete result.hotelRequirement; delete result.hotelCandidates;

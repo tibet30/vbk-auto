@@ -14,7 +14,7 @@ import { applyProductPatchSafe } from "../../src/main/operations/product-patch.j
 import { productSchema } from "../../src/main/automation/schema/schema-definitions.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT } from "../../src/shared/hotel-candidate-counts.js";
 import { sanitiseModuleValue } from "../../src/main/planning/stage-runner.js";
-import { PLATFORM_HOTEL_DESCRIPTION } from "../../src/shared/platform-hotel-rules.js";
+import { PLATFORM_HOTEL_DESCRIPTION, PLATFORM_HOTEL_MODEL_TOKEN } from "../../src/shared/platform-hotel-rules.js";
 
 test("HOTEL_TIER_VALUES 不含旧 /-5；/-38 是当前唯一 5 钻枚举", () => {
   assert.equal(HOTEL_TIER_VALUES.includes(LEGACY_FIVE_DIAMOND_HOTEL_TIER as never), false);
@@ -55,6 +55,14 @@ test("骨架接受平台自动匹配说明，不将三四五钻规则误判为�
   assert.equal(result.ok, true);
   if (result.ok) assert.deepEqual(result.value, { pickupCity: "西安", transport: "charter" });
   assert.equal(input.hotelTier, PLATFORM_HOTEL_DESCRIPTION);
+});
+
+test("骨架兼容模型的平台自动匹配标记，并且不把它保存成 hotelTier", () => {
+  const result = sanitiseModuleValue("skeleton", {
+    hotelTier: PLATFORM_HOTEL_MODEL_TOKEN, pickupCity: "拉萨", transport: "charter",
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.value, { pickupCity: "拉萨", transport: "charter" });
 });
 
 test("normaliseProductDraft 把旧的 /-5 字段归一为 /-38；保留 /-38", () => {

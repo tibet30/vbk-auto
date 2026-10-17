@@ -53,6 +53,24 @@ VBK 只在只读校验步骤（`checkTourDaily` saveType=8/3）判定行程文�
 4. 平台驳回的词写入 `vbk_copy_feedback(module='itinerary')`：既用于提交前的预防性改写，也进入 itinerary 阶段的生成提示，避免重复踩同一个词。
 5. 旧版本留下的 `uncertain + 空回执 + 校验驳回文案` 状态，只有在只读核查（`recoverValidationOnlyReview`）用完整方案回读证明远端草稿未变化后，才回落为可重试边界。
 
+## 交通子产品行程文案被平台驳回时的自动修复
+
+子产品行程有自己的写前校验：`ensureTrafficLineItinerary` 的 `校验子产品行程交通`（saveType=8）、`保存子产品行程交通`（saveType=3），以及线路匹配审核的 `线路匹配审核前行程校验`（saveType=3）。这些校验都在写入之前，因此同样必须自愈，而不是把子产品标成未完成：
+
+1. `traffic-line/itinerary-copy-repair.ts` 只识别上述三个标签的 Ack 失败，解析平台点名的词，定位 VBK 行程详情里的自由文案字段（天标题 `dailyDescription` / 天补充说明 `subDesc` / 卡片 `description`、`warmTips`、`specialGift`）。景点、酒店、交通实体身份与结构字段不在可改写范围内。
+2. 命中时调用行程专属 AI 改写器（`ctx.itineraryCopyRewriter`，经 `fill-map` 注入为 `copyRepair`）定点重写，就地重试同一校验/保存；`execute` 在第一次真实远端写入前调用 `markWrite`，已派发写入后的失败保持原有失败语义（子产品标记未完成、继续其它子产品）。
+3. 线路匹配审核走同一闭环：改写命中载荷后重试同一授权提交，不扩大授权范围。
+4. 平台点名的词同样写入 `vbk_copy_feedback(module='itinerary')`，进入行程生成与提交前预防性改写。
+
+## 基本信息文案被平台驳回时的自动修复
+
+`saveProductBaseInfo` 会在 Ack=Failure 详情里点名「操作说明 / 副标题」中的非法关键词（例如 `300019:操作说明存在非法关键词：冈仁波齐`）。DOM 路径原本已有 `repairBasicInfoIllegalKeywords`，但自动录入走 API 路径，此前没有任何修复，阶段直接 `needs_user`：
+
+1. `basic-info-copy-repair.ts` 解析平台点名的字段与词，只用 `stripBasicInfoIllegalKeywords` 清理 `basicInfo.operationNotes` / `basicInfo.subtitle` 这两个自由文案字段，落库后重试保存；预算 3 轮，命中词不在可清理字段内或清理后为空时如实上抛。
+2. 接线在 `runtime/basic.ts` 的 API 执行器外层（`runBasicInfoSaveWithCopyRepair`），两种保存路径（供应商编号重算、常规重填）共用。
+3. 平台点名的词写入 `vbk_copy_feedback(module='basicInfo')`：既用于下次保存前的预防性清理，也进入 basicInfo 阶段的生成提示。
+4. 只清理平台明确点名的词，不改名称、城市、编号、景区 ID 等其他字段，也不放宽回读验收。
+
 ## 验证范围
 
 核心测试覆盖恢复决策、共享队列和授权传递、取消检查点、锁释放、诊断历史、产品壳交接及真实临时 SQLite 持久化读回。

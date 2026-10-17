@@ -4,6 +4,9 @@ import {
   approvedRecoveryStartPhase, canRestartPreWriteAuthorizationFailure,
   failedAutomationResumePhase, interruptedAutomationResumePhase, isVerifiedAutomationComplete,
 } from "../automation.main.resume-phase.js";
+import { draftPhasesFor } from "../automation.main.phases.js";
+import { parseProduct } from "../../schema/schema.js";
+import { staleCompletedEntryPhases } from "../changed-plan-phase-recovery.js";
 
 export type ApprovedWorkflowPlan =
   | { kind: "complete" }
@@ -34,8 +37,19 @@ export function automationStartPhase(product: ProductDetail | undefined): string
 }
 
 export function approvedWorkflowPlan(product: ProductDetail, replayOfAutomationRunId?: string,
-  generateTrafficChildren = false, itineraryReviewPending = false): ApprovedWorkflowPlan {
+  generateTrafficChildren = false, itineraryReviewPending = false,
+  legacyPlanChanged = false): ApprovedWorkflowPlan {
   if (product.automation?.id && replayOfAutomationRunId === product.automation.id) return { kind: "run" };
+  const hasPhaseFingerprints = product.automation?.phases.some((phase) => Boolean(phase.inputFingerprint)) === true;
+  if (product.automation?.status === "succeeded" && !itineraryReviewPending
+    && generateTrafficChildren && needsTrafficLineBackfill(product)
+    && !hasPhaseFingerprints && !legacyPlanChanged) return { kind: "traffic-backfill" };
+  if (product.automation?.status === "succeeded") {
+    const phases = draftPhasesFor(parseProduct(product.product))
+      .filter((phase) => phase !== "trafficLine" || generateTrafficChildren);
+    const stale = staleCompletedEntryPhases(product, phases, legacyPlanChanged);
+    if (stale.length) return { kind: "run", retryFrom: stale[0] };
+  }
   if (itineraryReviewPending && isVerifiedAutomationComplete(product)) return { kind: "run", retryFrom: "preflight" };
   if (itineraryReviewPending && product.productId
     && /^VBK 菜单尚未解锁/u.test(product.automation?.recovery?.phases.preflight?.finalError ?? "")) {

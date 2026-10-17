@@ -48,6 +48,7 @@ import {
 } from "../../ctrip/product-menu-readback.js";
 import { itineraryReviewRequestSource } from "../../../operations/itinerary-review-request-source.js";
 import type { AutomationRunContext } from "../automation.main.context.js";
+import { prepareChangedPlanPhaseRecovery } from "../changed-plan-phase-recovery.js";
 
 type AutomationLogLevel = "info" | "warning" | "error";
 
@@ -157,6 +158,8 @@ export async function prepareAutomationSetup(
       if (startIndex < 0) throw new Error("VBK 向导恢复阶段不在当前产品录入计划中。");
       wizardAdvanceOnly = recovery.wizardAdvanceOnly;
       run = recovery.run;
+    } else if (productDetail.automation?.status === "succeeded") {
+      run = prepareChangedPlanPhaseRecovery(productDetail, draftPhases, mutableRetryFrom);
     } else {
       run = prepareAutomationResumeRun(productDetail.automation!, draftPhases, mutableRetryFrom);
     }

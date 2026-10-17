@@ -16,6 +16,7 @@ import {
   failedAutomationResumePhase,
 } from "./automation.main.resume-phase.js";
 import { automationStartPhase, approvedWorkflowPlan } from "./runtime/workflow-plan.js";
+import { approvalFollowsChangedPlan } from "./changed-plan-approval.js";
 import { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
 import { itineraryReviewUnlockApproval } from "../../../shared/itinerary-review-approval.js";
 import type { WizardStageRetryPhase } from "../../../shared/wizard-stage-retry.js";
@@ -188,7 +189,8 @@ export class DraftAutomation {
       || reviewState.approvalId !== reviewApproval.id || reviewState.agentRunId !== agent.run.id));
     const plan = approval.trafficChildrenOnly ? { kind: "traffic-backfill" as const }
       : approvedWorkflowPlan(product, approval.replayOfAutomationRunId,
-        approval.generateTrafficChildren === true, reviewPending);
+        approval.generateTrafficChildren === true, reviewPending,
+        approvalFollowsChangedPlan(product, agent, approval));
     if (plan.kind === "complete") return;
     if (plan.kind === "traffic-backfill") {
       await this.runApprovedBackfillLocked(localProductId);

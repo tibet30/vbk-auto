@@ -11,6 +11,7 @@
 .taskStrip:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 .taskSummary { min-width: 0; max-width: min(42vw, 460px); display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
+.taskSummary[data-compact='true'] { max-width: none; }
 .taskSummary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
 .summaryIcon { width: 20px; height: 20px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 6px; color: var(--muted-foreground); background: var(--muted); }
 .taskSummary[data-status='running'] .summaryIcon { color: var(--ai-teal); background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface)); }

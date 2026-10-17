@@ -13,7 +13,7 @@ test("行程 POI 编辑器必须通过 VBK suggestPoi 搜索并经 updateReviewF
   assert.match(source, /spotIndex: item\.spotIndex/);
 });
 
-test("已匹配 POI 仍保留编辑按钮，并展示候选省市地址", () => {
+test("已匹配 POI 仍保留编辑按钮，并在下拉候选中展示省市地址", () => {
   assert.match(source, /hasPoi \? formatMatchedPoiLabel\(item\)/);
   assert.match(source, /title=\{`编辑 \$\{item\.title\} 的 VBK POI`\}/);
   assert.match(source, /formatPoiRegion/);
@@ -28,10 +28,9 @@ test("已匹配 POI 仍保留编辑按钮，并展示候选省市地址", () => 
   assert.match(source, /地域未知/);
   assert.doesNotMatch(source, /可选择/);
   assert.doesNotMatch(source, /candidate\.poiId \?\? "无 poiId"/);
-  // 候选卡片若裁剪溢出，会裁掉省市区域行。
-  const resultBlock = stylesSource.match(/\.result\s*\{[^}]*\}/s)?.[0] ?? "";
-  assert.match(resultBlock, /\.result\s*\{/);
-  assert.doesNotMatch(resultBlock, /overflow\s*:/);
+  assert.match(source, /<Select[\s\S]*aria-label="选择 VBK POI"/);
+  assert.match(source, /\{candidate\.poiName\} · \{formatCandidateLocation\(candidate\)\}/);
+  assert.match(stylesSource, /\.candidateSelect\s*\{[\s\S]*width:\s*100%/);
 });
 
 test("已匹配文案在有行政区时展示斜杠区域，无行政区时只显示名称", () => {
@@ -43,9 +42,10 @@ test("搜索中输入框仍可编辑，避免映射耗时导致卡住感", () =>
   assert.match(source, /正在搜索 VBK POI/);
 });
 
-test("行程 POI 编辑器仅供人工兜底：保留全部候选但不自动选择或写回", () => {
+test("行程 POI 编辑器仅供人工兜底：下拉只展示可选候选且不自动选择或写回", () => {
   assert.equal(source.includes("setSelected(next)"), false);
-  assert.match(source, /detail\.candidates\.map\(\(candidate\)/);
+  assert.match(source, /detail\?\.candidates\.filter\(\(candidate\) => candidate\.selectable\)/);
+  assert.match(source, /selectableCandidates\.map\(\(candidate\)/);
   assert.match(source, /setSelected\(candidate\);/);
   assert.match(source, /disabled=\{loading !== null \|\| !selected\?\.selectable\}/);
   assert.doesNotMatch(source, /next\.autoSelection/);
@@ -63,9 +63,9 @@ test("POI 保存成功后广播产品更新并退出保存态", () => {
   assert.match(source, /finally\s*\{\s*setLoading\(null\);\s*\}/);
 });
 
-test("无合法 poiName/poiId 的候选只能查看，不能作为保存目标", () => {
-  assert.match(source, /data-selectable=\{candidate\.selectable\}/);
-  assert.match(source, /disabled=\{!candidate\.selectable \|\| loading !== null\}/);
+test("无合法 poiName/poiId 的候选不进入下拉，也不能作为保存目标", () => {
+  assert.match(source, /selectableCandidates = detail\?\.candidates\.filter\(\(candidate\) => candidate\.selectable\) \?\? \[\]/);
+  assert.doesNotMatch(source, /detail\.candidates\.map\(\(candidate\)/);
   assert.match(source, /if \(!selected\?\.selectable \|\| !selected\.poiName \|\| !selected\.poiId \|\| !api\(\)\) return;/);
 });
 

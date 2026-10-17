@@ -24,13 +24,16 @@ function Fixture() {
     view: "workspace", currentAccountName: "示例账号", accountMenuOpen: false, setProduct() {}, setView() {}, setAccountMenuOpen() {}, vbkLogin: { loggedIn: true },
   } as unknown as AppModel;
   Object.assign(window, { stageFixture: { setStatus, setSaved, setReady } });
-  return <main style={{ height: "100vh", display: "flex", flexDirection: "column", minWidth: 0 }}>
-    <AppTopbar model={model} />
-    <AppStageNav model={model} />
-    <section role="tabpanel" id={`stage-panel-${stage}`} aria-labelledby={`stage-${stage}`} className={layout.stageSplit} style={{ gridTemplateColumns: "1fr 1fr" }}>
-      <section className={layout.panel}><div className={layout.panelHeader}><strong>{stage === "review" ? "方案协作" : "审查结果汇总"}</strong></div><div style={{ padding: 16 }}>产品详情内容区</div></section>
-      <section className={layout.panel}>{stage === "review" ? <AppWorkspaceReviewSummaryHead viewMode={mode} onChangeViewMode={setMode} /> : <div className={layout.panelHeader}><strong>VBK 浏览器</strong></div>}<div id="summary-view-panel" style={{ padding: 16 }}>{mode === "cards" ? "基本信息 / 每日行程 / 资源" : "JSON 产品数据"}</div></section>
-    </section>
+  return <main style={{ height: "100vh", display: "grid", gridTemplateColumns: "var(--rail) minmax(0, 1fr)", minWidth: 0 }}>
+    <aside data-testid="fixture-rail" style={{ borderRight: "1px solid var(--border)", background: "var(--surface)" }} />
+    <div style={{ display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+      <AppTopbar model={model} />
+      <AppStageNav model={model} />
+      <section role="tabpanel" id={`stage-panel-${stage}`} aria-labelledby={`stage-${stage}`} className={layout.stageSplit} style={{ gridTemplateColumns: "1fr 1fr" }}>
+        <section className={layout.panel}><div className={layout.panelHeader}><strong>{stage === "review" ? "方案协作" : "审查结果汇总"}</strong></div><div style={{ padding: 16 }}>产品详情内容区</div></section>
+        <section className={layout.panel}>{stage === "review" ? <AppWorkspaceReviewSummaryHead viewMode={mode} onChangeViewMode={setMode} /> : <div className={layout.panelHeader}><strong>VBK 浏览器</strong></div>}<div id="summary-view-panel" style={{ padding: 16 }}>{mode === "cards" ? "基本信息 / 每日行程 / 资源" : "JSON 产品数据"}</div></section>
+      </section>
+    </div>
   </main>;
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);

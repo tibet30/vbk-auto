@@ -44,7 +44,6 @@
 
 .iconButton:focus-visible,
 .actionButton:focus-visible,
-.resultChoice:focus-visible,
 .saveButton:focus-visible,
 .input:focus-visible {
   outline: none;
@@ -52,8 +51,7 @@
 }
 
 .actionButton:disabled,
-.saveButton:disabled,
-.resultChoice:disabled {
+.saveButton:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -84,71 +82,18 @@
   font-size: var(--fs-xs);
 }
 
-.results {
-  display: grid;
-  gap: 5px;
-  max-height: 260px;
-  overflow: auto;
-}
-
-.result {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--ai-teal) 34%, var(--border));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--ai-teal) 5%, var(--surface));
-  color: var(--foreground);
-  font: inherit;
-  font-size: var(--fs-xs);
-  text-align: left;
-}
-
-.result[data-selected='true'] {
-  border-color: var(--ai-teal);
-  background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface));
-}
-
-.result[data-selectable='false'] {
-  border-color: var(--border);
-  background: color-mix(in srgb, var(--muted-foreground) 5%, var(--surface));
-}
-
-.resultChoice {
-  min-width: 0;
-  width: 100%;
-  padding: 7px 8px;
-  color: inherit;
-  text-align: left;
-}
-
-.resultChoice:not(:disabled):hover {
-  background: color-mix(in srgb, var(--ai-teal) 7%, transparent);
-}
-
-.resultHead {
+.candidateField {
   min-width: 0;
   display: grid;
-  grid-template-columns: 14px auto minmax(0, 1fr);
+  grid-template-columns: 14px minmax(0, 1fr);
   gap: 6px;
   align-items: center;
+  color: var(--ai-teal);
 }
 
-.resultName {
+.candidateSelect {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resultLocation {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted-foreground);
-  font-size: 11px;
-  line-height: 1.35;
+  width: 100%;
 }
 
 .error {

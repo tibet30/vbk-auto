@@ -34,6 +34,7 @@ export function WorkflowTaskSummary({ task, compact = false }: { task: ProductWo
       id={compact ? undefined : "workflow-task-status"}
       className={styles.taskSummary}
       data-status={task.status}
+      data-compact={compact}
       role="status"
       aria-live="polite"
       aria-atomic="true"

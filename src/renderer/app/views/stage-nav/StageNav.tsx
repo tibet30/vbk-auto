@@ -1,16 +1,11 @@
-import { Check, CircleHelp, LoaderCircle, Sparkles } from "lucide-react";
 import type { AppModel } from "../../app.main.model";
-import { WorkflowTaskSummary } from "../workflow-task/TaskStrip";
-import { StageTaskDetails } from "./StageTaskDetails";
 import { formatCostLabel, formatTokens } from "../workspace/planning-usage-format";
 import styles from "./StageNav.module.less";
 
 /** Product stages and authoritative status share one compact toolbar. */
 export function AppStageNav({ model }: { model: AppModel }) {
-  const { product, stage, openStage, reviewStepStatus, vbkStageStatus, currentWorkflowTask } = model;
+  const { product, stage, openStage, reviewStepStatus, vbkStageStatus } = model;
   if (!product) return null;
-  const taskActive = currentWorkflowTask && currentWorkflowTask.status !== "succeeded";
-  const saved = vbkStageStatus.tone === "saved";
   const usage = product.aiUsage?.lifetime;
   const usageCost = formatCostLabel(usage?.estimatedCostCny);
   const reviewLabel = reviewStepStatus === "passed"
@@ -44,13 +39,6 @@ export function AppStageNav({ model }: { model: AppModel }) {
         <span>{usage.tokensIncomplete || usage.totalTokens === null ? "Token 未返回" : `${formatTokens(usage.totalTokens)} Token`}</span>
         {usageCost && <span>· {usageCost}</span>}
       </span>}
-      <div id="workflow-task-status" className={styles.stageNavSummary} data-tone={taskActive ? currentWorkflowTask.status : vbkStageStatus.tone} role="status" aria-live="polite" tabIndex={-1}>
-        {taskActive ? <WorkflowTaskSummary task={currentWorkflowTask} compact /> : <>
-          {saved ? <Check size={14} /> : vbkStageStatus.tone === "running" ? <LoaderCircle size={14} /> : stage === "review" ? <Sparkles size={14} /> : <CircleHelp size={14} />}
-          <span>{saved ? "草稿已保存 · 未发布" : stage === "review" ? model.productCompletionLabel : vbkStageStatus.label}</span>
-        </>}
-      </div>
-      <StageTaskDetails key={product.id} model={model} reviewLabel={reviewLabel} />
     </div>
   </div>;
 }

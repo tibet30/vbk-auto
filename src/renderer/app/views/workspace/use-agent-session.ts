@@ -59,7 +59,8 @@ export function useAgentSession(localProductId: string, client: VbkApi | undefin
         if (next.localProductId === localProductId) apply();
       });
       apply();
-      const refresh = () => { void workspaceSnapshots.read(client, localProductId).then(apply)
+      const refresh = () => { void client.agent.get(localProductId)
+        .then(() => workspaceSnapshots.read(client, localProductId)).then(apply)
         .catch(reason => { if (alive) setError(reason instanceof Error ? reason.message : '无法读取协作记录'); }); };
       refresh();
       window.addEventListener('focus', refresh);

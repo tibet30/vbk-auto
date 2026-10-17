@@ -5,6 +5,8 @@ import { PRODUCT_FORM_LABELS, type ProductForm } from "../../../../shared/produc
 import { replacementDraftProductId } from "../../../../shared/product-replacement.js";
 import shared from "../shared.module.less";
 import { AccountPopover } from "./AccountPopover";
+import { StageTaskDetails } from "../stage-nav/StageTaskDetails";
+import { WorkflowTaskSummary } from "../workflow-task/TaskStrip";
 import styles from "./Topbar.module.less";
 
 /**
@@ -32,6 +34,7 @@ export function AppTopbar({ model }: { model: AppModel }) {
   const showProductTools = Boolean(product) && view === "workspace";
   const productForm = product ? ((Object.entries(PRODUCT_FORM_LABELS).find(([, label]) => product.name.endsWith(label))?.[0] ?? "privateTour") as ProductForm) : null;
   const replacementProductId = replacementDraftProductId(product);
+  const currentTask = model.currentWorkflowTask?.status === "succeeded" ? null : model.currentWorkflowTask;
 
   // 非工作台视图下，顶栏左侧显示当前页面名，比写死"VBK Desktop"更符合 macOS
   // 顶栏语义（顶栏 = 当前文档/视图名）。工作台视图下保持原产品面包屑。
@@ -60,12 +63,16 @@ export function AppTopbar({ model }: { model: AppModel }) {
             >
               <strong className={styles.title}>{product.name}</strong>
               <CopyableId value={product.id} className={styles.copyableIdTopbar} />
-              <span className={styles.crumbState} data-state={replacementProductId ? "ok" : statusTone(product.status)}>
-                <span className={shared.dot} data-state={replacementProductId || product.status === "draft_saved" ? "ok" : product.status === "blocked" ? "warn" : "ai"} />
-                {replacementProductId ? `已由新草稿 ${replacementProductId} 接管`
-                  : product.status === "review" && model.productCompletionLabel === "可录入 VBK 草稿 · 禁止上架"
-                  ? model.productCompletionLabel : statusLabel(product.status)}
-              </span>
+              <StageTaskDetails key={product.id} model={model}>
+                {currentTask ? <WorkflowTaskSummary task={currentTask} compact /> : (
+                  <span className={styles.crumbState} data-state={replacementProductId ? "ok" : statusTone(product.status)}>
+                    <span className={shared.dot} data-state={replacementProductId || product.status === "draft_saved" ? "ok" : product.status === "blocked" ? "warn" : "ai"} />
+                    {replacementProductId ? `已由新草稿 ${replacementProductId} 接管`
+                      : product.status === "review" && model.productCompletionLabel === "可录入 VBK 草稿 · 禁止上架"
+                      ? model.productCompletionLabel : statusLabel(product.status)}
+                  </span>
+                )}
+              </StageTaskDetails>
             </span>
           </>
         ) : viewTitle ? (

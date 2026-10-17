@@ -5,7 +5,7 @@ import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
 import { chromium } from "playwright";
 
-test("紧凑双行：阶段、任务详情、异常、JSON 和窄屏可用", async () => {
+test("顶部统一状态：阶段、任务详情、异常、JSON 和窄屏可用", async () => {
   const server = await createServer({ configFile: false, root: process.cwd(), plugins: [react()], server: { host: "127.0.0.1", port: 0 }, logLevel: "error" });
   await server.listen();
   const browser = await chromium.launch({ headless: true });
@@ -19,7 +19,8 @@ test("紧凑双行：阶段、任务详情、异常、JSON 和窄屏可用", asy
       assert.ok((await tab.boundingBox())!.height >= 44, "阶段 Tab 的点击高度至少为 44px");
     }
     assert.equal(await page.locator("#workflow-task-status").count(), 1);
-    assert.equal(await page.getByText("草稿已保存 · 未发布", { exact: true }).isVisible(), true);
+    assert.equal(await page.locator("header #workflow-task-status").count(), 1, "唯一权威状态位于顶部产品栏");
+    assert.equal(await page.getByText("草稿已保存", { exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("progressbar").count(), 0);
     const details = page.locator("details");
     assert.equal(await details.evaluate(node => (node as HTMLDetailsElement).open), false);
@@ -41,18 +42,24 @@ test("紧凑双行：阶段、任务详情、异常、JSON 和窄屏可用", asy
     await page.evaluate(() => (window as any).stageFixture.setStatus("running"));
     await page.getByRole("progressbar", { name: "后台任务进度" }).waitFor();
     assert.equal(await page.getByRole("progressbar").getAttribute("aria-valuenow"), "42");
+    assert.equal(await page.locator("#workflow-task-status").getByText("后台任务进行中", { exact: true }).isVisible(), true);
+    assert.equal(await page.getByText("草稿已保存", { exact: true }).count(), 0, "运行中任务优先于产品业务状态");
     await page.evaluate(() => (window as any).stageFixture.setStatus("failed"));
     await page.locator("#workflow-task-status").getByText("后台任务执行失败", { exact: true }).waitFor();
     assert.equal(await details.evaluate(node => (node as HTMLDetailsElement).open), false, "任务失败不自动展开详情");
     await page.locator("summary").click();
     await page.getByText("资源核验失败，请补充景点信息后继续。", { exact: true }).waitFor();
     assert.equal(await details.evaluate(node => (node as HTMLDetailsElement).open), true);
+    const railBox = await page.getByTestId("fixture-rail").boundingBox();
+    const popoverBox = await page.locator("#workflow-task-details-popover").boundingBox();
+    assert.ok(railBox && popoverBox && popoverBox.x >= railBox.x + railBox.width, "任务详情弹层不得进入侧栏裁切区");
     await page.locator("summary").click();
     await page.evaluate(() => (window as any).stageFixture.setStatus("needs_attention"));
     await page.locator("#workflow-task-status").getByText("后台任务等待处理", { exact: true }).waitFor();
     assert.equal(await details.evaluate(node => (node as HTMLDetailsElement).open), false, "等待处理不自动展开详情");
     await page.evaluate(() => { (window as any).stageFixture.setStatus("succeeded"); (window as any).stageFixture.setSaved(false); });
-    assert.equal(await page.getByText("草稿已保存 · 未发布", { exact: true }).count(), 0, "任务完成不代表草稿保存");
+    assert.equal(await page.getByText("草稿已保存", { exact: true }).count(), 0, "任务完成不代表草稿保存");
+    assert.equal(await page.locator("header").getByText("等待确认", { exact: true }).isVisible(), true);
     await page.evaluate(() => (window as any).stageFixture.setReady(false));
     await page.getByText("2 项待处理", { exact: true }).waitFor();
     await page.setViewportSize({ width: 390, height: 844 });

@@ -39,10 +39,14 @@ test("产品详情优先展示实时任务更新，不被列表缓存覆盖", ()
 
 test("从任务进入详情时定位对应阶段并聚焦状态", () => {
   const action = read("src/renderer/app/actions/product.ts");
-  const strip = read("src/renderer/app/views/stage-nav/StageNav.tsx");
+  const topbar = read("src/renderer/app/views/shell/Topbar.tsx");
+  const details = read("src/renderer/app/views/stage-nav/StageTaskDetails.tsx");
+  const stageNav = read("src/renderer/app/views/stage-nav/StageNav.tsx");
   assert.match(action, /task\.stage === "automation" \|\| task\.stage === "completed" \? "vbk" : "review"/);
   assert.match(action, /getElementById\("workflow-task-status"\)\?\.focus\(\)/);
-  assert.match(strip, /id="workflow-task-status"[\s\S]*tabIndex=\{-1\}/);
+  assert.match(topbar, /<StageTaskDetails[^>]*model=\{model\}>[\s\S]*<WorkflowTaskSummary task=\{currentTask\} compact/);
+  assert.match(details, /summary id="workflow-task-status"/);
+  assert.doesNotMatch(stageNav, /workflow-task-status|WorkflowTaskSummary/);
 });
 
 test("方案对话展示自动录入 recovery 中的完整报错详情", () => {

@@ -1,6 +1,7 @@
 import { Check, MapPin, Pencil, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../helpers";
+import { Select } from "../../helpers/Select";
 import type { PoiSuggestCandidate, PoiSuggestDetailResult, PoiSuggestLogContext } from "../../../../shared/contracts";
 import type { ItineraryTimelineSpotItem } from "./review-summary-itinerary-types";
 import { formatPoiRegion } from "./review-summary-itinerary-types";
@@ -32,6 +33,7 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
   const [selected, setSelected] = useState<PoiSuggestCandidate | null>(null);
   const [loading, setLoading] = useState<"search" | "save" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const selectableCandidates = detail?.candidates.filter((candidate) => candidate.selectable) ?? [];
   const logContext = (extra: Partial<PoiManualLogContext> = {}): PoiManualLogContext => ({
     localProductId,
     dayIndex: item.dayIndex,
@@ -234,40 +236,33 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
           <X size={12} aria-hidden="true" />
         </button>
       </div>
-      {detail && detail.candidates.length > 0 && (
-        <div className={styles.results} aria-label="VBK POI 候选列表">
-          {detail.candidates.map((candidate) => (
-            <div
-              key={`${candidate.index}-${candidate.poiId ?? "view"}`}
-              className={styles.result}
-              data-selected={selected?.index === candidate.index}
-              data-selectable={candidate.selectable}
-            >
-              <button
-                type="button"
-                className={styles.resultChoice}
-                disabled={!candidate.selectable || loading !== null}
-                aria-pressed={selected?.index === candidate.index}
-                onClick={() => {
-                  if (!candidate.selectable) return;
-                  setSelected(candidate);
-                  logPoiManual("select_result", logContext({
-                    poiName: candidate.poiName ?? undefined,
-                    poiId: candidate.poiId ?? undefined,
-                  }));
-                }}
-              >
-                <span className={styles.resultHead}>
-                  <MapPin size={12} aria-hidden="true" />
-                  <span className={styles.resultName}>{candidate.poiName || "未返回 poiName"}</span>
-                  <span className={styles.resultLocation} aria-label="候选区域信息">
-                    {formatCandidateLocation(candidate)}
-                  </span>
-                </span>
-              </button>
-            </div>
-          ))}
-        </div>
+      {selectableCandidates.length > 0 && (
+        <label className={styles.candidateField}>
+          <MapPin size={12} aria-hidden="true" />
+          <Select
+            className={styles.candidateSelect}
+            controlSize="compact"
+            value={selected?.index ?? ""}
+            disabled={loading !== null}
+            aria-label="选择 VBK POI"
+            onChange={(event) => {
+              const candidate = selectableCandidates.find((item) => item.index === Number(event.target.value));
+              if (!candidate) return;
+              setSelected(candidate);
+              logPoiManual("select_result", logContext({
+                poiName: candidate.poiName ?? undefined,
+                poiId: candidate.poiId ?? undefined,
+              }));
+            }}
+          >
+            <option value="" disabled>选择匹配的 VBK POI</option>
+            {selectableCandidates.map((candidate) => (
+              <option key={`${candidate.index}-${candidate.poiId}`} value={candidate.index}>
+                {candidate.poiName} · {formatCandidateLocation(candidate)}
+              </option>
+            ))}
+          </Select>
+        </label>
       )}
       {error && <p className={styles.error}>{error}</p>}
       <button

@@ -7,25 +7,22 @@
 .stageStepIndex { font-size: inherit; font-variant-numeric: tabular-nums; }
 .stageIssueCount { color: var(--warning); font-size: var(--fs-xs); }
 .usageMetric { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--muted-foreground); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.usageMetric + .stageNavSummary { margin-left: 8px; }
 .stageStep[data-status='passed'] .stageStepIndex, .stageStep[data-status='saved'] .stageStepIndex { color: var(--success); }
-.stageNavSummary { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; color: var(--muted-foreground); font-size: var(--fs-xs); }
-.stageNavSummary[data-tone='saved'] { color: var(--success); }
-.stageNavSummary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.taskDetails { display: contents; }
-.taskDetails > summary { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 8px; border-radius: var(--radius-sm); color: var(--muted-foreground); font-size: var(--fs-xs); cursor: pointer; list-style: none; }
-.taskDetails[open]::details-content { flex: 1 0 100%; min-width: 0; }
+.taskDetails { position: relative; min-width: 0; flex: 0 1 auto; }
+.taskDetails > summary { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding-left: 8px; border-left: 1px solid var(--border); color: var(--muted-foreground); cursor: pointer; list-style: none; }
 .taskDetails > summary::-webkit-details-marker { display: none; }
-.taskDetails > summary:hover { background: var(--muted); color: var(--foreground); }
-.taskDetails[open] > summary svg { transform: rotate(180deg); }
-.detailsBody { flex: 1 0 100%; min-width: 0; max-height: 36vh; overflow: auto; border-top: 1px solid var(--border); }
-.detailsBody p { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; color: var(--muted-foreground); font-size: var(--fs-xs); }
+.taskDetails > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: var(--radius-sm); }
+.taskDetails > summary:hover { color: var(--foreground); }
+.taskDetails[open] .taskDetailsChevron { transform: rotate(180deg); }
+.taskDetailsStatus { display: inline-flex; align-items: center; min-width: 0; }
+.taskDetailsChevron { flex: 0 0 auto; transition: transform 160ms ease; }
+.detailsBody { position: fixed; z-index: 40; top: calc(var(--topbar) + 6px); right: 12px; left: calc(var(--rail) + 12px); width: auto; max-width: 640px; max-height: min(70vh, 640px); margin-left: auto; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); box-shadow: 0 16px 36px rgb(9 9 11 / 14%); }
+.detailsBody p { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px var(--pad); color: var(--muted-foreground); font-size: var(--fs-xs); }
 .usageLabel { color: var(--foreground); }
 @media (max-width: 720px) {
   .toolbar { padding-inline: 8px; gap: 4px; }
-  .stageNavSummary { order: 3; flex: 1 1 auto; margin-left: 0; padding-bottom: 4px; }
   .usageMetric { order: 3; margin-left: 0; padding-bottom: 4px; }
-  .usageMetric + .stageNavSummary { margin-left: 4px; }
-  .taskDetails > summary { margin-left: auto; }
-  .taskDetails[open]::details-content { order: 4; }
+  .detailsBody { right: 8px; left: calc(var(--rail-compact) + 8px); max-height: calc(100vh - var(--topbar) - 14px); }
 }
+@media (min-width: 721px) and (max-width: 880px) { .detailsBody { left: calc(var(--rail-compact) + 12px); } }
+@media (prefers-reduced-motion: reduce) { .taskDetailsChevron { transition: none; } }

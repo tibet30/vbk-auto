@@ -69,7 +69,7 @@ export interface AgentCoreInternals {
   touch(run: AgentRun): void;
   running(snapshot: AgentSnapshot): void;
   waiting(snapshot: AgentSnapshot, status: "waiting_input" | "waiting_approval"): void;
-  pauseRun(snapshot: AgentSnapshot, content: string): void;
+  pauseRun(snapshot: AgentSnapshot, content: string, data?: Record<string, unknown>): void;
   terminal(status: AgentRunStatus): boolean;
   intent(id: string): Promise<string>;
 }
@@ -155,7 +155,9 @@ export class AgentCore {
   private touch(run: AgentRun): void { this.snapshots.touch(run); }
   private running(snapshot: AgentSnapshot): void { this.snapshots.running(snapshot); }
   private waiting(snapshot: AgentSnapshot, status: "waiting_input" | "waiting_approval"): void { this.snapshots.waiting(snapshot, status); }
-  private pauseRun(snapshot: AgentSnapshot, content: string): void { this.snapshots.pause(snapshot, content); }
+  private pauseRun(snapshot: AgentSnapshot, content: string, data?: Record<string, unknown>): void {
+    this.snapshots.pause(snapshot, content, data);
+  }
   private terminal(status: AgentRunStatus): boolean { return this.snapshots.terminal(status); }
   private async intent(id: string): Promise<string> {
     const product = await this.deps.productFingerprint?.(id) ?? "local";

@@ -42,6 +42,7 @@ export const settingsMethods = {
   },
   recordCopyFeedback(this: { db: Database.Database }, entry: Parameters<typeof copyFeedback.recordCopyFeedback>[1]) { copyFeedback.recordCopyFeedback(this.db, entry); },
   listRejectedItineraryWords(this: { db: Database.Database }) { return copyFeedback.listRejectedItineraryWords(this.db); },
+  listRejectedBasicInfoWords(this: { db: Database.Database }) { return copyFeedback.listRejectedBasicInfoWords(this.db); },
   getPresentationCopyRecovery(this: { db: Database.Database }, id: string) { return copyFeedback.getPresentationCopyRecovery(this.db, id); },
   savePresentationCopyRecovery(this: { db: Database.Database }, id: string, entry: Parameters<typeof copyFeedback.savePresentationCopyRecovery>[2]) { copyFeedback.savePresentationCopyRecovery(this.db, id, entry); },
   setSetting(this: { db: Database.Database }, key: string, value: string) { setSetting(this.db, key, value); },

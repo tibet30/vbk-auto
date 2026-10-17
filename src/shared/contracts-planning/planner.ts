@@ -43,6 +43,7 @@ import type {
   StagePersistedState,
 } from "./state.js";
 import type { ResearchTaskProposal } from "./modules.js";
+import type { RecommendationCategoryPolicy } from "../recommendation-category-policy.js";
 
 export interface ThreeStagePlanningAi {
   structureLocation(request: PlanningLocationRequest): Promise<PlanningLocation>;
@@ -92,6 +93,8 @@ export interface PlannerContext {
   excludedItineraryAlternatives?: Array<{ day: number; names: string[] }>;
   /** 用户明确保存的少量长期偏好，按预算裁剪后注入。 */
   memoryContext?: MemoryPromptContext;
+  /** presentation 阶段从 VBK QConfig + 类别目录实时解析出的可用集合。 */
+  recommendationCategoryPolicy?: RecommendationCategoryPolicy;
   /** Provider / model 仅作为 transport 参数，schema / prompt 不依赖。 */
   transport: {
     providerLabel: string;

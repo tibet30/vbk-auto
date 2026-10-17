@@ -91,7 +91,7 @@ export class AgentSnapshotManager {
     this.event(snapshot, "status", status, { status });
   }
 
-  pause(snapshot: AgentSnapshot, content: string): void {
+  pause(snapshot: AgentSnapshot, content: string, data?: Record<string, unknown>): void {
     if (!snapshot.run) return;
     if (snapshot.run.status === "completed") {
       const stage = snapshot.stages?.at(-1);
@@ -101,7 +101,8 @@ export class AgentSnapshotManager {
     }
     snapshot.run.status = "paused";
     this.touch(snapshot.run);
-    this.event(snapshot, "status", content, { status: "paused" });
+    // Event state is authoritative; callers may attach context but cannot override it.
+    this.event(snapshot, "status", content, { ...(data ?? {}), status: "paused" });
   }
 
   finish(snapshot: AgentSnapshot, verified = false): void {

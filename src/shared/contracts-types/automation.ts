@@ -15,7 +15,12 @@ export interface AutomationRun {
   updatedAt?: string;
   status: TaskStatus;
   currentPhase?: string;
-  phases: Array<{ phase: string; status: "pending" | "running" | "completed" | "failed" }>;
+  phases: Array<{
+    phase: string;
+    status: "pending" | "running" | "completed" | "failed";
+    /** Planning input proven by this phase's authoritative remote readback. */
+    inputFingerprint?: string;
+  }>;
   logs: Array<{ at: string; message: string; level: "info" | "warning" | "error" }>;
   screenshot?: string;
   recovery?: { phases: Record<string, PhaseRecovery> };

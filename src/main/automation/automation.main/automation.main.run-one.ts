@@ -16,6 +16,7 @@ import { loadPlaceholderCoverAsset } from "../placeholder-cover-asset.js";
 import { buildFillMap } from "./automation.main.run-one/fill-map.js";
 import { buildBasicExecute } from "./runtime/basic.js";
 import { automationAccountContext, automationSession, executeDraftPhase, recoverDraftPhase } from "./runtime/index.js";
+import { stampCompletedEntryPhase } from "../../application/product-entry-phase-fingerprint.js";
 
 /** Repair only the selected module; preserve every other durable stage and child checkpoint. */
 export async function runOnePhase(ctx: AutomationRunContext, localProductId: string, phaseName: string) {
@@ -62,6 +63,10 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
     if (outcome.status === "needs_user" && phaseName !== "trafficLine") {
       session.fail(outcome.finalError ?? `阶段 ${phaseName} 未完成`, phaseName);
       return;
+    }
+    if (outcome.status === "completed") {
+      stampCompletedEntryPhase(run, productData as unknown as Record<string, unknown>, phaseName);
+      session.persist();
     }
     if (phaseName === "preflight" && outcome.status === "completed") {
       Object.assign(run, settleRunAfterVerifiedPreflight(run));

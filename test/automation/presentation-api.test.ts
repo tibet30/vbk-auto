@@ -11,7 +11,7 @@ function browserWithResponses(responses: Array<{ status: number; payload: unknow
     url: () => "https://vbooking.ctrip.com/product/input/productImageText?productId=77098084&pattern=4&from=vbk",
     async evaluate(_fn: unknown, args: { endpoint: string; body: unknown }) {
       calls.push({ endpoint: args.endpoint, body: args.body });
-      if (args.endpoint.endsWith("getProductBaseInfo")) return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, saleControlInfo: { pICategoryId: 1003, inputLocale: "zh-CN" } }, durationMs: 1, ctx: {} };
+      if (args.endpoint.endsWith("getProductBaseInfo")) return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, saleControlInfo: { pICategoryId: 1003, inputLocale: "zh-CN", productPatternID: 4 } }, durationMs: 1, ctx: {} };
       const next = responses.shift();
       if (!next) throw new Error("unexpected request");
       return {
@@ -39,21 +39,26 @@ function browserWithResponses(responses: Array<{ status: number; payload: unknow
 const presentation = {
   recommendation: "2天1晚私家团，专车专导慢游西安。",
   recommendations: [
-    { category: "优选行程", text: "2天串起西安古城中轴与临潼盛唐地标，行程节奏合理不赶路，体验更深入" },
+    { category: "缤纷体验", text: "2天串起西安古城中轴与临潼盛唐地标，行程节奏合理不赶路，体验更深入" },
     { category: "精选酒店", text: "入住钟楼/南门商圈当地5钻酒店，方便每日出行与休息，整体体验更舒适" },
-    { category: "缤纷景点", text: "覆盖城墙、钟鼓楼、兵马俑等核心景点，兼顾古建与人文，行程内容更丰富" },
+    { category: "服务保障", text: "覆盖城墙、钟鼓楼、兵马俑等核心景点，兼顾古建与人文，行程内容更丰富" },
   ],
   features: "<p><strong>私家团：</strong>专车专导。</p>",
 };
 
 function submissionResponses(save: unknown, features = presentation.features) {
   return [
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, pmRcmdCategories: [
-      { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
-      { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
-      { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
-    ] } },
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, info: {} } },
+    { status: 200, payload: { data: { scope: { recommendReason: {
+      enabled: true, patternIds: [1, 3, 4], localePatternIds: { "zh-CN": [1, 3, 4] }, categoryWhitelist: [1, 2, 3, 5, 15],
+    } } } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, pmRcmdCategories: [
+      { pmRcmdCategoryId: 1, pmRcmdCategoryName: "服务保障" },
+      { pmRcmdCategoryId: 2, pmRcmdCategoryName: "贴心赠送" },
+      { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
+      { pmRcmdCategoryId: 5, pmRcmdCategoryName: "特色美食" },
+      { pmRcmdCategoryId: 15, pmRcmdCategoryName: "缤纷体验" },
+    ] } },
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, sensitiveWords: [] } },
     { status: 200, payload: { ResponseStatus: { Ack: "Success" } } },
     { status: 200, payload: save },
@@ -92,7 +97,7 @@ test("success false 的非法词可恢复，一般 Warning 不伪装成敏感词
 
 test("HTTP 失败即使包含非法词也保持为 HTTP 错误", async () => {
   const responses = submissionResponses({ checkErrMsg: "非法关键词：江鲜" });
-  responses[4]!.status = 403;
+  responses[5]!.status = 403;
   await assert.rejects(savePresentationViaApi(browserWithResponses(responses) as never, presentation), /HTTP 403/);
 });
 
@@ -136,20 +141,9 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
       status: 200,
       payload: {
         ResponseStatus: { Ack: "Success" },
-        pmRcmdCategories: [
-          { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
-          { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
-          { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
-        ],
-      },
-    },
-    {
-      status: 200,
-      payload: {
-        ResponseStatus: { Ack: "Success" },
         info: {
           pmRcmdItems: [
-            { id: 1, pmRcmdCategoryId: 9, url: "" },
+            { id: 1, pmRcmdCategoryId: 15, url: "" },
             { id: 2, pmRcmdCategoryId: 3, url: "" },
           ],
           productDesc: { id: 77098084, isBindTravelInfo: true },
@@ -158,6 +152,12 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
         },
       },
     },
+    { status: 200, payload: { data: { scope: { recommendReason: { enabled: true, patternIds: [1, 3, 4], localePatternIds: { "zh-CN": [1, 3, 4] }, categoryWhitelist: [1, 2, 3, 5, 15] } } } } },
+    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, pmRcmdCategories: [
+      { pmRcmdCategoryId: 1, pmRcmdCategoryName: "服务保障" }, { pmRcmdCategoryId: 2, pmRcmdCategoryName: "贴心赠送" },
+      { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" }, { pmRcmdCategoryId: 5, pmRcmdCategoryName: "特色美食" },
+      { pmRcmdCategoryId: 15, pmRcmdCategoryName: "缤纷体验" },
+    ] } },
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, sensitiveWords: [] } },
     { status: 200, payload: { ResponseStatus: { Ack: "Success" } } },
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, success: true } },
@@ -167,9 +167,9 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
         ResponseStatus: { Ack: "Success" },
         info: {
           pmRcmdItems: [
-            { id: 1, pmRcmdCategoryId: 9, rcmdDesc: recommendationPlan[0].text },
+            { id: 1, pmRcmdCategoryId: 15, rcmdDesc: recommendationPlan[0].text },
             { id: 2, pmRcmdCategoryId: 3, rcmdDesc: recommendationPlan[1].text },
-            { id: 3, pmRcmdCategoryId: 5, rcmdDesc: recommendationPlan[2].text },
+            { id: 3, pmRcmdCategoryId: 1, rcmdDesc: recommendationPlan[2].text },
           ],
           productDesc: {
             id: 77098084,
@@ -190,14 +190,16 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
     savedWith: "presentation-api",
   });
 
-  assert.match(browser.calls[0].endpoint, /getpmrcmdcategory\.json$/);
+  assert.match(browser.calls[0].endpoint, /getProductBaseInfo$/);
   assert.match(browser.calls[1].endpoint, /getdescriptionInfo$/);
-  assert.match(browser.calls[3].endpoint, /checkSensitiveWord$/);
-  assert.match(browser.calls[4].endpoint, /createProductDraft$/);
-  assert.match(browser.calls[5].endpoint, /savedescriptioninfo$/);
-  assert.match(browser.calls[6].endpoint, /getdescriptionInfo$/);
+  assert.match(browser.calls[2].endpoint, /tripInputLimitConfig$/);
+  assert.match(browser.calls[3].endpoint, /getpmrcmdcategory\.json$/);
+  assert.match(browser.calls[4].endpoint, /checkSensitiveWord$/);
+  assert.match(browser.calls[5].endpoint, /createProductDraft$/);
+  assert.match(browser.calls[6].endpoint, /savedescriptioninfo$/);
+  assert.match(browser.calls[7].endpoint, /getdescriptionInfo$/);
 
-  const saveBody = browser.calls[5].body as any;
+  const saveBody = browser.calls[6].body as any;
   assert.equal(saveBody.dto.productId, 77098084);
   assert.equal(saveBody.dto.productDesc.productDesc, presentation.features);
   assert.equal(saveBody.dto.productDescNew, null);
@@ -211,57 +213,31 @@ test("产品图文接口保存：旧兼容富文本字段 + 推荐理由回读�
       sortOrder: item.sortOrder,
     })),
     [
-      { id: 1, pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程", rcmdDesc: recommendationPlan[0].text, sortOrder: 1 },
+      { id: 1, pmRcmdCategoryId: 15, pmRcmdCategoryName: "缤纷体验", rcmdDesc: recommendationPlan[0].text, sortOrder: 1 },
       { id: 2, pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店", rcmdDesc: recommendationPlan[1].text, sortOrder: 2 },
-      { id: undefined, pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点", rcmdDesc: recommendationPlan[2].text, sortOrder: 3 },
+      { id: undefined, pmRcmdCategoryId: 1, pmRcmdCategoryName: "服务保障", rcmdDesc: recommendationPlan[2].text, sortOrder: 3 },
     ],
   );
 });
 
 test("产品图文接口保存：敏感词命中时不创建草稿也不保存", async () => {
-  const browser = browserWithResponses([
-    {
-      status: 200,
-      payload: {
-        ResponseStatus: { Ack: "Success" },
-        pmRcmdCategories: [
-          { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
-          { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
-          { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
-        ],
-      },
-    },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, info: {} } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, sensitiveWords: ["首发"] } },
-  ]);
+  const responses = submissionResponses({ ResponseStatus: { Ack: "Success" }, success: true });
+  responses[3] = { status: 200, payload: { ResponseStatus: { Ack: "Success" }, sensitiveWords: ["首发"] } };
+  const browser = browserWithResponses(responses);
   await assert.rejects(
     savePresentationViaApi(browser as never, presentation),
     /产品图文触发敏感词/,
   );
-  assert.equal(browser.calls.length, 4);
+  assert.equal(browser.calls.length, 5);
 });
 
 test("产品图文接口保存：显式产品 ID 不读取页面 URL", async () => {
-  const browser = browserWithResponses([
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, pmRcmdCategories: [
-      { pmRcmdCategoryId: 9, pmRcmdCategoryName: "优选行程" },
-      { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
-      { pmRcmdCategoryId: 5, pmRcmdCategoryName: "缤纷景点" },
-    ] } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, info: {} } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, sensitiveWords: [] } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" } } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, success: true } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, info: {
-      pmRcmdItems: buildRecommendationReasonsPlan(presentation.recommendations).map((item) => ({ rcmdDesc: item.text })),
-      productDesc: { productDesc: presentation.features },
-    } } },
-  ]);
+  const browser = browserWithResponses(submissionResponses({ ResponseStatus: { Ack: "Success" }, success: true }));
   browser.url = () => { throw new Error("production path must not read page.url"); };
   const result = await savePresentationViaApi(browser as never, presentation, 77098085);
   assert.equal(result.productId, 77098085);
   assert.equal((browser.calls[1].body as any).productId, 77098085);
-  assert.equal((browser.calls[5].body as any).dto.productId, 77098085);
+  assert.equal((browser.calls[6].body as any).dto.productId, 77098085);
 });
 
 test("产品图文接口保存：推荐理由不得描述不含导游", () => {
@@ -292,4 +268,15 @@ test("产品图文接口保存：产品特色不得描述不含导游", async ()
  await savePresentationViaApi(browser as never, presentation);
  const body = browser.calls.find(c => c.endpoint.endsWith("checkSensitiveWord"))!.body as any;
  assert.equal(body.categoryId, 1003); assert.deepEqual(body.requestBaseData, { locale: "zh-CN" });
+});
+
+test("保存前类别策略变化时停止写入并要求返回规划", async () => {
+  const responses = submissionResponses({ ResponseStatus: { Ack: "Success" }, success: true });
+  responses[1] = { status: 200, payload: { data: { scope: { recommendReason: {
+    enabled: true, patternIds: [4], localePatternIds: { "zh-CN": [4] }, categoryWhitelist: [1, 2, 3],
+  } } } } };
+  const browser = browserWithResponses(responses);
+  await assert.rejects(savePresentationViaApi(browser as never, presentation), /策略已变化.*缤纷体验/);
+  assert.equal(browser.calls.some((call) => call.endpoint.endsWith("createProductDraft")), false);
+  assert.equal(browser.calls.some((call) => call.endpoint.endsWith("savedescriptioninfo")), false);
 });

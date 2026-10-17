@@ -84,13 +84,17 @@ export function prepareAutomationResumeRun(previous: AutomationRun, phases: stri
   const error = previous.recovery?.phases.preflight?.finalError ?? "";
   if (previous.status === "failed" && preflight?.status === "failed" && preflightRepairPhase(error) === retryFrom) {
     if (!phases.includes(retryFrom)) throw new Error("当前产品没有对应的修复阶段。");
-    const reopened = new Set([retryFrom, "preflight", ...(phases.includes("trafficLine") ? ["trafficLine"] : []),
+    const reopenTraffic = retryFrom !== "terms" && phases.includes("trafficLine");
+    const reopened = new Set([retryFrom, "preflight", ...(reopenTraffic ? ["trafficLine"] : []),
       ...(retryFrom === "hotelResource" && phases.includes("vehicleResource") ? ["vehicleResource"] : [])]);
+    const repairMessage = retryFrom === "terms"
+      ? "权威预检发现节假日违约费比例不一致，仅重跑条款维护与最终预检；保留其它已完成阶段。"
+      : `权威预检发现内容不一致，恢复 ${retryFrom} 及必要的资源结算、交通回读与预检；保留其它已完成阶段。`;
     return { ...previous, status: "running", currentPhase: retryFrom, screenshot: undefined,
       phases: phases.map(phase => ({ phase, status: reopened.has(phase)
         ? "pending" : previous.phases.find(item => item.phase === phase)?.status === "completed" ? "completed" : "pending" })),
       logs: [...previous.logs, { at: new Date().toISOString(), level: "warning",
-        message: `权威预检发现内容不一致，恢复 ${retryFrom} 及必要的资源结算、交通回读与预检；保留其它已完成阶段。` }],
+        message: repairMessage }],
     };
   }
   if (previous.status === "failed" && retryFrom === "pricingInventory" && preflight?.status === "failed"

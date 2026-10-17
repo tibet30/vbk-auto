@@ -32,6 +32,18 @@ import type { AutoCoverFillOutcome } from "./outcome.js";
 
 const COVER_IMAGE_TARGET_COUNT = 10;
 
+function shouldRefreshDescription(
+  existingCover: Record<string, unknown> | null | undefined,
+  primaryPoi: string,
+  existingCoverComplete: boolean,
+  replaceManualCover: boolean,
+): boolean {
+  if (existingCoverComplete || replaceManualCover) return true;
+  const previousPoi = textValue(existingCover?.poi);
+  const description = textValue(existingCover?.description);
+  return Boolean(previousPoi && previousPoi !== primaryPoi && description.includes(previousPoi));
+}
+
 export async function applyAutoCoverFill(args: {
   page: Page;
   product: Record<string, unknown>;
@@ -227,7 +239,11 @@ export async function applyAutoCoverFill(args: {
     : {
         source: "ctripLibrary",
         ...primary,
-        ...(textValue(existingCover?.description) ? { description: existingCoverComplete || replaceManualCover ? primary.poi : textValue(existingCover?.description) } : {}),
+        ...(textValue(existingCover?.description) ? {
+          description: shouldRefreshDescription(existingCover, primary.poi, Boolean(existingCoverComplete), replaceManualCover)
+            ? primary.poi
+            : textValue(existingCover?.description),
+        } : {}),
         ...(typeof existingCover?.minQuality === "number" && Number.isFinite(existingCover.minQuality)
           ? { minQuality: existingCover.minQuality }
           : {}),

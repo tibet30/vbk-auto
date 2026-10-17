@@ -111,6 +111,7 @@ export function createRunPlanning(context: MainIpcContext, handlePreflightFailur
           apiKey: decryptedKey,
           presentationRejectedWords: db.listRejectedPresentationWords(),
           itineraryRejectedWords: db.listRejectedItineraryWords(),
+          basicInfoRejectedWords: db.listRejectedBasicInfoWords(),
           baseUrl: providerProfile.baseUrl,
           model: providerProfile.model,
           ...planningTransportOptions(turnSettings.aiProvider),

@@ -131,6 +131,11 @@ test("generate_product_module 的 presentation 模型失败时会确定性补齐
       runVbkPageExclusive: async <T>(work: () => Promise<T>) => work(),
     } as any,
     productMutations: new ProductMutationService(store),
+    resourceQueries: { recommendationCategoryPolicy: async () => ({
+      source: "fixed-replay", inputLocale: "zh-CN", productPatternId: 4, limited: true,
+      categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"],
+      fetchedAt: "2026-10-16T00:00:00.000Z",
+    }) },
     generateStage: async () => { throw new Error("模型未通过结构化工具返回本阶段模块。"); },
     disambiguatePoiOption: async () => ({ pickedText: null, confidence: 0 }),
     disambiguateStationOption: async () => ({ pickedText: null, reasoning: "" }),

@@ -20,6 +20,13 @@ const ITINERARY_DAY_PATCH_SCHEMA = {
     meals: { type: "string" }, hotelDescription: { type: "string" }, spots: { type: "array", items: ITINERARY_SPOT_PATCH_SCHEMA },
   },
 };
+const BASIC_INFO_PATCH_SCHEMA = {
+  type: "object",
+  properties: {
+    days: { type: "number" },
+    nights: { type: "number" },
+  },
+};
 export const PRODUCT_PATCH_SCHEMA = {
   type: "object",
   required: ["patch"],
@@ -27,7 +34,7 @@ export const PRODUCT_PATCH_SCHEMA = {
     patch: {
       type: "object",
       properties: {
-        basicInfo: { type: "object" }, presentation: { type: "object" }, operations: { type: "object" }, commercial: { type: "object" },
+        basicInfo: BASIC_INFO_PATCH_SCHEMA, presentation: { type: "object" }, operations: { type: "object" }, commercial: { type: "object" },
         itinerary: { type: "array", items: ITINERARY_DAY_PATCH_SCHEMA },
       },
     },

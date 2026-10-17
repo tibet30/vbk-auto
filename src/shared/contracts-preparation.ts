@@ -24,6 +24,8 @@ export type PreparationAction =
 export interface LockedItineraryDay {
   day: number;
   spots: string[];
+  /** Named day highlights that must remain on this day but have no route-order meaning. */
+  unorderedSpots?: string[];
 }
 
 export interface LockedConstraints {

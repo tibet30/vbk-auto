@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { prepareBackfilledPhaseRecovery, preparePhaseRetry, prepareQueuedPhaseResume } from "../../src/main/automation/phase-retry.js";
 import { DraftAutomation, approvedRecoveryStartPhase, canRestartPreWriteAuthorizationFailure, failedAutomationResumePhase, interruptedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.class.js";
 import type { AutomationRun } from "../../src/shared/contracts.js";
+import { HOLIDAY_PENALTY_PREFLIGHT_ERROR } from "../../src/main/automation/ctrip/preflight-errors.js";
 
 const previous = {
   id: "run-1",
@@ -199,6 +200,41 @@ test("恢复酒店候选后，保持从原失败预检阶段继续", () => {
     automation: { phases: [{ phase: "preflight", status: "failed" }] },
   };
   assert.equal(approvedRecoveryStartPhase(product, "preflight"), "preflight");
+});
+
+test("旧条款缺少节假日 80% 时，实际恢复入口从 terms 开始", () => {
+  const automation: AutomationRun = {
+    id: "legacy-holiday-terms",
+    status: "failed",
+    currentPhase: "preflight",
+    phases: [
+      { phase: "basic", status: "completed" },
+      { phase: "terms", status: "completed" },
+      { phase: "preflight", status: "failed" },
+    ],
+    logs: [],
+    recovery: { phases: { preflight: {
+      phase: "preflight", state: "needs_user", attempts: [],
+      finalError: HOLIDAY_PENALTY_PREFLIGHT_ERROR,
+    } } },
+  };
+  const product: any = {
+    productId: "79916439",
+    product: {
+      sales: { productType: "domesticShort", productForm: "privateTour", splitGroup: false },
+      basicInfo: {
+        supplierProductName: "拉萨7天6晚私家团", supplierProductCode: "P-79916439",
+        subtitle: "测试", days: 1, nights: 0, meetingCity: "拉萨", destinationCity: "拉萨",
+        province: "西藏", operationNotes: "测试",
+      },
+      operations: { pickupCity: "拉萨" },
+      itinerary: [{ day: 1, title: "拉萨", spots: [], description: "测试", hotel: "无", meals: "敬请自理" }],
+    },
+    automation,
+  };
+  const failedPhase = failedAutomationResumePhase(automation);
+  assert.equal(failedPhase, "preflight");
+  assert.equal(approvedRecoveryStartPhase(product, failedPhase), "terms");
 });
 
 test("预检因缺酒店候选失败且候选后补时，仅恢复酒店资源和预检", () => {

@@ -18,6 +18,8 @@ function fixture(initialStep: number, options: {
   afterDescriptionMaxStep?: number;
   baseProductId?: unknown;
   descriptionProductId?: unknown;
+  descriptionInfoProductIds?: unknown[];
+  descriptionNestedProductId?: unknown;
   missingDescriptionIdentity?: boolean;
   sessionInvalidOnceFor?: string;
   mutateMenus?: (menus: any[]) => void;
@@ -25,12 +27,15 @@ function fixture(initialStep: number, options: {
   let step = initialStep;
   let reportedMaxStep = initialStep;
   let sessionInvalidAttempts = 0;
+  let descriptionReads = 0;
   const calls: string[] = [];
   const writes: any[] = [];
   const base = { productId: options.baseProductId ?? 79712643, mainName: "保留原标题" };
   const description = {
+    ...(options.missingDescriptionIdentity ? {} : { productId: 79712643 }),
     productDesc: {
       ...(options.missingDescriptionIdentity ? {} : { id: options.descriptionProductId ?? 79712643 }),
+      ...(options.descriptionNestedProductId === undefined ? {} : { productId: options.descriptionNestedProductId }),
       productDesc: "保留原图文",
     },
     pmRcmdItems: [{ rcmdDesc: "原推荐", pmRcmdCategoryId: 9 }],
@@ -49,7 +54,15 @@ function fixture(initialStep: number, options: {
         options.mutateMenus?.(payload.menus);
       } else if (endpoint === "getProductBaseInfo") {
         payload = { baseInfo: base, nameAreas: [], bookingControls: { minPersonQuantity: 1, maxPersonQuantity: 10 }, meta: { saveStep: options.remoteStep ?? step } };
-      } else if (endpoint === "getdescriptionInfo") payload = { info: options.incomplete ? {} : description };
+      } else if (endpoint === "getdescriptionInfo") {
+        const sequence = options.descriptionInfoProductIds;
+        const sequenceValue = sequence?.[Math.min(descriptionReads, sequence.length - 1)];
+        descriptionReads += 1;
+        payload = { info: options.incomplete ? {} : {
+          ...description,
+          ...(sequence ? { productId: sequenceValue } : {}),
+        } };
+      }
       else if (endpoint === "inSwitch") payload = { switched: options.review ?? true };
       else {
         if (options.sessionInvalidOnceFor === endpoint && sessionInvalidAttempts++ === 0) {
@@ -135,16 +148,30 @@ test("单阶段拒绝跨产品回读模型，未发送任何官方下一步写�
   const foreignDescription = fixture(-70, { descriptionProductId: 123 });
   await assert.rejects(
     () => advanceSavedProductWizardStage(foreignDescription.page, "79712643", "pictureAndText"),
-    /产品身份不一致/,
+    /指向另一产品.*productDesc\.id=123.*未发送图文下一步/,
   );
   assert.equal(foreignDescription.writes.length, 0);
 
   const noDescriptionIdentity = fixture(-70, { missingDescriptionIdentity: true });
   await assert.rejects(
     () => advanceSavedProductWizardStage(noDescriptionIdentity.page, "79712643", "pictureAndText"),
-    /产品身份不一致/,
+    /缺少可核验的产品标识.*未发送图文下一步/,
   );
   assert.equal(noDescriptionIdentity.writes.length, 0);
+});
+
+test("图文回读容忍空值占位，并在瞬时跨产品标识恢复后安全推进", async () => {
+  const placeholder = fixture(-70, { descriptionNestedProductId: 0, afterDescriptionStep: -60 });
+  await advanceSavedProductWizardStage(placeholder.page, "79712643", "pictureAndText");
+  assert.deepEqual(placeholder.writes.map(write => write.endpoint), ["createProductDraft", "savedescriptioninfo"]);
+
+  const transient = fixture(-70, {
+    descriptionInfoProductIds: [123, 79712643],
+    afterDescriptionStep: -60,
+  });
+  await advanceSavedProductWizardStage(transient.page, "79712643", "pictureAndText");
+  assert.equal(transient.calls.filter(call => call === "getdescriptionInfo").length, 2);
+  assert.deepEqual(transient.writes.map(write => write.endpoint), ["createProductDraft", "savedescriptioninfo"]);
 });
 
 test("每笔官方下一步写入前都重新核验当前状态", async () => {

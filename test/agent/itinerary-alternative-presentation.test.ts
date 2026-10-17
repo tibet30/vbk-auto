@@ -13,6 +13,7 @@ import { repairExcludedAlternativeCopy } from "../../src/main/planning/itinerary
 import { excludedItineraryCopyGroups, excludedItineraryCopyConflicts } from "../../src/main/planning/itinerary-alternative-consistency.js";
 import { alternativeGroupKey } from "../../src/shared/trusted-operator-itinerary-removals.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
+import { deterministicPresentationRepair } from "../../src/main/agent/presentation-deterministic-repair.js";
 
 const RECOMMENDATIONS = [
   { category: "服务保障", text: "全程专车衔接核心景点与住宿，减少换乘等待，按每日节奏安排游览更从容安心。" },
@@ -122,6 +123,27 @@ test("C07 未核验 OR 仍阻断，普通非 OR 文案不作为派生文案缺�
   const repaired = repairExcludedAlternativeCopy(operatorRemoved, operatorRemoved.product.itinerary);
   assert.equal(repaired.changed, true, "只有可信且绑定原 OR 组的删除凭证允许清理旧日文案");
   assert.doesNotMatch(`${repaired.itinerary[2]!.title} ${repaired.itinerary[2]!.description}`, /非物质文化遗产中心|非遗中心/);
+});
+
+test("可信删除已清理行程但图文仍陈旧时，确定性重建图文并保留封面", () => {
+  const product = staleProduct();
+  product.product.itinerary![2]!.title = "日喀则博物馆与扎什伦布寺";
+  product.product.itinerary![2]!.description = "上午游览日喀则博物馆，下午参观扎什伦布寺。";
+  product.product.manualReview = { itinerarySpotRemovals: [{
+    day: 3, name: "非物质文化遗产中心参观", removedAt: "2026-10-17T00:00:00.000Z",
+  }] };
+  product.product.presentation = {
+    ...cleanPresentation(),
+    features: "<p>第三天安排日喀则博物馆或非物质文化遗产中心参观。</p>",
+    cover: { source: "ctripLibrary", imageId: 123, imageUrl: "https://example.test/cover.jpg" },
+  };
+  assert.match(excludedItineraryCopyConflicts(product).join(" "), /非物质文化遗产中心/);
+  const repaired = deterministicPresentationRepair(product, ["缤纷体验", "服务保障", "精选酒店"]);
+  assert.ok(repaired);
+  assert.deepEqual(repaired.cover, (product.product.presentation as any).cover);
+  const next = { ...product, product: { ...product.product, presentation: repaired } } as ProductDetail;
+  assert.deepEqual(excludedItineraryCopyConflicts(next), []);
+  assert.equal((repaired.recommendations as unknown[]).length, 3);
 });
 
 test("C06 缺失明确 OR 槽位时，即使模型请求确认也不会创建审批卡", async () => {

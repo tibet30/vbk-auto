@@ -51,7 +51,8 @@ export function applyItinerarySpotRemove(product: Json, input: Extract<ManualRev
   if (!Array.isArray(dayRecord.spots)) throw new Error("目标行程没有可删除的景点列表。");
   const spot = dayRecord.spots[input.spotIndex];
   if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
-  const spotName = typeof (spot as Json).name === "string" ? String((spot as Json).name).trim() : "";
+  const spotRecord = spot as Json;
+  const spotName = typeof spotRecord.name === "string" ? String(spotRecord.name).trim() : "";
   const allSpots = dayRecord.spots as unknown[];
   const alternatives = alternativeGroupIndexes(allSpots, input.spotIndex);
   const groupKey = alternatives.length > 1 ? alternativeGroupKey(Number(dayRecord.day), alternatives.map((index) => {
@@ -60,7 +61,10 @@ export function applyItinerarySpotRemove(product: Json, input: Extract<ManualRev
   const remaining = dayRecord.spots.filter((_, index) => index !== input.spotIndex); dayRecord.spots = remaining;
   const dayNumber = Number(dayRecord.day);
   if (spotName && Number.isInteger(dayNumber) && dayNumber > 0) {
-    appendTrustedOperatorItineraryRemoval(next, dayNumber, spotName, new Date().toISOString(), groupKey);
+    appendTrustedOperatorItineraryRemoval(next, dayNumber, spotName, new Date().toISOString(), groupKey, {
+      poiName: typeof spotRecord.poiName === "string" ? spotRecord.poiName : undefined,
+      poiId: typeof spotRecord.poiId === "number" ? spotRecord.poiId : undefined,
+    });
     normaliseRemainingAlternativeRelation(remaining, alternatives, input.spotIndex);
   }
   if (spotName && Array.isArray(dayRecord.activities)) removeMatchingActivity(dayRecord, spotName);

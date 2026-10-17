@@ -15,7 +15,9 @@ export async function pauseCommand(core: AgentCore, id: string): Promise<AgentSn
   return c.command(id, async () => {
     const snapshot = c.load(id);
     c.snapshots.interruptStreaming(snapshot, "已暂停，回复未完成。");
-    if (snapshot.run && !c.terminal(snapshot.run.status)) c.pauseRun(snapshot, "运行已暂停");
+    if (snapshot.run && !c.terminal(snapshot.run.status)) {
+      c.pauseRun(snapshot, "运行已暂停", { reportIssue: false, operatorRequested: true });
+    }
     return c.save(snapshot);
   });
 }

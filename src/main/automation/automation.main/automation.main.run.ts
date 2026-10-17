@@ -9,6 +9,7 @@ import type { AutomationRunContext } from "./automation.main.context.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import { automationSession, recoverDraftPhase } from "./runtime/index.js";
+import { stampCompletedEntryPhase } from "../../application/product-entry-phase-fingerprint.js";
 
 /** Complete entry and forward recovery share handlers, checkpoints and terminal transitions. */
 export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
@@ -69,6 +70,8 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
         session.fail(outcome.finalError ?? `阶段 ${phase} 未完成`, phase);
         return;
       }
+      stampCompletedEntryPhase(setup.run, setup.product as unknown as Record<string, unknown>, phase);
+      setup.persist();
       setup.log(`已保存：${phase}`);
     }
     await finalizeRunWithScreenshot(setup.run, saveScreenshot, productIdRef.current, setup.page, setup.log);

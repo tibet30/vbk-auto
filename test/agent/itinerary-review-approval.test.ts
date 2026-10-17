@@ -62,3 +62,12 @@ test("只为新的完整录入范围补充自动审核，窄范围和旧批准�
   assert.deepEqual(normalizeAgentApprovalScope(f.product, ["basic"]), ["vbk.write_phase:basic"]);
   assert.equal(phases.includes(ITINERARY_REVIEW_UNLOCK_SCOPE), false);
 });
+
+test("已有产品的重审批会收窄遗留 saleControl，不制造额外继续门槛", () => {
+  const f = fixture();
+  f.product.productId = "79924183";
+  const required = requiredAgentPhases(f.product).map(phase => `vbk.write_phase:${phase}`);
+  const normalized = normalizeAgentApprovalScope(f.product, [...required, "vbk.write_phase:saleControl"]);
+  assert.deepEqual(normalized.filter(item => item.startsWith("vbk.write_phase:")), required);
+  assert.equal(agentApprovalScopeError(f.product, normalized), undefined);
+});

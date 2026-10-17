@@ -21,6 +21,7 @@ export function agentPatchOperations(product: ProductDetail, patch: Json, option
   // `spots` array. Keep generated/rebuilt itineraries on their dedicated tool;
   // this conversational patch path may only overlay the supplied days.
   const presentationPatch = record(patch.presentation) ? { ...patch.presentation } : undefined;
+  const basicInfoPatch = record(patch.basicInfo) ? normaliseDurationPatch(patch.basicInfo) : undefined;
   if (presentationPatch && Object.hasOwn(presentationPatch, 'features')) {
     const features = coerceProductFeaturesHtml(presentationPatch.features);
     if (!features) throw new Error('presentation.features 必须是非空 HTML 字符串，不能是对象/数组。');
@@ -28,6 +29,7 @@ export function agentPatchOperations(product: ProductDetail, patch: Json, option
   }
   const effectivePatch: Json = {
     ...patch,
+    ...(basicInfoPatch ? { basicInfo: basicInfoPatch } : {}),
     ...(presentationPatch ? { presentation: presentationPatch } : {}),
     ...(Object.hasOwn(patch, "itinerary")
       ? { itinerary: mergeItineraryDays(product.product.itinerary, patch.itinerary) }
@@ -231,11 +233,33 @@ function assertLockedPlanningPatch(product: ProductDetail, patch: Json): void {
   const locked = extractLockedConstraints(product, (product.messages ?? []).filter((message) => message.role === "user"));
   const basic = record(patch.basicInfo) ? patch.basicInfo : undefined;
   const operations = record(patch.operations) ? patch.operations : undefined;
-  if (locked.days && basic?.days !== undefined && Number(basic.days) !== locked.days) {
+  assertDurationPatchValue(basic, "days", 1, 60);
+  assertDurationPatchValue(basic, "nights", 0, 59);
+  if (locked.days && basic?.days !== undefined && basic.days !== locked.days) {
     throw new Error(`出行天数已锁定为 ${locked.days} 天，不能改为 ${basic.days}`);
+  }
+  if (locked.nights !== undefined && basic?.nights !== undefined && basic.nights !== locked.nights) {
+    throw new Error(`住宿晚数已锁定为 ${locked.nights} 晚，不能改为 ${basic.nights}`);
   }
   if (locked.transport && operations?.transport !== undefined && operations.transport !== locked.transport) {
     throw new Error(`交通方式已锁定为 ${locked.transport}，不能覆盖`);
+  }
+}
+
+function normaliseDurationPatch(value: Json): Json {
+  const basicInfo = { ...value };
+  for (const key of ["days", "nights"] as const) {
+    const raw = basicInfo[key];
+    if (typeof raw === "string" && /^\d+$/.test(raw.trim())) basicInfo[key] = Number(raw.trim());
+  }
+  return basicInfo;
+}
+
+function assertDurationPatchValue(basic: Json | undefined, key: "days" | "nights", min: number, max: number): void {
+  if (!basic || !Object.hasOwn(basic, key)) return;
+  const value = basic[key];
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`basicInfo.${key} 必须是 ${min} 至 ${max} 的整数。`);
   }
 }
 

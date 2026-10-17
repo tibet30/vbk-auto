@@ -14,8 +14,12 @@ const agentWritePhases = new Set([
 
 /** Accept phase aliases emitted by older prompts without broadening the requested scope. */
 export function normalizeAgentApprovalScope(product: ProductDetail, scope: string[]): string[] {
-  const phases = new Set([...requiredAgentPhases(product), ...(product.productId ? ['saleControl'] : [])]);
-  const normalized = [...new Set(scope.map(item=>phases.has(item) ? `vbk.write_phase:${item}` : item))];
+  const phases = new Set(requiredAgentPhases(product));
+  const normalized = [...new Set(scope.map(item=>phases.has(item) ? `vbk.write_phase:${item}` : item))]
+    // A saved product no longer needs its creation-shell phase. Narrowing this
+    // stale scope is safe and prevents an old first-entry request from forcing
+    // another operator retry before the current-plan approval card appears.
+    .filter(item => !(product.productId && item === "vbk.write_phase:saleControl"));
   const current = buildAgentApproval(product).scope;
   if (current.includes(ITINERARY_REVIEW_UNLOCK_SCOPE)
     && current.filter(item => item !== ITINERARY_REVIEW_UNLOCK_SCOPE).every(item => normalized.includes(item))) {

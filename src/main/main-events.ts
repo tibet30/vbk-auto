@@ -82,7 +82,10 @@ export function createMainEventBroadcasters(deps: MainEventDeps) {
   };
 
   let productEmitter: (product: ProductDetail) => void = broadcastProduct;
-  const emitProduct = (product: ProductDetail) => productEmitter(product);
+  const emitProduct = (product: ProductDetail) => {
+    deps.getProductStorage()?.observe(product);
+    productEmitter(product);
+  };
 
   const emitPlanningState = (state: PlanningGenerationState) => {
     // 状态已落库；renderer 重建期间由 planning:state 读取路径补偿。
@@ -92,6 +95,8 @@ export function createMainEventBroadcasters(deps: MainEventDeps) {
   };
 
   const emitWorkflowTask = (task: ProductWorkflowTask, notify = true) => {
+    const product = deps.getDb()?.getProduct(task.localProductId);
+    if (product) deps.getProductStorage()?.observe(product);
     const window = deps.getWindow() ?? undefined;
     const attention = notify ? workflowAttentionNotification(task) : null;
     if (deps.getSettings().systemNotificationsEnabled && attention) {

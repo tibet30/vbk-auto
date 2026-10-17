@@ -48,6 +48,11 @@ function sameProductId(value: unknown, productId: string): boolean {
   return Number.isSafeInteger(expected) && expected > 0 && actual === expected;
 }
 
+function positiveProductId(value: unknown): number | null {
+  const parsed = typeof value === "string" || typeof value === "number" ? Number(value) : NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function assertBaseInfoIdentity(baseInfo: unknown, productId: string): asserts baseInfo is Record<string, unknown> {
   if (!baseInfo || typeof baseInfo !== "object" || !sameProductId((baseInfo as Record<string, unknown>).productId, productId)) {
     throw new Error("VBK 基本信息向导回读产品身份不一致，停止推进");
@@ -57,18 +62,49 @@ function assertBaseInfoIdentity(baseInfo: unknown, productId: string): asserts b
 function assertDescriptionIdentity(info: unknown, productId: string): asserts info is Record<string, unknown> {
   if (!info || typeof info !== "object") throw new Error("VBK 图文保存模型不完整，停止推进");
   const description = (info as Record<string, unknown>).productDesc;
-  const ids = [
-    (info as Record<string, unknown>).productId,
-    description && typeof description === "object" ? (description as Record<string, unknown>).productId : undefined,
-    description && typeof description === "object" ? (description as Record<string, unknown>).id : undefined,
-  ].filter(id => id !== undefined && id !== null);
-  if (!ids.length || ids.some(id => !sameProductId(id, productId))) {
-    throw new Error("VBK 图文向导回读产品身份不一致，停止推进");
+  const fields = [
+    ["info.productId", (info as Record<string, unknown>).productId],
+    ["productDesc.productId", description && typeof description === "object"
+      ? (description as Record<string, unknown>).productId : undefined],
+    ["productDesc.id", description && typeof description === "object"
+      ? (description as Record<string, unknown>).id : undefined],
+  ] as const;
+  const identities = fields.flatMap(([field, value]) => {
+    const id = positiveProductId(value);
+    return id === null ? [] : [{ field, id }];
+  });
+  if (!identities.length) {
+    throw new Error(`VBK 图文回读缺少可核验的产品标识（当前产品 ${productId}），已安全暂停；未发送图文下一步。`);
+  }
+  const conflicts = identities.filter(({ id }) => !sameProductId(id, productId));
+  if (conflicts.length) {
+    const evidence = conflicts.map(({ field, id }) => `${field}=${id}`).join("、");
+    throw new Error(`VBK 图文回读指向另一产品（当前产品 ${productId}；${evidence}），已安全暂停；未发送图文下一步。`);
   }
 }
 
+async function readVerifiedDescription(page: SavedStagePage, productId: string) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const description = await postTrafficLineSoa(page, "15638", "getdescriptionInfo",
+      { productId: Number(productId) }, "VBK 已保存图文回读");
+    const info = description.info as Record<string, unknown> | undefined;
+    try {
+      if (!info?.productDesc || !Array.isArray(info.pmRcmdItems)) {
+        throw new Error("VBK 图文保存模型不完整，已安全暂停；未发送图文下一步。");
+      }
+      assertDescriptionIdentity(info, productId);
+      return info;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await page.waitForTimeout(attempt * 250);
+    }
+  }
+  throw lastError;
+}
+
 async function saveCompletedStage(
-  page: TrafficLinePage,
+  page: SavedStagePage,
   productId: string,
   completedStep: SavedProductWizardStage,
   options: SavedProductWizardStageOptions,
@@ -96,14 +132,8 @@ async function saveCompletedStage(
     }, "VBK 已保存基本信息下一步", { beforeAttempt: options.assertCurrent });
     return;
   }
-  const description = await postTrafficLineSoa(page, "15638", "getdescriptionInfo",
-    { productId: Number(productId) }, "VBK 已保存图文回读");
-  const info = description.info as Record<string, unknown> | undefined;
-  if (!info?.productDesc || !Array.isArray(info.pmRcmdItems)) {
-    throw new Error("VBK 图文保存模型不完整，停止推进");
-  }
+  const info = await readVerifiedDescription(page, productId);
   assertBaseInfoIdentity(remote.baseInfo, productId);
-  assertDescriptionIdentity(info, productId);
   await postTrafficLineSoa(page, "20698", "createProductDraft",
     { productId: Number(productId), module: "desc" }, "VBK 现有产品图文草稿准备", { beforeAttempt: options.assertCurrent });
   await postTrafficLineSoa(page, "15638", "savedescriptioninfo",

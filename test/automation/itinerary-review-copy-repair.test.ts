@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  domesticShortPoiDecisionMessage,
   isValidationOnlyReviewFailure,
   runItineraryReviewWithCopyRepair,
 } from "../../src/main/automation/automation.main/itinerary-review-copy-repair.js";
@@ -108,6 +109,53 @@ test("非只读校验失败的错误不进入自动修复", async () => {
     persist: () => {},
   }), /库存不足/);
   assert.equal(saveDraftCalls, 0);
+});
+
+test("境内短途与结构化 POI 风险必须交给用户决定且不自动重试", async () => {
+  const value = {
+    itinerary: [
+      { day: 4, spots: [
+        { name: "冈仁波齐", poiName: "冈仁波齐", poiId: 10758151 },
+        { name: "冈仁波齐山体冰川遗迹", poiName: "冈仁波齐", poiId: 10758151 },
+      ] },
+      { day: 5, spots: [{ name: "远眺冈仁波齐", poiName: "冈仁波齐", poiId: 10758151 }] },
+    ],
+  };
+  const raw = "行程审核校验失败（Ack=Failure）：数据风险，原因：POI：冈仁波齐 且 产品类型：境内短途旅游，请修改后重新操作";
+  const riskError = Object.assign(new Error(raw), { itineraryReviewValidationOnly: true });
+  const logs: string[] = [];
+  let submits = 0;
+  let saves = 0;
+  let rewrites = 0;
+  const { ctx } = fakeContext({ rewriter: async () => { rewrites += 1; return {}; } });
+
+  await assert.rejects(runItineraryReviewWithCopyRepair({
+    ctx, localProductId: "local", product: value,
+    log: (message) => { logs.push(message); },
+    submitReview: async () => { submits += 1; throw riskError; },
+    saveDraft: async () => { saves += 1; return {}; },
+    persist: () => {},
+  }), (error: Error) => {
+    assert.match(error.message, /行程审核需要用户决定/);
+    assert.match(error.message, /第4天「冈仁波齐」「冈仁波齐山体冰川遗迹」/);
+    assert.match(error.message, /第5天「远眺冈仁波齐」/);
+    assert.match(error.message, /确认后.*剔除所有绑定为「冈仁波齐」的条目/);
+    assert.match(error.message, /未修改 POI、未删除路线、未再次提交审核/);
+    assert.match(error.message, /平台原始原因/);
+    return true;
+  });
+  assert.equal(submits, 1);
+  assert.equal(saves, 0);
+  assert.equal(rewrites, 0);
+  assert.equal(logs.length, 1);
+});
+
+test("非境内短途结构化 POI 风险不伪装成用户决策门禁", () => {
+  assert.equal(domesticShortPoiDecisionMessage(new Error("库存不足"), product()), undefined);
+  assert.equal(domesticShortPoiDecisionMessage(
+    new Error("数据风险，原因：POI：冈仁波齐 且 产品类型：境内长线旅游"),
+    product(),
+  ), undefined);
 });
 
 test("没有可定位文案或超出修复预算时如实上抛，不伪造成功", async () => {

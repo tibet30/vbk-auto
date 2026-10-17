@@ -67,14 +67,14 @@ function resolveItineraryConstraints(
   fromIntent: { pois: string[]; itineraryOrder: LockedItineraryDay[] },
 ): { pois: string[]; itineraryOrder: LockedItineraryDay[] } {
   const initial = parseDayConstraints(initialRequirement);
-  const itineraryOrder = new Map<number, string[]>();
+  const itineraryOrder = new Map<number, LockedItineraryDay>();
   const generalPois = new Set<string>();
   const baselineOrder = fromIntent.itineraryOrder.length ? fromIntent.itineraryOrder : initial.itineraryOrder;
   const baselinePois = fromIntent.pois.length
     ? fromIntent.pois
     : unique([...initial.pois, ...parseMustPois(initialRequirement)]);
-  for (const row of baselineOrder) itineraryOrder.set(row.day, [...row.spots]);
-  const daySpecificPois = baselineOrder.flatMap((row) => row.spots);
+  for (const row of baselineOrder) itineraryOrder.set(row.day, cloneLockedDay(row));
+  const daySpecificPois = baselineOrder.flatMap(lockedDaySpots);
   for (const poi of baselinePois) {
     if (!daySpecificPois.some((spot) => sameConstraintPlace(spot, poi))) generalPois.add(poi);
   }
@@ -84,29 +84,33 @@ function resolveItineraryConstraints(
     const removed = parseRemovedPois(requirement);
     for (const poi of removed) {
       generalPois.delete(poi);
-      for (const [day, spots] of itineraryOrder) {
-        itineraryOrder.set(day, spots.filter((spot) => !sameConstraintPlace(spot, poi)));
+      for (const [day, row] of itineraryOrder) {
+        itineraryOrder.set(day, {
+          day,
+          spots: row.spots.filter((spot) => !sameConstraintPlace(spot, poi)),
+          ...filteredUnorderedSpots(row, poi),
+        });
       }
     }
     const correction = isItineraryCorrection(requirement);
     for (const row of parsed.itineraryOrder) {
-      const existing = itineraryOrder.get(row.day) ?? [];
-      if (correction) for (const poi of existing) generalPois.delete(poi);
-      itineraryOrder.set(row.day, correction ? [...row.spots] : unique([...existing, ...row.spots]));
+      const existing = itineraryOrder.get(row.day);
+      if (correction && existing) for (const poi of lockedDaySpots(existing)) generalPois.delete(poi);
+      itineraryOrder.set(row.day, correction ? cloneLockedDay(row) : mergeLockedDays(existing, row));
     }
-    const parsedDayPois = parsed.itineraryOrder.flatMap((row) => row.spots);
+    const parsedDayPois = parsed.itineraryOrder.flatMap(lockedDaySpots);
     for (const poi of [...parseMustPois(requirement), ...parseReplacementPois(requirement)]) {
       if (parsedDayPois.some((spot) => sameConstraintPlace(spot, poi))) continue;
       generalPois.add(poi);
     }
   }
 
-  const order = [...itineraryOrder.entries()]
-    .filter(([, spots]) => spots.length > 0)
-    .sort(([left], [right]) => left - right)
-    .map(([day, spots]) => ({ day, spots: unique(spots) }));
+  const order = [...itineraryOrder.values()]
+    .filter((row) => lockedDaySpots(row).length > 0)
+    .sort((left, right) => left.day - right.day)
+    .map(cloneLockedDay);
   return {
-    pois: unique([...generalPois, ...order.flatMap((row) => row.spots)]),
+    pois: unique([...generalPois, ...order.flatMap(lockedDaySpots)]),
     itineraryOrder: order,
   };
 }
@@ -125,14 +129,28 @@ function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrde
     const end = matches[index + 1]?.index ?? routeText.length;
     const remainder = cleanDayConstraintText(trimPlanningControlTail(routeText.slice(start, end)));
     if (!Number.isInteger(day) || day < 1 || /^(?:不要|不安排|别)/.test(remainder)) continue;
-    const spots = splitSpots(remainder);
-    if (!spots.length) continue;
+    const { spots, unorderedSpots } = splitDaySpots(remainder);
+    if (!spots.length && !unorderedSpots.length) continue;
     const existing = itineraryOrder.find((row) => row.day === day);
-    if (existing) existing.spots = unique([...existing.spots, ...spots]);
-    else itineraryOrder.push({ day, spots });
-    pois.push(...spots);
+    if (existing) {
+      existing.spots = unique([...existing.spots, ...spots]);
+      existing.unorderedSpots = unique([...(existing.unorderedSpots ?? []), ...unorderedSpots]);
+    } else itineraryOrder.push({ day, spots, ...(unorderedSpots.length ? { unorderedSpots } : {}) });
+    pois.push(...spots, ...unorderedSpots);
   }
   return { pois, itineraryOrder };
+}
+
+function splitDaySpots(value: string): { spots: string[]; unorderedSpots: string[] } {
+  const marker = /(?:^|[\s，,。；;\-—–])看点[:：]\s*/u.exec(value);
+  if (!marker || marker.index === undefined) return { spots: splitSpots(value), unorderedSpots: [] };
+  const spots = splitSpots(value.slice(0, marker.index));
+  const highlights = splitSpots(value.slice(marker.index + marker[0].length));
+  return {
+    spots,
+    unorderedSpots: highlights.filter((highlight) =>
+      !spots.some((spot) => sameConstraintPlace(spot, highlight))),
+  };
 }
 
 function parseMustPois(textValue: string): string[] {
@@ -171,11 +189,14 @@ function splitSpots(value: string): string[] {
     .replace(/(?:火车站接|接火车站?|送火车站?|接站|送站|住[^—–\-，,、。；;\n]{2,})/gu, " ")
     .replace(/(?:二选一|多选一|任选其一)/gu, " ")
     .replace(/(?:或者|或|\/|／)/gu, "，")
+    .replace(/[+＋]/gu, "，")
+    .replace(/[；;]/gu, "，")
     .replace(/[>＞→]+/gu, "，")
     .replace(/[—–-]+/gu, "，")
     .split(/[和与、，,以及]+/)
     .map((item) => item
       .replace(/^(?:(?:必须)?(?:去|游览|安排|参观)|再?(?:改成|改为|换成|调整为|替换为|改去|换去)|再加|增加|加上)/, "")
+      .replace(/(?:海拔|柏油路|公路里程)[:：]?\s*\d+(?:\.\d+)?\s*(?:m|米|km|公里)?[\s\S]*$/iu, "")
       .replace(/[。；;]+$/u, "")
       .trim())
     .filter(looksLikePlaceName);
@@ -237,6 +258,28 @@ function latestParsedValue<T>(values: string[], parse: (value: string) => T | un
 function sameConstraintPlace(left: string, right: string): boolean {
   const normalise = (value: string) => value.replace(/\s+/g, "");
   return normalise(left) === normalise(right);
+}
+
+function lockedDaySpots(row: LockedItineraryDay): string[] {
+  return [...row.spots, ...(row.unorderedSpots ?? [])];
+}
+
+function cloneLockedDay(row: LockedItineraryDay): LockedItineraryDay {
+  const unorderedSpots = unique(row.unorderedSpots ?? []);
+  return { day: row.day, spots: unique(row.spots), ...(unorderedSpots.length ? { unorderedSpots } : {}) };
+}
+
+function mergeLockedDays(existing: LockedItineraryDay | undefined, incoming: LockedItineraryDay): LockedItineraryDay {
+  return cloneLockedDay({
+    day: incoming.day,
+    spots: [...(existing?.spots ?? []), ...incoming.spots],
+    unorderedSpots: [...(existing?.unorderedSpots ?? []), ...(incoming.unorderedSpots ?? [])],
+  });
+}
+
+function filteredUnorderedSpots(row: LockedItineraryDay, removed: string): Pick<LockedItineraryDay, "unorderedSpots"> | object {
+  const unorderedSpots = (row.unorderedSpots ?? []).filter((spot) => !sameConstraintPlace(spot, removed));
+  return unorderedSpots.length ? { unorderedSpots } : {};
 }
 
 function intentConstraints(product: ProductDetail): { pois: string[]; itineraryOrder: LockedItineraryDay[] } {

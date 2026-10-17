@@ -64,7 +64,15 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
     disambiguateStation: trafficStationDisambiguator(localProductId),
   }));
   const resolveItineraryPoisAndTraffic = async (localProductId: string) => {
-    const { current, converted } = await resolveAdministrativeRouteNodes(get(localProductId), deps, withPage);
+    let { current, converted } = await resolveAdministrativeRouteNodes(get(localProductId), deps, withPage);
+    const repair = selfRepairItineraryForVbk(current.product.itinerary,
+      Number((current.product.basicInfo as JsonObject)?.nights), current.product);
+    if (repair.changed) {
+      deps.productMutations.commands.mergeChanges(localProductId, current, {
+        ...productData(current), itinerary: repair.itinerary,
+      }, 'ai', { status: current.status });
+      current = get(localProductId);
+    }
     const runtime = new DbOrchestratorRuntime(deps.db, deps.browser, deps.productMutations, task => withPage(task), resolveTrafficAvailability, deps.disambiguatePoiOption, deps.resourceQueries);
     const tasks = await enrichItineraryPois({
       localProductId,
@@ -73,14 +81,6 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       persistedTaskKeys: new Set(current.researchTasks.map(task => `${task.type}::${task.label}`)),
       reviewCompletePois: true,
     });
-    const latest = get(localProductId);
-    const repair = selfRepairItineraryForVbk(latest.product.itinerary, Number((latest.product.basicInfo as JsonObject)?.nights));
-    if (repair.changed) {
-      deps.productMutations.commands.mergeChanges(localProductId, latest, {
-        ...productData(latest),
-        itinerary: repair.itinerary,
-      }, 'ai', { status: latest.status });
-    }
     const removed = new Set([
       ...repair.removedTravelNodes,
       ...repair.selectedAlternatives.flatMap((item) => item.removed),

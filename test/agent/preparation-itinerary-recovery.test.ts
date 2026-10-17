@@ -60,3 +60,17 @@ test("历史行程缺少 OR 首项且无人工凭证时，准备状态不能假�
   assert.equal(evaluation.ready, false);
   assert.ok(evaluation.blockingReasons.some((reason) => /二选一景点必须全部保留.*日喀则博物馆/.test(reason)));
 });
+
+test("恢复入口使用产品上下文移除已持久化的住宿路线节点", () => {
+  const p = buildProductSnapshot({ destination: "拉萨", days: 2, productForm: "privateTour" });
+  Object.assign(p.product.basicInfo!, { nights: 2, meetingCity: "拉萨", destinationCity: "拉萨",
+    userIdea: "D1：塔钦→札达土林→塔钦（宿塔尔钦）\nD2：塔钦→仲巴五彩沙漠→萨嘎（宿萨嘎）" });
+  p.product.itinerary = [
+    { day: 1, title: "塔钦→札达土林→塔钦", hotelCity: "普兰", spots: [{ name: "塔钦" }, { name: "札达土林" }] },
+    { day: 2, title: "塔钦→仲巴五彩沙漠→萨嘎", hotelCity: "萨嘎", spots: [{ name: "塔钦" }, { name: "仲巴五彩沙漠" }] },
+  ];
+
+  const recovery = preparationItineraryRecovery(p);
+  assert.deepEqual(recovery?.repair.removedTravelNodes, ["塔钦", "塔钦"]);
+  assert.deepEqual(recovery?.product.itinerary.map(day => day.spots?.map(spot => spot.name)), [["札达土林"], ["仲巴五彩沙漠"]]);
+});

@@ -8,7 +8,7 @@ import { itineraryInputContractError } from "../planning/itinerary-input-contrac
 export function preparationItineraryRecovery(current: ProductDetail) {
   if (current.productId || !Array.isArray(current.product.itinerary)) return undefined;
   const basic = current.product.basicInfo as Record<string, unknown> | undefined;
-  const repair = selfRepairItineraryForVbk(current.product.itinerary, Number(basic?.nights));
+  const repair = selfRepairItineraryForVbk(current.product.itinerary, Number(basic?.nights), current.product);
   if (!repair.changed || itineraryInputContractError(current, repair.itinerary)) return undefined;
   const resolvedNames = new Set([
     ...repair.removedTravelNodes,

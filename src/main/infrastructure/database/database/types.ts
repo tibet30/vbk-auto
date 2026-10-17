@@ -46,6 +46,7 @@ export interface VbkDatabasePrototype {
   listRejectedPresentationWords(): ReturnType<typeof import("../parts/vbk-copy-feedback.js").listRejectedPresentationWords>;
   recordCopyFeedback(entry: Parameters<typeof import("../parts/vbk-copy-feedback.js").recordCopyFeedback>[1]): void;
   listRejectedItineraryWords(): ReturnType<typeof import("../parts/vbk-copy-feedback.js").listRejectedItineraryWords>;
+  listRejectedBasicInfoWords(): ReturnType<typeof import("../parts/vbk-copy-feedback.js").listRejectedBasicInfoWords>;
   getPresentationCopyRecovery(id: string): ReturnType<typeof import("../parts/vbk-copy-feedback.js").getPresentationCopyRecovery>;
   savePresentationCopyRecovery(id: string, entry: Parameters<typeof import("../parts/vbk-copy-feedback.js").savePresentationCopyRecovery>[2]): void;
   setSetting(key: string, value: string): void;

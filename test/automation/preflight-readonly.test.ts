@@ -47,7 +47,7 @@ test("生产 fillMap 的 preflight 在审核推进边界保持只读", async () 
       if (endpoint.endsWith("/getTourDailyDetail.json")) return success({ tourInfo: { tourDailyDescriptions: [{}, {}] } });
       if (endpoint.endsWith("/listProductClauses")) return success({ centralDataDto: {
         additionalInfoDto: { firstClassTypeIds: [] }, filterConditionDto: { productId: 1 },
-      } });
+      }, unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } });
       if (endpoint.endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
       if (endpoint.endsWith("/searchProductImage.json")) return success({
         productImages: [{ imageInfo: { imageId: 99001, accompanyTourInfo: { imageTypeId: 2 } } }],

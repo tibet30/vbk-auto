@@ -128,8 +128,9 @@ test("条款回读以实际条款包核验广济桥外观不进入成人或儿�
     }] });
     throw new Error(`unexpected endpoint ${endpoint}`);
   } };
-  const tabs = [1, 2, 3, 4].map(() => ({
+  const tabs = [1, 2, 3, 4].map((tabEnum) => ({
     centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
+    ...(tabEnum === 3 ? { unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } } : {}),
   }));
   const result = await verifyTermsReadback(page, product, "79189107", tabs);
   assert.equal(result.adultTicketInclusionText, "开元寺");
@@ -147,13 +148,29 @@ test("条款回读拒绝 selectedClauseItems 中异常的组件结构", async ()
     }] });
     throw new Error(`unexpected endpoint ${request.endpoint}`);
   } };
-  const tabs = [1, 2, 3, 4].map(() => ({
+  const tabs = [1, 2, 3, 4].map((tabEnum) => ({
     centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
+    ...(tabEnum === 3 ? { unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } } : {}),
   }));
   await assert.rejects(() => verifyTermsReadback(page, {
     ...product,
     itinerary: [],
   }, "79189107", tabs), /componentCode 结构异常/);
+});
+
+test("条款预检拒绝未勾选或非 80% 的节假日条款", async () => {
+  const page = { evaluate: async (_fn: unknown, request: any) => {
+    if (String(request.endpoint).endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
+    throw new Error(`unexpected endpoint ${request.endpoint}`);
+  } };
+  const tabs = [1, 2, 3, 4].map((tabEnum) => ({
+    centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
+    ...(tabEnum === 3 ? { unBookingContentDto: { holidayRuleDto: { lossValue: 0.6 } } } : {}),
+  }));
+  await assert.rejects(
+    () => verifyTermsReadback(page, { ...product, itinerary: [] }, "79189107", tabs),
+    /节假日违约费比例.*不是 80%/,
+  );
 });
 
 test("只读恢复预检补齐免费 POI 票型并接受远端无需门票回读", async () => {

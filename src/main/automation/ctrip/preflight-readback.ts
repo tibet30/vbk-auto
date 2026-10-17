@@ -4,6 +4,8 @@ import { placeholderDraftOnly, readActiveCoverFallback } from "../../../shared/c
 import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../domain/product/features-rich-text.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
+import { HOLIDAY_PENALTY_RATE } from "./clauses-api.js";
+import { HOLIDAY_PENALTY_PREFLIGHT_ERROR } from "./preflight-errors.js";
 import { buildAdultTicketInclusionText } from "./terms.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
 import { readBoundCoverImageIdsViaApi } from "./presentation/cover-bind.js";
@@ -186,6 +188,15 @@ export async function verifyTermsReadback(
     const selected = selectedClauseItems(clausePackage);
     packages.push({ tabEnum, selectedCount: selected.length });
     if (tabEnum === 1) firstTabItems = selected;
+    if (tabEnum === 3) {
+      const holidayRule = productRecord(productRecord(payload).unBookingContentDto).holidayRuleDto;
+      if (
+        Number(productRecord(holidayRule).lossValue) !== HOLIDAY_PENALTY_RATE
+        || Number(productRecord(holidayRule).travelAgencyLossValue) !== HOLIDAY_PENALTY_RATE
+      ) {
+        throw new Error(HOLIDAY_PENALTY_PREFLIGHT_ERROR);
+      }
+    }
   }
   const itinerary = Array.isArray(productRecord(product).itinerary) ? productRecord(product).itinerary : [];
   const enrichedItinerary = itinerary.length

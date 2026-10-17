@@ -6,19 +6,19 @@
  */
 
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../infrastructure/vbk-session-request.js";
+import {
+  ensureRequiredClause,
+  formatSelectedClauseItems,
+  setClauseComponentValue,
+} from "./structured-clause-items.js";
+
+export {
+  ensureRequiredClause,
+  formatSelectedClauseItems,
+  setClauseComponentValue,
+} from "./structured-clause-items.js";
 
 type ClauseRecord = Record<string, any>;
-interface ClauseElement {
-  componentCode?: unknown;
-  elementCode?: unknown;
-  elementValue?: unknown;
-  value?: unknown;
-}
-interface SelectedClauseItem {
-  clauseItemId: number;
-  secondClassTypeId: number;
-  elementDtos: ClauseElement[];
-}
 
 const CLAUSE_HEAD = {
   cid: "",
@@ -57,6 +57,18 @@ export const REQUIRED_CLAUSE_IDS = {
 } as const;
 
 const LODGING_SELF_PAY_NOTE = "单房差及儿童占床费用（如产生），具体金额以出行前实际确认为准";
+export const HOLIDAY_PENALTY_RATE = 0.8;
+export const HOLIDAY_PENALTY_PERCENT = 80;
+const HOLIDAY_UNBOOKING_RULE = {
+  isHoliday: "T",
+  // saveProductClauses 接收 0-100 的百分数，listProductClauses 回读 0-1 的比例。
+  lossValue: HOLIDAY_PENALTY_PERCENT,
+  travelAgencyLossValue: HOLIDAY_PENALTY_PERCENT,
+  nonGroupLossValue: 0,
+  nonGroupTravelAgencyLossValue: 0,
+  minAdvanceDays: 0,
+  maxAdvanceDays: 0,
+} as const;
 // Saved platform clause IDs. The page-context payload is kept ID-only as well.
 export const DEFAULT_SELECTED_CLAUSE_IDS = {
   1: [38536, 134, 10095, 7, 10091, 13, 10087, 3014],
@@ -73,99 +85,6 @@ export const DEFAULT_SELECTED_CLAUSE_IDS = {
     563,
   ],
 } as const;
-
-export function formatSelectedClauseItems(clauseTypeDtos: ClauseRecord[] = []): SelectedClauseItem[] {
-  const result: SelectedClauseItem[] = [];
-  for (const type of clauseTypeDtos ?? []) {
-    const selectedItems = [
-      ...(type.clauseItemDtos ?? []),
-      ...(type.containers ?? []).flatMap((container: ClauseRecord) =>
-        (container.clauseItemDtos ?? []).map((item: ClauseRecord) => ({
-          ...item,
-          selected: container.selectedClauseItemId == null
-            ? item.selected
-            : String(item.clauseItemId) === String(container.selectedClauseItemId) ? "T" : "F",
-        })),
-      ),
-    ].filter((item: ClauseRecord) => {
-      if (item.itemType != null && item.itemType !== "F") return false;
-      if (item.isShow != null && item.isShow !== "T") return false;
-      if (item.hasSelectBox === "F") return true;
-      return item.selected === "T";
-    });
-    for (const item of selectedItems) {
-      result.push({
-        clauseItemId: item.clauseItemId,
-        secondClassTypeId: type.clauseTypeId,
-        elementDtos: (item.clauseComponentDtos ?? []).map((component: ClauseRecord) => {
-          const element = component.componentElementDtos?.find(
-            (candidate: ClauseRecord) => candidate.elementCode === component.value,
-          );
-          return {
-            componentCode: component.componentCode,
-            value: element?.elementValue ?? component.value,
-            ...(element ? { elementCode: element.elementCode } : {}),
-          };
-        }),
-      });
-    }
-  }
-  return result;
-}
-
-export function ensureRequiredClause(
-  items: SelectedClauseItem[],
-  clauseTypeDtos: ClauseRecord[] = [],
-  clauseItemId: number,
-): SelectedClauseItem[] {
-  if (items.some((item) => item.clauseItemId === clauseItemId)) return items;
-  for (const type of clauseTypeDtos ?? []) {
-    const candidates = [
-      ...(type.clauseItemDtos ?? []),
-      ...(type.containers ?? []).flatMap((container: ClauseRecord) => container.clauseItemDtos ?? []),
-    ];
-    const target = candidates.find((item: ClauseRecord) => item.clauseItemId === clauseItemId);
-    if (!target) continue;
-    return [
-      ...items,
-      {
-        clauseItemId: target.clauseItemId,
-        secondClassTypeId: type.clauseTypeId,
-        elementDtos: (target.clauseComponentDtos ?? []).map((component: ClauseRecord) => {
-          const element = component.componentElementDtos?.find(
-            (candidate: ClauseRecord) => candidate.elementCode === component.value,
-          );
-          return {
-            componentCode: component.componentCode,
-            value: element?.elementValue ?? component.value,
-            ...(element ? { elementCode: element.elementCode } : {}),
-          };
-        }),
-      },
-    ];
-  }
-  throw new Error(`VBK 条款包缺少必选条款 ${clauseItemId}`);
-}
-
-export function setClauseComponentValue(
-  items: SelectedClauseItem[],
-  clauseItemId: number,
-  componentCode: string,
-  value: unknown,
-): SelectedClauseItem[] {
-  let found = false;
-  const next = items.map((item) => {
-    if (item.clauseItemId !== clauseItemId) return item;
-    const elements = (item.elementDtos ?? []).map((element) => {
-      if (element.componentCode !== componentCode) return element;
-      found = true;
-      return { ...element, value };
-    });
-    return { ...item, elementDtos: elements };
-  });
-  if (!found) throw new Error(`VBK 条款 ${clauseItemId} 缺少组件 ${componentCode}`);
-  return next;
-}
 
 const ADULT_TICKET_REMARKS_COMPONENT = "landticketremarks";
 const CHILD_TICKET_REMARKS_COMPONENT = "landticket2";
@@ -284,7 +203,7 @@ export async function saveStructuredProductClauses(
         productId: String(productId),
         tabEnum,
         clauseEditDtos: [],
-        unBookingRuleDtos: [],
+        unBookingRuleDtos: tabEnum === 3 ? [HOLIDAY_UNBOOKING_RULE] : [],
       },
     );
     const persistedClauseData = await helpers.request(
@@ -292,6 +211,13 @@ export async function saveStructuredProductClauses(
       { contentType: "json", head, productId: String(productId), tabEnum },
     );
     const persistedCentral = persistedClauseData.centralDataDto;
+    const persistedHolidayRule = persistedClauseData.unBookingContentDto?.holidayRuleDto;
+    if (tabEnum === 3 && (
+      Number(persistedHolidayRule?.lossValue) !== HOLIDAY_PENALTY_RATE
+      || Number(persistedHolidayRule?.travelAgencyLossValue) !== HOLIDAY_PENALTY_RATE
+    )) {
+      throw new Error("条款页签 3 保存后回读的节假日违约费比例（旅行者与旅行社）不是 80%");
+    }
     const persistedBody = {
       ...persistedCentral,
       clauseFilterConditionDto: persistedCentral.filterConditionDto,

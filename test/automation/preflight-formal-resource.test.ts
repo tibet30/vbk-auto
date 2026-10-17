@@ -58,6 +58,7 @@ function preflightPage(segments: { draft: unknown[]; formal: unknown[] }) {
     }
     if (endpoint.endsWith("/listProductClauses")) return success({
       centralDataDto: { additionalInfoDto: { firstClassTypeIds: [] }, filterConditionDto: { productId: 1 } },
+      unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } },
     });
     if (endpoint.endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
     if (endpoint.endsWith("/searchProductImage.json")) return success({

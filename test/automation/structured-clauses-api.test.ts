@@ -244,6 +244,7 @@ test("默认条款集合使用已保存的平台 ID，覆盖门票成人/儿童�
 
 function noPageClauseClient(tamperReadback = false, childBookable = true) {
   const saved = new Map<number, any[]>();
+  const savedUnbookingRules = new Map<number, any[]>();
   const order: number[] = [];
   const client = {
     nativeOnly: true,
@@ -253,6 +254,8 @@ function noPageClauseClient(tamperReadback = false, childBookable = true) {
       const tab = body.tabEnum ?? body.testTab;
       if (endpoint.endsWith("listProductClauses")) {
         data.centralDataDto = { testTab: tab, additionalInfoDto: { firstClassTypeIds: [tab] }, filterConditionDto: { pICategoryId: 1003 } };
+        const holidayRule = savedUnbookingRules.get(tab)?.find((rule) => rule.isHoliday === "T");
+        data.unBookingContentDto = { holidayRuleDto: holidayRule ?? {} };
       } else if (endpoint.endsWith("getClausePackage")) {
         const persisted = saved.get(tab);
         const ids = DEFAULT_SELECTED_CLAUSE_IDS[tab as keyof typeof DEFAULT_SELECTED_CLAUSE_IDS];
@@ -267,21 +270,36 @@ function noPageClauseClient(tamperReadback = false, childBookable = true) {
         order.push(tab);
         saved.set(tab, body.clausePackageItemDtos);
         data.clausePackageId = 1000 + tab;
+      } else if (endpoint.endsWith("saveProductClauses.json")) {
+        savedUnbookingRules.set(tab, body.unBookingRuleDtos.map((rule: any) => ({
+          ...rule,
+          lossValue: Number(rule.lossValue) / 100,
+          travelAgencyLossValue: Number(rule.travelAgencyLossValue) / 100,
+        })));
       }
       return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, ...data }, durationMs: 1, ctx: {} as any };
     },
   };
-  return { client, order, saved };
+  return { client, order, saved, savedUnbookingRules };
 }
 
 test("页面关闭时条款四个页签仍完成接口保存与回读，保留成人儿童门票文本", async () => {
-  const { client, order, saved } = noPageClauseClient();
+  const { client, order, saved, savedUnbookingRules } = noPageClauseClient();
   const result = await saveStructuredProductClauses(client, "79232466", { adultTicketInclusionText: "晋祠+太原古县城" });
   assert.deepEqual(order, [2, 1, 3, 4]);
   assert.equal(result.savedTabs.length, 4);
   for (const id of [13, 10087]) {
     assert.equal(saved.get(1)?.find(item => item.clauseItemId === id)?.elementDtos[0].value, "晋祠+太原古县城");
   }
+  assert.deepEqual(savedUnbookingRules.get(3), [{
+    isHoliday: "T",
+    lossValue: 0.8,
+    travelAgencyLossValue: 0.8,
+    nonGroupLossValue: 0,
+    nonGroupTravelAgencyLossValue: 0,
+    minAdvanceDays: 0,
+    maxAdvanceDays: 0,
+  }]);
 });
 
 test("无页面条款保存仍会拒绝远端回读文本不一致", async () => {

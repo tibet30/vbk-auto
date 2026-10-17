@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {preflightRepairPhase} from '../../src/main/automation/automation.main/preflight-repair-phase.js';
 import {prepareAutomationResumeRun} from '../../src/main/automation/automation.main/automation.main.resume-state.js';
+import {HOLIDAY_PENALTY_PREFLIGHT_ERROR} from '../../src/main/automation/ctrip/preflight-errors.js';
 import type {AutomationRun} from '../../src/shared/contracts.js';
 test('precise preflight mismatches reopen the affected module and dependent readback gates',()=>{
- for(const [error,phase] of [['产品图文预检推荐理由不一致：缺少「当前理由」','presentation'],['产品图文预检缺少已绑定的真实封面 remote imageId','presentation'],['产品图文预检封面绑定不一致：期望唯一 imageId=123，实际=无','presentation'],['酒店资源只读回读住宿段数量不一致：期望 1，实际 0','hotelResource'],['酒店资源只读回读第 1 段候选 ID 集合不一致：期望=123,456，实际=','hotelResource']]){
+ for(const [error,phase] of [['产品图文预检推荐理由不一致：缺少「当前理由」','presentation'],['产品图文预检产品特色文案不一致','presentation'],['产品图文预检缺少已绑定的真实封面 remote imageId','presentation'],['产品图文预检封面绑定不一致：期望唯一 imageId=123，实际=无','presentation'],['酒店资源只读回读住宿段数量不一致：期望 1，实际 0','hotelResource'],['酒店资源只读回读第 1 段候选 ID 集合不一致：期望=123,456，实际=','hotelResource']]){
  assert.equal(preflightRepairPhase(error),phase);
  const phases=['basic','presentation','hotelResource','trafficLine','preflight'];
  const old={id:'r',status:'failed',currentPhase:'preflight',logs:[],phases:phases.map(phase=>({phase,status:phase==='preflight'?'failed':'completed'})),recovery:{phases:{preflight:{finalError:error}}}} as AutomationRun;
@@ -22,4 +23,16 @@ test('private-tour hotel repair reopens resource finalization without replaying 
  const next=prepareAutomationResumeRun(old,phases,'hotelResource');
  assert.deepEqual(next.phases.filter(x=>x.status==='pending').map(x=>x.phase),['hotelResource','vehicleResource','trafficLine','preflight']);
  assert.equal(next.phases.find(x=>x.phase==='terms')?.status,'completed');
+});
+
+test('legacy completed terms reopen when the authoritative holiday penalty is not 80%',()=>{
+ const error=HOLIDAY_PENALTY_PREFLIGHT_ERROR;
+ const phases=['basic','presentation','itinerary','package','pricingInventory','hotelResource','vehicleResource','terms','trafficLine','preflight'];
+ const old={id:'r',status:'failed',currentPhase:'preflight',logs:[],phases:phases.map(phase=>({phase,status:phase==='preflight'?'failed':'completed'})),recovery:{phases:{preflight:{finalError:error}}}} as AutomationRun;
+ assert.equal(preflightRepairPhase(error),'terms');
+ const next=prepareAutomationResumeRun(old,phases,'terms');
+ assert.equal(next.currentPhase,'terms');
+ assert.deepEqual(next.phases.filter(x=>x.status==='pending').map(x=>x.phase),['terms','preflight']);
+ assert.equal(next.phases.find(x=>x.phase==='trafficLine')?.status,'completed');
+ assert.match(next.logs.at(-1)?.message ?? '',/仅重跑条款维护与最终预检/);
 });

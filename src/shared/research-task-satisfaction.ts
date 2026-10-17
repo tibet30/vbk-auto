@@ -6,6 +6,7 @@ import { hasCompletePoi, requiresItineraryPoi } from "./itinerary-activity-kind.
 import { hasVerifiedRouteAdministrativeNode } from "./route-administrative-nodes.js";
 import { samePoiName } from "./poi-name-key.js";
 import { trustedOperatorItineraryRemovals } from "./trusted-operator-itinerary-removals.js";
+import { isPersistedRouteTravelNode } from "./itinerary-route-travel-node.js";
 import {
   hasBorderPermitItineraryTrigger,
   hasResolvedBorderPermitVisibleFields,
@@ -67,6 +68,10 @@ function poiNameSatisfaction(product: ProductLike, taskName: string): PoiResearc
   if (!hasNonPoi && trustedOperatorItineraryRemovals(product).some((receipt) =>
     samePoiName(receipt.name, targetName))) return "removed";
   if (hasVerifiedRouteAdministrativeNode(product, targetName)) return "non_poi";
+  if (product.itinerary.some((day) => {
+    const record = objectValue(day);
+    return record ? isPersistedRouteTravelNode(product, record, targetName) : false;
+  })) return "non_poi";
   // An explicitly saved night shoot is an independent activity, not a new
   // sightseeing stop. Do not keep a stale POI question for its location once
   // that day's actual attractions are verified. Missing attractions above

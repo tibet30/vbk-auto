@@ -41,7 +41,11 @@ export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductD
       if (!district) { kept.push(spot); continue; }
       converted.push({ day: Number(day.day), name, districtId: Number(district.districtId) });
       const activities: Json[] = day.activities ?? [];
-      if (!activities.some(item => `${item.title ?? ''} ${item.detail ?? ''}`.includes(name))) {
+      const generated = activities.find(item => /行政地点与交通衔接$/u.test(String(item.title ?? '')));
+      if (generated && !String(generated.title).includes(name)) {
+        const names = String(generated.title).replace(/行政地点与交通衔接$/u, '').split('、').filter(Boolean);
+        generated.title = `${[...new Set([...names, name])].join('、')}行政地点与交通衔接`;
+      } else if (!activities.some(item => `${item.title ?? ''} ${item.detail ?? ''}`.includes(name))) {
         activities.push({ time: '不限', type: 'transport', title: `${name}行政地点与交通衔接`, detail: day.description || `按原始路线经${name}，保留当地停留安排。` });
       }
       day.activities = activities;

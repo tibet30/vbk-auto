@@ -16,6 +16,10 @@
 const NON_WRITABLE_CITY_NAMES: ReadonlyMap<string, string> = new Map([
   ["潮汕", "汕头"],
   ["南澳岛", "汕头"],
+  ["珠峰小镇", "定日"],
+  ["巴松村", "定日"],
+  ["塔尔钦", "普兰"],
+  ["塔钦", "普兰"],
 ]);
 
 /**

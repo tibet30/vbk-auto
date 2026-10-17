@@ -20,3 +20,14 @@ test('restoring an unresolved attraction reopens the question despite an old dis
     itinerary: [{ day: 1, spots: [{ name: '天峻县', kind: 'attraction', poiId: null, poiName: null }] }] };
   assert.equal(poiResearchTaskSatisfaction({ label: '核查 天峻县 的 VBK POI 映射', type: 'vbk' }, p), null);
 });
+
+test('persisted lodging and road nodes retire stale POI questions without deletion receipts', () => {
+  const p = { basicInfo: { meetingCity: '拉萨', userIdea: 'D1：拉萨—塔钦（宿塔尔钦）\nD2：塔钦—22道班—萨嘎（宿萨嘎）' },
+    itinerary: [
+      { day: 1, title: '拉萨—塔钦', spots: [] },
+      { day: 2, title: '塔钦—22道班—萨嘎', spots: [] },
+    ] };
+  for (const name of ['拉萨', '塔钦', '22道班', '萨嘎']) {
+    assert.equal(poiResearchTaskSatisfaction({ label: `核查 ${name} 的 VBK POI 映射`, type: 'vbk' }, p), 'non_poi');
+  }
+});

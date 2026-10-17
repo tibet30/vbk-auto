@@ -38,6 +38,8 @@ test('dated D routes normalize unique cross-province administrative anchors and 
   assert.equal(result?.converted.length, 4);
   assert.deepEqual(result?.itinerary[0].spots.map((s: any) => s.name), ['茶卡盐湖']);
   assert.equal(result?.itinerary[1].spots.length, 0);
+  assert.equal(result?.itinerary[1].activities.length, 1);
+  assert.equal(result?.itinerary[1].activities[0].title, '瓜州、敦煌行政地点与交通衔接');
   assert.match(result?.itinerary[1].activities.map((a: any) => `${a.title} ${a.detail}`).join(' '), /瓜州.*敦煌/);
   assert.equal(p.product.itinerary[0]?.spots?.length, 3);
 });

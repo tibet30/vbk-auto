@@ -1,3 +1,5 @@
+import { isPersistedRouteTravelNode } from "../../shared/itinerary-route-travel-node.js";
+
 type JsonObject = Record<string, unknown>;
 
 export interface ItinerarySelfRepairResult {
@@ -13,7 +15,7 @@ export interface ItinerarySelfRepairResult {
  * Explicitly named attractions stay in their original order until an operator
  * resolves or removes them.  A missing POI never selects an `or` sibling.
  */
-export function selfRepairItineraryForVbk(value: unknown, nights?: number): ItinerarySelfRepairResult {
+export function selfRepairItineraryForVbk(value: unknown, nights?: number, product?: JsonObject): ItinerarySelfRepairResult {
   const itinerary = Array.isArray(value)
     ? value.filter(isRecord).map((day) => structuredClone(day))
     : [];
@@ -30,7 +32,7 @@ export function selfRepairItineraryForVbk(value: unknown, nights?: number): Itin
     const original = Array.isArray(day.spots) ? day.spots.filter(isRecord) : [];
     const withoutTravel = original.filter((spot) => {
       const name = spotName(spot);
-      if (!name || isExplicitNonPoi(spot) || !isExplicitTravelNode(day, spot)) return true;
+      if (!name || isExplicitNonPoi(spot) || !isExplicitTravelNode(day, spot, product)) return true;
       removedTravelNodes.push(name);
       return false;
     });
@@ -63,10 +65,12 @@ function isExplicitNonPoi(value: JsonObject): boolean {
   return value.kind === "free" || value.kind === "other";
 }
 
-function isExplicitTravelNode(day: JsonObject, spot: JsonObject): boolean {
+function isExplicitTravelNode(day: JsonObject, spot: JsonObject, product?: JsonObject): boolean {
   const name = spotName(spot);
-  if (/^(?:接站|送站|接机|送机|接团|送团|接送|接火车|送火车)/u.test(name)) return true;
+  if (/^(?:接站|送站|接机|送机|接团|送团|接送|接火车|送火车)(?:服务|返程)?$/u.test(name)) return true;
+  if (/(?:公园|景区|风景区|古镇|古城|街区|博物馆|纪念馆|寺|遗址)$/u.test(name)) return false;
   if (/(?:\(|（)(?:入住|住宿)(?:\)|）)|^(?:入住|住宿)/u.test(name)) return true;
+  if (isPersistedRouteTravelNode(product, day, name)) return true;
   if (!/(?:机场|航站楼|火车站|高铁站|动车站|汽车站|客运站|码头)/u.test(name)) return false;
   return /(?:接站|送站|接机|送机|接火车|送火车|接送)/u.test(`${text(day.title)} ${text(day.description)}`);
 }

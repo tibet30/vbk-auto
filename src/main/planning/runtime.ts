@@ -20,6 +20,7 @@ import { ProductMutationService } from "../application/product-mutation-service.
 import { getCtripSightAvailability, getCtripSightAvailabilities } from "../infrastructure/ctrip-sight-availability.js";
 import { suggestPoi, suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { getVbkRequestPage } from "../infrastructure/vbk-request-page.js";
+import { queryRecommendationCategoryPolicy } from "../infrastructure/vbk-recommendation-category-policy.js";
 import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
@@ -38,6 +39,9 @@ import type {
   PlanningModule,
   ResearchTaskProposal,
 } from "../../shared/contracts-planning.js";
+import { isProductForm } from "../../shared/product-form.js";
+import { PRODUCT_FORM_PATTERN_IDS } from "../../shared/recommendation-category-policy.js";
+import { unavailableRecommendationCategories } from "../../shared/recommendation-category-policy.js";
 import { detectAcceptedModulesFromProduct, itineraryPoisAreComplete } from "./runtime-accepted-modules.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName, resolveTravelScope } from "./runtime/province-scope.js";
 import {
@@ -86,6 +90,29 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     private readonly resourceQueries?: ResourceQueryOverrides,
   ) {
     this.productMutations = productMutations ?? new ProductMutationService(db);
+  }
+
+  async resolveRecommendationCategoryPolicy(localProductId: string) {
+    const product = this.db.getProduct(localProductId);
+    if (!product) throw new Error("产品不存在，无法读取推荐理由类别策略。");
+    const form = (product.product.sales as { productForm?: unknown } | undefined)?.productForm;
+    if (!isProductForm(form)) throw new Error("产品形态未确定，无法读取推荐理由类别策略。");
+    return platformResourceGateway(this.db, localProductId).query(
+      "recommendation_category_policy",
+      { productForm: form, productPatternId: PRODUCT_FORM_PATTERN_IDS[form], inputLocale: "zh-CN" },
+      async () => {
+        if (this.resourceQueries?.recommendationCategoryPolicy) {
+          return this.resourceQueries.recommendationCategoryPolicy(form);
+        }
+        if (!this.browser) throw new Error("VBK 会话不可用，无法读取推荐理由类别策略。");
+        const run = async () => queryRecommendationCategoryPolicy(
+          await getVbkRequestPage(this.browser!),
+          { productPatternId: PRODUCT_FORM_PATTERN_IDS[form], inputLocale: "zh-CN" },
+        );
+        return this.runVbkPageExclusive ? this.runVbkPageExclusive(run) : run();
+      },
+      (value) => value.categories.length < 3,
+    );
   }
   async suggestPoi(keyword: string, context?: { destinationCity?: string; province?: string }) {
     if (!this.browser) return null;
@@ -142,6 +169,11 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
       value = merged.mergedValue;
     }
     if (module === "presentation") {
+      const policy = await this.resolveRecommendationCategoryPolicy(localProductId);
+      const unavailable = unavailableRecommendationCategories(value, policy);
+      if (unavailable.length) {
+        return { ok: false, reason: `推荐理由类别当前不可用：${unavailable.join("、")}。请按最新平台策略重新规划。` };
+      }
       const merged = mergePresentation(product, value);
       if (merged.rejectReason) return { ok: false, reason: merged.rejectReason };
       value = merged.mergedValue;

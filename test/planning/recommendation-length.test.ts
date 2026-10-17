@@ -56,6 +56,9 @@ test("图文兜底不保留长度不合规的旧推荐理由，生成内容均�
   let written: unknown;
   const runtime = {
     loadCurrentProduct: async () => ({ basicInfo: { meetingCity: "成都", days: 1 }, presentation: presentation("短句") }),
+    resolveRecommendationCategoryPolicy: async () => ({ source: "fixed-replay", inputLocale: "zh-CN", productPatternId: 4,
+      limited: true, categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"],
+      fetchedAt: "2026-10-16T00:00:00.000Z" }),
     writeModule: async (_id: string, module: string, _path: string, value: unknown) => {
       if (module === "presentation") written = value;
       return { ok: true };

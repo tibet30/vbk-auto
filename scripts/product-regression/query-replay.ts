@@ -4,6 +4,7 @@ import type { VbkBrowser } from '../../src/main/infrastructure/vbk-browser.js';
 import { EMPTY_VBK_SESSION_CONTEXT } from '../../src/main/infrastructure/vbk-session-request.js';
 import { type RegressionFixture, type Json } from './corpus.js';
 import { hotelTransport, loadProviderReplay, type ProviderReplay } from './provider-replay.js';
+import { PRODUCT_FORM_PATTERN_IDS } from '../../src/shared/recommendation-category-policy.js';
 
 /** Semantic query projections; never selects, binds or returns a completed product. */
 export function createQueryReplay(fixture: RegressionFixture, provider: ProviderReplay = loadProviderReplay(fixture.key)) {
@@ -11,6 +12,19 @@ export function createQueryReplay(fixture: RegressionFixture, provider: Provider
   const misses: string[] = [];
   const missing = (query: string): never => { misses.push(query); throw new ReplayDataMissingError(`缺少资源查询回放：${query}`); };
   const queries: ResourceQueryOverrides = {
+    recommendationCategoryPolicy: async productForm => {
+      calls.push(`recommendation-category-policy:${productForm}`);
+      const limited = productForm !== 'freeTravel';
+      const categoryIds = limited ? [1, 2, 3, 5, 15] : [1, 2, 3, 5, 9, 15];
+      const categories = limited
+        ? ['服务保障', '贴心赠送', '精选酒店', '特色美食', '缤纷体验']
+        : ['服务保障', '贴心赠送', '精选酒店', '特色美食', '优选行程', '缤纷体验'];
+      return {
+        source: 'fixed-replay', inputLocale: 'zh-CN', productPatternId: PRODUCT_FORM_PATTERN_IDS[productForm],
+        limited, categoryIds, categories,
+        fetchedAt: '2026-10-16T00:00:00.000Z',
+      };
+    },
     poiAvailability: async id => {
       calls.push(`availability:${id}`);
       const item = fixture.poiReplay.find(p => p.candidate.poiId === id);

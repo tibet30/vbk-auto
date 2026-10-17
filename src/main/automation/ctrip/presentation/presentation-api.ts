@@ -10,6 +10,8 @@ import { buildRecommendationReasonsPlan, type RecommendationPlanStep } from "./r
 import { readProductIdFromVbkUrl } from "./cover-bind.js";
 import { assertNoPresentationRejectedWords } from "./copy-errors.js";
 import { findVbkCopyBadCase } from "../../../planning/vbk-copy-policy.js";
+import { queryRecommendationCategoryPolicy } from "../../../infrastructure/vbk-recommendation-category-policy.js";
+import { unavailableRecommendationCategories } from "../../../../shared/recommendation-category-policy.js";
 
 const SOA_15638 = "https://online.ctrip.com/restapi/soa2/15638";
 const CREATE_PRODUCT_DRAFT_ENDPOINT =
@@ -49,14 +51,26 @@ export async function savePresentationViaApi(
   if (!featuresHtml) throw new Error("产品图文缺少产品特色 HTML，已停止接口保存。");
   assertPresentationCopyAllowed(productFeaturesPlainText(featuresHtml), "features", "产品特色");
 
-  const [categoryMap, current] = await Promise.all([
-    loadRecommendationCategories(page),
+  const [base, current] = await Promise.all([
+    getProductBaseInfoApi(page, String(productId)),
     loadDescriptionInfo(page, productId),
   ]);
+  const sale = asRecord(base.saleControlInfo);
+  const productPatternId = Number(sale?.productPatternID ?? sale?.productPatternId);
+  const inputLocale = text(sale?.inputLocale) || "zh-CN";
+  if (!Number.isInteger(productPatternId) || productPatternId <= 0) {
+    throw new Error("产品图文缺少已保存的产品形态，无法读取推荐理由类别策略。");
+  }
+  const policy = await queryRecommendationCategoryPolicy(page, { productPatternId, inputLocale });
+  const unavailable = unavailableRecommendationCategories(presentation, policy);
+  if (unavailable.length) {
+    throw new Error(`推荐理由类别策略已变化，请返回规划阶段重新生成：${unavailable.join("、")}。`);
+  }
+  const categoryMap = new Map(policy.categories.map((name, index) => [name, policy.categoryIds[index]!]));
   if (options.reconcile && descriptionMatches(current, recommendations, featuresHtml)) {
     return { productId, recommendationCount: current.pmRcmdItems?.length ?? 0, featuresSaved: true, savedWith: "presentation-api" };
   }
-  await checkPresentationSensitiveWords(page, productId, presentation, recommendations, featuresHtml);
+  await checkPresentationSensitiveWords(page, productId, presentation, recommendations, featuresHtml, base);
   await options.beforeWrite?.();
   await createDescriptionDraft(page, productId);
 
@@ -112,25 +126,6 @@ function assertPresentationCopyAllowed(value: unknown, path: string, label: stri
   );
 }
 
-async function loadRecommendationCategories(page: VbkSessionRequestBrowser): Promise<Map<string, number>> {
-  const result = await request(page, {
-    endpoint: `${SOA_15638}/getpmrcmdcategory.json`,
-    body: {},
-    errorLabel: "读取产品图文推荐理由分类",
-  });
-  assertAckSuccess(result, "读取产品图文推荐理由分类");
-  const categories = asRecord(result.payload)?.pmRcmdCategories;
-  if (!Array.isArray(categories)) throw new Error("产品图文推荐理由分类回读为空。");
-  const map = new Map<string, number>();
-  for (const item of categories) {
-    const record = asRecord(item);
-    const name = text(record?.pmRcmdCategoryName);
-    const id = Number(record?.pmRcmdCategoryId);
-    if (name && Number.isInteger(id) && id > 0) map.set(name, id);
-  }
-  return map;
-}
-
 async function loadDescriptionInfo(
   page: VbkSessionRequestBrowser,
   productId: number,
@@ -150,6 +145,7 @@ async function checkPresentationSensitiveWords(
   presentation: any,
   recommendations: RecommendationPlanStep[],
   featuresHtml: string,
+  base: Record<string, any>,
 ): Promise<void> {
   const content = [
     presentation.recommendation,
@@ -157,7 +153,6 @@ async function checkPresentationSensitiveWords(
     ...recommendations.map((item) => item.text),
   ].map(text).filter(Boolean).join("\n");
   if (!content) return;
-  const base = await getProductBaseInfoApi(page, String(productId));
   const sale = asRecord(base.saleControlInfo);
   const categoryId = Number(sale?.pICategoryId);
   const locale = text(sale?.inputLocale);

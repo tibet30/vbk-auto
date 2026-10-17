@@ -18,6 +18,8 @@ import {
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import type { AgentTool } from "./types.js";
 import type { ResourceQueryOverrides } from '../planning/resource-query-overrides.js';
+import { unavailableRecommendationCategories } from '../../shared/recommendation-category-policy.js';
+import { deterministicPresentationRepair } from './presentation-deterministic-repair.js';
 
 type JsonObject = Record<string, unknown>;
 type GenerateStage = ProductGenerationStage;
@@ -48,6 +50,15 @@ export function createGenerationStageTools(args: {
   clearUnverifiedItineraryPois: (itinerary: unknown) => void;
 }): AgentTool[] {
   const { deps, get, resolveTrafficAvailability, resolveItineraryPoisAndTraffic, clearUnverifiedItineraryPois } = args;
+  const runtime = () => new DbOrchestratorRuntime(
+    deps.db,
+    deps.browser,
+    deps.productMutations,
+    (task) => deps.productWorkflows.runVbkPageExclusive(task),
+    resolveTrafficAvailability,
+    deps.disambiguatePoiOption,
+    deps.resourceQueries,
+  );
   const removeConvergedAlternativeDayCopy = (localProductId: string): boolean => {
     const saved = get(localProductId);
     const repaired = repairExcludedAlternativeCopy(saved, saved.product.itinerary);
@@ -63,15 +74,7 @@ export function createGenerationStageTools(args: {
   const generation = () => new ProductGenerationService({
     getProduct: get,
     generateStage: (localProductId, stage) => deps.generateStage(localProductId, stage),
-    runtime: new DbOrchestratorRuntime(
-      deps.db,
-      deps.browser,
-      deps.productMutations,
-      (task) => deps.productWorkflows.runVbkPageExclusive(task),
-      resolveTrafficAvailability,
-      deps.disambiguatePoiOption,
-      deps.resourceQueries,
-    ),
+    runtime: runtime(),
     beforePresentation: (localProductId) => {
       removeConvergedAlternativeDayCopy(localProductId);
     },
@@ -112,9 +115,31 @@ export function createGenerationStageTools(args: {
       parameters: { type: "object", properties: {} },
       async execute(_toolArgs, ctx) {
         const current = get(ctx.localProductId).product as JsonObject;
+        const policy = await runtime().resolveRecommendationCategoryPolicy(ctx.localProductId);
         if (hasCompletePresentationRecommendations(current.presentation)
+          && unavailableRecommendationCategories(current.presentation, policy).length === 0
           && excludedItineraryCopyConflicts(get(ctx.localProductId)).length === 0) {
           return { content: "推荐理由已处理完成：当前已保存 3 条有效且分类不重复的推荐理由。", data: { recommendationsVerified: true, alreadySatisfied: true } };
+        }
+        const saved = get(ctx.localProductId);
+        const repairedPresentation = deterministicPresentationRepair(saved, policy.categories);
+        if (repairedPresentation) {
+          deps.productMutations.commands.mergeChanges(ctx.localProductId, saved, {
+            ...saved.product,
+            presentation: repairedPresentation,
+          }, 'ai', { status: saved.status });
+          const persisted = get(ctx.localProductId);
+          const persistedPresentation = (persisted.product as JsonObject).presentation;
+          if (!hasCompletePresentationRecommendations(persistedPresentation)
+            || unavailableRecommendationCategories(persistedPresentation, policy).length > 0
+            || excludedItineraryCopyConflicts(persisted).length > 0) {
+            throw new Error("推荐理由确定性修复后回读仍不满足当前行程与类别策略。");
+          }
+          deps.emitProduct(persisted);
+          return {
+            content: "推荐理由已处理完成：已依据当前有效行程重建推荐与产品特色。",
+            data: { recommendationsVerified: true, deterministicRepair: true },
+          };
         }
         const { applied } = await generation().generate(ctx.localProductId, "presentation");
         return {

@@ -1,11 +1,12 @@
 import type { AgentSnapshot, ProductDetail } from "../../shared/contracts.js";
-import type { DiagnosticEnvironment } from "../../shared/product-diagnostic-report.js";
+import type { DiagnosticEnvironment, ProductDiagnosticReport } from "../../shared/product-diagnostic-report.js";
+import type { ProductTelemetryReport } from "../../shared/product-usage-report.js";
 import { logWarn } from "../../shared/log-timestamp.js";
+import { redactLogString } from "../../shared/log-redaction.js";
 import type { AppAuthStore } from "./app-auth-store.js";
 import type { VbkDatabase } from "./database/database.js";
 import { resolveTibetApiBaseUrl } from "./tibet-auth.js";
 import { buildProductDiagnostics } from "../application/product-diagnostic-builder.js";
-import { buildProductUsageReport } from "../application/product-usage-builder.js";
 
 export function createProductDiagnosticReporter(args: {
   db: VbkDatabase; store: AppAuthStore; environment(): DiagnosticEnvironment;
@@ -43,22 +44,24 @@ export function createProductDiagnosticReporter(args: {
       for (const item of pending) {
         const session = args.store.get();
         if (!session || session.user.id !== owner) return;
-        const usage = "reportType" in item.report && item.report.reportType === "usage";
-        const route = usage ? "desktop-usage" : "desktop-diagnostics";
-        const expectedEventId = "reportId" in item.report ? item.report.reportId : item.report.failure?.eventId ?? null;
-        const response = await (args.fetchImpl ?? fetch)(`${resolveTibetApiBaseUrl(args.baseUrl)}/api/extension/${route}`, {
+        const report = minimalReport(item.report);
+        if (!report) {
+          args.db.markDiagnosticSent(owner, item.eventId);
+          continue;
+        }
+        const response = await (args.fetchImpl ?? fetch)(`${resolveTibetApiBaseUrl(args.baseUrl)}/api/extension/desktop-diagnostics`, {
           method: "POST", signal: AbortSignal.timeout(15_000),
           headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${session.token}` },
-          body: JSON.stringify(item.report),
+          body: JSON.stringify(report),
         });
-        const context = `${route}，HTTP ${response.status}`;
+        const context = `desktop-diagnostics，HTTP ${response.status}`;
         if (!response.ok) throw new Error(`诊断服务请求失败（${context}）`);
         let envelope: { code?: number; data?: { clientId?: string; eventId?: string | null } } | null;
         try { envelope = await response.json() as typeof envelope; } catch {
           throw new Error(`诊断服务返回非 JSON 数据（${context}，${response.headers.get("content-type") ?? "未知内容类型"}）`);
         }
-        if (envelope?.code !== 200 || envelope.data?.clientId !== item.report.clientId
-          || envelope.data?.eventId !== expectedEventId) {
+        if (envelope?.code !== 200 || envelope.data?.clientId !== report.clientId
+          || envelope.data?.eventId !== report.issue.eventId) {
           throw new Error(`诊断服务未确认保存（${context}）`);
         }
         args.db.markDiagnosticSent(owner, item.eventId);
@@ -70,16 +73,53 @@ export function createProductDiagnosticReporter(args: {
       try {
         const owner = args.db.readLocalProductState(product.id)?.ownerUserId;
         if (!owner) return;
-        for (const report of buildProductDiagnostics(product, args.environment(), snapshot)) {
-          args.db.enqueueDiagnostic(owner, report.failure?.eventId ?? `created:${product.id}`, report);
+        const task = args.db.latestWorkflowTaskForProduct(product.id);
+        for (const report of buildProductDiagnostics(product, args.environment(), snapshot, task)) {
+          args.db.enqueueDiagnostic(owner, report.issue.eventId, report);
         }
-        const usage = buildProductUsageReport(product, args.environment(), snapshot);
-        if (usage) args.db.enqueueDiagnostic(owner, `usage:${usage.reportId}`, usage);
         if (args.autoFlush !== false) void flush();
       } catch {
         logWarn("[product-diagnostics] collection deferred; local product remains saved");
       }
     },
     flush,
+  };
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function text(value: unknown, max: number): string {
+  return redactLogString(typeof value === "string" ? value : String(value ?? "")).slice(0, max);
+}
+
+/** Rich v1 rows and old usage may still exist locally; never put those payloads on the wire. */
+function minimalReport(value: ProductTelemetryReport): ProductDiagnosticReport | undefined {
+  const raw = record(value);
+  if (raw.reportType === "usage") return undefined;
+  const legacy = record(raw.failure);
+  const current = record(raw.issue);
+  const issue = raw.schemaVersion === 2 ? current : legacy;
+  if (!Object.keys(issue).length) return undefined;
+  const state = raw.schemaVersion === 2 ? text(issue.state, 40) : "failed";
+  if (!["failed", "paused", "blocked", "uncertain_write"].includes(state)) return undefined;
+  const source = raw.schemaVersion === 2 && issue.source === "entry" ? "entry" : "planning";
+  const reason = text(raw.schemaVersion === 2 ? issue.reason : issue.error, 2_000);
+  const eventId = text(issue.eventId, 64);
+  const occurredAt = text(issue.occurredAt, 40);
+  if (!eventId || !reason || !occurredAt) return undefined;
+  const blocker = text(issue.blockerKind, 40);
+  const blockerKind = ["approval_precondition", "authorization_denied", "completion_blocked"].includes(blocker)
+    ? blocker as ProductDiagnosticReport["issue"]["blockerKind"] : undefined;
+  const environment = record(raw.environment);
+  const optionalEnvironment = Object.fromEntries(["model", "provider"]
+    .flatMap(key => environment[key] === undefined ? [] : [[key, text(environment[key], 120)]]));
+  return {
+    schemaVersion: 2, clientId: text(raw.clientId, 64), name: text(raw.name, 255),
+    environment: { appVersion: text(environment.appVersion, 120), platform: text(environment.platform, 120),
+      arch: text(environment.arch, 120), ...optionalEnvironment },
+    issue: { eventId, source, state: state as ProductDiagnosticReport["issue"]["state"],
+      stage: text(issue.stage || "agent", 120), reason, occurredAt, ...(blockerKind ? { blockerKind } : {}) },
   };
 }

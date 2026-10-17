@@ -1,6 +1,6 @@
 import type { AiUsageTotals } from "./contracts-ai-usage.js";
 import type { AiTokenRateCny } from "./ai-usage-cost.js";
-import type { DiagnosticEnvironment, ProductDiagnosticReport } from "./product-diagnostic-report.js";
+import type { DiagnosticEnvironment, LegacyProductDiagnosticReport, ProductDiagnosticReport } from "./product-diagnostic-report.js";
 
 export interface ProductUsageReport {
   schemaVersion: 1;
@@ -20,4 +20,4 @@ export interface ProductUsageReport {
   };
 }
 
-export type ProductTelemetryReport = ProductDiagnosticReport | ProductUsageReport;
+export type ProductTelemetryReport = ProductDiagnosticReport | LegacyProductDiagnosticReport | ProductUsageReport;

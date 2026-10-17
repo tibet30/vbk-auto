@@ -73,6 +73,7 @@ export function applySensitivePresentationRewrite(
     if (typeof next !== "string" || next.trim().length === 0) {
       throw new Error(`AI 未重写敏感词命中的字段：${path}`);
     }
+    let acceptedValue = next.trim();
     const visible = path === "features" ? productFeaturesPlainText(next) : next;
     if (/[\u200b-\u200d\ufeff]/.test(visible)) throw new Error("AI 重写不得通过隐藏字符规避关键词检查。");
     const remaining = sensitiveWords.find((word) => word.trim() && visible.includes(word.trim()));
@@ -85,14 +86,17 @@ export function applySensitivePresentationRewrite(
     if (path === "features") {
       const safeHtml = formatProductFeaturesHtml(next);
       if (!productFeaturesPlainText(safeHtml)) throw new Error("AI 重写后的产品特色为空。");
-      if (/<[^>]+>/.test(next) && safeHtml !== next.trim()) throw new Error("AI 重写后的产品特色包含不允许的 HTML。");
+      if (productFeaturesPlainText(safeHtml) !== visible) {
+        throw new Error("AI 重写后的产品特色包含无法安全保留的 HTML 内容。");
+      }
       const tags = (value: string) => formatProductFeaturesHtml(value).match(/<[^>]+>/g)?.join("") ?? "";
       if (tags(next) !== tags(String(current.features))) throw new Error("AI 重写不得改变产品特色的富文本结构。");
+      acceptedValue = safeHtml;
     }
     const before = String(readPath(current, path) ?? "");
     const facts = visible.match(/\d+(?:\.\d+)?|(?:含餐|含早|含午餐|含晚餐|赠送|免费|保险|保证)/g) ?? [];
     if (facts.some(fact => !before.includes(fact))) throw new Error(`AI 重写引入未经确认的权益或数值：${path}`);
-    writePath(candidate, path, next.trim());
+    writePath(candidate, path, acceptedValue);
   }
   if (findSensitivePresentationPaths({ presentation: candidate }, sensitiveWords).length) {
     throw new Error("AI 重写后的图文仍包含本轮累计非法关键词。");
@@ -105,6 +109,34 @@ export function applySensitivePresentationRewrite(
   if (!copyShape.success) throw new Error("AI 重写后的产品图文不符合文案结构约束。");
   // 所有字段通过后一次性提交，避免后一个字段失败时留下半更新。
   product.presentation = candidate;
+}
+
+/** Prefer a bounded deletion for platform-named words; fall back to AI when shape/length would become invalid. */
+export function applyDeterministicPresentationWordRemoval(
+  product: ProductWithPresentation,
+  affectedPaths: readonly PresentationCopyPath[],
+  sensitiveWords: readonly string[],
+): boolean {
+  const current = product.presentation;
+  if (!current) return false;
+  const generated = structuredClone(current);
+  for (const path of affectedPaths) {
+    const before = readPath(generated, path);
+    if (typeof before !== "string") return false;
+    const after = sensitiveWords.reduce((value, word) => value.replaceAll(word.trim(), ""), before)
+      .replace(/[、，,]{2,}/g, "、").replace(/\s{2,}/g, " ").trim();
+    if (!after || after === before) return false;
+    writePath(generated, path, after);
+  }
+  try {
+    applySensitivePresentationRewrite(product, {
+      reply: "", questions: [], researchTasks: [],
+      patch: [{ op: "replace", path: "/presentation", value: generated }],
+    }, affectedPaths, sensitiveWords);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function rewritePrompt(words: readonly string[], paths: readonly PresentationCopyPath[], presentation?: Record<string, any>): string {

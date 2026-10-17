@@ -12,7 +12,7 @@ function fixture() {
   const product = {
     basicInfo: { meetingCity: "泸州" },
     presentation: {
-      recommendation: "泸州两天一晚私家团", recommendationCategory: "优选行程", features: "<p>游览当地人文景观</p>",
+      recommendation: "泸州两天一晚私家团", recommendationCategory: "服务保障", features: "<p>游览当地人文景观</p>",
       recommendations: [
         { category: "服务保障", text: "专车衔接泸州当地景点，按既定行程安排接送" },
         { category: "精选酒店", text: "安排泸州当地酒店住宿一晚，便于各景点衔接" },
@@ -39,10 +39,17 @@ function fixture() {
       const endpoint = args.endpoint.split("/").at(-1)!;
       calls.push(endpoint);
       let payload: any = { ResponseStatus: { Ack: "Success" } };
-      if (endpoint === "getProductBaseInfo") payload.saleControlInfo = { pICategoryId: 1003, inputLocale: "zh-CN" };
+      if (endpoint === "getProductBaseInfo") payload.saleControlInfo = { pICategoryId: 1003, productPatternID: 4, inputLocale: "zh-CN" };
+      else if (endpoint === "tripInputLimitConfig") payload.data = { scope: { recommendReason: {
+        enabled: true, patternIds: [1, 3, 4], localePatternIds: { "zh-CN": [1, 3, 4] }, categoryWhitelist: [1, 3, 5],
+      } } };
       else if (endpoint === "searchProductImage.json") payload.productImages = images;
       else if (endpoint === "bindProductImage.json") { images = args.body.productImages; payload.success = true; }
-      else if (endpoint === "getpmrcmdcategory.json") payload.pmRcmdCategories = ["服务保障", "精选酒店", "特色美食"].map((name, index) => ({ pmRcmdCategoryId: index + 1, pmRcmdCategoryName: name }));
+      else if (endpoint === "getpmrcmdcategory.json") payload.pmRcmdCategories = [
+        { pmRcmdCategoryId: 1, pmRcmdCategoryName: "服务保障" },
+        { pmRcmdCategoryId: 3, pmRcmdCategoryName: "精选酒店" },
+        { pmRcmdCategoryId: 5, pmRcmdCategoryName: "特色美食" },
+      ];
       else if (endpoint === "getdescriptionInfo") payload.info = remote;
       else if (endpoint === "checkSensitiveWord") payload.sensitiveWords = [];
       else if (endpoint === "savedescriptioninfo") {

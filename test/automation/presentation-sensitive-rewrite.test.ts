@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  applyDeterministicPresentationWordRemoval,
   applySensitivePresentationRewrite,
   findSensitivePresentationPaths,
 } from "../../src/main/automation/automation.main/presentation-sensitive-rewrite.js";
@@ -24,6 +25,17 @@ function product() {
 test("敏感词只定位实际命中的产品图文字段", () => {
   const value = product();
   assert.deepEqual(findSensitivePresentationPaths(value, ["首次"]), ["recommendation"]);
+});
+
+test("平台点名词可在保持富文本结构时确定性删除，长度失效则交回 AI", () => {
+  const value = product();
+  value.presentation.features = "<p><strong>路线：</strong>串联冈仁波齐与藏西湖泊景观</p>";
+  assert.equal(applyDeterministicPresentationWordRemoval(value, ["features"], ["冈仁波齐"]), true);
+  assert.equal(value.presentation.features, "<p><strong>路线：</strong>串联与藏西湖泊景观</p>");
+
+  const short = product();
+  assert.equal(applyDeterministicPresentationWordRemoval(short, ["recommendations.2.text"], ["地道晋菜与地方早餐"]), false);
+  assert.match(short.presentation.recommendations[2].text, /地道晋菜与地方早餐/);
 });
 
 test("敏感词重写使用平台字符宽度，中文超84字节仍可合法写入", () => {
@@ -116,4 +128,25 @@ test("改写拒绝新增权益，富文本在可见文本层定位", () => {
   assert.deepEqual(findSensitivePresentationPaths(value, ["江鲜"]), ["features"]);
   value.presentation.features = "<p>自由品尝&#27743;&#x9c9c;</p>";
   assert.deepEqual(findSensitivePresentationPaths(value, ["江鲜"]), ["features"]);
+});
+
+test("产品特色重写会无损清理标签属性，但拒绝清理后丢失可见内容", () => {
+  const value = product();
+  value.presentation.features = "<p><strong>路线：</strong>首次到访可串联核心看点</p>";
+  applySensitivePresentationRewrite(value, {
+    reply: "", questions: [], researchTasks: [], patch: [{ op: "replace", path: "/presentation", value: {
+      ...value.presentation,
+      features: '<p class="copy"><strong style="color:red">路线：</strong>集中游览核心看点</p>',
+    } }],
+  }, ["features"], ["可串联"]);
+  assert.equal(value.presentation.features, "<p><strong>路线：</strong>集中游览核心看点</p>");
+
+  const before = structuredClone(value);
+  assert.throws(() => applySensitivePresentationRewrite(value, {
+    reply: "", questions: [], researchTasks: [], patch: [{ op: "replace", path: "/presentation", value: {
+      ...value.presentation,
+      features: "<p><strong>路线：</strong>集中游览核心看点</p><script>危险内容</script>",
+    } }],
+  }, ["features"], []), /无法安全保留的 HTML 内容/);
+  assert.deepEqual(value, before);
 });

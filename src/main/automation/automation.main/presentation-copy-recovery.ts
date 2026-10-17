@@ -3,7 +3,12 @@ import type { AiResponse } from "../../../shared/contracts.js";
 import type { VbkCopyFeedbackStore, VbkCopyRecovery } from "../../planning/vbk-copy-feedback.js";
 import { PresentationSensitiveWordsError } from "../ctrip/presentation/save-monitor.js";
 import { PresentationCopyRejectedError } from "../ctrip/presentation/copy-errors.js";
-import { applySensitivePresentationRewrite, findSensitivePresentationPaths, rewritePrompt } from "./presentation-copy-candidate.js";
+import {
+  applyDeterministicPresentationWordRemoval,
+  applySensitivePresentationRewrite,
+  findSensitivePresentationPaths,
+  rewritePrompt,
+} from "./presentation-copy-candidate.js";
 
 type Product = Record<string, any> & { presentation?: Record<string, any> };
 export function presentationCopyHash(product: Product): string {
@@ -69,7 +74,24 @@ export async function runPresentationCopyRecovery(args: {
         }
       }
       const paths = findSensitivePresentationPaths(args.product, state.words);
-      if (!paths.length) throw new Error(`平台非法关键词无法在提交的产品图文中定位：${state.words.join("、")}`);
+      if (!paths.length) {
+        if (state.rewrites >= 2) {
+          throw new Error(`产品图文自动修复未完成，已使用 ${state.rewrites}/2 轮：${rejection.message}`);
+        }
+        throw new Error(`平台非法关键词无法在提交的产品图文中定位：${state.words.join("、")}`);
+      }
+      const deterministic = structuredClone(args.product);
+      if (state.rewrites >= 2 && applyDeterministicPresentationWordRemoval(deterministic, paths, state.words)) {
+        const before = structuredClone(args.product.presentation);
+        state.currentHash = presentationCopyHash(deterministic);
+        state.history.push({ at: new Date().toISOString(), source: "deterministic-removal", detail: rejection.message, paths, before, after: deterministic.presentation });
+        remember();
+        args.product.presentation = deterministic.presentation;
+        try { args.persist(); } catch (error) { args.product.presentation = before; throw error; }
+        args.log(`已按平台点名词确定性清理产品图文：${state.words.join("、")}`, "warning");
+        rejection = undefined;
+        continue;
+      }
       if (!args.rewrite || state.rewrites >= 2) throw new Error(`产品图文自动修复未完成，已使用 ${state.rewrites}/2 轮：${rejection.message}`);
       state.rewrites += 1;
       remember(); // AI 调用前计数，崩溃或无效输出同样消耗预算。

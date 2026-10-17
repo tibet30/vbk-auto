@@ -8,7 +8,12 @@ import { runPresentationCopyRecovery } from "./presentation-copy-recovery.js";
 import { savePresentationViaApi } from "../ctrip/presentation/presentation-api.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { verifyPresentationImageCheckpoint } from "../ctrip/presentation/image-checkpoint.js";
-export { findSensitivePresentationPaths, applySensitivePresentationRewrite, rewritePrompt } from "./presentation-copy-candidate.js";
+export {
+  applyDeterministicPresentationWordRemoval,
+  applySensitivePresentationRewrite,
+  findSensitivePresentationPaths,
+  rewritePrompt,
+} from "./presentation-copy-candidate.js";
 export type { PresentationCopyPath } from "./presentation-copy-candidate.js";
 type ProductWithPresentation = Record<string, any> & { presentation?: Record<string, any> };
 

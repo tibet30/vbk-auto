@@ -9,6 +9,9 @@ import {
 } from "../../src/main/planning/itinerary-alternative-copy.js";
 import { buildDayDescription } from "../../src/main/automation/ctrip/itinerary-api/itinerary-transform.js";
 import { alternativeGroupKey } from "../../src/shared/trusted-operator-itinerary-removals.js";
+import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
+import { itineraryInputContractError } from "../../src/main/planning/itinerary-input-contract.js";
+import { isPersistedRouteTravelNode } from "../../src/shared/itinerary-route-travel-node.js";
 
 test("末日明确不住宿才清理误填酒店，保留真实住宿与普通待核验 POI", () => {
   const original = [
@@ -63,6 +66,86 @@ test("纯交通和入住节点移出 POI 列表，明确二选一景点保持原
   assert.deepEqual((result.itinerary[1]!.spots as Array<Record<string, unknown>>).slice(0, 2).map((spot) => spot.relation), ["or", "or"]);
   assert.equal(result.itinerary[1]!.title, "人文二选一");
   assert.equal(result.itinerary[1]!.description, "非遗中心或博物馆二选一。");
+});
+
+test("原始路线证据在 POI 查询前移除接团城、宿点和道班，保留真实景点", () => {
+  const itinerary = [
+    { day: 1, title: "拉萨—羊卓雍措—日喀则", spots: [{ name: "拉萨" }, { name: "羊卓雍措" }] },
+    { day: 5, title: "塔钦--札达--塔钦", spots: [
+      { name: "塔钦", poiName: "塔钦", poiId: 145328355 },
+      { name: "札达", poiName: null, poiId: null },
+      { name: "扎达土林", poiName: "札达土林国家地质公园", poiId: 76422, province: "西藏", city: "阿里", district: "札达" },
+    ] },
+    { day: 6, title: "塔钦--仲巴--萨嘎", spots: [{ name: "塔钦" }, { name: "仲巴五彩沙漠" }] },
+    { day: 7, title: "萨嘎--22道班--日喀则--拉萨", spots: [{ name: "22道班" }, { name: "浪措湖" }, { name: "拉萨" }] },
+  ];
+  const product = { basicInfo: { meetingCity: "拉萨", nights: 6,
+    userIdea: "D1天：拉萨—羊卓雍措—日喀则（宿日喀则） D5天：塔钦--札达--塔钦（宿塔尔钦） D6天：塔钦--仲巴--萨嘎（宿萨嘎） D7天：萨嘎--22道班--日喀则--拉萨" }, itinerary };
+  const result = selfRepairItineraryForVbk(itinerary, 6, product);
+  assert.deepEqual(result.removedTravelNodes, ["拉萨", "塔钦", "札达", "塔钦", "22道班", "拉萨"]);
+  assert.deepEqual(result.itinerary.map(day => (day.spots as any[]).map(spot => spot.name)),
+    [["羊卓雍措"], ["扎达土林"], ["仲巴五彩沙漠"], ["浪措湖"]]);
+});
+
+test("POI 保存契约与自修复共用住宿路线节点判定，且不吞掉古镇景点", () => {
+  const product = buildProductSnapshot({ destination: "拉萨", days: 2, productForm: "privateTour" });
+  Object.assign(product.product.basicInfo!, {
+    meetingCity: "拉萨",
+    destinationCity: "拉萨",
+    userIdea: "D1天：塔钦--札达土林--塔钦（宿塔尔钦）\nD2天：塔钦--仲巴五彩沙漠--萨嘎（宿萨嘎）",
+  });
+  product.product.itinerary = [
+    { day: 1, title: "塔钦--札达土林--塔钦", spots: [{ name: "塔钦" }, { name: "札达土林" }], hotelCity: "普兰" },
+    { day: 2, title: "塔钦--仲巴五彩沙漠--萨嘎", spots: [{ name: "塔钦" }, { name: "仲巴五彩沙漠" }], hotelCity: "萨嘎" },
+  ];
+  const repaired = selfRepairItineraryForVbk(product.product.itinerary, 2, product.product);
+  assert.deepEqual(repaired.removedTravelNodes, ["塔钦", "塔钦"]);
+  assert.equal(itineraryInputContractError(product, repaired.itinerary), undefined);
+  assert.equal(isPersistedRouteTravelNode(product.product, { day: 1, title: "拉萨—华阳古镇—日喀则" }, "华阳古镇"), false);
+});
+
+test("珠峰小镇住宿允许次日巴松村作为路线起点，但不能全局豁免同名景点", () => {
+  const product = buildProductSnapshot({ destination: "拉萨", days: 3, productForm: "privateTour",
+    userIdea: [
+      "D1天：拉萨—羊卓雍措—日喀则（宿日喀则）",
+      "D2天：日喀则—珠峰（宿珠峰小镇）",
+      "D3天：巴松村—佩枯措—萨嘎（宿萨嘎）",
+    ].join(" ") });
+  Object.assign(product.product.basicInfo!, { meetingCity: "拉萨", destinationCity: "拉萨" });
+  const itinerary = [
+    { day: 1, title: "拉萨—羊卓雍措—日喀则", spots: [
+      { name: "拉萨", kind: "other" }, { name: "羊卓雍措", kind: "attraction" }, { name: "日喀则", kind: "other" },
+    ] },
+    { day: 2, title: "日喀则—珠峰", spots: [
+      { name: "日喀则", kind: "other" }, { name: "珠峰", kind: "attraction" },
+    ] },
+    { day: 3, title: "巴松村—佩枯措—萨嘎", spots: [
+      { name: "巴松村", kind: "other" }, { name: "佩枯措", kind: "attraction" }, { name: "萨嘎", kind: "other" },
+    ] },
+  ];
+  assert.equal(isPersistedRouteTravelNode(product.product, itinerary[2]!, "巴松村"), true);
+  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+
+  const standalone = buildProductSnapshot({ destination: "拉萨", days: 1, productForm: "privateTour", userIdea: "D1：巴松村" });
+  Object.assign(standalone.product.basicInfo!, { meetingCity: "拉萨", destinationCity: "拉萨" });
+  assert.equal(isPersistedRouteTravelNode(standalone.product, { day: 1, title: "巴松村" }, "巴松村"), false);
+  assert.match(itineraryInputContractError(standalone, [
+    { day: 1, title: "巴松村", spots: [{ name: "巴松村", kind: "other" }] },
+  ]) ?? "", /必须保留为景点类型/);
+});
+
+test("人工审查改为其他活动并留下核查凭证后，契约保留名称但不再强迫伪造 POI", () => {
+  const product = buildProductSnapshot({ destination: "拉萨", days: 1, productForm: "privateTour" });
+  Object.assign(product.product.basicInfo!, { userIdea: "D1：巴松村", meetingCity: "拉萨", destinationCity: "拉萨" });
+  product.product.itinerary = [{ day: 1, title: "巴松村", spots: [{ name: "巴松村", kind: "other", poiName: null, poiId: null }] }];
+  const next = structuredClone(product.product.itinerary);
+  assert.match(itineraryInputContractError(product, next) ?? "", /必须保留为景点类型/);
+  product.researchTasks = [{ id: "manual-kind", label: "核查 巴松村 的 VBK POI 映射", type: "vbk",
+    status: "succeeded", state: "confirmed", evidence: [{ id: "evidence", title: "[itinerary-kind:no-poi] 运营人工分类",
+      source: "user", retrievedAt: "2026-10-16T00:00:00.000Z", accepted: true }] }];
+  assert.equal(itineraryInputContractError(product, next), undefined);
+  assert.equal(itineraryInputContractError(product, [{ day: 1, title: "巴松村", spots: [] }]), undefined,
+    "可信人工非 POI 分类也应从完整路线的必保留景点集合中豁免");
 });
 
 test("普通未命中景点和全部未命中的二选一保持不动", () => {

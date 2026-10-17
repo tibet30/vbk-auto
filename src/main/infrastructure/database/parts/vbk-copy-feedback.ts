@@ -26,6 +26,12 @@ export function listRejectedItineraryWords(db: Database.Database): string[] {
     .map(row => row.word);
 }
 
+/** 平台在基本信息（操作说明 / 副标题）里拒绝过的词：只用于基本信息文案。 */
+export function listRejectedBasicInfoWords(db: Database.Database): string[] {
+  return (db.prepare("SELECT word FROM vbk_copy_feedback WHERE module='basicInfo' ORDER BY word").all() as Array<{ word: string }>)
+    .map(row => row.word);
+}
+
 export function getPresentationCopyRecovery(db: Database.Database, localProductId: string): VbkCopyRecovery | undefined {
   const row = db.prepare("SELECT payload_json FROM vbk_copy_recovery WHERE local_product_id=?").get(localProductId) as { payload_json: string } | undefined;
   return row ? JSON.parse(row.payload_json) as VbkCopyRecovery : undefined;

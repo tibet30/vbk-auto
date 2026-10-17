@@ -68,6 +68,17 @@ test("只对完整且当前结构无效的输入投影", () => {
   assert.equal(projectCompleteItinerary(draft("日喀则轻松游。")), undefined);
 });
 
+test("结构合法但丢失锁定景点的旧草稿仍按原始完整路线重建", () => {
+  const product = draft();
+  const stale = projectedItinerary(product);
+  stale[0]!.spots = (stale[0]!.spots as any[]).filter((spot) => spot.name !== "萨迦古城");
+  stale[0]!.title = "萨迦寺 · 冲拉山欣赏珠峰东坡";
+  stale[0]!.description = "按旧草稿安排。";
+  product.product.itinerary = stale as any;
+  assert.match(itineraryInputContractError(product, stale) ?? "", /萨迦古城/u);
+  assert.ok(projectCompleteItinerary(product));
+});
+
 test('dated cross-city routes preserve night experiences and overnight endpoints through projection', () => {
   const product = buildProductSnapshot({ destination: '西宁', days: 2, productForm: 'privateTour',
     userIdea: '**10 月 4 号 D1：** 西宁 - 青海湖 - 茶卡盐湖 - 天峻县（天俊石林星空）\n**10 月 5 号 D2：** 天峻 - 德令哈 - 大柴旦翡翠湖' });
@@ -90,6 +101,22 @@ test("投影保留类似名称景点，后续逐日住宿修正则回退", () =>
   assert.equal(projectCompleteItinerary(product), undefined);
 });
 
+test("创建产品的 product_brief 消息是原始需求副本，不会误判为后续修订", () => {
+  const product = draft();
+  product.messages = [{ role: "user", content: JSON.stringify({
+    type: "product_brief", destination: "日喀则", days: 3, nights: 2,
+    userIdea: RIKAZE_ROUTE,
+  }) }] as any;
+  assert.ok(projectCompleteItinerary(product));
+});
+
+test("要求重放原始完整路线属于控制指令，不会阻断确定性恢复", () => {
+  const product = draft();
+  product.messages = [{ role: "user", content:
+    "请从头重新规划当前产品，按原始完整逐日路线重新生成并继续本地资源核验；保持原住宿城市。" }] as any;
+  assert.ok(projectCompleteItinerary(product));
+});
+
 test("D1 的住宿不会误取 D10 段落", () => {
   const product = buildProductSnapshot({ destination: "日喀则", days: 10, productForm: "privateTour" });
   Object.assign(product.product.basicInfo!, {
@@ -106,6 +133,34 @@ test("原始完整输入的住宿写法保留地点而不截成宿字", () => {
   const itinerary = projectedItinerary(draft(RIKAZE_ROUTE.replaceAll("住日喀则", "住宿：日喀则")));
   assert.match(String(itinerary[0]!.hotel), /日喀则/);
   assert.doesNotMatch(String(itinerary[0]!.hotel), /宿日喀则/);
+});
+
+test("阿里括号宿点路线确定性投影，不再交给模型重写或把末日补成住宿", () => {
+  const idea = [
+    "D1天：拉萨—羊卓雍措—普莫雍措—卡若拉冰川—日喀则（宿日喀则） - 看点：羊卓雍湖，库拉岗日冰川",
+    "D2天：日喀则—扎什伦布寺—萨迦寺—十万个沙丘—珠峰（宿珠峰小镇） - 看点：洛子峰，珠峰绒布冰川遗迹",
+    "D3天：巴松村—佩枯措—希夏邦马峰冰川群—萨嘎（宿萨嘎） - 看点：珠穆朗玛峰风景区，希夏邦马，拉普古村寨",
+    "D4天：萨嘎—仲巴五彩沙漠—公珠措—冈仁波齐—玛旁雍措—拉昂措（宿塔尔钦）",
+    "D5天：塔钦—札达—塔钦（宿塔尔钦） - 看点：扎达土林，古格王朝，托林寺",
+    "D6天：塔钦—仲巴—萨嘎（宿萨嘎） - 看点：冈仁波齐，玛旁雍措，拉昂措，公珠措，五彩沙丘",
+    "D7天：萨嘎—22道班—日喀则—拉萨 - 看点：索比拉亚山，达格架喷泉，桑桑大草原，浪措湖",
+  ].join(" ");
+  const product = buildProductSnapshot({ destination: "拉萨", days: 7, productForm: "privateTour", userIdea: idea });
+  Object.assign(product.product.basicInfo!, { days: 7, nights: 6, meetingCity: "拉萨", destinationCity: "拉萨" });
+  product.product.itinerary = [];
+
+  const itinerary = projectedItinerary(product);
+  assert.equal(itinerary.length, 7);
+  assert.deepEqual(itinerary.slice(0, 6).map((day) => day.hotel), [
+    "日喀则（待匹配）", "珠峰小镇（待匹配）", "萨嘎（待匹配）",
+    "塔尔钦（待匹配）", "塔尔钦（待匹配）", "萨嘎（待匹配）",
+  ]);
+  assert.equal(itinerary[6]!.hotel, "无");
+  assert.ok(!(itinerary[2]!.spots as any[]).some((spot) => spot.name === "巴松村"));
+  assert.ok((itinerary[0]!.spots as any[]).some((spot) => spot.name === "羊卓雍湖"));
+  assert.ok((itinerary[0]!.spots as any[]).some((spot) => spot.name === "库拉岗日冰川"));
+  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+  assert.equal(itineraryStructureError({ ...product.product, itinerary }), undefined);
 });
 
 async function assertBusinessToolFallsBack(initial: ProductDetail): Promise<void> {

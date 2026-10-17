@@ -40,10 +40,10 @@ class ItineraryOnlyPlanner implements Planner {
       return {
         reply: "pres",
         modules: [{ module: "presentation", status: "accepted", value: {
-          recommendationCategory: "优选行程",
+          recommendationCategory: "服务保障",
           recommendation: "R",
           recommendations: [
-            { category: "优选行程", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷景点", text: "c" },
+            { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
           ],
           features: "f",
         } }],
@@ -67,6 +67,7 @@ class InMemoryStore implements GenerationStateStore {
 
 class FakeRuntime implements OrchestratorRuntime {
   product: Record<string, unknown> = { basicInfo: { province: "山西", subtitle: "太原精华之旅", operationNotes: "待核查", days: 2, nights: 1, meetingCity: "太原" } };
+  async resolveRecommendationCategoryPolicy() { return fixedRecommendationPolicy(); }
   researchTasks: ResearchTaskProposal[] = [];
   private keys = new Set<string>();
   async loadExistingResearchTasks() {
@@ -99,6 +100,11 @@ class FakeRuntime implements OrchestratorRuntime {
   async loadAcceptedModules(): Promise<PlanningModule[]> {
     return detectAcceptedModulesFromProduct(this.product);
   }
+}
+
+function fixedRecommendationPolicy() {
+  return { source: "fixed-replay" as const, inputLocale: "zh-CN", productPatternId: 4, limited: true,
+    categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"], fetchedAt: "2026-10-16T00:00:00.000Z" };
 }
 
 const skeleton = { destination: "太原", days: 2, nights: 1, productForm: "privateTour" as const, productType: "domesticShort" as const, supplierProductCode: "NEW" };

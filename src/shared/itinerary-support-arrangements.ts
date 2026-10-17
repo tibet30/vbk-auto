@@ -37,6 +37,7 @@ export function itinerarySupportingArrangements(day: unknown): SupportingArrange
       ? item.type as SupportingArrangement["type"] : supportArrangementType(item, row);
     if (type && text(item.title)) result.push({ time: text(item.time) || "不限", title: text(item.title), detail: text(item.detail) || text(item.title), type });
   }
+  mergeAdministrativeTransports(result);
   const serviceSpots = (Array.isArray(row.spots) ? row.spots : []).filter((spot) => supportArrangementType(spot, row));
   const transportSpots = serviceSpots.filter((spot) => supportArrangementType(spot, row) === "transport");
   if (transportSpots.length) {
@@ -65,6 +66,23 @@ export function itinerarySupportingArrangements(day: unknown): SupportingArrange
     result.push({ time: "不限", title: "住宿安排", detail: lodging, type: "hotel" });
   }
   return result;
+}
+
+/** 多个行政节点只表达同一天的一段线路，不能在界面渲染成重复的“接送安排”。 */
+function mergeAdministrativeTransports(result: SupportingArrangement[]): void {
+  const indexes = result.flatMap((item, index) =>
+    item.type === "transport" && /行政地点与交通衔接$/u.test(item.title) ? [index] : []);
+  if (indexes.length < 2) return;
+  const items = indexes.map((index) => result[index]!);
+  const names = items.flatMap((item) => item.title.replace(/行政地点与交通衔接$/u, "").split(/[、；]/u))
+    .map((item) => item.trim()).filter(Boolean);
+  const details = [...new Set(items.map((item) => item.detail).filter(Boolean))];
+  result[indexes[0]!] = {
+    ...items[0]!,
+    title: `${[...new Set(names)].join("、")}行政地点与交通衔接`,
+    detail: details.join("；"),
+  };
+  for (const index of indexes.slice(1).reverse()) result.splice(index, 1);
 }
 
 /** Persist service arrangements outside spots; repeated generation cannot recreate service stations. */

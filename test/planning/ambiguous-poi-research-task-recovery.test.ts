@@ -10,6 +10,7 @@ import {
   shouldSyncConfirmedResearchTasks,
 } from "../../src/main/operations/research-refresh.js";
 import { isResearchTaskSatisfiedByProduct } from "../../src/shared/research-task-satisfaction.js";
+import { itineraryInputContractError } from "../../src/main/planning/itinerary-input-contract.js";
 
 const ambiguousDetail = "已找到多个候选 POI，但程序无法安全确定唯一地点；请手动选择 POI";
 const taskLabel = "核查 城固张骞故里 的 VBK POI 映射";
@@ -142,4 +143,53 @@ test("受控 POI 解析凭证可结清旧歧义任务，普通或错误映射仍
   assert.equal(task.detail, "当前行程已保存有效的 VBK POI 映射。");
   assert.match(task.evidence.at(-1)?.title ?? "", /\[itinerary-poi:verified\].*151283243/);
   assert.equal(task.evidence.at(-1)?.source, "vbk");
+});
+
+test("同日两个锁定别名解析为同一 POI 后生成可审计的去重凭证", () => {
+  const db = withDb();
+  const created = db.createProduct({
+    destination: "拉萨", days: 1, productForm: "privateTour",
+    userIdea: "D1天：羊卓雍措 - 看点：羊卓雍湖",
+  });
+  const current = db.getProduct(created.id)!;
+  db.updateProduct(created.id, { ...current.product, itinerary: [{
+    day: 1,
+    spots: [{ name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, kind: "attraction" }],
+  }] });
+
+  const result = db.confirmVerifiedPoiResearchTasks(created.id, [
+    { day: 1, spotName: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105 },
+    { day: 1, spotName: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
+  ]);
+
+  assert.equal(result.updated, 1);
+  const product = db.getProduct(created.id)!;
+  const aliasTask = product.researchTasks.find((task) => task.label === "核查 羊卓雍湖 的 VBK POI 映射");
+  assert.equal(aliasTask?.state, "confirmed");
+  assert.match(aliasTask?.evidence[0]?.title ?? "", /\[itinerary-poi:verified\].*羊卓雍湖.*82105/u);
+  assert.equal(itineraryInputContractError(product, product.product.itinerary), undefined);
+});
+
+test("已持久化的受控 POI 与本轮别名解析一致时也生成去重凭证", () => {
+  const db = withDb();
+  const created = db.createProduct({
+    destination: "拉萨", days: 1, productForm: "privateTour",
+    userIdea: "D1天：羊卓雍措 - 看点：羊卓雍湖",
+  });
+  const current = db.getProduct(created.id)!;
+  db.updateProduct(created.id, { ...current.product, itinerary: [{
+    day: 1,
+    spots: [{ name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, kind: "attraction" }],
+  }] });
+
+  const result = db.confirmVerifiedPoiResearchTasks(created.id, [
+    { day: 1, spotName: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
+  ]);
+
+  assert.equal(result.updated, 1);
+  const product = db.getProduct(created.id)!;
+  const aliasTask = product.researchTasks.find((task) => task.label === "核查 羊卓雍湖 的 VBK POI 映射");
+  assert.equal(aliasTask?.state, "confirmed");
+  assert.match(aliasTask?.evidence[0]?.title ?? "", /\[itinerary-poi:verified\].*羊卓雍湖.*82105/u);
+  assert.equal(itineraryInputContractError(product, product.product.itinerary), undefined);
 });

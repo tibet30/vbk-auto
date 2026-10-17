@@ -49,6 +49,23 @@ test("接送站点的名称和说明合并到已有 transport 且重复保存不
   assert.deepEqual(normaliseItinerarySupport(merged), merged);
 });
 
+test("同一天多个行政节点合并为一个接送安排并保留去重后的说明", () => {
+  const day = normaliseItinerarySupport({
+    day: 7,
+    activities: [
+      { time: "不限", type: "transport", title: "萨嘎行政地点与交通衔接", detail: "返程至拉萨。" },
+      { time: "不限", type: "transport", title: "日喀则行政地点与交通衔接", detail: "返程至拉萨。" },
+    ],
+  }) as any;
+  assert.deepEqual(day.activities, [{
+    time: "不限",
+    type: "transport",
+    title: "萨嘎、日喀则行政地点与交通衔接",
+    detail: "返程至拉萨。",
+  }]);
+  assert.deepEqual(normaliseItinerarySupport(day), day);
+});
+
 test("有明确接送的无景点日通过所有准入，真正空白日和仅有餐食仍失败", () => {
   const day = normaliseItinerarySupport(transferDay);
   assert.equal(hasValidItinerary({ itinerary: [day] }), true);

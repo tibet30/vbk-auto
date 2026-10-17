@@ -10,6 +10,7 @@ import type {
 import { ensureTrafficLineApi, isUnavailableTrafficResourceFailure } from "./main.js";
 import type { TrafficLinePage } from "./client.js";
 import type { TrafficLineStationDisambiguator } from "./endpoints.js";
+import type { TrafficLineCopyRepair } from "./itinerary-copy-repair.js";
 import { ensureAuthorizedTrafficRouteReview } from "./authorized-route-review.js";
 
 type TrafficLineLog = (message: string, level?: "info" | "warning" | "error") => void;
@@ -25,6 +26,8 @@ interface TrafficLinePhaseInput {
   disambiguator?: TrafficLineStationDisambiguator;
   product?: Record<string, unknown>;
   routeReviewAuthorized?: boolean;
+  /** 子产品行程与线路审核前校验被平台以非法关键词驳回时的自动文案修复能力。 */
+  copyRepair?: TrafficLineCopyRepair;
 }
 
 interface TrafficLinePhaseResultChild {
@@ -63,6 +66,7 @@ export async function ensureTrafficLinePhase({
   disambiguator,
   product,
   routeReviewAuthorized,
+  copyRepair,
 }: TrafficLinePhaseInput): Promise<TrafficLinePhaseResult> {
   const executableConfig = trafficLineConfigForProduct(config, product);
   if (!executableConfig.enabled || executableConfig.variants.length === 0) {
@@ -85,7 +89,7 @@ export async function ensureTrafficLinePhase({
   const endpointPlan = progress.endpointPlan ?? executableConfig.availability?.endpointPlan;
   let result: Awaited<ReturnType<typeof ensureTrafficLineApi>>;
   try {
-    await ensureAuthorizedTrafficRouteReview(page, parentProductId, routeReviewAuthorized === true, log);
+    await ensureAuthorizedTrafficRouteReview(page, parentProductId, routeReviewAuthorized === true, log, copyRepair);
     result = await ensureTrafficLineApi(page, parentProductId, executableConfig, {
       // 平台核验不是同步保存；有界只读等待覆盖超过一分钟的正常异步结算。
       maxSegmentPolls: 600,
@@ -112,6 +116,7 @@ export async function ensureTrafficLinePhase({
       onStatus: (message) => log(message),
       disambiguator,
       product,
+      copyRepair,
     });
   } catch (error) {
     progress = {

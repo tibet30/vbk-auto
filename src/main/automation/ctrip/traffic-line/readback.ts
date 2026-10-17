@@ -13,6 +13,7 @@ import {
   verifyTrafficNodes,
 } from "./itinerary.js";
 import { waitForStableReadbackGroup, type StableReadbackOptions } from "./stability.js";
+import type { TrafficLineCopyRepair } from "./itinerary-copy-repair.js";
 import type { TrafficLineExistingChild } from "./types.js";
 import type { TrafficLinePage } from "./client.js";
 import { settleTrafficLineClausesBeforeActivation } from "./clause-itinerary-recovery.js";
@@ -40,9 +41,10 @@ export class TrafficLineItineraryReadbackError extends Error {
 /** 只有当前正式行程明确缺交通节点时修复，网络或版本关系错误不得触发写入。 */
 export async function repairTrafficLineItineraryIfMissing(
   page: TrafficLinePage, productId: string, variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan,
+  copyRepair?: TrafficLineCopyRepair,
 ): Promise<void> {
   if (await trafficLineItineraryNeedsRepair(page, productId, variant)) {
-    await ensureTrafficLineItinerary(page, productId, variant, endpoints);
+    await ensureTrafficLineItinerary(page, productId, variant, endpoints, copyRepair);
   }
 }
 
@@ -57,11 +59,12 @@ async function trafficLineItineraryNeedsRepair(page: TrafficLinePage, productId:
 /** 首次录入也处理资源结算迟到引起的行程回退，不能只在手动恢复时修复。 */
 export async function ensureTrafficLineClausesWithItineraryRecovery(
   page: TrafficLinePage, productId: string, variant: TrafficLineVariant, endpoints: TrafficLineEndpointPlan,
+  copyRepair?: TrafficLineCopyRepair,
 ): Promise<void> {
   await settleTrafficLineClausesBeforeActivation({
     settleClauses: async () => { await ensureTrafficLineClauses(page, productId, variant); },
     itineraryNeedsRepair: () => trafficLineItineraryNeedsRepair(page, productId, variant),
-    repairItinerary: () => ensureTrafficLineItinerary(page, productId, variant, endpoints),
+    repairItinerary: () => ensureTrafficLineItinerary(page, productId, variant, endpoints, copyRepair),
     saveClauses: () => ensureTrafficLineClauses(page, productId, variant),
     verifyClauses: () => verifyTrafficLineClauses(page, productId, variant),
   });

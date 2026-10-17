@@ -18,7 +18,8 @@ test("全部交通与用车资源提交后再写回行程，避免正式交通�
   // (no leading `await`). Use plain call signature.
   const submitted = source.indexOf("ensureTrafficLineSegments(");
   const binding = source.indexOf("await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);", submitted);
-  const itinerary = source.indexOf("await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);", binding);
+  // 行程写回可携带文案自动修复能力，但必须仍带已解析端点并发生在用车绑定之后。
+  const itinerary = source.indexOf("ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints", binding);
   const checkpoint = source.indexOf('checkpoint("resourcesSaved", relationship.productId);', binding);
 
   assert.ok(submitted >= 0, "必须先提交交通资源段");

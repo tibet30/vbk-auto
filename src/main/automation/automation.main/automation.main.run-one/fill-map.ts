@@ -26,6 +26,7 @@ import { ensureHotelResourceApi } from "../../ctrip/hotel-resource-api.js";
 import { ensureVehicleResourceApi } from "../../ctrip/vehicle-resource-api.js";
 import { runProductPreflightApi } from "../../ctrip/preflight-api.js";
 import { ensureTrafficLinePhase } from "../../ctrip/traffic-line/run-phase.js";
+import type { TrafficLineCopyRepair } from "../../ctrip/traffic-line/itinerary-copy-repair.js";
 import { advanceSavedProductWizardStage } from "../../ctrip/product-wizard.js";
 import { AutomationCancelledError } from "../automation.main.errors.js";
 import { trafficRouteReviewAuthorized } from "../../../../shared/traffic-route-review-approval.js";
@@ -195,6 +196,7 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
         },
         disambiguator: ctx.disambiguator,
         product: productData,
+        copyRepair: trafficCopyRepair(ctx, localProductId, log),
       });
     },
     preflight: async () => {
@@ -205,6 +207,31 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
       });
       if (!result.menus.fullyUnlocked) throw new Error("行程审核后菜单未保持全部解锁，已停止完成预检。");
       return result;
+    },
+  };
+}
+
+/**
+ * 子产品行程与线路审核前校验被平台以非法关键词驳回时的自动修复能力：
+ * 定点改写命中文案并重试；平台点名的词同时沉淀到本地行程词库。
+ */
+function trafficCopyRepair(
+  ctx: AutomationRunContext,
+  localProductId: string,
+  log: (message: string, level?: "info" | "warning" | "error") => void,
+): TrafficLineCopyRepair | undefined {
+  const rewrite = ctx.itineraryCopyRewriter;
+  if (!rewrite) return undefined;
+  return {
+    rewrite,
+    onRepaired: ({ words, paths, detail }) => {
+      for (const word of words) {
+        try {
+          ctx.db.recordCopyFeedback({ word, module: "itinerary", paths, source: "traffic-line", detail });
+        } catch { /* 学习失败不影响本次修复。 */ }
+      }
+      log(`平台驳回子产品行程文案「${words.join("、")}」，已自动改写 ${paths.join("、")} 并重试保存`, "warning");
+      ctx.emit(localProductId);
     },
   };
 }

@@ -3,16 +3,23 @@ import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../../../sh
 import { calculateTourScoreStep, checkTourDailyStep, fetchTourDailyDetail, fetchTourInfoId, saveProductTourInfoStep, saveTourDailyDetailStep } from "../itinerary-api/steps.js";
 import { list, text, type JsonRecord, type TrafficLinePage } from "./client.js";
 import { applyRequiredPoiRiskPlans, mergeTrafficNodes, verifyTrafficNodes, currentTrafficLineTourInfoId, readTrafficNodesFromPage } from "./itinerary.js";
+import { runTrafficItineraryCopyRepair, type TrafficLineCopyRepair } from "./itinerary-copy-repair.js";
 
 export class TrafficLineItineraryReadbackError extends Error {
   constructor(readonly expectedTourInfoId: string, message: string) { super(message); }
 }
-export async function ensureTrafficLineItinerary(page: TrafficLinePage, productId: string, variant: TrafficLineVariant, endpoints?: TrafficLineEndpointPlan): Promise<{ days: number; transportNodes: number }> {
-  try { return await saveTrafficLineItineraryOnce(page, productId, variant, endpoints); }
+export async function ensureTrafficLineItinerary(
+  page: TrafficLinePage,
+  productId: string,
+  variant: TrafficLineVariant,
+  endpoints?: TrafficLineEndpointPlan,
+  copyRepair?: TrafficLineCopyRepair,
+): Promise<{ days: number; transportNodes: number }> {
+  try { return await saveTrafficLineItineraryOnce(page, productId, variant, endpoints, copyRepair); }
   catch (error) {
     return recoverMissingTrafficItinerary(error,
       async () => currentTrafficLineTourInfoId(await fetchTourInfoId(page, productId)),
-      () => saveTrafficLineItineraryOnce(page, productId, variant, endpoints));
+      () => saveTrafficLineItineraryOnce(page, productId, variant, endpoints, copyRepair));
   }
 }
 
@@ -28,6 +35,7 @@ async function saveTrafficLineItineraryOnce(
   productId: string,
   variant: TrafficLineVariant,
   endpoints?: TrafficLineEndpointPlan,
+  copyRepair?: TrafficLineCopyRepair,
 ): Promise<{ days: number; transportNodes: number }> {
   const source = await readTrafficNodesFromPage(page, productId, variant);
   const linked = await fetchTourInfoId(page, productId);
@@ -37,37 +45,45 @@ async function saveTrafficLineItineraryOnce(
   const detail = await fetchTourDailyDetail(page, tourInfoId);
   if (!detail.tourInfo) throw new Error("子产品行程详情回读为空，无法安全合并交通节点。");
 
-  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant, endpoints));
+  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant, endpoints)) as Record<string, any>;
   const descriptions = list(merged.tourDailyDescriptions);
   for (const day of descriptions) day.tourDailyInfos = orderItineraryMeals(list(day.tourDailyInfos));
   const base = { ...productTourInfo, productId, tourInfoId, days: descriptions.length };
-  const checked8 = await checkTourDailyStep(page, base, JSON.stringify(merged), 8, "校验子产品行程交通");
-  const score = await calculateTourScoreStep(page, { ...base, aggregateScore: checked8.aggregateScore });
-  const checked3 = await checkTourDailyStep(page, base, JSON.stringify({
-    ...checked8,
-    aggregateScore: score.aggregateScore ?? checked8.aggregateScore,
-    tourInfoScores: score.tourInfoScores,
-  }), 3, "保存子产品行程交通");
-  verifyTrafficNodes(checked3, variant);
-  await saveTourDailyDetailStep(page, checked3);
-  const savedId = text(checked3.tourInfoId);
-  if (!savedId) throw new Error("子产品行程交通保存后未生成 tourInfoId。");
-  const final = {
-    ...checked3,
-    productId,
-    tourInfoId: savedId,
-    auditTourInfoId: savedId,
-    main: productTourInfo.main ?? true,
-    sort: productTourInfo.sort ?? 0,
-  };
-  await saveProductTourInfoStep(page, final, JSON.stringify(final));
-  return waitForTrafficLineItineraryReadback(async () => {
-    const linked = await fetchTourInfoId(page, productId);
-    const linkedId = currentTrafficLineTourInfoId(linked);
-    if (linkedId !== savedId) return { tourInfoId: linkedId, tourInfo: null };
-    const readback = await fetchTourDailyDetail(page, linkedId);
-    return { tourInfoId: linkedId, tourInfo: readback.tourInfo ?? null };
-  }, savedId, variant);
+  // 子产品行程校验（saveType=8/3）在写入前判定非法关键词；命中时就地改写文案后重试。
+  return runTrafficItineraryCopyRepair({
+    detail: merged,
+    repair: copyRepair,
+    execute: async (markWrite) => {
+      const checked8 = await checkTourDailyStep(page, base, JSON.stringify(merged), 8, "校验子产品行程交通");
+      const score = await calculateTourScoreStep(page, { ...base, aggregateScore: checked8.aggregateScore });
+      const checked3 = await checkTourDailyStep(page, base, JSON.stringify({
+        ...checked8,
+        aggregateScore: score.aggregateScore ?? checked8.aggregateScore,
+        tourInfoScores: score.tourInfoScores,
+      }), 3, "保存子产品行程交通");
+      verifyTrafficNodes(checked3, variant);
+      markWrite();
+      await saveTourDailyDetailStep(page, checked3);
+      const savedId = text(checked3.tourInfoId);
+      if (!savedId) throw new Error("子产品行程交通保存后未生成 tourInfoId。");
+      const final = {
+        ...checked3,
+        productId,
+        tourInfoId: savedId,
+        auditTourInfoId: savedId,
+        main: productTourInfo.main ?? true,
+        sort: productTourInfo.sort ?? 0,
+      };
+      await saveProductTourInfoStep(page, final, JSON.stringify(final));
+      return waitForTrafficLineItineraryReadback(async () => {
+        const linked = await fetchTourInfoId(page, productId);
+        const linkedId = currentTrafficLineTourInfoId(linked);
+        if (linkedId !== savedId) return { tourInfoId: linkedId, tourInfo: null };
+        const readback = await fetchTourDailyDetail(page, linkedId);
+        return { tourInfoId: linkedId, tourInfo: readback.tourInfo ?? null };
+      }, savedId, variant);
+    },
+  });
 }
 
 export async function waitForTrafficLineItineraryReadback(

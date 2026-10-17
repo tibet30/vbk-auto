@@ -15,6 +15,7 @@ import type {
 } from "../../../../shared/contracts-traffic-line.js";
 import type { TrafficLineStationDisambiguator } from "./endpoints.js";
 import type { TrafficLineChildReadback } from "./readback.js";
+import type { TrafficLineCopyRepair } from "./itinerary-copy-repair.js";
 
 export interface TrafficLineApiOptions {
   maxSegmentPolls?: number;
@@ -22,6 +23,8 @@ export interface TrafficLineApiOptions {
   now?: Date;
   stableReadbackIntervalMs?: number;
   stableReadbackSamples?: number;
+  /** 子产品行程与线路审核前校验被平台以非法关键词驳回时的自动文案修复能力。 */
+  copyRepair?: TrafficLineCopyRepair;
   itinerary?: readonly { spots?: Array<{ city?: string | null }> }[];
   endpointPlan?: TrafficLineEndpointPlan;
   rejectedTrainStationCodes?: readonly string[];
@@ -47,4 +50,5 @@ export type {
   TrafficLineChildProgress,
   TrafficLineChildReadback,
   TrafficLineStationDisambiguator,
+  TrafficLineCopyRepair,
 };

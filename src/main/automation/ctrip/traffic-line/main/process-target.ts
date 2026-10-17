@@ -131,9 +131,9 @@ export async function processTrafficLineTarget(
       await readTrafficLineSegmentReadback(page, relationship.productId, target.variant, endpoints);
       checkpoint("resourcesSaved", relationship.productId);
       if (trafficClauseMaterializationCanResume(previous) || trafficResourceCardRejected(previous)) {
-        await repairTrafficLineItineraryIfMissing(page, relationship.productId, target.variant, endpoints);
+        await repairTrafficLineItineraryIfMissing(page, relationship.productId, target.variant, endpoints, options.copyRepair);
         checkpoint("itinerarySaved", relationship.productId);
-        await ensureTrafficLineClausesWithItineraryRecovery(page, relationship.productId, target.variant, endpoints);
+        await ensureTrafficLineClausesWithItineraryRecovery(page, relationship.productId, target.variant, endpoints, options.copyRepair);
         checkpoint("clausesSaved", relationship.productId);
       }
       await activateTrafficLineChild(page, parentProductId, relationship, target.variant, endpoints);
@@ -193,7 +193,7 @@ export async function processTrafficLineTarget(
             ),
             beforeSubmit: async () => {
               await ensureTrafficLineVehicleDraft(page, relationship.productId, options.product);
-              await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);
+              await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair);
             },
             onSubmit: (departureCityCount) => {
               const submittedAt = new Date().toISOString();
@@ -213,10 +213,10 @@ export async function processTrafficLineTarget(
     // 用车正式提交会重新结算行程关联；先完成所有资源提交，再写回交通卡片。
     // 否则资源段虽有航班，条款读取的正式行程仍可能丢失去返程节点。
     await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);
-    await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints);
+    await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair);
     checkpoint("resourcesSaved", relationship.productId);
     checkpoint("itinerarySaved", relationship.productId);
-    await ensureTrafficLineClausesWithItineraryRecovery(page, relationship.productId, target.variant, endpoints);
+    await ensureTrafficLineClausesWithItineraryRecovery(page, relationship.productId, target.variant, endpoints, options.copyRepair);
     checkpoint("clausesSaved", relationship.productId);
     await activateTrafficLineChild(page, parentProductId, relationship, target.variant, endpoints);
     checkpoint("activated", relationship.productId);

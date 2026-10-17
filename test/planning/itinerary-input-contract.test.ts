@@ -97,6 +97,32 @@ test("完整每日行程禁止整体重排或替换，只允许规范化", () =>
   ]), undefined);
 });
 
+test("景点齐全但顺序错误时明确报告顺序，不误报全部缺失", () => {
+  const product = draft("D1 宽窄巷子—锦里—武侯祠；D2 都江堰");
+  const error = itineraryInputContractError(product, [
+    { day: 1, spots: [{ name: "宽窄巷子" }, { name: "武侯祠" }, { name: "锦里" }] },
+    { day: 2, spots: [{ name: "都江堰" }] },
+  ]);
+  assert.match(error ?? "", /顺序不一致/);
+  assert.doesNotMatch(error ?? "", /缺失/);
+});
+
+test("阿里南线主路线严格保序，看点补充当天保留但不强制相对顺序", () => {
+  const product = draft("D1天：拉萨—羊卓雍措—普莫雍措—卡若拉冰川—日喀则（宿日喀则）海拔：3800m柏油路：460km - 看点：羊卓雍湖，普莫雍措，库拉岗日冰川、卡若拉冰川\nD2天：日喀则—冈仁波齐+玛旁雍措+拉昂措 - 看点：玛旁雍措；纳木那尼峰；远眺冈仁波齐");
+  Object.assign(product.product.basicInfo!, { days: 2, meetingCity: "拉萨", destinationCity: "拉萨", destination: "拉萨" });
+  const locked = extractLockedConstraints(product);
+  assert.deepEqual(locked.itineraryOrder[0], {
+    day: 1,
+    spots: ["拉萨", "羊卓雍措", "普莫雍措", "卡若拉冰川", "日喀则"],
+    unorderedSpots: ["羊卓雍湖", "库拉岗日冰川"],
+  });
+  assert.deepEqual(locked.itineraryOrder[1], { day: 2, spots: ["日喀则", "冈仁波齐", "玛旁雍措", "拉昂措"], unorderedSpots: ["纳木那尼峰", "远眺冈仁波齐"] });
+  assert.equal(itineraryInputContractError(product, [
+    { day: 1, spots: ["拉萨", "羊卓雍措", "羊卓雍湖", "普莫雍措", "库拉岗日冰川", "卡若拉冰川", "日喀则"].map((name) => ({ name })) },
+    { day: 2, spots: ["日喀则", "冈仁波齐", "玛旁雍措", "纳木那尼峰", "拉昂措", "远眺冈仁波齐"].map((name) => ({ name })) },
+  ]), undefined);
+});
+
 test("大于号和箭头分隔的完整日程会逐点锁定", () => {
   const product = draft("D1: 宽窄巷子 > 锦里 → 武侯祠\nD2: 都江堰＞青城山");
   const locked = extractLockedConstraints(product);

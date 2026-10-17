@@ -19,6 +19,7 @@ import { isAdministrativeLocationName, toPlatformShortLocationName } from "../..
 import { supportArrangementType } from "../../../shared/itinerary-support-arrangements.js";
 import { hasVerifiedRouteAdministrativeNode } from "../../../shared/route-administrative-nodes.js";
 import { hasCompletePoi } from "../../../shared/itinerary-activity-kind.js";
+import { poiResearchTaskNames } from "../../../shared/poi-research-tasks.js";
 
 export const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -112,6 +113,21 @@ export function isSupportingLockedSpot(product: ProductDetail, dayNumber: number
   const existing = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
     .find(spot => spot && samePlace(spotName(spot), name));
   return Boolean(supportArrangementType(existing ?? { name, kind: "other" }, source ?? nextDay));
+}
+
+/** A manual review kind switch is auditable business evidence that the named
+ * route item is intentionally retained as free/other rather than disguised to
+ * bypass a failed POI lookup. Both the persisted kind and its evidence marker
+ * are required; either one alone is insufficient. */
+export function hasTrustedOperatorNonPoiClassification(product: ProductDetail, dayNumber: number, name: string): boolean {
+  const source = (asDayList(product.product.itinerary) ?? []).find(day => Number(day.day) === dayNumber);
+  const classified = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
+    .some(spot => spot && samePlace(spotName(spot), name)
+      && (spot.kind === "free" || spot.kind === "other") && !hasCompletePoi(spot));
+  if (!classified) return false;
+  return product.researchTasks.some(task => task.state === "confirmed"
+    && poiResearchTaskNames(task.label, task.type).some(taskName => samePlace(taskName, name))
+    && task.evidence?.some(item => item.accepted && item.title.includes("[itinerary-kind:no-poi]")));
 }
 
 export function isDeletableAdministrativeLocation(product: ProductDetail, value: string, day?: number): boolean {

@@ -73,6 +73,20 @@ test("同日同名 OR 槽位的删除凭证不能豁免另一组", () => {
   assert.equal(itineraryInputContractError(product, missingSecond), undefined);
 });
 
+test("带平台身份的删除凭证同时豁免同一 POI 的原路线别名", () => {
+  const product = draft("D1天：冈仁波齐 - 看点：冈仁波齐山体冰川遗迹\nD2天：武侯祠");
+  product.product.manualReview = { itinerarySpotRemovals: [{
+    day: 1, name: "冈仁波齐", poiName: "冈仁波齐", poiId: 10758151,
+    removedAt: "2026-10-16T00:00:00.000Z",
+  }] };
+  const itinerary = [
+    { day: 1, spots: [] },
+    { day: 2, spots: [{ name: "武侯祠", kind: "attraction" }] },
+  ];
+
+  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+});
+
 test("原始 JSON 加回精确 OR 槽位会清理旧收据，之后 AI 不能再次删除", () => {
   const product = draft("第一天：甲或乙。第二天：武侯祠。");
   Object.assign(product.product.basicInfo!, { days: 2 });

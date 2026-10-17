@@ -1,4 +1,5 @@
 import { trustedOperatorItineraryRemovals, alternativeGroupKey } from "./trusted-operator-itinerary-removals.js";
+import { samePoiName } from "./poi-name-key.js";
 
 type Json = Record<string, unknown>;
 
@@ -14,8 +15,8 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
     const scoped = receipts.filter((receipt) => receipt.day === Number(day.day));
     const deleted = new Set<number>();
     for (const [index, spot] of spots.entries()) {
-      const name = text(record(spot).name);
-      if (scoped.some((receipt) => compact(receipt.name) === compact(name)
+      const value = record(spot);
+      if (scoped.some((receipt) => matchesReceipt(receipt, value)
         && (!receipt.groupKey || groupMatches(spots, index, Number(day.day), receipt.groupKey)))) deleted.add(index);
     }
     day.spots = spots.filter((_, index) => !deleted.has(index));
@@ -27,7 +28,7 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
     }
     const remaining = (day.spots as unknown[]).map((spot) => compact(text(record(spot).name)));
     const removed = scoped.filter((receipt) => !remaining.includes(compact(receipt.name)));
-    const aliases = removed.flatMap((receipt) => mentionAliases(receipt.name));
+    const aliases = removed.flatMap((receipt) => [receipt.name, receipt.poiName].flatMap(mentionAliases));
     if (!aliases.length) continue;
     if (Array.isArray(day.activities)) {
       day.activities = day.activities.filter((activity) => !aliases.includes(text(record(activity).title)));
@@ -51,7 +52,17 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
   return next;
 }
 
-function mentionAliases(name: string): string[] {
+function matchesReceipt(
+  receipt: { name: string; poiName?: string; poiId?: number }, spot: Json,
+): boolean {
+  const spotId = Number(spot.poiId);
+  if (receipt.poiId && Number.isInteger(spotId) && spotId > 0 && receipt.poiId === spotId) return true;
+  if (receipt.poiName && (samePoiName(receipt.poiName, spot.poiName) || samePoiName(receipt.poiName, spot.name))) return true;
+  return compact(receipt.name) === compact(text(spot.name));
+}
+
+function mentionAliases(name: unknown): string[] {
+  if (typeof name !== "string") return [];
   const full = name.trim();
   const short = full.replace(/^[\p{Script=Han}]{1,8}?(?:市|县)/u, "");
   return [...new Set([full, short].filter((value) => value.length >= 2))];

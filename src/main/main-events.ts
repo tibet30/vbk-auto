@@ -20,6 +20,7 @@ import { createAttentionNotificationDelivery } from "./infrastructure/attention-
 import { showSystemNotification, systemNotificationsSupported } from "./infrastructure/system-notifications.js";
 import { createProductStorage } from "./application/product-storage.js";
 import { APP_NAME } from "../shared/brand.js";
+import { sanitizeAgentSnapshot } from "../shared/agent-snapshot-sanitize.js";
 import type {
   AgentSnapshot,
   PlanningGenerationState,
@@ -108,21 +109,26 @@ export function createMainEventBroadcasters(deps: MainEventDeps) {
   };
 
   const emitAgentSnapshot = (snapshot: AgentSnapshot) => {
+    // IPC 出口唯一脱敏点。AgentCore.send/pause/resume 的返回值是 in-memory
+    // snapshot，落库路径虽然走 sanitizeAgentSnapshot，但返回给 renderer 与广播
+    // 在这里都仍要走一次。否则事件 content 里出现的 API key / Bearer / VBK
+    // 登录账号 / 中国手机号 / 身份证号会绕过 log-redaction 规则泄露给前端。
+    const safe = sanitizeAgentSnapshot(snapshot);
     const db = deps.getDb();
     const window = deps.getWindow() ?? undefined;
-    const productName = db?.getProduct(snapshot.localProductId)?.name ?? "方案";
-    const attention = agentAttentionNotification(snapshot, productName);
+    const productName = db?.getProduct(safe.localProductId)?.name ?? "方案";
+    const attention = agentAttentionNotification(safe, productName);
     if (deps.getSettings().systemNotificationsEnabled && attention) {
-      void deliverAgentAttention(snapshot.localProductId, { ...attention, title: `${APP_NAME} · ${attention.title}` });
+      void deliverAgentAttention(safe.localProductId, { ...attention, title: `${APP_NAME} · ${attention.title}` });
     }
-    if (snapshot.run) {
-      const task = db?.latestWorkflowTaskForProduct(snapshot.localProductId);
+    if (safe.run) {
+      const task = db?.latestWorkflowTaskForProduct(safe.localProductId);
       if (task) emitWorkflowTask(task, false);
-      const latestProduct = db?.getProduct(snapshot.localProductId);
+      const latestProduct = db?.getProduct(safe.localProductId);
       if (latestProduct) emitProduct(latestProduct);
     }
-    safeRendererSend(window, "agent:updated", agentDisplaySnapshot(snapshot));
-    emitWorkspace(snapshot.localProductId);
+    safeRendererSend(window, "agent:updated", agentDisplaySnapshot(safe));
+    emitWorkspace(safe.localProductId);
   };
 
   /**

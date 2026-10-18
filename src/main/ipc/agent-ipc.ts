@@ -1,5 +1,6 @@
-import type { AgentApprovalResponse, AgentIllegalKeywordRepairInput, AgentInputResponse } from "../../shared/contracts.js";
+import type { AgentApprovalResponse, AgentIllegalKeywordRepairInput, AgentInputResponse, AgentSnapshot } from "../../shared/contracts.js";
 import { agentDisplaySnapshot, agentHistoryPage } from "../../shared/agent-display.js";
+import { sanitizeAgentSnapshot } from "../../shared/agent-snapshot-sanitize.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import type { MainIpcContext } from "./context.js";
 
@@ -9,12 +10,19 @@ export function registerAgentIpc(context: MainIpcContext): void {
     if (!context.agentCore) throw new Error("Agent 服务尚未就绪，请重启应用后重试。");
     return context.agentCore;
   };
-  const emit = (snapshot: Awaited<ReturnType<NonNullable<MainIpcContext["agentCore"]>["get"]>>) => {
-    context.emitAgentSnapshot?.(snapshot);
-    return agentDisplaySnapshot(snapshot);
+  /**
+   * AgentCore 的 send/pause/resume 拿到的 snapshot 是 in-memory 未脱敏的
+   * （落库路径 saveAgentSnapshot 会 sanitize，但返回到 IPC handler 的引用
+   * 不是 sanitized）。所以这里统一 sanitize 一次后再广播与返给 renderer。
+   */
+  const emit = (snapshot: AgentSnapshot) => {
+    const safe = sanitizeAgentSnapshot(snapshot);
+    context.emitAgentSnapshot?.(safe);
+    return agentDisplaySnapshot(safe);
   };
   ipcMain.handle("agent:get", (_event, localProductId: string) => agent().get(localProductId).then(emit));
   ipcMain.handle("agent:getHistory", (_event, localProductId: string, page: number) => agent().get(localProductId)
+    .then((snapshot) => sanitizeAgentSnapshot(snapshot))
     .then((snapshot) => agentHistoryPage(snapshot.events, page)));
   ipcMain.handle("agent:send", (_event, localProductId: string, content: string) => {
     context.memoryService?.captureExplicitFromUserMessage(content, {

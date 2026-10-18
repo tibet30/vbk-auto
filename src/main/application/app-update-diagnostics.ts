@@ -1,4 +1,5 @@
 import type { AppUpdateErrorCode } from "../../shared/contracts.js";
+import { redactLogString } from "../../shared/log-redaction.js";
 
 /**
  * 更新链路里可以预期的失败：既有分类码，也带上直接可读的中文说明，
@@ -61,4 +62,18 @@ export function describeUpdateFailure(error: unknown): AppUpdateFailureInfo {
     message: "更新失败，请稍后重试；若持续失败，请把诊断信息发给维护人员。",
     detail,
   };
+}
+
+/**
+ * 出口脱敏：errorDetail 来自 electron-updater / manifest fetch 的 raw error
+ * message / stack，可能含自建更新源 URL 中的 token / 调试 key。
+ * 广播到 renderer (safeRendererSend 'updates:changed') 与 IPC 返回前必须
+ * 调一下，保留主文案 + 走脱敏后的技术细节。
+ */
+export function sanitizeUpdateStateForExport<T extends { errorDetail?: string }>(state: T): T {
+  const detail = state.errorDetail;
+  if (!detail) return state;
+  const safe = { ...state };
+  safe.errorDetail = redactLogString(detail);
+  return safe;
 }

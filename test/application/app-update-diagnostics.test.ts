@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { AppUpdateFailure, describeUpdateFailure } from "../../src/main/application/app-update-diagnostics.js";
+import { AppUpdateFailure, describeUpdateFailure, sanitizeUpdateStateForExport } from "../../src/main/application/app-update-diagnostics.js";
 
 test("自定义 AppUpdateFailure 保留分类码、中文说明与技术细节", () => {
   const failure = describeUpdateFailure(
@@ -32,4 +32,31 @@ test("未知异常有兜底分类，主文案始终可读", () => {
   assert.equal(failure.code, "unknown");
   assert.match(failure.message, /稍后重试/);
   assert.equal(failure.detail, "boom");
+});
+
+test("sanitizeUpdateStateForExport 仅脱敏 errorDetail 字段，不动 feedUrl / installerPath", () => {
+  // AppUpdateState 出口 (safeRendererSend 'updates:changed' + IPC 返值) 之前
+  // 必走这一道。errorDetail 来自 raw Error.message / stack，可能含 URL token
+  // / 调试 key；feedUrl / installerPath 是自建 URL + 本地路径，保留原样。
+  const raw = {
+    currentVersion: "1.1.19",
+    platform: "darwin",
+    feedUrl: "https://updater.test/feed",
+    installerPath: "/Users/cisco/Downloads/vbk.dmg",
+    errorDetail: "fetch failed: https://updater.test/feed?token=secret-abc123&apiKey=sk-leak-9876",
+  };
+  const safe = sanitizeUpdateStateForExport(raw);
+  for (const secret of ["secret-abc123", "sk-leak-9876"]) {
+    assert.equal(safe.errorDetail?.includes(secret), false, secret);
+  }
+  assert.match(safe.errorDetail ?? "", /\[已脱敏\]/);
+  // feedUrl / installerPath 不在脱敏范围。
+  assert.equal(safe.feedUrl, raw.feedUrl);
+  assert.equal(safe.installerPath, raw.installerPath);
+});
+
+test("sanitizeUpdateStateForExport 在 errorDetail 为空时原样返回", () => {
+  const raw = { currentVersion: "1.1.19", errorDetail: undefined };
+  const safe = sanitizeUpdateStateForExport(raw);
+  assert.equal(safe, raw);
 });

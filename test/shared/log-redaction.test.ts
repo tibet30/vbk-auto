@@ -156,3 +156,13 @@ test("createRuntimeLogCapture 不会泄露 VBK 账户 key", () => {
   assert.equal(text.includes("sess-secret-7766"), false);
   assert.match(text, /\[已脱敏\]/);
 });
+
+test("URL query 中多个同名 key 都能逐个脱敏（不吞后续）", () => {
+  // 之前 “通用密文类字段” stop set 不含 & / ?，遇到 URL ?token=&apiKey=
+  // 会整段连吃，第二个同名参数漏。错误细节 / stack 出口都必须用这条。
+  const url = "https://updater.test/feed?token=secret-abc123&apiKey=sk-leak-9876";
+  const safe = redactLogString(url);
+  assert.equal(safe.includes("secret-abc123"), false);
+  assert.equal(safe.includes("sk-leak-9876"), false);
+  assert.match(safe, /token=\[已脱敏\]&apiKey=\[已脱敏\]/);
+});

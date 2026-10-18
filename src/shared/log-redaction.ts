@@ -78,8 +78,8 @@ const STRING_PATTERNS: Array<[RegExp, string]> = [
   [/(\b(?:authorization|proxy-authorization)\b["']?\s*[:=]\s*["']?)(?:Bearer\s+|Basic\s+)?[^\s,;"'}]+/gi, `$1${REDACTED}`],
   // Bearer / Basic 前缀拼接
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._\-+/=]{6,}/g, `$1 ${REDACTED}`],
-  // 通用密文类字段
-  [/(\b(?:api[-_]?key|x-api-key|password|passwd|pwd|passphrase|client[-_]?secret|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token|bearer|credential|private[-_]?key|ssh[-_]?key|signature)\b["']?\s*[:=]\s*["']?)[^\s,;"'}]+/gi, `$1${REDACTED}`],
+  // 通用密文类字段：stop set 包含 & / ?，避免 URL query 里吞掉后续同名参数。
+  [/(\b(?:api[-_]?key|x-api-key|password|passwd|pwd|passphrase|client[-_]?secret|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token|bearer|credential|private[-_]?key|ssh[-_]?key|signature)\b["']?\s*[:=]\s*["']?)[^\s,;&?"'}]+/gi, `$1${REDACTED}`],
   // Cookie 头
   [/(\b(?:cookie|set-cookie)\b["']?\s*[:=]\s*["']?)[^\r\n"'}]+/gi, `$1${REDACTED}`],
   // URL query

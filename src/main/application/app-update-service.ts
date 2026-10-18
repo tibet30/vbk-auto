@@ -19,6 +19,7 @@ import electronUpdater from "electron-updater";
 import type { ProgressInfo, UpdateInfo } from "electron-updater";
 import type { AppUpdateState, AppUpdateStatus } from "../../shared/contracts.js";
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
+import { sanitizeUpdateStateForExport } from "./app-update-diagnostics.js";
 import { safeRendererSend } from "../infrastructure/renderer-send.js";
 import { AppUpdateFailure, describeUpdateFailure } from "./app-update-diagnostics.js";
 import { downloadFile, ensureTrailingSlashUrl, selectInstallerFile } from "./app-update-service/download.js";
@@ -71,7 +72,11 @@ export class AppUpdateService {
   }
 
   snapshot(): AppUpdateState {
-    return { ...this.state, progress: this.state.progress ? { ...this.state.progress } : undefined };
+    const base: AppUpdateState = {
+      ...this.state,
+      progress: this.state.progress ? { ...this.state.progress } : undefined,
+    };
+    return sanitizeUpdateStateForExport(base);
   }
 
   scheduleStartupCheck(delayMs = 20_000): void {

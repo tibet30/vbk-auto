@@ -78,10 +78,12 @@ export class CheckpointStore {
 
   /**
    * 把整个 checkpoint 对象写回文件，2-space JSON。
+   * mode 0o600 限制同机其它用户读；lastError 仍可能含 URL token，但
+   * 仅为本机诊断保留，不外发。重启后可从该 checkpoint 续跑阶段。
    */
   async save(checkpoint) {
     await fs.mkdir(path.dirname(this.file), { recursive: true });
-    await fs.writeFile(this.file, `${JSON.stringify(checkpoint, null, 2)}\n`);
+    await fs.writeFile(this.file, `${JSON.stringify(checkpoint, null, 2)}\n`, { mode: 0o600 });
   }
 
   /**

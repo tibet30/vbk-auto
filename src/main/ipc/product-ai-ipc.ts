@@ -21,6 +21,7 @@ import { canonicalJson } from '../../shared/product-storage-projection.js';
 import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { verifyManualPoiSelection, verifiedMappingForManualPoi } from "../operations/manual-review-poi-selection.js";
+import { sanitizeAgentSnapshot } from "../../shared/agent-snapshot-sanitize.js";
 
 async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
   try {
@@ -122,8 +123,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       sourceKind: "ai:user",
     });
     const snapshot = await context.agentCore.send(localProductId, content);
-    context.emitAgentSnapshot?.(snapshot);
-    return snapshot;
+    const safe = sanitizeAgentSnapshot(snapshot);
+    context.emitAgentSnapshot?.(safe);
+    return safe;
   });
   ipcMain.handle("ai:cancel", async (_event, localProductId: string) => {
     if (!context.agentCore) throw new Error("Agent 服务尚未就绪，请重启应用后重试。");

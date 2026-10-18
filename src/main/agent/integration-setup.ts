@@ -246,6 +246,19 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
           : `重新录入全部阶段，保留当前方案和 VBK 产品 ${current.productId}，最终回读后保存未提审草稿。${confirmation.summary}` };
     },
     prepareWizardStageRetry: (localProductId, phase) => prepareWizardStageRetry(context, localProductId, phase),
+    /**
+     * 授权交接的隐式语义（这张表决定调用方该期待什么）：
+     *
+     *   | 入参特征                                                                | 实际行为                                                  |
+     *   | ------------------------------------------------------------------------ | --------------------------------------------------------- |
+     *   | `approval.wizardStageRetry` 已设置                                       | 转交给 stage retry 路径，不进完整 worklflow              |
+     *   | 远端已 succeeded 且无交通待补录 且非显式 fresh 重录                       | 仅 `completeApprovedWorkflow`（本地终态过渡，不重放 VBK）|
+     *   | 其它一切（包括失败 / 续跑 / 显式 fresh 重录 / 交通待补录）                | `runQueuedApprovedWorkflow`：异步列出阶段，准备续跑     |
+     *
+     * 「隐式成功 dispatch」是关键设计点：远端成功可能早于 AgentCore 收到完成回调
+     * 落地（用户在网页上保存草稿、桌面进程被中途打断）；启动恢复路径应补齐本地
+     * 终态过渡，但**永远不要重放已经写过的阶段**，否则会重复写入 VBK。
+     */
     handoffApprovedWorkflow: (localProductId, approval) => {
       if (approval.wizardStageRetry) return handoffWizardStageRetry(context, localProductId, approval);
       // A remote-successful automation can outlive an interrupted desktop

@@ -5,13 +5,51 @@ const MAX_DEPTH = 6;
 const MAX_ARRAY_ITEMS = 50;
 const MAX_STRING_LENGTH = 12_000;
 const TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\s*/;
-const SENSITIVE_KEY = /(?:^|[_-])(api[-_]?key|password|passwd|pwd|passphrase|secret|authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token|client[-_]?secret)(?:$|[_-])/i;
+/**
+ * 敏感字段识别（结构化对象的 key）。
+ *
+ * 名词本身的拼写五花八门（camelCase / kebab-case / snake_case）；用个别名
+ * 列表集中匹配，比写多套分隔符更可靠。
+ *
+ * 必备名单：
+ *   - HTTP / OAuth：authorization / cookie / csrf / signature；
+ *   - 密文：password / privateKey / sshKey / credential / passphrase / secret；
+ *   - API 凭证：apiKey / xApiKey / bearer / token / accessToken / refreshToken /
+ *     sessionToken / idToken / clientSecret。
+ *
+ * 个人信息（按合规要求脱敏）：
+ *   - phone / mobile / tel（与中国手机号同时脱敏）；
+ *   - idCard / id-card / idcard / 身份证 / 证件号（仅在 key 头存在时匹配身份证号 18 位上下文）。
+ *
+ * VBK / 携程业务身份字段：
+ *   - vbkAccount / loginAccount / providerId 也脱敏（防止客户/店铺 ID 与登录邮箱泄露）；
+ *     “account” 本体也加入名单，避免子键（如 `vbk_account`、`vbk-account`、
+ *     `vbkAccount`、`VbKAccount`）未来加进来时漏出。
+ */
+const SENSITIVE_KEY = /(?:^|[_-])(api[-_]?key|x[-_]?api[-_]?key|password|passwd|pwd|passphrase|secret|client[-_]?secret|authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|bearer|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token|csrf|signature|credential|private[-_]?key|ssh[-_]?key|phone|mobile|tel|tele|id[-_]?card|idcard|身份证|证件号|vbk[-_]?account|login[-_]?account|provider[-_]?id|account)(?:$|[_-])/i;
 
 const STRING_PATTERNS: Array<[RegExp, string]> = [
+  // HTTP / OAuth 标准头
   [/(\b(?:authorization|proxy-authorization)\b["']?\s*[:=]\s*["']?)(?:Bearer\s+|Basic\s+)?[^\s,;"'}]+/gi, `$1${REDACTED}`],
-  [/(\b(?:api[-_]?key|password|passwd|pwd|passphrase|client[-_]?secret|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token)\b["']?\s*[:=]\s*["']?)[^\s,;"'}]+/gi, `$1${REDACTED}`],
+  // Bearer / Basic 前缀拼接
+  [/\b(Bearer|Basic)\s+[A-Za-z0-9._\-+/=]{6,}/g, `$1 ${REDACTED}`],
+  // 通用密文类字段
+  [/(\b(?:api[-_]?key|x-api-key|password|passwd|pwd|passphrase|client[-_]?secret|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token|bearer|credential|private[-_]?key|ssh[-_]?key|signature)\b["']?\s*[:=]\s*["']?)[^\s,;"'}]+/gi, `$1${REDACTED}`],
+  // Cookie 头
   [/(\b(?:cookie|set-cookie)\b["']?\s*[:=]\s*["']?)[^\r\n"'}]+/gi, `$1${REDACTED}`],
-  [/([?&](?:api[-_]?key|token|access[-_]?token|refresh[-_]?token|password)=)[^&#\s]+/gi, `$1${REDACTED}`],
+  // URL query
+  [/([?&](?:api[-_]?key|x-api-key|token|access[-_]?token|refresh[-_]?token|password|signature|credential)=)[^&#\s]+/gi, `$1${REDACTED}`],
+  // 独立的 Bearer 字符串（无 key 头时，例如 "Bearer xxx" 单独出现在消息里）
+  [/\bbearer\s+[A-Za-z0-9._\-+/=]{6,}/gi, `bearer ${REDACTED}`],
+  // SSH private key 原文（识别 BEGIN OPENSSH/ RSA/ DSA 等头部）
+  [/-----BEGIN (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----/g, REDACTED],
+  // 中国大陆手机号（11 位 +86 或纯 1[3-9] 开头）；避免误伤普通数字串，仅在 “phone / tel / mobile” 同句子上以口令位置脱敏
+  [/(\b(?:phone|tel|mobile)\b["']?\s*[:=]?\s*["']?)(?:\+?86[-\s]?)?1[3-9]\d{9}\b/gi, `$1${REDACTED}`],
+  // 中国大陆身份证号（18 位 + 末位校验）；同上，仅在 key 头存在时脱敏
+  [/(\b(?:id[-_]?card|身份证|证件号)\b["']?\s*[:=]?\s*["']?)[1-9]\d{16}[\dXx]\b/gi, `$1${REDACTED}`],
+  // VBK / 携程业务身份（email 形式 loginAccount；纯数字 providerId；带 vbkAccount 包装）
+  [/(\b(?:vbk[-_]?account|login[-_]?account)\b["']?\s*[:=]?\s*["']?)[^\s,;"'}<>]{3,}/gi, `$1${REDACTED}`],
+  [/(\bprovider[-_]?id\b["']?\s*[:=]?\s*["']?)\d{4,}/gi, `$1${REDACTED}`],
 ];
 
 export function redactLogString(value: string): string {

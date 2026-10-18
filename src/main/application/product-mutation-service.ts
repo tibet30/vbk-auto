@@ -1,8 +1,24 @@
 /**
  * 产品 JSON 的统一写入口。
  *
+ * 提交流程上的不变量（详见 ARCHITECTURE.md §6「写入、并发与安全」）：
+ *   1. 提交时读取最新产品，按字段与读取时的基线比较；
+ *   2. 调用本服务执行城市、已核验 POI、人工删除与酒店一致性规则；
+ *   3. 保存后重读，重读后的 ProductDetail 作为对外广播值。
+ *
  * AI patch 必须在提交瞬间读取数据库最新快照后再应用，不能使用网络请求开始时
  * 的旧对象整包覆盖；所有写入完成后再从数据库读取 ProductDetail 并按需广播。
+ *
+ * 调用链：
+ *   IPC handler
+ *     ↓ createLocalProductState / workspace-snapshot ...
+ *     ↓ ProductMutationService.{aiPatch, manualField, mergeChanges}
+ *     ↓ ProductCommandService.{aiPatch, manualField}（source 来源校验）
+ *     ↓ applyProductPatchSafe / applyManualReviewField（领域纯函数）
+ *     ↓ store.replace + transaction + notify
+ *
+ * 跨进程广播：对其它观察者仍以 read-your-write + 冗余广播为原则；广播不在
+ * 该层修复业务状态，那是 `ProductExecutionService` + 任务投影的职责。
  */
 
 import type { AiResponse, ProductDetail, ProductSummary } from "../../shared/contracts.js";

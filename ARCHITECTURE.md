@@ -141,6 +141,13 @@ saleControl → basic → presentation → itinerary → package
 
 详细规则见 [VBK 自动录入与恢复](docs/vbk-automation-recovery.md)。
 
+### Agent 与自动化的并发契约
+
+- 同一个产品**不能**同时存在 AI 与自动化阶段。`ProductWorkflowCoordinator.assertIdle(localProductId, kind)` 在同产品冲突上抛错，是 `auto-confirm-product` / Agent task scheduler / automation start 三路人口点共用的护栏。
+- AgentCore 与 automation runner 共同使用 `runVbkPageExclusive`：所有跨产品需要占用 VBK 页面的动作走一条 FIFO，`pageOwner` 记录当前长期占用者；agent paused 期间不会释放 pageOwner，automation 派出会按 FIFO 顺序等。
+- AgentCore 内部的 `commandTails` 门仅保证 AgentCore 内部不会双指令交错；不依赖跨 runner 的互斥。
+- 该契约的覆盖见 `test/application/product-workflow-coordinator.test.ts`（`assertIdle` / `runVbkPageExclusive` FIFO / 错误后继续）和 `test/agent/core-concurrency.test.ts`（AgentCore `pause during async tool` 等 13 用例）。两个测试一起锁住“pause 期间 platform write 不会中断 / 不会出现跨产品同时写 VBK”的语义。
+
 ## 5. 数据真相与存储
 
 | 事实 | 来源 | 用途与限制 |

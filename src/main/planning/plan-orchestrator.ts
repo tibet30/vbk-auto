@@ -1,6 +1,22 @@
 /**
- * 规划编排器（orchestrator）。
+ * 规划编排器（orchestrator，纯函数路径）—— 历史实现，仅用于单测回放。
  *
+ * 自 v1.1.x 起，正式规划 IPC 入口已迁移至 `src/main/ipc/planning-v2-ipc.ts`，
+ * 每个规划 mutation 都通过 AgentCore.send(...)、AgentCore.resume(...)
+ * 委派到 Agent 意图循环。本文件的 `runPlan` 不再被装配链路调用。
+ *
+ * 仍保留的理由：
+ *   - 14 个 `test/planning/*.test.ts` 通过直接 `runPlan(...)` 验证本地
+ *     阶段（skeleton / validation / research）的纯函数行为、回放快照、
+ *     阶段断点和阶段重试；这些与 AgentCore 集成不相干；
+ *   - 历史阶段持久化产物（`planning_generation.version=1`）需要在
+ *     续跑代码里能被解析回 shape。
+ *
+ * 怎么继续（用户视角）：
+ *   - **不要**新增 production 入口到这里；规划 IPC 走 v2。
+ *   - **可以**新增/保留纯函数单测到这里，验证单阶段行为。
+ *
+ * 实现要点（历史；保留以保证 README / 架构图向后兼容）：
  *  - 单调流式：skeleton → itinerary → presentation → commercial → research → validation；
  *  - skeleton / research / validation 是**本地阶段**，不调用 AI；
  *  - 其它 AI 阶段独立 retry，retry 次数受 stageRetryLimit 控制（默认 2）；
@@ -10,6 +26,9 @@
  *  - release 模块默认 draft-only（submitReview=false / publishAfterApproval=false）；
  *  - assistant 回复基于「实际接受 / 缺失模块」重建，不接受模型声明；
  *  - validation 阶段从持久化产品 + 持久化 stage 状态反推完整性。
+ *
+ * @deprecated 自 v1.1.x 起 production 规划入口是 `registerPlanningV2Ipc` +
+ *             AgentCore 意图；本文件**仅**供历史回放与单测使用。
  */
 
 import {

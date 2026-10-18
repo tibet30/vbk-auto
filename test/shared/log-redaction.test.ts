@@ -50,3 +50,80 @@ test("IPC 日志输入再次脱敏且非法枚举安全降级", () => {
   assert.equal(safe.message.includes("plain"), false);
   assert.equal(JSON.stringify(safe.context).includes("plain-token"), false);
 });
+
+test("字符串脱敏：独立 Bearer、前缀拼接 Bearer、x-api-key、URL query", () => {
+  for (const input of [
+    "token dump = Bearer abcdefghijklmnopqrstuvwxyz",
+    "Bypass header: Bearer shhhh-this-is-secret",
+    "x-api-key: sk-live-1234567890abcdef",
+    "POST /v1?apiKey=sk-1234567890&type=user",
+    "POST /v1?signature=0123456789abcdef",
+  ]) {
+    const safe = redactLogString(input);
+    assert.equal(safe.includes("abcdefghijklmnopqrstuvwxyz"), false, input);
+    assert.equal(safe.includes("shhhh-this-is-secret"), false, input);
+    assert.equal(safe.includes("sk-live-1234567890abcdef"), false, input);
+    assert.equal(safe.includes("sk-1234567890"), false, input);
+    assert.equal(safe.includes("0123456789abcdef"), false, input);
+    assert.match(safe, /\[已脱敏\]/, input);
+  }
+});
+
+test("字符串脱敏：SSH private key 原文与不带 key 头的泄露", () => {
+  const ssh = "-----BEGIN OPENSSH PRIVATE KEY-----\nABCDEFG\n-----END OPENSSH PRIVATE KEY-----";
+  const safe = redactLogString(ssh);
+  assert.equal(safe.includes("ABCDEFG"), false);
+  assert.match(safe, /\[已脱敏\]/);
+  // 不带 key 头时仍能捕捉独立的 Bearer
+  const naked = "stored token = Bearer 0123456789ABCDEF";
+  assert.equal(redactLogString(naked).includes("0123456789ABCDEF"), false);
+});
+
+test("结构化对象：中国手机号、身份证号、VBK 业务身份随 key 一起被脱敏", () => {
+  const payload = {
+    phone: "13800001234",
+    mobile: "+86 13900005678",
+    "id-card": "11010119900101001X",
+    vbkAccount: "alice@example.com",
+    loginAccount: "bob@example.com",
+    providerId: 1234567,
+    note: "普通描述不应被触碰",
+  };
+  const safe = JSON.stringify(redactLogValue(payload));
+  for (const secret of ["13800001234", "13900005678", "11010119900101001X", "alice@example.com", "bob@example.com", "1234567"]) {
+    assert.equal(safe.includes(secret), false, secret);
+  }
+  assert.match(safe, /\[已脱敏\]/);
+  assert.match(safe, /普通描述不应被触碰/);
+});
+
+test("结构化对象里手机 / 身份证只在 key 头存在时脱敏（避免误伤普通数字串）", () => {
+  const payload = { note: "下单 13800001234 请核对", unrelated: "11010119900101001X 可能只起紧示" };
+  const safe = JSON.stringify(redactLogValue(payload));
+  // 有 key 头时仍应脱敏：
+  const withKey = { phone: "13800001234" };
+  assert.equal(JSON.stringify(redactLogValue(withKey)).includes("13800001234"), false);
+  // 不带 key 时保留原始文本（避免误伤业务记录里的数字）
+  assert.match(safe, /下单 13800001234/);
+});
+
+test("createRuntimeLogCapture 与 sanitizeRuntimeLogCapture 也走扩充后的规则", () => {
+  const capture = createRuntimeLogCapture("error", "main", [
+    "事故再发",
+    { xApiKey: "sk-live-must-not-leak", loginAccount: "evil@example.com", providerId: 9999999 },
+  ]);
+  const text = JSON.stringify(capture);
+  for (const secret of ["sk-live-must-not-leak", "evil@example.com", "9999999"]) {
+    assert.equal(text.includes(secret), false, secret);
+  }
+  const sanitized = sanitizeRuntimeLogCapture({
+    level: "error",
+    source: "main",
+    occurredAt: new Date().toISOString(),
+    message: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz x-api-key=sk-live-extra-9988",
+    context: { csrf: "csrf-token-1234567890", phone: "13800001234" },
+  } as never);
+  for (const secret of ["abcdefghijklmnopqrstuvwxyz", "sk-live-extra-9988", "csrf-token-1234567890", "13800001234"]) {
+    assert.equal(JSON.stringify(sanitized).includes(secret), false, secret);
+  }
+});

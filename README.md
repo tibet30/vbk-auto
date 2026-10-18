@@ -143,6 +143,11 @@ npm run test:all  # 显式全量回归
 npm run build
 ```
 
+> 护栏：`npm run test:e2e` / `npm run test:e2e:online` 不取代类型检查。
+> 交付前请手动走 `npm run check`，两者都过才算变更生效。五个固定回归样本
+> 在 `test:changed` 中被强制拉起，与 `--changed` 一阶隔离；二者只是“覆盖广度”的
+> 程度不同，不会互替。
+
 ## 产品 E2E 回归
 
 `npm run test:e2e` 固定回放西安、潮汕、泸州、成都、日喀则五个代表产品，从原始需求新建空白产品，经过生产方案生成、POI/酒店/车辆/交通端点筛查、保存回读和方案确认，最终停在 VBK 录入前的新审批请求。禁止导入已完成方案。代码或运行配置变化时，`npm run test:changed` 会附带全部五个 case。

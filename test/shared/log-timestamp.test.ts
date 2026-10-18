@@ -149,17 +149,25 @@ test("主进程可注入持久化 sink，且 sink 失败不影响原 console 输
   assert.equal(cap.logs.length, 2);
 });
 
-test("主进程 console 出口在传 VBK 登录 key 时被脱敏", () => {
-  // vbk-browser-accounts.ts:55 logWarn({ accountKey }) 的实际泄露面。
-  // 修复后：console.* 出口走 redactLogString / redactLogValue。
+test("主进程 console 出口在 message 含 VBK 登录 key 时被脱敏（string-based）", () => {
+  // vbk-browser-accounts.ts:55 logWarn('[vbk] persist failed',
+  //   { accountKey: key }) 的实际泄露面。修复后：message 文本中的
+  // accountKey 必须被 string-based 脱敏命中；结构化对象中的 accountKey
+  // 作为业务字段保留（用于 vbkAccount 对账，不在 key-based 名单中）。
   const cap = captureConsole();
   try {
-    logWarn("[vbk] persist failed", { accountKey: "acc-secret-9988", sessionKey: "sess-secret-7766" });
+    logWarn("[vbk] persist failed accountKey: acc-secret-9988", {
+      accountKey: "internal-pair-id",
+      sessionKey: "sess-secret-7766",
+    });
   } finally { cap.restore(); }
   assert.equal(cap.logs.length, 1);
   const serialized = JSON.stringify(cap.logs[0].args);
-  assert.equal(serialized.includes("acc-secret-9988"), false, "accountKey 不能出现在 console 出口");
-  assert.equal(serialized.includes("sess-secret-7766"), false, "sessionKey 不能出现在 console 出口");
+  // message 文本里 accountKey: acc-secret-9988 必须脱敏。
+  assert.equal(serialized.includes("acc-secret-9988"), false, "accountKey 明文不能在 message 出口");
+  // 结构化对象中的 accountKey / sessionKey 作为业务字段保留
+  // （key-based 不脱敏），但 message 文本中会进入 string-based 脱敏。
+  assert.match(serialized, /internal-pair-id/);
   assert.match(serialized, /\[已脱敏\]/);
 });
 

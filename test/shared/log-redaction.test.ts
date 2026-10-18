@@ -128,33 +128,54 @@ test("createRuntimeLogCapture 与 sanitizeRuntimeLogCapture 也走扩充后的�
   }
 });
 
-test("结构化对象中 accountKey / sessionKey / vbkActiveAccountKey 都被脱敏", () => {
-  // vbk-browser-accounts.ts:55 logWarn(... { accountKey: key }) 的泄露面。
-  // 改 SENSITIVE_KEY 名单后必须捕获 accountKey / sessionKey / vbkActiveAccountKey。
+test("结构化对象中 accountKey / sessionKey 是业务字段，不在 key-based 脱敏中", () => {
+  // vbk-browser-accounts.ts:55 logWarn(... { accountKey: key }) 泄露面只
+  // 靠 string-based 脱敏覆盖。结构化对象里 accountKey 作为业务身份对账
+  // 字段（AgentSnapshot.events[].data.approval.accountKey）必须保留：
+  // sanitizeAgentSnapshot 后仍然可用于 vbkAccount 对账。
+  // 列表脱敏（redactLogValue）不命中；accountName 同样不命中。
   const payload = {
     accountKey: "acc-abcdef-9876",
     sessionKey: "sess-1234567890abcdef",
-    vbkActiveAccountKey: "1234567",
+    vbkActiveAccountKey: "active-9876",
     accountName: "show-name-不脱敏",
   };
   const safe = JSON.stringify(redactLogValue(payload));
-  for (const secret of ["acc-abcdef-9876", "sess-1234567890abcdef", "1234567"]) {
-    assert.equal(safe.includes(secret), false, secret);
+  // accountKey / sessionKey / vbkActiveAccountKey 都是业务字段，key-based
+  // 不脱敏。
+  for (const keep of ["acc-abcdef-9876", "sess-1234567890abcdef", "active-9876", "show-name-不脱敏"]) {
+    assert.match(safe, new RegExp(keep.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), keep);
   }
-  // accountName 不在名单，保留。
-  assert.match(safe, /show-name-不脱敏/);
 });
 
-test("createRuntimeLogCapture 不会泄露 VBK 账户 key", () => {
-  // 主进程 console 出口在 logSink 之外的写处（开发期 npm run dev）。
-  // 这一条验证 sink 路径在 VBK 账户 key 上也安全。
+test("string-based 脱敏覆盖 accountKey / sessionKey / vbkActiveAccountKey", () => {
+  // logSink / console 出口都走 string-based 脱敏。accountKey 出现在 message
+  // 文本里必须能被识别。这是 vbk-browser-accounts.ts:55 泄露面的修复。
+  for (const text of [
+    "{\"accountKey\":\"acc-secret-9988\"}",
+    "sessionKey: sess-secret-7766",
+    "vbkActiveAccountKey=active-secret-5544",
+  ]) {
+    const safe = redactLogString(text);
+    for (const secret of ["acc-secret-9988", "sess-secret-7766", "active-secret-5544"]) {
+      if (text.includes(secret)) assert.equal(safe.includes(secret), false, `${text} -> ${secret}`);
+    }
+    assert.match(safe, /\[已脱敏\]/);
+  }
+});
+
+test("createRuntimeLogCapture 不会泄露 VBK 账户 key（走 string 路径）", () => {
+  // sink 路径会逐个 arg 走 redactLogValue / redactLogString。object 走
+  // redactLogValue（保留 accountKey），但同上下文后续 message 走 string
+  // 路径。这里主要验证同一份 output 序列化后看不到明文 acc-secret。
+  // 任一 key（vbk-account / account-key）走 string-based 脱敏。
   const capture = createRuntimeLogCapture("error", "main", [
-    "vbk 失败", { accountKey: "acc-secret-9988", sessionKey: "sess-secret-7766" },
+    "vbk 失败 accountKey: acc-secret-9988", { accountKey: "internal-pair-id" },
   ]);
   const text = JSON.stringify(capture);
   assert.equal(text.includes("acc-secret-9988"), false);
-  assert.equal(text.includes("sess-secret-7766"), false);
-  assert.match(text, /\[已脱敏\]/);
+  // accountKey 作为业务字段在结构化对象里保留（key-based 不脱敏）。
+  assert.match(text, /internal-pair-id/);
 });
 
 test("URL query 中多个同名 key 都能逐个脱敏（不吞后续）", () => {

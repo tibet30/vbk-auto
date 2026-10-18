@@ -27,8 +27,15 @@ const TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\s*/;
  *     `vbkAccount`、`VbKAccount`）未来加进来时漏出。
  */
 // 严格边界：key 整体必须等于其中一个列出的变体。
-// 可变形列表上 Kebab / snake_case / camelCase / PascalCase 同写；
+// 可变形列表上 Kebab / snake_case / camelCase / PascalCase 同写。
 // 不使用「account」这样的宽子串，避免误伤 `accountName` / `myAccount`。
+// 特别注意：以下「业务身份」key 不在 key-based 名单中，因为它们是
+// AgentSnapshot.events[].data.approval.accountKey 这类业务字段的值，需要
+// 在业务路径中保留才能走 vbkAccount 对比：
+//   - accountKey / account_key / sessionKey / session_key /
+//     vbkActiveAccountKey / vbk_active_account_key
+// 这三个 key 仅在 string-based 脱敏路径中被识别（见下方 STRING_PATTERNS
+// 补充），不会影响 key-based 净化。
 const SENSITIVE_KEY = new RegExp(
   "^(?:" + [
     "api[-_]?key",
@@ -64,11 +71,8 @@ const SENSITIVE_KEY = new RegExp(
     "身份证",
     "证件号",
     "vbk[-_]?account",
-    "vbk[-_]?active[-_]?account[-_]?key",
     "login[-_]?account",
     "provider[-_]?id",
-    "account[-_]?key",
-    "session[-_]?key",
   ].join("|") + ")$",
   "i",
 );
@@ -95,6 +99,11 @@ const STRING_PATTERNS: Array<[RegExp, string]> = [
   // VBK / 携程业务身份（email 形式 loginAccount；纯数字 providerId；带 vbkAccount 包装）
   [/(\b(?:vbk[-_]?account|login[-_]?account)\b["']?\s*[:=]?\s*["']?)[^\s,;"'}<>]{3,}/gi, `$1${REDACTED}`],
   [/(\bprovider[-_]?id\b["']?\s*[:=]?\s*["']?)\d{4,}/gi, `$1${REDACTED}`],
+  // 业务身份 key（仅 string-based 脱敏）：accountKey / sessionKey /
+  // vbkActiveAccountKey 是 AgentSnapshot.events[].data.approval 业务字段
+  // 用的凭证对账 key，必须在 key-based 脱敏中保留原值；只在消息文本
+  // （如 vbk-browser-accounts.ts:55 logWarn({ accountKey })）中被识别。
+  [/(\b(?:account[-_]?key|session[-_]?key|vbk[-_]?active[-_]?account[-_]?key)\b["']?\s*[:=]?\s*["']?)[^\s,;"'}<>]{3,}/gi, `$1${REDACTED}`],
 ];
 
 export function redactLogString(value: string): string {

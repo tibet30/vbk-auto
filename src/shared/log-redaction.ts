@@ -26,7 +26,52 @@ const TIMESTAMP_PREFIX = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\s*/;
  *     “account” 本体也加入名单，避免子键（如 `vbk_account`、`vbk-account`、
  *     `vbkAccount`、`VbKAccount`）未来加进来时漏出。
  */
-const SENSITIVE_KEY = /(?:^|[_-])(api[-_]?key|x[-_]?api[-_]?key|password|passwd|pwd|passphrase|secret|client[-_]?secret|authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|bearer|token|access[-_]?token|refresh[-_]?token|id[-_]?token|session[-_]?token|csrf|signature|credential|private[-_]?key|ssh[-_]?key|phone|mobile|tel|tele|id[-_]?card|idcard|身份证|证件号|vbk[-_]?account|login[-_]?account|provider[-_]?id|account)(?:$|[_-])/i;
+// 严格边界：key 整体必须等于其中一个列出的变体。
+// 可变形列表上 Kebab / snake_case / camelCase / PascalCase 同写；
+// 不使用「account」这样的宽子串，避免误伤 `accountName` / `myAccount`。
+const SENSITIVE_KEY = new RegExp(
+  "^(?:" + [
+    "api[-_]?key",
+    "x[-_]?api[-_]?key",
+    "password",
+    "passwd",
+    "pwd",
+    "passphrase",
+    "secret",
+    "client[-_]?secret",
+    "authorization",
+    "proxy[-_]?authorization",
+    "cookie",
+    "set[-_]?cookie",
+    "bearer",
+    "token",
+    "access[-_]?token",
+    "refresh[-_]?token",
+    "id[-_]?token",
+    "session[-_]?token",
+    "csrf",
+    "csrf[-_]?token",
+    "signature",
+    "credential",
+    "private[-_]?key",
+    "ssh[-_]?key",
+    "phone",
+    "mobile",
+    "tel",
+    "tele",
+    "id[-_]?card",
+    "idcard",
+    "身份证",
+    "证件号",
+    "vbk[-_]?account",
+    "vbk[-_]?active[-_]?account[-_]?key",
+    "login[-_]?account",
+    "provider[-_]?id",
+    "account[-_]?key",
+    "session[-_]?key",
+  ].join("|") + ")$",
+  "i",
+);
 
 const STRING_PATTERNS: Array<[RegExp, string]> = [
   // HTTP / OAuth 标准头
@@ -82,7 +127,7 @@ function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unkn
   if (Array.isArray(value)) {
     return value.slice(0, MAX_ARRAY_ITEMS).map((item) => redactValue(item, depth + 1, seen));
   }
-  const output = Object.create(null) as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 100)) {
     output[key] = SENSITIVE_KEY.test(key) ? REDACTED : redactValue(item, depth + 1, seen);
   }

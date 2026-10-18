@@ -127,3 +127,32 @@ test("createRuntimeLogCapture 与 sanitizeRuntimeLogCapture 也走扩充后的�
     assert.equal(JSON.stringify(sanitized).includes(secret), false, secret);
   }
 });
+
+test("结构化对象中 accountKey / sessionKey / vbkActiveAccountKey 都被脱敏", () => {
+  // vbk-browser-accounts.ts:55 logWarn(... { accountKey: key }) 的泄露面。
+  // 改 SENSITIVE_KEY 名单后必须捕获 accountKey / sessionKey / vbkActiveAccountKey。
+  const payload = {
+    accountKey: "acc-abcdef-9876",
+    sessionKey: "sess-1234567890abcdef",
+    vbkActiveAccountKey: "1234567",
+    accountName: "show-name-不脱敏",
+  };
+  const safe = JSON.stringify(redactLogValue(payload));
+  for (const secret of ["acc-abcdef-9876", "sess-1234567890abcdef", "1234567"]) {
+    assert.equal(safe.includes(secret), false, secret);
+  }
+  // accountName 不在名单，保留。
+  assert.match(safe, /show-name-不脱敏/);
+});
+
+test("createRuntimeLogCapture 不会泄露 VBK 账户 key", () => {
+  // 主进程 console 出口在 logSink 之外的写处（开发期 npm run dev）。
+  // 这一条验证 sink 路径在 VBK 账户 key 上也安全。
+  const capture = createRuntimeLogCapture("error", "main", [
+    "vbk 失败", { accountKey: "acc-secret-9988", sessionKey: "sess-secret-7766" },
+  ]);
+  const text = JSON.stringify(capture);
+  assert.equal(text.includes("acc-secret-9988"), false);
+  assert.equal(text.includes("sess-secret-7766"), false);
+  assert.match(text, /\[已脱敏\]/);
+});

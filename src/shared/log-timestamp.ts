@@ -16,6 +16,8 @@
  *   - 与 ISO-8601 接近，便于机器解析。
  */
 
+import { redactLogString, redactLogValue } from "./log-redaction.js";
+
 /** 取得当前 sortable timestamp。测试可以注入固定 Date 来断言。 */
 export function logTimestamp(): string {
   const now = new Date();
@@ -52,8 +54,18 @@ const withTimestamp = (args: ReadonlyArray<unknown>): unknown[] => {
   return [logTimestamp(), ...args];
 };
 
-export const logInfo: LogFn = (...args) => { emit("info", args); console.info(...withTimestamp(args)); };
-export const logWarn: LogFn = (...args) => { emit("warn", args); console.warn(...withTimestamp(args)); };
-export const logError: LogFn = (...args) => { emit("error", args); console.error(...withTimestamp(args)); };
-export const logLog: LogFn = (...args) => { emit("info", args); console.log(...withTimestamp(args)); };
-export const logDebug: LogFn = (...args) => { emit("debug", args); console.debug(...withTimestamp(args)); };
+/**
+ * 主进程 console.* 出口脱敏。
+ * logSink 路径（captureRuntimeLog → sanitizeRuntimeLogCapture）已独立脱敏。
+ * 这一道是为了「开发期 npm run dev」与 prod `--enable-logging` 写出去
+ * 的 stdout / stderr 不会泄露 API key / Bearer / VBK 登录账号 / csrf / 身份证
+ * 等业务敏感字段。
+ */
+const withRedaction = (args: ReadonlyArray<unknown>): unknown[] =>
+  args.map((arg) => (typeof arg === "string" ? redactLogString(arg) : redactLogValue(arg)));
+
+export const logInfo: LogFn = (...args) => { emit("info", args); console.info(...withTimestamp(withRedaction(args))); };
+export const logWarn: LogFn = (...args) => { emit("warn", args); console.warn(...withTimestamp(withRedaction(args))); };
+export const logError: LogFn = (...args) => { emit("error", args); console.error(...withTimestamp(withRedaction(args))); };
+export const logLog: LogFn = (...args) => { emit("info", args); console.log(...withTimestamp(withRedaction(args))); };
+export const logDebug: LogFn = (...args) => { emit("debug", args); console.debug(...withTimestamp(withRedaction(args))); };

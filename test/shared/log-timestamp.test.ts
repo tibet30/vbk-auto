@@ -148,3 +148,43 @@ test("主进程可注入持久化 sink，且 sink 失败不影响原 console 输
   assert.deepEqual(seen[0].args, ["[runtime] visible", { attempt: 2 }]);
   assert.equal(cap.logs.length, 2);
 });
+
+test("主进程 console 出口在传 VBK 登录 key 时被脱敏", () => {
+  // vbk-browser-accounts.ts:55 logWarn({ accountKey }) 的实际泄露面。
+  // 修复后：console.* 出口走 redactLogString / redactLogValue。
+  const cap = captureConsole();
+  try {
+    logWarn("[vbk] persist failed", { accountKey: "acc-secret-9988", sessionKey: "sess-secret-7766" });
+  } finally { cap.restore(); }
+  assert.equal(cap.logs.length, 1);
+  const serialized = JSON.stringify(cap.logs[0].args);
+  assert.equal(serialized.includes("acc-secret-9988"), false, "accountKey 不能出现在 console 出口");
+  assert.equal(serialized.includes("sess-secret-7766"), false, "sessionKey 不能出现在 console 出口");
+  assert.match(serialized, /\[已脱敏\]/);
+});
+
+test("主进程 console 出口传明文 Authorization / apiKey / csrf / Bearer 时被脱敏", () => {
+  const cap = captureConsole();
+  try {
+    logError("Authorization: Bearer abcdefghijklmnopqrstuvwxyz apiKey=sk-leak-1234567890", { csrf: "csrf-secret" });
+  } finally { cap.restore(); }
+  assert.equal(cap.logs.length, 1);
+  const serialized = JSON.stringify(cap.logs[0].args);
+  for (const secret of ["abcdefghijklmnopqrstuvwxyz", "sk-leak-1234567890", "csrf-secret"]) {
+    assert.equal(serialized.includes(secret), false, secret);
+  }
+  assert.match(serialized, /\[已脱敏\]/);
+});
+
+test("主进程 console 出口对 Error 实例的 message / stack 也走脱敏", () => {
+  const cap = captureConsole();
+  try {
+    logError("出错了", new Error("apiKey=sk-leak-1234567890 failed"));
+  } finally { cap.restore(); }
+  assert.equal(cap.logs.length, 1);
+  const args = cap.logs[0].args;
+  const errorObj = args[1] as { message: string; stack: string };
+  assert.equal(errorObj.message.includes("sk-leak-1234567890"), false);
+  assert.equal(errorObj.stack.includes("sk-leak-1234567890"), false);
+  assert.match(errorObj.message, /\[已脱敏\]/);
+});

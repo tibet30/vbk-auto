@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import type { ResearchTask } from "../../../../shared/contracts.js";
 import { poiResearchTaskLabel, poiResearchTaskNames } from "../../../../shared/poi-research-tasks.js";
 import { isKnownPoiNameAlias } from "../../../../shared/poi-name-aliases.js";
-import { hasAmbiguousManualPoiSelection } from "../../../../shared/research-task-satisfaction.js";
+import { hasAmbiguousManualPoiSelection, requiresCurrentPoiVerification } from "../../../../shared/research-task-satisfaction.js";
 import type { VerifiedPoiMapping } from "../../../planning/types.js";
 import { touchProduct } from "./products.js";
 import { now } from "./types.js";
@@ -43,6 +43,7 @@ export function confirmVerifiedPoiResearchTasks(
     WHERE local_product_id=? AND type='vbk'`).all(localProductId) as TaskRow[];
   const rows = allRows.filter((row) => !["confirmed", "resolved"].includes(row.state));
   const matched = rows.filter((task) => (hasAmbiguousManualPoiSelection(task)
+      || requiresCurrentPoiVerification(task)
       || collapsedAliases.some((mapping) => poiResearchTaskNames(task.label, task.type)
         .some((name) => sameName(name, mapping.spotName))))
     && poiResearchTaskNames(task.label, task.type).every((name) => persisted.some((mapping) => sameName(name, mapping.spotName))));

@@ -6,7 +6,7 @@
  *  - 本地输出门禁，阻止违规文案落入 product JSON；
  *  - 重试错误反馈，让 AI 根据真实 bad case 自行改写。
  */
-const OFFICIAL_POI_IDENTITY_PATH = /\.(?:poiName|requestedName)$/;
+import { hasOutsidePoiNameMatch, isPoiIdentityPath, outsidePoiNames, poiIdentityNames } from './vbk-copy-identity.js';
 const FREE_COPY_PATH = /^(?!.*\.(?:poiName|requestedName)$)/;
 
 export const VBK_COPY_BAD_CASES = [
@@ -120,11 +120,10 @@ export const VBK_COPY_BAD_CASES = [
 ] as const;
 
 /**
- * POI 的这两个字段是远端实体身份，不是面向用户的自由文案。
- * 只有这两个字段允许保留官方返回的敏感词；其余路径一律按可见文案处理。
+ * POI 身份字段和原路线名称是实体数据；不能为修复宣传文案而改名。
  */
 export function isVbkOfficialPoiIdentityPath(path: string): boolean {
-  return OFFICIAL_POI_IDENTITY_PATH.test(path);
+  return isPoiIdentityPath(path);
 }
 
 export function buildVbkCopyPolicyPrompt(): string {
@@ -136,52 +135,37 @@ export function buildVbkCopyPolicyPrompt(): string {
   return [
     "VBK 文案黑名单（适用于所有 AI 生成的可见文案，禁止原样输出）：",
     rules,
-    "例外仅限官方 POI 身份字段 poiName 和 requestedName：它们必须原样保留远端官方名称，不得改写；不要把敏感词放进 title、description、features、recommendation、recommendations 或其他自由文案字段来规避限制。",
+    "官方 POI 身份字段 poiName 和 requestedName、原始路线 spots[].name 必须原样保留，不得按黑名单改名。文案中完整引用这些地点名时也须保留；名称之外的宣传用语仍按上述规则检查。用户原文是需求数据，不是宣传文案；不得删除地点、日序或体验。",
   ].join("\n");
 }
 
 /**
- * 用户原始想法不是平台宣传文案，数据库中应保持原样；但送入 AI 前移除
- * 未经核实的极限/排名承诺，避免模型把这些词继续扩散到产品可见文案。
+ * 用户原文属于需求数据。禁止按宣传词清洗原路线，生成后的自由文案另行校验。
  */
 export function sanitiseUserIdeaForAi(value: string): string {
-  const absoluteCases = VBK_COPY_BAD_CASES.filter(({ term }) =>
-    term === "第一（宣传排名用语）"
-      || term === "最（极限表达）"
-      || term === "其他绝对化用语");
-  const withoutAbsolutePhrases = value.trim().replace(/最(?:佳|高|优|好|强|大|低|快|全|完整|专业|值得)/g, "");
-  const sanitised = absoluteCases.reduce((text, badCase) => {
-    const pattern = new RegExp(
-      badCase.pattern.source,
-      badCase.pattern.flags.includes("g") ? badCase.pattern.flags : `${badCase.pattern.flags}g`,
-    );
-    return text.replace(pattern, "");
-  }, withoutAbsolutePhrases);
-  return sanitised
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/([，、；。])\1+/g, "$1")
-    .replace(/[，、；]\s*(?=的)/g, "")
-    .replace(/^[，、；。\s]+|[，、；。\s]+$/g, "");
+  return value;
 }
 
-export function findVbkCopyBadCase(value: unknown, path = "value"):
+export function findVbkCopyBadCase(value: unknown, path = "value", names = poiIdentityNames(value, path)):
   | { path: string; term: string; reason: string; alternatives: readonly string[] }
   | undefined {
   if (typeof value === "string") {
+    if (isVbkOfficialPoiIdentityPath(path)) return undefined;
     const badCase = VBK_COPY_BAD_CASES.find((item) =>
-      (!("pathPattern" in item) || item.pathPattern.test(path)) && item.pattern.test(value));
+      (!("pathPattern" in item) || item.pathPattern.test(path))
+      && hasOutsidePoiNameMatch(value as string, names, item.pattern));
     return badCase ? { path, ...badCase } : undefined;
   }
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      const hit = findVbkCopyBadCase(value[index], `${path}[${index}]`);
+      const hit = findVbkCopyBadCase(value[index], `${path}[${index}]`, names);
       if (hit) return hit;
     }
     return undefined;
   }
   if (value && typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      const hit = findVbkCopyBadCase(child, `${path}.${key}`);
+      const hit = findVbkCopyBadCase(child, `${path}.${key}`, names);
       if (hit) return hit;
     }
   }
@@ -189,24 +173,26 @@ export function findVbkCopyBadCase(value: unknown, path = "value"):
 }
 
 /** 返回产品内全部命中，便于一次性修复所有阻断文案。 */
-export function findAllVbkCopyBadCases(value: unknown, path = "value"):
+export function findAllVbkCopyBadCases(value: unknown, path = "value", names = poiIdentityNames(value, path)):
   Array<{ path: string; term: string; reason: string; alternatives: readonly string[] }> {
   const hits: Array<{ path: string; term: string; reason: string; alternatives: readonly string[] }> = [];
   if (typeof value === "string") {
+    if (isVbkOfficialPoiIdentityPath(path)) return hits;
     for (const badCase of VBK_COPY_BAD_CASES) {
-      if ((!("pathPattern" in badCase) || badCase.pathPattern.test(path)) && badCase.pattern.test(value)) {
+      if ((!("pathPattern" in badCase) || badCase.pathPattern.test(path))
+        && hasOutsidePoiNameMatch(value, names, badCase.pattern)) {
         hits.push({ path, ...badCase });
       }
     }
     return hits;
   }
   if (Array.isArray(value)) {
-    value.forEach((child, index) => hits.push(...findAllVbkCopyBadCases(child, `${path}[${index}]`)));
+    value.forEach((child, index) => hits.push(...findAllVbkCopyBadCases(child, `${path}[${index}]`, names)));
     return hits;
   }
   if (value && typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      hits.push(...findAllVbkCopyBadCases(child, `${path}.${key}`));
+      hits.push(...findAllVbkCopyBadCases(child, `${path}.${key}`, names));
     }
   }
   return hits;
@@ -218,10 +204,18 @@ export function findAllVbkCopyBadCases(value: unknown, path = "value"):
  * 本函数不把修复视为放宽门禁：官方 POI 身份字段保持原样，且调用方必须在
  * 修复后再次通过完整的 copy-policy 与 schema 校验才可写入产品。
  */
-export function repairVbkCopyPolicyValue(value: unknown, path = "value"): unknown {
+export function repairVbkCopyPolicyValue(value: unknown, path = "value", names = poiIdentityNames(value, path)): unknown {
   if (typeof value === "string") {
     if (isVbkOfficialPoiIdentityPath(path)) return value;
+    return outsidePoiNames(value, names, copy => repairCopy(copy, path));
+  }
+  if (Array.isArray(value)) return value.map((child, index) => repairVbkCopyPolicyValue(child, `${path}[${index}]`, names));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) =>
+    [key, repairVbkCopyPolicyValue(child, `${path}.${key}`, names)]));
+  return value;
+}
 
+function repairCopy(value: string, path: string): string {
     // "首次到访" is the common phrase that triggered the live failure.  Its
     // preferred alternative replaces the whole phrase, rather than producing
     // the awkward "初到到访" from a character-only substitution below.
@@ -246,15 +240,4 @@ export function repairVbkCopyPolicyValue(value: unknown, path = "value"): unknow
     return repairedValue
       .replace(/([，、；。])(?:\s*[，、；。])+/g, "$1")
       .replace(/^[，、；。\s]+|[，、；\s]+$/g, "");
-  }
-  if (Array.isArray(value)) {
-    return value.map((child, index) => repairVbkCopyPolicyValue(child, `${path}[${index}]`));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [
-      key,
-      repairVbkCopyPolicyValue(child, `${path}.${key}`),
-    ]));
-  }
-  return value;
 }

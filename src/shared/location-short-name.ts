@@ -61,6 +61,7 @@ const ADMINISTRATIVE_SUFFIXES = [
 ] as const;
 
 const PROTECTED_NAME_SUFFIX = /(?:景区|市区|城区|园区|片区|街区|社区|校区|厂区|矿区|库区)$/u;
+const PROVINCE_LEVEL_CITIES = new Set(["北京", "天津", "上海", "重庆", "香港", "澳门"]);
 
 /** 将省、市、自治区、自治州等行政地点归一为平台常用短名。 */
 export function toPlatformShortLocationName(value: unknown): string {
@@ -76,6 +77,17 @@ export function toPlatformShortLocationName(value: unknown): string {
     }
   }
   return input;
+}
+
+/** 省级城市及特别行政区；这些节点在平台父链中可以直接隶属于 Country。 */
+export function isProvinceLevelCityName(value: unknown): boolean {
+  return PROVINCE_LEVEL_CITIES.has(toPlatformShortLocationName(value));
+}
+
+/** 识别平台行政父链中的中国国家节点。 */
+export function isChinaCountryName(value: unknown): boolean {
+  const name = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return ["中国", "中华人民共和国", "china", "cn"].includes(name);
 }
 
 /** 识别明确的行政地名，供 spots/POI 合同把“路过城市/县域”与景点区分开。 */

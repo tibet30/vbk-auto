@@ -27,7 +27,7 @@ test("POI 补全查询携带产品目的城市和省份上下文", async () => {
   assert.deepEqual(contexts, [{ destinationCity: "乌鲁木齐", province: "新疆" }]);
 });
 
-test("跨城住宿路线不把所有 POI 查询错误锁在接团城市", async () => {
+test("仅有跨城住宿字段不能放宽 POI 查询的接团城市", async () => {
   const contexts: unknown[] = [];
   const runtime = testRuntime({
     product: {
@@ -43,7 +43,7 @@ test("跨城住宿路线不把所有 POI 查询错误锁在接团城市", async 
     },
   });
   await enrichItineraryPois({ localProductId: "tibet-cross-city", destination: "拉萨", runtime, persistedTaskKeys: new Set() });
-  assert.deepEqual(contexts, [{ province: "西藏" }]);
+  assert.deepEqual(contexts, [{ destinationCity: "拉萨", province: "西藏" }]);
 });
 
 test("措错正字差异会查询官方别名并写回原景点槽位", async () => {
@@ -65,7 +65,7 @@ test("措错正字差异会查询官方别名并写回原景点槽位", async ()
   assert.equal(written[0].spots[0].poiId, 91992);
 });
 
-test("已完整 POI 续跑时不靠重新搜索清空映射", async () => {
+test("已完整 POI 复核时必须重新查询，正确 ID 可由本次查询确认", async () => {
   let written: any;
   let queryCount = 0;
   const runtime = testRuntime({
@@ -75,7 +75,7 @@ test("已完整 POI 续跑时不靠重新搜索清空映射", async () => {
     },
     suggestPoi: async () => {
       queryCount += 1;
-      return null;
+      return { poiName: "南山风景区", poiId: 78174 };
     },
     write: (value) => { written = value; },
   });
@@ -88,9 +88,27 @@ test("已完整 POI 续跑时不靠重新搜索清空映射", async () => {
     reviewCompletePois: true,
   });
 
-  assert.equal(queryCount, 0);
-  assert.equal(written, undefined);
+  assert.equal(queryCount, 1);
+  assert.equal(written[0].spots[0].poiId, 78174);
   assert.deepEqual(result, []);
+});
+
+test("已完整 POI 复核会用独立查询替换同省错 ID", async () => {
+  let written: any;
+  const runtime = testRuntime({
+    product: {
+      basicInfo: { destinationCity: "乌鲁木齐", province: "新疆" },
+      itinerary: [{ day: 3, spots: [{ name: "南山风景区", poiName: "同省错误景点", poiId: 111 }] }],
+    },
+    suggestPoi: async () => ({ poiName: "南山风景区", poiId: 78174 }),
+    write: (value) => { written = value; },
+  });
+  await enrichItineraryPois({
+    localProductId: "poi-stale-id", destination: "新疆", runtime,
+    persistedTaskKeys: new Set(), reviewCompletePois: true,
+  });
+  assert.equal(written[0].spots[0].poiId, 78174);
+  assert.equal(written[0].spots[0].poiName, "南山风景区");
 });
 
 test("已绑定但暂停营业的 POI 保留原槽位、清空失效绑定并创建人工任务", async () => {
@@ -121,16 +139,16 @@ test("已绑定但暂停营业的 POI 保留原槽位、清空失效绑定并创
     { name: "武侯祠", poiName: "武侯祠", poiId: 67890 },
   ]);
   assert.equal(result[0]?.label, "核查 金沙遗址博物馆 的 VBK POI 映射");
-  assert.match(result[0]?.detail ?? "", /暂停营业，已保留原景点和原行程位置/);
+  assert.match(result[0]?.detail ?? "", /暂停营业，已清除旧 POI 绑定并保留原行程位置/);
   assert.deepEqual([...new Set(batchIds)].sort(), [12345, 67890]);
 });
 
-test("自动匹配到暂停营业 POI 时不写入行程", async () => {
-  let written = false;
+test("自动匹配到暂停营业 POI 时保留槽位但不保存失效绑定", async () => {
+  let written: any;
   const runtime = testRuntime({
     product: { itinerary: [{ day: 1, spots: [{ name: "金沙遗址博物馆", poiName: null, poiId: null }] }] },
     suggestPoi: async () => ({ poiName: "金沙遗址博物馆", poiId: 82723 }),
-    write: () => { written = true; },
+    write: (value) => { written = value; },
   });
   runtime.getPoiAvailability = async () => ({ status: "suspended" });
 
@@ -138,7 +156,7 @@ test("自动匹配到暂停营业 POI 时不写入行程", async () => {
     localProductId: "poi-suspended-auto", destination: "成都", runtime, persistedTaskKeys: new Set(),
   });
 
-  assert.equal(written, false);
+  assert.deepEqual(written[0].spots, [{ name: "金沙遗址博物馆", poiName: null, poiId: null }]);
   assert.match(result[0]?.detail ?? "", /携程景点详情标记为暂停营业/);
 });
 

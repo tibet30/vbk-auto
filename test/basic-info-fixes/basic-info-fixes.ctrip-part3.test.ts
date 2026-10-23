@@ -79,8 +79,10 @@ test("接线 2：fillAndSavePresentation 仅通过 API 保存并回读", async (
   assert.match(presBody, /savedWith \}/);
   assert.doesNotMatch(presBody, /clickBasicInfoNextStep/);
   assert.doesNotMatch(presBody, /waitForSectionEnabled/);
-  assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations\)/,
+  assert.match(presBody, /buildRecommendationReasonsPlan\(presentation\.recommendations, officialPoiNames\)/,
     "进入产品图文前必须校验完整的三条推荐理由配置");
+  assert.match(presBody, /trustedPresentationPoiNames\(product\)/,
+    "图文门禁必须使用当前产品的可信地点身份");
   assert.match(presBody, /cover\?\.source === "ctripLibrary" && ctripLibraryCoverAttempts\(cover\)\.length > 0/,
     "产品图文必须只在完整图库封面配置下绑定图库图片");
   assert.match(presBody, /ctripLibraryCoverAttempts\(cover\)\.length > 0/, "封面必须有已选图库图片的有效身份");

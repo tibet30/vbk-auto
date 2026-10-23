@@ -8,6 +8,7 @@ import { runPresentationCopyRecovery } from "./presentation-copy-recovery.js";
 import { savePresentationViaApi } from "../ctrip/presentation/presentation-api.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { verifyPresentationImageCheckpoint } from "../ctrip/presentation/image-checkpoint.js";
+import { trustedPresentationPoiNames } from "../../planning/vbk-copy-identity.js";
 export {
   applyDeterministicPresentationWordRemoval,
   applySensitivePresentationRewrite,
@@ -52,11 +53,12 @@ export async function fillPresentationWithSensitiveRewrite(args: {
     args.ctx.emit(args.localProductId);
   };
   let coverResult: unknown;
+  const officialPoiNames = trustedPresentationPoiNames(args.product);
   return runPresentationCopyRecovery({
     ...args, store: args.ctx.db, assertWritable, persist,
     rewrite: args.ctx.presentationCopyRewriter,
     save: async (reconcile, state, remember) => {
-      const options = { beforeWrite: assertWritable, reconcile };
+      const options = { beforeWrite: assertWritable, reconcile, officialPoiNames };
       const imageHash = () => createHash("sha256").update(JSON.stringify([
         args.productId, args.product.presentation?.cover, args.product.presentation?.coverFallback,
       ])).digest("hex");

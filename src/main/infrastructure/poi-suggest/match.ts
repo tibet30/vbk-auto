@@ -8,6 +8,7 @@
  */
 
 import type { PoiSuggestion } from "../../../shared/contracts.js";
+import { isCombinedPoiPlaceName, normalisePoiIdentityName } from "../../../shared/poi-name-identity.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -23,7 +24,7 @@ function positiveIntegerValue(value: unknown): number | undefined {
 }
 
 function normaliseName(value: string): string {
-  return value.replace(/[（）()\s]/g, "").toLowerCase();
+  return normalisePoiIdentityName(value);
 }
 
 function normaliseLocationName(value: unknown): string {
@@ -47,7 +48,7 @@ export function pickBestPoi(
   // containment select one half of it; enrichment will create a research task
   // instead.  Candidate names may legitimately use brackets for aliases, so
   // this guard intentionally applies only to the requested keyword.
-  if (hasMultiplePlaceNames(keyword)) return null;
+  if (isCombinedPoiPlaceName(keyword)) return null;
   const list = asRecord(payload)?.poiList;
   const pois = Array.isArray(list) ? list : [];
   const key = normaliseName(keyword);
@@ -68,7 +69,7 @@ export function pickBestPoi(
       // Exact requests for a sub-attraction remain valid above.  A partial
       // main-attraction request must never be satisfied by one of its pits,
       // halls, entrances, etc., merely because the name happens to contain it.
-      return !isSubAttraction(rawName) && matchKeys.some((matchKey) => isConservativeContainmentMatch(matchKey, name));
+      return !isSubAttraction(rawName) && matchKeys.some((matchKey) => isConservativeContainmentMatch(matchKey, name, asRecord(item)));
     });
   };
   // Some VBK responses expose English/partial district metadata even though
@@ -151,7 +152,7 @@ function stripDestinationPrefix(keyword: string, destinationCity?: string): stri
  * place, and it is not a clearly subordinate attraction.
  */
 function pickConservativeAliasPoi(keyword: string, pois: unknown[]): Record<string, unknown> | null {
-  if (hasMultiplePlaceNames(keyword)) return null;
+  if (isCombinedPoiPlaceName(keyword)) return null;
   const keywordCore = removePlaceType(keyword);
   if (keywordCore.length < 4) return null;
   const matches = pois.flatMap((item) => {
@@ -186,10 +187,6 @@ function splitBracketAlias(name: string): [string, string] | null {
   return officialName && alias ? [officialName, alias] : null;
 }
 
-function hasMultiplePlaceNames(name: string): boolean {
-  return /[·、,，/]/.test(name) || /(?:和|与|及)/.test(name);
-}
-
 function isSubAttraction(name: string): boolean {
   // Keep this deliberately limited to facilities and clearly secondary
   // attractions. Exact-name selection is handled before this guard, so a
@@ -197,7 +194,11 @@ function isSubAttraction(name: string): boolean {
   return /(?:[一二三四五六七八九十百\d]+号|陪葬坑|院史|陈列|展览|展厅|售票处|停车场|入口|出口|山门|凉亭|楼|阁|塔|寺|殿|台|苑|园|碑林|救生会|观景台|服务中心|雕像|塑像|纪念碑)/.test(name);
 }
 
-function isConservativeContainmentMatch(keyword: string, candidate: string): boolean {
+function isConservativeContainmentMatch(
+  keyword: string,
+  candidate: string,
+  poi: Record<string, unknown> | null,
+): boolean {
   const keywordCore = removePlaceType(keyword);
   const candidateCore = removePlaceType(candidate);
   if (!keywordCore || !candidateCore) return false;
@@ -207,9 +208,23 @@ function isConservativeContainmentMatch(keyword: string, candidate: string): boo
   // 前缀的官方主景点名；拒绝"金山风景区"匹配"夹金山/布金山"。
   if (candidateCore.endsWith(keywordCore)) {
     const prefix = candidateCore.slice(0, -keywordCore.length);
-    return /(?:省|市|区|县|州|盟|旗)/.test(prefix);
+    return /(?:省|市|区|县|州|盟|旗)/u.test(prefix)
+      || candidateAdministrativePrefixes(poi).has(prefix);
   }
   return false;
+}
+
+function candidateAdministrativePrefixes(poi: Record<string, unknown> | null): Set<string> {
+  const names = new Set<string>();
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    const record = asRecord(value);
+    if (!record) return;
+    if (typeof record.districtName === "string") names.add(normaliseName(record.districtName));
+    Object.values(record).forEach((child) => { if (child && typeof child === "object") visit(child); });
+  };
+  visit(poi?.district);
+  return names;
 }
 
 function removePlaceType(name: string): string {

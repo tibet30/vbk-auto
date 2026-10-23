@@ -3,6 +3,7 @@ import type { AiResponse } from "../../../shared/contracts.js";
 import type { VbkCopyFeedbackStore, VbkCopyRecovery } from "../../planning/vbk-copy-feedback.js";
 import { PresentationSensitiveWordsError } from "../ctrip/presentation/save-monitor.js";
 import { PresentationCopyRejectedError } from "../ctrip/presentation/copy-errors.js";
+import { repairLocalPresentationCopy } from "./presentation-local-copy-repair.js";
 import {
   applyDeterministicPresentationWordRemoval,
   applySensitivePresentationRewrite,
@@ -51,8 +52,24 @@ export async function runPresentationCopyRecovery(args: {
   };
   try {
     await args.assertWritable();
+    const localCandidate = structuredClone(args.product);
+    const localPaths = repairLocalPresentationCopy(localCandidate);
+    if (localPaths.length) {
+      const before = structuredClone(args.product.presentation);
+      await args.assertWritable();
+      state.currentHash = presentationCopyHash(localCandidate);
+      state.history.push({ at: new Date().toISOString(), source: "local-policy",
+        detail: "按当前 POI 身份保留官方名，仅修复本地已知文案规则", paths: localPaths,
+        before, after: localCandidate.presentation });
+      remember();
+      args.product.presentation = localCandidate.presentation;
+      try { args.persist(); } catch (error) { args.product.presentation = before; throw error; }
+      args.log("已自动修复产品图文，保留官方景点名与原方案，继续录入", "info");
+    }
     // 已知反馈也经过同一个局部修复入口，不扩散到其他模块或 POI 身份字段。
-    const known = [...new Set([...state.words, ...args.store.listRejectedPresentationWords()])]
+    const inherited = args.store.listRejectedPresentationWords()
+      .filter(word => findSensitivePresentationPaths(args.product, [word], true).length);
+    const known = [...new Set([...state.words, ...inherited])]
       .filter(word => findSensitivePresentationPaths(args.product, [word]).length);
     if (known.length) {
       rejection = new PresentationCopyRejectedError(known, 200, "local-feedback", `本地图文词库命中：${known.join("、")}`);
@@ -65,7 +82,7 @@ export async function runPresentationCopyRecovery(args: {
           const result = await args.save(Boolean(continuing) || state.rewrites > 0, state, remember);
           state.status = "completed";
           remember();
-          if (state.rewrites) args.log("产品图文已自动调整并通过远端回读，继续后续录入", "info");
+          if (state.rewrites || localPaths.length) args.log("产品图文已自动调整并通过远端回读，继续后续录入", "info");
           return result;
         } catch (error) {
           if (!(error instanceof PresentationSensitiveWordsError)) throw error;
@@ -73,8 +90,11 @@ export async function runPresentationCopyRecovery(args: {
           rejection = error;
         }
       }
-      const paths = findSensitivePresentationPaths(args.product, state.words);
+      const paths = findSensitivePresentationPaths(args.product, state.words, true);
       if (!paths.length) {
+        if (findSensitivePresentationPaths(args.product, state.words).length) {
+          throw new Error(`平台拒绝的关键词涉及官方 POI 名称，无法安全改名，必须返回规划核查：${state.words.join("、")}`);
+        }
         if (state.rewrites >= 2) {
           throw new Error(`产品图文自动修复未完成，已使用 ${state.rewrites}/2 轮：${rejection.message}`);
         }

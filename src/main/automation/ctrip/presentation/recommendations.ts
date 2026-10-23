@@ -57,6 +57,7 @@ export function normalizeVbkRecommendation(value: unknown, category?: string): s
  */
 export function buildRecommendationReasonsPlan(
   recommendations: ReadonlyArray<{ category: string; text: string }>,
+  officialPoiNames: readonly string[] = [],
 ): RecommendationPlanStep[] {
   if (!Array.isArray(recommendations) || recommendations.length !== 3) {
     throw new Error("推荐理由必须为 3 项，请先在产品草稿中维护。");
@@ -78,6 +79,7 @@ export function buildRecommendationReasonsPlan(
     if (!(RECOMMENDATION_CATEGORIES as readonly string[]).includes(category)) {
       throw new Error(`推荐理由分类「${category}」不在白名单。`);
     }
+    const sourceNormalizedText = normalizeVbkRecommendationPunctuation(text);
     const normalizedText = normalizeVbkRecommendation(text, category);
     if (!normalizedText) {
       throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
@@ -88,8 +90,14 @@ export function buildRecommendationReasonsPlan(
     if (!hasValidVbkRecommendationLength(fittedText)) {
       throw new Error(`推荐理由第 ${i + 1} 项不在 30～84 个字符范围内，请重新生成更短文案。`);
     }
-    const copyBadCase = findVbkCopyBadCase(text, `recommendations.${i}.text`)
-      ?? findVbkCopyBadCase(normalizedText, `recommendations.${i}.text`);
+    const referencedOfficialNames = officialPoiNames.filter(name => text.includes(name));
+    const lostOfficialName = referencedOfficialNames.find(name => !fittedText.includes(name));
+    if (lostOfficialName) {
+      throw new Error(`推荐理由第 ${i + 1} 项裁剪后会丢失官方 POI 名「${lostOfficialName}」，必须返回规划重新改写。`);
+    }
+    const copyBadCase = findVbkCopyBadCase(text, `recommendations.${i}.text`, [...officialPoiNames])
+      ?? findVbkCopyBadCase(sourceNormalizedText, `recommendations.${i}.text`, [...officialPoiNames])
+      ?? findVbkCopyBadCase(fittedText, `recommendations.${i}.text`, [...officialPoiNames]);
     if (copyBadCase) {
       throw new Error(
         `推荐理由第 ${i + 1} 项命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,

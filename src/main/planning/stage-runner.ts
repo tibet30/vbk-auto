@@ -15,6 +15,7 @@ import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceN
 import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-policy.js";
 import { fitPresentationRecommendationTexts } from "./vbk-recommendation-length.js";
 import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
+import { trustedPresentationPoiNames } from "./vbk-copy-identity.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -72,6 +73,7 @@ export function sanitiseModuleValue(
   module: PlanningModule,
   value: unknown,
   minimumTravelersDefault = 1,
+  officialPoiNames?: readonly string[],
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   const hit = findBlacklistedKey(value);
   if (hit) return { ok: false, reason: `AI 输出包含禁写字段 ${hit}` };
@@ -88,7 +90,7 @@ export function sanitiseModuleValue(
     }
     value = fitPresentationRecommendationTexts(presentation);
   }
-  const copyBadCases = findAllVbkCopyBadCases(value);
+  const copyBadCases = findCopyBadCases(value, officialPoiNames);
   if (copyBadCases.length > 0) {
     return {
       ok: false,
@@ -118,6 +120,12 @@ export function sanitiseModuleValue(
   const validated = validateModuleValue(module, value);
   if (!validated.ok) return validated;
   return { ok: true, value: validated.value };
+}
+
+function findCopyBadCases(value: unknown, officialPoiNames?: readonly string[]) {
+  return officialPoiNames === undefined
+    ? findAllVbkCopyBadCases(value)
+    : findAllVbkCopyBadCases(value, "value", [...officialPoiNames]);
 }
 
 function formatVbkCopyBadCases(
@@ -150,6 +158,8 @@ export async function executeStageOutput(args: {
   const researchTasks: ResearchTaskProposal[] = [];
   const minimumTravelersDefault = 1;
   const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
+  let presentationIdentityLoaded = false;
+  let presentationOfficialPoiNames: string[] = [];
 
   // research tasks 是 module 列表里的一种 module（researchTasks）；adapter
   // 已经把 tool_call 顶级 researchTasks 合并进 modules，这里不再单独处理。
@@ -190,15 +200,25 @@ export async function executeStageOutput(args: {
 
     // value 是从原始 raw 中读取的；adapter 在拆 tool_call 时会把模块的 value 暴露到 outcome 里。
     const rawValue = outcome.value;
-    let sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault);
+    if (outcome.module === "presentation" && !presentationIdentityLoaded) {
+      presentationIdentityLoaded = true;
+      if (typeof runtime.loadCurrentProduct === "function") {
+        const current = await runtime.loadCurrentProduct(localProductId);
+        presentationOfficialPoiNames = trustedPresentationPoiNames(current);
+      }
+    }
+    const officialPoiNames = outcome.module === "presentation" ? presentationOfficialPoiNames : undefined;
+    let sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault, officialPoiNames);
     // Copy-policy rejection is kept as a hard gate.  Only its known, vetted
     // alternatives may be used for one deterministic repair; the repaired
     // value then goes through every gate (including schema) again.
-    if (!sanitised.ok && findAllVbkCopyBadCases(rawValue).length > 0) {
+    if (!sanitised.ok && findCopyBadCases(rawValue, officialPoiNames).length > 0) {
       sanitised = sanitiseModuleValue(
         outcome.module,
-        repairVbkCopyPolicyValue(rawValue),
+        repairVbkCopyPolicyValue(rawValue, "value",
+          officialPoiNames === undefined ? undefined : [...officialPoiNames]),
         minimumTravelersDefault,
+        officialPoiNames,
       );
     }
     if (!sanitised.ok) {

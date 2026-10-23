@@ -32,6 +32,7 @@ import {
 import { denyPreparationTool } from "../preparation-action-guard.js";
 import { enrichItineraryPois } from "../../planning/poi-enrichment.js";
 import { isPlanningPoiCandidateInContext } from "../../planning/poi-auto-selection.js";
+import { buildPoiContextForItineraryDay } from "../../planning/poi-context.js";
 import { syncInitialTrafficLineAvailability } from "../../planning/traffic-line-availability.js";
 import { resolveProductTrafficLineAvailability } from "../../automation/ctrip/traffic-line/planning-availability.js";
 import type { TrafficLineStationDisambiguator } from "../../automation/ctrip/traffic-line/endpoints.js";
@@ -168,14 +169,15 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const current = get(ctx.localProductId);
         const { dayIndex, spotIndex, spot } = selectItinerarySpot(current, day, spotName);
         if (!requiresItineraryPoi(spot)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
-        const basic = productData(current).basicInfo as JsonObject | undefined;
-        const context = {
-          destinationCity: cleanText(basic?.destinationCity || basic?.meetingCity), province: cleanText(basic?.province),
-        };
+        const currentProduct = productData(current);
+        const basic = currentProduct.basicInfo as JsonObject | undefined;
+        const context = buildPoiContextForItineraryDay(currentProduct,
+          cleanText(basic?.destinationCity || basic?.meetingCity),
+          Array.isArray(currentProduct.itinerary) ? currentProduct.itinerary[dayIndex] : undefined);
         const detail = await withPage(async () => platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).poi(queryKeyword, context));
         const candidate = detail.candidates.find((item) => item.poiId === poiId && item.selectable && item.poiName);
         if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${queryKeyword}」的当前可选查询结果中。`);
-        if (!isPlanningPoiCandidateInContext(candidate, context, productData(current), spotName, detail.candidates)) {
+        if (!isPlanningPoiCandidateInContext(candidate, context, currentProduct, spotName, detail.candidates)) {
           throw new Error(`POI「${candidate.poiName}」与第 ${day} 天原景点「${spotName}」的地域约束不匹配。`);
         }
         const availability = await getCtripSightAvailabilities(undefined, [poiId], deps.db);
@@ -191,11 +193,17 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const next = structuredClone(current.product);
         const itinerary = next.itinerary as JsonObject[];
         (itinerary[dayIndex]!.spots as JsonObject[])[spotIndex] = nextSpot;
-        deps.productMutations.commands.mergeChanges(ctx.localProductId, current, next, 'resource', {}, {
-          queryPath: ['basicInfo'], queryFingerprint: canonicalJson(current.product.basicInfo),
-          targetPath: ['itinerary'], targetFingerprint: canonicalJson(current.product.itinerary),
+        deps.db.runProductTransaction(() => {
+          deps.productMutations.commands.mergeChanges(ctx.localProductId, current, next, 'resource', { notify: false }, {
+            queryPath: ['basicInfo'], queryFingerprint: canonicalJson(current.product.basicInfo),
+            targetPath: ['itinerary'], targetFingerprint: canonicalJson(current.product.itinerary),
+          });
+          deps.db.confirmVerifiedPoiResearchTasks(ctx.localProductId, [{
+            day, spotName: cleanText(spot.name) || spotName, poiName: candidate.poiName, poiId,
+            province: cleanText(candidate.province), city: cleanText(candidate.city), district: cleanText(candidate.district),
+          }]);
+          refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         });
-        refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         deps.emitProduct(get(ctx.localProductId));
         return { content: safeJson({ day, spotName, queryKeyword, poiName: candidate.poiName, poiId, province: candidate.province, city: candidate.city }) };
       },

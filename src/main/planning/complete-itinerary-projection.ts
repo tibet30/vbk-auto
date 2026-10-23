@@ -5,6 +5,8 @@ import { classifyItineraryInputMode, explicitAlternativeGroups, itineraryInputCo
 import { itineraryStructureError } from "./itinerary-structure.js";
 import { projectDatedRoute } from "./dated-route-projection.js";
 import { selfRepairItineraryForVbk } from "./itinerary-self-repair.js";
+import { isIndependentItineraryExperience } from '../../shared/independent-itinerary-experience.js';
+import { toPlatformShortLocationName } from '../../shared/location-short-name.js';
 
 type JsonObject = Record<string, unknown>;
 type LockedDay = { day: number; spots: string[]; unorderedSpots?: string[] };
@@ -21,7 +23,8 @@ const DAY_TOKEN: Record<string, number> = {
  */
 export function projectCompleteItinerary(product: ProductDetail): PlanningStageOutput | undefined {
   const currentItinerary = product.product.itinerary;
-  if (!itineraryStructureError(product.product as JsonObject)
+  const replayOriginal = requestsOriginalRouteReplay(userMessages(product).at(-1)?.content ?? '');
+  if (!replayOriginal && !itineraryStructureError(product.product as JsonObject)
     && !itineraryInputContractError(product, currentItinerary)) return undefined;
   const basic = record(product.product.basicInfo);
   const days = positiveInteger(basic?.days);
@@ -73,13 +76,14 @@ function projectDay(args: {
   const sourceNotes = parentheticalNotes(args.rawDayText);
   const spots = attractions.map((name, index) => ({
     name,
-    kind: "attraction",
+    kind: isIndependentItineraryExperience(name) ? "other" : "attraction",
     poiName: null,
     poiId: null,
     timeOfDay: timeFor(index, attractions.length, groups, name),
     relation: groups.some((group) => group.names.some((candidate) => samePlace(candidate, name))) ? "or" : "and",
   }));
   const stay = stayForDay(args);
+  const overnight = args.row.day <= args.nights;
   return {
     day: args.row.day,
     title,
@@ -88,10 +92,14 @@ function projectDay(args: {
       `按用户原定顺序安排：${description}。`,
       ...(sourceNotes.length ? [`原始补充：${sourceNotes.join("、")}。`] : []),
       ...travelServices,
-      stay ? `当晚按用户要求住${stay}，酒店待运营匹配。` : "当日返程，不安排住宿。",
+      overnight ? stay ? `当晚按原路线住${stay}，使用平台自动匹配酒店。`
+        : "当晚沿原路线安排平台酒店，住宿行政城市待资源核验。" : "当日返程，不安排住宿。",
     ].join(""),
-    hotel: stay ? `${stay}（待匹配）` : "无",
+    hotel: overnight ? stay ? `${stay}（待匹配）` : "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店" : "无",
     meals: "自理",
+    ...(travelServices.length || attractions.every(name => toPlatformShortLocationName(name) === args.fallbackStay)
+      ? { activities: [{ time: '不限', type: 'transport', title: args.rawDayText.trim(), detail: args.rawDayText.trim() }] }
+      : {}),
   };
 }
 
@@ -141,7 +149,8 @@ function stayForDay(args: { row: LockedDay; nights: number; fallbackStay: string
   const parenthesized = args.rawDayText.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim();
   const explicit = parenthesized
     || args.rawDayText.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n]{2,30})/u)?.[1]?.trim();
-  return explicit || args.fallbackStay || "当地酒店";
+  const endpoint = args.row.spots.at(-1);
+  return explicit || (endpoint && toPlatformShortLocationName(endpoint) === args.fallbackStay ? args.fallbackStay : undefined);
 }
 
 function parentheticalNotes(raw: string): string[] {
@@ -194,7 +203,8 @@ function hasUnsupportedService(product: ProductDetail): boolean {
 }
 
 function daySection(value: string, day: number): string {
-  const marker = /(?:D\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/giu;
+  value = value.replace(/\\[nr]/gu, '\n');
+  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/giu;
   const matches = [...value.matchAll(marker)];
   const index = matches.findIndex((match) => DAY_TOKEN[match[1] ?? match[2] ?? ""] === day);
   if (index < 0) return "";
@@ -207,6 +217,9 @@ function serviceNotes(raw: string, spots: string[]): string[] {
   const notes: string[] = [];
   if (/(?:接火车|火车站接|接站)/u.test(raw) || spots.some((name) => /(?:接火车|火车站接|接站)/u.test(name))) notes.push("含火车站接站服务。");
   if (/(?:送火车|送站)/u.test(raw) || spots.some((name) => /(?:送火车|送站)/u.test(name))) notes.push("含火车站送站服务。");
+  const namedServices = raw.split(/[-—–→，,。；;\n]/u).map(value => value.trim())
+    .filter(value => /^[\p{Script=Han}]{2,10}(?:接站|送站|接机|送机|接团|送团)$/u.test(value));
+  if (namedServices.length) notes.push(`保留原始接送地点：${namedServices.join('、')}。`);
   return notes;
 }
 
@@ -229,7 +242,7 @@ function formatAttractionSequence(
 }
 
 function isTravelService(name: string): boolean {
-  return /^(?:接火车站?|火车站接|送火车站?|接站|送站|接机|送机|接团|送团)(?:返程)?$/u.test(name.trim());
+  return /^(?:[\p{Script=Han}]{2,10})?(?:接火车站?|火车站接|送火车站?|接站|送站|接机|送机|接团|送团)(?:返程)?$/u.test(name.trim());
 }
 
 function timeFor(index: number, length: number, groups: Array<{ names: string[] }>, name: string): "morning" | "afternoon" {

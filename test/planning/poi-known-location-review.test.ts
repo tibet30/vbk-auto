@@ -33,19 +33,23 @@ test("同省唯一同名也不能把明确的汕头当日景点匹配到中山",
   assert.equal(checked, false);
 });
 
-test("已绑定错误城市会重新查询并持久化清空错误ID，其余已核验POI保留", async () => {
+test("复核模式清空明确错城绑定，但暂时无法确认时保留无反证旧绑定并阻塞", async () => {
   const { db, id } = fixture();
   const runtime = new DbOrchestratorRuntime(db);
   const queried: string[] = [];
   runtime.resolvePoiSelection = async (_id, keyword) => { queried.push(keyword); return { status: "uncertain", reason: "location_mismatch" }; };
   runtime.getPoiAvailabilities = async ids => new Map(ids.map(id => [id, { status: "available" }]));
   const tasks = await enrichItineraryPois({ localProductId: id, destination: "潮汕", runtime, persistedTaskKeys: new Set(), reviewCompletePois: true });
-  assert.deepEqual(queried, ["炮台公园"]);
+  assert.deepEqual(queried, ["炮台公园", "小公园"]);
   const spots = db.getProduct(id)!.product.itinerary![0]!.spots!;
   assert.equal(spots[0]!.poiId, null);
   assert.equal(spots[0]!.name, "炮台公园");
   assert.equal(spots[1]!.poiId, 148613054);
   assert.equal(tasks[0]!.label, "核查 炮台公园 的 VBK POI 映射");
+  assert.equal(tasks[1]!.label, "核查 小公园 的 VBK POI 映射");
+  const pending = db.getProduct(id)!.researchTasks.find(task => task.label.includes("小公园"))!;
+  assert.equal(pending.state, "researching");
+  assert.match(pending.detail ?? "", /本轮 POI 核验未完成/);
 });
 
 test("核验期间人工改动行程时，拒绝用旧结果覆盖", async () => {

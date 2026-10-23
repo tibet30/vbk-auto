@@ -9,6 +9,7 @@ import {
   hasAmbiguousManualPoiSelection,
   isResearchTaskSatisfiedByProduct,
   poiResearchTaskSatisfaction,
+  requiresCurrentPoiVerification,
 } from "../../../../shared/research-task-satisfaction.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "../../../minimax/minimax-constants.js";
 import { now } from "./types.js";
@@ -45,7 +46,10 @@ export function addResearchTask(db: Database.Database, localProductId: string, t
   const duplicate = existing.find((row) => row.label === canonicalTask.label)
     ?? existing.find((row) => isSamePoiResearchTask(row, canonicalTask));
   if (duplicate) {
-    if (canonicalTask.detail && duplicate.label === canonicalTask.label) {
+    if (requiresCurrentPoiVerification(canonicalTask)) {
+      db.prepare("UPDATE research_tasks SET detail=?, state='researching', status='queued' WHERE id=?")
+        .run(canonicalTask.detail || null, duplicate.id);
+    } else if (canonicalTask.detail && duplicate.label === canonicalTask.label) {
       db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(canonicalTask.detail, duplicate.id);
     }
     touchProduct(db, localProductId);

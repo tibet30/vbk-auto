@@ -312,33 +312,31 @@ test("已完成方案若 POI 被打坏，续跑会回退 itinerary 并补齐后�
   assert.deepEqual(fixed[0].spots[0], { name: "晋祠博物馆", kind: "attraction", poiName: "晋祠博物馆（VBK）", poiId: 79413 });
   assert.deepEqual(fixed[1].spots[0], { name: "山西博物院", kind: "attraction", poiName: "山西博物院（VBK）", poiId: 79413 });
 });
-test("已完成方案的 POI 已齐全时续跑不查询也不重写行程", async () => {
+test("已完成方案旧 POI 独立重查，本次验证后才保留 ID 和路线", async () => {
   const store = new InMemoryStore();
   const runtime = new FakeRuntime();
-  await runPlan({
-    localProductId: "completed-poi-complete", skeleton, store, runtime,
-    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
-  });
-  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ poiName: string | null; poiId: number | null }> }>;
-  for (const day of itinerary) {
-    for (const spot of day.spots) {
-      spot.poiName = spot.poiName ?? `${String((spot as { name?: string }).name ?? "已核验景点")}（VBK）`;
-      spot.poiId = spot.poiId ?? 79413;
-    }
+  await runPlan({ localProductId: "completed-poi-complete", skeleton, store, runtime,
+    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax" });
+  const itinerary = runtime.product.itinerary as Array<{ spots: Array<{ name: string; poiName: string | null; poiId: number | null }> }>;
+  const expected = new Map<string, number>();
+  for (const day of itinerary) for (const spot of day.spots) {
+    spot.poiName = spot.poiName ?? `${spot.name}（VBK）`;
+    spot.poiId = spot.poiId ?? 79413;
+    expected.set(spot.name, spot.poiId);
   }
   runtime.moduleWrites = [];
-  let queryCount = 0;
-  runtime.suggestPoi = async () => {
-    queryCount += 1;
-    return null;
+  const queried: string[] = [];
+  runtime.suggestPoi = async (keyword) => {
+    queried.push(keyword);
+    return { poiName: `${keyword}（VBK）`, poiId: expected.get(keyword)! };
   };
-  const result = await runPlan({
-    localProductId: "completed-poi-complete", skeleton, store, runtime,
-    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax",
-  });
+  const result = await runPlan({ localProductId: "completed-poi-complete", skeleton, store, runtime,
+    planner: new FakePlanner(buildFakeScript()), providerLabel: "minimax" });
   assert.equal(result.status, "completed");
-  assert.equal(queryCount, 0);
-  assert.deepEqual(runtime.moduleWrites, []);
+  assert.deepEqual(queried, ["晋祠博物馆", "山西博物院"]);
+  assert.deepEqual(runtime.moduleWrites, [{ module: "itinerary", writePath: AI_WRITABLE_PATHS.itinerary }]);
+  const reviewed = runtime.product.itinerary as typeof itinerary;
+  assert.deepEqual(reviewed.map((day) => day.spots[0]!.poiId), [...expected.values()]);
 });
 test("assistant 回复反映实际接受 / 缺失模块，不抄模型 reply", async () => {
   const store = new InMemoryStore();

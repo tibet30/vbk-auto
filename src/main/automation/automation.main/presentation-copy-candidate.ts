@@ -4,6 +4,8 @@ import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../domai
 import { buildRecommendationReasonsPlan } from "../ctrip/presentation/recommendations.js";
 import { hasValidVbkRecommendationLength } from "../../planning/vbk-recommendation-length.js";
 import { productSchema } from "../schema/schema-definitions.js";
+import { hasOutsidePoiNameMatch, trustedPresentationPoiNames } from "../../planning/vbk-copy-identity.js";
+import { protectedPresentationFacts } from "./presentation-copy-facts.js";
 
 export type PresentationCopyPath =
   | "recommendation"
@@ -15,6 +17,7 @@ type ProductWithPresentation = Record<string, any> & { presentation?: Record<str
 export function findSensitivePresentationPaths(
   product: ProductWithPresentation,
   sensitiveWords: readonly string[],
+  ignoreOfficialNames = false,
 ): PresentationCopyPath[] {
   const presentation = product.presentation ?? {};
   const candidates: Array<[PresentationCopyPath, unknown]> = [
@@ -28,8 +31,14 @@ export function findSensitivePresentationPaths(
       : []),
   ];
   const words = sensitiveWords.map((word) => word.trim()).filter(Boolean);
+  const officialPoiNames = ignoreOfficialNames ? trustedPresentationPoiNames(product) : [];
   return candidates
-    .filter(([path, value]) => typeof value === "string" && words.some((word) => (path === "features" ? productFeaturesPlainText(value) : value).includes(word)))
+    .filter(([path, value]) => typeof value === "string" && words.some((word) => {
+      const visible = path === "features" ? productFeaturesPlainText(value) : value;
+      if (!ignoreOfficialNames) return visible.includes(word);
+      const escaped = word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      return hasOutsidePoiNameMatch(visible, officialPoiNames, new RegExp(escaped, "u"));
+    }))
     .map(([path]) => path);
 }
 
@@ -58,6 +67,10 @@ function presentationFromResponse(response: AiResponse): Record<string, any> {
   return operation.value as Record<string, any>;
 }
 
+function referencedPoiNames(value: string, officialPoiNames: readonly string[]): string[] {
+  return officialPoiNames.filter(name => value.includes(name)).sort();
+}
+
 export function applySensitivePresentationRewrite(
   product: ProductWithPresentation,
   response: AiResponse,
@@ -68,6 +81,7 @@ export function applySensitivePresentationRewrite(
   if (!current) throw new Error("产品图文数据不存在，无法应用 AI 敏感词重写。");
   const generated = presentationFromResponse(response);
   const candidate = structuredClone(current);
+  const officialPoiNames = trustedPresentationPoiNames(product);
   for (const path of affectedPaths) {
     const next = readPath(generated, path);
     if (typeof next !== "string" || next.trim().length === 0) {
@@ -75,10 +89,23 @@ export function applySensitivePresentationRewrite(
     }
     let acceptedValue = next.trim();
     const visible = path === "features" ? productFeaturesPlainText(next) : next;
+    const beforeVisible = path === "features"
+      ? productFeaturesPlainText(String(readPath(current, path) ?? ""))
+      : String(readPath(current, path) ?? "");
     if (/[\u200b-\u200d\ufeff]/.test(visible)) throw new Error("AI 重写不得通过隐藏字符规避关键词检查。");
-    const remaining = sensitiveWords.find((word) => word.trim() && visible.includes(word.trim()));
+    const beforePoiNames = referencedPoiNames(beforeVisible, officialPoiNames);
+    const nextPoiNames = referencedPoiNames(visible, officialPoiNames);
+    if (JSON.stringify(beforePoiNames) !== JSON.stringify(nextPoiNames)) {
+      throw new Error("AI 重写不得增加、删除或修改当前行程的官方 POI 引用。");
+    }
+    const remaining = sensitiveWords.find((word) => {
+      const term = word.trim();
+      if (!term) return false;
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      return hasOutsidePoiNameMatch(visible, officialPoiNames, new RegExp(escaped, "u"));
+    });
     if (remaining) throw new Error(`AI 重写后仍包含平台非法关键词：${remaining}`);
-    const policyHit = findVbkCopyBadCase(visible, path);
+    const policyHit = findVbkCopyBadCase(visible, path, officialPoiNames);
     if (policyHit) throw new Error(`AI 重写后仍命中文案黑名单：${policyHit.term}`);
     if (path.startsWith("recommendations.") && !hasValidVbkRecommendationLength(next)) {
       throw new Error(`AI 重写的推荐理由不在平台 30～84 字符范围内：${path}`);
@@ -94,14 +121,17 @@ export function applySensitivePresentationRewrite(
       acceptedValue = safeHtml;
     }
     const before = String(readPath(current, path) ?? "");
-    const facts = visible.match(/\d+(?:\.\d+)?|(?:含餐|含早|含午餐|含晚餐|赠送|免费|保险|保证)/g) ?? [];
-    if (facts.some(fact => !before.includes(fact))) throw new Error(`AI 重写引入未经确认的权益或数值：${path}`);
+    const beforeFacts = protectedPresentationFacts(beforeVisible);
+    const nextFacts = protectedPresentationFacts(visible);
+    if (JSON.stringify(beforeFacts) !== JSON.stringify(nextFacts)) {
+      throw new Error(`AI 重写改变了已确认的权益或数值（含新增未经确认、删除或替换），必须返回规划重新确认：${path}`);
+    }
     writePath(candidate, path, acceptedValue);
   }
-  if (findSensitivePresentationPaths({ presentation: candidate }, sensitiveWords).length) {
+  if (findSensitivePresentationPaths({ ...product, presentation: candidate }, sensitiveWords, true).length) {
     throw new Error("AI 重写后的图文仍包含本轮累计非法关键词。");
   }
-  buildRecommendationReasonsPlan(candidate.recommendations);
+  buildRecommendationReasonsPlan(candidate.recommendations, officialPoiNames);
   const copyShape = productSchema.shape.presentation.safeParse({
     recommendationCategory: candidate.recommendationCategory, recommendation: candidate.recommendation,
     recommendations: candidate.recommendations, features: candidate.features,

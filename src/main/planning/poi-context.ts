@@ -1,4 +1,7 @@
 import type { PoiSuggestContext } from "./types.js";
+import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
+import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
+import { originalOvernightRoute } from "../../shared/itinerary-overnight-city.js";
 
 /**
  * 按 POI / 景点 / 景区名称从一天的文本中反推城市。
@@ -26,18 +29,62 @@ export function buildPoiContextForItineraryDay(
   day: unknown,
 ): PoiSuggestContext {
   const base = buildPoiContext(product, destination);
+  const sameDay = verifiedOriginalRouteLocation(product, day);
+  if (sameDay) return sameDay;
   const dayCity = inferExplicitPoiDayCity(day);
   if (dayCity) return { ...base, destinationCity: dayCity };
-  return hasCrossCityStayPlan(product, base.destinationCity)
-    ? { province: base.province }
-    : base;
+  return verifiedSurroundingRouteLocation(product, day) ?? base;
 }
 
-function hasCrossCityStayPlan(product: Record<string, unknown>, arrivalCity: string | undefined): boolean {
-  if (!Array.isArray(product.itinerary) || !arrivalCity) return false;
-  return product.itinerary.some((day) => isRecord(day)
-    && textValue(day.hotelCity)
-    && textValue(day.hotelCity) !== arrivalCity);
+type VerifiedRouteLocation = { destinationCity: string; province: string };
+
+function verifiedSurroundingRouteLocation(
+  product: Record<string, unknown>,
+  targetDay: unknown,
+): VerifiedRouteLocation | undefined {
+  if (!Array.isArray(product.itinerary)) return undefined;
+  const targetNumber = isRecord(targetDay) ? Number(targetDay.day) : NaN;
+  const targetIndex = product.itinerary.findIndex((item) => item === targetDay
+    || (Number.isInteger(targetNumber) && isRecord(item) && Number(item.day) === targetNumber));
+  if (targetIndex <= 0 || targetIndex >= product.itinerary.length - 1) return undefined;
+  const before = verifiedOriginalRouteLocation(product, product.itinerary[targetIndex - 1]);
+  const after = verifiedOriginalRouteLocation(product, product.itinerary[targetIndex + 1]);
+  return before && after && sameRouteLocation(before, after) ? before : undefined;
+}
+
+function verifiedOriginalRouteLocation(
+  product: Record<string, unknown>,
+  day: unknown,
+): VerifiedRouteLocation | undefined {
+  if (!isRecord(day)) return undefined;
+  const dayNumber = Number(day.day);
+  const rawRoute = Number.isInteger(dayNumber) ? normaliseText(originalOvernightRoute(product, day)) : "";
+  if (!rawRoute || !Array.isArray(day.spots)) return undefined;
+  const complete = day.spots.filter((spot): spot is Record<string, unknown> => isRecord(spot) && hasCompletePoi(spot));
+  if (!complete.length || complete.some((spot) => !originalRouteSupportsSpot(rawRoute, spot))) return undefined;
+  const verified = complete;
+  if (!verified.length) return undefined;
+  const locations = verified.map((spot) => ({
+    destinationCity: toPlatformShortLocationName(spot.city),
+    province: toPlatformShortLocationName(spot.province),
+  }));
+  if (locations.some((location) => !location.destinationCity || !location.province)) return undefined;
+  const productProvince = toPlatformShortLocationName(productBasicInfo(product).province);
+  if (productProvince && locations.some((location) => location.province !== productProvince)) return undefined;
+  const [first] = locations;
+  return first && locations.every((location) => sameRouteLocation(first, location)) ? first : undefined;
+}
+
+function originalRouteSupportsSpot(rawRoute: string, spot: Record<string, unknown>): boolean {
+  const name = normaliseText(spot.name);
+  const locations = [spot.city, spot.district]
+    .flatMap((value) => [normaliseText(value), normaliseText(toPlatformShortLocationName(value))])
+    .filter((value) => value.length >= 2);
+  return name.length >= 2 && rawRoute.includes(name) && locations.some((location) => rawRoute.includes(location));
+}
+
+function sameRouteLocation(left: VerifiedRouteLocation, right: VerifiedRouteLocation): boolean {
+  return left.destinationCity === right.destinationCity && left.province === right.province;
 }
 
 export function hasProductPoiContext(product: Record<string, unknown>): boolean {
@@ -83,6 +130,10 @@ function productBasicInfo(product: Record<string, unknown>): Record<string, unkn
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normaliseText(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/gu, "").trim() : "";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

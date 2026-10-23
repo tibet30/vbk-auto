@@ -35,7 +35,8 @@ export function explicitAlternativeGroups(product: ProductDetail): Array<{ day: 
 }
 
 export function rawAlternativeGroups(value: string): Array<{ day: number; names: string[] }> {
-  const marker = /(?:[Dd]\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/g;
+  value = value.replace(/\\[nr]/gu, '\n');
+  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/gi;
   const matches = [...value.matchAll(marker)];
   return matches.flatMap((match, index) => {
     const token = match[1] ?? match[2] ?? "";

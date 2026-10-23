@@ -4,6 +4,7 @@ import type {
   PoiSuggestTextField,
   PoiSuggestion,
 } from "../../shared/contracts.js";
+import { isChinaCountryName, isProvinceLevelCityName } from "../../shared/location-short-name.js";
 
 export interface PoiSuggestDetailResultWithRawPayload extends PoiSuggestDetailResult {
   rawPayload: unknown;
@@ -65,11 +66,15 @@ function readDistrictLocation(poi: Record<string, unknown> | null) {
     : [];
   const parentOfType = (type: string) => parents.find((parent) => String(parent.districtType ?? "").toLowerCase() === type.toLowerCase());
   const currentType = String(district?.districtType ?? "").toLowerCase();
+  const city = stringValue(parentOfType("City")?.districtName)
+    ?? (currentType === "city" ? stringValue(district?.districtName) : null);
+  const explicitProvince = stringValue(parentOfType("Province")?.districtName)
+    ?? (currentType === "province" ? stringValue(district?.districtName) : null);
+  const country = stringValue(parentOfType("Country")?.districtName);
+  const inferredProvince = isProvinceLevelCityName(city) && (!country || isChinaCountryName(country)) ? city : null;
   return {
-    province: stringValue(parentOfType("Province")?.districtName)
-      ?? (currentType === "province" ? stringValue(district?.districtName) : null),
-    city: stringValue(parentOfType("City")?.districtName)
-      ?? (currentType === "city" ? stringValue(district?.districtName) : null),
+    province: explicitProvince ?? inferredProvince,
+    city,
     district: stringValue(district?.districtName),
   };
 }

@@ -50,7 +50,7 @@ test("basicInfo user message 不暴露系统编码、联系人、资源 ID 或�
   assert.doesNotMatch(message, /bookingControls|commercial|inventory/);
 });
 
-test("用户想法送入补全文案 AI 前移除绝对化用语，但保留逐日安排", () => {
+test("用户想法作为需求原文送入 AI，不按宣传规则删改", () => {
   const message = composePlanningUserMessage({
     ...request,
     context: {
@@ -65,7 +65,7 @@ test("用户想法送入补全文案 AI 前移除绝对化用语，但保留逐�
     },
   });
   assert.match(message, /第一天去晋祠/);
-  assert.doesNotMatch(message, /全网|最佳|唯一/);
+  assert.match(message, /第一天去晋祠，安排全网最佳、唯一的体验/);
 });
 
 test("上下文投影递归清理禁写字段，并限制 vehicleResource 子字段", () => {

@@ -20,6 +20,7 @@ import { supportArrangementType } from "../../../shared/itinerary-support-arrang
 import { hasVerifiedRouteAdministrativeNode } from "../../../shared/route-administrative-nodes.js";
 import { hasCompletePoi } from "../../../shared/itinerary-activity-kind.js";
 import { poiResearchTaskNames } from "../../../shared/poi-research-tasks.js";
+import { experienceNameKey, isIndependentItineraryExperience } from '../../../shared/independent-itinerary-experience.js';
 
 export const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -110,6 +111,17 @@ export function requiresLockedAttraction(name: string): boolean {
 
 export function isSupportingLockedSpot(product: ProductDetail, dayNumber: number, name: string, nextDay?: Record<string, unknown>): boolean {
   const source = (asDayList(product.product.itinerary) ?? []).find(day => Number(day.day) === dayNumber);
+  if (isIndependentItineraryExperience(name)) {
+    const day = nextDay ?? source;
+    const key = experienceNameKey(name);
+    return (Array.isArray(day?.activities) ? day.activities : []).some(value => {
+      const activity = asRecord(value);
+      return activity?.type === 'other' && experienceNameKey(text(activity.title)).includes(key);
+    }) || (Array.isArray(day?.spots) ? day.spots : []).some(value => {
+      const spot = asRecord(value);
+      return spot?.kind === 'other' && experienceNameKey(spotName(spot)) === key;
+    });
+  }
   const existing = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
     .find(spot => spot && samePlace(spotName(spot), name));
   return Boolean(supportArrangementType(existing ?? { name, kind: "other" }, source ?? nextDay));

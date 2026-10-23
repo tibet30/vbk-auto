@@ -56,34 +56,37 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         if (!keyword) continue;
         if (!requiresItineraryPoi(spot as Record<string, unknown>)) continue;
         let invalidLocation = false;
+        let reviewingComplete = false;
         if (hasCompletePoi(spot as Record<string, unknown>)) {
           if (!shouldReviewCompletePois) continue;
+          reviewingComplete = true;
           const availability = availabilityByPoiId.get(spot.poiId) ?? await queryPoiAvailability(runtime, localProductId, spot.poiId, queryTimeoutMs);
           if (availability === "suspended") {
             const retainedName = String(spot.name || keyword);
-            spot.poiName = null;
-            spot.poiId = null;
-            delete spot.province;
-            delete spot.city;
-            delete spot.district;
+            clearPoiBinding(spot);
             poiUpdated = true;
             await addPoiResearchTask({
               runtime, localProductId, persistedTaskKeys, addedTasks,
               keyword: retainedName,
-              detail: "携程景点详情标记为暂停营业，已保留原景点和原行程位置；请待恢复营业后重新查询或手动绑定 POI",
+              detail: "携程景点详情标记为暂停营业，已清除旧 POI 绑定并保留原行程位置；请待恢复营业后重新查询或替换景点",
             });
-            logInfo("[planning.poi]", { event: "suspended-poi-retained", localProductId, keyword: retainedName });
+            logInfo("[planning.poi]", { event: "suspended-poi-cleared", localProductId, keyword: retainedName });
             continue;
           }
-          // Unknown historical metadata stays intact. Known mismatches must
-          // be re-resolved; having an ID is not evidence of the right city.
-          invalidLocation = Boolean(spot.city && spot.province) && !isPlanningPoiCandidateInContext({
-            ...spot, index: 0, selectable: true, textFields: [],
+          // Re-resolve every reviewed mapping. Definite location contradictions
+          // are cleared immediately; an inconclusive lookup retains the old
+          // fact but opens a durable current-verification gate below.
+          const hasKnownLocation = Boolean(spot.city || spot.province);
+          invalidLocation = hasKnownLocation && !isPlanningPoiCandidateInContext({
+            ...spot,
+            province: spot.province || poiContext.province,
+            city: spot.city || poiContext.destinationCity,
+            index: 0, selectable: true, textFields: [],
           }, poiContext, product, String(keyword));
-          if (!invalidLocation) continue;
-          spot.poiName = null; spot.poiId = null;
-          delete spot.province; delete spot.city; delete spot.district;
-          poiUpdated = true;
+          if (invalidLocation) {
+            clearPoiBinding(spot);
+            poiUpdated = true;
+          }
         }
         const originalKeyword = String(keyword);
         const firstQuery = isTravelNodeName(originalKeyword)
@@ -124,9 +127,22 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           poiUpdated = true;
           recordVerifiedMapping(verifiedMappings, runtime, day, originalKeyword, match);
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
-        } else if (!queryFailed || invalidLocation) {
+        } else if (!queryFailed || invalidLocation || reviewingComplete) {
+          if (suspended && spot && typeof spot === "object" && !Array.isArray(spot)) {
+            clearPoiBinding(spot);
+            poiUpdated = true;
+          }
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
-          const detail = suspended
+          const retainedForCurrentReview = reviewingComplete && !invalidLocation && !suspended;
+          const detail = retainedForCurrentReview && queryFailed
+            ? "本轮 POI 核验未完成：平台查询失败或超时，已保留先前绑定；请重新查询并确认当前 POI"
+            : retainedForCurrentReview && selectionReason === "ambiguous"
+            ? "本轮 POI 核验未完成：当前查询召回多个候选，无法安全确定唯一地点，已保留先前绑定；请重新查询或手动选择 POI"
+            : retainedForCurrentReview && selectionReason === "location_mismatch"
+            ? "本轮 POI 核验未完成：候选地域信息不足或与当前行程上下文不一致，已保留先前绑定；请重新查询并确认当前 POI"
+            : retainedForCurrentReview
+            ? "本轮 POI 核验未完成：当前查询未召回可确认候选，已保留先前绑定；请重新查询或手动确认当前 POI"
+            : suspended
             ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
             : isTravelNodeName(originalKeyword)
             ? "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点"
@@ -224,6 +240,14 @@ async function addPoiResearchTask(args: {
 }
 function timeoutOrDefault(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) && value! > 0 ? Math.floor(value!) : fallback;
+}
+
+function clearPoiBinding(spot: Record<string, unknown>): void {
+  spot.poiName = null;
+  spot.poiId = null;
+  delete spot.province;
+  delete spot.city;
+  delete spot.district;
 }
 
 function textValue(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }

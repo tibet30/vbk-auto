@@ -7,6 +7,7 @@
  */
 
 import type { PlanningNodeId, PlanningNodeState, PlanningPlanV2 } from "../../../shared/contracts-planning.js";
+import { isProvinceLevelCityName } from "../../../shared/location-short-name.js";
 import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceName } from "../runtime.js";
 
 export function node(plan: PlanningPlanV2, id: PlanningNodeId): PlanningNodeState {
@@ -38,7 +39,7 @@ export function isValidDestinationCity(city: string, province: string): boolean 
   const value = city.trim();
   if (!value || value.length > 40 || /\d/.test(value)) return false;
   if (!isProvinceLevelName(value)) return true;
-  return ["北京", "天津", "上海", "重庆", "香港", "澳门"].includes(normaliseProvinceName(province))
+  return isProvinceLevelCityName(normaliseProvinceName(province))
     && normaliseProvinceName(value) === normaliseProvinceName(province);
 }
 

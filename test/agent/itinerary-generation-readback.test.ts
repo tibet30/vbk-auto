@@ -29,6 +29,7 @@ function toolsFor(output: unknown, options: { persistWrites?: boolean } = {}) {
     reopenKindSupersededPoiResearchTasks: () => ({ updated: 0, taskIds: [] }),
     reopenAmbiguousAutoConfirmedPoiResearchTasks: () => ({ updated: 0, taskIds: [] }),
     markResearchTasksSatisfiedByProduct: () => ({ updated: 0, taskIds: [] }),
+    confirmVerifiedPoiResearchTasks: () => ({ updated: 0, taskIds: [] }),
   };
   const tools = createAgentBusinessTools({
     db: store as never, browser: { requestPage: async () => ({
@@ -40,6 +41,14 @@ function toolsFor(output: unknown, options: { persistWrites?: boolean } = {}) {
     generateStage: async () => output as never,
     disambiguatePoiOption: async () => ({ pickedText: null, confidence: 0 }),
     disambiguateStationOption: async () => ({ pickedText: null, reasoning: "" }), emitProduct: () => undefined,
+    resourceQueries: {
+      poi: async (keyword) => {
+        const poiId = keyword === "宽窄巷子" ? 101 : 102;
+        const candidate = { index: 0, poiName: keyword, poiId, province: "四川", city: "成都", selectable: true, textFields: [] };
+        return { httpStatus: 200, businessStatus: "Success", poiListCount: 1, best: candidate, candidates: [candidate] };
+      },
+      poiAvailability: async () => ({ status: "available" }),
+    },
   });
   return { saved: () => saved, tool: tools.find((item) => item.name === "generate_product_module")! };
 }
@@ -60,7 +69,7 @@ test("accepted itinerary still fails when the persisted readback remains incompl
   assert.equal(saved().product.itinerary?.length, 1);
 });
 
-test("accepted itinerary without verified POIs stays valid and moves to POI resolution", async () => {
+test("accepted itinerary 的旧 POI 经本次独立查询验证后保留 ID 和路线", async () => {
   const itinerary = [{ day: 1, title: "宽窄巷子", description: "游览宽窄巷子", hotel: "无", meals: "自理",
     spots: [{ name: "宽窄巷子", poiName: "宽窄巷子", poiId: 101 }] },
   { day: 2, title: "武侯祠", description: "游览武侯祠", hotel: "无", meals: "自理",
@@ -70,6 +79,6 @@ test("accepted itinerary without verified POIs stays valid and moves to POI reso
   assert.match(result.content, /"itinerary"/);
   assert.equal(saved().product.itinerary?.[0]?.title, "宽窄巷子");
   assert.equal(saved().product.itinerary?.[0]?.spots?.[0]?.poiId, 101);
-  assert.equal(saved().product.itinerary?.[1]?.spots?.[0]?.poiId, null);
-  assert.equal(evaluatePreparationCompletion(saved()).currentNode, "poiResolution");
+  assert.equal(saved().product.itinerary?.[1]?.spots?.[0]?.poiId, 102);
+  assert.equal(evaluatePreparationCompletion(saved()).currentNode, "copy");
 });

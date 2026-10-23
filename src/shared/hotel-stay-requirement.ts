@@ -96,7 +96,8 @@ export function hotelStayRequirement(product: Json, day: Json): HotelStayRequire
 }
 
 function originalDaySection(brief: string, dayNumber: number): string | undefined {
-  const marker = /(?:^|[\s；;])(?:(?:D|第)\s*)?(\d+)(?:天|日)?\s*[-、.:：]/giu;
+  brief = brief.replace(/\\[nr]/gu, '\n');
+  const marker = /(?:^|[\s；;])(?:(?:D(?:ay)?|第)\s*)?(\d+)(?:天|日)?\s*[-、.:：\s]/giu;
   const matches = [...brief.matchAll(marker)];
   const current = matches.find((match) => Number(match[1]) === dayNumber);
   if (!current || current.index === undefined) return undefined;

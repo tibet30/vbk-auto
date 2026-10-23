@@ -13,6 +13,8 @@ type Evidence = {
 };
 
 const NORMALIZED_VALIDATION_PATHS = [
+  /^\$\.tourDailyDescriptions\[\d+\]\.(?:isAiRcmdTitle|isEditAfterAi)$/u,
+  /^\$\.tourDailyDescriptions\[\d+\]\.tourDailyInfos\[\d+\]\.tourDailyPois\[\d+\]\.aiAdjustPoiDetailInfo$/u,
   /^\$\.tourDailyDescriptions\[\d+\]\.(?:parentId|refId)$/u,
   /^\$\.tourDailyDescriptions\[\d+\]\.tourDailyInfos\[\d+\]\.(?:parentId|refId|directionType|fixedProductsOnSale|pkgDepartureDate|sightRecommend|tourDailyCar|tourDailyDinner|tourDailyDismiss|tourDailyGather|transportation)$/u,
   /^\$\.tourDailyDescriptions\[\d+\]\.tourDailyInfos\[\d+\]\.useSegmentConfig$/u,

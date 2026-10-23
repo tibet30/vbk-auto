@@ -21,6 +21,27 @@ test('bare route administrative node is preserved in transport, verified named P
   assert.equal((p.product.itinerary as any)[1].spots.length,2,'source is untouched until controlled persistence');
 });
 
+test('a route POI name protected by its place suffix is not removed by a same-named district result', async () => {
+  const protectedNames = ['北极村', '测试镇', '测试景区', '测试城区', '测试园区', '测试片区', '测试街区',
+    '测试社区', '测试校区', '测试厂区', '测试矿区', '测试库区'];
+  const route = protectedNames.join('-');
+  const p = buildProductSnapshot({ destination: '哈尔滨', days: 1, productForm: 'privateTour', userIdea: `Day1 ${route}` });
+  Object.assign(p.product.basicInfo!, { province: '黑龙江' });
+  p.product.itinerary = [{ day: 1, title: protectedNames.join(' · '), description: `游览${route}`,
+    spots: protectedNames.map(name => ({ name, kind: 'attraction', poiId: null, poiName: null })) }] as any;
+  let calls = 0;
+  const result = await normaliseNumberedRouteAdministrativeNodes(p, { nativeOnly: true, vbkSessionFetch: async (request: any) => {
+    calls++;
+    const name = request.body.keyword;
+    return { status: 200, payload: { ResponseStatus: { Ack: 'Success' }, districts: [{
+      districtId: 2, districtName: name, districtType: 'City', parents: [{ districtName: '黑龙江', districtType: 'Province' }],
+    }] } };
+  } } as any);
+  assert.equal(calls, 0, 'protected route POIs should not be sent through administrative classification');
+  assert.equal(result, undefined);
+  assert.deepEqual(p.product.itinerary[0]!.spots!.map(spot => spot.name), protectedNames);
+});
+
 test('dated D routes normalize unique cross-province administrative anchors and cache repeated reads', async () => {
   const p = buildProductSnapshot({ destination: '西宁', days: 2, productForm: 'privateTour',
     userIdea: '**10 月 4 号 D1：** 西宁 - 茶卡盐湖 - 瓜州\n**10 月 5 号 D2：** 瓜州 - 敦煌' });

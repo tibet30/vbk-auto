@@ -69,10 +69,11 @@ function resolveItineraryConstraints(
   const initial = parseDayConstraints(initialRequirement);
   const itineraryOrder = new Map<number, LockedItineraryDay>();
   const generalPois = new Set<string>();
-  const baselineOrder = fromIntent.itineraryOrder.length ? fromIntent.itineraryOrder : initial.itineraryOrder;
-  const baselinePois = fromIntent.pois.length
-    ? fromIntent.pois
-    : unique([...initial.pois, ...parseMustPois(initialRequirement)]);
+  // Explicit daily source text outranks a model's interpretation of that text.
+  const baselineOrder = initial.itineraryOrder.length ? initial.itineraryOrder : fromIntent.itineraryOrder;
+  const baselinePois = initial.itineraryOrder.length || !fromIntent.pois.length
+    ? unique([...initial.pois, ...parseMustPois(initialRequirement)])
+    : fromIntent.pois;
   for (const row of baselineOrder) itineraryOrder.set(row.day, cloneLockedDay(row));
   const daySpecificPois = baselineOrder.flatMap(lockedDaySpots);
   for (const poi of baselinePois) {
@@ -118,8 +119,8 @@ function resolveItineraryConstraints(
 function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrder: LockedItineraryDay[] } {
   const itineraryOrder: LockedItineraryDay[] = [];
   const pois: string[] = [];
-  const marker = /(?:[Dd]\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/g;
-  const routeText = textValue.replace(/(?:^|[\n\r])\s*(?:住宿与商业配置|住宿配置|商业配置|录入配置|(?:已确认的?)?住宿(?:要求|安排)|已确认的?业务要求)[:：][\s\S]*$/u, "");
+  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/gi;
+  const routeText = textValue.replace(/\\[nr]/gu, '\n').replace(/(?:^|[\n\r])\s*(?:住宿与商业配置|住宿配置|商业配置|录入配置|(?:已确认的?)?住宿(?:要求|安排)|已确认的?业务要求)[:：][\s\S]*$/u, "");
   const matches = [...routeText.matchAll(marker)];
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index]!;
@@ -186,7 +187,7 @@ function splitSpots(value: string): string[] {
     .replace(/【[^】]*】|\[[^\]]*\]|\([^)]*\)|（[^）]*）/gu, " ")
     .replace(/(?:^|[\n\r])\s*[0-9一二三四五六七八九十]+\s*月\s*[0-9一二三四五六七八九十]+\s*号\s*$/gu, " ")
     .replace(/包车|专车|拼车|当地[345四五三]钻.*$|钻酒店.*$/g, " ")
-    .replace(/(?:火车站接|接火车站?|送火车站?|接站|送站|住[^—–\-，,、。；;\n]{2,})/gu, " ")
+    .replace(/(?<![\p{Script=Han}])(?:火车站接|接火车站?|送火车站?|接站|送站)|住[^—–\-，,、。；;\n]{2,}/gu, " ")
     .replace(/(?:二选一|多选一|任选其一)/gu, " ")
     .replace(/(?:或者|或|\/|／)/gu, "，")
     .replace(/[+＋]/gu, "，")
@@ -230,6 +231,7 @@ function trimPlanningControlTail(value: string): string {
 
 function looksLikePlaceName(item: string): boolean {
   if (item.length < 2 || item.length > 20) return false;
+  if (/^(?:出发地|客源地)$/u.test(item)) return false;
   if (/^(?:保留|保持)(?:此|原|上述)?(?:顺序|行程顺序|景点顺序)/u.test(item)) return false;
   if (/[{}"']/.test(item) || /destination|productForm|userIdea|nights/.test(item)) return false;
   if (/不要|不安排|不需要|可以|希望|期望|资料|准备|询问|审批|明确|端到端|测试|轻松|适合|带孩子|建议|最好|左右|一下|安排点/.test(item)) return false;

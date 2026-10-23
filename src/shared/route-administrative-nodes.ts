@@ -1,7 +1,9 @@
 import { toPlatformShortLocationName } from './location-short-name.js';
+import { isProtectedRoutePoiPlaceName } from './route-place-name.js';
 
 /** Written only after a unique native district read; AI patches cannot write diagnostics. */
 export function hasVerifiedRouteAdministrativeNode(product: Record<string, unknown>, name: string, day?: number): boolean {
+  if (isProtectedRoutePoiPlaceName(name)) return false;
   const diagnostics = record(product.diagnostics);
   const nodes = Array.isArray(diagnostics?.routeAdministrativeNodes) ? diagnostics.routeAdministrativeNodes : [];
   const target = toPlatformShortLocationName(name);

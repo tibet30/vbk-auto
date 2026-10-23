@@ -10,6 +10,7 @@ import { buildAdultTicketInclusionText } from "./terms.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
 import { readBoundCoverImageIdsViaApi } from "./presentation/cover-bind.js";
 import { buildRecommendationReasonsPlan } from "./presentation/recommendations.js";
+import { trustedPresentationPoiNames } from "../../planning/vbk-copy-identity.js";
 import { selectedClauseItems } from "./traffic-line/clause-items.js";
 import { postTrafficLineSoa, record, text, type JsonRecord, type TrafficLinePage } from "./traffic-line/client.js";
 
@@ -100,7 +101,10 @@ export async function verifyPresentationReadback(
   }
 
   const remote = productRecord(info);
-  const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
+  const recommendations = buildRecommendationReasonsPlan(
+    presentation.recommendations,
+    trustedPresentationPoiNames(productValue),
+  );
   const remoteRecommendations = Array.isArray(remote.pmRcmdItems) ? remote.pmRcmdItems : [];
   for (const expected of recommendations) {
     if (!remoteRecommendations.some((item) => text(productRecord(item).rcmdDesc) === expected.text)) {

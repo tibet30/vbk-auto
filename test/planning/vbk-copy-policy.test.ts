@@ -75,10 +75,10 @@ test("实跑敏感词与极限宣传进入黑名单，但行程序号不被误�
   assert.equal(findVbkCopyBadCase("费用不含导游", "value.commercial.terms.exclusions"), undefined);
 });
 
-test("用户原始想法保留行程语义，但提交 AI 前移除绝对化用语", () => {
-  const sanitised = sanitiseUserIdeaForAi("第一天去晋祠，安排全网最佳、唯一的深度体验，保证满意。");
-  assert.match(sanitised, /第一天去晋祠/);
-  assert.doesNotMatch(sanitised, /全网|最佳|唯一|保证满意/);
+test("用户原始想法原样提交，宣传规则只检查生成文案", () => {
+  const raw = "第一天去晋祠，安排全网最佳、唯一的深度体验，保证满意。";
+  assert.equal(sanitiseUserIdeaForAi(raw), raw);
+  assert.ok(findVbkCopyBadCase(raw));
   assert.equal(sanitiseUserIdeaForAi("最后一天自由活动"), "最后一天自由活动");
 });
 
@@ -158,7 +158,7 @@ test("规划阶段用已验证替代词修复首次文案后才写入", async ()
   assert.equal(sanitiseModuleValue("presentation", writes[0]).ok, true, "写入前后的门禁仍应通过");
 });
 
-test("确定性修复保留官方 POI 身份字段，并让未消除的命中继续拒绝", () => {
+test("确定性修复保留所有官方 POI 身份字段，并修复自由文案", () => {
   const value = {
     itinerary: [{ description: "首次到访", spots: [{ poiName: "首次公园", requestedName: "首次公园" }] }],
   };
@@ -166,7 +166,7 @@ test("确定性修复保留官方 POI 身份字段，并让未消除的命中继
   assert.deepEqual(repaired, {
     itinerary: [{ description: "初到", spots: [{ poiName: "首次公园", requestedName: "首次公园" }] }],
   });
-  assert.equal(findVbkCopyBadCase(repaired)?.path, "value.itinerary[0].spots[0].poiName");
+  assert.equal(findVbkCopyBadCase(repaired), undefined);
 });
 
 test("夜骑楼按完整短语改为街区风情，避免产生散步楼", () => {

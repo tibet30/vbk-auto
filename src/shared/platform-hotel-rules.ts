@@ -3,6 +3,7 @@ import { hasItineraryHotelStay, needsItineraryHotelCandidates, normaliseReturnDa
 import { hotelStayRequirement } from "./hotel-stay-requirement.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
 import { isNonWritableCityAlias, toWritableAdministrativeCityName } from "./region-overrides.js";
+import { originalOvernightRoute, originalRouteEndsAtArrival, verifiedOvernightCity } from './itinerary-overnight-city.js';
 
 type Json = Record<string, any>;
 export interface PlatformHotelRules { autoMatch: boolean; grades: number[] }
@@ -48,19 +49,25 @@ export function normalisePlatformHotelProduct(product: Json): Json {
     const savedCity = toPlatformShortLocationName(day.hotelCity);
     const arrivalCity = toPlatformShortLocationName(basic.meetingCity || basic.destinationCity);
     const requestedCity = toPlatformShortLocationName(toWritableAdministrativeCityName(requirement?.cityName));
+    const verifiedCity = verifiedOvernightCity(next, day);
+    const inferredCity = requestedCity || verifiedCity;
     const inheritedArrival = savedCity && requestedCity && savedCity === arrivalCity && requestedCity !== arrivalCity;
-    const city = inheritedArrival ? requestedCity : toPlatformShortLocationName(savedCity || requestedCity
-      || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || arrivalCity);
+    const fallbackCity = originalOvernightRoute(next, day) && !originalRouteEndsAtArrival(next, day) ? '' : arrivalCity;
+    const city = inheritedArrival ? inferredCity : toPlatformShortLocationName(savedCity || inferredCity
+      || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity);
     const result: Json = { ...day, hotel: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL,
       hotelDescription: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL };
     delete result.hotelRequirement; delete result.hotelCandidates;
-    if (stay) result.hotelCity = city; else delete result.hotelCity;
+    if (stay && city) result.hotelCity = city; else delete result.hotelCity;
     const hotelNames = [raw.hotel, ...namedHotels, ...(raw.hotelCandidates ?? []).map((candidate: Json) => candidate.hotelName)];
     result.title = cleanPlatformHotelCopy(result.title, hotelNames);
     if (typeof result.title === "string") result.title = result.title.split(PLATFORM_HOTEL_DESCRIPTION).join("平台酒店");
     const routeCopy = (value: unknown) => {
       const cleaned = cleanPlatformHotelCopy(value, hotelNames);
-      return typeof cleaned === "string" ? cleaned.split(PLATFORM_HOTEL_DESCRIPTION).join("平台酒店") : cleaned;
+      if (typeof cleaned !== 'string') return cleaned;
+      const copy = cleaned.split(PLATFORM_HOTEL_DESCRIPTION).join("平台酒店");
+      return stay && city ? copy.replace('当晚沿原路线安排平台酒店，住宿行政城市待资源核验。',
+        `当晚住宿行政城市为${city}，使用平台自动匹配酒店。`) : copy;
     };
     result.description = routeCopy(result.description);
     if (Array.isArray(result.activities)) result.activities = result.activities.filter((activity: Json) => stay || activity.type !== "hotel").map((activity: Json) =>

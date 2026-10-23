@@ -27,12 +27,14 @@ import type { CtripLibraryCover } from "../../../../../shared/contracts-ctrip-co
 import type { ManualUploadCover } from "../../../../../shared/contracts-ctrip-cover.js";
 import type { VbkPage } from "../../locator-types.js";
 import { buildRecommendationReasonsPlan } from "../recommendations.js";
+import { trustedPresentationPoiNames } from "../../../../planning/vbk-copy-identity.js";
 import { ctripLibraryCoverAttempts } from "./cover-attempts.js";
 
 export interface PresentationWriteOptions {
   beforeWrite?: () => Promise<void>;
   reconcile?: boolean;
   onImagesBound?: (result: unknown) => void;
+  officialPoiNames?: readonly string[];
 }
 
 type ManualUploadCoverWithRemoteId = ManualUploadCover & { remoteImageId?: number };
@@ -47,6 +49,7 @@ interface PresentationProduct extends Record<string, unknown> {
   productId?: unknown;
   presentation?: PresentationContent;
   basicInfo?: { meetingCity?: unknown };
+  itinerary?: unknown;
 }
 
 /** 第一阶段已经持久化 imageId，直接调用 VBK 图片绑定接口并回读确认封面。 */
@@ -125,7 +128,10 @@ export async function fillAndSavePresentation(
   if (!presentation.recommendations) {
     throw new Error("推荐理由必须恰好 3 条：分类在白名单且不重复，文本非空。请补全 presentation.recommendations。");
   }
-  buildRecommendationReasonsPlan(presentation.recommendations);
+  const officialPoiNames = options.officialPoiNames
+    ?? trustedPresentationPoiNames(product);
+  options.officialPoiNames = officialPoiNames;
+  buildRecommendationReasonsPlan(presentation.recommendations, officialPoiNames);
   // 产品图片先通过 bindProductImage 设置封面和景点图；推荐理由 + 产品特色
   // 再由 savePresentationViaApi 写入 /15638/getdescriptionInfo →
   // /20698/createProductDraft → /15638/savedescriptioninfo。

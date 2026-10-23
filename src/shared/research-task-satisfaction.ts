@@ -21,6 +21,7 @@ const commercialPattern = /成人价|儿童价|成人成本|儿童成本|价格|
 const obsoletePoiFailurePattern = /suggestPoi\s*未匹配|未找到对应的\s*VBK\s*POI|暂停营业|停止营业|永久关闭|已关闭|可能已关闭|temporarily\s+closed|permanently\s+closed|不能加入行程|不能写入行程|不能作为行程景点|请替换为(?:正常营业|可游览)景点|替换为(?:正常营业|可游览)景点|手动录入\s*POI|人工核查/i;
 const poiCandidateAmbiguityPattern = /多个候选|无法(?:安全)?确定(?:唯一|其一)|不能(?:安全)?(?:默认)?选择(?:其一|候选)/u;
 const explicitManualPoiSelectionPattern = /(?:手动|人工|运营人员?)\s*(?:选择|确认)(?:\s*(?:POI|景点|地点|候选))?/u;
+const currentPoiVerificationPattern = /本轮\s*POI\s*核验未完成/u;
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -119,6 +120,12 @@ export function requiresManualPoiSelection(task: ResearchTaskText): boolean {
   return poiCandidateAmbiguityPattern.test(detail) || explicitManualPoiSelectionPattern.test(detail);
 }
 
+/** The retained mapping is historical evidence only until a current controlled
+ * POI lookup produces a fresh verification receipt. */
+export function requiresCurrentPoiVerification(task: ResearchTaskText): boolean {
+  return task.type === "vbk" && currentPoiVerificationPattern.test(textValue(task.detail));
+}
+
 /** Narrow migration/recovery predicate for the historic auto-confirm bug.
  * A generic manual-input note is not enough: the detail must say both that
  * candidates are ambiguous and that a human must choose one. */
@@ -168,7 +175,8 @@ export function isResearchTaskSatisfiedByProduct(
       // “已找到多个候选…请手动选择” is a durable operator decision gate.
       // A trusted removal/free-activity receipt still settles the task; only a
       // same-name + positive-ID mapping is prohibited from auto-confirming it.
-      return poiSatisfaction !== "verified" || !requiresManualPoiSelection(task);
+      return poiSatisfaction !== "verified"
+        || (!requiresManualPoiSelection(task) && !requiresCurrentPoiVerification(task));
     }
     // A failed POI task may become obsolete after the operator replaces that
     // attraction in the current itinerary. Only explicit failure/replacement

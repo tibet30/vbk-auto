@@ -156,7 +156,8 @@ test("阿里括号宿点路线确定性投影，不再交给模型重写或把�
     "塔尔钦（待匹配）", "塔尔钦（待匹配）", "萨嘎（待匹配）",
   ]);
   assert.equal(itinerary[6]!.hotel, "无");
-  assert.ok(!(itinerary[2]!.spots as any[]).some((spot) => spot.name === "巴松村"));
+  assert.ok((itinerary[2]!.spots as any[]).some((spot) => spot.name === "巴松村"),
+    "前夜只明确宿珠峰小镇，不能用地点别名把原路线巴松村降为住宿衔接");
   assert.ok((itinerary[0]!.spots as any[]).some((spot) => spot.name === "羊卓雍湖"));
   assert.ok((itinerary[0]!.spots as any[]).some((spot) => spot.name === "库拉岗日冰川"));
   assert.equal(itineraryInputContractError(product, itinerary), undefined);

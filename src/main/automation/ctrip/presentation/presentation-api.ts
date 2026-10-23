@@ -35,6 +35,7 @@ export interface PresentationApiResult {
 export interface PresentationSaveOptions {
   beforeWrite?: () => Promise<void>;
   reconcile?: boolean;
+  officialPoiNames?: readonly string[];
 }
 
 export async function savePresentationViaApi(
@@ -45,11 +46,12 @@ export async function savePresentationViaApi(
 ): Promise<PresentationApiResult> {
   const productId = explicitProductId ?? readProductIdFromVbkUrl(page.url());
   if (!Number.isInteger(productId) || productId <= 0) throw new Error("VBK 产品 ID必须是正整数。");
-  const recommendations = buildRecommendationReasonsPlan(presentation.recommendations);
-  assertPresentationCopyAllowed(presentation.recommendation, "recommendation", "推荐语");
+  const officialPoiNames = options.officialPoiNames ?? [];
+  const recommendations = buildRecommendationReasonsPlan(presentation.recommendations, officialPoiNames);
+  assertPresentationCopyAllowed(presentation.recommendation, "recommendation", "推荐语", officialPoiNames);
   const featuresHtml = formatProductFeaturesHtml(presentation.features);
   if (!featuresHtml) throw new Error("产品图文缺少产品特色 HTML，已停止接口保存。");
-  assertPresentationCopyAllowed(productFeaturesPlainText(featuresHtml), "features", "产品特色");
+  assertPresentationCopyAllowed(productFeaturesPlainText(featuresHtml), "features", "产品特色", officialPoiNames);
 
   const [base, current] = await Promise.all([
     getProductBaseInfoApi(page, String(productId)),
@@ -118,8 +120,13 @@ export async function savePresentationViaApi(
   };
 }
 
-function assertPresentationCopyAllowed(value: unknown, path: string, label: string): void {
-  const copyBadCase = findVbkCopyBadCase(value, path);
+function assertPresentationCopyAllowed(
+  value: unknown,
+  path: string,
+  label: string,
+  officialPoiNames: readonly string[],
+): void {
+  const copyBadCase = findVbkCopyBadCase(value, path, [...officialPoiNames]);
   if (!copyBadCase) return;
   throw new Error(
     `产品图文${label}命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,

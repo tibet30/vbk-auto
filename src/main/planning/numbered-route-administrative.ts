@@ -8,8 +8,10 @@ import { vbkSessionRequest, type VbkSessionRequestBrowser } from '../infrastruct
 import { retryVbkRead } from '../infrastructure/vbk-read-retry.js';
 import { assertVbkAckSuccess } from '../infrastructure/vbk-response-error.js';
 import { buildSuggestDistrictRequest, SUGGEST_DISTRICT_ENDPOINT } from '../infrastructure/suggest-district.js';
+import { isProtectedRoutePoiPlaceName } from '../../shared/route-place-name.js';
 
 type Json = Record<string, any>;
+
 /** 完整原始逐日路线中，将平台唯一确认的行政节点移回交通安排。 */
 export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductDetail, page: VbkSessionRequestBrowser) {
   const basic = detail.product.basicInfo as Json;
@@ -28,7 +30,9 @@ export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductD
     const kept = [];
     for (const spot of day.spots ?? []) {
       const name = String(spot.name ?? '').trim();
-      if (!requiresItineraryPoi(spot) || hasCompletePoi(spot) || !route.includes(name)) { kept.push(spot); continue; }
+      if (!requiresItineraryPoi(spot) || hasCompletePoi(spot) || !route.includes(name) || isProtectedRoutePoiPlaceName(name)) {
+        kept.push(spot); continue;
+      }
       if (!districts.has(name)) {
         const response = await retryVbkRead(() => vbkSessionRequest(page, {
           endpoint: SUGGEST_DISTRICT_ENDPOINT, body: buildSuggestDistrictRequest(toPlatformShortLocationName(name)),

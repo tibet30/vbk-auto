@@ -104,7 +104,7 @@ test("POI 保存契约与自修复共用住宿路线节点判定，且不吞掉�
   assert.equal(isPersistedRouteTravelNode(product.product, { day: 1, title: "拉萨—华阳古镇—日喀则" }, "华阳古镇"), false);
 });
 
-test("珠峰小镇住宿允许次日巴松村作为路线起点，但不能全局豁免同名景点", () => {
+test("住宿锚点不能把次日同名村落 POI 降为行政路线节点", () => {
   const product = buildProductSnapshot({ destination: "拉萨", days: 3, productForm: "privateTour",
     userIdea: [
       "D1天：拉萨—羊卓雍措—日喀则（宿日喀则）",
@@ -123,8 +123,8 @@ test("珠峰小镇住宿允许次日巴松村作为路线起点，但不能全�
       { name: "巴松村", kind: "other" }, { name: "佩枯措", kind: "attraction" }, { name: "萨嘎", kind: "other" },
     ] },
   ];
-  assert.equal(isPersistedRouteTravelNode(product.product, itinerary[2]!, "巴松村"), true);
-  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+  assert.equal(isPersistedRouteTravelNode(product.product, itinerary[2]!, "巴松村"), false);
+  assert.match(itineraryInputContractError(product, itinerary) ?? "", /必须保留为景点类型/);
 
   const standalone = buildProductSnapshot({ destination: "拉萨", days: 1, productForm: "privateTour", userIdea: "D1：巴松村" });
   Object.assign(standalone.product.basicInfo!, { meetingCity: "拉萨", destinationCity: "拉萨" });
@@ -132,6 +132,14 @@ test("珠峰小镇住宿允许次日巴松村作为路线起点，但不能全�
   assert.match(itineraryInputContractError(standalone, [
     { day: 1, title: "巴松村", spots: [{ name: "巴松村", kind: "other" }] },
   ]) ?? "", /必须保留为景点类型/);
+
+  const explicit = buildProductSnapshot({ destination: "拉萨", days: 2, productForm: "privateTour",
+    userIdea: "D1天：珠峰—巴松村（宿巴松村） D2天：巴松村—佩枯措" });
+  Object.assign(explicit.product.basicInfo!, { meetingCity: "拉萨", destinationCity: "拉萨" });
+  const nextDay = { day: 2, title: "巴松村—佩枯措", spots: [{ name: "巴松村", kind: "other" },
+    { name: "佩枯措", kind: "attraction" }] };
+  assert.equal(isPersistedRouteTravelNode(explicit.product, nextDay, "巴松村"), true,
+    "only an exact previous-night instruction can classify a village as the next day's lodging connection");
 });
 
 test("人工审查改为其他活动并留下核查凭证后，契约保留名称但不再强迫伪造 POI", () => {

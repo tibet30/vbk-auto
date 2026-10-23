@@ -1,10 +1,9 @@
-import { hotelStayRequirement } from "./hotel-stay-requirement.js";
 import { hasCompletePoi } from "./itinerary-activity-kind.js";
+import { originalOvernightRoute } from "./itinerary-overnight-city.js";
 import { toWritableAdministrativeCityName } from "./region-overrides.js";
+import { isProtectedRoutePoiPlaceName } from "./route-place-name.js";
 
 type JsonObject = Record<string, unknown>;
-
-const PROTECTED_PLACE_SUFFIX = /(?:景区|古镇|城区|园区|片区|街区|社区|校区|厂区|矿区|库区)$/u;
 
 /**
  * Identify a persisted route/lodging node that must stay in the route text but
@@ -17,9 +16,12 @@ export function isPersistedRouteTravelNode(
   name: string,
 ): boolean {
   const value = name.trim();
-  if (!value || PROTECTED_PLACE_SUFFIX.test(value)) return false;
+  if (!value) return false;
   if (/^\d+道班$/u.test(value)) return true;
   if (!product || !routeTitleContainsNode(text(day.title), value)) return false;
+  if (isProtectedRoutePoiPlaceName(value)) {
+    return hasExplicitPreviousOvernightStart(product, day, value);
+  }
 
   const basic = isRecord(product.basicInfo) ? product.basicInfo : {};
   const administrative = [basic.meetingCity, basic.destinationCity, basic.destination]
@@ -31,16 +33,30 @@ export function isPersistedRouteTravelNode(
     administrative.push(text(peer.province), text(peer.city), text(peer.district));
   }
   const dayNumber = Number(day.day);
-  const itinerary = Array.isArray(product.itinerary) ? product.itinerary.filter(isRecord) : [];
   for (const targetDay of [dayNumber, dayNumber - 1]) {
-    const sourceDay = itinerary.find((item) => Number(item.day) === targetDay) ?? { day: targetDay };
-    const requirement = hotelStayRequirement(product, sourceDay);
-    if (requirement) administrative.push(requirement.anchorName, requirement.cityName ?? "");
+    const overnight = explicitOriginalOvernightName(originalOvernightRoute(product, { day: targetDay }));
+    if (overnight) administrative.push(overnight);
   }
 
   const writableName = toWritableAdministrativeCityName(value);
   return administrative.some((candidate) => candidate === value
     || toWritableAdministrativeCityName(candidate) === writableName);
+}
+
+function hasExplicitPreviousOvernightStart(product: JsonObject, day: JsonObject, name: string): boolean {
+  const dayNumber = Number(day.day);
+  if (!Number.isInteger(dayNumber) || dayNumber <= 1) return false;
+  const previous = explicitOriginalOvernightName(originalOvernightRoute(product, { day: dayNumber - 1 }));
+  if (previous !== name) return false;
+  const current = originalOvernightRoute(product, { day: dayNumber });
+  const start = current?.replace(/^\s*[:：]/u, "").split(/[-—–→]/u)[0]?.trim();
+  return start === name;
+}
+
+function explicitOriginalOvernightName(source: string | undefined): string | undefined {
+  if (!source) return undefined;
+  return source.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim()
+    || source.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n（(]{2,30})/u)?.[1]?.trim();
 }
 
 function routeTitleContainsNode(title: string, name: string): boolean {

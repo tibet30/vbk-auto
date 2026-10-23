@@ -60,6 +60,7 @@ export async function queryPoiSuggest(
   await localizePoiListDistricts(browser, list, {
     browserRequestTimeoutMs,
     evaluateTimeoutMs,
+    province: options.province,
   });
   return parsePoiSuggestPayload(keyword, payload, response.status, options);
 }

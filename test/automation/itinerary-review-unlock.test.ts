@@ -24,7 +24,7 @@ const detail = (tourInfoId = "420189338085900414", productId?: number) => ({ ...
   }] }],
 }] });
 
-function fixture(options: { allUnlocked?: boolean; formalOnly?: boolean; lockedStatus2?: boolean; badAck?: boolean; dropPoi?: boolean; changeText?: boolean; generatedDailyId?: boolean; unknownDailyId?: boolean; platformNormalization?: boolean; nonemptyPlatformField?: boolean; postReviewField?: boolean; foreignCheck?: boolean; foreignAssociation?: boolean; foreignSecondAssociation?: boolean; foreignDetail?: boolean; emptyScore?: boolean; visaMessage?: boolean; published?: boolean; child?: boolean; badPage?: boolean; login?: boolean; noRoute?: boolean; badMaxStep?: boolean; pendingReadbacks?: number; unsubmittedAfterUnlock?: boolean } = {}) {
+function fixture(options: { allUnlocked?: boolean; formalOnly?: boolean; lockedStatus2?: boolean; badAck?: boolean; dropPoi?: boolean; changeText?: boolean; generatedDailyId?: boolean; unknownDailyId?: boolean; platformNormalization?: boolean; aiMetadata?: boolean; nonemptyPlatformField?: boolean; postReviewField?: boolean; foreignCheck?: boolean; foreignAssociation?: boolean; foreignSecondAssociation?: boolean; foreignDetail?: boolean; emptyScore?: boolean; visaMessage?: boolean; published?: boolean; child?: boolean; badPage?: boolean; login?: boolean; noRoute?: boolean; badMaxStep?: boolean; pendingReadbacks?: number; unsubmittedAfterUnlock?: boolean } = {}) {
   let unlocked = options.allUnlocked === true;
   let routeId = unlocked && !options.noRoute ? 900 : 0;
   let pendingReadbacks = options.pendingReadbacks ?? 0;
@@ -60,6 +60,11 @@ function fixture(options: { allUnlocked?: boolean; formalOnly?: boolean; lockedS
       else if (method === "getProductTourInfoList") payload = { tourInfos: [relation()] };
       else if (method === "getTourDailyDetail.json") {
         const current = detail(body.tourInfoId, options.foreignDetail ? 1 : undefined);
+        if (unlocked && options.aiMetadata) {
+          Object.assign(current.tourDailyDescriptions[0], { isAiRcmdTitle: true, isEditAfterAi: true });
+          Object.assign(current.tourDailyDescriptions[0].tourDailyInfos[0].tourDailyPois[0],
+            { aiAdjustPoiDetailInfo: { suggestedPoiName: "平台建议", reason: "AI推荐标记" } });
+        }
         if (unlocked && options.postReviewField) current.tourDailyDescriptions[0].reviewGeneratedValue = "platform";
         payload = { tourInfo: current };
       }
@@ -93,6 +98,11 @@ function fixture(options: { allUnlocked?: boolean; formalOnly?: boolean; lockedS
           const hotelSlot = day.tourDailyInfos[1].tourDailyHotels[0];
           Object.assign(hotelSlot, { basicRooms: [], cruiseCompany: null, hotelType: null, ships: [] });
           Object.assign(hotelSlot.hotel, { biTag: null, district: {}, ggLatitude: null, ggLongitude: null });
+        }
+        if (options.aiMetadata) {
+          Object.assign(next.tourDailyDescriptions[0], { isAiRcmdTitle: true, isEditAfterAi: true });
+          Object.assign(next.tourDailyDescriptions[0].tourDailyInfos[0].tourDailyPois[0],
+            { aiAdjustPoiDetailInfo: { suggestedPoiName: "平台建议", reason: "AI推荐标记" } });
         }
         if (options.nonemptyPlatformField) next.tourDailyDescriptions[0].tourDailyInfos[0].tourDailyDinner = { dinnerType: { key: "L" } };
         if (options.foreignCheck) next.productId = 1;
@@ -266,4 +276,18 @@ test("无独立草稿的真实 formal==audit 审核边界按状态选择版本",
   const invalid = fixture({ formalOnly: true, lockedStatus2: true });
   await assert.rejects(() => readItineraryReviewEvidence(invalid.page, id), /可提交的当前草稿版本/);
   assert.equal(invalid.requests.some(request => /checkTourDaily|saveProduct/.test(request.method)), false);
+});
+
+// The real protocol must consume the check responses and finish full readback.
+test("check8/check3 与最终回读带 AI 标记时完整审核协议仍验证实际行程", async () => {
+  const f = fixture({ aiMetadata: true });
+  const before = await readItineraryReviewEvidence(f.page, id);
+  const steps: string[] = [];
+  await submitItineraryReviewUnlock(f.page, before, { onStep: step => steps.push(step.step) });
+  const result = await verifyItineraryReviewUnlock(f.page, id, before.contentDigest);
+  assert.equal(result.verified, true);
+  assert.deepEqual(steps, ["check8", "calculateScore", "check3", "saveDaily", "calculateNeedAppliedVisa", "saveProduct3"]);
+  const saved = f.requests.find(request => request.method === "saveTourDailyDetail.json")!.body.tourInfo;
+  assert.equal(saved.tourDailyDescriptions[0].tourDailyInfos[0].tourDailyPois[0].poi.poiId, 85218);
+  assert.deepEqual(result.publication, { active: "F", isonline: "F", releaseActive: "F" });
 });

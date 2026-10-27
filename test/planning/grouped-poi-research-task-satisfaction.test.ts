@@ -54,3 +54,44 @@ test("刷新待处理事项会结案已手工配置完成的组合备选 POI 任
     fs.rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test("& 连接的历史复合 POI 任务在各组件均已改判为非 POI 后结案", () => {
+  const label = "核查 雪域主峰秘境穿越&雪地摩托 的 VBK POI 映射";
+  assert.deepEqual(poiResearchTaskNames(label, "vbk"), ["雪域主峰秘境穿越", "雪地摩托"]);
+
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-compound-non-poi-task-"));
+  try {
+    const db = new VbkDatabase(dataPath);
+    const product = db.createProduct({ destination: "吉林", days: 6, productForm: "privateTour" });
+    db.updateProduct(product.id, {
+      ...product.product,
+      itinerary: [{ day: 6, spots: [
+        { name: "雪域主峰秘境穿越", kind: "other", poiName: null, poiId: null },
+        { name: "雪地摩托", kind: "attraction", poiName: null, poiId: null },
+      ] }],
+    });
+    const taskId = db.addResearchTask(product.id, {
+      label,
+      type: "vbk",
+      detail: "已找到候选 POI，但其地域与产品主城市不一致",
+    });
+
+    assert.equal(refreshSatisfiedResearchTasks(db, product.id).updated, 0,
+      "任一组成项仍是未绑定景点时，复合任务必须继续保留");
+    const current = db.getProduct(product.id)!;
+    db.updateProduct(product.id, {
+      ...current.product,
+      itinerary: [{ day: 6, spots: [
+        { name: "雪域主峰秘境穿越", kind: "other", poiName: null, poiId: null },
+        { name: "雪地摩托", kind: "other", poiName: null, poiId: null },
+      ] }],
+    });
+    const result = refreshSatisfiedResearchTasks(db, product.id);
+    assert.deepEqual(result.taskIds, [taskId]);
+    const task = db.getProduct(product.id)!.researchTasks.find((item) => item.id === taskId)!;
+    assert.equal(task.state, "confirmed");
+    assert.match(task.evidence?.at(-1)?.title ?? "", /无需 POI 核查/);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});

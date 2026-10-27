@@ -42,6 +42,17 @@ test("删除住宿限制保留同句景点与交通距离", () => {
   assert.match(normalized.itinerary[0].title, /游览青城山后/);
 });
 
+test("钻级区间与列表整体折叠，不被逐词替换成病句", () => {
+  // 真实样本（万州自由行 features）：「按三钻至五钻标准自动匹配」曾被逐词替换。
+  assert.equal(cleanPlatformHotelCopy("四晚住宿由平台按三钻至五钻标准自动匹配，覆盖万州、云阳、奉节与巫山。"),
+    "四晚住宿由平台按平台酒店规则自动匹配，覆盖万州、云阳、奉节与巫山。");
+  assert.equal(cleanPlatformHotelCopy("住宿标准为三钻、四钻、五钻酒店。"), "住宿标准为平台自动匹配酒店。");
+  assert.equal(cleanPlatformHotelCopy("住宿由平台按三钻四钻五钻规则自动匹配，结合每日路线安排入住城市"),
+    "住宿由平台按平台酒店规则自动匹配，结合每日路线安排入住城市");
+  const cleaned = cleanPlatformHotelCopy("四晚住宿由平台按三钻至五钻标准自动匹配");
+  assert.equal(cleanPlatformHotelCopy(cleaned), cleaned);
+});
+
 test("平台自动匹配会清除旧的指定酒店来源和档次", () => {
   const normalized = normalisePlatformHotelProduct({
     basicInfo: { meetingCity: "成都", nights: 1 },
@@ -57,4 +68,33 @@ test("平台自动匹配会清除旧的指定酒店来源和档次", () => {
   assert.deepEqual(normalized.operations.hotelRules, { autoMatch: true, grades: [3, 4, 5] });
   assert.equal(normalized.operations.hotelSource, undefined);
   assert.equal(normalized.operations.hotelTier, undefined);
+});
+
+test("「三至五钻」「平台自动匹配三钻至五钻」整体折叠，不产生重复或残句", () => {
+  // 真实样本（吉林7天6晚私家团 features / 推荐理由）。
+  const cases: Array<[string, string]> = [
+    ["住宿按三至五钻自动匹配，二道温泉酒店提供泡汤", "住宿按平台酒店规则自动匹配，二道温泉酒店提供泡汤"],
+    ["全程平台自动匹配三钻至五钻酒店，含二道温泉酒店", "全程平台自动匹配酒店，含二道温泉酒店"],
+    ["酒店为平台自动匹配的三钻至五钻酒店标准", "酒店为平台自动匹配酒店标准"],
+  ];
+  for (const [source, expected] of cases) {
+    assert.equal(cleanPlatformHotelCopy(source), expected);
+    assert.equal(cleanPlatformHotelCopy(expected), expected);
+  }
+  assert.equal(cleanPlatformHotelCopy("第三至五天游览长白山"), "第三至五天游览长白山");
+});
+
+test("旧版逐词替换留下的病句可被修复且保持幂等", () => {
+  const cases: Array<[string, string]> = [
+    ["住宿按三至平台自动匹配酒店自动匹配，二道温泉酒店", "住宿按平台酒店规则自动匹配，二道温泉酒店"],
+    ["酒店为平台自动匹配的平台自动匹配酒店标准", "酒店为平台自动匹配酒店标准"],
+    ["全程平台自动匹配平台自动匹配酒店，含雪乡住宿", "全程平台自动匹配酒店，含雪乡住宿"],
+    ["住宿为平台自动匹配酒店至平台自动匹配酒店", "住宿为平台自动匹配酒店"],
+  ];
+  for (const [source, expected] of cases) {
+    assert.equal(cleanPlatformHotelCopy(source), expected);
+    assert.equal(cleanPlatformHotelCopy(expected), expected);
+  }
+  const description = `住宿：${PLATFORM_HOTEL_DESCRIPTION}。`;
+  assert.equal(cleanPlatformHotelCopy(description), description);
 });

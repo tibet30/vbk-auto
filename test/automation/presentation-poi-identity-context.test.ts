@@ -155,16 +155,22 @@ test("已知词定位可忽略官方名内部命中，默认平台拒绝定位�
   assert.deepEqual(findSensitivePresentationPaths(value, ["第一"], true), ["recommendations.0.text"]);
 });
 
-test("候选保留官方名内部历史词并修复名称外词时可以通过", () => {
+test("平台点名词在官方名内部时候选必须改述该名称，其他官方名仍须保留", () => {
   const value = structuredClone(harbin);
   value.presentation.recommendations[0]!.text = "首次串联龙江第一湾风景区与中国最北点，按每日路线安排游览并体验当地风貌";
-  applySensitivePresentationRewrite(value, {
-    reply: "", questions: [], researchTasks: [],
-    patch: [{ op: "replace", path: "/presentation", value: { ...value.presentation,
-      recommendations: [{ ...value.presentation.recommendations[0],
-        text: "初到可串联龙江第一湾风景区与中国最北点，按每日路线安排游览并体验当地风貌" },
-      ...value.presentation.recommendations.slice(1)] } }],
-  }, ["recommendations.0.text"], ["首次", "第一"]);
-  assert.match(value.presentation.recommendations[0]!.text, /龙江第一湾风景区/);
-  assert.doesNotMatch(value.presentation.recommendations[0]!.text, /首次/);
+  const patch = (text: string) => ({ reply: "", questions: [], researchTasks: [],
+    patch: [{ op: "replace" as const, path: "/presentation", value: { ...value.presentation,
+      features: "<p><strong>路线：</strong>串联黑龙江江湾景区与中国最北点。</p>",
+      recommendations: [{ ...value.presentation.recommendations[0], text }, ...value.presentation.recommendations.slice(1)] } }] });
+  assert.throws(() => applySensitivePresentationRewrite(structuredClone(value),
+    patch("初到可串联龙江第一湾风景区与中国最北点，按每日路线安排游览并体验当地风貌"),
+    ["features", "recommendations.0.text"], ["首次", "第一"]), /仍包含平台非法关键词：第一/);
+  assert.throws(() => applySensitivePresentationRewrite(structuredClone(value),
+    patch("初到可串联黑龙江江湾景区与漠河北端，按每日路线安排游览并体验当地风貌与特色"),
+    ["features", "recommendations.0.text"], ["首次", "第一"]), /官方 POI 引用/);
+  applySensitivePresentationRewrite(value,
+    patch("初到可串联黑龙江江湾景区与中国最北点，按每日路线安排游览并体验当地风貌与特色"),
+    ["features", "recommendations.0.text"], ["首次", "第一"]);
+  assert.match(value.presentation.recommendations[0]!.text, /中国最北点/);
+  assert.doesNotMatch(value.presentation.recommendations[0]!.text, /首次|第一/);
 });

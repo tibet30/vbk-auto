@@ -9,6 +9,8 @@
 
 import type { PoiSuggestion } from "../../../shared/contracts.js";
 import { isCombinedPoiPlaceName, normalisePoiIdentityName } from "../../../shared/poi-name-identity.js";
+import { isKnownPoiNameAlias } from "../../../shared/poi-name-aliases.js";
+import { isCompatiblePoiIdentity } from "../../../shared/poi-candidate-identity.js";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -53,7 +55,7 @@ export function pickBestPoi(
   const pois = Array.isArray(list) ? list : [];
   const key = normaliseName(keyword);
   if (!key) return null;
-  const scopedPois = filterPoisByContext(pois, context);
+  const scopedPois = filterPoisByContext(pois, context).filter(item => isCompatiblePoiIdentity(keyword, candidatePoiName(item)));
   if (pois.length > 0 && scopedPois.length === 0) return null;
   const matchKeys = [key, stripDestinationPrefix(key, context?.destinationCity)]
     .filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
@@ -63,7 +65,9 @@ export function pickBestPoi(
   // contain the whole keyword and win merely because of list order.
   const findHit = (pool: unknown[]) => {
     const exact = pool.find((item) => matchKeys.some((matchKey) => normaliseName(candidatePoiName(item)) === matchKey));
-    return exact ?? matchKeys.map((matchKey) => pickConservativeAliasPoi(matchKey, pool)).find(Boolean) ?? pool.find((item) => {
+    const aliases = pool.filter(item => isKnownPoiNameAlias(keyword, candidatePoiName(item)));
+    const alias = new Set(aliases.map(item => asRecord(item)?.poiId)).size === 1 ? aliases[0] : undefined;
+    return exact ?? alias ?? matchKeys.map((matchKey) => pickConservativeAliasPoi(matchKey, pool)).find(Boolean) ?? pool.find((item) => {
       const rawName = candidatePoiName(item);
       const name = normaliseName(rawName);
       // Exact requests for a sub-attraction remain valid above.  A partial

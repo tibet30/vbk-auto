@@ -10,10 +10,13 @@ import {
   isResearchTaskSatisfiedByProduct,
   poiResearchTaskSatisfaction,
   requiresCurrentPoiVerification,
+  requiresManualPoiSelection,
 } from "../../../../shared/research-task-satisfaction.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "../../../minimax/minimax-constants.js";
+import { isGeneratedPoiFailureDetail } from "../../../../shared/poi-research-outcome.js";
 import { now } from "./types.js";
 import { touchProduct } from "./products.js";
+import { hasCurrentVerifiedPoiEvidence } from "./verified-poi-research.js";
 
 const POST_CONFIRM_STATUSES = new Set(["automating", "draft_saved"]);
 const NO_POI_EVIDENCE_MARKER = "[itinerary-kind:no-poi]";
@@ -40,15 +43,22 @@ export function addResearchTask(db: Database.Database, localProductId: string, t
     label: canonicalPoiResearchTaskLabel(task.label, task.type),
   };
   const existing = db.prepare(`
-    SELECT id, label, type FROM research_tasks
+    SELECT id, label, type, evidence_json FROM research_tasks
     WHERE local_product_id=? AND type=?
-  `).all(localProductId, canonicalTask.type) as Array<{ id: string; label: string; type: ResearchTask["type"] }>;
+  `).all(localProductId, canonicalTask.type) as Array<{
+    id: string; label: string; type: ResearchTask["type"]; evidence_json: string;
+  }>;
   const duplicate = existing.find((row) => row.label === canonicalTask.label)
     ?? existing.find((row) => isSamePoiResearchTask(row, canonicalTask));
   if (duplicate) {
     if (requiresCurrentPoiVerification(canonicalTask)) {
-      db.prepare("UPDATE research_tasks SET detail=?, state='researching', status='queued' WHERE id=?")
-        .run(canonicalTask.detail || null, duplicate.id);
+      const row = db.prepare("SELECT product_json FROM products WHERE id=?").get(localProductId) as { product_json?: string } | undefined;
+      let current: Record<string, unknown> = {};
+      try { current = JSON.parse(row?.product_json ?? "{}"); } catch { /* malformed product is handled elsewhere */ }
+      if (!hasCurrentVerifiedPoiEvidence(current, duplicate)) {
+        db.prepare("UPDATE research_tasks SET detail=?, state='researching', status='queued' WHERE id=?")
+          .run(canonicalTask.detail || null, duplicate.id);
+      }
     } else if (canonicalTask.detail && duplicate.label === canonicalTask.label) {
       db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(canonicalTask.detail, duplicate.id);
     }
@@ -273,7 +283,14 @@ function reconcileConfirmedPoiDetails(
     WHERE local_product_id=? AND state IN ('confirmed','resolved') AND type='vbk'`)
     .all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }>;
   const repaired = rows.filter((row) => (!onlyTaskIds?.length || onlyTaskIds.includes(row.id))
-    && reconciledSatisfiedDetail(row.type, row.detail) !== row.detail
+    // 旧版本只修「未找到对应的 VBK POI」这一种文案，导致 POI 绑定成功后
+    // 「地域与产品主城市不一致 / 未找到一致地点 / 本轮核验未完成」等系统
+    // 失败说明永久留在已确认任务上。这里统一按系统文案标记修复，运营手写
+    // 的备注不在标记内，仍原样保留。
+    // 「多个候选，请手动选择」是运营的决策凭证，人工确认后必须保留原文，
+    // 否则会抹掉历史上确实由人消歧的依据。
+    && !requiresManualPoiSelection(row)
+    && isGeneratedPoiFailureDetail(row.detail)
     && poiResearchTaskSatisfaction(row, product) === "verified");
   const update = db.prepare("UPDATE research_tasks SET detail=? WHERE id=? AND local_product_id=?");
   for (const row of repaired) update.run(SAVED_POI_DETAIL, row.id, localProductId);

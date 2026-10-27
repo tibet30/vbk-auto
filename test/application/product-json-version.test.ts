@@ -47,7 +47,7 @@ test("ProductMutationService 按读到的版本提交，过期 expectedVersion �
   }
 });
 
-test("数据库统一写入口不会持久化同一天的重复 POI 身份", () => {
+test("数据库保存保留同ID的不同原名，只合并同名同时间的重复副本", () => {
   const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-poi-dedupe-write-"));
   const db = new VbkDatabase(dataPath);
   try {
@@ -59,6 +59,7 @@ test("数据库统一写入口不会持久化同一天的重复 POI 身份", () 
         spots: [
           { name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105 },
           { name: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
+          { name: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
         ],
       }],
     }, "planning", created.productJsonVersion);
@@ -67,7 +68,7 @@ test("数据库统一写入口不会持久化同一天的重复 POI 身份", () 
     try {
       const row = reader.prepare("SELECT product_json FROM products WHERE id=?").get(created.id) as { product_json: string };
       const saved = JSON.parse(row.product_json) as { itinerary: Array<{ spots: Array<{ name: string }> }> };
-      assert.deepEqual(saved.itinerary[0].spots.map((spot) => spot.name), ["羊卓雍措"]);
+      assert.deepEqual(saved.itinerary[0].spots.map((spot) => spot.name), ["羊卓雍措", "羊卓雍湖"]);
     } finally {
       reader.close();
     }

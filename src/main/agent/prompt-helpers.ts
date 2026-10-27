@@ -4,12 +4,9 @@ import { toPlatformShortLocationName } from "../../shared/location-short-name.js
 import type { ProductDetail } from "../../shared/contracts.js";
 import type { LockedConstraints, LockedItineraryDay } from "../../shared/contracts-preparation.js";
 import { parseProductBriefMessage } from "../../shared/product-brief-message.js";
+import { daySections } from "../planning/day-sections.js";
 import { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
-
-const DAY_TOKEN: Record<string, number> = {
-  "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
-  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
-};
+import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 
 export function isPlanningControlMessage(content: string): boolean {
   const text = content.trim();
@@ -36,7 +33,7 @@ export function extractLockedConstraints(
   const operations = asObject(data.operations);
   const sales = asObject(data.sales);
   const traffic = asObject(operations?.trafficLine);
-  const initialRequirement = text(basic?.userIdea);
+  const initialRequirement = constraintUserIdea(basic);
   const laterRequirements = filterPlanningRequirementMessages(messages).map((message) => message.content);
   const requirementText = [initialRequirement, ...laterRequirements].filter(Boolean).join("\n");
   const fromIntent = intentConstraints(product);
@@ -119,24 +116,18 @@ function resolveItineraryConstraints(
 function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrder: LockedItineraryDay[] } {
   const itineraryOrder: LockedItineraryDay[] = [];
   const pois: string[] = [];
-  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/gi;
   const routeText = textValue.replace(/\\[nr]/gu, '\n').replace(/(?:^|[\n\r])\s*(?:住宿与商业配置|住宿配置|商业配置|录入配置|(?:已确认的?)?住宿(?:要求|安排)|已确认的?业务要求)[:：][\s\S]*$/u, "");
-  const matches = [...routeText.matchAll(marker)];
-  for (let index = 0; index < matches.length; index += 1) {
-    const match = matches[index]!;
-    const token = match[1] ?? match[2] ?? "";
-    const day = DAY_TOKEN[token] ?? Number(token);
-    const start = (match.index ?? 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? routeText.length;
-    const remainder = cleanDayConstraintText(trimPlanningControlTail(routeText.slice(start, end)));
-    if (!Number.isInteger(day) || day < 1 || /^(?:不要|不安排|别)/.test(remainder)) continue;
+  // 逐日切分收敛在 day-sections：段首天头与段尾下一行的【】都不进正文。
+  for (const section of daySections(routeText)) {
+    const remainder = cleanDayConstraintText(trimPlanningControlTail(section.content));
+    if (/^(?:不要|不安排|别)/.test(remainder)) continue;
     const { spots, unorderedSpots } = splitDaySpots(remainder);
     if (!spots.length && !unorderedSpots.length) continue;
-    const existing = itineraryOrder.find((row) => row.day === day);
+    const existing = itineraryOrder.find((row) => row.day === section.day);
     if (existing) {
       existing.spots = unique([...existing.spots, ...spots]);
       existing.unorderedSpots = unique([...(existing.unorderedSpots ?? []), ...unorderedSpots]);
-    } else itineraryOrder.push({ day, spots, ...(unorderedSpots.length ? { unorderedSpots } : {}) });
+    } else itineraryOrder.push({ day: section.day, spots, ...(unorderedSpots.length ? { unorderedSpots } : {}) });
     pois.push(...spots, ...unorderedSpots);
   }
   return { pois, itineraryOrder };
@@ -184,17 +175,29 @@ function isItineraryCorrection(value: string): boolean {
 function splitSpots(value: string): string[] {
   return value
     .replace(/\*\*/g, " ")
-    .replace(/【[^】]*】|\[[^\]]*\]|\([^)]*\)|（[^）]*）/gu, " ")
+    // `长白山北景区（天池/长白瀑布/小天池/地下森林）` 的括号是子景点枚举，
+    // 必须保留内部名称；只有带 `/` 的括号按分隔符展开，纯说明括号仍整体删除。
+    .replace(/[（(]([^）)\n]*[\/／][^）)\n]*)[）)]/gu, "，$1，")
+    // 成对括号（讲解标记、天头【第N天 城市】）整体当分隔符：只"删除"会让
+    // 前后两个名字粘连成「松花湖】雾凇长廊晨景」这种假景点。
+    .replace(/【[^】\n]*】|\[[^\]\n]*\]|\([^)\n]*\)|（[^）\n]*）/gu, "，")
+    // 天头被 day 标记切走后残留的孤立括号，同样按分隔符处理，不能拖进标题。
+    .replace(/[【】]/gu, "，")
     .replace(/(?:^|[\n\r])\s*[0-9一二三四五六七八九十]+\s*月\s*[0-9一二三四五六七八九十]+\s*号\s*$/gu, " ")
     .replace(/包车|专车|拼车|当地[345四五三]钻.*$|钻酒店.*$/g, " ")
-    .replace(/(?<![\p{Script=Han}])(?:火车站接|接火车站?|送火车站?|接站|送站)|住[^—–\-，,、。；;\n]{2,}/gu, " ")
+    .replace(/(?<![\p{Script=Han}\d:：])(?:火车站接|接火车站?|送火车站?|接站|送站)/gu, " ")
+    // 住宿不是景点。「入住/住宿/住XX」必须整体剔除：原实现从「住」开始删，
+    // 会把「入住市区酒店」削成残字「入」，且不把「→」和空白当边界，会一路
+    // 吞到行尾。「宿雪乡」同类，但保留宿州/宿迁/宿松这些地名。
+    .replace(/(?:入住|住宿|住(?!宿))[^—–\-，,、。；;\n→\s]{2,}/gu, " ")
+    .replace(/(?<!住)宿(?!州|迁|松)[^—–\-，,、。；;\n→\s]{2,}/gu, " ")
     .replace(/(?:二选一|多选一|任选其一)/gu, " ")
     .replace(/(?:或者|或|\/|／)/gu, "，")
     .replace(/[+＋]/gu, "，")
     .replace(/[；;]/gu, "，")
     .replace(/[>＞→]+/gu, "，")
     .replace(/[—–-]+/gu, "，")
-    .split(/[和与、，,以及]+/)
+    .split(/(?:和|与|、|，|,|以及)+/u)
     .map((item) => item
       .replace(/^(?:(?:必须)?(?:去|游览|安排|参观)|再?(?:改成|改为|换成|调整为|替换为|改去|换去)|再加|增加|加上)/, "")
       .replace(/(?:海拔|柏油路|公路里程)[:：]?\s*\d+(?:\.\d+)?\s*(?:m|米|km|公里)?[\s\S]*$/iu, "")
@@ -231,6 +234,8 @@ function trimPlanningControlTail(value: string): string {
 
 function looksLikePlaceName(item: string): boolean {
   if (item.length < 2 || item.length > 20) return false;
+  // 兜底：任何残留括号/换行都不是地名（「入 【」这类残片曾整块进入标题）。
+  if (/[【】\[\]（）()\n\r]/.test(item)) return false;
   if (/^(?:出发地|客源地)$/u.test(item)) return false;
   if (/^(?:保留|保持)(?:此|原|上述)?(?:顺序|行程顺序|景点顺序)/u.test(item)) return false;
   if (/[{}"']/.test(item) || /destination|productForm|userIdea|nights/.test(item)) return false;

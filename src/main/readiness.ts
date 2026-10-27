@@ -24,6 +24,8 @@ import { mergeReadinessIssues, openResearchTaskToIssue } from "../shared/readine
 import { isResearchTaskSatisfiedByProduct } from "../shared/research-task-satisfaction.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "./minimax/minimax-constants.js";
 import { automationBlockers, productSchema } from "./automation/schema/schema.js";
+import { routeLocationBlockers } from "../shared/route-location-evidence.js";
+import { poiIdentityBlockers } from "../shared/poi-candidate-identity.js";
 
 /** completion 计算的最大阻塞数。超过则按 0 完成度处理。 */
 const READINESS_MAX_BLOCKERS = 12;
@@ -52,6 +54,8 @@ export interface ComputeReadinessInput {
 export function computeReadiness(input: ComputeReadinessInput): ProductReadiness {
   const { product, researchTasks, automation } = input;
   const issues: ProductReadiness["issues"] = [];
+  issues.push(...routeLocationBlockers(product));
+  issues.push(...poiIdentityBlockers(product));
   const parsed = productSchema.safeParse(product);
   if (!parsed.success) {
     for (const issue of parsed.error.issues.slice(0, 6)) {

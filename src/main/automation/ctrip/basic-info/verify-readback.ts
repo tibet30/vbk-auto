@@ -24,6 +24,7 @@ export function assertBasicInfoReadback(base: Json, booking: Json, expected: Exp
     ["vendorComplainContactId", expected.complaintContactId, Number(booking.vendorComplainContactId)],
     ["vendorBookingContactId", expected.bookingContactId, Number(booking.vendorBookingContactId)],
     ["vendorBookingEmergencyContactId", expected.emergencyContactId, Number(booking.vendorBookingEmergencyContactId)],
+    ["isPublicEmergencyContact", "T", booking.isPublicEmergencyContact],
     ["forChild", expected.forChild, String(booking.forChild)],
     ["localInfoID", expected.localTravelAgencyId, Number(booking.localInfoID
       ?? (Array.isArray(booking.localInfoIds) ? booking.localInfoIds[0] : 0))],

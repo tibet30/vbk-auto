@@ -47,6 +47,8 @@ export interface GenerationStateStore {
 export interface PoiSuggestContext {
   destinationCity?: string;
   province?: string;
+  itineraryDay?: number;
+  spotName?: string;
 }
 
 export interface VerifiedPoiMapping {
@@ -64,11 +66,15 @@ export interface OrchestratorRuntime {
   resolveRecommendationCategoryPolicy?(localProductId: string): Promise<RecommendationCategoryPolicy>;
   suggestPoi?(keyword: string, context?: PoiSuggestContext): Promise<{ poiName: string; poiId: number } | null>;
   /** 规划运行时使用的受控 POI 决策：前 12 条 AI 消歧、营业核验及置信度门槛均在这里完成。 */
-  resolvePoiSelection?(localProductId: string, keyword: string, context?: PoiSuggestContext): Promise<PoiAutoSelectionResult>;
+  resolvePoiSelection?(localProductId: string, keyword: string, context?: PoiSuggestContext,
+    /** 本轮尚未落库的行程：同轮已绑定、已带坐标的景点可作路线走廊参考。 */
+    itinerary?: unknown[]): Promise<PoiAutoSelectionResult>;
   /** 按 POI ID 从携程攻略景点详情核验实时营业状态。 */
   getPoiAvailability?(poiId: number): Promise<{ status: "available" | "suspended" }>;
   /** 以受控并发批量核验一组 POI 的营业状态。 */
   getPoiAvailabilities?(poiIds: readonly number[]): Promise<Map<number, { status: "available" | "suspended" }>>;
+  /** 按官方名只读查询并取回指定 poiId 的平台坐标；名称查不回同一 ID 时返回 undefined。 */
+  getPoiCoordinates?(poiName: string, poiId: number): Promise<{ latitude: number; longitude: number } | undefined>;
   /** 读取当前已存在的 research tasks（label+type）。 */
   loadExistingResearchTasks(localProductId: string): Promise<Array<Pick<ResearchTaskProposal, "label" | "type">>>;
   /** 写入一个产品的模块（指定固定路径）。 */

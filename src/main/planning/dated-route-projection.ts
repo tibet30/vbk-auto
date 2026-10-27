@@ -1,5 +1,6 @@
 import type { ProductDetail } from '../../shared/contracts.js';
 import { filterPlanningRequirementMessages } from '../agent/prompt-helpers.js';
+import { constraintUserIdea } from '../../shared/product-idea-optimization.js';
 
 type Json = Record<string, any>;
 type RouteDay = { day: number; route: string; names: string[]; notes: string[] };
@@ -8,7 +9,7 @@ type RouteDay = { day: number; route: string; names: string[]; notes: string[] }
 export function completeDatedRoute(product: ProductDetail): RouteDay[] | undefined {
   const basic = product.product.basicInfo as Json;
   const days = Number(basic?.days);
-  const raw = String(basic?.userIdea ?? '').replace(/\*\*/gu, '');
+  const raw = constraintUserIdea(basic).replace(/\*\*/gu, '');
   const rows = raw.split(/[\n\r]+/u).filter(line => line.trim()).map(line => {
     const match = line.match(/^\s*(?:\d{1,2}\s*月\s*\d{1,2}\s*号\s*)?D(\d{1,2})\s*[:：]\s*(.+)$/iu);
     if (!match || !/[-—–→]/u.test(match[2]!)) return undefined;
@@ -47,7 +48,7 @@ export function projectDatedRoute(product: ProductDetail): Json[] | undefined {
 
 /** Administrative receipts exempt POI mapping, never the original transport/experience text. */
 export function datedRouteDetailError(product: ProductDetail, itinerary: Json[]): string | undefined {
-  const original = String((product.product.basicInfo as Json)?.userIdea ?? '').trim();
+  const original = constraintUserIdea(product.product.basicInfo);
   if (filterPlanningRequirementMessages(product.messages ?? []).some(message => message.content.trim() !== original)) return undefined;
   const route = completeDatedRoute(product);
   if (!route) return undefined;

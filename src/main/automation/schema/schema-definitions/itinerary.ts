@@ -23,6 +23,9 @@ export const itineraryDaySchema = z.object({
     province: z.string().nullable().optional(),
     city: z.string().nullable().optional(),
     district: z.string().nullable().optional(),
+    /** 绑定 POI 时平台返回的坐标；跨城景点的路线走廊核验据此回读。 */
+    latitude: z.number().min(-90).max(90).nullable().optional(),
+    longitude: z.number().min(-180).max(180).nullable().optional(),
     timeOfDay: z.enum(["morning", "afternoon"]).optional(),
     relation: z.enum(["and", "or"]).optional(),
     // 录入阶段自动补齐：封面用满 10 张后剩余图按 POI 归属写入对应景点。

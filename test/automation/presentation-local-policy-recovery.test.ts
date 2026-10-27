@@ -126,18 +126,74 @@ test("继承关键词仅修复名称外宣传，名称内引用保留", async ()
   assert.equal(h.saves, 1);
 });
 
-test("本产品真实平台拒绝官方名时停止且重启不会将拒绝当历史豁免", async () => {
+test("平台点名词落在官方名内部时改述图文中的名称引用，POI 绑定不变", async () => {
   const h = harness();
+  const itinerary = structuredClone(h.product.itinerary);
   let submits = 0;
-  let rewrites = 0;
+  const prompts: string[] = [];
   const args = { ...h, save: async () => {
     submits++;
-    throw new PresentationCopyRejectedError(["第一"], 200, "savedescriptioninfo", "非法关键词：第一");
-  }, rewrite: async () => { rewrites++; throw new Error("不应改名"); } };
-  await assert.rejects(runPresentationCopyRecovery(args), /官方 POI 名称.*返回规划/);
-  assert.equal(submits, 1);
-  assert.equal(rewrites, 0);
-  await assert.rejects(runPresentationCopyRecovery(args), /官方 POI 名称.*返回规划/);
-  assert.equal(submits, 1);
-  assert.deepEqual(h.state?.words, ["第一"]);
+    if (submits === 1) throw new PresentationCopyRejectedError(["第一"], 200, "checkSensitiveWord", "非法关键词：第一");
+    return "continued";
+  }, rewrite: async (request: { message: string }) => {
+    prompts.push(request.message);
+    const presentation = structuredClone(h.product.presentation);
+    presentation.features = "<p>黑龙江江湾、中国最北点按原定日序游览。</p>";
+    presentation.recommendations[0]!.text = "串联黑龙江江湾景区与中国最北点，按每日路线安排游览，结合实际行程体验当地风貌与特色";
+    return { reply: "", questions: [], researchTasks: [], patch: [{ op: "replace" as const, path: "/presentation", value: presentation }] };
+  } };
+  assert.equal(await runPresentationCopyRecovery(args), "continued");
+  assert.equal(submits, 2);
+  assert.match(prompts[0]!, /地点名称含上述词语时/);
+  assert.doesNotMatch(h.product.presentation.features, /第一/);
+  assert.match(h.product.presentation.features, /中国最北点/, "未被点名的官方名保持原样");
+  assert.deepEqual(h.product.itinerary, itinerary, "行程 POI 绑定不改名");
+  assert.equal(h.state?.status, "completed");
+});
+
+test("改述点名官方名时仍不得删除其他官方名引用", async () => {
+  const h = harness();
+  const args = { ...h, save: async () => {
+    throw new PresentationCopyRejectedError(["第一"], 200, "checkSensitiveWord", "非法关键词：第一");
+  }, rewrite: async () => {
+    const presentation = structuredClone(h.product.presentation);
+    presentation.features = "<p>黑龙江江湾按原定日序游览。</p>";
+    presentation.recommendations[0]!.text = "串联黑龙江江湾景区，按每日路线安排游览，结合实际行程体验当地风貌与特色，行程衔接清晰";
+    return { reply: "", questions: [], researchTasks: [], patch: [{ op: "replace" as const, path: "/presentation", value: presentation }] };
+  } };
+  await assert.rejects(runPresentationCopyRecovery(args), /官方 POI 引用/);
+  assert.equal(h.state?.rewrites, 2);
+});
+
+test("吉林线「朝鲜」被拒：古村落 POI 名在图文中改述后续跑", async () => {
+  const h = harness();
+  h.product.itinerary = [{ day: 4, spots: [
+    { name: "朝鲜古村落", poiName: "延吉春兴朝鲜族古村落民俗文化园", poiId: 134445140 },
+    { name: "中国最北点", poiName: "中国最北点", poiId: 2 },
+  ] }];
+  h.product.presentation.features = "<p>延吉朝鲜古村落看村落风貌，再到中国最北点。</p>";
+  const itinerary = structuredClone(h.product.itinerary);
+  let submits = 0;
+  const args = { ...h, save: async () => {
+    if (++submits === 1) throw new PresentationCopyRejectedError(["朝鲜"], 200, "checkSensitiveWord", "非法关键词：朝鲜");
+    return "continued";
+  }, rewrite: async () => {
+    const presentation = structuredClone(h.product.presentation);
+    presentation.features = "<p>延吉民俗古村落看村落风貌，再到中国最北点。</p>";
+    return { reply: "", questions: [], researchTasks: [], patch: [{ op: "replace" as const, path: "/presentation", value: presentation }] };
+  } };
+  assert.equal(await runPresentationCopyRecovery(args), "continued");
+  assert.equal(submits, 2);
+  assert.equal(h.product.presentation.features, "<p>延吉民俗古村落看村落风貌，再到中国最北点。</p>");
+  assert.deepEqual(h.product.itinerary, itinerary);
+});
+
+test("平台酒店规则产品录入前修复图文中的旧酒店病句", async () => {
+  const h = harness();
+  Object.assign(h.product, { operations: { hotelMatchingMode: "rules" } });
+  h.product.presentation.features = "<p>住宿按三至平台自动匹配酒店自动匹配，龙江第一湾按原定日序游览。</p>";
+  assert.equal(await runPresentationCopyRecovery(h), "continued");
+  assert.equal(h.product.presentation.features, "<p>住宿按平台酒店规则自动匹配，龙江第一湾按原定日序游览。</p>");
+  assert.equal(h.writes, 1);
+  assert.equal(h.saves, 1);
 });

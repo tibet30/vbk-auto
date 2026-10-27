@@ -1,0 +1,126 @@
+{
+  "recordedAt": "2026-10-27T04:05:37.446Z",
+  "provenance": "read-only suggestPoi capture of the 27d3fe9a final bindings; platform latitude/longitude only",
+  "points": {
+    "76348": {
+      "poiName": "扎什伦布寺",
+      "latitude": 29.2711811,
+      "longitude": 88.8785616
+    },
+    "76351": {
+      "poiName": "萨迦寺",
+      "latitude": 28.9078762,
+      "longitude": 88.0269608
+    },
+    "76352": {
+      "poiName": "珠穆朗玛峰",
+      "latitude": 27.9904583,
+      "longitude": 86.9341651
+    },
+    "76353": {
+      "poiName": "绒布冰川",
+      "latitude": 28.0759724,
+      "longitude": 86.8672342
+    },
+    "76422": {
+      "poiName": "札达土林国家地质公园‌",
+      "latitude": 31.50248,
+      "longitude": 79.76864
+    },
+    "78548": {
+      "poiName": "玛旁雍措",
+      "latitude": 30.6876023,
+      "longitude": 81.4797276
+    },
+    "78551": {
+      "poiName": "托林寺",
+      "latitude": 31.487072,
+      "longitude": 79.806198
+    },
+    "82105": {
+      "poiName": "羊卓雍错",
+      "latitude": 28.9259653,
+      "longitude": 90.7400773
+    },
+    "85085": {
+      "poiName": "佩枯错",
+      "latitude": 28.8952826,
+      "longitude": 85.5939826
+    },
+    "85087": {
+      "poiName": "洛子I峰",
+      "latitude": 27.9645237,
+      "longitude": 86.9422381
+    },
+    "85090": {
+      "poiName": "希夏邦马峰",
+      "latitude": 28.3546502,
+      "longitude": 85.788173
+    },
+    "85599": {
+      "poiName": "拉昂错",
+      "latitude": 30.691131,
+      "longitude": 81.241431
+    },
+    "85600": {
+      "poiName": "纳木那尼峰",
+      "latitude": 30.441169,
+      "longitude": 81.306248
+    },
+    "91485": {
+      "poiName": "卡若拉冰川",
+      "latitude": 28.889089,
+      "longitude": 90.1730468
+    },
+    "91992": {
+      "poiName": "公珠错",
+      "latitude": 30.6477937,
+      "longitude": 82.131525
+    },
+    "94904": {
+      "poiName": "普莫雍错",
+      "latitude": 28.601373,
+      "longitude": 90.2544801
+    },
+    "10758151": {
+      "poiName": "冈仁波齐",
+      "latitude": 31.0700169,
+      "longitude": 81.321337
+    },
+    "10758152": {
+      "poiName": "古格王国遗址",
+      "latitude": 31.469462,
+      "longitude": 79.677903
+    },
+    "23423947": {
+      "poiName": "仲巴县五彩沙漠",
+      "latitude": 29.870818,
+      "longitude": 83.795554
+    },
+    "56809413": {
+      "poiName": "达格架喷泉",
+      "latitude": 29.604335,
+      "longitude": 85.757288
+    },
+    "88954632": {
+      "poiName": "珠峰景区",
+      "latitude": 28.592761,
+      "longitude": 87.088145
+    },
+    "145595738": {
+      "poiName": "马泉河湿地",
+      "latitude": 29.89225,
+      "longitude": 83.722982
+    },
+    "149690264": {
+      "poiName": "定结县十万个沙丘",
+      "latitude": 28.496628,
+      "longitude": 87.714987
+    },
+    "156482624": {
+      "poiName": "浪措湖",
+      "latitude": 29.217378,
+      "longitude": 87.419463
+    }
+  }
+}

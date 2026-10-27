@@ -23,6 +23,7 @@ import type {
   ProductDetail,
 } from "../../../../shared/contracts.js";
 import { recoverCreatedShell } from "../automation.main.recover-shell.js";
+import { canRestartPreWriteShellFailure } from "../automation.main.class/lifecycle.js";
 import { normalizeUnsupportedProductTypeBeforeShell } from "../automation.main.product-type.js";
 import { draftPhasesFor } from "../automation.main.phases.js";
 import {
@@ -40,7 +41,6 @@ import {
   readActiveCoverFallback,
 } from "../../../../shared/cover-fallback.js";
 import { loadPlaceholderCoverAsset } from "../../placeholder-cover-asset.js";
-import { hasProductLineResolutionFailure } from "../../ctrip/basic-info/api.js";
 import {
   isItineraryReviewCompletedMenus,
   productWizardRecoveryPhase,
@@ -48,7 +48,7 @@ import {
 } from "../../ctrip/product-menu-readback.js";
 import { itineraryReviewRequestSource } from "../../../operations/itinerary-review-request-source.js";
 import type { AutomationRunContext } from "../automation.main.context.js";
-import { prepareChangedPlanPhaseRecovery } from "../changed-plan-phase-recovery.js";
+import { prepareChangedPlanPhaseRecovery, prepareFailedRunChangedPlanRecovery } from "../changed-plan-phase-recovery.js";
 
 type AutomationLogLevel = "info" | "warning" | "error";
 
@@ -60,7 +60,6 @@ export interface AutomationSetup {
   wizardAdvanceOnly: ReadonlySet<string>;
   run: AutomationRun;
   basicInfoSaved: boolean;
-  productLineBlocked: boolean;
   butlerSelection: ContactCardSelection | null;
   servicePhone: string;
   keySpots: string[];
@@ -107,8 +106,14 @@ export async function prepareAutomationSetup(
 
   let mutableRetryFrom = retryFrom;
   if (mutableRetryFrom === "saleControl") {
-    await recoverCreatedShell(ctx, productDetail);
-    mutableRetryFrom = "basic";
+    // 创建请求从未发出（业务线/合同/品牌前置失败）时没有远端副作用，直接重跑；
+    // 只有发出过创建请求才进入权威核查，避免重复创建。
+    if (canRestartPreWriteShellFailure(productDetail.automation, productDetail.productId)) {
+      mutableRetryFrom = undefined;
+    } else {
+      await recoverCreatedShell(ctx, productDetail);
+      mutableRetryFrom = "basic";
+    }
   }
 
   const draftPhases = resourceRecoveryPhases(
@@ -125,9 +130,6 @@ export async function prepareAutomationSetup(
   }
 
   let basicInfoSaved = productDetail.basicInfoSaved ?? false;
-  let productLineBlocked = hasProductLineResolutionFailure(
-    productDetail.automation?.recovery?.phases.basic,
-  );
 
   if (mutableRetryFrom && !productDetail.automation) {
     throw new Error("没有可重试的自动录入记录。");
@@ -161,7 +163,15 @@ export async function prepareAutomationSetup(
     } else if (productDetail.automation?.status === "succeeded") {
       run = prepareChangedPlanPhaseRecovery(productDetail, draftPhases, mutableRetryFrom);
     } else {
-      run = prepareAutomationResumeRun(productDetail.automation!, draftPhases, mutableRetryFrom);
+      // 失败后重新规划改动了断点之前的阶段时，从最早改动的阶段起重跑。
+      const changed = prepareFailedRunChangedPlanRecovery(productDetail, draftPhases, mutableRetryFrom);
+      if (changed) {
+        mutableRetryFrom = changed.retryFrom;
+        startIndex = draftPhases.indexOf(mutableRetryFrom);
+        run = changed.run;
+      } else {
+        run = prepareAutomationResumeRun(productDetail.automation!, draftPhases, mutableRetryFrom);
+      }
     }
   } else {
     run = {
@@ -195,7 +205,6 @@ export async function prepareAutomationSetup(
     wizardAdvanceOnly,
     run,
     basicInfoSaved,
-    productLineBlocked,
     butlerSelection,
     servicePhone,
     keySpots,

@@ -1,5 +1,6 @@
 import { unchangedResourceSegments } from "./resource-segment-readback.js";
 import { toPlatformShortLocationName } from "../../../shared/location-short-name.js";
+import { toVbkCityName } from "../../../shared/region-overrides.js";
 import { normalisePlatformHotelProduct, platformHotelStayGroups, validPlatformHotelRules } from "../../../shared/platform-hotel-rules.js";
 import { hasItineraryHotelStay } from "../../../shared/itinerary-hotel.js";
 import { productNeedsVehicleResource } from "../../../shared/product-form.js";
@@ -7,6 +8,7 @@ import { normalizeHotelResourceLayout } from "./hotel-resource-api.js";
 import { ensureResourceSegmentsDraftApi, getProductSegmentsApi, segmentsFromPayload, saveProductSegmentApi, initializeResourceSegmentsDraftApi } from "./vehicle-resource-api.js";
 import { finalizeParentResourceSegments } from "./resource-segment-finalization.js";
 import { buildPlatformHotelRule, platformHotelRuleMatches, platformHotelRuleFailureDetail } from "./hotel-rule-protocol.js";
+import { resolveHotelRuleRouteCities } from './hotel-rule-cities.js';
 
 export async function ensurePlatformHotelRulesApi(page: any, input: any, productId: string, options: { draftOnly?: boolean } = {}) {
   const product = normalisePlatformHotelProduct(input);
@@ -14,9 +16,10 @@ export async function ensurePlatformHotelRulesApi(page: any, input: any, product
   if (!days.length) return { skipped: "行程不含住宿", verified: true };
   const rules = product.operations.hotelRules;
   if (!validPlatformHotelRules(rules)) throw new Error("酒店规则缺失或无效");
+  const routeCities = await resolveHotelRuleRouteCities(page, product);
   const payload = await ensureResourceSegmentsDraftApi(page, productId);
   const layout = await normalizeHotelResourceLayout({ page, productId, resolvedDays: days, payload, source: "rules",
-    provinceForCity: city => hotelRuleProvince(product, city) });
+    provinceForCity: city => toPlatformShortLocationName(routeCities.get(city)?.provinceName) || hotelRuleProvince(product, city) });
   let fresh: any = await getProductSegmentsApi(page, productId);
   if (options.draftOnly && !Array.isArray(fresh?.draftProductSegments?.segments)) throw new Error("平台酒店规则未返回草稿，不能确认草稿保存");
   const count = segmentsFromPayload(fresh).slice(1).filter((s: any) => Number(s.segmentBase?.stayNights) > 0).length;
@@ -28,7 +31,7 @@ export async function ensurePlatformHotelRulesApi(page: any, input: any, product
         const restored = await initializeResourceSegmentsDraftApi(page, productId);
         if (!unchangedResourceSegments(fresh, restored)) throw new Error("酒店规则草稿恢复后内容变化，停止写入");
         fresh = restored;
-        segment = assertHotelRulesLayout(fresh, product)[index];
+        segment = assertHotelRulesLayout(fresh, product, false, routeCities)[index];
       };
       if (!Array.isArray(fresh?.draftProductSegments?.segments)) await restore();
       const save = () => saveProductSegmentApi(page, { ...segment, hotel: buildPlatformHotelRule(segment, rules) }, "VBK 平台酒店规则保存");
@@ -41,10 +44,10 @@ export async function ensurePlatformHotelRulesApi(page: any, input: any, product
         await save();
       }
       fresh = await getProductSegmentsApi(page, productId);
-      assertHotelRulesLayout(fresh, product);
+      assertHotelRulesLayout(fresh, product, false, routeCities);
     }
   }
-  const lodging = assertHotelRulesLayout(fresh, product);
+  const lodging = assertHotelRulesLayout(fresh, product, false, routeCities);
   if (options.draftOnly && !Array.isArray(fresh?.draftProductSegments?.segments)) throw new Error("平台酒店规则未返回草稿，不能确认草稿回读");
   const mismatches = lodging.filter((s: any) => !platformHotelRuleMatches(s, rules));
   if (mismatches.length) throw new Error(`平台酒店规则草稿回读不一致：${JSON.stringify(mismatches.map(platformHotelRuleFailureDetail))}`);
@@ -54,7 +57,7 @@ export async function ensurePlatformHotelRulesApi(page: any, input: any, product
   return { source: "rules", verified: true, rules, layout, finalization,
     positiveSegmentCount: lodging.length, segmentIds: lodging.map((s: any) => String(s.segmentId)) };
 }
-export function assertHotelRulesLayout(payload: any, product: any, formalOnly = false) {
+export function assertHotelRulesLayout(payload: any, product: any, formalOnly = false, routeCities = new Map<string, Record<string, any>>()) {
   const expected = platformHotelStayGroups(product);
   const segments = segmentsFromPayload(payload, { formalOnly });
   if (!segments.length || segments.some((s: any, index: number) => {
@@ -69,9 +72,13 @@ export function assertHotelRulesLayout(payload: any, product: any, formalOnly = 
   lodging.forEach((segment: any, index: number) => {
     const base = segment.segmentBase;
     const wanted = expected[index]!;
-    const province = hotelRuleProvince(product, wanted.cityName);
-    if (toPlatformShortLocationName(base.destinationCity?.cityName) !== wanted.cityName
+    // 平台回读的是可写城市：万州等直辖市下辖区县写入后回读为重庆。
+    const wantedCityName = toVbkCityName(wanted.cityName);
+    const routeCity = routeCities.get(wanted.cityName);
+    const province = toPlatformShortLocationName(routeCity?.provinceName) || hotelRuleProvince(product, wanted.cityName);
+    if (toPlatformShortLocationName(base.destinationCity?.cityName) !== wantedCityName
       || province && (toPlatformShortLocationName(base.destinationCity?.provinceName) !== province || base.destinationCity?.countryName !== "中国")
+      || routeCity && Number(base.destinationCity?.cityId) !== Number(routeCity.cityId)
       || ["stayNights", "minStayNights", "maxStayNights"].some(key => Number(base[key]) !== wanted.nights))
       throw new Error("平台酒店规则住宿城市或晚数回读不一致");
   });
@@ -92,7 +99,8 @@ function hotelRuleProvince(product: any, cityName: string): string | undefined {
 export async function verifyPlatformHotelRulesReadback(page: any, product: any, productId: string) {
   const normalized = normalisePlatformHotelProduct(product);
   if (!normalized.itinerary.some((day: any) => hasItineraryHotelStay(day.hotel))) return { skipped: "行程不含住宿", verified: true };
-  const lodging = assertHotelRulesLayout(await getProductSegmentsApi(page, productId), normalized, true);
+  const routeCities = await resolveHotelRuleRouteCities(page, normalized);
+  const lodging = assertHotelRulesLayout(await getProductSegmentsApi(page, productId), normalized, true, routeCities);
   if (!validPlatformHotelRules(normalized.operations.hotelRules) || lodging.some((s: any) => !platformHotelRuleMatches(s, normalized.operations.hotelRules)))
     throw new Error("平台酒店规则正式回读不一致");
   return { source: "rules", verified: true, positiveSegmentCount: lodging.length, rules: normalized.operations.hotelRules };
@@ -101,9 +109,10 @@ export async function verifyPlatformHotelRulesReadback(page: any, product: any, 
 export async function verifyPlatformHotelDraftRulesReadback(page: any, product: any, productId: string) {
   const rules = product.operations?.hotelRules;
   if (!validPlatformHotelRules(rules)) throw new Error("酒店规则缺失或无效");
+  const routeCities = await resolveHotelRuleRouteCities(page, product);
   const payload: any = await getProductSegmentsApi(page, productId);
   if (!Array.isArray(payload?.draftProductSegments?.segments)) throw new Error("未返回酒店规则草稿，不能清除失败提示");
-  const lodging = assertHotelRulesLayout(payload, product);
+  const lodging = assertHotelRulesLayout(payload, product, false, routeCities);
   if (lodging.some(segment => !platformHotelRuleMatches(segment, rules))) throw new Error("平台酒店规则草稿回读不一致");
   return { verified: true as const, productId, segmentIds: lodging.map(s => String(s.segmentId)),
     rules: { autoMatch: true as const, grades: [3, 4, 5] }, specifiedHotels: [] as [], draftOnly: true as const };

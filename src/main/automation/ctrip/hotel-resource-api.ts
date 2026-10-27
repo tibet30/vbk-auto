@@ -1,6 +1,7 @@
 import { ensurePlatformHotelRulesApi } from "./hotel-rule-api.js";
 import { platformHotelStayGroups } from "../../../shared/platform-hotel-rules.js";
 import { toPlatformShortLocationName } from "../../../shared/location-short-name.js";
+import { toVbkCityName } from "../../../shared/region-overrides.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT } from "../../../shared/hotel-candidate-counts.js";
 import { buildLodgingResourceSegment, getProductSegmentsApi, resolveResourceSegmentCityApi, saveProductSegmentApi, segmentsFromPayload } from "./vehicle-resource-api.js";
 
@@ -24,7 +25,10 @@ export async function normalizeHotelResourceLayout(args: {
   province?: string;
   provinceForCity?: (cityName: string) => string | undefined;
 }) {
-  const expected = args.source === "rules" ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights }) => ({ cityName, nights })) : hotelStayGroups(args.resolvedDays, args.source === "ctrip");
+  // 平台酒店规则的住宿城市按 VBK 可写城市回读：万州等直辖市下辖区县落到重庆。
+  const expected = args.source === "rules"
+    ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights }) => ({ cityName: toVbkCityName(cityName), nights }))
+    : hotelStayGroups(args.resolvedDays, args.source === "ctrip");
   let payload = args.payload;
   let segments = segmentsFromPayload(payload);
   const [fullTrip] = segments;

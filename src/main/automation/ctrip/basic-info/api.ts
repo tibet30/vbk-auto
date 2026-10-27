@@ -15,12 +15,7 @@ import { assertBasicInfoReadback } from "./verify-readback.js";
 import {
   productLineSaveField,
   resolveBasicInfoCityAnchor,
-  selectProductLine,
-} from "./product-line.js";
-
-export {
-  hasProductLineResolutionFailure,
-  isProductLineResolutionError,
+  selectOptionalProductLine,
 } from "./product-line.js";
 
 const ENDPOINT = "https://online.ctrip.com/restapi/soa2/15638";
@@ -36,6 +31,8 @@ export interface BasicInfoApiResult {
   contactCardId: number;
   scenicSpotCount: number;
   productLineSkipped: boolean;
+  /** 未写产品线的原因；skipProductLine 显式跳过时为空。 */
+  productLineSkipReason?: string;
   localTravelAgency: {
     id: number;
     name: string;
@@ -106,11 +103,11 @@ async function resolveCity(page: VbkSessionRequestBrowser, cityName: string, con
   return city;
 }
 
-async function resolveProductLine(page: VbkSessionRequestBrowser, info: Json, cityId: number, cityName: string): Promise<Json> {
+async function resolveProductLine(page: VbkSessionRequestBrowser, info: Json, cityId: number, cityName: string) {
   const payload = await post(page, "getProductLinesByDestinationCityId", {
     destinationCityId: cityId,
   }, "VBK 产品线查询");
-  return selectProductLine(payload.productLineDtos, info, cityName);
+  return selectOptionalProductLine(payload.productLineDtos, info, cityName);
 }
 
 function phoneText(item: Json): string {
@@ -185,8 +182,9 @@ export async function ensureBasicInfoApi(
     resolvePhone(page, sourceBase, servicePhone),
     resolveContact(page, butler),
   ]);
-  const productLine = options.skipProductLine
-    ? null
+  // 产品线非必填：无法唯一匹配时不写 productLineID，不阻断基本信息保存。
+  const { productLine, skipReason: productLineSkipReason } = options.skipProductLine
+    ? { productLine: null, skipReason: undefined }
     : await resolveProductLine(page, info, Number(city.cityId), String(city.cityName ?? meetingCity).trim());
   const advance = resolveAdvanceBooking(product);
   if (!advance) throw new Error("提前预订配置非法");
@@ -231,6 +229,7 @@ export async function ensureBasicInfoApi(
     ? (childPrice > 0 ? "T" : "F") : String(sourceBooking.forChild ?? "F");
   const bookingControl = {
     ...mergeContact(sourceBooking, contact),
+    isPublicEmergencyContact: "T",
     forChild,
     advanceBookingDays: advance.days,
     advanceBookingTime: advance.time,
@@ -291,6 +290,7 @@ export async function ensureBasicInfoApi(
     contactCardId: expected.contactCardId,
     scenicSpotCount: scenicRules.length,
     productLineSkipped: productLine === null,
+    productLineSkipReason,
     localTravelAgency,
   };
 }

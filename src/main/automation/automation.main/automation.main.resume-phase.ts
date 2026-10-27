@@ -3,7 +3,7 @@ import { parseProduct } from "../schema/schema.js";
 import { draftPhasesFor } from "./automation.main.phases.js";
 import { preflightRepairPhase } from "./preflight-repair-phase.js";
 import { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
-export { canRestartPreWriteAuthorizationFailure } from "./automation.main.class/lifecycle.js";
+export { canRestartPreWriteAuthorizationFailure, canRestartPreWriteShellFailure } from "./automation.main.class/lifecycle.js";
 
 export function interruptedAutomationResumePhase(run?: AutomationRun): string | undefined {
   if (run?.status !== "failed") return undefined;

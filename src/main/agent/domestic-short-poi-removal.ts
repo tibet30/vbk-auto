@@ -42,13 +42,21 @@ export function removeConfirmedDomesticShortPoiRisk(
   } : undefined;
   let removed = 0;
   for (let dayIndex = itinerary.length - 1; dayIndex >= 0; dayIndex -= 1) {
-    const day = record((product.itinerary as unknown[])[dayIndex]);
-    const spots = Array.isArray(day?.spots) ? day.spots : [];
-    for (let spotIndex = spots.length - 1; spotIndex >= 0; spotIndex -= 1) {
-      const spot = record(spots[spotIndex]);
-      if (!spot || !matchesRiskPoi(spot, poiName)) continue;
+    // 每次删除都会重排当天 spots（同 POI 的兄弟条目可能被删除凭证一并清掉），
+    // 所以每轮都从最新产品重新定位，不能沿用删除前的下标。
+    for (;;) {
+      const day = record((product.itinerary as unknown[])[dayIndex]);
+      const spots: unknown[] = Array.isArray(day?.spots) ? day.spots : [];
+      let spotIndex = -1;
+      spots.forEach((value, index) => {
+        const spot = record(value);
+        if (spot !== undefined && matchesRiskPoi(spot, poiName)) spotIndex = index;
+      });
+      if (spotIndex < 0) break;
+      const before = spots.length;
       product = applyItinerarySpotRemove(product, { field: "itinerarySpotRemove", dayIndex, spotIndex });
-      removed += 1;
+      const after = record((product.itinerary as unknown[])[dayIndex])?.spots;
+      removed += before - (Array.isArray(after) ? after.length : 0);
     }
   }
   if (identity) {

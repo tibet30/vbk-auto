@@ -4,6 +4,7 @@ import { hotelStayRequirement } from "./hotel-stay-requirement.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
 import { isNonWritableCityAlias, toWritableAdministrativeCityName } from "./region-overrides.js";
 import { originalOvernightRoute, originalRouteEndsAtArrival, verifiedOvernightCity } from './itinerary-overnight-city.js';
+import { verifiedRouteOvernightCity } from './route-location-evidence.js';
 
 type Json = Record<string, any>;
 export interface PlatformHotelRules { autoMatch: boolean; grades: number[] }
@@ -50,10 +51,11 @@ export function normalisePlatformHotelProduct(product: Json): Json {
     const arrivalCity = toPlatformShortLocationName(basic.meetingCity || basic.destinationCity);
     const requestedCity = toPlatformShortLocationName(toWritableAdministrativeCityName(requirement?.cityName));
     const verifiedCity = verifiedOvernightCity(next, day);
+    const routeCity = verifiedRouteOvernightCity(next, day);
     const inferredCity = requestedCity || verifiedCity;
     const inheritedArrival = savedCity && requestedCity && savedCity === arrivalCity && requestedCity !== arrivalCity;
     const fallbackCity = originalOvernightRoute(next, day) && !originalRouteEndsAtArrival(next, day) ? '' : arrivalCity;
-    const city = inheritedArrival ? inferredCity : toPlatformShortLocationName(savedCity || inferredCity
+    const city = inheritedArrival || (routeCity && savedCity && savedCity !== inferredCity) ? inferredCity : toPlatformShortLocationName(savedCity || inferredCity
       || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity);
     const result: Json = { ...day, hotel: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL,
       hotelDescription: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL };
@@ -83,6 +85,8 @@ export function platformHotelStayGroups(product: Json) {
     if (!hasItineraryHotelStay(day.hotel)) continue;
     const cityName = toPlatformShortLocationName(day.hotelCity);
     if (!cityName) throw new Error(`第 ${day.day} 天缺少住宿城市`);
+    const routeCity = verifiedRouteOvernightCity(product, day);
+    if (routeCity && cityName !== routeCity) throw new Error(`第 ${day.day} 天住宿城市「${cityName}」与已核验原路线落点「${routeCity}」不一致`);
     if (isNonWritableCityAlias(cityName)) {
       throw new Error(`第 ${day.day} 天住宿城市「${cityName}」不是可写行政城市，请填写当晚实际住宿城市`);
     }

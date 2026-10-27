@@ -1,3 +1,5 @@
+import { resolveRouteLocations } from './route-location-resolution.js';
+import { withRouteRequirements } from '../../shared/route-requirement-context.js';
 import type { ProductDetail } from '../../shared/contracts.js';
 import { hasCompletePoi, requiresItineraryPoi } from '../../shared/itinerary-activity-kind.js';
 import { toPlatformShortLocationName } from '../../shared/location-short-name.js';
@@ -9,39 +11,43 @@ import { retryVbkRead } from '../infrastructure/vbk-read-retry.js';
 import { assertVbkAckSuccess } from '../infrastructure/vbk-response-error.js';
 import { buildSuggestDistrictRequest, SUGGEST_DISTRICT_ENDPOINT } from '../infrastructure/suggest-district.js';
 import { isProtectedRoutePoiPlaceName } from '../../shared/route-place-name.js';
+import { constraintUserIdea } from '../../shared/product-idea-optimization.js';
 
 type Json = Record<string, any>;
 
 /** 完整原始逐日路线中，将平台唯一确认的行政节点移回交通安排。 */
 export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductDetail, page: VbkSessionRequestBrowser) {
   const basic = detail.product.basicInfo as Json;
-  const raw = String(basic?.userIdea ?? '');
+  const raw = constraintUserIdea(basic);
   const numbered = hasCompleteNumberedRoute(raw, Number(basic?.days));
   const locked = extractLockedConstraints(detail, detail.messages ?? []);
   const complete = classifyItineraryInputMode(locked, Number(basic?.days), detail.planning?.userIntent) === 'complete';
-  if (detail.productId || (!numbered && !complete) || !basic.province) return undefined;
+  if ((!numbered && !complete) || !basic.province) return undefined;
   const itinerary = structuredClone(detail.product.itinerary) as Json[];
   const converted: Array<{ day: number; name: string; districtId: number }> = [];
   const districts = new Map<string, Json | undefined>();
+  const queryDistrict = async (name: string) => {
+    if (!districts.has(name)) {
+      const response = await retryVbkRead(() => vbkSessionRequest(page, {
+        endpoint: SUGGEST_DISTRICT_ENDPOINT, body: buildSuggestDistrictRequest(toPlatformShortLocationName(name)),
+        errorLabel: '逐日路线行政节点核验', includeCidQuery: false, browserRequestTimeoutMs: 12000, evaluateTimeoutMs: 15000,
+      }));
+      const payload = assertVbkAckSuccess(response.payload, '逐日路线行政节点核验') as Json;
+      districts.set(name, exactRouteAdministrativeDistrict(payload, name));
+    }
+    return districts.get(name);
+  };
   for (const day of itinerary) {
     const line = raw.split(/[\n\r]/).find(line => new RegExp(`^\\s*${day.day}\\s*[-、:：.]`).test(line));
-    const route = numbered ? line?.replace(/^\s*\d+\s*[-、:：.]\s*/, '').split(/[-—–→]+/u).map(name => name.replace(/[;；。]+$/u, '').trim()) ?? []
-      : locked.itineraryOrder.find(row => row.day === Number(day.day))?.spots ?? [];
+    const route = locked.itineraryOrder.find(row => row.day === Number(day.day))?.spots
+      ?? (numbered ? line?.replace(/^\s*\d+\s*[-、:：.]\s*/, '').split(/[-—–→]+/u).map(name => name.replace(/[;；。]+$/u, '').trim()) ?? [] : []);
     const kept = [];
     for (const spot of day.spots ?? []) {
       const name = String(spot.name ?? '').trim();
       if (!requiresItineraryPoi(spot) || hasCompletePoi(spot) || !route.includes(name) || isProtectedRoutePoiPlaceName(name)) {
         kept.push(spot); continue;
       }
-      if (!districts.has(name)) {
-        const response = await retryVbkRead(() => vbkSessionRequest(page, {
-          endpoint: SUGGEST_DISTRICT_ENDPOINT, body: buildSuggestDistrictRequest(toPlatformShortLocationName(name)),
-          errorLabel: '逐日路线行政节点核验', includeCidQuery: false, browserRequestTimeoutMs: 12000, evaluateTimeoutMs: 15000,
-        }));
-        const payload = assertVbkAckSuccess(response.payload, '逐日路线行政节点核验') as Json;
-        districts.set(name, exactRouteAdministrativeDistrict(payload, name, numbered ? String(basic.province) : undefined));
-      }
-      const district = districts.get(name);
+      const district = await queryDistrict(name);
       if (!district) { kept.push(spot); continue; }
       converted.push({ day: Number(day.day), name, districtId: Number(district.districtId) });
       const activities: Json[] = day.activities ?? [];
@@ -56,7 +62,10 @@ export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductD
     }
     day.spots = kept;
   }
-  return converted.length ? { itinerary, converted } : undefined;
+  const sourceProduct = withRouteRequirements(detail.product, detail.messages ?? []);
+  const locations = await resolveRouteLocations({ ...sourceProduct, itinerary }, queryDistrict);
+  const previousLocations = (detail.product.diagnostics as Json | undefined)?.routeLocations;
+  return converted.length || locations.length || previousLocations?.length ? { itinerary, converted, locations } : undefined;
 }
 
 export function exactRouteAdministrativeDistrict(payload: Json, name: string, province?: string): Json | undefined {

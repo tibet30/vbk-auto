@@ -5,6 +5,7 @@ import { isAdministrativeLocationName } from "../../shared/location-short-name.j
 import { samePoiName } from "../../shared/poi-name-key.js";
 import { hasVerifiedRouteAdministrativeNode } from "../../shared/route-administrative-nodes.js";
 import { trustedOperatorItineraryRemovals } from "../../shared/trusted-operator-itinerary-removals.js";
+import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -25,7 +26,7 @@ type JsonObject = Record<string, unknown>;
  */
 export function numberedRouteConstraintError(product: ProductDetail, itinerary: Record<string, unknown>[]): string | undefined {
   const basic = product.product.basicInfo as Record<string, unknown> | undefined;
-  const raw = String(basic?.userIdea ?? "");
+  const raw = constraintUserIdea(basic);
   const days = Number(basic?.days);
   const rows = completeNumberedRouteRows(raw, days);
   if (!rows) return undefined;

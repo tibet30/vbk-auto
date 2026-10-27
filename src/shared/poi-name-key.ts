@@ -11,6 +11,8 @@
  * 子串包含，避免把同城不同景点（「汉中」与「汉中市古汉台博物馆」）混为一谈。
  */
 
+import { isKnownPoiNameAlias } from "./poi-name-aliases.js";
+
 const BRACKETED = /[（(【[][^）)】\]]*[）)】\]]/gu;
 const SPACES = /[\s\u3000]+/gu;
 const TRAILING_ACTION = /(?:参观|游览|打卡|体验)$/u;
@@ -27,5 +29,6 @@ export function poiNameKey(value: unknown): string {
 /** 两个名称是否指向同一个 POI 条目（按 poiNameKey 等价）。 */
 export function samePoiName(left: unknown, right: unknown): boolean {
   const a = poiNameKey(left);
-  return Boolean(a) && a === poiNameKey(right);
+  return Boolean(a) && (a === poiNameKey(right)
+    || (typeof left === "string" && typeof right === "string" && isKnownPoiNameAlias(left, right)));
 }

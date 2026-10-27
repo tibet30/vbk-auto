@@ -112,6 +112,11 @@ export async function fillBasicInfo(
   const advance = resolveAdvanceBooking(product);
   if (advance) await fillAdvanceBooking(page, advance);
   await fillLocalTravelAgency(page);
+  const emergencyContact = page.locator(".ant-form-item").filter({
+    has: page.locator("label").filter({ hasText: "对客展示紧急联系人" }),
+  });
+  await assertCount(emergencyContact, 1, "对客展示紧急联系人");
+  await emergencyContact.getByRole("radio", { name: "是", exact: true }).check();
   if (butlerSelection && typeof butlerSelection === "object") {
     await fillButlerContact(page, butlerSelection as ButlerSelection);
   }

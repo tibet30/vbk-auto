@@ -10,6 +10,16 @@
 
 import type { AutomationRun } from "../../shared/contracts.js";
 
+type PhaseRow = AutomationRun["phases"][number];
+
+/** 保留已完成阶段时一并保留其输入指纹，后续恢复才能判断规划是否改动过它。 */
+export function keptCompletedPhase(previous: AutomationRun, phase: string): PhaseRow {
+  const prior = previous.phases.find((item) => item.phase === phase);
+  return prior?.inputFingerprint
+    ? { phase, status: "completed", inputFingerprint: prior.inputFingerprint }
+    : { phase, status: "completed" };
+}
+
 /**
  * 准备「失败任务整段重跑」：要求 previous.status === "failed" 且目标阶段当前为 failed。
  * 返回新的 AutomationRun：status=running，phases 里「目标之前已完成」保留 completed，
@@ -41,13 +51,11 @@ export function preparePhaseRetry(
     ...previous,
     status: "running",
     currentPhase: retryPhase,
-    phases: phases.map((phase, index) => ({
-      phase,
-      status: parentAfterTrafficFailure && phase === "trafficLine" ? "failed"
+    phases: phases.map((phase, index): PhaseRow =>
+      parentAfterTrafficFailure && phase === "trafficLine" ? { phase, status: "failed" }
         : index < retryIndex && previous.phases.find((item) => item.phase === phase)?.status === "completed"
-        ? "completed"
-        : "pending",
-    })),
+        ? keptCompletedPhase(previous, phase)
+        : { phase, status: "pending" }),
     logs: [
       ...previous.logs,
       { at, message: `正在从失败阶段重试：${retryPhase}`, level: "warning" },
@@ -84,10 +92,10 @@ export function prepareBackfilledPhaseRecovery(
     ...previous,
     status: "running",
     currentPhase: insertedPhase,
-    phases: phases.map((phase) => {
+    phases: phases.map((phase): PhaseRow => {
       if (phase === insertedPhase || phase === failedPhase) return { phase, status: "pending" };
       const prior = previous.phases.find((item) => item.phase === phase);
-      return { phase, status: prior?.status === "completed" ? "completed" : "pending" };
+      return prior?.status === "completed" ? keptCompletedPhase(previous, phase) : { phase, status: "pending" };
     }),
     logs: [
       ...previous.logs,
@@ -122,12 +130,12 @@ export function prepareQueuedPhaseResume(
     ...previous,
     status: "running",
     currentPhase: resumePhase,
-    phases: phases.map((phase, index) => {
+    phases: phases.map((phase, index): PhaseRow => {
       const prior = previous.phases.find(item => item.phase === phase);
       const independentTerms = phase === "terms" && ["hotelResource", "vehicleResource"].includes(resumePhase);
-      const status = phase === "trafficLine" && prior?.status === "failed" && index < resumeIndex ? "failed"
-        : (index < resumeIndex || independentTerms) && prior?.status === "completed" ? "completed" : "pending";
-      return { phase, status };
+      if (phase === "trafficLine" && prior?.status === "failed" && index < resumeIndex) return { phase, status: "failed" };
+      return (index < resumeIndex || independentTerms) && prior?.status === "completed"
+        ? keptCompletedPhase(previous, phase) : { phase, status: "pending" };
     }),
     logs: [
       ...previous.logs,

@@ -85,3 +85,21 @@ test("重启后的 start 将已有壳送入恢复入口，无 ID 仍阻止重建
   await assert.rejects(runner.start(product.id), /避免重复创建/);
   assert.equal(calls.length, 1);
 });
+
+test("创建请求发出前失败：允许直接重跑销售控制，不要求先核查草稿", async () => {
+  const { canRestartPreWriteShellFailure, SALE_CONTROL_CREATE_INTENT, SALE_CONTROL_CREATE_TRACKED } =
+    await import("../../src/main/automation/automation.main/automation.main.class/lifecycle.js");
+  const { approvedWorkflowPlan } = await import("../../src/main/automation/automation.main/runtime/workflow-plan.js");
+  const { product } = fixture();
+  product.productId = undefined;
+  // 升级前的旧记录没有追踪起点：缺少意图标记不代表请求未发出，仍须核查。
+  product.automation!.logs = [{ at: new Date().toISOString(), level: "info", message: "正在创建 VBK 产品草稿…" }];
+  assert.equal(canRestartPreWriteShellFailure(product.automation, undefined), false);
+  product.automation!.logs = [{ at: new Date().toISOString(), level: "info", message: SALE_CONTROL_CREATE_TRACKED }];
+  assert.equal(canRestartPreWriteShellFailure(product.automation, undefined), true);
+  assert.deepEqual(approvedWorkflowPlan(product, undefined, false, false, false), { kind: "run" });
+  // 创建请求发出后仍必须人工核查，避免重复创建。
+  product.automation!.logs.push({ at: new Date().toISOString(), level: "info", message: SALE_CONTROL_CREATE_INTENT });
+  assert.equal(canRestartPreWriteShellFailure(product.automation, undefined), false);
+  assert.deepEqual(approvedWorkflowPlan(product, undefined, false, false, false), { kind: "run", retryFrom: "saleControl" });
+});

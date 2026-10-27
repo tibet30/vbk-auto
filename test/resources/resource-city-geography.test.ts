@@ -2,6 +2,20 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveResourceSegmentCityApi } from "../../src/main/automation/ctrip/vehicle-resource-api/segment-apis.js";
 
+test("住宿段把万州按平台可写城市重庆查询，且不查询平台不存在的万州", async () => {
+  const keywords: string[] = [];
+  const page = { nativeOnly: true, vbkSessionFetch: async (input: any) => {
+    assert.equal(new URL(input.endpoint).pathname, "/restapi/soa2/15638/suggestDepartureCity");
+    keywords.push(input.body.keyword);
+    return { status: 200, payload: { ResponseStatus: { Ack: "Success" },
+      cities: input.body.keyword === "重庆"
+        ? [{ cityId: 4, cityName: "重庆", countryName: "中国", provinceName: "重庆" }] : [] } };
+  } };
+  const selected = await resolveResourceSegmentCityApi(page, "万州", { countryName: "中国", province: "重庆" });
+  assert.deepEqual(keywords, ["重庆"]);
+  assert.deepEqual(selected, { cityId: 4, cityName: "重庆", countryName: "中国", provinceName: "重庆" });
+});
+
 test("住宿段只读城市查询沿用已知国家，排除越南同名广安且不调用保存接口", async () => {
   const calls: string[] = [];
   const cities = [

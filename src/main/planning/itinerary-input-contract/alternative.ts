@@ -20,36 +20,45 @@ import type { ProductDetail } from "../../../shared/contracts.js";
 import { supportArrangementType } from "../../../shared/itinerary-support-arrangements.js";
 import { alternativeGroupKey, hasTrustedOperatorItineraryRemoval } from "../../../shared/trusted-operator-itinerary-removals.js";
 import { requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
-import { asDayList, asRecord, samePlace, spotName, text, unique } from "./utils.js";
-import { DAY_TOKEN } from "./utils.js";
+import { asDayList, asRecord, isDeletableAdministrativeLocation, requiresLockedAttraction, samePlace, spotName, text, unique } from "./utils.js";
+import { daySections } from "../day-sections.js";
+import { constraintUserIdea } from "../../../shared/product-idea-optimization.js";
 
 export function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
   const structured = (product.planning?.userIntent?.activities ?? []).flatMap((activity) => {
     const names = unique([activity.title, ...(activity.alternatives ?? [])]);
     return activity.kind === "poi" && activity.day > 0 && names.length > 1 ? [{ day: activity.day, names }] : [];
   });
-  const basic = asRecord(product.product.basicInfo);
-  const raw = text(basic?.userIdea);
-  const parsed = rawAlternativeGroups(raw);
+  const raw = constraintUserIdea(product.product.basicInfo);
+  // 原始文本里「住A或者B」是住宿城市二选一，不是景点 OR 组；只要组里出现
+  // 非景点选项（住宿/接送/行政地点），整组不锁定，否则会要求为不存在的 POI
+  // 同时绑定两个“景点”，规划永远无法通过。
+  const parsed = rawAlternativeGroups(raw)
+    .filter((group) => group.names.every((name) => isPoiAlternativeOption(product, name)));
   return uniqueGroups([...structured, ...parsed]);
 }
 
+function isPoiAlternativeOption(product: ProductDetail, name: string): boolean {
+  const value = name.trim();
+  return Boolean(value)
+    && requiresLockedAttraction(value)
+    && !isDeletableAdministrativeLocation(product, value)
+    && supportArrangementType({ name: value }) === undefined;
+}
+
 export function rawAlternativeGroups(value: string): Array<{ day: number; names: string[] }> {
-  value = value.replace(/\\[nr]/gu, '\n');
-  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/gi;
-  const matches = [...value.matchAll(marker)];
-  return matches.flatMap((match, index) => {
-    const token = match[1] ?? match[2] ?? "";
-    const day = DAY_TOKEN[token] ?? Number(token);
-    const start = (match.index ?? 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? value.length;
-    if (!Number.isInteger(day) || day < 1) return [];
+  // 与逐日顺序共用 day-sections 的分段：最后一天在行首【补充建议】等分节标题处截断，
+  // 否则文末的建议段会被当成最后一天的景点二选一。
+  return daySections(value).flatMap(({ day, body }) => {
     // Operational sentences after a day's route are not scenic alternatives.
-    return value.slice(start, end).split(/[-—–→。；;\n，,]+/u).flatMap((segment) => {
+    return body.split(/[-—–→。；;\n，,]+/u).flatMap((segment) => {
       // 接送方式的"或"属于服务选择，不能锁成必须同时保留的景点 OR 组。
       if (supportArrangementType({ name: segment.trim() }) === "transport") return [];
       if (/^\s*(?:不含|不包含|不安排|不提交|不发布|不需要|无需|不要)/u.test(segment)) return [];
       if (/^\s*(?:第\s*[0-9一二三四五六七八九十]+\s*晚|(?:参考)?酒店|住宿|入住)/u.test(segment)) return [];
+      // 「住巫山或者万州」是当晚住宿城市二选一，不是景点 OR 组。住宿不是
+      // 可绑定 POI 的游览站点，锁成二选一景点会让行程生成永远无法通过。
+      if (/^\s*(?:住|宿(?!州|迁|松))/u.test(segment)) return [];
       if (!/(?:或者|或)/u.test(segment)
         && !(/(?:二选一|多选一|任选其一)/u.test(segment) && /(?:\/|／)/u.test(segment))) return [];
       const names = unique(segment
@@ -69,6 +78,8 @@ export function cleanAlternativeName(value: string): string {
     // 凭证永远匹配不上，行程校验继续要求保留该项。
     .replace(/[*_`~#]+/gu, " ")
     .replace(/^[:：、，,\s]+/u, "")
+    // 住宿前缀不是景点名的一部分：「或者住巫山」→「巫山」。
+    .replace(/^(?:入住|住宿|宿(?!州|迁|松)|住)\s*/u, "")
     .replace(/^(?:去|游览|参观|安排)\s*/u, "")
     .trim();
 }

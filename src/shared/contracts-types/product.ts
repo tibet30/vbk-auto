@@ -31,8 +31,39 @@ export interface CreateProductInput {
   productForm: import("../product-form.js").ProductForm;
   /** 创建产品时用户提供的原始想法，供后续 AI 规划参考。 */
   userIdea?: string;
+  /** 仅在运营明确采用创建前 AI 版本后携带；userIdea 与 optimizedIdea 必须一致。 */
+  ideaOptimization?: ProductIdeaOptimizationReceipt;
   /** 勾选后由主进程完成生成、核验和 VBK 自动录入，不依赖 renderer 持续在线。 */
   autoConfirm?: boolean;
+}
+
+export interface ProductIdeaOptimizationRequest {
+  destination: string;
+  days: number;
+  productForm: import("../product-form.js").ProductForm;
+  userIdea: string;
+}
+
+export interface ProductIdeaOptimizationChange {
+  before: string;
+  after: string;
+  reason: string;
+}
+
+export interface ProductIdeaOptimizationResult {
+  optimizedIdea: string;
+  preservedItems: string[];
+  changes: ProductIdeaOptimizationChange[];
+  recommendations: string[];
+  warnings: string[];
+  sourceFingerprint: string;
+  provider: string;
+  model: string;
+  optimizedAt: string;
+}
+
+export interface ProductIdeaOptimizationReceipt extends ProductIdeaOptimizationResult {
+  originalIdea: string;
 }
 
 export interface ProductReadiness {

@@ -19,6 +19,7 @@ export function isPersistedRouteTravelNode(
   if (!value) return false;
   if (/^\d+道班$/u.test(value)) return true;
   if (!product || !routeTitleContainsNode(text(day.title), value)) return false;
+  if (hasOriginalLodgingDeparture(product, day, value)) return true;
   if (isProtectedRoutePoiPlaceName(value)) {
     return hasExplicitPreviousOvernightStart(product, day, value);
   }
@@ -41,6 +42,25 @@ export function isPersistedRouteTravelNode(
   const writableName = toWritableAdministrativeCityName(value);
   return administrative.some((candidate) => candidate === value
     || toWritableAdministrativeCityName(candidate) === writableName);
+}
+
+/** A bare departure is not a POI only when the preceding original day ends
+ * with that exact lodging locality and today's original route starts there.
+ * This is role evidence, never administrative or POI identity evidence. */
+function hasOriginalLodgingDeparture(product: JsonObject, day: JsonObject, name: string): boolean {
+  const currentSpots = Array.isArray(day.spots) ? day.spots.filter(isRecord) : [];
+  if (currentSpots.some(spot => text(spot.name) === name && hasCompletePoi(spot))) return false;
+
+  if (isProtectedRoutePoiPlaceName(name)
+    || /(?:山|湖|寺|公园|博物馆|纪念馆|古城|市集|广场|遗址)$/u.test(name)) return false;
+  const dayNumber = Number(day.day);
+  if (!Number.isInteger(dayNumber) || dayNumber <= 1) return false;
+  const previous = originalOvernightRoute(product, { day: dayNumber - 1 });
+  const endpoint = previous?.split(/[-—–→]/u).at(-1)?.trim();
+  const locality = endpoint?.match(/^([^，,。；;（）()]{2,10}?)(?:温泉)?(?:酒店|宾馆|住宿)[。；;]?$/u)?.[1];
+  if (locality !== name) return false;
+  const current = originalOvernightRoute(product, { day: dayNumber });
+  return current?.replace(/^\s*[:：]/u, '').split(/[-—–→]/u)[0]?.trim() === name;
 }
 
 function hasExplicitPreviousOvernightStart(product: JsonObject, day: JsonObject, name: string): boolean {

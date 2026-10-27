@@ -1,5 +1,5 @@
 import { toPlatformShortLocationName } from "../../../shared/location-short-name.js";
-import { toWritableAdministrativeCityName } from "../../../shared/region-overrides.js";
+import { toVbkCityName, toWritableAdministrativeCityName } from "../../../shared/region-overrides.js";
 import { placeholderDraftOnly, readActiveCoverFallback } from "../../../shared/cover-fallback.js";
 import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../domain/product/features-rich-text.js";
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
@@ -38,8 +38,8 @@ export function verifyBasicInfoReadback(baseInfo: unknown, product: unknown, pro
   if (expectedCity(basicInfo.meetingCity, "basicInfo.meetingCity") !== expectedCity(basicInfo.destinationCity, "basicInfo.destinationCity")) {
     throw new Error("基本信息预检本地 meetingCity 与 destinationCity 不一致");
   }
-  const meetingCity = toWritableAdministrativeCityName(expectedCity(basicInfo.meetingCity, "basicInfo.meetingCity"));
-  const destinationCity = toWritableAdministrativeCityName(expectedCity(basicInfo.destinationCity, "basicInfo.destinationCity"));
+  const meetingCity = toVbkCityName(toWritableAdministrativeCityName(expectedCity(basicInfo.meetingCity, "basicInfo.meetingCity")));
+  const destinationCity = toVbkCityName(toWritableAdministrativeCityName(expectedCity(basicInfo.destinationCity, "basicInfo.destinationCity")));
   const days = positiveInteger(basicInfo.days);
   const nights = Number(basicInfo.nights);
   if (!days || !Number.isInteger(nights) || nights < 0) {

@@ -34,7 +34,7 @@ test("数据库读取归一化会把历史字符串 POI ID 转成数字，非法
   ]);
 });
 
-test("数据库读取归一化会收敛同一天已绑定到同一 POI 的历史别名", () => {
+test("数据库读取保留同一POI的不同原名，不把别处元数据串到本槽位", () => {
   const product = parseAndNormalizeProductJson(JSON.stringify({
     itinerary: [{
       day: 1,
@@ -46,7 +46,9 @@ test("数据库读取归一化会收敛同一天已绑定到同一 POI 的历史
   })) as Record<string, any>;
 
   assert.deepEqual(product.itinerary[0].spots, [{
-    name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, city: "山南", kind: "attraction",
+    name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, kind: "attraction",
+  }, {
+    name: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105, city: "山南", kind: "attraction",
   }]);
 });
 

@@ -38,12 +38,27 @@ test("浏览器 bounds、导航 URL 与 providerId 拒绝错误类型", () => {
 });
 
 test("产品创建 payload 必须严格符合公开契约", () => {
+  const ideaOptimization = {
+    originalIdea: "带孩子去晋祠，慢一点。", optimizedIdea: "亲子慢游晋祠，下午保留休息时间。",
+    preservedItems: ["晋祠"], changes: [], recommendations: [], warnings: [],
+    sourceFingerprint: "a".repeat(64), provider: "minimax", model: "MiniMax-M3", optimizedAt: "2026-10-24T08:00:00.000Z",
+  };
   assert.doesNotThrow(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour" }]));
+  assert.doesNotThrow(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", userIdea: ideaOptimization.optimizedIdea, ideaOptimization }]));
+  assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", userIdea: ideaOptimization.optimizedIdea, ideaOptimization: { ...ideaOptimization, finalIdea: ideaOptimization.optimizedIdea } }]), /field=input/);
   assert.doesNotThrow(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1000) }]));
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", userIdea: "字".repeat(1001) }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 1, productForm: "privateTour" }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 0, productForm: "privateTour" }]), /field=input/);
   assert.throws(() => validateIpcArguments("products:create", [{ destination: "太原", days: 2, productForm: "privateTour", injected: true }]), /field=input/);
+});
+
+test("创建前 AI 优化只接受完整且有界的产品想法", () => {
+  const input = { destination: "太原", days: 2, productForm: "privateTour", userIdea: "亲子慢游晋祠" };
+  assert.doesNotThrow(() => validateIpcArguments("ai:optimizeProductIdea", [input]));
+  assert.throws(() => validateIpcArguments("ai:optimizeProductIdea", [{ ...input, userIdea: "" }]), /field=input/);
+  assert.throws(() => validateIpcArguments("ai:optimizeProductIdea", [{ ...input, days: 1 }]), /field=input/);
+  assert.throws(() => validateIpcArguments("ai:optimizeProductIdea", [{ ...input, extra: true }]), /field=input/);
 });
 
 test("应用账号切换只接受正整数用户 ID", () => {

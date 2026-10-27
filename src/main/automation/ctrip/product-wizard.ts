@@ -8,6 +8,11 @@ export type SavedProductWizardStage = "basicInfo" | "pictureAndText";
 export interface SavedProductWizardStageOptions {
   /** Revalidate the current phase authorization immediately before each write. */
   assertCurrent?: () => Promise<void> | void;
+  /**
+   * 自由行的保存边界与私家团不同：图文保存会同时解锁「推荐玩法」和「套餐管理」，
+   * maxStep 也直接到 10。允许相邻多解锁一项，但目标边界自身仍必须已解锁。
+   */
+  allowAdditionalUnlock?: boolean;
 }
 
 type SavedStagePage = TrafficLinePage & Pick<Page, "waitForTimeout">;
@@ -122,7 +127,7 @@ async function saveCompletedStage(
     assertBaseInfoIdentity(remote.baseInfo, productId);
     await postTrafficLineSoa(page, "15638", "saveProductBaseInfo", {
       baseInfo: remote.baseInfo,
-      bookingControl: { ...booking, personQuantity: {
+      bookingControl: { ...booking, isPublicEmergencyContact: "T", personQuantity: {
         minPersonQuantity: booking.minPersonQuantity, maxPersonQuantity: booking.maxPersonQuantity,
       } },
       nameAreaRules: remote.nameAreas,
@@ -140,10 +145,11 @@ async function saveCompletedStage(
     { dto: { ...info, productId: Number(productId), saveType: 4 } }, "VBK 已保存图文下一步", { beforeAttempt: options.assertCurrent });
 }
 
-function assertSingleBoundaryAdvance(
+export function assertSingleBoundaryAdvance(
   before: Awaited<ReturnType<typeof readProductMenus>>,
   after: Awaited<ReturnType<typeof readProductMenus>>,
   completedStep: SavedProductWizardStage,
+  options: SavedProductWizardStageOptions = {},
 ) {
   const { boundary, target, passed } = stageState(after.menus, completedStep);
   if (!passed) {
@@ -152,10 +158,13 @@ function assertSingleBoundaryAdvance(
   const beforeCore = productMenuCore(before.menus);
   const afterCore = productMenuCore(after.menus);
   const changed = afterCore.flatMap((menu, index) => menu.enabled === beforeCore[index]?.enabled ? [] : [index]);
-  if (changed.length !== 1 || changed[0] !== boundary.targetIndex) {
+  const allowed = options.allowAdditionalUnlock
+    ? [boundary.targetIndex, boundary.targetIndex + 1]
+    : [boundary.targetIndex];
+  if (!changed.includes(boundary.targetIndex) || changed.some(index => !allowed.includes(index))) {
     throw new Error(`VBK 向导推进越过指定菜单边界：${target.title || target.key}`);
   }
-  if (after.maxStep !== boundary.targetMaxStep) {
+  if (!options.allowAdditionalUnlock && after.maxStep !== boundary.targetMaxStep) {
     throw new Error(`VBK 向导推进后官方步骤状态不一致：${target.title || target.key}`);
   }
 }
@@ -180,7 +189,7 @@ export async function advanceSavedProductWizardStage(
     const after = await readProductMenus(page, productId);
     const current = stageState(after.menus, completedStep);
     if (current.passed) {
-      assertSingleBoundaryAdvance(before, after, completedStep);
+      assertSingleBoundaryAdvance(before, after, completedStep, options);
       return { ...after, completedStep, targetStep: current.target.key, advanced: true as const };
     }
     if (poll < 10) await page.waitForTimeout(500);

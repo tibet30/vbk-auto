@@ -145,6 +145,14 @@ export async function submitItineraryReviewUnlock(
   options.onStep?.(receipt("saveProduct3", "15638/saveProductTourInfo", 3));
 }
 
+/**
+ * 自由行的「推荐玩法」不绑定线路库，routeId 正常就是 0；私家团/跟团游必须有线路。
+ * 审核状态仍必须是官方已提交/已通过值。
+ */
+export function reviewReadbackSatisfied(productForm: string, routeId: number, auditKey: string): boolean {
+  return (productForm === "freeTravel" || routeId > 0) && ["A", "N"].includes(auditKey);
+}
+
 function pageProductId(state: Record<string, unknown>): string {
   const location = record(state.location);
   const query = record(location.query);
@@ -187,7 +195,10 @@ export async function verifyItineraryReviewUnlock(
   const info = record(base.baseInfo); const meta = record(base.meta);
   const routeId = Number(info.routeId) || 0;
   const auditKey = String(record(relation.tourInfo).auditStatus?.key ?? "");
-  if (routeId <= 0 || !["A", "N"].includes(auditKey)) throw new Error("行程审核尚未通过远端回读。");
+  const productForm = String(record(record(product).sales).productForm ?? "");
+  if (!reviewReadbackSatisfied(productForm, routeId, auditKey)) {
+    throw new Error("行程审核尚未通过远端回读。");
+  }
   const publication = { active: String(info.active ?? base.active ?? ""), isonline: String(meta.isonline ?? info.isonline ?? base.isonline ?? ""), releaseActive: String(meta.releaseActive ?? base.releaseActive ?? "") };
   if (publication.active !== "F" || publication.isonline !== "F" || publication.releaseActive !== "F") throw new Error("审核解锁不得改变产品发布状态。");
   const children = await readTrafficLineChildren(page, productId);

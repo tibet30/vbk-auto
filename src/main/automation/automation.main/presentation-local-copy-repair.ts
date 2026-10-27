@@ -1,6 +1,8 @@
 import { outsidePoiNames, trustedPresentationPoiNames } from "../../planning/vbk-copy-identity.js";
 import { repairVbkCopyPolicyValue } from "../../planning/vbk-copy-policy.js";
 import { applySensitivePresentationRewrite, type PresentationCopyPath } from "./presentation-copy-candidate.js";
+import { cleanPlatformHotelCopy } from "../../../shared/platform-hotel-copy.js";
+import { usesPlatformHotelRules } from "../../../shared/platform-hotel-rules.js";
 
 type Product = Record<string, any> & { presentation?: Record<string, any> };
 
@@ -31,12 +33,16 @@ export function repairLocalPresentationCopy(product: Product): PresentationCopyP
   const presentation = structuredClone(product.presentation);
   const identityBaseline = structuredClone(product.presentation);
   const names = trustedPresentationPoiNames(product);
+  // 平台酒店规则产品：已存图文可能带着旧版钻级折叠留下的病句，录入前一并修正。
+  const hotelCopy = usesPlatformHotelRules(product)
+    ? (value: string) => outsidePoiNames(value, names, copy => cleanPlatformHotelCopy(copy) as string)
+    : (value: string) => value;
   const paths: PresentationCopyPath[] = [];
   const repair = (value: unknown, path: PresentationCopyPath, setRestored: (value: string) => void): unknown => {
     if (typeof value !== "string") return value;
     const restored = restoreLegacyNames(value, names);
     setRestored(restored);
-    const next = repairVbkCopyPolicyValue(restored, `value.presentation.${path}`, names) as string;
+    const next = hotelCopy(repairVbkCopyPolicyValue(restored, `value.presentation.${path}`, names) as string);
     if (next !== value) paths.push(path);
     return next;
   };

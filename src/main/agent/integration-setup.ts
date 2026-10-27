@@ -2,6 +2,7 @@
  * agent/integration-setup 入口（barrel + installProductAgent）：
  *   - restore.ts：restoreExplicitOperatorDeletion + mentionsDay +
  *     restoreContextIdentifiesReceipt + restoreExplicitAlternativeSlots；
+ *   - prepare-user-instruction.ts：用户明确指令（含数据风险 POI 剔除后重录）落库；
  *
  * installProductAgent 是 AgentCore 的胶水代码：
  *   - 注入 OpenAI model + tools + 各种 gate（approval precondition / finish
@@ -31,14 +32,11 @@ import { recordAgentUsage } from "./integration-usage.js";
 import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import { recoverResolvedHotelCandidates } from "./hotel-candidate-recovery.js";
-import { repairProductForExplicitInstruction } from "./user-instruction-repair.js";
 import { resolvedProductQuestions } from "./pending-question-reconciliation.js";
 import { needsTrafficLineBackfill } from "../automation/traffic-line-backfill.js";
-import { isPreparationRun, isPreparationInstruction } from "./preparation-run.js";
-import { preparationItineraryRecovery } from "./preparation-itinerary-recovery.js";
+import { isPreparationRun } from "./preparation-run.js";
 import { runQueuedApprovedWorkflow } from "./queued-approved-workflow.js";
-import { removeConfirmedDomesticShortPoiRisk } from "./domestic-short-poi-removal.js";
-import { restoreExplicitOperatorDeletion, restoreExplicitAlternativeSlots } from "./integration-setup/restore.js";
+import { prepareUserInstruction } from "./integration-setup/prepare-user-instruction.js";
 import { reconcileUncertainAgentWrite } from "./integration-setup/reconcile-uncertain-write.js";
 import { handoffWizardStageRetry, prepareWizardStageRetry } from "./integration-setup/wizard-stage-retry.js";
 
@@ -159,58 +157,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       const inspected = inspectCover(data);
       return resolvedProductQuestions(data, questions, { manualCoverAssetReady: Boolean(inspected.asset && !inspected.issue) });
     },
-    prepareUserInstruction: (localProductId, content, selection) => {
-      let current = db.getProduct(localProductId);
-      if (!current) throw productNotFound(localProductId);
-      let preparationRecovered = false;
-      const receiptProduct = structuredClone(current.product);
-      if (restoreExplicitOperatorDeletion(receiptProduct, content)) {
-        current = context.productMutations.commands.mergeChanges(localProductId, current, receiptProduct, 'user', {
-          status: current.status, expectedVersion: current.productJsonVersion,
-          allowItineraryRemovalRestore: true,
-        });
-        preparationRecovered = true;
-      }
-      const riskRemoval = removeConfirmedDomesticShortPoiRisk(current, selection?.selectedQuestions ?? []);
-      if (riskRemoval?.removed) {
-        current = context.productMutations.commands.mergeChanges(localProductId, current, riskRemoval.product, "user", {
-          status: current.status, expectedVersion: current.productJsonVersion, allowItineraryRemovalRestore: true,
-        });
-        emitProduct(current);
-        preparationRecovered = true;
-      }
-      const restored = restoreExplicitAlternativeSlots(current, content);
-      if (restored) {
-        current = context.productMutations.commands.mergeChanges(localProductId, current, restored, 'user', {
-          status: current.status, expectedVersion: current.productJsonVersion,
-        });
-        preparationRecovered = true;
-      }
-      if (isPreparationInstruction(content)) {
-        const recovery = preparationItineraryRecovery(current);
-        if (recovery) {
-          current = context.productMutations.commands.mergeChanges(localProductId, current, recovery.product, 'resource', {
-            status: current.status, expectedVersion: current.productJsonVersion,
-          });
-          db.markResearchTasksSatisfied(localProductId, recovery.taskIds);
-          refreshSatisfiedResearchTasks(db, localProductId);
-          preparationRecovered = true;
-        }
-      }
-      const repair = repairProductForExplicitInstruction(
-        current,
-        content,
-        selection?.selectedLabels,
-        selection?.selectedQuestions,
-      );
-      if (!repair) {
-        if (preparationRecovered) emitProduct(db.getProduct(localProductId)!);
-        return preparationRecovered || undefined;
-      }
-      const saved = context.productMutations.commands.mergeChanges(localProductId, current, repair.product, 'resource', { status: current.status });
-      emitProduct(saved);
-      return true;
-    },
+    prepareUserInstruction: (localProductId, content, selection) =>
+      prepareUserInstruction(context, localProductId, content, selection),
     recoverApproval: async (localProductId, snapshot) => {
       let product = db.getProduct(localProductId);
       if (!product) return undefined;

@@ -27,6 +27,8 @@ export interface ReplaceProductAndSatisfyResearchTasksOptions {
   source?: "vbk" | "web" | "user";
   /** evidence 标题；默认使用 options.note。 */
   researchEvidenceTitle?: string;
+  /** 调用方持有的 product_json 版本；与库中不一致时整笔回滚。 */
+  expectedVersion?: number;
 }
 
 /**
@@ -44,7 +46,7 @@ export function replaceProductAndSatisfyResearchTasks(
 ): { product: ProductDetail; confirmedTaskIds: string[] } {
   const tx = db.transaction(() => {
     const durableInput = dedupeProductItineraryPois(product);
-    updateProduct(db, localProductId, durableInput, options.status);
+    updateProduct(db, localProductId, durableInput, options.status, options.expectedVersion, options.source);
     reopenKindSupersededPoiResearchTasks(db, localProductId, durableInput);
     const confirmed = markResearchTasksSatisfiedByProduct(
       db,

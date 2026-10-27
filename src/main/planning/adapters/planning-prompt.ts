@@ -16,6 +16,7 @@ import { buildVbkCopyPolicyPrompt, sanitiseUserIdeaForAi } from "../vbk-copy-pol
 import { buildBasicInfoFeedbackPrompt, buildItineraryFeedbackPrompt, buildPresentationFeedbackPrompt } from "../vbk-copy-feedback.js";
 import { PRIVATE_TOUR_COPY_GUIDE } from "../../../shared/private-tour-copy.js";
 import { ITINERARY_LODGING_GUIDE } from "../../../shared/itinerary-hotel.js";
+import { constraintUserIdea } from "../../../shared/product-idea-optimization.js";
 
 const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, string> = {
   skeleton: `1. skeleton.value 只包含 hotelTier、pickupCity、transport、reusePickupForDropoff、mealsIncluded、vehicleResource。
@@ -122,7 +123,7 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     : {};
   const userIdea = typeof basicInfo.userIdea === "string" ? sanitiseUserIdeaForAi(basicInfo.userIdea) : "";
   const locked = context.lockedConstraints;
-  const itineraryMode = hasCompleteNumberedRoute(userIdea, context.skeleton.days) ? "complete" : locked
+  const itineraryMode = hasCompleteNumberedRoute(constraintUserIdea(basicInfo), context.skeleton.days) ? "complete" : locked
     ? classifyItineraryInputMode(locked, context.skeleton.days)
     : "open";
   const excludedAlternatives = stage === "presentation"

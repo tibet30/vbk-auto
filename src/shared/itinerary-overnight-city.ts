@@ -1,3 +1,6 @@
+import { originalOvernightRoute } from './original-itinerary-route.js';
+export { originalOvernightRoute } from './original-itinerary-route.js';
+import { verifiedRouteOvernightCity } from './route-location-evidence.js';
 import { hasCompletePoi, requiresItineraryPoi } from './itinerary-activity-kind.js';
 import { toPlatformShortLocationName } from './location-short-name.js';
 
@@ -5,28 +8,10 @@ type Json = Record<string, any>;
 const short = (value: unknown) => toPlatformShortLocationName(value);
 const compact = (value: unknown) => typeof value === 'string' ? value.replace(/\s+/gu, '') : '';
 
-/** Original daily route evidence, independent of generated lodging defaults. */
-export function originalOvernightRoute(product: Json, day: Json): string | undefined {
-  const raw = String(product.basicInfo?.userIdea ?? '').replace(/\\[nr]/gu, '\n');
-  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*(?:天|日)?|第\s*([0-9一二三四五六七八九十]+)\s*天|(?:^|\n)\s*(\d+)\s*[-、:：.])/giu;
-  const matches = [...raw.matchAll(marker)];
-  const index = matches.findIndex(match => dayNumber(match[1] ?? match[2] ?? match[3]) === Number(day.day));
-  if (index < 0) return undefined;
-  const match = matches[index]!;
-  return raw.slice(match.index! + match[0].length, matches[index + 1]?.index ?? raw.length).trim();
-}
-
-function dayNumber(value: string | undefined): number {
-  if (!value) return NaN;
-  if (/^\d+$/u.test(value)) return Number(value);
-  const digits = '一二三四五六七八九';
-  const [tens, units] = value.split('十');
-  if (units === undefined) return digits.indexOf(value) + 1;
-  return (tens ? digits.indexOf(tens) + 1 : 1) * 10 + (units ? digits.indexOf(units) + 1 : 0);
-}
-
 /** Infer only from original stops whose bound POIs agree on their administrative location. */
 export function verifiedOvernightCity(product: Json, day: Json): string | undefined {
+  const anchoredCity = verifiedRouteOvernightCity(product, day);
+  if (anchoredCity) return anchoredCity;
   const source = originalOvernightRoute(product, day);
   if (!source) return undefined;
   const spots: Json[] = (day.spots ?? []).filter((spot: Json) => requiresItineraryPoi(spot));

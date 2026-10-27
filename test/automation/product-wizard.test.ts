@@ -92,6 +92,7 @@ test("单阶段基本信息下一步只解锁图文，且不导航、不点击�
   assert.deepEqual(f.writes.map(write => write.endpoint), ["saveProductBaseInfo"]);
   assert.deepEqual(f.calls, ["getSubMenu.json", "getProductBaseInfo", "saveProductBaseInfo", "getSubMenu.json"]);
   assert.equal(f.writes[0].body.meta.saveType, 2);
+  assert.equal(f.writes[0].body.bookingControl.isPublicEmergencyContact, "T");
   assert.deepEqual(f.writes[0].body.baseInfo, f.base);
 });
 

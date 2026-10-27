@@ -101,7 +101,7 @@ export class AgentTurnLoop {
           continue;
         }
         if (preparation.modelRepairWindow) {
-          this.snapshots.event(before, "status", `当前节点 ${preparation.action!.node} 已自动尝试两次。请基于前两次真实工具结果和当前保存事实在最多三轮内读取并修复，不能只询问是否继续；必须保留锁定城市、天数和已绑定 POI。`, {
+          this.snapshots.event(before, "status", `当前节点 ${preparation.action!.node} 已自动尝试两次。请基于前两次真实工具结果和当前保存事实在最多三轮内读取并修复，不能只询问是否继续；必须保留锁定城市、天数和已绑定 POI。POI 查询只是读取；取得候选后，下一轮优先调用 select_itinerary_poi 绑定原槽位并检查保存结果，再查询下一批。跨省候选必须通过当前原路线地域核验，不得改接团城市或猜测 ID。`, {
             deterministicPreparationModelRepair: true,
             modelFeedback: true,
             node: preparation.action!.node,

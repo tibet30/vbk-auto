@@ -2,6 +2,7 @@ import type { PoiSuggestContext } from "./types.js";
 import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
 import { toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { originalOvernightRoute } from "../../shared/itinerary-overnight-city.js";
+import { currentRouteLocations, routeLocationsForSpot } from "../../shared/route-location-evidence.js";
 
 /**
  * 按 POI / 景点 / 景区名称从一天的文本中反推城市。
@@ -27,8 +28,22 @@ export function buildPoiContextForItineraryDay(
   product: Record<string, unknown>,
   destination: string,
   day: unknown,
+  keyword?: string,
 ): PoiSuggestContext {
   const base = buildPoiContext(product, destination);
+  if (isRecord(day) && keyword) {
+    const locations = routeLocationsForSpot(product, day, keyword);
+    if (locations.length) return {
+      ...(locations.length === 1 ? { destinationCity: locations[0].city, province: locations[0].province } : base),
+      itineraryDay: Number(day.day), spotName: keyword,
+    };
+  }
+  if (isRecord(day)) {
+    const native = currentRouteLocations(product, day);
+    const cities = new Set(native.map(node => `${node.province}/${node.city}`));
+    if (cities.size === 1 && native[0]!.province === base.province) return { destinationCity: native[0]!.city, province: native[0]!.province,
+      ...(keyword ? { itineraryDay: Number(day.day), spotName: keyword } : {}) };
+  }
   const sameDay = verifiedOriginalRouteLocation(product, day);
   if (sameDay) return sameDay;
   const dayCity = inferExplicitPoiDayCity(day);

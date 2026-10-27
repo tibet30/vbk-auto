@@ -1,3 +1,6 @@
+import type { ProductIdeaOptimizationReceipt } from "./contracts-types/product.js";
+import { normaliseIdeaOptimizationReceipt } from "./product-idea-optimization.js";
+
 export interface ProductBriefMessage {
   type: "product_brief";
   destination: string;
@@ -5,6 +8,7 @@ export interface ProductBriefMessage {
   days: number;
   nights: number;
   userIdea?: string;
+  ideaOptimization?: ProductIdeaOptimizationReceipt;
 }
 
 export function buildProductBriefMessageContent(input: {
@@ -13,6 +17,7 @@ export function buildProductBriefMessageContent(input: {
   days: number;
   nights: number;
   userIdea?: string;
+  ideaOptimization?: ProductIdeaOptimizationReceipt;
 }): string {
   const brief: ProductBriefMessage = {
     type: "product_brief",
@@ -21,6 +26,7 @@ export function buildProductBriefMessageContent(input: {
     days: input.days,
     nights: input.nights,
     ...(input.userIdea?.trim() ? { userIdea: input.userIdea.trim() } : {}),
+    ...(input.ideaOptimization ? { ideaOptimization: input.ideaOptimization } : {}),
   };
   return JSON.stringify(brief);
 }
@@ -34,15 +40,16 @@ export function parseProductBriefMessage(content: string): ProductBriefMessage |
     if (typeof value.destination !== "string" || !value.destination.trim()) return undefined;
     if (typeof value.productFormLabel !== "string" || !value.productFormLabel.trim()) return undefined;
     if (!Number.isInteger(value.days) || !Number.isInteger(value.nights)) return undefined;
+    const userIdea = typeof value.userIdea === "string" ? value.userIdea.trim() : "";
+    const ideaOptimization = normaliseIdeaOptimizationReceipt(value.ideaOptimization, userIdea);
     return {
       type: "product_brief",
       destination: value.destination.trim(),
       productFormLabel: value.productFormLabel.trim(),
       days: value.days!,
       nights: value.nights!,
-      ...(typeof value.userIdea === "string" && value.userIdea.trim()
-        ? { userIdea: value.userIdea.trim() }
-        : {}),
+      ...(userIdea ? { userIdea } : {}),
+      ...(ideaOptimization ? { ideaOptimization } : {}),
     };
   } catch {
     return undefined;

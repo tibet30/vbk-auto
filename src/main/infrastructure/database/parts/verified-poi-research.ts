@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { ResearchTask } from "../../../../shared/contracts.js";
-import { poiResearchTaskLabel, poiResearchTaskNames } from "../../../../shared/poi-research-tasks.js";
-import { isKnownPoiNameAlias } from "../../../../shared/poi-name-aliases.js";
+import { poiResearchTaskNames } from "../../../../shared/poi-research-tasks.js";
 import { hasAmbiguousManualPoiSelection, requiresCurrentPoiVerification } from "../../../../shared/research-task-satisfaction.js";
 import type { VerifiedPoiMapping } from "../../../planning/types.js";
 import { touchProduct } from "./products.js";
@@ -20,6 +19,40 @@ interface TaskRow {
   evidence_json: string;
 }
 
+/** A later lookup failure must not invalidate a controlled receipt while the
+ * exact saved day/name/POI mapping is still present in the current product. */
+export function hasCurrentVerifiedPoiEvidence(
+  product: Record<string, unknown>,
+  task: Pick<TaskRow, "label" | "type" | "evidence_json">,
+): boolean {
+  const names = poiResearchTaskNames(task.label, task.type);
+  if (!names.length) return false;
+  const receipts = verifiedMappingsFromEvidence(task.evidence_json);
+  return receipts.length > 0
+    && names.every((name) => everyCurrentSlotVerified(product, name, receipts));
+}
+
+/** Repairs rows reopened by the historic duplicate-task path. Evidence is
+ * preserved; only a receipt that still matches the current product can close. */
+export function restoreCurrentVerifiedPoiResearchTasks(
+  db: Database.Database,
+  localProductId: string,
+): { updated: number; taskIds: string[] } {
+  const productRow = db.prepare("SELECT product_json FROM products WHERE id=?").get(localProductId) as { product_json?: string } | undefined;
+  if (!productRow?.product_json) return { updated: 0, taskIds: [] };
+  let product: Record<string, unknown>;
+  try { product = JSON.parse(productRow.product_json) as Record<string, unknown>; } catch { return { updated: 0, taskIds: [] }; }
+  const rows = db.prepare(`SELECT id,label,type,state,detail,evidence_json FROM research_tasks
+    WHERE local_product_id=? AND type='vbk' AND state NOT IN ('confirmed','resolved')`).all(localProductId) as TaskRow[];
+  const matched = rows.filter((task) => hasCurrentVerifiedPoiEvidence(product, task));
+  const update = db.prepare(`UPDATE research_tasks SET state='confirmed', status='succeeded', detail=?
+    WHERE id=? AND local_product_id=? AND state NOT IN ('confirmed','resolved')`);
+  const taskIds = matched.filter((task) => update.run(SAVED_POI_DETAIL, task.id, localProductId).changes > 0)
+    .map((task) => task.id);
+  if (taskIds.length) touchProduct(db, localProductId);
+  return { updated: taskIds.length, taskIds };
+}
+
 /**
  * Settle an ambiguity task only from the controlled POI resolver receipt.
  * A same-name/positive-ID product JSON write is deliberately insufficient.
@@ -33,20 +66,15 @@ export function confirmVerifiedPoiResearchTasks(
   if (!productRow?.product_json || !mappings.length) return { updated: 0, taskIds: [] };
   let product: Record<string, unknown>;
   try { product = JSON.parse(productRow.product_json) as Record<string, unknown>; } catch { return { updated: 0, taskIds: [] }; }
-  const exact = mappings.filter((mapping) => persistedMappingExists(product, mapping));
-  const collapsedAliases = mappings.filter((mapping) => !exact.includes(mapping)
-    && persistedAliasReceiptExists(product, mapping));
-  const persisted = [...exact, ...collapsedAliases];
+  const persisted = mappings.filter(mapping => persistedMappingExists(product, mapping));
   if (!persisted.length) return { updated: 0, taskIds: [] };
 
   const allRows = db.prepare(`SELECT id,label,type,state,detail,evidence_json FROM research_tasks
     WHERE local_product_id=? AND type='vbk'`).all(localProductId) as TaskRow[];
   const rows = allRows.filter((row) => !["confirmed", "resolved"].includes(row.state));
   const matched = rows.filter((task) => (hasAmbiguousManualPoiSelection(task)
-      || requiresCurrentPoiVerification(task)
-      || collapsedAliases.some((mapping) => poiResearchTaskNames(task.label, task.type)
-        .some((name) => sameName(name, mapping.spotName))))
-    && poiResearchTaskNames(task.label, task.type).every((name) => persisted.some((mapping) => sameName(name, mapping.spotName))));
+      || requiresCurrentPoiVerification(task))
+    && poiResearchTaskNames(task.label, task.type).every((name) => everyCurrentSlotVerified(product, name, persisted)));
   const update = db.prepare(`UPDATE research_tasks SET state='confirmed', status='succeeded', detail=?, evidence_json=?
     WHERE id=? AND local_product_id=? AND state NOT IN ('confirmed','resolved')`);
   const taskIds: string[] = [];
@@ -64,27 +92,8 @@ export function confirmVerifiedPoiResearchTasks(
     });
     if (update.run(SAVED_POI_DETAIL, JSON.stringify(evidence), task.id, localProductId).changes > 0) taskIds.push(task.id);
   }
-  for (const mapping of collapsedAliases) {
-    const label = poiResearchTaskLabel(mapping.spotName);
-    if (allRows.some((task) => task.label === label)) continue;
-    const id = randomUUID();
-    const evidence = [{
-      id: randomUUID(),
-      title: verifiedEvidenceTitle(mapping),
-      source: "vbk",
-      retrievedAt: now(),
-      accepted: true,
-    }];
-    db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)")
-      .run(id, localProductId, label, "vbk", "succeeded", "confirmed", SAVED_POI_DETAIL, JSON.stringify(evidence));
-    taskIds.push(id);
-  }
   if (taskIds.length) touchProduct(db, localProductId);
   return { updated: taskIds.length, taskIds };
-}
-
-function verifiedEvidenceTitle(mapping: VerifiedPoiMapping): string {
-  return `${VERIFIED_POI_EVIDENCE_MARKER} 第${mapping.day}天 ${mapping.spotName} -> ${mapping.poiName} (${mapping.poiId})`;
 }
 
 function persistedMappingExists(product: Record<string, unknown>, mapping: VerifiedPoiMapping): boolean {
@@ -96,20 +105,36 @@ function persistedMappingExists(product: Record<string, unknown>, mapping: Verif
       && sameName(String(spot.poiName ?? ""), mapping.poiName)));
 }
 
-function persistedAliasReceiptExists(
-  product: Record<string, unknown>,
-  mapping: VerifiedPoiMapping,
-): boolean {
+/** One current receipt cannot settle another day's same-named pending verification. */
+function everyCurrentSlotVerified(product: Record<string, unknown>, name: string, mappings: readonly VerifiedPoiMapping[]): boolean {
   if (!Array.isArray(product.itinerary)) return false;
-  return product.itinerary.some((day) => isRecord(day) && Number(day.day) === mapping.day
-    && Array.isArray(day.spots) && day.spots.some((spot) => isRecord(spot)
-      && spot.poiId === mapping.poiId
-      && sameName(String(spot.poiName ?? ""), mapping.poiName)
-      && isKnownPoiNameAlias(String(spot.name ?? ""), mapping.spotName)));
+  const slots = product.itinerary.flatMap(day => isRecord(day) && Array.isArray(day.spots)
+    ? day.spots.filter(isRecord).filter(spot => sameName(String(spot.name ?? ''), name))
+      .map(spot => ({ day: Number(day.day), spot })) : []);
+  const receipts = [...mappings];
+  return slots.length > 0 && slots.every(({ day, spot }) => {
+    const index = receipts.findIndex(mapping => mapping.day === day && sameName(mapping.spotName, String(spot.name))
+      && mapping.poiId === spot.poiId && sameName(mapping.poiName, String(spot.poiName)));
+    if (index < 0) return false;
+    receipts.splice(index, 1);
+    return true;
+  });
 }
 
 function parseEvidence(value: string): unknown[] {
   try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+}
+
+function verifiedMappingsFromEvidence(value: string): VerifiedPoiMapping[] {
+  return parseEvidence(value).flatMap((item) => {
+    const title = isRecord(item) && typeof item.title === "string" ? item.title : "";
+    if (!title.includes(VERIFIED_POI_EVIDENCE_MARKER)) return [];
+    return title.slice(title.indexOf(VERIFIED_POI_EVIDENCE_MARKER) + VERIFIED_POI_EVIDENCE_MARKER.length)
+      .split("；").flatMap((part) => {
+        const match = /^\s*第(\d+)天\s+(.+?)\s+->\s+(.+?)\s+\((\d+)\)\s*$/u.exec(part);
+        return match ? [{ day: Number(match[1]), spotName: match[2]!, poiName: match[3]!, poiId: Number(match[4]) }] : [];
+      });
+  });
 }
 function sameName(left: string, right: string): boolean { return left.replace(/\s+/gu, "") === right.replace(/\s+/gu, ""); }
 function isRecord(value: unknown): value is Record<string, unknown> {

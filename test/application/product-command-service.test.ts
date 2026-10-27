@@ -37,7 +37,7 @@ test('late cover result changes only its fields and preserves a concurrent itine
   const baseline = db.getProduct(id)!;
   mutations.replace(id, { ...baseline.product, itinerary: [{ day: 1, title: '人工修改', spots: [], meals: '自理' }] });
   const next = mutations.commands.mergeChanges(id, baseline, { ...baseline.product, presentation: { cover: { type: 'none' } } }, 'resource');
-  assert.equal((next.product.itinerary as Record<string, unknown>[])[0]!.title, '人工修改');
+  assert.equal((next.product.itinerary as Record<string, unknown>[])[0]!.title, '【出发地-成都】人工修改');
   assert.deepEqual(next.product.presentation, { cover: { type: 'none' } });
 }));
 

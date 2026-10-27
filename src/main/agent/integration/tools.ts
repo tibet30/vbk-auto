@@ -32,12 +32,12 @@ import {
 import { denyPreparationTool } from "../preparation-action-guard.js";
 import { enrichItineraryPois } from "../../planning/poi-enrichment.js";
 import { isPlanningPoiCandidateInContext } from "../../planning/poi-auto-selection.js";
-import { buildPoiContextForItineraryDay } from "../../planning/poi-context.js";
+import { findPoiQueryScope, itineraryPoiScope, screenPoiQueryForScope } from "./poi-scope.js";
+import { isCompatiblePoiIdentity } from "../../../shared/poi-candidate-identity.js";
 import { syncInitialTrafficLineAvailability } from "../../planning/traffic-line-availability.js";
 import { resolveProductTrafficLineAvailability } from "../../automation/ctrip/traffic-line/planning-availability.js";
 import type { TrafficLineStationDisambiguator } from "../../automation/ctrip/traffic-line/endpoints.js";
 import type { ProductDetail } from "../../../shared/contracts.js";
-import { requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
 import { getCtripSightAvailabilities } from "../../infrastructure/ctrip-sight-availability.js";
 import { compactPoiQueryResult, poiCandidatesForAvailability } from "../poi-query-compact.js";
 import { DbOrchestratorRuntime } from "../../planning/runtime.js";
@@ -46,7 +46,7 @@ import { selfRepairItineraryForVbk } from "../../planning/itinerary-self-repair.
 import { createItineraryDraftTools } from "../integration-itinerary-draft-tools.js";
 import { createCreationRecoveryTools } from "../integration-creation-recovery-tools.js";
 import type { AgentTool } from "../types.js";
-import { cleanText, productData, positiveInteger, requirePatch, safeJson, selectItinerarySpot, type JsonObject, clearUnverifiedItineraryPois as clearUnverifiedItineraryPoisImpl } from "./util.js";
+import { cleanText, productData, positiveInteger, requirePatch, safeJson, type JsonObject, clearUnverifiedItineraryPois as clearUnverifiedItineraryPoisImpl } from "./util.js";
 
 export function createAgentBusinessTools(deps: AgentBusinessDependencies): AgentTool[] {
   const get = (localProductId: string) => {
@@ -146,15 +146,23 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       },
     },
     {
-      name: "query_poi", description: "按名称查询 VBK POI 候选和详情，并标注 usable（可查到且未暂停营业）；返回精简结果，不写入平台。", parameters: { type: "object", required: ["keyword"], properties: { keyword: { type: "string" } } },
+      name: "query_poi", description: "按名称查询 VBK POI。绑定原行程时传 day 和原景点 spotName；usable 同时要求匹配该槽位的地域且未暂停营业。同名跨日或别名查询未指定槽位时不会标为可绑定。只读查询。", parameters: { type: "object", required: ["keyword"], properties: { keyword: { type: "string" }, day: { type: "number" }, spotName: { type: "string" } } },
       async execute(args, ctx) {
         const keyword = cleanText(args.keyword);
         if (!keyword) throw new Error("缺少地点名称。");
+        const scope = findPoiQueryScope(get(ctx.localProductId), keyword, args);
         return withPage(async () => {
-          const detail = await platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).poi(keyword);
-          const candidates = poiCandidatesForAvailability({ keyword, detail });
+          const raw = await platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).poi(keyword, scope?.context);
+          const detail = screenPoiQueryForScope(raw, scope);
+          const candidates = poiCandidatesForAvailability({ keyword, identityName: scope?.spotName, detail });
           const availability = await getCtripSightAvailabilities(undefined, candidates.map((item) => item.poiId!), deps.db);
-          return { content: safeJson(compactPoiQueryResult({ keyword, detail, availability })) };
+          const bindingIssue = !scope ? "请指定原行程的 day 和 spotName 后重新查询，当前结果尚不能绑定。"
+            : raw.candidates.some(item => item.selectable) && !detail.candidates.some(item => item.selectable)
+            ? "当前候选不符合原行程槽位的地域或景点身份、主子层级要求，不能绑定；请核对原地点或更换查询词。" : undefined;
+          return { content: safeJson({ ...compactPoiQueryResult({ keyword, identityName: scope?.spotName, detail, availability }),
+            scope: scope ? { day: scope.day, spotName: scope.spotName } : null,
+            ...(bindingIssue ? { bindingIssue } : {}),
+          }) };
         });
       },
     },
@@ -167,16 +175,11 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const poiId = positiveInteger(args.poiId, "poiId");
         if (!spotName) throw new Error("缺少现有景点名称。");
         const current = get(ctx.localProductId);
-        const { dayIndex, spotIndex, spot } = selectItinerarySpot(current, day, spotName);
-        if (!requiresItineraryPoi(spot)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
-        const currentProduct = productData(current);
-        const basic = currentProduct.basicInfo as JsonObject | undefined;
-        const context = buildPoiContextForItineraryDay(currentProduct,
-          cleanText(basic?.destinationCity || basic?.meetingCity),
-          Array.isArray(currentProduct.itinerary) ? currentProduct.itinerary[dayIndex] : undefined);
+        const { dayIndex, spotIndex, spot, product: currentProduct, context } = itineraryPoiScope(current, day, spotName);
         const detail = await withPage(async () => platformBusinessQueries(deps.db, ctx.localProductId, await getVbkRequestPage(deps.browser)).poi(queryKeyword, context));
         const candidate = detail.candidates.find((item) => item.poiId === poiId && item.selectable && item.poiName);
         if (!candidate?.poiName) throw new Error(`POI ${poiId} 不在「${queryKeyword}」的当前可选查询结果中。`);
+        if (!isCompatiblePoiIdentity(cleanText(spot.name), candidate.poiName)) throw new Error(`POI「${candidate.poiName}」与原景点「${spotName}」的身份或主子层级不符，不能代替原景点。`);
         if (!isPlanningPoiCandidateInContext(candidate, context, currentProduct, spotName, detail.candidates)) {
           throw new Error(`POI「${candidate.poiName}」与第 ${day} 天原景点「${spotName}」的地域约束不匹配。`);
         }
@@ -189,6 +192,8 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
           province: cleanText(candidate.province) || null,
           city: cleanText(candidate.city) || null,
           district: cleanText(candidate.district) || null,
+          latitude: typeof candidate.latitude === "number" ? candidate.latitude : null,
+          longitude: typeof candidate.longitude === "number" ? candidate.longitude : null,
         };
         const next = structuredClone(current.product);
         const itinerary = next.itinerary as JsonObject[];

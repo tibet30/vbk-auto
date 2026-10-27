@@ -10,6 +10,7 @@ import { AutomationCancelledError } from "./automation.main.errors.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import { automationSession, recoverDraftPhase } from "./runtime/index.js";
 import { stampCompletedEntryPhase } from "../../application/product-entry-phase-fingerprint.js";
+import { SALE_CONTROL_CREATE_INTENT, SALE_CONTROL_CREATE_TRACKED } from "./automation.main.class/lifecycle.js";
 
 /** Complete entry and forward recovery share handlers, checkpoints and terminal transitions. */
 export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
@@ -25,13 +26,13 @@ export async function runAutomation(ctx: AutomationRunContext, localProductId: s
       initializeAutomationStartPhase(setup.run, productIdRef.current);
       setup.persist();
       if (!productIdRef.current) {
-        setup.log("正在创建 VBK 产品草稿…");
+        setup.log(SALE_CONTROL_CREATE_TRACKED);
         productIdRef.current = await ctx.runVbkPageExclusive(async () => {
           assertActive();
           return configureProductShellApi(setup.page, setup.product, createdId => {
             ctx.db.setProductId(localProductId, createdId);
             setup.log(`携程已返回产品壳 ID：${createdId}，正在核验销售控制。`);
-          });
+          }, () => setup.log(SALE_CONTROL_CREATE_INTENT));
         }, "saleControl");
         ctx.db.setProductId(localProductId, productIdRef.current);
         ctx.browser.addPinnedProductId?.(productIdRef.current);

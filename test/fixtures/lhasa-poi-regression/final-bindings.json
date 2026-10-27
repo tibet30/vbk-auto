@@ -1,0 +1,290 @@
+[
+  {
+    "day": 1,
+    "name": "羊卓雍措",
+    "poiName": "羊卓雍错",
+    "poiId": 82105,
+    "province": "西藏",
+    "city": "山南",
+    "district": "浪卡子"
+  },
+  {
+    "day": 1,
+    "name": "普莫雍措",
+    "poiName": "普莫雍错",
+    "poiId": 94904,
+    "province": "西藏",
+    "city": "山南",
+    "district": "浪卡子"
+  },
+  {
+    "day": 1,
+    "name": "卡若拉冰川",
+    "poiName": "卡若拉冰川",
+    "poiId": 91485,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "江孜"
+  },
+  {
+    "day": 1,
+    "name": "羊卓雍湖",
+    "poiName": "羊卓雍错",
+    "poiId": 82105,
+    "province": "西藏",
+    "city": "山南",
+    "district": "浪卡子"
+  },
+  {
+    "day": 2,
+    "name": "扎什伦布寺",
+    "poiName": "扎什伦布寺",
+    "poiId": 76348,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "日喀则"
+  },
+  {
+    "day": 2,
+    "name": "萨迦寺",
+    "poiName": "萨迦寺",
+    "poiId": 76351,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "萨迦"
+  },
+  {
+    "day": 2,
+    "name": "十万个沙丘",
+    "poiName": "定结县十万个沙丘",
+    "poiId": 149690264,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "定结"
+  },
+  {
+    "day": 2,
+    "name": "珠峰",
+    "poiName": "珠峰景区",
+    "poiId": 88954632,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "定日"
+  },
+  {
+    "day": 2,
+    "name": "洛子峰",
+    "poiName": "洛子I峰",
+    "poiId": 85087,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "定日"
+  },
+  {
+    "day": 2,
+    "name": "珠峰绒布冰川遗迹",
+    "poiName": "绒布冰川",
+    "poiId": 76353,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "定日"
+  },
+  {
+    "day": 3,
+    "name": "佩枯措",
+    "poiName": "佩枯错",
+    "poiId": 85085,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "吉隆"
+  },
+  {
+    "day": 3,
+    "name": "珠穆朗玛峰风景区",
+    "poiName": "珠穆朗玛峰",
+    "poiId": 76352,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "定日"
+  },
+  {
+    "day": 3,
+    "name": "希夏邦马",
+    "poiName": "希夏邦马峰",
+    "poiId": 85090,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "聂拉木"
+  },
+  {
+    "day": 4,
+    "name": "仲巴五彩沙漠",
+    "poiName": "仲巴县五彩沙漠",
+    "poiId": 23423947,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "仲巴"
+  },
+  {
+    "day": 4,
+    "name": "公珠措",
+    "poiName": "公珠错",
+    "poiId": 91992,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 4,
+    "name": "冈仁波齐",
+    "poiName": "冈仁波齐",
+    "poiId": 10758151,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 4,
+    "name": "玛旁雍措",
+    "poiName": "玛旁雍措",
+    "poiId": 78548,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 4,
+    "name": "拉昂措",
+    "poiName": "拉昂错",
+    "poiId": 85599,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 4,
+    "name": "马泉河湿地",
+    "poiName": "马泉河湿地",
+    "poiId": 145595738,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "仲巴"
+  },
+  {
+    "day": 4,
+    "name": "冈仁波齐山体冰川遗迹",
+    "poiName": "冈仁波齐",
+    "poiId": 10758151,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 4,
+    "name": "纳木那尼峰",
+    "poiName": "纳木那尼峰",
+    "poiId": 85600,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 5,
+    "name": "远眺冈仁波齐",
+    "poiName": "冈仁波齐",
+    "poiId": 10758151,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 5,
+    "name": "扎达土林",
+    "poiName": "札达土林国家地质公园‌",
+    "poiId": 76422,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "札达"
+  },
+  {
+    "day": 5,
+    "name": "古格王朝",
+    "poiName": "古格王国遗址",
+    "poiId": 10758152,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "札达"
+  },
+  {
+    "day": 5,
+    "name": "托林寺",
+    "poiName": "托林寺",
+    "poiId": 78551,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "札达"
+  },
+  {
+    "day": 6,
+    "name": "冈仁波齐",
+    "poiName": "冈仁波齐",
+    "poiId": 10758151,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 6,
+    "name": "玛旁雍措",
+    "poiName": "玛旁雍措",
+    "poiId": 78548,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 6,
+    "name": "拉昂措",
+    "poiName": "拉昂错",
+    "poiId": 85599,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 6,
+    "name": "公珠措",
+    "poiName": "公珠错",
+    "poiId": 91992,
+    "province": "西藏",
+    "city": "阿里",
+    "district": "普兰"
+  },
+  {
+    "day": 6,
+    "name": "五彩沙丘",
+    "poiName": "仲巴县五彩沙漠",
+    "poiId": 23423947,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "仲巴"
+  },
+  {
+    "day": 7,
+    "name": "达格架喷泉",
+    "poiName": "达格架喷泉",
+    "poiId": 56809413,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "昂仁"
+  },
+  {
+    "day": 7,
+    "name": "浪措湖",
+    "poiName": "浪措湖",
+    "poiId": 156482624,
+    "province": "西藏",
+    "city": "日喀则",
+    "district": "昂仁"
+  }
+]

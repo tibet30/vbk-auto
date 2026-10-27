@@ -18,6 +18,19 @@ export interface ProductMenu {
   enabled: "T" | "F";
 }
 
+/**
+ * 自由行产品的行程菜单在平台上叫「推荐玩法」（dailyRecommendTour），页面仍是
+ * TourDays；写入接口与行程保存一致。回读时统一归一成 TourDays，避免产品形态
+ * 差异让整个向导边界判定失效。
+ */
+const MENU_KEY_ALIASES: Record<string, string> = { dailyRecommendTour: "TourDays" };
+
+export function normaliseProductMenuKeys(menus: ProductMenu[]): ProductMenu[] {
+  return menus.map(menu => menu?.key && MENU_KEY_ALIASES[menu.key]
+    ? { ...menu, key: MENU_KEY_ALIASES[menu.key]! }
+    : menu);
+}
+
 export type ProductWizardRecoveryPhase = typeof PRODUCT_WIZARD_RECOVERY_STEPS[number]["phase"];
 
 export type ProductMenuRecoveryEvidence = {
@@ -127,7 +140,7 @@ async function readProductMenusOnce(page: TrafficLinePage, productId: string) {
   if (result.hasPermission !== true) throw new Error("VBK 菜单回读未确认当前产品权限");
   if (!Number.isFinite(result.maxStep)) throw new Error("VBK 菜单回读缺少有效 maxStep");
   if (!Array.isArray(result.menus)) throw new Error("VBK 菜单回读缺少 menus");
-  const menus = result.menus as ProductMenu[];
+  const menus = normaliseProductMenuKeys(result.menus as ProductMenu[]);
   const expectedProductId = String(Number(productId));
   if (menus.length < PRODUCT_MENU_KEYS.length) {
     const keys = menus.slice(0, 16).map(menu => String(menu?.key ?? "未知").replace(/[^a-zA-Z0-9_-]/g, "?").slice(0, 40));

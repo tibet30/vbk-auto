@@ -7,7 +7,6 @@ import { writeAutomationProduct } from "./automation.main.persist.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { finalizeRunWithScreenshot } from "./automation.main.run.finalize.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
-import { hasProductLineResolutionFailure } from "../ctrip/basic-info/api.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
 import { resolveRunStatusAfterSinglePhaseSuccess, settleRunAfterVerifiedPreflight } from "./automation.main.run-one-state.js";
 import { inspectManualCoverAsset } from "../manual-cover-asset.js";
@@ -48,7 +47,6 @@ export async function runOnePhase(ctx: AutomationRunContext, localProductId: str
   try {
     const basicState = { productDetail: product, product: productData, run, page, ...session, ...account,
       scenicSpotLogs: [] as string[], basicInfoSaved,
-      productLineBlocked: hasProductLineResolutionFailure(product.automation.recovery?.phases.basic),
       wizardAdvanceOnly: new Set<string>() };
     const fillMap = buildFillMap({ ctx, localProductId, productDetail: product, page,
       productData, productId: product.productId, run, ...session });

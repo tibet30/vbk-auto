@@ -27,6 +27,9 @@ export type ManualReviewFieldInput =
     province?: string | null;
     city?: string | null;
     district?: string | null;
+    /** 主进程按平台当前返回重建，不采信 renderer 回传。 */
+    latitude?: number | null;
+    longitude?: number | null;
   }
   /** 手动切换有序行程条目的业务类型；切到非景点时必须清空既有 POI。 */
   | { field: "itinerarySpotKind"; dayIndex: number; spotIndex: number; kind: ItineraryActivityKind; description?: string }

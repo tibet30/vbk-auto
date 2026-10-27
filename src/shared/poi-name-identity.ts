@@ -10,7 +10,7 @@ export function normalisePoiIdentityName(value: string): string {
 export function isCombinedPoiPlaceName(name: string): boolean {
   const baseName = name.trim().replace(/[（(][^（）()]*[）)]/gu, "")
     .replace(/([0-9一二三四五六七八九十])·(?=[0-9一二三四五六七八九十])/gu, "$1");
-  if (/[·、,，/]/u.test(baseName)) return true;
+  if (/[·、,，/&＆+＋]/u.test(baseName)) return true;
 
   const connector = /^(?<left>[\u3400-\u9fff]{1,24})(?:和|与|及|暨)(?<right>[\u3400-\u9fff]{1,24})$/u.exec(baseName);
   if (!connector?.groups) return false;

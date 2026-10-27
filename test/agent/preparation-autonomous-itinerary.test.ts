@@ -274,7 +274,7 @@ test("隔离 SQLite 经结构、POI、酒店三节点写回后重启仍可读", 
     assert.equal(reloaded.product.basicInfo?.meetingCity, "潮州");
     assert.equal(reloaded.product.basicInfo?.destinationCity, "潮州");
     assert.equal(reloaded.product.basicInfo?.days, 2);
-    assert.deepEqual(reloaded.product.itinerary?.map((day) => day.title), ["潮州古城", "南澳海岸"]);
+    assert.deepEqual(reloaded.product.itinerary?.map((day) => day.title), ["【出发地-潮州】潮州古城", "南澳海岸"]);
     assert.equal(reloaded.product.itinerary?.[0]?.hotelCandidates, undefined);
     assert.equal(reloaded.product.itinerary?.[0]?.hotelCity, "潮州");
     assert.deepEqual((reloaded.product.operations as any).hotelRules, { autoMatch: true, grades: [3, 4, 5] });

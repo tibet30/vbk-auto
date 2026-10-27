@@ -15,7 +15,7 @@ test('bare route administrative node is preserved in transport, verified named P
   p.product.itinerary=[{day:1,spots:[]},{day:2,description:'测试停留后去张良庙，返回西安送机',spots:[{name:'测试',kind:'attraction',poiId:null,poiName:null},{name:'张良庙',kind:'attraction',poiId:2,poiName:'张良庙'}]}] as any;
   let calls=0;
   const result=await normaliseNumberedRouteAdministrativeNodes(p,{nativeOnly:true,vbkSessionFetch:async()=>{calls++;return {status:200,payload:{ResponseStatus:{Ack:'Success'},districts:[district]}};}} as any);
-  assert.equal(calls,1);assert.deepEqual(result?.converted,[{day:2,name:'测试',districtId:1}]);
+  assert.equal(calls,2);assert.deepEqual(result?.converted,[{day:2,name:'测试',districtId:1}]);
   assert.deepEqual(result?.itinerary[1].spots.map((s:any)=>s.name),['张良庙']);
   assert.match(result?.itinerary[1].activities[0].detail,/测试停留/);
   assert.equal((p.product.itinerary as any)[1].spots.length,2,'source is untouched until controlled persistence');

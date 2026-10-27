@@ -40,6 +40,10 @@ export type {
 export type {
   ProductSummary,
   CreateProductInput,
+  ProductIdeaOptimizationRequest,
+  ProductIdeaOptimizationChange,
+  ProductIdeaOptimizationResult,
+  ProductIdeaOptimizationReceipt,
   ProductReadiness,
   ProductDetail,
 } from "./contracts-types/product.js";

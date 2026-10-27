@@ -55,6 +55,7 @@ const api: VbkApi = {
     resume: (id, mode) => ipcRenderer.invoke("workflowTasks:resume", id, mode),
   },
   ai: {
+    optimizeProductIdea: (input) => ipcRenderer.invoke("ai:optimizeProductIdea", input),
     send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),
     cancel: (localProductId) => ipcRenderer.invoke("ai:cancel", localProductId),
     regenerate: (localProductId, field) => ipcRenderer.invoke("ai:regenerate", localProductId, field),
@@ -62,6 +63,7 @@ const api: VbkApi = {
   research: {
     accept: (localProductId, taskId, evidenceId) => ipcRenderer.invoke("research:accept", localProductId, taskId, evidenceId),
     refreshIssues: (localProductId) => ipcRenderer.invoke("research:refreshIssues", localProductId),
+    removePoiIssue: (localProductId, target) => ipcRenderer.invoke("research:removePoiIssue", localProductId, target),
     resolveVehicleResource: (localProductId, taskId) => ipcRenderer.invoke("research:vehicleResource", localProductId, taskId),
     resolveHotelResource: (localProductId, taskId) => ipcRenderer.invoke("research:hotelResource", localProductId, taskId),
   },

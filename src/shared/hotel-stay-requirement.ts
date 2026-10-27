@@ -1,6 +1,7 @@
 import { hotelDiamondFromTier } from "./hotel-tiers.js";
 import { hotelLocationFromHotelText, toWritableAdministrativeCityName } from "./region-overrides.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
+import { constraintUserIdea } from "./product-idea-optimization.js";
 
 export type HotelRatingType = "diamond" | "star" | "homestay";
 export type HotelStayRequirement = {
@@ -17,7 +18,7 @@ const object = (value: unknown): Json => value && typeof value === "object" && !
 
 /** 用户逐日住宿地点优先于解析器选中的酒店名称，重试不能扩大到整个县。 */
 export function hotelStayRequirement(product: Json, day: Json): HotelStayRequirement | undefined {
-  const brief = text(object(product.basicInfo).userIdea);
+  const brief = constraintUserIdea(product.basicInfo);
   const line = originalDaySection(brief, Number(day.day));
   const segments = line?.replace(/^\s*(?:D|第)?\d+(?:天|日)?\s*[-、.:：\s]/iu, "").split(/-+|→|—|>/u) ?? [];
   const stay = [...segments].reverse().find(segment => /(?:宿|住|住宿)/u.test(segment) && !/不住|无住宿|无需住宿/u.test(segment));

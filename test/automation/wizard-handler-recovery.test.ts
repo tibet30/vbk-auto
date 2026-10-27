@@ -96,7 +96,6 @@ function executeRecoveryHandler(
     log: () => {},
     persist: () => {},
     basicInfoSaved: true,
-    productLineBlocked: false,
     scenicSpotLogs: [],
     wizardAdvanceOnly: new Set([phase]),
   } as any;

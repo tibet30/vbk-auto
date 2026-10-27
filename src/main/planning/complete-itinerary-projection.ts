@@ -5,15 +5,25 @@ import { classifyItineraryInputMode, explicitAlternativeGroups, itineraryInputCo
 import { itineraryStructureError } from "./itinerary-structure.js";
 import { projectDatedRoute } from "./dated-route-projection.js";
 import { selfRepairItineraryForVbk } from "./itinerary-self-repair.js";
-import { isIndependentItineraryExperience } from '../../shared/independent-itinerary-experience.js';
+import { daySection, daySections } from "./day-sections.js";
+import {
+  boundaryAnchors,
+  isBoundaryAnchor,
+  isRouteArrivalNode,
+  projectedSpotKind,
+  routeHeads,
+  splitProjectedSpots,
+} from "./itinerary-spot-projection.js";
+import { parseProductBriefMessage } from '../../shared/product-brief-message.js';
+import { isPersistedRouteTravelNode } from '../../shared/itinerary-route-travel-node.js';
+import { isItineraryTransferName } from '../../shared/itinerary-transfer-name.js';
+import { normaliseItinerarySupport, supportArrangementType } from '../../shared/itinerary-support-arrangements.js';
+import { isProductAdministrativeRouteName } from '../../shared/product-administrative-route-name.js';
 import { toPlatformShortLocationName } from '../../shared/location-short-name.js';
+import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 
 type JsonObject = Record<string, unknown>;
 type LockedDay = { day: number; spots: string[]; unorderedSpots?: string[] };
-const DAY_TOKEN: Record<string, number> = {
-  "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
-  一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
-};
 
 /**
  * Complete, day-by-day customer routes are source data, not a prompt for a
@@ -29,7 +39,7 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
   const basic = record(product.product.basicInfo);
   const days = positiveInteger(basic?.days);
   if (!days) return undefined;
-  if (hasUnmergedRequirement(product) || hasUnsupportedService(product)) return undefined;
+  if (hasUnmergedRequirement(product)) return undefined;
 
   const locked = extractLockedConstraints(product, userMessages(product));
   if (classifyItineraryInputMode(locked, days, product.planning?.userIntent) !== "complete") return undefined;
@@ -43,15 +53,19 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
   const alternativeGroups = explicitAlternativeGroups(product);
   const expandedOrder = expandAlternativeGroups(order, alternativeGroups);
   if (!expandedOrder || expandedOrder.some((row) => row.spots.every(isTravelService))) return undefined;
+  const heads = routeHeads(originalDaySections(product));
+  const anchors = boundaryAnchors(expandedOrder, heads);
   const projected = expandedOrder.map((row) => projectDay({
     row,
+    product: product.product as JsonObject,
     days,
     nights: positiveInteger(basic?.nights) ?? 0,
     fallbackStay: text(basic?.meetingCity) || text(basic?.destinationCity),
     rawDayText: rawDayText(product, row.day),
     alternativeGroups,
+    anchors: anchors.get(row.day) ?? new Set<string>(),
   }));
-  const itinerary = selfRepairItineraryForVbk(projected, positiveInteger(basic?.nights) ?? 0,
+  const itinerary = selfRepairItineraryForVbk(projected.map(normaliseItinerarySupport), positiveInteger(basic?.nights) ?? 0,
     product.product as JsonObject).itinerary;
   if (itineraryStructureError({ ...product.product, itinerary }) || itineraryInputContractError(product, itinerary)) return undefined;
   return {
@@ -62,42 +76,66 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
 
 function projectDay(args: {
   row: LockedDay;
+  product: JsonObject;
   days: number;
   nights: number;
   fallbackStay: string;
   rawDayText: string;
   alternativeGroups: Array<{ day: number; names: string[] }>;
+  anchors: ReadonlySet<string>;
 }): JsonObject {
   const travelServices = serviceNotes(args.rawDayText, args.row.spots);
-  const attractions = [...args.row.spots, ...(args.row.unorderedSpots ?? [])].filter((name) => !isTravelService(name));
+  const routeNames = [...args.row.spots, ...(args.row.unorderedSpots ?? [])];
+  // 行政落脚点（「重庆万州」）、接送/住宿服务名（「返程」「万州送站」）与
+  // 相邻天共享的起终点（「延吉」「哈尔滨」）没有可绑定 POI，不能投影成景点。
+  const placeNames = routeNames.filter((name) => !isTravelService(name)
+    && !isProductAdministrativeRouteName(args.product, name)
+    && supportArrangementType({ name }) === undefined
+    && !isItineraryTransferName(name)
+    && !isRouteArrivalNode(name)
+    && !isBoundaryAnchor(name, args.anchors));
+  // `长白山北景区&天池` 是一个复合路线节点，不是单个 POI；拆开后才可核验。
+  const entries = [...new Map(placeNames.flatMap((sourceName) => splitProjectedSpots(sourceName)
+    .map((name) => [name.replace(/\s+/gu, ""), { name, sourceName }] as const))).values()];
   const groups = args.alternativeGroups.filter((group) => group.day === args.row.day);
-  const title = formatAttractionSequence(attractions, groups, " · ");
+  const candidates = entries.map((entry) => entry.name);
+  const title = formatAttractionSequence(candidates, groups, " · ") || placeNames.join(" · ") || args.rawDayText.trim();
+  const routeDay = { day: args.row.day, title };
+  const departures = candidates.filter(name => isPersistedRouteTravelNode(args.product, routeDay, name));
+  const kept = entries.filter((entry) => !departures.includes(entry.name));
+  const attractions = kept.map((entry) => entry.name);
   const description = formatAttractionSequence(attractions, groups, "、");
   const sourceNotes = parentheticalNotes(args.rawDayText);
-  const spots = attractions.map((name, index) => ({
-    name,
-    kind: isIndependentItineraryExperience(name) ? "other" : "attraction",
+  const spots = kept.map((entry, index) => ({
+    name: entry.name,
+    kind: projectedSpotKind(entry.name),
     poiName: null,
     poiId: null,
-    timeOfDay: timeFor(index, attractions.length, groups, name),
-    relation: groups.some((group) => group.names.some((candidate) => samePlace(candidate, name))) ? "or" : "and",
+    timeOfDay: timeFor(index, kept.length, groups, entry.name),
+    relation: groups.some((group) => group.names.some((candidate) =>
+      samePlace(candidate, entry.name) || samePlace(candidate, entry.sourceName))) ? "or" : "and",
   }));
   const stay = stayForDay(args);
+  const stayCity = stay ? writableStayCity(stay, args.rawDayText) : undefined;
   const overnight = args.row.day <= args.nights;
   return {
     day: args.row.day,
     title,
     spots,
     description: [
-      `按用户原定顺序安排：${description}。`,
+      ...(attractions.length ? [`按用户原定顺序安排：${description}。`]
+        : [`当日为行政落脚与接送安排，无可绑定 POI 的景点：${placeNames.join("、") || args.rawDayText.trim()}。`]),
       ...(sourceNotes.length ? [`原始补充：${sourceNotes.join("、")}。`] : []),
       ...travelServices,
+      `原始逐日安排：${args.rawDayText.trim()}。`,
       overnight ? stay ? `当晚按原路线住${stay}，使用平台自动匹配酒店。`
         : "当晚沿原路线安排平台酒店，住宿行政城市待资源核验。" : "当日返程，不安排住宿。",
     ].join(""),
     hotel: overnight ? stay ? `${stay}（待匹配）` : "使用携程平台酒店，自动匹配三钻、四钻、五钻酒店" : "无",
+    ...(stayCity ? { hotelCity: stayCity } : {}),
     meals: "自理",
-    ...(travelServices.length || attractions.every(name => toPlatformShortLocationName(name) === args.fallbackStay)
+    ...(departures.length || travelServices.length || !attractions.length
+      || attractions.every(name => toPlatformShortLocationName(name) === args.fallbackStay)
       ? { activities: [{ time: '不限', type: 'transport', title: args.rawDayText.trim(), detail: args.rawDayText.trim() }] }
       : {}),
   };
@@ -148,9 +186,26 @@ function stayForDay(args: { row: LockedDay; nights: number; fallbackStay: string
   if (args.row.day > args.nights) return undefined;
   const parenthesized = args.rawDayText.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim();
   const explicit = parenthesized
-    || args.rawDayText.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n]{2,30})/u)?.[1]?.trim();
+    || args.rawDayText.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n（(→]{2,30})/u)?.[1]?.trim();
   const endpoint = args.row.spots.at(-1);
-  return explicit || (endpoint && toPlatformShortLocationName(endpoint) === args.fallbackStay ? args.fallbackStay : undefined);
+  const generic = /^(?:(?:市区|当地|平台|精品|舒适|特色)?(?:酒店|宾馆|民宿|客栈)|住宿)$/u;
+  return (explicit && !generic.test(explicit) ? explicit : undefined) || (endpoint && toPlatformShortLocationName(endpoint) === args.fallbackStay ? args.fallbackStay : undefined);
+}
+
+/**
+ * 投影出的住宿落点直接补上 hotelCity，避免下游按酒店文案猜城市时丢掉跨城
+ * 住宿城市（「云阳」「奉节」没有市县尾缀，解析器无法从占位文案还原）。
+ * 「住巫山或者万州」在本地只落第一个明确城市，原始二选一仍保留在描述与
+ * 原始逐日安排里，由运营在确认前决定。
+ */
+function writableStayCity(stay: string, rawDayText: string): string | undefined {
+  const first = stay.split(/(?:或者|或|\/|／)/u)[0]?.trim()
+    .replace(/(?:温泉)?(?:酒店|宾馆|民宿|客栈|住宿)$/u, "")
+    .replace(/(?:附近|周边|当地)$/u, "") ?? "";
+  const city = toPlatformShortLocationName(first);
+  if (!city || !rawDayText.includes(first)) return undefined;
+  if (/(?:镇|村|乡|景区|风景区|片区|园区|街区|社区|古城|古镇)$/u.test(city)) return undefined;
+  return city;
 }
 
 function parentheticalNotes(raw: string): string[] {
@@ -159,9 +214,18 @@ function parentheticalNotes(raw: string): string[] {
     .filter((note) => note.length > 0 && !/^宿\s*/u.test(note) && note !== "二选一");
 }
 
+function originalDaySections(product: ProductDetail): ReturnType<typeof daySections> {
+  const sources = [constraintUserIdea(product.product.basicInfo),
+    ...userMessages(product).map((message) => messagePlainText(message.content))].filter(Boolean);
+  const merged = new Map<number, ReturnType<typeof daySections>[number]>();
+  for (const source of sources) for (const section of daySections(source)) merged.set(section.day, section);
+  return [...merged.values()].sort((left, right) => left.day - right.day);
+}
+
 function rawDayText(product: ProductDetail, day: number): string {
-  const sections = [text(record(product.product.basicInfo)?.userIdea), ...userMessages(product).map((message) => message.content)]
+  const sections = [constraintUserIdea(product.product.basicInfo), ...userMessages(product).map((message) => messagePlainText(message.content))]
     .map((value) => daySection(value, day))
+    .map((value) => value.replace(/^[:：、，,\s]+/u, "").trim())
     .filter(Boolean);
   // A later day-specific correction replaces that day's old operational text.
   // Combining them can preserve two contradictory accommodation instructions.
@@ -195,24 +259,6 @@ function messageRestatesOriginalBrief(content: string, original: string): boolea
   }
 }
 
-/** The compact projector records only the train services it can preserve in a
- * description. Other service forms retain their established model handling. */
-function hasUnsupportedService(product: ProductDetail): boolean {
-  return [text(record(product.product.basicInfo)?.userIdea), ...userMessages(product).map((message) => message.content)]
-    .some((value) => /(?:接机|送机|接团|送团)/u.test(value));
-}
-
-function daySection(value: string, day: number): string {
-  value = value.replace(/\\[nr]/gu, '\n');
-  const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*天?|第\s*([0-9一二三四五六七八九十]+)\s*天)/giu;
-  const matches = [...value.matchAll(marker)];
-  const index = matches.findIndex((match) => DAY_TOKEN[match[1] ?? match[2] ?? ""] === day);
-  if (index < 0) return "";
-  const current = matches[index]!;
-  const start = (current.index ?? 0) + current[0].length;
-  return value.slice(start, matches[index + 1]?.index ?? value.length);
-}
-
 function serviceNotes(raw: string, spots: string[]): string[] {
   const notes: string[] = [];
   if (/(?:接火车|火车站接|接站)/u.test(raw) || spots.some((name) => /(?:接火车|火车站接|接站)/u.test(name))) notes.push("含火车站接站服务。");
@@ -220,6 +266,7 @@ function serviceNotes(raw: string, spots: string[]): string[] {
   const namedServices = raw.split(/[-—–→，,。；;\n]/u).map(value => value.trim())
     .filter(value => /^[\p{Script=Han}]{2,10}(?:接站|送站|接机|送机|接团|送团)$/u.test(value));
   if (namedServices.length) notes.push(`保留原始接送地点：${namedServices.join('、')}。`);
+  if (/(?:接机|送机|接团|送团|集合|解散)/u.test(raw)) notes.push(`接送与集合安排按原文执行：${raw.trim()}。`);
   return notes;
 }
 
@@ -242,7 +289,7 @@ function formatAttractionSequence(
 }
 
 function isTravelService(name: string): boolean {
-  return /^(?:[\p{Script=Han}]{2,10})?(?:接火车站?|火车站接|送火车站?|接站|送站|接机|送机|接团|送团)(?:返程)?$/u.test(name.trim());
+  return isItineraryTransferName(name);
 }
 
 function timeFor(index: number, length: number, groups: Array<{ names: string[] }>, name: string): "morning" | "afternoon" {
@@ -253,6 +300,11 @@ function timeFor(index: number, length: number, groups: Array<{ names: string[] 
     return firstIndex < Math.ceil(length / 2) ? "morning" : "afternoon";
   }
   return index < Math.ceil(length / 2) ? "morning" : "afternoon";
+}
+
+/** 创建产品的 product_brief 消息是 JSON 副本；逐日切分必须用其中的 userIdea。 */
+function messagePlainText(content: string): string {
+  return parseProductBriefMessage(content)?.userIdea?.trim() || content;
 }
 
 function userMessages(product: ProductDetail): Array<{ role: string; content: string }> {

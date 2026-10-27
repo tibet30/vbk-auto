@@ -11,13 +11,16 @@
  * 默认展开、可滚动；视觉密度对齐「每日行程」section。
  */
 
-import { ChevronDown, ListChecks, LoaderCircle, RefreshCw } from "lucide-react";
-import type { ProductReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
+import { useState } from "react";
+import { ChevronDown, ListChecks, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
+import type { ProductDetail, ProductReadiness, ResearchTask } from "../../../../shared/contracts-types.js";
 import shared from "../shared.module.less";
 import styles from "./review-summary-issues.module.less";
 import { buildOpenIssueRows } from "./review-summary-open-issues.helpers.js";
+import type { PoiIssueDeleteTarget } from "../../../../shared/poi-issue-delete.js";
 
 export interface ReviewSummaryOpenIssuesProps {
+  product: ProductDetail;
   readiness: ProductReadiness;
   taskList: ResearchTask[];
   setComposerInput?: (value: string) => void;
@@ -30,6 +33,8 @@ export interface ReviewSummaryOpenIssuesProps {
   refreshing: boolean;
   onRefresh: () => void;
   hotelStateRefreshNeeded?: boolean;
+  /** 删除 POI 待处理项，并同步从每日行程移除对应景点。 */
+  onDeletePoiIssue: (target: PoiIssueDeleteTarget, name: string) => Promise<void>;
 }
 
 function sendToComposer(setComposerInput: ((value: string) => void) | undefined, fallback: (value: string) => void, content: string) {
@@ -38,6 +43,7 @@ function sendToComposer(setComposerInput: ((value: string) => void) | undefined,
 }
 
 export function AppWorkspaceReviewSummaryOpenIssues({
+  product,
   readiness,
   taskList,
   setComposerInput,
@@ -48,8 +54,10 @@ export function AppWorkspaceReviewSummaryOpenIssues({
   refreshing,
   onRefresh,
   hotelStateRefreshNeeded = false,
+  onDeletePoiIssue,
 }: ReviewSummaryOpenIssuesProps) {
-  const rows = buildOpenIssueRows(readiness, taskList);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const rows = buildOpenIssueRows(readiness, taskList, product);
   if (rows.length === 0 && !hotelStateRefreshNeeded) return null;
 
   const total = rows.length;
@@ -117,6 +125,36 @@ export function AppWorkspaceReviewSummaryOpenIssues({
                       );
                     }}
                   >{issue.taskId ? "手动确认" : "处理"}</button>
+                  {issue.poiDeleteTarget && (
+                    <button
+                      type="button"
+                      className={`${shared.btn} ${shared.btnSm} ${styles.itemDeleteBtn}`}
+                      data-variant="danger"
+                      aria-label={`删除 POI：${issue.poiName ?? issue.label}`}
+                      title="删除该 POI，并从每日行程中移除"
+                      disabled={deletingKey !== null}
+                      onClick={async (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (deletingKey !== null) return;
+                        const name = issue.poiName ?? issue.label;
+                        if (!window.confirm(`删除「${name}」？待处理事项会同步关闭，每日行程中的该 POI 也会被移除。`)) return;
+                        const key = `${issue.label}-${index}`;
+                        setDeletingKey(key);
+                        try {
+                          await onDeletePoiIssue(issue.poiDeleteTarget!, name);
+                        } catch {
+                          // 父级 action 已把失败原因写入 notice，这里只负责复位按钮。
+                        } finally {
+                          setDeletingKey(null);
+                        }
+                      }}
+                    >
+                      {deletingKey === `${issue.label}-${index}`
+                        ? <LoaderCircle size={13} aria-hidden="true" />
+                        : <Trash2 size={13} aria-hidden="true" />}
+                    </button>
+                  )}
                 </span>
               </li>
             ))}

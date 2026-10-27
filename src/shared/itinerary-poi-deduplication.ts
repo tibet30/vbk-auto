@@ -6,18 +6,19 @@ type Json = Record<string, unknown>;
 
 type SeenSpot = {
   index: number;
+  name: string;
+  timeOfDay: unknown;
   poiId: number | null;
   poiNameKeys: string[];
   hasProviderIdentity: boolean;
 };
 
 /**
- * Collapse duplicate POI slots within one day after provider resolution.
+ * Collapse repeated copies of the same named visit after provider resolution.
  *
- * The first route position is authoritative. Its label is also retained unless
- * it is merely an administrative waypoint and a later duplicate carries the
- * actual attraction label. Different provider IDs, different days, and
- * explicit OR alternatives remain separate.
+ * A provider ID never authorises merging distinct original names. Different
+ * route labels, visit periods, provider IDs, days and explicit OR alternatives
+ * remain separate, so their individual verification tasks retain a real slot.
  */
 export function dedupeSameDayItinerarySpots(spots: readonly unknown[]): unknown[] {
   const result: unknown[] = [];
@@ -74,6 +75,8 @@ export function dedupeProductItineraryPois<T extends Json>(product: T): T {
 }
 
 function sameIdentity(left: Omit<SeenSpot, "index">, right: Omit<SeenSpot, "index">): boolean {
+  // Provider identity does not authorise deleting a distinct original route label or visit.
+  if (left.name !== right.name || left.timeOfDay !== right.timeOfDay) return false;
   if (left.poiId && right.poiId) return left.poiId === right.poiId;
   return left.poiNameKeys.some((leftName) => right.poiNameKeys.some((rightName) =>
     leftName === rightName || ((left.hasProviderIdentity && right.hasProviderIdentity)
@@ -83,6 +86,9 @@ function sameIdentity(left: Omit<SeenSpot, "index">, right: Omit<SeenSpot, "inde
 function spotIdentity(spot: Json): Omit<SeenSpot, "index"> {
   const providerName = poiNameKey(spot.poiName);
   return {
+    // Unlike provider identity, an original visit label includes its notes/actions.
+    name: typeof spot.name === 'string' ? spot.name.replace(/\s+/gu, '').trim() : '',
+    timeOfDay: spot.timeOfDay,
     poiId: positiveInteger(spot.poiId),
     poiNameKeys: [providerName, poiNameKey(spot.name)].filter(Boolean),
     hasProviderIdentity: Boolean(providerName || positiveInteger(spot.poiId)),

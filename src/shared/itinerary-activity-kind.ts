@@ -51,7 +51,8 @@ export function normaliseItinerarySpotKind<T extends ItinerarySpotLike>(spot: T)
   return { ...spot, kind, poiId: Number.isInteger(spot.poiId) && Number(spot.poiId) > 0 ? Number(spot.poiId) : null, poiName: text(spot.poiName) || null };
 }
 
-function namedPoiPrefix(title: string): string | undefined {
+export function namedPoiPrefix(title: string): string | undefined {
+  if (PLACE_SUFFIX.test(title.trim())) return title.trim();
   const prefix = title.replace(/^(?:游览|参观|打卡|前往|去|到)\s*/u, "")
     .split(/[【\[]/, 1)[0]
     .replace(/(?:自由活动|体验|手作|制作|课程|休息|用餐|入住|接送|乘车|集合|离开|返程).*$/u, "")

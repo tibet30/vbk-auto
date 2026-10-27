@@ -13,6 +13,7 @@ import { normaliseHotelTier } from "../../../shared/hotel-tiers.js";
 import { normaliseTrafficLineConfig } from "../../../shared/contracts-traffic-line.js";
 import { normaliseCommercialInventory, normaliseCommercialPricing, normaliseCommercialRelease } from "./commercial.js";
 import { normaliseItinerary } from "./itinerary.js";
+import { normaliseItineraryArrivalTitle } from "../../../shared/itinerary-arrival-title.js";
 import { normalisePresentation } from "./presentation.js";
 import { positiveIntegerValue, positiveNumberValue, textValue } from "./helpers.js";
 import { normaliseReturnDayLodging } from "../../../shared/itinerary-hotel.js";
@@ -88,7 +89,7 @@ export function normaliseProductDraft(product: Record<string, unknown>, options?
     if (release) commercial.release = release; else delete commercial.release;
     if (Object.keys(commercial).length) result.commercial = commercial; else delete result.commercial;
   }
-  return result;
+  return normaliseItineraryArrivalTitle(result);
 }
 
 /** Repair persisted numeric strings without hiding malformed or out-of-range duration values. */

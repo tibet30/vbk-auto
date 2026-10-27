@@ -38,7 +38,7 @@ test("日喀则原行程的羊卓雍湖接受山南官方羊卓雍错并继续�
   assert.equal(isPlanningPoiCandidateInContext(candidate("羊卓雍错", "山南", "西藏"), context, {}, "羊卓雍湖"), false);
 });
 
-test("用户指定的冰川观察名只接受同省唯一同实体官方主 POI", async () => {
+test("用户指定名称只接受同省唯一同实体，独立冰川不能自动换成整座山峰", async () => {
   const context = { destinationCity: "拉萨", province: "西藏" };
   const cases = [
     ["羊卓雍措", "羊卓雍错", "山南"],
@@ -51,14 +51,16 @@ test("用户指定的冰川观察名只接受同省唯一同实体官方主 POI"
     const product = { basicInfo: { userIdea: `D1：${requested}`, province: "西藏" },
       itinerary: [{ day: 1, title: requested, spots: [{ name: requested }] }] };
     const only = candidate(official, city, "西藏", 10);
-    assert.equal(isPlanningPoiCandidateInContext(only, context, product, requested, [only]), true);
+    const isGlacierSubstitution = requested === '库拉岗日冰川' || requested === '希夏邦马峰冰川群';
+    assert.equal(isPlanningPoiCandidateInContext(only, context, product, requested, [only]), !isGlacierSubstitution);
     const result = await resolvePlanningPoiAutoSelection({
       localProductId: "identity-core", keyword: requested, product, context,
       detail: { httpStatus: 200, businessStatus: "Success", poiListCount: 1, best: null, candidates: [only] },
       checkAvailability: async () => ({ status: "available" }),
       disambiguate: async () => { throw new Error("同省唯一同实体不应交给模型重复消歧"); },
     });
-    assert.deepEqual(result.match, { poiName: official, poiId: 10, province: "西藏", city });
+    if (isGlacierSubstitution) assert.equal(result.match, undefined);
+    else assert.deepEqual(result.match, { poiName: official, poiId: 10, province: "西藏", city });
     assert.equal(isPlanningPoiCandidateInContext(candidate("藏北大草原", "那曲", "西藏", 11),
       context, product, requested, [only]), false);
   }

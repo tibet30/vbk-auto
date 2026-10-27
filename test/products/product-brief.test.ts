@@ -117,6 +117,45 @@ test("创建产品会保存用户初始想法，并限制为 1000 个字", async
   );
 });
 
+test("使用 AI 版本后只保存原版与 AI 版，后续始终读取 AI 版", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-optimized-idea-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  const product = db.createProduct({
+    destination: "太原", days: 2, productForm: "privateTour", userIdea: "亲子慢游晋祠，建议下午留休息时间。",
+    ideaOptimization: {
+      originalIdea: "带孩子去晋祠，慢一点。",
+      optimizedIdea: "亲子慢游晋祠，建议下午留休息时间。",
+      preservedItems: ["晋祠", "亲子", "慢节奏"],
+      changes: [{ before: "慢一点", after: "下午留休息时间", reason: "转成可执行安排" }],
+      recommendations: ["建议下午留休息时间"], warnings: [],
+      sourceFingerprint: "a".repeat(64), provider: "minimax", model: "MiniMax-M3",
+      optimizedAt: "2026-10-24T08:00:00.000Z",
+    },
+  });
+  const basic = product.product.basicInfo as Record<string, unknown>;
+  assert.equal(basic.userIdea, "亲子慢游晋祠，建议下午留休息时间。");
+  assert.deepEqual((basic.ideaOptimization as Record<string, unknown>).originalIdea, "带孩子去晋祠，慢一点。");
+  assert.equal((basic.ideaOptimization as Record<string, unknown>).finalIdea, undefined);
+  assert.equal((basic.ideaOptimization as Record<string, unknown>).humanEdited, undefined);
+  assert.equal((product.product.diagnostics as Record<string, Record<string, unknown>>).creationInput.userIdea, "亲子慢游晋祠，建议下午留休息时间。");
+});
+
+test("优化收据与最终想法不一致时拒绝创建", async (t) => {
+  const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-product-stale-optimized-idea-"));
+  t.after(() => fs.rm(dataPath, { recursive: true, force: true }));
+  const db = new VbkDatabase(dataPath);
+  assert.throws(() => db.createProduct({
+    destination: "太原", days: 2, productForm: "privateTour", userIdea: "当前想法",
+    ideaOptimization: {
+      originalIdea: "原文", optimizedIdea: "过期 AI 版本",
+      preservedItems: [], changes: [], recommendations: [], warnings: [],
+      sourceFingerprint: "b".repeat(64), provider: "minimax", model: "MiniMax-M3",
+      optimizedAt: "2026-10-24T08:00:00.000Z",
+    },
+  }), /AI 版本与当前用户想法不一致/);
+});
+
 test("读取旧产品时补齐空 vehicleResource", async (t) => {
   const dataPath = await fs.mkdtemp(path.join(os.tmpdir(), "vbk-vehicle-default-"));
   t.after(() => fs.rm(dataPath, { recursive: true, force: true }));

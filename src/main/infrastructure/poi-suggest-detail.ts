@@ -47,6 +47,8 @@ function toPoiSuggestCandidate(item: unknown, index: number): PoiSuggestCandidat
     city: location.city,
     district: location.district,
     address: stringValue(poi?.address),
+    latitude: finiteNumber(poi?.latitude),
+    longitude: finiteNumber(poi?.longitude),
     selectable: Boolean(poiName && poiId),
     textFields,
   };
@@ -127,6 +129,10 @@ function isSensitivePoiKey(key: string): boolean {
 function stringValue(value: unknown): string | null {
   const text = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
   return text || null;
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function positiveIntegerValue(value: unknown): number | undefined {

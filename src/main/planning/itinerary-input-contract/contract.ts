@@ -27,6 +27,9 @@ import {
   hasTrustedOperatorAlternativeDeletionOnAnyDay,
 } from "./alternative.js";
 import {
+  isNameSubsequence,
+  missingNames,
+  extraNames,
   asDayList,
   asRecord,
   hasTrustedOperatorNonPoiClassification,
@@ -40,10 +43,11 @@ import {
   text,
   userMessages,
 } from "./utils.js";
-import { poiResearchTaskNames } from "../../../shared/poi-research-tasks.js";
-import { isKnownPoiNameAlias } from "../../../shared/poi-name-aliases.js";
 import { classifyItineraryInputMode } from "./mode.js";
 import { isPersistedRouteTravelNode } from "../../../shared/itinerary-route-travel-node.js";
+import { originalOvernightRoute } from "../../../shared/original-itinerary-route.js";
+import { orderedItineraryRoutePath } from "../../../shared/itinerary-route-path.js";
+import { anchorKey, isLikelyAttractionAnchor, isRouteArrivalNode, splitProjectedSpots } from "../itinerary-spot-projection.js";
 
 export function itineraryInputContractError(product: ProductDetail, nextItinerary: unknown): string | undefined {
   const locked = extractLockedConstraints(product, userMessages(product));
@@ -70,16 +74,16 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
     const unorderedSpots = filterRequiredSpots(product, row.day, row.unorderedSpots ?? [], dayRecords.get(row.day));
     const allRequiredSpots = [...requiredSpots, ...unorderedSpots];
     if (mode === "complete") {
-      if (!isNameSubsequenceLocal(product, row.day, names, requiredSpots, dayRecords.get(row.day))) {
-        const missing = missingNamesLocal(product, row.day, names, requiredSpots, dayRecords.get(row.day));
+      if (!isNameSubsequence(names, requiredSpots)) {
+        const missing = missingNames(names, requiredSpots);
         if (missing.length) {
           return `用户已给出完整第 ${row.day} 天行程，禁止整体重排或替换；只能规范化并核验 POI。缺失：${missing.join("、")}`;
         }
         return `用户已给出完整第 ${row.day} 天行程，景点顺序不一致，禁止整体重排或替换；期望：${requiredSpots.join(" → ")}；实际：${names.join(" → ")}`;
       }
-      const missingHighlights = missingNamesLocal(product, row.day, names, unorderedSpots, dayRecords.get(row.day));
+      const missingHighlights = missingNames(names, unorderedSpots);
       if (missingHighlights.length) return `用户已给出完整第 ${row.day} 天行程，补充看点必须保留：${missingHighlights.join("、")}`;
-      const extras = extraNamesLocal(product, row.day, names, [...row.spots, ...(row.unorderedSpots ?? [])], dayRecords.get(row.day))
+      const extras = extraNames(names, [...row.spots, ...(row.unorderedSpots ?? [])])
         .filter((name) => !isDeletableAdministrativeLocation(product, name, row.day));
       if (extras.length) {
         return `用户已给出完整第 ${row.day} 天行程，不能新增或替换景点：${extras.join("、")}`;
@@ -108,7 +112,9 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
       .filter((poi) => !hasTrustedOperatorAlternativeDeletionOnAnyDay(product, poi))
       .filter((poi) => !allNames.some((name) => samePlace(name, poi)));
     if (missing.length) return `已锁定的指定 POI 必须保留：${missing.join("、")}`;
-    const disguised = locked.pois.filter(requiresLockedAttraction).find((poi) => !hasTrustedOperatorAlternativeDeletionOnAnyDay(product, poi)
+    const disguised = locked.pois
+      .filter((poi) => !isDeletableAdministrativeLocation(product, poi))
+      .filter(requiresLockedAttraction).find((poi) => !hasTrustedOperatorAlternativeDeletionOnAnyDay(product, poi)
       && !locked.itineraryOrder.some((row) => hasTrustedOperatorNonPoiClassification(product, row.day, poi))
       && itinerary.some((day) => (Array.isArray(day.spots) ? day.spots : []).filter(asRecord)
         .some((spot) => samePlace(spotName(spot), poi) && !requiresItineraryPoi(spot))));
@@ -119,85 +125,28 @@ export function itineraryInputContractError(product: ProductDetail, nextItinerar
 
 function filterRequiredSpots(product: ProductDetail, day: number, spots: string[], nextDay?: Record<string, unknown>): string[] {
   const sourceDay = nextDay ?? (asDayList(product.product.itinerary) ?? []).find((item) => Number(item.day) === day) ?? { day };
-  return spots.filter((spot) =>
+  const currentNames = nextDay ? spotNames(nextDay) : [];
+  const boundaries = nextDay ? originalRouteBoundaries(product, day) : new Set<string>();
+  return spots.flatMap(splitProjectedSpots).filter((spot) =>
     !isSupportingLockedSpot(product, day, spot, nextDay)
     && !isPersistedRouteTravelNode(product.product, sourceDay, spot)
     && !isDeletableAdministrativeLocation(product, spot, day)
     && !hasTrustedOperatorNonPoiClassification(product, day, spot)
-    && !hasTrustedOperatorAlternativeDeletion(product, day, spot));
+    && !hasTrustedOperatorAlternativeDeletion(product, day, spot)
+    // 投影会移除相邻天共享的起终点；它们不是景点，不能反过来要求行程保留。
+    && !(currentNames.length > 0 && !currentNames.some((name) => anchorKey(name) === anchorKey(spot))
+      && !isLikelyAttractionAnchor(spot)
+      && (boundaries.has(anchorKey(spot)) || isRouteArrivalNode(spot))));
 }
 
-function isNameSubsequenceLocal(
-  product: ProductDetail,
-  day: number,
-  haystack: string[],
-  needles: string[],
-  currentDay?: Record<string, unknown>,
-): boolean {
-  let index = 0;
-  for (const name of haystack) {
-    if (index < needles.length && currentMatchesLocked(product, day, name, needles[index]!, currentDay)) index += 1;
-  }
-  return index === needles.length;
-}
-function missingNamesLocal(
-  product: ProductDetail,
-  day: number,
-  haystack: string[],
-  needles: string[],
-  currentDay?: Record<string, unknown>,
-): string[] {
-  return needles.filter((needle) => !haystack.some((name) => currentMatchesLocked(product, day, name, needle, currentDay)));
-}
-function extraNamesLocal(
-  product: ProductDetail,
-  day: number,
-  haystack: string[],
-  needles: string[],
-  currentDay?: Record<string, unknown>,
-): string[] {
-  return haystack.filter((name) => !needles.some((needle) => currentMatchesLocked(product, day, name, needle, currentDay)));
-}
-
-function currentMatchesLocked(
-  product: ProductDetail,
-  day: number,
-  currentName: string,
-  lockedName: string,
-  currentDay?: Record<string, unknown>,
-): boolean {
-  if (samePlace(currentName, lockedName)) return true;
-  return (Array.isArray(currentDay?.spots) ? currentDay.spots : []).some((item) => {
-    const spot = asRecord(item);
-    if (!spot || !samePlace(spotName(spot), currentName) || !Number.isInteger(spot.poiId)) return false;
-    const poiId = String(spot.poiId);
-    const directEvidence = verifiedPoiIdForLockedName(product, day, lockedName) === poiId;
-    const verifiedAliasEvidence = isKnownPoiNameAlias(lockedName, text(spot.poiName))
-      && hasVerifiedPoiIdentityForDay(product, day, poiId);
-    return directEvidence || verifiedAliasEvidence;
-  });
-}
-
-function verifiedPoiIdForLockedName(product: ProductDetail, day: number, lockedName: string): string | undefined {
-  for (const task of product.researchTasks) {
-    if (task.state !== "confirmed"
-      || !poiResearchTaskNames(task.label, task.type).some((name) => samePlace(name, lockedName))) continue;
-    for (const evidence of task.evidence ?? []) {
-      if (!evidence.accepted) continue;
-      const match = evidence.title.match(/^\[itinerary-poi:verified\]\s*第(\d+)天\s+.+?\s+->\s+.+?\s+\((\d+)\)$/u);
-      if (match && Number(match[1]) === day) return match[2];
-    }
-  }
-  return undefined;
-}
-
-function hasVerifiedPoiIdentityForDay(product: ProductDetail, day: number, poiId: string): boolean {
-  return product.researchTasks.some((task) => task.state === "confirmed"
-    && task.evidence?.some((evidence) => {
-      if (!evidence.accepted) return false;
-      const match = evidence.title.match(/^\[itinerary-poi:verified\]\s*第(\d+)天\s+.+?\s+->\s+.+?\s+\((\d+)\)$/u);
-      return Boolean(match && Number(match[1]) === day && match[2] === poiId);
-    }));
+/** 当天原文路线的首尾节点；只用于解释「为什么投影没有保留这个城市名」。 */
+function originalRouteBoundaries(product: ProductDetail, day: number): Set<string> {
+  const route = originalOvernightRoute(product.product as Record<string, unknown>, { day });
+  if (!route) return new Set();
+  // 天头 `【第N天 A—B—C】` 是路线摘要；正文里的同名景点不能把 B/C 挤出首尾。
+  const head = route.includes("】") ? route.slice(0, route.indexOf("】")) : route;
+  const tokens = orderedItineraryRoutePath(head).split(/[—–\-→]/u).map(anchorKey).filter(Boolean);
+  return new Set(tokens.length ? [tokens[0]!, tokens.at(-1)!] : []);
 }
 
 function supportArrangementNameFilter(name: string): boolean {

@@ -185,12 +185,12 @@
   padding: 0;
 }
 
-/* 行布局：序号列 | 文本列（minmax(0, 1fr)） | 处理按钮列。
- * 文本列负责承载 label + detail，按钮列固定 64px（含 padding），
+/* 行布局：序号列 | 文本列（minmax(0, 1fr)） | 操作按钮列。
+ * POI 行同时有「手动确认 / 处理」和「删除」两个按钮；按钮列按内容宽度，
  * 长标题/长说明最多挤占文本列，按钮不会被推走、不换行。 */
 .item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 64px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 10px 14px;
@@ -250,11 +250,12 @@
   -webkit-box-orient: vertical;
 }
 
-/* 按钮列：固定 64px 宽容器，保证「处理」按钮稳定且不换行。 */
+/* 按钮列：主操作 64px + 可选删除按钮 28px + 6px 间距。 */
 .itemAction {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   min-width: 64px;
 }
@@ -269,4 +270,24 @@
   white-space: nowrap;
   padding: 0 6px;
   justify-content: center;
+}
+
+/* 删除 POI：危险的破坏性操作，独立小图标按钮，避免和「手动确认」误触。 */
+.itemDeleteBtn {
+  width: 28px;
+  height: var(--control-sm);
+  padding: 0;
+  flex: 0 0 auto;
+  justify-content: center;
+  color: var(--destructive, #dc2626);
+  border-color: color-mix(in srgb, var(--destructive, #dc2626) 26%, var(--border));
+}
+
+.itemDeleteBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--destructive, #dc2626) 8%, var(--surface));
+}
+
+.itemDeleteBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }

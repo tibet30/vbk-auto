@@ -1,7 +1,7 @@
 import { getProductBaseInfoApi } from "../basic-info/read-base.js";
 import { postTrafficLineSoa, type TrafficLinePage } from "./client.js";
 
-/** 按官方“下一步”推进初建向导，原样保存远端内容；不会发布或启用套餐。 */
+/** 按官方“下一步”推进初建向导，保留远端内容并固定展示紧急联系人；不会发布或启用套餐。 */
 export async function advanceSavedProductWizard(
   page: TrafficLinePage,
   productId: string,
@@ -13,7 +13,7 @@ export async function advanceSavedProductWizard(
     const booking = remote.bookingControls ?? remote.bookingControl;
     if (!booking || !remote.baseInfo || !Array.isArray(remote.nameAreas)) throw new Error("基本信息保存模型不完整，向导未推进。");
     await postTrafficLineSoa(page, "15638", "saveProductBaseInfo", {
-      baseInfo: remote.baseInfo, bookingControl: { ...booking, personQuantity: {
+      baseInfo: remote.baseInfo, bookingControl: { ...booking, isPublicEmergencyContact: "T", personQuantity: {
         minPersonQuantity: booking.minPersonQuantity, maxPersonQuantity: booking.maxPersonQuantity,
       } }, nameAreaRules: remote.nameAreas,
       meta: { ...remote.meta, saveType: 2, resizeTourDailyInfo: "F", clauseTabEnabled: "F" },

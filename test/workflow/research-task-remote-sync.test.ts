@@ -36,6 +36,29 @@ test("research confirmation is persisted while remote-only tasks are preserved",
     assert.deepEqual(broadcasts, [saved]);
 });
 
+test("product JSON is persisted even when a manual field confirms no new research task", async () => {
+  const local = {
+    ...product(1, []),
+    product: { itinerary: [{ day: 5, spots: [{ name: "油画村", kind: "attraction", poiName: "俄罗斯油画馆", poiId: 152886957 }] }] },
+  } as ProductDetail;
+  let remote = {
+    ...product(2, []),
+    product: { itinerary: [{ day: 5, spots: [{ name: "油画村", kind: "other", poiName: null, poiId: null }] }] },
+  } as ProductDetail;
+  const service = {
+    get: async () => remote,
+    update: async (next: ProductDetail) => { remote = { ...next, revision: 3 }; return remote; },
+  } as TibetProductService;
+
+  const saved = await syncConfirmedResearchTasksToRemote({
+    db: { getProduct: () => local, importProductSnapshot: (snapshot) => snapshot },
+    remote: service, localProductId: local.id, broadcast: () => {},
+  });
+
+  assert.deepEqual(saved.product, local.product);
+  assert.deepEqual(remote.product, local.product);
+});
+
 test("research confirmation is replayed once after a revision conflict", async () => {
     const local = product(1, [task("matched", "confirmed")]);
     const firstRemote = product(2, [task("matched", "researching")]);

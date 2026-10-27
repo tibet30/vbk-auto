@@ -1,6 +1,7 @@
 import type { ManualReviewFieldInput, PoiSuggestDetailResult } from "../../shared/contracts.js";
 import { isManualPoiCandidateInVerifiedRouteContext } from "../planning/poi-auto-selection.js";
 import type { VerifiedPoiMapping } from "../planning/types.js";
+import { buildPoiContextForItineraryDay } from "../planning/poi-context.js";
 
 type Json = Record<string, unknown>;
 type PoiInput = Extract<ManualReviewFieldInput, { field: "itinerarySpotPoi" }>;
@@ -22,10 +23,7 @@ function selectionContext(product: Json, dayIndex: number, spotIndex: number) {
   const basic = record(product.basicInfo);
   return {
     spotName,
-    context: {
-      destinationCity: typeof basic.destinationCity === "string" ? basic.destinationCity.trim() : undefined,
-      province: typeof basic.province === "string" ? basic.province.trim() : undefined,
-    },
+    context: buildPoiContextForItineraryDay(product, text(basic.meetingCity), day, spotName),
   };
 }
 
@@ -76,6 +74,8 @@ export function verifyManualPoiSelection(
     province: candidate.province?.trim() || null,
     city: candidate.city?.trim() || null,
     district: candidate.district?.trim() || null,
+    ...(typeof candidate.latitude === "number" && typeof candidate.longitude === "number"
+      ? { latitude: candidate.latitude, longitude: candidate.longitude } : {}),
   };
 }
 

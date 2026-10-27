@@ -1,4 +1,4 @@
-import { hasCompletePoi } from "./itinerary-activity-kind.js";
+import { hasCompletePoi, namedPoiPrefix } from "./itinerary-activity-kind.js";
 
 type Json = Record<string, unknown>;
 export type SupportingArrangement = { time: string; title: string; detail: string; type: "transport" | "meal" | "hotel" };
@@ -8,6 +8,7 @@ export function supportArrangementType(value: unknown, day?: unknown): Supportin
   const spot = record(value);
   if (hasCompletePoi(spot)) return undefined;
   const name = text(spot.name) || text(spot.title);
+  if (namedPoiPrefix(name)) return undefined;
   if (/^(?:早餐|午餐|晚餐|正餐|用餐|餐食)/u.test(name)) return "meal";
   if (/(?:接团|送团|接机|送机|接站|送站|送高铁|送飞机|接送|集合|解散|返程)/u.test(name)
     || /(?:接|送)$/u.test(name) || /(?:酒店|宾馆|民宿|客栈).*(?:出发|退房|离开)/u.test(name)

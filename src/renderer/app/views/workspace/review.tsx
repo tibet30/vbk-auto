@@ -22,6 +22,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     confirmTask,
     resolveVehicleTask,
     refreshResearchIssues,
+    deletePoiIssue,
     refreshingIssues,
     resolvingVehicleTaskId,
     vbkLogin,
@@ -104,6 +105,7 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         resolvingVehicleTaskId={resolvingVehicleTaskId}
         refreshingIssues={refreshingIssues}
         onRefreshIssues={refreshResearchIssues}
+        onDeletePoiIssue={deletePoiIssue}
         loading={loading}
         onConfirmTask={() => void confirmTask()}
         onResolveVehicle={() => void resolveVehicleTask()}

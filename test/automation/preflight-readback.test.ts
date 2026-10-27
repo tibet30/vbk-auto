@@ -53,6 +53,17 @@ test("潮汕平台行政城市映射仍精确回读汕头，拒绝潮州或不�
   assert.throws(() => verifyBasicInfoReadback(remote, { basicInfo: { ...local.basicInfo, destinationCity: "汕头" } }, "1"), /本地.*不一致/);
 });
 
+test("万州产品平台城市回读为重庆，本地锚点仍是万州", () => {
+  const remote = { productId: 2, masterDepartureCityId: 4, destinationCityID: 4,
+    masterDepartureCityName: "重庆", destinationCityName: "重庆", travelDays: 5,
+    maxTravelDays: 5, travelNights: 4, vendorProductCode: "WZ-5D" };
+  const local = { basicInfo: { meetingCity: "万州", destinationCity: "万州", days: 5, nights: 4 } };
+  assert.deepEqual(verifyBasicInfoReadback(remote, local, "2"), {
+    cityId: 4, meetingCity: "重庆", destinationCity: "重庆", days: 5, nights: 4,
+  });
+  assert.throws(() => verifyBasicInfoReadback({ ...remote, masterDepartureCityName: "万州" }, local, "2"), /城市锚点不一致/);
+});
+
 test("产品图文只接受唯一的真实图库封面与已保存文案", async () => {
   const page = { evaluate: async (_fn: unknown, request: any) => {
     if (String(request.endpoint).endsWith("/searchProductImage.json")) {

@@ -106,6 +106,7 @@ export async function configureProductShellApi(
   page: VbkSessionRequestBrowser,
   product: Json,
   onCreated?: (productId: string) => void | Promise<void>,
+  onCreateIntent?: () => void | Promise<void>,
 ): Promise<string> {
   const state = await loadSaleControlCreateState(page);
   const vendorId = Number(state.vendorId ?? record(state.userInfo).vendorId);
@@ -153,6 +154,9 @@ export async function configureProductShellApi(
     ...(supportsSmallGroupSettings(form) ? { maxSmallGroupSize: maxGroupSize } : {}),
     isPerformanceProduct: "F",
   };
+  // 写请求发出前先落一个可持久化的意图标记：只有标记存在时，后续失败才允许
+  // 认定“可能已在远端创建”，从而拒绝自动重复创建。
+  await onCreateIntent?.();
   const saved = await post(page, "saveSaleControlInfo", {
     id: String(vendorId),
     idType: "providerId",

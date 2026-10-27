@@ -14,6 +14,7 @@ import type { ResourceCity, Segment } from "./types.js";
 import { VBK_RESOURCE_HEAD } from "./types.js";
 import { selectAdministrativeCity, type AdministrativeCityContext } from "../basic-info/administrative-city.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
+import { toVbkCityName } from "../../../../shared/region-overrides.js";
 
 export async function getProductSegmentsApi(page: any, productId: string) {
   const response = await vbkSessionRequest(page, {
@@ -47,7 +48,8 @@ export async function saveProductSegmentApi(page: any, segment: Segment, errorLa
  * 防止同名地级市或区县被误写到住宿行程段。
  */
 export async function resolveResourceSegmentCityApi(page: any, cityName: string, context: AdministrativeCityContext = {}): Promise<ResourceCity> {
-  const expected = cityName.trim();
+  // 「万州」等直辖市下辖区县不在 VBK 城市列表中，只能按其可写城市「重庆」写入。
+  const expected = toVbkCityName(cityName.trim());
   if (!expected) throw new Error("住宿资源行程段缺少城市名称");
   const query = async (keyword: string) => {
     const response = await vbkSessionRequest(page, {

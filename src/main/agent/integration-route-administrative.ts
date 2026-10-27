@@ -15,7 +15,7 @@ export async function resolveAdministrativeRouteNodes(
   const diagnostics = current.product.diagnostics as Record<string, unknown> | undefined;
   const receipts = Array.isArray(diagnostics?.routeAdministrativeNodes) ? diagnostics.routeAdministrativeNodes : [];
   deps.productMutations.commands.mergeChanges(current.id, current, { ...current.product, itinerary: result.itinerary,
-    diagnostics: { ...diagnostics, routeAdministrativeNodes: [...receipts, ...result.converted] },
+    diagnostics: { ...diagnostics, routeAdministrativeNodes: [...receipts, ...result.converted], routeLocations: result.locations },
   }, 'resource', { status: current.status });
   const names = new Set(result.converted.map(item => item.name));
   deps.db.markResearchTasksSatisfied(current.id, current.researchTasks.filter(task =>

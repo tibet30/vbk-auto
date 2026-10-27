@@ -39,8 +39,8 @@ function itinerary(poiId: number) {
   }];
 }
 
-test("已确认的同一 POI 身份允许一个去重后景点同时满足路线名和补充看点别名", () => {
-  assert.equal(itineraryInputContractError(productWithVerifiedAlias(), itinerary(82105)), undefined);
+test("历史同POI回执不能代替缺失的原路线槽位", () => {
+  assert.match(itineraryInputContractError(productWithVerifiedAlias(), itinerary(82105)) ?? "", /缺失：羊卓雍措/);
 });
 
 test("名称相似但 POI 身份不一致时不能借用已确认别名绕过完整行程门禁", () => {
@@ -51,4 +51,10 @@ test("未接受的映射证据不能作为 POI 别名身份凭证", () => {
   const product = productWithVerifiedAlias();
   product.researchTasks[0]!.evidence![0]!.accepted = false;
   assert.match(itineraryInputContractError(product, itinerary(82105)) ?? "", /缺失：羊卓雍措/);
+});
+
+test("两个原名独立保留后可使用相同POI，不依赖历史去重回执", () => {
+  const rows = itinerary(82105);
+  rows[0]!.spots.unshift({ name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, kind: "attraction" });
+  assert.equal(itineraryInputContractError(productWithVerifiedAlias(), rows), undefined);
 });

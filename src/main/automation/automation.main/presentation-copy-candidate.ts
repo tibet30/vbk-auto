@@ -14,13 +14,9 @@ export type PresentationCopyPath =
 
 type ProductWithPresentation = Record<string, any> & { presentation?: Record<string, any> };
 
-export function findSensitivePresentationPaths(
-  product: ProductWithPresentation,
-  sensitiveWords: readonly string[],
-  ignoreOfficialNames = false,
-): PresentationCopyPath[] {
+function presentationCopyEntries(product: ProductWithPresentation): Array<[PresentationCopyPath, string]> {
   const presentation = product.presentation ?? {};
-  const candidates: Array<[PresentationCopyPath, unknown]> = [
+  const entries: Array<[PresentationCopyPath, unknown]> = [
     ["recommendation", presentation.recommendation],
     ["features", presentation.features],
     ...(Array.isArray(presentation.recommendations)
@@ -30,16 +26,38 @@ export function findSensitivePresentationPaths(
         ] as [PresentationCopyPath, unknown])
       : []),
   ];
+  return entries.filter((entry): entry is [PresentationCopyPath, string] => typeof entry[1] === "string");
+}
+
+export function findSensitivePresentationPaths(
+  product: ProductWithPresentation,
+  sensitiveWords: readonly string[],
+  ignoreOfficialNames = false,
+): PresentationCopyPath[] {
+  const candidates = presentationCopyEntries(product);
   const words = sensitiveWords.map((word) => word.trim()).filter(Boolean);
   const officialPoiNames = ignoreOfficialNames ? trustedPresentationPoiNames(product) : [];
   return candidates
-    .filter(([path, value]) => typeof value === "string" && words.some((word) => {
+    .filter(([path, value]) => words.some((word) => {
       const visible = path === "features" ? productFeaturesPlainText(value) : value;
       if (!ignoreOfficialNames) return visible.includes(word);
       const escaped = word.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
       return hasOutsidePoiNameMatch(visible, officialPoiNames, new RegExp(escaped, "u"));
     }))
     .map(([path]) => path);
+}
+
+/** 修复定位：平台已点名的词即使落在官方名内部，也必须在图文里改述。 */
+export function findRepairablePresentationPaths(
+  product: ProductWithPresentation,
+  sensitiveWords: readonly string[],
+): PresentationCopyPath[] {
+  const protectedNames = copyProtectedPoiNames(product, sensitiveWords);
+  return presentationCopyEntries(product).filter(([path, value]) => {
+    const visible = path === "features" ? productFeaturesPlainText(value) : value;
+    return sensitiveWords.some(word => word.trim() && hasOutsidePoiNameMatch(
+      visible, protectedNames, new RegExp(word.trim().replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u")));
+  }).map(([path]) => path);
 }
 
 function readPath(presentation: Record<string, any>, path: PresentationCopyPath): unknown {
@@ -67,6 +85,16 @@ function presentationFromResponse(response: AiResponse): Record<string, any> {
   return operation.value as Record<string, any>;
 }
 
+/**
+ * 平台已点名的词出现在官方名内部时，图文里保留该名称永远无法通过校验。
+ * POI 身份只存在于行程 spots，图文只是引用，所以这些名称在图文中允许改述；
+ * 其余官方名仍须原样保留。
+ */
+function copyProtectedPoiNames(product: ProductWithPresentation, sensitiveWords: readonly string[]): string[] {
+  const words = sensitiveWords.map(word => word.trim()).filter(Boolean);
+  return trustedPresentationPoiNames(product).filter(name => !words.some(word => name.includes(word)));
+}
+
 function referencedPoiNames(value: string, officialPoiNames: readonly string[]): string[] {
   return officialPoiNames.filter(name => value.includes(name)).sort();
 }
@@ -81,7 +109,7 @@ export function applySensitivePresentationRewrite(
   if (!current) throw new Error("产品图文数据不存在，无法应用 AI 敏感词重写。");
   const generated = presentationFromResponse(response);
   const candidate = structuredClone(current);
-  const officialPoiNames = trustedPresentationPoiNames(product);
+  const officialPoiNames = copyProtectedPoiNames(product, sensitiveWords);
   for (const path of affectedPaths) {
     const next = readPath(generated, path);
     if (typeof next !== "string" || next.trim().length === 0) {
@@ -128,7 +156,7 @@ export function applySensitivePresentationRewrite(
     }
     writePath(candidate, path, acceptedValue);
   }
-  if (findSensitivePresentationPaths({ ...product, presentation: candidate }, sensitiveWords, true).length) {
+  if (findRepairablePresentationPaths({ ...product, presentation: candidate }, sensitiveWords).length) {
     throw new Error("AI 重写后的图文仍包含本轮累计非法关键词。");
   }
   buildRecommendationReasonsPlan(candidate.recommendations, officialPoiNames);
@@ -173,7 +201,7 @@ export function rewritePrompt(words: readonly string[], paths: readonly Presenta
   return [
     `VBK 平台拦截了产品图文，非法关键词：${words.join("、")}。`,
     `只重写实际命中的字段：${paths.join("、")}。`,
-    "保持事实、语气、长度和其他字段不变，不得再次出现上述词语，也不要用疑似违规的夸张承诺替代。禁止新增价格、含餐、酒店档次、保险或服务权益；产品特色保持原 HTML 标签结构，只改可见文本。",
+    "保持事实、语气、长度和其他字段不变，不得再次出现上述词语，也不要用疑似违规的夸张承诺替代。地点名称含上述词语时，在图文中改用不含该词的中性称呼（如“民俗古村落”），其他地点名称原样保留。禁止新增价格、含餐、酒店档次、保险或服务权益；产品特色保持原 HTML 标签结构，只改可见文本。",
     buildVbkCopyPolicyPrompt(),
     "请通过 /presentation patch 返回完整 presentation 对象。recommendations 必须是保持原顺序的三个 {category,text} 对象组成的数组；路径中的数字是从 0 开始的数组下标，不是对象键。禁止仅返回命中条目或用 recommendations.2.text 作为对象键。",
     presentation ? `完整 value 模板（仅替换命中文本，其他值原样返回）：${JSON.stringify(presentation)}` : "",

@@ -22,6 +22,9 @@ import { platformResourceGateway } from '../infrastructure/platform-resource-gat
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { verifyManualPoiSelection, verifiedMappingForManualPoi } from "../operations/manual-review-poi-selection.js";
 import { sanitizeAgentSnapshot } from "../../shared/agent-snapshot-sanitize.js";
+import { optimizeProductIdea } from "../planning/product-idea-optimizer.js";
+import { hasUnverifiedPoiSpot, removePoiIssueSpots } from "../operations/poi-issue-removal.js";
+import type { PoiIssueDeleteTarget } from "../../shared/poi-issue-delete.js";
 
 async function reconcileSavedProductQuestion(context: MainIpcContext, id: string): Promise<void> {
   try {
@@ -35,6 +38,12 @@ async function reconcileSavedProductQuestion(context: MainIpcContext, id: string
 
 export function registerProductAiIpc(context: MainIpcContext): void {
   const { db, emitProduct, readiness, getSettings, aiService, productMutations, remoteProducts, broadcastProduct } = context;
+
+  ipcMain.handle("ai:optimizeProductIdea", (event, input) => {
+    // 会用本机 API Key 把用户输入发给第三方 AI，只允许受信任的应用窗口调用。
+    assertTrustedSender(event, "ai:optimizeProductIdea");
+    return optimizeProductIdea(context, input);
+  });
 
   ipcMain.handle("products:readiness", (_event, id: string) => readiness(id));
   ipcMain.handle("products:updateProductJson", async (_event, id: string, json: string) => {
@@ -99,8 +108,25 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const settledPoiTasks = manualPoiMapping
       ? db.confirmVerifiedPoiResearchTasks(id, [manualPoiMapping])
       : { taskIds: [] as string[] };
-    const resultProduct = settledPoiTasks.taskIds.length ? db.getProduct(id) ?? saved : saved;
-    const confirmedTaskIds = resultProduct.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
+    const localResult = settledPoiTasks.taskIds.length ? db.getProduct(id) ?? saved : saved;
+    const confirmedTaskIds = localResult.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
+    // 产品列表与重启恢复以 Tibet 快照为权威。人工字段即使没有新结清
+    // research task，也必须把本次 product JSON 一并同步；否则界面先显示
+    // “保存成功”，下一次重载却会被远端旧快照覆盖。
+    // 本地已提交；远端同步失败不能让本次保存表现为失败，也不能跳过广播。
+    // 下一次确认或刷新会再次同步。
+    let resultProduct = localResult;
+    try {
+      resultProduct = await syncConfirmedResearchTasksToRemote({
+        db,
+        remote: remoteProducts,
+        localProductId: id,
+        broadcast: broadcastProduct,
+      });
+    } catch (error) {
+      logWarn("[products:updateReviewField] remote sync failed after local commit", { localProductId: id, error });
+      resultProduct = db.getProduct(id) ?? localResult;
+    }
     await reconcileSavedProductQuestion(context, id);
     if (confirmedTaskIds.length > 0) {
       logInfo("[products:updateReviewField] sync-confirmed research task", {
@@ -174,6 +200,44 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       broadcast: broadcastProduct,
     });
     return { accepted: true, product };
+  });
+  ipcMain.handle("research:removePoiIssue", async (event, localProductId: string, target: PoiIssueDeleteTarget) => {
+    assertTrustedSender(event, "research:removePoiIssue");
+    context.productWorkflows.assertIdle(localProductId, "manual");
+    const product = db.getProduct(localProductId);
+    if (!product) throw productNotFound(localProductId);
+    const taskId = target && "taskId" in target ? target.taskId : undefined;
+    const task = taskId ? product.researchTasks.find((item) => item.id === taskId) : undefined;
+    if (taskId && !task) throw new Error("待处理事项不存在或已处理。");
+    const removal = removePoiIssueSpots(product.product, task, target ?? {});
+    if (task && hasUnverifiedPoiSpot(removal.product, removal.names)) {
+      throw new Error("同名景点仍有未核验项，已保留该待处理事项。");
+    }
+    let saved = product;
+    if (removal.removed.length > 0) {
+      saved = db.replaceProductAndSatisfyResearchTasks(localProductId, removal.product, {
+        expectedVersion: product.productJsonVersion ?? 0,
+        note: "运营已删除 POI 待处理项，并同步移除对应行程景点。",
+        researchEvidenceTitle: "[itinerary-operator:removed] 运营已删除 POI 待处理项并移除对应行程景点",
+        source: "user",
+      }).product;
+    }
+    if (task && !saved.researchTasks.some((item) => item.id === task.id && (item.state === "confirmed" || item.state === "resolved"))) {
+      db.markResearchTasksSatisfied(localProductId, [task.id], removal.removed.length > 0
+        ? "[itinerary-operator:removed] 运营已删除 POI 待处理项并移除对应行程景点"
+        : "[poi-issue:deleted] 运营已删除待处理项；当前行程不含该景点");
+    }
+    const finalProduct = await syncConfirmedResearchTasksToRemote({
+      db, remote: remoteProducts, localProductId, broadcast: broadcastProduct,
+    });
+    broadcastProduct(finalProduct);
+    emitProduct(finalProduct);
+    return {
+      product: finalProduct,
+      readiness: readiness(localProductId),
+      removedNames: removal.removed.map((item) => item.name),
+      resolvedTaskIds: task ? [task.id] : [],
+    };
   });
   ipcMain.handle("research:refreshIssues", async (_event, localProductId: string) => {
     const product = db.getProduct(localProductId);

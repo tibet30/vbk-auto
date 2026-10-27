@@ -3,6 +3,14 @@ import { toPlatformShortLocationName } from "../../shared/location-short-name.js
 import { hasCompletePoi } from "../../shared/itinerary-activity-kind.js";
 import { isKnownPoiNameAlias } from "../../shared/poi-name-aliases.js";
 import { inferExplicitPoiDayCity } from "./poi-context.js";
+import { corridorProvesLocation, routeLocationsForKeyword, routeLocationMatches } from "../../shared/route-location-evidence.js";
+import type { PoiSuggestContext } from "./types.js";
+import { poiRouteIdentityCore } from "../../shared/poi-original-route-identity.js";
+import { isCompatiblePoiIdentity, samePoiIdentityName } from "../../shared/poi-candidate-identity.js";
+import { explicitOriginalRouteDecision } from "./poi-route-location.js";
+import { isSelectableCandidate, uncertainReason } from "./poi-uncertain-reason.js";
+import { dayContainsKeyword, dayRouteText, routeDayNumber } from "./poi-day-text.js";
+import type { PoiSelectionReason } from "../../shared/poi-research-outcome.js";
 
 export interface PoiAutoSelectionMatch {
   poiName: string;
@@ -10,11 +18,13 @@ export interface PoiAutoSelectionMatch {
   province?: string;
   city?: string;
   district?: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface PoiAutoSelectionResult {
   status: "available" | "suspended" | "uncertain";
-  reason?: "no_candidate" | "location_mismatch" | "ambiguous";
+  reason?: PoiSelectionReason;
   match?: PoiAutoSelectionMatch;
 }
 
@@ -43,9 +53,20 @@ export async function resolvePlanningPoiAutoSelection(args: {
   checkAvailability(poiId: number): Promise<{ status: "available" | "suspended" }>;
   disambiguate?: PoiAutoDisambiguator;
 }): Promise<PoiAutoSelectionResult> {
+  const scoped = args.context as PoiSuggestContext | undefined;
+  args = { ...args, keyword: scoped?.spotName || args.keyword };
+  const locations = routeLocationsForKeyword(args.product, scoped?.spotName || args.keyword, scoped?.itineraryDay);
+  if (!args.confirmedPoiId) {
+    const named = args.detail.candidates.filter(candidate => isPlanningPoiCandidateInContext(candidate,
+      args.context, args.product, args.keyword, args.detail.candidates)
+      && samePoiIdentityName(args.keyword, candidate.poiName));
+    if (new Set(named.map(candidate => candidate.poiId)).size > 1) return { status: "uncertain", reason: "ambiguous" };
+  }
   const confirmed = args.confirmedPoiId ? args.detail.candidates.find(candidate => candidate.poiId === args.confirmedPoiId
     && isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)) : undefined;
-  if (args.confirmedPoiId && !confirmed) return { status: "uncertain", reason: args.detail.candidates.length ? "location_mismatch" : "no_candidate" };
+  if (args.confirmedPoiId && !confirmed) {
+    return { status: "uncertain", reason: uncertainReason(args.keyword, args.detail.candidates) };
+  }
   const exact = confirmed ?? (args.detail.best
     ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
       isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates) && candidate.poiId === args.detail.best!.poiId)
@@ -65,7 +86,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
     if (choices.length === 0) {
       return {
         status: "uncertain",
-        reason: args.detail.candidates.length > 0 ? "location_mismatch" : "no_candidate",
+        reason: uncertainReason(args.keyword, args.detail.candidates),
       };
     }
     const outcome = await args.disambiguate({
@@ -81,7 +102,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
   if (!candidate || !isSelectableCandidate(candidate) || !candidateMatchesContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)) {
     return {
       status: "uncertain",
-      reason: args.detail.candidates.length > 0 ? "location_mismatch" : "no_candidate",
+      reason: uncertainReason(args.keyword, args.detail.candidates),
     };
   }
   const availability = await args.checkAvailability(candidate.poiId);
@@ -95,12 +116,10 @@ export async function resolvePlanningPoiAutoSelection(args: {
       ...(candidate.province?.trim() ? { province: candidate.province.trim() } : {}),
       ...(candidate.city?.trim() ? { city: candidate.city.trim() } : {}),
       ...(candidate.district?.trim() ? { district: candidate.district.trim() } : {}),
+      ...(typeof candidate.latitude === "number" && typeof candidate.longitude === "number"
+        ? { latitude: candidate.latitude, longitude: candidate.longitude } : {}),
     },
   };
-}
-
-function isSelectableCandidate(candidate: PoiSuggestCandidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } {
-  return candidate.selectable && Boolean(candidate.poiName?.trim() && candidate.poiId && candidate.poiId > 0);
 }
 
 export function isPlanningPoiCandidateInContext(
@@ -110,7 +129,9 @@ export function isPlanningPoiCandidateInContext(
   keyword: string,
   candidates?: PoiSuggestCandidate[],
 ): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } {
-  return isSelectableCandidate(candidate) && candidateMatchesContext(candidate, context, product, keyword, candidates);
+  const scoped = context as PoiSuggestContext | undefined;
+  return isSelectableCandidate(candidate) && isCompatiblePoiIdentity(scoped?.spotName || keyword, candidate.poiName)
+    && candidateMatchesContext(candidate, context, product, keyword, candidates);
 }
 
 /**
@@ -128,7 +149,10 @@ export function isManualPoiCandidateInVerifiedRouteContext(
   keyword: string,
   candidates?: PoiSuggestCandidate[],
 ): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } {
+  if (!candidate.poiName || !isCompatiblePoiIdentity((context as PoiSuggestContext | undefined)?.spotName || keyword, candidate.poiName)) return false;
   if (isPlanningPoiCandidateInContext(candidate, context, product, keyword, candidates)) return true;
+  const scoped = context as PoiSuggestContext | undefined;
+  if (routeLocationsForKeyword(product, scoped?.spotName || keyword, scoped?.itineraryDay).length) return false;
   return hasVerifiedRouteNeighbourEvidence(candidate, context, product, keyword);
 }
 
@@ -168,6 +192,28 @@ function candidateMatchesContext(
   keyword: string,
   candidates?: PoiSuggestCandidate[],
 ): boolean {
+  const scoped = context as PoiSuggestContext | undefined;
+  const locations = routeLocationsForKeyword(product, scoped?.spotName || keyword, scoped?.itineraryDay);
+  // 旧产品可能没有 diagnostics.routeLocations；但运营原文逐日路线里明确写出的
+  // 城市仍是当前方案的地点证据。只在「当天唯一、景点是完整路线节点、候选城市
+  // 也在同一天原文出现」时放行，生成标题、酒店和旧绑定都不参与。
+  if (!locations.length) {
+    const explicit = explicitOriginalRouteDecision(product, scoped?.spotName || keyword, candidate, candidates);
+    if (explicit === "allow") return true;
+    if (explicit === "deny") return false;
+  }
+  if (locations.length) {
+    if (locations.some(location => routeLocationMatches(candidate, location))) return true;
+    const basic = isRecord(product.basicInfo) ? product.basicInfo : {};
+    const province = normaliseAdministrativeName(basic.province);
+    // 单侧或跨城锚点：同省 + 原文点名 + 本次结果唯一不能证明地点（正确那条可能
+    // 不在结果里）。还必须由平台坐标证明候选落在当日路线走廊内。
+    return locations.length > 0 && !(locations.length === 1 && locations[0]!.bounded)
+      && locations.every(location => location.province === province)
+      && normaliseAdministrativeName(candidate.province) === province
+      && explicitlyNamedUniquePoi(product, keyword, candidate, candidates, province)
+      && corridorProvesLocation(product, routeDayNumber(product, scoped?.spotName || keyword, scoped?.itineraryDay), candidate);
+  }
   const destinationCity = normaliseAdministrativeName(context?.destinationCity);
   const province = normaliseAdministrativeName(context?.province);
   const candidateCity = normaliseAdministrativeName(candidate.city);
@@ -203,8 +249,8 @@ function explicitlyNamedUniquePoi(product: Record<string, unknown>, keyword: str
   const matchesName = (name: string) => {
     const core = normaliseText(name).replace(/[（）()]/gu, "")
       .replace(/(?:旅游景区|地质公园|风景名胜区|风景区|景区)$/u, "");
-    const desiredIdentity = poiIdentityCore(desired);
-    const candidateIdentity = poiIdentityCore(core);
+    const desiredIdentity = poiRouteIdentityCore(desired);
+    const candidateIdentity = poiRouteIdentityCore(core);
     return normaliseText(name) === desired || core === desired
       || isKnownPoiNameAlias(desired, core)
       || (desiredIdentity.length >= 4 && desiredIdentity === candidateIdentity)
@@ -217,13 +263,6 @@ function explicitlyNamedUniquePoi(product: Record<string, unknown>, keyword: str
     && matchesName(item.poiName ?? "")
     && normaliseAdministrativeName(item.province) === province).map(item => item.poiId));
   return ids.size === 1 && ids.has(candidate.poiId);
-}
-
-function poiIdentityCore(value: string): string {
-  return normaliseText(value)
-    .replace(/^远眺/u, "")
-    .replace(/措$/u, "错")
-    .replace(/(?:山体冰川遗迹|冰川遗迹|冰川群|冰川|雪山)$/u, "");
 }
 
 /** A different, verified original stop establishes the day's city, never a hotel or stale alias. */
@@ -260,31 +299,6 @@ function itineraryExplicitlyAllowsLocation(
     if (candidateCity === "山南" && isKnownPoiNameAlias(keyword, candidatePoiName ?? "")) return true;
     return locations.some((location) => text.includes(normaliseText(location)));
   });
-}
-
-function dayContainsKeyword(day: Record<string, unknown>, keyword: string): boolean {
-  const desired = normaliseText(keyword);
-  if (desired.length < 2) return false;
-  const spots = Array.isArray(day.spots) ? day.spots : [];
-  return spots.some((spot) => {
-    if (!isRecord(spot)) return false;
-    const name = normaliseText(String(spot.name ?? ""));
-    return name.length >= 2 && (name.includes(desired) || desired.includes(name));
-  });
-}
-
-function dayRouteText(day: Record<string, unknown>): string {
-  const spots = Array.isArray(day.spots) ? day.spots : [];
-  const activities = Array.isArray(day.activities) ? day.activities : [];
-  return [day.title, day.description, ...spots.flatMap((spot) => {
-    if (!isRecord(spot)) return [];
-    return [spot.name, spot.description];
-  }), ...activities.flatMap((activity) => {
-    if (!isRecord(activity)) return [];
-    return [activity.title, activity.detail];
-  })]
-    .filter((value): value is string => typeof value === "string")
-    .join(" ");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

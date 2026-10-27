@@ -164,7 +164,11 @@ export function AgentConversation({ product, userName, readiness, client, input,
             <div><dt>目的地</dt><dd>{brief.destination}</dd></div>
             <div><dt>产品形态</dt><dd>{brief.productFormLabel}</dd></div>
             <div><dt>行程</dt><dd>{brief.days} 天 {brief.nights} 晚</dd></div>
-            {brief.userIdea ? <div><dt>你的想法</dt><dd>{brief.userIdea}</dd></div> : null}
+            {brief.ideaOptimization ? <>
+              <div><dt>原始想法</dt><dd>{brief.ideaOptimization.originalIdea}</dd></div>
+              <div><dt>AI 版本</dt><dd>{brief.ideaOptimization.optimizedIdea}</dd></div>
+              <div><dt>优化记录</dt><dd>{brief.ideaOptimization.changes.length} 项调整 · {brief.ideaOptimization.recommendations.length} 项建议</dd></div>
+            </> : brief.userIdea ? <div><dt>你的想法</dt><dd>{brief.userIdea}</dd></div> : null}
           </dl> : <div className={styles.messageContent}>{message.content}</div>}
         </article>;
       })}

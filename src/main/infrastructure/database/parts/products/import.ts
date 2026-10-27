@@ -13,6 +13,7 @@
  * run id below rather than being deleted with the business snapshot.
  */
 
+import { withRouteRequirements } from '../../../../../shared/route-requirement-context.js';
 import type Database from "better-sqlite3";
 import type { ConversationMessage, CreateProductInput, ProductDetail, ResearchTask } from "../../../../../shared/contracts.js";
 import { coalescePoiResearchTasks } from "../product-research-tasks.js";
@@ -151,7 +152,8 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
     viewRevision: Number(product.view_revision) || 0,
     plan: JSON.parse(product.product_json),
     resourceEvidence: architecture.evidence,
-    product: parseAndNormalizeProductJson(JSON.stringify(architecture.product)),
+    product: withRouteRequirements(parseAndNormalizeProductJson(JSON.stringify(architecture.product)),
+      messages.map(message => ({ role: message.role, content: message.content }))),
     messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
     researchTasks: coalescePoiResearchTasks(tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) }))),
     automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,

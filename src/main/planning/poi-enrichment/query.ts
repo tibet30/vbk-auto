@@ -1,6 +1,8 @@
 import type { OrchestratorRuntime } from "../types.js";
 import { logInfo, logWarn } from "../../../shared/log-timestamp.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
+import type { PoiSelectionReason } from "../../../shared/poi-research-outcome.js";
+import { isCompatiblePoiIdentity } from "../../../shared/poi-candidate-identity.js";
 
 const DEFAULT_AVAILABILITY_TIMEOUT_MS = 16_000;
 
@@ -10,17 +12,18 @@ export async function queryPoi(args: {
   keyword: string;
   queryTimeoutMs: number;
   context?: { destinationCity?: string; province?: string };
+  itinerary?: unknown[];
 }): Promise<{
   match: PoiMatch | null;
   failed: boolean;
   suspended: boolean;
-  reason?: "no_candidate" | "location_mismatch" | "ambiguous";
+  reason?: PoiSelectionReason;
 }> {
   try {
     logInfo("[planning.poi]", { event: "query-start", localProductId: args.localProductId, keyword: args.keyword });
     if (args.runtime.resolvePoiSelection) {
       const selected = await rejectPoiQueryAfter(
-        args.runtime.resolvePoiSelection(args.localProductId, args.keyword, args.context),
+        args.runtime.resolvePoiSelection(args.localProductId, args.keyword, args.context, args.itinerary),
         args.queryTimeoutMs,
       );
       return {
@@ -48,9 +51,9 @@ export async function queryPoi(args: {
     return { match: null, failed: true, suspended: false, reason: undefined };
   }
 }
-type PoiMatch = { poiName: string; poiId: number; province?: string; city?: string; district?: string };
+type PoiMatch = { poiName: string; poiId: number; province?: string; city?: string; district?: string; latitude?: number; longitude?: number };
 
-function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown; province?: unknown; city?: unknown; district?: unknown } | null | undefined): PoiMatch | null {
+function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown; province?: unknown; city?: unknown; district?: unknown; latitude?: unknown; longitude?: unknown } | null | undefined): PoiMatch | null {
   if (!match || typeof match !== "object") return null;
   const poiName = match.poiName;
   const poiId = match.poiId;
@@ -61,7 +64,12 @@ function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown; province
     ...(hasText(match.province) ? { province: match.province.trim() } : {}),
     ...(hasText(match.city) ? { city: match.city.trim() } : {}),
     ...(hasText(match.district) ? { district: match.district.trim() } : {}),
+    ...(isFiniteNumber(match.latitude) && isFiniteNumber(match.longitude) ? { latitude: match.latitude, longitude: match.longitude } : {}),
   };
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 export function applyPoiMatch(spot: Record<string, unknown>, match: PoiMatch): void {
@@ -70,6 +78,13 @@ export function applyPoiMatch(spot: Record<string, unknown>, match: PoiMatch): v
   if (match.province) spot.province = match.province;
   if (match.city) spot.city = match.city;
   if (match.district) spot.district = match.district;
+  if (match.latitude !== undefined && match.longitude !== undefined) {
+    spot.latitude = match.latitude;
+    spot.longitude = match.longitude;
+  } else {
+    delete spot.latitude;
+    delete spot.longitude;
+  }
 }
 
 export async function queryPoiAvailability(runtime: OrchestratorRuntime, localProductId: string, poiId: unknown, timeoutMs = DEFAULT_AVAILABILITY_TIMEOUT_MS): Promise<"available" | "suspended" | "unverified" | null> {
@@ -111,6 +126,38 @@ export async function queryItineraryPoiAvailabilities(
     });
     return new Map();
   }
+}
+
+/**
+ * 历史绑定没有坐标，路线走廊证据无从计算。复核前按官方名只读回查同一 poiId 的
+ * 平台坐标；查询失败或回查不到同一 ID 时保持原样，由地域门禁按缺证据处理。
+ */
+export async function backfillItineraryPoiCoordinates(runtime: OrchestratorRuntime, localProductId: string,
+  itinerary: any[], timeoutMs = DEFAULT_AVAILABILITY_TIMEOUT_MS): Promise<boolean> {
+  if (!runtime.getPoiCoordinates) return false;
+  let changed = false;
+  const cache = new Map<number, { latitude: number; longitude: number } | undefined>();
+  for (const spot of itinerary.flatMap((day) => Array.isArray(day?.spots) ? day.spots : [])) {
+    if (!spot || typeof spot !== "object" || !hasCompletePoi(spot) || !requiresItineraryPoi(spot)) continue;
+    if (isFiniteNumber(spot.latitude) && isFiniteNumber(spot.longitude)) continue;
+    // 身份已不符的旧绑定会在复核中清除，不必为它取坐标。
+    if (!isCompatiblePoiIdentity(String(spot.name ?? ""), String(spot.poiName))) continue;
+    const poiId = Number(spot.poiId);
+    if (!cache.has(poiId)) {
+      try {
+        // 用原景点名查询：与复核本身发出的查询一致，不额外产生新的平台请求形态。
+        const name = String(spot.name ?? "").trim() || String(spot.poiName).trim();
+        cache.set(poiId, await rejectPoiQueryAfter(runtime.getPoiCoordinates(name, poiId), timeoutMs));
+      } catch (error) {
+        logWarn("[planning.poi]", { event: "coordinate-backfill-failed", localProductId, poiId,
+          error: error instanceof Error ? error.message : String(error) });
+        cache.set(poiId, undefined);
+      }
+    }
+    const point = cache.get(poiId);
+    if (point) { spot.latitude = point.latitude; spot.longitude = point.longitude; changed = true; }
+  }
+  return changed;
 }
 
 export function isTravelNodeName(value: string): boolean {

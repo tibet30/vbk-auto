@@ -5,7 +5,7 @@ import type { VbkDatabase } from "../infrastructure/database/database.js";
 
 type RefreshDb = Pick<VbkDatabase,
   "getProduct" | "markResearchTasksSatisfiedByProduct" | "reopenAmbiguousAutoConfirmedPoiResearchTasks" | "reopenKindSupersededPoiResearchTasks"
->;
+> & Partial<Pick<VbkDatabase, "restoreCurrentVerifiedPoiResearchTasks">>;
 
 export interface RefreshedResearchIssues {
   /** Backward-compatible alias for `confirmed`; reopening alone is not a confirmation. */
@@ -24,15 +24,19 @@ export function refreshSatisfiedResearchTasks(db: RefreshDb, localProductId: str
   }
   const kindReopened = db.reopenKindSupersededPoiResearchTasks(localProductId, product.product);
   const ambiguousReopened = db.reopenAmbiguousAutoConfirmedPoiResearchTasks(localProductId);
+  const verifiedRestored = db.restoreCurrentVerifiedPoiResearchTasks?.(localProductId) ?? {
+    updated: 0,
+    taskIds: [],
+  };
   const refreshedProduct = db.getProduct(localProductId);
   if (!refreshedProduct) throw new Error("产品不存在。");
   const confirmed = db.markResearchTasksSatisfiedByProduct(localProductId, refreshedProduct.product);
   const reopenedTaskIds = [...kindReopened.taskIds, ...ambiguousReopened.taskIds];
   return {
-    updated: confirmed.updated,
-    taskIds: confirmed.taskIds,
-    confirmed: confirmed.updated,
-    confirmedTaskIds: confirmed.taskIds,
+    updated: confirmed.updated + verifiedRestored.updated,
+    taskIds: [...verifiedRestored.taskIds, ...confirmed.taskIds],
+    confirmed: confirmed.updated + verifiedRestored.updated,
+    confirmedTaskIds: [...verifiedRestored.taskIds, ...confirmed.taskIds],
     reopened: reopenedTaskIds.length,
     reopenedTaskIds,
   };

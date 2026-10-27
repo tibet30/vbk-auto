@@ -7,6 +7,7 @@ import { repairLocalPresentationCopy } from "./presentation-local-copy-repair.js
 import {
   applyDeterministicPresentationWordRemoval,
   applySensitivePresentationRewrite,
+  findRepairablePresentationPaths,
   findSensitivePresentationPaths,
   rewritePrompt,
 } from "./presentation-copy-candidate.js";
@@ -90,11 +91,9 @@ export async function runPresentationCopyRecovery(args: {
           rejection = error;
         }
       }
-      const paths = findSensitivePresentationPaths(args.product, state.words, true);
+      // 平台点名的词落在官方名内部时，图文中的该名称引用也必须改述；POI 绑定本身不动。
+      const paths = findRepairablePresentationPaths(args.product, state.words);
       if (!paths.length) {
-        if (findSensitivePresentationPaths(args.product, state.words).length) {
-          throw new Error(`平台拒绝的关键词涉及官方 POI 名称，无法安全改名，必须返回规划核查：${state.words.join("、")}`);
-        }
         if (state.rewrites >= 2) {
           throw new Error(`产品图文自动修复未完成，已使用 ${state.rewrites}/2 轮：${rejection.message}`);
         }

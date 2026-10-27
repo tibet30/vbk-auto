@@ -5,11 +5,12 @@ import {
   selectAdministrativeCity,
 } from "../../src/main/automation/ctrip/basic-info/api.js";
 import {
-  hasProductLineResolutionFailure,
   productLineSaveField,
   resolveBasicInfoCityAnchor,
+  selectOptionalProductLine,
   selectProductLine,
 } from "../../src/main/automation/ctrip/basic-info/product-line.js";
+import { toVbkCityName } from "../../src/shared/region-overrides.js";
 
 const agencies = [
   { localInfoID: 38289, localInfoName: "宾茂乐游", active: "T" },
@@ -98,6 +99,16 @@ test("潮汕行政城市在平台边界映射汕头，保留本地锁定值并�
   assert.throws(() => resolveBasicInfoCityAnchor({ basicInfo: { meetingCity: "潮汕", destinationCity: "汕头" } }), /同一已锁定城市/);
 });
 
+test("万州是重庆下辖区县，平台城市边界映射重庆并保留产品锚点", () => {
+  const product = { basicInfo: { meetingCity: "万州", destinationCity: "万州" } };
+  assert.equal(resolveBasicInfoCityAnchor(product), "重庆");
+  assert.equal(product.basicInfo.meetingCity, "万州");
+  assert.equal(toVbkCityName("万州"), "重庆");
+  assert.equal(toVbkCityName("重庆"), "重庆");
+  assert.equal(toVbkCityName("云阳"), "云阳");
+  assert.equal(toVbkCityName(""), "");
+});
+
 test("遗留省级城市锚点使用已确认的接送城市自愈", () => {
   assert.equal(resolveBasicInfoCityAnchor({
     basicInfo: { meetingCity: "河南", destinationCity: "河南" },
@@ -133,6 +144,28 @@ test("省级目的地没有城市一地线路时唯一匹配省内线路", () =>
   });
 });
 
+test("城市一地线路只有自营专用前缀版本时唯一匹配", () => {
+  assert.deepEqual(selectProductLine([
+    { lineId: 10, lineName: "内蒙+东北" },
+    { lineId: 11, lineName: "长白山一地" },
+    { lineId: 12, lineName: "自营专用-吉林市一地" },
+    { lineId: 13, lineName: "主题游-滑雪-松花湖" },
+  ], { destinationCity: "吉林", province: "吉林" }, "吉林市"), {
+    lineId: 12,
+    lineName: "自营专用-吉林市一地",
+  });
+});
+
+test("精确城市一地线路优先于自营专用前缀版本", () => {
+  assert.deepEqual(selectProductLine([
+    { lineId: 12, lineName: "自营专用-吉林市一地" },
+    { lineId: 14, lineName: "吉林市一地" },
+  ], { destinationCity: "吉林", province: "吉林" }, "吉林市"), {
+    lineId: 14,
+    lineName: "吉林市一地",
+  });
+});
+
 test("普通城市产品不会降级选择省级全景线路", () => {
   assert.throws(
     () => selectProductLine([
@@ -142,17 +175,24 @@ test("普通城市产品不会降级选择省级全景线路", () => {
   );
 });
 
-test("只有历史产品线错误才触发第二次重试降级", () => {
-  assert.equal(hasProductLineResolutionFailure({
-    attempts: [{ error: "产品线无法按城市/省份精确匹配：长春一地、吉林一地" }],
-  }), true);
-  assert.equal(hasProductLineResolutionFailure({
-    attemptsHistory: [{ error: "省级产品线「吉林省内」无法唯一匹配：2 个候选" }],
-    attempts: [],
-  }), true);
-  assert.equal(hasProductLineResolutionFailure({
-    attempts: [{ error: "400 电话无法唯一匹配" }],
-  }), false);
+test("产品线非必填：无法匹配时不写并返回原因，不抛错", () => {
+  const result = selectOptionalProductLine([
+    { lineId: 10, lineName: "内蒙+东北" },
+  ], { destinationCity: "吉林", province: "吉林" }, "吉林市");
+  assert.equal(result.productLine, null);
+  assert.match(result.skipReason ?? "", /产品线无法按城市\/省份精确匹配：吉林市一地/);
+  assert.equal(selectOptionalProductLine([
+    { lineId: 12, lineName: "自营专用-吉林市一地" },
+  ], { destinationCity: "吉林", province: "吉林" }, "吉林市").productLine?.lineId, 12);
+});
+
+test("产品线多候选同样按非必填跳过", () => {
+  const result = selectOptionalProductLine([
+    { lineId: 1, lineName: "郑州一地" },
+    { lineId: 2, lineName: "郑州一地" },
+  ], { destinationCity: "郑州", province: "河南" }, "郑州");
+  assert.equal(result.productLine, null);
+  assert.match(result.skipReason ?? "", /无法唯一匹配：2 个候选/);
 });
 
 test("降级保存完全省略 productLineID 字段", () => {

@@ -9,6 +9,7 @@ export function record(value: unknown): Json {
 export function splitProduct(product: Json, source: ProductResourceEvidence['source'] = 'verified') {
   const plan: ProductPlan = structuredClone(product);
   const diagnostics = record(plan.diagnostics);
+  delete diagnostics.routeRequirementMessages;
   delete plan.diagnostics;
   const fields: ProductResourceEvidence['fields'] = [];
   const take = (object: Json, key: string, path: string[]) => {
@@ -18,6 +19,7 @@ export function splitProduct(product: Json, source: ProductResourceEvidence['sou
     }
   };
   take(diagnostics, 'routeAdministrativeNodes', ['diagnostics']);
+  take(diagnostics, 'routeLocations', ['diagnostics']);
   const days = Array.isArray(plan.itinerary) ? plan.itinerary : [];
   const candidates = days.flatMap(day => Array.isArray(record(day).hotelCandidates)
     ? record(day).hotelCandidates as unknown[] : []);

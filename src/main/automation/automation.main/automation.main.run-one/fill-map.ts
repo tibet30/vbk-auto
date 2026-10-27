@@ -127,14 +127,20 @@ export function buildFillMap(args: FillMapContext): Record<string, FillFn> {
     presentation: async () => {
       if (args.wizardAdvanceOnly?.has("presentation")) {
         const advanced = await advanceSavedProductWizardStage(
-          page, productId!, "pictureAndText", { assertCurrent: assertPresentationAdvanceCurrent },
+          page, productId!, "pictureAndText", {
+            assertCurrent: assertPresentationAdvanceCurrent,
+            allowAdditionalUnlock: productData.sales?.productForm === "freeTravel",
+          },
         );
         if (advanced.advanced) log("产品图文已按 VBK 官方下一步推进，行程描述已解锁。");
         return advanced;
       }
       const result = await fillPresentationWithSensitiveRewrite({ ctx, localProductId, page, product: productData, productId: productId!, log });
       const advanced = await advanceSavedProductWizardStage(
-        page, productId!, "pictureAndText", { assertCurrent: assertPresentationAdvanceCurrent },
+        page, productId!, "pictureAndText", {
+          assertCurrent: assertPresentationAdvanceCurrent,
+          allowAdditionalUnlock: productData.sales?.productForm === "freeTravel",
+        },
       );
       if (advanced.advanced) log("产品图文已按 VBK 官方下一步推进，行程描述已解锁。");
       return result;

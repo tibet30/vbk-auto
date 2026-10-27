@@ -80,6 +80,7 @@ export interface VbkDatabasePrototype {
   markResearchAccepted(localProductId: string, taskId: string, note?: string, source?: "vbk" | "web" | "user"): void;
   markResearchTasksSatisfied(localProductId: string, taskIds: readonly string[], note?: string): ReturnType<typeof import("../parts/research-tasks.js").markResearchTasksSatisfied>;
   confirmVerifiedPoiResearchTasks(localProductId: string, mappings: readonly VerifiedPoiMapping[]): ReturnType<typeof import("../parts/verified-poi-research.js").confirmVerifiedPoiResearchTasks>;
+  restoreCurrentVerifiedPoiResearchTasks(localProductId: string): ReturnType<typeof import("../parts/verified-poi-research.js").restoreCurrentVerifiedPoiResearchTasks>;
   reopenAmbiguousAutoConfirmedPoiResearchTasks(localProductId: string): ReturnType<typeof import("../parts/research-tasks.js").reopenAmbiguousAutoConfirmedPoiResearchTasks>;
   reopenKindSupersededPoiResearchTasks(localProductId: string, product: Record<string, unknown>): ReturnType<typeof import("../parts/research-tasks.js").reopenKindSupersededPoiResearchTasks>;
   markResearchTasksSatisfiedByProduct(localProductId: string, product: Record<string, unknown>): ReturnType<typeof import("../parts/research-tasks.js").markResearchTasksSatisfiedByProduct>;

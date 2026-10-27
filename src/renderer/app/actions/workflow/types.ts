@@ -18,6 +18,7 @@ export interface WorkflowDeps {
 export type WorkflowHandlers = {
   confirmTask: () => Promise<void>;
   refreshResearchIssues: () => Promise<void>;
+  deletePoiIssue: (target: import("../../../../shared/poi-issue-delete.js").PoiIssueDeleteTarget, name: string) => Promise<void>;
   resolveVehicleTask: () => Promise<void>;
   startAutomation: () => Promise<void>;
   stopAutomation: () => Promise<void>;

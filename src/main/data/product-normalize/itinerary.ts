@@ -68,6 +68,7 @@ export function normaliseItinerary(value: unknown) {
           poiId: normalisePoiId(raw.poiId),
           ...(textValue(raw.description) ? { description: textValue(raw.description) } : {}),
           ...Object.fromEntries(["province", "city", "district"].flatMap(key => textValue(raw[key]) ? [[key, textValue(raw[key])]] : [])),
+          ...Object.fromEntries(["latitude", "longitude"].flatMap(key => typeof raw[key] === "number" && Number.isFinite(raw[key]) ? [[key, raw[key]]] : [])),
           ...(timeOfDay ? { timeOfDay } : {}),
           ...(relation ? { relation } : {}),
           ...(raw.kind === "attraction" || raw.kind === "free" || raw.kind === "other" ? { kind: raw.kind } : {}),

@@ -66,7 +66,7 @@ test("POI verification updates current itinerary while keeping travel nodes out 
   assert.deepEqual((result.itinerary[0].spots as any[])[0], { name: "宽窄巷子", poiName: "宽窄巷子景区", poiId: 99 });
 });
 
-test("POI verification collapses same-day aliases resolved to one provider POI", () => {
+test("POI verification preserves distinct original same-day labels for one provider POI", () => {
   const result = applyPoiMatches([{
     day: 1,
     spots: [
@@ -81,6 +81,8 @@ test("POI verification collapses same-day aliases resolved to one provider POI",
   assert.equal(result.missing.length, 0);
   assert.deepEqual((result.itinerary[0].spots as any[]), [{
     name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, timeOfDay: "morning", relation: "and",
+  }, {
+    name: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105, timeOfDay: "morning", relation: "and",
   }]);
 });
 

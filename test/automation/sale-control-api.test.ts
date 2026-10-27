@@ -85,3 +85,21 @@ test("未签约或供应商不一致的业务线在创建之前停止", async ()
   await assert.rejects(resolveCreateBusinessContext(client({ providerId: 7 }), 1279416, "privateTour"), /供应商与当前账号不一致/);
   assert.equal(page.calls.some(call => call.endpoint.endsWith("saveSaleControlInfo")), false);
 });
+
+test("自由行没有同名业务线，按定制游业务线取上下文", async () => {
+  const { resolveCreateBusinessContext } = await import("../../src/main/automation/ctrip/sale-control/business-context.js");
+  const page = client({ providerId: 1279416, providerBusinessLineList: [
+    { cooperateBusinessLine: 6, businessLineName: "定制游", statusEnum: "signed" },
+    { cooperateBusinessLine: 1, businessLineName: "私家团", statusEnum: "signed", travelType: 1 },
+  ] });
+  assert.deepEqual(await resolveCreateBusinessContext(page, 1279416, "freeTravel"), { businessId: 6, travelType: 0 });
+});
+
+test("业务线缺失时报出应选业务线与当前已签约列表", async () => {
+  const { resolveCreateBusinessContext } = await import("../../src/main/automation/ctrip/sale-control/business-context.js");
+  const page = client({ providerId: 1279416, providerBusinessLineList: [
+    { cooperateBusinessLine: 1, businessLineName: "私家团", statusEnum: "signed", travelType: 1 },
+  ] });
+  await assert.rejects(resolveCreateBusinessContext(page, 1279416, "freeTravel"),
+    /应为「定制游」；当前已签约：私家团/);
+});

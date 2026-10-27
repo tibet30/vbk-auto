@@ -154,6 +154,7 @@ test("preload 的 category.method → channel 命名约定（同名简化）", (
     ["products.delete", "products:delete"],
     ["products.readiness", "products:readiness"],
     ["ai.send", "ai:send"],
+    ["ai.optimizeProductIdea", "ai:optimizeProductIdea"],
     ["ai.regenerate", "ai:regenerate"],
     ["automation.start", "automation:start"],
     ["automation.getItineraryReviewUnlockState", "automation:getItineraryReviewUnlockState"],

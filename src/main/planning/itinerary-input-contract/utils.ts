@@ -16,11 +16,15 @@
 
 import type { ProductDetail } from "../../../shared/contracts.js";
 import { isAdministrativeLocationName, toPlatformShortLocationName } from "../../../shared/location-short-name.js";
+import { isItineraryTransferName } from "../../../shared/itinerary-transfer-name.js";
 import { supportArrangementType } from "../../../shared/itinerary-support-arrangements.js";
 import { hasVerifiedRouteAdministrativeNode } from "../../../shared/route-administrative-nodes.js";
+import { isProductAdministrativeRouteName } from "../../../shared/product-administrative-route-name.js";
 import { hasCompletePoi } from "../../../shared/itinerary-activity-kind.js";
 import { poiResearchTaskNames } from "../../../shared/poi-research-tasks.js";
 import { experienceNameKey, isIndependentItineraryExperience } from '../../../shared/independent-itinerary-experience.js';
+import { isItineraryActivityPhrase } from '../../../shared/itinerary-activity-phrase.js';
+import { constraintUserIdea } from "../../../shared/product-idea-optimization.js";
 
 export const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -106,11 +110,19 @@ export function escapeRegExp(value: string): string {
 export function requiresLockedAttraction(name: string): boolean {
   const value = text(name);
   if (/^(?:上午|下午|晚上|全天)?\s*自由活动$/u.test(value)) return false;
+  if (isIndependentItineraryExperience(value) || isItineraryActivityPhrase(value)) return false;
   return !/(?:接团|送团|接机|送机|接站|送站|接送|无人机航拍|航拍|办理入住|集合|解散|乘车|返程)(?:服务)?$/u.test(value);
 }
 
 export function isSupportingLockedSpot(product: ProductDetail, dayNumber: number, name: string, nextDay?: Record<string, unknown>): boolean {
   const source = (asDayList(product.product.itinerary) ?? []).find(day => Number(day.day) === dayNumber);
+  if (/^(?:上午|下午|晚上|全天)?\s*自由活动$/u.test(text(name))) {
+    const day = nextDay ?? source;
+    return (Array.isArray(day?.activities) ? day.activities : []).some(value => {
+      const activity = asRecord(value);
+      return activity?.type === 'free' && text(activity.title).replace(/\s+/gu, '') === name.replace(/\s+/gu, '');
+    });
+  }
   if (isIndependentItineraryExperience(name)) {
     const day = nextDay ?? source;
     const key = experienceNameKey(name);
@@ -121,6 +133,11 @@ export function isSupportingLockedSpot(product: ProductDetail, dayNumber: number
       const spot = asRecord(value);
       return spot?.kind === 'other' && experienceNameKey(spotName(spot)) === key;
     });
+  }
+  if (isItineraryTransferName(name)) {
+    const bound = [source, nextDay].some(day => (Array.isArray(day?.spots) ? day.spots : []).map(asRecord)
+      .some(spot => spot && text(spot.name) === name && hasCompletePoi(spot)));
+    if (!bound) return true;
   }
   const existing = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
     .find(spot => spot && samePlace(spotName(spot), name));
@@ -145,6 +162,9 @@ export function hasTrustedOperatorNonPoiClassification(product: ProductDetail, d
 export function isDeletableAdministrativeLocation(product: ProductDetail, value: string, day?: number): boolean {
   if (hasVerifiedRouteAdministrativeNode(product.product, value, day)) return true;
   if (isAdministrativeLocationName(value)) return true;
+  // 「重庆万州」「万州送站」这类由产品行政锚点拼出的路线节点不是 POI；
+  // 否则规划期会要求为它绑定不存在的景点而反复失败。
+  if (isProductAdministrativeRouteName(product.product, value)) return true;
   const compact = value.replace(/\s+/g, "");
   if (!compact) return false;
   const basic = asRecord(product.product.basicInfo);
@@ -160,7 +180,7 @@ export function isDeletableAdministrativeLocation(product: ProductDetail, value:
   ].map((item) => text(item).replace(/\s+/g, "")).filter(Boolean);
   if (productLocationNames.includes(compact)) return true;
   const raw = [
-    text(asRecord(product.product.basicInfo)?.userIdea),
+    constraintUserIdea(product.product.basicInfo),
     ...(product.messages ?? []).filter((message) => message.role === "user").map((message) => message.content),
   ].join("\n").replace(/\s+/g, "");
   if (new RegExp(`(?:删除|移除|去掉|取消)(?:[^。；;]{0,40})${escapeRegExp(compact)}(?:[^。；;]{0,40})(?:行政|过境|城市|住宿|散团|节点|POI|poi)`, "u").test(raw)) {

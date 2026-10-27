@@ -8,6 +8,7 @@
 
 import { api } from "../../helpers";
 import { usesPlatformHotelRules } from "../../../../shared/platform-hotel-rules.js";
+import type { PoiIssueDeleteTarget } from "../../../../shared/poi-issue-delete.js";
 import type { WorkflowDeps } from "./types.js";
 
 export function buildResearchHandlers(deps: WorkflowDeps) {
@@ -87,6 +88,26 @@ export function buildResearchHandlers(deps: WorkflowDeps) {
     }
   };
 
+  /** 删除 POI 待处理项，并同步从每日行程移除对应景点。 */
+  const deletePoiIssue = async (target: PoiIssueDeleteTarget, name: string) => {
+    if (!product || !api()) return;
+    setNotice(null);
+    try {
+      const result = await api()!.research.removePoiIssue(product.id, target);
+      setProduct(result.product);
+      setReadiness(result.readiness);
+      setActiveTaskId(null);
+      setVerificationNote("");
+      const removed = result.removedNames.length
+        ? `，并从每日行程移除 ${result.removedNames.join("、")}`
+        : "（当前行程已无该景点）";
+      setNotice(`已删除「${name}」待处理项${removed}。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "删除 POI 失败，请重试。");
+      throw error;
+    }
+  };
+
   /** 重算并清理已由当前 product_json 满足的历史待处理事项。 */
   const refreshResearchIssues = async () => {
     if (!product || !api() || refreshingIssues) return;
@@ -116,5 +137,5 @@ export function buildResearchHandlers(deps: WorkflowDeps) {
     }
   };
 
-  return { confirmTask, resolveVehicleTask, refreshResearchIssues };
+  return { confirmTask, resolveVehicleTask, refreshResearchIssues, deletePoiIssue };
 }

@@ -1,5 +1,7 @@
 import type {
   CreateProductInput,
+  ProductIdeaOptimizationRequest,
+  ProductIdeaOptimizationResult,
   AiConnectionTestInput,
   AiModelListInput,
   AiModelListResult,
@@ -51,7 +53,6 @@ import type {
 } from "./contracts-auth.js";
 
 export type WorkflowTaskRetryMode = "from_error" | "from_start";
-
 /**
  * IPC 契约：renderer ↔ main 的强类型接口。
  *
@@ -61,8 +62,7 @@ export type WorkflowTaskRetryMode = "from_error" | "from_start";
  *  - preload 端：在 `preload.cts` 暴露同名 API；
  *  - renderer 端：`useAppActions` 等钩子里调用。
  *
- * 同一模块（例如 `browser`、`automation`、`accounts`、`settings`）内部按职责分组，
- * 新方法请加到对应分组下，不要在末尾追加。
+ * 同一模块内部按职责分组，新方法加到对应分组下。
  */
 
 export interface VbkApi {
@@ -110,6 +110,7 @@ export interface VbkApi {
     resume(id: string, mode: WorkflowTaskRetryMode): Promise<ProductWorkflowTask>;
   };
   ai: {
+    optimizeProductIdea(input: ProductIdeaOptimizationRequest): Promise<ProductIdeaOptimizationResult>;
     send(localProductId: string, content: string): Promise<void>;
     cancel(localProductId: string): Promise<{ cancelled: boolean }>;
     /**
@@ -121,10 +122,8 @@ export interface VbkApi {
   };
   research: {
     accept(localProductId: string, taskId: string, note?: string): Promise<void>;
-    refreshIssues(localProductId: string): Promise<{
-      updated: number; taskIds: string[]; confirmed: number; confirmedTaskIds: string[];
-      reopened: number; reopenedTaskIds: string[]; product: ProductDetail; readiness: ProductReadiness;
-    }>;
+    refreshIssues(localProductId: string): Promise<{ updated: number; taskIds: string[]; confirmed: number; confirmedTaskIds: string[]; reopened: number; reopenedTaskIds: string[]; product: ProductDetail; readiness: ProductReadiness }>;
+    removePoiIssue(localProductId: string, target: import('./poi-issue-delete.js').PoiIssueDeleteTarget): Promise<{ product: ProductDetail; readiness: ProductReadiness; removedNames: string[]; resolvedTaskIds: string[] }>;
     resolveVehicleResource(localProductId: string, taskId?: string): Promise<VehicleResourceMatch | undefined>;
     resolveHotelResource(localProductId: string, taskId?: string): Promise<HotelResourceMatch>;
   };

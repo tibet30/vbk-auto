@@ -1,4 +1,4 @@
-import { toWritableAdministrativeCityName } from "../../../../shared/region-overrides.js";
+import { toVbkCityName, toWritableAdministrativeCityName } from "../../../../shared/region-overrides.js";
 
 type Json = Record<string, any>;
 
@@ -24,6 +24,8 @@ const PROVINCE_LEVEL_NAMES = new Set([
   "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆", "香港", "澳门",
 ]);
 
+const SELF_OPERATED_PREFIX = "自营专用-";
+
 /** 遗留省级城市锚点使用已规划的明确接送城市自愈。 */
 export function resolveBasicInfoCityAnchor(product: Json): string {
   const info = record(product.basicInfo);
@@ -34,7 +36,8 @@ export function resolveBasicInfoCityAnchor(product: Json): string {
   }
   const pickupCity = String(record(product.operations).pickupCity ?? "").trim();
   if (pickupCity && PROVINCE_LEVEL_NAMES.has(trimAdministrativeSuffix(meetingCity))) return pickupCity;
-  return toWritableAdministrativeCityName(meetingCity);
+  // 「万州」这类直辖市下辖区县不在 VBK 城市列表中，只能落到其可写城市「重庆」。
+  return toVbkCityName(toWritableAdministrativeCityName(meetingCity));
 }
 
 /** 精确城市优先；只有省级范围产品可唯一降级到“省内/全景”线路。 */
@@ -45,10 +48,13 @@ export function selectProductLine(productLineDtos: unknown, info: Json, cityName
     `${trimAdministrativeSuffix(info.province)}一地`,
   ].filter((value) => value !== "一地"))];
   const lines = list(productLineDtos);
+  // 部分账号只开放「自营专用-<城市>一地」，与公开线路同义；公开线路优先。
   for (const name of candidates) {
-    const matches = lines.filter((item) => String(item.lineName ?? "").trim() === name);
-    if (matches.length === 1) return matches[0];
-    if (matches.length > 1) throw new Error(`产品线「${name}」无法唯一匹配：${matches.length} 个候选`);
+    for (const lineName of [name, `${SELF_OPERATED_PREFIX}${name}`]) {
+      const matches = lines.filter((item) => String(item.lineName ?? "").trim() === lineName);
+      if (matches.length === 1) return matches[0];
+      if (matches.length > 1) throw new Error(`产品线「${lineName}」无法唯一匹配：${matches.length} 个候选`);
+    }
   }
 
   const destination = trimAdministrativeSuffix(info.destinationCity);
@@ -78,14 +84,21 @@ export function isProductLineResolutionError(error: unknown): boolean {
     || message.startsWith("省级产品线「");
 }
 
-export function hasProductLineResolutionFailure(recovery: unknown): boolean {
-  const phase = record(recovery);
-  const attempts = [...list(phase.attemptsHistory), ...list(phase.attempts)];
-  return attempts.some((attempt) => isProductLineResolutionError(attempt.error))
-    || isProductLineResolutionError(phase.finalError);
+/** 产品线在 VBK 是非必填项：无法唯一匹配时不写，并把原因交给调用方记录。 */
+export function selectOptionalProductLine(
+  productLineDtos: unknown,
+  info: Json,
+  cityName: string,
+): { productLine: Json | null; skipReason?: string } {
+  try {
+    return { productLine: selectProductLine(productLineDtos, info, cityName) };
+  } catch (error) {
+    if (!isProductLineResolutionError(error)) throw error;
+    return { productLine: null, skipReason: (error as Error).message };
+  }
 }
 
-/** null 表示重试降级：保存包中完全不出现 productLineID。 */
+/** null 表示不写产品线：保存包中完全不出现 productLineID。 */
 export function productLineSaveField(productLine: Json | null): Json {
   return productLine ? { productLineID: Number(productLine.lineId) } : {};
 }

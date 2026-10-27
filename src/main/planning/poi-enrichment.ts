@@ -12,8 +12,10 @@ import type { OrchestratorRuntime } from "./types.js";
 import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { buildPoiContextForItineraryDay } from "./poi-context.js";
-import { queryPoi, applyPoiMatch, queryPoiAvailability, queryItineraryPoiAvailabilities, isTravelNodeName } from "./poi-enrichment/query.js";
-import { isPlanningPoiCandidateInContext } from "./poi-auto-selection.js";
+import { queryPoi, applyPoiMatch, queryPoiAvailability, queryItineraryPoiAvailabilities, isTravelNodeName, backfillItineraryPoiCoordinates } from "./poi-enrichment/query.js";
+import { hasDefinitePoiLocationConflict } from "./poi-location-conflict.js";
+import { isCompatiblePoiIdentity } from "../../shared/poi-candidate-identity.js";
+import { poiResearchFailureDetail } from "../../shared/poi-research-outcome.js";
 import type { VerifiedPoiMapping } from "./types.js";
 
 interface PoiEnrichmentArgs {
@@ -48,25 +50,33 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
     && (hasIncompleteItineraryPois(product) || (shouldReviewCompletePois && hasCompleteItineraryPois(product)))) {
     const updated = structuredClone(product.itinerary) as any[];
     const availabilityByPoiId = await queryItineraryPoiAvailabilities(runtime, localProductId, updated, shouldReviewCompletePois, queryTimeoutMs);
-    let poiUpdated = false;
+    const deferred: Array<{ day: any; spot: any; keyword: string; poiContext: ReturnType<typeof buildPoiContextForItineraryDay>;
+      reviewingComplete: boolean; attempt: Awaited<ReturnType<typeof selectSpotPoi>> }> = [];
+    let deferredBaseline = 0;
+    const pendingTasks: Array<{ keyword: string; detail: string }> = [];
+    // 地域复核前补齐已绑定 POI 的平台坐标，跨城景点才能按路线走廊回读证明。
+    let poiUpdated = shouldReviewCompletePois
+      && await backfillItineraryPoiCoordinates(runtime, localProductId, updated, queryTimeoutMs);
+
     for (const day of updated) {
-      const poiContext = buildPoiContextForItineraryDay(product, args.destination, day);
       for (const spot of Array.isArray(day?.spots) ? day.spots : []) {
         const keyword = typeof spot === "string" ? spot : spot?.name ?? spot?.poiName;
         if (!keyword) continue;
         if (!requiresItineraryPoi(spot as Record<string, unknown>)) continue;
+        const poiContext = buildPoiContextForItineraryDay(product, args.destination, day, String(keyword));
         let invalidLocation = false;
+        let invalidIdentity = false;
         let reviewingComplete = false;
         if (hasCompletePoi(spot as Record<string, unknown>)) {
           if (!shouldReviewCompletePois) continue;
           reviewingComplete = true;
+          invalidIdentity = !isCompatiblePoiIdentity(String(keyword), String(spot.poiName));
           const availability = availabilityByPoiId.get(spot.poiId) ?? await queryPoiAvailability(runtime, localProductId, spot.poiId, queryTimeoutMs);
           if (availability === "suspended") {
             const retainedName = String(spot.name || keyword);
             clearPoiBinding(spot);
             poiUpdated = true;
-            await addPoiResearchTask({
-              runtime, localProductId, persistedTaskKeys, addedTasks,
+            pendingTasks.push({
               keyword: retainedName,
               detail: "携程景点详情标记为暂停营业，已清除旧 POI 绑定并保留原行程位置；请待恢复营业后重新查询或替换景点",
             });
@@ -76,39 +86,26 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           // Re-resolve every reviewed mapping. Definite location contradictions
           // are cleared immediately; an inconclusive lookup retains the old
           // fact but opens a durable current-verification gate below.
-          const hasKnownLocation = Boolean(spot.city || spot.province);
-          invalidLocation = hasKnownLocation && !isPlanningPoiCandidateInContext({
+          invalidLocation = hasDefinitePoiLocationConflict({
             ...spot,
-            province: spot.province || poiContext.province,
-            city: spot.city || poiContext.destinationCity,
             index: 0, selectable: true, textFields: [],
-          }, poiContext, product, String(keyword));
-          if (invalidLocation) {
+          }, poiContext, { ...product, itinerary: updated }, String(keyword));
+          if (invalidLocation || invalidIdentity) {
             clearPoiBinding(spot);
             poiUpdated = true;
           }
         }
         const originalKeyword = String(keyword);
-        const firstQuery = isTravelNodeName(originalKeyword)
-          ? { match: null, failed: false, suspended: false }
-          : await queryPoi({ runtime, localProductId, keyword: originalKeyword, queryTimeoutMs, context: poiContext });
-        let match = firstQuery.match;
-        let queryFailed = firstQuery.failed;
-        let suspended = firstQuery.suspended;
-        let selectionReason = firstQuery.reason;
-        // “永祚寺（双塔寺）”这类官方名+同地点别名先做确定性别名查询，
-        // 避免整串关键词召回外地同名前缀，也避免模型原样重复后耗尽重试。
-        if (!match && !queryFailed && !suspended) {
-          for (const alias of queryAliases(originalKeyword)) {
-            if (isTravelNodeName(alias)) continue;
-            const aliasQuery = await queryPoi({ runtime, localProductId, keyword: alias, queryTimeoutMs, context: poiContext });
-            match = aliasQuery.match;
-            queryFailed = aliasQuery.failed;
-            suspended = aliasQuery.suspended;
-            selectionReason = aliasQuery.reason;
-            if (match || queryFailed || suspended) break;
-          }
+        const attempt = await selectSpotPoi({ runtime, localProductId, queryTimeoutMs, itinerary: updated,
+          spot, keyword: originalKeyword, poiContext, reviewingComplete, deferLocation: true });
+        // 跨城景点靠同轮已绑定的锚点城市景点作路线走廊参考；先绑定其余景点，再补核一次。
+        if (!attempt.match && !attempt.queryFailed && !attempt.suspended && attempt.selectionReason === "location_mismatch"
+          && !invalidLocation && !invalidIdentity) {
+          if (!deferred.length) deferredBaseline = boundPointCount(updated);
+          deferred.push({ day, spot, keyword: originalKeyword, poiContext, reviewingComplete, attempt });
+          continue;
         }
+        const { match, queryFailed, suspended, selectionReason } = attempt;
         if (match && spot && typeof spot === "object" && !Array.isArray(spot)) {
           applyPoiMatch(spot, match);
           poiUpdated = true;
@@ -116,14 +113,8 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (match && typeof spot === "string") {
           const index = day.spots.indexOf(spot);
-          day.spots[index] = {
-            name: spot,
-            poiName: match.poiName,
-            poiId: match.poiId,
-            ...(match.province ? { province: match.province } : {}),
-            ...(match.city ? { city: match.city } : {}),
-            ...(match.district ? { district: match.district } : {}),
-          };
+          day.spots[index] = { name: spot };
+          applyPoiMatch(day.spots[index], match);
           poiUpdated = true;
           recordVerifiedMapping(verifiedMappings, runtime, day, originalKeyword, match);
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
@@ -133,30 +124,45 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             poiUpdated = true;
           }
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
-          const retainedForCurrentReview = reviewingComplete && !invalidLocation && !suspended;
-          const detail = retainedForCurrentReview && queryFailed
-            ? "本轮 POI 核验未完成：平台查询失败或超时，已保留先前绑定；请重新查询并确认当前 POI"
-            : retainedForCurrentReview && selectionReason === "ambiguous"
-            ? "本轮 POI 核验未完成：当前查询召回多个候选，无法安全确定唯一地点，已保留先前绑定；请重新查询或手动选择 POI"
-            : retainedForCurrentReview && selectionReason === "location_mismatch"
-            ? "本轮 POI 核验未完成：候选地域信息不足或与当前行程上下文不一致，已保留先前绑定；请重新查询并确认当前 POI"
-            : retainedForCurrentReview
-            ? "本轮 POI 核验未完成：当前查询未召回可确认候选，已保留先前绑定；请重新查询或手动确认当前 POI"
-            : suspended
-            ? "携程景点详情标记为暂停营业，不能加入行程；请替换为正常营业景点"
-            : isTravelNodeName(originalKeyword)
-            ? "该名称是接送/交通/住宿节点，不能作为行程景点 POI；请替换为可游览景点"
-            : selectionReason === "location_mismatch"
-            ? "已找到候选 POI，但其地域与产品主城市不一致；请确认当天行程地点范围或手动绑定 POI"
-            : selectionReason === "ambiguous"
-            ? "已找到多个候选 POI，但程序无法安全确定唯一地点；请手动选择 POI"
-            : "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI";
-          await addPoiResearchTask({
-            runtime, localProductId, persistedTaskKeys, addedTasks,
+          const detail = poiResearchFailureDetail({
+            reason: selectionReason,
+            reviewingComplete,
+            queryFailed,
+            invalidLocation,
+            invalidIdentity,
+            suspended,
+            travelNode: isTravelNodeName(originalKeyword),
+          });
+          pendingTasks.push({
             keyword: String(keyword), detail,
           });
         }
       }
+    }
+    // 补核轮走完整查询（原名 + 别名 + 复核时的官方名回查）。首轮跳过的别名/官方名
+    // 查询不依赖走廊参考，必须照常执行；只有原名查询在没有新增参考时可沿用首轮结论。
+    const referencesAdded = deferred.length > 0 && boundPointCount(updated) > deferredBaseline;
+    for (const item of deferred) {
+      const { day, spot, keyword, poiContext, reviewingComplete } = item;
+      const { match, queryFailed, suspended, selectionReason } = await selectSpotPoi({ runtime, localProductId, queryTimeoutMs,
+        itinerary: updated, spot, keyword, poiContext, reviewingComplete, firstAttempt: referencesAdded ? undefined : item.attempt });
+      if (match) {
+        if (typeof spot === "string") {
+          const index = day.spots.indexOf(spot);
+          day.spots[index] = { name: spot };
+          applyPoiMatch(day.spots[index], match);
+        } else applyPoiMatch(spot, match);
+        poiUpdated = true;
+        recordVerifiedMapping(verifiedMappings, runtime, day, keyword, match);
+        logInfo("[planning.poi]", { event: "query-success-after-references", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
+        continue;
+      }
+      // 与首轮一致：非复核景点查询失败时不建任务，留给下次重试。
+      if (queryFailed && !reviewingComplete) continue;
+      logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
+      pendingTasks.push({ keyword,
+        detail: poiResearchFailureDetail({ reason: selectionReason, reviewingComplete, queryFailed, invalidLocation: false,
+          invalidIdentity: false, suspended, travelNode: isTravelNodeName(keyword) }) });
     }
     if (poiUpdated) {
       const writeResult = runtime.writeResolvedItineraryPois
@@ -169,9 +175,82 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
       }
       logInfo("[planning.poi]", { event: "write-back", localProductId });
     }
+    // 任务在行程落库后才写入：重开判断要读到本轮清除/改绑后的产品，否则旧绑定
+    // 仍能对上旧凭证，被清除绑定的已确认任务不会重新打开。
+    for (const task of pendingTasks) {
+      await addPoiResearchTask({ runtime, localProductId, persistedTaskKeys, addedTasks, ...task });
+    }
   }
 
   return addedTasks;
+}
+
+/** 一次受控 POI 选择：原名、同地点别名，复核时再用已绑定官方名回查同一 poiId。 */
+async function selectSpotPoi(args: {
+  runtime: OrchestratorRuntime; localProductId: string; queryTimeoutMs: number; itinerary: unknown[];
+  spot: any; keyword: string; poiContext: ReturnType<typeof buildPoiContextForItineraryDay>; reviewingComplete: boolean;
+  /** 首轮：原名地点未证实时直接返回，待同轮锚点景点绑定后再补核。 */
+  deferLocation?: boolean;
+  /** 补核轮在没有新增走廊参考时复用首轮原名查询结果，不重复同一请求。 */
+  firstAttempt?: { match: Awaited<ReturnType<typeof queryPoi>>["match"]; queryFailed: boolean; suspended: boolean;
+    selectionReason: Awaited<ReturnType<typeof queryPoi>>["reason"] };
+}) {
+  const { runtime, localProductId, queryTimeoutMs, itinerary: updated, spot, reviewingComplete, poiContext } = args;
+  const originalKeyword = args.keyword;
+    const firstQuery = args.firstAttempt
+      ? { match: args.firstAttempt.match, failed: args.firstAttempt.queryFailed, suspended: args.firstAttempt.suspended, reason: args.firstAttempt.selectionReason }
+      : isTravelNodeName(originalKeyword)
+      ? { match: null, failed: false, suspended: false, reason: undefined }
+      : await queryPoi({ runtime, localProductId, keyword: originalKeyword, queryTimeoutMs, context: poiContext, itinerary: updated });
+    let match = firstQuery.match;
+    let queryFailed = firstQuery.failed;
+    let suspended = firstQuery.suspended;
+    let selectionReason = firstQuery.reason;
+    // “永祚寺（双塔寺）”这类官方名+同地点别名先做确定性别名查询，
+    // 避免整串关键词召回外地同名前缀，也避免模型原样重复后耗尽重试。
+    // 原名已召回同名候选、只是地点未证实时，换别名查不到新证据：交给补核轮。
+    if (!match && !queryFailed && !suspended && !(args.deferLocation && selectionReason === "location_mismatch")) {
+      for (const alias of queryAliases(originalKeyword)) {
+        if (isTravelNodeName(alias)) continue;
+        const aliasQuery = await queryPoi({ runtime, localProductId, keyword: alias, queryTimeoutMs, context: poiContext, itinerary: updated });
+        match = aliasQuery.match;
+        queryFailed = aliasQuery.failed;
+        suspended = aliasQuery.suspended;
+        selectionReason = aliasQuery.reason;
+        if (match || queryFailed || suspended) break;
+      }
+    }
+    // 复核已绑定 POI 时，用户的原始叫法常常只是俗称（「船观神女峰」→
+    // 「神女峰」），用俗称重查永远无法复现唯一候选，会把已经核验成功的
+    // 绑定反复重开成待处理事项。这里用已绑定的官方 poiName 再走一次同
+    // 一条受控核验；只有回到同一个 poiId 才算复核通过，换 ID 一律按原
+    // 失败流程阻塞，不能借官方名洗白历史错配。
+    if (!match && !queryFailed && !suspended && reviewingComplete
+      && !(args.deferLocation && selectionReason === "location_mismatch")
+      && spot && typeof spot === "object" && !Array.isArray(spot)) {
+      const officialName = textValue(spot.poiName);
+      const boundPoiId = Number(spot.poiId);
+      if (officialName && officialName !== originalKeyword && !isTravelNodeName(officialName)
+        && Number.isInteger(boundPoiId) && boundPoiId > 0) {
+        // 选择器会优先使用 context.spotName 做身份匹配，必须把它改成官方名，
+        // 否则平台用官方名查询、本地却仍按原始俗称判定，等于没回查。
+        const officialContext = { ...poiContext, spotName: officialName };
+        const officialQuery = await queryPoi({ runtime, localProductId, keyword: officialName, queryTimeoutMs, context: officialContext, itinerary: updated });
+        if (officialQuery.match?.poiId === boundPoiId) {
+          match = officialQuery.match;
+          selectionReason = officialQuery.reason;
+          logInfo("[planning.poi]", { event: "review-official-name-confirmed", localProductId, keyword: originalKeyword, poiName: officialName, poiId: boundPoiId });
+        }
+      }
+    }
+  return { match, queryFailed, suspended, selectionReason };
+}
+
+/** 带平台坐标的已绑定景点数，用于判断补核轮是否有新的走廊参考。 */
+function boundPointCount(itinerary: any[]): number {
+  return itinerary.flatMap((day) => Array.isArray(day?.spots) ? day.spots : [])
+    .filter((spot) => spot && typeof spot === "object" && hasCompletePoi(spot)
+      && Number.isFinite(spot.latitude) && Number.isFinite(spot.longitude)).length;
 }
 
 function recordVerifiedMapping(
@@ -199,6 +278,8 @@ function queryAliases(value: string): string[] {
   const aliases = bracketAliases(value);
   if (/措$/u.test(value)) aliases.push(value.replace(/措$/u, "错"));
   else if (/错$/u.test(value)) aliases.push(value.replace(/错$/u, "措"));
+  if (/淞/u.test(value)) aliases.push(value.replace(/淞/gu, "凇"));
+  else if (/凇/u.test(value)) aliases.push(value.replace(/凇/gu, "淞"));
   return [...new Set(aliases.filter((alias) => alias && alias !== value.trim()))];
 }
 
@@ -248,6 +329,8 @@ function clearPoiBinding(spot: Record<string, unknown>): void {
   delete spot.province;
   delete spot.city;
   delete spot.district;
+  delete spot.latitude;
+  delete spot.longitude;
 }
 
 function textValue(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }

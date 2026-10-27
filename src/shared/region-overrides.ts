@@ -45,6 +45,26 @@ export function isNonWritableCityAlias(value: unknown): boolean {
   return trimmed.length > 0 && NON_WRITABLE_CITY_NAMES.has(trimmed);
 }
 
+/**
+ * 平台城市列表缺失的行政区 → 平台唯一可写城市。
+ *
+ * 与 NON_WRITABLE_CITY_NAMES 的区别：这里的名字是真实行政区（万州区隶属于
+ * 重庆），产品必须按实际逐晚住宿城市保存；只是 VBK suggestDepartureCity 只
+ * 返回城市级节点，查询「万州」「万州区」均为空，平台只能写重庆（cityId=4，
+ * 产品线「重庆一地」）。因此只在平台城市查询与远端回读比对时映射，产品字段
+ * 仍保留「万州」，避免把区县名误写成城市或反过来丢掉跨城住宿。
+ */
+const VBK_MISSING_CITY_NAMES: ReadonlyMap<string, string> = new Map([
+  ["万州", "重庆"],
+]);
+
+/** 把平台城市列表缺失的行政区映射成 VBK 可写城市；未命中时原样返回。 */
+export function toVbkCityName(value: unknown): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return trimmed;
+  return VBK_MISSING_CITY_NAMES.get(trimmed) ?? trimmed;
+}
+
 /** 酒店描述中存在多个并存的城市时，按优先级返回最具体的地点。 */
 export function hotelLocationFromHotelText(value: string): string {
   // 每晚住宿字段中的明确市县优先；不能把跨城线路都回退到产品接团城市。

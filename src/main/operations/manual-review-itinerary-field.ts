@@ -21,8 +21,14 @@ export function applyItinerarySpotPoi(product: Json, input: Extract<ManualReview
   const spot = dayRecord.spots[input.spotIndex];
   if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
   if (!requiresItineraryPoi(spot as Json)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
-  dayRecord.spots[input.spotIndex] = { ...(spot as Json), poiName, poiId: input.poiId,
+  const updated: Json = { ...(spot as Json), poiName, poiId: input.poiId,
     province: locationText(input.province), city: locationText(input.city), district: locationText(input.district) };
+  // 坐标随本次绑定一起替换：旧 POI 的坐标不能留给新 POI 作走廊证据。
+  delete updated.latitude; delete updated.longitude;
+  if (Number.isFinite(input.latitude) && Number.isFinite(input.longitude)) {
+    updated.latitude = input.latitude; updated.longitude = input.longitude;
+  }
+  dayRecord.spots[input.spotIndex] = updated;
   return next;
 }
 
@@ -36,6 +42,7 @@ export function applyItinerarySpotKind(product: Json, input: Extract<ManualRevie
   const updated: Json = { ...(spot as Json), kind: input.kind, ...(input.description === undefined ? {} : { description: input.description.trim() }) };
   if (input.kind !== 'attraction') { delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType; }
   else { updated.poiId = null; updated.poiName = null; delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType; }
+  delete updated.latitude; delete updated.longitude;
   spots[input.spotIndex] = normaliseItinerarySpotKind(updated);
   return next;
 }

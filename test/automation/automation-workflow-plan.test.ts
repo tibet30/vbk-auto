@@ -7,6 +7,7 @@ import { parseProduct } from "../../src/main/automation/schema/schema.js";
 import { preparePhaseRetry, prepareQueuedPhaseResume, prepareSinglePhaseRetry } from "../../src/main/automation/phase-retry.js";
 import { failedAutomationResumePhase } from "../../src/main/automation/automation.main/automation.main.resume-phase.js";
 import { settleRunAfterVerifiedPreflight } from "../../src/main/automation/automation.main/automation.main.run-one-state.js";
+import { SALE_CONTROL_CREATE_TRACKED } from "../../src/main/automation/automation.main/automation.main.class/lifecycle.js";
 
 function product(status: "failed" | "queued" | "succeeded" | "cancelled" = "failed") {
   const value = buildProductSnapshot({ destination: "成都", days: 1, productForm: "groupTour" });
@@ -56,8 +57,12 @@ test("pre-write guard rejection can restart even after the shared failure transi
   value.automation!.recovery = { phases: { saleControl: { phase: "saleControl", state: "needs_user", attempts: [], finalError: "当前任务未处于可录入状态。" } } };
   assert.equal(automationStartPhase(value), undefined);
   assert.deepEqual(approvedWorkflowPlan(value), { kind: "run" });
+  // 没有追踪起点的旧记录：缺少创建意图日志不能证明请求未发出，走权威核查而非重建。
   value.automation!.logs = [];
   assert.deepEqual(approvedWorkflowPlan(value), { kind: "run", retryFrom: "saleControl" });
+  // 本版本记录：有追踪起点、没有创建意图，属于创建前失败，直接从销售控制重跑。
+  value.automation!.logs = [{ at: "now", level: "info", message: SALE_CONTROL_CREATE_TRACKED }];
+  assert.deepEqual(approvedWorkflowPlan(value), { kind: "run" });
 });
 
 test("a cancelled shell with a durable ID enters read-only recovery instead of recreation", () => {

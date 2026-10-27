@@ -1,4 +1,4 @@
-import { ensureBasicInfoApi, isProductLineResolutionError } from "../../ctrip/basic-info/api.js";
+import { ensureBasicInfoApi } from "../../ctrip/basic-info/api.js";
 import { advanceSavedProductWizardStage } from "../../ctrip/product-wizard.js";
 import { shouldRefillBasicInfo } from "../../schema/schema.js";
 import { writeAutomationProduct } from "../automation.main.persist.js";
@@ -11,7 +11,7 @@ import { executeDraftPhase } from "./phase.js";
 
 export type BasicExecutionState = Pick<AutomationSetup,
   "productDetail" | "product" | "run" | "page" | "log" | "persist" | "butlerSelection"
-  | "servicePhone" | "scenicSpotLogs" | "basicInfoSaved" | "productLineBlocked" | "wizardAdvanceOnly">;
+  | "servicePhone" | "scenicSpotLogs" | "basicInfoSaved" | "wizardAdvanceOnly">;
 
 /** Basic info shares supplier-code refresh, account context and remote verification in both modes. */
 export function buildBasicExecute(
@@ -43,29 +43,26 @@ export function buildBasicExecute(
         const result = await ensureBasicInfoApi(...args);
         return result;
       };
-      try {
-        return await runBasicInfoSaveWithCopyRepair({
-          product: productPayload,
-          save: executeBasicInfoApi,
-          // 只改基本信息的自由文案，落库后仍由平台回读验收。
-          persist: () => {
-            productDetail.product = productPayload as unknown as Record<string, unknown>;
-            writeAutomationProduct(ctx, setup.productDetail.id, productDetail.product, "automating");
-          },
-          log: setup.log,
-          knownRejectedWords: ctx.db.listRejectedBasicInfoWords?.() ?? [],
-          onLearned: (words, labels, detail) => {
-            for (const word of words) {
-              try {
-                ctx.db.recordCopyFeedback({ word, module: "basicInfo", paths: [...labels], source: "basic-info-save", detail });
-              } catch { /* 学习失败不影响本次修复。 */ }
-            }
-          },
-        });
-      } catch (error) {
-        if (isProductLineResolutionError(error)) setup.productLineBlocked = true;
-        throw error;
-      }
+      const result = await runBasicInfoSaveWithCopyRepair({
+        product: productPayload,
+        save: executeBasicInfoApi,
+        // 只改基本信息的自由文案，落库后仍由平台回读验收。
+        persist: () => {
+          productDetail.product = productPayload as unknown as Record<string, unknown>;
+          writeAutomationProduct(ctx, setup.productDetail.id, productDetail.product, "automating");
+        },
+        log: setup.log,
+        knownRejectedWords: ctx.db.listRejectedBasicInfoWords?.() ?? [],
+        onLearned: (words, labels, detail) => {
+          for (const word of words) {
+            try {
+              ctx.db.recordCopyFeedback({ word, module: "basicInfo", paths: [...labels], source: "basic-info-save", detail });
+            } catch { /* 学习失败不影响本次修复。 */ }
+          }
+        },
+      });
+      if (result.productLineSkipReason) setup.log(`产品线为非必填项，本次不写入：${result.productLineSkipReason}`, "warning");
+      return result;
     };
     const advanceWizard = async () => {
       const advanced = await advanceSavedProductWizardStage(
@@ -89,7 +86,6 @@ export function buildBasicExecute(
           productIdRef.current!,
           butlerSelection!,
           servicePhone,
-          { skipProductLine: setup.productLineBlocked },
         );
         setup.log(`地接社已${result.localTravelAgency.selection === "defaulted" ? "自动选择" : "确认"}：${result.localTravelAgency.name || "未命名"}（${result.localTravelAgency.id}）`);
         setup.log(`供应商产品编号已通过基本信息 API 写入并完成回读：${supplierCode}`);
@@ -115,7 +111,6 @@ export function buildBasicExecute(
       productIdRef.current,
       butlerSelection!,
       servicePhone,
-      { skipProductLine: setup.productLineBlocked },
     );
     setup.log(`地接社已${result.localTravelAgency.selection === "defaulted" ? "自动选择" : "确认"}：${result.localTravelAgency.name || "未命名"}（${result.localTravelAgency.id}）`);
     // 把景点未命中的单项沉淀到 automation 日志。

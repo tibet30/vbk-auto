@@ -35,6 +35,9 @@ export interface PoiSuggestCandidate {
   city?: string | null;
   district?: string | null;
   address?: string | null;
+  /** 平台返回的 WGS 坐标；用于跨城景点的路线走廊核验。 */
+  latitude?: number | null;
+  longitude?: number | null;
   selectable: boolean;
   textFields: PoiSuggestTextField[];
 }

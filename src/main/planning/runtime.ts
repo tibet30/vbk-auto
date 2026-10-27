@@ -120,14 +120,15 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     return this.runVbkPageExclusive ? this.runVbkPageExclusive(query) : query();
   }
 
-  async resolvePoiSelection(localProductId: string, keyword: string, context?: { destinationCity?: string; province?: string }) {
+  async resolvePoiSelection(localProductId: string, keyword: string, context?: { destinationCity?: string; province?: string },
+    itinerary?: unknown[]) {
     if (!this.browser) return { status: "uncertain" as const };
     const product = this.db.getProduct(localProductId);
     if (!product) return { status: "uncertain" as const };
     const query = async () => resolvePlanningPoiAutoSelection({
       localProductId,
       keyword,
-      product: product.product,
+      product: itinerary ? { ...product.product, itinerary } : product.product,
       context,
       detail: await platformResourceGateway(this.db, localProductId).query('poi', { keyword, context }, async () => this.resourceQueries?.poi
         ? this.resourceQueries.poi(keyword, context) : suggestPoiDetail(await getVbkRequestPage(this.browser!), keyword, context), value => !value.candidates.length),
@@ -141,6 +142,17 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
   async getPoiAvailability(poiId: number) {
     if (this.resourceQueries?.poiAvailability) return this.resourceQueries.poiAvailability(poiId);
     return getCtripSightAvailability(undefined, poiId, this.db);
+  }
+
+  async getPoiCoordinates(poiName: string, poiId: number) {
+    if (!this.browser && !this.resourceQueries?.poi) return undefined;
+    const query = async () => this.resourceQueries?.poi
+      ? this.resourceQueries.poi(poiName)
+      : suggestPoiDetail(await getVbkRequestPage(this.browser!), poiName);
+    const detail = await (this.runVbkPageExclusive && !this.resourceQueries?.poi ? this.runVbkPageExclusive(query) : query());
+    const row = detail.candidates.find(candidate => candidate.poiId === poiId);
+    return typeof row?.latitude === "number" && typeof row.longitude === "number"
+      ? { latitude: row.latitude, longitude: row.longitude } : undefined;
   }
 
   async getPoiAvailabilities(poiIds: readonly number[]) {

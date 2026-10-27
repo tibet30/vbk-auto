@@ -74,6 +74,7 @@ export interface ReviewSummaryProps {
   onResolveVehicle: () => Promise<void> | void;
   refreshingIssues: boolean;
   onRefreshIssues: () => Promise<void> | void;
+  onDeletePoiIssue: (target: import("../../../../../shared/poi-issue-delete.js").PoiIssueDeleteTarget, name: string) => Promise<void>;
 }
 
 /** 统计产品 JSON 对象顶层键的数量，给运营一个结构直觉；不会递归整个树。 */
@@ -122,6 +123,7 @@ export function AppWorkspaceReviewSummary({
   onResolveVehicle,
   refreshingIssues,
   onRefreshIssues,
+  onDeletePoiIssue,
 }: ReviewSummaryProps) {
   const previous = useRef({ id: product.id, value: product.product });
   const [changed, setChanged] = useState<string[]>([]);
@@ -277,6 +279,7 @@ export function AppWorkspaceReviewSummary({
               />
 
               <AppWorkspaceReviewSummaryOpenIssues
+                product={product}
                 hotelStateRefreshNeeded={usesPlatformHotelRules(product.product) && Boolean(product.automation?.phases.some(p => p.phase === "hotelResource" && p.status === "failed"))}
                 readiness={readiness}
                 taskList={taskList}
@@ -287,6 +290,7 @@ export function AppWorkspaceReviewSummary({
                 onToggleCollapsed={() => setOpenIssuesCollapsed((v) => !v)}
                 refreshing={refreshingIssues}
                 onRefresh={onRefreshIssues}
+                onDeletePoiIssue={onDeletePoiIssue}
               />
 
               <AppWorkspaceReviewSummaryTraffic

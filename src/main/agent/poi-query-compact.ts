@@ -1,5 +1,7 @@
 import type { PoiSuggestCandidate, PoiSuggestDetailResult } from "../../shared/contracts-types.js";
 import { chooseUsablePoiOptions, type PoiUsabilityDecision } from "../planning/poi-usable-choices.js";
+import { isCompatiblePoiIdentity, samePoiIdentityName } from "../../shared/poi-candidate-identity.js";
+import { isKnownPoiNameAlias } from "../../shared/poi-name-aliases.js";
 
 export type CompactPoiCandidate = {
   poiName: string | null;
@@ -16,6 +18,7 @@ export type CompactPoiCandidate = {
 /** 给模型看的精简 POI 结果：避免完整候选列表撑爆 24KB 截断。 */
 export function compactPoiQueryResult(args: {
   keyword: string;
+  identityName?: string;
   detail: PoiSuggestDetailResult;
   availability: Map<number, { status: "available" | "suspended" }>;
   maxCandidates?: number;
@@ -29,7 +32,8 @@ export function compactPoiQueryResult(args: {
   usableDecision: PoiUsabilityDecision;
 } {
   const maxCandidates = Math.max(1, Math.min(20, args.maxCandidates ?? 20));
-  const enriched = args.detail.candidates.map((item) => enrichCandidate(item, args.availability));
+  const enriched = args.detail.candidates.map((item) => enrichCandidate({ ...item,
+    selectable: item.selectable && isCompatiblePoiIdentity(args.identityName || args.keyword, item.poiName ?? '') }, args.availability));
   const usable = enriched.filter((item) => item.usable);
   const selected = (usable.length ? usable : enriched.filter((item) => item.selectable)).slice(0, maxCandidates);
   const decision = chooseUsablePoiOptions(enriched
@@ -45,7 +49,7 @@ export function compactPoiQueryResult(args: {
     httpStatus: args.detail.httpStatus,
     businessStatus: args.detail.businessStatus,
     poiListCount: args.detail.poiListCount,
-    best: args.detail.best,
+    best: args.detail.best && isCompatiblePoiIdentity(args.identityName || args.keyword, args.detail.best.poiName) ? args.detail.best : null,
     candidates: selected,
     usableDecision: decision,
   };
@@ -53,20 +57,25 @@ export function compactPoiQueryResult(args: {
 
 export function poiCandidatesForAvailability(args: {
   keyword: string;
+  identityName?: string;
   detail: PoiSuggestDetailResult;
   maxCandidates?: number;
 }): PoiSuggestCandidate[] {
   const maxCandidates = Math.max(1, Math.min(20, args.maxCandidates ?? 5));
-  const selectable = args.detail.candidates.filter((item) => item.selectable && item.poiId);
+  const selectable = args.detail.candidates.filter((item) => item.selectable && item.poiId
+    && isCompatiblePoiIdentity(args.identityName || args.keyword, item.poiName ?? ''));
+  const named = selectable.filter(item => samePoiIdentityName(args.identityName || args.keyword, item.poiName ?? ''));
+  if (new Set(named.map(item => item.poiId)).size > 1) return [];
   const bestId = args.detail.best?.poiId;
   if (bestId) {
     const bestCandidate = selectable.find((item) => item.poiId === bestId);
-    return bestCandidate ? [bestCandidate] : [];
+    if (bestCandidate) return [bestCandidate];
   }
   const keyword = normalisePoiName(args.keyword);
   if (!keyword || keyword.length < 2) return [];
   return selectable
-    .filter((item) => isStrongPoiNameMatch(keyword, normalisePoiName(item.poiName)))
+    .filter((item) => isStrongPoiNameMatch(keyword, normalisePoiName(item.poiName))
+      || isKnownPoiNameAlias(args.identityName || args.keyword, item.poiName ?? ''))
     .slice(0, maxCandidates);
 }
 

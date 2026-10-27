@@ -100,6 +100,31 @@ test("人工选定 POI 后歧义决策门 task 结清，并留下受控凭证", 
   }
 });
 
+test("人工重新选定已保留的 POI 后结清本轮核验任务", () => {
+  const { db, cleanup } = withDb();
+  try {
+    const { product, taskId } = seedProduct(db,
+      "本轮 POI 核验未完成：当前查询召回多个候选，无法安全确定唯一地点，已保留先前绑定；请重新查询或手动选择 POI");
+    const input = manualPoiInput();
+    saveManualField(db, product.id, input);
+
+    const { settledTaskIds, result } = settleFromSaved(db, product.id, input);
+    assert.deepEqual(settledTaskIds, [taskId]);
+    assert.equal(result.researchTasks.find(item => item.id === taskId)?.state, "confirmed");
+  } finally {
+    cleanup();
+  }
+});
+
+test("人工 POI 写入即使没有新结清任务也同步远端产品快照", () => {
+  const source = fs.readFileSync(path.resolve("src/main/ipc/product-ai-ipc.ts"), "utf8");
+  const handler = source.match(/ipcMain\.handle\("products:updateReviewField"[\s\S]*?return resultProduct;\n  \}\);/)?.[0] ?? "";
+  assert.match(handler, /resultProduct = await syncConfirmedResearchTasksToRemote\(/);
+  assert.doesNotMatch(handler, /if \(confirmedTaskIds\.length > 0\) \{[\s\S]*?syncConfirmedResearchTasksToRemote/);
+  // 本地已提交后远端同步失败不能让保存报错，也不能跳过广播。
+  assert.match(handler, /catch \(error\) \{[\s\S]*?remote sync failed after local commit[\s\S]*?broadcastProduct\(resultProduct\)/);
+});
+
 test("并发写入改掉同一 spot 后不得借用别人的绑定结清人工决策", () => {
   const { db, cleanup } = withDb();
   try {

@@ -1,0 +1,170 @@
+{
+  "administrative": {
+    "日喀则": {
+      "districtId": 100,
+      "districtName": "日喀则",
+      "districtType": "City",
+      "parents": [
+        {
+          "districtName": "西藏",
+          "districtType": "Province"
+        }
+      ]
+    },
+    "萨嘎": {
+      "districtId": 120381,
+      "districtName": "萨嘎",
+      "districtType": "County",
+      "parents": [
+        {
+          "districtName": "西藏",
+          "districtType": "Province"
+        },
+        {
+          "districtName": "日喀则",
+          "districtType": "City"
+        }
+      ]
+    },
+    "仲巴": {
+      "districtId": 120376,
+      "districtName": "仲巴",
+      "districtType": "County",
+      "parents": [
+        {
+          "districtName": "西藏",
+          "districtType": "Province"
+        },
+        {
+          "districtName": "日喀则",
+          "districtType": "City"
+        }
+      ]
+    },
+    "札达": {
+      "districtId": 2454,
+      "districtName": "札达",
+      "districtType": "County",
+      "parents": [
+        {
+          "districtName": "西藏",
+          "districtType": "Province"
+        },
+        {
+          "districtName": "阿里",
+          "districtType": "City"
+        }
+      ]
+    },
+    "羊卓雍措": null,
+    "普莫雍措": null,
+    "卡若拉冰川": null,
+    "扎什伦布寺": null,
+    "萨迦寺": null,
+    "十万个沙丘": null,
+    "珠峰": null,
+    "佩枯措": null,
+    "希夏邦马峰冰川群": null,
+    "仲巴五彩沙漠": null,
+    "公珠措": null,
+    "冈仁波齐": null,
+    "玛旁雍措": null,
+    "拉昂措": null,
+    "拉萨": null,
+    "冈仁波齐+玛旁雍措+拉昂措": null
+  },
+  "poi": {
+    "佩枯措": {
+      "poiName": "佩枯措观景台",
+      "poiId": 152830907,
+      "district": {
+        "districtName": "吉隆",
+        "districtType": "County",
+        "parents": [
+          {
+            "districtName": "西藏",
+            "districtType": "Province"
+          },
+          {
+            "districtName": "日喀则",
+            "districtType": "City"
+          }
+        ]
+      }
+    },
+    "冈仁波齐": {
+      "poiName": "冈仁波齐",
+      "poiId": 10758151,
+      "district": {
+        "districtName": "普兰",
+        "districtType": "County",
+        "parents": [
+          {
+            "districtName": "西藏",
+            "districtType": "Province"
+          },
+          {
+            "districtName": "阿里",
+            "districtType": "City"
+          }
+        ]
+      },
+      "latitude": 31.0700169,
+      "longitude": 81.321337
+    },
+    "托林寺": {
+      "poiName": "托林寺",
+      "poiId": 78551,
+      "district": {
+        "districtName": "札达",
+        "districtType": "County",
+        "parents": [
+          {
+            "districtName": "西藏",
+            "districtType": "Province"
+          },
+          {
+            "districtName": "阿里",
+            "districtType": "City"
+          }
+        ]
+      },
+      "latitude": 31.487072,
+      "longitude": 79.806198
+    },
+    "佩枯错": {
+      "poiName": "佩枯错",
+      "poiId": 85085,
+      "district": {
+        "districtId": 120374,
+        "districtName": "吉隆",
+        "districtType": "City",
+        "parents": [
+          {
+            "districtId": 100,
+            "districtName": "日喀则",
+            "districtType": "City"
+          },
+          {
+            "districtId": 100003,
+            "districtName": "西藏",
+            "districtType": "Province"
+          },
+          {
+            "districtId": 110000,
+            "districtName": "中国",
+            "districtType": "Country"
+          },
+          {
+            "districtId": 120001,
+            "districtName": "亚洲",
+            "districtType": "Continent"
+          }
+        ],
+        "publishStatus": 6
+      },
+      "latitude": 28.8952826,
+      "longitude": 85.5939826
+    }
+  }
+}

@@ -98,8 +98,32 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
       productForm: z.enum(PRODUCT_FORMS),
       userIdea: z.string().max(1000).optional(),
       autoConfirm: z.boolean().optional(),
+      ideaOptimization: z.object({
+        optimizedIdea: z.string().trim().min(1).max(1000),
+        originalIdea: z.string().trim().min(1).max(1000),
+        preservedItems: z.array(z.string().trim().min(1).max(160)).max(20),
+        changes: z.array(z.object({
+          before: z.string().trim().min(1).max(240),
+          after: z.string().trim().min(1).max(240),
+          reason: z.string().trim().min(1).max(160),
+        }).strict()).max(20),
+        recommendations: z.array(z.string().trim().min(1).max(160)).max(20),
+        warnings: z.array(z.string().trim().min(1).max(160)).max(20),
+        sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+        provider: z.string().trim().min(1).max(80),
+        model: z.string().trim().min(1).max(160),
+        optimizedAt: z.iso.datetime(),
+      }).strict().optional(),
     }).strict(), args[0]);
     void input;
+  }
+  if (channel === "ai:optimizeProductIdea") {
+    parse(channel, "input", z.object({
+      destination: z.string().trim().min(1).max(100),
+      days: z.number().int().min(2).max(60),
+      productForm: z.enum(PRODUCT_FORMS),
+      userIdea: z.string().trim().min(1).max(1000),
+    }).strict(), args[0]);
   }
   if (channel === "products:updateProductJson") {
     parse(channel, "json", z.string().min(2).max(2_000_000), args[1]);

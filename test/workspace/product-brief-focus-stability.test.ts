@@ -21,9 +21,9 @@ test("中文组合输入期间不把每个拼音字母回写为受控 textarea v
   const ideaEnd = form.indexOf("/>", ideaStart);
   const idea = form.slice(ideaStart, ideaEnd);
 
-  assert.match(idea, /defaultValue=\{input\.userIdea \?\? ""\}/);
+  assert.match(idea, /defaultValue=\{sourceIdea\}/);
   assert.doesNotMatch(idea, /\bvalue=\{/);
   assert.match(idea, /onCompositionStart=/);
   assert.match(idea, /onCompositionEnd=/);
-  assert.match(idea, /if \(ideaComposingRef\.current\) return;[\s\S]*setIdeaDraft\(userIdea\)/);
+  assert.match(idea, /if \(!ideaComposingRef\.current\) updateSourceIdea/);
 });

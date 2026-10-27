@@ -201,3 +201,42 @@ test("草稿菜单边界只接受明确开启的官方审核推进开关", async
     await assert.rejects(() => verifyProductDraftMenus(pageFor(undefined, switched), productId, context()), /VBK 菜单尚未解锁/);
   }
 });
+
+test("自由行的推荐玩法菜单归一为 TourDays，不破坏向导边界", async () => {
+  const menus = unlockedMenus(productId);
+  menus.maxStep = -80;
+  menus.menus.forEach((menu, index) => { menu.enabled = index < 2 ? "T" : "F"; });
+  const index = menus.menus.findIndex(menu => menu.key === "TourDays");
+  menus.menus[index] = { ...menus.menus[index]!, key: "dailyRecommendTour", title: "推荐玩法",
+    url: `/ivbk/vendor/tourdays?productid=${productId}&from=vbk` };
+  const page = { evaluate: async (_fn: unknown, _request: unknown) => success(menus) };
+  const read = await readProductMenus(page as any, productId);
+  assert.equal(read.menus[index]!.key, "TourDays");
+  assert.equal(productWizardRecoveryPhase(read), "basic");
+});
+
+test("自由行图文保存同时解锁推荐玩法与套餐管理，边界仍必须包含推荐玩法", async () => {
+  const { assertSingleBoundaryAdvance } = await import("../../src/main/automation/ctrip/product-wizard.js");
+  const menus = (unlocked: number[], steps: number) => {
+    const rows = PRODUCT_MENU_KEYS.map((key, index) => ({ key, title: key,
+      enabled: (unlocked.includes(index) ? "T" : "F") as "T" | "F",
+      url: `/ivbk/vendor/${key}?productId=${productId}` }));
+    return { maxStep: steps, menus: rows } as any;
+  };
+  const before = menus([0, 1, 2], -70);
+  const after = menus([0, 1, 2, 3, 4], 10);
+  assert.doesNotThrow(() => assertSingleBoundaryAdvance(before, after, "pictureAndText", { allowAdditionalUnlock: true }));
+  assert.throws(() => assertSingleBoundaryAdvance(before, after, "pictureAndText"),
+    /越过指定菜单边界/);
+  const skipped = menus([0, 1, 2, 4], 10);
+  assert.throws(() => assertSingleBoundaryAdvance(before, skipped, "pictureAndText", { allowAdditionalUnlock: true }),
+    /菜单顺序异常|越过指定菜单边界/);
+});
+
+test("自由行行程审核不要求 routeId，私家团仍要求线路身份", async () => {
+  const { reviewReadbackSatisfied } = await import("../../src/main/automation/ctrip/itinerary-review/unlock.js");
+  assert.equal(reviewReadbackSatisfied("freeTravel", 0, "N"), true);
+  assert.equal(reviewReadbackSatisfied("privateTour", 0, "N"), false);
+  assert.equal(reviewReadbackSatisfied("privateTour", 558, "A"), true);
+  assert.equal(reviewReadbackSatisfied("freeTravel", 558, "X"), false);
+});

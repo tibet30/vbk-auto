@@ -62,3 +62,26 @@ test("核验期间人工改动行程时，拒绝用旧结果覆盖", async () =>
   assert.equal(result.ok, false);
   assert.equal(db.getProduct(id)!.product.itinerary![0]!.description, "运营的新指示");
 });
+
+test("复核清除身份不符的旧绑定后，已确认任务按落库后的行程重新打开", async () => {
+  const db = new VbkDatabase(fs.mkdtempSync(path.join(os.tmpdir(), "vbk-poi-reopen-")));
+  // 真实错绑样本（拉萨 27d3fe9a）：古格王朝曾被绑到主子层级不符的「古格王朝遗址-红殿」。
+  const detail = db.createProduct({ destination: "阿里", days: 1, productForm: "privateTour", userIdea: "D1: 古格王朝" });
+  db.updateProduct(detail.id, { ...detail.product, basicInfo: { ...detail.product.basicInfo, province: "西藏" },
+    itinerary: [{ day: 1, title: "札达", description: "札达", hotel: "无", meals: "自理", spots: [
+      { name: "古格王朝", poiName: "古格王朝遗址-红殿", poiId: 145360250, province: "西藏", city: "阿里" },
+    ] }] });
+  const taskId = db.addResearchTask(detail.id, { label: "核查 古格王朝 的 VBK POI 映射", type: "vbk", detail: "旧" });
+  // 旧凭证与当前（错误）绑定一致：只看落库前的行程会误判为「仍有有效凭证」。
+  db.markResearchAccepted(detail.id, taskId, "[itinerary-poi:verified] 第1天 古格王朝 -> 古格王朝遗址-红殿 (145360250)", "vbk");
+  assert.equal(db.getProduct(detail.id)!.researchTasks.find(task => task.id === taskId)!.state, "confirmed");
+  const runtime = new DbOrchestratorRuntime(db);
+  runtime.resolvePoiSelection = async () => ({ status: "uncertain", reason: "identity_mismatch" });
+  runtime.getPoiAvailabilities = async ids => new Map(ids.map(id => [id, { status: "available" }]));
+  await enrichItineraryPois({ localProductId: detail.id, destination: "阿里", runtime, persistedTaskKeys: new Set(), reviewCompletePois: true });
+  const saved = db.getProduct(detail.id)!;
+  assert.equal(saved.product.itinerary![0]!.spots![0]!.poiId, null);
+  const task = saved.researchTasks.find(item => item.id === taskId)!;
+  assert.equal(task.state, "researching");
+  assert.match(task.detail ?? "", /已清除/);
+});

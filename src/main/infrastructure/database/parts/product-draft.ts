@@ -9,6 +9,7 @@ import { now } from "./types.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { defaultDailyTransport, isProductForm, PRODUCT_FORM_LABELS } from "../../../../shared/product-form.js";
 import { DEFAULT_TRAFFIC_LINE_CONFIG } from "../../../../shared/contracts-traffic-line.js";
+import { normaliseIdeaOptimizationReceipt } from "../../../../shared/product-idea-optimization.js";
 
 /** Build the initial product snapshot without writing local or remote state. */
 export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
@@ -23,6 +24,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
   if (!isProductForm(productForm)) throw new Error("请选择有效的产品形态。");
   const userIdea = typeof input.userIdea === "string" ? input.userIdea.trim() : "";
   if (userIdea.length > 1000) throw new Error("用户想法不能超过 1000 个字。");
+  const ideaOptimization = normaliseIdeaOptimizationReceipt(input.ideaOptimization, userIdea);
 
   const formLabel = PRODUCT_FORM_LABELS[productForm];
   const nights = Math.max(0, days - 1);
@@ -57,6 +59,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
       province,
       operationNotes: "",
       userIdea,
+      ...(ideaOptimization ? { ideaOptimization } : {}),
     },
     operations: {
       hotelMatchingMode: "rules",
@@ -90,6 +93,7 @@ export function buildProductSnapshot(input: CreateProductInput): ProductDetail {
         days,
         nights,
         ...(userIdea ? { userIdea } : {}),
+        ...(ideaOptimization ? { ideaOptimization } : {}),
       }),
       createdAt,
     }],

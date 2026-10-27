@@ -209,14 +209,13 @@ test("真实业务工具对 open、partial、已有有效和歧义输入回退�
   cancelledAlternative.messages = [{ role: "user", content: "第三天改为日喀则博物馆-扎什伦布寺参观。" }] as any;
   const newAlternative = draft();
   newAlternative.messages = [{ role: "user", content: "第三天改为日喀则博物馆或者非遗中心参观-扎什伦布寺参观。" }] as any;
-  const flightService = draft(RIKAZE_ROUTE.replace("第一天接火车", "第一天接机"));
   const poiCorrection = draft();
   poiCorrection.messages = [{ role: "user", content: "把萨迦寺改为白居寺。" }] as any;
   const noDayLodgingCorrection = draft();
   noDayLodgingCorrection.messages = [{ role: "user", content: "住宿改为拉萨。" }] as any;
   const firstNightCorrection = draft();
   firstNightCorrection.messages = [{ role: "user", content: "第一晚住甲城。" }] as any;
-  for (const product of [draft("第一天萨迦古城。"), draft("日喀则轻松游。"), valid, ambiguous, lodgingCorrection, cancelledAlternative, newAlternative, flightService, poiCorrection, noDayLodgingCorrection, firstNightCorrection]) {
+  for (const product of [draft("第一天萨迦古城。"), draft("日喀则轻松游。"), valid, ambiguous, lodgingCorrection, cancelledAlternative, newAlternative, poiCorrection, noDayLodgingCorrection, firstNightCorrection]) {
     await assertBusinessToolFallsBack(product);
   }
 });

@@ -145,51 +145,93 @@ test("受控 POI 解析凭证可结清旧歧义任务，普通或错误映射仍
   assert.equal(task.evidence.at(-1)?.source, "vbk");
 });
 
-test("同日两个锁定别名解析为同一 POI 后生成可审计的去重凭证", () => {
+test("同一绑定已有受控 POI 凭证时，后续查询失败不得重新打开任务", () => {
   const db = withDb();
-  const created = db.createProduct({
-    destination: "拉萨", days: 1, productForm: "privateTour",
-    userIdea: "D1天：羊卓雍措 - 看点：羊卓雍湖",
+  const product = db.createProduct({ destination: "西安", days: 1, productForm: "privateTour" });
+  addMatchedItinerary(db, product.id);
+  const taskId = db.addResearchTask(product.id, { label: taskLabel, type: "vbk", detail: ambiguousDetail });
+  db.confirmVerifiedPoiResearchTasks(product.id, [{
+    day: 1, spotName: "城固张骞故里", poiName: "张骞纪念馆", poiId: 151283243,
+    province: "陕西", city: "汉中", district: "城固",
+  }]);
+
+  db.addResearchTask(product.id, {
+    label: taskLabel,
+    type: "vbk",
+    detail: "本轮 POI 核验未完成：当前查询召回多个候选，无法安全确定唯一地点，已保留先前绑定；请重新查询或手动选择 POI",
   });
-  const current = db.getProduct(created.id)!;
-  db.updateProduct(created.id, { ...current.product, itinerary: [{
-    day: 1,
-    spots: [{ name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, kind: "attraction" }],
+
+  const task = db.getProduct(product.id)!.researchTasks.find(item => item.id === taskId)!;
+  assert.equal(task.state, "confirmed");
+  assert.equal(task.status, "succeeded");
+  assert.match(task.evidence.at(-1)?.title ?? "", /\[itinerary-poi:verified\].*151283243/);
+});
+
+test("刷新可恢复被旧逻辑错误重开的受控 POI 凭证任务", () => {
+  const db = withDb();
+  const product = db.createProduct({ destination: "西安", days: 1, productForm: "privateTour" });
+  addMatchedItinerary(db, product.id);
+  const taskId = db.addResearchTask(product.id, { label: taskLabel, type: "vbk", detail: ambiguousDetail });
+  db.confirmVerifiedPoiResearchTasks(product.id, [{
+    day: 1, spotName: "城固张骞故里", poiName: "张骞纪念馆", poiId: 151283243,
+    province: "陕西", city: "汉中", district: "城固",
+  }]);
+  const snapshot = db.getProduct(product.id)!;
+  const task = snapshot.researchTasks.find(item => item.id === taskId)!;
+  task.state = "researching";
+  task.status = "queued";
+  task.detail = "本轮 POI 核验未完成：当前查询召回多个候选，无法安全确定唯一地点，已保留先前绑定；请重新查询或手动选择 POI";
+  db.importProductSnapshot(snapshot);
+
+  const result = refreshSatisfiedResearchTasks(db, product.id);
+
+  assert.equal(result.confirmed, 1);
+  assert.deepEqual(result.confirmedTaskIds, [taskId]);
+  const restored = db.getProduct(product.id)!.researchTasks.find(item => item.id === taskId)!;
+  assert.equal(restored.state, "confirmed");
+  assert.equal(restored.status, "succeeded");
+  assert.match(restored.evidence.at(-1)?.title ?? "", /\[itinerary-poi:verified\].*151283243/);
+});
+
+test("同日两个原名分别保存与核验，不能共用一个槽位", () => {
+  const db = withDb();
+  const created = db.createProduct({ destination: "拉萨", days: 1, productForm: "privateTour",
+    userIdea: "D1天：羊卓雍措 - 看点：羊卓雍湖" });
+  const names = ["羊卓雍措", "羊卓雍湖"];
+  db.updateProduct(created.id, { ...created.product, itinerary: [{ day: 1,
+    spots: names.map(name => ({ name, poiName: "羊卓雍错", poiId: 82105, kind: "attraction" })),
   }] });
-
-  const result = db.confirmVerifiedPoiResearchTasks(created.id, [
-    { day: 1, spotName: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105 },
-    { day: 1, spotName: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
-  ]);
-
-  assert.equal(result.updated, 1);
+  for (const name of names) db.addResearchTask(created.id, { label: `核查 ${name} 的 VBK POI 映射`, type: "vbk",
+    detail: "本轮 POI 核验未完成：需核验当前槽位。" });
+  const result = db.confirmVerifiedPoiResearchTasks(created.id, names.map(spotName => ({
+    day: 1, spotName, poiName: "羊卓雍错", poiId: 82105,
+  })));
+  assert.equal(result.updated, 2);
   const product = db.getProduct(created.id)!;
-  const aliasTask = product.researchTasks.find((task) => task.label === "核查 羊卓雍湖 的 VBK POI 映射");
-  assert.equal(aliasTask?.state, "confirmed");
-  assert.match(aliasTask?.evidence[0]?.title ?? "", /\[itinerary-poi:verified\].*羊卓雍湖.*82105/u);
+  assert.equal(product.product.itinerary![0]!.spots!.length, 2);
+  for (const task of product.researchTasks) {
+    assert.equal(task.state, "confirmed");
+    assert.match(task.evidence[0]?.title ?? "", /\[itinerary-poi:verified\].*82105/u);
+  }
   assert.equal(itineraryInputContractError(product, product.product.itinerary), undefined);
 });
 
-test("已持久化的受控 POI 与本轮别名解析一致时也生成去重凭证", () => {
+for (const existingPending of [false, true]) test(`缺失原槽位不能靠同POI别名回执${existingPending ? '结清旧任务' : '创建确认任务'}`, () => {
   const db = withDb();
-  const created = db.createProduct({
-    destination: "拉萨", days: 1, productForm: "privateTour",
-    userIdea: "D1天：羊卓雍措 - 看点：羊卓雍湖",
-  });
-  const current = db.getProduct(created.id)!;
-  db.updateProduct(created.id, { ...current.product, itinerary: [{
-    day: 1,
+  const created = db.createProduct({ destination: "拉萨", days: 1, productForm: "privateTour",
+    userIdea: "D1天：羊卓雍措 - 看点：羊卓雍湖" });
+  db.updateProduct(created.id, { ...created.product, itinerary: [{ day: 1,
     spots: [{ name: "羊卓雍措", poiName: "羊卓雍错", poiId: 82105, kind: "attraction" }],
   }] });
-
+  if (existingPending) db.addResearchTask(created.id, { label: "核查 羊卓雍湖 的 VBK POI 映射", type: "vbk",
+    detail: "本轮 POI 核验未完成：历史去重遗留，原槽位尚未恢复。" });
   const result = db.confirmVerifiedPoiResearchTasks(created.id, [
     { day: 1, spotName: "羊卓雍湖", poiName: "羊卓雍错", poiId: 82105 },
   ]);
-
-  assert.equal(result.updated, 1);
+  assert.equal(result.updated, 0);
   const product = db.getProduct(created.id)!;
-  const aliasTask = product.researchTasks.find((task) => task.label === "核查 羊卓雍湖 的 VBK POI 映射");
-  assert.equal(aliasTask?.state, "confirmed");
-  assert.match(aliasTask?.evidence[0]?.title ?? "", /\[itinerary-poi:verified\].*羊卓雍湖.*82105/u);
-  assert.equal(itineraryInputContractError(product, product.product.itinerary), undefined);
+  const task = product.researchTasks.find(task => task.label === "核查 羊卓雍湖 的 VBK POI 映射");
+  if (existingPending) { assert.equal(task?.state, "researching"); assert.deepEqual(task?.evidence, []); }
+  else assert.equal(task, undefined);
+  assert.match(itineraryInputContractError(product, product.product.itinerary) ?? "", /羊卓雍湖/);
 });

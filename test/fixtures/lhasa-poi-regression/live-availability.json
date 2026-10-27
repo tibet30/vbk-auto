@@ -1,0 +1,168 @@
+[
+  {
+    "poiId": 91992,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "具体开放时间需咨询景区",
+    "verifiedAt": "2026-10-24T14:05:34.805Z"
+  },
+  {
+    "poiId": 85599,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "全年全天开放",
+    "verifiedAt": "2026-10-24T14:05:35.659Z"
+  },
+  {
+    "poiId": 10758152,
+    "status": "available",
+    "openStatus": "今日已闭园",
+    "latelyOpenTime": "明天10:00-18:00开放",
+    "verifiedAt": "2026-10-24T14:05:36.623Z"
+  },
+  {
+    "poiId": 85085,
+    "status": "available",
+    "openStatus": "今日已闭园",
+    "latelyOpenTime": "明天09:00-18:00开放（18:00停止入园）",
+    "verifiedAt": "2026-10-24T14:05:37.675Z"
+  },
+  {
+    "poiId": 85090,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "全年全天开放",
+    "verifiedAt": "2026-10-24T14:05:38.562Z"
+  },
+  {
+    "poiId": 145360250,
+    "status": "available",
+    "openStatus": "今日已闭园",
+    "latelyOpenTime": "明天10:00-18:00开放",
+    "verifiedAt": "2026-10-24T14:05:39.735Z"
+  },
+  {
+    "poiId": 144445835,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "具体开放时间需咨询景区",
+    "verifiedAt": "2026-10-24T14:05:40.607Z"
+  },
+  {
+    "poiId": 91485,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 76348,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 76351,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 149690264,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 88954632,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 76353,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 10758151,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 78548,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 145595738,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 85600,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 78551,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 56809413,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 156482624,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 144359752,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 145210345,
+    "status": "available",
+    "source": "2026-10-24 candidate-audit availability/cache projection"
+  },
+  {
+    "poiId": 82105,
+    "status": "available",
+    "openStatus": "今日已闭园",
+    "latelyOpenTime": "明天08:30-18:00开放（17:30停止入园）",
+    "verifiedAt": "2026-10-24T14:08:50.953Z"
+  },
+  {
+    "poiId": 94904,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "全年全天开放",
+    "verifiedAt": "2026-10-24T14:08:51.383Z"
+  },
+  {
+    "poiId": 76352,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "全年全天开放",
+    "verifiedAt": "2026-10-24T14:08:52.412Z"
+  },
+  {
+    "poiId": 76422,
+    "status": "available",
+    "openStatus": "今日已闭园",
+    "latelyOpenTime": "明天08:00-17:00开放（17:00停止入园）",
+    "verifiedAt": "2026-10-24T14:08:53.469Z"
+  },
+  {
+    "poiId": 118481664,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "全年全天开放",
+    "verifiedAt": "2026-10-24T14:08:54.454Z"
+  },
+  {
+    "poiId": 152830907,
+    "status": "available",
+    "openStatus": "",
+    "latelyOpenTime": "全年全天开放",
+    "verifiedAt": "2026-10-24T14:08:55.472Z"
+  }
+]

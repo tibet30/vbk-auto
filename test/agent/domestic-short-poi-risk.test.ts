@@ -60,6 +60,30 @@ test("确认数据风险后只剔除所有匹配 POI，并留下逐日人工删�
   assert.equal(detail.product.manualReview, undefined, "纯函数不能修改原产品");
 });
 
+test("同一天两个风险条目夹着其他景点时，不误删中间景点", () => {
+  // 真实样本（拉萨 61ebada2 第4天）：曾误删「玛旁雍措」并留下冈仁波齐。
+  const detail = product();
+  (detail.product.itinerary as Array<{ spots: unknown[] }>)[0]!.spots = [
+    { name: "公珠措", poiName: "公珠错", poiId: 91992 },
+    { name: "冈仁波齐", poiName: "冈仁波齐", poiId: 10758151 },
+    { name: "玛旁雍措", poiName: "玛旁雍措", poiId: 78548 },
+    { name: "拉昂措", poiName: "拉昂错", poiId: 85599 },
+    { name: "冈仁波齐山体冰川遗迹", poiName: "冈仁波齐", poiId: 10758151 },
+    { name: "纳木那尼峰", poiName: "纳木那尼峰", poiId: 85600 },
+  ];
+  const question = domesticShortPoiRiskQuestion(RISK)!;
+  const result = removeConfirmedDomesticShortPoiRisk(detail, [{
+    id: question.id, label: question.label, selectedLabel: question.options![0]!.label,
+  }])!;
+  const days = result.product.itinerary as Array<{ spots: Array<{ name: string; poiId: number }> }>;
+  assert.deepEqual(days[0]!.spots.map(spot => spot.name), ["公珠措", "玛旁雍措", "拉昂措", "纳木那尼峰"]);
+  assert.ok(days.every(day => day.spots.every(spot => spot.poiId !== 10758151)));
+  assert.equal(result.removed, 4);
+  const receipts = (result.product.manualReview as { itinerarySpotRemovals: Array<{ name: string; poiId?: number }> })
+    .itinerarySpotRemovals;
+  assert.ok(receipts.every(item => item.poiId === 10758151), "删除凭证不能指向非风险 POI");
+});
+
 test("集成指令先处理显式恢复再执行确认剔除，不能清空本次 trusted removal", () => {
   let detail = { ...product(), productJsonVersion: 1 };
   const question = domesticShortPoiRiskQuestion(RISK)!;

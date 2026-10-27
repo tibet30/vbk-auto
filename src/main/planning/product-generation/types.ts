@@ -7,6 +7,7 @@ import type {
   ResearchTaskProposal,
 } from "../../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "../types.js";
+import type { ItineraryDayTitleRequest } from "../itinerary-day-titles.js";
 
 export type ProductGenerationStage = Extract<
   PlanningStage,
@@ -33,4 +34,6 @@ export interface ProductGenerationDependencies {
   clearUnverifiedItineraryPois(itinerary: unknown): void;
   resolveItineraryResources(localProductId: string): Promise<unknown>;
   refreshSatisfiedResearchTasks(localProductId: string): void | Promise<void>;
+  /** 为行程逐日生成天标题候选；未提供或失败时使用确定性兜底标题。 */
+  generateItineraryDayTitles?(localProductId: string, requests: ItineraryDayTitleRequest[]): Promise<Array<{ day: number; title: string }>>;
 }

@@ -84,3 +84,27 @@ test('住宿表达整段剔除：入住/宿/住 XX 不留残字，宿州这类�
   assert.deepEqual(rows[1]!.spots, ['敦煌']);
   assert.ok(rows[2]!.spots.includes('宿州'));
 });
+
+// 产品 ae3316d7：【DAYN】天头 + 末尾【服务建议】【二选一待定】分节；分节正文里的
+// 「DAY4」只是引用，不能被当成新的第 4 天，也不能让第 5 天吞下服务说明。
+const WANZHOU = `【产品定位】重庆万州出发/进出，5天4晚私家团。
+
+【DAY1】出发地 → 重庆万州，入住万州。
+（建议：抵达后安排万州城区轻松游览，晚餐品尝万州烤鱼。）
+
+【DAY4】巫峡 → 神女大扶梯，入住巫山或万州。
+
+【DAY5】巫山或万州 → 返程。
+（建议：住宿选万州则返程更从容。）
+
+【服务建议】私家团含专车接送、独立用车与导游讲解。
+
+【二选一待定】DAY4 住宿地：巫山 或 万州。`;
+
+test('分节标题里的 DAYN 引用不产生新的一天，非末日也在分节标题处截断', () => {
+  assert.deepEqual(daySections(WANZHOU).map((section) => section.day), [1, 4, 5]);
+  const last = daySection(WANZHOU, 5);
+  assert.ok(last.includes('返程'));
+  assert.ok(!/服务建议|二选一待定|专车接送/u.test(last), JSON.stringify(last));
+  assert.ok(!daySection(WANZHOU, 4).includes('住宿地'));
+});

@@ -122,6 +122,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
         }
         return adapter.generateStage({ stage, context: plannerContext });
       },
+      generateItineraryDayTitles: async (localProductId, requests) => (await context.aiService())
+        .generateItineraryDayTitles(requests, { localProductId, onEvent: (event) => recordAgentUsage(db, localProductId, event) }),
       disambiguatePoiOption: async ({ localProductId, desired, product, candidates }) => {
         const outcome = await (await context.aiService()).disambiguateOption({
           kind: "spot", desired, product, candidates,

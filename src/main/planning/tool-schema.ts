@@ -16,6 +16,7 @@
  *     从 AI tool schema 中完全移除，runtime.addResearchTask 仍是唯一写入路径。
  */
 
+import { ITINERARY_DAY_TITLE_MAX_LENGTH } from "../../shared/itinerary-day-title.js";
 import type { PlanningStage, PlanningModule } from "../../shared/contracts-planning.js";
 import { STAGE_ALLOWED_MODULES } from "./stage-contract.js";
 
@@ -86,7 +87,7 @@ function moduleValueJsonSchema(module: PlanningModule, recommendationCategories?
           required: ["day", "title", "spots", "description", "hotel", "meals"],
           properties: {
             day: { type: "number", minimum: 1 },
-            title: { type: "string", minLength: 1 },
+            title: { type: "string", minLength: 1, maxLength: ITINERARY_DAY_TITLE_MAX_LENGTH, description: `一行简洁中文天标题，最多 ${ITINERARY_DAY_TITLE_MAX_LENGTH} 个字符（首日会追加「【出发地-城市】」前缀，需预留约 10 字）；不得包含换行、括号建议或服务说明。` },
             spots: { type: "array", minItems: 0, description: "按实际顺序排列。每个 spot.name 只能是一个可独立检索的可游览地点，组合地点必须拆分。景点 kind=attraction 必须是真实可检索 POI；明确独立自由活动用 free；航拍等独立体验用 other。机场、车站、码头、酒店、民宿、集合点和接送点不得进入 spots。接送用 activities 的 transport，餐食写 meals，住宿写 hotel。纯接送日 spots 为空，禁止凑站点。free/other 不得带 POI，不能因搜索失败改类型。", items: { type: "object", additionalProperties: false, required: ["name", "kind", "poiName", "poiId"], properties: { name: { type: "string", minLength: 1 }, kind: { type: "string", enum: ["attraction", "free", "other"] }, description: { type: ["string", "null"] }, poiName: { type: ["string", "null"] }, poiId: { type: ["number", "null"], minimum: 1 }, timeOfDay: { type: "string", enum: ["morning", "afternoon"] }, relation: { type: "string", enum: ["and", "or"] } } } },
             activities: { type: "array", items: { type: "object", additionalProperties: false, required: ["time", "title", "detail", "type"], properties: { time: { type: "string" }, title: { type: "string" }, detail: { type: "string" }, type: { type: "string", enum: ["transport", "free", "other"] } } } },
             description: { type: "string", minLength: 1 },

@@ -32,7 +32,8 @@ export interface DaySection {
 
 export function daySections(value: string): DaySection[] {
   const source = value.replace(/\\[nr]/gu, "\n");
-  const matches = [...source.matchAll(DAY_MARKER)];
+  // `【二选一待定】DAY4 住宿地…` 这类分节正文里的 DAYN 只是引用，不是新的一天。
+  const matches = [...source.matchAll(DAY_MARKER)].filter((match) => !insideSectionHeadingLine(source, match.index ?? 0));
   const sections: DaySection[] = [];
   for (let index = 0; index < matches.length; index += 1) {
     const match = matches[index]!;
@@ -87,14 +88,26 @@ function stripDayHead(body: string): string {
 }
 
 function sectionEnd(source: string, start: number, next: number | undefined): number {
-  if (next === undefined) {
-    // 最后一天：只在**换行后**的 `【…】` 处截断；正文开头的
-    // `【出发地-成都】接站` 是自己的内容，不能当作分节标题。
-    const tail = source.slice(start);
-    const heading = /(?:\r?\n)[ \t]*【[^】\n]*】/u.exec(tail);
-    return heading ? start + (heading.index ?? 0) : source.length;
-  }
-  const lineStart = source.lastIndexOf("\n", next - 1) + 1;
+  const lineStart = next === undefined ? source.length : source.lastIndexOf("\n", next - 1) + 1;
   // 同一行内的下一个标记（`D1 甲 D2 乙`）不能按行回退。
-  return lineStart > start ? lineStart : next;
+  const end = next === undefined || lineStart > start ? lineStart : next;
+  // 任何一天都只在**换行后**的非 day 分节标题（`【服务建议】`）处截断；正文开头的
+  // `【出发地-成都】接站` 是自己的内容，不能当作分节标题。
+  const heading = /(?:\r?\n)[ \t]*【([^】\n]*)】/gu;
+  heading.lastIndex = start;
+  for (let found = heading.exec(source); found && found.index < end; found = heading.exec(source)) {
+    if (!isDayMarkerText(found[1] ?? "")) return found.index;
+  }
+  return end;
+}
+
+/** 标记所在行以非 day 的 `【…】` 分节标题开头（`【二选一待定】DAY4 …`）。 */
+function insideSectionHeadingLine(source: string, index: number): boolean {
+  const lineStart = source.lastIndexOf("\n", index - 1) + 1;
+  const heading = /^[ \t]*【([^】\n]*)】/u.exec(source.slice(lineStart, index));
+  return Boolean(heading) && !isDayMarkerText(heading![1] ?? "");
+}
+
+function isDayMarkerText(value: string): boolean {
+  return new RegExp(DAY_MARKER.source, "iu").test(value);
 }

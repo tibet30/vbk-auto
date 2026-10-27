@@ -18,6 +18,7 @@ import { PLATFORM_HOTEL_DESCRIPTION } from "../../../../shared/platform-hotel-ru
  *     VBK 协议字段写入；业务上不要求纯数字、不参与 URL 或 query 拼接。
  */
 
+import { ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleLength } from "../../../../shared/itinerary-day-title.js";
 import { orderItineraryMeals } from "./meal-order.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
@@ -120,6 +121,10 @@ export function buildDayDescription(args: {
   const day = normaliseItinerarySupport(args.day);
   if (!day.title || !day.title.trim()) {
     throw new Error(`第 ${day.day} 天 title 缺失（行程标题必填）。`);
+  }
+  // VBK 对超长天标题直接 Ack=Failure；写入前本地拦截，给出可定位的原因。
+  if (itineraryDayTitleLength(day.title) > ITINERARY_DAY_TITLE_MAX_LENGTH) {
+    throw new Error(`第 ${day.day} 天标题 ${itineraryDayTitleLength(day.title)} 字，超过 VBK 上限 ${ITINERARY_DAY_TITLE_MAX_LENGTH} 字，请重新生成每日行程标题。`);
   }
   const isFirst = index === 0;
   const isLast = index === totalDays - 1;

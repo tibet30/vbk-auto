@@ -12,6 +12,7 @@ import { PLATFORM_HOTEL_GUIDE } from "../../../shared/platform-hotel-rules.js";
  */
 
 import { APP_NAME } from "../../../shared/brand.js";
+import { ITINERARY_DAY_TITLE_MAX_LENGTH } from "../../../shared/itinerary-day-title.js";
 import { buildVbkCopyPolicyPrompt } from "../../planning/vbk-copy-policy.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
 import { PRIVATE_TOUR_COPY_GUIDE } from "../../../shared/private-tour-copy.js";
@@ -54,7 +55,7 @@ const outputGuide = `${PRIVATE_TOUR_COPY_GUIDE}\n只输出一个 JSON 对象，�
 
 【/itinerary】value 必须是数组，每天的行程为一个对象，包含以下全部字段：
   day → number，正整数，从 1 开始
-  title → string，格式 "城市—景点1—景点2—景点3"
+  title → string，格式 "城市—景点1—景点2—景点3"，一行，最多 ${ITINERARY_DAY_TITLE_MAX_LENGTH} 个字符，不得包含换行、括号建议或服务说明
   spots → string[]，当天游览的景点名称列表，不得为空；每个 spot 只能写一个可独立检索的地点。不得把“钟楼和鼓楼”“回民街·钟鼓楼广场”等多个地点合写为一个 spot，必须拆成多个 spots；括号内可写同一地点别名
   description → string，详细行程描述（非空，包含交通、游览、用餐安排）
   hotel → string，当晚住宿描述

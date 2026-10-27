@@ -78,6 +78,7 @@ function service(args: {
   generate?: () => Promise<PlanningStageOutput>;
   events?: string[];
   resolve?: (detail: ProductDetail) => Promise<void>;
+  titles?: (requests: Array<{ day: number }>) => Promise<Array<{ day: number; title: string }>>;
 }) {
   const detail = args.detail ?? product();
   const runtime = new MemoryRuntime(detail);
@@ -104,6 +105,10 @@ function service(args: {
         await args.resolve?.(detail);
       },
       refreshSatisfiedResearchTasks: () => { events.push("refreshResearch"); },
+      ...(args.titles ? { generateItineraryDayTitles: async (_id: string, requests: Array<{ day: number }>) => {
+        events.push("titles");
+        return args.titles!(requests);
+      } } : {}),
     }),
   };
 }
@@ -274,3 +279,26 @@ function setPath(product: Record<string, unknown>, path: string, value: unknown)
   parent[segments.at(-1)!] = value;
   return next;
 }
+
+test("规划模型的合格天标题不调用 AI 重写", async () => {
+  const events: string[] = [];
+  const setup = service({ events, titles: async () => [] });
+  await setup.generation.generate(setup.detail.id, "itinerary");
+  assert.ok(!events.includes("titles"));
+  assert.equal(setup.detail.product.itinerary![0]!.title, "宽窄巷子");
+});
+
+test("规划模型的超长天标题交给 AI 重写，AI 不合格时用兜底标题而不是截断", async () => {
+  const long = "宽窄巷子" + "，漫步老成都街巷感受市井烟火".repeat(6);
+  const output = itineraryOutput();
+  (output.modules[0]!.value as Array<Record<string, unknown>>)[0]!.title = long;
+  const rewritten = service({ output: structuredClone(output), titles: async () => [{ day: 1, title: "宽窄巷子漫步" }] });
+  await rewritten.generation.generate(rewritten.detail.id, "itinerary");
+  assert.equal(rewritten.detail.product.itinerary![0]!.title, "宽窄巷子漫步");
+
+  const fallback = service({ output: structuredClone(output), titles: async () => { throw new Error("offline"); } });
+  await fallback.generation.generate(fallback.detail.id, "itinerary");
+  const title = fallback.detail.product.itinerary![0]!.title!;
+  assert.ok([...title].length <= 70, title);
+  assert.ok(title.includes("宽窄巷子"), title);
+});

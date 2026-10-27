@@ -35,6 +35,7 @@ export interface AgentBusinessDependencies {
   productWorkflows: ProductWorkflowCoordinator;
   productMutations: ProductMutationService;
   generateStage(localProductId: string, stage: GenerateStage): Promise<PlanningStageOutput>;
+  generateItineraryDayTitles?(localProductId: string, requests: import("../planning/itinerary-day-titles.js").ItineraryDayTitleRequest[]): Promise<Array<{ day: number; title: string }>>;
   disambiguatePoiOption(args: { localProductId: string; desired: string; product: Record<string, unknown>; candidates: Array<{ id: string; text: string }> }): Promise<{ pickedText: string | null; confidence: number }>;
   disambiguateStationOption(args: { localProductId: string; stationSubtype: "airport" | "train"; desired: string; product: Record<string, unknown>; candidates: Array<{ id?: string; text: string }> }): Promise<{ pickedText: string | null; reasoning: string }>;
   emitProduct(product: ProductDetail): void;
@@ -83,6 +84,7 @@ export function createGenerationStageTools(args: {
     refreshSatisfiedResearchTasks: (localProductId) => {
       refreshSatisfiedResearchTasks(deps.db, localProductId);
     },
+    ...(deps.generateItineraryDayTitles ? { generateItineraryDayTitles: deps.generateItineraryDayTitles } : {}),
   });
 
   return [

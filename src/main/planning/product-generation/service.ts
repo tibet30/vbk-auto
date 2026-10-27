@@ -1,6 +1,9 @@
 import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
 import type { PlanningStageOutput } from "../../../shared/contracts-planning.js";
 import { projectCompleteItinerary } from "../complete-itinerary-projection.js";
+import { ensureDayTitleFits, generateItineraryDayTitles, itineraryDaySourceText } from "../itinerary-day-titles.js";
+import { itineraryDayTitleBudget, itineraryDayTitleProblem } from "../../../shared/itinerary-day-title.js";
+import { logWarn } from "../../../shared/log-timestamp.js";
 import { excludedItineraryCopyConflicts } from "../itinerary-alternative-consistency.js";
 import { executeStageOutput } from "../stage-runner.js";
 import {
@@ -66,9 +69,10 @@ export class ProductGenerationService {
     const projected = stage === "itinerary"
       ? projectCompleteItinerary(this.deps.getProduct(localProductId))
       : undefined;
-    if (projected) return projected;
+    if (projected) return this.withDayTitles(localProductId, projected, true);
     try {
-      return await this.deps.generateStage(localProductId, stage);
+      const output = await this.deps.generateStage(localProductId, stage);
+      return stage === "itinerary" ? this.withDayTitles(localProductId, output, false) : output;
     } catch (error) {
       if (isReplayDataMissing(error) || stage !== "presentation" && stage !== "commercial") throw error;
       return {
@@ -76,6 +80,36 @@ export class ProductGenerationService {
         modules: [],
       };
     }
+  }
+
+  /**
+   * 天标题有 VBK 长度上限。确定性投影的标题由 AI 重写；规划模型自带的标题
+   * 只在超限或含分节/建议时才重写。AI 不可用或不合格时用不截断的兜底标题。
+   */
+  private async withDayTitles(localProductId: string, output: PlanningStageOutput, projected: boolean): Promise<PlanningStageOutput> {
+    const product = this.deps.getProduct(localProductId);
+    const productJson = product.product as JsonObject;
+    const modules = await Promise.all(output.modules.map(async (module) => {
+      if (module.module !== "itinerary" || !Array.isArray(module.value)) return module;
+      const itinerary = module.value as JsonObject[];
+      const needsTitle = (day: JsonObject) => projected
+        || Boolean(itineraryDayTitleProblem(String(day.title ?? ""), itineraryDayTitleBudget(productJson, Number(day.day))));
+      const targets = itinerary.filter(needsTitle);
+      if (!targets.length) return module;
+      const generate = this.deps.generateItineraryDayTitles;
+      const titled = generate
+        ? await generateItineraryDayTitles({
+          product: productJson,
+          itinerary: targets,
+          sourceText: (day) => itineraryDaySourceText(product, day),
+          generate: (requests) => generate(localProductId, requests),
+          onWarning: (message) => logWarn("[planning] itinerary day title", { localProductId, message }),
+        })
+        : targets;
+      const byDay = new Map(titled.map((day) => [Number(day.day), day]));
+      return { ...module, value: itinerary.map((day) => ensureDayTitleFits(productJson, byDay.get(Number(day.day)) ?? day)) };
+    }));
+    return { ...output, modules };
   }
 
   private clearGeneratedPoiClaims(output: PlanningStageOutput): void {

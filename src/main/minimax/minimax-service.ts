@@ -9,7 +9,10 @@
  */
 
 import { rewritePresentationCopy } from "./presentation-copy-rewriter.js";
+import { isReplayDataMissing } from "../infrastructure/replay-data-error.js";
 import { rewriteItineraryCopy } from "./itinerary-copy-rewriter.js";
+import { generateItineraryDayTitles as generateItineraryDayTitlesOperation } from "./itinerary-day-title-generator.js";
+import type { ItineraryDayTitleRequest } from "../planning/itinerary-day-titles.js";
 import type { ItineraryCopyRewriteRequest } from "../../shared/itinerary-copy-rewrite.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AiUsageEvent, AiUsageSource, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
 import { logError, logInfo, logWarn } from "../../shared/log-timestamp.js";
@@ -22,6 +25,7 @@ import { buildPlanningMessages, decideRetry, parsePlanningResponse, PLANNING_RET
 import {
   completePlanning,
   createMiniMaxClient,
+  emitMiniMaxUsage,
   isDeepSeek,
   miniMaxProviderError,
   providerLabel,
@@ -101,6 +105,28 @@ export class MiniMaxService {
   async rewriteItineraryCopy(input: ItineraryCopyRewriteRequest): Promise<AiResponse> {
     if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 AI API Key。");
     return rewriteItineraryCopy(this.client(replyTimeout()), this.config.model, input);
+  }
+
+  /** 为确定性投影的行程逐日生成天标题候选；采纳与否由调用方本地校验。 */
+  async generateItineraryDayTitles(
+    requests: ItineraryDayTitleRequest[],
+    usage?: { localProductId: string; onEvent?: (event: AiUsageEvent) => void },
+  ): Promise<Array<{ day: number; title: string }>> {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 AI API Key。");
+    const startedAt = Date.now();
+    const extraParams = isDeepSeek(this.config) ? {} : { thinking: { type: "disabled" } };
+    try {
+      logAIPrompt({ entry: "MiniMax.generateItineraryDayTitles", provider: this.config.provider ?? "minimax", model: this.config.model,
+        messages: [{ role: "user", content: JSON.stringify(requests) }] });
+      const result = await generateItineraryDayTitlesOperation(this.client(replyTimeout()), this.config.model, requests, { extraParams });
+      emitMiniMaxUsage(this.config, usage, "planning.generateStage", "itineraryDayTitles", Date.now() - startedAt, result.response);
+      return result.titles;
+    } catch (error) {
+      if (isReplayDataMissing(error)) throw error;
+      const serviceError = miniMaxProviderError(this.config, error);
+      emitMiniMaxUsage(this.config, usage, "planning.generateStage", "itineraryDayTitles", Date.now() - startedAt, undefined, serviceError);
+      throw serviceError;
+    }
   }
 
   async reply(input: {

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isCombinedSpotName } from "./spot-name.js";
 import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
+import { ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleLength } from "../../shared/itinerary-day-title.js";
 const requiredText = z.string().trim().min(1);
 
 const itinerarySpotSchema = z.object({
@@ -27,7 +28,8 @@ const itinerarySpotSchema = z.object({
 
 export const itineraryDaySchema = z.object({
   day: z.number().int().min(1),
-  title: requiredText,
+  title: requiredText.refine((title) => itineraryDayTitleLength(title) <= ITINERARY_DAY_TITLE_MAX_LENGTH,
+    `title 最多 ${ITINERARY_DAY_TITLE_MAX_LENGTH} 个字符`),
   spots: z.array(itinerarySpotSchema),
   activities: z.array(z.object({ time: requiredText, title: requiredText, detail: requiredText,
     type: z.enum(["transport", "visit", "meal", "hotel", "free", "other"]),

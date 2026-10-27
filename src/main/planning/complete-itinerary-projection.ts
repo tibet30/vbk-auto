@@ -6,6 +6,7 @@ import { itineraryStructureError } from "./itinerary-structure.js";
 import { projectDatedRoute } from "./dated-route-projection.js";
 import { selfRepairItineraryForVbk } from "./itinerary-self-repair.js";
 import { daySection, daySections } from "./day-sections.js";
+import { routeLine } from "./itinerary-day-titles.js";
 import {
   boundaryAnchors,
   isBoundaryAnchor,
@@ -99,7 +100,7 @@ function projectDay(args: {
     .map((name) => [name.replace(/\s+/gu, ""), { name, sourceName }] as const))).values()];
   const groups = args.alternativeGroups.filter((group) => group.day === args.row.day);
   const candidates = entries.map((entry) => entry.name);
-  const title = formatAttractionSequence(candidates, groups, " · ") || placeNames.join(" · ") || args.rawDayText.trim();
+  const title = formatAttractionSequence(candidates, groups, " · ") || placeNames.join(" · ") || routeLine(args.rawDayText) || args.rawDayText.trim();
   const routeDay = { day: args.row.day, title };
   const departures = candidates.filter(name => isPersistedRouteTravelNode(args.product, routeDay, name));
   const kept = entries.filter((entry) => !departures.includes(entry.name));

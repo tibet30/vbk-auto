@@ -19,6 +19,7 @@ export type AIPromptEntry =
   | "MiniMax.diagnoseAutomationFailure"
   | "MiniMax.disambiguateOption"
   | "MiniMax.regenerateSubtitle"
+  | "MiniMax.generateItineraryDayTitles"
   | "Planner.generateStage"
   | "Planner.resolvePoiName"
   | "ThreeStage.structureLocation"

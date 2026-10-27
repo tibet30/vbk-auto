@@ -278,3 +278,20 @@ test("隔离 SQLite 中完整行程不调用模型，写入后重连仍可读", 
     rmSync(dataPath, { recursive: true, force: true });
   }
 });
+
+test("无可绑定景点的天标题只取路线首行，不带括号建议和服务分节", () => {
+  const product = buildProductSnapshot({ destination: "万州", days: 2, productForm: "privateTour" });
+  Object.assign(product.product.basicInfo!, {
+    days: 2, nights: 1, meetingCity: "万州", destinationCity: "万州", province: "重庆",
+    userIdea: "【DAY1】出发地 → 重庆万州，入住万州。\n（建议：抵达后安排万州城区轻松游览，晚餐品尝万州烤鱼，为后续行程热身。）\n\n"
+      + "【DAY2】万州 → 返程。\n（建议：返程大交通自理。）\n\n【服务建议】私家团含专车接送、独立用车与导游讲解。\n\n【二选一待定】DAY1 住宿地：万州。",
+  });
+  product.product.itinerary = [];
+  const itinerary = projectedItinerary(product);
+  for (const day of itinerary) {
+    const title = String(day.title);
+    assert.doesNotMatch(title, /建议|服务|\n/u, title);
+    assert.ok(title.length <= 30, title);
+  }
+  assert.doesNotMatch(JSON.stringify(itinerary[1]), /服务建议|二选一待定/u);
+});

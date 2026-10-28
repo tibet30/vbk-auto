@@ -1,6 +1,11 @@
-import { isTrafficLineRouteReviewRequired } from "../../../shared/traffic-resource-status.js";
+import { trafficChildSkipHandled } from "../../../shared/traffic-resource-status.js";
 import { TRAFFIC_SKIP_LABELS, isTrafficSkipReason, trafficSkipReason } from "../../../shared/traffic-skip-reason.js";
-import type { TrafficLineVariant } from "../../../shared/contracts-traffic-line.js";
+import type { TrafficLineChildProgress, TrafficLineVariant } from "../../../shared/contracts-traffic-line.js";
+
+/** 与母产品结案同一口径：只有 skipped 标记且非玩法线路审核的子产品才显示已跳过。 */
+function skipHandled(item: Record<string, unknown>): boolean {
+  return trafficChildSkipHandled(item as unknown as TrafficLineChildProgress);
+}
 
 /** A fresh verified readback supersedes historical failure/skip display flags. */
 export function trafficLineChildStatus(item: Record<string, unknown>, hasCompletedStages: boolean): string {
@@ -8,13 +13,20 @@ export function trafficLineChildStatus(item: Record<string, unknown>, hasComplet
   for (const value of [item.status, item.state, item.nodeStatus]) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  // 玩法线路审核需用户授权后续跑，仍显示待处理；其它失败已跳过并保留原因。
-  if (typeof item.failureReason === "string" && item.failureReason.trim()) {
-    return isTrafficLineRouteReviewRequired(item.failureReason) ? "failed" : "skipped";
-  }
-  if (item.skipped === true) return "skipped";
+  if (skipHandled(item)) return "skipped";
+  if (typeof item.failureReason === "string" && item.failureReason.trim()) return "failed";
   if (typeof item.failedStage === "string" && item.failedStage.trim()) return "failed";
   return hasCompletedStages ? "running" : "pending";
+}
+
+export type TrafficReviewResourceState = "awaitingResource" | "checking" | "verified" | "skipped" | "failed";
+
+/** 审查面板的班期资源状态；已跳过的子产品不会把整块面板标为失败。 */
+export function trafficReviewResourceState(progress: Record<string, unknown> | null, checking: boolean, phaseFailed: boolean): TrafficReviewResourceState {
+  if (progress?.verified === true) return "verified";
+  if (progress && skipHandled(progress)) return "skipped";
+  if (progress?.failureReason || phaseFailed) return "failed";
+  return checking ? "checking" : "awaitingResource";
 }
 
 /** 跳过原因的展示文案；没有任何失败证据时不编造原因。 */

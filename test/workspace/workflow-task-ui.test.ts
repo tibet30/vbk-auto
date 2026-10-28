@@ -132,3 +132,12 @@ test("任务中心提供带二次确认的永久废弃入口且明确保留产�
   assert.match(taskPage, /filter === "abandoned"/);
   assert.match(api, /abandon\(id: string\): Promise<ProductWorkflowTask>/);
 });
+
+test("已跳过子产品不再作为录入失败提示，VBK 面板写明跳过数量", () => {
+  const conversation = read("src/renderer/app/views/workspace/agent-conversation.tsx");
+  const vbkReview = read("src/renderer/app/views/workspace/vbk/review.tsx");
+  assert.match(conversation, /const incomplete = blockingTrafficVariants\(config, product\.automation\?\.trafficLine\)/);
+  assert.doesNotMatch(conversation, /incompleteTrafficVariants/);
+  assert.match(vbkReview, /trafficChildOutcomes\(trafficConfig, product\.automation\?\.trafficLine\)\.skipped\.length/);
+  assert.match(vbkReview, /已跳过 \$\{skippedChildren\} 个子产品/);
+});

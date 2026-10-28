@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TRAFFIC_SKIP_LABELS, trafficSkipReason } from "../../src/shared/traffic-skip-reason.js";
 import { blockingTrafficVariants, incompleteTrafficVariants } from "../../src/shared/traffic-resource-status.js";
+import { trafficChildOutcomes } from "../../src/shared/traffic-child-outcome.js";
 
 test("子产品跳过原因区分本地缺班期、平台无资源与录入失败", () => {
   assert.equal(trafficSkipReason("产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。"), "local_inventory_missing");
@@ -22,4 +23,18 @@ test("缺销售班期的已跳过子产品仍可重试，但不阻塞母产品�
     failureReason: "产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。" }] } as any;
   assert.deepEqual(incompleteTrafficVariants(config as any, progress), ["trainRoundTrip"]);
   assert.deepEqual(blockingTrafficVariants(config as any, progress), []);
+});
+
+test("子产品结果计数是结案汇总与录入面板的共同口径", () => {
+  const config = { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] } as const;
+  const progress = { children: [
+    { variant: "flightRoundTrip", verified: true, completedStages: ["finalReadback"] },
+    { variant: "trainRoundTrip", verified: false, skipped: true, skipReason: "local_inventory_missing", completedStages: [], failedStage: "resourcesSaved",
+      failureReason: "产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。" },
+  ] } as any;
+  const outcomes = trafficChildOutcomes(config as any, progress);
+  assert.equal(outcomes.completed.length, 1);
+  assert.deepEqual(outcomes.skipped, [{ variant: "trainRoundTrip", reason: "local_inventory_missing" }]);
+  progress.children[1].failureReason = "当前产品未匹配玩法线路，请去行程描述/资源配置页面提交审核匹配线路";
+  assert.deepEqual(trafficChildOutcomes(config as any, progress).skipped, [], "玩法线路审核不算跳过");
 });

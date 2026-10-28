@@ -36,10 +36,13 @@ test("保存和有效化失败不显示为本班期已跳过", () => {
     failureReason: "子产品资源校验后没有任何可用的多出发城市" }, true), "skipped");
 });
 
-test("带失败原因的子产品显示已跳过，端点提示写明原因", () => {
-  const item = { verified: false, variant: "trainRoundTrip", failedStage: "resourcesSaved",
+test("已跳过的子产品显示已跳过，端点提示写明原因；无跳过标记的旧失败仍显示失败", () => {
+  const item = { verified: false, skipped: true, variant: "trainRoundTrip", failedStage: "resourcesSaved",
     failureReason: "产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。" };
   assert.equal(trafficLineChildStatus(item, true), "skipped");
   assert.match(trafficLineEndpointHint("skipped", true, trafficLineSkipLabel(item)), /已跳过：本地未配置销售班期，请在价格库存班期补充后重试/);
   assert.equal(trafficLineSkipLabel({ verified: false, failureReason: "请求超时" }), "子产品录入失败，已跳过");
+  // 与 trafficChildSkipHandled 同一口径：旧记录没有 skipped 标记时不冒充已跳过。
+  assert.equal(trafficLineChildStatus({ verified: false, variant: "trainRoundTrip", failedStage: "resourcesSaved",
+    failureReason: "请求超时" }, true), "failed");
 });

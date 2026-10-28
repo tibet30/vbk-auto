@@ -15,6 +15,7 @@ import { useMemo } from "react";
 import { aggregateSectionState, phaseDisplayLabel, visibleVbkNavSections } from "../../../helpers";
 import { TrafficLineProgress } from "../../../helpers/traffic-line-progress";
 import { trafficResourceStatus } from "../../../../../shared/traffic-resource-status.js";
+import { trafficChildOutcomes } from "../../../../../shared/traffic-child-outcome.js";
 import type { TrafficLineConfig } from "../../../../../shared/contracts-traffic-line.js";
 import shared from "../../shared.module.less";
 import layout from "../layout.module.less";
@@ -64,10 +65,10 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
 
   if (!product) return null;
   const draftSaved = product.status === "draft_saved" && Boolean(product.productId) && Boolean(product.automation?.phases.some(phase => phase.phase === "preflight" && phase.status === "completed"));
-  const optionalTrafficPending = trafficResourceStatus(
-    (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
-    product.automation?.trafficLine,
-  ).hasIncompleteTraffic;
+  const trafficConfig = (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine;
+  const skippedChildren = trafficChildOutcomes(trafficConfig, product.automation?.trafficLine).skipped.length;
+  const optionalTrafficPending = trafficResourceStatus(trafficConfig, product.automation?.trafficLine).hasIncompleteTraffic || skippedChildren > 0;
+  const skippedChildrenNote = skippedChildren ? `已跳过 ${skippedChildren} 个子产品` : "";
   const automationSucceeded = draftSaved;
 
   return (
@@ -84,7 +85,7 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
           </div>
           <div className={styles.readinessHeroBody}>
             <strong>{draftSaved ? "产品草稿已保存" : readiness.ready ? "产品方案已就绪" : "先回到第一步完成核查"}</strong>
-            <small>{draftSaved ? optionalTrafficPending ? "母产品已完成并通过回读；未完成的交通套餐可单独重试。" : "母产品及交通套餐已通过远端回读。" : readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
+            <small>{draftSaved ? optionalTrafficPending ? `母产品已完成并通过回读；${skippedChildrenNote ? `${skippedChildrenNote}，` : ""}未完成的交通套餐可单独重试。` : "母产品及交通套餐已通过远端回读。" : readiness.ready ? "在方案协作中确认后，将自动录入 VBK。" : `还有 ${readiness.issues.length} 项未处理。`}</small>
           </div>
           <div className={styles.readinessHeroProgress}>
             <strong>{readiness.completion}%</strong>
@@ -96,7 +97,7 @@ export function AppWorkspaceVbkReview({ model }: ReviewAsideProps) {
             <span className={layout.panelNum}>C</span>
             <strong className={styles.productSectionTitle}>自动录入进度</strong>
             <span className={styles.productSectionMeta}>
-              {draftSaved ? optionalTrafficPending ? "母产品已完成" : "全部完成" : product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
+              {draftSaved ? optionalTrafficPending ? `母产品已完成${skippedChildrenNote ? ` · ${skippedChildrenNote}` : ""}` : "全部完成" : product.automation?.currentPhase ? `当前：${product.automation.currentPhase}` : "未开始"}
             </span>
           </div>
           <div className={styles.automation}>

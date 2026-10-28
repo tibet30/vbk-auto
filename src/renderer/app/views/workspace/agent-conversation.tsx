@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, MessageCircleMore, Pause, Play, Send } from "lucide-react";
 import type { ProductDetail, ProductReadiness, TrafficLineConfig, VbkApi } from "../../../../shared/contracts";
-import { incompleteTrafficVariants } from "../../../../shared/traffic-resource-status";
+import { blockingTrafficVariants } from "../../../../shared/traffic-resource-status";
 import { parseProductBriefMessage } from "../../../../shared/product-brief-message";
 import { AgentInput } from "./agent-input";
 import { AgentStageTimeline } from "./agent-stage-timeline";
@@ -240,7 +240,8 @@ export function AgentConversation({ product, userName, readiness, client, input,
 
 function latestAutomationFailure(product: ProductDetail) {
   const config = (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine;
-  const incomplete = incompleteTrafficVariants(config, product.automation?.trafficLine);
+  // 已跳过的子产品不再算作录入失败；只有阻塞母产品结案的交通方式才提示。
+  const incomplete = blockingTrafficVariants(config, product.automation?.trafficLine);
   if (incomplete.length) {
     const reasons = [...new Set(product.automation?.trafficLine?.children
       .filter((child) => incomplete.includes(child.variant))

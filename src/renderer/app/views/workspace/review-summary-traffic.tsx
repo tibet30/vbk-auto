@@ -1,7 +1,7 @@
 import { BadgeCheck, ChevronDown, Plane, TrainFront } from "lucide-react";
 import type { ProductDetail } from "../../../../shared/contracts-types.js";
 import type { TrafficLineVariant } from "../../../../shared/contracts-traffic-line.js";
-import { isUnavailableTrafficResourceFailure } from "../../../../shared/traffic-resource-status.js";
+import { trafficLineSkipLabel, trafficReviewResourceState, type TrafficReviewResourceState } from "../../helpers/traffic-line-child-status.js";
 import styles from "./review-summary-traffic.module.less";
 
 type UnknownRecord = Record<string, unknown>;
@@ -10,7 +10,8 @@ type TrafficReviewItem = {
   variant: TrafficLineVariant;
   arrival: string;
   departure: string;
-  resourceState: "awaitingResource" | "checking" | "verified" | "unavailable" | "failed";
+  resourceState: TrafficReviewResourceState;
+  skipLabel?: string;
 };
 
 function record(value: unknown): UnknownRecord | null {
@@ -49,12 +50,9 @@ function readTrafficReviewItems(product: ProductDetail): TrafficReviewItem[] {
     const departure = stationLabel(route?.departure, train);
     const child = children.find((item) => record(item)?.variant === variant);
     const progress = record(child);
-    const resourceState = progress?.verified === true
-      ? "verified"
-      : progress?.skipped === true && isUnavailableTrafficResourceFailure(String(progress.failureReason ?? ""), variant) ? "unavailable"
-        : progress?.failureReason || trafficProgress?.failureReason ? "failed"
-          : checking ? "checking" : "awaitingResource";
-    return arrival && departure ? [{ variant, arrival, departure, resourceState }] : [];
+    const resourceState = trafficReviewResourceState(progress, checking, Boolean(trafficProgress?.failureReason));
+    const skipLabel = resourceState === "skipped" && progress ? trafficLineSkipLabel(progress) : undefined;
+    return arrival && departure ? [{ variant, arrival, departure, resourceState, skipLabel }] : [];
   });
 }
 
@@ -72,18 +70,19 @@ export function AppWorkspaceReviewSummaryTraffic({
   const items = readTrafficReviewItems(product);
   const endpointsConfirmed = items.length > 0;
   const resourceVerified = items.filter((item) => item.resourceState === "verified").length;
-  const plannedItems = items.filter((item) => item.resourceState !== "unavailable");
+  const plannedItems = items.filter((item) => item.resourceState !== "skipped");
+  const skippedSuffix = items.length > plannedItems.length ? ` · 已跳过 ${items.length - plannedItems.length} 类` : "";
   const resourceComplete = product.productId
     && plannedItems.length > 0 && resourceVerified === plannedItems.length;
   const resourceFailed = items.some((item) => item.resourceState === "failed");
   const headerMeta = !endpointsConfirmed
     ? "待核验"
     : product.productId && resourceComplete
-      ? `${resourceVerified}/${items.length} 类班期已核验`
+      ? `${resourceVerified}/${items.length} 类班期已核验${skippedSuffix}`
       : !product.productId
         ? `${items.length} 类端点已确认`
         : resourceFailed ? "班期核验需处理"
-          : plannedItems.length === 0 ? "当前班期暂无可用资源" : `${resourceVerified}/${plannedItems.length} 类班期已核验`;
+          : plannedItems.length === 0 ? "子产品已跳过" : `${resourceVerified}/${plannedItems.length} 类班期已核验${skippedSuffix}`;
 
   return (
     <section
@@ -121,7 +120,7 @@ export function AppWorkspaceReviewSummaryTraffic({
                     </div>
                     <span className={styles.itemState} data-state={item.resourceState}>
                       {item.resourceState === "verified" ? "班期资源已确认"
-                        : item.resourceState === "unavailable" ? "本班期无资源"
+                        : item.resourceState === "skipped" ? item.skipLabel ? `已跳过：${item.skipLabel}` : "已跳过"
                             : item.resourceState === "failed" ? "班期核验需处理"
                               : item.resourceState === "checking" ? "正在核验班期资源"
                               : "端点已确认，待核验班期资源"}

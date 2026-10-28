@@ -41,7 +41,7 @@ for (const length of [29, 30, 80, 84, 85]) {
     assert.equal(detectAcceptedModulesFromProduct(product).includes("presentation"), valid);
     assert.equal(deepValidateModules({ skeleton, product, acceptedModules: ["presentation"] }).invalid.length === 0, valid);
     if (valid) assert.equal(buildRecommendationReasonsPlan(value.recommendations)[0]?.text, text);
-    else if (length > 84) assert.throws(() => buildRecommendationReasonsPlan(value.recommendations), /第 1 项推荐理由超过 84 平台字符且无法按分句截短/);
+    else if (length > 84) assert.throws(() => buildRecommendationReasonsPlan(value.recommendations), /第 1 项超过 84 平台字符且无法按分句截短/);
     else assert.throws(() => buildRecommendationReasonsPlan(value.recommendations), /不在 30～84 个字符范围内/);
   });
 }

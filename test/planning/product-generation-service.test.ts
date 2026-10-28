@@ -156,7 +156,7 @@ test("resource callback corruption is caught by the second persisted readback", 
   assert.deepEqual(events, ["generate", "clearPois", "resolveResources", "refreshResearch"]);
 });
 
-test("presentation fallback repairs before generation and returns one accepted summary per module", async () => {
+test("presentation model rejection fails visibly without local fallback copy", async () => {
   const events: string[] = [];
   const setup = service({
     events,
@@ -167,26 +167,20 @@ test("presentation fallback repairs before generation and returns one accepted s
   });
   setup.detail.product.presentation = undefined;
 
-  const result = await setup.generation.generate(setup.detail.id, "presentation");
-
+  await assert.rejects(setup.generation.generate(setup.detail.id, "presentation"),
+    /推荐理由未处理：图文生成没有写入 presentation 模块（模型未返回图文；图文内容未通过校验.*不使用本地兜底文案）/);
   assert.deepEqual(events.slice(0, 2), ["beforePresentation", "generate"]);
-  assert.equal(result.applied.accepted.filter((item) => item.module === "presentation").length, 1);
-  assert.deepEqual(
-    result.applied.accepted.find((item) => item.module === "presentation")?.acceptedFields,
-    ["recommendation", "features", "recommendations", "cover"],
-  );
-  assert.equal(result.applied.rejected.some((item) => item.module === "presentation"), false);
-  assert.equal((setup.detail.product.presentation?.recommendations ?? []).length, 3);
+  assert.equal(setup.detail.product.presentation?.recommendations, undefined, "不得写入本地兜底推荐理由");
 });
 
-test("generator failures fall back only for presentation and commercial", async () => {
-  for (const stage of ["presentation", "commercial"] as const) {
+test("generator failures fall back only for commercial; presentation errors propagate", async () => {
+  const commercial = service({ generate: async () => { throw new Error("provider failed"); } });
+  await commercial.generation.generate(commercial.detail.id, "commercial");
+  for (const stage of ["presentation", "basicInfo"] as const) {
     const setup = service({ generate: async () => { throw new Error("provider failed"); } });
     if (stage === "presentation") setup.detail.product.presentation = undefined;
-    await setup.generation.generate(setup.detail.id, stage);
+    await assert.rejects(setup.generation.generate(setup.detail.id, stage), /provider failed/);
   }
-  const setup = service({ generate: async () => { throw new Error("provider failed"); } });
-  await assert.rejects(setup.generation.generate(setup.detail.id, "basicInfo"), /provider failed/);
 });
 
 test("basicInfo write ACK without persisted fields is returned as rejected", async () => {

@@ -7,9 +7,9 @@ test("presentation 自动把模型输出的 features 对象修复为安全 HTML"
     recommendationCategory: "优选行程",
     recommendation: "日喀则人文精华两日游",
     recommendations: [
-      { category: "优选行程", text: "江孜与日喀则人文串联" },
-      { category: "缤纷景点", text: "庄园古堡寺院层次丰富" },
-      { category: "服务保障", text: "专车接送并配讲解" },
+      { category: "优选行程", text: "江孜宗山古堡与日喀则扎什伦布寺串联，2天读懂后藏人文" },
+      { category: "缤纷景点", text: "帕拉庄园看旧时庄园生活，白居寺十万佛塔层层登高" },
+      { category: "服务保障", text: "日喀则火车站接送站，全程专车往返江孜无需换乘" },
     ],
     features: {
       sections: [

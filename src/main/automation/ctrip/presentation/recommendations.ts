@@ -85,23 +85,23 @@ export function buildRecommendationReasonsPlan(
     try {
       normalizedText = normalizeVbkRecommendation(text);
     } catch (error) {
-      throw new Error(`推荐理由第 ${i + 1} 项${error instanceof Error ? error.message : String(error)}，必须返回规划重新改写。`);
+      const reason = (error instanceof Error ? error.message : String(error)).replace(/^推荐理由/u, "");
+      throw new Error(`推荐理由第 ${i + 1} 项${reason}，必须返回规划重新改写。`);
     }
     if (!normalizedText) {
       throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
     }
-    const fittedText = normalizedText;
-    if (!hasValidVbkRecommendationLength(fittedText)) {
+    if (!hasValidVbkRecommendationLength(normalizedText)) {
       throw new Error(`推荐理由第 ${i + 1} 项不在 30～84 个字符范围内，请重新生成更短文案。`);
     }
     const referencedOfficialNames = officialPoiNames.filter(name => text.includes(name));
-    const lostOfficialName = referencedOfficialNames.find(name => !fittedText.includes(name));
+    const lostOfficialName = referencedOfficialNames.find(name => !normalizedText.includes(name));
     if (lostOfficialName) {
       throw new Error(`推荐理由第 ${i + 1} 项裁剪后会丢失官方 POI 名「${lostOfficialName}」，必须返回规划重新改写。`);
     }
     const copyBadCase = findVbkCopyBadCase(text, `recommendations.${i}.text`, [...officialPoiNames])
       ?? findVbkCopyBadCase(sourceNormalizedText, `recommendations.${i}.text`, [...officialPoiNames])
-      ?? findVbkCopyBadCase(fittedText, `recommendations.${i}.text`, [...officialPoiNames]);
+      ?? findVbkCopyBadCase(normalizedText, `recommendations.${i}.text`, [...officialPoiNames]);
     if (copyBadCase) {
       throw new Error(
         `推荐理由第 ${i + 1} 项命中 VBK 文案黑名单「${copyBadCase.term}」：${copyBadCase.reason}；请改写为「${copyBadCase.alternatives.join("」或「")}」。`,
@@ -111,7 +111,7 @@ export function buildRecommendationReasonsPlan(
       throw new Error(`推荐理由分类「${category}」重复。`);
     }
     seen.add(category);
-    plan.push({ index: i, category, text: fittedText });
+    plan.push({ index: i, category, text: normalizedText });
   }
   return plan;
 }

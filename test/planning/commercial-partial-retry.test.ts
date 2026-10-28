@@ -40,7 +40,7 @@ class PartialCommercialPlanner implements Planner {
         modules: [{ module: "presentation", status: "accepted", value: {
           recommendationCategory: "服务保障", recommendation: "R",
           recommendations: [
-            { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
+            { category: "服务保障", text: "第1天专车接站直达首个景点，全程同一司机衔接无需换乘" }, { category: "精选酒店", text: "市区酒店连住1晚，含双早，步行可达夜市品尝当地小吃" }, { category: "缤纷体验", text: "2天串联3处古建与博物馆，室内外景点动静结合不重样" },
           ],
           features: "f",
         } }],
@@ -92,7 +92,7 @@ class StaleRejectedCommercialPlanner implements Planner {
         modules: [{ module: "presentation", status: "accepted", value: {
           recommendationCategory: "服务保障", recommendation: "R",
           recommendations: [
-            { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
+            { category: "服务保障", text: "第1天专车接站直达首个景点，全程同一司机衔接无需换乘" }, { category: "精选酒店", text: "市区酒店连住1晚，含双早，步行可达夜市品尝当地小吃" }, { category: "缤纷体验", text: "2天串联3处古建与博物馆，室内外景点动静结合不重样" },
           ],
           features: "f",
         } }],

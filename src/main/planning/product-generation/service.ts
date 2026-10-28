@@ -1,5 +1,5 @@
 import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
-import type { PlanningStageOutput } from "../../../shared/contracts-planning.js";
+import type { PlanningStageError, PlanningStageOutput } from "../../../shared/contracts-planning.js";
 import { projectCompleteItinerary } from "../complete-itinerary-projection.js";
 import { ensureDayTitleFits, generateItineraryDayTitles, itineraryDaySourceText } from "../itinerary-day-titles.js";
 import { itineraryDayTitleBudget, itineraryDayTitleProblem } from "../../../shared/itinerary-day-title.js";
@@ -28,9 +28,9 @@ type JsonObject = Record<string, unknown>;
 export class ProductGenerationService {
   constructor(private readonly deps: ProductGenerationDependencies) {}
 
-  async generate(localProductId: string, stage: ProductGenerationStage): Promise<ProductGenerationResult> {
+  async generate(localProductId: string, stage: ProductGenerationStage, previousError?: PlanningStageError): Promise<ProductGenerationResult> {
     if (stage === "presentation") await this.deps.beforePresentation(localProductId);
-    const output = await this.stageOutput(localProductId, stage);
+    const output = await this.stageOutput(localProductId, stage, previousError);
     if (stage === "itinerary") this.clearGeneratedPoiClaims(output);
 
     const applied = await executeStageOutput({
@@ -65,13 +65,14 @@ export class ProductGenerationService {
   private async stageOutput(
     localProductId: string,
     stage: ProductGenerationStage,
+    previousError?: PlanningStageError,
   ): Promise<PlanningStageOutput> {
     const projected = stage === "itinerary"
       ? projectCompleteItinerary(this.deps.getProduct(localProductId))
       : undefined;
     if (projected) return this.withDayTitles(localProductId, projected, true);
     try {
-      const output = await this.deps.generateStage(localProductId, stage);
+      const output = await this.deps.generateStage(localProductId, stage, previousError);
       return stage === "itinerary" ? this.withDayTitles(localProductId, output, false) : output;
     } catch (error) {
       // 只有商业阶段可转本地确定性补全；图文失败必须如实失败，不再生成兜底文案。

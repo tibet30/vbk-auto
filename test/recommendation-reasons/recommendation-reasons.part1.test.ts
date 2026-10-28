@@ -9,9 +9,9 @@ import {
 } from "./recommendation-reasons.shared.js";
 test("3 项分类去重后顺序保留", () => {
   const plan = buildRecommendationReasonsPlan([
-    { category: "精选酒店", text: "B" },
-    { category: "优选行程", text: "A" },
-    { category: "缤纷景点", text: "C" },
+    { category: "精选酒店", text: "成都市区酒店连住1晚，含双早，步行可达春熙路商圈" },
+    { category: "优选行程", text: "成都2天串联宽窄巷子与武侯祠，老城街巷与三国祠堂一次看全" },
+    { category: "缤纷景点", text: "大熊猫基地清晨入园，赶在8点前看熊猫进食的活跃时段" },
   ]);
   assert.equal(plan.length, 3);
   assert.equal(plan[0]?.category, "精选酒店");
@@ -19,23 +19,23 @@ test("3 项分类去重后顺序保留", () => {
 
 test("少于 3 项抛错", () => {
   assert.throws(() => buildRecommendationReasonsPlan([
-    { category: "优选行程", text: "A" },
+    { category: "优选行程", text: "成都2天串联宽窄巷子与武侯祠，老城街巷与三国祠堂一次看全" },
   ]), /3 项/);
 });
 
 test("非白名单分类抛错", () => {
   assert.throws(() => buildRecommendationReasonsPlan([
     { category: "超值套餐", text: "非法" },
-    { category: "精选酒店", text: "B" },
-    { category: "缤纷景点", text: "C" },
+    { category: "精选酒店", text: "成都市区酒店连住1晚，含双早，步行可达春熙路商圈" },
+    { category: "缤纷景点", text: "大熊猫基地清晨入园，赶在8点前看熊猫进食的活跃时段" },
   ]), /白名单/);
 });
 
 test("重复分类抛错", () => {
   assert.throws(() => buildRecommendationReasonsPlan([
-    { category: "优选行程", text: "A" },
-    { category: "优选行程", text: "B" },
-    { category: "缤纷景点", text: "C" },
+    { category: "优选行程", text: "成都2天串联宽窄巷子与武侯祠，老城街巷与三国祠堂一次看全" },
+    { category: "优选行程", text: "成都市区酒店连住1晚，含双早，步行可达春熙路商圈" },
+    { category: "缤纷景点", text: "大熊猫基地清晨入园，赶在8点前看熊猫进食的活跃时段" },
   ]), /重复/);
 });
 

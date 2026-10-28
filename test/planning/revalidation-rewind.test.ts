@@ -199,7 +199,7 @@ test("resume 检测到非法 1-day itinerary → 状态 needs_user 且 currentSt
       recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
+        { category: "服务保障", text: "第1天专车接站直达首个景点，全程同一司机衔接无需换乘" }, { category: "精选酒店", text: "市区酒店连住1晚，含双早，步行可达夜市品尝当地小吃" }, { category: "缤纷体验", text: "2天串联3处古建与博物馆，室内外景点动静结合不重样" },
       ],
       features: "f",
     } }] },
@@ -256,7 +256,7 @@ test("resume 检测到非法 release 子模块（publicPriceCeiling 缺失）→
       recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
+        { category: "服务保障", text: "第1天专车接站直达首个景点，全程同一司机衔接无需换乘" }, { category: "精选酒店", text: "市区酒店连住1晚，含双早，步行可达夜市品尝当地小吃" }, { category: "缤纷体验", text: "2天串联3处古建与博物馆，室内外景点动静结合不重样" },
       ],
       features: "f",
     } }] },
@@ -307,7 +307,7 @@ test("rewind 不会清除比 invalid 阶段更早的合法 completedStages", asy
       recommendationCategory: "服务保障",
       recommendation: "R",
       recommendations: [
-        { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
+        { category: "服务保障", text: "第1天专车接站直达首个景点，全程同一司机衔接无需换乘" }, { category: "精选酒店", text: "市区酒店连住1晚，含双早，步行可达夜市品尝当地小吃" }, { category: "缤纷体验", text: "2天串联3处古建与博物馆，室内外景点动静结合不重样" },
       ],
       features: "f",
     } }] },

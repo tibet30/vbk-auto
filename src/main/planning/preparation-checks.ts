@@ -3,7 +3,7 @@ import type { ProductDetail } from "../../shared/contracts.js";
 import type { PreparationGap, PostApprovalDeterministicItem } from "../../shared/contracts-preparation.js";
 import { foundationGaps } from "./preparation-checks/foundation.js";
 import { commercialGaps } from "./preparation-checks/commercial.js";
-import { itineraryCopyGaps } from "./preparation-checks/copy.js";
+import { itineraryCopyGaps, recommendationQualityGaps } from "./preparation-checks/copy.js";
 import { resourceGaps } from "./preparation-checks/resources.js";
 import { trafficGaps } from "./preparation-checks/traffic.js";
 
@@ -23,6 +23,7 @@ export function extraPreparationGaps(product: Record<string, unknown>, detail?: 
     ...foundationGaps(product),
     ...commercialGaps(product),
     ...itineraryCopyGaps(detail),
+    ...recommendationQualityGaps(product),
     ...resourceGaps(product),
     ...trafficGaps(product),
   ];

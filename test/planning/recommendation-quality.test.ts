@@ -29,6 +29,14 @@ test("含景点名（含间隔号写法）或道路编号的推荐理由视为�
   assert.deepEqual(recommendationQualityProblems(product, [concreteC, "沿G318一路向西，雪山草甸与牧场交替出现，车窗外即是风景", concreteA]), []);
 });
 
+test("组合 POI 名按间隔号拆段，单独提及其中一段也视为具体", () => {
+  const combined = { itinerary: [{ day: 1, spots: [{ name: "布达拉宫·红宫", poiName: "布达拉宫·红宫", poiId: 9 }] }] };
+  assert.deepEqual(recommendationQualityProblems(combined, ["清晨登上布达拉宫俯瞰拉萨河谷，转经道上感受藏地日常"]), []);
+  assert.deepEqual(recommendationQualityProblems(combined, ["红宫壁画与灵塔殿依次参观，讲解藏式建筑的营造智慧"]), []);
+  const single = { itinerary: [{ day: 1, spots: [{ name: "A·宫", poiName: null, poiId: null }] }] };
+  assert.ok(recommendationQualityProblems(single, ["宫墙下慢慢走走，感受古老建筑带来的宁静与庄严氛围"]).includes("第1条缺少具体景点名或数字"));
+});
+
 test("两条字符二元组相似度过高时报重复，只共用一个景点名不报", () => {
   const near = "上午登布达拉宫看红宫壁画，下午转大昭寺八廓街，感受千年藏地信仰文化";
   assert.ok(recommendationQualityProblems(product, [concreteA, near, concreteC]).includes("第1条与第2条内容重复"));
@@ -37,7 +45,7 @@ test("两条字符二元组相似度过高时报重复，只共用一个景点�
 });
 
 test("超长且无法按分句截短的推荐理由直接抛错，不再替换为泛化短句", () => {
-  assert.throws(() => fitVbkRecommendationText("无标点的超长推荐理由".repeat(8), undefined, "服务保障"),
+  assert.throws(() => fitVbkRecommendationText("无标点的超长推荐理由".repeat(8)),
     /推荐理由超过 84 平台字符且无法按分句截短/);
 });
 

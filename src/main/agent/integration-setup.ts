@@ -92,7 +92,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       get automation() { return context.automation; },
       productWorkflows,
       productMutations: context.productMutations,
-      generateStage: async (localProductId, stage) => {
+      generateStage: async (localProductId, stage, previousError) => {
         const settings = getSettings();
         const profile = aiProviderConfig(settings, settings.aiProvider);
         const key = await apiKey(settings.aiProvider);
@@ -120,7 +120,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
           );
           plannerContext.recommendationCategoryPolicy = await policyRuntime.resolveRecommendationCategoryPolicy(localProductId);
         }
-        return adapter.generateStage({ stage, context: plannerContext });
+        return adapter.generateStage({ stage, context: plannerContext, previousError });
       },
       generateItineraryDayTitles: async (localProductId, requests) => (await context.aiService())
         .generateItineraryDayTitles(requests, { localProductId, onEvent: (event) => recordAgentUsage(db, localProductId, event) }),

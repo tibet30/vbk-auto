@@ -6,9 +6,9 @@ const presentation = {
   recommendationCategory: "缤纷景点",
   recommendation: "龙江第一湾与中国最北点串联，最佳观景时段更从容",
   recommendations: [
-    { category: "缤纷景点", text: "龙江第一湾与中国最北点保留原路线名称" },
-    { category: "服务保障", text: "全程衔接清晰，优先核对每日集合时间" },
-    { category: "特色美食", text: "按行程节奏安排当地餐食，体验更丰富" },
+    { category: "缤纷景点", text: "龙江第一湾与中国最北点保留原路线名称，沿江而上感受界江风光" },
+    { category: "服务保障", text: "漠河往返全程专车衔接，2天行程优先核对每日集合时间" },
+    { category: "特色美食", text: "北极村安排当地铁锅炖餐食，按3段行程节奏用餐更从容" },
   ],
   features: "<p><strong>沿途亮点：</strong>龙江第一湾、中国最北点与北极村。</p>",
 };

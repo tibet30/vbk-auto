@@ -154,9 +154,9 @@ function buildFakeScript(): FakeProviderScript[] {
             recommendationCategory: "缤纷体验",
             recommendation: "2 天串联核心景点",
             recommendations: [
-              { category: "缤纷体验", text: "节奏舒适不赶路" },
-              { category: "精选酒店", text: "当地 3 钻酒店含早餐" },
-              { category: "服务保障", text: "覆盖晋祠与博物院" },
+              { category: "缤纷体验", text: "2天串联3处古建与博物馆，室内外景点动静结合不重样" },
+              { category: "精选酒店", text: "市区酒店连住1晚，含双早，步行可达夜市品尝当地小吃" },
+              { category: "服务保障", text: "第1天专车接站直达首个景点，全程同一司机衔接无需换乘" },
             ],
             features: "【古建巡礼】专业讲解\n【私享出行】独立成团",
             cover: {

@@ -3,6 +3,7 @@ import type {
   ModuleOutcome,
   PlanningModule,
   PlanningStage,
+  PlanningStageError,
   PlanningStageOutput,
   ResearchTaskProposal,
 } from "../../../shared/contracts-planning.js";
@@ -28,7 +29,8 @@ export interface ProductGenerationResult {
 
 export interface ProductGenerationDependencies {
   getProduct(localProductId: string): ProductDetail;
-  generateStage(localProductId: string, stage: ProductGenerationStage): Promise<PlanningStageOutput>;
+  /** previousError 为本产品同阶段上一次失败原因，回传给模型以便针对性修正。 */
+  generateStage(localProductId: string, stage: ProductGenerationStage, previousError?: PlanningStageError): Promise<PlanningStageOutput>;
   runtime: OrchestratorRuntime;
   beforePresentation(localProductId: string): void | Promise<void>;
   clearUnverifiedItineraryPois(itinerary: unknown): void;

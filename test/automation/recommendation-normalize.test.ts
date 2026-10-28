@@ -33,7 +33,7 @@ test("推荐理由不改写敏感词，并把超长文本确定性收敛到完�
   const plan = buildRecommendationReasonsPlan([
     { category: "精选酒店", text: "入住核心片区舒适酒店，步行即可抵达热门商圈，方便每天出行与休息，每日行程结束后可以从容休息" },
     { category: "特色美食", text: "本地老店特色小吃与简餐，餐食与景点结合，体验更丰富，按需品尝" },
-    { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
+    { category: "服务保障", text: "全程专车衔接酒店与宽窄巷子，避开自行换乘的繁琐，2天出行更安心" },
   ]);
   assert.equal(plan[0]?.text, "入住核心片区舒适酒店，步行即可抵达热门商圈，方便每天出行与休息");
   assert.ok(vbkRecommendationCharacterLength(plan[0]!.text) <= 80);
@@ -48,7 +48,7 @@ test("平台字符宽度合规的推荐理由超过规划字节预算时仍保�
   const plan = buildRecommendationReasonsPlan([
     { category: "精选酒店", text },
     { category: "特色美食", text: "本地老店特色小吃与简餐，餐食与景点结合，体验更丰富，按需品尝" },
-    { category: "服务保障", text: "全程专车衔接酒店与景区，避开自行换乘的繁琐，陌生路况也可安心出行" },
+    { category: "服务保障", text: "全程专车衔接酒店与宽窄巷子，避开自行换乘的繁琐，2天出行更安心" },
   ]);
   assert.equal(plan[0]?.text, text);
 });
@@ -59,7 +59,7 @@ test("没有可保留完整分句时抛错，录入阶段可见失败而不替�
     { category: "服务保障", text: "无标点的超长推荐理由".repeat(8) },
     { category: "精选酒店", text: "成都市区5钻酒店连住1晚，步行可达春熙路，夜游太古里更方便" },
     { category: "特色美食", text: "宽窄巷子可品尝龙抄手、钟水饺等成都小吃，午餐就近安排" },
-  ]), /第 1 项推荐理由超过 84 平台字符且无法按分句截短.*返回规划重新改写/);
+  ]), /第 1 项超过 84 平台字符且无法按分句截短.*返回规划重新改写/);
 });
 
 test("推荐理由文本不是 string 时直接拒绝", () => {

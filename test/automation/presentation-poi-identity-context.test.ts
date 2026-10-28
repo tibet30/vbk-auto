@@ -41,7 +41,7 @@ test("哈尔滨官方 POI 全名在推荐理由中保留，名称外的排名宣
 test("推荐理由裁剪不得丢失末尾官方 POI 名", () => {
   const names = poiIdentityNames({ itinerary: harbin.itinerary });
   const long = structuredClone(harbin.presentation.recommendations);
-  long[0]!.text = `${"沿途景观与地方文化体验内容丰富".repeat(8)}，前往龙江第一湾风景区`;
+  long[0]!.text = `${"沿途景观与地方文化体验内容丰富，".repeat(8)}前往龙江第一湾风景区`;
   assert.throws(
     () => buildRecommendationReasonsPlan(long, names),
     /裁剪后会丢失官方 POI 名.*必须返回规划重新改写/,
@@ -51,7 +51,7 @@ test("推荐理由裁剪不得丢失末尾官方 POI 名", () => {
 test("推荐理由超长原文末尾黑名单不得被裁剪吞掉", () => {
   const names = poiIdentityNames({ itinerary: harbin.itinerary });
   const long = structuredClone(harbin.presentation.recommendations);
-  long[0]!.text = `${"沿途景观与地方文化体验内容丰富".repeat(8)}，当地排名第一`;
+  long[0]!.text = `${"沿途景观与地方文化体验内容丰富，".repeat(8)}当地排名第一`;
   assert.throws(
     () => buildRecommendationReasonsPlan(long, names),
     /第一（宣传排名用语）/,

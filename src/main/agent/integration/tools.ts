@@ -30,6 +30,7 @@ import {
   type AgentBusinessDependencies,
 } from "../integration-generate.js";
 import { denyPreparationTool } from "../preparation-action-guard.js";
+import { presentationRecommendationTexts, recommendationQualityProblems } from "../../planning/validation/recommendation-quality.js";
 import { enrichItineraryPois } from "../../planning/poi-enrichment.js";
 import { isPlanningPoiCandidateInContext } from "../../planning/poi-auto-selection.js";
 import { findPoiQueryScope, itineraryPoiScope, screenPoiQueryForScope } from "./poi-scope.js";
@@ -124,6 +125,11 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
       name: "patch_product", requiresApproval: false, description: "合并保存本地规划字段（basicInfo、presentation、itinerary、operations、commercial）；系统锁定既有 meetingCity。用户明确指定大交通抵达/返程端点时，只能写 operations.trafficLine.arrivalCity / departureCity；不得写交通方式或启用状态，系统会调用接口核验。未指定端点才默认产品目的地。itinerary 的数据结构严格为逐日对象数组：[{day:1, title:'...', spots:[{name:'...', timeOfDay:'morning', relation:'and'|'or'}]}]。二选一/多选一必须保留每个原始景点，连续写在同一天同一时段，且每项 relation:'or'，供 VBK 录入为“或”。不接受 {item:...}、嵌套数组或 hotels 顶层字段；不允许填写新的 poiId/poiName，已查询到的候选只能由 select_itinerary_poi 写入。", parameters: PRODUCT_PATCH_SCHEMA,
       async execute(args, ctx) {
         const patch = requirePatch(args);
+        if (patchRequestsRecommendations(patch)) {
+          const texts = presentationRecommendationTexts(patch.presentation) ?? [];
+          const problems = recommendationQualityProblems(productData(get(ctx.localProductId)), texts);
+          if (problems.length) throw new Error(`推荐理由不够具体，未保存：${problems.join("；")}。请改写为含本行程景点名、城市名或数字且互不重复的三条。`);
+        }
         const instruction = [historicalHotelTierInstruction(deps.db, get(ctx.localProductId)), hotelAnswerInstruction(deps.db.getAgentSnapshot?.(ctx.localProductId)?.events ?? [])].filter(Boolean).join("\n");
         const operations = agentPatchOperations(get(ctx.localProductId), patch, { hotelTierInstruction: instruction });
         const result = deps.productMutations.applyAiPatch(ctx.localProductId, operations);

@@ -243,9 +243,9 @@ test("产品图文接口保存：显式产品 ID 不读取页面 URL", async () 
 test("产品图文接口保存：推荐理由不得描述不含导游", () => {
   assert.throws(
     () => buildRecommendationReasonsPlan([
-      { category: "优选行程", text: "行程自由安排，不配随队导游。" },
-      { category: "精选酒店", text: "入住当地酒店。" },
-      { category: "缤纷景点", text: "覆盖核心景点。" },
+      { category: "优选行程", text: "成都2天行程自由安排，不配随队导游，可按喜好调整游览顺序" },
+      { category: "精选酒店", text: "成都市区酒店连住1晚，含双早，步行可达春熙路商圈" },
+      { category: "缤纷景点", text: "宽窄巷子与武侯祠串联，半天看尽成都老城的街巷与祠堂" },
     ]),
     /导游否定描述/,
   );

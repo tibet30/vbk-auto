@@ -18,8 +18,11 @@ const bigramSource = (value: string): string => compact(value).replace(/[，,、
 function concreteNames(product: Record<string, unknown>): string[] {
   const names = new Set<string>();
   const add = (value: unknown) => {
-    const name = compact(text(value));
+    const raw = text(value);
+    const name = compact(raw);
     if (name) names.add(name);
+    // 「布达拉宫·红宫」这类组合名，各段（至少 2 字）单独提及也算具体。
+    for (const part of raw.split(/[·・•]/u).map(compact)) if (part.length >= 2) names.add(part);
   };
   add(record(product.basicInfo).meetingCity);
   for (const day of Array.isArray(product.itinerary) ? product.itinerary.map(record) : []) {
@@ -44,6 +47,13 @@ function jaccard(left: Set<string>, right: Set<string>): number {
   let shared = 0;
   for (const gram of left) if (right.has(gram)) shared += 1;
   return shared / (left.size + right.size - shared);
+}
+
+/** 取出 presentation.recommendations[].text；不是数组时返回 undefined。 */
+export function presentationRecommendationTexts(presentation: unknown): string[] | undefined {
+  const recommendations = record(presentation).recommendations;
+  if (!Array.isArray(recommendations)) return undefined;
+  return recommendations.map((entry) => text(record(entry).text));
 }
 
 export function recommendationQualityProblems(product: Record<string, unknown>, texts: string[]): string[] {

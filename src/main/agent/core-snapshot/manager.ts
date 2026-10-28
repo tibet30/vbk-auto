@@ -31,6 +31,7 @@ export class AgentSnapshotManager {
     private readonly store: AgentSnapshotStore,
     private readonly now: () => Date,
     private readonly id: () => string,
+    private readonly completeSummary?: (localProductId: string, scope: string[], summary: string) => string,
   ) {}
 
   load(id: string): AgentSnapshot {
@@ -154,18 +155,20 @@ export class AgentSnapshotManager {
       if (toolCallId) this.result(snapshot, toolCallId, "审批范围或说明无效。", { executionRejected: true }, runId);
       return;
     }
+    // 所有创建路径（模型 request_approval、完成门、整轮重录、向导重试）在此统一补全说明。
+    const shownSummary = this.completeSummary?.(snapshot.localProductId, scope, summary) ?? summary;
     const approval: AgentApproval = {
       id: this.id(),
       productVersion: identity.productVersion,
       accountKey: identity.accountKey,
       scope,
-      summary,
+      summary: shownSummary,
       status: "pending",
       createdAt: this.now().toISOString(),
       intentVersion: snapshot.run.intentVersion,
     };
     snapshot.pendingApproval = approval;
-    this.event(snapshot, "approval_request", summary, { ...(toolCallId ? { toolCallId } : {}), approval }, runId);
+    this.event(snapshot, "approval_request", shownSummary, { ...(toolCallId ? { toolCallId } : {}), approval }, runId);
     this.waiting(snapshot, "waiting_approval");
   }
 

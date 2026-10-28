@@ -67,8 +67,11 @@ export interface DurationReplacementDeps {
   readRemoteBaseInfo: (productId: string) => Promise<unknown>;
 }
 
-/** 不能转新建：保持本地绑定，阶段按失败结束，并告知运营原因。 */
-function refuseReplacement(deps: DurationReplacementDeps, thrown: unknown, reason: string): never | void {
+/**
+ * 不能转新建：保持本地绑定并告知运营原因。原录入是抛错结束的，包装原因后重新抛出；
+ * 原录入以 needs_user 落库结束（未抛错）时，失败记录已在库中，正常返回。
+ */
+function refuseReplacement(deps: DurationReplacementDeps, thrown: unknown, reason: string): void {
   deps.db.addMessage(deps.localProductId, "assistant", reason);
   deps.emit(deps.localProductId);
   if (thrown !== undefined) throw new Error(reason, { cause: thrown });

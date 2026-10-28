@@ -28,6 +28,7 @@ import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from "./co
 import { preparationApprovalBlockReason } from "../planning/preparation-completion.js";
 import { inspectManualCoverAsset } from "../automation/manual-cover-asset.js";
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from "./integration-guard.js";
+import { withDurationReplacementNotice } from "../../shared/duration-replacement.js";
 import { recordAgentUsage } from "./integration-usage.js";
 import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
@@ -242,6 +243,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       return agentTaskContext(db, localProductId, memoryContext, readiness(localProductId));
     },
     normalizeApprovalScope: (localProductId, scope) => normalizeAgentApprovalScope(db.getProduct(localProductId)!, scope),
+    completeApprovalSummary: (localProductId, scope, summary) =>
+      withDurationReplacementNotice(summary, scope, db.getProduct(localProductId)),
     approvalPrecondition: async (localProductId, scope, options) => {
       const product = db.getProduct(localProductId);
       if (!product) return "产品不存在";

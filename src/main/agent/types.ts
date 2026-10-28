@@ -127,6 +127,8 @@ export interface AgentCoreDependencies {
     options?: { wizardStageRetry?: WizardStageRetryPhase },
   ): Promise<string | undefined>;
   normalizeApprovalScope?(localProductId: string, scope: string[]): string[] | Promise<string[]>;
+  /** 所有确认卡创建前的说明补全（如改天数转新建提示）；须幂等。 */
+  completeApprovalSummary?(localProductId: string, scope: string[], summary: string): string;
   now?: () => Date;
   id?: () => string;
 }

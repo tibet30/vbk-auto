@@ -24,6 +24,19 @@ export function durationChangedFromRemote(product: Pick<ProductDetail, "productI
   return entered !== undefined && Number.isInteger(days) && days > 0 && days !== entered;
 }
 
+/**
+ * 确认卡说明补全：范围含 vbk.duration_replacement 时，运营看到的说明必须包含
+ * 旧草稿 ID 与「新建产品」提示；已包含则不重复追加。范围不含时原样返回。
+ */
+export function withDurationReplacementNotice(
+  summary: string, scope: readonly string[], product: Pick<ProductDetail, "productId" | "product" | "automation"> | undefined,
+): string {
+  if (!scope.includes(DURATION_REPLACEMENT_SCOPE) || !product) return summary;
+  const notice = durationReplacementNotice(product);
+  if (!notice || summary.includes(notice)) return summary;
+  return `${summary.trim()}${summary.trim() ? "\n" : ""}${notice}`;
+}
+
 export function durationReplacementNotice(product: Pick<ProductDetail, "productId" | "product" | "automation">): string {
   return durationChangedFromRemote(product)
     ? `若 VBK 拒绝改天数，将保留旧草稿 ${product.productId} 并新建产品重新录入。`

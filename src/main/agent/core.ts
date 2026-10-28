@@ -93,7 +93,8 @@ export class AgentCore {
   constructor(private readonly deps: AgentCoreDependencies, store: AgentSnapshotStore) {
     this.now = deps.now ?? (() => new Date());
     this.id = deps.id ?? (() => crypto.randomUUID());
-    this.snapshots = new AgentSnapshotManager(store, this.now, this.id);
+    this.snapshots = new AgentSnapshotManager(store, this.now, this.id,
+      deps.completeApprovalSummary && ((id, scope, summary) => deps.completeApprovalSummary!(id, scope, summary)));
     this.toolRunner = new AgentToolRunner(deps, this.snapshots, this.now, this.id);
     this.handoffs = new AgentHandoff(deps, this.snapshots, (id, operation) => this.command(id, operation));
     this.loop = new AgentTurnLoop(deps, this.snapshots, this.toolRunner, this.id, this.active, this.scheduled);

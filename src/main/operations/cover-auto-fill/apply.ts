@@ -5,7 +5,7 @@
  *   - 阶段一：按 collectCoverSearchKeywords 有序去重逐个搜，收集每个 POI 的完整候选池；
  *   - 阶段二：先把 requiredTourImagePois 的代表图按 imageId 去重轮询挑一张，再轮询补足到 imageTargetCount；
  *   - 阶段三：把剩余候选按真实 POI 归属写入 itinerary[].spots[].images（cover-spot-images）；
- *   - 失败时走 applyCoverFallback 占位并返回简短原因。
+ *   - 无合格图或检索失败时不写占位图，返回阻塞原因，由 readiness 的封面缺口拦住录入。
  *
  * 关键约束：
  *   - 仅主进程确认尺寸不足后允许 manualUpload → ctripLibrary；
@@ -17,11 +17,11 @@ import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
 import { inspectManualCoverAsset } from "../../automation/manual-cover-asset.js";
 import type { Page } from "playwright";
 import { searchCtripLibraryImages } from "../../infrastructure/ctrip-library-search.js";
+import { coverSearchLogger } from "../../infrastructure/cover-place-search-logger.js";
 import type { CtripLibraryImageCandidate, CtripLibrarySearchResult } from "../../../shared/contracts-types.js";
 import { logInfo } from "../../../shared/log-timestamp.js";
 import { collectSpotImageResiduals } from "../cover-spot-images.js";
 import { missingTourImagePois, requiredTourImagePois } from "../../../shared/tour-image-coverage.js";
-import { applyCoverFallback } from "../cover-fallback.js";
 import {
   buildCtripLibraryCoverAlternateFromCandidate,
   readPreparedCoverImages,
@@ -115,7 +115,7 @@ export async function applyAutoCoverFill(args: {
       // 生产路径（main.ts）始终不传 injectSearch，走默认 searchCtripLibraryImages。
       result = args.injectSearch
         ? await args.injectSearch(args.page, keyword)
-        : await searchCtripLibraryImages(args.page, keyword);
+        : await searchCtripLibraryImages(args.page, keyword, { logger: coverSearchLogger });
     } catch (error) {
       if (isReplayDataMissing(error)) throw error;
       searchFailures += 1;
@@ -208,15 +208,14 @@ export async function applyAutoCoverFill(args: {
   }
 
   if (!primary) {
-    const reason = searchFailures > 0 ? "search_unavailable" : "no_qualified_candidate";
-    const fallback = applyCoverFallback(product, reason, now);
+    // 不再写运营占位图：保持产品原样，由 readiness 的「封面图」缺口阻塞录入。
     return {
-      nextProduct: fallback.nextProduct,
+      nextProduct: product,
       outcome: {
-        written: fallback.written,
-        reason: reason === "search_unavailable"
-          ? `${keywords.length} 个景点（${keywords.join("、")}）中有 ${searchFailures} 个搜索失败，已设置待重试占位图；请重试或人工上传真实图片`
-          : `已检索 ${keywords.length} 个景点（${keywords.join("、")}）且无合格图片，已设置待替换占位图`,
+        written: false,
+        reason: searchFailures > 0
+          ? `${keywords.length} 个景点（${keywords.join("、")}）中有 ${searchFailures} 个搜索失败，请重试或人工上传/选择图库图片`
+          : `已检索 ${keywords.length} 个景点（${keywords.join("、")}）且无合格图片，请重试或人工上传/选择图库图片`,
       },
     };
   }

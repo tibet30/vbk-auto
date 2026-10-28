@@ -1,4 +1,4 @@
-import { logWarn } from "../../shared/log-timestamp.js";
+import { logInfo, logWarn } from "../../shared/log-timestamp.js";
 /**
  * cover place search 可观测日志：
  *   - 仅做类型 + 一个截断纯函数 + console 桥接，不持有任何 side effect 之外的资源；
@@ -31,6 +31,7 @@ import { logWarn } from "../../shared/log-timestamp.js";
  *    imageIdCount / durationMs + 会话上下文）；
  *  - "image-info-failure"：getImageInfo 失败（message / durationMs / httpStatus +
  *    会话上下文）；
+ *  - "image-info-failed"：批量 getImageInfo 失败后逐张重试，单张仍失败（imageId / message）；
  *  - "candidates-after-dedup"：suggestPoi 候选合并去重完成（candidateCount /
  *    withImageIdCount / imageIds 前 20 个）—— 仅旧链路使用，新链路不触发。
  */
@@ -114,12 +115,16 @@ export type CoverPlaceSearchLogEvent =
       durationMs: number;
       httpStatus: number;
       ctx: CoverPlaceSearchSessionContext;
-    };
+    }
+  | { event: "image-info-failed"; imageId: number; message: string };
 
 export type CoverPlaceSearchLogger = (record: CoverPlaceSearchLogEvent) => void;
 
 /** 默认 logger：no-op；实际 console.warn 桥接由 cover-ipc 注入。 */
 export const SILENT_COVER_PLACE_LOGGER: CoverPlaceSearchLogger = () => {};
+
+/** 自动封面补齐用的运行日志 logger：每个事件原样写入 `[cover-search]` 运行日志。 */
+export const coverSearchLogger: CoverPlaceSearchLogger = (event) => logInfo("[cover-search]", event);
 
 /**
  * 兜底用的空会话上下文：当调用方未传 ctx 时（例如 ctrip-image-info 的 BrowserView
@@ -265,6 +270,9 @@ export function createConsoleCoverPlaceLogger(args?: {
             `httpStatus=${record.httpStatus} durationMs=${record.durationMs} ` +
             formatSessionContext(record.ctx),
         );
+        return;
+      case "image-info-failed":
+        sink(`${prefix} image_info.single_failed imageId=${record.imageId} message=${JSON.stringify(record.message)}`);
         return;
     }
   };

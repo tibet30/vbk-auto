@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { bindCtripLibraryPresentationImages } from "../../src/main/automation/ctrip/presentation/main.js";
+import { installLogSink } from "../../src/shared/log-timestamp.js";
 import { COVER_IMAGE_TYPE_ID, ATTRACTION_IMAGE_TYPE_ID } from "../../src/main/automation/ctrip/presentation/cover-bind.js";
 
 test("单张景点图不可用时保留警告，继续绑定其它图片并允许图文流程返回", async () => {
@@ -19,13 +20,18 @@ test("单张景点图不可用时保留警告，继续绑定其它图片并允�
     }
     return { status: 200, payload, durationMs: 1, ctx: {} as any };
   } };
+  const warnings: unknown[][] = [];
+  installLogSink((level, args) => { if (level === "warn") warnings.push([...args]); });
   const result = await bindCtripLibraryPresentationImages(page, { source: "ctripLibrary", imageId: 1, imageUrl: "https://img/1", poi: "景点甲", alternates: [
     { imageId: 2, imageUrl: "https://img/2", poi: "景点乙" }, { imageId: 3, imageUrl: "https://img/3", poi: "景点丙" },
-  ] }, 1);
+  ] }, 1).finally(() => installLogSink());
   assert.deepEqual(attempted, [1, 2, 3]);
   assert.equal(result.imageId, 1);
   assert.deepEqual(result.attractionImages.map((image: any) => image.imageId), [3]);
   assert.equal(result.imageWarnings.length, 1);
   assert.match(result.imageWarnings[0], /景点乙.*图库图片不存在/);
   assert.deepEqual(bound.map(image => image.imageInfo.accompanyTourInfo.imageTypeId), [COVER_IMAGE_TYPE_ID, ATTRACTION_IMAGE_TYPE_ID]);
+  const bindingWarnings = warnings.filter((args) => String(args[0]).includes("[presentation] 景点图绑定失败"));
+  assert.equal(bindingWarnings.length, 1);
+  assert.match(JSON.stringify(bindingWarnings[0][1]), /imageId=2/);
 });

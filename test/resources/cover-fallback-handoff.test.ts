@@ -11,6 +11,8 @@ import { loadPlaceholderCoverAsset } from "../../src/main/automation/placeholder
 import { automationBlockers } from "../../src/main/automation/schema/schema-functions.js";
 import { assertPresentationReadyForVbk, evaluateAutomationContract } from "../../src/main/automation/automation-contract.js";
 import { listProducts } from "../../src/main/infrastructure/database/parts/products.js";
+import { evaluateVisibleReadiness } from "../../src/main/planning/preparation-completion.js";
+import type { ProductDetail } from "../../src/shared/contracts.js";
 
 const product = {
   presentation: {
@@ -26,36 +28,28 @@ const product = {
   itinerary: [{ day: 1, spots: [{ name: "晋祠博物馆", poiName: "晋祠博物馆", poiId: 1 }] }],
 };
 
-test("无合格图片创建持久化交接标记，再次检查不重复", async () => {
+function readinessOf(next: Record<string, unknown>) {
+  return evaluateVisibleReadiness({ id: "cover-handoff", name: "封面交接", status: "review", researchTasks: [], product: next } as unknown as ProductDetail);
+}
+
+test("无合格图片时不写占位图，readiness 以封面缺口阻塞", async () => {
   const first = await applyAutoCoverFill({
     page: {} as never,
     product,
     now: () => "2026-09-29T00:00:00.000Z",
     injectSearch: async () => ({ keyword: "晋祠博物馆", poi: "", candidates: [], fetchedAt: "2026-09-29T00:00:00.000Z" }),
   });
-  assert.equal(first.outcome.written, true);
-  assert.equal(readActiveCoverFallback(first.nextProduct)?.reason, "no_qualified_candidate");
-  const second = await applyAutoCoverFill({
-    page: {} as never,
-    product: first.nextProduct,
-    injectSearch: async () => ({ keyword: "晋祠博物馆", poi: "", candidates: [], fetchedAt: "2026-09-29T00:00:00.000Z" }),
-  });
-  assert.equal(second.outcome.written, false);
-  assert.equal(second.nextProduct, first.nextProduct);
-  assert.equal(placeholderDraftOnly(first.nextProduct), false);
-  assert.throws(() => assertPresentationReadyForVbk(first.nextProduct), /未提审/);
-  const draft = { ...first.nextProduct, commercial: { release: { submitReview: false, publishAfterApproval: false } } };
-  assert.equal(placeholderDraftOnly(draft), true);
-  assert.equal(evaluateAutomationContract(draft).failures.some((item) => item.field.path === "presentation.cover"), false);
-  assert.equal(automationBlockers(draft).some((item) => item.label === "封面图"), false);
-  assert.doesNotThrow(() => assertPresentationReadyForVbk(draft));
-  const publish = { ...draft, commercial: { release: { submitReview: false, publishAfterApproval: true } } };
-  assert.equal(placeholderDraftOnly(publish), false);
-  assert.equal(automationBlockers(publish).some((item) => item.label === "封面图"), true);
-  assert.throws(() => assertPresentationReadyForVbk(publish), /未上架/);
+  assert.equal(first.outcome.written, false);
+  assert.equal(first.nextProduct, product);
+  assert.equal(readActiveCoverFallback(first.nextProduct), null);
+  const readiness = readinessOf(first.nextProduct);
+  assert.equal(readiness.ready, false);
+  assert.ok(readiness.issues.some((item) => item.label.includes("封面")), JSON.stringify(readiness.issues));
+  assert.equal(automationBlockers(first.nextProduct).some((item) => item.label === "封面图"), true);
+  assert.throws(() => assertPresentationReadyForVbk(first.nextProduct));
 });
 
-test("图库图片有 ID 但尺寸或质量不足时仍进入占位交接", async () => {
+test("图库图片有 ID 但尺寸或质量不足时不写占位图，保留原封面配置", async () => {
   const filled = await applyAutoCoverFill({
     page: {} as never,
     product,
@@ -67,8 +61,21 @@ test("图库图片有 ID 但尺寸或质量不足时仍进入占位交接", asyn
       ],
     }),
   });
-  assert.equal(readActiveCoverFallback(filled.nextProduct)?.reason, "no_qualified_candidate");
+  assert.equal(filled.outcome.written, false);
+  assert.equal(readActiveCoverFallback(filled.nextProduct), null);
   assert.equal((filled.nextProduct.presentation as Record<string, unknown>).cover, product.presentation.cover);
+  assert.equal(readinessOf(filled.nextProduct).ready, false);
+});
+
+test("历史占位数据仍按既有门禁读取：仅未提审草稿可用", () => {
+  const legacy = applyCoverFallback(product, "no_qualified_candidate", () => "2026-09-29T00:00:00.000Z").nextProduct;
+  assert.equal(readActiveCoverFallback(legacy)?.reason, "no_qualified_candidate");
+  assert.equal(placeholderDraftOnly(legacy), false);
+  assert.throws(() => assertPresentationReadyForVbk(legacy), /未提审/);
+  const draft = { ...legacy, commercial: { release: { submitReview: false, publishAfterApproval: false } } };
+  assert.equal(placeholderDraftOnly(draft), true);
+  assert.equal(evaluateAutomationContract(draft).failures.some((item) => item.field.path === "presentation.cover"), false);
+  assert.doesNotThrow(() => assertPresentationReadyForVbk(draft));
 });
 
 test("图库故障与无合格图分开记录；人工上传后占位消失", () => {

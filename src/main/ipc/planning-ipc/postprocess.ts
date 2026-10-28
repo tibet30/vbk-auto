@@ -2,7 +2,7 @@
  * planning-ipc.ts 的"runPlanning 完成态后处理"工具：
  *   - applyCompletedAfterPlanningResult：规划 completed 后自动补齐封面 / 用车资源；
  *     失败只 console.info，不阻塞规划完成态；
- *   - applySearchUnavailableFallback：未登录 / 状态查询失败时的占位 fallback。
+ *   - 未登录 / 状态查询失败时只记日志后返回，不写占位封面。
  *
  * 拆分原因：原 runPlanning 的尾部后处理占据约 90 行，单独抽出便于阅读 / 覆盖单测。
  */
@@ -10,7 +10,7 @@
 import { productCoverGenerator } from "../../operations/generated-cover.js";
 import { logInfo } from "../../../shared/log-timestamp.js";
 import { getVbkRequestPage } from "../../infrastructure/vbk-request-page.js";
-import { applyAutoCoverFill, applyCoverFallback } from "../../operations/cover-auto-fill.js";
+import { applyAutoCoverFill } from "../../operations/cover-auto-fill.js";
 import { applyAutoVehicleResourceTrigger } from "../../operations/vehicle-resource-trigger.js";
 import { syncConfirmedResearchTasksToRemote } from "../../operations/research-task-remote-sync.js";
 import type { MainIpcContext } from "../context.js";
@@ -30,12 +30,8 @@ export async function applyCompletedAfterPlanningResult(context: MainIpcContext,
       return null;
     });
   if (!browserStatus?.loggedIn) {
-    // 未登录/状态查询失败只是暂时无法搜索；占位明确标为待重试。
-    const current = db.getProduct(args.localProductId)!;
-    const fallback = applyCoverFallback(current.product, "search_unavailable");
-    if (fallback.written) {
-      productMutations.commands.mergeChanges(args.localProductId, current, fallback.nextProduct, 'resource', { status: "review", notify: false });
-    }
+    // 未登录/状态查询失败只是暂时无法搜索：不写占位图，封面缺口由 readiness 阻塞，登录后重试。
+    logInfo("[planning] VBK not logged in, skipping auto cover / resource fill", { provider: args.providerLabel });
     return;
   }
   const productAfter = db.getProduct(args.localProductId)!;

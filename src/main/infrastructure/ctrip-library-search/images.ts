@@ -6,6 +6,7 @@
  *   - callSearchImage 支持 sources 兜底（供应商图库无图时回退到 source 3）；
  *
  * 任意步骤抛错向上传播（logger 已记录失败原因）；imageIds 为空时走「无图」分支。
+ * getImageInfo 批量失败时逐张重试，只丢弃单张仍失败的图。
  */
 
 import type {
@@ -13,7 +14,7 @@ import type {
   CtripLibraryPlaceCandidate,
   CtripLibrarySearchResult,
 } from "../../../shared/contracts-types.js";
-import { fetchCtripImageInfoMap } from "../ctrip-image-info.js";
+import { fetchCtripImageInfoMap, type CtripLibraryImageInfo } from "../ctrip-image-info.js";
 import { vbkSessionRequest } from "../vbk-session-request.js";
 import {
   SILENT_COVER_PLACE_LOGGER,
@@ -85,16 +86,14 @@ export async function searchCtripLibraryImagesForPlace(
     };
   }
   logger({ event: "image-ids-extracted", imageIds: searchImage.imageIds });
-  const infoMap = await fetchCtripImageInfoMap(browser, searchImage.imageIds, {
-    browserRequestTimeoutMs: options.browserRequestTimeoutMs,
-    evaluateTimeoutMs: options.evaluateTimeoutMs,
-  });
+  const { infoMap, failedImageIds } = await fetchImageInfoWithRetry(browser, searchImage.imageIds, options, logger);
 
-  // 步骤 3：按 searchImage 顺序拼装 candidates
+  // 步骤 3：按 searchImage 顺序拼装 candidates；逐张重试仍失败的图直接丢弃。
   const candidates: CtripLibraryImageCandidate[] = [];
   const placePoi: SuggestPoiParsedPoi = { poiId: placePoiId, poiName: placeName };
   for (let index = 0; index < searchImage.imageIds.length; index += 1) {
     const imageId = searchImage.imageIds[index];
+    if (failedImageIds.has(imageId)) continue;
     const info = infoMap.get(imageId);
     candidates.push(buildCandidateFromImageInfo({
       imageId,
@@ -109,6 +108,38 @@ export async function searchCtripLibraryImagesForPlace(
     candidates,
     fetchedAt,
   };
+}
+
+/**
+ * 批量 getImageInfo 失败时逐张重试：单张失败只记一条 image-info-failed 事件，
+ * 其余照常拼装；全部单张都失败时抛出原批量错误，交由调用方按「检索失败」处理。
+ */
+async function fetchImageInfoWithRetry(
+  browser: CtripLibrarySearchBrowser,
+  imageIds: ReadonlyArray<number>,
+  options: SearchCtripLibraryOptions,
+  logger: CoverPlaceSearchLogger,
+): Promise<{ infoMap: Map<number, CtripLibraryImageInfo>; failedImageIds: Set<number> }> {
+  const timeouts = {
+    browserRequestTimeoutMs: options.browserRequestTimeoutMs,
+    evaluateTimeoutMs: options.evaluateTimeoutMs,
+  };
+  try {
+    return { infoMap: await fetchCtripImageInfoMap(browser, imageIds, timeouts), failedImageIds: new Set() };
+  } catch (batchError) {
+    const infoMap = new Map<number, CtripLibraryImageInfo>();
+    const failedImageIds = new Set<number>();
+    for (const imageId of imageIds) {
+      try {
+        for (const [id, info] of await fetchCtripImageInfoMap(browser, [imageId], timeouts)) infoMap.set(id, info);
+      } catch (error) {
+        failedImageIds.add(imageId);
+        logger({ event: "image-info-failed", imageId, message: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    if (failedImageIds.size === imageIds.length) throw batchError;
+    return { infoMap, failedImageIds };
+  }
 }
 
 async function callSearchImage(

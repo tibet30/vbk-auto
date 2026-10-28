@@ -29,6 +29,7 @@ import type { VbkPage } from "../../locator-types.js";
 import { buildRecommendationReasonsPlan } from "../recommendations.js";
 import { trustedPresentationPoiNames } from "../../../../planning/vbk-copy-identity.js";
 import { ctripLibraryCoverAttempts } from "./cover-attempts.js";
+import { logWarn } from "../../../../../shared/log-timestamp.js";
 
 export interface PresentationWriteOptions {
   beforeWrite?: () => Promise<void>;
@@ -100,7 +101,8 @@ export async function bindCtripLibraryPresentationImages(
       );
     }
   }
-  // 景点图尽量绑定，单张缺失或不可用不阻断后续图文保存。
+  // 景点图尽量绑定，单张缺失或不可用不阻断后续图文保存；失败明细写进运行日志。
+  if (failures.length) logWarn("[presentation] 景点图绑定失败", { failures });
   return { ...coverResult, attractionImages: attractionResults, ...(failures.length ? { imageWarnings: failures } : {}) };
 }
 

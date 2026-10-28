@@ -44,7 +44,7 @@ test("平台字符宽度合规的推荐理由超过规划字节预算时仍保�
   const text = "入住核心片区舒适酒店，步行即可抵达热门商圈，方便每天出行与休息";
   assert.ok(new TextEncoder().encode(text).length > 80);
   assert.ok(hasValidVbkRecommendationLength(text));
-  assert.equal(normalizeVbkRecommendation(text, "精选酒店"), text);
+  assert.equal(normalizeVbkRecommendation(text), text);
   const plan = buildRecommendationReasonsPlan([
     { category: "精选酒店", text },
     { category: "特色美食", text: "本地老店特色小吃与简餐，餐食与景点结合，体验更丰富，按需品尝" },
@@ -53,11 +53,13 @@ test("平台字符宽度合规的推荐理由超过规划字节预算时仍保�
   assert.equal(plan[0]?.text, text);
 });
 
-test("没有可保留完整分句时使用分类安全短句，不留下半截语义", () => {
-  const text = normalizeVbkRecommendation("无标点的超长推荐理由".repeat(8), "服务保障");
-  assert.equal(text, "各环节衔接清晰，行程安排明确，按产品说明安排");
-  assert.ok(vbkRecommendationCharacterLength("各环节衔接清晰，行程安排明确") < 30);
-  assert.ok(hasValidVbkRecommendationLength(text));
+test("没有可保留完整分句时抛错，录入阶段可见失败而不替换成泛化短句", () => {
+  assert.throws(() => normalizeVbkRecommendation("无标点的超长推荐理由".repeat(8)), /推荐理由超过 84 平台字符且无法按分句截短/);
+  assert.throws(() => buildRecommendationReasonsPlan([
+    { category: "服务保障", text: "无标点的超长推荐理由".repeat(8) },
+    { category: "精选酒店", text: "成都市区5钻酒店连住1晚，步行可达春熙路，夜游太古里更方便" },
+    { category: "特色美食", text: "宽窄巷子可品尝龙抄手、钟水饺等成都小吃，午餐就近安排" },
+  ]), /第 1 项推荐理由超过 84 平台字符且无法按分句截短.*返回规划重新改写/);
 });
 
 test("推荐理由文本不是 string 时直接拒绝", () => {
@@ -77,8 +79,8 @@ test("presentation 生成出口先收短超长推荐理由再通过 schema", () 
     recommendation: "无锡三日游览安排清晰。",
     recommendations: [
       { category: "缤纷景点", text: "串联太湖湖滨与梁溪老城，集中体验无锡山水与人文风貌，三日游览节奏从容舒适" },
-      { category: "精选酒店", text: "入住当地舒适酒店" },
-      { category: "服务保障", text: "专车接送衔接顺畅" },
+      { category: "精选酒店", text: "无锡市区酒店连住2晚，含双早，步行可达南长街夜游古运河" },
+      { category: "服务保障", text: "3天专车接送，无锡站接团后直达鼋头渚，行李随车不必换乘" },
     ],
     features: "<p>三日私家团行程。</p>",
   });

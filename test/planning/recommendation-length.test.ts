@@ -21,8 +21,8 @@ function presentation(text: string) {
     recommendationCategory: "优选行程", recommendation: "文化之旅", features: "<p>行程安排</p>",
     recommendations: [
       { category: "优选行程", text },
-      { category: "精选酒店", text: "A".repeat(30) },
-      { category: "缤纷景点", text: "A".repeat(30) },
+      { category: "精选酒店", text: "2" + "B".repeat(29) },
+      { category: "缤纷景点", text: "3" + "C".repeat(29) },
     ],
   };
 }
@@ -30,7 +30,7 @@ function presentation(text: string) {
 for (const length of [29, 30, 80, 84, 85]) {
   test(`推荐理由 ${length} 字符在生成、草稿、就绪、持久化和录入门禁保持一致`, () => {
     const valid = length >= 30 && length <= 84;
-    const text = "A".repeat(length);
+    const text = "1" + "A".repeat(length - 1);
     const value = presentation(text);
     const product = { presentation: value };
     assert.equal(hasValidVbkRecommendationLength(text), valid);
@@ -41,7 +41,8 @@ for (const length of [29, 30, 80, 84, 85]) {
     assert.equal(detectAcceptedModulesFromProduct(product).includes("presentation"), valid);
     assert.equal(deepValidateModules({ skeleton, product, acceptedModules: ["presentation"] }).invalid.length === 0, valid);
     if (valid) assert.equal(buildRecommendationReasonsPlan(value.recommendations)[0]?.text, text);
-    else assert.equal(hasValidVbkRecommendationLength(buildRecommendationReasonsPlan(value.recommendations)[0]!.text), true, "平台录入前的长度收敛必须生成合法文案");
+    else if (length > 84) assert.throws(() => buildRecommendationReasonsPlan(value.recommendations), /第 1 项推荐理由超过 84 平台字符且无法按分句截短/);
+    else assert.throws(() => buildRecommendationReasonsPlan(value.recommendations), /不在 30～84 个字符范围内/);
   });
 }
 
@@ -52,22 +53,17 @@ test("字符计数包含中文、英文、标点和 Unicode 字符，排除首�
   assert.equal(hasValidVbkRecommendationLength("😀".repeat(30)), false);
 });
 
-test("图文兜底不保留长度不合规的旧推荐理由，生成内容均满足 30～84 字符", async () => {
-  let written: unknown;
+test("图文内容不合格时不再生成兜底文案，保留缺口并返回拒绝原因", async () => {
+  let written = false;
   const runtime = {
     loadCurrentProduct: async () => ({ basicInfo: { meetingCity: "成都", days: 1 }, presentation: presentation("短句") }),
-    resolveRecommendationCategoryPolicy: async () => ({ source: "fixed-replay", inputLocale: "zh-CN", productPatternId: 4,
-      limited: true, categoryIds: [1, 2, 3, 5, 15], categories: ["服务保障", "贴心赠送", "精选酒店", "特色美食", "缤纷体验"],
-      fetchedAt: "2026-10-16T00:00:00.000Z" }),
-    writeModule: async (_id: string, module: string, _path: string, value: unknown) => {
-      if (module === "presentation") written = value;
-      return { ok: true };
-    },
+    writeModule: async () => { written = true; return { ok: true }; },
     mutateProduct: async () => ({ ok: true }),
   } as unknown as OrchestratorRuntime;
-  await applyStageDeterministicCompletion({ stage: "presentation", localProductId: "test", skeleton, runtime });
-  assert.ok(written);
-  assert.equal(validateModuleValue("presentation", written).ok, true);
+  const result = await applyStageDeterministicCompletion({ stage: "presentation", localProductId: "test", skeleton, runtime });
+  assert.equal(written, false, "不得写入本地兜底推荐理由");
+  assert.equal(result.accepted.some((item) => item.module === "presentation"), false);
+  assert.match(result.rejected.find((item) => item.module === "presentation")?.reason ?? "", /recommendations.*不使用本地兜底文案/);
 });
 
 test("实际平台已保存中文推荐理由计数与输入框一致", () => {

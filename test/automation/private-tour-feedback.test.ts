@@ -4,7 +4,6 @@ import { privateTourSubtitle, tourTitleSpots, vbkCopyWidth } from "../../src/sha
 import { HOTEL_SELECTION_NOTE } from "../../src/shared/itinerary-service-copy.js";
 import { requiredTourImagePois, missingTourImagePois } from "../../src/shared/tour-image-coverage.js";
 import { applyAutoCoverFill } from "../../src/main/operations/cover-auto-fill.js";
-import { presentationFallback } from "../../src/main/planning/presentation-fallback.js";
 import { checkServiceCards } from "../../src/main/automation/ctrip/itinerary-api/readback-service-cards.js";
 import { projectDraftWrite } from "../../src/main/automation/ctrip/itinerary-api/draft-write-projection.js";
 
@@ -83,18 +82,6 @@ test("交通与酒店卡片回读拒绝丢失、错时、错位及不完整选�
   assert.throws(() => checkServiceCards("第2天", expected, [infos[0]!, infos[1]!, { activeType: { key: 1 }, description: "酒店甲" }]), /完整选房说明/);
   assert.deepEqual(projectDraftWrite([{ tourDailyInfos: infos }]).transportNodes, [{ day: 1, position: 1, time: "D", description: "第2天，全天用车" }]);
 });
-
-test("兜底图文取实际日程特色，不虚构含餐、导游或酒店权益", () => {
-  const copy = presentationFallback({ sales: { productForm: "privateTour" }, basicInfo: { meetingCity: "太原", days: 1 }, operations: { transport: "charter" },
-    itinerary: [{ day: 1, title: "古建探访", description: "游览晋祠，观察木构与壁画", spots: [{ name: "晋祠" }] }] });
-  assert.match(copy.features, /木构与壁画/);
-  assert.match(copy.features, /一单一团\+24h线上管家/);
-  assert.doesNotMatch(copy.features, /赠送|专业导游|豪华酒店/);
-  assert.equal((copy.features.match(/<p>/g) ?? []).length, 3);
-  assert.equal(new Set(copy.recommendations.map(reason => reason.text)).size, 3);
-  assert.ok(copy.recommendations.every(reason => vbkCopyWidth(reason.text) >= 30 && vbkCopyWidth(reason.text) <= 84));
-});
-
 
 test("二十个收费景点时容量全部用于景点覆盖，免费旧自动封面不占名额", async () => {
   const spots = [{ name: "免费景点", poiId: 99, ticketType: { key: 2 } }, ...Array.from({ length: 20 }, (_, i) => ({ name: `景点${i + 1}`, poiId: i + 1, ticketType: { key: 1 } }))];

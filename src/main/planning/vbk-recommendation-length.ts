@@ -2,8 +2,8 @@
  * VBK 推荐理由长度合同。
  *
  * 模型提示词只能降低超长概率；这里负责在规划写入与平台录入两个出口做
- * 确定性收敛。优先保留完整的逗号分句；单个分句本身已超限时使用对应
- * 分类的保守短句，避免从任意字符处截断而留下残句。
+ * 确定性收敛。只保留完整的逗号分句前缀；单个分句本身已超限时抛错，
+ * 不从任意字符处截断，也不替换成泛化兜底文案。
  */
 
 export const VBK_RECOMMENDATION_GENERATION_MAX_CHARACTERS = 80;
@@ -42,26 +42,13 @@ export function normalizeVbkRecommendationPunctuation(value: string): string {
     .replace(/，+$/g, "");
 }
 
-const CATEGORY_FALLBACKS: Readonly<Record<string, string>> = {
-  优选行程: "行程安排清晰，游览节奏舒适",
-  服务保障: "各环节衔接清晰，行程安排明确",
-  贴心赠送: "已核实赠送权益按产品说明提供",
-  精选酒店: "住宿安排舒适，方便每日出行",
-  缤纷景点: "串联当地景点，兼顾风光与人文",
-  特色美食: "合理安排用餐，体验当地风味",
-  度假首选: "行程节奏舒适，适合从容游览",
-  超值赠送: "已核实赠送权益按产品说明提供",
-  五星精选: "住宿与行程衔接便利，体验舒适",
-};
-
-function safeFallback(category?: string): string {
-  return `${CATEGORY_FALLBACKS[String(category ?? "").trim()] ?? "行程亮点安排清晰"}，按产品说明安排`;
-}
-
+/**
+ * 只做截短：保留完整分句前缀；无法截出 30 字符以上的完整前缀时抛错，
+ * 由调用方作为可见失败返回规划重写，绝不替换成泛化短句。
+ */
 export function fitVbkRecommendationText(
   value: string,
   maxCharacters = VBK_RECOMMENDATION_GENERATION_MAX_CHARACTERS,
-  category?: string,
 ): string {
   const normalized = normalizeVbkRecommendationPunctuation(value);
   if (!normalized) return normalized;
@@ -77,10 +64,7 @@ export function fitVbkRecommendationText(
   }
   completePrefix = completePrefix.replace(/[，、\-\s]+$/u, "").trim();
   if (completePrefix && vbkRecommendationCharacterLength(completePrefix) >= VBK_RECOMMENDATION_MIN_CHARACTERS) return completePrefix;
-
-  const fallback = safeFallback(category);
-  if (vbkRecommendationCharacterLength(fallback) <= maxCharacters) return fallback;
-  throw new Error(`VBK 推荐理由安全短句超过 ${maxCharacters} 平台字符。`);
+  throw new Error("推荐理由超过 84 平台字符且无法按分句截短");
 }
 
 export function fitPresentationRecommendationTexts(value: unknown): unknown {
@@ -93,13 +77,17 @@ export function fitPresentationRecommendationTexts(value: unknown): unknown {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
       const recommendation = entry as Record<string, unknown>;
       if (typeof recommendation.text !== "string") return entry;
-      const category = typeof recommendation.category === "string" ? recommendation.category : undefined;
       const normalized = normalizeVbkRecommendationPunctuation(recommendation.text);
-      if (hasValidVbkRecommendationLength(normalized)) {
+      if (vbkRecommendationCharacterLength(normalized) <= VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS) {
+        // 过短文本原样保留，由 schema 以「不在 30～84 字符范围内」拒绝并回传重试。
         return { ...recommendation, text: normalized };
       }
-      const fitted = fitVbkRecommendationText(recommendation.text, undefined, category);
-      return { ...recommendation, text: fitted };
+      try {
+        return { ...recommendation, text: fitVbkRecommendationText(recommendation.text) };
+      } catch {
+        // 无法按分句截短：保留原文，由 schema 拒绝并把长度原因回传给模型重写。
+        return { ...recommendation, text: normalized };
+      }
     }),
   };
 }

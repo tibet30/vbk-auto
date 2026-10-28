@@ -16,6 +16,7 @@ import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-pol
 import { fitPresentationRecommendationTexts } from "./vbk-recommendation-length.js";
 import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
 import { trustedPresentationPoiNames } from "./vbk-copy-identity.js";
+import { recommendationQualityProblems } from "./validation/recommendation-quality.js";
 
 export interface StageExecutionResult {
   accepted: ModuleOutcome[];
@@ -122,6 +123,15 @@ export function sanitiseModuleValue(
   return { ok: true, value: validated.value };
 }
 
+function presentationQualityProblems(product: Record<string, unknown>, value: unknown): string[] {
+  const recommendations = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>).recommendations : undefined;
+  if (!Array.isArray(recommendations)) return [];
+  const texts = recommendations.map((entry) => entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).text === "string"
+    ? String((entry as Record<string, unknown>).text) : "");
+  return recommendationQualityProblems(product, texts);
+}
+
 function findCopyBadCases(value: unknown, officialPoiNames?: readonly string[]) {
   return officialPoiNames === undefined
     ? findAllVbkCopyBadCases(value)
@@ -224,6 +234,14 @@ export async function executeStageOutput(args: {
     if (!sanitised.ok) {
       rejected.push({ module: outcome.module, status: "rejected", reason: sanitised.reason });
       continue;
+    }
+    if (outcome.module === "presentation" && typeof runtime.loadCurrentProduct === "function") {
+      // 具体性不合格整模块拒绝，原因经阶段重试回传模型；不做本地替换。
+      const quality = presentationQualityProblems(await runtime.loadCurrentProduct(localProductId), sanitised.value);
+      if (quality.length) {
+        rejected.push({ module: "presentation", status: "rejected", reason: `推荐理由不够具体：${quality.join("；")}` });
+        continue;
+      }
     }
     if (outcome.module === "basicInfo") {
       const current = await runtime.loadCurrentProduct(localProductId);

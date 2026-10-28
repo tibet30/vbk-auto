@@ -4,8 +4,6 @@ import type { OrchestratorRuntime } from "./types.js";
 import { hasValidVbkRecommendationLength } from "./vbk-recommendation-length.js";
 import { ensureCommercialFallbacks, ensurePackageName } from "./commercial-stage.js";
 import { ensurePresentationCover } from "./cover-default.js";
-import { AI_WRITABLE_PATHS } from "./schemas.js";
-import { presentationFallback } from "./presentation-fallback.js";
 
 export function skeletonFromProduct(product: Record<string, unknown>): PlanningSkeleton {
   const basic = record(product.basicInfo);
@@ -68,6 +66,10 @@ export async function applyStageDeterministicCompletion(args: {
   return { accepted, rejected };
 }
 
+/**
+ * 图文内容缺失或不合格时不再本地兜底生成：保留缺口并返回拒绝原因，
+ * 由阶段重试把原因回传给模型；重试用尽后进入 needs_user 标红。
+ */
 async function ensurePresentationContent(args: {
   localProductId: string;
   runtime: OrchestratorRuntime;
@@ -75,25 +77,12 @@ async function ensurePresentationContent(args: {
   const product = await args.runtime.loadCurrentProduct(args.localProductId);
   const presentation = record(product.presentation) ?? {};
   if (hasPresentationContent(presentation)) return undefined;
-  if (!args.runtime.resolveRecommendationCategoryPolicy) throw new Error("规划运行时未提供推荐理由类别策略查询。");
-  const policy = await args.runtime.resolveRecommendationCategoryPolicy(args.localProductId);
-  const fallback = presentationFallback(product, policy.categories);
-  const nextPresentation = {
-    ...presentation,
-    recommendationCategory: policy.categories.includes(text(presentation.recommendationCategory))
-      ? text(presentation.recommendationCategory) : policy.categories[0],
-    recommendation: text(presentation.recommendation) || fallback.recommendation,
-    features: text(presentation.features) || fallback.features,
-    recommendations: validRecommendations(presentation.recommendations) ?? fallback.recommendations,
-  };
-  const result = await args.runtime.writeModule(args.localProductId, "presentation", AI_WRITABLE_PATHS.presentation, nextPresentation);
-  if (!result.ok) return { module: "presentation", status: "rejected", reason: result.reason || "图文兜底写入失败" };
-  return {
-    module: "presentation",
-    status: "accepted",
-    writePath: AI_WRITABLE_PATHS.presentation,
-    acceptedFields: ["recommendation", "features", "recommendations"],
-  };
+  const missing = [
+    text(presentation.recommendation) ? "" : "recommendation",
+    text(presentation.features) ? "" : "features",
+    validRecommendations(presentation.recommendations) ? "" : "recommendations",
+  ].filter(Boolean);
+  return { module: "presentation", status: "rejected", reason: `图文内容未通过校验（${missing.join("、")}），需重新生成，不使用本地兜底文案` };
 }
 
 function hasPresentationContent(presentation: Record<string, unknown>): boolean {

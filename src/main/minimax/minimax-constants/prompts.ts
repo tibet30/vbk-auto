@@ -139,8 +139,8 @@ ${buildVbkCopyPolicyPrompt()}
 ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}
 
 ===== 文案风格参考 =====
-presentation.recommendation 示例："2天串联晋祠古建与三晋文明，独立成团、专车服务，节奏舒适不赶路。"
-presentation.recommendations 示例：3条推荐理由，每条不同维度，如 [{"category":"优选行程","text":"2天串联核心景点，节奏舒适。"},{"category":"精选酒店","text":"精选当地3钻酒店，含早餐。"},{"category":"缤纷景点","text":"覆盖晋祠、博物院等核心景点。"}]
+presentation.recommendation 示例："2天串联晋祠古建与山西博物院，独立成团、专车往返太原市区。"
+presentation.recommendations 示例：3条推荐理由，每条至少含一个本行程真实景点名、城市名或数字，且维度不同，如 [{"category":"优选行程","text":"晋祠看宋代圣母殿彩塑，山西博物院读三晋青铜，2天读懂太原千年古建"},{"category":"精选酒店","text":"太原市区3钻酒店连住1晚，含双早，步行可达柳巷夜市"},{"category":"缤纷景点","text":"晋祠难老泉与周柏同游，下午转场山西博物院，室内外景点动静结合"}]
 presentation.features 示例："<p><strong>古建巡礼：</strong>游览晋祠古建与宋代彩塑。</p><p><strong>私享出行：</strong>独立成团，专车衔接核心景点。</p><p><strong>舒适住宿：</strong>入住方案约定档次的酒店。</p>"
 itinerary 每天 description 示例："专车于市区/火车站/机场接客。上午前往XX景区，在讲解陪同下游览XX。午餐品尝当地特色美食。下午前往XX，傍晚返回市区入住。"
 terms 示例：inclusions="行程内专车服务、1晚酒店住宿、行程规划；实际以确认单为准。" exclusions="景区门票、讲解、餐饮、个人消费、单房差。" bookingNotes="至少2人起订，建议提前1天15时前预订。" refundPolicy="资源确认前无损取消；确认后按实际已发生费用扣除。"

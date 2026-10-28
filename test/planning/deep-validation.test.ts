@@ -35,7 +35,9 @@ class AllStagesOkPlanner implements Planner {
         reply: "pres", modules: [{ module: "presentation", status: "accepted", value: {
           recommendationCategory: "服务保障", recommendation: "R",
           recommendations: [
-            { category: "服务保障", text: "a" }, { category: "精选酒店", text: "b" }, { category: "缤纷体验", text: "c" },
+            { category: "服务保障", text: "太原接站后专车直达晋祠，2天行程全程同一司机衔接无需换乘" },
+            { category: "精选酒店", text: "太原市区酒店连住1晚，含双早，步行可达柳巷夜市品尝小吃" },
+            { category: "缤纷体验", text: "晋祠看宋代43尊彩塑，山西博物院读三晋青铜，古建与文物一次看全" },
           ],
           features: "f",
         } }],

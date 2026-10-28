@@ -29,10 +29,10 @@ export const VBK_RECOMMENDATION_MAX_LENGTH = VBK_RECOMMENDATION_PLATFORM_MAX_CHA
 
 /**
  * 现场确认 VBK 推荐理由输入框只接受这组标点的等价形式；若文本已落在
- * 30～84 字符合同内则原样返回，否则按规划端长度收敛规则裁短。敏感词和
+ * 30～84 字符合同内则原样返回；超长时只按完整分句截短，无法截短即抛错。敏感词和
  * 结构化字段仍由独立门禁校验。
  */
-export function normalizeVbkRecommendation(value: unknown, category?: string): string {
+export function normalizeVbkRecommendation(value: unknown): string {
   if (typeof value !== "string") {
     throw new Error("推荐理由文本必须是 string，禁止自动转换类型。");
   }
@@ -42,7 +42,7 @@ export function normalizeVbkRecommendation(value: unknown, category?: string): s
     return normalized;
   }
   if (characterLength > VBK_RECOMMENDATION_PLATFORM_MAX_CHARACTERS) {
-    return fitVbkRecommendationText(normalized, undefined, category);
+    return fitVbkRecommendationText(normalized);
   }
   return normalized;
 }
@@ -80,13 +80,17 @@ export function buildRecommendationReasonsPlan(
       throw new Error(`推荐理由分类「${category}」不在白名单。`);
     }
     const sourceNormalizedText = normalizeVbkRecommendationPunctuation(text);
-    const normalizedText = normalizeVbkRecommendation(text, category);
+    // 超长且无法按分句截短时抛错，录入阶段以可见失败停下，绝不换成泛化短句。
+    let normalizedText: string;
+    try {
+      normalizedText = normalizeVbkRecommendation(text);
+    } catch (error) {
+      throw new Error(`推荐理由第 ${i + 1} 项${error instanceof Error ? error.message : String(error)}，必须返回规划重新改写。`);
+    }
     if (!normalizedText) {
       throw new Error(`推荐理由第 ${i + 1} 项文本为空。`);
     }
-    const fittedText = hasValidVbkRecommendationLength(normalizedText)
-      ? normalizedText
-      : fitVbkRecommendationText(normalizedText, undefined, category);
+    const fittedText = normalizedText;
     if (!hasValidVbkRecommendationLength(fittedText)) {
       throw new Error(`推荐理由第 ${i + 1} 项不在 30～84 个字符范围内，请重新生成更短文案。`);
     }

@@ -46,7 +46,8 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 6. 每条 recommendations[].text 按平台中文2、英文1计数，必须在30～84个字符范围内；建议写30～40个汉字（60～80个平台字符），充分提炼行程体验，禁止按UTF-8字节截短。
 7. 推荐语、推荐理由和产品特色不得描述“不配随队导游”“不含导游”“无导游”等导游否定信息；这些信息可能与导游条款显示“含导游”不一致，必须改写为行程安排、当地服务或用车接送等正向亮点。
 8. 禁止使用“最、最佳、最高、最优”等绝对化表达；改用“更、较为、重点”等客观表述。
-9. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}`,
+9. ${PRODUCT_FEATURES_RICH_TEXT_GUIDE}
+10. 推荐理由与产品特色优先提炼用户原文（userIdea）中的卖点；每条至少包含一个本行程真实景点名、城市名或具体数字；三条分别写不同维度，禁止"节奏舒适""安排清晰"等空泛表述。`,
   commercial: `1. 套餐名由本地系统按目的地、天数、晚数和产品形态固定生成；本阶段不要输出 packageName。
 2. 价格统一按人均填写；pricing.adult > 0，pricing.child >= 0；minimumTravelers 固定为 1；cost.adult 不可超过 adult。这里填写的是本地审核用指导价/草稿价，不是实时采购价或供应商报价。
 3. inventory.startDate / endDate 使用 YYYY-MM-DD，且 startDate 不晚于 endDate。

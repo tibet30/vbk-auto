@@ -8,6 +8,7 @@ import { VBK_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendati
 import { dayHasUserOtherActivity } from "../../../shared/itinerary-content.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
 import { hasValidVbkRecommendationLength } from "../vbk-recommendation-length.js";
+import { recommendationQualityProblems } from "./recommendation-quality.js";
 import type { ModuleOutcome } from "../../../shared/contracts-planning.js";
 import { asArray, asRecord, textValue } from "./helpers.js";
 
@@ -105,7 +106,9 @@ export function validatePresentation(product: Record<string, unknown>, accepted:
           valid = false;
         }
       }
-      if (!valid) { /* reasons already populated */ }
+      if (valid) {
+        reasons.push(...recommendationQualityProblems(product, recommendations.map((entry) => textValue(asRecord(entry)?.text))));
+      }
     }
     if (textValue(presentation.recommendation).length === 0) reasons.push("presentation.recommendation 缺失");
     if (textValue(presentation.features).length === 0) reasons.push("presentation.features 缺失");

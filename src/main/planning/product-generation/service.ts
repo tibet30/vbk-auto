@@ -74,7 +74,8 @@ export class ProductGenerationService {
       const output = await this.deps.generateStage(localProductId, stage);
       return stage === "itinerary" ? this.withDayTitles(localProductId, output, false) : output;
     } catch (error) {
-      if (isReplayDataMissing(error) || stage !== "presentation" && stage !== "commercial") throw error;
+      // 只有商业阶段可转本地确定性补全；图文失败必须如实失败，不再生成兜底文案。
+      if (isReplayDataMissing(error) || stage !== "commercial") throw error;
       return {
         reply: error instanceof Error ? error.message : "结构化生成失败，转入本地确定性补全。",
         modules: [],

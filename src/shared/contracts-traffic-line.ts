@@ -89,8 +89,10 @@ export interface TrafficLineChildProgress {
   childProductId?: string;
   completedStages: TrafficLineChildStage[];
   verified: boolean;
-  /** 平台已明确确认该交通方式没有可售资源；保留子产品记录但不再自动重试。 */
+  /** 本轮已跳过：不阻塞母产品结案；failedStage 仍保留供手动重试。 */
   skipped?: boolean;
+  /** 跳过原因，见 TRAFFIC_SKIP_LABELS；缺失时按 failureReason 推断。 */
+  skipReason?: import("./traffic-skip-reason.js").TrafficSkipReason;
   failedStage?: TrafficLineChildStage;
   failureReason?: string;
   /** 最近一次班期校验实际提交的代表性日期数量；缺失表示旧版全量校验。 */

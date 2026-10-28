@@ -1,5 +1,6 @@
 import { TRAFFIC_LINE_CHILD_STAGES, type TrafficLineChildProgress } from "../../../../shared/contracts-traffic-line.js";
 import { isUnavailableTrafficResourceFailure, isTrafficLineRouteReviewRequired } from "../../../../shared/traffic-resource-status.js";
+import { trafficSkipReason } from "../../../../shared/traffic-skip-reason.js";
 
 export function trafficRouteActivationCanResume(progress?: TrafficLineChildProgress): boolean {
   return progress?.failedStage === "activated" && isTrafficLineRouteReviewRequired(progress.failureReason ?? "")
@@ -30,10 +31,10 @@ export function trafficResourceCardRejected(progress?: TrafficLineChildProgress)
     && /子产品资源提交未通过：资源配置中含有(?:机票|火车票)资源，需要行程描述中先添加(?:航班|火车)信息卡片/.test(progress.failureReason ?? "");
 }
 
-/** Optional children may continue independently; protocol failures remain retryable failures. */
+/** 子产品失败一律跳过以便母产品继续；协议失败仍保留 failedStage 供手动重试。 */
 export function trafficLineFailureProgress(progress: TrafficLineChildProgress, reason: string): TrafficLineChildProgress {
   const unavailable = isUnavailableTrafficResourceFailure(reason, progress.variant);
-  return { ...progress, verified: false, skipped: unavailable,
+  return { ...progress, verified: false, skipped: true, skipReason: trafficSkipReason(reason, progress.variant),
     failedStage: unavailable ? undefined : TRAFFIC_LINE_CHILD_STAGES.find(stage => !progress.completedStages.includes(stage)) ?? "finalReadback",
     failureReason: reason };
 }

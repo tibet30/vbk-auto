@@ -57,7 +57,8 @@ test("班期探测遵守提前预订与库存边界，不使用今天或一年�
 test("子产品协议失败保留可重试阶段，历史错误skipped标记不阻止恢复", () => {
   const previous = { variant: "flightRoundTrip" as const, lineDescription: "飞机往返", completedStages: ["planned", "stationsResolved", "childCreated", "presentationCopied"] as const, verified: false };
   const progress = trafficLineFailureProgress({ ...previous, completedStages: [...previous.completedStages] }, "酒店不可订");
-  assert.equal(progress.skipped, false);
+  assert.equal(progress.skipped, true);
+  assert.equal(progress.skipReason, "child_failed");
   assert.equal(progress.failedStage, "resourcesSaved");
   assert.equal(trafficLineChildShouldBeSkipped({ ...progress, skipped: true }), false);
   assert.equal(trafficLineFailureProgress(progress, "VBK 校验后没有任何可用的多出发城市").skipped, true);

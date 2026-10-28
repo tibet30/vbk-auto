@@ -7,7 +7,8 @@ import type {
   TrafficLineVariant,
   TrafficLineWorkflowProgress,
 } from "../../../../shared/contracts-traffic-line.js";
-import { ensureTrafficLineApi, isUnavailableTrafficResourceFailure } from "./main.js";
+import { ensureTrafficLineApi } from "./main.js";
+import { trafficSkipReason } from "../../../../shared/traffic-skip-reason.js";
 import type { TrafficLinePage } from "./client.js";
 import type { TrafficLineStationDisambiguator } from "./endpoints.js";
 import type { TrafficLineCopyRepair } from "./itinerary-copy-repair.js";
@@ -134,11 +135,11 @@ export async function ensureTrafficLinePhase({
   for (const item of result.skipped ?? []) {
     log(`${item.variant === "flightRoundTrip" ? "飞机" : "火车"}子产品未完成，已记录未完成原因：${item.reason}`, "warning");
   }
-  log(`线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。`);
+  log(children.length ? `线路及交通阶段已完成 ${children.length} 个子产品的远端聚合核验。` : "本次未生成交通子产品");
   const skipped = result.skipped ?? [];
-  // 端点存在不等于当前班期有可售资源；平台明确无资源时保留
+  // 端点存在不等于当前班期有可售资源；平台无资源或本地缺销售班期时保留
   // skipped 证据；会话/保存/回读失败保留子产品失败态，由外层继续母产品预检。
-  const unresolvedAvailable = skipped.filter((item) => !isUnavailableTrafficResourceFailure(item.reason, item.variant));
+  const unresolvedAvailable = skipped.filter((item) => trafficSkipReason(item.reason, item.variant) === "child_failed");
   if (unresolvedAvailable.length) {
     const reason = unresolvedAvailable.map((item) => `${item.variant}=${item.reason}`).join("；");
     progress = { ...progress, failureReason: reason, verifiedAt: undefined };

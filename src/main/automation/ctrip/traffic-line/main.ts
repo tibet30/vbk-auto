@@ -40,6 +40,7 @@ import { preflightTrafficLineEndpoints, resolveTrainReplacementEndpoints } from 
 import { trafficLinePlanMatchesExplicitCities } from "../../../../shared/traffic-line-user-endpoints.js";
 import { ensureHotelResourceApi } from "../hotel-resource-api.js";
 import { trafficLineFailureProgress } from "./child-failure.js";
+import { trafficSkipReason } from "../../../../shared/traffic-skip-reason.js";
 import {
   processTrafficLineTarget,
   type PendingTrafficLineChild,
@@ -81,6 +82,7 @@ export async function ensureTrafficLineApi(
     options.onChildProgress?.({
       ...previous,
       skipped: true,
+      skipReason: trafficSkipReason(reason, target.variant),
       failedStage: undefined,
       failureReason: reason,
     });
@@ -127,7 +129,7 @@ export async function ensureTrafficLineApi(
       const reason = error instanceof Error ? error.message : String(error);
       const previous = options.childProgress?.find(child => child.variant === "trainRoundTrip");
       skipped.push({ variant: "trainRoundTrip", lineDescription: "火车往返", reason });
-      if (previous) options.onChildProgress?.({ ...previous, verified: false, skipped: true, failureReason: reason });
+      if (previous) options.onChildProgress?.({ ...previous, verified: false, skipped: true, skipReason: trafficSkipReason(reason, "trainRoundTrip"), failureReason: reason });
       targets = targets.filter(target => target.variant !== "trainRoundTrip");
     }
   }

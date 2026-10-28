@@ -30,5 +30,7 @@ test("card rejection recovery cannot activate or record saved resources when for
   assert.match(result.skipped?.[0]?.reason ?? "", /未返回可作为正式回读的资源段/);
   assert.equal(calls.some(url => /save|submit|activate/i.test(url)), false);
   assert.equal(checkpoints.some(item => item.completedStages.includes("resourcesSaved")), false);
-  assert.equal(checkpoints.at(-1).skipped, false);
+  assert.equal(checkpoints.at(-1).skipped, true);
+  assert.equal(checkpoints.at(-1).skipReason, "child_failed");
+  assert.equal(checkpoints.at(-1).failedStage, "resourcesSaved");
 });

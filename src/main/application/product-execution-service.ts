@@ -3,8 +3,11 @@ import type { ProductExecutionView } from '../../shared/contracts-product-archit
 import { approvalForRun } from '../agent/integration-gates.js';
 import { agentWorkflowPatch } from '../agent/integration-workflow.js';
 import { hasVerifiedMotherPhases, failedAutomationResumePhase, approvedRecoveryStartPhase } from '../automation/automation.main/automation.main.resume-phase.js';
-import { incompleteTrafficVariants, isUnavailableTrafficResourceFailure } from '../../shared/traffic-resource-status.js';
+import { blockingTrafficVariants, isUnavailableTrafficResourceFailure, trafficChildSkipHandled } from '../../shared/traffic-resource-status.js';
+import { trafficSummaryMessage } from './traffic-summary-message.js';
 import type { TrafficLineConfig } from '../../shared/contracts-traffic-line.js';
+
+export { trafficSummaryMessage };
 
 export interface ProductExecutionStore {
   listWorkflowTasks?(): ProductWorkflowTask[];
@@ -48,8 +51,8 @@ function hasPendingTraffic(product: ProductDetail, snapshot?: AgentSnapshot): bo
   if (approval && approval.generateTrafficChildren !== true) return false;
   const config = (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine;
   const children = product.automation?.trafficLine?.children ?? [];
-  return incompleteTrafficVariants(config, product.automation?.trafficLine).length > 0
-    || children.some(child => !(child.verified && (child.completedStages ?? []).includes('finalReadback')) && !child.skipped
+  return blockingTrafficVariants(config, product.automation?.trafficLine).length > 0
+    || children.some(child => !(child.verified && (child.completedStages ?? []).includes('finalReadback')) && !trafficChildSkipHandled(child)
       && !isUnavailableTrafficResourceFailure(child.failureReason ?? '', child.variant));
 }
 
@@ -86,7 +89,7 @@ export class ProductExecutionService {
         message: '平台写入结果不明，请先核查回读', error: snapshot.uncertainWrite.message, completedAt: undefined };
     } else if (view.mother === 'verified' && !pending) {
       patch = { ...patch, status: 'succeeded', stage: 'completed', progress: 100,
-        message: '母产品草稿已通过核验；交通子产品结果单独保留', error: undefined,
+        message: trafficSummaryMessage(product, snapshot), error: undefined,
         completedAt: task.completedAt ?? snapshot?.run?.updatedAt ?? product.updatedAt };
     } else if (view.mother === 'verified' && pending) {
       patch = { ...patch, status: snapshot?.run?.status === 'running' ? 'running' : 'needs_attention',

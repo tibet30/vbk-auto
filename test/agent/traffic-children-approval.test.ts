@@ -5,7 +5,8 @@ import { agentProductVersion, agentCompletionGate, approvalForRun, requiredAgent
 import { assertAgentWriteAuthorized } from "../../src/main/agent/integration-guard.js";
 import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
 import { approvedWorkflowPlan } from "../../src/main/automation/automation.main/runtime/workflow-plan.js";
-import type { AgentApproval, AgentSnapshot, ProductReadiness } from "../../src/shared/contracts.js";
+import { ProductExecutionService, trafficSummaryMessage } from "../../src/main/application/product-execution-service.js";
+import type { AgentApproval, AgentSnapshot, ProductReadiness, ProductWorkflowTask } from "../../src/shared/contracts.js";
 
 function fixture() {
   const product = buildProductSnapshot({ destination: "成都", days: 2, productForm: "privateTour" });
@@ -93,4 +94,35 @@ test("手动录入拒绝未完成母产品、变更账号和准备门禁阻塞",
     assert.equal(f.handoffs(), 0);
     assert.equal(f.read().events.some(e => e.type === "approval"), false);
   }
+});
+
+test("未勾选生成子产品时汇总写明本次未生成子产品", async () => {
+  const f = fixture();
+  await f.core.approve(f.product.id, { approvalId: f.approval.id, productVersion: f.approval.productVersion });
+  assert.equal(trafficSummaryMessage(f.product, f.read()), "母产品草稿已通过核验；本次未生成子产品");
+});
+
+test("缺销售班期的子产品已跳过并单独列出，不阻塞母产品完成", async () => {
+  const f = fixture();
+  Object.assign(f.product.product.operations!, { trafficLine: { enabled: true, variants: ["flightRoundTrip", "trainRoundTrip"] } });
+  f.approval.productVersion = agentProductVersion(f.product);
+  await f.core.approve(f.product.id, { approvalId: f.approval.id, productVersion: f.approval.productVersion, generateTrafficChildren: true });
+  f.product.automation!.phases.push({ phase: "trafficLine", status: "completed" });
+  f.product.automation!.trafficLine = { children: [
+    { variant: "flightRoundTrip", lineDescription: "飞机往返", childProductId: "c1", completedStages: ["finalReadback"], verified: true },
+    { variant: "trainRoundTrip", lineDescription: "火车往返", childProductId: "c2", completedStages: ["childCreated", "presentationCopied"],
+      verified: false, skipped: true, skipReason: "local_inventory_missing", failedStage: "resourcesSaved",
+      failureReason: "产品没有可用于交通资源核验的销售班期，已保留交通子产品基础信息，跳过班期资源设置。" },
+  ] };
+  const message = trafficSummaryMessage(f.product, f.read());
+  assert.match(message, /已跳过 1 个子产品：/);
+  assert.match(message, /火车往返（本地未配置销售班期，请在价格库存班期补充后重试）/);
+  assert.deepEqual(agentCompletionGate(f.product, f.read(), { ready: true } as ProductReadiness,
+    { runId: "run", hadWrites: true, hadRemoteWrites: true, deterministicWorkflow: true }), { verified: true });
+  const task = { id: "task", status: "running", stage: "automation", progress: 90 } as ProductWorkflowTask;
+  const updated = new ProductExecutionService({ getProduct: () => f.product, getAgentSnapshot: () => f.read(),
+    latestWorkflowTaskForProduct: () => task, createWorkflowTask: () => task,
+    updateWorkflowTask: (_id, patch) => ({ ...task, ...patch }) }).reconcile(f.product.id)!;
+  assert.equal(updated.status, "succeeded");
+  assert.equal(updated.message, message);
 });

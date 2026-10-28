@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Circle, LoaderCircle, Plane, TrainFront } from "lucide-react";
 import type { ProductDetail } from "../../../shared/contracts.js";
 import styles from "./traffic-line-progress.module.less";
-import { trafficLineChildStatus, trafficLineEndpointHint, latestTrafficLineEndpointPlan } from "./traffic-line-child-status.js";
+import { trafficLineChildStatus, trafficLineEndpointHint, trafficLineSkipLabel, latestTrafficLineEndpointPlan } from "./traffic-line-child-status.js";
 
 type TransportKind = "flightRoundTrip" | "trainRoundTrip";
 type UnknownRecord = Record<string, unknown>;
@@ -13,6 +13,7 @@ type ChildView = {
   arrival?: string;
   departure?: string;
   endpointVerified?: boolean;
+  skipLabel?: string;
   error?: string;
   nodes: Array<{ key: string; label: string; status: "pending" | "running" | "done" | "failed"; error?: string }>;
 };
@@ -117,6 +118,7 @@ function childFrom(kind: TransportKind, value: unknown, endpoint?: unknown): Chi
     childId: text(item.childProductId, item.productId, item.id, item.vbkProductId),
     arrival,
     departure,
+    skipLabel: trafficLineSkipLabel(item),
     error: text(item.error, item.message, item.lastError, item.failureReason),
     nodes,
   };
@@ -167,7 +169,7 @@ export function TrafficLineProgress({ automation, product }: { automation: Produ
               {statusLabel(card.status)}
             </span>
           </div>
-          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />{trafficLineEndpointHint(card.status, Boolean(card.childId))}</p> : null}
+          {card.endpointVerified ? <p className={styles.endpointVerified}><CheckCircle2 size={12} aria-hidden="true" />{trafficLineEndpointHint(card.status, Boolean(card.childId), card.skipLabel)}</p> : null}
           <dl className={styles.details}>
             <div><dt>抵达</dt><dd>{card.arrival || "待根据行程规划"}</dd></div>
             <div><dt>返程</dt><dd>{card.departure || "待根据行程规划"}</dd></div>

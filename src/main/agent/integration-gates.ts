@@ -8,7 +8,7 @@ import { parseProduct } from '../automation/schema/schema.js';
 import { draftPhasesFor } from '../automation/automation.main/automation.main.phases.js';
 import type { AgentFinishContext, AgentFinishResult } from './types.js';
 import { preservesApprovedIntent } from './approval-intent.js';
-import { isUnavailableTrafficResourceFailure, isTrafficLineRouteReviewRequired, trafficResourceStatus } from '../../shared/traffic-resource-status.js';
+import { isUnavailableTrafficResourceFailure, isTrafficLineRouteReviewRequired, trafficChildSkipHandled, trafficResourceStatus } from '../../shared/traffic-resource-status.js';
 import { evaluatePreparationCompletion } from '../planning/preparation-completion.js';
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { preparationStageGaps } from "../planning/preparation/policy.js";
@@ -24,11 +24,11 @@ export function trafficLineCanBeDeferred(product: ProductDetail): boolean {
     (product.product.operations as { trafficLine?: TrafficLineConfig } | undefined)?.trafficLine,
     product.automation?.trafficLine,
   );
-  // 母草稿成功不代表交通完成；只允许平台明确无可售资源的变体跳过。
+  // 母草稿成功不代表交通完成；平台无资源或已标为跳过的子产品才算已处理。
   return product.status === "draft_saved" && Boolean(product.productId)
     && Boolean(product.automation?.phases?.some(phase => phase.phase === "preflight" && phase.status === "completed"))
-    && !trafficStatus.hasIncompleteTraffic
-    && !product.automation?.trafficLine?.children.some(child => !child.verified
+    && !trafficStatus.hasBlockingTraffic
+    && !product.automation?.trafficLine?.children.some(child => !child.verified && !trafficChildSkipHandled(child)
       && !isUnavailableTrafficResourceFailure(child.failureReason ?? "", child.variant));
 }
 
@@ -128,8 +128,9 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
   const canDeferTrafficLine = trafficLineCanBeDeferred(product);
   const incompleteTrafficChild = phases.includes('trafficLine') && !canDeferTrafficLine
     ? product.automation?.trafficLine?.children.find((child) => {
-      // Platform "no sellable resource" skips are durable success for that variant.
+      // Platform "no sellable resource" and explicit skips are handled for that variant.
       if (isUnavailableTrafficResourceFailure(child.failureReason ?? "", child.variant)) return false;
+      if (trafficChildSkipHandled(child)) return false;
       return !child.verified || !child.completedStages.includes('finalReadback');
     })
     : undefined;
@@ -138,7 +139,7 @@ export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnaps
     product.automation?.trafficLine,
   );
   const missingTraffic = phases.includes('trafficLine') && !canDeferTrafficLine
-    ? trafficStatus.incompleteVariants
+    ? trafficStatus.blockingVariants
       .find(variant => !product.automation?.trafficLine?.children.some(child => child.variant === variant))
     : undefined;
   if (missingTraffic) return { verified:false, message:`${missingTraffic === 'flightRoundTrip' ? '飞机' : '火车'}套餐尚未创建并完成最终回读；母产品仍需通过预检，不能结束任务。请继续录入。` };

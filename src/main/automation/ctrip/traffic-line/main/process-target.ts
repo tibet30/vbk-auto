@@ -88,6 +88,7 @@ export async function processTrafficLineTarget(
       completedStages: [...new Set([...progress.completedStages, stage])],
       verified,
       skipped: false,
+      skipReason: undefined,
       failedStage: undefined,
       failureReason: undefined,
     };

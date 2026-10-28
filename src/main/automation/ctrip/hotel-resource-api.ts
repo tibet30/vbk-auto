@@ -23,12 +23,12 @@ export async function normalizeHotelResourceLayout(args: {
   payload: any;
   source: "ctrip" | "package-api" | "rules";
   province?: string;
-  provinceForCity?: (cityName: string) => string | undefined;
+  provinceForCity?: (cityName: string, dayNumbers?: number[]) => string | undefined;
 }) {
   // 平台酒店规则的住宿城市按 VBK 可写城市回读：万州等直辖市下辖区县落到重庆。
   const expected = args.source === "rules"
-    ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights }) => ({ cityName: toVbkCityName(cityName), nights }))
-    : hotelStayGroups(args.resolvedDays, args.source === "ctrip");
+    ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights, dayNumbers }) => ({ cityName: toVbkCityName(cityName), nights, dayNumbers }))
+    : hotelStayGroups(args.resolvedDays, args.source === "ctrip").map(group => ({ ...group, dayNumbers: undefined as number[] | undefined }));
   let payload = args.payload;
   let segments = segmentsFromPayload(payload);
   const [fullTrip] = segments;
@@ -57,7 +57,7 @@ export async function normalizeHotelResourceLayout(args: {
     for (let index = 0; index < existingLodging.length; index++) {
       const segment = existingLodging[index];
       const group = expected[index]!;
-      const province = args.provinceForCity?.(group.cityName) ?? args.province;
+      const province = args.provinceForCity?.(group.cityName, group.dayNumbers) ?? args.province;
       const destination = segment.segmentBase?.destinationCity;
       const country = fullTrip.segmentBase?.destinationCity?.countryName;
       const sameCity = toPlatformShortLocationName(destination?.cityName) === toPlatformShortLocationName(group.cityName)
@@ -81,10 +81,10 @@ export async function normalizeHotelResourceLayout(args: {
   while (lodgingSegments(segments).length < expected.length) {
     const currentLodging = lodgingSegments(segments);
     const group = expected[currentLodging.length]!;
-    const terminal = segments.at(-1);
-    if (!terminal || Number(terminal.segmentBase?.stayNights) !== 0 || terminal.segmentBase?.deleteable !== true) {
-      throw new Error("VBK 资源配置缺少可用于新增住宿段的末尾空段");
+    if (!usableTerminal(segments.at(-1))) {
+      segments = await ensureTerminalSegment(args.page, args.productId, segments);
     }
+    const terminal = segments.at(-1)!; // usableTerminal 已确认存在
     const previous = currentLodging.at(-1) ?? fullTrip;
     const departureCity = previous.segmentBase?.destinationCity;
     if (!departureCity || typeof departureCity !== "object") {
@@ -92,7 +92,7 @@ export async function normalizeHotelResourceLayout(args: {
     }
     const destinationCity = await resolveResourceSegmentCityApi(args.page, group.cityName, {
       countryName: departureCity.countryName,
-      province: args.provinceForCity?.(group.cityName) ?? args.province,
+      province: args.provinceForCity?.(group.cityName, group.dayNumbers) ?? args.province,
     });
     const draft = buildLodgingResourceSegment({
       terminalTemplate: terminal,
@@ -139,8 +139,34 @@ export async function normalizeHotelResourceLayout(args: {
       || Number(base.stayNights) !== Number(base.maxStayNights);
   });
   if (unequal.length) throw new Error(`资源行程段停留晚数与住宿晚数不一致：${unequal.map((segment: any) => String(segment.segmentId)).join("、")}`);
-  return { changed: Boolean(created || corrections.length), created, expected };
+  return { changed: Boolean(created || corrections.length), created, expected: expected.map(({ cityName, nights }) => ({ cityName, nights })) };
 }
+
+function usableTerminal(segment: any): boolean {
+  return Boolean(segment) && Number(segment.segmentBase?.stayNights) === 0 && segment.segmentBase?.deleteable === true;
+}
+
+/**
+ * 平台偶尔不返回 0 晚可删除的末尾段。以现有末尾段为模板补建一个空段（新增协议与
+ * 住宿段相同：segmentId 0），不带资源组和房间；保存后回读，仍不可用就停止。
+ */
+async function ensureTerminalSegment(page: any, productId: string, segments: any[]) {
+  const template = segments.at(-1);
+  if (!template) throw new Error(TERMINAL_REPAIR_FAILED);
+  const segmentNumber = Math.max(...segments.map((segment: any) => Number(segment.segmentBase?.segmentNumber) || 0)) + 1;
+  const draft = structuredClone(template);
+  // 模板可能是全程段：套餐与酒店日也不能被复制到新空段。
+  if (Array.isArray(draft.packages)) draft.packages = [];
+  if (Array.isArray(draft.hotelDays)) draft.hotelDays = [];
+  await saveProductSegmentApi(page, { ...draft, segmentId: 0, segmentResourceGroups: [], hotel: { segmentRooms: [] },
+    segmentBase: { ...(draft.segmentBase ?? {}), segmentNumber, stayNights: 0, minStayNights: 0, maxStayNights: 0, deleteable: true },
+  }, "VBK 补建末尾空行程段");
+  const refreshed = segmentsFromPayload(await getProductSegmentsApi(page, productId));
+  if (!usableTerminal(refreshed.at(-1))) throw new Error(TERMINAL_REPAIR_FAILED);
+  return refreshed;
+}
+
+const TERMINAL_REPAIR_FAILED = "VBK 资源配置无法补出末尾空段，请在资源配置页手动添加一个空行程段后重试";
 
 function lodgingSegments(segments: any[]) {
   return segments.slice(1).filter((segment: any) => Number(segment.segmentBase?.stayNights) > 0);

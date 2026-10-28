@@ -4,6 +4,8 @@ import { normalisePlatformHotelProduct, platformHotelStayGroups, PLATFORM_HOTEL_
 import { resourceGaps } from "../../src/main/planning/preparation-checks/resources.js";
 import { buildPlatformHotelRule, platformHotelRuleMatches } from "../../src/main/automation/ctrip/hotel-rule-protocol.js";
 import { formalResourcesMatchDraft } from "../../src/main/automation/ctrip/resource-segment-finalization.js";
+import { originalOvernightRoute } from "../../src/shared/original-itinerary-route.js";
+import { verifiedRouteOvernightCity } from "../../src/shared/route-location-evidence.js";
 
 const legacy = () => ({ basicInfo: { meetingCity: "成都", nights: 3 }, sales: { productForm: "freeTravel" },
   operations: { hotelResource: { source: "ctrip" }, hotelFallbackPolicy: { allowDowngrade: true } },
@@ -112,4 +114,30 @@ test("用户原始路线中的酒店名称不再进入生成标题与接送说�
   assert.match(product.itinerary[0].title, /白塔公园/);
   assert.doesNotMatch(JSON.stringify(product.itinerary[0].activities), /三钻|四钻|五钻/);
   assert.equal(product.basicInfo.userIdea, "动车站-白塔公园-丽枫酒店\n丽枫酒店-邓小平故里");
+});
+
+test("旅游区住宿城市改写为行政城市", () => {
+  const product = normalisePlatformHotelProduct({ basicInfo: { meetingCity: "深圳", nights: 2 }, operations: {},
+    itinerary: [
+      { day: 1, hotel: description, hotelCity: "潮汕", spots: [] },
+      { day: 2, hotel: description, hotelCity: "潮汕", spots: [] },
+      { day: 3, hotel: "无", spots: [] },
+    ] });
+  assert.deepEqual(product.itinerary.map((day: any) => day.hotelCity), ["汕头", "汕头", undefined]);
+  assert.deepEqual(platformHotelStayGroups(product).map(({ cityName, nights }) => ({ cityName, nights })),
+    [{ cityName: "汕头", nights: 2 }]);
+});
+
+test("已核验原路线落点为旅游区别名时按行政城市比对，不报不一致", () => {
+  const userIdea = "D1天：深圳—潮汕 D2天：潮汕—深圳";
+  const input: any = { basicInfo: { meetingCity: "深圳", nights: 1, userIdea }, operations: {},
+    itinerary: [{ day: 1, hotel: description, hotelCity: "潮汕", spots: [] }, { day: 2, hotel: "无", spots: [] }] };
+  const sourceRoute = originalOvernightRoute(input, input.itinerary[0])!;
+  input.diagnostics = { routeLocations: [{ day: 1, name: "潮汕", districtId: 1, position: sourceRoute.indexOf("潮汕"),
+    sourceRoute, routeKey: "k", province: "广东", city: "潮汕" }] };
+  assert.equal(verifiedRouteOvernightCity(input, input.itinerary[0]), "潮汕");
+  const product = normalisePlatformHotelProduct(input);
+  assert.equal(product.itinerary[0].hotelCity, "汕头");
+  assert.deepEqual(platformHotelStayGroups(product).map(({ cityName, nights }) => ({ cityName, nights })),
+    [{ cityName: "汕头", nights: 1 }]);
 });

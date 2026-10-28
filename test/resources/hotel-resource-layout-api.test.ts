@@ -235,3 +235,65 @@ test("新建产品缺少住宿段时，自动按连续城市创建并让停留�
     else (globalThis as any).document = oldDocument;
   }
 });
+
+test("缺少末尾空段时先补空段再新增住宿段", async () => {
+  const chengdu = city(28, "成都");
+  const fullTrip = { segmentId: "full-trip", productId: 80000001, segmentResourceGroups: [{ resourceGroupId: 9001 }],
+    hotel: { segmentRooms: [] }, segmentBase: { segmentNumber: 1, departureCity: chengdu, destinationCity: chengdu,
+      stayNights: 0, minStayNights: 0, maxStayNights: 0, deleteable: false } };
+  let segments: any[] = [structuredClone(fullTrip)];
+  const saves: any[] = [];
+  const page = { nativeOnly: true, vbkSessionFetch: async (request: any) => {
+    const action = new URL(request.endpoint).pathname.split("/").at(-1);
+    assert.ok(["getSegments", "saveSegment", "suggestDepartureCity"].includes(action!), `unexpected external operation ${action}`);
+    let extra = {};
+    if (action === "suggestDepartureCity") extra = { cities: request.body.keyword === "成都" ? [chengdu] : [] };
+    if (action === "saveSegment") {
+      const draft = structuredClone(request.body.segment);
+      saves.push(structuredClone(draft));
+      if (Number(draft.segmentId) === 0) {
+        draft.segmentId = `seg-${saves.length}`;
+        if (Number(draft.segmentBase.stayNights) === 0) segments.push(draft); else segments.splice(-1, 0, draft);
+        segments.forEach((segment, index) => { segment.segmentBase.segmentNumber = index + 1; });
+      } else segments = segments.map(segment => segment.segmentId === draft.segmentId ? draft : segment);
+    }
+    if (action === "getSegments") extra = { draftProductSegments: { segments: structuredClone(segments) } };
+    return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, ...extra } };
+  } };
+  const result: any = await ensureHotelResourceApi(page, {
+    sales: { productForm: "privateTour" }, basicInfo: { meetingCity: "成都", province: "四川", nights: 1 },
+    itinerary: [{ day: 1, hotel: "平台酒店", hotelCity: "成都", spots: [] }, { day: 2, hotel: "无", spots: [] }],
+  }, "80000001");
+  assert.equal(result.verified, true);
+  assert.equal(result.layout.created, 1);
+  const terminalSave = saves[0];
+  assert.equal(terminalSave.segmentId, 0);
+  assert.equal(terminalSave.segmentBase.segmentNumber, 2);
+  assert.deepEqual([terminalSave.segmentBase.stayNights, terminalSave.segmentBase.minStayNights, terminalSave.segmentBase.maxStayNights], [0, 0, 0]);
+  assert.equal(terminalSave.segmentBase.deleteable, true);
+  assert.deepEqual(terminalSave.segmentResourceGroups, []);
+  assert.deepEqual(terminalSave.hotel, { segmentRooms: [] });
+  assert.equal(saves[1].segmentId, 0);
+  assert.equal(saves[1].segmentBase.stayNights, 1);
+  assert.deepEqual(segments.map(segment => [segment.segmentBase.destinationCity.cityName, segment.segmentBase.stayNights]),
+    [["成都", 0], ["成都", 1], ["成都", 0]]);
+});
+
+test("补建末尾空段后仍拿不到可用末尾段时停止并提示人工添加", async () => {
+  const chengdu = city(28, "成都");
+  const segments = [{ segmentId: "full-trip", productId: 80000002, hotel: { segmentRooms: [] }, segmentBase: { segmentNumber: 1,
+    departureCity: chengdu, destinationCity: chengdu, stayNights: 0, minStayNights: 0, maxStayNights: 0, deleteable: false } }];
+  let saves = 0;
+  const page = { nativeOnly: true, vbkSessionFetch: async (request: any) => {
+    const action = new URL(request.endpoint).pathname.split("/").at(-1);
+    if (action === "saveSegment") saves++;
+    const extra = action === "getSegments" ? { draftProductSegments: { segments: structuredClone(segments) } }
+      : action === "suggestDepartureCity" ? { cities: [chengdu] } : {};
+    return { status: 200, payload: { ResponseStatus: { Ack: "Success" }, ...extra } };
+  } };
+  await assert.rejects(ensureHotelResourceApi(page, {
+    sales: { productForm: "privateTour" }, basicInfo: { meetingCity: "成都", province: "四川", nights: 1 },
+    itinerary: [{ day: 1, hotel: "平台酒店", hotelCity: "成都", spots: [] }, { day: 2, hotel: "无", spots: [] }],
+  }, "80000002"), /VBK 资源配置无法补出末尾空段，请在资源配置页手动添加一个空行程段后重试/);
+  assert.equal(saves, 1);
+});

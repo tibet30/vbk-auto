@@ -19,7 +19,7 @@ export async function ensurePlatformHotelRulesApi(page: any, input: any, product
   const routeCities = await resolveHotelRuleRouteCities(page, product);
   const payload = await ensureResourceSegmentsDraftApi(page, productId);
   const layout = await normalizeHotelResourceLayout({ page, productId, resolvedDays: days, payload, source: "rules",
-    provinceForCity: city => toPlatformShortLocationName(routeCities.get(city)?.provinceName) || hotelRuleProvince(product, city) });
+    provinceForCity: (city, dayNumbers) => toPlatformShortLocationName(routeCities.get(city)?.provinceName) || hotelRuleProvince(product, city, dayNumbers) });
   let fresh: any = await getProductSegmentsApi(page, productId);
   if (options.draftOnly && !Array.isArray(fresh?.draftProductSegments?.segments)) throw new Error("平台酒店规则未返回草稿，不能确认草稿保存");
   const count = segmentsFromPayload(fresh).slice(1).filter((s: any) => Number(s.segmentBase?.stayNights) > 0).length;
@@ -75,7 +75,7 @@ export function assertHotelRulesLayout(payload: any, product: any, formalOnly = 
     // 平台回读的是可写城市：万州等直辖市下辖区县写入后回读为重庆。
     const wantedCityName = toVbkCityName(wanted.cityName);
     const routeCity = routeCities.get(wanted.cityName);
-    const province = toPlatformShortLocationName(routeCity?.provinceName) || hotelRuleProvince(product, wanted.cityName);
+    const province = toPlatformShortLocationName(routeCity?.provinceName) || hotelRuleProvince(product, wanted.cityName, wanted.dayNumbers);
     if (toPlatformShortLocationName(base.destinationCity?.cityName) !== wantedCityName
       || province && (toPlatformShortLocationName(base.destinationCity?.provinceName) !== province || base.destinationCity?.countryName !== "中国")
       || routeCity && Number(base.destinationCity?.cityId) !== Number(routeCity.cityId)
@@ -85,8 +85,10 @@ export function assertHotelRulesLayout(payload: any, product: any, formalOnly = 
   return lodging;
 }
 
-/** Cross-province routes use the lodging city's own POI geography, never the arrival province. */
-function hotelRuleProvince(product: any, cityName: string): string | undefined {
+/** Cross-province routes use the lodging city's own POI geography, never the arrival province.
+ * A lodging city without its own POIs (西宁) falls back to the stay days and their next days:
+ * only one shared province among those spots counts as evidence. */
+export function hotelRuleProvince(product: any, cityName: string, dayNumbers: number[] = []): string | undefined {
   const spots = (product.itinerary ?? []).flatMap((day: any) => day.spots ?? []);
   const provinces = new Set<string>(spots.map((spot: any) => toPlatformShortLocationName(spot.province)).filter(Boolean));
   const matching = new Set<string>(spots.filter((spot: any) => [spot.city, spot.district]
@@ -94,7 +96,11 @@ function hotelRuleProvince(product: any, cityName: string): string | undefined {
     .map((spot: any) => toPlatformShortLocationName(spot.province)).filter(Boolean));
   if (matching.size === 1) return [...matching][0];
   const base = toPlatformShortLocationName(product.basicInfo?.province);
-  return base && [...provinces].every(province => province === base) ? base : undefined;
+  if (base && [...provinces].every(province => province === base)) return base;
+  const nearby = new Set(dayNumbers.flatMap(day => [day, day + 1]));
+  const adjacent = new Set<string>((product.itinerary ?? []).filter((day: any) => nearby.has(Number(day.day)))
+    .flatMap((day: any) => day.spots ?? []).map((spot: any) => toPlatformShortLocationName(spot.province)).filter(Boolean));
+  return adjacent.size === 1 ? [...adjacent][0] : undefined;
 }
 export async function verifyPlatformHotelRulesReadback(page: any, product: any, productId: string) {
   const normalized = normalisePlatformHotelProduct(product);

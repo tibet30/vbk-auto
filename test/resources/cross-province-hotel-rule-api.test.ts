@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ensurePlatformHotelRulesApi, verifyPlatformHotelDraftRulesReadback, verifyPlatformHotelRulesReadback } from '../../src/main/automation/ctrip/hotel-rule-api.js';
+import { ensurePlatformHotelRulesApi, hotelRuleProvince, verifyPlatformHotelDraftRulesReadback, verifyPlatformHotelRulesReadback } from '../../src/main/automation/ctrip/hotel-rule-api.js';
 import { normalisePlatformHotelProduct } from '../../src/shared/platform-hotel-rules.js';
 
 const jilin = { cityId: 159, cityName: '吉林市', provinceName: '吉林', countryName: '中国' };
@@ -90,4 +90,17 @@ test('readback rechecks current administrative identity and never repairs wrong 
     await assert.rejects(verifyPlatformHotelRulesReadback(page, input, '80319520'), /回读不一致/);
     assert.equal(state.writes, writes);
   }
+});
+
+test('住宿城市当天无景点时用当天和次日景点推断省份', () => {
+  const spot = (name: string, province: string, city: string) => ({ name, poiName: name, poiId: 1, province, city });
+  const product = { basicInfo: { meetingCity: '兰州', province: '甘肃', nights: 3 }, itinerary: [
+    { day: 1, hotelCity: '兰州', spots: [spot('中山桥', '甘肃', '兰州')] },
+    { day: 2, hotelCity: '西宁', spots: [spot('互助土族故土园', '青海', '海东')] },
+    { day: 3, hotelCity: '海北', spots: [spot('青海湖', '青海', '海北')] },
+    { day: 4, spots: [spot('鸣沙山', '甘肃', '敦煌')] },
+  ] };
+  assert.equal(hotelRuleProvince(product, '西宁'), undefined);
+  assert.equal(hotelRuleProvince(product, '西宁', [2]), '青海');
+  assert.equal(hotelRuleProvince(product, '西宁', [3]), undefined, '次日跨省时不推断');
 });

@@ -47,16 +47,18 @@ export function normalisePlatformHotelProduct(product: Json): Json {
     const day = normaliseReturnDayLodging(raw, basic) as Json;
     const stay = needsItineraryHotelCandidates(day, index, Number(basic.nights));
     const requirement = stay ? hotelStayRequirement(next, day) : undefined;
-    const savedCity = toPlatformShortLocationName(day.hotelCity);
+    // 旅游区别名（潮汕等）先改写为平台可写行政城市，再取短名比对。
+    const writable = (value: unknown) => toPlatformShortLocationName(toWritableAdministrativeCityName(value));
+    const savedCity = writable(day.hotelCity);
     const arrivalCity = toPlatformShortLocationName(basic.meetingCity || basic.destinationCity);
     const requestedCity = toPlatformShortLocationName(toWritableAdministrativeCityName(requirement?.cityName));
     const verifiedCity = verifiedOvernightCity(next, day);
-    const routeCity = verifiedRouteOvernightCity(next, day);
+    const routeCity = writable(verifiedRouteOvernightCity(next, day));
     const inferredCity = requestedCity || verifiedCity;
     const inheritedArrival = savedCity && requestedCity && savedCity === arrivalCity && requestedCity !== arrivalCity;
     const fallbackCity = originalOvernightRoute(next, day) && !originalRouteEndsAtArrival(next, day) ? '' : arrivalCity;
-    const city = inheritedArrival || (routeCity && savedCity && savedCity !== inferredCity) ? inferredCity : toPlatformShortLocationName(savedCity || inferredCity
-      || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity);
+    const city = writable(inheritedArrival || (routeCity && savedCity && savedCity !== writable(inferredCity)) ? inferredCity : toPlatformShortLocationName(savedCity || inferredCity
+      || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity));
     const result: Json = { ...day, hotel: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL,
       hotelDescription: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL };
     delete result.hotelRequirement; delete result.hotelCandidates;
@@ -79,16 +81,18 @@ export function normalisePlatformHotelProduct(product: Json): Json {
   });
   return normalisePlatformHotelCopy(next, (product.itinerary ?? []).flatMap((day: Json) => [day.hotel, ...(day.hotelCandidates ?? []).map((candidate: Json) => candidate.hotelName)]));
 }
+const MANUAL_CITY_HINT = "；请在行程规划中人工指定当晚住宿城市";
 export function platformHotelStayGroups(product: Json) {
   const groups: Array<{ cityName: string; nights: number; dayNumbers: number[]; hotelIds: number[] }> = [];
   for (const day of product.itinerary ?? []) {
     if (!hasItineraryHotelStay(day.hotel)) continue;
     const cityName = toPlatformShortLocationName(day.hotelCity);
-    if (!cityName) throw new Error(`第 ${day.day} 天缺少住宿城市`);
-    const routeCity = verifiedRouteOvernightCity(product, day);
+    if (!cityName) throw new Error(`第 ${day.day} 天缺少住宿城市${MANUAL_CITY_HINT}`);
+    const verifiedRoute = verifiedRouteOvernightCity(product, day);
+    const routeCity = verifiedRoute && toPlatformShortLocationName(toWritableAdministrativeCityName(verifiedRoute));
     if (routeCity && cityName !== routeCity) throw new Error(`第 ${day.day} 天住宿城市「${cityName}」与已核验原路线落点「${routeCity}」不一致`);
     if (isNonWritableCityAlias(cityName)) {
-      throw new Error(`第 ${day.day} 天住宿城市「${cityName}」不是可写行政城市，请填写当晚实际住宿城市`);
+      throw new Error(`第 ${day.day} 天住宿城市「${cityName}」不是可写行政城市，请填写当晚实际住宿城市${MANUAL_CITY_HINT}`);
     }
     const last = groups.at(-1);
     if (last?.cityName === cityName && last.dayNumbers.at(-1)! + 1 === Number(day.day)) {

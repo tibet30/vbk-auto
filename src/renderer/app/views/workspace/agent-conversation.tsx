@@ -17,6 +17,7 @@ const PHASE_NAMES: Record<string, string> = {
 };
 function scopeLabel(scope: string) {
   if (scope === "vbk.review_unlock:itinerary") return "自动审核行程并解锁标签";
+  if (scope === "vbk.duration_replacement") return "改天数被拒时保留旧草稿并新建产品";
   return PHASE_NAMES[scope.replace("vbk.write_phase:", "")] ?? scope;
 }
 

@@ -116,11 +116,10 @@ export async function processTrafficLineTarget(
       await ensureHotelResourceApi(page, options.product, relationship.productId);
     }
     // 母产品改天数后，已有子产品仍是旧天数：按母产品当前每日行程重建子产品行程。
-    // 只读比较失败不阻断原流程（记录后按原路径继续）；同步写入失败仍按跳过规则处理。
+    // 只读比较失败时不能按旧天数收口：抛出后由下方 catch 按 T3 跳过规则记录失败。
     const parentDescriptions = await readParentItineraryForChild(page, parentProductId, relationship.productId)
       .catch((error: unknown) => {
-        options.onStatus?.(`交通子产品 ${relationship.productId} 未能比较母子行程天数，按原流程继续：${error instanceof Error ? error.message : String(error)}`);
-        return undefined;
+        throw new Error(`未能比较母子行程天数，不按旧天数收口：${error instanceof Error ? error.message : String(error)}`);
       });
     if (parentDescriptions) {
       options.onStatus?.(`交通子产品 ${relationship.productId} 行程天数与母产品不一致，正在按母产品 ${parentDescriptions.length} 天行程同步。`);
@@ -138,15 +137,13 @@ export async function processTrafficLineTarget(
         snapshot: () => progress,
       } };
     }
-    if (trafficRouteActivationCanResume(previous) || trafficClauseMaterializationCanResume(previous) || trafficResourceCardRejected(previous)) {
+    // 天数需同步时不走恢复捷径：资源段返程日随天数变化，须按新行程走完整写链。
+    if (!parentDescriptions && (trafficRouteActivationCanResume(previous)
+      || trafficClauseMaterializationCanResume(previous) || trafficResourceCardRejected(previous))) {
       // 线路审核或条款物化失败不撤销已保存资源；先独立回读正式资源，
       // 不重建资源草稿，也不重新发起耗时的班期校验。
       await readTrafficLineSegmentReadback(page, relationship.productId, target.variant, endpoints);
       checkpoint("resourcesSaved", relationship.productId);
-      if (parentDescriptions) {
-        await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair, parentDescriptions);
-        checkpoint("itinerarySaved", relationship.productId);
-      }
       if (trafficClauseMaterializationCanResume(previous) || trafficResourceCardRejected(previous)) {
         await repairTrafficLineItineraryIfMissing(page, relationship.productId, target.variant, endpoints, options.copyRepair);
         checkpoint("itinerarySaved", relationship.productId);

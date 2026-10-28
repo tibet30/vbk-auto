@@ -31,4 +31,9 @@ export interface AutomationRun {
    * 转新建的批准 ID。存在即表示本轮已用掉唯一一次转新建。
    */
   durationReplacement?: { previousProductId: string; approvalId?: string; at: string };
+  /**
+   * 当前绑定远端草稿上最后一次通过回读的每日行程天数（itinerary 阶段完成时记录）。
+   * 用于判定本轮是否真的在改天数；新建产品的运行不继承该值。
+   */
+  enteredItineraryDays?: number;
 }

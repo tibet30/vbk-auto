@@ -1,6 +1,7 @@
 import type { AgentApproval, AgentSnapshot, ProductDetail } from '../../shared/contracts.js';
 import { agentProductVersion, approvalForRun, buildAgentApproval, requiredAgentPhases } from './integration-gates.js';
 import { ITINERARY_REVIEW_UNLOCK_SCOPE } from '../../shared/itinerary-review-approval.js';
+import { DURATION_REPLACEMENT_SCOPE } from '../../shared/duration-replacement.js';
 import type { WizardStageRetryPhase } from '../../shared/wizard-stage-retry.js';
 
 export class AgentAuthorizationError extends Error {
@@ -21,9 +22,10 @@ export function normalizeAgentApprovalScope(product: ProductDetail, scope: strin
     // another operator retry before the current-plan approval card appears.
     .filter(item => !(product.productId && item === "vbk.write_phase:saleControl"));
   const current = buildAgentApproval(product).scope;
-  if (current.includes(ITINERARY_REVIEW_UNLOCK_SCOPE)
-    && current.filter(item => item !== ITINERARY_REVIEW_UNLOCK_SCOPE).every(item => normalized.includes(item))) {
-    normalized.push(ITINERARY_REVIEW_UNLOCK_SCOPE);
+  const derived = [ITINERARY_REVIEW_UNLOCK_SCOPE, DURATION_REPLACEMENT_SCOPE];
+  // 审核解锁与改天数转新建均由系统按当前方案推导，并写进确认卡说明；模型只需给出阶段范围。
+  if (current.filter(item => !derived.includes(item)).every(item => normalized.includes(item))) {
+    normalized.push(...current.filter(item => derived.includes(item)));
   }
   return [...new Set(normalized)];
 }
@@ -38,10 +40,13 @@ export function agentApprovalScopeError(
     && scope[0] === `vbk.write_phase:${options.wizardStageRetry}`;
   if (!wizardStageScope && required.some(item=>!scope.includes(item))) return `最终确认范围不完整。请将 read_product.requiredApprovalScope 原样用于 scope：${JSON.stringify(required)}。`;
   if (wizardStageScope && !required.includes(scope[0]!)) return `当前产品不支持向导阶段：${options.wizardStageRetry}。`;
-  const reviewAllowed = buildAgentApproval(product).scope.includes(ITINERARY_REVIEW_UNLOCK_SCOPE);
+  const current = buildAgentApproval(product).scope;
+  const reviewAllowed = current.includes(ITINERARY_REVIEW_UNLOCK_SCOPE);
+  const replacementAllowed = current.includes(DURATION_REPLACEMENT_SCOPE);
   const isKnownScope = (item: string) => item.startsWith("vbk.write_phase:")
     && agentWritePhases.has(item.slice("vbk.write_phase:".length));
   if (scope.some(item=>!required.includes(item) && !(reviewAllowed && item === ITINERARY_REVIEW_UNLOCK_SCOPE)
+    && !((replacementAllowed || options.allowSupersededPhases) && item === DURATION_REPLACEMENT_SCOPE)
     && (!options.allowSupersededPhases || !isKnownScope(item)))) {
     return `包含当前产品不支持的录入范围。当前 requiredApprovalScope：${JSON.stringify(required)}。`;
   }
@@ -62,12 +67,14 @@ export function isDeterministicAutomationInFlight(
 
 /** Run inside the browser lock, immediately before dispatching platform calls. */
 /**
- * 已批准录入中天数被拒、转新建产品时，本轮重录需要新建产品壳。只有记录了
+ * 已批准录入中天数被拒、转新建产品时，本轮重录需要新建产品壳。只有批准里
+ * 显式包含 vbk.duration_replacement（确认卡已告知运营可能新建产品）、本轮记录了
  * 同一批准 ID 且本地尚未绑定新产品时，才为该批准补出 saleControl。
  */
 function replacementShellScope(product: ProductDetail, approval: AgentApproval): string[] {
   const replacement = product.automation?.durationReplacement;
-  return !product.productId && replacement?.approvalId === approval.id ? ["vbk.write_phase:saleControl"] : [];
+  return approval.scope.includes(DURATION_REPLACEMENT_SCOPE) && !product.productId
+    && replacement?.approvalId === approval.id ? ["vbk.write_phase:saleControl"] : [];
 }
 
 export function assertAgentWriteAuthorized(product: ProductDetail, snapshot: AgentSnapshot | undefined, phase: string, accountKey: string): void {

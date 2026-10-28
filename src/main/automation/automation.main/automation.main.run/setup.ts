@@ -183,6 +183,9 @@ export async function prepareAutomationSetup(
       logs: durationReplacement ? [{ at: durationReplacement.at, level: "warning",
         message: `旧 VBK 草稿 ${durationReplacement.previousProductId} 未接受新天数，已本地解绑；本轮从销售控制新建产品重录。` }] : [],
       ...(durationReplacement ? { durationReplacement } : {}),
+      // 同一远端草稿上的整轮重录沿用已录入天数；转新建产品后不继承。
+      ...(!durationReplacement && productDetail.productId && productDetail.automation?.enteredItineraryDays
+        ? { enteredItineraryDays: productDetail.automation.enteredItineraryDays } : {}),
     };
   }
 

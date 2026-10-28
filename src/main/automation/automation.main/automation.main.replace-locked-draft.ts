@@ -29,21 +29,39 @@ export function prepareLockedDraftReplacement(product: ProductDetail): {
   };
 }
 
-/** 替代前必须再次以 VBK 为准确认旧草稿尚未提审、未激活、未发布。 */
-export function assertRemoteDraftCanBeReplaced(raw: unknown): void {
+function remoteDraftParts(raw: unknown) {
   const root = raw && typeof raw === "object" && !Array.isArray(raw)
     ? raw as Record<string, unknown>
     : {};
   const data = root.data && typeof root.data === "object" && !Array.isArray(root.data)
     ? root.data as Record<string, unknown>
     : root;
-  const sale = data.saleControlInfo as Record<string, unknown> | undefined;
-  const base = data.baseInfo as Record<string, unknown> | undefined;
-  const meta = data.meta as Record<string, unknown> | undefined;
-  if (Number(sale?.productCategoryID ?? sale?.productCategoryId) !== 10
-    || !isUnpublishedActive(String(base?.active))
-    || String(meta?.auditStatus) !== "N"
-    || String(meta?.releaseActive) !== "F") {
+  return {
+    sale: data.saleControlInfo as Record<string, unknown> | undefined,
+    base: data.baseInfo as Record<string, unknown> | undefined,
+    meta: data.meta as Record<string, unknown> | undefined,
+  };
+}
+
+/** 远端草稿未提审、未发布：active 为 F/D（D 即「无效·下线」），auditStatus=N，releaseActive=F。 */
+function remoteDraftUnpublished(raw: unknown): boolean {
+  const { base, meta } = remoteDraftParts(raw);
+  return isUnpublishedActive(String(base?.active))
+    && String(meta?.auditStatus) === "N"
+    && String(meta?.releaseActive) === "F";
+}
+
+/** 替代前必须再次以 VBK 为准确认旧草稿尚未提审、未激活、未发布。 */
+export function assertRemoteDraftCanBeReplaced(raw: unknown): void {
+  const { sale } = remoteDraftParts(raw);
+  if (Number(sale?.productCategoryID ?? sale?.productCategoryId) !== 10 || !remoteDraftUnpublished(raw)) {
     throw new Error("VBK 远端草稿已不满足安全替代条件，不会创建替代产品。");
+  }
+}
+
+/** 改天数转新建前的只读确认：不要求产品类别，只要求旧草稿仍未提审、未发布。 */
+export function assertRemoteDraftUnpublished(raw: unknown, productId: string): void {
+  if (!remoteDraftUnpublished(raw)) {
+    throw new Error(`VBK 草稿 ${productId} 已不是未提审、未发布状态，不会转新建产品；请人工核对后处理。`);
   }
 }

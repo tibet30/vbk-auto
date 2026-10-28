@@ -13,6 +13,7 @@ import { evaluatePreparationCompletion } from '../planning/preparation-completio
 import { readActiveCoverFallback } from '../../shared/cover-fallback.js';
 import { preparationStageGaps } from "../planning/preparation/policy.js";
 import { ITINERARY_REVIEW_UNLOCK_SCOPE } from "../../shared/itinerary-review-approval.js";
+import { DURATION_REPLACEMENT_SCOPE, durationReplacementNotice } from "../../shared/duration-replacement.js";
 
 export function requiredAgentPhases(product: ProductDetail): string[] {
   const data = product.product as unknown as Parameters<typeof draftPhasesFor>[0];
@@ -90,10 +91,13 @@ export function buildAgentApproval(product: ProductDetail) {
   const placeholderNotice = readActiveCoverFallback(product.product)
     ? "将上传运营占位图，仅保存未提审草稿，禁止上架；运营须在上架前替换真实封面。"
     : "";
+  // 已绑定远端草稿且本地天数与最后一次录入的天数不同：运营须看到并批准「可能新建产品」。
+  const replacementNotice = durationReplacementNotice(product);
   return {
     scope: [...requiredAgentPhases(product).map(phase=>`vbk.write_phase:${phase}`),
-      ...(placeholderNotice ? [] : [ITINERARY_REVIEW_UNLOCK_SCOPE])],
-    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${manualCoverNotice}${generatedCoverNotice}${placeholderNotice}${placeholderNotice ? '' : '本次录入包含自动提交母产品行程审核并解锁全部标签，不发布。'}请核对右侧行程、资源和条款，确认后录入当前方案。`,
+      ...(placeholderNotice ? [] : [ITINERARY_REVIEW_UNLOCK_SCOPE]),
+      ...(replacementNotice ? [DURATION_REPLACEMENT_SCOPE] : [])],
+    summary: `${basic.meetingCity || basic.destinationCity} · ${basic.days}天${basic.nights}晚。${pricing ? `成人 ¥${pricing.adult}，儿童 ¥${pricing.child}。` : ''}${inventory ? `班期 ${inventory.startDate} 至 ${inventory.endDate}。` : ''}${replacementNotice}${manualCoverNotice}${generatedCoverNotice}${placeholderNotice}${placeholderNotice ? '' : '本次录入包含自动提交母产品行程审核并解锁全部标签，不发布。'}请核对右侧行程、资源和条款，确认后录入当前方案。`,
   };
 }
 export function agentCompletionGate(product: ProductDetail, snapshot: AgentSnapshot | undefined, readiness: ProductReadiness, context?: AgentFinishContext): AgentFinishResult {

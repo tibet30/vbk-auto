@@ -123,7 +123,11 @@ export function entryPhaseInputFingerprint(product: Json, phase: string): string
 
 export function stampCompletedEntryPhase(run: AutomationRun, product: Json, phase: string): void {
   const row = run.phases.find((item) => item.phase === phase);
-  if (row?.status === "completed") row.inputFingerprint = entryPhaseInputFingerprint(product, phase);
+  if (row?.status !== "completed") return;
+  row.inputFingerprint = entryPhaseInputFingerprint(product, phase);
+  // 每日行程已按此天数写入并通过远端回读：记录为当前远端草稿的已录入天数。
+  const days = Number(record(product.basicInfo).days);
+  if (phase === "itinerary" && Number.isInteger(days) && days > 0) run.enteredItineraryDays = days;
 }
 
 export function completedEntryPhaseIsCurrent(product: ProductDetail, phase: string): boolean | undefined {

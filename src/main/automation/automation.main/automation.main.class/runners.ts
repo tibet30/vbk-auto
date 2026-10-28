@@ -16,7 +16,9 @@ import { runOnePhase as runOnePhaseFlow } from "../automation.main.run-one.js";
 import { runSaleControlPhase } from "../automation.main.run-sale-control.js";
 import { makeAutomationRunContext } from "../automation.main.make-context.js";
 import { automationNavigationPin } from "../automation.main.pin.js";
-import { runWithDurationReplacement } from "../duration-change-replacement.js";
+import { runWithDurationReplacement, type DurationReplacementDeps } from "../duration-change-replacement.js";
+import { getProductBaseInfoApi } from "../../ctrip/basic-info/read-base.js";
+import { getVbkRequestPage } from "../../../infrastructure/vbk-request-page.js";
 import type { AutomationRunContext } from "../automation.main.context.js";
 import type { VbkBrowser } from "../../../infrastructure/vbk-browser.js";
 import type { VbkDatabase } from "../../../infrastructure/database/database.js";
@@ -65,15 +67,21 @@ export function buildRunContext(bindings: RunContextBindings, localProductId?: s
   });
 }
 
+function replacementDeps(bindings: RunContextBindings, ctx: AutomationRunContext, localProductId: string): DurationReplacementDeps {
+  return { db: bindings.db, localProductId, emit: ctx.emit,
+    readRemoteBaseInfo: productId => ctx.runVbkPageExclusive(async () =>
+      getProductBaseInfoApi(await getVbkRequestPage(bindings.browser), productId)) };
+}
+
 /** 天数被平台拒绝时，在同一轮内解绑旧草稿并从第一个阶段新建产品重录一次。 */
 export async function runFull(bindings: RunContextBindings, ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
-  return runWithDurationReplacement({ db: bindings.db, localProductId, emit: ctx.emit }, replacement => replacement
+  return runWithDurationReplacement(replacementDeps(bindings, ctx, localProductId), replacement => replacement
     ? runAutomationFlow(ctx, localProductId, undefined, replacement)
     : runAutomationFlow(ctx, localProductId, retryFrom));
 }
 
 export async function runOne(bindings: RunContextBindings, ctx: AutomationRunContext, localProductId: string, phase: string) {
-  return runWithDurationReplacement({ db: bindings.db, localProductId, emit: ctx.emit }, replacement => replacement
+  return runWithDurationReplacement(replacementDeps(bindings, ctx, localProductId), replacement => replacement
     ? runAutomationFlow(ctx, localProductId, undefined, replacement)
     : runOnePhaseFlow(ctx, localProductId, phase));
 }

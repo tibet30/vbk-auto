@@ -221,6 +221,9 @@ test("getImageInfo 批量失败时逐张重试，只丢失败的图", async () =
   const failed = events.filter((event) => event.event === "image-info-failed");
   assert.equal(failed.length, 1);
   assert.match(JSON.stringify(failed[0]), /"imageId":2/);
+  const batchFailure = events.filter((event) => event.event === "image-info-failure");
+  assert.equal(batchFailure.length, 1);
+  assert.match(JSON.stringify(batchFailure[0]), /图片服务异常/);
 });
 
 test("searchCtripLibraryImages：suggestPoi 返回 HTTP 400 抛错 + suggest-failure 事件", async () => {

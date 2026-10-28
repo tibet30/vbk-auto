@@ -111,7 +111,7 @@ export async function searchCtripLibraryImagesForPlace(
 }
 
 /**
- * 批量 getImageInfo 失败时逐张重试：单张失败只记一条 image-info-failed 事件，
+ * 批量 getImageInfo 失败时先记 image-info-failure（批量原因），再逐张重试：单张失败只记一条 image-info-failed 事件，
  * 其余照常拼装；全部单张都失败时抛出原批量错误，交由调用方按「检索失败」处理。
  */
 async function fetchImageInfoWithRetry(
@@ -127,6 +127,13 @@ async function fetchImageInfoWithRetry(
   try {
     return { infoMap: await fetchCtripImageInfoMap(browser, imageIds, timeouts), failedImageIds: new Set() };
   } catch (batchError) {
+    logger({
+      event: "image-info-failure",
+      message: batchError instanceof Error ? batchError.message : String(batchError),
+      httpStatus: 0,
+      durationMs: 0,
+      ctx: EMPTY_CTRIP_SESSION_CONTEXT,
+    });
     const infoMap = new Map<number, CtripLibraryImageInfo>();
     const failedImageIds = new Set<number>();
     for (const imageId of imageIds) {

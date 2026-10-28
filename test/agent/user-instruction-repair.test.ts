@@ -6,6 +6,9 @@ import {
   repairProductForExplicitHotelCity,
   repairProductForExplicitInstruction,
 } from "../../src/main/agent/user-instruction-repair.js";
+import { extractLockedConstraints } from "../../src/main/agent/prompt-helpers.js";
+import { itineraryInputContractError, planningWriteContractError } from "../../src/main/planning/itinerary-input-contract.js";
+import { agentPatchOperations } from "../../src/main/agent/integration-patch.js";
 
 function detail(): ProductDetail {
   return {
@@ -86,10 +89,22 @@ test("duration correction accepts only explicit user corrections and accepts Chi
   assert.equal((repaired.product.basicInfo as Record<string, unknown>).nights, 3);
 });
 
-test("submitted or actively automating products are not silently duration-rewritten", () => {
-  const submitted = detail();
-  submitted.productId = "123";
-  assert.equal(repairProductForExplicitDuration(submitted, "改成4天3晚"), undefined);
+test("remote drafts accept an explicit duration change; only a running automation is protected", () => {
+  const remote = detail();
+  Object.assign(remote.product.basicInfo as Record<string, unknown>, { days: 2, nights: 1 });
+  remote.productId = "123";
+  remote.basicInfoSaved = true;
+  const repaired = repairProductForExplicitDuration(remote, "改成4天3晚");
+  assert.ok(repaired);
+  assert.equal((repaired.product.basicInfo as Record<string, unknown>).days, 4);
+  assert.equal((repaired.product.basicInfo as Record<string, unknown>).nights, 3);
+  // 天数锁跟随 basicInfo：改天数后规划写入按新天数校验，不会被旧天数拒绝。
+  const changed = { ...remote, product: repaired.product };
+  assert.equal(extractLockedConstraints(changed, []).days, 4);
+  const fourDays = [1, 2, 3, 4].map((day) => ({ day, title: `D${day}`, spots: [], description: "游览", hotel: "", meals: "" }));
+  assert.doesNotMatch(itineraryInputContractError(changed, fourDays) ?? "", /天数/);
+  assert.match(itineraryInputContractError(changed, fourDays.slice(0, 2)) ?? "", /已锁定的 4 天/);
+  assert.equal(planningWriteContractError(changed, "skeleton", { days: 4 }), undefined);
   const running = detail();
   running.automation = { id: "run", status: "running", logs: [], phases: [] };
   assert.equal(repairProductForExplicitDuration(running, "改成4天3晚"), undefined);
@@ -101,4 +116,24 @@ test("combined instruction repair applies duration before hotel correction", () 
   const repaired = repairProductForExplicitInstruction(current, "改成4天3晚，并明确住日喀则4钻酒店");
   assert.ok(repaired);
   assert.equal((repaired.product.basicInfo as Record<string, unknown>).days, 4);
+});
+
+test("已有 productId 的产品「改成5天4晚」后，三处本地天数锁都跟随为 5 天", () => {
+  const remote = detail();
+  Object.assign(remote.product.basicInfo as Record<string, unknown>, { days: 2, nights: 1 });
+  remote.productId = "79000001";
+  remote.basicInfoSaved = true;
+  const repaired = repairProductForExplicitDuration(remote, "改成5天4晚");
+  assert.ok(repaired);
+  const changed = { ...remote, product: repaired.product };
+  // prompt-helpers extractLockedConstraints
+  assert.equal(extractLockedConstraints(changed, []).days, 5);
+  assert.equal(extractLockedConstraints(changed, []).nights, 4);
+  // itinerary-input-contract：5 天行程通过，旧 2 天被拒
+  const fiveDays = [1, 2, 3, 4, 5].map((day) => ({ day, title: `D${day}`, spots: [], description: "游览", hotel: "", meals: "" }));
+  assert.doesNotMatch(itineraryInputContractError(changed, fiveDays) ?? "", /天数/);
+  assert.match(itineraryInputContractError(changed, fiveDays.slice(0, 2)) ?? "", /已锁定的 5 天/);
+  // integration-patch assertLockedPlanningPatch：锁为 5 天
+  assert.doesNotMatch(String((() => { try { agentPatchOperations(changed, { basicInfo: { days: 5, nights: 4 } }); return ""; } catch (error) { return error; } })()), /已锁定/);
+  assert.throws(() => agentPatchOperations(changed, { basicInfo: { days: 2, nights: 1 } }), /已锁定为 5 天/);
 });

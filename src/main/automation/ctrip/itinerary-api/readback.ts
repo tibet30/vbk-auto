@@ -48,6 +48,17 @@ export type {
 } from "./readback/types.js";
 
 /**
+ * 写入后回读的天数与本次期望不一致：平台未接受天数变化，视为该产品天数已被锁定。
+ * 录入流程据此在本轮内转新建产品一次（见 duration-change-replacement.ts）。
+ */
+export class DurationChangeRejectedError extends Error {
+  constructor(readonly expectedDays: number, readonly actualDays: number) {
+    super(`回读行程天数不一致：期望 ${expectedDays} 天，实际 ${actualDays} 天`);
+    this.name = "DurationChangeRejectedError";
+  }
+}
+
+/**
  * 字段级回读校验：每个 day 都按 expectations 严格比对，错误信息必含
  * 「第 N 天 / 字段 / 期望 / 实际」。
  */
@@ -62,7 +73,7 @@ export async function verifyItineraryReadback(
     : [];
   const expectedDays = expectations.days.length;
   if (descriptions.length !== expectedDays) {
-    throw new Error(`回读行程天数不一致：期望 ${expectedDays} 天，实际 ${descriptions.length} 天`);
+    throw new DurationChangeRejectedError(expectedDays, descriptions.length);
   }
 
   let totalSpots = 0;

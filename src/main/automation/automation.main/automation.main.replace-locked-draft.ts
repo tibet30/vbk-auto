@@ -1,4 +1,5 @@
 import type { ProductDetail } from "../../../shared/contracts.js";
+import { isUnpublishedActive } from "../../../shared/vbk-publication.js";
 
 /**
  * 平台一旦创建产品壳，产品类型便不可编辑。对于尚未提审且已经失败的旧版
@@ -40,7 +41,7 @@ export function assertRemoteDraftCanBeReplaced(raw: unknown): void {
   const base = data.baseInfo as Record<string, unknown> | undefined;
   const meta = data.meta as Record<string, unknown> | undefined;
   if (Number(sale?.productCategoryID ?? sale?.productCategoryId) !== 10
-    || String(base?.active) !== "F"
+    || !isUnpublishedActive(String(base?.active))
     || String(meta?.auditStatus) !== "N"
     || String(meta?.releaseActive) !== "F") {
     throw new Error("VBK 远端草稿已不满足安全替代条件，不会创建替代产品。");

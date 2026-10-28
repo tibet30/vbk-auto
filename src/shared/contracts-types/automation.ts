@@ -26,4 +26,9 @@ export interface AutomationRun {
   recovery?: { phases: Record<string, PhaseRecovery> };
   /** 线路及交通仅保存已由远端回读确认的子产品检查点。 */
   trafficLine?: TrafficLineWorkflowProgress;
+  /**
+   * 本轮因天数变化被平台拒绝而转新建产品的记录：旧远端草稿 ID 与授权本次
+   * 转新建的批准 ID。存在即表示本轮已用掉唯一一次转新建。
+   */
+  durationReplacement?: { previousProductId: string; approvalId?: string; at: string };
 }

@@ -14,6 +14,7 @@ import { buildReadOnlyItineraryReadbackExpectations } from "../preflight-readonl
 import { resolveStationsForItinerary } from "../itinerary-api/stations-resolver.js";
 import { verifyItineraryReadback } from "../itinerary-api/readback.js";
 import { canonicalItineraryContent } from "./content-normalization.js";
+import { isUnpublishedActive } from "../../../../shared/vbk-publication.js";
 
 export interface ItineraryReviewEvidence {
   productId: string;
@@ -183,7 +184,8 @@ export async function readItineraryReviewEvidence(page: TrafficLinePage, product
     contentDigest: itineraryContentDigest(detail), menus: menus.menus, maxStep: menus.maxStep,
     fullyUnlocked: menus.fullyUnlocked, publication: publication(base), trafficChildren: children.length,
   };
-  if (Object.values(result.publication).some(value => value !== "F")) throw new Error("行程审核前产品必须保持未发布状态。");
+  const { active, isonline, releaseActive } = result.publication;
+  if (!isUnpublishedActive(active) || isonline !== "F" || releaseActive !== "F") throw new Error("行程审核前产品必须保持未发布状态。");
   if (result.trafficChildren !== 0) throw new Error("行程审核前存在交通子产品，不能作为母产品解锁提交。");
   return result;
 }

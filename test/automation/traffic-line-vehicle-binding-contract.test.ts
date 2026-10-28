@@ -33,7 +33,7 @@ test("已激活子产品直接进入最终回读，不重放其资源写入", ()
   // After split, the active branch sits in main/process-target.ts. Slice from
   // the active check up to the next `return` (no `await ensureTrafficLinePresentation`
   // in this branch — that comes later in the function body).
-  const activeStart = source.indexOf("if (relationship.active === true)");
+  const activeStart = source.indexOf("if (!parentDescriptions && relationship.active === true)");
   assert.ok(activeStart >= 0, "active branch must exist");
   // Find the closing of the early `return { pending: ... }` block.
   const pendingStart = source.indexOf("return { pending:", activeStart);

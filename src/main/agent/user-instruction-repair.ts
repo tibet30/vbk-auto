@@ -57,9 +57,9 @@ function repairProductForDuration(
   requested: { days: number; nights: number } | undefined,
 ): UserInstructionRepair | undefined {
   if (!requested) return undefined;
-  if (detail.productId || detail.basicInfoSaved || detail.automation?.status === "running") {
-    return undefined;
-  }
+  // 远端已有草稿也允许改天数：基本信息以 resizeTourDailyInfo=F 只改 travelDays，
+  // 行程按新天数整版重写；平台拒绝时由录入流程转新建产品。仅运行中的录入不改写。
+  if (detail.automation?.status === "running") return undefined;
 
   const basic = asObject(detail.product.basicInfo);
   const currentDays = Number(basic?.days);

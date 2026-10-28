@@ -1,4 +1,4 @@
-import type { AgentSnapshot, ProductDetail } from '../../shared/contracts.js';
+import type { AgentApproval, AgentSnapshot, ProductDetail } from '../../shared/contracts.js';
 import { agentProductVersion, approvalForRun, buildAgentApproval, requiredAgentPhases } from './integration-gates.js';
 import { ITINERARY_REVIEW_UNLOCK_SCOPE } from '../../shared/itinerary-review-approval.js';
 import type { WizardStageRetryPhase } from '../../shared/wizard-stage-retry.js';
@@ -61,8 +61,18 @@ export function isDeterministicAutomationInFlight(
 }
 
 /** Run inside the browser lock, immediately before dispatching platform calls. */
+/**
+ * 已批准录入中天数被拒、转新建产品时，本轮重录需要新建产品壳。只有记录了
+ * 同一批准 ID 且本地尚未绑定新产品时，才为该批准补出 saleControl。
+ */
+function replacementShellScope(product: ProductDetail, approval: AgentApproval): string[] {
+  const replacement = product.automation?.durationReplacement;
+  return !product.productId && replacement?.approvalId === approval.id ? ["vbk.write_phase:saleControl"] : [];
+}
+
 export function assertAgentWriteAuthorized(product: ProductDetail, snapshot: AgentSnapshot | undefined, phase: string, accountKey: string): void {
-  const approval = approvalForRun(snapshot);
+  const recorded = approvalForRun(snapshot);
+  const approval = recorded && { ...recorded, scope: [...new Set([...recorded.scope, ...replacementShellScope(product, recorded)])] };
   if (!snapshot?.run || snapshot.run.status !== 'running' || snapshot.uncertainWrite) throw new AgentAuthorizationError('当前任务未处于可录入状态。');
   if (!approval || approval.intentVersion !== snapshot.run.intentVersion
     || approval.accountKey !== accountKey || !accountKey

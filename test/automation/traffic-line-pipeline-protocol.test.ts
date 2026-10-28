@@ -91,6 +91,12 @@ test("当前可用方式会重验历史 skipped 子产品且不重复创建", as
         status: 200, durationMs: 1, ctx: {},
         payload: { ResponseStatus: { Ack: "Success" }, info: { productDesc: { productDesc: "<p>same</p>" }, pmRcmdItems: [] } },
       };
+      // 母/子行程天数只读比较：天数一致，不触发子产品行程同步。
+      const ok = (payload: object) => ({ status: 200, durationMs: 1, ctx: {}, payload: { ResponseStatus: { Ack: "Success" }, ...payload } });
+      if (String(request?.endpoint).endsWith("getProductTourInfoList")) {
+        return ok({ tourInfos: [{ productId: request.body.productId, tourInfoId: request.body.productId === 79189107 ? 910 : 920, main: true, sort: 0, days: 2 }] });
+      }
+      if (String(request?.endpoint).endsWith("getTourDailyDetail.json")) return ok({ tourInfo: { tourDailyDescriptions: [{}, {}] } });
       throw new Error("纯回读探针失败");
     },
   };

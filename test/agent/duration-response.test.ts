@@ -111,11 +111,18 @@ test("zero nights and Chinese numerals remain literal", () => {
   assert.equal((repair?.product.basicInfo as Record<string, unknown>).nights, 0);
 });
 
-test("remote/basic-saved/running guards survive the new selected-answer route", () => {
-  for (const flag of [{ productId: "123" }, { basicInfoSaved: true }, { automation: { id: "run", status: "running" as const, logs: [], phases: [] } }]) {
+test("selected-answer route changes remote drafts but never a running automation", () => {
+  for (const flag of [{ productId: "123" }, { basicInfoSaved: true }]) {
     const detail = { ...harness().detail(), ...flag };
-    assert.equal(repairProductForExplicitInstruction(detail, "", ["解锁为5天4晚"]), undefined);
+    const repair = repairProductForExplicitInstruction(detail, "", ["解锁为5天4晚"]);
+    assert.equal((repair?.product.basicInfo as Record<string, unknown>).days, 5);
+    const changed = { ...detail, product: repair!.product };
+    assert.equal(extractLockedConstraints(changed, []).days, 5);
+    assert.equal(planningWriteContractError(changed, "skeleton", { days: 5 }), undefined);
+    assert.match(planningWriteContractError(changed, "skeleton", { days: 2 }) ?? "", /锁定/);
   }
+  const running = { ...harness().detail(), automation: { id: "run", status: "running" as const, logs: [], phases: [] } };
+  assert.equal(repairProductForExplicitInstruction(running, "", ["解锁为5天4晚"]), undefined);
 });
 
 test("failed preparation keeps the pending request and intent for retry", async () => {

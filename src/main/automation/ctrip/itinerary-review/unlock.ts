@@ -14,6 +14,7 @@ import { fetchTourDailyDetail, fetchTourInfoId } from "../itinerary-api/steps.js
 import { calculateTourScoreStep, checkTourDailyStep, saveTourDailyDetailStep } from "../itinerary-api/steps.js";
 import { SAVE_TOUR_INFO_URL, SOHEAD, postSoa } from "../itinerary-api/transport.js";
 import { getProductBaseInfoApi } from "../basic-info/read-base.js";
+import { isUnpublishedActive } from "../../../../shared/vbk-publication.js";
 import { readTrafficLineChildren } from "../traffic-line/relationships.js";
 import {
   ItineraryReviewDigestMismatchError,
@@ -200,7 +201,7 @@ export async function verifyItineraryReviewUnlock(
     throw new Error("行程审核尚未通过远端回读。");
   }
   const publication = { active: String(info.active ?? base.active ?? ""), isonline: String(meta.isonline ?? info.isonline ?? base.isonline ?? ""), releaseActive: String(meta.releaseActive ?? base.releaseActive ?? "") };
-  if (publication.active !== "F" || publication.isonline !== "F" || publication.releaseActive !== "F") throw new Error("审核解锁不得改变产品发布状态。");
+  if (!isUnpublishedActive(publication.active) || publication.isonline !== "F" || publication.releaseActive !== "F") throw new Error("审核解锁不得改变产品发布状态。");
   const children = await readTrafficLineChildren(page, productId);
   if (children.length) throw new Error("审核解锁不得创建交通子产品。");
   const tabs = await verifyTabs(page, productId,

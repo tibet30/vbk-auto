@@ -66,7 +66,8 @@ export interface ItineraryReviewUnlockReceipt {
   routeId: number;
   maxStep: number;
   menus: ItineraryReviewMenu[];
-  publication: { active: "F"; isonline: "F"; releaseActive: "F" };
+  /** active=D 是首次保存基本信息后的「无效·下线」，仍属未发布。 */
+  publication: { active: "F" | "D"; isonline: "F"; releaseActive: "F" };
   trafficChildren: 0;
   checkedAt: string;
   tabs: Array<{ key: string; title: string; url: string; verified: true }>;

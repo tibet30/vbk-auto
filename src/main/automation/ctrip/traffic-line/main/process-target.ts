@@ -27,6 +27,7 @@ import {
   trafficLinePendingSubmitNeedsOneRecoveryRetry,
 } from "../helpers.js";
 import { ensureTrafficLineItinerary } from "../itinerary.js";
+import { readParentItineraryForChild } from "../itinerary/parent-sync.js";
 import {
   activateTrafficLineChild,
   repairTrafficLineItineraryIfMissing,
@@ -114,10 +115,21 @@ export async function processTrafficLineTarget(
     if (options.product) {
       await ensureHotelResourceApi(page, options.product, relationship.productId);
     }
+    // 母产品改天数后，已有子产品仍是旧天数：按母产品当前每日行程重建子产品行程。
+    // 只读比较失败不阻断原流程（记录后按原路径继续）；同步写入失败仍按跳过规则处理。
+    const parentDescriptions = await readParentItineraryForChild(page, parentProductId, relationship.productId)
+      .catch((error: unknown) => {
+        options.onStatus?.(`交通子产品 ${relationship.productId} 未能比较母子行程天数，按原流程继续：${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
+      });
+    if (parentDescriptions) {
+      options.onStatus?.(`交通子产品 ${relationship.productId} 行程天数与母产品不一致，正在按母产品 ${parentDescriptions.length} 天行程同步。`);
+    }
     // 恢复时平台可能已完成全部远端步骤，但上次本地 checkpoint
     // 未来得及持久化。已有效子产品也必须等所有兄弟均激活后进入整组稳定门；
-    // 不能用此刻的一次成功提前补 finalReadback。
-    if (relationship.active === true) {
+    // 不能用此刻的一次成功提前补 finalReadback。天数需同步时不走提前 return：
+    // 资源段的返程日随天数变化，须按新行程走完整写链。
+    if (!parentDescriptions && relationship.active === true) {
       return { pending: {
         variant: target.variant,
         lineDescription: trafficLineLabel(target.variant),
@@ -131,6 +143,10 @@ export async function processTrafficLineTarget(
       // 不重建资源草稿，也不重新发起耗时的班期校验。
       await readTrafficLineSegmentReadback(page, relationship.productId, target.variant, endpoints);
       checkpoint("resourcesSaved", relationship.productId);
+      if (parentDescriptions) {
+        await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair, parentDescriptions);
+        checkpoint("itinerarySaved", relationship.productId);
+      }
       if (trafficClauseMaterializationCanResume(previous) || trafficResourceCardRejected(previous)) {
         await repairTrafficLineItineraryIfMissing(page, relationship.productId, target.variant, endpoints, options.copyRepair);
         checkpoint("itinerarySaved", relationship.productId);
@@ -194,7 +210,7 @@ export async function processTrafficLineTarget(
             ),
             beforeSubmit: async () => {
               await ensureTrafficLineVehicleDraft(page, relationship.productId, options.product);
-              await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair);
+              await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair, parentDescriptions);
             },
             onSubmit: (departureCityCount) => {
               const submittedAt = new Date().toISOString();
@@ -214,7 +230,7 @@ export async function processTrafficLineTarget(
     // 用车正式提交会重新结算行程关联；先完成所有资源提交，再写回交通卡片。
     // 否则资源段虽有航班，条款读取的正式行程仍可能丢失去返程节点。
     await ensureTrafficLineVehicleBinding(page, relationship.productId, options.product);
-    await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair);
+    await ensureTrafficLineItinerary(page, relationship.productId, target.variant, endpoints, options.copyRepair, parentDescriptions);
     checkpoint("resourcesSaved", relationship.productId);
     checkpoint("itinerarySaved", relationship.productId);
     await ensureTrafficLineClausesWithItineraryRecovery(page, relationship.productId, target.variant, endpoints, options.copyRepair);

@@ -3,6 +3,7 @@ import type { TrafficLineEndpointPlan, TrafficLineVariant } from "../../../../sh
 import { calculateTourScoreStep, checkTourDailyStep, fetchTourDailyDetail, fetchTourInfoId, saveProductTourInfoStep, saveTourDailyDetailStep } from "../itinerary-api/steps.js";
 import { list, text, type JsonRecord, type TrafficLinePage } from "./client.js";
 import { applyRequiredPoiRiskPlans, mergeTrafficNodes, verifyTrafficNodes, currentTrafficLineTourInfoId, readTrafficNodesFromPage } from "./itinerary.js";
+import { rebaseOnParentDescriptions } from "./itinerary/parent-sync.js";
 import { runTrafficItineraryCopyRepair, type TrafficLineCopyRepair } from "./itinerary-copy-repair.js";
 
 export class TrafficLineItineraryReadbackError extends Error {
@@ -14,12 +15,14 @@ export async function ensureTrafficLineItinerary(
   variant: TrafficLineVariant,
   endpoints?: TrafficLineEndpointPlan,
   copyRepair?: TrafficLineCopyRepair,
+  /** 母产品当前每日行程；有值时作为子产品行程底稿（母产品改天数后同步）。 */
+  parentDescriptions?: readonly JsonRecord[],
 ): Promise<{ days: number; transportNodes: number }> {
-  try { return await saveTrafficLineItineraryOnce(page, productId, variant, endpoints, copyRepair); }
+  try { return await saveTrafficLineItineraryOnce(page, productId, variant, endpoints, copyRepair, parentDescriptions); }
   catch (error) {
     return recoverMissingTrafficItinerary(error,
       async () => currentTrafficLineTourInfoId(await fetchTourInfoId(page, productId)),
-      () => saveTrafficLineItineraryOnce(page, productId, variant, endpoints, copyRepair));
+      () => saveTrafficLineItineraryOnce(page, productId, variant, endpoints, copyRepair, parentDescriptions));
   }
 }
 
@@ -36,6 +39,7 @@ async function saveTrafficLineItineraryOnce(
   variant: TrafficLineVariant,
   endpoints?: TrafficLineEndpointPlan,
   copyRepair?: TrafficLineCopyRepair,
+  parentDescriptions?: readonly JsonRecord[],
 ): Promise<{ days: number; transportNodes: number }> {
   const source = await readTrafficNodesFromPage(page, productId, variant);
   const linked = await fetchTourInfoId(page, productId);
@@ -45,7 +49,8 @@ async function saveTrafficLineItineraryOnce(
   const detail = await fetchTourDailyDetail(page, tourInfoId);
   if (!detail.tourInfo) throw new Error("子产品行程详情回读为空，无法安全合并交通节点。");
 
-  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(detail.tourInfo, source.first, source.last, variant, endpoints)) as Record<string, any>;
+  const draft = parentDescriptions?.length ? rebaseOnParentDescriptions(detail.tourInfo, parentDescriptions) : detail.tourInfo;
+  const merged = applyRequiredPoiRiskPlans(mergeTrafficNodes(draft, source.first, source.last, variant, endpoints)) as Record<string, any>;
   const descriptions = list(merged.tourDailyDescriptions);
   for (const day of descriptions) day.tourDailyInfos = orderItineraryMeals(list(day.tourDailyInfos));
   const base = { ...productTourInfo, productId, tourInfoId, days: descriptions.length };

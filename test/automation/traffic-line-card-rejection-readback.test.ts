@@ -14,6 +14,10 @@ test("card rejection recovery cannot activate or record saved resources when for
       const payload = request.endpoint.endsWith("getdescriptionInfo")
         ? { info: { productDesc: { productDesc: "same" }, pmRcmdItems: [] } }
         : request.endpoint.endsWith("getSegments") ? { productSegments: { segments: [] } }
+        // 母/子行程天数只读比较：天数一致，不触发子产品行程同步。
+        : request.endpoint.endsWith("getProductTourInfoList")
+          ? { tourInfos: [{ productId: Number(request.body.productId), tourInfoId: request.body.productId === 1 ? 910 : 920, main: true, sort: 0, days: 1 }] }
+        : request.endpoint.endsWith("getTourDailyDetail.json") ? { tourInfo: { tourDailyDescriptions: [{}] } }
         : assert.fail(`unexpected request ${request.endpoint}`);
       return { status: 200, durationMs: 1, ctx: {}, payload: { ResponseStatus: { Ack: "Success" }, ...payload } };
     },

@@ -48,6 +48,7 @@ import {
 } from "../../ctrip/product-menu-readback.js";
 import { itineraryReviewRequestSource } from "../../../operations/itinerary-review-request-source.js";
 import type { AutomationRunContext } from "../automation.main.context.js";
+import type { DurationReplacement } from "../duration-change-replacement.js";
 import { prepareChangedPlanPhaseRecovery, prepareFailedRunChangedPlanRecovery } from "../changed-plan-phase-recovery.js";
 
 type AutomationLogLevel = "info" | "warning" | "error";
@@ -79,6 +80,7 @@ export async function prepareAutomationSetup(
   ctx: AutomationRunContext,
   localProductId: string,
   retryFrom: string | undefined,
+  durationReplacement?: DurationReplacement,
 ): Promise<AutomationSetup> {
   const productDetail = ctx.db.getProduct(localProductId);
   if (!productDetail) throw new Error("产品不存在");
@@ -178,7 +180,9 @@ export async function prepareAutomationSetup(
       id: randomUUID(),
       status: "running",
       phases: draftPhases.map((phase) => ({ phase, status: "pending" })),
-      logs: [],
+      logs: durationReplacement ? [{ at: durationReplacement.at, level: "warning",
+        message: `旧 VBK 草稿 ${durationReplacement.previousProductId} 未接受新天数，已本地解绑；本轮从销售控制新建产品重录。` }] : [],
+      ...(durationReplacement ? { durationReplacement } : {}),
     };
   }
 

@@ -6,6 +6,7 @@ import { writeAutomationProduct } from "./automation.main.persist.js";
 import { prepareAutomationSetup, type AutomationSetup } from "./automation.main.run/setup.js";
 import { buildAutomationHandlers, buildBasicExecute } from "./automation.main.run/handlers.js";
 import type { AutomationRunContext } from "./automation.main.context.js";
+import type { DurationReplacement } from "./duration-change-replacement.js";
 import { AutomationCancelledError } from "./automation.main.errors.js";
 import { saveScreenshot } from "../ctrip/ctrip.js";
 import { automationSession, recoverDraftPhase } from "./runtime/index.js";
@@ -13,8 +14,9 @@ import { stampCompletedEntryPhase } from "../../application/product-entry-phase-
 import { SALE_CONTROL_CREATE_INTENT, SALE_CONTROL_CREATE_TRACKED } from "./automation.main.class/lifecycle.js";
 
 /** Complete entry and forward recovery share handlers, checkpoints and terminal transitions. */
-export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string) {
-  const setup = await prepareAutomationSetup(ctx, localProductId, retryFrom);
+export async function runAutomation(ctx: AutomationRunContext, localProductId: string, retryFrom?: string,
+  durationReplacement?: DurationReplacement) {
+  const setup = await prepareAutomationSetup(ctx, localProductId, retryFrom, durationReplacement);
   const session = automationSession(ctx, localProductId, setup.run);
   const productIdRef = { current: setup.productDetail.productId };
   const assertActive = () => {

@@ -1,6 +1,6 @@
 import { trustedOperatorItineraryRemovals, alternativeGroupSegments } from "./trusted-operator-itinerary-removals.js";
 import { samePoiName } from "./poi-name-key.js";
-import { itinerarySpotKey } from "./itinerary-spot-identity.js";
+import { isItinerarySpotId, itinerarySpotExactName, itinerarySpotKey } from "./itinerary-spot-identity.js";
 
 type Json = Record<string, unknown>;
 
@@ -10,6 +10,7 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
   if (!receipts.length && !trustedOperatorItineraryRemovals(incoming).length) return incoming;
   const next = structuredClone(incoming);
   next.manualReview = { ...record(next.manualReview), itinerarySpotRemovals: structuredClone(receipts) };
+  const survivingIds = currentSpotIds(current);
   for (const value of Array.isArray(next.itinerary) ? next.itinerary : []) {
     const day = record(value);
     const spots: unknown[] = Array.isArray(day.spots) ? day.spots : [];
@@ -17,7 +18,7 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
     const deleted = new Set<number>();
     for (const [index, spot] of spots.entries()) {
       const value = record(spot);
-      if (scoped.some((receipt) => matchesReceipt(receipt, value)
+      if (scoped.some((receipt) => matchesReceipt(receipt, value, survivingIds)
         && (!receipt.groupKey || groupMatches(spots, index, Number(day.day), receipt.groupKey)))) deleted.add(index);
     }
     day.spots = spots.filter((_, index) => !deleted.has(index));
@@ -53,12 +54,33 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
   return next;
 }
 
+/** current 行程里已有的合法 spotId：带着它们的景点是幸存的既有景点。 */
+function currentSpotIds(current: Json): Set<string> {
+  const ids = new Set<string>();
+  for (const day of Array.isArray(current.itinerary) ? current.itinerary : []) {
+    for (const spot of Array.isArray(record(day).spots) ? record(day).spots as unknown[] : []) {
+      if (isItinerarySpotId(record(spot).spotId)) ids.add(record(spot).spotId as string);
+    }
+  }
+  return ids;
+}
+
+/**
+ * 幸存的既有景点（spotId 已在 current 中）只按 spotId / poiId / 精确 poiName / 精确原名匹配，
+ * 不走名称键兜底：否则删「X（夜景）」会把同天幸存的「X」一起删掉。
+ * 没有 ID 或 ID 不在 current 中的景点（新生成的）仍走名称键兜底，重新生成的同名景点照旧被拦截（决策 3）。
+ */
 function matchesReceipt(
-  receipt: { name: string; poiName?: string; poiId?: number; spotId?: string }, spot: Json,
+  receipt: { name: string; poiName?: string; poiId?: number; spotId?: string }, spot: Json, survivingIds: ReadonlySet<string>,
 ): boolean {
   if (receipt.spotId && receipt.spotId === spot.spotId) return true;
   const spotPoiId = Number(spot.poiId);
   if (receipt.poiId && Number.isInteger(spotPoiId) && spotPoiId > 0 && receipt.poiId === spotPoiId) return true;
+  if (isItinerarySpotId(spot.spotId) && survivingIds.has(spot.spotId)) {
+    const exact = (value: unknown) => itinerarySpotExactName(value);
+    return Boolean(receipt.poiName && exact(receipt.poiName) && [spot.poiName, spot.name].some((name) => exact(name) === exact(receipt.poiName)))
+      || Boolean(exact(receipt.name)) && exact(receipt.name) === exact(spot.name);
+  }
   if (receipt.poiName && (samePoiName(receipt.poiName, spot.poiName) || samePoiName(receipt.poiName, spot.name))) return true;
   const key = itinerarySpotKey(receipt.name);
   return Boolean(key) && key === itinerarySpotKey(spot.name);

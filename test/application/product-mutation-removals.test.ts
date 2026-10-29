@@ -182,3 +182,46 @@ test("旧版去空白 groupKey 的凭证仍能匹配当前景点名", () => {
   const result = preserveItineraryRemovals(product, product);
   assert.deepEqual((result.itinerary as typeof product.itinerary)[0]!.spots.map((spot) => spot.name), ["甲景点"]);
 });
+
+const pingyao = (extra: Record<string, unknown> = {}) => ({ name: "平遥古城", poiName: "平遥古城", poiId: 9, kind: "attraction" as const, ...extra });
+const night = (extra: Record<string, unknown> = {}) => ({ name: "平遥古城（夜景）", poiName: null, poiId: null, kind: "attraction" as const, ...extra });
+
+test("删除「X（夜景）」不会在同一次保存里删掉同天带 ID 的「X」", () => {
+  const product = buildProductSnapshot({ destination: "平遥", days: 1, productForm: "privateTour" }).product;
+  product.itinerary = [{ day: 1, title: "平遥", description: "游览古城。", spots: [pingyao({ spotId: SPOT_A }), night({ spotId: SPOT_B })] }];
+  const next = applyItinerarySpotRemove(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
+  assert.deepEqual((next.itinerary as Array<{ spots: Array<{ name: string }> }>)[0]!.spots.map((spot) => spot.name), ["平遥古城"]);
+});
+
+test("删除「X（夜景）」后模型不带 ID 重新生成：夜景仍被拦截，X 保留", () => {
+  let saved = buildProductSnapshot({ destination: "平遥", days: 1, productForm: "privateTour" });
+  saved.product.itinerary = [{ day: 1, title: "平遥", description: "游览古城。", spots: [pingyao({ spotId: SPOT_A }), night({ spotId: SPOT_B })] }];
+  saved.product = applyItinerarySpotRemove(saved.product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 }) as typeof saved.product;
+  const incoming = structuredClone(saved.product);
+  incoming.itinerary![0]!.spots = [night(), pingyao({ poiName: null, poiId: null })];
+  const service = new ProductMutationService({ getProduct: () => saved,
+    updateProduct: (_id, next, status) => { saved = { ...saved, product: next as typeof saved.product, status: status ?? saved.status }; } });
+  service.replace(saved.id, incoming);
+  const spots = saved.product.itinerary![0]!.spots;
+  assert.deepEqual(spots.map((spot) => [spot.name, spot.spotId, spot.poiId]), [["平遥古城", SPOT_A, 9]]);
+});
+
+test("模型只回传改名为「X（夜景）」的 X（继承了 X 的 ID）时，删除凭证仍拦截", () => {
+  const product = {
+    manualReview: { itinerarySpotRemovals: [{ day: 1, name: "平遥古城（夜景）", removedAt: "now", spotId: SPOT_B }] },
+    itinerary: [{ day: 1, spots: [pingyao({ spotId: SPOT_A })] }],
+  };
+  const incoming = { ...structuredClone(product), itinerary: [{ day: 1, spots: [night({ spotId: SPOT_A })] }] };
+  const result = preserveItineraryRemovals(product, incoming);
+  assert.deepEqual((result.itinerary as Array<{ spots: unknown[] }>)[0]!.spots, []);
+});
+
+test("「XX体验」的删除凭证不删除同天幸存的「XX」", () => {
+  const product = buildProductSnapshot({ destination: "西安", days: 1, productForm: "privateTour" }).product;
+  product.itinerary = [{ day: 1, title: "西安", description: "游览。", spots: [
+    { spotId: SPOT_A, name: "古城墙", poiName: null, poiId: null, kind: "attraction" },
+    { spotId: SPOT_B, name: "古城墙体验", poiName: null, poiId: null, kind: "attraction" },
+  ] }];
+  const next = applyItinerarySpotRemove(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
+  assert.deepEqual((next.itinerary as Array<{ spots: Array<{ name: string }> }>)[0]!.spots.map((spot) => spot.name), ["古城墙"]);
+});

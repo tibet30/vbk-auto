@@ -4,26 +4,24 @@
  */
 
 import { delay } from "../utils.js";
+import type { VbkSessionRequestBrowser } from "../../../infrastructure/vbk-session-request.js";
 import {
-  vbkSessionRequest,
-  type VbkSessionRequestBrowser,
-  type VbkSessionRequestResult,
-} from "../../../infrastructure/vbk-session-request.js";
-import { describeVbkFailureDetail } from "../../../infrastructure/vbk-response-error.js";
-
-const BIND_PRODUCT_IMAGE_ENDPOINT =
-  "https://online.ctrip.com/restapi/soa2/20698/bindProductImage.json";
-const SEARCH_PRODUCT_IMAGE_ENDPOINT =
-  "https://online.ctrip.com/restapi/soa2/20698/searchProductImage.json";
-const COVER_IMAGE_TYPE_ID = 2;
-const ATTRACTION_IMAGE_TYPE_ID = 4;
-
-interface ProductImageRecord {
-  imageId?: unknown;
-  fileName?: unknown;
-  imageInfo?: ProductImageRecord;
-  accompanyTourInfo?: { imageTypeId?: unknown };
-}
+  ATTRACTION_IMAGE_TYPE_ID,
+  BIND_PRODUCT_IMAGE_ENDPOINT,
+  COVER_IMAGE_TYPE_ID,
+  SEARCH_PRODUCT_IMAGE_ENDPOINT,
+  UNBIND_PRODUCT_IMAGE_ENDPOINT,
+  assertBusinessSuccess,
+  assertPositiveInteger,
+  nonNegativeDelay,
+  positiveAttemptCount,
+  productImageInfos,
+  request,
+  responseHasImageType,
+  searchProductImages,
+  type CoverBindOptions,
+} from "./image-api.js";
+import { makeRoomForCover } from "./cover-replace.js";
 
 /** Recover a manually uploaded cover when the upload succeeded but its local checkpoint was lost. */
 export async function readBoundCoverByFileNameViaApi(
@@ -41,12 +39,6 @@ export async function readBoundCoverByFileNameViaApi(
     .filter((id) => Number.isInteger(id) && id > 0);
   if (matches.length > 1) throw new Error(`远端存在多个同名封面 ${fileName}，无法安全复用。`);
   return matches[0] ?? null;
-}
-
-interface CoverBindOptions {
-  beforeWrite?: () => Promise<void>;
-  confirmationAttempts?: number;
-  confirmationIntervalMs?: number;
 }
 
 export function buildCoverBindRequest(productId: number, imageId: number) {
@@ -99,17 +91,6 @@ export function responseHasBoundAttractionImage(payload: unknown, imageId: numbe
   return responseHasImageType(payload, imageId, ATTRACTION_IMAGE_TYPE_ID);
 }
 
-function responseHasImageType(payload: unknown, imageId: number, imageTypeId: number): boolean {
-  const record = asRecord(payload);
-  const images = Array.isArray(record?.productImages) ? record.productImages : [];
-  return images.some((entry) => {
-    const outer = asRecord(entry) as ProductImageRecord | null;
-    const image = asRecord(outer?.imageInfo) as ProductImageRecord | null ?? outer;
-    return Number(image?.imageId) === imageId
-      && Number(image?.accompanyTourInfo?.imageTypeId) === imageTypeId;
-  });
-}
-
 export async function bindCtripLibraryAttractionImageViaApi(
   page: VbkSessionRequestBrowser,
   imageId: number,
@@ -151,44 +132,12 @@ export async function bindCtripLibraryCoverViaApi(
     : productIdOrOptions ?? {};
   const existingResult = await searchProductImages(page, productId);
   assertBusinessSuccess(existingResult, "确认现有产品封面", false);
-  const existingImages = productImageInfos(existingResult.payload);
   if (responseHasBoundCover(existingResult.payload, imageId)) {
     return { reused: true, productId, imageId };
   }
 
-  // 只有 imageTypeId=2 明确表示“当前产品封面”。imageTypeId=0 仅表示
-  // 未分类，无法推断其业务类型，必须保持不动；否则会误改酒店、餐饮等素材。
-  const oldCovers = existingImages.filter((image) =>
-    Number(image.imageId) !== imageId
-    && Number(image.accompanyTourInfo?.imageTypeId) === COVER_IMAGE_TYPE_ID,
-  );
-  if (oldCovers.length > 1) {
-    throw new Error("更换封面失败：远端存在多个当前封面，无法安全确定需要归类的旧封面。请先在 VBK 处理重复封面。");
-  }
-  const oldCover = oldCovers[0];
-  let reclassifiedOldCoverId: number | undefined;
-  if (oldCover) {
-    const oldCoverId = Number(oldCover.imageId);
-    if (!Number.isInteger(oldCoverId) || oldCoverId <= 0) {
-      throw new Error("更换封面失败：远端当前封面缺少合法 imageId，已停止写入。");
-    }
-    await options.beforeWrite?.();
-    const reclassifyResult = await request(page, {
-      endpoint: BIND_PRODUCT_IMAGE_ENDPOINT,
-      body: buildImageTypeBindRequest(productId, oldCoverId, ATTRACTION_IMAGE_TYPE_ID),
-      errorLabel: "归类旧产品封面",
-    });
-    assertBusinessSuccess(reclassifyResult, "归类旧产品封面", true);
-    await confirmImageType(
-      page,
-      productId,
-      oldCoverId,
-      ATTRACTION_IMAGE_TYPE_ID,
-      "归类旧产品封面",
-      options,
-    );
-    reclassifiedOldCoverId = oldCoverId;
-  }
+  // 旧封面直接删除（不再改成景点图占位），产品满 20 张时再删一张景点图腾位。
+  await makeRoomForCover(page, productId, imageId, existingResult.payload, options);
 
   await options.beforeWrite?.();
   const bindResult = await request(page, {
@@ -203,17 +152,10 @@ export async function bindCtripLibraryCoverViaApi(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const searchResult = await searchProductImages(page, productId);
     assertBusinessSuccess(searchResult, "确认产品封面", false);
-    if (responseHasBoundCover(searchResult.payload, imageId)
-      && (reclassifiedOldCoverId === undefined
-        || responseHasImageType(searchResult.payload, reclassifiedOldCoverId, ATTRACTION_IMAGE_TYPE_ID))) {
+    if (responseHasBoundCover(searchResult.payload, imageId)) {
       return { reused: false, productId, imageId };
     }
     if (attempt < attempts - 1 && intervalMs > 0) await delay(intervalMs);
-  }
-  if (reclassifiedOldCoverId !== undefined) {
-    throw new Error(
-      `封面接口已返回成功，但回读未同时确认新封面 imageId=${imageId} 与旧图 imageId=${reclassifiedOldCoverId} 的最终类型。`,
-    );
   }
   throw new Error(`封面接口已返回成功，但回读未确认 imageId=${imageId} 已设置为产品封面。`);
 }
@@ -237,31 +179,6 @@ async function confirmImageType(
   throw new Error(`${label}接口已返回成功，但回读未确认 imageId=${imageId} 的图片类型为 ${imageTypeId}。`);
 }
 
-function productImageInfos(payload: unknown): ProductImageRecord[] {
-  const record = asRecord(payload);
-  const images = Array.isArray(record?.productImages) ? record.productImages : [];
-  return images.flatMap((entry) => {
-    const outer = asRecord(entry) as ProductImageRecord | null;
-    const image = asRecord(outer?.imageInfo) as ProductImageRecord | null ?? outer;
-    return image ? [image] : [];
-  });
-}
-
-async function searchProductImages(
-  page: VbkSessionRequestBrowser,
-  productId: number,
-): Promise<VbkSessionRequestResult> {
-  return request(page, {
-    endpoint: SEARCH_PRODUCT_IMAGE_ENDPOINT,
-    body: {
-      productId,
-      removeUnauthorized: true,
-      urlOptions: [{ width: 200, height: 200, quality: 0.9, type: "R" }],
-    },
-    errorLabel: "确认产品封面",
-  });
-}
-
 /** Read the authoritative cover IDs without treating an unclassified image as a cover. */
 export async function readBoundCoverImageIdsViaApi(
   page: VbkSessionRequestBrowser,
@@ -276,63 +193,9 @@ export async function readBoundCoverImageIdsViaApi(
     .filter((id) => Number.isInteger(id) && id > 0);
 }
 
-async function request(
-  page: VbkSessionRequestBrowser,
-  args: { endpoint: string; body: Record<string, unknown>; errorLabel: string },
-): Promise<VbkSessionRequestResult> {
-  return vbkSessionRequest(page, {
-    ...args,
-    browserRequestTimeoutMs: 12_000,
-    evaluateTimeoutMs: 15_000,
-    includeCidQuery: true,
-    headers: { cookieorigin: "https://vbooking.ctrip.com" },
-    referrer: "https://vbooking.ctrip.com/",
-    referrerPolicy: "strict-origin-when-cross-origin",
-  });
-}
-
-function assertBusinessSuccess(
-  result: VbkSessionRequestResult,
-  label: string,
-  requireSuccess: boolean,
-): void {
-  if (result.status < 200 || result.status >= 300) {
-    const detail = describeVbkFailureDetail(result.payload);
-    throw new Error(`${label}失败：HTTP ${result.status}${detail ? `；${detail}` : ""}`);
-  }
-  const payload = asRecord(result.payload);
-  const ack = String(asRecord(payload?.ResponseStatus)?.Ack ?? "");
-  if (ack === "Failure" || ack === "Warning") {
-    const detail = describeVbkFailureDetail(payload);
-    throw new Error(`${label}失败：Ack=${ack}${detail ? `；${detail}` : ""}`);
-  }
-  if (requireSuccess && payload?.success !== true) {
-    const message = describeVbkFailureDetail(payload)
-      || (typeof payload?.message === "string" ? payload.message : "");
-    throw new Error(`${label}失败：接口未返回 success=true${message ? `：${message}` : ""}`);
-  }
-}
-
-function asRecord(value: unknown): Record<string, any> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, any>
-    : null;
-}
-
-function assertPositiveInteger(value: number, label: string): void {
-  if (!Number.isInteger(value) || value <= 0) throw new Error(`${label}必须是正整数。`);
-}
-
-function positiveAttemptCount(value: number | undefined, fallback: number): number {
-  return Number.isInteger(value) && Number(value) > 0 ? Number(value) : fallback;
-}
-
-function nonNegativeDelay(value: number | undefined, fallback: number): number {
-  return Number.isFinite(value) && Number(value) >= 0 ? Number(value) : fallback;
-}
-
 export {
   ATTRACTION_IMAGE_TYPE_ID,
+  UNBIND_PRODUCT_IMAGE_ENDPOINT,
   BIND_PRODUCT_IMAGE_ENDPOINT,
   COVER_IMAGE_TYPE_ID,
   SEARCH_PRODUCT_IMAGE_ENDPOINT,

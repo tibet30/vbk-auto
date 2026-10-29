@@ -72,31 +72,6 @@ test("手动上传丢失本地 checkpoint 后按唯一文件名认领已绑定�
   assert.equal(browser.calls.length, 1);
 });
 
-test("更换封面只归类明确的旧封面，并回读旧图与新封面最终类型", async () => {
-  const browser = browserWithResponses([
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
-      { imageInfo: { imageId: 111, accompanyTourInfo: { imageTypeId: 2 } } },
-    ] } },
-    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
-      { imageInfo: { imageId: 111, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
-    ] } },
-    { status: 200, payload: { success: true, ResponseStatus: { Ack: "Success" } } },
-    { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [
-      { imageInfo: { imageId: 111, accompanyTourInfo: { imageTypeId: ATTRACTION_IMAGE_TYPE_ID } } },
-      { imageInfo: { imageId: 222, accompanyTourInfo: { imageTypeId: COVER_IMAGE_TYPE_ID } } },
-    ] } },
-  ]);
-  await bindCtripLibraryCoverViaApi(browser as never, 222, {
-    confirmationAttempts: 1,
-    confirmationIntervalMs: 0,
-  });
-  assert.deepEqual(browser.calls[1].body, buildImageTypeBindRequest(76983997, 111, ATTRACTION_IMAGE_TYPE_ID));
-  assert.equal(browser.calls[2].endpoint, SEARCH_PRODUCT_IMAGE_ENDPOINT);
-  assert.deepEqual(browser.calls[3].body, buildCoverBindRequest(76983997, 222));
-  assert.equal(browser.calls[4].endpoint, SEARCH_PRODUCT_IMAGE_ENDPOINT);
-});
-
 test("无类型图片无法确认业务类型时不被重分类", async () => {
   const browser = browserWithResponses([
     { status: 200, payload: { ResponseStatus: { Ack: "Success" }, productImages: [

@@ -4,7 +4,7 @@ import { needsTrafficLineBackfill } from "../../src/main/automation/traffic-line
 import type { ProductDetail } from "../../src/shared/contracts.js";
 import { readFileSync } from "node:fs";
 import { ensureTrafficLineItinerary } from "../../src/main/automation/ctrip/traffic-line/itinerary.js";
-import { readParentItineraryForChild } from "../../src/main/automation/ctrip/traffic-line/itinerary/parent-sync.js";
+import { readParentItineraryForChild, rebaseOnParentDescriptions } from "../../src/main/automation/ctrip/traffic-line/itinerary/parent-sync.js";
 
 test("已保存母草稿补回已核验交通计划后只需补交通阶段", () => {
   const product = {
@@ -124,8 +124,10 @@ function parentChildFixture() {
 
 test("子产品天数与母产品不同：按母产品每日行程重建子产品行程并合并首末交通节点", async () => {
   const f = parentChildFixture();
-  const parentDescriptions = await readParentItineraryForChild(f.page as never, PARENT_ID, CHILD_ID);
-  assert.equal(parentDescriptions?.length, 3);
+  const parentSync = await readParentItineraryForChild(f.page as never, PARENT_ID, CHILD_ID);
+  assert.equal(parentSync?.descriptions.length, 3);
+  assert.equal(parentSync?.childDays, 2, "返回子产品同步前的旧天数");
+  const parentDescriptions = parentSync?.descriptions;
   assert.equal(f.requests.some((request) => request.path !== "getProductTourInfoList" && request.path !== "getTourDailyDetail.json"), false,
     "比较天数必须只读");
   const result = await ensureTrafficLineItinerary(f.page as never, CHILD_ID, "trainRoundTrip", undefined, undefined, parentDescriptions);
@@ -145,4 +147,26 @@ test("天数不一致时已生效子产品不走提前 return", () => {
   const read = source.indexOf("readParentItineraryForChild(page, parentProductId, relationship.productId)");
   const early = source.indexOf("if (!parentDescriptions && relationship.active === true)");
   assert.ok(read > 0 && early > read, "必须先比较母子天数，再决定是否提前返回");
+});
+
+test("母产品含主题/航班节点时，所有 tourDaily*Id 与版本引用 ID 递归清空，其余字段保留", () => {
+  const parentDays = [{ tourDailyDescriptionId: 1, orderDay: 1, refId: "r", parentId: 7, dailyDescription: "母D1",
+    tourDailyInfos: [
+      { tourDailyInfoId: 11, tourInfoId: 900, pkgTourInfoId: 901, activeType: { key: 1, name: "主题" },
+        tourDailyTheme: { tourDailyThemeId: 21, themeName: "古城" } },
+      { tourDailyInfoId: 12, activeType: { key: 14, name: "航班" },
+        tourDailyFlight: { tourDailyFlightId: 31, flightNo: "MU1" }, tourDailyPackageFlightId: 32,
+        tourDailyPois: [{ tourDailyPoiId: 41, poi: { poiId: 5001 } }] },
+    ] }];
+  const rebased = rebaseOnParentDescriptions({ tourInfoId: 9200, templateId: 3 }, parentDays);
+  const [day] = rebased.tourDailyDescriptions as any[];
+  assert.equal(rebased.tourInfoId, 9200, "子产品自身 tourInfo 不受影响");
+  assert.deepEqual([day.tourDailyDescriptionId, day.refId, day.parentId], [null, null, null]);
+  const [theme, flight] = day.tourDailyInfos;
+  assert.deepEqual([theme.tourDailyInfoId, theme.tourInfoId, theme.pkgTourInfoId, theme.tourDailyTheme.tourDailyThemeId], [null, null, null, null]);
+  assert.deepEqual([flight.tourDailyInfoId, flight.tourDailyFlight.tourDailyFlightId, flight.tourDailyPackageFlightId, flight.tourDailyPois[0].tourDailyPoiId], [null, null, null, null]);
+  assert.equal(theme.tourDailyTheme.themeName, "古城");
+  assert.equal(flight.tourDailyFlight.flightNo, "MU1");
+  assert.equal(flight.tourDailyPois[0].poi.poiId, 5001, "POI 等业务 ID 保留");
+  assert.equal(parentDays[0]!.tourDailyInfos[0]!.tourDailyInfoId, 11, "不改动母产品原数据");
 });

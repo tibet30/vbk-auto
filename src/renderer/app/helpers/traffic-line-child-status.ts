@@ -1,6 +1,7 @@
 import { trafficChildSkipHandled } from "../../../shared/traffic-resource-status.js";
 import { TRAFFIC_SKIP_LABELS, isTrafficSkipReason, trafficSkipReason } from "../../../shared/traffic-skip-reason.js";
 import type { TrafficLineChildProgress, TrafficLineVariant } from "../../../shared/contracts-traffic-line.js";
+import { durationSyncNote } from "../../../shared/traffic-duration-sync.js";
 
 /** 与母产品结案同一口径：只有 skipped 标记且非玩法线路审核的子产品才显示已跳过。 */
 function skipHandled(item: Record<string, unknown>): boolean {
@@ -19,6 +20,17 @@ export function trafficLineChildStatus(item: Record<string, unknown>, hasComplet
   return hasCompletedStages ? "running" : "pending";
 }
 
+export type TrafficLineStatusTone = "pending" | "running" | "done" | "skipped" | "failed";
+
+/** 卡片色调：已跳过单独一档（警示黄），不与失败共用红色。 */
+export function trafficLineStatusTone(status: string): TrafficLineStatusTone {
+  if (status === "completed" || status === "succeeded") return "done";
+  if (status === "skipped") return "skipped";
+  if (status === "failed" || status === "needs_user") return "failed";
+  if (status === "running" || status === "queued") return "running";
+  return "pending";
+}
+
 export type TrafficReviewResourceState = "awaitingResource" | "checking" | "verified" | "skipped" | "failed";
 
 /** 审查面板的班期资源状态；已跳过的子产品不会把整块面板标为失败。 */
@@ -31,9 +43,12 @@ export function trafficReviewResourceState(progress: Record<string, unknown> | n
 
 /** 跳过原因的展示文案；没有任何失败证据时不编造原因。 */
 export function trafficLineSkipLabel(item: Record<string, unknown>): string | undefined {
-  if (isTrafficSkipReason(item.skipReason)) return TRAFFIC_SKIP_LABELS[item.skipReason];
   const reason = typeof item.failureReason === "string" ? item.failureReason.trim() : "";
-  return reason ? TRAFFIC_SKIP_LABELS[trafficSkipReason(reason, item.variant as TrafficLineVariant)] : undefined;
+  const kind = isTrafficSkipReason(item.skipReason) ? item.skipReason
+    : reason ? trafficSkipReason(reason, item.variant as TrafficLineVariant) : undefined;
+  if (!kind) return undefined;
+  const note = durationSyncNote(reason);
+  return note ? `${TRAFFIC_SKIP_LABELS[kind]}（${note}）` : TRAFFIC_SKIP_LABELS[kind];
 }
 
 export function trafficLineEndpointHint(status: string, hasChild: boolean, skipLabel?: string): string {

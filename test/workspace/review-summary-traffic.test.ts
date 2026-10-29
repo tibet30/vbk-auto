@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { trafficLineSkipLabel, trafficReviewResourceState } from "../../src/renderer/app/helpers/traffic-line-child-status.js";
+import { trafficLineSkipLabel, trafficLineStatusTone, trafficReviewResourceState } from "../../src/renderer/app/helpers/traffic-line-child-status.js";
 
 const source = readFileSync("src/renderer/app/views/workspace/review-summary-traffic.tsx", "utf8");
 
@@ -27,4 +27,17 @@ test("缺销售班期的已跳过子产品显示已跳过与原因，玩法线�
   const routeReview = { variant: "flightRoundTrip", verified: false, skipped: true, failedStage: "activated",
     failureReason: "当前产品未匹配玩法线路，请去行程描述/资源配置页面提交审核匹配线路" };
   assert.equal(trafficReviewResourceState(routeReview, false, false), "failed");
+});
+
+test("已跳过显示为警示黄，不与失败共用红色", () => {
+  assert.equal(trafficLineStatusTone("skipped"), "skipped");
+  assert.equal(trafficLineStatusTone("failed"), "failed");
+  assert.equal(trafficLineStatusTone("needs_user"), "failed");
+  const reviewLess = readFileSync("src/renderer/app/views/workspace/review-summary-traffic.module.less", "utf8");
+  const skippedRule = reviewLess.match(/\.itemState\[data-state="skipped"\]\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(skippedRule, /var\(--warning\)/);
+  assert.doesNotMatch(skippedRule, /--destructive/);
+  const progressLess = readFileSync("src/renderer/app/helpers/traffic-line-progress.module.less", "utf8");
+  assert.match(progressLess, /\.card\[data-state='skipped'\]\s*\{[^}]*var\(--warning\)/);
+  assert.match(progressLess, /\.state\[data-state='skipped'\]\s*\{[^}]*var\(--warning\)/);
 });

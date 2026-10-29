@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Circle, LoaderCircle, Plane, TrainFront } from "lucide-react";
 import type { ProductDetail } from "../../../shared/contracts.js";
 import styles from "./traffic-line-progress.module.less";
-import { trafficLineChildStatus, trafficLineEndpointHint, trafficLineSkipLabel, latestTrafficLineEndpointPlan } from "./traffic-line-child-status.js";
+import { trafficLineChildStatus, trafficLineEndpointHint, trafficLineSkipLabel, trafficLineStatusTone, latestTrafficLineEndpointPlan } from "./traffic-line-child-status.js";
 
 type TransportKind = "flightRoundTrip" | "trainRoundTrip";
 type UnknownRecord = Record<string, unknown>;
@@ -88,13 +88,6 @@ function statusLabel(status: string): string {
   } as Record<string, string>)[status] || "待确认";
 }
 
-function statusTone(status: string): "pending" | "running" | "done" | "failed" {
-  if (status === "completed" || status === "succeeded") return "done";
-  if (status === "failed" || status === "needs_user") return "failed";
-  if (status === "running" || status === "queued") return "running";
-  return "pending";
-}
-
 function childFrom(kind: TransportKind, value: unknown, endpoint?: unknown): ChildView {
   const item = record(value) || {};
   const endpointPlan = record(endpoint) || {};
@@ -158,14 +151,14 @@ export function TrafficLineProgress({ automation, product }: { automation: Produ
     </div>
     <div className={styles.cards}>
       {cards.map((card) => {
-        const tone = statusTone(card.status);
+        const tone = trafficLineStatusTone(card.status);
         const Icon = card.kind === "flightRoundTrip" ? Plane : TrainFront;
         return <article className={styles.card} data-state={tone} key={card.kind}>
           <div className={styles.cardHead}>
             <span className={styles.icon}><Icon size={15} aria-hidden="true" /></span>
             <strong>{card.kind === "flightRoundTrip" ? "飞机往返" : "火车往返"}</strong>
             <span className={styles.state} data-state={tone}>
-              {tone === "done" ? <CheckCircle2 size={13} aria-hidden="true" /> : tone === "running" ? <LoaderCircle size={13} className={styles.spin} aria-hidden="true" /> : tone === "failed" ? <AlertTriangle size={13} aria-hidden="true" /> : <Circle size={13} aria-hidden="true" />}
+              {tone === "done" ? <CheckCircle2 size={13} aria-hidden="true" /> : tone === "running" ? <LoaderCircle size={13} className={styles.spin} aria-hidden="true" /> : tone === "failed" || tone === "skipped" ? <AlertTriangle size={13} aria-hidden="true" /> : <Circle size={13} aria-hidden="true" />}
               {statusLabel(card.status)}
             </span>
           </div>

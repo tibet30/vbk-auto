@@ -15,7 +15,7 @@ export function trafficSummaryMessage(product: ProductDetail, snapshot?: AgentSn
   }
   const { completed, skipped } = trafficChildOutcomes(config, product.automation?.trafficLine);
   if (!completed.length && !skipped.length) return `${MOTHER_VERIFIED}；本次未生成子产品`;
-  const labels = skipped.map(item => `${trafficLineLabel(item.variant)}（${TRAFFIC_SKIP_LABELS[item.reason]}）`);
+  const labels = skipped.map(item => `${trafficLineLabel(item.variant)}（${TRAFFIC_SKIP_LABELS[item.reason]}${item.note ? `；${item.note}` : ''}）`);
   return [MOTHER_VERIFIED,
     ...(completed.length ? [`已完成 ${completed.length} 个子产品`] : []),
     ...(labels.length ? [`已跳过 ${labels.length} 个子产品：${labels.join('、')}`] : []),

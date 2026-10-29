@@ -46,6 +46,7 @@ test("母子天数比较失败时子产品按跳过规则记录失败，不按�
   assert.equal(last.skipped, true);
   assert.equal(last.skipReason, "child_failed");
   assert.match(last.failureReason, /未能比较母子行程天数/);
+  assert.match(last.failureReason, /^子产品可能仍为旧天数，未与母产品同步：/);
   assert.equal(last.completedStages.includes("resourcesSaved"), false);
 });
 
@@ -54,6 +55,10 @@ test("母子天数不一致时恢复分支不走捷径（不先回读旧资源�
   const result = await h.run();
   // 完整写链需要销售班期做资源核验；本夹具没有班期，因此在写链入口处停下，证明未走恢复捷径。
   assert.match(result.skipped?.[0]?.reason ?? "", /没有可用于交通资源核验的销售班期/);
+  // 同步失败须写明子产品仍为旧天数；跳过分类不变。
+  assert.match(result.skipped?.[0]?.reason ?? "", /^子产品仍为旧 2 天，未与母产品同步：/);
+  assert.equal(h.checkpoints.at(-1).skipped, true);
+  assert.equal(h.checkpoints.at(-1).skipReason, "local_inventory_missing");
   assert.equal(h.calls.some(url => url.endsWith("getSegments")), false);
   const afterSync = h.calls.slice(h.calls.lastIndexOf("https://vbooking.ctrip.com/restapi/soa2/13643/getTourDailyDetail.json") + 1);
   // 捷径的第一步是只读 getSegments 回读正式资源；完整写链先查询上次资源提交状态。

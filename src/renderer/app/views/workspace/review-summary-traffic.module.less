@@ -166,11 +166,17 @@
   color: var(--warning);
 }
 
-.itemState[data-state="preflightUnavailable"],
-.itemState[data-state="skipped"] {
+.itemState[data-state="preflightUnavailable"] {
   border-color: color-mix(in srgb, var(--destructive) 32%, var(--border));
   background: color-mix(in srgb, var(--destructive) 8%, var(--surface));
   color: var(--destructive);
+}
+
+/* 已跳过是可补救的提示，不是失败：用警示黄。 */
+.itemState[data-state="skipped"] {
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  color: var(--warning);
 }
 
 .itemState[data-state="failed"] {

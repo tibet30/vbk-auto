@@ -27,7 +27,8 @@ import {
   trafficLinePendingSubmitNeedsOneRecoveryRetry,
 } from "../helpers.js";
 import { ensureTrafficLineItinerary } from "../itinerary.js";
-import { readParentItineraryForChild } from "../itinerary/parent-sync.js";
+import { readParentItineraryForChild, type ParentItinerarySync } from "../itinerary/parent-sync.js";
+import { durationSyncFailureReason } from "../../../../../shared/traffic-duration-sync.js";
 import {
   activateTrafficLineChild,
   repairTrafficLineItineraryIfMissing,
@@ -95,6 +96,8 @@ export async function processTrafficLineTarget(
     };
     options.onChildProgress?.(progress);
   };
+  // 天数同步状态：比较失败或同步写链失败时，失败原因须写明子产品仍为旧天数。
+  let durationSync: { compared: false } | { compared: true; sync: ParentItinerarySync } | undefined;
   try {
     checkpoint("planned");
     checkpoint("stationsResolved");
@@ -117,10 +120,13 @@ export async function processTrafficLineTarget(
     }
     // 母产品改天数后，已有子产品仍是旧天数：按母产品当前每日行程重建子产品行程。
     // 只读比较失败时不能按旧天数收口：抛出后由下方 catch 按 T3 跳过规则记录失败。
-    const parentDescriptions = await readParentItineraryForChild(page, parentProductId, relationship.productId)
+    const parentSync = await readParentItineraryForChild(page, parentProductId, relationship.productId)
       .catch((error: unknown) => {
+        durationSync = { compared: false };
         throw new Error(`未能比较母子行程天数，不按旧天数收口：${error instanceof Error ? error.message : String(error)}`);
       });
+    const parentDescriptions = parentSync?.descriptions;
+    if (parentSync) durationSync = { compared: true, sync: parentSync };
     if (parentDescriptions) {
       options.onStatus?.(`交通子产品 ${relationship.productId} 行程天数与母产品不一致，正在按母产品 ${parentDescriptions.length} 天行程同步。`);
     }
@@ -242,7 +248,11 @@ export async function processTrafficLineTarget(
       snapshot: () => progress,
     } };
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    const detail = error instanceof Error ? error.message : String(error);
+    const reason = durationSync
+      ? durationSyncFailureReason(detail, durationSync.compared ? durationSync.sync.childDays : undefined,
+        durationSync.compared, target.variant)
+      : detail;
     options.onChildProgress?.(trafficLineFailureProgress(progress, reason));
     options.onStatus?.(`${target.lineDescription}子产品未完成，已记录失败并继续处理其它子产品：${reason}`);
     return { skipped: { variant: target.variant, lineDescription: target.lineDescription, reason } };

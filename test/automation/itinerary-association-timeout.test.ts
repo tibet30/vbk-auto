@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ensureItineraryApi } from "../../src/main/automation/ctrip/itinerary-api.js";
+import { DurationChangeRejectedError } from "../../src/main/automation/ctrip/itinerary-api/readback.js";
+import { isDurationChangeRejection } from "../../src/main/automation/automation.main/duration-change-replacement.js";
 import {
   baseProductNoHotel, callLog, clearRouteHandlers, installFetchStub,
   installHandlersForFieldMismatch, makeFakePage, resetCallLog, routeHandlers, uninstallFetchStub,
@@ -38,3 +40,18 @@ for (const mismatch of [false, true]) {
     } finally { clearRouteHandlers(); uninstallFetchStub(); }
   });
 }
+
+test("timeout recovery that reads back the old day count fails visibly and never switches to a new product", async () => {
+  installFetchStub(); resetCallLog();
+  installHandlersForFieldMismatch({ readbackDays: 3 });
+  try {
+    const error = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928", { readOnlyBeforeWrite: true })
+      .then(() => undefined, (caught: unknown) => caught);
+    assert.ok(error instanceof Error, "只读恢复回读到旧天数必须失败");
+    assert.ok(!(error instanceof DurationChangeRejectedError));
+    assert.match(error.message, /只读回读.*3 天.*2 天/);
+    assert.equal(isDurationChangeRejection("itinerary", error), false);
+    assert.equal(isDurationChangeRejection("itinerary", error.message), false, "落库的 finalError 也不能被判为天数被拒");
+    assert.equal(callLog.filter(call => /save|checkTourDaily/.test(call.endpoint)).length, 0);
+  } finally { clearRouteHandlers(); uninstallFetchStub(); }
+});

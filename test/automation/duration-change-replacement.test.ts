@@ -48,6 +48,15 @@ test("回读天数不一致抛出带类型的 DurationChangeRejectedError", asyn
   assert.equal(isDurationChangeRejection("basic", new PlatformOperationError("天数保存超时", "write_uncertain")), false);
 });
 
+test("平台拒绝只认行程天数/出游天数/travelDays，「提前预订天数」等不算改天数被拒", () => {
+  const reject = (message: string) => isDurationChangeRejection("basic", new PlatformOperationError(message, "business_rejection"));
+  assert.equal(reject("保存失败：出游天数不能修改"), true);
+  assert.equal(reject("Ack=Failure：travelDays is locked"), true);
+  assert.equal(reject("保存失败：提前预订天数必须大于 0"), false);
+  assert.equal(reject("保存失败：最晚取消天数格式错误"), false);
+  assert.equal(isDurationChangeRejection("basic", "VBK 基本信息保存失败（Ack=Failure）：提前预订天数超出范围"), false);
+});
+
 const remoteDraft = (active = "D", releaseActive = "F") => ({ data: { saleControlInfo: { productCategoryID: 1 },
   baseInfo: { active }, meta: { auditStatus: "N", releaseActive } } });
 
@@ -104,6 +113,7 @@ test("天数被拒后只读确认旧草稿未发布，本地解绑、提示手�
   assert.equal(messages.length, 1);
   assert.match(messages[0]!, /79000001/);
   assert.match(messages[0]!, /请在 VBK 后台手动下线或删除/);
+  assert.match(messages[0]!, /旧草稿下的交通子产品随旧草稿保留。$/);
 });
 
 test("同一轮第二次天数被拒不再转新建，直接失败；其它失败不转新建", async () => {

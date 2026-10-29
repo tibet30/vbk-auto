@@ -9,8 +9,10 @@ import { assertRemoteDraftUnpublished } from "./automation.main.replace-locked-d
 /**
  * 改天数失败转新建产品：
  *   - 已有远端草稿改天数时，基本信息以 resizeTourDailyInfo=F 只改 travelDays，行程按新天数整版重写；
- *   - 只有本轮天数确实不同于当前远端草稿最后一次录入的天数时，写入报错（含「天数」）
+ *   - 只有本轮天数确实不同于当前远端草稿最后一次录入的天数时，平台明确拒绝写入
+ *     （原因含「行程天数 / 出游天数 / travelDays」，「提前预订天数」等其它天数字段不算）
  *     或回读天数不一致才视为该产品天数已被锁定；天数未变时按普通失败处理；
+ *   - 超时后的只读恢复回读到旧天数只说明上次写入未生效，不算被拒（见 association-save.ts）；
  *   - 运营批准须显式包含 vbk.duration_replacement（确认卡已说明可能新建产品），
  *     且只读回读确认旧草稿仍未提审、未发布，否则不转新建、阶段失败并说明原因；
  *   - 满足后只在本地解绑旧草稿（VBK 无删除接口，旧草稿保留），在同一轮已批准录入内
@@ -28,7 +30,7 @@ function causes(error: unknown): unknown[] {
   return chain;
 }
 
-/** 只认基本信息/行程阶段：回读天数不一致，或平台明确拒绝且原因含「天数」；不确定写入一律不算。 */
+/** 只认基本信息/行程阶段：回读天数不一致，或平台明确拒绝且原因指向行程天数；不确定写入一律不算。 */
 export function isDurationChangeRejection(phase: string | undefined, error: unknown): boolean {
   if (!phase || !DURATION_PHASES.has(phase)) return false;
   if ((error as { uncertainWrite?: boolean } | undefined)?.uncertainWrite) return false;
@@ -37,7 +39,7 @@ export function isDurationChangeRejection(phase: string | undefined, error: unkn
   if (/回读行程天数不一致/.test(message)) return true;
   const platformRejected = (error instanceof PlatformOperationError && error.kind === "business_rejection")
     || /Ack=Failure/.test(message);
-  return platformRejected && /天数/.test(message);
+  return platformRejected && /行程天数|出游天数|travelDays/.test(message);
 }
 
 /** Agent 录入的阶段失败通常以 needs_user 结束而不抛错，此时从已落库的失败记录判定。 */
@@ -114,7 +116,7 @@ export async function runWithDurationReplacement(
   db.setProductLifecycle(localProductId, { productId: null, status: "review", basicInfoSaved: false });
   db.addMessage(localProductId, "assistant",
     `${prefix}，按已锁定处理：已在本地解绑，正在按新天数新建产品重新录入。`
-    + `旧草稿 ${previousProductId} 已保留，请在 VBK 后台手动下线或删除。`);
+    + `旧草稿 ${previousProductId} 已保留，请在 VBK 后台手动下线或删除。旧草稿下的交通子产品随旧草稿保留。`);
   deps.emit(localProductId);
   await attempt(replacement);
 }

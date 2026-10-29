@@ -54,8 +54,10 @@ export async function resolveManualCoverCity(client: Client, city: string) {
   const matches = candidates.filter((item: any) => item?.name === name
     && Number.isSafeInteger(item.id) && item.id > 0
     && Number.isSafeInteger(item.countryId) && item.countryId > 0);
-  if (matches.length !== 1) throw new Error(`封面城市 ${name} 未返回唯一精确匹配，已停止上传。`);
-  return matches[0] as { id: number; countryId: number };
+  // 国内产品的城市常与国外地名同名（如「拉萨」），重名时只在境内候选里取唯一项。
+  const unique = matches.length === 1 ? matches : matches.filter((item: any) => item.inChina === true);
+  if (unique.length !== 1) throw new Error(`封面城市 ${name} 未返回唯一精确匹配，已停止上传。`);
+  return unique[0] as { id: number; countryId: number };
 }
 
 /** No page acquisition and no automatic retry after an uncertain upload outcome. */

@@ -76,6 +76,18 @@ test("missing or ambiguous city, invalid image and cancellation cause no upload"
   assert.equal(f.writes.length, 0);
 });
 
+test("same-name foreign cities do not block a single domestic match, but two domestic ones still do", async () => {
+  const foreign = [122003, 1539614, 1693467].map(id => ({ name: "拉萨", id, countryId: 81, inChina: false }));
+  const f = fixture({ cities: [foreign[0], { name: "拉萨", id: 36, countryId: 1, inChina: true }, ...foreign.slice(1)] });
+  await uploadNewManualCoverViaApi(f.client, 42, file, "拉萨");
+  assert.deepEqual(f.writes[0].body[0].tags[0], { tagType: "District", tagValue: "36" });
+  assert.deepEqual(f.writes[0].body[0].tags[2], { tagType: "Country", tagValue: "1" });
+
+  const twoDomestic = fixture({ cities: [...foreign, ...[36, 37].map(id => ({ name: "拉萨", id, countryId: 1, inChina: true }))] });
+  await assert.rejects(uploadNewManualCoverViaApi(twoDomestic.client, 42, file, "拉萨"), /唯一精确匹配/);
+  assert.equal(twoDomestic.writes.length, 0);
+});
+
 test("HTTP business failures, ambiguous responses and uncertain transport never bind or retry", async () => {
   for (const upload of [
     { ResponseStatus: { Ack: "Warning" }, body: [{ success: true, imageId: 123 }] },

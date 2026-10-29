@@ -29,6 +29,7 @@ import { preparationApprovalBlockReason } from "../planning/preparation-completi
 import { inspectManualCoverAsset } from "../automation/manual-cover-asset.js";
 import { agentApprovalScopeError, assertAgentWriteAuthorized, normalizeAgentApprovalScope } from "./integration-guard.js";
 import { withDurationReplacementNotice } from "../../shared/duration-replacement.js";
+import { backfillEnteredItineraryDays } from "./integration-setup/entered-days-backfill.js";
 import { recordAgentUsage } from "./integration-usage.js";
 import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
@@ -183,8 +184,9 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       }
       return recoverEquivalentApproval(product, snapshot);
     },
-    prepareWorkflowReplay: (localProductId, content) => {
+    prepareWorkflowReplay: async (localProductId, content) => {
       productWorkflows.assertIdle(localProductId, "automation");
+      await backfillEnteredItineraryDays(context, localProductId);
       const current = db.getProduct(localProductId);
       if (!current?.automation || !["succeeded", "failed"].includes(current.automation.status)) return undefined;
       const replaceUnknownShell = requestsLegacyShellReplacement(current, content);
@@ -242,7 +244,10 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       }
       return agentTaskContext(db, localProductId, memoryContext, readiness(localProductId));
     },
-    normalizeApprovalScope: (localProductId, scope) => normalizeAgentApprovalScope(db.getProduct(localProductId)!, scope),
+    normalizeApprovalScope: async (localProductId, scope) => {
+      await backfillEnteredItineraryDays(context, localProductId);
+      return normalizeAgentApprovalScope(db.getProduct(localProductId)!, scope);
+    },
     completeApprovalSummary: (localProductId, scope, summary) =>
       withDurationReplacementNotice(summary, scope, db.getProduct(localProductId)),
     approvalPrecondition: async (localProductId, scope, options) => {
@@ -280,6 +285,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
         const accountKey = login.loginAccount?.trim() || login.accountName?.trim();
         if (!login.loggedIn || !accountKey || approval?.accountKey !== accountKey || (remote.vbkAccount && remote.vbkAccount !== accountKey)) return { verified: false, message: "当前账号与本轮确认不一致，请恢复对应账号后继续核对。" };
       } else {
+        await backfillEnteredItineraryDays(context, localProductId);
         // Creating a final confirmation card is still phase A: clear satisfied
         // research noise before readiness decides the plan is complete.
         const refreshed = refreshSatisfiedResearchTasks(db, localProductId);

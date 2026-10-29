@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ProductMutationService } from "../../src/main/application/product-mutation-service.js";
 import type { ProductDetail, ProductSummary } from "../../src/shared/contracts.js";
+import { withoutSpotIds } from "../helpers/without-spot-ids.js";
 
 function detail(product: Record<string, unknown>): ProductDetail {
   return {
@@ -129,7 +130,7 @@ test("异步整包补全不能用旧快照抹掉已核验的同名行程 POI", (
     operations: { transport: "charter", vehicleResource: { resourceGroupId: 2206177 } },
   });
 
-  assert.deepEqual((saved.product.itinerary as Array<{ spots: unknown[] }>)[0]?.spots[0], {
+  assert.deepEqual(withoutSpotIds((saved.product.itinerary as Array<{ spots: unknown[] }>)[0]?.spots[0]), {
     name: "扎什伦布寺",
     poiName: "扎什伦布寺",
     poiId: 76348,
@@ -164,7 +165,7 @@ test("已核验 POI 仅在同日同名同类型的空映射中保留", () => {
   });
 
   const itinerary = saved.product.itinerary as Array<{ spots: Array<Record<string, unknown>> }>;
-  assert.deepEqual(itinerary[0]?.spots[0], { name: "同名景点", kind: "attraction", poiName: "第一天景点", poiId: 101 });
+  assert.deepEqual(withoutSpotIds(itinerary[0]?.spots[0]), { name: "同名景点", kind: "attraction", poiName: "第一天景点", poiId: 101 });
   assert.equal(itinerary[1]?.spots[0]?.poiId, null, "改名不复用旧 POI");
   assert.equal(itinerary[1]?.spots[1]?.poiId, null, "改为 other 不复用旧 POI");
   assert.deepEqual(itinerary[2]?.spots, [], "历史接送不再占用景点位置");

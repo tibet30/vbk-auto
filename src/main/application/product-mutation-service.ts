@@ -28,6 +28,7 @@ import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
+import { inheritItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { normaliseItineraryArrivalTitle } from "../../shared/itinerary-arrival-title.js";
 import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
@@ -105,9 +106,11 @@ export class ProductMutationService {
         ? currentBasic.meetingCity
         : currentBasic.destinationCity,
     );
+    // 先按旧方案继承 spotId（模型输出不带 ID），后续 POI 保留与删除凭证都基于带 ID 的方案。
+    const withIds = inheritItinerarySpotIds(current.product, product);
     const incoming = options.preserveVerifiedItineraryPois === false
-      ? product
-      : preserveVerifiedItineraryPois(current.product, product);
+      ? withIds
+      : preserveVerifiedItineraryPois(current.product, withIds);
     const protectedIncoming = options.allowItineraryRemovalRestore ? incoming : preserveItineraryRemovals(current.product, incoming);
     const normalised = normaliseItineraryArrivalTitle(normaliseProductLocationFields(protectedIncoming, lockedMeetingCity || undefined));
     if (Array.isArray(normalised.itinerary)) normalised.itinerary = normalised.itinerary.map((day) =>

@@ -26,6 +26,7 @@ import { readLocalProductState } from "../local-product-state.js";
 import { readProductArchitecture, writeProductArchitecture } from '../product-architecture-store.js';
 import { canonicalJson, splitProduct } from '../../../../../shared/product-storage-projection.js';
 import { approvedPlanVersion } from '../../../../application/product-approval-projection.js';
+import { ensureItinerarySpotIds, inheritItinerarySpotIds } from '../../../../../shared/itinerary-spot-identity.js';
 
 export function createProduct(db: Database.Database, input: CreateProductInput): ProductDetail {
   return importProductSnapshot(db, buildProductSnapshot(input));
@@ -34,7 +35,9 @@ export function createProduct(db: Database.Database, input: CreateProductInput):
 export function importProductSnapshot(db: Database.Database, snapshot: ProductDetail): ProductDetail {
   const existing = getProduct(db, snapshot.id);
   const existingCreatedAt = (db.prepare("SELECT created_at FROM products WHERE id=?").get(snapshot.id) as { created_at: string } | undefined)?.created_at;
-  const product = parseAndNormalizeProductJson(JSON.stringify(snapshot.product));
+  const parsed = parseAndNormalizeProductJson(JSON.stringify(snapshot.product));
+  // 远端快照可能不带 spotId：先继承本地 ID，再补齐，保证同内容导入的 plan 比较相等、不空增版本。
+  const product = ensureItinerarySpotIds(existing ? inheritItinerarySpotIds(existing.product, parsed) : parsed);
   const restoredAt = snapshot.updatedAt || now();
   const version = existing ? (existing.planVersion ?? existing.productJsonVersion ?? 0) + Number(
     canonicalJson(existing.plan) !== canonicalJson(splitProduct(product).plan)

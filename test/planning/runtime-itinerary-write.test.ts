@@ -3,6 +3,7 @@ import test from "node:test";
 import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
 import { ProductMutationService } from "../../src/main/application/product-mutation-service.js";
 import { DbOrchestratorRuntime } from "../../src/main/planning/runtime.js";
+import { withoutSpotIds } from "../helpers/without-spot-ids.js";
 
 const USER_IDEA = `D1: 潮汕接团 > 自由活动
 D2: 南澳大桥 > 长山尾灯塔 > 彩虹公路 > 三囱崖灯塔 > 无人机航拍 > 青澳湾 > 北回归线 > 2 号公路 > 彩虹海 > 孤独榕树村
@@ -59,7 +60,7 @@ test("真实 runtime 写入保留完整用户行程，并继续拒绝重排", as
   const genericRegeneration = itinerary();
   assert.deepEqual(await runtime.writeModule(detail.id, "itinerary", "/itinerary", genericRegeneration), { ok: true });
   const readback = saved.itinerary as Array<{ spots: Array<Record<string, unknown>> }>;
-  assert.deepEqual(readback[1]?.spots[0], {
+  assert.deepEqual(withoutSpotIds(readback[1]?.spots[0]), {
     name: "南澳大桥", kind: "attraction", poiName: "南澳大桥", poiId: 10546075, city: "汕头",
   });
 

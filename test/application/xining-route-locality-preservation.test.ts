@@ -6,6 +6,7 @@ import path from 'node:path';
 import { VbkDatabase } from '../../src/main/infrastructure/database/database.js';
 import { ProductMutationService } from '../../src/main/application/product-mutation-service.js';
 import { buildProductSnapshot } from '../../src/main/infrastructure/database/parts/product-draft.js';
+import { withoutSpotIds } from '../helpers/without-spot-ids.js';
 import { hotelStayRequirement } from '../../src/shared/hotel-stay-requirement.js';
 import { hotelCandidateMeetsStay } from '../../src/shared/hotel-stay-requirement.js';
 import { reconcileHotelStays } from '../../src/shared/reconcile-hotel-stays.js';
@@ -22,7 +23,7 @@ test('the same complete POI binding retains its omitted native locality through 
     const incoming = structuredClone(p.product) as any;
     delete incoming.itinerary[0].spots[0].province; delete incoming.itinerary[0].spots[0].city; delete incoming.itinerary[0].spots[0].district;
     const saved = mutation.replace(p.id, incoming);
-    assert.deepEqual(saved.product.itinerary![0]!.spots![0], p.product.itinerary![0]!.spots![0]);
+    assert.deepEqual(withoutSpotIds(saved.product.itinerary![0]!.spots![0]), withoutSpotIds(p.product.itinerary![0]!.spots![0]));
     const changed = structuredClone(incoming); changed.itinerary[0].spots[0].poiId = 123;
     assert.equal(mutation.replace(p.id, changed).product.itinerary![0]!.spots![0]!.city, undefined, 'new binding does not inherit old locality');
   } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }

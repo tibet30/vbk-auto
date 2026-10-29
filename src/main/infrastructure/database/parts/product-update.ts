@@ -7,6 +7,7 @@ import { approvedPlanVersion } from '../../../application/product-approval-proje
 import { advanceAutomationApproval } from '../../../application/product-approval-transition.js';
 import { getAgentSnapshot } from './agent.js';
 import { dedupeProductItineraryPois } from '../../../../shared/itinerary-poi-deduplication.js';
+import { ensureItinerarySpotIds } from '../../../../shared/itinerary-spot-identity.js';
 
 /**
  * 写入产品 product_json，可选更新 status。直接覆盖整个 product 字段。
@@ -20,7 +21,8 @@ export function updateProduct(
   source?: string,
 ) {
   const write = db.transaction(() => {
-    const durableInput = dedupeProductItineraryPois(product);
+    // 兜底：任何写入路径落库前都保证每个景点有合法且唯一的 spotId。
+    const durableInput = ensureItinerarySpotIds(dedupeProductItineraryPois(product));
     const basicInfo = durableInput.basicInfo && typeof durableInput.basicInfo === "object" && !Array.isArray(durableInput.basicInfo)
       ? durableInput.basicInfo as Record<string, unknown>
       : undefined;

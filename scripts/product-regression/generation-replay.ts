@@ -10,12 +10,15 @@ export interface GenerationReplay {
   disambiguations: Array<{ desired: string; candidates: Json[]; response: Json }>;
   agentFinalResponse: { content: string };
   removals: Array<{ day: number; name: string }>;
-  stageResponses: Record<string, Json>; agentTurns: Array<{ name: string; arguments: Json }>;
+  stageResponses: Record<string, Json>;
+  /** 天标题生成工具 submit_itinerary_day_titles 的固定回复；第 n 次调用取第 n 条，缺少即失败。 */
+  dayTitleResponses?: Json[];
+  agentTurns: Array<{ name: string; arguments: Json }>;
 }
 export function loadGenerationReplay(key: string): GenerationReplay {
   const trace = JSON.parse(readFileSync(`${FIXTURE_ROOT}/${key}-generation.json`, 'utf8')) as GenerationReplay;
   if (trace.version !== 1 || !trace.input.userIdea || !trace.stageResponses.itinerary) throw new Error(`缺少需求/模型回放：${key}`);
-  const encoded = JSON.stringify([trace.input, trace.constraints, trace.hotelRequirements, trace.stageResponses]);
+  const encoded = JSON.stringify([trace.input, trace.constraints, trace.hotelRequirements, trace.stageResponses, trace.dayTitleResponses ?? []]);
   if (/"(?:poiId|poiName|hotelCandidates|hotelResource|resourceGroupId|imageId|pendingApproval)"\s*:/u.test(encoded)) {
     throw new Error(`生成回放不得包含已绑定资源或审批：${key}`);
   }
@@ -31,6 +34,7 @@ export function installPlanningTransport(trace: GenerationReplay) {
   const previous = globalThis.fetch;
   const stages: string[] = [];
   let agentIndex = 0;
+  let dayTitleCalls = 0;
   const misses: string[] = [];
   const missing = (query: string): never => { misses.push(query); throw new ReplayDataMissingError(`缺少模型响应回放：${query}`); };
   globalThis.fetch = async (input, init) => {
@@ -60,6 +64,16 @@ export function installPlanningTransport(trace: GenerationReplay) {
       return Response.json({ id: 'disambiguation', choices: [{ index: 0, finish_reason: 'tool_calls',
         message: { role: 'assistant', content: null, tool_calls: [{ id: 'choice', type: 'function',
           function: { name, arguments: JSON.stringify(recording.response) } }] } }] });
+    }
+    if (name === 'submit_itinerary_day_titles') {
+      const index = dayTitleCalls++;
+      if (index >= 2) throw new Error(`模型阶段超出固定回放次数：${name}`);
+      const recording = trace.dayTitleResponses?.[index];
+      if (!recording) return missing(`stage:${name}`);
+      return Response.json({ id: `replay-dayTitles-${index}`, object: 'chat.completion', created: 0, model: 'fixed-regression',
+        choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
+          tool_calls: [{ id: `dayTitles-${index}`, type: 'function', function: { name, arguments: JSON.stringify(recording) } }] } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
     }
     const stage = Object.keys(trace.stageResponses).find(s => name === `submit_${s}_module`);
     if (!stage) return missing(`stage:${name}`);

@@ -71,6 +71,7 @@ export function applyItinerarySpotRemove(product: Json, input: Extract<ManualRev
     appendTrustedOperatorItineraryRemoval(next, dayNumber, spotName, new Date().toISOString(), groupKey, {
       poiName: typeof spotRecord.poiName === "string" ? spotRecord.poiName : undefined,
       poiId: typeof spotRecord.poiId === "number" ? spotRecord.poiId : undefined,
+      spotId: typeof spotRecord.spotId === "string" ? spotRecord.spotId : undefined,
     });
     normaliseRemainingAlternativeRelation(remaining, alternatives, input.spotIndex);
   }

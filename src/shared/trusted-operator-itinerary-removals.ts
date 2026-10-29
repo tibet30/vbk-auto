@@ -1,4 +1,5 @@
 import { isKnownPoiNameAlias } from "./poi-name-aliases.js";
+import { isItinerarySpotId, itinerarySpotKey } from "./itinerary-spot-identity.js";
 
 type Json = Record<string, unknown>;
 export type TrustedItineraryRemoval = {
@@ -8,12 +9,14 @@ export type TrustedItineraryRemoval = {
   groupKey?: string;
   poiName?: string;
   poiId?: number;
+  /** 被删景点的稳定身份；旧凭证没有该字段。 */
+  spotId?: string;
 };
-export type TrustedItineraryRemovalIdentity = { poiName?: string; poiId?: number };
+export type TrustedItineraryRemovalIdentity = { poiName?: string; poiId?: number; spotId?: string };
 
 /** Stable identity for one ordered, same-time `or` group. */
 export function alternativeGroupKey(day: number, names: readonly string[]): string {
-  return `or:${day}:${names.map(normalise).join("\u001f")}`;
+  return `or:${day}:${names.map(itinerarySpotKey).join("\u001f")}`;
 }
 
 /** A receipt can only be written through the trusted manual-review IPC. */
@@ -77,8 +80,10 @@ export function trustedOperatorItineraryRemovals(product: Json): ReadonlyArray<T
 export function sameTrustedOperatorItineraryRemovals(current: Json, next: Json): boolean { return JSON.stringify(removals(current)) === JSON.stringify(removals(next)); }
 
 function receiptReappeared(receipt: TrustedItineraryRemoval, itinerary: unknown[]): boolean {
+  // 同一个 spotId 出现在任意一天，说明运营显式写回了这个景点。
+  if (receipt.spotId && itinerary.some((item) => spotsOf(item).some((spot) => record(spot)?.spotId === receipt.spotId))) return true;
   const day = itinerary.find((item) => Number(record(item)?.day) === receipt.day);
-  const spots = Array.isArray(record(day)?.spots) ? record(day)!.spots as unknown[] : [];
+  const spots = spotsOf(day);
   for (let index = 0; index < spots.length; index += 1) {
     const spot = record(spots[index]); if (!spot || !sameName(text(spot.name), receipt.name)) continue;
     if (!receipt.groupKey) return true;
@@ -86,20 +91,22 @@ function receiptReappeared(receipt: TrustedItineraryRemoval, itinerary: unknown[
   }
   return false;
 }
+function spotsOf(day: unknown): unknown[] { const spots = record(day)?.spots; return Array.isArray(spots) ? spots : []; }
+/** 旧凭证的 groupKey 按去空白生成，这里对每一段重新归一化后再比较。 */
 function groupReappeared(groupKey: string, day: number, spots: readonly unknown[], index: number): boolean {
   const prefix = `or:${day}:`; if (!groupKey.startsWith(prefix)) return false;
-  const names = groupKey.slice(prefix.length).split("\u001f").filter(Boolean);
-  const position = names.indexOf(normalise(text(record(spots[index])?.name))); if (position < 0) return false;
+  const names = groupKey.slice(prefix.length).split("\u001f").filter(Boolean).map(itinerarySpotKey);
+  const position = names.indexOf(itinerarySpotKey(record(spots[index])?.name)); if (position < 0) return false;
   const start = index - position;
-  return start >= 0 && names.every((name, offset) => normalise(text(record(spots[start + offset])?.name)) === name);
+  return start >= 0 && names.every((name, offset) => itinerarySpotKey(record(spots[start + offset])?.name) === name);
 }
 function removals(product: Json): TrustedItineraryRemoval[] {
   const manualReview = record(product.manualReview); const value = Array.isArray(manualReview?.itinerarySpotRemovals) ? manualReview.itinerarySpotRemovals : [];
   return value.flatMap((item) => {
     const receipt = record(item); const day = Number(receipt?.day); const name = text(receipt?.name); const removedAt = text(receipt?.removedAt); const groupKey = text(receipt?.groupKey);
-    const poiName = text(receipt?.poiName); const poiId = Number(receipt?.poiId);
+    const poiName = text(receipt?.poiName); const poiId = Number(receipt?.poiId); const spotId = receipt?.spotId;
     return Number.isInteger(day) && day > 0 && name && removedAt ? [{ day, name, removedAt,
-      ...(groupKey ? { groupKey } : {}), ...(poiName ? { poiName } : {}),
+      ...(groupKey ? { groupKey } : {}), ...(poiName ? { poiName } : {}), ...(isItinerarySpotId(spotId) ? { spotId } : {}),
       ...(Number.isInteger(poiId) && poiId > 0 ? { poiId } : {}) }] : [];
   });
 }
@@ -107,8 +114,8 @@ function applyIdentity(receipt: TrustedItineraryRemoval, identity: TrustedItiner
   const poiName = text(identity.poiName); const poiId = Number(identity.poiId);
   if (poiName) receipt.poiName = poiName;
   if (Number.isInteger(poiId) && poiId > 0) receipt.poiId = poiId;
+  if (isItinerarySpotId(identity.spotId)) receipt.spotId = identity.spotId;
 }
-function sameName(left: string, right: string): boolean { const a = normalise(left); const b = normalise(right); return Boolean(a) && a === b; }
-function normalise(value: string): string { return value.replace(/\s+/g, "").trim(); }
+function sameName(left: string, right: string): boolean { const a = itinerarySpotKey(left); return Boolean(a) && a === itinerarySpotKey(right); }
 function text(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }
 function record(value: unknown): Json | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Json : undefined; }

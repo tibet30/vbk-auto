@@ -1,5 +1,6 @@
-import { trustedOperatorItineraryRemovals, alternativeGroupKey } from "./trusted-operator-itinerary-removals.js";
+import { trustedOperatorItineraryRemovals } from "./trusted-operator-itinerary-removals.js";
 import { samePoiName } from "./poi-name-key.js";
+import { itinerarySpotKey } from "./itinerary-spot-identity.js";
 
 type Json = Record<string, unknown>;
 
@@ -26,8 +27,8 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
       const kept = group.filter((peer) => !deleted.has(peer));
       if (group.length > 1 && kept.length === 1) record(spots[kept[0]!]).relation = "and";
     }
-    const remaining = (day.spots as unknown[]).map((spot) => compact(text(record(spot).name)));
-    const removed = scoped.filter((receipt) => !remaining.includes(compact(receipt.name)));
+    const remaining = (day.spots as unknown[]).map((spot) => itinerarySpotKey(record(spot).name));
+    const removed = scoped.filter((receipt) => !remaining.includes(itinerarySpotKey(receipt.name)));
     const aliases = removed.flatMap((receipt) => [receipt.name, receipt.poiName].flatMap(mentionAliases));
     if (!aliases.length) continue;
     if (Array.isArray(day.activities)) {
@@ -53,12 +54,14 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
 }
 
 function matchesReceipt(
-  receipt: { name: string; poiName?: string; poiId?: number }, spot: Json,
+  receipt: { name: string; poiName?: string; poiId?: number; spotId?: string }, spot: Json,
 ): boolean {
-  const spotId = Number(spot.poiId);
-  if (receipt.poiId && Number.isInteger(spotId) && spotId > 0 && receipt.poiId === spotId) return true;
+  if (receipt.spotId && receipt.spotId === spot.spotId) return true;
+  const spotPoiId = Number(spot.poiId);
+  if (receipt.poiId && Number.isInteger(spotPoiId) && spotPoiId > 0 && receipt.poiId === spotPoiId) return true;
   if (receipt.poiName && (samePoiName(receipt.poiName, spot.poiName) || samePoiName(receipt.poiName, spot.name))) return true;
-  return compact(receipt.name) === compact(text(spot.name));
+  const key = itinerarySpotKey(receipt.name);
+  return Boolean(key) && key === itinerarySpotKey(spot.name);
 }
 
 function mentionAliases(name: unknown): string[] {
@@ -88,11 +91,12 @@ function dropRouteSegments(copy: string, aliases: readonly string[]): string {
 function groupMatches(spots: readonly unknown[], index: number, day: number, key: string): boolean {
   const prefix = `or:${day}:`;
   if (!key.startsWith(prefix)) return false;
-  const names = key.slice(prefix.length).split("\u001f");
-  const position = names.indexOf(compact(text(record(spots[index]).name)));
+  // 旧凭证的 groupKey 按去空白生成，逐段重新归一化后再比较。
+  const names = key.slice(prefix.length).split("\u001f").map(itinerarySpotKey);
+  const position = names.indexOf(itinerarySpotKey(record(spots[index]).name));
   const start = index - position;
-  return position >= 0 && start >= 0
-    && alternativeGroupKey(day, spots.slice(start, start + names.length).map((spot) => text(record(spot).name))) === key;
+  return position >= 0 && start >= 0 && start + names.length <= spots.length
+    && names.every((name, offset) => itinerarySpotKey(record(spots[start + offset]).name) === name);
 }
 
 function groupIndexes(spots: readonly unknown[], index: number): number[] {
@@ -107,4 +111,3 @@ function groupIndexes(spots: readonly unknown[], index: number): number[] {
 
 function record(value: unknown): Json { return value && typeof value === "object" && !Array.isArray(value) ? value as Json : {}; }
 function text(value: unknown): string { return typeof value === "string" ? value.trim() : ""; }
-function compact(value: string): string { return value.replace(/\s+/g, ""); }

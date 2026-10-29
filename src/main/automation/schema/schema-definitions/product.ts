@@ -23,6 +23,7 @@ export const manualReviewSchema = z.object({
     groupKey: z.string().min(1).optional(),
     poiName: z.string().min(1).optional(),
     poiId: z.number().int().positive().optional(),
+    spotId: z.string().regex(/^sp_[0-9a-f]{12}$/).optional(),
   }).strict()).default([]),
 }).strict();
 

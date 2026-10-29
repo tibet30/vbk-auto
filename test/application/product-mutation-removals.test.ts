@@ -3,7 +3,7 @@ import test from "node:test";
 import { ProductMutationService } from "../../src/main/application/product-mutation-service.js";
 import { buildProductSnapshot } from "../../src/main/infrastructure/database/parts/product-draft.js";
 import { applyItinerarySpotRemove } from "../../src/main/operations/manual-review-itinerary-field.js";
-import { alternativeGroupKey } from "../../src/shared/trusted-operator-itinerary-removals.js";
+import { alternativeGroupKey, clearReappearedTrustedOperatorItineraryRemovals } from "../../src/shared/trusted-operator-itinerary-removals.js";
 import { preserveItineraryRemovals } from "../../src/shared/preserve-itinerary-removals.js";
 
 const museum = "汉中市古汉台博物馆";
@@ -112,4 +112,73 @@ test("删除凭证只作用于指定日期和OR组，同名另一组及另一日
   assert.equal(itinerary[0]!.spots[2]!.relation, "or");
   assert.equal(itinerary[1]!.spots[0]!.name, "乙");
   assert.equal(product.itinerary[0]!.spots.length, 4);
+});
+
+const SPOT_A = "sp_aaaaaaaaaaaa";
+const SPOT_B = "sp_bbbbbbbbbbbb";
+const SPOT_C = "sp_cccccccccccc";
+type Receipt = { spotId?: string; name: string; groupKey?: string };
+const receiptsOf = (product: unknown) =>
+  (product as { manualReview: { itinerarySpotRemovals: Receipt[] } }).manualReview.itinerarySpotRemovals;
+
+test("删除凭证记录被删景点的 spotId", () => {
+  const product = buildProductSnapshot({ destination: "潮州", days: 1, productForm: "privateTour" }).product;
+  product.itinerary = [{ day: 1, title: "潮州", description: "游览", spots: [
+    { spotId: SPOT_A, name: "广济桥", poiName: null, poiId: null, kind: "attraction" },
+  ] }];
+  const next = applyItinerarySpotRemove(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0 });
+  assert.equal(receiptsOf(next)[0]!.spotId, SPOT_A);
+});
+
+test("删除带括号注释的景点后，模型以无注释名重新生成，仍被拦截", () => {
+  let saved = buildProductSnapshot({ destination: "潮州", days: 1, productForm: "privateTour" });
+  saved.product.itinerary = [{ day: 1, title: "潮州古城", description: "游览古城。", spots: [
+    { name: "广济桥（不上桥）", poiName: null, poiId: null, kind: "attraction" },
+    { name: "牌坊街", poiName: null, poiId: null, kind: "attraction" },
+  ] }];
+  saved.product = applyItinerarySpotRemove(saved.product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0 }) as typeof saved.product;
+  const incoming = structuredClone(saved.product);
+  incoming.itinerary![0]!.spots = [
+    { name: "广济桥", poiName: null, poiId: null, kind: "attraction" },
+    { name: "牌坊街", poiName: null, poiId: null, kind: "attraction" },
+  ];
+  const service = new ProductMutationService({ getProduct: () => saved,
+    updateProduct: (_id, next, status) => { saved = { ...saved, product: next as typeof saved.product, status: status ?? saved.status }; } });
+  service.replace(saved.id, incoming);
+  assert.deepEqual(saved.product.itinerary![0]!.spots.map((spot) => spot.name), ["牌坊街"]);
+});
+
+test("二选一删除一项后重新生成：被删项不复活，同组其余项保留", () => {
+  let saved = buildProductSnapshot({ destination: "潮州", days: 1, productForm: "privateTour" });
+  const option = (name: string) => ({ name, poiName: null, poiId: null, kind: "attraction" as const, relation: "or" as const, timeOfDay: "morning" as const });
+  saved.product.itinerary = [{ day: 1, title: "潮州", description: "上午三选一。", spots: [option("甲景点"), option("乙景点"), option("丙景点")] }];
+  saved.product = applyItinerarySpotRemove(saved.product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 }) as typeof saved.product;
+  const incoming = structuredClone(saved.product);
+  incoming.itinerary![0]!.spots = [option("甲景点"), option("乙景点"), option("丙景点")];
+  const service = new ProductMutationService({ getProduct: () => saved,
+    updateProduct: (_id, next, status) => { saved = { ...saved, product: next as typeof saved.product, status: status ?? saved.status }; } });
+  service.replace(saved.id, incoming);
+  const names = saved.product.itinerary![0]!.spots.map((spot) => spot.name);
+  assert.deepEqual(names, ["甲景点", "丙景点"]);
+  assert.ok(saved.product.itinerary![0]!.spots.every((spot) => spot.relation === "or"));
+});
+
+test("原 spotId 被显式写回时清除凭证", () => {
+  const product = {
+    manualReview: { itinerarySpotRemovals: [{ day: 1, name: "广济桥", removedAt: "now", spotId: SPOT_B }] },
+    itinerary: [{ day: 1, spots: [{ spotId: SPOT_B, name: "完全改了名" }, { spotId: SPOT_C, name: "牌坊街" }] }],
+  };
+  assert.equal(clearReappearedTrustedOperatorItineraryRemovals(product), true);
+  assert.deepEqual(product.manualReview.itinerarySpotRemovals, []);
+});
+
+test("旧版去空白 groupKey 的凭证仍能匹配当前景点名", () => {
+  const product = {
+    manualReview: { itinerarySpotRemovals: [{ day: 1, name: "乙 景点", removedAt: "now", groupKey: "or:1:甲景点\u001f乙景点" }] },
+    itinerary: [{ day: 1, spots: [
+      { name: "甲景点", relation: "or", timeOfDay: "morning" }, { name: "乙 景点", relation: "or", timeOfDay: "morning" },
+    ] }],
+  };
+  const result = preserveItineraryRemovals(product, product);
+  assert.deepEqual((result.itinerary as typeof product.itinerary)[0]!.spots.map((spot) => spot.name), ["甲景点"]);
 });

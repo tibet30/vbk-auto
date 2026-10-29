@@ -6,6 +6,8 @@ import { ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleLength } from "../../s
 const requiredText = z.string().trim().min(1);
 
 const itinerarySpotSchema = z.object({
+  // 含 ID 的回读不能被 strict 拒绝；模型输出本身不带它，由继承逻辑补上。
+  spotId: z.string().regex(/^sp_[0-9a-f]{12}$/).optional(),
   name: requiredText,
   kind: z.enum(["attraction", "free", "other"]).default("attraction"),
   description: z.string().trim().optional(),

@@ -69,7 +69,7 @@ const CONTEXT_SECTIONS: Record<PlanningStage, readonly string[]> = {
 const FORBIDDEN_CONTEXT_KEYS = new Set([
   "supplierProductCode", "hotelResource", "vehicleId", "resourceId",
   "resourceGroupId", "resourceGroupName", "supplierCode", "providerId",
-  "contactCardId", "butler", "bookingControls", "userIdea",
+  "contactCardId", "butler", "bookingControls", "userIdea", "spotId",
 ]);
 
 function sanitiseContext(value: unknown, parentKey?: string): unknown {

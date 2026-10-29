@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AutomationRun, ProductDetail } from "../../shared/contracts.js";
+import { stripItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
 import { canonicalJson, record } from "../../shared/product-storage-projection.js";
 
 type Json = Record<string, unknown>;
@@ -20,7 +21,8 @@ function sales(product: Json): Json {
 }
 
 function itinerary(product: Json): unknown[] {
-  return structuredClone(Array.isArray(product.itinerary) ? product.itinerary : []);
+  // spotId 是系统补的稳定身份，不参与阶段指纹，补 ID 不得使已完成阶段失效。
+  return stripItinerarySpotIds(Array.isArray(product.itinerary) ? product.itinerary : []);
 }
 
 function presentation(product: Json): Json {

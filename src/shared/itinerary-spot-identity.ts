@@ -161,3 +161,18 @@ export function findItinerarySpot(
   }
   return undefined;
 }
+
+/**
+ * 返回行程的副本，并删掉每个对象景点的 spotId；不修改入参。
+ * 审批指纹与录入阶段指纹计算前使用：补 ID 不是操作员的选择，不能让既有审批或阶段失效。
+ */
+export function stripItinerarySpotIds(itinerary: unknown[]): unknown[] {
+  const copy = structuredClone(itinerary);
+  for (const day of copy) {
+    if (!isRecord(day) || !Array.isArray(day.spots)) continue;
+    for (const spot of day.spots) {
+      if (isRecord(spot)) delete spot.spotId;
+    }
+  }
+  return copy;
+}

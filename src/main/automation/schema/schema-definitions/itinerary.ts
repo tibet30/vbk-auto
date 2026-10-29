@@ -15,6 +15,8 @@ export const itineraryDaySchema = z.object({
   day: z.number().int().positive(),
   title: z.string().min(1),
   spots: z.array(z.object({
+    /** 景点稳定身份；由系统生成与继承，模型不产出。 */
+    spotId: z.string().regex(/^sp_[0-9a-f]{12}$/).optional(),
     name: z.string().min(1),
     kind: z.enum(["attraction", "free", "other"]).default("attraction"),
     description: z.string().optional(),

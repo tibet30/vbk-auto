@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ProductDetail } from "../../shared/contracts.js";
+import { stripItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
 import { productSchema } from "../automation/schema/schema.js";
 
 type Json = Record<string, unknown>;
@@ -13,6 +14,8 @@ export function legacyProductVersion(product: Pick<ProductDetail, "product">): s
   const parsed = productSchema.safeParse(product.product);
   const data = structuredClone(parsed.success ? parsed.data : product.product) as unknown as Json;
   if (data.basicInfo) delete (data.basicInfo as Json).supplierProductCode;
+  // spotId 是系统补的稳定身份，不是操作员选择；补 ID 不能让既有审批失效。
+  if (Array.isArray(data.itinerary)) data.itinerary = stripItinerarySpotIds(data.itinerary);
   const ops = data.operations as Json | undefined;
   // In platform-rules mode the legacy named-hotel fields are forbidden and
   // deterministically removed on persistence. They cannot represent a user

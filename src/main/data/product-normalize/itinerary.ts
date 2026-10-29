@@ -17,6 +17,7 @@ import { normaliseReturnDayLodging } from "../../../shared/itinerary-hotel.js";
 import { normaliseItinerarySupport } from "../../../shared/itinerary-support-arrangements.js";
 import { normaliseItinerarySpotKind } from "../../../shared/itinerary-activity-kind.js";
 import { dedupeSameDayItinerarySpots } from "../../../shared/itinerary-poi-deduplication.js";
+import { isItinerarySpotId } from "../../../shared/itinerary-spot-identity.js";
 import { normalisePoiId, textValue } from "./helpers.js";
 
 /**
@@ -63,6 +64,7 @@ export function normaliseItinerary(value: unknown) {
           : undefined;
         const relation = raw.relation === "or" ? "or" : raw.relation === "and" ? "and" : undefined;
         return normaliseItinerarySpotKind({
+          ...(isItinerarySpotId(raw.spotId) ? { spotId: raw.spotId } : {}),
           name: textValue(raw.name) || textValue(raw.poiName),
           poiName: textValue(raw.poiName) || null,
           poiId: normalisePoiId(raw.poiId),

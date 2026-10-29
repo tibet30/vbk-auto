@@ -1,4 +1,4 @@
-import { trustedOperatorItineraryRemovals } from "./trusted-operator-itinerary-removals.js";
+import { trustedOperatorItineraryRemovals, alternativeGroupSegments } from "./trusted-operator-itinerary-removals.js";
 import { samePoiName } from "./poi-name-key.js";
 import { itinerarySpotKey } from "./itinerary-spot-identity.js";
 
@@ -89,10 +89,9 @@ function dropRouteSegments(copy: string, aliases: readonly string[]): string {
 }
 
 function groupMatches(spots: readonly unknown[], index: number, day: number, key: string): boolean {
-  const prefix = `or:${day}:`;
-  if (!key.startsWith(prefix)) return false;
   // 旧凭证的 groupKey 按去空白生成，逐段重新归一化后再比较。
-  const names = key.slice(prefix.length).split("\u001f").map(itinerarySpotKey);
+  const names = alternativeGroupSegments(key, day);
+  if (!names) return false;
   const position = names.indexOf(itinerarySpotKey(record(spots[index]).name));
   const start = index - position;
   return position >= 0 && start >= 0 && start + names.length <= spots.length

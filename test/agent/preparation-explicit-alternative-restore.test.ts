@@ -87,3 +87,14 @@ test("同日同名跨 OR 组时，只能按指明的组同伴撤销收据", () =
     day: 1, name: "X", removedAt: "now", groupKey: alternativeGroupKey(1, ["乙", "X"]),
   }]);
 });
+
+test("旧格式（仅去空白）groupKey 的删除凭证仍阻止恢复带「参观」后缀的 OR 组", () => {
+  const detail = actualProduct();
+  // 持久化凭证按旧规则生成：非遗中心参观 的「参观」后缀与括号都未被去掉。
+  const legacyKey = "or:3:日喀则博物馆\u001f非遗中心参观";
+  assert.notEqual(legacyKey, alternativeGroupKey(3, ["日喀则博物馆", "非遗中心参观"]));
+  detail.product.manualReview = { itinerarySpotRemovals: [
+    { day: 3, name: "日喀则博物馆", removedAt: "2026-10-04T00:00:00.000Z", groupKey: legacyKey },
+  ] };
+  assert.equal(restoreExplicitAlternativeSlots(detail, "恢复第3天日喀则博物馆"), undefined);
+});

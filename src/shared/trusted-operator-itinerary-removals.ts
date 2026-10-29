@@ -19,13 +19,32 @@ export function alternativeGroupKey(day: number, names: readonly string[]): stri
   return `or:${day}:${names.map(itinerarySpotKey).join("\u001f")}`;
 }
 
+/** 取出 groupKey 在指定天下的各段名称（逐段按 itinerarySpotKey 归一化）；前缀不符返回 undefined。 */
+export function alternativeGroupSegments(groupKey: string, day: number): string[] | undefined {
+  const prefix = `or:${day}:`;
+  return groupKey.startsWith(prefix) ? groupKey.slice(prefix.length).split("\u001f").map(itinerarySpotKey) : undefined;
+}
+
+/**
+ * 两个 groupKey 是否指同一个 OR 组。旧凭证按「仅去空白」生成，新 key 按 poiNameKey 生成，
+ * 所以不能直接做字符串相等：同一天、段数相同、逐段 itinerarySpotKey 相等即视为同一组。
+ */
+export function sameAlternativeGroupKey(left: string | undefined, right: string | undefined): boolean {
+  if (!left || !right) return !left && !right;
+  if (left === right) return true;
+  const day = /^or:(\d+):/u.exec(left)?.[1];
+  if (!day || !right.startsWith(`or:${day}:`)) return false;
+  const a = alternativeGroupSegments(left, Number(day)); const b = alternativeGroupSegments(right, Number(day));
+  return Boolean(a && b) && a!.length === b!.length && a!.every((segment, index) => segment === b![index]);
+}
+
 /** A receipt can only be written through the trusted manual-review IPC. */
 export function hasTrustedOperatorItineraryRemoval(
   product: Json, day: number, name: string, groupKey?: string, ambiguous = false,
 ): boolean {
   const matches = removals(product).filter((item) => item.day === day
     && (sameName(item.name, name) || Boolean(item.poiName && isKnownPoiNameAlias(item.poiName, name))));
-  if (groupKey) return matches.some((item) => item.groupKey === groupKey || (!item.groupKey && !ambiguous));
+  if (groupKey) return matches.some((item) => sameAlternativeGroupKey(item.groupKey, groupKey) || (!item.groupKey && !ambiguous));
   return matches.some((item) => !item.groupKey);
 }
 
@@ -34,7 +53,7 @@ export function appendTrustedOperatorItineraryRemoval(
   identity: TrustedItineraryRemovalIdentity = {},
 ): void {
   const manualReview = record(product.manualReview) ?? {}; const current = removals(product);
-  const existing = current.find((item) => item.day === day && sameName(item.name, name) && item.groupKey === groupKey);
+  const existing = current.find((item) => item.day === day && sameName(item.name, name) && sameAlternativeGroupKey(item.groupKey, groupKey));
   if (existing) applyIdentity(existing, identity);
   else {
     const receipt: TrustedItineraryRemoval = { day, name: name.trim(), removedAt, ...(groupKey ? { groupKey } : {}) };
@@ -60,7 +79,7 @@ export function bindTrustedOperatorItineraryRemovalIdentity(
 /** A later explicit operator instruction restores this exact receipt. */
 export function clearTrustedOperatorItineraryRemoval(product: Json, day: number, name: string, groupKey?: string): boolean {
   const current = removals(product);
-  const next = current.filter((item) => !(item.day === day && sameName(item.name, name) && (groupKey ? item.groupKey === groupKey : !item.groupKey)));
+  const next = current.filter((item) => !(item.day === day && sameName(item.name, name) && (groupKey ? sameAlternativeGroupKey(item.groupKey, groupKey) : !item.groupKey)));
   if (next.length === current.length) return false;
   const manualReview = record(product.manualReview) ?? {}; manualReview.itinerarySpotRemovals = next; product.manualReview = manualReview;
   return true;
@@ -94,8 +113,7 @@ function receiptReappeared(receipt: TrustedItineraryRemoval, itinerary: unknown[
 function spotsOf(day: unknown): unknown[] { const spots = record(day)?.spots; return Array.isArray(spots) ? spots : []; }
 /** 旧凭证的 groupKey 按去空白生成，这里对每一段重新归一化后再比较。 */
 function groupReappeared(groupKey: string, day: number, spots: readonly unknown[], index: number): boolean {
-  const prefix = `or:${day}:`; if (!groupKey.startsWith(prefix)) return false;
-  const names = groupKey.slice(prefix.length).split("\u001f").filter(Boolean).map(itinerarySpotKey);
+  const names = alternativeGroupSegments(groupKey, day)?.filter(Boolean); if (!names) return false;
   const position = names.indexOf(itinerarySpotKey(record(spots[index])?.name)); if (position < 0) return false;
   const start = index - position;
   return start >= 0 && names.every((name, offset) => itinerarySpotKey(record(spots[start + offset])?.name) === name);

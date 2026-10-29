@@ -64,3 +64,14 @@ test("删除标题中的路线点时保留同一标题的其它锚点", () => {
   assert.match(String(day.description), /留坝县/);
   assert.doesNotMatch(String(day.description), /张良庙/);
 });
+
+test("删除凭证记录被删景点的 spotId，非法 spotId 不落凭证", () => {
+  const product = { itinerary: [{ day: 1, spots: [
+    { spotId: "sp_0123456789ab", name: "晋祠", poiName: null, poiId: null },
+    { spotId: "bad", name: "平遥古城", poiName: null, poiId: null },
+  ] }] };
+  const first = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0 });
+  assert.equal(((first.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<Record<string, unknown>>)[0]!.spotId, "sp_0123456789ab");
+  const second = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
+  assert.equal(((second.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<Record<string, unknown>>)[0]!.spotId, undefined);
+});

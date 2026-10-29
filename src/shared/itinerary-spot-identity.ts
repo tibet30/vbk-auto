@@ -1,0 +1,163 @@
+/**
+ * 行程景点的稳定身份（spotId）。
+ *
+ * POI 绑定、删除凭证、核查任务凭证过去都靠名字或下标对齐景点，行程被别处改写后
+ * 容易错位。这里给每个景点一个 `sp_` + 12 位小写十六进制的 ID，并提供：
+ *   - 生成与格式判断；
+ *   - 新方案对旧方案的 ID 继承（inheritItinerarySpotIds）；
+ *   - 缺失 / 非法 / 重复 ID 的补齐（ensureItinerarySpotIds）；
+ *   - 按 ID 定位（findItinerarySpot）。
+ *
+ * 名称比较统一走 poiNameKey，不要在别处再写一套归一化规则。
+ * 非对象形式的 spot（字符串）原样保留，不带 ID。
+ */
+
+import { poiNameKey } from "./poi-name-key.js";
+
+type Json = Record<string, unknown>;
+
+const SPOT_ID_PATTERN = /^sp_[0-9a-f]{12}$/;
+
+export function newItinerarySpotId(): string {
+  return `sp_${globalThis.crypto.randomUUID().replace(/-/gu, "").slice(0, 12)}`;
+}
+
+export function isItinerarySpotId(value: unknown): value is string {
+  return typeof value === "string" && SPOT_ID_PATTERN.test(value);
+}
+
+/** 景点名称比较的唯一入口，等同 poiNameKey。 */
+export function itinerarySpotKey(name: unknown): string {
+  return poiNameKey(name);
+}
+
+function isRecord(value: unknown): value is Json {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function daysOf(product: Json): Json[] {
+  const itinerary = product.itinerary;
+  return Array.isArray(itinerary) ? itinerary.filter(isRecord) : [];
+}
+
+function spotsOf(day: Json): unknown[] {
+  return Array.isArray(day.spots) ? day.spots : [];
+}
+
+function positivePoiId(spot: Json): number | undefined {
+  const id = Number(spot.poiId);
+  return Number.isInteger(id) && id > 0 ? id : undefined;
+}
+
+function freshId(taken: Set<string>): string {
+  let id = newItinerarySpotId();
+  while (taken.has(id)) id = newItinerarySpotId();
+  return id;
+}
+
+interface OldSpot { id: string; key: string; poiId: number | undefined }
+
+/** 旧方案按 day 编号分组的带 ID 景点，以及全部旧 ID。 */
+function indexPrevious(previous: Json): { byDay: Map<number, OldSpot[]>; allIds: Set<string> } {
+  const byDay = new Map<number, OldSpot[]>();
+  const allIds = new Set<string>();
+  for (const day of daysOf(previous)) {
+    const list = byDay.get(Number(day.day)) ?? [];
+    for (const spot of spotsOf(day)) {
+      if (!isRecord(spot) || !isItinerarySpotId(spot.spotId)) continue;
+      allIds.add(spot.spotId);
+      list.push({ id: spot.spotId, key: itinerarySpotKey(spot.name), poiId: positivePoiId(spot) });
+    }
+    byDay.set(Number(day.day), list);
+  }
+  return { byDay, allIds };
+}
+
+/**
+ * 返回 next 的深拷贝，并按以下顺序写好 spots[].spotId（同一份新方案内一个 ID 只用一次）：
+ *   a. 已带 spotId、旧方案存在且未被占用 -> 保留（可跨天）；
+ *   b. 同天、名称键相同的旧景点，按出现顺序一对一继承；
+ *   c. 同天、poiId 为正整数且相同的旧景点，一对一继承；
+ *   d. 否则生成新 ID。
+ * 规则 a 对所有景点先整体处理一遍，避免显式 ID 被前面的同名景点抢走。不修改入参。
+ */
+export function inheritItinerarySpotIds(previous: Json, next: Json): Json {
+  const result = structuredClone(next);
+  const { byDay, allIds } = indexPrevious(previous);
+  const taken = new Set<string>();
+  const pending: Array<{ spot: Json; day: number }> = [];
+
+  for (const day of daysOf(result)) {
+    for (const spot of spotsOf(day)) {
+      if (!isRecord(spot)) continue;
+      const explicit = spot.spotId;
+      if (isItinerarySpotId(explicit) && allIds.has(explicit) && !taken.has(explicit)) taken.add(explicit);
+      else pending.push({ spot, day: Number(day.day) });
+    }
+  }
+
+  for (const { spot, day } of pending) {
+    const olds = (byDay.get(day) ?? []).filter((old) => !taken.has(old.id));
+    const key = itinerarySpotKey(spot.name);
+    const poiId = positivePoiId(spot);
+    const hit = (key ? olds.find((old) => old.key === key) : undefined)
+      ?? (poiId ? olds.find((old) => old.poiId === poiId) : undefined);
+    const id = hit?.id ?? freshId(taken);
+    taken.add(id);
+    spot.spotId = id;
+  }
+  return result;
+}
+
+/**
+ * 只给缺失 / 非法 / 方案内重复的景点补新 ID，已有合法且唯一的 ID 不动。
+ * 没有任何需要补的景点时返回原对象引用。
+ */
+export function ensureItinerarySpotIds(product: Json): Json {
+  const seen = new Set<string>();
+  let needsFix = false;
+  for (const day of daysOf(product)) {
+    for (const spot of spotsOf(day)) {
+      if (!isRecord(spot)) continue;
+      if (isItinerarySpotId(spot.spotId) && !seen.has(spot.spotId)) seen.add(spot.spotId);
+      else needsFix = true;
+    }
+  }
+  if (!needsFix) return product;
+
+  const result = structuredClone(product);
+  const used = new Set<string>();
+  for (const day of daysOf(result)) {
+    for (const spot of spotsOf(day)) {
+      if (!isRecord(spot)) continue;
+      if (isItinerarySpotId(spot.spotId) && !used.has(spot.spotId)) used.add(spot.spotId);
+      else delete spot.spotId;
+    }
+  }
+  for (const day of daysOf(result)) {
+    for (const spot of spotsOf(day)) {
+      if (!isRecord(spot) || "spotId" in spot) continue;
+      const id = freshId(used);
+      used.add(id);
+      spot.spotId = id;
+    }
+  }
+  return result;
+}
+
+export function findItinerarySpot(
+  product: Json,
+  spotId: string,
+): { dayIndex: number; spotIndex: number; spot: Json } | undefined {
+  const itinerary = Array.isArray(product.itinerary) ? product.itinerary : [];
+  for (let dayIndex = 0; dayIndex < itinerary.length; dayIndex += 1) {
+    const day = itinerary[dayIndex];
+    if (!isRecord(day)) continue;
+    const spots = spotsOf(day);
+    for (let spotIndex = 0; spotIndex < spots.length; spotIndex += 1) {
+      const spot = spots[spotIndex];
+      if (isRecord(spot) && spot.spotId === spotId) return { dayIndex, spotIndex, spot };
+    }
+  }
+  return undefined;
+}

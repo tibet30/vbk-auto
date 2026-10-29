@@ -14,6 +14,8 @@ import type { CtripLibraryCoverAlternate } from "../contracts-ctrip-cover.js";
 export type ItineraryActivityKind = ActivityKind;
 
 export interface ItinerarySpot {
+  /** 景点稳定身份（sp_ + 12 位十六进制），由继承逻辑补齐，模型输出不含此字段。 */
+  spotId?: string;
   name: string;
   poiName: string | null;
   poiId: number | null;

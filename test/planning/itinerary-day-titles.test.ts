@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ReplayDataMissingError } from "../../src/main/infrastructure/replay-data-error.js";
-import { ensureDayTitleFits, fallbackDayTitle, generateItineraryDayTitles, type ItineraryDayTitleRequest } from "../../src/main/planning/itinerary-day-titles.js";
+import { ensureDayTitleFits, fallbackDayTitle, generateItineraryDayTitles, privateTourDayTitleFacts, type ItineraryDayTitleRequest } from "../../src/main/planning/itinerary-day-titles.js";
+import { privateTourDayTitleProblem } from "../../src/shared/private-tour-day-title.js";
 import { ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleBudget } from "../../src/shared/itinerary-day-title.js";
 import { normaliseItineraryArrivalTitle } from "../../src/shared/itinerary-arrival-title.js";
 
@@ -183,4 +184,18 @@ test("私家团兜底前缀：接送日按方向用专车前缀，含营销词�
   const kept = await generateItineraryDayTitles({ product: privateProduct, itinerary: [{ day: 2, title: "经典艺术馆", spots: [{ name: "经典艺术馆" }] }],
     sourceText: () => "", generate: async () => [{ day: 2, title: "专车服务｜经典艺术馆" }] });
   assert.equal(kept[0]!.title, "专车服务｜经典艺术馆");
+});
+
+test("私家团：无景点时标题推导的节点不算事实，营销词照样拦；兜底丢掉该节点并保留途经点", async () => {
+  const route = { sales: { productForm: "privateTour" }, basicInfo: { meetingCity: "西安", destinationCity: "汉中", days: 3 } };
+  const facts = privateTourDayTitleFacts(route, { day: 2, title: "专车服务｜网红打卡一条街", spots: [] });
+  assert.match(privateTourDayTitleProblem("专车服务｜网红打卡一条街", 24, facts) ?? "", /营销词/u);
+  const day = { day: 2, title: "专车服务｜西安-网红打卡街-汉中", spots: [] };
+  assert.match(privateTourDayTitleProblem(day.title, 24, privateTourDayTitleFacts(route, day)) ?? "", /营销词/u);
+  const fitted = String(ensureDayTitleFits(route, day).title);
+  assert.equal(fitted, "专车服务｜西安-汉中");
+  const calls: ItineraryDayTitleRequest[][] = [];
+  await generateItineraryDayTitles({ product: route, itinerary: [day], sourceText: () => "",
+    generate: async (requests) => { calls.push(requests); return [{ day: 2, title: day.title }]; } });
+  assert.match(calls[1]?.[0]?.rejectedReason ?? "", /营销词/u);
 });

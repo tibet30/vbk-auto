@@ -21,6 +21,11 @@ export type PrivateTourTitleFacts = { allowedNames?: string[]; spots?: string[] 
 const MAX_NODES = 4;
 const FORBIDDEN_PUNCT = /[/、：:,，\s]/u;
 
+/** 节点名是否命中营销词；标题推导出的节点命中时不能当作必含项。 */
+export function hasPrivateTourMarketingWord(name: string): boolean {
+  return MARKETING.test(name);
+}
+
 export function isPrivateTourProduct(product: Record<string, unknown> | undefined): boolean {
   const sales = product?.sales;
   return Boolean(sales) && typeof sales === "object" && isPrivateTourForm((sales as Record<string, unknown>).productForm);

@@ -17,6 +17,7 @@ import {
   PRIVATE_TOUR_DEFAULT_PREFIX,
   PRIVATE_TOUR_FREE_PREFIX,
   fitPrivateTourDayTitle,
+  hasPrivateTourMarketingWord,
   isPrivateTourProduct,
   privateTourDayTitleNodes,
   privateTourDayTitleProblem,
@@ -179,15 +180,19 @@ function transferPrefix(source: string): string {
   return matched.length === 1 ? matched[0]![0] : PRIVATE_TOUR_DEFAULT_PREFIX;
 }
 
-/** 私家团当天事实：必含项为首个景点（无景点时取首个非接送节点）与途经节点。 */
+/**
+ * 私家团当天事实：必含项为首个景点（无景点时取标题里首个非接送、无营销词的节点）与途经节点。
+ * allowedNames 只放真实事实（当天 spots 与已确认的途经节点），标题推导的节点不能借此放行营销词。
+ */
 function privateTourDayFacts(product: JsonObject, day: JsonObject) {
   const title = text(day.title);
   const spots = spotNames(day);
   const names = [...new Set([...sequenceNames(title), ...privateTourDayTitleNodes(routeLine(title), spots), ...spots])];
   const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
-  const first = spots[0] ?? names.find((name) => !routeNodes.includes(name) && !supportArrangementType({ name }));
+  const first = spots[0] ?? names.find((name) => !routeNodes.includes(name)
+    && !supportArrangementType({ name }) && !hasPrivateTourMarketingWord(name));
   const required = [...new Set([...(first ? [first] : []), ...routeNodes])];
-  const facts: PrivateTourTitleFacts = { allowedNames: [...required, ...routeNodes], spots };
+  const facts: PrivateTourTitleFacts = { allowedNames: [...new Set(routeNodes)], spots };
   return { names, routeNodes, required, facts };
 }
 
@@ -246,7 +251,7 @@ function titleProblem(product: JsonObject, itinerary: JsonObject[], request: Iti
   const day = itinerary.find((item) => Number(item.day) === request.day) ?? { day: request.day };
   const basic = request.format === "privateTour"
     ? privateTourDayTitleProblem(title, request.maxLength, {
-      allowedNames: [...request.requiredNames, ...(request.optionalNames ?? []), ...request.routeNodes], spots: spotNames(day) })
+      allowedNames: [...new Set(request.routeNodes)], spots: spotNames(day) })
     : itineraryDayTitleProblem(title, request.maxLength);
   if (basic) return basic;
   const compactTitle = compact(title);

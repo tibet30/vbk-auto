@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
-import type { ResearchTask } from "../../../../shared/contracts.js";
+import type { Evidence, ResearchTask } from "../../../../shared/contracts.js";
 import { poiResearchTaskNames } from "../../../../shared/poi-research-tasks.js";
+import { isItinerarySpotId, itinerarySpotKey } from "../../../../shared/itinerary-spot-identity.js";
 import { hasAmbiguousManualPoiSelection, requiresCurrentPoiVerification } from "../../../../shared/research-task-satisfaction.js";
 import type { VerifiedPoiMapping } from "../../../planning/types.js";
 import { touchProduct } from "./products.js";
@@ -84,8 +85,10 @@ export function confirmVerifiedPoiResearchTasks(
     const evidence = parseEvidence(task.evidence_json);
     evidence.push({
       id: randomUUID(),
+      // 文本形式保留给旧读取方与远端同步；结构化 poiMappings 是新的首选来源。
       title: `${VERIFIED_POI_EVIDENCE_MARKER} ${taskMappings.map(mapping =>
         `第${mapping.day}天 ${mapping.spotName} -> ${mapping.poiName} (${mapping.poiId})`).join("；")}`,
+      poiMappings: taskMappings.map(receiptMapping),
       source: "vbk",
       retrievedAt: now(),
       accepted: true,
@@ -97,28 +100,40 @@ export function confirmVerifiedPoiResearchTasks(
 }
 
 function persistedMappingExists(product: Record<string, unknown>, mapping: VerifiedPoiMapping): boolean {
-  if (!Array.isArray(product.itinerary)) return false;
-  return product.itinerary.some((day) => isRecord(day) && Number(day.day) === mapping.day
-    && Array.isArray(day.spots) && day.spots.some((spot) => isRecord(spot)
-      && sameName(String(spot.name ?? ""), mapping.spotName)
-      && spot.poiId === mapping.poiId
-      && sameName(String(spot.poiName ?? ""), mapping.poiName)));
+  return currentSlots(product).some(({ day, spot }) => slotMatches(mapping, day, spot));
 }
 
-/** One current receipt cannot settle another day's same-named pending verification. */
+/** One current receipt cannot settle another day's same-named pending verification.
+ * 改名后任务标签仍是旧名：凭证 spotName 与标签同名时，其 spotId 指向的槽位也归入本任务。 */
 function everyCurrentSlotVerified(product: Record<string, unknown>, name: string, mappings: readonly VerifiedPoiMapping[]): boolean {
-  if (!Array.isArray(product.itinerary)) return false;
-  const slots = product.itinerary.flatMap(day => isRecord(day) && Array.isArray(day.spots)
-    ? day.spots.filter(isRecord).filter(spot => sameName(String(spot.name ?? ''), name))
-      .map(spot => ({ day: Number(day.day), spot })) : []);
+  const key = itinerarySpotKey(name);
+  if (!key) return false;
+  const labelledIds = new Set(mappings.filter((mapping) => itinerarySpotKey(mapping.spotName) === key && isItinerarySpotId(mapping.spotId))
+    .map((mapping) => mapping.spotId));
+  const slots = currentSlots(product).filter(({ spot }) => itinerarySpotKey(spot.name) === key
+    || (isItinerarySpotId(spot.spotId) && labelledIds.has(spot.spotId)));
   const receipts = [...mappings];
   return slots.length > 0 && slots.every(({ day, spot }) => {
-    const index = receipts.findIndex(mapping => mapping.day === day && sameName(mapping.spotName, String(spot.name))
-      && mapping.poiId === spot.poiId && sameName(mapping.poiName, String(spot.poiName)));
+    const index = receipts.findIndex((mapping) => slotMatches(mapping, day, spot));
     if (index < 0) return false;
     receipts.splice(index, 1);
     return true;
   });
+}
+
+function currentSlots(product: Record<string, unknown>): Array<{ day: number; spot: Record<string, unknown> }> {
+  if (!Array.isArray(product.itinerary)) return [];
+  return product.itinerary.flatMap((day) => isRecord(day) && Array.isArray(day.spots)
+    ? day.spots.filter(isRecord).map((spot) => ({ day: Number(day.day), spot })) : []);
+}
+
+/** 双方都有 spotId 时按 spotId + poiId 认定同一槽位（改名不影响）；否则按天 + 名称 + POI。 */
+function slotMatches(mapping: VerifiedPoiMapping, day: number, spot: Record<string, unknown>): boolean {
+  if (isItinerarySpotId(mapping.spotId) && isItinerarySpotId(spot.spotId)) {
+    return mapping.spotId === spot.spotId && spot.poiId === mapping.poiId;
+  }
+  return mapping.day === day && sameName(String(spot.name ?? ""), mapping.spotName)
+    && spot.poiId === mapping.poiId && sameName(String(spot.poiName ?? ""), mapping.poiName);
 }
 
 function parseEvidence(value: string): unknown[] {
@@ -127,7 +142,9 @@ function parseEvidence(value: string): unknown[] {
 
 function verifiedMappingsFromEvidence(value: string): VerifiedPoiMapping[] {
   return parseEvidence(value).flatMap((item) => {
-    const title = isRecord(item) && typeof item.title === "string" ? item.title : "";
+    if (!isRecord(item)) return [];
+    if (Array.isArray(item.poiMappings)) return item.poiMappings.flatMap(structuredMapping);
+    const title = typeof item.title === "string" ? item.title : "";
     if (!title.includes(VERIFIED_POI_EVIDENCE_MARKER)) return [];
     return title.slice(title.indexOf(VERIFIED_POI_EVIDENCE_MARKER) + VERIFIED_POI_EVIDENCE_MARKER.length)
       .split("；").flatMap((part) => {
@@ -136,7 +153,23 @@ function verifiedMappingsFromEvidence(value: string): VerifiedPoiMapping[] {
       });
   });
 }
-function sameName(left: string, right: string): boolean { return left.replace(/\s+/gu, "") === right.replace(/\s+/gu, ""); }
+
+/** 结构化凭证逐项校验；字段不合法的条目丢弃，不让它参与结清。 */
+function structuredMapping(value: unknown): VerifiedPoiMapping[] {
+  if (!isRecord(value)) return [];
+  const { day, spotId, spotName, poiName, poiId } = value;
+  if (typeof day !== "number" || !Number.isInteger(day) || day <= 0) return [];
+  if (typeof poiId !== "number" || !Number.isInteger(poiId) || poiId <= 0) return [];
+  if (typeof spotName !== "string" || !spotName.trim() || typeof poiName !== "string" || !poiName.trim()) return [];
+  return [{ day, ...(isItinerarySpotId(spotId) ? { spotId } : {}), spotName, poiName, poiId }];
+}
+
+function receiptMapping(mapping: VerifiedPoiMapping): NonNullable<Evidence["poiMappings"]>[number] {
+  return { day: mapping.day, ...(isItinerarySpotId(mapping.spotId) ? { spotId: mapping.spotId } : {}),
+    spotName: mapping.spotName, poiName: mapping.poiName, poiId: mapping.poiId };
+}
+
+function sameName(left: string, right: string): boolean { return itinerarySpotKey(left) === itinerarySpotKey(right); }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

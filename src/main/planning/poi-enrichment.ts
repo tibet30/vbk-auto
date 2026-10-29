@@ -17,6 +17,7 @@ import { hasDefinitePoiLocationConflict } from "./poi-location-conflict.js";
 import { isCompatiblePoiIdentity } from "../../shared/poi-candidate-identity.js";
 import { poiResearchFailureDetail } from "../../shared/poi-research-outcome.js";
 import type { VerifiedPoiMapping } from "./types.js";
+import { bracketAliases, recordVerifiedMapping } from "./poi-enrichment/mappings.js";
 
 interface PoiEnrichmentArgs {
   localProductId: string;
@@ -109,14 +110,14 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
         if (match && spot && typeof spot === "object" && !Array.isArray(spot)) {
           applyPoiMatch(spot, match);
           poiUpdated = true;
-          recordVerifiedMapping(verifiedMappings, runtime, day, originalKeyword, match);
+          recordVerifiedMapping(verifiedMappings, runtime, day, spot, originalKeyword, match);
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (match && typeof spot === "string") {
           const index = day.spots.indexOf(spot);
           day.spots[index] = { name: spot };
           applyPoiMatch(day.spots[index], match);
           poiUpdated = true;
-          recordVerifiedMapping(verifiedMappings, runtime, day, originalKeyword, match);
+          recordVerifiedMapping(verifiedMappings, runtime, day, day.spots[index], originalKeyword, match);
           logInfo("[planning.poi]", { event: "query-success", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         } else if (!queryFailed || invalidLocation || reviewingComplete) {
           if (suspended && spot && typeof spot === "object" && !Array.isArray(spot)) {
@@ -153,7 +154,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
           applyPoiMatch(day.spots[index], match);
         } else applyPoiMatch(spot, match);
         poiUpdated = true;
-        recordVerifiedMapping(verifiedMappings, runtime, day, keyword, match);
+        recordVerifiedMapping(verifiedMappings, runtime, day, spot, keyword, match);
         logInfo("[planning.poi]", { event: "query-success-after-references", localProductId, keyword, poiName: match.poiName, poiId: match.poiId });
         continue;
       }
@@ -251,27 +252,6 @@ function boundPointCount(itinerary: any[]): number {
   return itinerary.flatMap((day) => Array.isArray(day?.spots) ? day.spots : [])
     .filter((spot) => spot && typeof spot === "object" && hasCompletePoi(spot)
       && Number.isFinite(spot.latitude) && Number.isFinite(spot.longitude)).length;
-}
-
-function recordVerifiedMapping(
-  mappings: VerifiedPoiMapping[],
-  runtime: OrchestratorRuntime,
-  day: Record<string, unknown>,
-  spotName: string,
-  match: { poiName: string; poiId: number; province?: string; city?: string; district?: string },
-): void {
-  // Only the production controlled selector proves candidate context,
-  // availability and confidence. A bare suggestPoi result cannot settle a
-  // durable operator-selection gate.
-  if (!runtime.resolvePoiSelection) return;
-  const dayNumber = Number(day.day);
-  if (!Number.isInteger(dayNumber) || dayNumber <= 0) return;
-  mappings.push({ day: dayNumber, spotName, ...match });
-}
-
-function bracketAliases(value: string): string[] {
-  const aliases = Array.from(value.matchAll(/[（(]([^）)]+)[）)]/g), (match) => match[1].trim());
-  return [...new Set(aliases.filter((alias) => alias && alias !== value.trim()))];
 }
 
 function queryAliases(value: string): string[] {

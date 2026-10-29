@@ -1,6 +1,7 @@
 import type { ManualReviewFieldInput, PoiSuggestDetailResult } from "../../shared/contracts.js";
 import { isManualPoiCandidateInVerifiedRouteContext } from "../planning/poi-auto-selection.js";
 import type { VerifiedPoiMapping } from "../planning/types.js";
+import { isItinerarySpotId } from "../../shared/itinerary-spot-identity.js";
 import { buildPoiContextForItineraryDay } from "../planning/poi-context.js";
 
 type Json = Record<string, unknown>;
@@ -111,5 +112,5 @@ export function verifiedMappingForManualPoi(product: Json, input: PoiInput): Ver
   const poiId = spot.poiId;
   if (!spotName || !poiName || !positiveInteger(poiId) || !Number.isInteger(dayNumber) || dayNumber <= 0) return null;
   if (poiId !== input.poiId || poiName !== input.poiName.trim()) return null;
-  return { day: dayNumber, spotName, poiName, poiId };
+  return { day: dayNumber, ...(isItinerarySpotId(spot.spotId) ? { spotId: spot.spotId } : {}), spotName, poiName, poiId };
 }

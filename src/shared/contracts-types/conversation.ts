@@ -29,6 +29,8 @@ export interface Evidence {
   source: "vbk" | "web" | "user";
   retrievedAt: string;
   accepted: boolean;
+  /** POI 核查受控凭证的结构化映射；title 同时保留文本形式供旧读取方使用。 */
+  poiMappings?: Array<{ day: number; spotId?: string; spotName: string; poiName: string; poiId: number }>;
 }
 
 export interface ResearchTask {

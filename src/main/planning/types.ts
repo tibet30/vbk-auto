@@ -53,6 +53,8 @@ export interface PoiSuggestContext {
 
 export interface VerifiedPoiMapping {
   day: number;
+  /** 被核验景点的稳定身份；旧凭证或字符串景点没有。 */
+  spotId?: string;
   spotName: string;
   poiName: string;
   poiId: number;

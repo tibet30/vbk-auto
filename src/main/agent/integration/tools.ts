@@ -47,6 +47,7 @@ import { selfRepairItineraryForVbk } from "../../planning/itinerary-self-repair.
 import { createItineraryDraftTools } from "../integration-itinerary-draft-tools.js";
 import { createCreationRecoveryTools } from "../integration-creation-recovery-tools.js";
 import type { AgentTool } from "../types.js";
+import { isItinerarySpotId } from "../../../shared/itinerary-spot-identity.js";
 import { cleanText, productData, positiveInteger, requirePatch, safeJson, type JsonObject, clearUnverifiedItineraryPois as clearUnverifiedItineraryPoisImpl } from "./util.js";
 
 export function createAgentBusinessTools(deps: AgentBusinessDependencies): AgentTool[] {
@@ -210,7 +211,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
             targetPath: ['itinerary'], targetFingerprint: canonicalJson(current.product.itinerary),
           });
           deps.db.confirmVerifiedPoiResearchTasks(ctx.localProductId, [{
-            day, spotName: cleanText(spot.name) || spotName, poiName: candidate.poiName, poiId,
+            day, spotId: isItinerarySpotId(spot.spotId) ? spot.spotId : undefined, spotName: cleanText(spot.name) || spotName, poiName: candidate.poiName, poiId,
             province: cleanText(candidate.province), city: cleanText(candidate.city), district: cleanText(candidate.district),
           }]);
           refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);

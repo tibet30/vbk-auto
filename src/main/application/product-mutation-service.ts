@@ -28,7 +28,7 @@ import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
-import { inheritItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
+import { inheritItinerarySpotIds, isItinerarySpotId, itinerarySpotKey } from "../../shared/itinerary-spot-identity.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { normaliseItineraryArrivalTitle } from "../../shared/itinerary-arrival-title.js";
 import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
@@ -144,6 +144,10 @@ type JsonRecord = Record<string, unknown>;
  * `replace` 接受的是完整产品快照，而封面/资源查询在网络往返期间可能已经过时。
  * 对同一天、同一原始景点，缺失的 incoming POI 不能抹掉已经由 VBK 核验过的绑定。
  * 新写入的完整绑定仍可覆盖旧绑定；不同天、不同景点或活动类型变更都不会借用 POI。
+ *
+ * 景点匹配一对一：两侧都带 spotId 时只认 ID 相同的旧景点（且名称键、kind 仍须一致，
+ * 改名即视为新景点）；任一侧缺 ID 时退回「同天 + 名称键 + kind」。
+ * 每个旧的已核验景点最多被消耗一次，所以同天同名的多个景点不会共用一个 POI。
  */
 function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord): JsonRecord {
   if (!Array.isArray(current.itinerary) || !Array.isArray(incoming.itinerary)) return incoming;
@@ -159,28 +163,42 @@ function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord
     if (!isRecord(incomingDay)) continue;
     const currentDay = currentDays.get(positiveDay(incomingDay.day) ?? -1);
     if (!currentDay || !Array.isArray(currentDay.spots) || !Array.isArray(incomingDay.spots)) continue;
-    const verifiedByName = new Map<string, JsonRecord>();
-    for (const spot of currentDay.spots) {
-      if (!isRecord(spot) || !hasVerifiedPoi(spot)) continue;
-      const name = text(spot.name);
-      if (name) verifiedByName.set(name, spot);
+    const verified = currentDay.spots.filter((spot): spot is JsonRecord => isRecord(spot) && hasVerifiedPoi(spot));
+    if (!verified.length) continue;
+    const consumed = new Set<JsonRecord>();
+    const incomingSpots = incomingDay.spots.filter(isRecord);
+    // 先处理 ID 精确命中，避免缺 ID 的景点按名字抢走后面带 ID 景点的旧 POI。
+    for (const spot of incomingSpots) {
+      if (!isItinerarySpotId(spot.spotId)) continue;
+      const match = verified.find(old => !consumed.has(old) && old.spotId === spot.spotId);
+      if (match && applyVerifiedPoi(spot, match)) consumed.add(match);
     }
-    for (const spot of incomingDay.spots) {
-      if (!isRecord(spot)) continue;
-      const verified = verifiedByName.get(text(spot.name));
-      if (!verified
-        || !requiresItineraryPoi(spot)
-        || !requiresItineraryPoi(verified)
-        || activityKind(spot) !== activityKind(verified)) continue;
-      if (hasVerifiedPoi(spot) && (spot.poiId !== verified.poiId || spot.poiName !== verified.poiName)) continue;
-      spot.poiName = verified.poiName;
-      spot.poiId = verified.poiId;
-      for (const field of ["province", "city", "district"] as const) {
-        if (spot[field] === undefined && verified[field] !== undefined) spot[field] = verified[field];
-      }
+    for (const spot of incomingSpots) {
+      const hasId = isItinerarySpotId(spot.spotId);
+      if (hasId && verified.some(old => old.spotId === spot.spotId)) continue;
+      const match = verified.find(old => !consumed.has(old)
+        // 本侧有 ID 时，只能退回到没有 ID 的旧景点；有别的 ID 的旧景点属于另一个槽位。
+        && (!hasId || !isItinerarySpotId(old.spotId))
+        && itinerarySpotKey(old.name) === itinerarySpotKey(spot.name));
+      if (match && applyVerifiedPoi(spot, match)) consumed.add(match);
     }
   }
   return next;
+}
+
+/** 通过全部保护条件时把旧景点的 POI 绑定写入 incoming 景点；返回是否消耗了旧景点。 */
+function applyVerifiedPoi(spot: JsonRecord, verified: JsonRecord): boolean {
+  if (itinerarySpotKey(spot.name) !== itinerarySpotKey(verified.name)
+    || !requiresItineraryPoi(spot)
+    || !requiresItineraryPoi(verified)
+    || activityKind(spot) !== activityKind(verified)) return false;
+  if (hasVerifiedPoi(spot) && (spot.poiId !== verified.poiId || spot.poiName !== verified.poiName)) return false;
+  spot.poiName = verified.poiName;
+  spot.poiId = verified.poiId;
+  for (const field of ["province", "city", "district"] as const) {
+    if (spot[field] === undefined && verified[field] !== undefined) spot[field] = verified[field];
+  }
+  return true;
 }
 
 function isRecord(value: unknown): value is JsonRecord {

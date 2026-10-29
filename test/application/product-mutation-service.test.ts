@@ -235,3 +235,53 @@ test("AI patch 写入待自动补图的 ctripLibrary cover 时不因缺 imageId/
     minQuality: 3,
   });
 });
+
+function replaceWithStore(current: Record<string, unknown>, incoming: Record<string, unknown>) {
+  let saved = detail(current);
+  const store = {
+    getProduct: () => saved,
+    updateProduct: (_id: string, product: Record<string, unknown>) => { saved = { ...saved, product: product as ProductDetail["product"] }; },
+  };
+  new ProductMutationService(store).replace("p-1", incoming);
+  return (saved.product.itinerary as Array<{ spots: Array<Record<string, unknown>> }>)[0]!.spots;
+}
+
+test("同天两个同名景点各自保留各自 POI", () => {
+  const spot = (spotId: string, poiId: number | null) => ({
+    spotId, name: "古城巷", kind: "attraction", poiName: poiId ? `古城巷${poiId}` : null, poiId,
+  });
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [spot("sp_aaaaaaaaaaaa", 1), spot("sp_bbbbbbbbbbbb", 2)] }] },
+    { itinerary: [{ day: 1, spots: [spot("sp_aaaaaaaaaaaa", null), spot("sp_bbbbbbbbbbbb", null)] }] },
+  );
+  assert.deepEqual(spots.map(item => item.poiId), [1, 2]);
+  assert.deepEqual(spots.map(item => item.poiName), ["古城巷1", "古城巷2"]);
+});
+
+test("名称键等价时仍保留 POI", () => {
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [{ spotId: "sp_aaaaaaaaaaaa", name: "广济桥", kind: "attraction", poiName: "广济桥", poiId: 5 }] }] },
+    { itinerary: [{ day: 1, spots: [{ name: "广济桥（不上桥）", kind: "attraction", poiName: null, poiId: null }] }] },
+  );
+  assert.equal(spots[0]?.poiId, 5);
+  assert.equal(spots[0]?.poiName, "广济桥");
+});
+
+test("改名后不保留 POI", () => {
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [{ spotId: "sp_aaaaaaaaaaaa", name: "广济桥", kind: "attraction", poiName: "广济桥", poiId: 5 }] }] },
+    { itinerary: [{ day: 1, spots: [{ spotId: "sp_aaaaaaaaaaaa", name: "湘子桥", kind: "attraction", poiName: null, poiId: null }] }] },
+  );
+  assert.equal(spots[0]?.poiId, null);
+});
+
+test("无 spotId 的同名景点按顺序一对一消耗旧 POI，不重复占用", () => {
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [{ name: "古城巷", kind: "attraction", poiName: "古城巷", poiId: 1 }] }] },
+    { itinerary: [{ day: 1, spots: [
+      { name: "古城巷", kind: "attraction", poiName: null, poiId: null },
+      { name: "古城巷", kind: "attraction", poiName: null, poiId: null },
+    ] }] },
+  );
+  assert.deepEqual(spots.map(item => item.poiId), [1, null]);
+});

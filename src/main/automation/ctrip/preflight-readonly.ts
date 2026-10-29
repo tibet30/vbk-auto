@@ -1,3 +1,4 @@
+import { isPrivateTourProduct } from "../../../shared/private-tour-day-title.js";
 import { buildReadbackExpectations } from "./itinerary-api/itinerary-transform.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
 import { verifyItineraryReadback } from "./itinerary-api/readback.js";
@@ -17,7 +18,7 @@ export async function buildReadOnlyItineraryReadbackExpectations(
   const itinerary = Array.isArray(product?.itinerary) ? product.itinerary : [];
   const operations = product?.operations ?? {};
   const enrichedItinerary = await enrichItineraryPoiMetadata(page, itinerary);
-  return buildReadbackExpectations({ itinerary: enrichedItinerary, operations, stations });
+  return buildReadbackExpectations({ itinerary: enrichedItinerary, operations, stations, privateTour: isPrivateTourProduct(product) });
 }
 
 /**

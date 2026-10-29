@@ -25,6 +25,7 @@ import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
 import { normaliseItinerarySupport, dayHasTransportArrangement } from "../../../../shared/itinerary-support-arrangements.js";
 import { toVbkDailyUseCar } from "../../../../shared/product-form.js";
 import { HOTEL_SELECTION_NOTE, dailyTransportDescription } from "../../../../shared/itinerary-service-copy.js";
+import { isFreeActivityDayTitle, privateTourDayTitleContent } from "../../../../shared/private-tour-day-title.js";
 import { itineraryAttractions, effectiveItinerarySpotKind } from "../../../../shared/itinerary-activity-kind.js";
 import { effectiveTimedSpots, dayOtherActivities, buildAttractionInfo, dayTimeline, otherDescriptionForActivity } from "./itinerary-timeline.js";
 import type { ProductItineraryDay, ProductOperations, VbkTourDailyDescription, ResolvedStations, ReadbackDayExpectation, ReadbackExpectations } from "./itinerary-types.js";
@@ -54,6 +55,8 @@ export function buildReadbackExpectations(args: {
   itinerary: ProductItineraryDay[];
   operations: ProductOperations;
   stations: ResolvedStations;
+  /** 私家团用车卡片只取「｜」后的内容，自由活动日不放用车卡片。 */
+  privateTour?: boolean;
 }): ReadbackExpectations {
   const { itinerary, operations, stations } = args;
   const days: ReadbackDayExpectation[] = itinerary.map((rawDay, index) => {
@@ -76,7 +79,7 @@ export function buildReadbackExpectations(args: {
         mealsIncluded: key === "B" && operations.mealsIncluded === true,
       })),
       hotels: hotelNamesForDay(day).map((hotelName) => ({ hotelName, hotelTier: hotelRatingForDay(day, operations.hotelTier), selectionNote: HOTEL_SELECTION_NOTE })),
-      transport: operations.transport === "charter" ? { description: dailyTransportDescription(day.title) } : undefined,
+      transport: dailyTransportCopy(day.title, operations, args.privateTour),
       useCar: toVbkDailyUseCar(operations.transport),
       activities: activities.map((activity) => ({
         kind: activity.type === "free" ? "free" : "other",
@@ -116,6 +119,7 @@ export function buildDayDescription(args: {
   totalDays: number;
   operations: ProductOperations;
   stations: ResolvedStations;
+  privateTour?: boolean;
 }): VbkTourDailyDescription {
   const { index, totalDays, operations, stations } = args;
   const day = normaliseItinerarySupport(args.day);
@@ -146,7 +150,8 @@ export function buildDayDescription(args: {
     }));
   }
 
-  if (operations.transport === "charter") infos.push(buildDailyTransportInfo(day.title, sort++));
+  const transport = dailyTransportCopy(day.title, operations, args.privateTour);
+  if (transport) infos.push(buildDailyTransportInfo(transport.title, sort++));
 
   // 3) 景点节点（可由用户明确的“其他”活动替代）。景点按上午/下午拆开，
   // 让餐食自然落在两段游览之间，而不是把全天景点堆在三餐之前。
@@ -235,6 +240,15 @@ export function buildDayDescription(args: {
   };
 }
 
+/** 包车日的用车卡片文案来源；私家团取「｜」之后的内容，自由活动日不放卡片。 */
+function dailyTransportCopy(title: string, operations: ProductOperations, privateTour?: boolean) {
+  if (operations.transport !== "charter") return undefined;
+  if (!privateTour) return { title, description: dailyTransportDescription(title) };
+  if (isFreeActivityDayTitle(title)) return undefined;
+  const content = privateTourDayTitleContent(title);
+  return { title: content, description: dailyTransportDescription(content) };
+}
+
 type MealType = { key: "B" | "L" | "S"; index: 0 | 1 | 2 };
 
 function mealDescription(day: ProductItineraryDay, key: MealType["key"], index: MealType["index"]): string {
@@ -285,6 +299,7 @@ export function transformItinerary(args: {
   operations: ProductOperations;
   stations: ResolvedStations;
   refIdSeed?: string;
+  privateTour?: boolean;
 }): VbkTourDailyDescription[] {
   const { itinerary, operations, stations } = args;
   if (!Array.isArray(itinerary) || itinerary.length === 0) {
@@ -308,6 +323,7 @@ export function transformItinerary(args: {
       totalDays: itinerary.length,
       operations,
       stations,
+      privateTour: args.privateTour,
     }),
   );
 }

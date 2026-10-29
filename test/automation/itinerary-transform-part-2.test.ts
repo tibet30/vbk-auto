@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   buildDayDescription,
+  buildReadbackExpectations,
   transformItinerary,
   type ProductItineraryDay,
   type ProductOperations,
@@ -195,4 +196,22 @@ test("3 天行程：refId 一律为 null（不做去重 / 不参与协议字段�
       if (info.tourDailyDinner && "refId" in info.tourDailyDinner) assert.equal(info.tourDailyDinner.refId, null);
     }
   }
+});
+
+test("私家团包车日用车卡片只取「｜」后的内容，自由活动日不放用车卡片", () => {
+  const days = [
+    makeDay({ day: 1, title: "【出发地-丽江】专车服务｜故宫·天坛" }),
+    makeDay({ day: 2, title: "自由活动｜丽江古城" }),
+    makeDay({ day: 3, title: "专车送机｜丽江古城" }),
+  ];
+  const out = transformItinerary({ itinerary: days, operations: baseOps, stations: baseStations, privateTour: true });
+  const cards = out.map((day) => day.tourDailyInfos.filter((info) => info.activeType?.key === 8));
+  assert.equal(cards[0]!.length, 1);
+  assert.equal(cards[0]![0]!.description, "故宫·天坛，全天用车");
+  assert.equal(cards[1]!.length, 0);
+  assert.equal(cards[2]![0]!.description, "丽江古城，全天用车");
+  const expected = buildReadbackExpectations({ itinerary: days, operations: baseOps, stations: baseStations, privateTour: true });
+  assert.deepEqual(expected.days.map((day) => day.transport?.description), ["故宫·天坛，全天用车", undefined, "丽江古城，全天用车"]);
+  const group = transformItinerary({ itinerary: [days[1]!], operations: baseOps, stations: baseStations });
+  assert.equal(group[0]!.tourDailyInfos.find((info) => info.activeType?.key === 8)?.description, "自由活动｜丽江古城，全天用车");
 });

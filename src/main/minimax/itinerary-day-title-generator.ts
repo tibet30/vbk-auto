@@ -12,6 +12,9 @@ const SYSTEM_PROMPT = "你负责为已确定的旅游行程逐日撰写 VBK 天�
   + "字数严格不超过该天的 maxLength（按字符计数，含标点与空格）。"
   + "rejectedReason 非空表示上一版被本地校验拒绝，必须针对该原因修正。";
 
+/** 私家团标题模板（format 为 privateTour 的天）；optionalNames 放得下才写。 */
+export const PRIVATE_TOUR_DAY_TITLE_PROMPT = "私家团标题格式为「前缀｜当天内容」，前缀只能从 专车服务、专车接机、专车接站、专车送机、专车送站、自由活动 中选；城市之间用「-」，同城景点之间用「·」，最多 3 个景点；不得使用 emoji、括号、+、→、营销词。";
+
 /**
  * 天标题专用生成器：一次请求返回全部天的标题。只产出候选值，是否采纳由调用方
  * 的本地校验（长度 / 景点完整性 / 不串天）决定。
@@ -27,7 +30,9 @@ export async function generateItineraryDayTitles(
   const response = await client.chat.completions.create({
     model,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: requests.some((request) => request.format === "privateTour")
+        ? `${SYSTEM_PROMPT}${PRIVATE_TOUR_DAY_TITLE_PROMPT}optionalNames 中的景点在字数允许时按原顺序补入。`
+        : SYSTEM_PROMPT },
       { role: "user", content: `需要生成标题的天：${JSON.stringify(requests)}` },
     ],
     temperature: 0.3,

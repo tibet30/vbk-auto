@@ -1,4 +1,5 @@
 import { arrivalTitlePrefix } from './itinerary-arrival-title.js';
+import { PRIVATE_TOUR_DAY_TITLE_MAX_LENGTH, isPrivateTourProduct } from './private-tour-day-title.js';
 
 /**
  * 天标题写入 VBK `dailyDescription`，平台对超长标题直接 Ack=Failure
@@ -11,10 +12,11 @@ export function itineraryDayTitleLength(title: string): number {
   return [...title.trim()].length;
 }
 
-/** 当天标题（不含首日前缀）可用的字符预算。 */
+/** 当天标题（不含首日前缀）可用的字符预算；私家团整行按 24 字计。 */
 export function itineraryDayTitleBudget(product: Record<string, unknown>, day: number): number {
   const prefix = day === 1 ? arrivalTitlePrefix(product) : '';
-  return ITINERARY_DAY_TITLE_MAX_LENGTH - [...prefix].length;
+  const limit = isPrivateTourProduct(product) ? PRIVATE_TOUR_DAY_TITLE_MAX_LENGTH : ITINERARY_DAY_TITLE_MAX_LENGTH;
+  return limit - [...prefix].length;
 }
 
 /** 标题只做一行摘要：不能带换行、分节括号或「建议」类说明。 */

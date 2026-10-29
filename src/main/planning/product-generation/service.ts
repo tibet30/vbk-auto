@@ -3,6 +3,7 @@ import type { PlanningStageError, PlanningStageOutput } from "../../../shared/co
 import { projectCompleteItinerary } from "../complete-itinerary-projection.js";
 import { ensureDayTitleFits, generateItineraryDayTitles, itineraryDaySourceText } from "../itinerary-day-titles.js";
 import { itineraryDayTitleBudget, itineraryDayTitleProblem } from "../../../shared/itinerary-day-title.js";
+import { isPrivateTourProduct, privateTourDayTitleProblem } from "../../../shared/private-tour-day-title.js";
 import { logWarn } from "../../../shared/log-timestamp.js";
 import { excludedItineraryCopyConflicts } from "../itinerary-alternative-consistency.js";
 import { executeStageOutput } from "../stage-runner.js";
@@ -95,7 +96,8 @@ export class ProductGenerationService {
       if (module.module !== "itinerary" || !Array.isArray(module.value)) return module;
       const itinerary = module.value as JsonObject[];
       const needsTitle = (day: JsonObject) => projected
-        || Boolean(itineraryDayTitleProblem(String(day.title ?? ""), itineraryDayTitleBudget(productJson, Number(day.day))));
+        || Boolean((isPrivateTourProduct(productJson) ? privateTourDayTitleProblem : itineraryDayTitleProblem)(
+          String(day.title ?? ""), itineraryDayTitleBudget(productJson, Number(day.day))));
       const targets = itinerary.filter(needsTitle);
       if (!targets.length) return module;
       const generate = this.deps.generateItineraryDayTitles;

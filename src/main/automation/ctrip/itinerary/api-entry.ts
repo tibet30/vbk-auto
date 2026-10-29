@@ -38,6 +38,7 @@ export interface ItineraryDraftProduct {
   itinerary?: ProductItineraryDay[];
   operations?: ProductOperations;
   productId?: string | number;
+  sales?: unknown;
 }
 
 /**
@@ -62,6 +63,7 @@ export async function fillItineraryDraftApi(
     itinerary: product.itinerary,
     operations: product.operations,
     productId: product.productId,
+    sales: product.sales,
   }, productId, { readOnlyBeforeWrite: options.readOnlyBeforeWrite });
   if (!apiResult?.tourInfoId) {
     throw new Error("行程阶段全量接口保存：ensureItineraryApi 未返回合法 tourInfoId。");

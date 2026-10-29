@@ -80,7 +80,8 @@ function explicitOriginalOvernightName(source: string | undefined): string | und
 }
 
 function routeTitleContainsNode(title: string, name: string): boolean {
-  return new RegExp(`(?:^|[—→·-])\\s*${escapeRegExp(name)}\\s*(?:[—→·-]|$)`, "u").test(title);
+  // 私家团标题「专车服务｜大理-丽江」里，「｜」后的首个节点同样是独立路线节点。
+  return new RegExp(`(?:^|[—→·｜-])\\s*${escapeRegExp(name)}\\s*(?:[—→·-]|$)`, "u").test(title);
 }
 
 function escapeRegExp(value: string): string {

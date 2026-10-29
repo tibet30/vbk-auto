@@ -1,5 +1,6 @@
 import { PLATFORM_HOTEL_GUIDE } from "../../../shared/platform-hotel-rules.js";
 import { ITINERARY_DAY_TITLE_MAX_LENGTH } from "../../../shared/itinerary-day-title.js";
+import { PRIVATE_TOUR_DAY_TITLE_MAX_LENGTH, PRIVATE_TOUR_DAY_TITLE_PREFIXES } from "../../../shared/private-tour-day-title.js";
 import { hasCompleteNumberedRoute } from "../numbered-route-constraints.js";
 /**
  * 阶段级 planning prompt。
@@ -36,7 +37,7 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
 6. 如果 destination 是省、自治区或直辖市，默认只围绕系统指定的核心游览城市选点；需要第二个核心城市时，只能选择系统给出的近邻城市，禁止全省撒点。
 7. 同一天的 spots 必须按实际游览顺序排列，并集中在同一城市或彼此相邻的片区；逐一检查相邻及前后 POI，禁止安排明显远距离、跨城折返或会触发“POI离群”的景点组合。
 8. 远距离或跨城景点优先拆到不同日期；确需同日移动时，description 必须在对应景点之间明确写出航班、高铁或长途专车等交通衔接及合理时长，不能把远距离 POI 直接连续排列。
-8a. title 是一行简洁中文天标题，最多 ${ITINERARY_DAY_TITLE_MAX_LENGTH} 个字符（首日会被追加「【出发地-城市】」前缀，需再预留约 10 字）；只概括当天路线与核心游览，不得包含换行、括号建议、服务说明或价格。
+8a. title 是一行简洁中文天标题，最多 ${ITINERARY_DAY_TITLE_MAX_LENGTH} 个字符（首日会被追加「【出发地-城市】」前缀，需再预留约 10 字）；只概括当天路线与核心游览，不得包含换行、括号建议、服务说明或价格。私家团 title 格式为「前缀｜当天内容」，整行（含首日前缀）最多 ${PRIVATE_TOUR_DAY_TITLE_MAX_LENGTH} 字；前缀只能是 ${PRIVATE_TOUR_DAY_TITLE_PREFIXES.join("、")} 之一，城市之间用「-」，同城景点之间用「·」，最多 3 个景点，例如「专车服务｜故宫·景山公园·什刹海」。
 9. spots[].timeOfDay 只接受 morning 或 afternoon，不允许 evening/night/晚上。星空、夜拍等夜间安排必须额外写入 activities（time 为“晚上”，type 为 other），保留用户指定地点和体验；实际白天游览的景点仍在 spots 内核验 POI，不得将夜拍改成下午或只写在交通描述里。`,
   presentation: `1. recommendationCategory 与 recommendations[].category 只能从本次读取的 VBK 可用类别选择：{{RECOMMENDATION_CATEGORIES}}。
 2. recommendations 数组长度必须严格等于 3：只输出第 1、2、3 条，禁止第 4 条或更多；category 互不重复。数组长度不是 3 会导致本阶段整体失败并重试。

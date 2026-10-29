@@ -111,3 +111,51 @@ test("ensureDayTitleFits 去掉换行与括号建议后再判断，合格标题�
   assert.equal(ensureDayTitleFits(product, raw).title, "万州 → 返程");
   assert.equal(ensureDayTitleFits(product, itinerary[2]!).title, itinerary[2]!.title);
 });
+
+const privateProduct = { sales: { productForm: "privateTour" }, basicInfo: { meetingCity: "北京", destinationCity: "北京", days: 2 } };
+const privateItinerary = [
+  { day: 1, title: "故宫 · 天坛 · 颐和园", spots: [{ name: "故宫" }, { name: "天坛" }, { name: "颐和园" }] },
+  { day: 2, title: "八达岭长城 · 十三陵", spots: [{ name: "八达岭长城" }, { name: "十三陵" }] },
+];
+
+test("私家团请求按 24 字预算并只把首个景点设为必含，跟团游仍是 70", async () => {
+  let seen: ItineraryDayTitleRequest[] = [];
+  await generateItineraryDayTitles({
+    product: privateProduct, itinerary: privateItinerary, sourceText: () => "",
+    generate: async (requests) => { seen = requests; return [{ day: 1, title: "专车服务｜故宫·天坛·颐和园" }, { day: 2, title: "专车服务｜八达岭长城·十三陵" }]; },
+  });
+  assert.equal(seen[0]!.maxLength, 24 - "【出发地-北京】".length);
+  assert.equal(seen[1]!.maxLength, 24);
+  assert.equal(seen[0]!.format, "privateTour");
+  assert.deepEqual(seen[0]!.requiredNames, ["故宫"]);
+  assert.deepEqual(seen[0]!.optionalNames, ["天坛", "颐和园"]);
+  assert.equal(itineraryDayTitleBudget(privateProduct, 2), 24);
+  assert.equal(itineraryDayTitleBudget({ sales: { productForm: "groupTour" } }, 2), ITINERARY_DAY_TITLE_MAX_LENGTH);
+  let groupSeen: ItineraryDayTitleRequest[] = [];
+  await generateItineraryDayTitles({ product, itinerary, sourceText: () => "", generate: async (requests) => { groupSeen = requests; return []; } });
+  assert.equal(groupSeen[1]!.maxLength, 70);
+  assert.equal(groupSeen[1]!.format, undefined);
+});
+
+test("私家团 AI 标题须带合法前缀，否则带原因重试", async () => {
+  const calls: ItineraryDayTitleRequest[][] = [];
+  const result = await generateItineraryDayTitles({
+    product: privateProduct, itinerary: [privateItinerary[1]!], sourceText: () => "",
+    generate: async (requests) => {
+      calls.push(requests);
+      return [{ day: 2, title: calls.length === 1 ? "包车服务｜八达岭长城" : "专车服务｜八达岭长城" }];
+    },
+  });
+  assert.match(calls[1]![0]!.rejectedReason ?? "", /前缀/u);
+  assert.equal(result[0]!.title, "专车服务｜八达岭长城");
+});
+
+test("私家团 ensureDayTitleFits：补专车服务前缀并裁到 24 字，无景点无途经点补自由活动", () => {
+  const fitted = ensureDayTitleFits(privateProduct, { day: 2, title: "八达岭长城 · 十三陵 · 居庸关 · 慕田峪长城", spots: ["八达岭长城", "十三陵", "居庸关", "慕田峪长城"].map((name) => ({ name })) });
+  assert.match(String(fitted.title), /^专车服务｜八达岭长城/u);
+  assert.ok([...String(fitted.title)].length <= 24, String(fitted.title));
+  const free = ensureDayTitleFits(privateProduct, { day: 2, title: "北京市区", spots: [] });
+  assert.equal(free.title, "自由活动｜北京市区");
+  const ok = { day: 2, title: "专车服务｜八达岭长城·十三陵", spots: [] };
+  assert.equal(ensureDayTitleFits(privateProduct, ok), ok);
+});

@@ -45,11 +45,12 @@ import {
 } from "./steps.js";
 import type { ApiPage, ItineraryApiResult } from "./transport.js";
 import { linkedVersionId, linkedVersionSummary, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
+import { isPrivateTourProduct } from "../../../../shared/private-tour-day-title.js";
 import { approvedFormalDraftSource, assertCreatedDraftRelation } from "./draft-source.js";
 
 export async function ensureItineraryApi(
   page: ApiPage,
-  product: { itinerary: ProductItineraryDay[]; operations?: ProductOperations; productId?: string | number },
+  product: { itinerary: ProductItineraryDay[]; operations?: ProductOperations; productId?: string | number; sales?: unknown },
   productId: string,
   options: { readOnlyBeforeWrite?: boolean } = {},
 ): Promise<ItineraryApiResult> {
@@ -58,6 +59,7 @@ export async function ensureItineraryApi(
   }
   product = normalisePlatformHotelProduct(product) as typeof product;
   const operations: ProductOperations = product.operations ?? {};
+  const privateTour = isPrivateTourProduct(product);
   if (!operations.pickupCity) {
     throw new Error("operations.pickupCity 缺失，无法解析接送站。");
   }
@@ -94,7 +96,7 @@ export async function ensureItineraryApi(
   }
 
   if (options.readOnlyBeforeWrite && (formalSource || initialCreation)) throw new Error("VBK 尚无独立行程草稿，不能把正式稿或空模板作为写入恢复回读。");
-  if (options.readOnlyBeforeWrite) return readExistingItineraryDraft(page, productId, writableVersion.id, auditTourInfoId ?? "", { itinerary: enrichedItinerary, operations, stations });
+  if (options.readOnlyBeforeWrite) return readExistingItineraryDraft(page, productId, writableVersion.id, auditTourInfoId ?? "", { itinerary: enrichedItinerary, operations, stations, privateTour });
 
   // 4) 草稿详情是正常草稿保存的输入模板；写入只以关联 draft ID 为源，绝不使用
   // formal/audit 详情替代；已采样的正式稿复制路径只把正式稿用作只读输入。
@@ -112,6 +114,7 @@ export async function ensureItineraryApi(
     itinerary: enrichedItinerary,
     operations,
     stations,
+    privateTour,
   });
 
   // 5) 拼装完整 tourInfo payload（含 template / templateId / days / tourDailyDescriptions）
@@ -253,6 +256,7 @@ export async function ensureItineraryApi(
     itinerary: enrichedItinerary,
     operations,
     stations,
+    privateTour,
   });
   const verify = await verifyItineraryReadback(page, finalWritableTourInfoId, readbackExpectations);
 

@@ -219,3 +219,12 @@ test("验收第二轮和产品名中的序号不作为天数标记，顺序说�
     { day: 2, spots: ["尧坝古镇", "泸县玉蟾山景区"] },
   ]);
 });
+
+test("read_product 使用的 Agent 产品上下文不含 spotId", () => {
+  const product = draft();
+  product.product.itinerary![0]!.spots[0]!.spotId = "sp_aaaaaaaaaaaa";
+  const visible = agentProductContext(product);
+  assert.doesNotMatch(JSON.stringify(visible), /spotId|sp_aaaaaaaaaaaa/);
+  assert.doesNotMatch(agentTaskContext({ getProduct: () => product, getAgentSnapshot: () => undefined } as any, product.id), /spotId/);
+  assert.equal(product.product.itinerary![0]!.spots[0]!.spotId, "sp_aaaaaaaaaaaa");
+});

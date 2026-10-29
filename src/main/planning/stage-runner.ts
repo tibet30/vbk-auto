@@ -15,6 +15,7 @@ import { isAcceptablePlanningRegionName, isProvinceLevelName, normaliseProvinceN
 import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-policy.js";
 import { fitPresentationRecommendationTexts } from "./vbk-recommendation-length.js";
 import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
+import { stripItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
 import { trustedPresentationPoiNames } from "./vbk-copy-identity.js";
 import { presentationRecommendationTexts, recommendationQualityProblems } from "./validation/recommendation-quality.js";
 
@@ -99,6 +100,8 @@ export function sanitiseModuleValue(
     };
   }
 
+  // 模型生成的行程模块不得携带 spotId：ID 只由保存时的继承分配（决策 6）。
+  if (module === "itinerary" && Array.isArray(value)) value = stripItinerarySpotIds(value);
   if (module === "release" && value && typeof value === "object" && !Array.isArray(value)) {
     value = { ...(value as Record<string, unknown>), submitReview: false, publishAfterApproval: false };
   }

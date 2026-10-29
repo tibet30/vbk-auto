@@ -127,3 +127,10 @@ test("operations 阶段只允许 AI 写 vehicleResource.requestedTotalCost", () 
     { ok: false, reason: "AI 输出包含禁写字段 vehicleResource" },
   );
 });
+
+test("generate_product_module 的行程模块丢弃模型给出的 spotId", () => {
+  const result = sanitiseModuleValue("itinerary", [{ day: 1, title: "古城", description: "游览", hotel: "无", meals: "自理",
+    spots: [{ spotId: "sp_aaaaaaaaaaaa", name: "平遥古城", kind: "attraction" }] }]);
+  assert.equal(result.ok, true);
+  assert.doesNotMatch(JSON.stringify(result.ok ? result.value : null), /spotId/);
+});

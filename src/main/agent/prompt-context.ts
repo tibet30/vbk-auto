@@ -4,6 +4,7 @@ import { evaluatePreparationCompletion, toVisibleReadiness } from "../planning/p
 import { projectProductContext } from "../planning/adapters/planning-prompt.js";
 import { requiredAgentPhases } from "./integration-gates.js";
 import { preparationStageGaps } from "../planning/preparation/policy.js";
+import { stripItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
 
 export { PREPARATION_PROMPT_VERSION };
 
@@ -49,7 +50,7 @@ export function buildAgentProductContext(product: ProductDetail, snapshot?: Agen
     completionCriteria: preparation.completionCriteria,
     lockedConstraints: preparation.lockedConstraints,
     itineraryInputMode: preparation.itineraryInputMode,
-    product: product.product,
+    product: withoutSpotIds(product.product),
     researchTasks: product.researchTasks.map(({ id, label, state, detail }) => ({ id, label, state, detail })),
     automation: product.automation
       ? { status: product.automation.status, currentPhase: product.automation.currentPhase, phases: product.automation.phases }
@@ -145,4 +146,10 @@ function itineraryModeRule(mode: string): string {
   if (mode === "complete") return "用户已给出完整每日行程：禁止整体重排或替换，只允许规范化和 POI 核验。";
   if (mode === "partial") return "用户已给出部分行程约束：保留 lockedConstraints 中的目的地、天数、指定 POI、日序和交通方式，只补空缺。";
   return "用户未给出行程：可以完整生成每日行程，但仍须保留已锁定城市和天数。";
+}
+
+/** spotId 不进入模型上下文（决策 6）；返回副本，不改入参。 */
+export function withoutSpotIds<T extends object>(product: T): T {
+  const itinerary = (product as { itinerary?: unknown }).itinerary;
+  return Array.isArray(itinerary) ? { ...product, itinerary: stripItinerarySpotIds(itinerary) } : product;
 }

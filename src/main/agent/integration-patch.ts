@@ -5,6 +5,7 @@ import { extractLockedConstraints } from './prompt-helpers.js';
 import { itineraryInputContractError } from '../planning/itinerary-input-contract.js';
 import { itineraryDaySchema } from '../planning/itinerary-day-schema.js';
 import { normaliseHotelTier, inferHotelTierFromUserText, hotelDiamondFromTier } from '../../shared/hotel-tiers.js';
+import { stripItinerarySpotIds } from '../../shared/itinerary-spot-identity.js';
 
 type Json = Record<string, unknown>;
 type Patch = NonNullable<AiResponse['patch']>;
@@ -263,8 +264,10 @@ function assertDurationPatchValue(basic: Json | undefined, key: "days" | "nights
   }
 }
 
-function mergeItineraryDays(current: unknown, incoming: unknown): Json[] {
-  if (!Array.isArray(incoming)) throw new Error('行程必须是逐日列表。');
+function mergeItineraryDays(current: unknown, rawIncoming: unknown): Json[] {
+  if (!Array.isArray(rawIncoming)) throw new Error('行程必须是逐日列表。');
+  // spotId 只能来自保存时的继承；模型补丁里的 spotId（可能抄自别的天）一律丢弃。
+  const incoming = stripItinerarySpotIds(rawIncoming);
   const existingDays = Array.isArray(current) ? current.filter(record) : [];
   const byDay = new Map(existingDays.map((day) => [Number(day.day), day]));
   const seen = new Set<number>();

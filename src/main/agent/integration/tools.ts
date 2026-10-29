@@ -47,7 +47,7 @@ import { selfRepairItineraryForVbk } from "../../planning/itinerary-self-repair.
 import { createItineraryDraftTools } from "../integration-itinerary-draft-tools.js";
 import { createCreationRecoveryTools } from "../integration-creation-recovery-tools.js";
 import type { AgentTool } from "../types.js";
-import { isItinerarySpotId } from "../../../shared/itinerary-spot-identity.js";
+import { isItinerarySpotId, stripItinerarySpotIds } from "../../../shared/itinerary-spot-identity.js";
 import { cleanText, productData, positiveInteger, requirePatch, safeJson, type JsonObject, clearUnverifiedItineraryPois as clearUnverifiedItineraryPoisImpl } from "./util.js";
 
 export function createAgentBusinessTools(deps: AgentBusinessDependencies): AgentTool[] {
@@ -264,7 +264,7 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const result = await resolveItineraryPoisAndTraffic(ctx.localProductId);
         refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         deps.emitProduct(get(ctx.localProductId));
-        return {content:safeJson({...result,itinerary:get(ctx.localProductId).product.itinerary})};
+        return {content:safeJson({...result,itinerary:stripItinerarySpotIds((get(ctx.localProductId).product.itinerary ?? []) as unknown[])})};
       },
     },
   ];

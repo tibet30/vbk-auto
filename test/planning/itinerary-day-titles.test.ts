@@ -159,3 +159,12 @@ test("私家团 ensureDayTitleFits：补专车服务前缀并裁到 24 字，无
   const ok = { day: 2, title: "专车服务｜八达岭长城·十三陵", spots: [] };
   assert.equal(ensureDayTitleFits(privateProduct, ok), ok);
 });
+
+test("私家团兜底：整句标题放不下时用当天景点重组，不写「第N天行程安排」", () => {
+  const sentence = "八达岭长城" + "，登城远眺感受燕山雄关气势".repeat(3);
+  const fitted = ensureDayTitleFits(privateProduct, { day: 2, title: sentence, spots: [{ name: "八达岭长城" }, { name: "十三陵" }] });
+  assert.equal(fitted.title, "专车服务｜八达岭长城·十三陵");
+  const empty = ensureDayTitleFits(privateProduct, { day: 2, title: "全天" + "自由安排休息".repeat(5), spots: [] });
+  // 无景点、无途经点且原句放不下：只剩自由活动前缀，内容无事实可用，保留日序占位。
+  assert.equal(empty.title, "自由活动｜第2天行程安排");
+});

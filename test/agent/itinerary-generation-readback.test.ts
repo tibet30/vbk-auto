@@ -77,7 +77,8 @@ test("accepted itinerary 的旧 POI 经本次独立查询验证后保留 ID 和�
   const { saved, tool } = toolsFor({ reply: "ok", modules: [{ module: "itinerary", status: "accepted", value: itinerary }] });
   const result = await tool.execute({ stage: "itinerary" }, { localProductId: saved().id, accountKey: "a", productVersion: "v" });
   assert.match(result.content, /"itinerary"/);
-  assert.equal(saved().product.itinerary?.[0]?.title, "【出发地-成都】宽窄巷子");
+  // 私家团：规划标题缺前缀时按「前缀｜当天内容」补「专车服务｜」，首日再加出发地前缀。
+  assert.equal(saved().product.itinerary?.[0]?.title, "【出发地-成都】专车服务｜宽窄巷子");
   assert.equal(saved().product.itinerary?.[0]?.spots?.[0]?.poiId, 101);
   assert.equal(saved().product.itinerary?.[1]?.spots?.[0]?.poiId, 102);
   assert.equal(evaluatePreparationCompletion(saved()).currentNode, "copy");

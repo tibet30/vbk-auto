@@ -123,22 +123,32 @@ export function ensureDayTitleFits(product: JsonObject, day: JsonObject): JsonOb
   return { ...day, title: fallbackDayTitle({ day: dayNumber, title: routeLine(title), names, budget, routeNodes }) };
 }
 
-/** 私家团：AI 重试仍不合格时从末尾删景点；没有合法前缀时补「专车服务｜」或「自由活动｜」。 */
+/**
+ * 私家团：AI 重试仍不合格时先从末尾删节点；仍不合格就用当天景点与途经节点重组
+ * 「前缀｜内容」。没有合法前缀时补「专车服务｜」，无景点无途经点补「自由活动｜」。
+ */
 function ensurePrivateTourDayTitle(product: JsonObject, day: JsonObject, dayNumber: number, budget: number): JsonObject {
   // 首日前缀在保存时统一追加，预算已扣除；这里先去掉，避免重复计数。
   const title = text(day.title).replace(/^(?:【出发地\s*[-－—–]\s*[^】]+】\s*)+/u, "");
   if (title && !privateTourDayTitleProblem(title, budget)) return title === text(day.title) ? day : { ...day, title };
   const route = routeLine(title);
-  const names = [...new Set([...sequenceNames(title), ...privateTourDayTitleNodes(route), ...spotNames(day)])];
+  const spots = spotNames(day);
+  const names = [...new Set([...sequenceNames(title), ...privateTourDayTitleNodes(route), ...spots])];
   const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
   const head = route.split("｜")[0]!.trim();
   const hasPrefix = route.includes("｜") && (PRIVATE_TOUR_DAY_TITLE_PREFIXES as readonly string[]).includes(head);
-  const prefix = !spotNames(day).length && !routeNodes.length ? PRIVATE_TOUR_FREE_PREFIX : PRIVATE_TOUR_DEFAULT_PREFIX;
-  const source = hasPrefix ? route : `${prefix}｜${route || spotNames(day).join("·")}`;
-  const fitted = fitPrivateTourDayTitle(source, budget, routeNodes);
-  if (!privateTourDayTitleProblem(fitted, budget)) return { ...day, title: fitted };
+  const prefix = hasPrefix ? head : !spots.length && !routeNodes.length ? PRIVATE_TOUR_FREE_PREFIX : PRIVATE_TOUR_DEFAULT_PREFIX;
+  const fitted = fitPrivateTourDayTitle(hasPrefix ? route : `${prefix}｜${route}`, budget, routeNodes);
+  if (route && !privateTourDayTitleProblem(fitted, budget)) return { ...day, title: fitted };
+  // 原标题是整句或放不下：只用当天事实（景点、途经节点）重组，不写通用占位。
+  const facts = names.filter((name) => spots.includes(name) || routeNodes.includes(name));
+  if (facts.length) {
+    const content = facts.map((name, index) => (!index ? "" : routeNodes.includes(name) || routeNodes.includes(facts[index - 1]!) ? "-" : "·") + name).join("");
+    const rebuilt = fitPrivateTourDayTitle(`${prefix}｜${content}`, budget, routeNodes);
+    if (!privateTourDayTitleProblem(rebuilt, budget)) return { ...day, title: rebuilt };
+  }
   if (routeNodes.length) throw new Error(`第 ${dayNumber} 天标题无法在长度限制内保留全部途经点`);
-  return { ...day, title: `${hasPrefix ? head : prefix}｜第${dayNumber}天行程安排` };
+  return { ...day, title: `${prefix}｜第${dayNumber}天行程安排` };
 }
 
 /** 路线首行：去掉括号建议与句末标点，供无景点日的兜底标题使用。 */

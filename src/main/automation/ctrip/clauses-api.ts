@@ -7,12 +7,14 @@
 
 import { vbkSessionRequest, type VbkSessionRequestBrowser } from "../../infrastructure/vbk-session-request.js";
 import {
+  ensureOptionalClause,
   ensureRequiredClause,
   formatSelectedClauseItems,
   setClauseComponentValue,
 } from "./structured-clause-items.js";
 
 export {
+  ensureOptionalClause,
   ensureRequiredClause,
   formatSelectedClauseItems,
   setClauseComponentValue,
@@ -54,7 +56,20 @@ export const REQUIRED_CLAUSE_IDS = {
   adultTicketIncluded: 13,
   // 费用包含页：儿童行程所列景点/场馆首道大门票。
   childTicketIncluded: 10087,
+  // 交通须知：航班起飞前 [ ] 分钟到达机场办理登机手续。
+  airportCheckIn: 491,
 } as const;
+
+/**
+ * 说明&须知页（tab 4）追加勾选的须知条款：游船不可抗力、自费活动、娱乐场所、
+ * 交通/证件/车辆/火车票/儿童票、长江码头、当地经济条件、旺季早餐。
+ * 平台条款包按模板下发，缺失的条款静默跳过，不做失败条件。
+ */
+export const OPTIONAL_NOTICE_CLAUSE_IDS = [
+  400, 41672, 538, 485, 371, 467, 486, 526, 552, 479, REQUIRED_CLAUSE_IDS.airportCheckIn, 1174, 439, 473,
+] as const;
+const AIRPORT_CHECK_IN_COMPONENT = "tripnoticeinput1";
+export const AIRPORT_CHECK_IN_MINUTES = "120";
 
 const LODGING_SELF_PAY_NOTE = "单房差及儿童占床费用（如产生），具体金额以出行前实际确认为准";
 export const HOLIDAY_PENALTY_RATE = 0.8;
@@ -175,6 +190,14 @@ export async function saveStructuredProductClauses(
         items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
       }
     }
+    if (tabEnum === 4 && !isFreeTravel) {
+      for (const clauseItemId of OPTIONAL_NOTICE_CLAUSE_IDS) {
+        items = ensureOptionalClause(items, clausePackage.clauseTypeDtos, clauseItemId);
+      }
+      if (items.some((item) => item.clauseItemId === requiredIds.airportCheckIn)) {
+        items = helpers.setValue(items, requiredIds.airportCheckIn, AIRPORT_CHECK_IN_COMPONENT, AIRPORT_CHECK_IN_MINUTES);
+      }
+    }
     let savePackage;
     try {
       savePackage = await helpers.request(
@@ -231,11 +254,26 @@ export async function saveStructuredProductClauses(
       "text/plain;charset=UTF-8",
     );
     const persistedIds = new Set(helpers.format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
+    const sentIds = new Set(items.map((item) => item.clauseItemId));
     const missingIds = isFreeTravel
       ? []
-      : (defaultSelectedClauseIds[tabEnum] ?? []).filter((id) => !persistedIds.has(id));
+      : [
+        ...(defaultSelectedClauseIds[tabEnum] ?? []),
+        ...(tabEnum === 4 ? OPTIONAL_NOTICE_CLAUSE_IDS.filter((id) => sentIds.has(id)) : []),
+      ].filter((id) => !persistedIds.has(id));
     if (missingIds.length > 0) {
       throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
+    }
+    if (tabEnum === 4 && !isFreeTravel && sentIds.has(requiredIds.airportCheckIn)) {
+      const persistedAirport = helpers.format(persistedPackage.clauseTypeDtos).find(
+        (item) => item.clauseItemId === requiredIds.airportCheckIn,
+      );
+      const persistedMinutes = persistedAirport?.elementDtos?.find(
+        (element) => element.componentCode === AIRPORT_CHECK_IN_COMPONENT,
+      )?.value;
+      if (String(persistedMinutes ?? "") !== AIRPORT_CHECK_IN_MINUTES) {
+        throw new Error(`条款页签 4 保存后回读的航班提前到达分钟数不是 ${AIRPORT_CHECK_IN_MINUTES}`);
+      }
     }
     if (tabEnum === 1 && adultTicketInclusionText) {
       const persistedItems = helpers.format(persistedPackage.clauseTypeDtos);

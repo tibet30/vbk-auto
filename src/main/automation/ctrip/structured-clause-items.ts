@@ -56,12 +56,7 @@ export function formatSelectedClauseItems(clauseTypeDtos: ClauseRecord[] = []): 
   return result;
 }
 
-export function ensureRequiredClause(
-  items: SelectedClauseItem[],
-  clauseTypeDtos: ClauseRecord[] = [],
-  clauseItemId: number,
-): SelectedClauseItem[] {
-  if (items.some((item) => item.clauseItemId === clauseItemId)) return items;
+function findClause(clauseTypeDtos: ClauseRecord[] = [], clauseItemId: number): SelectedClauseItem | undefined {
   for (const type of clauseTypeDtos ?? []) {
     const candidates = [
       ...(type.clauseItemDtos ?? []),
@@ -69,13 +64,35 @@ export function ensureRequiredClause(
     ];
     const target = candidates.find((item: ClauseRecord) => item.clauseItemId === clauseItemId);
     if (!target) continue;
-    return [...items, {
+    return {
       clauseItemId: target.clauseItemId,
       secondClassTypeId: type.clauseTypeId,
       elementDtos: clauseElements(target),
-    }];
+    };
   }
-  throw new Error(`VBK 条款包缺少必选条款 ${clauseItemId}`);
+  return undefined;
+}
+
+export function ensureRequiredClause(
+  items: SelectedClauseItem[],
+  clauseTypeDtos: ClauseRecord[] = [],
+  clauseItemId: number,
+): SelectedClauseItem[] {
+  if (items.some((item) => item.clauseItemId === clauseItemId)) return items;
+  const target = findClause(clauseTypeDtos, clauseItemId);
+  if (!target) throw new Error(`VBK 条款包缺少必选条款 ${clauseItemId}`);
+  return [...items, target];
+}
+
+/** 平台条款包里没有该条款（模板差异）时静默跳过，不当作失败。 */
+export function ensureOptionalClause(
+  items: SelectedClauseItem[],
+  clauseTypeDtos: ClauseRecord[] = [],
+  clauseItemId: number,
+): SelectedClauseItem[] {
+  if (items.some((item) => item.clauseItemId === clauseItemId)) return items;
+  const target = findClause(clauseTypeDtos, clauseItemId);
+  return target ? [...items, target] : items;
 }
 
 export function setClauseComponentValue(

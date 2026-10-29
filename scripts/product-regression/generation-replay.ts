@@ -66,10 +66,11 @@ export function installPlanningTransport(trace: GenerationReplay) {
           function: { name, arguments: JSON.stringify(recording.response) } }] } }] });
     }
     if (name === 'submit_itinerary_day_titles') {
-      const index = dayTitleCalls++;
-      if (index >= 2) throw new Error(`模型阶段超出固定回放次数：${name}`);
+      // 与阶段回放一致：缺记录先记 miss，只有成功回放才计数（SDK 重试不会把 miss 变成普通错误）。
+      const index = dayTitleCalls;
       const recording = trace.dayTitleResponses?.[index];
       if (!recording) return missing(`stage:${name}`);
+      if (++dayTitleCalls > 2) throw new Error(`模型阶段超出固定回放次数：${name}`);
       return Response.json({ id: `replay-dayTitles-${index}`, object: 'chat.completion', created: 0, model: 'fixed-regression',
         choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
           tool_calls: [{ id: `dayTitles-${index}`, type: 'function', function: { name, arguments: JSON.stringify(recording) } }] } }],

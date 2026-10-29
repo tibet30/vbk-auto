@@ -1,6 +1,8 @@
 import type { ProductDetail } from "../../shared/contracts.js";
 import { isReplayDataMissing } from "../infrastructure/replay-data-error.js";
 import { isPersistedRouteTravelNode } from "../../shared/itinerary-route-travel-node.js";
+import { effectiveItinerarySpotKind } from "../../shared/itinerary-activity-kind.js";
+import { itinerarySupportingArrangements, supportArrangementType } from "../../shared/itinerary-support-arrangements.js";
 import { parseProductBriefMessage } from "../../shared/product-brief-message.js";
 import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 import { daySection } from "./day-sections.js";
@@ -18,6 +20,7 @@ import {
   isPrivateTourProduct,
   privateTourDayTitleNodes,
   privateTourDayTitleProblem,
+  type PrivateTourTitleFacts,
 } from "../../shared/private-tour-day-title.js";
 
 type JsonObject = Record<string, unknown>;
@@ -125,30 +128,72 @@ export function ensureDayTitleFits(product: JsonObject, day: JsonObject): JsonOb
 
 /**
  * 私家团：AI 重试仍不合格时先从末尾删节点；仍不合格就用当天景点与途经节点重组
- * 「前缀｜内容」。没有合法前缀时补「专车服务｜」，无景点无途经点补「自由活动｜」。
+ * 「前缀｜内容」。结果必须仍含全部必含项（首个景点与途经节点），否则报错不写入。
  */
 function ensurePrivateTourDayTitle(product: JsonObject, day: JsonObject, dayNumber: number, budget: number): JsonObject {
   // 首日前缀在保存时统一追加，预算已扣除；这里先去掉，避免重复计数。
   const title = text(day.title).replace(/^(?:【出发地\s*[-－—–]\s*[^】]+】\s*)+/u, "");
-  if (title && !privateTourDayTitleProblem(title, budget)) return title === text(day.title) ? day : { ...day, title };
-  const route = routeLine(title);
+  const { names, routeNodes, required, facts } = privateTourDayFacts(product, { ...day, title });
   const spots = spotNames(day);
-  const names = [...new Set([...sequenceNames(title), ...privateTourDayTitleNodes(route), ...spots])];
-  const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
+  const fits = (candidate: string) => !privateTourDayTitleProblem(candidate, budget, facts)
+    && required.every((name) => compact(candidate).includes(compact(name)));
+  if (title && fits(title)) return title === text(day.title) ? day : { ...day, title };
+  const route = routeLine(title);
   const head = route.split("｜")[0]!.trim();
   const hasPrefix = route.includes("｜") && (PRIVATE_TOUR_DAY_TITLE_PREFIXES as readonly string[]).includes(head);
-  const prefix = hasPrefix ? head : !spots.length && !routeNodes.length ? PRIVATE_TOUR_FREE_PREFIX : PRIVATE_TOUR_DEFAULT_PREFIX;
-  const fitted = fitPrivateTourDayTitle(hasPrefix ? route : `${prefix}｜${route}`, budget, routeNodes);
-  if (route && !privateTourDayTitleProblem(fitted, budget)) return { ...day, title: fitted };
+  const prefix = hasPrefix ? head : privateTourFallbackPrefix(day, routeNodes);
+  const fitted = fitPrivateTourDayTitle(hasPrefix ? route : `${prefix}｜${route}`, budget, required, facts);
+  if (route && fits(fitted)) return { ...day, title: fitted };
   // 原标题是整句或放不下：只用当天事实（景点、途经节点）重组，不写通用占位。
-  const facts = names.filter((name) => spots.includes(name) || routeNodes.includes(name));
-  if (facts.length) {
-    const content = facts.map((name, index) => (!index ? "" : routeNodes.includes(name) || routeNodes.includes(facts[index - 1]!) ? "-" : "·") + name).join("");
-    const rebuilt = fitPrivateTourDayTitle(`${prefix}｜${content}`, budget, routeNodes);
-    if (!privateTourDayTitleProblem(rebuilt, budget)) return { ...day, title: rebuilt };
+  const ordered = names.filter((name) => spots.includes(name) || routeNodes.includes(name));
+  if (ordered.length) {
+    const content = ordered.map((name, index) => (!index ? "" : routeNodes.includes(name) || routeNodes.includes(ordered[index - 1]!) ? "-" : "·") + name).join("");
+    const rebuilt = fitPrivateTourDayTitle(`${prefix}｜${content}`, budget, required, facts);
+    if (fits(rebuilt)) return { ...day, title: rebuilt };
   }
-  if (routeNodes.length) throw new Error(`第 ${dayNumber} 天标题无法在长度限制内保留全部途经点`);
+  if (required.length) throw new Error(`第 ${dayNumber} 天标题无法在长度限制内保留全部必含景点与途经点`);
   return { ...day, title: `${prefix}｜第${dayNumber}天行程安排` };
+}
+
+/**
+ * 兜底前缀：有接送/用车安排的天用专车前缀（接送方向唯一可判定时用接机/接站/送机/送站），
+ * 只有真正的自由活动天（free 活动、无交通、无景点无途经点）才用「自由活动」。
+ */
+function privateTourFallbackPrefix(day: JsonObject, routeNodes: string[]): string {
+  const transports = itinerarySupportingArrangements(day).filter((item) => item.type === "transport");
+  if (transports.length) return transferPrefix(transports.map((item) => `${item.title} ${item.detail}`).join(" "));
+  const spots = Array.isArray(day.spots) ? day.spots.filter((spot): spot is JsonObject => Boolean(spot) && typeof spot === "object") : [];
+  const activities = Array.isArray(day.activities) ? day.activities as JsonObject[] : [];
+  const free = spots.some((spot) => effectiveItinerarySpotKind(spot) === "free") || activities.some((item) => item?.type === "free");
+  const attractions = spots.filter((spot) => effectiveItinerarySpotKind(spot) === "attraction" && !supportArrangementType(spot, day));
+  return free && !attractions.length && !routeNodes.length ? PRIVATE_TOUR_FREE_PREFIX : PRIVATE_TOUR_DEFAULT_PREFIX;
+}
+
+const TRANSFER_PREFIXES: Array<[string, RegExp]> = [
+  ["专车接机", /接机|接飞机|机场接/u], ["专车接站", /接站|接火车|接高铁|火车站接|高铁站接/u],
+  ["专车送机", /送机|送飞机|送至?机场/u], ["专车送站", /送站|送火车|送高铁|送至?(?:火车|高铁)站/u],
+];
+
+function transferPrefix(source: string): string {
+  const matched = TRANSFER_PREFIXES.filter(([, pattern]) => pattern.test(source));
+  return matched.length === 1 ? matched[0]![0] : PRIVATE_TOUR_DEFAULT_PREFIX;
+}
+
+/** 私家团当天事实：必含项为首个景点（无景点时取首个非接送节点）与途经节点。 */
+function privateTourDayFacts(product: JsonObject, day: JsonObject) {
+  const title = text(day.title);
+  const spots = spotNames(day);
+  const names = [...new Set([...sequenceNames(title), ...privateTourDayTitleNodes(routeLine(title), spots), ...spots])];
+  const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
+  const first = spots[0] ?? names.find((name) => !routeNodes.includes(name) && !supportArrangementType({ name }));
+  const required = [...new Set([...(first ? [first] : []), ...routeNodes])];
+  const facts: PrivateTourTitleFacts = { allowedNames: [...required, ...routeNodes], spots };
+  return { names, routeNodes, required, facts };
+}
+
+/** 供生成服务判断规划标题是否需要重写：与写入前校验使用同一组当天事实。 */
+export function privateTourDayTitleFacts(product: JsonObject, day: JsonObject): PrivateTourTitleFacts {
+  return privateTourDayFacts(product, day).facts;
 }
 
 /** 路线首行：去掉括号建议与句末标点，供无景点日的兜底标题使用。 */
@@ -183,33 +228,30 @@ function titleRequest(product: JsonObject, day: JsonObject, sourceText: string):
 
 /** 私家团只要求首个景点与途经节点，其余景点按 24 字预算取舍。 */
 function privateTourTitleRequest(product: JsonObject, day: JsonObject, dayNumber: number, sourceText: string): ItineraryDayTitleRequest {
-  const title = text(day.title);
-  const names = [...new Set([...spotNames(day), ...sequenceNames(title), ...privateTourDayTitleNodes(title)])];
-  const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
-  const first = spotNames(day)[0] ?? names.find((name) => !routeNodes.includes(name));
-  const requiredNames = [...new Set([...(first ? [first] : []), ...routeNodes])];
+  const { routeNodes, required } = privateTourDayFacts(product, day);
   return {
     day: dayNumber,
     format: "privateTour",
     maxLength: itineraryDayTitleBudget(product, dayNumber),
-    requiredNames,
-    optionalNames: spotNames(day).filter((name) => !requiredNames.includes(name)),
+    requiredNames: required,
+    optionalNames: spotNames(day).filter((name) => !required.includes(name)),
     routeNodes,
-    currentTitle: title,
+    currentTitle: text(day.title),
     sourceText: sourceText.trim(),
     hotel: text(day.hotel),
   };
 }
 
 function titleProblem(product: JsonObject, itinerary: JsonObject[], request: ItineraryDayTitleRequest, title: string): string | undefined {
+  const day = itinerary.find((item) => Number(item.day) === request.day) ?? { day: request.day };
   const basic = request.format === "privateTour"
-    ? privateTourDayTitleProblem(title, request.maxLength)
+    ? privateTourDayTitleProblem(title, request.maxLength, {
+      allowedNames: [...request.requiredNames, ...(request.optionalNames ?? []), ...request.routeNodes], spots: spotNames(day) })
     : itineraryDayTitleProblem(title, request.maxLength);
   if (basic) return basic;
   const compactTitle = compact(title);
   const missing = request.requiredNames.filter((name) => !compactTitle.includes(compact(name)));
   if (missing.length) return `缺少当天景点：${missing.join("、")}`;
-  const day = itinerary.find((item) => Number(item.day) === request.day) ?? { day: request.day };
   const lostNodes = request.routeNodes.filter((name) => !isPersistedRouteTravelNode(product, { ...day, title }, name));
   if (lostNodes.length) return `途经点须保持独立路线节点：${lostNodes.join("、")}`;
   const own = [...request.requiredNames, ...(request.optionalNames ?? [])];

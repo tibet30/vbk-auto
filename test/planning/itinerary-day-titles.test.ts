@@ -150,11 +150,13 @@ test("私家团 AI 标题须带合法前缀，否则带原因重试", async () =
   assert.equal(result[0]!.title, "专车服务｜八达岭长城");
 });
 
-test("私家团 ensureDayTitleFits：补专车服务前缀并裁到 24 字，无景点无途经点补自由活动", () => {
+test("私家团 ensureDayTitleFits：补专车服务前缀并裁到 24 字，只有真正的自由活动天补自由活动", () => {
   const fitted = ensureDayTitleFits(privateProduct, { day: 2, title: "八达岭长城 · 十三陵 · 居庸关 · 慕田峪长城", spots: ["八达岭长城", "十三陵", "居庸关", "慕田峪长城"].map((name) => ({ name })) });
   assert.match(String(fitted.title), /^专车服务｜八达岭长城/u);
   assert.ok([...String(fitted.title)].length <= 24, String(fitted.title));
-  const free = ensureDayTitleFits(privateProduct, { day: 2, title: "北京市区", spots: [] });
+  // 没有景点但也没有 free 活动：不能当作自由活动日（会丢用车卡片），用专车服务。
+  assert.equal(ensureDayTitleFits(privateProduct, { day: 2, title: "北京市区", spots: [] }).title, "专车服务｜北京市区");
+  const free = ensureDayTitleFits(privateProduct, { day: 2, title: "北京市区", spots: [{ name: "自由活动", kind: "free" }] });
   assert.equal(free.title, "自由活动｜北京市区");
   const ok = { day: 2, title: "专车服务｜八达岭长城·十三陵", spots: [] };
   assert.equal(ensureDayTitleFits(privateProduct, ok), ok);
@@ -164,7 +166,21 @@ test("私家团兜底：整句标题放不下时用当天景点重组，不写�
   const sentence = "八达岭长城" + "，登城远眺感受燕山雄关气势".repeat(3);
   const fitted = ensureDayTitleFits(privateProduct, { day: 2, title: sentence, spots: [{ name: "八达岭长城" }, { name: "十三陵" }] });
   assert.equal(fitted.title, "专车服务｜八达岭长城·十三陵");
-  const empty = ensureDayTitleFits(privateProduct, { day: 2, title: "全天" + "自由安排休息".repeat(5), spots: [] });
-  // 无景点、无途经点且原句放不下：只剩自由活动前缀，内容无事实可用，保留日序占位。
-  assert.equal(empty.title, "自由活动｜第2天行程安排");
+  const empty = ensureDayTitleFits(privateProduct, { day: 2, title: "全天" + "自由安排休息".repeat(5), spots: [{ name: "自由活动", kind: "free" }] });
+  // 自由活动天、原句放不下：节点「自由活动」本身就是当天事实。
+  assert.equal(empty.title, "自由活动｜自由活动");
+});
+
+test("私家团兜底前缀：接送日按方向用专车前缀，含营销词的景点名原样保留", async () => {
+  const pickup = ensureDayTitleFits(privateProduct, { day: 2, title: "抵达北京，专车接机后入住酒店休息", spots: [],
+    activities: [{ time: "不限", title: "北京首都机场接机", detail: "专车接机前往酒店", type: "transport" }] });
+  assert.match(String(pickup.title), /^专车接机｜/u);
+  const both = ensureDayTitleFits(privateProduct, { day: 2, title: "北京", spots: [],
+    activities: [{ time: "不限", title: "送机/送站", detail: "按航班或车次送机或送站", type: "transport" }] });
+  assert.equal(both.title, "专车服务｜北京");
+  const spot = ensureDayTitleFits(privateProduct, { day: 2, title: "经典艺术馆" + "，慢慢看展".repeat(5), spots: [{ name: "经典艺术馆" }] });
+  assert.equal(spot.title, "专车服务｜经典艺术馆");
+  const kept = await generateItineraryDayTitles({ product: privateProduct, itinerary: [{ day: 2, title: "经典艺术馆", spots: [{ name: "经典艺术馆" }] }],
+    sourceText: () => "", generate: async () => [{ day: 2, title: "专车服务｜经典艺术馆" }] });
+  assert.equal(kept[0]!.title, "专车服务｜经典艺术馆");
 });

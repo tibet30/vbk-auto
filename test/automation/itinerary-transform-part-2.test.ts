@@ -15,6 +15,7 @@ import {
   type ProductOperations,
   type ResolvedStations,
 } from "../../src/main/automation/ctrip/itinerary-api/itinerary-transform.ts";
+import { ensureDayTitleFits } from "../../src/main/planning/itinerary-day-titles.ts";
 
 const baseStations: ResolvedStations = {
   pickupAir: { type: "air", id: "LJG", code: "LJG", name: "三义机场", raw: {} },
@@ -214,4 +215,18 @@ test("私家团包车日用车卡片只取「｜」后的内容，自由活动�
   assert.deepEqual(expected.days.map((day) => day.transport?.description), ["故宫·天坛，全天用车", undefined, "丽江古城，全天用车"]);
   const group = transformItinerary({ itinerary: [days[1]!], operations: baseOps, stations: baseStations });
   assert.equal(group[0]!.tourDailyInfos.find((info) => info.activeType?.key === 8)?.description, "自由活动｜丽江古城，全天用车");
+});
+
+test("私家团兜底标题：接送日不落成自由活动、保留用车卡片；真正的自由活动日没有用车卡片", () => {
+  const product = { sales: { productForm: "privateTour" }, basicInfo: { meetingCity: "丽江", destinationCity: "丽江", days: 3 } };
+  const transfer = ensureDayTitleFits(product, makeDay({ day: 3, title: "早餐后退房，专车送至丽江三义机场，结束愉快旅程", spots: [],
+    activities: [{ time: "上午", title: "丽江送机", detail: "专车送至丽江三义机场", type: "transport" }] })) as ProductItineraryDay;
+  const free = ensureDayTitleFits(product, makeDay({ day: 2, title: "丽江古城周边全天自由活动，可自行安排逛吃与休息", spots: [{ name: "自由活动", kind: "free" }],
+    activities: [] })) as ProductItineraryDay;
+  assert.match(transfer.title, /^专车送机｜/u);
+  assert.match(free.title, /^自由活动｜/u);
+  const out = transformItinerary({ itinerary: [makeDay(), free, transfer], operations: baseOps, stations: baseStations, privateTour: true });
+  const cards = out.map((day) => day.tourDailyInfos.filter((info) => info.activeType?.key === 8));
+  assert.equal(cards[1]!.length, 0);
+  assert.equal(cards[2]!.length, 1);
 });

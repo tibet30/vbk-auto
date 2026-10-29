@@ -1,7 +1,7 @@
 import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
 import type { PlanningStageError, PlanningStageOutput } from "../../../shared/contracts-planning.js";
 import { projectCompleteItinerary } from "../complete-itinerary-projection.js";
-import { ensureDayTitleFits, generateItineraryDayTitles, itineraryDaySourceText } from "../itinerary-day-titles.js";
+import { ensureDayTitleFits, generateItineraryDayTitles, itineraryDaySourceText, privateTourDayTitleFacts } from "../itinerary-day-titles.js";
 import { itineraryDayTitleBudget, itineraryDayTitleProblem } from "../../../shared/itinerary-day-title.js";
 import { isPrivateTourProduct, privateTourDayTitleProblem } from "../../../shared/private-tour-day-title.js";
 import { logWarn } from "../../../shared/log-timestamp.js";
@@ -95,9 +95,10 @@ export class ProductGenerationService {
     const modules = await Promise.all(output.modules.map(async (module) => {
       if (module.module !== "itinerary" || !Array.isArray(module.value)) return module;
       const itinerary = module.value as JsonObject[];
-      const needsTitle = (day: JsonObject) => projected
-        || Boolean((isPrivateTourProduct(productJson) ? privateTourDayTitleProblem : itineraryDayTitleProblem)(
-          String(day.title ?? ""), itineraryDayTitleBudget(productJson, Number(day.day))));
+      const budget = (day: JsonObject) => itineraryDayTitleBudget(productJson, Number(day.day));
+      const needsTitle = (day: JsonObject) => projected || Boolean(isPrivateTourProduct(productJson)
+        ? privateTourDayTitleProblem(String(day.title ?? ""), budget(day), privateTourDayTitleFacts(productJson, day))
+        : itineraryDayTitleProblem(String(day.title ?? ""), budget(day)));
       const targets = itinerary.filter(needsTitle);
       if (!targets.length) return module;
       const generate = this.deps.generateItineraryDayTitles;

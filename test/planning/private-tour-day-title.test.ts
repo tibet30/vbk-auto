@@ -73,3 +73,25 @@ test("用车卡片内容取「｜」之后；自由活动日识别", () => {
   assert.equal(isFreeActivityDayTitle("【出发地-大理】自由活动｜大理古城"), true);
   assert.equal(isFreeActivityDayTitle("专车服务｜大理古城"), false);
 });
+
+test("景点名含营销词时按当天事实放行，裁剪不改写景点名", () => {
+  const facts = { allowedNames: ["经典艺术馆"], spots: ["经典艺术馆", "鼓浪屿"] };
+  assert.equal(privateTourDayTitleProblem("专车服务｜经典艺术馆·鼓浪屿", max, facts), undefined);
+  assert.ok(privateTourDayTitleProblem("专车服务｜经典艺术馆·鼓浪屿", max), "无事实名时仍拦营销词");
+  assert.ok(privateTourDayTitleProblem("专车服务｜经典路线·鼓浪屿", max, facts), "非事实节点的营销词仍拦");
+  assert.equal(fitPrivateTourDayTitle("专车服务｜经典艺术馆·网红街·鼓浪屿", max, ["经典艺术馆"], facts), "专车服务｜经典艺术馆·鼓浪屿");
+});
+
+test("「-」连写不能绕过景点数与节点数上限", () => {
+  assert.match(privateTourDayTitleProblem("专车服务｜甲-乙-丙-丁-戊", max) ?? "", /节点/u);
+  const spots = ["故宫", "天坛", "颐和园", "圆明园"];
+  assert.match(privateTourDayTitleProblem("专车服务｜故宫-天坛-颐和园-圆明园", max, { spots }) ?? "", /景点 4 个/u);
+  assert.equal(privateTourDayTitleProblem("专车服务｜北京-故宫·天坛-颐和园", max, { spots }), undefined);
+});
+
+test("当天内容不能有 /、、、：、逗号或空格", () => {
+  for (const title of ["专车服务｜送飞机/送高铁", "专车服务｜故宫、天坛", "专车服务｜故宫：天坛", "专车服务｜故宫，天坛", "专车服务｜故宫 天坛"]) {
+    assert.ok(privateTourDayTitleProblem(title, max), title);
+  }
+  assert.equal(privateTourDayTitleProblem("专车服务｜2 号公路", max, { spots: ["2 号公路"] }), undefined);
+});

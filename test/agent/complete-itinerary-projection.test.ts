@@ -295,3 +295,22 @@ test("无可绑定景点的天标题只取路线首行，不带括号建议和�
   }
   assert.doesNotMatch(JSON.stringify(itinerary[1]), /服务建议|二选一待定/u);
 });
+
+test("首末日仅接送站的完整行程仍确定性投影，夜游景点按原名保留", () => {
+  const product = buildProductSnapshot({ destination: "奉节", days: 5, productForm: "freeTravel" });
+  Object.assign(product.product.basicInfo!, {
+    days: 5, nights: 4, meetingCity: "奉节", destinationCity: "奉节", province: "重庆",
+    userIdea: "DAY1：出发地-奉节：今日仅接站\nDAY2：【奉节】白帝城-夔塘峡-三峡之巅-住奉节\n"
+      + "DAY3：【奉节-巫山】巫峡-神女峰-三峡龙脊-夜游三峡之光-住巫山\n"
+      + "DAY4：【巫山】神女天路-小三峡-小小三峡-夜游神女大扶梯-住巫山\nDAY5：【巫山-返程】今日仅送站",
+  });
+  product.product.itinerary = [];
+  const itinerary = projectedItinerary(product);
+  assert.equal(itinerary.length, 5);
+  assert.deepEqual(itinerary[2]!.spots!.map((spot: any) => spot.name), ["巫峡", "神女峰", "三峡龙脊", "夜游三峡之光"]);
+  assert.deepEqual(itinerary[4]!.spots, []);
+  assert.equal(itinerary[4]!.hotel, "无");
+  assert.match(String(itinerary[4]!.description), /火车站送站服务/);
+  assert.equal(itineraryStructureError({ ...product.product, itinerary }), undefined);
+  assert.equal(itineraryInputContractError(product, itinerary), undefined);
+});

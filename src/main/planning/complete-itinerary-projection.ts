@@ -53,7 +53,9 @@ export function projectCompleteItinerary(product: ProductDetail): PlanningStageO
   }
   const alternativeGroups = explicitAlternativeGroups(product);
   const expandedOrder = expandAlternativeGroups(order, alternativeGroups);
-  if (!expandedOrder || expandedOrder.some((row) => row.spots.every(isTravelService))) return undefined;
+  // 整天只有接送（「今日仅送站」）也是原文的一天：projectDay 会写成无景点的接送日，
+  // 不能因此放弃投影把完整路线交回模型重写。
+  if (!expandedOrder) return undefined;
   const heads = routeHeads(originalDaySections(product));
   const anchors = boundaryAnchors(expandedOrder, heads);
   const projected = expandedOrder.map((row) => projectDay({

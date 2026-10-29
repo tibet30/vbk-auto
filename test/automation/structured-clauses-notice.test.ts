@@ -34,8 +34,11 @@ test("远端回读的航班提前到达分钟数不是 120 时条款阶段失败
   await assert.rejects(saveStructuredProductClauses(client, "79232466", {}), /分钟数不是 120/);
 });
 
-test("自由行不强制勾选红框须知条款", async () => {
+test("自由行同样勾选红框须知条款并填 120", async () => {
   const { client, saved } = noPageClauseClient();
   await saveStructuredProductClauses(client, "79232466", { productForm: "freeTravel" });
-  assert.ok(!(saved.get(4) ?? []).some((item) => item.clauseItemId === 491 && item.elementDtos.some((e: any) => e.value === "120")));
+  const tab4 = saved.get(4) ?? [];
+  for (const id of OPTIONAL_NOTICE_CLAUSE_IDS) assert.ok(tab4.some((item) => item.clauseItemId === id), `缺少 ${id}`);
+  assert.equal(tab4.find((item) => item.clauseItemId === 491)?.elementDtos
+    .find((element: any) => element.componentCode === "tripnoticeinput1")?.value, "120");
 });

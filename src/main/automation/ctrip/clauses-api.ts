@@ -63,7 +63,7 @@ export const REQUIRED_CLAUSE_IDS = {
 /**
  * 说明&须知页（tab 4）追加勾选的须知条款：游船不可抗力、自费活动、娱乐场所、
  * 交通/证件/车辆/火车票/儿童票、长江码头、当地经济条件、旺季早餐。
- * 平台条款包按模板下发，缺失的条款静默跳过，不做失败条件。
+ * 平台条款包按模板下发，缺失的条款静默跳过，不做失败条件；自由行同样勾选。
  */
 export const OPTIONAL_NOTICE_CLAUSE_IDS = [
   400, 41672, 538, 485, 371, 467, 486, 526, 552, 479, REQUIRED_CLAUSE_IDS.airportCheckIn, 1174, 439, 473,
@@ -190,7 +190,7 @@ export async function saveStructuredProductClauses(
         items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
       }
     }
-    if (tabEnum === 4 && !isFreeTravel) {
+    if (tabEnum === 4) {
       for (const clauseItemId of OPTIONAL_NOTICE_CLAUSE_IDS) {
         items = ensureOptionalClause(items, clausePackage.clauseTypeDtos, clauseItemId);
       }
@@ -255,16 +255,14 @@ export async function saveStructuredProductClauses(
     );
     const persistedIds = new Set(helpers.format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
     const sentIds = new Set(items.map((item) => item.clauseItemId));
-    const missingIds = isFreeTravel
-      ? []
-      : [
-        ...(defaultSelectedClauseIds[tabEnum] ?? []),
-        ...(tabEnum === 4 ? OPTIONAL_NOTICE_CLAUSE_IDS.filter((id) => sentIds.has(id)) : []),
-      ].filter((id) => !persistedIds.has(id));
+    const missingIds = [
+      ...(isFreeTravel ? [] : defaultSelectedClauseIds[tabEnum] ?? []),
+      ...(tabEnum === 4 ? OPTIONAL_NOTICE_CLAUSE_IDS.filter((id) => sentIds.has(id)) : []),
+    ].filter((id) => !persistedIds.has(id));
     if (missingIds.length > 0) {
       throw new Error(`条款页签 ${tabEnum} 保存后回读缺少条款：${missingIds.join(",")}`);
     }
-    if (tabEnum === 4 && !isFreeTravel && sentIds.has(requiredIds.airportCheckIn)) {
+    if (tabEnum === 4 && sentIds.has(requiredIds.airportCheckIn)) {
       const persistedAirport = helpers.format(persistedPackage.clauseTypeDtos).find(
         (item) => item.clauseItemId === requiredIds.airportCheckIn,
       );

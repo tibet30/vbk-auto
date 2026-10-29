@@ -98,3 +98,35 @@ test("旧格式（仅去空白）groupKey 的删除凭证仍阻止恢复带「�
   ] };
   assert.equal(restoreExplicitAlternativeSlots(detail, "恢复第3天日喀则博物馆"), undefined);
 });
+
+test("同日两个 OR 组都删了「非遗中心参观」：只说名字不撤销任何一条", () => {
+  const product: Record<string, unknown> = { manualReview: { itinerarySpotRemovals: [
+    { day: 1, name: "非遗中心参观", removedAt: "now", groupKey: alternativeGroupKey(1, ["日喀则博物馆", "非遗中心参观"]) },
+    { day: 1, name: "非遗中心参观", removedAt: "now", groupKey: alternativeGroupKey(1, ["扎什伦布寺", "非遗中心参观"]) },
+  ] } };
+  assert.equal(restoreExplicitOperatorDeletion(product, "恢复D1 非遗中心参观"), false);
+  assert.equal(((product.manualReview as Record<string, unknown>).itinerarySpotRemovals as unknown[]).length, 2);
+});
+
+test("同日同名跨 OR 组：点名组 A 的同伴只撤销组 A 的凭证", () => {
+  const groupB = alternativeGroupKey(1, ["扎什伦布寺", "非遗中心参观"]);
+  const product: Record<string, unknown> = { manualReview: { itinerarySpotRemovals: [
+    { day: 1, name: "非遗中心参观", removedAt: "now", groupKey: alternativeGroupKey(1, ["日喀则博物馆", "非遗中心参观"]) },
+    { day: 1, name: "非遗中心参观", removedAt: "now", groupKey: groupB },
+  ] } };
+  assert.equal(restoreExplicitOperatorDeletion(product, "恢复第1天日喀则博物馆或非遗中心参观"), true);
+  assert.deepEqual((product.manualReview as Record<string, unknown>).itinerarySpotRemovals, [
+    { day: 1, name: "非遗中心参观", removedAt: "now", groupKey: groupB },
+  ]);
+});
+
+test("恢复第1天宗山和日喀则博物馆，不撤销无关的扎什伦布寺组凭证", () => {
+  const groupA = alternativeGroupKey(1, ["宗山", "日喀则博物馆"]);
+  const product: Record<string, unknown> = { manualReview: { itinerarySpotRemovals: [
+    { day: 1, name: "日喀则博物馆", removedAt: "now", groupKey: groupA },
+    { day: 1, name: "日喀则博物馆", removedAt: "now", groupKey: alternativeGroupKey(1, ["扎什伦布寺", "日喀则博物馆"]) },
+  ] } };
+  assert.equal(restoreExplicitOperatorDeletion(product, "恢复第1天宗山和日喀则博物馆"), true);
+  const left = (product.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<{ groupKey: string }>;
+  assert.deepEqual(left.map((item) => item.groupKey), [alternativeGroupKey(1, ["扎什伦布寺", "日喀则博物馆"])]);
+});

@@ -13,7 +13,8 @@
  */
 
 import type { ProductDetail } from "../../../shared/contracts.js";
-import { clearTrustedOperatorItineraryRemoval, trustedOperatorItineraryRemovals } from "../../../shared/trusted-operator-itinerary-removals.js";
+import { alternativeGroupSegments, clearTrustedOperatorItineraryRemoval, trustedOperatorItineraryRemovals } from "../../../shared/trusted-operator-itinerary-removals.js";
+import { itinerarySpotKey } from "../../../shared/itinerary-spot-identity.js";
 import { explicitAlternativeGroups } from "../../planning/itinerary-input-contract.js";
 import { restoreExplicitAlternativeGroupSpots } from "../../planning/restore-explicit-itinerary-spots.js";
 import { extractLockedConstraints } from "../prompt-helpers.js";
@@ -36,11 +37,14 @@ function restoreContextIdentifiesReceipt(
   receipt: ReturnType<typeof trustedOperatorItineraryRemovals>[number],
   receipts: ReturnType<typeof trustedOperatorItineraryRemovals>, content: string,
 ): boolean {
-  const sameSlotName = receipts.filter((item) => item.day === receipt.day && item.name.replace(/\s+/g, "") === receipt.name.replace(/\s+/g, ""));
+  const key = itinerarySpotKey(receipt.name);
+  const sameSlotName = receipts.filter((item) => item.day === receipt.day && itinerarySpotKey(item.name) === key);
   if (sameSlotName.length === 1) return true;
-  if (!receipt.groupKey?.startsWith(`or:${receipt.day}:`)) return false;
-  const peers = receipt.groupKey.slice(`or:${receipt.day}:`.length).split("")
-    .filter((name) => name && name !== receipt.name.replace(/\s+/g, ""));
+  // groupKey 各段以 \u001f 分隔；逐段按 itinerarySpotKey 归一化后比较。
+  const segments = receipt.groupKey ? alternativeGroupSegments(receipt.groupKey, receipt.day) : undefined;
+  if (!segments) return false;
+  const peers = segments.filter((name) => name && name !== key);
+  // 用户原文是整句，只去空白后做包含判断，不做名称键归一化。
   const compact = content.replace(/\s+/g, "");
   return peers.some((name) => compact.includes(name));
 }

@@ -48,6 +48,7 @@ export function useItinerarySpotRemoval(localProductId: string, days: ItineraryD
       if (!ipc) throw new Error("未连接桌面保存服务，请重新打开应用后重试。");
       await ipc.products.updateReviewField(localProductId, {
         field: "itinerarySpotRemove", dayIndex: item.dayIndex, spotIndex: item.spotIndex!,
+        ...(item.spotId ? { spotId: item.spotId } : {}),
       });
       if (currentProduct.current !== localProductId) return;
       setConfirmation(null); setNotice(`已删除「${item.title}」。`);

@@ -42,8 +42,11 @@ test("POI 行内取消不写入，失败可重试，确认删除实际持久化�
         try {
           if (fail) throw new Error("后台任务执行中，暂不能修改行程");
           assert.equal(id, seed.id);
-          assert.deepEqual(input, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0 });
           const current = db.getProduct(id)!;
+          // 渲染端必须带上它看到的 spotId，主进程据此防止下标错位。
+          const firstSpotId = (current.product.itinerary as Array<{ spots: Array<{ spotId?: string }> }>)[0]!.spots[0]!.spotId;
+          assert.match(String(firstSpotId), /^sp_[0-9a-f]{12}$/);
+          assert.deepEqual(input, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 0, spotId: firstSpotId });
           const saved = mutations.commands.manualField({ localProductId: id, source: "user", expectedVersion: current.productJsonVersion ?? 0 },
             input, { status: manualReviewSavePolicy(current.status).nextStatus });
           response.end(JSON.stringify(saved));

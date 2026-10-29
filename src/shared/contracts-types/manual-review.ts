@@ -22,6 +22,8 @@ export type ManualReviewFieldInput =
     field: "itinerarySpotPoi";
     dayIndex: number;
     spotIndex: number;
+    /** 渲染端看到的景点 ID；与 spotIndex 处现有景点不一致时主进程拒绝写入。缺省表示旧客户端。 */
+    spotId?: string;
     poiName: string;
     poiId: number;
     province?: string | null;
@@ -32,9 +34,9 @@ export type ManualReviewFieldInput =
     longitude?: number | null;
   }
   /** 手动切换有序行程条目的业务类型；切到非景点时必须清空既有 POI。 */
-  | { field: "itinerarySpotKind"; dayIndex: number; spotIndex: number; kind: ItineraryActivityKind; description?: string }
+  | { field: "itinerarySpotKind"; dayIndex: number; spotIndex: number; spotId?: string; kind: ItineraryActivityKind; description?: string }
   /** 每日行程 spot 手动删除：只移除指定 spot，并同步移除同名 visit 活动。 */
-  | { field: "itinerarySpotRemove"; dayIndex: number; spotIndex: number }
+  | { field: "itinerarySpotRemove"; dayIndex: number; spotIndex: number; spotId?: string }
   /**
    * 管家联系人：来自账号固定信息 (AccountFixedInfo.butlerName)，
    * 必须是合法的 ContactCardSelection（contactCardId / providerId / displayName）。

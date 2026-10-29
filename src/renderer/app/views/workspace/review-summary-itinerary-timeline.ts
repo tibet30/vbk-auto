@@ -11,6 +11,7 @@ export interface ItineraryDay {
   day?: number;
   title?: string;
   spots?: Array<{
+    spotId?: string;
     name: string;
     kind?: "attraction" | "free" | "other";
     description?: string;
@@ -36,6 +37,8 @@ export interface TimelineItem {
   type: ItineraryActivity["type"];
   dayIndex: number;
   spotIndex?: number;
+  /** 景点稳定 ID；提交人工编辑时带上，主进程据此防止下标错位。 */
+  spotId?: string;
   poiName?: string | null;
   poiId?: number | null;
   province?: string | null;
@@ -73,6 +76,7 @@ export function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem
       type: spot ? (spot.kind === "free" ? "free" : spot.kind === "other" ? "other" : "visit") : act.type ?? "other",
       dayIndex,
       spotIndex: spotIndex >= 0 ? spotIndex : undefined,
+      spotId: typeof spot?.spotId === "string" ? spot.spotId : undefined,
       poiName: spot?.poiName ?? null,
       poiId: spot?.poiId ?? null,
       province: spot?.province ?? null,
@@ -95,6 +99,7 @@ export function buildTimeline(day: ItineraryDay, dayIndex: number): TimelineItem
       type: spot.kind === "free" ? "free" : spot.kind === "other" ? "other" : "visit",
       dayIndex,
       spotIndex: index,
+      spotId: typeof spot.spotId === "string" ? spot.spotId : undefined,
       poiName: spot.poiName ?? null,
       poiId: spot.poiId ?? null,
       province: spot.province ?? null,

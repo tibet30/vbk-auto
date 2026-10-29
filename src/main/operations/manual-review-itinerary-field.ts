@@ -6,6 +6,11 @@ import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-remov
 type Json = Record<string, unknown>;
 function objectValue(value: unknown): Json { return value && typeof value === "object" && !Array.isArray(value) ? value as Json : {}; }
 
+/** 渲染端带着看到的 spotId 提交时，定位到的景点必须仍是同一个；旧客户端不带 spotId 则沿用下标定位。 */
+function assertSpotIdMatches(spotId: string | undefined, spot: Json): void {
+  if (spotId !== undefined && spotId !== spot.spotId) throw new Error("行程已变更，请刷新后重试。");
+}
+
 export function applyItinerarySpotPoi(product: Json, input: Extract<ManualReviewFieldInput, { field: "itinerarySpotPoi" }>): Json {
   if (!Number.isInteger(input.dayIndex) || input.dayIndex < 0) throw new Error("行程天数索引不合法。");
   if (!Number.isInteger(input.spotIndex) || input.spotIndex < 0) throw new Error("景点索引不合法。");
@@ -20,6 +25,7 @@ export function applyItinerarySpotPoi(product: Json, input: Extract<ManualReview
   if (!Array.isArray(dayRecord.spots)) throw new Error("目标行程没有可写入的景点列表。");
   const spot = dayRecord.spots[input.spotIndex];
   if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
+  assertSpotIdMatches(input.spotId, spot as Json);
   if (!requiresItineraryPoi(spot as Json)) throw new Error("自由活动或其他活动无需配置 POI；请先切换为景点。");
   const updated: Json = { ...(spot as Json), poiName, poiId: input.poiId,
     province: locationText(input.province), city: locationText(input.city), district: locationText(input.district) };
@@ -39,6 +45,7 @@ export function applyItinerarySpotKind(product: Json, input: Extract<ManualRevie
   if (!day || typeof day !== "object" || Array.isArray(day) || !Array.isArray((day as Json).spots)) throw new Error("目标行程条目不存在。");
   const spots = (day as Json).spots as unknown[]; const spot = spots[input.spotIndex];
   if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标行程条目不存在。");
+  assertSpotIdMatches(input.spotId, spot as Json);
   const updated: Json = { ...(spot as Json), kind: input.kind, ...(input.description === undefined ? {} : { description: input.description.trim() }) };
   if (input.kind !== 'attraction') { delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType; }
   else { updated.poiId = null; updated.poiName = null; delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType; }
@@ -59,6 +66,7 @@ export function applyItinerarySpotRemove(product: Json, input: Extract<ManualRev
   const spot = dayRecord.spots[input.spotIndex];
   if (!spot || typeof spot !== "object" || Array.isArray(spot)) throw new Error("目标景点不存在。");
   const spotRecord = spot as Json;
+  assertSpotIdMatches(input.spotId, spotRecord);
   const spotName = typeof spotRecord.name === "string" ? String(spotRecord.name).trim() : "";
   const allSpots = dayRecord.spots as unknown[];
   const alternatives = alternativeGroupIndexes(allSpots, input.spotIndex);

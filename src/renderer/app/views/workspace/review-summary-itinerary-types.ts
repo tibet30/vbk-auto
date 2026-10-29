@@ -2,6 +2,7 @@ export interface ItineraryTimelineSpotItem {
   title: string;
   dayIndex: number;
   spotIndex: number;
+  spotId?: string;
   poiName?: string | null;
   poiId?: number | null;
   province?: string | null;

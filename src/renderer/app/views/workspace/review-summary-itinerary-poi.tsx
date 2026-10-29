@@ -91,6 +91,7 @@ export function ItinerarySpotPoiEditor({ localProductId, item }: { localProductI
       field: "itinerarySpotPoi",
       dayIndex: item.dayIndex,
       spotIndex: item.spotIndex,
+      ...(item.spotId ? { spotId: item.spotId } : {}),
       ...saveTarget,
     });
     return saveTarget;

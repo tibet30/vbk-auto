@@ -73,7 +73,7 @@ export function AppWorkspaceReviewSummaryItinerary({ localProductId, days, expan
     const key = `${item.dayIndex}-${item.spotIndex}`;
     setSavingKindKey(key);
     try {
-      await api()!.products.updateReviewField(localProductId, { field: "itinerarySpotKind", dayIndex: item.dayIndex, spotIndex: item.spotIndex, kind });
+      await api()!.products.updateReviewField(localProductId, { field: "itinerarySpotKind", dayIndex: item.dayIndex, spotIndex: item.spotIndex, ...(item.spotId ? { spotId: item.spotId } : {}), kind });
     } catch (error) { window.alert(error instanceof Error ? error.message : "保存行程类型失败，请重试。"); }
     finally { setSavingKindKey((current) => current === key ? null : current); }
   };

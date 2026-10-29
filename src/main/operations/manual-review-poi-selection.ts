@@ -70,6 +70,8 @@ export function verifyManualPoiSelection(
     field: "itinerarySpotPoi",
     dayIndex: input.dayIndex,
     spotIndex: input.spotIndex,
+    // 保留渲染端携带的 spotId，保存时仍要校验下标处是不是原景点。
+    ...(input.spotId === undefined ? {} : { spotId: input.spotId }),
     poiName: candidate.poiName.trim(),
     poiId: candidate.poiId,
     province: candidate.province?.trim() || null,

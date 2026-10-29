@@ -126,3 +126,17 @@ test("findItinerarySpot 返回下标与景点", () => {
   assert.equal(hit?.spot.name, "B");
   assert.equal(findItinerarySpot(input, "sp_ffffffffffff"), undefined);
 });
+
+test("继承：同天「X」与「X（注释）」并存时重排，先按原名一对一，不按名称键串号", () => {
+  const prev = product({ day: 1, spots: [{ name: "平遥古城", spotId: ID1, poiId: 9 }, { name: "平遥古城（夜景）", spotId: ID2 }] });
+  const next = product({ day: 1, spots: [{ name: "平遥古城（夜景）" }, { name: "平遥古城" }] });
+  assert.deepEqual(ids(inheritItinerarySpotIds(prev, next)), [ID2, ID1]);
+});
+
+test("继承：名称轮次全部做完才按 poiId 兜底，前面的 poiId 命中不抢后面的同名", () => {
+  const prev = product({ day: 1, spots: [{ name: "古汉台", spotId: ID1, poiId: 9 }] });
+  const next = product({ day: 1, spots: [{ name: "汉中市古汉台博物馆", poiId: 9 }, { name: "古汉台", poiId: 9 }] });
+  const result = ids(inheritItinerarySpotIds(prev, next));
+  assert.equal(result[1], ID1);
+  assert.notEqual(result[0], ID1);
+});

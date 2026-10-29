@@ -28,7 +28,7 @@ import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
-import { inheritItinerarySpotIds, isItinerarySpotId, itinerarySpotKey } from "../../shared/itinerary-spot-identity.js";
+import { inheritItinerarySpotIds, isItinerarySpotId, itinerarySpotExactName, itinerarySpotKey } from "../../shared/itinerary-spot-identity.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { normaliseItineraryArrivalTitle } from "../../shared/itinerary-arrival-title.js";
 import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
@@ -171,6 +171,10 @@ function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord
     for (const spot of incomingSpots) {
       if (!isItinerarySpotId(spot.spotId)) continue;
       const match = verified.find(old => !consumed.has(old) && old.spotId === spot.spotId);
+      // 同天另有名称键相同的景点（「X」与「X（夜景）」）时，ID 命中还须原名一致，
+      // 否则 ID 可能是按名称键错配继承来的，POI 会串到别的景点上。
+      if (match && sharesSpotKeyWithPeer(match, currentDay.spots, spot, incomingSpots)
+        && itinerarySpotExactName(match.name) !== itinerarySpotExactName(spot.name)) continue;
       if (match && applyVerifiedPoi(spot, match)) consumed.add(match);
     }
     for (const spot of incomingSpots) {
@@ -184,6 +188,13 @@ function preserveVerifiedItineraryPois(current: JsonRecord, incoming: JsonRecord
     }
   }
   return next;
+}
+
+/** 当前天或 incoming 天里，是否另有景点与这对景点名称键相同。 */
+function sharesSpotKeyWithPeer(old: JsonRecord, currentSpots: unknown[], spot: JsonRecord, incomingSpots: JsonRecord[]): boolean {
+  const keys = new Set([itinerarySpotKey(old.name), itinerarySpotKey(spot.name)]);
+  return currentSpots.some(peer => isRecord(peer) && peer !== old && keys.has(itinerarySpotKey(peer.name)))
+    || incomingSpots.some(peer => peer !== spot && keys.has(itinerarySpotKey(peer.name)));
 }
 
 /** 通过全部保护条件时把旧景点的 POI 绑定写入 incoming 景点；返回是否消耗了旧景点。 */

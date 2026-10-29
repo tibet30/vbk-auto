@@ -55,7 +55,12 @@ function freshId(taken: Set<string>): string {
   return id;
 }
 
-interface OldSpot { id: string; key: string; poiId: number | undefined }
+interface OldSpot { id: string; exact: string; key: string; poiId: number | undefined }
+
+/** 去空白后的原名，用于「同名」精确比较；比名称键更严格。 */
+export function itinerarySpotExactName(name: unknown): string {
+  return typeof name === "string" ? name.replace(/[\s\u3000]+/gu, "") : "";
+}
 
 /** 旧方案按 day 编号分组的带 ID 景点，以及全部旧 ID。 */
 function indexPrevious(previous: Json): { byDay: Map<number, OldSpot[]>; allIds: Set<string> } {
@@ -66,7 +71,7 @@ function indexPrevious(previous: Json): { byDay: Map<number, OldSpot[]>; allIds:
     for (const spot of spotsOf(day)) {
       if (!isRecord(spot) || !isItinerarySpotId(spot.spotId)) continue;
       allIds.add(spot.spotId);
-      list.push({ id: spot.spotId, key: itinerarySpotKey(spot.name), poiId: positivePoiId(spot) });
+      list.push({ id: spot.spotId, exact: itinerarySpotExactName(spot.name), key: itinerarySpotKey(spot.name), poiId: positivePoiId(spot) });
     }
     byDay.set(Number(day.day), list);
   }
@@ -76,10 +81,12 @@ function indexPrevious(previous: Json): { byDay: Map<number, OldSpot[]>; allIds:
 /**
  * 返回 next 的深拷贝，并按以下顺序写好 spots[].spotId（同一份新方案内一个 ID 只用一次）：
  *   a. 已带 spotId、旧方案存在且未被占用 -> 保留（可跨天）；
- *   b. 同天、名称键相同的旧景点，按出现顺序一对一继承；
+ *   b. 同天同名的旧景点，按出现顺序一对一继承。分两轮：先整天按去空白原名精确匹配，
+ *      再对剩下的按名称键匹配。否则「X」与「X（夜景）」同天并存时重排，会按名称键互换 ID；
  *   c. 同天、poiId 为正整数且相同的旧景点，一对一继承；
  *   d. 否则生成新 ID。
- * 规则 a 对所有景点先整体处理一遍，避免显式 ID 被前面的同名景点抢走。不修改入参。
+ * 每条规则都对所有景点整体处理一遍再进入下一条，避免前面的景点按较弱规则抢走后面景点
+ * 按较强规则应得的 ID。不修改入参。
  */
 export function inheritItinerarySpotIds(previous: Json, next: Json): Json {
   const result = structuredClone(next);
@@ -96,13 +103,23 @@ export function inheritItinerarySpotIds(previous: Json, next: Json): Json {
     }
   }
 
-  for (const { spot, day } of pending) {
-    const olds = (byDay.get(day) ?? []).filter((old) => !taken.has(old.id));
-    const key = itinerarySpotKey(spot.name);
-    const poiId = positivePoiId(spot);
-    const hit = (key ? olds.find((old) => old.key === key) : undefined)
-      ?? (poiId ? olds.find((old) => old.poiId === poiId) : undefined);
-    const id = hit?.id ?? freshId(taken);
+  const rules: Array<(spot: Json, old: OldSpot) => boolean> = [
+    (spot, old) => Boolean(old.exact) && old.exact === itinerarySpotExactName(spot.name),
+    (spot, old) => Boolean(old.key) && old.key === itinerarySpotKey(spot.name),
+    (spot, old) => old.poiId !== undefined && old.poiId === positivePoiId(spot),
+  ];
+  let unresolved = pending;
+  for (const rule of rules) {
+    unresolved = unresolved.filter(({ spot, day }) => {
+      const hit = (byDay.get(day) ?? []).find((old) => !taken.has(old.id) && rule(spot, old));
+      if (!hit) return true;
+      taken.add(hit.id);
+      spot.spotId = hit.id;
+      return false;
+    });
+  }
+  for (const { spot } of unresolved) {
+    const id = freshId(taken);
     taken.add(id);
     spot.spotId = id;
   }

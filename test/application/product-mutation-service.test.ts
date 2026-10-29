@@ -258,9 +258,18 @@ test("同天两个同名景点各自保留各自 POI", () => {
   assert.deepEqual(spots.map(item => item.poiName), ["古城巷1", "古城巷2"]);
 });
 
-test("名称键等价时仍保留 POI", () => {
+test("模型不带 ID 时按名称键继承旧 ID，ID 命中后保留 POI", () => {
   const spots = replaceWithStore(
     { itinerary: [{ day: 1, spots: [{ spotId: "sp_aaaaaaaaaaaa", name: "广济桥", kind: "attraction", poiName: "广济桥", poiId: 5 }] }] },
+    { itinerary: [{ day: 1, spots: [{ name: "广济桥（不上桥）", kind: "attraction", poiName: null, poiId: null }] }] },
+  );
+  assert.equal(spots[0]?.poiId, 5);
+  assert.equal(spots[0]?.poiName, "广济桥");
+});
+
+test("旧数据无 spotId 时走名称键兜底，仍保留 POI", () => {
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [{ name: "广济桥", kind: "attraction", poiName: "广济桥", poiId: 5 }] }] },
     { itinerary: [{ day: 1, spots: [{ name: "广济桥（不上桥）", kind: "attraction", poiName: null, poiId: null }] }] },
   );
   assert.equal(spots[0]?.poiId, 5);
@@ -284,4 +293,32 @@ test("无 spotId 的同名景点按顺序一对一消耗旧 POI，不重复占�
     ] }] },
   );
   assert.deepEqual(spots.map(item => item.poiId), [1, null]);
+});
+
+test("同天「X」与「X（注释）」并存时模型重排且不带 ID，POI 仍留在原景点", () => {
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [
+      { spotId: "sp_aaaaaaaaaaaa", name: "平遥古城", kind: "attraction", poiName: "平遥古城", poiId: 9 },
+      { spotId: "sp_bbbbbbbbbbbb", name: "平遥古城（夜景）", kind: "attraction", poiName: null, poiId: null },
+    ] }] },
+    { itinerary: [{ day: 1, spots: [
+      { name: "平遥古城（夜景）", kind: "attraction", poiName: null, poiId: null },
+      { name: "平遥古城", kind: "attraction", poiName: null, poiId: null },
+    ] }] },
+  );
+  assert.deepEqual(spots.map(item => [item.name, item.poiId ?? null]), [["平遥古城（夜景）", null], ["平遥古城", 9]]);
+});
+
+test("同天不同 spotId、名称键相同时，ID 命中但原名不同不借用 POI", () => {
+  const spots = replaceWithStore(
+    { itinerary: [{ day: 1, spots: [
+      { spotId: "sp_aaaaaaaaaaaa", name: "古城巷", kind: "attraction", poiName: "古城巷", poiId: 1 },
+      { spotId: "sp_bbbbbbbbbbbb", name: "古城巷参观", kind: "attraction", poiName: null, poiId: null },
+    ] }] },
+    { itinerary: [{ day: 1, spots: [
+      { spotId: "sp_aaaaaaaaaaaa", name: "古城巷参观", kind: "attraction", poiName: null, poiId: null },
+      { spotId: "sp_bbbbbbbbbbbb", name: "古城巷", kind: "attraction", poiName: null, poiId: null },
+    ] }] },
+  );
+  assert.deepEqual(spots.map(item => item.poiId ?? null), [null, null]);
 });

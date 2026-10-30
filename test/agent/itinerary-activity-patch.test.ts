@@ -35,4 +35,9 @@ test("AI 补丁携带的 spotId 被丢弃：从别的天抄来的 ID 不会被�
     updateProduct: (_id: string, value: Record<string, unknown>) => { saved = { ...saved, product: value as ProductDetail["product"] }; } });
   service.applyAiPatch("p-1", patch);
   assert.deepEqual((saved.product.itinerary as any[]).map((day) => day.spots[0].spotId), ["sp_aaaaaaaaaaaa", "sp_bbbbbbbbbbbb"]);
+  // 区分剥离与否：第 1 天补丁抄来第 2 天的 B。不剥离时第 1 天会按显式 ID 拿走 B、第 2 天被换新 ID；
+  // 剥离后第 1 天按原名继承 A，第 2 天保留 B。
+  const copied = agentPatchOperations(saved, { itinerary: [{ day: 1, spots: [{ spotId: "sp_bbbbbbbbbbbb", name: "平遥古城", kind: "attraction" }] }] });
+  service.applyAiPatch("p-1", copied);
+  assert.deepEqual((saved.product.itinerary as any[]).map((day) => day.spots[0].spotId), ["sp_aaaaaaaaaaaa", "sp_bbbbbbbbbbbb"]);
 });

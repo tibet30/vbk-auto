@@ -54,29 +54,40 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
   return next;
 }
 
-/** current 行程里已有的合法 spotId：带着它们的景点是幸存的既有景点。 */
-function currentSpotIds(current: Json): Set<string> {
-  const ids = new Set<string>();
+/** current 行程里已有的合法 spotId → 该景点去空白后的原名。 */
+function currentSpotIds(current: Json): Map<string, string> {
+  const ids = new Map<string, string>();
   for (const day of Array.isArray(current.itinerary) ? current.itinerary : []) {
     for (const spot of Array.isArray(record(day).spots) ? record(day).spots as unknown[] : []) {
-      if (isItinerarySpotId(record(spot).spotId)) ids.add(record(spot).spotId as string);
+      const value = record(spot);
+      if (isItinerarySpotId(value.spotId)) ids.set(value.spotId, itinerarySpotExactName(value.name));
     }
   }
   return ids;
 }
 
 /**
- * 幸存的既有景点（spotId 已在 current 中）只按 spotId / poiId / 精确 poiName / 精确原名匹配，
+ * 幸存景点：spotId 在 current 中，且去空白名称与 current 同 ID 景点一致。
+ * 名称已变（换半角括号、换动作词等）的变体即使继承了 ID，也按新生成景点走名称键兜底。
+ */
+function isSurvivor(spot: Json, survivingIds: ReadonlyMap<string, string>): boolean {
+  if (!isItinerarySpotId(spot.spotId)) return false;
+  const name = survivingIds.get(spot.spotId);
+  return name !== undefined && Boolean(name) && name === itinerarySpotExactName(spot.name);
+}
+
+/**
+ * 幸存的既有景点（spotId 在 current 中且原名未变）只按 spotId / poiId / 精确 poiName / 精确原名匹配，
  * 不走名称键兜底：否则删「X（夜景）」会把同天幸存的「X」一起删掉。
- * 没有 ID 或 ID 不在 current 中的景点（新生成的）仍走名称键兜底，重新生成的同名景点照旧被拦截（决策 3）。
+ * 没有 ID、ID 不在 current 中或名称已变的景点（新生成/变体）仍走名称键兜底，重新生成的同名景点照旧被拦截（决策 3）。
  */
 function matchesReceipt(
-  receipt: { name: string; poiName?: string; poiId?: number; spotId?: string }, spot: Json, survivingIds: ReadonlySet<string>,
+  receipt: { name: string; poiName?: string; poiId?: number; spotId?: string }, spot: Json, survivingIds: ReadonlyMap<string, string>,
 ): boolean {
   if (receipt.spotId && receipt.spotId === spot.spotId) return true;
   const spotPoiId = Number(spot.poiId);
   if (receipt.poiId && Number.isInteger(spotPoiId) && spotPoiId > 0 && receipt.poiId === spotPoiId) return true;
-  if (isItinerarySpotId(spot.spotId) && survivingIds.has(spot.spotId)) {
+  if (isSurvivor(spot, survivingIds)) {
     const exact = (value: unknown) => itinerarySpotExactName(value);
     return Boolean(receipt.poiName && exact(receipt.poiName) && [spot.poiName, spot.name].some((name) => exact(name) === exact(receipt.poiName)))
       || Boolean(exact(receipt.name)) && exact(receipt.name) === exact(spot.name);

@@ -225,3 +225,39 @@ test("「XX体验」的删除凭证不删除同天幸存的「XX」", () => {
   const next = applyItinerarySpotRemove(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
   assert.deepEqual((next.itinerary as Array<{ spots: Array<{ name: string }> }>)[0]!.spots.map((spot) => spot.name), ["古城墙"]);
 });
+
+/** R-1：先删掉第二个景点生成凭证，再按模型回传的 spots 走完整保存链路。 */
+function replaceAfterRemoval(kept: Record<string, unknown>, removed: Record<string, unknown>, returned: Array<Record<string, unknown>>) {
+  let saved = buildProductSnapshot({ destination: "平遥", days: 1, productForm: "privateTour" });
+  saved.product.itinerary = [{ day: 1, title: "行程", description: "游览。", spots: [kept, removed] as never }];
+  saved.product = applyItinerarySpotRemove(saved.product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 }) as typeof saved.product;
+  const incoming = structuredClone(saved.product);
+  incoming.itinerary![0]!.spots = returned as never;
+  const service = new ProductMutationService({ getProduct: () => saved,
+    updateProduct: (_id, next, status) => { saved = { ...saved, product: next as typeof saved.product, status: status ?? saved.status }; } });
+  service.replace(saved.id, incoming);
+  return saved.product.itinerary![0]!.spots.map((spot) => [spot.name, spot.spotId, spot.poiId ?? null]);
+}
+
+test("被删「X（夜景）」换半角括号写成「X(夜景)」时仍被拦截，且不继承 X 的 POI", () => {
+  const spots = replaceAfterRemoval(pingyao({ spotId: SPOT_A }), night({ spotId: SPOT_B }), [night({ name: "平遥古城(夜景)" })]);
+  assert.deepEqual(spots, []);
+});
+
+test("被删「古城墙体验」换动作词写成「古城墙参观」时仍被拦截", () => {
+  const wall = { spotId: SPOT_A, name: "古城墙", poiName: "古城墙", poiId: 7, kind: "attraction" as const };
+  const spots = replaceAfterRemoval(wall, { spotId: SPOT_B, name: "古城墙体验", poiName: null, poiId: null, kind: "attraction" },
+    [{ name: "古城墙参观", poiName: null, poiId: null, kind: "attraction" }]);
+  assert.deepEqual(spots, []);
+});
+
+test("幸存「X」原样回传时在「X（夜景）」删除凭证旁保留并带 POI", () => {
+  const spots = replaceAfterRemoval(pingyao({ spotId: SPOT_A }), night({ spotId: SPOT_B }), [pingyao({ spotId: SPOT_A })]);
+  assert.deepEqual(spots, [["平遥古城", SPOT_A, 9]]);
+});
+
+test("模型同时回传「X」与「X(夜景)」：X 保留 ID 与 POI，变体被拦截", () => {
+  const spots = replaceAfterRemoval(pingyao({ spotId: SPOT_A }), night({ spotId: SPOT_B }),
+    [pingyao({ poiName: null, poiId: null }), night({ name: "平遥古城(夜景)" })]);
+  assert.deepEqual(spots, [["平遥古城", SPOT_A, 9]]);
+});

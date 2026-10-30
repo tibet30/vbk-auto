@@ -12,6 +12,7 @@ import {
   formatSelectedClauseItems,
   setClauseComponentValue,
 } from "./structured-clause-items.js";
+import { isSameDayOnlyFullPenalty } from "./unbooking-rules.js";
 
 export {
   ensureOptionalClause,
@@ -252,18 +253,8 @@ export async function saveStructuredProductClauses(
     )) {
       throw new Error("条款页签 3 保存后回读的节假日违约费比例（旅行者与旅行社）不是 80%");
     }
-    if (tabEnum === 3) {
-      const standardRules = (persistedClauseData.unBookingContentDto?.regionUnbookingRules ?? [])
-        .flatMap((region: ClauseRecord) => region.unBookingRuleDtos ?? [])
-        .filter((rule: ClauseRecord) => rule.isHoliday !== "T");
-      const [sameDay] = standardRules;
-      if (
-        standardRules.length !== 1
-        || Number(sameDay.minAdvanceDays) !== 0 || Number(sameDay.maxAdvanceDays) !== 0
-        || Number(sameDay.lossValue) !== 1 || Number(sameDay.travelAgencyLossValue) !== 1
-      ) {
-        throw new Error("条款页签 3 保存后回读的标准条款不是仅「行程当日」收取总费用 100%");
-      }
+    if (tabEnum === 3 && !isSameDayOnlyFullPenalty(persistedClauseData.unBookingContentDto)) {
+      throw new Error("条款页签 3 保存后回读的标准条款不是仅「行程当日」收取总费用 100%");
     }
     const persistedBody = {
       ...persistedCentral,

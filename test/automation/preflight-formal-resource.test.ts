@@ -58,7 +58,7 @@ function preflightPage(segments: { draft: unknown[]; formal: unknown[] }) {
     }
     if (endpoint.endsWith("/listProductClauses")) return success({
       centralDataDto: { additionalInfoDto: { firstClassTypeIds: [] }, filterConditionDto: { productId: 1 } },
-      unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } },
+      unBookingContentDto: { regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: [{ minAdvanceDays: 0, maxAdvanceDays: 0, lossValue: 1, travelAgencyLossValue: 1, isHoliday: "F" }] }], holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } },
     });
     if (endpoint.endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
     if (endpoint.endsWith("/searchProductImage.json")) return success({

@@ -1,4 +1,4 @@
-import { HOLIDAY_PENALTY_PREFLIGHT_ERROR } from "../ctrip/preflight-errors.js";
+import { HOLIDAY_PENALTY_PREFLIGHT_ERROR, SAME_DAY_PENALTY_PREFLIGHT_ERROR } from "../ctrip/preflight-errors.js";
 
 /** Only precise authoritative readback mismatches can reopen a completed module. */
 export function preflightRepairPhase(error: string): 'presentation' | 'hotelResource' | 'terms' | undefined {
@@ -11,6 +11,6 @@ export function preflightRepairPhase(error: string): 'presentation' | 'hotelReso
   // only repeat the same read-only check.
   if (/^酒店资源只读回读住宿段数量不一致：期望 \d+，实际 \d+$/u.test(error)) return 'hotelResource';
   if (/^酒店资源只读回读第 \d+ 段候选 ID 集合不一致：期望=[\d,]+，实际=/u.test(error)) return 'hotelResource';
-  if (error === HOLIDAY_PENALTY_PREFLIGHT_ERROR) return 'terms';
+  if (error === HOLIDAY_PENALTY_PREFLIGHT_ERROR || error === SAME_DAY_PENALTY_PREFLIGHT_ERROR) return 'terms';
   return undefined;
 }

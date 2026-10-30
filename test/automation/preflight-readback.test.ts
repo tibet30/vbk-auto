@@ -7,6 +7,7 @@ import {
 } from "../../src/main/automation/ctrip/preflight-readback.ts";
 import { buildReadOnlyItineraryReadbackExpectations } from "../../src/main/automation/ctrip/preflight-readonly.ts";
 import { verifyItineraryReadback } from "../../src/main/automation/ctrip/itinerary-api/readback.ts";
+import { SAME_DAY_PENALTY_PREFLIGHT_ERROR } from "../../src/main/automation/ctrip/preflight-errors.ts";
 
 const success = (payload: Record<string, unknown>) => ({ status: 200, payload: { ResponseStatus: { Ack: "Success" }, ...payload }, durationMs: 1, ctx: {} });
 
@@ -141,7 +142,7 @@ test("条款回读以实际条款包核验广济桥外观不进入成人或儿�
   } };
   const tabs = [1, 2, 3, 4].map((tabEnum) => ({
     centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
-    ...(tabEnum === 3 ? { unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } } : {}),
+    ...(tabEnum === 3 ? { unBookingContentDto: { regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: [{ minAdvanceDays: 0, maxAdvanceDays: 0, lossValue: 1, travelAgencyLossValue: 1, isHoliday: "F" }] }], holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } } : {}),
   }));
   const result = await verifyTermsReadback(page, product, "79189107", tabs);
   assert.equal(result.adultTicketInclusionText, "开元寺");
@@ -161,7 +162,7 @@ test("条款回读拒绝 selectedClauseItems 中异常的组件结构", async ()
   } };
   const tabs = [1, 2, 3, 4].map((tabEnum) => ({
     centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
-    ...(tabEnum === 3 ? { unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } } : {}),
+    ...(tabEnum === 3 ? { unBookingContentDto: { regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: [{ minAdvanceDays: 0, maxAdvanceDays: 0, lossValue: 1, travelAgencyLossValue: 1, isHoliday: "F" }] }], holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } } } : {}),
   }));
   await assert.rejects(() => verifyTermsReadback(page, {
     ...product,
@@ -176,11 +177,33 @@ test("条款预检拒绝未勾选或非 80% 的节假日条款", async () => {
   } };
   const tabs = [1, 2, 3, 4].map((tabEnum) => ({
     centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
-    ...(tabEnum === 3 ? { unBookingContentDto: { holidayRuleDto: { lossValue: 0.6 } } } : {}),
+    ...(tabEnum === 3 ? { unBookingContentDto: { regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: [{ minAdvanceDays: 0, maxAdvanceDays: 0, lossValue: 1, travelAgencyLossValue: 1, isHoliday: "F" }] }], holidayRuleDto: { lossValue: 0.6 } } } : {}),
   }));
   await assert.rejects(
     () => verifyTermsReadback(page, { ...product, itinerary: [] }, "79189107", tabs),
     /节假日违约费比例.*不是 80%/,
+  );
+});
+
+test("条款预检拒绝标准条款不是仅行程当日 100% 的旧梯度规则", async () => {
+  const page = { evaluate: async (_fn: unknown, request: any) => {
+    if (String(request.endpoint).endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
+    throw new Error(`unexpected endpoint ${request.endpoint}`);
+  } };
+  const ladder = [
+    { minAdvanceDays: 4, maxAdvanceDays: 6, lossValue: 0.2, travelAgencyLossValue: 0.2 },
+    { minAdvanceDays: 0, maxAdvanceDays: 0, lossValue: 0.6, travelAgencyLossValue: 0.6 },
+  ];
+  const tabs = [1, 2, 3, 4].map((tabEnum) => ({
+    centralDataDto: { additionalInfoDto: { firstClassTypeIds: [8] }, filterConditionDto: { productId: 79189107 } },
+    ...(tabEnum === 3 ? { unBookingContentDto: {
+      regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: ladder }],
+      holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 },
+    } } : {}),
+  }));
+  await assert.rejects(
+    () => verifyTermsReadback(page, { ...product, itinerary: [] }, "79189107", tabs),
+    (error: Error) => error.message === SAME_DAY_PENALTY_PREFLIGHT_ERROR,
   );
 });
 

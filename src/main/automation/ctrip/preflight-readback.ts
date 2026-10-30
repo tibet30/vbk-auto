@@ -5,7 +5,8 @@ import { formatProductFeaturesHtml, productFeaturesPlainText } from "../../domai
 import { vbkSessionRequest } from "../../infrastructure/vbk-session-request.js";
 import { assertVbkAckSuccess } from "../../infrastructure/vbk-response-error.js";
 import { HOLIDAY_PENALTY_RATE } from "./clauses-api.js";
-import { HOLIDAY_PENALTY_PREFLIGHT_ERROR } from "./preflight-errors.js";
+import { HOLIDAY_PENALTY_PREFLIGHT_ERROR, SAME_DAY_PENALTY_PREFLIGHT_ERROR } from "./preflight-errors.js";
+import { isSameDayOnlyFullPenalty } from "./unbooking-rules.js";
 import { buildAdultTicketInclusionText } from "./terms.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
 import { readBoundCoverImageIdsViaApi } from "./presentation/cover-bind.js";
@@ -193,7 +194,9 @@ export async function verifyTermsReadback(
     packages.push({ tabEnum, selectedCount: selected.length });
     if (tabEnum === 1) firstTabItems = selected;
     if (tabEnum === 3) {
-      const holidayRule = productRecord(productRecord(payload).unBookingContentDto).holidayRuleDto;
+      const unBookingContent = productRecord(payload).unBookingContentDto;
+      if (!isSameDayOnlyFullPenalty(unBookingContent)) throw new Error(SAME_DAY_PENALTY_PREFLIGHT_ERROR);
+      const holidayRule = productRecord(unBookingContent).holidayRuleDto;
       if (
         Number(productRecord(holidayRule).lossValue) !== HOLIDAY_PENALTY_RATE
         || Number(productRecord(holidayRule).travelAgencyLossValue) !== HOLIDAY_PENALTY_RATE

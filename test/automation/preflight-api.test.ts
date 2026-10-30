@@ -43,7 +43,7 @@ const preflightDescription = () => ({
 
 const preflightClauses = () => ({
   centralDataDto: { additionalInfoDto: { firstClassTypeIds: [] }, filterConditionDto: { productId: 1 } },
-  unBookingContentDto: { holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } },
+  unBookingContentDto: { regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: [{ minAdvanceDays: 0, maxAdvanceDays: 0, lossValue: 1, travelAgencyLossValue: 1, isHoliday: "F" }] }], holidayRuleDto: { lossValue: 0.8, travelAgencyLossValue: 0.8 } },
 });
 
 const preflightCover = () => ({

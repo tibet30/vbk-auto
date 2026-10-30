@@ -264,7 +264,9 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const result = await resolveItineraryPoisAndTraffic(ctx.localProductId);
         refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         deps.emitProduct(get(ctx.localProductId));
-        return {content:safeJson({...result,itinerary:stripItinerarySpotIds((get(ctx.localProductId).product.itinerary ?? []) as unknown[])})};
+        // 决策 6：顶层行程与 repair.itinerary 副本都面向模型，统一剥掉 spotId。
+        const repair = { ...result.repair, itinerary: stripItinerarySpotIds(result.repair.itinerary as unknown[]) };
+        return {content:safeJson({...result,repair,itinerary:stripItinerarySpotIds((get(ctx.localProductId).product.itinerary ?? []) as unknown[])})};
       },
     },
   ];

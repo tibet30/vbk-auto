@@ -57,6 +57,9 @@ test('新建空白产品经生产生成、原始资源解析和绑定回读，�
     assert.notEqual(generated.data?.preparationDenied, true, generated.content);
     const resolved = await tools.find(tool => tool.name === 'resolve_itinerary_pois')!.execute({}, context);
     assert.notEqual(resolved.data?.preparationDenied, true, resolved.content);
+    // 决策 6：工具结果（含 repair.itinerary 副本）面向模型，不得携带 spotId。
+    assert.ok(db.getProduct(created.id)!.product.itinerary!.flatMap(day => day.spots ?? []).every(spot => spot.spotId), '前提：已保存景点带 spotId');
+    assert.doesNotMatch(resolved.content, /spotId/u);
     db.close(); db = new VbkDatabase(dir);
     const saved = db.getProduct(created.id)!;
     const days = saved.product.itinerary!;

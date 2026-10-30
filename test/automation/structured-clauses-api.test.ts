@@ -252,6 +252,15 @@ test("页面关闭时条款四个页签仍完成接口保存与回读，保留�
     assert.equal(saved.get(1)?.find(item => item.clauseItemId === id)?.elementDtos[0].value, "晋祠+太原古县城");
   }
   assert.deepEqual(savedUnbookingRules.get(3), [{
+    isHoliday: "F",
+    lossValue: 1,
+    travelAgencyLossValue: 1,
+    nonGroupLossValue: 0,
+    nonGroupTravelAgencyLossValue: 0,
+    minAdvanceDays: 0,
+    maxAdvanceDays: 0,
+    key: 0,
+  }, {
     isHoliday: "T",
     lossValue: 0.8,
     travelAgencyLossValue: 0.8,

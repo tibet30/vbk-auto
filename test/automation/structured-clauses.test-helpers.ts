@@ -20,7 +20,11 @@ export function noPageClauseClient(
       if (endpoint.endsWith("listProductClauses")) {
         data.centralDataDto = { testTab: tab, additionalInfoDto: { firstClassTypeIds: [tab] }, filterConditionDto: { pICategoryId: 1003 } };
         const holidayRule = savedUnbookingRules.get(tab)?.find((rule) => rule.isHoliday === "T");
-        data.unBookingContentDto = { holidayRuleDto: holidayRule ?? {} };
+        const standardRules = (savedUnbookingRules.get(tab) ?? []).filter((rule) => rule.isHoliday !== "T");
+        data.unBookingContentDto = {
+          holidayRuleDto: holidayRule ?? {},
+          regionUnbookingRules: [{ region: "CN", unBookingRuleDtos: standardRules }],
+        };
       } else if (endpoint.endsWith("getClausePackage")) {
         const persisted = saved.get(tab);
         const ids = DEFAULT_SELECTED_CLAUSE_IDS[tab as keyof typeof DEFAULT_SELECTED_CLAUSE_IDS];

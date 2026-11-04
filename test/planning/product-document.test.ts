@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import JSZip from 'jszip';
@@ -8,6 +9,13 @@ import type { Settings } from '../../src/shared/contracts.js';
 import { guardDocumentDialogueReply } from '../../src/main/planning/document-dialogue-guard.js';
 
 const brief = { destination: '', productForm: '' as const, days: null, userIdea: '' };
+
+test('PDF 提取文字层，损坏文件给出中文提示', async () => {
+  const pdf = new Uint8Array(readFileSync(new URL('../fixtures/document/plain-itinerary.pdf', import.meta.url)));
+  const extraction = await extractProductDocument('行程.pdf', pdf);
+  assert.match(extraction.text, /D1 Xian Taibai Mountain/);
+  await assert.rejects(extractProductDocument('坏.pdf', new Uint8Array([37, 80, 68, 70])), /PDF 解析失败/);
+});
 
 test('DOCX 提取正文，拒绝不支持的文件和空内容', async () => {
   const zip = new JSZip();

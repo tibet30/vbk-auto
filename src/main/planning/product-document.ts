@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { PDFParse } from 'pdf-parse';
+import { extractText } from 'unpdf';
 import mammoth from 'mammoth';
 import { aiProviderConfig } from '../../shared/ai-provider-config.js';
 import { isProductForm } from '../../shared/product-form.js';
@@ -16,8 +16,10 @@ export async function extractProductDocument(name: string, bytes: Uint8Array): P
   if (bytes.byteLength > 10 * 1024 * 1024 || bytes.byteLength === 0) throw new Error('文件为空或超过 10 MB。');
   let text: string;
   if (/\.pdf$/i.test(name)) {
-    const parser = new PDFParse({ data: bytes });
-    try { text = (await parser.getText()).text; } finally { await parser.destroy(); }
+    // unpdf 内置 pdfjs 的 serverless 构建：纯 JS、不依赖 @napi-rs/canvas，
+    // 打包时不必再为双架构 skia 原生库做例外处理。
+    try { text = (await extractText(bytes, { mergePages: true })).text; }
+    catch { throw new Error('PDF 解析失败，请确认文件未加密且完整；扫描件请先转换为可复制文字的 PDF。'); }
   } else if (/\.docx$/i.test(name)) {
     text = (await mammoth.extractRawText({ buffer: Buffer.from(bytes) })).value;
   } else throw new Error('请选择 PDF 或 DOCX 文件；旧版 DOC 请先另存为 DOCX。');

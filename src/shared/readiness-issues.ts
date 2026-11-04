@@ -30,6 +30,9 @@ export function readinessIssueSemanticKey(issue: Pick<ReadinessIssue, "label" | 
   if (hotelDay) return `itinerary:hotel:${Number(hotelDay[1])}`;
   const hotelPath = label.match(/^itinerary\.(\d+)\.hotelCandidates(?:\.|$)/);
   if (hotelPath) return `itinerary:hotel:${Number(hotelPath[1]) + 1}`;
+  // zod 校验错误的 label 已中文化（「每日行程 · 第 2 天 · 酒店候选」），日期语义必须保持不变。
+  const localizedHotelDay = label.match(/第\s*(\d+)\s*天[^第]*酒店候选/);
+  if (localizedHotelDay) return `itinerary:hotel:${Number(localizedHotelDay[1])}`;
   if (vehiclePattern.test(text)) return "resource:vehicle";
   if (hotelPattern.test(text)) return "resource:hotel";
   if (coverPattern.test(text)) return "presentation:cover";

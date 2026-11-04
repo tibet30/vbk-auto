@@ -72,7 +72,7 @@ test("准备完成后允许本地受控修订，但不允许重新生成模块",
   const allowed = denyPreparationTool(product, undefined, "patch_product", { patch: { itinerary: [{ day: 1, description: "调整后的合规文案" }] } });
   assert.equal(allowed, undefined);
   assert.ok(denyPreparationTool(product, undefined, "generate_product_module", { stage: "itinerary" }));
-  // Schema errors use field paths rather than the localized cover label.
+  // Schema errors stay in the cover gate and expose a readable field label.
   (product.product.presentation as Record<string, unknown>).cover = {
     source: "manualUpload", fileId: "uploaded-file", mimeType: "image/jpeg",
     width: 1280, height: 800, sizeBytes: "204800", originalName: "cover.jpg",
@@ -80,7 +80,8 @@ test("准备完成后允许本地受控修订，但不允许重新生成模块",
   const invalidCover = evaluatePreparationCompletion(product);
   assert.equal(invalidCover.ready, false);
   assert.equal(invalidCover.currentNode, "cover");
-  assert.ok(invalidCover.missing.includes("presentation.cover.sizeBytes"));
+  assert.ok(invalidCover.missing.includes("展示信息 · 产品封面 · 文件大小"));
+  assert.ok(invalidCover.gaps.some((gap) => gap.node === "cover" && gap.label === "展示信息 · 产品封面 · 文件大小"));
   assert.equal(denyPreparationTool(product, undefined, "resolve_cover"), undefined);
   assert.ok(denyPreparationTool(product, undefined, "request_approval"));
 });

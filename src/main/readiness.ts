@@ -24,6 +24,8 @@ import { mergeReadinessIssues, openResearchTaskToIssue } from "../shared/readine
 import { isResearchTaskSatisfiedByProduct } from "../shared/research-task-satisfaction.js";
 import { isCoverResearchTaskSatisfiedByProduct } from "./minimax/minimax-constants.js";
 import { automationBlockers, productSchema } from "./automation/schema/schema.js";
+import { evaluateAutomationContract } from "./automation/automation-contract/evaluate.js";
+import { schemaIssueToReadinessIssue } from "./readiness-schema-issues.js";
 import { routeLocationBlockers } from "../shared/route-location-evidence.js";
 import { poiIdentityBlockers } from "../shared/poi-candidate-identity.js";
 
@@ -58,9 +60,13 @@ export function computeReadiness(input: ComputeReadinessInput): ProductReadiness
   issues.push(...poiIdentityBlockers(product));
   const parsed = productSchema.safeParse(product);
   if (!parsed.success) {
-    for (const issue of parsed.error.issues.slice(0, 6)) {
-      issues.push({ label: issue.path.join(".") || "产品方案", detail: issue.message });
-    }
+    // 自动录入契约已用人话报告的字段（副标题、省份、运营备注、每日行程等）
+    // 不再重复展示 zod 原始错误。
+    const contractPaths = new Set(
+      evaluateAutomationContract(product).failures.map((failure) => failure.field.path),
+    );
+    const schemaIssues = parsed.error.issues.filter((issue) => !contractPaths.has(issue.path.join(".")));
+    for (const issue of schemaIssues.slice(0, 6)) issues.push(schemaIssueToReadinessIssue(issue));
   }
   const unresolved = researchTasks.filter((task) =>
     task.state !== "confirmed" &&

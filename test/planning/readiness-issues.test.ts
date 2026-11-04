@@ -34,6 +34,19 @@ test("每日酒店候选保留日期，导航数量和待处理清单一致", ()
   assert.deepEqual(buildOpenIssueRows({ ready: false, completion: 0, issues }, []).map(row => row.label), issues.map(row => row.label));
 });
 
+test("zod 校验错误的中文 label 仍按天保留酒店候选", () => {
+  const issues = mergeReadinessIssues([
+    { label: "每日行程 · 第 1 天 · 酒店候选", detail: "酒店候选至少需要 1 项，请补充后重试。" },
+    { label: "每日行程 · 第 2 天 · 酒店候选", detail: "酒店候选至少需要 1 项，请补充后重试。" },
+    { label: "酒店资源", detail: "需匹配 VBK 酒店资源" },
+  ]);
+  assert.deepEqual(issues.map((issue) => issue.label), [
+    "每日行程 · 第 1 天 · 酒店候选",
+    "每日行程 · 第 2 天 · 酒店候选",
+    "酒店资源",
+  ]);
+});
+
 test("缺 resourceGroupId + 用车 research task 只返回 1 个用车待处理项", () => {
   const issues = mergeReadinessIssues([
     openResearchTaskToIssue(task("vehicle-1", "核查用车资源组（按目的地 / 出行人数）", "vbk", "在 VBK 资源库确认有效资源组 ID")),

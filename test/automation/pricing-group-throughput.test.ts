@@ -30,8 +30,12 @@ const ageBands = [
     ],
   },
 ];
-const firstDate = localBusinessDate();
-const nextBusinessDay = new Date();
+const startBusinessDay = new Date();
+const nextBusinessDay = new Date(startBusinessDay);
+nextBusinessDay.setDate(nextBusinessDay.getDate() + 1);
+if (startBusinessDay.getMonth() !== nextBusinessDay.getMonth()) startBusinessDay.setDate(startBusinessDay.getDate() + 1);
+const firstDate = localBusinessDate(startBusinessDay);
+nextBusinessDay.setTime(startBusinessDay.getTime());
 nextBusinessDay.setDate(nextBusinessDay.getDate() + 1);
 const secondDate = localBusinessDate(nextBusinessDay);
 const product = {

@@ -6,8 +6,10 @@ import {buildGroupPricingExpectation} from '../../src/main/automation/ctrip/pric
 import {success, ageBands, product, browserWithHandler, rowsFromSaveBody, baseEndpointPayload} from './pricing-fixture.js';
 
 function yearlyProduct() {
-  const end=new Date(); end.setDate(end.getDate()+364);
-  return {...product, commercial:{...product.commercial,inventory:{...product.commercial.inventory,endDate:localBusinessDate(end)}}};
+  const start=new Date(); const tomorrow=new Date(start); tomorrow.setDate(tomorrow.getDate()+1);
+  if(start.getMonth()!==tomorrow.getMonth()) start.setDate(start.getDate()+1);
+  const end=new Date(start); end.setDate(end.getDate()+364);
+  return {...product, commercial:{...product.commercial,inventory:{...product.commercial.inventory,startDate:localBusinessDate(start),endDate:localBusinessDate(end)}}};
 }
 
 test('库存窗口跨天重试时不把平台未写入的第 366 天加入预检',()=>{

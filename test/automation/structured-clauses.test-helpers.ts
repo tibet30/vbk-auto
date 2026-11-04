@@ -6,7 +6,7 @@ import {
 export function noPageClauseClient(
   tamperReadback = false,
   childBookable = true,
-  optional: { omit?: number[]; tamperMinutes?: boolean } = {},
+  optional: { omit?: number[]; tamperMinutes?: boolean; unselected?: number[] } = {},
 ) {
   const saved = new Map<number, any[]>();
   const savedUnbookingRules = new Map<number, any[]>();
@@ -42,7 +42,8 @@ export function noPageClauseClient(
           const item = persisted?.find(item => item.clauseItemId === id);
           const component = id === 13 ? "landticketremarks" : id === 10087 ? "landticket2" : id === 1079 ? "otherfeewithout1" : undefined;
           const value = item?.elementDtos.find((element: any) => element.componentCode === component)?.value ?? "";
-          return { clauseItemId: id, itemType: "F", isShow: "T", selected: "T", clauseComponentDtos: component
+          const selected = !optional.unselected?.includes(id) || item ? "T" : "F";
+          return { clauseItemId: id, itemType: "F", isShow: "T", selected, clauseComponentDtos: component
             ? [{ componentCode: component, value: tamperReadback && persisted && id === 13 ? "错误景点" : value }] : [] };
         })], containers: [] }];
       } else if (endpoint.endsWith("saveClausePackage")) {

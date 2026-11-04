@@ -42,3 +42,10 @@ test("自由行同样勾选红框须知条款并填 120", async () => {
   assert.equal(tab4.find((item) => item.clauseItemId === 491)?.elementDtos
     .find((element: any) => element.componentCode === "tripnoticeinput1")?.value, "120");
 });
+
+test("自由行也勾选孕妇预订限制与航班不可抗力条款，并校验回读", async () => {
+  const { client, saved } = noPageClauseClient(false, true, { unselected: [1095, 98] });
+  await saveStructuredProductClauses(client, "79232466", { productForm: "freeTravel" });
+  assert.ok((saved.get(3) ?? []).some((item) => item.clauseItemId === 1095), "页签 3 缺少孕妇预订限制 1095");
+  assert.ok((saved.get(4) ?? []).some((item) => item.clauseItemId === 98), "页签 4 缺少航班不可抗力 98");
+});

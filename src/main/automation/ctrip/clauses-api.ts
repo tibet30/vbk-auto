@@ -114,6 +114,12 @@ export const DEFAULT_SELECTED_CLAUSE_IDS = {
   ],
 } as const;
 
+// 自由行不套用私家团默认条款，但孕妇预订限制与航班不可抗力须知同样必选。
+export const FREE_TRAVEL_SELECTED_CLAUSE_IDS: Record<number, readonly number[]> = {
+  3: [REQUIRED_CLAUSE_IDS.pregnancyBookingRestriction],
+  4: [REQUIRED_CLAUSE_IDS.flightForceMajeureNotice],
+};
+
 const ADULT_TICKET_REMARKS_COMPONENT = "landticketremarks";
 const CHILD_TICKET_REMARKS_COMPONENT = "landticket2";
 
@@ -127,7 +133,7 @@ export async function saveStructuredProductClauses(
   const head = CLAUSE_HEAD;
   const requiredIds = REQUIRED_CLAUSE_IDS;
   const childBookable = options?.childBookable !== false;
-  const defaultSelectedClauseIds: Record<number, readonly number[]> = {
+  const defaultSelectedClauseIds: Record<number, readonly number[]> = isFreeTravel ? FREE_TRAVEL_SELECTED_CLAUSE_IDS : {
     ...DEFAULT_SELECTED_CLAUSE_IDS,
     1: DEFAULT_SELECTED_CLAUSE_IDS[1].filter((id) => childBookable || ![10091, 10087].includes(id)),
   };
@@ -198,10 +204,8 @@ export async function saveStructuredProductClauses(
       items = helpers.setValue(items, requiredIds.lodgingIncluded, "otherfeewithout1", lodgingSelfPayNote);
     }
     if (tabEnum === 3 && !isFreeTravel) items = helpers.ensure(items, clausePackage.clauseTypeDtos, requiredIds.minorWithAdult);
-    if (!isFreeTravel) {
-      for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
-        items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
-      }
+    for (const clauseItemId of defaultSelectedClauseIds[tabEnum] ?? []) {
+      items = helpers.ensure(items, clausePackage.clauseTypeDtos, clauseItemId);
     }
     if (tabEnum === 4) {
       for (const clauseItemId of OPTIONAL_NOTICE_CLAUSE_IDS) {
@@ -274,7 +278,7 @@ export async function saveStructuredProductClauses(
     const persistedIds = new Set(helpers.format(persistedPackage.clauseTypeDtos).map((item) => item.clauseItemId));
     const sentIds = new Set(items.map((item) => item.clauseItemId));
     const missingIds = [
-      ...(isFreeTravel ? [] : defaultSelectedClauseIds[tabEnum] ?? []),
+      ...(defaultSelectedClauseIds[tabEnum] ?? []),
       ...(tabEnum === 4 ? OPTIONAL_NOTICE_CLAUSE_IDS.filter((id) => sentIds.has(id)) : []),
     ].filter((id) => !persistedIds.has(id));
     if (missingIds.length > 0) {

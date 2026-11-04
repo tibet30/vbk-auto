@@ -25,7 +25,8 @@ test('POI 待处理项在手动确认旁提供删除入口，并同步移除行�
   assert.match(openIssues, /issue\.poiDeleteTarget/);
   assert.match(openIssues, /aria-label={`删除 POI：/);
   assert.match(openIssues, /onDeletePoiIssue\(issue\.poiDeleteTarget!/);
-  assert.match(openIssues, /window\.confirm\(`删除「\$\{name\}」/);
+  assert.match(openIssues, /role="alertdialog"/);
+  assert.match(openIssues, /确认删除/);
   const research = readFileSync("src/renderer/app/actions/workflow/research.ts", "utf8");
   assert.match(research, /research\.removePoiIssue/);
   const helper = readFileSync("src/renderer/app/views/workspace/review-summary-open-issues.helpers.ts", "utf8");

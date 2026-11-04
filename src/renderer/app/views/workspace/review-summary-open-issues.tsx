@@ -57,6 +57,7 @@ export function AppWorkspaceReviewSummaryOpenIssues({
   onDeletePoiIssue,
 }: ReviewSummaryOpenIssuesProps) {
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [confirmingKey, setConfirmingKey] = useState<string | null>(null);
   const rows = buildOpenIssueRows(readiness, taskList, product);
   if (rows.length === 0 && !hotelStateRefreshNeeded) return null;
 
@@ -104,42 +105,37 @@ export function AppWorkspaceReviewSummaryOpenIssues({
                 <span className={styles.itemIndex}>{index + 1}</span>
                 <span className={styles.itemBody}>
                   <strong className={styles.itemLabel}>{issue.label}</strong>
-                  <span className={styles.itemDetail}>{issue.detail}</span>
+                  {confirmingKey === `${issue.label}-${index}` && issue.poiDeleteTarget ? (
+                    <span className={`${styles.itemDetail} ${styles.itemDetailDanger}`}>
+                      删除「{issue.poiName ?? issue.label}」？待处理事项会同步关闭，每日行程中的该 POI 也会被移除。
+                    </span>
+                  ) : (
+                    <span className={styles.itemDetail}>{issue.detail}</span>
+                  )}
                 </span>
-                <span className={styles.itemAction}>
-                  <button
-                    type="button"
-                    className={`${shared.btn} ${shared.btnSm} ${styles.itemActionBtn}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (issue.taskId) {
-                        setActiveTask(issue.taskId);
-                        setVerificationNote("");
-                        return;
-                      }
-                      sendToComposer(
-                        setComposerInput,
-                        setVerificationNote,
-                        issue.actionPrompt,
-                      );
+                {confirmingKey === `${issue.label}-${index}` && issue.poiDeleteTarget ? (
+                  <span
+                    className={styles.itemAction}
+                    role="alertdialog"
+                    aria-label="确认删除 POI"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setConfirmingKey(null);
                     }}
-                  >{issue.taskId ? "手动确认" : "处理"}</button>
-                  {issue.poiDeleteTarget && (
+                  >
                     <button
                       type="button"
-                      className={`${shared.btn} ${shared.btnSm} ${styles.itemDeleteBtn}`}
-                      data-variant="danger"
-                      aria-label={`删除 POI：${issue.poiName ?? issue.label}`}
-                      title="删除该 POI，并从每日行程中移除"
-                      disabled={deletingKey !== null}
-                      onClick={async (event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (deletingKey !== null) return;
+                      autoFocus
+                      className={`${shared.btn} ${shared.btnSm} ${styles.itemConfirmBtn}`}
+                      onClick={() => setConfirmingKey(null)}
+                    >取消</button>
+                    <button
+                      type="button"
+                      className={`${shared.btn} ${shared.btnSm} ${styles.itemConfirmBtn}`}
+                      data-variant="danger-solid"
+                      onClick={async () => {
                         const name = issue.poiName ?? issue.label;
-                        if (!window.confirm(`删除「${name}」？待处理事项会同步关闭，每日行程中的该 POI 也会被移除。`)) return;
                         const key = `${issue.label}-${index}`;
+                        setConfirmingKey(null);
                         setDeletingKey(key);
                         try {
                           await onDeletePoiIssue(issue.poiDeleteTarget!, name);
@@ -149,13 +145,50 @@ export function AppWorkspaceReviewSummaryOpenIssues({
                           setDeletingKey(null);
                         }
                       }}
-                    >
-                      {deletingKey === `${issue.label}-${index}`
-                        ? <LoaderCircle size={13} aria-hidden="true" />
-                        : <Trash2 size={13} aria-hidden="true" />}
-                    </button>
-                  )}
-                </span>
+                    >确认删除</button>
+                  </span>
+                ) : (
+                  <span className={styles.itemAction}>
+                    <button
+                      type="button"
+                      className={`${shared.btn} ${shared.btnSm} ${styles.itemActionBtn}`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        if (issue.taskId) {
+                          setActiveTask(issue.taskId);
+                          setVerificationNote("");
+                          return;
+                        }
+                        sendToComposer(
+                          setComposerInput,
+                          setVerificationNote,
+                          issue.actionPrompt,
+                        );
+                      }}
+                    >{issue.taskId ? "手动确认" : "处理"}</button>
+                    {issue.poiDeleteTarget && (
+                      <button
+                        type="button"
+                        className={`${shared.btn} ${shared.btnSm} ${styles.itemDeleteBtn}`}
+                        data-variant="danger"
+                        aria-label={`删除 POI：${issue.poiName ?? issue.label}`}
+                        title="删除该 POI，并从每日行程中移除"
+                        disabled={deletingKey !== null}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (deletingKey !== null) return;
+                          setConfirmingKey(`${issue.label}-${index}`);
+                        }}
+                      >
+                        {deletingKey === `${issue.label}-${index}`
+                          ? <LoaderCircle size={13} aria-hidden="true" />
+                          : <Trash2 size={13} aria-hidden="true" />}
+                      </button>
+                    )}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

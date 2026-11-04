@@ -287,6 +287,19 @@
   background: color-mix(in srgb, var(--destructive, #dc2626) 8%, var(--surface));
 }
 
+/* 删除二次确认：原位替换「手动确认 / 删除」按钮组，紧贴删除按钮所在位置。 */
+.itemConfirmBtn {
+  height: var(--control-sm);
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0 10px;
+  justify-content: center;
+}
+
+.itemDetailDanger {
+  color: var(--destructive, #dc2626);
+}
+
 .itemDeleteBtn:disabled {
   cursor: not-allowed;
   opacity: 0.62;

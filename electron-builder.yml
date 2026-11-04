@@ -29,6 +29,12 @@ files:
   - "!artifacts/**"
   - "!fixtures/**"
   - "!examples/**"
+  # 文档解析只用 pdfjs 的文字层（getText），不渲染页面图片；@napi-rs/canvas 是
+  # pdfjs 渲染图片时才懒加载的可选原生库，只装了宿主架构那一份（darwin-arm64）。
+  # 打进 x64 包既无法加载，又会让 universal 合并把它当成「两架构同名文件」而失败，
+  # 因此整包排除。将来若需要文档内图片/扫描件 OCR，必须按架构安装并显式声明
+  # mac.x64ArchFiles，不能直接去掉这条排除。
+  - "!**/node_modules/@napi-rs/**"
 
 # 原生模块（.node）需从 asar 中解包，否则运行时无法加载
 asarUnpack:

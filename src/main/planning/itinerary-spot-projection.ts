@@ -21,7 +21,7 @@ export interface RouteHead {
   last: string;
 }
 
-const NON_ANCHOR_SUFFIX = /(?:景区|风景区|公园|博物馆|纪念馆|寺|庙|宫|塔|楼|阁|湖|山|峰|瀑布|森林|草原|湿地|峡谷|洞|泉|古城|古镇|城|村|街|巷|桥|陵|遗址|广场|市集|山庄|度假区|滑雪场|漂流|温泉)$/u;
+const NON_ANCHOR_SUFFIX = /(?:景区|风景区|旅游区|游览区|名胜区|保护区|公园|博物馆|纪念馆|寺|庙|宫|塔|楼|阁|湖|山|峰|瀑布|森林|草原|湿地|峡谷|洞|泉|古城|古镇|城|村|街|巷|桥|陵|遗址|广场|市集|山庄|度假区|滑雪场|漂流|温泉)$/u;
 const ARRIVAL_PREFIX = /^(?:抵达|到达|前往|返回|赴)\s*/u;
 
 export function routeHeads(sections: readonly DaySection[]): Map<number, RouteHead> {

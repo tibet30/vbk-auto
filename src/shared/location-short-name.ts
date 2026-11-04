@@ -60,7 +60,8 @@ const ADMINISTRATIVE_SUFFIXES = [
   "区",
 ] as const;
 
-const PROTECTED_NAME_SUFFIX = /(?:景区|市区|城区|园区|片区|街区|社区|校区|厂区|矿区|库区)$/u;
+// 「泸州老窖旅游区」若按行政尾缀「区」裁剪会被当成行政地名，规划期整条丢掉。
+const PROTECTED_NAME_SUFFIX = /(?:景区|旅游区|度假区|游览区|名胜区|保护区|市区|城区|园区|片区|街区|社区|校区|厂区|矿区|库区)$/u;
 const PROVINCE_LEVEL_CITIES = new Set(["北京", "天津", "上海", "重庆", "香港", "澳门"]);
 
 /** 将省、市、自治区、自治州等行政地点归一为平台常用短名。 */

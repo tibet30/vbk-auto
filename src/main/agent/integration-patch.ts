@@ -6,6 +6,7 @@ import { itineraryInputContractError } from '../planning/itinerary-input-contrac
 import { itineraryDaySchema } from '../planning/itinerary-day-schema.js';
 import { normaliseHotelTier, inferHotelTierFromUserText, hotelDiamondFromTier } from '../../shared/hotel-tiers.js';
 import { stripItinerarySpotIds } from '../../shared/itinerary-spot-identity.js';
+import { keepOperatorNonPoiKinds } from './integration-patch-operator-kind.js';
 
 type Json = Record<string, unknown>;
 type Patch = NonNullable<AiResponse['patch']>;
@@ -33,7 +34,7 @@ export function agentPatchOperations(product: ProductDetail, patch: Json, option
     ...(basicInfoPatch ? { basicInfo: basicInfoPatch } : {}),
     ...(presentationPatch ? { presentation: presentationPatch } : {}),
     ...(Object.hasOwn(patch, "itinerary")
-      ? { itinerary: mergeItineraryDays(product.product.itinerary, patch.itinerary) }
+      ? { itinerary: keepOperatorNonPoiKinds(product, mergeItineraryDays(product.product.itinerary, patch.itinerary)) }
       : {}),
   };
   assertTrafficLineEndpointPatch(effectivePatch);

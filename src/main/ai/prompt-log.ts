@@ -20,6 +20,7 @@ export type AIPromptEntry =
   | "MiniMax.disambiguateOption"
   | "MiniMax.regenerateSubtitle"
   | "MiniMax.generateItineraryDayTitles"
+  | "MiniMax.generateDailyRouteStructure"
   | "Planner.generateStage"
   | "Planner.resolvePoiName"
   | "ThreeStage.structureLocation"

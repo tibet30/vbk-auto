@@ -4,7 +4,9 @@ import { toPlatformShortLocationName } from "../../shared/location-short-name.js
 import type { ProductDetail } from "../../shared/contracts.js";
 import type { LockedConstraints, LockedItineraryDay } from "../../shared/contracts-preparation.js";
 import { parseProductBriefMessage } from "../../shared/product-brief-message.js";
-import { daySections } from "../planning/day-sections.js";
+import { dailyRouteSources } from "./daily-route-source.js";
+import { storedDailyRouteOrder } from "../planning/daily-route-structure.js";
+import { expandParentheticalSubSpots, isTravelDurationNote } from "./day-spot-parenthetical.js";
 import { isPendingApprovalStatusFollowup, preservesApprovedIntent } from "./approval-intent.js";
 import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 
@@ -37,7 +39,8 @@ export function extractLockedConstraints(
   const laterRequirements = filterPlanningRequirementMessages(messages).map((message) => message.content);
   const requirementText = [initialRequirement, ...laterRequirements].filter(Boolean).join("\n");
   const fromIntent = intentConstraints(product);
-  const itineraryConstraints = resolveItineraryConstraints(initialRequirement, laterRequirements, fromIntent);
+  const aiOrder = storedDailyRouteOrder(data, initialRequirement);
+  const itineraryConstraints = resolveItineraryConstraints(initialRequirement, laterRequirements, fromIntent, aiOrder);
   const transport = latestParsedValue([initialRequirement, ...laterRequirements], transportFromText);
   const hotelTier = latestParsedValue([initialRequirement, ...laterRequirements], inferHotelTierFromUserText);
   const days = Number(basic?.days);
@@ -62,8 +65,11 @@ function resolveItineraryConstraints(
   initialRequirement: string,
   laterRequirements: string[],
   fromIntent: { pois: string[]; itineraryOrder: LockedItineraryDay[] },
+  aiOrder?: LockedItineraryDay[],
 ): { pois: string[]; itineraryOrder: LockedItineraryDay[] } {
-  const initial = parseDayConstraints(initialRequirement);
+  // 首版逐日路线优先用 AI 结构化并经本地校验的结果；没有或已过期才回退规则解析。
+  const initial = aiOrder ? { pois: aiOrder.flatMap(lockedDaySpots), itineraryOrder: aiOrder.map(cloneLockedDay) }
+    : parseDayConstraints(initialRequirement);
   const itineraryOrder = new Map<number, LockedItineraryDay>();
   const generalPois = new Set<string>();
   // Explicit daily source text outranks a model's interpretation of that text.
@@ -116,10 +122,8 @@ function resolveItineraryConstraints(
 function parseDayConstraints(textValue: string): { pois: string[]; itineraryOrder: LockedItineraryDay[] } {
   const itineraryOrder: LockedItineraryDay[] = [];
   const pois: string[] = [];
-  const routeText = textValue.replace(/\\[nr]/gu, '\n').replace(/(?:^|[\n\r])\s*(?:住宿与商业配置|住宿配置|商业配置|录入配置|(?:已确认的?)?住宿(?:要求|安排)|已确认的?业务要求)[:：][\s\S]*$/u, "");
-  // 逐日切分收敛在 day-sections：段首天头与段尾下一行的【】都不进正文。
-  for (const section of daySections(routeText)) {
-    const remainder = cleanDayConstraintText(trimPlanningControlTail(section.content));
+  for (const section of dailyRouteSources(textValue)) {
+    const remainder = section.text;
     if (/^(?:不要|不安排|别)/.test(remainder)) continue;
     const { spots, unorderedSpots } = splitDaySpots(remainder);
     if (!spots.length && !unorderedSpots.length) continue;
@@ -173,7 +177,7 @@ function isItineraryCorrection(value: string): boolean {
 }
 
 function splitSpots(value: string): string[] {
-  return value
+  return expandParentheticalSubSpots(value)
     .replace(/\*\*/g, " ")
     // `长白山北景区（天池/长白瀑布/小天池/地下森林）` 的括号是子景点枚举，
     // 必须保留内部名称；只有带 `/` 的括号按分隔符展开，纯说明括号仍整体删除。
@@ -206,37 +210,12 @@ function splitSpots(value: string): string[] {
     .filter(looksLikePlaceName);
 }
 
-function cleanDayConstraintText(value: string): string {
-  return value
-    .replace(/\*\*/g, " ")
-    .replace(/(?:^|[\n\r])\s*[0-9一二三四五六七八九十]+\s*月\s*[0-9一二三四五六七八九十]+\s*号\s*$/u, " ")
-    .replace(/^[:：、，,\s]+/, "")
-    .trim();
-}
-
-/**
- * A product brief can append execution preferences after the last daily route.
- * They are not itinerary constraints, even when the last route is introduced
- * by a D1/D2 marker. Keeping them here would turn "AI 自我修复" into a POI.
- */
-function trimPlanningControlTail(value: string): string {
-  return value
-    .replace(/[，,。；;\n]\s*(?:景点顺序(?:保持|保留)|(?:保持|保留)(?:此|原|上述)?(?:顺序|行程顺序|景点顺序))[\s\S]*$/u, "")
-    .replace(
-    /(?:[\n。；;]\s*)+(?:沿用(?:最近)?产品要求[:：]|重新生成全部方案|端到端.*(?:测试|验证|复验)|本次已授权|重新创建新产品|修复共享问题|资料准备|期望在资料准备|如需处理|无需(?:再)?询问用户|不需要(?:再)?询问用户|请读取刚创建的产品|任何\s*VBK\s*写入)[\s\S]*$/u,
-    "",
-    )
-    .replace(
-      /(?:[\n。；;]\s*)(?=(?:接送团属于|自由活动用|这些不配置(?:POI)?|城市(?:固定|为)|酒店[0-9一二三四五六七八九十]+钻|成人[0-9一二三四五六七八九十]|儿童[0-9一二三四五六七八九十]|[0-9一二三四五六七八九十]+人成团|每班库存|出发(?:日期|时间)(?:为|是)?|出发(?=[0-9一二三四五六七八九十]{1,4}(?:年|[-/.]))|保持(?:跟团游|私家团)|只保存|不启用|不提交审核))[\s\S]*$/u,
-      "",
-    );
-}
-
 function looksLikePlaceName(item: string): boolean {
   if (item.length < 2 || item.length > 20) return false;
   // 兜底：任何残留括号/换行都不是地名（「入 【」这类残片曾整块进入标题）。
   if (/[【】\[\]（）()\n\r]/.test(item)) return false;
   if (/^(?:出发地|客源地)$/u.test(item)) return false;
+  if (isTravelDurationNote(item)) return false;
   if (/^(?:保留|保持)(?:此|原|上述)?(?:顺序|行程顺序|景点顺序)/u.test(item)) return false;
   if (/[{}"']/.test(item) || /destination|productForm|userIdea|nights/.test(item)) return false;
   if (/不要|不安排|不需要|可以|希望|期望|资料|准备|询问|审批|明确|端到端|测试|轻松|适合|带孩子|建议|最好|左右|一下|安排点/.test(item)) return false;

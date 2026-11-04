@@ -9,6 +9,7 @@ import type {
 } from "../../../shared/contracts-planning.js";
 import type { OrchestratorRuntime } from "../types.js";
 import type { ItineraryDayTitleRequest } from "../itinerary-day-titles.js";
+import type { DailyRouteStructure, DailyRouteStructureGenerator } from "../daily-route-structure.js";
 
 export type ProductGenerationStage = Extract<
   PlanningStage,
@@ -38,4 +39,8 @@ export interface ProductGenerationDependencies {
   refreshSatisfiedResearchTasks(localProductId: string): void | Promise<void>;
   /** 为行程逐日生成天标题候选；未提供或失败时使用确定性兜底标题。 */
   generateItineraryDayTitles?(localProductId: string, requests: ItineraryDayTitleRequest[]): Promise<Array<{ day: number; title: string }>>;
+  /** 逐日路线 AI 结构化；未提供或失败时沿用规则解析。 */
+  structureDailyRoute?(localProductId: string, request: Parameters<DailyRouteStructureGenerator>[0]): ReturnType<DailyRouteStructureGenerator>;
+  /** 把通过本地校验的结构写入 product.diagnostics.dailyRouteStructure。 */
+  saveDailyRouteStructure?(localProductId: string, structure: DailyRouteStructure): void;
 }

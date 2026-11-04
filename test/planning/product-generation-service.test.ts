@@ -297,3 +297,24 @@ test("规划模型的超长天标题交给 AI 重写，AI 不合格时用兜底�
   // 私家团兜底用当天景点重组「前缀｜内容」，不写「第1天行程安排」之类的通用占位。
   assert.equal(fallback.detail.product.itinerary![0]!.title, "专车服务｜宽窄巷子");
 });
+
+test("itinerary 阶段在投影前调用一次 AI 逐日路线结构化并落库；已有有效结构时不再调用", async () => {
+  const detail = product();
+  Object.assign(detail.product.basicInfo!, { days: 1, userIdea: "D1：上午 宽窄巷子" });
+  const saved: unknown[] = [];
+  let calls = 0;
+  const setup = service({ detail });
+  const deps = (setup.generation as unknown as { deps: Record<string, unknown> }).deps;
+  deps.structureDailyRoute = async () => {
+    calls += 1;
+    return [{ day: 1, nodes: [{ name: "宽窄巷子", kind: "attraction" }] }];
+  };
+  deps.saveDailyRouteStructure = (_id: string, structure: unknown) => {
+    saved.push(structure);
+    detail.product.diagnostics = { dailyRouteStructure: structure };
+  };
+  await setup.generation.generate(detail.id, "itinerary");
+  await setup.generation.generate(detail.id, "itinerary");
+  assert.equal(calls, 1);
+  assert.equal(saved.length, 1);
+});

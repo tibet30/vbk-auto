@@ -21,6 +21,7 @@ import { isItineraryTransferName } from '../../shared/itinerary-transfer-name.js
 import { normaliseItinerarySupport, supportArrangementType } from '../../shared/itinerary-support-arrangements.js';
 import { isProductAdministrativeRouteName } from '../../shared/product-administrative-route-name.js';
 import { toPlatformShortLocationName } from '../../shared/location-short-name.js';
+import { explicitOvernightName } from "../../shared/explicit-overnight-name.js";
 import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 
 type JsonObject = Record<string, unknown>;
@@ -108,7 +109,9 @@ function projectDay(args: {
   const kept = entries.filter((entry) => !departures.includes(entry.name));
   const attractions = kept.map((entry) => entry.name);
   const description = formatAttractionSequence(attractions, groups, "、");
-  const sourceNotes = parentheticalNotes(args.rawDayText);
+  // 括号内已展开为景点的子景点不再重复写进「原始补充」。
+  const sourceNotes = parentheticalNotes(args.rawDayText).filter((note) => !note.split(/[、，,]/u).map((item) => item.trim())
+    .every((item) => attractions.some((name) => samePlace(name, item))));
   const spots = kept.map((entry, index) => ({
     name: entry.name,
     kind: projectedSpotKind(entry.name),
@@ -187,9 +190,7 @@ function expandAlternativeGroups(order: LockedDay[], groups: Array<{ day: number
 
 function stayForDay(args: { row: LockedDay; nights: number; fallbackStay: string; rawDayText: string }): string | undefined {
   if (args.row.day > args.nights) return undefined;
-  const parenthesized = args.rawDayText.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim();
-  const explicit = parenthesized
-    || args.rawDayText.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n（(→]{2,30})/u)?.[1]?.trim();
+  const explicit = explicitOvernightName(args.rawDayText);
   const endpoint = args.row.spots.at(-1);
   const generic = /^(?:(?:市区|当地|平台|精品|舒适|特色)?(?:酒店|宾馆|民宿|客栈)|住宿)$/u;
   return (explicit && !generic.test(explicit) ? explicit : undefined) || (endpoint && toPlatformShortLocationName(endpoint) === args.fallbackStay ? args.fallbackStay : undefined);

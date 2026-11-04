@@ -12,6 +12,7 @@ import { rewritePresentationCopy } from "./presentation-copy-rewriter.js";
 import { isReplayDataMissing } from "../infrastructure/replay-data-error.js";
 import { rewriteItineraryCopy } from "./itinerary-copy-rewriter.js";
 import { generateItineraryDayTitles as generateItineraryDayTitlesOperation } from "./itinerary-day-title-generator.js";
+import { runDailyRouteStructure } from "./daily-route-structure-generator.js";
 import type { ItineraryDayTitleRequest } from "../planning/itinerary-day-titles.js";
 import type { ItineraryCopyRewriteRequest } from "../../shared/itinerary-copy-rewrite.js";
 import type { AdvisorOutcome, AdvisorRequest, AiResponse, AiUsageEvent, AiUsageSource, DisambiguateOutcome, DisambiguateRequest } from "../../shared/contracts.js";
@@ -129,6 +130,10 @@ export class MiniMaxService {
     }
   }
 
+  async generateDailyRouteStructure(request: Parameters<typeof runDailyRouteStructure>[2], usage?: { localProductId: string; onEvent?: (event: AiUsageEvent) => void }) {
+    if (!this.config.apiKey) throw new MiniMaxServiceError("provider_not_configured", "尚未配置 AI API Key。");
+    return runDailyRouteStructure(this.config, this.client(replyTimeout()), request, usage);
+  }
   async reply(input: {
     message: string;
     product: Record<string, unknown>;

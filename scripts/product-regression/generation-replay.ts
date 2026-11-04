@@ -13,12 +13,14 @@ export interface GenerationReplay {
   stageResponses: Record<string, Json>;
   /** 天标题生成工具 submit_itinerary_day_titles 的固定回复；第 n 次调用取第 n 条，缺少即失败。 */
   dayTitleResponses?: Json[];
+  /** 逐日路线结构化工具 submit_daily_route_structure 的固定回复；原文含「D1/第N天」逐日标记时必须提供。 */
+  dailyRouteResponses?: Json[];
   agentTurns: Array<{ name: string; arguments: Json }>;
 }
 export function loadGenerationReplay(key: string): GenerationReplay {
   const trace = JSON.parse(readFileSync(`${FIXTURE_ROOT}/${key}-generation.json`, 'utf8')) as GenerationReplay;
   if (trace.version !== 1 || !trace.input.userIdea || !trace.stageResponses.itinerary) throw new Error(`缺少需求/模型回放：${key}`);
-  const encoded = JSON.stringify([trace.input, trace.constraints, trace.hotelRequirements, trace.stageResponses, trace.dayTitleResponses ?? []]);
+  const encoded = JSON.stringify([trace.input, trace.constraints, trace.hotelRequirements, trace.stageResponses, trace.dayTitleResponses ?? [], trace.dailyRouteResponses ?? []]);
   if (/"(?:poiId|poiName|hotelCandidates|hotelResource|resourceGroupId|imageId|pendingApproval)"\s*:/u.test(encoded)) {
     throw new Error(`生成回放不得包含已绑定资源或审批：${key}`);
   }
@@ -35,6 +37,7 @@ export function installPlanningTransport(trace: GenerationReplay) {
   const stages: string[] = [];
   let agentIndex = 0;
   let dayTitleCalls = 0;
+  let dailyRouteCalls = 0;
   const misses: string[] = [];
   const missing = (query: string): never => { misses.push(query); throw new ReplayDataMissingError(`缺少模型响应回放：${query}`); };
   globalThis.fetch = async (input, init) => {
@@ -64,6 +67,16 @@ export function installPlanningTransport(trace: GenerationReplay) {
       return Response.json({ id: 'disambiguation', choices: [{ index: 0, finish_reason: 'tool_calls',
         message: { role: 'assistant', content: null, tool_calls: [{ id: 'choice', type: 'function',
           function: { name, arguments: JSON.stringify(recording.response) } }] } }] });
+    }
+    if (name === 'submit_daily_route_structure') {
+      const index = dailyRouteCalls;
+      const recording = trace.dailyRouteResponses?.[index];
+      if (!recording) return missing(`stage:${name}`);
+      if (++dailyRouteCalls > 2) throw new Error(`模型阶段超出固定回放次数：${name}`);
+      return Response.json({ id: `replay-dailyRoute-${index}`, object: 'chat.completion', created: 0, model: 'fixed-regression',
+        choices: [{ index: 0, finish_reason: 'tool_calls', message: { role: 'assistant', content: null,
+          tool_calls: [{ id: `dailyRoute-${index}`, type: 'function', function: { name, arguments: JSON.stringify(recording) } }] } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } });
     }
     if (name === 'submit_itinerary_day_titles') {
       // 与阶段回放一致：缺记录先记 miss，只有成功回放才计数（SDK 重试不会把 miss 变成普通错误）。

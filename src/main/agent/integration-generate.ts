@@ -36,6 +36,7 @@ export interface AgentBusinessDependencies {
   productMutations: ProductMutationService;
   generateStage(localProductId: string, stage: GenerateStage, previousError?: PlanningStageError): Promise<PlanningStageOutput>;
   generateItineraryDayTitles?(localProductId: string, requests: import("../planning/itinerary-day-titles.js").ItineraryDayTitleRequest[]): Promise<Array<{ day: number; title: string }>>;
+  structureDailyRoute?(localProductId: string, request: import("../planning/daily-route-structure.js").DailyRouteStructureRequest): ReturnType<import("../planning/daily-route-structure.js").DailyRouteStructureGenerator>;
   disambiguatePoiOption(args: { localProductId: string; desired: string; product: Record<string, unknown>; candidates: Array<{ id: string; text: string }> }): Promise<{ pickedText: string | null; confidence: number }>;
   disambiguateStationOption(args: { localProductId: string; stationSubtype: "airport" | "train"; desired: string; product: Record<string, unknown>; candidates: Array<{ id?: string; text: string }> }): Promise<{ pickedText: string | null; reasoning: string }>;
   emitProduct(product: ProductDetail): void;
@@ -85,6 +86,14 @@ export function createGenerationStageTools(args: {
       refreshSatisfiedResearchTasks(deps.db, localProductId);
     },
     ...(deps.generateItineraryDayTitles ? { generateItineraryDayTitles: deps.generateItineraryDayTitles } : {}),
+    ...(deps.structureDailyRoute ? { structureDailyRoute: deps.structureDailyRoute } : {}),
+    saveDailyRouteStructure: (localProductId, structure) => {
+      const saved = get(localProductId);
+      const diagnostics = saved.product.diagnostics as Record<string, unknown> | undefined;
+      deps.productMutations.commands.mergeChanges(localProductId, saved, {
+        ...saved.product, diagnostics: { ...diagnostics, dailyRouteStructure: structure },
+      }, 'resource', { status: saved.status, notify: false });
+    },
   });
   // 同产品同阶段上一次失败原因：Agent 再次调用生成工具时作为 previousError 回传模型。
   const lastStageErrors = new Map<string, PlanningStageError>();

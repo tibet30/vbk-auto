@@ -2,6 +2,7 @@ import { hasCompletePoi } from "./itinerary-activity-kind.js";
 import { originalOvernightRoute } from "./itinerary-overnight-city.js";
 import { toWritableAdministrativeCityName } from "./region-overrides.js";
 import { isProtectedRoutePoiPlaceName } from "./route-place-name.js";
+import { explicitOvernightName } from "./explicit-overnight-name.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -74,9 +75,7 @@ function hasExplicitPreviousOvernightStart(product: JsonObject, day: JsonObject,
 }
 
 function explicitOriginalOvernightName(source: string | undefined): string | undefined {
-  if (!source) return undefined;
-  return source.match(/[（(]\s*宿\s*([^）)]+)[）)]/u)?.[1]?.trim()
-    || source.match(/(?:住宿|入住|住(?!宿))\s*(?:为|：|:)?\s*([^—–\-，,、。；;\n（(]{2,30})/u)?.[1]?.trim();
+  return explicitOvernightName(source);
 }
 
 function routeTitleContainsNode(title: string, name: string): boolean {

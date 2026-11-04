@@ -1,5 +1,7 @@
 import { isReplayDataMissing } from "../../infrastructure/replay-data-error.js";
 import type { PlanningStageError, PlanningStageOutput } from "../../../shared/contracts-planning.js";
+import { constraintUserIdea } from "../../../shared/product-idea-optimization.js";
+import { needsDailyRouteStructure, structureDailyRoute } from "../daily-route-structure.js";
 import { projectCompleteItinerary } from "../complete-itinerary-projection.js";
 import { ensureDayTitleFits, generateItineraryDayTitles, itineraryDaySourceText, privateTourDayTitleFacts } from "../itinerary-day-titles.js";
 import { itineraryDayTitleBudget, itineraryDayTitleProblem } from "../../../shared/itinerary-day-title.js";
@@ -68,6 +70,7 @@ export class ProductGenerationService {
     stage: ProductGenerationStage,
     previousError?: PlanningStageError,
   ): Promise<PlanningStageOutput> {
+    if (stage === "itinerary") await this.ensureDailyRouteStructure(localProductId);
     const projected = stage === "itinerary"
       ? projectCompleteItinerary(this.deps.getProduct(localProductId))
       : undefined;
@@ -83,6 +86,24 @@ export class ProductGenerationService {
         modules: [],
       };
     }
+  }
+
+  /**
+   * 用户逐日路线的拆分交给 AI：只在原文没有已验证结构时调用一次，通过本地校验
+   * （天序完整、节点逐字出自当天原文）后落库；失败不阻断，后续沿用规则解析。
+   */
+  private async ensureDailyRouteStructure(localProductId: string): Promise<void> {
+    const { structureDailyRoute: generate, saveDailyRouteStructure: save } = this.deps;
+    if (!generate || !save) return;
+    const product = this.deps.getProduct(localProductId);
+    const userIdea = constraintUserIdea(product.product.basicInfo);
+    if (!needsDailyRouteStructure(product.product as JsonObject, userIdea)) return;
+    const structure = await structureDailyRoute({
+      userIdea,
+      generate: (request) => generate(localProductId, request),
+      onWarning: (message) => logWarn("[planning] daily route structure", { localProductId, message }),
+    });
+    if (structure) save(localProductId, structure);
   }
 
   /**

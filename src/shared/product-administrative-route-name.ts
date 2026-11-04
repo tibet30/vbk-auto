@@ -14,6 +14,9 @@
 import { isAdministrativeLocationName, toPlatformShortLocationName } from "./location-short-name.js";
 
 const PROVINCE_LEVEL_PREFIXES = ["北京", "天津", "上海", "重庆", "香港", "澳门"] as const;
+// 「长沙市区」= 产品自身城市 + 市区/城区：它是行程里的城市落脚点，不是景点，
+// 也查不到可绑定的 POI。toPlatformShortLocationName 对该后缀有意不截断，所以单独处理。
+const URBAN_AREA_SUFFIX = /(?:市区|城区)$/u;
 const TRANSFER_SERVICE_SUFFIX = /(?:接站|送站|接机|送机|接团|送团|集合|解散|接送|返程)$/u;
 
 type Json = Record<string, unknown>;
@@ -41,6 +44,9 @@ export function isProductAdministrativeRouteName(product: Json, value: unknown):
   const prefixes = [province, ...PROVINCE_LEVEL_PREFIXES].filter((item): item is string => Boolean(item));
   // 「重庆万州」= 直辖市前缀 + 产品城市；只接受由产品字段拼出的组合。
   if (prefixes.some((prefix) => anchors.some((anchor) => name === `${prefix}${anchor}`))) return true;
+
+  // 「长沙市区」「万州城区」：只接受产品自身城市 + 市区/城区，「长沙市区博物馆」「湘潭市区」仍按景点处理。
+  if (URBAN_AREA_SUFFIX.test(name) && anchors.includes(name.replace(URBAN_AREA_SUFFIX, ""))) return true;
 
   // 「万州送站」「重庆集合」：城市锚点 + 接送/集合动作。
   const served = name.replace(TRANSFER_SERVICE_SUFFIX, "");

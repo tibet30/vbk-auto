@@ -12,7 +12,7 @@ test("后台任务刷新不应让新建产品表单参与无关重渲染", () =>
 test("稳定的提交回调始终调用最新 createProduct，避免提交旧草稿", () => {
   assert.match(source, /const createProductRef = useRef\(createProduct\)/);
   assert.match(source, /createProductRef\.current = createProduct/);
-  assert.match(source, /const submitCreation = useCallback\(\(\) => \{[\s\S]*createProductRef\.current\(\)[\s\S]*\}, \[\]\)/);
+  assert.match(source, /const submitCreation = useCallback\(\(input\?: typeof createInput\) => \{[\s\S]*createProductRef\.current\(input\)[\s\S]*\}, \[\]\)/);
 });
 
 test("中文组合输入期间不把每个拼音字母回写为受控 textarea value", () => {

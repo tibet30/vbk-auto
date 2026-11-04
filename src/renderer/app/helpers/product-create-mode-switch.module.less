@@ -1,0 +1,6 @@
+.switch { display: inline-flex; flex: 0 0 auto; padding: 2px; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--muted); }
+.option { height: 28px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--fs-sm); cursor: pointer; transition: background-color 160ms ease, color 160ms ease; }
+.option:hover:not(:disabled) { color: var(--foreground); }
+.option[aria-pressed='true'] { background: var(--surface); color: var(--foreground); font-weight: 600; box-shadow: 0 0 0 1px var(--border); cursor: default; }
+.option:focus-visible { outline: none; box-shadow: var(--focus); }
+.option:disabled { opacity: .5; cursor: not-allowed; }

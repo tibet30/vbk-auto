@@ -84,12 +84,13 @@ export function useProductHandlers(state: AppState) {
     }
   };
 
-  const createProduct = async () => {
+  const createProduct = async (override?: typeof createInput) => {
+    const productInput = override ?? createInput;
     if (!hasActiveAiKey(settings)) {
       setNotice(`尚未配置 AI 模型，请先到「设置」中配置 ${aiProviderLabel(settings)} 的 API Key 后再创建产品。`);
       return;
     }
-    const fieldErrors = validateProductBrief(createInput);
+    const fieldErrors = validateProductBrief(productInput);
     const firstFieldError = Object.values(fieldErrors)[0];
     if (firstFieldError) {
       setNotice(firstFieldError);
@@ -101,9 +102,9 @@ export function useProductHandlers(state: AppState) {
       const client = api();
       if (!client) throw new Error("应用通道未就绪，请稍后重试。");
       const created = await client.products.create({
-        ...createInput,
-        destination: createInput.destination.trim(),
-        userIdea: (createInput.userIdea ?? "").trim(),
+        ...productInput,
+        destination: productInput.destination.trim(),
+        userIdea: (productInput.userIdea ?? "").trim(),
         autoConfirm: false,
       });
       const latestTask = created.workflowTask;
@@ -115,11 +116,11 @@ export function useProductHandlers(state: AppState) {
       setProduct(visibleCreated);
       setStage("review");
       setView("workspace");
+      setCreating(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "创建产品失败，请重试。");
     } finally {
       setSavingProduct(false);
-      setCreating(false);
       setAutoConfirmCreation(false);
     }
   };

@@ -110,6 +110,7 @@ export interface VbkApi {
     resume(id: string, mode: WorkflowTaskRetryMode): Promise<ProductWorkflowTask>;
   };
   ai: {
+    document: { extract(name: string, bytes: Uint8Array): Promise<import('./product-document.js').DocumentExtraction>; discuss(input: import('./product-document.js').DocumentChatRequest): Promise<import('./product-document.js').DocumentChatResult> };
     optimizeProductIdea(input: ProductIdeaOptimizationRequest): Promise<ProductIdeaOptimizationResult>;
     send(localProductId: string, content: string): Promise<void>;
     cancel(localProductId: string): Promise<{ cancelled: boolean }>;

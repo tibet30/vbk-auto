@@ -22,6 +22,7 @@ import { platformResourceGateway } from '../infrastructure/platform-resource-gat
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
 import { verifyManualPoiSelection, verifiedMappingForManualPoi } from "../operations/manual-review-poi-selection.js";
 import { sanitizeAgentSnapshot } from "../../shared/agent-snapshot-sanitize.js";
+import { extractProductDocument, discussProductDocument } from "../planning/product-document.js";
 import { optimizeProductIdea } from "../planning/product-idea-optimizer.js";
 import { hasUnverifiedPoiSpot, removePoiIssueSpots } from "../operations/poi-issue-removal.js";
 import type { PoiIssueDeleteTarget } from "../../shared/poi-issue-delete.js";
@@ -38,6 +39,9 @@ async function reconcileSavedProductQuestion(context: MainIpcContext, id: string
 
 export function registerProductAiIpc(context: MainIpcContext): void {
   const { db, emitProduct, readiness, getSettings, aiService, productMutations, remoteProducts, broadcastProduct } = context;
+
+  ipcMain.handle("document:extract", (_event, name: string, bytes: Uint8Array) => extractProductDocument(name, bytes));
+  ipcMain.handle("document:discuss", (_event, input) => discussProductDocument(context, input));
 
   ipcMain.handle("ai:optimizeProductIdea", (event, input) => {
     // 会用本机 API Key 把用户输入发给第三方 AI，只允许受信任的应用窗口调用。

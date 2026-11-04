@@ -48,8 +48,8 @@ export function AppProductsPage({ model }: { model: AppModel }) {
     setCreating(false);
     setAutoConfirmCreation(false);
   }, [setAutoConfirmCreation, setCreating]);
-  const submitCreation = useCallback(() => {
-    void createProductRef.current();
+  const submitCreation = useCallback((input?: typeof createInput) => {
+    void createProductRef.current(input);
   }, []);
 
   const aiConfigured = hasActiveAiKey(settings);

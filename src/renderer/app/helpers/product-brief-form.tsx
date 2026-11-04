@@ -1,3 +1,5 @@
+import { ProductDocumentForm } from "./product-document-form.js";
+import { ProductCreateModeSwitch, type ProductCreateMode } from "./product-create-mode-switch.js";
 import { Select } from "./Select";
 import { Check, LoaderCircle, Plus, RotateCcw, Sparkles, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -10,10 +12,13 @@ import { api } from "./constants.js";
 import { type ProductBriefField, type ProductBriefFieldErrors, validateProductBrief } from "./product-brief-validation";
 import { CREATE_PRODUCT_MAX_DAYS, CREATE_PRODUCT_MIN_DAYS, parseProductDaysInput, productDaysInputValue } from "./product-days-input";
 
-type Props = { input: CreateProductInput; setInput: (input: CreateProductInput) => void; autoConfirm: boolean; setAutoConfirm: (value: boolean) => void; submitting: boolean; onCancel: () => void; onSubmit: () => void };
+type Props = { input: CreateProductInput; setInput: (input: CreateProductInput) => void; autoConfirm: boolean; setAutoConfirm: (value: boolean) => void; submitting: boolean; onCancel: () => void; onSubmit: (input?: CreateProductInput) => void };
 type OptimizationSource = ProductIdeaOptimizationRequest;
 
 export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubmit }: Props) {
+  const [mode, setMode] = useState<ProductCreateMode>("manual");
+  const [documentVisited, setDocumentVisited] = useState(false);
+  const switchMode = (next: ProductCreateMode) => { if (next === "document") setDocumentVisited(true); setMode(next); };
   const [fieldErrors, setFieldErrors] = useState<ProductBriefFieldErrors>({});
   const [sourceIdea, setSourceIdea] = useState(input.userIdea ?? "");
   const [result, setResult] = useState<ProductIdeaOptimizationResult | null>(null);
@@ -76,8 +81,13 @@ export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubm
     if (Object.keys(errors).length === 0) onSubmit();
   };
 
-  return <div className={`${shared.card} ${styles.briefForm}`}>
-    <div><h3>新建产品</h3><p className={shared.viewSub}>填写基础信息和你的初步想法，也可以先让 AI 整理成更可执行的规划输入。</p></div>
+  return <>
+  {documentVisited ? <div hidden={mode !== "document"}><ProductDocumentForm submitting={submitting} onCancel={onCancel} mode={mode} onModeChange={switchMode} onSubmit={onSubmit} /></div> : null}
+  <div hidden={mode !== "manual"}><div className={`${shared.card} ${styles.briefForm}`}>
+    <div className={ideaStyles.formHead}>
+      <div><h3>新建产品</h3><p className={shared.viewSub}>填写基础信息和你的初步想法，也可以先让 AI 整理成更可执行的规划输入。</p></div>
+      <ProductCreateModeSwitch mode={mode} onChange={switchMode} disabled={submitting || optimizing} />
+    </div>
     <div className={styles.briefGrid}>
       <label><span className={shared.fieldLabel}>目的地</span><input className={shared.input} autoFocus placeholder="例如：太原" value={input.destination} aria-invalid={Boolean(fieldErrors.destination)} aria-describedby={fieldErrors.destination ? "create-product-destination-error" : undefined} onChange={(event) => updateBase("destination", { ...input, destination: event.target.value })} />{fieldErrors.destination ? <span id="create-product-destination-error" className={styles.fieldError} role="alert">{fieldErrors.destination}</span> : null}</label>
       <label><span className={shared.fieldLabel}>产品形态</span><Select value={input.productForm} onChange={(event) => updateBase("userIdea", { ...input, productForm: event.target.value as CreateProductInput["productForm"] })}>{(Object.entries(PRODUCT_FORM_LABELS) as Array<[ProductForm, string]>).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
@@ -105,7 +115,8 @@ export function ProductBriefForm({ input, setInput, submitting, onCancel, onSubm
     {input.productForm === "privateTour" ? <span className={styles.ideaGuide}>建议补充：付费景点及门票是否包含、特色体验、适合客群、游览节奏和已确认服务。私家团副标题固定包含“一单一团+24h线上管家”。</span> : null}
     <p className={styles.ideaHint}>创建后仍会经过程序检查和你的方案确认，AI 优化不会直接进入 VBK 录入。</p>
     <div className={styles.formActions}><button type="button" className={shared.btn} data-variant="ghost" onClick={onCancel}>取消</button><button type="button" className={shared.btn} data-variant="primary" disabled={submitting} onClick={submit}>{submitting ? <><LoaderCircle size={15} className={styles.spin} />创建中</> : <><Plus size={15} />创建</>}</button></div>
-  </div>;
+  </div></div>
+  </>;
 }
 
 function OptimizationReview({ result, stale, adopted, onAdopt }: { result: ProductIdeaOptimizationResult; stale: boolean; adopted: boolean; onAdopt: () => void }) {

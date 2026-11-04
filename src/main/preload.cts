@@ -55,6 +55,7 @@ const api: VbkApi = {
     resume: (id, mode) => ipcRenderer.invoke("workflowTasks:resume", id, mode),
   },
   ai: {
+    document: { extract: (name, bytes) => ipcRenderer.invoke("document:extract", name, bytes), discuss: input => ipcRenderer.invoke("document:discuss", input) },
     optimizeProductIdea: (input) => ipcRenderer.invoke("ai:optimizeProductIdea", input),
     send: (localProductId, content) => ipcRenderer.invoke("ai:send", localProductId, content),
     cancel: (localProductId) => ipcRenderer.invoke("ai:cancel", localProductId),

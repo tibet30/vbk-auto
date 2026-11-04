@@ -90,6 +90,18 @@ export function validateIpcArguments(channel: string, args: unknown[]): void {
     parse(channel, "localProductId", localProductIdSchema, args[0]);
   }
 
+  if (channel === "document:extract") {
+    parse(channel, "name", z.string().min(1).max(255), args[0]);
+    parse(channel, "bytes", z.instanceof(Uint8Array).refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= 10 * 1024 * 1024), args[1]);
+  }
+  if (channel === "document:discuss") {
+    parse(channel, "input", z.object({
+      documentText: z.string().trim().min(1).max(60000),
+      messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().trim().min(1).max(4000) }).strict()).max(60),
+      brief: z.object({ destination: z.string().max(100), productForm: z.union([z.enum(PRODUCT_FORMS), z.literal("")]), days: z.number().int().min(2).max(60).nullable(), userIdea: z.string().max(1000) }).strict(),
+    }).strict(), args[0]);
+  }
+
   if (channel === "products:create") {
     const input = parse(channel, "input", z.object({
       destination: z.string().trim().min(1).max(100),

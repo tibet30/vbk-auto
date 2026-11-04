@@ -195,7 +195,7 @@ export async function verifyTermsReadback(
     if (tabEnum === 1) firstTabItems = selected;
     if (tabEnum === 3) {
       const unBookingContent = productRecord(payload).unBookingContentDto;
-      if (!isSameDayOnlyFullPenalty(unBookingContent)) throw new Error(SAME_DAY_PENALTY_PREFLIGHT_ERROR);
+      if (productRecord(productRecord(product).sales).productForm === "freeTravel" && !isSameDayOnlyFullPenalty(unBookingContent)) throw new Error(SAME_DAY_PENALTY_PREFLIGHT_ERROR);
       const holidayRule = productRecord(unBookingContent).holidayRuleDto;
       if (
         Number(productRecord(holidayRule).lossValue) !== HOLIDAY_PENALTY_RATE

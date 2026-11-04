@@ -85,6 +85,7 @@ const HOLIDAY_UNBOOKING_RULE = {
   minAdvanceDays: 0,
   maxAdvanceDays: 0,
 } as const;
+// 仅自由行可自定义标准条款（私家团的 isUnBookingInput 为 "F"，平台固定默认梯度）。
 // 标准条款只录「行程当日」一行：旅行者与旅行社均收取总费用 100%，其余天数留空按 0 损失处理。
 const SAME_DAY_UNBOOKING_RULE = {
   isHoliday: "F",
@@ -238,7 +239,9 @@ export async function saveStructuredProductClauses(
         productId: String(productId),
         tabEnum,
         clauseEditDtos: [],
-        unBookingRuleDtos: tabEnum === 3 ? [SAME_DAY_UNBOOKING_RULE, HOLIDAY_UNBOOKING_RULE] : [],
+        unBookingRuleDtos: tabEnum === 3
+          ? (isFreeTravel ? [SAME_DAY_UNBOOKING_RULE, HOLIDAY_UNBOOKING_RULE] : [HOLIDAY_UNBOOKING_RULE])
+          : [],
       },
     );
     const persistedClauseData = await helpers.request(
@@ -253,7 +256,7 @@ export async function saveStructuredProductClauses(
     )) {
       throw new Error("条款页签 3 保存后回读的节假日违约费比例（旅行者与旅行社）不是 80%");
     }
-    if (tabEnum === 3 && !isSameDayOnlyFullPenalty(persistedClauseData.unBookingContentDto)) {
+    if (tabEnum === 3 && isFreeTravel && !isSameDayOnlyFullPenalty(persistedClauseData.unBookingContentDto)) {
       throw new Error("条款页签 3 保存后回读的标准条款不是仅「行程当日」收取总费用 100%");
     }
     const persistedBody = {

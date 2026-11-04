@@ -185,7 +185,7 @@ test("条款预检拒绝未勾选或非 80% 的节假日条款", async () => {
   );
 });
 
-test("条款预检拒绝标准条款不是仅行程当日 100% 的旧梯度规则", async () => {
+test("条款预检仅对自由行拒绝标准条款不是仅行程当日 100% 的梯度规则", async () => {
   const page = { evaluate: async (_fn: unknown, request: any) => {
     if (String(request.endpoint).endsWith("/getClausePackage")) return success({ clauseTypeDtos: [] });
     throw new Error(`unexpected endpoint ${request.endpoint}`);
@@ -202,9 +202,12 @@ test("条款预检拒绝标准条款不是仅行程当日 100% 的旧梯度规�
     } } : {}),
   }));
   await assert.rejects(
-    () => verifyTermsReadback(page, { ...product, itinerary: [] }, "79189107", tabs),
+    () => verifyTermsReadback(page, { ...product, sales: { productForm: "freeTravel" }, itinerary: [] }, "79189107", tabs),
     (error: Error) => error.message === SAME_DAY_PENALTY_PREFLIGHT_ERROR,
   );
+  // 私家团的标准条款由平台固定为默认梯度，不属于可校验范围。
+  const result = await verifyTermsReadback(page, { ...product, sales: { productForm: "privateTour" }, itinerary: [] }, "79189107", tabs);
+  assert.equal(result.tabs.length, 4);
 });
 
 test("只读恢复预检补齐免费 POI 票型并接受远端无需门票回读", async () => {

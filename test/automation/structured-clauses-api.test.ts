@@ -244,13 +244,18 @@ test("默认条款集合使用已保存的平台 ID，覆盖门票成人/儿童�
 });
 
 test("页面关闭时条款四个页签仍完成接口保存与回读，保留成人儿童门票文本", async () => {
-  const { client, order, saved, savedUnbookingRules } = noPageClauseClient();
-  const result = await saveStructuredProductClauses(client, "79232466", { adultTicketInclusionText: "晋祠+太原古县城" });
+  const { client, order, saved } = noPageClauseClient();
+  const result = await saveStructuredProductClauses(client, "79232466", { productForm: "privateTour", adultTicketInclusionText: "晋祠+太原古县城" });
   assert.deepEqual(order, [2, 1, 3, 4]);
   assert.equal(result.savedTabs.length, 4);
   for (const id of [13, 10087]) {
     assert.equal(saved.get(1)?.find(item => item.clauseItemId === id)?.elementDtos[0].value, "晋祠+太原古县城");
   }
+});
+
+test("自由行条款页签 3 标准条款固定为行程当日 100%，并附带节假日 80%", async () => {
+  const { client, savedUnbookingRules } = noPageClauseClient();
+  await saveStructuredProductClauses(client, "79232466", { productForm: "freeTravel" });
   assert.deepEqual(savedUnbookingRules.get(3), [{
     isHoliday: "F",
     lossValue: 1,
@@ -261,6 +266,20 @@ test("页面关闭时条款四个页签仍完成接口保存与回读，保留�
     maxAdvanceDays: 0,
     key: 0,
   }, {
+    isHoliday: "T",
+    lossValue: 0.8,
+    travelAgencyLossValue: 0.8,
+    nonGroupLossValue: 0,
+    nonGroupTravelAgencyLossValue: 0,
+    minAdvanceDays: 0,
+    maxAdvanceDays: 0,
+  }]);
+});
+
+test("私家团标准条款由平台固定，只保存节假日 80% 且不校验标准条款回读", async () => {
+  const { client, savedUnbookingRules } = noPageClauseClient();
+  await saveStructuredProductClauses(client, "79232466", { productForm: "privateTour", adultTicketInclusionText: "晋祠" });
+  assert.deepEqual(savedUnbookingRules.get(3), [{
     isHoliday: "T",
     lossValue: 0.8,
     travelAgencyLossValue: 0.8,

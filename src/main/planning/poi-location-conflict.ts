@@ -5,10 +5,14 @@ import { hasOriginalPoiNameEvidence } from '../../shared/poi-original-route-iden
 import { isPlanningPoiCandidateInContext } from './poi-auto-selection.js';
 import type { PoiSuggestContext } from './types.js';
 import { inferExplicitPoiDayCity } from './poi-context.js';
+import { hasCurrentPoiAdjudication } from '../../shared/poi-adjudication-receipt.js';
+import { routeDayNumber } from './poi-day-text.js';
 
 /** Rejection of a new selection is not proof that a saved identity is wrong. */
 export function hasDefinitePoiLocationConflict(candidate: PoiSuggestCandidate, context: PoiSuggestContext,
   product: Record<string, unknown>, keyword: string): boolean {
+  const target = context.spotName || keyword;
+  if (hasCurrentPoiAdjudication(product, routeDayNumber(product, target, context.itineraryDay), target, candidate.poiId)) return false;
   const locations = routeLocationsForKeyword(product, context.spotName || keyword, context.itineraryDay);
   if (locations.length && locations.some(location =>
     (!short(candidate.province) || short(candidate.province) === location.province)

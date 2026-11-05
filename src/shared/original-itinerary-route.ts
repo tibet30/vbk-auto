@@ -13,6 +13,16 @@ export function originalOvernightRoute(product: Json, day: Json): string | undef
   return route;
 }
 
+/**
+ * Administrative receipts belong to the operator's original route, not to the
+ * generated title/description or the current set of POI rows. Manual POI
+ * selection, reclassification and deletion must therefore not stale every
+ * administrative anchor on the day.
+ */
+export function routeLocationKey(product: Json, day: Json): string {
+  return JSON.stringify([originalOvernightRoute(product, day), day.day]);
+}
+
 function dailyRoute(input: string, day: number): string | undefined {
   const raw = input.replace(/\\[nr]/gu, '\n');
   const marker = /(?:D(?:ay)?\s*([0-9一二三四五六七八九十]+)\s*(?:天|日)?|第\s*([0-9一二三四五六七八九十]+)\s*天|(?:^|\n)\s*(\d+)\s*[-、:：.])/giu;

@@ -3,6 +3,7 @@ import { toPlatformShortLocationName } from './location-short-name.js';
 import { orderedItineraryRoutePath } from './itinerary-route-path.js';
 import { hasOriginalPoiNameEvidence } from './poi-original-route-identity.js';
 import { corridorDistanceKm, geoPoint, ROUTE_CORRIDOR_RADIUS_KM } from './route-corridor.js';
+import { hasCurrentPoiAdjudication } from './poi-adjudication-receipt.js';
 
 type Json = Record<string, any>;
 export interface RouteLocation {
@@ -19,17 +20,11 @@ export interface RouteLocationEvidence extends RouteLocation {
   position: number;
   sourceRoute: string;
   routeKey: string;
+  /** 乡镇级锚点（川主寺镇）：只证明当天经过的县与州，不作为住宿行政城市。 */
+  town?: boolean;
 }
 
-/**
- * Administrative receipts belong to the operator's original route, not to the
- * generated title/description or the current set of POI rows. Manual POI
- * selection, reclassification and deletion must therefore not stale every
- * administrative anchor on the day.
- */
-export function routeLocationKey(product: Json, day: Json): string {
-  return JSON.stringify([originalOvernightRoute(product, day), day.day]);
-}
+export { routeLocationKey } from './original-itinerary-route.js';
 
 /** Only native administrative receipts for the current route may expand geography. */
 export function currentRouteLocations(product: Json, day: Json): RouteLocationEvidence[] {
@@ -116,6 +111,8 @@ export function routeLocationBlockers(product: Json): Array<{ label: string; det
   for (const day of Array.isArray(product.itinerary) ? product.itinerary : []) {
     for (const spot of Array.isArray(day?.spots) ? day.spots : []) {
       if (!spot?.poiId || !spot.poiName) continue;
+      // 规则判不了、由 AI 在硬门内裁决的绑定：当前原路线下的凭证就是地域证据。
+      if (hasCurrentPoiAdjudication(product, Number(day.day), spot.name, spot.poiId)) continue;
       const locations = routeLocationsForSpot(product, day, spot.name);
       const crossProvince = province && spot.province && toPlatformShortLocationName(spot.province) !== province;
       const receipts = product.diagnostics?.routeLocations;
@@ -169,10 +166,14 @@ function corridorReferences(product: Json, dayNumber: number, excludePoiId: numb
  * 只读平台返回并持久化的坐标，可在回读时离线重算；缺坐标即不成立。
  */
 export function corridorProvesLocation(product: Json, dayNumber: number, candidate: Json): boolean {
-  const point = geoPoint(candidate);
-  if (!point) return false;
-  const distance = corridorDistanceKm(point, corridorReferences(product, dayNumber, Number(candidate.poiId)));
+  const distance = routeCorridorDistanceKm(product, dayNumber, candidate);
   return distance !== undefined && distance <= ROUTE_CORRIDOR_RADIUS_KM;
+}
+
+/** 候选到当日已核验路线折线的距离；缺坐标或缺参考点时为 undefined。 */
+export function routeCorridorDistanceKm(product: Json, dayNumber: number, candidate: Json): number | undefined {
+  const point = geoPoint(candidate);
+  return point ? corridorDistanceKm(point, corridorReferences(product, dayNumber, Number(candidate.poiId))) : undefined;
 }
 
 /**
@@ -200,7 +201,7 @@ export function verifiedRouteOvernightCity(product: Json, day: Json): string | u
   if (!source) return undefined;
   const nodes = currentRouteLocations(product, day).sort((a, b) => a.position - b.position);
   const last = nodes.at(-1);
-  if (!last) return undefined;
+  if (!last || last.town) return undefined;
   const tail = source.slice(last.position + last.name.length).trim();
   if (!/^(?:市|县|旗)?(?:[\s。；;，,]|(?:入住|住宿|当地|酒店|休息))*$/u.test(tail)) return undefined;
   return last.district || last.city;

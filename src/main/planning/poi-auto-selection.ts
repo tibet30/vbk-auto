@@ -11,6 +11,8 @@ import { explicitOriginalRouteDecision } from "./poi-route-location.js";
 import { isSelectableCandidate, uncertainReason } from "./poi-uncertain-reason.js";
 import { dayContainsKeyword, dayRouteText, routeDayNumber } from "./poi-day-text.js";
 import type { PoiSelectionReason } from "../../shared/poi-research-outcome.js";
+import { poiAdjudicationFor } from "../../shared/poi-adjudication-receipt.js";
+import { adjudicatePoiWithAi } from "./poi-ai-adjudication.js";
 
 export interface PoiAutoSelectionMatch {
   poiName: string;
@@ -20,6 +22,8 @@ export interface PoiAutoSelectionMatch {
   district?: string;
   latitude?: number;
   longitude?: number;
+  /** 规则无法证明地点、由 AI 在硬门内裁决：写回时留下裁决凭证。 */
+  adjudication?: { confidence: number; reasoning?: string };
 }
 
 export interface PoiAutoSelectionResult {
@@ -34,12 +38,15 @@ export interface PoiAutoDisambiguator {
     desired: string;
     product: Record<string, unknown>;
     candidates: Array<{ id: string; text: string }>;
-  }): Promise<{ pickedText: string | null; confidence: number }>;
+    /** 当天原路线、行政锚点、邻近已核验景点等裁决上下文。 */
+    context?: Record<string, unknown>;
+  }): Promise<{ pickedText: string | null; confidence: number; reasoning?: string }>;
 }
 
 /**
- * 规划阶段的唯一 POI 决策顺序：程序严格命中优先；否则只将携程排序前 12 条
- * 交给 AI。选定后先核验营业状态，最后才以大于 80% 的 AI 置信度决定是否写回。
+ * 规划阶段的唯一 POI 决策顺序：程序严格命中优先；其次沿用当前原路线下仍有效的
+ * AI 裁决凭证；否则把规则认可与同省身份兼容的前 12 条交给 AI 在硬门内裁决
+ * （见 poi-ai-adjudication.ts）。选定后核验营业状态再写回。
  */
 export async function resolvePlanningPoiAutoSelection(args: {
   localProductId: string;
@@ -55,55 +62,56 @@ export async function resolvePlanningPoiAutoSelection(args: {
 }): Promise<PoiAutoSelectionResult> {
   const scoped = args.context as PoiSuggestContext | undefined;
   args = { ...args, keyword: scoped?.spotName || args.keyword };
-  const locations = routeLocationsForKeyword(args.product, scoped?.spotName || args.keyword, scoped?.itineraryDay);
+  const inRule = (candidate: PoiSuggestCandidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
+    isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates);
+  const dayNumber = routeDayNumber(args.product, args.keyword, scoped?.itineraryDay);
+  const province = normaliseAdministrativeName(args.context?.province);
+  const receipt = args.confirmedPoiId ? undefined : poiAdjudicationFor(args.product, dayNumber, args.keyword);
+  const reused = receipt ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
+    candidate.poiId === receipt.poiId && isSelectableCandidate(candidate) && isCompatiblePoiIdentity(args.keyword, candidate.poiName)
+    && Boolean(province) && normaliseAdministrativeName(candidate.province) === province) : undefined;
+  let ambiguous = false;
   if (!args.confirmedPoiId) {
-    const named = args.detail.candidates.filter(candidate => isPlanningPoiCandidateInContext(candidate,
-      args.context, args.product, args.keyword, args.detail.candidates)
+    const named = args.detail.candidates.filter(candidate => inRule(candidate)
       && samePoiIdentityName(args.keyword, candidate.poiName));
-    if (new Set(named.map(candidate => candidate.poiId)).size > 1) return { status: "uncertain", reason: "ambiguous" };
+    // 同名多候选：机器不靠排序猜身份；有裁决凭证或 AI 时交给它们，否则留给人工。
+    ambiguous = new Set(named.map(candidate => candidate.poiId)).size > 1;
+    if (ambiguous && !reused && !args.disambiguate) return { status: "uncertain", reason: "ambiguous" };
   }
   const confirmed = args.confirmedPoiId ? args.detail.candidates.find(candidate => candidate.poiId === args.confirmedPoiId
     && isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)) : undefined;
   if (args.confirmedPoiId && !confirmed) {
     return { status: "uncertain", reason: uncertainReason(args.keyword, args.detail.candidates) };
   }
-  const exact = confirmed ?? (args.detail.best
+  const exact = confirmed ?? (args.detail.best && !ambiguous
     ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
       isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates) && candidate.poiId === args.detail.best!.poiId)
     : undefined);
-  const uniqueNamed = exact ? undefined : args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
+  const uniqueNamed = exact || ambiguous ? undefined : args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
     isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)
     && explicitlyNamedUniquePoi(args.product, args.keyword, candidate, args.detail.candidates,
       normaliseAdministrativeName(args.context?.province)));
-  let candidate = exact ?? uniqueNamed;
-  let confidence = 1;
+  let candidate = exact ?? uniqueNamed ?? reused;
+  let confidence = candidate === reused && receipt ? receipt.confidence : 1;
+  let adjudication: PoiAutoSelectionMatch["adjudication"] = candidate === reused && receipt
+    ? { confidence: receipt.confidence, ...(receipt.reasoning ? { reasoning: receipt.reasoning } : {}) } : undefined;
+  const fallbackReason = (): PoiSelectionReason => ambiguous ? "ambiguous" : uncertainReason(args.keyword, args.detail.candidates);
 
   if (!candidate && args.disambiguate) {
-    const choices = args.detail.candidates
-      .filter((item): item is PoiSuggestCandidate & { poiName: string; poiId: number } =>
-        isPlanningPoiCandidateInContext(item, args.context, args.product, args.keyword, args.detail.candidates))
-      .slice(0, 12);
-    if (choices.length === 0) {
-      return {
-        status: "uncertain",
-        reason: uncertainReason(args.keyword, args.detail.candidates),
-      };
+    const outcome = await adjudicatePoiWithAi({ localProductId: args.localProductId, keyword: args.keyword,
+      product: args.product, province, dayNumber, detail: args.detail, ambiguous, inRule, disambiguate: args.disambiguate });
+    if (outcome.rejectedBy === "confidence") return { status: "uncertain", reason: "ambiguous" };
+    if (!outcome.candidate) return { status: "uncertain", reason: fallbackReason() };
+    candidate = outcome.candidate;
+    confidence = outcome.confidence ?? 0;
+    if (!outcome.inRule || ambiguous) {
+      adjudication = { confidence, ...(outcome.reasoning ? { reasoning: outcome.reasoning } : {}) };
     }
-    const outcome = await args.disambiguate({
-      localProductId: args.localProductId,
-      desired: args.keyword,
-      product: args.product,
-      candidates: choices.map((item) => ({ id: String(item.index), text: candidateLabel(item) })),
-    });
-    candidate = choices.find((item) => candidateLabel(item) === outcome.pickedText);
-    confidence = outcome.confidence;
   }
 
-  if (!candidate || !isSelectableCandidate(candidate) || !candidateMatchesContext(candidate, args.context, args.product, args.keyword, args.detail.candidates)) {
-    return {
-      status: "uncertain",
-      reason: uncertainReason(args.keyword, args.detail.candidates),
-    };
+  if (!candidate || !isSelectableCandidate(candidate)
+    || (!adjudication && !candidateMatchesContext(candidate, args.context, args.product, args.keyword, args.detail.candidates))) {
+    return { status: "uncertain", reason: fallbackReason() };
   }
   const availability = await args.checkAvailability(candidate.poiId);
   if (availability.status === "suspended") return { status: "suspended" };
@@ -118,6 +126,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
       ...(candidate.district?.trim() ? { district: candidate.district.trim() } : {}),
       ...(typeof candidate.latitude === "number" && typeof candidate.longitude === "number"
         ? { latitude: candidate.latitude, longitude: candidate.longitude } : {}),
+      ...(adjudication ? { adjudication } : {}),
     },
   };
 }
@@ -172,13 +181,6 @@ function hasVerifiedRouteNeighbourEvidence(
   return product.itinerary.some(day => isRecord(day)
     && dayContainsKeyword(day, keyword)
     && hasVerifiedOriginalRouteNeighbour(day, basic, candidate, province));
-}
-
-function candidateLabel(candidate: PoiSuggestCandidate & { poiName: string }): string {
-  const location = [candidate.province, candidate.city, candidate.district]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join("/");
-  return location ? `${candidate.poiName} · ${location}` : candidate.poiName;
 }
 
 /**

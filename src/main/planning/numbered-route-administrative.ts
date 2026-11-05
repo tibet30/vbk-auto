@@ -25,18 +25,21 @@ export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductD
   if ((!numbered && !complete) || !basic.province) return undefined;
   const itinerary = structuredClone(detail.product.itinerary) as Json[];
   const converted: Array<{ day: number; name: string; districtId: number }> = [];
-  const districts = new Map<string, Json | undefined>();
-  const queryDistrict = async (name: string) => {
-    if (!districts.has(name)) {
+  const payloads = new Map<string, Json>();
+  const queryPayload = async (name: string) => {
+    if (!payloads.has(name)) {
       const response = await retryVbkRead(() => vbkSessionRequest(page, {
         endpoint: SUGGEST_DISTRICT_ENDPOINT, body: buildSuggestDistrictRequest(toPlatformShortLocationName(name)),
         errorLabel: '逐日路线行政节点核验', includeCidQuery: false, browserRequestTimeoutMs: 12000, evaluateTimeoutMs: 15000,
       }));
-      const payload = assertVbkAckSuccess(response.payload, '逐日路线行政节点核验') as Json;
-      districts.set(name, exactRouteAdministrativeDistrict(payload, name));
+      payloads.set(name, assertVbkAckSuccess(response.payload, '逐日路线行政节点核验') as Json);
     }
-    return districts.get(name);
+    return payloads.get(name)!;
   };
+  // 景点转交通只认县级以上；周庄、乌镇这类镇名景点不能被转走。
+  const queryDistrict = async (name: string) => exactRouteAdministrativeDistrict(await queryPayload(name), name);
+  // 路线锚点可用唯一乡镇（川主寺镇），它只证明当天经过的县与州。
+  const queryAnchor = async (name: string) => exactRouteAdministrativeDistrict(await queryPayload(name), name, undefined, { allowTown: true });
   for (const day of itinerary) {
     const line = raw.split(/[\n\r]/).find(line => new RegExp(`^\\s*${day.day}\\s*[-、:：.]`).test(line));
     const route = locked.itineraryOrder.find(row => row.day === Number(day.day))?.spots
@@ -63,16 +66,23 @@ export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductD
     day.spots = kept;
   }
   const sourceProduct = withRouteRequirements(detail.product, detail.messages ?? []);
-  const locations = await resolveRouteLocations({ ...sourceProduct, itinerary }, queryDistrict);
+  const locations = await resolveRouteLocations({ ...sourceProduct, itinerary }, queryAnchor);
   const previousLocations = (detail.product.diagnostics as Json | undefined)?.routeLocations;
   return converted.length || locations.length || previousLocations?.length ? { itinerary, converted, locations } : undefined;
 }
 
-export function exactRouteAdministrativeDistrict(payload: Json, name: string, province?: string): Json | undefined {
-  const matches = (Array.isArray(payload.districts) ? payload.districts : []).filter((item: Json) =>
-    Number(item.districtId) > 0 && toPlatformShortLocationName(item.districtName) === toPlatformShortLocationName(name)
-    && /^(?:city|district|county|municipality)$/i.test(String(item.districtType))
+export function exactRouteAdministrativeDistrict(payload: Json, name: string, province?: string,
+  options: { allowTown?: boolean } = {}): Json | undefined {
+  const districts: Json[] = Array.isArray(payload.districts) ? payload.districts : [];
+  const inProvince = (item: Json) => Number(item.districtId) > 0
     && Array.isArray(item.parents) && item.parents.some((parent: Json) => /^(?:province|municipality)$/i.test(String(parent.districtType))
-      && (!province || toPlatformShortLocationName(parent.districtName) === toPlatformShortLocationName(province))));
-  return matches.length === 1 ? matches[0] : undefined;
+      && (!province || toPlatformShortLocationName(parent.districtName) === toPlatformShortLocationName(province)));
+  const matches = districts.filter(item => inProvince(item)
+    && toPlatformShortLocationName(item.districtName) === toPlatformShortLocationName(name)
+    && /^(?:city|district|county|municipality)$/i.test(String(item.districtType)));
+  if (matches.length || !options.allowTown) return matches.length === 1 ? matches[0] : undefined;
+  const plain = name.trim().replace(/(?:镇|乡)$/u, '');
+  const towns = districts.filter(item => inProvince(item) && /^(?:town|township)$/i.test(String(item.districtType))
+    && String(item.districtName ?? '').trim().replace(/(?:镇|乡)$/u, '') === plain);
+  return plain.length >= 2 && towns.length === 1 ? towns[0] : undefined;
 }

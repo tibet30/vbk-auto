@@ -36,6 +36,7 @@ function parseDisambiguateContext(
   input: DisambiguateRequest,
 ): Record<string, unknown> {
   const { kind, desired } = input;
+  if (input.context) return { desired, ...input.context };
   const ctx: Record<string, unknown> = { desired };
   const basic = (product.basicInfo as Record<string, unknown> | undefined) ?? {};
   const presentation = (product.presentation as Record<string, unknown> | undefined) ?? {};
@@ -50,8 +51,10 @@ function parseDisambiguateContext(
     ctx.pickupCity = operations.pickupCity ?? null;
   } else if (kind === "spot") {
     const itinerary = Array.isArray(product.itinerary) ? product.itinerary as Array<Record<string, unknown>> : [];
-    ctx.itinerarySpots = itinerary.map((day) => Array.isArray(day.spots) ? day.spots : [])
-      .flat().filter((spot): spot is string => typeof spot === "string");
+    // 景点现在是 { name, ... } 对象；旧数据仍可能是字符串。
+    ctx.itinerarySpots = itinerary.map((day) => Array.isArray(day.spots) ? day.spots : []).flat()
+      .map((spot) => typeof spot === "string" ? spot : (spot as Record<string, unknown> | null)?.name)
+      .filter((name): name is string => typeof name === "string" && Boolean(name.trim()));
     ctx.recommendation = typeof presentation.recommendation === "string" ? presentation.recommendation : null;
   } else if (kind === "station") {
     ctx.pickupCity = operations.pickupCity ?? null;

@@ -14,7 +14,8 @@ export function recordVerifiedMapping(
   day: Record<string, unknown>,
   spot: unknown,
   spotName: string,
-  match: { poiName: string; poiId: number; province?: string; city?: string; district?: string },
+  match: { poiName: string; poiId: number; province?: string; city?: string; district?: string;
+    adjudication?: { confidence: number; reasoning?: string } },
 ): void {
   // 只有生产受控选择器能证明候选上下文、营业状态与置信度；
   // 单纯的 suggestPoi 结果不能结清运营决策门。
@@ -23,7 +24,10 @@ export function recordVerifiedMapping(
   if (!Number.isInteger(dayNumber) || dayNumber <= 0) return;
   const spotId = spot && typeof spot === "object" && !Array.isArray(spot)
     ? (spot as Record<string, unknown>).spotId : undefined;
-  mappings.push({ day: dayNumber, ...(isItinerarySpotId(spotId) ? { spotId } : {}), spotName, ...match });
+  const { poiName, poiId, province, city, district, adjudication } = match;
+  mappings.push({ day: dayNumber, ...(isItinerarySpotId(spotId) ? { spotId } : {}), spotName, poiName, poiId,
+    ...(province ? { province } : {}), ...(city ? { city } : {}), ...(district ? { district } : {}),
+    ...(adjudication ? { adjudication } : {}) });
 }
 
 export function bracketAliases(value: string): string[] {

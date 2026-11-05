@@ -65,15 +65,16 @@ export function createRunPlanning(context: MainIpcContext, handlePreflightFailur
             return { pickedText: outcome.pickedText, reasoning: outcome.reasoning };
           },
         }),
-        async ({ localProductId: poiProductId, desired, product: poiProduct, candidates }) => {
+        async ({ localProductId: poiProductId, desired, product: poiProduct, candidates, context: poiContext }) => {
           const outcome = await (await aiService()).disambiguateOption({
             kind: "spot",
             desired,
             product: poiProduct,
             candidates,
+            ...(poiContext ? { context: poiContext } : {}),
             usage: { localProductId: poiProductId, stage: "planningPoiSelection" },
           });
-          return { pickedText: outcome.pickedText, confidence: outcome.confidence };
+          return { pickedText: outcome.pickedText, confidence: outcome.confidence, reasoning: outcome.reasoning };
         },
       );
       const productData = (product.product ?? {}) as Record<string, unknown>;

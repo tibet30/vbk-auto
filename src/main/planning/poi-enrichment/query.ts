@@ -51,9 +51,11 @@ export async function queryPoi(args: {
     return { match: null, failed: true, suspended: false, reason: undefined };
   }
 }
-type PoiMatch = { poiName: string; poiId: number; province?: string; city?: string; district?: string; latitude?: number; longitude?: number };
+type PoiMatch = { poiName: string; poiId: number; province?: string; city?: string; district?: string; latitude?: number; longitude?: number;
+  adjudication?: { confidence: number; reasoning?: string } };
 
-function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown; province?: unknown; city?: unknown; district?: unknown; latitude?: unknown; longitude?: unknown } | null | undefined): PoiMatch | null {
+function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown; province?: unknown; city?: unknown; district?: unknown; latitude?: unknown; longitude?: unknown;
+  adjudication?: { confidence: number; reasoning?: string } } | null | undefined): PoiMatch | null {
   if (!match || typeof match !== "object") return null;
   const poiName = match.poiName;
   const poiId = match.poiId;
@@ -65,6 +67,7 @@ function normalisePoiMatch(match: { poiName?: unknown; poiId?: unknown; province
     ...(hasText(match.city) ? { city: match.city.trim() } : {}),
     ...(hasText(match.district) ? { district: match.district.trim() } : {}),
     ...(isFiniteNumber(match.latitude) && isFiniteNumber(match.longitude) ? { latitude: match.latitude, longitude: match.longitude } : {}),
+    ...(match.adjudication && isFiniteNumber(match.adjudication.confidence) ? { adjudication: match.adjudication } : {}),
   };
 }
 

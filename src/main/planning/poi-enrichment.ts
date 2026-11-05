@@ -124,7 +124,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             clearPoiBinding(spot);
             poiUpdated = true;
           }
-          logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
+          logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword, reason: selectionReason ?? null });
           const detail = poiResearchFailureDetail({
             reason: selectionReason,
             reviewingComplete,
@@ -160,7 +160,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
       }
       // 与首轮一致：非复核景点查询失败时不建任务，留给下次重试。
       if (queryFailed && !reviewingComplete) continue;
-      logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword });
+      logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword, reason: selectionReason ?? null });
       pendingTasks.push({ keyword,
         detail: poiResearchFailureDetail({ reason: selectionReason, reviewingComplete, queryFailed, invalidLocation: false,
           invalidIdentity: false, suspended, travelNode: isTravelNodeName(keyword) }) });

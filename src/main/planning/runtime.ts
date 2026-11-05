@@ -26,6 +26,7 @@ import { injectAccountButler } from "../operations/account-butler-inject.js";
 import { applyManualReviewField } from "../operations/manual-review-field.js";
 import { resolvePlanningPoiAutoSelection, type PoiAutoDisambiguator } from "./poi-auto-selection.js";
 import { historicalConfirmedPoiId } from "./historical-poi-selection.js";
+import { mergePoiAdjudications } from "../../shared/poi-adjudication-receipt.js";
 import { planningWriteContractError } from "./itinerary-input-contract.js";
 import { extractLockedConstraints } from "../agent/prompt-helpers.js";
 import type { TrafficLineConfig, TrafficLineEndpointAvailability } from "../../shared/contracts-traffic-line.js";
@@ -223,7 +224,14 @@ export class DbOrchestratorRuntime implements OrchestratorRuntime {
     }
     const reason = planningWriteContractError(current, "itinerary", itinerary);
     if (reason) return { ok: false, reason };
-    this.productMutations.commands.mergeChanges(localProductId, current, { ...current.product, itinerary }, 'resource', {
+    const next: Record<string, unknown> = { ...current.product, itinerary };
+    // AI 裁决凭证与绑定同一次写入：本轮裁决替换同槽旧凭证，失效凭证随之清理。
+    const diagnostics = (current.product.diagnostics ?? {}) as Record<string, unknown>;
+    const adjudications = mergePoiAdjudications(next, verifiedMappings, new Date().toISOString());
+    if (adjudications.length || Array.isArray(diagnostics.poiAdjudications)) {
+      next.diagnostics = { ...diagnostics, poiAdjudications: adjudications };
+    }
+    this.productMutations.commands.mergeChanges(localProductId, current, next, 'resource', {
       preserveVerifiedItineraryPois: false, expectedVersion: current.productJsonVersion ?? 0,
     });
     if (verifiedMappings.length) this.db.confirmVerifiedPoiResearchTasks(localProductId, verifiedMappings);

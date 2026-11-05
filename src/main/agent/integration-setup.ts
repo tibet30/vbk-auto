@@ -128,12 +128,12 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
         .generateItineraryDayTitles(requests, { localProductId, onEvent: (event) => recordAgentUsage(db, localProductId, event) }),
       structureDailyRoute: async (localProductId, request) => (await context.aiService())
         .generateDailyRouteStructure(request, { localProductId, onEvent: (event) => recordAgentUsage(db, localProductId, event) }),
-      disambiguatePoiOption: async ({ localProductId, desired, product, candidates }) => {
+      disambiguatePoiOption: async ({ localProductId, desired, product, candidates, context: poiContext }) => {
         const outcome = await (await context.aiService()).disambiguateOption({
-          kind: "spot", desired, product, candidates,
+          kind: "spot", desired, product, candidates, ...(poiContext ? { context: poiContext } : {}),
           usage: { localProductId, stage: "planningPoiSelection" },
         });
-        return { pickedText: outcome.pickedText, confidence: outcome.confidence };
+        return { pickedText: outcome.pickedText, confidence: outcome.confidence, reasoning: outcome.reasoning };
       },
       disambiguateStationOption: async ({ localProductId, stationSubtype, desired, product, candidates }) => {
         const outcome = await (await context.aiService()).disambiguateOption({

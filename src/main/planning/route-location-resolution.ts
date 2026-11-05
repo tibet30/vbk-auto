@@ -31,13 +31,18 @@ export async function resolveRouteLocations(product: Json, query: (name: string)
       const province = toPlatformShortLocationName(parents.find(parent => /^(?:province|municipality)$/iu.test(parent.districtType))?.districtName);
       const type = String(district.districtType);
       const ownName = toPlatformShortLocationName(district.districtName);
-      const parentCity = toPlatformShortLocationName(parents.find(parent => /^(?:city|municipality)$/iu.test(parent.districtType))?.districtName);
+      const cityParents = parents.filter(parent => /^(?:city|municipality)$/iu.test(parent.districtType));
+      const town = /^(?:town|township)$/iu.test(type);
+      // 乡镇（川主寺镇）的父级依次是县、州：城市取州，区县取县。
+      const parentCity = toPlatformShortLocationName((town ? cityParents.at(-1) : cityParents[0])?.districtName);
       const city = parentCity || (/^(?:city|municipality)$/iu.test(type) ? ownName : '');
+      const county = town ? (cityParents.length > 1 ? toPlatformShortLocationName(cityParents[0]!.districtName) : undefined)
+        : ownName !== city ? ownName : undefined;
       if (!province || !city) continue;
       const position = sourceRoute.indexOf(name, start);
       if (position < 0) continue;
       locations.push({ day: Number(day.day), name, districtId: Number(district.districtId), province, city,
-        ...(ownName !== city ? { district: ownName } : {}),
+        ...(county ? { district: county } : {}), ...(town ? { town: true } : {}),
         position, sourceRoute, routeKey: routeLocationKey(product, day) });
     }
   }
@@ -74,7 +79,8 @@ function routeSegments(path: string): Array<{ token: string; start: number }> {
 
 function administrativeQueryName(token: string): string | undefined {
   const name = token.replace(/[（(【][^）)】]*[）)】]/gu, '').replace(/^[\s:：*]+|[\s。；;*]+$/gu, '')
-    .replace(/^(?:抵达|到达|前往|入住|住宿于|住宿在|住在|住)/u, '')
+    // 「住：黑水」去掉前缀后不能留下冒号，否则查成「：黑水」丢掉当天锚点。
+    .replace(/^(?:抵达|到达|前往|入住|住宿于|住宿在|住在|住)[\s:：]*/u, '')
     // 「长沙市区」是城市「长沙」的落脚点写法，平台行政区只认「长沙」。
     .replace(/(?<=\p{Script=Han}{2})市区$/u, '')
     .replace(/(?:\d{1,2}[:：]\d{2})?(?:集合|接团|送团|接机|送机|接站|送站|送飞机|送高铁|住宿|接|送)$/u, '').trim();

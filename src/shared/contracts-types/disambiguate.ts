@@ -15,6 +15,8 @@ export interface DisambiguateRequest {
   product: Record<string, unknown>;
   /** VBK 下拉返回的全部候选（包含中文 / ID / 中文别名）。 */
   candidates: Array<{ id?: string; text: string }>;
+  /** 调用方整理好的判定上下文（如 POI 裁决的当天原路线与锚点）；提供时直接作为 productContext。 */
+  context?: Record<string, unknown>;
 }
 
 export interface DisambiguateOutcome {

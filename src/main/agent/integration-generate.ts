@@ -18,6 +18,7 @@ import {
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
 import type { AgentTool } from "./types.js";
 import type { ResourceQueryOverrides } from '../planning/resource-query-overrides.js';
+import type { PoiAutoDisambiguator } from "../planning/poi-auto-selection.js";
 import { unavailableRecommendationCategories } from '../../shared/recommendation-category-policy.js';
 import { presentationRecommendationTexts, recommendationQualityProblems } from '../planning/validation/recommendation-quality.js';
 
@@ -37,7 +38,7 @@ export interface AgentBusinessDependencies {
   generateStage(localProductId: string, stage: GenerateStage, previousError?: PlanningStageError): Promise<PlanningStageOutput>;
   generateItineraryDayTitles?(localProductId: string, requests: import("../planning/itinerary-day-titles.js").ItineraryDayTitleRequest[]): Promise<Array<{ day: number; title: string }>>;
   structureDailyRoute?(localProductId: string, request: import("../planning/daily-route-structure.js").DailyRouteStructureRequest): ReturnType<import("../planning/daily-route-structure.js").DailyRouteStructureGenerator>;
-  disambiguatePoiOption(args: { localProductId: string; desired: string; product: Record<string, unknown>; candidates: Array<{ id: string; text: string }> }): Promise<{ pickedText: string | null; confidence: number }>;
+  disambiguatePoiOption: PoiAutoDisambiguator;
   disambiguateStationOption(args: { localProductId: string; stationSubtype: "airport" | "train"; desired: string; product: Record<string, unknown>; candidates: Array<{ id?: string; text: string }> }): Promise<{ pickedText: string | null; reasoning: string }>;
   emitProduct(product: ProductDetail): void;
 }

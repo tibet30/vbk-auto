@@ -7,7 +7,7 @@ const DAY_DIGITS: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五
 function summaryRoutes(text: string): string[] {
   return [...text.matchAll(/^\s*DAY\s*(\d+)\s+(.+)$/gimu)].map(([, day, rest]) => {
     const cells = rest!.split(/\s+/u).filter(Boolean);
-    const mealAt = cells.findIndex((cell, i) => /^(?:0|√)$/u.test(cell) && /^(?:0|√)$/u.test(cells[i + 1] ?? ''));
+    const mealAt = cells.findIndex((cell, i) => /^(?:0|√|×)$/u.test(cell) && /^(?:0|√|×)$/u.test(cells[i + 1] ?? ''));
     const route = (mealAt >= 0 ? cells.slice(0, mealAt) : cells).join('').replace(/[:：]$/u, '').replace(/([^\s：]+)：/u, '$1：');
     return `第${day}天：${route}`;
   });
@@ -29,7 +29,9 @@ function detailTitles(text: string): string[] {
  */
 export function documentRouteIdea(documentText: string, confirmedLodging?: string): string {
   const lines = summaryRoutes(documentText);
-  const routes = lines.length ? lines : detailTitles(documentText);
+  const details = detailTitles(documentText);
+  // PDF 换行可能把简表某一天拆散（「DAY\n巫山/\n2 …」）；简表缺天时改用覆盖每一天的详细行程标题。
+  const routes = lines.length >= details.length ? lines : details;
   if (!routes.length) return '';
   const conflict = lodgingConflict(documentText);
   const note = conflict && confirmedLodging ? `第${conflict.day}天住宿城市：${confirmedLodging}（运营确认）`

@@ -17,3 +17,15 @@ export class NonAdvisableAutomationError extends Error {
     this.name = "NonAdvisableAutomationError";
   }
 }
+
+/**
+ * 写请求发出前的确定性拦截（版本关系不可写等）。平台侧没有任何改动，
+ * 不能被当作「写入结果不明」；同样不交给 AI 猜测重试。
+ */
+export class WriteNotDispatchedError extends NonAdvisableAutomationError {
+  readonly writeDispatched = false;
+  constructor(message: string) {
+    super(message);
+    this.name = "WriteNotDispatchedError";
+  }
+}

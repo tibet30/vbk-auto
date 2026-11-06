@@ -47,6 +47,7 @@ import type { ApiPage, ItineraryApiResult } from "./transport.js";
 import { linkedVersionId, linkedVersionSummary, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
 import { isPrivateTourProduct } from "../../../../shared/private-tour-day-title.js";
 import { approvedFormalDraftSource, assertCreatedDraftRelation } from "./draft-source.js";
+import { WriteNotDispatchedError } from "../../automation.main/automation.main.errors.js";
 
 export async function ensureItineraryApi(
   page: ApiPage,
@@ -92,7 +93,7 @@ export async function ensureItineraryApi(
   const formalTourInfoId = linkedVersionId(tourInfo, "tourInfoId");
   const auditTourInfoId = linkedVersionId(tourInfo, "auditTourInfoId");
   if (!writableVersion) {
-    throw new Error(`VBK 行程关联未返回独立的 draftTourInfoId 或首建未提交 previewTourInfoId；没有当前平台写入协议证据，已停止草稿保存。关联版本=${linkedVersionSummary(tourInfo)}`);
+    throw new WriteNotDispatchedError(`VBK 行程关联未返回独立的 draftTourInfoId 或首建未提交 previewTourInfoId；没有当前平台写入协议证据，未发送任何写请求。关联版本=${linkedVersionSummary(tourInfo)}`);
   }
 
   if (options.readOnlyBeforeWrite && (formalSource || initialCreation)) throw new Error("VBK 尚无独立行程草稿，不能把正式稿或空模板作为写入恢复回读。");

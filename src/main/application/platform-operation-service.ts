@@ -50,6 +50,11 @@ export class PlatformOperationService {
     } catch (cause) {
       if ((cause as { authorizationDenied?: boolean; uncertainWrite?: boolean })?.authorizationDenied
         || (cause as { uncertainWrite?: boolean })?.uncertainWrite) throw cause;
+      // 写请求发出前已确定性拦截：平台无改动，原样上抛，不按报错文案猜成不确定写入。
+      if ((cause as { writeDispatched?: boolean })?.writeDispatched === false) {
+        this.capture?.(evidence, 'business_rejection');
+        throw cause;
+      }
       const error = cause instanceof Error ? cause : new Error(String(cause));
       const kind = classifyPlatformFailure(error);
       const uncertain = kind === 'network_failure' || kind === 'protocol_failure';

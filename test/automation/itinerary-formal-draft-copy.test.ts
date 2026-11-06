@@ -17,12 +17,12 @@ const before = {
   auditStatus: { key: "A", value: "审核通过" },
 };
 
-function setup(change: (relation: Record<string, any>) => void = () => {}) {
+function setup(change: (relation: Record<string, any>) => void = () => {}, initial: Record<string, unknown> = before) {
   installHandlersForFieldMismatch({ hotelName: () => "", otherDescription: () => "自由活动", serviceStart: "08:00", serviceEnd: "20:00", title: (i) => i === 0 ? "第1天" : "第2天" });
   let calls = 0;
-  const after = { ...before, draftTourInfoId: draft };
+  const after = { ...initial, draftTourInfoId: draft, draftTourInfoStatus: 1 };
   routeHandlers["/restapi/soa2/15638/getProductTourInfoList"] = () => ({
-    ResponseStatus: { Ack: "Success" }, tourInfos: [calls++ ? after : before],
+    ResponseStatus: { Ack: "Success" }, tourInfos: [calls++ ? after : initial],
   });
   routeHandlers["/restapi/soa2/15638/checkTourDaily"] = (body: any) => {
     const relation = structuredClone(after);
@@ -53,6 +53,29 @@ test("approved formal template is copied into the server-created independent dra
   assert.equal(association.saveType, 2);
   assert.deepEqual(association.tourInfo, { ...before, draftTourInfoId: draft });
   assert.equal(JSON.parse(association.tourDaily).tourInfoId, formal, "matches captured normal UI association source");
+});
+
+// 2026-11-06 产品 80989432：审核解锁后关联为 draftTourInfoStatus=2 且无草稿指针；
+// VBK 行程页同样以正式稿为模板走 check(2)，状态值不参与版本选择。
+test("approved formal with draftTourInfoStatus=2 also copies into a server-created draft", async () => {
+  const locked = { ...before, draftTourInfoStatus: 2 };
+  delete (locked as Record<string, unknown>).previewTourInfoId;
+  setup(() => {}, locked);
+  const result = await ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928");
+  assert.equal(result.tourInfoId, draft);
+  const check = callLog.find((c) => c.endpoint.endsWith("/checkTourDaily"))!.body as any;
+  assert.equal(check.saveType, 2);
+  assert.equal(JSON.parse(check.tourDaily).tourInfoId, formal);
+  const association = callLog.find((c) => c.endpoint.endsWith("/saveProductTourInfo"))!.body as any;
+  assert.equal(association.tourInfo.tourInfoId, formal);
+  assert.equal(association.tourInfo.auditTourInfoId, formal);
+  assert.equal(association.tourInfo.draftTourInfoId, draft);
+});
+
+test("approved formal with draftTourInfoStatus=2 still refuses when check(2) returns no independent draft", async () => {
+  setup((r: any) => { delete r.draftTourInfoId; }, { ...before, draftTourInfoStatus: 2 });
+  await assert.rejects(() => ensureItineraryApi(makeFakePage() as any, baseProductNoHotel as any, "77035928"), /独立草稿/);
+  assert.equal(callLog.some((c) => /saveTourDailyDetail|saveProductTourInfo/.test(c.endpoint)), false);
 });
 
 for (const [name, change] of [

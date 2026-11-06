@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { PlatformOperationService, PlatformOperationError } from '../../src/main/application/platform-operation-service.js';
 import { runPhaseWithRecovery } from '../../src/main/automation/recovery/recovery-run.js';
+import { WriteNotDispatchedError } from '../../src/main/automation/automation.main/automation.main.errors.js';
 import { assertPlatformQueryResponse } from '../../src/main/infrastructure/platform-query-response.js';
 
 const context = { source: 'vbk' as const, accountKey: 'account', capability: 'poi', query: { keyword: '成都' } };
@@ -50,4 +51,25 @@ test('uncertain write persists needs-user and propagates to Agent without adviso
   error => error instanceof PlatformOperationError && error.uncertainWrite);
   assert.equal(calls, 1); assert.equal(advisoryCalls, 0);
   assert.equal((run as { recovery?: { phases: Record<string, { state: string }> } }).recovery?.phases.basic?.state, 'needs_user');
+});
+
+// 2026-11-06 产品 80989432：行程版本关系不可写时在发请求前就停止，报错含「协议」二字，
+// 曾被文案分类误判为 protocol_failure → 写入结果不明，任务被锁成「先核查回读」。
+test('write refused before dispatch is not an uncertain write and skips advisory replay', async () => {
+  const service = new PlatformOperationService(); const outcomes: string[] = [];
+  const tracked = new PlatformOperationService((_evidence, outcome) => outcomes.push(outcome));
+  const refuse = async () => { throw new WriteNotDispatchedError('没有当前平台写入协议证据，未发送任何写请求。'); };
+  await assert.rejects(tracked.write(context, async () => undefined, refuse),
+    error => error instanceof WriteNotDispatchedError && !(error as { uncertainWrite?: boolean }).uncertainWrite);
+  assert.deepEqual(outcomes, ['write_dispatched', 'business_rejection']);
+  let advisoryCalls = 0;
+  const run = { id: 'run', status: 'running', phases: [{ phase: 'itinerary', status: 'running' }], logs: [] };
+  await assert.rejects(runPhaseWithRecovery({ run, phase: 'itinerary', completedPhases: [], productIdExists: true,
+    basicInfoSaved: true, execute: () => service.write(context, async () => undefined, refuse),
+    advisor: async () => { advisoryCalls++; return { action: 'retry_same_phase' }; },
+    applyAction: async () => undefined, persist: () => undefined, log: () => undefined } as never), WriteNotDispatchedError);
+  assert.equal(advisoryCalls, 0);
+  const phase = (run as { recovery?: { phases: Record<string, { state: string; userInstruction?: string }> } }).recovery?.phases.itinerary;
+  assert.equal(phase?.state, 'needs_user');
+  assert.doesNotMatch(phase?.userInstruction ?? '', /写入结果不明/);
 });

@@ -1,5 +1,6 @@
 import { usesPlatformHotelRules, normalisePlatformHotelProduct } from "../../shared/platform-hotel-rules.js";
 import { assertHotelRulesLayout } from "../automation/ctrip/hotel-rule-api.js";
+import { resolveStayCityAliases } from "../automation/ctrip/hotel-rule-cities.js";
 import { platformHotelRuleMatches } from "../automation/ctrip/hotel-rule-protocol.js";
 import type { AgentSnapshot, ProductDetail } from '../../shared/contracts.js';
 import { normaliseTrafficLineVariant, trafficLineLabel, type TrafficLineChildStage, type TrafficLineVariant } from '../../shared/contracts-traffic-line.js';
@@ -52,7 +53,8 @@ async function reconcileHotelResource(product: ProductDetail, page: Parameters<t
   if (usesPlatformHotelRules(product.product)) {
     try {
       const normalized = normalisePlatformHotelProduct(product.product);
-      const lodging = assertHotelRulesLayout(payload, normalized, true);
+      const lodging = assertHotelRulesLayout(payload, normalized, true,
+        await resolveStayCityAliases(page, normalized, payload, new Map(), true));
       const complete = lodging.every(segment => platformHotelRuleMatches(segment, normalized.operations.hotelRules));
       return { reconciled: complete, message: complete ? "已只读核对正式酒店自动匹配规则与空指定酒店名单。" : "正式酒店规则尚未完整保存，已保留现场。" };
     } catch (error) { return { reconciled: false, message: `酒店规则回读未确认：${String(error)}` }; }

@@ -13,6 +13,9 @@ export function hotelDraftRequestScope(page: VbkSessionRequestBrowser, productId
       assertCurrent();
       const url = new URL(request.endpoint);
       const action = url.pathname.split("/").at(-1)!;
+      // 住宿地行政父级查询（川主寺 → 松潘）是只读行政区接口，原样放行。
+      if (url.origin === "https://online.ctrip.com" && url.pathname === "/restapi/soa2/20049/suggestDistrict")
+        return page.vbkSessionFetch!(request);
       if (url.origin !== "https://online.ctrip.com" || url.pathname !== `/restapi/soa2/15638/${action}` || !allowed.has(action))
         throw new Error("酒店草稿授权禁止其他阶段、提交审核和发布");
       const body = request.body as any;

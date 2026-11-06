@@ -104,11 +104,14 @@ test("短县名补查询仍要求省份唯一，不允许同名外省和重复�
   }
 });
 
-test("住宿城市协议缺失不能被县名补查询掩盖", async () => {
-  let calls = 0;
-  const page = { evaluate: async () => { calls++; return { status: 200, payload: { ResponseStatus: { Ack: "Success" } } }; } };
-  await assert.rejects(resolveResourceSegmentCityApi(page, "眉", { province: "陕西" }), /缺少 cities 列表/);
-  assert.equal(calls, 1);
+test("平台省略 cities 视为查无结果：县名补查询与行政父级都查不到时停止并提示改所属县市", async () => {
+  const endpoints: string[] = [];
+  const page = { evaluate: async (_fn: unknown, request: any) => {
+    endpoints.push(`${new URL(request.endpoint).pathname.split("/").at(-1)}:${request.body.keyword}`);
+    return { status: 200, payload: { ResponseStatus: { Ack: "Success" } } };
+  } };
+  await assert.rejects(resolveResourceSegmentCityApi(page, "眉", { province: "陕西" }), /行政区父级也无法唯一确认所属县市/);
+  assert.deepEqual(endpoints, ["suggestDepartureCity:眉", "suggestDepartureCity:眉县", "suggestDistrict:眉"]);
 });
 
 test("保存后实际住宿地点改变必须阻塞，不能以短名等价掩盖错误城市", async () => {

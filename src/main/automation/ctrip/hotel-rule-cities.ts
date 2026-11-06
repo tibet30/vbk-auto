@@ -1,7 +1,8 @@
 import { originalOvernightRoute } from '../../../shared/original-itinerary-route.js';
 import { toPlatformShortLocationName } from '../../../shared/location-short-name.js';
 import { platformHotelStayGroups } from '../../../shared/platform-hotel-rules.js';
-import { resolveResourceSegmentCityApi } from './vehicle-resource-api.js';
+import { resolveResourceSegmentCityApi, segmentsFromPayload } from './vehicle-resource-api.js';
+import { toVbkCityName } from '../../../shared/region-overrides.js';
 
 type Json = Record<string, any>;
 
@@ -18,6 +19,20 @@ export async function resolveHotelRuleRouteCities(page: any, product: Json): Pro
     const city = await resolveResourceSegmentCityApi(page, group.cityName, { countryName: '中国' });
     if (!toPlatformShortLocationName(city.provinceName)) throw new Error(`住宿城市「${group.cityName}」的平台查询缺少省份，不能确认跨省住宿`);
     cities.set(group.cityName, city);
+  }
+  return cities;
+}
+
+/**
+ * 已保存住宿段与住宿地原名对不上时（川主寺 → 松潘），重新查询该住宿地的 VBK 城市，
+ * 供回读按 cityId 比对。名字已一致的住宿夜不查询，保持重复执行零请求。
+ */
+export async function resolveStayCityAliases(page: any, product: Json, payload: Json, cities: Map<string, Json>, formalOnly = false) {
+  const lodging = segmentsFromPayload(payload, { formalOnly }).slice(1).filter((s: Json) => Number(s.segmentBase?.stayNights) > 0);
+  for (const [index, group] of platformHotelStayGroups(product).entries()) {
+    const saved = toPlatformShortLocationName(lodging[index]?.segmentBase?.destinationCity?.cityName);
+    if (cities.has(group.cityName) || !saved || saved === toPlatformShortLocationName(toVbkCityName(group.cityName))) continue;
+    cities.set(group.cityName, await resolveResourceSegmentCityApi(page, group.cityName, { countryName: '中国' }));
   }
   return cities;
 }

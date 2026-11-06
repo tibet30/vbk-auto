@@ -24,11 +24,19 @@ export async function normalizeHotelResourceLayout(args: {
   source: "ctrip" | "package-api" | "rules";
   province?: string;
   provinceForCity?: (cityName: string, dayNumbers?: number[]) => string | undefined;
+  /** 已确认的住宿地 → VBK 城市（含行政父级回退：川主寺 → 松潘），按产品原名索引。 */
+  knownCity?: (sourceCity: string) => any;
+  onResolvedCity?: (sourceCity: string, city: any) => void;
 }) {
   // 平台酒店规则的住宿城市按 VBK 可写城市回读：万州等直辖市下辖区县落到重庆。
   const expected = args.source === "rules"
-    ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights, dayNumbers }) => ({ cityName: toVbkCityName(cityName), nights, dayNumbers }))
-    : hotelStayGroups(args.resolvedDays, args.source === "ctrip").map(group => ({ ...group, dayNumbers: undefined as number[] | undefined }));
+    ? platformHotelStayGroups({ itinerary: args.resolvedDays }).map(({ cityName, nights, dayNumbers }) => ({ cityName: toVbkCityName(cityName), sourceCity: cityName, nights, dayNumbers }))
+    : hotelStayGroups(args.resolvedDays, args.source === "ctrip").map(group => ({ ...group, sourceCity: group.cityName, dayNumbers: undefined as number[] | undefined }));
+  // 查询落到所属县市后，按平台城市继续比对与回读。
+  const adopt = (group: { cityName: string; sourceCity: string }, city: any) => {
+    group.cityName = String(city.cityName);
+    args.onResolvedCity?.(group.sourceCity, city);
+  };
   let payload = args.payload;
   let segments = segmentsFromPayload(payload);
   const [fullTrip] = segments;
@@ -60,14 +68,20 @@ export async function normalizeHotelResourceLayout(args: {
       const province = args.provinceForCity?.(group.cityName, group.dayNumbers) ?? args.province;
       const destination = segment.segmentBase?.destinationCity;
       const country = fullTrip.segmentBase?.destinationCity?.countryName;
-      const sameCity = toPlatformShortLocationName(destination?.cityName) === toPlatformShortLocationName(group.cityName)
+      const known = args.knownCity?.(group.sourceCity);
+      if (known) adopt(group, known);
+      const sameCity = known ? Number(destination?.cityId) === Number(known.cityId)
+        : toPlatformShortLocationName(destination?.cityName) === toPlatformShortLocationName(group.cityName)
         && (!province || toPlatformShortLocationName(destination?.provinceName) === toPlatformShortLocationName(province))
         && (!country || destination?.countryName === country);
-      if (Number(segment.segmentBase?.stayNights) === group.nights && sameCity) continue;
+      const sameNights = Number(segment.segmentBase?.stayNights) === group.nights;
+      if (sameNights && sameCity) continue;
       const city = sameCity ? segment.segmentBase.destinationCity
         : await resolveResourceSegmentCityApi(args.page, group.cityName, {
           province, countryName: country,
         });
+      adopt(group, city);
+      if (sameNights && Number(city.cityId) === Number(destination?.cityId)) continue;
       await saveProductSegmentApi(args.page, { ...segment, segmentBase: { ...segment.segmentBase, destinationCity: city,
         stayNights: group.nights, minStayNights: group.nights, maxStayNights: group.nights } }, "VBK 酒店规则住宿段转换");
       payload = await getProductSegmentsApi(args.page, args.productId);
@@ -90,10 +104,11 @@ export async function normalizeHotelResourceLayout(args: {
     if (!departureCity || typeof departureCity !== "object") {
       throw new Error("VBK 资源配置全程段缺少到达城市，无法新增住宿段");
     }
-    const destinationCity = await resolveResourceSegmentCityApi(args.page, group.cityName, {
+    const destinationCity = args.knownCity?.(group.sourceCity) ?? await resolveResourceSegmentCityApi(args.page, group.cityName, {
       countryName: departureCity.countryName,
       province: args.provinceForCity?.(group.cityName, group.dayNumbers) ?? args.province,
     });
+    if (args.source === "rules") adopt(group, destinationCity);
     const draft = buildLodgingResourceSegment({
       terminalTemplate: terminal,
       segmentNumber: Number(terminal.segmentBase?.segmentNumber),

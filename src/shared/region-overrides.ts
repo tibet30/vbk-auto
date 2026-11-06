@@ -53,13 +53,11 @@ export function isNonWritableCityAlias(value: unknown): boolean {
  * 返回城市级节点，查询「万州」「万州区」均为空，平台只能写重庆（cityId=4，
  * 产品线「重庆一地」）。因此只在平台城市查询与远端回读比对时映射，产品字段
  * 仍保留「万州」，避免把区县名误写成城市或反过来丢掉跨城住宿。
- * 「川主寺」（松潘县下辖镇）、「九寨沟沟口」（九寨沟县景区门户）同理：平台
- * 查询为空，只能按所属县松潘（cityId=1372）、九寨沟（cityId=91）写入。
+ * 乡镇、景区门户（川主寺、九寨沟沟口）不在此表：住宿段查询为空时按 VBK
+ * 行政区父链自动回退到所属县市，见 vehicle-resource-api/administrative-parent-city。
  */
 const VBK_MISSING_CITY_NAMES: ReadonlyMap<string, string> = new Map([
   ["万州", "重庆"],
-  ["川主寺", "松潘"],
-  ["九寨沟沟口", "九寨沟"],
 ]);
 
 /** 把平台城市列表缺失的行政区映射成 VBK 可写城市；未命中时原样返回。 */

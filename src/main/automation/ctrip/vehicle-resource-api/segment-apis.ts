@@ -2,7 +2,7 @@
  * vehicle-resource-api/segment-apis：15638 系列接口的核心封装。
  *   - getProductSegmentsApi：拉取 resources 草稿 + 正式段；
  *   - saveProductSegmentApi：保存一个完整行程段；
- *   - resolveResourceSegmentCityApi：精确匹配住宿城市（unique cityName）；
+ *   - resolveResourceSegmentCityApi：精确匹配住宿城市（unique cityName），查无时按行政父级回退；
  *   - buildLodgingResourceSegment：以平台末尾空段为模板新建住宿段；
  *   - submitResourceSegmentsApi：提交资源配置草稿（不等于产品审核）；
  *   - futureSchedule：submitSegments 要求的日期数组（90 天后 + offset）。
@@ -15,6 +15,7 @@ import { VBK_RESOURCE_HEAD } from "./types.js";
 import { selectAdministrativeCity, type AdministrativeCityContext } from "../basic-info/administrative-city.js";
 import { toPlatformShortLocationName } from "../../../../shared/location-short-name.js";
 import { toVbkCityName } from "../../../../shared/region-overrides.js";
+import { resolveAdministrativeParentCity } from "./administrative-parent-city.js";
 
 export async function getProductSegmentsApi(page: any, productId: string) {
   const response = await vbkSessionRequest(page, {
@@ -72,9 +73,19 @@ export async function resolveResourceSegmentCityApi(page: any, cityName: string,
     && !cities.some(city => toPlatformShortLocationName(city.cityName) === expected)) {
     cities = await query(`${expected}县`);
   }
-  if (!cities.length) throw new Error(`VBK 城市列表没有「${expected}」，乡镇、景区等落脚点无法写入住宿段；请在行程规划中把当晚住宿城市改为所属县市`);
-  const city = selectAdministrativeCity(cities, expected, context);
-  if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`住宿城市「${expected}」缺少合法 cityId`);
+  let target = expected;
+  let regional = context;
+  if (!cities.length) {
+    // 乡镇、景区门户不在平台城市表里：按行政父链取唯一的所属县市再查（川主寺 → 松潘）。
+    const parent = await resolveAdministrativeParentCity(page, expected, context.province);
+    if (!parent) throw new Error(`VBK 城市列表没有「${expected}」，行政区父级也无法唯一确认所属县市；请在行程规划中把当晚住宿城市改为所属县市`);
+    target = parent.cityName;
+    regional = { ...context, province: context.province ?? parent.provinceName };
+    cities = await query(target);
+    if (!cities.length) throw new Error(`住宿地「${expected}」的所属县市「${target}」（经${parent.via}）不在 VBK 城市列表中`);
+  }
+  const city = selectAdministrativeCity(cities, target, regional);
+  if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`住宿城市「${target}」缺少合法 cityId`);
   return structuredClone(city);
 }
 

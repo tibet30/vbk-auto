@@ -8,7 +8,7 @@ import { normalizeHotelResourceLayout } from "./hotel-resource-api.js";
 import { ensureResourceSegmentsDraftApi, getProductSegmentsApi, segmentsFromPayload, saveProductSegmentApi, initializeResourceSegmentsDraftApi } from "./vehicle-resource-api.js";
 import { finalizeParentResourceSegments } from "./resource-segment-finalization.js";
 import { buildPlatformHotelRule, platformHotelRuleMatches, platformHotelRuleFailureDetail } from "./hotel-rule-protocol.js";
-import { resolveHotelRuleRouteCities } from './hotel-rule-cities.js';
+import { resolveHotelRuleRouteCities, resolveStayCityAliases } from './hotel-rule-cities.js';
 
 export async function ensurePlatformHotelRulesApi(page: any, input: any, productId: string, options: { draftOnly?: boolean } = {}) {
   const product = normalisePlatformHotelProduct(input);
@@ -19,7 +19,8 @@ export async function ensurePlatformHotelRulesApi(page: any, input: any, product
   const routeCities = await resolveHotelRuleRouteCities(page, product);
   const payload = await ensureResourceSegmentsDraftApi(page, productId);
   const layout = await normalizeHotelResourceLayout({ page, productId, resolvedDays: days, payload, source: "rules",
-    provinceForCity: (city, dayNumbers) => toPlatformShortLocationName(routeCities.get(city)?.provinceName) || hotelRuleProvince(product, city, dayNumbers) });
+    provinceForCity: (city, dayNumbers) => toPlatformShortLocationName(routeCities.get(city)?.provinceName) || hotelRuleProvince(product, city, dayNumbers),
+    knownCity: city => routeCities.get(city), onResolvedCity: (city, resolved) => { if (!routeCities.has(city)) routeCities.set(city, resolved); } });
   let fresh: any = await getProductSegmentsApi(page, productId);
   if (options.draftOnly && !Array.isArray(fresh?.draftProductSegments?.segments)) throw new Error("平台酒店规则未返回草稿，不能确认草稿保存");
   const count = segmentsFromPayload(fresh).slice(1).filter((s: any) => Number(s.segmentBase?.stayNights) > 0).length;
@@ -72,9 +73,9 @@ export function assertHotelRulesLayout(payload: any, product: any, formalOnly = 
   lodging.forEach((segment: any, index: number) => {
     const base = segment.segmentBase;
     const wanted = expected[index]!;
-    // 平台回读的是可写城市：万州等直辖市下辖区县写入后回读为重庆。
-    const wantedCityName = toVbkCityName(wanted.cityName);
+    // 平台回读的是可写城市：万州回读为重庆，川主寺按行政父级回读为松潘。
     const routeCity = routeCities.get(wanted.cityName);
+    const wantedCityName = routeCity ? toPlatformShortLocationName(routeCity.cityName) : toVbkCityName(wanted.cityName);
     const province = toPlatformShortLocationName(routeCity?.provinceName) || hotelRuleProvince(product, wanted.cityName, wanted.dayNumbers);
     if (toPlatformShortLocationName(base.destinationCity?.cityName) !== wantedCityName
       || province && (toPlatformShortLocationName(base.destinationCity?.provinceName) !== province || base.destinationCity?.countryName !== "中国")
@@ -106,7 +107,9 @@ export async function verifyPlatformHotelRulesReadback(page: any, product: any, 
   const normalized = normalisePlatformHotelProduct(product);
   if (!normalized.itinerary.some((day: any) => hasItineraryHotelStay(day.hotel))) return { skipped: "行程不含住宿", verified: true };
   const routeCities = await resolveHotelRuleRouteCities(page, normalized);
-  const lodging = assertHotelRulesLayout(await getProductSegmentsApi(page, productId), normalized, true, routeCities);
+  const payload = await getProductSegmentsApi(page, productId);
+  await resolveStayCityAliases(page, normalized, payload, routeCities, true);
+  const lodging = assertHotelRulesLayout(payload, normalized, true, routeCities);
   if (!validPlatformHotelRules(normalized.operations.hotelRules) || lodging.some((s: any) => !platformHotelRuleMatches(s, normalized.operations.hotelRules)))
     throw new Error("平台酒店规则正式回读不一致");
   return { source: "rules", verified: true, positiveSegmentCount: lodging.length, rules: normalized.operations.hotelRules };
@@ -118,6 +121,7 @@ export async function verifyPlatformHotelDraftRulesReadback(page: any, product: 
   const routeCities = await resolveHotelRuleRouteCities(page, product);
   const payload: any = await getProductSegmentsApi(page, productId);
   if (!Array.isArray(payload?.draftProductSegments?.segments)) throw new Error("未返回酒店规则草稿，不能清除失败提示");
+  await resolveStayCityAliases(page, product, payload, routeCities);
   const lodging = assertHotelRulesLayout(payload, product, false, routeCities);
   if (lodging.some(segment => !platformHotelRuleMatches(segment, rules))) throw new Error("平台酒店规则草稿回读不一致");
   return { verified: true as const, productId, segmentIds: lodging.map(s => String(s.segmentId)),

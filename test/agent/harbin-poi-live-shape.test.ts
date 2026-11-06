@@ -120,9 +120,8 @@ test("真实回放从空白产品生成、匹配、保存回读并保留人工�
       disambiguatePoiOption: async ({ desired, candidates }) => {
         const targetId = expected.get(desired);
         assert.ok(targetId, `未知消歧关键词 ${desired}`);
-        const target = candidates.find(
-          (item) => item.id === String(candidateIds(desired).indexOf(targetId)),
-        );
+        // 裁决请求里的候选 id 就是 VBK poiId；选中目标必须是回放里同地域的那个候选项。
+        const target = candidates.find((item) => item.id === String(targetId));
         assert.ok(
           target &&
             target.text.includes("黑龙江") &&
@@ -142,20 +141,19 @@ test("真实回放从空白产品生成、匹配、保存回读并保留人工�
       accountKey: "test",
       productVersion: "test",
     };
-    const generated = await tools
-      .find((tool) => tool.name === "generate_product_module")!
-      .execute({ stage: "itinerary" }, context);
-    assert.notEqual(generated.data?.preparationDenied, true, generated.content);
+    // 生产里首轮查询未命中就会落一条核查任务；按同一稳定标签先预置，
+    // 验证生成阶段的受控绑定写入会把这些任务一并结清，而不是留在 researching。
+    // 生成期绑定完成后行程已推进到 completion，之后不再调用 resolve_itinerary_pois。
     for (const name of expected.keys())
       db.addResearchTask(created.id, {
         type: "vbk",
         label: `核查 ${name} 的 VBK POI 映射`,
         detail: "等待真实候选核验",
       });
-    for (let attempt = 0; attempt < 3; attempt += 1)
-      await tools
-        .find((tool) => tool.name === "resolve_itinerary_pois")!
-        .execute({}, context);
+    const generated = await tools
+      .find((tool) => tool.name === "generate_product_module")!
+      .execute({ stage: "itinerary" }, context);
+    assert.notEqual(generated.data?.preparationDenied, true, generated.content);
     const reader = new VbkDatabase(directory);
     const saved = reader.getProduct(created.id)!;
     reader.close();
@@ -193,9 +191,12 @@ test("真实回放从空白产品生成、匹配、保存回读并保留人工�
       { field: "itinerarySpotRemove", dayIndex, spotIndex },
     );
     used.clear();
-    await tools
+    // 生成期已把行程推进到 completion/copy，此时门禁不允许再调 resolve_itinerary_pois；
+    // 人工删除只需在回读中保持不变，任何复核都不得复活已删除的景点。
+    const reviewed = await tools
       .find((tool) => tool.name === "resolve_itinerary_pois")!
       .execute({}, context);
+    assert.equal(reviewed.data?.preparationDenied, true, reviewed.content);
     const finalReader = new VbkDatabase(directory);
     const finalProduct = finalReader.getProduct(created.id)!;
     finalReader.close();
@@ -217,15 +218,6 @@ test("真实回放从空白产品生成、匹配、保存回读并保留人工�
   }
 });
 
-function candidateIds(keyword: string): number[] {
-  const record = records.find(
-    (item) =>
-      item.endpoint.endsWith("suggestPoi") && item.body.keyword === keyword,
-  );
-  return (
-    (record?.payload as { poiList?: Array<{ poiId?: number }> }).poiList ?? []
-  ).map((item) => Number(item.poiId));
-}
 const exclusive = {
   runExclusive: async (
     _id: string,

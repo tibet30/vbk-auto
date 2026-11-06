@@ -1,7 +1,7 @@
 import { originalOvernightRoute } from './original-itinerary-route.js';
 import { toPlatformShortLocationName } from './location-short-name.js';
 import { orderedItineraryRoutePath } from './itinerary-route-path.js';
-import { hasOriginalPoiNameEvidence } from './poi-original-route-identity.js';
+import { hasOriginalPoiNameEvidence, withoutScenicSuffix } from './poi-original-route-identity.js';
 import { corridorDistanceKm, geoPoint, ROUTE_CORRIDOR_RADIUS_KM } from './route-corridor.js';
 import { hasCurrentPoiAdjudication } from './poi-adjudication-receipt.js';
 
@@ -60,6 +60,14 @@ function routeStopPosition(path: string, keyword: string): number | undefined {
   return positions.length === 1 ? positions[0] : undefined;
 }
 
+/** 「九寨沟风景区」只比原站点「九寨沟」多一个景区类别尾缀，仍落在该站点上。 */
+function spotRoutePosition(path: string, keyword: string): number | undefined {
+  const exact = routeStopPosition(path, keyword);
+  if (exact !== undefined) return exact;
+  const bare = withoutScenicSuffix(keyword);
+  return bare.length >= 2 && bare !== keyword.replace(/\s+/gu, '') ? routeStopPosition(path, bare) : undefined;
+}
+
 /** A stop sees only the adjacent route anchors, never all cities visited that day. */
 export function routeLocationsForSpot(product: Json, day: Json, keyword: string): RouteLocation[] {
   const source = originalOvernightRoute(product, day);
@@ -68,7 +76,7 @@ export function routeLocationsForSpot(product: Json, day: Json, keyword: string)
   const spot = day.spots.find((value: Json) => value?.name === keyword);
   if (!spot) return [];
   const path = orderedItineraryRoutePath(source);
-  const position = routeStopPosition(path, keyword);
+  const position = spotRoutePosition(path, keyword);
   if (position === undefined) return [];
   const nodes = currentRouteLocations(product, day).filter(node => node.position < path.length).sort((a, b) => a.position - b.position);
   const before = nodes.filter(node => node.position <= position).at(-1);
@@ -84,7 +92,7 @@ export function routeLocationsForSpot(product: Json, day: Json, keyword: string)
 function currentSpotOrderPreserved(source: string, spots: Json[]): boolean {
   const path = orderedItineraryRoutePath(source);
   const positions = spots.flatMap((spot) => {
-    const position = routeStopPosition(path, textValue(spot?.name));
+    const position = spotRoutePosition(path, textValue(spot?.name));
     return position === undefined ? [] : [position];
   });
   return positions.every((position, index) => index === 0 || position >= positions[index - 1]!);

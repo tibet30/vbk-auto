@@ -10,7 +10,10 @@ export async function resolveAdministrativeRouteNodes(
   withPage: <T>(work: () => Promise<T>) => Promise<T>,
 ): Promise<{ current: ProductDetail; converted?: Array<{ day: number; name: string; districtId: number }> }> {
   if (!deps.browser) return { current };
-  const result = await withPage(async () => normaliseNumberedRouteAdministrativeNodes(current, await getVbkRequestPage(deps.browser)));
+  // Agent 对话里的运营要求（「第四天要有九寨沟的景区」）只存在快照事件中。
+  const agentMessages = (deps.db.getAgentSnapshot?.(current.id)?.events ?? []).filter(event => event.type === 'user')
+    .map(event => ({ role: 'user' as const, content: event.content }));
+  const result = await withPage(async () => normaliseNumberedRouteAdministrativeNodes(current, await getVbkRequestPage(deps.browser), agentMessages));
   if (!result) return { current };
   const diagnostics = current.product.diagnostics as Record<string, unknown> | undefined;
   const receipts = Array.isArray(diagnostics?.routeAdministrativeNodes) ? diagnostics.routeAdministrativeNodes : [];

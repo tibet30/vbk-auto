@@ -10,7 +10,7 @@ export function poiRouteIdentityCore(value: string): string {
 }
 
 /** 景区类别尾缀只是同类地貌的目录称谓，不改变原名对应的地点身份。 */
-function withoutScenicSuffix(value: string): string {
+export function withoutScenicSuffix(value: string): string {
   return compact(value).replace(/(?:旅游景区|风景名胜区|风景区|景区|地质公园)$/u, '');
 }
 

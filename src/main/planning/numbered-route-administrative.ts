@@ -12,11 +12,15 @@ import { assertVbkAckSuccess } from '../infrastructure/vbk-response-error.js';
 import { buildSuggestDistrictRequest, SUGGEST_DISTRICT_ENDPOINT } from '../infrastructure/suggest-district.js';
 import { isProtectedRoutePoiPlaceName } from '../../shared/route-place-name.js';
 import { constraintUserIdea } from '../../shared/product-idea-optimization.js';
+import { isExplicitlyRequiredDaySpot } from '../../shared/explicit-day-spot-requirement.js';
 
 type Json = Record<string, any>;
 
 /** 完整原始逐日路线中，将平台唯一确认的行政节点移回交通安排。 */
-export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductDetail, page: VbkSessionRequestBrowser) {
+export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductDetail, page: VbkSessionRequestBrowser,
+  /** Agent 对话中的运营原话；只用于识别明确景点要求，不改写原路线。 */
+  agentMessages: ReadonlyArray<{ role: string; content: string }> = []) {
+  const requirementMessages = [...(detail.messages ?? []), ...agentMessages];
   const basic = detail.product.basicInfo as Json;
   const raw = constraintUserIdea(basic);
   const numbered = hasCompleteNumberedRoute(raw, Number(basic?.days));
@@ -47,7 +51,9 @@ export async function normaliseNumberedRouteAdministrativeNodes(detail: ProductD
     const kept = [];
     for (const spot of day.spots ?? []) {
       const name = String(spot.name ?? '').trim();
-      if (!requiresItineraryPoi(spot) || hasCompletePoi(spot) || !route.includes(name) || isProtectedRoutePoiPlaceName(name)) {
+      if (!requiresItineraryPoi(spot) || hasCompletePoi(spot) || !route.includes(name) || isProtectedRoutePoiPlaceName(name)
+        // 运营已明确「第N天要有X的景区」：同名行政区不能把这个景点转成交通衔接。
+        || isExplicitlyRequiredDaySpot(requirementMessages, Number(day.day), name)) {
         kept.push(spot); continue;
       }
       const district = await queryDistrict(name);

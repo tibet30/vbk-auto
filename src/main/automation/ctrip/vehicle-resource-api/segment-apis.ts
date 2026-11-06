@@ -61,8 +61,9 @@ export async function resolveResourceSegmentCityApi(page: any, cityName: string,
       body: { contentType: "json", head: VBK_RESOURCE_HEAD, keyword },
     });
     assertVbkResourceResponse(response.payload, "VBK 住宿城市查询");
-    if (!Array.isArray((response.payload as any)?.cities)) throw new Error("VBK 住宿城市查询缺少 cities 列表");
-    return (response.payload as any).cities as ResourceCity[];
+    // 平台查无结果时直接省略 cities 字段（实测「川主寺」「九寨沟沟口」），按空列表处理。
+    const cities = (response.payload as any)?.cities;
+    return (Array.isArray(cities) ? cities : []) as ResourceCity[];
   };
   let cities = await query(expected);
   // 单字县名的短名（眉、洋等）不能命中平台建议接口。仅补查询完整县名，
@@ -71,6 +72,7 @@ export async function resolveResourceSegmentCityApi(page: any, cityName: string,
     && !cities.some(city => toPlatformShortLocationName(city.cityName) === expected)) {
     cities = await query(`${expected}县`);
   }
+  if (!cities.length) throw new Error(`VBK 城市列表没有「${expected}」，乡镇、景区等落脚点无法写入住宿段；请在行程规划中把当晚住宿城市改为所属县市`);
   const city = selectAdministrativeCity(cities, expected, context);
   if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`住宿城市「${expected}」缺少合法 cityId`);
   return structuredClone(city);

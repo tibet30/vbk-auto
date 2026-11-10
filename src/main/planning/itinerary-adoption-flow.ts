@@ -14,6 +14,8 @@ import {
   markItineraryVerifying,
 } from "./itinerary-adoption.js";
 import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
+import { readProductForm } from "../../shared/product-form.js";
+import { dayMayHaveNoSpots } from "../../shared/itinerary-content.js";
 
 type ItineraryPoiLookup = (
   name: string,
@@ -47,9 +49,13 @@ export async function acceptItineraryAndRerunCompletion(args: {
       throw new Error("当前没有待采用的对话行程，请先在对话中调整行程。");
     }
     const itinerary = remote.product.itinerary;
+    const productForm = readProductForm(remote.product);
     const malformedDay = (Array.isArray(itinerary) ? itinerary : []).findIndex((day) => {
       const spots = asRecord(day)?.spots;
-      return !Array.isArray(spots) || spots.length === 0 || spots.some((spot) => {
+      if (!Array.isArray(spots)) return true;
+      // 自由行整天自由活动不需要景点，采用后由就绪门禁继续检查文案与住宿。
+      if (spots.length === 0) return !dayMayHaveNoSpots(day, productForm);
+      return spots.some((spot) => {
         const record = asRecord(spot);
         return typeof spot === "string" ? !spot.trim() : !text(record?.name) && !text(record?.poiName);
       });

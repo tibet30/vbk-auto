@@ -1,7 +1,8 @@
 /**
  * 其他模块 schema：itinerary / pricing / inventory / terms / release /
  * packageName / operations（skeleton）。
- *   - itinerary：数组，每项用 itineraryDaySchema 校验；
+ *   - itinerary：数组，每项用 itineraryDaySchema 校验（结构形状；无景点日是否成立
+ *     由产品形态决定，见 itinerary-structure 的产品级门禁）；
  *   - pricing：成人/儿童价 + 成本（可选）+ minimumTravelers（可选）；cost.adult
  *     不可超过 adult；
  *   - inventory：YYYY-MM-DD startDate / endDate + dailyQuota；startDate <= endDate；

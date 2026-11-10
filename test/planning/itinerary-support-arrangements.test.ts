@@ -74,7 +74,9 @@ test("有明确接送的无景点日通过所有准入，真正空白日和仅�
   const empty = { ...transferDay, spots: [], activities: [] };
   assert.equal(hasValidItinerary({ itinerary: [empty] }), false);
   assert.equal(itineraryPoisAreComplete([empty]), false);
-  assert.equal(validateModuleValue("itinerary", [empty]).ok, false);
+  // 空日是结构合法形状；能否成立取决于产品形态（自由行整天自由活动），
+  // 由 hasValidItinerary / itineraryPoisAreComplete 等产品级门禁判断。
+  assert.equal(validateModuleValue("itinerary", [empty]).ok, true);
   const mealsOnly = { ...empty, spots: [{ name: "早餐含", kind: "other" as const }] };
   assert.equal(hasValidItinerary({ itinerary: [mealsOnly] }), false);
   assert.equal(itineraryPoisAreComplete([mealsOnly]), false);

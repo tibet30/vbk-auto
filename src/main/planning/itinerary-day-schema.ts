@@ -1,7 +1,5 @@
 import { z } from "zod";
 import { isCombinedSpotName } from "./spot-name.js";
-import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
-import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleLength } from "../../shared/itinerary-day-title.js";
 const requiredText = z.string().trim().min(1);
 
@@ -42,6 +40,7 @@ export const itineraryDaySchema = z.object({
   hotelCity: z.string().trim().optional(),
   meals: requiredText,
   mealDescriptions: z.array(requiredText).length(3).optional(),
-}).strict().superRefine((day, ctx) => {
-  if (!normaliseItinerarySupport(day).spots.length && !dayHasUserOtherActivity(day)) ctx.addIssue({ code: "custom", path: ["spots"], message: "无游览站点的日期必须有明确接送或独立活动安排。" });
-});
+}).strict();
+// 「无景点的日期是否成立」取决于产品形态（自由行整天自由活动）与当天安排：
+// 由 itinerary-structure / validators-basic / 自动化契约等产品级门禁统一判断，
+// 这里不再写死，避免自由行合法行程在模块写入与回读时被误判。

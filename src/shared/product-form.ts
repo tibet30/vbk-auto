@@ -38,6 +38,15 @@ export function isPrivateTourForm(value: unknown): boolean {
   return value === "privateTour";
 }
 
+export function isFreeTravelForm(value: unknown): boolean {
+  return value === "freeTravel";
+}
+
+/** 从产品对象读取 sales.productForm；缺失时返回 undefined。 */
+export function readProductForm(product: unknown): unknown {
+  return objectValue(objectValue(product)?.sales)?.productForm;
+}
+
 export function requiresVehicleResource(value: unknown): boolean {
   return value === "privateTour";
 }

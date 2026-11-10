@@ -183,6 +183,16 @@ test("spots 和用户其他活动都为空 → 抛错", () => {
   );
 });
 
+test("自由行整天自由活动：无景点日不生成景点节点，也不再抛错", () => {
+  const day = makeDay({ spots: [], title: "丽江自由活动" });
+  const out = transformItinerary({
+    itinerary: [day], operations: { ...baseOps, transport: "none" }, stations: baseStations, refIdSeed: "1", productForm: "freeTravel",
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].tourDailyInfos.filter((info) => info.activeType?.key === 3).length, 0);
+  assert.match(out[0].dailyDescription, /自由活动/);
+});
+
 // ───────── 已知 day 实测组合 ─────────
 
 test("3 天行程：refId 一律为 null（不做去重 / 不参与协议字段）", () => {

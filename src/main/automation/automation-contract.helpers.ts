@@ -22,7 +22,8 @@ import { hasValidVbkRecommendationLength } from "../planning/vbk-recommendation-
 import { readCover } from "../operations/cover-info.js";
 import { isCtripLibraryCoverComplete } from "../operations/cover-auto-fill.js";
 import { placeholderDraftOnly, readActiveCoverFallback } from "../../shared/cover-fallback.js";
-import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { dayMayHaveNoSpots } from "../../shared/itinerary-content.js";
+import { readProductForm } from "../../shared/product-form.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 
@@ -81,6 +82,8 @@ export function hasValidPresentationText(product: Record<string, unknown>): bool
 export function hasValidItinerary(product: Record<string, unknown>): boolean {
   const itinerary = asArray(product.itinerary);
   if (!itinerary || itinerary.length === 0) return false;
+  // 自由行整天自由活动是合法行程，不要求每天都有景点。
+  const productForm = readProductForm(product);
   for (const day of itinerary) {
     const source = asObject(day);
     if (!source || !Array.isArray(source.spots)) return false;
@@ -91,7 +94,7 @@ export function hasValidItinerary(product: Record<string, unknown>): boolean {
     const spots = asArray(record.spots);
     if (!spots) return false;
     if (spots.length === 0) {
-      if (dayHasUserOtherActivity(record)) continue;
+      if (dayMayHaveNoSpots(record, productForm)) continue;
       return false;
     }
     for (const spot of spots) {

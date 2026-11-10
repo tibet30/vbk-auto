@@ -1,5 +1,6 @@
 import { VBK_RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
-import { dayHasUserOtherActivity } from "../../shared/itinerary-content.js";
+import { dayMayHaveNoSpots } from "../../shared/itinerary-content.js";
+import { readProductForm } from "../../shared/product-form.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { hasValidVbkRecommendationLength } from "./vbk-recommendation-length.js";
@@ -53,12 +54,13 @@ export function detectAcceptedModulesFromProduct(product: Record<string, unknown
   const expectedDays = Number.isInteger(Number(basicInfo?.days)) && Number(basicInfo?.days) > 0
     ? Number(basicInfo?.days)
     : null;
+  const productForm = readProductForm(product);
   if (Array.isArray(itinerary)) {
     if (expectedDays !== null) {
-      if (itinerary.length === expectedDays && itineraryDaysAreOrdered(itinerary, expectedDays) && itineraryPoisAreComplete(itinerary)) {
+      if (itinerary.length === expectedDays && itineraryDaysAreOrdered(itinerary, expectedDays) && itineraryPoisAreComplete(itinerary, productForm)) {
         accepted.push("itinerary");
       }
-    } else if (itinerary.length > 0 && itineraryDaysAreOrdered(itinerary, itinerary.length) && itineraryPoisAreComplete(itinerary)) {
+    } else if (itinerary.length > 0 && itineraryDaysAreOrdered(itinerary, itinerary.length) && itineraryPoisAreComplete(itinerary, productForm)) {
       accepted.push("itinerary");
     }
   }
@@ -112,7 +114,7 @@ function itineraryDaysAreOrdered(itinerary: unknown[], expectedDays: number): bo
   return true;
 }
 
-export function itineraryPoisAreComplete(itinerary: unknown[]): boolean {
+export function itineraryPoisAreComplete(itinerary: unknown[], productForm?: unknown): boolean {
   if (itinerary.length === 0) return false;
   for (const day of itinerary) {
     if (!day || typeof day !== "object" || Array.isArray(day)) return false;
@@ -120,7 +122,7 @@ export function itineraryPoisAreComplete(itinerary: unknown[]): boolean {
     const normalised = normaliseItinerarySupport(day);
     const spots = (normalised as Record<string, unknown>).spots as unknown[];
     if (spots.length === 0) {
-      if (dayHasUserOtherActivity(day)) continue;
+      if (dayMayHaveNoSpots(day, productForm)) continue;
       return false;
     }
     for (const spot of spots) {

@@ -45,6 +45,7 @@ import {
 } from "./steps.js";
 import type { ApiPage, ItineraryApiResult } from "./transport.js";
 import { linkedVersionId, linkedVersionSummary, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
+import { readProductForm } from "../../../../shared/product-form.js";
 import { isPrivateTourProduct } from "../../../../shared/private-tour-day-title.js";
 import { approvedFormalDraftSource, assertCreatedDraftRelation } from "./draft-source.js";
 import { WriteNotDispatchedError } from "../../automation.main/automation.main.errors.js";
@@ -61,6 +62,8 @@ export async function ensureItineraryApi(
   product = normalisePlatformHotelProduct(product) as typeof product;
   const operations: ProductOperations = product.operations ?? {};
   const privateTour = isPrivateTourProduct(product);
+  // 自由行允许整天自由活动：每日行程可以没有景点节点。
+  const productForm = readProductForm(product);
   if (!operations.pickupCity) {
     throw new Error("operations.pickupCity 缺失，无法解析接送站。");
   }
@@ -116,6 +119,7 @@ export async function ensureItineraryApi(
     operations,
     stations,
     privateTour,
+    productForm,
   });
 
   // 5) 拼装完整 tourInfo payload（含 template / templateId / days / tourDailyDescriptions）

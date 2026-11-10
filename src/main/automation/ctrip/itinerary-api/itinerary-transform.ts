@@ -23,6 +23,7 @@ import { orderItineraryMeals } from "./meal-order.js";
 import { HOTEL_RESOURCE_CANDIDATE_COUNT, HOTEL_RESOURCE_MIN_CANDIDATE_COUNT, ITINERARY_HOTEL_CANDIDATE_COUNT } from "../../../../shared/hotel-candidate-counts.js";
 import { hasItineraryHotelStay } from "../../../../shared/itinerary-hotel.js";
 import { normaliseItinerarySupport, dayHasTransportArrangement } from "../../../../shared/itinerary-support-arrangements.js";
+import { productFormAllowsSpotlessDays } from "../../../../shared/itinerary-content.js";
 import { toVbkDailyUseCar } from "../../../../shared/product-form.js";
 import { HOTEL_SELECTION_NOTE, dailyTransportDescription } from "../../../../shared/itinerary-service-copy.js";
 import { isFreeActivityDayTitle, privateTourDayTitleContent } from "../../../../shared/private-tour-day-title.js";
@@ -120,6 +121,8 @@ export function buildDayDescription(args: {
   operations: ProductOperations;
   stations: ResolvedStations;
   privateTour?: boolean;
+  /** 自由行允许整天自由活动：无景点、无独立活动、无接送也成立。 */
+  productForm?: unknown;
 }): VbkTourDailyDescription {
   const { index, totalDays, operations, stations } = args;
   const day = normaliseItinerarySupport(args.day);
@@ -159,7 +162,7 @@ export function buildDayDescription(args: {
   const attractionSpots = itineraryAttractions(sourceSpots);
   const hasSpots = attractionSpots.length > 0;
   const otherActivities = dayOtherActivities(day);
-  if (!hasSpots && !otherActivities.length && !dayHasTransportArrangement(day)) {
+  if (!hasSpots && !otherActivities.length && !dayHasTransportArrangement(day) && !productFormAllowsSpotlessDays(args.productForm)) {
     throw new Error(`第 ${day.day} 天缺少已验证景点或用户明确的其他活动。`);
   }
   let lunchAdded = false;
@@ -300,6 +303,7 @@ export function transformItinerary(args: {
   stations: ResolvedStations;
   refIdSeed?: string;
   privateTour?: boolean;
+  productForm?: unknown;
 }): VbkTourDailyDescription[] {
   const { itinerary, operations, stations } = args;
   if (!Array.isArray(itinerary) || itinerary.length === 0) {
@@ -324,6 +328,7 @@ export function transformItinerary(args: {
       operations,
       stations,
       privateTour: args.privateTour,
+      productForm: args.productForm,
     }),
   );
 }

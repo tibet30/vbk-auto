@@ -28,7 +28,7 @@ const STAGE_RULES: Record<Exclude<PlanningStage, "research" | "validation">, str
   basicInfo: `1. 只提交 basicInfo 一个模块；value 必须包含 subtitle、province、destinationCity、meetingCity、operationNotes；地点字段只输出名称，不输出或猜测任何 ID。
 2. 中国目的地的 province 必须是标准省级行政区名称；境外目的地的 province 填国家、地区或一级行政区常用中文名称。destinationCity 必须是标准目的地城市名称，不能把景点名或 POI ID 填入其中，也不能把普通城市原样填进 province。第一阶段即使草稿已有原始目的地，也必须给出标准 province 和 destinationCity。
 3. subtitle、meetingCity 和 operationNotes 使用简洁中文；subtitle 必须为 2～40 个字符；不得把未核查信息写成已确认事实。`,
-  itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，游览日安排真实游览站点；纯接送日允许 spots 为空，但必须有 activities.transport 接送安排。
+  itinerary: `1. itinerary.value 的天数必须等于 basicInfo.days，游览日安排真实游览站点；纯接送日允许 spots 为空，但必须有 activities.transport 接送安排；仅自由行允许整天不排景点（spots 直接留空，不得为凑站点新增景点或写「自由活动」占位）；其他产品形态每天仍需景点或明确接送/独立活动。
 2. 使用 POI-first 顺序：先围绕 travelScope 准备足量候选景点池，再从中选择最可能被 VBK/携程 POI 接口查到的单一可游览景点组织行程；不要先写跨区域大行程再补 POI。若用户已在对话中明确或确认具体景点，则这些景点优先进入景点池，不得仅因 POI 未命中而替换。
 3. spots 必须是对象数组，每项包含 name、kind、poiName、poiId；kind 只能为 attraction、free、other。attraction 是真实景点，未通过接口核查时 poiName 和 poiId 均填 null，禁止猜测 ID；free 仅限独立明确自由活动，other 用于航拍等独立体验；接团、送团、接送必须写 activities 的 transport（time/title/detail），机场、车站、酒店出发点不得进入 spots。纯接送日允许 spots: []，不得凑景点，两者 poiName/poiId 均为 null 且不查 POI。可选 relation 只允许 and/or：同一上午或下午连续参观多个景点默认 and，只有用户明确“二选一/任选其一/或者”时才标 or。本地系统会尽力匹配接口；用户明确推荐的景点未命中时仍保留 name，后续由运营手动配置或删除；仅由 AI 推荐且未命中的景点会从行程中删除，必要时只能替换为同范围可查景点。
 4. 每个 spot.name 只写一个可独立检索的地点；“钟楼和鼓楼”等多个地点必须拆开，括号内只可保留同一地点的别名或入口说明。
@@ -172,7 +172,7 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
           "产品形态业务规则（必须遵守）：",
           "- 私家团：每天安排专车接送，必须匹配用车资源组。",
           "- 半自助：部分日期可自由活动，其余日期安排专车接送；不得把整段行程都写成自由活动或都写成专车陪同。",
-          "- 自由行：每天均为用户自由活动，不生成私家团用车资源组阻塞。",
+          "- 自由行：每天由游客自行安排，不生成私家团用车资源组阻塞；用户点名或值得推荐的景点照常写入 spots，没有景点安排的日期 spots 留空。",
           "- 跟团游：必须包含随团导游；价格按人均填写。",
           ...(stage === "skeleton" || stage === "commercial"
             ? ["- 跟团游 / 半自助：销售控制需要选择拼小团=是、参加广场拼团=是、最大拼团人数=8。"]

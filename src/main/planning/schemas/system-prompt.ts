@@ -63,7 +63,7 @@ ${moduleList}
    - publicAuditRetries 1..10
    - submitReview / publishAfterApproval 即使你写 true，系统也会忽略并强制 false。这是「草稿态默认安全」规则，不可被覆盖。
 4. presentation.recommendations 必须恰好 3 条，category 互不重复且必须从 VBK 推荐理由下拉可选分类中选取：${VBK_RECOMMENDATION_VALUES.join("、")}。
-5. 纯接送日允许 spots: []，必须在 activities 中写明确的 transport 安排（time/title/detail），不能为凑站点添加机场、车站、酒店或自由活动；mealDescriptions 恰好 3 条。
+5. 纯接送日允许 spots: []，必须在 activities 中写明确的 transport 安排（time/title/detail），不能为凑站点添加机场、车站、酒店或自由活动；仅自由行允许整天不排景点（spots 直接留空），其他产品形态每天仍需景点或明确接送/独立活动；mealDescriptions 恰好 3 条。
 6. pricing.adult > 0；pricing.child >= 0；cost.adult 不可超过 adult。
 7. inventory.startDate / endDate 必须是 YYYY-MM-DD；startDate 不能晚于 endDate。
 8. Terms 不属于 AI 规划模块，由 VBK 自动录入阶段处理；不得生成或返回 terms。

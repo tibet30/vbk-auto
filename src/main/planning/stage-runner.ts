@@ -16,6 +16,8 @@ import { findAllVbkCopyBadCases, repairVbkCopyPolicyValue } from "./vbk-copy-pol
 import { fitPresentationRecommendationTexts } from "./vbk-recommendation-length.js";
 import { coerceProductFeaturesHtml } from "../domain/product/features-rich-text.js";
 import { stripItinerarySpotIds } from "../../shared/itinerary-spot-identity.js";
+import { readProductForm } from "../../shared/product-form.js";
+import { spotlessDayProblem } from "./itinerary-structure.js";
 import { trustedPresentationPoiNames } from "./vbk-copy-identity.js";
 import { presentationRecommendationTexts, recommendationQualityProblems } from "./validation/recommendation-quality.js";
 
@@ -76,6 +78,7 @@ export function sanitiseModuleValue(
   value: unknown,
   minimumTravelersDefault = 1,
   officialPoiNames?: readonly string[],
+  options: { productForm?: unknown } = {},
 ): { ok: true; value: unknown } | { ok: false; reason: string } {
   const hit = findBlacklistedKey(value);
   if (hit) return { ok: false, reason: `AI 输出包含禁写字段 ${hit}` };
@@ -123,6 +126,12 @@ export function sanitiseModuleValue(
 
   const validated = validateModuleValue(module, value);
   if (!validated.ok) return validated;
+  // schema 只校验结构；「空日是否成立」依赖产品形态，在校验通过后单独拦截，
+  // 避免把自由行合法的整天自由活动判成缺景点，也避免非自由行空日被写入。
+  if (module === "itinerary" && Array.isArray(validated.value)) {
+    const spotless = spotlessDayProblem(validated.value, options.productForm);
+    if (spotless) return { ok: false, reason: `spots：${spotless}` };
+  }
   return { ok: true, value: validated.value };
 }
 
@@ -164,6 +173,11 @@ export async function executeStageOutput(args: {
   const allowed = STAGE_ALLOWED_MODULES[stage] as readonly PlanningModule[];
   let presentationIdentityLoaded = false;
   let presentationOfficialPoiNames: string[] = [];
+  // 产品形态决定「空日是否成立」。skeleton 阶段已落库 sales.productForm，itinerary 阶段只读当前产品；
+  // 每个输出只含一个 itinerary 模块，无需缓存。读不到形态（单测替身无 loadCurrentProduct）按从严处理。
+  const productForm = async (): Promise<unknown> => typeof runtime.loadCurrentProduct === "function"
+    ? readProductForm(await runtime.loadCurrentProduct(localProductId))
+    : undefined;
 
   // research tasks 是 module 列表里的一种 module（researchTasks）；adapter
   // 已经把 tool_call 顶级 researchTasks 合并进 modules，这里不再单独处理。
@@ -212,7 +226,8 @@ export async function executeStageOutput(args: {
       }
     }
     const officialPoiNames = outcome.module === "presentation" ? presentationOfficialPoiNames : undefined;
-    let sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault, officialPoiNames);
+    const moduleOptions = outcome.module === "itinerary" ? { productForm: await productForm() } : {};
+    let sanitised = sanitiseModuleValue(outcome.module, rawValue, minimumTravelersDefault, officialPoiNames, moduleOptions);
     // Copy-policy rejection is kept as a hard gate.  Only its known, vetted
     // alternatives may be used for one deterministic repair; the repaired
     // value then goes through every gate (including schema) again.
@@ -223,6 +238,7 @@ export async function executeStageOutput(args: {
           officialPoiNames === undefined ? undefined : [...officialPoiNames]),
         minimumTravelersDefault,
         officialPoiNames,
+        moduleOptions,
       );
     }
     if (!sanitised.ok) {

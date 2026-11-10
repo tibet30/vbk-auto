@@ -1,5 +1,16 @@
 import { requiresItineraryPoi } from "./itinerary-activity-kind.js";
+import { isFreeTravelForm } from "./product-form.js";
 import { dayHasTransportArrangement, supportArrangementType } from "./itinerary-support-arrangements.js";
+
+/** 自由行由游客自行安排，某天不排景点属于合法行程，不用景点占位。 */
+export function productFormAllowsSpotlessDays(productForm: unknown): boolean {
+  return isFreeTravelForm(productForm);
+}
+
+/** 产品形态与当天安排共同决定一个无景点日期能否成立。 */
+export function dayMayHaveNoSpots(day: unknown, productForm: unknown): boolean {
+  return productFormAllowsSpotlessDays(productForm) || dayHasUserOtherActivity(day);
+}
 
 /** A day can contain only non-attractions when its ordered spots say so.
  * Legacy activities remain readable, but are never required to be user-only. */

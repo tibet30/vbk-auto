@@ -5,7 +5,8 @@
  */
 
 import { VBK_RECOMMENDATION_CATEGORIES } from "../../domain/product/recommendation-categories.js";
-import { dayHasUserOtherActivity } from "../../../shared/itinerary-content.js";
+import { dayMayHaveNoSpots } from "../../../shared/itinerary-content.js";
+import { readProductForm } from "../../../shared/product-form.js";
 import { hasCompletePoi, requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
 import { hasValidVbkRecommendationLength } from "../vbk-recommendation-length.js";
 import { recommendationQualityProblems } from "./recommendation-quality.js";
@@ -30,6 +31,7 @@ export function validateItinerary(args: {
 }): ModuleOutcome | null {
   if (!args.accepted && asArray(args.product.itinerary) === undefined) return null;
   const itinerary = asArray(args.product.itinerary) ?? [];
+  const productForm = readProductForm(args.product);
   const reasons: string[] = [];
   if (itinerary.length !== args.expectedDays) reasons.push(`行程天数 ${itinerary.length} ≠ 骨架天数 ${args.expectedDays}`);
   const seenDays = new Set<number>();
@@ -47,7 +49,7 @@ export function validateItinerary(args: {
     }
     if (textValue(record.title).length === 0) reasons.push(`第 ${index + 1} 天 title 缺失`);
     const spots = asArray(record.spots);
-    if (!spots || (spots.length === 0 && !dayHasUserOtherActivity(record))) {
+    if (!spots || (spots.length === 0 && !dayMayHaveNoSpots(record, productForm))) {
       reasons.push(`第 ${index + 1} 天缺少已验证 spots 或用户其他活动`);
     } else {
       for (let spotIndex = 0; spotIndex < spots.length; spotIndex += 1) {

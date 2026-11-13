@@ -170,6 +170,59 @@ test("conflict replay keeps a more advanced local automation when remote is stal
   assert.equal(written?.productId, "77970002");
 });
 
+test("瞬时网络失败会短退避重试一次，避免刚保存就放弃同步", async () => {
+  const local = product(1, [task("matched", "confirmed")]);
+  const remote = product(2, [task("matched", "researching")]);
+  let updateCalls = 0;
+  let imported = 0;
+  const service = {
+    get: async () => remote,
+    update: async (next: ProductDetail) => {
+      updateCalls += 1;
+      if (updateCalls === 1) throw new Error("fetch failed");
+      return { ...next, revision: 3 };
+    },
+  } as unknown as TibetProductService;
+  const db = {
+    getProduct: () => local,
+    importProductSnapshot: (snapshot: ProductDetail) => { imported += 1; return snapshot; },
+  };
+
+  const saved = await syncConfirmedResearchTasksToRemote({ db, remote: service, localProductId: local.id, broadcast: () => {} });
+
+  assert.equal(updateCalls, 2);
+  assert.equal(imported, 1);
+  assert.equal(saved.revision, 3);
+});
+
+test("瞬时失败后撞上版本冲突仍按最新远端重放，不直接放弃同步", async () => {
+  const local = product(1, [task("matched", "confirmed")]);
+  const firstRemote = product(2, [task("matched", "researching")]);
+  const latest = product(5, [task("matched", "researching"), task("new", "researching")]);
+  let calls = 0;
+  const service = {
+    get: async () => firstRemote,
+    update: async (next: ProductDetail) => {
+      calls += 1;
+      if (calls === 1) throw new Error("fetch failed");
+      if (calls === 2) throw new TibetProductConflictError(latest);
+      return { ...next, revision: 6 };
+    },
+  } as unknown as TibetProductService;
+  const db = {
+    getProduct: () => local,
+    importProductSnapshot: (snapshot: ProductDetail) => snapshot,
+  };
+
+  const saved = await syncConfirmedResearchTasksToRemote({ db, remote: service, localProductId: local.id, broadcast: () => {} });
+
+  assert.equal(calls, 3);
+  assert.deepEqual(saved.researchTasks.map(({ id, state }) => [id, state]), [
+    ["matched", "confirmed"], ["new", "researching"],
+  ]);
+  assert.equal(saved.revision, 6);
+});
+
 test("a failed remote confirmation never replaces the durable local mutation with stale remote data", async () => {
     const local = product(1, [task("matched", "confirmed")]);
     const remote = product(2, [task("matched", "researching")]);

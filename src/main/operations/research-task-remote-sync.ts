@@ -35,7 +35,9 @@ export async function syncConfirmedResearchTasksToRemote(args: {
   const confirmed = local.researchTasks.filter(isTerminal);
 
   let remote = await args.remote.get(args.localProductId);
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let transientRetried = false;
+  let conflictRetried = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     if (!remote.revision) throw new Error("产品远端版本缺失，请刷新后重试。");
     const mergedTasks = remote.researchTasks.map((task) =>
       confirmed.find((candidate) => sameTask(candidate, task)) ?? task);
@@ -52,14 +54,32 @@ export async function syncConfirmedResearchTasksToRemote(args: {
       args.broadcast(saved);
       return saved;
     } catch (error) {
-      if (error instanceof TibetProductConflictError && attempt === 0) {
+      // 冲突重试按「是否已经重放过」判断，不能钉在第一次尝试上：瞬时网络重试
+      // 会先消耗掉 attempt 0，否则「先断网一次、再撞一次版本冲突」就会直接失败。
+      if (error instanceof TibetProductConflictError && !conflictRetried) {
+        conflictRetried = true;
         remote = error.latest;
+        continue;
+      }
+      // 断网/超时是最常见的同步失败，且下一次保存才会重试；这里补一次短退避，
+      // 把「刚保存就断网」的窗口收敛，同时避免把硬失败拖成多次重试。
+      if (!transientRetried && isTransientNetworkError(error)) {
+        transientRetried = true;
+        await new Promise(resolve => setTimeout(resolve, TRANSIENT_RETRY_DELAY_MS));
         continue;
       }
       throw error;
     }
   }
   throw new Error("待核查状态同步失败，请刷新后重试。");
+}
+
+const TRANSIENT_RETRY_DELAY_MS = 300;
+
+/** 只对网络层瞬时错误重试；业务/鉴权失败必须原样上抛。 */
+function isTransientNetworkError(error: unknown): boolean {
+  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /network|timeout|timed out|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up|fetch failed|\b50[234]\b/i.test(message);
 }
 
 /**

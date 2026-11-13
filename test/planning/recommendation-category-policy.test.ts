@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { deriveRecommendationCategoryPolicy } from "../../src/main/infrastructure/vbk-recommendation-category-policy.js";
+import {
+  deriveRecommendationCategoryPolicy,
+  queryRecommendationCategoryPolicy,
+} from "../../src/main/infrastructure/vbk-recommendation-category-policy.js";
+import { EMPTY_VBK_SESSION_CONTEXT, type VbkSessionRequestBrowser } from "../../src/main/infrastructure/vbk-session-request.js";
 
 const directory = [
   { id: 1, name: "服务保障" }, { id: 2, name: "贴心赠送" }, { id: 3, name: "精选酒店" },
@@ -39,4 +43,47 @@ test("策略引用未知类别或可用项少于三项时失败关闭", () => {
     { productPatternId: 4 }), /缺少策略 ID：99/);
   assert.throws(() => deriveRecommendationCategoryPolicy({ ...scope, categoryWhitelist: [1, 2] }, directory,
     { productPatternId: 4 }), /少于 3 项/);
+});
+
+/** 平台在线接口失败时 HTTP 仍是 200，真正原因只在 ResponseStatus.Errors 里。 */
+function categoryBrowser(payload: unknown): VbkSessionRequestBrowser {
+  return {
+    nativeOnly: true,
+    evaluate: async () => { throw new Error("nativeOnly 客户端不应走页面执行上下文"); },
+    vbkSessionFetch: async () => ({
+      status: 200, payload, durationMs: 1, ctx: EMPTY_VBK_SESSION_CONTEXT,
+    }),
+  };
+}
+
+const loginExpiredPayload = {
+  ResponseStatus: {
+    Ack: "Failure",
+    Errors: [{ Message: "当前用户登录已失效,请重新登录", ErrorCode: "10007" }],
+  },
+};
+
+test("登录失效时抛出平台原始原因与重新登录指引，而不是只报 Ack=Failure", async () => {
+  await assert.rejects(
+    queryRecommendationCategoryPolicy(categoryBrowser(loginExpiredPayload), { productPatternId: 4 }),
+    (error: Error) => {
+      assert.match(error.message, /10007/);
+      assert.match(error.message, /当前用户登录已失效/);
+      assert.match(error.message, /重新登录 VBK 账号后继续/);
+      return true;
+    },
+  );
+});
+
+test("非登录类平台失败保留原始错误码，不错误提示重新登录", async () => {
+  await assert.rejects(
+    queryRecommendationCategoryPolicy(categoryBrowser({
+      ResponseStatus: { Ack: "Failure", Errors: [{ Message: "策略配置错误", ErrorCode: "20001" }] },
+    }), { productPatternId: 4 }),
+    (error: Error) => {
+      assert.match(error.message, /20001/);
+      assert.doesNotMatch(error.message, /重新登录/);
+      return true;
+    },
+  );
 });

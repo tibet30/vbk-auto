@@ -9,12 +9,14 @@ import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js
 import { handleAgentInputRequest } from "./core-input-request.js";
 import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 import { classifyPlatformFailure } from "../application/platform-operation-service.js";
+import { isVbkLoginExpiredMessage, withVbkLoginHint } from "../infrastructure/vbk-login-error.js";
 import { externalAgentActionsBlocked, pauseSafeStartupExternalAction, SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-guard.js";
 
 export type CallOutcome = "continue" | "waiting" | "stale";
 
 /** 失败信息回传模型，供其判断是否再自调用一次。 */
-export function formatToolFailureForModel(name: string, message: string, protocolBlocked = false): string {
+export function formatToolFailureForModel(name: string, message: string, protocolBlocked = false, loginExpired = false): string {
+  if (loginExpired) return `工具失败：${withVbkLoginHint(message)}\n工具：${name}\n重试同一工具不会恢复，请停止重试并告知运营重新登录后再继续。`;
   if (protocolBlocked) return `工具失败：${message}\n工具：${name}\n车辆资源查询响应协议异常，已暂停。更换城市、座位或切换车辆查询工具不能修复协议；请修复接口适配后再明确继续。`;
   return `工具失败：${message}\n工具：${name}\n请根据上述错误判断是否再自行调用一次；同一工具同一参数最多再试一次，仍失败请换策略或 ask_user。`;
 }
@@ -155,7 +157,10 @@ export class AgentToolRunner {
       const message = error instanceof Error ? error.message : String(error);
       snapshot = this.snapshots.load(id);
       const protocolBlocked = isVehicleProtocolFailure(call.name, error);
-      const failureContent = formatToolFailureForModel(call.name, message, protocolBlocked);
+      // 登录态失效不属于「再试一次能恢复」的失败：同一参数重试只会再吃一次 10007，
+      // 白白多跑一轮模型调用，最后给出「连续失败两次」这种不指向处置的暂停原因。
+      const loginExpired = isVbkLoginExpiredMessage(message);
+      const failureContent = formatToolFailureForModel(call.name, message, protocolBlocked, loginExpired);
       if ((error as {authorizationDenied?: boolean}).authorizationDenied) {
         this.snapshots.blockedResult(snapshot, call.id, failureContent, "authorization_denied", {error:message}, token.runId);
       } else this.snapshots.result(snapshot, call.id, failureContent, {
@@ -163,6 +168,10 @@ export class AgentToolRunner {
       }, token.runId);
       if ((error as { uncertainWrite?: boolean }).uncertainWrite) {
         this.snapshots.markUncertain(snapshot, call.id, message);
+      } else if (loginExpired && snapshot.run?.id === token.runId) {
+        // 平台链路已经给出处置话术时不再复述整句，只补「暂停后从哪继续」。
+        this.snapshots.pause(snapshot,
+          `任务已暂停：${message}\n请重新登录 VBK 账号后点「继续」，从当前进度接续。`);
       } else if (protocolBlocked && snapshot.run?.id === token.runId) {
         this.snapshots.pause(snapshot, `车辆资源查询协议异常，已暂停；请修复接口适配后继续。最近原因：${message}`);
       } else if (!isDeterministicPreparationCall(snapshot, call)

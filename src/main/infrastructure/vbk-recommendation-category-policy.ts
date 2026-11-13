@@ -7,6 +7,8 @@ import {
   type VbkSessionRequestBrowser,
   type VbkSessionRequestResult,
 } from "./vbk-session-request.js";
+import { describeVbkFailureDetail } from "./vbk-response-error.js";
+import { isVbkLoginExpiredMessage, withVbkLoginHint } from "./vbk-login-error.js";
 
 const QCONFIG_ENDPOINT = "https://vbooking.ctrip.com/product/input/qconfig/tripInputLimitConfig";
 const CATEGORY_ENDPOINT = "https://online.ctrip.com/restapi/soa2/15638/getpmrcmdcategory.json";
@@ -94,9 +96,24 @@ async function request(page: VbkSessionRequestBrowser, endpoint: string): Promis
 }
 
 function assertSuccess(result: VbkSessionRequestResult, label: string): void {
-  if (result.status < 200 || result.status >= 300) throw new Error(`${label}读取失败：HTTP ${result.status}。`);
+  if (result.status < 200 || result.status >= 300) {
+    throw new Error(failureMessage(`${label}读取失败：HTTP ${result.status}`, result.payload));
+  }
   const ack = String(record(record(result.payload)?.ResponseStatus)?.Ack ?? "").trim();
-  if (ack && ack !== "Success") throw new Error(`${label}读取失败：Ack=${ack}。`);
+  if (ack && ack !== "Success") {
+    throw new Error(failureMessage(`${label}读取失败（Ack=${ack}）`, result.payload));
+  }
+}
+
+/**
+ * 平台在线接口失败时 HTTP 仍是 200，真正原因只在 ResponseStatus.Errors 里。
+ * 丢掉这段 detail 会只剩「Ack=Failure」，运营无法判断是登录失效还是策略变化；
+ * 登录失效类还要补一句固定处置话术，否则模型会拿同一参数再试一次并让任务暂停。
+ */
+function failureMessage(head: string, payload: unknown): string {
+  const detail = describeVbkFailureDetail(payload);
+  const message = detail ? `${head}：${detail}。` : `${head}。`;
+  return isVbkLoginExpiredMessage(message) ? withVbkLoginHint(message) : message;
 }
 
 function numberList(value: unknown): number[] {

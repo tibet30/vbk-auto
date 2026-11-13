@@ -13,7 +13,7 @@ import {
   isBorderPermitIssueText,
 } from "./border-permit.js";
 type ProductLike = Record<string, unknown>;
-type ResearchTaskText = { label?: string; detail?: string | null; type?: string };
+type ResearchTaskText = { label?: string; detail?: string | null; type?: string; gate?: string | null };
 
 const vehiclePattern = /用车|车辆|接送|司机|资源组|vehicle|vehicleResource|resourceGroupId/i;
 const hotelPattern = /酒店|住宿|客栈|民宿|hotelTier|hotelCandidates/i;
@@ -116,6 +116,7 @@ export type PoiResearchSatisfaction = "verified" | "non_poi" | "removed" | null;
  * Explicit removal/free-activity receipts remain independently valid. */
 export function requiresManualPoiSelection(task: ResearchTaskText): boolean {
   if (task.type !== "vbk") return false;
+  if (task.gate === "manual_poi_selection") return true;
   const detail = textValue(task.detail);
   return poiCandidateAmbiguityPattern.test(detail) || explicitManualPoiSelectionPattern.test(detail);
 }
@@ -123,7 +124,20 @@ export function requiresManualPoiSelection(task: ResearchTaskText): boolean {
 /** The retained mapping is historical evidence only until a current controlled
  * POI lookup produces a fresh verification receipt. */
 export function requiresCurrentPoiVerification(task: ResearchTaskText): boolean {
-  return task.type === "vbk" && currentPoiVerificationPattern.test(textValue(task.detail));
+  if (task.type !== "vbk") return false;
+  if (task.gate === "current_poi_verification") return true;
+  return currentPoiVerificationPattern.test(textValue(task.detail));
+}
+
+/**
+ * 决策门：自动谓词必须拒绝、只有受控凭证能结清的任务。
+ *
+ * 写侧（confirmVerifiedPoiResearchTasks）与读侧（isResearchTaskSatisfiedByProduct）
+ * 共用这一个判定：两边各写一套正则时，任何一次文案调整都会让「运营已经选过」
+ * 与「任务仍待核查」重新分裂。
+ */
+export function isPoiDecisionGate(task: ResearchTaskText): boolean {
+  return requiresManualPoiSelection(task) || requiresCurrentPoiVerification(task);
 }
 
 /** Narrow migration/recovery predicate for the historic auto-confirm bug.
@@ -131,6 +145,7 @@ export function requiresCurrentPoiVerification(task: ResearchTaskText): boolean 
  * candidates are ambiguous and that a human must choose one. */
 export function hasAmbiguousManualPoiSelection(task: ResearchTaskText): boolean {
   if (task.type !== "vbk") return false;
+  if (task.gate) return task.gate === "manual_poi_selection";
   const detail = textValue(task.detail);
   return poiCandidateAmbiguityPattern.test(detail) && explicitManualPoiSelectionPattern.test(detail);
 }
@@ -175,8 +190,7 @@ export function isResearchTaskSatisfiedByProduct(
       // “已找到多个候选…请手动选择” is a durable operator decision gate.
       // A trusted removal/free-activity receipt still settles the task; only a
       // same-name + positive-ID mapping is prohibited from auto-confirming it.
-      return poiSatisfaction !== "verified"
-        || (!requiresManualPoiSelection(task) && !requiresCurrentPoiVerification(task));
+      return poiSatisfaction !== "verified" || !isPoiDecisionGate(task);
     }
     // A failed POI task may become obsolete after the operator replaces that
     // attraction in the current itinerary. Only explicit failure/replacement

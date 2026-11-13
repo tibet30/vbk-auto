@@ -172,6 +172,8 @@ saleControl → basic → presentation → itinerary → package
 
 - `ProductCommandService` 提交时读取最新产品，按字段与读取时的基线比较；调用 `ProductMutationService` 执行城市、已核验 POI、人工删除与酒店一致性规则。保存后重读，再广播。
 - 人工字段与严格匹配的核查任务在同一事务中保存；资源和 AI 命令也在产品事务内核对任务。旧完整编辑入口适配到有版本的完整编辑命令。
+- POI 绑定的三份投影必须同一次写入：行程 spot（事实）、`diagnostics.poiAdjudications`（受控凭证）、`research_tasks`（决策门）。人工选点在 `ProductCommandService.manualField` 内一并写凭证并按落库事实结清任务；`ProductMutationService.replace` 的护栏对本次新增/改号的绑定校验凭证，AI patch 来源（`stripUnreceiptedPoi`）直接剥离，人工整包 JSON 编辑（`rejectUnreceiptedPoi`）明确拒绝，其余来源保留并告警。
+- 决策门判定只有一处：`isPoiDecisionGate`（`shared/research-task-satisfaction`）同时供自动谓词与凭证结清使用；`research_tasks.gate` 优先，历史行回退到文案。任何把数据库行送进谓词的地方都必须把 `gate` 一起传（`findSatisfiedResearchTaskIds` 曾因重建对象丢字段，导致 gate 失效）。新增 POI 失败文案时必须同时给出 gate，否则运营会再次看到「选过了还在待核查」。
 - 内部通过存储实现拆分方案、资源证据和诊断；兼容的 `ProductDetail.product` 仍可组合读取，但异步调用方只提交其负责的变化。
 - `ProductExecutionService` 聚合持久化阶段、Agent 和任务事实，在写入处更新任务投影。查询及广播不修复业务状态；任务管理门面委托 Agent。
 - `platform-business-queries` 提供 POI、酒店资源库、车辆、交通站点、封面及母产品回读接口，协议解析集中在既有底层实现；每日酒店仍使用独立类型及查询适配。

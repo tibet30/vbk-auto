@@ -62,4 +62,6 @@ export interface ResearchTaskProposal {
   label: string;
   type: "vbk" | "web" | "cost" | "image";
   detail?: string;
+  /** 决策门类型：只能由受控凭证结清，不能凭同名绑定自动放过。 */
+  gate?: "manual_poi_selection" | "current_poi_verification" | null;
 }

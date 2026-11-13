@@ -33,7 +33,8 @@ function reconciledSatisfiedDetail(type: ResearchTask["type"], detail: string | 
   return /(?:已保留原景点|手动录入\s*POI)/u.test(detail) ? SAVED_POI_DETAIL : detail;
 }
 
-export function addResearchTask(db: Database.Database, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) {
+export function addResearchTask(db: Database.Database, localProductId: string,
+  task: Pick<ResearchTask, "label" | "type" | "detail"> & { gate?: ResearchTask["gate"] | null }) {
   const statusRow = db.prepare("SELECT status FROM products WHERE id=?").get(localProductId) as { status?: string } | undefined;
   if (statusRow && POST_CONFIRM_STATUSES.has(statusRow.status ?? "")) {
     throw new Error("确认后的录入阶段不能再新增 research_tasks，缺失项记入自动化记录。");
@@ -41,6 +42,7 @@ export function addResearchTask(db: Database.Database, localProductId: string, t
   const canonicalTask = {
     ...task,
     label: canonicalPoiResearchTaskLabel(task.label, task.type),
+    gate: task.gate ?? null,
   };
   const existing = db.prepare(`
     SELECT id, label, type, evidence_json FROM research_tasks
@@ -56,17 +58,21 @@ export function addResearchTask(db: Database.Database, localProductId: string, t
       let current: Record<string, unknown> = {};
       try { current = JSON.parse(row?.product_json ?? "{}"); } catch { /* malformed product is handled elsewhere */ }
       if (!hasCurrentVerifiedPoiEvidence(current, duplicate)) {
-        db.prepare("UPDATE research_tasks SET detail=?, state='researching', status='queued' WHERE id=?")
-          .run(canonicalTask.detail || null, duplicate.id);
+        db.prepare("UPDATE research_tasks SET detail=?, gate=COALESCE(?, gate), state='researching', status='queued' WHERE id=?")
+          .run(canonicalTask.detail || null, canonicalTask.gate, duplicate.id);
       }
     } else if (canonicalTask.detail && duplicate.label === canonicalTask.label) {
-      db.prepare("UPDATE research_tasks SET detail=? WHERE id=?").run(canonicalTask.detail, duplicate.id);
+      db.prepare("UPDATE research_tasks SET detail=?, gate=COALESCE(?, gate) WHERE id=?")
+        .run(canonicalTask.detail, canonicalTask.gate, duplicate.id);
     }
     touchProduct(db, localProductId);
     return duplicate.id;
   }
   const id = randomUUID();
-  db.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)").run(id, localProductId, canonicalTask.label, canonicalTask.type, "queued", "researching", canonicalTask.detail || null, "[]");
+  // 显式列名：research_tasks 后续还会加列，位置式 VALUES 会随迁移失效。
+  db.prepare(`INSERT INTO research_tasks(id,local_product_id,label,type,status,state,detail,evidence_json,gate)
+    VALUES(?,?,?,?,?,?,?,?,?)`).run(id, localProductId, canonicalTask.label, canonicalTask.type, "queued", "researching",
+    canonicalTask.detail || null, "[]", canonicalTask.gate);
   touchProduct(db, localProductId);
   return id;
 }
@@ -151,11 +157,12 @@ export function reopenKindSupersededPoiResearchTasks(db: Database.Database, loca
  * manual confirmations, removal receipts, resolved tasks, or product JSON.
  */
 export function reopenAmbiguousAutoConfirmedPoiResearchTasks(db: Database.Database, localProductId: string) {
-  const rows = db.prepare(`SELECT id,type,detail,evidence_json FROM research_tasks
+  const rows = db.prepare(`SELECT id,type,detail,gate,evidence_json FROM research_tasks
     WHERE local_product_id=? AND type='vbk' AND state='confirmed'`).all(localProductId) as Array<{
     id: string;
     type: ResearchTask["type"];
     detail: string | null;
+    gate: string | null;
     evidence_json: string;
   }>;
   const ids = rows.filter((row) => hasAmbiguousManualPoiSelection(row)
@@ -201,7 +208,7 @@ export function findSatisfiedResearchTaskIds(
   product: Record<string, unknown>,
 ): string[] {
   const rows = db.prepare(`
-    SELECT id, label, type, state, detail
+    SELECT id, label, type, state, detail, gate
     FROM research_tasks
     WHERE local_product_id=?
   `).all(localProductId) as Array<{
@@ -210,6 +217,7 @@ export function findSatisfiedResearchTaskIds(
     type: ResearchTask["type"];
     state: ResearchTask["state"];
     detail: string | null;
+    gate: string | null;
   }>;
   const satisfied: string[] = [];
   for (const row of rows) {
@@ -220,7 +228,9 @@ export function findSatisfiedResearchTaskIds(
     // 谓词对 image 类型已自带「只看 type === "image"」守卫；对 vbk / web / cost
     // 类型已自带「task.type === "image" → false」守卫（见 shared/research-task-
     // satisfaction.ts）。两侧守卫互补，按 type 选一侧谓词即可。
-    if (predicate({ type: row.type, label: row.label, detail: row.detail ?? undefined }, product)) {
+    // gate 必须一起传入：谓词靠它识别决策门，丢掉字段会让新文案的决策门
+    // 重新变成「同名绑定即自动结清」。
+    if (predicate({ type: row.type, label: row.label, detail: row.detail ?? undefined, gate: row.gate }, product)) {
       satisfied.push(row.id);
     }
   }
@@ -257,8 +267,8 @@ export function markResearchTasksSatisfiedByProduct(
     const targetIds = options.onlyTaskIds && options.onlyTaskIds.length > 0
       ? matched.filter((id) => options.onlyTaskIds!.includes(id))
       : matched;
-    const rows = targetIds.length ? db.prepare(`SELECT id,label,type,detail FROM research_tasks WHERE local_product_id=? AND id IN (${targetIds.map(() => "?").join(",")})`)
-      .all(localProductId, ...targetIds) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }> : [];
+    const rows = targetIds.length ? db.prepare(`SELECT id,label,type,detail,gate FROM research_tasks WHERE local_product_id=? AND id IN (${targetIds.map(() => "?").join(",")})`)
+      .all(localProductId, ...targetIds) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null; gate: string | null }> : [];
     const nonPoiIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "non_poi").map((row) => row.id);
     const removedIds = rows.filter((row) => poiResearchTaskSatisfaction(row, product) === "removed").map((row) => row.id);
     const ordinaryIds = targetIds.filter((id) => !nonPoiIds.includes(id) && !removedIds.includes(id));
@@ -279,9 +289,9 @@ function reconcileConfirmedPoiDetails(
   product: Record<string, unknown>,
   onlyTaskIds?: readonly string[],
 ): string[] {
-  const rows = db.prepare(`SELECT id,label,type,detail FROM research_tasks
+  const rows = db.prepare(`SELECT id,label,type,detail,gate FROM research_tasks
     WHERE local_product_id=? AND state IN ('confirmed','resolved') AND type='vbk'`)
-    .all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null }>;
+    .all(localProductId) as Array<{ id: string; label: string; type: ResearchTask["type"]; detail: string | null; gate: string | null }>;
   const repaired = rows.filter((row) => (!onlyTaskIds?.length || onlyTaskIds.includes(row.id))
     // 旧版本只修「未找到对应的 VBK POI」这一种文案，导致 POI 绑定成功后
     // 「地域与产品主城市不一致 / 未找到一致地点 / 本轮核验未完成」等系统

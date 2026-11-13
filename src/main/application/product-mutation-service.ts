@@ -35,11 +35,13 @@ import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
 import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
 import { normalisePlatformHotelProduct, usesPlatformHotelRules } from "../../shared/platform-hotel-rules.js";
 import { ProductCommandService } from './product-command-service.js';
+import { enforceReceiptedPoiBindings } from './itinerary-poi-binding-guard.js';
 
 type ProductMutationStore = {
   runProductTransaction?: <T>(task: () => T) => T;
   markResearchTasksSatisfiedByProduct?: VbkDatabase['markResearchTasksSatisfiedByProduct'];
   reopenKindSupersededPoiResearchTasks?: VbkDatabase['reopenKindSupersededPoiResearchTasks'];
+  confirmVerifiedPoiResearchTasks?: VbkDatabase['confirmVerifiedPoiResearchTasks'];
   getProduct: VbkDatabase["getProduct"];
   updateProduct: (
     id: string,
@@ -65,6 +67,18 @@ export interface ProductMutationOptions {
   preserveVerifiedItineraryPois?: boolean;
   /** 仅人工整包编辑或明确的用户加回指令可以撤销删除凭证。 */
   allowItineraryRemovalRestore?: boolean;
+  /**
+   * AI patch 入口专用：本次写入新出现且没有受控凭证的 POI 绑定直接丢弃。
+   * `patch_product` 的工具契约本就禁止携带 POI ID；落库前剥离才能让契约生效。
+   * 规划模块写入（`writeModule`）不开这个开关，只记告警。
+   */
+  stripUnreceiptedPoi?: boolean;
+  /**
+   * 人工整包 JSON 编辑专用：新增的无凭证 POI 绑定直接拒绝保存。
+   * 原始 JSON 不能创建凭证，静默保留只会留下「已绑定、任务不结清」，
+   * 静默剥离又会丢掉运营刚写的内容，所以这里明确报错并要求走景点选择器。
+   */
+  rejectUnreceiptedPoi?: boolean;
   /** Set by the command service, never inferred from an active automation run. */
   source?: string;
 }
@@ -84,6 +98,8 @@ export class ProductMutationService {
         ? (id, product) => store.markResearchTasksSatisfiedByProduct!(id, product) : undefined,
       reopenResearch: store.reopenKindSupersededPoiResearchTasks
         ? (id, product) => { store.reopenKindSupersededPoiResearchTasks!(id, product); } : undefined,
+      confirmPoiResearch: store.confirmVerifiedPoiResearchTasks
+        ? (id, mappings) => store.confirmVerifiedPoiResearchTasks!(id, mappings) : undefined,
     });
   }
 
@@ -112,7 +128,19 @@ export class ProductMutationService {
       ? withIds
       : preserveVerifiedItineraryPois(current.product, withIds);
     const protectedIncoming = options.allowItineraryRemovalRestore ? incoming : preserveItineraryRemovals(current.product, incoming);
-    const normalised = normaliseItineraryArrivalTitle(normaliseProductLocationFields(protectedIncoming, lockedMeetingCity || undefined));
+    // 统一写入口的护栏：新出现的 POI 绑定必须带当前槽位的受控凭证，否则该绑定
+    // 永远不会结清「请手动选择 POI」决策门，运营会一直看到待核查项。
+    const guarded = enforceReceiptedPoiBindings(current.product, protectedIncoming, {
+      source: options.source ?? "user",
+      strip: options.stripUnreceiptedPoi === true,
+      localProductId,
+    });
+    if (options.rejectUnreceiptedPoi && guarded.recorded.length) {
+      throw new Error(`行程 POI 绑定必须通过景点选择器保存：${guarded.recorded
+        .map(binding => `第${binding.day}天「${binding.spotName}」→ ${binding.poiId}`)
+        .join("；")}。请回到每日行程重新选择 POI，系统会自动写入受控凭证。`);
+    }
+    const normalised = normaliseItineraryArrivalTitle(normaliseProductLocationFields(guarded.product, lockedMeetingCity || undefined));
     if (Array.isArray(normalised.itinerary)) normalised.itinerary = normalised.itinerary.map((day) =>
       day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
     this.store.updateProduct(localProductId, usesPlatformHotelRules(normalised) ? normalisePlatformHotelProduct(normalised) : reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0, options.source);
@@ -132,7 +160,8 @@ export class ProductMutationService {
     const result = applyProductPatchSafe(current.product, patch);
     if (!result.applied) return { product: current, applied: false };
     return {
-      product: this.commands.mergeChanges(localProductId, current, result.product, 'ai', options),
+      product: this.commands.mergeChanges(localProductId, current, result.product, 'ai',
+        { ...options, stripUnreceiptedPoi: true }),
       applied: true,
     };
   }

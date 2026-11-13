@@ -86,7 +86,7 @@ export const productMethods = {
   updateMessageStatus(this: { db: Database.Database }, localProductId: string, messageId: string, taskStatus: TaskStatus) { updateMessageStatus(this.db, localProductId, messageId, taskStatus); },
   recoverUnansweredMessages(this: { db: Database.Database }) { recoverUnansweredMessages(this.db); },
   recoverOrphanAutomationRuns(this: { db: Database.Database }) { return recoverOrphanAutomationRuns(this.db); },
-  addResearchTask(this: { db: Database.Database }, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">) { return addResearchTask(this.db, localProductId, task); },
+  addResearchTask(this: { db: Database.Database }, localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail"> & { gate?: ResearchTask["gate"] | null }) { return addResearchTask(this.db, localProductId, task); },
   markResearchAccepted(this: { db: Database.Database }, localProductId: string, taskId: string, note?: string, source: "vbk" | "web" | "user" = "user") { markResearchAccepted(this.db, localProductId, taskId, note, source); },
   markResearchTasksSatisfied(this: { db: Database.Database }, localProductId: string, taskIds: readonly string[], note?: string) { return markResearchTasksSatisfied(this.db, localProductId, taskIds, note); },
   confirmVerifiedPoiResearchTasks(this: { db: Database.Database }, localProductId: string, mappings: Parameters<typeof confirmVerifiedPoiResearchTasks>[2]) { return confirmVerifiedPoiResearchTasks(this.db, localProductId, mappings); },

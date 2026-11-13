@@ -2,6 +2,8 @@ import type { AiResponse, ManualReviewFieldInput, ProductDetail } from '../../sh
 import type { ProductMutationOptions } from './product-mutation-service.js';
 import { canonicalJson, composeProduct, record } from '../../shared/product-storage-projection.js';
 import { applyManualReviewField } from '../operations/manual-review-field.js';
+import { attachManualPoiReceipt, verifiedMappingForManualPoi } from '../operations/manual-review-poi-selection.js';
+import type { VerifiedPoiMapping } from '../planning/types.js';
 import { applyProductPatchSafe } from '../operations/product-patch.js';
 
 export type ProductCommandSource = 'user' | 'ai' | 'resource' | 'automation' | 'import';
@@ -29,16 +31,35 @@ interface Store {
   notify(product: ProductDetail): void;
   satisfyResearch?(id: string, product: Record<string, unknown>): { taskIds: string[] };
   reopenResearch?(id: string, product: Record<string, unknown>): void;
+  /** 受控 POI 凭证是决策门 task 的唯一结清依据（自动谓词刻意不认同名绑定）。 */
+  confirmPoiResearch?(id: string, mappings: readonly VerifiedPoiMapping[]): { taskIds: string[] };
 }
 interface Change { path: string[]; before: unknown; after: unknown; remove: boolean; }
+/** commit 的可选行为：satisfy 是自动谓词，settle 是受控凭证回写（两者互不替代）。 */
+interface CommitBehavior {
+  satisfy?: boolean;
+  preserveExtensions?: boolean;
+  settle?: (product: ProductDetail) => void;
+}
 
 /** Commands re-read facts at commit, apply only their fields, then publish the saved value. */
 export class ProductCommandService {
   constructor(private readonly store: Store) {}
   manualField(context: ProductCommandContext, input: ManualReviewFieldInput, options: ProductMutationOptions = {}) {
     if (context.source !== 'user') throw new Error('人工字段命令必须来自运营操作。');
-    return this.commit(context, current => applyManualReviewField(current.product, input),
-      { ...options, allowItineraryRemovalRestore: true }, true);
+    return this.commit(context, current => {
+      const proposed = applyManualReviewField(current.product, input);
+      return input.field === 'itinerarySpotPoi' ? attachManualPoiReceipt(proposed, input) : proposed;
+    }, { ...options, allowItineraryRemovalRestore: true }, {
+      satisfy: true,
+      // 凭证在 build 阶段已与绑定同写；落库后按持久化事实取证并结清同名决策门。
+      // 收在命令里，任何新的人工选点入口都不会再漏掉这一步。
+      settle: saved => {
+        if (input.field !== 'itinerarySpotPoi') return;
+        const mapping = verifiedMappingForManualPoi(saved.product, input);
+        if (mapping) this.store.confirmPoiResearch?.(saved.id, [mapping]);
+      },
+    });
   }
   aiPatch(context: ProductCommandContext, patch: NonNullable<AiResponse['patch']>) {
     if (context.source !== 'ai') throw new Error('AI patch 来源不匹配。');
@@ -50,7 +71,7 @@ export class ProductCommandService {
   }
   replaceFull(context: ProductCommandContext, product: Record<string, unknown>, options: ProductMutationOptions = {}) {
     if (context.source !== 'user' && context.source !== 'import') throw new Error('整包替换仅允许完整人工编辑或历史导入。');
-    return this.commit(context, () => product, options, false, false);
+    return this.commit(context, () => product, options, { preserveExtensions: false });
   }
   /** Changed fields are compared with the captured baseline, not an entire stale product. */
   mergeChanges(id: string, baseline: ProductDetail, next: Record<string, unknown>, source: ProductCommandSource,
@@ -88,7 +109,8 @@ export class ProductCommandService {
     });
   }
   private commit(context: ProductCommandContext, build: (product: ProductDetail) => Record<string, unknown>,
-    options: ProductMutationOptions = {}, satisfy = false, preserveExtensions = true): ProductDetail {
+    options: ProductMutationOptions = {}, behavior: CommitBehavior = {}): ProductDetail {
+    const { satisfy = false, preserveExtensions = true } = behavior;
     if (context.source !== 'user' && (options.allowMeetingCityCorrection || options.allowItineraryRemovalRestore)) {
       throw new Error('撤销人工约束必须由运营明确操作。');
     }
@@ -110,6 +132,8 @@ export class ProductCommandService {
         this.store.reopenResearch?.(result.id, result.product);
         this.store.satisfyResearch?.(result.id, result.product);
       }
+      // 受控凭证回写与本次写入同一事务：结清失败不能让绑定单独落库。
+      behavior.settle?.(this.requireProduct(context.localProductId));
       return this.requireProduct(context.localProductId);
     });
     if (options.notify !== false) this.store.notify(saved);

@@ -168,7 +168,9 @@ test('invalid historical research evidence rolls back all architecture changes',
   const db = new Database(':memory:');
   try {
     applyMigrations(db, legacyMigrations);
-    db.prepare('INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)').run('broken-research', 'product', '核查', 'poi', 'pending', 'pending', '', '{bad');
+    // 显式列名：research_tasks 会随迁移加列，位置式 VALUES 对列数敏感。
+    db.prepare(`INSERT INTO research_tasks(id,local_product_id,label,type,status,state,detail,evidence_json)
+      VALUES(?,?,?,?,?,?,?,?)`).run('broken-research', 'product', '核查', 'poi', 'pending', 'pending', '', '{bad');
     assert.throws(() => runDatabaseMigrations(db), /research_tasks\/broken-research/);
     assert.equal(db.prepare("SELECT 1 FROM migrations WHERE id='0017_product_architecture'").get(), undefined);
     assert.equal(db.prepare("SELECT 1 FROM sqlite_master WHERE name='product_resource_evidence'").get(), undefined);

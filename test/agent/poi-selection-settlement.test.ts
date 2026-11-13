@@ -54,6 +54,9 @@ test('Agent 别名选点成功后同步结清歧义任务，后续刷新不重�
     assert.equal(task.state, 'confirmed');
     assert.equal(task.detail, '当前行程已保存有效的 VBK POI 映射。');
     assert.match(task.evidence.at(-1)!.title, /\[itinerary-poi:verified\].*龙江湾.*91861/);
+    const receipts = db.getProduct(product.id)!.product.diagnostics?.poiAdjudications as Array<Record<string, unknown>>;
+    assert.deepEqual(receipts.map(receipt => [receipt.day, receipt.spotName, receipt.poiId]),
+      [[1, '龙江湾', 91861]], '显式选点必须与绑定同事务保存当前路线凭证');
     refreshSatisfiedResearchTasks(db, product.id);
     assert.equal(db.getProduct(product.id)!.researchTasks.find(task => task.id === taskId)!.state, 'confirmed');
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }

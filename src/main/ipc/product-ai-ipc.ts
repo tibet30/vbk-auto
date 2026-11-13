@@ -20,7 +20,7 @@ import type { MainIpcContext } from "./context.js";
 import { canonicalJson } from '../../shared/product-storage-projection.js';
 import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
 import { suggestPoiDetail } from "../infrastructure/poi-suggest.js";
-import { verifyManualPoiSelection, verifiedMappingForManualPoi } from "../operations/manual-review-poi-selection.js";
+import { verifyManualPoiSelection } from "../operations/manual-review-poi-selection.js";
 import { sanitizeAgentSnapshot } from "../../shared/agent-snapshot-sanitize.js";
 import { extractProductDocument, discussProductDocument } from "../planning/product-document.js";
 import { optimizeProductIdea } from "../planning/product-idea-optimizer.js";
@@ -69,6 +69,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       allowMeetingCityCorrection: true,
       preserveVerifiedItineraryPois: false,
       allowItineraryRemovalRestore: true,
+      // 原始 JSON 不能创建受控凭证：新增的 POI 绑定必须走景点选择器，否则会留下
+      // 「已绑定、任务不结清」；这里显式拒绝并提示，而不是静默保留或静默剥离。
+      rejectUnreceiptedPoi: true,
     });
     await reconcileSavedProductQuestion(context, id);
     return saved;
@@ -102,24 +105,11 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     const beforeConfirmed = new Set(product.researchTasks.filter(task => task.state === 'confirmed').map(task => task.id));
     const saved = productMutations.commands.manualField({ localProductId: id, source: 'user',
       expectedVersion: product.productJsonVersion ?? 0 }, verifiedInput, { status: policy.nextStatus });
-    // 显式人工选定 POI 就是「请手动选择 POI」决策门的运营决策本身：落库后按
-    // 持久化行程取证结清同名 task。自动确认谓词仍拒绝把同名 + 正整数 POI ID
-    // 当作结清依据，所以这条受控凭证必须在这里补上，否则运营选完 POI 仍会
-    // 在待核查列表里看到同一项。
-    const manualPoiMapping = verifiedInput.field === "itinerarySpotPoi"
-      ? verifiedMappingForManualPoi(saved.product, verifiedInput)
-      : null;
-    const settledPoiTasks = manualPoiMapping
-      ? db.confirmVerifiedPoiResearchTasks(id, [manualPoiMapping])
-      : { taskIds: [] as string[] };
-    const localResult = settledPoiTasks.taskIds.length ? db.getProduct(id) ?? saved : saved;
-    const confirmedTaskIds = localResult.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
-    // 产品列表与重启恢复以 Tibet 快照为权威。人工字段即使没有新结清
-    // research task，也必须把本次 product JSON 一并同步；否则界面先显示
-    // “保存成功”，下一次重载却会被远端旧快照覆盖。
-    // 本地已提交；远端同步失败不能让本次保存表现为失败，也不能跳过广播。
-    // 下一次确认或刷新会再次同步。
-    let resultProduct = localResult;
+    // 人工选点的凭证与决策门 task 结清已收进 manualField 命令（同一事务），这里
+    // 只负责把本次结果同步到远端。不要再在 IPC 层补一遍取证/结清：那正是过去
+    // 「绑定写了、任务没结」在各入口反复复发的来源。
+    const confirmedTaskIds = saved.researchTasks.filter(task => task.state === 'confirmed' && !beforeConfirmed.has(task.id)).map(task => task.id);
+    let resultProduct = saved;
     try {
       resultProduct = await syncConfirmedResearchTasksToRemote({
         db,
@@ -129,7 +119,7 @@ export function registerProductAiIpc(context: MainIpcContext): void {
       });
     } catch (error) {
       logWarn("[products:updateReviewField] remote sync failed after local commit", { localProductId: id, error });
-      resultProduct = db.getProduct(id) ?? localResult;
+      resultProduct = db.getProduct(id) ?? saved;
     }
     await reconcileSavedProductQuestion(context, id);
     if (confirmedTaskIds.length > 0) {

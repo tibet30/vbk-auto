@@ -40,5 +40,7 @@ export interface ResearchTask {
   status: TaskStatus;
   state: FieldState;
   detail?: string;
+  /** 决策门类型。历史行没有该字段，判定需回退到文案。 */
+  gate?: "manual_poi_selection" | "current_poi_verification";
   evidence?: Evidence[];
 }

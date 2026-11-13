@@ -70,12 +70,17 @@ export async function resolvePlanningPoiAutoSelection(args: {
   const reused = receipt ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
     candidate.poiId === receipt.poiId && isSelectableCandidate(candidate) && isCompatiblePoiIdentity(args.keyword, candidate.poiName)
     && Boolean(province) && normaliseAdministrativeName(candidate.province) === province) : undefined;
+  let duplicateFirst: (PoiSuggestCandidate & { poiName: string; poiId: number }) | undefined;
   let ambiguous = false;
   if (!args.confirmedPoiId) {
-    const named = args.detail.candidates.filter(candidate => inRule(candidate)
+    const named = args.detail.candidates.filter((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } => inRule(candidate)
       && samePoiIdentityName(args.keyword, candidate.poiName));
-    // 同名多候选：机器不靠排序猜身份；有裁决凭证或 AI 时交给它们，否则留给人工。
-    ambiguous = new Set(named.map(candidate => candidate.poiId)).size > 1;
+    const multipleIds = new Set(named.map(candidate => candidate.poiId)).size > 1;
+    // 平台重复返回完全相同的展示项时按返回顺序取第一条；地域不同仍不得靠排序猜身份。
+    // 已有当前路线的受控凭证时继续用凭证那条：等价重复项之间来回改号会无谓地让
+    // 凭证失效、把已经核验过的景点重新推进待核查。
+    duplicateFirst = multipleIds && !reused && new Set(named.map(candidateDisplayKey)).size === 1 ? named[0] : undefined;
+    ambiguous = multipleIds && !duplicateFirst;
     if (ambiguous && !reused && !args.disambiguate) return { status: "uncertain", reason: "ambiguous" };
   }
   const confirmed = args.confirmedPoiId ? args.detail.candidates.find(candidate => candidate.poiId === args.confirmedPoiId
@@ -83,7 +88,7 @@ export async function resolvePlanningPoiAutoSelection(args: {
   if (args.confirmedPoiId && !confirmed) {
     return { status: "uncertain", reason: uncertainReason(args.keyword, args.detail.candidates) };
   }
-  const exact = confirmed ?? (args.detail.best && !ambiguous
+  const exact = confirmed ?? duplicateFirst ?? (args.detail.best && !ambiguous
     ? args.detail.candidates.find((candidate): candidate is PoiSuggestCandidate & { poiName: string; poiId: number } =>
       isPlanningPoiCandidateInContext(candidate, args.context, args.product, args.keyword, args.detail.candidates) && candidate.poiId === args.detail.best!.poiId)
     : undefined);
@@ -129,6 +134,12 @@ export async function resolvePlanningPoiAutoSelection(args: {
       ...(adjudication ? { adjudication } : {}),
     },
   };
+}
+
+function candidateDisplayKey(candidate: PoiSuggestCandidate & { poiName: string }): string {
+  const location = [candidate.province, candidate.city, candidate.district]
+    .map(value => normaliseAdministrativeName(value));
+  return [candidate.poiName.trim(), ...location].join("\u0000");
 }
 
 export function isPlanningPoiCandidateInContext(

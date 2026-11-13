@@ -110,6 +110,47 @@ test("同名多候选不再直接要求人工：有 AI 时交给 AI 裁决，没
   assert.equal(result.match?.adjudication?.confidence, 0.92);
 });
 
+test("同名同省市区的重复 POI 按平台顺序选择第一条", async () => {
+  const value = await product({ keepHeishui: true });
+  const first = { ...bipenggou, poiId: 70004 };
+  const second = { ...bipenggou, poiId: 89964 };
+  const checked: number[] = [];
+  const result = await resolvePlanningPoiAutoSelection({
+    localProductId: "duplicate-display", keyword: "毕棚沟", product: value,
+    context: { province: "四川", destinationCity: "成都", itineraryDay: 1, spotName: "毕棚沟" } as Json,
+    detail: { httpStatus: 200, businessStatus: "Success", poiListCount: 2,
+      best: { poiName: second.poiName, poiId: second.poiId }, candidates: [first, second] },
+    checkAvailability: async (poiId) => { checked.push(poiId); return { status: "available" as const }; },
+    disambiguate: async () => { throw new Error("重复展示项不应再调用 AI"); },
+  });
+
+  assert.equal(result.match?.poiId, first.poiId);
+  assert.deepEqual(checked, [first.poiId]);
+  assert.equal(result.match?.adjudication, undefined);
+});
+
+test("重复展示项不会覆盖已有受控凭证，绑定不在等价项之间改号", async () => {
+  const value = await product({ keepHeishui: true });
+  const first = { ...bipenggou, poiId: 70004 };
+  const second = { ...bipenggou, poiId: 89964 };
+  value.diagnostics.poiAdjudications = mergePoiAdjudications(value, [{ day: 1, spotName: "毕棚沟", poiName: "毕棚沟",
+    poiId: 89964, province: "四川", city: "阿坝", adjudication: { confidence: 0.92, reasoning: "沿当天路线" } }],
+    "2026-11-05T00:00:00Z");
+  const checked: number[] = [];
+  const result = await resolvePlanningPoiAutoSelection({
+    localProductId: "duplicate-display-with-receipt", keyword: "毕棚沟", product: value,
+    context: { province: "四川", destinationCity: "成都", itineraryDay: 1, spotName: "毕棚沟" } as Json,
+    detail: { httpStatus: 200, businessStatus: "Success", poiListCount: 2,
+      best: { poiName: second.poiName, poiId: second.poiId }, candidates: [first, second] },
+    checkAvailability: async (poiId) => { checked.push(poiId); return { status: "available" as const }; },
+    disambiguate: async () => { throw new Error("已有凭证时不应再调用 AI"); },
+  });
+
+  assert.equal(result.match?.poiId, second.poiId, "沿用凭证那条，不按平台顺序改号");
+  assert.deepEqual(checked, [second.poiId]);
+  assert.equal(result.match?.adjudication?.confidence, 0.92);
+});
+
 test("裁决凭证：就绪检查与复核认可当前原路线下的凭证；改了原路线即失效", async () => {
   const value = await product();
   Object.assign(value.itinerary[0].spots[0], { poiId: 89964, poiName: "毕棚沟", province: "四川", city: "阿坝",

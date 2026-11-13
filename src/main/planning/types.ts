@@ -61,7 +61,7 @@ export interface VerifiedPoiMapping {
   province?: string;
   city?: string;
   district?: string;
-  /** 规则无法证明地点、由 AI 在硬门内裁决：写回时生成 diagnostics.poiAdjudications 凭证。 */
+  /** 规则无法证明地点、由 AI 在硬门内或运营从受控候选中裁决：写回时生成地域凭证。 */
   adjudication?: { confidence: number; reasoning?: string };
 }
 

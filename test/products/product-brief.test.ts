@@ -302,7 +302,9 @@ test("历史 POI 待办在详情中合并呈现，且续跑不会再新增同义
   const db = new VbkDatabase(dataPath);
   const product = db.createProduct({ destination: "太原", days: 2, productForm: "privateTour" });
   const raw = (db as unknown as { db: { prepare(sql: string): { run(...values: unknown[]): void; get(...values: unknown[]): { count: number } } } }).db;
-  const insert = raw.prepare("INSERT INTO research_tasks VALUES(?,?,?,?,?,?,?,?)");
+  // 显式列名：research_tasks 会随迁移加列，位置式 VALUES 对列数敏感。
+  const insert = raw.prepare(`INSERT INTO research_tasks(id,local_product_id,label,type,status,state,detail,evidence_json)
+    VALUES(?,?,?,?,?,?,?,?)`);
   for (const [index, name] of ["山西博物院", "晋祠", "蒙山大佛"].entries()) {
     insert.run(`legacy-no-match-${index}`, product.id, `待核查景点 ${name} 的 VBK POI`, "vbk", "queued", "researching", "suggestPoi 未匹配，请人工核查", "[]");
     insert.run(`legacy-city-poi-${index}`, product.id, `核查 ${name} 在 VBK 资源库的 city / poi 映射`, "vbk", "queued", "researching", "由目的地「太原」延伸", "[]");

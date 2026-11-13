@@ -96,7 +96,7 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
       insertMessage.run(message.id, snapshot.id, message.role, message.content, message.taskStatus ?? null, message.createdAt);
     }
     const insertTask = db.prepare(
-      "INSERT OR IGNORE INTO research_tasks(id,local_product_id,label,type,status,state,detail,evidence_json) VALUES(?,?,?,?,?,?,?,?)",
+      "INSERT OR IGNORE INTO research_tasks(id,local_product_id,label,type,status,state,detail,evidence_json,gate) VALUES(?,?,?,?,?,?,?,?,?)",
     );
     for (const task of snapshot.researchTasks) {
       insertTask.run(
@@ -108,6 +108,7 @@ export function importProductSnapshot(db: Database.Database, snapshot: ProductDe
         task.state,
         task.detail ?? null,
         JSON.stringify(task.evidence ?? []),
+        task.gate ?? null,
       );
     }
     if (journal.action === "insert") {
@@ -158,7 +159,7 @@ export function getProduct(db: Database.Database, id: string): ProductDetail | u
     product: withRouteRequirements(parseAndNormalizeProductJson(JSON.stringify(architecture.product)),
       messages.map(message => ({ role: message.role, content: message.content }))),
     messages: messages.map((m) => ({ id: m.id, role: m.role as ConversationMessage["role"], content: m.content, createdAt: m.created_at, taskStatus: m.task_status as ConversationMessage["taskStatus"] })),
-    researchTasks: coalescePoiResearchTasks(tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, evidence: JSON.parse(t.evidence_json) }))),
+    researchTasks: coalescePoiResearchTasks(tasks.map((t) => ({ id: t.id, label: t.label, type: t.type as ResearchTask["type"], status: t.status as ResearchTask["status"], state: t.state as ResearchTask["state"], detail: t.detail || undefined, gate: (t.gate as ResearchTask["gate"]) || undefined, evidence: JSON.parse(t.evidence_json) }))),
     automation: automationRow ? JSON.parse(automationRow.payload_json) : undefined,
     basicInfoSaved: Number(product.basic_info_saved) === 1,
   };

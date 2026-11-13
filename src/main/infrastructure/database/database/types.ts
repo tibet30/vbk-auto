@@ -76,7 +76,7 @@ export interface VbkDatabasePrototype {
   updateMessageStatus(localProductId: string, messageId: string, taskStatus: TaskStatus): void;
   recoverUnansweredMessages(): void;
   recoverOrphanAutomationRuns(): ReturnType<typeof import("../parts/products.js").recoverOrphanAutomationRuns>;
-  addResearchTask(localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail">): ReturnType<typeof import("../parts/research-tasks.js").addResearchTask>;
+  addResearchTask(localProductId: string, task: Pick<ResearchTask, "label" | "type" | "detail"> & { gate?: ResearchTask["gate"] | null }): ReturnType<typeof import("../parts/research-tasks.js").addResearchTask>;
   markResearchAccepted(localProductId: string, taskId: string, note?: string, source?: "vbk" | "web" | "user"): void;
   markResearchTasksSatisfied(localProductId: string, taskIds: readonly string[], note?: string): ReturnType<typeof import("../parts/research-tasks.js").markResearchTasksSatisfied>;
   confirmVerifiedPoiResearchTasks(localProductId: string, mappings: readonly VerifiedPoiMapping[]): ReturnType<typeof import("../parts/verified-poi-research.js").confirmVerifiedPoiResearchTasks>;

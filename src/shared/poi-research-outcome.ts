@@ -38,22 +38,41 @@ const LOCATION_MISMATCH_DETAIL = "已找到同名候选 POI，但其地域与当
 const AMBIGUOUS_DETAIL = "已找到多个候选 POI，但程序无法安全确定唯一地点；请手动选择 POI";
 const NO_CANDIDATE_DETAIL = "未找到对应的 VBK POI，已保留原景点和原行程位置；请确认景点名称或手动录入 POI";
 
-export function poiResearchFailureDetail(args: PoiResearchFailureArgs): string {
-  if (args.invalidIdentity) return CLEARED_IDENTITY_DETAIL;
+/**
+ * 决策门类型：这条任务必须由**受控凭证**结清，自动谓词不得凭同名绑定放过。
+ *
+ * 与文案一起由 `poiResearchFailure` 产出，两处共用同一分支，避免「文案改了、
+ * 结清判定没跟上」——那样运营会再次看到「选过了还在待核查」。
+ */
+export type PoiResearchGate = "manual_poi_selection" | "current_poi_verification";
+
+export interface PoiResearchFailure {
+  detail: string;
+  gate: PoiResearchGate | null;
+}
+
+export function poiResearchFailure(args: PoiResearchFailureArgs): PoiResearchFailure {
+  if (args.invalidIdentity) return { detail: CLEARED_IDENTITY_DETAIL, gate: "current_poi_verification" };
   const retained = args.reviewingComplete && !args.invalidLocation && !args.suspended;
-  if (retained) {
-    if (args.queryFailed) return QUERY_FAILED_DETAIL;
-    if (args.reason === "ambiguous") return RETAINED_AMBIGUOUS_DETAIL;
-    if (args.reason === "identity_mismatch") return RETAINED_IDENTITY_DETAIL;
-    if (args.reason === "location_mismatch") return RETAINED_LOCATION_DETAIL;
-    return RETAINED_NO_CANDIDATE_DETAIL;
-  }
-  if (args.suspended) return SUSPENDED_DETAIL;
-  if (args.travelNode) return TRAVEL_NODE_DETAIL;
-  if (args.reason === "identity_mismatch") return IDENTITY_MISMATCH_DETAIL;
-  if (args.reason === "location_mismatch") return LOCATION_MISMATCH_DETAIL;
-  if (args.reason === "ambiguous") return AMBIGUOUS_DETAIL;
-  return NO_CANDIDATE_DETAIL;
+  if (retained) return { detail: retainedDetail(args), gate: "current_poi_verification" };
+  if (args.suspended) return { detail: SUSPENDED_DETAIL, gate: null };
+  if (args.travelNode) return { detail: TRAVEL_NODE_DETAIL, gate: null };
+  if (args.reason === "identity_mismatch") return { detail: IDENTITY_MISMATCH_DETAIL, gate: null };
+  if (args.reason === "location_mismatch") return { detail: LOCATION_MISMATCH_DETAIL, gate: null };
+  if (args.reason === "ambiguous") return { detail: AMBIGUOUS_DETAIL, gate: "manual_poi_selection" };
+  return { detail: NO_CANDIDATE_DETAIL, gate: null };
+}
+
+function retainedDetail(args: PoiResearchFailureArgs): string {
+  if (args.queryFailed) return QUERY_FAILED_DETAIL;
+  if (args.reason === "ambiguous") return RETAINED_AMBIGUOUS_DETAIL;
+  if (args.reason === "identity_mismatch") return RETAINED_IDENTITY_DETAIL;
+  if (args.reason === "location_mismatch") return RETAINED_LOCATION_DETAIL;
+  return RETAINED_NO_CANDIDATE_DETAIL;
+}
+
+export function poiResearchFailureDetail(args: PoiResearchFailureArgs): string {
+  return poiResearchFailure(args).detail;
 }
 
 /** 系统生成的 POI 失败说明标记；运营手写备注不在此列。 */

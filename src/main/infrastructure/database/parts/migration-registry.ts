@@ -19,6 +19,8 @@
  *   - 0011_user_memories：用户偏好记忆（显式记忆 + 证据 + 维护状态）。
  *   - 0012_ctrip_poi_availability_cache：携程 POI 营业状态成功缓存。
  *   - 0013_product_json_version：products 加 product_json_version 乐观并发列。
+ *   - 0017_research_tasks_gate：research_tasks 加 gate 列（POI 决策门结构化标记，
+ *     结清不再依赖中文文案正则；历史行回退到文案判定）。
  *
  * 注：
  *   - cookies 不再写入 SQLite：本地 0600 atomic cookie store 才是 cookie
@@ -295,6 +297,12 @@ export const legacyMigrations: Migration[] = [
         sent INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,
         PRIMARY KEY(owner_user_id,event_id)
       )`,
+    ],
+  },
+  {
+    id: "0017_research_tasks_gate",
+    statements: [
+      `ALTER TABLE research_tasks ADD COLUMN gate TEXT`,
     ],
   },
 ];

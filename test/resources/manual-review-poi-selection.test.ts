@@ -134,6 +134,7 @@ const savedInput = {
 test("人工选定 POI 后按落库行程取证，供决策门 task 结清", () => {
   assert.deepEqual(verifiedMappingForManualPoi(savedProduct, savedInput), {
     day: 4, spotName: "张骞故里", poiName: "张骞纪念馆", poiId: 151283243,
+    province: "陕西", city: "汉中", district: "城固",
   });
 });
 

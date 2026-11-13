@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import type { Evidence, ResearchTask } from "../../../../shared/contracts.js";
 import { poiResearchTaskNames } from "../../../../shared/poi-research-tasks.js";
 import { isItinerarySpotId, itinerarySpotKey } from "../../../../shared/itinerary-spot-identity.js";
-import { hasAmbiguousManualPoiSelection, requiresCurrentPoiVerification } from "../../../../shared/research-task-satisfaction.js";
+import { isPoiDecisionGate } from "../../../../shared/research-task-satisfaction.js";
 import type { VerifiedPoiMapping } from "../../../planning/types.js";
 import { touchProduct } from "./products.js";
 import { now } from "./types.js";
@@ -17,6 +17,7 @@ interface TaskRow {
   type: ResearchTask["type"];
   state: string;
   detail: string | null;
+  gate: string | null;
   evidence_json: string;
 }
 
@@ -43,7 +44,7 @@ export function restoreCurrentVerifiedPoiResearchTasks(
   if (!productRow?.product_json) return { updated: 0, taskIds: [] };
   let product: Record<string, unknown>;
   try { product = JSON.parse(productRow.product_json) as Record<string, unknown>; } catch { return { updated: 0, taskIds: [] }; }
-  const rows = db.prepare(`SELECT id,label,type,state,detail,evidence_json FROM research_tasks
+  const rows = db.prepare(`SELECT id,label,type,state,detail,gate,evidence_json FROM research_tasks
     WHERE local_product_id=? AND type='vbk' AND state NOT IN ('confirmed','resolved')`).all(localProductId) as TaskRow[];
   const matched = rows.filter((task) => hasCurrentVerifiedPoiEvidence(product, task));
   const update = db.prepare(`UPDATE research_tasks SET state='confirmed', status='succeeded', detail=?
@@ -70,11 +71,12 @@ export function confirmVerifiedPoiResearchTasks(
   const persisted = mappings.filter(mapping => persistedMappingExists(product, mapping));
   if (!persisted.length) return { updated: 0, taskIds: [] };
 
-  const allRows = db.prepare(`SELECT id,label,type,state,detail,evidence_json FROM research_tasks
+  const allRows = db.prepare(`SELECT id,label,type,state,detail,gate,evidence_json FROM research_tasks
     WHERE local_product_id=? AND type='vbk'`).all(localProductId) as TaskRow[];
   const rows = allRows.filter((row) => !["confirmed", "resolved"].includes(row.state));
-  const matched = rows.filter((task) => (hasAmbiguousManualPoiSelection(task)
-      || requiresCurrentPoiVerification(task))
+  // 结清侧与自动谓词共用 isPoiDecisionGate：凡是自动确认被拒绝的决策门，凭证
+  // 就必须能结清它。两边各写一套判定会让新文案重新变成「选过了还在待核查」。
+  const matched = rows.filter((task) => isPoiDecisionGate(task)
     && poiResearchTaskNames(task.label, task.type).every((name) => everyCurrentSlotVerified(product, name, persisted)));
   const update = db.prepare(`UPDATE research_tasks SET state='confirmed', status='succeeded', detail=?, evidence_json=?
     WHERE id=? AND local_product_id=? AND state NOT IN ('confirmed','resolved')`);

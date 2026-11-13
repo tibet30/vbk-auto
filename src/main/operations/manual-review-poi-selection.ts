@@ -2,6 +2,7 @@ import type { ManualReviewFieldInput, PoiSuggestDetailResult } from "../../share
 import { isManualPoiCandidateInVerifiedRouteContext } from "../planning/poi-auto-selection.js";
 import type { VerifiedPoiMapping } from "../planning/types.js";
 import { isItinerarySpotId } from "../../shared/itinerary-spot-identity.js";
+import { mergePoiAdjudications } from "../../shared/poi-adjudication-receipt.js";
 import { buildPoiContextForItineraryDay } from "../planning/poi-context.js";
 
 type Json = Record<string, unknown>;
@@ -91,6 +92,26 @@ function positiveInteger(value: unknown): value is number {
 }
 
 /**
+ * 落库前把受控凭证并进同一次产品写入。
+ *
+ * 凭证必须与绑定在同一次 commit 里落地：先写绑定、稍后补凭证的任何两段式写法，
+ * 都会在两步之间留下「已绑定但无凭证」的中间态——任务不结清、地域核验继续拦，
+ * 正是运营反复看到的「选过了还在待核查」。
+ */
+export function attachManualPoiReceipt(product: Json, input: PoiInput): Json {
+  const mapping = verifiedMappingForManualPoi(product, input);
+  if (!mapping) return product;
+  const next = structuredClone(product) as Json;
+  next.diagnostics = {
+    ...record(next.diagnostics),
+    poiAdjudications: mergePoiAdjudications(next, [{ ...mapping, adjudication: {
+      confidence: 1, reasoning: '运营从当前平台受控候选中人工选定',
+    } }], new Date().toISOString()),
+  };
+  return next;
+}
+
+/**
  * 运营在行程里按受控候选显式选定 POI 后，从**落库后的产品**取证，产出可结清
  * 「请手动选择 / 手动绑定 POI」这类决策门 task 的受控凭证。
  *
@@ -114,5 +135,8 @@ export function verifiedMappingForManualPoi(product: Json, input: PoiInput): Ver
   const poiId = spot.poiId;
   if (!spotName || !poiName || !positiveInteger(poiId) || !Number.isInteger(dayNumber) || dayNumber <= 0) return null;
   if (poiId !== input.poiId || poiName !== input.poiName.trim()) return null;
-  return { day: dayNumber, ...(isItinerarySpotId(spot.spotId) ? { spotId: spot.spotId } : {}), spotName, poiName, poiId };
+  return { day: dayNumber, ...(isItinerarySpotId(spot.spotId) ? { spotId: spot.spotId } : {}), spotName, poiName, poiId,
+    ...(text(spot.province) ? { province: text(spot.province) } : {}),
+    ...(text(spot.city) ? { city: text(spot.city) } : {}),
+    ...(text(spot.district) ? { district: text(spot.district) } : {}) };
 }

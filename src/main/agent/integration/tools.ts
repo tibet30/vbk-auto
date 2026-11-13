@@ -35,6 +35,7 @@ import { enrichItineraryPois } from "../../planning/poi-enrichment.js";
 import { isPlanningPoiCandidateInContext } from "../../planning/poi-auto-selection.js";
 import { findPoiQueryScope, itineraryPoiScope, screenPoiQueryForScope } from "./poi-scope.js";
 import { isCompatiblePoiIdentity } from "../../../shared/poi-candidate-identity.js";
+import { mergePoiAdjudications } from "../../../shared/poi-adjudication-receipt.js";
 import { syncInitialTrafficLineAvailability } from "../../planning/traffic-line-availability.js";
 import { resolveProductTrafficLineAvailability } from "../../automation/ctrip/traffic-line/planning-availability.js";
 import type { TrafficLineStationDisambiguator } from "../../automation/ctrip/traffic-line/endpoints.js";
@@ -205,15 +206,21 @@ export function createAgentBusinessTools(deps: AgentBusinessDependencies): Agent
         const next = structuredClone(current.product);
         const itinerary = next.itinerary as JsonObject[];
         (itinerary[dayIndex]!.spots as JsonObject[])[spotIndex] = nextSpot;
+        const verifiedMapping = {
+          day, ...(isItinerarySpotId(spot.spotId) ? { spotId: spot.spotId } : {}),
+          spotName: cleanText(spot.name) || spotName, poiName: candidate.poiName, poiId,
+          province: cleanText(candidate.province), city: cleanText(candidate.city), district: cleanText(candidate.district),
+        };
+        next.diagnostics = { ...((next.diagnostics as JsonObject | undefined) ?? {}),
+          poiAdjudications: mergePoiAdjudications(next, [{ ...verifiedMapping, adjudication: {
+            confidence: 1, reasoning: 'Agent 从当前平台受控候选中显式选定',
+          } }], new Date().toISOString()) };
         deps.db.runProductTransaction(() => {
           deps.productMutations.commands.mergeChanges(ctx.localProductId, current, next, 'resource', { notify: false }, {
             queryPath: ['basicInfo'], queryFingerprint: canonicalJson(current.product.basicInfo),
             targetPath: ['itinerary'], targetFingerprint: canonicalJson(current.product.itinerary),
           });
-          deps.db.confirmVerifiedPoiResearchTasks(ctx.localProductId, [{
-            day, spotId: isItinerarySpotId(spot.spotId) ? spot.spotId : undefined, spotName: cleanText(spot.name) || spotName, poiName: candidate.poiName, poiId,
-            province: cleanText(candidate.province), city: cleanText(candidate.city), district: cleanText(candidate.district),
-          }]);
+          deps.db.confirmVerifiedPoiResearchTasks(ctx.localProductId, [verifiedMapping]);
           refreshSatisfiedResearchTasks(deps.db, ctx.localProductId);
         });
         deps.emitProduct(get(ctx.localProductId));

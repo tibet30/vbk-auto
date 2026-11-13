@@ -15,7 +15,8 @@ import { buildPoiContextForItineraryDay } from "./poi-context.js";
 import { queryPoi, applyPoiMatch, queryPoiAvailability, queryItineraryPoiAvailabilities, isTravelNodeName, backfillItineraryPoiCoordinates } from "./poi-enrichment/query.js";
 import { hasDefinitePoiLocationConflict } from "./poi-location-conflict.js";
 import { isCompatiblePoiIdentity } from "../../shared/poi-candidate-identity.js";
-import { poiResearchFailureDetail } from "../../shared/poi-research-outcome.js";
+import { poiResearchFailure } from "../../shared/poi-research-outcome.js";
+import type { PoiResearchGate } from "../../shared/poi-research-outcome.js";
 import type { VerifiedPoiMapping } from "./types.js";
 import { bracketAliases, recordVerifiedMapping } from "./poi-enrichment/mappings.js";
 
@@ -54,7 +55,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
     const deferred: Array<{ day: any; spot: any; keyword: string; poiContext: ReturnType<typeof buildPoiContextForItineraryDay>;
       reviewingComplete: boolean; attempt: Awaited<ReturnType<typeof selectSpotPoi>> }> = [];
     let deferredBaseline = 0;
-    const pendingTasks: Array<{ keyword: string; detail: string }> = [];
+    const pendingTasks: Array<{ keyword: string; detail: string; gate?: PoiResearchGate | null }> = [];
     // 地域复核前补齐已绑定 POI 的平台坐标，跨城景点才能按路线走廊回读证明。
     let poiUpdated = shouldReviewCompletePois
       && await backfillItineraryPoiCoordinates(runtime, localProductId, updated, queryTimeoutMs);
@@ -125,7 +126,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             poiUpdated = true;
           }
           logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword, reason: selectionReason ?? null });
-          const detail = poiResearchFailureDetail({
+          const failure = poiResearchFailure({
             reason: selectionReason,
             reviewingComplete,
             queryFailed,
@@ -135,7 +136,7 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
             travelNode: isTravelNodeName(originalKeyword),
           });
           pendingTasks.push({
-            keyword: String(keyword), detail,
+            keyword: String(keyword), detail: failure.detail, gate: failure.gate,
           });
         }
       }
@@ -161,9 +162,9 @@ export async function enrichItineraryPois(args: PoiEnrichmentArgs): Promise<Rese
       // 与首轮一致：非复核景点查询失败时不建任务，留给下次重试。
       if (queryFailed && !reviewingComplete) continue;
       logInfo("[planning.poi]", { event: "query-no-match", localProductId, keyword, reason: selectionReason ?? null });
-      pendingTasks.push({ keyword,
-        detail: poiResearchFailureDetail({ reason: selectionReason, reviewingComplete, queryFailed, invalidLocation: false,
-          invalidIdentity: false, suspended, travelNode: isTravelNodeName(keyword) }) });
+      const failure = poiResearchFailure({ reason: selectionReason, reviewingComplete, queryFailed, invalidLocation: false,
+        invalidIdentity: false, suspended, travelNode: isTravelNodeName(keyword) });
+      pendingTasks.push({ keyword, detail: failure.detail, gate: failure.gate });
     }
     if (poiUpdated) {
       const writeResult = runtime.writeResolvedItineraryPois
@@ -275,11 +276,12 @@ function hasCompleteItineraryPois(product: Record<string, unknown>): boolean {
     && (day as { spots: unknown[] }).spots.some((spot) => requiresItineraryPoi(spot as Record<string, unknown>) && hasCompletePoi(spot as Record<string, unknown>)));
 }
 
-function buildPoiResearchTask(keyword: string, detail: string): ResearchTaskProposal {
+function buildPoiResearchTask(keyword: string, detail: string, gate: PoiResearchGate | null): ResearchTaskProposal {
   return {
     label: poiResearchTaskLabel(keyword),
     type: "vbk",
     detail,
+    ...(gate ? { gate } : {}),
   };
 }
 
@@ -290,8 +292,9 @@ async function addPoiResearchTask(args: {
   addedTasks: ResearchTaskProposal[];
   keyword: string;
   detail: string;
+  gate?: PoiResearchGate | null;
 }): Promise<void> {
-  const task = buildPoiResearchTask(args.keyword, args.detail);
+  const task = buildPoiResearchTask(args.keyword, args.detail, args.gate ?? null);
   const key = `${task.type}::${task.label}`;
   await args.runtime.addResearchTask(args.localProductId, task);
   if (!args.persistedTaskKeys.has(key)) {

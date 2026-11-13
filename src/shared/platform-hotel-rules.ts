@@ -4,6 +4,7 @@ import { hotelStayRequirement } from "./hotel-stay-requirement.js";
 import { toPlatformShortLocationName } from "./location-short-name.js";
 import { isNonWritableCityAlias, toWritableAdministrativeCityName } from "./region-overrides.js";
 import { originalOvernightRoute, originalRouteEndsAtArrival, verifiedOvernightCity } from './itinerary-overnight-city.js';
+import { explicitOvernightName } from './explicit-overnight-name.js';
 import { verifiedRouteOvernightCity } from './route-location-evidence.js';
 
 type Json = Record<string, any>;
@@ -27,7 +28,7 @@ export function platformHotelRulesRequired(product: Json): boolean {
   return !days.length ? nights > 0 : days.some((day: Json, index: number) => needsItineraryHotelCandidates(day, index, nights));
 }
 
-/** Explicit conversion on new local preparation; readers never migrate saved products. */
+/** 统一写入口的住宿迁移：把产品转换为平台自动匹配规则，并清理旧指定酒店/候选字段。 */
 export function normalisePlatformHotelProduct(product: Json): Json {
   const next = structuredClone(product);
   const ops = { ...(next.operations ?? {}) };
@@ -42,10 +43,17 @@ export function normalisePlatformHotelProduct(product: Json): Json {
   delete ops.hotelFallbackPolicy;
   next.operations = ops;
   const basic = next.basicInfo ?? {};
+  const nights = Number(basic.nights);
   const namedHotels = [...[basic.userIdea ?? "", ...(next.itinerary ?? []).map((day: Json) => day.title ?? "")].join("\n").matchAll(/[^，。；、\s→—-]{1,25}(?:酒店|宾馆|客栈|民宿)(?:[（(][^）)]*[）)])?/gu)].map(match => match[0].replace(/^.*(?:入住|住宿于|住宿在|前往|送至|从)/u, ""));
   next.itinerary = (next.itinerary ?? []).map((raw: Json, index: number) => {
     const day = normaliseReturnDayLodging(raw, basic) as Json;
-    const stay = needsItineraryHotelCandidates(day, index, Number(basic.nights));
+    // 住宿夜只能落在前 N 晚：历史文本（如「本日不含返程后住宿」）没被识别成
+    // 不住宿时，第 N+1 天会被误升级成住宿夜，导致 stay groups 晚数多于 basicInfo。
+    // nights 缺失/为 0 时不做上限判断（历史草稿可能尚未填晚数），避免误清住宿；
+    // 有晚数时住宿夜只落在前 N 晚。
+    const withinNights = !(Number.isInteger(nights) && nights > 0)
+      || !Number.isInteger(Number(day.day)) || Number(day.day) <= nights;
+    const stay = withinNights && needsItineraryHotelCandidates(day, index, Number(basic.nights));
     const requirement = stay ? hotelStayRequirement(next, day) : undefined;
     // 旅游区别名（潮汕等）先改写为平台可写行政城市，再取短名比对。
     const writable = (value: unknown) => toPlatformShortLocationName(toWritableAdministrativeCityName(value));
@@ -57,8 +65,16 @@ export function normalisePlatformHotelProduct(product: Json): Json {
     const inferredCity = requestedCity || verifiedCity;
     const inheritedArrival = savedCity && requestedCity && savedCity === arrivalCity && requestedCity !== arrivalCity;
     const fallbackCity = originalOvernightRoute(next, day) && !originalRouteEndsAtArrival(next, day) ? '' : arrivalCity;
-    const city = writable(inheritedArrival || (routeCity && savedCity && savedCity !== writable(inferredCity)) ? inferredCity : toPlatformShortLocationName(savedCity || inferredCity
-      || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity));
+    // 已保存的住宿城市只有在当天原文「明确写出住宿地」（宿X/住X）或与已核验路线
+    // 落点一致时才算有据；只是作为途经点出现在路线里的城市不能自证。
+    const explicitStay = explicitOvernightName(originalOvernightRoute(next, day));
+    const savedSupported = Boolean(savedCity) && ((explicitStay && writable(explicitStay) === savedCity)
+      || (routeCity && routeCity === savedCity));
+    const conflict = Boolean(routeCity && savedCity && savedCity !== writable(inferredCity));
+    const chosen = (inheritedArrival || conflict) && !savedSupported
+      ? (inferredCity || routeCity)
+      : (savedCity || inferredCity || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity);
+    const city = writable(chosen);
     const result: Json = { ...day, hotel: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL,
       hotelDescription: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL };
     delete result.hotelRequirement; delete result.hotelCandidates;

@@ -33,7 +33,6 @@
 
 import type { ManualReviewFieldInput } from "../../shared/contracts.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
-import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
 import { applyItinerarySpotKind, applyItinerarySpotPoi, applyItinerarySpotRemove } from "./manual-review-itinerary-field.js";
 import { applyPricing, applyInventory } from "./manual-review-field/pricing.js";
 import { applyBasicInfoSubtitle, applyVehicleResource } from "./manual-review-field/basic.js";
@@ -66,5 +65,5 @@ export function applyManualReviewField(product: Record<string, unknown>, input: 
   }
   if (Array.isArray(next.itinerary)) next.itinerary = next.itinerary.map(day =>
     day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
-  return repairLegacyCoverQuality(reconcileHotelStays(next));
+  return repairLegacyCoverQuality(next);
 }

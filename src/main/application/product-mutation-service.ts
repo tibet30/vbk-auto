@@ -28,12 +28,11 @@ import { applyProductPatchSafe } from "../operations/product-patch.js";
 import { normaliseProductLocationFields, toPlatformShortLocationName } from "../../shared/location-short-name.js";
 import { requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
 import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
+import { preserveOperatorActivityKinds } from "../../shared/preserve-operator-itinerary-kinds.js";
 import { inheritItinerarySpotIds, isItinerarySpotId, itinerarySpotExactName, itinerarySpotKey } from "../../shared/itinerary-spot-identity.js";
 import { normaliseItinerarySupport } from "../../shared/itinerary-support-arrangements.js";
 import { normaliseItineraryArrivalTitle } from "../../shared/itinerary-arrival-title.js";
-import { reconcileHotelCopy } from "../../shared/hotel-copy-consistency.js";
-import { reconcileHotelStays } from "../../shared/reconcile-hotel-stays.js";
-import { normalisePlatformHotelProduct, usesPlatformHotelRules } from "../../shared/platform-hotel-rules.js";
+import { normalisePlatformHotelProduct } from "../../shared/platform-hotel-rules.js";
 import { ProductCommandService } from './product-command-service.js';
 import { enforceReceiptedPoiBindings } from './itinerary-poi-binding-guard.js';
 
@@ -124,9 +123,14 @@ export class ProductMutationService {
     );
     // 先按旧方案继承 spotId（模型输出不带 ID），后续 POI 保留与删除凭证都基于带 ID 的方案。
     const withIds = inheritItinerarySpotIds(current.product, product);
-    const incoming = options.preserveVerifiedItineraryPois === false
+    // 人工把条目改成「自由活动 / 其他」后，生成重跑不得把它改回景点：类型凭证
+    // 与删除凭证一样只认受控人工操作，人工整包编辑（source=user）仍然完全掌控。
+    const withKinds = options.source === "user"
       ? withIds
-      : preserveVerifiedItineraryPois(current.product, withIds);
+      : preserveOperatorActivityKinds(current.product, withIds, current.researchTasks ?? []);
+    const incoming = options.preserveVerifiedItineraryPois === false
+      ? withKinds
+      : preserveVerifiedItineraryPois(current.product, withKinds);
     const protectedIncoming = options.allowItineraryRemovalRestore ? incoming : preserveItineraryRemovals(current.product, incoming);
     // 统一写入口的护栏：新出现的 POI 绑定必须带当前槽位的受控凭证，否则该绑定
     // 永远不会结清「请手动选择 POI」决策门，运营会一直看到待核查项。
@@ -143,7 +147,7 @@ export class ProductMutationService {
     const normalised = normaliseItineraryArrivalTitle(normaliseProductLocationFields(guarded.product, lockedMeetingCity || undefined));
     if (Array.isArray(normalised.itinerary)) normalised.itinerary = normalised.itinerary.map((day) =>
       day && typeof day === "object" && !Array.isArray(day) ? normaliseItinerarySupport(day) : day);
-    this.store.updateProduct(localProductId, usesPlatformHotelRules(normalised) ? normalisePlatformHotelProduct(normalised) : reconcileHotelCopy(reconcileHotelStays(normalised)), options.status, current.productJsonVersion ?? 0, options.source);
+    this.store.updateProduct(localProductId, normalisePlatformHotelProduct(normalised), options.status, current.productJsonVersion ?? 0, options.source);
     const saved = this.store.getProduct(localProductId);
     if (!saved) throw productNotFound(localProductId);
     if (options.notify !== false) this.onUpdated?.(saved);

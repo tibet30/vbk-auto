@@ -86,13 +86,13 @@ flowchart LR
 | 资源域 | 稳定入口 | 职责 |
 | --- | --- | --- |
 | 行程 POI | `planning/poi-enrichment.ts` | 行程遍历、地域消歧、营业核验、编号回填和核查任务 |
-| 每日酒店 | `infrastructure/ctrip-hotel-search.ts` | 逐晚住宿地标、距离和评级匹配、许可内重试、进度回填 |
-| VBK 酒店资源库 | `operations/hotel-resource.ts` | 平台资源库查询与匹配，和每日携程酒店候选分开 |
+| 每日住宿 | `shared/platform-hotel-rules.ts` | 平台自动匹配三/四/五钻；只保存每晚住宿行政城市与晚数，本地不查询酒店候选 |
+| VBK 酒店资源库 | `operations/hotel-resource.ts` | 平台住宿规则段的查询与保存回读 |
 | 车辆资源组 | `operations/vehicle-resource.ts` | 预算及座位匹配、正常无结果时兜底、结果构建 |
 | 大交通端点 | Agent 集成与交通查询适配器 | 准备阶段核验站点；正式资源及班期以子产品执行回读为准 |
 
 候选查询不等于平台绑定。网络、登录和解析异常不能伪装成正常无候选；未核验编号不能由模型补造。
-酒店降档必须读取应用层计算的逐日许可；策略默认值不等于任意日期或范围的授权。
+住宿不再有逐晚钻级、民宿、距离或降档许可：平台统一自动匹配三钻、四钻、五钻。
 详细契约见 [资源匹配与核验](docs/resource-matching-verification.md)。
 
 ## 4. 授权录入与恢复

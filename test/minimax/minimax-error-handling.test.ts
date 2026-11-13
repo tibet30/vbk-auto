@@ -162,3 +162,20 @@ test("classifyMiniMaxError 对 Evolink “未返回可写入” 文案同样归�
     "invalid_model_output",
   );
 });
+
+test("输入审核拒绝（422 input new_sensitive）归类为 input_moderated，且文案不误导为连接问题", () => {
+  const error = {
+    status: 422,
+    type: "unprocessable_entity_error",
+    message: "422 input new_sensitive (1026)",
+    error: { message: "input new_sensitive (1026)", type: "unprocessable_entity_error", http_code: "422" },
+  };
+  assert.equal(extractMiniMaxFailureReason(error), "422 input new_sensitive (1026)");
+  assert.equal(classifyMiniMaxError(error), "input_moderated");
+  const message = normalizeFailureMessage("input_moderated", extractMiniMaxFailureReason(error));
+  assert.match(message, /内容审核拒绝/);
+  assert.match(message, /更改文案/);
+  assert.doesNotMatch(message, /检查连接/);
+  // 即使 errorCode 尚未归一化，只要文案带输入审核标记也走同一处置文案。
+  assert.match(normalizeFailureMessage("provider_error", "422 input new_sensitive (1026)"), /内容审核拒绝/);
+});

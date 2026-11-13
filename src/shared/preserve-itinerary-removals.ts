@@ -43,7 +43,11 @@ export function preserveItineraryRemovals(current: Json, incoming: Json): Json {
       // 下文「编号路线校验」会把它们报成未保留。描述是散文，仍优先整句过滤。
       const segmented = dropRouteSegments(copy, aliases);
       const claused = dropMentionedClauses(copy, aliases);
-      day[field] = field === "title" ? segmented || claused : claused || segmented;
+      // 原始逐日路线（「门源 — 岗什卡雪峰 — 阿咪东索景区 | 宿祁连」）整句删除会
+      // 连未删除的路线点一起丢掉，下一轮校验又报「门源」缺失并来回反复。
+      // 含路线分隔符时按段删，保留同句的其它节点。
+      const routeLike = /[—–→|｜]/u.test(copy);
+      day[field] = field === "title" || routeLike ? segmented || claused : claused || segmented;
       if (!day[field]) {
         const kept = (day.spots as unknown[]).map((spot) => text(record(spot).name)).filter(Boolean).join("、");
         day[field] = field === "title" ? kept || `第${day.day}天行程`
@@ -113,11 +117,11 @@ function dropMentionedClauses(copy: string, aliases: readonly string[]): string 
 
 /** 只删命中删除凭证的路线点分段，保留同一标题里的其它锁定路线点。 */
 function dropRouteSegments(copy: string, aliases: readonly string[]): string {
-  return copy.split(/([—–\-·、，,→/／])/u)
+  return copy.split(/([—–\-·、，,→/／|｜])/u)
     .filter((part) => !aliases.some((name) => part.includes(name)))
     .join("")
-    .replace(/^[\s—–\-·、，,→/／]+|[\s—–\-·、，,→/／]+$/gu, "")
-    .replace(/([—–\-·、，,→/／])\s*(?=[—–\-·、，,→/／])/gu, "")
+    .replace(/^[\s—–\-·、，,→/／|｜]+|[\s—–\-·、，,→/／|｜]+$/gu, "")
+    .replace(/([—–\-·、，,→/／|｜])\s*(?=[—–\-·、，,→/／|｜])/gu, "")
     .trim();
 }
 

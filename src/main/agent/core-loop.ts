@@ -119,7 +119,7 @@ export class AgentTurnLoop {
           this.snapshots.save(before);
         }
         if (preparation.hotelInputModelWindow) {
-          this.snapshots.event(before, "status", "酒店资料已回答，请读取该答案并用 patch_product 和 resolve_itinerary_hotels 落实到真实住宿候选；不能重复 ask_user，不能猜测酒店 ID、改变用户明确的住宿地点或只回复检索策略。", {
+          this.snapshots.event(before, "status", "住宿资料已回答，请读取该答案并用 patch_product 和 resolve_itinerary_hotels 写入当晚住宿行政城市与平台自动匹配三/四/五钻规则；不得查询或指定具体酒店、不能重复 ask_user，也不能改变用户明确的住宿地点。", {
             hotelInputModelWindow: true, modelFeedback: true, node: preparation.action!.node,
             progressKey: preparation.action!.progressKey,
           }, token.runId);

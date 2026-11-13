@@ -7,6 +7,8 @@
  *   - 配套给 UI / DevTools 看的 toRetryHint、isStructuredFormatFailure。
  */
 
+import { isModelInputModerationMessage } from "../../shared/ai-input-moderation.js";
+
 export const normalizeWhitespace = (value: string) => value.replace(/[\s\u00a0\t\r\n]+/g, " ").trim();
 
 const ignoreStructuralKeys = new Set(["code"]);
@@ -90,6 +92,8 @@ export function isStructuredFormatFailure(reason: string) {
  */
 export function classifyMiniMaxError(error: unknown): string {
   const reason = extractMiniMaxFailureReason(error);
+  // 输入侧内容审核拒绝：与网络/鉴权/输出格式都无关，原样重试必定再失败。
+  if (isModelInputModerationMessage(reason)) return "input_moderated";
   if (reason && isStructuredFormatFailure(reason)) return "invalid_model_output";
   if (reason) {
     if (isStructuredFormatFailure(reason)
@@ -147,6 +151,10 @@ export function normalizeFailureMessage(errorCode: string, reason: string, provi
   }
   if (errorCode === "empty_model_output") {
     return `${providerLabel} 未返回可写入的产品方案，请重试。`;
+  }
+  if (errorCode === "input_moderated" || isModelInputModerationMessage(normalizedReason)) {
+    // 输入审核拒绝与连接/配置无关：原样重试同一份请求不会再通过，必须给出可执行动作。
+    return `${providerLabel} 内容审核拒绝了本次请求的输入文本（含平台敏感词清单），已停止原样重试；请更改文案、去掉敏感表述后再继续。`;
   }
 
   if (!(errorCode === "invalid_model_output" || errorCode === "empty_model_output") && !isStructuredFormatFailure(normalizedReason)) {

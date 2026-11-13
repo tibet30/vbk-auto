@@ -45,6 +45,25 @@ test("策略引用未知类别或可用项少于三项时失败关闭", () => {
     { productPatternId: 4 }), /少于 3 项/);
 });
 
+/** 平台图文页目录全集 15 项；后 5 项在该合同下 disabled，本地写入门禁也不接受。 */
+const fullDirectory = [
+  "优选行程", "服务保障", "贴心赠送", "精选酒店", "缤纷景点", "特色美食", "度假首选", "超值赠送",
+  "五星精选", "限时秒杀", "尊享入住", "大牌驾到", "优质交通", "优良资质", "缤纷体验",
+].map((name, index) => ({ id: index + 1, name }));
+
+test("平台目录里本地无法持久化的分类不进入规划可用清单", () => {
+  const policy = deriveRecommendationCategoryPolicy({ enabled: false }, fullDirectory, { productPatternId: 2 });
+  assert.deepEqual(policy.categories, ["优选行程", "服务保障", "贴心赠送", "精选酒店", "缤纷景点",
+    "特色美食", "度假首选", "超值赠送", "五星精选", "缤纷体验"]);
+  assert.equal(policy.categoryIds.length, policy.categories.length);
+  assert.ok(!policy.categories.includes("限时秒杀"));
+});
+
+test("白名单只剩本地不可写分类时失败关闭，不把非法分类交给模型", () => {
+  assert.throws(() => deriveRecommendationCategoryPolicy({ enabled: true, categoryWhitelist: [10, 11, 12] }, fullDirectory,
+    { productPatternId: 2 }), /少于 3 项/);
+});
+
 /** 平台在线接口失败时 HTTP 仍是 200，真正原因只在 ResponseStatus.Errors 里。 */
 function categoryBrowser(payload: unknown): VbkSessionRequestBrowser {
   return {

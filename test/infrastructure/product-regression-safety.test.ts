@@ -6,7 +6,6 @@ import { loadCase, replayPoi } from '../../scripts/product-regression/corpus.js'
 import { createQueryReplay } from '../../scripts/product-regression/query-replay.js';
 import { loadGenerationReplay } from '../../scripts/product-regression/generation-replay.js';
 import { loadProviderReplay } from '../../scripts/product-regression/provider-replay.js';
-import { CTRIP_HOTEL_SUGGEST_ENDPOINT } from '../../src/main/infrastructure/ctrip-hotel-search/provider.js';
 import type { VbkSessionRequestBrowser } from '../../src/main/infrastructure/vbk-session-request.js';
 
 const POI = 'https://online.ctrip.com/restapi/soa2/20049/suggestPoi';
@@ -69,11 +68,9 @@ test('完整流程固定输入没有资源绑定；缺失酒店和图库查询�
   provider.covers = [];
   provider.districts = [];
   const replay = createQueryReplay(fixture, provider);
-  await assert.rejects(replay.queries.hotelFetch!(CTRIP_HOTEL_SUGGEST_ENDPOINT, { method: 'POST', body: JSON.stringify({ keyword }) }), /缺少资源查询回放/);
-  // Known POIs cannot silently imply a recorded empty result.
   await assert.rejects(replay.queries.coverSearch!({} as any, fixture.poiReplay[0].candidate.poiName), /缺少资源查询回放/);
   const page = await replay.browser.requestPage() as unknown as VbkSessionRequestBrowser;
   await assert.rejects(page.vbkSessionFetch!({ endpoint: 'https://online.ctrip.com/restapi/soa2/20049/suggestDistrict',
     body: { keyword: fixture.poiReplay[0].keyword } } as any), /缺少资源查询回放/);
-  assert.equal(replay.misses.length, 3);
+  assert.equal(replay.misses.length, 2);
 });

@@ -1,4 +1,6 @@
 import { originalOvernightRoute } from '../../../shared/original-itinerary-route.js';
+import { structuredOvernightName } from '../../planning/daily-route-structure.js';
+import { explicitOvernightName } from '../../../shared/explicit-overnight-name.js';
 import { toPlatformShortLocationName } from '../../../shared/location-short-name.js';
 import { platformHotelStayGroups } from '../../../shared/platform-hotel-rules.js';
 import { resolveResourceSegmentCityApi, segmentsFromPayload } from './vehicle-resource-api.js';
@@ -38,9 +40,17 @@ export async function resolveStayCityAliases(page: any, product: Json, payload: 
 }
 
 function explicitRouteCity(product: Json, day: Json, city: string): boolean {
+  // AI 已按原文逐字读出当晚住宿地时以它为准：这是「读懂了」的结果，不依赖正则命中。
+  const structured = structuredOvernightName(product, Number(day.day));
+  if (structured && toPlatformShortLocationName(structured) === city) return true;
   const source = originalOvernightRoute(product, day);
   if (!source) return false;
-  return source.split(/[-—–→>＞，,；;\/／\n]+/u).some(token => {
+  // 「| 宿肃南」「；住张掖」是当晚住宿注记，不是路线景点节点。运营最常用的行内简写
+  // 若整体参与比对，会得到「祁连黑河源 | 宿肃南」这种假地名，跨省住宿地就永远不算
+  // 显式指定，只能退回接团省份推断，最终按「青海/肃南」筛成 0 个候选而暂停。
+  const overnight = explicitOvernightName(source);
+  if (overnight && toPlatformShortLocationName(overnight) === city) return true;
+  return source.split(/[-—–→>＞，,；;\/／|｜\n]+/u).some(token => {
     const name = token.trim().replace(/^[*：:、\s]+|[*。\s]+$/gu, '')
       .replace(/^(?:抵达|到达|前往|入住|住宿于|住宿在|住在|住)/u, '')
       .replace(/(?:集合|接团|送团|接机|送机|接站|送站|住宿|接|送)$/u, '');

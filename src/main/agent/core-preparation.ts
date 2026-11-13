@@ -4,7 +4,6 @@ import { isPreparationRun } from "./preparation-run.js";
 import { decidePreparationAction, type PreparationDirectedAction } from "./preparation-director.js";
 import { evaluatePreparationCompletion } from "../planning/preparation-completion.js";
 import { manualPoiInput, unmatchedCanonicalPoiSlots, type ManualPoiSlot } from "./core-preparation-poi-input.js";
-import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 
 export type PreparationLoopDecision =
   | { kind: "execute"; action: PreparationDirectedAction }
@@ -104,8 +103,6 @@ export function nextPreparationLoopDecision(
     && events.some((call) => call.type === "tool_call" && call.data?.toolCallId === event.data?.toolCallId
       && call.data?.deterministicPreparation === true && call.data?.progressKey === action.progressKey));
   const detail = (repairOutcome ?? automaticOutcome)?.content.replace(/\s+/g, " ").slice(0, 240) || "自动动作未返回可验证的产品进展";
-  const questions = action.node === "hotelResolution" ? hotelAvailabilityQuestions(product, automaticOutcome?.content ?? "") : [];
-  if (questions.length) return { kind: "askHotelInput", action, questions };
   return { kind: "pause", reason: `本地准备在 ${action.node} 已自动尝试 ${attempts} 次且模型修复三轮后仍无业务进展。当前缺项：${missing.join("、") || "见最新产品核验"}。最近结果：${detail}` };
 }
 

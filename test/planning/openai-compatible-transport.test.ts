@@ -238,3 +238,56 @@ test("normaliseTransportError 兜底 unknown 仍带原 message", () => {
   assert.equal(result.code, "unknown");
   assert.equal(result.message, "weird stuff");
 });
+
+test("normaliseTransportError 把 422 input new_sensitive 映射到 provider_input_moderated", () => {
+  const err = Object.assign(new Error("422 input new_sensitive (1026)"), {
+    status: 422,
+    type: "unprocessable_entity_error",
+    error: { message: "input new_sensitive (1026)", type: "unprocessable_entity_error", http_code: "422" },
+  });
+  const result = normaliseTransportError(err);
+  assert.equal(result.code, "provider_input_moderated");
+  assert.match(result.message, /内容审核拒绝/);
+  assert.match(result.message, /更改文案/);
+  assert.doesNotMatch(result.message, /检查连接/);
+  assert.ok((result.details ?? "").includes("status=422"));
+});
+
+test("模型以 422 input new_sensitive 拒收时，adapter 自动修复 prompt 后重试并成功", async (t) => {
+  let calls = 0;
+  const server = await startCapturingServer(t, (_req, res) => {
+    calls += 1;
+    res.setHeader("content-type", "application/json");
+    if (calls === 1) {
+      res.statusCode = 422;
+      // 线上 MiniMax 的实际 422 body：error 包裹，SDK 才会把原因放进 message。
+      res.end(JSON.stringify({ error: { message: "input new_sensitive (1026)", type: "unprocessable_entity_error", code: "1026" } }));
+      return;
+    }
+    res.end(okToolCallResponse("submit_basicInfo_module", {
+      reply: "ok",
+      modules: [{ module: "basicInfo", status: "accepted", value: { subtitle: "太原精华之旅", province: "山西", operationNotes: "待核查" } }],
+    }));
+  });
+  const adapter = new OpenAICompatiblePlannerAdapter({
+    apiKey: "test-minimax-key",
+    baseUrl: server.url,
+    model: "MiniMax-M3",
+    ...planningTransportOptions("minimax"),
+    // 模拟平台已学到的词，确认修复只去掉敏感字面量、保留其它证据。
+    itineraryRejectedWords: ["冈仁波齐"],
+  });
+  const output = await adapter.generateStage(basicInfoRequest());
+  assert.equal(server.captured.length, 2);
+  assert.match(output.reply, /ok/);
+  const first = String((server.captured[0]!.parsedBody.messages as any[])[0].content);
+  const second = String((server.captured[1]!.parsedBody.messages as any[])[0].content);
+  assert.doesNotMatch(first, /「主席」/);
+  assert.doesNotMatch(second, /「主席」/);
+  // 正常 prompt 已不含敏感字面量：level 1 脱敏后与 level 0 相同，直接跳到 level 2，
+  // 把整段黑名单换成中性约束，不再重复发送同一份必被拒的 prompt。
+  assert.doesNotMatch(second, /领导职务称谓/);
+  assert.match(second, /VBK 文案限制：避免绝对化宣传/);
+  // 用户/产品上下文不能被修复逻辑打散：platform 学到的词仍是数据，原样保留。
+  assert.match(String((server.captured[1]!.parsedBody.messages as any[])[1].content), /太原/);
+});

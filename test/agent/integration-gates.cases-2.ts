@@ -5,8 +5,6 @@ import { agentProductVersion, agentCompletionGate, buildAgentApproval, recoverEq
 import { assertAgentWriteAuthorized, agentApprovalScopeError, isDeterministicAutomationInFlight } from '../../src/main/agent/integration-guard.js';
 import { agentPlannerContext } from '../../src/main/agent/integration-context.js';
 import { agentPatchOperations } from '../../src/main/agent/integration-patch.js';
-import { applyResolvedItineraryHotels, persistedItineraryHotelResult } from '../../src/main/agent/integration.js';
-import { reconcileResolvedHotelCopy, recoverResolvedHotelCandidates } from '../../src/main/agent/hotel-candidate-recovery.js';
 import { agentWorkflowPatch } from '../../src/main/agent/integration-workflow.js';
 import { prepareAgentAutomation } from '../../src/main/automation/automation.main/automation.main.agent.js';
 import { applyProductPatchSafe } from '../../src/main/operations/product-patch.js';

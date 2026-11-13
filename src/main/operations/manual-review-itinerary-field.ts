@@ -1,5 +1,7 @@
 import type { ManualReviewFieldInput } from "../../shared/contracts.js";
 import { normaliseItinerarySpotKind, requiresItineraryPoi } from "../../shared/itinerary-activity-kind.js";
+import { isItinerarySpotId } from "../../shared/itinerary-spot-identity.js";
+import { recordOperatorItinerarySpotKind } from "../../shared/operator-itinerary-kinds.js";
 import { alternativeGroupKey, appendTrustedOperatorItineraryRemoval } from "../../shared/trusted-operator-itinerary-removals.js";
 import { preserveItineraryRemovals } from "../../shared/preserve-itinerary-removals.js";
 
@@ -51,6 +53,15 @@ export function applyItinerarySpotKind(product: Json, input: Extract<ManualRevie
   else { updated.poiId = null; updated.poiName = null; delete updated.images; delete updated.poiData; delete updated.poiType; delete updated.ticketType; }
   delete updated.latitude; delete updated.longitude;
   spots[input.spotIndex] = normaliseItinerarySpotKind(updated);
+  // 人工类型必须独立成凭证：`spot.kind` 会被后续生成重建，凭证不会。
+  const spotRecord = spot as Json;
+  recordOperatorItinerarySpotKind(next, {
+    day: Number((day as Json).day),
+    name: typeof spotRecord.name === "string" ? spotRecord.name.trim() : "",
+    kind: input.kind,
+    setAt: new Date().toISOString(),
+    ...(isItinerarySpotId(spotRecord.spotId) ? { spotId: spotRecord.spotId as string } : {}),
+  });
   return next;
 }
 

@@ -56,9 +56,14 @@ function setup(context: any) {
 
 test("单酒店阶段保存草稿并独立连接回读本地转换和收据，不执行或发布其他阶段", async context => {
   const f = setup(context); const untouched = structuredClone(f.segments.map(({ hotel, ...rest }) => rest));
+  // 住宿已统一为平台自动匹配：保存时旧 hotelResource/hotelTier 会被迁移清掉，
+  // 「准备只读」改为校验 prepare 不推进产品版本、不改变已保存形态。
+  const savedVersion = f.db.getProduct(f.id)!.productJsonVersion;
   const plan = f.retry.prepare(f.id);
   assert.deepEqual(plan.stays, [{ cityName: "广安", nights: 1 }]);
-  assert.equal((f.db.getProduct(f.id)!.product.operations as any).hotelResource.resourceId, 55195528, "准备确认只读");
+  assert.equal(f.db.getProduct(f.id)!.productJsonVersion, savedVersion, "准备确认只读");
+  assert.equal((f.db.getProduct(f.id)!.product.operations as any).hotelResource, undefined);
+  assert.equal((f.db.getProduct(f.id)!.product.operations as any).hotelMatchingMode, "rules");
   const receipt = await f.retry.execute(plan.token);
   assert.equal(receipt.verified, true); assert.equal(receipt.draftOnly, true);
   assert.deepEqual(f.segments[1].hotel.segmentRooms, []);

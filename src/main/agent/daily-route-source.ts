@@ -13,9 +13,30 @@ export interface DailyRouteSource {
 export function dailyRouteSources(textValue: string): DailyRouteSource[] {
   const routeText = textValue.replace(/\\[nr]/gu, "\n").replace(/(?:^|[\n\r])\s*(?:住宿与商业配置|住宿配置|商业配置|录入配置|(?:已确认的?)?住宿(?:要求|安排)|已确认的?业务要求)[:：][\s\S]*$/u, "");
   // 逐日切分收敛在 day-sections：段首天头与段尾下一行的【】都不进正文。
-  return daySections(routeText).map((section) => ({
-    day: section.day,
-    text: cleanDayConstraintText(trimPlanningControlTail(section.content)),
+  const sections = daySections(routeText);
+  if (sections.length) {
+    return sections.map((section) => ({
+      day: section.day,
+      text: cleanDayConstraintText(trimPlanningControlTail(section.content)),
+    }));
+  }
+  // 「1-西安接---住太白山唐镇」这类连字符编号路线也交给 AI 读懂，不再只靠编号正则。
+  return numberedRouteSources(routeText);
+}
+
+/**
+ * 编号路线逐日切分：行首序号 + 连接符，至少两行、序号从 1 连续，且至少一行含
+ * 路线连接符；否则不结构化。收紧这些条件是为了避免把「1-预算3000—5000」这类
+ * 普通编号需求清单当成逐日路线交给 AI。
+ */
+function numberedRouteSources(routeText: string): DailyRouteSource[] {
+  const rows = [...routeText.matchAll(/^\s*(\d{1,2})\s*[-、:：.]\s*([^\n\r]+)/gmu)];
+  if (rows.length < 2 || !rows.some((row) => /-{2,}|→|—/u.test(row[2]!))) return [];
+  const days = rows.map((row) => Number(row[1]));
+  if (days[0] !== 1 || days.some((day, index) => day !== index + 1)) return [];
+  return rows.map((row) => ({
+    day: Number(row[1]),
+    text: cleanDayConstraintText(trimPlanningControlTail(row[2]!)),
   }));
 }
 

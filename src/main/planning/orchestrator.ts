@@ -32,6 +32,7 @@ export function toPlannerError(error: unknown): PlannerError {
     case "provider_timeout":
     case "provider_rate_limit":
     case "provider_authentication":
+    case "provider_input_moderated":
     case "invalid_model_output":
     case "empty_model_output":
       return new PlannerError(code, message, details);

@@ -2,8 +2,6 @@
  * integration 共用工具 + 不依赖 tool 工厂的小函数：
  *   - JsonObject / productData / cleanText / safeJson / requirePatch / positiveInteger
  *     / absentTravelNodeResearchTask；
- *   - applyResolvedItineraryHotels：把酒店候选 + 资源来源写入 operations.hotelResource
- *     + 同步 itinerary.hotels（reconcileResolvedHotelCopy）；
  *   - selectItinerarySpot：从 product.itinerary 里按 day + name（精确或前后缀）找
  *     单个 spot，给 select_itinerary_poi 工具用；
  *   - clearUnverifiedItineraryPois：清掉未经核验的 poiId / poiName，并把 string spots
@@ -14,7 +12,6 @@
 
 import type { ProductDetail } from "../../../shared/contracts.js";
 import { isTravelNodeName } from "../../planning/itinerary-adoption.js";
-import { reconcileResolvedHotelCopy } from "../hotel-candidate-recovery.js";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -40,36 +37,6 @@ export function absentTravelNodeResearchTask(label: string, presentSpotNames: Re
   const match = label.match(/^核查\s+(.+?)\s+的\s+VBK\s+POI\s+映射$/i);
   const name = match?.[1]?.trim() ?? "";
   return Boolean(name && isTravelNodeName(name) && !presentSpotNames.has(name));
-}
-
-/**
- * 酒店检索是受控资源核验，不应只写 itinerary。把候选和资源来源一起保存，
- * 才能让后续阶段可靠地进入 hotelResource，而不是被旧的 nonPlatform 标签跳过。
- */
-export function applyResolvedItineraryHotels(
-  product: JsonObject,
-  resolved: Awaited<ReturnType<typeof import("../../infrastructure/ctrip-hotel-search.js").resolveItineraryHotelCandidates>>,
-): JsonObject {
-  const first = resolved.dailyCandidates[0]?.candidates[0];
-  if (!first) throw new Error("酒店候选为空，无法写入酒店资源。");
-  const operations = product.operations && typeof product.operations === "object" && !Array.isArray(product.operations)
-    ? product.operations as JsonObject
-    : {};
-  return {
-    ...structuredClone(product),
-    itinerary: resolved.itinerary.map((day) => reconcileResolvedHotelCopy(day as JsonObject)),
-    operations: {
-      ...operations,
-      hotelResource: {
-        source: "ctrip",
-        resourceId: first.hotelId,
-        resourceName: first.hotelName,
-        diamond: first.diamond,
-        candidates: resolved.dailyCandidates[0]!.candidates,
-        dailyCandidates: resolved.dailyCandidates,
-      },
-    },
-  };
 }
 
 export function selectItinerarySpot(product: ProductDetail, day: number, spotName: string) {

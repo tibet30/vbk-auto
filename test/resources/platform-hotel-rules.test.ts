@@ -141,3 +141,65 @@ test("已核验原路线落点为旅游区别名时按行政城市比对，不�
   assert.deepEqual(platformHotelStayGroups(product).map(({ cityName, nights }) => ({ cityName, nights })),
     [{ cityName: "汕头", nights: 1 }]);
 });
+
+test("原文明确写出的住宿城市不会被路线 POI 证据或推断改掉", () => {
+  const input: any = { basicInfo: { meetingCity: "西宁", destinationCity: "西宁", province: "青海", nights: 1,
+    userIdea: "D1：西宁 — 祁连 — 肃南" }, sales: { productForm: "freeTravel" }, operations: {},
+    itinerary: [{ day: 1, hotel: "平台酒店", hotelCity: "肃南", spots: [] }, { day: 2, hotel: "无" }], diagnostics: {} };
+  const source = originalOvernightRoute(input, { day: 1 })!;
+  input.diagnostics.routeLocations = [{ day: 1, name: "肃南", province: "甘肃", city: "张掖", district: "肃南",
+    districtId: 21323, position: source.indexOf("肃南"), sourceRoute: source,
+    routeKey: JSON.stringify([source, 1]) }];
+  const result = normalisePlatformHotelProduct(input);
+  assert.equal(result.itinerary[0]!.hotelCity, "肃南", "保存城市在原文有据时不能被推断结果改掉或清空");
+});
+
+test("逐晚钻级、民宿与距离口径只作历史字段，不进入平台自动匹配规则", () => {
+  const input: any = { basicInfo: { meetingCity: "成都", destinationCity: "成都", province: "四川", nights: 2,
+    userIdea: "D1：成都 — 都江堰（宿都江堰，要求四钻民宿，距离5公里内）\nD2：都江堰 — 青城山" },
+    sales: { productForm: "freeTravel" }, operations: {},
+    itinerary: [
+      { day: 1, hotel: "四钻民宿", hotelCity: "都江堰", hotelRequirement: { cityName: "都江堰", diamond: 4, ratingType: "homestay", maxDistanceKm: 5 } },
+      { day: 2, hotel: "当地5钻酒店", hotelCity: "成都" },
+    ] };
+  const result = normalisePlatformHotelProduct(input);
+  assert.deepEqual(result.operations.hotelRules, defaultPlatformHotelRules());
+  for (const day of result.itinerary) {
+    assert.equal(day.hotelRequirement, undefined);
+    assert.equal(day.hotelCandidates, undefined);
+    assert.equal((day as any).maxDistanceKm, undefined);
+  }
+  assert.deepEqual(result.itinerary.map((day: any) => day.hotelCity), ["都江堰", "成都"]);
+  assert.equal(normalisePlatformHotelProduct(result).itinerary[0].hotelCity, "都江堰", "重复转换不得回退到旧钻级或距离口径");
+});
+
+test("历史产品的返程日不会被迁移成住宿夜，晚数不超过 basicInfo.nights", () => {
+  const input: any = { basicInfo: { meetingCity: "西安", destinationCity: "西安", province: "陕西", days: 6, nights: 5,
+    userIdea: "1-西安接---住太白山唐镇\n2-太白县---五丈原---住太白县咀头镇\n3-太白县---留坝---住留侯\n4-留侯---华阳古镇---住华阳古镇\n5-华阳---汉中---住汉中\n6-汉中送飞机/送高铁" },
+    sales: { productForm: "privateTour" }, operations: { hotelTier: "当地5钻酒店", hotelResource: { resourceId: 1 } },
+    itinerary: [
+      { day: 1, hotel: "太白山唐镇附近住宿（待核验）", hotelCity: "眉" },
+      { day: 2, hotel: "太白县咀头镇附近住宿（待核验）", hotelCity: "太白" },
+      { day: 3, hotel: "留侯附近住宿（待核验）", hotelCity: "留坝" },
+      { day: 4, hotel: "华阳古镇附近住宿（待核验）", hotelCity: "洋" },
+      { day: 5, hotel: "汉中附近住宿（待核验）", hotelCity: "汉中" },
+      { day: 6, hotel: "本日不含返程后住宿", hotelCity: "汉中" },
+    ] };
+  const result = normalisePlatformHotelProduct(input);
+  assert.equal(result.itinerary[5].hotel, "无当日住宿安排");
+  assert.equal(result.itinerary[5].hotelCity, undefined);
+  assert.deepEqual(platformHotelStayGroups(result).reduce((sum: number, group: any) => sum + group.nights, 0), 5);
+});
+
+test("已保存城市只是当天途经点、原文宿另一地时按已核验落点纠正", () => {
+  const input: any = { basicInfo: { meetingCity: "张掖", destinationCity: "张掖", province: "甘肃", days: 2, nights: 1,
+    userIdea: "D1：张掖 — 祁连 — 肃南" }, sales: { productForm: "freeTravel" }, operations: {},
+    itinerary: [{ day: 1, hotel: "平台酒店", hotelCity: "祁连" }, { day: 2, hotel: "无" }], diagnostics: {} };
+  const source = originalOvernightRoute(input, { day: 1 })!;
+  input.diagnostics.routeLocations = [{ day: 1, name: "肃南", province: "甘肃", city: "张掖", district: "肃南",
+    districtId: 21323, position: source.indexOf("肃南"), sourceRoute: source,
+    routeKey: JSON.stringify([source, 1]) }];
+  const result = normalisePlatformHotelProduct(input);
+  assert.equal(result.itinerary[0].hotelCity, "肃南", "途经点祁连不能当成原文指定住宿地");
+  assert.deepEqual(platformHotelStayGroups(result).map(({ cityName }) => cityName), ["肃南"]);
+});

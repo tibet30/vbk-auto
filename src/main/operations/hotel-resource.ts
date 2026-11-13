@@ -1,4 +1,4 @@
-/** Stable VBK hotel-resource entry points. Ctrip daily candidates use ctrip-hotel-search. */
+/** Stable VBK hotel-resource entry points for the platform auto-match (3/4/5 diamond) rules. */
 export { hotelResourceQuery } from "./hotel-resource-resolution/query.js";
 export { searchVbkResources } from "./hotel-resource-resolution/search.js";
 export { firstHotelResource } from "./hotel-resource-resolution/match.js";

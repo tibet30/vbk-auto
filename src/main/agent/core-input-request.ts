@@ -3,7 +3,6 @@ import { AgentSnapshotManager, type TurnToken } from "./core-snapshot.js";
 import { parseQuestions } from "./core-validation.js";
 import { asksForCommercialPricing, asksForPrematureApproval, automaticPreparationAnswer } from "./preparation-question-defaults.js";
 import { automaticRepairFlowAnswer, mustKeepRepairQuestionVisible } from "./core-preparation.js";
-import { isHotelRecoveryQuestion } from "./core-preparation-hotel-input.js";
 import { answerProductQuestionsWithAi, canAutomaticallyAnswerProductQuestion, isAutomaticProductInputRun } from "./automatic-product-input.js";
 import { resolveSelectedAnswers } from "./selected-input-answers.js";
 import type { AgentCoreDependencies, AgentToolCall } from "./types.js";
@@ -21,7 +20,7 @@ function splitDefaultQuestions(
   const visible: AgentQuestion[] = [];
   const defaultAnswers: Record<string, string | string[]> = {};
   for (const question of questions) {
-    const answer = isHotelRecoveryQuestion(question) || mustKeepRepairQuestionVisible(deps, snapshot, question)
+    const answer = mustKeepRepairQuestionVisible(deps, snapshot, question)
       ? undefined
       : defaultAnswerForQuestion(question) ?? automaticRepairFlowAnswer(deps, snapshot, question);
     if (answer === undefined) visible.push(question);
@@ -31,7 +30,6 @@ function splitDefaultQuestions(
 }
 
 function normaliseQuestion(question: AgentQuestion): AgentQuestion {
-  if (isHotelRecoveryQuestion(question)) return question;
   const label = question.label.replace(/\s+/g, "");
   if (question.kind === "single" && /酒店/.test(label) && /候选|备选|选择|资源/.test(label)) {
     return { ...question, kind: "multiple" };

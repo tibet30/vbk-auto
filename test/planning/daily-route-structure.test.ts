@@ -8,11 +8,15 @@ import {
   needsDailyRouteStructure,
   routeFingerprint,
   storedDailyRouteOrder,
+  structuredAlternativeGroups,
+  storedRouteNodeNames,
+  structuredOvernightName,
   structureDailyRoute,
   type DailyRouteStructure,
   type DailyRouteStructureGenerator,
 } from "../../src/main/planning/daily-route-structure.js";
 import { mergedDailyRouteSources } from "../../src/main/agent/daily-route-source.js";
+import { explicitAlternativeGroups } from "../../src/main/planning/itinerary-input-contract/alternative.js";
 import type { ProductDetail } from "../../src/shared/contracts.js";
 
 const IDEA = "D1：长沙 → 韶山，约1小时车程 → 滴水洞，晚上住在韶山\nD2：韶山，车行1.5h → 岳麓山：爱晚亭、麓山寺";
@@ -177,4 +181,136 @@ test("AI 标为 place 的城市只是路程节点，不进锁定景点；整天�
     version: 1, fingerprint: routeFingerprint(mergedDailyRouteSources(returnIdea)), days: returnDays as DailyRouteStructure["days"],
   });
   assert.deepEqual(extractLockedConstraints(returning, []).itineraryOrder.map((row) => row.day), [1, 2]);
+});
+
+const STAY_IDEA = "D1：长沙 → 韶山（毛泽东故居）当晚在韶山过夜\nD2：韶山 → 长沙 → 送长沙南站";
+const STAY_DAYS = [
+  { day: 1, nodes: [{ name: "长沙", kind: "place" }, { name: "韶山", kind: "place" }, { name: "毛泽东故居", kind: "attraction" }], overnight: "韶山" },
+  { day: 2, nodes: [{ name: "韶山", kind: "place" }, { name: "长沙", kind: "place" }, { name: "长沙南站", kind: "place" }] },
+];
+
+test("当晚住宿地由 AI 从原文读出，本地只校验逐字出自原文与不是动作短语", async () => {
+  const structure = await structureDailyRoute({ userIdea: STAY_IDEA, generate: async () => STAY_DAYS });
+  assert.ok(structure);
+  assert.equal(structure.version, 2);
+  assert.equal(structure.days[0]!.overnight?.name, "韶山");
+  assert.equal(structure.days[1]!.overnight, undefined);
+  const sources = mergedDailyRouteSources(STAY_IDEA);
+  const fabricated = [{ day: 1, nodes: [], overnight: { name: "张家界" } }, { day: 2, nodes: [] }];
+  assert.match(dailyRouteStructureProblem(sources, fabricated as DailyRouteStructure["days"]) ?? "", /住宿地「张家界」没有逐字出现/);
+  const action = [{ day: 1, nodes: [], overnight: { name: "宿韶山" } }, { day: 2, nodes: [] }];
+  assert.match(dailyRouteStructureProblem(sources, action as DailyRouteStructure["days"]) ?? "", /住宿动作短语/);
+});
+
+test("下游读取住宿地以 AI 结构为准，原文改动后立即失效", () => {
+  const product = draft(STAY_IDEA);
+  product.product.basicInfo!.nights = 1;
+  const structure: DailyRouteStructure = {
+    version: 2, fingerprint: routeFingerprint(mergedDailyRouteSources(STAY_IDEA)),
+    days: [{ day: 1, nodes: [], overnight: { name: "韶山" } }],
+  };
+  const withStored = withStructure(product, structure);
+  assert.equal(structuredOvernightName(withStored.product, 1), "韶山");
+  assert.equal(structuredOvernightName(withStored.product, 2), undefined);
+  withStored.product.basicInfo!.userIdea = `${STAY_IDEA}\nD3：自由活动`;
+  assert.equal(structuredOvernightName(withStored.product, 1), undefined, "原文变化后旧结构里的住宿地不得继续使用");
+  const legacy: DailyRouteStructure = { version: 1, fingerprint: structure.fingerprint, days: [{ day: 1, nodes: [] }] };
+  assert.equal(structuredOvernightName({ ...withStored.product, diagnostics: { dailyRouteStructure: legacy } }, 1), undefined);
+});
+
+test("v1 结构在含住宿夜的产品上会重新结构化一次补齐住宿地，之后不再触发", async () => {
+  const product = draft(IDEA);
+  product.product.basicInfo!.nights = 1;
+  const legacy: DailyRouteStructure = {
+    version: 1, fingerprint: routeFingerprint(mergedDailyRouteSources(IDEA)), days: AI_DAYS as DailyRouteStructure["days"],
+  };
+  assert.equal(needsDailyRouteStructure(withStructure(product, legacy).product, IDEA), true);
+  const fresh = await structureDailyRoute({ userIdea: IDEA, generate: async () => AI_DAYS });
+  assert.equal(needsDailyRouteStructure(withStructure(product, fresh!).product, IDEA), false);
+  const noNights = draft(IDEA); noNights.product.basicInfo!.nights = 0;
+  assert.equal(needsDailyRouteStructure(withStructure(noNights, legacy).product, IDEA), false, "没有住宿夜不需要重读住宿地");
+});
+
+test("行程投影的入住城市优先取 AI 读出的住宿地，正则认不出时也不丢", async () => {
+  const structure = await structureDailyRoute({ userIdea: STAY_IDEA, generate: async () => STAY_DAYS });
+  const product = withStructure(draft(STAY_IDEA), structure!);
+  product.product.basicInfo!.nights = 1;
+  const itinerary = projectCompleteItinerary(product)?.modules[0]?.value as Array<Record<string, any>>;
+  assert.ok(Array.isArray(itinerary), "完整路线投影应产出行程");
+  assert.equal(itinerary[0]!.hotelCity, "韶山");
+});
+
+const OR_IDEA = "D1：长沙 → 韶山（毛泽东故居 或 滴水洞，二选一）\nD2：韶山 → 长沙";
+const OR_DAYS = [
+  { day: 1, nodes: [
+    { name: "长沙", kind: "place" }, { name: "韶山", kind: "place" },
+    { name: "毛泽东故居", kind: "attraction", relation: "or" },
+    { name: "滴水洞", kind: "attraction", relation: "or" }] },
+  { day: 2, nodes: [{ name: "韶山", kind: "place" }, { name: "长沙", kind: "place" }] },
+];
+
+test("AI 读出二选一并标 relation=or，本地校验相邻与原文选择标记", async () => {
+  const structure = await structureDailyRoute({ userIdea: OR_IDEA, generate: async () => OR_DAYS });
+  assert.ok(structure);
+  assert.deepEqual(structuredAlternativeGroups({ basicInfo: { userIdea: OR_IDEA }, diagnostics: { dailyRouteStructure: structure } }),
+    [{ day: 1, names: ["毛泽东故居", "滴水洞"] }]);
+  const plainIdea = "D1：长沙 → 韶山（毛泽东故居、滴水洞）\nD2：韶山 → 长沙";
+  const plainSources = mergedDailyRouteSources(plainIdea);
+  assert.match(dailyRouteStructureProblem(plainSources, OR_DAYS as DailyRouteStructure["days"]) ?? "", /选择标记/);
+  const lonely = [{ day: 1, nodes: [{ name: "韶山", kind: "place" }, { name: "毛泽东故居", kind: "attraction", relation: "or" }] },
+    { day: 2, nodes: [] }];
+  assert.match(dailyRouteStructureProblem(mergedDailyRouteSources(OR_IDEA), lonely as DailyRouteStructure["days"]) ?? "", /至少两项/);
+});
+
+test("文本规则认不出的二选一，由 AI 结构补上并进入锁定约束", async () => {
+  const idea = "D1：长沙 → 韶山，毛泽东故居、滴水洞 任选其一\nD2：韶山 → 长沙";
+  const days = [
+    { day: 1, nodes: [{ name: "长沙", kind: "place" }, { name: "韶山", kind: "place" },
+      { name: "毛泽东故居", kind: "attraction", relation: "or" }, { name: "滴水洞", kind: "attraction", relation: "or" }] },
+    { day: 2, nodes: [{ name: "韶山", kind: "place" }, { name: "长沙", kind: "place" }] },
+  ];
+  const structure = await structureDailyRoute({ userIdea: idea, generate: async () => days });
+  const product = withStructure(draft(idea), structure!);
+  assert.deepEqual(explicitAlternativeGroups(product), [{ day: 1, names: ["毛泽东故居", "滴水洞"] }]);
+  const regexOnly = withStructure(draft(idea), { ...structure!, days: structure!.days.map((day) => ({
+    ...day, nodes: day.nodes.map(({ relation: _relation, ...node }) => node) })) });
+  assert.deepEqual(explicitAlternativeGroups(regexOnly), [], "没有 AI 标注时文本规则认不出这种写法");
+});
+
+test("远处的「或」不算候选的二选一标记，不能把几个景点误锁成一组", async () => {
+  const idea = "D1：长沙 — 韶山 — 滴水洞（含接送或自理）\nD2：韶山 — 长沙";
+  const days = [
+    { day: 1, nodes: [{ name: "长沙", kind: "place" }, { name: "韶山", kind: "attraction", relation: "or" },
+      { name: "滴水洞", kind: "attraction", relation: "or" }] },
+    { day: 2, nodes: [{ name: "韶山", kind: "place" }, { name: "长沙", kind: "place" }] },
+  ];
+  const structure = await structureDailyRoute({ userIdea: idea, generate: async () => days });
+  assert.equal(structure, undefined, "编造的二选一组会让整份结构被拒并重试一次");
+});
+
+test("结构里的收尾城市按原语义排除，不变成当天景点", async () => {
+  const idea = "D1：祁连 — 巴尔斯雪山 - 七彩丹霞 | 张掖结束行程\nD2：张掖 — 兰州";
+  const days = [
+    { day: 1, nodes: [{ name: "祁连", kind: "place" }, { name: "巴尔斯雪山", kind: "attraction" },
+      { name: "七彩丹霞", kind: "attraction" }, { name: "张掖", kind: "place" }] },
+    { day: 2, nodes: [{ name: "张掖", kind: "place" }, { name: "兰州", kind: "place" }] },
+  ];
+  const structure = await structureDailyRoute({ userIdea: idea, generate: async () => days });
+  const names = storedRouteNodeNames({ basicInfo: { userIdea: idea }, diagnostics: { dailyRouteStructure: structure } });
+  assert.deepEqual(names.get(1), ["祁连", "巴尔斯雪山", "七彩丹霞"], "收尾城市张掖不应成为当天景点");
+  assert.deepEqual(names.get(2), ["张掖", "兰州"]);
+});
+
+test("连字符编号路线也进入 AI 结构化，住宿地与节点仍逐字校验", async () => {
+  const idea = "1-西安接---住太白山唐镇---泡温泉;\n2-五丈原---黄柏塬---太白县咀头镇住宿;\n3-太白县---张良庙---留侯住宿";
+  const sources = mergedDailyRouteSources(idea);
+  assert.deepEqual(sources.map(source => source.day), [1, 2, 3]);
+  const structure = await structureDailyRoute({ userIdea: idea, generate: async () => [
+    { day: 1, nodes: [], overnight: "太白山唐镇" },
+    { day: 2, nodes: [{ name: "五丈原", kind: "attraction" }, { name: "黄柏塬", kind: "attraction" }], overnight: "太白县咀头镇" },
+    { day: 3, nodes: [{ name: "张良庙", kind: "attraction" }], overnight: "留侯" },
+  ] });
+  assert.equal(structure?.version, 2);
+  assert.deepEqual(structure?.days.map(day => day.overnight?.name), ["太白山唐镇", "太白县咀头镇", "留侯"]);
+  assert.deepEqual(structure?.days.map(day => day.nodes.map(node => node.name)), [[], ["五丈原", "黄柏塬"], ["张良庙"]]);
 });

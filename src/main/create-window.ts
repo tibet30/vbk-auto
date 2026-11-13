@@ -1,5 +1,6 @@
 import path from "node:path";
 import { BrowserWindow } from "electron";
+import { isModelInputModerationMessage } from "../shared/ai-input-moderation.js";
 import { logWarn } from "../shared/log-timestamp.js";
 import { APP_NAME } from "../shared/brand.js";
 import type { ProductDetail, Settings } from "../shared/contracts.js";
@@ -28,6 +29,18 @@ interface CreateMainWindowArgs {
 }
 
 const devRendererUrl = process.env.VBK_RENDERER_URL?.trim() || "http://127.0.0.1:5173";
+
+/**
+ * 模型侧输入审核拒绝时给出可执行文案；其它失败原样透传。
+ *
+ * 这类 422 与网络/鉴权无关，原样重试同一份 prompt 必然再次失败，
+ * 所以必须在暂停原因里说明「改文案」而不是「检查连接」。
+ */
+function actionableAiFailure(error: unknown): unknown {
+  if (!isModelInputModerationMessage(error)) return error;
+  return new Error("AI 内容审核拒绝了本次请求的输入文本（含平台敏感词清单），已自动尝试规避措辞仍未通过；请更改文案、去掉敏感表述后再继续。");
+}
+
 function diagnosticUrl(value: string): string {
   try {
     const url = new URL(value);
@@ -138,11 +151,19 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
     },
     async (request) => {
       args.getSettings();
-      return (await args.aiService()).rewritePresentationCopy(request);
+      try {
+        return await (await args.aiService()).rewritePresentationCopy(request);
+      } catch (error) {
+        throw actionableAiFailure(error);
+      }
     },
     async (request) => {
       args.getSettings();
-      return (await args.aiService()).rewriteItineraryCopy(request);
+      try {
+        return await (await args.aiService()).rewriteItineraryCopy(request);
+      } catch (error) {
+        throw actionableAiFailure(error);
+      }
     },
   );
   const services = { window, browser, automation };

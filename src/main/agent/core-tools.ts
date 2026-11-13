@@ -1,4 +1,5 @@
 import { failedAgentToolResult } from "../../shared/agent-tool-outcomes.js";
+import { isInputModerationFailure } from "../ai/prompt-moderation-repair.js";
 import { clampRetryAfterSeconds, parseRetryAfterSeconds } from "../../shared/retry-after.js";
 import { trackProductExecution, waitWithoutExecutionTime } from "../operations/product-execution-clock.js";
 import { AgentSnapshotManager, type TurnToken } from "./core-snapshot.js";
@@ -7,7 +8,6 @@ import { isCacheableReadQuery, readQueryCacheKey, ReadQueryCache } from "./read-
 import { excludedItineraryCopyConflicts } from "../planning/itinerary-alternative-consistency.js";
 import type { AgentCoreDependencies, AgentTool, AgentToolCall } from "./types.js";
 import { handleAgentInputRequest } from "./core-input-request.js";
-import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 import { classifyPlatformFailure } from "../application/platform-operation-service.js";
 import { isVbkLoginExpiredMessage, withVbkLoginHint } from "../infrastructure/vbk-login-error.js";
 import { externalAgentActionsBlocked, pauseSafeStartupExternalAction, SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-guard.js";
@@ -174,17 +174,14 @@ export class AgentToolRunner {
           `任务已暂停：${message}\n请重新登录 VBK 账号后点「继续」，从当前进度接续。`);
       } else if (protocolBlocked && snapshot.run?.id === token.runId) {
         this.snapshots.pause(snapshot, `车辆资源查询协议异常，已暂停；请修复接口适配后继续。最近原因：${message}`);
+      } else if (isInputModerationFailure(error) && snapshot.run?.id === token.runId) {
+        // 模型侧输入审核拒绝与网络、参数无关：同一份 prompt 再试一次必定同样被拒，
+        // 不能落进「连续失败两次」的通用兜底里，否则暂停原因不指向任何可执行处置。
+        this.snapshots.pause(snapshot,
+          `任务已暂停：模型内容审核拒绝了本次请求的输入文本，自动规避措辞后仍未通过。`
+          + `请精简或更改文案里的敏感表述后点「继续」。最近原因：${message}`);
       } else if (!isDeterministicPreparationCall(snapshot, call)
         && this.snapshots.failures(snapshot, call, message) >= 2 && snapshot.run?.id === token.runId) {
-        const product = call.name === "resolve_itinerary_hotels" ? this.deps.preparationProduct?.(id) : undefined;
-        const questions = product ? hotelAvailabilityQuestions(product, message) : [];
-        if (questions.length && !snapshot.uncertainWrite) {
-          const inputCall = { id: this.id(), name: "ask_user", arguments: { questions } };
-          this.snapshots.event(snapshot, "tool_call", inputCall.name, { toolCallId: inputCall.id,
-            name: inputCall.name, arguments: inputCall.arguments, hotelAvailabilityInput: true }, token.runId);
-          this.snapshots.save(snapshot);
-          return handleAgentInputRequest(this.deps, this.snapshots, this.now, this.id, id, inputCall, token);
-        }
         this.snapshots.pause(snapshot, `相同工具和参数连续失败两次，已暂停。最近原因：${message}`);
       }
       this.snapshots.save(snapshot);

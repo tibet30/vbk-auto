@@ -190,6 +190,10 @@ function splitSpots(value: string): string[] {
     .replace(/(?:^|[\n\r])\s*[0-9一二三四五六七八九十]+\s*月\s*[0-9一二三四五六七八九十]+\s*号\s*$/gu, " ")
     .replace(/包车|专车|拼车|当地[345四五三]钻.*$|钻酒店.*$/g, " ")
     .replace(/(?<![\p{Script=Han}\d:：])(?:火车站接|接火车站?|送火车站?|接站|送站)/gu, " ")
+    // 逐日路线里的 `|` / `｜` 是注记分隔符（「| 宿祁连」「| 张掖结束行程」），
+    // 不是景点名的一部分；必须先换成逗号再做住宿剔除，否则「宿祁连|张掖结束行程」
+    // 会被宿字正则一路吞掉，连带丢掉后面的地名。
+    .replace(/[|｜]/gu, "，")
     // 住宿不是景点。「入住/住宿/住XX」必须整体剔除：原实现从「住」开始删，
     // 会把「入住市区酒店」削成残字「入」，且不把「→」和空白当边界，会一路
     // 吞到行尾。「宿雪乡」同类，但保留宿州/宿迁/宿松这些地名。
@@ -207,7 +211,7 @@ function splitSpots(value: string): string[] {
       .replace(/(?:海拔|柏油路|公路里程)[:：]?\s*\d+(?:\.\d+)?\s*(?:m|米|km|公里)?[\s\S]*$/iu, "")
       .replace(/[。；;]+$/u, "")
       .trim())
-    .filter(looksLikePlaceName);
+    .filter((item) => looksLikePlaceName(item) && !/(?:结束行程|散团)$/u.test(item));
 }
 
 function looksLikePlaceName(item: string): boolean {

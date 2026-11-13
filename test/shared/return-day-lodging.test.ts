@@ -2,12 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normaliseReturnDayLodging, hasItineraryHotelStay } from '../../src/shared/itinerary-hotel.js';
 import { normaliseProductDraft } from '../../src/main/data/product-normalize.js';
-import { reconcileHotelStays } from '../../src/shared/reconcile-hotel-stays.js';
 
 const basic = { days: 6, nights: 5 };
 const day = { day: 6, title: '汉中送飞机/送高铁', description: '按返程时间送站', hotel: '敬请自理', meals: '敬请自理', spots: [] };
 test('6天5晚送站日的自理占位不会再要求第六晚酒店，餐食保持自理', () => {
-  for (const normalise of [normaliseProductDraft, reconcileHotelStays]) {
+  for (const normalise of [normaliseProductDraft]) {
     const p = normalise({ basicInfo: basic, itinerary: [day] });
     const last = (p.itinerary as any[])[0];
     assert.equal(last.hotel, '无当日住宿安排');

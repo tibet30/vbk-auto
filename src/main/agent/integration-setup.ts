@@ -23,7 +23,7 @@ import { SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-
 import { OpenAIAgentModel } from "./openai-model.js";
 import { createAgentBusinessTools, agentProductVersion } from "./integration.js";
 import { agentPlannerContextForRun, agentTaskContext } from "./integration-context.js";
-import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval, requiredAgentPhases } from "./integration-gates.js";
+import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval } from "./integration-gates.js";
 import { requestsFreshAutomationRun, requestsLegacyShellReplacement } from "./core-workflow-replay.js";
 import { preparationApprovalBlockReason } from "../planning/preparation-completion.js";
 import { inspectManualCoverAsset } from "../automation/manual-cover-asset.js";
@@ -33,7 +33,6 @@ import { backfillEnteredItineraryDays } from "./integration-setup/entered-days-b
 import { recordAgentUsage } from "./integration-usage.js";
 import { estimateAiUsageCostCny } from "../../shared/ai-usage-cost.js";
 import { refreshSatisfiedResearchTasks } from "../operations/research-refresh.js";
-import { recoverResolvedHotelCandidates } from "./hotel-candidate-recovery.js";
 import { resolvedProductQuestions } from "./pending-question-reconciliation.js";
 import { needsTrafficLineBackfill } from "../automation/traffic-line-backfill.js";
 import { isPreparationRun } from "./preparation-run.js";
@@ -166,24 +165,8 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
     prepareUserInstruction: (localProductId, content, selection) =>
       prepareUserInstruction(context, localProductId, content, selection),
     recoverApproval: async (localProductId, snapshot) => {
-      let product = db.getProduct(localProductId);
+      const product = db.getProduct(localProductId);
       if (!product) return undefined;
-      const restored = recoverResolvedHotelCandidates(product.product as Record<string, unknown>, snapshot);
-      if (restored) {
-        product = context.productMutations.commands.mergeChanges(localProductId, product, restored, 'resource', { status: product.status });
-        const approval = approvalForRun(snapshot);
-        // Restoring candidates may change required phases (e.g. hotelResource).
-        // Refresh fingerprint/intent only; never silently expand write authority.
-        if (approval && snapshot.run && approval.productVersion === agentProductVersion(product)) {
-          const required = requiredAgentPhases(product).map((phase) => `vbk.write_phase:${phase}`);
-          if (required.some((scope) => !approval.scope.includes(scope))) return undefined;
-          return {
-            ...approval,
-            productVersion: agentProductVersion(product),
-            intentVersion: snapshot.run.intentVersion,
-          };
-        }
-      }
       return recoverEquivalentApproval(product, snapshot);
     },
     prepareWorkflowReplay: async (localProductId, content) => {

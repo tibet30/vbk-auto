@@ -25,6 +25,7 @@ import { poiResearchTaskNames } from "../../../shared/poi-research-tasks.js";
 import { experienceNameKey, isIndependentItineraryExperience } from '../../../shared/independent-itinerary-experience.js';
 import { isItineraryActivityPhrase } from '../../../shared/itinerary-activity-phrase.js';
 import { constraintUserIdea } from "../../../shared/product-idea-optimization.js";
+import { findOperatorItinerarySpotKind } from "../../../shared/operator-itinerary-kinds.js";
 
 export const DAY_TOKEN: Record<string, number> = {
   "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10,
@@ -150,13 +151,32 @@ export function isSupportingLockedSpot(product: ProductDetail, dayNumber: number
  * are required; either one alone is insufficient. */
 export function hasTrustedOperatorNonPoiClassification(product: ProductDetail, dayNumber: number, name: string): boolean {
   const source = (asDayList(product.product.itinerary) ?? []).find(day => Number(day.day) === dayNumber);
-  const classified = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
-    .some(spot => spot && samePlace(spotName(spot), name)
-      && (spot.kind === "free" || spot.kind === "other") && !hasCompletePoi(spot));
+  const spot = (Array.isArray(source?.spots) ? source.spots : []).map(asRecord)
+    .find(item => item && samePlace(spotName(item), name));
+  // 已经绑定完整 POI 的条目是资源核验后的事实，任何分类凭证都不能再把它当非 POI。
+  if (spot && hasCompletePoi(spot)) return false;
+  // 人工类型凭证优先：`spot.kind` 会被生成重建，凭证不会；凭证写成 attraction
+  // 就是运营显式改回景点，此时不能再按历史 free/other 豁免。
+  const recorded = findOperatorItinerarySpotKind(product.product as Record<string, unknown>, dayNumber, name);
+  if (recorded) return recorded.kind !== "attraction";
+  // 历史数据：核查任务的 no-poi 证据。任务可能已被重新排队（state=researching），
+  // 只认证据本身，否则「生成把类型改回景点 → 任务重开 → 证据失效」会互相锁死。
+  if (hasNoPoiEvidence(product, name)) return true;
+  const classified = Boolean(spot) && (spot!.kind === "free" || spot!.kind === "other") && !hasCompletePoi(spot!);
   if (!classified) return false;
   return product.researchTasks.some(task => task.state === "confirmed"
     && poiResearchTaskNames(task.label, task.type).some(taskName => samePlace(taskName, name))
     && task.evidence?.some(item => item.accepted && item.title.includes("[itinerary-kind:no-poi]")));
+}
+
+/** 核查任务里带 no-poi 标记的已接受证据：运营把该条目设为自由活动/其他的历史凭证。 */
+function hasNoPoiEvidence(product: ProductDetail, name: string): boolean {
+  return (product.researchTasks ?? []).some(task => {
+    if (task.type !== "vbk" && task.type !== "web") return false;
+    const accepted = (task.evidence ?? []).some(item => item?.accepted === true
+      && typeof item.title === "string" && item.title.includes("[itinerary-kind:no-poi]"));
+    return accepted && poiResearchTaskNames(task.label, task.type).some(taskName => samePlace(taskName, name));
+  });
 }
 
 export function isDeletableAdministrativeLocation(product: ProductDetail, value: string, day?: number): boolean {

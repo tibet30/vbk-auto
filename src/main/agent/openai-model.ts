@@ -1,4 +1,5 @@
 import { stripAgentReasoning } from "../../shared/agent-visible-text.js";
+import { attemptWithPromptRepair, sanitisePromptMessages } from "../ai/prompt-moderation-repair.js";
 import OpenAI from "openai";
 import type { AgentModel, AgentModelInput, AgentToolCall } from "./types.js";
 
@@ -49,23 +50,29 @@ export class OpenAIAgentModel implements AgentModel {
   }
   async complete(input: AgentModelInput) {
     const deadline = AbortSignal.timeout(this.config.timeoutMs ?? 90_000);
-    const stream = await this.client.chat.completions.create({
-      model: this.config.model,
-      messages: input.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-        ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
-        ...(message.toolCalls ? { tool_calls: message.toolCalls.map((call) => ({
-          id: call.id,
-          type: "function" as const,
-          function: { name: call.name, arguments: call.rawArguments ?? JSON.stringify(call.arguments) },
-        })) } : {}),
-      })) as OpenAI.Chat.ChatCompletionMessageParam[],
-      tools: input.tools.map((tool) => ({ type: "function" as const, function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
-      stream: true,
-      stream_options: { include_usage: true },
-      ...(this.config.extraParams ?? {}),
-    }, { signal: deadline });
+    const messages = input.messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+      ...(message.toolCalls ? { tool_calls: message.toolCalls.map((call) => ({
+        id: call.id,
+        type: "function" as const,
+        function: { name: call.name, arguments: call.rawArguments ?? JSON.stringify(call.arguments) },
+      })) } : {}),
+    }));
+    // 只有模型输入审核拒绝才自我修复 prompt；其它错误原样抛出，交给 Agent 的失败处置。
+    const stream = await attemptWithPromptRepair({
+      label: "agent.reply",
+      buildMessages: (level) => sanitisePromptMessages(messages, level),
+      call: (repaired) => this.client.chat.completions.create({
+        model: this.config.model,
+        messages: repaired as OpenAI.Chat.ChatCompletionMessageParam[],
+        tools: input.tools.map((tool) => ({ type: "function" as const, function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
+        stream: true,
+        stream_options: { include_usage: true },
+        ...(this.config.extraParams ?? {}),
+      }, { signal: deadline }),
+    });
 
     let rawContent = "";
     let visibleContent = "";

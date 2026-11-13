@@ -10,6 +10,8 @@ export class PlannerError extends Error {
       | "provider_timeout"
       | "provider_rate_limit"
       | "provider_authentication"
+      /** 模型侧输入审核拒绝（MiniMax 422 / status_code 1026 input new_sensitive）。 */
+      | "provider_input_moderated"
       | "invalid_model_output"
       | "empty_model_output"
       | "missing_module"

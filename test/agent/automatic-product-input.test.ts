@@ -32,16 +32,6 @@ test("普通文本资料由 AI 回答，不能进入等待输入或暂停", asyn
   assert.deepEqual(f.get().events.find(e => e.type === "tool_result")?.data?.answers, { style: "海岛与古城体验" });
 });
 
-test("酒店恢复 AI 选择真实选项并持久化逐日选择供后续工具读取", async () => {
-  const f = fixture('{"hotel1":"lower_hotel"}');
-  await f.ask([{ id: "hotel1", label: "第1天住宿未取得符合要求的酒店候选", kind: "single", required: true, options: [
-    { id: "keep", label: "保留当地5钻酒店" }, { id: "lower_hotel", label: "接受当地4钻酒店，保留原定住宿地点" },
-  ] }]);
-  assert.equal(f.get().pendingInput, undefined);
-  assert.equal(f.get().run?.status, "running");
-  assert.match(hotelAnswerInstruction(f.get().events), /接受当地4钻酒店/);
-});
-
 test("AI 输出无效选项时交回模型修复，不把普通问题推给运营", async () => {
   const f = fixture('{"choice":"invented"}');
   await f.ask([{ id: "choice", label: "游览节奏", kind: "single", required: true, options: [{ id: "slow", label: "轻松游览" }] }]);
@@ -109,13 +99,3 @@ test("酒店查询错误提到验证码时，住宿策略仍由 AI 处理", asyn
   assert.equal(f.get().pendingInput, undefined);
 });
 
-test("混合住宿和登录请求只显示真实访问条件，并保存 AI 住宿选择", async () => {
-  const f = fixture('{"hotel1":"lower_hotel"}');
-  await f.ask([
-    { id: "hotel1", label: "第1天住宿未取得符合要求的酒店候选", kind: "single", required: true,
-      options: [{ id: "lower_hotel", label: "接受当地4钻酒店" }] },
-    { id: "login", label: "登录验证码", kind: "text", required: true },
-  ]);
-  assert.deepEqual(f.get().pendingInput?.questions.map(question => question.id), ["login"]);
-  assert.match(hotelAnswerInstruction(f.get().events), /接受当地4钻酒店/);
-});

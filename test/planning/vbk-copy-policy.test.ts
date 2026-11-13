@@ -6,11 +6,12 @@ import {
   buildVbkCopyPolicyPrompt,
   findAllVbkCopyBadCases,
   findVbkCopyBadCase,
+  redactPromptUnsafeCopyTerms,
   repairVbkCopyPolicyValue,
   sanitiseUserIdeaForAi,
 } from "../../src/main/planning/vbk-copy-policy.js";
 import { systemPrompt as legacySystemPrompt } from "../../src/main/minimax/minimax-constants.js";
-import { composePlanningSystemPrompt } from "../../src/main/planning/adapters/planning-prompt.js";
+import { composePlanningSystemPrompt, composePlanningUserMessage } from "../../src/main/planning/adapters/planning-prompt.js";
 
 test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   const prompt = buildVbkCopyPolicyPrompt();
@@ -18,7 +19,11 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   assert.match(prompt, /开班/);
   assert.match(prompt, /首次/);
   assert.match(prompt, /首选/);
-  assert.match(prompt, /主席/);
+  // 政治人物/职务类词只保留在本地门禁，送模型的措辞换成类别（否则 provider 输入审核会 422）。
+  assert.match(prompt, /领导职务称谓/);
+  assert.match(prompt, /政治人物姓名/);
+  assert.doesNotMatch(prompt, /主席/);
+  assert.doesNotMatch(prompt, /毛泽东/);
   assert.match(prompt, /朝圣/);
   assert.match(prompt, /贵族/);
   assert.match(prompt, /第一（宣传排名用语）/);
@@ -35,7 +40,11 @@ test("VBK bad case 同时进入 AI 提示词与本地输出门禁", () => {
   assert.match(planningPrompt, /只有当前结构化产品上下文明示了已核实的免费权益/);
   assert.match(planningPrompt, /禁止自行编造保险、礼品、门票、接送或其他赠送权益/);
   for (const badCase of VBK_COPY_BAD_CASES) {
-    assert.ok(planningPrompt.includes(badCase.term), `真实规划提示漏掉黑名单词：${badCase.term}`);
+    const label = "aiTerm" in badCase ? badCase.aiTerm : badCase.term;
+    assert.ok(planningPrompt.includes(label), `真实规划提示漏掉黑名单词：${label}`);
+    if ("aiTerm" in badCase) {
+      assert.ok(!planningPrompt.includes(badCase.term), `真实规划提示仍带敏感字面量：${badCase.term}`);
+    }
   }
 
   const hit = findVbkCopyBadCase({ operationNotes: "本产品首发日期待定" });
@@ -226,4 +235,44 @@ test("文案修复后仍有 schema 问题时不得写入", async () => {
   assert.equal(writes, 0);
   assert.equal(result.accepted.length, 0);
   assert.match(result.rejected[0]?.reason ?? "", /recommendations.*>=3 items/);
+});
+
+test("政治人物/职务类词只用于本地门禁，送模型措辞换成类别以免 422", () => {
+  // 本地门禁仍按真实词命中：官方 POI 名放行、自由文案拦截。
+  assert.equal(findVbkCopyBadCase("参观主席旧居")?.term, "主席");
+  assert.equal(findVbkCopyBadCase("瞻仰毛泽东青年艺术雕塑", "value.itinerary[0].description")?.term, "毛泽东");
+  // 送模型的规则里不出现真实字面量，但保留可执行的改写方向。
+  const prompt = buildVbkCopyPolicyPrompt();
+  for (const term of ["主席", "毛泽东"]) assert.ok(!prompt.includes(term), `提示词仍含敏感字面量：${term}`);
+  assert.match(prompt, /领导职务称谓.*历史人物/);
+  assert.match(prompt, /政治人物姓名.*近现代文化地标/);
+  // 回灌模型的短文本同样要清洗，真实词只在本地错误文案里保留。
+  assert.equal(redactPromptUnsafeCopyTerms("文案黑名单：命中「主席」，请改写为「重要人物」"),
+    "文案黑名单：命中「领导职务称谓」，请改写为「重要人物」");
+  assert.equal(redactPromptUnsafeCopyTerms("命中「毛泽东」"), "命中「政治人物姓名」");
+  assert.equal(redactPromptUnsafeCopyTerms("普通文案"), "普通文案");
+});
+
+test("上一轮失败原因回灌模型前清洗敏感字面量，产品正文与 POI 名称不动", () => {
+  const request = {
+    stage: "basicInfo",
+    context: {
+      skeleton: { destination: "西宁", days: 4, nights: 3, productForm: "freeTravel", productType: "domesticShort", supplierProductCode: "" },
+      currentProduct: {
+        basicInfo: { destination: "西宁", userIdea: "参观主席旧居", days: 4, nights: 3 },
+        itinerary: [{ day: 1, spots: [{ name: "毛泽东青年艺术雕塑", poiName: "毛泽东青年艺术雕塑" }] }],
+      },
+      acceptedModules: [],
+      existingResearchTasks: [],
+      history: [],
+      transport: { providerLabel: "minimax", model: "MiniMax-M3" },
+    },
+    previousError: { stage: "basicInfo", attempt: 1, code: "missing_module", message: "文案黑名单：命中「主席」" },
+  } as unknown as Parameters<typeof composePlanningUserMessage>[0];
+  const message = composePlanningUserMessage(request);
+  assert.match(message, /上一轮失败原因：文案黑名单：命中「领导职务称谓」/);
+  assert.ok(!message.includes("命中「主席」"), "失败原因仍把真实敏感词回灌给模型");
+  // 用户原文与官方 POI 名称是需求/实体数据，保持原样。
+  assert.match(message, /参观主席旧居/);
+  assert.match(message, /毛泽东青年艺术雕塑/);
 });

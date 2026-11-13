@@ -16,6 +16,7 @@ import OpenAI, {
   RateLimitError,
 } from "openai";
 import { PlannerError } from "../../../shared/contracts-planning.js";
+import { isModelInputModerationMessage } from "../../../shared/ai-input-moderation.js";
 
 /**
  * 一次 chat.completions.create 请求体的内部表达。
@@ -50,6 +51,15 @@ export function normaliseTransportError(error: unknown): PlannerError {
   if (isReplayDataMissing(error)) throw error;
   if (error instanceof PlannerError) return error;
   const causeMessage = error instanceof Error && error.message ? error.message : String(error);
+  // 输入侧内容审核拒绝（MiniMax 422 / status_code 1026 input new_sensitive）：
+  // 与网络、鉴权、限流无关，重试同一份 prompt 不会通过，单独归类给出可执行提示。
+  if (isModelInputModerationMessage(causeMessage) || isModelInputModerationMessage(error)) {
+    return new PlannerError(
+      "provider_input_moderated",
+      "AI 内容审核拒绝了本次请求的输入文本（含平台敏感词清单），已自动尝试规避措辞仍未通过；请更改文案、去掉敏感表述后再继续。",
+      describeCause(error, causeMessage),
+    );
+  }
   if (error instanceof AuthenticationError) {
     return new PlannerError(
       "provider_authentication",

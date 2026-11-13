@@ -3,7 +3,7 @@ import type { ResourceQueryOverrides } from '../../src/main/planning/resource-qu
 import type { VbkBrowser } from '../../src/main/infrastructure/vbk-browser.js';
 import { EMPTY_VBK_SESSION_CONTEXT } from '../../src/main/infrastructure/vbk-session-request.js';
 import { type RegressionFixture, type Json } from './corpus.js';
-import { hotelTransport, loadProviderReplay, type ProviderReplay } from './provider-replay.js';
+import { loadProviderReplay, type ProviderReplay } from './provider-replay.js';
 import { PRODUCT_FORM_PATTERN_IDS } from '../../src/shared/recommendation-category-policy.js';
 
 /** Semantic query projections; never selects, binds or returns a completed product. */
@@ -31,7 +31,6 @@ export function createQueryReplay(fixture: RegressionFixture, provider: Provider
       if (!item?.availability.status) return missing(`availability:${id}`);
       return structuredClone(item.availability) as { status: 'available' | 'suspended' };
     },
-    hotelFetch: hotelTransport(provider, calls, missing),
     coverGenerationFetch: async () => missing("cover:image_generation"),
     coverSearch: async (_page, keyword) => {
       calls.push(`cover:${keyword}`);

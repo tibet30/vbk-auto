@@ -75,3 +75,18 @@ test("删除凭证记录被删景点的 spotId，非法 spotId 不落凭证", ()
   const second = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 1 });
   assert.equal(((second.manualReview as Record<string, unknown>).itinerarySpotRemovals as Array<Record<string, unknown>>)[0]!.spotId, undefined);
 });
+
+test("删除原始逐日路线中的景点时保留同句其它路线点", () => {
+  const product = {
+    itinerary: [{ day: 2,
+      title: "岗什卡雪峰",
+      description: "原始逐日安排：门源 — 岗什卡雪峰 — 阿咪东索景区 | 宿祁连。",
+      spots: [{ name: "门源" }, { name: "岗什卡雪峰" }, { name: "阿咪东索景区" }] }],
+  };
+  const next = applyManualReviewField(product, { field: "itinerarySpotRemove", dayIndex: 0, spotIndex: 2 });
+  const day = (next.itinerary as Array<Record<string, unknown>>)[0]!;
+  assert.doesNotMatch(String(day.description), /阿咪东索景区/);
+  // 整句删除会顺手抹掉未删除的「门源」，下一轮原路线校验又报缺失。
+  assert.match(String(day.description), /门源/);
+  assert.match(String(day.description), /岗什卡雪峰/);
+});

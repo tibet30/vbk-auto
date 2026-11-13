@@ -32,6 +32,13 @@ test("实际酒店名称算住宿晚", () => {
   assert.equal(hasItineraryHotelStay("安排入住潮州古城酒店"), true);
 });
 
+test("否定住宿与住宿自理的变体都不算平台住宿夜", () => {
+  for (const hotel of ["不含当晚住宿", "不含住宿", "返程当日不含住宿。", "当天不包含过夜住宿（汉中送站）",
+    "当日不提供住宿", "无需当晚住宿", "本日不含返程后住宿", "不含返程后住宿"]) {
+    assert.equal(hasItineraryHotelStay(hotel), false, hotel);
+  }
+});
+
 test("行程描述住宿始终使用携程平台酒店，套餐是否含酒店为否", () => {
   assert.equal(ITINERARY_CTRIP_PLATFORM_HOTEL.useSegmentConfig, true);
   assert.equal(ITINERARY_CTRIP_PLATFORM_HOTEL.ishand, true);

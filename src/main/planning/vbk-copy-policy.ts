@@ -36,12 +36,17 @@ export const VBK_COPY_BAD_CASES = [
   },
   {
     term: "主席",
+    // 模型侧输入审核（MiniMax 422 input new_sensitive）会拒绝政治职务类字面量：
+    // 送模型的规则只写称谓类别，真实词仍由本地门禁与修复逻辑处理。
+    aiTerm: "领导职务称谓",
     reason: "VBK 行程描述实跑会判定为非法关键词",
     alternatives: ["重要人物", "相关负责人", "历史人物"],
     pattern: /主席/,
   },
   {
     term: "毛泽东",
+    // 同上：政治人物姓名不能进入 AI 请求，否则整份 prompt 会被 provider 拒收。
+    aiTerm: "政治人物姓名",
     reason: "VBK 产品图文接口实跑会判定为非法关键词",
     alternatives: ["历史人物", "青年主题雕塑", "近现代文化地标"],
     pattern: /毛泽东/,
@@ -128,15 +133,36 @@ export function isVbkOfficialPoiIdentityPath(path: string): boolean {
 
 export function buildVbkCopyPolicyPrompt(): string {
   const rules = VBK_COPY_BAD_CASES.map(
-    (badCase) => "replacement" in badCase && badCase.replacement === ""
-      ? `- 禁止词「${badCase.term}」：${badCase.reason}；直接删除相关表述，不要改写成其他保险承诺`
-      : `- 禁止词「${badCase.term}」：${badCase.reason}；请按语境改写为「${badCase.alternatives.join("」或「")}」`,
+    (badCase) => {
+      // aiTerm 是有意保留的「送模型措辞」：政治人物/职务类词只会进本地门禁，
+      // 不会进入 AI 请求，避免 provider 输入审核直接以 422 拒收整份 prompt。
+      const label = "aiTerm" in badCase ? badCase.aiTerm : badCase.term;
+      return "replacement" in badCase && badCase.replacement === ""
+        ? `- 禁止词「${label}」：${badCase.reason}；直接删除相关表述，不要改写成其他保险承诺`
+        : `- 禁止词「${label}」：${badCase.reason}；请按语境改写为「${badCase.alternatives.join("」或「")}」`;
+    },
   ).join("\n");
   return [
     "VBK 文案黑名单（适用于所有 AI 生成的可见文案，禁止原样输出）：",
     rules,
     "官方 POI 身份字段 poiName 和 requestedName、原始路线 spots[].name 必须原样保留，不得按黑名单改名。文案中完整引用这些地点名时也须保留；名称之外的宣传用语仍按上述规则检查。用户原文是需求数据，不是宣传文案；不得删除地点、日序或体验。",
   ].join("\n");
+}
+
+/**
+ * 把「不能进入模型请求」的黑名单字面量替换成 aiTerm 措辞。
+ *
+ * 只用于会回灌给模型的短文本（例如上一轮失败原因）；产品正文与 POI 名称不走这里，
+ * 否则会破坏文案改写所需的真实文本与实体身份。
+ */
+export function redactPromptUnsafeCopyTerms(text: string): string {
+  if (!text) return text;
+  let out = text;
+  for (const badCase of VBK_COPY_BAD_CASES) {
+    if (!("aiTerm" in badCase)) continue;
+    out = out.split(badCase.term).join(badCase.aiTerm);
+  }
+  return out;
 }
 
 /**

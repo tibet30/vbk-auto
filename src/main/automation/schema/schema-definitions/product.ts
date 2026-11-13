@@ -25,6 +25,15 @@ export const manualReviewSchema = z.object({
     poiId: z.number().int().positive().optional(),
     spotId: z.string().regex(/^sp_[0-9a-f]{12}$/).optional(),
   }).strict()).default([]),
+  // 运营人工设定的条目类型凭证：生成重跑时据此还原「自由活动 / 其他」，
+  // 不再让把景点改回景点、再被 POI 门禁拦住的循环复发。
+  itinerarySpotKinds: z.array(z.object({
+    day: z.number().int().positive(),
+    name: z.string().min(1),
+    kind: z.enum(["attraction", "free", "other"]),
+    setAt: z.string().min(1),
+    spotId: z.string().regex(/^sp_[0-9a-f]{12}$/).optional(),
+  }).strict()).default([]),
 }).strict();
 
 export const productSchema = z

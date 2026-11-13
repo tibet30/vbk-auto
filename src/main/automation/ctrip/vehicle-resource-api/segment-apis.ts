@@ -84,9 +84,26 @@ export async function resolveResourceSegmentCityApi(page: any, cityName: string,
     cities = await query(target);
     if (!cities.length) throw new Error(`住宿地「${expected}」的所属县市「${target}」（经${parent.via}）不在 VBK 城市列表中`);
   }
-  const city = selectAdministrativeCity(cities, target, regional);
+  const city = selectCityOrExplain(cities, target, regional);
   if (!Number.isInteger(Number(city.cityId)) || Number(city.cityId) <= 0) throw new Error(`住宿城市「${target}」缺少合法 cityId`);
   return structuredClone(city);
+}
+
+/**
+ * 跨省住宿地只是被省份筛掉时，补一句运营能直接照做的处置：
+ * 平台唯一候选在别的省，说明当晚住宿注记没被解析成「显式住宿城市」，
+ * 只报「0 个候选」会让运营以为是平台缺城市。
+ */
+function selectCityOrExplain(cities: ResourceCity[], target: string, regional: AdministrativeCityContext): ResourceCity {
+  try {
+    return selectAdministrativeCity(cities, target, regional);
+  } catch (error) {
+    const nationwide = cities.filter((city) => toPlatformShortLocationName(city.cityName) === target);
+    const only = nationwide.length === 1 ? nationwide[0] : undefined;
+    if (!regional.province || !only?.provinceName) throw error;
+    throw new Error(`${(error as Error).message}该城市平台唯一（${only.countryName || "中国"}/${only.provinceName}），`
+      + `但不在当前要求的「${regional.province}」；若当晚确实跨省住在「${target}」，请在原路线当天写明「宿${target}」。`);
+  }
 }
 
 /**

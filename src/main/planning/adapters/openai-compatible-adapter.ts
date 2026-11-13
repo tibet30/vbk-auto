@@ -23,6 +23,7 @@ import {
 } from "../../../shared/contracts-planning.js";
 import { timedCompletion, toAiUsageEvent } from "../../ai/completion-usage.js";
 import { logAIPrompt } from "../../ai/prompt-log.js";
+import { attemptWithPromptRepair, sanitisePromptMessages, type PromptRepairLevel } from "../../ai/prompt-moderation-repair.js";
 import { logInfo } from "../../../shared/log-timestamp.js";
 import type { AiUsageEvent, AiUsageSource } from "../../../shared/contracts-ai-usage.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
@@ -98,28 +99,38 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
     }
     const toolSchema = buildStageToolSchema(stage, { recommendationCategories });
     const userMessage = composePlanningUserMessage(request);
-    const messages = [
-      { role: "system", content: composePlanningSystemPrompt(stage, this.config.presentationRejectedWords, this.config.itineraryRejectedWords, this.config.basicInfoRejectedWords, recommendationCategories) },
+    const systemMessage = composePlanningSystemPrompt(stage, this.config.presentationRejectedWords, this.config.itineraryRejectedWords, this.config.basicInfoRejectedWords, recommendationCategories);
+    const buildMessages = (level: PromptRepairLevel) => sanitisePromptMessages([
+      { role: "system", content: systemMessage },
       { role: "user", content: userMessage },
-    ];
+    ], level);
     // Adapter 单次传输尝试：transport 失败直接抛错，由 orchestrator 决定是否 stage retry。
-    logAIPrompt({
-      entry: "Planner.generateStage",
-      provider: this.config.provider ?? "openai-compatible",
-      model: this.config.model,
-      messages,
+    // 唯一的例外是模型输入审核拒绝：原样重发不会再通过，先把 prompt 改造成更保守的形态
+    // 自我修复（脱敏 → 去黑名单）后再发，仍被拒才把错误交给上层。
+    const response = await attemptWithPromptRepair({
+      label: `planning.${stage}`,
+      buildMessages,
+      call: async (messages, level) => {
+        logAIPrompt({
+          entry: "Planner.generateStage",
+          provider: this.config.provider ?? "openai-compatible",
+          model: this.config.model,
+          messages,
+          ...(level > 0 ? { attempt: level } : {}),
+        });
+        return this.createCompletion({
+          model: this.config.model,
+          messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+          temperature: 0.1,
+          max_completion_tokens: stage === "itinerary"
+            ? Math.min(16_384, Math.max(4096, request.context.skeleton.days * 1024))
+            : 4096,
+          tools: [toolSchema],
+          tool_choice: { type: "function", function: { name: toolSchema.function.name } },
+          ...(this.config.extraParams ?? {}),
+        }, { source: "planning.generateStage", stage });
+      },
     });
-    const response = await this.createCompletion({
-      model: this.config.model,
-      messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
-      temperature: 0.1,
-      max_completion_tokens: stage === "itinerary"
-        ? Math.min(16_384, Math.max(4096, request.context.skeleton.days * 1024))
-        : 4096,
-      tools: [toolSchema],
-      tool_choice: { type: "function", function: { name: toolSchema.function.name } },
-      ...(this.config.extraParams ?? {}),
-    }, { source: "planning.generateStage", stage });
 
     const message = response.choices[0]?.message;
     if (response.choices[0]?.finish_reason === "length") {
@@ -143,22 +154,30 @@ export class OpenAICompatiblePlannerAdapter implements Planner {
   }
 
   async resolvePoiName(request: PoiNameResolutionRequest): Promise<string | null> {
-    const messages = composePoiNameResolutionMessages(request);
-    logAIPrompt({
-      entry: "Planner.resolvePoiName",
-      provider: this.config.provider ?? "openai-compatible",
-      model: this.config.model,
-      messages,
+    const baseMessages = composePoiNameResolutionMessages(request);
+    const response = await attemptWithPromptRepair({
+      label: "planning.resolvePoiName",
+      buildMessages: (level) => sanitisePromptMessages(baseMessages, level),
+      call: async (messages, level) => {
+        logAIPrompt({
+          entry: "Planner.resolvePoiName",
+          provider: this.config.provider ?? "openai-compatible",
+          model: this.config.model,
+          messages,
+          ...(level > 0 ? { attempt: level } : {}),
+        });
+        return this.createCompletion({
+          model: this.config.model,
+          messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
+          temperature: 0,
+          max_completion_tokens: 128,
+          tools: [poiNameToolSchema],
+          tool_choice: { type: "function", function: { name: poiNameToolSchema.function.name } },
+          ...(this.config.extraParams ?? {}),
+        }, { source: "planning.resolvePoiName", attempt: request.attempt });
+      },
     });
-    const response = await this.createCompletion({
-      model: this.config.model,
-      messages: messages as OpenAI.Chat.ChatCompletionMessageParam[],
-      temperature: 0,
-      max_completion_tokens: 128,
-      tools: [poiNameToolSchema],
-      tool_choice: { type: "function", function: { name: poiNameToolSchema.function.name } },
-      ...(this.config.extraParams ?? {}),
-    }, { source: "planning.resolvePoiName", attempt: request.attempt });
+
     const call = response.choices[0]?.message?.tool_calls?.find(
       (item) => "function" in item && item.function.name === poiNameToolSchema.function.name,
     );

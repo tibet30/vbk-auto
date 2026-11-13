@@ -3,8 +3,6 @@ import { readOnlyFetcher, readOnlySession, classifyQueryError } from './read-onl
 import { suggestPoiDetail } from '../../src/main/infrastructure/poi-suggest.js';
 import { getCtripSightAvailability } from '../../src/main/infrastructure/ctrip-sight-availability.js';
 import { resolvePlanningPoiAutoSelection } from '../../src/main/planning/poi-auto-selection.js';
-import { createHotelCandidateResolver } from '../../src/main/infrastructure/ctrip-hotel-search/resolve.js';
-import { hotelStayRequirement, type HotelStayRequirement } from '../../src/shared/hotel-stay-requirement.js';
 import { productNeedsVehicleResource } from '../../src/shared/product-form.js';
 import { matchVehicleResource } from '../../src/main/operations/vehicle-resource/matching.js';
 import { buildVehicleResourceQuery, targetVehicleTotalCost } from '../../src/main/operations/vehicle-resource/query.js';
@@ -49,23 +47,8 @@ try {
         return result.status === 'available' && result.match?.poiId === spot.poiId;
       });
     }
-    await check('酒店候选', async () => {
-      const itinerary = structuredClone(p.itinerary) as Json[];
-      const requirements = new Map<number, HotelStayRequirement>();
-      for (const day of itinerary) {
-        const candidate = day.hotelCandidates?.[0];
-        const requirement = hotelStayRequirement(p, day) ?? (candidate && {
-          anchorName: candidate.anchorName, cityName: candidate.cityName,
-          diamond: candidate.diamond, ratingType: candidate.ratingType ?? 'diamond',
-        });
-        if (requirement) requirements.set(day.day, requirement);
-        delete day.hotelCandidates;
-      }
-      const result = await createHotelCandidateResolver(fetcher)(itinerary, p.basicInfo.meetingCity,
-        p.basicInfo.nights, p.operations.hotelTier, undefined, requirements, false, []);
-      return result.dailyCandidates.every(d => d.candidates.some(h =>
-        fixture.product.itinerary.find((old: Json) => old.day === d.day)?.hotelCandidates?.some((old: Json) => old.hotelId === h.hotelId)));
-    });
+    // 住宿统一由平台自动匹配三/四/五钻，本地不再查询或绑定具体酒店候选，
+    // 因此在线核验只覆盖 POI、用车资源组与大交通端点。
     if (productNeedsVehicleResource(p)) await check('用车资源', async () => {
       const estimate = buildVehicleResourceQuery({ city: p.operations.pickupCity || p.basicInfo.meetingCity,
         days: p.basicInfo.days, serviceHoursPerDay: p.operations.vehicleResource?.serviceHoursPerDay });

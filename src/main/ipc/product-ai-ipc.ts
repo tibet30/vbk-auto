@@ -16,6 +16,7 @@ import { flushProductAiUsage } from "../ai/flush-product-ai-usage.js";
 import { recordAgentUsage } from "../agent/integration-usage.js";
 import { getCtripSightAvailability } from "../infrastructure/ctrip-sight-availability.js";
 import { clearReappearedTrustedOperatorItineraryRemovals, sameTrustedOperatorItineraryRemovals } from "../../shared/trusted-operator-itinerary-removals.js";
+import { reconcileOperatorItineraryKindsFromProduct } from "../../shared/operator-itinerary-kinds.js";
 import type { MainIpcContext } from "./context.js";
 import { canonicalJson } from '../../shared/product-storage-projection.js';
 import { platformResourceGateway } from '../infrastructure/platform-resource-gateway.js';
@@ -62,6 +63,9 @@ export function registerProductAiIpc(context: MainIpcContext): void {
     // A visible, exact slot re-add is an operator change of mind. Revoke only
     // that receipt before validation; raw JSON can never create or alter one.
     clearReappearedTrustedOperatorItineraryRemovals(next);
+    // 同理：原始 JSON 里把条目类型改回「景点」也是一次显式决定，凭证跟随它，
+    // 否则下一次生成会按旧凭证把类型又还原成自由活动/其他。
+    reconcileOperatorItineraryKindsFromProduct(next);
     parseProduct(next);
     const saved = productMutations.commands.replaceFull({ localProductId: id, source: 'user',
       expectedVersion: product.productJsonVersion ?? 0 }, next, {

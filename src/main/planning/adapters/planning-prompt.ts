@@ -14,7 +14,7 @@ import { classifyItineraryInputMode } from "../itinerary-input-contract.js";
 import { STAGE_ALLOWED_MODULES } from "../stage-contract.js";
 import { PRODUCT_FEATURES_RICH_TEXT_GUIDE } from "../../domain/product/features-rich-text.js";
 import { resolveTravelScope } from "../runtime.js";
-import { buildVbkCopyPolicyPrompt, sanitiseUserIdeaForAi } from "../vbk-copy-policy.js";
+import { buildVbkCopyPolicyPrompt, redactPromptUnsafeCopyTerms, sanitiseUserIdeaForAi } from "../vbk-copy-policy.js";
 import { buildBasicInfoFeedbackPrompt, buildItineraryFeedbackPrompt, buildPresentationFeedbackPrompt } from "../vbk-copy-feedback.js";
 import { PRIVATE_TOUR_COPY_GUIDE } from "../../../shared/private-tour-copy.js";
 import { ITINERARY_LODGING_GUIDE } from "../../../shared/itinerary-hotel.js";
@@ -189,7 +189,9 @@ export function composePlanningUserMessage(request: PlannerRequest): string {
     for (const module of context.acceptedModules) lines.push(`  - ${module.module}${module.writePath ? ` → ${module.writePath}` : ""}`);
   }
   if (previousError) {
-    lines.push("", `上一轮失败原因：${previousError.message}（code=${previousError.code}）`, "请修正该问题并严格按本阶段工具 schema 重试。");
+    // 失败原因可能引用真实黑名单词（例如本地门禁拒绝时回显命中词）；
+    // 回灌模型前统一换成 aiTerm 措辞，避免 provider 输入审核拒收整份请求。
+    lines.push("", `上一轮失败原因：${redactPromptUnsafeCopyTerms(previousError.message)}（code=${previousError.code}）`, "请修正该问题并严格按本阶段工具 schema 重试。");
   }
   lines.push("", "当前产品草稿（仅保留本阶段所需的安全上下文）：", JSON.stringify(projectProductContext(stage, context.currentProduct)));
   return lines.join("\n");

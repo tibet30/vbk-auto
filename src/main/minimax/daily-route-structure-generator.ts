@@ -9,7 +9,8 @@ import { emitMiniMaxUsage, isDeepSeek, miniMaxProviderError, type MiniMaxConfig 
 const resultSchema = z.object({
   days: z.array(z.object({
     day: z.number().int().positive(),
-    nodes: z.array(z.object({ name: z.string(), kind: z.string() })),
+    nodes: z.array(z.object({ name: z.string(), kind: z.string(), relation: z.string().optional() })),
+    overnight: z.string().optional(),
   })).min(1),
 });
 
@@ -19,7 +20,9 @@ const SYSTEM_PROMPT = "你负责把旅游产品的逐日路线原文拆成有序
   + "place=仅作为起点、终点、中转或住宿落脚的城市/机场/车站等地名；"
   + "highlight=「看点」之类不限顺序的亮点。"
   + "不要输出：车程/时长/里程说明（如「车程约1h」）、门票/讲解/用餐/包车等服务说明、住宿酒店名、住宿动作（如「宿韶山」「住韶山」「入住市区」）、「出发地」「客源地」这类客源城市占位词、接送服务、「上午/下午」等时间词。"
-  + "「甲或乙」「二选一」的候选各自独立输出为 attraction，保持原文顺序。"
+  + "「甲或乙」「二选一」「任选其一」的候选各自独立输出为 attraction 且 relation=\"or\"，保持原文顺序并与其它节点相邻；同一组的候选必须连续输出。"
+  + "每天另给 overnight：当天原文明确写出的当晚住宿地（城市/县/镇名，如「宿肃南」「住门源」「夜宿韶山」都填肃南/门源/韶山），"
+  + "只从原文取，绝不推断；住宿地不要同时写进 nodes；原文没写住宿信息就省略 overnight。"
   + "days 必须恰好覆盖输入的每一天，不得增减。rejectedReason 非空表示上一版被本地校验拒绝，必须针对该原因修正。";
 
 /** 逐日路线结构化：一次请求返回全部天；只产出候选，是否采纳由本地校验决定。 */
@@ -52,11 +55,16 @@ export async function generateDailyRouteStructure(
                 type: "object", additionalProperties: false, required: ["day", "nodes"],
                 properties: {
                   day: { type: "integer", enum: days },
+                  overnight: { type: "string", minLength: 2, description: "当天原文明确写出的当晚住宿地短名；没写就省略" },
                   nodes: {
                     type: "array",
                     items: {
                       type: "object", additionalProperties: false, required: ["name", "kind"],
-                      properties: { name: { type: "string", minLength: 2 }, kind: { type: "string", enum: ["attraction", "place", "highlight"] } },
+                      properties: {
+                        name: { type: "string", minLength: 2 },
+                        kind: { type: "string", enum: ["attraction", "place", "highlight"] },
+                        relation: { type: "string", enum: ["or"], description: "「甲或乙 / 二选一 / 任选其一」的同组候选标 or" },
+                      },
                     },
                   },
                 },

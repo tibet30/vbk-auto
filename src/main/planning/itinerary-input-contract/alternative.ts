@@ -22,9 +22,15 @@ import { alternativeGroupKey, hasTrustedOperatorItineraryRemoval } from "../../.
 import { requiresItineraryPoi } from "../../../shared/itinerary-activity-kind.js";
 import { asDayList, asRecord, isDeletableAdministrativeLocation, requiresLockedAttraction, samePlace, spotName, text, unique } from "./utils.js";
 import { daySections } from "../day-sections.js";
+import { structuredAlternativeGroups } from "../daily-route-structure.js";
 import { constraintUserIdea } from "../../../shared/product-idea-optimization.js";
 
 export function explicitAlternativeGroups(product: ProductDetail): Array<{ day: number; names: string[] }> {
+  // AI 已从原文读出并标注的二选一（结构已校验相邻、原文有选择标记）优先；
+  // 但只覆盖它读到的那些组：AI 只标了其中一天时，其余天的二选一仍要走
+  // 「userIntent 活动 + 文本规则」兜底，不能整组丢弃导致门禁放松。
+  const fromRoute = structuredAlternativeGroups(product.product as Record<string, unknown>)
+    .filter((group) => group.names.every((name) => isPoiAlternativeOption(product, name)));
   const structured = (product.planning?.userIntent?.activities ?? []).flatMap((activity) => {
     const names = unique([activity.title, ...(activity.alternatives ?? [])]);
     return activity.kind === "poi" && activity.day > 0 && names.length > 1 ? [{ day: activity.day, names }] : [];
@@ -35,7 +41,7 @@ export function explicitAlternativeGroups(product: ProductDetail): Array<{ day: 
   // 同时绑定两个“景点”，规划永远无法通过。
   const parsed = rawAlternativeGroups(raw)
     .filter((group) => group.names.every((name) => isPoiAlternativeOption(product, name)));
-  return uniqueGroups([...structured, ...parsed]);
+  return uniqueGroups([...fromRoute, ...structured, ...parsed]);
 }
 
 function isPoiAlternativeOption(product: ProductDetail, name: string): boolean {

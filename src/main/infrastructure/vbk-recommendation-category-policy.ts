@@ -2,6 +2,7 @@ import type {
   RecommendationCategoryDirectoryItem,
   RecommendationCategoryPolicy,
 } from "../../shared/recommendation-category-policy.js";
+import { RECOMMENDATION_CATEGORIES } from "../domain/product/recommendation-categories.js";
 import {
   vbkSessionRequest,
   type VbkSessionRequestBrowser,
@@ -54,14 +55,22 @@ export function deriveRecommendationCategoryPolicy(
   const byId = new Map(directory.map((item) => [item.id, item.name]));
   const missing = selected.filter((id) => !byId.has(id));
   if (missing.length) throw new Error(`推荐理由类别目录缺少策略 ID：${missing.join("、")}。`);
-  const categories = selected.map((id) => byId.get(id)!).filter(Boolean);
+  // 类别目录是平台图文页的全集（15 项），其中「限时秒杀 / 尊享入住 / 大牌驾到 / 优质交通 /
+  // 优良资质」在 VBK 合同下为 disabled 或保存必失败，本地模块契约与写入门禁也不接受。
+  // 规划只能从本地真正能持久化的子集里选，否则模型按工具 schema 选出的分类会在模块校验时
+  // 被判成非法选项，产品反复停在图文阶段。
+  const writable = selected.filter((id) => {
+    const name = byId.get(id);
+    return Boolean(name) && (RECOMMENDATION_CATEGORIES as readonly string[]).includes(name!);
+  });
+  const categories = writable.map((id) => byId.get(id)!).filter(Boolean);
   if (categories.length < 3) throw new Error("推荐理由可用类别少于 3 项，无法生成互不重复的推荐理由。");
   return {
     source: "vbk-qconfig",
     inputLocale,
     productPatternId: input.productPatternId,
     limited,
-    categoryIds: selected,
+    categoryIds: writable,
     categories,
     fetchedAt: new Date().toISOString(),
   };

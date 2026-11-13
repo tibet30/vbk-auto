@@ -5,6 +5,7 @@ import OpenAI, {
   RateLimitError,
 } from "openai";
 import type { AiUsageEvent, AiUsageSource } from "../../shared/contracts.js";
+import { isModelInputModerationMessage } from "../../shared/ai-input-moderation.js";
 import { toAiUsageEvent } from "../ai/completion-usage.js";
 import { MiniMaxServiceError, responseTool } from "./minimax-constants.js";
 
@@ -91,6 +92,14 @@ export function miniMaxProviderError(config: MiniMaxConfig, error: unknown): Min
   }
   if (error instanceof APIConnectionError) {
     return new MiniMaxServiceError("provider_connection", `无法连接 ${label} 服务。`);
+  }
+  // 输入侧内容审核拒绝（HTTP 422 / status_code 1026 input new_sensitive）：
+  // 与连接、鉴权无关，原样重试同一份 prompt 不会再通过，必须提示改写措辞。
+  if (isModelInputModerationMessage(error)) {
+    return new MiniMaxServiceError(
+      "input_moderated",
+      `${label} 内容审核拒绝了本次请求的输入文本（含平台敏感词清单），已自动尝试规避措辞仍未通过；请更改文案、去掉敏感表述后再继续。`,
+    );
   }
   return new MiniMaxServiceError("provider_error", `${label} 服务暂时无法完成本次请求。`);
 }

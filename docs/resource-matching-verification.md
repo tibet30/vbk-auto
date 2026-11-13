@@ -8,7 +8,7 @@
 
 | 资源域 | 保留的入口 | 内部分工 |
 | --- | --- | --- |
-| 携程每日酒店 | `infrastructure/ctrip-hotel-search.ts` | `provider` 查询与列表读取；`context` 地标定位；`itinerary-policy` 住宿日与城市锚点；`matching` 评级重试；`projection` 候选回填；`resolve` 逐日进度 |
+| 平台住宿规则 | `shared/platform-hotel-rules.ts` | `normalisePlatformHotelProduct` 统一转换为平台自动匹配三/四/五钻；`platformHotelStayGroups` 按 `hotelCity` 与晚数分组；本地不查询、生成或绑定具体酒店候选 |
 | VBK 酒店资源库 | `operations/hotel-resource.ts` | `hotel-resource-resolution/{query,search,match,resolve}` 分开条件、请求、选择和结果构建 |
 | 车辆资源组 | `operations/vehicle-resource.ts` | `query` 条件；`search` 请求；`parse` 候选解析与价格排序；`matching` 精准及座位兜底；`projection` 产品结果；`resolve` 装配 |
 | 行程 POI | `planning/poi-enrichment.ts` | 入口负责行程遍历、核查任务、持久化；`poi-enrichment/query` 负责查询、营业核验、超时和结果规范化 |
@@ -16,22 +16,18 @@
 调用方导入路径及持久化数据格式保持一致。内部模块的辅助函数不从原入口公开。
 现有 `planning-poi-resolver`、POI 消歧和地域规则继续作为候选决策层使用。
 
-## 酒店契约
+## 住宿契约
 
-- 每日住宿条件优先于接团城市；行政城市规范化为平台短名，景点与地标名称保持原样。
-- 地标定位、实际评级类型、城市 ID 和距离均需匹配，不能用邻市卡片冒充候选。
-- 只有正常解析的空结果或候选不符才进入评级/地标重试；网络、登录和解析异常保留为失败。
-- 逐日许可表中只有 `true` 允许降档；缺失记录和 `false` 都不能授权。应用层仍负责按
-  已确认回答及系统默认策略，为每个日期计算完整许可表。
-- 历史候选继续通过既有城市、地标、距离及评级规则校验后复用。
-- 逐日回填基于输入的副本；一个日期失败时，可以先保存其他日期的进度，再报告未完成日期。
-- 酒店文案的距离以候选实际核验地标为准；回填实际评级并保留降档原因。
+- 住宿统一为平台自动匹配三钻、四钻、五钻；产品只保留每晚实际住宿行政城市短名
+  （`hotelCity`）与晚数，不再保存具体酒店、逐晚钻级、民宿/星级、距离上限或候选列表。
+- 已删除旧携程每日酒店候选链路（搜索、缓存、降级、对账、候选就绪门及其测试）。
+  历史产品里已保存的 `hotelRequirement`、`hotelCandidates`、`hotelTier` 只读兼容，
+  下一次保存时由 `normalisePlatformHotelProduct` 清理，不进入新写入与门禁。
+- `hotelCity` 不得沿用接团城市覆盖跨城住宿，也不能填景区、古镇或乡镇名；无住宿日不保留该字段。
+- 原文明确写出的住宿地（`宿X`、`| 宿X`、`住X`）优先由 AI 逐日结构读出并逐字校验，
+  正则只作为结构缺失时的兜底；保存城市在原路线原文有据时不得被路线 POI 证据改写。
 - VBK 酒店资源库优先使用锁定的 `meetingCity`，缺少城市时禁止发出查询。
-  指定城市没有有效资源时，不再回退到异地第一条。既有 `nonPlatform` 方案保留其
-  明确来源，不携带伪造的平台资源 ID；它与携程每日真实酒店候选是不同层次的数据。
-
-`createHotelCandidateResolver(fetcher)` 是内部可注入查询边界，测试无需修改全局 fetch。
-原有 `resolveItineraryHotelCandidates` 仍使用原来的八个位置参数。
+  指定城市没有有效资源时，不再回退到异地第一条；`nonPlatform` 历史方案保留明确来源。
 
 ## 车辆与 POI 契约
 
@@ -42,12 +38,16 @@
 - POI 查询失败与正常无候选保持区分，不能把网络问题伪装成不存在的景点。
 - 既有景点名称、日期和位置保留；已知地域错配走重新解析，运行时写入仍检查行程是否被人工修改。
 
-## 本次验证（2026-10-11）
+## 历史验证（2026-10-11，已被后续住宿规则替换）
+
+以下记录只说明当时的重构过程；其中的旧酒店候选模块与对应测试已在
+「住宿统一为平台自动匹配」改动中整体删除，不再作为当前契约或验收依据。
+当前验收口径见 `test/fixtures/product-regression/README.md` 的 5 项正向 + 20 项负向回归。
 
 资源、酒店基础设施、POI 规划与架构边界测试：418 项，415 通过，3 失败。
 新增 8 项边界测试全部通过。
 
-3 个失败在重构前的酒店实现中对照复跑也同样失败：
+3 个失败在重构前的酒店实现中对照复跑也同样失败（相关测试已删除）：
 
 1. `hotel-entry-root-causes.test.ts`：华阳住宿锚点仍保留旧西安城市。
 2. `hotel-replay-cache-progress.test.ts`：城市级历史候选复用预期与当前地标约束不一致。

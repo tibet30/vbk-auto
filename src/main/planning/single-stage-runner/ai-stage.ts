@@ -217,6 +217,9 @@ export async function runAiStage(args: {
     } catch (error) {
       lastError = toStageError(stage, attempt, error);
       logAttemptError("planner 抛错", { stage, attempt, localProductId: state.localProductId, code: lastError.code, message: lastError.message });
+      // 输入侧内容审核拒绝：同一份 prompt 再重试只会再被拒一次，
+      // 直接交给上层提示改写措辞，不消耗后续重试预算。
+      if (lastError.code === "provider_input_moderated") break;
     }
   }
 

@@ -11,7 +11,6 @@ import type { Planner, PlanningMajorStage, PlanningNodeId, PlanningSkeleton, Thr
 import type { PoiSuggestDetailResult } from "../../../shared/contracts-types.js";
 import type { OrchestratorRuntime } from "../types.js";
 import type { PlanningPlanV2 } from "../../../shared/contracts-planning.js";
-import type { resolveItineraryHotelCandidates } from "../../infrastructure/ctrip-hotel-search.js";
 
 export interface ThreeStageOrchestratorDependencies {
   localProductId: string;
@@ -23,7 +22,6 @@ export interface ThreeStageOrchestratorDependencies {
   persist(plan: PlanningPlanV2): Promise<void>;
   assertVbkLogin(): Promise<void>;
   queryPoi(name: string): Promise<PoiSuggestDetailResult>;
-  resolveHotels(itinerary: Array<Record<string, unknown>>, nights?: number): Promise<Awaited<ReturnType<typeof resolveItineraryHotelCandidates>>>;
   resolveCover(): Promise<{ complete: boolean; summary: string }>;
   resolveVehicle(): Promise<{ complete: boolean; summary: string }>;
   privateTour: boolean;

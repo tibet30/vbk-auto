@@ -6,6 +6,7 @@ import { itineraryStructureError } from "./itinerary-structure.js";
 import { projectDatedRoute } from "./dated-route-projection.js";
 import { selfRepairItineraryForVbk } from "./itinerary-self-repair.js";
 import { daySection, daySections } from "./day-sections.js";
+import { dailyRouteSources } from "../agent/daily-route-source.js";
 import { routeLine } from "./itinerary-day-titles.js";
 import {
   boundaryAnchors,
@@ -22,6 +23,7 @@ import { normaliseItinerarySupport, supportArrangementType } from '../../shared/
 import { isProductAdministrativeRouteName } from '../../shared/product-administrative-route-name.js';
 import { toPlatformShortLocationName } from '../../shared/location-short-name.js';
 import { explicitOvernightName } from "../../shared/explicit-overnight-name.js";
+import { structuredOvernightName } from "./daily-route-structure.js";
 import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 
 type JsonObject = Record<string, unknown>;
@@ -121,7 +123,7 @@ function projectDay(args: {
     relation: groups.some((group) => group.names.some((candidate) =>
       samePlace(candidate, entry.name) || samePlace(candidate, entry.sourceName))) ? "or" : "and",
   }));
-  const stay = stayForDay(args);
+  const stay = stayForDay({ ...args, structuredStay: structuredOvernightName(args.product, args.row.day) });
   const stayCity = stay ? writableStayCity(stay, args.rawDayText) : undefined;
   const overnight = args.row.day <= args.nights;
   return {
@@ -188,9 +190,13 @@ function expandAlternativeGroups(order: LockedDay[], groups: Array<{ day: number
   return expanded;
 }
 
-function stayForDay(args: { row: LockedDay; nights: number; fallbackStay: string; rawDayText: string }): string | undefined {
+function stayForDay(args: {
+  row: LockedDay; nights: number; fallbackStay: string; rawDayText: string; structuredStay?: string;
+}): string | undefined {
   if (args.row.day > args.nights) return undefined;
-  const explicit = explicitOvernightName(args.rawDayText);
+  // AI 已从原文读出当晚住宿地时优先采用（本地已校验逐字出自当天原文）；
+  // 正则只作为没有结构化结果时的兜底。
+  const explicit = args.structuredStay || explicitOvernightName(args.rawDayText);
   const endpoint = args.row.spots.at(-1);
   const generic = /^(?:(?:市区|当地|平台|精品|舒适|特色)?(?:酒店|宾馆|民宿|客栈)|住宿)$/u;
   return (explicit && !generic.test(explicit) ? explicit : undefined) || (endpoint && toPlatformShortLocationName(endpoint) === args.fallbackStay ? args.fallbackStay : undefined);
@@ -227,13 +233,21 @@ function originalDaySections(product: ProductDetail): ReturnType<typeof daySecti
 }
 
 function rawDayText(product: ProductDetail, day: number): string {
-  const sections = [constraintUserIdea(product.product.basicInfo), ...userMessages(product).map((message) => messagePlainText(message.content))]
+  const texts = [constraintUserIdea(product.product.basicInfo), ...userMessages(product).map((message) => messagePlainText(message.content))];
+  const sections = texts
     .map((value) => daySection(value, day))
     .map((value) => value.replace(/^[:：、，,\s]+/u, "").trim())
     .filter(Boolean);
   // A later day-specific correction replaces that day's old operational text.
   // Combining them can preserve two contradictory accommodation instructions.
-  return sections.at(-1) ?? "";
+  if (sections.length) return sections.at(-1)!;
+  // 编号路线（「1-西安接---…」）没有 D/第N天 天头：用逐日路线切分的同日正文兜底，
+  // 否则原始逐日安排、括号补充与住宿城市可取性都拿不到当天原文。
+  return texts.flatMap((value) => dailyRouteSources(value))
+    .filter((source) => source.day === day)
+    .map((source) => source.text.trim())
+    .filter(Boolean)
+    .at(-1) ?? "";
 }
 
 /** A later user requirement can alter an option, lodging, or a named POI. Do

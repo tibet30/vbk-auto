@@ -3,7 +3,6 @@ import { isPreparationRun } from "./preparation-run.js";
 import { requiredItineraryPoiSatisfaction } from "./core-preparation-poi-input.js";
 import type { AgentSnapshotManager } from "./core-snapshot.js";
 import type { AgentCoreDependencies } from "./types.js";
-import { hotelAvailabilityQuestions } from "./core-preparation-hotel-input.js";
 import { canAutomaticallyAnswerProductQuestion, isAutomaticProductInputRun } from "./automatic-product-input.js";
 import { domesticShortPoiRiskInput } from "../../shared/domestic-short-poi-risk.js";
 
@@ -24,9 +23,7 @@ export function refreshPendingInput(args: {
   if (!request) {
     const riskDecision = recoverDomesticShortPoiRiskInput(args);
     if (riskDecision.changed && snapshot.pendingInput) return refreshPendingInput(args);
-    const hotelRecovery = recoverPausedHotelInput(args);
-    if (hotelRecovery.changed && snapshot.pendingInput) return refreshPendingInput(args);
-    return hotelRecovery.changed ? hotelRecovery : resumeManualPoiBlocked(args);
+    return resumeManualPoiBlocked(args);
   }
   if (!request.questions.length || snapshot.run?.status !== "waiting_input") {
     return { changed: false, shouldSchedule: false };
@@ -128,31 +125,6 @@ function hasActiveApprovedIntent(snapshot: AgentSnapshot): boolean {
 function hasRemoteWriteInRun(snapshot: AgentSnapshot): boolean {
   return snapshot.events.some((event) => event.runId === snapshot.run?.id && event.type === "tool_result"
     && event.data?.remoteWrite === true);
-}
-
-/** Older repeated hotel failures paused without exposing the missing decision.
- * Recover only that automatic pause, using current candidates to omit repaired nights. */
-function recoverPausedHotelInput(args: {
-  id: string; snapshot: AgentSnapshot; deps: AgentCoreDependencies; snapshots: AgentSnapshotManager;
-}): PendingInputRefresh {
-  const { id, snapshot, deps, snapshots } = args;
-  const unchanged = { changed: false, shouldSchedule: false };
-  if (snapshot.run?.status !== "paused" || !isPreparationRun(snapshot) || snapshot.uncertainWrite || snapshot.pendingApproval
-    || hasActiveApprovedIntent(snapshot) || hasRemoteWriteInRun(snapshot)) return unchanged;
-  const pause = [...snapshot.events].reverse().find(event => event.runId === snapshot.run?.id
-    && event.type === "status" && event.data?.status === "paused");
-  if (!pause?.content.startsWith("相同工具和参数连续失败两次")) return unchanged;
-  const failure = [...snapshot.events].reverse().find(event => event.runId === snapshot.run?.id && event.type === "tool_result");
-  const call = snapshot.events.find(event => event.type === "tool_call" && event.data?.toolCallId === failure?.data?.toolCallId);
-  if (call?.data?.name !== "resolve_itinerary_hotels" || typeof failure?.data?.error !== "string") return unchanged;
-  const product = deps.preparationProduct?.(id);
-  const questions = product ? hotelAvailabilityQuestions(product, failure.data.error) : [];
-  if (!questions.length) return unchanged;
-  snapshots.event(snapshot, "status", `历史住宿资料问题已转交 AI 自动处理：${JSON.stringify(questions)}`, {
-    automaticInputRedirect: true, recoveredHotelFailure: true, questions,
-  });
-  snapshots.running(snapshot);
-  return { changed: true, shouldSchedule: true };
 }
 
 function resumeManualPoiBlocked(args: {

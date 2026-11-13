@@ -35,6 +35,6 @@ test('确认后规划想法写入运营确认的住宿，不再保留待确认�
 
 test('确认后回复说明已记录，不再重复冲突提示', () => {
   const reply = guardDocumentDialogueReply('x', doc, [], '住奉节', true, '奉节');
-  assert.match(reply, /已记录第一天住宿城市：奉节/);
+  assert.match(reply, /已选择第一天住宿城市：奉节/);
   assert.doesNotMatch(reply, /待确认/);
 });

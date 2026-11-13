@@ -16,7 +16,7 @@ export function guardDocumentDialogueReply(reply: string, source: string, servic
   const selected = lines.filter(line => line.length <= 180 && (requested.includes(line) || filters.some(filter => filter.test(line)))).slice(0, 5);
   const serviceNote = selected.length ? `\n文档服务原文摘录：\n${selected.join('\n')}` : '';
   const conflict = lodgingConflict(source);
-  const conflictNote = conflict && confirmedLodging ? `\n已记录第${conflict.day}天住宿城市：${confirmedLodging}（按你的回答，文档原写${conflict.choices}）。`
+  const conflictNote = conflict && confirmedLodging ? `\n已选择第${conflict.day}天住宿城市：${confirmedLodging}（文档原写${conflict.choices}）。`
     : conflict ? `\n第${conflict.day}天住宿城市待确认：${conflict.summary ? `行程简表写${conflict.summary}，` : ''}详细行程写${conflict.choices}，请在创建后核对该天的住宿安排。` : '';
   return `${intro}${serviceNote}${conflictNote}`;
 }

@@ -1,7 +1,12 @@
 import type { DocumentChatRequest, DocumentChatResult } from '../../shared/product-document.js';
 import { PRODUCT_FORM_LABELS } from '../../shared/product-form.js';
 
-/** 模型提议没有确认效力；只有运营手填值或明确表达的字段才可进入创建表单。 */
+/**
+ * 合并文档分析结果与运营手填值。
+ *
+ * 接团城市必须能在文档原文中核对，或由运营明确指定；产品形态允许模型根据
+ * 行程服务特征分析。已有表单值与运营后续明确修改始终优先，避免重复讨论覆盖手填内容。
+ */
 export function protectDocumentFields(input: DocumentChatRequest, result: DocumentChatResult): DocumentChatResult {
   const userText = input.messages.filter(message => message.role === 'user').map(message => message.content).join('。');
   const sentences = userText.split(/(?<=[。；;\n！？!?])/u);
@@ -30,11 +35,14 @@ export function protectDocumentFields(input: DocumentChatRequest, result: Docume
     && /产品形态|产品类型|确认|确定|选择|做成|作为/u.test(sentence)
     && !new RegExp(`(?:不|不要|不是|不选|不能|排除|待确认|未确认)[^，,。；;]{0,12}${label}`, 'u').test(sentence)
     && !uncertain.test(sentence)));
-  const destination = explicitCity || (confirmedCity ? city : input.brief.destination);
-  const productForm = explicitForm || (confirmedForm ? form : input.brief.productForm);
+  const rejectedForm = Boolean(label && new RegExp(`(?:不|不要|不是|不选|不能|排除)[^，,。；;]{0,12}${label}`, 'u').test(userText));
+  const source = input.documentText.replace(/\s+/gu, '');
+  const citySupported = Boolean(city && source.includes(city.replace(/\s+/gu, '')));
+  const destination = explicitCity || (confirmedCity ? city : input.brief.destination || (citySupported ? city : ''));
+  const productForm = explicitForm || (confirmedForm ? form : input.brief.productForm || (rejectedForm ? '' : form));
   const discarded = Boolean((city && destination !== city) || (form && productForm !== form));
   return {
-    reply: discarded ? '请核对接团城市和产品形态；未明确确认的内容不会自动填写。行程建议已整理在下方，可继续讨论或直接修改。' : result.reply,
+    reply: discarded ? '部分创建信息无法从文档原文核对，已保留可验证的建议；请核对下方内容，需要调整可直接修改。' : result.reply,
     brief: { ...result.brief, destination, productForm },
   };
 }

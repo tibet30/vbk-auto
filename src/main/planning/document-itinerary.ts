@@ -24,14 +24,15 @@ export const DOCUMENT_ITINERARY_SCHEMA = {
       route: { type: 'string', description: '当日起止地点，用“-”连接，逐字取自文档，例如“巫山-奉节”' },
       spots: { type: 'array', items: { type: 'string' }, description: '当天游览景点，按文档顺序，名称逐字取自文档，去掉【】' },
       meals: { type: 'array', items: { type: 'string', enum: [...DOCUMENT_MEALS] }, description: '文档写明当天包含的餐食' },
-      lodging: { type: 'string', description: '当晚住宿行政城市短名；文档并列多个城市用“/”连接；返程日或无住宿留空' },
+      lodging: { type: 'string', description: '当晚住宿行政城市短名；文档给出二选一时直接选择一个可住宿的县市，乡镇村与县市并列时选县市；返程日或无住宿留空' },
     },
   },
 } as const;
 
 export const DOCUMENT_ITINERARY_RULES = 'itinerary 必须覆盖文档的每一天，天数与 days 一致。spots 只写可游览的景点、景区、街区或观景台，'
   + '不写餐厅、酒店、接送、车程、自费或自愿项目、“自由活动”等说明，不得增加文档没有的景点。'
-  + 'lodging 只写行政城市短名（如“奉节”），不写酒店名；“温馨的家”等返程表述留空；文档的行程简表与详细行程住宿不一致时，把两处城市都用“/”列出。';
+  + 'lodging 只写行政城市短名（如“奉节”），不写酒店名；“温馨的家”等返程表述留空。'
+  + '同一晚有两个住宿选项时无需询问，直接选择一个具备住宿条件的行政县市；乡、镇、村、景区与县市并列时选择县市，两个县市都可住宿时任选其一，lodging 只输出选中的一项。';
 
 const squash = (value: string) => value.replace(/[\s【】]+/gu, '');
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
@@ -73,6 +74,22 @@ export function documentItineraryProblem(plan: DocumentDayPlan[], documentText: 
 /** 文档并列的住宿城市：运营已回答时只保留该城市，否则保留全部候选待确认。 */
 export function applyLodgingDecision(plan: DocumentDayPlan[], day: number, choices: string[], confirmed?: string): DocumentDayPlan[] {
   return plan.map(row => row.day !== day ? row : { ...row, lodging: confirmed ? [confirmed] : choices });
+}
+
+const NON_ADMINISTRATIVE_STAY = /(?:乡|镇|村|景区|园区|片区|街区|社区|校区|厂区|矿区|库区)$/u;
+
+/**
+ * 从文档住宿二选一中选择可写入酒店平台的行政城市；模型选择有效时优先保留。
+ *
+ * 只接受行政县市：住宿城市要直接落 `hotelCity`，写成古镇、乡、村或景区会让平台
+ * 查不到住宿；两个候选都不是行政县市时返回 undefined，交回原来的「待确认」，
+ * 由运营给出可住宿的城市。
+ */
+export function chooseDocumentLodging(choices: string[], proposed: string[] = []): string | undefined {
+  const candidates = [...new Set(choices.map(toPlatformShortLocationName).filter(Boolean))];
+  const valid = candidates.filter(city => !NON_ADMINISTRATIVE_STAY.test(city));
+  const proposedChoice = proposed.map(toPlatformShortLocationName).find(city => valid.includes(city));
+  return proposedChoice || valid[0];
 }
 
 const CN_DIGITS = '零一二三四五六七八九';

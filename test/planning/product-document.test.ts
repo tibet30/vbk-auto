@@ -47,18 +47,19 @@ test('创建前多轮讨论传入文档、当前字段和既往对话，返回�
   try {
     const address = server.address(); assert.ok(address && typeof address !== 'string');
     const settings = { aiProvider: 'deepseek', deepseekBaseUrl: `http://127.0.0.1:${address.port}/v1`, deepseekModel: 'test', hasDeepSeekKey: true } as Settings;
-    const result = await discussProductDocument({ getSettings: () => settings, apiKey: async () => 'test' }, { documentText: '第一天三峡之巅\n第二天夔州古城', brief, messages: [{ role: 'assistant', content: '是什么产品形态？' }, { role: 'user', content: '跟团游' }] });
+    const result = await discussProductDocument({ getSettings: () => settings, apiKey: async () => 'test' }, { documentText: '第一天奉节三峡之巅\n第二天奉节夔州古城', brief, messages: [{ role: 'assistant', content: '是什么产品形态？' }, { role: 'user', content: '跟团游' }] });
     assert.equal(result.brief.productForm, 'groupTour');
+    assert.equal(result.brief.destination, '奉节');
     assert.equal(result.brief.userIdea, 'D1：三峡之巅（不含餐）\nD2：夔州古城（含早餐）');
     assert.equal(result.itinerary?.length, 2);
-    assert.match(result.reply, /还需要你确认：接团城市/);
-    assert.doesNotMatch(result.reply, /产品形态/);
-    assert.match(request.messages[1].content, /第一天三峡之巅/);
+    assert.match(result.reply, /创建信息已齐全/);
+    assert.doesNotMatch(result.reply, /还需要你确认/);
+    assert.match(request.messages[1].content, /第一天奉节三峡之巅/);
     assert.equal(request.messages.at(-1).content, '跟团游');
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
-test('文档住宿记载冲突时不得把奉节作为已确定住宿，超长回复应自动重试', async () => {
+test('文档住宿二选一时自动采用可住宿行政城市，超长回复应自动重试', async () => {
   const documentText = '行程简表：\nDAY 1 出发地-奉节：三峡之巅-夔州古城-三峡拗口 住宿酒店 奉节\nDAY 2 奉节-巫山-出发地\n详细行程：\n第一天：出发地-奉节 餐：无 住宿：奉节/巫山\n游览三峡之巅。';
   let calls = 0;
   const server = createServer((req, res) => {
@@ -80,11 +81,10 @@ test('文档住宿记载冲突时不得把奉节作为已确定住宿，超长�
     const result = await discussProductDocument({ getSettings: () => settings, apiKey: async () => 'test' }, { documentText, brief, messages: [{ role: 'user', content: '奉节接团、自由行。路线和全部服务尚待确认。' }] });
     assert.equal(calls, 2);
     assert.equal(result.brief.destination, '奉节'); assert.equal(result.brief.productForm, 'freeTravel');
-    // 文档简表写奉节、详细行程写奉节/巫山：模型只给奉节也不能当作已确定，两城并列待确认。
-    assert.equal(result.brief.userIdea, 'D1：【出发地-奉节】三峡之巅-夔州古城-三峡拗口-住奉节或巫山（不含餐）\nD2：【奉节-巫山-出发地】（不含餐）\n【待确认】第一晚住宿城市待确认：文档写奉节或巫山');
+    assert.equal(result.brief.userIdea, 'D1：【出发地-奉节】三峡之巅-夔州古城-三峡拗口-住奉节（不含餐）\nD2：【奉节-巫山-出发地】（不含餐）');
     assert.doesNotMatch(result.brief.userIdea, /白帝城/);
-    assert.doesNotMatch(result.reply, /已确认住宿/);
-    assert.match(result.reply, /住宿城市待确认.*奉节\/巫山/s);
+    assert.match(result.reply, /已选择第一天住宿城市：奉节.*奉节\/巫山/s);
+    assert.doesNotMatch(result.reply, /住宿城市待确认/);
     assert.doesNotMatch(result.reply, /原文路线摘录|均待确认/);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });

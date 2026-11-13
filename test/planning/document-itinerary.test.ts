@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { applyLodgingDecision, chineseOrdinal, documentItineraryProblem, normaliseDocumentItinerary, pendingLodging, renderDocumentItinerary } from '../../src/main/planning/document-itinerary.js';
+import { applyLodgingDecision, chineseOrdinal, chooseDocumentLodging, documentItineraryProblem, normaliseDocumentItinerary, pendingLodging, renderDocumentItinerary } from '../../src/main/planning/document-itinerary.js';
 import { documentRouteIdea } from '../../src/main/planning/document-route-idea.js';
 import { dailyRouteSources } from '../../src/main/agent/daily-route-source.js';
 import { rawAlternativeGroups } from '../../src/main/planning/itinerary-input-contract/alternative.js';
@@ -30,7 +30,7 @@ test('校验：缺天、空安排、文档中不存在的景点都拒绝', () =>
   assert.match(documentItineraryProblem([plan[0]!, { ...plan[1]!, spots: ['白帝城'] }, plan[2]!], doc, 3)!, /白帝城.*没有出现在文档中/);
 });
 
-test('渲染：逐日一行，住宿并列时写待确认；运营确认后只保留确认城市', () => {
+test('渲染：逐日一行；住宿二选一自动选择可住宿行政城市', () => {
   const plan = normaliseDocumentItinerary(raw);
   const pending = renderDocumentItinerary(plan, pendingLodging(plan), 1000);
   assert.equal(pending, [
@@ -43,6 +43,9 @@ test('渲染：逐日一行，住宿并列时写待确认；运营确认后只�
   const idea = renderDocumentItinerary(confirmed, pendingLodging(confirmed), 1000);
   assert.match(idea, /^D1：【全国各地-巫山】三峡龙脊-神女大扶梯-住巫山（含晚餐）$/m);
   assert.doesNotMatch(idea, /待确认/);
+  assert.equal(chooseDocumentLodging(['白嘎乡', '比如县']), '比如');
+  assert.equal(chooseDocumentLodging(['奉节', '巫山'], ['巫山']), '巫山');
+  assert.equal(chooseDocumentLodging(['白嘎乡', '扎尕那村']), undefined, '都不是行政县市时交回待确认');
 });
 
 test('规范文本被下游逐日解析正确读取：待确认段不并入最后一天，住宿并列不锁成景点二选一', () => {

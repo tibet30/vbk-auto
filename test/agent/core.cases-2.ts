@@ -301,10 +301,24 @@ test("AgentCore requires scope, product version, and account binding for writes"
   assert.ok(unapproved.events.some((event) => /需要当前意图/.test(event.content)));
 });
 
+/**
+ * send 返回后循环要经过一次动态 import 才会调用模型（core-model.ts 里的
+ * trackProductExecution），单次 setImmediate 在该模块首次加载时不够用。
+ * 这里轮询等待「模型确实开始」，断言强度不变：模型没启动仍然失败。
+ */
+async function waitForModelStart(started: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 250 && !started(); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.equal(started(), true, "模型调用必须在 send 返回后启动");
+}
+
 test("send returns before a deferred model finishes", async () => {
   let release!: () => void;
   const { core } = harness([{ content: "done" }]);
   const original = (core as unknown as { deps: AgentCoreDependencies }).deps.model!;
   (core as unknown as { deps: AgentCoreDependencies }).deps.model = { complete: async (input) => { await new Promise<void>((resolve) => { release = resolve; }); return original.complete(input); } };
-  const snapshot = await core.send("fast", "go"); assert.equal(snapshot.run?.status, "running"); await new Promise((resolve) => setImmediate(resolve)); release(); await core.idle("fast");
+  const snapshot = await core.send("fast", "go"); assert.equal(snapshot.run?.status, "running");
+  await waitForModelStart(() => typeof release === "function");
+  release(); await core.idle("fast");
 });

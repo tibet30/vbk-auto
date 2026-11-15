@@ -36,6 +36,8 @@
     "test:e2e:export": "python3 scripts/product-regression/export.py"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.92",
+    "ai": "^7.0.173",
     "better-sqlite3": "^13.0.2",
     "electron-updater": "^6.8.9",
     "lucide-react": "^1.28.0",
@@ -58,10 +60,10 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "jszip": "^3.10.2",
+    "less": "^4.2.2",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "vite": "^8.2.0",
-    "wait-on": "^9.1.0",
-    "less": "^4.2.2"
+    "wait-on": "^9.1.0"
   }
 }

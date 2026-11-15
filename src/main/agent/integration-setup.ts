@@ -20,7 +20,7 @@ import { DbOrchestratorRuntime } from "../planning/runtime.js";
 import { productNotFound } from "../infrastructure/db-errors.js";
 import { AgentCore } from "./core.js";
 import { SAFE_STARTUP_EXTERNAL_ACTION_BLOCK_REASON } from "./safe-startup-agent-guard.js";
-import { OpenAIAgentModel } from "./openai-model.js";
+import { createAgentModel } from "./agent-model-factory.js";
 import { createAgentBusinessTools, agentProductVersion } from "./integration.js";
 import { agentPlannerContextForRun, agentTaskContext } from "./integration-context.js";
 import { agentCompletionGate, approvalForRun, buildAgentApproval, recoverEquivalentApproval } from "./integration-gates.js";
@@ -67,7 +67,7 @@ export function installProductAgent(context: MainIpcContext, resourceQueries?: R
       const profile = aiProviderConfig(settings, settings.aiProvider);
       const key = await apiKey(settings.aiProvider);
       if (!key) throw new Error("请先在设置中配置当前 AI 服务的密钥。");
-      return new OpenAIAgentModel({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model,
+      return createAgentModel({ apiKey: key, baseUrl: profile.baseUrl, model: profile.model,
         extraParams: planningTransportOptions(settings.aiProvider).extraParams,
         onUsage: (usage) => recordAgentUsage(db, localProductId, {
           id: crypto.randomUUID(), source: "chat.reply", stage: "agent", model: profile.model, provider: settings.aiProvider,

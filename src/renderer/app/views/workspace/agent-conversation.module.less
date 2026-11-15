@@ -78,7 +78,7 @@
 .activity > summary::-webkit-details-marker { display: none; }
 .activity > summary::after { content: '›'; display: inline-block; font-size: 16px; font-weight: 600; line-height: 1; transform: rotate(0deg); transition: transform 160ms ease-out; }
 .activity[open] > summary::after { transform: rotate(90deg); }
-.activityBody { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-control); background: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; max-height: 240px; overflow-y: auto; color: var(--foreground); display: flex; flex-direction: column; gap: 6px; }
+.activityBody { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-control); background: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; overflow-y: auto; color: var(--foreground); display: flex; flex-direction: column; gap: 6px; }
 
 .toolRow { border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); }
 .toolRow > summary { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 6px 10px; cursor: pointer; list-style: none; font-size: 12px; color: var(--foreground); }
@@ -86,14 +86,14 @@
 .toolStatus { margin-left: auto; color: var(--muted-foreground); font-size: 11px; }
 .toolRowBody { display: grid; gap: 8px; padding: 0 10px 10px; border-top: 1px solid var(--border); }
 .toolRowBody strong { display: block; margin: 8px 0 4px; font-size: 11px; color: var(--muted-foreground); }
-.toolRowBody pre { margin: 0; padding: 8px; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: var(--radius-control); background: var(--muted); color: var(--foreground); font-size: 12px; }
+.toolRowBody pre { margin: 0; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: var(--radius-control); background: var(--muted); color: var(--foreground); font-size: 12px; }
 
 .systemNote { max-width: calc(94% - 40px); margin-left: 40px; align-self: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); color: var(--muted-foreground); font-size: 12px; }
 .systemNote .meta { margin-bottom: 5px; }
 .systemNote .messageContent { font-size: 12px; color: var(--foreground); }
 .details { margin-top: 8px; font-size: 12px; color: var(--muted-foreground); }
 .details summary { cursor: pointer; padding: 4px 0; }
-.details pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow-y: auto; padding: 8px; background: var(--muted); color: var(--foreground); }
+.details pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; background: var(--muted); color: var(--foreground); }
 
 .empty { color: var(--muted-foreground); line-height: 1.8; margin: 12px 0; }
 .historyPager { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--muted); color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
@@ -129,3 +129,23 @@
 
 .activity[data-expanded='true'] .activityBody { max-height: none; background: transparent; padding: 6px 0; }
 .assistantProse { background: transparent; padding: 6px 0; }
+
+.resultCard { border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface); overflow: hidden; }
+.resultHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--muted); }
+.resultTitle { font-size: 12px; font-weight: 600; color: var(--foreground); }
+.resultMeta { color: var(--muted-foreground); font-size: 11px; }
+.resultRow { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.6; }
+.resultKey { flex: 0 0 auto; color: var(--muted-foreground); font-size: 11px; }
+.resultValue { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--foreground); }
+.resultBadge { flex: 0 0 auto; margin-left: auto; padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; white-space: nowrap; }
+.resultBadge[data-ok='true'] { border-color: color-mix(in srgb, var(--success) 40%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--surface)); color: var(--success); }
+.resultChips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.resultChip { padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); font-size: 11px; line-height: 1.7; }
+.resultNotice { padding: 7px 10px; border-top: 1px solid var(--border); color: var(--warning); font-size: 12px; line-height: 1.6; }
+.resultEmpty { padding: 8px 10px; border-top: 1px solid var(--border); color: var(--muted-foreground); font-size: 12px; }
+.resultFailure { padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--destructive) 32%, var(--border)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--destructive) 6%, var(--surface)); color: var(--destructive-foreground); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.resultText { padding: 8px 10px; color: var(--foreground); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
+.resultRaw { font-size: 12px; color: var(--muted-foreground); }
+.resultRaw > summary { cursor: pointer; padding: 6px 10px; color: var(--muted-foreground); }
+.resultRaw pre { margin: 0; padding: 8px 10px; border-top: 1px solid var(--border); color: var(--foreground); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.toolRowBody > .resultRaw { border-top: 1px solid var(--border); }

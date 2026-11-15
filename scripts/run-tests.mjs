@@ -65,7 +65,13 @@ const receiptFile = receiptDirectory && path.join(receiptDirectory, 'results.jso
 let exitCode = 1;
 try {
   const result = spawnSync(process.execPath, [
-    "--import", "tsx", "--test",
+    "--import", "tsx",
+    // 渲染层组件测试会 import CSS Modules；生产由 Vite 处理，测试侧用这个 loader
+    // 把 .less 解析成类名代理，否则 node 会因未知扩展名直接失败。
+    // 只在仓库内存在时加载：运行器会被复制到临时 fixture 目录里做自检。
+    ...(existsSync(path.join(root, "test/support/less-hooks.mjs"))
+      ? ["--import", path.join(root, "test/support/less-hooks.mjs")] : []),
+    "--test",
     mode === "e2e-live" ? "--test-timeout=360000" : "--test-timeout=60000",
     "--test-concurrency=1",
     ...(receiptFile ? ["--test-reporter=tap", "--test-reporter=./scripts/product-regression-reporter.mjs",

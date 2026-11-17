@@ -53,7 +53,7 @@ export function AppTasksPage({ model }: { model: AppModel }) {
       <div className={styles.tasksContainer}>
         <header className={styles.tasksHead}>
           <div>
-            <h1>任务中心</h1>
+            <h1>自动化运行</h1>
             <p className={shared.viewSub}>{workflowTasks.length} 个任务 · {activeCount ? `${activeCount} 个正在执行` : "当前没有运行中的任务"}</p>
           </div>
           <nav className={styles.filters} aria-label="筛选任务">

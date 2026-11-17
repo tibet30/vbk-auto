@@ -1,0 +1,118 @@
+/* 设置页「外部工具（MCP）」卡片：沿用浅色工作台语言，编辑区用等宽字体。 */
+.block {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+
+.heading { display: flex; align-items: flex-start; gap: 10px; }
+.icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--ai-teal) 10%, transparent);
+  color: var(--ai-teal);
+}
+.headingBody { min-width: 0; margin-right: auto; }
+.headingBody h2 { margin: 0 0 3px; font-size: 14px; }
+.headingBody p { margin: 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+
+.status {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status[data-tone='success'] { background: color-mix(in srgb, var(--success) 9%, var(--surface)); color: var(--success); }
+.status[data-tone='danger'] { background: color-mix(in srgb, var(--destructive) 9%, var(--surface)); color: var(--destructive); }
+
+.hint { display: flex; align-items: center; gap: 6px; margin: 14px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.5; }
+
+.rows { display: grid; gap: 10px; margin-top: 12px; }
+.row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--bg, var(--surface));
+}
+.rowHead { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; }
+.rowBody { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.6fr) 92px; gap: 6px; }
+
+.input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.input:focus-visible { outline: none; border-color: var(--foreground); }
+.input::placeholder { color: var(--muted-foreground); font-family: inherit; }
+
+.remove {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--muted-foreground);
+}
+.remove:hover { border-color: color-mix(in srgb, var(--destructive) 40%, var(--border)); color: var(--destructive); }
+
+.statusLine { margin: 0; display: flex; align-items: center; gap: 5px; color: var(--muted-foreground); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.statusLine[data-tone='success'] { color: var(--success); }
+.statusLine[data-tone='danger'] { color: var(--destructive); }
+.statusLine[data-tone='muted'] { color: var(--muted-foreground); }
+.inlineAction {
+  margin-left: 6px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 10px;
+}
+.inlineAction:disabled { opacity: .55; cursor: not-allowed; }
+.inlineAction:hover:not(:disabled) { background: var(--muted); }
+.error { margin: 0; display: flex; align-items: flex-start; gap: 5px; color: var(--destructive); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.change { margin: 0; display: flex; align-items: flex-start; gap: 5px; color: var(--warning, var(--muted-foreground)); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.notice { margin: 0; color: var(--success); font-size: 11px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.actions button {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 11px;
+}
+.actions button:disabled { opacity: .55; cursor: not-allowed; }
+.primary { border-color: var(--foreground) !important; background: var(--foreground) !important; color: var(--primary-foreground) !important; }
+.secondary:hover:not(:disabled) { background: var(--muted); }
+
+@media (max-width: 720px) {
+  .rowHead,
+  .rowBody { grid-template-columns: minmax(0, 1fr); }
+  .remove { width: 100%; }
+}

@@ -1,11 +1,15 @@
 /* VBK Desktop — workspace home (入口页)
  * 登录打开时，VBK 页面是唯一任务面；工作台首页卸载，BrowserView 占满内容区。 */
 
-/* 默认（登录未打开）：保留原 max-width + 单列布局。 */
+/* 智能体首页占满内容区；最近任务栏由内部布局管理。 */
 .homeStage {
-  width: var(--content-max);
-  padding: 16px 16px 0;
-  margin: 0 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  overflow: hidden;
 }
 
 /* 登录打开：占满父容器高度的单一 VBK stage。 */
@@ -16,46 +20,4 @@
   margin: 0;
   display: block;
   background: transparent;
-}
-
-.homeMain {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  padding: 16px 16px 0;
-  overflow-y: auto;
-}
-
-.workspaceHomeHead {
-  margin-bottom: 12px;
-}
-
-.workspaceHomeHead h1,
-.workspaceHomeTitle {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-}
-
-.workspaceHomeGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--pad-sm);
-}
-
-@media (max-width: 880px) {
-  .workspaceHomeGrid { grid-template-columns: 1fr; }
-}
-
-/* WorkbenchModule action 区内承载多个按钮的并排容器。
- * WorkbenchModule 自身的 moduleFoot 是 space-between 布局：左 hint + 右 action。
- * 这里只是 action 区的局部包装，使用 inline-flex 维持自然宽度，避免撑开父布局。 */
-.moduleActions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
 }

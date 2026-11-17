@@ -66,8 +66,8 @@ export function AppRail({ model }: { model: AppModel }) {
           setLoginPanelOpen(false);
           closeAccountMenus();
         }}
-        aria-label="工作台"
-        title="工作台"
+        aria-label="智能体"
+        title="智能体"
       >
         <BriefcaseBusiness className={styles.icon} />
       </button>
@@ -94,8 +94,8 @@ export function AppRail({ model }: { model: AppModel }) {
           setView("tasks");
           closeAccountMenus();
         }}
-        aria-label="任务中心"
-        title="任务中心"
+        aria-label="自动化运行"
+        title="自动化运行"
       >
         <ListChecks className={styles.icon} />
       </button>

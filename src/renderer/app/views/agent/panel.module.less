@@ -1,0 +1,160 @@
+/* 右侧运行工作面板：只呈现 main 进程给出的运行事实，不自造状态。 */
+.panel {
+  /* tokens.css 未定义这三个别名，这里回落到真实令牌，避免样式静默失效。 */
+  --success-green: var(--success);
+  --warning-amber: var(--warning);
+  --radius-small: var(--radius-sm);
+  width: 320px;
+  min-width: 300px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.panel button:disabled { opacity: .55; cursor: not-allowed; }
+
+.head { padding: 13px 16px 12px; border-bottom: 1px solid var(--border); }
+.headTop { display: flex; align-items: center; gap: 6px; }
+.headTop svg { color: var(--ai-teal); }
+.headTop h2 { margin: 0; color: var(--foreground); font-size: var(--fs-sm); font-weight: 600; }
+.intent { margin: 7px 0 0; color: var(--muted-foreground); font-size: var(--fs-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.statusLine { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.step { color: var(--muted-foreground); font-family: var(--font-mono); font-size: 10px; }
+.runError { margin: 7px 0 0; display: flex; align-items: flex-start; gap: 5px; color: var(--destructive); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.runBar { margin-top: 9px; display: flex; align-items: center; }
+.resume {
+  height: 26px;
+  margin-right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--foreground);
+  border-radius: var(--radius-small);
+  background: var(--foreground);
+  color: var(--primary-foreground);
+  font-size: 10px;
+}
+.resume:disabled { opacity: .55; }
+.cancel {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.cancel:hover:not(:disabled) { border-color: color-mix(in srgb, var(--destructive) 40%, var(--border)); color: var(--destructive); }
+
+.status {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.status[data-tone='active'] { border-color: color-mix(in srgb, var(--ai-teal) 38%, var(--border)); color: var(--ai-teal-foreground, var(--ai-teal)); }
+.status[data-tone='success'] { border-color: color-mix(in srgb, var(--success-green) 38%, var(--border)); color: var(--success-green); }
+.status[data-tone='warning'] { border-color: color-mix(in srgb, var(--warning-amber) 38%, var(--border)); color: var(--warning-amber); }
+.status[data-tone='danger'] { border-color: color-mix(in srgb, var(--destructive) 38%, var(--border)); color: var(--destructive); }
+
+.body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 20px; }
+
+.approval { padding: 10px 11px 11px; border: 1px solid color-mix(in srgb, var(--warning-amber) 32%, var(--border)); border-radius: var(--radius-control); background: var(--surface); }
+.approvalHead { display: flex; align-items: center; gap: 6px; }
+.approvalHead svg { color: var(--warning-amber); }
+.approvalHead strong { color: var(--foreground); font-size: var(--fs-sm); font-weight: 600; }
+.risk { margin-left: auto; padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-small); color: var(--muted-foreground); font-size: 10px; line-height: 16px; }
+.risk[data-risk='medium'] { border-color: color-mix(in srgb, var(--warning-amber) 45%, var(--border)); color: var(--warning-amber); }
+.risk[data-risk='high'] { border-color: color-mix(in srgb, var(--destructive) 45%, var(--border)); color: var(--destructive); }
+.facts { margin: 9px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; font-size: var(--fs-xs); }
+.facts dt { color: var(--muted-foreground); }
+.facts dd { margin: 0; color: var(--foreground); overflow-wrap: anywhere; }
+.mono { font-family: var(--font-mono); font-size: 10px; }
+.impact { margin: 9px 0 0; padding: 7px 8px; border-radius: var(--radius-small); background: var(--muted); color: var(--foreground); font-size: var(--fs-xs); line-height: 1.55; overflow-wrap: anywhere; }
+.impact b { margin-right: 5px; color: var(--muted-foreground); font-weight: 500; }
+
+.diff {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diffLine { display: block; }
+.diffLine[data-line='add'] { color: var(--success-green); }
+.diffLine[data-line='remove'] { color: var(--destructive); }
+.diffLine[data-line='context'] { color: var(--muted-foreground); }
+
+.actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+.actions button,
+.rowActions button {
+  flex: 1 1 100%;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--fs-xs);
+}
+/* 行内按钮比审批按钮小一号，避免和收据列表抢注意力。 */
+.rowActions { margin-top: 4px; display: flex; }
+.rowActions button { flex: 0 0 auto; height: 24px; padding: 0 8px; border-radius: var(--radius-small); color: var(--muted-foreground); font-size: 10px; }
+.rowActions button:hover:not(:disabled) { color: var(--foreground); background: var(--muted); }
+.primary { border-color: var(--foreground); background: var(--foreground); color: var(--primary-foreground); }
+.primary:disabled { border-color: var(--border); background: var(--muted); color: var(--muted-foreground); }
+.secondary:hover:not(:disabled) { background: var(--muted); }
+.deny { border-color: color-mix(in srgb, var(--destructive) 40%, var(--border)); color: var(--destructive); }
+.deny:hover:not(:disabled) { background: color-mix(in srgb, var(--destructive) 7%, var(--surface)); }
+
+.section { margin-top: 14px; }
+.sectionHead { margin: 0 0 5px; display: flex; align-items: baseline; gap: 6px; color: var(--foreground); font-size: var(--fs-xs); font-weight: 500; }
+.sectionHead span { margin-left: auto; color: var(--muted-foreground); font-size: 10px; font-weight: 400; }
+.rows { display: grid; }
+.row { border-top: 1px solid var(--border); }
+.row:last-child { border-bottom: 1px solid var(--border); }
+.rowPlain { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; padding: 7px 0; }
+.rowSummary { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 6px; padding: 7px 0; list-style: none; cursor: pointer; }
+.rowSummary::-webkit-details-marker { display: none; }
+.rowSummary:hover { background: var(--muted); }
+.time { padding-top: 1px; color: var(--subtle, var(--muted-foreground)); font-family: var(--font-mono); font-size: 10px; }
+.rowMain { min-width: 0; display: grid; gap: 2px; }
+.rowTitle { min-width: 0; display: flex; align-items: center; gap: 6px; }
+.rowName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-size: var(--fs-xs); }
+.rowSummaryText { color: var(--muted-foreground); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.rowSummaryText[data-error='true'] { color: var(--destructive); }
+.fileList { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.fileList span { padding: 0 5px; border: 1px solid var(--border); border-radius: var(--radius-small); color: var(--muted-foreground); font-family: var(--font-mono); font-size: 9px; line-height: 15px; }
+.receiptBody { margin: 0 0 8px 40px; display: grid; gap: 3px; color: var(--foreground); font-size: 10px; line-height: 1.55; }
+.receiptBody p { margin: 0; overflow-wrap: anywhere; }
+.receiptBody b { margin-right: 5px; color: var(--muted-foreground); font-weight: 500; }
+
+.empty { margin-top: 12px; padding: 13px 10px; border: 1px dashed var(--border); border-radius: var(--radius-control); color: var(--muted-foreground); font-size: var(--fs-xs); text-align: center; }
+.empty p { margin: 0; }
+.empty ul { margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; list-style: none; }
+.empty li { padding: 0 6px; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--muted); color: var(--foreground); font-size: 10px; line-height: 16px; }
+
+@media (max-width: 880px) {
+  .panel { width: 280px; min-width: 260px; max-width: 280px; }
+}

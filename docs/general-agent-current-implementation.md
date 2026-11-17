@@ -1,6 +1,6 @@
 # 通用智能体当前实现细节
 
-本文件是 [交接文档](/Users/cisco/Documents/vbk-auto/docs/general-agent-implementation-handoff.md) 的实现细节附录：
+续做入口是 [续做交接](/Users/cisco/Documents/vbk-auto/docs/general-agent-continuation-handoff.md)。本文件是 [交接文档](/Users/cisco/Documents/vbk-auto/docs/general-agent-implementation-handoff.md) 的实现细节附录：
 记录各阶段「已经真实可用」的部分、关键不变量与仍未做的边界。
 交接文档只保留入口、业务不变量、验收要求与实施步骤。
 

@@ -38,6 +38,9 @@
 - 三人同游 adapter（等业务侧 Token 免登录方案）；
 - 产品域其余写动作（资源绑定 / 换封面 / 发布）与 Skill 版本管理。
 
+> **续做请先读 [续做交接（面向下一个执行模型）](/Users/cisco/Documents/vbk-auto/docs/general-agent-continuation-handoff.md)**：
+> 那里有当前提交状态、模块地图、验证命令、真实窗口调试方法与待办。本文保留需求来源、产品决策与原始实施步骤。
+
 ## 接手入口
 
 开始实施前，按顺序完整阅读：

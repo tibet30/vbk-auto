@@ -1,6 +1,7 @@
 # VBK 后台写入实施计划（第 5 步剩余部分）
 
 更新时间：2026-11-17  
+续做入口：[续做交接](/Users/cisco/Documents/vbk-auto/docs/general-agent-continuation-handoff.md)  
 状态：范围已确认，等一处业务规则确认后开工。
 
 ## 已确认的输入

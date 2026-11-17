@@ -98,6 +98,8 @@ const ipcRegistrarSource = [
   "src/main/ipc/planning-v2-ipc.ts",
   "src/main/ipc/app-auth-ipc.ts",
   "src/main/ipc/agent-ipc.ts",
+  "src/main/ipc/agent-workspace-ipc.ts",
+  "src/main/ipc/planning-ipc/ipc-handlers.ts",
   "src/main/ipc/memory-ipc.ts",
   "src/main/ipc/update-ipc.ts",
 ].map(readSource).join("\n");

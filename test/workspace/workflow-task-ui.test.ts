@@ -6,11 +6,11 @@ import path from "node:path";
 const root = path.resolve(import.meta.dirname, "../..");
 const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
 
-test("主菜单固定为产品之后紧跟任务中心", () => {
+test("主菜单固定为智能体、产品、自动化运行", () => {
   const rail = read("src/renderer/app/views/shell/Rail.tsx");
-  const workspace = rail.indexOf('aria-label="工作台"');
+  const workspace = rail.indexOf('aria-label="智能体"');
   const products = rail.indexOf('aria-label="产品"');
-  const tasks = rail.indexOf('aria-label="任务中心"');
+  const tasks = rail.indexOf('aria-label="自动化运行"');
   const logs = rail.indexOf('aria-label="运行日志"');
   assert.ok(workspace < products && products < tasks && tasks < logs);
 });

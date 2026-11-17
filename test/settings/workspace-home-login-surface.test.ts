@@ -38,6 +38,7 @@ function read(relPath: string): string {
 }
 
 const homeIndexSrc = read("src/renderer/app/views/workspace-home/index.tsx");
+const agentHomeSrc = read("src/renderer/app/views/agent/AgentHome.tsx");
 const homePanelSrc = read("src/renderer/app/views/workspace-home/LoginBrowserPanel.tsx");
 const homePanelLessSrc = read("src/renderer/app/views/workspace-home/login-browser.module.less");
 const homeIndexLessSrc = read("src/renderer/app/views/workspace-home/index.module.less");
@@ -79,15 +80,10 @@ test("VBK 刷新状态后同步刷新已记录账号列表", () => {
 });
 
 test("工作台空产品时仍可进入产品列表", () => {
-  const productListButton = homeIndexSrc.match(
-    /<button[\s\S]*?onClick=\{openProductList\}[\s\S]*?>\s*查看产品\s*<\/button>/,
-  )?.[0];
-
-  assert.ok(productListButton, "工作台必须保留“查看产品”入口。");
-  assert.doesNotMatch(
-    productListButton,
-    /disabled=/,
-    "空产品列表是可安全查看的；“查看产品”不能因 products.length 为 0 而变成死按钮。",
+  assert.match(
+    agentHomeSrc,
+    /<button type="button" onClick=\{model\.openProductList\}>产品列表<\/button>/,
+    "智能体首页必须保留产品列表快速入口，且不能因 products.length 为 0 而禁用。",
   );
 });
 
@@ -113,8 +109,8 @@ test("workspace-home 必须在 loginPanelOpen=true 时挂载 LoginBrowserPanel",
 test("workspace-home 在登录打开时使用单一 VBK stage，不再 50/50 分栏", () => {
   assert.match(
     homeIndexSrc,
-    /\{!loginPanelOpen\s*&&\s*<div\s+className=\{styles\.homeMain\}>/,
-    "登录打开时工作台首页必须卸载，避免与 VBK 页面各占 50%。",
+    /\{!loginPanelOpen\s*&&\s*<AgentWorkspacePage\s+model=\{model\}\s*\/>\}/,
+    "登录打开时智能体首页必须卸载，避免与 VBK 页面各占 50%。",
   );
   assert.doesNotMatch(
     homeIndexLessSrc,
@@ -324,12 +320,12 @@ test("登录面板打开期间不自动探测，必须等待用户手动确认",
   );
   assert.match(
     derivedSrc,
-    /onPageReady\(\(\) => \{[\s\S]*?if \(loginPanelOpenRef\.current\) return;[\s\S]*?checkVbkLogin\(\)/,
+    /onPageReady\(\(\) => \{[\s\S]*?if \(loginPanelOpenRef\.current\) return;[\s\S]*?checkVbkLogin\(true\)/,
     "登录面板打开时 page-ready 自动探测必须跳过。",
   );
   assert.match(
     derivedSrc,
-    /setTimeout\(\(\) => \{[\s\S]*?if \(loginPanelOpenRef\.current\) return;[\s\S]*?checkVbkLogin\(\)/,
+    /setTimeout\(\(\) => \{[\s\S]*?if \(loginPanelOpenRef\.current\) return;[\s\S]*?checkVbkLogin\(true\)/,
     "登录面板打开时启动兜底自动探测也必须跳过。",
   );
   assert.doesNotMatch(

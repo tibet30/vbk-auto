@@ -9,6 +9,7 @@ import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
 import { registerAgentIpc } from "./ipc/agent-ipc.js";
 import { registerMemoryIpc } from "./ipc/memory-ipc.js";
 import { registerUpdateIpc } from "./ipc/update-ipc.js";
+import { registerAgentWorkspaceIpc } from "./ipc/agent-workspace-ipc.js";
 
 // 规划入口仅由 v2 注册。旧 registerPlanningIpc（src/main/ipc/planning-ipc.ts）
 // 是 deprecated 历史文件，仅留作单测直接驱动 plan-orchestrator.runPlan。
@@ -32,6 +33,7 @@ export function registerMainIpc(
   registerSettingsIpc(context);
   registerPlanningV2Ipc(context);
   registerAgentIpc(context);
+  registerAgentWorkspaceIpc(context);
   registerMemoryIpc(context);
   registerUpdateIpc(updateService);
 }

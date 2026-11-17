@@ -25,6 +25,26 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { VbkApi } from "../shared/contracts.js";
 
 const api: VbkApi = {
+  agentWorkspace: {
+    list: () => ipcRenderer.invoke("agentWorkspace:list"),
+    create: (input) => ipcRenderer.invoke("agentWorkspace:create", input),
+    get: (id) => ipcRenderer.invoke("agentWorkspace:get", id),
+    update: (id, patch) => ipcRenderer.invoke("agentWorkspace:update", id, patch),
+    send: (id, content) => ipcRenderer.invoke("agentWorkspace:send", id, content),
+    approve: (id, toolCallId, scope) => ipcRenderer.invoke("agentWorkspace:approve", id, toolCallId, scope),
+    reject: (id, toolCallId, reason) => ipcRenderer.invoke("agentWorkspace:reject", id, toolCallId, reason),
+    reconcile: (id, toolCallId) => ipcRenderer.invoke("agentWorkspace:reconcile", id, toolCallId),
+    openArtifact: (id, receiptId, mode) => ipcRenderer.invoke("agentWorkspace:openArtifact", id, receiptId, mode),
+    previewArtifact: (id, receiptId) => ipcRenderer.invoke("agentWorkspace:previewArtifact", id, receiptId),
+    capabilities: () => ipcRenderer.invoke("agentWorkspace:capabilities"),
+    externalTools: () => ipcRenderer.invoke("agentWorkspace:externalTools"),
+    saveExternalTools: (servers) => ipcRenderer.invoke("agentWorkspace:saveExternalTools", servers),
+    refreshExternalTools: () => ipcRenderer.invoke("agentWorkspace:refreshExternalTools"),
+    setExternalToolConnection: (serverId, connected) => ipcRenderer.invoke("agentWorkspace:setExternalToolConnection", serverId, connected),
+    resume: (id) => ipcRenderer.invoke("agentWorkspace:resume", id),
+    cancel: (id) => ipcRenderer.invoke("agentWorkspace:cancel", id),
+    selectDirectory: (id) => ipcRenderer.invoke("agentWorkspace:selectDirectory", id),
+  },
   workspace: { get: id => ipcRenderer.invoke('workspace:get', id) },
   agent: {
     get: (id) => ipcRenderer.invoke("agent:get", id),

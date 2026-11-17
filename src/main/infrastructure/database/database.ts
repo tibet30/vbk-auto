@@ -30,6 +30,8 @@ import { agentMethods } from "./database/agent.js";
 import { memoryMethods } from "./database/memory.js";
 import { operationLogMethods, operationLogStatics } from "./database/operation-log.js";
 import { itineraryReviewUnlockMethods } from "./database/itinerary-review-unlock.js";
+import { agentWorkspaceMethods } from "./database/agent-workspace.js";
+import { agentRuntimeMethods } from "./database/agent-runtime.js";
 import type { VbkDatabasePrototype } from "./database/types.js";
 import type { AccountFixedInfoField } from "../../../shared/contracts.js";
 
@@ -63,6 +65,8 @@ Object.assign(VbkDatabase.prototype, agentMethods);
 Object.assign(VbkDatabase.prototype, memoryMethods);
 Object.assign(VbkDatabase.prototype, operationLogMethods);
 Object.assign(VbkDatabase.prototype, itineraryReviewUnlockMethods);
+Object.assign(VbkDatabase.prototype, agentWorkspaceMethods);
+Object.assign(VbkDatabase.prototype, agentRuntimeMethods);
 
 Object.assign(VbkDatabase, settingsStatics);
 Object.assign(VbkDatabase, operationLogStatics);

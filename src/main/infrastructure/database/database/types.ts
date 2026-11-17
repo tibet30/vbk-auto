@@ -32,7 +32,28 @@ import type {
   UserMemory,
   UserMemoryEvidence,
 } from "../../../../shared/contracts.js";
+import type {
+  AgentThread,
+  AgentThreadDetail,
+  AgentThreadMessage,
+  AgentThreadMessageRole,
+  AgentThreadStatus,
+  AgentThreadSummary,
+  CreateAgentThreadInput,
+  UpdateAgentThreadInput,
+} from "../../../../shared/contracts-agent-workspace.js";
 import type { CachedCtripPoiAvailability } from "../parts/ctrip-poi-availability-cache.js";
+import type { AgentTranscriptEntry } from "../parts/agent-runtime.js";
+import type {
+  AgentActionReceipt,
+  AgentApprovalScope,
+  AgentPermissionGrant,
+  AgentReceiptStatus,
+  AgentRun,
+  AgentRunStatus,
+  AgentToolCallRecord,
+  AgentToolCallStatus,
+} from "../../../../shared/contracts-agent-runtime.js";
 import type { OperationLogRow } from "../parts/operation-log.js";
 import type { ProductListPage } from "../parts/products.js";
 import type { ReplaceProductAndSatisfyResearchTasksOptions } from "../parts/replace-product-with-research-tasks.js";
@@ -40,6 +61,70 @@ import type { ItineraryReviewUnlockState } from "../../../../shared/itinerary-re
 import type { VerifiedPoiMapping } from "../../../planning/types.js";
 
 export interface VbkDatabasePrototype {
+  // generic agent workspace
+  createAgentThread(ownerUserId: number, input: CreateAgentThreadInput): AgentThread;
+  getAgentThread(ownerUserId: number, id: string): AgentThread | undefined;
+  listAgentThreads(ownerUserId: number): AgentThread[];
+  updateAgentThread(ownerUserId: number, id: string, patch: UpdateAgentThreadInput & {
+    summary?: AgentThreadSummary;
+    runtimeStatus?: AgentThreadStatus;
+  }): AgentThread;
+  addAgentThreadMessage(ownerUserId: number, threadId: string, role: AgentThreadMessageRole, content: string): AgentThreadMessage;
+  listAgentThreadMessages(ownerUserId: number, threadId: string): AgentThreadMessage[];
+  getAgentThreadDetail(ownerUserId: number, id: string): AgentThreadDetail;
+
+  // generic agent runtime: runs / tool calls / grants / receipts
+  createAgentRun(ownerUserId: number, input: { threadId: string; intent: string; maxSteps?: number }): AgentRun;
+  getAgentRun(ownerUserId: number, id: string): AgentRun | undefined;
+  listAgentRuns(ownerUserId: number, threadId: string, limit?: number): AgentRun[];
+  findActiveAgentRun(ownerUserId: number, threadId: string): AgentRun | undefined;
+  updateAgentRun(ownerUserId: number, id: string, patch: {
+    status?: AgentRunStatus;
+    step?: number;
+    maxSteps?: number;
+    error?: string | null;
+    completedAt?: string | null;
+  }): AgentRun;
+  getAgentRunTranscript(ownerUserId: number, runId: string): AgentTranscriptEntry[];
+  saveAgentRunTranscript(ownerUserId: number, runId: string, transcript: readonly AgentTranscriptEntry[]): void;
+  insertAgentToolCall(ownerUserId: number, input: Parameters<typeof import("../parts/agent-runtime.js").insertAgentToolCall>[2]): AgentToolCallRecord;
+  getAgentToolCall(ownerUserId: number, id: string): AgentToolCallRecord | undefined;
+  findAgentToolCallByIdempotencyKey(idempotencyKey: string): AgentToolCallRecord | undefined;
+  updateAgentToolCall(ownerUserId: number, id: string, patch: {
+    status?: AgentToolCallStatus;
+    error?: string | null;
+    receiptId?: string | null;
+    targetKey?: string | null;
+    summary?: string;
+    diff?: string | null;
+  }): AgentToolCallRecord;
+  listAgentToolCalls(ownerUserId: number, runId: string): AgentToolCallRecord[];
+  listAgentToolCallsByThread(ownerUserId: number, threadId: string, limit?: number): AgentToolCallRecord[];
+  markInterruptedAgentToolCallsUncertain(detail: string): number;
+  recoverInterruptedAgentRuns(detail: string): number;
+  createAgentPermissionGrant(ownerUserId: number, input: {
+    threadId: string;
+    runId: string;
+    toolCallId: string;
+    scope: AgentApprovalScope;
+    action: string;
+    targetKey: string;
+    accountKey: string;
+  }): AgentPermissionGrant;
+  listAgentPermissionGrants(ownerUserId: number, threadId: string): AgentPermissionGrant[];
+  revokeAgentPermissionGrants(ownerUserId: number, threadId: string, reason: string): number;
+  saveAgentActionReceipt(ownerUserId: number, input: Parameters<typeof import("../parts/agent-runtime-approval.js").saveAgentActionReceipt>[2]): {
+    receipt: AgentActionReceipt;
+    created: boolean;
+  };
+  getAgentActionReceipt(ownerUserId: number, id: string): AgentActionReceipt | undefined;
+  markAgentActionReceiptReconciled(ownerUserId: number, id: string, input: {
+    status: Extract<AgentReceiptStatus, "succeeded" | "failed">;
+    detail: string;
+  }): AgentActionReceipt;
+  findAgentActionReceiptByIdempotencyKey(idempotencyKey: string): AgentActionReceipt | undefined;
+  listAgentActionReceipts(ownerUserId: number, threadId: string, limit?: number): AgentActionReceipt[];
+
   // settings
   getSetting(key: string): ReturnType<typeof import("../parts/settings.js").getSetting>;
   listLocalRejectedPresentationWords(): ReturnType<typeof import("../parts/vbk-copy-feedback.js").listRejectedPresentationWords>;

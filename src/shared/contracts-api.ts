@@ -45,6 +45,7 @@ import type {
 } from "./contracts-types.js";
 import type { PlanningGenerationState, PlanningMajorStage, PlanningModule } from "./contracts-planning.js";
 import type { AgentDisplaySnapshot, AgentHistoryPage, AgentInputResponse, AgentApprovalResponse, AgentIllegalKeywordRepairInput } from "./contracts-agent.js";
+import type { AgentWorkspaceApi } from "./contracts-agent-workspace.js";
 import type {
   AppAuthAccountsSnapshot,
   AppAuthCaptcha,
@@ -55,7 +56,6 @@ import type {
 export type WorkflowTaskRetryMode = "from_error" | "from_start";
 /**
  * IPC 契约：renderer ↔ main 的强类型接口。
- *
  * `VbkApi` 描述了 renderer 端可以调用的全部 IPC 方法。修改本接口后
  * 需同步实现：
  *  - main 端：在 `main.ts` 的 `registerIpc()` 中增补 handler；
@@ -66,6 +66,7 @@ export type WorkflowTaskRetryMode = "from_error" | "from_start";
  */
 
 export interface VbkApi {
+  agentWorkspace: AgentWorkspaceApi;
   workspace: {
     get(id: string): Promise<import('./contracts-product-architecture.js').ProductWorkspaceSnapshot>;
   };

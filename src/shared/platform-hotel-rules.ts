@@ -6,6 +6,7 @@ import { isNonWritableCityAlias, toWritableAdministrativeCityName } from "./regi
 import { originalOvernightRoute, originalRouteEndsAtArrival, verifiedOvernightCity } from './itinerary-overnight-city.js';
 import { explicitOvernightName } from './explicit-overnight-name.js';
 import { verifiedRouteOvernightCity } from './route-location-evidence.js';
+import { spotNamedHotelCity } from './hotel-city-evidence.js';
 
 type Json = Record<string, any>;
 export interface PlatformHotelRules { autoMatch: boolean; grades: number[] }
@@ -68,11 +69,15 @@ export function normalisePlatformHotelProduct(product: Json): Json {
     // 已保存的住宿城市只有在当天原文「明确写出住宿地」（宿X/住X）或与已核验路线
     // 落点一致时才算有据；只是作为途经点出现在路线里的城市不能自证。
     const explicitStay = explicitOvernightName(originalOvernightRoute(next, day));
-    const savedSupported = Boolean(savedCity) && ((explicitStay && writable(explicitStay) === savedCity)
+    // 「住珠峰」这类原文写出的是景点名：保存值不是行政城市，不能算运营已指定城市，
+    // 改用该景点当天已核验的所属县市（珠峰 → 定日）；没有证据时不改写。
+    const spotCity = stay ? spotNamedHotelCity(next, day, [explicitStay, requirement?.anchorName, day.hotelCity]) : undefined;
+    const savedIsSpotName = Boolean(savedCity && spotCity && spotCity.city !== savedCity);
+    const savedSupported = Boolean(savedCity) && !savedIsSpotName && ((explicitStay && writable(explicitStay) === savedCity)
       || (routeCity && routeCity === savedCity));
     const conflict = Boolean(routeCity && savedCity && savedCity !== writable(inferredCity));
-    const chosen = (inheritedArrival || conflict) && !savedSupported
-      ? (inferredCity || routeCity)
+    const chosen = (inheritedArrival || conflict || savedIsSpotName) && !savedSupported
+      ? (inferredCity || routeCity || spotCity?.city)
       : (savedCity || inferredCity || day.hotelRequirement?.cityName || day.hotelCandidates?.[0]?.cityName || fallbackCity);
     const city = writable(chosen);
     const result: Json = { ...day, hotel: stay ? PLATFORM_HOTEL_DESCRIPTION : NO_ITINERARY_HOTEL,
@@ -86,8 +91,13 @@ export function normalisePlatformHotelProduct(product: Json): Json {
       const cleaned = cleanPlatformHotelCopy(value, hotelNames);
       if (typeof cleaned !== 'string') return cleaned;
       const copy = cleaned.split(PLATFORM_HOTEL_DESCRIPTION).join("平台酒店");
-      return stay && city ? copy.replace('当晚沿原路线安排平台酒店，住宿行政城市待资源核验。',
-        `当晚住宿行政城市为${city}，使用平台自动匹配酒店。`) : copy;
+      if (!stay || !city) return copy;
+      // 投影阶段写的是原文住宿地（住珠峰）；收敛到行政城市后，文案同步改成
+      // 行政城市口径，避免产品图文继续对客人说「住珠峰」而住宿段写定日。
+      const named = String(explicitStay ?? '').trim();
+      const settled = named && named !== city ? copy.split(`当晚按原路线住${named}`).join(`当晚住宿行政城市为${city}`) : copy;
+      return settled.replace('当晚沿原路线安排平台酒店，住宿行政城市待资源核验。',
+        `当晚住宿行政城市为${city}，使用平台自动匹配酒店。`);
     };
     result.description = routeCopy(result.description);
     if (Array.isArray(result.activities)) result.activities = result.activities.filter((activity: Json) => stay || activity.type !== "hotel").map((activity: Json) =>

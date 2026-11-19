@@ -5,6 +5,21 @@ import {
   resolveAiConnectionInput,
   successfulAiConnectionTest,
 } from "../../src/main/infrastructure/ai-settings.js";
+import { canQuickSwitchAiModel } from "../../src/renderer/app/helpers/ai-test-receipts.js";
+import type { ConnectionTest, Settings } from "../../src/shared/contracts.js";
+
+const workspaceSettings: Settings = {
+  aiProvider: "deepseek",
+  minimaxBaseUrl: "https://api.minimaxi.com/v1",
+  minimaxModel: "MiniMax-M3",
+  deepseekBaseUrl: "https://api.evolink.ai/v1",
+  deepseekModel: "deepseek-v4-flash",
+  hasMiniMaxKey: false,
+  hasDeepSeekKey: true,
+  systemNotificationsEnabled: true,
+  systemNotificationsSupported: true,
+  dataPath: "/tmp/vbk-auto-test",
+};
 
 test("连接测试始终使用当前选择的提供商、地址和模型", async () => {
   const readProviders: string[] = [];
@@ -70,4 +85,28 @@ test("成功结果携带本次测试的模型身份", () => {
   assert.equal(result.provider, "deepseek");
   assert.equal(result.model, "deepseek-v4-flash");
   assert.match(result.message, /Evolink.*DeepSeek V4 Flash.*连接测试通过/);
+});
+
+test("工作区允许 MiniMax 官方模型互切，动态模型仍须逐模型测试", () => {
+  assert.equal(canQuickSwitchAiModel(workspaceSettings, "deepseek", "deepseek-v4-flash", null), true);
+  assert.equal(canQuickSwitchAiModel(workspaceSettings, "deepseek", "claude-fable-5", null), false);
+  assert.equal(canQuickSwitchAiModel(workspaceSettings, "deepseek", "claude-fable-5", null, true), true);
+  const verified: ConnectionTest = {
+    connected: true,
+    message: "连接测试通过",
+    provider: "deepseek",
+    baseUrl: workspaceSettings.deepseekBaseUrl,
+    model: "claude-fable-5",
+    testedAt: "2026-11-16T00:00:00.000Z",
+  };
+  assert.equal(canQuickSwitchAiModel(workspaceSettings, "deepseek", "claude-fable-5", verified), true);
+  assert.equal(canQuickSwitchAiModel(workspaceSettings, "deepseek", "claude-fable-5", {
+    ...verified,
+    baseUrl: "https://old.example/v1",
+  }), false);
+  const minimaxSettings = { ...workspaceSettings, hasMiniMaxKey: true };
+  assert.equal(canQuickSwitchAiModel(minimaxSettings, "minimax", "MiniMax-M3", null), true);
+  assert.equal(canQuickSwitchAiModel(minimaxSettings, "minimax", "MiniMax-M3.1-Flash", null), true);
+  assert.equal(canQuickSwitchAiModel(minimaxSettings, "minimax", "unknown-minimax-model", null), false);
+  assert.equal(canQuickSwitchAiModel(workspaceSettings, "minimax", "MiniMax-M3.1-Flash", null), false);
 });

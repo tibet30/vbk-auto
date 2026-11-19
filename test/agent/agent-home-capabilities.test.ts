@@ -51,3 +51,15 @@ test("能力未加载完成时入口不冒充可用", () => {
   assert.match(html, /data-state="loading"/u);
   assert.doesNotMatch(html, /data-state="ready"/u);
 });
+
+test("平台查询入口只在 tibet Skill 就绪时可用", () => {
+  const withoutTibet = render(skills("product-read", "deck", "web", "local-file"));
+  const ordersStart = withoutTibet.indexOf("查我的订单");
+  assert.ok(ordersStart > 0, "入口本身要在，不能悄悄消失");
+  assert.match(withoutTibet.slice(ordersStart, ordersStart + 220), /data-state="missing"/u);
+
+  const withTibet = render(skills("product-read", "deck", "web", "local-file", "tibet"));
+  const readySlice = withTibet.slice(withTibet.indexOf("查我的订单"), withTibet.indexOf("查我的订单") + 220);
+  assert.match(readySlice, /data-state="ready"/u, "有 tibet Skill 时入口必须可用");
+  assert.match(withTibet, /查 VBK 绑定/u);
+});

@@ -39,24 +39,6 @@
 .meta strong { color: var(--foreground); font-size: 12px; }
 
 .messageContent { overflow-wrap: anywhere; line-height: 1.7; font-size: 13px; }
-.messageContent p { margin: 0 0 10px; }
-.messageContent p:last-child { margin-bottom: 0; }
-.messageContent h1, .messageContent h2, .messageContent h3 { margin: 0 0 8px; line-height: 1.4; }
-.messageContent h1 { font-size: 17px; }
-.messageContent h2 { font-size: 15px; }
-.messageContent h3 { font-size: 14px; }
-.messageContent ul, .messageContent ol { margin: 0 0 10px; padding-left: 22px; }
-.messageContent li + li { margin-top: 4px; }
-.messageContent code { padding: 1px 4px; border-radius: 4px; background: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
-.messageContent pre { margin: 0 0 10px; padding: 10px 12px; overflow-x: auto; border-radius: var(--radius-control); background: var(--muted); }
-.messageContent pre code { padding: 0; background: transparent; }
-.messageContent a { color: var(--link-blue); text-decoration: underline; text-underline-offset: 2px; }
-.messageContent :global(.markdown-table-scroll), .assistantProse :global(.markdown-table-scroll) { max-width: 100%; overflow-x: auto; margin: 0 0 10px; border: 1px solid var(--border); border-radius: var(--radius-control); }
-.messageContent table, .assistantProse table { width: 100%; min-width: 420px; border-collapse: collapse; background: var(--surface); font-size: 12px; line-height: 1.55; }
-.messageContent th, .messageContent td, .assistantProse th, .assistantProse td { padding: 7px 9px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-.messageContent th:last-child, .messageContent td:last-child, .assistantProse th:last-child, .assistantProse td:last-child { border-right: 0; }
-.messageContent tr:last-child td, .assistantProse tr:last-child td { border-bottom: 0; }
-.messageContent th, .assistantProse th { background: var(--muted); color: var(--foreground); font-weight: 600; white-space: nowrap; }
 
 .briefFields { margin: 0; display: grid; gap: 8px; min-width: 200px; }
 .briefFields > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: start; }
@@ -67,11 +49,7 @@
 .assistantAvatar { position: absolute; top: 0; left: -40px; border: 1px solid var(--ai-teal); border-radius: 50%; background: color-mix(in srgb, var(--ai-teal) 10%, var(--surface)); color: var(--ai-teal); }
 .threadTurn { position: relative; display: flex; flex-direction: column; gap: 6px; }
 .assistantProse { padding: 10px 12px; border-radius: var(--radius-control); background: var(--muted); overflow-wrap: anywhere; line-height: 1.7; font-size: 13px; color: var(--foreground); }
-.assistantProse p { margin: 0 0 10px; }
-.assistantProse p:last-child { margin-bottom: 0; }
-.assistantProse[data-streaming='true']::after { content: ''; display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -2px; background: var(--ai-teal); animation: stream-caret 900ms steps(1, end) infinite; }
 .assistantProse[data-interrupted='true'] { color: var(--muted-foreground); }
-@keyframes stream-caret { 50% { opacity: 0; } }
 
 .activity { font-size: 12px; color: var(--muted-foreground); }
 .activity > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; color: var(--ai-teal); }
@@ -116,6 +94,10 @@
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .composer { padding: 14px 18px; border-top: 1px solid var(--border); background: var(--surface); }
 .composer textarea { max-height: 180px; min-height: 64px; margin-bottom: 8px; }
+.modelPicker { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.modelPickerLabel { color: var(--muted-foreground); font-size: 11px; }
+.modelSelect { width: auto; min-width: 156px; max-width: 230px; }
+.modelPickerHint, .modelLoading { color: var(--muted-foreground); font-size: 11px; white-space: nowrap; }
 .shortcut { flex: 1; text-align: right; color: var(--muted-foreground); font-size: 11px; }
 .newMessages { position: absolute; bottom: 174px; align-self: center; padding: 8px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--foreground); color: var(--surface); cursor: pointer; }
 .abandon { font-size: 12px; margin-top: 10px; line-height: 1.8; }
@@ -123,9 +105,9 @@
 .panel button:focus-visible, .panel textarea:focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
 .panel button:disabled { opacity: .5; cursor: default; }
 
-@media (max-width: 880px) { .timeline { padding: 12px; } .composer { padding: 12px; } .status { padding: 10px 12px; flex-wrap: wrap; } .failureNotice, .message, .assistantThread, .systemNote { max-width: calc(100% - 40px); } .shortcut { display: none; } }
+@media (max-width: 880px) { .timeline { padding: 12px; } .composer { padding: 12px; } .status { padding: 10px 12px; flex-wrap: wrap; } .failureNotice, .message, .assistantThread, .systemNote { max-width: calc(100% - 40px); } .modelPickerHint, .shortcut { display: none; } }
 @media (max-width: 440px) { .failureRepair { align-items: flex-start; flex-direction: column; } .repairAction { width: 100%; } }
-@media (prefers-reduced-motion: reduce) { .timeline { scroll-behavior: auto; } .assistantProse[data-streaming='true']::after, .activity > summary::after { animation: none; transition: none; } }
+@media (prefers-reduced-motion: reduce) { .timeline { scroll-behavior: auto; } .activity > summary::after { animation: none; transition: none; } }
 
 .activity[data-expanded='true'] .activityBody { max-height: none; background: transparent; padding: 6px 0; }
 .assistantProse { background: transparent; padding: 6px 0; }

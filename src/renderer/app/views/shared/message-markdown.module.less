@@ -1,0 +1,127 @@
+/* 助手文本的 Markdown 排版。样式只作用于容器内部，不污染调用方的对话样式。 */
+.markdown {
+  min-width: 0;
+  color: inherit;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+
+.markdown p { margin: 0 0 10px; }
+.markdown p:last-child { margin-bottom: 0; }
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -.01em;
+}
+.markdown h1 { font-size: 18px; }
+.markdown h2 { font-size: 16px; }
+.markdown h3 { font-size: 14px; }
+.markdown h4,
+.markdown h5,
+.markdown h6 { font-size: 13px; color: var(--muted-foreground); }
+
+/* 对话气泡的发送者标签用块级 strong，这里必须还原标准加粗。 */
+.markdown strong { font-weight: 600; }
+.markdown em { font-style: italic; }
+.markdown del { color: var(--muted-foreground); }
+
+.markdown a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; }
+.markdown a:hover { color: color-mix(in srgb, var(--link) 78%, var(--foreground)); }
+
+.markdown ul,
+.markdown ol { margin: 0 0 10px; padding-left: 22px; }
+.markdown li + li { margin-top: 4px; }
+.markdown li > p { margin: 0 0 4px; }
+.markdown li > ul,
+.markdown li > ol { margin: 4px 0 0; }
+
+/* GFM 任务列表：勾选框替掉项目符号。 */
+.markdown li:has(> input[type='checkbox']) { margin-left: -18px; list-style: none; }
+.markdown input[type='checkbox'] { margin: 0 6px 0 0; vertical-align: -1px; }
+
+.markdown code {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: .92em;
+}
+.markdown pre {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-control);
+  background: var(--muted);
+  line-height: 1.55;
+}
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: var(--fs-sm);
+  white-space: pre;
+}
+
+.markdown blockquote {
+  margin: 0 0 10px;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--border-strong, var(--border));
+  color: var(--muted-foreground);
+}
+.markdown hr { height: 1px; margin: 16px 0; border: 0; background: var(--border); }
+.markdown img { max-width: 100%; border-radius: var(--radius-control); }
+
+.tableScroll {
+  max-width: 100%;
+  margin: 0 0 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+.tableScroll table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.tableScroll th,
+.tableScroll td {
+  padding: 7px 9px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.tableScroll th:last-child,
+.tableScroll td:last-child { border-right: 0; }
+.tableScroll tr:last-child td { border-bottom: 0; }
+.tableScroll th { background: var(--muted); color: var(--foreground); font-weight: 600; white-space: nowrap; }
+
+/* 流式输出光标：跟随后一个块级元素的末尾，避免新结构把光标甩到新行。 */
+.markdown[data-streaming='true'] > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: var(--ai-teal);
+  animation: message-markdown-caret 900ms steps(1, end) infinite;
+}
+@keyframes message-markdown-caret { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .markdown[data-streaming='true'] > :last-child::after { animation: none; }
+}

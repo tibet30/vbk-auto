@@ -117,7 +117,7 @@ export function UpdateDialog() {
             <ArrowRight size={15} className={styles.versionArrow} aria-hidden="true" />
             <span className={styles.versionCell} data-tone={view.tone}>
               <small>{state?.downloaded ? "已下载版本" : "服务器最新版本"}</small>
-              <strong>{state?.availableVersion ? `v${state.availableVersion}` : "—"}</strong>
+              <strong>{view.latestVersionLabel}</strong>
             </span>
           </div>
 

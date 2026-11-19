@@ -24,12 +24,14 @@ export interface UpdatePresentation {
   progress?: number;
   /** 是否值得在状态栏上显示角标，吸引用户注意。 */
   attention: boolean;
+  /** 第二个版本格：服务器最新版本，或已下载的版本。 */
+  latestVersionLabel: string;
 }
 
 const ERROR_CODES: Record<AppUpdateErrorCode, { reason: string; advice: string }> = {
   unsupported: {
     reason: "运行环境不支持",
-    advice: "只有打包后的 macOS 或 Windows 安装版能检查更新：开发模式（未打包）会在应用目录里找不到更新产物。请用安装版验证。",
+    advice: "在线更新只支持 macOS 或 Windows 客户端；当前平台请下载安装包后手动升级。",
   },
   feed_missing: {
     reason: "更新源缺少更新文件",
@@ -51,6 +53,10 @@ const ERROR_CODES: Record<AppUpdateErrorCode, { reason: string; advice: string }
     reason: "安装包下载失败",
     advice: "下载过程被中断，请检查网络后重新下载。",
   },
+  install_unavailable: {
+    reason: "当前环境不能自动安装",
+    advice: "开发模式不会自动替换当前应用，请打开下载好的安装包手动覆盖安装。",
+  },
   unknown: {
     reason: "未归类的失败",
     advice: "请稍后重试；若持续失败，请把下方诊断信息发给维护人员。",
@@ -69,6 +75,18 @@ const INSTALL_STEPS = [
   "重新打开应用，在设置里确认版本号已经更新。",
 ];
 
+const MANUAL_DOWNLOAD_STEPS = [
+  "点击「下载新版」，安装包会保存到「下载」文件夹。",
+  "下载完成后点击「打开安装包」。",
+  "按安装包提示手动覆盖安装；开发模式不会自动替换当前应用。",
+];
+
+const MANUAL_INSTALL_STEPS = [
+  "点击「打开安装包」启动安装程序。",
+  "按安装包提示手动覆盖安装。",
+  "开发模式不会自动替换当前应用，重启后版本号以安装结果为准。",
+];
+
 export function presentUpdate(state: AppUpdateState | null, loading = false): UpdatePresentation {
   if (!state) {
     return loading
@@ -80,8 +98,8 @@ export function presentUpdate(state: AppUpdateState | null, loading = false): Up
       ...base(
         "muted",
         "不可用",
-        "当前运行方式无法在线更新",
-        "在线更新只在安装版里启用；开发模式读取的版本号与更新产物都不完整。",
+        "当前平台无法在线更新",
+        "在线更新只支持 macOS 或 Windows 客户端。",
       ),
       advice: ERROR_CODES.unsupported.advice,
       reason: ERROR_CODES.unsupported.reason,
@@ -89,31 +107,39 @@ export function presentUpdate(state: AppUpdateState | null, loading = false): Up
   }
 
   const latest = state.availableVersion ? `v${state.availableVersion}` : "";
+  const latestVersionLabel = describeLatestVersion(state);
+  const manual = !state.canInstall;
 
   if (state.status === "checking") {
-    return base("busy", "检查中", "正在检查新版本", "正在连接更新服务器读取版本清单。");
+    return {
+      ...base("busy", "检查中", "正在检查新版本", "正在连接更新服务器读取版本清单。"),
+      latestVersionLabel,
+    };
   }
   if (state.status === "downloading") {
     const percent = state.progress?.percent ?? 0;
     return {
       ...base("busy", `下载中 ${percent}%`, `正在下载 ${latest || "新版本"}`, describeProgress(state, percent)),
       progress: percent,
+      latestVersionLabel,
     };
   }
   if (state.status === "downloaded") {
     return {
       ...base("ready", "待安装", `${latest || "新版本"} 已下载`, "安装包已经就绪，按下面三步完成覆盖安装。"),
-      steps: INSTALL_STEPS,
+      steps: manual ? MANUAL_INSTALL_STEPS : INSTALL_STEPS,
       primaryAction: "open_installer",
       attention: true,
+      latestVersionLabel,
     };
   }
   if (state.status === "available") {
     return {
       ...base("ready", "可更新", `发现新版本 ${latest}`, "确认后再下载，安装包不会自动替换当前版本。"),
-      steps: DOWNLOAD_STEPS,
+      steps: manual ? MANUAL_DOWNLOAD_STEPS : DOWNLOAD_STEPS,
       primaryAction: "download",
       attention: true,
+      latestVersionLabel,
     };
   }
   if (state.status === "error") {
@@ -124,19 +150,37 @@ export function presentUpdate(state: AppUpdateState | null, loading = false): Up
       reason: mapped.reason,
       primaryAction: "check",
       attention: true,
+      latestVersionLabel,
     };
   }
   if (state.status === "not_available") {
-    return base("idle", "已是最新", "已是最新版本", `当前版本 v${state.currentVersion} 与更新源一致。`);
+    return {
+      ...base("idle", "已是最新", "已是最新版本", `当前版本 v${state.currentVersion} 与更新源一致。`),
+      latestVersionLabel,
+    };
   }
   return {
-    ...base("idle", "待检查", "尚未检查更新", `当前版本 v${state.currentVersion}，可以手动检查服务器上的新版本。`),
+    ...base(
+      "idle",
+      "待检查",
+      "尚未检查更新",
+      manual
+        ? `当前版本 v${state.currentVersion}；开发模式可以检查服务器最新版本，下载后需手动安装。`
+        : `当前版本 v${state.currentVersion}，可以手动检查服务器上的新版本。`,
+    ),
     primaryAction: "check",
+    latestVersionLabel,
   };
 }
 
 function base(tone: UpdateTone, badge: string, headline: string, summary: string): UpdatePresentation {
-  return { tone, badge, headline, summary, steps: [], primaryAction: null, attention: false };
+  return { tone, badge, headline, summary, steps: [], primaryAction: null, attention: false, latestVersionLabel: "—" };
+}
+
+function describeLatestVersion(state: AppUpdateState): string {
+  if (state.availableVersion) return `v${state.availableVersion}`;
+  if (state.serverVersion) return `v${state.serverVersion}`;
+  return "—";
 }
 
 function describeProgress(state: AppUpdateState, percent: number): string {
@@ -174,10 +218,12 @@ export function diagnosticText(state: AppUpdateState | null): string {
     `当前版本：v${state.currentVersion}`,
     `平台：${state.platform}`,
     `支持在线更新：${state.supported ? "是" : "否"}`,
+    `可自动安装：${state.canInstall ? "是" : "否（开发模式需手动安装）"}`,
     `状态：${state.status}`,
     `更新源：${state.feedUrl}`,
     `最近检查：${formatCheckedAt(state.checkedAt)}`,
   ];
+  if (state.serverVersion) lines.push(`服务器最新版本：v${state.serverVersion}`);
   if (state.availableVersion) lines.push(`可用版本：v${state.availableVersion}`);
   if (state.errorCode) lines.push(`失败原因：${state.errorCode}`);
   if (state.errorMessage) lines.push(`说明：${state.errorMessage}`);

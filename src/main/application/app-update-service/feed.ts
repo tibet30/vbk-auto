@@ -18,6 +18,22 @@ export function isSupportedUpdatePlatform(platform: NodeJS.Platform): platform i
   return platform === "darwin" || platform === "win32";
 }
 
+export interface UpdateCapability {
+  /** 能否检查更新：只看平台，开发模式同样可以拉清单。 */
+  supported: boolean;
+  /** 能否自动安装：只有打包版可以，开发模式只能下载后手动覆盖。 */
+  canInstall: boolean;
+}
+
+export function resolveUpdateCapability(
+  platform: NodeJS.Platform,
+  packaged: boolean,
+  forced = false,
+): UpdateCapability {
+  const supported = isSupportedUpdatePlatform(platform);
+  return { supported, canInstall: supported && (packaged || forced) };
+}
+
 export function manifestFileName(): string {
   return process.platform === "win32" ? "latest.yml" : "latest-mac.yml";
 }

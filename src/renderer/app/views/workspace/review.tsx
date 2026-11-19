@@ -50,6 +50,10 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
     expandedDayIndexes,
     setExpandedDayIndexes,
     planningRecovery,
+    settings,
+    aiModelLists,
+    savingAi,
+    switchWorkspaceAiModel,
   } = model;
 
   if (!product) return null;
@@ -66,6 +70,10 @@ export function AppWorkspaceReview({ model }: { model: AppModel }) {
         client={api() ?? undefined}
         input={input}
         setInput={setInput}
+        settings={settings}
+        modelLists={aiModelLists}
+        switchingModel={savingAi}
+        onModelChange={switchWorkspaceAiModel}
         onApproved={() => { model.setStage("vbk"); model.setBrowserOpen(true); }}
       />
       <AppWorkspaceReviewSummary

@@ -102,6 +102,7 @@ const ipcRegistrarSource = [
   "src/main/ipc/planning-ipc/ipc-handlers.ts",
   "src/main/ipc/memory-ipc.ts",
   "src/main/ipc/update-ipc.ts",
+  "src/main/ipc/tibet-ipc.ts",
 ].map(readSource).join("\n");
 
 test("preload.cts 里的 invoke channel 在 IPC registrars 全部注册", () => {

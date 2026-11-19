@@ -82,6 +82,47 @@ test("已有结构的未核验 POI 自动 resolve，而不重生行程", async (
   assert.deepEqual(calls, ["resolve"]);
 });
 
+test("同进度下资源查询只自动执行一次，不再重复整轮 POI 核验", async () => {
+  const product = baseProduct();
+  completeItinerary(product, false);
+  const { core, deps, calls } = harness(product, [1, 2, 3].map(i => ({ toolCalls: [{ id: `repair-${i}`, name: "patch_product", arguments: {} }] })));
+  deps.tools = [
+    { name: "resolve_itinerary_pois", description: "resolve", parameters: {}, write: true, requiresApproval: false, execute: async () => {
+      calls.push("resolve");
+      // 与真实产品一致：行程绑定、缺项、待核查任务都没有变化。
+      return { content: "仍有 2 个槽位未命中，与上一轮结果相同" };
+    } },
+    { name: "patch_product", description: "repair", parameters: {}, write: true, requiresApproval: false, execute: async () => { calls.push("patch"); return { content: "no structural change" }; } },
+  ];
+
+  await core.send(product.id, PRODUCT_PREPARATION_INSTRUCTION);
+  await core.idle(product.id);
+  const snapshot = await core.get(product.id);
+  assert.deepEqual(calls.filter(call => call === "resolve"), ["resolve"]);
+  assert.equal(snapshot.run?.status, "paused");
+  assert.match(snapshot.events.at(-1)?.content ?? "", /自动尝试 1 次/);
+});
+
+test("同进度下 POI 查询失败仍允许自动重试一次", async () => {
+  const product = baseProduct();
+  completeItinerary(product, false);
+  let attempts = 0;
+  const { core, deps, calls } = harness(product, [1, 2, 3].map(i => ({ toolCalls: [{ id: `repair-${i}`, name: "patch_product", arguments: {} }] })));
+  deps.tools = [
+    { name: "resolve_itinerary_pois", description: "resolve", parameters: {}, write: true, requiresApproval: false, execute: async () => {
+      calls.push("resolve");
+      attempts += 1;
+      if (attempts === 1) throw new Error("资源查询超时");
+      return { content: "资源服务仍无候选" };
+    } },
+    { name: "patch_product", description: "repair", parameters: {}, write: true, requiresApproval: false, execute: async () => { calls.push("patch"); return { content: "no structural change" }; } },
+  ];
+
+  await core.send(product.id, PRODUCT_PREPARATION_INSTRUCTION);
+  await core.idle(product.id);
+  assert.deepEqual(calls.filter(call => call === "resolve"), ["resolve", "resolve"]);
+});
+
 test("无进展时最多自动两次，给模型一次修复窗口后暂停而不追问继续", async () => {
   const product = baseProduct();
   const { core, deps, calls } = harness(product, [1, 2, 3].map(i => ({ toolCalls: [{ id: `repair-${i}`, name: "patch_product", arguments: {} }] })));

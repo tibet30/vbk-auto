@@ -1,5 +1,5 @@
 import { Select } from "../../helpers/Select";
-import { Check, CircleCheck, CircleX, Eye, EyeOff, LoaderCircle, PlugZap, RefreshCw, Save, Zap } from "lucide-react";
+import { Check, CircleCheck, CircleX, Eye, EyeOff, LoaderCircle, PlugZap, Save, Zap } from "lucide-react";
 import {
   AI_PROVIDER_PROFILES,
   aiModelOption,
@@ -29,14 +29,13 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
     refreshingAiModels,
     aiTest,
     setAiTest,
-    aiModelList,
-    aiModelListError,
+    aiModelLists,
+    aiModelListErrors,
     openAiConfig,
     switchProvider,
     switchAiModel,
     changeAiBaseUrl,
     changeAiApiKey,
-    refreshAiModels,
     saveAiConfig,
     testAiConnection,
   } = model;
@@ -65,11 +64,12 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
   );
   const busy = savingAi || testingAi || loadingAiKey || refreshingAiModels;
   const builtInModelOptions = selectedProfile.modelOptions || [];
-  const modelOptions = aiProvider === "deepseek" && aiModelList
-    ? aiModelList.map((item) => ({ value: item.id, label: item.label }))
+  const discoveredModels = aiModelLists[aiProvider];
+  const modelListError = aiModelListErrors[aiProvider];
+  const modelOptions = discoveredModels?.length
+    ? discoveredModels.map((item) => ({ value: item.id, label: item.label }))
     : builtInModelOptions;
   const selectedModelMissing = Boolean(aiModel && !modelOptions.some((option) => option.value === aiModel));
-  const canRefreshModels = aiProvider === "deepseek" && Boolean(aiApiKey.trim() || selectedConfig?.hasKey);
 
   const invalidateTest = () => {
     if (aiTest) setAiTest(null);
@@ -165,16 +165,9 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
           <div className={styles.field}>
             <div className={styles.fieldLabelRow}>
               <label className={shared.fieldLabel} htmlFor="ai-model-select">{selectedProfile.shortLabel} 模型名</label>
-              {aiProvider === "deepseek" && <button
-                type="button"
-                className={styles.refreshModelsBtn}
-                onClick={() => void refreshAiModels()}
-                disabled={busy || !canRefreshModels}
-                aria-label="刷新 Evolink 可用模型"
-              >
-                <RefreshCw size={13} className={refreshingAiModels ? styles.spinner : undefined} aria-hidden="true" />
-                {refreshingAiModels ? "刷新中…" : "刷新模型"}
-              </button>}
+              {refreshingAiModels && <span className={styles.modelRefreshStatus}>
+                <LoaderCircle size={13} className={styles.spinner} aria-hidden="true" /> 自动获取中…
+              </span>}
             </div>
             {modelOptions.length ? <>
               <Select
@@ -190,14 +183,16 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
               </Select>
               <div className={styles.modelMeta}>
                 <small className={shared.fieldHint}>请求模型 ID：<span className={styles.inlineModelId}>{aiModel}</span></small>
-                {aiProvider === "deepseek" && <small
+                <small
                   className={styles.modelRefreshStatus}
-                  data-state={aiModelListError ? "blocked" : aiModelList ? "confirmed" : undefined}
+                  data-state={modelListError ? "blocked" : discoveredModels ? "confirmed" : undefined}
                   role="status"
                   aria-live="polite"
                 >
-                  {aiModelListError || (aiModelList ? `已获取 ${aiModelList.length} 个模型` : "刷新可读取当前 Key 的模型")}
-                </small>}
+                  {modelListError || (discoveredModels
+                    ? `已自动加载 ${discoveredModels.length} 个模型`
+                    : selectedConfig?.hasKey ? "正在自动获取模型目录" : "保存供应商后自动获取模型")}
+                </small>
               </div>
             </> : <input
               id="ai-model-select"

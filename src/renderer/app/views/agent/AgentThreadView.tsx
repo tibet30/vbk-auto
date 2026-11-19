@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentApprovalScope, AgentThreadWorkspace } from "../../../../shared/contracts-agent-runtime.js";
 import { AgentWorkPanel } from "./AgentWorkPanel";
 import { ArtifactPreviewModal } from "./ArtifactPreviewModal";
+import { MessageMarkdown } from "../shared/message-markdown";
 import { api } from "../../helpers";
 import { disabledSkillIds, isSkillEnabled } from "./skill-scope";
 import styles from "./workspace.module.less";
@@ -109,8 +110,10 @@ export function AgentThreadView({
           {!detail.messages.length && <div className={styles.threadEmpty}><MessageSquareText size={24} /><p>继续描述目标，智能体会把这次工作保存在当前任务中。</p></div>}
           {detail.messages.map((message) => (
             <article className={styles.message} data-role={message.role} key={message.id}>
-              {message.role === "assistant" && <strong>智能体</strong>}
-              <p>{message.content}</p>
+              {message.role === "assistant" && <strong className={styles.sender}>智能体</strong>}
+              {message.role === "assistant"
+                ? <MessageMarkdown content={message.content} />
+                : <p className={styles.plainText}>{message.content}</p>}
             </article>
           ))}
           {sending && <div className={styles.running}><LoaderCircle size={15} />正在处理当前任务…</div>}

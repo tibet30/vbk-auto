@@ -76,6 +76,7 @@
 | `skills/web/` | 结构化计划 → 静态网页工程（第 6 步） |
 | `skills/product-readonly/` | 产品列表与就绪结论的只读查询（第 4 步） |
 | `skills/account-readonly/` | 本机 VBK 账号记录与账号固定信息的只读查询（第 5 步可离线部分） |
+| `skills/tibet-readonly/` | 三人同游服务端令牌状态与公共在售目录的只读查询（第 8 步） |
 | `mcp/` | 外部 MCP 工具：stdio 连接、工具桥接、发现诊断（第 7 步） |
 
 默认注册表：`local-file` + `deck` + `web`；MCP 工具由 `ExternalToolRuntime` 从设置键 `agentMcpServers` 发现后作为 `extraSkills` 追加；装配时若传入只读端口，再前置 `account-read` / `product-read`（端口在 `src/main/agent-workspace/ports.ts` 里从本机 cookie 记录、账号固定信息与产品库投影，不新增事实）。新增依赖 `pptxgenjs@^4.0.1`，`yarn.lock` 已同步（`package-lock.json` 被 `.gitignore` 忽略）。
@@ -114,7 +115,7 @@
 
 - asar 内含全部新增运行时依赖：`pptxgenjs`（7 项）、`@modelcontextprotocol/sdk`（219 项）、`jszip`、`image-size`，以及既有的 `better-sqlite3`、`playwright`；
 - 打包应用正常启动：主进程模块图会在启动时 **eager 加载** `pptxgenjs`（deck Skill）与 MCP SDK（mcp/client），因此能启动即证明两者在 asar 内解析成功；
-- `window.vbk` 桥接存在，`agentWorkspace.capabilities()` 返回 5 个 Skill（product-read / account-read / local-file / deck / web），渲染进程正常显示应用账号登录门；
+- `window.vbk` 桥接存在，`agentWorkspace.capabilities()` 返回当时注册的全部 Skill（2026-11-16 那次为 5 个：product-read / account-read / local-file / deck / web；第 8 步新增 tibet 后为 6 个），渲染进程正常显示应用账号登录门；
 - 启动日志里的 `[memory] maintenance skipped`（"请先登录应用账号后再保存记忆"）是未登录时**有意跳过**的后台维护，不是异常。
 
 未覆盖：打包模式下走完整"生成 PPT"需要登录 + 模型密钥，该路径在开发模式已用 python-pptx 验证过，代码同一份。
@@ -254,7 +255,7 @@
 
 ### 第 5 步还没做的部分
 
-具体后台**写**动作的实施见 [VBK 写入实施计划](/Users/cisco/Documents/vbk-auto/docs/general-agent-vbk-write-plan.md)（范围已确认，待一处规则确认后开工）；三人同游后台 adapter 等 Token 方案。写入的准入机制已就位（见上）。
+具体后台**写**动作的实施见 [VBK 写入实施计划](/Users/cisco/Documents/vbk-auto/docs/general-agent-vbk-write-plan.md)（范围已确认，待一处规则确认后开工）；三人同游服务端 adapter 的只读部分已落地，见下方「第 8 步」。写入的准入机制已就位（见上）。
 
 注意决策 A 的连带影响：产品的「行程录入」属于 `行程规划 → 程序检查 → 运营确认 → 行程录入` 的最后一环，通用智能体触发它等于绕过程序检查与运营确认。因此第 5 步可做的后台写，只剩**产品域之外**的操作（例如账号/供应商资料维护），范围需要另定。
 
@@ -282,3 +283,12 @@
 - `render.ts`：确定性渲染 `index.html`、`styles.css`、`README.md`；模型文本一律 HTML 转义后再拼接，模型无法注入标签或脚本。
 - `index.ts`：一次调用对应一个目标目录、一次审批、一张收据；目录已存在时**整目录先归档到 `.agent-trash` 再重建**，新旧版本不会混在同一个目录里。
 - 产物是纯静态文件，双击 `index.html` 即可在浏览器预览（已用 Playwright 实际渲染截图核对）。
+
+### 第 8 步：三人同游服务端只读（service token）
+
+三人同游服务端（Tibet）的只读接入已落地：`tibet.status` / `tibet.services` / `tibet.adminServices` /
+`tibet.service` / `tibet.vbkBindings` / `tibet.orders` / `tibet.order` 七个只读动作，
+令牌默认继承创建者管理员并可按类型叠加客户 / 扩展用户身份；令牌存本机 0600 文件，设置页可保存、验证、清除。
+
+细节（令牌与身份契约、代码分层、不变量、验证记录）见
+[三人同游服务端接入](/Users/cisco/Documents/vbk-auto/docs/general-agent-tibet-service.md)。

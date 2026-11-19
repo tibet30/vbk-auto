@@ -1,7 +1,7 @@
 import type { AgentEvent } from "../../../../../shared/contracts";
 import { splitAgentReasoning } from "../../../../../shared/agent-visible-text";
 import styles from "../agent-conversation.module.less";
-import { renderAssistantMarkdown } from "../assistant-markdown";
+import { MessageMarkdown } from "../../shared/message-markdown";
 import type { AgentThreadStep } from "../agent-conversation-grouping";
 import { statusText } from "./labels";
 import { ThinkingActivity, ToolsActivity } from "./activity";
@@ -13,7 +13,7 @@ function AssistantAnswer({ event }: { event: AgentEvent }) {
   const visibleAnswer = answer || (!reasoning ? event.content.trim() : "");
   if (!visibleAnswer && !interrupted) return null;
   return <div className={styles.assistantProse} data-streaming={streaming || undefined} data-interrupted={interrupted || undefined} aria-busy={streaming || undefined}>
-    {visibleAnswer ? renderAssistantMarkdown(visibleAnswer) : "生成已中止"}
+    {visibleAnswer ? <MessageMarkdown content={visibleAnswer} streaming={streaming} /> : "生成已中止"}
   </div>;
 }
 

@@ -39,6 +39,20 @@ test("刷新使用当前地址和临时 API Key 请求 /models", async () => {
   assert.deepEqual(result.models.map((model) => model.id), ["model-a", "model-b"]);
 });
 
+test("MiniMax 自动返回官方模型目录，不请求不存在的 /models 接口", async () => {
+  let fetchCalled = false;
+  const result = await fetchAiModelList({
+    provider: "minimax",
+    baseUrl: "https://api.minimaxi.com/v1",
+  }, async () => "stored-minimax-key", async () => {
+    fetchCalled = true;
+    return new Response(null, { status: 500 });
+  });
+
+  assert.equal(fetchCalled, false);
+  assert.deepEqual(result.models.map((model) => model.id), ["MiniMax-M3", "MiniMax-M3.1-Flash"]);
+});
+
 test("刷新可沿用本地已保存密钥，并给出可恢复的鉴权错误", async () => {
   let readProvider = "";
   await assert.rejects(() => fetchAiModelList({

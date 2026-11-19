@@ -27,7 +27,7 @@ export function shouldApplyWorkflowTaskDetailUpdate(
   return view === "workspace" && activeLocalProductId === taskLocalProductId;
 }
 
-/** 后台 VBK 页面跳转不应在产品表单或列表页触发登录状态刷新。 */
-export function shouldHandleVbkPageReady(view: AppView): boolean {
-  return view === "workspace";
+/** 顶栏在所有主视图展示 VBK 状态，因此页面就绪通知不能被当前路由吞掉。 */
+export function shouldHandleVbkPageReady(_view: AppView): boolean {
+  return true;
 }

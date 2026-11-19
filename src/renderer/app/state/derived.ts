@@ -83,13 +83,13 @@ export function useAppStateDerived(state: AppStateBase) {
     const unsubscribePageReady = api()!.events.onPageReady(() => {
       if (!shouldHandleVbkPageReady(currentViewRef.current)) return;
       if (loginPanelOpenRef.current) return;
-      void checkVbkLogin();
+      void checkVbkLogin(true);
     });
     // 兜底：1.2s 后重试一次，防止 vbk:page-ready 事件因超时未送达。
     const retryLoginCheck = window.setTimeout(() => {
       if (!shouldHandleVbkPageReady(currentViewRef.current)) return;
       if (loginPanelOpenRef.current) return;
-      void checkVbkLogin();
+      void checkVbkLogin(true);
     }, 1200);
     const unsubscribeCollections = subscribeCollectionLiveUpdates({
       events: api()!.events,

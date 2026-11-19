@@ -42,6 +42,7 @@ export type AppUpdateErrorCode =
   | "manifest_invalid"
   | "installer_missing"
   | "download_failed"
+  | "install_unavailable"
   | "unknown";
 
 export interface AppUpdateProgress {
@@ -54,10 +55,15 @@ export interface AppUpdateProgress {
 export interface AppUpdateState {
   currentVersion: string;
   platform: string;
+  /** 能否检查更新：只取决于平台，开发模式同样可查。 */
   supported: boolean;
+  /** 能否自动安装：只有打包版可以，开发模式只能下载后手动覆盖。 */
+  canInstall: boolean;
   feedUrl: string;
   status: AppUpdateStatus;
   updateAvailable: boolean;
+  /** 更新源上的最新版本，只要清单可读就有值，与是否有更新无关。 */
+  serverVersion?: string;
   availableVersion?: string;
   releaseDate?: string;
   /** 面向用户的中文失败说明；成功时为空。 */

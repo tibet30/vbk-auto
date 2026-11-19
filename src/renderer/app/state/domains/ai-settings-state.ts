@@ -1,9 +1,9 @@
 import { useState } from "react";
-import type { AiModelInfo, ConnectionTest, Settings } from "../../../../shared/contracts.js";
+import type { AiModelCatalogs, AiProvider, ConnectionTest, Settings } from "../../../../shared/contracts.js";
 
 export function useAiSettingsState() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [aiProvider, setAiProvider] = useState<"minimax" | "deepseek">("minimax");
+  const [aiProvider, setAiProvider] = useState<AiProvider>("minimax");
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
   const [aiBaseUrl, setAiBaseUrl] = useState("https://api.minimaxi.com/v1");
   const [aiApiKey, setAiApiKey] = useState("");
@@ -13,9 +13,9 @@ export function useAiSettingsState() {
   const [testingAi, setTestingAi] = useState(false);
   const [loadingAiKey, setLoadingAiKey] = useState(false);
   const [aiTest, setAiTest] = useState<ConnectionTest | null>(null);
-  const [aiModelList, setAiModelList] = useState<AiModelInfo[] | null>(null);
+  const [aiModelLists, setAiModelLists] = useState<AiModelCatalogs>({});
   const [refreshingAiModels, setRefreshingAiModels] = useState(false);
-  const [aiModelListError, setAiModelListError] = useState<string | null>(null);
+  const [aiModelListErrors, setAiModelListErrors] = useState<Partial<Record<AiProvider, string>>>({});
 
   return {
     settings, setSettings,
@@ -29,8 +29,8 @@ export function useAiSettingsState() {
     testingAi, setTestingAi,
     loadingAiKey, setLoadingAiKey,
     aiTest, setAiTest,
-    aiModelList, setAiModelList,
+    aiModelLists, setAiModelLists,
     refreshingAiModels, setRefreshingAiModels,
-    aiModelListError, setAiModelListError,
+    aiModelListErrors, setAiModelListErrors,
   };
 }

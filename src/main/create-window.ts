@@ -1,5 +1,5 @@
 import path from "node:path";
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
 import { isModelInputModerationMessage } from "../shared/ai-input-moderation.js";
 import { logWarn } from "../shared/log-timestamp.js";
 import { APP_NAME } from "../shared/brand.js";
@@ -9,6 +9,7 @@ import type { VbkDatabase } from "./infrastructure/database/database.js";
 import type { LocalVbkCookieStore } from "./infrastructure/vbk-cookie-store.js";
 import { VbkBrowser } from "./infrastructure/vbk-browser.js";
 import { installContentSecurityPolicy } from "./infrastructure/csp.js";
+import { openExternalUrl } from "./infrastructure/external-url.js";
 import { safeRendererSend } from "./infrastructure/renderer-send.js";
 import type { MiniMaxService } from "./minimax/minimax.js";
 import { rendererRecoveryDelay, shouldRecoverRenderer } from "./renderer-recovery.js";
@@ -83,6 +84,26 @@ function installRendererStartupDiagnostics(window: BrowserWindow): void {
   });
 }
 
+/**
+ * 应用窗口只承载本地工作台：Markdown 外链交给系统浏览器，绝不让窗口被导航走。
+ * 链接来自模型输出，属不可信输入，因此统一按「新窗口请求 + 导航请求」两条路径拦截。
+ */
+function installExternalLinkGuard(window: BrowserWindow): void {
+  const openExternally = (url: string) => {
+    void openExternalUrl(url, (value) => shell.openExternal(value)).catch((error: unknown) => {
+      logWarn("[link] external open rejected", {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+  window.webContents.setWindowOpenHandler(({ url }) => { openExternally(url); return { action: "deny" }; });
+  window.webContents.on("will-navigate", (event, url) => {
+    if (url === window.webContents.getURL()) return;
+    event.preventDefault();
+    openExternally(url);
+  });
+}
+
 export interface MainWindowServices {
   window: BrowserWindow;
   browser: VbkBrowser;
@@ -106,6 +127,7 @@ export async function createMainWindow(args: CreateMainWindowArgs): Promise<Main
     },
   });
   installRendererStartupDiagnostics(window);
+  installExternalLinkGuard(window);
   args.onWindowCreated?.(window);
   installContentSecurityPolicy(window.webContents.session);
 

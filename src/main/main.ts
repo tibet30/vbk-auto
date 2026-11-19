@@ -17,6 +17,7 @@ import {
   LOCAL_AI_KEY_FILE_NAME,
   type LocalAiKeyStore,
 } from "./infrastructure/ai-key-store.js";
+import { createTibetServiceTokenStoreIn, type TibetServiceTokenStore } from "./infrastructure/tibet-service-token-store.js";
 import {
   createLocalVbkCookieStore,
   LOCAL_VBK_COOKIE_FILE_NAME,
@@ -28,7 +29,6 @@ import { createTibetCopyRuleSync } from "./infrastructure/tibet-copy-rules.js";
 import { createProductStorage } from "./application/product-storage.js";
 import { createMainWindow } from "./create-window.js";
 import { ProductTaskScheduler } from "./application/product-task-scheduler.js";
-import type { ProductWorkflowTask } from "../shared/contracts.js";
 import type { MainIpcContext } from "./ipc/context.js";
 import { ProductWorkflowCoordinator } from "./application/product-workflow-coordinator.js";
 import { ProductMutationService } from "./application/product-mutation-service.js";
@@ -99,6 +99,7 @@ let isQuittingForUpdate = false;
  * main.ts initialises this in `bootstrap()` together with the database.
  */
 let aiKeyStore: LocalAiKeyStore | null = null;
+let tibetServiceTokens: TibetServiceTokenStore | null = null;
 /**
  * Local VBK cookie-session store. Same 0600 JSON file pattern as the AI
  * key store. Created in `bootstrap()` together with the database and
@@ -192,6 +193,7 @@ app.whenReady().then(async () => {
   setOperationLogDb(db);
   installLogSink((level, args) => captureRuntimeLog(createRuntimeLogCapture(level, "main", args)));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
+  tibetServiceTokens = createTibetServiceTokenStoreIn(app.getPath("userData"));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
   const appAuth = createTibetAuthService(appAuthStore, { skipRemoteStatusValidation: safeDevelopmentStartup });
@@ -249,6 +251,7 @@ app.whenReady().then(async () => {
     get browser() { return browser ?? undefined; },
     get automation() { return automation ?? undefined; },
     aiKeyStore,
+    get tibetServiceTokens() { return tibetServiceTokens ?? undefined; },
     getSettings,
     apiKey,
     aiService,
@@ -343,6 +346,3 @@ app.on("before-quit", (event) => {
   void browser.dispose().finally(() => app.exit(0));
 });
 
-// 让 TS 知道 ProductWorkflowTask 仍通过 events 模块被消费；
-// 不导出类型避免外部污染 main 入口。
-void ({} as ProductWorkflowTask);

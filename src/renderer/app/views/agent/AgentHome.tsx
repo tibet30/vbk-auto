@@ -14,6 +14,8 @@ const STARTERS: Array<{ label: string; prompt: string; skill?: string }> = [
   { label: "制作 PPT", prompt: "做一份汇报 PPT，先给我大纲再生成", skill: "deck" },
   { label: "制作网页", prompt: "做一个静态网页，先给我内容结构", skill: "web" },
   { label: "整理文件", prompt: "整理工作目录里的文件，写操作先问我", skill: "local-file" },
+  { label: "查我的订单", prompt: "用三人同游平台查一下我的客户订单，按状态和金额列出来", skill: "tibet" },
+  { label: "查 VBK 绑定", prompt: "查一下三人同游平台里保存的 VBK 账号绑定，标出当前用的是哪个", skill: "tibet" },
   { label: "操作后台", prompt: "登录 VBK 后台处理任务" },
 ];
 

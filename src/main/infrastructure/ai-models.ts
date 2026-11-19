@@ -1,5 +1,5 @@
 /**
- * AI 模型列表拉取与解析（仅 Evolink 提供方支持）。
+ * AI 模型列表自动发现与解析。
  *
  * 设计要点：
  *  - 不直接读数据库：通过 `readStoredKey` 回调解耦，测试可注入 mock 密钥源
@@ -17,14 +17,14 @@ import type {
   AiModelListResult,
   AiProvider,
 } from "../../shared/contracts.js";
-import { aiModelOption, isAiProvider } from "../../shared/contracts.js";
+import { aiModelOption, aiProviderProfile, isAiProvider } from "../../shared/contracts.js";
 import { assertSafeAiServiceUrl } from "./ai-settings.js";
 
 /** fetch 注入点，签名与全局 fetch 兼容；测试时可替换为 mock。 */
 type FetchModelList = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 /**
- * 拼 Evolink /models URL：先校验 baseUrl 安全，再追加 /models、清空 query/hash。
+ * 拼 OpenAI 兼容 /models URL：先校验 baseUrl 安全，再追加 /models、清空 query/hash。
  */
 function modelListUrl(baseUrl: string): URL {
   const url = assertSafeAiServiceUrl(baseUrl.trim());
@@ -86,13 +86,11 @@ export function parseAiModelList(payload: unknown, provider: AiProvider): AiMode
  * 拉取模型列表前的 API Key 解析：
  *   - 校验 provider 合法；
  *   - input.apiKey 优先，否则回调 readStoredKey 读本地 ai-key-store；
- *   - provider ≠ "deepseek" 时拒掉（当前只支持 Evolink）。
  */
 async function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiProvider) => Promise<string>): Promise<string> {
   if (!isAiProvider(input?.provider)) throw new Error("请选择要刷新的 AI 提供商。");
-  if (input.provider !== "deepseek") throw new Error("当前仅支持刷新 Evolink 模型列表。");
   const key = stringValue(input.apiKey) || await readStoredKey(input.provider);
-  if (!key) throw new Error("请先填写 Evolink API Key。");
+  if (!key) throw new Error(`请先填写 ${aiProviderProfile(input.provider).shortLabel} API Key。`);
   return key;
 }
 
@@ -100,15 +98,17 @@ async function resolveKey(input: AiModelListInput, readStoredKey: (provider: AiP
  * 把 HTTP status 翻译成本地化错误：401/403（鉴权）、429（限流）、5xx（服务端）、其它（未知）。
  * 调用方拿到 Error 后直接 throw / 抛回 IPC 层即可。
  */
-function modelListHttpError(status: number): Error {
-  if (status === 401 || status === 403) return new Error("Evolink API Key 无效，或无权读取模型列表。");
-  if (status === 429) return new Error("Evolink 请求过于频繁，请稍后再刷新。");
-  if (status >= 500) return new Error("Evolink 服务暂时不可用，请稍后再刷新模型。");
-  return new Error(`Evolink 模型列表获取失败（HTTP ${status}）。`);
+function modelListHttpError(provider: AiProvider, status: number): Error {
+  const label = aiProviderProfile(provider).shortLabel;
+  if (status === 401 || status === 403) return new Error(`${label} API Key 无效，或无权读取模型列表。`);
+  if (status === 429) return new Error(`${label} 请求过于频繁，请稍后再试。`);
+  if (status >= 500) return new Error(`${label} 服务暂时不可用，请稍后再试。`);
+  return new Error(`${label} 模型列表获取失败（HTTP ${status}）。`);
 }
 
 /**
- * 拉取 Evolink 模型列表（仅 Evolink 提供方支持）。
+ * 自动发现模型列表。MiniMax 尚无标准模型枚举接口，使用应用内官方目录；
+ * 其它 OpenAI 兼容提供商从 /models 拉取实时结果。
  * 抛错时已本地化为用户可读文案；调用方一般直接透传给 renderer。
  *
  * @param input 拉取输入（provider / baseUrl / 可选 apiKey）
@@ -120,7 +120,13 @@ export async function fetchAiModelList(
   readStoredKey: (provider: AiProvider) => Promise<string>,
   fetchModels: FetchModelList = fetch,
 ): Promise<AiModelListResult> {
+  assertSafeAiServiceUrl(input.baseUrl.trim());
   const apiKey = await resolveKey(input, readStoredKey);
+  if (input.provider === "minimax") {
+    const models = (aiProviderProfile("minimax").modelOptions || [])
+      .map((option) => ({ id: option.value, label: option.label, ownedBy: "minimax" }));
+    return { models, fetchedAt: new Date().toISOString() };
+  }
   let response: Response;
   try {
     response = await fetchModels(modelListUrl(input.baseUrl), {
@@ -134,7 +140,7 @@ export async function fetchAiModelList(
     }
     throw new Error("无法连接 Evolink，请检查服务地址和网络后重试。");
   }
-  if (!response.ok) throw modelListHttpError(response.status);
+  if (!response.ok) throw modelListHttpError(input.provider, response.status);
 
   let payload: unknown;
   try {

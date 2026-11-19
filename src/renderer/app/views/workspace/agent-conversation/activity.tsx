@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AgentEvent } from "../../../../../shared/contracts";
 import { shouldExpandAgentReasoning, splitAgentReasoning } from "../../../../../shared/agent-visible-text";
 import styles from "../agent-conversation.module.less";
+import { MessageMarkdown } from "../../shared/message-markdown";
 import { pairMethodBatchEvents } from "../agent-conversation-grouping";
 import { statusText, toolCallLabel } from "./labels";
 import { ToolResultBody } from "./tool-result-view";
@@ -17,7 +18,7 @@ export function ThinkingActivity({ event }: { event: AgentEvent }) {
   const label = streaming && !reasoningComplete ? "正在思考…" : "思考片刻";
   return <details className={styles.activity} open={open} onToggle={(item) => setOpen(item.currentTarget.open)}>
     <summary>{label}</summary>
-    <div className={styles.activityBody}>{reasoning}</div>
+    <div className={styles.activityBody}><MessageMarkdown content={reasoning} /></div>
   </details>;
 }
 

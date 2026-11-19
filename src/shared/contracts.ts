@@ -11,3 +11,4 @@ export * from "./contracts-agent.js";
 export * from "./contracts-agent-workspace.js";
 export * from "./contracts-product-architecture.js";
 export * from "./system-notification-settings.js";
+export * from "./contracts-service-token.js";

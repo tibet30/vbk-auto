@@ -2,6 +2,7 @@ import type { DraftAutomation } from "../automation/automation.js";
 import type { VbkBrowser } from "../infrastructure/vbk-browser.js";
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import type { LocalAiKeyStore } from "../infrastructure/ai-key-store.js";
+import type { TibetServiceTokenStore } from "../infrastructure/tibet-service-token-store.js";
 import type { MiniMaxService } from "../minimax/minimax.js";
 import type { ProductWorkflowCoordinator } from "../application/product-workflow-coordinator.js";
 import type { ProductMutationService } from "../application/product-mutation-service.js";
@@ -31,6 +32,8 @@ export interface MainIpcContext {
   browser: VbkBrowser;
   automation: DraftAutomation;
   aiKeyStore: LocalAiKeyStore;
+  /** 三人同游服务令牌的本地存储（0600 文件；renderer 只能看到掩码）。 */
+  tibetServiceTokens?: TibetServiceTokenStore;
   getSettings: () => Settings;
   apiKey: (provider?: AiProvider) => Promise<string>;
   aiService: (snapshot?: Settings) => Promise<MiniMaxService>;

@@ -203,3 +203,32 @@ test("已保存城市只是当天途经点、原文宿另一地时按已核验�
   assert.equal(result.itinerary[0].hotelCity, "肃南", "途经点祁连不能当成原文指定住宿地");
   assert.deepEqual(platformHotelStayGroups(result).map(({ cityName }) => cityName), ["肃南"]);
 });
+
+test("原文写景点名住宿（住珠峰）时按当天已核验景点的所属县市收敛，文案同步改口径", () => {
+  const input: any = { basicInfo: { meetingCity: "阿里", destinationCity: "阿里", province: "西藏", days: 2, nights: 2,
+    userIdea: "D1：【拉萨-日喀则】羊卓雍措-住日喀则（不含餐）\nD2：【日喀则-珠峰】扎什伦布寺-珠峰绒布冰川遗迹-住珠峰（不含餐）" },
+  sales: { productForm: "groupTour" }, operations: {},
+  itinerary: [
+    { day: 1, hotel: "日喀则（待匹配）", hotelCity: "日喀则", description: "原始逐日安排：D1。当晚按原路线住日喀则，使用平台自动匹配酒店。", spots: [] },
+    { day: 2, hotel: "珠峰（待匹配）", hotelCity: "珠峰", description: "原始逐日安排：D2。当晚按原路线住珠峰，使用平台自动匹配酒店。",
+      spots: [{ name: "扎什伦布寺", poiName: "扎什伦布寺", poiId: 76348, province: "西藏", city: "日喀则", district: "日喀则" },
+        { name: "珠峰绒布冰川遗迹", poiName: "绒布冰川", poiId: 76353, province: "西藏", city: "日喀则", district: "定日" }] },
+  ] };
+  const result = normalisePlatformHotelProduct(input);
+  assert.equal(result.itinerary[1].hotelCity, "定日");
+  assert.match(result.itinerary[1].description, /当晚住宿行政城市为定日/u);
+  assert.doesNotMatch(result.itinerary[1].description, /当晚按原路线住珠峰/u);
+  assert.deepEqual(platformHotelStayGroups(result).map(({ cityName }) => cityName), ["日喀则", "定日"]);
+  assert.deepEqual(normalisePlatformHotelProduct(result), result, "再次保存不能回到景点名");
+});
+
+test("景点没有核验归属时保留原住宿地名，不凭空编造行政城市", () => {
+  const input: any = { basicInfo: { meetingCity: "阿里", destinationCity: "阿里", province: "西藏", days: 1, nights: 1,
+    userIdea: "D1：【日喀则-珠峰】珠峰绒布冰川遗迹-住珠峰（不含餐）" }, sales: { productForm: "groupTour" },
+  operations: {}, itinerary: [{ day: 1, hotel: "珠峰（待匹配）", hotelCity: "珠峰",
+    description: "原始逐日安排：D1。当晚按原路线住珠峰，使用平台自动匹配酒店。",
+    spots: [{ name: "珠峰绒布冰川遗迹" }] }] };
+  const result = normalisePlatformHotelProduct(input);
+  assert.equal(result.itinerary[0].hotelCity, "珠峰");
+  assert.match(result.itinerary[0].description, /当晚按原路线住珠峰/u);
+});

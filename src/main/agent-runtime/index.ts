@@ -16,6 +16,7 @@ import { createProductReadSkill, type ProductReadPort } from "./skills/product-r
 import { createAccountReadSkill, type AccountReadPort } from "./skills/account-readonly/index.js";
 import { createVbkReadSkill, type VbkReadPort } from "./skills/vbk-readonly/index.js";
 import { createVbkWriteSkill, type VbkWritePort } from "./skills/vbk-write/index.js";
+import { createTibetReadSkill, type TibetReadPort } from "./skills/tibet-readonly/index.js";
 import { assertBackendWritesAreVerifiable } from "./skills/backend-write-guard.js";
 import type { AgentSkill } from "./types.js";
 
@@ -51,6 +52,19 @@ export { createVbkReadSkill, VBK_READ_ACCOUNT } from "./skills/vbk-readonly/inde
 export type { VbkReadPort, VbkStatusSnapshot } from "./skills/vbk-readonly/index.js";
 export { createVbkWriteSkill } from "./skills/vbk-write/index.js";
 export type { VbkProductBasicInfo, VbkWriteGateResult, VbkWritePort } from "./skills/vbk-write/index.js";
+export { createTibetReadSkill, TIBET_READ_ACCOUNT } from "./skills/tibet-readonly/index.js";
+export type {
+  TibetAdminCatalogQueryRecord,
+  TibetCatalogDetailRecord,
+  TibetCatalogPageRecord,
+  TibetCatalogQueryRecord,
+  TibetCatalogServiceRecord,
+  TibetOrderRecord,
+  TibetPlatformReferenceRecord,
+  TibetReadPort,
+  TibetStatusRecord,
+  TibetVbkBindingRecord,
+} from "./skills/tibet-readonly/index.js";
 export type { AccountReadPort, AccountReadRecord } from "./skills/account-readonly/index.js";
 export { McpServerConnection, McpTimeoutError, toolFingerprint } from "./mcp/client.js";
 export type { McpConnectionDiagnostics, McpConnectionState, McpServerConfig, McpToolDescriptor } from "./mcp/client.js";
@@ -72,6 +86,7 @@ export function createAgentRuntime(
     accounts?: AccountReadPort;
     vbk?: VbkReadPort;
     vbkWrite?: VbkWritePort;
+    tibet?: TibetReadPort;
     /** 外部 MCP Skill：由 `createMcpSkillSource().discover()` 提供，仍然走同一套审批与收据。 */
     extraSkills?: readonly AgentSkill[];
   } = {},
@@ -81,6 +96,7 @@ export function createAgentRuntime(
   if (options.accounts) skills.unshift(createAccountReadSkill(options.accounts));
   if (options.vbk) skills.unshift(createVbkReadSkill(options.vbk));
   if (options.vbkWrite) skills.unshift(createVbkWriteSkill(options.vbkWrite));
+  if (options.tibet) skills.unshift(createTibetReadSkill(options.tibet));
   if (options.extraSkills?.length) skills.push(...options.extraSkills);
   if (options.products) skills.unshift(createProductReadSkill(options.products));
   // 装配即准入：后台域写动作必须能预览、能回读，否则拒绝装配。

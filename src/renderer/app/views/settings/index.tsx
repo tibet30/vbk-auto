@@ -2,6 +2,7 @@ import type { AppModel } from "../../app.main.model";
 import shared from "../shared.module.less";
 import styles from "./index.module.less";
 import { AgentToolsBlock } from "./agent-tools-block";
+import { TibetServiceBlock } from "./tibet-service-block";
 import { AiProviderBlock } from "./minimax-block";
 import { VbkLoginBlock } from "./vbk-login-block";
 import { AppAccountBlock } from "./app-account-block";
@@ -21,6 +22,7 @@ export function AppSettingsPage({ model }: { model: AppModel }) {
       <VbkLoginBlock model={model} />
       <AiProviderBlock model={model} />
       <AgentToolsBlock />
+      <TibetServiceBlock />
     </div>
   </div>;
 }

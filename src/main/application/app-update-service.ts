@@ -23,8 +23,8 @@ import { sanitizeUpdateStateForExport } from "./app-update-diagnostics.js";
 import { safeRendererSend } from "../infrastructure/renderer-send.js";
 import { AppUpdateFailure, describeUpdateFailure } from "./app-update-diagnostics.js";
 import { downloadFile, ensureTrailingSlashUrl, selectInstallerFile } from "./app-update-service/download.js";
-import { devForced, feedUrl, isSupportedUpdatePlatform } from "./app-update-service/feed.js";
-import { compareSemver, fetchLatestManifest, parseLatestManifest } from "./app-update-service/manifest.js";
+import { devForced, feedUrl, resolveUpdateCapability } from "./app-update-service/feed.js";
+import { decideManifestUpdate, fetchLatestManifest, parseLatestManifest } from "./app-update-service/manifest.js";
 
 export { APP_UPDATE_FEED_URL } from "./app-update-service/feed.js";
 
@@ -43,17 +43,24 @@ export class AppUpdateService {
   private periodicTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: AppUpdateServiceOptions) {
-    const supported = isSupportedUpdatePlatform(process.platform) && (app.isPackaged || devForced);
+    const capability = resolveUpdateCapability(process.platform, app.isPackaged, devForced);
     this.state = {
       currentVersion: app.getVersion(),
       platform: process.platform,
-      supported,
+      supported: capability.supported,
+      canInstall: capability.canInstall,
       feedUrl,
-      status: supported ? "idle" : "unsupported",
+      status: capability.supported ? "idle" : "unsupported",
       updateAvailable: false,
       downloaded: false,
     };
-    if (!supported) return;
+    if (!capability.supported) return;
+    // 开发模式没有 app-update.yml 与安装产物，只能走自实现清单检查；
+    // 不初始化 autoUpdater，避免它在未打包环境里抛错。
+    if (capability.canInstall) this.wireAutoUpdater();
+  }
+
+  private wireAutoUpdater(): void {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowDowngrade = false;
@@ -103,14 +110,23 @@ export class AppUpdateService {
     this.patch({ status: "checking", errorMessage: undefined, errorCode: undefined, errorDetail: undefined });
     try {
       const manifest = parseLatestManifest(await fetchLatestManifest());
-      if (compareSemver(manifest.version, app.getVersion()) <= 0) {
-        this.patch({ status: "not_available", updateAvailable: false, downloaded: false });
+      const decision = decideManifestUpdate(manifest, app.getVersion());
+      if (!decision.updateAvailable) {
+        this.patch({
+          status: "not_available",
+          updateAvailable: false,
+          downloaded: false,
+          serverVersion: decision.serverVersion,
+          availableVersion: undefined,
+          progress: undefined,
+        });
       } else {
         this.patch({
           status: "available",
           updateAvailable: true,
-          availableVersion: manifest.version,
-          releaseDate: manifest.releaseDate,
+          serverVersion: decision.serverVersion,
+          availableVersion: decision.availableVersion,
+          releaseDate: decision.releaseDate,
           progress: undefined,
           downloaded: false,
           installerPath: undefined,
@@ -159,6 +175,12 @@ export class AppUpdateService {
 
   quitAndInstall(): void {
     this.assertSupported();
+    if (!this.state.canInstall) {
+      throw new AppUpdateFailure(
+        "install_unavailable",
+        "开发模式不会自动替换当前应用，请打开下载好的安装包手动覆盖安装。",
+      );
+    }
     if (!this.state.downloaded) throw new Error("新版本尚未下载完成。");
     this.options.onQuitAndInstall();
     autoUpdater.quitAndInstall(false, true);
@@ -173,6 +195,7 @@ export class AppUpdateService {
     this.patch({
       status: "available",
       updateAvailable: true,
+      serverVersion: info.version,
       availableVersion: info.version,
       releaseDate: info.releaseDate,
       progress: undefined,
@@ -196,6 +219,7 @@ export class AppUpdateService {
     this.patch({
       status: "downloaded",
       updateAvailable: true,
+      serverVersion: info.version,
       availableVersion: info.version,
       releaseDate: info.releaseDate,
       downloaded: true,

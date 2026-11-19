@@ -35,7 +35,7 @@ export function UpdateBlock() {
         <ArrowRight size={14} className={styles.metaArrow} aria-hidden="true" />
         <span className={styles.metaCell} data-tone={view.tone}>
           <small>{state?.downloaded ? "已下载" : "服务器最新"}</small>
-          <strong>{state?.availableVersion ? `v${state.availableVersion}` : "—"}</strong>
+          <strong>{view.latestVersionLabel}</strong>
         </span>
         <span className={styles.metaCell}>
           <small>最近检查</small>

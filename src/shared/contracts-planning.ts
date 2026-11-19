@@ -51,7 +51,7 @@ export type {
 
 export type { PlanningPlanV2 } from "./contracts-planning/plan.js";
 
-export type { PlanningStageOutput, PlanningStageError } from "./contracts-planning/output.js";
+export type { PlanningStageOutput, PlanningStageError, PlanningRunResult } from "./contracts-planning/output.js";
 
 export type {
   ModulePersistedState,

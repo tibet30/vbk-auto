@@ -54,9 +54,14 @@ function nearestOccurrenceDistance(path: string, name: string, position: number)
   return best;
 }
 
+/**
+ * 停靠点边界字符：路线里的分隔符与「|」后的附加说明（`| 宿门源`、`| 张掖结束行程`）。
+ * 少了竖线时，每天最后一个景点永远拿不到原文路线证据，跨省尾段会被判成外省。
+ */
+const STOP_BOUNDARY = /[-—–→+＋>＞，,、/／（(【:：&＆|｜\s]/u;
+
 function routeContainsWholeStop(path: string, name: string): boolean {
-  const boundary = (character: string | undefined) =>
-    character === undefined || /[-—–→+＋>＞，,、/／（(【:：&＆\s]/u.test(character);
+  const boundary = (character: string | undefined) => character === undefined || STOP_BOUNDARY.test(character);
   for (let index = path.indexOf(name); index >= 0; index = path.indexOf(name, index + name.length)) {
     if (boundary(path[index - 1]) && boundary(path[index + name.length])) return true;
   }
@@ -77,8 +82,7 @@ function routeOrderPreserved(path: string, day: Json): boolean {
 }
 
 function routeStopIndex(path: string, name: string): number | undefined {
-  const boundary = (character: string | undefined) =>
-    character === undefined || /[-—–→+＋>＞，,、/／（(【:：&＆\s]/u.test(character);
+  const boundary = (character: string | undefined) => character === undefined || STOP_BOUNDARY.test(character);
   for (let index = path.indexOf(name); index >= 0; index = path.indexOf(name, index + name.length)) {
     if (boundary(path[index - 1]) && boundary(path[index + name.length])) return index;
   }

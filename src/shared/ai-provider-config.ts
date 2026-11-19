@@ -1,4 +1,4 @@
-import type { AiProvider, Settings } from "./contracts-types.js";
+import type { AiModelInfo, AiProvider, Settings } from "./contracts-types.js";
 
 export interface AiProviderProfile {
   value: AiProvider;
@@ -14,6 +14,15 @@ export interface AiModelOption {
   label: string;
 }
 
+export interface AiModelChoice extends AiModelOption {
+  provider: AiProvider;
+  providerLabel: string;
+  configured: boolean;
+  active: boolean;
+}
+
+export type AiModelCatalogs = Partial<Record<AiProvider, readonly AiModelInfo[]>>;
+
 export const AI_PROVIDER_PROFILES: readonly AiProviderProfile[] = [
   {
     value: "minimax",
@@ -21,6 +30,10 @@ export const AI_PROVIDER_PROFILES: readonly AiProviderProfile[] = [
     shortLabel: "MiniMax",
     defaultBaseUrl: "https://api.minimaxi.com/v1",
     defaultModel: "MiniMax-M3",
+    modelOptions: [
+      { value: "MiniMax-M3", label: "MiniMax M3" },
+      { value: "MiniMax-M3.1-Flash", label: "MiniMax M3.1 Flash" },
+    ],
   },
   {
     value: "deepseek",
@@ -45,6 +58,29 @@ export function aiProviderProfile(provider: AiProvider): AiProviderProfile {
 
 export function aiModelOption(provider: AiProvider, model: string): AiModelOption | undefined {
   return aiProviderProfile(provider).modelOptions?.find((option) => option.value === model);
+}
+
+/** 对话输入区可直接切换的模型；优先使用自动发现目录，并保留当前动态模型。 */
+export function aiModelChoices(settings: Settings, catalogs: AiModelCatalogs = {}): AiModelChoice[] {
+  return AI_PROVIDER_PROFILES.flatMap((profile) => {
+    const config = aiProviderConfig(settings, profile.value);
+    const discovered = catalogs[profile.value]?.map((model) => ({ value: model.id, label: model.label }));
+    const knownOptions = discovered?.length
+      ? discovered
+      : profile.modelOptions?.length
+      ? [...profile.modelOptions]
+      : [{ value: config.model, label: aiModelOption(profile.value, config.model)?.label || config.model }];
+    const options = knownOptions.some((option) => option.value === config.model)
+      ? knownOptions
+      : [{ value: config.model, label: config.model }, ...knownOptions];
+    return options.map((option) => ({
+      ...option,
+      provider: profile.value,
+      providerLabel: profile.label,
+      configured: config.hasKey,
+      active: settings.aiProvider === profile.value && config.model === option.value,
+    }));
+  });
 }
 
 export function isSupportedAiModel(provider: AiProvider, model: string): boolean {

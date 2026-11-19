@@ -13,6 +13,7 @@ import {
   successfulAiConnectionTest,
 } from "../infrastructure/ai-settings.js";
 import { fetchAiModelList } from "../infrastructure/ai-models.js";
+import { describeTibetServiceToken } from "../infrastructure/tibet-service-token-status.js";
 import { assertTrustedSender } from "../infrastructure/ipc-sender.js";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { captureRuntimeLog, loadOperationLog } from "../operations/operation-log-store.js";
@@ -123,6 +124,32 @@ export function registerSettingsIpc(context: MainIpcContext): void {
   ipcMain.handle("settings:openNotificationSettings", async (event) => {
     assertTrustedSender(event, "settings:openNotificationSettings");
     await openSystemNotificationSettings();
+  });
+
+  // ---- 三人同游服务令牌（本地 0600 文件；明文永不回到 renderer） ----
+  const requireTokenStore = () => {
+    const store = context.tibetServiceTokens;
+    if (!store) throw new Error("服务令牌存储尚未就绪，请稍后重试。");
+    return store;
+  };
+  ipcMain.handle("settings:tibetServiceToken", async () => describeTibetServiceToken(requireTokenStore()));
+  ipcMain.handle("settings:saveTibetServiceToken", async (event, token: unknown) => {
+    assertTrustedSender(event, "settings:saveTibetServiceToken");
+    if (typeof token !== "string") throw new Error("服务令牌必须是字符串。");
+    const store = requireTokenStore();
+    store.save(token);
+    // 保存后立刻自检：把「存了但无效」当场暴露，而不是等智能体调用时才失败。
+    return describeTibetServiceToken(store, { verify: true });
+  });
+  ipcMain.handle("settings:clearTibetServiceToken", async (event) => {
+    assertTrustedSender(event, "settings:clearTibetServiceToken");
+    const store = requireTokenStore();
+    store.clear();
+    return describeTibetServiceToken(store);
+  });
+  ipcMain.handle("settings:verifyTibetServiceToken", async (event) => {
+    assertTrustedSender(event, "settings:verifyTibetServiceToken");
+    return describeTibetServiceToken(requireTokenStore(), { verify: true });
   });
   // 读取自动化操作历史。早期版本返回内存样例，等真实写入路径就绪后再
   // 改读持久化文件；查询语义保持一致以免上层调用方重写。

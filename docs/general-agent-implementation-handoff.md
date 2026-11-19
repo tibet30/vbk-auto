@@ -20,7 +20,7 @@
 ## 本阶段交付清单（2026-11-17 收口）
 
 **新增模块**
-- `src/main/agent-runtime/`：`skill-registry` / `permission-policy` / `path-scope` / `action-executor` / `run-loop` / `run-service` / `artifacts` / `skill-scope` / `mcp/*` / `skills/{local-file,deck,web,product-readonly,account-readonly,vbk-readonly,vbk-write,backend-write-guard}`
+- `src/main/agent-runtime/`：`skill-registry` / `permission-policy` / `path-scope` / `action-executor` / `run-loop` / `run-service` / `artifacts` / `skill-scope` / `mcp/*` / `skills/{local-file,deck,web,product-readonly,account-readonly,vbk-readonly,vbk-write,tibet-readonly,backend-write-guard}`
 - `src/main/agent-workspace/`：`service` / `ports` / `external-tools` / `external-tools-settings` / `model-context` / `vbk-adapter` / `vbk-write-adapter`
 - `src/renderer/app/views/agent/`：`AgentHome` / `ThreadSidebar` / `AgentThreadView` / `AgentWorkPanel` + `AgentWorkPanelRows` / `ArtifactPreviewModal` / `skill-scope`
 - `src/renderer/app/views/settings/agent-tools-block.tsx`（MCP 配置卡片）
@@ -88,7 +88,7 @@
 - 跨任务的排队优先级与配额（串行与队列可见性已实现：同账号写操作 FIFO，面板能看到持锁任务与排队数）。
 - 产品写入/确认/录入类的通用 Skill——**已决策永久不做**（A，代码守卫 `assertProductActionsReadOnly`）。
 - 后台**写**的其余动作（资源绑定 / 换封面 / 发布）与真实受控写入验证：第一个写动作已按决策 A 落地，计划见 [VBK 写入实施计划](/Users/cisco/Documents/vbk-auto/docs/general-agent-vbk-write-plan.md)。
-- 三人同游 adapter：等业务侧的 Token 免登录方案，当前无接口/会话信息。
+- 三人同游 adapter：只读部分已落地（service token + 公共在售目录 + 令牌自检，见 [当前实现细节](/Users/cisco/Documents/vbk-auto/docs/general-agent-current-implementation.md) 第 8 步）；需要身份绑定的个人数据与写入仍未做。
 - 附件上传与幻灯片缩略图渲染（PPT 只有生成与收据，没有应用内图形预览；本机无 LibreOffice/PowerPoint 渲染器，不做假实现）。
 - MCP 配置的持久化细节（断开状态只在本次会话有效，重启按配置重连）。
 - MCP 外部 Skill 的"安装/分发"（连接与配置已可用，但没有市场或一键安装）。

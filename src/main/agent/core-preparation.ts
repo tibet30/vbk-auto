@@ -2,6 +2,7 @@ import type { AgentQuestion, AgentSnapshot } from "../../shared/contracts.js";
 import type { AgentCoreDependencies } from "./types.js";
 import { isPreparationRun } from "./preparation-run.js";
 import { decidePreparationAction, type PreparationDirectedAction } from "./preparation-director.js";
+import { preparationActionRepeatsOnNoProgress } from "../planning/preparation/policy.js";
 import { evaluatePreparationCompletion } from "../planning/preparation-completion.js";
 import { manualPoiInput, unmatchedCanonicalPoiSlots, type ManualPoiSlot } from "./core-preparation-poi-input.js";
 
@@ -77,7 +78,12 @@ export function nextPreparationLoopDecision(
     && event.data?.deterministicPreparationModelRepair === true
     && event.data?.progressKey === action.progressKey
     && event.data?.name === action.name);
-  if (attempts < 2) return { kind: "execute", action };
+  const lastAttemptFailed = deterministicAttemptFailed(events, snapshot.run?.id, action);
+  if (attempts === 0) return { kind: "execute", action };
+  // AI 生成有方差，同一指纹内允许再跑一次；资源查询在同一指纹下必然复现同一批
+  // 候选与未命中，只在上一轮真的失败（报错 / 被拒 / 没有收据）时重试，否则直接
+  // 交给模型修复窗口，避免一次纯重复的全量 POI 查询与 AI 裁决。
+  if (attempts < 2 && (preparationActionRepeatsOnNoProgress(action.name) || lastAttemptFailed)) return { kind: "execute", action };
   if (manualInput) return { kind: "askPoiInput", action, input: manualInput };
   if (!modelRepairSeen) return { kind: "model", action, modelRepairWindow: true };
   const evaluation = evaluatePreparationCompletion(product, snapshot);
@@ -114,6 +120,23 @@ function eventsSinceLatestUser(snapshot: AgentSnapshot) {
 
 function isReadOnlyTool(name: unknown): boolean {
   return typeof name === "string" && /^(?:read|query)_/.test(name);
+}
+
+/** 同一 progressKey 下上一次确定性执行是否真的失败：报错、被拒或没有收据。 */
+function deterministicAttemptFailed(
+  events: AgentSnapshot["events"],
+  runId: string | undefined,
+  action: PreparationDirectedAction,
+): boolean {
+  const calls = events.filter((event) => event.runId === runId && event.type === "tool_call"
+    && event.data?.deterministicPreparation === true
+    && event.data?.name === action.name
+    && event.data?.progressKey === action.progressKey);
+  const toolCallId = calls.at(-1)?.data?.toolCallId;
+  if (!toolCallId) return false;
+  const result = events.find((event) => event.type === "tool_result" && event.data?.toolCallId === toolCallId);
+  if (!result) return true;
+  return Boolean(result.data?.error || result.data?.executionRejected);
 }
 
 function hasActiveApproval(snapshot: AgentSnapshot): boolean {

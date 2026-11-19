@@ -45,6 +45,10 @@ const api: VbkApi = {
     cancel: (id) => ipcRenderer.invoke("agentWorkspace:cancel", id),
     selectDirectory: (id) => ipcRenderer.invoke("agentWorkspace:selectDirectory", id),
   },
+  tibet: {
+    platformReference: (productId) => ipcRenderer.invoke("tibet:platformReference", productId),
+    status: () => ipcRenderer.invoke("tibet:status"),
+  },
   workspace: { get: id => ipcRenderer.invoke('workspace:get', id) },
   agent: {
     get: (id) => ipcRenderer.invoke("agent:get", id),
@@ -132,7 +136,7 @@ const api: VbkApi = {
     listKnownAccounts: () => ipcRenderer.invoke("accounts:listKnownAccounts"),
     providerIdFor: (accountName) => ipcRenderer.invoke("accounts:providerIdFor", accountName),
   },
-  settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input), testNotification: () => ipcRenderer.invoke("settings:testNotification"), openNotificationSettings: () => ipcRenderer.invoke("settings:openNotificationSettings") },
+  settings: { get: () => ipcRenderer.invoke("settings:get"), listModels: (input) => ipcRenderer.invoke("settings:listModels", input), save: (input) => ipcRenderer.invoke("settings:save", input), test: (input) => ipcRenderer.invoke("settings:test", input), testNotification: () => ipcRenderer.invoke("settings:testNotification"), openNotificationSettings: () => ipcRenderer.invoke("settings:openNotificationSettings"), tibetServiceToken: () => ipcRenderer.invoke("settings:tibetServiceToken"), saveTibetServiceToken: (token) => ipcRenderer.invoke("settings:saveTibetServiceToken", token), clearTibetServiceToken: () => ipcRenderer.invoke("settings:clearTibetServiceToken"), verifyTibetServiceToken: () => ipcRenderer.invoke("settings:verifyTibetServiceToken") },
   updates: { status: () => ipcRenderer.invoke("updates:status"), check: () => ipcRenderer.invoke("updates:check"), download: () => ipcRenderer.invoke("updates:download"), openInstaller: () => ipcRenderer.invoke("updates:openInstaller"), showInstallerInFolder: () => ipcRenderer.invoke("updates:showInstallerInFolder"), quitAndInstall: () => ipcRenderer.invoke("updates:quitAndInstall") },
   contacts: { listProviderContactCards: (providerId, searchKeyword) => ipcRenderer.invoke("contacts:listProviderContactCards", providerId, searchKeyword), suggestPoi: (keyword) => ipcRenderer.invoke("contacts:suggestPoi", keyword) },
   cover: {

@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CircleAlert, MessageCircleMore, Pause, Play, Send } from "lucide-react";
-import type { ProductDetail, ProductReadiness, TrafficLineConfig, VbkApi } from "../../../../shared/contracts";
+import type { AiModelCatalogs, AiProvider, ProductDetail, ProductReadiness, Settings, TrafficLineConfig, VbkApi } from "../../../../shared/contracts";
 import { blockingTrafficVariants } from "../../../../shared/traffic-resource-status";
 import { parseProductBriefMessage } from "../../../../shared/product-brief-message";
 import { AgentInput } from "./agent-input";
+import { AgentModelSelect } from "./agent-model-select";
 import { AgentStageTimeline } from "./agent-stage-timeline";
 import { STATUS } from "./agent-conversation-items";
 import { useAgentSession } from "./use-agent-session";
@@ -61,13 +62,19 @@ function FailureNotice({ failure, disabled, busy, repairing, submitted, onRepair
   </section>;
 }
 
-export function AgentConversation({ product, userName, readiness, client, input, setInput, onApproved }: {
+export function AgentConversation({
+  product, userName, readiness, client, input, setInput, settings, modelLists, switchingModel, onModelChange, onApproved,
+}: {
   product: ProductDetail;
   userName: string;
   readiness: ProductReadiness;
   client: VbkApi | undefined;
   input: string;
   setInput(value: string): void;
+  settings: Settings | null;
+  modelLists: AiModelCatalogs;
+  switchingModel: boolean;
+  onModelChange(provider: AiProvider, model: string): Promise<void>;
   onApproved(): void;
 }) {
   const { snapshot, history, error, busy, run, loadHistoryPage } = useAgentSession(product.id, client);
@@ -228,6 +235,13 @@ export function AgentConversation({ product, userName, readiness, client, input,
         onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
         onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
       <div className={styles.actions}>
+        <AgentModelSelect
+          settings={settings}
+          modelLists={modelLists}
+          disabled={busy || running}
+          switching={switchingModel}
+          onChange={onModelChange}
+        />
         {running && <button className={shared.btn} type="button" disabled={busy} onClick={() => void run((agent) => agent.pause(product.id))}><Pause size={14} />暂停执行</button>}
         {(status === "paused" || status === "failed") && <button className={shared.btn} type="button" disabled={busy} onClick={() => void run((agent) => agent.resume(product.id))}><Play size={14} />继续执行</button>}
         {status && !["completed", "abandoned"].includes(status) && <button className={shared.btn} type="button" disabled={busy} onClick={() => setShowAbandon(!showAbandon)}>废弃任务</button>}

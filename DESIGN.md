@@ -124,3 +124,4 @@ The browser is not a modal or separate application window. It is a first-class S
 - Every stage switch and status update should have an explicit source of truth (state icon + text), not only color.
 - Keep keyboard and screen-reader basics in scope for shared form controls and important action buttons.
 - 下拉字段统一使用 `src/renderer/app/helpers/Select.tsx` 的公共 `Select`，保留原生 `option`、事件和键盘行为。标准高度为 36px，工具栏可用 `controlSize="compact"`（32px）；有外层边框的筛选器用 `variant="plain"`。箭头距右侧 12px、文字右侧留白 32px，页面样式只调整业务布局和必要的紧凑尺寸，不再自行定义箭头。
+- 模型自由文本（助手正文、阶段总结、思考内容）统一使用 `src/renderer/app/views/shared/message-markdown.tsx` 渲染（`react-markdown` + `remark-gfm` + `remark-breaks`），支持标题、加粗、列表、GFM 表格、代码块与外链；禁止再写正则或逐行的自研 Markdown 解析。用户输入、工具原始 JSON 与固定 UI 文案保持纯文本，不套 Markdown。

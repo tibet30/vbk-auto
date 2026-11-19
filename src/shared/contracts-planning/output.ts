@@ -6,7 +6,8 @@
  */
 
 import type { PlanningStage } from "./stages.js";
-import type { ModuleOutcome } from "./modules.js";
+import type { ModuleOutcome, PlanningModule } from "./modules.js";
+import type { PlanningGenerationState } from "./state.js";
 
 export interface PlanningStageOutput {
   /** 给运营的中文回复，简短说明本阶段结果。 */
@@ -15,6 +16,15 @@ export interface PlanningStageOutput {
   modules: ModuleOutcome[];
   /** 阶段级问题（最多 1 条），仅当完全阻塞下一阶段才返回。 */
   question?: string;
+}
+
+export interface PlanningRunResult {
+  state: PlanningGenerationState;
+  status: "completed" | "needs_user" | "failed";
+  accepted: PlanningModule[];
+  rejected: Array<{ module: PlanningModule; reason?: string }>;
+  researchTasks: Array<{ label: string; type: "vbk" | "web" | "cost" | "image"; detail?: string }>;
+  assistantReply: string;
 }
 
 export interface PlanningStageError {

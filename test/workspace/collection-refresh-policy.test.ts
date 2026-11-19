@@ -34,11 +34,12 @@ test("实时集合事件只在可见列表应用，新建表单保持静默", ()
   assert.equal(shouldApplyWorkflowTaskDetailUpdate("workspace", "product-1", "product-2"), false);
 });
 
-test("后台 VBK 页面跳转不能刷新产品表单或列表页", () => {
+test("VBK 页面就绪在所有顶栏视图触发登录态检查", () => {
   assert.equal(shouldHandleVbkPageReady("workspace"), true);
-  assert.equal(shouldHandleVbkPageReady("products"), false);
-  assert.equal(shouldHandleVbkPageReady("tasks"), false);
-  assert.equal(shouldHandleVbkPageReady("settings"), false);
+  assert.equal(shouldHandleVbkPageReady("products"), true);
+  assert.equal(shouldHandleVbkPageReady("tasks"), true);
+  assert.equal(shouldHandleVbkPageReady("settings"), true);
+  assert.equal(shouldHandleVbkPageReady("operation-log"), true);
 });
 
 test("后台任务状态通过受控事件实时更新，列表接口负责进入页面时补偿", () => {

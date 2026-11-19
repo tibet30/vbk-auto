@@ -80,3 +80,14 @@ export function preparationActionPlan(evaluation: PreparationEvaluation): Prepar
   if (!action || !evaluation.allowedActions.includes(action.name)) return undefined;
   return { node: evaluation.currentNode as PreparationActionPlan["node"], ...action };
 }
+
+/**
+ * 同一 progressKey 下是否允许再执行一次。
+ *
+ * AI 生成有方差，同样的指纹再跑一次可能得到不同结果；POI 资源核验是同一份产品
+ * 事实的确定性读取，指纹没变就必然得到同样的候选与未命中，重复执行只是把一整轮
+ * POI 查询与 AI 裁决再付一次钱。
+ */
+export function preparationActionRepeatsOnNoProgress(name: PreparationActionPlan["name"]): boolean {
+  return name !== "resolve_itinerary_pois";
+}

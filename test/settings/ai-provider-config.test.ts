@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AI_PROVIDER_PROFILES,
+  aiModelChoices,
   aiModelOption,
   aiProviderConfig,
   aiProviderLabel,
@@ -52,14 +53,53 @@ test("只接受应用支持的 AI 提供商", () => {
 
 test("提供商预设可按值稳定查找", () => {
   assert.equal(AI_PROVIDER_PROFILES.length, 2);
+  assert.deepEqual(aiProviderProfile("minimax").modelOptions?.map((option) => option.value), [
+    "MiniMax-M3",
+    "MiniMax-M3.1-Flash",
+  ]);
   assert.equal(aiProviderProfile("deepseek").defaultModel, "deepseek-v4-flash");
   assert.deepEqual(aiProviderProfile("deepseek").modelOptions?.map((option) => option.value), [
     "deepseek-v4-flash",
     "claude-fable-5",
   ]);
   assert.equal(aiModelOption("deepseek", "claude-fable-5")?.label, "Claude Fable 5");
+  assert.equal(aiModelOption("minimax", "MiniMax-M3.1-Flash")?.label, "MiniMax M3.1 Flash");
+  assert.equal(isSupportedAiModel("minimax", "MiniMax-M3.1-Flash"), true);
   assert.equal(isSupportedAiModel("deepseek", "claude-fable-5"), true);
   assert.equal(isSupportedAiModel("deepseek", "made-up-model"), false);
+});
+
+test("对话模型选择器列出内置模型、当前动态模型和配置状态", () => {
+  const choices = aiModelChoices({
+    ...settings,
+    aiProvider: "deepseek",
+    deepseekModel: "new-model",
+    hasDeepSeekKey: true,
+  });
+  assert.deepEqual(choices.map(({ provider, value, configured, active }) => ({ provider, value, configured, active })), [
+    { provider: "minimax", value: "MiniMax-M3", configured: true, active: false },
+    { provider: "minimax", value: "MiniMax-M3.1-Flash", configured: true, active: false },
+    { provider: "deepseek", value: "new-model", configured: true, active: true },
+    { provider: "deepseek", value: "deepseek-v4-flash", configured: true, active: false },
+    { provider: "deepseek", value: "claude-fable-5", configured: true, active: false },
+  ]);
+});
+
+test("对话模型选择器优先采用供应商自动发现的模型目录", () => {
+  const choices = aiModelChoices(settings, {
+    deepseek: [
+      { id: "live-model-a", label: "Live Model A" },
+      { id: "live-model-b", label: "Live Model B" },
+    ],
+  });
+  assert.deepEqual(
+    choices.filter((choice) => choice.provider === "deepseek").map(({ value, label }) => ({ value, label })),
+    [
+      { value: "deepseek-v4-flash", label: "deepseek-v4-flash" },
+      { value: "live-model-a", label: "Live Model A" },
+      { value: "live-model-b", label: "Live Model B" },
+    ],
+  );
 });
 
 test("hasActiveAiKey 仅依赖当前激活的提供商", () => {

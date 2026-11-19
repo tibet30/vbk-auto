@@ -43,6 +43,12 @@ import type {
   UserMemory,
   MemoryMaintenanceState,
 } from "./contracts-types.js";
+import type {
+  TibetPlatformReferenceResult,
+  TibetServiceStatusSummary,
+  TibetServiceTokenSnapshot,
+} from "./contracts-service-token.js";
+import type { PlanningRunResult } from "./contracts-planning/output.js";
 import type { PlanningGenerationState, PlanningMajorStage, PlanningModule } from "./contracts-planning.js";
 import type { AgentDisplaySnapshot, AgentHistoryPage, AgentInputResponse, AgentApprovalResponse, AgentIllegalKeywordRepairInput } from "./contracts-agent.js";
 import type { AgentWorkspaceApi } from "./contracts-agent-workspace.js";
@@ -245,31 +251,9 @@ export interface VbkApi {
     listManual(): Promise<{ supportedMimeTypes: readonly string[]; records: ManualUploadCoverMeta[] }>;
     /** 判断 fileId 本地副本是否还在；UI 用作"图片已失效"判定。 */
     exists(args: { fileId: string; originalName: string }): Promise<boolean>;
-    /**
-     * 按景点 / 景区名称（scenic/attraction name）查询携程图库地址候选列表（阶段 A）：
-     *  - main 端走 suggestpoi.json（soa2/15638），在 BrowserView 内联 fetch 完成，
-     *    **不再**调用 VBK 旧 suggestPoi / suggestPoiDetail / 任何 DOM 弹窗；
-     *  - keyword 必须是字符串（trim 后非空），由 renderer UI 的「景点名称」输入框
-     *    收集；空字符串由 UI 拦截，不进入 IPC；
-     *  - 返回 CtripLibraryPlaceSearchResult：places 是合法候选（poiId + poiName
-     *    都齐备）按 suggestPoi 原始顺序排列；address / province / city / district
-     *    按 suggestPoi 响应里的常见 key 抽取，缺时为 null；
-     *  - UI 在地址列表里选中一个 place 后再调用 searchCtripLibraryImages 走阶段 B；
-     *  - 错误由查询函数直接抛出（业务失败 / 网络失败 / 鉴权失败等）。
-     */
+    /** 阶段 A：按景点名查携程图库地址候选（main 端 suggestpoi.json 内联 fetch，不走 DOM 弹窗）；keyword trim 后非空，places 按原始顺序，address/province/city/district 缺省为 null，错误直接抛出。 */
     searchCtripLibraryPlaces(args: { keyword: string }): Promise<CtripLibraryPlaceSearchResult>;
-    /**
-     * 按已选 place 取该地址下的携程图库图片列表（阶段 B）：
-     *  - 必须先有合法的 place（poiId 正整数 + poiName 非空），由阶段 A 的
-     *    searchCtripLibraryPlaces 选出来；UI 选中后传入；
-     *  - main 端走 searchImage（soa2/12719）→ getImageInfo（soa2/12719），
-     *    在 BrowserView 内联 fetch 完成；不依赖 DOM 弹窗 / importpic-modal；
-     *  - 业务失败 / 未登录 / place 不合法时直接抛出；返回 CtripLibrarySearchResult
-     *    仅含 image candidates，每条 candidate 必含 imageId + imageUrl（缺一即
-     *    视为「未取到图库图片」不会进入 product）；keyword / poi 字段保留回显用；
-     *  - 选中某候选 → renderer 把它写回 product.presentation.cover 的 ctripLibrary
-     *    形态（imageId / imageUrl 必填，poi / description 来自 poiName 或兜底）。
-     */
+    /** 阶段 B：按已选 place 取图库图片（searchImage → getImageInfo 内联 fetch）；place 必须合法，失败 / 未登录直接抛出；每条候选必含 imageId + imageUrl；选中后写回 presentation.cover.ctripLibrary。 */
     searchCtripLibraryImages(args: { keyword: string; place: CtripLibraryPlaceCandidate }): Promise<CtripLibrarySearchResult>;
   };
   settings: {
@@ -279,6 +263,14 @@ export interface VbkApi {
     test(input: AiConnectionTestInput): Promise<ConnectionTest>;
     testNotification(): Promise<SystemNotificationResult>;
     openNotificationSettings(): Promise<void>;
+    /** 三人同游服务令牌：读取本地状态（不回传明文）。 */
+    tibetServiceToken(): Promise<TibetServiceTokenSnapshot>;
+    /** 保存令牌并回读本地状态；格式非法时抛错，不落盘。 */
+    saveTibetServiceToken(token: string): Promise<TibetServiceTokenSnapshot>;
+    /** 清除本地令牌。 */
+    clearTibetServiceToken(): Promise<TibetServiceTokenSnapshot>;
+    /** 向服务端自检令牌（网络请求），返回身份与有效期。 */
+    verifyTibetServiceToken(): Promise<TibetServiceTokenSnapshot>;
   };
   updates: {
     status(): Promise<AppUpdateState>;
@@ -319,6 +311,12 @@ export interface VbkApi {
     /** 采用当前对话行程：先核验真实 POI，再失效并重跑全部产品补全节点。 */
     acceptItineraryAndRerunCompletion(localProductId: string): Promise<PlanningRunResult>;
   };
+  tibet: {
+    /** 产品面板的「平台在售参考」：只传产品 id，主进程读产品事实后比对。 */
+    platformReference(productId: string): Promise<TibetPlatformReferenceResult>;
+    /** 令牌是否已配置（只读本地状态，不发网络请求）。 */
+    status(): Promise<TibetServiceStatusSummary>;
+  };
   memory: {
     /** 主动写入明确记忆（用户明确发“记住 / 以后都”）。 */
     saveExplicit(localProductId: string, input: Omit<MemoryInput, "ownerUserId" | "kind">): Promise<MemorySaveResult>;
@@ -339,12 +337,4 @@ export interface VbkApi {
   };
 }
 
-/** renderer 可见的规划结果摘要（状态 + 接受 / 拒绝模块 + 助手回复）。 */
-export interface PlanningRunResult {
-  state: PlanningGenerationState;
-  status: "completed" | "needs_user" | "failed";
-  accepted: PlanningModule[];
-  rejected: Array<{ module: PlanningModule; reason?: string }>;
-  researchTasks: Array<{ label: string; type: "vbk" | "web" | "cost" | "image"; detail?: string }>;
-  assistantReply: string;
-}
+export type { PlanningRunResult } from "./contracts-planning/output.js";

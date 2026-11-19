@@ -23,6 +23,7 @@ import type {
 } from "../../../../../shared/contracts-types.js";
 import layout from "../layout.module.less";
 import { AppWorkspaceReviewSummaryBasicInfo } from "../review-summary-basic-info";
+import { PlatformReferenceCard } from "./platform-reference.js";
 import { AppWorkspaceReviewSummaryHead, type SummaryViewMode } from "../review-summary-head";
 import { AppWorkspaceReviewSummaryItinerary, type ItineraryDay } from "../review-summary-itinerary";
 import { AppWorkspaceReviewSummaryJson } from "../review-summary-json";
@@ -277,6 +278,8 @@ export function AppWorkspaceReviewSummary({
                 collapsed={itineraryCollapsed}
                 onToggleCollapsed={() => setItineraryCollapsed((value) => !value)}
               />
+
+              <PlatformReferenceCard productId={product.id} />
 
               <AppWorkspaceReviewSummaryOpenIssues
                 product={product}

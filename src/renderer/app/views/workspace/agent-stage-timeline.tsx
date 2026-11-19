@@ -3,7 +3,7 @@ import type { AgentEvent, AgentSnapshot, AgentStage } from '../../../../shared/c
 import { hydrateAgentStages } from '../../../../shared/agent-stage-lifecycle';
 import { groupAgentTimelineEvents } from './agent-conversation-grouping';
 import { AgentAssistantThread, AgentEventItem } from './agent-conversation-items';
-import { renderAssistantMarkdown } from './assistant-markdown';
+import { MessageMarkdown } from '../shared/message-markdown';
 import styles from './agent-stage.module.less';
 
 export function visibleAgentStages(snapshot: AgentSnapshot, events: AgentEvent[], latestPage: boolean) {
@@ -52,7 +52,7 @@ function Stage({ stage, events, allEvents, userName, active, finalStages, childr
     </details> : <div className={styles.processBody}><Process events={processEvents} allEvents={allEvents} userName={userName} /></div>)}
     {hasSummary && <article className={styles.summary} data-stage-summary aria-label={label} data-final-summary={final || undefined}>
       <div className={styles.heading}><strong>{label}</strong><time dateTime={stage.updatedAt}>{new Date(stage.updatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</time></div>
-      <div className={styles.prose}>{renderAssistantMarkdown(stage.summary!)}</div>
+      <div className={styles.prose}><MessageMarkdown content={stage.summary!} /></div>
       {actions.length > 0 && <p className={styles.note}>已返回的动作：{actions.join('、')}</p>}
       {final && finalStages.some((item) => item.runId === stage.runId && item.decision) && <details className={styles.process}>
         <summary>查看历史确认记录（已处理）</summary>

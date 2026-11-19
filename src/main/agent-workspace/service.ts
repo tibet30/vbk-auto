@@ -21,6 +21,7 @@ import { assembleThreadContext, buildThreadSummary } from "./context-compression
 import { buildAccountReadPort, buildProductReadPort } from "./ports.js";
 import { buildVbkReadPortFromContext } from "./vbk-adapter.js";
 import { buildVbkWritePortFromContext } from "./vbk-write-adapter.js";
+import { buildTibetReadPortFromContext } from "./tibet-adapter.js";
 import { ExternalToolRuntime } from "./external-tools.js";
 import { ExternalToolSettings } from "./external-tools-settings.js";
 import { createModelProvider } from "./model-context.js";
@@ -69,6 +70,7 @@ export class AgentWorkspaceService {
       accounts: buildAccountReadPort(this.context),
       vbk: buildVbkReadPortFromContext(this.context),
       vbkWrite: buildVbkWritePortFromContext(this.context),
+      tibet: buildTibetReadPortFromContext(this.context),
       extraSkills: this.externalToolRuntime.currentSkills(),
     });
   }
@@ -342,3 +344,4 @@ function workingDirectoryAvailable(directory: string | undefined): boolean | und
     return false;
   }
 }
+

@@ -1,11 +1,13 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
+  aiModelOption,
   aiProviderConfig,
   aiProviderProfile,
   type AiProvider,
   type ConnectionTest,
 } from "../../../shared/contracts.js";
 import { api } from "../helpers";
+import { readAiConnectionTest, rememberAiConnectionTest } from "../helpers/ai-test-receipts";
 import type { AppState } from "../state/useAppState";
 
 function validateServiceUrl(value: string): boolean {
@@ -18,32 +20,10 @@ function validateServiceUrl(value: string): boolean {
   }
 }
 
-const AI_TEST_STORAGE_PREFIX = "vbk:aiTest:";
-
-function readSavedTest(provider: AiProvider, model: string): ConnectionTest | null {
-  try {
-    const raw = localStorage.getItem(`${AI_TEST_STORAGE_PREFIX}${provider}:${model}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<ConnectionTest>;
-    if (
-      parsed.provider === provider
-      && typeof parsed.connected === "boolean"
-      && typeof parsed.message === "string"
-      && typeof parsed.baseUrl === "string"
-      && parsed.model === model
-      && typeof parsed.testedAt === "string"
-    ) return parsed as ConnectionTest;
-  } catch { /* Electron 隐私模式或存储损坏时按未测试处理。 */ }
-  return null;
-}
-
-function rememberTest(result: ConnectionTest) {
-  try { localStorage.setItem(`${AI_TEST_STORAGE_PREFIX}${result.provider}:${result.model}`, JSON.stringify(result)); } catch { /* 忽略 */ }
-}
-
 export function useAiHandlers(state: AppState) {
   const {
     settings,
+    aiConfigOpen,
     setAiConfigOpen,
     setAiBaseUrl,
     setAiApiKey,
@@ -60,13 +40,53 @@ export function useAiHandlers(state: AppState) {
     setTestingAi,
     setLoadingAiKey,
     aiTest,
-    setAiModelList,
+    setAiModelLists,
     setRefreshingAiModels,
-    setAiModelListError,
+    setAiModelListErrors,
     setSettings,
   } = state;
   const testRequestId = useRef(0);
-  const modelListRequestId = useRef(0);
+  const modelListRequestId = useRef<Record<AiProvider, number>>({ minimax: 0, deepseek: 0 });
+
+  const loadAiModelList = async (provider: AiProvider, baseUrl: string, apiKey = "") => {
+    if (!api() || !validateServiceUrl(baseUrl)) return;
+    const requestId = ++modelListRequestId.current[provider];
+    setRefreshingAiModels(true);
+    setAiModelListErrors((current) => ({ ...current, [provider]: undefined }));
+    try {
+      const result = await api()!.settings.listModels({
+        provider,
+        baseUrl,
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      });
+      if (requestId === modelListRequestId.current[provider]) {
+        setAiModelLists((current) => ({ ...current, [provider]: result.models }));
+      }
+    } catch (error) {
+      if (requestId === modelListRequestId.current[provider]) {
+        setAiModelListErrors((current) => ({
+          ...current,
+          [provider]: error instanceof Error ? error.message : "无法自动获取模型列表。",
+        }));
+      }
+    } finally {
+      if (requestId === modelListRequestId.current[provider]) setRefreshingAiModels(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!settings) return;
+    if (settings.hasMiniMaxKey) void loadAiModelList("minimax", settings.minimaxBaseUrl);
+    if (settings.hasDeepSeekKey) void loadAiModelList("deepseek", settings.deepseekBaseUrl);
+  }, [settings?.hasMiniMaxKey, settings?.minimaxBaseUrl, settings?.hasDeepSeekKey, settings?.deepseekBaseUrl]);
+
+  useEffect(() => {
+    const key = aiApiKey.trim();
+    const baseUrl = aiBaseUrl.trim();
+    if (!aiConfigOpen || !key || !validateServiceUrl(baseUrl)) return;
+    const timer = window.setTimeout(() => void loadAiModelList(aiProvider, baseUrl, key), 500);
+    return () => window.clearTimeout(timer);
+  }, [aiConfigOpen, aiProvider, aiBaseUrl, aiApiKey]);
 
   const switchProvider = async (provider: AiProvider) => {
     testRequestId.current += 1;
@@ -80,13 +100,14 @@ export function useAiHandlers(state: AppState) {
     setAiModel(model);
     setAiApiKey("");
     setShowAiApiKey(false);
-    setAiTest(readSavedTest(provider, model));
-    setAiModelListError(null);
+    setAiTest(readAiConnectionTest(provider, model));
+    setAiModelListErrors((current) => ({ ...current, [provider]: undefined }));
     setNotice(null);
     // API Key 永远不从本机读回：渲染端只持有「临时未保存」的输入框值。
     // 如需校验或调用模型，由调用方在 settings:listModels / settings:test 的入参里
     // 显式带上当前 UI 输入框的 key；持久化需要走 settings:save。
     setLoadingAiKey(false);
+    if (config?.hasKey) void loadAiModelList(provider, config.baseUrl);
   };
 
   const openAiConfig = () => {
@@ -97,60 +118,26 @@ export function useAiHandlers(state: AppState) {
 
   const switchAiModel = (model: string) => {
     setAiModel(model);
-    setAiTest(readSavedTest(aiProvider, model));
+    setAiTest(readAiConnectionTest(aiProvider, model));
     setNotice(null);
   };
 
   const changeAiBaseUrl = (baseUrl: string) => {
-    modelListRequestId.current += 1;
+    modelListRequestId.current[aiProvider] += 1;
     setRefreshingAiModels(false);
     setAiBaseUrl(baseUrl);
-    setAiModelList(null);
-    setAiModelListError(null);
+    setAiModelLists((current) => ({ ...current, [aiProvider]: undefined }));
+    setAiModelListErrors((current) => ({ ...current, [aiProvider]: undefined }));
     setAiTest(null);
   };
 
   const changeAiApiKey = (key: string) => {
-    modelListRequestId.current += 1;
+    modelListRequestId.current[aiProvider] += 1;
     setRefreshingAiModels(false);
     setAiApiKey(key);
-    setAiModelList(null);
-    setAiModelListError(null);
+    setAiModelLists((current) => ({ ...current, [aiProvider]: undefined }));
+    setAiModelListErrors((current) => ({ ...current, [aiProvider]: undefined }));
     setAiTest(null);
-  };
-
-  const refreshAiModels = async () => {
-    const baseUrl = aiBaseUrl.trim();
-    const apiKey = aiApiKey.trim();
-    const storedKeyAvailable = settings ? aiProviderConfig(settings, aiProvider).hasKey : false;
-    if (!api() || aiProvider !== "deepseek") return;
-    if (!validateServiceUrl(baseUrl)) {
-      setAiModelListError("服务地址必须使用 https://；本机调试可使用 http://127.0.0.1。");
-      return;
-    }
-    if (!apiKey && !storedKeyAvailable) {
-      setAiModelListError("请先填写 Evolink API Key，再刷新模型。");
-      return;
-    }
-
-    const requestId = ++modelListRequestId.current;
-    setRefreshingAiModels(true);
-    setAiModelListError(null);
-    setNotice(null);
-    try {
-      const result = await api()!.settings.listModels({
-        provider: "deepseek",
-        baseUrl,
-        ...(apiKey ? { apiKey } : {}),
-      });
-      if (requestId === modelListRequestId.current) setAiModelList(result.models);
-    } catch (error) {
-      if (requestId === modelListRequestId.current) {
-        setAiModelListError(error instanceof Error ? error.message : "无法刷新 Evolink 模型列表。");
-      }
-    } finally {
-      if (requestId === modelListRequestId.current) setRefreshingAiModels(false);
-    }
   };
 
   const saveAiConfig = async () => {
@@ -204,6 +191,31 @@ export function useAiHandlers(state: AppState) {
     }
   };
 
+  const switchWorkspaceAiModel = async (provider: AiProvider, model: string) => {
+    if (!api() || !settings) return;
+    const config = aiProviderConfig(settings, provider);
+    if (!config.hasKey) {
+      setNotice(`请先到设置中配置 ${aiProviderProfile(provider).shortLabel}。`);
+      return;
+    }
+    if (settings.aiProvider === provider && config.model === model) return;
+
+    setSavingAi(true);
+    setNotice(null);
+    try {
+      const nextSettings = await api()!.settings.save(provider === "minimax"
+        ? { aiProvider: provider, minimaxModel: model }
+        : { aiProvider: provider, deepseekModel: model });
+      setSettings(nextSettings);
+      const label = aiModelOption(provider, model)?.label || model;
+      setNotice(`已切换到 ${label}，下一次 AI 请求开始使用。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "模型切换失败，请重试。");
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
   const testAiConnection = async () => {
     const baseUrl = aiBaseUrl.trim();
     const model = aiModel.trim();
@@ -236,8 +248,9 @@ export function useAiHandlers(state: AppState) {
         ...(apiKey ? { apiKey } : {}),
       });
       if (requestId === testRequestId.current) {
-        rememberTest(result);
+        rememberAiConnectionTest(result);
         setAiTest(result);
+        void loadAiModelList(aiProvider, baseUrl, apiKey);
       }
     } catch (error) {
       const failed: ConnectionTest = {
@@ -249,7 +262,7 @@ export function useAiHandlers(state: AppState) {
         testedAt: new Date().toISOString(),
       };
       if (requestId === testRequestId.current) {
-        rememberTest(failed);
+        rememberAiConnectionTest(failed);
         setAiTest(failed);
       }
     } finally {
@@ -263,8 +276,8 @@ export function useAiHandlers(state: AppState) {
     switchAiModel,
     changeAiBaseUrl,
     changeAiApiKey,
-    refreshAiModels,
     saveAiConfig,
+    switchWorkspaceAiModel,
     testAiConnection,
   };
 }

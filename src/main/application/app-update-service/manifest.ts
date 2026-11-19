@@ -76,3 +76,24 @@ export function compareSemver(left: string, right: string): number {
   }
   return 0;
 }
+
+export interface ManifestDecision {
+  /** 清单上的版本，无论是否有更新都要带回给界面。 */
+  serverVersion: string;
+  updateAvailable: boolean;
+  availableVersion?: string;
+  releaseDate?: string;
+}
+
+export function decideManifestUpdate(
+  manifest: { version: string; releaseDate?: string },
+  currentVersion: string,
+): ManifestDecision {
+  const updateAvailable = compareSemver(manifest.version, currentVersion) > 0;
+  return {
+    serverVersion: manifest.version,
+    updateAvailable,
+    availableVersion: updateAvailable ? manifest.version : undefined,
+    releaseDate: updateAvailable ? manifest.releaseDate : undefined,
+  };
+}

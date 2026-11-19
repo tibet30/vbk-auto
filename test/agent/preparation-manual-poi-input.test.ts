@@ -158,7 +158,8 @@ test("回答后模型先查询再绑定原槽位，耗尽不会重复提问", as
   }, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (item) => saved.set(item.localProductId, structuredClone(item)) });
   await core.send(current.id, PRODUCT_PREPARATION_INSTRUCTION); await core.idle(current.id);
   const done = await core.get(current.id);
-  assert.deepEqual(calls, ["resolve", "resolve", "query", "select"], JSON.stringify(done.events.map((event) => ({ type: event.type, content: event.content, data: event.data }))));
+  // 同指纹下 POI 资源核验只跑一次：第二次必然复现同一批未命中，直接进入人工确认。
+  assert.deepEqual(calls, ["resolve", "query", "select"], JSON.stringify(done.events.map((event) => ({ type: event.type, content: event.content, data: event.data }))));
   assert.equal(done.events.some((event) => event.type === "input_request"), false);
   assert.notEqual(done.run?.status, "paused");
 });
@@ -324,7 +325,7 @@ test("一次多点回答按剩余槽位继承窗口，新增或改名不继承",
   }, { getAgentSnapshot: (id) => saved.get(id), saveAgentSnapshot: (item) => saved.set(item.localProductId, structuredClone(item)) });
   await core.send(current.id, PRODUCT_PREPARATION_INSTRUCTION); await core.idle(current.id);
   const done = await core.get(current.id);
-  assert.deepEqual(calls, ["resolve", "resolve", "query:别名A", "select:景点 A", "query:别名B", "select:景点 B"]);
+  assert.deepEqual(calls, ["resolve", "query:别名A", "select:景点 A", "query:别名B", "select:景点 B"]);
   assert.equal(done.events.filter((event) => event.type === "input_request").length, 0);
   assert.deepEqual(current.product.itinerary![0]!.spots!.map((spot) => [spot.name, spot.relation, spot.timeOfDay]), [
     ["景点 A", "and", "morning"], ["景点 B", "and", "afternoon"],

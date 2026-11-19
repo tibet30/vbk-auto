@@ -26,7 +26,7 @@ import { normaliseItinerarySupport, dayHasTransportArrangement } from "../../../
 import { productFormAllowsSpotlessDays } from "../../../../shared/itinerary-content.js";
 import { toVbkDailyUseCar } from "../../../../shared/product-form.js";
 import { HOTEL_SELECTION_NOTE, dailyTransportDescription } from "../../../../shared/itinerary-service-copy.js";
-import { isFreeActivityDayTitle, privateTourDayTitleContent } from "../../../../shared/private-tour-day-title.js";
+import { dayTitleTransportCopy, isFreeActivityDayTitle } from "../../../../shared/day-title-grammar.js";
 import { itineraryAttractions, effectiveItinerarySpotKind } from "../../../../shared/itinerary-activity-kind.js";
 import { effectiveTimedSpots, dayOtherActivities, buildAttractionInfo, dayTimeline, otherDescriptionForActivity } from "./itinerary-timeline.js";
 import type { ProductItineraryDay, ProductOperations, VbkTourDailyDescription, ResolvedStations, ReadbackDayExpectation, ReadbackExpectations } from "./itinerary-types.js";
@@ -248,7 +248,7 @@ function dailyTransportCopy(title: string, operations: ProductOperations, privat
   if (operations.transport !== "charter") return undefined;
   if (!privateTour) return { title, description: dailyTransportDescription(title) };
   if (isFreeActivityDayTitle(title)) return undefined;
-  const content = privateTourDayTitleContent(title);
+  const content = dayTitleTransportCopy(title);
   return { title: content, description: dailyTransportDescription(content) };
 }
 

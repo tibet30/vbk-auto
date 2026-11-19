@@ -46,7 +46,7 @@ import {
 import type { ApiPage, ItineraryApiResult } from "./transport.js";
 import { linkedVersionId, linkedVersionSummary, isUnsubmittedAuditStatus, writableTourInfoVersion, assertRetainedVersion } from "./versioning.js";
 import { readProductForm } from "../../../../shared/product-form.js";
-import { isPrivateTourProduct } from "../../../../shared/private-tour-day-title.js";
+import { isPrivateTourProduct } from "../../../../shared/product-form.js";
 import { approvedFormalDraftSource, assertCreatedDraftRelation } from "./draft-source.js";
 import { WriteNotDispatchedError } from "../../automation.main/automation.main.errors.js";
 

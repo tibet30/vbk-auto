@@ -42,6 +42,11 @@ export function isFreeTravelForm(value: unknown): boolean {
   return value === "freeTravel";
 }
 
+export function isPrivateTourProduct(product: Record<string, unknown> | undefined): boolean {
+  const sales = product?.sales;
+  return Boolean(sales) && typeof sales === "object" && isPrivateTourForm((sales as Record<string, unknown>).productForm);
+}
+
 /** 从产品对象读取 sales.productForm；缺失时返回 undefined。 */
 export function readProductForm(product: unknown): unknown {
   return objectValue(objectValue(product)?.sales)?.productForm;

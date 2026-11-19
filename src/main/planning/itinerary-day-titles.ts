@@ -1,80 +1,104 @@
 import type { ProductDetail } from "../../shared/contracts.js";
 import { isReplayDataMissing } from "../infrastructure/replay-data-error.js";
 import { isPersistedRouteTravelNode } from "../../shared/itinerary-route-travel-node.js";
+import { hasItineraryHotelStay } from "../../shared/itinerary-hotel.js";
 import { effectiveItinerarySpotKind } from "../../shared/itinerary-activity-kind.js";
-import { itinerarySupportingArrangements, supportArrangementType } from "../../shared/itinerary-support-arrangements.js";
 import { parseProductBriefMessage } from "../../shared/product-brief-message.js";
 import { constraintUserIdea } from "../../shared/product-idea-optimization.js";
 import { daySection } from "./day-sections.js";
 import {
   ITINERARY_DAY_TITLE_MAX_LENGTH,
   itineraryDayTitleBudget,
-  itineraryDayTitleLength,
   itineraryDayTitleProblem,
 } from "../../shared/itinerary-day-title.js";
 import {
-  PRIVATE_TOUR_DAY_TITLE_PREFIXES,
-  PRIVATE_TOUR_DEFAULT_PREFIX,
-  PRIVATE_TOUR_FREE_PREFIX,
-  fitPrivateTourDayTitle,
-  hasPrivateTourMarketingWord,
-  isPrivateTourProduct,
-  privateTourDayTitleNodes,
-  privateTourDayTitleProblem,
-  type PrivateTourTitleFacts,
-} from "../../shared/private-tour-day-title.js";
+  dayTitleGrammarProblem,
+  itineraryTitleLength,
+  normaliseDayTitle,
+  parseDayTitle,
+  renderDayTitle,
+  type DayTitleFacts,
+  type ParsedDayTitle,
+} from "../../shared/day-title-grammar.js";
+import { fitDayTitle } from "../../shared/day-title-fit.js";
 
 type JsonObject = Record<string, unknown>;
 
 export interface ItineraryDayTitleRequest {
   day: number;
-  /** 本天标题（不含首日前缀）可用字符数。 */
   maxLength: number;
-  /** 私家团标题须为「前缀｜当天内容」并受 24 字整行上限约束。 */
-  format?: "privateTour";
-  /** 标题必须原样包含的景点名。 */
   requiredNames: string[];
-  /** 私家团可选景点：放得下才写，最多凑满 3 个。 */
   optionalNames?: string[];
-  /** 原路线中须以独立节点保留的途经地。 */
   routeNodes: string[];
-  /** 当前确定性标题，同时也是 AI 失败时的兜底。 */
+  startName: string;
+  stayAllowed: boolean;
+  stayName: string;
+  includeNotes: string[];
+  freeActivityOnly: boolean;
   currentTitle: string;
-  /** 用户原始逐日安排，只作为事实来源。 */
   sourceText: string;
   hotel: string;
-  /** 上一轮被拒原因；首轮为空。 */
   rejectedReason?: string;
 }
 
 export type ItineraryDayTitleGenerator = (requests: ItineraryDayTitleRequest[]) => Promise<Array<{ day: number; title: string }>>;
 
-/**
- * 确定性兜底标题：不在字符中间截断。景点串放得下就整串保留；放不下时只保留
- * 能完整放下的前几个景点并注明总数；无景点日取路线首行，仍放不下则用通用标题。
- */
-export function fallbackDayTitle(args: { day: number; title: string; names: string[]; budget: number; routeNodes?: string[] }): string {
-  const { day, title, names, budget, routeNodes = [] } = args;
-  if (!itineraryDayTitleProblem(title, budget)) return title.trim();
-  if (names.length) {
-    const all = names.join(" · ");
-    if (itineraryDayTitleLength(all) <= budget) return all;
-    for (let count = names.length - 1; count >= 0; count -= 1) {
-      const selected = new Set([...names.slice(0, count), ...routeNodes]);
-      if (!selected.size) continue;
-      const candidate = `${names.filter((name) => selected.has(name)).join(" · ")} · 等${names.length}处景点`;
-      if (itineraryDayTitleLength(candidate) <= budget) return candidate;
-    }
-  }
-  if (routeNodes.length) throw new Error(`第 ${day} 天标题无法在长度限制内保留全部途经点`);
-  return `第${day}天行程安排`;
+export function dayTitleFacts(product: JsonObject, day: JsonObject): DayTitleFacts {
+  const spots = spotNames(day);
+  const routeNodes = sequenceNames(text(day.title))
+    .filter((name) => isPersistedRouteTravelNode(product, day, name));
+  return {
+    allowedNames: [...new Set([...spots, ...routeNodes])],
+    stayAllowed: hasHotelFact(day),
+    freeActivityOnly: isFreeOnlyDay(day),
+  };
 }
 
-/**
- * 让 AI 为确定性投影的行程重写天标题。每个标题都要本地校验：长度、单行、
- * 必须包含当天全部景点名、不得出现其他天的景点；不合格的天带原因重试一次，
- * 仍不合格（或 AI 调用失败）就保留确定性兜底标题。
- */
+export function fallbackDayTitle(args: {
+  day: number;
+  title: string;
+  names: string[];
+  budget: number;
+  routeNodes?: string[];
+  startName?: string;
+  stayName?: string;
+  includes?: string;
+  facts?: DayTitleFacts;
+}): string {
+  const { day, title, names, budget, routeNodes = [], startName = "", stayName = "", includes = "" } = args;
+  const facts: DayTitleFacts = args.facts ?? { allowedNames: [...names, ...routeNodes], stayAllowed: Boolean(stayName) };
+  const existing = fitDayTitle(title, budget, routeNodes, facts);
+  // 原标题放得下但不含任何当天事实时信息量为零，仍按事实重组。
+  const coversFact = !names.length || names.some((name) => existing.includes(name));
+  if (coversFact && !dayTitleGrammarProblem(existing, budget, facts)) return existing;
+  const nodes = [...new Set([...names, ...routeNodes])];
+  if (!startName && !nodes.length) return `第${day}天行程安排`;
+  const parsed: ParsedDayTitle = {
+    arrival: "",
+    start: startName,
+    nodes: nodes.map((name) => ({ name, detail: "" })),
+    stay: stayName,
+    includes,
+  };
+  const fitted = fitDayTitle(renderDayTitle(parsed), budget, routeNodes, facts);
+  if (!dayTitleGrammarProblem(fitted, budget, facts)) return fitted;
+  const minimal = `${startName || nodes[0]}${nodes.length > 1 ? `-${nodes[1]}` : ""}`;
+  return minimal ? [...minimal].slice(0, budget).join("") : `第${day}天行程安排`;
+}
+
+export function ensureDayTitleFits(product: JsonObject, day: JsonObject): JsonObject {
+  const dayNumber = Number(day.day);
+  const budget = Math.min(ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleBudget(product, dayNumber));
+  const facts = dayTitleFacts(product, day);
+  const raw = text(day.title);
+  const title = normaliseDayTitle(routeLine(raw));
+  if (!dayTitleGrammarProblem(title, budget, facts)) return title === raw ? day : { ...day, title };
+  const required = requiredNodeNames(product, day);
+  const fitted = fitDayTitle(title, budget, required, facts);
+  if (!dayTitleGrammarProblem(fitted, budget, facts)) return { ...day, title: fitted };
+  return { ...day, title: fallbackDayTitle({ day: dayNumber, title, names: dayNodeNames(day), budget, routeNodes: required, facts }) };
+}
+
 export async function generateItineraryDayTitles(args: {
   product: JsonObject;
   itinerary: JsonObject[];
@@ -115,132 +139,30 @@ export async function generateItineraryDayTitles(args: {
   });
 }
 
-/** 写入前最后一道保证：标题仍不合格就替换成兜底标题（不截断）。 */
-export function ensureDayTitleFits(product: JsonObject, day: JsonObject): JsonObject {
-  const dayNumber = Number(day.day);
-  const budget = Math.min(ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleBudget(product, dayNumber));
-  const title = text(day.title);
-  if (isPrivateTourProduct(product)) return ensurePrivateTourDayTitle(product, day, dayNumber, budget);
-  if (!itineraryDayTitleProblem(title, budget)) return day;
-  const names = [...new Set([...sequenceNames(title), ...spotNames(day)])];
-  const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
-  return { ...day, title: fallbackDayTitle({ day: dayNumber, title: routeLine(title), names, budget, routeNodes }) };
-}
-
-/**
- * 私家团：AI 重试仍不合格时先从末尾删节点；仍不合格就用当天景点与途经节点重组
- * 「前缀｜内容」。结果必须仍含全部必含项（首个景点与途经节点），否则报错不写入。
- */
-function ensurePrivateTourDayTitle(product: JsonObject, day: JsonObject, dayNumber: number, budget: number): JsonObject {
-  // 首日前缀在保存时统一追加，预算已扣除；这里先去掉，避免重复计数。
-  const title = text(day.title).replace(/^(?:【出发地\s*[-－—–]\s*[^】]+】\s*)+/u, "");
-  const { names, routeNodes, required, facts } = privateTourDayFacts(product, { ...day, title });
-  const spots = spotNames(day);
-  const fits = (candidate: string) => !privateTourDayTitleProblem(candidate, budget, facts)
-    && required.every((name) => compact(candidate).includes(compact(name)));
-  if (title && fits(title)) return title === text(day.title) ? day : { ...day, title };
-  const route = routeLine(title);
-  const head = route.split("｜")[0]!.trim();
-  const hasPrefix = route.includes("｜") && (PRIVATE_TOUR_DAY_TITLE_PREFIXES as readonly string[]).includes(head);
-  const prefix = hasPrefix ? head : privateTourFallbackPrefix(day, routeNodes);
-  const fitted = fitPrivateTourDayTitle(hasPrefix ? route : `${prefix}｜${route}`, budget, required, facts);
-  if (route && fits(fitted)) return { ...day, title: fitted };
-  // 原标题是整句或放不下：只用当天事实（景点、途经节点）重组，不写通用占位。
-  const ordered = names.filter((name) => spots.includes(name) || routeNodes.includes(name));
-  if (ordered.length) {
-    const content = ordered.map((name, index) => (!index ? "" : routeNodes.includes(name) || routeNodes.includes(ordered[index - 1]!) ? "-" : "·") + name).join("");
-    const rebuilt = fitPrivateTourDayTitle(`${prefix}｜${content}`, budget, required, facts);
-    if (fits(rebuilt)) return { ...day, title: rebuilt };
-  }
-  if (required.length) throw new Error(`第 ${dayNumber} 天标题无法在长度限制内保留全部必含景点与途经点`);
-  return { ...day, title: `${prefix}｜第${dayNumber}天行程安排` };
-}
-
-/**
- * 兜底前缀：有接送/用车安排的天用专车前缀（接送方向唯一可判定时用接机/接站/送机/送站），
- * 只有真正的自由活动天（free 活动、无交通、无景点无途经点）才用「自由活动」。
- */
-function privateTourFallbackPrefix(day: JsonObject, routeNodes: string[]): string {
-  const transports = itinerarySupportingArrangements(day).filter((item) => item.type === "transport");
-  if (transports.length) return transferPrefix(transports.map((item) => `${item.title} ${item.detail}`).join(" "));
-  const spots = Array.isArray(day.spots) ? day.spots.filter((spot): spot is JsonObject => Boolean(spot) && typeof spot === "object") : [];
-  const activities = Array.isArray(day.activities) ? day.activities as JsonObject[] : [];
-  const free = spots.some((spot) => effectiveItinerarySpotKind(spot) === "free") || activities.some((item) => item?.type === "free");
-  const attractions = spots.filter((spot) => effectiveItinerarySpotKind(spot) === "attraction" && !supportArrangementType(spot, day));
-  return free && !attractions.length && !routeNodes.length ? PRIVATE_TOUR_FREE_PREFIX : PRIVATE_TOUR_DEFAULT_PREFIX;
-}
-
-const TRANSFER_PREFIXES: Array<[string, RegExp]> = [
-  ["专车接机", /接机|接飞机|机场接/u], ["专车接站", /接站|接火车|接高铁|火车站接|高铁站接/u],
-  ["专车送机", /送机|送飞机|送至?机场/u], ["专车送站", /送站|送火车|送高铁|送至?(?:火车|高铁)站/u],
-];
-
-function transferPrefix(source: string): string {
-  const matched = TRANSFER_PREFIXES.filter(([, pattern]) => pattern.test(source));
-  return matched.length === 1 ? matched[0]![0] : PRIVATE_TOUR_DEFAULT_PREFIX;
-}
-
-/**
- * 私家团当天事实：必含项为首个景点（无景点时取标题里首个非接送、无营销词的节点）与途经节点。
- * allowedNames 只放真实事实（当天 spots 与已确认的途经节点），标题推导的节点不能借此放行营销词。
- */
-function privateTourDayFacts(product: JsonObject, day: JsonObject) {
-  const title = text(day.title);
-  const spots = spotNames(day);
-  const names = [...new Set([...sequenceNames(title), ...privateTourDayTitleNodes(routeLine(title), spots), ...spots])];
-  const routeNodes = names.filter((name) => isPersistedRouteTravelNode(product, day, name));
-  const first = spots[0] ?? names.find((name) => !routeNodes.includes(name)
-    && !supportArrangementType({ name }) && !hasPrivateTourMarketingWord(name));
-  const required = [...new Set([...(first ? [first] : []), ...routeNodes])];
-  const facts: PrivateTourTitleFacts = { allowedNames: [...new Set(routeNodes)], spots };
-  return { names, routeNodes, required, facts };
-}
-
-/** 供生成服务判断规划标题是否需要重写：与写入前校验使用同一组当天事实。 */
-export function privateTourDayTitleFacts(product: JsonObject, day: JsonObject): PrivateTourTitleFacts {
-  return privateTourDayFacts(product, day).facts;
-}
-
-/** 路线首行：去掉括号建议与句末标点，供无景点日的兜底标题使用。 */
-export function routeLine(raw: string): string {
-  const line = raw.trim().split(/\r?\n/u)[0] ?? "";
-  return line.replace(/[（(][^）)]*[）)]/gu, "").replace(/[。；;，,\s]+$/u, "").trim();
-}
-
-/** 用户原始逐日安排：投影与 AI 标题共用同一份当日原文。 */
-export function itineraryDaySourceText(product: ProductDetail, day: number): string {
-  const sources = [constraintUserIdea(product.product.basicInfo), ...(product.messages ?? [])
-    .filter((message) => message.role === "user")
-    .map((message) => parseProductBriefMessage(message.content)?.userIdea?.trim() || message.content)];
-  return sources.map((value) => daySection(value, day).replace(/^[:：、，,\s]+/u, "").trim()).filter(Boolean).at(-1) ?? "";
+function requiredNodeNames(product: JsonObject, day: JsonObject): string[] {
+  return sequenceNames(text(day.title)).filter((name) => isPersistedRouteTravelNode(product, day, name));
 }
 
 function titleRequest(product: JsonObject, day: JsonObject, sourceText: string): ItineraryDayTitleRequest {
   const dayNumber = Number(day.day);
-  if (isPrivateTourProduct(product)) return privateTourTitleRequest(product, day, dayNumber, sourceText);
+  const facts = dayTitleFacts(product, day);
+  const spots = spotNames(day);
+  const routeNodes = (facts.allowedNames ?? []).filter((name) => !spots.includes(name)
+    && isPersistedRouteTravelNode(product, day, name));
+  const parsed = parseDayTitle(text(day.title));
+  const first = spots[0];
+  const required = [...new Set([...(first ? [first] : []), ...routeNodes])];
   return {
     day: dayNumber,
     maxLength: Math.min(ITINERARY_DAY_TITLE_MAX_LENGTH, itineraryDayTitleBudget(product, dayNumber)),
-    // 投影标题里的途经节点（「延吉」「日喀则」）不在 spots 里，但下游靠标题识别
-    // 途经地，AI 标题同样必须保留。
-    requiredNames: [...new Set([...spotNames(day), ...sequenceNames(text(day.title))])],
-    routeNodes: sequenceNames(text(day.title)).filter((name) => isPersistedRouteTravelNode(product, day, name)),
-    currentTitle: text(day.title),
-    sourceText: sourceText.trim(),
-    hotel: text(day.hotel),
-  };
-}
-
-/** 私家团只要求首个景点与途经节点，其余景点按 24 字预算取舍。 */
-function privateTourTitleRequest(product: JsonObject, day: JsonObject, dayNumber: number, sourceText: string): ItineraryDayTitleRequest {
-  const { routeNodes, required } = privateTourDayFacts(product, day);
-  return {
-    day: dayNumber,
-    format: "privateTour",
-    maxLength: itineraryDayTitleBudget(product, dayNumber),
     requiredNames: required,
-    optionalNames: spotNames(day).filter((name) => !required.includes(name)),
+    optionalNames: spots.filter((name) => !required.includes(name)),
     routeNodes,
+    startName: plainStart(parsed.start) || firstStopName(product, day),
+    stayAllowed: hasHotelFact(day),
+    stayName: stayLocality(sourceText) || text(day.hotelCity),
+    includeNotes: includeNoteCandidates(sourceText),
+    freeActivityOnly: facts.freeActivityOnly !== false,
     currentTitle: text(day.title),
     sourceText: sourceText.trim(),
     hotel: text(day.hotel),
@@ -248,25 +170,98 @@ function privateTourTitleRequest(product: JsonObject, day: JsonObject, dayNumber
 }
 
 function titleProblem(product: JsonObject, itinerary: JsonObject[], request: ItineraryDayTitleRequest, title: string): string | undefined {
-  const day = itinerary.find((item) => Number(item.day) === request.day) ?? { day: request.day };
-  const basic = request.format === "privateTour"
-    ? privateTourDayTitleProblem(title, request.maxLength, {
-      allowedNames: [...new Set(request.routeNodes)], spots: spotNames(day) })
-    : itineraryDayTitleProblem(title, request.maxLength);
+  const facts: DayTitleFacts = {
+    allowedNames: [...request.requiredNames, ...request.routeNodes, ...(request.optionalNames ?? [])],
+    stayAllowed: request.stayAllowed,
+    freeActivityOnly: request.freeActivityOnly,
+  };
+  const basic = dayTitleGrammarProblem(title, request.maxLength, facts);
   if (basic) return basic;
   const compactTitle = compact(title);
   const missing = request.requiredNames.filter((name) => !compactTitle.includes(compact(name)));
   if (missing.length) return `缺少当天景点：${missing.join("、")}`;
+  const day = itinerary.find((item) => Number(item.day) === request.day) ?? { day: request.day };
   const lostNodes = request.routeNodes.filter((name) => !isPersistedRouteTravelNode(product, { ...day, title }, name));
   if (lostNodes.length) return `途经点须保持独立路线节点：${lostNodes.join("、")}`;
   const own = [...request.requiredNames, ...(request.optionalNames ?? [])];
   const foreign = itinerary
-    .filter((day) => Number(day.day) !== request.day)
+    .filter((item) => Number(item.day) !== request.day)
     .flatMap(spotNames)
-    .filter((name) => !own.some((own) => compact(own).includes(compact(name)) || compact(name).includes(compact(own))))
+    .filter((name) => !own.some((mine) => compact(mine).includes(compact(name)) || compact(name).includes(compact(mine))))
     .filter((name) => compactTitle.includes(compact(name)) && !compact(request.sourceText).includes(compact(name)));
   if (foreign.length) return `出现其他天的景点：${[...new Set(foreign)].join("、")}`;
+  const parsed = parseDayTitle(title);
+  if (parsed.includes && request.includeNotes.length
+    && !request.includeNotes.some((note) => compact(note).includes(compact(parsed.includes))
+      || compact(parsed.includes).includes(compact(note)))) {
+    return `含项说明须取自当天原文：${parsed.includes}`;
+  }
   return undefined;
+}
+
+export function itineraryDaySourceText(product: ProductDetail, day: number): string {
+  const sources = [constraintUserIdea(product.product.basicInfo), ...(product.messages ?? [])
+    .filter((message) => message.role === "user")
+    .map((message) => parseProductBriefMessage(message.content)?.userIdea?.trim() || message.content)];
+  return sources.map((value) => daySection(value, day).replace(/^[:：、，,\s]+/u, "").trim()).filter(Boolean).at(-1) ?? "";
+}
+
+export function routeLine(raw: string): string {
+  const line = raw.trim().split(/\r?\n/u)[0] ?? "";
+  return line.replace(/[。；;，,\s]+$/u, "").trim();
+}
+
+export function sequenceNames(title: string): string[] {
+  const parsed = parseDayTitle(title);
+  return [parsed.start, ...parsed.nodes.map((node) => node.name)]
+    .flatMap((name) => name.split("·"))
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function firstStopName(product: JsonObject, day: JsonObject): string {
+  const nodes = (dayTitleFacts(product, day).allowedNames ?? [])
+    .filter((name) => isPersistedRouteTravelNode(product, day, name));
+  return nodes[0] ?? "";
+}
+
+function hasHotelFact(day: JsonObject): boolean {
+  return hasItineraryHotelStay(day.hotel) || Boolean(text(day.hotelCity));
+}
+
+function stayLocality(sourceText: string): string {
+  const match = sourceText.match(/(?:入住|住)(?:宿)?([^-－—–【，。；、\s]{2,12})/u);
+  if (!match) return "";
+  const value = match[1]!.trim();
+  return /酒店|宾馆|民宿|客栈|安排|条件/u.test(value) ? "" : value;
+}
+
+function plainStart(value: string): string {
+  return value.replace(/[（(][^）)]*[）)]/gu, "").trim();
+}
+
+function isFreeOnlyDay(day: JsonObject): boolean {
+  const spots = Array.isArray(day.spots) ? day.spots.filter((spot): spot is JsonObject => Boolean(spot) && typeof spot === "object") : [];
+  const activities = Array.isArray(day.activities) ? day.activities as JsonObject[] : [];
+  const free = spots.some((spot) => effectiveItinerarySpotKind(spot) === "free") || activities.some((item) => item?.type === "free");
+  const attractions = spots.filter((spot) => effectiveItinerarySpotKind(spot) === "attraction");
+  return free && !attractions.length;
+}
+
+function includeNoteCandidates(sourceText: string): string[] {
+  // 只认「含/包含」明确的当天含项；景点后的【配讲解】属于景点属性，不能当含项尾缀。
+  const stated = [...sourceText.matchAll(/(?:包含|含)[^，。；：、\n【】]{2,24}/gu)].map((match) => match[0].trim());
+  return [...new Set(stated.filter(Boolean))];
+}
+
+function dayNodeNames(day: JsonObject): string[] {
+  const activities = Array.isArray(day.activities) ? day.activities : [];
+  const titles = activities.flatMap((activity) => {
+    const item = activity && typeof activity === "object" ? activity as JsonObject : {};
+    const type = text(item.type);
+    return type && ["meal", "hotel"].includes(type) ? [] : [text(item.title)];
+  });
+  return [...new Set([...spotNames(day), ...titles].filter(Boolean))];
 }
 
 function spotNames(day: JsonObject): string[] {
@@ -275,13 +270,6 @@ function spotNames(day: JsonObject): string[] {
     const name = spot && typeof spot === "object" ? text((spot as JsonObject).name) : "";
     return name ? [name] : [];
   });
-}
-
-/** 只有「A · B · C」形式的确定性景点串才拆出节点；路线句子不拆。 */
-export function sequenceNames(title: string): string[] {
-  if (!title.includes(" · ")) return [];
-  return title.split(" · ").map((name) => name.replace(/（二选一）$/u, "").trim())
-    .flatMap((name) => name.split("或")).map((name) => name.trim()).filter(Boolean);
 }
 
 function compact(value: string): string { return value.replace(/\s+/gu, ""); }

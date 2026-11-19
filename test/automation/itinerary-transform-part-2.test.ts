@@ -233,8 +233,8 @@ test("私家团兜底标题：接送日不落成自由活动、保留用车卡�
     activities: [{ time: "上午", title: "丽江送机", detail: "专车送至丽江三义机场", type: "transport" }] })) as ProductItineraryDay;
   const free = ensureDayTitleFits(product, makeDay({ day: 2, title: "丽江古城周边全天自由活动，可自行安排逛吃与休息", spots: [{ name: "自由活动", kind: "free" }],
     activities: [] })) as ProductItineraryDay;
-  assert.match(transfer.title, /^专车送机｜/u);
-  assert.match(free.title, /^自由活动｜/u);
+  assert.equal(transfer.title, "丽江送机");
+  assert.equal(free.title, "自由活动");
   const out = transformItinerary({ itinerary: [makeDay(), free, transfer], operations: baseOps, stations: baseStations, privateTour: true });
   const cards = out.map((day) => day.tourDailyInfos.filter((info) => info.activeType?.key === 8));
   assert.equal(cards[1]!.length, 0);

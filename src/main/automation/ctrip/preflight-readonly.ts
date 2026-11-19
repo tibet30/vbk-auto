@@ -1,4 +1,4 @@
-import { isPrivateTourProduct } from "../../../shared/private-tour-day-title.js";
+import { isPrivateTourProduct } from "../../../shared/product-form.js";
 import { buildReadbackExpectations } from "./itinerary-api/itinerary-transform.js";
 import { enrichItineraryPoiMetadata } from "./itinerary-api/poi-metadata.js";
 import { verifyItineraryReadback } from "./itinerary-api/readback.js";

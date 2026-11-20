@@ -44,3 +44,47 @@ test("置顶、摘要和归档独立更新且归档不删除历史", () => {
   }
 });
 
+test("删除任务会同时清掉消息、运行与收据，且只作用于本人", () => {
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-agent-workspace-delete-"));
+  try {
+    const db = new VbkDatabase(dataPath);
+    const thread = db.createAgentThread(1001, { title: "待删除任务" });
+    db.addAgentThreadMessage(1001, thread.id, "user", "第一条");
+    const run = db.createAgentRun(1001, { threadId: thread.id, intent: "整理报价" });
+    assert.equal(db.listAgentRuns(1001, thread.id).length, 1);
+
+    assert.throws(() => db.deleteAgentThread(1002, thread.id), /不存在/);
+    assert.equal(db.listAgentThreads(1001).length, 1);
+
+    db.deleteAgentThread(1001, thread.id);
+    assert.equal(db.listAgentThreads(1001).length, 0);
+    assert.equal(db.getAgentThread(1001, thread.id), undefined);
+    assert.equal(db.listAgentRuns(1001, thread.id).length, 0);
+    assert.equal(db.findActiveAgentRun(1001, thread.id), undefined);
+    assert.throws(() => db.getAgentThreadDetail(1001, thread.id), /不存在/);
+    assert.equal(run.threadId, thread.id);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});
+
+test("智能体产出消息置未读，打开任务后回到已读", () => {
+  const dataPath = fs.mkdtempSync(path.join(os.tmpdir(), "vbk-agent-workspace-unread-"));
+  try {
+    const db = new VbkDatabase(dataPath);
+    const thread = db.createAgentThread(1001, {});
+    assert.equal(thread.unread, false);
+
+    db.addAgentThreadMessage(1001, thread.id, "user", "开始整理");
+    assert.equal(db.getAgentThread(1001, thread.id)?.unread, false);
+
+    db.addAgentThreadMessage(1001, thread.id, "assistant", "已经整理完毕");
+    assert.equal(db.getAgentThread(1001, thread.id)?.unread, true);
+
+    db.markAgentThreadRead(1001, thread.id);
+    assert.equal(db.getAgentThread(1001, thread.id)?.unread, false);
+    assert.equal(db.listAgentThreads(1001)[0]?.unread, false);
+  } finally {
+    fs.rmSync(dataPath, { recursive: true, force: true });
+  }
+});

@@ -24,6 +24,7 @@ type ThreadRow = {
   enabled_skills_json: string | null;
   created_at: string;
   updated_at: string;
+  unread: number;
   message_count: number;
 };
 
@@ -63,6 +64,7 @@ function fromThreadRow(row: ThreadRow): AgentThread {
       ? { enabledSkills: parseEnabledSkills(row.enabled_skills_json)! }
       : {}),
     ...(parseSummary(row.summary_json) ? { summary: parseSummary(row.summary_json) } : {}),
+    unread: Boolean(row.unread),
     messageCount: row.message_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -131,6 +133,19 @@ export function updateAgentThread(
   return getAgentThread(db, ownerUserId, id)!;
 }
 
+export function deleteAgentThread(db: Database.Database, ownerUserId: number, id: string): void {
+  if (!getAgentThread(db, ownerUserId, id)) throw new Error(`智能体任务不存在：${id}`);
+  const remove = db.transaction(() => {
+    db.prepare("DELETE FROM agent_action_receipts WHERE owner_user_id=? AND thread_id=?").run(ownerUserId, id);
+    db.prepare("DELETE FROM agent_tool_calls WHERE owner_user_id=? AND thread_id=?").run(ownerUserId, id);
+    db.prepare("DELETE FROM agent_permission_grants WHERE owner_user_id=? AND thread_id=?").run(ownerUserId, id);
+    db.prepare("DELETE FROM agent_runs WHERE owner_user_id=? AND thread_id=?").run(ownerUserId, id);
+    db.prepare("DELETE FROM agent_thread_messages WHERE thread_id=?").run(id);
+    db.prepare("DELETE FROM agent_threads WHERE owner_user_id=? AND id=?").run(ownerUserId, id);
+  });
+  remove();
+}
+
 export function addAgentThreadMessage(
   db: Database.Database,
   ownerUserId: number,
@@ -143,9 +158,13 @@ export function addAgentThreadMessage(
   if (!message.content) throw new Error("消息内容不能为空。");
   db.prepare("INSERT INTO agent_thread_messages(id,thread_id,role,content,created_at) VALUES(?,?,?,?,?)")
     .run(message.id, message.threadId, message.role, message.content, message.createdAt);
-  db.prepare("UPDATE agent_threads SET updated_at=? WHERE owner_user_id=? AND id=?")
-    .run(message.createdAt, ownerUserId, threadId);
+  db.prepare("UPDATE agent_threads SET updated_at=?,unread=? WHERE owner_user_id=? AND id=?")
+    .run(message.createdAt, role === "user" ? 0 : 1, ownerUserId, threadId);
   return message;
+}
+
+export function markAgentThreadRead(db: Database.Database, ownerUserId: number, threadId: string): void {
+  db.prepare("UPDATE agent_threads SET unread=0 WHERE owner_user_id=? AND id=?").run(ownerUserId, threadId);
 }
 
 export function listAgentThreadMessages(db: Database.Database, ownerUserId: number, threadId: string): AgentThreadMessage[] {

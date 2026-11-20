@@ -25,6 +25,8 @@ const TRANSIENT_NODE_ERROR_CODES: ReadonlySet<string> = new Set([
 
 const TRANSIENT_MESSAGE_PATTERN = /\b(?:HTTP\s*)?(?:429|5\d\d)\b/;
 const TRANSIENT_PROVIDER_PATTERN = /服务暂时不可用|服务集群负载较高|provider_(?:connection|timeout|rate_limit)/i;
+/** 上游在没有 terminal chunk 的情况下关流（AI SDK 记为 NoOutputGeneratedError）：偶发且可安全重发。 */
+const EMPTY_OUTPUT_PATTERN = /no output generated|without a finish chunk|模型响应为空|未返回可用内容/i;
 
 function statusOf(error: unknown): number | undefined {
   if (!error || typeof error !== "object") return undefined;
@@ -47,11 +49,20 @@ function messageOf(error: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function nameOf(error: unknown): string {
+  if (!error || typeof error !== "object") return "";
+  const value = (error as { name?: unknown }).name;
+  return typeof value === "string" ? value : "";
+}
+
 export function isTransientModelError(error: unknown): boolean {
   const status = statusOf(error);
   if (status !== undefined && (TRANSIENT_HTTP_STATUSES.has(status) || status >= 500)) return true;
   if (TRANSIENT_NODE_ERROR_CODES.has(codeOf(error))) return true;
+  if (/NoOutputGenerated|EmptyOutput/i.test(nameOf(error))) return true;
   const message = messageOf(error);
   if (!message) return false;
-  return TRANSIENT_MESSAGE_PATTERN.test(message) || TRANSIENT_PROVIDER_PATTERN.test(message);
+  return TRANSIENT_MESSAGE_PATTERN.test(message)
+    || TRANSIENT_PROVIDER_PATTERN.test(message)
+    || EMPTY_OUTPUT_PATTERN.test(message);
 }

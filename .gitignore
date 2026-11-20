@@ -77,6 +77,8 @@ input
 *.swo
 # 仓库根的临时调试 repro 脚本（保留在本地，不入仓；按需 git add -f）
 repro-*.mjs
+# 界面截图调试残留（tmp-shots/shoot.mjs + png）
+tmp-shots/
 
 # ============ 锁文件 ============
 # 项目统一使用 yarn，忽略 npm 锁文件避免冲突

@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, History, ListChecks, PackageOpen, Settings } from "lucide-react";
+import { History, ListChecks, PackageOpen, Settings, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppModel } from "../../app.main.model";
 import { useAppAuth } from "../../auth/AppAuthContext";
@@ -69,7 +69,7 @@ export function AppRail({ model }: { model: AppModel }) {
         aria-label="智能体"
         title="智能体"
       >
-        <BriefcaseBusiness className={styles.icon} />
+        <Sparkles className={styles.icon} />
       </button>
 
       <button

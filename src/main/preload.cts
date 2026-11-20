@@ -30,6 +30,7 @@ const api: VbkApi = {
     create: (input) => ipcRenderer.invoke("agentWorkspace:create", input),
     get: (id) => ipcRenderer.invoke("agentWorkspace:get", id),
     update: (id, patch) => ipcRenderer.invoke("agentWorkspace:update", id, patch),
+    remove: (id) => ipcRenderer.invoke("agentWorkspace:remove", id),
     send: (id, content) => ipcRenderer.invoke("agentWorkspace:send", id, content),
     approve: (id, toolCallId, scope) => ipcRenderer.invoke("agentWorkspace:approve", id, toolCallId, scope),
     reject: (id, toolCallId, reason) => ipcRenderer.invoke("agentWorkspace:reject", id, toolCallId, reason),

@@ -51,12 +51,12 @@ export function AgentHome({ model, busy, capabilities, onStart }: AgentHomeProps
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(); }
             }}
-            placeholder="描述目标。可以先创建任务，再为它选择文件夹或关联产品。"
+            placeholder="描述目标。发送后会创建任务；没指定工作目录时自动使用临时工作区。"
             aria-label="新任务内容"
           />
           <div className={styles.composerTools}>
             <button type="button" disabled title="创建任务后可添加附件"><Paperclip size={15} />附件</button>
-            <button type="button" disabled title="创建任务后可选择工作目录"><FolderOpen size={15} />工作目录</button>
+            <button type="button" disabled title="创建任务后可指定工作目录；不指定则自动使用临时工作区"><FolderOpen size={15} />工作目录</button>
             <span><WandSparkles size={14} />自动选择 Skill</span>
             <button type="button" className={styles.send} onClick={submit} disabled={!prompt.trim() || busy} aria-label="开始任务">
               <ArrowUp size={16} />

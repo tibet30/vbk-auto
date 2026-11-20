@@ -1,6 +1,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { isStepCount, jsonSchema, streamText, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import { stripAgentReasoning } from "../../shared/agent-visible-text.js";
+import { logWarn } from "../../shared/log-timestamp.js";
 import { attemptWithPromptRepair, sanitisePromptMessages, type PromptRepairLevel } from "../ai/prompt-moderation-repair.js";
 import { toModelMessages } from "./ai-sdk-transcript.js";
 import type { AgentModel, AgentModelInput, AgentModelMessage, AgentModelResult, AgentToolCall, AgentToolDefinition } from "./types.js";
@@ -62,6 +63,9 @@ export class AiSdkAgentModel implements AgentModel {
     input: AgentModelInput,
     signal: AbortSignal,
   ): Promise<AgentModelResult> {
+    // 流内的 provider 错误默认只被 SDK 消费掉，最终只剩一句「No output generated」；
+    // 这里先留住真实原因，供空响应时写日志与诊断，用户可见文案仍由上层统一中文化。
+    let streamFailure: unknown;
     const result = streamText({
       model: this.model,
       messages,
@@ -71,6 +75,7 @@ export class AiSdkAgentModel implements AgentModel {
       stopWhen: isStepCount(1),
       // 完成检查反馈以 system 消息插在对话中间，语义位置不能丢。
       allowSystemInMessages: true,
+      onError: ({ error }) => { streamFailure = error; },
     });
 
     let raw = "";
@@ -105,12 +110,12 @@ export class AiSdkAgentModel implements AgentModel {
       throw new Error("模型响应因长度限制被截断，请减少上下文后重试。");
     }
     if (!finishReason) {
-      throw new Error("模型流式响应提前结束，请重试。");
+      throw emptyOutputError(streamFailure, "模型流式响应提前结束，请重试。");
     }
 
     const toolCalls = providerCalls.map((call) => toToolCall(call.toolCallId, call.toolName, call.input));
     if (!raw.trim() && !toolCalls.length && finishReason !== "tool-calls") {
-      throw new Error("模型响应为空：未返回可用内容。");
+      throw emptyOutputError(streamFailure, "模型响应为空：未返回可用内容。");
     }
 
     const mapped = {
@@ -163,6 +168,19 @@ function toToolCall(id: string, name: string, input: unknown): AgentToolCall {
     rawArguments: typeof input === "string" ? input : JSON.stringify(input),
     argumentError: "工具参数必须是 JSON 对象",
   };
+}
+
+/**
+ * 空响应单独留一条诊断：真实原因（上游断流、代理截断、审核）只在 streamFailure 里，
+ * 不写日志就只能看到「没有内容」这句话，无法定位。
+ */
+function emptyOutputError(streamFailure: unknown, message: string): Error {
+  const detail = streamFailure instanceof Error ? streamFailure.message : "";
+  if (detail) logWarn("[agent] model stream ended without content", detail);
+  const error = new Error(message);
+  error.name = "AgentEmptyOutputError";
+  if (detail) Object.assign(error, { agentDetail: detail });
+  return error;
 }
 
 /**

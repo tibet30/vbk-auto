@@ -3,6 +3,8 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { toModelMessages } from "../../src/main/agent/ai-sdk-transcript.js";
 import { AiSdkAgentModel } from "../../src/main/agent/ai-sdk-model.js";
+import { describeAgentFailure } from "../../src/main/agent/agent-failure.js";
+import { isTransientModelError } from "../../src/main/agent/transient-error.js";
 import type { AgentModelMessage } from "../../src/main/agent/types.js";
 
 test("assistant text and every tool call stay in one message", () => {
@@ -218,5 +220,20 @@ test("forwards cached prompt tokens through usage", async () => {  const usages:
     assert.equal(result.content, "完成");
     assert.equal(usages.at(-1)?.inputTokens, 100);
     assert.equal(usages.at(-1)?.cachedTokens, 40);
+  });
+});
+
+test("an ended stream without content surfaces a retryable Chinese failure", async () => {
+  const messages: AgentModelMessage[] = [{ role: "user", content: "你好" }];
+  await withServer([], async (baseUrl) => {
+    const model = new AiSdkAgentModel({ apiKey: "test", baseUrl, model: "test-model" });
+    await assert.rejects(model.complete({ messages, tools: [] }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /未返回可用内容/u);
+      assert.doesNotMatch(error.message, /no output generated|finish reason/i);
+      assert.equal(isTransientModelError(error), true, "空流必须交给上层自动重试");
+      assert.match(describeAgentFailure(error).message, /没有返回任何内容/u);
+      return true;
+    });
   });
 });

@@ -15,6 +15,7 @@ import {
   agentReceiptArtifactMigration,
   agentRuntimeMigration,
   agentThreadSkillsMigration,
+  agentThreadUnreadMigration,
 } from "./agent-runtime-migration.js";
 
 export { legacyMigrations };
@@ -24,5 +25,5 @@ export function runDatabaseMigrations(db: Database.Database): void {
   prepareArchitectureMigration(db);
   applyMigrations(db, [...legacyMigrations, productArchitectureMigration, itineraryReviewUnlockMigration,
     itinerarySpotIdMigration, agentRuntimeMigration, agentReceiptArtifactMigration,
-    agentThreadSkillsMigration]);
+    agentThreadSkillsMigration, agentThreadUnreadMigration]);
 }

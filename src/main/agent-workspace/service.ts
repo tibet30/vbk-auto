@@ -1,7 +1,6 @@
 import type {
   AgentThread,
   AgentThreadDetail,
-  AgentThreadStatus,
   CreateAgentThreadInput,
   UpdateAgentThreadInput,
 } from "../../shared/contracts-agent-workspace.js";
@@ -11,13 +10,11 @@ import type {
   AgentCapabilities,
   AgentExternalToolsSnapshot,
   AgentMcpServerInput,
-  AgentRun,
   AgentThreadWorkspace,
 } from "../../shared/contracts-agent-runtime.js";
+import { toAgentFailureError } from "../agent/agent-failure.js";
 import type { MainIpcContext } from "../ipc/context.js";
-import type { AgentModelMessage } from "../agent/types.js";
-import fs from "node:fs";
-import { assembleThreadContext, buildThreadSummary } from "./context-compression.js";
+import { buildThreadSummary } from "./context-compression.js";
 import { buildAccountReadPort, buildProductReadPort } from "./ports.js";
 import { buildVbkReadPortFromContext } from "./vbk-adapter.js";
 import { buildVbkWritePortFromContext } from "./vbk-write-adapter.js";
@@ -25,37 +22,31 @@ import { buildTibetReadPortFromContext } from "./tibet-adapter.js";
 import { ExternalToolRuntime } from "./external-tools.js";
 import { ExternalToolSettings } from "./external-tools-settings.js";
 import { createModelProvider } from "./model-context.js";
+import { automaticTitle, threadStatusFor } from "./thread-state.js";
+import { resolveTemporaryWorkspaceRoot, ThreadWorkspaceDirectory } from "./workspace-directory.js";
+import { previewWorkspaceArtifact, resolveWorkspaceArtifact } from "./workspace-artifacts.js";
+import { composeWorkspaceView, historyMessages } from "./workspace-view.js";
 import {
-  buildArtifactPreview,
   createAgentRuntime,
   registryForScope,
-  resolveArtifactForOpen,
   type AgentSkillRegistry,
   type AgentRuntime,
   type ResolvedArtifact,
 } from "../agent-runtime/index.js";
 
-
-function automaticTitle(content: string): string {
-  const oneLine = content.replace(/\s+/gu, " ").trim();
-  return oneLine.length > 24 ? `${oneLine.slice(0, 24)}…` : oneLine || "新任务";
-}
-
-function threadStatusFor(run: AgentRun | undefined): AgentThreadStatus {  if (!run) return "waiting";
-  if (run.status === "running" || run.status === "queued") return "running";
-  if (run.status === "waiting_approval") return "waiting";
-  if (run.status === "needs_attention" || run.status === "uncertain") return "needs_attention";
-  return "waiting";
-}
-
 export class AgentWorkspaceService {
   private readonly running = new Set<string>();
   private readonly externalToolRuntime: ExternalToolRuntime;
+  private readonly directories: ThreadWorkspaceDirectory;
   /** 设置页入口：与对话链路共用同一批 MCP 连接。 */
   readonly externalTools: ExternalToolSettings;
   private runtime: AgentRuntime;
 
-  constructor(private readonly context: MainIpcContext) {
+  constructor(
+    private readonly context: MainIpcContext,
+    options: { temporaryWorkspaceRoot?: string } = {},
+  ) {
+    this.directories = new ThreadWorkspaceDirectory(resolveTemporaryWorkspaceRoot(options.temporaryWorkspaceRoot));
     this.externalToolRuntime = new ExternalToolRuntime(context.db);
     this.externalTools = new ExternalToolSettings(this.externalToolRuntime, () => {
       this.runtime = this.buildRuntime();
@@ -92,8 +83,10 @@ export class AgentWorkspaceService {
     return id;
   }
 
-  /** 应用启动后调用一次：把中断的运行与动作收敛到可解释状态。 */
+  /** 应用启动后调用一次：把中断的运行与动作收敛到可解释状态，并回收无主的临时工作区。 */
   recover(): { runs: number; toolCalls: number } {
+    const db = this.context.db;
+    this.directories.prune((ownerUserId, threadId) => db.getAgentThread(ownerUserId, threadId)?.workingDirectory);
     return this.runtime.runs.recoverInterrupted();
   }
 
@@ -107,7 +100,17 @@ export class AgentWorkspaceService {
 
   get(id: string): AgentThreadWorkspace {
     const owner = this.owner();
+    return this.compose(this.context.db.getAgentThreadDetail(owner, id));
+  }
+
+  /** 界面打开任务的唯一入口：读完即视为已读，运行结果不会在用户眼前反复标记未读。 */
+  open(id: string): AgentThreadWorkspace {
+    const owner = this.owner();
     const detail = this.context.db.getAgentThreadDetail(owner, id);
+    if (detail.thread.unread) {
+      this.context.db.markAgentThreadRead(owner, id);
+      detail.thread = { ...detail.thread, unread: false };
+    }
     return this.compose(detail);
   }
 
@@ -118,11 +121,36 @@ export class AgentWorkspaceService {
       && patch.workingDirectory !== current.workingDirectory) {
       // 目录一变，旧目录上的授权立即失效。
       this.context.db.revokeAgentPermissionGrants(owner, id, "working_directory_changed");
+      if (patch.workingDirectory === null) this.directories.release(current);
     }
     if (patch.status === "archived") {
       this.context.db.revokeAgentPermissionGrants(owner, id, "thread_archived");
     }
     return this.context.db.updateAgentThread(owner, id, patch);
+  }
+
+  remove(id: string): void {
+    const owner = this.owner();
+    if (this.running.has(id)) throw new Error("当前任务仍在处理中，无法删除。");
+    const thread = this.context.db.getAgentThread(owner, id);
+    if (!thread) throw new Error(`智能体任务不存在：${id}`);
+    const active = this.context.db.findActiveAgentRun(owner, id);
+    const pending = active && ["queued", "running", "waiting_approval"].includes(active.status);
+    if (pending) throw new Error("任务还有未结束的运行，请先取消后再删除。");
+    this.context.db.deleteAgentThread(owner, id);
+    this.directories.release(thread);
+  }
+
+  /** 缺目录时自动创建任务级临时工作区；用户选的目录保持不变。 */
+  async prepareWorkingDirectory(id: string): Promise<string> {
+    const owner = this.owner();
+    const thread = this.context.db.getAgentThread(owner, id);
+    if (!thread) throw new Error(`智能体任务不存在：${id}`);
+    const directory = await this.directories.resolve(thread);
+    if (directory !== thread.workingDirectory) {
+      this.context.db.updateAgentThread(owner, id, { workingDirectory: directory });
+    }
+    return directory;
   }
 
   async send(id: string, content: string): Promise<AgentThreadWorkspace> {
@@ -151,21 +179,21 @@ export class AgentWorkspaceService {
       const before = this.context.db.getAgentThreadDetail(owner, id);
       const sum = buildThreadSummary(before.messages, before.thread.summary);
       if (sum) this.context.db.updateAgentThread(owner, id, { summary: sum });
-      const history = this.history(before, sum);
+      const history = historyMessages(before, sum);
       const run = await this.runtime.runs.start({
         ownerUserId: owner,
         threadId: id,
         intent: prompt,
         registry: this.registryFor(current),
         history,
-        ...(current.workingDirectory ? { workingDirectory: current.workingDirectory } : {}),
+        workingDirectory: await this.prepareWorkingDirectory(id),
         provider: () => createModelProvider({ context: this.context, summary: sum, skills: this.runtime.registry.summaries() }),
       });
       this.context.db.updateAgentThread(owner, id, { runtimeStatus: threadStatusFor(run) });
       return this.get(id);
     } catch (error) {
       this.context.db.updateAgentThread(owner, id, { runtimeStatus: "needs_attention" });
-      throw error;
+      throw toAgentFailureError(error);
     } finally {
       this.running.delete(id);
     }
@@ -182,13 +210,12 @@ export class AgentWorkspaceService {
   /** 不确定写入的核查入口：只读回读，收敛后任务回到"需要处理，可继续"。 */
   async reconcile(threadId: string, toolCallId: string): Promise<AgentThreadWorkspace> {
     const owner = this.owner();
-    const thread = this.context.db.getAgentThread(owner, threadId);
-    if (!thread) throw new Error(`智能体任务不存在：${threadId}`);
+    if (!this.context.db.getAgentThread(owner, threadId)) throw new Error(`智能体任务不存在：${threadId}`);
     await this.runtime.runs.reconcile({
       ownerUserId: owner,
       threadId,
       toolCallId,
-      ...(thread.workingDirectory ? { workingDirectory: thread.workingDirectory } : {}),
+      workingDirectory: await this.prepareWorkingDirectory(threadId),
     });
     this.context.db.updateAgentThread(owner, threadId, { runtimeStatus: "needs_attention" });
     return this.get(threadId);
@@ -208,46 +235,28 @@ export class AgentWorkspaceService {
         ownerUserId: owner,
         threadId,
         registry: this.registryFor(thread),
-        history: this.history(before, before.thread.summary),
-        ...(thread.workingDirectory ? { workingDirectory: thread.workingDirectory } : {}),
+        history: historyMessages(before, before.thread.summary),
+        workingDirectory: await this.prepareWorkingDirectory(threadId),
         provider: () => createModelProvider({ context: this.context, summary: before.thread.summary, skills: this.runtime.registry.summaries() }),
       });
       this.context.db.updateAgentThread(owner, threadId, { runtimeStatus: threadStatusFor(run) });
       return this.get(threadId);
     } catch (error) {
       this.context.db.updateAgentThread(owner, threadId, { runtimeStatus: "needs_attention" });
-      throw error;
+      throw toAgentFailureError(error);
     } finally {
       this.running.delete(threadId);
     }
   }
 
   /** 校验并解析收据登记的产物；真正的系统打开动作留在 IPC 层。 */
-  async resolveArtifact(threadId: string, receiptId: string): Promise<ResolvedArtifact> {
-    const owner = this.owner();
-    const thread = this.context.db.getAgentThread(owner, threadId);
-    if (!thread) throw new Error(`智能体任务不存在：${threadId}`);
-    return resolveArtifactForOpen({
-      db: this.context.db,
-      ownerUserId: owner,
-      threadId,
-      receiptId,
-      ...(thread.workingDirectory ? { workingDirectory: thread.workingDirectory } : {}),
-    });
+  resolveArtifact(threadId: string, receiptId: string): Promise<ResolvedArtifact> {
+    return resolveWorkspaceArtifact({ context: this.context, threadId, receiptId });
   }
 
   /** 应用内预览：只支持目录型产物（网页工程），样式在主进程内联后返回。 */
-  async previewArtifact(threadId: string, receiptId: string): Promise<AgentArtifactPreview> {
-    const owner = this.owner();
-    const thread = this.context.db.getAgentThread(owner, threadId);
-    if (!thread) throw new Error(`智能体任务不存在：${threadId}`);
-    return buildArtifactPreview({
-      db: this.context.db,
-      ownerUserId: owner,
-      threadId,
-      receiptId,
-      ...(thread.workingDirectory ? { workingDirectory: thread.workingDirectory } : {}),
-    });
+  previewArtifact(threadId: string, receiptId: string): Promise<AgentArtifactPreview> {
+    return previewWorkspaceArtifact({ context: this.context, threadId, receiptId });
   }
 
   /** 当前能力：只读注册表与外部工具状态，不触发模型调用。 */
@@ -287,8 +296,8 @@ export class AgentWorkspaceService {
           toolCallId,
           registry: this.registryFor(thread),
           scope: extra.scope ?? "once",
-          history: this.history(before, before.thread.summary),
-          ...(thread.workingDirectory ? { workingDirectory: thread.workingDirectory } : {}),
+          history: historyMessages(before, before.thread.summary),
+          workingDirectory: await this.prepareWorkingDirectory(threadId),
           provider: () => createModelProvider({ context: this.context, summary: before.thread.summary, skills: this.runtime.registry.summaries() }),
         })
         : await this.runtime.runs.reject({
@@ -296,7 +305,7 @@ export class AgentWorkspaceService {
           threadId,
           toolCallId,
           ...(extra.reason ? { reason: extra.reason } : {}),
-          ...(thread.workingDirectory ? { workingDirectory: thread.workingDirectory } : {}),
+          workingDirectory: await this.prepareWorkingDirectory(threadId),
         });
       const summary = buildThreadSummary(before.messages, before.thread.summary);
       this.context.db.updateAgentThread(owner, threadId, {
@@ -306,42 +315,26 @@ export class AgentWorkspaceService {
       return this.get(threadId);
     } catch (error) {
       this.context.db.updateAgentThread(owner, threadId, { runtimeStatus: "needs_attention" });
-      throw error;
+      throw toAgentFailureError(error);
     } finally {
       this.running.delete(threadId);
     }
   }
 
   private compose(detail: AgentThreadDetail): AgentThreadWorkspace {
-    const owner = this.owner();
     const runtime = this.runtime.runs.snapshot({
-      ownerUserId: owner,
+      ownerUserId: this.owner(),
       threadId: detail.thread.id,
       ...(detail.thread.enabledSkills !== undefined ? { enabledSkills: detail.thread.enabledSkills } : {}),
       ...(detail.thread.workingDirectory ? { workingDirectory: detail.thread.workingDirectory } : {}),
     });
-    const externalTools = this.externalToolRuntime.currentStatus();
-    const composed = { ...detail, runtime: externalTools.length ? { ...runtime, externalTools } : runtime };
-    const available = workingDirectoryAvailable(detail.thread.workingDirectory);
-    return available === undefined ? composed : { ...composed, workingDirectoryAvailable: available };
-  }
-
-  private history(
-    detail: AgentThreadDetail,
-    summary: AgentThreadDetail["thread"]["summary"],
-  ): AgentModelMessage[] {
-    const assembled = assembleThreadContext({ messages: detail.messages, summary });
-    return assembled.messages.map((message) => ({ role: message.role, content: message.content }));
+    return composeWorkspaceView({
+      detail,
+      runtime,
+      externalTools: this.externalToolRuntime.currentStatus(),
+      workingDirectoryKind: this.directories.kind(detail.thread),
+    });
   }
 }
 
-/** 任务目录是否可用：不存在或不是目录时，界面要能提前提示，而不是等模型跑起来才报错。 */
-function workingDirectoryAvailable(directory: string | undefined): boolean | undefined {
-  if (!directory) return undefined;
-  try {
-    return fs.statSync(directory).isDirectory();
-  } catch {
-    return false;
-  }
-}
 

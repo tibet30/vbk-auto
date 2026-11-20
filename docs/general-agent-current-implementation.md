@@ -12,10 +12,11 @@
 - `src/main/infrastructure/database/parts/agent-workspace.ts`：按用户隔离的线程和消息持久化。
 - `src/main/infrastructure/database/parts/migration-registry.ts`：迁移 `0018_agent_workspace`。
 - `src/main/agent-workspace/service.ts`：通用对话、自动标题、运行状态和明确记忆捕获。
+- `src/main/agent-workspace/workspace-directory.ts`：工作目录来源判定，临时工作区的创建、回收与启动清理。
 - `src/main/ipc/agent-workspace-ipc.ts`：任务 CRUD、发送消息和目录选择 IPC。
 - `src/main/preload.cts`、`src/shared/contracts-api.ts`：renderer 桥接。
 
-当前真实能力：创建、搜索、打开、重命名、置顶、归档任务；持久化完整消息；调用现有模型完成无工具对话；为任务保存一个工作目录。
+当前真实能力：创建、搜索、打开、置顶、归档、删除任务；列表默认只渲染最近 20 条，滚动到底部或点「加载更多」继续加载；不提供重命名入口。持久化完整消息；调用现有模型完成无工具对话；为任务保存一个工作目录；未指定目录的任务在首次执行前自动获得临时工作区（见下方「临时工作区」）。
 
 （第一阶段结束时）目录字段只是授权范围的记录，还没有文件读取或写入工具。第二阶段已补齐工具运行时与本地文件闭环，**当前状态看下方「第二阶段当前实现」**；"没有收据不得声称已完成"这条系统提示一直保留到今天。
 
@@ -32,9 +33,10 @@
 ### 界面
 
 - `src/renderer/app/views/agent/index.tsx`：工作区容器和任务协调。
-- `ThreadSidebar.tsx`：最近任务第二列。
+- `ThreadSidebar.tsx`：最近任务第二列；首屏 20 条，滚动触底增量加载；每行保留置顶/归档/删除，删除会清掉该任务的消息、运行、工具调用、授权与收据，执行中的任务不允许删除。
 - `AgentHome.tsx`：紧凑首页、推荐入口和快速跳转。
 - `AgentThreadView.tsx`：消息、摘要、目录和输入区。
+- **新建任务只回到首页**：点「新建任务」把主区域切回首页输入框，每次都是空白草稿，不落库空白任务——任务记录在第一条消息发出时才创建，任务列表因此不会留下没内容的任务。新建 / 切换 / 归档都会推进视图代次，在途运行或刷新回包若已过期只更新列表，不会把用户拽回对话。
 - `src/renderer/app/views/workspace-home/index.tsx`：挂载智能体；VBK 登录打开时仍保持原独占登录面。
 - `Rail.tsx`、`Topbar.tsx`、`views/tasks/index.tsx`：名称更新。
 
@@ -109,6 +111,18 @@
 `waiting_approval`、`needs_attention`、`uncertain` 必须保留——恢复与继续都依赖它。
 好处是长期使用时 SQLite 不会被历史 transcript 无界撑大。
 
+### 临时工作区（2026-11-19）
+
+生成 PPT、网页或文件前不再要求用户先选目录：任务没有工作目录时，首次执行（发送消息、继续、批准写动作、核查）前自动创建任务级临时工作区，并写回 `agent_threads.working_directory`。
+
+- 落点：`<userData>/agent-workspaces/<ownerUserId>/<threadId>`。选应用数据目录而不是系统 `tmp`，因为产物（`.pptx`、网页工程）在任务结束前属于交付物，系统清理策略下会静默丢失；需要换位置时用 `VBK_AGENT_WORKSPACE_ROOT` 或构造参数覆盖。2026-11-19 用户已确认保持这个落点（方案 A），并由全局门禁 GATE-027 拦回系统临时目录的回退改动。
+- 来源判定只看路径是否等于该任务的标准临时路径（`ThreadWorkspaceDirectory.kind`）：用户自己选中、恰好同名前缀的目录永远不会被当成临时目录处理。
+- 回收：删除任务时删除临时工作区；应用启动时清理没有任何任务引用的临时目录。用户选择的目录只记录、不清空；临时目录切换成用户目录后旧目录在下一次启动清理时回收，不自动迁移产物。
+- 临时目录被外部清掉后，下一次执行会重建同一路径；用户目录丢失仍按原语义报"目录不可用"，不静默回落到临时目录。
+- 界面上目录按钮显示「临时工作区 · 路径」并在 tooltip 说明回收规则；未创建时显示「临时工作区（执行时自动创建）」。
+
+范围与验收：`src/main/agent-workspace/workspace-directory.ts` + `workspace-view.ts` + `workspace-artifacts.ts`，测试见 `test/agent/temporary-workspace.test.ts` 与 `test/agent/agent-directory-health.test.ts`（创建、丢失重建、删除回收、启动清理、用户目录不动、界面标注）。规划与未做项见 [临时工作区规划](/Users/cisco/Documents/vbk-auto/docs/plans/2026-11-19-agent-temporary-workspace.md)。
+
 ### 打包产物验证（asar 内依赖解析）
 
 `npm run package:mac:dir` 打包后用 `VBK_USER_DATA_DIR` 指向临时目录启动真实的 `.app`（不碰用户数据），验证：
@@ -176,6 +190,14 @@
 - 不确定写入的核查走 `agentWorkspace:reconcile`：只读回读后把收据单向收敛为成功/失败，并把结论写入任务历史（`system` 消息），运行回到「需要处理，可继续」。核查本身仍无法判定时保持 `uncertain`，不猜成功、不允许重试。
 - 审批卡与收据历史来自 SQLite 快照，重开任务与重启应用后仍然可见。
 - **产物面板**：成功收据里登记的产物单独成段，展示文件/文件夹、文件树、总字节与预览入口，并提供「打开」与「在文件夹中显示」。打开动作由 `agentWorkspace:openArtifact` 处理：renderer 只传收据 id，主进程按任务授权目录重新 `realpath` 校验，越界、跨任务、已删除的产物一律拒绝，不提供通用文件打开器。
+
+### 失败提示与空流重试（2026-11-19）
+
+- 运行出口统一收敛成中文：`src/main/agent/agent-failure.ts` 的 `describeAgentFailure` 负责分类（超时／鉴权／限流／5xx／空响应／内容审核／上下文超长／网络），`run-loop` 把同一句话写进 `run.error`，`AgentWorkspaceService` 的 send / resume / approve 出口用 `toAgentFailureError` 保证 IPC 抛出的也是这句话。原始技术信息只进 `logWarn`，不进界面。
+- 空响应按瞬时故障重试：AI SDK 的 `NoOutputGeneratedError`、`InvalidResponseDataError: Response stream ended without a finish reason` 与我们自己判定的「模型响应为空」都归到 `transient-error.ts`，`completeWithRetries` 自动重发两次，仍失败才暴露给用户。
+- `ai-sdk-model.ts` 注册 `streamText` 的 `onError`：SDK 默认把流内 provider 错误吞掉，最终只剩一句「No output generated」；这里先留住真实原因，写进空响应错误的 `agentDetail` 与诊断日志。
+- renderer 统一走 `src/renderer/app/views/agent/workspace-error.ts`：剥掉 `Error invoking remote method '…'` 与 `AI_xxxError:` 前缀，纯英文错误退回中文兜底，再按文案给出「下一步」提示。`test/agent/agent-workspace-error.test.ts` 断言 `views/agent` 下不再出现把 `reason.message` 直接塞进界面的写法。
+- 错误条改为「警示图标 + 说明 + 下一步 + 关闭」；发送失败后立刻刷新任务详情，用户能看到自己那条消息和「继续运行」入口，不会停在「0 条记录」。
 
 ### 这一步之后仍未做的部分
 

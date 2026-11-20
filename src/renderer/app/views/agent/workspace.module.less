@@ -1,6 +1,12 @@
 .workspace { width: 100%; min-width: 0; min-height: 0; display: flex; overflow: hidden; background: var(--surface); }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.error { margin: 10px 14px 0; padding: 9px 11px; border-radius: var(--radius-control); background: color-mix(in srgb, var(--destructive) 8%, var(--surface)); color: var(--destructive); font-size: var(--fs-xs); }
+.error { display: flex; align-items: flex-start; gap: 8px; margin: 10px 14px 0; padding: 9px 10px 9px 11px; border: 1px solid color-mix(in srgb, var(--destructive) 22%, transparent); border-radius: var(--radius-control); background: color-mix(in srgb, var(--destructive) 7%, var(--surface)); color: var(--destructive); font-size: var(--fs-xs); line-height: 1.5; }
+.error > svg { flex: none; margin-top: 1px; }
+.errorBody { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.errorMessage { margin: 0; font-weight: 500; }
+.errorHint { margin: 0; color: color-mix(in srgb, var(--destructive) 62%, var(--muted-foreground)); }
+.errorClose { flex: none; display: inline-flex; align-items: center; justify-content: center; padding: 2px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; cursor: pointer; opacity: .7; }
+.errorClose:hover { opacity: 1; background: color-mix(in srgb, var(--destructive) 12%, transparent); }
 .loading { height: 100%; display: grid; place-items: center; color: var(--muted-foreground); font-size: var(--fs-sm); }
 
 .home { flex: 1; min-height: 0; display: grid; align-content: center; justify-items: center; padding: 36px; overflow-y: auto; }
@@ -9,8 +15,8 @@
 .home h1 { margin: 0 0 22px; font-size: 24px; line-height: 1.25; font-weight: 600; letter-spacing: -.025em; }
 
 .composer { border: 1px solid var(--border-strong, var(--border)); border-radius: var(--radius-card); background: var(--surface); box-shadow: 0 8px 28px rgba(24, 24, 27, .07); }
-.composer:focus-within { border-color: var(--foreground); }
-.composer textarea { width: 100%; min-height: 86px; resize: vertical; padding: 12px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--fs-sm); line-height: 1.55; }
+.composer textarea { width: 100%; min-height: 86px; resize: none; padding: 12px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--fs-sm); line-height: 1.55; }
+.composer textarea:focus-visible { box-shadow: none; }
 .composer textarea::placeholder { color: var(--muted-foreground); }
 .composerTools { min-height: 42px; display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
 .composerTools button,
@@ -67,8 +73,8 @@
 @keyframes agent-spin { to { transform: rotate(360deg); } }
 
 .threadComposer { min-height: 56px; margin: 0 18px 16px; display: flex; align-items: flex-end; gap: 8px; padding: 8px; border: 1px solid var(--border-strong, var(--border)); border-radius: 10px; background: var(--surface); }
-.threadComposer:focus-within { border-color: var(--foreground); }
-.threadComposer textarea { flex: 1; min-height: 30px; max-height: 130px; resize: vertical; padding: 6px 4px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--fs-sm); }
+.threadComposer textarea { flex: 1; min-height: 30px; max-height: 130px; resize: none; padding: 6px 4px; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-size: var(--fs-sm); }
+.threadComposer textarea:focus-visible { box-shadow: none; }
 .threadComposer button { width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--radius-control); background: var(--foreground); color: var(--primary-foreground); }
 .threadComposer button:disabled { background: var(--muted); color: var(--muted-foreground); }
 

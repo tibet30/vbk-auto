@@ -1,16 +1,20 @@
-import { dialog, shell } from "electron";
+import path from "node:path";
+import { app, dialog, shell } from "electron";
 import { secureIpcMain as ipcMain } from "../infrastructure/ipc-sender.js";
 import { AgentWorkspaceService } from "../agent-workspace/service.js";
 import type { MainIpcContext } from "./context.js";
 
 export function registerAgentWorkspaceIpc(context: MainIpcContext): void {
-  const workspace = new AgentWorkspaceService(context);
+  const workspace = new AgentWorkspaceService(context, {
+    temporaryWorkspaceRoot: path.join(app.getPath("userData"), "agent-workspaces"),
+  });
   // 启动即收敛上次中断的运行：执行中的动作转 uncertain，半途运行退回 needs_attention。
   workspace.recover();
   ipcMain.handle("agentWorkspace:list", () => workspace.list());
   ipcMain.handle("agentWorkspace:create", (_event, input) => workspace.create(input));
-  ipcMain.handle("agentWorkspace:get", (_event, id: string) => workspace.get(String(id ?? "")));
+  ipcMain.handle("agentWorkspace:get", (_event, id: string) => workspace.open(String(id ?? "")));
   ipcMain.handle("agentWorkspace:update", (_event, id: string, patch) => workspace.update(String(id ?? ""), patch));
+  ipcMain.handle("agentWorkspace:remove", (_event, id: string) => workspace.remove(String(id ?? "")));
   ipcMain.handle("agentWorkspace:send", (_event, id: string, content: string) => workspace.send(String(id ?? ""), String(content ?? "")));
   ipcMain.handle("agentWorkspace:approve", (_event, threadId: string, toolCallId: string, scope: string) =>
     workspace.approve(String(threadId ?? ""), String(toolCallId ?? ""), scope === "thread" ? "thread" : "once"));
@@ -43,8 +47,8 @@ export function registerAgentWorkspaceIpc(context: MainIpcContext): void {
       title: "选择当前任务可访问的工作目录",
       properties: ["openDirectory", "createDirectory"],
     });
-    if (result.canceled || !result.filePaths[0]) return workspace.get(String(id ?? ""));
+    if (result.canceled || !result.filePaths[0]) return workspace.open(String(id ?? ""));
     workspace.update(String(id ?? ""), { workingDirectory: result.filePaths[0] });
-    return workspace.get(String(id ?? ""));
+    return workspace.open(String(id ?? ""));
   });
 }

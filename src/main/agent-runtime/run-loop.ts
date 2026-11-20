@@ -10,6 +10,7 @@ import type {
   AgentRun,
   AgentToolCallRecord,
 } from "../../shared/contracts-agent-runtime.js";
+import { describeAgentFailure, toAgentFailureError } from "../agent/agent-failure.js";
 import type { AgentModel, AgentModelMessage, AgentToolCall } from "../agent/types.js";
 import type { VbkDatabase } from "../infrastructure/database/database.js";
 import { toolCallIdempotencyKey, type ActionExecutor } from "./action-executor.js";
@@ -85,9 +86,9 @@ export async function advanceAgentRun(input: AdvanceAgentRunInput): Promise<Adva
         tools: input.registry.definitions(),
       });
     } catch (error) {
-      const message = errorMessage(error);
-      db.updateAgentRun(ownerUserId, run.id, { status: "needs_attention", step, error: message });
-      throw error;
+      const failure = describeAgentFailure(error);
+      db.updateAgentRun(ownerUserId, run.id, { status: "needs_attention", step, error: failure.message });
+      throw toAgentFailureError(error);
     }
 
     const calls = reply.toolCalls ?? [];

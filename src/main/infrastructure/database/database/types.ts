@@ -65,6 +65,7 @@ export interface VbkDatabasePrototype {
   createAgentThread(ownerUserId: number, input: CreateAgentThreadInput): AgentThread;
   getAgentThread(ownerUserId: number, id: string): AgentThread | undefined;
   listAgentThreads(ownerUserId: number): AgentThread[];
+  deleteAgentThread(ownerUserId: number, id: string): void;
   updateAgentThread(ownerUserId: number, id: string, patch: UpdateAgentThreadInput & {
     summary?: AgentThreadSummary;
     runtimeStatus?: AgentThreadStatus;
@@ -72,6 +73,7 @@ export interface VbkDatabasePrototype {
   addAgentThreadMessage(ownerUserId: number, threadId: string, role: AgentThreadMessageRole, content: string): AgentThreadMessage;
   listAgentThreadMessages(ownerUserId: number, threadId: string): AgentThreadMessage[];
   getAgentThreadDetail(ownerUserId: number, id: string): AgentThreadDetail;
+  markAgentThreadRead(ownerUserId: number, id: string): void;
 
   // generic agent runtime: runs / tool calls / grants / receipts
   createAgentRun(ownerUserId: number, input: { threadId: string; intent: string; maxSteps?: number }): AgentRun;

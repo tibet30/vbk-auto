@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { Archive, ArchiveRestore, Pencil, Pin, Plus, Search } from "lucide-react";
+// 最近任务侧栏：任务列表、搜索、置顶/归档/删除，以及默认 20 条、触底加载更多。
+import { useEffect, useRef, useState } from "react";
+import { Archive, ArchiveRestore, Pin, Plus, Search, Trash2 } from "lucide-react";
 import type { AgentThread, UpdateAgentThreadInput } from "../../../../shared/contracts.js";
+import { relativeThreadTime } from "./thread-time";
 import styles from "./sidebar.module.less";
 
 interface ThreadSidebarProps {
@@ -11,22 +13,53 @@ interface ThreadSidebarProps {
   onNew(): void;
   onOpen(id: string): void;
   onUpdate(thread: AgentThread, patch: UpdateAgentThreadInput): void;
+  onDelete(thread: AgentThread): void;
 }
 
-function statusLabel(thread: AgentThread): string {
+const PAGE_SIZE = 20;
+const CLOCK_TICK_MS = 60_000;
+const LOAD_MORE_THRESHOLD_PX = 120;
+
+function hoverStatusLabel(thread: AgentThread): string {
   if (thread.status === "running") return "正在处理";
-  if (thread.status === "waiting") return "等待继续";
   if (thread.status === "needs_attention") return "需要处理";
   if (thread.status === "completed") return "已完成";
-  if (thread.status === "archived") return "已归档";
-  return thread.messageCount ? `${thread.messageCount} 条记录` : "尚未开始";
+  if (thread.status === "draft" && thread.messageCount) return `${thread.messageCount} 条记录`;
+  return "";
 }
 
 export function ThreadSidebar(props: ThreadSidebarProps) {
+  const [now, setNow] = useState(() => Date.now());
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setLimit(PAGE_SIZE);
+    setConfirmingId(null);
+  }, [props.query]);
+
   const normalized = props.query.trim().toLocaleLowerCase();
   const visible = props.threads.filter((thread) => !normalized || thread.title.toLocaleLowerCase().includes(normalized));
   const active = visible.filter((thread) => thread.status !== "archived");
   const archived = visible.filter((thread) => thread.status === "archived");
+  const activeShown = active.slice(0, limit);
+  const archivedShown = archived.slice(0, Math.max(0, limit - active.length));
+  const hasMore = visible.length > activeShown.length + archivedShown.length;
+
+  const loadMore = () => setLimit((value) => value + PAGE_SIZE);
+
+  const handleScroll = () => {
+    const element = scrollRef.current;
+    if (!element || !hasMore) return;
+    if (element.scrollHeight - element.scrollTop - element.clientHeight > LOAD_MORE_THRESHOLD_PX) return;
+    loadMore();
+  };
 
   return (
     <aside className={styles.sidebar} aria-label="最近任务">
@@ -40,84 +73,101 @@ export function ThreadSidebar(props: ThreadSidebarProps) {
           <input value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder="搜索任务" />
         </label>
       </div>
-      <div className={styles.threadScroll}>
-        {/* threads 必须写在展开运算之后：否则会被 line props 里的全量列表覆盖，
-            导致"最近"混入已归档任务、搜索过滤失效。 */}
-        <ThreadGroup label="最近" {...props} threads={active} />
-        {archived.length > 0 && <ThreadGroup label="已归档" {...props} threads={archived} />}
+      <div className={styles.threadScroll} ref={scrollRef} onScroll={handleScroll}>
+        <ThreadGroup label="最近" {...props} now={now} threads={activeShown} confirmingId={confirmingId} onAskRemove={setConfirmingId} />
+        {archivedShown.length > 0 && (
+          <ThreadGroup label="已归档" {...props} now={now} threads={archivedShown} confirmingId={confirmingId} onAskRemove={setConfirmingId} />
+        )}
         {!visible.length && <p className={styles.empty}>没有匹配的任务</p>}
+        {hasMore && (
+          <button type="button" className={styles.loadMore} onClick={loadMore}>
+            加载更多
+          </button>
+        )}
       </div>
     </aside>
   );
 }
 
-function ThreadGroup(props: ThreadSidebarProps & { label: string; threads: AgentThread[] }) {
-  const [editingId, setEditingId] = useState<string>();
-  const [editingTitle, setEditingTitle] = useState("");
+function ThreadGroup(props: ThreadSidebarProps & { label: string; threads: AgentThread[]; now: number; confirmingId: string | null; onAskRemove(id: string | null): void }) {
   if (!props.threads.length) return null;
-  const finishRename = (thread: AgentThread) => {
-    const title = editingTitle.trim();
-    setEditingId(undefined);
-    if (title && title !== thread.title) props.onUpdate(thread, { title });
-  };
   return (
     <section className={styles.group}>
       <h2>{props.label}</h2>
-      {props.threads.map((thread) => (
-        <div className={styles.threadRow} data-active={props.selectedId === thread.id} key={thread.id}>
-          {editingId === thread.id ? (
-            <div className={styles.threadOpen}>
-              <span className={styles.status} data-status={thread.status} />
-              <span className={styles.threadCopy}>
-                <input
-                  className={styles.renameInput}
-                  value={editingTitle}
-                  autoFocus
-                  onChange={(event) => setEditingTitle(event.target.value)}
-                  onBlur={() => finishRename(thread)}
-                  onKeyDown={(event) => {
-                    event.stopPropagation();
-                    if (event.key === "Enter") finishRename(thread);
-                    if (event.key === "Escape") setEditingId(undefined);
-                  }}
-                />
-                <small>{thread.pinned ? "已置顶 · " : ""}{statusLabel(thread)}</small>
-              </span>
-            </div>
-          ) : (
-            <button type="button" className={styles.threadOpen} onClick={() => props.onOpen(thread.id)}>
-              <span className={styles.status} data-status={thread.status} />
-              <span className={styles.threadCopy}>
-                <strong>{thread.title}</strong>
-                <small>{thread.pinned ? "已置顶 · " : ""}{statusLabel(thread)}</small>
-              </span>
-            </button>
-          )}
-          <div className={styles.threadActions}>
-            {thread.status !== "archived" && (
-              <button type="button" aria-label="重命名任务" onClick={() => {
-                setEditingId(thread.id);
-                setEditingTitle(thread.title);
-              }}>
-                <Pencil size={13} aria-hidden="true" />
-              </button>
-            )}
-            {thread.status !== "archived" && (
-              <button type="button" aria-label={thread.pinned ? "取消置顶" : "置顶"} onClick={() => props.onUpdate(thread, { pinned: !thread.pinned })}>
-                <Pin size={13} aria-hidden="true" />
-              </button>
-            )}
+      {props.threads.map((thread) => {
+        const status = hoverStatusLabel(thread);
+        const confirming = props.confirmingId === thread.id;
+        return (
+          <div
+            className={styles.threadRow}
+            data-active={props.selectedId === thread.id}
+            data-confirming={confirming || undefined}
+            key={thread.id}
+          >
             <button
               type="button"
-              aria-label={thread.status === "archived" ? "恢复任务" : "归档任务"}
-              onClick={() => props.onUpdate(thread, { status: thread.status === "archived" ? "draft" : "archived" })}
+              className={styles.threadOpen}
+              onClick={() => {
+                props.onAskRemove(null);
+                props.onOpen(thread.id);
+              }}
             >
-              {thread.status === "archived" ? <ArchiveRestore size={13} aria-hidden="true" /> : <Archive size={13} aria-hidden="true" />}
+              {thread.pinned && <Pin size={10} className={styles.threadPin} role="img" aria-label="已置顶" />}
+              <span className={styles.threadTitle} title={thread.title}>{thread.title}</span>
+              <span className={styles.threadMeta}>
+                <span className={styles.threadTime}>{relativeThreadTime(thread.updatedAt, props.now)}</span>
+                {status && <span className={styles.threadStatus}>{status}</span>}
+              </span>
             </button>
+            <div className={styles.threadActions}>
+              {confirming ? (
+                <span
+                  className={styles.threadConfirm}
+                  role="alertdialog"
+                  aria-label={`确认删除任务：${thread.title}`}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") props.onAskRemove(null);
+                  }}
+                >
+                  <button type="button" autoFocus className={styles.confirmCancel} onClick={() => props.onAskRemove(null)}>
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.confirmRemove}
+                    title="任务自带的临时工作区会一并删除；你自己选择的目录不受影响"
+                    onClick={() => {
+                      props.onAskRemove(null);
+                      props.onDelete(thread);
+                    }}
+                  >
+                    确认删除
+                  </button>
+                </span>
+              ) : (
+                <>
+                  {thread.status !== "archived" && (
+                    <button type="button" aria-label={thread.pinned ? "取消置顶" : "置顶"} onClick={() => props.onUpdate(thread, { pinned: !thread.pinned })}>
+                      <Pin size={13} aria-hidden="true" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label={thread.status === "archived" ? "恢复任务" : "归档任务"}
+                    onClick={() => props.onUpdate(thread, { status: thread.status === "archived" ? "draft" : "archived" })}
+                  >
+                    {thread.status === "archived" ? <ArchiveRestore size={13} aria-hidden="true" /> : <Archive size={13} aria-hidden="true" />}
+                  </button>
+                  <button type="button" aria-label="删除任务" onClick={() => props.onAskRemove(thread.id)}>
+                    <Trash2 size={13} aria-hidden="true" />
+                  </button>
+                </>
+              )}
+            </div>
+            {thread.unread && <span className={styles.unreadDot} role="img" aria-label="未读" title="未读" />}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </section>
   );
 }
-

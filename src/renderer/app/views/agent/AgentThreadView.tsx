@@ -7,6 +7,7 @@ import { ArtifactPreviewModal } from "./ArtifactPreviewModal";
 import { MessageMarkdown } from "../shared/message-markdown";
 import { api } from "../../helpers";
 import { disabledSkillIds, isSkillEnabled } from "./skill-scope";
+import { agentWorkspaceErrorMessage } from "./workspace-error";
 import styles from "./workspace.module.less";
 
 interface AgentThreadViewProps {
@@ -46,7 +47,7 @@ export function AgentThreadView({
         receiptId,
         title,
         loading: false,
-        error: reason instanceof Error ? reason.message : "无法生成预览。",
+        error: agentWorkspaceErrorMessage(reason, "无法生成预览。"),
       });
     }
   };
@@ -66,13 +67,17 @@ export function AgentThreadView({
             type="button"
             className={styles.directory}
             data-warning={detail.workingDirectoryAvailable === false}
+            data-kind={detail.workingDirectoryKind ?? "none"}
+            title={detail.workingDirectoryKind === "temporary"
+              ? "未指定目录时自动创建的临时工作区，删除任务会一并清理；点击可换成你自己的目录"
+              : "点击选择工作目录"}
             onClick={onSelectDirectory}
           >
             {detail.workingDirectoryAvailable === false ? <CircleAlert size={14} /> : <FolderOpen size={14} />}
             <span>
               {detail.thread.workingDirectory
-                ? `${compactPath(detail.thread.workingDirectory)}${detail.workingDirectoryAvailable === false ? " · 目录不可用" : ""}`
-                : "选择工作目录"}
+                ? `${detail.workingDirectoryKind === "temporary" ? "临时工作区 · " : ""}${compactPath(detail.thread.workingDirectory)}${detail.workingDirectoryAvailable === false ? " · 目录不可用" : ""}`
+                : "临时工作区（执行时自动创建）"}
             </span>
           </button>
         </header>

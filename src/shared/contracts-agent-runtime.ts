@@ -221,8 +221,13 @@ export interface AgentCapabilities {
   externalTools: AgentExternalToolStatus[];
 }
 
+/** 工作目录来源：用户选择的目录，或系统为该任务自动创建的临时工作区。 */
+export type AgentThreadWorkingDirectoryKind = "user" | "temporary";
+
 export interface AgentThreadWorkspace extends AgentThreadDetail {
   runtime: AgentRuntimeSnapshot;
   /** 已选工作目录是否真实存在且是目录；未选目录时为 undefined。 */
   workingDirectoryAvailable?: boolean;
+  /** 有工作目录时标注来源；临时工作区随任务删除一并回收。 */
+  workingDirectoryKind?: AgentThreadWorkingDirectoryKind;
 }

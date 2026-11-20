@@ -8,10 +8,12 @@ import type {
 import {
   addAgentThreadMessage,
   createAgentThread,
+  deleteAgentThread,
   getAgentThread,
   getAgentThreadDetail,
   listAgentThreadMessages,
   listAgentThreads,
+  markAgentThreadRead,
   updateAgentThread,
 } from "../parts/agent-workspace.js";
 
@@ -24,6 +26,9 @@ export const agentWorkspaceMethods = {
   },
   listAgentThreads(this: { db: Database.Database }, ownerUserId: number) {
     return listAgentThreads(this.db, ownerUserId);
+  },
+  deleteAgentThread(this: { db: Database.Database }, ownerUserId: number, id: string) {
+    deleteAgentThread(this.db, ownerUserId, id);
   },
   updateAgentThread(
     this: { db: Database.Database },
@@ -47,6 +52,9 @@ export const agentWorkspaceMethods = {
   },
   getAgentThreadDetail(this: { db: Database.Database }, ownerUserId: number, id: string) {
     return getAgentThreadDetail(this.db, ownerUserId, id);
+  },
+  markAgentThreadRead(this: { db: Database.Database }, ownerUserId: number, id: string) {
+    markAgentThreadRead(this.db, ownerUserId, id);
   },
 } as const;
 

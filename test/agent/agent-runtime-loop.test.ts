@@ -194,3 +194,29 @@ test("重启后待审批动作仍可恢复，中断的执行转 uncertain", asyn
   assert.equal(after.toolCalls[0].status, "uncertain");
   assert.equal(after.receipts.length, 0);
 });
+
+test("模型空响应时运行记下中文原因，抛出的错误也不再是 SDK 原文", async () => {
+  const { dir, db, threadId } = workspace();
+  const runtime = createAgentRuntime(db);
+  const model = new ScriptedModel([]);
+  const original = Object.assign(new Error("No output generated. Check the stream for errors."), {
+    name: "AI_NoOutputGeneratedError",
+  });
+  model.complete = async () => { throw original; };
+  await assert.rejects(runtime.runs.start({
+    ownerUserId: OWNER,
+    threadId,
+    intent: "整理文件",
+    history: [{ role: "user" as const, content: "把备注整理成新文件" }],
+    workingDirectory: dir,
+    provider: async () => ({ model, systemPrompt: "系统说明" }),
+  }), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /没有返回任何内容/u);
+    assert.doesNotMatch(error.message, /No output generated/u);
+    return true;
+  });
+  const run = runtime.runs.snapshot({ ownerUserId: OWNER, threadId, workingDirectory: dir }).run;
+  assert.equal(run?.status, "needs_attention");
+  assert.match(run?.error ?? "", /没有返回任何内容/u);
+});

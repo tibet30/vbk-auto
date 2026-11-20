@@ -58,6 +58,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  gap: 2px;
+  padding-right: 6px;
   border-radius: var(--radius-small);
 }
 
@@ -67,41 +69,104 @@
 .threadOpen {
   min-width: 0;
   flex: 1;
-  display: grid;
-  grid-template-columns: 8px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px;
   text-align: left;
   color: var(--foreground);
 }
 
-.status { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--muted-foreground); }
-.status[data-status='running'] { background: var(--ai-teal); }
-.status[data-status='waiting'] { background: var(--success); }
-.status[data-status='needs_attention'] { background: var(--warning); }
+.threadPin { flex: none; color: var(--muted-foreground); }
 
-.threadCopy { min-width: 0; display: grid; gap: 2px; }
-.threadCopy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); font-weight: 500; }
-.threadCopy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: 10px; }
-.renameInput {
-  width: 100%;
+.threadTitle {
+  flex: 1;
   min-width: 0;
-  height: 20px;
-  padding: 0 4px;
-  border: 1px solid var(--ring);
-  border-radius: 4px;
-  outline: 0;
-  background: var(--surface);
-  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.threadMeta {
+  flex: none;
+  min-width: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.threadStatus,
+.threadTime { white-space: nowrap; }
+.threadStatus { display: none; }
+.threadRow:hover .threadTime,
+.threadRow:focus-within .threadTime { display: none; }
+.threadRow:hover .threadStatus,
+.threadRow:focus-within .threadStatus { display: inline; }
+
+.unreadDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
 }
 
 .threadActions { display: none; padding-right: 4px; }
 .threadRow:hover .threadActions,
-.threadRow:focus-within .threadActions { display: flex; }
+.threadRow:focus-within .threadActions,
+.threadRow[data-confirming='true'] .threadActions { display: flex; }
 .threadActions button { width: 26px; height: 28px; display: grid; place-items: center; color: var(--muted-foreground); border-radius: 5px; }
 .threadActions button:hover { background: var(--surface); color: var(--foreground); }
+.threadActions button[aria-label='删除任务']:hover { color: var(--destructive); }
+
+.threadConfirm { display: inline-flex; align-items: center; gap: 4px; }
+
+.threadRow[data-confirming='true'] .threadMeta { display: none; }
+
+.threadActions .threadConfirm button {
+  width: auto;
+  height: 26px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 5px;
+}
+
+.threadActions .confirmCancel {
+  color: var(--foreground);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.threadActions .confirmCancel:hover { background: var(--muted); color: var(--foreground); }
+
+.threadActions .confirmRemove {
+  color: #fff;
+  background: var(--destructive, #dc2626);
+  border: 1px solid var(--destructive, #dc2626);
+}
+
+.threadActions .confirmRemove:hover { background: #b91c1c; color: #fff; }
+
+.loadMore {
+  width: 100%;
+  height: 30px;
+  margin-top: 6px;
+  color: var(--muted-foreground);
+  font-size: var(--fs-xs);
+  border-radius: 5px;
+}
+
+.loadMore:hover { background: var(--muted); color: var(--foreground); }
 
 .empty { margin: 20px 8px; color: var(--muted-foreground); font-size: var(--fs-xs); text-align: center; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

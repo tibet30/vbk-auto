@@ -38,7 +38,11 @@ function render(detail: AgentThreadWorkspace): string {
   }));
 }
 
-function workspace(directory: string | undefined, available: boolean | undefined): AgentThreadWorkspace {
+function workspace(
+  directory: string | undefined,
+  available: boolean | undefined,
+  kind?: AgentThreadWorkspace["workingDirectoryKind"],
+): AgentThreadWorkspace {
   return {
     thread: {
       id: "t-1",
@@ -54,6 +58,7 @@ function workspace(directory: string | undefined, available: boolean | undefined
     messages: [],
     runtime: { toolCalls: [], receipts: [], skills: [] },
     ...(available !== undefined ? { workingDirectoryAvailable: available } : {}),
+    ...(kind ? { workingDirectoryKind: kind } : {}),
   };
 }
 
@@ -81,4 +86,16 @@ test("目录不可用时界面提前提示，而不是等模型报错", () => {
 
   const healthy = render(workspace("/tmp/vbk-agent-smoke", true));
   assert.doesNotMatch(healthy, /目录不可用/u);
+});
+
+test("未指定目录时界面说明会使用临时工作区，自动创建的目录也标注来源", () => {
+  const none = render(workspace(undefined, undefined));
+  assert.match(none, /临时工作区/u);
+
+  const temporary = render(workspace("/tmp/vbk-agent-workspaces/1001/t-1", true, "temporary"));
+  assert.match(temporary, /临时工作区/u);
+  assert.match(temporary, /1001\/t-1/u);
+
+  const user = render(workspace("/tmp/vbk-agent-smoke", true, "user"));
+  assert.doesNotMatch(user, /临时工作区/u);
 });

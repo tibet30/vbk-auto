@@ -35,6 +35,7 @@ export interface AgentThread {
   /** 本任务启用的 Skill id；缺省表示全部启用。 */
   enabledSkills?: string[];
   summary?: AgentThreadSummary;
+  unread: boolean;
   messageCount: number;
   createdAt: string;
   updatedAt: string;
@@ -81,6 +82,8 @@ export interface AgentWorkspaceApi {
   create(input?: CreateAgentThreadInput): Promise<AgentThread>;
   get(id: string): Promise<AgentThreadWorkspace>;
   update(id: string, patch: UpdateAgentThreadInput): Promise<AgentThread>;
+  /** 删除任务及其对话、运行、工具调用、授权与收据；执行中的任务不允许删除。 */
+  remove(id: string): Promise<void>;
   send(id: string, content: string): Promise<AgentThreadWorkspace>;
   selectDirectory(id: string): Promise<AgentThreadWorkspace>;
   /** 批准挂起的写动作；scope 决定一次授权还是本任务内持续授权。 */

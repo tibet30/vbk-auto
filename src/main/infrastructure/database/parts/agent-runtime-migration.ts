@@ -129,3 +129,16 @@ export const agentThreadSkillsMigration: Migration = {
     `ALTER TABLE agent_threads ADD COLUMN enabled_skills_json TEXT`,
   ],
 };
+
+/**
+ * 0022_agent_thread_unread：任务列表的已读未读。
+ *
+ * 默认 0（已读）：历史任务升级后不应集体变成未读；只有智能体新产出消息时才置 1，
+ * 用户打开任务（agentWorkspace:get）后置回 0。
+ */
+export const agentThreadUnreadMigration: Migration = {
+  id: "0022_agent_thread_unread",
+  statements: [
+    `ALTER TABLE agent_threads ADD COLUMN unread INTEGER NOT NULL DEFAULT 0`,
+  ],
+};

@@ -21,7 +21,7 @@
 
 **新增模块**
 - `src/main/agent-runtime/`：`skill-registry` / `permission-policy` / `path-scope` / `action-executor` / `run-loop` / `run-service` / `artifacts` / `skill-scope` / `mcp/*` / `skills/{local-file,deck,web,product-readonly,account-readonly,vbk-readonly,vbk-write,tibet-readonly,backend-write-guard}`
-- `src/main/agent-workspace/`：`service` / `ports` / `external-tools` / `external-tools-settings` / `model-context` / `vbk-adapter` / `vbk-write-adapter`
+- `src/main/agent-workspace/`：`service` / `ports` / `external-tools` / `external-tools-settings` / `model-context` / `vbk-adapter` / `vbk-write-adapter` / `workspace-directory` / `workspace-view` / `workspace-artifacts`
 - `src/renderer/app/views/agent/`：`AgentHome` / `ThreadSidebar` / `AgentThreadView` / `AgentWorkPanel` + `AgentWorkPanelRows` / `ArtifactPreviewModal` / `skill-scope`
 - `src/renderer/app/views/settings/agent-tools-block.tsx`（MCP 配置卡片）
 - 迁移 `0019_agent_runtime` / `0020_agent_receipt_artifact` / `0021_agent_thread_enabled_skills`
@@ -57,7 +57,7 @@
 
 - 页面名称为“智能体”；原“任务中心”名称为“自动化运行”。
 - 采用 Codex 风格三栏：全局导航、最近任务、主工作区。
-- 最近任务位于左侧第二列，支持搜索、重命名、置顶、归档和恢复。
+- 最近任务位于左侧第二列，支持搜索、置顶、归档、恢复和删除；默认只渲染最近 20 条，滚动到列表底部自动加载更多。
 - 行程规划是预装 Skill，不是通用智能体的特殊首页。
 - 首批后台为 VBK 和三人同游。
 - 文件权限按任务绑定目录；读取可静默执行，写入必须可见并留下收据。

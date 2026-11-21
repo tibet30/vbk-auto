@@ -112,11 +112,11 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
             <dd className={styles.kvValue}><span className={styles.mono}>{activeConfig?.baseUrl}</span></dd>
           </div>
           <div className={styles.kvRow}>
-            <dt className={styles.kvLabel}>API Key</dt>
+            <dt className={styles.kvLabel}>授权方式</dt>
             <dd className={styles.kvValue}>
               {configured
-                ? <span className={styles.apiKeyMasked}>••••••••••••••••</span>
-                : <span className={shared.taskEmpty}>未配置，AI 功能不可用</span>}
+                ? <span>登录账号</span>
+                : <span className={shared.taskEmpty}>未登录，AI 功能不可用</span>}
             </dd>
           </div>
         </dl>
@@ -205,35 +205,6 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
               disabled={loadingAiKey}
             />}
           </div>
-          <label className={styles.field}>
-            <span className={shared.fieldLabel}>{selectedProfile.shortLabel} API Key</span>
-            <div className={shared.passInputWrap}>
-              <input
-                className={shared.input}
-                type={showAiApiKey ? "text" : "password"}
-                value={aiApiKey}
-                onChange={(event) => changeAiApiKey(event.target.value)}
-                placeholder={loadingAiKey ? "正在读取本机密钥…" : selectedConfig?.hasKey ? "沿用已保存密钥" : "请输入 API Key"}
-                spellCheck={false}
-                autoComplete="new-password"
-                disabled={loadingAiKey}
-              />
-              <button
-                type="button"
-                className={shared.iconBtn}
-                onClick={() => setShowAiApiKey((show) => !show)}
-                aria-label={showAiApiKey ? "隐藏 API Key" : "显示 API Key"}
-                aria-pressed={showAiApiKey}
-                disabled={loadingAiKey || !aiApiKey}
-              >
-                {loadingAiKey
-                  ? <LoaderCircle size={14} className={styles.spinner} aria-hidden="true" />
-                  : showAiApiKey ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
-              </button>
-            </div>
-            <small className={shared.fieldHint}>Key 以 JSON 形式保存在本机应用数据目录（仅当前用户可读）。能直接访问本机文件系统的用户仍可读出，请勿在公用电脑使用。</small>
-          </label>
-
           <div
             className={styles.testStatus}
             data-state={testingAi ? "testing" : aiTest ? (aiTest.connected ? "ok" : "error") : "idle"}
@@ -247,7 +218,7 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
                   : <PlugZap size={15} aria-hidden="true" />}
             <span>{testingAi
               ? `正在测试 ${selectedProfile.shortLabel} · ${trimmedModel || selectedProfile.defaultModel}…`
-              : aiTest?.message || "测试会使用当前页显示的地址、模型和 API Key。"}</span>
+              : aiTest?.message || "测试会使用当前页显示的地址、模型和登录账号。"}</span>
           </div>
         </div>
       )}
@@ -258,8 +229,8 @@ export function AiProviderBlock({ model }: { model: AppModel }) {
         {!settings ? "加载中…"
           : aiConfigOpen ? "先测试当前配置，连接成功后再保存并切换。"
             : activeTestMatches ? aiTest?.message
-              : configured ? "API Key 仅保存在本机，不会写入仓库。"
-                : "请配置并测试一个模型后使用 AI 功能。"}
+              : configured ? "AI 调用经登录账号授权，不在本机保存密钥。"
+                : "登录后即可测试并使用 AI 功能。"}
       </div>
       {settings && <div className={shared.btnRow}>
         {aiConfigOpen ? <>

@@ -59,7 +59,11 @@ export async function resolveAiConnectionInput(
   const apiKey = typeof input.apiKey === "string" && input.apiKey.trim()
     ? input.apiKey.trim()
     : await readStoredKey(input.provider);
-  if (!apiKey) throw new Error(`请先填写 ${aiProviderProfile(input.provider).shortLabel} API Key。`);
+  if (!apiKey) {
+    throw new Error(input.provider === "minimax"
+      ? "请先登录账号后再测试 AI 连接。"
+      : `请先填写 ${aiProviderProfile(input.provider).shortLabel} API Key。`);
+  }
   return { provider: input.provider, baseUrl, model, apiKey };
 }
 

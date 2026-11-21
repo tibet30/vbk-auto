@@ -68,6 +68,8 @@ export interface LocalAiKeyStore {
    * Blank input is a no-op (returns false). Returns true on successful write.
    */
   setKey(provider: LocalAiKeyProvider, plaintext: string): boolean;
+  /** 清除指定提供商的本地密钥；已为空时返回 false。 */
+  clearKey(provider: LocalAiKeyProvider): boolean;
   /** Read-only snapshot of all configured providers. */
   configuredProviders(): LocalAiKeyProvider[];
   /** Path to the JSON file on disk; useful for diagnostics and tests. */
@@ -215,6 +217,19 @@ export function createLocalAiKeyStore(filePath: string): LocalAiKeyStore {
       const next: LocalAiKeyFile = {
         version: SCHEMA_VERSION,
         providers: { ...cache.providers, [provider]: trimmed },
+      };
+      writeAtomic(next);
+      cache = next;
+      return true;
+    },
+    clearKey(provider) {
+      if (!isSupportedProvider(provider)) {
+        throw new Error(`不支持的 AI 提供商：${String(provider)}`);
+      }
+      if (!cache.providers[provider]) return false;
+      const next: LocalAiKeyFile = {
+        version: SCHEMA_VERSION,
+        providers: { ...cache.providers, [provider]: "" },
       };
       writeAtomic(next);
       cache = next;

@@ -24,6 +24,7 @@ import {
   type LocalVbkCookieStore,
 } from "./infrastructure/vbk-cookie-store.js";
 import { createAppAuthStore, LOCAL_APP_AUTH_FILE_NAME } from "./infrastructure/app-auth-store.js";
+import type { AppAuthStore } from "./infrastructure/app-auth-store.js";
 import { createTibetAuthService } from "./infrastructure/tibet-auth.js";
 import { createTibetCopyRuleSync } from "./infrastructure/tibet-copy-rules.js";
 import { createProductStorage } from "./application/product-storage.js";
@@ -110,6 +111,7 @@ let tibetServiceTokens: TibetServiceTokenStore | null = null;
  * 引用，bootstrap 失败会通过 app.whenReady 的 .catch 退出进程。
  */
 let cookieStore: LocalVbkCookieStore | null = null;
+let appAuthStoreRef: AppAuthStore | null = null;
 let productWorkflows: ProductWorkflowCoordinator | null = null;
 let productStorage: ReturnType<typeof createProductStorage> | null = null;
 
@@ -121,6 +123,7 @@ const {
 } = createMainAiRuntime({
   getDb: () => db!,
   getAiKeyStore: () => aiKeyStore!,
+  getAppAuthStore: () => appAuthStoreRef,
   dataPath: () => app.getPath("userData"),
   defaultMiniMaxModel,
 });
@@ -193,9 +196,12 @@ app.whenReady().then(async () => {
   setOperationLogDb(db);
   installLogSink((level, args) => captureRuntimeLog(createRuntimeLogCapture(level, "main", args)));
   aiKeyStore = createLocalAiKeyStore(path.join(app.getPath("userData"), LOCAL_AI_KEY_FILE_NAME));
+  // 托管渠道上线后 MiniMax 走服务端网关，本机不再需要保存订阅密钥。
+  aiKeyStore.clearKey("minimax");
   tibetServiceTokens = createTibetServiceTokenStoreIn(app.getPath("userData"));
   cookieStore = createLocalVbkCookieStore(path.join(app.getPath("userData"), LOCAL_VBK_COOKIE_FILE_NAME));
   const appAuthStore = createAppAuthStore(path.join(app.getPath("userData"), LOCAL_APP_AUTH_FILE_NAME));
+  appAuthStoreRef = appAuthStore;
   const appAuth = createTibetAuthService(appAuthStore, { skipRemoteStatusValidation: safeDevelopmentStartup });
   productStorage = createProductStorage({ db, store: appAuthStore, appVersion: () => app.getVersion(), settings: getSettings, enableBackgroundSync: !safeDevelopmentStartup });
   const remoteProducts = productStorage.products;

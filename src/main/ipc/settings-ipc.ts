@@ -57,16 +57,14 @@ export function registerSettingsIpc(context: MainIpcContext): void {
     // 「空值不覆盖」：trim 后是空字符串 / null / undefined 的字段一律不动。
     // 之前 `input.apiKey ?? ""` 把 undefined 视为空串，这与 {"apiKey":null}
     // 表现一样 —— 不会触发任何写入。
-    const rawMiniMaxKey = input.apiKey;
     const rawDeepSeekKey = input.deepseekApiKey;
-    const minimaxKey = typeof rawMiniMaxKey === "string" && rawMiniMaxKey.trim() ? rawMiniMaxKey.trim() : null;
     const deepseekKey = typeof rawDeepSeekKey === "string" && rawDeepSeekKey.trim() ? rawDeepSeekKey.trim() : null;
     // AI API keys live in the local 0600 JSON store, no longer routed
     // through Electron Keychain encryption. We intentionally do NOT
     // gate this IPC on any encryption-availability check anymore — the
     // old "macOS cannot encrypt" prompt is gone.
     if (!aiKeyStore) throw new Error("AI 密钥存储尚未就绪，请稍后重试。");
-    if (provider === "minimax" && !minimaxKey && !aiKeyStore.hasKey("minimax")) throw new Error("请填写 MiniMax API Key。");
+    // 托管渠道下 MiniMax 走服务端网关登录态，本机不再保存或校验订阅密钥。
     if (provider === "deepseek" && !deepseekKey && !aiKeyStore.hasKey("deepseek")) throw new Error("请填写 Evolink API Key。");
 
     // 写库：SQLite 与本地 JSON 文件跨介质，不能在事务里原子提交。
@@ -81,14 +79,8 @@ export function registerSettingsIpc(context: MainIpcContext): void {
     try {
       if (minimaxBaseUrl !== undefined) db.setSetting("minimaxBaseUrl", minimaxBaseUrl);
       if (minimaxModel !== undefined) db.setSetting("minimaxModel", minimaxModel);
-      if (minimaxKey) {
-        aiKeyStore.setKey("minimax", minimaxKey);
-        // Legacy SQLite ciphertext is now meaningless and must NEVER be
-        // read again (it can't be decrypted after the old encryption row
-        // was lost). Remove that provider's row in the settings table so
-        // the DB stops pretending it has a configured key.
-        safeRemoveLegacyCiphertext(db, "minimaxApiKey");
-      }
+      // MiniMax 走网关登录态，遗留的 SQLite 密文行清掉，避免数据库继续假装配了密钥。
+      if (provider === "minimax") safeRemoveLegacyCiphertext(db, "minimaxApiKey");
       if (deepseekBaseUrl !== undefined) db.setSetting("deepseekBaseUrl", deepseekBaseUrl);
       if (deepseekModel !== undefined) db.setSetting("deepseekModel", deepseekModel);
       if (deepseekKey) {

@@ -8,6 +8,7 @@ import { MiniMaxService } from "./minimax/minimax.js";
 import { productNotFound } from "./infrastructure/db-errors.js";
 import { systemNotificationsSupported } from "./infrastructure/system-notifications.js";
 import type { LocalAiKeyStore } from "./infrastructure/ai-key-store.js";
+import type { AppAuthStore } from "./infrastructure/app-auth-store.js";
 import type { VbkDatabase } from "./infrastructure/database/database.js";
 import type { MemoryService } from "./memory/memory-service.js";
 import { getVbkRequestPage } from "./infrastructure/vbk-request-page.js";
@@ -26,23 +27,28 @@ export function safeRemoveLegacyCiphertext(db: VbkDatabase, key: string): void {
   }
 }
 
+export const AI_GATEWAY_BASE_URL = "https://www.atdtour.com/api/ai/gateway/v1";
+
 export function createMainAiRuntime(input: {
   getDb: () => VbkDatabase;
   getAiKeyStore: () => LocalAiKeyStore | null;
+  getAppAuthStore: () => AppAuthStore | null;
   dataPath: () => string;
   defaultMiniMaxModel: string;
 }) {
+  const gatewayToken = (): string => input.getAppAuthStore()?.get()?.token ?? "";
+
   const getSettings = (): Settings => {
     const db = input.getDb();
     return ({
     aiProvider: isAiProvider(db.getSetting("aiProvider")?.value)
       ? db.getSetting("aiProvider")!.value as AiProvider
       : "minimax",
-    minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || "https://api.minimaxi.com/v1",
+    minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || AI_GATEWAY_BASE_URL,
     minimaxModel: db.getSetting("minimaxModel")?.value || input.defaultMiniMaxModel,
     deepseekBaseUrl: db.getSetting("deepseekBaseUrl")?.value || "https://api.evolink.ai/v1",
     deepseekModel: db.getSetting("deepseekModel")?.value || "deepseek-v4-flash",
-    hasMiniMaxKey: input.getAiKeyStore()?.hasKey("minimax") ?? false,
+    hasMiniMaxKey: Boolean(gatewayToken()),
     hasDeepSeekKey: input.getAiKeyStore()?.hasKey("deepseek") ?? false,
     systemNotificationsEnabled: resolveSystemNotificationsEnabled(db.getSetting("systemNotificationsEnabled")?.value),
     systemNotificationsSupported: systemNotificationsSupported(),
@@ -51,6 +57,7 @@ export function createMainAiRuntime(input: {
   };
 
   const apiKey = async (provider: AiProvider = getSettings().aiProvider): Promise<string> => {
+    if (provider === "minimax") return gatewayToken();
     const store = input.getAiKeyStore();
     return store ? store.getKey(provider) : "";
   };

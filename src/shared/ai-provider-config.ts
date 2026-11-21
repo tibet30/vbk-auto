@@ -28,7 +28,7 @@ export const AI_PROVIDER_PROFILES: readonly AiProviderProfile[] = [
     value: "minimax",
     label: "MiniMax",
     shortLabel: "MiniMax",
-    defaultBaseUrl: "https://api.minimaxi.com/v1",
+    defaultBaseUrl: "https://www.atdtour.com/api/ai/gateway/v1",
     defaultModel: "MiniMax-M3",
     modelOptions: [
       { value: "MiniMax-M3", label: "MiniMax M3" },

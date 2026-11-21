@@ -39,8 +39,10 @@ export function AppAccountPopover({
   const [quota, setQuota] = useState<AiQuotaSnapshot | null>(null);
 
   useEffect(() => {
+    const bridge = api();
+    if (!bridge) return;
     let alive = true;
-    void api().aiQuota.get()
+    void bridge.aiQuota.get()
       .then((snapshot) => { if (alive) setQuota(snapshot); })
       .catch(() => { if (alive) setQuota(null); });
     return () => { alive = false; };

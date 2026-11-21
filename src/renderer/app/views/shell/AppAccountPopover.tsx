@@ -19,6 +19,15 @@ function quotaPercent(value: number | null): string {
   return value === null ? "—" : `${value}%`;
 }
 
+function quotaResumeLabel(endsAt: string | null): string {
+  if (!endsAt) return "";
+  const end = new Date(endsAt);
+  if (Number.isNaN(end.getTime())) return "";
+  const clock = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+  const sameDay = end.toDateString() === new Date().toDateString();
+  return sameDay ? clock : `${end.getMonth() + 1}/${end.getDate()} ${clock}`;
+}
+
 function maskPhone(phone: string): string {
   return /^(\d{3})\d+(\d{4})$/.test(phone)
     ? phone.replace(/^(\d{3})\d+(\d{4})$/, "$1****$2")
@@ -91,14 +100,28 @@ export function AppAccountPopover({
         <div className={styles.quotaBlock} aria-label="AI 额度">
           <div className={styles.quotaRow}>
             <span className={styles.quotaLabel}>5 小时</span>
-            <span className={styles.quotaValue} data-low={(quota.upstream.intervalRemainingPercent ?? 100) <= 20}>
-              {quotaPercent(quota.upstream.intervalRemainingPercent)}
+            <span className={styles.quotaTail}>
+              {(quota.upstream.intervalRemainingPercent ?? 100) <= 20 && (
+                <span className={styles.quotaResume}>
+                  {quotaResumeLabel(quota.upstream.intervalEndsAt)} 恢复
+                </span>
+              )}
+              <span className={styles.quotaValue} data-low={(quota.upstream.intervalRemainingPercent ?? 100) <= 20}>
+                {quotaPercent(quota.upstream.intervalRemainingPercent)}
+              </span>
             </span>
           </div>
           <div className={styles.quotaRow}>
             <span className={styles.quotaLabel}>本周</span>
-            <span className={styles.quotaValue} data-low={(quota.upstream.weeklyRemainingPercent ?? 100) <= 20}>
-              {quotaPercent(quota.upstream.weeklyRemainingPercent)}
+            <span className={styles.quotaTail}>
+              {(quota.upstream.weeklyRemainingPercent ?? 100) <= 20 && (
+                <span className={styles.quotaResume}>
+                  {quotaResumeLabel(quota.upstream.weeklyEndsAt)} 恢复
+                </span>
+              )}
+              <span className={styles.quotaValue} data-low={(quota.upstream.weeklyRemainingPercent ?? 100) <= 20}>
+                {quotaPercent(quota.upstream.weeklyRemainingPercent)}
+              </span>
             </span>
           </div>
           {quota.memberLimitBillableTokens !== null && (

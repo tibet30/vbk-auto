@@ -308,7 +308,7 @@ app.whenReady().then(async () => {
       syncCopyRules();
       await vbkBindings.onAuthenticated(user, source);
     },
-  });
+  }, () => appAuthStoreRef);
   await openMainWindow();
   if (!safeDevelopmentStartup) {
     updateService.scheduleStartupCheck();

@@ -88,6 +88,10 @@ export interface VbkApi {
     resume(localProductId: string): Promise<AgentDisplaySnapshot>;
     abandon(localProductId: string): Promise<AgentDisplaySnapshot>;
   };
+  aiQuota: {
+    /** 网关额度快照：上游窗口剩余与个人当月用量；未配置个人配额时限额为 null。 */
+    get(): Promise<import("./contracts-ai-quota.js").AiQuotaSnapshot>;
+  };
   appAuth: {
     status(): Promise<AppAuthStatus>;
     listAccounts(): Promise<AppAuthAccountsSnapshot>;

@@ -63,6 +63,9 @@ const api: VbkApi = {
     resume: (id) => ipcRenderer.invoke("agent:resume", id),
     abandon: (id) => ipcRenderer.invoke("agent:abandon", id),
   },
+  aiQuota: {
+    get: () => ipcRenderer.invoke("ai:quota"),
+  },
   appAuth: {
     status: () => ipcRenderer.invoke("appAuth:status"),
     listAccounts: () => ipcRenderer.invoke("appAuth:listAccounts"),

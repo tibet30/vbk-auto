@@ -278,3 +278,34 @@
   font-size: var(--fs-xs);
   line-height: 1.5;
 }
+
+/* AI 额度：只展示上游窗口剩余百分比与个人配额剩余，不写说明文案。 */
+.quotaBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.quotaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.quotaLabel {
+  opacity: 0.6;
+}
+
+.quotaValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+
+  &[data-low='true'] {
+    color: #d4380d;
+  }
+}

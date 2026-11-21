@@ -1,7 +1,9 @@
 import { CircleAlert, LogIn, LogOut, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppAuthUser, SavedAppAuthAccount } from "../../../../shared/contracts-auth";
 import { appAuthErrorMessage } from "../../auth/app-auth-error";
+import { api } from "../../helpers";
+import type { AiQuotaSnapshot } from "../../../../shared/contracts-ai-quota";
 import shared from "../shared.module.less";
 import styles from "./AccountPopover.module.less";
 
@@ -11,6 +13,10 @@ interface AppAccountPopoverProps {
   onSwitchAccount: (userId: number) => Promise<void>;
   onStartLogin: () => Promise<void>;
   onLogout: () => Promise<void>;
+}
+
+function quotaPercent(value: number | null): string {
+  return value === null ? "—" : `${value}%`;
 }
 
 function maskPhone(phone: string): string {
@@ -30,6 +36,16 @@ export function AppAccountPopover({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState("");
   const displayName = user.name.trim() || "未命名用户";
+  const [quota, setQuota] = useState<AiQuotaSnapshot | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void api().aiQuota.get()
+      .then((snapshot) => { if (alive) setQuota(snapshot); })
+      .catch(() => { if (alive) setQuota(null); });
+    return () => { alive = false; };
+  }, [user.id]);
+
   const accountInitial = displayName.slice(0, 1) || "用";
   const switchableAccounts = savedAccounts.filter((account) => account.user.id !== user.id);
 
@@ -68,6 +84,29 @@ export function AppAccountPopover({
           <span className={styles.popoverMeta}>{maskPhone(user.phone)}</span>
         </div>
       </div>
+
+      {quota?.upstream.available && (
+        <div className={styles.quotaBlock} aria-label="AI 额度">
+          <div className={styles.quotaRow}>
+            <span className={styles.quotaLabel}>5 小时</span>
+            <span className={styles.quotaValue} data-low={(quota.upstream.intervalRemainingPercent ?? 100) <= 20}>
+              {quotaPercent(quota.upstream.intervalRemainingPercent)}
+            </span>
+          </div>
+          <div className={styles.quotaRow}>
+            <span className={styles.quotaLabel}>本周</span>
+            <span className={styles.quotaValue} data-low={(quota.upstream.weeklyRemainingPercent ?? 100) <= 20}>
+              {quotaPercent(quota.upstream.weeklyRemainingPercent)}
+            </span>
+          </div>
+          {quota.memberLimitBillableTokens !== null && (
+            <div className={styles.quotaRow}>
+              <span className={styles.quotaLabel}>本月配额</span>
+              <span className={styles.quotaValue}>{quotaPercent(quota.memberRemainingPercent)}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {switchableAccounts.length > 0 && (
         <div className={styles.popoverSaved} aria-label="以前登录过的账号">

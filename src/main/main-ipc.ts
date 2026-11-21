@@ -5,6 +5,7 @@ import { registerHotelDraftRetryIpc } from "./ipc/hotel-draft-retry-ipc.js";
 import { registerItineraryReviewUnlockIpc } from "./ipc/itinerary-review-unlock-ipc.js";
 import { registerSettingsIpc } from "./ipc/settings-ipc.js";
 import { registerPlanningV2Ipc } from "./ipc/planning-v2-ipc.js";
+import { registerAiQuotaIpc } from "./ipc/ai-quota-ipc.js";
 import { registerAppAuthIpc } from "./ipc/app-auth-ipc.js";
 import { registerAgentIpc } from "./ipc/agent-ipc.js";
 import { registerMemoryIpc } from "./ipc/memory-ipc.js";
@@ -24,8 +25,10 @@ export function registerMainIpc(
   appAuth: TibetAuthService,
   updateService: AppUpdateService,
   onAuthenticated?: Parameters<typeof registerAppAuthIpc>[1],
+  getAppAuthStore?: () => import("./infrastructure/app-auth-store.js").AppAuthStore | null,
 ): void {
   registerAppAuthIpc(appAuth, onAuthenticated);
+  registerAiQuotaIpc(getAppAuthStore ?? (() => null));
   registerRemoteProductIpc(context);
   registerProductAiIpc(context);
   registerBrowserAutomationIpc(context);

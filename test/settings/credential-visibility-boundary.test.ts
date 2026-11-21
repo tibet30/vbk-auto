@@ -25,11 +25,14 @@ test("Settings 对外只有 hasKey 布尔，不含 apiKey 明文字段", () => {
   assert.doesNotMatch(settingsIface, /\bdeepseekApiKey\s*:/);
 
   // After splitting, getSettings() lives in main-runtime.ts.
+  // MiniMax 改走服务端网关后，hasMiniMaxKey 表示「有登录令牌」而不是本机存了 Key；
+  // 对外形状仍然是布尔，renderer 依旧读不到任何明文凭据。
   const getSettings = [
     read("src/main/main.ts"),
     read("src/main/main-runtime.ts"),
   ].join("\n");
-  assert.match(getSettings, /hasMiniMaxKey:\s*input\.getAiKeyStore\(\)\?\.hasKey\(["']minimax["']\)\s*\?\?\s*false/);
+  assert.match(getSettings, /hasMiniMaxKey:\s*Boolean\(gatewayToken\(\)\)/);
+  assert.doesNotMatch(getSettings, /hasMiniMaxKey:\s*input\.getAiKeyStore\(\)\.getKey/);
   assert.match(getSettings, /hasDeepSeekKey:\s*input\.getAiKeyStore\(\)\?\.hasKey\(["']deepseek["']\)\s*\?\?\s*false/);
 });
 

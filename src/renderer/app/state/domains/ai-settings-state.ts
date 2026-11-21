@@ -5,7 +5,7 @@ export function useAiSettingsState() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [aiProvider, setAiProvider] = useState<AiProvider>("minimax");
   const [aiConfigOpen, setAiConfigOpen] = useState(false);
-  const [aiBaseUrl, setAiBaseUrl] = useState("https://api.minimaxi.com/v1");
+  const [aiBaseUrl, setAiBaseUrl] = useState("https://www.atdtour.com/api/ai/gateway/v1");
   const [aiApiKey, setAiApiKey] = useState("");
   const [aiModel, setAiModel] = useState("");
   const [showAiApiKey, setShowAiApiKey] = useState(false);

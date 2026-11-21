@@ -44,7 +44,8 @@ export function createMainAiRuntime(input: {
     aiProvider: isAiProvider(db.getSetting("aiProvider")?.value)
       ? db.getSetting("aiProvider")!.value as AiProvider
       : "minimax",
-    minimaxBaseUrl: db.getSetting("minimaxBaseUrl")?.value || AI_GATEWAY_BASE_URL,
+    // 托管渠道固定走网关：本机残留的旧直连地址必须被忽略，否则会带登录令牌打到上游。
+    minimaxBaseUrl: AI_GATEWAY_BASE_URL,
     minimaxModel: db.getSetting("minimaxModel")?.value || input.defaultMiniMaxModel,
     deepseekBaseUrl: db.getSetting("deepseekBaseUrl")?.value || "https://api.evolink.ai/v1",
     deepseekModel: db.getSetting("deepseekModel")?.value || "deepseek-v4-flash",

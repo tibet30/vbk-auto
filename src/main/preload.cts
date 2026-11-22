@@ -65,6 +65,7 @@ const api: VbkApi = {
   },
   aiQuota: {
     get: () => ipcRenderer.invoke("ai:quota"),
+    request: (input) => ipcRenderer.invoke("ai:quotaRequest", input),
   },
   appAuth: {
     status: () => ipcRenderer.invoke("appAuth:status"),

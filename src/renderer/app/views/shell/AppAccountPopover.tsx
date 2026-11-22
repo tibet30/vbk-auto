@@ -6,6 +6,7 @@ import { api } from "../../helpers";
 import type { AiQuotaSnapshot } from "../../../../shared/contracts-ai-quota";
 import shared from "../shared.module.less";
 import styles from "./AccountPopover.module.less";
+import quotaStyles from "./AccountQuota.module.less";
 
 interface AppAccountPopoverProps {
   user: AppAuthUser;
@@ -17,6 +18,14 @@ interface AppAccountPopoverProps {
 
 function quotaPercent(value: number | null): string {
   return value === null ? "—" : `${value}%`;
+}
+
+const QUOTA_APPLY_PRESETS = [50_000_000, 100_000_000];
+
+function formatTokens(value: number): string {
+  if (value >= 100_000_000) return `${Math.round(value / 100_000_000)} 亿`;
+  if (value >= 10_000) return `${Math.round(value / 10_000)} 万`;
+  return String(value);
 }
 
 function quotaResumeLabel(endsAt: string | null): string {
@@ -46,6 +55,11 @@ export function AppAccountPopover({
   const [error, setError] = useState("");
   const displayName = user.name.trim() || "未命名用户";
   const [quota, setQuota] = useState<AiQuotaSnapshot | null>(null);
+  const [applyOpen, setApplyOpen] = useState(false);
+  const [applyTokens, setApplyTokens] = useState(QUOTA_APPLY_PRESETS[0]);
+  const [applyReason, setApplyReason] = useState("");
+  const [applyBusy, setApplyBusy] = useState(false);
+  const [applyError, setApplyError] = useState("");
 
   useEffect(() => {
     const bridge = api();
@@ -56,6 +70,24 @@ export function AppAccountPopover({
       .catch(() => { if (alive) setQuota(null); });
     return () => { alive = false; };
   }, [user.id]);
+
+  const submitApply = async () => {
+    const bridge = api();
+    if (!bridge) return;
+    setApplyBusy(true);
+    setApplyError("");
+    try {
+      await bridge.aiQuota.request({ requestedBillableTokens: applyTokens, reason: applyReason.trim() });
+      const snapshot = await bridge.aiQuota.get();
+      setQuota(snapshot);
+      setApplyOpen(false);
+      setApplyReason("");
+    } catch (submitError) {
+      setApplyError(submitError instanceof Error ? submitError.message : "提交失败");
+    } finally {
+      setApplyBusy(false);
+    }
+  };
 
   const accountInitial = displayName.slice(0, 1) || "用";
   const switchableAccounts = savedAccounts.filter((account) => account.user.id !== user.id);
@@ -97,37 +129,105 @@ export function AppAccountPopover({
       </div>
 
       {quota?.upstream.available && (
-        <div className={styles.quotaBlock} aria-label="AI 额度">
-          <div className={styles.quotaRow}>
-            <span className={styles.quotaLabel}>5 小时</span>
-            <span className={styles.quotaTail}>
+        <div className={quotaStyles.quotaBlock} aria-label="AI 额度">
+          <div className={quotaStyles.quotaRow}>
+            <span className={quotaStyles.quotaLabel}>5 小时</span>
+            <span className={quotaStyles.quotaTail}>
               {(quota.upstream.intervalRemainingPercent ?? 100) <= 20 && (
-                <span className={styles.quotaResume}>
+                <span className={quotaStyles.quotaResume}>
                   {quotaResumeLabel(quota.upstream.intervalEndsAt)} 恢复
                 </span>
               )}
-              <span className={styles.quotaValue} data-low={(quota.upstream.intervalRemainingPercent ?? 100) <= 20}>
+              <span className={quotaStyles.quotaValue} data-low={(quota.upstream.intervalRemainingPercent ?? 100) <= 20}>
                 {quotaPercent(quota.upstream.intervalRemainingPercent)}
               </span>
             </span>
           </div>
-          <div className={styles.quotaRow}>
-            <span className={styles.quotaLabel}>本周</span>
-            <span className={styles.quotaTail}>
+          <div className={quotaStyles.quotaRow}>
+            <span className={quotaStyles.quotaLabel}>本周</span>
+            <span className={quotaStyles.quotaTail}>
               {(quota.upstream.weeklyRemainingPercent ?? 100) <= 20 && (
-                <span className={styles.quotaResume}>
+                <span className={quotaStyles.quotaResume}>
                   {quotaResumeLabel(quota.upstream.weeklyEndsAt)} 恢复
                 </span>
               )}
-              <span className={styles.quotaValue} data-low={(quota.upstream.weeklyRemainingPercent ?? 100) <= 20}>
+              <span className={quotaStyles.quotaValue} data-low={(quota.upstream.weeklyRemainingPercent ?? 100) <= 20}>
                 {quotaPercent(quota.upstream.weeklyRemainingPercent)}
               </span>
             </span>
           </div>
           {quota.memberLimitBillableTokens !== null && (
-            <div className={styles.quotaRow}>
-              <span className={styles.quotaLabel}>本月配额</span>
-              <span className={styles.quotaValue}>{quotaPercent(quota.memberRemainingPercent)}</span>
+            <div className={quotaStyles.quotaRow}>
+              <span className={quotaStyles.quotaLabel}>本月配额</span>
+              <span className={quotaStyles.quotaValue}>{quotaPercent(quota.memberRemainingPercent)}</span>
+            </div>
+          )}
+
+          {quota.memberLimitBillableTokens !== null && quota.request?.status === "pending" && (
+            <div className={quotaStyles.quotaApplyState}>
+              待审批 · +{formatTokens(quota.request.requestedBillableTokens)}
+            </div>
+          )}
+          {quota.memberLimitBillableTokens !== null && quota.request?.status === "approved" && (
+            <div className={quotaStyles.quotaApplyState} data-state="approved">
+              已批准 · +{formatTokens(quota.request.requestedBillableTokens)}
+            </div>
+          )}
+          {quota.memberLimitBillableTokens !== null
+            && quota.request?.status === "rejected" && !applyOpen && (
+            <div className={quotaStyles.quotaApplyState} data-state="rejected">
+              上次申请未通过
+            </div>
+          )}
+          {quota.memberLimitBillableTokens !== null
+            && (quota.request === null || quota.request.status === "rejected")
+            && !applyOpen && (
+            <button
+              type="button"
+              className={quotaStyles.quotaApplyToggle}
+              onClick={() => { setApplyOpen(true); setApplyError(""); }}
+            >
+              申请追加
+            </button>
+          )}
+
+          {quota.memberLimitBillableTokens !== null && applyOpen && (
+            <div className={quotaStyles.quotaApplyForm}>
+              <div className={quotaStyles.quotaApplyPresets} role="group" aria-label="追加额度档位">
+                {QUOTA_APPLY_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    aria-pressed={applyTokens === preset}
+                    data-selected={applyTokens === preset}
+                    className={quotaStyles.quotaApplyPreset}
+                    onClick={() => setApplyTokens(preset)}
+                    disabled={applyBusy}
+                  >
+                    +{formatTokens(preset)}
+                  </button>
+                ))}
+              </div>
+              <input
+                className={quotaStyles.quotaApplyReason}
+                value={applyReason}
+                onChange={(event) => setApplyReason(event.target.value)}
+                placeholder="用途"
+                maxLength={200}
+                disabled={applyBusy}
+              />
+              {applyError && <div className={quotaStyles.quotaApplyError}>{applyError}</div>}
+              <div className={quotaStyles.quotaApplyActions}>
+                <button type="button" className={quotaStyles.quotaApplyCancel}
+                  onClick={() => setApplyOpen(false)} disabled={applyBusy}>
+                  取消
+                </button>
+                <button type="button" className={quotaStyles.quotaApplySubmit}
+                  onClick={() => void submitApply()}
+                  disabled={applyBusy || applyReason.trim().length < 4}>
+                  {applyBusy ? "提交中" : "提交申请"}
+                </button>
+              </div>
             </div>
           )}
         </div>

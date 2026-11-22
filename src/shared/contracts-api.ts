@@ -91,6 +91,8 @@ export interface VbkApi {
   aiQuota: {
     /** 网关额度快照：上游窗口剩余与个人当月用量；未配置个人配额时限额为 null。 */
     get(): Promise<import("./contracts-ai-quota.js").AiQuotaSnapshot>;
+    /** 提交本账期追加申请；同一账期只允许一条待审批。 */
+    request(input: import("./contracts-ai-quota.js").AiQuotaRequestInput): Promise<void>;
   };
   appAuth: {
     status(): Promise<AppAuthStatus>;

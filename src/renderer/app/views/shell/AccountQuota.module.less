@@ -1,0 +1,124 @@
+/* 账号菜单里的 AI 额度区块：窗口剩余、恢复时刻与追加申请。 */
+
+/* AI 额度：只展示上游窗口剩余百分比与个人配额剩余，不写说明文案。 */
+.quotaBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-top: 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.quotaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.quotaLabel {
+  opacity: 0.6;
+}
+
+.quotaTail {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.quotaResume {
+  font-size: 11px;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+.quotaValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+
+  &[data-low='true'] {
+    color: #d4380d;
+  }
+}
+
+/* 额度追加：状态行、档位选择与提交动作，均用交互态表达，不写解释文案。 */
+.quotaApplyState {
+  font-size: 12px;
+  color: #0958d9;
+
+  &[data-state='approved'] {
+    color: #237804;
+  }
+
+  &[data-state='rejected'] {
+    color: #a8071a;
+  }
+}
+
+.quotaApplyToggle,
+.quotaApplyPreset,
+.quotaApplyCancel,
+.quotaApplySubmit {
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: transparent;
+  padding: 4px 10px;
+  cursor: pointer;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+.quotaApplyToggle {
+  align-self: flex-start;
+}
+
+.quotaApplyForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.quotaApplyPresets {
+  display: flex;
+  gap: 6px;
+}
+
+.quotaApplyPreset {
+  &[data-selected='true'] {
+    border-color: #1677ff;
+    color: #1677ff;
+    font-weight: 600;
+  }
+}
+
+.quotaApplyReason {
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: transparent;
+}
+
+.quotaApplyError {
+  font-size: 12px;
+  color: #a8071a;
+}
+
+.quotaApplyActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.quotaApplySubmit {
+  border-color: #1677ff;
+  color: #1677ff;
+  font-weight: 600;
+}

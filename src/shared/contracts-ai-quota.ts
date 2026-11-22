@@ -9,10 +9,26 @@ export interface AiQuotaUpstreamSnapshot {
   weeklyEndsAt: string | null;
 }
 
+export interface AiQuotaRequestState {
+  id: number;
+  status: "pending" | "approved" | "rejected";
+  requestedBillableTokens: number;
+  reason: string;
+  createdAt: string;
+  decidedAt: string | null;
+  decisionNote: string;
+}
+
 export interface AiQuotaSnapshot {
   periodKey: string;
   memberUsedBillableTokens: number;
   memberLimitBillableTokens: number | null;
   memberRemainingPercent: number | null;
+  request: AiQuotaRequestState | null;
   upstream: AiQuotaUpstreamSnapshot;
+}
+
+export interface AiQuotaRequestInput {
+  requestedBillableTokens: number;
+  reason: string;
 }
